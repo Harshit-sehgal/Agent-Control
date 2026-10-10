@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b1020"><title>Agent Control — Prototype</title><link rel="stylesheet" href="/app.css"></head>
+<body>
+<div id="login" class="login-wrap hidden">
+  <form id="login-form" class="login-card">
+    <div class="brand-logo">◈</div><h1>Agent Control</h1><p class="muted">Private multi-agent operations dashboard</p>
+    <label>Dashboard password<input type="password" name="password" placeholder="Password printed in terminal" required autocomplete="current-password"></label>
+    <button class="primary full">Unlock dashboard</button><div id="login-error" class="error"></div>
+  </form>
+</div>
+<div id="shell" class="shell hidden">
+  <aside class="sidebar"><a class="brand" href="#overview"><span class="brand-logo">◈</span><span>Agent Control<small>PRIVATE PROTOTYPE</small></span></a>
+    <div class="side-label">WORKSPACE</div><nav id="navigation">
+      <button data-page="overview" class="nav active"><span>▦</span> Overview</button>
+      <button data-page="candidates" class="nav"><span>◎</span> Discovery</button>
+      <button data-page="approvals" class="nav"><span>✓</span> Approval inbox</button>
+      <button data-page="agents" class="nav"><span>◇</span> Bot groups</button>
+      <button data-page="schedules" class="nav"><span>◷</span> Schedules</button>
+      <button data-page="settings" class="nav"><span>⚙</span> Settings</button>
+    </nav><div class="sidebar-bottom"><div class="status-dot"></div><span>Local worker online</span><small id="ai-chip">Template mode</small><button id="logout" title="Sign out">↪</button></div>
+  </aside>
+  <main class="main"><div class="topbar"><div class="eyebrow" id="breadcrumb">WORKSPACE / OVERVIEW</div><div class="top-actions"><span class="live-mark">● SYSTEM ONLINE</span><span id="clock"></span></div></div>
+    <div class="content" id="app"></div>
+  </main>
+  <nav class="mobile-nav" id="mobile-nav"><button data-page="overview">Overview</button><button data-page="candidates">Scout</button><button data-page="approvals">Approvals</button><button data-page="agents">Bots</button><button data-page="schedules">Schedule</button><button data-page="settings">Settings</button></nav>
+</div>
+<div id="toast" class="toast hidden" role="status" aria-live="polite"></div><script type="module" src="/app.js"></script>
+</body></html>
