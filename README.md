@@ -1,8 +1,16 @@
-# Agent Control — working prototype v0.2
+# Agent Control — working prototype v0.3
 
 A local-first dashboard for creating bot groups, reviewing AI-assisted drafts, and coordinating human-approved workflows. **X-engage is the first demo group.** It does not use an X developer API key, automatically crawl X, or automatically publish to X.
 
-## GitHub Pages: redesigned bot-first UI (v0.2)
+## Bot coordination v0.3: group chat and handoffs
+
+**Group chats now route tasks between specialist bots.** You can mention `@Writer`, `@Reviewer`, or `@everyone` to select recipients. Without an explicit mention, X-engage uses Scout → Ranker → Researcher → Writer → Reviewer. Every result is attached to the bot identity, handed to the next bot, and shown in the shared conversation. Human review is required before any external action.
+
+- **GitHub Pages:** Deterministic, browser-local coordination demonstration. Handoffs produce distinct message records, pass task context, and can create an **unapproved template draft**. No real AI is run on Pages.
+- **Node API:** Persistent run coordination for real, *text-only* model calls when a **server-side** `OPENAI_API_KEY` is configured. `POST /api/groups/:id/chat` queues an authenticated run; `GET /api/groups/:id/chat` returns messages and execution traces. Each run is limited to six steps, with bounded context and group isolation. Model outputs never receive browser or publication tools.
+- The platform does **not** yet have the autonomous, cloud-hosted multi-agent capabilities of Grok Bot or OpenAI Dots. See [`docs/COORDINATION.md`](docs/COORDINATION.md) for the precise supported behavior, security boundaries, and API contract.
+
+## GitHub Pages: redesigned bot-first UI (v0.3)
 
 Visit **https://harshit-sehgal.github.io/Agent-Control/** after the Pages workflow completes. The browser-only UI now includes:
 

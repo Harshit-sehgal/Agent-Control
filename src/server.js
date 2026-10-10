@@ -7,6 +7,7 @@ import {JsonStore} from './store.js';
 import {activity,candidateInput,cleanText,initialState,markDue,scoreCandidate,scheduleApproval,uuid,validHttpUrl} from './core.js';
 import {aiEnabled,makeDraft,executeCustomBot} from './ai.js';
 import {startScheduler} from './scheduler.js';
+import {queueGroupRun,markInterrupted,coordinationState} from './coordination.js';
 
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const PUBLIC=path.join(ROOT,'public');
@@ -16,6 +17,7 @@ const STORE_PATH=process.env.DATA_FILE||path.join(ROOT,'data','state.json');
 const PASSWORD=process.env.DASHBOARD_PASSWORD||crypto.randomBytes(12).toString('base64url');
 const sessions=new Map(), attempts=new Map();
 const store=await new JsonStore(STORE_PATH).init();
+await markInterrupted(store);
 const stopScheduler=startScheduler(store);
 const TYPES={'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8','svg':'image/svg+xml','png':'image/png','ico':'image/x-icon'};
 const isLive=()=>aiEnabled();
@@ -166,6 +168,17 @@ async function api(req,res,u){
       const g=s.groups.find(g=>g.id===match[1]);if(!g)fail('Group not found.',404);
       const bot={id:uuid(),name,instructions,type:'custom'};g.bots.push(bot);activity(s,'bot',`Created bot ${name}.`);return bot;
     });return send(res,201,bot);
+  }
+  // Durable text-only bot coordination. Humans approve every external action separately.
+  match=p.match(/^\/api\/groups\/([a-z0-9-]+)\/chat$/);
+  if(match&&m==='GET'){
+    const s=store.read();coordinationState(s);
+    return send(res,200,{messages:(s.groupMessages[match[1]]||[]).slice(-300),runs:s.groupRuns.filter(r=>r.groupId===match[1]).slice(0,50)});
+  }
+  if(match&&m==='POST'){
+    const b=await jsonBody(req);
+    const result=await queueGroupRun(store,{groupId:match[1],message:b.message,directBotId:b.directBotId||null});
+    return send(res,202,result);
   }
   if(p==='/api/bots/run'&&m==='POST'){
     const b=await jsonBody(req),input=cleanText(b.input,4000);
