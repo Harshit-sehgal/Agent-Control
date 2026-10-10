@@ -12,3 +12,14 @@ jobs:
           node-version: '22'
       - run: npm run check
       - run: npm test
+      # The Pages workflow deploys docs/ straight from the commit, so a stale
+      # bundle would silently ship. Rebuild it and fail if the checked-in copy
+      # does not match, instead of letting the deploy overwrite the difference.
+      - name: Verify the committed Pages bundle matches shared/
+        run: |
+          npm run build:pages
+          if [ -n "$(git status --porcelain docs)" ]; then
+            echo "docs/ is stale. Run 'npm run build:pages' and commit the result."
+            git --no-pager diff --stat docs
+            exit 1
+          fi
