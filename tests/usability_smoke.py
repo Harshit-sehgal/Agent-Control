@@ -5,6 +5,7 @@ from pathlib import Path
 from playwright.async_api import async_playwright
 ROOT=Path(__file__).resolve().parents[1]
 
+
 def strip_imports(text):
  x=re.sub(r"import\s*\{[^}]*\}\s*from\s*'[^']*';",'',text,flags=re.S)
  return re.sub(r"import\s+[^\n]*?from\s*'[^']*';",'',x)
@@ -28,10 +29,13 @@ def page_html():
 
 MODULES=['core.js','workflow.js','usability.js','coordination.js','group-simulator.js','chat-engine.js','local-api.js','app.js']
 
-async def boot(page):
+async def boot(page,seed=None):
+ """Load the bundle. `seed` pre-populates the fake localStorage so a caller can
+ simulate a reload that preserved data (set_content and reload both wipe the
+ in-memory store the harness installs). """
  await page.goto('about:blank')
  await page.set_content(page_html(),wait_until='domcontentloaded')
- await page.evaluate("""() => {const store={};Object.defineProperty(window,'localStorage',{configurable:true,value:{getItem:k=>store[k]??null,setItem:(k,v)=>{store[k]=v}}});crypto.randomUUID=()=>String(Date.now())+'-'+Math.random().toString(16).slice(2);} """)
+ await page.evaluate("""s => {const store=Object.assign({},s);Object.defineProperty(window,'localStorage',{configurable:true,value:{getItem:k=>store[k]??null,setItem:(k,v)=>{store[k]=v},removeItem:k=>{delete store[k]},key:i=>Object.keys(store)[i]??null,get length(){return Object.keys(store).length}}});crypto.randomUUID=()=>String(Date.now())+'-'+Math.random().toString(16).slice(2);} """,seed or {})
  scripts=[]
  for f in MODULES:
   x=strip_imports((ROOT/'shared'/f).read_text())
@@ -40,6 +44,39 @@ async def boot(page):
   if f=='local-api.js': scripts.append('window.AGENT_API=window.AGENT_LOCAL_API;')
  await page.add_script_tag(content='\n'.join(scripts))
  await page.get_by_role('button',name='Create new bot').first.wait_for()
+
+async def bot_profile_edit(page,errors):
+ """Editing a lasting bot profile must persist through the shared workflow rules.
+
+ The store is the source of truth: the edit has to survive a reload and must not
+ be shadowed by the cosmetic localStorage profile record.
+ """
+ await boot(page)
+ # Target the sidebar entry by bot id: its accessible name carries the avatar
+ # glyph (e.g. "⌘Writer"), so a plain name match is fragile.
+ await page.locator('#sidebar button[data-action="open-chat"][data-id="writer"]').click()
+ await page.get_by_role('button',name='Profile').click()
+ await page.locator('#edit-bot-form input[name="name"]').fill('Lead Writer')
+ await page.locator('#edit-bot-form textarea[name="instructions"]').fill('Draft concise replies, then hand to Reviewer.')
+ await page.locator('#edit-bot-form button:has-text("Save profile")').click()
+ await page.get_by_role('heading',name='Lead Writer',exact=True).wait_for()
+ # The group record must hold the new instructions, not just the rendered copy.
+ stored=await page.evaluate("()=>JSON.parse(localStorage.getItem('agent-control-ghpages-v1'))")
+ bot=next(b for g in stored['groups'] for b in g['bots'] if b['id']=='writer')
+ assert bot['name']=='Lead Writer',bot
+ assert bot['instructions'].startswith('Draft concise replies'),bot
+ # The cosmetic record must not carry a stale name/instructions mirror, which
+ # would shadow the store forever via profile().
+ profiles=await page.evaluate("()=>JSON.parse(localStorage.getItem('agent-control-bot-profiles-v2')||'{}')")
+ assert not any('name' in v or 'instructions' in v for v in profiles.values()),profiles
+ # And it must survive a reload: re-boot with the persisted data only.
+ storage=await page.evaluate("()=>{const o={};for(let i=0;i<window.localStorage.length;i++){const k=window.localStorage.key(i);o[k]=window.localStorage.getItem(k);}return o;}")
+ await boot(page,storage)
+ await page.locator('#sidebar button[data-action="open-chat"][data-id="writer"]').click()
+ await page.get_by_role('heading',name='Lead Writer',exact=True).wait_for()
+ panel=page.locator('#inspector .inspector-card').first
+ assert 'Draft concise replies' in await panel.inner_text(),await panel.inner_text()
+ assert not errors,errors
 
 async def main():
  async with async_playwright() as p:
@@ -107,7 +144,9 @@ async def main():
   assert await phone.get_by_role('heading',name='Approval inbox').count()==1
   await phone.wait_for_timeout(350)
   await phone.screenshot(path=str(ROOT/'ui-v05-mobile.png'),full_page=True)
+  # A lasting bot profile edit must persist to the store and survive a reload.
+  await bot_profile_edit(desktop,errors)
   assert not errors,errors
-  print('USABILITY SMOKE PASS: contextual menus, templates, pinned/duplicated bot, filters, schedules, mobile selector, no JS errors')
+  print('USABILITY SMOKE PASS: contextual menus, templates, pinned/duplicated bot, filters, schedules, mobile selector, persisted bot profile, no JS errors')
   await browser.close()
 asyncio.run(main())
