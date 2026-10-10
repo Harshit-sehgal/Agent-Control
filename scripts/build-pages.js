@@ -10,11 +10,19 @@
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const src = path.join(root, 'shared');
 const dest = path.join(root, 'docs');
+
+/** Stable hash of the bundled asset contents, used to bust browser caches. */
+async function bundleVersion(names) {
+  const hash = crypto.createHash('sha256');
+  for (const name of names.slice().sort()) hash.update(name).update(await fs.readFile(path.join(src, name)));
+  return hash.digest('hex').slice(0, 10);
+}
 
 // The demo cannot execute the Node coordinators, so it ships only the
 // browser-safe modules plus the pages and styles.
@@ -41,6 +49,20 @@ for (const name of stale) {
 const indexPath = path.join(dest, 'index.html');
 const marked = (await fs.readFile(indexPath, 'utf8')).replace('<meta name="agent-backend" content="server">', '<meta name="agent-backend" content="static">');
 await fs.writeFile(indexPath, marked);
+
+// Cache-bust the browser-local assets with a content hash so a returning
+// visitor cannot keep a stale bundle after a deploy.
+const version = await bundleVersion(files.filter(f => /\.(js|css)$/.test(f)));
+const stamped = marked.replace(/(href|src)="(\.\/[^"?]+\.(?:js|css))"/g, (_, attr, url) => `${attr}="${url}?v=${version}"`);
+await fs.writeFile(indexPath, stamped);
+
+// Relative ES module imports must carry the same version, otherwise a browser
+// can serve a cached older module while the entry point is fresh.
+for (const name of files.filter(f => f.endsWith('.js'))) {
+  const file = path.join(dest, name);
+  const body = (await fs.readFile(file, 'utf8')).replace(/((?:from|import)\s*)(['"])(\.\/[\w-]+\.js)\2/g, (_, kw, quote, url) => `${kw}${quote}${url}?v=${version}${quote}`);
+  await fs.writeFile(file, body);
+}
 // Prevent Jekyll from stripping files that start with an underscore.
 await fs.writeFile(path.join(dest, '.nojekyll'), '');
 copied.push('.nojekyll');
