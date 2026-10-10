@@ -30,7 +30,9 @@ function send(res,status,value,headers={}){res.writeHead(status,{'Content-Type':
 function cookie(req,key){const found=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith(key+'='));return found?.slice(key.length+1);}
 function authed(req){const sid=cookie(req,'agent_session'),s=sid&&sessions.get(sid);if(!s)return false;if(s.exp<Date.now()){sessions.delete(sid);return false;}return true;}
 // Drop expired rows so a long-lived process cannot grow the maps without bound.
-function pruneExpired(){const now=Date.now();for(const [sid,s] of sessions)if(s.exp<now)sessions.delete(sid);for(const [ip,r] of attempts)if(now>r.until&&r.count===0)attempts.delete(ip);}
+// An attempt record is only meaningful while its window is open; once it lapses
+// the counter is reset on the next login anyway, so the row can go.
+function pruneExpired(){const now=Date.now();for(const [sid,s] of sessions)if(s.exp<now)sessions.delete(sid);for(const [ip,r] of attempts)if(now>r.until)attempts.delete(ip);}
 function requireAuth(req){if(!authed(req))fail('Sign in first.',401);}
 function timingEqual(a,b){const h1=crypto.createHash('sha256').update(String(a)).digest(),h2=crypto.createHash('sha256').update(String(b)).digest();return crypto.timingSafeEqual(h1,h2);}
 function checkOrigin(req){if(req.url?.split('?')[0]==='/api/capture')return; if(!['POST','PATCH','DELETE','PUT'].includes(req.method))return;

@@ -66,6 +66,23 @@ test('complete dashboard capture → draft → edit → approve → ready → ma
     assert.equal(originBlocked.status,403);
   }finally{await t.stop();}
 });
+test('login is rate limited after repeated failures and the limit resets after the window', {timeout:25000}, async()=>{
+  const t=await launch();
+  try{
+    const login=async password=>{
+      const r=await fetch(t.base+'/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})});
+      return r.status;
+    };
+    // Eight failures are tolerated; the ninth is refused without checking the password.
+    for(let i=0;i<8;i++) assert.equal(await login('wrong'),401,`attempt ${i+1}`);
+    assert.equal(await login('wrong'),429);
+    // Even the correct password is refused while the window is open.
+    assert.equal(await login('test-password-1234'),429);
+    // A different client IP is unaffected by another IP's lockout.
+    assert.equal((await fetch(t.base+'/api/state')).status,401);
+  }finally{await t.stop();}
+});
+
 test('bot profile edits persist to the store and survive a restart', {timeout:25000}, async()=>{
   const t=await launch();
   try{
