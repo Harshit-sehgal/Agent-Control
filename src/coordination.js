@@ -13,6 +13,13 @@ export async function markInterrupted(store){
   await store.update(s=>{coordinationState(s);for(const r of s.groupRuns){if(r.status==='running'||r.status==='queued'){r.status='interrupted';r.error='Server restarted before the run completed. Retry explicitly to avoid duplicate model calls.';}}});
 }
 export async function queueGroupRun(store,{groupId,message,directBotId=null}){
+  // Validate the request against the store first so a missing group reports 404
+  // and a busy group reports 409, instead of the AI-key check shadowing them
+  // with a misleading 422 on an instance that simply has no key yet.
+  const snapshot=store.read();
+  const probe=snapshot.groups.find(g=>g.id===groupId);
+  if(!probe)throw Object.assign(new Error('Group not found'),{status:404});
+  if(snapshot.groupRuns?.filter(r=>r.groupId===groupId&&['running','queued'].includes(r.status)).length>=1)throw Object.assign(new Error('A group run is already active. Wait or retry later.'),{status:409});
   if(!aiEnabled())throw Object.assign(new Error('Set OPENAI_API_KEY on the Node server for real agent-to-agent model execution. GitHub Pages runs a labeled simulation.'),{status:422});
   const id=await store.update(s=>{
     coordinationState(s);

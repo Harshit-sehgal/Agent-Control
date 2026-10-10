@@ -72,6 +72,19 @@ test('orchestrator records execution failure and never publishes',async()=>{
     assert.equal(s.drafts.length,0);assert.equal(s.groupMessages['x-engage']?.length||0,0);
   }finally{await rm(dir,{recursive:true,force:true});}
 });
+test('queuing a run reports a missing group before complaining about the AI key',async()=>{
+  // Without OPENAI_API_KEY the old code returned 422 for everything, so a typo
+  // in the group id told the user to set a key instead of telling them the group
+  // does not exist. Validation order matters.
+  const dir=await mkdtemp(path.join(tmpdir(),'ac-coord-404-'));
+  try{
+    const store=await new JsonStore(path.join(dir,'state.json')).init();
+    await store.update(s=>{coordinationState(s);s.groups=[group];});
+    const {queueGroupRun:queue}=await import('../src/coordination.js');
+    await assert.rejects(queue(store,{groupId:'missing',message:'hi'}),error=>error.status===404);
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
 test('a repeated group run does not create a second draft for the same candidate',async()=>{
   const drafts=[],messages=[];
   const state={settings:{topics:['robotics']},candidates:[{id:'c1',text:'New robotics architecture published, what do you think?',url:'https://example.com',author:'Demo'}],drafts};
