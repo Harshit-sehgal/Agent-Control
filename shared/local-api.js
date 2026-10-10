@@ -4,7 +4,7 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {scoreCandidate, templateDraft, cleanText, initialState} from './core.js';
+import {scoreCandidate, templateDraft, cleanText, initialState, markDue, activity} from './core.js';
 import {
   migrate, seedDemo, updateSettings, addCandidate, beginProcessing,
   finishProcessing, editDraft, findDraft, rewriteDraft, draftAction, addGroup,
@@ -33,15 +33,24 @@ function save(state) {
 }
 const find = (items, key) => items.find(x => x.id === key) || (() => { throw new Error('Item not found.'); })();
 
-/** Advance the local clock so scheduled drafts and reminders resolve. */
+/** Advance the local clock so scheduled drafts and reminders resolve.
+ * This mirrors `src/scheduler.js` exactly and leans on the same `markDue`/
+ * `activity` primitives, so a transition logged by the Node backend is logged
+ * identically here. Reimplementing it inline was why the Pages Activity tab
+ * stayed empty while the Node build recorded ready and reminder events. */
 function due(state) {
   const time = Date.now();
   let changed = false;
-  for (const d of state.drafts) if (d.status === 'scheduled' && Date.parse(d.dueAt) <= time) { d.status = 'ready'; changed = true; }
-  for (const r of state.schedules) if (r.enabled && Date.parse(r.nextAt) <= time) {
-    if (r.kind === 'interval') r.nextAt = new Date(time + r.intervalMinutes * 60000).toISOString();
-    else r.enabled = false;
-    changed = true;
+  for (const d of state.drafts) {
+    if (markDue(d, time)) { changed = true; activity(state, 'ready', `Draft for ${d.author} is ready for manual posting.`, {draftId: d.id}); }
+  }
+  for (const r of state.schedules) {
+    if (r.enabled && r.nextAt && Date.parse(r.nextAt) <= time) {
+      activity(state, 'reminder', r.label, {scheduleId: r.id});
+      changed = true;
+      if (r.kind === 'once') r.enabled = false;
+      else r.nextAt = new Date(time + r.intervalMinutes * 60000).toISOString();
+    }
   }
   if (changed) save(state);
 }

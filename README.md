@@ -41,7 +41,7 @@ The static Pages dashboard includes functional navigation controls (not real AI 
 - **Bot action dropdowns** on cards and in chat: open, edit, duplicate, pin/unpin, and copy instructions. Duplication creates a new profile with its own empty conversation.
 - **Group action dropdowns**: open workspace, open group chat, or add a specialist.
 - **Create Bot templates** for Scout, Researcher, Writer, Reviewer, and Coordinator. Templates fill **editable instructions**; they do not connect to an AI provider.
-- **Discovery search, status filter, and sorting** (newest, oldest, best/worst score); filtering does not modify stored candidate records.
+- **Discovery search, status filter, and sorting** (newest, oldest, best/worst score). Search matches author, topic, post text, or the source URL, so pasting a captured post link finds it. Filtering does not modify stored candidate records.
 - **Approval status and sort controls** for pending, scheduled, ready, posted, rejected, and all drafts.
 - **Conversation dropdown** to copy or clear chat. Clearing chat requires confirmation and affects only the current browser.
 - **Responsive group section dropdown** on phones, where the desktop tab strip is hidden.

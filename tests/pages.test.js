@@ -52,4 +52,28 @@ test('reject invalid input and impossible approval delays',async()=>{
   await assert.rejects(request('/api/candidates','POST',{url:'javascript:alert(1)',text:'an adequately long candidate'}),/valid public http/);
   await assert.rejects(request('/api/candidates','POST',{url:'https://example.com',text:'short'}),/at least 12/);
   await assert.rejects(request('/api/settings','PATCH',{topics:['AI'],minDelay:11,maxDelay:3}),/Invalid delay window/);
+});test('Pages resolves due drafts and reminders exactly like the Node scheduler',async()=>{
+  // src/scheduler.js records a `ready` event when a scheduled draft comes due and
+  // a `reminder` event when a schedule fires. The browser-local transport used to
+  // reimplement that logic inline and record neither, so the Pages Activity tab
+  // stayed empty while the Node build logged them.
+  const store=makeStorage();
+  const {request}=setup(store);
+  await request('/api/settings','PATCH',{minDelay:0,maxDelay:0});
+  const d=await seed(request);
+  await request(`/api/drafts/${d.id}/approve`,'POST',{});
+  const created=await request('/api/schedules','POST',{label:'Review the queue',kind:'once',nextAt:new Date(Date.now()+3600000).toISOString()});
+  // Rewrite both into the past, exactly as if the page had been left open.
+  const state=JSON.parse(store.map.get('agent-control-ghpages-v1'));
+  const draft=state.drafts.find(x=>x.id===d.id);
+  draft.dueAt=new Date(Date.now()-1000).toISOString();
+  state.schedules.find(x=>x.id===created.id).nextAt=new Date(Date.now()-1000).toISOString();
+  store.map.set('agent-control-ghpages-v1',JSON.stringify(state));
+  const after=await request('/api/state');
+  const resolved=after.drafts.find(x=>x.id===d.id);
+  const fired=after.schedules.find(x=>x.id===created.id);
+  assert.equal(resolved.status,'ready');
+  assert.equal(fired.enabled,false,'A one-off reminder must disable itself once it fires.');
+  assert.ok(after.events.some(e=>e.type==='ready'),'Pages must record the ready transition in the activity log.');
+  assert.ok(after.events.some(e=>e.type==='reminder'&&e.message==='Review the queue'),'Pages must record fired reminders in the activity log.');
 });

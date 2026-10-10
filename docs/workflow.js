@@ -8,7 +8,7 @@
  * Keeping transitions here is the single source of truth for the draft
  * lifecycle: candidate -> draft -> approved/scheduled -> ready -> posted.
  */
-import {activity,candidateInput,cleanText,scheduleApproval} from './core.js?v=0c6d5abe9b';
+import {activity,candidateInput,cleanText,scheduleApproval} from './core.js?v=40d8d8ee87';
 
 export const SCHEMA_VERSION = 2;
 
