@@ -56,3 +56,11 @@ test('chat clearing and sensitive changes require confirmation',()=>{
  assert.match(js,/duplicate-bot/);
  assert.match(js,/pin-bot/);
 });
+test('the UI adapts its copy and adds sign-out for the Node server build',()=>{
+ assert.match(js,/function isStaticDemo\(/);
+ assert.match(js,/agent-backend/);
+ assert.match(js,/case 'logout'/);
+ assert.match(js,/async function logout\(/);
+ assert.match(js,/Connected to Node server/);
+ assert.match(js,/Your session expired/);
+});
