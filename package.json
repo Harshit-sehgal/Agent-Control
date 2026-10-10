@@ -11,6 +11,6 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "test": "node --test tests/*.test.js",
-    "check": "node --check src/server.js && node --check src/core.js && node --check src/store.js && node --check src/ai.js && node --check src/scheduler.js && node --check public/app.js && node --check extension/popup.js && node --check docs/app.js && node --check docs/chat-engine.mjs && node --check docs/coordination.mjs && node --check docs/group-simulator.mjs && node --check src/coordination.js"
+    "check": "node --check src/server.js && node --check src/core.js && node --check src/store.js && node --check src/ai.js && node --check src/scheduler.js && node --check public/app.js && node --check extension/popup.js && node --check docs/app.js && node --check docs/usability.mjs && node --check docs/chat-engine.mjs && node --check docs/coordination.mjs && node --check docs/group-simulator.mjs && node --check src/coordination.js"
   }
 }
