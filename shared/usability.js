@@ -7,7 +7,9 @@ export function filterCandidates(items, {status='all',sort='newest',query=''}={}
     if (status==='new' && item.status!=='new') return false;
     if (status==='drafted' && item.status!=='drafted') return false;
     if (status==='high' && (item.score?.score??-1)<70) return false;
-    return !q || [item.author,item.topic,item.text].some(v => String(v??'').toLocaleLowerCase().includes(q));
+    // Include the URL: users naturally paste the post link to find a capture,
+    // and it is the only stable handle they have for it.
+    return !q || [item.author,item.topic,item.text,item.url].some(v => String(v??'').toLocaleLowerCase().includes(q));
   });
   return filtered.sort((a,b) => {
     if (sort==='score-high') return score(b.score?.score)-score(a.score?.score) || timestamp(b.createdAt)-timestamp(a.createdAt);

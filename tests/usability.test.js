@@ -7,9 +7,9 @@ import {filterCandidates,filterDrafts,normalizeUiPrefs} from '../shared/usabilit
 const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const [html,js,css]=await Promise.all(['shared/index.html','shared/app.js','shared/usability.css'].map(f=>readFile(path.join(root,f),'utf8')));
 const candidates=[
- {id:'old',author:'Robot',topic:'robotics',text:'old',status:'new',createdAt:'2025-01-01T00:00:00Z'},
- {id:'new',author:'Alice',topic:'AI',text:'new benchmark',status:'drafted',score:{score:91},createdAt:'2026-01-01T00:00:00Z'},
- {id:'medium',author:'Bob',topic:'machine learning',text:'ML',status:'drafted',score:{score:62},createdAt:'2026-02-01T00:00:00Z'}
+ {id:'old',author:'Robot',topic:'robotics',text:'old',url:'https://example.com/old/status/1',status:'new',createdAt:'2025-01-01T00:00:00Z'},
+ {id:'new',author:'Alice',topic:'AI',text:'new benchmark',url:'https://example.com/new/status/2',status:'drafted',score:{score:91},createdAt:'2026-01-01T00:00:00Z'},
+ {id:'medium',author:'Bob',topic:'machine learning',text:'ML',url:'https://example.com/medium/status/3',status:'drafted',score:{score:62},createdAt:'2026-02-01T00:00:00Z'}
 ];
 const drafts=[
  {id:'x',status:'pending',score:80,createdAt:'2026-01-01T00:00:00Z'},
@@ -17,6 +17,13 @@ const drafts=[
  {id:'z',status:'ready',score:45,createdAt:'2026-03-01T00:00:00Z'}
 ];
 test('candidate search is case-insensitive across topic and author',()=>assert.deepEqual(filterCandidates(candidates,{query:'ai'}).map(x=>x.id),['new']));
+test('candidate search also matches the source URL',()=>{
+  // Users naturally paste the post link to find a capture, and the URL is the
+  // only stable handle they have for it.
+  assert.deepEqual(filterCandidates(candidates,{query:'example.com/old'}).map(x=>x.id),['old']);
+  assert.deepEqual(filterCandidates(candidates,{query:'https://example.com'}).map(x=>x.id).length,3);
+  assert.deepEqual(filterCandidates(candidates,{query:'example.com/none'}).map(x=>x.id),[]);
+});
 test('candidate filters include high-score and unprocessed views',()=>{
  assert.deepEqual(filterCandidates(candidates,{status:'high'}).map(x=>x.id),['new']);
  assert.deepEqual(filterCandidates(candidates,{status:'new'}).map(x=>x.id),['old']);
