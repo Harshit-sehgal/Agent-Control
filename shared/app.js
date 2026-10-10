@@ -202,7 +202,9 @@ function toggleScheduleFields(){const form=el('schedule-form');if(!form)return;c
 const FOCUSABLE='a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 function trapTab(ev){
   if(ev.key!=='Tab')return;
-  const layer=!el('modal').classList.contains('hidden')?el('modal'):(!el('command').classList.contains('hidden')?el('command'):null);
+  // All three layers declare aria-modal, including the standalone sign-in box.
+  const login=el('login-layer');
+  const layer=!el('modal').classList.contains('hidden')?el('modal'):(!el('command').classList.contains('hidden')?el('command'):(login&&!login.classList.contains('hidden')?login:null));
   if(!layer)return;
   const nodes=[...layer.querySelectorAll(FOCUSABLE)].filter(n=>n.offsetParent!==null);
   if(!nodes.length)return;

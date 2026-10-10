@@ -1,7 +1,7 @@
-import {classifyMessage, botSuggestions, statusSummary} from './chat-engine.js?v=f32c209867';
-import {simulateGroup} from './group-simulator.js?v=f32c209867';
-import {planHandoffs} from './coordination.js?v=f32c209867';
-import {filterCandidates,filterDrafts,normalizeUiPrefs,UI_PREFS_KEY} from './usability.js?v=f32c209867';
+import {classifyMessage, botSuggestions, statusSummary} from './chat-engine.js?v=93d0ad0c7c';
+import {simulateGroup} from './group-simulator.js?v=93d0ad0c7c';
+import {planHandoffs} from './coordination.js?v=93d0ad0c7c';
+import {filterCandidates,filterDrafts,normalizeUiPrefs,UI_PREFS_KEY} from './usability.js?v=93d0ad0c7c';
 
 // GitHub Pages edition: all interactions use the existing browser-local demo API.
 // Never send account tokens or real-world posting actions from this static demo.
@@ -202,7 +202,9 @@ function toggleScheduleFields(){const form=el('schedule-form');if(!form)return;c
 const FOCUSABLE='a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 function trapTab(ev){
   if(ev.key!=='Tab')return;
-  const layer=!el('modal').classList.contains('hidden')?el('modal'):(!el('command').classList.contains('hidden')?el('command'):null);
+  // All three layers declare aria-modal, including the standalone sign-in box.
+  const login=el('login-layer');
+  const layer=!el('modal').classList.contains('hidden')?el('modal'):(!el('command').classList.contains('hidden')?el('command'):(login&&!login.classList.contains('hidden')?login:null));
   if(!layer)return;
   const nodes=[...layer.querySelectorAll(FOCUSABLE)].filter(n=>n.offsetParent!==null);
   if(!nodes.length)return;
