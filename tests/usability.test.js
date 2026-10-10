@@ -63,4 +63,5 @@ test('the UI adapts its copy and adds sign-out for the Node server build',()=>{
  assert.match(js,/async function logout\(/);
  assert.match(js,/Connected to Node server/);
  assert.match(js,/Your session expired/);
+ assert.match(js,/rewrite-draft/);
 });

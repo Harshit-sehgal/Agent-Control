@@ -18,3 +18,16 @@ test('scheduler only transitions due drafts, and does not auto-post',async()=>{
     await tick(s,5000);assert.equal(s.read().events.filter(e=>e.type==='ready').length,1);
   }finally{await fs.rm(dir,{recursive:true,force:true});}
 });
+test('a failed disk write never advances in-memory state ahead of disk',async()=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'agent-store-fail-'));try{
+    const s=await new JsonStore(path.join(dir,'state.json')).init();
+    const before=s.read().version;
+    const realPersist=s.persist.bind(s);
+    s.persist=async()=>{throw new Error('disk full');};
+    await assert.rejects(s.update(d=>{d.version=999;}),/disk full/);
+    assert.equal(s.read().version,before);
+    s.persist=realPersist;
+    await s.update(d=>{d.version=before+1;});
+    assert.equal(s.read().version,before+1);
+  }finally{await fs.rm(dir,{recursive:true,force:true});}
+});

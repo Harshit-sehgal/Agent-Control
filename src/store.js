@@ -11,11 +11,13 @@ export class JsonStore {
     return this;
   }
   read(){return structuredClone(this.state);}
-  async persist(){const t=this.filename+'.tmp';await fs.writeFile(t,JSON.stringify(this.state,null,2),{mode:0o600});await fs.rename(t,this.filename);}
+  // Write the temp file and rename it into place before the caller's state
+  // pointer moves, so a failed disk write never leaves memory ahead of disk.
+  async persist(state=this.state){const t=this.filename+'.tmp';await fs.writeFile(t,JSON.stringify(state,null,2),{mode:0o600});await fs.rename(t,this.filename);}
   update(fn){
     const op=this.serial.then(async()=>{
       const next=structuredClone(this.state); const result=await fn(next);
-      this.state=next;await this.persist();return result;
+      await this.persist(next); this.state=next; return result;
     });
     this.serial=op.catch(()=>{});return op;
   }

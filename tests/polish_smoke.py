@@ -19,6 +19,12 @@ def inline_html():
     html=html.replace('<link rel="stylesheet" href="./app.css">\n<link rel="stylesheet" href="./polish.css">','<style>'+css+'</style>')
     for tag in ['<script type="module" src="./local-api.js"></script>','<script defer src="./transport.js"></script>','<script type="module" src="./app.js"></script>']:
         html=html.replace(tag,'')
+    # This harness injects the bundle as an inline script, which the page's CSP
+    # would block. Drop the CSP meta here only; the deployed page keeps it.
+    html=re.sub(r'<meta http-equiv="Content-Security-Policy"[^>]*>','',html)
+    # Mirror the real Pages build (marker "static") so the browser-local demo
+    # auto-seeds its samples instead of expecting a live, empty backend.
+    html=html.replace('content="server"','content="static"')
     return html
 
 # Browser-safe modules concatenated in dependency order, with imports stripped.

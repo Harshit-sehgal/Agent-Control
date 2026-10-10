@@ -17,6 +17,13 @@ def page_html():
  s=s.replace('</head>','<style>'+c+'</style></head>')
  for tag in ['<script type="module" src="./local-api.js"></script>','<script defer src="./transport.js"></script>','<script type="module" src="./app.js"></script>']:
   s=s.replace(tag,'')
+ # This harness injects the bundle as an inline script, which the page CSP
+ # would block. Drop the CSP meta here only; the deployed page keeps it.
+ s=re.sub(r'<meta http-equiv="Content-Security-Policy"[^>]*>','',s)
+ # Mirror the real Pages build: the browser-local demo is marked "static", so
+ # the app auto-seeds its sample posts. With the source marker ("server") the
+ # app would (correctly) treat the API as a real, empty backend.
+ s=s.replace('content="server"','content="static"')
  return s
 
 MODULES=['core.js','workflow.js','usability.js','coordination.js','group-simulator.js','chat-engine.js','local-api.js','app.js']
