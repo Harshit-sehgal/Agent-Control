@@ -59,7 +59,14 @@ export function scheduleApproval(draft, min, max, now=Date.now(), random) {
   return draft;
 }
 export function markDue(draft,now=Date.now()) {
-  if(draft.status==='scheduled' && new Date(draft.dueAt).getTime()<=now) {draft.status='ready';return true;}
+  if(draft.status!=='scheduled') return false;
+  // Guard the falsy cases explicitly: `new Date(null).getTime()` is 0 and
+  // `new Date(undefined).getTime()` is NaN, both of which are <= now, so a draft
+  // with a missing dueAt would be released instantly instead of waiting for its
+  // real time. Only a real, finite timestamp counts as due.
+  if(!draft.dueAt) return false;
+  const due = new Date(draft.dueAt).getTime();
+  if(Number.isFinite(due) && due<=now) {draft.status='ready';return true;}
   return false;
 }
 export function activity(state,type,message,meta={}) {

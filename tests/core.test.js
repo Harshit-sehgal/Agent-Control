@@ -37,3 +37,19 @@ test('template draft is stable and records a requested rewrite direction',()=>{
   assert.match(directed,/Requested angle \(not yet applied\): focus on the reliability angle/);
   assert.ok(directed.length<=1700);
 });
+test('markDue ignores a scheduled draft with a missing or invalid dueAt',()=>{
+  const now=Date.now();
+  // `new Date(null).getTime()` is 0 and `new Date(undefined).getTime()` is NaN --
+  // both are <= now, so a corrupt state file would otherwise release the draft
+  // instantly instead of waiting for its real time.
+  assert.equal(markDue({status:'scheduled',dueAt:null},now),false);
+  assert.equal(markDue({status:'scheduled',dueAt:undefined},now),false);
+  assert.equal(markDue({status:'scheduled',dueAt:''},now),false);
+  assert.equal(markDue({status:'scheduled',dueAt:0},now),false);
+  assert.equal(markDue({status:'scheduled',dueAt:'not-a-date'},now),false);
+  // A valid due time still transitions, and a pending draft never does.
+  assert.equal(markDue({status:'scheduled',dueAt:new Date(now+60000).toISOString()},now),false);
+  assert.equal(markDue({status:'pending',dueAt:new Date(now-1000).toISOString()},now),false);
+  const real={status:'scheduled',dueAt:new Date(now-1000).toISOString()};
+  assert.equal(markDue(real,now),true);assert.equal(real.status,'ready');
+});
