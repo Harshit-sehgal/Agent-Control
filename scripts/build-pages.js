@@ -36,6 +36,11 @@ for (const name of files) {
 for (const name of stale) {
   try { await fs.rm(path.join(dest, name)); } catch { /* Already gone. */ }
 }
+// Mark the copied page as browser-local so transport.js uses localStorage
+// instead of trying to reach an /api that does not exist on static hosting.
+const indexPath = path.join(dest, 'index.html');
+const marked = (await fs.readFile(indexPath, 'utf8')).replace('<meta name="agent-backend" content="server">', '<meta name="agent-backend" content="static">');
+await fs.writeFile(indexPath, marked);
 // Prevent Jekyll from stripping files that start with an underscore.
 await fs.writeFile(path.join(dest, '.nojekyll'), '');
 copied.push('.nojekyll');

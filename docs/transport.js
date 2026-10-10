@@ -10,13 +10,21 @@
  */
 (function () {
   'use strict';
-  var local = window.AGENT_LOCAL_API;
-  var staticHosting = location.protocol === 'file:';
+  // Build-time marker: the Pages bundle is stamped `static`, the Node-served
+  // page keeps `server`. This is the only reliable signal because both are
+  // served over http(s) origins where /api may or may not exist.
+  var marker = document.querySelector('meta[name="agent-backend"]');
+  var backend = marker && marker.getAttribute('content');
+  var useLocal = backend === 'static' || location.protocol === 'file:';
 
   function api(path, method, body) {
-    if (staticHosting) return local(path, method, body);
-    var options = {method: method || 'GET', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}};
-    if (body !== undefined) options.body = JSON.stringify(body);
+    // Resolve the browser-local backend lazily: it is a deferred module and
+    // may not have attached its global when this classic script first runs.
+    if (useLocal) return window.AGENT_LOCAL_API(path, method, body);
+    var verb = method || 'GET';
+    var options = {method: verb, credentials: 'same-origin', headers: {'Content-Type': 'application/json'}};
+    // GET/HEAD requests must not carry a body, even an empty default.
+    if (body !== undefined && verb !== 'GET' && verb !== 'HEAD') options.body = JSON.stringify(body);
     return fetch(path, options).then(function (response) {
       return response.json().catch(function () { return {error: 'Invalid server response'}; }).then(function (data) {
         if (!response.ok) {
@@ -30,5 +38,4 @@
   }
 
   window.AGENT_API = api;
-  window.AGENT_PAGES_DEMO = local; // Backwards-compatible alias used by tests.
 })();

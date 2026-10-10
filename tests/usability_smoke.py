@@ -15,7 +15,7 @@ def page_html():
  for name in ('app.css','polish.css','usability.css'):
   s=s.replace(f'<link rel="stylesheet" href="./{name}">','')
  s=s.replace('</head>','<style>'+c+'</style></head>')
- for tag in ['<script src="./transport.js"></script>','<script src="./local-api.js"></script>','<script type="module" src="./app.js"></script>']:
+ for tag in ['<script type="module" src="./local-api.js"></script>','<script defer src="./transport.js"></script>','<script type="module" src="./app.js"></script>']:
   s=s.replace(tag,'')
  return s
 

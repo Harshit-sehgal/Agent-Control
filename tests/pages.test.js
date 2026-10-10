@@ -19,7 +19,7 @@ function setup(target=makeStorage()){storage=target;return {request:globalThis.w
 const seed=async request=>{await request('/api/demo/seed','POST',{});const s=await request('/api/state');const item=s.candidates.find(x=>x.topic==='AI');return request(`/api/candidates/${item.id}/process`,'POST',{});};
 
 test('demo page uses path-relative assets and clearly discloses browser-local data',()=>{
-  assert.match(html,/\.\/app\.css/);assert.match(html,/\.\/app\.js/);assert.match(html,/\.\/local-api\.js/);assert.match(html,/\.\/transport\.js/);
+  assert.match(html,/\.\/app\.css/);assert.match(html,/\.\/app\.js/);assert.match(html,/type="module" src="\.\/local-api\.js"/);assert.match(html,/\.\/transport\.js/);
   assert.match(html,/Data is saved only in this browser/);
   assert.doesNotMatch(html,/<script[^>]+src="\/app\.js/);
 });

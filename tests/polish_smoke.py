@@ -17,7 +17,7 @@ def inline_html():
     html=(ROOT/'shared/index.html').read_text()
     css=(ROOT/'shared/app.css').read_text()+'\n'+(ROOT/'shared/polish.css').read_text()
     html=html.replace('<link rel="stylesheet" href="./app.css">\n<link rel="stylesheet" href="./polish.css">','<style>'+css+'</style>')
-    for tag in ['<script src="./transport.js"></script>','<script src="./local-api.js"></script>','<script type="module" src="./app.js"></script>']:
+    for tag in ['<script type="module" src="./local-api.js"></script>','<script defer src="./transport.js"></script>','<script type="module" src="./app.js"></script>']:
         html=html.replace(tag,'')
     return html
 
