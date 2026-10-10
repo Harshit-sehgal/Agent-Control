@@ -1,0 +1,172 @@
+# Agent Control — working prototype v0.1
+
+A local-first dashboard for creating bot groups, reviewing AI-assisted drafts, and coordinating human-approved workflows. **X-engage is the first demo group.** It does not use an X developer API key, automatically crawl X, or automatically publish to X.
+
+## What works now
+
+- Responsive web dashboard with password login (desktop/mobile browser).
+- Persistent candidate inbox; add URLs/text directly or capture one visible post from a Chrome extension.
+- Built-in X-engage bots: Scout, Ranker, Researcher, Writer, Reviewer, Manual Handoff.
+- Deterministic topic-based relevance ranking. This is a heuristic, not a learned engagement predictor.
+- Real AI drafting through an optional OpenAI Responses API key, with template-only fallback when no key is supplied.
+- Editable drafts; revisions invalidate earlier approvals and scheduled publication handoffs.
+- Random delay after approval, configurable from 0 to 1440 minutes. When due, the draft becomes **ready for manual posting**; no automatic posting occurs.
+- Copy approved text, open source URL, and manually confirm publication.
+- Create custom bot groups and custom text bots; run custom bots when an AI key is configured.
+- Persistent once-only and recurring reminder events, stored with task history.
+- Event/activity log, strict capture token, local file persistence, HTTP-only session cookie, basic login rate limiting.
+- Zero npm runtime dependencies. Requires Node.js 22+.
+
+### Important boundaries
+
+- The Scout **does not automatically scroll, scrape, or search your X feed**. The Chrome extension captures one post after you deliberately invoke it. X restricts non-API scripting; a test account does not negate that restriction.
+- The Researcher role **does not independently fact-check web claims** yet. Drafts carry a source and a warning to verify claims. Do not treat any generated text as verified reporting.
+- The scheduler runs on the host computer. For 24/7 service, host the Node process on an always-on machine or configure a secured server deployment.
+- This prototype is single-workspace/single-user, not a hardened multi-tenant SaaS.
+- Custom bots run text-only prompts; they do not have browser or file-system tool access yet.
+- Notifications appear in the dashboard activity log, not as mobile push notifications.
+- No external accounts, secrets, or private files are transmitted unless you explicitly configure a paid AI provider for text drafting.
+
+## Quick start (Linux/macOS/Windows with Node 22+)
+
+```bash
+# Unzip the download, then open its project folder.
+cd agent-control-prototype
+npm test
+npm start
+```
+
+Open **http://127.0.0.1:4173**. On first startup without environment variables, the terminal prints a randomly generated dashboard password. This password changes after a restart. For a stable password:
+
+```bash
+# Linux/macOS
+DASHBOARD_PASSWORD='use-a-long-random-password' npm start
+```
+
+Windows PowerShell:
+
+```powershell
+$env:DASHBOARD_PASSWORD = 'use-a-long-random-password'
+npm start
+```
+
+Optional real AI drafting:
+
+```bash
+# Linux/macOS. Paid API usage is separate from ChatGPT subscription.
+OPENAI_API_KEY='YOUR_OWN_KEY' OPENAI_MODEL='gpt-4.1-mini' DASHBOARD_PASSWORD='use-a-long-random-password' npm start
+```
+
+Secrets are read **only on the server**. Never place an AI provider key in the browser extension or Git repository. When a key is configured, draft creation may incur API charges. If the provider request fails, the backend reports an error; it does not pretend to have generated a successful AI answer.
+
+### Try the full workflow
+
+1. Log in to the dashboard.
+2. Select **Load sample posts** on Overview, or add your own post in Discovery.
+3. Click **Score + draft** on a candidate.
+4. Open Approval inbox. Edit the draft and save a new revision.
+5. Click **Approve + schedule**. Default window: 2–10 minutes. To test instantly, change it to 0–0 in Settings before approval.
+6. Wait for the status **ready**, or choose **Make ready now** to accelerate an approved draft.
+7. Copy the approved text, open the original post, and **personally** click Post on X.
+8. Click **I posted it** to mark the task complete in the dashboard.
+
+The exact revision displayed when you approve is locked. Editing after approval revokes that approval and removes its schedule.
+
+## Chrome extension
+
+1. Open `chrome://extensions/` in Chrome, Edge, or another compatible Chromium desktop browser.
+2. Enable **Developer mode** and select **Load unpacked**.
+3. Select the `extension/` folder.
+4. Open dashboard → **Settings**, then copy **Capture token**.
+5. Click the extension icon, enter `http://127.0.0.1:4173` and the token.
+6. Open `http://127.0.0.1:4173/demo-feed.html` to test on a controlled page. Highlight text in one example post, then click **Capture selected post** in the extension.
+7. Go to Dashboard → **Discovery** and process the captured candidate.
+
+On an X feed, explicitly select text in the post you are viewing before capturing. The extension does not scroll, click through, or read the entire feed. The dashboard also supports manual URL/text entry.
+
+**Capture-token permissions:** The token only permits `POST /api/capture`. It does not permit draft approval, editing, or posting. If you expose the backend over the internet, protect it behind a private network / access gateway and use HTTPS.
+
+## Remote access from your phone
+
+### Fastest private setup: Tailscale
+
+1. Install Tailscale on your laptop and phone, and sign in to the same tailnet.
+2. Start the server listening on the Tailscale interface or a private-network interface:
+
+```bash
+# Use only while Tailscale/private firewall access is configured.
+HOST=0.0.0.0 DASHBOARD_PASSWORD='use-a-long-random-password' npm start
+```
+
+3. On your phone, open `http://<your-laptop-tailscale-ip>:4173` over your private tailnet.
+4. For production, use HTTPS and an access proxy; do not forward TCP port 4173 on your public router.
+
+If the laptop sleeps or shuts down, the dashboard and scheduler stop. This prototype has **not** yet split the execution plane across cloud and local workers. The intended cloud/local design is documented in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+### Cloud deployment
+
+The current Node server can run on a private Node-compatible host with persistent disk, but the extension capture and security settings need additional configuration. **Do not deploy the sample server publicly without an access gateway, HTTPS, and a hardened data store.** This first iteration is meant for local or private-tailnet use.
+
+## Tests
+
+```bash
+npm run check
+npm test
+```
+
+The suite checks scoring, invalid URLs, scheduling boundaries, state persistence, recovery across reloads, and a live HTTP end-to-end lifecycle including auth, extension-token intake, editing, double-approval rejection, manual publishing confirmation, and cross-origin protection.
+
+## Repository creation
+
+The ChatGPT GitHub integration can write to existing repositories but **cannot create a new repository** in this session. To create a private repo after downloading/unzipping:
+
+```bash
+cd agent-control-prototype
+git init -b main
+git add .
+git commit -m "feat: initial working agent dashboard and X-engage prototype"
+gh auth login
+gh repo create Harshit-sehgal/agent-control-prototype --private --source=. --remote=origin --push
+```
+
+`gh` is the official GitHub CLI (`https://cli.github.com/`). If already signed in, skip `gh auth login`. Confirm `data/` and `.env` are not tracked (`git status --short` should not list them). The repo must not already exist under that name.
+
+## Architecture
+
+```text
+Browser (phone / desktop) ---- authenticated HTTP ----> Node dashboard/API
+                                                     |
+                                                     +-- JSON store (local)
+                                                     +-- scheduler
+                                                     +-- topic ranker
+                                                     +-- AI provider (optional)
+Chrome extension ---- capture-only token ------------> /api/capture
+
+Note: Browser actions that X does not authorize are not enabled.
+```
+
+### Key paths
+
+- `src/server.js`: HTTP routes, session auth, candidates/drafts/groups/schedules.
+- `src/core.js`: Validation, ranking, scheduling state transitions.
+- `src/ai.js`: Optional provider adapter and clearly labeled offline fallback.
+- `src/store.js`: Serialized atomic persistence.
+- `src/scheduler.js`: Due-task and reminder reconciliation.
+- `public/`: Dashboard UI and controlled demo feed.
+- `extension/`: Manifest V3 capture extension.
+- `tests/`: Unit tests and HTTP integration test.
+- `docs/ROADMAP.md`: Phased path to the production architecture.
+
+## Security and operational notes
+
+- Use a strong stable `DASHBOARD_PASSWORD` before exposing the server beyond localhost.
+- The prototype uses in-memory sessions: a restart signs users out. This is deliberate for the local proof-of-concept.
+- The capture token is stored in `data/state.json`, which is excluded from Git. Store the data directory on an encrypted disk if it holds sensitive posts.
+- Input is escaped in the dashboard, and post URL schemes are validated. Captured posts are **untrusted external content**.
+- JSON file persistence is suitable for a single-process prototype only. Replace it with a transactional database and scoped permissions before multi-user use.
+- Remote admin operations should use a private network, reverse proxy with HTTPS, and additional rate limits/audit controls before public exposure.
+- The system never claims that an AI draft is your personal opinion unless you have actually supplied or approved it.
+
+## License
+
+No open-source license has been selected. The default is all rights reserved until the repository owner chooses a license.
