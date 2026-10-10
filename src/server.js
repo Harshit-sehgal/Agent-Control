@@ -162,7 +162,7 @@ const ASSETS=new Set(['index.html','app.css','polish.css','usability.css','trans
 async function serve(req,res,u){
   let rel=u.pathname==='/'?'index.html':u.pathname.slice(1);
   if(!ASSETS.has(rel))return send(res,404,{error:'Not found'});
-  try {const body=await fs.readFile(path.join(PUBLIC,rel));res.writeHead(200,{'Content-Type':TYPES[rel.split('.').pop()]||'application/octet-stream','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'",'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'});res.end(body);}catch{return send(res,404,{error:'Missing asset'});}
+  try {const body=await fs.readFile(path.join(PUBLIC,rel));res.writeHead(200,{'Content-Type':TYPES[rel.split('.').pop()]||'application/octet-stream','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'",'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'});res.end(body);}catch{return send(res,404,{error:'Missing asset'});}
 }
 const server=http.createServer(async(req,res)=>{
   try{

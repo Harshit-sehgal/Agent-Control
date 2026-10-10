@@ -10,8 +10,6 @@
  */
 import {activity,candidateInput,cleanText,scheduleApproval} from './core.js';
 
-const randomUUID = () => crypto.randomUUID();
-
 export const SCHEMA_VERSION = 2;
 
 export function fail(message, status = 400) {
@@ -68,7 +66,7 @@ export function addCandidate(state, body) {
   const input = candidateInput(body);
   const existing = state.candidates.find(c => c.url === input.url && c.text === input.text);
   if (existing) return {candidate: existing, duplicate: true};
-  const candidate = {...input, id: randomUUID(), status: 'new', createdAt: new Date().toISOString()};
+  const candidate = {...input, id: crypto.randomUUID(), status: 'new', createdAt: new Date().toISOString()};
   state.candidates.unshift(candidate);
   activity(state, 'capture', `Added a candidate from ${input.author}.`, {candidateId: candidate.id});
   return {candidate, duplicate: false};
@@ -78,7 +76,7 @@ export function seedDemo(state, sample = []) {
   let count = 0;
   for (const b of sample) {
     if (state.candidates.some(c => c.url === b.url)) continue;
-    state.candidates.push({...b, id: randomUUID(), status: 'new', createdAt: new Date().toISOString(), demo: true});
+    state.candidates.push({...b, id: crypto.randomUUID(), status: 'new', createdAt: new Date().toISOString(), demo: true});
     count++;
   }
   activity(state, 'demo', `Loaded ${count} demo candidate(s).`);
@@ -97,7 +95,7 @@ export function finishProcessing(state, id, evaluation, generated) {
   c.status = 'drafted';
   c.score = evaluation;
   const draft = {
-    id: randomUUID(), candidateId: id, author: c.author, url: c.url, sourceText: c.text,
+    id: crypto.randomUUID(), candidateId: id, author: c.author, url: c.url, sourceText: c.text,
     text: generated.text, revision: 1, status: 'pending', score: evaluation.score,
     mode: generated.mode, note: generated.note, createdAt: new Date().toISOString(),
   };
@@ -164,7 +162,7 @@ export function draftAction(state, id, action, body = {}) {
 export function addGroup(state, body) {
   const name = cleanText(body.name, 80);
   if (!name) fail('Group name required.');
-  const g = {id: randomUUID(), name, description: cleanText(body.description, 300), bots: []};
+  const g = {id: crypto.randomUUID(), name, description: cleanText(body.description, 300), bots: []};
   state.groups.push(g);
   activity(state, 'group', `Created group ${name}.`);
   return g;
@@ -176,7 +174,7 @@ export function addBot(state, groupId, body) {
   if (!name || !instructions) fail('Bot name and instructions required.');
   const g = state.groups.find(x => x.id === groupId);
   if (!g) fail('Group not found.', 404);
-  const bot = {id: randomUUID(), name, instructions, type: 'custom'};
+  const bot = {id: crypto.randomUUID(), name, instructions, type: 'custom'};
   g.bots.push(bot);
   activity(state, 'bot', `Created bot ${name}.`);
   return bot;
@@ -196,7 +194,7 @@ export function addSchedule(state, body) {
     if (!Number.isInteger(intervalMinutes) || intervalMinutes < 1 || intervalMinutes > 10080) fail('Interval must be 1–10080 minutes.');
     nextAt = new Date(Date.now() + intervalMinutes * 60000).toISOString();
   }
-  const item = {id: randomUUID(), label, kind, nextAt, intervalMinutes, enabled: true};
+  const item = {id: crypto.randomUUID(), label, kind, nextAt, intervalMinutes, enabled: true};
   state.schedules.unshift(item);
   activity(state, 'schedule', `Added reminder: ${label}`);
   return item;
