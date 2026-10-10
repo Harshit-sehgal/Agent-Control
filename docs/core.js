@@ -22,12 +22,17 @@ export function scoreCandidate(candidate, topics) {
   const score=clamp(10+relevance+specificity+conversation+sources,0,100);
   return {score, matched, reasons:[`${matched.length} matched topic(s)`,conversation===20?'Contains a discussion prompt':'No clear discussion prompt',`Text length ${candidate.text.length} characters`], label:score>=70?'High':score>=45?'Medium':'Low'};
 }
-export function templateDraft(candidate,settings) {
+export function templateDraft(candidate,settings,direction='') {
   const excerpt=candidate.text.replace(/\s+/g,' ').slice(0,135);
   const question=/\?/.test(candidate.text);
   const intro=question?'Interesting question. ':'Worth looking into. ';
   const opinion=cleanText(settings.opinions,700);
-  return `${intro}${question?'I would check the actual results before settling on an answer.':'I would want to see how this holds up in practice.'}${opinion?' '+opinion:''}\n\nContext: ${excerpt}`.slice(0,1700);
+  const angle=cleanText(direction,240);
+  // A template cannot rewrite prose, so when the user asks for a direction we
+  // carry it into the draft, clearly marked as an instruction not yet applied,
+  // instead of pretending an AI acted on it (or silently returning the same text).
+  const requested=angle?`\n\nRequested angle (not yet applied): ${angle}`:'';
+  return `${intro}${question?'I would check the actual results before settling on an answer.':'I would want to see how this holds up in practice.'}${opinion?' '+opinion:''}${requested}\n\nContext: ${excerpt}`.slice(0,1700);
 }
 export function delayWindow(min,max,random=()=>Math.random()) {
   const a=Number(min),b=Number(max);
@@ -61,3 +66,9 @@ export function activity(state,type,message,meta={}) {
   state.events.unshift({id:uuid(),at:new Date().toISOString(),type,message,meta});
   state.events=state.events.slice(0,200);
 }
+/** Content Security Policy shared by the Node response header and the static
+ * Pages <meta http-equiv> tag. Both copies must stay byte-identical;
+ * tests/security-headers.test.js asserts they match, so editing one without the
+ * other fails the build instead of silently weakening the demo. */
+export const CSP="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+

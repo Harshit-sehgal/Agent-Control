@@ -66,3 +66,68 @@ test('complete dashboard capture → draft → edit → approve → ready → ma
     assert.equal(originBlocked.status,403);
   }finally{await t.stop();}
 });
+test('bot profile edits persist to the store and survive a restart', {timeout:25000}, async()=>{
+  const t=await launch();
+  try{
+    const send=async(method,url,body,cookie,headers={})=>{
+      const r=await fetch(t.base+url,{method,headers:{'Content-Type':'application/json',...headers,...(cookie?{Cookie:cookie}:{})},body:body===undefined?undefined:JSON.stringify(body)});
+      const value=await r.json();return {status:r.status,body:value,cookie:r.headers.get('set-cookie')};
+    };
+    const login=await send('POST','/api/login',{password:'test-password-1234'});
+    const cookie=login.cookie.split(';')[0];
+    const patched=await send('PATCH','/api/groups/x-engage/bots/writer',{name:'Senior Writer',instructions:'Draft concise replies in the user voice.'},cookie);
+    assert.equal(patched.status,200);
+    assert.equal(patched.body.name,'Senior Writer');
+    assert.equal(patched.body.instructions,'Draft concise replies in the user voice.');
+    // The change must be in persisted state, not just the response.
+    const state=(await send('GET','/api/state',undefined,cookie)).body;
+    const writer=state.groups[0].bots.find(b=>b.id==='writer');
+    assert.equal(writer.name,'Senior Writer');
+    assert.equal((await send('PATCH','/api/groups/x-engage/bots/missing',{name:'x',instructions:'y'},cookie)).status,404);
+    assert.equal((await send('PATCH','/api/groups/missing/bots/writer',{name:'x',instructions:'y'},cookie)).status,404);
+    assert.equal((await send('PATCH','/api/groups/x-engage/bots/writer',{name:'',instructions:'y'},cookie)).status,400);
+    assert.equal((await send('PATCH','/api/groups/x-engage/bots/writer',{name:'x',instructions:'y'})).status,401);
+  }finally{await t.stop();}
+});
+test('a candidate interrupted mid-draft is processable again after a restart', {timeout:25000}, async()=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'agent-api-recover-')),port=await freePort();
+  const base=`http://127.0.0.1:${port}`;
+  const stateFile=path.join(dir,'state.json');
+  const env={...process.env,OPENAI_API_KEY:'',DASHBOARD_PASSWORD:'test-password-1234',HOST:'127.0.0.1',PORT:String(port),DATA_FILE:stateFile};
+  const waitFor=async child=>{
+    for(let i=0;i<90;i++){
+      if(child.exitCode!==null)return false;
+      try{if((await fetch(base+'/api/health')).ok)return true;}catch{}
+      await new Promise(r=>setTimeout(r,70));
+    }
+    return false;
+  };
+  const first=spawn(process.execPath,['src/server.js'],{cwd:root,env,stdio:'ignore'});
+  try{
+    assert.equal(await waitFor(first),true);
+    const send=async(method,url,body,cookie,headers={})=>{
+      const r=await fetch(base+url,{method,headers:{'Content-Type':'application/json',...headers,...(cookie?{Cookie:cookie}:{})},body:body===undefined?undefined:JSON.stringify(body)});
+      const value=await r.json();return {status:r.status,body:value,cookie:r.headers.get('set-cookie')};
+    };
+    const cookie=(await send('POST','/api/login',{password:'test-password-1234'})).cookie.split(';')[0];
+    const state=(await send('GET','/api/state',undefined,cookie)).body;
+    const c=await send('POST','/api/capture',{url:'https://x.com/test/status/555',text:'How can robotics models become more reliable in practice?',author:'Tester',topic:'robotics'},undefined,{'X-Capture-Token':state.captureToken,Origin:'chrome-extension://example'});
+    const id=c.body.candidate.id;
+    // Simulate a crash after beginProcessing but before finishProcessing.
+    await fs.writeFile(stateFile,JSON.stringify({...state,version:2,candidates:[{...c.body.candidate,status:'processing'}]},null,2));
+    first.kill('SIGINT');await new Promise(resolve=>first.once('exit',resolve));
+    const second=spawn(process.execPath,['src/server.js'],{cwd:root,env,stdio:'ignore'});
+    try{
+      assert.equal(await waitFor(second),true,'Server must restart despite a stranded processing candidate.');
+      // Sessions are in-memory, so re-authenticate against the restarted process.
+      const fresh=(await send('POST','/api/login',{password:'test-password-1234'})).cookie.split(';')[0];
+      const after=(await send('GET','/api/state',undefined,fresh)).body;
+      assert.equal(after.candidates.length,1,'The stranded candidate must survive the restart.');
+      assert.equal(after.candidates[0].status,'new','The interrupted candidate must be released, not stuck forever.');
+      assert.equal((await send('POST',`/api/candidates/${id}/process`,{},fresh)).status,201);
+    }finally{second.kill('SIGINT');await new Promise(resolve=>second.once('exit',resolve));}
+  }finally{await fs.rm(dir,{recursive:true,force:true});}
+});
+
+
+

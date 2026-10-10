@@ -4,12 +4,12 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {scoreCandidate, templateDraft, initialState} from './core.js?v=7e866b05dc';
+import {scoreCandidate, templateDraft, cleanText, initialState} from './core.js?v=48363eb1ef';
 import {
-  SCHEMA_VERSION, migrate, seedDemo, updateSettings, addCandidate, beginProcessing,
+  migrate, seedDemo, updateSettings, addCandidate, beginProcessing,
   finishProcessing, editDraft, findDraft, rewriteDraft, draftAction, addGroup,
-  addBot, addSchedule, removeSchedule, resetDemo,
-} from './workflow.js?v=7e866b05dc';
+  addBot, updateBot, addSchedule, removeSchedule, resetDemo,
+} from './workflow.js?v=48363eb1ef';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
@@ -19,7 +19,9 @@ function read() {
     const value = localStorage.getItem(KEY);
     if (value) {
       const state = JSON.parse(value);
-      if (state && typeof state === 'object' && Array.isArray(state.candidates) && state.version === SCHEMA_VERSION) return state;
+      // Always migrate: a stored version equal to SCHEMA_VERSION can still be
+      // missing a field added later in the same version, and a legacy shape must
+      // gain every collection the UI indexes into.
       if (state && typeof state === 'object' && Array.isArray(state.candidates)) return migrate(state);
     }
   } catch { throw new Error('Browser storage is unavailable. Enable local storage to use this demo.'); }
@@ -58,7 +60,7 @@ async function localApi(path, method = 'GET', body = {}) {
 
   if (path === '/api/demo/seed' && method === 'POST') { const r = seedDemo(state, samples); save(state); return r; }
   if (path === '/api/settings' && method === 'PATCH') { const r = updateSettings(state, body); save(state); return r; }
-  if (path === '/api/candidates' && method === 'POST') { const r = addCandidate(state, body); save(state); return r.candidate; }
+  if (path === '/api/candidates' && method === 'POST') { const r = addCandidate(state, body); save(state); return {...r.candidate, duplicate: r.duplicate}; }
 
   let m;
   if ((m = path.match(/^\/api\/candidates\/([a-z0-9-]+)\/process$/)) && method === 'POST') {
@@ -74,7 +76,8 @@ async function localApi(path, method = 'GET', body = {}) {
     let result;
     if (m[2] === 'rewrite') {
       const candidate = find(state.candidates, draft.candidateId);
-      result = rewriteDraft(state, m[1], {text: templateDraft(candidate, state.settings), mode: 'template', note: 'Template draft. Rewrite instructions have not been processed by an AI model.'});
+      const direction = cleanText(body?.direction, 240);
+      result = rewriteDraft(state, m[1], {text: templateDraft(candidate, state.settings, direction), mode: 'template', note: direction ? 'Template draft. The requested direction is recorded but was not applied by an AI model.' : 'Template draft. Rewrite instructions have not been processed by an AI model.'});
     } else {
       result = draftAction(state, m[1], m[2]);
     }
@@ -83,6 +86,9 @@ async function localApi(path, method = 'GET', body = {}) {
   }
   if (path === '/api/groups' && method === 'POST') { const g = addGroup(state, body); save(state); return g; }
   if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/bots$/)) && method === 'POST') { const b = addBot(state, m[1], body); save(state); return b; }
+  // Keep lasting bot profile edits in the store so they survive a reload, exactly
+  // like the Node backend, instead of living only in browser-local UI state.
+  if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/bots\/([a-z0-9-]+)$/)) && method === 'PATCH') { const b = updateBot(state, m[1], m[2], body); save(state); return b; }
   if (path === '/api/bots/run') throw new Error('Running AI bots requires the separate Node backend, not GitHub Pages.');
   if (path === '/api/schedules' && method === 'POST') { const s = addSchedule(state, body); save(state); return s; }
   if ((m = path.match(/^\/api\/schedules\/([a-z0-9-]+)$/)) && method === 'DELETE') { const r = removeSchedule(state, m[1]); save(state); return r; }

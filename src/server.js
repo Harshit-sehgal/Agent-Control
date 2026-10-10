@@ -4,7 +4,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import crypto from 'node:crypto';
 import {JsonStore} from './store.js';
-import {activity,candidateInput,cleanText,scoreCandidate,uuid} from '../shared/core.js';
+import {activity,candidateInput,cleanText,scoreCandidate,uuid,CSP} from '../shared/core.js';
 import * as wf from '../shared/workflow.js';
 import {aiEnabled,makeDraft,executeCustomBot} from './ai.js';
 import {startScheduler} from './scheduler.js';
@@ -18,15 +18,19 @@ const STORE_PATH=process.env.DATA_FILE||path.join(ROOT,'data','state.json');
 const PASSWORD=process.env.DASHBOARD_PASSWORD||crypto.randomBytes(12).toString('base64url');
 const sessions=new Map(), attempts=new Map();
 const store=await new JsonStore(STORE_PATH).init();
-await store.update(s=>wf.migrate(s));
+await store.update(s=>{wf.migrate(s);wf.recoverInterrupted(s);});
 await markInterrupted(store);
 const stopScheduler=startScheduler(store);
+if(store.recoveredFrom)console.warn(`WARNING: ${STORE_PATH} was unreadable and has been moved to ${store.recoveredFrom}. A fresh state was created.`);
 const TYPES={'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8','svg':'image/svg+xml','png':'image/png','ico':'image/x-icon'};
 const isLive=()=>aiEnabled();
 function fail(message,status=400){throw Object.assign(new Error(message),{status});}
-function send(res,status,value,headers={}){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...headers});res.end(JSON.stringify(value));}
+const SECURITY={'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer'};
+function send(res,status,value,headers={}){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...SECURITY,...headers});res.end(JSON.stringify(value));}
 function cookie(req,key){const found=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith(key+'='));return found?.slice(key.length+1);}
 function authed(req){const sid=cookie(req,'agent_session'),s=sid&&sessions.get(sid);if(!s)return false;if(s.exp<Date.now()){sessions.delete(sid);return false;}return true;}
+// Drop expired rows so a long-lived process cannot grow the maps without bound.
+function pruneExpired(){const now=Date.now();for(const [sid,s] of sessions)if(s.exp<now)sessions.delete(sid);for(const [ip,r] of attempts)if(now>r.until&&r.count===0)attempts.delete(ip);}
 function requireAuth(req){if(!authed(req))fail('Sign in first.',401);}
 function timingEqual(a,b){const h1=crypto.createHash('sha256').update(String(a)).digest(),h2=crypto.createHash('sha256').update(String(b)).digest();return crypto.timingSafeEqual(h1,h2);}
 function checkOrigin(req){if(req.url?.split('?')[0]==='/api/capture')return; if(!['POST','PATCH','DELETE','PUT'].includes(req.method))return;
@@ -43,6 +47,7 @@ async function api(req,res,u){
   if(p==='/api/login'&&m==='POST'){
     const ip=req.socket.remoteAddress||'unknown',record=attempts.get(ip)||{count:0,until:0};
     if(Date.now()>record.until){record.count=0;record.until=Date.now()+900000;}
+    pruneExpired();
     if(record.count>=8)fail('Too many attempts. Try again in 15 minutes.',429);
     const b=await jsonBody(req);
     if(!timingEqual(b.password||'',PASSWORD)){record.count++;attempts.set(ip,record);fail('Incorrect password.',401);}
@@ -77,8 +82,10 @@ async function api(req,res,u){
   }
   if(p==='/api/candidates'&&m==='POST'){
     const b=await jsonBody(req);
-    const result=await store.update(s=>wf.addCandidate(s,b).candidate);
-    return send(res,201,result);
+    // Report duplicates the same way /api/capture does, so the UI can tell the
+    // user the post was already queued instead of pretending it was added.
+    const result=await store.update(s=>wf.addCandidate(s,b));
+    return send(res,result.duplicate?200:201,result.candidate);
   }
   let match=p.match(/^\/api\/candidates\/([a-f0-9-]+)\/process$/);
   if(match&&m==='POST'){
@@ -126,6 +133,14 @@ async function api(req,res,u){
     const bot=await store.update(s=>wf.addBot(s,match[1],b));
     return send(res,201,bot);
   }
+  // Persist lasting bot profile edits to the store so they survive a reload and
+  // are shared by every device, instead of living only in browser localStorage.
+  match=p.match(/^\/api\/groups\/([a-z0-9-]+)\/bots\/([a-z0-9-]+)$/);
+  if(match&&m==='PATCH'){
+    const b=await jsonBody(req);
+    const bot=await store.update(s=>wf.updateBot(s,match[1],match[2],b));
+    return send(res,200,bot);
+  }
   // Durable text-only bot coordination. Humans approve every external action separately.
   match=p.match(/^\/api\/groups\/([a-z0-9-]+)\/chat$/);
   if(match&&m==='GET'){
@@ -162,7 +177,7 @@ const ASSETS=new Set(['index.html','app.css','polish.css','usability.css','trans
 async function serve(req,res,u){
   let rel=u.pathname==='/'?'index.html':u.pathname.slice(1);
   if(!ASSETS.has(rel))return send(res,404,{error:'Not found'});
-  try {const body=await fs.readFile(path.join(PUBLIC,rel));res.writeHead(200,{'Content-Type':TYPES[rel.split('.').pop()]||'application/octet-stream','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'",'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'});res.end(body);}catch{return send(res,404,{error:'Missing asset'});}
+  try {const body=await fs.readFile(path.join(PUBLIC,rel));res.writeHead(200,{'Content-Type':TYPES[rel.split('.').pop()]||'application/octet-stream','Content-Security-Policy':CSP,...SECURITY,'Cache-Control':'no-store'});res.end(body);}catch{return send(res,404,{error:'Missing asset'});}
 }
 const server=http.createServer(async(req,res)=>{
   try{

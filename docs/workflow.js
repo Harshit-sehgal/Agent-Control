@@ -8,7 +8,7 @@
  * Keeping transitions here is the single source of truth for the draft
  * lifecycle: candidate -> draft -> approved/scheduled -> ready -> posted.
  */
-import {activity,candidateInput,cleanText,scheduleApproval} from './core.js?v=7e866b05dc';
+import {activity,candidateInput,cleanText,scheduleApproval} from './core.js?v=48363eb1ef';
 
 export const SCHEMA_VERSION = 2;
 
@@ -179,6 +179,35 @@ export function addBot(state, groupId, body) {
   activity(state, 'bot', `Created bot ${name}.`);
   return bot;
 }
+
+/** Persist a lasting bot profile edit. The group record is the single source of
+ * truth, so name/instructions are never mirrored into browser-local UI state. */
+export function updateBot(state, groupId, botId, body) {
+  const g = state.groups.find(x => x.id === groupId);
+  if (!g) fail('Group not found.', 404);
+  const bot = g.bots.find(x => x.id === botId);
+  if (!bot) fail('Bot not found.', 404);
+  const name = cleanText(body.name, 80);
+  const instructions = cleanText(body.instructions, 3000);
+  if (!name || !instructions) fail('Bot name and instructions required.');
+  bot.name = name;
+  bot.instructions = instructions;
+  activity(state, 'bot', `Updated bot ${name}.`);
+  return bot;
+}
+
+/** Release candidates stranded in `processing` by a crash mid-draft.
+ * Without this a restart leaves them permanently unprocessable: beginProcessing
+ * rejects `processing` forever, so the post can never be drafted again. */
+export function recoverInterrupted(state) {
+  let recovered = 0;
+  for (const c of state.candidates) {
+    if (c.status === 'processing') { c.status = 'new'; recovered++; }
+  }
+  if (recovered) activity(state, 'recovery', `Released ${recovered} candidate(s) interrupted by a restart.`);
+  return {recovered};
+}
+
 
 export function addSchedule(state, body) {
   const label = cleanText(body.label, 200);

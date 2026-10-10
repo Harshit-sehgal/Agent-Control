@@ -1,7 +1,7 @@
-import {classifyMessage, botSuggestions, statusSummary} from './chat-engine.js?v=7e866b05dc';
-import {simulateGroup} from './group-simulator.js?v=7e866b05dc';
-import {planHandoffs} from './coordination.js?v=7e866b05dc';
-import {filterCandidates,filterDrafts,normalizeUiPrefs,UI_PREFS_KEY} from './usability.js?v=7e866b05dc';
+import {classifyMessage, botSuggestions, statusSummary} from './chat-engine.js?v=48363eb1ef';
+import {simulateGroup} from './group-simulator.js?v=48363eb1ef';
+import {planHandoffs} from './coordination.js?v=48363eb1ef';
+import {filterCandidates,filterDrafts,normalizeUiPrefs,UI_PREFS_KEY} from './usability.js?v=48363eb1ef';
 
 // GitHub Pages edition: all interactions use the existing browser-local demo API.
 // Never send account tokens or real-world posting actions from this static demo.
@@ -208,7 +208,12 @@ document.body.addEventListener('keydown',ev=>{
 });
 document.body.addEventListener('submit',async ev=>{const form=ev.target;if(!form?.id&&!form?.classList.contains('edit-form'))return;ev.preventDefault();const f=values(form);try{switch(form.id){case 'login-form':{await submitLogin(form);break;}case 'new-bot-form':{const b=await api(`/api/groups/${f.group}/bots`,'POST',{name:f.name,instructions:f.instructions});profiles[b.id]={avatarIndex:htmlState.avatarIndex};saveLocal(META_KEY,profiles);hideModal();await sync();select('chat',f.group,b.id);toast(`${b.name} created.`);break;}
 case 'new-group-form':{const g=await api('/api/groups','POST',{name:f.name,description:f.description});hideModal();await sync();select('group',g.id);toast('Group created. Add a bot to get started.');break;}
-case 'edit-bot-form':{const b=activeBot();if(!b)throw Error('Bot not found');profiles[b.id]={...(profiles[b.id]||{}),name:String(f.name).trim().slice(0,80),instructions:String(f.instructions).trim().slice(0,3000)};saveLocal(META_KEY,profiles);hideModal();render();toast('Bot profile updated locally.');break;}
+case 'edit-bot-form':{const b=activeBot();if(!b)throw Error('Bot not found');
+    // Persist the lasting profile through the API so it survives a reload and is
+    // shared across devices. Only cosmetic UI state (avatar) stays in localStorage.
+    const saved=await api(`/api/groups/${botGroup(b.id)?.id||htmlState.groupId}/bots/${b.id}`,'PATCH',{name:f.name,instructions:f.instructions});
+    profiles[b.id]={...(profiles[b.id]||{}),name:saved.name,instructions:saved.instructions};
+    saveLocal(META_KEY,profiles);hideModal();await sync();render();toast('Bot profile saved.');break;}
 case 'candidate-form':await api('/api/candidates','POST',f);form.reset();await sync();toast('Post added to Discovery.');break;
 case 'settings-form':await api('/api/settings','PATCH',{topics:f.topics.split(',').map(s=>s.trim()).filter(Boolean),style:f.style,opinions:f.opinions,minDelay:Number(f.minDelay),maxDelay:Number(f.maxDelay)});await sync();toast('Preferences saved.');break;
 case 'schedule-form':{const entry={label:f.label,kind:f.kind,intervalMinutes:Number(f.intervalMinutes),nextAt:f.nextAt?new Date(f.nextAt).toISOString():undefined};await api('/api/schedules','POST',entry);await sync();toast('Local reminder added.');break;}

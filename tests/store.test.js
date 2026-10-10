@@ -31,3 +31,26 @@ test('a failed disk write never advances in-memory state ahead of disk',async()=
     assert.equal(s.read().version,before+1);
   }finally{await fs.rm(dir,{recursive:true,force:true});}
 });
+test('an unreadable state file is quarantined instead of crashing on every start',async()=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'agent-store-corrupt-'));
+  try{
+    const file=path.join(dir,'state.json');
+    await fs.writeFile(file,'{corrupt');
+    const s=await new JsonStore(file).init();
+    // A fresh, usable state plus a recorded pointer for the operator.
+    assert.ok(s.recoveredFrom?.startsWith(`${file}.corrupt-`));
+    assert.equal(s.read().version>=1,true);
+    await fs.access(s.recoveredFrom);
+    assert.equal(await fs.readFile(s.recoveredFrom,'utf8'),'{corrupt');
+    // The recovered store must still persist normally afterwards.
+    await s.update(d=>{d.version=7;});
+    assert.equal((await new JsonStore(file).init()).read().version,7);
+  }finally{await fs.rm(dir,{recursive:true,force:true});}
+});
+test('a missing state file does not report a recovery',async()=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'agent-store-fresh-'));
+  try{
+    assert.equal((await new JsonStore(path.join(dir,'state.json')).init()).recoveredFrom,undefined);
+  }finally{await fs.rm(dir,{recursive:true,force:true});}
+});
+

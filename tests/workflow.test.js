@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {migrate,updateSettings,addCandidate,seedDemo,beginProcessing,finishProcessing,failProcessing,editDraft,draftAction,addGroup,addBot,addSchedule,removeSchedule,resetDemo,findDraft,findCandidate,SCHEMA_VERSION} from '../shared/workflow.js';
+import {migrate,updateSettings,addCandidate,seedDemo,beginProcessing,finishProcessing,failProcessing,editDraft,draftAction,addGroup,addBot,updateBot,recoverInterrupted,addSchedule,removeSchedule,resetDemo,findDraft,findCandidate,SCHEMA_VERSION} from '../shared/workflow.js';
 import {initialState} from '../shared/core.js';
 
 const store = () => migrate(initialState());
@@ -118,4 +118,30 @@ test('resetDemo removes demo candidates and their drafts only', () => {
   assert.equal(s.candidates[0].id, real.id);
   assert.equal(s.drafts.length, 1);
   assert.equal(s.drafts[0].candidateId, real.id);
+});
+test('bot profile edits persist through the shared workflow rules', () => {
+  const s = store();
+  const g = s.groups[0];
+  const bot = g.bots.find(b => b.id === 'writer');
+  const updated = updateBot(s, g.id, bot.id, {name: 'Senior Writer', instructions: 'Draft concise replies in the user voice.'});
+  assert.equal(updated.name, 'Senior Writer');
+  assert.equal(g.bots.find(b => b.id === 'writer').name, 'Senior Writer');
+  assert.match(s.events[0].message, /Updated bot Senior Writer/);
+  assert.throws(() => updateBot(s, g.id, 'missing', {name: 'x', instructions: 'y'}), /Bot not found/);
+  assert.throws(() => updateBot(s, 'missing', bot.id, {name: 'x', instructions: 'y'}), /Group not found/);
+  assert.throws(() => updateBot(s, g.id, bot.id, {name: '  ', instructions: 'y'}), /required/);
+});
+
+test('candidates stranded in processing by a crash become processable again', () => {
+  const s = store();
+  const c = addCandidate(s, {url: 'https://x.com/a/status/7', text: 'A candidate interrupted mid-draft'}).candidate;
+  beginProcessing(s, c.id);
+  assert.equal(s.candidates[0].status, 'processing');
+  // Re-running it before recovery must still be rejected.
+  assert.throws(() => beginProcessing(s, c.id), /already processing/);
+  assert.deepEqual(recoverInterrupted(s), {recovered: 1});
+  assert.equal(s.candidates[0].status, 'new');
+  assert.doesNotThrow(() => beginProcessing(s, c.id));
+  // Idempotent: a pass over clean state releases nothing.
+  assert.deepEqual(recoverInterrupted({...s, candidates: [{status: 'new'}]}), {recovered: 0});
 });

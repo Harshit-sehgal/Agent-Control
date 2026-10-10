@@ -7,7 +7,16 @@ export class JsonStore {
   async init(){
     await fs.mkdir(path.dirname(this.filename),{recursive:true});
     try {this.state=JSON.parse(await fs.readFile(this.filename,'utf8'));}
-    catch(e){if(e.code!=='ENOENT')throw e;this.state=initialState();await this.persist();}
+    catch(e){
+      if(e.code!=='ENOENT'){
+        // Unreadable or corrupt JSON must not leave the process in a crash loop:
+        // quarantine the bad file, start from a clean state, and record it so the
+        // caller can warn the operator instead of silently losing the data.
+        this.recoveredFrom=`${this.filename}.corrupt-${Date.now()}`;
+        await fs.rename(this.filename,this.recoveredFrom).catch(()=>{});
+      }
+      this.state=initialState();await this.persist();
+    }
     return this;
   }
   read(){return structuredClone(this.state);}

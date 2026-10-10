@@ -6,7 +6,7 @@ function outputText(response){
   return text.slice(0,3000);
 }
 export async function makeDraft(candidate,settings,override='') {
-  if(!aiEnabled()) return {text:templateDraft(candidate,settings),mode:'template',note:'Template only: no AI key configured; facts and opinions are NOT verified.'};
+  if(!aiEnabled()) return {text:templateDraft(candidate,settings,override),mode:'template',note:override?'Template only: no AI key configured; the requested direction was recorded but not applied.':'Template only: no AI key configured; facts and opinions are NOT verified.'};
   const model=process.env.OPENAI_MODEL||'gpt-4.1-mini';
   const instructions=[
     'You draft a short, casual reply for X. Never claim to be the account owner.',

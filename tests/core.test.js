@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {candidateInput,scoreCandidate,delayWindow,scheduleApproval,markDue,initialState,validHttpUrl} from '../shared/core.js';
+import {candidateInput,scoreCandidate,delayWindow,scheduleApproval,markDue,initialState,validHttpUrl,templateDraft} from '../shared/core.js';
 
 test('initial state has X-engage group with expected bots',()=>{const s=initialState();assert.equal(s.groups[0].id,'x-engage');assert.equal(s.groups[0].bots.length,6);assert.ok(s.captureToken.length>25);});
 test('score ranks matching technical conversation higher',()=>{
@@ -25,4 +25,15 @@ test('approval locks exact revision and becomes ready when due',()=>{
   assert.equal(draft.approvedRevision,3);assert.equal(draft.approvedText,'Approved copy');
   assert.equal(markDue(draft,219999),false);assert.equal(markDue(draft,220000),true);assert.equal(draft.status,'ready');
   assert.throws(()=>scheduleApproval(draft,0,0,100000));
+});
+
+test('template draft is stable and records a requested rewrite direction',()=>{
+  const c={text:'Which robotics benchmarks actually predict production reliability?',topic:'robotics'};
+  const s={opinions:''};
+  const base=templateDraft(c,s);
+  assert.equal(templateDraft(c,s),base,'template output is deterministic without a direction');
+  const directed=templateDraft(c,s,'focus on the reliability angle');
+  assert.notEqual(directed,base,'a requested direction changes the template text');
+  assert.match(directed,/Requested angle \(not yet applied\): focus on the reliability angle/);
+  assert.ok(directed.length<=1700);
 });

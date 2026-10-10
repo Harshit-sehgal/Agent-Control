@@ -4,11 +4,11 @@
 <meta name="description" content="Agent Control: manage your bot groups, chat with bots, and review X-engage drafts.">
 <meta name="agent-backend" content="static">
 <!-- Mirrors the Node server's CSP header so the static Pages build is protected too. Keep the two in sync. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'">
 <title>Agent Control — Your bot workspace</title>
-<link rel="stylesheet" href="./app.css?v=7e866b05dc">
-<link rel="stylesheet" href="./polish.css?v=7e866b05dc">
-<link rel="stylesheet" href="./usability.css?v=7e866b05dc">
+<link rel="stylesheet" href="./app.css?v=48363eb1ef">
+<link rel="stylesheet" href="./polish.css?v=48363eb1ef">
+<link rel="stylesheet" href="./usability.css?v=48363eb1ef">
 </head><body>
 <div id="root" class="app-layout">
   <aside class="sidebar" id="sidebar" aria-label="Workspace navigation"></aside>
@@ -22,8 +22,8 @@
 <div id="command" class="command-layer hidden" role="presentation"></div>
 <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 <div id="mobile-backdrop" class="mobile-backdrop hidden"></div>
-<script type="module" src="./local-api.js?v=7e866b05dc"></script>
-<script defer src="./transport.js?v=7e866b05dc"></script>
-<script type="module" src="./app.js?v=7e866b05dc"></script>
+<script type="module" src="./local-api.js?v=48363eb1ef"></script>
+<script defer src="./transport.js?v=48363eb1ef"></script>
+<script type="module" src="./app.js?v=48363eb1ef"></script>
 <!-- Data is saved only in this browser. No real AI or remote backend on GitHub Pages. -->
 </body></html>
