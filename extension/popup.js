@@ -1,4 +1,14 @@
 const $=id=>document.getElementById(id),status=message=>{$('msg').textContent=message;};
+/** Ask Chrome for origin access to the configured dashboard before fetching it.
+ * The bundled host_permissions only cover the default port 4173, but the server
+ * accepts any PORT, so a custom port would otherwise fail with an opaque CORS
+ * error. The user grants the exact origin in the browser prompt. */
+async function ensureOriginAccess(url){
+  const origin=`${url.protocol}//${url.host}/*`;
+  const granted=await chrome.permissions.contains({origins:[origin]});
+  if(granted)return true;
+  return chrome.permissions.request({origins:[origin]});
+}
 (async()=>{const s=await chrome.storage.local.get(['endpoint','token','topic']);for(const name of ['endpoint','token','topic'])if(s[name])$(name).value=s[name];})();
 function readSelectedPost(){
   const selection=window.getSelection();const node=selection?.anchorNode;
@@ -17,6 +27,8 @@ $('capture').addEventListener('click',async()=>{
     const url=new URL(endpoint);
     if(url.protocol!=='https:'&&!(['127.0.0.1','localhost'].includes(url.hostname)&&url.protocol==='http:'))throw new Error('Use HTTPS or localhost HTTP.');
     if(!token)throw new Error('Enter capture token from Dashboard → Settings.');
+    // The dashboard may run on a port other than the bundled 4173.
+    if(!await ensureOriginAccess(url))throw new Error('Permission for this dashboard origin was denied.');
     await chrome.storage.local.set({endpoint,token,topic});
     const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
     if(!tab?.id)throw new Error('No active tab found.');
