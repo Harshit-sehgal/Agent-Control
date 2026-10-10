@@ -1,7 +1,7 @@
-import {classifyMessage, botSuggestions, statusSummary} from './chat-engine.js?v=33e1e7f12b';
-import {simulateGroup} from './group-simulator.js?v=33e1e7f12b';
-import {planHandoffs} from './coordination.js?v=33e1e7f12b';
-import {filterCandidates,filterDrafts,normalizeUiPrefs,UI_PREFS_KEY} from './usability.js?v=33e1e7f12b';
+import {classifyMessage, botSuggestions, statusSummary} from './chat-engine.js?v=f32c209867';
+import {simulateGroup} from './group-simulator.js?v=f32c209867';
+import {planHandoffs} from './coordination.js?v=f32c209867';
+import {filterCandidates,filterDrafts,normalizeUiPrefs,UI_PREFS_KEY} from './usability.js?v=f32c209867';
 
 // GitHub Pages edition: all interactions use the existing browser-local demo API.
 // Never send account tokens or real-world posting actions from this static demo.
@@ -196,7 +196,22 @@ document.body.addEventListener('input',ev=>{if(ev.target.id==='command-input')up
 document.body.addEventListener('change',ev=>{const keys={'candidate-status':'candidateStatus','candidate-sort':'candidateSort','draft-status':'draftStatus','draft-sort':'draftSort'};const key=keys[ev.target.id];if(key){setPreference(key,ev.target.value);if(key.startsWith('candidate'))updateCandidateList();else updateApprovalList();}if(ev.target.id==='mobile-group-tab')select('group',htmlState.groupId,null,ev.target.value);if(ev.target.id==='bot-template'){const t=BOT_TEMPLATES[ev.target.value]||BOT_TEMPLATES.blank;const form=el('new-bot-form');if(form){form.elements.namedItem('name').value=t.name;form.elements.namedItem('instructions').value=t.instructions;}}if(ev.target.matches('#schedule-form [name=kind]'))toggleScheduleFields();});
 function toggleScheduleFields(){const form=el('schedule-form');if(!form)return;const once=form.elements.namedItem('kind').value==='once';const frequency=form.elements.namedItem('intervalMinutes'),date=form.elements.namedItem('nextAt');frequency.disabled=once;date.disabled=!once;date.required=once;frequency.closest('label').classList.toggle('field-disabled',once);date.closest('label').classList.toggle('field-disabled',!once);}
 
+// Keep Tab inside an open dialog. The dialogs declare aria-modal="true", but
+// without this the browser still moves focus into the background content that the
+// dialog visually covers, which is the exact case aria-modal is meant to prevent.
+const FOCUSABLE='a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+function trapTab(ev){
+  if(ev.key!=='Tab')return;
+  const layer=!el('modal').classList.contains('hidden')?el('modal'):(!el('command').classList.contains('hidden')?el('command'):null);
+  if(!layer)return;
+  const nodes=[...layer.querySelectorAll(FOCUSABLE)].filter(n=>n.offsetParent!==null);
+  if(!nodes.length)return;
+  const first=nodes[0],last=nodes[nodes.length-1],active=document.activeElement;
+  if(ev.shiftKey&&(active===first||!layer.contains(active))){ev.preventDefault();last.focus();}
+  else if(!ev.shiftKey&&(active===last||!layer.contains(active))){ev.preventDefault();first.focus();}
+}
 document.body.addEventListener('keydown',ev=>{
+  trapTab(ev);
   if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='k'){ev.preventDefault();el('command').classList.contains('hidden')?openCommandPalette():closeCommandPalette();return;}
   if(ev.key==='Escape'){const menus=[...document.querySelectorAll('details.action-menu[open]')];if(menus.length){ev.preventDefault();closeActionMenus();menus[menus.length-1].querySelector('summary')?.focus();return;}
     if(!el('command').classList.contains('hidden')){ev.preventDefault();closeCommandPalette();return;}
