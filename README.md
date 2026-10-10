@@ -27,6 +27,20 @@ A local-first dashboard for creating bot groups, reviewing AI-assisted drafts, a
 - Notifications appear in the dashboard activity log, not as mobile push notifications.
 - No external accounts, secrets, or private files are transmitted unless you explicitly configure a paid AI provider for text drafting.
 
+
+## Public GitHub Pages demonstration
+
+This repository includes a **static interactive demonstration** under `docs/` that can be deployed to GitHub Pages. It is deliberately separate from the Node-powered dashboard.
+
+- **Demo URL after enabling Pages:** `https://harshit-sehgal.github.io/Agent-Control/`
+- **Initial GitHub setup:** Repository **Settings → Pages → Build and deployment → Source: GitHub Actions**. The `.github/workflows/pages.yml` deployment workflow then runs on pushes to `main`, or can be manually started from **Actions**. As an alternative, choose **Deploy from a branch → main → /docs**.
+- **What works:** local browser-based candidate intake, heuristic scoring, template drafts, edits, approval revisions, manual-post handoff, bot/group configuration, and on-visit due-time updates.
+- **What does not work:** server password/session auth, browser extension pairing, actual AI requests, cross-device synchronization, cloud background schedules, push notifications, and unattended browser control or X posting.
+- **Privacy:** GitHub Pages is a public website. The demo stores everything in that browser's `localStorage`, **not in your GitHub repository** and not on a server. Clearing browser data deletes the demo state. Avoid entering secrets or personal content into a public demo.
+- **Deployment:** If Pages has not been enabled in repository settings, the workflow can fail until its publishing source is configured. `configure-pages` cannot enable Pages automatically with the default `GITHUB_TOKEN`.
+
+To test the demonstration locally, serve the `docs/` folder with any static file server. Run `npm test` and `npm run check` before publishing changes.
+
 ## Quick start (Linux/macOS/Windows with Node 22+)
 
 ```bash
