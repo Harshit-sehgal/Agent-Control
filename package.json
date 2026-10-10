@@ -4,11 +4,13 @@
   "private": true,
   "type": "module",
   "description": "Local-first multi-agent dashboard with human-approved X drafting and browser capture",
-  "engines": {"node": ">=22"},
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "test": "node --test tests/*.test.js",
-    "check": "node --check src/server.js && node --check src/core.js && node --check src/store.js && node --check src/ai.js && node --check src/scheduler.js && node --check public/app.js && node --check extension/popup.js && node --check docs/app.js && node --check docs/demo-api.js"
+    "check": "node --check src/server.js && node --check src/core.js && node --check src/store.js && node --check src/ai.js && node --check src/scheduler.js && node --check public/app.js && node --check extension/popup.js && node --check docs/app.js && node --check docs/chat-engine.mjs"
   }
 }
