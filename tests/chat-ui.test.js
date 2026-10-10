@@ -31,3 +31,14 @@ test('Specialist suggestions remain relevant',()=>{
   assert.ok(botSuggestions('Scout').some(x=>/candidate/i.test(x)));
   assert.ok(botSuggestions('Writer').some(x=>/Draft/i.test(x)));
 });
+
+test('bot profiles never mirror name/instructions into browser-local UI state',()=>{
+  // `profile()` spreads the cosmetic UI record over the bot, so a name/instructions
+  // copy there would shadow the server value permanently and edits made on another
+  // device could never appear.
+  assert.match(app,/delete profiles\[id\]\.name;delete profiles\[id\]\.instructions/);
+  // Saving a profile must round-trip through the API, not only localStorage.
+  assert.match(app,/api\(`\/api\/groups\/\$\{botGroup\(b\.id\)\?\.id\|\|htmlState\.groupId\}\/bots\/\$\{b\.id\}`,'PATCH'/);
+  // A duplicate must take its instructions from the group record, not the mirror.
+  assert.match(app,/instructions:p\.instructions\|\|base\.instructions/);
+});

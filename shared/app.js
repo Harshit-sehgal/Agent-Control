@@ -24,6 +24,10 @@ const htmlState={view:'home',groupId:'x-engage',tab:'overview',botId:null,editDr
 let state=null,toastTimer=null,syncTimer=null;const CHAT_KEY='agent-control-bot-chats-v2',META_KEY='agent-control-bot-profiles-v2';
 function loadLocal(key,fallback){try{return JSON.parse(localStorage.getItem(key))??fallback;}catch{return fallback;}}
 let messages=loadLocal(CHAT_KEY,{}), profiles=loadLocal(META_KEY,{});
+// `profiles` is cosmetic UI state only (avatar, pin). An earlier build also wrote
+// name/instructions here, and profile() spreads it over the bot record, so those
+// stale copies would permanently shadow the server's values. Strip them once.
+for(const id of Object.keys(profiles)){delete profiles[id].name;delete profiles[id].instructions;}
 const uiPrefs=normalizeUiPrefs(loadLocal(UI_PREFS_KEY,{}));
 let candidateQuery='';
 function setPreference(key,value){const next=normalizeUiPrefs({...uiPrefs,[key]:value});Object.assign(uiPrefs,next);saveLocal(UI_PREFS_KEY,uiPrefs);}
@@ -210,9 +214,10 @@ document.body.addEventListener('submit',async ev=>{const form=ev.target;if(!form
 case 'new-group-form':{const g=await api('/api/groups','POST',{name:f.name,description:f.description});hideModal();await sync();select('group',g.id);toast('Group created. Add a bot to get started.');break;}
 case 'edit-bot-form':{const b=activeBot();if(!b)throw Error('Bot not found');
     // Persist the lasting profile through the API so it survives a reload and is
-    // shared across devices. Only cosmetic UI state (avatar) stays in localStorage.
+    // shared across devices. Only cosmetic UI state (avatar) stays in localStorage:
+    // mirroring name/instructions there would shadow the server value forever via
+    // profile(), so an edit made on another device could never appear here.
     const saved=await api(`/api/groups/${botGroup(b.id)?.id||htmlState.groupId}/bots/${b.id}`,'PATCH',{name:f.name,instructions:f.instructions});
-    profiles[b.id]={...(profiles[b.id]||{}),name:saved.name,instructions:saved.instructions};
     saveLocal(META_KEY,profiles);hideModal();await sync();render();toast('Bot profile saved.');break;}
 case 'candidate-form':await api('/api/candidates','POST',f);form.reset();await sync();toast('Post added to Discovery.');break;
 case 'settings-form':await api('/api/settings','PATCH',{topics:f.topics.split(',').map(s=>s.trim()).filter(Boolean),style:f.style,opinions:f.opinions,minDelay:Number(f.minDelay),maxDelay:Number(f.maxDelay)});await sync();toast('Preferences saved.');break;

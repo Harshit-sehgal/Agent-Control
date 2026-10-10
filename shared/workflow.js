@@ -20,6 +20,16 @@ export function fail(message, status = 400) {
 export function migrate(state) {
   if (!state || typeof state !== 'object') fail('Invalid stored state.', 500);
   state.settings ??= {};
+  // A legacy `settings` can be an empty object or predate a field. Every UI
+  // surface reads these (the Settings form calls `topics.join`, approvals read
+  // the delay window), so they must be backfilled here rather than guarded in
+  // each caller.
+  if (!Array.isArray(state.settings.topics)) state.settings.topics = [];
+  if (typeof state.settings.style !== 'string') state.settings.style = '';
+  if (typeof state.settings.opinions !== 'string') state.settings.opinions = '';
+  for (const key of ['minDelay', 'maxDelay']) {
+    if (!Number.isInteger(state.settings[key])) state.settings[key] = key === 'minDelay' ? 2 : 10;
+  }
   state.candidates ??= [];
   state.drafts ??= [];
   state.runs ??= [];

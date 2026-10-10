@@ -16,6 +16,28 @@ test('migrate is idempotent and fills legacy state fields', () => {
   assert.deepEqual(twice, once);
   assert.throws(() => migrate(null), /Invalid stored state/);
 });
+test('migrate backfills every settings field the UI and approvals read', () => {
+  // A legacy state can carry an empty or partial settings object. The Settings
+  // form calls `topics.join(...)` and approvals read the delay window, so a
+  // missing field used to be a hard failure rather than a fallback.
+  const legacy = migrate({version: 1, settings: {}, candidates: []});
+  assert.deepEqual(legacy.settings, {topics: [], style: '', opinions: '', minDelay: 2, maxDelay: 10});
+  assert.equal(migrate({version: 1, settings: {topics: 'not-an-array', minDelay: 'soon'}}).settings.topics.length, 0);
+  assert.equal(migrate({version: 1, settings: {minDelay: null, maxDelay: 9999}}).settings.minDelay, 2);
+  // Existing valid values must never be overwritten.
+  assert.deepEqual(migrate({settings: {topics: ['AI'], style: 'short', opinions: 'mine', minDelay: 0, maxDelay: 5}}).settings, {topics: ['AI'], style: 'short', opinions: 'mine', minDelay: 0, maxDelay: 5});
+  // Still idempotent after the added backfill.
+  const once = migrate({version: 1, settings: {}});
+  assert.deepEqual(migrate(once), once);
+});
+
+test('a legacy state with no delay window can still approve a draft', () => {
+  const s = migrate({version: 1, settings: {}, candidates: []});
+  const c = addCandidate(s, {url: 'https://x.com/a/status/8', text: 'A candidate from a legacy workspace'}).candidate;
+  const draft = finishProcessing(s, c.id, {score: 50}, {text: 'Draft body', mode: 'template', note: 'n'});
+  assert.equal(draftAction(s, draft.id, 'approve', {}).status, 'scheduled');
+});
+
 
 test('candidate add dedupes identical posts and seed records demo items', () => {
   const s = store();
