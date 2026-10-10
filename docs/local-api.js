@@ -4,12 +4,12 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {scoreCandidate, templateDraft, cleanText, initialState} from './core.js?v=2dc3b6b680';
+import {scoreCandidate, templateDraft, cleanText, initialState} from './core.js?v=6c0ba9f6ae';
 import {
   migrate, seedDemo, updateSettings, addCandidate, beginProcessing,
   finishProcessing, editDraft, findDraft, rewriteDraft, draftAction, addGroup,
   addBot, updateBot, addSchedule, removeSchedule, resetDemo,
-} from './workflow.js?v=2dc3b6b680';
+} from './workflow.js?v=6c0ba9f6ae';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();

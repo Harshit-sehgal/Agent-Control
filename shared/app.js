@@ -151,6 +151,10 @@ async function sendChat(text){const b=currentChatInfo();if(!b)return;const key=c
       // Validate recipients before execution; messages cannot cross group boundaries.
       const route=planHandoffs(group,msg,{directBotId:b.isTeam?null:undefined});
       const append=entry=>{messages[key].push(entry);saveLocal(CHAT_KEY,messages);render();};
+      // Refresh state first: the simulator reuses state.drafts to decide which
+      // candidate still needs a draft, so a stale snapshot would re-draft a post
+      // an earlier run already handled.
+      state=await api('/api/state');
       const run=await simulateGroup({group,message:msg,state,api,makeId:uid,emit:append});
       const runLog=loadLocal('agent-control-coordination-runs-v1',[]);
       runLog.unshift({id:run.id,groupId:group.id,mode:route.mode,recipients:run.recipients,status:run.status,trace:run.trace,createdAt:run.createdAt});

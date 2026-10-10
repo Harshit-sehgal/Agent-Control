@@ -72,3 +72,21 @@ test('orchestrator records execution failure and never publishes',async()=>{
     assert.equal(s.drafts.length,0);assert.equal(s.groupMessages['x-engage']?.length||0,0);
   }finally{await rm(dir,{recursive:true,force:true});}
 });
+test('a repeated group run does not create a second draft for the same candidate',async()=>{
+  const drafts=[],messages=[];
+  const state={settings:{topics:['robotics']},candidates:[{id:'c1',text:'New robotics architecture published, what do you think?',url:'https://example.com',author:'Demo'}],drafts};
+  let calls=0;
+  const api=async(url)=>{calls++;return {id:`d${calls}`,candidateId:'c1',author:'Demo',text:'Template draft',status:'pending'};};
+  const first=await simulateGroup({group,message:'Coordinate X-engage',state,makeId:randomUUID,emit:m=>messages.push(m),api});
+  assert.equal(drafts.length,1);
+  // The simulator must consult the drafts it already recorded, not call the API
+  // again, so the approval inbox cannot fill with duplicates of one post.
+  const second=await simulateGroup({group,message:'Coordinate X-engage',state,makeId:randomUUID,emit:m=>messages.push(m),api});
+  assert.equal(calls,1,'The second run must not create another draft.');
+  assert.equal(drafts.length,1);
+  assert.match(messages.filter(m=>m.senderId==='writer').pop().text,/already exists/);
+  // Reviewer must report the real pending count, not merely "some drafts exist".
+  assert.match(messages.filter(m=>m.senderId==='reviewer').pop().text,/1 pending draft/);
+  assert.equal(first.status,'completed');assert.equal(second.status,'completed');
+});
+
