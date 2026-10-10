@@ -1,4 +1,4 @@
-import {markDue,activity} from './core.js';
+import {markDue,activity} from '../shared/core.js';
 export async function tick(store,now=Date.now()) {
   return store.update(state=>{
     let changed=0;

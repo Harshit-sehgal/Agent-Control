@@ -4,6 +4,6 @@
   "description": "Capture one user-selected browser post for AI drafting. No automated scrolling or posting.",
   "version": "0.1.0",
   "permissions": ["activeTab", "scripting", "storage"],
-  "host_permissions": ["http://127.0.0.1:4173/*", "http://localhost:4173/*", "https://*/*"],
+  "host_permissions": ["http://127.0.0.1:4173/*", "http://localhost:4173/*"],
   "action": {"default_title": "Capture visible post", "default_popup": "popup.html"}
 }

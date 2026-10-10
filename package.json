@@ -1,6 +1,6 @@
 {
   "name": "agent-control-prototype",
-  "version": "0.1.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "description": "Local-first multi-agent dashboard with human-approved X drafting and browser capture",
@@ -11,6 +11,7 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "test": "node --test tests/*.test.js",
-    "check": "node --check src/server.js && node --check src/core.js && node --check src/store.js && node --check src/ai.js && node --check src/scheduler.js && node --check public/app.js && node --check extension/popup.js && node --check docs/app.js && node --check docs/usability.mjs && node --check docs/chat-engine.mjs && node --check docs/coordination.mjs && node --check docs/group-simulator.mjs && node --check src/coordination.js"
+    "build:pages": "node scripts/build-pages.js",
+    "check": "node --check src/server.js && node --check src/store.js && node --check src/ai.js && node --check src/scheduler.js && node --check src/coordination.js && node --check shared/core.js && node --check shared/workflow.js && node --check shared/coordination.js && node --check shared/group-simulator.js && node --check shared/chat-engine.js && node --check shared/usability.js && node --check shared/app.js && node --check shared/local-api.js && node --check shared/transport.js && node --check extension/popup.js && node --check scripts/build-pages.js"
   }
 }

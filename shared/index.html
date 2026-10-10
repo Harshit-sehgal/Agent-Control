@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#f6f7fb">
+<meta name="description" content="Agent Control: manage your bot groups, chat with bots, and review X-engage drafts.">
+<title>Agent Control — Your bot workspace</title>
+<link rel="stylesheet" href="./app.css">
+<link rel="stylesheet" href="./polish.css">
+<link rel="stylesheet" href="./usability.css">
+</head><body>
+<div id="root" class="app-layout">
+  <aside class="sidebar" id="sidebar" aria-label="Workspace navigation"></aside>
+  <div class="app-area">
+    <header class="topbar" id="topbar"></header>
+    <main class="main" id="main" tabindex="-1"></main>
+  </div>
+  <aside id="inspector" class="inspector" aria-label="Context panel"></aside>
+</div>
+<div id="modal" class="modal-layer hidden" role="presentation"></div>
+<div id="command" class="command-layer hidden" role="presentation"></div>
+<div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+<div id="mobile-backdrop" class="mobile-backdrop hidden"></div>
+<script src="./transport.js"></script>
+<script src="./local-api.js"></script>
+<script type="module" src="./app.js"></script>
+<!-- Data is saved only in this browser. No real AI or remote backend on GitHub Pages. -->
+</body></html>

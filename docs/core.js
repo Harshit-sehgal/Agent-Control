@@ -1,6 +1,4 @@
-import {randomInt, randomUUID} from 'node:crypto';
-
-export const uuid = () => randomUUID();
+export const uuid = () => crypto.randomUUID();
 export const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 export function cleanText(v, max=4000) { return typeof v === 'string' ? v.trim().slice(0,max) : ''; }
 export function validHttpUrl(value) {
@@ -31,14 +29,14 @@ export function templateDraft(candidate,settings) {
   const opinion=cleanText(settings.opinions,700);
   return `${intro}${question?'I would check the actual results before settling on an answer.':'I would want to see how this holds up in practice.'}${opinion?' '+opinion:''}\n\nContext: ${excerpt}`.slice(0,1700);
 }
-export function delayWindow(min,max,random=()=>randomInt(0,1_000_000)/1_000_000) {
+export function delayWindow(min,max,random=()=>Math.random()) {
   const a=Number(min),b=Number(max);
   if(!Number.isInteger(a)||!Number.isInteger(b)||a<0||b>1440||a>b) throw Object.assign(new Error('Delay must be whole minutes with 0 ≤ min ≤ max ≤ 1440.'),{status:400});
   const msMin=a*60000,msMax=b*60000;
   return msMin+Math.floor(random()*(msMax-msMin+1));
 }
 export function initialState() {
-  return {version:1, createdAt:new Date().toISOString(), settings:{topics:['AI','machine learning','robotics','technology'],style:'Short, casual, direct. Simple words. No em dashes. Do not invent my opinions.',opinions:'',minDelay:2,maxDelay:10},captureToken:randomUUID().replaceAll('-',''),groups:[{id:'x-engage',name:'X-engage',description:'User-assisted social research and drafting',bots:[
+  return {version:1, createdAt:new Date().toISOString(), settings:{topics:['AI','machine learning','robotics','technology'],style:'Short, casual, direct. Simple words. No em dashes. Do not invent my opinions.',opinions:'',minDelay:2,maxDelay:10},captureToken:crypto.randomUUID().replaceAll('-',''),groups:[{id:'x-engage',name:'X-engage',description:'User-assisted social research and drafting',bots:[
     {id:'scout',name:'Scout',instructions:'Collect only user-submitted browser context.',type:'source'},
     {id:'ranker',name:'Ranker',instructions:'Score post relevance and discussion value.',type:'scoring'},
     {id:'researcher',name:'Researcher',instructions:'Only describe evidence supplied; do not fabricate verification.',type:'context'},

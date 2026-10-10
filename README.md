@@ -161,6 +161,7 @@ The current Node server can run on a private Node-compatible host with persisten
 ```bash
 npm run check
 npm test
+npm run build:pages   # regenerate the static GitHub Pages bundle in docs/
 ```
 
 The suite checks scoring, invalid URLs, scheduling boundaries, state persistence, recovery across reloads, and a live HTTP end-to-end lifecycle including auth, extension-token intake, editing, double-approval rejection, manual publishing confirmation, and cross-origin protection.
@@ -196,15 +197,26 @@ Note: Browser actions that X does not authorize are not enabled.
 
 ### Key paths
 
-- `src/server.js`: HTTP routes, session auth, candidates/drafts/groups/schedules.
-- `src/core.js`: Validation, ranking, scheduling state transitions.
-- `src/ai.js`: Optional provider adapter and clearly labeled offline fallback.
-- `src/store.js`: Serialized atomic persistence.
-- `src/scheduler.js`: Due-task and reminder reconciliation.
-- `public/`: Dashboard UI and controlled demo feed.
+- `src/server.js`: HTTP routes, session auth, and request/response handling.
+- `shared/workflow.js`: the single source of workflow transitions (candidates, drafts, approval, schedules) plus the versioned schema migration.
+- `shared/core.js`: validation, ranking, scheduling state transitions.
+- `src/ai.js`: optional provider adapter and clearly labeled offline fallback.
+- `src/store.js`: serialized atomic persistence.
+- `src/scheduler.js`: due-task and reminder reconciliation.
+- `shared/`: the dashboard UI, its browser-safe logic, and the local transport. The Node server serves this folder directly.
+- `scripts/build-pages.js`: copies `shared/` into `docs/` for the static GitHub Pages build (`npm run build:pages`).
 - `extension/`: Manifest V3 capture extension.
-- `tests/`: Unit tests and HTTP integration test.
-- `docs/ROADMAP.md`: Phased path to the production architecture.
+- `tests/`: unit tests, the HTTP integration test, and optional Playwright smoke tests.
+- `docs/ROADMAP.md`: phased path to the production architecture.
+
+### One UI, two transports
+
+The dashboard in `shared/` is the only UI. At runtime `shared/transport.js` picks a backend:
+
+- Under the Node server it calls same-origin `/api/*` and shows a password sign-in.
+- On the static Pages build it calls the browser-local `localStorage` implementation in `shared/local-api.js`.
+
+Both paths run the same `shared/workflow.js` rules, so the demo and the real dashboard cannot drift. Edit `shared/`, then run `npm run build:pages` to regenerate `docs/`.
 
 ## Security and operational notes
 

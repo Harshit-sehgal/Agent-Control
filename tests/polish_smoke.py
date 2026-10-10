@@ -2,35 +2,44 @@
 No network, browser credentials, or external X interactions.
 """
 import asyncio
+import re
 from pathlib import Path
 from playwright.async_api import async_playwright
 
 ROOT=Path(__file__).resolve().parents[1]
 
+def strip_imports(text):
+    """Remove ESM import statements (single or multi-line) for concatenation."""
+    text=re.sub(r"import\s*\{[^}]*\}\s*from\s*'[^']*';",'',text,flags=re.S)
+    return re.sub(r"import\s+[^\n]*?from\s*'[^']*';",'',text)
+
 def inline_html():
-    html=(ROOT/'docs/index.html').read_text()
-    css=(ROOT/'docs/app.css').read_text()+'\n'+(ROOT/'docs/polish.css').read_text()
+    html=(ROOT/'shared/index.html').read_text()
+    css=(ROOT/'shared/app.css').read_text()+'\n'+(ROOT/'shared/polish.css').read_text()
     html=html.replace('<link rel="stylesheet" href="./app.css">\n<link rel="stylesheet" href="./polish.css">','<style>'+css+'</style>')
-    html=html.replace('<script src="./demo-api.js"></script>','').replace('<script type="module" src="./app.js"></script>','')
+    for tag in ['<script src="./transport.js"></script>','<script src="./local-api.js"></script>','<script type="module" src="./app.js"></script>']:
+        html=html.replace(tag,'')
     return html
+
+# Browser-safe modules concatenated in dependency order, with imports stripped.
+MODULES=['core.js','workflow.js','coordination.js','group-simulator.js','chat-engine.js','usability.js','local-api.js','app.js']
 
 async def boot(page):
     await page.goto('about:blank')
     await page.set_content(inline_html(),wait_until='domcontentloaded')
     await page.evaluate("""() => {const memory={}; Object.defineProperty(window,'localStorage',{configurable:true,value:{getItem:k=>memory[k]??null,setItem:(k,v)=>{memory[k]=v}}});crypto.randomUUID=()=>String(Date.now())+'-'+Math.random().toString(16).slice(2);}""")
-    await page.add_script_tag(content=(ROOT/'tests/stub-demo-api.js').read_text())
     scripts=[]
-    for filename in ['coordination.mjs','group-simulator.mjs','chat-engine.mjs','app.js']:
-        part=(ROOT/'docs'/filename).read_text()
-        part='\n'.join(line for line in part.split('\n') if not line.startswith('import '))
+    for filename in MODULES:
+        part=strip_imports((ROOT/'shared'/filename).read_text())
         part=part.replace('export const ','const ').replace('export function ','function ').replace('export async function ','async function ')
         scripts.append(part)
+        if filename=='local-api.js': scripts.append('window.AGENT_API=window.AGENT_LOCAL_API;')
     await page.add_script_tag(content='\n'.join(scripts))
     await page.get_by_role('button',name='Create new bot').first.wait_for()
 
 async def main():
     async with async_playwright() as p:
-        browser=await p.chromium.launch(headless=True,executable_path='/usr/bin/chromium',args=['--no-sandbox'])
+        browser=await p.chromium.launch(headless=True,args=['--no-sandbox'])
         page=await browser.new_page(viewport={'width':1440,'height':900},device_scale_factor=1)
         page.set_default_timeout(5000)
         errors=[]

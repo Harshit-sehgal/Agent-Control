@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {candidateInput,scoreCandidate,delayWindow,scheduleApproval,markDue,initialState,validHttpUrl} from '../src/core.js';
+import {candidateInput,scoreCandidate,delayWindow,scheduleApproval,markDue,initialState,validHttpUrl} from '../shared/core.js';
 
 test('initial state has X-engage group with expected bots',()=>{const s=initialState();assert.equal(s.groups[0].id,'x-engage');assert.equal(s.groups[0].bots.length,6);assert.ok(s.captureToken.length>25);});
 test('score ranks matching technical conversation higher',()=>{

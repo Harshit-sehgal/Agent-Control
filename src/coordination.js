@@ -2,9 +2,9 @@
  * No browser or external-action tools are given to model workers.
  */
 import {randomUUID} from 'node:crypto';
-import {createRun,createEnvelope,MAX_HANDOFFS} from '../docs/coordination.mjs';
+import {createRun,createEnvelope,MAX_HANDOFFS} from '../shared/coordination.js';
 import {executeCustomBot,aiEnabled} from './ai.js';
-import {activity} from './core.js';
+import {activity} from '../shared/core.js';
 const running=new Set();
 const clean=v=>String(v??'').slice(0,4000);
 const stamp=()=>new Date().toISOString();

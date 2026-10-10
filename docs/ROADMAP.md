@@ -10,9 +10,17 @@
 - Optional AI provider integration and offline template mode.
 - Basic auth, capture scopes, audit trail, Node test suite.
 
+## Delivered: unified UI and shared workflow core
+
+- `src/workflow.js` owns every workflow transition; the HTTP routes no longer contain business rules.
+- Versioned state schema (`SCHEMA_VERSION`) with an idempotent `migrate()` run at startup.
+- One UI in `shared/`, served directly by Node and copied to `docs/` for Pages with `npm run build:pages`.
+- `shared/transport.js` selects the real `/api` backend under Node and the browser-local backend on Pages, so both run identical rules.
+- The browser-local demo (`shared/local-api.js`) reuses `shared/workflow.js` instead of duplicating lifecycle logic.
+
 ## Next milestone: v0.2 local agent + structured workflows
 
-1. Extract workflow state management from route handlers.
+1. ~~Extract workflow state management from route handlers.~~ Done: see `src/workflow.js`.
 2. Introduce versioned bot/group schemas, explicit input/output contracts.
 3. Build independent local agent with device pairing and outbound authenticated connection.
 4. Add per-action tool permissions and a local browser adapter for sites that authorize automation.

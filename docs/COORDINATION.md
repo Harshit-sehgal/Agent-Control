@@ -31,7 +31,7 @@ The group chat exposes the bot's name, the next recipient, time, run ID (stored)
 
 ## GitHub Pages demonstration
 
-`docs/coordination.mjs` contains the routing policy shared by the Node engine and Pages demo. `docs/group-simulator.mjs` implements a visible deterministic demonstration. It passes context between mock specialists and can create **pending template drafts** through the existing browser-local mock API. It never calls a model. Both chat history and the run trace are saved in `localStorage`. Data is not synchronized across devices.
+`shared/coordination.js` contains the routing policy shared by the Node engine and the Pages demo. `shared/group-simulator.js` implements a visible deterministic demonstration. It passes context between mock specialists and can create **pending template drafts** through the existing browser-local mock API. It never calls a model. Both chat history and the run trace are saved in `localStorage`. Data is not synchronized across devices.
 
 Try X-engage → Group chat → `Check the latest candidate and prepare a draft`. The group will show Scout → Ranker → Researcher → Writer → Reviewer. Try `@Writer @Reviewer Draft and check one reply` to route only to two specialists.
 

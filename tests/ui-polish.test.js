@@ -4,7 +4,7 @@ import {readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const [html,css,js]=await Promise.all(['docs/index.html','docs/polish.css','docs/app.js'].map(file=>readFile(path.join(root,file),'utf8')));
+const [html,css,js]=await Promise.all(['shared/index.html','shared/polish.css','shared/app.js'].map(file=>readFile(path.join(root,file),'utf8')));
 test('Pages uses relative visual assets and an accessible command palette',()=>{
   assert.match(html,/href="\.\/polish\.css"/);
   assert.match(html,/id="command"/);

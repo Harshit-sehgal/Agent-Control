@@ -1,4 +1,4 @@
-import {templateDraft,cleanText} from './core.js';
+import {templateDraft,cleanText} from '../shared/core.js';
 export const aiEnabled=()=>Boolean(process.env.OPENAI_API_KEY);
 function outputText(response){
   const text=(response.output||[]).flatMap(x=>x.content||[]).filter(c=>c.type==='output_text').map(c=>c.text).join('\n').trim();

@@ -4,3 +4,5 @@ data/
 .DS_Store
 coverage/
 *.log
+__pycache__/
+ui-*.png

@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {initialState} from './core.js';
+import {initialState} from '../shared/core.js';
 
 export class JsonStore {
   constructor(filename){this.filename=filename;this.state=null;this.serial=Promise.resolve();}

@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {classifyMessage, botSuggestions, statusSummary} from '../docs/chat-engine.mjs';
-const html=await readFile(new URL('../docs/index.html',import.meta.url),'utf8');
-const app=await readFile(new URL('../docs/app.js',import.meta.url),'utf8');
-const css=await readFile(new URL('../docs/app.css',import.meta.url),'utf8');
+import {classifyMessage, botSuggestions, statusSummary} from '../shared/chat-engine.js';
+const html=await readFile(new URL('../shared/index.html',import.meta.url),'utf8');
+const app=await readFile(new URL('../shared/app.js',import.meta.url),'utf8');
+const css=await readFile(new URL('../shared/app.css',import.meta.url),'utf8');
 test('Pages build has safe relative assets, modal and accessible chat structure',()=>{
-  assert.match(html,/\.\/app\.js/);assert.match(html,/\.\/app\.css/);assert.match(html,/\.\/demo-api\.js/);
+  assert.match(html,/\.\/app\.js/);assert.match(html,/\.\/app\.css/);assert.match(html,/\.\/local-api\.js/);
   assert.match(html,/Data is saved only in this browser/);assert.match(html,/id="inspector"/);
   assert.match(app,/id="chat-form"/);assert.match(app,/id="new-bot-form"/);
   assert.match(app,/id="candidate-form"/);assert.match(app,/id="new-group-form"/);

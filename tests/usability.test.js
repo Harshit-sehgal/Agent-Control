@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {filterCandidates,filterDrafts,normalizeUiPrefs} from '../docs/usability.mjs';
+import {filterCandidates,filterDrafts,normalizeUiPrefs} from '../shared/usability.js';
 const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const [html,js,css]=await Promise.all(['docs/index.html','docs/app.js','docs/usability.css'].map(f=>readFile(path.join(root,f),'utf8')));
+const [html,js,css]=await Promise.all(['shared/index.html','shared/app.js','shared/usability.css'].map(f=>readFile(path.join(root,f),'utf8')));
 const candidates=[
  {id:'old',author:'Robot',topic:'robotics',text:'old',status:'new',createdAt:'2025-01-01T00:00:00Z'},
  {id:'new',author:'Alice',topic:'AI',text:'new benchmark',status:'drafted',score:{score:91},createdAt:'2026-01-01T00:00:00Z'},

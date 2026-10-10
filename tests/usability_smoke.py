@@ -1,35 +1,42 @@
 """Interactive browser checks for Agent Control's v0.5 usability controls."""
 import asyncio
+import re
 from pathlib import Path
 from playwright.async_api import async_playwright
 ROOT=Path(__file__).resolve().parents[1]
 
+def strip_imports(text):
+ x=re.sub(r"import\s*\{[^}]*\}\s*from\s*'[^']*';",'',text,flags=re.S)
+ return re.sub(r"import\s+[^\n]*?from\s*'[^']*';",'',x)
+
 def page_html():
- s=(ROOT/'docs/index.html').read_text()
- c='\n'.join((ROOT/'docs'/f).read_text() for f in ['app.css','polish.css','usability.css'])
+ s=(ROOT/'shared/index.html').read_text()
+ c='\n'.join((ROOT/'shared'/f).read_text() for f in ['app.css','polish.css','usability.css'])
  for name in ('app.css','polish.css','usability.css'):
   s=s.replace(f'<link rel="stylesheet" href="./{name}">','')
  s=s.replace('</head>','<style>'+c+'</style></head>')
- s=s.replace('<script src="./demo-api.js"></script>','').replace('<script type="module" src="./app.js"></script>','')
+ for tag in ['<script src="./transport.js"></script>','<script src="./local-api.js"></script>','<script type="module" src="./app.js"></script>']:
+  s=s.replace(tag,'')
  return s
+
+MODULES=['core.js','workflow.js','usability.js','coordination.js','group-simulator.js','chat-engine.js','local-api.js','app.js']
 
 async def boot(page):
  await page.goto('about:blank')
  await page.set_content(page_html(),wait_until='domcontentloaded')
  await page.evaluate("""() => {const store={};Object.defineProperty(window,'localStorage',{configurable:true,value:{getItem:k=>store[k]??null,setItem:(k,v)=>{store[k]=v}}});crypto.randomUUID=()=>String(Date.now())+'-'+Math.random().toString(16).slice(2);} """)
- await page.add_script_tag(content=(ROOT/'tests/stub-demo-api.js').read_text())
  scripts=[]
- for f in ['usability.mjs','coordination.mjs','group-simulator.mjs','chat-engine.mjs','app.js']:
-  x=(ROOT/'docs'/f).read_text()
-  x='\n'.join(z for z in x.splitlines() if not z.startswith('import '))
+ for f in MODULES:
+  x=strip_imports((ROOT/'shared'/f).read_text())
   x=x.replace('export const ','const ').replace('export function ','function ').replace('export async function ','async function ')
   scripts.append(x)
+  if f=='local-api.js': scripts.append('window.AGENT_API=window.AGENT_LOCAL_API;')
  await page.add_script_tag(content='\n'.join(scripts))
  await page.get_by_role('button',name='Create new bot').first.wait_for()
 
 async def main():
  async with async_playwright() as p:
-  browser=await p.chromium.launch(headless=True,executable_path='/usr/bin/chromium',args=['--no-sandbox'])
+  browser=await p.chromium.launch(headless=True,args=['--no-sandbox'])
   desktop=await browser.new_page(viewport={'width':1440,'height':900})
   desktop.set_default_timeout(7000)
   errors=[]
@@ -66,7 +73,7 @@ async def main():
   await desktop.locator('#candidate-status').select_option('drafted')
   assert await desktop.locator('#candidate-results .list-row').count()==0
   await desktop.get_by_role('button',name='Clear filters').click()
-  assert await desktop.locator('#candidate-results .list-row').count()==2
+  assert await desktop.locator('#candidate-results .list-row').count()==3
   # approvals after drafting / filter state
   await desktop.locator('#candidate-results .list-row').first.get_by_role('button',name='Draft reply').click()
   await desktop.get_by_role('tab',name='Approvals').click()
