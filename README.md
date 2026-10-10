@@ -1,6 +1,17 @@
-# Agent Control — working prototype v0.3
+# Agent Control — working prototype v0.4
 
 A local-first dashboard for creating bot groups, reviewing AI-assisted drafts, and coordinating human-approved workflows. **X-engage is the first demo group.** It does not use an X developer API key, automatically crawl X, or automatically publish to X.
+
+## Interface polish v0.4 (GitHub Pages)
+
+- Professional dark navigation rail, clean white surfaces, improved hierarchy, and better spacing on dashboard, group and chat screens.
+- Connected workflow progress presentation for X-engage, with a horizontal scroll view on narrow devices.
+- Command palette: press **Ctrl+K** (Windows/Linux) or **⌘K** (macOS), search bots, groups or pages, use arrow keys and Enter to navigate, and Escape to close. A search control also appears in the top bar.
+- More readable individual and group chats with explicit speaker labels, improved composer focus states and tighter approval controls.
+- Small-screen layout, keyboard focus visibility and reduced-motion preferences have been checked in a headless browser.
+- Added `tests/ui-polish.test.js` (Node) and `tests/polish_smoke.py` (optional Playwright browser validation).
+
+The Pages version remains **a browser-local, non-AI simulation**. The existing Node API is unchanged. Browser-local data and conversations are not synchronized between devices. Do not enter secrets into the public Pages demo.
 
 ## Bot coordination v0.3: group chat and handoffs
 
@@ -10,7 +21,7 @@ A local-first dashboard for creating bot groups, reviewing AI-assisted drafts, a
 - **Node API:** Persistent run coordination for real, *text-only* model calls when a **server-side** `OPENAI_API_KEY` is configured. `POST /api/groups/:id/chat` queues an authenticated run; `GET /api/groups/:id/chat` returns messages and execution traces. Each run is limited to six steps, with bounded context and group isolation. Model outputs never receive browser or publication tools.
 - The platform does **not** yet have the autonomous, cloud-hosted multi-agent capabilities of Grok Bot or OpenAI Dots. See [`docs/COORDINATION.md`](docs/COORDINATION.md) for the precise supported behavior, security boundaries, and API contract.
 
-## GitHub Pages: redesigned bot-first UI (v0.3)
+## GitHub Pages: redesigned bot-first UI (v0.4)
 
 Visit **https://harshit-sehgal.github.io/Agent-Control/** after the Pages workflow completes. The browser-only UI now includes:
 
