@@ -128,8 +128,9 @@ The exact revision displayed when you approve is locked. Editing after approval 
 3. Select the `extension/` folder.
 4. Open dashboard → **Settings**, then copy **Capture token**.
 5. Click the extension icon, enter `http://127.0.0.1:4173` and the token.
-6. Open `http://127.0.0.1:4173/demo-feed.html` to test on a controlled page. Highlight text in one example post, then click **Capture selected post** in the extension.
-7. Go to Dashboard → **Discovery** and process the captured candidate.
+6. If the dashboard runs on a port other than `4173`, the extension asks Chrome for access to that origin on first capture. Approve the prompt; the bundled permission only covers the default port, so custom ports are granted per-origin rather than up front.
+7. Open `http://127.0.0.1:4173/demo-feed.html` to test on a controlled page. Highlight text in one example post, then click **Capture selected post** in the extension.
+8. Go to Dashboard → **Discovery** and process the captured candidate.
 
 On an X feed, explicitly select text in the post you are viewing before capturing. The extension does not scroll, click through, or read the entire feed. The dashboard also supports manual URL/text entry.
 
