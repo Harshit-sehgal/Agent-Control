@@ -4,7 +4,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import crypto from 'node:crypto';
 import {JsonStore} from './store.js';
-import {activity,candidateInput,cleanText,scoreCandidate,uuid,CSP} from '../shared/core.js';
+import {activity,candidateInput,cleanText,scoreCandidate,uuid,CSP,DEMO_SAMPLES} from '../shared/core.js';
 import * as wf from '../shared/workflow.js';
 import {aiEnabled,makeDraft,executeCustomBot} from './ai.js';
 import {startScheduler} from './scheduler.js';
@@ -74,12 +74,8 @@ async function api(req,res,u){
     return send(res,200,result);
   }
   if(p==='/api/demo/seed'&&m==='POST'){
-    const sample=[
-      {url:'https://example.com/robotics-demo',text:'What would make robotics models genuinely useful outside a lab? I care more about reliability than demos.',author:'Demo robotics account',topic:'robotics'},
-      {url:'https://example.com/ai-demo',text:'New AI coding benchmark released. Does a benchmark really tell you how the model performs on a messy production codebase?',author:'Demo AI account',topic:'AI'},
-      {url:'https://example.com/misc-demo',text:'It is a nice day today.',author:'Demo lifestyle account',topic:'other'}
-    ];
-    const result=await store.update(s=>wf.seedDemo(s,sample));
+    // Samples come from the shared core.js constant, exactly like the Pages demo.
+    const result=await store.update(s=>wf.seedDemo(s,DEMO_SAMPLES));
     return send(res,200,result);
   }
   if(p==='/api/candidates'&&m==='POST'){

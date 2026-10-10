@@ -1,5 +1,8 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {candidateInput,scoreCandidate,delayWindow,scheduleApproval,markDue,initialState,validHttpUrl,templateDraft} from '../shared/core.js';
+import {readFile} from 'node:fs/promises';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {candidateInput,scoreCandidate,delayWindow,scheduleApproval,markDue,initialState,validHttpUrl,templateDraft,DEMO_SAMPLES} from '../shared/core.js';
 
 test('initial state has X-engage group with expected bots',()=>{const s=initialState();assert.equal(s.groups[0].id,'x-engage');assert.equal(s.groups[0].bots.length,6);assert.ok(s.captureToken.length>25);});
 test('score ranks matching technical conversation higher',()=>{
@@ -52,4 +55,23 @@ test('markDue ignores a scheduled draft with a missing or invalid dueAt',()=>{
   assert.equal(markDue({status:'pending',dueAt:new Date(now-1000).toISOString()},now),false);
   const real={status:'scheduled',dueAt:new Date(now-1000).toISOString()};
   assert.equal(markDue(real,now),true);assert.equal(real.status,'ready');
+});
+
+test('the demo fixtures live in one place and both backends load them',async()=>{
+  // The Node /api/demo/seed route used to restate the samples inline, so an edit
+  // to one demo silently diverged from the other. Both must read DEMO_SAMPLES.
+  assert.equal(DEMO_SAMPLES.length,3);
+  for(const s of DEMO_SAMPLES){
+    assert.ok(s.url&&s.text&&s.author&&s.topic,'Fixture incomplete: '+JSON.stringify(s));
+    assert.ok(validHttpUrl(s.url),'Fixture URL invalid: '+s.url);
+    assert.ok(s.text.length>=12,'Fixture text too short: '+s.url);
+  }
+  const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+  const serverJs=await readFile(path.join(root,'src','server.js'),'utf8');
+  const localApi=await readFile(path.join(root,'shared','local-api.js'),'utf8');
+  assert.match(serverJs,/seedDemo\(s,DEMO_SAMPLES\)/,'The Node seed route must use the shared fixtures.');
+  assert.match(localApi,/seedDemo\(state, DEMO_SAMPLES\)/,'The browser-local transport must use the shared fixtures.');
+  // And neither file may carry its own restated copy of the fixtures.
+  assert.doesNotMatch(serverJs,/robotics-demo/,'The Node server restated the demo fixtures inline.');
+  assert.doesNotMatch(localApi,/const samples\s*=\s*\[/,'local-api.js restated the demo fixtures inline.');
 });

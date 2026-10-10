@@ -4,12 +4,12 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {scoreCandidate, templateDraft, cleanText, initialState, markDue, activity} from './core.js?v=93d0ad0c7c';
+import {scoreCandidate, templateDraft, cleanText, initialState, markDue, activity, DEMO_SAMPLES} from './core.js?v=43bdb2fac7';
 import {
   migrate, seedDemo, updateSettings, addCandidate, beginProcessing,
   finishProcessing, editDraft, findDraft, rewriteDraft, draftAction, addGroup,
   addBot, updateBot, addSchedule, removeSchedule, resetDemo,
-} from './workflow.js?v=93d0ad0c7c';
+} from './workflow.js?v=43bdb2fac7';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
@@ -54,20 +54,13 @@ function due(state) {
   }
   if (changed) save(state);
 }
-
-const samples = [
-  {url: 'https://example.com/robotics-demo', author: 'Demo robotics account', topic: 'robotics', text: 'What would make robotics models genuinely useful outside a lab? I care more about reliability than demos.'},
-  {url: 'https://example.com/ai-demo', author: 'Demo AI account', topic: 'AI', text: 'New AI coding benchmark released. Does a benchmark really tell you how the model performs on a messy production codebase?'},
-  {url: 'https://example.com/misc-demo', author: 'Demo lifestyle account', topic: 'other', text: 'It is a nice day today.'}
-];
-
 async function localApi(path, method = 'GET', body = {}) {
   if (path === '/api/login' || path === '/api/logout') return {ok: true};
   const state = read();
   due(state);
   if (path === '/api/state' && method === 'GET') return {...state, aiEnabled: false, serverTime: now()};
 
-  if (path === '/api/demo/seed' && method === 'POST') { const r = seedDemo(state, samples); save(state); return r; }
+  if (path === '/api/demo/seed' && method === 'POST') { const r = seedDemo(state, DEMO_SAMPLES); save(state); return r; }
   if (path === '/api/settings' && method === 'PATCH') { const r = updateSettings(state, body); save(state); return r; }
   if (path === '/api/candidates' && method === 'POST') { const r = addCandidate(state, body); save(state); return {...r.candidate, duplicate: r.duplicate}; }
 

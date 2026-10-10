@@ -78,4 +78,12 @@ export function activity(state,type,message,meta={}) {
  * tests/security-headers.test.js asserts they match, so editing one without the
  * other fails the build instead of silently weakening the demo. */
 export const CSP="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+/** The sample posts the demo seeds. The Node `/api/demo/seed` route and the
+ * browser-local transport both load from here, so the two demos cannot drift
+ * into different fixtures. */
+export const DEMO_SAMPLES=[
+  {url:'https://example.com/robotics-demo',author:'Demo robotics account',topic:'robotics',text:'What would make robotics models genuinely useful outside a lab? I care more about reliability than demos.'},
+  {url:'https://example.com/ai-demo',author:'Demo AI account',topic:'AI',text:'New AI coding benchmark released. Does a benchmark really tell you how the model performs on a messy production codebase?'},
+  {url:'https://example.com/misc-demo',author:'Demo lifestyle account',topic:'other',text:'It is a nice day today.'},
+];
 
