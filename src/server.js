@@ -12,6 +12,9 @@ import {queueGroupRun,markInterrupted,coordinationState} from './coordination.js
 
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const PUBLIC=path.join(ROOT,'shared');
+// The /api/health version is the package version, not a literal, so a release
+// bump cannot drift away from the health endpoint.
+const VERSION=JSON.parse(await fs.readFile(path.join(ROOT,'package.json'),'utf8')).version;
 const PORT=Number(process.env.PORT||4173);
 const HOST=process.env.HOST||'127.0.0.1';
 const STORE_PATH=process.env.DATA_FILE||path.join(ROOT,'data','state.json');
@@ -45,7 +48,7 @@ async function jsonBody(req){let total=0;const chunks=[];for await (const chunk 
 function snapshot(){const s=store.read();return {...s,aiEnabled:isLive(),serverTime:new Date().toISOString()};}
 async function api(req,res,u){
   const p=u.pathname,m=req.method;
-  if(p==='/api/health'&&m==='GET')return send(res,200,{ok:true,version:'0.5.0'});
+  if(p==='/api/health'&&m==='GET')return send(res,200,{ok:true,version:VERSION});
   if(p==='/api/login'&&m==='POST'){
     const ip=req.socket.remoteAddress||'unknown',record=attempts.get(ip)||{count:0,until:0};
     if(Date.now()>record.until){record.count=0;record.until=Date.now()+900000;}
