@@ -11,6 +11,7 @@ import {
   addBot, updateBot, addSchedule, removeSchedule, resetDemo,
 } from './workflow.js';
 import {enqueueTask, retryTask, cancelTask} from './tasks.js';
+import {addEvidence, verifyEvidence, dropEvidence} from './evidence.js';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
@@ -104,6 +105,9 @@ async function localApi(path, method = 'GET', body = {}) {
   if (path === '/api/tasks' && method === 'POST') { const t = enqueueTask(state, body); save(state); return t.task; }
   if ((m = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/retry$/)) && method === 'POST') { const r = retryTask(state, m[1]); save(state); return r; }
   if ((m = path.match(/^\/api\/tasks\/([a-f0-9-]+)$/)) && method === 'DELETE') { const r = cancelTask(state, m[1]); save(state); return r; }
+  if ((m = path.match(/^\/api\/drafts\/([a-f0-9-]+)\/evidence$/)) && method === 'POST') { const e = addEvidence(state, {...body, draftId: m[1]}); save(state); return e; }
+  if ((m = path.match(/^\/api\/evidence\/([a-f0-9-]+)\/verify$/)) && method === 'POST') { const e = verifyEvidence(state, m[1], body.status); save(state); return e; }
+  if ((m = path.match(/^\/api\/evidence\/([a-f0-9-]+)$/)) && method === 'DELETE') { const r = dropEvidence(state, m[1]); save(state); return r; }
   if (path === '/api/reset-demo' && method === 'POST') { const r = resetDemo(state); save(state); return r; }
   throw new Error(`Not available in the browser-local demo: ${method} ${path}`);
 }

@@ -8,8 +8,9 @@
  * Keeping transitions here is the single source of truth for the draft
  * lifecycle: candidate -> draft -> approved/scheduled -> ready -> posted.
  */
-import {activity,candidateInput,cleanText,scheduleApproval} from './core.js?v=7a0880189e';
-import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js?v=7a0880189e';
+import {activity,candidateInput,cleanText,scheduleApproval} from './core.js?v=bf9b5298d4';
+import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js?v=bf9b5298d4';
+import {evidenceSummary,evidenceForDraft,seedCandidateEvidence} from './evidence.js?v=bf9b5298d4';
 
 export const SCHEMA_VERSION = 3;
 
@@ -35,6 +36,7 @@ export function migrate(state) {
   state.drafts ??= [];
   state.runs ??= [];
   state.tasks ??= [];
+  state.evidence ??= [];
   state.events ??= [];
   state.groups ??= [];
   state.groupMessages ??= {};
@@ -83,6 +85,7 @@ export function addCandidate(state, body) {
   if (existing) return {candidate: existing, duplicate: true};
   const candidate = {...input, id: crypto.randomUUID(), status: 'new', createdAt: new Date().toISOString()};
   state.candidates.unshift(candidate);
+  seedCandidateEvidence(state, candidate);
   activity(state, 'capture', `Added a candidate from ${input.author}.`, {candidateId: candidate.id});
   return {candidate, duplicate: false};
 }
@@ -91,7 +94,9 @@ export function seedDemo(state, sample = []) {
   let count = 0;
   for (const b of sample) {
     if (state.candidates.some(c => c.url === b.url)) continue;
-    state.candidates.push({...b, id: crypto.randomUUID(), status: 'new', createdAt: new Date().toISOString(), demo: true});
+    const candidate = {...b, id: crypto.randomUUID(), status: 'new', createdAt: new Date().toISOString(), demo: true};
+    state.candidates.push(candidate);
+    seedCandidateEvidence(state, candidate);
     count++;
   }
   activity(state, 'demo', `Loaded ${count} demo candidate(s).`);
@@ -109,10 +114,15 @@ export function finishProcessing(state, id, evaluation, generated) {
   const c = findCandidate(state, id);
   c.status = 'drafted';
   c.score = evaluation;
+  // Every draft starts with its captured source recorded as unverified
+  // evidence; the evidence model is what makes "check claims before posting"
+  // a state transition instead of a warning label.
+  seedCandidateEvidence(state, c);
   const draft = {
     id: crypto.randomUUID(), candidateId: id, author: c.author, url: c.url, sourceText: c.text,
     text: generated.text, revision: 1, status: 'pending', score: evaluation.score,
     mode: generated.mode, note: generated.note, createdAt: new Date().toISOString(),
+    evidence: evidenceSummary(state.evidence.filter(e => e.candidateId === id)),
   };
   state.drafts.unshift(draft);
   activity(state, 'draft', `Created ${generated.mode} draft for ${c.author}.`, {draftId: draft.id});
@@ -134,6 +144,7 @@ export function editDraft(state, id, text) {
   d.revision++;
   d.status = 'pending';
   delete d.approvedText; delete d.approvedRevision; delete d.dueAt; delete d.approvedAt;
+  delete d.approvedEvidence;
   activity(state, 'edit', `Edited draft. Revision ${d.revision}; previous approval cleared.`, {draftId: d.id});
   return d;
 }
@@ -147,6 +158,7 @@ export function rewriteDraft(state, id, generated) {
   x.mode = generated.mode;
   x.note = generated.note;
   delete x.approvedText; delete x.approvedRevision; delete x.dueAt; delete x.approvedAt;
+  delete x.approvedEvidence;
   activity(state, 'rewrite', `Rewrote draft ${x.id}.`, {draftId: x.id});
   return x;
 }
@@ -154,8 +166,15 @@ export function rewriteDraft(state, id, generated) {
 export function draftAction(state, id, action, body = {}) {
   const x = findDraft(state, id);
   if (action === 'approve') {
+    // The evidence gate: disputed source material blocks approval, the same
+    // way an empty draft does. Confidence values alone never unblock it.
+    const summary = evidenceSummary(evidenceForDraft(state, id));
+    if (!summary.approved) fail('Resolve disputed evidence before approving this draft.', 409);
     scheduleApproval(x, body.minDelay ?? state.settings.minDelay, body.maxDelay ?? state.settings.maxDelay);
-    activity(state, 'approve', `Approved exact revision ${x.revision}.`, {draftId: id, dueAt: x.dueAt});
+    // Freeze the evidence picture the approval was made against, so a later
+    // evidence edit can never retroactively change what was approved.
+    x.approvedEvidence = evidenceForDraft(state, id).map(e => structuredClone(e));
+    activity(state, 'approve', `Approved exact revision ${x.revision}.`, {draftId: id, dueAt: x.dueAt, evidence: summary.level});
   } else if (action === 'reject') {
     if (!['pending', 'scheduled', 'ready'].includes(x.status)) fail('Cannot reject this draft.', 409);
     x.status = 'rejected';

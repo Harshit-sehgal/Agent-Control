@@ -14,6 +14,7 @@ const openStore = async file => process.env.STORE_BACKEND === 'json'
 import {activity,candidateInput,cleanText,scoreCandidate,uuid,CSP,DEMO_SAMPLES} from '../shared/core.js';
 import * as wf from '../shared/workflow.js';
 import * as tasks from '../shared/tasks.js';
+import * as evidence from '../shared/evidence.js';
 import {aiEnabled,aiModel,aiProvider,makeDraft,executeCustomBot} from './ai.js';
 import {startScheduler} from './scheduler.js';
 import {queueGroupRun,markInterrupted,coordinationState} from './coordination.js';
@@ -92,6 +93,9 @@ const WRITE_ROUTES=[
   [/^\/api\/tasks$/,'POST','member'],
   [/^\/api\/tasks\/[a-f0-9-]+\/retry$/,'POST','member'],
   [/^\/api\/tasks\/[a-f0-9-]+$/,'DELETE','member'],
+  [/^\/api\/drafts\/[a-f0-9-]+\/evidence$/,'POST','member'],
+  [/^\/api\/evidence\/[a-f0-9-]+\/verify$/,'POST','member'],
+  [/^\/api\/evidence\/[a-f0-9-]+$/,'DELETE','member'],
   [/^\/api\/demo\/seed$/,'POST','member'],
   [/^\/api\/reset-demo$/,'POST','member'],
 ];
@@ -283,6 +287,21 @@ async function api(req,res,u){
   if(match&&m==='PATCH'){const u=requireRole(req,'admin');const b=await jsonBody(req);return send(res,200,auth.updateUser(u,match[1],b));}
   if(match&&m==='DELETE'){const u=requireRole(req,'admin');return send(res,200,auth.deleteUser(u,match[1]));}
   if(p==='/api/account'&&m==='DELETE'){const u=requireAuth(req);const b=await jsonBody(req);auth.selfDeleteAccount(u.userId,b.password);return send(res,200,{ok:true},{'Set-Cookie':clearCookie()});}
+  // --- Source evidence: what supports a draft, verified by whom ---
+  match=p.match(/^\/api\/drafts\/([a-f0-9-]+)\/evidence$/);
+  if(match&&m==='POST'){
+    const b=await jsonBody(req);
+    const item=await store.update(s=>evidence.addEvidence(s,{...b,draftId:match[1],createdBy:actor.email}));
+    return send(res,201,item);
+  }
+  match=p.match(/^\/api\/evidence\/([a-f0-9-]+)\/verify$/);
+  if(match&&m==='POST'){
+    const b=await jsonBody(req);
+    const item=await store.update(s=>evidence.verifyEvidence(s,match[1],b.status,{actor:actor.email}));
+    return send(res,200,item);
+  }
+  match=p.match(/^\/api\/evidence\/([a-f0-9-]+)$/);
+  if(match&&m==='DELETE'){const result=await store.update(s=>evidence.dropEvidence(s,match[1]));return send(res,200,result);}
   fail('Unknown endpoint.',404);
 }
 const ASSETS=new Set(['index.html','app.css','polish.css','usability.css','transport.js','local-api.js','app.js','core.js','workflow.js','coordination.js','group-simulator.js','chat-engine.js','usability.js','demo-feed.html']);

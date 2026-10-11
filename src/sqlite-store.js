@@ -243,6 +243,11 @@ export class SqliteStore {
       ...c, demo: Boolean(c.demo), ...(c.score ? {score: JSON.parse(c.score)} : {}),
     }));
     s.drafts = this.db.prepare('SELECT * FROM drafts').all();
+    s.evidence = this.db.prepare('SELECT * FROM evidence').all().map(e => ({
+      id: e.id, kind: e.kind, link: e.link, claim: e.claim, confidence: e.confidence,
+      verification: e.verification, reuse: e.reuse, note: e.note,
+      draftId: e.draft_id, candidateId: e.candidate_id, createdBy: e.created_by, createdAt: e.created_at,
+    }));
     s.runs = this.db.prepare('SELECT * FROM runs').all();
     s.events = this.db.prepare('SELECT * FROM events').all().map(e => ({...e, meta: JSON.parse(e.meta)}));
     const messages = this.db.prepare('SELECT * FROM group_messages ORDER BY rowid').all();
@@ -260,7 +265,7 @@ export class SqliteStore {
   }
   writeCollections(state) {
     const t = this.transaction(() => {
-      for (const table of ['groups', 'bots', 'candidates', 'drafts', 'runs', 'events', 'group_messages', 'group_runs', 'tasks']) {
+      for (const table of ['groups', 'bots', 'candidates', 'drafts', 'evidence', 'runs', 'events', 'group_messages', 'group_runs', 'tasks']) {
         this.db.prepare(`DELETE FROM ${table}`).run();
       }
       this.db.prepare('INSERT INTO kv (key,value) VALUES (\'created_at\',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(state.createdAt || now());
@@ -287,6 +292,10 @@ export class SqliteStore {
       for (const r of state.runs) {
         this.db.prepare('INSERT INTO runs (id,bot_id,bot_name,input,output,at) VALUES (?,?,?,?,?,?)')
           .run(r.id, r.botId, r.botName, r.input ?? null, r.output ?? null, r.at || now());
+      }
+      for (const e of (state.evidence || [])) {
+        this.db.prepare('INSERT INTO evidence (id,draft_id,candidate_id,kind,link,claim,confidence,verification,reuse,note,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
+          .run(e.id, e.draftId ?? null, e.candidateId ?? null, e.kind, e.link ?? null, e.claim, e.confidence, e.verification, e.reuse, e.note ?? null, e.createdBy ?? null, e.createdAt || now());
       }
       for (const t of (state.tasks || [])) {
         this.db.prepare('INSERT INTO tasks (id,kind,title,payload,status,run_at,interval_minutes,idempotency_key,attempts,max_attempts,lease_owner,lease_until,last_error,result,created_by,created_at,updated_at,completed_at,enabled,label,next_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')

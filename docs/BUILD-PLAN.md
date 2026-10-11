@@ -10,15 +10,15 @@ Tracks execution of the v0.2/v0.3 roadmap items. Update as phases land; every ph
 - Also landed: completed the in-flight `.env` loader + provider-agnostic AI client
 
 ## Phase B — multi-user control plane
-- [ ] users, server-side sessions (revocable), password reset tokens
-- [ ] workspaces + membership roles (owner/admin/member/viewer)
-- [ ] First-run owner bootstrap from `DASHBOARD_PASSWORD`; `/api/login` unchanged
-- [ ] Authz matrix on every route; session list/revoke endpoints
+- [x] users, server-side sessions (revocable), password reset tokens
+- [x] workspaces + membership roles (owner/admin/member/viewer)
+- [x] First-run owner bootstrap from `DASHBOARD_PASSWORD`; `/api/login` unchanged
+- [x] Authz matrix on every route; session list/revoke endpoints
 
 ## Phase C — structured tasks + durable queue
-- [ ] `shared/tasks.js` transition rules (pure, replaces reminder events)
-- [ ] `src/queue.js` worker: idempotency keys, leases, backoff, crash recovery
-- [ ] `schedules` → tasks migration; scheduler keeps draft release + task dispatch
+- [x] `shared/tasks.js` transition rules (pure, replaces reminder events)
+- [x] `src/queue.js` worker: idempotency keys, leases, backoff, crash recovery
+- [x] `schedules` → tasks migration; scheduler keeps draft release + task dispatch
 
 ## Phase D — source evidence model
 - [ ] `shared/evidence.js`: link, claim, confidence, verification status, reuse
