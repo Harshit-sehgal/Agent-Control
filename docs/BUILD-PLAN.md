@@ -69,3 +69,10 @@ as the record of what shipped; new work should be added as a fresh section.
 - [x] UI split into `shared/ui-*.js` modules with a pure view-model layer
 - [x] Single stylesheet (`shared/app.css`), system fonts, tightened CSP
 - [x] Tests and Playwright smokes updated for the new UI
+
+## Phase N — server structure and durable history
+- [x] Route table with declared access per route (`src/router.js`, `src/routes-*.js`)
+- [x] Lossless restarts: every workflow record keeps its whole document (schema v3)
+- [x] Reminders survive a restart
+- [x] Conversations stored with the workspace, with a one-time import from the browser
+- [x] Sheets take focus as they open (fixes text landing in the wrong field)

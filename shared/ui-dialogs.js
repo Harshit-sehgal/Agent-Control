@@ -27,7 +27,9 @@ export function openSheet(html, {label, title = '', sub = ''} = {}) {
   const layer = el('modal');
   layer.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(label || title)}"><div class="sheet-grip" aria-hidden="true"></div>${title ? `<div class="sheet-head"><div><h2>${esc(title)}</h2>${sub ? `<p>${esc(sub)}</p>` : ''}</div>${iconBtn('x', 'Close', 'close-sheet')}</div>` : ''}${html}</div>`;
   layer.classList.remove('hidden');
-  requestAnimationFrame(() => (layer.querySelector('[autofocus]') || layer.querySelector('input,textarea,select,button.primary,button'))?.focus());
+  // Focus now, not on the next frame: a late frame would pull focus back here
+  // after the user had already moved on, and their typing would land in the wrong field.
+  (layer.querySelector('[autofocus]') || layer.querySelector('input,textarea,select,button.primary,button'))?.focus();
 }
 export function closeSheet(result = null) {
   if (!sheetOpen()) return;

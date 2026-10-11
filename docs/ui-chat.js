@@ -3,10 +3,10 @@
  * model is configured and in the deterministic simulator otherwise. A custom bot
  * runs its own instructions on the server; everything else answers from the
  * offline command set. Nothing here can publish. */
-import {classifyMessage, statusSummary} from './chat-engine.js?v=f6bd5ef1e8';
-import {simulateGroup} from './group-simulator.js?v=f6bd5ef1e8';
-import {planHandoffs} from './coordination.js?v=f6bd5ef1e8';
-import {store, api, sync, conversation, appendMessage, setTyping, isStaticDemo, isLive, logLocalRun, teamKey} from './ui-store.js?v=f6bd5ef1e8';
+import {classifyMessage, statusSummary} from './chat-engine.js?v=85a553776b';
+import {simulateGroup} from './group-simulator.js?v=85a553776b';
+import {planHandoffs} from './coordination.js?v=85a553776b';
+import {store, api, sync, conversation, appendMessage, setTyping, isStaticDemo, isLive, logLocalRun, teamKey} from './ui-store.js?v=85a553776b';
 
 const TERMINAL = ['completed', 'failed', 'interrupted', 'awaiting_checkpoint'];
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));

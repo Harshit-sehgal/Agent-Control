@@ -31,7 +31,7 @@ const files = [
   'transport.js', 'local-api.js', 'app.js',
   'ui-kit.js', 'ui-model.js', 'ui-store.js', 'ui-dialogs.js', 'ui-chat.js', 'ui-views.js', 'ui-panel.js', 'ui-sheets.js', 'ui-admin.js', 'ui-actions.js', 'ui-fx.js',
   'core.js', 'workflow.js', 'tasks.js', 'evidence.js', 'contracts.js', 'retention.js',
-  'coordination.js', 'group-simulator.js',
+  'coordination.js', 'chats.js', 'group-simulator.js',
   'chat-engine.js', 'usability.js', 'demo-feed.html',
 ];
 // Files that used to live in docs/ before the UI moved to shared/.

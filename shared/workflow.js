@@ -13,6 +13,7 @@ import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js';
 import {evidenceSummary,evidenceForDraft,seedCandidateEvidence} from './evidence.js';
 import {normalizeRetention} from './retention.js';
 import * as contracts from './contracts.js';
+import {pruneChats} from './chats.js';
 
 export const SCHEMA_VERSION = 3;
 
@@ -43,6 +44,7 @@ export function migrate(state) {
   state.groups ??= [];
   state.groupMessages ??= {};
   state.groupRuns ??= [];
+  pruneChats(state);
   // Backfill bot contracts and permissions. An older stored bot gains the
   // defaults for its type; explicitly configured values are left alone.
   for (const g of state.groups) {

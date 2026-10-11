@@ -11,14 +11,14 @@
  *   ui-dialogs  toast, sheet, confirm/ask   ui-actions action/form tables
  *   ui-fx       confetti, the send arrow, and when the bots react
  */
-import {parseRoute} from './ui-model.js?v=f6bd5ef1e8';
-import {store, api, sync, onChange, changed, go, back, popped, conversation, isStaticDemo, isAdmin, applyTheme, watchSystemTheme} from './ui-store.js?v=f6bd5ef1e8';
-import {toast, closeSheet, sheetOpen, trapTab} from './ui-dialogs.js?v=f6bd5ef1e8';
-import {listShell, renderList, threadShell, renderThread, homeView} from './ui-views.js?v=f6bd5ef1e8';
-import {renderInfo, refreshLists, renderPage} from './ui-panel.js?v=f6bd5ef1e8';
-import {showLogin, hideLogin, openCommandPalette, closeCommandPalette, paletteOpen, updateCommandResults, chooseCommand, moveCommand} from './ui-sheets.js?v=f6bd5ef1e8';
-import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=f6bd5ef1e8';
-import {bringBotsToLife} from './ui-fx.js?v=f6bd5ef1e8';
+import {parseRoute} from './ui-model.js?v=85a553776b';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, back, popped, conversation, isStaticDemo, isAdmin, applyTheme, watchSystemTheme} from './ui-store.js?v=85a553776b';
+import {toast, closeSheet, sheetOpen, trapTab} from './ui-dialogs.js?v=85a553776b';
+import {listShell, renderList, threadShell, renderThread, homeView} from './ui-views.js?v=85a553776b';
+import {renderInfo, refreshLists, renderPage} from './ui-panel.js?v=85a553776b';
+import {showLogin, hideLogin, openCommandPalette, closeCommandPalette, paletteOpen, updateCommandResults, chooseCommand, moveCommand} from './ui-sheets.js?v=85a553776b';
+import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=85a553776b';
+import {bringBotsToLife} from './ui-fx.js?v=85a553776b';
 
 const el = id => document.getElementById(id);
 const hashRoute = () => parseRoute(location.hash, store.state, {server: !isStaticDemo(), admin: isAdmin()});
@@ -77,11 +77,12 @@ onChange(scope => {
 
 async function boot() {
   try {
-    store.state = await api('/api/state');
+    await loadState();
     if (isStaticDemo() && !localStorage.getItem('ac-v2-welcome')) {
       await api('/api/demo/seed', 'POST', {}); localStorage.setItem('ac-v2-welcome', '1');
-      store.state = await api('/api/state');
+      await loadState();
     }
+    await importLocalChats();
     listShell(); lastView = '';
     // First paint only: the chat rows arrive one after another.
     document.body.classList.add('booting'); setTimeout(() => document.body.classList.remove('booting'), 900);
@@ -101,7 +102,7 @@ async function boot() {
 function lockScreen(message) {
   clearInterval(syncTimer); syncTimer = null;
   closeSheet(); closeCommandPalette();
-  store.state = null; lastView = '';
+  store.state = null; store.messages = {}; lastView = '';
   for (const id of ['sidebar', 'main', 'inspector']) el(id).innerHTML = '';
   showLogin(message);
 }

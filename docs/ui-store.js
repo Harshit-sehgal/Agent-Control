@@ -1,9 +1,11 @@
-/** Single source of UI state: the server snapshot, the route, the browser-local
- * conversation log and cosmetic preferences. Views read from `store` and never
+/** Single source of UI state: the server snapshot, the route, the conversations
+ * it carries and cosmetic preferences. Views read from `store` and never
  * keep their own copies, so one `sync()` + one render keeps every pane current. */
-import {normalizeUiPrefs, UI_PREFS_KEY} from './usability.js?v=f6bd5ef1e8';
-import {routeHash} from './ui-model.js?v=f6bd5ef1e8';
+import {normalizeUiPrefs, UI_PREFS_KEY} from './usability.js?v=85a553776b';
+import {routeHash} from './ui-model.js?v=85a553776b';
+import {createOutbox} from './chats.js?v=85a553776b';
 
+// Where an earlier build kept conversations; read once by importLocalChats().
 const CHAT_KEY = 'agent-control-bot-chats-v2';
 const META_KEY = 'agent-control-bot-profiles-v2';
 const RUNS_KEY = 'agent-control-coordination-runs-v1';
@@ -26,7 +28,8 @@ export const store = {
   /** chat: conversation id (`team-<groupId>` or a bot id). page: a "You" page.
    * info: null | 'home' | a section name for the open chat's info panel. */
   route: {chat: null, page: null, info: null},
-  messages: loadLocal(CHAT_KEY, {}),
+  /** Conversations by id: the workspace's copy plus anything still being sent. */
+  messages: {},
   profiles: loadLocal(META_KEY, {}),
   prefs: normalizeUiPrefs(loadLocal(UI_PREFS_KEY, {})),
   checkpoints: Boolean(loadLocal(GATE_KEY, false)),
@@ -69,7 +72,35 @@ const listeners = new Set();
 export const onChange = fn => { listeners.add(fn); return () => listeners.delete(fn); };
 export const changed = (scope = 'all') => { for (const fn of listeners) fn(scope); };
 
-export async function sync(scope = 'all') { store.state = await api('/api/state'); changed(scope); return store.state; }
+// Sent in the background, without the busy bar: a message is on screen already.
+const outbox = createOutbox((key, messages) => window.AGENT_API(`/api/chats/${key}/messages`, 'POST', {messages}));
+/** Fetch the workspace and fold its conversations into what is on screen. */
+export async function loadState() {
+  await outbox.settle();
+  const fetch = outbox.beginFetch();
+  store.state = await api('/api/state');
+  store.messages = outbox.adopt(store.state.chats || {}, store.messages, fetch);
+  return store.state;
+}
+export async function sync(scope = 'all') { await loadState(); changed(scope); return store.state; }
+/** Conversations an earlier build kept in this browser move to the workspace
+ * once, so they follow the account. A conversation the workspace already has
+ * is left alone. */
+export async function importLocalChats() {
+  const legacy = loadLocal(CHAT_KEY, null);
+  if (!legacy || typeof legacy !== 'object' || store.state?.me?.role === 'viewer') return;
+  let offline = false;
+  for (const [key, list] of Object.entries(legacy)) {
+    if (!Array.isArray(list) || store.messages[key]?.length || !conversation(key)) continue;
+    const messages = list.slice(-300).filter(m => m?.text && ['user', 'bot', 'system'].includes(m.role)).map(m => ({...m, id: m.id || crypto.randomUUID()}));
+    if (!messages.length) continue;
+    try { await window.AGENT_API(`/api/chats/${key}/messages`, 'POST', {messages}); }
+    catch (error) { if (!error?.status) offline = true; }
+  }
+  if (offline) return;
+  try { localStorage.removeItem(CHAT_KEY); } catch { /* Storage is unavailable; nothing to remove. */ }
+  await loadState();
+}
 
 export const groups = () => store.state?.groups || [];
 export const teamKey = groupId => `team-${groupId}`;
@@ -91,11 +122,15 @@ export function conversation(id = store.route.chat) {
 }
 
 export function appendMessage(key, entry) {
-  (store.messages[key] ??= []).push({id: crypto.randomUUID(), at: new Date().toISOString(), ...entry});
-  saveLocal(CHAT_KEY, store.messages);
+  const message = {id: crypto.randomUUID(), at: new Date().toISOString(), ...entry};
+  (store.messages[key] ??= []).push(message);
+  outbox.add(key, message);
   changed('thread');
 }
-export function clearMessages(key) { delete store.messages[key]; saveLocal(CHAT_KEY, store.messages); changed(); }
+export async function clearMessages(key) {
+  await api(`/api/chats/${key}`, 'DELETE');
+  outbox.forget(key); delete store.messages[key]; changed();
+}
 export function setTyping(key, on) { on ? store.typing.add(key) : store.typing.delete(key); changed('thread'); }
 export function setProfile(botId, patch) { store.profiles[botId] = {...(store.profiles[botId] || {}), ...patch}; saveLocal(META_KEY, store.profiles); }
 export function setPref(key, value) { Object.assign(store.prefs, normalizeUiPrefs({...store.prefs, [key]: value})); saveLocal(UI_PREFS_KEY, store.prefs); }

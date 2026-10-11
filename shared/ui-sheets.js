@@ -129,6 +129,6 @@ export function showLogin(message = '') {
   if (visible) { const err = el('login-error'); if (err) err.textContent = message; return; }
   layer.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-label="Sign in"><div class="sheet-head"><div><h2>Sign in</h2><p>Enter the dashboard password printed by the server.</p></div></div><form id="login-form" class="form">${field('Dashboard password', `<input class="input" type="password" name="password" autocomplete="current-password" required autofocus>`)}${btn('Unlock', null, {kind: 'primary', type: 'submit', wide: true})}<p class="note" id="login-error" role="alert">${esc(message)}</p></form></div>`;
   layer.classList.remove('hidden');
-  requestAnimationFrame(() => layer.querySelector('input[autofocus]')?.focus());
+  layer.querySelector('input[autofocus]')?.focus();
 }
 export const hideLogin = () => { const layer = el('login-layer'); if (layer) { layer.classList.add('hidden'); layer.innerHTML = ''; } };

@@ -65,8 +65,8 @@ export const actions = {
   },
   'clear-chat': async b => {
     if (!store.messages[b.dataset.id]?.length) return toast('This conversation is already empty');
-    if (!await confirmSheet('Clear this conversation?', {confirm: 'Clear', danger: true, detail: 'Messages are removed from this browser. Drafts and posts stay.'})) return;
-    clearMessages(b.dataset.id); toast('Conversation cleared');
+    if (!await confirmSheet('Clear this conversation?', {confirm: 'Clear', danger: true, detail: 'Messages are removed for everyone in this workspace. Drafts and posts stay.'})) return;
+    await clearMessages(b.dataset.id); toast('Conversation cleared');
   },
 
   // bots

@@ -541,6 +541,16 @@ async def runs_log(page, base):
 
 async def sheet_keyboard(page, base):
     await open_app(page, base)
+    # A sheet takes focus as it opens, before any animation frame. A deferred
+    # focus used to land after the user had moved to the next field.
+    inside = await page.evaluate('''async () => {
+        document.querySelector('#sidebar .new-chat').click();
+        for (let i = 0; i < 4; i++) await Promise.resolve();
+        return Boolean(document.activeElement?.closest('#modal'));
+    }''')
+    assert inside, 'the sheet must hold focus as soon as it opens'
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#modal')).to_be_hidden()
     trigger = page.locator('#sidebar .new-chat')
     await trigger.focus()
     await page.keyboard.press('Enter')

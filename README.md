@@ -18,7 +18,7 @@ The interface is organized like a messenger. The Node server and the GitHub Page
 - Small-screen layout and reduced-motion preferences are validated in a headless browser.
 - Tests: `tests/ui-model.test.js` and `tests/ui-polish.test.js` (Node), `tests/polish_smoke.py` and `tests/usability_smoke.py` (optional Playwright browser validation).
 
-The Pages version remains **a browser-local, non-AI simulation**. The existing Node API is unchanged. Browser-local data and conversations are not synchronized between devices. Do not enter secrets into the public Pages demo.
+The Pages version remains **a browser-local, non-AI simulation**: its data and conversations stay in that one browser. On the Node server, conversations are stored with the workspace, so they follow your account to every device you sign in on. Do not enter secrets into the public Pages demo.
 
 ## Bot coordination: group chat and handoffs
 
@@ -33,7 +33,7 @@ The Pages version remains **a browser-local, non-AI simulation**. The existing N
 
 Visit **https://harshit-sehgal.github.io/Agent-Control/** after the Pages workflow completes. The browser-only UI now includes:
 
-- A chat list of named bots and groups, with separate, persistent browser-local conversations.
+- A chat list of named bots and groups, each with its own saved conversation. The Node server stores conversations with the workspace; the Pages demo keeps them in the browser.
 - Create bot, create group, and edit lasting bot instructions in the interface.
 - X-engage group chat, with drafts and posts shown in the thread and its workspace sections (Drafts, Posts found, Reminders, Runs, Voice and timing) in the chat info panel.
 - Share post candidates, create template drafts, edit and approve revisions, and prepare manual X posting handoffs.
@@ -51,7 +51,7 @@ The static Pages dashboard includes functional navigation controls (not real AI 
 - **Create Bot templates** for Scout, Researcher, Writer, Reviewer, and Coordinator. Templates fill **editable instructions**; they do not connect to an AI provider.
 - **Posts found search, status filter, and sorting** (newest, oldest, best/worst score), in the X-engage chat info panel. Search matches author, topic, post text, or the source URL, so pasting a captured post link finds it. Filtering does not modify stored candidate records.
 - **Drafts status and sort controls** in the X-engage chat info panel, for To decide, Scheduled, Ready to post, Posted, Skipped, and Everything drafts.
-- **Clear chat** from group info. Clearing a conversation asks for confirmation in a sheet and affects only the current browser.
+- **Clear chat** from group info. Clearing a conversation asks for confirmation in a sheet. On the Node server it clears the conversation for everyone in the workspace.
 - **Conditional reminder fields** in the New reminder sheet: exact-time reminders require a timestamp; interval reminders require an interval.
 - **Persisted UI preferences:** sort and filter options remain in browser local storage across reloads.
 - **Confirmation sheets** before marking a draft as posted, removing a reminder, or clearing a conversation.
@@ -202,7 +202,7 @@ gh repo create Harshit-sehgal/agent-control-prototype --private --source=. --rem
 ```text
 Browser (phone / desktop) ---- authenticated HTTP ----> Node dashboard/API
                                                      |
-                                                     +-- JSON store (local)
+                                                     +-- SQLite store (local)
                                                      +-- scheduler
                                                      +-- topic ranker
                                                      +-- AI provider (optional)
@@ -213,11 +213,16 @@ Note: Browser actions that X does not authorize are not enabled.
 
 ### Key paths
 
-- `src/server.js`: HTTP routes, session auth, and request/response handling.
+- `src/server.js`: starts the services (store, auth, queue, scheduler), then dispatches each request through the route table.
+- `src/router.js`: the route table. Every route is registered with the access it needs (`public`, `agent`, or a least role), so a permission cannot be forgotten.
+- `src/routes-*.js`: the routes themselves, grouped by area: `public` (sign-in, capture, local-agent protocol), `workflow` (posts, drafts, evidence, tasks), `groups` (groups, bots, runs, conversations) and `account` (users, sessions, agents, vault, backups).
+- `src/http.js`: JSON responses with the security headers, bounded body readers and the same-origin check.
+- `src/sqlite-store.js`: the default store. Each record is kept whole next to its typed columns, so a restart reads back exactly what was written.
+- `shared/chats.js`: conversation history rules, shared by the server and the browser-local transport.
 - `shared/workflow.js`: the single source of workflow transitions (candidates, drafts, approval, schedules) plus the versioned schema migration.
 - `shared/core.js`: validation, ranking, scheduling state transitions.
 - `src/ai.js`: optional provider adapter and clearly labeled offline fallback.
-- `src/store.js`: serialized atomic persistence.
+- `src/store.js`: the older JSON store, kept behind `STORE_BACKEND=json` for tests.
 - `src/scheduler.js`: due-task and reminder reconciliation.
 - `shared/`: the dashboard UI, its browser-safe logic, and the local transport. The Node server serves this folder directly.
 - `scripts/build-pages.js`: copies `shared/` into `docs/` for the static GitHub Pages build (`npm run build:pages`).

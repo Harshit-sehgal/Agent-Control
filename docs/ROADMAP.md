@@ -37,6 +37,8 @@
 - **Human checkpoint gates.** An "Approve between steps" toggle pauses a run before each handoff; the run waits in `awaiting_checkpoint` until an admin approves the next step (`POST /api/groups/:id/runs/:id/continue`).
 - **Admin surfaces (Node build).** Team & access (users, roles, sessions), Local agents (pairing, permissions, revoke), and **Data & security** (credential vault, retention preview/prune, encrypted backup export/restore).
 - **Notifications** (`src/notifications.js`): an unread count under You, an in-app feed, and per-user channel preferences (in-app/webhook/email relay).
+- **Server structure.** API routes are declared in a route table with the access each one needs (`src/router.js`, `src/routes-*.js`); `src/server.js` only starts services and dispatches.
+- **Durable history.** Conversations are stored with the workspace and follow the account across devices; every workflow record reads back unchanged after a restart (`src/sqlite-store.js`, `shared/chats.js`).
 - **Deployment hardening**: optional in-process HTTPS (`TLS_CERT`/`TLS_KEY`), HSTS, startup validation, and [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
 ## Remaining

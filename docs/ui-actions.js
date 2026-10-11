@@ -1,14 +1,14 @@
 /** What the UI can do, as three lookup tables keyed by `data-action`, form id and
  * control id. app.js owns the DOM events and dispatches here; handlers throw on
  * failure and the dispatcher turns that into one toast. */
-import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, groupOfBot, teamKey, groups, setProfile, setPref, setCheckpoints, clearMessages} from './ui-store.js?v=f6bd5ef1e8';
-import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=f6bd5ef1e8';
-import {sendChat, streamGroupRun} from './ui-chat.js?v=f6bd5ef1e8';
-import {confetti, whoosh, react, poke} from './ui-fx.js?v=f6bd5ef1e8';
-import {renderList} from './ui-views.js?v=f6bd5ef1e8';
-import {refreshLists, reloadAdminPage} from './ui-panel.js?v=f6bd5ef1e8';
-import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand} from './ui-sheets.js?v=f6bd5ef1e8';
-import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=f6bd5ef1e8';
+import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, groupOfBot, teamKey, groups, setProfile, setPref, setCheckpoints, clearMessages} from './ui-store.js?v=85a553776b';
+import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=85a553776b';
+import {sendChat, streamGroupRun} from './ui-chat.js?v=85a553776b';
+import {confetti, whoosh, react, poke} from './ui-fx.js?v=85a553776b';
+import {renderList} from './ui-views.js?v=85a553776b';
+import {refreshLists, reloadAdminPage} from './ui-panel.js?v=85a553776b';
+import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand} from './ui-sheets.js?v=85a553776b';
+import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=85a553776b';
 
 const adminCtx = {reload: reloadAdminPage};
 const chatId = () => store.route.chat;
@@ -65,8 +65,8 @@ export const actions = {
   },
   'clear-chat': async b => {
     if (!store.messages[b.dataset.id]?.length) return toast('This conversation is already empty');
-    if (!await confirmSheet('Clear this conversation?', {confirm: 'Clear', danger: true, detail: 'Messages are removed from this browser. Drafts and posts stay.'})) return;
-    clearMessages(b.dataset.id); toast('Conversation cleared');
+    if (!await confirmSheet('Clear this conversation?', {confirm: 'Clear', danger: true, detail: 'Messages are removed for everyone in this workspace. Drafts and posts stay.'})) return;
+    await clearMessages(b.dataset.id); toast('Conversation cleared');
   },
 
   // bots

@@ -6,9 +6,10 @@ import {fileURLToPath} from 'node:url';
 import {CSP} from '../shared/core.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const [indexHtml, serverJs, css] = await Promise.all([
+const [indexHtml, serverJs, httpJs, css] = await Promise.all([
   readFile(path.join(root, 'shared', 'index.html'), 'utf8'),
   readFile(path.join(root, 'src', 'server.js'), 'utf8'),
+  readFile(path.join(root, 'src', 'http.js'), 'utf8'),
   readFile(path.join(root, 'shared', 'app.css'), 'utf8'),
 ]);
 
@@ -32,10 +33,10 @@ test('the CSP denies framing and cross-origin embedding', () => {
 });
 
 test('the server sends clickjacking and sniffing headers on every response', () => {
-  assert.match(serverJs, /'X-Frame-Options':'DENY'/);
-  assert.match(serverJs, /'X-Content-Type-Options':'nosniff'/);
+  assert.match(httpJs, /'X-Frame-Options':'DENY'/);
+  assert.match(httpJs, /'X-Content-Type-Options':'nosniff'/);
   // Both the JSON and the static-asset paths must carry them.
-  assert.match(serverJs, /function send\(res,status,value,headers=\{\}\)\{[^}]*\.\.\.SECURITY/);
+  assert.match(httpJs, /function send\(res,status,value,headers=\{\}\)\{[^}]*\.\.\.SECURITY/);
   assert.match(serverJs, /'Content-Security-Policy':CSP,\.\.\.SECURITY/);
 });
 

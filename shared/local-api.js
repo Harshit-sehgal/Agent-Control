@@ -12,6 +12,7 @@ import {
 } from './workflow.js';
 import {enqueueTask, retryTask, cancelTask} from './tasks.js';
 import {addEvidence, verifyEvidence, dropEvidence} from './evidence.js';
+import {addChatMessages, clearChat} from './chats.js';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
@@ -108,6 +109,9 @@ async function localApi(path, method = 'GET', body = {}) {
   if ((m = path.match(/^\/api\/drafts\/([a-f0-9-]+)\/evidence$/)) && method === 'POST') { const e = addEvidence(state, {...body, draftId: m[1]}); save(state); return e; }
   if ((m = path.match(/^\/api\/evidence\/([a-f0-9-]+)\/verify$/)) && method === 'POST') { const e = verifyEvidence(state, m[1], body.status); save(state); return e; }
   if ((m = path.match(/^\/api\/evidence\/([a-f0-9-]+)$/)) && method === 'DELETE') { const r = dropEvidence(state, m[1]); save(state); return r; }
+  // Conversation history, stored with the rest of the browser-local state.
+  if ((m = path.match(/^\/api\/chats\/([a-z0-9-]+)\/messages$/)) && method === 'POST') { const r = addChatMessages(state, m[1], Array.isArray(body.messages) ? body.messages : [body]); save(state); return r; }
+  if ((m = path.match(/^\/api\/chats\/([a-z0-9-]+)$/)) && method === 'DELETE') { const r = clearChat(state, m[1]); save(state); return r; }
   if (path === '/api/reset-demo' && method === 'POST') { const r = resetDemo(state); save(state); return r; }
   throw new Error(`Not available in the browser-local demo: ${method} ${path}`);
 }
