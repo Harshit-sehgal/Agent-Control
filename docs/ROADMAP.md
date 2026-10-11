@@ -41,14 +41,19 @@
 - **Durable history.** Conversations are stored with the workspace and follow the account across devices; the orchestrator writes each run's messages and outcome into its conversation, so a run shows up even if the tab that started it was closed; every workflow record reads back unchanged after a restart (`src/sqlite-store.js`, `shared/chats.js`).
 - **Deployment hardening**: optional in-process HTTPS (`TLS_CERT`/`TLS_KEY`), HSTS, startup validation, and [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
+## Delivered: workspaces, push, a real browser reader, deploy files
+
+- **More than one workspace.** Each workspace has its own database file, members and roles; a session works on one workspace at a time and can switch (`src/workspaces.js`, `src/routes-workspaces.js`). Local agents, credentials, notifications, capture tokens and backups are per workspace.
+- **Mobile push.** Web Push to any subscribed device, encrypted and signed with `node:crypto` (`src/push.js`), delivered through the task queue with retries. A service worker shows the notification (`shared/sw.js`), and a web manifest lets the app be installed, which iOS requires for push.
+- **A real browser reader.** With `AGENT_BROWSER=1` the local agent opens allowlisted pages in the installed Chrome over the DevTools protocol (`agent/browser.mjs`). No dependency was added, and it only reads.
+- **Deploy files.** `Dockerfile`, `deploy/compose.yaml` (Caddy for HTTPS) and `deploy/agent-control.service`.
+
 ## What is left
 
-The v0.2 and v0.3 lists that used to sit here are delivered above, apart from these:
-
-- **A real browser adapter.** The local agent's `browser.capture` is an HTTP read of pages the operator allowlists, not browser automation. Driving a real browser needs a headless-browser dependency, which this project avoids. Decide whether that rule bends for the agent process only.
-- **More than one workspace.** Users, sessions and roles exist, but every installation has one workspace. Organizations with separate data need a workspace id on every workflow table and a membership check on every read.
-- **Mobile push.** Notifications reach the in-app feed, a webhook or an email relay. Web Push needs a service worker and a push subscription per device.
-- **An always-on host.** The server runs HTTPS in-process or behind a proxy (see [`DEPLOYMENT.md`](DEPLOYMENT.md)), but nothing here deploys it. Until it runs somewhere always on, the scheduler and queue only work while your machine is up.
+- **A host that is actually on.** The deploy files are tested locally, but nothing here rents a machine or points a domain at it. Until the server runs somewhere always on, the scheduler and queue only work while your machine is up.
+- **Push on a real phone.** The encryption and signing are tested against an independent decoder, not yet against Apple's or Google's push service from a real device.
+- **Email delivery.** The email channel records a relay-ready notification; sending mail needs an SMTP client or gateway this project does not embed.
+- **Workspaces for hostile tenants.** Workspaces share one process, vault key and AI provider key. Billing-grade isolation is a different design.
 
 ## Future milestones
 

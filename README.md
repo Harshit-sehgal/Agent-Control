@@ -77,10 +77,10 @@ Use `npm test` for Node unit tests. For a local Chromium UI smoke test, install 
 
 - The Scout **does not automatically scroll, scrape, or search your X feed**. The Chrome extension captures one post after you deliberately invoke it. X restricts non-API scripting; a test account does not negate that restriction.
 - The Researcher role **does not independently fact-check web claims** yet. Drafts carry a source and a warning to verify claims. Do not treat any generated text as verified reporting.
-- The scheduler runs on the host computer. For 24/7 service, host the Node process on an always-on machine or configure a secured server deployment.
-- This prototype is single-workspace/single-user, not a hardened multi-tenant SaaS.
+- The scheduler runs on the host computer. For 24/7 service, run the container or the systemd unit in `deploy/` on a machine that stays on (see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)).
+- An installation can hold several workspaces, each with its own data and members, but it is self-hosted software for people you trust, not a hardened multi-tenant SaaS.
 - Custom bots run text-only prompts; they do not have browser or file-system tool access yet.
-- Notifications appear in the dashboard activity log, not as mobile push notifications.
+- Push notifications reach a phone or desktop only after you turn them on for that device under **You → Notifications**, and only when the server is served over HTTPS (or on `localhost`). On an iPhone or iPad the app must first be added to the Home Screen.
 - No external accounts, secrets, or private files are transmitted unless you explicitly configure a paid AI provider for text drafting.
 
 ## Quick start (Linux/macOS/Windows with Node 22+)
@@ -170,7 +170,7 @@ If the laptop sleeps or shuts down, the dashboard and scheduler stop. This proto
 
 ### Cloud deployment
 
-The current Node server can run on a private Node-compatible host with persistent disk, but the extension capture and security settings need additional configuration. **Do not deploy the sample server publicly without an access gateway, HTTPS, and a hardened data store.** This first iteration is meant for local or private-tailnet use.
+`deploy/` holds what a host that stays on needs: a `Dockerfile` at the repository root, a Compose file that puts Caddy in front for HTTPS, and a systemd unit for hosts without Docker. [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) walks through each. **Do not expose the server without HTTPS and a long `DASHBOARD_PASSWORD`.** Nothing in this repository deploys it for you; choosing and paying for a host is yours.
 
 ## Tests
 
@@ -215,7 +215,10 @@ Note: Browser actions that X does not authorize are not enabled.
 
 - `src/server.js`: starts the services (store, auth, queue, scheduler), then dispatches each request through the route table.
 - `src/router.js`: the route table. Every route is registered with the access it needs (`public`, `agent`, or a least role), so a permission cannot be forgotten.
-- `src/routes-*.js`: the routes themselves, grouped by area: `public` (sign-in, capture, local-agent protocol), `workflow` (posts, drafts, evidence, tasks), `groups` (groups, bots, runs, conversations) and `account` (users, sessions, agents, vault, backups).
+- `src/routes-*.js`: the routes themselves, grouped by area: `public` (sign-in, capture, local-agent protocol), `workflow` (posts, drafts, evidence, tasks), `groups` (groups, bots, runs, conversations) and `account` (users, sessions, agents, vault, backups), `workspaces` and `push`.
+- `src/workspaces.js`: one database file per workspace. A request works on its session's workspace and no other.
+- `src/push.js`: Web Push (message encryption and VAPID signing) with `node:crypto`, no library.
+- `agent/browser.mjs`: the local agent's real-browser reader, driving an installed Chrome over the DevTools protocol.
 - `src/http.js`: JSON responses with the security headers, bounded body readers and the same-origin check.
 - `src/sqlite-store.js`: the default store. Each record is kept whole next to its typed columns, so a restart reads back exactly what was written.
 - `shared/chats.js`: conversation history rules, shared by the server and the browser-local transport.
@@ -252,6 +255,8 @@ Both paths run the same `shared/workflow.js` rules, so the demo and the real das
 - The local agent refuses `http.check` targets on private or local networks and does not follow redirects. Set `AGENT_ALLOW_PRIVATE=1` on the device to allow private addresses on purpose.
 - At most `AI_MAX_CONCURRENCY` model calls (default 4) run at once; a workspace holds at most 2000 collected posts.
 - Model output in a chat carries an **AI** mark that only the server can set, on runs it executed itself. A browser can add built-in command replies to a conversation, but it cannot mark them as model output or give them a sender the conversation does not have.
+- Each workspace keeps its data in its own database file (`state.ws-<id>.db` beside `state.db`). Accounts and memberships live in the first one. Only an owner of the first workspace can create workspaces; people are invited to one workspace at a time.
+- Push subscriptions belong to the account that made them. The installation's push key pair is generated on first use and stored encrypted with the vault key. A push endpoint must be a public https address.
 - Webhook notifications are not delivered to private or local addresses, and redirects are not followed. Set `WEBHOOK_ALLOW_PRIVATE=1` to allow a relay on your own network.
 - Captured posts are **untrusted external content**; input is escaped and URL schemes validated. Model output never receives browser or publishing tools, and **the final Post click is always human**.
 - Run behind an HTTPS reverse proxy; enable `HSTS=1` only after TLS works. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
