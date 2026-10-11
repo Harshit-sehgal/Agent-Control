@@ -17,7 +17,7 @@
 import * as tasks from '../shared/tasks.js';
 import {activity} from '../shared/core.js';
 
-export function createQueue(store, handlers = {}, {intervalMs = 2000, workerId, leaseMs = 60000, batch = 5} = {}) {
+export function createQueue(store, handlers = {}, {intervalMs = 2000, workerId, leaseMs = 60000, batch = 5, onFail = null} = {}) {
   const id = workerId || `worker-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
   let busy = false;
   let timer = null;
@@ -35,6 +35,9 @@ export function createQueue(store, handlers = {}, {intervalMs = 2000, workerId, 
           await store.update(s => tasks.completeTask(s, task.id, result ?? null));
         } catch (e) {
           await store.update(s => tasks.failTask(s, task.id, e.message));
+          // Failure notification is a separate, non-blocking concern: the task
+          // record is already durable, so a notify failure must not mask it.
+          try { if (onFail) await onFail(task, e); } catch (notifyError) { console.error('Failure notify error:', notifyError.message); }
         }
       }
     } catch (e) {

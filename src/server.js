@@ -18,6 +18,7 @@ import * as evidence from '../shared/evidence.js';
 import * as agent from './agent.js';
 import * as credentials from './credentials.js';
 import * as backup from './backup.js';
+import * as notifications from './notifications.js';
 import {pruneState,RETENTION_DEFAULTS} from '../shared/retention.js';
 import {aiEnabled,aiModel,aiProvider,makeDraft,executeCustomBot} from './ai.js';
 import {startScheduler,startRetention} from './scheduler.js';
@@ -54,21 +55,44 @@ if(recoveredAgentTasks)console.log(`Re-armed ${recoveredAgentTasks} agent task(s
 agent.attachVault(store,STORE_PATH);
 // Task kinds map to handlers here rather than inside the queue module, so the
 // worker stays independent of the server surface it drives.
-const stopQueue=createQueue(store,{
-  ...defaultHandlers(store),
-  'candidate-draft': async task=>processCandidate(task.payload.candidateId),
+// Notifications enqueue themselves as queue tasks, so the enqueue hook is
+// filled in once the queue exists (handlers are registered before start()).
+let enqueueNotification=()=>{};
+const notify=(event)=>notifications.notify(store,enqueueNotification,{workspaceId:DEFAULT_WORKSPACE_ID,userId:null,...event});
+const queue=createQueue(store,{
+  ...defaultHandlers(store,notify),  'candidate-draft': async task=>processCandidate(task.payload.candidateId),
   'group-run': async task=>{ await queueGroupRun(store,{groupId:task.payload.groupId,message:task.payload.message,directBotId:task.payload.directBotId}); },
   'agent-job': async task=>{
-    // Local-agent dispatch lands in phase F; until an agent is paired this
-    // fails loudly instead of silently marking the job done.
-    throw Object.assign(new Error('No paired local agent is available for this job yet. Pair a device first.'),{status:422});
+    // Dispatch to a paired local agent: enqueue an agent task for each agent
+    // that holds the required permission. The queue's idempotency and the
+    // agent-side lease make exactly-once practical without claiming more than
+    // the protocol can prove.
+    const kind=task.payload.action;
+    const agents=store.all("SELECT id,permissions FROM agents WHERE revoked_at IS NULL").map(a=>({id:a.id,permissions:JSON.parse(a.permissions||'[]')}))
+      .filter(a=>!task.payload.agentId||a.id===task.payload.agentId)
+      .filter(a=>a.permissions.includes(kind));
+    if(!agents.length)throw new Error('No paired local agent holds the permission this job needs.');
+    for(const a of agents){
+      agent.enqueueAgentTask(store,a.id,{kind,payload:task.payload.params||{},idempotencyKey:`job:${task.id}:${a.id}`,createdBy:task.createdBy});
+    }
+    return {dispatchedTo:agents.map(a=>a.id)};
   },
-}).start();
+  'notification': async task=>{
+    const result=await notifications.deliver(store,task);
+    store.run('UPDATE notifications SET status=?, sent_at=? WHERE id=?','sent',new Date().toISOString(),task.payload.notificationId);
+    return result;
+  },
+},{onFail:(task,error)=>Promise.resolve(notify({title:'A background task failed',body:`${task.title}: ${error.message}`,kind:'task-failure',meta:{taskId:task.id}}))});
+// The queue exists now, so notifications can enqueue themselves as delivery
+// tasks. Handlers above captured this closure, not a started loop.
+enqueueNotification=(s,spec)=>s.update(st=>{enqueueTask(st,spec);});
+const stopQueue=queue.start();
 if(store.recoveredFrom)console.warn(`WARNING: ${STORE_PATH} was unreadable and has been moved to ${store.recoveredFrom}. A fresh state was created.`);
 const TYPES={'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8','svg':'image/svg+xml','png':'image/png','ico':'image/x-icon'};
 const isLive=()=>aiEnabled();
 function fail(message,status=400){throw Object.assign(new Error(message),{status});}
-const SECURITY={'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer'};
+const HSTS_ENABLED=process.env.HSTS==='1'||String(process.env.PUBLIC_ORIGIN||'').startsWith('https://');
+const SECURITY={'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer',...(HSTS_ENABLED?{'Strict-Transport-Security':'max-age=31536000; includeSubDomains'}:{})};
 function send(res,status,value,headers={}){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...SECURITY,...headers});res.end(JSON.stringify(value));}
 function cookie(req,key){const found=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith(key+'='));return found?.slice(key.length+1);}
 /** Resolve the signed-in principal from the server-side session table, or null. */
@@ -116,6 +140,8 @@ const WRITE_ROUTES=[
   [/^\/api\/credentials\/[a-f0-9-]+$/,'DELETE','admin'],
   [/^\/api\/retention\/prune$/,'POST','admin'],
   [/^\/api\/admin\/restore$/,'POST','admin'],
+  [/^\/api\/notifications\/read$/,'POST','member'],
+  [/^\/api\/notification-prefs$/,'PATCH','member'],
   [/^\/api\/demo\/seed$/,'POST','member'],
   [/^\/api\/reset-demo$/,'POST','member'],
 ];
@@ -147,7 +173,7 @@ async function processCandidate(id){
   }
 }
 
-function snapshot(req){const s=store.read();const me=principal(req);return {...s,aiEnabled:isLive(),aiModel:isLive()?aiModel():null,me:me?{email:me.email,role:me.role}:null,retention:retentionSettings(s),serverTime:new Date().toISOString()};}
+function snapshot(req){const s=store.read();const me=principal(req);return {...s,aiEnabled:isLive(),aiModel:isLive()?aiModel():null,me:me?{email:me.email,role:me.role}:null,retention:retentionSettings(s),notifications:me?notifications.listNotifications(store,me.userId,50):[],unread:me?notifications.unreadCount(store,me.userId):0,serverTime:new Date().toISOString()};}
 const retentionSettings=s=>({...RETENTION_DEFAULTS,...(s.settings?.retention||{})});
 async function api(req,res,u){
   const p=u.pathname,m=req.method;
@@ -400,6 +426,23 @@ async function api(req,res,u){
     return send(res,200,result);
   }
   // --- Retention: preview then apply the workspace policy ---
+  // --- Notifications: feed, read state, and per-user channel preferences ---
+  if(p==='/api/notifications'&&m==='GET'){
+    const u=requireAuth(req);
+    return send(res,200,{notifications:notifications.listNotifications(store,u.userId),unread:notifications.unreadCount(store,u.userId)});
+  }
+  match=p.match(/^\/api\/notifications\/read$/);
+  if(match&&m==='POST'){
+    const u=requireAuth(req);
+    const b=await jsonBody(req);
+    return send(res,200,notifications.markRead(store,u.userId,Array.isArray(b?.ids)?b.ids:[b?.ids].filter(Boolean)));
+  }
+  if(p==='/api/notification-prefs'&&m==='GET'){const u=requireAuth(req);return send(res,200,notifications.getPreferences(store,u.userId));}
+  if(p==='/api/notification-prefs'&&m==='PATCH'){
+    const u=requireAuth(req);
+    const b=await jsonBody(req);
+    return send(res,200,notifications.updatePreferences(store,u.userId,b));
+  }
   if(p==='/api/retention/preview'&&m==='GET'){
     const state=store.read();
     return send(res,200,{policy:retentionSettings(state),preview:pruneState(state,{dryRun:true})});
@@ -452,6 +495,16 @@ const server=http.createServer(async(req,res)=>{
     else fail('Method not allowed.',405);
   }catch(e){let status=e.status||500;console.error(status===500?'Server error: '+e.message:'');if(res.headersSent){res.end();return;}send(res,status,{error:status===500?'Internal server error':e.message});}
 });
+// Fail loudly on a misconfiguration that would silently weaken security, and
+// warn about the rest; every check is about the deployment, not the app logic.
+function preflight(){
+  const origin=process.env.PUBLIC_ORIGIN||'';
+  if(origin&&!/^https?:\/\//.test(origin))throw new Error('PUBLIC_ORIGIN must be an absolute http(s) URL, e.g. https://dash.example.com');
+  if(HSTS_ENABLED&&!origin.startsWith('https://'))console.warn('config: HSTS is on but PUBLIC_ORIGIN is not https. Only enable it behind TLS termination.');
+  if(!process.env.DASHBOARD_PASSWORD)console.warn('config: no DASHBOARD_PASSWORD set. A random password is printed each boot; set one for a stable login.');
+  if(HOST!=='127.0.0.1'&&HOST!=='localhost'&&!origin.startsWith('https://'))console.warn('config: binding to '+HOST+' without HTTPS. Put TLS in front (reverse proxy).');
+}
+preflight();
 server.listen(PORT,HOST,()=>{
   console.log(`\nAgent Control Prototype: http://${HOST}:${PORT}`);
   if(!process.env.DASHBOARD_PASSWORD) console.log(`Temporary dashboard password (changes on restart): ${PASSWORD}`);
