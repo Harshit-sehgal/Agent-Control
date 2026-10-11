@@ -48,7 +48,8 @@ async function jsonBody(req){let total=0;const chunks=[];for await (const chunk 
 function snapshot(){const s=store.read();return {...s,aiEnabled:isLive(),serverTime:new Date().toISOString()};}
 async function api(req,res,u){
   const p=u.pathname,m=req.method;
-  if(p==='/api/health'&&m==='GET')return send(res,200,{ok:true,version:VERSION});
+  // Health checks and uptime probes commonly use HEAD; answer both, bodyless for HEAD.
+  if(p==='/api/health'&&(m==='GET'||m==='HEAD')){const payload=JSON.stringify({ok:true,version:VERSION});res.writeHead(200,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...SECURITY});return res.end(m==='HEAD'?undefined:payload);}
   if(p==='/api/login'&&m==='POST'){
     const ip=req.socket.remoteAddress||'unknown',record=attempts.get(ip)||{count:0,until:0};
     if(Date.now()>record.until){record.count=0;record.until=Date.now()+900000;}
@@ -84,9 +85,11 @@ async function api(req,res,u){
   if(p==='/api/candidates'&&m==='POST'){
     const b=await jsonBody(req);
     // Report duplicates the same way /api/capture does, so the UI can tell the
-    // user the post was already queued instead of pretending it was added.
+    // user the post was already queued instead of pretending it was added. The
+    // flag has to ride along with the candidate or the browser-local transport
+    // and the Node route would answer differently for the same input.
     const result=await store.update(s=>wf.addCandidate(s,b));
-    return send(res,result.duplicate?200:201,result.candidate);
+    return send(res,result.duplicate?200:201,{...result.candidate,duplicate:result.duplicate});
   }
   let match=p.match(/^\/api\/candidates\/([a-f0-9-]+)\/process$/);
   if(match&&m==='POST'){
@@ -178,14 +181,14 @@ const ASSETS=new Set(['index.html','app.css','polish.css','usability.css','trans
 async function serve(req,res,u){
   let rel=u.pathname==='/'?'index.html':u.pathname.slice(1);
   if(!ASSETS.has(rel))return send(res,404,{error:'Not found'});
-  try {const body=await fs.readFile(path.join(PUBLIC,rel));res.writeHead(200,{'Content-Type':TYPES[rel.split('.').pop()]||'application/octet-stream','Content-Security-Policy':CSP,...SECURITY,'Cache-Control':'no-store'});res.end(body);}catch{return send(res,404,{error:'Missing asset'});}
+  try {const body=await fs.readFile(path.join(PUBLIC,rel));res.writeHead(200,{'Content-Type':TYPES[rel.split('.').pop()]||'application/octet-stream','Content-Security-Policy':CSP,...SECURITY,'Cache-Control':'no-store'});res.end(req.method==='HEAD'?undefined:body);}catch{return send(res,404,{error:'Missing asset'});}
 }
 const server=http.createServer(async(req,res)=>{
   try{
     const host=req.headers.host||'localhost';const url=new URL(req.url,`http://${host}`);
     checkOrigin(req);
     if(url.pathname.startsWith('/api/'))await api(req,res,url);
-    else if(req.method==='GET')await serve(req,res,url);
+    else if(req.method==='GET'||req.method==='HEAD')await serve(req,res,url);
     else fail('Method not allowed.',405);
   }catch(e){let status=e.status||500;console.error(status===500?'Server error: '+e.message:'');if(res.headersSent){res.end();return;}send(res,status,{error:status===500?'Internal server error':e.message});}
 });

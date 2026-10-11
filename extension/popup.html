@@ -1,1 +1,25 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Agent Capture</title><style>body{font:13px system-ui;width:330px;margin:0;background:#111827;color:#e9eefb;padding:17px}h2{margin:0 0 6px}p{font-size:12px;line-height:1.5;color:#a0acc6}label{display:block;font-size:11px;margin-top:13px}input,textarea{width:100%;margin-top:5px;box-sizing:border-box;background:#0a1222;border:1px solid #455673;color:#fff;border-radius:7px;padding:9px}textarea{resize:vertical}button{width:100%;margin-top:13px;padding:11px;background:#b6c8ff;color:#111c32;font-weight:650;border:0;border-radius:8px;cursor:pointer}#msg{font-size:11px;line-height:1.5;color:#9fdbb5;margin-top:12px;overflow-wrap:anywhere}.tip{border-left:2px solid #9eb7f2;padding-left:10px}</style></head><body><h2>◈ Agent Capture</h2><p>Capture one visible post after selecting it. Your dashboard prepares the draft; you click Post yourself.</p><label>Dashboard URL<input id="endpoint" value="http://127.0.0.1:4173" placeholder="https://dashboard.example.com"></label><label>Capture token<input id="token" type="password" placeholder="From Dashboard → Settings"></label><label>Topic (optional)<input id="topic" placeholder="AI, robotics..."></label><p class="tip">On X, highlight text from the post you want to capture, then open this extension. On the demo feed, select text inside one card.</p><button id="capture">Capture selected post</button><p id="msg"></p><script src="popup.js"></script></body></html>
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>Agent Capture</title><style>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{font:13px/1.5 'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;width:330px;margin:0;background:#000;color:#f4f4f4;padding:18px}
+h2{margin:0 0 8px;font-size:15px;font-weight:600;display:flex;align-items:center;gap:8px}
+p{font-size:12px;line-height:1.55;color:#8f8f8f;margin:0}
+label{display:block;font-size:11px;font-weight:600;color:#c7c7c7;margin-top:14px}
+input{width:100%;margin-top:6px;background:#111;border:1px solid #2e2e2e;color:#f4f4f4;border-radius:9px;padding:9px 11px;font:inherit;outline:0}
+input:focus{border-color:#3a3a3a;box-shadow:0 0 0 3px rgba(255,255,255,.06)}
+input::placeholder{color:#6a6a6a}
+button{width:100%;margin-top:16px;padding:11px;background:#fff;color:#0a0a0a;font:600 13px/1 inherit;border:0;border-radius:10px;cursor:pointer}
+button:hover{background:#e6e6e6}
+button:focus-visible{outline:2px solid #fff;outline-offset:2px}
+#msg{font-size:11.5px;line-height:1.5;color:#8f8f8f;margin-top:13px;overflow-wrap:anywhere;min-height:16px}
+.tip{border-left:2px solid #333;padding-left:11px;margin-top:14px}
+</style></head><body>
+<h2>&#10022; Agent Capture</h2>
+<p>Capture one visible post after selecting it. Your dashboard prepares the draft; you click Post yourself.</p>
+<label>Dashboard URL<input id="endpoint" value="http://127.0.0.1:4173" placeholder="https://dashboard.example.com"></label>
+<label>Capture token<input id="token" type="password" placeholder="From Dashboard &rarr; Settings"></label>
+<label>Topic (optional)<input id="topic" placeholder="AI, robotics..."></label>
+<p class="tip">On X, highlight text from the post you want to capture, then open this extension. On the demo feed, select text inside one card.</p>
+<button id="capture">Capture selected post</button>
+<p id="msg" role="status" aria-live="polite"></p>
+<script src="popup.js"></script></body></html>

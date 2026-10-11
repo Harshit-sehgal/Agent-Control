@@ -1,61 +1,77 @@
-/* Agent Control 0.5 — contextual controls, filters and responsive usability. */
+/* Agent Control — contextual controls, filters and responsive usability.
+   Grok-style overflow menus: a compact trigger that opens a floating panel. */
+
 .action-menu{position:relative;display:inline-flex;flex:0 0 auto;z-index:2}
-.action-menu[open]{z-index:50}
-.action-menu>summary{list-style:none;display:grid;place-items:center;width:35px;height:35px;border:1px solid transparent;border-radius:10px;cursor:pointer;color:#67728a;background:transparent;transition:background .15s,border-color .15s}
+.action-menu[open]{z-index:60}
+.action-menu>summary{
+  list-style:none;display:grid;place-items:center;width:32px;height:32px;border:1px solid transparent;
+  border-radius:9px;cursor:pointer;color:var(--muted);background:transparent;transition:background .14s,color .14s,border-color .14s;
+}
 .action-menu>summary::-webkit-details-marker{display:none}
-.action-menu>summary:hover,.action-menu[open]>summary{background:#efedff;color:#5b58d7;border-color:#e5e3ff}
-.action-menu>summary:focus-visible{outline:3px solid #ada8fa;outline-offset:2px}
-.dropdown-panel{position:absolute;right:0;top:calc(100% + 7px);width:max-content;min-width:208px;max-width:min(300px,90vw);padding:6px;background:#fff;border:1px solid #e2e7f0;border-radius:13px;box-shadow:0 18px 48px #1b26432b;z-index:60}
-.dropdown-panel button{width:100%;display:flex;gap:10px;align-items:center;text-align:left;padding:10px 11px;font-weight:650;font-size:12px;color:#35415d;border:0;border-radius:8px;background:transparent;cursor:pointer;white-space:nowrap}
-.dropdown-panel button:hover,.dropdown-panel button:focus-visible{background:#f2f0ff;color:#4d4abb}
-.dropdown-panel button svg{color:#838eaa;flex-shrink:0}
-.topbar .action-menu>summary{border-color:#e7eaf1;background:#fafbfe}
-.topbar .action-menu>summary:hover{background:#f1f0ff}
+.action-menu>summary:hover,.action-menu[open]>summary{background:var(--surface-3);color:var(--ink);border-color:var(--line-2)}
+.action-menu>summary:focus-visible{outline:2px solid #f5f5f5;outline-offset:2px}
+
+.dropdown-panel{
+  position:absolute;right:0;top:calc(100% + 6px);width:max-content;min-width:206px;max-width:min(300px,90vw);
+  padding:6px;background:var(--surface-2);border:1px solid var(--line-2);border-radius:13px;
+  box-shadow:var(--shadow-lg);z-index:70;transform-origin:top right;animation:menu-in .13s ease;
+}
+@keyframes menu-in{from{opacity:0;transform:translateY(-4px) scale(.98)}to{opacity:1;transform:none}}
+.dropdown-panel button{
+  width:100%;display:flex;gap:10px;align-items:center;text-align:left;padding:9px 11px;font-weight:500;
+  font-size:12.5px;color:var(--ink-2);border:0;border-radius:8px;background:transparent;cursor:pointer;white-space:nowrap;
+}
+.dropdown-panel button:hover,.dropdown-panel button:focus-visible{background:var(--surface-4);color:var(--ink)}
+.dropdown-panel button svg{color:var(--muted);flex-shrink:0}
+.dropdown-panel button:focus-visible{outline:2px solid #f5f5f5;outline-offset:-2px}
+.topbar .action-menu>summary{border-color:var(--line-2);background:var(--surface-2)}
+
 .group-card{cursor:default;isolation:isolate;min-width:0}
 .group-card-head{width:100%;min-width:0;align-items:flex-start}
 .group-card-head>div:nth-child(2){flex:1;min-width:0}
 .group-card-head .menu-anchor{margin-left:auto;align-self:flex-start}
-.group-open{margin-top:auto;width:100%;border:0;background:transparent;color:#707c92;font-size:11px;font-weight:700;text-align:left;display:flex;justify-content:space-between;align-items:center;padding:12px 0 0;cursor:pointer;border-top:1px solid #e9edf4}
-.group-open span{display:inline-flex;gap:4px;align-items:center;color:var(--accent)}
-.group-open:hover span{color:var(--accent-dark)}
-.bot-card{cursor:default;isolation:isolate;min-width:0}
-.bot-card-head{display:flex;align-items:flex-start;justify-content:space-between}
-.bot-card-head .action-menu{margin:-4px -4px 0 0}
-.bot-card-link{display:flex;align-items:center;justify-content:space-between;gap:5px;margin-top:auto;padding:11px 0 0;border:0;border-top:1px solid #edf0f5;background:transparent;color:var(--accent);font-size:11px;font-weight:750;cursor:pointer;width:100%;text-align:left}
-.bot-card-link:hover{color:var(--accent-dark)}
-.toolbar{display:flex;align-items:end;gap:9px;flex-wrap:wrap;margin:0 0 13px}
-.search-field{min-width:190px;flex:1;display:flex;align-items:center;gap:9px;background:#fff;border:1px solid #e0e5ee;border-radius:10px;padding:0 12px;height:43px;color:#8591a6;box-shadow:0 2px 10px #101a3010}
-.search-field:focus-within{border-color:#a5a0eb;box-shadow:0 0 0 3px #e8e7ff}
-.search-field input{border:0;outline:0;min-width:0;width:100%;height:100%;font-size:12px;color:#2b3550;background:transparent}
-.search-field input::placeholder{color:#9ca8bb}
-.select-wrap{display:flex;flex-direction:column;gap:5px;min-width:145px;color:#7f899d;font-size:10px;font-weight:700}
-.select-wrap .select{height:43px;min-height:43px;max-width:100%;margin:0;padding:0 30px 0 12px;background:#fff;border-color:#e0e5ee;font-size:12px;font-weight:650;cursor:pointer}
-.approval-toolbar{margin-top:-1px;margin-bottom:17px}
+.group-card .action-menu,.bot-card .action-menu{z-index:20}
+/* Keep an open menu above neighbouring hover transforms. */
+.group-card:has(.action-menu[open]),.bot-card:has(.action-menu[open]){transform:none;z-index:50;position:relative}
+
+/* ---------- Toolbars ---------- */
+.toolbar{display:flex;align-items:flex-end;gap:9px;flex-wrap:wrap;margin:0 0 14px}
+.search-field{
+  min-width:200px;flex:1;display:flex;align-items:center;gap:9px;height:42px;padding:0 13px;
+  background:var(--surface-2);border:1px solid var(--line-2);border-radius:10px;color:var(--muted);
+  transition:border-color .15s,box-shadow .15s;
+}
+.search-field:focus-within{border-color:var(--line-3);box-shadow:0 0 0 3px rgba(255,255,255,.05)}
+.search-field input{flex:1;min-width:0;height:100%;border:0;outline:0;background:transparent;font-size:13px;color:var(--ink)}
+.search-field input::placeholder{color:var(--subtle)}
+.select-wrap{display:flex;flex-direction:column;gap:6px;min-width:150px;color:var(--subtle);font-size:10.5px;font-weight:600;letter-spacing:.3px}
+.select-wrap .select{height:42px;margin:0;font-size:12.5px;font-weight:500}
+.approval-toolbar{margin-bottom:18px}
 .approval-toolbar>.btn{height:42px}
-.archived-draft{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-bottom:10px}
-.archived-draft p{margin:8px 0 0}
+.mobile-tab-selector{display:none}
+.help-text{display:block;font-size:11.5px;color:var(--subtle);line-height:1.5;margin-top:7px}
 .field-disabled{opacity:.45}
 .field-disabled :is(input,select){pointer-events:none}
-.mobile-tab-selector{display:none}
-.chat-head>.action-menu{margin-left:2px}
 .chat-head>.action-menu .dropdown-panel{right:0;left:auto}
-.group-card .action-menu,.bot-card .action-menu{z-index:20}
-/* Avoid hover transforms that make an open menu move under the pointer. */
-.group-card:has(.action-menu[open]),.bot-card:has(.action-menu[open]){transform:none;z-index:40;position:relative}
-@media(max-width:1050px){.toolbar .search-field{min-width:100%;flex-basis:100%}.select-wrap{flex:1}}
-@media(max-width:650px){
+
+@media(max-width:1050px){
+  .toolbar .search-field{min-width:100%;flex-basis:100%}
+  .select-wrap{flex:1}
+}
+@media(max-width:700px){
   .tabs{display:none}
-  .mobile-tab-selector{display:flex;flex-direction:column;gap:6px;margin:8px 0 18px;color:#647089;font-size:11px;font-weight:700}
+  .mobile-tab-selector{display:flex;flex-direction:column;gap:6px;margin:4px 0 18px;color:var(--subtle);font-size:11px;font-weight:600}
   .mobile-tab-selector .select{height:44px;margin:0}
-  .toolbar{gap:9px}
   .search-field{min-width:100%}
-  .select-wrap{flex:1;min-width:125px}
-  .dropdown-panel{max-width:min(260px,85vw)}
+  .select-wrap{flex:1;min-width:130px}
+  .dropdown-panel{max-width:min(260px,86vw)}
   .group-card .dropdown-panel,.bot-card .dropdown-panel{right:0}
   .topbar .action-menu{display:none}
-  .draft-actions{gap:7px}
+  .draft-actions{gap:8px}
   .draft-actions .btn{min-height:38px}
   .archived-draft{align-items:flex-start}
 }
-@media(prefers-reduced-motion:reduce){.action-menu>summary{transition:none}}
-.help-text{display:block;font-size:10.5px;color:#8995a8;line-height:1.5;margin-top:6px}
+@media(prefers-reduced-motion:reduce){
+  .action-menu>summary{transition:none}
+  .dropdown-panel{animation:none}
+}

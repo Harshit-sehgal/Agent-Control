@@ -32,6 +32,15 @@ test('Specialist suggestions remain relevant',()=>{
   assert.ok(botSuggestions('Writer').some(x=>/Draft/i.test(x)));
 });
 
+test('custom bots run through the Node provider only on the server build',()=>{
+  // The README promises custom bots run when a key is configured; the UI used
+  // to answer every custom bot with the offline command demo instead.
+  assert.match(app,/state\.aiEnabled&&b\.type==='custom'/);
+  assert.match(app,/\/api\/bots\/run/);
+  // And the chat/inspector must stop claiming the bot is offline in that case.
+  assert.match(app,/This bot runs its instructions through the server AI provider/);
+  assert.match(app,/Server AI provider':'Not connected'/);
+});
 test('bot profiles never mirror name/instructions into browser-local UI state',()=>{
   // `profile()` spreads the cosmetic UI record over the bot, so a name/instructions
   // copy there would shadow the server value permanently and edits made on another

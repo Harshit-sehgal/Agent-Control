@@ -37,6 +37,12 @@ test('complete dashboard capture → draft → edit → approve → ready → ma
     assert.equal(login.status,200);const cookie=login.cookie.split(';')[0];
     const state=(await send('GET','/api/state',undefined,cookie)).body;
     assert.equal(state.aiEnabled,false);
+    // Standard HEAD probes must succeed with the security headers and no body.
+    const head=await fetch(t.base+'/',{method:'HEAD'});
+    assert.equal(head.status,200);
+    assert.equal(await head.text(),'');
+    assert.match(head.headers.get('content-security-policy')||'',/frame-ancestors 'none'/);
+    assert.equal((await fetch(t.base+'/api/health',{method:'HEAD'})).status,200);
     const c=await send('POST','/api/capture',{url:'https://x.com/test/status/123',text:'How can robotics models become more reliable in practice?',author:'Tester',topic:'robotics'},undefined,{'X-Capture-Token':state.captureToken,Origin:'chrome-extension://example'});
     assert.equal(c.status,201);
     const bad=await send('POST','/api/capture',{url:'https://x.com/test/status/4',text:'Some other post data here'},undefined,{'X-Capture-Token':'wrong'});
@@ -104,6 +110,30 @@ test('bot profile edits persist to the store and survive a restart', {timeout:25
     assert.equal((await send('PATCH','/api/groups/missing/bots/writer',{name:'x',instructions:'y'},cookie)).status,404);
     assert.equal((await send('PATCH','/api/groups/x-engage/bots/writer',{name:'',instructions:'y'},cookie)).status,400);
     assert.equal((await send('PATCH','/api/groups/x-engage/bots/writer',{name:'x',instructions:'y'})).status,401);
+  }finally{await t.stop();}
+});
+test('adding a duplicate candidate reports the duplicate instead of lying about it', {timeout:25000}, async()=>{
+  // /api/capture already reported duplicates, but /api/candidates dropped the
+  // flag while returning the candidate, so the Node build and the browser-local
+  // transport answered the same input differently and the UI always claimed the
+  // post was added.
+  const t=await launch();
+  try{
+    const send=async(method,url,body,cookie,headers={})=>{
+      const r=await fetch(t.base+url,{method,headers:{'Content-Type':'application/json',...headers,...(cookie?{Cookie:cookie}:{})},body:body===undefined?undefined:JSON.stringify(body)});
+      const value=await r.json();return {status:r.status,body:value,cookie:r.headers.get('set-cookie')};
+    };
+    const cookie=(await send('POST','/api/login',{password:'test-password-1234'})).cookie.split(';')[0];
+    const post={url:'https://x.com/test/status/999',text:'A candidate long enough to pass validation.',author:'Dup',topic:'AI'};
+    const first=await send('POST','/api/candidates',post,cookie);
+    assert.equal(first.status,201);
+    assert.equal(first.body.duplicate,false);
+    const again=await send('POST','/api/candidates',post,cookie);
+    assert.equal(again.status,200,'A duplicate is accepted, not created, so it answers 200.');
+    assert.equal(again.body.duplicate,true);
+    assert.equal(again.body.id,first.body.id,'The duplicate must return the original candidate.');
+    const state=(await send('GET','/api/state',undefined,cookie)).body;
+    assert.equal(state.candidates.length,1,'No second candidate may be stored.');
   }finally{await t.stop();}
 });
 test('a candidate interrupted mid-draft is processable again after a restart', {timeout:25000}, async()=>{

@@ -63,6 +63,26 @@ test('chat clearing and sensitive changes require confirmation',()=>{
  assert.match(js,/duplicate-bot/);
  assert.match(js,/pin-bot/);
 });
+test('hash routes respond to browser Back and Forward',()=>{
+  assert.match(js,/function applyRoute\(/);
+  assert.match(js,/addEventListener\('popstate'/);
+  assert.match(js,/history\.pushState/);
+});
+test('a background refresh never wipes an in-progress form or the sign-in',()=>{
+  // The 30s poll used to re-render unconditionally, discarding whatever the user
+  // had typed in the Discovery/Settings forms, and rebuilding the sign-in dialog
+  // (clearing the password) on every 401.
+  assert.match(js,/editing=active/);
+  assert.match(js,/overlay=htmlState\.modal/);
+  assert.match(js,/clearInterval\(syncTimer\)/);
+  assert.match(js,/const visible=Boolean\(layer\)/);
+});
+test('the UI distinguishes a duplicate capture from a new one',()=>{
+  // /api/candidates now returns `duplicate`; the toast must reflect it rather
+  // than always claiming a new post was added.
+  assert.match(js,/r\?\.duplicate\?/);
+  assert.match(js,/already in Discovery/);
+});
 test('the UI adapts its copy and adds sign-out for the Node server build',()=>{
  assert.match(js,/function isStaticDemo\(/);
  assert.match(js,/agent-backend/);

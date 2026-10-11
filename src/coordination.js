@@ -61,6 +61,9 @@ export async function runGroup(store,id,executor=executeCustomBot){
       });
     }
     await store.update(s=>{const r=s.groupRuns.find(x=>x.id===id);r.status='completed';r.completedAt=stamp();r.lastOutput=previous?.output??null;activity(s,'group-run','Completed bot coordination run',{runId:id});});
-  }catch(e){await store.update(s=>{const r=s.groupRuns?.find(x=>x.id===id);if(r){r.status='failed';r.error=clean(e.message);r.completedAt=stamp();activity(s,'group-error',`Coordination failed: ${clean(e.message)}`,{runId:id});}});}
+  // Only a run that was actually executing may be marked failed. A restart marks
+  // live runs `interrupted`; overwriting that with `failed` would report a crash
+  // the operator never saw as a model error and hide the explicit retry advice.
+  }catch(e){await store.update(s=>{const r=s.groupRuns?.find(x=>x.id===id);if(r&&r.status==='running'){r.status='failed';r.error=clean(e.message);r.completedAt=stamp();activity(s,'group-error',`Coordination failed: ${clean(e.message)}`,{runId:id});}});}
   finally{running.delete(id);}
 }
