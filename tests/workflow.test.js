@@ -107,18 +107,42 @@ test('settings validation rejects impossible delay windows', () => {
   assert.equal(result.maxDelay, 5);
 });
 
-test('groups, bots and schedules validate and persist', () => {
+test('migrate() converts legacy reminder schedules into structured tasks', () => {
+  const legacy = store();
+  legacy.schedules = [
+    {id: 'r1', label: 'Old once', kind: 'once', nextAt: new Date(Date.now() - 1000).toISOString(), intervalMinutes: null, enabled: true},
+    {id: 'r2', label: 'Old interval', kind: 'interval', nextAt: new Date(Date.now() + 60000).toISOString(), intervalMinutes: 42, enabled: true},
+    {id: 'r3', label: 'Disabled', kind: 'interval', nextAt: new Date(Date.now() + 60000).toISOString(), intervalMinutes: 42, enabled: false},
+  ];
+  migrate(legacy);
+  assert.deepEqual(legacy.schedules, []);
+  assert.equal(legacy.tasks.length, 3);
+  assert.ok(legacy.tasks.every(t => t.kind === 'reminder' && t.payload.label && t.status));
+  const done = legacy.tasks.find(t => t.payload.label === 'Old once');
+  assert.equal(done.status, 'done', 'A one-off whose time already passed must not fire late.');
+  assert.equal(legacy.tasks.find(t => t.payload.label === 'Disabled').status, 'done');
+  // Migration is idempotent and does not re-convert.
+  migrate(legacy);
+  assert.equal(legacy.tasks.length, 3);
+  assert.equal(legacy.version, SCHEMA_VERSION);
+});
+
+test('groups, bots and structured tasks validate and persist', () => {
   const s = store();
   assert.throws(() => addGroup(s, {name: '  '}), /Group name required/);
   const g = addGroup(s, {name: 'Insights', description: 'Research'});
   assert.throws(() => addBot(s, 'missing', {name: 'x', instructions: 'y'}), /Group not found/);
   const b = addBot(s, g.id, {name: 'Summarizer', instructions: 'Summarize input'});
   assert.equal(g.bots[0].id, b.id);
+  // Reminder creation now writes a structured task, not a passive schedule row.
   assert.throws(() => addSchedule(s, {label: 'x', kind: 'nope'}), /valid schedule kind/);
   const item = addSchedule(s, {label: 'Check queue', kind: 'interval', intervalMinutes: 60});
-  assert.equal(item.enabled, true);
+  assert.equal(s.tasks.length, 1);
+  assert.equal(s.tasks[0].kind, 'reminder');
+  assert.equal(s.tasks[0].payload.label, 'Check queue');
+  assert.equal(s.schedules.length, 0, 'The legacy schedules collection is emptied by migration.');
   removeSchedule(s, item.id);
-  assert.equal(s.schedules.length, 0);
+  assert.equal(s.tasks[0].status, 'cancelled');
   assert.throws(() => removeSchedule(s, 'none'), /Schedule not found/);
 });
 

@@ -9,8 +9,9 @@
  * lifecycle: candidate -> draft -> approved/scheduled -> ready -> posted.
  */
 import {activity,candidateInput,cleanText,scheduleApproval} from './core.js';
+import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js';
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export function fail(message, status = 400) {
   throw Object.assign(new Error(message), {status});
@@ -33,12 +34,16 @@ export function migrate(state) {
   state.candidates ??= [];
   state.drafts ??= [];
   state.runs ??= [];
-  state.schedules ??= [];
+  state.tasks ??= [];
   state.events ??= [];
   state.groups ??= [];
   state.groupMessages ??= {};
   state.groupRuns ??= [];
   if (!Number.isInteger(state.version)) state.version = 1;
+  // Passive reminder schedules become structured runnable tasks. Idempotent:
+  // after this runs, `schedules` is always an empty array and never returns.
+  state.schedules ??= [];
+  migrateSchedules(state);
   state.version = Math.max(state.version, SCHEMA_VERSION);
   return state;
 }
@@ -219,33 +224,31 @@ export function recoverInterrupted(state) {
 }
 
 
+/** Reminder compatibility layer: the UI and both transports still create
+ * reminders through these helpers, but the record they write is a structured
+ * `reminder`-kind task with retries, leases and status events. */
 export function addSchedule(state, body) {
-  const label = cleanText(body.label, 200);
-  const kind = body.kind;
-  if (!label || !['once', 'interval'].includes(kind)) fail('Label and valid schedule kind required.');
-  let nextAt, intervalMinutes = null;
-  if (kind === 'once') {
-    const when = Date.parse(body.nextAt);
-    if (!Number.isFinite(when) || when < Date.now() + 1000 || when > Date.now() + 365 * 86400000) fail('Choose a future date within one year.');
-    nextAt = new Date(when).toISOString();
-  } else {
-    intervalMinutes = Number(body.intervalMinutes);
-    if (!Number.isInteger(intervalMinutes) || intervalMinutes < 1 || intervalMinutes > 10080) fail('Interval must be 1–10080 minutes.');
-    nextAt = new Date(Date.now() + intervalMinutes * 60000).toISOString();
-  }
-  const item = {id: crypto.randomUUID(), label, kind, nextAt, intervalMinutes, enabled: true};
-  state.schedules.unshift(item);
-  activity(state, 'schedule', `Added reminder: ${label}`);
-  return item;
+  const task = enqueueTask(state, {kind: 'reminder', payload: {label: body.label, kind: body.kind, intervalMinutes: body.intervalMinutes, nextAt: body.nextAt}}).task;
+  return scheduleView(task);
 }
 
 export function removeSchedule(state, id) {
-  const i = state.schedules.findIndex(x => x.id === id);
-  if (i < 0) fail('Schedule not found.', 404);
-  const item = state.schedules.splice(i, 1)[0];
-  activity(state, 'schedule', `Removed reminder: ${item.label}`);
+  const task = state.tasks.find(t => t.id === id && t.kind === 'reminder');
+  if (!task) fail('Schedule not found.', 404);
+  cancelTask(state, id);
   return {ok: true};
 }
+
+/** Backwards-compatible shape for older UI callers: the live task projected
+ * into the fields the schedule list used to show. */
+const scheduleView = task => ({
+  id: task.id,
+  label: task.payload.label,
+  kind: task.payload.kind,
+  nextAt: task.runAt,
+  intervalMinutes: task.intervalMinutes,
+  enabled: task.status === 'queued' || task.status === 'running',
+});
 
 export function resetDemo(state) {
   state.candidates = state.candidates.filter(x => !x.demo);

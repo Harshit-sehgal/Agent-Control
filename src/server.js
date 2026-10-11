@@ -13,9 +13,11 @@ const openStore = async file => process.env.STORE_BACKEND === 'json'
   : openSqliteStore(file);
 import {activity,candidateInput,cleanText,scoreCandidate,uuid,CSP,DEMO_SAMPLES} from '../shared/core.js';
 import * as wf from '../shared/workflow.js';
+import * as tasks from '../shared/tasks.js';
 import {aiEnabled,aiModel,aiProvider,makeDraft,executeCustomBot} from './ai.js';
 import {startScheduler} from './scheduler.js';
 import {queueGroupRun,markInterrupted,coordinationState} from './coordination.js';
+import {createQueue,recoverQueue,defaultHandlers} from './queue.js';
 import {Auth,ROLES,sessionCookie,clearCookie} from './auth.js';
 
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
@@ -36,6 +38,19 @@ const stopScheduler=startScheduler(store);
 // sessions, resets and roles live in the database.
 const auth=new Auth(store);
 auth.ensureBootstrap(PASSWORD);
+await recoverQueue(store);
+// Task kinds map to handlers here rather than inside the queue module, so the
+// worker stays independent of the server surface it drives.
+const stopQueue=createQueue(store,{
+  ...defaultHandlers(store),
+  'candidate-draft': async task=>processCandidate(task.payload.candidateId),
+  'group-run': async task=>{ await queueGroupRun(store,{groupId:task.payload.groupId,message:task.payload.message,directBotId:task.payload.directBotId}); },
+  'agent-job': async task=>{
+    // Local-agent dispatch lands in phase F; until an agent is paired this
+    // fails loudly instead of silently marking the job done.
+    throw Object.assign(new Error('No paired local agent is available for this job yet. Pair a device first.'),{status:422});
+  },
+}).start();
 if(store.recoveredFrom)console.warn(`WARNING: ${STORE_PATH} was unreadable and has been moved to ${store.recoveredFrom}. A fresh state was created.`);
 const TYPES={'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8','svg':'image/svg+xml','png':'image/png','ico':'image/x-icon'};
 const isLive=()=>aiEnabled();
@@ -74,6 +89,9 @@ const WRITE_ROUTES=[
   [/^\/api\/bots\/run$/,'POST','member'],
   [/^\/api\/schedules$/,'POST','member'],
   [/^\/api\/schedules\/[a-f0-9-]+$/,'DELETE','member'],
+  [/^\/api\/tasks$/,'POST','member'],
+  [/^\/api\/tasks\/[a-f0-9-]+\/retry$/,'POST','member'],
+  [/^\/api\/tasks\/[a-f0-9-]+$/,'DELETE','member'],
   [/^\/api\/demo\/seed$/,'POST','member'],
   [/^\/api\/reset-demo$/,'POST','member'],
 ];
@@ -86,6 +104,21 @@ function authorize(actor,p,m){
   }
 }
 async function jsonBody(req){let total=0;const chunks=[];for await (const chunk of req){total+=chunk.length;if(total>128*1024)fail('Request too large.',413);chunks.push(chunk);}try{return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');}catch{fail('Invalid JSON.',400);}}
+/** Shared by the HTTP route and the queue worker: score a candidate and
+ * produce a draft, releasing the candidate if anything fails so a transient
+ * provider error never strands it. */
+async function processCandidate(id){
+  const context=await store.update(s=>wf.beginProcessing(s,id));
+  try{
+    const evaluation=scoreCandidate(context.candidate,context.settings.topics);
+    const result=await makeDraft(context.candidate,context.settings);
+    return await store.update(s=>wf.finishProcessing(s,id,evaluation,result));
+  } catch(e){
+    await store.update(s=>wf.failProcessing(s,id,e.message));
+    throw e;
+  }
+}
+
 function snapshot(req){const s=store.read();const me=principal(req);return {...s,aiEnabled:isLive(),aiModel:isLive()?aiModel():null,me:me?{email:me.email,role:me.role}:null,serverTime:new Date().toISOString()};}
 async function api(req,res,u){
   const p=u.pathname,m=req.method;
@@ -151,14 +184,8 @@ async function api(req,res,u){
   }
   let match=p.match(/^\/api\/candidates\/([a-f0-9-]+)\/process$/);
   if(match&&m==='POST'){
-    const id=match[1];
-    const context=await store.update(s=>wf.beginProcessing(s,id));
-    try{
-      const evaluation=scoreCandidate(context.candidate,context.settings.topics);
-      const result=await makeDraft(context.candidate,context.settings);
-      const newDraft=await store.update(s=>wf.finishProcessing(s,id,evaluation,result));
-      return send(res,201,newDraft);
-    } catch(e){await store.update(s=>wf.failProcessing(s,id,e.message));throw e;}
+    const draft=await processCandidate(match[1]);
+    return send(res,201,draft);
   }
   match=p.match(/^\/api\/drafts\/([a-f0-9-]+)$/);
   if(match&&m==='PATCH'){
@@ -229,6 +256,16 @@ async function api(req,res,u){
   }
   match=p.match(/^\/api\/schedules\/([a-f0-9-]+)$/);
   if(match&&m==='DELETE'){const result=await store.update(s=>wf.removeSchedule(s,match[1]));return send(res,200,result);}
+  // Structured task queue: the same records the internal worker executes.
+  if(p==='/api/tasks'&&m==='POST'){
+    const b=await jsonBody(req);
+    const result=await store.update(s=>tasks.enqueueTask(s,b));
+    return send(res,result.duplicate?200:201,result.task);
+  }
+  match=p.match(/^\/api\/tasks\/([a-f0-9-]+)\/retry$/);
+  if(match&&m==='POST'){const result=await store.update(s=>tasks.retryTask(s,match[1]));return send(res,200,result);}
+  match=p.match(/^\/api\/tasks\/([a-f0-9-]+)$/);
+  if(match&&m==='DELETE'){const result=await store.update(s=>tasks.cancelTask(s,match[1]));return send(res,200,result);}
   if(p==='/api/reset-demo'&&m==='POST'){
     const result=await store.update(s=>wf.resetDemo(s));
     return send(res,200,result);
@@ -269,4 +306,4 @@ server.listen(PORT,HOST,()=>{
   console.log(`AI mode: ${isLive()?`Connected · ${aiModel()} @ ${aiProvider()}`:'Template drafts (no AI provider configured)'}`);
   if(HOST!=='127.0.0.1'&&HOST!=='localhost')console.warn('WARNING: Use HTTPS plus a private network / access proxy for remote access.');
 });
-process.on('SIGINT',()=>{stopScheduler();server.close(()=>process.exit(0));});
+process.on('SIGINT',()=>{stopQueue();stopScheduler();server.close(()=>process.exit(0));});

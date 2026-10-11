@@ -221,7 +221,7 @@ export class SqliteStore {
       createdAt: this.kvGet('created_at') || now(),
       settings: {topics: [], style: '', opinions: '', minDelay: 2, maxDelay: 10},
       captureToken: this.kvGet('capture_token'),
-      groups: [], candidates: [], drafts: [], runs: [], schedules: [], events: [],
+      groups: [], candidates: [], drafts: [], runs: [], tasks: [], events: [],
       groupMessages: {}, groupRuns: [],
     };
     const cfg = this.db.prepare('SELECT * FROM settings WHERE id=1').get();
@@ -244,10 +244,6 @@ export class SqliteStore {
     }));
     s.drafts = this.db.prepare('SELECT * FROM drafts').all();
     s.runs = this.db.prepare('SELECT * FROM runs').all();
-    s.schedules = this.db.prepare('SELECT * FROM tasks WHERE kind=?').all('reminder').map(t => ({
-      id: t.id, label: t.label ?? t.title, kind: t.payload ? JSON.parse(t.payload).kind || 'interval' : 'interval',
-      nextAt: t.next_at, intervalMinutes: t.interval_minutes, enabled: Boolean(t.enabled),
-    }));
     s.events = this.db.prepare('SELECT * FROM events').all().map(e => ({...e, meta: JSON.parse(e.meta)}));
     const messages = this.db.prepare('SELECT * FROM group_messages ORDER BY rowid').all();
     s.groupMessages = {};
@@ -296,12 +292,8 @@ export class SqliteStore {
         this.db.prepare('INSERT INTO tasks (id,kind,title,payload,status,run_at,interval_minutes,idempotency_key,attempts,max_attempts,lease_owner,lease_until,last_error,result,created_by,created_at,updated_at,completed_at,enabled,label,next_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
           .run(t.id, t.kind, t.title, JSON.stringify(t.payload || {}), t.status, t.runAt, t.intervalMinutes ?? null, t.idempotencyKey ?? null, t.attempts ?? 0, t.maxAttempts ?? 5, t.leaseOwner ?? null, t.leaseUntil ?? null, t.lastError ?? null, t.result ? JSON.stringify(t.result) : null, t.createdBy ?? null, t.createdAt || now(), t.updatedAt || now(), t.completedAt ?? null, 1, t.title, t.runAt);
       }
-      // Legacy reminder schedules are kept as reminder-kind tasks so the UI and
-      // scheduler keep working until the queue engine takes over in phase C.
-      for (const s of (state.schedules || [])) {
-        this.db.prepare('INSERT INTO tasks (id,kind,title,payload,status,run_at,interval_minutes,enabled,label,next_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
-          .run(s.id, 'reminder', s.label, JSON.stringify({kind: s.kind}), s.enabled ? 'scheduled' : 'done', s.nextAt, s.intervalMinutes, s.enabled ? 1 : 0, s.label, s.nextAt, now(), now());
-      }
+      // Legacy reminder schedules were migrated into reminder-kind tasks by
+      // wf.migrate(); the store only ever sees state.tasks now.
       for (const e of state.events) {
         this.db.prepare('INSERT INTO events (id,at,type,message,meta,group_id) VALUES (?,?,?,?,?,?)')
           .run(e.id, e.at || now(), e.type, e.message, JSON.stringify(e.meta || {}), e.meta?.groupId || null);

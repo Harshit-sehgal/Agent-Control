@@ -4,12 +4,13 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {scoreCandidate, templateDraft, cleanText, initialState, markDue, activity, DEMO_SAMPLES} from './core.js?v=6efa1bb343';
+import {scoreCandidate, templateDraft, cleanText, initialState, markDue, activity, DEMO_SAMPLES} from './core.js?v=7a0880189e';
 import {
   migrate, seedDemo, updateSettings, addCandidate, beginProcessing,
   finishProcessing, editDraft, findDraft, rewriteDraft, draftAction, addGroup,
   addBot, updateBot, addSchedule, removeSchedule, resetDemo,
-} from './workflow.js?v=6efa1bb343';
+} from './workflow.js?v=7a0880189e';
+import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=7a0880189e';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
@@ -33,23 +34,28 @@ function save(state) {
 }
 const find = (items, key) => items.find(x => x.id === key) || (() => { throw new Error('Item not found.'); })();
 
-/** Advance the local clock so scheduled drafts and reminders resolve.
- * This mirrors `src/scheduler.js` exactly and leans on the same `markDue`/
- * `activity` primitives, so a transition logged by the Node backend is logged
- * identically here. Reimplementing it inline was why the Pages Activity tab
- * stayed empty while the Node build recorded ready and reminder events. */
+/** Advance the local clock so scheduled drafts and due tasks resolve.
+ * This mirrors the Node `src/scheduler.js` (drafts) and `src/queue.js`
+ * (reminder tasks) with the same `markDue`/`activity` primitives, so a
+ * transition logged by the Node backend is logged identically here. */
 function due(state) {
   const time = Date.now();
   let changed = false;
   for (const d of state.drafts) {
     if (markDue(d, time)) { changed = true; activity(state, 'ready', `Draft for ${d.author} is ready for manual posting.`, {draftId: d.id}); }
   }
-  for (const r of state.schedules) {
-    if (r.enabled && r.nextAt && Date.parse(r.nextAt) <= time) {
-      activity(state, 'reminder', r.label, {scheduleId: r.id});
-      changed = true;
-      if (r.kind === 'once') r.enabled = false;
-      else r.nextAt = new Date(time + r.intervalMinutes * 60000).toISOString();
+  // Reminder tasks fire here exactly like the server's queue worker: a one-off
+  // completes, an interval re-arms for the next window.
+  for (const t of state.tasks) {
+    if (t.kind !== 'reminder' || t.status !== 'queued') continue;
+    if (!(Date.parse(t.runAt) <= time)) continue;
+    activity(state, 'reminder', t.payload.label, {taskId: t.id});
+    changed = true;
+    if (t.payload.kind === 'once') {
+      t.status = 'done';
+      t.completedAt = new Date(time).toISOString();
+    } else {
+      t.runAt = new Date(time + t.intervalMinutes * 60000).toISOString();
     }
   }
   if (changed) save(state);
@@ -94,6 +100,10 @@ async function localApi(path, method = 'GET', body = {}) {
   if (path === '/api/bots/run') throw new Error('Running AI bots requires the separate Node backend, not GitHub Pages.');
   if (path === '/api/schedules' && method === 'POST') { const s = addSchedule(state, body); save(state); return s; }
   if ((m = path.match(/^\/api\/schedules\/([a-z0-9-]+)$/)) && method === 'DELETE') { const r = removeSchedule(state, m[1]); save(state); return r; }
+  // Structured task endpoints, identical to the Node server's queue surface.
+  if (path === '/api/tasks' && method === 'POST') { const t = enqueueTask(state, body); save(state); return t.task; }
+  if ((m = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/retry$/)) && method === 'POST') { const r = retryTask(state, m[1]); save(state); return r; }
+  if ((m = path.match(/^\/api\/tasks\/([a-f0-9-]+)$/)) && method === 'DELETE') { const r = cancelTask(state, m[1]); save(state); return r; }
   if (path === '/api/reset-demo' && method === 'POST') { const r = resetDemo(state); save(state); return r; }
   throw new Error(`Not available in the browser-local demo: ${method} ${path}`);
 }

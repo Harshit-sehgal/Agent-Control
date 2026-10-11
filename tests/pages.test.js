@@ -45,7 +45,10 @@ test('custom groups, bots, local reminders and unsupported AI execution',async()
   await assert.rejects(request('/api/bots/run','POST',{botId:b.id,input:'hello'}),/Node backend/);
   const rem=await request('/api/schedules','POST',{label:'Check queue',kind:'interval',intervalMinutes:60});
   assert.equal(rem.enabled,true);
-  await request(`/api/schedules/${rem.id}`,'DELETE');assert.equal((await request('/api/state')).schedules.length,0);
+  await request(`/api/schedules/${rem.id}`,'DELETE');
+  const tasks=(await request('/api/state')).tasks;
+  assert.equal(tasks.length,1);
+  assert.equal(tasks[0].status,'cancelled','Removing a reminder cancels its structured task record.');
 });
 test('reject invalid input and impossible approval delays',async()=>{
   const {request}=setup();
@@ -67,13 +70,15 @@ test('reject invalid input and impossible approval delays',async()=>{
   const state=JSON.parse(store.map.get('agent-control-ghpages-v1'));
   const draft=state.drafts.find(x=>x.id===d.id);
   draft.dueAt=new Date(Date.now()-1000).toISOString();
-  state.schedules.find(x=>x.id===created.id).nextAt=new Date(Date.now()-1000).toISOString();
+  const reminder=state.tasks.find(x=>x.id===created.id);
+  assert.ok(reminder,'A created reminder must persist as a structured task.');
+  reminder.runAt=new Date(Date.now()-1000).toISOString();
   store.map.set('agent-control-ghpages-v1',JSON.stringify(state));
   const after=await request('/api/state');
   const resolved=after.drafts.find(x=>x.id===d.id);
-  const fired=after.schedules.find(x=>x.id===created.id);
+  const fired=after.tasks.find(x=>x.id===created.id);
   assert.equal(resolved.status,'ready');
-  assert.equal(fired.enabled,false,'A one-off reminder must disable itself once it fires.');
+  assert.equal(fired.status,'done','A one-off reminder must complete once it fires.');
   assert.ok(after.events.some(e=>e.type==='ready'),'Pages must record the ready transition in the activity log.');
   assert.ok(after.events.some(e=>e.type==='reminder'&&e.message==='Review the queue'),'Pages must record fired reminders in the activity log.');
 });
