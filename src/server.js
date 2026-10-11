@@ -20,13 +20,17 @@ import {aiEnabled,aiModel,aiProvider,makeDraft} from './ai.js';
 import {startScheduler,startRetention} from './scheduler.js';
 import {queueGroupRun,markInterrupted} from './coordination.js';
 import {createQueue,recoverQueue,defaultHandlers} from './queue.js';
-import {Auth,DEFAULT_WORKSPACE as DEFAULT_WORKSPACE_ID} from './auth.js';
+import {Auth} from './auth.js';
+import {openWorkspaces} from './workspaces.js';
+import {createPush} from './push.js';
 import {fail,send,cookie,checkOrigin,rawBody,safeJson,SECURITY,HSTS_ENABLED} from './http.js';
 import {createRouter,isReply,allows} from './router.js';
 import {publicRoutes} from './routes-public.js';
 import {workflowRoutes} from './routes-workflow.js';
 import {groupRoutes} from './routes-groups.js';
 import {accountRoutes} from './routes-account.js';
+import {workspaceRoutes} from './routes-workspaces.js';
+import {pushRoutes} from './routes-push.js';
 
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const PUBLIC=path.join(ROOT,'shared');
@@ -38,63 +42,82 @@ const HOST=process.env.HOST||'127.0.0.1';
 const STORE_PATH=process.env.DATA_FILE||path.join(ROOT,'data','state.json');
 const PASSWORD=process.env.DASHBOARD_PASSWORD||crypto.randomBytes(12).toString('base64url');
 const store=await openStore(STORE_PATH);
-await store.update(s=>{wf.migrate(s);wf.recoverInterrupted(s);});
-await markInterrupted(store);
-const stopScheduler=startScheduler(store);
-const stopRetention=startRetention(store);
 // First boot bootstraps the owner account from DASHBOARD_PASSWORD; afterwards
 // sessions, resets and roles live in the database.
 const auth=new Auth(store);
 auth.ensureBootstrap(PASSWORD);
-await recoverQueue(store);
-// Tasks orphaned by a disconnected agent are re-armed at boot rather
-// than left leased to a process that no longer exists.
-const recoveredAgentTasks=agent.recoverAgentTasks(store);
-if(recoveredAgentTasks)console.log(`Re-armed ${recoveredAgentTasks} agent task(s) from a previous run.`);
 // Paired-agent secrets are encrypted with this key; MASTER_KEY overrides the
 // auto-generated keyfile that lives with the data directory.
 agent.attachVault(store,STORE_PATH);
-// Task kinds map to handlers here rather than inside the queue module, so the
-// worker stays independent of the server surface it drives.
-// Notifications enqueue themselves as queue tasks, so the enqueue hook is
-// filled in once the queue exists (handlers are registered before start()).
-let enqueueNotification=()=>{};
-const notify=(event)=>notifications.notify(store,enqueueNotification,{workspaceId:DEFAULT_WORKSPACE_ID,userId:null,...event});
-const queue=createQueue(store,{
-  ...defaultHandlers(store,notify),  'candidate-draft': async task=>processCandidate(task.payload.candidateId),
-  'group-run': async task=>{ await queueGroupRun(store,{groupId:task.payload.groupId,message:task.payload.message,directBotId:task.payload.directBotId}); },
-  'agent-job': async task=>{
-    // Dispatch to a paired local agent: enqueue an agent task for each agent
-    // that holds the required permission. The queue's idempotency and the
-    // agent-side lease make exactly-once practical without claiming more than
-    // the protocol can prove.
-    const kind=task.payload.action;
-    const agents=store.all("SELECT id,permissions FROM agents WHERE revoked_at IS NULL").map(a=>({id:a.id,permissions:JSON.parse(a.permissions||'[]')}))
-      .filter(a=>!task.payload.agentId||a.id===task.payload.agentId)
-      .filter(a=>a.permissions.includes(kind));
-    if(!agents.length)throw new Error('No paired local agent holds the permission this job needs.');
-    for(const a of agents){
-      agent.enqueueAgentTask(store,a.id,{kind,payload:task.payload.params||{},idempotencyKey:`job:${task.id}:${a.id}`,createdBy:task.createdBy});
-    }
-    return {dispatchedTo:agents.map(a=>a.id)};
-  },
-  'notification': async task=>{
-    const result=await notifications.deliver(store,task);
-    store.run('UPDATE notifications SET status=?, sent_at=? WHERE id=?','sent',new Date().toISOString(),task.payload.notificationId);
-    return result;
-  },
-},{onFail:(task,error)=>Promise.resolve(notify({title:'A background task failed',body:`${task.title}: ${error.message}`,kind:'task-failure',meta:{taskId:task.id}}))});
-// The queue exists now, so notifications can enqueue themselves as delivery
-// tasks. Handlers above captured this closure, not a started loop.
-enqueueNotification=(s,spec)=>s.update(st=>{tasks.enqueueTask(st,spec);}).catch(error=>console.error('Notification enqueue:',error.message));
-const stopQueue=queue.start();
+const push=createPush(store);
+/** Everything that runs in the background for one workspace: the handoff
+ * clock, retention and the task queue, each bound to that workspace's store.
+ * Returns the function that stops them. */
+function startWorkspace(ws,workspaceId){
+  const ready=(async()=>{
+    await ws.update(s=>{wf.migrate(s);wf.recoverInterrupted(s);});
+    await markInterrupted(ws);
+    await recoverQueue(ws);
+  })();
+  // Tasks orphaned by a disconnected agent are re-armed at boot rather
+  // than left leased to a process that no longer exists.
+  const recoveredAgentTasks=agent.recoverAgentTasks(ws);
+  if(recoveredAgentTasks)console.log(`Re-armed ${recoveredAgentTasks} agent task(s) from a previous run.`);
+  // Notifications enqueue themselves as queue tasks.
+  const enqueue=(s,spec)=>s.update(st=>{tasks.enqueueTask(st,spec);}).catch(error=>console.error('Notification enqueue:',error.message));
+  const notify=(event)=>{
+    const id=notifications.notify(ws,enqueue,{workspaceId,userId:null,...event});
+    // A notification for one person goes to that person's devices; one for the
+    // workspace goes to every member who can still sign in.
+    const members=auth.listUsers(workspaceId).filter(u=>!u.disabled).map(u=>u.id);
+    push.announce(ws,enqueue,event.userId?members.filter(id=>id===event.userId):members,{id,title:event.title,body:event.body});
+    return id;
+  };
+  // Task kinds map to handlers here rather than inside the queue module, so the
+  // worker stays independent of the server surface it drives.
+  const queue=createQueue(ws,{
+    ...defaultHandlers(ws,notify),  'candidate-draft': async task=>processCandidate(ws,task.payload.candidateId),
+    'group-run': async task=>{ await queueGroupRun(ws,{groupId:task.payload.groupId,message:task.payload.message,directBotId:task.payload.directBotId}); },
+    'agent-job': async task=>{
+      // Dispatch to a paired local agent: enqueue an agent task for each agent
+      // that holds the required permission. The queue's idempotency and the
+      // agent-side lease make exactly-once practical without claiming more than
+      // the protocol can prove.
+      const kind=task.payload.action;
+      const agents=ws.all("SELECT id,permissions FROM agents WHERE revoked_at IS NULL").map(a=>({id:a.id,permissions:JSON.parse(a.permissions||'[]')}))
+        .filter(a=>!task.payload.agentId||a.id===task.payload.agentId)
+        .filter(a=>a.permissions.includes(kind));
+      if(!agents.length)throw new Error('No paired local agent holds the permission this job needs.');
+      for(const a of agents){
+        agent.enqueueAgentTask(ws,a.id,{kind,payload:task.payload.params||{},idempotencyKey:`job:${task.id}:${a.id}`,createdBy:task.createdBy});
+      }
+      return {dispatchedTo:agents.map(a=>a.id)};
+    },
+    'notification': async task=>{
+      // A push goes to a device, not to a stored webhook, and a failed one
+      // raises no notification of its own: that would be pushed again.
+      if(task.payload.channel==='push')return push.deliver(task);
+      const result=await notifications.deliver(ws,task);
+      ws.run('UPDATE notifications SET status=?, sent_at=? WHERE id=?','sent',new Date().toISOString(),task.payload.notificationId);
+      return result;
+    },
+  },{onFail:(task,error)=>task.payload?.channel==='push'?null:Promise.resolve(notify({title:'A background task failed',body:`${task.title}: ${error.message}`,kind:'task-failure',meta:{taskId:task.id}}))});
+  // Nothing runs until recovery has finished, so a stalled task is re-armed
+  // before the first sweep can see it.
+  let stops=[],stopped=false;
+  ready.then(()=>{if(!stopped)stops=[startScheduler(ws),startRetention(ws),queue.start()];}).catch(error=>console.error(`Workspace ${workspaceId} failed to start:`,error.message));
+  const stop=()=>{stopped=true;for(const s of stops)s();};
+  stop.ready=ready;
+  return stop;
+}
+const workspaces=await openWorkspaces(store,auth,startWorkspace);
 if(store.recoveredFrom)console.warn(`WARNING: ${STORE_PATH} was unreadable and has been moved to ${store.recoveredFrom}. A fresh state was created.`);
-const TYPES={'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8','svg':'image/svg+xml','png':'image/png','ico':'image/x-icon'};
+const TYPES={'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8','svg':'image/svg+xml','png':'image/png','ico':'image/x-icon','webmanifest':'application/manifest+json'};
 const isLive=()=>aiEnabled();
 /** Shared by the HTTP route and the queue worker: score a candidate and
  * produce a draft, releasing the candidate if anything fails so a transient
  * provider error never strands it. */
-async function processCandidate(id){
+async function processCandidate(store,id){
   const context=await store.update(s=>wf.beginProcessing(s,id));
   try{
     const evaluation=scoreCandidate(context.candidate,context.settings.topics);
@@ -109,11 +132,13 @@ async function processCandidate(id){
 // Every API route lives in a route module and is registered with the access it
 // needs (see src/router.js). This file only wires them to the running services.
 const router=createRouter();
-const app={store,auth,processCandidate,version:VERSION,workspaceId:DEFAULT_WORKSPACE_ID};
+const app={store,auth,workspaces,push,processCandidate,version:VERSION};
 publicRoutes(router,app);
 workflowRoutes(router,app);
 groupRoutes(router,app);
 accountRoutes(router,app);
+workspaceRoutes(router,app);
+pushRoutes(router,app);
 
 async function api(req,res,u){
   const found=router.find(req.method,u.pathname),access=found?.route.access;
@@ -129,8 +154,12 @@ async function api(req,res,u){
   }
   // Bodies are read on demand: a handler that rate-limits or verifies a
   // signature does so before any JSON is parsed.
+  // A signed-in request works on its session's workspace and no other. Routes
+  // without a session find their workspace from what the caller presents.
+  const scope=actor?workspaces.get(actor.workspaceId):null;
+  if(actor&&!scope)fail('This workspace is no longer available. Sign in again.',401);
   let raw,parsed;
-  const context={req,path:u.pathname,params:found.params,actor,
+  const context={req,path:u.pathname,params:found.params,actor,store:scope,
     raw:async()=>raw??=await rawBody(req),
     body:async()=>parsed??=safeJson(await rawBody(req,128*1024))};
   const result=await found.route.handler(context);
@@ -138,7 +167,7 @@ async function api(req,res,u){
   if(req.method==='HEAD'){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...SECURITY,...headers});return res.end();}
   send(res,status,body,headers);
 }
-const ASSETS=new Set(['index.html','app.css','transport.js','local-api.js','app.js','ui-kit.js','ui-model.js','ui-store.js','ui-dialogs.js','ui-chat.js','ui-views.js','ui-panel.js','ui-sheets.js','ui-admin.js','ui-actions.js','ui-fx.js','core.js','workflow.js','tasks.js','evidence.js','contracts.js','retention.js','coordination.js','chats.js','group-simulator.js','chat-engine.js','usability.js','demo-feed.html']);
+const ASSETS=new Set(['index.html','app.css','transport.js','local-api.js','app.js','ui-kit.js','ui-model.js','ui-store.js','ui-dialogs.js','ui-chat.js','ui-views.js','ui-panel.js','ui-sheets.js','ui-admin.js','ui-actions.js','ui-fx.js','ui-push.js','sw.js','manifest.webmanifest','icon-192.png','icon-512.png','core.js','workflow.js','tasks.js','evidence.js','contracts.js','retention.js','coordination.js','chats.js','group-simulator.js','chat-engine.js','usability.js','demo-feed.html']);
 async function serve(req,res,u){
   let rel=u.pathname==='/'?'index.html':u.pathname.slice(1);
   if(!ASSETS.has(rel))return send(res,404,{error:'Not found'});
@@ -182,4 +211,4 @@ server.listen(PORT,HOST,()=>{
   console.log(`AI mode: ${isLive()?`Connected · ${aiModel()} @ ${aiProvider()}`:'Template drafts (no AI provider configured)'}`);
   if(HOST!=='127.0.0.1'&&HOST!=='localhost')console.warn('WARNING: Use HTTPS plus a private network / access proxy for remote access.');
 });
-process.on('SIGINT',()=>{stopQueue();stopScheduler();stopRetention();server.close(()=>process.exit(0));});
+process.on('SIGINT',()=>{workspaces.stop();server.close(()=>process.exit(0));});

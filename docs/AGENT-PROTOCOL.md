@@ -54,7 +54,21 @@ Task kinds are permission-gated: `http.check` and `browser.capture`
 (the latter limited to an explicit `AGENT_BROWSER_ALLOWLIST`). `http.check`
 refuses hosts that are, or resolve to, private or local addresses, and reports
 a redirect instead of following it; `AGENT_ALLOW_PRIVATE=1` on the device
-lifts that on purpose. The **server**
+lifts that on purpose.
+
+`browser.capture` is a plain HTTP read by default. With `AGENT_BROWSER=1` on
+the device, the agent opens the page in the Chrome, Chromium or Edge already
+installed there (`AGENT_BROWSER_PATH` names one explicitly;
+`AGENT_BROWSER_ARGS` adds flags such as `--no-sandbox` for containers) and
+returns the title and visible text, so pages that need JavaScript can be read.
+That browser starts with an empty profile that is deleted afterwards, so it is
+signed in to nothing. A page, a frame or a redirect outside the allowlist is
+blocked, and so is any request the page makes to a private or local address.
+The agent never clicks, types, uploads or posts.
+
+A device belongs to the workspace whose admin created its pairing code. The
+device does not need to know which: the server finds the workspace from the
+code or the agent id. The **server**
 decides an agent's permissions; a heartbeat body is never trusted to widen its
 own scope (`setAgentPermissions` is admin-only). There is deliberately no
 `publish.*` permission anywhere in the system.

@@ -104,7 +104,8 @@ export function timeline({conv, state, messages = {}}) {
 const GROUP_SECTIONS = ['home', 'drafts', 'posts', 'reminders', 'runs', 'voice'];
 const BOT_SECTIONS = ['home', 'edit'];
 const LEGACY_TABS = {overview: 'home', discovery: 'posts', approvals: 'drafts', schedules: 'reminders', activity: 'runs', settings: 'voice'};
-const PAGES = ['you', 'about', 'notifications', 'team', 'agents', 'data'];
+const PAGES = ['you', 'about', 'notifications', 'workspaces', 'team', 'agents', 'data'];
+const SERVER_PAGES = ['notifications', 'workspaces'];
 const ADMIN_PAGES = ['team', 'agents', 'data'];
 
 /** Hash → route. Unknown or forbidden targets fall back to the chat list, and
@@ -122,7 +123,7 @@ export function parseRoute(hash, state, {server = false, admin = false} = {}) {
   const page = head === 'you' ? (a || 'you') : head;
   if (PAGES.includes(page)) {
     if (ADMIN_PAGES.includes(page) && !admin) return none;
-    if (page === 'notifications' && !server) return none;
+    if (SERVER_PAGES.includes(page) && !server) return none;
     return {...none, page};
   }
   return none;

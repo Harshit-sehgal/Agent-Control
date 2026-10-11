@@ -43,9 +43,14 @@ over method, path, timestamp and body hash; a timestamp window plus a per-agent
 replay cache reject replays; agents run only permission-gated task kinds.
 
 ## Known limitations
-- One workspace; roles are workspace-scoped.
+- Workspaces are separated by database file, and a session can only reach the
+  workspace it is in. An owner of the first workspace administers the
+  installation; this is not a boundary between mutually hostile tenants, who
+  would still share one process, one vault key and one AI provider key.
 - The local agent executes only `http.check` and an explicitly allowlisted
-  `browser.capture`.
+  `browser.capture`. With `AGENT_BROWSER=1` the capture runs in a real
+  headless browser with an empty profile; it reads pages and cannot click,
+  type or post.
 - No built-in TLS termination — run it behind a reverse proxy. HSTS, startup
   validation and `docs/DEPLOYMENT.md` are tracked in `docs/BUILD-PLAN.md`.
 - Model providers are third-party and optional; treat their output as untrusted.

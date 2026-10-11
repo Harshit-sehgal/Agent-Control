@@ -23,6 +23,7 @@ the operational knobs.
 | `PUBLIC_ORIGIN` | absolute `https://…` URL; enables the origin/CSRF check for that host |
 | `HSTS` | `1` to send `Strict-Transport-Security` (only behind TLS) |
 | `WEBHOOK_ALLOW_PRIVATE` | `1` to let webhook notifications reach private or local addresses |
+| `VAPID_SUBJECT` | contact for push services, `mailto:you@example.com` or an https URL; defaults to `PUBLIC_ORIGIN`. Apple rejects pushes without a real one |
 | `MASTER_KEY` | 32-byte key (64 hex chars) for the credential vault; else a `0600` keyfile is generated beside the DB |
 | `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` / `AI_API_STYLE` / `AI_TIMEOUT_MS` / `AI_MAX_CONCURRENCY` | optional OpenAI-compatible provider |
 
@@ -70,18 +71,45 @@ browsers will refuse plain HTTP for `max-age`, so enable it last.
   sent notifications, runs) — never drafts, candidates or evidence.
   `GET /api/retention/preview` shows what a prune would remove before you run it.
 
-## Run under systemd
-```ini
-[Service]
-WorkingDirectory=/srv/agent-control
-EnvironmentFile=/srv/agent-control/.env
-ExecStart=/usr/bin/node src/server.js
-Restart=on-failure
-User=agent-control
-NoNewPrivileges=true
-ProtectSystem=strict
-ReadWritePaths=/srv/agent-control/data
+## Keeping it on
+The scheduler, the task queue and push only run while the server does. Two
+ready-made ways to keep it up on a machine that stays on (a small VPS, a home
+server, a Raspberry Pi):
+
+**Docker with HTTPS.** `deploy/compose.yaml` runs the app and Caddy, which gets
+and renews the certificate by itself. Point your domain's DNS at the host, open
+ports 80 and 443, then:
+
+```sh
+cd deploy
+cp ../.env.example .env     # set DASHBOARD_PASSWORD and add DOMAIN=dash.example.com
+docker compose up -d --build
 ```
+
+The databases and the vault key are kept in the `data` volume. The image runs
+as a non-root user and reports its health from `/api/health`.
+
+**systemd, without Docker.** Copy the repository to `/srv/agent-control`, write
+its `.env`, install `deploy/agent-control.service` and put a reverse proxy in
+front as described above. The unit restarts the server on failure and can write
+only to the data directory.
+
+Nothing in this repository creates the host or the DNS record for you.
+
+## Workspaces
+Every workspace after the first has its own database file beside the main one
+(`state.ws-<id>.db`). A file-level backup is the whole data directory: every
+`*.db` file plus `vault.key`. The in-app backup under **Data and security**
+covers the workspace you are in, so each workspace owner exports their own.
+Deleting a workspace deletes its file.
+
+## Push notifications
+Browsers only allow push on a secure origin, so it works over HTTPS or on
+`localhost`, not over plain HTTP on a LAN address. Each person turns it on per
+device under **You → Notifications**. On an iPhone or iPad the app has to be
+added to the Home Screen first. The key pair that identifies this installation
+to push services is created on first use and stored encrypted with the vault
+key; if the vault key changes, devices have to subscribe again.
 
 ## Health & smoke
 `GET /api/health` returns `{ok:true,version}` and supports `HEAD`. It is

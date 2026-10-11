@@ -86,3 +86,11 @@ as the record of what shipped; new work should be added as a fresh section.
 - [x] Local agent refuses private-network targets; model calls and posts are bounded
 - [x] Only the server can mark a chat message as model output or name its sender
 - [x] Webhooks refuse private-network targets unless allowed on purpose
+
+## Phase P — workspaces, push, browser reader, deploy files
+- [x] One database per workspace; sessions carry a workspace and can switch (schema v5)
+- [x] Create, rename and delete workspaces; members invited per workspace
+- [x] Web Push without a library: encryption, VAPID, queue delivery, service worker, manifest
+- [x] Local agent reads allowlisted pages with the installed browser over DevTools
+- [x] Dockerfile, Compose with Caddy, and a systemd unit
+- [ ] Push verified from a real phone; server running on an always-on host

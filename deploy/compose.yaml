@@ -1,0 +1,40 @@
+# Agent Control with HTTPS on a host that stays on.
+#
+#   cd deploy
+#   cp ../.env.example .env        # then set DASHBOARD_PASSWORD and DOMAIN
+#   docker compose up -d --build
+#
+# Caddy gets and renews the certificate for DOMAIN by itself. Point the
+# domain's DNS at this host and open ports 80 and 443 first.
+services:
+  app:
+    build: ..
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Inside the container the app must listen on every interface so Caddy
+      # can reach it; only Caddy is published to the outside.
+      HOST: 0.0.0.0
+      DATA_FILE: /data/state.json
+      PUBLIC_ORIGIN: https://${DOMAIN:?Set DOMAIN in deploy/.env}
+      HSTS: "1"
+    volumes:
+      - data:/data
+    expose:
+      - "4173"
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      DOMAIN: ${DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy:/data
+volumes:
+  data:
+  caddy:

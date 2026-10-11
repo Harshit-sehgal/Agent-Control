@@ -4,13 +4,14 @@
 import {activity, candidateInput} from '../shared/core.js';
 import * as wf from '../shared/workflow.js';
 import * as agent from './agent.js';
-import {sessionCookie, clearCookie} from './auth.js';
-import {fail, cookie, timingEqual, safeJson} from './http.js';
+import {sessionCookie, clearCookie, DEFAULT_WORKSPACE} from './auth.js';
+import {sha256} from './vault.js';
+import {fail, cookie, safeJson} from './http.js';
 import {reply} from './router.js';
 
 const LOGIN_WINDOW_MS = 900000, LOGIN_ATTEMPTS = 8;
 
-export function publicRoutes(router, {store, auth, version}) {
+export function publicRoutes(router, {auth, workspaces, version}) {
   // Failed sign-ins per address. A record only matters while its window is
   // open, so lapsed ones are dropped and a long-lived process cannot grow it.
   const attempts = new Map();
@@ -23,6 +24,10 @@ export function publicRoutes(router, {store, auth, version}) {
     if (record.count >= limit) fail('Too many attempts. Try again in 15 minutes.', 429);
     record.count++;
   }
+
+  // The workspace a device was paired in. An unknown id falls through to the
+  // first workspace, whose signature check refuses it.
+  const agentStore = c => workspaces.holding('SELECT 1 AS x FROM agents WHERE id=?', String(c.req.headers['x-agent-id'] || '')) || workspaces.get(DEFAULT_WORKSPACE);
 
   // Health checks and uptime probes commonly use HEAD; the server answers it bodyless.
   for (const method of ['GET', 'HEAD']) router.add(method, '/api/health', 'public', () => ({ok: true, version}));
@@ -67,7 +72,8 @@ export function publicRoutes(router, {store, auth, version}) {
     const token = c.req.headers['x-capture-token'];
     // Read the token without copying the whole workspace: this runs before
     // the caller has proved anything.
-    if (!token || !timingEqual(token, store.captureToken())) fail('Invalid extension token.', 401);
+    const store = token ? workspaces.byCaptureToken(token) : null;
+    if (!store) fail('Invalid extension token.', 401);
     const body = candidateInput(await c.body());
     const result = await store.update(s => wf.addCandidate(s, body));
     return reply(result.duplicate ? 200 : 201, result);
@@ -79,11 +85,15 @@ export function publicRoutes(router, {store, auth, version}) {
   router.add('POST', '/api/agent/pair', 'agent', async c => {
     const b = safeJson(await c.raw());
     if (!b?.code || typeof b.code !== 'string') fail('A pairing code is required.', 400);
+    // A code that matches nothing is refused by the first workspace, with the
+    // same answer a wrong code always got.
+    const store = workspaces.holding('SELECT 1 AS x FROM pairing_codes WHERE code_hash=?', sha256(b.code)) || workspaces.get(DEFAULT_WORKSPACE);
     const result = agent.redeemPairing(store, {code: b.code, name: b.name, permissions: b.permissions});
     await store.update(s => { activity(s, 'agent', `Paired local agent "${String(b.name || 'Local agent').slice(0, 60)}".`, {agentId: result.agentId}); });
     return reply(201, result);
   });
   router.add('POST', '/api/agent/heartbeat', 'agent', async c => {
+    const store = agentStore(c);
     const device = agent.verifyAgentRequest(store, c.req.headers, 'POST', c.path, await c.raw());
     agent.touchAgent(store, device.id);
     const recovered = agent.recoverAgentTasks(store);
@@ -92,7 +102,7 @@ export function publicRoutes(router, {store, auth, version}) {
     return {ok: true, serverTime: new Date().toISOString(), agent: {id: device.id, name: device.name}, tasks};
   });
   router.add('POST', '/api/agent/tasks/:id/result', 'agent', async c => {
-    const raw = await c.raw();
+    const raw = await c.raw(), store = agentStore(c);
     const device = agent.verifyAgentRequest(store, c.req.headers, 'POST', c.path, raw);
     const b = safeJson(raw);
     if (!b?.status) fail('A result status is required.', 400);

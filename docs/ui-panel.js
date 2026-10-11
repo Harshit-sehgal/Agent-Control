@@ -1,13 +1,13 @@
 /** Everything that used to be a dashboard tab now hangs off a conversation:
  * the info panel of the open chat (drafts, posts, reminders, runs, voice, the
  * bot's profile) and the "You" pages (account, admin, about). */
-import {filterCandidates, filterDrafts} from './usability.js?v=aa40e42b9d';
-import {ACTIONS, OUTPUT_KINDS} from './contracts.js?v=aa40e42b9d';
-import {ACTIVE_DRAFTS, needsYou} from './ui-model.js?v=aa40e42b9d';
-import {esc, icon, avatar, groupAvatar, tintClass, TINT_COUNT, btn, iconBtn, row, box, field, note, empty, tag, pageHead, fullDate} from './ui-kit.js?v=aa40e42b9d';
-import {store, conversation, isStaticDemo, isAdmin, isLive, isXGroup, botTint, recentRuns, THEMES, themeChoice} from './ui-store.js?v=aa40e42b9d';
-import {draftCard, postCard} from './ui-views.js?v=aa40e42b9d';
-import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=aa40e42b9d';
+import {filterCandidates, filterDrafts} from './usability.js?v=8487cfc1fa';
+import {ACTIONS, OUTPUT_KINDS} from './contracts.js?v=8487cfc1fa';
+import {ACTIVE_DRAFTS, needsYou} from './ui-model.js?v=8487cfc1fa';
+import {esc, icon, avatar, groupAvatar, tintClass, TINT_COUNT, btn, iconBtn, row, box, field, note, empty, tag, pageHead, fullDate} from './ui-kit.js?v=8487cfc1fa';
+import {store, conversation, isStaticDemo, isAdmin, isLive, isXGroup, botTint, recentRuns, THEMES, themeChoice} from './ui-store.js?v=8487cfc1fa';
+import {draftCard, postCard} from './ui-views.js?v=8487cfc1fa';
+import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=8487cfc1fa';
 
 const el = id => document.getElementById(id);
 const options = (pairs, current) => pairs.map(([value, label]) => `<option value="${esc(value)}"${value === current ? ' selected' : ''}>${esc(label)}</option>`).join('');
@@ -141,12 +141,12 @@ export function refreshLists() {
 /* ---------- "You" pages ---------- */
 
 function youPage() {
-  const {state} = store, demo = isStaticDemo(), me = state.me;
+  const {state} = store, demo = isStaticDemo(), me = state.me, workspace = (state.workspaces || []).find(w => w.current);
   const admin = isAdmin() ? box(['team', 'agents', 'data'].map(p => row({title: ADMIN_PAGES[p].title, sub: esc(ADMIN_PAGES[p].sub), action: 'open-page', data: {page: p}})).join(''), 'Admin') : '';
   return `${pageHead('You', {back: 'back-to-list'})}
     <div class="page-body">
-      <div class="hero"><span class="avatar avatar-plain" style="width:84px;height:84px">${icon('lock', 34)}</span><h2>${esc(me?.email || 'This browser')}</h2><p>${esc(me?.role ? `Signed in as ${me.role}` : 'Local demo. Nothing leaves this browser.')}</p></div>
-      ${box((demo ? '' : row({title: 'Notifications', right: state.unread ? `${state.unread} unread` : '', tone: state.unread ? 'warn' : '', action: 'open-page', data: {page: 'notifications'}})) + row({title: 'New bot', action: 'new-bot'}) + row({title: 'New group', action: 'new-group'}) + row({title: 'Jump to anything', right: 'Ctrl K', action: 'command-open'}) + (!demo && state.captureToken ? row({title: 'Copy capture token', sub: 'Paste it into the browser extension to capture posts.', action: 'copy-capture-token'}) : ''))}
+      <div class="hero"><span class="avatar avatar-plain" style="width:84px;height:84px">${icon('lock', 34)}</span><h2>${esc(me?.email || 'This browser')}</h2><p>${esc(me?.role ? `Signed in as ${me.role}${workspace ? ` in ${workspace.name}` : ''}` : 'Local demo. Nothing leaves this browser.')}</p></div>
+      ${box((demo ? '' : row({title: 'Workspace', right: esc(workspace?.name || ''), action: 'open-page', data: {page: 'workspaces'}}) + row({title: 'Notifications', right: state.unread ? `${state.unread} unread` : '', tone: state.unread ? 'warn' : '', action: 'open-page', data: {page: 'notifications'}})) + row({title: 'New bot', action: 'new-bot'}) + row({title: 'New group', action: 'new-group'}) + row({title: 'Jump to anything', right: 'Ctrl K', action: 'command-open'}) + (!demo && state.captureToken ? row({title: 'Copy capture token', sub: 'Paste it into the browser extension to capture posts.', action: 'copy-capture-token'}) : ''))}
       ${box(`<div class="themes" role="group" aria-label="Colour theme">${THEMES.map(t => `<button type="button" class="theme${t.id === themeChoice() ? ' on' : ''}" data-action="set-theme" data-theme="${t.id}" aria-pressed="${t.id === themeChoice()}"><span class="theme-dots">${t.dots.map(c => `<i style="background:${c}"></i>`).join('')}</span><strong>${esc(t.name)}</strong><small>${esc(t.sub)}</small></button>`).join('')}</div>`, 'Colours')}
       ${admin}
       ${box(row({title: 'About this build', action: 'open-page', data: {page: 'about'}}) + (demo ? '' : row({title: 'Sign out', action: 'logout', tone: 'bad'})))}

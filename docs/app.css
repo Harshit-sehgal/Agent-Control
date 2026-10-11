@@ -215,6 +215,8 @@ body:not(.has-info) .pane-info{display:none}
 .chips.center{justify-content:center;flex-wrap:wrap;padding:0}
 .chip{flex:none;height:36px;padding:0 14px;border:1px solid var(--control);border-radius:18px;font-size:14px;white-space:nowrap;transition:background .15s}
 .chip:hover{background:var(--raised)}
+/* A finger needs a taller target than a mouse pointer does. */
+@media (pointer:coarse){.chip{height:44px;border-radius:22px}}
 .composer{flex:none;display:flex;align-items:flex-end;gap:8px;padding:0 max(12px,calc((100% - 764px)/2)) max(14px,env(safe-area-inset-bottom))}
 .composer textarea{flex:1;min-width:0;min-height:46px;max-height:180px;padding:12px 18px;border:0;outline:0;border-radius:23px;background:var(--raised);font-size:16px;line-height:1.35;resize:none}
 .composer textarea:focus{box-shadow:0 0 0 2px var(--control)}

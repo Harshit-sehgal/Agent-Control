@@ -29,10 +29,11 @@ async function bundleVersion(names) {
 const files = [
   'index.html', 'app.css',
   'transport.js', 'local-api.js', 'app.js',
-  'ui-kit.js', 'ui-model.js', 'ui-store.js', 'ui-dialogs.js', 'ui-chat.js', 'ui-views.js', 'ui-panel.js', 'ui-sheets.js', 'ui-admin.js', 'ui-actions.js', 'ui-fx.js',
+  'ui-kit.js', 'ui-model.js', 'ui-store.js', 'ui-dialogs.js', 'ui-chat.js', 'ui-views.js', 'ui-panel.js', 'ui-sheets.js', 'ui-admin.js', 'ui-actions.js', 'ui-fx.js', 'ui-push.js', 'sw.js',
   'core.js', 'workflow.js', 'tasks.js', 'evidence.js', 'contracts.js', 'retention.js',
   'coordination.js', 'chats.js', 'group-simulator.js',
   'chat-engine.js', 'usability.js', 'demo-feed.html',
+  'manifest.webmanifest', 'icon-192.png', 'icon-512.png',
 ];
 // Files that used to live in docs/ before the UI moved to shared/.
 const stale = ['polish.css', 'usability.css', 'demo-api.js', 'app.css.map', 'usability.mjs', 'coordination.mjs', 'group-simulator.mjs', 'chat-engine.mjs'];

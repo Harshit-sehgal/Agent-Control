@@ -13,19 +13,19 @@ import {reply, allows} from './router.js';
 
 const retentionSettings = s => ({...RETENTION_DEFAULTS, ...(s.settings?.retention || {})});
 
-export function workflowRoutes(router, {store, processCandidate}) {
+export function workflowRoutes(router, {auth, processCandidate}) {
   router.add('GET', '/api/state', 'viewer', c => {
-    const s = store.read(), me = c.actor, live = aiEnabled();
+    const s = c.store.read(), me = c.actor, live = aiEnabled();
     // The capture token lets its holder add posts, which a viewer may not do.
     if (!allows(me.role, 'member')) delete s.captureToken;
-    return {...s, aiEnabled: live, aiModel: live ? aiModel() : null, me: {email: me.email, role: me.role}, retention: retentionSettings(s),
-      notifications: notifications.listNotifications(store, me.userId, 50), unread: notifications.unreadCount(store, me.userId), serverTime: new Date().toISOString()};
+    return {...s, aiEnabled: live, aiModel: live ? aiModel() : null, me: {email: me.email, role: me.role}, workspaces: auth.listWorkspaces(me.userId).map(w => ({...w, current: w.id === me.workspaceId})), canCreateWorkspace: auth.roleOf(me.userId) === 'owner', retention: retentionSettings(s),
+      notifications: notifications.listNotifications(c.store, me.userId, 50), unread: notifications.unreadCount(c.store, me.userId), serverTime: new Date().toISOString()};
   });
-  router.add('PATCH', '/api/settings', 'admin', async c => { const b = await c.body(); return store.update(s => wf.updateSettings(s, b)); });
+  router.add('PATCH', '/api/settings', 'admin', async c => { const b = await c.body(); return c.store.update(s => wf.updateSettings(s, b)); });
 
   // Samples come from the shared core.js constant, exactly like the Pages demo.
-  router.add('POST', '/api/demo/seed', 'member', () => store.update(s=>wf.seedDemo(s,DEMO_SAMPLES)));
-  router.add('POST', '/api/reset-demo', 'member', () => store.update(s => wf.resetDemo(s)));
+  router.add('POST', '/api/demo/seed', 'member', c => c.store.update(s=>wf.seedDemo(s,DEMO_SAMPLES)));
+  router.add('POST', '/api/reset-demo', 'member', c => c.store.update(s => wf.resetDemo(s)));
 
   router.add('POST', '/api/candidates', 'member', async c => {
     const b = await c.body();
@@ -33,20 +33,20 @@ export function workflowRoutes(router, {store, processCandidate}) {
     // user the post was already queued instead of pretending it was added. The
     // flag has to ride along with the candidate or the browser-local transport
     // and the Node route would answer differently for the same input.
-    const result = await store.update(s => wf.addCandidate(s, b));
+    const result = await c.store.update(s => wf.addCandidate(s, b));
     return reply(result.duplicate ? 200 : 201, {...result.candidate, duplicate: result.duplicate});
   });
-  router.add('POST', '/api/candidates/:id/process', 'member', async c => reply(201, await processCandidate(c.params.id)));
+  router.add('POST', '/api/candidates/:id/process', 'member', async c => reply(201, await processCandidate(c.store, c.params.id)));
 
-  router.add('PATCH', '/api/drafts/:id', 'member', async c => { const b = await c.body(); return store.update(s => wf.editDraft(s, c.params.id, b.text)); });
+  router.add('PATCH', '/api/drafts/:id', 'member', async c => { const b = await c.body(); return c.store.update(s => wf.editDraft(s, c.params.id, b.text)); });
   for (const action of ['approve', 'reject', 'ready', 'posted']) {
-    router.add('POST', `/api/drafts/:id/${action}`, 'member', async c => { const b = await c.body(); return store.update(s => wf.draftAction(s, c.params.id, action, b)); });
+    router.add('POST', `/api/drafts/:id/${action}`, 'member', async c => { const b = await c.body(); return c.store.update(s => wf.draftAction(s, c.params.id, action, b)); });
   }
   router.add('POST', '/api/drafts/:id/rewrite', 'member', async c => {
-    const id = c.params.id, b = await c.body(), existing = store.read(), old = wf.findDraft(existing, id), candidate = wf.findCandidate(existing, old.candidateId);
+    const id = c.params.id, b = await c.body(), existing = c.store.read(), old = wf.findDraft(existing, id), candidate = wf.findCandidate(existing, old.candidateId);
     if (!['pending', 'scheduled', 'ready'].includes(old.status)) fail('Cannot rewrite this draft.', 409);
     const out = await makeDraft(candidate, existing.settings, b.direction || '');
-    return store.update(s => {
+    return c.store.update(s => {
       const x = wf.findDraft(s, id); if (x.revision !== old.revision) fail('Draft changed during rewrite. Retry.', 409);
       x.text = out.text; x.revision++; x.status = 'pending'; x.mode = out.mode; x.note = out.note;
       delete x.approvedText; delete x.approvedRevision; delete x.dueAt; delete x.approvedAt;
@@ -57,13 +57,13 @@ export function workflowRoutes(router, {store, processCandidate}) {
   // Source evidence: what supports a draft, verified by whom.
   router.add('POST', '/api/drafts/:id/evidence', 'member', async c => {
     const b = await c.body();
-    return reply(201, await store.update(s => evidence.addEvidence(s, {...b, draftId: c.params.id, createdBy: c.actor.email})));
+    return reply(201, await c.store.update(s => evidence.addEvidence(s, {...b, draftId: c.params.id, createdBy: c.actor.email})));
   });
-  router.add('POST', '/api/evidence/:id/verify', 'member', async c => { const b = await c.body(); return store.update(s => evidence.verifyEvidence(s, c.params.id, b.status, {actor: c.actor.email})); });
-  router.add('DELETE', '/api/evidence/:id', 'member', c => store.update(s => evidence.dropEvidence(s, c.params.id)));
+  router.add('POST', '/api/evidence/:id/verify', 'member', async c => { const b = await c.body(); return c.store.update(s => evidence.verifyEvidence(s, c.params.id, b.status, {actor: c.actor.email})); });
+  router.add('DELETE', '/api/evidence/:id', 'member', c => c.store.update(s => evidence.dropEvidence(s, c.params.id)));
 
-  router.add('POST', '/api/schedules', 'member', async c => { const b = await c.body(); return reply(201, await store.update(s => wf.addSchedule(s, b))); });
-  router.add('DELETE', '/api/schedules/:id', 'member', c => store.update(s => wf.removeSchedule(s, c.params.id)));
+  router.add('POST', '/api/schedules', 'member', async c => { const b = await c.body(); return reply(201, await c.store.update(s => wf.addSchedule(s, b))); });
+  router.add('DELETE', '/api/schedules/:id', 'member', c => c.store.update(s => wf.removeSchedule(s, c.params.id)));
 
   // Structured task queue: the same records the internal worker executes.
   router.add('POST', '/api/tasks', 'member', async c => {
@@ -71,13 +71,13 @@ export function workflowRoutes(router, {store, processCandidate}) {
     // Delivery tasks are created by the server from a user's own preferences.
     // Taken from a request, one would send to any stored webhook.
     if (b.kind === 'notification') fail('Notification deliveries are queued by the server, not by request.', 403);
-    const result = await store.update(s => tasks.enqueueTask(s, b));
+    const result = await c.store.update(s => tasks.enqueueTask(s, b));
     return reply(result.duplicate ? 200 : 201, result.task);
   });
-  router.add('POST', '/api/tasks/:id/retry', 'member', c => store.update(s => tasks.retryTask(s, c.params.id)));
-  router.add('DELETE', '/api/tasks/:id', 'member', c => store.update(s => tasks.cancelTask(s, c.params.id)));
+  router.add('POST', '/api/tasks/:id/retry', 'member', c => c.store.update(s => tasks.retryTask(s, c.params.id)));
+  router.add('DELETE', '/api/tasks/:id', 'member', c => c.store.update(s => tasks.cancelTask(s, c.params.id)));
 
   // Retention: preview, then apply the workspace policy.
-  router.add('GET', '/api/retention/preview', 'viewer', () => { const state = store.read(); return {policy: retentionSettings(state), preview: pruneState(state, {dryRun: true})}; });
-  router.add('POST', '/api/retention/prune', 'admin', () => store.update(s => pruneState(s)));
+  router.add('GET', '/api/retention/preview', 'viewer', c => { const state = c.store.read(); return {policy: retentionSettings(state), preview: pruneState(state, {dryRun: true})}; });
+  router.add('POST', '/api/retention/prune', 'admin', c => c.store.update(s => pruneState(s)));
 }
