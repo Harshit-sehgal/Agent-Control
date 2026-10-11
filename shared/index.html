@@ -11,11 +11,12 @@
 <link rel="stylesheet" href="./polish.css">
 <link rel="stylesheet" href="./usability.css">
 </head><body>
+<div id="progress" class="progress hidden" role="presentation"></div>
 <div id="root" class="app-layout">
-  <aside class="sidebar" id="sidebar" aria-label="Workspace navigation"></aside>
+  <aside class="sidebar" id="sidebar" aria-label="Workspace navigation"><div class="side-skeleton"><div class="side-skeleton-logo"></div><div class="side-skeleton-row"></div><div class="side-skeleton-row"></div><div class="side-skeleton-row short"></div></div></aside>
   <div class="app-area">
     <header class="topbar" id="topbar"></header>
-    <main class="main" id="main" tabindex="-1"></main>
+    <main class="main" id="main" tabindex="-1"><div class="splash" role="status" aria-live="polite"><span class="splash-mark" aria-hidden="true">&#10022;</span><p>Loading your workspace…</p></div></main>
   </div>
   <aside id="inspector" class="inspector" aria-label="Context panel"></aside>
 </div>

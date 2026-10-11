@@ -63,6 +63,18 @@ test('chat clearing and sensitive changes require confirmation',()=>{
  assert.match(js,/duplicate-bot/);
  assert.match(js,/pin-bot/);
 });
+test('the shell is integrated: one search, animated routes, one progress bar',()=>{
+  assert.match(html,/id="progress"/);
+  assert.match(html,/class="splash"/);
+  assert.match(html,/id="main" tabindex="-1"/);
+  assert.match(js,/class="side-search" data-action="command-open"/);
+  // The top-bar search is only the off-canvas fallback, not a second entry point.
+  assert.match(js,/class="jump-button" data-action="command-open"/);
+  assert.match(js,/lastRoute/);
+  assert.match(js,/classList\.add\('view-enter'\)/);
+  assert.match(js,/function setBusy\(/);
+  assert.match(js,/class="crumb" data-action="open-group"/);
+});
 test('hash routes respond to browser Back and Forward',()=>{
   assert.match(js,/function applyRoute\(/);
   assert.match(js,/addEventListener\('popstate'/);

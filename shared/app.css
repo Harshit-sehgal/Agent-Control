@@ -84,6 +84,49 @@ img{max-width:100%}
 .mobile-backdrop:not(.hidden){display:none}
 .menu-toggle{display:none}
 
+/* ---------- First paint: splash + sidebar skeleton ---------- */
+.splash{height:60vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:var(--muted)}
+.splash-mark{width:52px;height:52px;display:grid;place-items:center;border-radius:15px;background:var(--ink);color:var(--accent-ink);font-size:24px;animation:pulse 1.4s ease-in-out infinite}
+.splash p{margin:0;font-size:13px}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.75;transform:scale(.96)}}
+.side-skeleton{padding:8px}
+.side-skeleton-logo{height:34px;width:150px;border-radius:10px;background:var(--surface-3);margin:6px 8px 22px}
+.side-skeleton-row{height:14px;border-radius:7px;background:var(--surface-2);margin:11px 8px}
+.side-skeleton-row.short{width:60%}
+.side-skeleton-logo,.side-skeleton-row{animation:shimmer 1.5s ease-in-out infinite}
+@keyframes shimmer{0%,100%{opacity:.5}50%{opacity:1}}
+
+/* Route transition: content eases in instead of snapping between screens. */
+.view-enter{animation:view-in .26s cubic-bezier(.22,.61,.36,1)}
+@keyframes view-in{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+
+/* Slim top progress bar for any in-flight request, shown across the shell. */
+.progress{position:fixed;top:0;left:0;right:0;height:2px;z-index:200;overflow:hidden;background:transparent}
+.progress:after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent 0%,var(--accent) 45%,transparent 100%);transform:translateX(-100%);animation:progress-slide 1.1s ease-in-out infinite}
+@keyframes progress-slide{to{transform:translateX(100%)}}
+
+/* Sidebar search: the single search affordance on desktop. */
+.side-search{
+  width:100%;display:flex;align-items:center;gap:10px;height:38px;padding:0 10px;margin:0 0 12px;
+  border:1px solid var(--line-2);background:var(--surface-2);border-radius:10px;color:var(--muted);
+  font-size:12.5px;font-weight:500;transition:border-color .15s,background .15s,color .15s;
+}
+.side-search:hover{border-color:var(--line-3);background:var(--surface-3);color:var(--ink-2)}
+.side-search span{flex:1;text-align:left}
+.side-search kbd{font:600 10.5px/1.2 'JetBrains Mono',monospace;background:var(--surface-4);border:1px solid var(--line-2);border-radius:6px;padding:3px 6px}
+
+/* Clickable breadcrumb segments. */
+.crumb{color:var(--muted);font-size:12.5px;font-weight:500;padding:3px 5px;border-radius:7px;transition:background .14s,color .14s}
+.crumb:hover{background:var(--surface-3);color:var(--ink-2);text-decoration:none}
+
+/* Shared identity header for group + chat so both read as one screen. */
+.head-identity{display:flex;align-items:center;gap:15px;min-width:0}
+.head-identity h1,.head-identity .page-title{margin:6px 0 6px}
+.head-identity .page-sub{margin:0}
+.group-icon.big{width:48px;height:48px;flex:0 0 48px;border-radius:14px}
+.group-page-head{align-items:center}
+.group-page-head .page-title{margin:7px 0 5px}
+
 /* ---------- Sidebar ---------- */
 .side-logo{display:flex;align-items:center;gap:11px;padding:6px 8px 18px}
 .logo-symbol{
@@ -130,8 +173,10 @@ img{max-width:100%}
 .breadcrumb strong{color:var(--ink);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .breadcrumb .slash{color:var(--subtle)}
 .top-right{display:flex;align-items:center;gap:10px}
+/* The sidebar carries search on desktop; the top bar only takes over when the
+   sidebar is off-canvas on small screens. */
 .jump-button{
-  display:flex;align-items:center;gap:10px;min-width:230px;padding:8px 10px 8px 12px;
+  display:none;align-items:center;gap:10px;min-width:230px;padding:8px 10px 8px 12px;
   border:1px solid var(--line-2);background:var(--surface-2);border-radius:10px;
   color:var(--muted);font-size:12px;font-weight:500;transition:border-color .15s,background .15s;
 }
@@ -141,10 +186,6 @@ img{max-width:100%}
   border:1px solid var(--line-2);border-radius:6px;padding:3px 6px;color:var(--muted);
 }
 .jump-button:hover{border-color:var(--line-3);background:var(--surface-3);color:var(--ink-2)}
-.top-badge{
-  display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--ink-2);
-  background:var(--surface-2);border:1px solid var(--line);border-radius:var(--radius-pill);padding:5px 11px;
-}
 .top-link{
   width:34px;height:34px;display:grid;place-items:center;border-radius:9px;color:var(--muted);
   border:1px solid transparent;transition:background .14s,color .14s;
@@ -476,8 +517,7 @@ img{max-width:100%}
   .menu-toggle{display:inline-flex}
   .topbar{height:56px;min-height:56px;padding:0 16px}
   .main{padding:22px 18px 56px}
-  .top-badge{display:none}
-  .jump-button{min-width:0;width:38px;height:38px;padding:0;justify-content:center}
+  .jump-button{display:flex;min-width:0;width:38px;height:38px;padding:0;justify-content:center}
   .jump-button span,.jump-button kbd{display:none}
   .two-col,.three-col{grid-template-columns:1fr}
   .stat-row{grid-template-columns:repeat(2,1fr)}
