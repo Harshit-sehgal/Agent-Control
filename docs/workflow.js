@@ -8,10 +8,10 @@
  * Keeping transitions here is the single source of truth for the draft
  * lifecycle: candidate -> draft -> approved/scheduled -> ready -> posted.
  */
-import {activity,candidateInput,cleanText,scheduleApproval} from './core.js?v=5370c2c9dc';
-import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js?v=5370c2c9dc';
-import {evidenceSummary,evidenceForDraft,seedCandidateEvidence} from './evidence.js?v=5370c2c9dc';
-import * as contracts from './contracts.js?v=5370c2c9dc';
+import {activity,candidateInput,cleanText,scheduleApproval} from './core.js?v=48a317fe1c';
+import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js?v=48a317fe1c';
+import {evidenceSummary,evidenceForDraft,seedCandidateEvidence} from './evidence.js?v=48a317fe1c';
+import * as contracts from './contracts.js?v=48a317fe1c';
 
 export const SCHEMA_VERSION = 3;
 

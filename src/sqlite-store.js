@@ -20,6 +20,9 @@ import {sqlite} from './sqlite.js';
 import * as wf from '../shared/workflow.js';
 
 const now = () => new Date().toISOString();
+/** Current schema version. Keep in sync with the migration list; tests and
+ * operators read it, so it is exported rather than duplicated. */
+export const SCHEMA_DB_VERSION = 2;
 
 /** v1 ships the full target schema: the workflow document plus the surfaces
  * the roadmap adds (task queue, agents, vault, notifications, users). Adding a
@@ -125,6 +128,12 @@ const MIGRATIONS = [
         created_at TEXT NOT NULL, updated_at TEXT NOT NULL, started_at TEXT, completed_at TEXT);
       CREATE UNIQUE INDEX IF NOT EXISTS jobs_idem ON jobs(idempotency_key) WHERE idempotency_key IS NOT NULL;
     `);
+  }},
+  // v2: paired-agent secrets are stored encrypted (the vault) instead of a
+  // hash, because the server must be able to verify an HMAC signature made
+  // with the secret, which a one-way hash cannot support.
+  {to: 2, up(db) {
+    db.exec('ALTER TABLE agents ADD COLUMN secret_enc TEXT');
   }}];
 export class SqliteStore {
   constructor(dbPath, legacyPath) {

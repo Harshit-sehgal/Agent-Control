@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import {fileURLToPath} from 'node:url';
-import {SqliteStore} from '../src/sqlite-store.js';
+import {SqliteStore,SCHEMA_DB_VERSION} from '../src/sqlite-store.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -26,7 +26,7 @@ test('a fresh database seeds the built-in workspace and persists updates across 
   assert.equal(reopened.read().captureToken, token, 'The capture token must be stable across restarts.');
   // Migration must be idempotent on an existing database.
   await reopened.migrate();
-  assert.equal(reopened.get('SELECT version FROM schema_meta WHERE id=1').version, 1);
+  assert.equal(reopened.get('SELECT version FROM schema_meta WHERE id=1').version, SCHEMA_DB_VERSION);
   await fs.rm(path.dirname(db), {recursive: true, force: true});
 });
 

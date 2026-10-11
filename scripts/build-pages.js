@@ -29,7 +29,8 @@ async function bundleVersion(names) {
 const files = [
   'index.html', 'app.css', 'polish.css', 'usability.css',
   'transport.js', 'local-api.js', 'app.js',
-  'core.js', 'workflow.js', 'coordination.js', 'group-simulator.js',
+  'core.js', 'workflow.js', 'tasks.js', 'evidence.js', 'contracts.js',
+  'coordination.js', 'group-simulator.js',
   'chat-engine.js', 'usability.js', 'demo-feed.html',
 ];
 // Files that used to live in docs/ before the UI moved to shared/.
