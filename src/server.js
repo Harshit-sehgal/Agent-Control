@@ -16,8 +16,11 @@ import * as wf from '../shared/workflow.js';
 import * as tasks from '../shared/tasks.js';
 import * as evidence from '../shared/evidence.js';
 import * as agent from './agent.js';
+import * as credentials from './credentials.js';
+import * as backup from './backup.js';
+import {pruneState,RETENTION_DEFAULTS} from '../shared/retention.js';
 import {aiEnabled,aiModel,aiProvider,makeDraft,executeCustomBot} from './ai.js';
-import {startScheduler} from './scheduler.js';
+import {startScheduler,startRetention} from './scheduler.js';
 import {queueGroupRun,markInterrupted,coordinationState} from './coordination.js';
 import {createQueue,recoverQueue,defaultHandlers} from './queue.js';
 import {Auth,ROLES,sessionCookie,clearCookie,DEFAULT_WORKSPACE as DEFAULT_WORKSPACE_ID} from './auth.js';
@@ -36,6 +39,7 @@ const store=await openStore(STORE_PATH);
 await store.update(s=>{wf.migrate(s);wf.recoverInterrupted(s);});
 await markInterrupted(store);
 const stopScheduler=startScheduler(store);
+const stopRetention=startRetention(store);
 // First boot bootstraps the owner account from DASHBOARD_PASSWORD; afterwards
 // sessions, resets and roles live in the database.
 const auth=new Auth(store);
@@ -108,6 +112,10 @@ const WRITE_ROUTES=[
   [/^\/api\/agents\/[a-f0-9-]+\/tasks$/,'POST','member'],
   [/^\/api\/agents\/[a-f0-9-]+$/,'PATCH','admin'],
   [/^\/api\/agents\/[a-f0-9-]+$/,'DELETE','admin'],
+  [/^\/api\/credentials$/,'POST','admin'],
+  [/^\/api\/credentials\/[a-f0-9-]+$/,'DELETE','admin'],
+  [/^\/api\/retention\/prune$/,'POST','admin'],
+  [/^\/api\/admin\/restore$/,'POST','admin'],
   [/^\/api\/demo\/seed$/,'POST','member'],
   [/^\/api\/reset-demo$/,'POST','member'],
 ];
@@ -139,7 +147,8 @@ async function processCandidate(id){
   }
 }
 
-function snapshot(req){const s=store.read();const me=principal(req);return {...s,aiEnabled:isLive(),aiModel:isLive()?aiModel():null,me:me?{email:me.email,role:me.role}:null,serverTime:new Date().toISOString()};}
+function snapshot(req){const s=store.read();const me=principal(req);return {...s,aiEnabled:isLive(),aiModel:isLive()?aiModel():null,me:me?{email:me.email,role:me.role}:null,retention:retentionSettings(s),serverTime:new Date().toISOString()};}
+const retentionSettings=s=>({...RETENTION_DEFAULTS,...(s.settings?.retention||{})});
 async function api(req,res,u){
   const p=u.pathname,m=req.method;
   // Health checks and uptime probes commonly use HEAD; answer both, bodyless for HEAD.
@@ -366,6 +375,51 @@ async function api(req,res,u){
     await store.update(s=>activity(s,'agent','Revoked a local agent. Its in-flight tasks were failed, not dropped silently.',{agentId:match[1]}));
     return send(res,200,result);
   }
+  // --- Credential vault: encrypted at rest, revealed only by admins ---
+  if(p==='/api/credentials'&&m==='GET')return send(res,200,{credentials:credentials.listCredentials(store,DEFAULT_WORKSPACE_ID)});
+  if(p==='/api/credentials'&&m==='POST'){
+    requireRole(req,'admin');
+    const b=await jsonBody(req);
+    const result=credentials.addCredential(store,DEFAULT_WORKSPACE_ID,{...b,createdBy:actor.email});
+    await store.update(s=>activity(s,'credential',`Stored credential "${String(b.name||'').slice(0,60)}".`,{credentialId:result.id}));
+    return send(res,201,result);
+  }
+  match=p.match(/^\/api\/credentials\/([a-f0-9-]+)\/reveal$/);
+  if(match&&m==='POST'){
+    // Admins only: the reveal returns plaintext and is written to the audit log.
+    requireRole(req,'admin');
+    const item=credentials.revealCredential(store,DEFAULT_WORKSPACE_ID,match[1]);
+    await store.update(s=>activity(s,'credential',`Revealed credential "${String(item.name).slice(0,60)}".`,{credentialId:item.id}));
+    return send(res,200,item);
+  }
+  match=p.match(/^\/api\/credentials\/([a-f0-9-]+)$/);
+  if(match&&m==='DELETE'){
+    requireRole(req,'admin');
+    const result=credentials.deleteCredential(store,DEFAULT_WORKSPACE_ID,match[1]);
+    await store.update(s=>activity(s,'credential','Deleted a credential.',{credentialId:match[1]}));
+    return send(res,200,result);
+  }
+  // --- Retention: preview then apply the workspace policy ---
+  if(p==='/api/retention/preview'&&m==='GET'){
+    const state=store.read();
+    return send(res,200,{policy:retentionSettings(state),preview:pruneState(state,{dryRun:true})});
+  }
+  if(p==='/api/retention/prune'&&m==='POST'){
+    const report=await store.update(s=>pruneState(s));
+    return send(res,200,report);
+  }
+  // --- Backup: export/restore. Credentials and sessions never travel ---
+  if(p==='/api/admin/backup'&&m==='GET'){
+    requireRole(req,'admin');
+    return send(res,200,backup.exportBackup(store));
+  }
+  if(p==='/api/admin/restore'&&m==='POST'){
+    requireRole(req,'admin');
+    const b=await jsonBody(req);
+    const result=backup.importBackup(store,b,{force:Boolean(b.force)});
+    await store.update(s=>activity(s,'backup',`Restored a backup into this installation (${result.restored} rows).`));
+    return send(res,200,result);
+  }
   // --- Source evidence: what supports a draft, verified by whom ---
   match=p.match(/^\/api\/drafts\/([a-f0-9-]+)\/evidence$/);
   if(match&&m==='POST'){
@@ -383,7 +437,7 @@ async function api(req,res,u){
   if(match&&m==='DELETE'){const result=await store.update(s=>evidence.dropEvidence(s,match[1]));return send(res,200,result);}
   fail('Unknown endpoint.',404);
 }
-const ASSETS=new Set(['index.html','app.css','polish.css','usability.css','transport.js','local-api.js','app.js','core.js','workflow.js','tasks.js','evidence.js','contracts.js','coordination.js','group-simulator.js','chat-engine.js','usability.js','demo-feed.html']);
+const ASSETS=new Set(['index.html','app.css','polish.css','usability.css','transport.js','local-api.js','app.js','core.js','workflow.js','tasks.js','evidence.js','contracts.js','retention.js','coordination.js','group-simulator.js','chat-engine.js','usability.js','demo-feed.html']);
 async function serve(req,res,u){
   let rel=u.pathname==='/'?'index.html':u.pathname.slice(1);
   if(!ASSETS.has(rel))return send(res,404,{error:'Not found'});
@@ -404,4 +458,4 @@ server.listen(PORT,HOST,()=>{
   console.log(`AI mode: ${isLive()?`Connected · ${aiModel()} @ ${aiProvider()}`:'Template drafts (no AI provider configured)'}`);
   if(HOST!=='127.0.0.1'&&HOST!=='localhost')console.warn('WARNING: Use HTTPS plus a private network / access proxy for remote access.');
 });
-process.on('SIGINT',()=>{stopQueue();stopScheduler();server.close(()=>process.exit(0));});
+process.on('SIGINT',()=>{stopQueue();stopScheduler();stopRetention();server.close(()=>process.exit(0));});

@@ -11,6 +11,7 @@
 import {activity,candidateInput,cleanText,scheduleApproval} from './core.js';
 import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js';
 import {evidenceSummary,evidenceForDraft,seedCandidateEvidence} from './evidence.js';
+import {normalizeRetention} from './retention.js';
 import * as contracts from './contracts.js';
 
 export const SCHEMA_VERSION = 3;
@@ -81,6 +82,7 @@ export function updateSettings(state, body) {
     state.settings.minDelay = a;
     state.settings.maxDelay = c;
   }
+  if (body.retention !== undefined) state.settings.retention = normalizeRetention(body.retention);
   activity(state, 'settings', 'Updated user preferences.');
   return state.settings;
 }
