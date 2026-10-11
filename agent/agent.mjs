@@ -13,10 +13,11 @@
  * a hash of the body, and the server rejects replays and stale clocks.
  *
  * The agent executes only the task kinds its server-side permissions allow.
- * "browser.capture" is an HTTP read of pages the operator explicitly
- * allowlists (AGENT_BROWSER_ALLOWLIST), not browser automation: it exists so
- * sites that authorize scripted access can be read deliberately. Driving a
- * real browser would add a headless-browser dependency this project avoids,
+ * "browser.capture" reads a page on a host the operator explicitly allowlists
+ * (AGENT_BROWSER_ALLOWLIST). By default that is a plain HTTP read. With
+ * AGENT_BROWSER=1 the page is opened in the Chrome, Chromium or Edge installed
+ * on this device (see agent/browser.mjs), which also reads pages that need
+ * JavaScript. Either way it only reads: nothing is clicked, typed or posted,
  * and automating X is outside the product's rules regardless.
  */
 import fs from 'node:fs';
@@ -24,6 +25,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import crypto from 'node:crypto';
 import {assertPublicUrl} from './net-guard.mjs';
+import {captureWithBrowser} from './browser.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG = path.join(HERE, 'agent.config.json');
@@ -110,8 +112,9 @@ async function execute(task, config) {
     const allow = (process.env.AGENT_BROWSER_ALLOWLIST || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
     const host = new URL(target).host.toLowerCase();
     if (!allow.includes(host)) {
-      throw new Error(`Refusing to read ${host}: it is not in AGENT_BROWSER_ALLOWLIST. This is an HTTP read of explicitly allowed pages, not browser automation.`);
+      throw new Error(`Refusing to read ${host}: it is not in AGENT_BROWSER_ALLOWLIST. Only explicitly allowed pages are read.`);
     }
+    if (process.env.AGENT_BROWSER === '1') return captureWithBrowser(target, {allow});
     const res = await fetch(target, {method: 'GET', signal: AbortSignal.timeout(15000)});
     const html = (await res.text()).slice(0, 200000);
     const title = /<title[^>]*>([^<]*)<\/title>/i.exec(html)?.[1]?.trim() || null;
