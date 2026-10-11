@@ -1,6 +1,7 @@
 import './env.js'; // load .env before anything reads process.env
 import './env.js'; // load .env before anything reads process.env
 import http from 'node:http';
+import https from 'node:https';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -485,8 +486,7 @@ async function serve(req,res,u){
   let rel=u.pathname==='/'?'index.html':u.pathname.slice(1);
   if(!ASSETS.has(rel))return send(res,404,{error:'Not found'});
   try {const body=await fs.readFile(path.join(PUBLIC,rel));res.writeHead(200,{'Content-Type':TYPES[rel.split('.').pop()]||'application/octet-stream','Content-Security-Policy':CSP,...SECURITY,'Cache-Control':'no-store'});res.end(req.method==='HEAD'?undefined:body);}catch{return send(res,404,{error:'Missing asset'});}
-}
-const server=http.createServer(async(req,res)=>{
+}const handler=async(req,res)=>{
   try{
     const host=req.headers.host||'localhost';const url=new URL(req.url,`http://${host}`);
     checkOrigin(req);
@@ -494,7 +494,20 @@ const server=http.createServer(async(req,res)=>{
     else if(req.method==='GET'||req.method==='HEAD')await serve(req,res,url);
     else fail('Method not allowed.',405);
   }catch(e){let status=e.status||500;console.error(status===500?'Server error: '+e.message:'');if(res.headersSent){res.end();return;}send(res,status,{error:status===500?'Internal server error':e.message});}
-});
+};
+// Optional in-process TLS. A reverse proxy is still the recommended front for
+// a real deployment; this exists so a private single-host install can serve
+// HTTPS without one. `req.socket.encrypted` drives the Secure cookie flag.
+const TLS={cert:process.env.TLS_CERT,key:process.env.TLS_KEY};
+let server;
+if(TLS.cert||TLS.key){
+  if(!TLS.cert||!TLS.key)throw new Error('TLS_CERT and TLS_KEY must be set together. Remove both to serve plain HTTP (local use only).');
+  let cert,key;
+  try{cert=await fs.readFile(TLS.cert);key=await fs.readFile(TLS.key);}
+  catch(e){throw new Error(`TLS_CERT/TLS_KEY could not be read: ${e.message}`);}
+  server=https.createServer({cert,key},handler);
+  console.log(`TLS: serving HTTPS from ${TLS.cert}`);
+}else server=http.createServer(handler);
 // Fail loudly on a misconfiguration that would silently weaken security, and
 // warn about the rest; every check is about the deployment, not the app logic.
 function preflight(){
@@ -506,7 +519,7 @@ function preflight(){
 }
 preflight();
 server.listen(PORT,HOST,()=>{
-  console.log(`\nAgent Control Prototype: http://${HOST}:${PORT}`);
+  console.log(`\nAgent Control Prototype: http${server instanceof https.Server?'s':''}://${HOST}:${PORT}`);
   if(!process.env.DASHBOARD_PASSWORD) console.log(`Temporary dashboard password (changes on restart): ${PASSWORD}`);
   console.log(`AI mode: ${isLive()?`Connected · ${aiModel()} @ ${aiProvider()}`:'Template drafts (no AI provider configured)'}`);
   if(HOST!=='127.0.0.1'&&HOST!=='localhost')console.warn('WARNING: Use HTTPS plus a private network / access proxy for remote access.');
