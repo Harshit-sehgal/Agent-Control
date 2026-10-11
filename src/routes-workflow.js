@@ -9,13 +9,15 @@ import {pruneState, RETENTION_DEFAULTS} from '../shared/retention.js';
 import * as notifications from './notifications.js';
 import {aiEnabled, aiModel, makeDraft} from './ai.js';
 import {fail} from './http.js';
-import {reply} from './router.js';
+import {reply, allows} from './router.js';
 
 const retentionSettings = s => ({...RETENTION_DEFAULTS, ...(s.settings?.retention || {})});
 
 export function workflowRoutes(router, {store, processCandidate}) {
   router.add('GET', '/api/state', 'viewer', c => {
     const s = store.read(), me = c.actor, live = aiEnabled();
+    // The capture token lets its holder add posts, which a viewer may not do.
+    if (!allows(me.role, 'member')) delete s.captureToken;
     return {...s, aiEnabled: live, aiModel: live ? aiModel() : null, me: {email: me.email, role: me.role}, retention: retentionSettings(s),
       notifications: notifications.listNotifications(store, me.userId, 50), unread: notifications.unreadCount(store, me.userId), serverTime: new Date().toISOString()};
   });
@@ -66,6 +68,9 @@ export function workflowRoutes(router, {store, processCandidate}) {
   // Structured task queue: the same records the internal worker executes.
   router.add('POST', '/api/tasks', 'member', async c => {
     const b = await c.body();
+    // Delivery tasks are created by the server from a user's own preferences.
+    // Taken from a request, one would send to any stored webhook.
+    if (b.kind === 'notification') fail('Notification deliveries are queued by the server, not by request.', 403);
     const result = await store.update(s => tasks.enqueueTask(s, b));
     return reply(result.duplicate ? 200 : 201, result.task);
   });

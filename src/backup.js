@@ -13,7 +13,8 @@
  */
 import crypto from 'node:crypto';
 import * as wf from '../shared/workflow.js';
-import {initialState} from '../shared/core.js';
+import {initialState, validHttpUrl} from '../shared/core.js';
+import {ROLES} from './auth.js';
 import {readDocuments} from './sqlite-store.js';
 
 export const BACKUP_VERSION = 1;
@@ -61,6 +62,15 @@ export function validateBackup(document) {
   // Recompute the checksum so a hand-edited or truncated file is rejected.
   const actual = crypto.createHash('sha256').update(JSON.stringify(document.tables)).digest('hex');
   if (document.checksum && document.checksum !== actual) fail('Backup checksum does not match its contents. The file may be corrupt or edited.');
+  // Roles are the known ones, and every link the UI will render is http(s):
+  // the normal write paths enforce both, so a restore must not be a way round.
+  for (const m of document.tables.workspace_members) if (!ROLES.includes(m.role)) fail('Backup holds an unknown role.');
+  const link = (value, where) => { if (value && !validHttpUrl(value)) fail(`Backup holds a link that is not http(s) in ${where}.`); };
+  for (const e of document.tables.evidence) link(e.link, 'evidence');
+  for (const name of ['candidates', 'drafts']) for (const row of document.tables[name]) {
+    link(row.url, name);
+    if (row.doc) { let doc; try { doc = JSON.parse(row.doc); } catch { fail(`Backup row in ${name} is not valid JSON.`); } link(doc?.url, name); }
+  }
   // The workflow document must survive a migration before being trusted.
   const state = tablesToState(document.tables);
   wf.migrate(state);
@@ -82,7 +92,10 @@ export function importBackup(store, document, {force = false} = {}) {
       store.run(`DELETE FROM ${name}`);
       const rows = tables[name] || [];
       if (!rows.length) continue;
-      const columns = Object.keys(rows[0]);
+      // Column names go into the statement, so only the table's own are used.
+      const known = new Set(store.all(`PRAGMA table_info(${name})`).map(c => c.name));
+      const columns = Object.keys(rows[0]).filter(c => known.has(c));
+      if (!columns.length) fail(`Backup table "${name}" has no usable columns.`);
       const placeholders = columns.map(() => '?').join(',');
       const statement = store.db.prepare(`INSERT INTO ${name} (${columns.join(',')}) VALUES (${placeholders})`);
       for (const row of rows) {

@@ -23,7 +23,7 @@ the operational knobs.
 | `PUBLIC_ORIGIN` | absolute `https://…` URL; enables the origin/CSRF check for that host |
 | `HSTS` | `1` to send `Strict-Transport-Security` (only behind TLS) |
 | `MASTER_KEY` | 32-byte key (64 hex chars) for the credential vault; else a `0600` keyfile is generated beside the DB |
-| `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` / `AI_API_STYLE` / `AI_TIMEOUT_MS` | optional OpenAI-compatible provider |
+| `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` / `AI_API_STYLE` / `AI_TIMEOUT_MS` / `AI_MAX_CONCURRENCY` | optional OpenAI-compatible provider |
 
 `preflight()` refuses to boot on an invalid `PUBLIC_ORIGIN` and warns when HSTS
 is on without HTTPS, when no `DASHBOARD_PASSWORD` is set, or when the server is

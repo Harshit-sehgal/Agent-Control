@@ -2,9 +2,9 @@
  * `adminPage(kind)` fetches and returns the body HTML; the handler tables are
  * wired by the host's delegated click, submit and change listeners. Handlers do
  * not catch errors, the host toasts them. */
-import {esc, btn, row, box, field, note, empty, tag, fullDate} from './ui-kit.js?v=f80adbb636';
-import {store, api, sync} from './ui-store.js?v=f80adbb636';
-import {toast, confirmSheet, askSheet} from './ui-dialogs.js?v=f80adbb636';
+import {esc, btn, row, box, field, note, empty, tag, fullDate} from './ui-kit.js?v=ec265c1708';
+import {store, api, sync} from './ui-store.js?v=ec265c1708';
+import {toast, confirmSheet, askSheet} from './ui-dialogs.js?v=ec265c1708';
 
 /** Title + one-line description per page, used by the host for the page header. */
 export const ADMIN_PAGES = {
@@ -171,7 +171,9 @@ export async function adminPage(kind) {
   }
   if (kind === 'data') {
     const [creds, retention] = await Promise.all([api('/api/credentials'), api('/api/retention/preview')]);
-    return credentialsPanel(creds.credentials || []) + retentionPanel(retention.policy, retention.preview) + backupPanel();
+    return credentialsPanel(creds.credentials || []) + retentionPanel(retention.policy, retention.preview)
+      // A backup carries every account's password hash, so only the owner gets it.
+      + (store.state?.me?.role === 'owner' ? backupPanel() : note('Backup and restore are available to the workspace owner.'));
   }
   if (kind === 'notifications') {
     const [list, prefs] = await Promise.all([api('/api/notifications'), api('/api/notification-prefs')]);

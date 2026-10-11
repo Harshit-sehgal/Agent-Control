@@ -8,14 +8,16 @@
  * Keeping transitions here is the single source of truth for the draft
  * lifecycle: candidate -> draft -> approved/scheduled -> ready -> posted.
  */
-import {activity,candidateInput,cleanText,scheduleApproval} from './core.js?v=f80adbb636';
-import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js?v=f80adbb636';
-import {evidenceSummary,evidenceForDraft,seedCandidateEvidence} from './evidence.js?v=f80adbb636';
-import {normalizeRetention} from './retention.js?v=f80adbb636';
-import * as contracts from './contracts.js?v=f80adbb636';
-import {pruneChats} from './chats.js?v=f80adbb636';
+import {activity,candidateInput,cleanText,scheduleApproval} from './core.js?v=ec265c1708';
+import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js?v=ec265c1708';
+import {evidenceSummary,evidenceForDraft,seedCandidateEvidence} from './evidence.js?v=ec265c1708';
+import {normalizeRetention} from './retention.js?v=ec265c1708';
+import * as contracts from './contracts.js?v=ec265c1708';
+import {pruneChats} from './chats.js?v=ec265c1708';
 
 export const SCHEMA_VERSION = 3;
+/** Posts are never pruned by age, so their number is bounded here. */
+export const MAX_CANDIDATES = 2000;
 
 export function fail(message, status = 400) {
   throw Object.assign(new Error(message), {status});
@@ -90,6 +92,7 @@ export function updateSettings(state, body) {
 }
 
 export function addCandidate(state, body) {
+  if ((state.candidates || []).length >= MAX_CANDIDATES) fail(`This workspace already holds ${MAX_CANDIDATES} posts. Remove some before adding more.`, 409);
   const input = candidateInput(body);
   const existing = state.candidates.find(c => c.url === input.url && c.text === input.text);
   if (existing) return {candidate: existing, duplicate: true};

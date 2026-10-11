@@ -85,9 +85,11 @@ export function accountRoutes(router, {store, auth, workspaceId}) {
   router.add('GET', '/api/notification-prefs', 'viewer', c => notifications.getPreferences(store, c.actor.userId));
   router.add('PATCH', '/api/notification-prefs', 'member', async c => { const b = await c.body(); return notifications.updatePreferences(store, c.actor.userId, b); });
 
-  // Backup: export and restore. Credentials and sessions never travel.
-  router.add('GET', '/api/admin/backup', 'admin', () => backup.exportBackup(store));
-  router.add('POST', '/api/admin/restore', 'admin', async c => {
+  // Backup: export and restore. Credentials and sessions never travel. Owner
+  // only: a backup carries every account's password hash, and a restore
+  // replaces accounts and roles, so either one in an admin's hands is a way up.
+  router.add('GET', '/api/admin/backup', 'owner', () => backup.exportBackup(store));
+  router.add('POST', '/api/admin/restore', 'owner', async c => {
     const b = await c.body();
     const result = backup.importBackup(store, b, {force: Boolean(b.force)});
     await store.update(s => activity(s, 'backup', `Restored a backup into this installation (${result.restored} rows).`));

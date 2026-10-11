@@ -16,6 +16,8 @@ import * as contracts from './contracts.js';
 import {pruneChats} from './chats.js';
 
 export const SCHEMA_VERSION = 3;
+/** Posts are never pruned by age, so their number is bounded here. */
+export const MAX_CANDIDATES = 2000;
 
 export function fail(message, status = 400) {
   throw Object.assign(new Error(message), {status});
@@ -90,6 +92,7 @@ export function updateSettings(state, body) {
 }
 
 export function addCandidate(state, body) {
+  if ((state.candidates || []).length >= MAX_CANDIDATES) fail(`This workspace already holds ${MAX_CANDIDATES} posts. Remove some before adding more.`, 409);
   const input = candidateInput(body);
   const existing = state.candidates.find(c => c.url === input.url && c.text === input.text);
   if (existing) return {candidate: existing, duplicate: true};

@@ -51,7 +51,10 @@ Verification (`verifyAgentRequest`):
 
 ## 5. Permissions
 Task kinds are permission-gated: `http.check` and `browser.capture`
-(the latter limited to an explicit `AGENT_BROWSER_ALLOWLIST`). The **server**
+(the latter limited to an explicit `AGENT_BROWSER_ALLOWLIST`). `http.check`
+refuses hosts that are, or resolve to, private or local addresses, and reports
+a redirect instead of following it; `AGENT_ALLOW_PRIVATE=1` on the device
+lifts that on purpose. The **server**
 decides an agent's permissions; a heartbeat body is never trusted to widen its
 own scope (`setAgentPermissions` is admin-only). There is deliberately no
 `publish.*` permission anywhere in the system.

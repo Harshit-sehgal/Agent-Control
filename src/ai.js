@@ -49,7 +49,13 @@ function extract(data){
 const upstream=(message,status=502)=>Object.assign(new Error(message),{status});
 const errorText=(data,status)=>cleanText(data?.error?.message||data?.message||data?._error,200)||`provider responded ${status}`;
 
+// Each call can cost money and holds a connection for minutes, so only a few
+// run at once; the rest are refused instead of queued without bound.
+const maxCalls=()=>{const n=Number(process.env.AI_MAX_CONCURRENCY);return Number.isInteger(n)&&n>=1?n:4;};
+let activeCalls=0;
 async function callModel({instructions,input,maxTokens}){
+  if(activeCalls>=maxCalls())throw upstream('The AI provider is busy with other requests. Try again in a moment.',429);
+  activeCalls++;
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs());
   try{
     const res=await fetch(endpoint(),{method:'POST',headers:{Authorization:`Bearer ${providerKey()}`,'Content-Type':'application/json'},body:JSON.stringify(payload(instructions,input,maxTokens)),signal:controller.signal});
@@ -60,7 +66,7 @@ async function callModel({instructions,input,maxTokens}){
     if(e.name==='AbortError')throw upstream(`AI provider timed out after ${Math.round(timeoutMs()/1000)}s.`,504);
     if(e.status)throw e;
     throw upstream(`AI provider at ${aiProvider()} could not be reached.`);
-  }finally{clearTimeout(timer);}
+  }finally{clearTimeout(timer);activeCalls--;}
 }
 
 export async function makeDraft(candidate,settings,override='') {

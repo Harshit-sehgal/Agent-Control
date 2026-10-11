@@ -6,7 +6,7 @@
  * These transitions are pure and mirror `workflow.js`: the Node worker and the
  * browser-local demo both run them, so the two backends cannot drift.
  */
-import {activity, cleanText} from './core.js?v=f80adbb636';
+import {activity, cleanText} from './core.js?v=ec265c1708';
 
 export const TASK_STATUSES = ['queued', 'running', 'done', 'failed', 'cancelled'];
 export const MAX_ATTEMPTS_DEFAULT = 5;

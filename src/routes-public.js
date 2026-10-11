@@ -15,18 +15,26 @@ export function publicRoutes(router, {store, auth, version}) {
   // open, so lapsed ones are dropped and a long-lived process cannot grow it.
   const attempts = new Map();
   const pruneExpired = () => { const now = Date.now(); for (const [ip, r] of attempts) if (now > r.until) attempts.delete(ip); };
+  /** Count one try from `key` in the current window, or refuse with 429. */
+  function attempt(key, limit) {
+    pruneExpired();
+    const record = attempts.get(key) || {count: 0, until: Date.now() + LOGIN_WINDOW_MS};
+    attempts.set(key, record);
+    if (record.count >= limit) fail('Too many attempts. Try again in 15 minutes.', 429);
+    record.count++;
+  }
 
   // Health checks and uptime probes commonly use HEAD; the server answers it bodyless.
   for (const method of ['GET', 'HEAD']) router.add(method, '/api/health', 'public', () => ({ok: true, version}));
 
   router.add('POST', '/api/login', 'public', async c => {
-    const ip = c.req.socket.remoteAddress || 'unknown', record = attempts.get(ip) || {count: 0, until: 0};
-    if (Date.now() > record.until) { record.count = 0; record.until = Date.now() + LOGIN_WINDOW_MS; }
-    pruneExpired();
-    if (record.count >= LOGIN_ATTEMPTS) fail('Too many attempts. Try again in 15 minutes.', 429);
+    const ip = c.req.socket.remoteAddress || 'unknown';
+    // The attempt is counted before the body is read, so a burst of parallel
+    // requests cannot all slip past the limit while the first is still open.
+    attempt(ip, LOGIN_ATTEMPTS);
     const b = await c.body();
     const result = auth.login({email: b.email, password: b.password}, {ip, userAgent: c.req.headers['user-agent']});
-    if (!result.ok) { record.count++; attempts.set(ip, record); fail(result.error, result.status); }
+    if (!result.ok) fail(result.error, result.status);
     attempts.delete(ip);
     const secure = Boolean(c.req.socket.encrypted || c.req.headers['x-forwarded-proto'] === 'https');
     return reply(200, {ok: true, me: {email: result.user.email, role: result.role}}, {'Set-Cookie': sessionCookie(result.sessionId, {secure})});
@@ -39,6 +47,8 @@ export function publicRoutes(router, {store, auth, version}) {
   // These two answer identically whether or not the address exists, so they
   // cannot be used to enumerate accounts.
   router.add('POST', '/api/auth/forgot', 'public', async c => {
+    // Each request replaces the pending reset, so it is limited like sign-in.
+    attempt(`forgot:${c.req.socket.remoteAddress || 'unknown'}`, LOGIN_ATTEMPTS);
     const b = await c.body();
     const token = auth.requestPasswordReset(b.email);
     // Local-first deployment: the console prints the token because there is no
@@ -55,7 +65,9 @@ export function publicRoutes(router, {store, auth, version}) {
   // A separate token limits the extension to adding a candidate and nothing else.
   router.add('POST', '/api/capture', 'public', async c => {
     const token = c.req.headers['x-capture-token'];
-    if (!token || !timingEqual(token, store.read().captureToken)) fail('Invalid extension token.', 401);
+    // Read the token without copying the whole workspace: this runs before
+    // the caller has proved anything.
+    if (!token || !timingEqual(token, store.captureToken())) fail('Invalid extension token.', 401);
     const body = candidateInput(await c.body());
     const result = await store.update(s => wf.addCandidate(s, body));
     return reply(result.duplicate ? 200 : 201, result);

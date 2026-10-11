@@ -23,6 +23,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import crypto from 'node:crypto';
+import {assertPublicUrl} from './net-guard.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG = path.join(HERE, 'agent.config.json');
@@ -97,7 +98,10 @@ async function execute(task, config) {
     const target = String(task.payload?.url || '');
     if (!/^https?:\/\//.test(target)) throw new Error('http.check needs a valid http(s) url.');
     const started = Date.now();
-    const res = await fetch(target, {method: 'GET', redirect: 'follow', signal: AbortSignal.timeout(10000)});
+    await assertPublicUrl(target);
+    // Redirects are reported, not followed: following one could land on an
+    // address the check above would have refused.
+    const res = await fetch(target, {method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(10000)});
     const latencyMs = Date.now() - started;
     return {url: target, httpStatus: res.status, ok: res.ok, latencyMs, checkedAt: new Date().toISOString()};
   }

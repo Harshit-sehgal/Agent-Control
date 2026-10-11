@@ -34,6 +34,8 @@ const verifyPassword = (password, stored) => {
   const actual = crypto.scryptSync(String(password), salt, 64, {...SCRYPT, N: Number(n) || SCRYPT.N});
   return crypto.timingSafeEqual(actual, Buffer.from(hash, 'hex'));
 };
+// Verified against when the address is unknown, to spend the same time.
+const DUMMY_HASH = hashPassword(crypto.randomBytes(16).toString('hex'));
 export const validEmail = value => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(value || '').trim());
 
 export class Auth {
@@ -54,17 +56,24 @@ export class Auth {
     // one shared password for the bootstrapped owner account.
     const mail = String(email || OWNER_EMAIL).trim().toLowerCase();
     const row = this.store.get('SELECT * FROM users WHERE email=?', mail);
-    if (!row) return {ok: false, error: 'Sign-in is not initialised.', status: 500};
+    // One answer for an unknown address, a wrong password and a disabled
+    // account, after the same amount of work, so sign-in cannot be used to
+    // find out which addresses have accounts.
+    const refused = {ok: false, error: 'Incorrect email or password.', status: 401};
+    if (!verifyPassword(password, row ? row.password_hash : DUMMY_HASH) || !row) return refused;
     if (row.disabled_at) return {ok: false, error: 'Account disabled.', status: 403};
-    if (!verifyPassword(password, row.password_hash)) return {ok: false, error: 'Incorrect password.', status: 401};
+    // The cookie holds the id; the table holds only its hash, so neither the
+    // database file nor the sessions list can be replayed as a login.
     const sessionId = crypto.randomBytes(32).toString('hex');
     this.store.run('INSERT INTO sessions (id,user_id,created_at,expires_at,ip,user_agent) VALUES (?,?,?,?,?,?)',
-      sessionId, row.id, now(), new Date(Date.now() + SESSION_TTL_MS).toISOString(), ip || null, String(userAgent || '').slice(0, 200));
+      sha256(sessionId), row.id, now(), new Date(Date.now() + SESSION_TTL_MS).toISOString(), ip || null, String(userAgent || '').slice(0, 200));
     return {ok: true, userId: row.id, user: {id: row.id, email: row.email}, role: this.roleOf(row.id), sessionId};
   }
-  /** Resolve a session id to a live principal, or null. */
-  session(sessionId) {
-    if (!sessionId) return null;
+  /** Resolve the cookie's session id to a live principal, or null. The
+   * principal's `sessionId` is the stored handle (the hash), not the cookie. */
+  session(cookieId) {
+    if (!cookieId) return null;
+    const sessionId = sha256(cookieId);
     const row = this.store.get(
       `SELECT s.id AS sid, s.expires_at, u.id, u.email, u.disabled_at
        FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=? AND s.revoked_at IS NULL`, sessionId);
@@ -76,7 +85,7 @@ export class Auth {
     const row = this.store.get('SELECT role FROM workspace_members WHERE user_id=? AND workspace_id=?', userId, DEFAULT_WORKSPACE);
     return row?.role || 'viewer';
   }
-  logout(sessionId) { if (sessionId) this.store.run('UPDATE sessions SET revoked_at=? WHERE id=? AND revoked_at IS NULL', now(), sessionId); }
+  logout(cookieId) { if (cookieId) this.store.run('UPDATE sessions SET revoked_at=? WHERE id=? AND revoked_at IS NULL', now(), sha256(cookieId)); }
   listSessions(userId) {
     return this.store.all(
       `SELECT id, created_at, expires_at, ip, user_agent FROM sessions

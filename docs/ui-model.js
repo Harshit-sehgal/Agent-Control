@@ -2,7 +2,7 @@
  * a pane shows: the chat list, a thread's timeline, the "needs you" count and
  * the hash route. No DOM and no globals, so the product rules here are unit
  * tested directly (tests/ui-model.test.js). */
-import {fullDate} from './ui-kit.js?v=f80adbb636';
+import {fullDate} from './ui-kit.js?v=ec265c1708';
 
 export const ACTIVE_DRAFTS = ['pending', 'scheduled', 'ready'];
 const X_GROUP = 'x-engage';

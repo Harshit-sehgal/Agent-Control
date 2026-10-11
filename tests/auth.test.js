@@ -45,8 +45,17 @@ test('login, sessions, expiry and revocation behave like real credentials', asyn
   assert.equal(auth.session(good.sessionId), null, 'Logout must invalidate the session.');
   // Expiry is enforced, not just recorded.
   const again = auth.login({password: 'owner-secret-1'}).sessionId;
-  store.run('UPDATE sessions SET expires_at=? WHERE id=?', new Date(Date.now() - 1000).toISOString(), again);
+  const handle = auth.session(again).sessionId;
+  assert.notEqual(handle, again, 'The table must hold a hash of the session id, never the id the cookie carries.');
+  assert.equal(store.get('SELECT count(*) AS n FROM sessions WHERE id=?', again).n, 0);
+  assert.equal(auth.session(handle), null, 'A stored handle must not work as a login.');
+  assert.equal(auth.listSessions(good.user.id).some(s => s.id === again), false, 'The sessions list must not expose live tokens.');
+  store.run('UPDATE sessions SET expires_at=? WHERE id=?', new Date(Date.now() - 1000).toISOString(), handle);
   assert.equal(auth.session(again), null);
+  // An unknown address and a wrong password are indistinguishable.
+  const unknown = auth.login({email: 'nobody@example.com', password: 'x'}), wrong = auth.login({password: 'x'});
+  assert.deepEqual({status: unknown.status, error: unknown.error}, {status: wrong.status, error: wrong.error});
+  assert.equal(unknown.status, 401);
   await fs.rm(dir, {recursive: true, force: true});
 });
 

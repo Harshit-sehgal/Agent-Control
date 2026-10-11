@@ -76,3 +76,11 @@ as the record of what shipped; new work should be added as a fresh section.
 - [x] Reminders survive a restart
 - [x] Conversations stored with the workspace, with a one-time import from the browser
 - [x] Sheets take focus as they open (fixes text landing in the wrong field)
+- [x] Group runs report into their conversation from the server
+
+## Phase O — adversarial security review
+- [x] Owner-only backup and restore; restore validates roles, links and column names
+- [x] Hashed session ids; one answer for unknown address and wrong password
+- [x] Sign-in and reset attempts counted before the body is read
+- [x] Capture token withheld from viewers; request-made notification tasks refused
+- [x] Local agent refuses private-network targets; model calls and posts are bounded

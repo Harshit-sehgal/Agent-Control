@@ -16,13 +16,14 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {initialState, uuid} from '../shared/core.js';
+import crypto from 'node:crypto';
 import {sqlite} from './sqlite.js';
 import * as wf from '../shared/workflow.js';
 
 const now = () => new Date().toISOString();
 /** Current schema version. Keep in sync with the migration list; tests and
  * operators read it, so it is exported rather than duplicated. */
-export const SCHEMA_DB_VERSION = 3;
+export const SCHEMA_DB_VERSION = 4;
 
 /** v1 ships the full target schema: the workflow document plus the surfaces
  * the roadmap adds (task queue, agents, vault, notifications, users). Adding a
@@ -173,6 +174,13 @@ const MIGRATIONS = [
   {to: 3, up(db) {
     for (const table of DOC_TABLES) db.exec(`ALTER TABLE ${table} ADD COLUMN doc TEXT`);
     db.exec('CREATE TABLE IF NOT EXISTS chat_messages (id TEXT PRIMARY KEY, chat_key TEXT NOT NULL, doc TEXT NOT NULL, at TEXT NOT NULL)');
+  }},
+  // v4: session ids were stored as issued, so the database file (or the
+  // sessions list) held live sign-in tokens. Only their hash is kept now;
+  // sessions that are already open keep working.
+  {to: 4, up(db) {
+    const rehash = db.prepare('UPDATE sessions SET id=? WHERE id=?');
+    for (const row of db.prepare('SELECT id FROM sessions').all()) rehash.run(crypto.createHash('sha256').update(row.id).digest('hex'), row.id);
   }}];
 export class SqliteStore {
   constructor(dbPath, legacyPath) {
@@ -358,12 +366,13 @@ export class SqliteStore {
         }
       }
       for (const [key, list] of Object.entries(state.chats || {})) {
-        for (const m of list || []) this.db.prepare('INSERT INTO chat_messages (id,chat_key,doc,at) VALUES (?,?,?,?)').run(m.id, key, JSON.stringify(m), m.at || now());
+        for (const m of list || []) this.db.prepare('INSERT INTO chat_messages (id,chat_key,doc,at) VALUES (?,?,?,?)').run(`${key}/${m.id}`, key, JSON.stringify(m), m.at || now());
       }
     });
     return t;
   }
   read() { return structuredClone(this.cache); }
+  captureToken() { return this.cache.captureToken; }
   async persist(state = this.cache) { this.writeCollections(state); this.cache = state; }
   update(fn) {
     const op = this.serial.then(async () => {

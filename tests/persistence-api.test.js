@@ -82,3 +82,46 @@ test('conversation history is validated, deduplicated, role-gated and clearable'
     assert.equal((await t.send('GET', '/api/state', undefined, cookie)).body.chats['team-x-engage'], undefined);
   } finally { await t.remove(); }
 });
+
+test('a viewer never receives the capture token, and backups are for the owner only', {timeout: 30000}, async () => {
+  const t = await installation();
+  try {
+    await t.start();
+    const owner = await t.login();
+    const make = async (email, role) => {
+      assert.equal((await t.send('POST', '/api/users', {email, password: 'some-password-1234', role}, owner)).status, 201);
+      return (await t.send('POST', '/api/login', {email, password: 'some-password-1234'})).cookie.split(';')[0];
+    };
+    const viewer = await make('viewer@example.com', 'viewer'), admin = await make('admin@example.com', 'admin');
+    assert.equal(typeof (await t.send('GET', '/api/state', undefined, owner)).body.captureToken, 'string');
+    assert.equal((await t.send('GET', '/api/state', undefined, viewer)).body.captureToken, undefined);
+    // A backup carries password hashes and a restore rewrites roles: not for admins.
+    assert.equal((await t.send('GET', '/api/admin/backup', undefined, admin)).status, 403);
+    assert.equal((await t.send('POST', '/api/admin/restore', {force: true}, admin)).status, 403);
+    const backup = (await t.send('GET', '/api/admin/backup', undefined, owner)).body;
+    assert.equal(backup.backupVersion, 1);
+
+    // A restore cannot smuggle in a script link, an unknown role or SQL in a column name.
+    const tamper = change => { const copy = structuredClone(backup); delete copy.checksum; change(copy.tables); return {...copy, force: true}; };
+    const bad = [
+      tamper(x => x.evidence.push({id: 'e1', kind: 'link', link: 'javascript:alert(1)', claim: 'c', confidence: 1, verification: 'unverified', reuse: 'quote', created_at: new Date().toISOString()})),
+      tamper(x => { x.workspace_members[0].role = 'superuser'; }),
+    ];
+    for (const document of bad) assert.equal((await t.send('POST', '/api/admin/restore', document, owner)).status, 400);
+    const injected = tamper(x => { x.groups[0] = {...x.groups[0], 'name) VALUES (1); DROP TABLE users; --': 'x'}; });
+    assert.equal((await t.send('POST', '/api/admin/restore', injected, owner)).status, 200, 'Unknown columns are ignored, not spliced into SQL.');
+    // A restore signs everyone out; the owner's account must still be there to sign in to.
+    assert.equal((await t.send('GET', '/api/users', undefined, await t.login())).status, 200, 'The users table must survive.');
+  } finally { await t.remove(); }
+});
+
+test('sign-in attempts are counted before the request body is read', {timeout: 30000}, async () => {
+  const t = await installation();
+  try {
+    await t.start();
+    // Twenty at once: with the old check-then-count order, all of them reached the password check.
+    const results = await Promise.all(Array.from({length: 20}, () => t.send('POST', '/api/login', {password: 'wrong-guess'})));
+    const counts = results.reduce((n, r) => ({...n, [r.status]: (n[r.status] || 0) + 1}), {});
+    assert.deepEqual(counts, {401: 8, 429: 12});
+  } finally { await t.remove(); }
+});

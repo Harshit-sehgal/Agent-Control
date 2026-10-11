@@ -171,7 +171,9 @@ export async function adminPage(kind) {
   }
   if (kind === 'data') {
     const [creds, retention] = await Promise.all([api('/api/credentials'), api('/api/retention/preview')]);
-    return credentialsPanel(creds.credentials || []) + retentionPanel(retention.policy, retention.preview) + backupPanel();
+    return credentialsPanel(creds.credentials || []) + retentionPanel(retention.policy, retention.preview)
+      // A backup carries every account's password hash, so only the owner gets it.
+      + (store.state?.me?.role === 'owner' ? backupPanel() : note('Backup and restore are available to the workspace owner.'));
   }
   if (kind === 'notifications') {
     const [list, prefs] = await Promise.all([api('/api/notifications'), api('/api/notification-prefs')]);

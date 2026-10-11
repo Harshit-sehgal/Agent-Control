@@ -244,8 +244,14 @@ Both paths run the same `shared/workflow.js` rules, so the demo and the real das
 - Set a strong, stable `DASHBOARD_PASSWORD` before exposing the server beyond localhost.
 - State lives in a transactional SQLite database (`DATA_FILE`); sessions are server-side and revocable, so a restart no longer signs users out.
 - Secrets (paired-agent secrets, stored credentials) are AES-256-GCM encrypted; the master key is `MASTER_KEY` or a `0600` keyfile beside the database. **Back the key up with the data.**
-- Roles are `viewer < member < admin < owner`; every mutating route is gated by a route matrix (`tests/authz-matrix.test.js`).
-- Login is rate-limited; the session cookie is `HttpOnly` + `SameSite=Strict`, and cross-origin writes are rejected.
+- Roles are `viewer < member < admin < owner`; every route is registered with the least role it needs (`src/router.js`, `tests/authz-matrix.test.js`).
+- Sign-in and password-reset requests are rate-limited per address, and the attempt is counted before the request is read. An unknown address and a wrong password get the same answer.
+- The session cookie is `HttpOnly` + `SameSite=Strict`; the database holds only a hash of each session id. Cross-origin writes are rejected.
+- **Backup and restore are for the owner only.** A backup carries every account's password hash, and a restore replaces accounts and roles. A restore rejects unknown roles and any link that is not http(s).
+- The extension capture token is a write credential, so viewers do not receive it.
+- The local agent refuses `http.check` targets on private or local networks and does not follow redirects. Set `AGENT_ALLOW_PRIVATE=1` on the device to allow private addresses on purpose.
+- At most `AI_MAX_CONCURRENCY` model calls (default 4) run at once; a workspace holds at most 2000 collected posts.
+- **Known limit:** conversation history is a display record that the browser writes, including the replies of built-in commands. A member could therefore store a message that looks like a bot's. Drafts, approvals and runs are not affected: they are separate records that only the server writes.
 - Captured posts are **untrusted external content**; input is escaped and URL schemes validated. Model output never receives browser or publishing tools, and **the final Post click is always human**.
 - Run behind an HTTPS reverse proxy; enable `HSTS=1` only after TLS works. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 - Full threat model: [`SECURITY.md`](SECURITY.md). Agent protocol: [`docs/AGENT-PROTOCOL.md`](docs/AGENT-PROTOCOL.md).
