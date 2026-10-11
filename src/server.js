@@ -16,6 +16,7 @@ import * as wf from '../shared/workflow.js';
 import {aiEnabled,aiModel,aiProvider,makeDraft,executeCustomBot} from './ai.js';
 import {startScheduler} from './scheduler.js';
 import {queueGroupRun,markInterrupted,coordinationState} from './coordination.js';
+import {Auth,ROLES,sessionCookie,clearCookie} from './auth.js';
 
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const PUBLIC=path.join(ROOT,'shared');
@@ -26,11 +27,15 @@ const PORT=Number(process.env.PORT||4173);
 const HOST=process.env.HOST||'127.0.0.1';
 const STORE_PATH=process.env.DATA_FILE||path.join(ROOT,'data','state.json');
 const PASSWORD=process.env.DASHBOARD_PASSWORD||crypto.randomBytes(12).toString('base64url');
-const sessions=new Map(), attempts=new Map();
+const attempts=new Map();
 const store=await openStore(STORE_PATH);
 await store.update(s=>{wf.migrate(s);wf.recoverInterrupted(s);});
 await markInterrupted(store);
 const stopScheduler=startScheduler(store);
+// First boot bootstraps the owner account from DASHBOARD_PASSWORD; afterwards
+// sessions, resets and roles live in the database.
+const auth=new Auth(store);
+auth.ensureBootstrap(PASSWORD);
 if(store.recoveredFrom)console.warn(`WARNING: ${STORE_PATH} was unreadable and has been moved to ${store.recoveredFrom}. A fresh state was created.`);
 const TYPES={'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8','svg':'image/svg+xml','png':'image/png','ico':'image/x-icon'};
 const isLive=()=>aiEnabled();
@@ -38,12 +43,14 @@ function fail(message,status=400){throw Object.assign(new Error(message),{status
 const SECURITY={'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer'};
 function send(res,status,value,headers={}){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...SECURITY,...headers});res.end(JSON.stringify(value));}
 function cookie(req,key){const found=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith(key+'='));return found?.slice(key.length+1);}
-function authed(req){const sid=cookie(req,'agent_session'),s=sid&&sessions.get(sid);if(!s)return false;if(s.exp<Date.now()){sessions.delete(sid);return false;}return true;}
+/** Resolve the signed-in principal from the server-side session table, or null. */
+function principal(req){return auth.session(cookie(req,'agent_session'));}
+function requireAuth(req){const p=principal(req);if(!p)fail('Sign in first.',401);return p;}
+function requireRole(req,minRole){const p=requireAuth(req);if(ROLES.indexOf(p.role)<ROLES.indexOf(minRole))fail(`This action needs the ${minRole} role or higher.`,403);return p;}
 // Drop expired rows so a long-lived process cannot grow the maps without bound.
 // An attempt record is only meaningful while its window is open; once it lapses
 // the counter is reset on the next login anyway, so the row can go.
-function pruneExpired(){const now=Date.now();for(const [sid,s] of sessions)if(s.exp<now)sessions.delete(sid);for(const [ip,r] of attempts)if(now>r.until)attempts.delete(ip);}
-function requireAuth(req){if(!authed(req))fail('Sign in first.',401);}
+function pruneExpired(){const now=Date.now();for(const [ip,r] of attempts)if(now>r.until)attempts.delete(ip);}
 function timingEqual(a,b){const h1=crypto.createHash('sha256').update(String(a)).digest(),h2=crypto.createHash('sha256').update(String(b)).digest();return crypto.timingSafeEqual(h1,h2);}
 function checkOrigin(req){if(req.url?.split('?')[0]==='/api/capture')return; if(!['POST','PATCH','DELETE','PUT'].includes(req.method))return;
   const origin=req.headers.origin;
@@ -51,8 +58,35 @@ function checkOrigin(req){if(req.url?.split('?')[0]==='/api/capture')return; if(
   const possible=[`http://${req.headers.host}`,`https://${req.headers.host}`,process.env.PUBLIC_ORIGIN].filter(Boolean);
   if(!possible.includes(origin))fail('Cross-origin request rejected.',403);
 }
+/** Minimum role per mutating route. GET routes are open to any authenticated
+ * member; every write and every admin surface is checked here so a viewer
+ * session cannot mutate even if a future route forgets to ask. */
+const WRITE_ROUTES=[
+  [/^\/api\/settings$/,'PATCH','admin'],
+  [/^\/api\/candidates$/,'POST','member'],
+  [/^\/api\/candidates\/[a-f0-9-]+\/process$/,'POST','member'],
+  [/^\/api\/drafts\/[a-f0-9-]+$/,'PATCH','member'],
+  [/^\/api\/drafts\/[a-f0-9-]+\/(approve|reject|ready|posted|rewrite)$/,'POST','member'],
+  [/^\/api\/groups$/,'POST','member'],
+  [/^\/api\/groups\/[a-z0-9-]+\/bots$/,'POST','member'],
+  [/^\/api\/groups\/[a-z0-9-]+\/bots\/[a-z0-9-]+$/,'PATCH','member'],
+  [/^\/api\/groups\/[a-z0-9-]+\/chat$/,'POST','member'],
+  [/^\/api\/bots\/run$/,'POST','member'],
+  [/^\/api\/schedules$/,'POST','member'],
+  [/^\/api\/schedules\/[a-f0-9-]+$/,'DELETE','member'],
+  [/^\/api\/demo\/seed$/,'POST','member'],
+  [/^\/api\/reset-demo$/,'POST','member'],
+];
+function authorize(actor,p,m){
+  for(const [pattern,method,role] of WRITE_ROUTES){
+    if(method===m&&pattern.test(p)){
+      if(ROLES.indexOf(actor.role)<ROLES.indexOf(role))fail(`This action needs the ${role} role or higher.`,403);
+      return;
+    }
+  }
+}
 async function jsonBody(req){let total=0;const chunks=[];for await (const chunk of req){total+=chunk.length;if(total>128*1024)fail('Request too large.',413);chunks.push(chunk);}try{return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');}catch{fail('Invalid JSON.',400);}}
-function snapshot(){const s=store.read();return {...s,aiEnabled:isLive(),aiModel:isLive()?aiModel():null,serverTime:new Date().toISOString()};}
+function snapshot(req){const s=store.read();const me=principal(req);return {...s,aiEnabled:isLive(),aiModel:isLive()?aiModel():null,me:me?{email:me.email,role:me.role}:null,serverTime:new Date().toISOString()};}
 async function api(req,res,u){
   const p=u.pathname,m=req.method;
   // Health checks and uptime probes commonly use HEAD; answer both, bodyless for HEAD.
@@ -63,12 +97,28 @@ async function api(req,res,u){
     pruneExpired();
     if(record.count>=8)fail('Too many attempts. Try again in 15 minutes.',429);
     const b=await jsonBody(req);
-    if(!timingEqual(b.password||'',PASSWORD)){record.count++;attempts.set(ip,record);fail('Incorrect password.',401);}
-    attempts.delete(ip);const sid=crypto.randomBytes(32).toString('hex');sessions.set(sid,{exp:Date.now()+7*86400000});
+    const result=auth.login({email:b.email,password:b.password},{ip,userAgent:req.headers['user-agent']});
+    if(!result.ok){record.count++;attempts.set(ip,record);fail(result.error,result.status);}
+    attempts.delete(ip);
     const secure=Boolean(req.socket.encrypted||req.headers['x-forwarded-proto']==='https');
-    return send(res,200,{ok:true},{'Set-Cookie':`agent_session=${sid}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800${secure?'; Secure':''}`});
+    return send(res,200,{ok:true,me:{email:result.user.email,role:result.role}},{'Set-Cookie':sessionCookie(result.sessionId,{secure})});
   }
-  if(p==='/api/logout'&&m==='POST'){const sid=cookie(req,'agent_session');if(sid)sessions.delete(sid);return send(res,200,{ok:true},{'Set-Cookie':'agent_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0'});}
+  if(p==='/api/logout'&&m==='POST'){auth.logout(cookie(req,'agent_session'));return send(res,200,{ok:true},{'Set-Cookie':clearCookie()});}
+  // Public, unauthenticated auth routes. They answer identically whether or not
+  // the address exists, so they cannot be used to enumerate accounts.
+  if(p==='/api/auth/forgot'&&m==='POST'){
+    const b=await jsonBody(req);
+    const token=auth.requestPasswordReset(b.email);
+    // Local-first deployment: the console prints the token because there is no
+    // mail transport configured. Do not log tokens in a public deployment.
+    if(token)console.log(`\nPassword reset token for ${String(b.email||'').trim().toLowerCase()} (valid 1 hour, single use):\n  ${token}\n`);
+    return send(res,200,{ok:true});
+  }
+  if(p==='/api/auth/reset'&&m==='POST'){
+    const b=await jsonBody(req);
+    auth.consumePasswordReset(b.token,b.password);
+    return send(res,200,{ok:true});
+  }
   if(p==='/api/capture'&&m==='POST'){
     // A separate token limits extension permissions to adding a candidate only.
     const token=req.headers['x-capture-token'];
@@ -77,8 +127,9 @@ async function api(req,res,u){
     const result=await store.update(s=>wf.addCandidate(s,body));
     return send(res,result.duplicate?200:201,result);
   }
-  requireAuth(req);
-  if(p==='/api/state'&&m==='GET')return send(res,200,snapshot());
+  const actor=requireAuth(req);
+  authorize(actor,p,m);
+  if(p==='/api/state'&&m==='GET')return send(res,200,snapshot(req));
   if(p==='/api/settings'&&m==='PATCH'){
     const b=await jsonBody(req);
     const result=await store.update(s=>wf.updateSettings(s,b));
@@ -182,6 +233,19 @@ async function api(req,res,u){
     const result=await store.update(s=>wf.resetDemo(s));
     return send(res,200,result);
   }
+  // --- Authenticated account, session, and user management (Phase B) ---
+  if(p==='/api/me'&&m==='GET'){const u=requireAuth(req);return send(res,200,{email:u.email,role:u.role});}
+  if(p==='/api/auth/password'&&m==='POST'){const u=requireAuth(req);const b=await jsonBody(req);auth.changePassword(u.userId,b.currentPassword,b.newPassword);return send(res,200,{ok:true});}
+  if(p==='/api/sessions'&&m==='GET'){const u=requireAuth(req);return send(res,200,{sessions:auth.listSessions(u.userId).map(s=>({...s,current:s.id===u.sessionId}))});}
+  if(p==='/api/sessions/revoke-all'&&m==='POST'){const u=requireAuth(req);auth.revokeAll(u.userId,u.sessionId);return send(res,200,{ok:true});}
+  match=p.match(/^\/api\/sessions\/([a-f0-9-]+)$/);
+  if(match&&m==='DELETE'){const u=requireAuth(req);if(!auth.revokeSession(u.userId,match[1]))fail('Session not found.',404);return send(res,200,{ok:true});}
+  if(p==='/api/users'&&m==='GET'){requireRole(req,'admin');return send(res,200,{users:auth.listUsers(),roles:ROLES});}
+  if(p==='/api/users'&&m==='POST'){const u=requireRole(req,'admin');const b=await jsonBody(req);return send(res,201,auth.createUser(u,b));}
+  match=p.match(/^\/api\/users\/([a-f0-9-]+)$/);
+  if(match&&m==='PATCH'){const u=requireRole(req,'admin');const b=await jsonBody(req);return send(res,200,auth.updateUser(u,match[1],b));}
+  if(match&&m==='DELETE'){const u=requireRole(req,'admin');return send(res,200,auth.deleteUser(u,match[1]));}
+  if(p==='/api/account'&&m==='DELETE'){const u=requireAuth(req);const b=await jsonBody(req);auth.selfDeleteAccount(u.userId,b.password);return send(res,200,{ok:true},{'Set-Cookie':clearCookie()});}
   fail('Unknown endpoint.',404);
 }
 const ASSETS=new Set(['index.html','app.css','polish.css','usability.css','transport.js','local-api.js','app.js','core.js','workflow.js','coordination.js','group-simulator.js','chat-engine.js','usability.js','demo-feed.html']);

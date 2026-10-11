@@ -3,10 +3,11 @@
 Tracks execution of the v0.2/v0.3 roadmap items. Update as phases land; every phase ends with `npm run check && npm test && npm run build:pages` green.
 
 ## Phase A — transactional store
-- [ ] `node:sqlite` store behind the existing `read()`/`update()` interface (Node 22 re-exec guard)
-- [ ] Schema v1 + `schema_meta` migration ledger
-- [ ] Legacy `state.json` import on boot (mtime-guarded, supports operator JSON restore)
-- [ ] Atomic WAL transactions; `recoveredFrom` quarantine kept
+- [x] `node:sqlite` store behind the existing `read()`/`update()` interface (Node 22 re-exec guard)
+- [x] Schema v1 + `schema_meta` migration ledger
+- [x] Legacy `state.json` import on boot (mtime-guarded, supports operator JSON restore)
+- [x] Atomic WAL transactions; `recoveredFrom` quarantine kept
+- Also landed: completed the in-flight `.env` loader + provider-agnostic AI client
 
 ## Phase B — multi-user control plane
 - [ ] users, server-side sessions (revocable), password reset tokens
