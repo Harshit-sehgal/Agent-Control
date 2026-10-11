@@ -347,6 +347,11 @@ test('parseRoute refuses admin pages unless the viewer is an admin', () => {
   }
 });
 
+test('parseRoute opens the workspaces page for any signed-in server user only', () => {
+  assert.deepEqual(parse('#you/workspaces'), none);
+  assert.deepEqual(parse('#you/workspaces', {server: true}), {chat: null, page: 'workspaces', info: null});
+});
+
 test('parseRoute refuses notifications without a server', () => {
   assert.deepEqual(parse('#you/notifications'), none);
   assert.deepEqual(parse('#you/notifications', {server: false, admin: true}), none);

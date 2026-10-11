@@ -33,7 +33,7 @@ const PAYLOAD_KINDS = {
   'agent-job': body => ({action: cleanText(body.action, 64), params: body.params && typeof body.params === 'object' ? body.params : {}, agentId: cleanText(body.agentId, 64) || null}),
   notification: body => ({
     notificationId: cleanText(body.notificationId, 64) || null,
-    channel: ['in_app', 'webhook', 'email'].includes(body.channel) ? body.channel : 'in_app',
+    channel: ['in_app', 'webhook', 'email', 'push'].includes(body.channel) ? body.channel : 'in_app',
     target: cleanText(body.target, 4000) || null,
     title: cleanText(body.title, 200), body: cleanText(body.body, 2000),
     meta: body.meta && typeof body.meta === 'object' ? body.meta : {},

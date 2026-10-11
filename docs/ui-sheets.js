@@ -1,9 +1,9 @@
 /** The sheets a conversation can raise (new chat, new bot, share a post, set a
  * reminder), plus the two full-screen layers: quick navigation and sign-in. */
-import {esc, icon, btn, row, field, note} from './ui-kit.js?v=aa40e42b9d';
-import {store, groups, conversation, isStaticDemo, isAdmin, isXGroup, teamKey, go} from './ui-store.js?v=aa40e42b9d';
-import {openSheet, closeSheet, captureFocus, restoreFocus} from './ui-dialogs.js?v=aa40e42b9d';
-import {tintPicker} from './ui-panel.js?v=aa40e42b9d';
+import {esc, icon, btn, row, field, note} from './ui-kit.js?v=b58f2a921d';
+import {store, groups, conversation, isStaticDemo, isAdmin, isXGroup, teamKey, go} from './ui-store.js?v=b58f2a921d';
+import {openSheet, closeSheet, captureFocus, restoreFocus} from './ui-dialogs.js?v=b58f2a921d';
+import {tintPicker} from './ui-panel.js?v=b58f2a921d';
 
 const el = id => document.getElementById(id);
 
@@ -86,7 +86,7 @@ function commands() {
     {label: 'You and settings', hint: 'Account', run: () => go({page: 'you'})},
     {label: 'About this build', hint: 'How it works', run: () => go({page: 'about'})},
   ];
-  if (!isStaticDemo()) items.push({label: 'Notifications', hint: 'Account', run: () => go({page: 'notifications'})});
+  if (!isStaticDemo()) items.push({label: 'Notifications', hint: 'Account', run: () => go({page: 'notifications'})}, {label: 'Workspaces', hint: 'Account', run: () => go({page: 'workspaces'})});
   if (isAdmin()) items.push({label: 'Team and access', hint: 'Admin', run: () => go({page: 'team'})}, {label: 'Local agents', hint: 'Admin', run: () => go({page: 'agents'})}, {label: 'Data and security', hint: 'Admin', run: () => go({page: 'data'})});
   for (const g of groups()) {
     const team = teamKey(g.id);

@@ -2,15 +2,20 @@
  * `adminPage(kind)` fetches and returns the body HTML; the handler tables are
  * wired by the host's delegated click, submit and change listeners. Handlers do
  * not catch errors, the host toasts them. */
-import {esc, btn, row, box, field, note, empty, tag, fullDate} from './ui-kit.js?v=aa40e42b9d';
-import {store, api, sync} from './ui-store.js?v=aa40e42b9d';
-import {toast, confirmSheet, askSheet} from './ui-dialogs.js?v=aa40e42b9d';
+import {esc, btn, row, box, field, note, empty, tag, fullDate} from './ui-kit.js?v=b58f2a921d';
+import {store, api, sync} from './ui-store.js?v=b58f2a921d';
+import {toast, confirmSheet, askSheet} from './ui-dialogs.js?v=b58f2a921d';
+import {pushStatus, enablePush, disablePush} from './ui-push.js?v=b58f2a921d';
 
 /** Title + one-line description per page, used by the host for the page header. */
 export const ADMIN_PAGES = {
   notifications: {
     title: 'Notifications',
     sub: 'Reminders, failed tasks, revoked agents and approvals blocked by disputed evidence.',
+  },
+  workspaces: {
+    title: 'Workspaces',
+    sub: 'Each workspace has its own bots, posts, drafts, chats and members.',
   },
   team: {
     title: 'Team and access',
@@ -36,7 +41,34 @@ const textInput = (name, {type = 'text', value = '', ...rest} = {}) => {
   return `<input class="input" name="${esc(name)}" type="${esc(type)}" value="${esc(value)}"${extra}>`;
 };
 
-function notificationsPanel(list, prefs) {
+const PUSH_HELP = {
+  insecure: 'Push needs a secure address. Open this app over https, or on localhost.',
+  unsupported: 'This browser cannot receive push here. On an iPhone or iPad, add this app to the Home Screen first, then open it from there.',
+  blocked: 'Notifications are blocked for this site. Allow them in the browser settings, then reload.',
+  off: 'Get reminders, failed tasks and alerts on this device, even when the app is closed.',
+  on: 'This device gets reminders, failed tasks and alerts, even when the app is closed.',
+};
+function pushPanel(push) {
+  const buttons = push.state === 'on' ? btn('Send a test', 'push-test', {small: true}) + btn('Turn off', 'push-off', {small: true})
+    : push.state === 'off' ? btn('Turn on', 'push-on', {kind: 'primary', small: true}) : '';
+  const others = push.devices - (push.state === 'on' ? 1 : 0);
+  return box(actionRow(`Push on this device ${tag(push.state === 'on' ? 'on' : 'off', push.state === 'on' ? 'good' : '')}`,
+    esc(PUSH_HELP[push.state]) + (others > 0 ? ` ${others} other device${others === 1 ? '' : 's'} of yours ${others === 1 ? 'is' : 'are'} subscribed.` : ''), buttons), 'Push');
+}
+
+function workspacesPanel(res) {
+  const list = res.workspaces || [], current = list.find(w => w.current);
+  const rows = list.map(w => actionRow(`${esc(w.name)}${w.current ? ` ${tag('current', 'good')}` : ''}`, `You are ${esc(w.role)}`,
+    w.current ? '' : btn('Switch', 'workspace-switch', {id: w.id, small: true}))).join('');
+  const create = res.canCreate ? box(`<form id="workspace-form">${field('Name', textInput('name', {required: true, maxlength: 60, placeholder: 'Client work'}))}${btn('Create workspace', null, {kind: 'primary', type: 'submit'})}</form>`, 'New workspace')
+    : note('Only an owner of the first workspace can create workspaces.');
+  const manage = current?.role === 'owner' ? box(`<form id="workspace-rename-form">${field('Name of this workspace', `<input class="input" name="name" type="text" value="${esc(current.name)}" required maxlength="60">`)}${btn('Rename', null, {type: 'submit'})}</form>`
+    + (current.id === 'default' ? '' : `<p>${btn('Delete this workspace', 'workspace-delete', {kind: 'danger', small: true, data: {name: current.name}})}</p>`), 'This workspace') : '';
+  return box(rows, `Your workspaces, ${list.length}`) + create + manage
+    + note('Switching changes what this browser shows. People are invited to one workspace at a time, under Team and access.');
+}
+
+function notificationsPanel(list, prefs, push) {
   const unread = list.filter(n => n.status !== 'read');
   const items = list.length
     ? list.map(n => actionRow(
@@ -54,7 +86,7 @@ function notificationsPanel(list, prefs) {
     ${field('Email address', textInput('emailAddress', {type: 'email', value: prefs.emailAddress || ''}))}
     ${btn('Save preferences', null, {kind: 'primary', type: 'submit'})}
   </form>`;
-  return `${readAll}${box(items, `Recent, ${unread.length} unread`)}${box(form, 'Delivery channels')}`;
+  return `${readAll}${box(items, `Recent, ${unread.length} unread`)}${pushPanel(push)}${box(form, 'Delivery channels')}`;
 }
 
 function teamPanel(usersRes, sessionsRes) {
@@ -78,6 +110,7 @@ function teamPanel(usersRes, sessionsRes) {
       ${field('Role', '<select class="input" name="role"><option value="viewer">viewer</option><option value="member" selected>member</option><option value="admin">admin</option></select>')}
     </div>
     ${field('Temporary password (min 12 chars)', textInput('password', {type: 'password', minlength: 12, required: true}))}
+    <p class="field-help">Someone who already has an account keeps their own password and is added to this workspace.</p>
     ${btn('Create user', null, {kind: 'primary', type: 'submit'})}
   </form>`;
   const sessionRows = sessions.map(session => actionRow(
@@ -176,8 +209,11 @@ export async function adminPage(kind) {
       + (store.state?.me?.role === 'owner' ? backupPanel() : note('Backup and restore are available to the workspace owner.'));
   }
   if (kind === 'notifications') {
-    const [list, prefs] = await Promise.all([api('/api/notifications'), api('/api/notification-prefs')]);
-    return notificationsPanel(list.notifications || [], prefs);
+    const [list, prefs, push] = await Promise.all([api('/api/notifications'), api('/api/notification-prefs'), pushStatus()]);
+    return notificationsPanel(list.notifications || [], prefs, push);
+  }
+  if (kind === 'workspaces') {
+    return workspacesPanel(await api('/api/workspaces'));
   }
   if (kind === 'agents') {
     const res = await api('/api/agents');
@@ -187,6 +223,13 @@ export async function adminPage(kind) {
     return agentsPanel(res, pairing);
   }
   throw new Error(`Unknown admin page: ${kind}`);
+}
+
+/** Everything on screen belongs to the workspace that was just left, so the
+ * app starts again from the chat list instead of patching each piece. */
+function enterWorkspace() {
+  location.hash = '#chats';
+  location.reload();
 }
 
 /** data-action handlers: (button, ctx) => Promise. ctx = {reload: () => Promise} re-renders the current admin page. */
@@ -202,6 +245,33 @@ export const adminActions = {
     await api('/api/notifications/read', 'POST', {ids: [button.dataset.id]});
     await sync();
     await ctx.reload();
+  },
+  'push-on': async (button, ctx) => {
+    await enablePush();
+    toast('Push is on for this device.');
+    await ctx.reload();
+  },
+  'push-off': async (button, ctx) => {
+    await disablePush();
+    toast('Push is off for this device.');
+    await ctx.reload();
+  },
+  'push-test': async () => {
+    const {results} = await api('/api/push/test', 'POST', {});
+    const failed = results.filter(r => r.startsWith('failed'));
+    if (failed.length) throw new Error(failed[0].replace(/^failed: /, ''));
+    toast(`Test sent to ${results.length} device${results.length === 1 ? '' : 's'}.`);
+  },
+  'workspace-switch': async button => {
+    await api('/api/workspaces/switch', 'POST', {id: button.dataset.id});
+    enterWorkspace();
+  },
+  'workspace-delete': async button => {
+    const name = button.dataset.name;
+    const typed = await askSheet(`Delete "${name}"?`, {sub: 'Its bots, posts, drafts and chats are removed for everyone and cannot be recovered. Type the workspace name to confirm.', submit: 'Delete workspace'});
+    if (typed === null) return;
+    await api('/api/workspaces/current', 'DELETE', {confirm: typed});
+    enterWorkspace();
   },
   'revoke-sessions': async (button, ctx) => {
     if (!await confirmSheet('Sign out every other session?', {confirm: 'Sign out', danger: true})) return;
@@ -296,10 +366,21 @@ export const adminActions = {
 
 /** form submit handlers keyed by form id: (form, values, ctx). `values` = Object.fromEntries(new FormData(form)). */
 export const adminForms = {
+  'workspace-form': async (form, values) => {
+    const created = await api('/api/workspaces', 'POST', {name: values.name});
+    await api('/api/workspaces/switch', 'POST', {id: created.id});
+    enterWorkspace();
+  },
+  'workspace-rename-form': async (form, values, ctx) => {
+    await api('/api/workspaces/current', 'PATCH', {name: values.name});
+    toast('Workspace renamed.');
+    await sync();
+    await ctx.reload();
+  },
   'create-user-form': async (form, values, ctx) => {
     const res = await api('/api/users', 'POST', {email: values.email, password: values.password, role: values.role});
     form.reset();
-    toast(`User ${res.email || values.email} created.`);
+    toast(res.existing ? `${res.email} already had an account and now belongs to this workspace too. Their password is unchanged.` : `User ${res.email || values.email} created.`);
     await ctx.reload();
   },
   'credential-form': async (form, values, ctx) => {

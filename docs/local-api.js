@@ -4,15 +4,15 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {scoreCandidate, templateDraft, cleanText, initialState, markDue, activity, DEMO_SAMPLES} from './core.js?v=aa40e42b9d';
+import {scoreCandidate, templateDraft, cleanText, initialState, markDue, activity, DEMO_SAMPLES} from './core.js?v=b58f2a921d';
 import {
   migrate, seedDemo, updateSettings, addCandidate, beginProcessing,
   finishProcessing, editDraft, findDraft, rewriteDraft, draftAction, addGroup,
   addBot, updateBot, addSchedule, removeSchedule, resetDemo,
-} from './workflow.js?v=aa40e42b9d';
-import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=aa40e42b9d';
-import {addEvidence, verifyEvidence, dropEvidence} from './evidence.js?v=aa40e42b9d';
-import {addChatMessages, clearChat} from './chats.js?v=aa40e42b9d';
+} from './workflow.js?v=b58f2a921d';
+import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=b58f2a921d';
+import {addEvidence, verifyEvidence, dropEvidence} from './evidence.js?v=b58f2a921d';
+import {addChatMessages, clearChat} from './chats.js?v=b58f2a921d';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();

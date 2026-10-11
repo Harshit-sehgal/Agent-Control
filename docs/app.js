@@ -11,14 +11,14 @@
  *   ui-dialogs  toast, sheet, confirm/ask   ui-actions action/form tables
  *   ui-fx       confetti, the send arrow, and when the bots react
  */
-import {parseRoute} from './ui-model.js?v=aa40e42b9d';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, back, popped, conversation, isStaticDemo, isAdmin, applyTheme, watchSystemTheme} from './ui-store.js?v=aa40e42b9d';
-import {toast, closeSheet, sheetOpen, trapTab} from './ui-dialogs.js?v=aa40e42b9d';
-import {listShell, renderList, threadShell, renderThread, homeView} from './ui-views.js?v=aa40e42b9d';
-import {renderInfo, refreshLists, renderPage} from './ui-panel.js?v=aa40e42b9d';
-import {showLogin, hideLogin, openCommandPalette, closeCommandPalette, paletteOpen, updateCommandResults, chooseCommand, moveCommand} from './ui-sheets.js?v=aa40e42b9d';
-import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=aa40e42b9d';
-import {bringBotsToLife} from './ui-fx.js?v=aa40e42b9d';
+import {parseRoute} from './ui-model.js?v=b58f2a921d';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, back, popped, conversation, isStaticDemo, isAdmin, applyTheme, watchSystemTheme} from './ui-store.js?v=b58f2a921d';
+import {toast, closeSheet, sheetOpen, trapTab} from './ui-dialogs.js?v=b58f2a921d';
+import {listShell, renderList, threadShell, renderThread, homeView} from './ui-views.js?v=b58f2a921d';
+import {renderInfo, refreshLists, renderPage} from './ui-panel.js?v=b58f2a921d';
+import {showLogin, hideLogin, openCommandPalette, closeCommandPalette, paletteOpen, updateCommandResults, chooseCommand, moveCommand} from './ui-sheets.js?v=b58f2a921d';
+import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=b58f2a921d';
+import {bringBotsToLife} from './ui-fx.js?v=b58f2a921d';
 
 const el = id => document.getElementById(id);
 const hashRoute = () => parseRoute(location.hash, store.state, {server: !isStaticDemo(), admin: isAdmin()});

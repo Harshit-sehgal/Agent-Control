@@ -6,7 +6,7 @@
  * These transitions are pure and mirror `workflow.js`: the Node worker and the
  * browser-local demo both run them, so the two backends cannot drift.
  */
-import {activity, cleanText} from './core.js?v=aa40e42b9d';
+import {activity, cleanText} from './core.js?v=b58f2a921d';
 
 export const TASK_STATUSES = ['queued', 'running', 'done', 'failed', 'cancelled'];
 export const MAX_ATTEMPTS_DEFAULT = 5;
@@ -33,7 +33,7 @@ const PAYLOAD_KINDS = {
   'agent-job': body => ({action: cleanText(body.action, 64), params: body.params && typeof body.params === 'object' ? body.params : {}, agentId: cleanText(body.agentId, 64) || null}),
   notification: body => ({
     notificationId: cleanText(body.notificationId, 64) || null,
-    channel: ['in_app', 'webhook', 'email'].includes(body.channel) ? body.channel : 'in_app',
+    channel: ['in_app', 'webhook', 'email', 'push'].includes(body.channel) ? body.channel : 'in_app',
     target: cleanText(body.target, 4000) || null,
     title: cleanText(body.title, 200), body: cleanText(body.body, 2000),
     meta: body.meta && typeof body.meta === 'object' ? body.meta : {},

@@ -86,7 +86,7 @@ function commands() {
     {label: 'You and settings', hint: 'Account', run: () => go({page: 'you'})},
     {label: 'About this build', hint: 'How it works', run: () => go({page: 'about'})},
   ];
-  if (!isStaticDemo()) items.push({label: 'Notifications', hint: 'Account', run: () => go({page: 'notifications'})});
+  if (!isStaticDemo()) items.push({label: 'Notifications', hint: 'Account', run: () => go({page: 'notifications'})}, {label: 'Workspaces', hint: 'Account', run: () => go({page: 'workspaces'})});
   if (isAdmin()) items.push({label: 'Team and access', hint: 'Admin', run: () => go({page: 'team'})}, {label: 'Local agents', hint: 'Admin', run: () => go({page: 'agents'})}, {label: 'Data and security', hint: 'Admin', run: () => go({page: 'data'})});
   for (const g of groups()) {
     const team = teamKey(g.id);

@@ -7,7 +7,7 @@
  *
  * Messages are display records only. Nothing here runs a bot or publishes.
  */
-import {cleanText} from './core.js?v=aa40e42b9d';
+import {cleanText} from './core.js?v=b58f2a921d';
 
 export const MAX_CHAT_MESSAGES = 300;
 const MAX_TEXT = 8000;

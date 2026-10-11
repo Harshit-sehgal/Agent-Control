@@ -7,7 +7,8 @@
 <!-- Mirrors the Node server's CSP header so the static Pages build is protected too. Keep the two in sync. -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'">
 <title>Agent Control</title>
-<link rel="stylesheet" href="./app.css?v=aa40e42b9d">
+<link rel="manifest" href="./manifest.webmanifest"><link rel="apple-touch-icon" href="./icon-192.png"><link rel="icon" href="./icon-192.png">
+<link rel="stylesheet" href="./app.css?v=b58f2a921d">
 </head><body data-pane="list">
 <div id="progress" class="progress hidden" role="presentation"></div>
 <div id="root" class="app">
@@ -19,8 +20,8 @@
 <div id="command" class="command-layer hidden" role="presentation"></div>
 <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 <div id="announce" class="sr-only" aria-live="polite"></div>
-<script type="module" src="./local-api.js?v=aa40e42b9d"></script>
-<script defer src="./transport.js?v=aa40e42b9d"></script>
-<script type="module" src="./app.js?v=aa40e42b9d"></script>
+<script type="module" src="./local-api.js?v=b58f2a921d"></script>
+<script defer src="./transport.js?v=b58f2a921d"></script>
+<script type="module" src="./app.js?v=b58f2a921d"></script>
 <!-- Data is saved only in this browser. No real AI or remote backend on GitHub Pages. -->
 </body></html>

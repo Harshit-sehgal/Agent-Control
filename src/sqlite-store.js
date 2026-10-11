@@ -23,7 +23,7 @@ import * as wf from '../shared/workflow.js';
 const now = () => new Date().toISOString();
 /** Current schema version. Keep in sync with the migration list; tests and
  * operators read it, so it is exported rather than duplicated. */
-export const SCHEMA_DB_VERSION = 4;
+export const SCHEMA_DB_VERSION = 5;
 
 /** v1 ships the full target schema: the workflow document plus the surfaces
  * the roadmap adds (task queue, agents, vault, notifications, users). Adding a
@@ -181,6 +181,16 @@ const MIGRATIONS = [
   {to: 4, up(db) {
     const rehash = db.prepare('UPDATE sessions SET id=? WHERE id=?');
     for (const row of db.prepare('SELECT id FROM sessions').all()) rehash.run(crypto.createHash('sha256').update(row.id).digest('hex'), row.id);
+  }},
+  // v5: a session remembers which workspace it is looking at, and a device can
+  // register for push notifications. Sessions opened before this have no
+  // workspace and fall back to one the account belongs to.
+  {to: 5, up(db) {
+    db.exec('ALTER TABLE sessions ADD COLUMN workspace_id TEXT');
+    db.exec(`CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      endpoint TEXT NOT NULL UNIQUE, p256dh TEXT NOT NULL, auth TEXT NOT NULL,
+      user_agent TEXT, created_at TEXT NOT NULL)`);
   }}];
 export class SqliteStore {
   constructor(dbPath, legacyPath) {
@@ -371,6 +381,8 @@ export class SqliteStore {
     });
     return t;
   }
+  /** Wait for queued writes, then release the file. Used when a workspace is deleted. */
+  async close() { await this.serial; this.db.close(); }
   read() { return structuredClone(this.cache); }
   captureToken() { return this.cache.captureToken; }
   async persist(state = this.cache) { this.writeCollections(state); this.cache = state; }
