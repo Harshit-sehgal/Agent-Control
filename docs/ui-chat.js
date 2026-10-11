@@ -3,10 +3,10 @@
  * model is configured and in the deterministic simulator otherwise. A custom bot
  * runs its own instructions on the server; everything else answers from the
  * offline command set. Nothing here can publish. */
-import {classifyMessage, statusSummary} from './chat-engine.js?v=ec265c1708';
-import {simulateGroup} from './group-simulator.js?v=ec265c1708';
-import {planHandoffs, runNote} from './coordination.js?v=ec265c1708';
-import {store, api, sync, conversation, appendMessage, setTyping, isStaticDemo, isLive, logLocalRun, teamKey} from './ui-store.js?v=ec265c1708';
+import {classifyMessage, statusSummary} from './chat-engine.js?v=aa40e42b9d';
+import {simulateGroup} from './group-simulator.js?v=aa40e42b9d';
+import {planHandoffs, runNote} from './coordination.js?v=aa40e42b9d';
+import {store, api, sync, conversation, appendMessage, setTyping, isStaticDemo, isLive, logLocalRun, teamKey} from './ui-store.js?v=aa40e42b9d';
 
 const TERMINAL = ['completed', 'failed', 'interrupted', 'awaiting_checkpoint'];
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -91,7 +91,7 @@ async function reply(conv, message) {
   // provider. Built-in bots and the static demo keep the deterministic commands.
   if (isLive() && bot.type === 'custom') {
     const run = await api('/api/bots/run', 'POST', {botId: bot.id, input: message});
-    return appendMessage(id, {role: 'bot', text: run.output || 'The bot returned no output.', mode: 'ai'});
+    return appendMessage(id, {id: run.id, role: 'bot', text: run.output || 'The bot returned no output.', mode: 'ai'});
   }
   const text = await localReply(conv, message);
   await wait(BEAT_MS);

@@ -251,7 +251,8 @@ Both paths run the same `shared/workflow.js` rules, so the demo and the real das
 - The extension capture token is a write credential, so viewers do not receive it.
 - The local agent refuses `http.check` targets on private or local networks and does not follow redirects. Set `AGENT_ALLOW_PRIVATE=1` on the device to allow private addresses on purpose.
 - At most `AI_MAX_CONCURRENCY` model calls (default 4) run at once; a workspace holds at most 2000 collected posts.
-- **Known limit:** conversation history is a display record that the browser writes, including the replies of built-in commands. A member could therefore store a message that looks like a bot's. Drafts, approvals and runs are not affected: they are separate records that only the server writes.
+- Model output in a chat carries an **AI** mark that only the server can set, on runs it executed itself. A browser can add built-in command replies to a conversation, but it cannot mark them as model output or give them a sender the conversation does not have.
+- Webhook notifications are not delivered to private or local addresses, and redirects are not followed. Set `WEBHOOK_ALLOW_PRIVATE=1` to allow a relay on your own network.
 - Captured posts are **untrusted external content**; input is escaped and URL schemes validated. Model output never receives browser or publishing tools, and **the final Post click is always human**.
 - Run behind an HTTPS reverse proxy; enable `HSTS=1` only after TLS works. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 - Full threat model: [`SECURITY.md`](SECURITY.md). Agent protocol: [`docs/AGENT-PROTOCOL.md`](docs/AGENT-PROTOCOL.md).

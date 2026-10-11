@@ -124,7 +124,7 @@ function messageHtml(item, conv, latestRunNote) {
   if (m.role === 'user') return `<div class="msg me${item.lead ? ' lead' : ''}"><div class="bubble"><span class="text">${esc(m.text)}</span><time>${esc(clock(m.at))}</time></div></div>`;
   const name = m.senderName || conv.name, {face, color} = botFace(conv, m.senderId, name);
   const next = m.toBotId ? conv.group.bots.find(b => b.id === m.toBotId)?.name : null;
-  return `<div class="msg them ${color}${item.lead ? ' lead' : ''}">${item.lead ? face : '<span class="avatar-gap"></span>'}<div class="bubble">${conv.isTeam && item.lead ? `<span class="sender ${color}">${esc(name)}</span>` : ''}<span class="text">${esc(m.text)}</span>${next ? `<span class="handoff">${icon('arrow', 12)} ${esc(next)}</span>` : ''}<time>${esc(clock(m.at))}</time></div></div>`;
+  return `<div class="msg them ${color}${item.lead ? ' lead' : ''}">${item.lead ? face : '<span class="avatar-gap"></span>'}<div class="bubble">${conv.isTeam && item.lead ? `<span class="sender ${color}">${esc(name)}</span>` : ''}<span class="text">${esc(m.text)}</span>${next ? `<span class="handoff">${icon('arrow', 12)} ${esc(next)}</span>` : ''}<time>${m.mode === 'ai' ? '<span class="by-model" title="Written by the AI model on the server">AI</span> ' : ''}${esc(clock(m.at))}</time></div></div>`;
 }
 
 function itemHtml(item, conv, latestRunNote) {

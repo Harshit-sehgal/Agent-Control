@@ -19,6 +19,7 @@
  * Delivery is durable: outbound notifications are queue tasks with the same
  * retry/backoff rules as everything else, and a failure never claims success.
  */
+import {assertPublicUrl} from '../agent/net-guard.mjs';
 import crypto from 'node:crypto';
 import {encryptJson, decryptJson} from './vault.js';
 
@@ -114,11 +115,14 @@ export async function deliver(store, task) {
     catch { throw new Error('Webhook credential cannot be decrypted with the current MASTER_KEY.'); }
     const parsed = new URL(url);
     if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Webhook URL must be http(s).');
+    // A stored webhook must not be a way to reach this server's own network.
+    // WEBHOOK_ALLOW_PRIVATE=1 allows it on purpose, for a relay on the LAN.
+    await assertPublicUrl(url, {allowPrivate: process.env.WEBHOOK_ALLOW_PRIVATE === '1'});
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10000);
     try {
       const res = await fetch(url, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
+        method: 'POST', headers: {'Content-Type': 'application/json'}, redirect: 'manual',
         body: JSON.stringify({title, body, meta, at: now()}),
         signal: controller.signal,
       });

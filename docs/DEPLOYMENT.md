@@ -22,6 +22,7 @@ the operational knobs.
 | `STORE_BACKEND` | `json` forces the legacy JSON store (escape hatch/tests) |
 | `PUBLIC_ORIGIN` | absolute `https://…` URL; enables the origin/CSRF check for that host |
 | `HSTS` | `1` to send `Strict-Transport-Security` (only behind TLS) |
+| `WEBHOOK_ALLOW_PRIVATE` | `1` to let webhook notifications reach private or local addresses |
 | `MASTER_KEY` | 32-byte key (64 hex chars) for the credential vault; else a `0600` keyfile is generated beside the DB |
 | `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` / `AI_API_STYLE` / `AI_TIMEOUT_MS` / `AI_MAX_CONCURRENCY` | optional OpenAI-compatible provider |
 

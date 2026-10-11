@@ -84,3 +84,5 @@ as the record of what shipped; new work should be added as a fresh section.
 - [x] Sign-in and reset attempts counted before the body is read
 - [x] Capture token withheld from viewers; request-made notification tasks refused
 - [x] Local agent refuses private-network targets; model calls and posts are bounded
+- [x] Only the server can mark a chat message as model output or name its sender
+- [x] Webhooks refuse private-network targets unless allowed on purpose

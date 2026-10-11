@@ -91,7 +91,7 @@ async function reply(conv, message) {
   // provider. Built-in bots and the static demo keep the deterministic commands.
   if (isLive() && bot.type === 'custom') {
     const run = await api('/api/bots/run', 'POST', {botId: bot.id, input: message});
-    return appendMessage(id, {role: 'bot', text: run.output || 'The bot returned no output.', mode: 'ai'});
+    return appendMessage(id, {id: run.id, role: 'bot', text: run.output || 'The bot returned no output.', mode: 'ai'});
   }
   const text = await localReply(conv, message);
   await wait(BEAT_MS);

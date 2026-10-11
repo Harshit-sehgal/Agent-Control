@@ -16,7 +16,7 @@ export function coordinationState(s){s.groupMessages??={};s.groupRuns??=[];}
  * conversation that no longer exists is skipped: the run log keeps the record. */
 function say(s,run,entry){
   if(!entry)return;
-  try{addChatMessages(s,run.chatKey||`team-${run.groupId}`,[entry]);}catch{/* Conversation removed mid-run. */}
+  try{addChatMessages(s,run.chatKey||`team-${run.groupId}`,[entry],{trusted:true});}catch{/* Conversation removed mid-run. */}
 }
 export async function markInterrupted(store){
   await store.update(s=>{coordinationState(s);for(const r of s.groupRuns){if(r.status==='running'||r.status==='queued'){r.status='interrupted';r.error='Server restarted before the run completed. Retry explicitly to avoid duplicate model calls.';say(s,r,runNote(r));}}});

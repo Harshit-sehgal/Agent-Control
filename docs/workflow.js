@@ -8,12 +8,12 @@
  * Keeping transitions here is the single source of truth for the draft
  * lifecycle: candidate -> draft -> approved/scheduled -> ready -> posted.
  */
-import {activity,candidateInput,cleanText,scheduleApproval} from './core.js?v=ec265c1708';
-import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js?v=ec265c1708';
-import {evidenceSummary,evidenceForDraft,seedCandidateEvidence} from './evidence.js?v=ec265c1708';
-import {normalizeRetention} from './retention.js?v=ec265c1708';
-import * as contracts from './contracts.js?v=ec265c1708';
-import {pruneChats} from './chats.js?v=ec265c1708';
+import {activity,candidateInput,cleanText,scheduleApproval} from './core.js?v=aa40e42b9d';
+import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js?v=aa40e42b9d';
+import {evidenceSummary,evidenceForDraft,seedCandidateEvidence} from './evidence.js?v=aa40e42b9d';
+import {normalizeRetention} from './retention.js?v=aa40e42b9d';
+import * as contracts from './contracts.js?v=aa40e42b9d';
+import {pruneChats} from './chats.js?v=aa40e42b9d';
 
 export const SCHEMA_VERSION = 3;
 /** Posts are never pruned by age, so their number is bounded here. */

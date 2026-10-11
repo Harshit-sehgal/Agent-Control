@@ -2,10 +2,10 @@
  * Both are thin renderers over ui-model.js. The list shell and the composer are
  * painted once and then only their contents change, so a background refresh can
  * never wipe what the user is typing. */
-import {botSuggestions} from './chat-engine.js?v=ec265c1708';
-import {chatRows, timeline, needsYou, draftStage, ACTIVE_DRAFTS} from './ui-model.js?v=ec265c1708';
-import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=ec265c1708';
-import {store, conversation, isStaticDemo, isLive, isXGroup, botTint, recentRuns} from './ui-store.js?v=ec265c1708';
+import {botSuggestions} from './chat-engine.js?v=aa40e42b9d';
+import {chatRows, timeline, needsYou, draftStage, ACTIVE_DRAFTS} from './ui-model.js?v=aa40e42b9d';
+import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=aa40e42b9d';
+import {store, conversation, isStaticDemo, isLive, isXGroup, botTint, recentRuns} from './ui-store.js?v=aa40e42b9d';
 
 const el = id => document.getElementById(id);
 const FILTERS = [['all', 'All'], ['needs', 'Needs you'], ['groups', 'Groups'], ['bots', 'Bots']];
@@ -124,7 +124,7 @@ function messageHtml(item, conv, latestRunNote) {
   if (m.role === 'user') return `<div class="msg me${item.lead ? ' lead' : ''}"><div class="bubble"><span class="text">${esc(m.text)}</span><time>${esc(clock(m.at))}</time></div></div>`;
   const name = m.senderName || conv.name, {face, color} = botFace(conv, m.senderId, name);
   const next = m.toBotId ? conv.group.bots.find(b => b.id === m.toBotId)?.name : null;
-  return `<div class="msg them ${color}${item.lead ? ' lead' : ''}">${item.lead ? face : '<span class="avatar-gap"></span>'}<div class="bubble">${conv.isTeam && item.lead ? `<span class="sender ${color}">${esc(name)}</span>` : ''}<span class="text">${esc(m.text)}</span>${next ? `<span class="handoff">${icon('arrow', 12)} ${esc(next)}</span>` : ''}<time>${esc(clock(m.at))}</time></div></div>`;
+  return `<div class="msg them ${color}${item.lead ? ' lead' : ''}">${item.lead ? face : '<span class="avatar-gap"></span>'}<div class="bubble">${conv.isTeam && item.lead ? `<span class="sender ${color}">${esc(name)}</span>` : ''}<span class="text">${esc(m.text)}</span>${next ? `<span class="handoff">${icon('arrow', 12)} ${esc(next)}</span>` : ''}<time>${m.mode === 'ai' ? '<span class="by-model" title="Written by the AI model on the server">AI</span> ' : ''}${esc(clock(m.at))}</time></div></div>`;
 }
 
 function itemHtml(item, conv, latestRunNote) {

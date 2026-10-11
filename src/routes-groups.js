@@ -37,6 +37,8 @@ export function groupRoutes(router, {store}) {
     return reply(201, await store.update(s => {
       const run = {id: uuid(), botId: bot.id, botName: bot.name, input, output, at: new Date().toISOString()};
       s.runs.unshift(run); s.runs = s.runs.slice(0, 100);
+      // Written here, not by the browser, so the chat can show it as model output.
+      chats.addChatMessages(s, bot.id, [{id: run.id, role: 'bot', text: output, mode: 'ai', at: run.at}], {trusted: true});
       activity(s, 'run', `Completed ${bot.name} task.`, {runId: run.id}); return run;
     }));
   });

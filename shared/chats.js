@@ -18,6 +18,25 @@ const LABELS = ['senderId', 'senderName', 'toBotId', 'runId', 'mode', 'kind'];
 function fail(message, status = 400) { throw Object.assign(new Error(message), {status}); }
 
 const chatKeys = state => new Set((state.groups || []).flatMap(g => [`team-${g.id}`, ...(g.bots || []).map(b => b.id)]));
+const groupOf = (state, key) => (state.groups || []).find(g => `team-${g.id}` === key || (g.bots || []).some(b => b.id === key));
+
+/** What a browser may claim about a message it writes. It can never mark a
+ * message as model output (`mode`), and it can never name a sender the
+ * conversation does not have: in a group the sender must be one of the group's
+ * bots and takes that bot's real name; in a bot's own chat there is no choice.
+ * Only the server, writing a run it executed itself, is `trusted`. */
+function untrusted(state, key, message) {
+  delete message.mode; delete message.senderId; delete message.senderName; delete message.toBotId;
+  if (message.role !== 'user') message.origin = 'browser';
+  return message;
+}
+function claimedSender(state, key, raw, message) {
+  if (message.role !== 'bot' || !key.startsWith('team-')) return message;
+  const bots = groupOf(state, key)?.bots || [], sender = bots.find(b => b.id === raw.senderId), next = bots.find(b => b.id === raw.toBotId);
+  if (sender) { message.senderId = sender.id; message.senderName = sender.name; }
+  if (sender && next) message.toBotId = next.id;
+  return message;
+}
 
 function entry(raw, makeId, now) {
   if (!raw || typeof raw !== 'object') fail('A message must be an object.');
@@ -31,11 +50,11 @@ function entry(raw, makeId, now) {
 
 /** Append messages to a conversation. A message whose id is already stored is
  * skipped, so a client can safely resend after a dropped connection. */
-export function addChatMessages(state, key, messages, {makeId = () => crypto.randomUUID(), now = new Date().toISOString()} = {}) {
+export function addChatMessages(state, key, messages, {makeId = () => crypto.randomUUID(), now = new Date().toISOString(), trusted = false} = {}) {
   if (!chatKeys(state).has(key)) fail('Conversation not found.', 404);
   if (!Array.isArray(messages) || !messages.length) fail('Send at least one message.');
   if (messages.length > MAX_CHAT_MESSAGES) fail(`Send at most ${MAX_CHAT_MESSAGES} messages at once.`);
-  const clean = messages.map(m => entry(m, makeId, now));
+  const clean = messages.map(m => { const e = entry(m, makeId, now); return trusted ? e : claimedSender(state, key, m, untrusted(state, key, e)); });
   state.chats ??= {};
   const list = state.chats[key] || [], seen = new Set(list.map(m => m.id));
   let added = 0;
