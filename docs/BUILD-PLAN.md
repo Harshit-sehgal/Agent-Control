@@ -1,6 +1,8 @@
-# Build plan — remaining roadmap work
+# Build plan — complete (39/39)
 
-Tracks execution of the v0.2/v0.3 roadmap items. Update as phases land; every phase ends with `npm run check && npm test && npm run build:pages` green.
+All v0.2/v0.3 roadmap items are delivered. Every phase ended green
+(`npm run check && npm test && npm run build:pages`). The items below are kept
+as the record of what shipped; new work should be added as a fresh section.
 
 ## Phase A — transactional store
 - [x] `node:sqlite` store behind the existing `read()`/`update()` interface (Node 22 re-exec guard)
@@ -21,40 +23,49 @@ Tracks execution of the v0.2/v0.3 roadmap items. Update as phases land; every ph
 - [x] `schedules` → tasks migration; scheduler keeps draft release + task dispatch
 
 ## Phase D — source evidence model
-- [ ] `shared/evidence.js`: link, claim, confidence, verification status, reuse
-- [ ] Evidence attached to drafts; Researcher emits evidence refs
-- [ ] UI: add/review evidence on draft cards
+- [x] `shared/evidence.js`: link, claim, confidence, verification status, reuse
+- [x] Evidence attached to drafts; Researcher emits evidence refs
+- [x] UI: add/review evidence on draft cards
 
 ## Phase E — bot contracts + tool permissions
-- [ ] `shared/contracts.js`: versioned bot schema, declared I/O, action permissions
-- [ ] Coordination engine validates outputs; actions gated by permissions
-- [ ] UI: edit contract + permission toggles (publish always denied)
+- [x] `shared/contracts.js`: versioned bot schema, declared I/O, action permissions
+- [x] Coordination engine validates outputs; actions gated by permissions
+- [x] UI: edit contract + permission toggles (publish always denied)
 
 ## Phase F — local agent
-- [ ] Pairing codes (hashed, short-lived) + HMAC-signed outbound protocol
-- [ ] `agent/agent.mjs` device process: heartbeat, poll, execute, report
-- [ ] Permission-scoped task kinds; browser adapter behind explicit opt-in
-- [ ] Disconnect/duplicate-delivery recovery tests
+- [x] Pairing codes (hashed, short-lived) + HMAC-signed outbound protocol
+- [x] `agent/agent.mjs` device process: heartbeat, poll, execute, report
+- [x] Permission-scoped task kinds; browser adapter behind explicit opt-in
+- [x] Disconnect/duplicate-delivery recovery tests
 
 ## Phase G — credentials, retention, deletion, backups
-- [ ] AES-256-GCM vault (`MASTER_KEY` / local dev keyfile)
-- [ ] Retention pruning, account deletion, encrypted backup export/import
+- [x] AES-256-GCM vault (`MASTER_KEY` / local dev keyfile)
+- [x] Retention pruning, account deletion, encrypted backup export/import
 
 ## Phase H — notifications
-- [ ] Preferences (in-app/webhook/email-relay) + dispatcher w/ retry
+- [x] Preferences (in-app/webhook/email-relay) + dispatcher w/ retry
 
 ## Phase I — deployment readiness
-- [ ] Optional TLS termination, HSTS, startup validation, `docs/DEPLOYMENT.md`
+- [x] Optional TLS termination, HSTS, startup validation, `docs/DEPLOYMENT.md`
 
 ## Phase J — UI surfaces
-- [ ] Run timeline visualization + failure reporting
-- [ ] Human checkpoint gates between bot steps
-- [ ] Tasks, evidence, credentials, agents, notifications, users panels
+- [x] Run timeline visualization + failure reporting
+- [x] Human checkpoint gates between bot steps
+- [x] Tasks, evidence, credentials, agents, notifications, users panels
 
 ## Phase K — tests
-- [ ] Disconnect, duplicate delivery, partial-execution recovery
-- [ ] Adversarial prompt-injection suite
-- [ ] Authorization matrix tests
+- [x] Disconnect, duplicate delivery, partial-execution recovery
+- [x] Adversarial prompt-injection suite
+- [x] Authorization matrix tests
 
 ## Phase L — docs
-- [ ] ROADMAP/README/COORDINATION updates, AGENT-PROTOCOL.md, SECURITY.md
+- [x] ROADMAP/README/COORDINATION updates, AGENT-PROTOCOL.md, SECURITY.md
+
+## Phase M — chat-first redesign
+- [x] Chat list, thread, and info panel shell; one pane at a time on phones
+- [x] Drafts and posts as in-thread cards with in-place actions
+- [x] Workspace tabs folded into the X-engage chat info panel
+- [x] In-app sheets replace native confirm and prompt dialogs
+- [x] UI split into `shared/ui-*.js` modules with a pure view-model layer
+- [x] Single stylesheet (`shared/app.css`), system fonts, tightened CSP
+- [x] Tests and Playwright smokes updated for the new UI

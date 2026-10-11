@@ -1,319 +1,172 @@
-import {classifyMessage, botSuggestions, statusSummary} from './chat-engine.js?v=48a317fe1c';
-import {simulateGroup} from './group-simulator.js?v=48a317fe1c';
-import {planHandoffs} from './coordination.js?v=48a317fe1c';
-import {filterCandidates,filterDrafts,normalizeUiPrefs,UI_PREFS_KEY} from './usability.js?v=48a317fe1c';
+/** Agent Control UI entry point. Boots the store, paints the three panes from
+ * the route, and turns DOM events into the lookups in ui-actions.js.
+ *
+ * Module map (all browser-safe, all in shared/):
+ *   ui-kit      string builders: icons, avatars, rows, time labels
+ *   ui-model    pure view models: chat list, timeline, needs-you, routes
+ *   ui-store    the one state object, API wrapper, navigation
+ *   ui-chat     what happens after send (server run, simulator, commands)
+ *   ui-views    chat list + thread          ui-panel   chat info + You pages
+ *   ui-sheets   sheets, quick nav, sign-in  ui-admin   admin pages
+ *   ui-dialogs  toast, sheet, confirm/ask   ui-actions action/form tables
+ *   ui-fx       confetti, the send arrow, and when the bots react
+ */
+import {parseRoute} from './ui-model.js?v=f6bd5ef1e8';
+import {store, api, sync, onChange, changed, go, back, popped, conversation, isStaticDemo, isAdmin, applyTheme, watchSystemTheme} from './ui-store.js?v=f6bd5ef1e8';
+import {toast, closeSheet, sheetOpen, trapTab} from './ui-dialogs.js?v=f6bd5ef1e8';
+import {listShell, renderList, threadShell, renderThread, homeView} from './ui-views.js?v=f6bd5ef1e8';
+import {renderInfo, refreshLists, renderPage} from './ui-panel.js?v=f6bd5ef1e8';
+import {showLogin, hideLogin, openCommandPalette, closeCommandPalette, paletteOpen, updateCommandResults, chooseCommand, moveCommand} from './ui-sheets.js?v=f6bd5ef1e8';
+import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=f6bd5ef1e8';
+import {bringBotsToLife} from './ui-fx.js?v=f6bd5ef1e8';
 
-// GitHub Pages edition: all interactions use the existing browser-local demo API.
-// Never send account tokens or real-world posting actions from this static demo.
-// Every request flows through one wrapper so the whole shell can show a single
-// in-flight indicator, delayed enough that instant local reads never flash.
-let inflight=0,busyTimer=null;
-function setBusy(on){const bar=document.getElementById('progress');if(!bar)return;if(on){if(busyTimer)return;busyTimer=setTimeout(()=>{bar.classList.remove('hidden');document.body.classList.add('is-busy');},140);}else{clearTimeout(busyTimer);busyTimer=null;bar.classList.add('hidden');document.body.classList.remove('is-busy');}}
-const api=async(path,method='GET',body={})=>{inflight++;if(inflight===1)setBusy(true);try{return await window.AGENT_API(path,method,body);}finally{inflight--;if(inflight===0)setBusy(false);}};
-const $=selector=>document.querySelector(selector);
-const el=id=>document.getElementById(id);
-const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const uid=()=>crypto.randomUUID();
-const relative=date=>{if(!date)return 'Not set';const delta=Date.now()-Date.parse(date);if(!Number.isFinite(delta))return 'Unknown';if(Math.abs(delta)<60000)return 'Just now';const amount=Math.round(Math.abs(delta)/60000);return delta>=0?`${amount}m ago`:`in ${amount}m`;};
-const displayDate=date=>date?new Date(date).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'—';
-const ICON={pin:'<path d="m16 9 2-2-5-5-2 2-5 1-1 4-3 3 7 7 3-3 4-1 2-2-5-5-2 2"/>',filter:'<path d="M4 7h16M7 12h10M10 17h4"/>',home:'<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',plus:'<path d="M12 5v14M5 12h14"/>',chat:'<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 8.5-8.5h.5a8.48 8.48 0 0 1 8 8z"/>',grid:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',layers:'<path d="m12 2 9 5-9 5-9-5 9-5zm-9 10 9 5 9-5M3 17l9 5 9-5"/>',check:'<path d="m5 12 4 4L19 6"/>',clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',compass:'<circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2.2 5-4.8 2 2-4.8z"/>',arrow:'<path d="M5 12h14m-6-6 6 6-6 6"/>',chevron:'<path d="m9 18 6-6-6-6"/>',settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06-2.9 2.9-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6v.1h-4v-.1A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06-2.9-2.9.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1H4v-4h.1a1.65 1.65 0 0 0 .5-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06 2.9-2.9.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6V4h4v.1a1.65 1.65 0 0 0 1 .5 1.65 1.65 0 0 0 1.82-.33l.06-.06 2.9 2.9-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 .6 1H20v4h-.1a1.65 1.65 0 0 0-.5 1z"/>',menu:'<path d="M4 6h16M4 12h16M4 18h16"/>',x:'<path d="M6 6l12 12M18 6 6 18"/>',sparkle:'<path d="m12 2 1.5 7.5L21 12l-7.5 2.5L12 22l-2.5-7.5L2 12l7.5-2.5z"/>',send:'<path d="m22 2-7 20-4-9-9-4 20-7Zm0 0L11 13"/>',external:'<path d="M13 4h7v7M20 4l-9 9M20 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h5"/>',copy:'<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>',edit:'<path d="M12 20h9M16 4l4 4-11 11-5 1 1-5z"/>',shield:'<path d="M12 2 4 5v6c0 5 3.5 8.7 8 11 4.5-2.3 8-6 8-11V5z"/>',dots:'<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',back:'<path d="m15 18-6-6 6-6"/>',trash:'<path d="M3 6h18M8 6V4h8v2m3 0-1 15H6L5 6m5 4v7m4-7v7"/>',bell:'<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>',info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.6h.01"/>',bolt:'<path d="m13 2-9 12h7l-1 8 10-12h-7z"/>',search:'<circle cx="10" cy="10" r="7"/><path d="m15 15 6 6"/>'};
-const icon=(name,size=17)=>`<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[name]||ICON.sparkle}</svg>`;
-// Avatar identity tiles: dark, tint-matched pairs that keep each bot distinct
-// while staying inside the monochrome system and keeping the glyph legible.
-const AVATAR_THEMES=[['#1e1b34','#c4b5fd'],['#0f2030','#93c5fd'],['#2a2110','#fcd34d'],['#0e2416','#86efac'],['#2a1516','#fca5a5'],['#0d2429','#7dd3fc']];
-const EMOJIS=['✦','◎','◈','⌘','✳','◉','✸','▣'];
-const BOT_TEMPLATES={blank:{name:'',instructions:''},scout:{name:'Scout',instructions:'Collect relevant user-selected sources. Summarize the content and include direct links. Do not invent sources.'},research:{name:'Researcher',instructions:'Review evidence, distinguish facts from opinions, and flag claims that need verification. Provide citations when possible.'},writer:{name:'Writer',instructions:'Write clear, concise drafts in the user-approved tone. Do not invent their opinions. Return drafts for approval.'},review:{name:'Reviewer',instructions:'Check drafts for unsupported facts, unclear language, and permissions. Request revisions if needed. Never publish content.'},organize:{name:'Coordinator',instructions:'Route work to other bots in this group. Explain handoffs and summarize results. Require user approval before external actions.'}};
-const shade=i=>AVATAR_THEMES[Math.abs(i)%AVATAR_THEMES.length][0];
-const tint=i=>AVATAR_THEMES[Math.abs(i)%AVATAR_THEMES.length][1];
-const avatar=(name,i=0,size=43)=>`<span class="bot-pfp" style="width:${size}px;height:${size}px;background:${shade(i)};color:${tint(i)};font-size:${Math.round(size*.49)}px">${EMOJIS[Math.abs(i)%EMOJIS.length]}</span>`;
-const pills=status=>`<span class="chip ${status==='posted'||status==='ready'?'green':status==='scheduled'||status==='pending'?'orange':status==='rejected'?'red':'purple'}">${esc(status==='ready'?'Ready to post':status||'New')}</span>`;
-const htmlState={view:'home',groupId:'x-engage',tab:'overview',botId:null,editDraft:null,modal:null,avatarIndex:0,sidebarOpen:false};
-let state=null,toastTimer=null,syncTimer=null;const CHAT_KEY='agent-control-bot-chats-v2',META_KEY='agent-control-bot-profiles-v2';
-// Dialogs declare aria-modal, so they must hand focus back to the control that
-// opened them; without this a keyboard user is dropped at the top of the page.
-let lastFocus=null;
-function captureFocus(){lastFocus=document.activeElement instanceof HTMLElement?document.activeElement:null;}
-function restoreFocus(){const node=lastFocus;lastFocus=null;if(node&&document.contains(node)&&typeof node.focus==='function')node.focus();}
-function loadLocal(key,fallback){try{return JSON.parse(localStorage.getItem(key))??fallback;}catch{return fallback;}}
-let messages=loadLocal(CHAT_KEY,{}), profiles=loadLocal(META_KEY,{});
-// `profiles` is cosmetic UI state only (avatar, pin). An earlier build also wrote
-// name/instructions here, and profile() spreads it over the bot record, so those
-// stale copies would permanently shadow the server's values. Strip them once.
-for(const id of Object.keys(profiles)){delete profiles[id].name;delete profiles[id].instructions;}
-const uiPrefs=normalizeUiPrefs(loadLocal(UI_PREFS_KEY,{}));
-let candidateQuery='',lastRoute='';
-/** Keep the active sidebar entry in view when groups grow past the fold. */
-function ensureActiveVisible(){const a=el('sidebar')?.querySelector('[aria-current="page"]');if(a&&a.scrollIntoView)a.scrollIntoView({block:'nearest'});}
-function setPreference(key,value){const next=normalizeUiPrefs({...uiPrefs,[key]:value});Object.assign(uiPrefs,next);saveLocal(UI_PREFS_KEY,uiPrefs);}
-const orderedBots=g=>[...g.bots].sort((a,b)=>Number(Boolean(profiles[b.id]?.pinned))-Number(Boolean(profiles[a.id]?.pinned)));
-function actionMenu(label,items){return `<details class="action-menu"><summary aria-label="${esc(label)}" title="${esc(label)}">${icon('dots',18)}</summary><div class="dropdown-panel" role="group">${items}</div></details>`;}
-const menuItem=(label,action,id,ic='arrow')=>`<button type="button" data-action="${esc(action)}" ${id?`data-id="${esc(id)}"`:''}>${icon(ic,15)}<span>${esc(label)}</span></button>`;
-function saveLocal(key,data){try{localStorage.setItem(key,JSON.stringify(data));return true;}catch{toast('Browser storage is unavailable. Changes may not persist.',true);return false;}}
-function profile(bot){return {...bot,...(profiles[bot.id]||{})};}
-function botGroup(id){return state.groups.find(g=>g.bots.some(b=>b.id===id));}
-function activeGroup(){return state.groups.find(g=>g.id===htmlState.groupId)||state.groups[0];}
-function activeBot(){return state.groups.flatMap(g=>g.bots).map(profile).find(b=>b.id===htmlState.botId);}
-function isXGroup(g){return g?.id==='x-engage';}
-function isStaticDemo(){const m=document.querySelector('meta[name="agent-backend"]');return !m||m.getAttribute('content')==='static';}
-function toast(message,error=false){const node=el('toast');node.textContent=message;node.classList.toggle('error',Boolean(error));node.classList.remove('hidden');clearTimeout(toastTimer);toastTimer=setTimeout(()=>node.classList.add('hidden'),3800);}
-async function sync(){try{state=await api('/api/state');render();}catch(e){if(e.status===401)showLogin('Your session expired. Sign in again.');else toast(e.message||'Could not refresh state.',true);}}
-function select(view,groupId=null,botId=null,tab=null){closeCommandPalette();htmlState.view=view;if(groupId)htmlState.groupId=groupId;if(botId)htmlState.botId=botId;if(tab)htmlState.tab=tab;else if(view==='group')htmlState.tab='overview';htmlState.sidebarOpen=false;hideModal();render();const hash=view==='chat'?`chat/${encodeURIComponent(htmlState.botId)}`:view==='group'?`group/${encodeURIComponent(htmlState.groupId)}/${htmlState.tab}`:view;history.pushState(null,'',`#${hash}`);}
-// Fast navigation is intentionally local: commands never execute bot tools or post to X.
-let paletteEntries=[];
-function commandItems(){
-  const items=[
-    {label:'Home',hint:'Workspace',glyph:'home',run:()=>select('home')},
-    {label:'Approval inbox',hint:'Review drafts',glyph:'check',run:()=>select('inbox')},
-    {label:'Create new bot',hint:'New specialist',glyph:'plus',run:()=>openModal('new-bot')},
-    {label:'Create bot group',hint:'New workspace',glyph:'layers',run:()=>openModal('new-group')},
-    {label:'About this build',hint:'How the demo works',glyph:'shield',run:()=>openModal('demo-info')}
-  ];
-  for(const g of state.groups){
-    items.push({label:g.name,hint:'Bot group',glyph:'layers',run:()=>select('group',g.id)});
-    items.push({label:`${g.name} · Group chat`,hint:'Shared conversation',glyph:'chat',run:()=>select('chat',g.id,`team-${g.id}`)});
-    for(const b of g.bots){items.push({label:`${profile(b).name}`,hint:`${g.name} · Specialist chat`,glyph:'chat',run:()=>select('chat',g.id,b.id)});}
-    if(isXGroup(g))for(const tab of ['overview','discovery','approvals','schedules','activity','settings']){
-      items.push({label:`${g.name} · ${tab.charAt(0).toUpperCase()+tab.slice(1)}`,hint:'Group workspace',glyph:'grid',run:()=>select('group',g.id,null,tab)});
+const el = id => document.getElementById(id);
+const hashRoute = () => parseRoute(location.hash, store.state, {server: !isStaticDemo(), admin: isAdmin()});
+/** True while the user is typing inside `node`, so a repaint must not replace it. */
+const typingIn = node => { const a = document.activeElement; return Boolean(a && node?.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)); };
+let lastView = '', syncTimer = null;
+
+/** A repaint replaces nodes, so remember which control had focus by its stable
+ * attributes and give focus back to its replacement. */
+const FOCUS_KEYS = ['action', 'id', 'filter', 'section', 'page', 'status', 'index'];
+function keepFocus(paint) {
+  const a = document.activeElement, pane = a?.closest?.('.pane');
+  const selector = pane && a.dataset?.action ? `#${pane.id} ${a.tagName.toLowerCase()}` + FOCUS_KEYS.filter(k => a.dataset[k] !== undefined).map(k => `[data-${k}="${CSS.escape(a.dataset[k])}"]`).join('') : null;
+  paint();
+  if (selector && !document.contains(a)) document.querySelector(selector)?.focus({preventScroll: true});
+}
+/** While the info panel covers the thread (narrow screens), keep Tab and
+ * assistive tech out of what is underneath. */
+function setInert() {
+  const {info, chat, page} = store.route, phone = matchMedia('(max-width:850px)').matches;
+  el('main').inert = Boolean(info) && matchMedia('(max-width:1180px)').matches;
+  el('sidebar').inert = phone && Boolean(info || chat || page);
+}
+
+/** Repaint everything for the current route. One view key drives the
+ * transition and focus move, so reopening the same screen never jumps. */
+function renderRoute() {
+  const {chat, page, info} = store.route, main = el('main');
+  if (chat && !conversation()) return go({}, {replace: true});
+  document.body.dataset.pane = info ? 'info' : (chat || page) ? 'main' : 'list';
+  document.body.classList.toggle('has-info', Boolean(info));
+  const view = page ? `page:${page}` : chat ? `chat:${chat}` : 'home';
+  if (view !== lastView) {
+    if (page) renderPage(); else if (chat) threadShell(conversation()); else main.innerHTML = homeView();
+    main.classList.remove('view-enter'); void main.offsetWidth; main.classList.add('view-enter');
+    // Only pull focus where it will not pop a phone keyboard open.
+    if (matchMedia('(pointer:fine)').matches) (main.querySelector('.composer textarea') || main.querySelector('h2'))?.focus?.({preventScroll: true});
+  }
+  lastView = view;
+  setInert();
+  renderList(); renderThread(); renderInfo();
+  if (info) el('inspector').querySelector('.back')?.focus({preventScroll: true});
+}
+
+onChange(scope => {
+  if (!store.state) return;
+  if (scope === 'route') return renderRoute();
+  keepFocus(() => {
+    renderList();
+    if (scope === 'list') return;
+    if (!typingIn(el('chat-space'))) renderThread();
+    // Never repaint the panel under the user's cursor; it catches up on the next change.
+    if (scope === 'all' && !typingIn(el('inspector'))) renderInfo();
+  });
+});
+
+async function boot() {
+  try {
+    store.state = await api('/api/state');
+    if (isStaticDemo() && !localStorage.getItem('ac-v2-welcome')) {
+      await api('/api/demo/seed', 'POST', {}); localStorage.setItem('ac-v2-welcome', '1');
+      store.state = await api('/api/state');
     }
+    listShell(); lastView = '';
+    // First paint only: the chat rows arrive one after another.
+    document.body.classList.add('booting'); setTimeout(() => document.body.classList.remove('booting'), 900);
+    store.route = hashRoute(); changed('route');
+    clearInterval(syncTimer);
+    syncTimer = setInterval(async () => {
+      try { await sync(); }
+      catch (e) { if (e.status === 401) lockScreen('Your session expired. Sign in again.'); }
+    }, 30000);
+  } catch (e) {
+    if (e.status === 401) return showLogin(e.message);
+    el('main').innerHTML = `<section class="home"><h1>Could not start</h1><p></p><p>${isStaticDemo() ? 'Enable browser local storage and reload. If the page was cached from an older deploy, hard-refresh once.' : 'Check that the Node server is running and reload.'}</p></section>`;
+    el('main').querySelector('p').textContent = e.message;
   }
-  return items;
 }
-function updateCommandResults(value=''){
-  const q=value.trim().toLowerCase();
-  paletteEntries=commandItems().filter(x=>`${x.label} ${x.hint}`.toLowerCase().includes(q)).slice(0,16);
-  const area=el('command-results');if(!area)return;
-  area.innerHTML=paletteEntries.length?paletteEntries.map((entry,i)=>`<button class="command-item ${i===0?'selected':''}" data-action="command-choice" data-index="${i}" role="option" aria-selected="${i===0}"><span class="command-icon">${icon(entry.glyph,16)}</span><span>${esc(entry.label)}</span><small>${esc(entry.hint)}</small></button>`).join(''):'<div class="command-none">No matching commands</div>';
+/** Leave nothing of the signed-out workspace in the DOM behind the sign-in. */
+function lockScreen(message) {
+  clearInterval(syncTimer); syncTimer = null;
+  closeSheet(); closeCommandPalette();
+  store.state = null; lastView = '';
+  for (const id of ['sidebar', 'main', 'inspector']) el(id).innerHTML = '';
+  showLogin(message);
 }
-function closeCommandPalette(){if(el('command').classList.contains('hidden'))return;el('command').classList.add('hidden');el('command').innerHTML='';paletteEntries=[];restoreFocus();}
-function openCommandPalette(){
-  hideModal();captureFocus();
-  const layer=el('command');layer.classList.remove('hidden');
-  layer.innerHTML=`<div class="command-card" role="dialog" aria-modal="true" aria-label="Quick navigation"><div class="command-head">${icon('search',18)}<input id="command-input" aria-label="Search pages and bots" autocomplete="off" placeholder="Search bots, groups, and pages…" maxlength="120"><button class="btn small ghost" data-action="command-dismiss" aria-label="Close quick navigation">Esc</button></div><div class="command-hint">JUMP TO</div><div class="command-results" id="command-results" role="listbox"></div><div class="command-foot"><span>↑ ↓ Navigate · Enter Open</span><span>Esc Close</span></div></div>`;
-  updateCommandResults();el('command-input').focus();
-}
-function chooseCommand(index){const entry=paletteEntries[index];if(!entry)return;closeCommandPalette();entry.run();}
-function navButton(label,name,selected,attributes=''){return `<button class="nav-button ${selected?'active':''}" ${selected?'aria-current="page"':''} ${attributes}>${icon(name)}<span>${esc(label)}</span></button>`;}
-function sidebar(){const s=state;el('sidebar').className=`sidebar ${htmlState.sidebarOpen?'mobile-open':''}`;el('sidebar').innerHTML=`
- <div class="side-logo"><span class="logo-symbol">${icon('layers',20)}</span><div><div class="brand-title">Agent Control</div><div class="brand-sub">YOUR AGENT WORKSPACE</div></div></div>
- <button class="side-search" data-action="command-open" aria-keyshortcuts="Control+K Meta+K" aria-label="Search or jump to anything">${icon('search',16)}<span>Search or jump to…</span><kbd>⌘K</kbd></button>
- <button class="btn wide" data-action="new-bot">${icon('plus',16)} Create new bot</button>
- <div class="side-section-head">WORKSPACE</div>
- ${navButton('Home','home',htmlState.view==='home','data-action="home"')}
- ${navButton('Approval inbox','check',htmlState.view==='inbox','data-action="inbox"')}
- <div class="side-section-head">BOT GROUPS <button title="Create group" aria-label="Create group" data-action="new-group">${icon('plus',15)}</button></div>
- ${s.groups.map(g=>`<button class="side-group ${htmlState.view==='group'&&g.id===htmlState.groupId?'active':''}" data-action="open-group" data-id="${esc(g.id)}" ${htmlState.view==='group'&&g.id===htmlState.groupId?'aria-current="page"':''}><span class="group-title">${icon('layers',16)}<span>${esc(g.name)}</span></span><span class="count">${g.bots.length}</span></button>
- ${(g.id===htmlState.groupId||htmlState.view==='home')?`<div class="bot-nest"><button class="side-bot ${htmlState.view==='chat'&&htmlState.botId===`team-${g.id}`?'active':''}" data-action="team-chat" data-id="${esc(g.id)}" ${htmlState.view==='chat'&&htmlState.botId===`team-${g.id}`?'aria-current="page"':''}>${avatar('Team',1,23)} Group chat</button>${orderedBots(g).map((b,i)=>`<button class="side-bot ${htmlState.view==='chat'&&htmlState.botId===b.id?'active':''}" data-action="open-chat" data-id="${esc(b.id)}" ${htmlState.view==='chat'&&htmlState.botId===b.id?'aria-current="page"':''}>${avatar(b.name,i,23)}<span>${esc(profile(b).name)}</span>${profiles[b.id]?.pinned?icon('pin',12):''}</button>`).join('')}</div>`:''}`).join('')}
- <div class="side-spacer"></div><div class="side-section-head">ENVIRONMENT</div>
- ${isStaticDemo()?`<button class="nav-button" data-action="demo-info">${icon('settings')} <span>Demo settings</span></button>`:''}
- <div class="side-footer"><span class="dot"></span><div><strong>${isStaticDemo()?'Browser-only prototype':'Connected to Node server'}</strong><span>${isStaticDemo()?'Data stays in this browser':'Live /api backend'}</span></div></div>
- ${isStaticDemo()?'':`<button class="nav-button" data-action="logout">${icon('back')} <span>Sign out</span></button>`}`;
-}
-function topbar(){const g=activeGroup(),b=activeBot();let label='Your workspace',crumb='';if(htmlState.view==='group'){label=g?.name||'Group';crumb=`<button class="crumb" data-action="home">Bot groups</button><span class="slash">/</span><strong>${esc(label)}</strong>`;}else if(htmlState.view==='chat'){label=htmlState.botId?.startsWith('team-')?'Group chat':b?.name||'Bot';crumb=`<button class="crumb" data-action="open-group" data-id="${esc(g?.id||'')}">${esc(g?.name||'Bot groups')}</button><span class="slash">/</span><strong>${esc(label)}</strong>`;}else if(htmlState.view==='inbox'){label='Approval inbox';crumb=`<button class="crumb" data-action="home">Workspace</button><span class="slash">/</span><strong>Approval inbox</strong>`;}else{crumb='<strong>Your workspace</strong>';}el('topbar').innerHTML=`<nav class="breadcrumb" aria-label="Breadcrumb"><button class="btn ghost icon-only menu-toggle" data-action="toggle-menu" aria-label="Open menu">${icon('menu',21)}</button>${crumb}</nav><div class="top-right"><button class="jump-button" data-action="command-open" aria-label="Search bots and pages" title="Search bots and pages (Ctrl+K)">${icon('search',15)}<span>Jump to anything</span><kbd>⌘ K</kbd></button>${actionMenu('Workspace actions',menuItem('New bot','new-bot',null,'plus')+menuItem('New group','new-group',null,'layers')+menuItem('Approval inbox','inbox',null,'check')+menuItem('About demo','demo-info',null,'shield')+(isStaticDemo()?'':menuItem('Sign out','logout',null,'back')))}<button class="top-link" title="About this demo" aria-label="About this demo" data-action="demo-info">${icon('info',18)}</button><span class="top-avatar">AC</span></div>`;el('mobile-backdrop').classList.toggle('hidden',!htmlState.sidebarOpen);}
-const heading=(eyebrow,title,sub,buttons='')=>`<div class="page-head"><div><div class="eyebrow">${esc(eyebrow)}</div><h1 class="page-title">${esc(title)}</h1><p class="page-sub">${esc(sub)}</p></div>${buttons?`<div class="button-row">${buttons}</div>`:''}</div>`;
-function stats(){const p=state.drafts.filter(d=>d.status==='pending').length,r=state.drafts.filter(d=>d.status==='ready').length;return `<div class="stat-row">${[['Candidates',state.candidates.length,'compass','Post ideas collected'],['Awaiting review',p,'check','Needs your decision'],['Ready to post',r,'send','Manual publish'],['Specialist bots',state.groups.reduce((n,g)=>n+g.bots.length,0),'grid','Configured profiles']].map(([name,v,ic,sub])=>`<div class="stat"><span class="stat-name">${name}</span><div class="stat-icon">${icon(ic,16)}</div><div class="stat-value">${v}</div><div class="stat-detail">${sub}</div></div>`).join('')}</div>`;}
-function groupTile(g){return `<article class="card group-card"><div class="group-card-head"><div class="group-icon">${icon('layers',20)}</div><div><h3>${esc(g.name)}</h3><p>${esc(g.description||'Custom automation group')}</p></div><div class="menu-anchor">${actionMenu(`${g.name} options`,menuItem('Open workspace','open-group',g.id,'grid')+menuItem('Group chat','team-chat',g.id,'chat')+menuItem('Add a specialist','add-bot-to-group',g.id,'plus'))}</div></div><button class="group-open" data-action="open-group" data-id="${esc(g.id)}">${g.bots.length} specialized bots <span>Open workspace ${icon('chevron',15)}</span></button></article>`;}
-function activityList(limit=6){return state.events.slice(0,limit).map(e=>`<div class="activity"><span class="line-dot"></span><div><strong>${esc(e.message)}</strong><time>${displayDate(e.at)}</time></div></div>`).join('')||'<div class="empty"><p>No activity recorded yet.</p></div>';}
-function home(){const g=activeGroup();return `<section class="home-intro">
-<div class="eyebrow">AGENT CONTROL</div>
-<h1 class="page-title">What should your bots work on?</h1>
-<p class="page-sub">Create a specialist, message a group, and review every draft before anything goes out. Nothing is posted without your final click.</p>
-<form id="home-prompt" class="home-prompt" autocomplete="off"><span class="home-prompt-icon">${icon('sparkle',18)}</span><input class="home-prompt-input" name="prompt" placeholder="Ask your group to research, draft or review something…" maxlength="4000" required autocomplete="off" aria-label="Ask your bot group"><button class="btn primary icon-only" type="submit" aria-label="Send to group chat">${icon('send',17)}</button></form>
-<div class="home-chips">${['Summarize the latest candidate','Draft a reply to the top post','What needs my approval?','Review the pending drafts'].map(s=>`<button class="suggestion" data-action="home-ask" data-text="${esc(s)}">${esc(s)} ${icon('arrow',12)}</button>`).join('')}</div>
-</section>
-<div class="section-h"><h2>Workspace snapshot</h2><span class="status-caption">${isStaticDemo()?'Stored in this browser only':'Stored on this Node server'}</span></div>${stats()}
-<div class="section-h"><h2>Your bot groups</h2><button class="btn small" data-action="new-group">${icon('plus',14)} New group</button></div><div class="group-grid">${state.groups.map(groupTile).join('')}</div>
-<div class="two-col" style="margin-top:24px"><div class="card card-pad"><div class="section-h" style="margin:0 0 10px"><h2>Recent activity</h2><button class="btn ghost small" data-action="open-group" data-id="${esc(g?.id||'x-engage')}">View workspace ${icon('chevron',14)}</button></div>${activityList()}</div><div class="card card-pad"><div class="kicker">START HERE</div><h2 style="font:800 17px Manrope;letter-spacing:-.5px;margin:12px 0">Talk to a specialist</h2><p class="page-sub">Every bot has its own conversation and a focused responsibility.</p><div style="display:grid;gap:9px;margin-top:20px">${(g?.bots||[]).slice(0,3).map((b,i)=>`<button data-action="open-chat" data-id="${esc(b.id)}" class="btn" style="justify-content:flex-start">${avatar(b.name,i,26)} ${esc(profile(b).name)} <span style="margin-left:auto">${icon('chevron',14)}</span></button>`).join('')}</div></div></div>`;}
-function groupHeader(g){return `<div class="page-head group-page-head"><div class="head-identity"><div class="group-icon big">${icon('layers',22)}</div><div><div class="eyebrow">GROUP WORKSPACE</div><h1 class="page-title">${esc(g.name)}</h1><p class="page-sub">${esc(g.description||'Group workspace')}</p></div></div><div class="button-row"><button class="btn" data-action="team-chat" data-id="${esc(g.id)}">${icon('chat',15)} Group chat</button><button class="btn primary" data-action="new-bot">${icon('plus',15)} Add bot</button></div></div>`;}
-function groupTabs(){const x=['overview','discovery','approvals','schedules','activity','settings'];const names={overview:'Overview',discovery:'Discovery',approvals:'Approvals',schedules:'Schedules',activity:'Activity',settings:'Settings'};return `<div class="tabs" role="tablist" aria-label="Group tools">${x.map(t=>`<button role="tab" aria-selected="${htmlState.tab===t}" class="tab ${htmlState.tab===t?'active':''}" data-action="group-tab" data-tab="${t}">${names[t]}</button>`).join('')}</div><label class="mobile-tab-selector"><span>Workspace section</span><select id="mobile-group-tab" class="select" aria-label="Workspace section">${x.map(t=>`<option value="${t}" ${htmlState.tab===t?'selected':''}>${names[t]}</option>`).join('')}</select></label>`;}
-function group(){const g=activeGroup();if(!g)return home();return `${groupHeader(g)}${isXGroup(g)?groupTabs():''}${isXGroup(g)?xTab(g):genericGroup(g)}`;}
-function genericGroup(g){return `<div class="section-h"><h2>Specialists</h2><span class="status-caption">Choose a bot to start a conversation</span></div><div class="bot-grid">${orderedBots(g).map((b,i)=>botTile(b,i)).join('')||emptyState('This group has no bots','Create a specialist and assign its job.','new-bot','Create bot')}</div>`;}
-function botTile(b,i){const p=profile(b);return `<article class="bot-card"><div class="bot-card-head">${avatar(p.name,i,42)}${actionMenu(`${p.name} options`,menuItem('Open chat','open-chat',b.id,'chat')+menuItem('Edit profile','edit-card-bot',b.id,'edit')+menuItem('Duplicate bot','duplicate-bot',b.id,'copy')+menuItem('Copy instructions','copy-bot-instructions',b.id,'copy')+menuItem(profiles[b.id]?.pinned?'Unpin bot':'Pin bot','pin-bot',b.id,'pin'))}</div><div><strong>${esc(p.name)}</strong><small>${esc(p.instructions||'Custom specialist').slice(0,96)}</small></div><button class="bot-card-link" data-action="open-chat" data-id="${esc(b.id)}">Open conversation ${icon('arrow',14)}</button></article>`;}
-function xTab(g){switch(htmlState.tab){case 'discovery':return discovery();case 'approvals':return approvals();case 'schedules':return schedules();case 'activity':return `<div class="card card-pad">${activityList(60)}</div>`;case 'settings':return settings();default:return xOverview(g);}}
-function xOverview(g){const vals=[state.candidates.length,state.candidates.filter(c=>c.status==='drafted').length,state.drafts.filter(d=>d.status==='pending').length,state.drafts.filter(d=>d.status==='ready'||d.status==='posted').length];return `<div class="hero"><span class="chip purple">${icon('layers',12)} X-ENGAGE PIPELINE</span><h2>Find the right conversations. Reply with intent.</h2><p>Capture useful posts, rank them, prepare replies, and approve the final draft. The final Post click stays with you.</p><div class="button-row"><button class="btn primary" data-action="group-tab" data-tab="discovery">${icon('compass',15)} Explore candidates</button><button class="btn" data-action="group-tab" data-tab="approvals">${icon('check',15)} Review drafts</button></div></div>
-<div class="section-h"><h2>Workflow stages</h2><span class="chip">Manual final posting</span></div><div class="card card-pad"><div class="kicker">WORKFLOW HEALTH · LOCAL DEMO</div><div class="pipeline">${[['Discovered',vals[0]],['Scored',state.candidates.filter(c=>!!c.score).length],['Drafted',vals[1]],['Review',vals[2]],['Ready / posted',vals[3]]].map(([a,b])=>`<div class="pipe"><b>${b}</b><small>${a}</small></div>`).join('')}</div><div class="note" style="margin-top:18px">${isStaticDemo()?'No automated X feed crawling, real AI model, or background cloud execution is connected on GitHub Pages.':'Automated X feed crawling and automatic posting are not enabled. Drafts use the configured server AI provider when a key is present, otherwise labeled templates.'}</div></div>
-<div class="section-h"><h2>Specialist team</h2><button class="btn small" data-action="new-bot">${icon('plus',14)} Add specialist</button></div><div class="bot-grid">${orderedBots(g).map((b,i)=>botTile(b,i)).join('')}</div>
-<div class="two-col" style="margin-top:21px"><div class="card card-pad"><div class="section-h" style="margin:0 0 9px"><h2>Latest candidates</h2><button class="btn ghost small" data-action="group-tab" data-tab="discovery">See all →</button></div>${state.candidates.slice(0,3).map(c=>`<div class="activity"><span class="line-dot"></span><div><strong>${esc(c.author)}</strong><div class="list-secondary">${esc(c.text).slice(0,128)}</div></div></div>`).join('')||'<p class="page-sub">No posts captured.</p>'}</div><div class="card card-pad"><div class="kicker">NEXT ACTION</div><h2 style="font:800 17px Manrope;margin:14px 0">Your review inbox</h2><p class="page-sub">${state.drafts.filter(d=>d.status==='pending').length} draft(s) currently need your approval. Nothing is posted automatically.</p><button class="btn primary" style="margin-top:20px" data-action="group-tab" data-tab="approvals">Open approvals ${icon('arrow',15)}</button></div></div>`;}
-function candidateCard(c){return `<div class="list-row"><div class="score">${c.score?.score??'—'}</div><div class="list-main"><div class="list-primary">${esc(c.author)} <span class="chip" style="margin-left:5px">${esc(c.topic||'Uncategorized')}</span></div><div class="list-secondary">${esc(c.text).slice(0,225)}</div><div class="list-secondary"><a class="link" href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">View source ↗</a> · ${relative(c.createdAt)} ${c.demo?'· Sample content':''}</div></div><div class="list-actions"><button class="btn small primary" data-action="draft-candidate" data-id="${esc(c.id)}">Draft reply</button></div></div>`;}
-function discovery(){const visible=filterCandidates(state.candidates,{status:uiPrefs.candidateStatus,sort:uiPrefs.candidateSort,query:candidateQuery});return `<div class="two-col"><section><div class="section-h" style="margin-top:0"><h2>Discovered posts <span class="chip purple" id="candidate-count">${visible.length} / ${state.candidates.length}</span></h2><div class="button-row">${state.candidates.some(c=>c.demo)?'<button class="btn small ghost" data-action="reset-demo">Remove samples</button>':''}<button class="btn small" data-action="load-samples">Load samples</button></div></div><div class="toolbar" aria-label="Discovery filters"><label class="search-field">${icon('search',16)}<input id="candidate-search" aria-label="Search discovered posts" type="search" placeholder="Search posts, topics, authors, links" value="${esc(candidateQuery)}"></label><label class="select-wrap"><span>Status</span><select id="candidate-status" class="select" aria-label="Filter candidates"><option value="all" ${uiPrefs.candidateStatus==='all'?'selected':''}>All posts</option><option value="new" ${uiPrefs.candidateStatus==='new'?'selected':''}>Not processed</option><option value="drafted" ${uiPrefs.candidateStatus==='drafted'?'selected':''}>Drafted</option><option value="high" ${uiPrefs.candidateStatus==='high'?'selected':''}>High score (70+)</option></select></label><label class="select-wrap"><span>Sort</span><select id="candidate-sort" class="select" aria-label="Sort candidates"><option value="newest" ${uiPrefs.candidateSort==='newest'?'selected':''}>Newest first</option><option value="oldest" ${uiPrefs.candidateSort==='oldest'?'selected':''}>Oldest first</option><option value="score-high" ${uiPrefs.candidateSort==='score-high'?'selected':''}>Highest score</option><option value="score-low" ${uiPrefs.candidateSort==='score-low'?'selected':''}>Lowest score</option></select></label></div><div class="card list-card" id="candidate-results">${visible.map(candidateCard).join('')||emptyState('No matching posts','Change the filters, or add a new post.','reset-candidate-filters','Clear filters')}</div></section><section><div class="card card-pad"><div class="section-h" style="margin:0 0 18px"><h2>Add a candidate</h2>${icon('plus',16)}</div><form id="candidate-form"><label class="field"><span class="form-label">Post URL</span><input class="input" type="url" name="url" placeholder="https://x.com/user/status/..." required></label><label class="field"><span class="form-label">Author</span><input class="input" name="author" placeholder="Account name"></label><label class="field"><span class="form-label">Topic</span><input class="input" name="topic" placeholder="AI, robotics, technology"></label><label class="field"><span class="form-label">Visible post text</span><textarea class="textarea" name="text" rows="5" minlength="12" placeholder="Paste the post content" required></textarea></label><button class="btn primary wide" type="submit">Add to discovery ${icon('arrow',15)}</button></form></div><p class="status-caption" style="margin:13px 4px">The installed browser extension supports user-assisted capture with the local Node backend. It is not paired with the static Pages demo.</p></section></div>`;}
-function updateCandidateList(){const node=el('candidate-results');if(!node)return;const filtered=filterCandidates(state.candidates,{status:uiPrefs.candidateStatus,sort:uiPrefs.candidateSort,query:candidateQuery});node.innerHTML=filtered.map(candidateCard).join('')||emptyState('No matching posts','Change the filters, or add a new post.','reset-candidate-filters','Clear filters');const count=el('candidate-count');if(count)count.textContent=`${filtered.length} / ${state.candidates.length}`;}
-function draftCard(d){const current=htmlState.editDraft===d.id;return `<div class="card draft-card"><div class="draft-top"><div><div class="list-primary">${esc(d.author)} ${pills(d.status)}</div><div class="list-secondary"><a class="link" href="${esc(d.url)}" rel="noopener noreferrer" target="_blank">Source post ↗</a> · Score ${Number(d.score||0)}/100 · Revision ${d.revision}</div></div><span class="chip">${d.mode==='template'?'Template':'Draft'}</span></div><hr class="sep"/><div class="draft-body">${esc(d.text)}</div><div class="note" style="margin-top:17px">${esc(d.note||'Review all content before posting.')}${d.dueAt?` · Scheduled ${displayDate(d.dueAt)}`:''}</div>
-${current?`<form class="edit-form" data-id="${esc(d.id)}" style="margin-top:17px"><label class="field"><span class="form-label">Edit this draft</span><textarea class="textarea" name="text" rows="5" required>${esc(d.text)}</textarea></label><div class="button-row"><button class="btn primary" type="submit">Save revision</button><button type="button" class="btn" data-action="cancel-edit">Cancel</button></div></form>`:''}
-<div class="draft-actions">${['pending','scheduled','ready'].includes(d.status)?`<button class="btn small" data-action="edit-draft" data-id="${esc(d.id)}">${icon('edit',14)} Edit</button>`:''}${['pending','scheduled','ready'].includes(d.status)?`<button class="btn small" data-action="rewrite-draft" data-id="${esc(d.id)}">${icon('sparkle',14)} Rewrite</button>`:''}${d.status==='pending'?`<button class="btn primary small" data-action="approve-draft" data-id="${esc(d.id)}">${icon('check',14)} Approve & schedule</button><button class="btn danger small" data-action="reject-draft" data-id="${esc(d.id)}">Reject</button>`:''}${d.status==='scheduled'?`<button class="btn small primary" data-action="ready-draft" data-id="${esc(d.id)}">Ready now</button><button class="btn small danger" data-action="reject-draft" data-id="${esc(d.id)}">Cancel</button>`:''}${d.status==='ready'?`<button class="btn small primary" data-action="copy-draft" data-id="${esc(d.id)}">${icon('copy',14)} Copy text</button><a class="btn small" href="${esc(d.url)}" target="_blank" rel="noopener noreferrer">${icon('external',14)} Open source</a><button class="btn small" data-action="posted-draft" data-id="${esc(d.id)}">I posted it</button>`:''}</div></div>`;}
-function approvalContents(){const list=filterDrafts(state.drafts,{status:uiPrefs.draftStatus,sort:uiPrefs.draftSort});return list.length?list.map(d=>['pending','scheduled','ready'].includes(d.status)?draftCard(d):`<div class="card list-row archived-draft"><div class="list-main"><strong>${esc(d.author)}</strong><p class="list-secondary">${esc(d.text).slice(0,200)}</p></div>${pills(d.status)}</div>`).join(''):emptyState('No matching drafts','Change the status filter or prepare a draft.','reset-draft-filters','Clear filters');}
-function approvals(){return `<div class="section-h" style="margin-top:0"><h2>Approval inbox</h2><span class="chip orange" id="approval-count">${state.drafts.filter(d=>d.status==='pending').length} need a decision</span></div><div class="toolbar approval-toolbar" aria-label="Approval filters"><label class="select-wrap"><span>Status</span><select id="draft-status" class="select" aria-label="Filter drafts">${[['active','Active drafts'],['pending','Needs approval'],['scheduled','Scheduled'],['ready','Ready to post'],['posted','Posted'],['rejected','Rejected'],['all','All drafts']].map(([v,l])=>`<option value="${v}" ${uiPrefs.draftStatus===v?'selected':''}>${l}</option>`).join('')}</select></label><label class="select-wrap"><span>Sort</span><select id="draft-sort" class="select" aria-label="Sort drafts">${[['newest','Newest first'],['oldest','Oldest first'],['score-high','Highest score']].map(([v,l])=>`<option value="${v}" ${uiPrefs.draftSort===v?'selected':''}>${l}</option>`).join('')}</select></label><button class="btn small ghost" data-action="reset-draft-filters">Reset</button></div><div id="approval-results">${approvalContents()}</div>`;}
-function updateApprovalList(){const node=el('approval-results');if(node)node.innerHTML=approvalContents();}
-function scheduleStatusLabel(t){return t.status==='done'?'Completed':t.status==='failed'?'Failed':t.status==='cancelled'?'Removed':t.status==='running'?'Running':'Due '+displayDate(t.runAt);}
-function schedules(){const reminders=(state.tasks||[]).filter(t=>t.kind==='reminder');return `<div class="two-col"><section><div class="section-h" style="margin-top:0"><h2>Scheduled work</h2></div><div class="card list-card">${reminders.map(t=>`<div class="list-row"><div class="list-main"><div class="list-primary">${esc(t.payload?.label||t.title)}</div><div class="list-secondary">${t.payload?.kind==='interval'?`Every ${t.intervalMinutes} minute(s)`:'One-time'} · ${scheduleStatusLabel(t)}${t.lastError?` · ${esc(t.lastError)}`:''}</div></div><button class="btn small danger" data-action="remove-task" data-id="${esc(t.id)}">Remove</button></div>`).join('')||emptyState('No reminders yet','Create a local reminder to test the scheduler.')}</div><div class="section-h"><h2>Publication handoffs</h2></div><div class="card list-card">${state.drafts.filter(d=>d.status==='scheduled').map(d=>`<div class="list-row"><div class="list-main"><div class="list-primary">${esc(d.author)}</div><div class="list-secondary">Ready at ${displayDate(d.dueAt)}</div></div>${pills(d.status)}</div>`).join('')||emptyState('Nothing scheduled','Approve a draft to create a handoff.')}</div></section><section><div class="card card-pad"><h2 class="panel-title" style="margin:0 0 20px">New reminder</h2><form id="schedule-form"><label class="field"><span class="form-label">Reminder</span><input class="input" name="label" placeholder="Review new discussions" required></label><label class="field"><span class="form-label">Type</span><select class="select" name="kind"><option value="interval">Recurring interval</option><option value="once">Exact time</option></select></label><label class="field"><span class="form-label">Interval in minutes</span><input class="input" name="intervalMinutes" type="number" value="60" min="1" max="10080"></label><label class="field"><span class="form-label">Date and time (for one-time)</span><input class="input" name="nextAt" type="datetime-local"></label><button class="btn primary wide">Create reminder</button></form></div><div class="note" style="margin-top:14px">Reminders run as structured tasks with retries and status events. This demo checks timers only while you open or interact with the site; the Node backend keeps working while the server process is up.</div></section></div>`;}
-function settings(){const s=state.settings,demo=isStaticDemo(),ai=Boolean(state?.aiEnabled),model=state?.aiModel;const about=demo?'GitHub Pages serves only static files, so chats use deterministic local commands instead of a language model, and everything stays in this browser.':ai?'A server-side AI provider is connected for drafting and custom bots. Model output still needs your review, and the final Post click is always yours.':"No AI provider is configured, so drafts use clearly labeled templates. Set AI_API_KEY (and AI_BASE_URL) on the server to enable real drafting.";return `<div class="two-col"><div class="card card-pad"><h2 class="panel-title" style="margin:0 0 23px">Writing & scheduling preferences</h2><form id="settings-form"><label class="field"><span class="form-label">Topic interests (comma-separated)</span><input class="input" name="topics" value="${esc(s.topics.join(', '))}" required></label><label class="field"><span class="form-label">Writing style</span><textarea class="textarea" name="style" rows="3">${esc(s.style)}</textarea></label><label class="field"><span class="form-label">Approved opinions (optional)</span><textarea class="textarea" name="opinions" rows="3">${esc(s.opinions)}</textarea></label><div class="form-grid"><label class="field"><span class="form-label">Minimum delay (min)</span><input class="input" type="number" name="minDelay" min="0" max="1440" value="${s.minDelay}" required></label><label class="field"><span class="form-label">Maximum delay (min)</span><input class="input" type="number" name="maxDelay" min="0" max="1440" value="${s.maxDelay}" required></label></div><button class="btn primary">Save preferences</button></form></div><div class="card card-pad"><h2 class="panel-title">About this build</h2><div class="note" style="margin-top:19px">${esc(about)}</div><div class="inspect-row"><span>Storage</span><b>${demo?'Local browser':'Node server (JSON store)'}</b></div><div class="inspect-row"><span>Real AI</span><b>${demo?'Not connected':ai?(model?`Connected · ${esc(model)}`:'Connected provider'):'Template drafts'}</b></div><div class="inspect-row"><span>Final X posting</span><b>Manual</b></div><div class="inspect-row"><span>Device sync</span><b>${demo?'Not available':'Server state'}</b></div></div></div>`;}
-function emptyState(title,description,action=null,label='',tab=null){return `<div class="card empty"><div class="empty-icon">${icon('sparkle',25)}</div><h3>${esc(title)}</h3><p>${esc(description)}</p>${action?`<button class="btn primary" data-action="${esc(action)}" ${tab?`data-tab="${esc(tab)}"`:''}>${esc(label)}</button>`:''}</div>`;}
-function inbox(){return `${heading('DECISIONS','Your approval inbox','Nothing gets published on X without your final manual click.','<button class="btn" data-action="open-group" data-id="x-engage">'+icon('layers',15)+' X-engage</button>')}${approvals()}`;}
-function currentChatInfo(){
-  if(htmlState.botId?.startsWith('team-')){
-    const group=state.groups.find(g=>`team-${g.id}`===htmlState.botId);
-    if(!group)return null;
-    return {id:htmlState.botId,name:`${group.name} group chat`,instructions:`Shared coordination for ${group.bots.map(b=>b.name).join(', ')}. All external actions require human approval.`,isTeam:true,group,index:1};
-  }
-  const b=activeBot(),g=botGroup(htmlState.botId);
-  return b?{...b,group:g,index:g?.bots.findIndex(x=>x.id===b?.id)||0,isTeam:false}:null;
-}
-function chatKey(){return htmlState.botId;}
-function chatView(){const bot=currentChatInfo();if(!bot?.id){select('home');return '';}const history=messages[chatKey()]||[];const aiCustom=!isStaticDemo()&&Boolean(state.aiEnabled)&&bot.type==='custom';return `<div class="chat-shell"><div class="chat-head">${avatar(bot.name,bot.index,47)}<div style="flex:1"><h2>${esc(bot.name)}</h2><p>${esc(bot.isTeam?'All specialists · Group conversation':`${bot.group?.name||'Personal bot'} · Dedicated conversation`)}</p></div>${!bot.isTeam?`<button class="btn small" data-action="edit-bot">${icon('settings',14)} Profile</button>`:''}${actionMenu('Conversation actions',menuItem('Copy conversation','copy-chat',bot.id,'copy')+menuItem('Clear conversation','clear-chat',bot.id,'trash')+(bot.isTeam?'':menuItem('Duplicate bot','duplicate-bot',bot.id,'copy')+menuItem(profiles[bot.id]?.pinned?'Unpin bot':'Pin bot','pin-bot',bot.id,'pin')))}</div>${bot.isTeam?`<div class="coordination-strip"><span class="chip purple">${icon('layers',13)} Shared group memory</span><span class="status-caption">Use @Scout, @Writer, or @everyone to route work. Without a mention, the group follows its pipeline. Max 6 handoffs.</span></div>`:''}<div class="chat-space" id="chat-space" role="log" aria-live="polite" aria-label="Conversation">${history.length?history.map(m=>`<div class="message ${m.role==='user'?'user':''}"><div class="message-avatar">${m.role==='user'?'Y':m.role==='system'?'•':esc((m.senderName||bot.name).slice(0,1).toUpperCase())}</div><div class="message-content"><div class="message-speaker">${m.role==='bot'?esc(m.senderName||bot.name):m.role==='system'?'Workflow event':'You'}</div><div class="message-text">${esc(m.text)}</div><div class="message-meta">${m.role==='bot'?`${esc(m.senderName||bot.name)}${m.toBotId?' → '+esc(bot.group?.bots.find(x=>x.id===m.toBotId)?.name||'Next specialist'):''} · Local simulation (not AI)`:m.role==='system'?'Coordination event':'You'} · ${displayDate(m.at)}</div></div></div>`).join(''):`<div class="chat-welcome"><div class="giant" style="background:${shade(bot.index)};color:var(--accent)">${EMOJIS[bot.index%EMOJIS.length]}</div><div class="eyebrow">SPECIALIST CONVERSATION</div><h2>Meet ${esc(bot.name)}</h2><p>${esc(bot.instructions||'A specialized bot, ready for instructions.')}<br><br>${aiCustom?'<b>Connected:</b> This bot runs its instructions through the server AI provider.':"<b>Demo mode:</b> Try the suggested commands. Actual model chat will require a backend."}</p><div class="chat-suggestions">${botSuggestions(bot.name,bot.group?.name).map(s=>`<button class="suggestion" data-action="quick-chat" data-text="${esc(s)}">${esc(s)} ${icon('arrow',12)}</button>`).join('')}</div></div>`}</div><form id="chat-form" class="composer"><div class="composer-box"><textarea name="message" rows="2" placeholder="Message ${esc(bot.name)}…" aria-label="Your message" maxlength="4000" required></textarea><div class="composer-tools"><span class="chat-mode"><span class="dot"></span> ${bot.isTeam?'Agent-to-agent handoff simulation':'Offline command demo'} · No live AI</span><button class="send" type="submit" aria-label="Send message">${icon('arrow',18)}</button></div></div><div class="composer-hint">Enter to send · Shift+Enter for a new line</div></form></div>`;}
-function inspector(){const node=el('inspector');if(htmlState.view!=='chat'){node.classList.remove('open');node.innerHTML='';return;}node.classList.add('open');const b=currentChatInfo();const aiCustom=!isStaticDemo()&&Boolean(state.aiEnabled)&&b?.type==='custom';node.innerHTML=`<div class="meta-overline">AGENT DETAILS</div><div style="display:flex;align-items:center;gap:11px;margin:19px 0">${avatar(b.name,b.index,45)}<div><div class="panel-title">${esc(b.name)}</div><div class="status-caption">${b.isTeam?'Group conversation':'Specialized teammate'}</div></div></div><div class="inspector-card"><h3>Primary responsibility</h3><p>${esc(b.instructions||'No job description set.')}</p></div><div class="inspector-card"><h3>Runtime</h3><div class="inspect-row"><span>Model</span><b>${aiCustom?(state?.aiModel?esc(state.aiModel):'Server AI provider'):'Not connected'}</b></div><div class="inspect-row"><span>Execution</span><b>${aiCustom?'Server provider':'Browser-local'}</b></div><div class="inspect-row"><span>Memory</span><b>Local chat history</b></div><div class="inspect-row"><span>Publishing</span><b>Manual only</b></div></div><div class="inspector-card"><h3>Useful commands</h3>${botSuggestions(b.name,b.group?.name).map(s=>`<button data-action="quick-chat" data-text="${esc(s)}" class="btn wide" style="margin-top:7px;justify-content:flex-start">${icon('arrow',13)} ${esc(s)}</button>`).join('')}</div><div class="note">This is a functional interface prototype. AI reasoning, web search and automated browser tools are not active.</div>`;}
-function render(){if(!state)return;sidebar();topbar();const root=el('main');
-  // One route key drives the transition, scroll reset and focus move, so a
-  // background refresh of the same screen never yanks the user around.
-  const route=`${htmlState.view}/${htmlState.groupId||''}/${htmlState.botId||''}/${htmlState.tab||''}`;const changed=route!==lastRoute;lastRoute=route;
-  root.innerHTML=htmlState.view==='home'?home():htmlState.view==='inbox'?inbox():htmlState.view==='chat'?chatView():group();
-  inspector();toggleScheduleFields();ensureActiveVisible();
-  if(htmlState.view==='chat'){const box=el('chat-space');if(box)box.scrollTop=box.scrollHeight;}
-  else if(changed)scrollTo({top:0,behavior:'auto'});
-  if(changed){root.classList.remove('view-enter');void root.offsetWidth;root.classList.add('view-enter');
-    if(htmlState.view!=='chat'){const h=root.querySelector('h1,h2');if(h){h.setAttribute('tabindex','-1');h.focus({preventScroll:true});}}}}
-function hideModal(){if(el('modal').classList.contains('hidden'))return;htmlState.modal=null;el('modal').classList.add('hidden');el('modal').innerHTML='';restoreFocus();}
-function openModal(type){captureFocus();htmlState.modal=type;htmlState.avatarIndex=0;const g=activeGroup();let content='';if(type==='new-bot'){content=`<div class="modal-top"><div><div class="eyebrow">BUILD YOUR TEAM</div><h2>Create a new bot</h2><p>Give your bot a name, a clear job, and a group. Start chatting with it immediately.</p></div><button class="btn icon-only ghost" data-action="close-modal" aria-label="Close">${icon('x',18)}</button></div><form id="new-bot-form"><span class="form-label">Choose an identity</span><div class="avatar-picker">${EMOJIS.map((a,i)=>`<button type="button" class="avatar-choice ${!i?'selected':''}" data-action="avatar" data-index="${i}" aria-label="Avatar ${i+1}">${a}</button>`).join('')}</div><label class="field"><span class="form-label">Starting template</span><select class="select" id="bot-template" aria-label="Bot template"><option value="blank">Blank bot</option><option value="scout">Scout · Discover sources</option><option value="research">Researcher · Check context</option><option value="writer">Writer · Draft content</option><option value="review">Reviewer · Check quality</option><option value="organize">Coordinator · Route tasks</option></select><small class="help-text">Templates provide editable instructions only. They do not enable real AI on Pages.</small></label><label class="field"><span class="form-label">Bot name</span><input class="input" name="name" placeholder="e.g. Content Strategist" maxlength="80" required autofocus></label><label class="field"><span class="form-label">Bot group</span><select class="select" name="group">${state.groups.map(x=>`<option value="${esc(x.id)}" ${x.id===g?.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></label><label class="field"><span class="form-label">Job / lasting instructions</span><textarea class="textarea" name="instructions" rows="4" placeholder="What does the bot specialize in? What should it never do?" maxlength="3000" required></textarea></label><button class="btn primary wide" type="submit">Create bot and open chat ${icon('arrow',15)}</button></form>`;}
-else if(type==='new-group'){content=`<div class="modal-top"><div><div class="eyebrow">TEAM STRUCTURE</div><h2>Create bot group</h2><p>Organize specialists around one shared outcome.</p></div><button class="btn icon-only ghost" data-action="close-modal" aria-label="Close">${icon('x',18)}</button></div><form id="new-group-form"><label class="field"><span class="form-label">Group name</span><input class="input" name="name" placeholder="e.g. Product Research" maxlength="80" required autofocus></label><label class="field"><span class="form-label">Description</span><textarea class="textarea" name="description" rows="3" placeholder="What is the group responsible for?" maxlength="300"></textarea></label><button class="btn primary wide" type="submit">Create group ${icon('arrow',15)}</button></form>`;}
-else if(type==='edit-bot'){const b=currentChatInfo();content=`<div class="modal-top"><div><div class="eyebrow">BOT PROFILE</div><h2>Edit ${esc(b.name)}</h2><p>Keep lasting instructions separate from one-time chat messages.</p></div><button class="btn icon-only ghost" data-action="close-modal" aria-label="Close">${icon('x',18)}</button></div>${b.isTeam?`<div class="note">The group coordinator is a built-in demo conversation and does not have an editable profile.</div>`:`<form id="edit-bot-form"><label class="field"><span class="form-label">Name</span><input class="input" name="name" value="${esc(b.name)}" maxlength="80" required></label><label class="field"><span class="form-label">Instructions</span><textarea class="textarea" name="instructions" rows="6" maxlength="3000" required>${esc(b.instructions)}</textarea></label><button class="btn primary wide">Save profile</button></form>`}`;}
-else {content=isStaticDemo()?`<div class="modal-top"><div><div class="eyebrow">IMPORTANT LIMITS</div><h2>About the Pages prototype</h2><p>GitHub Pages serves only HTML, CSS and JavaScript. This version keeps data in your browser and uses simple commands for bot replies.</p></div><button class="btn icon-only ghost" data-action="close-modal" aria-label="Close">${icon('x',18)}</button></div><div class="note">Your conversations and drafts are not synchronized across devices. The demo does not connect to Grok, X, OpenAI, or any backend. Do not enter secrets in the chat.</div>`:`<div class="modal-top"><div><div class="eyebrow">CONNECTED SERVER</div><h2>About this build</h2><p>This page is served by the Node dashboard and reads and writes live state through the authenticated <code>/api</code> routes.</p></div><button class="btn icon-only ghost" data-action="close-modal" aria-label="Close">${icon('x',18)}</button></div><div class="note">${state?.aiEnabled?'A server-side AI provider is configured for drafting and custom bots.':"No AI provider is configured, so drafts use labeled templates. Set AI_API_KEY (and AI_BASE_URL) on the server to enable real drafting."} External actions still require your manual approval, and the final Post click is always yours.</div>`;}
-const layer=el('modal');layer.innerHTML=`<div class="modal-card" role="dialog" aria-modal="true" aria-label="${type==='new-bot'?'Create bot':type==='new-group'?'Create group':type==='edit-bot'?'Edit bot':'Demo details'}">${content}</div>`;layer.classList.remove('hidden');requestAnimationFrame(()=>layer.querySelector('input[autofocus]')?.focus());}
-async function sendChat(text){const b=currentChatInfo();if(!b)return;const key=chatKey();const msg=String(text).trim();if(!msg)return;messages[key]??=[];messages[key].push({id:uid(),role:'user',text:msg,at:new Date().toISOString()});saveLocal(CHAT_KEY,messages);
-  if(b.isTeam || (b.group && planHandoffs(b.group,msg).mode==='mention')){
-    const group=b.group;
-    try{
-      // Validate recipients before execution; messages cannot cross group boundaries.
-      const route=planHandoffs(group,msg,{directBotId:b.isTeam?null:undefined});
-      const append=entry=>{messages[key].push(entry);saveLocal(CHAT_KEY,messages);render();};
-      // Refresh state first: the simulator reuses state.drafts to decide which
-      // candidate still needs a draft, so a stale snapshot would re-draft a post
-      // an earlier run already handled.
-      state=await api('/api/state');
-      const run=await simulateGroup({group,message:msg,state,api,makeId:uid,emit:append});
-      const runLog=loadLocal('agent-control-coordination-runs-v1',[]);
-      runLog.unshift({id:run.id,groupId:group.id,mode:route.mode,recipients:run.recipients,status:run.status,trace:run.trace,createdAt:run.createdAt});
-      saveLocal('agent-control-coordination-runs-v1',runLog.slice(0,50));
-      await sync();return;
-    }catch(error){messages[key].push({id:uid(),role:'system',text:`Coordination failed: ${error.message}`,at:new Date().toISOString()});saveLocal(CHAT_KEY,messages);render();return;}
-  }
-  // On the Node build a custom bot can actually execute its instructions through
-  // the server provider. The built-in specialists and the static demo keep the
-  // deterministic command behavior instead.
-  if(!isStaticDemo()&&state.aiEnabled&&b.type==='custom'){
-    try{const run=await api('/api/bots/run','POST',{botId:b.id,input:msg});
-      messages[key].push({id:uid(),role:'bot',text:run.output||'The bot returned no output.',at:new Date().toISOString()});
-    }catch(error){messages[key].push({id:uid(),role:'bot',text:`I couldn't run that: ${error.message}`,at:new Date().toISOString()});}
-    saveLocal(CHAT_KEY,messages);await sync();return;
-  }
-  const cmd=classifyMessage(msg);let result='';try{if(cmd.intent==='status')result=`Here is the current workspace snapshot:\n\n${statusSummary(state)}\n\nThis is a local state summary, not a live scan.`;
-else if(cmd.intent==='approvals')result=`${state.drafts.filter(d=>d.status==='pending').length} draft(s) are waiting in the approval inbox. Open X-engage → Approvals to review or edit them. Nothing is published automatically.`;
-else if(cmd.intent==='discover')result=`Discovery currently contains ${state.candidates.length} candidate(s). ${isStaticDemo()?'This demo cannot scroll or search a live X feed.':'This server does not crawl X; capture posts with the browser extension. '}Open X-engage → Discovery to add a post${isStaticDemo()?', or use the bundled sample posts.':'.'}`;
-else if(cmd.intent==='draft'){const c=state.candidates.find(c=>!state.drafts.some(d=>d.candidateId===c.id))||state.candidates[0];if(!c)result='There are no candidates yet. Open X-engage → Discovery and add a post or load sample data first.';else {const d=await api(`/api/candidates/${c.id}/process`,'POST',{});result=`I created a template draft for ${c.author} (score: ${d.score}/100). It is now in X-engage → Approvals.\n\nThis is a template, not AI-generated writing; check it before approval.`;}}
-else if(cmd.intent==='create-bot'){if(cmd.name&&cmd.name.length>=2&&cmd.name.length<60){const g=b.group||activeGroup();const created=await api(`/api/groups/${g.id}/bots`,'POST',{name:cmd.name,instructions:`Custom bot ${cmd.name}. Update this profile with a clear job, permitted tools and approval boundaries.`});result=`Created ${created.name} in ${g.name}. Select it in the sidebar to start its conversation. Edit its profile to define a real job.`;}else result='Choose “Create new bot” in the sidebar to give the bot a name, a group, and instructions.';}
-else if(cmd.intent==='schedules')result=`Current draft delay: ${state.settings.minDelay}–${state.settings.maxDelay} minutes. Change the range under X-engage → Settings. ${isStaticDemo()?'The Pages demo checks timers only while the site is running; there is no always-on worker.':'The server scheduler runs while the Node process is up.'}`;
-else result=`I'm ${b.name}. My assigned job is: ${b.instructions||'Not configured yet.'}\n\n${isStaticDemo()?'This is an offline command demo, not a connected AI model.':'Direct chat uses built-in commands; group runs use the server AI provider when a key is configured.'} Try “Show status”, “Draft a reply”, or “Show pending approvals”.`;
-}catch(error){result=`I couldn't complete that local command: ${error.message}`;}
-messages[key].push({id:uid(),role:'bot',text:result,at:new Date().toISOString()});saveLocal(CHAT_KEY,messages);await sync();}
-async function copyValue(text,successMessage){if(!navigator.clipboard?.writeText)throw Error('Clipboard permission unavailable.');await navigator.clipboard.writeText(text);toast(successMessage);}
-/** Home prompt: open the first group chat and hand the message to the group. */
-async function startGroupChat(text){const message=String(text||'').trim();if(!message)return;const g=state.groups[0];if(!g){toast('Create a bot group first.',true);return;}select('chat',g.id,`team-${g.id}`);await sendChat(message);}
-function closeActionMenus(except=null){document.querySelectorAll('details.action-menu[open]').forEach(node=>{if(node!==except)node.open=false;});}
-async function perform(action,button){const id=button.dataset.id;try{switch(action){case 'command-open':openCommandPalette();break;case 'command-dismiss':closeCommandPalette();break;case 'command-choice':chooseCommand(Number(button.dataset.index));break;case 'home':select('home');break;case 'inbox':select('inbox');break;case 'open-group':select('group',id);break;case 'group-tab':htmlState.tab=button.dataset.tab;select('group',htmlState.groupId,null,htmlState.tab);break;case 'open-chat':select('chat',botGroup(id)?.id,id);break;case 'team-chat':{const target=id&&state.groups.some(g=>g.id===id)?id:htmlState.groupId;select('chat',target,`team-${target}`);break;}case 'new-bot':openModal('new-bot');break;case 'new-group':openModal('new-group');break;case 'edit-bot':openModal('edit-bot');break;case 'edit-card-bot':{const g=botGroup(id);if(!g)throw Error('Bot not found');select('chat',g.id,id);openModal('edit-bot');break;}
-case 'add-bot-to-group':htmlState.groupId=id;openModal('new-bot');break;
-case 'duplicate-bot':{const g=botGroup(id),base=g?.bots.find(x=>x.id===id);if(!base)throw Error('Bot not found');const p=profile(base);const result=await api(`/api/groups/${g.id}/bots`,'POST',{name:`${p.name} copy`.slice(0,80),instructions:p.instructions||base.instructions});profiles[result.id]={avatarIndex:profiles[id]?.avatarIndex??0};saveLocal(META_KEY,profiles);await sync();select('chat',g.id,result.id);toast('Bot duplicated. Its chat starts empty.');break;}
-case 'copy-bot-instructions':{const b=activeBot()?.id===id?activeBot():state.groups.flatMap(g=>g.bots).map(profile).find(b=>b.id===id);if(!b)throw Error('Bot not found');await copyValue(b.instructions||'','Instructions copied');break;}
-case 'pin-bot':{if(!botGroup(id))throw Error('Bot not found');profiles[id]={...(profiles[id]||{}),pinned:!profiles[id]?.pinned};saveLocal(META_KEY,profiles);render();toast(profiles[id].pinned?'Bot pinned to top':'Bot unpinned');break;}
-case 'copy-chat':{const rows=messages[id]||[];if(!rows.length)throw Error('Conversation is empty');const bot=htmlState.botId===id?currentChatInfo():null;const transcript=rows.map(m=>`[${m.at||''}] ${m.role==='user'?'You':(m.senderName||bot?.name||m.role)}: ${m.text}`).join('\n\n');await copyValue(transcript,'Conversation copied');break;}
-case 'clear-chat':{if(!messages[id]?.length){toast('Conversation is already empty');break;}if(!window.confirm('Clear this conversation on this browser? This cannot be undone.'))break;delete messages[id];saveLocal(CHAT_KEY,messages);render();toast('Conversation cleared from this browser');break;}
-case 'reset-candidate-filters':candidateQuery='';setPreference('candidateStatus','all');setPreference('candidateSort','newest');render();break;
-case 'reset-draft-filters':setPreference('draftStatus','active');setPreference('draftSort','newest');render();break;case 'demo-info':openModal('demo-info');break;case 'logout':{await logout();break;}case 'close-modal':hideModal();break;case 'toggle-menu':htmlState.sidebarOpen=!htmlState.sidebarOpen;sidebar();topbar();break;case 'avatar':htmlState.avatarIndex=Number(button.dataset.index);document.querySelectorAll('.avatar-choice').forEach(b=>b.classList.toggle('selected',b.dataset.index===button.dataset.index));break;case 'load-samples':{const r=await api('/api/demo/seed','POST',{});toast(`Loaded ${r.added} sample post(s).`);await sync();break;}
-case 'reset-demo':{if(!window.confirm('Remove all sample posts and their drafts?'))break;await api('/api/reset-demo','POST',{});toast('Removed sample posts.');await sync();break;}
-case 'draft-candidate':{const d=await api(`/api/candidates/${id}/process`,'POST',{});toast(`Template draft created (${d.score}/100).`);await sync();break;}
-case 'approve-draft':case 'reject-draft':case 'ready-draft':case 'posted-draft':{if(action==='posted-draft'&&!window.confirm('Confirm that you personally published this post on X?'))break;const op=({'approve-draft':'approve','reject-draft':'reject','ready-draft':'ready','posted-draft':'posted'})[action];await api(`/api/drafts/${id}/${op}`,'POST',{});toast(op==='approve'?'Approved. Manual posting handoff scheduled.':`Draft ${op}.`);await sync();break;}
-case 'edit-draft':htmlState.editDraft=id;render();break;case 'cancel-edit':htmlState.editDraft=null;render();break;
-case 'rewrite-draft':{const notes=window.prompt('Optional direction for the rewrite:');if(notes===null)break;await api(`/api/drafts/${id}/rewrite`,'POST',{direction:notes||''});toast('Draft rewritten.');await sync();break;}
-case 'copy-draft':{const d=state.drafts.find(x=>x.id===id);if(!d)throw Error('Draft not found');try{await navigator.clipboard.writeText(d.text);toast('Draft copied. Post manually on X.');}catch{toast('Clipboard unavailable. Copy the draft manually.',true);}break;}
-case 'remove-schedule':case 'remove-task':if(!window.confirm('Remove this reminder?'))break;await api(`/api/tasks/${id}`,'DELETE',{});toast('Reminder removed');await sync();break;
-case 'quick-chat':await sendChat(button.dataset.text);break;
-case 'home-ask':await startGroupChat(button.dataset.text);break;
-default:break;}}catch(err){toast(err.message||'Operation failed',true);}}
-function values(form){return Object.fromEntries(new FormData(form).entries());}
-/** Grow the composer to fit its content, capped like Grok's input. */
-function autoGrow(node){if(!node)return;node.style.height='auto';node.style.height=Math.min(node.scrollHeight,190)+'px';}
-document.body.addEventListener('click',ev=>{if(!ev.target.closest('details.action-menu'))closeActionMenus();else if(ev.target.closest('details.action-menu > summary'))closeActionMenus(ev.target.closest('details.action-menu'));else if(ev.target.closest('.dropdown-panel button'))closeActionMenus();const btn=ev.target.closest('[data-action]');if(btn){ev.preventDefault();perform(btn.dataset.action,btn);}else if(ev.target.id==='modal')hideModal();else if(ev.target.id==='command')closeCommandPalette();else if(ev.target.id==='mobile-backdrop'){htmlState.sidebarOpen=false;render();}});
-document.body.addEventListener('input',ev=>{if(ev.target.id==='command-input')updateCommandResults(ev.target.value);if(ev.target.id==='candidate-search'){candidateQuery=ev.target.value;updateCandidateList();}if(ev.target.matches('#chat-form textarea'))autoGrow(ev.target);});
-document.body.addEventListener('change',ev=>{const keys={'candidate-status':'candidateStatus','candidate-sort':'candidateSort','draft-status':'draftStatus','draft-sort':'draftSort'};const key=keys[ev.target.id];if(key){setPreference(key,ev.target.value);if(key.startsWith('candidate'))updateCandidateList();else updateApprovalList();}if(ev.target.id==='mobile-group-tab')select('group',htmlState.groupId,null,ev.target.value);if(ev.target.id==='bot-template'){const t=BOT_TEMPLATES[ev.target.value]||BOT_TEMPLATES.blank;const form=el('new-bot-form');if(form){form.elements.namedItem('name').value=t.name;form.elements.namedItem('instructions').value=t.instructions;}}if(ev.target.matches('#schedule-form [name=kind]'))toggleScheduleFields();});
-function toggleScheduleFields(){const form=el('schedule-form');if(!form)return;const once=form.elements.namedItem('kind').value==='once';const frequency=form.elements.namedItem('intervalMinutes'),date=form.elements.namedItem('nextAt');frequency.disabled=once;date.disabled=!once;date.required=once;frequency.closest('label').classList.toggle('field-disabled',once);date.closest('label').classList.toggle('field-disabled',!once);}
+actions.logout = async () => {
+  try { await api('/api/logout', 'POST', {}); } catch { /* Sign out regardless. */ }
+  lockScreen('Signed out.');
+};
+forms['login-form'] = async (form, f) => {
+  try { await api('/api/login', 'POST', f); hideLogin(); await boot(); }
+  catch (error) { const node = el('login-error'); if (node) node.textContent = error.message; }
+};
 
-// Keep Tab inside an open dialog. The dialogs declare aria-modal="true", but
-// without this the browser still moves focus into the background content that the
-// dialog visually covers, which is the exact case aria-modal is meant to prevent.
-const FOCUSABLE='a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
-function trapTab(ev){
-  if(ev.key!=='Tab')return;
-  // All three layers declare aria-modal, including the standalone sign-in box.
-  const login=el('login-layer');
-  const layer=!el('modal').classList.contains('hidden')?el('modal'):(!el('command').classList.contains('hidden')?el('command'):(login&&!login.classList.contains('hidden')?login:null));
-  if(!layer)return;
-  const nodes=[...layer.querySelectorAll(FOCUSABLE)].filter(n=>n.offsetParent!==null);
-  if(!nodes.length)return;
-  const first=nodes[0],last=nodes[nodes.length-1],active=document.activeElement;
-  if(ev.shiftKey&&(active===first||!layer.contains(active))){ev.preventDefault();last.focus();}
-  else if(!ev.shiftKey&&(active===last||!layer.contains(active))){ev.preventDefault();first.focus();}
-}
-document.body.addEventListener('keydown',ev=>{
+const fail = error => toast(error?.message || 'That did not work.', true);
+const autoGrow = node => { node.style.height = 'auto'; node.style.height = `${Math.min(node.scrollHeight, 180)}px`; };
+
+document.body.addEventListener('click', ev => {
+  const button = ev.target.closest('[data-action]');
+  if (button) {
+    if (button.tagName === 'SELECT' || button.tagName === 'INPUT') return; // handled on change
+    ev.preventDefault();
+    const run = actions[button.dataset.action];
+    // One request per press: a second click while it runs is ignored.
+    if (!run || button.dataset.busy) return;
+    button.dataset.busy = '1';
+    Promise.resolve().then(() => run(button)).catch(fail).finally(() => { delete button.dataset.busy; });
+  } else if (ev.target.id === 'modal') closeSheet();
+  else if (ev.target.id === 'command') closeCommandPalette();
+});
+document.body.addEventListener('submit', ev => {
+  const form = ev.target, key = forms[form.id] ? form.id : ['.edit-form', '.evidence-form'].find(k => form.classList.contains(k.slice(1)));
+  if (!key) return;
+  ev.preventDefault();
+  if (form.dataset.busy) return;
+  const values = Object.fromEntries(new FormData(form).entries()), submits = [...form.querySelectorAll('[type=submit]')];
+  form.dataset.busy = '1'; submits.forEach(b => { b.disabled = true; });
+  Promise.resolve().then(() => forms[key](form, values)).catch(fail).finally(() => { delete form.dataset.busy; submits.forEach(b => { b.disabled = false; }); });
+});
+document.body.addEventListener('change', ev => { Promise.resolve().then(() => onControlChange(ev.target)).catch(fail); });
+document.body.addEventListener('input', ev => {
+  if (ev.target.id === 'command-input') return updateCommandResults(ev.target.value);
+  if (ev.target.matches('.composer textarea')) return autoGrow(ev.target);
+  onControlInput(ev.target);
+});
+document.body.addEventListener('keydown', ev => {
   trapTab(ev);
-  if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='k'){ev.preventDefault();el('command').classList.contains('hidden')?openCommandPalette():closeCommandPalette();return;}
-  if(ev.key==='Escape'){const menus=[...document.querySelectorAll('details.action-menu[open]')];if(menus.length){ev.preventDefault();closeActionMenus();menus[menus.length-1].querySelector('summary')?.focus();return;}
-    if(!el('command').classList.contains('hidden')){ev.preventDefault();closeCommandPalette();return;}
-    if(!el('modal').classList.contains('hidden')){ev.preventDefault();hideModal();return;}
-    if(htmlState.sidebarOpen){htmlState.sidebarOpen=false;sidebar();topbar();}
-  }
-  if(ev.target.id==='command-input'){
-    if(ev.key==='Enter'){ev.preventDefault();chooseCommand(Number(el('command-results')?.querySelector('.selected')?.dataset.index??0));}
-    else if(['ArrowDown','ArrowUp'].includes(ev.key)){
-      ev.preventDefault();const nodes=[...el('command-results').querySelectorAll('.command-item')];if(!nodes.length)return;
-      const index=nodes.findIndex(n=>n.classList.contains('selected'));const delta=ev.key==='ArrowDown'?1:-1;
-      const next=nodes[(index+delta+nodes.length)%nodes.length];nodes.forEach(n=>{n.classList.remove('selected');n.setAttribute('aria-selected','false');});next.classList.add('selected');next.setAttribute('aria-selected','true');next.scrollIntoView({block:'nearest'});
-    }
+  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') { ev.preventDefault(); paletteOpen() ? closeCommandPalette() : openCommandPalette(); return; }
+  if (ev.key === 'Escape') {
+    if (paletteOpen()) { ev.preventDefault(); closeCommandPalette(); }
+    else if (sheetOpen()) { ev.preventDefault(); closeSheet(); }
+    else if (store.route.info) { ev.preventDefault(); back({chat: store.route.chat}); }
     return;
   }
-  if(ev.key==='Enter'&&!ev.shiftKey&&ev.target.matches('#chat-form textarea')){ev.preventDefault();ev.target.closest('form').requestSubmit();}
+  if (ev.target.id === 'command-input') {
+    if (ev.key === 'Enter') { ev.preventDefault(); chooseCommand(Number(el('command-results')?.querySelector('.selected')?.dataset.index ?? 0)); }
+    else if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') { ev.preventDefault(); moveCommand(ev.key === 'ArrowDown' ? 1 : -1); }
+    return;
+  }
+  // Enter sends, Shift+Enter makes a new line.
+  // keyCode 229: Safari reports the Enter that commits an IME candidate without isComposing.
+  if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing && ev.keyCode !== 229 && ev.target.matches('.composer textarea')) { ev.preventDefault(); if (ev.target.value.trim()) ev.target.form.requestSubmit(); }
 });
-document.body.addEventListener('submit',async ev=>{const form=ev.target;if(!form?.id&&!form?.classList.contains('edit-form'))return;ev.preventDefault();const f=values(form);try{switch(form.id){case 'login-form':{await submitLogin(form);break;}case 'new-bot-form':{const b=await api(`/api/groups/${f.group}/bots`,'POST',{name:f.name,instructions:f.instructions});profiles[b.id]={avatarIndex:htmlState.avatarIndex};saveLocal(META_KEY,profiles);hideModal();await sync();select('chat',f.group,b.id);toast(`${b.name} created.`);break;}
-case 'new-group-form':{const g=await api('/api/groups','POST',{name:f.name,description:f.description});hideModal();await sync();select('group',g.id);toast('Group created. Add a bot to get started.');break;}
-case 'edit-bot-form':{const b=activeBot();if(!b)throw Error('Bot not found');
-    // Persist the lasting profile through the API so it survives a reload and is
-    // shared across devices. Only cosmetic UI state (avatar) stays in localStorage:
-    // mirroring name/instructions there would shadow the server value forever via
-    // profile(), so an edit made on another device could never appear here.
-    const saved=await api(`/api/groups/${botGroup(b.id)?.id||htmlState.groupId}/bots/${b.id}`,'PATCH',{name:f.name,instructions:f.instructions});
-    saveLocal(META_KEY,profiles);hideModal();await sync();render();toast('Bot profile saved.');break;}
-case 'candidate-form':{const r=await api('/api/candidates','POST',f);form.reset();await sync();toast(r?.duplicate?'That post is already in Discovery.':'Post added to Discovery.');break;}
-case 'settings-form':await api('/api/settings','PATCH',{topics:f.topics.split(',').map(s=>s.trim()).filter(Boolean),style:f.style,opinions:f.opinions,minDelay:Number(f.minDelay),maxDelay:Number(f.maxDelay)});await sync();toast('Preferences saved.');break;
-case 'schedule-form':{const entry={label:f.label,kind:f.kind,intervalMinutes:Number(f.intervalMinutes),nextAt:f.nextAt?new Date(f.nextAt).toISOString():undefined};await api('/api/schedules','POST',entry);await sync();toast('Local reminder added.');break;}
-case 'chat-form':{const input=form.querySelector('textarea');const text=input.value;input.value='';await sendChat(text);break;}
-case 'home-prompt':await startGroupChat(f.prompt);break;
-default:if(form.classList.contains('edit-form')){await api(`/api/drafts/${form.dataset.id}`,'PATCH',{text:f.text});htmlState.editDraft=null;await sync();toast('Draft updated. Previous approval cleared.');}break;}}catch(err){toast(err.message||'Something went wrong',true);}});
-/** Apply a hash route (#home, #inbox, #chat/<id>, #group/<id>/<tab>). Shared by
- * the initial load and by history navigation so Back/Forward actually work. */
-function applyRoute(hash){if(!state)return;const parts=String(hash||'').split('/');
-  if(parts[0]==='chat'&&parts[1]&&state.groups.some(g=>`team-${g.id}`===parts[1]||g.bots.some(b=>b.id===parts[1]))){const id=parts[1];htmlState.view='chat';htmlState.botId=id;htmlState.groupId=id.startsWith('team-')?state.groups.find(g=>`team-${g.id}`===id).id:botGroup(id)?.id;}
-  else if(parts[0]==='group'&&state.groups.some(g=>g.id===parts[1])){htmlState.view='group';htmlState.groupId=parts[1];htmlState.tab=['overview','discovery','approvals','schedules','activity','settings'].includes(parts[2])?parts[2]:'overview';}
-  else if(parts[0]==='inbox'){htmlState.view='inbox';}
-  else {htmlState.view='home';}
-  render();}
-window.addEventListener('popstate',()=>{htmlState.sidebarOpen=false;htmlState.editDraft=null;applyRoute(decodeURIComponent(location.hash.replace(/^#/,'')));});
-async function initialize(){try{state=await api('/api/state');if(isStaticDemo()&&!localStorage.getItem('ac-v2-welcome')){await api('/api/demo/seed','POST',{});localStorage.setItem('ac-v2-welcome','1');state=await api('/api/state');}applyRoute(decodeURIComponent(location.hash.replace(/^#/,'')));clearTimeout(syncTimer);syncTimer=setInterval(async()=>{if(state){try{state=await api('/api/state');
-      // A background refresh must never wipe what the user is typing. Skip the
-      // re-render while a form control has focus or a dialog/palette is open;
-      // state is still refreshed, so the next render is current.
-      const active=document.activeElement,editing=active&&/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName),overlay=htmlState.modal||!el('command').classList.contains('hidden');
-      if(htmlState.view!=='chat'&&!editing&&!overlay)render();
-    }catch(e){if(e.status===401){clearInterval(syncTimer);syncTimer=null;showLogin('Your session expired. Sign in again.');}}}},30000);}catch(e){if(e.status===401)showLogin(e.message);else el('main').innerHTML=`<div class="card card-pad"><h2>Could not start the ${isStaticDemo()?'local demo':'dashboard'}</h2><p>${esc(e.message)}</p><p>${isStaticDemo()?'Enable browser local storage and reload. If the page was cached from an older deploy, hard-refresh once.':'Check that the Node server is running and reload.'}</p></div>`;}}
-function showLogin(message=''){let layer=el('login-layer');const visible=Boolean(layer)&&!layer.classList.contains('hidden');
-  // A repeated session-expiry notice must not rebuild the dialog: doing so would
-  // clear a password the user is mid-way through typing.
-  if(!layer){layer=document.createElement('div');layer.id='login-layer';layer.className='modal-layer';document.body.appendChild(layer);}
-  if(visible){const err=el('login-error');if(err)err.textContent=message;return;}
-  layer.innerHTML=`<div class="modal-card" role="dialog" aria-modal="true" aria-label="Sign in"><div class="modal-top"><div><div class="eyebrow">PRIVATE WORKSPACE</div><h2>Sign in</h2><p>Enter the dashboard password printed by the server.</p></div></div><form id="login-form"><label class="field"><span class="form-label">Dashboard password</span><input class="input" type="password" name="password" autocomplete="current-password" required autofocus></label><button class="btn primary wide" type="submit">Unlock dashboard</button><p class="note" id="login-error">${esc(message)}</p></form></div>`;layer.classList.remove('hidden');requestAnimationFrame(()=>layer.querySelector('input[autofocus]')?.focus());}
-async function logout(){clearTimeout(syncTimer);try{await api('/api/logout','POST',{});}catch{/* Sign out regardless. */}state=null;showLogin('Signed out.');}
-async function submitLogin(form){try{await api('/api/login','POST',values(form));el('login-layer')?.classList.add('hidden');await initialize();}catch(error){const node=el('login-error');if(node)node.textContent=error.message;}}
-initialize();
+window.addEventListener('popstate', () => { popped(); if (!store.state) return; closeSheet(); closeCommandPalette(); const next = hashRoute(); if (next.chat !== store.route.chat) { store.editDraft = null; store.editText = null; } store.route = next; changed('route'); });
+window.addEventListener('resize', () => { if (store.state) setInert(); });
+// `toggle` does not bubble, so listen in the capture phase to remember open source panels.
+document.addEventListener('toggle', ev => { const id = ev.target.dataset?.evidence; if (id) ev.target.open ? store.openEvidence.add(id) : store.openEvidence.delete(id); }, true);
+
+applyTheme(); watchSystemTheme(); bringBotsToLife();
+boot();

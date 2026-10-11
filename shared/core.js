@@ -84,7 +84,7 @@ export function activity(state,type,message,meta={}) {
  * Pages <meta http-equiv> tag. Both copies must stay byte-identical;
  * tests/security-headers.test.js asserts they match, so editing one without the
  * other fails the build instead of silently weakening the demo. */
-export const CSP="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+export const CSP="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 /** The sample posts the demo seeds. The Node `/api/demo/seed` route and the
  * browser-local transport both load from here, so the two demos cannot drift
  * into different fixtures. */

@@ -8,10 +8,11 @@
  * Keeping transitions here is the single source of truth for the draft
  * lifecycle: candidate -> draft -> approved/scheduled -> ready -> posted.
  */
-import {activity,candidateInput,cleanText,scheduleApproval} from './core.js?v=48a317fe1c';
-import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js?v=48a317fe1c';
-import {evidenceSummary,evidenceForDraft,seedCandidateEvidence} from './evidence.js?v=48a317fe1c';
-import * as contracts from './contracts.js?v=48a317fe1c';
+import {activity,candidateInput,cleanText,scheduleApproval} from './core.js?v=f6bd5ef1e8';
+import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js?v=f6bd5ef1e8';
+import {evidenceSummary,evidenceForDraft,seedCandidateEvidence} from './evidence.js?v=f6bd5ef1e8';
+import {normalizeRetention} from './retention.js?v=f6bd5ef1e8';
+import * as contracts from './contracts.js?v=f6bd5ef1e8';
 
 export const SCHEMA_VERSION = 3;
 
@@ -81,6 +82,7 @@ export function updateSettings(state, body) {
     state.settings.minDelay = a;
     state.settings.maxDelay = c;
   }
+  if (body.retention !== undefined) state.settings.retention = normalizeRetention(body.retention);
   activity(state, 'settings', 'Updated user preferences.');
   return state.settings;
 }

@@ -2,17 +2,21 @@
 
 A local-first dashboard for creating bot groups, reviewing AI-assisted drafts, and coordinating human-approved workflows. **X-engage is the first demo group.** It does not use an X developer API key, automatically crawl X, or automatically publish to X.
 
-## Interface: a Grok-style monochrome workspace
+## Interface: a chat-first, messenger-style workspace
 
-The whole interface was rebuilt around a single dark design system: black surfaces, one white accent, generous radii, and a chat-first layout. The Node server and the GitHub Pages demo render the exact same UI from `shared/`.
+The interface is organized like a messenger. The Node server and the GitHub Pages demo render the exact same UI from `shared/`, styled by one stylesheet (`shared/app.css`) that uses system fonts only.
 
-- **Chat-first home.** A centered intent prompt starts a group run ("Ask your group to research, draft or review something…"), with quick-start chips and the workspace snapshot below it.
-- **Grok-style conversations.** Bot messages are plain text next to an identity chip; your messages are right-aligned bubbles; the composer is a rounded pill that grows with the text and keeps the send button inside it.
-- **Overflow menus and filters.** Contextual action menus, discovery search/sort/filter, and approval filters all sit on the same surface tokens.
-- **Command palette:** press **Ctrl+K** (Windows/Linux) or **⌘K** (macOS), search bots, groups or pages, use arrow keys and Enter to navigate, and Escape to close. There is also a Search entry in the sidebar and a search control in the top bar.
-- **Accessibility.** Visible `:focus-visible` rings on every control, focus returned to the trigger when a dialog closes, a focus trap inside modals and the palette, `role="log"` live regions for conversations, and a `prefers-reduced-motion` path that removes every transition.
-- Small-screen layout, mobile off-canvas navigation, and reduced-motion preferences are validated in a headless browser.
-- Tests: `tests/ui-polish.test.js` (Node), `tests/polish_smoke.py` and `tests/usability_smoke.py` (optional Playwright browser validation).
+- **Three panes.** A chat list, the open thread, and an info panel. On phones one pane shows at a time.
+- **Chat list.** Every group chat and every bot. The search box filters chats. The filters are All, Needs you, Groups, and Bots. The **+** button opens **New chat** (a new bot or a new group). The **…** button opens **You**: notifications, admin pages, about, and sign out.
+- **X-engage workspace in the chat.** The old workspace tabs now sit in the X-engage chat's info panel (tap the chat header): Drafts (Waiting on you), Posts found, Reminders, Runs, and Voice and timing. There is no Overview tab.
+- **Drafts in the thread.** Posts and drafts appear as messages in the X-engage thread. A draft is a card you answer in place: **Approve**, **Edit**, **Skip**, or **Rewrite**. After approval the card offers **Ready now**, **Copy text**, **Open post**, and **I posted it**. An amber "N need(s) you" pill in the chat header opens the drafts waiting on you.
+- **Composer + sheet.** The **+** button in the composer opens **Share a post**, **Set a reminder**, **Load sample posts**, and **Add a bot**.
+- **In-app sheets.** Confirmations and prompts appear as sheets inside the app, not as native browser dialogs.
+- **Colour themes:** a clean light theme and a soft warm-grey dark theme. The app follows your system setting; to pin one, open **You** and choose it under Colours. Each bot has its own face and pastel colour, used for its bubbles too. The choice is saved in this browser.
+- **Quick navigation:** press **Ctrl+K** (Windows/Linux) or **⌘K** (macOS), or choose **You → Jump to anything**. Search chats and pages, use arrow keys and Enter to navigate, and Escape to close.
+- **Accessibility.** Visible `:focus-visible` rings on every control, focus returned to the trigger when a sheet closes, a focus trap inside sheets and quick navigation, `role="log"` live regions for conversations, and a `prefers-reduced-motion` path that removes every transition.
+- Small-screen layout and reduced-motion preferences are validated in a headless browser.
+- Tests: `tests/ui-model.test.js` and `tests/ui-polish.test.js` (Node), `tests/polish_smoke.py` and `tests/usability_smoke.py` (optional Playwright browser validation).
 
 The Pages version remains **a browser-local, non-AI simulation**. The existing Node API is unchanged. Browser-local data and conversations are not synchronized between devices. Do not enter secrets into the public Pages demo.
 
@@ -21,18 +25,19 @@ The Pages version remains **a browser-local, non-AI simulation**. The existing N
 **Group chats now route tasks between specialist bots.** You can mention `@Writer`, `@Reviewer`, or `@everyone` to select recipients. Without an explicit mention, X-engage uses Scout → Ranker → Researcher → Writer → Reviewer. Every result is attached to the bot identity, handed to the next bot, and shown in the shared conversation. Human review is required before any external action.
 
 - **GitHub Pages:** Deterministic, browser-local coordination demonstration. Handoffs produce distinct message records, pass task context, and can create an **unapproved template draft**. No real AI is run on Pages.
-- **Node API:** Persistent run coordination for real, *text-only* model calls when a **server-side** AI provider is configured (`AI_API_KEY` + `AI_BASE_URL`; any OpenAI-compatible endpoint, including FreeLLMAPI, OpenRouter, Groq, a local Ollama/vLLM, or OpenAI itself). `POST /api/groups/:id/chat` queues an authenticated run; `GET /api/groups/:id/chat` returns messages and execution traces. Each run is limited to six steps, with bounded context and group isolation. Model outputs never receive browser or publication tools.
-- The platform does **not** yet have the autonomous, cloud-hosted multi-agent capabilities of Grok Bot or OpenAI Dots. See [`docs/COORDINATION.md`](docs/COORDINATION.md) for the precise supported behavior, security boundaries, and API contract.
+- **Node API:** Real, *text-only* multi-bot execution. Messages you send in a group chat run on the server orchestrator: each specialist is called with the accumulated context and hands off to the next, and every step is recorded as a run with a full trace. Enable **"Approve between steps"** to gate each handoff behind your approval. Configure a **server-side** AI provider (`AI_API_KEY` + `AI_BASE_URL`; any OpenAI-compatible endpoint, including FreeLLMAPI, OpenRouter, Groq, a local Ollama/vLLM, or OpenAI itself). Each run is limited to six steps, with bounded context and group isolation. Model outputs never receive browser or publication tools.
+- **Run timeline & admin.** The **Runs** section of a group's info panel (tap the chat header) shows every run with per-step traces, failures and a Retry action. Admins reach **Team & access** (users/roles/sessions), **Local agents** (pairing/permissions), and **Data & security** (credential vault, retention, encrypted backups) from **You**, where notifications are also listed.
+- The platform is **not** a cloud-hosted autonomous agent swarm; it runs where you run it and stops for human approval. See [`docs/COORDINATION.md`](docs/COORDINATION.md) for the exact behavior, security boundaries, and API contract.
 
-## GitHub Pages: redesigned bot-first UI
+## GitHub Pages: chat-first UI
 
 Visit **https://harshit-sehgal.github.io/Agent-Control/** after the Pages workflow completes. The browser-only UI now includes:
 
-- A chat-first roster of named bots with separate, persistent browser-local conversations.
+- A chat list of named bots and groups, with separate, persistent browser-local conversations.
 - Create bot, create group, and edit lasting bot instructions in the interface.
-- X-engage group chat and an X-engage workspace with Overview, Discovery, Approvals, Schedules, Activity, and Settings.
-- Add post candidates, create template drafts, edit and approve revisions, and prepare manual X posting handoffs.
-- Mobile-friendly navigation and a calmer, darker interface.
+- X-engage group chat, with drafts and posts shown in the thread and its workspace sections (Drafts, Posts found, Reminders, Runs, Voice and timing) in the chat info panel.
+- Share post candidates, create template drafts, edit and approve revisions, and prepare manual X posting handoffs.
+- A phone layout that shows one pane at a time.
 
 **Demo limitations:** Chat replies are deterministic local commands, not generated by an AI model. GitHub Pages has no server-side worker, live X integrations, secure key storage, push notifications, or cross-device sync. Never paste private account credentials or API keys into this public demo. The separate Node application still supports optional real AI drafting when deployed locally with a server-side provider key.
 
@@ -41,16 +46,15 @@ Visit **https://harshit-sehgal.github.io/Agent-Control/** after the Pages workfl
 
 The static Pages dashboard includes functional navigation controls (not real AI execution):
 
-- **Bot action dropdowns** on cards and in chat: open, edit, duplicate, pin/unpin, and copy instructions. Duplication creates a new profile with its own empty conversation.
-- **Group action dropdowns**: open workspace, open group chat, or add a specialist.
+- **Bot profile actions** in the bot's info panel: edit profile, pin to top or unpin, and duplicate. Duplication creates a new profile with its own empty conversation.
+- **Group info actions**: add a bot, copy the conversation, or clear the conversation. The group info panel also holds the "Approve between steps" toggle.
 - **Create Bot templates** for Scout, Researcher, Writer, Reviewer, and Coordinator. Templates fill **editable instructions**; they do not connect to an AI provider.
-- **Discovery search, status filter, and sorting** (newest, oldest, best/worst score). Search matches author, topic, post text, or the source URL, so pasting a captured post link finds it. Filtering does not modify stored candidate records.
-- **Approval status and sort controls** for pending, scheduled, ready, posted, rejected, and all drafts.
-- **Conversation dropdown** to copy or clear chat. Clearing chat requires confirmation and affects only the current browser.
-- **Responsive group section dropdown** on phones, where the desktop tab strip is hidden.
-- **Conditional schedule fields:** exact-time reminders require a timestamp; interval reminders require an interval.
+- **Posts found search, status filter, and sorting** (newest, oldest, best/worst score), in the X-engage chat info panel. Search matches author, topic, post text, or the source URL, so pasting a captured post link finds it. Filtering does not modify stored candidate records.
+- **Drafts status and sort controls** in the X-engage chat info panel, for To decide, Scheduled, Ready to post, Posted, Skipped, and Everything drafts.
+- **Clear chat** from group info. Clearing a conversation asks for confirmation in a sheet and affects only the current browser.
+- **Conditional reminder fields** in the New reminder sheet: exact-time reminders require a timestamp; interval reminders require an interval.
 - **Persisted UI preferences:** sort and filter options remain in browser local storage across reloads.
-- **Confirmation prompts** before marking a draft as posted, deleting a reminder, or clearing a conversation.
+- **Confirmation sheets** before marking a draft as posted, removing a reminder, or clearing a conversation.
 
 Use `npm test` for Node unit tests. For a local Chromium UI smoke test, install Python Playwright and Chromium, then run `python tests/usability_smoke.py`. The Pages edition remains a browser-local simulation without authenticated cloud agents, X browsing, or automatic posting.
 
@@ -121,14 +125,14 @@ Secrets are read **only on the server**. Never place an AI provider key in the b
 
 ### Try the full workflow
 
-1. Log in to the dashboard.
-2. Select **Load sample posts** on Overview, or add your own post in Discovery.
-3. Click **Score + draft** on a candidate.
-4. Open Approval inbox. Edit the draft and save a new revision.
-5. Click **Approve + schedule**. Default window: 2–10 minutes. To test instantly, change it to 0–0 in Settings before approval.
-6. Wait for the status **ready**, or choose **Make ready now** to accelerate an approved draft.
-7. Copy the approved text, open the original post, and **personally** click Post on X.
-8. Click **I posted it** to mark the task complete in the dashboard.
+1. Log in to the dashboard. The chat list opens.
+2. Open the **X-engage** chat. Tap **+** in the composer and select **Load sample posts**, or select **Share a post** to add your own.
+3. Select **Draft reply** on a post, either in the thread or in **Posts found** in the chat info panel. A draft card appears in the thread.
+4. Select the amber "N need(s) you" pill in the chat header to see drafts waiting on you. Select **Edit** on a draft, change the text, and save. This creates a new revision.
+5. Select **Approve** on the draft card. The delay window is set in **Voice and timing** in the chat info panel. Default window: 2–10 minutes. To test instantly, set both values to 0 before approval.
+6. Wait for the card to show **ready**, or select **Ready now** to accelerate an approved draft.
+7. Select **Copy text**, select **Open post**, and **personally** click Post on X.
+8. Select **I posted it** on the card to mark the task complete in the dashboard.
 
 The exact revision displayed when you approve is locked. Editing after approval revokes that approval and removes its schedule.
 
@@ -137,11 +141,11 @@ The exact revision displayed when you approve is locked. Editing after approval 
 1. Open `chrome://extensions/` in Chrome, Edge, or another compatible Chromium desktop browser.
 2. Enable **Developer mode** and select **Load unpacked**.
 3. Select the `extension/` folder.
-4. Open dashboard → **Settings**, then copy **Capture token**.
+4. In the dashboard open **You** (the ... button in the chat list) and choose **Copy capture token**.
 5. Click the extension icon, enter `http://127.0.0.1:4173` and the token.
 6. If the dashboard runs on a port other than `4173`, the extension asks Chrome for access to that origin on first capture. Approve the prompt; the bundled permission only covers the default port, so custom ports are granted per-origin rather than up front.
 7. Open `http://127.0.0.1:4173/demo-feed.html` to test on a controlled page. Highlight text in one example post, then click **Capture selected post** in the extension.
-8. Go to Dashboard → **Discovery** and process the captured candidate.
+8. Open the **X-engage** chat, open **Posts found** in the chat info panel, and draft the captured post.
 
 On an X feed, explicitly select text in the post you are viewing before capturing. The extension does not scroll, click through, or read the entire feed. The dashboard also supports manual URL/text entry.
 
@@ -232,13 +236,14 @@ Both paths run the same `shared/workflow.js` rules, so the demo and the real das
 
 ## Security and operational notes
 
-- Use a strong stable `DASHBOARD_PASSWORD` before exposing the server beyond localhost.
-- The prototype uses in-memory sessions: a restart signs users out. This is deliberate for the local proof-of-concept.
-- The capture token is stored in `data/state.json`, which is excluded from Git. Store the data directory on an encrypted disk if it holds sensitive posts.
-- Input is escaped in the dashboard, and post URL schemes are validated. Captured posts are **untrusted external content**.
-- JSON file persistence is suitable for a single-process prototype only. Replace it with a transactional database and scoped permissions before multi-user use.
-- Remote admin operations should use a private network, reverse proxy with HTTPS, and additional rate limits/audit controls before public exposure.
-- The system never claims that an AI draft is your personal opinion unless you have actually supplied or approved it.
+- Set a strong, stable `DASHBOARD_PASSWORD` before exposing the server beyond localhost.
+- State lives in a transactional SQLite database (`DATA_FILE`); sessions are server-side and revocable, so a restart no longer signs users out.
+- Secrets (paired-agent secrets, stored credentials) are AES-256-GCM encrypted; the master key is `MASTER_KEY` or a `0600` keyfile beside the database. **Back the key up with the data.**
+- Roles are `viewer < member < admin < owner`; every mutating route is gated by a route matrix (`tests/authz-matrix.test.js`).
+- Login is rate-limited; the session cookie is `HttpOnly` + `SameSite=Strict`, and cross-origin writes are rejected.
+- Captured posts are **untrusted external content**; input is escaped and URL schemes validated. Model output never receives browser or publishing tools, and **the final Post click is always human**.
+- Run behind an HTTPS reverse proxy; enable `HSTS=1` only after TLS works. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+- Full threat model: [`SECURITY.md`](SECURITY.md). Agent protocol: [`docs/AGENT-PROTOCOL.md`](docs/AGENT-PROTOCOL.md).
 
 ## License
 

@@ -5,7 +5,7 @@ Guidance for agents (and humans) changing this repo. Any `CLAUDE.md` still appli
 ## What this is
 Local-first, **zero-npm-runtime-dependency** multi-bot dashboard with human-approved X drafting. Node `>=22` (`.nvmrc`).
 
-- `shared/` — code used by **both** the browser UI and the Node server. Must stay browser-safe (no Node builtins).
+- `shared/` — code used by **both** the browser UI and the Node server. Must stay browser-safe (no Node builtins). The chat UI is split into `shared/ui-*.js`: `ui-kit.js` (string builders: icons, avatars, rows, time labels), `ui-model.js` (pure view models: chat list rows, thread timeline, needs-you count, routes), `ui-store.js` (single state object, API wrapper, navigation), `ui-chat.js` (what happens after send), `ui-views.js` (chat list and thread), `ui-panel.js` (chat info panel and You pages), `ui-sheets.js` (sheets, quick navigation, sign-in), `ui-admin.js` (admin pages), `ui-dialogs.js` (toast, sheet, confirm/ask), and `ui-actions.js` (action and form lookup tables). `ui-model.js` and `ui-kit.js` must stay pure (no DOM, no globals) because Node tests import them.
 - `src/` — Node-only: server, stores, auth, queue, scheduler, AI client, local agent, vault.
 - `docs/` — the **generated** GitHub Pages bundle. Never hand-edit; regenerate with `npm run build:pages`.
 - `extension/` — Chrome capture extension. `agent/` — the local device process.
@@ -49,4 +49,4 @@ More than one agent may edit this tree at the same time. To stay safe:
 - Tick items in `docs/BUILD-PLAN.md` as they land.
 
 ## Coverage notes
-`npm run test:coverage` uses V8 coverage, which only counts files the test process imports. The browser UI (`shared/app.js`, `shared/transport.js`) and `extension/popup.js` therefore show as *absent* — they are exercised by the Playwright smokes (`tests/polish_smoke.py`, `tests/usability_smoke.py`), which are not part of `node --test`.
+`npm run test:coverage` uses V8 coverage, which only counts files the test process imports. The browser-only files (`shared/app.js`, the DOM-bound `shared/ui-*.js` modules, and `shared/transport.js`) and `extension/popup.js` therefore show as *absent*. They are exercised by the Playwright smokes (`tests/polish_smoke.py`, `tests/usability_smoke.py`), which are not part of `node --test`. `shared/ui-model.js` and `shared/ui-kit.js` are imported by Node and are covered by `node --test`.

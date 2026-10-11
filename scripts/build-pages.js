@@ -27,14 +27,15 @@ async function bundleVersion(names) {
 // The demo cannot execute the Node coordinators, so it ships only the
 // browser-safe modules plus the pages and styles.
 const files = [
-  'index.html', 'app.css', 'polish.css', 'usability.css',
+  'index.html', 'app.css',
   'transport.js', 'local-api.js', 'app.js',
-  'core.js', 'workflow.js', 'tasks.js', 'evidence.js', 'contracts.js',
+  'ui-kit.js', 'ui-model.js', 'ui-store.js', 'ui-dialogs.js', 'ui-chat.js', 'ui-views.js', 'ui-panel.js', 'ui-sheets.js', 'ui-admin.js', 'ui-actions.js', 'ui-fx.js',
+  'core.js', 'workflow.js', 'tasks.js', 'evidence.js', 'contracts.js', 'retention.js',
   'coordination.js', 'group-simulator.js',
   'chat-engine.js', 'usability.js', 'demo-feed.html',
 ];
 // Files that used to live in docs/ before the UI moved to shared/.
-const stale = ['demo-api.js', 'app.css.map', 'usability.mjs', 'coordination.mjs', 'group-simulator.mjs', 'chat-engine.mjs'];
+const stale = ['polish.css', 'usability.css', 'demo-api.js', 'app.css.map', 'usability.mjs', 'coordination.mjs', 'group-simulator.mjs', 'chat-engine.mjs'];
 
 await fs.mkdir(dest, {recursive: true});
 const copied = [];

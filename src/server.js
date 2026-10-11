@@ -23,7 +23,7 @@ import * as notifications from './notifications.js';
 import {pruneState,RETENTION_DEFAULTS} from '../shared/retention.js';
 import {aiEnabled,aiModel,aiProvider,makeDraft,executeCustomBot} from './ai.js';
 import {startScheduler,startRetention} from './scheduler.js';
-import {queueGroupRun,markInterrupted,coordinationState} from './coordination.js';
+import {queueGroupRun,resumeGroupRun,markInterrupted,coordinationState} from './coordination.js';
 import {createQueue,recoverQueue,defaultHandlers} from './queue.js';
 import {Auth,ROLES,sessionCookie,clearCookie,DEFAULT_WORKSPACE as DEFAULT_WORKSPACE_ID} from './auth.js';
 
@@ -124,6 +124,7 @@ const WRITE_ROUTES=[
   [/^\/api\/groups\/[a-z0-9-]+\/bots$/,'POST','member'],
   [/^\/api\/groups\/[a-z0-9-]+\/bots\/[a-z0-9-]+$/,'PATCH','member'],
   [/^\/api\/groups\/[a-z0-9-]+\/chat$/,'POST','member'],
+  [/^\/api\/groups\/[a-z0-9-]+\/runs\/[a-f0-9-]+\/continue$/,'POST','member'],
   [/^\/api\/bots\/run$/,'POST','member'],
   [/^\/api\/schedules$/,'POST','member'],
   [/^\/api\/schedules\/[a-f0-9-]+$/,'DELETE','member'],
@@ -325,7 +326,13 @@ async function api(req,res,u){
   }
   if(match&&m==='POST'){
     const b=await jsonBody(req);
-    const result=await queueGroupRun(store,{groupId:match[1],message:b.message,directBotId:b.directBotId||null});
+    const result=await queueGroupRun(store,{groupId:match[1],message:b.message,directBotId:b.directBotId||null,checkpoints:b.checkpoints===true});
+    return send(res,202,result);
+  }
+  // Approve the next handoff of a run paused at a human checkpoint.
+  match=p.match(/^\/api\/groups\/([a-z0-9-]+)\/runs\/([a-f0-9-]+)\/continue$/);
+  if(match&&m==='POST'){
+    const result=await resumeGroupRun(store,match[2]);
     return send(res,202,result);
   }
   if(p==='/api/bots/run'&&m==='POST'){
@@ -481,7 +488,7 @@ async function api(req,res,u){
   if(match&&m==='DELETE'){const result=await store.update(s=>evidence.dropEvidence(s,match[1]));return send(res,200,result);}
   fail('Unknown endpoint.',404);
 }
-const ASSETS=new Set(['index.html','app.css','polish.css','usability.css','transport.js','local-api.js','app.js','core.js','workflow.js','tasks.js','evidence.js','contracts.js','retention.js','coordination.js','group-simulator.js','chat-engine.js','usability.js','demo-feed.html']);
+const ASSETS=new Set(['index.html','app.css','transport.js','local-api.js','app.js','ui-kit.js','ui-model.js','ui-store.js','ui-dialogs.js','ui-chat.js','ui-views.js','ui-panel.js','ui-sheets.js','ui-admin.js','ui-actions.js','ui-fx.js','core.js','workflow.js','tasks.js','evidence.js','contracts.js','retention.js','coordination.js','group-simulator.js','chat-engine.js','usability.js','demo-feed.html']);
 async function serve(req,res,u){
   let rel=u.pathname==='/'?'index.html':u.pathname.slice(1);
   if(!ASSETS.has(rel))return send(res,404,{error:'Not found'});
