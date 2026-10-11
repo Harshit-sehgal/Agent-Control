@@ -93,4 +93,5 @@ as the record of what shipped; new work should be added as a fresh section.
 - [x] Web Push without a library: encryption, VAPID, queue delivery, service worker, manifest
 - [x] Local agent reads allowlisted pages with the installed browser over DevTools
 - [x] Dockerfile, Compose with Caddy, and a systemd unit
-- [ ] Push verified from a real phone; server running on an always-on host
+- [x] Push delivered end to end through Google's push service to desktop Chrome
+- [ ] Push verified on a physical phone and through Apple's push service; server running on an always-on host

@@ -51,7 +51,7 @@
 ## What is left
 
 - **A host that is actually on.** The deploy files are tested locally, but nothing here rents a machine or points a domain at it. Until the server runs somewhere always on, the scheduler and queue only work while your machine is up.
-- **Push on a real phone.** The encryption and signing are tested against an independent decoder, not yet against Apple's or Google's push service from a real device.
+- **Push on a real phone.** A test push was delivered end to end through Google's push service (the one Android uses) to desktop Chrome. Apple's push service, and a physical phone, are not yet tried.
 - **Email delivery.** The email channel records a relay-ready notification; sending mail needs an SMTP client or gateway this project does not embed.
 - **Workspaces for hostile tenants.** Workspaces share one process, vault key and AI provider key. Billing-grade isolation is a different design.
 
