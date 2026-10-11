@@ -1,14 +1,14 @@
 /** What the UI can do, as three lookup tables keyed by `data-action`, form id and
  * control id. app.js owns the DOM events and dispatches here; handlers throw on
  * failure and the dispatcher turns that into one toast. */
-import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, groupOfBot, teamKey, groups, setProfile, setPref, setCheckpoints, clearMessages} from './ui-store.js?v=b58f2a921d';
-import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=b58f2a921d';
-import {sendChat, streamGroupRun} from './ui-chat.js?v=b58f2a921d';
-import {confetti, whoosh, react, poke} from './ui-fx.js?v=b58f2a921d';
-import {renderList} from './ui-views.js?v=b58f2a921d';
-import {refreshLists, reloadAdminPage} from './ui-panel.js?v=b58f2a921d';
-import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand} from './ui-sheets.js?v=b58f2a921d';
-import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=b58f2a921d';
+import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, groupOfBot, teamKey, groups, setProfile, setPref, setCheckpoints, clearMessages} from './ui-store.js?v=8487cfc1fa';
+import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=8487cfc1fa';
+import {sendChat, streamGroupRun} from './ui-chat.js?v=8487cfc1fa';
+import {confetti, whoosh, react, poke} from './ui-fx.js?v=8487cfc1fa';
+import {renderList} from './ui-views.js?v=8487cfc1fa';
+import {refreshLists, reloadAdminPage} from './ui-panel.js?v=8487cfc1fa';
+import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand} from './ui-sheets.js?v=8487cfc1fa';
+import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=8487cfc1fa';
 
 const adminCtx = {reload: reloadAdminPage};
 const chatId = () => store.route.chat;

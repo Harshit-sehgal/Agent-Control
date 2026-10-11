@@ -6,7 +6,7 @@
  * workspace-level policy in settings. Nothing here deletes drafts, candidates
  * or evidence: those are the user's working material, not exhaust.
  */
-import {activity} from './core.js?v=b58f2a921d';
+import {activity} from './core.js?v=8487cfc1fa';
 
 export const RETENTION_DEFAULTS = {events: 90, doneTasks: 30, sentNotifications: 30, runs: 30};
 

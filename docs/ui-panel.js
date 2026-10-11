@@ -1,13 +1,13 @@
 /** Everything that used to be a dashboard tab now hangs off a conversation:
  * the info panel of the open chat (drafts, posts, reminders, runs, voice, the
  * bot's profile) and the "You" pages (account, admin, about). */
-import {filterCandidates, filterDrafts} from './usability.js?v=b58f2a921d';
-import {ACTIONS, OUTPUT_KINDS} from './contracts.js?v=b58f2a921d';
-import {ACTIVE_DRAFTS, needsYou} from './ui-model.js?v=b58f2a921d';
-import {esc, icon, avatar, groupAvatar, tintClass, TINT_COUNT, btn, iconBtn, row, box, field, note, empty, tag, pageHead, fullDate} from './ui-kit.js?v=b58f2a921d';
-import {store, conversation, isStaticDemo, isAdmin, isLive, isXGroup, botTint, recentRuns, THEMES, themeChoice} from './ui-store.js?v=b58f2a921d';
-import {draftCard, postCard} from './ui-views.js?v=b58f2a921d';
-import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=b58f2a921d';
+import {filterCandidates, filterDrafts} from './usability.js?v=8487cfc1fa';
+import {ACTIONS, OUTPUT_KINDS} from './contracts.js?v=8487cfc1fa';
+import {ACTIVE_DRAFTS, needsYou} from './ui-model.js?v=8487cfc1fa';
+import {esc, icon, avatar, groupAvatar, tintClass, TINT_COUNT, btn, iconBtn, row, box, field, note, empty, tag, pageHead, fullDate} from './ui-kit.js?v=8487cfc1fa';
+import {store, conversation, isStaticDemo, isAdmin, isLive, isXGroup, botTint, recentRuns, THEMES, themeChoice} from './ui-store.js?v=8487cfc1fa';
+import {draftCard, postCard} from './ui-views.js?v=8487cfc1fa';
+import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=8487cfc1fa';
 
 const el = id => document.getElementById(id);
 const options = (pairs, current) => pairs.map(([value, label]) => `<option value="${esc(value)}"${value === current ? ' selected' : ''}>${esc(label)}</option>`).join('');
