@@ -1,0 +1,23 @@
+# Agent Control kept running on a machine of your own, reached over Tailscale.
+#
+#   docker compose -f deploy/compose.tailscale.yaml up -d --build
+#   tailscale serve --bg 4173
+#
+# Tailscale provides HTTPS at https://<machine>.<tailnet>.ts.net, to your own
+# devices only. Set TS_HOST to that name. The app uses the host's network and
+# listens on loopback, so nothing else can reach it, and it can call an AI
+# gateway running on this machine. Settings come from the repository's .env;
+# data stays in the repository's data/ folder.
+services:
+  app:
+    build: ..
+    restart: unless-stopped
+    network_mode: host
+    env_file: ../.env
+    environment:
+      HOST: 127.0.0.1
+      PORT: "4173"
+      DATA_FILE: /data/state.json
+      PUBLIC_ORIGIN: https://${TS_HOST:?Set TS_HOST to this machine's Tailscale name}
+    volumes:
+      - ../data:/data
