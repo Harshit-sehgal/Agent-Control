@@ -41,9 +41,12 @@ function extract(data){
   if(apiStyle()==='responses')text=(data.output||[]).flatMap(x=>x.content||[]).filter(c=>c.type==='output_text').map(c=>c.text).join('\n');
   else text=data.choices?.[0]?.message?.content||'';
   text=sanitize(text);
-  if(!text)throw new Error('AI returned an empty response.');
+  if(!text)throw upstream('AI returned an empty response.');
   return text.slice(0,3000);
 }
+// A provider failure is the upstream's fault, not a bug here: the status lets
+// an HTTP route show the message instead of a bare "Internal server error".
+const upstream=(message,status=502)=>Object.assign(new Error(message),{status});
 const errorText=(data,status)=>cleanText(data?.error?.message||data?.message||data?._error,200)||`provider responded ${status}`;
 
 async function callModel({instructions,input,maxTokens}){
@@ -51,11 +54,12 @@ async function callModel({instructions,input,maxTokens}){
   try{
     const res=await fetch(endpoint(),{method:'POST',headers:{Authorization:`Bearer ${providerKey()}`,'Content-Type':'application/json'},body:JSON.stringify(payload(instructions,input,maxTokens)),signal:controller.signal});
     let data=null;try{data=await res.json();}catch{/* non-JSON error body */}
-    if(!res.ok)throw new Error(`AI provider returned ${res.status}: ${errorText(data,res.status)}`);
+    if(!res.ok)throw upstream(`AI provider returned ${res.status}: ${errorText(data,res.status)}`);
     return extract(data||{});
   }catch(e){
-    if(e.name==='AbortError')throw new Error(`AI provider timed out after ${Math.round(timeoutMs()/1000)}s.`);
-    throw e;
+    if(e.name==='AbortError')throw upstream(`AI provider timed out after ${Math.round(timeoutMs()/1000)}s.`,504);
+    if(e.status)throw e;
+    throw upstream(`AI provider at ${aiProvider()} could not be reached.`);
   }finally{clearTimeout(timer);}
 }
 

@@ -84,3 +84,22 @@ test('custom bots run through the same configured provider',async()=>{
     assert.match(requests[0].body.messages[1].content,/do it now/);
   }finally{close();}
 });
+
+test('a provider failure is reported as a gateway error the API can show, not a server crash',async()=>{
+  const {port,close}=await stub({status:502,json:{error:{message:'All routed attempts failed'}}});
+  try{
+    await withEnv({AI_BASE_URL:`http://127.0.0.1:${port}/v1`,AI_API_KEY:'test-key',AI_API_STYLE:'chat'},async()=>{
+      await assert.rejects(()=>executeCustomBot({name:'B',instructions:'Summarise.'},'hello'),e=>e.status===502&&/All routed attempts failed/.test(e.message));
+    });
+  }finally{close();}
+  // Nothing is listening here: an unreachable provider is a gateway error too.
+  await withEnv({AI_BASE_URL:'http://127.0.0.1:9/v1',AI_API_KEY:'test-key',AI_API_STYLE:'chat'},async()=>{
+    await assert.rejects(()=>executeCustomBot({name:'B',instructions:'Summarise.'},'hello'),e=>e.status===502&&/could not be reached/.test(e.message));
+  });
+  const empty=await stub({status:200,json:{choices:[{message:{content:''}}]}});
+  try{
+    await withEnv({AI_BASE_URL:`http://127.0.0.1:${empty.port}/v1`,AI_API_KEY:'test-key',AI_API_STYLE:'chat'},async()=>{
+      await assert.rejects(()=>executeCustomBot({name:'B',instructions:'Summarise.'},'hello'),e=>e.status===502&&/empty response/.test(e.message));
+    });
+  }finally{empty.close();}
+});
