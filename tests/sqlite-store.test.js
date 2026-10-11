@@ -81,3 +81,46 @@ test('the store exposes the target-schema tables the roadmap phases need', async
   }
   await fs.rm(path.dirname(db), {recursive: true, force: true});
 });
+
+test('every workflow record survives a restart with the same shape, and writes keep working', async () => {
+  const {dir, db, legacy} = await sandbox();
+  const at = '2026-01-01T00:00:00.000Z';
+  const first = await new SqliteStore(db, legacy).init();
+  await first.update(s => {
+    s.candidates.push({id: 'c1', url: 'https://example.com/a', text: 'A candidate long enough', author: 'T', topic: 'AI', status: 'drafted', demo: false, score: {total: 80, reasons: ['topic']}, createdAt: at});
+    s.drafts.push({id: 'd1', candidateId: 'c1', author: 'T', url: 'https://example.com/a', sourceText: 'A candidate long enough', text: 'Reply', revision: 2, status: 'scheduled', score: 80, mode: 'template', note: 'n', approvedText: 'Reply', approvedRevision: 2, approvedAt: at, dueAt: at, createdAt: at});
+    s.runs.push({id: 'r1', botId: 'writer', botName: 'Writer', input: 'in', output: 'out', at});
+    s.groupRuns.push({id: 'g1', groupId: 'x-engage', input: 'hi', recipients: ['scout', 'writer'], mode: 'pipeline', status: 'awaiting_checkpoint', currentStep: 1, createdAt: at, startedAt: at, trace: [{botId: 'scout', output: 'o', toBotId: 'writer', at}], lastOutput: null, checkpointsEnabled: true, checkpoint: {nextStep: 1, previous: {botId: 'scout', output: 'o'}, at}});
+    s.groupMessages['x-engage'] = [{id: 'm1', runId: 'g1', role: 'bot', senderId: 'scout', senderName: 'Scout', toBotId: 'writer', text: 'o', at}];
+    s.tasks.push({id: 't1', kind: 'reminder', title: 'Check drafts', payload: {label: 'Check drafts', kind: 'interval', intervalMinutes: 60}, status: 'queued', runAt: at, intervalMinutes: 60, idempotencyKey: null, attempts: 0, maxAttempts: 5, leaseOwner: null, leaseUntil: null, lastError: null, result: null, createdBy: null, createdAt: at, updatedAt: at, completedAt: null});
+    s.chats = {writer: [{id: 'k1', role: 'user', text: 'make it shorter', at}, {id: 'k2', role: 'bot', text: 'Done.', at, mode: 'ai'}]};
+  });
+  const before = first.read();
+  first.db.close();
+  const reopened = await new SqliteStore(db, legacy).init();
+  const after = reopened.read();
+  for (const key of ['candidates', 'drafts', 'runs', 'groupRuns', 'groupMessages', 'tasks', 'chats']) assert.deepEqual(after[key], before[key], `${key} changed shape across a restart.`);
+  assert.equal(after.groupRuns[0].checkpointsEnabled, true, 'A paused run must still be gated after a restart.');
+  await reopened.update(s => { s.drafts[0].text = 'Edited'; });
+  assert.equal(reopened.read().drafts[0].text, 'Edited', 'Writes must keep working after a restart.');
+  await fs.rm(dir, {recursive: true, force: true});
+});
+
+test('rows written before the document column are read back in the workflow shape', async () => {
+  const {dir, db, legacy} = await sandbox();
+  const store = await new SqliteStore(db, legacy).init();
+  const at = '2026-01-01T00:00:00.000Z';
+  store.run('INSERT INTO candidates (id,url,author,topic,text,status,score,demo,created_at) VALUES (?,?,?,?,?,?,?,?,?)', 'c1', 'https://example.com/a', 'T', 'AI', 'A candidate long enough', 'drafted', '{"total":80}', 0, at);
+  store.run('INSERT INTO drafts (id,candidate_id,author,url,source_text,text,revision,status,created_at) VALUES (?,?,?,?,?,?,?,?,?)', 'd1', 'c1', 'T', 'https://example.com/a', 'src', 'Reply', 1, 'pending', at);
+  store.run('INSERT INTO group_runs (id,group_id,input,recipients,mode,status,created_at,checkpoint) VALUES (?,?,?,?,?,?,?,?)', 'g1', 'x-engage', 'hi', '["scout"]', 'direct', 'completed', at, '{"nextStep":1}');
+  store.run('INSERT INTO group_messages (id,group_id,run_id,role,sender_id,text,at) VALUES (?,?,?,?,?,?,?)', 'm1', 'x-engage', 'g1', 'bot', 'scout', 'o', at);
+  store.db.close();
+  const s = (await new SqliteStore(db, legacy).init()).read();
+  assert.deepEqual(s.drafts[0], {id: 'd1', candidateId: 'c1', author: 'T', url: 'https://example.com/a', sourceText: 'src', text: 'Reply', revision: 1, status: 'pending', createdAt: at});
+  assert.deepEqual(s.candidates[0].score, {total: 80});
+  assert.equal(s.candidates[0].demo, false);
+  assert.equal(s.groupRuns[0].groupId, 'x-engage');
+  assert.deepEqual(s.groupRuns[0].checkpoint, {nextStep: 1});
+  assert.deepEqual(s.groupMessages['x-engage'][0], {id: 'm1', runId: 'g1', role: 'bot', senderId: 'scout', text: 'o', at});
+  await fs.rm(dir, {recursive: true, force: true});
+});

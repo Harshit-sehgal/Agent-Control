@@ -22,11 +22,40 @@ import * as wf from '../shared/workflow.js';
 const now = () => new Date().toISOString();
 /** Current schema version. Keep in sync with the migration list; tests and
  * operators read it, so it is exported rather than duplicated. */
-export const SCHEMA_DB_VERSION = 2;
+export const SCHEMA_DB_VERSION = 3;
 
 /** v1 ships the full target schema: the workflow document plus the surfaces
  * the roadmap adds (task queue, agents, vault, notifications, users). Adding a
  * table here is idempotent; later phases add numbered migrations for changes. */
+const DOC_TABLES = ['candidates', 'drafts', 'runs', 'group_runs', 'group_messages'];
+const camel = key => key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+/** One stored row as the workflow document it came from. Rows written before
+ * v3 have no `doc`, so those are rebuilt from their columns: camelCase keys,
+ * JSON columns parsed, and NULL meaning "the field was never set". */
+export function fromRow(row, {json = [], drop = []} = {}) {
+  if (row.doc) return JSON.parse(row.doc);
+  const out = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (value === null || key === 'doc' || drop.includes(key)) continue;
+    out[camel(key)] = json.includes(key) ? JSON.parse(value) : value;
+  }
+  return out;
+}
+/** Rebuild the collections that are stored one document per row. `rows(table)`
+ * abstracts the source, so a live database and a backup file share one reader. */
+export function readDocuments(rows) {
+  const s = {};
+  s.candidates = rows('candidates').map(c => c.doc ? fromRow(c) : {...fromRow(c, {json: ['score']}), demo: Boolean(c.demo)});
+  s.drafts = rows('drafts').map(d => fromRow(d));
+  s.runs = rows('runs').map(r => fromRow(r));
+  s.groupRuns = rows('group_runs').map(r => fromRow(r, {json: ['recipients', 'trace', 'checkpoint']}));
+  s.groupMessages = {};
+  for (const m of rows('group_messages')) (s.groupMessages[m.group_id] ??= []).push(fromRow(m, {drop: ['group_id']}));
+  s.chats = {};
+  for (const m of rows('chat_messages')) (s.chats[m.chat_key] ??= []).push(JSON.parse(m.doc));
+  return s;
+}
+
 const MIGRATIONS = [
   {to: 1, up(db) {
     db.exec(`
@@ -134,6 +163,16 @@ const MIGRATIONS = [
   // with the secret, which a one-way hash cannot support.
   {to: 2, up(db) {
     db.exec('ALTER TABLE agents ADD COLUMN secret_enc TEXT');
+  }},
+  // v3: every workflow record also keeps its whole document. The typed columns
+  // stay for queries and backups, but reading the document back is what makes a
+  // restart lossless: a field with no column of its own (a run's checkpoint
+  // gate, anything added later) used to vanish, and the columns came back in
+  // snake_case, which broke the next write. Conversations move to the server
+  // here too, so they follow the account instead of one browser.
+  {to: 3, up(db) {
+    for (const table of DOC_TABLES) db.exec(`ALTER TABLE ${table} ADD COLUMN doc TEXT`);
+    db.exec('CREATE TABLE IF NOT EXISTS chat_messages (id TEXT PRIMARY KEY, chat_key TEXT NOT NULL, doc TEXT NOT NULL, at TEXT NOT NULL)');
   }}];
 export class SqliteStore {
   constructor(dbPath, legacyPath) {
@@ -231,7 +270,7 @@ export class SqliteStore {
       settings: {topics: [], style: '', opinions: '', minDelay: 2, maxDelay: 10},
       captureToken: this.kvGet('capture_token'),
       groups: [], candidates: [], drafts: [], runs: [], tasks: [], events: [],
-      groupMessages: {}, groupRuns: [],
+      groupMessages: {}, groupRuns: [], chats: {},
     };
     const cfg = this.db.prepare('SELECT * FROM settings WHERE id=1').get();
     if (cfg) s.settings = {
@@ -248,22 +287,14 @@ export class SqliteStore {
       delete g.rowid;
       s.groups.push(g);
     }
-    s.candidates = this.db.prepare('SELECT * FROM candidates').all().map(c => ({
-      ...c, demo: Boolean(c.demo), ...(c.score ? {score: JSON.parse(c.score)} : {}),
-    }));
-    s.drafts = this.db.prepare('SELECT * FROM drafts').all();
+    Object.assign(s, readDocuments(table => this.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()));
     s.evidence = this.db.prepare('SELECT * FROM evidence').all().map(e => ({
       id: e.id, kind: e.kind, link: e.link, claim: e.claim, confidence: e.confidence,
       verification: e.verification, reuse: e.reuse, note: e.note,
       draftId: e.draft_id, candidateId: e.candidate_id, createdBy: e.created_by, createdAt: e.created_at,
     }));
-    s.runs = this.db.prepare('SELECT * FROM runs').all();
     s.events = this.db.prepare('SELECT * FROM events').all().map(e => ({...e, meta: JSON.parse(e.meta)}));
-    const messages = this.db.prepare('SELECT * FROM group_messages ORDER BY rowid').all();
-    s.groupMessages = {};
-    for (const m of messages) (s.groupMessages[m.group_id] ??= []).push(m);
-    s.groupRuns = this.db.prepare('SELECT * FROM group_runs').all().map(r => ({...r, recipients: JSON.parse(r.recipients), trace: JSON.parse(r.trace)}));
-    s.tasks = this.db.prepare('SELECT * FROM tasks WHERE kind<>?').all('reminder').map(t => ({
+    s.tasks = this.db.prepare('SELECT * FROM tasks ORDER BY rowid').all().map(t => ({
       id: t.id, kind: t.kind, title: t.title, payload: JSON.parse(t.payload), status: t.status,
       runAt: t.run_at, intervalMinutes: t.interval_minutes, idempotencyKey: t.idempotency_key,
       attempts: t.attempts, maxAttempts: t.max_attempts, leaseOwner: t.lease_owner, leaseUntil: t.lease_until,
@@ -274,7 +305,7 @@ export class SqliteStore {
   }
   writeCollections(state) {
     const t = this.transaction(() => {
-      for (const table of ['groups', 'bots', 'candidates', 'drafts', 'evidence', 'runs', 'events', 'group_messages', 'group_runs', 'tasks']) {
+      for (const table of ['groups', 'bots', 'candidates', 'drafts', 'evidence', 'runs', 'events', 'group_messages', 'group_runs', 'tasks', 'chat_messages']) {
         this.db.prepare(`DELETE FROM ${table}`).run();
       }
       this.db.prepare('INSERT INTO kv (key,value) VALUES (\'created_at\',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(state.createdAt || now());
@@ -291,16 +322,16 @@ export class SqliteStore {
         }
       }
       for (const c of state.candidates) {
-        this.db.prepare('INSERT INTO candidates (id,url,author,topic,text,status,score,demo,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
-          .run(c.id, c.url, c.author, c.topic || '', c.text, c.status, c.score ? JSON.stringify(c.score) : null, c.demo ? 1 : 0, c.createdAt || now());
+        this.db.prepare('INSERT INTO candidates (id,url,author,topic,text,status,score,demo,created_at,doc) VALUES (?,?,?,?,?,?,?,?,?,?)')
+          .run(c.id, c.url, c.author, c.topic || '', c.text, c.status, c.score ? JSON.stringify(c.score) : null, c.demo ? 1 : 0, c.createdAt || now(), JSON.stringify(c));
       }
       for (const d of state.drafts) {
-        this.db.prepare('INSERT INTO drafts (id,candidate_id,author,url,source_text,text,revision,status,score,mode,note,approved_text,approved_revision,approved_at,due_at,posted_at,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-          .run(d.id, d.candidateId, d.author, d.url, d.sourceText || '', d.text, d.revision, d.status, d.score ?? null, d.mode || null, d.note || null, d.approvedText ?? null, d.approvedRevision ?? null, d.approvedAt ?? null, d.dueAt ?? null, d.postedAt ?? null, d.createdAt || now());
+        this.db.prepare('INSERT INTO drafts (id,candidate_id,author,url,source_text,text,revision,status,score,mode,note,approved_text,approved_revision,approved_at,due_at,posted_at,created_at,doc) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+          .run(d.id, d.candidateId, d.author, d.url, d.sourceText || '', d.text, d.revision, d.status, d.score ?? null, d.mode || null, d.note || null, d.approvedText ?? null, d.approvedRevision ?? null, d.approvedAt ?? null, d.dueAt ?? null, d.postedAt ?? null, d.createdAt || now(), JSON.stringify(d));
       }
       for (const r of state.runs) {
-        this.db.prepare('INSERT INTO runs (id,bot_id,bot_name,input,output,at) VALUES (?,?,?,?,?,?)')
-          .run(r.id, r.botId, r.botName, r.input ?? null, r.output ?? null, r.at || now());
+        this.db.prepare('INSERT INTO runs (id,bot_id,bot_name,input,output,at,doc) VALUES (?,?,?,?,?,?,?)')
+          .run(r.id, r.botId, r.botName, r.input ?? null, r.output ?? null, r.at || now(), JSON.stringify(r));
       }
       for (const e of (state.evidence || [])) {
         this.db.prepare('INSERT INTO evidence (id,draft_id,candidate_id,kind,link,claim,confidence,verification,reuse,note,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
@@ -317,14 +348,17 @@ export class SqliteStore {
           .run(e.id, e.at || now(), e.type, e.message, JSON.stringify(e.meta || {}), e.meta?.groupId || null);
       }
       for (const r of state.groupRuns) {
-        this.db.prepare('INSERT INTO group_runs (id,group_id,input,recipients,mode,status,current_step,created_at,started_at,completed_at,trace,last_output,error,checkpoint) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-          .run(r.id, r.groupId, r.input, JSON.stringify(r.recipients), r.mode, r.status, r.currentStep ?? 0, r.createdAt, r.startedAt ?? null, r.completedAt ?? null, JSON.stringify(r.trace || []), r.lastOutput ?? null, r.error ?? null, r.checkpoint ? JSON.stringify(r.checkpoint) : null);
+        this.db.prepare('INSERT INTO group_runs (id,group_id,input,recipients,mode,status,current_step,created_at,started_at,completed_at,trace,last_output,error,checkpoint,doc) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+          .run(r.id, r.groupId, r.input, JSON.stringify(r.recipients), r.mode, r.status, r.currentStep ?? 0, r.createdAt, r.startedAt ?? null, r.completedAt ?? null, JSON.stringify(r.trace || []), r.lastOutput ?? null, r.error ?? null, r.checkpoint ? JSON.stringify(r.checkpoint) : null, JSON.stringify(r));
       }
       for (const [groupId, list] of Object.entries(state.groupMessages || {})) {
         for (const m of list || []) {
-          this.db.prepare('INSERT INTO group_messages (id,group_id,run_id,role,sender_id,sender_name,to_bot_id,text,kind,at) VALUES (?,?,?,?,?,?,?,?,?,?)')
-            .run(m.id, groupId, m.runId ?? null, m.role, m.senderId ?? null, m.senderName ?? null, m.toBotId ?? null, m.text, m.kind ?? null, m.at || now());
+          this.db.prepare('INSERT INTO group_messages (id,group_id,run_id,role,sender_id,sender_name,to_bot_id,text,kind,at,doc) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+            .run(m.id, groupId, m.runId ?? null, m.role, m.senderId ?? null, m.senderName ?? null, m.toBotId ?? null, m.text, m.kind ?? null, m.at || now(), JSON.stringify(m));
         }
+      }
+      for (const [key, list] of Object.entries(state.chats || {})) {
+        for (const m of list || []) this.db.prepare('INSERT INTO chat_messages (id,chat_key,doc,at) VALUES (?,?,?,?)').run(m.id, key, JSON.stringify(m), m.at || now());
       }
     });
     return t;

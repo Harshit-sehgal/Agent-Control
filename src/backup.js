@@ -14,12 +14,16 @@
 import crypto from 'node:crypto';
 import * as wf from '../shared/workflow.js';
 import {initialState} from '../shared/core.js';
+import {readDocuments} from './sqlite-store.js';
 
 export const BACKUP_VERSION = 1;
 
 export function fail(message, status = 400) { throw Object.assign(new Error(message), {status}); }
 
 const EXPORT_TABLES = ['users', 'password_resets', 'workspaces', 'workspace_members', 'agents', 'agent_tasks', 'jobs', 'notifications', 'notification_prefs', 'settings', 'tasks', 'groups', 'bots', 'candidates', 'drafts', 'evidence', 'runs', 'events', 'group_runs', 'group_messages'];
+// Added after the first backups were written: exported when present, and an
+// older file that lacks them still restores.
+const OPTIONAL_TABLES = ['chat_messages'];
 // Never exported, by design: credential ciphertext cannot be decrypted under a
 // different key, pairing codes are single-use, and a live session id is a
 // credential an attacker holding a backup must not obtain.
@@ -28,7 +32,7 @@ const EXCLUDED_TABLES = ['credentials', 'pairing_codes', 'sessions', 'kv', 'sche
 /** Build the export document from an open store. */
 export function exportBackup(store) {
   const tables = {};
-  for (const name of EXPORT_TABLES) {
+  for (const name of [...EXPORT_TABLES, ...OPTIONAL_TABLES]) {
     try { tables[name] = store.all(`SELECT * FROM ${name}`); }
     catch { /* Table absent in an older schema: exported as empty. */ tables[name] = []; }
   }
@@ -51,6 +55,9 @@ export function validateBackup(document) {
   for (const name of EXPORT_TABLES) {
     if (!Array.isArray(document.tables[name])) fail(`Backup is missing the "${name}" table.`);
   }
+  for (const name of OPTIONAL_TABLES) {
+    if (document.tables[name] !== undefined && !Array.isArray(document.tables[name])) fail(`Backup table "${name}" is not a list.`);
+  }
   // Recompute the checksum so a hand-edited or truncated file is rejected.
   const actual = crypto.createHash('sha256').update(JSON.stringify(document.tables)).digest('hex');
   if (document.checksum && document.checksum !== actual) fail('Backup checksum does not match its contents. The file may be corrupt or edited.');
@@ -71,7 +78,7 @@ export function importBackup(store, document, {force = false} = {}) {
   });
   if (populated && !force) fail('This installation already holds workspace data. Restore with force=true to replace it (credentials are not carried by backups).', 409);
   store.transaction(() => {
-    for (const name of EXPORT_TABLES) {
+    for (const name of [...EXPORT_TABLES, ...OPTIONAL_TABLES]) {
       store.run(`DELETE FROM ${name}`);
       const rows = tables[name] || [];
       if (!rows.length) continue;
@@ -88,10 +95,11 @@ export function importBackup(store, document, {force = false} = {}) {
         }
       }
     }
-    // The store's in-memory document must agree with what we just wrote.
-    if (typeof store.cache !== 'undefined' && store.cache) Object.assign(store.cache, structuredClone(state));
   });
-  return {restored: EXPORT_TABLES.reduce((n, name) => n + (tables[name]?.length || 0), 0)};
+  // The store's in-memory document must agree with what was just written, so it
+  // is read back through the store's own row readers, not assembled here.
+  if (store.cache && typeof store.readCollections === 'function') store.cache = wf.migrate(store.readCollections());
+  return {restored: [...EXPORT_TABLES, ...OPTIONAL_TABLES].reduce((n, name) => n + (tables[name]?.length || 0), 0)};
 }
 
 /** Rebuild a plain state document from exported tables (for preview/validate).
@@ -105,14 +113,9 @@ export function tablesToState(tables) {
     minDelay: tables.settings[0].min_delay, maxDelay: tables.settings[0].max_delay,
   } : s.settings;
   s.groups = (tables.groups || []).map(g => ({...g, bots: (tables.bots || []).filter(b => b.group_id === g.id).map(b => ({...b}))}));
-  s.candidates = (tables.candidates || []).map(c => ({...c}));
-  s.drafts = (tables.drafts || []).map(d => ({...d}));
-  s.runs = (tables.runs || []).map(r => ({...r}));
+  Object.assign(s, readDocuments(name => tables[name] || []));
   s.evidence = (tables.evidence || []).map(e => ({...e}));
   s.events = (tables.events || []).map(e => ({...e}));
-  s.groupRuns = (tables.group_runs || []).map(r => ({...r, recipients: JSON.parse(r.recipients || '[]'), trace: JSON.parse(r.trace || '[]')}));
-  s.groupMessages = {};
-  for (const m of tables.group_messages || []) (s.groupMessages[m.group_id] ??= []).push({...m});
   s.tasks = (tables.tasks || []).map(t => ({...t, payload: JSON.parse(t.payload || '{}'), result: t.result ? JSON.parse(t.result) : null}));
   return s;
 }
