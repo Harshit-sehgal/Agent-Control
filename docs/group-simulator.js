@@ -1,5 +1,6 @@
 /** Offline group coordination. Intentionally not AI: demonstrates real context passing. */
-import {createRun,createEnvelope} from './coordination.js?v=bf9b5298d4';
+import {createRun,createEnvelope} from './coordination.js?v=5370c2c9dc';
+import {normalizeBot,canBot} from './contracts.js?v=5370c2c9dc';
 
 export async function simulateGroup({group, message, directBotId=null, state, api, makeId, emit}) {
   const run=createRun({group,message,directBotId,makeId});
@@ -7,7 +8,7 @@ export async function simulateGroup({group, message, directBotId=null, state, ap
   emit({id:makeId(),role:'system',text:`Started ${run.mode} · ${run.recipients.length} specialist(s) · demonstration only.`,runId:run.id,at:new Date().toISOString()});
   for (let i=0;i<run.recipients.length;i++) {
     run.currentStep=i;
-    const bot=group.bots.find(b=>b.id===run.recipients[i]);
+    const bot=normalizeBot(group.bots.find(b=>b.id===run.recipients[i]));
     const envelope=createEnvelope({run,bot,previous});
     // Prefer a candidate with no draft yet. `state.drafts` is refreshed below as
     // soon as the Writer creates one, so a repeated run cannot silently draft the
@@ -23,7 +24,12 @@ export async function simulateGroup({group, message, directBotId=null, state, ap
         // Guard against drafting the same post twice: an earlier run in this
         // session may already have created a draft for this candidate.
         const existing=state.drafts.find(d=>d.candidateId===candidate.id);
-        if(existing){
+        // Draft creation is an action, not a byproduct of talking: a Writer
+        // without the draft.create permission cannot create one, here or on
+        // the server engine.
+        if(!canBot(bot,'draft.create')){
+          output=`${bot.name} does not hold the draft.create permission, so no draft was created. Grant it in the bot profile if this workflow needs one.`;
+        }else if(existing){
           output=`A pending draft already exists for ${candidate.author} (Draft ID: ${existing.id}). Approve or revise it in the Approval inbox instead of creating another.`;
         }else{
           const draft=await api(`/api/candidates/${candidate.id}/process`,'POST',{});state.drafts.unshift(draft);

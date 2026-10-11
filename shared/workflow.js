@@ -11,6 +11,7 @@
 import {activity,candidateInput,cleanText,scheduleApproval} from './core.js';
 import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js';
 import {evidenceSummary,evidenceForDraft,seedCandidateEvidence} from './evidence.js';
+import * as contracts from './contracts.js';
 
 export const SCHEMA_VERSION = 3;
 
@@ -41,6 +42,11 @@ export function migrate(state) {
   state.groups ??= [];
   state.groupMessages ??= {};
   state.groupRuns ??= [];
+  // Backfill bot contracts and permissions. An older stored bot gains the
+  // defaults for its type; explicitly configured values are left alone.
+  for (const g of state.groups) {
+    for (const b of g.bots || []) contracts.normalizeBot(b);
+  }
   if (!Number.isInteger(state.version)) state.version = 1;
   // Passive reminder schedules become structured runnable tasks. Idempotent:
   // after this runs, `schedules` is always an empty array and never returns.
@@ -208,7 +214,11 @@ export function addBot(state, groupId, body) {
   if (!name || !instructions) fail('Bot name and instructions required.');
   const g = state.groups.find(x => x.id === groupId);
   if (!g) fail('Group not found.', 404);
-  const bot = {id: crypto.randomUUID(), name, instructions, type: 'custom'};
+  const bot = contracts.normalizeBot({
+    id: crypto.randomUUID(), name, instructions, type: 'custom',
+    contract: contracts.validateContract(body.contract),
+    permissions: contracts.validatePermissions(body.permissions),
+  });
   g.bots.push(bot);
   activity(state, 'bot', `Created bot ${name}.`);
   return bot;
@@ -226,6 +236,10 @@ export function updateBot(state, groupId, botId, body) {
   if (!name || !instructions) fail('Bot name and instructions required.');
   bot.name = name;
   bot.instructions = instructions;
+  // Contracts and permissions only change when explicitly provided, so a form
+  // that saves just the name cannot silently drop a permission.
+  if (body.contract !== undefined) bot.contract = contracts.validateContract(body.contract);
+  if (body.permissions !== undefined) bot.permissions = contracts.validatePermissions(body.permissions);
   activity(state, 'bot', `Updated bot ${name}.`);
   return bot;
 }

@@ -1,7 +1,7 @@
-import {classifyMessage, botSuggestions, statusSummary} from './chat-engine.js?v=bf9b5298d4';
-import {simulateGroup} from './group-simulator.js?v=bf9b5298d4';
-import {planHandoffs} from './coordination.js?v=bf9b5298d4';
-import {filterCandidates,filterDrafts,normalizeUiPrefs,UI_PREFS_KEY} from './usability.js?v=bf9b5298d4';
+import {classifyMessage, botSuggestions, statusSummary} from './chat-engine.js?v=5370c2c9dc';
+import {simulateGroup} from './group-simulator.js?v=5370c2c9dc';
+import {planHandoffs} from './coordination.js?v=5370c2c9dc';
+import {filterCandidates,filterDrafts,normalizeUiPrefs,UI_PREFS_KEY} from './usability.js?v=5370c2c9dc';
 
 // GitHub Pages edition: all interactions use the existing browser-local demo API.
 // Never send account tokens or real-world posting actions from this static demo.

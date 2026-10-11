@@ -3,6 +3,7 @@
  */
 import {randomUUID} from 'node:crypto';
 import {createRun,createEnvelope,MAX_HANDOFFS} from '../shared/coordination.js';
+import {assertContractOutput} from '../shared/contracts.js';
 import {executeCustomBot,aiEnabled} from './ai.js';
 import {activity} from '../shared/core.js';
 const running=new Set();
@@ -51,6 +52,10 @@ export async function runGroup(store,id,executor=executeCustomBot){
       const envelope=createEnvelope({run:r,bot,previous});
       const output=await executor(bot,JSON.stringify(envelope));
       if(typeof output!=='string'||!output.trim())throw new Error('Bot returned empty output.');
+      // The output contract is the gate: a step that returns the wrong shape
+      // fails the run here instead of handing a payload the next bot (or the
+      // human reading the transcript) never asked for.
+      assertContractOutput(bot,output);
       const toBotId=r.recipients[i+1]??null;
       previous={botId:bot.id,output:output.slice(0,3600)};
       await store.update(s=>{coordinationState(s);const live=s.groupRuns.find(x=>x.id===id);if(live.status!=='running')throw new Error('Run no longer active');
