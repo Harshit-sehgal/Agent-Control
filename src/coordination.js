@@ -20,7 +20,7 @@ export async function queueGroupRun(store,{groupId,message,directBotId=null}){
   const probe=snapshot.groups.find(g=>g.id===groupId);
   if(!probe)throw Object.assign(new Error('Group not found'),{status:404});
   if(snapshot.groupRuns?.filter(r=>r.groupId===groupId&&['running','queued'].includes(r.status)).length>=1)throw Object.assign(new Error('A group run is already active. Wait or retry later.'),{status:409});
-  if(!aiEnabled())throw Object.assign(new Error('Set OPENAI_API_KEY on the Node server for real agent-to-agent model execution. GitHub Pages runs a labeled simulation.'),{status:422});
+  if(!aiEnabled())throw Object.assign(new Error('No AI provider is configured on the Node server (set AI_API_KEY and AI_BASE_URL). GitHub Pages runs a labeled simulation.'),{status:422});
   const id=await store.update(s=>{
     coordinationState(s);
     const group=s.groups.find(g=>g.id===groupId);

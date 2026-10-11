@@ -12,6 +12,6 @@
     "dev": "node --watch src/server.js",
     "test": "node --test tests/*.test.js",
     "build:pages": "node scripts/build-pages.js",
-    "check": "node --check src/server.js && node --check src/store.js && node --check src/ai.js && node --check src/scheduler.js && node --check src/coordination.js && node --check shared/core.js && node --check shared/workflow.js && node --check shared/coordination.js && node --check shared/group-simulator.js && node --check shared/chat-engine.js && node --check shared/usability.js && node --check shared/app.js && node --check shared/local-api.js && node --check shared/transport.js && node --check extension/popup.js && node --check scripts/build-pages.js"
+    "check": "node --check src/server.js && node --check src/store.js && node --check src/sqlite-store.js && node --check src/sqlite.js && node --check src/env.js && node --check src/ai.js && node --check src/scheduler.js && node --check src/coordination.js && node --check shared/core.js && node --check shared/workflow.js && node --check shared/coordination.js && node --check shared/group-simulator.js && node --check shared/chat-engine.js && node --check shared/usability.js && node --check shared/app.js && node --check shared/local-api.js && node --check shared/transport.js && node --check extension/popup.js && node --check scripts/build-pages.js"
   }
 }

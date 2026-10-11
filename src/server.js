@@ -1,12 +1,19 @@
+import './env.js'; // load .env before anything reads process.env
+import './env.js'; // load .env before anything reads process.env
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import crypto from 'node:crypto';
-import {JsonStore} from './store.js';
+import {openStore as openSqliteStore} from './sqlite-store.js';
+// The JSON store remains available behind STORE_BACKEND=json for testing and
+// as an explicit escape hatch; SQLite is the default persistence engine.
+const openStore = async file => process.env.STORE_BACKEND === 'json'
+  ? new (await import('./store.js')).JsonStore(file).init()
+  : openSqliteStore(file);
 import {activity,candidateInput,cleanText,scoreCandidate,uuid,CSP,DEMO_SAMPLES} from '../shared/core.js';
 import * as wf from '../shared/workflow.js';
-import {aiEnabled,makeDraft,executeCustomBot} from './ai.js';
+import {aiEnabled,aiModel,aiProvider,makeDraft,executeCustomBot} from './ai.js';
 import {startScheduler} from './scheduler.js';
 import {queueGroupRun,markInterrupted,coordinationState} from './coordination.js';
 
@@ -20,7 +27,7 @@ const HOST=process.env.HOST||'127.0.0.1';
 const STORE_PATH=process.env.DATA_FILE||path.join(ROOT,'data','state.json');
 const PASSWORD=process.env.DASHBOARD_PASSWORD||crypto.randomBytes(12).toString('base64url');
 const sessions=new Map(), attempts=new Map();
-const store=await new JsonStore(STORE_PATH).init();
+const store=await openStore(STORE_PATH);
 await store.update(s=>{wf.migrate(s);wf.recoverInterrupted(s);});
 await markInterrupted(store);
 const stopScheduler=startScheduler(store);
@@ -45,7 +52,7 @@ function checkOrigin(req){if(req.url?.split('?')[0]==='/api/capture')return; if(
   if(!possible.includes(origin))fail('Cross-origin request rejected.',403);
 }
 async function jsonBody(req){let total=0;const chunks=[];for await (const chunk of req){total+=chunk.length;if(total>128*1024)fail('Request too large.',413);chunks.push(chunk);}try{return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');}catch{fail('Invalid JSON.',400);}}
-function snapshot(){const s=store.read();return {...s,aiEnabled:isLive(),serverTime:new Date().toISOString()};}
+function snapshot(){const s=store.read();return {...s,aiEnabled:isLive(),aiModel:isLive()?aiModel():null,serverTime:new Date().toISOString()};}
 async function api(req,res,u){
   const p=u.pathname,m=req.method;
   // Health checks and uptime probes commonly use HEAD; answer both, bodyless for HEAD.
@@ -195,7 +202,7 @@ const server=http.createServer(async(req,res)=>{
 server.listen(PORT,HOST,()=>{
   console.log(`\nAgent Control Prototype: http://${HOST}:${PORT}`);
   if(!process.env.DASHBOARD_PASSWORD) console.log(`Temporary dashboard password (changes on restart): ${PASSWORD}`);
-  console.log(`AI mode: ${isLive()?'Connected API':'Template drafts (no API key)'}`);
+  console.log(`AI mode: ${isLive()?`Connected · ${aiModel()} @ ${aiProvider()}`:'Template drafts (no AI provider configured)'}`);
   if(HOST!=='127.0.0.1'&&HOST!=='localhost')console.warn('WARNING: Use HTTPS plus a private network / access proxy for remote access.');
 });
 process.on('SIGINT',()=>{stopScheduler();server.close(()=>process.exit(0));});

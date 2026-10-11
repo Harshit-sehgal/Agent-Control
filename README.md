@@ -21,7 +21,7 @@ The Pages version remains **a browser-local, non-AI simulation**. The existing N
 **Group chats now route tasks between specialist bots.** You can mention `@Writer`, `@Reviewer`, or `@everyone` to select recipients. Without an explicit mention, X-engage uses Scout → Ranker → Researcher → Writer → Reviewer. Every result is attached to the bot identity, handed to the next bot, and shown in the shared conversation. Human review is required before any external action.
 
 - **GitHub Pages:** Deterministic, browser-local coordination demonstration. Handoffs produce distinct message records, pass task context, and can create an **unapproved template draft**. No real AI is run on Pages.
-- **Node API:** Persistent run coordination for real, *text-only* model calls when a **server-side** `OPENAI_API_KEY` is configured. `POST /api/groups/:id/chat` queues an authenticated run; `GET /api/groups/:id/chat` returns messages and execution traces. Each run is limited to six steps, with bounded context and group isolation. Model outputs never receive browser or publication tools.
+- **Node API:** Persistent run coordination for real, *text-only* model calls when a **server-side** AI provider is configured (`AI_API_KEY` + `AI_BASE_URL`; any OpenAI-compatible endpoint, including FreeLLMAPI, OpenRouter, Groq, a local Ollama/vLLM, or OpenAI itself). `POST /api/groups/:id/chat` queues an authenticated run; `GET /api/groups/:id/chat` returns messages and execution traces. Each run is limited to six steps, with bounded context and group isolation. Model outputs never receive browser or publication tools.
 - The platform does **not** yet have the autonomous, cloud-hosted multi-agent capabilities of Grok Bot or OpenAI Dots. See [`docs/COORDINATION.md`](docs/COORDINATION.md) for the precise supported behavior, security boundaries, and API contract.
 
 ## GitHub Pages: redesigned bot-first UI
@@ -60,7 +60,7 @@ Use `npm test` for Node unit tests. For a local Chromium UI smoke test, install 
 - Persistent candidate inbox; add URLs/text directly or capture one visible post from a Chrome extension.
 - Built-in X-engage bots: Scout, Ranker, Researcher, Writer, Reviewer, Manual Handoff.
 - Deterministic topic-based relevance ranking. This is a heuristic, not a learned engagement predictor.
-- Real AI drafting through an optional OpenAI Responses API key, with template-only fallback when no key is supplied.
+- Real AI drafting through any OpenAI-compatible provider (chat-completions or OpenAI Responses), with template-only fallback when no provider is configured.
 - Editable drafts; revisions invalidate earlier approvals and scheduled publication handoffs.
 - Random delay after approval, configurable from 0 to 1440 minutes. When due, the draft becomes **ready for manual posting**; no automatic posting occurs.
 - Copy approved text, open source URL, and manually confirm publication.
@@ -102,12 +102,20 @@ $env:DASHBOARD_PASSWORD = 'use-a-long-random-password'
 npm start
 ```
 
-Optional real AI drafting:
+Optional real AI drafting through any OpenAI-compatible provider:
 
 ```bash
-# Linux/macOS. Paid API usage is separate from ChatGPT subscription.
-OPENAI_API_KEY='YOUR_OWN_KEY' OPENAI_MODEL='gpt-4.1-mini' DASHBOARD_PASSWORD='use-a-long-random-password' npm start
+# Option A — a `.env` file next to package.json (git-ignored, loaded at startup):
+#   AI_BASE_URL=http://127.0.0.1:3001/v1   # FreeLLMAPI router, or any compatible endpoint
+#   AI_API_KEY=freellmapi-...              # your provider key
+#   AI_MODEL=auto                          # "auto" lets a router choose, or a concrete model id
+DASHBOARD_PASSWORD='use-a-long-random-password' npm start
+
+# Option B — inline environment variables (override .env):
+AI_BASE_URL='https://api.openai.com/v1' AI_API_KEY='YOUR_OWN_KEY' AI_MODEL='gpt-4.1-mini' DASHBOARD_PASSWORD='use-a-long-random-password' npm start
 ```
+
+`AI_API_STYLE` picks the wire format (`chat` for `/v1/chat/completions`, `responses` for OpenAI's `/v1/responses`); it is inferred from `AI_BASE_URL` when unset. `AI_TIMEOUT_MS` (default 90000) budgets slow free-tier routing. The startup banner prints the active model and endpoint.
 
 Secrets are read **only on the server**. Never place an AI provider key in the browser extension or Git repository. When a key is configured, draft creation may incur API charges. If the provider request fails, the backend reports an error; it does not pretend to have generated a successful AI answer.
 
