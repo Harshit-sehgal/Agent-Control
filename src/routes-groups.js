@@ -23,7 +23,7 @@ export function groupRoutes(router, {store}) {
   });
   router.add('POST', '/api/groups/:group/chat', 'member', async c => {
     const b = await c.body();
-    return reply(202, await queueGroupRun(store, {groupId: c.params.group, message: b.message, directBotId: b.directBotId || null, checkpoints: b.checkpoints === true}));
+    return reply(202, await queueGroupRun(store, {groupId: c.params.group, message: b.message, directBotId: b.directBotId || null, checkpoints: b.checkpoints === true, chatKey: typeof b.chatKey === 'string' ? b.chatKey : null}));
   });
   // Approve the next handoff of a run paused at a human checkpoint.
   router.add('POST', '/api/groups/:group/runs/:run/continue', 'member', async c => reply(202, await resumeGroupRun(store, c.params.run)));

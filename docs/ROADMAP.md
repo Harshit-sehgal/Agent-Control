@@ -38,34 +38,17 @@
 - **Admin surfaces (Node build).** Team & access (users, roles, sessions), Local agents (pairing, permissions, revoke), and **Data & security** (credential vault, retention preview/prune, encrypted backup export/restore).
 - **Notifications** (`src/notifications.js`): an unread count under You, an in-app feed, and per-user channel preferences (in-app/webhook/email relay).
 - **Server structure.** API routes are declared in a route table with the access each one needs (`src/router.js`, `src/routes-*.js`); `src/server.js` only starts services and dispatches.
-- **Durable history.** Conversations are stored with the workspace and follow the account across devices; every workflow record reads back unchanged after a restart (`src/sqlite-store.js`, `shared/chats.js`).
+- **Durable history.** Conversations are stored with the workspace and follow the account across devices; the orchestrator writes each run's messages and outcome into its conversation, so a run shows up even if the tab that started it was closed; every workflow record reads back unchanged after a restart (`src/sqlite-store.js`, `shared/chats.js`).
 - **Deployment hardening**: optional in-process HTTPS (`TLS_CERT`/`TLS_KEY`), HSTS, startup validation, and [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
-## Remaining
+## What is left
 
-- A full adversarial security-review pass and README / COORDINATION polish.
+The v0.2 and v0.3 lists that used to sit here are delivered above, apart from these:
 
-## Next milestone: v0.2 local agent + structured workflows
-
-1. ~~Extract workflow state management from route handlers.~~ Done: see `shared/workflow.js`.
-2. Introduce versioned bot/group schemas, explicit input/output contracts.
-3. Build independent local agent with device pairing and outbound authenticated connection.
-4. Add per-action tool permissions and a local browser adapter for sites that authorize automation.
-5. Replace text reminder events with structured runnable tasks and status events.
-6. Build a source evidence model: links, confidence, verification status, and allowed reuse.
-7. Add workflow run visualization, failure reporting and human checkpoints.
-8. Add tests for disconnects, duplicate task delivery and partial execution recovery.
-
-## Next milestone: v0.3 cloud control plane
-
-1. Move dashboard, authentication and scheduling to an always-on HTTPS backend.
-2. Replace local JSON store with transactional SQL and migrations.
-3. Separate users, organizations, workspace-level roles and bot permissions.
-4. Add workers and queues with explicit idempotency and lease control.
-5. Send approved task instructions to local agents through outbound secure channels.
-6. Implement encrypted credential storage, retention limits, account deletion, and backups.
-7. Implement mobile push/email notification preferences.
-8. Conduct a security review and adversarial prompt-injection tests.
+- **A real browser adapter.** The local agent's `browser.capture` is an HTTP read of pages the operator allowlists, not browser automation. Driving a real browser needs a headless-browser dependency, which this project avoids. Decide whether that rule bends for the agent process only.
+- **More than one workspace.** Users, sessions and roles exist, but every installation has one workspace. Organizations with separate data need a workspace id on every workflow table and a membership check on every read.
+- **Mobile push.** Notifications reach the in-app feed, a webhook or an email relay. Web Push needs a service worker and a push subscription per device.
+- **An always-on host.** The server runs HTTPS in-process or behind a proxy (see [`DEPLOYMENT.md`](DEPLOYMENT.md)), but nothing here deploys it. Until it runs somewhere always on, the scheduler and queue only work while your machine is up.
 
 ## Future milestones
 

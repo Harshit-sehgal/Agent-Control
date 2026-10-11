@@ -4,7 +4,7 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
-import {createRun,planHandoffs,createEnvelope,assertValidHandoff,MAX_HANDOFFS} from '../shared/coordination.js';
+import {createRun,planHandoffs,createEnvelope,assertValidHandoff,runNote,MAX_HANDOFFS} from '../shared/coordination.js';
 import {simulateGroup} from '../shared/group-simulator.js';
 import {JsonStore} from '../src/store.js';
 import {coordinationState,runGroup,markInterrupted} from '../src/coordination.js';
@@ -129,3 +129,39 @@ test('a repeated group run does not create a second draft for the same candidate
   assert.equal(first.status,'completed');assert.equal(second.status,'completed');
 });
 
+
+test('a run writes its messages and outcome into the conversation it was started from',async()=>{
+  const dir=await mkdtemp(path.join(tmpdir(),'ac-coord-'));
+  try{
+    const store=await new JsonStore(path.join(dir,'state.json')).init();
+    await store.update(s=>{s.groups=[group];coordinationState(s);
+      s.groupRuns.push(createRun({group,message:'@scout @writer go',makeId:()=> 'run-chat',chatKey:'writer',checkpoints:true}));});
+    assert.equal(store.read().groupRuns[0].chatKey,'writer');
+    await runGroup(store,'run-chat',async bot=>`Response from ${bot.name}`);
+    let chat=store.read().chats.writer;
+    assert.deepEqual(chat.map(m=>m.role),['bot','system'],'The first step and the pause must be in the conversation without any browser open.');
+    assert.equal(chat[0].id,store.read().groupMessages['x-engage'][0].id,'The conversation reuses the run-log id, so a client that mirrors it adds no duplicate.');
+    assert.equal(chat[0].senderName,'Scout');assert.equal(chat[0].runId,'run-chat');
+    assert.deepEqual(chat[1],{...chat[1],...runNote(store.read().groupRuns[0])});
+    assert.match(chat[1].text,/Paused after step 1/);
+    await runGroup(store,'run-chat',async bot=>`Response from ${bot.name}`);
+    chat=store.read().chats.writer;
+    assert.deepEqual(chat.map(m=>m.role),['bot','system','bot','system']);
+    assert.match(chat[3].text,/Done in 2 step/);
+    // A failure and a restart are reported there too.
+    await store.update(s=>{s.groupRuns.unshift(createRun({group,message:'again',makeId:()=> 'run-fail'}));});
+    await runGroup(store,'run-fail',async()=>{throw Error('Model unavailable');});
+    assert.match(store.read().chats['team-x-engage'].at(-1).text,/The run failed: Model unavailable/);
+    await store.update(s=>{s.groupRuns.unshift({...createRun({group,message:'later',makeId:()=> 'run-cut'}),status:'running'});});
+    await markInterrupted(store);
+    assert.match(store.read().chats['team-x-engage'].at(-1).text,/interrupted by a restart/);
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('a run can only be attached to a conversation inside its own group',()=>{
+  assert.equal(createRun({group,message:'hi',makeId:()=> 'r'}).chatKey,'team-x-engage');
+  assert.equal(createRun({group,message:'hi',makeId:()=> 'r',chatKey:'team-x-engage'}).chatKey,'team-x-engage');
+  assert.equal(createRun({group,message:'hi',makeId:()=> 'r',chatKey:'someone-else'}).chatKey,'team-x-engage');
+  assert.equal(createRun({group,message:'hi',makeId:()=> 'r',chatKey:'team-other'}).chatKey,'team-x-engage');
+  assert.equal(createRun({group,message:'hi',makeId:()=> 'r',directBotId:'writer'}).chatKey,'writer');
+});

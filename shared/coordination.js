@@ -43,9 +43,13 @@ export function planHandoffs(group, message, {directBotId=null}={}) {
   return {recipients:roster.slice(0,Math.min(3,MAX_HANDOFFS)).map(b=>b.id),mode:'pipeline'};
 }
 
-export function createRun({group, message, directBotId=null, now=new Date().toISOString(), makeId, checkpoints=false}) {
+export function createRun({group, message, directBotId=null, now=new Date().toISOString(), makeId, checkpoints=false, chatKey=null}) {
   const {recipients,mode}=planHandoffs(group,message,{directBotId});
+  // The conversation the run reports into: where it was started, as long as
+  // that is this group's chat or one of its bots. Never another group's.
+  const team=`team-${group.id}`, own=[team,...group.bots.map(b=>b.id)];
   return {
+    chatKey: own.includes(chatKey) ? chatKey : (directBotId || team),
     id:makeId(), groupId:group.id, input:safe(message), recipients,
     mode, status:'queued', currentStep:0, createdAt:now,
     trace:[], lastOutput:null,
@@ -53,6 +57,20 @@ export function createRun({group, message, directBotId=null, now=new Date().toIS
     // handoff, so no multi-step work advances unattended when enabled.
     checkpointsEnabled:Boolean(checkpoints), checkpoint:null,
   };
+}
+
+/** The line a conversation shows when a run stops or pauses, or null while it
+ * is still going. The id is derived from the run, so the server and a client
+ * that both report the same outcome store it once. */
+export function runNote(run){
+  const text={
+    completed:`Done in ${(run.trace||[]).length} step(s). Anything to post still needs your approval.`,
+    awaiting_checkpoint:`Paused after step ${run.currentStep}. Approve the next step to continue.`,
+    failed:`The run failed: ${run.error||'unknown error'}`,
+    interrupted:'The run was interrupted by a restart.',
+  }[run.status];
+  if(!text)return null;
+  return {id:`${run.id}-${run.status==='awaiting_checkpoint'?`paused-${run.currentStep}`:run.status}`.slice(0,64),role:'system',text,runId:run.id};
 }
 
 export function createEnvelope({run,bot,previous=null}){

@@ -5,7 +5,7 @@
  * offline command set. Nothing here can publish. */
 import {classifyMessage, statusSummary} from './chat-engine.js';
 import {simulateGroup} from './group-simulator.js';
-import {planHandoffs} from './coordination.js';
+import {planHandoffs, runNote} from './coordination.js';
 import {store, api, sync, conversation, appendMessage, setTyping, isStaticDemo, isLive, logLocalRun, teamKey} from './ui-store.js';
 
 const TERMINAL = ['completed', 'failed', 'interrupted', 'awaiting_checkpoint'];
@@ -33,19 +33,14 @@ export async function streamGroupRun(groupId, key = teamKey(groupId), runId = nu
     last = (snap.runs || []).find(r => runId ? r.id === runId : r.groupId === groupId) || null;
     if (last && TERMINAL.includes(last.status)) break;
   }
-  if (!last) return;
-  const done = {
-    completed: `Done in ${(last.trace || []).length} step(s). Anything to post still needs your approval.`,
-    awaiting_checkpoint: `Paused after step ${last.currentStep}. Approve the next step to continue.`,
-    failed: `The run failed: ${last.error || 'unknown error'}`,
-    interrupted: 'The run was interrupted by a restart.',
-  }[last.status];
-  if (done) appendMessage(key, {role: 'system', text: done, runId: last.id});
+  // The server writes the same line under the same id, so it is stored once.
+  const note = last && runNote(last);
+  if (note && !(store.messages[key] || []).some(m => m.id === note.id)) appendMessage(key, note);
 }
 
 async function runOnServer(group, message, directBotId, key) {
   appendMessage(key, {role: 'system', text: directBotId ? 'Working on it.' : 'Passing this to the group.'});
-  const run = await api(`/api/groups/${group.id}/chat`, 'POST', {message, directBotId: directBotId || null, checkpoints: store.checkpoints});
+  const run = await api(`/api/groups/${group.id}/chat`, 'POST', {message, directBotId: directBotId || null, checkpoints: store.checkpoints, chatKey: key});
   await streamGroupRun(group.id, key, run?.runId || null);
 }
 

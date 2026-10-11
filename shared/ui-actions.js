@@ -137,7 +137,7 @@ export const actions = {
   },
   'retry-run': async b => {
     const key = chatId() || teamKey(b.dataset.id);
-    const run = await api(`/api/groups/${b.dataset.id}/chat`, 'POST', {message: b.dataset.message, directBotId: b.dataset.direct || null, checkpoints: store.checkpoints});
+    const run = await api(`/api/groups/${b.dataset.id}/chat`, 'POST', {message: b.dataset.message, directBotId: b.dataset.direct || null, checkpoints: store.checkpoints, chatKey: key});
     toast('Run queued again.');
     await streamGroupRun(b.dataset.id, key, run?.runId || null); await sync();
   },

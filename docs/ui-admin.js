@@ -2,9 +2,9 @@
  * `adminPage(kind)` fetches and returns the body HTML; the handler tables are
  * wired by the host's delegated click, submit and change listeners. Handlers do
  * not catch errors, the host toasts them. */
-import {esc, btn, row, box, field, note, empty, tag, fullDate} from './ui-kit.js?v=85a553776b';
-import {store, api, sync} from './ui-store.js?v=85a553776b';
-import {toast, confirmSheet, askSheet} from './ui-dialogs.js?v=85a553776b';
+import {esc, btn, row, box, field, note, empty, tag, fullDate} from './ui-kit.js?v=f80adbb636';
+import {store, api, sync} from './ui-store.js?v=f80adbb636';
+import {toast, confirmSheet, askSheet} from './ui-dialogs.js?v=f80adbb636';
 
 /** Title + one-line description per page, used by the host for the page header. */
 export const ADMIN_PAGES = {
