@@ -37,7 +37,7 @@ Try X-engage → Group chat → `Check the latest candidate and prepare a draft`
 
 ## Local Node engine (real model calls)
 
-Start `npm start` with `OPENAI_API_KEY` and `DASHBOARD_PASSWORD` set in the **server process environment**. Authenticate to obtain the HTTP-only `agent_session` cookie.
+Start `npm start` with an AI provider configured — `AI_API_KEY` plus `AI_BASE_URL` for any OpenAI-compatible endpoint, or `OPENAI_API_KEY` for OpenAI itself — and `DASHBOARD_PASSWORD` set in the **server process environment** (or in a git-ignored `.env`). Authenticate to obtain the HTTP-only `agent_session` cookie.
 
 - `POST /api/groups/:groupId/chat` with `{"message":"Check this topic","directBotId":null}` returns HTTP 202 with `runId` and `status`.
 - `GET /api/groups/:groupId/chat` returns the persisted group `messages` and `runs` for polling.

@@ -9,8 +9,15 @@
  * lifecycle: candidate -> draft -> approved/scheduled -> ready -> posted.
  */
 import {activity,candidateInput,cleanText,scheduleApproval} from './core.js';
+import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js';
+import {evidenceSummary,evidenceForDraft,seedCandidateEvidence} from './evidence.js';
+import {normalizeRetention} from './retention.js';
+import * as contracts from './contracts.js';
+import {pruneChats} from './chats.js';
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
+/** Posts are never pruned by age, so their number is bounded here. */
+export const MAX_CANDIDATES = 2000;
 
 export function fail(message, status = 400) {
   throw Object.assign(new Error(message), {status});
@@ -33,12 +40,23 @@ export function migrate(state) {
   state.candidates ??= [];
   state.drafts ??= [];
   state.runs ??= [];
-  state.schedules ??= [];
+  state.tasks ??= [];
+  state.evidence ??= [];
   state.events ??= [];
   state.groups ??= [];
   state.groupMessages ??= {};
   state.groupRuns ??= [];
+  pruneChats(state);
+  // Backfill bot contracts and permissions. An older stored bot gains the
+  // defaults for its type; explicitly configured values are left alone.
+  for (const g of state.groups) {
+    for (const b of g.bots || []) contracts.normalizeBot(b);
+  }
   if (!Number.isInteger(state.version)) state.version = 1;
+  // Passive reminder schedules become structured runnable tasks. Idempotent:
+  // after this runs, `schedules` is always an empty array and never returns.
+  state.schedules ??= [];
+  migrateSchedules(state);
   state.version = Math.max(state.version, SCHEMA_VERSION);
   return state;
 }
@@ -68,16 +86,19 @@ export function updateSettings(state, body) {
     state.settings.minDelay = a;
     state.settings.maxDelay = c;
   }
+  if (body.retention !== undefined) state.settings.retention = normalizeRetention(body.retention);
   activity(state, 'settings', 'Updated user preferences.');
   return state.settings;
 }
 
 export function addCandidate(state, body) {
+  if ((state.candidates || []).length >= MAX_CANDIDATES) fail(`This workspace already holds ${MAX_CANDIDATES} posts. Remove some before adding more.`, 409);
   const input = candidateInput(body);
   const existing = state.candidates.find(c => c.url === input.url && c.text === input.text);
   if (existing) return {candidate: existing, duplicate: true};
   const candidate = {...input, id: crypto.randomUUID(), status: 'new', createdAt: new Date().toISOString()};
   state.candidates.unshift(candidate);
+  seedCandidateEvidence(state, candidate);
   activity(state, 'capture', `Added a candidate from ${input.author}.`, {candidateId: candidate.id});
   return {candidate, duplicate: false};
 }
@@ -86,7 +107,9 @@ export function seedDemo(state, sample = []) {
   let count = 0;
   for (const b of sample) {
     if (state.candidates.some(c => c.url === b.url)) continue;
-    state.candidates.push({...b, id: crypto.randomUUID(), status: 'new', createdAt: new Date().toISOString(), demo: true});
+    const candidate = {...b, id: crypto.randomUUID(), status: 'new', createdAt: new Date().toISOString(), demo: true};
+    state.candidates.push(candidate);
+    seedCandidateEvidence(state, candidate);
     count++;
   }
   activity(state, 'demo', `Loaded ${count} demo candidate(s).`);
@@ -104,10 +127,15 @@ export function finishProcessing(state, id, evaluation, generated) {
   const c = findCandidate(state, id);
   c.status = 'drafted';
   c.score = evaluation;
+  // Every draft starts with its captured source recorded as unverified
+  // evidence; the evidence model is what makes "check claims before posting"
+  // a state transition instead of a warning label.
+  seedCandidateEvidence(state, c);
   const draft = {
     id: crypto.randomUUID(), candidateId: id, author: c.author, url: c.url, sourceText: c.text,
     text: generated.text, revision: 1, status: 'pending', score: evaluation.score,
     mode: generated.mode, note: generated.note, createdAt: new Date().toISOString(),
+    evidence: evidenceSummary(state.evidence.filter(e => e.candidateId === id)),
   };
   state.drafts.unshift(draft);
   activity(state, 'draft', `Created ${generated.mode} draft for ${c.author}.`, {draftId: draft.id});
@@ -129,6 +157,7 @@ export function editDraft(state, id, text) {
   d.revision++;
   d.status = 'pending';
   delete d.approvedText; delete d.approvedRevision; delete d.dueAt; delete d.approvedAt;
+  delete d.approvedEvidence;
   activity(state, 'edit', `Edited draft. Revision ${d.revision}; previous approval cleared.`, {draftId: d.id});
   return d;
 }
@@ -142,6 +171,7 @@ export function rewriteDraft(state, id, generated) {
   x.mode = generated.mode;
   x.note = generated.note;
   delete x.approvedText; delete x.approvedRevision; delete x.dueAt; delete x.approvedAt;
+  delete x.approvedEvidence;
   activity(state, 'rewrite', `Rewrote draft ${x.id}.`, {draftId: x.id});
   return x;
 }
@@ -149,8 +179,15 @@ export function rewriteDraft(state, id, generated) {
 export function draftAction(state, id, action, body = {}) {
   const x = findDraft(state, id);
   if (action === 'approve') {
+    // The evidence gate: disputed source material blocks approval, the same
+    // way an empty draft does. Confidence values alone never unblock it.
+    const summary = evidenceSummary(evidenceForDraft(state, id));
+    if (!summary.approved) fail('Resolve disputed evidence before approving this draft.', 409);
     scheduleApproval(x, body.minDelay ?? state.settings.minDelay, body.maxDelay ?? state.settings.maxDelay);
-    activity(state, 'approve', `Approved exact revision ${x.revision}.`, {draftId: id, dueAt: x.dueAt});
+    // Freeze the evidence picture the approval was made against, so a later
+    // evidence edit can never retroactively change what was approved.
+    x.approvedEvidence = evidenceForDraft(state, id).map(e => structuredClone(e));
+    activity(state, 'approve', `Approved exact revision ${x.revision}.`, {draftId: id, dueAt: x.dueAt, evidence: summary.level});
   } else if (action === 'reject') {
     if (!['pending', 'scheduled', 'ready'].includes(x.status)) fail('Cannot reject this draft.', 409);
     x.status = 'rejected';
@@ -184,7 +221,11 @@ export function addBot(state, groupId, body) {
   if (!name || !instructions) fail('Bot name and instructions required.');
   const g = state.groups.find(x => x.id === groupId);
   if (!g) fail('Group not found.', 404);
-  const bot = {id: crypto.randomUUID(), name, instructions, type: 'custom'};
+  const bot = contracts.normalizeBot({
+    id: crypto.randomUUID(), name, instructions, type: 'custom',
+    contract: contracts.validateContract(body.contract),
+    permissions: contracts.validatePermissions(body.permissions),
+  });
   g.bots.push(bot);
   activity(state, 'bot', `Created bot ${name}.`);
   return bot;
@@ -202,6 +243,10 @@ export function updateBot(state, groupId, botId, body) {
   if (!name || !instructions) fail('Bot name and instructions required.');
   bot.name = name;
   bot.instructions = instructions;
+  // Contracts and permissions only change when explicitly provided, so a form
+  // that saves just the name cannot silently drop a permission.
+  if (body.contract !== undefined) bot.contract = contracts.validateContract(body.contract);
+  if (body.permissions !== undefined) bot.permissions = contracts.validatePermissions(body.permissions);
   activity(state, 'bot', `Updated bot ${name}.`);
   return bot;
 }
@@ -219,33 +264,31 @@ export function recoverInterrupted(state) {
 }
 
 
+/** Reminder compatibility layer: the UI and both transports still create
+ * reminders through these helpers, but the record they write is a structured
+ * `reminder`-kind task with retries, leases and status events. */
 export function addSchedule(state, body) {
-  const label = cleanText(body.label, 200);
-  const kind = body.kind;
-  if (!label || !['once', 'interval'].includes(kind)) fail('Label and valid schedule kind required.');
-  let nextAt, intervalMinutes = null;
-  if (kind === 'once') {
-    const when = Date.parse(body.nextAt);
-    if (!Number.isFinite(when) || when < Date.now() + 1000 || when > Date.now() + 365 * 86400000) fail('Choose a future date within one year.');
-    nextAt = new Date(when).toISOString();
-  } else {
-    intervalMinutes = Number(body.intervalMinutes);
-    if (!Number.isInteger(intervalMinutes) || intervalMinutes < 1 || intervalMinutes > 10080) fail('Interval must be 1–10080 minutes.');
-    nextAt = new Date(Date.now() + intervalMinutes * 60000).toISOString();
-  }
-  const item = {id: crypto.randomUUID(), label, kind, nextAt, intervalMinutes, enabled: true};
-  state.schedules.unshift(item);
-  activity(state, 'schedule', `Added reminder: ${label}`);
-  return item;
+  const task = enqueueTask(state, {kind: 'reminder', payload: {label: body.label, kind: body.kind, intervalMinutes: body.intervalMinutes, nextAt: body.nextAt}}).task;
+  return scheduleView(task);
 }
 
 export function removeSchedule(state, id) {
-  const i = state.schedules.findIndex(x => x.id === id);
-  if (i < 0) fail('Schedule not found.', 404);
-  const item = state.schedules.splice(i, 1)[0];
-  activity(state, 'schedule', `Removed reminder: ${item.label}`);
+  const task = state.tasks.find(t => t.id === id && t.kind === 'reminder');
+  if (!task) fail('Schedule not found.', 404);
+  cancelTask(state, id);
   return {ok: true};
 }
+
+/** Backwards-compatible shape for older UI callers: the live task projected
+ * into the fields the schedule list used to show. */
+const scheduleView = task => ({
+  id: task.id,
+  label: task.payload.label,
+  kind: task.payload.kind,
+  nextAt: task.runAt,
+  intervalMinutes: task.intervalMinutes,
+  enabled: task.status === 'queued' || task.status === 'running',
+});
 
 export function resetDemo(state) {
   state.candidates = state.candidates.filter(x => !x.demo);

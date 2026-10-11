@@ -12,7 +12,9 @@ async function freePort(){return await new Promise((resolve,reject)=>{const serv
 async function launch(){
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'agent-api-')),port=await freePort();
   const base=`http://127.0.0.1:${port}`;
-  const child=spawn(process.execPath,['src/server.js'],{cwd:root,env:{...process.env,OPENAI_API_KEY:'',DASHBOARD_PASSWORD:'test-password-1234',HOST:'127.0.0.1',PORT:String(port),DATA_FILE:path.join(dir,'state.json')},stdio:['ignore','pipe','pipe']});
+  // Hermetic: ignore any developer `.env` and every AI env var so the tests
+  // always run against the template-draft path, regardless of local setup.
+  const child=spawn(process.execPath,['src/server.js'],{cwd:root,env:{...process.env,AGENT_SKIP_DOTENV:'1',AI_API_KEY:'',OPENAI_API_KEY:'',AI_BASE_URL:'',OPENAI_BASE_URL:'',DASHBOARD_PASSWORD:'test-password-1234',HOST:'127.0.0.1',PORT:String(port),DATA_FILE:path.join(dir,'state.json')},stdio:['ignore','pipe','pipe']});
   let output='';child.stdout.on('data',b=>output+=b.toString());child.stderr.on('data',b=>output+=b.toString());
   let live=false;
   for(let i=0;i<90;i++){
@@ -140,7 +142,7 @@ test('a candidate interrupted mid-draft is processable again after a restart', {
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'agent-api-recover-')),port=await freePort();
   const base=`http://127.0.0.1:${port}`;
   const stateFile=path.join(dir,'state.json');
-  const env={...process.env,OPENAI_API_KEY:'',DASHBOARD_PASSWORD:'test-password-1234',HOST:'127.0.0.1',PORT:String(port),DATA_FILE:stateFile};
+  const env={...process.env,AGENT_SKIP_DOTENV:'1',AI_API_KEY:'',OPENAI_API_KEY:'',AI_BASE_URL:'',OPENAI_BASE_URL:'',DASHBOARD_PASSWORD:'test-password-1234',HOST:'127.0.0.1',PORT:String(port),DATA_FILE:stateFile};
   const waitFor=async child=>{
     for(let i=0;i<90;i++){
       if(child.exitCode!==null)return false;

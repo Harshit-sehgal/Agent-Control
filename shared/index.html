@@ -1,29 +1,24 @@
 <!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#000000"><meta name="color-scheme" content="dark">
-<meta name="description" content="Agent Control: a local-first workspace for your bot groups, conversations and approvals.">
+<meta name="theme-color" content="#fbfaf8"><meta name="color-scheme" content="light dark">
+<meta name="description" content="Agent Control: chat with your bots. They draft, you approve and post.">
 <meta name="agent-backend" content="server">
 <!-- Mirrors the Node server's CSP header so the static Pages build is protected too. Keep the two in sync. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'">
-<title>Agent Control — Your bot workspace</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'">
+<title>Agent Control</title>
 <link rel="stylesheet" href="./app.css">
-<link rel="stylesheet" href="./polish.css">
-<link rel="stylesheet" href="./usability.css">
-</head><body>
+</head><body data-pane="list">
 <div id="progress" class="progress hidden" role="presentation"></div>
-<div id="root" class="app-layout">
-  <aside class="sidebar" id="sidebar" aria-label="Workspace navigation"><div class="side-skeleton"><div class="side-skeleton-logo"></div><div class="side-skeleton-row"></div><div class="side-skeleton-row"></div><div class="side-skeleton-row short"></div></div></aside>
-  <div class="app-area">
-    <header class="topbar" id="topbar"></header>
-    <main class="main" id="main" tabindex="-1"><div class="splash" role="status" aria-live="polite"><span class="splash-mark" aria-hidden="true">&#10022;</span><p>Loading your workspace…</p></div></main>
-  </div>
-  <aside id="inspector" class="inspector" aria-label="Context panel"></aside>
+<div id="root" class="app">
+  <aside class="pane pane-list" id="sidebar" aria-label="Chats"></aside>
+  <main class="pane pane-main" id="main" tabindex="-1"><div class="splash" role="status" aria-live="polite"><p>Opening your chats…</p></div></main>
+  <aside class="pane pane-info" id="inspector" aria-label="Chat details"></aside>
 </div>
 <div id="modal" class="modal-layer hidden" role="presentation"></div>
 <div id="command" class="command-layer hidden" role="presentation"></div>
 <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-<div id="mobile-backdrop" class="mobile-backdrop hidden"></div>
+<div id="announce" class="sr-only" aria-live="polite"></div>
 <script type="module" src="./local-api.js"></script>
 <script defer src="./transport.js"></script>
 <script type="module" src="./app.js"></script>
