@@ -62,6 +62,32 @@ test('server-side agent execution persists messages and real previous outputs',a
   }finally{await rm(dir,{recursive:true,force:true});}
 });
 
+test('a checkpointed run pauses between steps and resumes on human approval',async()=>{
+  const dir=await mkdtemp(path.join(tmpdir(),'ac-coord-cp-'));
+  try{
+    const store=await new JsonStore(path.join(dir,'state.json')).init();
+    const three={id:'x-engage',name:'X-engage',bots:group.bots.slice(0,3)};
+    await store.update(s=>{s.groups=[three];coordinationState(s);s.groupRuns.push(createRun({group:three,message:'Coordinate',makeId:()=> 'run-cp',checkpoints:true}));});
+    const {resumeGroupRun}=await import('../src/coordination.js');
+    await runGroup(store,'run-cp',async bot=>`Response from ${bot.name}`);
+    let run=store.read().groupRuns[0];
+    assert.equal(run.status,'awaiting_checkpoint');
+    assert.equal(run.trace.length,1,'Only the first step runs before the gate.');
+    assert.equal(run.checkpoint.nextStep,1);
+    const responder=async bot=>`Response from ${bot.name}`;
+    await resumeGroupRun(store,'run-cp',responder);
+    run=store.read().groupRuns[0];
+    assert.equal(run.status,'awaiting_checkpoint','It pauses again before the last handoff.');
+    assert.equal(run.trace.length,2);
+    await resumeGroupRun(store,'run-cp',responder);
+    run=store.read().groupRuns[0];
+    assert.equal(run.status,'completed');
+    assert.equal(run.trace.length,3);
+    assert.equal(run.checkpoint,null);
+    // A run that is not paused cannot be resumed.
+    await assert.rejects(resumeGroupRun(store,'run-cp'),error=>error.status===409);
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
 test('orchestrator records execution failure and never publishes',async()=>{
   const dir=await mkdtemp(path.join(tmpdir(),'ac-coord-fail-'));
   try{

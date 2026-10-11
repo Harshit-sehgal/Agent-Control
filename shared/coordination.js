@@ -43,12 +43,15 @@ export function planHandoffs(group, message, {directBotId=null}={}) {
   return {recipients:roster.slice(0,Math.min(3,MAX_HANDOFFS)).map(b=>b.id),mode:'pipeline'};
 }
 
-export function createRun({group, message, directBotId=null, now=new Date().toISOString(), makeId}) {
+export function createRun({group, message, directBotId=null, now=new Date().toISOString(), makeId, checkpoints=false}) {
   const {recipients,mode}=planHandoffs(group,message,{directBotId});
   return {
     id:makeId(), groupId:group.id, input:safe(message), recipients,
     mode, status:'queued', currentStep:0, createdAt:now,
     trace:[], lastOutput:null,
+    // A checkpointed run pauses between steps until a human approves each
+    // handoff, so no multi-step work advances unattended when enabled.
+    checkpointsEnabled:Boolean(checkpoints), checkpoint:null,
   };
 }
 

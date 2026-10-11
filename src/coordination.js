@@ -13,7 +13,7 @@ export function coordinationState(s){s.groupMessages??={};s.groupRuns??=[];}
 export async function markInterrupted(store){
   await store.update(s=>{coordinationState(s);for(const r of s.groupRuns){if(r.status==='running'||r.status==='queued'){r.status='interrupted';r.error='Server restarted before the run completed. Retry explicitly to avoid duplicate model calls.';}}});
 }
-export async function queueGroupRun(store,{groupId,message,directBotId=null}){
+export async function queueGroupRun(store,{groupId,message,directBotId=null,checkpoints=false}){
   // Validate the request against the store first so a missing group reports 404
   // and a busy group reports 409, instead of the AI-key check shadowing them
   // with a misleading 422 on an instance that simply has no key yet.
@@ -27,7 +27,7 @@ export async function queueGroupRun(store,{groupId,message,directBotId=null}){
     const group=s.groups.find(g=>g.id===groupId);
     if(!group)throw Object.assign(new Error('Group not found'),{status:404});
     if(s.groupRuns.filter(r=>r.groupId===groupId&&['running','queued'].includes(r.status)).length>=1)throw Object.assign(new Error('A group run is already active. Wait or retry later.'),{status:409});
-    const run=createRun({group,message:clean(message),directBotId,makeId:randomUUID});
+    const run=createRun({group,message:clean(message),directBotId,makeId:randomUUID,checkpoints:Boolean(checkpoints)});
     if(run.recipients.length>MAX_HANDOFFS)throw Object.assign(new Error('Run too long.'),{status:400});
     s.groupRuns.unshift(run);s.groupRuns=s.groupRuns.slice(0,100);
     s.groupMessages[groupId]??=[];
@@ -41,11 +41,16 @@ export async function queueGroupRun(store,{groupId,message,directBotId=null}){
 export async function runGroup(store,id,executor=executeCustomBot){
   if(running.has(id))return;running.add(id);
   try{
-    await store.update(s=>{coordinationState(s);const r=s.groupRuns.find(x=>x.id===id);if(!r||r.status!=='queued')throw new Error('Run is not queued');r.status='running';r.startedAt=stamp();});
+    // Resume support: a run paused at a checkpoint restarts from where it
+    // stopped, carrying the previous bot's output into the next envelope.
+    const before=store.read().groupRuns.find(x=>x.id===id);
+    const start=before?.checkpoint?.nextStep||0;
+    let previous=before?.checkpoint?.previous||null;
+    await store.update(s=>{coordinationState(s);const r=s.groupRuns.find(x=>x.id===id);if(!r||!['queued','running','awaiting_checkpoint'].includes(r.status))throw new Error('Run is not runnable');r.status='running';r.startedAt=r.startedAt||stamp();r.checkpoint=null;});
     const original=store.read().groupRuns.find(x=>x.id===id);
-    let previous=null;
-    for(let i=0;i<original.recipients.length;i++){
+    for(let i=start;i<original.recipients.length;i++){
       const current=store.read();const g=current.groups.find(x=>x.id===original.groupId);const r=current.groupRuns.find(x=>x.id===id);
+      if(!r||r.status!=='running')throw new Error('Run no longer active');
       const bot=g?.bots.find(x=>x.id===r.recipients[i]);
       if(!g||!bot)throw new Error('Bot or group was removed during execution.');
       r.currentStep=i;
@@ -58,17 +63,31 @@ export async function runGroup(store,id,executor=executeCustomBot){
       assertContractOutput(bot,output);
       const toBotId=r.recipients[i+1]??null;
       previous={botId:bot.id,output:output.slice(0,3600)};
-      await store.update(s=>{coordinationState(s);const live=s.groupRuns.find(x=>x.id===id);if(live.status!=='running')throw new Error('Run no longer active');
+      await store.update(s=>{coordinationState(s);const live=s.groupRuns.find(x=>x.id===id);if(!live||live.status!=='running')throw new Error('Run no longer active');
         live.currentStep=i+1;live.trace.push({botId:bot.id,output:previous.output,toBotId,at:stamp()});
         const chat=s.groupMessages[live.groupId]??=[];
         chat.push({id:randomUUID(),runId:id,role:'bot',senderId:bot.id,senderName:bot.name,toBotId,text:previous.output,at:stamp()});
         s.groupMessages[live.groupId]=chat.slice(-300);
       });
+      // Human checkpoint: pause before the next handoff until a person approves,
+      // so a multi-step run never advances unattended when enabled.
+      if(original.checkpointsEnabled&&toBotId){
+        await store.update(s=>{const live=s.groupRuns.find(x=>x.id===id);live.status='awaiting_checkpoint';live.checkpoint={nextStep:i+1,previous,at:stamp()};activity(s,'group-run',`Paused for a checkpoint after step ${i+1}`,{runId:id});});
+        return;
+      }
     }
-    await store.update(s=>{const r=s.groupRuns.find(x=>x.id===id);r.status='completed';r.completedAt=stamp();r.lastOutput=previous?.output??null;activity(s,'group-run','Completed bot coordination run',{runId:id});});
+    await store.update(s=>{const r=s.groupRuns.find(x=>x.id===id);r.status='completed';r.completedAt=stamp();r.checkpoint=null;r.lastOutput=previous?.output??null;activity(s,'group-run','Completed bot coordination run',{runId:id});});
   // Only a run that was actually executing may be marked failed. A restart marks
   // live runs `interrupted`; overwriting that with `failed` would report a crash
   // the operator never saw as a model error and hide the explicit retry advice.
   }catch(e){await store.update(s=>{const r=s.groupRuns?.find(x=>x.id===id);if(r&&r.status==='running'){r.status='failed';r.error=clean(e.message);r.completedAt=stamp();activity(s,'group-error',`Coordination failed: ${clean(e.message)}`,{runId:id});}});}
   finally{running.delete(id);}
+}
+/** Resume a run paused at a checkpoint, after a person approved the next step. */
+export async function resumeGroupRun(store,id,executor=executeCustomBot){
+  const r=store.read().groupRuns.find(x=>x.id===id);
+  if(!r)throw Object.assign(new Error('Run not found.'),{status:404});
+  if(r.status!=='awaiting_checkpoint')throw Object.assign(new Error('This run is not waiting for a checkpoint.'),{status:409});
+  await runGroup(store,id,executor);
+  return {runId:id,status:'running'};
 }

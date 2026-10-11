@@ -32,11 +32,17 @@ export function loadMasterKey(dataFile) {
   const env = loadEnvKey();
   if (env) return {key: env, source: 'env'};
   const file = resolveVaultKeyPath(dataFile);
-  try {
-    const raw = fs.readFileSync(file, 'utf8').trim();
+  // Only generate a key when the file is *absent*. If it exists but cannot be
+  // read or is not a valid 32-byte key, fail loudly instead of overwriting it:
+  // a silent rotation would make every previously encrypted secret unreadable.
+  if (fs.existsSync(file)) {
+    let raw;
+    try { raw = fs.readFileSync(file, 'utf8').trim(); }
+    catch (e) { throw new Error(`The vault keyfile at ${file} exists but could not be read (${e.code || e.message}). Refusing to overwrite it.`); }
     const key = Buffer.from(raw, 'base64');
-    if (key.length === 32) return {key, source: 'keyfile'};
-  } catch {}
+    if (key.length !== 32) throw new Error(`The vault keyfile at ${file} is not a valid 32-byte key. Restore it from backup or set MASTER_KEY; refusing to overwrite it because that would make existing encrypted secrets unreadable.`);
+    return {key, source: 'keyfile'};
+  }
   const key = crypto.randomBytes(32);
   fs.mkdirSync(path.dirname(file), {recursive: true});
   fs.writeFileSync(file, key.toString('base64'), {mode: 0o600});

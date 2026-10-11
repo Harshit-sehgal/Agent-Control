@@ -118,7 +118,11 @@ export function enqueueAgentTask(store, agentId, {kind, payload = {}, idempotenc
   if (!agent) fail('Agent not found.', 404);
   if (agent.revoked_at) fail('This agent has been revoked.', 409);
   const granted = JSON.parse(agent.permissions || '[]');
-  if (permission && !granted.includes(permission)) fail(`This agent does not hold the ${permission} permission.`, 403);
+  // Always require the task kind's own permission, not only an explicitly
+  // passed one: a caller that forgets `permission` must not be able to enqueue
+  // work the agent was never granted.
+  const required = permission || permissionForKind(kind);
+  if (required && !granted.includes(required)) fail(`This agent does not hold the ${required} permission.`, 403);
   if (idempotencyKey) {
     const existing = store.get('SELECT * FROM agent_tasks WHERE agent_id=? AND idempotency_key=?', agentId, idempotencyKey);
     if (existing) return {task: existing, duplicate: true};
