@@ -89,6 +89,18 @@ docker compose up -d --build
 The databases and the vault key are kept in the `data` volume. The image runs
 as a non-root user and reports its health from `/api/health`.
 
+**Your own machine, over Tailscale.** No domain and no open ports: Tailscale
+gives the machine an HTTPS name that only your own devices can reach.
+
+```sh
+TS_HOST=<machine>.<tailnet>.ts.net docker compose -p agent-control -f deploy/compose.tailscale.yaml up -d --build
+sudo tailscale serve --bg 4173
+```
+
+It reads the repository's `.env`, keeps data in the repository's `data/`
+folder, and can call an AI gateway on the same machine. It is on only while
+that machine is.
+
 **systemd, without Docker.** Copy the repository to `/srv/agent-control`, write
 its `.env`, install `deploy/agent-control.service` and put a reverse proxy in
 front as described above. The unit restarts the server on failure and can write
