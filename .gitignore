@@ -1,8 +1,30 @@
+# Dependencies and build output
 node_modules/
-data/
-.env
-.DS_Store
+dist/
+build/
 coverage/
 *.log
+
+# Local state and secrets
+data/
+.env
+.env.*
+!.env.example
+
+# Python caches (Playwright smoke tests)
 __pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local agent tooling
+.freebuff/
+.claude/settings.local.json
+
+# Generated UI screenshots
 ui-*.png

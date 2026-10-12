@@ -264,4 +264,4 @@ Both paths run the same `shared/workflow.js` rules, so the demo and the real das
 
 ## License
 
-No open-source license has been selected. The default is all rights reserved until the repository owner chooses a license.
+Released under the MIT License. See [LICENSE](LICENSE). Copyright (c) 2026 Harshit Sehgal.
