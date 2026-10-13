@@ -5,7 +5,8 @@ import {randomUUID} from 'node:crypto';
 import {createRun,createEnvelope,runNote,MAX_HANDOFFS} from '../shared/coordination.js';
 import {addChatMessages} from '../shared/chats.js';
 import {assertContractOutput} from '../shared/contracts.js';
-import {executeCustomBot,aiEnabled} from './ai.js';
+import {executeCustomBot} from './ai.js';
+import {resolveConfig,aiAvailable} from './ai-providers.js';
 import {activity} from '../shared/core.js';
 const running=new Set();
 const clean=v=>String(v??'').slice(0,4000);
@@ -29,7 +30,7 @@ export async function queueGroupRun(store,{groupId,message,directBotId=null,chec
   const probe=snapshot.groups.find(g=>g.id===groupId);
   if(!probe)throw Object.assign(new Error('Group not found'),{status:404});
   if(snapshot.groupRuns?.filter(r=>r.groupId===groupId&&['running','queued'].includes(r.status)).length>=1)throw Object.assign(new Error('A group run is already active. Wait or retry later.'),{status:409});
-  if(!aiEnabled())throw Object.assign(new Error('No AI provider is configured on the Node server (set AI_API_KEY and AI_BASE_URL). GitHub Pages runs a labeled simulation.'),{status:422});
+  if(!aiAvailable(store))throw Object.assign(new Error('No AI provider is configured. Add one under You → AI and models, or set AI_API_KEY on the server. GitHub Pages runs a labeled simulation.'),{status:422});
   const id=await store.update(s=>{
     coordinationState(s);
     const group=s.groups.find(g=>g.id===groupId);
@@ -63,7 +64,8 @@ export async function runGroup(store,id,executor=executeCustomBot){
       if(!g||!bot)throw new Error('Bot or group was removed during execution.');
       r.currentStep=i;
       const envelope=createEnvelope({run:r,bot,previous});
-      const output=await executor(bot,JSON.stringify(envelope));
+      // Each bot runs on its own chosen model/provider, else the workspace default.
+      const output=await executor(bot,JSON.stringify(envelope),resolveConfig(store,bot.id));
       if(typeof output!=='string'||!output.trim())throw new Error('Bot returned empty output.');
       // The output contract is the gate: a step that returns the wrong shape
       // fails the run here instead of handing a payload the next bot (or the

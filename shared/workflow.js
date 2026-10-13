@@ -46,6 +46,12 @@ export function migrate(state) {
   state.groups ??= [];
   state.groupMessages ??= {};
   state.groupRuns ??= [];
+  // Bring-your-own-key AI providers and the workspace/bot model choices.
+  state.ai ??= {};
+  state.ai.providers ??= [];
+  state.ai.bots ??= {};
+  if (state.ai.defaultProviderId === undefined) state.ai.defaultProviderId = null;
+  if (state.ai.defaultModel === undefined) state.ai.defaultModel = null;
   pruneChats(state);
   // Backfill bot contracts and permissions. An older stored bot gains the
   // defaults for its type; explicitly configured values are left alone.

@@ -1,13 +1,13 @@
 /** Everything that used to be a dashboard tab now hangs off a conversation:
  * the info panel of the open chat (drafts, posts, reminders, runs, voice, the
  * bot's profile) and the "You" pages (account, admin, about). */
-import {filterCandidates, filterDrafts} from './usability.js?v=8487cfc1fa';
-import {ACTIONS, OUTPUT_KINDS} from './contracts.js?v=8487cfc1fa';
-import {ACTIVE_DRAFTS, needsYou} from './ui-model.js?v=8487cfc1fa';
-import {esc, icon, avatar, groupAvatar, tintClass, TINT_COUNT, btn, iconBtn, row, box, field, note, empty, tag, pageHead, fullDate} from './ui-kit.js?v=8487cfc1fa';
-import {store, conversation, isStaticDemo, isAdmin, isLive, isXGroup, botTint, recentRuns, THEMES, themeChoice} from './ui-store.js?v=8487cfc1fa';
-import {draftCard, postCard} from './ui-views.js?v=8487cfc1fa';
-import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=8487cfc1fa';
+import {filterCandidates, filterDrafts} from './usability.js?v=f0b0c2abd8';
+import {ACTIONS, OUTPUT_KINDS} from './contracts.js?v=f0b0c2abd8';
+import {ACTIVE_DRAFTS, needsYou} from './ui-model.js?v=f0b0c2abd8';
+import {esc, icon, avatar, groupAvatar, tintClass, TINT_COUNT, btn, iconBtn, row, box, field, note, empty, tag, pageHead, fullDate} from './ui-kit.js?v=f0b0c2abd8';
+import {store, conversation, isStaticDemo, isAdmin, isLive, isXGroup, botTint, recentRuns, THEMES, themeChoice} from './ui-store.js?v=f0b0c2abd8';
+import {draftCard, postCard} from './ui-views.js?v=f0b0c2abd8';
+import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=f0b0c2abd8';
 
 const el = id => document.getElementById(id);
 const options = (pairs, current) => pairs.map(([value, label]) => `<option value="${esc(value)}"${value === current ? ' selected' : ''}>${esc(label)}</option>`).join('');
@@ -113,11 +113,18 @@ function botHome(conv) {
 export const tintPicker = current => `<div class="tints" role="group" aria-label="Color">${Array.from({length: TINT_COUNT}, (_, i) => `<button type="button" class="tint ${tintClass(i)}${i === current ? ' on' : ''}" data-action="avatar" data-index="${i}" aria-label="Color ${i + 1}" aria-pressed="${i === current}">${icon('check', 18)}</button>`).join('')}</div>`;
 function botEdit(conv) {
   const {bot} = conv, kind = bot.contract?.output?.kind || 'text';
+  const ai = store.state?.ai || {}, providers = ai.providers || [], override = ai.bots?.[bot.id] || {};
+  // Only offer a model picker when at least one provider exists (or the server
+  // has an env key), so the form is not shown with nothing to choose.
+  const modelBlock = (providers.length || store.state?.aiEnabled)
+    ? `<div class="form-grid">${field('Model provider', `<select class="input" name="providerId"><option value="">Workspace default</option>${providers.map(p => `<option value="${esc(p.id)}" ${override.providerId === p.id ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select>`)}${field('Model', `<input class="input" name="model" value="${esc(override.model || '')}" placeholder="auto, gpt-4o-mini…" autocomplete="off">`)}</div>`
+    : '';
   return `${pageHead(`Edit ${bot.name}`, {sub: 'The job lasts. One-off requests go in the chat.', back: 'open-info'})}
     <form id="edit-bot-form" class="form">
       ${tintPicker(conv.tint)}
       ${field('Name', `<input class="input" name="name" value="${esc(bot.name)}" maxlength="80" required>`)}
       ${field('Job', `<textarea class="input" name="instructions" rows="5" maxlength="3000" required>${esc(bot.instructions)}</textarea>`)}
+      ${modelBlock}
       <div class="form-grid">${field('Answers in', `<select class="input" name="outputKind">${options(OUTPUT_KINDS.map(k => [k, k === 'structured' ? 'Structured JSON' : 'Plain text']), kind)}</select>`)}${field('Required fields', `<input class="input" name="fields" value="${esc((bot.contract?.output?.fields || []).map(x => x.name).join(', '))}" placeholder="verdict, reason">`)}</div>
       <fieldset class="contract-fieldset"><legend>What it may do</legend>${ACTIONS.map(a => `<label class="check-row"><input type="checkbox" name="permissions" value="${esc(a)}" ${(bot.permissions || []).includes(a) ? 'checked' : ''}><span>${esc(a)}</span></label>`).join('')}<p class="field-help">Publishing is never automated and cannot be granted here.</p></fieldset>
       ${btn('Save profile', null, {kind: 'primary', type: 'submit', wide: true})}
@@ -142,7 +149,7 @@ export function refreshLists() {
 
 function youPage() {
   const {state} = store, demo = isStaticDemo(), me = state.me, workspace = (state.workspaces || []).find(w => w.current);
-  const admin = isAdmin() ? box(['team', 'agents', 'data'].map(p => row({title: ADMIN_PAGES[p].title, sub: esc(ADMIN_PAGES[p].sub), action: 'open-page', data: {page: p}})).join(''), 'Admin') : '';
+  const admin = isAdmin() ? box(['ai', 'team', 'agents', 'data'].map(p => row({title: ADMIN_PAGES[p].title, sub: esc(ADMIN_PAGES[p].sub), action: 'open-page', data: {page: p}})).join(''), 'Admin') : '';
   return `${pageHead('You', {back: 'back-to-list'})}
     <div class="page-body">
       <div class="hero"><span class="avatar avatar-plain" style="width:84px;height:84px">${icon('lock', 34)}</span><h2>${esc(me?.email || 'This browser')}</h2><p>${esc(me?.role ? `Signed in as ${me.role}${workspace ? ` in ${workspace.name}` : ''}` : 'Local demo. Nothing leaves this browser.')}</p></div>
@@ -156,7 +163,7 @@ function aboutPage() {
   const {state} = store, demo = isStaticDemo(), ai = Boolean(state.aiEnabled), model = state?.aiModel;
   const text = demo ? 'GitHub Pages serves only static files, so bots answer with built-in commands instead of a language model, and everything stays in this browser. Do not type secrets into a chat.'
     : ai ? 'A server-side AI provider is connected for drafting and custom bots. Model output still needs your review, and the final Post click is always yours.'
-      : 'No AI provider is configured, so drafts use clearly labeled templates. Set AI_API_KEY (and AI_BASE_URL) on the server to enable real drafting.';
+      : 'No AI provider is configured, so drafts use clearly labeled templates. Add one under You → AI and models (bring your own key), or set AI_API_KEY on the server.';
   const fact = (label, value) => `<div class="row"><span class="row-main"><span class="row-title">${label}</span></span><span class="row-right">${value}</span></div>`;
   return `${pageHead('About this build', {back: 'open-page-you'})}
     <div class="page-body">${note(esc(text))}

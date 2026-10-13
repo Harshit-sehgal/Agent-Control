@@ -29,6 +29,18 @@ The Pages version remains **a browser-local, non-AI simulation**: its data and c
 - **Run timeline & admin.** The **Runs** section of a group's info panel (tap the chat header) shows every run with per-step traces, failures and a Retry action. Admins reach **Team & access** (users/roles/sessions), **Local agents** (pairing/permissions), and **Data & security** (credential vault, retention, encrypted backups) from **You**, where notifications are also listed.
 - The platform is **not** a cloud-hosted autonomous agent swarm; it runs where you run it and stops for human approval. See [`docs/COORDINATION.md`](docs/COORDINATION.md) for the exact behavior, security boundaries, and API contract.
 
+## AI: bring your own key (BYOK) and model selection
+
+Bots run on **your own** models. Open **You → AI and models** (admin) and add any OpenAI-compatible provider — OpenAI, Groq, OpenRouter, a local Ollama/vLLM, or a router like FreeLLMAPI. Each provider is a name, a base URL and an API key:
+
+- **Keys are stored encrypted** in the workspace vault (AES-256-GCM) and are never shown again; only the provider name, host and model list are visible.
+- **Load models** fetches the provider's own `GET /v1/models`, so the picker lists what the provider actually offers.
+- Choose a **default provider + model** for the workspace, then **override it per bot** in the bot's profile (Edit profile → Model provider / Model). Different bots can run on different models.
+- Resolution order at run time: **the bot's override → the workspace default → the server environment** (`AI_API_KEY`). The HTTP routes are OpenAPI-style: `POST /api/ai/providers`, `DELETE /api/ai/providers/:id`, `POST /api/ai/providers/:id/models`, `PATCH /api/ai`, `PATCH /api/ai/bots/:bot`.
+- The server still accepts `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` for a single env-configured provider; a saved provider takes precedence for jobs that use it.
+
+The static Pages demo has no providers; it stays a browser-local, command-only simulation.
+
 ## GitHub Pages: chat-first UI
 
 Visit **https://harshit-sehgal.github.io/Agent-Control/** after the Pages workflow completes. The browser-only UI now includes:

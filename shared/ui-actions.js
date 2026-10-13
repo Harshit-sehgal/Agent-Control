@@ -173,6 +173,8 @@ export const forms = {
     const inputs = b.contract?.inputs?.length ? b.contract.inputs : ['objective', 'previous_output', 'evidence', 'source_post', 'settings', 'identity'];
     const fields = kind === 'structured' ? String(f.fields || '').split(',').map(s => s.trim()).filter(Boolean).map(name => ({name, type: 'text', required: true})) : [];
     await api(`/api/groups/${groupOfBot(b.id).id}/bots/${b.id}`, 'PATCH', {name: f.name, instructions: f.instructions, contract: {version: 1, inputs, output: {kind, fields}}, permissions});
+    // Per-bot model override (bring your own key); only when the picker is shown.
+    if (form.querySelector('[name="model"]')) await api(`/api/ai/bots/${b.id}`, 'PATCH', {providerId: f.providerId || null, model: f.model || ''});
     await sync(); go({chat: b.id, info: 'home'}); toast('Profile saved.');
   },
   'candidate-form': async (form, f) => {

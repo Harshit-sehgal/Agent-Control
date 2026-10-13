@@ -17,6 +17,7 @@ import * as tasks from '../shared/tasks.js';
 import * as agent from './agent.js';
 import * as notifications from './notifications.js';
 import {aiEnabled,aiModel,aiProvider,makeDraft} from './ai.js';
+import {resolveConfig} from './ai-providers.js';
 import {startScheduler,startRetention} from './scheduler.js';
 import {queueGroupRun,markInterrupted} from './coordination.js';
 import {createQueue,recoverQueue,defaultHandlers} from './queue.js';
@@ -31,6 +32,7 @@ import {groupRoutes} from './routes-groups.js';
 import {accountRoutes} from './routes-account.js';
 import {workspaceRoutes} from './routes-workspaces.js';
 import {pushRoutes} from './routes-push.js';
+import {aiRoutes} from './routes-ai.js';
 
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const PUBLIC=path.join(ROOT,'shared');
@@ -121,7 +123,7 @@ async function processCandidate(store,id){
   const context=await store.update(s=>wf.beginProcessing(s,id));
   try{
     const evaluation=scoreCandidate(context.candidate,context.settings.topics);
-    const result=await makeDraft(context.candidate,context.settings);
+    const result=await makeDraft(context.candidate,context.settings,'',resolveConfig(store,null));
     return await store.update(s=>wf.finishProcessing(s,id,evaluation,result));
   } catch(e){
     await store.update(s=>wf.failProcessing(s,id,e.message));
@@ -139,6 +141,7 @@ groupRoutes(router,app);
 accountRoutes(router,app);
 workspaceRoutes(router,app);
 pushRoutes(router,app);
+aiRoutes(router,app);
 
 async function api(req,res,u){
   const found=router.find(req.method,u.pathname),access=found?.route.access;

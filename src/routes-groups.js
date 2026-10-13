@@ -5,6 +5,7 @@ import {activity, cleanText, uuid} from '../shared/core.js';
 import * as wf from '../shared/workflow.js';
 import * as chats from '../shared/chats.js';
 import {executeCustomBot} from './ai.js';
+import {resolveConfig} from './ai-providers.js';
 import {queueGroupRun, resumeGroupRun, coordinationState} from './coordination.js';
 import {fail} from './http.js';
 import {reply} from './router.js';
@@ -33,7 +34,7 @@ export function groupRoutes(router) {
     const bot = c.store.read().groups.flatMap(g => g.bots).find(x => x.id === b.botId);
     if (!bot || bot.type !== 'custom') fail('Select a custom bot.', 404);
     if (!input) fail('Provide task input.');
-    const output = await executeCustomBot(bot, input);
+    const output = await executeCustomBot(bot, input, resolveConfig(c.store, bot.id));
     return reply(201, await c.store.update(s => {
       const run = {id: uuid(), botId: bot.id, botName: bot.name, input, output, at: new Date().toISOString()};
       s.runs.unshift(run); s.runs = s.runs.slice(0, 100);

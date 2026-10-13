@@ -1,14 +1,14 @@
 /** What the UI can do, as three lookup tables keyed by `data-action`, form id and
  * control id. app.js owns the DOM events and dispatches here; handlers throw on
  * failure and the dispatcher turns that into one toast. */
-import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, groupOfBot, teamKey, groups, setProfile, setPref, setCheckpoints, clearMessages} from './ui-store.js?v=8487cfc1fa';
-import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=8487cfc1fa';
-import {sendChat, streamGroupRun} from './ui-chat.js?v=8487cfc1fa';
-import {confetti, whoosh, react, poke} from './ui-fx.js?v=8487cfc1fa';
-import {renderList} from './ui-views.js?v=8487cfc1fa';
-import {refreshLists, reloadAdminPage} from './ui-panel.js?v=8487cfc1fa';
-import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand} from './ui-sheets.js?v=8487cfc1fa';
-import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=8487cfc1fa';
+import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, groupOfBot, teamKey, groups, setProfile, setPref, setCheckpoints, clearMessages} from './ui-store.js?v=f0b0c2abd8';
+import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=f0b0c2abd8';
+import {sendChat, streamGroupRun} from './ui-chat.js?v=f0b0c2abd8';
+import {confetti, whoosh, react, poke} from './ui-fx.js?v=f0b0c2abd8';
+import {renderList} from './ui-views.js?v=f0b0c2abd8';
+import {refreshLists, reloadAdminPage} from './ui-panel.js?v=f0b0c2abd8';
+import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand} from './ui-sheets.js?v=f0b0c2abd8';
+import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=f0b0c2abd8';
 
 const adminCtx = {reload: reloadAdminPage};
 const chatId = () => store.route.chat;
@@ -173,6 +173,8 @@ export const forms = {
     const inputs = b.contract?.inputs?.length ? b.contract.inputs : ['objective', 'previous_output', 'evidence', 'source_post', 'settings', 'identity'];
     const fields = kind === 'structured' ? String(f.fields || '').split(',').map(s => s.trim()).filter(Boolean).map(name => ({name, type: 'text', required: true})) : [];
     await api(`/api/groups/${groupOfBot(b.id).id}/bots/${b.id}`, 'PATCH', {name: f.name, instructions: f.instructions, contract: {version: 1, inputs, output: {kind, fields}}, permissions});
+    // Per-bot model override (bring your own key); only when the picker is shown.
+    if (form.querySelector('[name="model"]')) await api(`/api/ai/bots/${b.id}`, 'PATCH', {providerId: f.providerId || null, model: f.model || ''});
     await sync(); go({chat: b.id, info: 'home'}); toast('Profile saved.');
   },
   'candidate-form': async (form, f) => {

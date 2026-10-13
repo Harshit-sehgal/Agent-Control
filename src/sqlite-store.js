@@ -289,6 +289,7 @@ export class SqliteStore {
       captureToken: this.kvGet('capture_token'),
       groups: [], candidates: [], drafts: [], runs: [], tasks: [], events: [],
       groupMessages: {}, groupRuns: [], chats: {},
+      ai: (() => { try { return JSON.parse(this.kvGet('ai') || '{}'); } catch { return {}; } })(),
     };
     const cfg = this.db.prepare('SELECT * FROM settings WHERE id=1').get();
     if (cfg) s.settings = {
@@ -328,6 +329,7 @@ export class SqliteStore {
       }
       this.db.prepare('INSERT INTO kv (key,value) VALUES (\'created_at\',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(state.createdAt || now());
       this.db.prepare('INSERT INTO kv (key,value) VALUES (\'capture_token\',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(state.captureToken);
+      this.db.prepare('INSERT INTO kv (key,value) VALUES (\'ai\',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(JSON.stringify(state.ai || {}));
       this.db.prepare('INSERT INTO settings (id,topics,style,opinions,min_delay,max_delay) VALUES (1,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET topics=excluded.topics, style=excluded.style, opinions=excluded.opinions, min_delay=excluded.min_delay, max_delay=excluded.max_delay')
         .run(JSON.stringify(state.settings.topics), state.settings.style, state.settings.opinions, state.settings.minDelay, state.settings.maxDelay);
       // Groups before bots: the foreign key requires the parent row to exist.

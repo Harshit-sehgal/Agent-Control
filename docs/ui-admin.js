@@ -2,10 +2,10 @@
  * `adminPage(kind)` fetches and returns the body HTML; the handler tables are
  * wired by the host's delegated click, submit and change listeners. Handlers do
  * not catch errors, the host toasts them. */
-import {esc, btn, row, box, field, note, empty, tag, fullDate} from './ui-kit.js?v=8487cfc1fa';
-import {store, api, sync} from './ui-store.js?v=8487cfc1fa';
-import {toast, confirmSheet, askSheet} from './ui-dialogs.js?v=8487cfc1fa';
-import {pushStatus, enablePush, disablePush} from './ui-push.js?v=8487cfc1fa';
+import {esc, btn, row, box, field, note, empty, tag, fullDate} from './ui-kit.js?v=f0b0c2abd8';
+import {store, api, sync} from './ui-store.js?v=f0b0c2abd8';
+import {toast, confirmSheet, askSheet} from './ui-dialogs.js?v=f0b0c2abd8';
+import {pushStatus, enablePush, disablePush} from './ui-push.js?v=f0b0c2abd8';
 
 /** Title + one-line description per page, used by the host for the page header. */
 export const ADMIN_PAGES = {
@@ -28,6 +28,10 @@ export const ADMIN_PAGES = {
   data: {
     title: 'Data and security',
     sub: 'Credential vault, retention policy and encrypted backups.',
+  },
+  ai: {
+    title: 'AI and models',
+    sub: 'Bring your own key: add providers, choose the default model, and override it per bot.',
   },
 };
 
@@ -196,8 +200,39 @@ function backupPanel() {
     + box(inner, 'Backup and restore');
 }
 
+function aiPanel(res) {
+  const providers = res.providers || [];
+  const rows = providers.length
+    ? providers.map(p => actionRow(
+      `${esc(p.label)} ${p.id === res.defaultProviderId ? tag('default', 'good') : ''}`,
+      `${esc(p.host)} · ${esc(p.style)}`,
+      (p.id === res.defaultProviderId ? '' : btn('Make default', 'ai-default-provider', {id: p.id, small: true}))
+        + btn('Delete', 'ai-delete-provider', {kind: 'danger', id: p.id, small: true}),
+    )).join('')
+    : empty('No providers yet');
+  const add = `<form id="ai-provider-form">
+    ${field('Name', textInput('label', {required: true, maxlength: 80, placeholder: 'OpenAI, Groq, my router'}))}
+    ${field('Base URL', textInput('baseUrl', {required: true, placeholder: 'https://api.openai.com/v1', autocomplete: 'off'}))}
+    ${field('API key', textInput('apiKey', {type: 'password', required: true, autocomplete: 'off'}))}
+    ${field('API style', '<select class="input" name="style"><option value="">Auto-detect</option><option value="chat">Chat completions</option><option value="responses">Responses</option></select>')}
+    ${btn('Save provider', null, {kind: 'primary', type: 'submit'})}
+  </form>`;
+  const options = providers.map(p => `<option value="${esc(p.id)}" ${p.id === res.defaultProviderId ? 'selected' : ''}>${esc(p.label)}</option>`).join('');
+  const defaults = providers.length ? `<form id="ai-default-form">
+    ${field('Default provider', `<select class="input" name="providerId">${options}</select>`)}
+    ${field('Default model', textInput('model', {value: res.defaultModel || '', placeholder: 'auto, gpt-4o-mini, llama-3.3-70b', list: 'ai-models', autocomplete: 'off'}))}
+    <datalist id="ai-models"></datalist>
+    <p>${btn('Load models', 'ai-load-models', {small: true})} ${btn('Save', null, {kind: 'primary', type: 'submit'})}</p>
+  </form>` : '';
+  return note('Bring your own key. Add any OpenAI-compatible provider (OpenAI, Groq, OpenRouter, a local vLLM/Ollama, or a router). Keys are stored encrypted and never shown again — only the provider name, host and model list are visible.')
+    + box(rows, `Providers, ${providers.length}`)
+    + box(add, 'Add a provider')
+    + (defaults ? box(defaults, 'Default for this workspace') : '');
+}
+
 /** Fetches what the page needs and returns its body HTML (no page header). Throws on API error. */
 export async function adminPage(kind) {
+  if (kind === 'ai') { const res = await api('/api/ai'); return aiPanel(res); }
   if (kind === 'team') {
     const [users, sessions] = await Promise.all([api('/api/users'), api('/api/sessions')]);
     return teamPanel(users, sessions);
@@ -315,6 +350,26 @@ export const adminActions = {
     await ctx.reload();
     toast('Pairing code created. It is shown once.');
   },
+  'ai-delete-provider': async (button, ctx) => {
+    if (!await confirmSheet('Remove this provider? Its saved key is deleted too.', {confirm: 'Delete', danger: true})) return;
+    await api(`/api/ai/providers/${button.dataset.id}`, 'DELETE');
+    toast('Provider removed.');
+    await sync(); await ctx.reload();
+  },
+  'ai-default-provider': async (button, ctx) => {
+    await api('/api/ai', 'PATCH', {providerId: button.dataset.id});
+    toast('Default provider set.');
+    await sync(); await ctx.reload();
+  },
+  'ai-load-models': async button => {
+    const form = button.closest('form'), id = form?.querySelector('[name=providerId]')?.value;
+    if (!id) { toast('Add a provider first.'); return; }
+    const res = await api(`/api/ai/providers/${id}/models`, 'POST', {});
+    const models = res.models || [];
+    const list = form?.querySelector('#ai-models');
+    if (list) list.innerHTML = models.map(m => `<option value="${esc(m)}"></option>`).join('');
+    toast(models.length ? `${models.length} model(s) available — pick one above.` : 'The provider returned no model list.');
+  },
   'reveal-credential': async button => {
     const res = await api(`/api/credentials/${button.dataset.id}/reveal`, 'POST', {});
     await askSheet('Credential value', {value: res.value, readonly: true, submit: 'Done', sub: 'Copy it now. It is not shown again.'});
@@ -376,6 +431,18 @@ export const adminForms = {
     toast('Workspace renamed.');
     await sync();
     await ctx.reload();
+  },
+  'ai-provider-form': async (form, values, ctx) => {
+    const p = await api('/api/ai/providers', 'POST', {label: values.label, baseUrl: values.baseUrl, apiKey: values.apiKey, style: values.style || undefined});
+    form.reset();
+    toast(`Provider "${p.label}" saved.`);
+    // Providers change what "AI is available" means app-wide, so refresh the snapshot.
+    await sync(); await ctx.reload();
+  },
+  'ai-default-form': async (form, values, ctx) => {
+    await api('/api/ai', 'PATCH', {providerId: values.providerId, model: values.model || ''});
+    toast('Default model saved.');
+    await sync(); await ctx.reload();
   },
   'create-user-form': async (form, values, ctx) => {
     const res = await api('/api/users', 'POST', {email: values.email, password: values.password, role: values.role});

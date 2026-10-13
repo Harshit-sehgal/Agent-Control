@@ -179,6 +179,12 @@ export async function captureWithBrowser(url, {allow, binary = findBrowser(), pe
     proxy.close();
     child.kill('SIGKILL');
     await new Promise(resolve => (child.exitCode !== null || child.signalCode ? resolve() : child.once('exit', resolve)));
-    fs.rmSync(profile, {recursive: true, force: true, maxRetries: 3});
+    // Chromium child processes can still be flushing the profile directory for
+    // a moment after the parent exits (maxRetries only helps on Windows), so
+    // retry and never let a cleanup race mask the real capture result.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try { fs.rmSync(profile, {recursive: true, force: true}); break; }
+      catch { await new Promise(resolve => setTimeout(resolve, 120)); }
+    }
   }
 }

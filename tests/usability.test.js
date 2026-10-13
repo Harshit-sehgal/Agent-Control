@@ -108,7 +108,7 @@ test('the Node build exposes Team and Local agents admin surfaces',()=>{
   // Admin surfaces are gated off on the static Pages demo and for non-admins:
   // the role check, the You-page entry, the quick-nav entries and the route parser.
   assert.match(js,/export const isAdmin = \(\) => !isStaticDemo\(\) && \['owner', 'admin'\]\.includes/);
-  assert.match(js,/isAdmin\(\) \? box\(\['team', 'agents', 'data'\]/);
+  assert.match(js,/isAdmin\(\) \? box\(\['ai', 'team', 'agents', 'data'\]/);
   assert.match(js,/if \(isAdmin\(\)\) items\.push\(/);
   assert.match(js,/parseRoute\(location\.hash, store\.state, \{server: !isStaticDemo\(\), admin: isAdmin\(\)\}\)/);
 });

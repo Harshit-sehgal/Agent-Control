@@ -54,6 +54,16 @@ export function revealCredential(store, workspaceId, id) {
   return {id, name: row.name, kind: row.kind, value};
 }
 
+/** Decrypt a credential by id for internal use (a workspace's database holds
+ * only its own rows). Unlike the reveal route this is not an audited action. */
+export function revealValue(store, id) {
+  const row = store.get('SELECT * FROM credentials WHERE id=?', id);
+  if (!row) fail('Credential not found.', 404);
+  if (row.expires_at && Date.parse(row.expires_at) < Date.now()) fail('This credential has expired.', 410);
+  try { return decryptJson(store.vaultKey, {ciphertext: row.ciphertext, iv: row.iv, tag: row.tag}).value; }
+  catch { fail('This credential cannot be decrypted with the current MASTER_KEY.', 500); }
+}
+
 export function deleteCredential(store, workspaceId, id) {
   const result = store.run('DELETE FROM credentials WHERE id=? AND workspace_id=?', id, workspaceId);
   if (result.changes === 0) fail('Credential not found.', 404);
