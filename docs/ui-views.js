@@ -2,10 +2,10 @@
  * Both are thin renderers over ui-model.js. The list shell and the composer are
  * painted once and then only their contents change, so a background refresh can
  * never wipe what the user is typing. */
-import {botSuggestions} from './chat-engine.js?v=bf1c2663b4';
-import {chatRows, timeline, needsYou, draftStage, ACTIVE_DRAFTS} from './ui-model.js?v=bf1c2663b4';
-import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=bf1c2663b4';
-import {store, conversation, isStaticDemo, isLive, isXGroup, botTint, recentRuns} from './ui-store.js?v=bf1c2663b4';
+import {botSuggestions} from './chat-engine.js?v=d59cbe1cf3';
+import {chatRows, timeline, needsYou, draftStage, ACTIVE_DRAFTS} from './ui-model.js?v=d59cbe1cf3';
+import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=d59cbe1cf3';
+import {store, conversation, isStaticDemo, isLive, isXGroup, botTint, recentRuns} from './ui-store.js?v=d59cbe1cf3';
 
 const el = id => document.getElementById(id);
 const FILTERS = [['all', 'All'], ['needs', 'Needs you'], ['groups', 'Groups'], ['bots', 'Bots']];

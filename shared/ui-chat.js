@@ -98,14 +98,23 @@ async function reply(conv, message) {
   appendMessage(id, {role: 'bot', text});
 }
 
+/** In-flight sends per conversation, so two overlapping sends keep the typing
+ * indicator up until the last one finishes instead of the first clearing it. */
+const inFlight = new Map();
+
 /** Send `text` to a conversation and let the right engine answer. */
 export async function sendChat(id, text) {
   const conv = conversation(id), message = String(text ?? '').trim();
   if (!conv || !message) return;
   appendMessage(id, {role: 'user', text: message});
-  setTyping(id, true);
+  const count = (inFlight.get(id) || 0) + 1;
+  inFlight.set(id, count);
+  if (count === 1) setTyping(id, true);
   try { await reply(conv, message); }
-  catch (error) { appendMessage(id, {role: 'system', text: `That did not go through: ${error.message}`}); }
-  finally { setTyping(id, false); }
+  catch (error) { appendMessage(id, {role: 'system', text: `That did not go through: ${error?.message || String(error)}`}); }
+  finally {
+    const left = (inFlight.get(id) || 1) - 1;
+    if (left <= 0) { inFlight.delete(id); setTyping(id, false); } else inFlight.set(id, left);
+  }
   await sync().catch(() => {});
 }

@@ -146,8 +146,9 @@ test('hash routes respond to browser Back and Forward',()=>{
   assert.match(js,/function renderRoute\(/);
   assert.match(js,/addEventListener\('popstate'/);
   assert.match(js,/pushState/);
-  // Opening a sheet or the palette is dismissed by Back rather than stranded.
-  assert.match(js,/popstate', \(\) => \{ popped\(\); if \(!store\.state\) return; closeSheet\(\); closeCommandPalette\(\)/);
+  // Opening a sheet or the palette is dismissed by Back rather than stranded,
+  // and the history depth is read from the entry (Back and Forward both fire it).
+  assert.match(js,/popstate', event => \{ syncDepth\(event\); if \(!store\.state\) return; closeSheet\(\); closeCommandPalette\(\)/);
 });
 test('a background refresh never wipes an in-progress form or the sign-in',()=>{
   // The 30s poll used to re-render unconditionally, discarding whatever the user

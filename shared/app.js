@@ -12,7 +12,7 @@
  *   ui-fx       confetti, the send arrow, and when the bots react
  */
 import {parseRoute} from './ui-model.js';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, back, popped, conversation, isStaticDemo, isAdmin, applyTheme, watchSystemTheme} from './ui-store.js';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, isAdmin, applyTheme, watchSystemTheme} from './ui-store.js';
 import {toast, closeSheet, sheetOpen, trapTab} from './ui-dialogs.js';
 import {listShell, renderList, threadShell, renderThread, homeView} from './ui-views.js';
 import {renderInfo, refreshLists, renderPage} from './ui-panel.js';
@@ -152,7 +152,8 @@ document.body.addEventListener('keydown', ev => {
   if (ev.key === 'Escape') {
     if (paletteOpen()) { ev.preventDefault(); closeCommandPalette(); }
     else if (sheetOpen()) { ev.preventDefault(); closeSheet(); }
-    else if (store.route.info) { ev.preventDefault(); back({chat: store.route.chat}); }
+    // Escape closes the whole info panel back to the thread, not one section.
+    else if (store.route.info) { ev.preventDefault(); go({chat: store.route.chat}, {replace: true}); }
     return;
   }
   if (ev.target.id === 'command-input') {
@@ -164,7 +165,7 @@ document.body.addEventListener('keydown', ev => {
   // keyCode 229: Safari reports the Enter that commits an IME candidate without isComposing.
   if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing && ev.keyCode !== 229 && ev.target.matches('.composer textarea')) { ev.preventDefault(); if (ev.target.value.trim()) ev.target.form.requestSubmit(); }
 });
-window.addEventListener('popstate', () => { popped(); if (!store.state) return; closeSheet(); closeCommandPalette(); const next = hashRoute(); if (next.chat !== store.route.chat) { store.editDraft = null; store.editText = null; } store.route = next; changed('route'); });
+window.addEventListener('popstate', event => { syncDepth(event); if (!store.state) return; closeSheet(); closeCommandPalette(); const next = hashRoute(); if (next.chat !== store.route.chat) { store.editDraft = null; store.editText = null; } store.route = next; changed('route'); });
 window.addEventListener('resize', () => { if (store.state) setInert(); });
 // `toggle` does not bubble, so listen in the capture phase to remember open source panels.
 document.addEventListener('toggle', ev => { const id = ev.target.dataset?.evidence; if (id) ev.target.open ? store.openEvidence.add(id) : store.openEvidence.delete(id); }, true);

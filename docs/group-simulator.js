@@ -1,6 +1,6 @@
 /** Offline group coordination. Intentionally not AI: demonstrates real context passing. */
-import {createRun,createEnvelope} from './coordination.js?v=bf1c2663b4';
-import {normalizeBot,canBot} from './contracts.js?v=bf1c2663b4';
+import {createRun,createEnvelope} from './coordination.js?v=d59cbe1cf3';
+import {normalizeBot,canBot} from './contracts.js?v=d59cbe1cf3';
 
 export async function simulateGroup({group, message, directBotId=null, state, api, makeId, emit}) {
   const run=createRun({group,message,directBotId,makeId});

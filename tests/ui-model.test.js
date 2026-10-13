@@ -317,7 +317,9 @@ test('parseRoute maps the old #group/<id>/<tab> routes onto info sections', () =
     assert.deepEqual(parse(`#group/${X}/${tab}`), {chat: 'team-x-engage', page: null, info: section}, tab);
   }
   assert.deepEqual(parse(`#group/${X}`), {chat: 'team-x-engage', page: null, info: 'home'});
-  assert.deepEqual(parse('#group/research/approvals'), {chat: 'team-research', page: null, info: 'drafts'});
+  // Legacy tab names are X-engage's own; another group falls back to its home
+  // instead of showing the X group's drafts.
+  assert.deepEqual(parse('#group/research/approvals'), {chat: 'team-research', page: null, info: 'home'});
   assert.equal(parse(`#group/${X}/never-heard-of-it`).info, 'home');
   assert.deepEqual(parse('#group/ghost/approvals'), none);
 });

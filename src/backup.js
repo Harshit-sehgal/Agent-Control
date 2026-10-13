@@ -37,6 +37,10 @@ export function exportBackup(store) {
     try { tables[name] = store.all(`SELECT * FROM ${name}`); }
     catch { /* Table absent in an older schema: exported as empty. */ tables[name] = []; }
   }
+  // Agent secret ciphertext is bound to this install's master key and would
+  // reconstitute usable device credentials if restored. The module's exclusion
+  // of secrets applies to it too, so blank those columns before checksumming.
+  tables.agents = (tables.agents || []).map(a => ({...a, secret_enc: null, secret_hash: null}));
   const checksum = crypto.createHash('sha256').update(JSON.stringify(tables)).digest('hex');
   return {
     backupVersion: BACKUP_VERSION,
@@ -59,9 +63,12 @@ export function validateBackup(document) {
   for (const name of OPTIONAL_TABLES) {
     if (document.tables[name] !== undefined && !Array.isArray(document.tables[name])) fail(`Backup table "${name}" is not a list.`);
   }
-  // Recompute the checksum so a hand-edited or truncated file is rejected.
+  // Recompute the checksum so a hand-edited or truncated file is rejected. A
+  // missing checksum is itself a failure: otherwise stripping the field would
+  // let a tampered file through.
   const actual = crypto.createHash('sha256').update(JSON.stringify(document.tables)).digest('hex');
-  if (document.checksum && document.checksum !== actual) fail('Backup checksum does not match its contents. The file may be corrupt or edited.');
+  if (!document.checksum) fail('Backup is missing its checksum, so it cannot be trusted.');
+  if (document.checksum !== actual) fail('Backup checksum does not match its contents. The file may be corrupt or edited.');
   // Roles are the known ones, and every link the UI will render is http(s):
   // the normal write paths enforce both, so a restore must not be a way round.
   for (const m of document.tables.workspace_members) if (!ROLES.includes(m.role)) fail('Backup holds an unknown role.');
@@ -88,6 +95,10 @@ export function importBackup(store, document, {force = false} = {}) {
   });
   if (populated && !force) fail('This installation already holds workspace data. Restore with force=true to replace it (credentials are not carried by backups).', 409);
   store.transaction(() => {
+    // Sessions are excluded from the export but they are not part of it to
+    // restore: a cookie for a user id that reappears in the backup would come
+    // back live. Everyone signs in again after a restore.
+    store.run('DELETE FROM sessions');
     for (const name of [...EXPORT_TABLES, ...OPTIONAL_TABLES]) {
       store.run(`DELETE FROM ${name}`);
       const rows = tables[name] || [];

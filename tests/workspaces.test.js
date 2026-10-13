@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import {spawn} from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -122,7 +123,10 @@ test('a reminder is pushed to the devices of the workspace it fired in, and a fa
     assert.equal(Buffer.from(info.publicKey, 'base64url').length, 65);
     // A real-looking subscription whose endpoint is on this machine: the server
     // must queue a delivery for it and then refuse to call it.
-    const keys = {p256dh: Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 7)]).toString('base64url'), auth: Buffer.alloc(16, 9).toString('base64url')};
+    // A real P-256 key (the stored point is now validated), with an endpoint on
+    // this machine so the server queues a delivery and then refuses to call it.
+    const ecdh = crypto.createECDH('prime256v1');
+    const keys = {p256dh: ecdh.generateKeys().toString('base64url'), auth: crypto.randomBytes(16).toString('base64url')};
     assert.equal((await t.send('POST', '/api/push/subscriptions', {endpoint: 'https://127.0.0.1:9/push', keys}, owner)).status, 201);
     assert.equal((await t.send('POST', '/api/push/subscriptions', {endpoint: 'http://push.example.com/x', keys}, owner)).status, 400);
     assert.equal((await t.send('POST', '/api/push/subscriptions', {endpoint: 'https://127.0.0.1:9/push', keys})).status, 401);

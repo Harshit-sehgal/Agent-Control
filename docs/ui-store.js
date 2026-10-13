@@ -1,9 +1,9 @@
 /** Single source of UI state: the server snapshot, the route, the conversations
  * it carries and cosmetic preferences. Views read from `store` and never
  * keep their own copies, so one `sync()` + one render keeps every pane current. */
-import {normalizeUiPrefs, UI_PREFS_KEY} from './usability.js?v=bf1c2663b4';
-import {routeHash} from './ui-model.js?v=bf1c2663b4';
-import {createOutbox} from './chats.js?v=bf1c2663b4';
+import {normalizeUiPrefs, UI_PREFS_KEY} from './usability.js?v=d59cbe1cf3';
+import {routeHash} from './ui-model.js?v=d59cbe1cf3';
+import {createOutbox} from './chats.js?v=d59cbe1cf3';
 
 // Where an earlier build kept conversations; read once by importLocalChats().
 const CHAT_KEY = 'agent-control-bot-chats-v2';
@@ -128,6 +128,9 @@ export function appendMessage(key, entry) {
   changed('thread');
 }
 export async function clearMessages(key) {
+  // Let queued sends land before the DELETE: a send that was already queued
+  // would otherwise POST after the clear and repopulate the conversation.
+  await outbox.settle();
   await api(`/api/chats/${key}`, 'DELETE');
   outbox.forget(key); delete store.messages[key]; changed();
 }
@@ -162,7 +165,10 @@ export function logLocalRun(run) { saveLocal(RUNS_KEY, [run, ...loadLocal(RUNS_K
 /** Entries this session pushed, so an in-app back arrow can pop one instead of
  * stacking a new entry that the system Back button would bounce off. */
 let depth = 0;
-export const popped = () => { depth = Math.max(0, depth - 1); };
+/** Sync our depth from the history entry we are landing on. Back and Forward
+ * both fire `popstate`, so the entry's stored depth is the source of truth;
+ * decrementing blindly corrupted the count on Forward. */
+export const syncDepth = event => { depth = (event && event.state && typeof event.state.depth === 'number') ? event.state.depth : 0; };
 /** In-app back: pop our own history entry when there is one, else go to `fallback`. */
 export function back(fallback = {}) { if (depth > 0) history.back(); else go(fallback, {replace: true}); }
 
@@ -173,6 +179,9 @@ export function go({chat = null, page = null, info = null} = {}, {replace = fals
   if (chat !== store.route.chat) { store.editDraft = null; store.editText = null; }
   store.route = {chat, page, info};
   const hash = `#${routeHash(store.route)}`;
-  if (location.hash !== hash) { history[replace ? 'replaceState' : 'pushState'](null, '', hash); if (!replace) depth++; }
+  if (location.hash !== hash) {
+    depth = replace ? depth : depth + 1;
+    history[replace ? 'replaceState' : 'pushState']({depth}, '', hash);
+  }
   changed('route');
 }

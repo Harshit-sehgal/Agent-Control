@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import {spawn} from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -102,12 +103,17 @@ test('a viewer never receives the capture token, and backups are for the owner o
     assert.equal(backup.backupVersion, 1);
 
     // A restore cannot smuggle in a script link, an unknown role or SQL in a column name.
-    const tamper = change => { const copy = structuredClone(backup); delete copy.checksum; change(copy.tables); return {...copy, force: true}; };
+    // Edit the tables and re-checksum, so the *content* rules are what reject
+    // the bad documents (a missing checksum is itself rejected below).
+    const tamper = change => { const copy = structuredClone(backup); change(copy.tables); copy.checksum = crypto.createHash('sha256').update(JSON.stringify(copy.tables)).digest('hex'); return {...copy, force: true}; };
     const bad = [
       tamper(x => x.evidence.push({id: 'e1', kind: 'link', link: 'javascript:alert(1)', claim: 'c', confidence: 1, verification: 'unverified', reuse: 'quote', created_at: new Date().toISOString()})),
       tamper(x => { x.workspace_members[0].role = 'superuser'; }),
     ];
     for (const document of bad) assert.equal((await t.send('POST', '/api/admin/restore', document, owner)).status, 400);
+    // A document with no checksum (or a stale one) cannot be trusted.
+    const noSum = structuredClone(backup); delete noSum.checksum; noSum.force = true;
+    assert.equal((await t.send('POST', '/api/admin/restore', noSum, owner)).status, 400, 'A backup without a checksum is refused.');
     const injected = tamper(x => { x.groups[0] = {...x.groups[0], 'name) VALUES (1); DROP TABLE users; --': 'x'}; });
     assert.equal((await t.send('POST', '/api/admin/restore', injected, owner)).status, 200, 'Unknown columns are ignored, not spliced into SQL.');
     // A restore signs everyone out; the owner's account must still be there to sign in to.

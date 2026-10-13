@@ -13,7 +13,7 @@ import {reply} from './router.js';
 export function accountRoutes(router, {auth, workspaces}) {
   // The signed-in user's own account and sessions.
   router.add('GET', '/api/me', 'viewer', c => ({email: c.actor.email, role: c.actor.role}));
-  router.add('POST', '/api/auth/password', 'viewer', async c => { const b = await c.body(); auth.changePassword(c.actor.userId, b.currentPassword, b.newPassword); return {ok: true}; });
+  router.add('POST', '/api/auth/password', 'viewer', async c => { const b = await c.body(); auth.changePassword(c.actor.userId, b.currentPassword, b.newPassword, c.actor.sessionId); return {ok: true}; });
   router.add('GET', '/api/sessions', 'viewer', c => ({sessions: auth.listSessions(c.actor.userId).map(s => ({...s, current: s.id === c.actor.sessionId}))}));
   router.add('POST', '/api/sessions/revoke-all', 'viewer', c => { auth.revokeAll(c.actor.userId, c.actor.sessionId); return {ok: true}; });
   router.add('DELETE', '/api/sessions/:id', 'viewer', c => { if (!auth.revokeSession(c.actor.userId, c.params.id)) fail('Session not found.', 404); return {ok: true}; });
@@ -39,7 +39,7 @@ export function accountRoutes(router, {auth, workspaces}) {
   router.add('GET', '/api/agents', 'viewer', c => ({agents: agent.listAgents(c.store, c.actor.workspaceId), actions: agent.AGENT_ACTIONS}));
   router.add('POST', '/api/agents/pair', 'admin', async c => {
     const b = await c.body();
-    const pairing = agent.createPairing(c.store, c.actor.workspaceId, {label: b.label, createdBy: c.actor.email});
+    const pairing = agent.createPairing(c.store, c.actor.workspaceId, {label: b.label, createdBy: c.actor.email, permissions: b.permissions});
     await c.store.update(s => activity(s, 'agent', 'Created a local-agent pairing code.', {expiresAt: pairing.expiresAt}));
     return reply(201, pairing);
   });

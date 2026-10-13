@@ -83,14 +83,18 @@ export function verifyAgentRequest(store, headers, method, path, rawBody) {
 
 /** Create a pairing code. The plaintext code is returned exactly once; only
  * its hash is stored, so a database leak cannot redeem pending pairings. */
-export function createPairing(store, workspaceId, {label, createdBy, ttlMs = PAIRING_TTL_MS} = {}) {
+export function createPairing(store, workspaceId, {label, createdBy, permissions, ttlMs = PAIRING_TTL_MS} = {}) {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const bytes = crypto.randomBytes(10);
   const code = Array.from(bytes, b => alphabet[b % alphabet.length]).join('');
   const expires = new Date(Date.now() + ttlMs).toISOString();
-  store.run('INSERT INTO pairing_codes (code_hash,workspace_id,label,created_by,expires_at,created_at) VALUES (?,?,?,?,?,?)',
-    sha256(code), workspaceId, cleanText(label, 120) || 'Local agent', createdBy || null, expires, now());
-  return {code, expiresAt: expires, ttlSeconds: Math.round(ttlMs / 1000)};
+  // The admin's chosen scope rides on the code. When unspecified it defaults to
+  // every action (the historical behavior); the device can only ever be granted
+  // a subset of this set at redemption.
+  const scope = (permissions === undefined ? AGENT_ACTIONS : (Array.isArray(permissions) ? permissions : [])).filter(p => AGENT_ACTIONS.includes(p));
+  store.run('INSERT INTO pairing_codes (code_hash,workspace_id,label,created_by,expires_at,created_at,permissions) VALUES (?,?,?,?,?,?,?)',
+    sha256(code), workspaceId, cleanText(label, 120) || 'Local agent', createdBy || null, expires, now(), JSON.stringify(scope));
+  return {code, expiresAt: expires, ttlSeconds: Math.round(ttlMs / 1000), permissions: scope};
 }
 
 /** Exchange a pairing code for agent credentials. */
@@ -101,7 +105,13 @@ export function redeemPairing(store, {code, name, permissions = []}) {
   if (Date.parse(row.expires_at) < Date.now()) fail('This pairing code has expired. Create a new one.', 410);
   const secret = crypto.randomBytes(32).toString('base64url');
   const agentId = crypto.randomUUID();
-  const granted = (Array.isArray(permissions) ? permissions : []).filter(p => AGENT_ACTIONS.includes(p));
+  // The device may ask for a subset of what the admin put on the code, never
+  // more. Asking for nothing takes the admin's full scope.
+  const allowed = (() => { try { return JSON.parse(row.permissions || '[]'); } catch { return []; } })().filter(p => AGENT_ACTIONS.includes(p));
+  // An explicit list (even empty) is intersected with the admin's scope; an
+  // omitted one takes the admin's full scope.
+  const requested = permissions === undefined ? allowed : (Array.isArray(permissions) ? permissions : []);
+  const granted = requested.filter(p => allowed.includes(p));
   // The secret is stored encrypted; pairing_codes keeps only hashes.
   const stored = JSON.stringify(encryptJson(store.vaultKey, {secret}));
   store.transaction(() => {
@@ -170,9 +180,10 @@ export function completeAgentTask(store, agentId, taskId, {status, result, error
   }
   if (status !== 'failed') fail('Result status must be done or failed.', 400);
   // Retry while attempts remain, exactly like the server queue; the agent
-  // gets the task again on a later heartbeat. Attempts are persisted, so
-  // repeated failures without a claim still exhaust the budget.
-  const attempts = (task.attempts || 0) + 1;
+  // gets the task again on a later heartbeat. `attempts` was already incremented
+  // when the task was claimed, so this is the count for the run that just failed
+  // — incrementing again here made a max_attempts=3 task run only twice.
+  const attempts = task.attempts || 0;
   const retry = attempts < (task.max_attempts || 3);
   store.run('UPDATE agent_tasks SET status=?,attempts=?,error=?,lease_until=NULL,updated_at=? WHERE id=?',
     retry ? 'queued' : 'failed', attempts, cleanText(error, 400) || 'Agent reported failure.', now(), taskId);

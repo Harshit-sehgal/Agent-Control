@@ -104,9 +104,9 @@ export function timeline({conv, state, messages = {}}) {
 const GROUP_SECTIONS = ['home', 'drafts', 'posts', 'reminders', 'runs', 'voice'];
 const BOT_SECTIONS = ['home', 'edit'];
 const LEGACY_TABS = {overview: 'home', discovery: 'posts', approvals: 'drafts', schedules: 'reminders', activity: 'runs', settings: 'voice'};
-const PAGES = ['you', 'about', 'notifications', 'workspaces', 'team', 'agents', 'data'];
+const PAGES = ['you', 'about', 'notifications', 'workspaces', 'ai', 'team', 'agents', 'data'];
 const SERVER_PAGES = ['notifications', 'workspaces'];
-const ADMIN_PAGES = ['team', 'agents', 'data'];
+const ADMIN_PAGES = ['ai', 'team', 'agents', 'data'];
 
 /** Hash → route. Unknown or forbidden targets fall back to the chat list, and
  * the pre-chat routes (#inbox, #group/<id>/<tab>) keep working as redirects. */
@@ -118,7 +118,10 @@ export function parseRoute(hash, state, {server = false, admin = false} = {}) {
   const section = (id, name) => (id.startsWith('team-') ? GROUP_SECTIONS : BOT_SECTIONS).includes(name) ? name : 'home';
   const [head, a, b, c] = parts;
   if (head === 'chat' && a && chatExists(a)) return {...none, chat: a, info: b === 'info' ? section(a, c || 'home') : null};
-  if (head === 'group' && groups.some(g => g.id === a)) return {...none, chat: teamKey(a), info: Object.hasOwn(LEGACY_TABS, b) ? LEGACY_TABS[b] : 'home'};
+  // Legacy #group/<id>/<tab> redirects only apply to the X-engage workspace:
+  // its tab names map to its info sections. Any other group falls back to its
+  // own home, so its panel never shows the X group's drafts or posts.
+  if (head === 'group' && groups.some(g => g.id === a)) return {...none, chat: teamKey(a), info: (a === X_GROUP && Object.hasOwn(LEGACY_TABS, b)) ? LEGACY_TABS[b] : 'home'};
   if (head === 'inbox' && chatExists(teamKey(X_GROUP))) return {...none, chat: teamKey(X_GROUP), info: 'drafts'};
   const page = head === 'you' ? (a || 'you') : head;
   if (PAGES.includes(page)) {

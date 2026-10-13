@@ -1,14 +1,16 @@
 /** Retention policy.
  *
- * The workflow document only grows: events, runs, finished tasks, sent
- * notifications. These are pure prune rules over the state object so the Node
- * server and the browser-local demo can apply them identically, plus a
- * workspace-level policy in settings. Nothing here deletes drafts, candidates
- * or evidence: those are the user's working material, not exhaust.
+ * The workflow document only grows: events, runs and finished tasks. These are
+ * pure prune rules over the state object so the Node server and the
+ * browser-local demo can apply them identically, plus a workspace-level policy
+ * in settings. Nothing here deletes drafts, candidates or evidence: those are
+ * the user's working material, not exhaust. (Notifications are not part of the
+ * workflow document — they are bounded by the in-app feed cap in
+ * src/notifications.js — so there is no retention knob for them here.)
  */
-import {activity} from './core.js?v=bf1c2663b4';
+import {activity} from './core.js?v=d59cbe1cf3';
 
-export const RETENTION_DEFAULTS = {events: 90, doneTasks: 30, sentNotifications: 30, runs: 30};
+export const RETENTION_DEFAULTS = {events: 90, doneTasks: 30, runs: 30};
 
 export function normalizeRetention(body = {}) {
   const out = {...RETENTION_DEFAULTS};

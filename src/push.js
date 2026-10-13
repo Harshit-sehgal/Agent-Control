@@ -60,6 +60,11 @@ function readSubscription(body) {
   if (url.protocol !== 'https:' || endpoint.length > 1000) refuse('The push endpoint must be an https address.');
   const point = b64(p256dh);
   if (point.length !== 65 || point[0] !== 4 || b64(auth).length !== 16) refuse('The push subscription keys are not valid.');
+  // A 65-byte blob starting with 0x04 can still be an invalid curve point.
+  // Prove it now so a bad subscription is refused at subscribe time instead of
+  // failing (and retrying) every push sent to it later.
+  try { const probe = crypto.createECDH('prime256v1'); probe.generateKeys(); probe.computeSecret(point); }
+  catch { refuse('The push subscription key is not a valid P-256 point.'); }
   return {endpoint, p256dh, auth};
 }
 

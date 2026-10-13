@@ -187,3 +187,30 @@ test('the API enforces the role matrix on every protected route', {timeout: 3000
     assert.equal((await send('POST', '/api/auth/reset', {token: 'bogus', password: 'new-password-1'})).status, 400);
   } finally { child.kill('SIGINT'); await new Promise(r => child.once('exit', r)); await fs.rm(dir, {recursive: true, force: true}); }
 });
+
+test('a corrupt stored password hash is refused, not thrown as a server error', async () => {
+  const {store, auth, dir} = await harness();
+  try {
+    auth.ensureBootstrap('owner-secret-1');
+    // A truncated hash used to reach timingSafeEqual and throw a RangeError,
+    // turning a bad password into a 500.
+    store.run("UPDATE users SET password_hash='scrypt$16384$deadbeef$ab' WHERE email='owner@localhost'");
+    const refused = auth.login({password: 'owner-secret-1'});
+    assert.equal(refused.ok, false);
+    assert.equal(refused.status, 401);
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});
+
+test('changing your own password keeps the acting session and signs out the others', async () => {
+  const {auth, dir} = await harness();
+  try {
+    auth.ensureBootstrap('owner-secret-1');
+    const acting = auth.login({password: 'owner-secret-1'});
+    const other = auth.login({password: 'owner-secret-1'});
+    // The session handle is the stored hash, as the route passes it.
+    const principal = auth.session(acting.sessionId);
+    auth.changePassword(principal.userId, 'owner-secret-1', 'new-password-1', principal.sessionId);
+    assert.ok(auth.session(acting.sessionId), 'the acting session stays signed in');
+    assert.equal(auth.session(other.sessionId), null, 'the other session is revoked');
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});

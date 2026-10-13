@@ -57,7 +57,7 @@ function pushPanel(push) {
     : push.state === 'off' ? btn('Turn on', 'push-on', {kind: 'primary', small: true}) : '';
   const others = push.devices - (push.state === 'on' ? 1 : 0);
   return box(actionRow(`Push on this device ${tag(push.state === 'on' ? 'on' : 'off', push.state === 'on' ? 'good' : '')}`,
-    esc(PUSH_HELP[push.state]) + (others > 0 ? ` ${others} other device${others === 1 ? '' : 's'} of yours ${others === 1 ? 'is' : 'are'} subscribed.` : ''), buttons), 'Push');
+    esc(PUSH_HELP[push.state] || 'Push status is unavailable in this browser.') + (others > 0 ? ` ${others} other device${others === 1 ? '' : 's'} of yours ${others === 1 ? 'is' : 'are'} subscribed.` : ''), buttons), 'Push');
 }
 
 function workspacesPanel(res) {
@@ -152,8 +152,14 @@ function agentsPanel(res, pairing) {
       );
     }).join('')
     : empty('No local agents', 'Create a pairing code, then pair a device.');
-  return `<p>${btn('Create pairing code', 'new-pairing', {kind: 'primary', small: true})}</p>`
-    + code
+  // The admin chooses the scope when issuing the code; the device cannot widen it.
+  const perms = actions.map(p => `<label class="check-row"><input type="checkbox" name="permissions" value="${esc(p)}" checked><span>${esc(p)}</span></label>`).join('');
+  const form = `<form id="pairing-form">
+    ${field('Device name', textInput('label', {placeholder: 'Laptop', maxlength: 120}))}
+    <fieldset class="contract-fieldset"><legend>Permissions</legend>${perms}<p class="field-help">The device can only ever be granted a subset of these.</p></fieldset>
+    ${btn('Create pairing code', null, {kind: 'primary', type: 'submit'})}
+  </form>`;
+  return form + code
     + box(rows, `Paired agents, ${agents.length}`)
     + note('A local agent runs only the task kinds it has been granted and can never publish.');
 }
@@ -343,13 +349,6 @@ export const adminActions = {
     toast('Permissions updated.');
     await ctx.reload();
   },
-  'new-pairing': async (button, ctx) => {
-    const label = await askSheet('Label for this device', {value: 'My device', submit: 'Create code'});
-    if (label === null) return;
-    lastPairing = await api('/api/agents/pair', 'POST', {label});
-    await ctx.reload();
-    toast('Pairing code created. It is shown once.');
-  },
   'ai-delete-provider': async (button, ctx) => {
     if (!await confirmSheet('Remove this provider? Its saved key is deleted too.', {confirm: 'Delete', danger: true})) return;
     await api(`/api/ai/providers/${button.dataset.id}`, 'DELETE');
@@ -431,6 +430,12 @@ export const adminForms = {
     toast('Workspace renamed.');
     await sync();
     await ctx.reload();
+  },
+  'pairing-form': async (form, values, ctx) => {
+    const permissions = [...form.querySelectorAll('input[name="permissions"]:checked')].map(x => x.value);
+    lastPairing = await api('/api/agents/pair', 'POST', {label: values.label, permissions});
+    await ctx.reload();
+    toast('Pairing code created. It is shown once.');
   },
   'ai-provider-form': async (form, values, ctx) => {
     const p = await api('/api/ai/providers', 'POST', {label: values.label, baseUrl: values.baseUrl, apiKey: values.apiKey, style: values.style || undefined});

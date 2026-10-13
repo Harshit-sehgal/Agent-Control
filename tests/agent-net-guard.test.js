@@ -7,6 +7,15 @@ test('loopback, private, link-local and metadata addresses are recognised', () =
   for (const a of ['8.8.8.8', '172.32.0.1', '93.184.216.34', '2606:4700:4700::1111', '::ffff:8.8.8.8']) assert.equal(isPrivateAddress(a), false, a);
 });
 
+test('addresses that tunnel a private IPv4 or sit in reserved ranges are recognised', () => {
+  for (const a of [
+    '192.0.0.1', '192.0.2.5', '198.51.100.9', '203.0.113.7', '198.18.0.1', '198.19.255.255', '192.88.99.1',
+    // 6to4 (2002::/16) and NAT64 (64:ff9b::/96) embed an IPv4 address.
+    '2002:7f00:1::', '2002:0a00:1::', '64:ff9b::7f00:1', '64:ff9b::a00:1',
+  ]) assert.equal(isPrivateAddress(a), true, a);
+  for (const a of ['2002:0808:0808::', '64:ff9b::808:808']) assert.equal(isPrivateAddress(a), false, a);
+});
+
 test('a check is refused when the host is, or resolves to, a private address', async () => {
   const lookup = async host => ({'public.test': [{address: '93.184.216.34'}], 'inside.test': [{address: '10.0.0.5'}], 'mixed.test': [{address: '93.184.216.34'}, {address: '127.0.0.1'}], 'empty.test': []})[host];
   const opts = {lookup, allowPrivate: false};

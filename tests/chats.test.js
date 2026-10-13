@@ -139,3 +139,10 @@ test('a browser cannot mark a message as model output or invent its sender', () 
   addChatMessages(s, 'writer', [{id: 't1', role: 'bot', text: 'real', mode: 'ai', senderId: 'writer', senderName: 'Writer'}], {trusted: true});
   assert.equal(s.chats.writer[1].mode, 'ai'); assert.equal(s.chats.writer[1].origin, undefined);
 });
+
+test('the local outbox is bounded, so a stuck tab cannot grow without limit', () => {
+  const outbox = createOutbox(async () => { throw Object.assign(new Error('server down'), {status: 500}); });
+  for (let i = 0; i < 600; i++) outbox.add('writer', {id: `m${i}`, role: 'user', text: 'x', at: new Date().toISOString()});
+  assert.ok(outbox.size <= 500, `outbox size ${outbox.size} must stay bounded`);
+  assert.ok(outbox.size > 0, 'undelivered messages are kept for a retry, not silently dropped');
+});

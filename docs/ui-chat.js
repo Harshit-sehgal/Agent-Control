@@ -3,10 +3,10 @@
  * model is configured and in the deterministic simulator otherwise. A custom bot
  * runs its own instructions on the server; everything else answers from the
  * offline command set. Nothing here can publish. */
-import {classifyMessage, statusSummary} from './chat-engine.js?v=bf1c2663b4';
-import {simulateGroup} from './group-simulator.js?v=bf1c2663b4';
-import {planHandoffs, runNote} from './coordination.js?v=bf1c2663b4';
-import {store, api, sync, conversation, appendMessage, setTyping, isStaticDemo, isLive, logLocalRun, teamKey} from './ui-store.js?v=bf1c2663b4';
+import {classifyMessage, statusSummary} from './chat-engine.js?v=d59cbe1cf3';
+import {simulateGroup} from './group-simulator.js?v=d59cbe1cf3';
+import {planHandoffs, runNote} from './coordination.js?v=d59cbe1cf3';
+import {store, api, sync, conversation, appendMessage, setTyping, isStaticDemo, isLive, logLocalRun, teamKey} from './ui-store.js?v=d59cbe1cf3';
 
 const TERMINAL = ['completed', 'failed', 'interrupted', 'awaiting_checkpoint'];
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -98,14 +98,23 @@ async function reply(conv, message) {
   appendMessage(id, {role: 'bot', text});
 }
 
+/** In-flight sends per conversation, so two overlapping sends keep the typing
+ * indicator up until the last one finishes instead of the first clearing it. */
+const inFlight = new Map();
+
 /** Send `text` to a conversation and let the right engine answer. */
 export async function sendChat(id, text) {
   const conv = conversation(id), message = String(text ?? '').trim();
   if (!conv || !message) return;
   appendMessage(id, {role: 'user', text: message});
-  setTyping(id, true);
+  const count = (inFlight.get(id) || 0) + 1;
+  inFlight.set(id, count);
+  if (count === 1) setTyping(id, true);
   try { await reply(conv, message); }
-  catch (error) { appendMessage(id, {role: 'system', text: `That did not go through: ${error.message}`}); }
-  finally { setTyping(id, false); }
+  catch (error) { appendMessage(id, {role: 'system', text: `That did not go through: ${error?.message || String(error)}`}); }
+  finally {
+    const left = (inFlight.get(id) || 1) - 1;
+    if (left <= 0) { inFlight.delete(id); setTyping(id, false); } else inFlight.set(id, left);
+  }
   await sync().catch(() => {});
 }

@@ -46,18 +46,29 @@ export function fail(message, status = 400) {
 
 export const taskKinds = () => Object.keys(PAYLOAD_KINDS);
 
+/** What each kind must actually carry to be runnable. The old "some value is
+ * present" check was defeated by object defaults (`params: {}`), so a job with
+ * no action reached the worker and burned its retries; each kind now names the
+ * scalar it needs. */
+const REQUIRED_FIELDS = {
+  'candidate-draft': payload => payload.candidateId || fail('A draft task needs a candidate id.'),
+  'group-run': payload => (payload.groupId && payload.message) || fail('A group run needs a group and a message.'),
+  'agent-job': payload => payload.action || fail('An agent job needs an action.'),
+};
+
 /** Validate a task request and build the canonical payload for its kind. */
 export function buildPayload(kind, body = {}) {
   const validate = PAYLOAD_KINDS[kind];
   if (!validate) fail(`Unknown task kind. Expected one of: ${taskKinds().join(', ')}.`);
   const payload = validate(body || {});
-  if (kind !== 'reminder' && !Object.values(payload).some(v => v !== null && v !== undefined && v !== '')) fail('This task needs more detail before it can run.', 400);
+  if (REQUIRED_FIELDS[kind]) REQUIRED_FIELDS[kind](payload);
   return payload;
 }
 
-/** Exponential backoff between retries: 1s, 2s, 4s ... capped at 5 minutes. */
+/** Exponential backoff between retries: 1s, 2s, 4s ... capped at 5 minutes.
+ * `attempt` is the count after claiming (1 on the first run), so subtract one. */
 export function retryDelay(attempt, now = Date.now()) {
-  const base = Math.min(2 ** Math.max(0, attempt) * 1000, 300000);
+  const base = Math.min(2 ** Math.max(0, attempt - 1) * 1000, 300000);
   return now + base;
 }
 
@@ -196,7 +207,9 @@ export function migrateSchedules(state) {
   const stamp = () => new Date().toISOString();
   for (const item of state.schedules) {
     const idempotencyKey = `schedule:${item.id}`;
-    if (state.tasks.some(t => t.idempotencyKey === idempotencyKey)) { migrated++; continue; }
+    // Already converted on an earlier run: leave it, and do not count it as a
+    // new conversion in the report.
+    if (state.tasks.some(t => t.idempotencyKey === idempotencyKey)) continue;
     const kind = item.kind === 'once' ? 'once' : 'interval';
     const label = cleanText(item.label, 200) || 'Reminder';
     const past = Date.parse(item.nextAt);

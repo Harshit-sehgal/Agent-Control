@@ -21,9 +21,6 @@ import {sqlite} from './sqlite.js';
 import * as wf from '../shared/workflow.js';
 
 const now = () => new Date().toISOString();
-/** Current schema version. Keep in sync with the migration list; tests and
- * operators read it, so it is exported rather than duplicated. */
-export const SCHEMA_DB_VERSION = 5;
 
 /** v1 ships the full target schema: the workflow document plus the surfaces
  * the roadmap adds (task queue, agents, vault, notifications, users). Adding a
@@ -191,7 +188,16 @@ const MIGRATIONS = [
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       endpoint TEXT NOT NULL UNIQUE, p256dh TEXT NOT NULL, auth TEXT NOT NULL,
       user_agent TEXT, created_at TEXT NOT NULL)`);
+  }},
+  // v6: a pairing code carries the permissions the admin chose when issuing it.
+  // The redeeming device could previously name its own scope, so an admin who
+  // meant to issue a read-only checker could get one that granted itself more.
+  {to: 6, up(db) {
+    db.exec('ALTER TABLE pairing_codes ADD COLUMN permissions TEXT');
   }}];
+/** Current schema version, derived from the migration list so it cannot drift.
+ * Tests and operators read it. */
+export const SCHEMA_DB_VERSION = MIGRATIONS.length;
 export class SqliteStore {
   constructor(dbPath, legacyPath) {
     this.dbPath = dbPath;

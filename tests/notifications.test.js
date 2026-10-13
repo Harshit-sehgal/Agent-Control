@@ -32,9 +32,10 @@ test('in-app notifications are recorded and bounded; read state is per user', as
   assert.equal(notifications.markRead(store, 'u1', [id]).marked, 0, 'Reading twice is a no-op.');
   assert.equal(notifications.unreadCount(store, 'u1'), 1);
   assert.equal(notifications.markRead(store, 'u1', []).marked, 0);
-  // The feed is bounded: a flood does not grow it without limit.
+  // The feed is bounded per scope: one user's flood cannot evict the shared notice.
   for (let i = 0; i < 205; i++) notifications.notify(store, null, {userId: 'u1', title: `n${i}`, body: ''});
-  assert.equal(store.get("SELECT count(*) AS n FROM notifications WHERE channel='in_app' AND (user_id IS NULL OR user_id='u1')").n, 200);
+  assert.equal(store.get("SELECT count(*) AS n FROM notifications WHERE channel='in_app' AND user_id='u1'").n, 200, "A user's own feed is capped");
+  assert.equal(store.get("SELECT count(*) AS n FROM notifications WHERE channel='in_app' AND user_id IS NULL").n, 1, 'The shared notice survives');
   await fs.rm(dir, {recursive: true, force: true});
 });
 
@@ -102,9 +103,9 @@ test('deliver() resolves the webhook URL from the encrypted credential and rejec
   await assert.rejects(notifications.deliver(store, {payload: {channel: 'webhook', target: badId, title: 't', body: 'b'}}), /http\(s\)/);
   // Missing credential fails clearly.
   await assert.rejects(notifications.deliver(store, {payload: {channel: 'webhook', target: 'missing', title: 't', body: 'b'}}), /no longer exists/);
-  // Email reports its pending-relay state honestly instead of claiming delivery.
-  const email = await notifications.deliver(store, {payload: {channel: 'email', target: 'ops@example.com', title: 't', body: 'b'}});
-  assert.equal(email.delivered, 'email-pending-relay');
+  // Email has no embedded relay, so it must fail loudly rather than let the
+  // queue mark the notification "sent".
+  await assert.rejects(notifications.deliver(store, {payload: {channel: 'email', target: 'ops@example.com', title: 't', body: 'b'}}), /external relay/i);
   // Unknown channels fail.
   await assert.rejects(notifications.deliver(store, {payload: {channel: 'carrier-pigeon', target: 'x', title: 't', body: 'b'}}), /Unknown notification channel/);
   await fs.rm(dir, {recursive: true, force: true });

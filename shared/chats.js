@@ -89,6 +89,10 @@ export function mergeChat(server = [], local = [], pending = new Set()) {
  * snapshot that was already on its way cannot make it flicker out. Sends go one
  * at a time, which keeps their order on the server.
  * `post(key, messages)` stores messages and rejects with an error carrying `status`. */
+/** Upper bound on unconfirmed sends held in a tab, so a tab that cannot reach
+ * the server never grows without limit. */
+const MAX_UNSENT = 500;
+
 export function createOutbox(post) {
   const unsent = new Map();
   let fetches = 0, chain = Promise.resolve();
@@ -104,7 +108,15 @@ export function createOutbox(post) {
   }
   const queue = item => { chain = chain.then(() => deliver(item)); };
   return {
-    add(key, message) { const item = {key, message}; unsent.set(message.id, item); queue(item); },
+    add(key, message) {
+      const item = {key, message};
+      unsent.set(message.id, item);
+      // Bound the local backlog: a long-lived tab that cannot reach the server
+      // (offline, or sending that keeps failing) would otherwise accumulate
+      // unsent messages without limit. The oldest unconfirmed send goes first.
+      if (unsent.size > MAX_UNSENT) unsent.delete(unsent.keys().next().value);
+      queue(item);
+    },
     /** Resolve once nothing is in flight, retrying sends that failed earlier. */
     async settle() { for (const item of unsent.values()) if (item.failed) { item.failed = false; queue(item); } await chain; },
     /** Number a state fetch as it starts; pass the number to `adopt` with its result. */

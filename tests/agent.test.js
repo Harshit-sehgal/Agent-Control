@@ -85,9 +85,11 @@ test('agent task leasing, duplicate results and disconnect recovery', async () =
   // Failures retry while attempts remain, then fail permanently.
   const {task: flaky} = agent.enqueueAgentTask(store, agentId, {kind: 'http.check', payload: {url: 'https://x'}});
   agent.claimAgentTasks(store, agentId);
-  assert.equal(agent.completeAgentTask(store, agentId, flaky.id, {status: 'failed', error: 'network down'}).status, 'queued');
+  assert.equal(agent.completeAgentTask(store, agentId, flaky.id, {status: 'failed', error: 'network down'}).status, 'queued', 'Attempt 1 of 3 retries.');
   agent.claimAgentTasks(store, agentId);
-  assert.equal(agent.completeAgentTask(store, agentId, flaky.id, {status: 'failed', error: 'network down'}).status, 'failed');
+  assert.equal(agent.completeAgentTask(store, agentId, flaky.id, {status: 'failed', error: 'network down'}).status, 'queued', 'Attempt 2 of 3 retries.');
+  agent.claimAgentTasks(store, agentId);
+  assert.equal(agent.completeAgentTask(store, agentId, flaky.id, {status: 'failed', error: 'network down'}).status, 'failed', 'Attempt 3 of 3 fails permanently.');
   assert.match(store.get('SELECT * FROM agent_tasks WHERE id=?', flaky.id).error, /network down/);
   // A task left running by a disconnected agent is re-armed, not lost.
   const {task: orphan} = agent.enqueueAgentTask(store, agentId, {kind: 'http.check', payload: {url: 'https://y'}});
@@ -197,4 +199,22 @@ test('the HTTP protocol pairs, dispatches and collects results end to end', {tim
     target.close();
     await fs.rm(dir, {recursive: true, force: true});
   }
+});
+
+test('a pairing code carries the admin scope, and the device can only narrow it', async () => {
+  const {store, dir} = await harness();
+  try {
+    // The admin issues a read-only code; the device asks for more and gets only
+    // the intersection, never the extra permission.
+    const {code} = agent.createPairing(store, 'default', {permissions: ['http.check']});
+    const widened = agent.redeemPairing(store, {code, name: 'Device', permissions: ['http.check', 'browser.action']});
+    assert.deepEqual(widened.permissions, ['http.check']);
+    // A device may also take a subset of what the admin allowed.
+    const {code: open} = agent.createPairing(store, 'default', {permissions: ['http.check', 'browser.action']});
+    const narrowed = agent.redeemPairing(store, {code: open, name: 'Device2', permissions: ['http.check']});
+    assert.deepEqual(narrowed.permissions, ['http.check']);
+    // Issuing a code with an unknown permission stores nothing usable.
+    const {code: bogus} = agent.createPairing(store, 'default', {permissions: ['publish.post']});
+    assert.deepEqual(agent.redeemPairing(store, {code: bogus, name: 'Device3'}).permissions, []);
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
 });

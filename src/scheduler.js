@@ -14,7 +14,12 @@ export async function tick(store,now=Date.now()) {
 }
 export function startScheduler(store,intervalMs=3000) {
   let busy=false;
-  const timer=setInterval(async()=>{if(busy)return;busy=true;try{await tick(store);}catch(e){console.error('Scheduler error:',e.message);}finally{busy=false;}},intervalMs);
+  const timer=setInterval(async()=>{if(busy)return;busy=true;try{
+    // Only write when a scheduled draft has come due; otherwise the tick
+    // rewrote the whole state document every few seconds for nothing.
+    const now=Date.now();
+    if((store.read().drafts||[]).some(d=>d.status==='scheduled'&&d.dueAt&&Number.isFinite(Date.parse(d.dueAt))&&Date.parse(d.dueAt)<=now))await tick(store,now);
+  }catch(e){console.error('Scheduler error:',e.message);}finally{busy=false;}},intervalMs);
   timer.unref();return ()=>clearInterval(timer);
 }
 /** Retention runs on a slow cadence: prune at boot (a restart is a natural

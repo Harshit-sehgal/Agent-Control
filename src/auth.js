@@ -36,7 +36,12 @@ const verifyPassword = (password, stored) => {
   const [scheme, n, salt, hash] = String(stored || '').split('$');
   if (scheme !== 'scrypt' || !salt || !hash) return false;
   const actual = crypto.scryptSync(String(password), salt, 64, {...SCRYPT, N: Number(n) || SCRYPT.N});
-  return crypto.timingSafeEqual(actual, Buffer.from(hash, 'hex'));
+  const expected = Buffer.from(hash, 'hex');
+  // A truncated or corrupt stored hash must fail verification, not throw a
+  // RangeError from timingSafeEqual (which would turn a wrong password into a
+  // 500 instead of a clean refusal).
+  if (expected.length !== actual.length) return false;
+  return crypto.timingSafeEqual(actual, expected);
 };
 // Verified against when the address is unknown, to spend the same time.
 const DUMMY_HASH = hashPassword(crypto.randomBytes(16).toString('hex'));
@@ -274,14 +279,16 @@ export class Auth {
     return {ok: true};
   }
   /** Change the acting user's own password, invalidating other sessions. */
-  changePassword(userId, currentPassword, newPassword) {
+  changePassword(userId, currentPassword, newPassword, keepSessionId = null) {
     const row = this.store.get('SELECT password_hash FROM users WHERE id=?', userId);
     if (!row) throw Object.assign(new Error('Account not found.'), {status: 404});
     if (!verifyPassword(currentPassword, row.password_hash)) throw Object.assign(new Error('Current password is incorrect.'), {status: 401});
     if (String(newPassword || '').length < 8) throw Object.assign(new Error('Password must be at least 8 characters.'), {status: 400});
     this.store.transaction(() => {
       this.store.run('UPDATE users SET password_hash=? WHERE id=?', hashPassword(newPassword), userId);
-      this.store.run('UPDATE sessions SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL', now(), userId);
+      // Sign out every other session but keep the one that made this change, so
+      // the acting user is not logged out by their own password update.
+      this.store.run('UPDATE sessions SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL AND id<>?', now(), userId, keepSessionId || '');
     });
     return {ok: true};
   }

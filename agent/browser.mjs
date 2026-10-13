@@ -163,7 +163,8 @@ export async function captureWithBrowser(url, {allow, steps = [], binary = findB
   const proxy = await startProxy({permit, refused: blocked});
   const {child, address} = launch(binary, profile, proxy.port, extraArgs);
   let cdp = null;
-  const deadline = new Promise((_, reject) => setTimeout(() => reject(new Error(`The page did not finish loading within ${timeoutMs / 1000}s.`)), timeoutMs).unref());
+  let deadlineTimer = null;
+  const deadline = new Promise((_, reject) => { deadlineTimer = setTimeout(() => reject(new Error(`The page did not finish loading within ${timeoutMs / 1000}s.`)), timeoutMs); deadlineTimer.unref(); });
   try {
     return await Promise.race([deadline, (async () => {
       cdp = await connect(await address);
@@ -209,6 +210,9 @@ export async function captureWithBrowser(url, {allow, steps = [], binary = findB
       return {url, finalUrl: page.url, title: page.title || null, excerpt: text.slice(0, 600), text: text.slice(0, 4000), blockedRequests: blocked.length, engine: 'browser', capturedAt: new Date().toISOString(), ...(steps.length ? {actions} : {})};
     })()]);
   } finally {
+    // The deadline only matters while loading; clear it so a successful capture
+    // does not leave a timer holding a closure until it fires.
+    clearTimeout(deadlineTimer);
     address.catch(() => {});
     try { cdp?.close(); } catch { /* Already closed. */ }
     proxy.close();

@@ -26,6 +26,11 @@ export function createQueue(store, handlers = {}, {intervalMs = 2000, workerId, 
     if (busy) return; // one sweep at a time; the store serializes writes anyway
     busy = true;
     try {
+      // Skip the write when nothing is due: store.update rewrites the whole
+      // state (DELETE + re-INSERT for SQLite) and this runs every couple of
+      // seconds, so an idle install should not write to disk at all.
+      const due = (store.read().tasks || []).some(t => t.status === 'queued' && Date.parse(t.runAt) <= now && !(t.leaseUntil && Date.parse(t.leaseUntil) > now));
+      if (!due) return;
       const claimed = await store.update(s => tasks.claimTasks(s, {workerId: id, now, leaseMs, limit: batch}));
       for (const task of claimed) {
         const handler = handlers[task.kind];

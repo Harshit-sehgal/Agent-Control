@@ -20,7 +20,7 @@ const store = () => {
 test('retention validation bounds the window and prune only removes exhaust', () => {
   assert.throws(() => normalizeRetention({events: -1}), /0.1825 days|0–1825/);
   assert.throws(() => normalizeRetention({doneTasks: 99999}), /0.1825 days|0–1825/);
-  assert.deepEqual(normalizeRetention({}), {events: 90, doneTasks: 30, sentNotifications: 30, runs: 30});
+  assert.deepEqual(normalizeRetention({}), {events: 90, doneTasks: 30, runs: 30});
   assert.equal(normalizeRetention({events: 0}).events, 0, 'Zero disables pruning for that collection.');
 
   const s = store();
@@ -53,7 +53,7 @@ test('retention validation bounds the window and prune only removes exhaust', ()
 test('retention is a workspace setting, validated through the settings route', () => {
   const s = store();
   updateSettings(s, {retention: {events: 7, doneTasks: 3}});
-  assert.deepEqual(s.settings.retention, {events: 7, doneTasks: 3, sentNotifications: 30, runs: 30});
+  assert.deepEqual(s.settings.retention, {events: 7, doneTasks: 3, runs: 30});
   assert.throws(() => updateSettings(s, {retention: {events: 5000}}), /0–1825 days/);
 });
 

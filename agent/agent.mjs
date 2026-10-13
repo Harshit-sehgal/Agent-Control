@@ -115,7 +115,12 @@ async function execute(task, config) {
       throw new Error(`Refusing to read ${host}: it is not in AGENT_BROWSER_ALLOWLIST. Only explicitly allowed pages are read.`);
     }
     if (process.env.AGENT_BROWSER === '1') return captureWithBrowser(target, {allow});
-    const res = await fetch(target, {method: 'GET', signal: AbortSignal.timeout(15000)});
+    // The fetch fallback must not become a second way onto the local network: it
+    // is checked like http.check, and redirects are reported rather than
+    // followed (a 302 from an allowlisted host could otherwise land on
+    // 169.254.169.254 or localhost).
+    await assertPublicUrl(target);
+    const res = await fetch(target, {method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(15000)});
     const html = (await res.text()).slice(0, 200000);
     const title = /<title[^>]*>([^<]*)<\/title>/i.exec(html)?.[1]?.trim() || null;
     const excerpt = html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 600);

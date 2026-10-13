@@ -75,10 +75,14 @@ export function notify(store, queue, {workspaceId = 'default', userId, title, bo
       VALUES (?,?,?,?,?,?,?,?,?)`, id, workspaceId || null, userId || null, 'in_app',
       String(title).slice(0, 200), String(body || '').slice(0, 2000), JSON.stringify(meta || {}), 'delivered', now());
     // Bound the in-app feed; oldest goes first so the newest stays readable.
-    const overflow = store.all(
-      `SELECT id FROM notifications WHERE channel='in_app' AND (user_id IS NULL OR user_id=?) ORDER BY created_at DESC LIMIT -1 OFFSET ?`,
-      userId || null, MAX_IN_APP);
-    for (const row of overflow) store.run('DELETE FROM notifications WHERE id=?', row.id);
+    // Global rows (user_id IS NULL, seen by everyone) and a user's own rows are
+    // capped separately, so one busy user cannot evict a shared notice.
+    const trim = (where, params) => {
+      const overflow = store.all(`SELECT id FROM notifications WHERE channel='in_app' AND ${where} ORDER BY created_at DESC LIMIT -1 OFFSET ?`, ...params, MAX_IN_APP);
+      for (const row of overflow) store.run('DELETE FROM notifications WHERE id=?', row.id);
+    };
+    if (userId) trim('user_id=?', [userId]);
+    trim('user_id IS NULL', []);
   }
   // Outbound channels become durable queue tasks rather than inline fetches,
   // so a webhook outage retries with backoff instead of being lost.
@@ -134,10 +138,12 @@ export async function deliver(store, task) {
     return {delivered: 'webhook'};
   }
   if (channel === 'email') {
-    // Honest limitation: delivering mail needs an SMTP client or gateway this
-    // zero-dependency project does not embed. Record that it is waiting on a
-    // relay rather than claiming it was sent.
-    return {delivered: 'email-pending-relay', note: 'Configure an external relay to deliver.'};
+    // Delivering mail needs an SMTP client or gateway this zero-dependency
+    // project does not embed. Throw so the queue records a real failure instead
+    // of completing the task and marking the notification "sent" — which would
+    // claim a message that never left. Operators switch the channel off or add
+    // a relay (the record stays visible either way).
+    throw new Error('Email delivery needs an external relay, which is not configured. Switch off the email channel or add a relay.');
   }
   throw new Error(`Unknown notification channel "${String(channel).slice(0, 40)}".`);
 }
