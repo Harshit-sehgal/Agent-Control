@@ -14,7 +14,11 @@ async function withStore(fn) {
     const dataFile = path.join(dir, 'state.json');
     const store = await new SqliteStore(path.join(dir, 'state.db'), dataFile).init();
     store.vaultKey = loadMasterKey(dataFile).key;
-    await store.update(s => migrate(s));
+    await store.update(s => {
+      migrate(s);
+      // A couple of real bots, so the per-bot override can be validated against them.
+      s.groups = [{id: 'x-engage', name: 'X-engage', bots: [{id: 'writer', name: 'Writer', type: 'writing'}, {id: 'other', name: 'Other', type: 'custom'}]}];
+    });
     return await fn(store);
   } finally {
     await fs.rm(dir, {recursive: true, force: true});
@@ -57,6 +61,10 @@ test('the workspace default model and a per-bot override both apply', async () =
 
     await ai.setBotModel(store, 'writer', {model: ''});
     assert.equal(ai.resolveConfig(store, 'writer').model, 'llama-3.3-70b', 'clearing the override falls back to the default');
+
+    // An override for a bot that does not exist is refused, not stored.
+    await assert.rejects(ai.setBotModel(store, 'ghost', {model: 'x'}), /Bot not found/);
+    assert.equal(store.read().ai.bots.ghost, undefined);
   });
 });
 

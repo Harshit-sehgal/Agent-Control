@@ -83,6 +83,10 @@ export async function setDefaults(store,{providerId,model}={}){
 
 export async function setBotModel(store,botId,{providerId,model}={}){
   if(!botId)fail('Missing bot id.');
+  // The override is keyed by bot id, so a typo or a stale id must be rejected
+  // instead of writing an override nothing will ever read.
+  const existing=store.read();
+  if(!(existing.groups||[]).some(group=>(group.bots||[]).some(bot=>bot.id===botId)))fail('Bot not found.',404);
   await store.update(s=>{const ai=aiState(s);const next={...(ai.bots[botId]||{})};
     if(providerId!==undefined){if(providerId&&!ai.providers.some(p=>p.id===providerId))throw fail('Provider not found.',404);next.providerId=providerId||null;}
     if(model!==undefined)next.model=clean(model,120);

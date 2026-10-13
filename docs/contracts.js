@@ -14,6 +14,8 @@
  *
  * Pure functions over bot records, like the other shared modules.
  */
+import {validHttpUrl} from './core.js?v=bf1c2663b4';
+
 export const CONTRACT_VERSION = 1;
 
 export const INPUTS = ['objective', 'previous_output', 'evidence', 'source_post', 'settings', 'identity'];
@@ -95,6 +97,20 @@ export function canBot(bot, action) {
  * structured value when the contract asks for one (tolerating code fences,
  * which models emit constantly), or the text itself. Throws on violation so
  * the coordinator records a real failure instead of passing garbage on. */
+/** True when `value` matches the declared field type. */
+function matchesType(value, type) {
+  switch (type) {
+    case 'text': return typeof value === 'string';
+    case 'number': return typeof value === 'number' && Number.isFinite(value);
+    case 'boolean': return typeof value === 'boolean';
+    case 'url': return typeof value === 'string' && validHttpUrl(value) !== null;
+    case 'string_list': return Array.isArray(value) && value.every(v => typeof v === 'string');
+    // An evidence reference is a link or a structured item ({link, claim, …}).
+    case 'evidence_list': return Array.isArray(value) && value.every(v => (typeof v === 'string' && v.trim()) || (v && typeof v === 'object' && !Array.isArray(v)));
+    default: return true;
+  }
+}
+
 export function assertContractOutput(bot, output) {
   const contract = bot?.contract || defaultContract();
   const text = String(output ?? '');
@@ -105,10 +121,15 @@ export function assertContractOutput(bot, output) {
   try { parsed = JSON.parse(cleaned); } catch { fail('Structured output was not valid JSON.', 502); }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) fail('Structured output must be a JSON object.', 502);
   for (const field of contract.output.fields) {
-    if (!field.required) continue;
-    if (parsed[field.name] === undefined || parsed[field.name] === null || parsed[field.name] === '') {
-      fail(`Structured output is missing the required field "${field.name}".`, 502);
+    const value = parsed[field.name];
+    // An absent value only fails a required field; a present value must still
+    // match its declared type, so the coordinator never hands a mis-typed
+    // payload to the next bot.
+    if (value === undefined || value === null || value === '') {
+      if (field.required) fail(`Structured output is missing the required field "${field.name}".`, 502);
+      continue;
     }
+    if (!matchesType(value, field.type)) fail(`Structured output field "${field.name}" must be of type ${field.type}.`, 502);
   }
   return parsed;
 }

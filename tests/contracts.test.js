@@ -95,6 +95,27 @@ test('the coordinator enforces structured output contracts and records failures'
   } finally { await rm(dir, {recursive: true, force: true}); }
 });
 
+test('structured output validates every declared field type, not just presence', () => {
+  const bot = contracts.normalizeBot({id: 'typed', type: 'custom', contract: contracts.validateContract({inputs: ['objective'], output: {kind: 'structured', fields: [
+    {name: 'confidence', type: 'number', required: true},
+    {name: 'label', type: 'text'},
+    {name: 'tags', type: 'string_list'},
+    {name: 'ok', type: 'boolean'},
+    {name: 'link', type: 'url'},
+    {name: 'refs', type: 'evidence_list'},
+  ]}})});
+  const good = {confidence: 0.8, label: 'fine', tags: ['a', 'b'], ok: true, link: 'https://example.com/a', refs: ['https://example.com/x', {link: 'https://example.com/y', claim: 'c'}]};
+  assert.deepEqual(contracts.assertContractOutput(bot, JSON.stringify(good)), good);
+
+  assert.throws(() => contracts.assertContractOutput(bot, JSON.stringify({confidence: 'high'})), /"confidence" must be of type number/);
+  assert.throws(() => contracts.assertContractOutput(bot, JSON.stringify({confidence: 1, tags: 'a'})), /"tags" must be of type string_list/);
+  assert.throws(() => contracts.assertContractOutput(bot, JSON.stringify({confidence: 1, ok: 'yes'})), /"ok" must be of type boolean/);
+  assert.throws(() => contracts.assertContractOutput(bot, JSON.stringify({confidence: 1, link: 'javascript:alert(1)'})), /"link" must be of type url/);
+  assert.throws(() => contracts.assertContractOutput(bot, JSON.stringify({confidence: 1, refs: [123]})), /"refs" must be of type evidence_list/);
+  // An optional field may be omitted, but a required one may not.
+  assert.throws(() => contracts.assertContractOutput(bot, JSON.stringify({label: 'x'})), /missing the required field "confidence"/);
+});
+
 test('the handoff envelope carries the contract and permission list', () => {
   const group = {id: 'g', name: 'G', bots: [{id: 'b1', name: 'B1', instructions: 'Do work.', type: 'custom', permissions: ['draft.create']}]};
   const bot = contracts.normalizeBot(group.bots[0]);
