@@ -1,24 +1,22 @@
-# systemd unit for a host without Docker.
-#
-#   sudo useradd --system --home /srv/agent-control agent-control
+# Agent Control as a systemd service (no Docker needed).
 #   sudo cp deploy/agent-control.service /etc/systemd/system/
-#   sudo systemctl enable --now agent-control
-#
-# Put a reverse proxy that terminates HTTPS in front (see docs/DEPLOYMENT.md).
+#   sudo systemctl daemon-reload && sudo systemctl enable --now agent-control
+# Adjust WorkingDirectory/EnvironmentFile and the User to your install.
 [Unit]
 Description=Agent Control
 After=network-online.target
 Wants=network-online.target
 
 [Service]
+Type=simple
+User=agent-control
 WorkingDirectory=/srv/agent-control
 EnvironmentFile=/srv/agent-control/.env
 ExecStart=/usr/bin/node src/server.js
 Restart=on-failure
-RestartSec=5
-User=agent-control
+RestartSec=3
+# Hardening: the app only writes under data/ (SQLite + vault keyfile).
 NoNewPrivileges=true
-PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/srv/agent-control/data

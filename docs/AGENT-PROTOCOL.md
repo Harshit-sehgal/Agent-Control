@@ -72,3 +72,39 @@ code or the agent id. The **server**
 decides an agent's permissions; a heartbeat body is never trusted to widen its
 own scope (`setAgentPermissions` is admin-only). There is deliberately no
 `publish.*` permission anywhere in the system.
+
+## 6. Task kinds
+
+`GET /api/agents` returns `actions`, the list an admin grants per agent.
+`POST /api/agents/:id/tasks` queues one (member role; the kind's own permission
+is required).
+
+| kind | permission | what it does |
+|---|---|---|
+| `http.check` | `http.check` | GET a URL, report status and latency. Redirects are reported, not followed. |
+| `browser.capture` | `browser.capture` | Read a page on an allowlisted host with the installed browser (or a plain fetch). |
+| `browser.action` | `browser.action` | **Interact** with an allowlisted page: `steps` of `navigate` / `click` / `type` / `waitFor` / `read` (max 25). |
+
+`browser.action` payload:
+
+```json
+{"url": "https://app.example.com/tickets",
+ "steps": [{"op": "type", "selector": "#q", "text": "open"},
+           {"op": "click", "selector": "#search"},
+           {"op": "read", "selector": "#results"}]}
+```
+
+Boundaries — the same as a read, plus interaction:
+
+- every host (the page **and** any step's `navigate`) must be in
+  `AGENT_BROWSER_ALLOWLIST`, including after a redirect;
+- the browser reaches the network only through the agent's proxy, which refuses
+  private/local addresses, so a step cannot pivot to your LAN;
+- actions run in a **fresh, empty profile** that is deleted afterwards, so the
+  agent is never signed in to anything; authenticated flows would need an
+  explicit, opt-in persistent profile (`AGENT_BROWSER_PROFILE`) and are not on
+  by default;
+- interaction requires the real browser (`AGENT_BROWSER=1`); the fetch fallback
+  is read-only;
+- a human dispatches the task. The model never triggers it — that is the same
+  hard boundary as publishing.

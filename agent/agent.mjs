@@ -25,7 +25,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import crypto from 'node:crypto';
 import {assertPublicUrl} from './net-guard.mjs';
-import {captureWithBrowser} from './browser.mjs';
+import {captureWithBrowser, ACTION_OPS, MAX_ACTIONS} from './browser.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG = path.join(HERE, 'agent.config.json');
@@ -120,6 +120,19 @@ async function execute(task, config) {
     const title = /<title[^>]*>([^<]*)<\/title>/i.exec(html)?.[1]?.trim() || null;
     const excerpt = html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 600);
     return {url: target, httpStatus: res.status, title, excerpt, capturedAt: new Date().toISOString()};
+  }
+  if (task.kind === 'browser.action') {
+    const target = String(task.payload?.url || '');
+    const allow = (process.env.AGENT_BROWSER_ALLOWLIST || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+    const host = new URL(target).host.toLowerCase();
+    if (!allow.includes(host)) throw new Error(`Refusing to act on ${host}: it is not in AGENT_BROWSER_ALLOWLIST. Only explicitly allowed pages are driven.`);
+    const steps = Array.isArray(task.payload?.steps) ? task.payload.steps.slice(0, MAX_ACTIONS) : [];
+    if (!steps.length) throw new Error('browser.action needs at least one step.');
+    const bad = steps.find(step => !step || !ACTION_OPS.includes(step.op));
+    if (bad) throw new Error(`Unsupported action "${String(bad?.op)}". Allowed: ${ACTION_OPS.join(', ')}.`);
+    // Interaction needs the real browser; the fetch fallback cannot click or type.
+    if (process.env.AGENT_BROWSER !== '1') throw new Error('browser.action needs a real browser: set AGENT_BROWSER=1 on this device.');
+    return captureWithBrowser(target, {allow, steps});
   }
   throw new Error(`Unknown task kind "${task.kind}".`);
 }

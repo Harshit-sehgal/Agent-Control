@@ -82,3 +82,33 @@ test('a real browser reads a script-rendered page and blocks what the policy ref
     assert.equal(profiles(), before, 'The temporary browser profile is deleted.');
   } finally { server.close(); }
 });
+
+test('browser.action types, clicks and reads, and refuses off-allowlist navigations', {skip: !browser && 'no browser installed', timeout: 60000}, async () => {
+  const server = http.createServer((req, res) => {
+    if (req.url === '/form') return res.writeHead(200, {'Content-Type': 'text/html'}).end(
+      `<title>Form</title><input id="name"><button id="go">Go</button><p id="out"></p>` +
+      `<script>document.getElementById('go').addEventListener('click',()=>{document.getElementById('out').textContent='Hello '+document.getElementById('name').value;});</script>`);
+    res.writeHead(200, {'Content-Type': 'text/plain'}).end('ok');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const host = `127.0.0.1:${server.address().port}`, permit = h => h !== 'localhost';
+  try {
+    const page = await captureWithBrowser(`http://${host}/form`, {allow: [host], binary: browser, permit, steps: [
+      {op: 'type', selector: '#name', text: 'Ada'},
+      {op: 'click', selector: '#go'},
+      {op: 'read', selector: '#out'},
+      {op: 'navigate', url: 'https://evil.example.com/'},
+      {op: 'launchMissiles'},
+      {},
+    ]});
+    const [type, click, read, nav, bad, missing] = page.actions;
+    assert.equal(type.ok, true, 'typing into the input succeeds');
+    assert.equal(click.ok, true, 'clicking the button succeeds');
+    assert.equal(read.text, 'Hello Ada', 'the click handler saw the typed value, so the page really interacted');
+    assert.equal(nav.ok, false, 'a navigation off the allowlist is refused');
+    assert.match(nav.reason, /allowlist/i);
+    assert.equal(bad.ok, false, 'an unknown op is refused');
+    assert.match(bad.reason, /unsupported/);
+    assert.equal(missing.ok, false, 'a step without an op is refused');
+  } finally { server.close(); }
+});

@@ -47,6 +47,23 @@ export function findBrowser(env = process.env) {
 
 export const hostAllowed = (url, allow) => { try { return allow.includes(new URL(url).host.toLowerCase()); } catch { return false; } };
 
+/** Actions a `browser.action` task may run, and the hard cap per task. Every
+ * click, typed value and navigation is still gated by the same allowlist and
+ * proxy as a read: this adds interaction, not a way around the boundary. */
+export const ACTION_OPS = ['navigate', 'click', 'type', 'waitFor', 'read'];
+export const MAX_ACTIONS = 25;
+const jsLiteral = value => JSON.stringify(String(value ?? ''));
+function actionExpression(step) {
+  const sel = jsLiteral(step.selector);
+  switch (step.op) {
+    case 'click': return `(()=>{const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};el.scrollIntoView();el.click();return{ok:true};})()`;
+    case 'type': return `(()=>{const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};const v=${jsLiteral(step.text)};if('value' in el){el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}else{el.textContent=v;}return{ok:true};})()`;
+    case 'waitFor': return `new Promise(res=>{const sel=${sel};const end=Date.now()+${Number(step.timeoutMs) > 0 ? Math.min(Number(step.timeoutMs), 15000) : 5000};const tick=()=>{if(document.querySelector(sel))return res({ok:true});if(Date.now()>end)return res({ok:false,reason:'timed out'});setTimeout(tick,100);};tick();})`;
+    case 'read': return `(()=>{const el=document.querySelector(${sel});return{ok:Boolean(el),text:el?String(el.textContent).slice(0,4000):null};})()`;
+    default: return null;
+  }
+}
+
 /** Decide one request the page being read wants to make. The page itself
  * (and any frame in it) must be on the allowlist; where a request may connect
  * to is the proxy's decision. */
@@ -138,7 +155,7 @@ async function connect(address) {
 }
 
 /** Open `url` in a headless browser and return what a reader would see. */
-export async function captureWithBrowser(url, {allow, binary = findBrowser(), permit = publicOnly, timeoutMs = 20000, extraArgs = String(process.env.AGENT_BROWSER_ARGS || '').split(' ').filter(Boolean)} = {}) {
+export async function captureWithBrowser(url, {allow, steps = [], binary = findBrowser(), permit = publicOnly, timeoutMs = 20000, extraArgs = String(process.env.AGENT_BROWSER_ARGS || '').split(' ').filter(Boolean)} = {}) {
   if (!binary) throw new Error('No Chrome, Chromium or Edge was found on this device. Install one, or set AGENT_BROWSER_PATH.');
   if (!hostAllowed(url, allow)) throw new Error(`Refusing to open ${url}: its host is not in AGENT_BROWSER_ALLOWLIST.`);
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-browser-'));
@@ -167,11 +184,29 @@ export async function captureWithBrowser(url, {allow, binary = findBrowser(), pe
       await loaded;
       // Give scripts a moment to render what they fetched.
       await new Promise(resolve => setTimeout(resolve, 600));
+      // Optional interaction steps (a `browser.action` task). Each is bounded and
+      // still gated by the allowlist + proxy; a `navigate` is checked here too.
+      const actions = [];
+      for (const step of steps.slice(0, MAX_ACTIONS)) {
+        if (step?.op === 'navigate') {
+          const target = String(step.url || '');
+          if (!hostAllowed(target, allow)) { actions.push({op: 'navigate', ok: false, reason: 'host not in AGENT_BROWSER_ALLOWLIST'}); continue; }
+          const nav = await cdp.send('Page.navigate', {url: target}, sessionId);
+          if (nav.errorText) { actions.push({op: 'navigate', ok: false, reason: nav.errorText}); continue; }
+          await new Promise(resolve => setTimeout(resolve, 500));
+          actions.push({op: 'navigate', ok: true, url: target});
+          continue;
+        }
+        const expression = actionExpression(step || {});
+        if (!expression) { actions.push({op: String(step?.op || 'unknown'), ok: false, reason: 'unsupported action'}); continue; }
+        const {result} = await cdp.send('Runtime.evaluate', {expression, awaitPromise: true, returnByValue: true}, sessionId);
+        actions.push({op: step.op, ...(result?.value && typeof result.value === 'object' ? result.value : {ok: false})});
+      }
       const {result} = await cdp.send('Runtime.evaluate', {returnByValue: true, expression: 'JSON.stringify({url: location.href, title: document.title, text: (document.body ? document.body.innerText : "").slice(0, 20000)})'}, sessionId);
       const page = JSON.parse(result.value);
       if (!hostAllowed(page.url, allow)) throw new Error(`The page ended up on ${new URL(page.url).host}, which is not in AGENT_BROWSER_ALLOWLIST.`);
       const text = page.text.replace(/\s+/g, ' ').trim();
-      return {url, finalUrl: page.url, title: page.title || null, excerpt: text.slice(0, 600), text: text.slice(0, 4000), blockedRequests: blocked.length, engine: 'browser', capturedAt: new Date().toISOString()};
+      return {url, finalUrl: page.url, title: page.title || null, excerpt: text.slice(0, 600), text: text.slice(0, 4000), blockedRequests: blocked.length, engine: 'browser', capturedAt: new Date().toISOString(), ...(steps.length ? {actions} : {})};
     })()]);
   } finally {
     address.catch(() => {});

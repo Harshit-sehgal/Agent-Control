@@ -1,0 +1,17 @@
+# Runs the named tunnel that publishes Agent Control at your hostname.
+#   sudo cp deploy/cloudflared.service /etc/systemd/system/
+#   sudo systemctl enable --now cloudflared
+# Requires /etc/cloudflared/config.yml (see deploy/cloudflared-config.yml).
+[Unit]
+Description=Cloudflare Tunnel for Agent Control
+After=network-online.target agent-control.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/cloudflared --no-autoupdate --config /etc/cloudflared/config.yml tunnel run
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

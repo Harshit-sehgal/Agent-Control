@@ -22,12 +22,16 @@ import crypto from 'node:crypto';
 import {cleanText} from '../shared/core.js';
 import {encryptJson,decryptJson,sha256,loadMasterKey} from './vault.js';
 
-export const AGENT_ACTIONS = ['http.check', 'browser.capture'];
+export const AGENT_ACTIONS = ['http.check', 'browser.capture', 'browser.action'];
 const PAIRING_TTL_MS = 10 * 60000;
 const CLOCK_SKEW_MS = 5 * 60000;
 const TASK_KINDS = {
   'http.check': 'http.check',
   'browser.capture': 'browser.capture',
+  // Interact with a page (navigate/click/type/wait/read) inside the same
+  // allowlist and proxy as a read. A separate permission because it acts, not
+  // just reads, so an operator grants it deliberately.
+  'browser.action': 'browser.action',
 };
 const signatureNonces = new Map(); // agentId -> Set of recently used signatures
 

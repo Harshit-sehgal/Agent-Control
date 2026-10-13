@@ -1,0 +1,15 @@
+# Named Cloudflare Tunnel in front of Agent Control.
+#   cloudflared tunnel create agent-control      # gives the UUID + credentials file
+#   sudo cp deploy/cloudflared-config.yml /etc/cloudflared/config.yml
+#   replace TUNNEL_UUID and app.example.com below
+#   cloudflared tunnel route dns agent-control app.example.com
+tunnel: TUNNEL_UUID
+credentials-file: /etc/cloudflared/TUNNEL_UUID.json
+
+ingress:
+  # The public hostname. Also set PUBLIC_ORIGIN=https://app.example.com in .env
+  # so the app's same-origin (CSRF) check matches, and add a Cloudflare Access
+  # policy on this hostname to restrict it to your account.
+  - hostname: app.example.com
+    service: http://127.0.0.1:4173
+  - service: http_status:404
