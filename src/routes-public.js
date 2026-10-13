@@ -25,6 +25,16 @@ export function publicRoutes(router, {auth, workspaces, version}) {
     record.count++;
   }
 
+  // Behind a reverse proxy the socket address is the proxy, so the limiter (and
+  // the session's recorded ip) would collapse every client into one bucket.
+  // The forwarded headers are only trusted when the operator says a proxy is in
+  // front (TRUST_PROXY=1), for both the client ip and the https hint.
+  const trustProxy = () => process.env.TRUST_PROXY === '1';
+  const clientIp = req => {
+    if (trustProxy()) { const fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim(); if (fwd) return fwd; }
+    return req.socket.remoteAddress || 'unknown';
+  };
+
   // The workspace a device was paired in. An unknown id falls through to the
   // first workspace, whose signature check refuses it.
   const agentStore = c => workspaces.holding('SELECT 1 AS x FROM agents WHERE id=?', String(c.req.headers['x-agent-id'] || '')) || workspaces.get(DEFAULT_WORKSPACE);
@@ -33,7 +43,7 @@ export function publicRoutes(router, {auth, workspaces, version}) {
   for (const method of ['GET', 'HEAD']) router.add(method, '/api/health', 'public', () => ({ok: true, version}));
 
   router.add('POST', '/api/login', 'public', async c => {
-    const ip = c.req.socket.remoteAddress || 'unknown';
+    const ip = clientIp(c.req);
     // The attempt is counted before the body is read, so a burst of parallel
     // requests cannot all slip past the limit while the first is still open.
     attempt(ip, LOGIN_ATTEMPTS);
@@ -41,7 +51,7 @@ export function publicRoutes(router, {auth, workspaces, version}) {
     const result = auth.login({email: b.email, password: b.password}, {ip, userAgent: c.req.headers['user-agent']});
     if (!result.ok) fail(result.error, result.status);
     attempts.delete(ip);
-    const secure = Boolean(c.req.socket.encrypted || c.req.headers['x-forwarded-proto'] === 'https');
+    const secure = Boolean(c.req.socket.encrypted || (trustProxy() && c.req.headers['x-forwarded-proto'] === 'https'));
     return reply(200, {ok: true, me: {email: result.user.email, role: result.role}}, {'Set-Cookie': sessionCookie(result.sessionId, {secure})});
   });
   router.add('POST', '/api/logout', 'public', c => {
@@ -53,12 +63,13 @@ export function publicRoutes(router, {auth, workspaces, version}) {
   // cannot be used to enumerate accounts.
   router.add('POST', '/api/auth/forgot', 'public', async c => {
     // Each request replaces the pending reset, so it is limited like sign-in.
-    attempt(`forgot:${c.req.socket.remoteAddress || 'unknown'}`, LOGIN_ATTEMPTS);
+    attempt(`forgot:${clientIp(c.req)}`, LOGIN_ATTEMPTS);
     const b = await c.body();
     const token = auth.requestPasswordReset(b.email);
-    // Local-first deployment: the console prints the token because there is no
-    // mail transport configured. Do not log tokens in a public deployment.
-    if (token) console.log(`\nPassword reset token for ${String(b.email || '').trim().toLowerCase()} (valid 1 hour, single use):\n  ${token}\n`);
+    // Local-first: the console prints the token because no mail transport is
+    // configured. Set RESET_TOKEN_CONSOLE=0 on a hosted deployment so reset
+    // tokens never reach the logs.
+    if (token && process.env.RESET_TOKEN_CONSOLE !== '0') console.log(`\nPassword reset token for ${String(b.email || '').trim().toLowerCase()} (valid 1 hour, single use):\n  ${token}\n`);
     return {ok: true};
   });
   router.add('POST', '/api/auth/reset', 'public', async c => {

@@ -151,6 +151,9 @@ export class Auth {
     this.store.transaction(() => {
       this.store.run('DELETE FROM workspace_members WHERE workspace_id=?', actor.workspaceId);
       this.store.run('DELETE FROM workspaces WHERE id=?', actor.workspaceId);
+      // Sessions still pointing at the removed workspace are not dangling: the
+      // next request resolves them to another workspace the account belongs to,
+      // so they are deliberately left to self-heal rather than logging people out.
     });
     return {ok: true};
   }

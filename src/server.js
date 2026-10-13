@@ -164,7 +164,9 @@ async function api(req,res,u){
   let raw,parsed;
   const context={req,path:u.pathname,params:found.params,actor,store:scope,
     raw:async()=>raw??=await rawBody(req),
-    body:async()=>parsed??=safeJson(await rawBody(req,128*1024))};
+    // An optional limit lets a route that legitimately carries a large document
+    // (a backup restore) ask for more than the 128 KB default.
+    body:async(limit=128*1024)=>parsed??=safeJson(await rawBody(req,limit))};
   const result=await found.route.handler(context);
   const {status,body,headers}=isReply(result)?result:{status:200,body:result,headers:{}};
   if(req.method==='HEAD'){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...SECURITY,...headers});return res.end();}

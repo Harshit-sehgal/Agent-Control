@@ -168,7 +168,7 @@ document.body.addEventListener('keydown', ev => {
 window.addEventListener('popstate', event => { syncDepth(event); if (!store.state) return; closeSheet(); closeCommandPalette(); const next = hashRoute(); if (next.chat !== store.route.chat) { store.editDraft = null; store.editText = null; } store.route = next; changed('route'); });
 window.addEventListener('resize', () => { if (store.state) setInert(); });
 // `toggle` does not bubble, so listen in the capture phase to remember open source panels.
-document.addEventListener('toggle', ev => { const id = ev.target.dataset?.evidence; if (id) ev.target.open ? store.openEvidence.add(id) : store.openEvidence.delete(id); }, true);
+document.addEventListener('toggle', ev => { const id = ev.target.dataset?.evidence; if (!id) return; if (ev.target.open) { store.openEvidence.add(id); if (store.openEvidence.size > 50) store.openEvidence.delete(store.openEvidence.values().next().value); } else store.openEvidence.delete(id); }, true);
 
 applyTheme(); watchSystemTheme(); bringBotsToLife();
 boot();

@@ -222,6 +222,9 @@ export function revokeAgent(store, agentId) {
   store.run('UPDATE agents SET revoked_at=?, status=? WHERE id=?', now(), 'revoked', agentId);
   // In-flight work must not complete for a revoked device.
   store.run("UPDATE agent_tasks SET status='failed', error='Agent was revoked before completion.', lease_until=NULL, updated_at=? WHERE agent_id=? AND status IN ('queued','running')", now(), agentId);
+  // Drop its replay cache so a revoked agent's entry is not retained for the
+  // process lifetime.
+  signatureNonces.delete(agentId);
   return {ok: true};
 }
 

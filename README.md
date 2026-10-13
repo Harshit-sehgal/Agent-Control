@@ -1,4 +1,4 @@
-# Agent Control — working prototype v0.6
+# Agent Control — working prototype v0.7
 
 A local-first dashboard for creating bot groups, reviewing AI-assisted drafts, and coordinating human-approved workflows. **X-engage is the first demo group.** It does not use an X developer API key, automatically crawl X, or automatically publish to X.
 

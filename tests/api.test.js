@@ -9,12 +9,12 @@ import {fileURLToPath} from 'node:url';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 async function freePort(){return await new Promise((resolve,reject)=>{const server=net.createServer();server.listen(0,'127.0.0.1',()=>{const port=server.address().port;server.close(()=>resolve(port));});server.on('error',reject);});}
-async function launch(){
+async function launch(extraEnv={}){
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'agent-api-')),port=await freePort();
   const base=`http://127.0.0.1:${port}`;
   // Hermetic: ignore any developer `.env` and every AI env var so the tests
   // always run against the template-draft path, regardless of local setup.
-  const child=spawn(process.execPath,['src/server.js'],{cwd:root,env:{...process.env,AGENT_SKIP_DOTENV:'1',AI_API_KEY:'',OPENAI_API_KEY:'',AI_BASE_URL:'',OPENAI_BASE_URL:'',DASHBOARD_PASSWORD:'test-password-1234',HOST:'127.0.0.1',PORT:String(port),DATA_FILE:path.join(dir,'state.json')},stdio:['ignore','pipe','pipe']});
+  const child=spawn(process.execPath,['src/server.js'],{cwd:root,env:{...process.env,AGENT_SKIP_DOTENV:'1',AI_API_KEY:'',OPENAI_API_KEY:'',AI_BASE_URL:'',OPENAI_BASE_URL:'',DASHBOARD_PASSWORD:'test-password-1234',HOST:'127.0.0.1',PORT:String(port),DATA_FILE:path.join(dir,'state.json'),...extraEnv},stdio:['ignore','pipe','pipe']});
   let output='';child.stdout.on('data',b=>output+=b.toString());child.stderr.on('data',b=>output+=b.toString());
   let live=false;
   for(let i=0;i<90;i++){
@@ -180,3 +180,14 @@ test('a candidate interrupted mid-draft is processable again after a restart', {
 
 
 
+
+test('behind a trusted proxy the rate limit keys on the forwarded client address', {timeout:30000}, async () => {
+  const t = await launch({TRUST_PROXY: '1'});
+  try {
+    const send = xff => fetch(t.base + '/api/login', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Forwarded-For': xff}, body: JSON.stringify({password: 'wrong'})});
+    for (let i = 0; i < 8; i++) assert.equal((await send('10.0.0.1')).status, 401, 'the first eight are checked');
+    assert.equal((await send('10.0.0.1')).status, 429, 'the ninth from one address is refused');
+    // A different forwarded client address is a different bucket.
+    assert.equal((await send('10.0.0.2')).status, 401, 'another client is unaffected');
+  } finally { await t.stop(); }
+});

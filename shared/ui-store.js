@@ -132,7 +132,7 @@ export async function clearMessages(key) {
   // would otherwise POST after the clear and repopulate the conversation.
   await outbox.settle();
   await api(`/api/chats/${key}`, 'DELETE');
-  outbox.forget(key); delete store.messages[key]; changed();
+  outbox.forget(key); delete store.messages[key]; store.openEvidence.clear(); changed();
 }
 export function setTyping(key, on) { on ? store.typing.add(key) : store.typing.delete(key); changed('thread'); }
 export function setProfile(botId, patch) { store.profiles[botId] = {...(store.profiles[botId] || {}), ...patch}; saveLocal(META_KEY, store.profiles); }
@@ -176,7 +176,8 @@ export function back(fallback = {}) { if (depth > 0) history.back(); else go(fal
  * browser Back/Forward and reload working. */
 export function go({chat = null, page = null, info = null} = {}, {replace = false} = {}) {
   // An edit in progress survives opening the info panel, not leaving the chat.
-  if (chat !== store.route.chat) { store.editDraft = null; store.editText = null; }
+  // Which evidence panels were open is per-conversation, so drop it on a switch.
+  if (chat !== store.route.chat) { store.editDraft = null; store.editText = null; store.openEvidence.clear(); }
   store.route = {chat, page, info};
   const hash = `#${routeHash(store.route)}`;
   if (location.hash !== hash) {

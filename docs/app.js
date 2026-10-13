@@ -11,14 +11,14 @@
  *   ui-dialogs  toast, sheet, confirm/ask   ui-actions action/form tables
  *   ui-fx       confetti, the send arrow, and when the bots react
  */
-import {parseRoute} from './ui-model.js?v=d59cbe1cf3';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, isAdmin, applyTheme, watchSystemTheme} from './ui-store.js?v=d59cbe1cf3';
-import {toast, closeSheet, sheetOpen, trapTab} from './ui-dialogs.js?v=d59cbe1cf3';
-import {listShell, renderList, threadShell, renderThread, homeView} from './ui-views.js?v=d59cbe1cf3';
-import {renderInfo, refreshLists, renderPage} from './ui-panel.js?v=d59cbe1cf3';
-import {showLogin, hideLogin, openCommandPalette, closeCommandPalette, paletteOpen, updateCommandResults, chooseCommand, moveCommand} from './ui-sheets.js?v=d59cbe1cf3';
-import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=d59cbe1cf3';
-import {bringBotsToLife} from './ui-fx.js?v=d59cbe1cf3';
+import {parseRoute} from './ui-model.js?v=b3961575ec';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, isAdmin, applyTheme, watchSystemTheme} from './ui-store.js?v=b3961575ec';
+import {toast, closeSheet, sheetOpen, trapTab} from './ui-dialogs.js?v=b3961575ec';
+import {listShell, renderList, threadShell, renderThread, homeView} from './ui-views.js?v=b3961575ec';
+import {renderInfo, refreshLists, renderPage} from './ui-panel.js?v=b3961575ec';
+import {showLogin, hideLogin, openCommandPalette, closeCommandPalette, paletteOpen, updateCommandResults, chooseCommand, moveCommand} from './ui-sheets.js?v=b3961575ec';
+import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=b3961575ec';
+import {bringBotsToLife} from './ui-fx.js?v=b3961575ec';
 
 const el = id => document.getElementById(id);
 const hashRoute = () => parseRoute(location.hash, store.state, {server: !isStaticDemo(), admin: isAdmin()});
@@ -168,7 +168,7 @@ document.body.addEventListener('keydown', ev => {
 window.addEventListener('popstate', event => { syncDepth(event); if (!store.state) return; closeSheet(); closeCommandPalette(); const next = hashRoute(); if (next.chat !== store.route.chat) { store.editDraft = null; store.editText = null; } store.route = next; changed('route'); });
 window.addEventListener('resize', () => { if (store.state) setInert(); });
 // `toggle` does not bubble, so listen in the capture phase to remember open source panels.
-document.addEventListener('toggle', ev => { const id = ev.target.dataset?.evidence; if (id) ev.target.open ? store.openEvidence.add(id) : store.openEvidence.delete(id); }, true);
+document.addEventListener('toggle', ev => { const id = ev.target.dataset?.evidence; if (!id) return; if (ev.target.open) { store.openEvidence.add(id); if (store.openEvidence.size > 50) store.openEvidence.delete(store.openEvidence.values().next().value); } else store.openEvidence.delete(id); }, true);
 
 applyTheme(); watchSystemTheme(); bringBotsToLife();
 boot();

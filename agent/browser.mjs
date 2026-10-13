@@ -13,7 +13,9 @@
  *   checked. That holds for everything the browser does (frames, workers,
  *   popups, WebSockets), not only for the page being read;
  * - it uses a new, empty profile each time and deletes it afterwards, so it is
- *   never signed in to anything;
+ *   never signed in to anything. Setting AGENT_BROWSER_PROFILE points it at a
+ *   directory to keep instead — the explicit opt-in for signed-in journeys,
+ *   where the operator signs in once and the profile (and its cookies) persist;
  * - it navigates and reads. There is no click, type, upload or download.
  */
 import {spawn} from 'node:child_process';
@@ -158,7 +160,10 @@ async function connect(address) {
 export async function captureWithBrowser(url, {allow, steps = [], binary = findBrowser(), permit = publicOnly, timeoutMs = 20000, extraArgs = String(process.env.AGENT_BROWSER_ARGS || '').split(' ').filter(Boolean)} = {}) {
   if (!binary) throw new Error('No Chrome, Chromium or Edge was found on this device. Install one, or set AGENT_BROWSER_PATH.');
   if (!hostAllowed(url, allow)) throw new Error(`Refusing to open ${url}: its host is not in AGENT_BROWSER_ALLOWLIST.`);
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-browser-'));
+  // A throwaway profile by default; a kept one only when the operator opts in.
+  const keepProfile = process.env.AGENT_BROWSER_PROFILE || null;
+  if (keepProfile) fs.mkdirSync(keepProfile, {recursive: true});
+  const profile = keepProfile || fs.mkdtempSync(path.join(os.tmpdir(), 'agent-browser-'));
   const blocked = [];
   const proxy = await startProxy({permit, refused: blocked});
   const {child, address} = launch(binary, profile, proxy.port, extraArgs);
@@ -218,10 +223,11 @@ export async function captureWithBrowser(url, {allow, steps = [], binary = findB
     proxy.close();
     child.kill('SIGKILL');
     await new Promise(resolve => (child.exitCode !== null || child.signalCode ? resolve() : child.once('exit', resolve)));
-    // Chromium child processes can still be flushing the profile directory for
-    // a moment after the parent exits (maxRetries only helps on Windows), so
-    // retry and never let a cleanup race mask the real capture result.
-    for (let attempt = 0; attempt < 5; attempt++) {
+    // A kept profile (AGENT_BROWSER_PROFILE) survives so its sign-in does; a
+    // throwaway one is removed. Chromium child processes can still be flushing
+    // the directory for a moment after the parent exits (maxRetries only helps
+    // on Windows), so retry and never let a cleanup race mask the real result.
+    if (!keepProfile) for (let attempt = 0; attempt < 5; attempt++) {
       try { fs.rmSync(profile, {recursive: true, force: true}); break; }
       catch { await new Promise(resolve => setTimeout(resolve, 120)); }
     }

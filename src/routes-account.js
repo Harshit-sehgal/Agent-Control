@@ -96,7 +96,8 @@ export function accountRoutes(router, {auth, workspaces}) {
   // replaces accounts and roles, so either one in an admin's hands is a way up.
   router.add('GET', '/api/admin/backup', 'owner', c => backup.exportBackup(c.store));
   router.add('POST', '/api/admin/restore', 'owner', async c => {
-    const b = await c.body();
+    // A backup document can be far larger than a normal request; allow up to 32 MB.
+    const b = await c.body(32 * 1024 * 1024);
     const result = backup.importBackup(c.store, b, {force: Boolean(b.force)});
     // A backup of the first workspace carries the list of workspaces.
     await workspaces.sync();

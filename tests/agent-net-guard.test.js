@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {isPrivateAddress, assertPublicUrl} from '../agent/net-guard.mjs';
+import http from 'node:http';
+import {isPrivateAddress, assertPublicUrl, resolvePublicAddress, pinnedRequest} from '../agent/net-guard.mjs';
 
 test('loopback, private, link-local and metadata addresses are recognised', () => {
   for (const a of ['127.0.0.1', '10.1.2.3', '172.16.0.1', '172.31.255.255', '192.168.1.1', '169.254.169.254', '100.64.0.1', '0.0.0.0', '::1', '::', 'fd00::1', 'fe80::1', '::ffff:10.0.0.1', 'not-an-ip']) assert.equal(isPrivateAddress(a), true, a);
@@ -24,4 +25,26 @@ test('a check is refused when the host is, or resolves to, a private address', a
   await assert.rejects(() => assertPublicUrl('file:///etc/passwd', opts), /Only http/);
   // The device owner can opt in.
   await assertPublicUrl('http://127.0.0.1:4173/', {lookup, allowPrivate: true});
+});
+
+test('a pinned request connects to the vetted address and reports redirects', async () => {
+  const server = http.createServer((req, res) => {
+    if (req.url === '/away') return res.writeHead(302, {Location: 'http://169.254.169.254/'}).end();
+    res.writeHead(200, {'Content-Type': 'text/plain'}).end(`host=${req.headers.host}`);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  try {
+    const url = `http://rebind.test:${port}/`;
+    // The name resolves to the loopback server for the check; a pin means the
+    // connection never re-resolves (so a later rebind cannot redirect it).
+    const lookup = async () => [{address: '127.0.0.1'}];
+    const {address} = await resolvePublicAddress(url, {lookup, allowPrivate: true});
+    const res = await pinnedRequest(url, {address, timeoutMs: 5000});
+    assert.equal(res.status, 200);
+    assert.equal(res.body, `host=rebind.test:${port}`, 'the Host header keeps the real name');
+    // A redirect off the host is reported, not chased.
+    const away = await pinnedRequest(`http://rebind.test:${port}/away`, {address, timeoutMs: 5000});
+    assert.equal(away.status, 302);
+  } finally { server.close(); }
 });

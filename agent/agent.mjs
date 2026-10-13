@@ -24,8 +24,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import crypto from 'node:crypto';
-import {assertPublicUrl} from './net-guard.mjs';
 import {captureWithBrowser, ACTION_OPS, MAX_ACTIONS} from './browser.mjs';
+import {resolvePublicAddress, pinnedRequest} from './net-guard.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG = path.join(HERE, 'agent.config.json');
@@ -99,13 +99,13 @@ async function execute(task, config) {
   if (task.kind === 'http.check') {
     const target = String(task.payload?.url || '');
     if (!/^https?:\/\//.test(target)) throw new Error('http.check needs a valid http(s) url.');
+    const {address} = await resolvePublicAddress(target);
     const started = Date.now();
-    await assertPublicUrl(target);
-    // Redirects are reported, not followed: following one could land on an
-    // address the check above would have refused.
-    const res = await fetch(target, {method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(10000)});
+    // Connect to the address that was just vetted, and report (do not follow)
+    // redirects. There is no second DNS lookup, so a rebind cannot slip through.
+    const res = await pinnedRequest(target, {address, timeoutMs: 10000});
     const latencyMs = Date.now() - started;
-    return {url: target, httpStatus: res.status, ok: res.ok, latencyMs, checkedAt: new Date().toISOString()};
+    return {url: target, httpStatus: res.status, ok: res.status >= 200 && res.status < 300, latencyMs, checkedAt: new Date().toISOString()};
   }
   if (task.kind === 'browser.capture') {
     const target = String(task.payload?.url || '');
@@ -116,12 +116,11 @@ async function execute(task, config) {
     }
     if (process.env.AGENT_BROWSER === '1') return captureWithBrowser(target, {allow});
     // The fetch fallback must not become a second way onto the local network: it
-    // is checked like http.check, and redirects are reported rather than
-    // followed (a 302 from an allowlisted host could otherwise land on
-    // 169.254.169.254 or localhost).
-    await assertPublicUrl(target);
-    const res = await fetch(target, {method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(15000)});
-    const html = (await res.text()).slice(0, 200000);
+    // is vetted like http.check and pinned to the vetted address, and redirects
+    // are reported rather than followed.
+    const {address} = await resolvePublicAddress(target);
+    const res = await pinnedRequest(target, {address, timeoutMs: 15000, maxBytes: 200000});
+    const html = res.body.slice(0, 200000);
     const title = /<title[^>]*>([^<]*)<\/title>/i.exec(html)?.[1]?.trim() || null;
     const excerpt = html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 600);
     return {url: target, httpStatus: res.status, title, excerpt, capturedAt: new Date().toISOString()};

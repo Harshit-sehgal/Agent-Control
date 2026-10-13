@@ -6,6 +6,8 @@
  * allow private addresses on purpose (for example to watch a local service).
  */
 import dns from 'node:dns/promises';
+import http from 'node:http';
+import https from 'node:https';
 import net from 'node:net';
 
 /** Expand an IPv6 address to its eight 16-bit hextets (handles `::`). */
@@ -48,15 +50,60 @@ export function isPrivateAddress(address) {
   return true; // Not an address at all.
 }
 
-/** Resolve `url`'s host and throw unless every address it has is public. */
-export async function assertPublicUrl(url, {lookup = dns.lookup, allowPrivate = process.env.AGENT_ALLOW_PRIVATE === '1'} = {}) {
+/** Resolve a URL's host once and return the single address to connect to,
+ * throwing unless every address it resolves to is public. Returning the chosen
+ * address (rather than the hostname) lets the caller pin its connection to the
+ * exact address that was checked, so a name cannot be rebound to a private one
+ * between the check and the connect. */
+export async function resolvePublicAddress(url, {lookup = dns.lookup, allowPrivate = process.env.AGENT_ALLOW_PRIVATE === '1'} = {}) {
   const parsed = new URL(url);
   if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Only http(s) addresses can be checked.');
-  if (allowPrivate) return parsed;
   const host = parsed.hostname.replace(/^\[|\]$/g, '');
   const addresses = net.isIP(host) ? [{address: host}] : await lookup(host, {all: true});
-  if (!addresses.length || addresses.some(a => isPrivateAddress(a.address))) {
+  // No addresses is treated as a refusal, so a name that resolves to nothing
+  // cannot be used to skip the private-address check.
+  if (!addresses.length || (!allowPrivate && addresses.some(a => isPrivateAddress(a.address)))) {
     throw new Error(`Refusing to reach ${host}: it is on a private or local network. Set AGENT_ALLOW_PRIVATE=1 on this device to allow that.`);
   }
-  return parsed;
+  return {parsed, host, address: addresses[0].address};
+}
+
+/** Resolve `url`'s host and throw unless every address it has is public. */
+export async function assertPublicUrl(url, opts = {}) {
+  return (await resolvePublicAddress(url, opts)).parsed;
+}
+
+/** A one-shot GET pinned to `address` (no redirects). Because the connection is
+ * bound to the vetted IP, the Host header and TLS SNI still use the real name,
+ * but DNS is never consulted again — there is no rebinding window. */
+export function pinnedRequest(url, {address, method = 'GET', headers = {}, timeoutMs = 10000, maxBytes = 200000} = {}) {
+  const parsed = new URL(url);
+  const mod = parsed.protocol === 'https:' ? https : http;
+  const family = net.isIP(address) || 4;
+  return new Promise((resolve, reject) => {
+    const req = mod.request({
+      protocol: parsed.protocol,
+      hostname: parsed.hostname,
+      port: parsed.port || undefined,
+      path: parsed.pathname + parsed.search,
+      method,
+      headers: {...headers, host: parsed.host},
+      // Pin the lookup to the address that was checked; the resolver is never
+      // consulted a second time. Node may ask for all addresses (happy eyeballs),
+      // in which case the answer must be an array.
+      lookup: (hostname, options, callback) => (options && options.all)
+        ? callback(null, [{address, family}])
+        : callback(null, address, family),
+      timeout: timeoutMs,
+    }, res => {
+      let body = '', size = 0;
+      res.setEncoding('utf8');
+      res.on('data', chunk => { size += chunk.length; if (size > maxBytes) { req.destroy(new Error('Response too large.')); } else body += chunk; });
+      res.on('end', () => resolve({status: res.statusCode, headers: res.headers, body}));
+      res.on('error', reject);
+    });
+    req.on('timeout', () => req.destroy(new Error(`Request timed out after ${timeoutMs / 1000}s.`)));
+    req.on('error', reject);
+    req.end();
+  });
 }
