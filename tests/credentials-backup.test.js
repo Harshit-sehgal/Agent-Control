@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -133,6 +134,101 @@ test('backup export/import round-trips data and never carries credentials or ses
   delete missing.tables.drafts;
   assert.throws(() => backup.validateBackup(missing), /missing the "drafts" table/);
   assert.throws(() => backup.validateBackup({backupVersion: 99, tables: {}}), /Unsupported backup version/);
+  await fs.rm(dir, {recursive: true, force: true});
+  await fs.rm(dir2, {recursive: true, force: true});
+});
+
+test('a backup read failure is not saved as an empty table', () => {
+  const missing = {
+    all(sql) {
+      if (String(sql).includes('chat_messages')) throw new Error('no such table: chat_messages');
+      return [];
+    },
+    get() { return {version: 7}; },
+  };
+  const doc = backup.exportBackup(missing);
+  assert.deepEqual(doc.tables.chat_messages, []);
+  assert.ok(doc.checksum);
+  const locked = {
+    all(sql) { if (String(sql).includes('users')) throw new Error('database is locked'); return []; },
+    get() { return {version: 7}; },
+  };
+  assert.throws(() => backup.exportBackup(locked), /database is locked/);
+});
+
+test('a backup drops agent secrets and still restores the agent row', async () => {
+  const {dir, store} = await harness();
+  const rawSecret = 'agent-device-secret-RAW';
+  const rawHash = 'agent-secret-hash-RAW';
+  store.run('INSERT INTO agents (id,workspace_id,name,secret_hash,secret_enc,status,permissions,paired_at) VALUES (?,?,?,?,?,?,?,?)',
+    'agent-1', 'default', 'Device', rawHash, rawSecret, 'paired', '[]', new Date().toISOString());
+  const backupDoc = backup.exportBackup(store);
+  const blob = JSON.stringify(backupDoc);
+  assert.equal(blob.includes(rawSecret), false, 'Agent ciphertext must not be exported.');
+  assert.equal(blob.includes(rawHash), false, 'The real secret hash must not be exported.');
+  assert.equal(backupDoc.tables.agents[0].secret_enc, null);
+  assert.equal(backupDoc.tables.agents[0].secret_hash, 'redacted');
+
+  const dir2 = await fs.mkdtemp(path.join(os.tmpdir(), 'secrets-agent-'));
+  const store2 = await new SqliteStore(path.join(dir2, 'state.db'), path.join(dir2, 'state.json')).init();
+  backup.importBackup(store2, JSON.parse(JSON.stringify(backupDoc)));
+  const restored = store2.get('SELECT secret_hash, secret_enc FROM agents WHERE id=?', 'agent-1');
+  assert.equal(restored.secret_hash, 'redacted');
+  assert.equal(restored.secret_enc, null);
+
+  // A backup written when secret_hash was SQL NULL must still validate and restore.
+  const legacy = JSON.parse(JSON.stringify(backupDoc));
+  legacy.tables.agents[0].secret_hash = null;
+  legacy.checksum = crypto.createHash('sha256').update(JSON.stringify(legacy.tables)).digest('hex');
+  const dir3 = await fs.mkdtemp(path.join(os.tmpdir(), 'secrets-agent-old-'));
+  const store3 = await new SqliteStore(path.join(dir3, 'state.db'), path.join(dir3, 'state.json')).init();
+  backup.importBackup(store3, legacy);
+  assert.equal(store3.get('SELECT secret_hash FROM agents WHERE id=?', 'agent-1').secret_hash, 'redacted');
+
+  await fs.rm(dir, {recursive: true, force: true});
+  await fs.rm(dir2, {recursive: true, force: true});
+  await fs.rm(dir3, {recursive: true, force: true});
+});
+
+test('restoring a backup interrupts in-flight runs that would otherwise wedge the group', async () => {
+  const {dir, store} = await harness();
+  await store.update(s => {
+    s.groupRuns.push({
+      id: 'r-wait', groupId: 'x-engage', input: 'hi', recipients: ['handoff'],
+      mode: 'pipeline', status: 'awaiting_browser', currentStep: 0,
+      createdAt: new Date().toISOString(), trace: [], lastOutput: null, error: null,
+    });
+  });
+  const backupDoc = backup.exportBackup(store);
+  const dir2 = await fs.mkdtemp(path.join(os.tmpdir(), 'secrets-restore-busy-'));
+  const dataFile2 = path.join(dir2, 'state.json');
+  const store2 = await new SqliteStore(path.join(dir2, 'state.db'), dataFile2).init();
+  store2.vaultKey = loadMasterKey(dataFile2).key;
+  backup.importBackup(store2, JSON.parse(JSON.stringify(backupDoc)));
+  assert.equal(store2.read().groupRuns.find(r => r.id === 'r-wait')?.status, 'interrupted');
+  await fs.rm(dir, {recursive: true, force: true});
+  await fs.rm(dir2, {recursive: true, force: true});
+});
+
+test('restoring a backup keeps a shown plan and a checkpoint, and drops live browser cards', async () => {
+  const {dir, store} = await harness();
+  await store.update(s => {
+    s.groupRuns.push(
+      {id: 'r-plan', groupId: 'x-engage', input: 'hi', recipients: ['handoff'], mode: 'pipeline', status: 'awaiting_plan', currentStep: 0, createdAt: new Date().toISOString(), trace: [], lastOutput: null, error: null},
+      {id: 'r-pause', groupId: 'x-engage', input: 'hi', recipients: ['handoff'], mode: 'pipeline', status: 'awaiting_checkpoint', currentStep: 1, createdAt: new Date().toISOString(), trace: [], lastOutput: null, error: null},
+    );
+    s.browserRequests = [{id: 'ghost', status: 'pending', chatKey: 'writer'}];
+  });
+  const backupDoc = backup.exportBackup(store);
+  const dir2 = await fs.mkdtemp(path.join(os.tmpdir(), 'secrets-restore-plan-'));
+  const dataFile2 = path.join(dir2, 'state.json');
+  const store2 = await new SqliteStore(path.join(dir2, 'state.db'), dataFile2).init();
+  store2.vaultKey = loadMasterKey(dataFile2).key;
+  store2.kvSet('browser_requests', JSON.stringify([{id: 'stale', status: 'pending'}]));
+  backup.importBackup(store2, JSON.parse(JSON.stringify(backupDoc)));
+  assert.equal(store2.read().groupRuns.find(r => r.id === 'r-plan')?.status, 'awaiting_plan');
+  assert.equal(store2.read().groupRuns.find(r => r.id === 'r-pause')?.status, 'awaiting_checkpoint');
+  assert.equal((store2.read().browserRequests || []).length, 0);
   await fs.rm(dir, {recursive: true, force: true});
   await fs.rm(dir2, {recursive: true, force: true});
 });

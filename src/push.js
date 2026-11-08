@@ -11,7 +11,7 @@
  * reaches the devices of that workspace's members.
  */
 import crypto from 'node:crypto';
-import {assertPublicUrl} from '../agent/net-guard.mjs';
+import {assertPublicUrl, resolvePublicAddress, pinnedRequest} from '../agent/net-guard.mjs';
 import {encryptJson, decryptJson} from './vault.js';
 
 const RECORD_SIZE = 4096;
@@ -68,7 +68,7 @@ function readSubscription(body) {
   return {endpoint, p256dh, auth};
 }
 
-export function createPush(store, {fetcher = fetch, guard = assertPublicUrl} = {}) {
+export function createPush(store, {fetcher = null, guard = assertPublicUrl, resolve = resolvePublicAddress, request = pinnedRequest} = {}) {
   let keys = null;
   /** The installation's key pair: made once, kept encrypted with the vault key. */
   function vapid() {
@@ -92,16 +92,26 @@ export function createPush(store, {fetcher = fetch, guard = assertPublicUrl} = {
   /** Send one message. Resolves 'sent', or 'gone' when the browser has
    * unsubscribed (the row is removed); anything else throws so it is retried. */
   async function send(subscription, message) {
-    // The endpoint came from a browser, so it must not be a way to make this
-    // server call an address on its own network.
-    await guard(subscription.endpoint, {allowPrivate: false});
-    const response = await fetcher(subscription.endpoint, {
-      method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(10000),
-      headers: {'Content-Encoding': 'aes128gcm', 'Content-Type': 'application/octet-stream', TTL: '86400', Urgency: 'normal', Authorization: vapidHeader(subscription.endpoint, vapid(), subject())},
-      body: encryptPayload(JSON.stringify({title: String(message.title || 'Agent Control').slice(0, 120), body: String(message.body || '').slice(0, 300)}), subscription),
-    });
+    const headers = {
+      'Content-Encoding': 'aes128gcm', 'Content-Type': 'application/octet-stream', TTL: '86400', Urgency: 'normal',
+      Authorization: vapidHeader(subscription.endpoint, vapid(), subject()),
+    };
+    const body = encryptPayload(JSON.stringify({title: String(message.title || 'Agent Control').slice(0, 120), body: String(message.body || '').slice(0, 300)}), subscription);
+    let response;
+    if (fetcher) {
+      // Injectable fetchers are for isolated callers. Keep their guard hook;
+      // production uses the pinned request path below so DNS is not resolved a
+      // second time between validation and connection.
+      await guard(subscription.endpoint, {allowPrivate: false});
+      response = await fetcher(subscription.endpoint, {
+        method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(10000), headers, body,
+      });
+    } else {
+      const {address} = await resolve(subscription.endpoint, {allowPrivate: false});
+      response = await request(subscription.endpoint, {address, method: 'POST', headers, body, timeoutMs: 10000});
+    }
     if (response.status === 404 || response.status === 410) { store.run('DELETE FROM push_subscriptions WHERE id=?', subscription.id); return 'gone'; }
-    if (!response.ok) throw new Error(`The push service responded ${response.status}.`);
+    if (response.status < 200 || response.status >= 300) throw new Error(`The push service responded ${response.status}.`);
     return 'sent';
   }
   const devices = userId => store.all('SELECT * FROM push_subscriptions WHERE user_id=? ORDER BY created_at', userId);

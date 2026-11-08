@@ -448,7 +448,7 @@ async def duplicate_bot(page, base):
     await open_app(page, base, '#chat/scout/info')
     await page.locator('#inspector [data-action="duplicate-bot"]').click()
     await expect(page.locator('.thread-title strong')).to_have_text('Scout copy')
-    await expect(page.locator('#chat-space .welcome')).to_contain_text('Collect only user-submitted browser context')
+    await expect(page.locator('#chat-space .welcome')).to_contain_text('home-feed page they approved')
     await expect(page.locator('.chat-row', has_text='Scout copy')).to_have_count(1)
 
 
@@ -479,7 +479,7 @@ async def clear_conversation(page, base):
     await expect(page.locator('#toast')).to_contain_text('Conversation cleared')
     await expect(page.locator('.msg.me')).to_have_count(0)
     await expect(page.locator('#chat-space .welcome')).to_be_visible()
-    await expect(page.locator('.chat-row[data-id="scout"] .chat-row-preview')).to_contain_text('Collect only')
+    await expect(page.locator('.chat-row[data-id="scout"] .chat-row-preview')).to_contain_text('home-feed page')
     # Clearing is local to that conversation and survives a reload.
     await page.reload()
     await expect(page.locator('.msg.me')).to_have_count(0)
@@ -588,6 +588,54 @@ async def sheet_keyboard(page, base):
     await expect(page.locator('#modal [role=dialog][aria-modal=true]')).to_have_count(1)
 
 
+async def group_settings_and_behaviour(page, base):
+    await open_app(page, base, f'#chat/{TEAM}/info/group-settings')
+    form = page.locator('#group-settings-form')
+    await expect(form.locator('input[name=routing]')).to_have_count(3)
+    rows = form.locator('#pipeline-rows .pipe-row')
+    await expect(rows.first).to_contain_text('1.')
+    first = (await rows.first.locator('.check-row').inner_text()).split('.', 1)[1].strip()
+    await rows.first.get_by_role('button', name=re.compile('down', re.I)).click()
+    await expect(rows.nth(1).locator('.check-row')).to_contain_text(f'2. {first}')
+    await expect(rows.first.get_by_role('button', name=re.compile('up', re.I))).to_be_disabled()
+    await expect(page.locator('#inspector [data-action="delete-group"]')).to_have_count(0)  # never for X-engage
+    # The bot profile carries the Behaviour fields.
+    await open_app(page, base, '#chat/writer/info/edit')
+    edit = page.locator('#edit-bot-form')
+    for name in ['enabled', 'replyLength', 'temperature', 'style', 'contextMessages', 'summonable', 'canHandoff']:
+        await expect(edit.locator(f'[name={name}]')).to_have_count(1)
+    # Typing @ in the composer offers names; picking one completes it.
+    await open_app(page, base, f'#chat/{TEAM}')
+    box = page.locator('#chat-form textarea')
+    await box.fill('ask @wri')
+    await box.dispatch_event('input')
+    await page.locator('#mention-strip [data-action="mention-pick"]', has_text='Writer').click()
+    await expect(box).to_have_value('ask @Writer ')
+
+
+async def tracked_plan_can_start(page, base):
+    """Show-the-plan-first used to stop with no Start button on the demo."""
+    await open_app(page, base, '#chat/team-x-engage/info/group-settings')
+    form = page.locator('#group-settings-form')
+    await form.locator('input[name=confirmPlan]').check()
+    await form.locator('button[type=submit]').click()
+    await expect(page.locator('#toast')).to_contain_text('Group settings saved')
+    await open_app(page, base, '#chat/handoff')
+    box = page.locator('#chat-form textarea')
+    await box.fill('draft a reply')
+    await box.press('Enter')
+    start = page.locator('#chat-space [data-action="approve-plan"]')
+    cancel = page.locator('#chat-space [data-action="cancel-plan"]')
+    await expect(start).to_be_visible()
+    await cancel.click()
+    await expect(page.locator('#chat-space')).to_contain_text('Plan cancelled')
+    await expect(start).to_have_count(0)
+    await box.fill('draft a reply')
+    await box.press('Enter')
+    await start.click()
+    await expect(page.locator('#chat-space .msg.them').first).to_be_visible(timeout=15000)
+
+
 async def phone_create_bot(page, base):
     await open_app(page, base)
     await page.locator('.fab').click()
@@ -629,6 +677,8 @@ async def main():
             await h.scenario('voice settings save and persist', voice_settings)
             await h.scenario('runs log shows the handoff trace', runs_log)
             await h.scenario('keyboard: Tab trapped in sheets and palette, Esc restores focus', sheet_keyboard)
+            await h.scenario('group settings reorder, behaviour fields, @mention help', group_settings_and_behaviour)
+            await h.scenario('tracked plan can be started or cancelled', tracked_plan_can_start)
             await h.scenario('phone: create a bot from the + button', phone_create_bot, PHONE)
             await browser.close()
             server.shutdown()

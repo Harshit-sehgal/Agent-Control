@@ -6,7 +6,10 @@ import * as agent from './agent.js';
 import * as credentials from './credentials.js';
 import * as backup from './backup.js';
 import * as notifications from './notifications.js';
-import {ROLES, clearCookie} from './auth.js';
+import {deleteProvider} from './ai-providers.js';
+import {onAgentTaskResult} from './bot-browser.js';
+import {resumeFeedRun, resumeBrowserRun} from './coordination.js';
+import {DEFAULT_WORKSPACE, ROLES, clearCookie} from './auth.js';
 import {fail} from './http.js';
 import {reply} from './router.js';
 
@@ -57,8 +60,16 @@ export function accountRoutes(router, {auth, workspaces}) {
     return result;
   });
   router.add('DELETE', '/api/agents/:id', 'admin', async c => {
+    const browserTasks = c.store.all(
+      "SELECT id FROM agent_tasks WHERE agent_id=? AND kind IN ('browser.capture','browser.action') AND status IN ('queued','running')",
+      c.params.id,
+    ).map(task => task.id);
     const result = agent.revokeAgent(c.store, c.params.id);
     await c.store.update(s => activity(s, 'agent', 'Revoked a local agent. Its in-flight tasks were failed, not dropped silently.', {agentId: c.params.id}));
+    for (const id of browserTasks) {
+      try { await onAgentTaskResult(c.store, id, {resumeFeed: resumeFeedRun, resumeBrowser: resumeBrowserRun}); }
+      catch (error) { console.error('Browser revocation:', error.message); }
+    }
     return result;
   });
 
@@ -77,14 +88,17 @@ export function accountRoutes(router, {auth, workspaces}) {
     return item;
   });
   router.add('DELETE', '/api/credentials/:id', 'admin', async c => {
-    const result = credentials.deleteCredential(c.store, c.actor.workspaceId, c.params.id);
+    const provider = c.store.read().ai?.providers?.find(p => p.credentialId === c.params.id);
+    const result = provider
+      ? await deleteProvider(c.store, c.actor.workspaceId, provider.id)
+      : credentials.deleteCredential(c.store, c.actor.workspaceId, c.params.id);
     await c.store.update(s => activity(s, 'credential', 'Deleted a credential.', {credentialId: c.params.id}));
     return result;
   });
 
   // Notifications: feed, read state, and per-user channel preferences.
   router.add('GET', '/api/notifications', 'viewer', c => ({notifications: notifications.listNotifications(c.store, c.actor.userId), unread: notifications.unreadCount(c.store, c.actor.userId)}));
-  router.add('POST', '/api/notifications/read', 'member', async c => {
+  router.add('POST', '/api/notifications/read', 'viewer', async c => {
     const b = await c.body();
     return notifications.markRead(c.store, c.actor.userId, Array.isArray(b?.ids) ? b.ids : [b?.ids].filter(Boolean));
   });
@@ -92,16 +106,24 @@ export function accountRoutes(router, {auth, workspaces}) {
   router.add('PATCH', '/api/notification-prefs', 'member', async c => { const b = await c.body(); return notifications.updatePreferences(c.store, c.actor.userId, b); });
 
   // Backup: export and restore. Credentials and sessions never travel. Owner
-  // only: a backup carries every account's password hash, and a restore
-  // replaces accounts and roles, so either one in an admin's hands is a way up.
+  // only. A backup of the primary workspace carries every account's password
+  // hash; other workspaces export only their own rows. Restore replaces the
+  // current workspace database, so either one in an admin's hands is a way up.
   router.add('GET', '/api/admin/backup', 'owner', c => backup.exportBackup(c.store));
   router.add('POST', '/api/admin/restore', 'owner', async c => {
     // A backup document can be far larger than a normal request; allow up to 32 MB.
     const b = await c.body(32 * 1024 * 1024);
-    const result = backup.importBackup(c.store, b, {force: Boolean(b.force)});
-    // A backup of the first workspace carries the list of workspaces.
-    await workspaces.sync();
-    await c.store.update(s => activity(s, 'backup', `Restored a backup into this installation (${result.restored} rows).`));
-    return result;
+    const restore = async store => {
+      const result = backup.importBackup(store, b, {force: Boolean(b.force), primaryWorkspace: c.actor.workspaceId === DEFAULT_WORKSPACE});
+      // A backup of the first workspace carries the list of workspaces.
+      await workspaces.sync();
+      await store.update(s => activity(s, 'backup', `Restored a backup into this installation (${result.restored} rows).`));
+      return result;
+    };
+    // A primary restore replaces global memberships and sessions, so fence
+    // work in every workspace while those account records are being replaced.
+    return c.actor.workspaceId === DEFAULT_WORKSPACE
+      ? workspaces.withAllPaused(restore)
+      : workspaces.withPaused(c.actor.workspaceId, restore);
   });
 }

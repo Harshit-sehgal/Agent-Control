@@ -114,6 +114,26 @@ test('agent task leasing, duplicate results and disconnect recovery', async () =
   await fs.rm(dir, {recursive: true, force: true});
 });
 
+test('browser actions are not retried, and failing a task drops queued work', async () => {
+  const {store, dir} = await harness();
+  const {code} = agent.createPairing(store, 'default', {});
+  const {agentId} = agent.redeemPairing(store, {code, name: 'Device', permissions: ['browser.action', 'http.check']});
+  const {task} = agent.enqueueAgentTask(store, agentId, {kind: 'browser.action', payload: {url: 'https://example.com', steps: [{op: 'click', selector: 'button'}]}});
+  assert.equal(task.max_attempts, 1);
+  agent.claimAgentTasks(store, agentId);
+  assert.equal(agent.completeAgentTask(store, agentId, task.id, {status: 'failed', error: 'deadline'}).status, 'failed');
+  const {task: orphan} = agent.enqueueAgentTask(store, agentId, {kind: 'browser.action', payload: {url: 'https://example.com', steps: [{op: 'read', selector: 'main'}]}});
+  agent.claimAgentTasks(store, agentId);
+  store.run('UPDATE agent_tasks SET lease_until=? WHERE id=?', new Date(Date.now() - 1000).toISOString(), orphan.id);
+  assert.equal(agent.recoverAgentTasks(store), 1);
+  assert.equal(store.get('SELECT status FROM agent_tasks WHERE id=?', orphan.id).status, 'failed');
+  const {task: held} = agent.enqueueAgentTask(store, agentId, {kind: 'http.check', payload: {url: 'https://example.com'}});
+  agent.failAgentTasks(store, [held.id], 'Browser request was denied.');
+  assert.equal(store.get('SELECT status FROM agent_tasks WHERE id=?', held.id).status, 'failed');
+  assert.equal(agent.claimAgentTasks(store, agentId).length, 0);
+  await fs.rm(dir, {recursive: true, force: true});
+});
+
 test('the HTTP protocol pairs, dispatches and collects results end to end', {timeout: 40000}, async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-http-'));
   const port = await new Promise((resolve, reject) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); s.on('error', reject); });
@@ -164,6 +184,7 @@ test('the HTTP protocol pairs, dispatches and collects results end to end', {tim
     const beat = await agentCall('/api/agent/heartbeat', {version: '1', os: 'linux'});
     assert.equal(beat.status, 200);
     assert.deepEqual(beat.body.tasks, []);
+    assert.ok(Array.isArray(beat.body.agent.permissions));
     // Enqueue work for the agent; the heartbeat delivers it.
     const queued = await admin('POST', `/api/agents/${agentId}/tasks`, {kind: 'http.check', payload: {url: targetUrl}, idempotencyKey: 'check-1'}, owner);
     assert.equal(queued.status, 201);

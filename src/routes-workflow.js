@@ -1,14 +1,14 @@
 /** The X-engage workflow over HTTP: the state snapshot, settings, posts,
  * drafts and their evidence, reminders, the task queue and retention. The rules
  * live in `shared/`; a route only reads the request and applies one transition. */
-import {activity, DEMO_SAMPLES} from '../shared/core.js';
+import {DEMO_SAMPLES} from '../shared/core.js';
 import * as wf from '../shared/workflow.js';
 import * as tasks from '../shared/tasks.js';
 import * as evidence from '../shared/evidence.js';
 import {pruneState, RETENTION_DEFAULTS} from '../shared/retention.js';
 import * as notifications from './notifications.js';
-import {aiEnabled, aiModel, makeDraft} from './ai.js';
-import {aiAvailable, resolveConfig} from './ai-providers.js';
+import {aiModel, makeDraft} from './ai.js';
+import {aiAvailable, resolveConfig, publicAi} from './ai-providers.js';
 import {fail} from './http.js';
 import {reply, allows} from './router.js';
 
@@ -19,7 +19,12 @@ export function workflowRoutes(router, {auth, processCandidate}) {
     const s = c.store.read(), me = c.actor, live = aiAvailable(c.store);
     // The capture token lets its holder add posts, which a viewer may not do.
     if (!allows(me.role, 'member')) delete s.captureToken;
-    return {...s, aiEnabled: live, aiModel: live ? (s.ai?.defaultModel || aiModel()) : null, me: {email: me.email, role: me.role}, workspaces: auth.listWorkspaces(me.userId).map(w => ({...w, current: w.id === me.workspaceId})), canCreateWorkspace: auth.roleOf(me.userId) === 'owner', retention: retentionSettings(s),
+    // The stored provider row holds the vault id and may carry a key inside a
+    // pasted base URL. The snapshot the browser receives is metadata only.
+    s.ai = publicAi(s);
+    const hasSavedDefault = s.ai?.providers?.some(provider => provider.id === s.ai.defaultProviderId);
+    const model = live ? (s.ai?.defaultModel || (hasSavedDefault ? 'auto' : aiModel())) : null;
+    return {...s, aiEnabled: live, aiModel: model, me: {email: me.email, role: me.role}, workspaces: auth.listWorkspaces(me.userId).map(w => ({...w, current: w.id === me.workspaceId})), canCreateWorkspace: auth.roleOf(me.userId) === 'owner', retention: retentionSettings(s),
       notifications: notifications.listNotifications(c.store, me.userId, 50), unread: notifications.unreadCount(c.store, me.userId), serverTime: new Date().toISOString()};
   });
   router.add('PATCH', '/api/settings', 'admin', async c => { const b = await c.body(); return c.store.update(s => wf.updateSettings(s, b)); });
@@ -37,22 +42,28 @@ export function workflowRoutes(router, {auth, processCandidate}) {
     const result = await c.store.update(s => wf.addCandidate(s, b));
     return reply(result.duplicate ? 200 : 201, {...result.candidate, duplicate: result.duplicate});
   });
-  router.add('POST', '/api/candidates/:id/process', 'member', async c => reply(201, await processCandidate(c.store, c.params.id)));
+  router.add('POST', '/api/candidates/:id/process', 'member', async c => {
+    const run = () => processCandidate(c.store, c.params.id);
+    return reply(201, await (c.store.trackWork ? c.store.trackWork(run) : run()));
+  });
 
   router.add('PATCH', '/api/drafts/:id', 'member', async c => { const b = await c.body(); return c.store.update(s => wf.editDraft(s, c.params.id, b.text)); });
   for (const action of ['approve', 'reject', 'ready', 'posted']) {
     router.add('POST', `/api/drafts/:id/${action}`, 'member', async c => { const b = await c.body(); return c.store.update(s => wf.draftAction(s, c.params.id, action, b)); });
   }
   router.add('POST', '/api/drafts/:id/rewrite', 'member', async c => {
-    const id = c.params.id, b = await c.body(), existing = c.store.read(), old = wf.findDraft(existing, id), candidate = wf.findCandidate(existing, old.candidateId);
-    if (!['pending', 'scheduled', 'ready'].includes(old.status)) fail('Cannot rewrite this draft.', 409);
-    const out = await makeDraft(candidate, existing.settings, b.direction || '', resolveConfig(c.store, null));
-    return c.store.update(s => {
-      const x = wf.findDraft(s, id); if (x.revision !== old.revision) fail('Draft changed during rewrite. Retry.', 409);
-      x.text = out.text; x.revision++; x.status = 'pending'; x.mode = out.mode; x.note = out.note;
-      delete x.approvedText; delete x.approvedRevision; delete x.dueAt; delete x.approvedAt;
-      activity(s, 'rewrite', `Rewrote draft ${x.id}.`, {draftId: x.id}); return x;
-    });
+    const rewrite = async () => {
+      const id = c.params.id, b = await c.body(), existing = c.store.read(), old = wf.findDraft(existing, id), candidate = wf.findCandidate(existing, old.candidateId);
+      if (!['pending', 'scheduled', 'ready'].includes(old.status)) fail('Cannot rewrite this draft.', 409);
+      const out = await makeDraft(candidate, existing.settings, b.direction || '', resolveConfig(c.store, null));
+      return c.store.update(s => {
+        const x = wf.findDraft(s, id); if (x.revision !== old.revision) fail('Draft changed during rewrite. Retry.', 409);
+        // Shared with edit: a new text drops the approval, its schedule, and the
+        // frozen evidence snapshot. Leaving the snapshot would keep the old approval.
+        return wf.rewriteDraft(s, id, out);
+      });
+    };
+    return c.store.trackWork ? c.store.trackWork(rewrite) : rewrite();
   });
 
   // Source evidence: what supports a draft, verified by whom.

@@ -194,6 +194,16 @@ const MIGRATIONS = [
   // meant to issue a read-only checker could get one that granted itself more.
   {to: 6, up(db) {
     db.exec('ALTER TABLE pairing_codes ADD COLUMN permissions TEXT');
+  }},
+  // v7: groups and bots keep the user's settings (routing, reply length...).
+  {to: 7, up(db) {
+    db.exec('ALTER TABLE groups ADD COLUMN settings TEXT');
+    db.exec('ALTER TABLE bots ADD COLUMN settings TEXT');
+  }},
+  // v8: retention windows live with the other workspace settings so a restart
+  // does not fall back to the defaults after You → Data saves a policy.
+  {to: 8, up(db) {
+    db.exec('ALTER TABLE settings ADD COLUMN retention TEXT');
   }}];
 /** Current schema version, derived from the migration list so it cannot drift.
  * Tests and operators read it. */
@@ -296,20 +306,28 @@ export class SqliteStore {
       groups: [], candidates: [], drafts: [], runs: [], tasks: [], events: [],
       groupMessages: {}, groupRuns: [], chats: {},
       ai: (() => { try { return JSON.parse(this.kvGet('ai') || '{}'); } catch { return {}; } })(),
+      browserRequests: (() => { try { return JSON.parse(this.kvGet('browser_requests') || '[]'); } catch { return []; } })(),
     };
     const cfg = this.db.prepare('SELECT * FROM settings WHERE id=1').get();
-    if (cfg) s.settings = {
-      topics: JSON.parse(cfg.topics), style: cfg.style, opinions: cfg.opinions,
-      minDelay: cfg.min_delay, maxDelay: cfg.max_delay,
-    };
+    if (cfg) {
+      s.settings = {
+        topics: JSON.parse(cfg.topics), style: cfg.style, opinions: cfg.opinions,
+        minDelay: cfg.min_delay, maxDelay: cfg.max_delay,
+      };
+      if (cfg.retention) {
+        try { s.settings.retention = JSON.parse(cfg.retention); } catch { /* ignore */ }
+      }
+    }
     if (!s.captureToken) { s.captureToken = uuid().replaceAll('-', ''); this.kvSet('capture_token', s.captureToken); }
     for (const g of this.db.prepare('SELECT * FROM groups ORDER BY rowid').all()) {
       g.bots = this.db.prepare('SELECT * FROM bots WHERE group_id=? ORDER BY rowid').all(g.id).map(b => ({
         id: b.id, name: b.name, instructions: b.instructions, type: b.type,
         ...(b.contract ? {contract: JSON.parse(b.contract)} : {}),
         ...(b.permissions ? {permissions: JSON.parse(b.permissions)} : {}),
+        ...(b.settings ? {settings: JSON.parse(b.settings)} : {}),
       }));
       delete g.rowid;
+      if (g.settings) g.settings = JSON.parse(g.settings); else delete g.settings;
       s.groups.push(g);
     }
     Object.assign(s, readDocuments(table => this.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()));
@@ -336,15 +354,16 @@ export class SqliteStore {
       this.db.prepare('INSERT INTO kv (key,value) VALUES (\'created_at\',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(state.createdAt || now());
       this.db.prepare('INSERT INTO kv (key,value) VALUES (\'capture_token\',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(state.captureToken);
       this.db.prepare('INSERT INTO kv (key,value) VALUES (\'ai\',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(JSON.stringify(state.ai || {}));
-      this.db.prepare('INSERT INTO settings (id,topics,style,opinions,min_delay,max_delay) VALUES (1,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET topics=excluded.topics, style=excluded.style, opinions=excluded.opinions, min_delay=excluded.min_delay, max_delay=excluded.max_delay')
-        .run(JSON.stringify(state.settings.topics), state.settings.style, state.settings.opinions, state.settings.minDelay, state.settings.maxDelay);
+      this.db.prepare('INSERT INTO kv (key,value) VALUES (\'browser_requests\',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(JSON.stringify(state.browserRequests || []));
+      this.db.prepare('INSERT INTO settings (id,topics,style,opinions,min_delay,max_delay,retention) VALUES (1,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET topics=excluded.topics, style=excluded.style, opinions=excluded.opinions, min_delay=excluded.min_delay, max_delay=excluded.max_delay, retention=excluded.retention')
+        .run(JSON.stringify(state.settings.topics), state.settings.style, state.settings.opinions, state.settings.minDelay, state.settings.maxDelay, state.settings.retention ? JSON.stringify(state.settings.retention) : null);
       // Groups before bots: the foreign key requires the parent row to exist.
       for (const g of state.groups) {
-        this.db.prepare('INSERT INTO groups (id,name,description,created_at) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, description=excluded.description')
-          .run(g.id, g.name, g.description || '', g.createdAt || now());
+        this.db.prepare('INSERT INTO groups (id,name,description,created_at,settings) VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, description=excluded.description, settings=excluded.settings')
+          .run(g.id, g.name, g.description || '', g.createdAt || now(), g.settings ? JSON.stringify(g.settings) : null);
         for (const b of g.bots) {
-          this.db.prepare('INSERT INTO bots (id,group_id,name,instructions,type,contract,permissions,created_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, instructions=excluded.instructions, type=excluded.type, contract=excluded.contract, permissions=excluded.permissions')
-            .run(b.id, g.id, b.name, b.instructions || '', b.type || 'custom', b.contract ? JSON.stringify(b.contract) : null, b.permissions ? JSON.stringify(b.permissions) : null, b.createdAt || now());
+          this.db.prepare('INSERT INTO bots (id,group_id,name,instructions,type,contract,permissions,created_at,settings) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, instructions=excluded.instructions, type=excluded.type, contract=excluded.contract, permissions=excluded.permissions, settings=excluded.settings')
+            .run(b.id, g.id, b.name, b.instructions || '', b.type || 'custom', b.contract ? JSON.stringify(b.contract) : null, b.permissions ? JSON.stringify(b.permissions) : null, b.createdAt || now(), b.settings ? JSON.stringify(b.settings) : null);
         }
       }
       for (const c of state.candidates) {

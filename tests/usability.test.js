@@ -75,12 +75,18 @@ test('chat clearing and sensitive changes require confirmation',()=>{
  assert.match(js,/settle = value => resolve\(value === true\)/);
 });
 test('the Node build runs real multi-bot coordination with a run timeline',()=>{
+ assert.match(js,/\/api\/auth\/forgot/);
+ assert.match(js,/\/api\/auth\/reset/);
+ assert.match(js,/id="forgot-form"/);
+ assert.match(js,/id="reset-form"/);
+ assert.match(js,/'login-forgot'/);
   assert.match(js,/async function runOnServer\(/);
   assert.match(js,/function streamGroupRun\(/);
   assert.match(js,/run-timeline/);
   assert.match(js,/'continue-run'/);
   assert.match(js,/'retry-run'/);
-  assert.match(js,/id="checkpoint-toggle"/);
+  // Approve-between-steps is the group's server-side setting, edited in Group settings.
+  assert.match(js,/checkRow\('checkpoints', 'Approve between steps'/);
   // A paused run can only be continued by the human, via the server API.
   assert.match(js,/\/runs\/\$\{b\.dataset\.run\}\/continue/);
 });
@@ -105,15 +111,18 @@ test('the Node build exposes Team and Local agents admin surfaces',()=>{
   assert.match(js,/function agentsPanel\(/);
   assert.match(js,/create-user-form/);
   assert.match(js,/toggle-agent-permission/);
+  assert.match(js,/'toggle-user-disabled'/);
+  assert.match(js,/Temporary password \(min 8 chars\)/);
   // Admin surfaces are gated off on the static Pages demo and for non-admins:
   // the role check, the You-page entry, the quick-nav entries and the route parser.
   assert.match(js,/export const isAdmin = \(\) => !isStaticDemo\(\) && \['owner', 'admin'\]\.includes/);
+  assert.match(js,/export const canWrite = \(\) => isStaticDemo\(\) \|\| \['owner', 'admin', 'member'\]\.includes/);
   assert.match(js,/isAdmin\(\) \? box\(\['ai', 'team', 'agents', 'data'\]/);
   assert.match(js,/if \(isAdmin\(\)\) items\.push\(/);
-  assert.match(js,/parseRoute\(location\.hash, store\.state, \{server: !isStaticDemo\(\), admin: isAdmin\(\)\}\)/);
+  assert.match(js,/parseRoute\(location\.hash, store\.state, \{server: !isStaticDemo\(\), admin: isAdmin\(\), write: canWrite\(\)\}\)/);
 });
 test('destructive admin actions ask first and say what they do',()=>{
-  for (const message of ['Sign out every other session','Remove this user from the workspace','Revoke this local agent','Delete this credential','Prune exhaust older than the retention policy','Replace this workspace with the pasted backup'])
+  for (const message of ['Sign out every other session','Remove this user from the workspace','Disable this account','Delete your account','Revoke this local agent','Delete this credential','Prune exhaust older than the retention policy','Replace this workspace with the pasted backup'])
     assert.match(js,new RegExp(`confirmSheet\\('${message}`),`${message} must be confirmed`);
 });
 test('the bot editor exposes contract and permission controls (Phase E UI)',()=>{
@@ -138,6 +147,7 @@ test('the shell is integrated: one search, animated routes, one progress bar',()
   // One search entry point per job: the chat-list filter and Ctrl+K quick nav.
   assert.match(js,/id="chat-search"/);
   assert.match(js,/ev\.key\.toLowerCase\(\) === 'k'/);
+  assert.match(js,/label: 'AI and models'/);
   assert.match(js,/lastView/);
   assert.match(js,/classList\.add\('view-enter'\)/);
   assert.match(js,/function setBusy\(/);
@@ -151,12 +161,24 @@ test('hash routes respond to browser Back and Forward',()=>{
   assert.match(js,/popstate', event => \{ syncDepth\(event\); if \(!store\.state\) return; closeSheet\(\); closeCommandPalette\(\)/);
 });
 test('a background refresh never wipes an in-progress form or the sign-in',()=>{
-  // The 30s poll used to re-render unconditionally, discarding whatever the user
-  // had typed, and rebuilding the sign-in dialog (clearing the password) on every 401.
+  // Idle data refreshes every 30s. A page request or a live group run shortens
+  // that to 3s, and a keystroke must not push the poll back. The poll used to
+  // re-render unconditionally, discarding whatever the user had typed, and
+  // rebuilding the sign-in dialog (clearing the password) on every 401.
   assert.match(js,/const typingIn = node =>/);
   assert.match(js,/if \(!typingIn\(el\('chat-space'\)\)\) renderThread\(\)/);
   assert.match(js,/scope === 'all' && !typingIn\(el\('inspector'\)\)\) renderInfo\(\)/);
   assert.match(js,/clearInterval\(syncTimer\)/);
+  assert.match(js,/workspaceBusy\(\) \? 3000 : 30000/);
+  assert.match(js,/syncTimer && syncDue <= due/);
+  // An older in-flight snapshot must not overwrite a newer one, and sign-out
+  // must drop both the timer and any refresh that was already on the wire.
+  assert.match(js,/ticket !== epoch \|\| fetch < appliedFetch/);
+  assert.match(js,/retireSession\(\)/);
+  assert.match(js,/ticket === sessionEpoch\(\)/);
+  assert.match(js,/if \(ticket !== sessionEpoch\(\)\) return/);
+  assert.match(js,/t\.kind === 'bot-task' \|\| t\.kind === 'reminder'/);
+  assert.match(js,/d\.status === 'scheduled' && dueWithin\(d\.dueAt\)/);
   assert.match(js,/const visible = Boolean\(layer\)/);
   // Sheets live in their own layer that a repaint never touches.
   assert.doesNotMatch(js,/el\('modal'\)\.innerHTML = (?!'')/);

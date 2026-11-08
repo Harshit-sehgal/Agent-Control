@@ -124,3 +124,13 @@ test('rows written before the document column are read back in the workflow shap
   assert.deepEqual(s.groupMessages['x-engage'][0], {id: 'm1', runId: 'g1', role: 'bot', senderId: 'scout', text: 'o', at});
   await fs.rm(dir, {recursive: true, force: true});
 });
+
+test('workspace retention settings survive a restart', async () => {
+  const {db} = await sandbox();
+  const first = await new SqliteStore(db, path.join(path.dirname(db), 'state.json')).init();
+  await first.update(s => { s.settings.retention = {events: 7, doneTasks: 3, runs: 14}; });
+  first.db.close();
+  const reopened = await new SqliteStore(db, path.join(path.dirname(db), 'state.json')).init();
+  assert.deepEqual(reopened.read().settings.retention, {events: 7, doneTasks: 3, runs: 14});
+  await fs.rm(path.dirname(db), {recursive: true, force: true});
+});

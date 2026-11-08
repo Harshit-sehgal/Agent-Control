@@ -8,6 +8,7 @@ import {SqliteStore} from '../src/sqlite-store.js';
 import {loadMasterKey} from '../src/vault.js';
 import {Auth} from '../src/auth.js';
 import {createPush, encryptPayload, vapidHeader, generateVapidKeys} from '../src/push.js';
+import {enablePush} from '../shared/ui-push.js';
 
 /** A browser's side of a subscription: its key pair and shared secret. */
 function device(endpoint = 'https://push.example.com/send/abc') {
@@ -103,6 +104,87 @@ test('delivery encrypts for the device, drops dead subscriptions and retries the
     assert.equal(t.push.endpoints(t.userId).length, 0, 'A device that unsubscribed is forgotten.');
     assert.deepEqual(await t.push.deliver(task), {delivered: 'gone'});
   } finally { await t.done(); }
+});
+
+test('turning push on keeps a subscription made for this server key', async () => {
+  const key = generateVapidKeys().publicKey;
+  const raw = Uint8Array.from(atob(key.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - key.length % 4) % 4)), c => c.charCodeAt(0));
+  const calls = [];
+  let unsubscribed = false, subscribed = false;
+  const existing = {
+    endpoint: 'https://push.example.com/send/keep',
+    options: {applicationServerKey: raw.buffer},
+    unsubscribe: async () => { unsubscribed = true; },
+    toJSON: () => ({endpoint: 'https://push.example.com/send/keep', keys: {p256dh: 'p', auth: 'a'}}),
+  };
+  const registration = {pushManager: {
+    getSubscription: async () => existing,
+    subscribe: async () => { subscribed = true; throw new Error('rotated'); },
+  }};
+  const previous = {window: globalThis.window, Notification: globalThis.Notification, atob: globalThis.atob, navigator: Object.getOwnPropertyDescriptor(globalThis, 'navigator')};
+  globalThis.document = {getElementById() { return null; }};
+  globalThis.atob = text => { if (text.length % 4) throw new Error('atob padding'); return previous.atob(text); };
+  globalThis.Notification = {requestPermission: async () => 'granted'};
+  Object.defineProperty(globalThis, 'navigator', {configurable: true, writable: true, value: {serviceWorker: {register: async () => registration, ready: Promise.resolve()}}});
+  globalThis.window = {AGENT_API: async (path, method, body) => {
+    calls.push({path, method, body});
+    if (method === 'POST') throw new Error('offline');
+    return {publicKey: key, endpoints: []};
+  }};
+  try {
+    await assert.rejects(enablePush(), /offline/);
+    assert.equal(unsubscribed, false, 'A failed save must not drop the subscription the browser already has.');
+    assert.equal(subscribed, false);
+    assert.equal(calls.at(-1).body.endpoint, existing.endpoint);
+  } finally {
+    globalThis.atob = previous.atob;
+    if (previous.Notification === undefined) delete globalThis.Notification; else globalThis.Notification = previous.Notification;
+    Object.defineProperty(globalThis, 'navigator', previous.navigator);
+    if (previous.window === undefined) delete globalThis.window; else globalThis.window = previous.window;
+    delete globalThis.document;
+  }
+});
+
+test('the service worker shows the payload and re-registers a rotated subscription', async () => {
+  const listeners = {};
+  const fetches = [];
+  let shown = null;
+  const next = {endpoint: 'https://push.example.com/send/new', toJSON: () => ({endpoint: 'https://push.example.com/send/new', keys: {p256dh: 'p', auth: 'a'}})};
+  globalThis.self = {
+    skipWaiting() {},
+    registration: {
+      scope: 'https://dash.example/',
+      showNotification: async (title, options) => { shown = {title, options}; },
+      pushManager: {subscribe: async () => { throw new Error('the new subscription was already provided'); }},
+    },
+    clients: {claim() {}, matchAll: async () => [], openWindow: async () => {}},
+    addEventListener(type, fn) { listeners[type] = fn; },
+  };
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => { fetches.push({url: String(url), init}); return {ok: true, status: 201}; };
+  try {
+    await import('../shared/sw.js');
+    await listeners.push({data: {json: () => ({title: 'Draft ready', body: 'For @tester'})}, waitUntil: p => p});
+    assert.deepEqual(shown, {title: 'Draft ready', options: {body: 'For @tester', icon: './icon-192.png', badge: './icon-192.png', tag: 'agent-control'}});
+    shown = null;
+    await listeners.push({data: {json: () => ({web_push: 8030, notification: {title: 'Nested', body: 'Inside'}})}, waitUntil: p => p});
+    assert.equal(shown.title, 'Nested');
+    assert.equal(shown.options.body, 'Inside');
+    shown = null;
+    await listeners.push({data: null, notification: {title: 'From the browser', body: 'Shown'}, waitUntil: p => p});
+    assert.equal(shown.title, 'From the browser');
+    assert.equal(shown.options.body, 'Shown');
+    await listeners.pushsubscriptionchange({
+      newSubscription: next,
+      oldSubscription: {endpoint: 'https://push.example.com/send/old', options: {}},
+      waitUntil: p => p,
+    });
+    assert.equal(fetches[0].init.method, 'POST');
+    assert.equal(fetches[0].url, 'https://dash.example/api/push/subscriptions');
+    assert.equal(JSON.parse(fetches[0].init.body).endpoint, next.endpoint);
+    assert.equal(fetches[1].init.method, 'DELETE');
+    assert.equal(JSON.parse(fetches[1].init.body).endpoint, 'https://push.example.com/send/old');
+  } finally { globalThis.fetch = previousFetch; }
 });
 
 test('a push endpoint on a private network is never called', async () => {

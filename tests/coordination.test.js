@@ -30,6 +30,16 @@ test('each handoff includes bounded previous bot output, not new instructions',(
   assert.deepEqual(r.recipients,['scout','ranker','researcher','writer','reviewer']);
 });
 
+test('the envelope prefers the newest page and bounds the bot role',()=>{
+  const r=createRun({group,message:'Handle this post',makeId:randomUUID});
+  r.task={feedText:'old feed text from home'};
+  r.browserPage='the docs you just opened';
+  const env=createEnvelope({run:r,bot:{...group.bots[0],instructions:'x'.repeat(5000)}});
+  assert.equal(env.page,'the docs you just opened');
+  assert.equal(env.botRole.length,3600);
+  assert.match(env.restrictions.join(' '),/Do not request that page again/);
+});
+
 test('browser simulation passes steps between real bot identities and creates pending draft only',async()=>{
   const messages=[],drafts=[];
   const state={settings:{topics:['robotics']},candidates:[{id:'c1',text:'New robotics architecture published, what do you think?',url:'https://example.com',author:'Demo'}],drafts};
@@ -75,13 +85,15 @@ test('a checkpointed run pauses between steps and resumes on human approval',asy
     assert.equal(run.trace.length,1,'Only the first step runs before the gate.');
     assert.equal(run.checkpoint.nextStep,1);
     const responder=async bot=>`Response from ${bot.name}`;
-    await resumeGroupRun(store,'run-cp',responder);
+    const first=await resumeGroupRun(store,'run-cp',responder);
     run=store.read().groupRuns[0];
     assert.equal(run.status,'awaiting_checkpoint','It pauses again before the last handoff.');
+    assert.equal(first.status,run.status,'The continue route reports the pause, not a fake running.');
     assert.equal(run.trace.length,2);
-    await resumeGroupRun(store,'run-cp',responder);
+    const last=await resumeGroupRun(store,'run-cp',responder);
     run=store.read().groupRuns[0];
     assert.equal(run.status,'completed');
+    assert.equal(last.status,run.status);
     assert.equal(run.trace.length,3);
     assert.equal(run.checkpoint,null);
     // A run that is not paused cannot be resumed.
@@ -154,7 +166,7 @@ test('a run writes its messages and outcome into the conversation it was started
     assert.match(store.read().chats['team-x-engage'].at(-1).text,/The run failed: Model unavailable/);
     await store.update(s=>{s.groupRuns.unshift({...createRun({group,message:'later',makeId:()=> 'run-cut'}),status:'running'});});
     await markInterrupted(store);
-    assert.match(store.read().chats['team-x-engage'].at(-1).text,/interrupted by a restart/);
+    assert.match(store.read().chats['team-x-engage'].at(-1).text,/Server restarted before the run completed/);
   }finally{await rm(dir,{recursive:true,force:true});}
 });
 

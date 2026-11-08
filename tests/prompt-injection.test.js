@@ -19,7 +19,10 @@ test('a bot whose instructions demand publishing still holds no such permission'
   assert.equal(contracts.canBot(bot, 'publish.post'), false);
   assert.deepEqual(bot.permissions, [], 'Custom bots start with no permissions, regardless of their wording.');
   // Even a bogus permission smuggled into the record is rejected on read.
-  assert.equal(contracts.canBot(bot, 'publish.post'), false);
+  const smuggled = contracts.normalizeBot({...bot, permissions: ['publish.post', 'draft.create']});
+  assert.deepEqual(smuggled.permissions, ['draft.create']);
+  assert.equal(contracts.canBot(smuggled, 'publish.post'), false);
+  assert.equal(contracts.canBot({permissions: ['publish.post']}, 'publish.post'), false);
   assert.throws(() => contracts.validatePermissions(['evidence.add', 'publish.post']), /Unknown permission/);
 });
 

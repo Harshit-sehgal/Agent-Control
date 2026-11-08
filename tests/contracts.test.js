@@ -58,6 +58,9 @@ test('permission grants are explicit, and unknown actions fail loudly', () => {
   assert.equal(contracts.canBot(bot, 'schedule.set'), true);
   assert.equal(contracts.canBot(bot, 'draft.create'), false);
   assert.equal(contracts.canBot(bot, 'publish.post'), false);
+  const smuggled = contracts.normalizeBot({id: 'smuggled', type: 'custom', permissions: ['publish.post', 'draft.create', 'draft.create']});
+  assert.deepEqual(smuggled.permissions, ['draft.create']);
+  assert.equal(contracts.canBot({permissions: ['publish.post']}, 'publish.post'), false);
   // A profile edit that omits permissions must not drop the existing ones.
   const renamed = updateBot(s, g.id, bot.id, {name: 'Senior Analyst', instructions: 'Analyze deeply.'});
   assert.deepEqual(renamed.permissions, ['schedule.set']);
@@ -112,8 +115,35 @@ test('structured output validates every declared field type, not just presence',
   assert.throws(() => contracts.assertContractOutput(bot, JSON.stringify({confidence: 1, ok: 'yes'})), /"ok" must be of type boolean/);
   assert.throws(() => contracts.assertContractOutput(bot, JSON.stringify({confidence: 1, link: 'javascript:alert(1)'})), /"link" must be of type url/);
   assert.throws(() => contracts.assertContractOutput(bot, JSON.stringify({confidence: 1, refs: [123]})), /"refs" must be of type evidence_list/);
+  assert.throws(() => contracts.assertContractOutput(bot, JSON.stringify({confidence: 1, refs: ['javascript:alert(1)']})), /"refs" must be of type evidence_list/);
+  assert.throws(() => contracts.assertContractOutput(bot, JSON.stringify({confidence: 1, refs: [{publish: true}]})), /"refs" must be of type evidence_list/);
+  assert.throws(() => contracts.assertContractOutput(bot, JSON.stringify({confidence: 1, publish: true})), /unexpected field "publish"/);
+  assert.throws(() => contracts.assertContractOutput({contract: {output: {kind: 'publish'}}}, 'hello'), /output kind/);
   // An optional field may be omitted, but a required one may not.
   assert.throws(() => contracts.assertContractOutput(bot, JSON.stringify({label: 'x'})), /missing the required field "confidence"/);
+});
+
+test('a structured bot may attach a browser block; the fence is stripped before the contract gate', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'ac-struct-browse-'));
+  try {
+    const store = await new JsonStore(path.join(dir, 'state.json')).init();
+    const bot = {
+      id: 'curator', name: 'Curator', instructions: 'Collect claims.', type: 'custom',
+      permissions: ['browser.use'],
+      contract: contracts.validateContract({inputs: ['objective'], output: {kind: 'structured', fields: [{name: 'verdict', type: 'text', required: true}]}}),
+    };
+    await store.update(s => {
+      s.groups = [{id: 'g1', name: 'Lab', bots: [bot]}];
+      coordinationState(s);
+      s.groupRuns.push(createRun({group: s.groups[0], message: 'Look it up', makeId: () => 'run-s'}));
+    });
+    await runGroup(store, 'run-s', async () => '```json\n{"verdict":"needs a page"}\n```\n```browser\n{"url":"https://example.com"}\n```');
+    const run = store.read().groupRuns[0];
+    assert.equal(run.status, 'awaiting_browser');
+    assert.match(run.trace[0].output, /needs a page/);
+    assert.doesNotMatch(run.trace[0].output, /```browser/);
+    assert.equal(store.read().browserRequests[0].url, 'https://example.com/');
+  } finally { await rm(dir, {recursive: true, force: true}); }
 });
 
 test('the handoff envelope carries the contract and permission list', () => {

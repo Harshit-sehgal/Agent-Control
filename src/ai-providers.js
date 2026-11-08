@@ -12,8 +12,10 @@ import {uuid} from '../shared/core.js';
 
 const fail=(message,status=400)=>{throw Object.assign(new Error(message),{status});};
 const clean=(v,n)=>String(v??'').trim().slice(0,n);
-const validBase=u=>{try{const x=new URL(u);return x.protocol==='http:'||x.protocol==='https:';}catch{return false;}};
-const hostOf=u=>{try{return new URL(u).host;}catch{return u;}};
+const validBase=u=>{try{const x=new URL(u);return (x.protocol==='http:'||x.protocol==='https:')&&!x.username&&!x.password&&!x.search&&!x.hash;}catch{return false;}};
+const hostOf=u=>{try{return new URL(u).host;}catch{return '';}};
+/** Admin listings keep the endpoint path, but strip userinfo, query and hash. */
+function safeBase(u){try{const x=new URL(String(u||''));x.username='';x.password='';x.search='';x.hash='';return x.href.replace(/\/+$/,'');}catch{return '';}}
 
 /** Ensure the AI shape exists on a state document. */
 export function aiState(state){
@@ -22,31 +24,55 @@ export function aiState(state){
   if(!state.ai.bots||typeof state.ai.bots!=='object')state.ai.bots={};
   return state.ai;
 }
-const publicProvider=p=>({id:p.id,label:p.label,baseUrl:p.baseUrl,style:p.style,host:hostOf(p.baseUrl),createdAt:p.createdAt,createdBy:p.createdBy||null});
+// The base URL may contain a secret path segment. The browser only needs the
+// host for display, so never return the full URL in public provider metadata.
+const publicProvider=p=>({id:p.id,label:p.label,style:p.style,host:hostOf(p.baseUrl),createdAt:p.createdAt,createdBy:p.createdBy||null});
+const providerListing=p=>({...publicProvider(p),baseUrl:safeBase(p.baseUrl)});
+function publicBots(bots){
+  const out={};
+  if(!bots||typeof bots!=='object')return out;
+  for(const [id,override] of Object.entries(bots)){
+    if(!override||typeof override!=='object'||Array.isArray(override))continue;
+    const providerId=override.providerId||null,model=override.model||null;
+    if(providerId||model)out[id]={providerId,model};
+  }
+  return out;
+}
+/** Provider metadata safe to send to the browser. No key, no vault id. */
+export function publicAi(state){
+  const ai=aiState(state);
+  return {providers:ai.providers.map(publicProvider),defaultProviderId:ai.defaultProviderId,defaultModel:ai.defaultModel||null,bots:publicBots(ai.bots)};
+}
 
 export function listProviders(state){
   const ai=aiState(state);
-  return {providers:ai.providers.map(publicProvider),defaultProviderId:ai.defaultProviderId,defaultModel:ai.defaultModel||null};
+  return {providers:ai.providers.map(providerListing),defaultProviderId:ai.defaultProviderId,defaultModel:ai.defaultModel||null};
 }
 
 /** Add a BYOK provider. The key is written to the vault, never to the state. */
 export async function addProvider(store,workspaceId,{label,baseUrl,apiKey,style,createdBy}={}){
   const name=clean(label,80);const url=clean(baseUrl,300).replace(/\/+$/,'');const key=String(apiKey||'').trim();
   if(!name)fail('Give the provider a name (e.g. OpenAI, Groq, my router).');
-  if(!validBase(url))fail('Base URL must be an absolute http(s) URL, e.g. https://api.openai.com/v1');
+  if(!validBase(url))fail('Base URL must be an absolute http(s) URL without a username, password, query, or hash.');
   if(!key)fail('Paste the API key for this provider.');
   const resolvedStyle=style==='responses'?'responses':style==='chat'?'chat':inferStyle(url);
   const credential=credentials.addCredential(store,workspaceId,{name:`AI key · ${name}`,kind:'ai_provider',value:key,createdBy});
   const provider={id:uuid(),label:name,baseUrl:url,style:resolvedStyle,credentialId:credential.id,createdBy:createdBy||null,createdAt:new Date().toISOString()};
   await store.update(s=>{const ai=aiState(s);ai.providers.unshift(provider);if(!ai.defaultProviderId)ai.defaultProviderId=provider.id;});
-  return publicProvider(provider);
+  return providerListing(provider);
 }
 
 export async function deleteProvider(store,workspaceId,id){
   const provider=store.read().ai?.providers?.find(p=>p.id===id);
   if(!provider)fail('Provider not found.',404);
-  if(provider.credentialId){try{credentials.deleteCredential(store,workspaceId,provider.credentialId);}catch{/* already gone */}}
-  await store.update(s=>{const ai=aiState(s);ai.providers=ai.providers.filter(p=>p.id!==id);if(ai.defaultProviderId===id)ai.defaultProviderId=ai.providers[0]?.id||null;});
+  if(provider.credentialId){try{credentials.deleteCredential(store,workspaceId,provider.credentialId);}catch(error){if(error.status!==404)throw error;}}
+  await store.update(s=>{const ai=aiState(s);ai.providers=ai.providers.filter(p=>p.id!==id);if(ai.defaultProviderId===id)ai.defaultProviderId=ai.providers[0]?.id||null;
+    for(const [botId,override] of Object.entries(ai.bots)){
+      if(override?.providerId!==id)continue;
+      const model=override.model||null;
+      if(!model)delete ai.bots[botId];else ai.bots[botId]={providerId:null,model};
+    }
+  });
   return {ok:true};
 }
 
@@ -61,7 +87,11 @@ export function providerConfig(store,provider){
 export function resolveConfig(store,botId){
   const state=store.read();const ai=aiState(state);
   const override=botId?ai.bots[botId]:null;
-  const providerId=(override?.providerId)||ai.defaultProviderId;
+  // A pin whose provider was deleted must fall through to the workspace
+  // default. Skipping that sent the bot to the environment key, or to the
+  // template path while a saved provider was still configured.
+  const pinned=override?.providerId&&ai.providers.some(p=>p.id===override.providerId)?override.providerId:null;
+  const providerId=pinned||ai.defaultProviderId;
   const provider=ai.providers.find(p=>p.id===providerId);
   if(provider){
     const config=providerConfig(store,provider);
@@ -69,7 +99,6 @@ export function resolveConfig(store,botId){
   }
   const env=envConfig();
   if(configReady(env))return {...env,model:override?.model||ai.defaultModel||env.model};
-  if(override?.model)return null;
   return null;
 }
 

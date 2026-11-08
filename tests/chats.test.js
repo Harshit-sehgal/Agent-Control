@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {initialState} from '../shared/core.js';
-import {migrate, addGroup} from '../shared/workflow.js';
+import {migrate, addGroup, addBot} from '../shared/workflow.js';
 import {addChatMessages, clearChat, pruneChats, mergeChat, createOutbox, MAX_CHAT_MESSAGES} from '../shared/chats.js';
 
 const fresh = () => migrate(initialState());
@@ -49,6 +49,55 @@ test('clearing a conversation removes only that one', () => {
   assert.deepEqual(clearChat(s, 'writer'), {ok: true, removed: 1});
   assert.equal(s.chats.writer, undefined);
   assert.equal(s.chats.scout.length, 1);
+});
+
+test('clearing a group chat also drops the run log so a later stream cannot refill it', () => {
+  const s = fresh();
+  addChatMessages(s, 'team-x-engage', [{role: 'user', text: 'a'}]);
+  s.groupMessages = {'x-engage': [{id: 'old', role: 'bot', text: 'prior run'}]};
+  assert.equal(clearChat(s, 'team-x-engage').removed, 2);
+  assert.equal(s.chats['team-x-engage'], undefined);
+  assert.equal(s.groupMessages['x-engage'], undefined);
+});
+
+test('clearing a conversation denies waiting pages and cancels its busy runs', () => {
+  const s = fresh();
+  addChatMessages(s, 'writer', [{role: 'user', text: 'a'}]);
+  s.browserRequests = [
+    {id: 'p', chatKey: 'writer', groupId: 'x-engage', status: 'pending'},
+    {id: 'd', chatKey: 'writer', groupId: 'x-engage', status: 'dispatched', runId: 'r1'},
+    {id: 'orphan', chatKey: 'writer', groupId: 'x-engage', status: 'dispatched'},
+    {id: 'keep', chatKey: 'scout', groupId: 'x-engage', status: 'pending'},
+    {id: 'done', chatKey: 'writer', groupId: 'x-engage', status: 'done'},
+  ];
+  s.groupRuns = [
+    {id: 'r1', chatKey: 'writer', groupId: 'x-engage', status: 'awaiting_browser'},
+    {id: 'r2', chatKey: 'writer', groupId: 'x-engage', status: 'awaiting_plan'},
+    {id: 'r3', chatKey: 'scout', groupId: 'x-engage', status: 'awaiting_feed'},
+    {id: 'r4', chatKey: 'writer', groupId: 'x-engage', status: 'completed'},
+    {id: 'team', chatKey: 'team-x-engage', groupId: 'x-engage', status: 'awaiting_checkpoint'},
+  ];
+  clearChat(s, 'writer');
+  assert.equal(s.browserRequests.find(r => r.id === 'p').status, 'denied');
+  assert.equal(s.browserRequests.find(r => r.id === 'd').status, 'denied');
+  assert.equal(s.browserRequests.find(r => r.id === 'orphan').status, 'denied');
+  assert.equal(s.browserRequests.find(r => r.id === 'keep').status, 'pending');
+  assert.equal(s.browserRequests.find(r => r.id === 'done').status, 'done');
+  assert.equal(s.groupRuns.find(r => r.id === 'r1').status, 'cancelled');
+  assert.equal(s.groupRuns.find(r => r.id === 'r2').status, 'cancelled');
+  assert.equal(s.groupRuns.find(r => r.id === 'r3').status, 'awaiting_feed');
+  assert.equal(s.groupRuns.find(r => r.id === 'r4').status, 'completed');
+  assert.equal(s.groupRuns.find(r => r.id === 'team').status, 'awaiting_checkpoint', 'Clearing a bot chat must not cancel the team run.');
+});
+
+test('clearing a group chat cancels a busy run that lives on a bot chat of that group', () => {
+  const s = fresh();
+  addChatMessages(s, 'team-x-engage', [{role: 'user', text: 'a'}]);
+  s.groupRuns = [{id: 'h', chatKey: 'handoff', groupId: 'x-engage', status: 'awaiting_plan'}];
+  s.browserRequests = [{id: 'p', chatKey: 'handoff', groupId: 'x-engage', status: 'pending'}];
+  clearChat(s, 'team-x-engage');
+  assert.equal(s.groupRuns[0].status, 'cancelled');
+  assert.equal(s.browserRequests[0].status, 'denied');
 });
 
 test('history of a bot or group that no longer exists is dropped', () => {
@@ -138,6 +187,18 @@ test('a browser cannot mark a message as model output or invent its sender', () 
   // The server, writing a run it executed, is believed.
   addChatMessages(s, 'writer', [{id: 't1', role: 'bot', text: 'real', mode: 'ai', senderId: 'writer', senderName: 'Writer'}], {trusted: true});
   assert.equal(s.chats.writer[1].mode, 'ai'); assert.equal(s.chats.writer[1].origin, undefined);
+});
+
+test('a summonable guest keeps its real name in a group chat', () => {
+  const s = fresh();
+  const other = addGroup(s, {name: 'Other', description: ''});
+  const guest = addBot(s, other.id, {name: 'Guest Bot', instructions: 'Help from next door.'});
+  addChatMessages(s, 'team-x-engage', [{id: 'g1', role: 'bot', text: 'here', senderId: guest.id, senderName: 'Impostor'}]);
+  assert.equal(s.chats['team-x-engage'][0].senderId, guest.id);
+  assert.equal(s.chats['team-x-engage'][0].senderName, 'Guest Bot');
+  s.groups.find(g => g.id === other.id).bots[0].settings = {summonable: false};
+  addChatMessages(s, 'team-x-engage', [{id: 'g2', role: 'bot', text: 'private', senderId: guest.id, senderName: 'Guest Bot'}]);
+  assert.equal(s.chats['team-x-engage'][1].senderId, undefined);
 });
 
 test('the local outbox is bounded, so a stuck tab cannot grow without limit', () => {

@@ -53,8 +53,12 @@ test('markDue ignores a scheduled draft with a missing or invalid dueAt',()=>{
   // A valid due time still transitions, and a pending draft never does.
   assert.equal(markDue({status:'scheduled',dueAt:new Date(now+60000).toISOString()},now),false);
   assert.equal(markDue({status:'pending',dueAt:new Date(now-1000).toISOString()},now),false);
-  const real={status:'scheduled',dueAt:new Date(now-1000).toISOString()};
+  const real={status:'scheduled',dueAt:new Date(now-1000).toISOString(),text:'Approved copy',revision:1,approvedText:'Approved copy',approvedRevision:1};
   assert.equal(markDue(real,now),true);assert.equal(real.status,'ready');
+  const changed={status:'scheduled',dueAt:new Date(now-1000).toISOString(),text:'Edited after approval',revision:2,approvedText:'Approved copy',approvedRevision:1};
+  assert.equal(markDue(changed,now),false);assert.equal(changed.status,'scheduled');
+  const never={status:'scheduled',dueAt:new Date(now-1000).toISOString(),text:'No approval was recorded',revision:1};
+  assert.equal(markDue(never,now),false);assert.equal(never.status,'scheduled');
 });
 
 test('core fails fast with an actionable message when Web Crypto is missing',async()=>{

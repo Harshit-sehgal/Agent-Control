@@ -144,7 +144,7 @@ export function enqueueAgentTask(store, agentId, {kind, payload = {}, idempotenc
   const id = crypto.randomUUID();
   const task = {
     id, agent_id: agentId, kind, payload: JSON.stringify(payload || {}), status: 'queued',
-    attempts: 0, max_attempts: 3, idempotency_key: idempotencyKey || null, created_by: createdBy || null, created_at: now(),
+    attempts: 0, max_attempts: kind === 'browser.action' ? 1 : 3, idempotency_key: idempotencyKey || null, created_by: createdBy || null, created_at: now(),
   };
   store.run('INSERT INTO agent_tasks (id,agent_id,kind,payload,status,attempts,max_attempts,idempotency_key,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
     task.id, task.agent_id, task.kind, task.payload, task.status, task.attempts, task.max_attempts, task.idempotency_key, task.created_by, task.created_at, now());
@@ -190,15 +190,24 @@ export function completeAgentTask(store, agentId, taskId, {status, result, error
   return {ok: true, status: retry ? 'queued' : 'failed'};
 }
 
-/** Tasks orphaned by a disconnected agent: expired leases return to queued. */
+/** Tasks orphaned by a disconnected agent: expired leases return to queued,
+ * except browser actions which fail instead (never retried). Returns how
+ * many stale tasks were settled. */
 export function recoverAgentTasks(store, nowMs = Date.now()) {
   const stale = store.all(`SELECT * FROM agent_tasks WHERE status='running' AND (lease_until IS NULL OR lease_until<=?)`,
     new Date(nowMs).toISOString());
+  let rearmed = 0;
   for (const row of stale) {
+    rearmed++;
+    if (row.kind === 'browser.action') {
+      store.run(`UPDATE agent_tasks SET status='failed', lease_until=NULL, error=?, updated_at=?, completed_at=? WHERE id=?`,
+        'The agent disconnected before completing. Browser actions are not retried.', now(), now(), row.id);
+      continue;
+    }
     store.run(`UPDATE agent_tasks SET status='queued', lease_until=NULL, error=?, updated_at=? WHERE id=?`,
       'The agent disconnected before completing. Re-armed automatically.', now(), row.id);
   }
-  return stale.length;
+  return rearmed;
 }
 
 export function touchAgent(store, agentId) {
@@ -226,6 +235,18 @@ export function revokeAgent(store, agentId) {
   // process lifetime.
   signatureNonces.delete(agentId);
   return {ok: true};
+}
+
+/** Drop queued or running agent work. A denied browser request uses this so
+ * the device is not still asked to open a page the person turned down. */
+export function failAgentTasks(store, ids, error) {
+  if (typeof store.run !== 'function') return;
+  const at = now();
+  const message = cleanText(error, 400) || 'Cancelled.';
+  for (const id of ids || []) {
+    if (!id) continue;
+    store.run("UPDATE agent_tasks SET status='failed', error=?, lease_until=NULL, updated_at=?, completed_at=? WHERE id=? AND status IN ('queued','running')", message, at, at, id);
+  }
 }
 
 /** Grant or shrink an agent's permissions. Only the server can widen them:

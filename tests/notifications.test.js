@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import {SqliteStore} from '../src/sqlite-store.js';
-import {loadMasterKey} from '../src/vault.js';
+import {loadMasterKey, encryptJson} from '../src/vault.js';
 import * as credentials from '../src/credentials.js';
 import * as notifications from '../src/notifications.js';
 import {createQueue} from '../src/queue.js';
@@ -103,10 +105,147 @@ test('deliver() resolves the webhook URL from the encrypted credential and rejec
   await assert.rejects(notifications.deliver(store, {payload: {channel: 'webhook', target: badId, title: 't', body: 'b'}}), /http\(s\)/);
   // Missing credential fails clearly.
   await assert.rejects(notifications.deliver(store, {payload: {channel: 'webhook', target: 'missing', title: 't', body: 'b'}}), /no longer exists/);
-  // Email has no embedded relay, so it must fail loudly rather than let the
-  // queue mark the notification "sent".
-  await assert.rejects(notifications.deliver(store, {payload: {channel: 'email', target: 'ops@example.com', title: 't', body: 'b'}}), /external relay/i);
+  // No EMAIL_RELAY_URL: delivery must fail loudly rather than let the queue
+  // mark the notification "sent".
+  const previousRelay = process.env.EMAIL_RELAY_URL;
+  delete process.env.EMAIL_RELAY_URL;
+  try {
+    await assert.rejects(notifications.deliver(store, {payload: {channel: 'email', target: 'ops@example.com', title: 't', body: 'b'}}), /external relay/i);
+  } finally {
+    if (previousRelay === undefined) delete process.env.EMAIL_RELAY_URL;
+    else process.env.EMAIL_RELAY_URL = previousRelay;
+  }
   // Unknown channels fail.
   await assert.rejects(notifications.deliver(store, {payload: {channel: 'carrier-pigeon', target: 'x', title: 't', body: 'b'}}), /Unknown notification channel/);
+  // An expired credential must not be sent, even though it still decrypts.
+  const enc = encryptJson(store.vaultKey, {value: 'https://hooks.example.com/expired'});
+  const expiredId = crypto.randomUUID();
+  store.run('INSERT INTO credentials (id,workspace_id,name,kind,ciphertext,iv,tag,created_by,created_at,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
+    expiredId, 'default', 'old', 'webhook', enc.ciphertext, enc.iv, enc.tag, null, new Date().toISOString(), new Date(Date.now() - 1000).toISOString());
+  await assert.rejects(notifications.deliver(store, {payload: {channel: 'webhook', target: expiredId, title: 't', body: 'b'}}), /expired/);
   await fs.rm(dir, {recursive: true, force: true });
+});
+
+test('a configured email relay receives the notification and a failure still throws', async () => {
+  const {store, dir} = await harness();
+  const previous = {
+    EMAIL_RELAY_URL: process.env.EMAIL_RELAY_URL,
+    EMAIL_RELAY_TOKEN: process.env.EMAIL_RELAY_TOKEN,
+    WEBHOOK_ALLOW_PRIVATE: process.env.WEBHOOK_ALLOW_PRIVATE,
+  };
+  const restoreEnv = () => {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  };
+  const requests = [];
+  const server = http.createServer((req, res) => {
+    const chunks = [];
+    req.on('data', chunk => chunks.push(chunk));
+    req.on('end', () => {
+      requests.push({url: req.url, method: req.method, headers: req.headers, body: Buffer.concat(chunks).toString('utf8')});
+      if (req.url === '/fail') return res.writeHead(502).end('no');
+      if (req.url === '/away') return res.writeHead(302, {Location: 'http://127.0.0.1/stolen'}).end();
+      res.writeHead(204).end();
+    });
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  const task = meta => ({payload: {channel: 'email', target: 'ops@example.com', title: 't', body: 'b', meta}});
+  const previousFetch = globalThis.fetch;
+  try {
+    process.env.WEBHOOK_ALLOW_PRIVATE = '1';
+    delete process.env.EMAIL_RELAY_TOKEN;
+    process.env.EMAIL_RELAY_URL = `http://127.0.0.1:${port}/relay`;
+    assert.deepEqual(await notifications.deliver(store, task({k: 1})), {delivered: 'email'});
+    assert.equal(requests[0].method, 'POST');
+    assert.equal(requests[0].headers.authorization, undefined);
+    assert.match(requests[0].headers['content-type'], /^application\/json/);
+    const posted = JSON.parse(requests[0].body);
+    assert.equal(posted.to, 'ops@example.com');
+    assert.equal(posted.title, 't');
+    assert.equal(posted.body, 'b');
+    assert.deepEqual(posted.meta, {k: 1});
+    assert.equal(typeof posted.at, 'string');
+
+    delete process.env.EMAIL_RELAY_TOKEN;
+    await notifications.deliver(store, task({}));
+    assert.equal(requests[1].headers.authorization, undefined);
+
+    delete process.env.EMAIL_RELAY_TOKEN;
+    process.env.EMAIL_RELAY_URL = `http://127.0.0.1:${port}/fail`;
+    await assert.rejects(notifications.deliver(store, task({})), error => {
+      assert.match(error.message, /responded 502/);
+      assert.doesNotMatch(error.message, /super-secret-token/);
+      assert.doesNotMatch(error.message, /ops@example.com/);
+      return true;
+    });
+
+    process.env.EMAIL_RELAY_URL = `http://127.0.0.1:${port}/away`;
+    const beforeRedirect = requests.length;
+    await assert.rejects(notifications.deliver(store, task({})), /responded 302/);
+    assert.equal(requests.length, beforeRedirect + 1, 'A redirect is not followed.');
+    assert.equal(requests.at(-1).url, '/away');
+
+    const beforeBadAddress = requests.length;
+    await assert.rejects(notifications.deliver(store, {payload: {channel: 'email', target: 'not-an-email', title: 't', body: 'b'}}), /valid address/);
+    assert.equal(requests.length, beforeBadAddress);
+
+    process.env.EMAIL_RELAY_URL = 'ftp://93.184.216.34/relay';
+    await assert.rejects(notifications.deliver(store, task({})), /http\(s\)/);
+
+    delete process.env.WEBHOOK_ALLOW_PRIVATE;
+    process.env.EMAIL_RELAY_URL = 'http://127.0.0.1/relay';
+    await assert.rejects(notifications.deliver(store, task({})), /private or local network/);
+
+    process.env.EMAIL_RELAY_URL = 'https://93.184.216.34/relay?x=1';
+    process.env.EMAIL_RELAY_TOKEN = 'super-secret-token';
+    globalThis.fetch = async () => { throw new Error('connect failed super-secret-token for ops@example.com via https://93.184.216.34/relay?x=1'); };
+    await assert.rejects(notifications.deliver(store, task({})), error => {
+      assert.doesNotMatch(error.message, /super-secret-token/);
+      assert.doesNotMatch(error.message, /ops@example.com/);
+      assert.doesNotMatch(error.message, /93\.184\.216\.34/);
+      return true;
+    });
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv();
+    await new Promise(resolve => server.close(resolve));
+    await fs.rm(dir, {recursive: true, force: true});
+  }
+});
+
+test('a burst in one millisecond keeps the newest notices, and reading one is personal', async () => {
+  const {store, dir} = await harness();
+  const realDate = Date;
+  const fixed = new realDate('2026-01-01T00:00:00.000Z');
+  global.Date = class extends realDate {
+    constructor(...args) { super(...(args.length ? args : [fixed])); }
+    static now() { return fixed.getTime(); }
+  };
+  try {
+    const ids = [];
+    for (let i = 0; i < 205; i++) ids.push(notifications.notify(store, null, {userId: 'u1', title: `n${i}`, body: ''}));
+    const kept = store.all("SELECT title FROM notifications WHERE user_id='u1'");
+    assert.equal(kept.length, 200);
+    assert.equal(kept.some(row => row.title === 'n204'), true, 'The notice just recorded has to stay.');
+    assert.equal(kept.some(row => row.title === 'n0'), false, 'The oldest notice is the one that makes room.');
+    assert.equal(store.get('SELECT id FROM notifications WHERE id=?', ids[204])?.id, ids[204]);
+  } finally { global.Date = realDate; }
+
+  const shared = notifications.notify(store, null, {userId: null, title: 'Reminder fired', body: 'In this workspace'});
+  const personal = notifications.notify(store, null, {userId: 'u1', title: 'Only u1', body: ''});
+  assert.equal(notifications.markRead(store, 'u1', [shared, personal]).marked, 2);
+  assert.equal(notifications.listNotifications(store, 'u1').find(row => row.id === shared).status, 'read');
+  assert.equal(notifications.listNotifications(store, 'u1').find(row => row.id === personal).status, 'read');
+  assert.equal(notifications.unreadCount(store, 'u2'), 1, 'Another member still has the shared notice.');
+  assert.equal(notifications.listNotifications(store, 'u2').find(row => row.id === shared).status === 'read', false);
+  assert.equal(notifications.markRead(store, 'u1', [shared]).marked, 0);
+  // Delivery success rewrites status to sent. That must not unread it.
+  const unread = notifications.unreadCount(store, 'u1');
+  store.run("UPDATE notifications SET status='sent' WHERE id=?", personal);
+  assert.equal(notifications.unreadCount(store, 'u1'), unread);
+  assert.equal(notifications.listNotifications(store, 'u1').find(row => row.id === personal).status, 'read');
+  await fs.rm(dir, {recursive: true, force: true});
 });

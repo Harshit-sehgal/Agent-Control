@@ -19,7 +19,7 @@ import * as notifications from './notifications.js';
 import {aiEnabled,aiModel,aiProvider,makeDraft} from './ai.js';
 import {resolveConfig} from './ai-providers.js';
 import {startScheduler,startRetention} from './scheduler.js';
-import {queueGroupRun,markInterrupted} from './coordination.js';
+import {queueGroupRun,markInterrupted,runBotTask} from './coordination.js';
 import {createQueue,recoverQueue,defaultHandlers} from './queue.js';
 import {Auth} from './auth.js';
 import {openWorkspaces} from './workspaces.js';
@@ -80,6 +80,7 @@ function startWorkspace(ws,workspaceId){
   const queue=createQueue(ws,{
     ...defaultHandlers(ws,notify),  'candidate-draft': async task=>processCandidate(ws,task.payload.candidateId),
     'group-run': async task=>{ await queueGroupRun(ws,{groupId:task.payload.groupId,message:task.payload.message,directBotId:task.payload.directBotId}); },
+    'bot-task': async task=>runBotTask(ws,task),
     'agent-job': async task=>{
       // Dispatch to a paired local agent: enqueue an agent task for each agent
       // that holds the required permission. The queue's idempotency and the
@@ -108,7 +109,7 @@ function startWorkspace(ws,workspaceId){
   // before the first sweep can see it.
   let stops=[],stopped=false;
   ready.then(()=>{if(!stopped)stops=[startScheduler(ws),startRetention(ws),queue.start()];}).catch(error=>console.error(`Workspace ${workspaceId} failed to start:`,error.message));
-  const stop=()=>{stopped=true;for(const s of stops)s();};
+  const stop=async()=>{stopped=true;await ready.catch(()=>{});for(const s of stops)await s();};
   stop.ready=ready;
   return stop;
 }
@@ -167,12 +168,16 @@ async function api(req,res,u){
     // An optional limit lets a route that legitimately carries a large document
     // (a backup restore) ask for more than the 128 KB default.
     body:async(limit=128*1024)=>parsed??=safeJson(await rawBody(req,limit))};
-  const result=await found.route.handler(context);
+  const invoke=()=>found.route.handler(context);
+  const managesWorkspace=found.route.pattern==='/api/admin/restore'||(req.method==='DELETE'&&found.route.pattern==='/api/workspaces/current');
+  const result=scope?.trackWork&&!managesWorkspace
+    ? await scope.trackWork(invoke)
+    : await invoke();
   const {status,body,headers}=isReply(result)?result:{status:200,body:result,headers:{}};
   if(req.method==='HEAD'){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...SECURITY,...headers});return res.end();}
   send(res,status,body,headers);
 }
-const ASSETS=new Set(['index.html','app.css','transport.js','local-api.js','app.js','ui-kit.js','ui-model.js','ui-store.js','ui-dialogs.js','ui-chat.js','ui-views.js','ui-panel.js','ui-sheets.js','ui-admin.js','ui-actions.js','ui-fx.js','ui-push.js','sw.js','manifest.webmanifest','icon-192.png','icon-512.png','core.js','workflow.js','tasks.js','evidence.js','contracts.js','retention.js','coordination.js','chats.js','group-simulator.js','chat-engine.js','usability.js','demo-feed.html']);
+const ASSETS=new Set(['index.html','app.css','transport.js','local-api.js','app.js','ui-kit.js','ui-model.js','ui-store.js','ui-dialogs.js','ui-chat.js','ui-views.js','ui-panel.js','ui-sheets.js','ui-admin.js','ui-actions.js','ui-fx.js','ui-push.js','sw.js','manifest.webmanifest','icon-192.png','icon-512.png','core.js','workflow.js','tasks.js','evidence.js','contracts.js','bot-settings.js','bot-browser.js','retention.js','coordination.js','chats.js','group-simulator.js','chat-engine.js','usability.js','local-runs.js','demo-feed.html']);
 async function serve(req,res,u){
   let rel=u.pathname==='/'?'index.html':u.pathname.slice(1);
   if(!ASSETS.has(rel))return send(res,404,{error:'Not found'});
@@ -213,7 +218,7 @@ preflight();
 server.listen(PORT,HOST,()=>{
   console.log(`\nAgent Control Prototype: http${server instanceof https.Server?'s':''}://${HOST}:${PORT}`);
   if(!process.env.DASHBOARD_PASSWORD) console.log(`Temporary dashboard password (changes on restart): ${PASSWORD}`);
-  console.log(`AI mode: ${isLive()?`Connected · ${aiModel()} @ ${aiProvider()}`:'Template drafts (no AI provider configured)'}`);
+  console.log(`AI mode: ${isLive()?`Connected · ${aiModel()} @ ${aiProvider()}`:'No AI_API_KEY in the environment. Add a provider under You → AI and models, or set AI_API_KEY.'}`);
   if(HOST!=='127.0.0.1'&&HOST!=='localhost')console.warn('WARNING: Use HTTPS plus a private network / access proxy for remote access.');
 });
-process.on('SIGINT',()=>{workspaces.stop();server.close(()=>process.exit(0));});
+process.on('SIGINT',()=>{void workspaces.stop().finally(()=>server.close(()=>process.exit(0)));});

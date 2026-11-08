@@ -10,9 +10,9 @@ The interface is organized like a messenger. The Node server and the GitHub Page
 - **Chat list.** Every group chat and every bot. The search box filters chats. The filters are All, Needs you, Groups, and Bots. The **+** button opens **New chat** (a new bot or a new group). The **…** button opens **You**: notifications, admin pages, about, and sign out.
 - **X-engage workspace in the chat.** The old workspace tabs now sit in the X-engage chat's info panel (tap the chat header): Drafts (Waiting on you), Posts found, Reminders, Runs, and Voice and timing. There is no Overview tab.
 - **Drafts in the thread.** Posts and drafts appear as messages in the X-engage thread. A draft is a card you answer in place: **Approve**, **Edit**, **Skip**, or **Rewrite**. After approval the card offers **Ready now**, **Copy text**, **Open post**, and **I posted it**. An amber "N need(s) you" pill in the chat header opens the drafts waiting on you.
-- **Composer + sheet.** The **+** button in the composer opens **Share a post**, **Set a reminder**, **Load sample posts**, and **Add a bot**.
+- **Composer + sheet.** The **+** button in the composer opens **Share a post**, **Set a reminder**, **Load sample posts**, **Schedule a task**, and **Add a bot**.
 - **In-app sheets.** Confirmations and prompts appear as sheets inside the app, not as native browser dialogs.
-- **Colour themes:** a clean light theme and a soft warm-grey dark theme. The app follows your system setting; to pin one, open **You** and choose it under Colours. Each bot has its own face and pastel colour, used for its bubbles too. The choice is saved in this browser.
+- **Colour themes:** a clean light theme and a soft warm-grey dark theme. The app follows your system setting; to pin one, open **You** and choose it under Colours. Each bot has its own face and pastel colour, used for its bubbles too. The bot colour is stored on the server (`settings.tint`) so it follows the account.
 - **Quick navigation:** press **Ctrl+K** (Windows/Linux) or **⌘K** (macOS), or choose **You → Jump to anything**. Search chats and pages, use arrow keys and Enter to navigate, and Escape to close.
 - **Accessibility.** Visible `:focus-visible` rings on every control, focus returned to the trigger when a sheet closes, a focus trap inside sheets and quick navigation, `role="log"` live regions for conversations, and a `prefers-reduced-motion` path that removes every transition.
 - Small-screen layout and reduced-motion preferences are validated in a headless browser.
@@ -24,10 +24,24 @@ The Pages version remains **a browser-local, non-AI simulation**: its data and c
 
 **Group chats now route tasks between specialist bots.** You can mention `@Writer`, `@Reviewer`, or `@everyone` to select recipients. Without an explicit mention, X-engage uses Scout → Ranker → Researcher → Writer → Reviewer. Every result is attached to the bot identity, handed to the next bot, and shown in the shared conversation. Human review is required before any external action.
 
-- **GitHub Pages:** Deterministic, browser-local coordination demonstration. Handoffs produce distinct message records, pass task context, and can create an **unapproved template draft**. No real AI is run on Pages.
-- **Node API:** Real, *text-only* multi-bot execution. Messages you send in a group chat run on the server orchestrator: each specialist is called with the accumulated context and hands off to the next, and every step is recorded as a run with a full trace. Enable **"Approve between steps"** to gate each handoff behind your approval. Configure a **server-side** AI provider (`AI_API_KEY` + `AI_BASE_URL`; any OpenAI-compatible endpoint, including FreeLLMAPI, OpenRouter, Groq, a local Ollama/vLLM, or OpenAI itself). Each run is limited to six steps, with bounded context and group isolation. Model outputs never receive browser or publication tools.
-- **Run timeline & admin.** The **Runs** section of a group's info panel (tap the chat header) shows every run with per-step traces, failures and a Retry action. Admins reach **Team & access** (users/roles/sessions), **Local agents** (pairing/permissions), and **Data & security** (credential vault, retention, encrypted backups) from **You**, where notifications are also listed.
+- **GitHub Pages:** Deterministic, browser-local coordination demonstration. Handoffs produce distinct message records, pass task context, and can create an **unapproved template draft**. **Approve between steps** pauses the simulation the same way as Node. No real AI is run on Pages.
+- **Node API:** Real multi-bot execution. Messages you send in a group chat run on the server orchestrator: each specialist is called with the accumulated context and hands off to the next, and every step is recorded as a run with a full trace. Turn on **Approve between steps** in Group settings to gate each handoff behind your approval. Configure AI under **You → AI and models**, or with `AI_API_KEY` + `AI_BASE_URL` (any OpenAI-compatible endpoint). Each run is limited to the group's step limit (six by default, twelve at most), with bounded context. Bots from other groups join only when @mentioned and summonable. A bot reaches a browser only with the opt-in `browser.use` permission, and only after you approve the page. Model outputs never receive publication tools.
+- **Run timeline & admin.** The **Runs** section of a group's info panel (tap the chat header) shows every run with per-step traces, failures and a Retry action. Admins reach **Team & access** (users/roles/sessions), **Local agents** (pairing/permissions), and **Data & security** (credential vault, retention, checksum-protected JSON backups) from **You**, where notifications are also listed.
 - The platform is **not** a cloud-hosted autonomous agent swarm; it runs where you run it and stops for human approval. See [`docs/COORDINATION.md`](docs/COORDINATION.md) for the exact behavior, security boundaries, and API contract.
+
+## Bots that work together, settings you control
+
+Bots behave like Grok bots on X: mention one anywhere and it answers in that chat, with the recent messages as context.
+
+- **Tell Handoff what you want.** X-engage is set to “One bot keeps it on track.” A plain message **in Handoff's own chat** plans only the bots that request needs, runs them, and checks the result. If the draft is missing it asks the writer once more, then tells you what is waiting. You still edit and post. A message in the X-engage **group** chat still runs the group's pipeline unless you @mention one bot. Group settings can choose **I'll direct them** (no tracked plan) or **Show me the plan first**. You can mark a different bot as primary. An @mention still talks to just that bot.
+- **@mention any bot in any chat.** In a one-to-one chat with Writer, `@Reviewer check this` makes Reviewer answer there. Bots from other groups can be called in too, unless their profile turns off "Can be @mentioned from other chats". The composer suggests names as you type `@`.
+- **Bots hand work to each other.** When a bot's reply mentions a teammate (`@Reviewer please check`), that teammate takes the next step. The step limit still applies, no bot hands off to itself, and you can turn handoffs off per bot or per group.
+- **Bot profile → Behaviour:** switched on or off, reply length, creativity (temperature), tone and style, how many recent messages it remembers, whether other chats can call it, whether it can hand off, and its colour. The model provider and model per bot are set on the same page.
+- **Group info → Group settings:** name and description; routing (bots take turns in order, only the first bot answers unless you mention others, or every bot answers); pipeline order and members; step limit (1 to 12); approve between steps; and bot handoffs. You can remove bots from a group, and an admin can delete any group except X-engage.
+- **Browser control on your own device:** tick `browser.use` in any bot's profile (What it may do). The bot can then ask for a web page in its reply. A card in the chat shows the URL and steps, with Approve and Decline. Approved requests run on your paired local agent (`agent/agent.mjs`, see [`docs/AGENT-PROTOCOL.md`](docs/AGENT-PROTOCOL.md)), and the bot continues with the result. Set *Browser requests* to "Run on my local agent without asking" to skip the card for that bot. Bots may read X but can never click or type there.
+- **Scheduled tasks:** a chat's info panel → Scheduled tasks (or + → Schedule a task) asks a bot or a group to run a prompt once or every N minutes. The results post into that chat.
+
+Settings are validated by one shared module (`shared/bot-settings.js`), so the server and the Pages demo accept the same values. The exact routing and safety rules are in [`docs/COORDINATION.md`](docs/COORDINATION.md).
 
 ## AI: bring your own key (BYOK) and model selection
 
@@ -36,10 +50,10 @@ Bots run on **your own** models. Open **You → AI and models** (admin) and add 
 - **Keys are stored encrypted** in the workspace vault (AES-256-GCM) and are never shown again; only the provider name, host and model list are visible.
 - **Load models** fetches the provider's own `GET /v1/models`, so the picker lists what the provider actually offers.
 - Choose a **default provider + model** for the workspace, then **override it per bot** in the bot's profile (Edit profile → Model provider / Model). Different bots can run on different models.
-- Resolution order at run time: **the bot's override → the workspace default → the server environment** (`AI_API_KEY`). The HTTP routes are OpenAPI-style: `POST /api/ai/providers`, `DELETE /api/ai/providers/:id`, `POST /api/ai/providers/:id/models`, `PATCH /api/ai`, `PATCH /api/ai/bots/:bot`.
-- The server still accepts `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` for a single env-configured provider; a saved provider takes precedence for jobs that use it.
+- Resolution order at run time: **the bot's override → the workspace default → the server environment** (`AI_API_KEY`). Routes: `POST /api/ai/providers`, `DELETE /api/ai/providers/:id`, `POST /api/ai/providers/:id/models`, `PATCH /api/ai`, `PATCH /api/ai/bots/:bot`.
+- The server still accepts `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` for a single env-configured provider. A saved workspace provider is used when the bot or the workspace default points at it.
 
-The static Pages demo has no providers; it stays a browser-local, command-only simulation.
+The static Pages demo has no providers; it stays a browser-local simulation (group handoffs and offline commands, no live model).
 
 ## GitHub Pages: chat-first UI
 
@@ -51,7 +65,7 @@ Visit **https://harshit-sehgal.github.io/Agent-Control/** after the Pages workfl
 - Share post candidates, create template drafts, edit and approve revisions, and prepare manual X posting handoffs.
 - A phone layout that shows one pane at a time.
 
-**Demo limitations:** Chat replies are deterministic local commands, not generated by an AI model. GitHub Pages has no server-side worker, live X integrations, secure key storage, push notifications, or cross-device sync. Never paste private account credentials or API keys into this public demo. The separate Node application still supports optional real AI drafting when deployed locally with a server-side provider key.
+**Demo limitations:** Group chat uses the deterministic simulator (including Approve between steps). Direct chats answer a small command set. Nothing is generated by an AI model. GitHub Pages has no server-side worker, live X integrations, secure key storage, push notifications, or cross-device sync. The browser-local demo requires Web Locks for safe multi-tab run coordination. Never paste private account credentials or API keys into this public demo. The separate Node application still supports optional real AI drafting when deployed locally with a server-side provider key.
 
 
 ## GitHub Pages UI: usability controls
@@ -59,7 +73,7 @@ Visit **https://harshit-sehgal.github.io/Agent-Control/** after the Pages workfl
 The static Pages dashboard includes functional navigation controls (not real AI execution):
 
 - **Bot profile actions** in the bot's info panel: edit profile, pin to top or unpin, and duplicate. Duplication creates a new profile with its own empty conversation.
-- **Group info actions**: add a bot, copy the conversation, or clear the conversation. The group info panel also holds the "Approve between steps" toggle.
+- **Group info actions**: add a bot, copy the conversation, or clear the conversation. Group settings hold routing, pipeline order, the step limit and "Approve between steps".
 - **Create Bot templates** for Scout, Researcher, Writer, Reviewer, and Coordinator. Templates fill **editable instructions**; they do not connect to an AI provider.
 - **Posts found search, status filter, and sorting** (newest, oldest, best/worst score), in the X-engage chat info panel. Search matches author, topic, post text, or the source URL, so pasting a captured post link finds it. Filtering does not modify stored candidate records.
 - **Drafts status and sort controls** in the X-engage chat info panel, for To decide, Scheduled, Ready to post, Posted, Skipped, and Everything drafts.
@@ -72,26 +86,26 @@ Use `npm test` for Node unit tests. For a local Chromium UI smoke test, install 
 
 ## What works now
 
-- Responsive web dashboard with password login (desktop/mobile browser).
+- Responsive web dashboard with email and password login (desktop/mobile browser). The owner account can omit the email. Change password lives on You.
 - Persistent candidate inbox; add URLs/text directly or capture one visible post from a Chrome extension.
-- Built-in X-engage bots: Scout, Ranker, Researcher, Writer, Reviewer, Manual Handoff.
+- Built-in X-engage bots: Scout, Ranker, Researcher, Writer, Reviewer, Handoff.
 - Deterministic topic-based relevance ranking. This is a heuristic, not a learned engagement predictor.
 - Real AI drafting through any OpenAI-compatible provider (chat-completions or OpenAI Responses), with template-only fallback when no provider is configured.
 - Editable drafts; revisions invalidate earlier approvals and scheduled publication handoffs.
 - Random delay after approval, configurable from 0 to 1440 minutes. When due, the draft becomes **ready for manual posting**; no automatic posting occurs.
 - Copy approved text, open source URL, and manually confirm publication.
 - Create custom bot groups and custom text bots; run custom bots when an AI key is configured.
-- Persistent once-only and recurring reminder events, stored with task history.
+- Persistent once-only and recurring reminder tasks, stored with task history.
 - Event/activity log, strict capture token, local file persistence, HTTP-only session cookie, basic login rate limiting.
 - Zero npm runtime dependencies. Requires Node.js 22+.
 
 ### Important boundaries
 
-- The Scout **does not automatically scroll, scrape, or search your X feed**. The Chrome extension captures one post after you deliberately invoke it. X restricts non-API scripting; a test account does not negate that restriction.
+- Scout does not crawl X on its own. On the Node server, a tracked “scroll my feed” asks you to approve one read-only pass over your home timeline. The Chrome extension still captures one post when you invoke it. Click and type on X stay refused.
 - The Researcher role **does not independently fact-check web claims** yet. Drafts carry a source and a warning to verify claims. Do not treat any generated text as verified reporting.
 - The scheduler runs on the host computer. For 24/7 service, run the container or the systemd unit in `deploy/` on a machine that stays on (see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)).
 - An installation can hold several workspaces, each with its own data and members, but it is self-hosted software for people you trust, not a hardened multi-tenant SaaS.
-- Custom bots run text-only prompts; they do not have browser or file-system tool access yet.
+- Custom bots have no file-system access. Browser access is the same opt-in `browser.use` permission as any other bot, and it still needs your approval and a paired local agent.
 - Push notifications reach a phone or desktop only after you turn them on for that device under **You → Notifications**, and only when the server is served over HTTPS (or on `localhost`). On an iPhone or iPad the app must first be added to the Home Screen.
 - No external accounts, secrets, or private files are transmitted unless you explicitly configure a paid AI provider for text drafting.
 
@@ -104,7 +118,7 @@ npm test
 npm start
 ```
 
-Open **http://127.0.0.1:4173**. On first startup without environment variables, the terminal prints a randomly generated dashboard password. This password changes after a restart. For a stable password:
+Open **http://127.0.0.1:4173**. On first startup without environment variables, the terminal prints a randomly generated dashboard password. Later restarts may print a different random string that does not update the stored owner password — set `DASHBOARD_PASSWORD` or change password under **You**. For a stable password:
 
 ```bash
 # Linux/macOS
@@ -131,7 +145,7 @@ DASHBOARD_PASSWORD='use-a-long-random-password' npm start
 AI_BASE_URL='https://api.openai.com/v1' AI_API_KEY='YOUR_OWN_KEY' AI_MODEL='gpt-4.1-mini' DASHBOARD_PASSWORD='use-a-long-random-password' npm start
 ```
 
-`AI_API_STYLE` picks the wire format (`chat` for `/v1/chat/completions`, `responses` for OpenAI's `/v1/responses`); it is inferred from `AI_BASE_URL` when unset. `AI_TIMEOUT_MS` (default 90000) budgets slow free-tier routing. The startup banner prints the active model and endpoint.
+`AI_API_STYLE` picks the wire format (`chat` for `/v1/chat/completions`, `responses` for OpenAI's `/v1/responses`); it is inferred from `AI_BASE_URL` when unset. `AI_TIMEOUT_MS` (default 180000) budgets slow free-tier routing. The startup banner reports the environment provider when `AI_API_KEY` is set. Saved providers under **You → AI and models** are used at run time even when the banner says none.
 
 Secrets are read **only on the server**. Never place an AI provider key in the browser extension or Git repository. When a key is configured, draft creation may incur API charges. If the provider request fails, the backend reports an error; it does not pretend to have generated a successful AI answer.
 
@@ -227,10 +241,10 @@ Note: Browser actions that X does not authorize are not enabled.
 
 - `src/server.js`: starts the services (store, auth, queue, scheduler), then dispatches each request through the route table.
 - `src/router.js`: the route table. Every route is registered with the access it needs (`public`, `agent`, or a least role), so a permission cannot be forgotten.
-- `src/routes-*.js`: the routes themselves, grouped by area: `public` (sign-in, capture, local-agent protocol), `workflow` (posts, drafts, evidence, tasks), `groups` (groups, bots, runs, conversations) and `account` (users, sessions, agents, vault, backups), `workspaces` and `push`.
+- `src/routes-*.js`: the routes themselves, grouped by area: `public` (sign-in, password reset, capture, local-agent protocol), `workflow` (posts, drafts, evidence, tasks), `groups` (groups, bots, runs, conversations), `account` (users, sessions, agents, vault, backups), `workspaces`, `push`, and `ai` (BYOK providers).
 - `src/workspaces.js`: one database file per workspace. A request works on its session's workspace and no other.
 - `src/push.js`: Web Push (message encryption and VAPID signing) with `node:crypto`, no library.
-- `agent/browser.mjs`: the local agent's real-browser reader, driving an installed Chrome over the DevTools protocol.
+- `agent/browser.mjs`: the local agent's real browser: allowlisted reads plus `browser.action` click/type/read/scroll, driving an installed Chrome over the DevTools protocol. Click and type on X are refused.
 - `src/http.js`: JSON responses with the security headers, bounded body readers and the same-origin check.
 - `src/sqlite-store.js`: the default store. Each record is kept whole next to its typed columns, so a restart reads back exactly what was written.
 - `shared/chats.js`: conversation history rules, shared by the server and the browser-local transport.
@@ -257,12 +271,12 @@ Both paths run the same `shared/workflow.js` rules, so the demo and the real das
 ## Security and operational notes
 
 - Set a strong, stable `DASHBOARD_PASSWORD` before exposing the server beyond localhost.
-- State lives in a transactional SQLite database (`DATA_FILE`); sessions are server-side and revocable, so a restart no longer signs users out.
+- State lives in a transactional SQLite database. `DATA_FILE` is the JSON sibling path (default `data/state.json`); the SQLite file is the same name with `.db` (`data/state.db`), or `DATA_DB` when set. Sessions are server-side and revocable, so a restart no longer signs users out.
 - Secrets (paired-agent secrets, stored credentials) are AES-256-GCM encrypted; the master key is `MASTER_KEY` or a `0600` keyfile beside the database. **Back the key up with the data.**
 - Roles are `viewer < member < admin < owner`; every route is registered with the least role it needs (`src/router.js`, `tests/authz-matrix.test.js`).
-- Sign-in and password-reset requests are rate-limited per address, and the attempt is counted before the request is read. An unknown address and a wrong password get the same answer.
+- Sign-in and forgot-password requests are rate-limited per client IP (8 attempts / 15 minutes), and the attempt is counted before the request is read. Reset itself consumes a one-time token. An unknown address and a wrong password get the same answer. Forgot password prints a one-time token in the server log unless `RESET_TOKEN_CONSOLE=0`.
 - The session cookie is `HttpOnly` + `SameSite=Strict`; the database holds only a hash of each session id. Cross-origin writes are rejected.
-- **Backup and restore are for the owner only.** A backup carries every account's password hash, and a restore replaces accounts and roles. A restore rejects unknown roles and any link that is not http(s).
+- **Backup and restore are for the owner only.** A backup of the primary workspace carries every account's password hash; other workspaces export only their own rows. Restore replaces data in the current workspace database (credentials, sessions and paired-agent credentials are excluded). Restored agent records are revoked and queued or running agent tasks fail; pair devices again after restore. The file is checksum-protected JSON, not encrypted — protect it like the database. A restore rejects unknown roles and any link that is not http(s).
 - The extension capture token is a write credential, so viewers do not receive it.
 - The local agent refuses `http.check` targets on private or local networks and does not follow redirects. Set `AGENT_ALLOW_PRIVATE=1` on the device to allow private addresses on purpose.
 - At most `AI_MAX_CONCURRENCY` model calls (default 4) run at once; a workspace holds at most 2000 collected posts.
@@ -270,8 +284,8 @@ Both paths run the same `shared/workflow.js` rules, so the demo and the real das
 - Each workspace keeps its data in its own database file (`state.ws-<id>.db` beside `state.db`). Accounts and memberships live in the first one. Only an owner of the first workspace can create workspaces; people are invited to one workspace at a time.
 - Push subscriptions belong to the account that made them. The installation's push key pair is generated on first use and stored encrypted with the vault key. A push endpoint must be a public https address.
 - Webhook notifications are not delivered to private or local addresses, and redirects are not followed. Set `WEBHOOK_ALLOW_PRIVATE=1` to allow a relay on your own network.
-- Captured posts are **untrusted external content**; input is escaped and URL schemes validated. Model output never receives browser or publishing tools, and **the final Post click is always human**.
-- Run behind an HTTPS reverse proxy; enable `HSTS=1` only after TLS works. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+- Captured posts are **untrusted external content**; input is escaped and URL schemes validated. Model output never receives publishing tools; a bot opens pages only through your own paired local agent, when you grant it `browser.use`; and **the final Post click is always human**.
+- Run behind an HTTPS reverse proxy, or set `TLS_CERT` and `TLS_KEY` together for in-process HTTPS; enable `HSTS=1` only after TLS works. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 - Full threat model: [`SECURITY.md`](SECURITY.md). Agent protocol: [`docs/AGENT-PROTOCOL.md`](docs/AGENT-PROTOCOL.md).
 
 ## License

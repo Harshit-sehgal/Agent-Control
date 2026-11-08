@@ -1,5 +1,118 @@
 # Changelog
 
+## Unreleased
+
+Bots that work together, with settings you control.
+
+### Added
+- **Bot settings**: on/off, reply length, temperature, tone, chat memory,
+  summonable, hand-off and colour, validated by `shared/bot-settings.js` on both
+  transports and stored in SQLite (schema v7).
+- **Group settings**: routing mode (pipeline, lead only, everyone), pipeline
+  order, step limit up to 12, approve between steps, bot handoffs. Edit and
+  delete groups; remove bots.
+- **@mention any bot in any chat**, including summonable bots from other groups,
+  with the chat's recent messages as context. Composer mention suggestions.
+- **Bot-to-bot handoff**: a reply that @mentions a teammate extends the run,
+  revalidated by `handoffTargets` and bounded by the step limit.
+- **Scheduled bot tasks** (`bot-task` queue kind) that post into the chat.
+- **A primary bot that can keep a task on track.** Group settings choose
+  “I'll direct them” or “One bot keeps it on track” (X-engage starts on the
+  second). The primary bot plans only the bots the request needs, can wait
+  for Start, checks the result, and asks the owner once more if it is missing.
+  You still edit and post.
+- **Local browser control for any bot** (`browser.use`, opt-in): a bot asks
+  for a page in its reply, the chat shows an Approve/Decline card (or the bot
+  is set to run without asking), a paired local agent opens it, and the bot
+  continues with the result. Click and type on X are refused.
+- **Reset password from the sign-in screen.** Forgot password asks
+  `POST /api/auth/forgot`; the server still prints the one-time token in its
+  log. A second form submits that token to `POST /api/auth/reset`.
+- **Draft cards from a group run.** A bot with `draft.create` whose reply
+  names a captured post URL files that reply as a pending draft. A second
+  model call is not made.
+- **Home-feed read.** A tracked request to scroll or read the feed asks the
+  source bot to scroll and read `x.com/home` first. The other bots wait for
+  that page, and they do not run if it is refused or the bot lacks `browser.use`.
+- **Email relay.** With `EMAIL_RELAY_URL` set, the email channel POSTs
+  `{to, title, body, meta, at}` to that gateway (`EMAIL_RELAY_TOKEN` as a bearer
+  token when set). Operators point the URL at their own HTTPS gateway; this
+  repo still does not speak SMTP. An unset relay still fails the delivery
+  instead of marking the mail sent.
+
+### Fixed
+- A bot that asks for a page pauses that same run until the result is back. The
+  next bot no longer runs as if the page had arrived, and the result is not
+  queued as a new run (which 409'd while the first run was still going).
+- Saving one X-engage group setting no longer writes the "every bot" pipeline
+  over Scout → Ranker → Researcher → Writer → Reviewer.
+- A scheduled task posts its chat line only after the run queues, so a busy
+  group or a validation error is not logged as a run that started.
+- Duplicating the primary bot no longer leaves two primaries.
+- A home-feed capture that puts page text in `actions[].text` still counts as a real feed.
+- Restoring a backup interrupts in-flight group runs, so a missing browser-request card cannot 409 the group forever.
+- The Node build ignores leftover GitHub Pages demo runs in the chat list, thread, Runs panel, and Continue. Those leftovers used to paint Approve on a live server.
+- Continue reports the run's real status after the next step (a pause or done), not a fake `running`.
+- A send that comes back already paused at a checkpoint no longer claims the others are working.
+- Declining a page on a checkpointed run pauses before the next bot, instead of skipping the gate.
+- Grant browser access grants `browser.use` instead of only opening the profile editor, including on Pages.
+- A Pages scheduled task occupies the group while it runs, then frees it.
+- The Pages demo pauses for Approve between steps, same gate as Node, then continues from that bot. A paused run keeps its gate and input in the local log, and the Runs panel shows Approve next step.
+- A checkpoint in a one-to-one chat counts on that chat, not the group. The drafts pill no longer counts a paused run as a draft. Continue and Start follow the run's conversation. The group home lists paused runs on Runs, not Drafts. A waiting plan or page is listed there too.
+- A 1:1 browse result returns the agent POST before the follow-up model call, so the agent's 15s timeout does not abort it. The next bot turn gets the captured page (up to 3600 chars), not only the short chat summary.
+- Members can read Voice and timing; only an admin can save it. Viewers cannot send, create, approve drafts, share posts, or save group settings.
+- A structured contract is checked after browser fences are stripped, so a bot
+  that holds `browser.use` can still ask for a page.
+- Showing a tracked plan no longer switches bots on. Start does. Cancel leaves
+  them off. A plan or a checkpoint counts as a live run, so a second one waits.
+- Starting a shown feed plan files the home-feed read before any bot runs.
+- A restart no longer cancels a shown plan or a checkpoint.
+- The Pages demo refuses a second send while a plan is on screen or a group
+  run is still painting.
+- A Pages scheduled task waits when a plan is already on screen, and a nested
+  demo API call no longer starts a second scheduled run.
+- A Pages chat send occupies the group before it fetches state, so a due
+  scheduled task cannot cut in.
+- Browser fences at the end of a long reply are still filed; two pages in one
+  reply wait for both results before that bot continues.
+- An oversized run envelope is shrunk field-by-field so the model still
+  receives valid JSON.
+- A dispatched page that is holding a group run can be declined, the same as a
+  home-feed read already sent to the device.
+- Invited members can sign in with their email. Change password lives on You.
+- A summonable guest keeps its real name in a group chat.
+- Clearing a group chat also drops the run log, so a later stream cannot
+  refill it.
+- A 1:1 browse continues that bot instead of starting a group run.
+- Declining a page that is holding a run keeps following the thread.
+- Failed scheduled bot tasks can be retried from the chat.
+- A reply that is only a browser fence still pauses for approval instead of
+  becoming raw JSON the orchestrator never files. A long reply keeps a
+  trailing fence instead of slicing it off at 3000 characters.
+- Clearing a Pages chat (or removing its bot or group) cancels the local
+  run log that was blocking the group, and a refresh interrupts a leftover
+  `running` simulation. Cancel is on those stuck run cards. Clearing the
+  team chat also ends a busy run that lived on a bot DM of that group.
+- Clearing a chat denies waiting browser requests and cancels that
+  conversation's busy runs, so a later send is not stuck behind a 409.
+  Removing a bot or a group does the same for the work it was holding.
+- Pages Start puts the plan back if another run in that group is already
+  active, instead of leaving it queued with no Start button.
+- Delete my account is on You. Disable or Enable an account is on Team.
+- The invite form's temporary password matches the server (8 characters).
+- A tracked plan is Handoff's own chat; the X-engage group chat still runs
+  the pipeline unless you @mention one bot.
+- Operator docs match the running server: route table (not `WRITE_ROUTES`),
+  optional `TLS_CERT`/`TLS_KEY`, owner-only restore, `AI_TIMEOUT_MS` default
+  180s, `TRUST_PROXY`, `RESET_TOKEN_CONSOLE`, `browser.action` in the agent
+  protocol, and those knobs in `.env.example`.
+
+### Changed
+- A group without a pipeline now runs every switched-on bot (up to its step
+  limit) instead of the first three.
+- The "Approve between steps" gate is a server-side group setting, not a
+  per-browser toggle.
+
 ## 0.7.0
 
 Bring-your-own-key AI, permissioned local-agent actions, and a hardening pass.

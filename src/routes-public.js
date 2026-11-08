@@ -4,6 +4,9 @@
 import {activity, candidateInput} from '../shared/core.js';
 import * as wf from '../shared/workflow.js';
 import * as agent from './agent.js';
+import {onAgentTaskResult, continueBrowserWork} from './bot-browser.js';
+import {queueGroupRun, resumeFeedRun, resumeBrowserRun} from './coordination.js';
+import {runOneBot} from './routes-groups.js';
 import {sessionCookie, clearCookie, DEFAULT_WORKSPACE} from './auth.js';
 import {sha256} from './vault.js';
 import {fail, cookie, safeJson} from './http.js';
@@ -12,7 +15,7 @@ import {reply} from './router.js';
 const LOGIN_WINDOW_MS = 900000, LOGIN_ATTEMPTS = 8;
 
 export function publicRoutes(router, {auth, workspaces, version}) {
-  // Failed sign-ins per address. A record only matters while its window is
+  // Failed sign-ins per client IP. A record only matters while its window is
   // open, so lapsed ones are dropped and a long-lived process cannot grow it.
   const attempts = new Map();
   const pruneExpired = () => { const now = Date.now(); for (const [ip, r] of attempts) if (now > r.until) attempts.delete(ip); };
@@ -73,6 +76,8 @@ export function publicRoutes(router, {auth, workspaces, version}) {
     return {ok: true};
   });
   router.add('POST', '/api/auth/reset', 'public', async c => {
+    // Cheap to try many tokens locally; same per-IP budget as forgot/login.
+    attempt(`reset:${clientIp(c.req)}`, LOGIN_ATTEMPTS);
     const b = await c.body();
     auth.consumePasswordReset(b.token, b.password);
     return {ok: true};
@@ -86,8 +91,11 @@ export function publicRoutes(router, {auth, workspaces, version}) {
     const store = token ? workspaces.byCaptureToken(token) : null;
     if (!store) fail('Invalid extension token.', 401);
     const body = candidateInput(await c.body());
-    const result = await store.update(s => wf.addCandidate(s, body));
-    return reply(result.duplicate ? 200 : 201, result);
+    const add = async () => {
+      const result = await store.update(s => wf.addCandidate(s, body));
+      return reply(result.duplicate ? 200 : 201, result);
+    };
+    return store.trackWork ? store.trackWork(add) : add();
   });
 
   // Local-agent protocol. Pairing redeems a one-time code; the other routes
@@ -99,26 +107,51 @@ export function publicRoutes(router, {auth, workspaces, version}) {
     // A code that matches nothing is refused by the first workspace, with the
     // same answer a wrong code always got.
     const store = workspaces.holding('SELECT 1 AS x FROM pairing_codes WHERE code_hash=?', sha256(b.code)) || workspaces.get(DEFAULT_WORKSPACE);
-    const result = agent.redeemPairing(store, {code: b.code, name: b.name, permissions: b.permissions});
-    await store.update(s => { activity(s, 'agent', `Paired local agent "${String(b.name || 'Local agent').slice(0, 60)}".`, {agentId: result.agentId}); });
-    return reply(201, result);
+    const pair = async () => {
+      const result = agent.redeemPairing(store, {code: b.code, name: b.name, permissions: b.permissions});
+      await store.update(s => { activity(s, 'agent', `Paired local agent "${String(b.name || 'Local agent').slice(0, 60)}".`, {agentId: result.agentId}); });
+      return reply(201, result);
+    };
+    return store.trackWork ? store.trackWork(pair) : pair();
   });
   router.add('POST', '/api/agent/heartbeat', 'agent', async c => {
     const store = agentStore(c);
-    const device = agent.verifyAgentRequest(store, c.req.headers, 'POST', c.path, await c.raw());
-    agent.touchAgent(store, device.id);
-    const recovered = agent.recoverAgentTasks(store);
-    const tasks = agent.claimAgentTasks(store, device.id).map(t => ({id: t.id, kind: t.kind, payload: JSON.parse(t.payload), attempts: t.attempts}));
-    if (recovered) await store.update(s => { activity(s, 'agent', `Re-armed ${recovered} agent task(s) after a disconnect.`); });
-    return {ok: true, serverTime: new Date().toISOString(), agent: {id: device.id, name: device.name}, tasks};
+    const raw = await c.raw();
+    const heartbeat = async () => {
+      const device = agent.verifyAgentRequest(store, c.req.headers, 'POST', c.path, raw);
+      agent.touchAgent(store, device.id);
+      const nowMs = Date.now();
+      const staleBrowserTasks = store.all(
+        `SELECT id FROM agent_tasks WHERE kind='browser.action' AND status='running' AND (lease_until IS NULL OR lease_until<=?)`,
+        new Date(nowMs).toISOString(),
+      ).map(task => task.id);
+      const recovered = agent.recoverAgentTasks(store, nowMs);
+      for (const id of staleBrowserTasks) {
+        try { await onAgentTaskResult(store, id, {resumeFeed: resumeFeedRun, resumeBrowser: resumeBrowserRun}); }
+        catch (error) { console.error('Browser recovery:', error.message); }
+      }
+      const tasks = agent.claimAgentTasks(store, device.id).map(t => ({id: t.id, kind: t.kind, payload: JSON.parse(t.payload), attempts: t.attempts}));
+      if (recovered) await store.update(s => { activity(s, 'agent', `Re-armed ${recovered} agent task(s) after a disconnect.`); });
+      let permissions = [];
+      try { permissions = JSON.parse(device.permissions || '[]'); } catch { /* Stored JSON. */ }
+      return {ok: true, serverTime: new Date().toISOString(), agent: {id: device.id, name: device.name, permissions}, tasks};
+    };
+    return store.trackWork ? store.trackWork(heartbeat) : heartbeat();
   });
   router.add('POST', '/api/agent/tasks/:id/result', 'agent', async c => {
     const raw = await c.raw(), store = agentStore(c);
-    const device = agent.verifyAgentRequest(store, c.req.headers, 'POST', c.path, raw);
-    const b = safeJson(raw);
-    if (!b?.status) fail('A result status is required.', 400);
-    const result = agent.completeAgentTask(store, device.id, c.params.id, {status: b.status, result: b.result, error: b.error});
-    await store.update(s => activity(s, 'agent', `Agent task ${c.params.id} reported ${b.status}.`, {taskId: c.params.id}));
-    return result;
+    const report = async () => {
+      const device = agent.verifyAgentRequest(store, c.req.headers, 'POST', c.path, raw);
+      const b = safeJson(raw);
+      if (!b?.status) fail('A result status is required.', 400);
+      const result = agent.completeAgentTask(store, device.id, c.params.id, {status: b.status, result: b.result, error: b.error});
+      await store.update(s => activity(s, 'agent', `Agent task ${c.params.id} reported ${b.status}.`, {taskId: c.params.id}));
+      // A bot's browser request reports back into its chat. The agent's result is
+      // already recorded, so a failure here must not fail the agent's request.
+      try { await onAgentTaskResult(store, c.params.id, {continueRun: (s, spec) => continueBrowserWork(s, spec, {runBot: runOneBot, runGroup: queueGroupRun}), resumeFeed: resumeFeedRun, resumeBrowser: resumeBrowserRun}); }
+      catch (error) { console.error('Browser result:', error.message); }
+      return result;
+    };
+    return store.trackWork ? store.trackWork(report) : report();
   });
 }

@@ -211,7 +211,8 @@ async def quick_navigation(page, base):
     assert total >= 10, total
     # Filter, then Enter opens the highlighted result.
     await page.locator('#command-input').fill('Reviewer')
-    await expect(page.get_by_role('option', name='Reviewer')).to_be_visible()
+    # 'Reviewer · Scheduled tasks' also matches now, so the bot itself comes first.
+    await expect(page.get_by_role('option', name='Reviewer').first).to_be_visible()
     await page.keyboard.press('Enter')
     await expect(command).to_be_hidden()
     await expect(page.locator('.thread-title strong')).to_have_text('Reviewer')

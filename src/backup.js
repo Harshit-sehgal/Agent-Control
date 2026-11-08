@@ -1,10 +1,11 @@
-/** Encrypted-at-rest backup export/import.
+/** Workspace backup export/import.
  *
  * An export is a single JSON document containing the workflow state plus the
- * relational surfaces (users, sessions, agents, agent tasks, jobs,
- * notifications) so an operator can move or archive an installation. It
- * deliberately EXCLUDES credential ciphertext and session secrets: a restored
- * installation re-enters its credentials, and everyone signs in again.
+ * relational surfaces (users, agents, agent tasks, jobs, notifications) so an
+ * operator can move or archive an installation. The file itself is not
+ * encrypted — protect it like the database. It deliberately EXCLUDES
+ * credential ciphertext and session secrets: a restored installation
+ * re-enters its credentials, and everyone signs in again.
  *
  * Import refuses a live database unless `--force`/`{force:true}` is given,
  * because restoring blindly would drop the current workspace. The document is
@@ -14,8 +15,10 @@
 import crypto from 'node:crypto';
 import * as wf from '../shared/workflow.js';
 import {initialState, validHttpUrl} from '../shared/core.js';
-import {ROLES} from './auth.js';
+import {DEFAULT_WORKSPACE, ROLES} from './auth.js';
 import {readDocuments} from './sqlite-store.js';
+import {INTERRUPT_STATUSES} from '../shared/coordination.js';
+import {validWorkspaceId} from './workspaces.js';
 
 export const BACKUP_VERSION = 1;
 
@@ -29,18 +32,51 @@ const OPTIONAL_TABLES = ['chat_messages'];
 // different key, pairing codes are single-use, and a live session id is a
 // credential an attacker holding a backup must not obtain.
 const EXCLUDED_TABLES = ['credentials', 'pairing_codes', 'sessions', 'kv', 'schema_meta'];
+// Not a device credential. agents.secret_hash cannot be SQL NULL (the column
+// is NOT NULL), and a backup must still restore the agent row.
+const REDACTED_AGENT_HASH = 'redacted';
+
+/** Browser-request cards live in kv, which backups exclude. A restored
+ * awaiting_feed/browser run would 409 the group with no card to finish it. */
+function interruptRestoredRun(row) {
+  if (!row || typeof row !== 'object') return row;
+  let doc = null;
+  if (typeof row.doc === 'string' && row.doc) doc = JSON.parse(row.doc);
+  // `doc` is authoritative when present because readDocuments loads it instead
+  // of rebuilding status from the SQL columns. Keep both representations in
+  // sync before deciding whether the restored run is still live.
+  const status = typeof doc?.status === 'string' ? doc.status : row.status;
+  const next = {...row, status};
+  if (!INTERRUPT_STATUSES.includes(status)) {
+    if (doc && typeof row.doc === 'string') next.doc = JSON.stringify({...doc, status});
+    return next;
+  }
+  const feed = status === 'awaiting_feed', page = status === 'awaiting_browser';
+  const error = feed ? 'Restored from backup while waiting for the home feed. Ask again.' : page ? 'Restored from backup while waiting for a page. Ask again.' : 'Restored from backup before the run completed. Retry explicitly.';
+  next.status = 'interrupted';
+  next.error = error;
+  if (doc && typeof row.doc === 'string') next.doc = JSON.stringify({...doc, status: 'interrupted', error});
+  return next;
+}
 
 /** Build the export document from an open store. */
 export function exportBackup(store) {
   const tables = {};
   for (const name of [...EXPORT_TABLES, ...OPTIONAL_TABLES]) {
     try { tables[name] = store.all(`SELECT * FROM ${name}`); }
-    catch { /* Table absent in an older schema: exported as empty. */ tables[name] = []; }
+    catch (e) {
+      // An older schema may lack a table. Any other read failure must not
+      // become a valid backup of an empty table: restoring that would wipe
+      // the live rows.
+      if (!/no such table/i.test(String(e?.message || ''))) throw e;
+      tables[name] = [];
+    }
   }
   // Agent secret ciphertext is bound to this install's master key and would
-  // reconstitute usable device credentials if restored. The module's exclusion
-  // of secrets applies to it too, so blank those columns before checksumming.
-  tables.agents = (tables.agents || []).map(a => ({...a, secret_enc: null, secret_hash: null}));
+  // reconstitute usable device credentials if restored. Blank it before
+  // checksumming. secret_hash is NOT NULL, so SQL NULL would make any backup
+  // that contains an agent fail on restore; a placeholder is not a credential.
+  tables.agents = (tables.agents || []).map(a => ({...a, secret_enc: null, secret_hash: REDACTED_AGENT_HASH}));
   const checksum = crypto.createHash('sha256').update(JSON.stringify(tables)).digest('hex');
   return {
     backupVersion: BACKUP_VERSION,
@@ -53,7 +89,7 @@ export function exportBackup(store) {
 }
 
 /** Validate an untrusted backup document without writing anything. */
-export function validateBackup(document) {
+export function validateBackup(document, {primaryWorkspace = false} = {}) {
   if (!document || typeof document !== 'object') fail('Backup is not a JSON object.');
   if (document.backupVersion !== BACKUP_VERSION) fail(`Unsupported backup version ${String(document.backupVersion).slice(0, 20)}.`);
   if (!document.tables || typeof document.tables !== 'object') fail('Backup has no tables.');
@@ -63,6 +99,13 @@ export function validateBackup(document) {
   for (const name of OPTIONAL_TABLES) {
     if (document.tables[name] !== undefined && !Array.isArray(document.tables[name])) fail(`Backup table "${name}" is not a list.`);
   }
+  const workspaceIds = new Set();
+  for (const row of document.tables.workspaces) {
+    if (!row || !validWorkspaceId(row.id)) fail('Backup holds a workspace id that is not usable as a file name.');
+    if (workspaceIds.has(row.id)) fail('Backup holds duplicate workspace ids.');
+    workspaceIds.add(row.id);
+  }
+  if (primaryWorkspace && !workspaceIds.has(DEFAULT_WORKSPACE)) fail('Backup is missing the primary workspace.');
   // Recompute the checksum so a hand-edited or truncated file is rejected. A
   // missing checksum is itself a failure: otherwise stripping the field would
   // let a tampered file through.
@@ -71,7 +114,29 @@ export function validateBackup(document) {
   if (document.checksum !== actual) fail('Backup checksum does not match its contents. The file may be corrupt or edited.');
   // Roles are the known ones, and every link the UI will render is http(s):
   // the normal write paths enforce both, so a restore must not be a way round.
-  for (const m of document.tables.workspace_members) if (!ROLES.includes(m.role)) fail('Backup holds an unknown role.');
+  for (const m of document.tables.workspace_members) {
+    if (!m || !ROLES.includes(m.role)) fail('Backup holds an unknown role.');
+    if (workspaceIds.size && !workspaceIds.has(m.workspace_id)) fail('Backup membership references an unknown workspace.');
+  }
+  // The SQL reader parses these columns after commit. Reject malformed JSON
+  // and wrong shapes before import so a bad settings value cannot poison the
+  // workspace cache or make the next startup fail.
+  const jsonShape = (table, column, accepts, expected) => {
+    for (const row of document.tables[table]) {
+      const value = row?.[column];
+      if (value == null || value === '') continue;
+      let parsed;
+      try { if (typeof value !== 'string') throw new Error(); parsed = JSON.parse(value); }
+      catch { fail(`Backup row ${row?.id ?? '?'} in ${table} has invalid ${column} JSON.`); }
+      if (!accepts(parsed)) fail(`Backup row ${row?.id ?? '?'} in ${table} has invalid ${column} JSON (expected ${expected}).`);
+    }
+  };
+  const object = value => Boolean(value && typeof value === 'object' && !Array.isArray(value));
+  jsonShape('groups', 'settings', object, 'an object');
+  jsonShape('bots', 'settings', object, 'an object');
+  jsonShape('bots', 'contract', object, 'an object');
+  jsonShape('bots', 'permissions', Array.isArray, 'a list');
+  jsonShape('group_runs', 'doc', object, 'an object');
   const link = (value, where) => { if (value && !validHttpUrl(value)) fail(`Backup holds a link that is not http(s) in ${where}.`); };
   for (const e of document.tables.evidence) link(e.link, 'evidence');
   for (const name of ['candidates', 'drafts']) for (const row of document.tables[name]) {
@@ -85,8 +150,9 @@ export function validateBackup(document) {
 }
 
 /** Restore into an empty-ish database inside one transaction. */
-export function importBackup(store, document, {force = false} = {}) {
-  const {tables, state} = validateBackup(document);
+export function importBackup(store, document, {force = false, primaryWorkspace = false} = {}) {
+  const {tables, state} = validateBackup(document, {primaryWorkspace});
+  const restoredAt = new Date().toISOString();
   // A freshly seeded database already contains the built-in group rows, so
   // "populated" means real content, not the defaults every install ships with.
   const CONTENT_TABLES = ['users', 'candidates', 'drafts', 'tasks', 'events', 'runs', 'evidence', 'agents', 'agent_tasks', 'jobs', 'notifications', 'group_runs', 'group_messages'];
@@ -99,9 +165,35 @@ export function importBackup(store, document, {force = false} = {}) {
     // restore: a cookie for a user id that reappears in the backup would come
     // back live. Everyone signs in again after a restore.
     store.run('DELETE FROM sessions');
+    // Browser-request cards live in kv, which backups exclude. Drop ghosts
+    // from the live database so a restore cannot show Approve for a run that
+    // is no longer waiting.
+    try { store.run("DELETE FROM kv WHERE key = 'browser_requests'"); } catch { /* Older schema. */ }
+    // Pairing codes are excluded from backups. A pre-restore code must not
+    // remain usable after restored agents have been revoked.
+    store.run('DELETE FROM pairing_codes');
     for (const name of [...EXPORT_TABLES, ...OPTIONAL_TABLES]) {
       store.run(`DELETE FROM ${name}`);
-      const rows = tables[name] || [];
+      // Backups written before the placeholder stored SQL NULL in secret_hash,
+      // which the column rejects. Fill that in after the checksum check so an
+      // older file still validates, then restores.
+      let rows = tables[name] || [];
+      if (name === 'agents') rows = rows.map(row => ({
+        ...row,
+        secret_hash: row.secret_hash || REDACTED_AGENT_HASH,
+        secret_enc: null,
+        status: 'revoked',
+        revoked_at: row.revoked_at || restoredAt,
+      }));
+      if (name === 'agent_tasks') rows = rows.map(row => ['queued', 'running'].includes(row.status) ? {
+        ...row,
+        status: 'failed',
+        error: 'Local-agent credentials are not included in backups. Pair an agent again before queuing work.',
+        lease_until: null,
+        updated_at: restoredAt,
+        completed_at: restoredAt,
+      } : row);
+      if (name === 'group_runs') rows = rows.map(interruptRestoredRun);
       if (!rows.length) continue;
       // Column names go into the statement, so only the table's own are used.
       const known = new Set(store.all(`PRAGMA table_info(${name})`).map(c => c.name));
@@ -135,6 +227,7 @@ export function tablesToState(tables) {
   s.settings = tables.settings?.length ? {
     topics: JSON.parse(tables.settings[0].topics || '[]'), style: tables.settings[0].style, opinions: tables.settings[0].opinions,
     minDelay: tables.settings[0].min_delay, maxDelay: tables.settings[0].max_delay,
+    ...(tables.settings[0].retention ? {retention: JSON.parse(tables.settings[0].retention)} : {}),
   } : s.settings;
   s.groups = (tables.groups || []).map(g => ({...g, bots: (tables.bots || []).filter(b => b.group_id === g.id).map(b => ({...b}))}));
   Object.assign(s, readDocuments(name => tables[name] || []));

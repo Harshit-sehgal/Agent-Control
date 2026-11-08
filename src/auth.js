@@ -69,8 +69,7 @@ export class Auth {
     // account, after the same amount of work, so sign-in cannot be used to
     // find out which addresses have accounts.
     const refused = {ok: false, error: 'Incorrect email or password.', status: 401};
-    if (!verifyPassword(password, row ? row.password_hash : DUMMY_HASH) || !row) return refused;
-    if (row.disabled_at) return {ok: false, error: 'Account disabled.', status: 403};
+    if (!verifyPassword(password, row ? row.password_hash : DUMMY_HASH) || !row || row.disabled_at) return refused;
     const workspaceId = this.homeWorkspace(row.id);
     if (!workspaceId) return {ok: false, error: 'This account is not in any workspace. Ask an admin to add you.', status: 403};
     // The cookie holds the id; the table holds only its hash, so neither the

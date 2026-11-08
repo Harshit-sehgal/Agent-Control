@@ -22,8 +22,9 @@ export function buildEvidence(body = {}) {
   const kind = EVIDENCE_KINDS.includes(body.kind) ? body.kind : fail('Evidence kind must be link, quote or claim.');
   const claim = cleanText(body.claim, 600);
   if (!claim) fail('Describe the claim this evidence supports.', 400);
-  if (body.link !== undefined && body.link !== null && String(body.link).trim() !== '' && !validHttpUrl(String(body.link))) fail('Evidence link must be a valid public http(s) URL.', 400);
-  if (kind === 'link' && !body.link) fail('Link evidence needs the URL it points at.', 400);
+  const linkText = body.link === undefined || body.link === null ? '' : String(body.link).trim();
+  if (linkText && !validHttpUrl(linkText)) fail('Evidence link must be a valid public http(s) URL.', 400);
+  if (kind === 'link' && !validHttpUrl(linkText)) fail('Link evidence needs the URL it points at.', 400);
   const confidence = Number(body.confidence);
   if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) fail('Confidence must be a number between 0 and 1.', 400);
   const verification = body.verification === undefined ? 'unverified' : body.verification;
@@ -32,11 +33,16 @@ export function buildEvidence(body = {}) {
   if (!REUSE_POLICIES.includes(reuse)) fail(`Reuse must be one of: ${REUSE_POLICIES.join(', ')}.`, 400);
   return {
     id: crypto.randomUUID(), kind,
-    link: body.link ? validHttpUrl(String(body.link)) : null,
+    link: linkText ? validHttpUrl(linkText) : null,
     claim, confidence: Math.round(confidence * 100) / 100, verification, reuse,
     note: cleanText(body.note, 300), draftId: body.draftId || null, candidateId: body.candidateId || null,
     createdBy: body.createdBy || null, createdAt: new Date().toISOString(),
   };
+}
+
+/** Own rows, plus candidate-level rows that are not tied to some other draft. */
+function itemsFor(state, draft) {
+  return state.evidence.filter(e => e.draftId === draft.id || (!e.draftId && draft.candidateId && e.candidateId === draft.candidateId));
 }
 
 /** The evidence a draft is allowed to rely on: its own items plus the evidence
@@ -44,7 +50,7 @@ export function buildEvidence(body = {}) {
 export function evidenceForDraft(state, draftId) {
   const draft = state.drafts.find(d => d.id === draftId);
   if (!draft) fail('Draft not found.', 404);
-  return state.evidence.filter(e => e.draftId === draftId || (draft.candidateId && e.candidateId === draft.candidateId));
+  return itemsFor(state, draft);
 }
 
 /** Summary the UI and the approval gate read: whether anything disputed or
@@ -85,18 +91,24 @@ export function removeEvidence(state, id) {
 function refreshSummaries(state, changed) {
   const affected = new Set();
   for (const draft of state.drafts) {
-    const items = state.evidence.filter(e => e.draftId === draft.id || e.candidateId === draft.candidateId);
+    const items = itemsFor(state, draft);
     const summary = evidenceSummary(items);
     draft.evidence = summary;
-    if (changed && (changed.draftId === draft.id || (changed.candidateId && changed.candidateId === draft.candidateId))) affected.add(draft.id);
+    if (changed && (changed.draftId === draft.id || (!changed.draftId && changed.candidateId && changed.candidateId === draft.candidateId))) affected.add(draft.id);
   }
   return affected;
 }
 
 export function addEvidence(state, body = {}) {
   const item = buildEvidence(body);
-  if (item.draftId && !state.drafts.some(d => d.id === item.draftId)) fail('Draft not found.', 404);
-  if (item.candidateId && !state.candidates.some(c => c.id === item.candidateId)) fail('Candidate not found.', 404);
+  if (item.draftId) {
+    const draft = state.drafts.find(d => d.id === item.draftId);
+    if (!draft) fail('Draft not found.', 404);
+    // A draft attachment stays on that draft. Copying the candidate id onto it
+    // made the same row show up on every other reply to that post.
+    if (item.candidateId && item.candidateId !== draft.candidateId) fail('That evidence belongs to a different draft.', 400);
+    item.candidateId = null;
+  } else if (item.candidateId && !state.candidates.some(c => c.id === item.candidateId)) fail('Candidate not found.', 404);
   if (!item.draftId && !item.candidateId) fail('Attach evidence to a draft or a candidate.', 400);
   state.evidence.unshift(item);
   refreshSummaries(state, item);

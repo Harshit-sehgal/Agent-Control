@@ -169,3 +169,86 @@ test('reminder tasks fire as activity events, mirroring the old scheduler behavi
   assert.ok(state.events.some(e => e.type === 'reminder' && e.message === 'Check the queue'));
   await fs.rm(dir, {recursive: true, force: true});
 });
+
+test('a sweep runs a task whose lease expired and does not write for a live lease', async () => {
+  const {store, dir} = await harness();
+  const calls = [];
+  const queue = createQueue(store, {echo: async task => { calls.push(task.title); return {ok: true}; }}, {intervalMs: 60000});
+  await store.update(s => {
+    const t = rawTask(s, {kind: 'echo', title: 'Expired'});
+    t.status = 'running';
+    t.attempts = 1;
+    t.leaseOwner = 'worker-dead';
+    t.leaseUntil = new Date(Date.now() - 1000).toISOString();
+  });
+  await queue.sweep();
+  assert.deepEqual(calls, ['Expired']);
+  assert.equal(store.read().tasks.find(t => t.title === 'Expired').status, 'done');
+
+  await store.update(s => {
+    const live = rawTask(s, {kind: 'echo', title: 'Live'});
+    live.status = 'running';
+    live.leaseOwner = 'worker-live';
+    live.leaseUntil = new Date(Date.now() + 60000).toISOString();
+    rawTask(s, {kind: 'echo', title: 'Future', runAt: new Date(Date.now() + 3_600_000).toISOString()});
+  });
+  let writes = 0;
+  const update = store.update.bind(store);
+  store.update = async fn => { writes += 1; return update(fn); };
+  await queue.sweep();
+  assert.equal(writes, 0, 'An idle sweep must not rewrite the database.');
+  assert.deepEqual(calls, ['Expired']);
+  assert.equal(store.read().tasks.find(t => t.title === 'Live').status, 'running');
+  assert.equal(store.read().tasks.find(t => t.title === 'Future').status, 'queued');
+  await fs.rm(dir, {recursive: true, force: true});
+});
+
+test('a busy 409 keeps retrying with backoff after the attempt budget', async () => {
+  const {store, dir} = await harness();
+  const notices = [];
+  const queue = createQueue(store, {
+    busy: async () => { throw Object.assign(new Error('A group run is already active.'), {status: 409}); },
+  }, {intervalMs: 60000, onFail: (_task, error) => { notices.push(error.message); }});
+  const task = await store.update(s => rawTask(s, {kind: 'busy', title: 'Busy', maxAttempts: 1}));
+  await queue.sweep();
+  let after = store.read().tasks.find(t => t.id === task.id);
+  assert.equal(after.status, 'queued');
+  assert.equal(after.attempts, 1);
+  assert.equal(after.lastError, 'A group run is already active.');
+  assert.ok(Date.parse(after.runAt) > Date.now(), 'The conflict waits on backoff.');
+  assert.equal(notices.length, 0, 'A busy conflict is not announced as a terminal failure.');
+  await queue.sweep();
+  assert.equal(store.read().tasks.find(t => t.id === task.id).attempts, 1);
+  await store.update(s => { s.tasks.find(t => t.id === task.id).runAt = new Date(Date.now() - 1000).toISOString(); });
+  await queue.sweep();
+  after = store.read().tasks.find(t => t.id === task.id);
+  assert.equal(after.status, 'queued');
+  assert.equal(after.attempts, 2);
+  assert.ok(Date.parse(after.runAt) > Date.now());
+  assert.equal(notices.length, 0);
+  // A different 409 is permanent once the budget is spent.
+  await store.update(s => { s.tasks.find(t => t.id === task.id).runAt = new Date(Date.now() + 3_600_000).toISOString(); });
+  const other = await store.update(s => rawTask(s, {kind: 'busy', title: 'Off', maxAttempts: 1, runAt: new Date(Date.now() - 1000).toISOString()}));
+  const queue2 = createQueue(store, {
+    busy: async () => { throw Object.assign(new Error('No bot in this group is switched on.'), {status: 409}); },
+  }, {intervalMs: 60000, onFail: (_task, error) => { notices.push(error.message); }});
+  await queue2.sweep();
+  const off = store.read().tasks.find(t => t.id === other.id);
+  assert.equal(off.status, 'failed');
+  assert.equal(notices.length, 1);
+  await fs.rm(dir, {recursive: true, force: true});
+});
+
+test('a permanent miss fails on the first attempt instead of re-arming', async () => {
+  const {store, dir} = await harness();
+  const queue = createQueue(store, {
+    gone: async () => { throw Object.assign(new Error('That bot or group no longer exists.'), {status: 404, permanent: true}); },
+  }, {intervalMs: 60000});
+  const task = await store.update(s => rawTask(s, {kind: 'gone', title: 'Gone', maxAttempts: 5, intervalMinutes: 30}));
+  await queue.sweep();
+  const after = store.read().tasks.find(t => t.id === task.id);
+  assert.equal(after.status, 'failed');
+  assert.equal(after.attempts, 1);
+  assert.match(after.lastError, /no longer exists/);
+  await fs.rm(dir, {recursive: true, force: true});
+});

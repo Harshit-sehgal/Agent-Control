@@ -92,3 +92,17 @@ test('evidence items are separate from conversation text and never quoted as ver
   assert.equal(evidence.evidenceSummary(evidence.evidenceForDraft(s, draft.id)).reuseBlocked, 1);
   assert.equal(evidence.evidenceForDraft(s, draft.id).find(e => e.reuse === 'none').verification, 'unverified', 'High confidence never means verified.');
 });
+
+test('evidence stays on the draft it was attached to', () => {
+  const s = store();
+  const draft = draftFor(s);
+  const other = draftFor(s, 'https://x.com/b/status/2', 'Another post long enough to become a candidate.');
+  s.drafts.push({id: 'sibling', candidateId: draft.candidateId, status: 'pending', text: 'Second reply', revision: 1});
+  const item = evidence.addEvidence(s, {draftId: draft.id, candidateId: draft.candidateId, kind: 'claim', claim: 'Only the first reply uses this source.', confidence: 0.4, verification: 'disputed'});
+  assert.equal(item.candidateId, null, 'A draft attachment is not also tagged as candidate-wide.');
+  assert.equal(evidence.evidenceForDraft(s, draft.id).some(e => e.id === item.id), true);
+  assert.equal(evidence.evidenceForDraft(s, 'sibling').some(e => e.id === item.id), false);
+  assert.equal(s.drafts.find(d => d.id === 'sibling').evidence.disputed, 0);
+  assert.throws(() => evidence.addEvidence(s, {draftId: draft.id, candidateId: other.candidateId, kind: 'claim', claim: 'This belongs on the other post.', confidence: 0.2}), /different draft/);
+  assert.throws(() => evidence.addEvidence(s, {draftId: draft.id, kind: 'link', link: '   ', claim: 'A blank link is not a source.', confidence: 0.2}), /needs the URL/);
+});

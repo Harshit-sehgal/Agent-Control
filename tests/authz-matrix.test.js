@@ -69,14 +69,19 @@ test('the authorization matrix gates every write by role and origin', {timeout: 
       assert.equal((await call(m, u, {body})).status, 401, `anonymous ${m} ${u} must be 401`);
     }
 
-    // Viewer: can read, cannot mutate anything.
+    // Viewer: can read (and mark their own notifications), cannot mutate workspace content.
     assert.equal((await call('GET', '/api/state', {cookie: viewer})).status, 200);
     assert.equal((await call('POST', '/api/candidates', {cookie: viewer, body: candidate})).status, 403);
     assert.equal((await call('PATCH', '/api/settings', {cookie: viewer, body: settings})).status, 403);
     assert.equal((await call('POST', '/api/users', {cookie: viewer, body: {email: 'v@x.test', password: 'long-enough-pass', role: 'member'}})).status, 403);
+    assert.equal((await call('POST', '/api/groups/x-engage/chat', {cookie: viewer, body: {message: 'hi'}})).status, 403);
+    assert.equal((await call('POST', '/api/notifications/read', {cookie: viewer, body: {ids: []}})).status, 200);
 
     // Member: may write content, may not touch admin surfaces.
     assert.equal((await call('POST', '/api/candidates', {cookie: member, body: candidate})).status, 201);
+    const memberChat = await call('POST', '/api/groups/x-engage/chat', {cookie: member, body: {message: 'please look this over'}});
+    assert.notEqual(memberChat.status, 403);
+    assert.ok([202, 422].includes(memberChat.status), `member group chat got ${memberChat.status}`);
     assert.equal((await call('PATCH', '/api/settings', {cookie: member, body: settings})).status, 403);
     assert.equal((await call('POST', '/api/users', {cookie: member, body: {email: 'm@x.test', password: 'long-enough-pass', role: 'member'}})).status, 403);
 

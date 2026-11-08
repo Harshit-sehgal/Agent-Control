@@ -5,13 +5,15 @@
  * provider metadata and the model list a provider reports.
  */
 import {reply} from './router.js';
-import {listProviders, addProvider, deleteProvider, setDefaults, setBotModel, modelsForProvider} from './ai-providers.js';
+import {listProviders, publicAi, addProvider, deleteProvider, setDefaults, setBotModel, modelsForProvider} from './ai-providers.js';
 
 export function aiRoutes(router) {
-  router.add('GET', '/api/ai', 'viewer', c => listProviders(c.store.read()));
+  // Viewers need provider labels and hosts for bot settings. Keep the configured
+  // endpoint path in admin responses only, where a custom URL may itself hold a secret.
+  router.add('GET', '/api/ai', 'viewer', c => publicAi(c.store.read()));
   router.add('POST', '/api/ai/providers', 'admin', async c => {
     const b = await c.body();
-    return reply(201, addProvider(c.store, c.actor.workspaceId, {...b, createdBy: c.actor.email}));
+    return reply(201, await addProvider(c.store, c.actor.workspaceId, {...b, createdBy: c.actor.email}));
   });
   router.add('DELETE', '/api/ai/providers/:id', 'admin', c => deleteProvider(c.store, c.actor.workspaceId, c.params.id));
   // Fetch the provider's own model list so the picker reflects reality.

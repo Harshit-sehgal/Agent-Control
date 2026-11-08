@@ -25,6 +25,7 @@ Thumbs.db
 # Local agent tooling
 .freebuff/
 .claude/settings.local.json
+.playwright-mcp/
 
 # Generated UI screenshots
 ui-*.png

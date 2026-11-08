@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {migrate,updateSettings,addCandidate,seedDemo,beginProcessing,finishProcessing,failProcessing,editDraft,draftAction,addGroup,addBot,updateBot,recoverInterrupted,addSchedule,removeSchedule,resetDemo,findDraft,findCandidate,SCHEMA_VERSION} from '../shared/workflow.js';
+import http from 'node:http';
+import {migrate,updateSettings,addCandidate,seedDemo,beginProcessing,finishProcessing,failProcessing,editDraft,draftAction,addGroup,addBot,updateBot,removeBot,removeGroup,recoverInterrupted,addSchedule,removeSchedule,resetDemo,findDraft,findCandidate,attachRunDraft,SCHEMA_VERSION} from '../shared/workflow.js';
+import {enqueueTask, completeTask, failTask} from '../shared/tasks.js';
 import {initialState} from '../shared/core.js';
+import {createRouter} from '../src/router.js';
+import {workflowRoutes} from '../src/routes-workflow.js';
 
 const store = () => migrate(initialState());
 
@@ -178,6 +182,27 @@ test('bot profile edits persist through the shared workflow rules', () => {
   assert.throws(() => updateBot(s, g.id, bot.id, {name: '  ', instructions: 'y'}), /required/);
 });
 
+test('a group-run reply becomes a pending draft only for a captured post the bot may draft', () => {
+  const s = store();
+  const url = 'https://x.com/ada/status/9';
+  addCandidate(s, {url: 'https://x.com/ada', text: 'Short profile link is long enough.', author: 'Ada'});
+  const candidate = addCandidate(s, {url, text: 'Rockets slipped a day and the window moved.', author: 'Ada'}).candidate;
+  const reply = 'The pad timeline slipped by a day. I would wait for the next window before calling it a delay.';
+  const writer = {id: 'writer', type: 'writing', name: 'Writer'};
+  assert.equal(attachRunDraft(s, {bot: writer, output: reply, sources: `please reply to ${url}`}).url, url);
+  assert.equal(attachRunDraft(s, {bot: writer, output: reply, sources: `please reply to ${url}`})?.text, undefined);
+  assert.equal(s.drafts[0].status, 'pending');
+  assert.equal(s.drafts[0].text, reply);
+  assert.equal(s.drafts[0].candidateId, candidate.id);
+  assert.equal(attachRunDraft(s, {bot: writer, output: reply, sources: url}), null, 'A post that already has a draft is left alone.');
+  const other = store();
+  addCandidate(other, {url, text: 'Rockets slipped a day and the window moved.', author: 'Ada'});
+  assert.equal(attachRunDraft(other, {bot: {type: 'writing', permissions: []}, output: reply, sources: url}), null);
+  assert.equal(attachRunDraft(other, {bot: writer, output: 'No draft.', sources: url}), null);
+  assert.equal(attachRunDraft(other, {bot: writer, output: reply, sources: 'no link here'}), null);
+  assert.equal(other.drafts.length, 0);
+});
+
 test('candidates stranded in processing by a crash become processable again', () => {
   const s = store();
   const c = addCandidate(s, {url: 'https://x.com/a/status/7', text: 'A candidate interrupted mid-draft'}).candidate;
@@ -190,4 +215,88 @@ test('candidates stranded in processing by a crash become processable again', ()
   assert.doesNotThrow(() => beginProcessing(s, c.id));
   // Idempotent: a pass over clean state releases nothing.
   assert.deepEqual(recoverInterrupted({...s, candidates: [{status: 'new'}]}), {recovered: 0});
+});
+
+test('removing a bot cancels an in-flight scheduled task so completion cannot re-arm it', () => {
+  const s = store();
+  const g = s.groups[0];
+  const task = enqueueTask(s, {kind: 'bot-task', payload: {groupId: g.id, botId: 'scout', message: 'daily', kind: 'interval', intervalMinutes: 60}}).task;
+  const kept = enqueueTask(s, {kind: 'bot-task', payload: {groupId: g.id, botId: 'writer', message: 'weekly', kind: 'interval', intervalMinutes: 60}}).task;
+  task.status = 'running';
+  kept.status = 'running';
+  const runAt = task.runAt;
+  removeBot(s, g.id, 'scout');
+  assert.equal(task.status, 'cancelled');
+  assert.equal(kept.status, 'running');
+  completeTask(s, task.id, {ok: true});
+  failTask(s, task.id, 'A group run is already active.');
+  assert.equal(task.status, 'cancelled');
+  assert.equal(task.runAt, runAt);
+});
+
+test('removing a bot denies its waiting pages and cancels busy runs it was holding', () => {
+  const s = store();
+  s.browserRequests = [
+    {id: 'own', botId: 'scout', chatKey: 'scout', status: 'pending'},
+    {id: 'team', botId: 'scout', chatKey: 'team-x-engage', runId: 'g1', status: 'pending'},
+    {id: 'keep', botId: 'writer', chatKey: 'writer', status: 'pending'},
+  ];
+  s.groupRuns = [
+    {id: 'own', chatKey: 'scout', groupId: 'x-engage', status: 'awaiting_browser'},
+    {id: 'g1', chatKey: 'team-x-engage', groupId: 'x-engage', status: 'awaiting_browser'},
+    {id: 'keep', chatKey: 'writer', groupId: 'x-engage', status: 'awaiting_plan'},
+  ];
+  removeBot(s, 'x-engage', 'scout');
+  assert.equal(s.browserRequests.find(r => r.id === 'own').status, 'denied');
+  assert.equal(s.browserRequests.find(r => r.id === 'team').status, 'denied');
+  assert.equal(s.browserRequests.find(r => r.id === 'keep').status, 'pending');
+  assert.equal(s.groupRuns.find(r => r.id === 'own').status, 'cancelled');
+  assert.equal(s.groupRuns.find(r => r.id === 'g1').status, 'cancelled');
+  assert.equal(s.groupRuns.find(r => r.id === 'keep').status, 'awaiting_plan');
+});
+
+test('removing a group cancels that group\'s busy runs', () => {
+  const s = store();
+  const g = addGroup(s, {name: 'Temp', description: ''});
+  addBot(s, g.id, {name: 'A', instructions: 'Do the thing that a specialist bot does here.'});
+  s.groupRuns = [{id: 'r', groupId: g.id, chatKey: `team-${g.id}`, status: 'awaiting_plan'}];
+  s.browserRequests = [{id: 'p', groupId: g.id, chatKey: `team-${g.id}`, status: 'pending'}];
+  removeGroup(s, g.id);
+  assert.equal(s.groupRuns[0].status, 'cancelled');
+  assert.equal(s.browserRequests[0].status, 'denied');
+});
+
+test('rewrite drops the previous approval, and a provider failure leaves it', async () => {
+  const s = store();
+  const c = addCandidate(s, {url: 'https://x.com/a/status/9', text: 'A candidate long enough to rewrite after approval'}).candidate;
+  const draft = finishProcessing(s, c.id, {score: 40}, {text: 'Approved copy', mode: 'template', note: 'n'});
+  draftAction(s, draft.id, 'approve', {minDelay: 0, maxDelay: 0});
+  assert.ok(draft.approvedEvidence?.length);
+  const router = createRouter();
+  workflowRoutes(router, {auth: {listWorkspaces: () => [], roleOf: () => 'owner'}, processCandidate: async () => {}});
+  const handler = router.find('POST', `/api/drafts/${draft.id}/rewrite`).route.handler;
+  const ctx = body => ({params: {id: draft.id}, body: async () => body, store: {read: () => s, update: async fn => fn(s)}, actor: {email: 'a@b.c', workspaceId: 'default'}});
+  const saved = ['AI_API_KEY', 'OPENAI_API_KEY', 'AI_BASE_URL', 'OPENAI_BASE_URL', 'AI_API_STYLE', 'AI_MODEL'].map(k => [k, process.env[k]]);
+  const setEnv = values => { for (const [k, v] of Object.entries(values)) { if (v) process.env[k] = v; else delete process.env[k]; } };
+  const restore = () => { for (const [k, v] of saved) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } };
+  const down = http.createServer((req, res) => { req.resume(); res.writeHead(500, {'Content-Type': 'application/json'}); res.end(JSON.stringify({error: {message: 'boom'}})); });
+  await new Promise(r => down.listen(0, '127.0.0.1', r));
+  try {
+    setEnv({AI_BASE_URL: `http://127.0.0.1:${down.address().port}/v1`, AI_API_KEY: 'sk-test-secret', AI_API_STYLE: 'chat', AI_MODEL: 'auto', OPENAI_API_KEY: '', OPENAI_BASE_URL: ''});
+    await assert.rejects(() => handler(ctx({direction: 'shorter'})), /500/);
+    assert.equal(draft.status, 'scheduled');
+    assert.equal(draft.approvedText, 'Approved copy');
+    assert.ok(draft.approvedEvidence?.length);
+    setEnv({AI_API_KEY: '', OPENAI_API_KEY: '', AI_BASE_URL: '', OPENAI_BASE_URL: '', AI_API_STYLE: '', AI_MODEL: ''});
+    const rewritten = await handler(ctx({direction: 'shorter'}));
+    assert.equal(rewritten.status, 'pending');
+    assert.equal(rewritten.revision, 2);
+    assert.equal(rewritten.approvedText, undefined);
+    assert.equal(rewritten.approvedRevision, undefined);
+    assert.equal(rewritten.approvedEvidence, undefined);
+    assert.equal(rewritten.dueAt, undefined);
+  } finally {
+    restore();
+    await new Promise(r => down.close(r));
+  }
 });

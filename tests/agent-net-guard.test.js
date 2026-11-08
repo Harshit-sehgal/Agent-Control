@@ -17,6 +17,29 @@ test('addresses that tunnel a private IPv4 or sit in reserved ranges are recogni
   for (const a of ['2002:0808:0808::', '64:ff9b::808:808']) assert.equal(isPrivateAddress(a), false, a);
 });
 
+test('equivalent IPv6 spellings and local tunnels are refused, public mappings are not', async () => {
+  for (const a of [
+    // Same address as ::ffff:127.0.0.1 / ::ffff:169.254.169.254. The expanded form connects to that IPv4.
+    '0:0:0:0:0:ffff:7f00:1', '0000:0000:0000:0000:0000:ffff:7f00:0001', '0:0:0:0:0:ffff:127.0.0.1', '0:0:0:0:0:ffff:a9fe:a9fe',
+    // Leading zeros must not skip the NAT64 decode (10.0.0.1 and 127.0.0.1).
+    '0064:ff9b::a00:1', '0064:ff9b::7f00:1',
+    // IPv4-compatible spelling of a private address, and link-local multicast.
+    '::10.0.0.1', '::a00:1', 'ff02::1', 'fec0::1', 'fe80::1%eth0',
+    // Local-use NAT64 (64:ff9b:1::/48) is not global. The second address embeds metadata while its last 32 bits look public.
+    '64:ff9b:1::808:808', '64:ff9b:1:a9fe:a9:fe00:808:808',
+    // Teredo client 10.0.0.1 and 192.0.2.45, plus documentation and benchmark ranges.
+    '2001:0:4136:e378:8000:63bf:f5ff:fffe', '2001:0:4136:e378:8000:63bf:3fff:fdd2', '2001:db8::1', '2001:2::1',
+  ]) assert.equal(isPrivateAddress(a), true, a);
+  // A public IPv4 written as mapped IPv6 stays reachable. Teredo to 8.8.8.8 does too.
+  for (const a of ['::ffff:808:808', '::808:808', '2001:0:4136:e378:8000:63bf:f7f7:f7f7']) assert.equal(isPrivateAddress(a), false, a);
+  const opts = {lookup: async () => [{address: '1.1.1.1'}], allowPrivate: false};
+  await assertPublicUrl('http://[::ffff:8.8.8.8]/', opts);
+  for (const url of [
+    'http://[0:0:0:0:0:ffff:7f00:1]/', 'http://[::10.0.0.1]/', 'http://[ff02::1]/',
+    'http://[64:ff9b:1:a9fe:a9:fe00:808:808]/', 'http://[2001:0:4136:e378:8000:63bf:f5ff:fffe]/', 'http://[2001:db8::1]/',
+  ]) await assert.rejects(() => assertPublicUrl(url, opts), /private or local network/, url);
+});
+
 test('a check is refused when the host is, or resolves to, a private address', async () => {
   const lookup = async host => ({'public.test': [{address: '93.184.216.34'}], 'inside.test': [{address: '10.0.0.5'}], 'mixed.test': [{address: '93.184.216.34'}, {address: '127.0.0.1'}], 'empty.test': []})[host];
   const opts = {lookup, allowPrivate: false};

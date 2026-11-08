@@ -75,6 +75,58 @@ test('without a provider, drafting falls back to a clearly labeled template',asy
   });
 });
 
+test('chat content arrays are the reply, and a non-text payload is not a draft',async()=>{
+  const parts=await stub({status:200,json:{choices:[{message:{content:[{type:'text',text:'Real reply'}]}}]}});
+  try{
+    const out=await withEnv({AI_BASE_URL:`http://127.0.0.1:${parts.port}/v1`,AI_API_KEY:'k',AI_API_STYLE:'chat',AI_MODEL:'auto'},()=>makeDraft(candidate,settings));
+    assert.equal(out.mode,'ai');
+    assert.equal(out.text,'Real reply');
+  }finally{parts.close();}
+  const image=await stub({status:200,json:{choices:[{message:{content:[{type:'image'}]}}]}});
+  try{
+    await withEnv({AI_BASE_URL:`http://127.0.0.1:${image.port}/v1`,AI_API_KEY:'k',AI_API_STYLE:'chat',AI_MODEL:'auto'},async()=>{
+      await assert.rejects(makeDraft(candidate,settings),/empty response/);
+    });
+  }finally{image.close();}
+});
+
+test('a provider error that echoes the key does not return the key',async()=>{
+  const {port,close}=await stub({status:401,json:{error:{message:'bad key sk-test-secret'}}});
+  try{
+    await withEnv({AI_BASE_URL:`http://127.0.0.1:${port}/v1`,AI_API_KEY:'sk-test-secret',AI_API_STYLE:'chat',AI_MODEL:'auto'},async()=>{
+      await assert.rejects(makeDraft(candidate,settings),e=>{
+        assert.match(e.message,/401/);
+        assert.equal(e.message.includes('sk-test-secret'),false);
+        return true;
+      });
+    });
+  }finally{close();}
+});
+
+test('a long reply still keeps a trailing browser fence instead of slicing it off',async()=>{
+  const block='```browser\n{"url":"https://example.com/docs"}\n```';
+  const {port,close}=await stub({status:200,json:{choices:[{message:{content:`Note.\n${'x'.repeat(4000)}\n${block}`}}]}});
+  try{
+    const out=await withEnv({AI_BASE_URL:`http://127.0.0.1:${port}/v1`,AI_API_KEY:'k',AI_API_STYLE:'chat',AI_MODEL:'m'},()=>executeCustomBot({instructions:'Look it up',permissions:['browser.use']},'fetch docs'));
+    assert.match(out,/```browser/);
+    assert.ok(out.length>3000);
+  }finally{close();}
+});
+
+test('a reply that is only a browser fence keeps those fences, and a markdown-wrapped draft still loses its wrapper',async()=>{
+  const block='```browser\n{"url":"https://example.com/docs"}\n```';
+  const page=await stub({status:200,json:{choices:[{message:{content:block}}]}});
+  try{
+    const out=await withEnv({AI_BASE_URL:`http://127.0.0.1:${page.port}/v1`,AI_API_KEY:'k',AI_API_STYLE:'chat',AI_MODEL:'m'},()=>executeCustomBot({instructions:'Look it up',permissions:['browser.use']},'fetch docs'));
+    assert.match(out,/```browser/);
+  }finally{page.close();}
+  const wrapped=await stub({status:200,json:{choices:[{message:{content:'```\nA concise reply.\n```'}}]}});
+  try{
+    const out=await withEnv({AI_BASE_URL:`http://127.0.0.1:${wrapped.port}/v1`,AI_API_KEY:'k',AI_API_STYLE:'chat',AI_MODEL:'m'},()=>executeCustomBot({instructions:'Write'},'hi'));
+    assert.equal(out,'A concise reply.');
+  }finally{wrapped.close();}
+});
+
 test('custom bots run through the same configured provider',async()=>{
   const {requests,port,close}=await stub({status:200,json:{choices:[{message:{content:'Bot answer'}}]}});
   try{
@@ -102,4 +154,26 @@ test('a provider failure is reported as a gateway error the API can show, not a 
       await assert.rejects(()=>executeCustomBot({name:'B',instructions:'Summarise.'},'hello'),e=>e.status===502&&/empty response/.test(e.message));
     });
   }finally{empty.close();}
+});
+
+test('a leftover think closer does not drop a browser fence',async()=>{
+  const {port,close}=await stub({status:200,json:{choices:[{message:{content:'```browser\n{"url":"https://example.com"}\n```\n</think>'}}]}});
+  try{
+    const out=await withEnv({AI_BASE_URL:`http://127.0.0.1:${port}/v1`,AI_API_KEY:'test-key',AI_API_STYLE:'chat',AI_MODEL:'auto'},()=>executeCustomBot({name:'B',instructions:'Look it up.'},'go'));
+    assert.match(out,/```browser/);
+  }finally{close();}
+});
+
+test('AI calls do not follow redirects',async()=>{
+  const server=http.createServer((req,res)=>{
+    if(req.url==='/v1/chat/completions'){res.writeHead(302,{Location:'/v1/ok'});res.end();return;}
+    res.writeHead(200,{'Content-Type':'application/json'});
+    res.end(JSON.stringify({choices:[{message:{content:'leaked'}}]}));
+  });
+  await new Promise(r=>server.listen(0,'127.0.0.1',r));
+  try{
+    await withEnv({AI_BASE_URL:`http://127.0.0.1:${server.address().port}/v1`,AI_API_KEY:'test-key',AI_API_STYLE:'chat',AI_MODEL:'auto'},async()=>{
+      await assert.rejects(()=>executeCustomBot({name:'B',instructions:'Summarise.'},'hello'),/redirected/);
+    });
+  }finally{server.close();}
 });

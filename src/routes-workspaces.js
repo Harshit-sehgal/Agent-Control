@@ -17,8 +17,11 @@ export function workspaceRoutes(router, {auth, workspaces}) {
   // (an owner of the first workspace) is checked by auth.createWorkspace.
   router.add('POST', '/api/workspaces', 'viewer', async c => {
     const b = await c.body();
-    const created = auth.createWorkspace(c.actor, b.name);
-    const store = await workspaces.create(created.id);
+    let created;
+    const store = await workspaces.create(() => {
+      created = auth.createWorkspace(c.actor, b.name);
+      return created.id;
+    });
     await store.update(s => activity(s, 'workspace', `Created the workspace "${created.name}".`));
     return reply(201, created);
   });
@@ -34,8 +37,7 @@ export function workspaceRoutes(router, {auth, workspaces}) {
     const b = await c.body();
     const current = mine(c.actor).find(w => w.current);
     if (String(b.confirm || '').trim() !== current.name) fail('Type the workspace name exactly to delete it.', 400);
-    auth.deleteWorkspace(c.actor);
-    await workspaces.remove(c.actor.workspaceId);
+    await workspaces.remove(c.actor.workspaceId, () => auth.deleteWorkspace(c.actor));
     return {ok: true};
   });
 }
