@@ -1,18 +1,21 @@
 /** What the UI can do, as three lookup tables keyed by `data-action`, form id and
  * control id. app.js owns the DOM events and dispatches here; handlers throw on
  * failure and the dispatcher turns that into one toast. */
-import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, groupOfBot, teamKey, groups, setProfile, setPref, setCheckpoints, clearMessages} from './ui-store.js?v=b3961575ec';
-import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=b3961575ec';
-import {sendChat, streamGroupRun} from './ui-chat.js?v=b3961575ec';
-import {confetti, whoosh, react, poke} from './ui-fx.js?v=b3961575ec';
-import {renderList} from './ui-views.js?v=b3961575ec';
-import {refreshLists, reloadAdminPage} from './ui-panel.js?v=b3961575ec';
-import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand} from './ui-sheets.js?v=b3961575ec';
-import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=b3961575ec';
+import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, setPref, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns, patchLocalRun, appendMessage} from './ui-store.js?v=20376b59b1';
+import {botSettings, groupSettings} from './bot-settings.js?v=20376b59b1';
+import {completeMention, moveRow, pipelineValue} from './ui-model.js?v=20376b59b1';
+import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=20376b59b1';
+import {sendChat, streamGroupRun, watchQueuedRun, continueDemoPlan} from './ui-chat.js?v=20376b59b1';
+import {confetti, whoosh, react, poke} from './ui-fx.js?v=20376b59b1';
+import {renderList, renderMentions} from './ui-views.js?v=20376b59b1';
+import {refreshLists, reloadAdminPage, pipelineList} from './ui-panel.js?v=20376b59b1';
+import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, botTaskSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=20376b59b1';
+import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=20376b59b1';
 
 const adminCtx = {reload: reloadAdminPage};
 const chatId = () => store.route.chat;
 const findBot = id => groupOfBot(id)?.bots.find(b => b.id === id) || (() => { throw new Error('Bot not found'); })();
+const patchBot = (id, body) => api(`/api/groups/${groupOfBot(id).id}/bots/${id}`, 'PATCH', body);
 
 async function copyText(text, done) {
   if (!navigator.clipboard?.writeText) throw new Error('Clipboard is not available here.');
@@ -33,10 +36,17 @@ export const actions = {
   'back-to-list': () => back({}),
   // The same arrow opens the panel from the thread and steps back from a section.
   'open-info': () => store.route.info && store.route.info !== 'home' ? back({chat: chatId(), info: 'home'}) : go({chat: chatId(), info: 'home'}),
+  'grant-browser': async b => {
+    const bot = findBot(b.dataset.id);
+    await patchBot(bot.id, {permissions: [...new Set([...(bot.permissions || []), 'browser.use'])]});
+    await sync();
+    toast(`${bot.name} can request pages now.`);
+  },
   'close-info': () => back({chat: chatId()}),
-  'open-section': b => go({chat: chatId(), info: b.dataset.section}),
+  'open-section': b => { if (b.dataset.section === 'group-settings') store.pipelineDraft = null; go({chat: chatId(), info: b.dataset.section}); },
   'open-page': b => go({page: b.dataset.page}),
   'open-page-you': () => back({page: 'you'}),
+  'change-password': () => changePasswordSheet(),
   'poke': b => poke(b),
   'list-filter': b => { store.listFilter = b.dataset.filter; renderList(); },
   'set-theme': b => { applyTheme(b.dataset.theme); changed('route'); },
@@ -52,11 +62,16 @@ export const actions = {
   'attach': () => attachSheet(),
   'share-post': () => sharePostSheet(),
   'new-reminder': () => reminderSheet(),
+  'new-bot-task': () => botTaskSheet(),
   'close-sheet': () => closeSheet(),
   'sheet-confirm': () => closeSheet(true),
 
   // conversation
   'quick-chat': b => sendChat(chatId(), b.dataset.text),
+  'mention-pick': b => {
+    const input = document.querySelector('#chat-form textarea'); if (!input) return;
+    input.value = completeMention(input.value, b.dataset.name); input.focus(); renderMentions(input.value);
+  },
   'home-ask': b => startGroupChat(b.dataset.text),
   'copy-chat': async b => {
     const rows = store.messages[b.dataset.id] || []; if (!rows.length) throw new Error('This conversation is empty.');
@@ -70,14 +85,30 @@ export const actions = {
   },
 
   // bots
-  'avatar': b => {
+  'avatar': async b => {
     const index = Number(b.dataset.index); pickTint(index);
-    if (b.closest('#edit-bot-form')) { setProfile(chatId(), {avatarIndex: index}); changed('thread'); }
+    if (!b.closest('#edit-bot-form')) return;
+    if (!canWrite()) throw new Error('A member can edit a bot.');
+    // The colour syncs through the server; the local pick paints it at once.
+    const bot = findBot(chatId());
+    setProfile(bot.id, {avatarIndex: index}); bot.settings = {...(bot.settings || {}), tint: index}; changed('thread');
+    await patchBot(bot.id, {settings: {tint: index}});
+  },
+  'toggle-bot': async b => {
+    const bot = findBot(b.dataset.id), enabled = !botSettings(bot).enabled;
+    await patchBot(bot.id, {settings: {enabled}}); await sync(); toast(enabled ? `${bot.name} is on.` : `${bot.name} is switched off.`);
+  },
+  'remove-bot': async b => {
+    const bot = findBot(b.dataset.id), group = groupOfBot(bot.id);
+    if (!await confirmSheet(`Remove ${bot.name} from ${group.name}?`, {confirm: 'Remove', danger: true, detail: 'Its chat and scheduled tasks stop. Past group messages stay.'})) return;
+    await api(`/api/groups/${group.id}/bots/${bot.id}`, 'DELETE', {});
+    await sync(); go({chat: teamKey(group.id)}, {replace: true}); toast(`${bot.name} removed.`);
   },
   'pin-bot': b => { findBot(b.dataset.id); const pinned = !store.profiles[b.dataset.id]?.pinned; setProfile(b.dataset.id, {pinned}); changed(); toast(pinned ? 'Pinned to the top' : 'Unpinned'); },
   'duplicate-bot': async b => {
     const id = b.dataset.id, group = groupOfBot(id), base = findBot(id);
-    const copy = await api(`/api/groups/${group.id}/bots`, 'POST', {name: `${base.name} copy`.slice(0, 80), instructions: base.instructions});
+    const copy = await api(`/api/groups/${group.id}/bots`, 'POST', {name: `${base.name} copy`.slice(0, 80), instructions: base.instructions, settings: {...botSettings(base), lead: false}});
+    if (base.contract || base.permissions) await api(`/api/groups/${group.id}/bots/${copy.id}`, 'PATCH', {contract: base.contract, permissions: base.permissions || []});
     setProfile(copy.id, {avatarIndex: store.profiles[id]?.avatarIndex ?? 0});
     await sync(); go({chat: copy.id}); toast('Bot duplicated. Its chat starts empty.');
   },
@@ -123,11 +154,50 @@ export const actions = {
     if (!await confirmSheet('Remove this reminder?', {confirm: 'Remove', danger: true})) return;
     await api(`/api/tasks/${b.dataset.id}`, 'DELETE', {}); toast('Reminder removed'); await sync();
   },
+  'remove-bot-task': async b => {
+    if (!await confirmSheet('Remove this scheduled task?', {confirm: 'Remove', danger: true, detail: 'It stops running. Answers it already gave stay in the chat.'})) return;
+    await api(`/api/tasks/${b.dataset.id}`, 'DELETE', {}); toast('Scheduled task removed'); await sync();
+  },
+  'retry-bot-task': async b => {
+    await api(`/api/tasks/${b.dataset.id}/retry`, 'POST', {}); toast('Task queued again.'); await sync();
+  },
+
+  // groups
+  'pipeline-move': b => {
+    const draft = store.pipelineDraft, group = conversation()?.group; if (!draft || !group) return;
+    const index = Number(b.dataset.index), delta = Number(b.dataset.delta), to = index + delta;
+    draft.rows = moveRow(draft.rows, index, delta);
+    const list = document.getElementById('pipeline-rows'); if (!list) return;
+    list.innerHTML = pipelineList(group);
+    // Keep the keyboard on the bot that moved, or on its other arrow at an end.
+    const same = list.querySelector(`[data-action="pipeline-move"][data-index="${to}"][data-delta="${delta}"]`);
+    (same && !same.disabled ? same : list.querySelector(`[data-action="pipeline-move"][data-index="${to}"][data-delta="${-delta}"]`))?.focus();
+  },
+  'delete-group': async b => {
+    const group = findGroup(b.dataset.id); if (!group) throw new Error('Group not found');
+    if (!await confirmSheet(`Delete ${group.name}?`, {confirm: 'Delete group', danger: true, detail: 'Its bots, their chats and its scheduled tasks are removed. This cannot be undone.'})) return;
+    await api(`/api/groups/${group.id}`, 'DELETE', {});
+    store.pipelineDraft = null; await sync(); go({}, {replace: true}); toast('Group deleted.');
+  },
 
   // runs (Node build)
   'continue-run': async b => {
+    const group = findGroup(b.dataset.id);
+    const run = recentRuns(group?.id).find(r => r.id === b.dataset.run);
+    const key = run?.chatKey || chatId() || teamKey(b.dataset.id);
+    if (isStaticDemo()) {
+      if (!group || !run || run.status !== 'awaiting_checkpoint') throw new Error('This run is not waiting for a checkpoint.');
+      await patchLocalRun(run.id, {status: 'queued'});
+      changed();
+      try {
+        await continueDemoPlan(group, run.input, key, {runId: run.id, resume: run});
+      } catch (error) {
+        await patchLocalRun(run.id, {status: 'awaiting_checkpoint'});
+        throw error;
+      } finally { changed(); }
+      return;
+    }
     // The POST only returns when the next bot is done, so stream alongside it.
-    const key = chatId() || teamKey(b.dataset.id);
     setTyping(key, true);
     try {
       const post = api(`/api/groups/${b.dataset.id}/runs/${b.dataset.run}/continue`, 'POST', {});
@@ -135,9 +205,75 @@ export const actions = {
     } finally { setTyping(key, false); }
     await sync();
   },
+  // A bot asked to use the local browser agent.
+  'approve-plan': async b => {
+    const group = findGroup(b.dataset.id);
+    const run = recentRuns(group?.id).find(r => r.id === b.dataset.run);
+    const key = run?.chatKey || chatId() || teamKey(b.dataset.id);
+    if (isStaticDemo()) {
+      if (!group || !run) throw new Error('That plan is no longer waiting.');
+      // Hide Start while the same plan runs. A failure puts it back; success
+      // must not leave the record queued, or it looks like work is still going.
+      await patchLocalRun(run.id, {status: 'queued'});
+      changed();
+      try {
+        await continueDemoPlan(group, run.input, key, {runId: run.id});
+      } catch (error) {
+        // Any failure, including 409 from another in-flight send in this
+        // group, puts Start back. Leaving it queued hid Start forever
+        // because queued counts as busy but Start only paints for awaiting_plan.
+        await patchLocalRun(run.id, {status: 'awaiting_plan'});
+        throw error;
+      } finally { changed(); }
+      return;
+    }
+    setTyping(key, true);
+    try {
+      await api(`/api/groups/${b.dataset.id}/runs/${b.dataset.run}/plan`, 'POST', {approve: true});
+      await sync();
+      const request = (store.state.browserRequests || []).find(r => r.runId === b.dataset.run && r.purpose === 'feed');
+      await streamGroupRun(b.dataset.id, key, b.dataset.run, {ignore: request?.status === 'dispatched' ? ['awaiting_feed'] : []});
+    } finally { setTyping(key, false); }
+    await sync();
+  },
+  'cancel-plan': async b => {
+    if (isStaticDemo()) {
+      const run = recentRuns(b.dataset.id).find(r => r.id === b.dataset.run);
+      await patchLocalRun(b.dataset.run, {status: 'cancelled'});
+      appendMessage(run?.chatKey || chatId() || teamKey(b.dataset.id), {role: 'system', text: 'Plan cancelled. No further replies will be added.', runId: b.dataset.run});
+      return;
+    }
+    await api(`/api/groups/${b.dataset.id}/runs/${b.dataset.run}/plan`, 'POST', {approve: false}); toast('Plan cancelled.'); await sync();
+  },
+  'approve-browser': async b => {
+    await api(`/api/browser-requests/${b.dataset.id}/approve`, 'POST', {});
+    toast('Sent to your local agent. The result will appear here.');
+    await sync();
+    const request = (store.state.browserRequests || []).find(r => r.id === b.dataset.id);
+    if (!request?.runId || !request.groupId) return;
+    const key = request.chatKey || teamKey(request.groupId);
+    const pause = request.purpose === 'feed' ? 'awaiting_feed' : 'awaiting_browser';
+    setTyping(key, true);
+    try { await streamGroupRun(request.groupId, key, request.runId, {ignore: [pause]}); }
+    finally { setTyping(key, false); }
+    await sync();
+  },
+  'deny-browser': async b => {
+    await api(`/api/browser-requests/${b.dataset.id}/deny`, 'POST', {});
+    toast('Declined.');
+    await sync();
+    const request = (store.state.browserRequests || []).find(r => r.id === b.dataset.id);
+    if (!request?.runId || !request.groupId) return;
+    const key = request.chatKey || teamKey(request.groupId);
+    setTyping(key, true);
+    try { await streamGroupRun(request.groupId, key, request.runId); }
+    finally { setTyping(key, false); }
+    await sync();
+  },
   'retry-run': async b => {
-    const key = chatId() || teamKey(b.dataset.id);
-    const run = await api(`/api/groups/${b.dataset.id}/chat`, 'POST', {message: b.dataset.message, directBotId: b.dataset.direct || null, checkpoints: store.checkpoints, chatKey: key});
+    const key = b.dataset.chat || chatId() || teamKey(b.dataset.id);
+    const run = await api(`/api/groups/${b.dataset.id}/chat`, 'POST', {message: b.dataset.message, directBotId: b.dataset.direct || null, checkpoints: groupSettings(findGroup(b.dataset.id)).checkpoints, chatKey: key});
+    if (await watchQueuedRun(b.dataset.id, key, run)) return;
     toast('Run queued again.');
     await streamGroupRun(b.dataset.id, key, run?.runId || null); await sync();
   },
@@ -149,14 +285,14 @@ export const actions = {
 export const forms = {
   'chat-form': async form => {
     const input = form.elements.namedItem('message'), text = input.value;
-    input.value = ''; input.style.height = '';
+    input.value = ''; input.style.height = ''; renderMentions('');
     whoosh(form.querySelector('.send')); react('nod', 700);
     await sendChat(chatId(), text);
   },
   'home-prompt': (form, f) => startGroupChat(f.prompt),
   'ask-form': (form, f) => closeSheet(String(f.answer || '')),
   'new-bot-form': async (form, f) => {
-    const bot = await api(`/api/groups/${f.group}/bots`, 'POST', {name: f.name, instructions: f.instructions});
+    const bot = await api(`/api/groups/${f.group}/bots`, 'POST', {name: f.name, instructions: f.instructions, settings: {tint: pickedTint}});
     setProfile(bot.id, {avatarIndex: pickedTint});
     closeSheet(); await sync(); go({chat: bot.id}); toast(`${bot.name} is ready.`);
   },
@@ -165,6 +301,7 @@ export const forms = {
     closeSheet(); await sync(); go({chat: teamKey(group.id), info: 'home'}); toast('Group created. Add a bot to get started.');
   },
   'edit-bot-form': async (form, f) => {
+    if (!canWrite()) throw new Error('A member can edit a bot.');
     const b = conversation()?.bot; if (!b) throw new Error('Bot not found');
     // The lasting profile goes through the API so it survives a reload and is
     // shared across devices. Only the cosmetic tint stays in localStorage.
@@ -172,7 +309,15 @@ export const forms = {
     const kind = f.outputKind === 'structured' ? 'structured' : 'text';
     const inputs = b.contract?.inputs?.length ? b.contract.inputs : ['objective', 'previous_output', 'evidence', 'source_post', 'settings', 'identity'];
     const fields = kind === 'structured' ? String(f.fields || '').split(',').map(s => s.trim()).filter(Boolean).map(name => ({name, type: 'text', required: true})) : [];
-    await api(`/api/groups/${groupOfBot(b.id).id}/bots/${b.id}`, 'PATCH', {name: f.name, instructions: f.instructions, contract: {version: 1, inputs, output: {kind, fields}}, permissions});
+    const on = name => Boolean(form.elements.namedItem(name)?.checked), picked = form.querySelector('.tint.on');
+    const settings = {
+      enabled: on('enabled'), replyLength: f.replyLength, style: f.style || '',
+      temperature: String(f.temperature ?? '').trim() === '' ? null : Number(f.temperature),
+      contextMessages: Number(f.contextMessages), summonable: on('summonable'), canHandoff: on('canHandoff'), lead: on('lead'),
+      ...(f.browserApproval ? {browserApproval: f.browserApproval} : {}),
+      ...(picked ? {tint: Number(picked.dataset.index)} : {}),
+    };
+    await api(`/api/groups/${groupOfBot(b.id).id}/bots/${b.id}`, 'PATCH', {name: f.name, instructions: f.instructions, contract: {version: 1, inputs, output: {kind, fields}}, permissions, settings});
     // Per-bot model override (bring your own key); only when the picker is shown.
     if (form.querySelector('[name="model"]')) await api(`/api/ai/bots/${b.id}`, 'PATCH', {providerId: f.providerId || null, model: f.model || ''});
     await sync(); go({chat: b.id, info: 'home'}); toast('Profile saved.');
@@ -182,12 +327,33 @@ export const forms = {
     closeSheet(); await sync(); toast(r?.duplicate ? 'That post is already here.' : 'Post shared with the group.');
   },
   'settings-form': async (form, f) => {
+    if (!isAdmin() && !isStaticDemo()) throw new Error('An admin sets voice and timing.');
     await api('/api/settings', 'PATCH', {topics: f.topics.split(',').map(s => s.trim()).filter(Boolean), style: f.style, opinions: f.opinions, minDelay: Number(f.minDelay), maxDelay: Number(f.maxDelay)});
     await sync(); toast('Saved.');
+  },
+  'group-settings-form': async (form, f) => {
+    if (!canWrite()) throw new Error('A member can change group settings.');
+    const group = conversation()?.group; if (!group) throw new Error('Group not found');
+    const rows = store.pipelineDraft?.groupId === group.id ? store.pipelineDraft.rows : [];
+    const pipeline = pipelineValue(rows, group);
+    if (Array.isArray(pipeline) && !pipeline.length) throw new Error('Tick at least one bot to take turns.');
+    const on = name => Boolean(form.elements.namedItem(name)?.checked);
+    await api(`/api/groups/${group.id}`, 'PATCH', {name: f.name, description: f.description || '', settings: {routing: f.routing || groupSettings(group).routing, coordination: f.coordination || groupSettings(group).coordination, pipeline, maxSteps: Number(f.maxSteps), checkpoints: on('checkpoints'), confirmPlan: on('confirmPlan'), botHandoffs: on('botHandoffs')}});
+    store.pipelineDraft = null; await sync(); toast('Group settings saved.');
+  },
+  'bot-task-form': async (form, f) => {
+    const once = f.kind === 'once';
+    const payload = {groupId: f.groupId, botId: f.botId || null, message: f.message, kind: once ? 'once' : 'interval', ...(once ? {nextAt: new Date(f.nextAt).toISOString()} : {intervalMinutes: Number(f.intervalMinutes)})};
+    await api('/api/tasks', 'POST', {kind: 'bot-task', payload, ...(once ? {} : {intervalMinutes: payload.intervalMinutes})});
+    closeSheet(); await sync(); toast(once ? 'Task scheduled.' : `Task scheduled every ${payload.intervalMinutes} min.`);
   },
   'schedule-form': async (form, f) => {
     await api('/api/schedules', 'POST', {label: f.label, kind: f.kind, intervalMinutes: Number(f.intervalMinutes), nextAt: f.nextAt ? new Date(f.nextAt).toISOString() : undefined});
     closeSheet(); await sync(); toast('Reminder set.');
+  },
+  'password-form': async (form, f) => {
+    await api('/api/auth/password', 'POST', {currentPassword: f.currentPassword, newPassword: f.newPassword});
+    closeSheet(); toast('Password updated. Other sessions are signed out.');
   },
   '.edit-form': async (form, f) => { await api(`/api/drafts/${form.dataset.id}`, 'PATCH', {text: f.text}); store.editDraft = null; store.editText = null; await sync(); toast('Draft updated. It needs your approval again.'); },
   '.evidence-form': async (form, f) => { await api(`/api/drafts/${form.dataset.id}/evidence`, 'POST', {kind: f.kind, claim: f.claim, confidence: Number(f.confidence), link: (f.link || '').trim() || null}); await sync(); toast('Source added.'); },
@@ -203,8 +369,10 @@ export function onControlChange(control) {
     const template = BOT_TEMPLATES[control.value] || BOT_TEMPLATES.blank, form = control.form;
     form.elements.namedItem('name').value = template.name; form.elements.namedItem('instructions').value = template.instructions;
   }
-  if (control.id === 'checkpoint-toggle') setCheckpoints(control.checked);
-  if (control.matches('#schedule-form [name=kind]')) toggleReminderFields();
+  if (control.matches('#schedule-form [name=kind], #bot-task-form [name=kind]')) toggleReminderFields(control.form.id);
+  if (control.matches('[name=pipeline-include]') && store.pipelineDraft) {
+    const r = store.pipelineDraft.rows[Number(control.dataset.index)]; if (r) r.included = control.checked;
+  }
   const admin = adminChanges[control.dataset.action];
   if (admin) return admin(control, adminCtx);
 }

@@ -146,13 +146,16 @@ body:not(.has-info) .pane-info{display:none}
 .thread-head .back{display:none}
 .thread-title{flex:1;min-width:0;display:flex;align-items:center;gap:11px;padding:4px 8px 4px 4px;border-radius:14px}
 .thread-title:hover{background:var(--surface)}
-.thread-title-text{min-width:0;display:flex;flex-direction:column}
-.thread-title-text strong{font-size:16px;font-weight:600}
+.thread-title-text{min-width:0;overflow:hidden;display:flex;flex-direction:column}
+.thread-title-text strong{font-size:16px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .thread-title-text span{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .needs-pill{flex:none;height:36px;padding:0 14px;border-radius:18px;background:var(--wait-bg);color:var(--wait);font-size:13px;font-weight:600;white-space:nowrap}
 .thread-log{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:3px;padding:14px max(14px,calc((100% - 760px)/2)) 10px;overscroll-behavior:contain}
 .day,.event{align-self:center;margin:10px 0 6px;padding:4px 12px;border-radius:12px;background:var(--surface);color:var(--muted);font-size:12px;text-align:center}
 .event{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px;max-width:88%;padding:6px 12px}
+.browser-request{flex-direction:column;align-items:stretch;text-align:left;padding:10px 14px}
+.browser-request a{overflow-wrap:anywhere;color:var(--text)}
+.browser-steps{margin:0;padding-left:18px;overflow-wrap:anywhere}
 .msg{display:flex;align-items:flex-end;gap:8px;max-width:100%}
 .msg.lead{margin-top:9px}
 .msg.me{justify-content:flex-end}
@@ -505,3 +508,14 @@ body.booting .chat-row:nth-child(2){animation-delay:30ms}body.booting .chat-row:
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
 }
+
+/* ---------- bots working together ---------- */
+.mentions{padding-top:0}
+.mentions[hidden]{display:none}
+.sender small{font-weight:400;color:var(--muted)}
+.hero h2 .tag{vertical-align:middle}
+.pipe-row{display:flex;align-items:center;gap:8px}
+.pipe-row+.pipe-row{border-top:1px solid var(--line)}
+.pipe-row .check-row{flex:1;min-width:0}
+.pipe-row .btn[disabled]{opacity:.4;cursor:default}
+.behaviour{display:flex;flex-direction:column;gap:12px}

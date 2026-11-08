@@ -8,12 +8,15 @@
  * Keeping transitions here is the single source of truth for the draft
  * lifecycle: candidate -> draft -> approved/scheduled -> ready -> posted.
  */
-import {activity,candidateInput,cleanText,scheduleApproval} from './core.js?v=b3961575ec';
-import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js?v=b3961575ec';
-import {evidenceSummary,evidenceForDraft,seedCandidateEvidence} from './evidence.js?v=b3961575ec';
-import {normalizeRetention} from './retention.js?v=b3961575ec';
-import * as contracts from './contracts.js?v=b3961575ec';
-import {pruneChats} from './chats.js?v=b3961575ec';
+import {activity,candidateInput,cleanText,scheduleApproval,scoreCandidate} from './core.js?v=20376b59b1';
+import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js?v=20376b59b1';
+import {evidenceSummary,evidenceForDraft,seedCandidateEvidence} from './evidence.js?v=20376b59b1';
+import {normalizeRetention} from './retention.js?v=20376b59b1';
+import * as contracts from './contracts.js?v=20376b59b1';
+import {pruneChats, releaseChatWork} from './chats.js?v=20376b59b1';
+import {denyBrowserRequest} from './bot-browser.js?v=20376b59b1';
+import {BUSY_STATUSES} from './coordination.js?v=20376b59b1';
+import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=20376b59b1';
 
 export const SCHEMA_VERSION = 3;
 /** Posts are never pruned by age, so their number is bounded here. */
@@ -46,6 +49,7 @@ export function migrate(state) {
   state.groups ??= [];
   state.groupMessages ??= {};
   state.groupRuns ??= [];
+  if (!Array.isArray(state.browserRequests)) state.browserRequests = [];
   // Bring-your-own-key AI providers and the workspace/bot model choices.
   state.ai ??= {};
   state.ai.providers ??= [];
@@ -57,6 +61,14 @@ export function migrate(state) {
   // defaults for its type; explicitly configured values are left alone.
   for (const g of state.groups) {
     for (const b of g.bots || []) contracts.normalizeBot(b);
+    prunePipeline(g);
+  }
+  // X-engage has one bot you talk to. Older workspaces gain it on Handoff
+  // unless someone has already picked a primary.
+  const x = state.groups.find(g => g.id === 'x-engage');
+  if (x && !(x.bots || []).some(b => b.settings?.lead)) {
+    const hand = (x.bots || []).find(b => b.id === 'handoff');
+    if (hand) hand.settings = {...(hand.settings || {}), lead: true};
   }
   if (!Number.isInteger(state.version)) state.version = 1;
   // Passive reminder schedules become structured runnable tasks. Idempotent:
@@ -148,6 +160,40 @@ export function finishProcessing(state, id, evaluation, generated) {
   return draft;
 }
 
+const DRAFT_REFUSAL = /cannot draft|no post|nothing to draft|no draft/i;
+/** A shorter captured URL must not match a longer one that merely starts with it. */
+function citesUrl(hay, url) {
+  let from = 0;
+  while (from <= hay.length) {
+    const at = hay.indexOf(url, from);
+    if (at < 0) return false;
+    const next = hay[at + url.length];
+    if (next === undefined || /[\s)\].,;!?'"<>]/.test(next)) return true;
+    from = at + url.length;
+  }
+  return false;
+}
+
+/** A writing step that holds `draft.create` becomes a pending draft when the
+ * run names a captured post that does not already have one. The bot's own
+ * text is the draft. No second model call. */
+export function attachRunDraft(state, {bot, output, sources = '', runId = null} = {}) {
+  const permissions = Array.isArray(bot?.permissions) ? bot.permissions : contracts.defaultPermissions(bot?.type);
+  if (!permissions.includes('draft.create')) return null;
+  const text = cleanText(output, 1700);
+  if (text.length < 40 || DRAFT_REFUSAL.test(text)) return null;
+  const hay = String(sources);
+  const candidate = (state.candidates || [])
+    .filter(c => c?.url && citesUrl(hay, c.url) && c.status !== 'processing' && !(state.drafts || []).some(d => d.candidateId === c.id))
+    .sort((a, b) => b.url.length - a.url.length)[0];
+  if (!candidate) return null;
+  const draft = finishProcessing(state, candidate.id, scoreCandidate(candidate, state.settings?.topics || []), {
+    text, mode: 'ai', note: 'Drafted in the group run. Read it before you approve.',
+  });
+  if (runId) draft.runId = runId;
+  return draft;
+}
+
 export function failProcessing(state, id, message) {
   findCandidate(state, id).status = 'error';
   activity(state, 'error', `Draft failed: ${String(message).slice(0, 160)}`);
@@ -232,7 +278,9 @@ export function addBot(state, groupId, body) {
     contract: contracts.validateContract(body.contract),
     permissions: contracts.validatePermissions(body.permissions),
   });
+  if (body.settings !== undefined) bot.settings = validateBotSettings(body.settings);
   g.bots.push(bot);
+  if (bot.settings?.lead) for (const other of g.bots) if (other !== bot && other.settings?.lead) other.settings = {...other.settings, lead: false};
   activity(state, 'bot', `Created bot ${name}.`);
   return bot;
 }
@@ -244,17 +292,99 @@ export function updateBot(state, groupId, botId, body) {
   if (!g) fail('Group not found.', 404);
   const bot = g.bots.find(x => x.id === botId);
   if (!bot) fail('Bot not found.', 404);
-  const name = cleanText(body.name, 80);
-  const instructions = cleanText(body.instructions, 3000);
+  // Every field only changes when explicitly provided, so a form that saves
+  // just one field cannot silently drop a permission or a setting.
+  const name = body.name === undefined ? bot.name : cleanText(body.name, 80);
+  const instructions = body.instructions === undefined ? bot.instructions : cleanText(body.instructions, 3000);
   if (!name || !instructions) fail('Bot name and instructions required.');
-  bot.name = name;
-  bot.instructions = instructions;
-  // Contracts and permissions only change when explicitly provided, so a form
-  // that saves just the name cannot silently drop a permission.
+  const settings = body.settings === undefined ? undefined : validateBotSettings(body.settings, bot.settings);
   if (body.contract !== undefined) bot.contract = contracts.validateContract(body.contract);
   if (body.permissions !== undefined) bot.permissions = contracts.validatePermissions(body.permissions);
+  bot.name = name;
+  bot.instructions = instructions;
+  if (settings) bot.settings = settings;
+  if (bot.settings?.lead) for (const other of g.bots) if (other !== bot && other.settings?.lead) other.settings = {...other.settings, lead: false};
   activity(state, 'bot', `Updated bot ${name}.`);
   return bot;
+}
+
+const findGroup = (state, groupId) => state.groups.find(x => x.id === groupId) || fail('Group not found.', 404);
+/** Scheduled bot tasks that would otherwise fire at a bot or group that is gone. */
+function cancelBotTasks(state, match) {
+  for (const t of state.tasks || []) {
+    // `running` as well as `queued`: an in-flight interval would otherwise
+    // complete and re-arm after the bot or group is already gone.
+    if (t.kind !== 'bot-task' || !['queued', 'running'].includes(t.status) || !match(t.payload || {})) continue;
+    t.status = 'cancelled';
+    t.updatedAt = new Date().toISOString();
+  }
+}
+function forgetBot(state, botId) {
+  if (state.ai?.bots) delete state.ai.bots[botId];
+  if (state.chats) delete state.chats[botId];
+  releaseChatWork(state, botId);
+  const now = new Date().toISOString();
+  for (const request of state.browserRequests || []) {
+    if (request.botId !== botId || !['pending', 'dispatched'].includes(request.status)) continue;
+    try { denyBrowserRequest(state, request.id); }
+    catch { request.status = 'denied'; request.updatedAt = now; }
+  }
+  for (const run of state.groupRuns || []) {
+    if (!BUSY_STATUSES.includes(run.status)) continue;
+    const waiting = ['awaiting_feed', 'awaiting_browser'].includes(run.status)
+      && (state.browserRequests || []).some(r => r.runId === run.id && r.botId === botId && r.status === 'denied');
+    const referencesBot = (run.recipients || []).includes(botId) || (run.guestIds || []).includes(botId)
+      || (run.trace || []).some(step => step.botId === botId || step.toBotId === botId);
+    if (run.chatKey !== botId && !waiting && !referencesBot) continue;
+    run.status = 'cancelled';
+    run.error = 'Bot removed.';
+    run.updatedAt = now;
+  }
+}
+
+export function updateGroup(state, groupId, body = {}) {
+  const g = findGroup(state, groupId);
+  const name = body.name === undefined ? g.name : cleanText(body.name, 80);
+  if (!name) fail('Group name required.');
+  if (typeof body.description === 'string' && body.description.trim().length > 300) fail('Description must be 300 characters or fewer.');
+  const settings = body.settings === undefined ? undefined : validateGroupSettings(g, body.settings, g.settings);
+  g.name = name;
+  if (body.description !== undefined) g.description = cleanText(body.description, 300);
+  if (settings) g.settings = settings;
+  activity(state, 'group', `Updated group ${name}.`);
+  return g;
+}
+
+export function removeBot(state, groupId, botId) {
+  const g = findGroup(state, groupId);
+  const bot = g.bots.find(x => x.id === botId);
+  if (!bot) fail('Bot not found.', 404);
+  g.bots = g.bots.filter(x => x.id !== botId);
+  prunePipeline(g);
+  forgetBot(state, botId);
+  cancelBotTasks(state, p => p.botId === botId);
+  activity(state, 'bot', `Removed bot ${bot.name}.`);
+  return {ok: true};
+}
+
+export function removeGroup(state, groupId) {
+  const g = findGroup(state, groupId);
+  if (g.id === 'x-engage') fail('The X-engage group cannot be deleted.', 409);
+  state.groups = state.groups.filter(x => x.id !== groupId);
+  for (const b of g.bots) forgetBot(state, b.id);
+  if (state.chats) delete state.chats[`team-${groupId}`];
+  if (state.groupMessages) delete state.groupMessages[groupId];
+  releaseChatWork(state, `team-${groupId}`);
+  const now = new Date().toISOString();
+  for (const run of state.groupRuns || []) {
+    if (run.groupId !== groupId || !BUSY_STATUSES.includes(run.status)) continue;
+    run.status = 'cancelled';
+    run.error = 'Group removed.';
+    run.updatedAt = now;
+  }
+  cancelBotTasks(state, p => p.groupId === groupId);
+  activity(state, 'group', `Removed group ${g.name}.`);
+  return {ok: true};
 }
 
 /** Release candidates stranded in `processing` by a crash mid-draft.

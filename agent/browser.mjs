@@ -16,7 +16,8 @@
  *   never signed in to anything. Setting AGENT_BROWSER_PROFILE points it at a
  *   directory to keep instead — the explicit opt-in for signed-in journeys,
  *   where the operator signs in once and the profile (and its cookies) persist;
- * - it navigates and reads. There is no click, type, upload or download.
+ * - it navigates and reads. Click and type exist for allowlisted hosts that
+ *   are not X or Twitter; those two stay refused. There is no upload or download.
  */
 import {spawn} from 'node:child_process';
 import dns from 'node:dns/promises';
@@ -26,6 +27,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import {isPrivateAddress} from './net-guard.mjs';
+import {isPostingHost} from '../shared/bot-browser.js';
 
 /** May the browser connect to `address`, which `host` resolved to? */
 const publicOnly = (host, address) => process.env.AGENT_ALLOW_PRIVATE === '1' || !isPrivateAddress(address);
@@ -52,27 +54,45 @@ export const hostAllowed = (url, allow) => { try { return allow.includes(new URL
 /** Actions a `browser.action` task may run, and the hard cap per task. Every
  * click, typed value and navigation is still gated by the same allowlist and
  * proxy as a read: this adds interaction, not a way around the boundary. */
-export const ACTION_OPS = ['navigate', 'click', 'type', 'waitFor', 'read'];
+export const ACTION_OPS = ['navigate', 'click', 'type', 'waitFor', 'read', 'scroll'];
 export const MAX_ACTIONS = 25;
 const jsLiteral = value => JSON.stringify(String(value ?? ''));
+const postingPage = `(()=>{try{const host=new URL(location.href).hostname.toLowerCase().replace(/\\.+$/,'');return host==='x.com'||host.endsWith('.x.com')||host==='twitter.com'||host.endsWith('.twitter.com');}catch{return false;}})()`;
+const postingRefusal = `Bots may read X and Twitter pages but never click or type there.`;
 function actionExpression(step) {
   const sel = jsLiteral(step.selector);
   switch (step.op) {
-    case 'click': return `(()=>{const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};el.scrollIntoView();el.click();return{ok:true};})()`;
-    case 'type': return `(()=>{const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};const v=${jsLiteral(step.text)};if('value' in el){el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}else{el.textContent=v;}return{ok:true};})()`;
+    case 'click': return `(()=>{const blocked=()=>${postingPage};if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};el.scrollIntoView();if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};el.click();return{ok:true};})()`;
+    case 'type': return `(()=>{const blocked=()=>${postingPage};if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};const v=${jsLiteral(step.text)};if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};if('value' in el){el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}else{el.textContent=v;}return{ok:true};})()`;
     case 'waitFor': return `new Promise(res=>{const sel=${sel};const end=Date.now()+${Number(step.timeoutMs) > 0 ? Math.min(Number(step.timeoutMs), 15000) : 5000};const tick=()=>{if(document.querySelector(sel))return res({ok:true});if(Date.now()>end)return res({ok:false,reason:'timed out'});setTimeout(tick,100);};tick();})`;
     case 'read': return `(()=>{const el=document.querySelector(${sel});return{ok:Boolean(el),text:el?String(el.textContent).slice(0,4000):null};})()`;
+    case 'scroll': {
+      const times = Math.min(4, Math.max(1, Number(step.times) || 2));
+      return `new Promise(async res=>{for(let i=0;i<${times};i++){window.scrollBy(0, Math.max(400, window.innerHeight||800));await new Promise(r=>setTimeout(r,400));}res({ok:true,times:${times}});})`;
+    }
     default: return null;
   }
+}
+
+/** Why this step must not run on `pageUrl`, or '' when it may.
+ * Click and type stay refused on X and Twitter even after a redirect or a
+ * trailing-dot host. Reading and scrolling those pages is allowed. */
+export function refusePostingAction(op, pageUrl) {
+  return (op === 'click' || op === 'type') && isPostingHost(pageUrl) ? 'Bots may read X and Twitter pages but never click or type there.' : '';
 }
 
 /** Decide one request the page being read wants to make. The page itself
  * (and any frame in it) must be on the allowlist; where a request may connect
  * to is the proxy's decision. */
-export function requestVerdict({url, isDocument}, {allow}) {
+export function requestVerdict({url, isDocument, method = 'GET', resourceType}, {allow}) {
   if (/^(data|blob|about):/i.test(url)) return {allow: true};
   if (!/^https?:/i.test(url)) return {allow: false, reason: 'Only http(s) is loaded.'};
   if (isDocument && !hostAllowed(url, allow)) return {allow: false, reason: `${new URL(url).host} is not in AGENT_BROWSER_ALLOWLIST.`};
+  // A WebSocket upgrade rides in as a GET, so check it by resource type
+  // before the writable-method check would let it through.
+  if (isPostingHost(url) && (resourceType === 'WebSocket' || !['GET', 'HEAD', 'OPTIONS'].includes(String(method).toUpperCase()))) {
+    return {allow: false, reason: 'Writes to X and Twitter are not allowed.'};
+  }
   return {allow: true};
 }
 
@@ -178,7 +198,7 @@ export async function captureWithBrowser(url, {allow, steps = [], binary = findB
       // The page's own requests pause here first, so it cannot be sent to a
       // page nobody allowed.
       cdp.on('Fetch.requestPaused', ({requestId, request, resourceType}) => {
-        const verdict = requestVerdict({url: request.url, isDocument: resourceType === 'Document'}, {allow});
+        const verdict = requestVerdict({url: request.url, isDocument: resourceType === 'Document', method: request.method, resourceType}, {allow});
         if (!verdict.allow) blocked.push(`${request.url.slice(0, 120)}: ${verdict.reason}`);
         cdp.send(verdict.allow ? 'Fetch.continueRequest' : 'Fetch.failRequest', verdict.allow ? {requestId} : {requestId, errorReason: 'BlockedByClient'}, sessionId).catch(() => {});
       });
@@ -193,7 +213,19 @@ export async function captureWithBrowser(url, {allow, steps = [], binary = findB
       // Optional interaction steps (a `browser.action` task). Each is bounded and
       // still gated by the allowlist + proxy; a `navigate` is checked here too.
       const actions = [];
+      const plannedPages = [url, ...steps.filter(step => step?.op === 'navigate').map(step => step.url)];
+      const touchesPosting = plannedPages.some(page => isPostingHost(page));
+      const currentUrl = async () => {
+        const {result} = await cdp.send('Runtime.evaluate', {expression: 'location.href', returnByValue: true}, sessionId);
+        return typeof result?.value === 'string' ? result.value : '';
+      };
       for (const step of steps.slice(0, MAX_ACTIONS)) {
+        if (step?.op === 'click' || step?.op === 'type') {
+          // The planned URL can be a trailing-dot spelling of X, or the page
+          // can land there by redirect after validation only saw another host.
+          const reason = refusePostingAction(step.op, await currentUrl()) || (touchesPosting ? 'Bots may read X and Twitter pages but never click or type there.' : '');
+          if (reason) { actions.push({op: step.op, ok: false, reason}); continue; }
+        }
         if (step?.op === 'navigate') {
           const target = String(step.url || '');
           if (!hostAllowed(target, allow)) { actions.push({op: 'navigate', ok: false, reason: 'host not in AGENT_BROWSER_ALLOWLIST'}); continue; }

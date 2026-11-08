@@ -17,6 +17,9 @@ test('a page must be on the allowlist, and only http(s) is loaded', () => {
   assert.equal(requestVerdict({url: 'https://cdn.example.net/a.js', isDocument: false}, {allow}).allow, true);
   for (const url of ['file:///etc/passwd', 'chrome://settings', 'ftp://example.com/x']) assert.equal(requestVerdict({url, isDocument: true}, {allow}).allow, false, url);
   assert.equal(requestVerdict({url: 'data:image/png;base64,AAAA', isDocument: false}, {allow}).allow, true);
+  // A WebSocket tunnel hides inside GET: posting hosts refuse it too.
+  assert.equal(requestVerdict({url: 'https://x.com/stream', isDocument: false, method: 'GET', resourceType: 'WebSocket'}, {allow: ['x.com', 'docs.example.com']}).allow, false);
+  assert.equal(requestVerdict({url: 'https://example.com/stream', isDocument: false, method: 'GET', resourceType: 'WebSocket'}, {allow: ['example.com']}).allow, true);
 });
 
 /** One request through the proxy, as a browser would send it. */
@@ -37,8 +40,13 @@ test('the proxy refuses private addresses and connects to the address it checked
     assert.equal((await viaProxy(strict.port, {path: `http://127.0.0.1:${sitePort}/`})).status, 403);
     assert.equal((await viaProxy(strict.port, {method: 'CONNECT', path: '10.0.0.5:443'})).status, 403);
     assert.equal((await viaProxy(strict.port, {method: 'CONNECT', path: '[::1]:443'})).status, 403);
+    // CONNECT is not parsed as a URL, so a non-canonical spelling must still be refused.
+    assert.equal((await viaProxy(strict.port, {method: 'CONNECT', path: '0:0:0:0:0:ffff:7f00:1:443'})).status, 403);
+    assert.equal((await viaProxy(strict.port, {method: 'CONNECT', path: '[0064:ff9b::a00:1]:443'})).status, 403);
+    assert.equal((await viaProxy(strict.port, {path: 'http://[64:ff9b:1:a9fe:a9:fe00:808:808]/'})).status, 403);
+    assert.equal((await viaProxy(strict.port, {path: 'http://[ff02::1]/'})).status, 403);
     assert.equal((await viaProxy(strict.port, {path: 'ftp://example.com/'})).status, 400);
-    assert.equal(strict.refused.length, 3);
+    assert.equal(strict.refused.length, 7);
   } finally { strict.close(); }
   // A name is resolved once, by the proxy, and that answer is what gets connected to.
   const lookup = async name => { lookups.push(name); return {address: name === 'docs.test' ? '127.0.0.1' : '192.168.1.1'}; };

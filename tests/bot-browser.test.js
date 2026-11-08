@@ -1,0 +1,536 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import * as agent from '../src/agent.js';
+import {SqliteStore} from '../src/sqlite-store.js';
+import * as wf from '../shared/workflow.js';
+import {createRun, createEnvelope} from '../shared/coordination.js';
+import {coordinationState, runGroup, resumeFeedRun, resumeBrowserRun} from '../src/coordination.js';
+import {dispatchBrowserRequest, onAgentTaskResult, autoDispatch, continueBrowserWork} from '../src/bot-browser.js';
+import {refusePostingAction} from '../agent/browser.mjs';
+import {parseBrowserRequests, validateBrowserRequest, recordBrowserRequests, stripBrowserBlocks, denyBrowserRequest, browserResultText, capturePageText, feedPageText, requestOfMessage, queueFeedRead, MAX_BROWSER_DEPTH, BROWSER_PERMISSION} from '../shared/bot-browser.js';
+import {addChatMessages} from '../shared/chats.js';
+import {validateBotSettings} from '../shared/bot-settings.js';
+import {ACTIONS} from '../shared/contracts.js';
+
+const block = body => `Let me look.\n\`\`\`browser\n${JSON.stringify(body)}\n\`\`\`\nBack soon.`;
+const browserBot = (extra = {}) => ({id: 'web', name: 'Web', instructions: 'Look things up.', type: 'custom', permissions: [BROWSER_PERMISSION], ...extra});
+const status = code => error => error.status === code;
+
+test('browser blocks are parsed, bounded and kept away from posting on X', () => {
+  assert.ok(ACTIONS.includes(BROWSER_PERMISSION));
+  assert.deepEqual(validateBrowserRequest({url: 'https://example.com/a'}), {kind: 'browser.capture', url: 'https://example.com/a', steps: []});
+  const act = validateBrowserRequest({url: 'https://example.com', steps: [{op: 'type', selector: '#q', text: 'hi'}, {op: 'click', selector: '#go'}, {op: 'read', selector: 'main'}]});
+  assert.equal(act.kind, 'browser.action'); assert.equal(act.steps.length, 3);
+  assert.throws(() => validateBrowserRequest({url: 'https://x.com/home', steps: [{op: 'click', selector: '[data-testid=tweetButton]'}]}), status(403));
+  assert.throws(() => validateBrowserRequest({url: 'https://example.com', steps: [{op: 'navigate', url: 'https://mobile.twitter.com'}, {op: 'type', selector: 'textarea', text: 'x'}]}), status(403), 'A navigate onto X before interacting is refused too.');
+  assert.equal(validateBrowserRequest({url: 'https://x.com/someone/status/1', steps: [{op: 'read', selector: 'article'}]}).kind, 'browser.action', 'Reading X is allowed.');
+  const scrolled = validateBrowserRequest({url: 'https://x.com/home', steps: [{op: 'scroll', times: 9}]});
+  assert.equal(scrolled.steps[0].times, 4, 'A scroll only moves the page, and only a few times.');
+  assert.equal(feedPageText({text: 'Sign in to X to see what is happening. Happening now. Join today and follow what you care about. This wall is long enough to pass a short-page check.'}), '');
+  assert.equal(feedPageText({title: 'X', text: 'Happening now. Join today. Sign in and see what people are talking about around the world this hour.'}), '');
+  assert.ok(feedPageText({text: 'Ada posted about rockets and the next launch window. Replying to Ada: the pad timeline slipped by a day.'}).includes('rockets'));
+  assert.ok(feedPageText({actions: [{text: 'Ada posted about rockets and the next launch window. Replying to Ada: the pad timeline slipped by a day.'}]}).includes('rockets'));
+  assert.equal(scrolled.kind, 'browser.action');
+  assert.throws(() => validateBrowserRequest({url: 'file:///etc/passwd'}), /public http/);
+  assert.throws(() => validateBrowserRequest({url: 'https://example.com', steps: Array(26).fill({op: 'read', selector: 'p'})}), /at most 25/);
+  assert.throws(() => validateBrowserRequest({url: 'https://example.com', steps: [{op: 'eval', selector: 'p'}]}), /op/);
+  const many = [1, 2, 3].map(i => block({url: `https://example.com/${i}`})).join('\n') + '\n```browser\nnot json\n```';
+  assert.equal(parseBrowserRequests(many).length, 2, 'At most two requests per reply.');
+  assert.deepEqual(parseBrowserRequests('```browser\n{oops\n```'), [{ok: false, error: 'The browser block is not valid JSON.'}]);
+  assert.equal(stripBrowserBlocks(block({url: 'https://example.com'})), 'Let me look.\n\nBack soon.');
+  const unclosed = 'Checking.\n```browser\n{"url":"https://example.com/docs"}';
+  assert.equal(parseBrowserRequests(unclosed)[0].request.url, 'https://example.com/docs', 'A reply ending on its block loses the closing fence in the AI client.');
+  assert.equal(stripBrowserBlocks(unclosed), 'Checking.');
+  assert.equal(capturePageText({actions: [{text: 'Hello'}]}), 'Hello');
+  assert.equal(capturePageText({text: 'x'.repeat(2000)}, 1500).length, 1500);
+  assert.equal(capturePageText({text: 'x'.repeat(2000)}).length, 2000);
+});
+
+test('a trailing dot is still X or Twitter, so click and type stay refused', () => {
+  const click = selector => [{op: 'click', selector}];
+  for (const url of ['https://x.com./home', 'https://x.com%2e/home', 'https://x.com%2e%2e/home', 'https://twitter.com.', 'https://www.x.com.', 'https://mobile.twitter.com%2e/', 'https://x.com%E3%80%82/home', 'https://twitter.com%EF%BC%8E/']) {
+    assert.throws(() => validateBrowserRequest({url, steps: click('[data-testid=tweetButton]')}), status(403), url);
+  }
+  assert.throws(() => validateBrowserRequest({url: 'https://example.com', steps: [{op: 'navigate', url: 'https://twitter.com%2e/compose'}, {op: 'type', selector: 'textarea', text: 'hi'}]}), status(403));
+  const read = validateBrowserRequest({url: 'https://x.com./home', steps: [{op: 'scroll', times: 2}, {op: 'read', selector: 'main'}]});
+  assert.equal(read.kind, 'browser.action', 'Reading the dotted host is still allowed.');
+  assert.equal(validateBrowserRequest({url: 'https://example.com.', steps: click('#go')}).steps[0].op, 'click', 'A trailing dot on some other host is not X.');
+  assert.equal(validateBrowserRequest({url: 'https://notx.com/home', steps: click('a')}).url, 'https://notx.com/home');
+  assert.match(refusePostingAction('click', 'https://x.com/home'), /never click or type/);
+  assert.match(refusePostingAction('type', 'https://x.com./compose'), /never click or type/);
+  assert.match(refusePostingAction('click', 'https://mobile.twitter.com/'), /never click or type/);
+  assert.equal(refusePostingAction('click', 'https://example.com/'), '');
+  assert.equal(refusePostingAction('read', 'https://x.com/home'), '');
+  assert.equal(refusePostingAction('scroll', 'https://twitter.com.'), '');
+});
+
+test('a missing feed permission keeps the bot id so the chat can open its profile', () => {
+  const state = wf.migrate({candidates: [], groups: [{id: 'g', name: 'G', bots: [browserBot({permissions: []})]}]});
+  const bot = state.groups.flatMap(g => g.bots).find(b => b.id === 'web');
+  const {record, line} = queueFeedRead(state, {bot, groupId: 'g', chatKey: 'team-g', runId: 'r'});
+  assert.equal(record, null);
+  assert.equal(line.kind, 'feed-permission');
+  assert.equal(line.senderId, 'web');
+  addChatMessages(state, 'team-g', [line], {trusted: true});
+  const saved = state.chats['team-g'].at(-1);
+  assert.equal(saved.kind, 'feed-permission');
+  assert.equal(saved.senderId, 'web');
+});
+
+test('a reply becomes request cards only for a bot holding browser.use, within the depth limit', () => {
+  const state = wf.migrate({candidates: [], groups: []});
+  const out = recordBrowserRequests(state, {bot: browserBot(), groupId: 'g', chatKey: 'web', output: block({url: 'https://example.com'}), makeId: (() => { let n = 0; return () => `id-${++n}`; })()});
+  assert.equal(out.text, 'Let me look.\n\nBack soon.');
+  assert.equal(out.records.length, 1); assert.equal(state.browserRequests[0].status, 'pending');
+  assert.equal(out.lines[0].kind, 'browser'); assert.equal(requestOfMessage(state, out.lines[0].id).id, out.records[0].id);
+  const none = recordBrowserRequests(state, {bot: browserBot({permissions: []}), groupId: 'g', chatKey: 'web', output: block({url: 'https://example.com'})});
+  assert.equal(none.records.length, 0); assert.match(none.lines[0].text, /does not hold the browser\.use permission/);
+  const deep = recordBrowserRequests(state, {bot: browserBot(), groupId: 'g', chatKey: 'web', output: block({url: 'https://example.com'}), depth: MAX_BROWSER_DEPTH});
+  assert.equal(deep.records.length, 0); assert.match(deep.lines[0].text, /limit/);
+  const refused = recordBrowserRequests(state, {bot: browserBot(), groupId: 'g', chatKey: 'web', output: block({url: 'https://x.com', steps: [{op: 'click', selector: 'button'}]})});
+  assert.match(refused.lines[0].text, /refused: .*Posting stays yours/);
+  assert.equal(recordBrowserRequests(state, {bot: browserBot(), groupId: 'g', chatKey: 'web', output: 'plain reply'}).text, 'plain reply');
+  const again = recordBrowserRequests(state, {bot: browserBot(), groupId: 'g', chatKey: 'web', output: block({url: 'https://x.com/home/'}), skipUrls: ['https://x.com/home']});
+  assert.equal(again.records.length, 0);
+  assert.match(again.lines[0].text, /already has that page/);
+  assert.equal(denyBrowserRequest(state, out.records[0].id).status, 'denied');
+  assert.throws(() => denyBrowserRequest(state, out.records[0].id), status(409));
+  state.browserRequests.unshift({id: 'feed-go', purpose: 'feed', runId: 'r-feed', status: 'dispatched'});
+  assert.equal(denyBrowserRequest(state, 'feed-go').status, 'denied', 'A home-feed read already sent can still be cancelled.');
+  state.browserRequests.unshift({id: 'page-go', runId: 'r-page', status: 'dispatched'});
+  assert.equal(denyBrowserRequest(state, 'page-go').status, 'denied', 'A dispatched page that is holding a run can still be cancelled.');
+  state.browserRequests.unshift({id: 'other-go', status: 'dispatched'});
+  assert.equal(denyBrowserRequest(state, 'other-go').status, 'denied', 'A dispatched 1:1 page can still be cancelled.');
+  assert.equal(validateBotSettings({browserApproval: 'auto'}).browserApproval, 'auto');
+  assert.throws(() => validateBotSettings({browserApproval: 'always'}), /Browser approval/);
+});
+
+test('the envelope tells only a permitted bot about the browser tool', () => {
+  const group = {id: 'g', name: 'G', bots: [browserBot(), {id: 'plain', name: 'Plain', instructions: 'x', type: 'custom'}]};
+  const run = createRun({group, message: '@Web @Plain go', makeId: () => 'r'});
+  assert.match(createEnvelope({run, bot: group.bots[0]}).tools.browser, /browser/);
+  assert.equal(createEnvelope({run, bot: group.bots[1]}).tools, undefined);
+  assert.match(browserResultText({botName: 'Web', url: 'https://example.com'}, {title: 'Example', finalUrl: 'https://example.com/', actions: [{op: 'read', ok: true, text: 'Hello'}]}), /Browser result for Web: Example · https:\/\/example\.com\/\n\nHello/);
+});
+
+async function harness() {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'bot-browser-'));
+  const store = await new SqliteStore(path.join(dir, 'state.db'), path.join(dir, 'state.json')).init();
+  store.run("INSERT INTO workspaces (id,name,created_at) VALUES ('default','Primary workspace',?)", new Date().toISOString());
+  agent.attachVault(store, path.join(dir, 'state.json'));
+  return {dir, store};
+}
+
+test('a bot browses through the paired local agent and continues from the result', async () => {
+  const {dir, store} = await harness();
+  try {
+    await store.update(s => { wf.migrate(s); coordinationState(s); s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}]; s.groupRuns.push(createRun({group: s.groups[0], message: 'Find the docs', makeId: () => 'run-1', chatKey: 'web'})); });
+    await runGroup(store, 'run-1', async () => block({url: 'https://example.com/docs', steps: [{op: 'read', selector: 'main'}]}));
+    let s = store.read();
+    const request = s.browserRequests[0];
+    assert.equal(request.status, 'pending', 'Ask is the default: nothing reaches the device unapproved.');
+    assert.deepEqual(s.chats.web.map(m => m.kind || m.role), ['bot', 'browser']);
+    assert.equal(s.chats.web[0].text, 'Let me look.\n\nBack soon.', 'The chat shows the reply without the raw block.');
+    await assert.rejects(dispatchBrowserRequest(store, request.id), error => error.status === 409 && /No paired local agent holds the browser\.action/.test(error.message));
+    assert.equal(store.read().browserRequests[0].status, 'pending', 'Without an agent the request stays pending.');
+
+    const {code} = agent.createPairing(store, 'default', {});
+    const device = agent.redeemPairing(store, {code, name: 'Laptop', permissions: ['browser.action']});
+    const sent = await dispatchBrowserRequest(store, request.id, {actor: 'owner@localhost'});
+    assert.equal(sent.status, 'dispatched'); assert.equal(sent.approvedBy, 'owner@localhost');
+    await assert.rejects(dispatchBrowserRequest(store, request.id), status(409), 'A request is sent once.');
+    const [task] = agent.claimAgentTasks(store, device.agentId);
+    assert.equal(task.kind, 'browser.action');
+    assert.deepEqual(JSON.parse(task.payload), {url: 'https://example.com/docs', steps: [{op: 'read', selector: 'main'}]});
+
+    const longPage = `Install with npm.\n${'Keep this paragraph for the next draft. '.repeat(60)}`;
+    agent.completeAgentTask(store, device.agentId, task.id, {status: 'done', result: {title: 'Docs', finalUrl: 'https://example.com/docs', actions: [{op: 'read', ok: true, text: longPage}]}});
+    assert.equal(store.read().groupRuns[0].status, 'awaiting_browser');
+    const continued = [];
+    const done = await onAgentTaskResult(store, task.id, {
+      continueRun: async () => continued.push('new-run'),
+      resumeBrowser: (s, req, opts) => resumeBrowserRun(s, req, {...opts, executor: async (bot, raw) => { continued.push(JSON.parse(raw)); return 'Used the docs.'; }}),
+    });
+    assert.equal(done.status, 'done');
+    for (let i = 0; i < 40 && store.read().groupRuns[0].status !== 'completed'; i++) await new Promise(r => setTimeout(r, 20));
+    s = store.read();
+    assert.match(s.chats.web.find(m => /Install with npm/.test(m.text)).text, /Browser result for Web: Docs/);
+    assert.equal(continued.includes('new-run'), false, 'The same run continues; a second queue must not start.');
+    const env = continued.find(e => e && e.page);
+    assert.ok(env && env.page.includes('Keep this paragraph') && env.page.length > 1500, 'The next turn gets the captured page, not the short chat line.');
+    assert.equal(s.groupRuns[0].status, 'completed');
+    assert.match(s.groupRuns[0].trace.at(-1).output, /Used the docs/);
+    assert.equal(await onAgentTaskResult(store, task.id, {continueRun: async () => continued.push('again')}), null, 'A result is applied once.');
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});
+
+test('a home-feed result is not handed back as a second run', async () => {
+  const {dir, store} = await harness();
+  try {
+    await store.update(s => { wf.migrate(s); s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot({id: 'scout', name: 'Scout', type: 'source'})]}]; });
+    const {code} = agent.createPairing(store, 'default', {});
+    const device = agent.redeemPairing(store, {code, name: 'Laptop', permissions: ['browser.capture']});
+    const now = new Date().toISOString();
+    await store.update(s => { s.browserRequests = [{id: 'fr', botId: 'scout', botName: 'Scout', groupId: 'lab', chatKey: 'scout', runId: 'run-f', purpose: 'feed', url: 'https://x.com/home', steps: [], kind: 'browser.capture', depth: 0, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: now, updatedAt: now}]; });
+    await dispatchBrowserRequest(store, 'fr');
+    const [task] = agent.claimAgentTasks(store, device.agentId);
+    agent.completeAgentTask(store, device.agentId, task.id, {status: 'done', result: {title: 'X', text: 'Happening now. Join today. Sign in and see what people are talking about around the world this hour.'}});
+    const continued = [];
+    await onAgentTaskResult(store, task.id, {continueRun: async () => { continued.push(true); }});
+    assert.equal(continued.length, 0);
+    assert.match(store.read().chats.scout.at(-1).text, /could not be resumed/);
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});
+
+test('a signed-out home feed stops the run and says to sign in', async () => {
+  const {dir, store} = await harness();
+  try {
+    await store.update(s => {
+      wf.migrate(s); coordinationState(s);
+      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot({id: 'scout', name: 'Scout', type: 'source'})]}];
+      s.groupRuns.push({id: 'run-f', groupId: 'lab', chatKey: 'scout', status: 'awaiting_feed', input: 'scroll my feed', recipients: ['scout'], mode: 'tracked', task: {needsFeed: true}, trace: [], createdAt: new Date().toISOString()});
+    });
+    const {code} = agent.createPairing(store, 'default', {});
+    const device = agent.redeemPairing(store, {code, name: 'Laptop', permissions: ['browser.capture']});
+    const now = new Date().toISOString();
+    await store.update(s => { s.browserRequests = [{id: 'fr', botId: 'scout', botName: 'Scout', groupId: 'lab', chatKey: 'scout', runId: 'run-f', purpose: 'feed', url: 'https://x.com/home', steps: [], kind: 'browser.capture', depth: 0, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: now, updatedAt: now}]; });
+    await dispatchBrowserRequest(store, 'fr');
+    const [task] = agent.claimAgentTasks(store, device.agentId);
+    agent.completeAgentTask(store, device.agentId, task.id, {status: 'done', result: {title: 'X', text: 'Happening now. Join today. Sign in and see what people are talking about around the world this hour.'}});
+    const continued = [];
+    await onAgentTaskResult(store, task.id, {continueRun: async () => { continued.push(true); }, resumeFeed: resumeFeedRun});
+    assert.equal(continued.length, 0);
+    const run = store.read().groupRuns.find(r => r.id === 'run-f');
+    assert.equal(run.status, 'failed');
+    assert.match(run.error, /Sign in/);
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});
+
+test('a feed denied while it is being sent stays denied, and its result does not start other bots', async () => {
+  const {dir, store} = await harness();
+  try {
+    const now = new Date().toISOString();
+    await store.update(s => {
+      wf.migrate(s);
+      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot({id: 'scout', name: 'Scout', type: 'source'})]}];
+      s.browserRequests = [{id: 'fr', botId: 'scout', botName: 'Scout', groupId: 'lab', chatKey: 'scout', runId: 'run-f', purpose: 'feed', url: 'https://x.com/home', steps: [], kind: 'browser.capture', depth: 0, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: now, updatedAt: now}];
+    });
+    const {code} = agent.createPairing(store, 'default', {});
+    const device = agent.redeemPairing(store, {code, name: 'Laptop', permissions: ['browser.capture']});
+    const orig = store.update.bind(store);
+    let flip = true;
+    store.update = async fn => {
+      if (flip) {
+        flip = false;
+        await orig(s => {
+          const req = s.browserRequests.find(r => r.id === 'fr');
+          if (req && req.status === 'pending') req.status = 'denied';
+        });
+      }
+      return orig(fn);
+    };
+    await assert.rejects(dispatchBrowserRequest(store, 'fr'), status(409));
+    assert.equal(store.read().browserRequests.find(r => r.id === 'fr').status, 'denied');
+    assert.equal(agent.claimAgentTasks(store, device.agentId).length, 0, 'A denial that wins before the claim does not leave a page for the agent to open.');
+    store.update = orig;
+    const mid = new Date().toISOString();
+    await store.update(s => { s.browserRequests.unshift({id: 'fr-mid', botId: 'scout', botName: 'Scout', groupId: 'lab', chatKey: 'scout', runId: 'run-f', purpose: 'feed', url: 'https://x.com/home', steps: [], kind: 'browser.capture', depth: 0, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: mid, updatedAt: mid}); });
+    let claimed = false;
+    store.update = async fn => {
+      const result = await orig(fn);
+      if (!claimed) {
+        const req = store.read().browserRequests.find(r => r.id === 'fr-mid');
+        if (req?.status === 'dispatched' && !(req.agentTaskIds || []).length) {
+          claimed = true;
+          await orig(s => {
+            const live = s.browserRequests.find(r => r.id === 'fr-mid');
+            if (live && live.status === 'dispatched') live.status = 'denied';
+          });
+        }
+      }
+      return result;
+    };
+    await assert.rejects(dispatchBrowserRequest(store, 'fr-mid'), status(409));
+    assert.equal(store.read().browserRequests.find(r => r.id === 'fr-mid').status, 'denied');
+    assert.equal(agent.claimAgentTasks(store, device.agentId).length, 0, 'A denial after the claim, before the task is queued, does not leave a page for the agent to open.');
+    store.update = orig;
+    const page = 'Ada posted about rockets and the next launch window. Replying to Ada: the pad timeline slipped by a day.';
+    const started = [];
+    const hooks = {continueRun: async () => { started.push('continue'); }, resumeFeed: async () => { started.push('resume'); }};
+    const later = new Date().toISOString();
+    await store.update(s => { s.browserRequests.unshift({id: 'fr2', botId: 'scout', botName: 'Scout', groupId: 'lab', chatKey: 'scout', runId: 'run-f', purpose: 'feed', url: 'https://x.com/home', steps: [], kind: 'browser.capture', depth: 0, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: later, updatedAt: later}); });
+    await dispatchBrowserRequest(store, 'fr2');
+    assert.equal((await store.update(s => denyBrowserRequest(s, 'fr2'))).status, 'denied');
+    const [linked] = agent.claimAgentTasks(store, device.agentId);
+    agent.completeAgentTask(store, device.agentId, linked.id, {status: 'done', result: {title: 'X', text: page}});
+    await onAgentTaskResult(store, linked.id, hooks);
+    assert.deepEqual(started, [], 'A page that arrives after the feed was denied does not start the other bots.');
+    assert.equal(store.read().browserRequests.find(r => r.id === 'fr2').status, 'denied');
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});
+
+test('a failed enqueue puts the claimed request back to pending', async () => {
+  const {dir, store} = await harness();
+  try {
+    const {code} = agent.createPairing(store, 'default', {});
+    const device = agent.redeemPairing(store, {code, name: 'Laptop', permissions: ['browser.capture']});
+    const now = new Date().toISOString();
+    await store.update(s => {
+      wf.migrate(s);
+      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}];
+      s.browserRequests = [{id: 'fr', botId: 'web', botName: 'Web', groupId: 'lab', chatKey: 'web', url: 'https://example.com/', steps: [], kind: 'browser.capture', depth: 0, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: now, updatedAt: now}];
+    });
+    const orig = store.run.bind(store);
+    store.run = (sql, ...params) => {
+      if (String(sql).includes('INSERT INTO agent_tasks')) throw Object.assign(new Error('The agent database is busy.'), {status: 503});
+      return orig(sql, ...params);
+    };
+    await assert.rejects(dispatchBrowserRequest(store, 'fr'), error => error.status === 503 && /busy/.test(error.message));
+    const left = store.read().browserRequests.find(r => r.id === 'fr');
+    assert.equal(left.status, 'pending');
+    assert.equal(left.approvedBy, undefined);
+    assert.equal(agent.claimAgentTasks(store, device.agentId).length, 0);
+    store.run = orig;
+    const sent = await dispatchBrowserRequest(store, 'fr');
+    assert.equal(sent.status, 'dispatched');
+    assert.equal(agent.claimAgentTasks(store, device.agentId).length, 1);
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});
+
+test('auto-approval with no agent stays pending and is reported, and a denial is not described as waiting', async () => {
+  const {dir, store} = await harness();
+  try {
+    const now = new Date().toISOString();
+    const request = (id, status) => ({id, botId: 'web', botName: 'Web', groupId: 'lab', chatKey: 'web', url: 'https://example.com/', steps: [], kind: 'browser.capture', depth: 0, status, agentTaskIds: [], result: null, error: null, createdAt: now, updatedAt: now});
+    await store.update(s => {
+      wf.migrate(s);
+      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}];
+      s.browserRequests = [request('pending-one', 'pending')];
+    });
+    await autoDispatch(store, store.read().browserRequests);
+    assert.equal(store.read().browserRequests[0].status, 'pending');
+    assert.match(store.read().chats.web.at(-1).text, /browser request is waiting: No paired local agent/);
+    await store.update(s => { s.browserRequests = [request('denied-one', 'denied')]; s.chats.web = []; });
+    await autoDispatch(store, store.read().browserRequests);
+    assert.equal(store.read().browserRequests[0].status, 'denied');
+    assert.equal(store.read().chats.web.length, 0);
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});
+
+test('a bot set to run without asking sends its request at once, and a failure is reported', async () => {
+  const {dir, store} = await harness();
+  try {
+    const {code} = agent.createPairing(store, 'default', {});
+    const device = agent.redeemPairing(store, {code, name: 'Laptop', permissions: ['browser.capture']});
+    await store.update(s => { wf.migrate(s); coordinationState(s); s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot({settings: {browserApproval: 'auto'}})]}]; s.groupRuns.push(createRun({group: s.groups[0], message: 'Read it', makeId: () => 'run-2', chatKey: 'team-lab'})); });
+    await runGroup(store, 'run-2', async () => block({url: 'https://example.com'}));
+    assert.equal(store.read().browserRequests[0].status, 'dispatched');
+    const [task] = agent.claimAgentTasks(store, device.agentId);
+    assert.equal(task.kind, 'browser.capture');
+    for (let i = 0; i < 3; i++) {
+      agent.completeAgentTask(store, device.agentId, task.id, {status: 'failed', error: 'example.com is not in AGENT_BROWSER_ALLOWLIST.'});
+      if (i < 2) { assert.equal(await onAgentTaskResult(store, task.id), null, 'A retrying task posts nothing yet.'); agent.claimAgentTasks(store, device.agentId); }
+    }
+    const failed = await onAgentTaskResult(store, task.id, {continueRun: async () => assert.fail('A failure is not handed back as a page.'), resumeBrowser: (s, req, opts) => resumeBrowserRun(s, req, {...opts, executor: async () => assert.fail('A failure is not handed back as a page.')})});
+    assert.equal(failed.status, 'failed');
+    assert.match(store.read().chats['team-lab'].at(-1).text, /browser request failed: example\.com is not in AGENT_BROWSER_ALLOWLIST/);
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});
+
+test('the next bot waits until the page is back, then that same bot continues', async () => {
+  const {dir, store} = await harness();
+  try {
+    const writer = browserBot({id: 'writer', name: 'Writer', type: 'writing'});
+    const reviewer = {id: 'reviewer', name: 'Reviewer', instructions: 'Check.', type: 'review'};
+    await store.update(s => {
+      wf.migrate(s); coordinationState(s);
+      s.groups = [{id: 'lab', name: 'Lab', bots: [writer, reviewer]}];
+      s.groupRuns.push(createRun({group: s.groups[0], message: '@Writer @Reviewer draft from the docs', makeId: () => 'run-p', chatKey: 'team-lab'}));
+    });
+    const seen = [];
+    await runGroup(store, 'run-p', async bot => { seen.push(bot.id); return bot.id === 'writer' ? block({url: 'https://example.com/docs', steps: [{op: 'read', selector: 'main'}]}) : 'Looks good.'; });
+    assert.deepEqual(seen, ['writer']);
+    assert.equal(store.read().groupRuns[0].status, 'awaiting_browser');
+    const {code} = agent.createPairing(store, 'default', {});
+    const device = agent.redeemPairing(store, {code, name: 'Laptop', permissions: ['browser.action']});
+    await dispatchBrowserRequest(store, store.read().browserRequests[0].id);
+    const [task] = agent.claimAgentTasks(store, device.agentId);
+    agent.completeAgentTask(store, device.agentId, task.id, {status: 'done', result: {title: 'Docs', text: 'Install with npm and then restart the service once.'}});
+    await onAgentTaskResult(store, task.id, {continueRun: async () => assert.fail('Must not start a second run.'), resumeBrowser: (s, req, opts) => resumeBrowserRun(s, req, {...opts, executor: async bot => { seen.push(bot.id); return bot.id === 'writer' ? 'Here is a draft from the docs you can edit.' : 'Looks good.'; }})});
+    for (let i = 0; i < 40 && store.read().groupRuns[0].status !== 'completed'; i++) await new Promise(r => setTimeout(r, 20));
+    assert.deepEqual(seen, ['writer', 'writer', 'reviewer']);
+    assert.equal(store.read().groupRuns[0].status, 'completed');
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});
+
+test('a long reply still files both browser fences', async () => {
+  const {dir, store} = await harness();
+  try {
+    await store.update(s => {
+      wf.migrate(s); coordinationState(s);
+      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}];
+      s.groupRuns.push(createRun({group: s.groups[0], message: 'Look both up', makeId: () => 'run-long', chatKey: 'team-lab'}));
+    });
+    const pad = `Note.\n${'x'.repeat(4000)}`;
+    await runGroup(store, 'run-long', async () => `${pad}\n${block({url: 'https://example.com/a'})}\n${block({url: 'https://example.com/b'})}`);
+    assert.equal(store.read().browserRequests.filter(r => r.runId === 'run-long').length, 2);
+    assert.equal(store.read().groupRuns[0].status, 'awaiting_browser');
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});
+
+test('the second page of one reply is waited for before the bot continues', async () => {
+  const {dir, store} = await harness();
+  try {
+    await store.update(s => {
+      wf.migrate(s); coordinationState(s);
+      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}];
+      s.groupRuns.push(createRun({group: s.groups[0], message: 'Look both up', makeId: () => 'run-two', chatKey: 'team-lab'}));
+    });
+    const seen = [];
+    await runGroup(store, 'run-two', async () => `${block({url: 'https://example.com/a'})}\n${block({url: 'https://example.com/b'})}`);
+    const [first, second] = store.read().browserRequests.filter(r => r.runId === 'run-two');
+    const pageA = 'Alpha page is long enough to count as captured article text here.';
+    const pageB = 'Beta page is long enough to count as captured article text here.';
+    await store.update(s => { s.browserRequests.find(r => r.id === first.id).status = 'done'; });
+    await resumeBrowserRun(store, first, {ok: true, text: pageA, executor: async () => { seen.push('early'); return 'too soon'; }});
+    assert.equal(store.read().groupRuns[0].status, 'awaiting_browser');
+    assert.match(store.read().groupRuns[0].browserPage, /Alpha page/);
+    assert.deepEqual(seen, []);
+    await store.update(s => { s.browserRequests.find(r => r.id === second.id).status = 'done'; });
+    await resumeBrowserRun(store, second, {ok: true, text: pageB, executor: async (bot, input) => {
+      seen.push('go');
+      assert.match(input, /Alpha page/);
+      assert.match(input, /Beta page/);
+      return 'Used both pages.';
+    }});
+    for (let i = 0; i < 40 && store.read().groupRuns[0].status !== 'completed'; i++) await new Promise(r => setTimeout(r, 20));
+    assert.deepEqual(seen, ['go']);
+    assert.equal(store.read().groupRuns[0].status, 'completed');
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});
+
+test('a duplicate result delivery neither double-appends nor restarts the run', async () => {
+  const {dir, store} = await harness();
+  try {
+    await store.update(s => {
+      wf.migrate(s); coordinationState(s);
+      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}];
+      s.groupRuns.push(createRun({group: s.groups[0], message: 'Look it up', makeId: () => 'run-dup', chatKey: 'team-lab'}));
+    });
+    await runGroup(store, 'run-dup', async () => block({url: 'https://example.com/a'}));
+    const [req] = store.read().browserRequests.filter(r => r.runId === 'run-dup');
+    const page = 'A page long enough to count as captured article text here now.';
+    const went = [];
+    await resumeBrowserRun(store, req, {ok: true, text: page, executor: async () => { went.push('run'); return 'Done.'; }});
+    const first = store.read().groupRuns[0].browserPage;
+    assert.match(store.read().groupRuns[0].status, /^(queued|running)$/, 'A single request resumes without waiting on siblings.');
+    // Simulate the retried POST: the agent reports the result a second time.
+    await resumeBrowserRun(store, req, {ok: true, text: page, executor: async () => { went.push('again'); return 'Done again.'; }});
+    assert.equal(store.read().groupRuns[0].browserPage, first, 'The page is not appended twice.');
+    for (let i = 0; i < 40 && store.read().groupRuns[0].status !== 'completed'; i++) await new Promise(r => setTimeout(r, 20));
+    assert.deepEqual(went, ['run']);
+    assert.equal(store.read().groupRuns[0].browserConsumed?.length, 1);
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});
+
+test('denying a page still pauses at a checkpoint before the next bot', async () => {
+  const {dir, store} = await harness();
+  try {
+    const writer = {id: 'writer', name: 'Writer', instructions: 'Write.', type: 'custom'};
+    await store.update(s => {
+      wf.migrate(s); coordinationState(s);
+      s.groups = [{id: 'lab', name: 'Lab', settings: {checkpoints: true}, bots: [browserBot(), writer]}];
+      s.groupRuns.push(createRun({group: s.groups[0], message: '@Web @Writer go', makeId: () => 'run-ck', chatKey: 'team-lab'}));
+    });
+    const seen = [];
+    await runGroup(store, 'run-ck', async bot => {
+      seen.push(bot.id);
+      if (bot.id === 'web') return block({url: 'https://example.com/docs'});
+      return 'Draft.';
+    });
+    const req = store.read().browserRequests.find(r => r.runId === 'run-ck');
+    await resumeBrowserRun(store, req, {ok: false, executor: async bot => { seen.push(bot.id); return 'should not run'; }});
+    assert.equal(store.read().groupRuns[0].status, 'awaiting_checkpoint');
+    assert.deepEqual(seen, ['web']);
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});
+
+test('a one-to-one browse result does not wait on the follow-up model call', async () => {
+  const {dir, store} = await harness();
+  try {
+    await store.update(s => {
+      wf.migrate(s); coordinationState(s);
+      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}];
+      recordBrowserRequests(s, {bot: browserBot(), groupId: 'lab', chatKey: 'web', output: block({url: 'https://example.com/docs', steps: [{op: 'read', selector: 'main'}]})});
+    });
+    const {code} = agent.createPairing(store, 'default', {});
+    const device = agent.redeemPairing(store, {code, name: 'Laptop', permissions: ['browser.action']});
+    await dispatchBrowserRequest(store, store.read().browserRequests[0].id);
+    const [task] = agent.claimAgentTasks(store, device.agentId);
+    agent.completeAgentTask(store, device.agentId, task.id, {status: 'done', result: {title: 'Docs', text: 'Install with npm.'}});
+    let spec = null, resolveHang;
+    const hang = new Promise(r => { resolveHang = r; });
+    await Promise.race([
+      onAgentTaskResult(store, task.id, {continueRun: async (s, body) => { spec = body; await hang; }}),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('held the agent POST')), 500)),
+    ]);
+    assert.equal(spec?.directBotId, 'web');
+    assert.match(spec.page, /Install with npm/);
+    assert.equal(spec.message.includes('Install with npm'), false, 'Page text is data, not part of the task message.');
+    resolveHang();
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});
+
+test('a one-to-one reply with two pages waits for both before continuing', async () => {
+  const {dir, store} = await harness();
+  try {
+    await store.update(s => {
+      wf.migrate(s); coordinationState(s);
+      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}];
+      recordBrowserRequests(s, {bot: browserBot(), groupId: 'lab', chatKey: 'web', output: `${block({url: 'https://example.com/a', steps: [{op: 'read', selector: 'main'}]})}\n${block({url: 'https://example.com/b', steps: [{op: 'read', selector: 'main'}]})}`});
+    });
+    const {code} = agent.createPairing(store, 'default', {});
+    const device = agent.redeemPairing(store, {code, name: 'Laptop', permissions: ['browser.action']});
+    const ids = store.read().browserRequests.filter(r => r.chatKey === 'web' && r.status === 'pending').map(r => r.id);
+    assert.equal(ids.length, 2);
+    for (const id of ids) await dispatchBrowserRequest(store, id);
+    const claimed = agent.claimAgentTasks(store, device.agentId);
+    assert.equal(claimed.length, 2);
+    const started = [];
+    agent.completeAgentTask(store, device.agentId, claimed[0].id, {status: 'done', result: {title: 'A', text: 'Alpha page is long enough to count as captured article text here.'}});
+    await onAgentTaskResult(store, claimed[0].id, {continueRun: async (s, spec) => started.push(spec)});
+    assert.equal(started.length, 0, 'The first page waits for the second.');
+    agent.completeAgentTask(store, device.agentId, claimed[1].id, {status: 'done', result: {title: 'B', text: 'Beta page is long enough to count as captured article text here.'}});
+    await onAgentTaskResult(store, claimed[1].id, {continueRun: async (s, spec) => started.push(spec)});
+    assert.equal(started.length, 1);
+    assert.match(started[0].page, /Alpha page/);
+    assert.match(started[0].page, /Beta page/);
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});
+
+test('a one-to-one browse continues that bot, not a group run', async () => {
+  const bot = [], group = [];
+  await continueBrowserWork(null, {directBotId: 'web', message: 'Here is the page.', page: 'Docs text.', browserDepth: 1, groupId: 'lab'}, {
+    runBot: async (s, spec) => bot.push(spec),
+    runGroup: async (s, spec) => group.push(spec),
+  });
+  assert.deepEqual(bot, [{botId: 'web', input: 'Here is the page.', page: 'Docs text.', browserDepth: 1}]);
+  assert.equal(group.length, 0);
+  await continueBrowserWork(null, {groupId: 'lab', message: 'go'}, {
+    runBot: async (s, spec) => bot.push(spec),
+    runGroup: async (s, spec) => group.push(spec),
+  });
+  assert.equal(group.length, 1);
+});
+
+test('browser requests survive a restart of the SQLite store', async () => {
+  const {dir, store} = await harness();
+  try {
+    await store.update(s => { wf.migrate(s); recordBrowserRequests(s, {bot: browserBot(), groupId: 'x-engage', chatKey: 'writer', output: block({url: 'https://example.com'})}); });
+    const again = await new SqliteStore(path.join(dir, 'state.db'), path.join(dir, 'state.json')).init();
+    assert.equal(again.read().browserRequests[0].url, 'https://example.com/');
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});

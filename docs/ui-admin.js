@@ -2,10 +2,10 @@
  * `adminPage(kind)` fetches and returns the body HTML; the handler tables are
  * wired by the host's delegated click, submit and change listeners. Handlers do
  * not catch errors, the host toasts them. */
-import {esc, btn, row, box, field, note, empty, tag, fullDate} from './ui-kit.js?v=b3961575ec';
-import {store, api, sync} from './ui-store.js?v=b3961575ec';
-import {toast, confirmSheet, askSheet} from './ui-dialogs.js?v=b3961575ec';
-import {pushStatus, enablePush, disablePush} from './ui-push.js?v=b3961575ec';
+import {esc, btn, row, box, field, note, empty, tag, fullDate} from './ui-kit.js?v=20376b59b1';
+import {store, api, sync} from './ui-store.js?v=20376b59b1';
+import {toast, confirmSheet, askSheet} from './ui-dialogs.js?v=20376b59b1';
+import {pushStatus, enablePush, disablePush} from './ui-push.js?v=20376b59b1';
 
 /** Title + one-line description per page, used by the host for the page header. */
 export const ADMIN_PAGES = {
@@ -27,7 +27,7 @@ export const ADMIN_PAGES = {
   },
   data: {
     title: 'Data and security',
-    sub: 'Credential vault, retention policy and encrypted backups.',
+    sub: 'Credential vault, retention policy and workspace backups.',
   },
   ai: {
     title: 'AI and models',
@@ -86,7 +86,7 @@ function notificationsPanel(list, prefs, push) {
     <label class="check-row"><input type="checkbox" name="inApp" ${prefs.inApp ? 'checked' : ''}><span>In-app (always recorded)</span></label>
     <label class="check-row"><input type="checkbox" name="webhook" ${prefs.webhook ? 'checked' : ''}><span>Webhook</span></label>
     ${field('Webhook credential id (from the vault)', textInput('webhookCredentialId', {value: prefs.webhookCredentialId || '', placeholder: 'uuid of a stored webhook credential'}))}
-    <label class="check-row"><input type="checkbox" name="email" ${prefs.email ? 'checked' : ''}><span>Email (relay; delivery is external)</span></label>
+    <label class="check-row"><input type="checkbox" name="email" ${prefs.email ? 'checked' : ''}><span>Email (needs EMAIL_RELAY_URL on the server)</span></label>
     ${field('Email address', textInput('emailAddress', {type: 'email', value: prefs.emailAddress || ''}))}
     ${btn('Save preferences', null, {kind: 'primary', type: 'submit'})}
   </form>`;
@@ -100,12 +100,14 @@ function teamPanel(usersRes, sessionsRes) {
   const me = store.state?.me?.email;
   const members = users.map(user => {
     const isMe = me === user.email;
-    const select = `<select class="input" data-action="set-role" data-id="${esc(user.id)}" aria-label="Role for ${esc(user.email)}">${roles.map(r => `<option value="${esc(r)}" ${r === user.role ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>`;
+    const choices = roles.filter(r => r !== 'owner');
+    const select = user.role === 'owner' ? '<span>owner</span>' : `<select class="input" data-action="set-role" data-id="${esc(user.id)}" aria-label="Role for ${esc(user.email)}">${choices.map(r => `<option value="${esc(r)}" ${r === user.role ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>`;
+    const disable = isMe ? '' : btn(user.disabled ? 'Enable' : 'Disable', 'toggle-user-disabled', {id: user.id, small: true, data: {disable: user.disabled ? '0' : '1'}});
     const remove = isMe ? '' : btn('Remove', 'remove-user', {kind: 'danger', id: user.id, small: true});
     return actionRow(
       `${esc(user.email)}${user.disabled ? ` ${tag('disabled', 'bad')}` : ''}${isMe ? ` ${tag('you', 'good')}` : ''}`,
       `Joined ${esc(fullDate(user.createdAt))}`,
-      select + remove,
+      select + disable + remove,
     );
   }).join('');
   const invite = `<form id="create-user-form">
@@ -113,7 +115,7 @@ function teamPanel(usersRes, sessionsRes) {
       ${field('Email', textInput('email', {type: 'email', required: true}))}
       ${field('Role', '<select class="input" name="role"><option value="viewer">viewer</option><option value="member" selected>member</option><option value="admin">admin</option></select>')}
     </div>
-    ${field('Temporary password (min 12 chars)', textInput('password', {type: 'password', minlength: 12, required: true}))}
+    ${field('Temporary password (min 8 chars)', textInput('password', {type: 'password', minlength: 8, required: true}))}
     <p class="field-help">Someone who already has an account keeps their own password and is added to this workspace.</p>
     ${btn('Create user', null, {kind: 'primary', type: 'submit'})}
   </form>`;
@@ -329,6 +331,13 @@ export const adminActions = {
     if (!await confirmSheet('Remove this user from the workspace?', {confirm: 'Remove', danger: true})) return;
     await api(`/api/users/${button.dataset.id}`, 'DELETE', {});
     toast('User removed.');
+    await ctx.reload();
+  },
+  'toggle-user-disabled': async (button, ctx) => {
+    const disable = button.dataset.disable === '1';
+    if (disable && !await confirmSheet('Disable this account?', {confirm: 'Disable', danger: true, detail: 'They cannot sign in. Their sessions are revoked.'})) return;
+    await api(`/api/users/${button.dataset.id}`, 'PATCH', {disabled: disable});
+    toast(disable ? 'Account disabled.' : 'Account enabled.');
     await ctx.reload();
   },
   'revoke-agent': async (button, ctx) => {

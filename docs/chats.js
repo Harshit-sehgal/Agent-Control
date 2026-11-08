@@ -7,7 +7,9 @@
  *
  * Messages are display records only. Nothing here runs a bot or publishes.
  */
-import {cleanText} from './core.js?v=b3961575ec';
+import {cleanText} from './core.js?v=20376b59b1';
+import {summonableGuests, BUSY_STATUSES} from './coordination.js?v=20376b59b1';
+import {denyBrowserRequest} from './bot-browser.js?v=20376b59b1';
 
 export const MAX_CHAT_MESSAGES = 300;
 const MAX_TEXT = 8000;
@@ -32,7 +34,10 @@ function untrusted(state, key, message) {
 }
 function claimedSender(state, key, raw, message) {
   if (message.role !== 'bot' || !key.startsWith('team-')) return message;
-  const bots = groupOf(state, key)?.bots || [], sender = bots.find(b => b.id === raw.senderId), next = bots.find(b => b.id === raw.toBotId);
+  const group = groupOf(state, key);
+  if (!group) return message;
+  const roster = [...(group.bots || []), ...summonableGuests(state.groups, group.id, {includeOff: true})];
+  const sender = roster.find(b => b.id === raw.senderId), next = roster.find(b => b.id === raw.toBotId);
   if (sender) { message.senderId = sender.id; message.senderName = sender.name; }
   if (sender && next) message.toBotId = next.id;
   return message;
@@ -63,10 +68,51 @@ export function addChatMessages(state, key, messages, {makeId = () => crypto.ran
   return {ok: true, added};
 }
 
+/** Clearing the thread also ends work that thread was blocking: waiting
+ * browser cards and BUSY runs. Leaving those would 409 every later send
+ * with no Approve/Start/Continue left on screen. Clearing a group chat also
+ * ends work on bot DMs of that group (a Handoff-DM plan still occupies the
+ * team). Clearing a bot's own chat only ends work keyed to that conversation. */
+export function groupIdOfChat(state, key) {
+  if (typeof key !== 'string') return '';
+  if (key.startsWith('team-')) return key.slice(5);
+  return groupOf(state, key)?.id || '';
+}
+export function matchesBusyChat(item, key, groupId) {
+  if (item.chatKey === key) return true;
+  return typeof key === 'string' && key.startsWith('team-') && Boolean(groupId && item.groupId === groupId);
+}
+
+export function releaseChatWork(state, key) {
+  const groupId = groupIdOfChat(state, key);
+  const ofChat = item => matchesBusyChat(item, key, groupId);
+  const now = new Date().toISOString();
+  for (const request of state.browserRequests || []) {
+    if (!ofChat(request) || !['pending', 'dispatched'].includes(request.status)) continue;
+    try { denyBrowserRequest(state, request.id); }
+    catch { request.status = 'denied'; request.updatedAt = now; }
+  }
+  for (const run of state.groupRuns || []) {
+    if (!ofChat(run) || !BUSY_STATUSES.includes(run.status)) continue;
+    run.status = 'cancelled';
+    run.error = 'Chat cleared.';
+    run.updatedAt = now;
+  }
+}
+
 export function clearChat(state, key) {
   const removed = state.chats?.[key]?.length || 0;
   if (state.chats && Object.hasOwn(state.chats, key)) delete state.chats[key];
-  return {ok: true, removed};
+  // The group run log is a second copy of the same lines. Leaving it would let
+  // the next stream paint the old run back into an empty thread.
+  const groupId = typeof key === 'string' && key.startsWith('team-') ? key.slice(5) : '';
+  let extra = 0;
+  if (groupId && state.groupMessages && Object.hasOwn(state.groupMessages, groupId)) {
+    extra = state.groupMessages[groupId]?.length || 0;
+    delete state.groupMessages[groupId];
+  }
+  releaseChatWork(state, key);
+  return {ok: true, removed: removed + extra};
 }
 
 /** Drop history whose bot or group is gone. Idempotent. */

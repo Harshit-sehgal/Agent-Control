@@ -49,12 +49,12 @@ export function delayWindow(min,max,random=()=>Math.random()) {
 }
 export function initialState() {
   return {version:1, createdAt:new Date().toISOString(), settings:{topics:['AI','machine learning','robotics','technology'],style:'Short, casual, direct. Simple words. No em dashes. Do not invent my opinions.',opinions:'',minDelay:2,maxDelay:10},captureToken:crypto.randomUUID().replaceAll('-',''),groups:[{id:'x-engage',name:'X-engage',description:'User-assisted social research and drafting',bots:[
-    {id:'scout',name:'Scout',instructions:'Collect only user-submitted browser context.',type:'source'},
+    {id:'scout',name:'Scout',instructions:'Collect posts from context the user supplied, or from a home-feed page they approved. Do not invent posts.',type:'source'},
     {id:'ranker',name:'Ranker',instructions:'Score post relevance and discussion value.',type:'scoring'},
     {id:'researcher',name:'Researcher',instructions:'Only describe evidence supplied; do not fabricate verification.',type:'context'},
     {id:'writer',name:'Writer',instructions:'Draft short replies in user style without invented opinions.',type:'writing'},
     {id:'reviewer',name:'Reviewer',instructions:'Require human approval and flag unsupported claims.',type:'review'},
-    {id:'handoff',name:'Handoff',instructions:'Prepare copy/manual posting. Never click Post.',type:'manual'}
+    {id:'handoff',name:'Handoff',instructions:'Prepare copy/manual posting. Never click Post. When the user tells you what they want, the other bots in this group take the job.',type:'manual',settings:{lead:true}}
   ]}],candidates:[],drafts:[],runs:[],schedules:[],events:[]};
 }
 export function scheduleApproval(draft, min, max, now=Date.now(), random) {
@@ -72,6 +72,9 @@ export function markDue(draft,now=Date.now()) {
   // with a missing dueAt would be released instantly instead of waiting for its
   // real time. Only a real, finite timestamp counts as due.
   if(!draft.dueAt) return false;
+  // Posted treats two missing approval fields as a match. Do not release a
+  // scheduled draft that never recorded the text that was approved.
+  if(draft.approvedRevision!==draft.revision || draft.approvedText!==draft.text) return false;
   const due = new Date(draft.dueAt).getTime();
   if(Number.isFinite(due) && due<=now) {draft.status='ready';return true;}
   return false;

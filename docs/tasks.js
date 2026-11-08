@@ -6,7 +6,7 @@
  * These transitions are pure and mirror `workflow.js`: the Node worker and the
  * browser-local demo both run them, so the two backends cannot drift.
  */
-import {activity, cleanText} from './core.js?v=b3961575ec';
+import {activity, cleanText} from './core.js?v=20376b59b1';
 
 export const TASK_STATUSES = ['queued', 'running', 'done', 'failed', 'cancelled'];
 export const MAX_ATTEMPTS_DEFAULT = 5;
@@ -19,14 +19,18 @@ const PAYLOAD_KINDS = {
     const kind = body.kind;
     const label = cleanText(body.label, 200);
     if (!label) throw fail('Label and valid schedule kind required.', 400);
-    if (kind === 'once') {
-      const when = Date.parse(body.nextAt);
-      if (!Number.isFinite(when) || when < Date.now() + 1000 || when > Date.now() + 365 * 86400000) throw fail('Choose a future date within one year.', 400);
-      return {label, kind, nextAt: new Date(when).toISOString()};
-    }
-    const intervalMinutes = Number(body.intervalMinutes);
-    if (!Number.isInteger(intervalMinutes) || intervalMinutes < 1 || intervalMinutes > 10080) throw fail('Interval must be 1\u201310080 minutes.', 400);
-    return {label, kind, intervalMinutes};
+    return {label, ...timing(body)};
+  },
+  'bot-task': body => {
+    const groupId = cleanText(body.groupId, 64);
+    if (!groupId) fail('A scheduled bot task needs a group.');
+    if (body.botId !== undefined && body.botId !== null && typeof body.botId !== 'string') fail('Bot id must be text.');
+    const botId = cleanText(body.botId, 64) || null;
+    const message = typeof body.message === 'string' ? body.message.trim() : '';
+    if (!message) fail('A scheduled bot task needs a message.');
+    if (message.length > 2000) fail('The message must be 2000 characters or fewer.');
+    if (!['once', 'interval'].includes(body.kind)) fail('Choose once or interval.');
+    return {groupId, botId, message, label: cleanText(body.label, 200) || message.slice(0, 60), ...timing(body)};
   },
   'candidate-draft': body => ({candidateId: cleanText(body.candidateId, 64), direction: cleanText(body.direction, 500)}),
   'group-run': body => ({groupId: cleanText(body.groupId, 64), message: cleanText(body.message, 4000), directBotId: cleanText(body.directBotId, 64) || null}),
@@ -43,6 +47,19 @@ const PAYLOAD_KINDS = {
 export function fail(message, status = 400) {
   throw Object.assign(new Error(message), {status});
 }
+
+/** The schedule part shared by reminders and scheduled bot tasks. */
+function timing(body) {
+  if (body.kind === 'once') {
+    const when = Date.parse(body.nextAt);
+    if (!Number.isFinite(when) || when < Date.now() + 1000 || when > Date.now() + 365 * 86400000) fail('Choose a future date within one year.');
+    return {kind: 'once', nextAt: new Date(when).toISOString()};
+  }
+  const intervalMinutes = Number(body.intervalMinutes);
+  if (!Number.isInteger(intervalMinutes) || intervalMinutes < 1 || intervalMinutes > 10080) fail('Interval must be 1\u201310080 minutes.');
+  return {kind: 'interval', intervalMinutes};
+}
+const SCHEDULED = ['reminder', 'bot-task'];
 
 export const taskKinds = () => Object.keys(PAYLOAD_KINDS);
 
@@ -79,7 +96,11 @@ export function enqueueTask(state, body = {}) {
   const kind = cleanText(body.kind, 64);
   const payload = buildPayload(kind, body.payload || body);
   const idempotencyKey = body.idempotencyKey ? cleanText(body.idempotencyKey, 120) : null;
-  const intervalMinutes = (kind === 'reminder' && payload.kind === 'interval') ? payload.intervalMinutes : (Number.isInteger(body.intervalMinutes) ? body.intervalMinutes : null);
+  if (kind === 'bot-task') {
+    const group = (state.groups || []).find(g => g.id === payload.groupId);
+    if (!group || (payload.botId && !group.bots.some(b => b.id === payload.botId))) fail('That bot or group no longer exists.', 404);
+  }
+  const intervalMinutes = (SCHEDULED.includes(kind) && payload.kind === 'interval') ? payload.intervalMinutes : (Number.isInteger(body.intervalMinutes) ? body.intervalMinutes : null);
   if (idempotencyKey) {
     const existing = state.tasks.find(t => t.idempotencyKey === idempotencyKey && t.status !== 'cancelled');
     if (existing) return {task: existing, duplicate: true};
@@ -101,6 +122,7 @@ const taskTitle = (kind, payload) => ({
   'candidate-draft': `Draft reply for ${payload.candidateId || 'candidate'}`,
   'group-run': `Group run: ${String(payload.message || '').slice(0, 80)}`,
   'agent-job': `Agent job: ${payload.action || 'unspecified'}`,
+  'bot-task': `Scheduled: ${payload.label}`,
 })[kind] || kind;
 
 /** Claim due tasks for execution. Leases are what make execution durable: a
@@ -127,6 +149,9 @@ export function claimTasks(state, {workerId, now = Date.now(), leaseMs = 60000, 
 export function completeTask(state, id, result = null, now = Date.now()) {
   const task = state.tasks.find(t => t.id === id);
   if (!task) fail('Task not found.', 404);
+  // Removed while this attempt was in flight. Completing it would re-arm an
+  // interval against a bot or group that is already gone.
+  if (task.status === 'cancelled') return task;
   if (task.status !== 'running') fail('Only a running task can be completed.', 409);
   task.status = 'done';
   task.result = result ?? null;
@@ -147,16 +172,21 @@ export function completeTask(state, id, result = null, now = Date.now()) {
 }
 
 /** Record a failure. The task goes back to `queued` with a backoff while
- * attempts remain, and only then to `failed`. */
-export function failTask(state, id, message, now = Date.now()) {
+ * attempts remain, and only then to `failed`. A 409 conflict (a busy group
+ * run) keeps that backoff past the budget instead of ending the task. */
+export function failTask(state, id, message, now = Date.now(), {conflict = false, permanent = false} = {}) {
   const task = state.tasks.find(t => t.id === id);
   if (!task) fail('Task not found.', 404);
+  if (task.status === 'cancelled') return task;
   if (task.status !== 'running') fail('Only a running task can fail.', 409);
   const error = String(message || 'Unknown error').slice(0, 400);
   task.leaseOwner = null;
   task.leaseUntil = null;
   task.updatedAt = new Date(now).toISOString();
-  if (task.attempts >= task.maxAttempts) {
+  // A busy group run outlasts the retry budget. A 409 must wait it out
+  // instead of being the error that marks the task failed. A permanent miss
+  // (the bot or group is gone) fails on this attempt.
+  if (permanent || (task.attempts >= task.maxAttempts && !conflict)) {
     task.status = 'failed';
     task.lastError = error;
     task.completedAt = new Date(now).toISOString();
@@ -219,7 +249,9 @@ export function migrateSchedules(state) {
       id: crypto.randomUUID(), kind: 'reminder', title: label,
       payload: kind === 'once' ? {label, kind, nextAt: onceAt} : {label, kind, intervalMinutes: intervalMinutes ?? 60},
       status: 'queued',
-      runAt: kind === 'once' ? onceAt : stamp(),
+      // A future interval keeps its next fire. Starting it at `now` would run
+      // a reminder that was not due yet. An overdue one is due immediately.
+      runAt: kind === 'once' ? onceAt : (Number.isFinite(past) && past > Date.now() ? new Date(past).toISOString() : stamp()),
       intervalMinutes: kind === 'interval' ? (intervalMinutes ?? 60) : null,
       idempotencyKey, attempts: 0, maxAttempts: 5, leaseOwner: null, leaseUntil: null,
       lastError: null, result: null, createdBy: null, createdAt: stamp(), updatedAt: stamp(), completedAt: null,

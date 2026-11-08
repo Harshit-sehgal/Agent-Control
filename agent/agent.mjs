@@ -16,9 +16,9 @@
  * "browser.capture" reads a page on a host the operator explicitly allowlists
  * (AGENT_BROWSER_ALLOWLIST). By default that is a plain HTTP read. With
  * AGENT_BROWSER=1 the page is opened in the Chrome, Chromium or Edge installed
- * on this device (see agent/browser.mjs), which also reads pages that need
- * JavaScript. Either way it only reads: nothing is clicked, typed or posted,
- * and automating X is outside the product's rules regardless.
+ * on this device (see agent/browser.mjs). "browser.action" may click, type,
+ * scroll and read there, except on X and Twitter, where click and type stay
+ * refused. Posting is never this process's job.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -28,7 +28,12 @@ import {captureWithBrowser, ACTION_OPS, MAX_ACTIONS} from './browser.mjs';
 import {resolvePublicAddress, pinnedRequest} from './net-guard.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const CONFIG = path.join(HERE, 'agent.config.json');
+const CONFIG = process.env.AGENT_CONFIG ? path.resolve(process.env.AGENT_CONFIG) : path.join(HERE, 'agent.config.json');
+// Kinds the control plane can grant. Asking for every one, when the operator
+// does not narrow the list, is the only way to receive the admin's full scope:
+// the server intersects the request with the code and treats an empty list as
+// "grant nothing".
+const TASK_KINDS = ['http.check', 'browser.capture', 'browser.action'];
 const POLL_MS = Number(process.env.AGENT_POLL_MS || 15000);
 const TIMEOUT_MS = 15000;
 
@@ -37,7 +42,14 @@ function loadConfig() {
   catch { fail('No agent config found. Run `node agent/agent.mjs pair --server <url> --code <code>` first.'); }
 }
 function saveConfig(config) {
-  fs.writeFileSync(CONFIG, JSON.stringify(config, null, 2), {mode: 0o600});
+  const fd = fs.openSync(CONFIG, 'w', 0o600);
+  try {
+    // open's mode only applies to a new file; repair permissions before the
+    // pairing secret is written when an older config already exists.
+    fs.fchmodSync(fd, 0o600);
+    fs.writeFileSync(fd, JSON.stringify(config, null, 2));
+    fs.fsyncSync(fd);
+  } finally { fs.closeSync(fd); }
 }
 function fail(message) { console.error(`agent: ${message}`); process.exit(1); }
 
@@ -47,6 +59,22 @@ function sign(secret, {method, requestPath, timestamp, body}) {
   return crypto.createHmac('sha256', secret).update(payload).digest('hex');
 }
 
+/** One outbound POST. Redirects are not followed: a 307 from the control plane
+ * would otherwise deliver the body (a pairing code, or a signed poll) to
+ * whatever host the Location names, including a metadata address. */
+async function post(url, {headers, body, timeoutMs = TIMEOUT_MS} = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {method: 'POST', headers, body, signal: controller.signal, redirect: 'manual'});
+    if (res.status >= 300 && res.status < 400) throw new Error(`Refusing to follow a redirect (${res.status}) from ${new URL(url).host}.`);
+    return res;
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error(`request to ${new URL(url).host} timed out after ${timeoutMs / 1000}s`);
+    throw e;
+  } finally { clearTimeout(timer); }
+}
+
 /** Outbound-only signed request. Returns parsed JSON or throws with the
  * server's message; never retries silently on 4xx. */
 async function call(config, requestPath, body = null) {
@@ -54,30 +82,26 @@ async function call(config, requestPath, body = null) {
   const raw = body === null ? '' : JSON.stringify(body);
   const timestamp = Date.now();
   const headers = {'Content-Type': 'application/json', 'X-Agent-Id': config.agentId, 'X-Agent-Ts': String(timestamp), 'X-Agent-Sig': sign(config.secret, {method: 'POST', requestPath, timestamp, body: raw})};
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-  try {
-    const res = await fetch(url, {method: 'POST', headers, body: body === null ? undefined : raw, signal: controller.signal});
-    const text = await res.text();
-    let value = null;
-    try { value = text ? JSON.parse(text) : null; } catch {}
-    if (!res.ok) throw new Error(`server responded ${res.status}: ${value?.error || text.slice(0, 200) || 'unknown error'}`);
-    return value;
-  } catch (e) {
-    if (e.name === 'AbortError') throw new Error(`request to ${url.host} timed out after ${TIMEOUT_MS / 1000}s`);
-    throw e;
-  } finally { clearTimeout(timer); }
+  const res = await post(url, {headers, body: body === null ? undefined : raw});
+  const text = await res.text();
+  let value = null;
+  try { value = text ? JSON.parse(text) : null; } catch {}
+  if (!res.ok) throw new Error(`server responded ${res.status}: ${value?.error || text.slice(0, 200) || 'unknown error'}`);
+  return value;
 }
 
 async function pair(argv) {
   const server = argValue(argv, '--server');
   const code = argValue(argv, '--code');
   if (!server || !code) fail('pair requires --server and --code.');
-  const permissions = (argValue(argv, '--permissions') || '').split(',').map(s => s.trim()).filter(Boolean);
+  const requested = argValue(argv, '--permissions');
+  const permissions = requested === null ? TASK_KINDS : requested.split(',').map(s => s.trim()).filter(Boolean);
   const name = argValue(argv, '--name') || `${process.env.COMPUTERNAME || process.env.HOSTNAME || 'device'}-agent`;
   const url = new URL(server.replace(/\/+$/, '') + '/api/agent/pair');
   const body = JSON.stringify({code, name, permissions});
-  const res = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body});
+  let res;
+  try { res = await post(url, {headers: {'Content-Type': 'application/json'}, body}); }
+  catch (e) { fail(e.message); }
   const value = await res.json().catch(() => null);
   if (!res.ok) fail(`pairing failed: ${value?.error || res.status}`);
   saveConfig({server: server.replace(/\/+$/, ''), agentId: value.agentId, secret: value.secret, workspaceId: value.workspaceId, permissions: value.permissions, pollIntervalMs: value.pollIntervalMs, name});
@@ -151,6 +175,7 @@ async function run() {
     try {
       const beat = await call(config, '/api/agent/heartbeat', {version: '1', os: process.platform, node: process.version});
       config.lastSeenAt = new Date().toISOString();
+      if (Array.isArray(beat.agent?.permissions)) config.permissions = beat.agent.permissions;
       for (const task of beat.tasks || []) {
         console.log(`agent: running ${task.kind} ${task.id}`);
         try {

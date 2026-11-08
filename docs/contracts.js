@@ -14,7 +14,7 @@
  *
  * Pure functions over bot records, like the other shared modules.
  */
-import {validHttpUrl} from './core.js?v=b3961575ec';
+import {validHttpUrl} from './core.js?v=20376b59b1';
 
 export const CONTRACT_VERSION = 1;
 
@@ -23,8 +23,10 @@ export const OUTPUT_KINDS = ['text', 'structured'];
 export const FIELD_TYPES = ['text', 'number', 'boolean', 'string_list', 'evidence_list', 'url'];
 
 /** Actions a bot may be granted. Deliberately absent: publish/post anything
- * externally. If it is not in this list, no profile can ever enable it. */
-export const ACTIONS = ['evidence.add', 'draft.create', 'schedule.set', 'agent.dispatch', 'chat.send'];
+ * externally. If it is not in this list, no profile can ever enable it.
+ * `browser.use` asks the user's paired local agent for a page; see
+ * bot-browser.js for why it still cannot press Post on X. */
+export const ACTIONS = ['evidence.add', 'draft.create', 'schedule.set', 'agent.dispatch', 'chat.send', 'browser.use'];
 
 export function fail(message, status = 400) {
   throw Object.assign(new Error(message), {status});
@@ -84,12 +86,13 @@ export function validatePermissions(list) {
 export function normalizeBot(bot) {
   if (!bot || typeof bot !== 'object') fail('Bot record is invalid.', 500);
   bot.contract ??= defaultContract();
-  bot.permissions ??= defaultPermissions(bot.type);
+  if (!Array.isArray(bot.permissions)) bot.permissions = defaultPermissions(bot.type);
+  else bot.permissions = [...new Set(bot.permissions.filter(action => ACTIONS.includes(action)))];
   return bot;
 }
 
 export function canBot(bot, action) {
-  if (!bot || !Array.isArray(bot.permissions)) return false;
+  if (!ACTIONS.includes(action) || !bot || !Array.isArray(bot.permissions)) return false;
   return bot.permissions.includes(action);
 }
 
@@ -106,21 +109,38 @@ function matchesType(value, type) {
     case 'url': return typeof value === 'string' && validHttpUrl(value) !== null;
     case 'string_list': return Array.isArray(value) && value.every(v => typeof v === 'string');
     // An evidence reference is a link or a structured item ({link, claim, …}).
-    case 'evidence_list': return Array.isArray(value) && value.every(v => (typeof v === 'string' && v.trim()) || (v && typeof v === 'object' && !Array.isArray(v)));
-    default: return true;
+    case 'evidence_list': return Array.isArray(value) && value.every(evidenceItem);
+    default: return false;
   }
 }
 
+function evidenceItem(value) {
+  if (typeof value === 'string') return validHttpUrl(value) !== null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const claim = typeof value.claim === 'string' && value.claim.trim();
+  const link = value.link === undefined || value.link === null || value.link === '' ? null : value.link;
+  if (link !== null && (typeof link !== 'string' || validHttpUrl(link) === null)) return false;
+  return Boolean(claim || link);
+}
+
 export function assertContractOutput(bot, output) {
-  const contract = bot?.contract || defaultContract();
   const text = String(output ?? '');
   if (!text.trim()) fail('Bot returned an empty output.', 502);
-  if (contract.output.kind !== 'structured') return text;
+  const contract = bot?.contract || defaultContract();
+  const declared = contract.output;
+  if (!declared || typeof declared !== 'object') fail('Contract output is required.', 502);
+  if (!OUTPUT_KINDS.includes(declared.kind)) fail(`Contract output kind must be one of: ${OUTPUT_KINDS.join(', ')}.`, 502);
+  if (declared.kind !== 'structured') return text;
+  const fields = Array.isArray(declared.fields) ? declared.fields : fail('Structured output must declare its fields.', 502);
+  if (!fields.length) fail('A structured output must declare at least one field.', 502);
   const cleaned = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   let parsed;
   try { parsed = JSON.parse(cleaned); } catch { fail('Structured output was not valid JSON.', 502); }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) fail('Structured output must be a JSON object.', 502);
-  for (const field of contract.output.fields) {
+  const names = new Set();
+  for (const field of fields) {
+    if (!field || typeof field !== 'object' || !field.name) fail('Structured output field is invalid.', 502);
+    names.add(field.name);
     const value = parsed[field.name];
     // An absent value only fails a required field; a present value must still
     // match its declared type, so the coordinator never hands a mis-typed
@@ -130,6 +150,9 @@ export function assertContractOutput(bot, output) {
       continue;
     }
     if (!matchesType(value, field.type)) fail(`Structured output field "${field.name}" must be of type ${field.type}.`, 502);
+  }
+  for (const key of Object.keys(parsed)) {
+    if (!names.has(key)) fail(`Structured output has unexpected field "${String(key).slice(0, 40)}".`, 502);
   }
   return parsed;
 }
