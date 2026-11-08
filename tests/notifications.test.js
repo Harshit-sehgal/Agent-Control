@@ -196,8 +196,12 @@ test('a configured email relay receives the notification and a failure still thr
     await assert.rejects(notifications.deliver(store, task({})), /http\(s\)/);
 
     delete process.env.WEBHOOK_ALLOW_PRIVATE;
+    // Cleartext relay on a public host: refused before anything is sent.
+    process.env.EMAIL_RELAY_URL = 'http://93.184.216.34/relay';
+    await assert.rejects(notifications.deliver(store, task({})), /must use https/);
+    // Cleartext relay on a private host: refused too, without the opt-in flag.
     process.env.EMAIL_RELAY_URL = 'http://127.0.0.1/relay';
-    await assert.rejects(notifications.deliver(store, task({})), /private or local network/);
+    await assert.rejects(notifications.deliver(store, task({})), /must use https/);
 
     process.env.EMAIL_RELAY_URL = 'https://93.184.216.34/relay?x=1';
     process.env.EMAIL_RELAY_TOKEN = 'super-secret-token';

@@ -158,8 +158,10 @@ export async function deliver(store, task) {
     try { parsed = new URL(relay); }
     catch { throw new Error('Email relay URL must be http(s).'); }
     const token = process.env.EMAIL_RELAY_TOKEN || '';
+    // Draft content travels in this POST: https, or an explicit private-network
+    // relay (WEBHOOK_ALLOW_PRIVATE). Never cleartext on a public host.
     if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Email relay URL must be http(s).');
-    if (token && parsed.protocol !== 'https:') throw new Error('Email relay URL must use https when EMAIL_RELAY_TOKEN is set.');
+    if (parsed.protocol !== 'https:' && !(process.env.WEBHOOK_ALLOW_PRIVATE === '1' && !token)) throw new Error('Email relay URL must use https.');
     const headers = {'Content-Type': 'application/json'};
     if (token) headers.Authorization = `Bearer ${token}`;
     const secrets = [token, relay, parsed.host, parsed.hostname, target];

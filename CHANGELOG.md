@@ -106,6 +106,24 @@ Bots that work together, with settings you control.
   optional `TLS_CERT`/`TLS_KEY`, owner-only restore, `AI_TIMEOUT_MS` default
   180s, `TRUST_PROXY`, `RESET_TOKEN_CONSOLE`, `browser.action` in the agent
   protocol, and those knobs in `.env.example`.
+- A run waiting on two pages of one reply keeps the second page even when the
+  first request's status flip commits before its page is appended (the page is
+  consumed atomically with the wait-decision), and a retried agent result is
+  appended once, not twice.
+- A 1:1 page result no longer flows page text back in the task message: it
+  travels in its own `page` field, marked untrusted text rather than a new
+  instruction.
+- Browser blocks are capped at two per reply total, valid or invalid, so a
+  reply cannot flood the chat with error cards.
+- Queue handlers renew their lease while running, so a long model call is not
+  re-claimed mid-flight, and the configured lease length actually reaches
+  `claimTasks` (it was silently dropped).
+- `recoverAgentTasks` counts browser-action failures as settled; removing the
+  first workspace answers 409, not 500. Notification prefs PATCH is back to
+  `member`; `POST /api/auth/reset` has the same per-IP throttle as login.
+- Writes to X and Twitter are refused through the WebSocket upgrade too (it
+  hides inside a GET), and an email relay must use https except under the
+  private-network opt-in.
 
 ### Changed
 - A group without a pipeline now runs every switched-on bot (up to its step
