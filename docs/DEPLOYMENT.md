@@ -1,9 +1,9 @@
 # Deployment
 
-Agent Control is a local-first app. It ships **no TLS termination and no
-authentication proxy** of its own; for anything beyond `127.0.0.1` you put it
-behind a reverse proxy that terminates HTTPS. This guide covers that setup and
-the operational knobs.
+Agent Control is a local-first app. For anything beyond `127.0.0.1` you
+terminate HTTPS — usually at a reverse proxy. Optional in-process TLS is
+`TLS_CERT` plus `TLS_KEY`. This guide covers that setup and the operational
+knobs.
 
 ## Requirements
 - **Node.js 22+** (`.nvmrc`). The SQLite store uses `node:sqlite`, which the
@@ -18,14 +18,23 @@ the operational knobs.
 |---|---|
 | `DASHBOARD_PASSWORD` | bootstraps the owner on first run; **set a long one** |
 | `HOST` / `PORT` | bind address (default `127.0.0.1:4173`) |
-| `DATA_FILE` | path to the SQLite database (default under the repo) |
+| `DATA_FILE` | JSON sibling path (default `data/state.json`); SQLite is the same name with `.db`, or `DATA_DB` |
 | `STORE_BACKEND` | `json` forces the legacy JSON store (escape hatch/tests) |
 | `PUBLIC_ORIGIN` | absolute `https://…` URL; enables the origin/CSRF check for that host |
 | `HSTS` | `1` to send `Strict-Transport-Security` (only behind TLS) |
-| `WEBHOOK_ALLOW_PRIVATE` | `1` to let webhook notifications reach private or local addresses |
+| `TLS_CERT` / `TLS_KEY` | optional paths to a certificate and key; both must be set to serve HTTPS in-process |
+| `TRUST_PROXY` | `1` when a reverse proxy sets `X-Forwarded-For` / `X-Forwarded-Proto`; the rate limiter and Secure-cookie hint then use those headers |
+| `RESET_TOKEN_CONSOLE` | `0` on a hosted install so password-reset tokens are not printed to the process log |
+| `WEBHOOK_ALLOW_PRIVATE` | `1` to let webhook and email-relay notifications reach private or local addresses |
+| `EMAIL_RELAY_URL` | optional HTTPS gateway. The email channel POSTs `{to, title, body, meta, at}` there. Unset, delivery fails instead of claiming the message was sent |
+| `EMAIL_RELAY_TOKEN` | optional bearer token for `EMAIL_RELAY_URL`; the relay must use HTTPS when set. This app does not speak SMTP |
 | `VAPID_SUBJECT` | contact for push services, `mailto:you@example.com` or an https URL; defaults to `PUBLIC_ORIGIN`. Apple rejects pushes without a real one |
 | `MASTER_KEY` | 32-byte key (64 hex chars) for the credential vault; else a `0600` keyfile is generated beside the DB |
 | `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` / `AI_API_STYLE` / `AI_TIMEOUT_MS` / `AI_MAX_CONCURRENCY` | optional OpenAI-compatible provider |
+
+Local-agent knobs (`AGENT_BROWSER`, allowlist, profile, path) are read by
+`node agent/agent.mjs`, not this process. They are listed in `.env.example`
+and [`AGENT-PROTOCOL.md`](AGENT-PROTOCOL.md).
 
 `preflight()` refuses to boot on an invalid `PUBLIC_ORIGIN` and warns when HSTS
 is on without HTTPS, when no `DASHBOARD_PASSWORD` is set, or when the server is
@@ -64,9 +73,12 @@ browsers will refuse plain HTTP for `max-age`, so enable it last.
   manager instead of shipping the keyfile.
 
 ## Backups & retention
-- `scripts/backup.mjs` exports an encrypted backup; `POST /api/admin/restore`
-  imports one (admin only, with a validation step). Back up the vault key
-  alongside the export.
+- `scripts/backup.mjs` exports a checksum-protected JSON backup (credentials
+  and sessions excluded; the file is not encrypted). Paired-agent credentials
+  are not restored: agent records are revoked and queued or running agent tasks
+  are failed, so pair devices again after a restore. `POST /api/admin/restore`
+  imports one (owner only, with a validation step). Back up the vault key
+  alongside the export. Protect the JSON file like the database.
 - Retention is configurable and prunes only exhaust (events, finished tasks,
   sent notifications, runs) — never drafts, candidates or evidence.
   `GET /api/retention/preview` shows what a prune would remove before you run it.
@@ -129,8 +141,10 @@ unauthenticated, so it is safe for uptime probes.
 
 ## Security checklist
 - [ ] `DASHBOARD_PASSWORD` set to a long random value.
-- [ ] TLS terminated at a proxy; `PUBLIC_ORIGIN=https://…` set.
+- [ ] TLS terminated at a proxy (or `TLS_CERT`/`TLS_KEY` set together); `PUBLIC_ORIGIN=https://…` set.
 - [ ] `HSTS=1` only after HTTPS works.
+- [ ] `TRUST_PROXY=1` only when a trusted proxy sets the forwarded headers.
+- [ ] `RESET_TOKEN_CONSOLE=0` if the process log is not private.
 - [ ] `MASTER_KEY` set (managed) or `vault.key` backed up.
 - [ ] Backups scheduled and one restore rehearsed.
 - [ ] Server bound to loopback (`HOST=127.0.0.1`) behind the proxy.

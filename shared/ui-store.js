@@ -2,14 +2,13 @@
  * it carries and cosmetic preferences. Views read from `store` and never
  * keep their own copies, so one `sync()` + one render keeps every pane current. */
 import {normalizeUiPrefs, UI_PREFS_KEY} from './usability.js';
-import {routeHash} from './ui-model.js';
+import {routeHash, tintOf} from './ui-model.js';
 import {createOutbox} from './chats.js';
+import {LOCAL_RUNS_KEY, mutateLocalRuns, patchLocalRun as patchStoredRun, cancelLocalRunsForChat} from './local-runs.js';
 
 // Where an earlier build kept conversations; read once by importLocalChats().
 const CHAT_KEY = 'agent-control-bot-chats-v2';
 const META_KEY = 'agent-control-bot-profiles-v2';
-const RUNS_KEY = 'agent-control-coordination-runs-v1';
-const GATE_KEY = 'ac-checkpoint-gate';
 const THEME_KEY = 'ac-theme';
 /** Colour choices. `system` follows the device. The ids are storage keys (kept
  * from the first warm palette); `dots` previews ground, you, waiting, done. */
@@ -32,7 +31,6 @@ export const store = {
   messages: {},
   profiles: loadLocal(META_KEY, {}),
   prefs: normalizeUiPrefs(loadLocal(UI_PREFS_KEY, {})),
-  checkpoints: Boolean(loadLocal(GATE_KEY, false)),
   listFilter: 'all',
   listQuery: '',
   postQuery: '',
@@ -43,6 +41,8 @@ export const store = {
   openEvidence: new Set(),
   /** Conversation ids with a reply in flight; drives the typing indicator. */
   typing: new Set(),
+  /** The group settings pipeline being reordered: {groupId, rows}, unsaved. */
+  pipelineDraft: null,
 };
 // `profiles` is cosmetic UI state only (tint, pin). An earlier build also wrote
 // name/instructions here, which would shadow the server's values forever.
@@ -50,6 +50,7 @@ for (const id of Object.keys(store.profiles)) { delete store.profiles[id].name; 
 
 export const isStaticDemo = () => { const m = document.querySelector('meta[name="agent-backend"]'); return !m || m.getAttribute('content') === 'static'; };
 export const isAdmin = () => !isStaticDemo() && ['owner', 'admin'].includes(store.state?.me?.role);
+export const canWrite = () => isStaticDemo() || ['owner', 'admin', 'member'].includes(store.state?.me?.role);
 /** True when the Node build has a model provider, so bots really run. */
 export const isLive = () => !isStaticDemo() && Boolean(store.state?.aiEnabled);
 
@@ -74,11 +75,23 @@ export const changed = (scope = 'all') => { for (const fn of listeners) fn(scope
 
 // Sent in the background, without the busy bar: a message is on screen already.
 const outbox = createOutbox((key, messages) => window.AGENT_API(`/api/chats/${key}/messages`, 'POST', {messages}));
+// A group run polls /api/state on its own while the workspace poll does too.
+// Whichever response returns last used to win, so an older snapshot could wipe
+// a browser card or a follow-up line and leave the slow poll in charge.
+let epoch = 0, appliedFetch = 0;
+/** Bumped on sign-out. An in-flight snapshot must not restore the workspace. */
+export const sessionEpoch = () => epoch;
+export const retireSession = () => { epoch += 1; };
 /** Fetch the workspace and fold its conversations into what is on screen. */
 export async function loadState() {
+  const ticket = epoch;
   await outbox.settle();
+  if (ticket !== epoch) return store.state;
   const fetch = outbox.beginFetch();
-  store.state = await api('/api/state');
+  const snap = await api('/api/state');
+  if (ticket !== epoch || fetch < appliedFetch) return store.state;
+  appliedFetch = fetch;
+  store.state = snap;
   store.messages = outbox.adopt(store.state.chats || {}, store.messages, fetch);
   return store.state;
 }
@@ -107,7 +120,12 @@ export const teamKey = groupId => `team-${groupId}`;
 export const findGroup = id => groups().find(g => g.id === id);
 export const groupOfBot = botId => groups().find(g => g.bots.some(b => b.id === botId));
 export const isXGroup = group => group?.id === 'x-engage';
-export const botTint = (group, botId) => store.profiles[botId]?.avatarIndex ?? Math.max(0, group?.bots.findIndex(b => b.id === botId) ?? 0);
+export const botTint = (group, botId) => {
+  const index = group?.bots.findIndex(b => b.id === botId) ?? 0;
+  return tintOf(group?.bots[index] || {id: botId}, index, store.profiles);
+};
+/** A bot of any group, for @mentioned guests that answer outside their own group. */
+export const findBot = botId => groupOfBot(botId)?.bots.find(b => b.id === botId) || null;
 
 /** Resolve a conversation id to what the views need, or null if it is gone. */
 export function conversation(id = store.route.chat) {
@@ -128,6 +146,7 @@ export function appendMessage(key, entry) {
   changed('thread');
 }
 export async function clearMessages(key) {
+  if (isStaticDemo()) await cancelLocalRunsForChat(store.state, key, 'Chat cleared.');
   // Let queued sends land before the DELETE: a send that was already queued
   // would otherwise POST after the clear and repopulate the conversation.
   await outbox.settle();
@@ -150,17 +169,21 @@ export function applyTheme(choice = themeChoice()) {
 }
 /** Re-resolve when the device flips between light and dark. */
 export function watchSystemTheme() { nightQuery().addEventListener('change', () => { if (themeChoice() === 'system') applyTheme('system'); }); }
-export function setCheckpoints(on) { store.checkpoints = Boolean(on); saveLocal(GATE_KEY, store.checkpoints); }
 
-/** Coordination runs, newest first: server runs merged with the local
- * simulation log so the timeline is populated on both builds. */
+/** Coordination runs, newest first. The Pages demo keeps them in localStorage.
+ * The Node build must ignore that log: leftover demo pauses would otherwise
+ * show Approve on a live server. */
 export function recentRuns(groupId) {
   const server = (store.state?.groupRuns || []).filter(r => r.groupId === groupId);
-  const local = loadLocal(RUNS_KEY, []).filter(r => r.groupId === groupId);
+  if (!isStaticDemo()) return server.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  const local = loadLocal(LOCAL_RUNS_KEY, []).filter(r => r.groupId === groupId);
   const byId = new Map([...local, ...server].map(r => [r.id, r]));
   return [...byId.values()].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 }
-export function logLocalRun(run) { saveLocal(RUNS_KEY, [run, ...loadLocal(RUNS_KEY, [])].slice(0, 50)); }
+export async function logLocalRun(run) {
+  return mutateLocalRuns(runs => { runs.unshift(run); runs.splice(50); });
+}
+export async function patchLocalRun(id, patch) { return patchStoredRun(id, patch); }
 
 /** Entries this session pushed, so an in-app back arrow can pop one instead of
  * stacking a new entry that the system Back button would bounce off. */

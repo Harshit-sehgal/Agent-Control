@@ -24,5 +24,5 @@ export function botSuggestions(name='Bot',group='') {
 export function statusSummary(s) {
   const candidates=s?.candidates?.length??0;
   const drafts=s?.drafts??[];
-  return `${candidates} candidate${candidates===1?'':'s'} in Discovery · ${drafts.filter(d=>d.status==='pending').length} awaiting approval · ${drafts.filter(d=>d.status==='scheduled').length} scheduled · ${drafts.filter(d=>d.status==='ready').length} ready for your manual Post click.`;
+  return `${candidates} candidate${candidates===1?'':'s'} in Posts found · ${drafts.filter(d=>d.status==='pending').length} awaiting approval · ${drafts.filter(d=>d.status==='scheduled').length} scheduled · ${drafts.filter(d=>d.status==='ready').length} ready for your manual Post click.`;
 }

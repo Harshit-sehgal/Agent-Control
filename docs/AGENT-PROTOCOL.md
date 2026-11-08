@@ -50,11 +50,11 @@ Verification (`verifyAgentRequest`):
   poll cannot enqueue (or run) the same job twice.
 
 ## 5. Permissions
-Task kinds are permission-gated: `http.check` and `browser.capture`
-(the latter limited to an explicit `AGENT_BROWSER_ALLOWLIST`). `http.check`
-refuses hosts that are, or resolve to, private or local addresses, and reports
-a redirect instead of following it; `AGENT_ALLOW_PRIVATE=1` on the device
-lifts that on purpose.
+Task kinds are permission-gated: `http.check`, `browser.capture`, and
+`browser.action` (the browser kinds limited to an explicit
+`AGENT_BROWSER_ALLOWLIST`). `http.check` refuses hosts that are, or resolve
+to, private or local addresses, and reports a redirect instead of following
+it; `AGENT_ALLOW_PRIVATE=1` on the device lifts that on purpose.
 
 `browser.capture` is a plain HTTP read by default. With `AGENT_BROWSER=1` on
 the device, the agent opens the page in the Chrome, Chromium or Edge already
@@ -62,9 +62,13 @@ installed there (`AGENT_BROWSER_PATH` names one explicitly;
 `AGENT_BROWSER_ARGS` adds flags such as `--no-sandbox` for containers) and
 returns the title and visible text, so pages that need JavaScript can be read.
 That browser starts with an empty profile that is deleted afterwards, so it is
-signed in to nothing. A page, a frame or a redirect outside the allowlist is
+signed in to nothing, unless `AGENT_BROWSER_PROFILE` points at a directory to
+keep. A page, a frame or a redirect outside the allowlist is
 blocked, and so is any request the page makes to a private or local address.
-The agent never clicks, types, uploads or posts.
+
+`browser.action` may click, type, wait, read or scroll on an allowlisted
+page. Click and type on X are always refused. The agent never uploads or
+posts.
 
 A device belongs to the workspace whose admin created its pairing code. The
 device does not need to know which: the server finds the workspace from the
@@ -83,7 +87,7 @@ is required).
 |---|---|---|
 | `http.check` | `http.check` | GET a URL, report status and latency. Redirects are reported, not followed. |
 | `browser.capture` | `browser.capture` | Read a page on an allowlisted host with the installed browser (or a plain fetch). |
-| `browser.action` | `browser.action` | **Interact** with an allowlisted page: `steps` of `navigate` / `click` / `type` / `waitFor` / `read` (max 25). |
+| `browser.action` | `browser.action` | **Interact** with an allowlisted page: `steps` of `navigate` / `click` / `type` / `waitFor` / `read` / `scroll` (max 25). `scroll` only moves the page. |
 
 `browser.action` payload:
 
@@ -106,5 +110,26 @@ Boundaries — the same as a read, plus interaction:
   by default;
 - interaction requires the real browser (`AGENT_BROWSER=1`); the fetch fallback
   is read-only;
-- a human dispatches the task. The model never triggers it — that is the same
-  hard boundary as publishing.
+- a task reaches the device only through a human decision. Either a person
+  queues it, or a person gives a bot the `browser.use` permission (see below).
+
+### Bots that use the browser (`browser.use`, opt-in)
+
+A bot holding `browser.use` may ask for a page by putting a fenced `browser`
+block in its reply: `{"url": "...", "steps": [...]}`, with the same step ops as
+above. `shared/bot-browser.js` validates the block and then:
+
+- strips it from the chat and shows a request card instead;
+- dispatches nothing until a member presses **Approve**, unless that bot's
+  *Browser requests* setting is "Run on my local agent without asking";
+- refuses any click or type on x.com or twitter.com, whatever the setting.
+  Bots may read X; posting stays a human action;
+- allows at most 2 requests per reply and 3 browser round trips per
+  conversation turn;
+- sends the request to the most recently seen paired agent that holds the
+  permission the request needs (`browser.capture` or `browser.action`). The
+  device allowlist, proxy and fresh profile above still apply.
+
+When the device reports back, the result is posted in the chat and the same bot
+is asked to continue with it. A failure is posted as a message and is never
+handed to the bot as a page.

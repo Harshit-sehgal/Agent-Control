@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ACTIVE_DRAFTS, draftStage, needsYou, chatRows, timeline, parseRoute, routeHash} from '../shared/ui-model.js';
+import {ACTIVE_DRAFTS, draftStage, needsYou, chatRows, timeline, parseRoute, routeHash, feedPauseAction, retryTarget, threadLineActions, isRunNote, runBelongsToChat, FEED_WAIT, FEED_OPEN} from '../shared/ui-model.js';
 
 // ---- fixtures -------------------------------------------------------------------------
 
@@ -77,7 +77,7 @@ test('chatRows lists every group conversation and every bot, in natural order by
   assert.deepEqual(team.members, [{name: 'Scout', tint: 0}, {name: 'Writer', tint: 1}]);
   assert.equal(scout.isTeam, false);
   assert.equal(scout.groupName, 'X engagement');
-  assert.equal(scout.needs, 0, 'only group conversations carry a needs count');
+  assert.equal(scout.needs, 0);
 });
 
 test('chatRows orders pinned first, then most recent message, then natural order', () => {
@@ -103,6 +103,109 @@ test('chatRows filter "needs" keeps only conversations that are waiting on the h
   const s = state({drafts: [draft('1', 'pending')], groupRuns: [{groupId: 'research', status: 'awaiting_checkpoint'}]});
   assert.deepEqual(ids(chatRows({state: s, filter: 'needs'})), ['team-x-engage', 'team-research']);
   assert.deepEqual(ids(chatRows({state: state(), filter: 'needs'})), []);
+});
+
+test('a checkpoint counts on the chat that holds it, not the whole group', () => {
+  assert.equal(runBelongsToChat({groupId: 'research', chatKey: 'analyst'}, 'analyst'), true);
+  assert.equal(runBelongsToChat({groupId: 'research'}, 'team-research'), true);
+  assert.equal(runBelongsToChat({groupId: 'research'}, 'analyst'), false);
+  const s = state({groupRuns: [
+    {id: 'c1', groupId: 'research', chatKey: 'analyst', status: 'awaiting_checkpoint'},
+    {id: 'c2', groupId: X, chatKey: 'team-x-engage', status: 'awaiting_checkpoint'},
+  ]});
+  const rows = chatRows({state: s});
+  assert.equal(rows.find(r => r.id === 'analyst').needs, 1);
+  assert.equal(rows.find(r => r.id === 'team-research').needs, 0, 'A pause in a 1:1 chat is not the group chat');
+  assert.equal(rows.find(r => r.id === 'team-x-engage').needs, 1);
+  assert.equal(rows.find(r => r.id === 'writer').needs, 0);
+  assert.equal(needsYou(s, s.groups[1]), 1, 'The group still counts every pause');
+});
+test('a waiting plan counts on the chat that holds it, including a demo run the workspace never stored', () => {
+  const s = state({groupRuns: [
+    {id: 'p1', groupId: 'research', chatKey: 'team-research', status: 'awaiting_plan'},
+    {id: 'p2', groupId: X, chatKey: 'writer', status: 'awaiting_plan'},
+    {id: 'p3', groupId: 'research', chatKey: 'team-research', status: 'running'},
+  ]});
+  const rows = chatRows({state: s});
+  assert.equal(rows.find(r => r.id === 'team-research').needs, 1);
+  assert.equal(rows.find(r => r.id === 'writer').needs, 1);
+  assert.equal(rows.find(r => r.id === 'team-x-engage').needs, 0, 'A plan in the writer chat is not the group chat');
+  const local = chatRows({state: state(), localRuns: [{id: 'local', groupId: 'research', chatKey: 'analyst', status: 'awaiting_plan'}]});
+  assert.equal(local.find(r => r.id === 'analyst').needs, 1);
+  assert.deepEqual(ids(chatRows({state: state(), filter: 'needs', localRuns: [{id: 'local', groupId: 'research', chatKey: 'analyst', status: 'awaiting_plan'}]})), ['analyst']);
+  const stale = chatRows({
+    state: state({groupRuns: [{id: 'p1', groupId: 'research', chatKey: 'team-research', status: 'completed'}]}),
+    localRuns: [{id: 'p1', groupId: 'research', chatKey: 'team-research', status: 'awaiting_plan'}],
+  });
+  assert.equal(stale.find(r => r.id === 'team-research').needs, 0, 'The workspace status wins over a stale local plan');
+});
+
+test('a plan and a pending page on the same chat both count', () => {
+  const s = state({
+    groupRuns: [{id: 'p1', groupId: 'research', chatKey: 'team-research', status: 'awaiting_plan'}],
+    browserRequests: [{id: 'a', status: 'pending', chatKey: 'team-research'}],
+  });
+  const row = chatRows({state: s}).find(r => r.id === 'team-research');
+  assert.equal(row.needs, 2);
+  assert.equal(row.text, 'Wants to open a page');
+});
+
+test('a feed-permission failure keeps Grant and Retry, and the demo still shows a plan', () => {
+  assert.deepEqual(threadLineActions({kind: 'feed-permission', senderId: 'scout', status: 'failed', live: true, note: true, latest: true}), {grant: true, plan: false, checkpoint: false, retry: true});
+  assert.equal(threadLineActions({kind: 'feed-permission', senderId: 'scout', status: 'failed', live: false, note: true, latest: true}).grant, true);
+  assert.deepEqual(threadLineActions({status: 'awaiting_plan', live: false, note: true, latest: true}), {grant: false, plan: true, checkpoint: false, retry: false});
+  assert.deepEqual(threadLineActions({status: 'awaiting_checkpoint', live: false, note: true, latest: true}), {grant: false, plan: false, checkpoint: true, retry: false});
+  assert.deepEqual(threadLineActions({status: 'failed', live: true, note: true, latest: false}), {grant: false, plan: false, checkpoint: false, retry: false});
+  assert.equal(isRunNote({role: 'system', runId: 'r', kind: 'browser'}), false);
+  assert.equal(isRunNote({role: 'system', runId: 'r'}), true);
+  assert.equal(isRunNote({role: 'bot', runId: 'r'}), false);
+});
+
+test('a pending browser request waits on the chat that holds it, including a one-to-one bot chat', () => {
+  const s = state({browserRequests: [
+    {id: 'a', status: 'pending', chatKey: 'team-research'},
+    {id: 'b', status: 'pending', chatKey: 'scout'},
+    {id: 'c', status: 'dispatched', chatKey: 'writer'},
+    {id: 'd', status: 'pending', chatKey: 'gone'},
+  ]});
+  const rows = chatRows({state: s, filter: 'needs'});
+  assert.deepEqual(ids(rows), ['scout', 'team-research']);
+  const team = rows.find(r => r.id === 'team-research'), one = rows.find(r => r.id === 'scout');
+  assert.equal(team.needs, 1);
+  assert.equal(team.text, 'Wants to open a page');
+  assert.equal(one.needs, 1);
+  assert.equal(one.text, 'Wants to open a page');
+  assert.equal(chatRows({state: s}).find(r => r.id === 'writer').needs, 0, 'A request already on the device is not waiting on you.');
+});
+
+test('retry of a tracked run names the primary bot and the conversation it started in', () => {
+  const group = {bots: [bot('handoff', 'Handoff', {settings: {lead: true}}), bot('writer', 'Writer', {type: 'writing'})]};
+  assert.deepEqual(retryTarget(group, {mode: 'tracked', chatKey: 'handoff', recipients: ['writer']}), {direct: 'handoff', chat: 'handoff'});
+  assert.deepEqual(retryTarget(group, {mode: 'direct', chatKey: 'writer', recipients: ['writer']}), {direct: 'writer', chat: 'writer'});
+  assert.deepEqual(retryTarget(group, {mode: 'pipeline', chatKey: 'team-g', recipients: ['writer']}), {direct: '', chat: 'team-g'});
+});
+
+test('a feed pause keeps watching once the read is sent, and waits once it is still on the person', () => {
+  assert.deepEqual(feedPauseAction(null), {action: 'lookAgain', text: ''});
+  assert.deepEqual(feedPauseAction({status: 'pending'}), {action: 'lookAgain', text: ''});
+  assert.deepEqual(feedPauseAction({status: 'pending'}, {graceUsed: true}), {action: 'wait', text: FEED_WAIT});
+  assert.deepEqual(feedPauseAction({status: 'dispatched'}, {graceUsed: true}), {action: 'follow', text: FEED_OPEN});
+  assert.deepEqual(feedPauseAction({status: 'failed'}), {action: 'follow', text: ''});
+});
+
+test('a dispatched feed read that still holds the group shows on that chat', () => {
+  const s = state({
+    groupRuns: [{id: 'run-1', groupId: 'research', chatKey: 'team-research', status: 'awaiting_feed'}],
+    browserRequests: [{id: 'f', purpose: 'feed', status: 'dispatched', chatKey: 'team-research', runId: 'run-1'}],
+  });
+  const row = chatRows({state: s, filter: 'needs'}).find(r => r.id === 'team-research');
+  assert.equal(row.needs, 1);
+  assert.equal(row.text, 'A feed read is still open');
+  const done = state({
+    groupRuns: [{id: 'run-1', groupId: 'research', chatKey: 'team-research', status: 'failed'}],
+    browserRequests: [{id: 'f', purpose: 'feed', status: 'dispatched', chatKey: 'team-research', runId: 'run-1'}],
+  });
+  assert.equal(chatRows({state: done}).find(r => r.id === 'team-research').needs, 0);
 });
 
 test('chatRows filters "groups" and "bots" split team chats from bot chats', () => {
@@ -285,6 +388,7 @@ test('parseRoute reads the info panel and defaults an unknown section to home', 
   assert.equal(parse('#chat/team-x-engage/info/nonsense').info, 'home');
   assert.equal(parse('#chat/team-x-engage/open/drafts').info, null, 'only /info/ opens the panel');
   assert.equal(parse('#chat/scout/info/edit').info, 'edit');
+  assert.equal(parse('#chat/scout/info/edit', {write: false}).info, 'home', 'Viewers do not open the bot edit form.');
   // Sections are per kind: a bot has no drafts panel and a group has no edit panel.
   assert.equal(parse('#chat/scout/info/drafts').info, 'home');
   assert.equal(parse('#chat/team-x-engage/info/edit').info, 'home');

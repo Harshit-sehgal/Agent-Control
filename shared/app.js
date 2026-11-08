@@ -12,19 +12,20 @@
  *   ui-fx       confetti, the send arrow, and when the bots react
  */
 import {parseRoute} from './ui-model.js';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, isAdmin, applyTheme, watchSystemTheme} from './ui-store.js';
-import {toast, closeSheet, sheetOpen, trapTab} from './ui-dialogs.js';
-import {listShell, renderList, threadShell, renderThread, homeView} from './ui-views.js';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, isAdmin, canWrite, applyTheme, watchSystemTheme, retireSession, sessionEpoch} from './ui-store.js';
+import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js';
+import {listShell, renderList, threadShell, renderThread, homeView, renderMentions} from './ui-views.js';
 import {renderInfo, refreshLists, renderPage} from './ui-panel.js';
 import {showLogin, hideLogin, openCommandPalette, closeCommandPalette, paletteOpen, updateCommandResults, chooseCommand, moveCommand} from './ui-sheets.js';
 import {actions, forms, onControlChange, onControlInput} from './ui-actions.js';
 import {bringBotsToLife} from './ui-fx.js';
 
 const el = id => document.getElementById(id);
-const hashRoute = () => parseRoute(location.hash, store.state, {server: !isStaticDemo(), admin: isAdmin()});
+const hashRoute = () => parseRoute(location.hash, store.state, {server: !isStaticDemo(), admin: isAdmin(), write: canWrite()});
 /** True while the user is typing inside `node`, so a repaint must not replace it. */
 const typingIn = node => { const a = document.activeElement; return Boolean(a && node?.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)); };
-let lastView = '', syncTimer = null;
+let lastView = '', syncTimer = null, syncDue = 0, refreshing = false;
+const LIVE_RUN = new Set(['running', 'queued', 'awaiting_feed', 'awaiting_browser']);
 
 /** A repaint replaces nodes, so remember which control had focus by its stable
  * attributes and give focus back to its replacement. */
@@ -63,8 +64,49 @@ function renderRoute() {
   if (info) el('inspector').querySelector('.back')?.focus({preventScroll: true});
 }
 
+/** A page request or a live group run finishes outside this tab, and a
+ * scheduled task fires on the server. Look again every few seconds while one
+ * of those is open, or due within this same window; an idle workspace stays
+ * on the slow poll. A keystroke must not push that poll back. */
+function dueWithin(when, windowMs = 30000) {
+  const at = Date.parse(when);
+  return Number.isFinite(at) && at <= Date.now() + windowMs;
+}
+function workspaceBusy() {
+  const state = store.state;
+  if (!state) return false;
+  if ((state.browserRequests || []).some(r => r.status === 'pending' || r.status === 'dispatched')) return true;
+  if ((state.groupRuns || []).some(r => LIVE_RUN.has(r.status))) return true;
+  if ((state.tasks || []).some(t => t.status === 'queued' && (t.kind === 'bot-task' || t.kind === 'reminder') && dueWithin(t.runAt))) return true;
+  return (state.drafts || []).some(d => d.status === 'scheduled' && dueWithin(d.dueAt));
+}
+function scheduleSync() {
+  if (!store.state || refreshing) return;
+  const wait = workspaceBusy() ? 3000 : 30000;
+  const due = Date.now() + wait;
+  if (syncTimer && syncDue <= due) return;
+  // Browsers keep one timer list, so this also clears the timeout below.
+  clearInterval(syncTimer);
+  syncDue = due;
+  syncTimer = setTimeout(async () => {
+    const ticket = sessionEpoch();
+    syncTimer = null;
+    refreshing = true;
+    try { await sync(); }
+    catch (e) { if (e.status === 401 && ticket === sessionEpoch()) lockScreen('Your session expired. Sign in again.'); }
+    finally {
+      // Sign-out bumps the epoch and may already have armed nothing. Do not
+      // clear a newer session's refresh, and do not start this one again.
+      if (ticket !== sessionEpoch()) return;
+      refreshing = false;
+      if (store.state) scheduleSync();
+    }
+  }, wait);
+}
+
 onChange(scope => {
   if (!store.state) return;
+  scheduleSync();
   if (scope === 'route') return renderRoute();
   keepFocus(() => {
     renderList();
@@ -86,12 +128,8 @@ async function boot() {
     listShell(); lastView = '';
     // First paint only: the chat rows arrive one after another.
     document.body.classList.add('booting'); setTimeout(() => document.body.classList.remove('booting'), 900);
+    clearInterval(syncTimer); syncTimer = null; syncDue = 0;
     store.route = hashRoute(); changed('route');
-    clearInterval(syncTimer);
-    syncTimer = setInterval(async () => {
-      try { await sync(); }
-      catch (e) { if (e.status === 401) lockScreen('Your session expired. Sign in again.'); }
-    }, 30000);
   } catch (e) {
     if (e.status === 401) return showLogin(e.message);
     el('main').innerHTML = `<section class="home"><h1>Could not start</h1><p></p><p>${isStaticDemo() ? 'Enable browser local storage and reload. If the page was cached from an older deploy, hard-refresh once.' : 'Check that the Node server is running and reload.'}</p></section>`;
@@ -100,7 +138,9 @@ async function boot() {
 }
 /** Leave nothing of the signed-out workspace in the DOM behind the sign-in. */
 function lockScreen(message) {
-  clearInterval(syncTimer); syncTimer = null;
+  retireSession();
+  refreshing = false;
+  clearInterval(syncTimer); syncTimer = null; syncDue = 0;
   closeSheet(); closeCommandPalette();
   store.state = null; store.messages = {}; lastView = '';
   for (const id of ['sidebar', 'main', 'inspector']) el(id).innerHTML = '';
@@ -110,9 +150,31 @@ actions.logout = async () => {
   try { await api('/api/logout', 'POST', {}); } catch { /* Sign out regardless. */ }
   lockScreen('Signed out.');
 };
+actions['delete-account'] = async () => {
+  if (!await confirmSheet('Delete your account?', {confirm: 'Delete account', danger: true, detail: 'You are signed out. This cannot be undone.'})) return;
+  const password = await askSheet('Your password', {sub: 'Type your password to delete this account.', submit: 'Delete account'});
+  if (password == null || !String(password).trim()) return;
+  await api('/api/account', 'DELETE', {password});
+  lockScreen('Account deleted.');
+};
 forms['login-form'] = async (form, f) => {
   try { await api('/api/login', 'POST', f); hideLogin(); await boot(); }
   catch (error) { const node = el('login-error'); if (node) node.textContent = error.message; }
+};
+actions['login-forgot'] = () => showLogin('', 'forgot');
+actions['login-reset'] = () => showLogin('', 'reset');
+actions['login-back'] = () => showLogin('', 'sign-in');
+forms['forgot-form'] = async (form, f) => {
+  try {
+    await api('/api/auth/forgot', 'POST', {email: f.email});
+    showLogin('If that account exists, the server log has a one-time token. Paste it below.', 'reset');
+  } catch (error) { const node = el('login-error'); if (node) node.textContent = error.message; }
+};
+forms['reset-form'] = async (form, f) => {
+  try {
+    await api('/api/auth/reset', 'POST', {token: f.token, password: f.password});
+    showLogin('Password updated. Sign in with the new one.');
+  } catch (error) { const node = el('login-error'); if (node) node.textContent = error.message; }
 };
 
 const fail = error => toast(error?.message || 'That did not work.', true);
@@ -143,7 +205,7 @@ document.body.addEventListener('submit', ev => {
 document.body.addEventListener('change', ev => { Promise.resolve().then(() => onControlChange(ev.target)).catch(fail); });
 document.body.addEventListener('input', ev => {
   if (ev.target.id === 'command-input') return updateCommandResults(ev.target.value);
-  if (ev.target.matches('.composer textarea')) return autoGrow(ev.target);
+  if (ev.target.matches('.composer textarea')) { if (ev.target.closest('#chat-form')) renderMentions(ev.target.value); return autoGrow(ev.target); }
   onControlInput(ev.target);
 });
 document.body.addEventListener('keydown', ev => {

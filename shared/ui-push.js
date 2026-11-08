@@ -4,7 +4,15 @@
 import {api} from './ui-store.js';
 
 const supported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
-const keyBytes = text => Uint8Array.from(atob(text.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+const keyBytes = text => {
+  const padded = text.replace(/-/g, '+').replace(/_/g, '/');
+  return Uint8Array.from(atob(padded + '='.repeat((4 - padded.length % 4) % 4)), c => c.charCodeAt(0));
+};
+const keyView = value => !value ? null : (ArrayBuffer.isView(value) ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength) : new Uint8Array(value));
+const sameKey = (subscription, key) => {
+  const currentKey = keyView(subscription?.options?.applicationServerKey), next = keyView(key);
+  return !!currentKey && !!next && currentKey.length === next.length && currentKey.every((byte, i) => byte === next[i]);
+};
 const current = async () => (await navigator.serviceWorker.getRegistration())?.pushManager.getSubscription() ?? null;
 
 /** @returns {{state: 'unsupported'|'insecure'|'blocked'|'off'|'on', devices: number}} */
@@ -23,10 +31,16 @@ export async function enablePush() {
   const {publicKey} = await api('/api/push');
   const registration = await navigator.serviceWorker.register('./sw.js');
   await navigator.serviceWorker.ready;
-  // A subscription made for an older server key cannot be reused.
-  const old = await registration.pushManager.getSubscription();
-  if (old) await old.unsubscribe();
-  const subscription = await registration.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: keyBytes(publicKey)});
+  const key = keyBytes(publicKey);
+  // A subscription made for an older server key cannot be reused. One made for
+  // this key must be kept: unsubscribing before the server has stored the
+  // replacement drops the device if that request fails.
+  let subscription = await registration.pushManager.getSubscription();
+  if (subscription && !sameKey(subscription, key)) {
+    await subscription.unsubscribe();
+    subscription = null;
+  }
+  if (!subscription) subscription = await registration.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: key});
   await api('/api/push/subscriptions', 'POST', subscription.toJSON());
 }
 

@@ -1,8 +1,10 @@
-# Build plan — complete (39/39)
+# Build plan — complete except host/push verification (38/39)
 
-All v0.2/v0.3 roadmap items are delivered. Every phase ended green
-(`npm run check && npm test && npm run build:pages`). The items below are kept
-as the record of what shipped; new work should be added as a fresh section.
+All v0.2/v0.3 roadmap items that can ship in this repo are delivered. Every
+phase ended green (`npm run check && npm test && npm run build:pages`). The
+open item is hardware: push on a physical phone and Apple's push service, on
+a host that stays on. The items below are the record of what shipped; new
+work should be added as a fresh section.
 
 ## Phase A — transactional store
 - [x] `node:sqlite` store behind the existing `read()`/`update()` interface (Node 22 re-exec guard)
@@ -24,7 +26,7 @@ as the record of what shipped; new work should be added as a fresh section.
 
 ## Phase D — source evidence model
 - [x] `shared/evidence.js`: link, claim, confidence, verification status, reuse
-- [x] Evidence attached to drafts; Researcher emits evidence refs
+- [x] Evidence attached to drafts; Researcher describes supplied evidence (it does not emit evidence rows from model output)
 - [x] UI: add/review evidence on draft cards
 
 ## Phase E — bot contracts + tool permissions
@@ -40,7 +42,7 @@ as the record of what shipped; new work should be added as a fresh section.
 
 ## Phase G — credentials, retention, deletion, backups
 - [x] AES-256-GCM vault (`MASTER_KEY` / local dev keyfile)
-- [x] Retention pruning, account deletion, encrypted backup export/import
+- [x] Retention pruning, account deletion, checksum-protected JSON backup export/import
 
 ## Phase H — notifications
 - [x] Preferences (in-app/webhook/email-relay) + dispatcher w/ retry
@@ -81,7 +83,7 @@ as the record of what shipped; new work should be added as a fresh section.
 ## Phase O — adversarial security review
 - [x] Owner-only backup and restore; restore validates roles, links and column names
 - [x] Hashed session ids; one answer for unknown address and wrong password
-- [x] Sign-in and reset attempts counted before the body is read
+- [x] Sign-in and forgot-password attempts counted before the body is read
 - [x] Capture token withheld from viewers; request-made notification tasks refused
 - [x] Local agent refuses private-network targets; model calls and posts are bounded
 - [x] Only the server can mark a chat message as model output or name its sender
@@ -95,3 +97,21 @@ as the record of what shipped; new work should be added as a fresh section.
 - [x] Dockerfile, Compose with Caddy, and a systemd unit
 - [x] Push delivered end to end through Google's push service to desktop Chrome
 - [ ] Push verified on a physical phone and through Apple's push service; server running on an always-on host
+
+## Phase Q — bots that work together, settings you control
+- [x] Bot settings: on/off, reply length, temperature, tone, chat memory, summonable, hand-off, colour (`shared/bot-settings.js`)
+- [x] Group settings: routing mode (pipeline, lead only, everyone), pipeline order, step limit up to 12, approve between steps, bot handoffs
+- [x] Edit, remove and switch off bots; edit and delete groups
+- [x] @mention any bot in any chat, including summonable bots from other groups, with the chat's recent messages as context
+- [x] Bot-to-bot handoff: a reply that @mentions a teammate extends the run, within the step limit
+- [x] Scheduled bot tasks that post their results into the chat, on the server and in the Pages demo
+- [x] Composer @mention suggestions
+- [x] Tests for every item above; check, test and build:pages green
+
+## Phase R — local browser control for bots
+- [x] `browser.use` permission on any bot; envelope and system prompt describe the browser block only to bots holding it
+- [x] Fenced `browser` blocks validated (`shared/bot-browser.js`): public http(s) only, 25 steps, 2 per reply, 3 round trips per turn, no click/type on X
+- [x] Approve/Decline card in the chat; per-bot "Browser requests" setting (ask, or run without asking)
+- [x] Dispatch to a paired local agent with the needed permission; result posted in the chat and the bot continues (`src/bot-browser.js`)
+- [x] Requests persisted in SQLite; Pages demo explains it needs the Node build
+- [x] Tests (`tests/bot-browser.test.js`); check, test and build:pages green

@@ -38,14 +38,61 @@ test('Specialist suggestions remain relevant',()=>{
 test('custom bots run through the Node provider only on the server build',()=>{
   // The README promises custom bots run when a key is configured; the UI used
   // to answer every custom bot with the offline command demo instead.
-  assert.match(app,/isLive\(\) && bot\.type === 'custom'/);
+  assert.match(app,/if \(!isStaticDemo\(\)\) return runOnServer/);
+  assert.match(app,/\/api\/bots\/run', 'POST', \{botId: bot\.id/);
   assert.match(app,/export const isLive = \(\) => !isStaticDemo\(\) && Boolean\(store\.state\?\.aiEnabled\)/);
   assert.match(app,/\/api\/bots\/run/);
-  // And the chat/inspector must stop claiming the bot is offline in that case.
-  assert.match(app,/This bot runs its instructions through the server AI provider/);
+  // Built-in bots use the same provider. A missing key is an error, not the demo.
+  assert.match(app,/This bot answers with your AI provider/);
+  assert.match(app,/will not answer with the demo/);
+  // Retry of a feed read must wait or keep watching, the same as the first send.
+  assert.match(app,/if \(await watchQueuedRun\(b\.dataset\.id, key, run\)\) return/);
+  assert.match(app,/await sync\(\)\.catch\(\(\) => \{\}\);\n    for \(const m of store\.messages\[key\] \|\| \[\]\) seen\.add\(m\.id\);/);
+  assert.match(app,/await sync\(\)\.catch\(\(\) => \{\}\);\n    const request = \(store\.state\.browserRequests \|\| \[\]\)\.find\(r => r\.runId === last\.id/);
+  assert.match(app,/await streamGroupRun\(groupId, key, run\.runId\);\n    return true;/);
+  assert.match(app,/const key = run\?\.chatKey \|\| chatId\(\) \|\| teamKey\(b\.dataset\.id\)/);
+  assert.match(app,/continueDemoPlan\(group, run\.input, key, \{runId: run\.id\}\)/);
+  assert.match(app,/BUSY_STATUSES\.includes\(r\.status\)/);
+  assert.match(app,/groupInFlight\(group\) > 1/);
+  assert.match(app,/continueDemoPlan\(group, message, key, \{runId, resume\} = \{\}\)/);
+  assert.match(app,/A group run is already active\. Wait or retry later/);
+  assert.match(app,/const lease = await claimLocalRun\(started/);
+  assert.match(app,/const heartbeat = setInterval\(\(\) => \{ void renewLocalRun\(lease\)\.catch\(\(\) => \{\}\); \}, 30_000\);/);
+  assert.match(app,/shouldStop: \(\) => localRunCancelled\(lease\.id\)/);
+  assert.match(app,/const finished = await finishLocalRun\(lease, run\);/);
+  assert.match(app,/'continue-run': async b => \{[\s\S]*?isStaticDemo\(\)[\s\S]*?resume: run/);
+  assert.match(app,/status === 'awaiting_checkpoint' \? btn\('Approve next step', 'continue-run'/);
+  assert.match(app,/drafts \? `<button type="button" class="needs-pill" data-action="open-section" data-section="drafts"/);
+  assert.match(app,/paused \? `\$\{paused\} paused`/);
+  assert.match(app,/Waiting on a page/);
+  assert.match(app,/An admin sets voice and timing for this workspace/);
+  assert.match(app,/if \(!isAdmin\(\) && !isStaticDemo\(\)\) throw new Error\('An admin sets voice and timing\.'\)/);
+  assert.match(app,/Viewers cannot send messages/);
+  assert.match(app,/A member can change group settings/);
+  assert.match(app,/write \? iconBtn\('plus', 'Share a post'/);
+  assert.match(app,/write && flags\.checkpoint \? btn\('Approve next step'/);
+  assert.match(app,/Viewers can read chats\. A member can send\./);
+  assert.match(app,/patchLocalRun\(run\.id, \{status: 'awaiting_plan'\}\)/);
+  assert.doesNotMatch(app,/if \(error\.status !== 409\) patchLocalRun/);
+  assert.match(app,/'delete-account'/);
+  assert.match(app,/\/api\/account', 'DELETE'/);
+  assert.match(app,/'toggle-user-disabled'/);
+  assert.match(app,/Temporary password \(min 8 chars\)/);
+  assert.match(app,/EMAIL_RELAY_URL/);
+  assert.match(app,/const waiting = last && skip.has\(last.status\)/);
+  assert.match(app,/request.status === 'dispatched' \? `<div class="card-actions">\$\{decline\}/);
+  assert.match(app,/<form id="login-form"[\s\S]*?name="email"/);
+  assert.match(app,/id="password-form"/);
+  assert.match(app,/\/api\/auth\/password/);
+  assert.match(app,/'deny-browser': async b => \{[\s\S]*?streamGroupRun\(request\.groupId/);
+  assert.match(app,/'retry-bot-task'/);
+  assert.match(app,/\['failed', 'interrupted', 'awaiting_plan', 'awaiting_checkpoint', 'completed', 'cancelled'\]\.includes\(run\?\.status\)/);
+  assert.match(app,/Grant browser access/);
+  assert.match(app,/'grant-browser': async b => \{[\s\S]*?patchBot\([\s\S]*?browser\.use/);
   // When a provider is connected, the actual model id is surfaced if known.
   assert.match(app,/Connected · \$\{esc\(model\)\}/);
   assert.match(app,/state\?\.aiModel/);
+  assert.match(app,/stuck \? btn\('Cancel', 'cancel-plan'/);
 });
 test('bot profiles never mirror name/instructions into browser-local UI state',()=>{
   // `profile()` spreads the cosmetic UI record over the bot, so a name/instructions
@@ -58,6 +105,7 @@ test('bot profiles never mirror name/instructions into browser-local UI state',(
   assert.match(app,/api\(`\/api\/groups\/\$\{groupOfBot\(b\.id\)\.id\}\/bots\/\$\{b\.id\}`, 'PATCH'/);
   // A duplicate must take its instructions from the group record, not the mirror.
   assert.match(app,/instructions: base\.instructions/);
+  assert.match(app,/settings: \{\.\.\.botSettings\(base\), lead: false\}/);
 });
 test('the old browser dialogs are gone: confirmation and prompts are in-app sheets',()=>{
   assert.doesNotMatch(app,/window\.(confirm|prompt|alert)\(/);

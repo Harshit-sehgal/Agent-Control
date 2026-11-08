@@ -49,6 +49,7 @@ export function attachSheet() {
     ${x ? row({lead: lead('link'), title: 'Share a post', sub: 'Paste a post from X for the bots to work on.', action: 'share-post'}) : ''}
     ${x ? row({lead: lead('clock'), title: 'Set a reminder', sub: 'Get nudged to check new posts.', action: 'new-reminder'}) : ''}
     ${x ? row({lead: lead('spark'), title: 'Load sample posts', sub: 'Three example posts to try the flow.', action: 'load-samples'}) : ''}
+    ${row({lead: lead('clock'), title: 'Schedule a task', sub: `${conv.isTeam ? 'The group' : esc(conv.name)} does it on a timer and answers here.`, action: 'new-bot-task'})}
     ${row({lead: lead('bot'), title: 'Add a bot', sub: `A new bot in ${esc(conv.group.name)}.`, action: 'add-bot-to-group', id: conv.group.id})}
   </div>`, {title: 'Add to this chat'});
 }
@@ -70,8 +71,22 @@ export function reminderSheet() {
   </form>`, {title: 'New reminder'});
   toggleReminderFields();
 }
-export function toggleReminderFields() {
-  const form = el('schedule-form'); if (!form) return;
+/** A scheduled prompt for the open chat; its answer posts back into the chat. */
+export function botTaskSheet() {
+  const conv = conversation(); if (!conv) return;
+  openSheet(`<form id="bot-task-form" class="form">
+    <input type="hidden" name="groupId" value="${esc(conv.group.id)}"><input type="hidden" name="botId" value="${conv.isTeam ? '' : esc(conv.bot.id)}">
+    ${field('What should it do?', `<textarea class="input" name="message" rows="3" maxlength="2000" placeholder="Summarise new posts about robotics" required autofocus></textarea>`)}
+    ${field('How often', `<select class="input" name="kind"><option value="interval">Repeat</option><option value="once">Once, at a set time</option></select>`)}
+    ${field('Every (minutes)', `<input class="input" name="intervalMinutes" type="number" value="60" min="1" max="10080" inputmode="numeric">`)}
+    ${field('At', `<input class="input" name="nextAt" type="datetime-local">`)}
+    ${btn('Schedule', null, {kind: 'primary', type: 'submit', wide: true})}
+  </form>`, {title: 'Schedule a task', sub: `${conv.isTeam ? conv.group.name : conv.name} answers in this chat.`});
+  toggleReminderFields('bot-task-form');
+}
+/** Repeat shows the interval; Once swaps it for a date and time. */
+export function toggleReminderFields(formId = 'schedule-form') {
+  const form = el(formId); if (!form) return;
   const once = form.elements.namedItem('kind').value === 'once', every = form.elements.namedItem('intervalMinutes'), at = form.elements.namedItem('nextAt');
   every.disabled = once; at.disabled = !once; at.required = once;
   every.closest('label').hidden = once; at.closest('label').hidden = !once;
@@ -87,12 +102,13 @@ function commands() {
     {label: 'About this build', hint: 'How it works', run: () => go({page: 'about'})},
   ];
   if (!isStaticDemo()) items.push({label: 'Notifications', hint: 'Account', run: () => go({page: 'notifications'})}, {label: 'Workspaces', hint: 'Account', run: () => go({page: 'workspaces'})});
-  if (isAdmin()) items.push({label: 'Team and access', hint: 'Admin', run: () => go({page: 'team'})}, {label: 'Local agents', hint: 'Admin', run: () => go({page: 'agents'})}, {label: 'Data and security', hint: 'Admin', run: () => go({page: 'data'})});
+  if (isAdmin()) items.push({label: 'Team and access', hint: 'Admin', run: () => go({page: 'team'})}, {label: 'Local agents', hint: 'Admin', run: () => go({page: 'agents'})}, {label: 'Data and security', hint: 'Admin', run: () => go({page: 'data'})}, {label: 'AI and models', hint: 'Account', run: () => go({page: 'ai'})});
   for (const g of groups()) {
     const team = teamKey(g.id);
     items.push({label: g.name, hint: 'Group chat', run: () => go({chat: team})});
     if (isXGroup(g)) for (const [section, label] of [['drafts', 'Waiting on you'], ['posts', 'Posts found'], ['reminders', 'Reminders'], ['runs', 'Runs'], ['voice', 'Voice and timing']]) items.push({label: `${g.name} · ${label}`, hint: 'Group', run: () => go({chat: team, info: section})});
-    for (const b of g.bots) items.push({label: b.name, hint: `${g.name} · bot`, run: () => go({chat: b.id})});
+    for (const [section, label] of [['group-settings', 'Group settings'], ['tasks', 'Scheduled tasks']]) items.push({label: `${g.name} · ${label}`, hint: 'Group', run: () => go({chat: team, info: section})});
+    for (const b of g.bots) items.push({label: b.name, hint: `${g.name} · bot`, run: () => go({chat: b.id})}, {label: `${b.name} · Scheduled tasks`, hint: `${g.name} · bot`, run: () => go({chat: b.id, info: 'tasks'})});
   }
   return items;
 }
@@ -120,15 +136,35 @@ export function moveCommand(delta) {
 
 /* ---------- sign-in (Node build) ---------- */
 
-export function showLogin(message = '') {
+export function showLogin(message = '', view = 'sign-in') {
   let layer = el('login-layer');
   // A repeated session-expiry notice must not rebuild the dialog: doing so would
   // clear a password the user is mid-way through typing.
   const visible = Boolean(layer) && !layer.classList.contains('hidden');
   if (!layer) { layer = document.createElement('div'); layer.id = 'login-layer'; layer.className = 'modal-layer'; document.body.appendChild(layer); }
-  if (visible) { const err = el('login-error'); if (err) err.textContent = message; return; }
-  layer.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-label="Sign in"><div class="sheet-head"><div><h2>Sign in</h2><p>Enter the dashboard password printed by the server.</p></div></div><form id="login-form" class="form">${field('Dashboard password', `<input class="input" type="password" name="password" autocomplete="current-password" required autofocus>`)}${btn('Unlock', null, {kind: 'primary', type: 'submit', wide: true})}<p class="note" id="login-error" role="alert">${esc(message)}</p></form></div>`;
+  if (visible && (layer.dataset.view || 'sign-in') === view) { const err = el('login-error'); if (err && message) err.textContent = message; return; }
+  layer.dataset.view = view;
+  const back = btn('Back to sign in', 'login-back', {kind: 'ghost', wide: true});
+  const head = view === 'forgot'
+    ? `<h2>Reset password</h2><p>The server prints a one-time token in its log. The answer is the same if the address is unknown.</p>`
+    : view === 'reset'
+      ? `<h2>Choose a new password</h2><p>Paste the token from the server log. It works once, for one hour.</p>`
+      : `<h2>Sign in</h2><p>Invited members use their email. The owner account can leave it blank.</p>`;
+  const form = view === 'forgot'
+    ? `<form id="forgot-form" class="form">${field('Email', `<input class="input" type="email" name="email" autocomplete="username" required autofocus>`)}${btn('Request token', null, {kind: 'primary', type: 'submit', wide: true})}<p class="note" id="login-error" role="alert">${esc(message)}</p></form>${back}`
+    : view === 'reset'
+      ? `<form id="reset-form" class="form">${field('Reset token', `<input class="input" name="token" autocomplete="one-time-code" required autofocus>`)}${field('New password', `<input class="input" type="password" name="password" autocomplete="new-password" required minlength="8">`, 'At least 8 characters.')}${btn('Update password', null, {kind: 'primary', type: 'submit', wide: true})}<p class="note" id="login-error" role="alert">${esc(message)}</p></form>${back}`
+      : `<form id="login-form" class="form">${field('Email', `<input class="input" type="email" name="email" autocomplete="username" placeholder="owner@localhost">`, 'Needed for an invited account. The owner can omit it.')}${field('Dashboard password', `<input class="input" type="password" name="password" autocomplete="current-password" required autofocus>`)}${btn('Unlock', null, {kind: 'primary', type: 'submit', wide: true})}<p class="note" id="login-error" role="alert">${esc(message)}</p></form><div class="row-actions">${btn('Forgot password', 'login-forgot', {kind: 'ghost', small: true})}${btn('I have a token', 'login-reset', {kind: 'ghost', small: true})}</div>`;
+  layer.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-label="Sign in"><div class="sheet-head"><div>${head}</div></div>${form}</div>`;
   layer.classList.remove('hidden');
   layer.querySelector('input[autofocus]')?.focus();
 }
 export const hideLogin = () => { const layer = el('login-layer'); if (layer) { layer.classList.add('hidden'); layer.innerHTML = ''; } };
+
+export function changePasswordSheet() {
+  openSheet(`<form id="password-form" class="form">
+    ${field('Current password', `<input class="input" type="password" name="currentPassword" autocomplete="current-password" required autofocus>`)}
+    ${field('New password', `<input class="input" type="password" name="newPassword" autocomplete="new-password" required minlength="8">`, 'At least 8 characters. Other sessions are signed out.')}
+    ${btn('Update password', null, {kind: 'primary', type: 'submit', wide: true})}
+  </form>`, {title: 'Change password'});
+}
