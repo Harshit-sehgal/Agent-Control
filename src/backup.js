@@ -4,8 +4,16 @@
  * relational surfaces (users, agents, agent tasks, jobs, notifications) so an
  * operator can move or archive an installation. The file itself is not
  * encrypted — protect it like the database. It deliberately EXCLUDES
- * credential ciphertext and session secrets: a restored installation
- * re-enters its credentials, and everyone signs in again.
+ * credential ciphertext and session secrets, and every secret-shaped value it
+ * does carry is replaced with a placeholder: a restored installation re-enters
+ * its credentials, pairs its devices again, and everyone signs in again.
+ *
+ * One consequence, stated plainly: `users.password_hash` is exported as a
+ * placeholder, so after a restore no account can sign in until its password is
+ * reset. The console token printed by POST /api/auth/forgot is the way back in
+ * (see `console.log` in src/routes-public.js); it is a recovery step, not an
+ * automatic one, and it is the price of a backup that does not carry an offline
+ * cracking target.
  *
  * Import refuses a live database unless `--force`/`{force:true}` is given,
  * because restoring blindly would drop the current workspace. The document is
@@ -35,6 +43,11 @@ const EXCLUDED_TABLES = ['credentials', 'pairing_codes', 'sessions', 'kv', 'sche
 // Not a device credential. agents.secret_hash cannot be SQL NULL (the column
 // is NOT NULL), and a backup must still restore the agent row.
 const REDACTED_AGENT_HASH = 'redacted';
+// A password hash is an offline cracking target, not data an operator needs
+// back: `verifyPassword` refuses anything that is not `scrypt$...`, so the
+// placeholder can never authenticate and the account resets after a restore
+// (see the module header).
+const REDACTED_PASSWORD_HASH = 'redacted';
 
 /** Browser-request cards live in kv, which backups exclude. A restored
  * awaiting_feed/browser run would 409 the group with no card to finish it. */
@@ -77,6 +90,9 @@ export function exportBackup(store) {
   // checksumming. secret_hash is NOT NULL, so SQL NULL would make any backup
   // that contains an agent fail on restore; a placeholder is not a credential.
   tables.agents = (tables.agents || []).map(a => ({...a, secret_enc: null, secret_hash: REDACTED_AGENT_HASH}));
+  // Same reasoning for sign-in passwords, and the header above claims secrets
+  // do not travel. password_hash is NOT NULL, so a placeholder replaces it.
+  tables.users = (tables.users || []).map(u => ({...u, password_hash: REDACTED_PASSWORD_HASH}));
   const checksum = crypto.createHash('sha256').update(JSON.stringify(tables)).digest('hex');
   return {
     backupVersion: BACKUP_VERSION,
@@ -178,6 +194,7 @@ export function importBackup(store, document, {force = false, primaryWorkspace =
       // which the column rejects. Fill that in after the checksum check so an
       // older file still validates, then restores.
       let rows = tables[name] || [];
+      if (name === 'users') rows = rows.map(row => ({...row, password_hash: row.password_hash || REDACTED_PASSWORD_HASH}));
       if (name === 'agents') rows = rows.map(row => ({
         ...row,
         secret_hash: row.secret_hash || REDACTED_AGENT_HASH,

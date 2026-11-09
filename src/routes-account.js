@@ -8,6 +8,7 @@ import * as backup from './backup.js';
 import * as notifications from './notifications.js';
 import {deleteProvider} from './ai-providers.js';
 import {onAgentTaskResult} from './bot-browser.js';
+import {validateBrowserRequest} from '../shared/bot-browser.js';
 import {resumeFeedRun, resumeBrowserRun} from './coordination.js';
 import {DEFAULT_WORKSPACE, ROLES, clearCookie} from './auth.js';
 import {fail} from './http.js';
@@ -48,7 +49,16 @@ export function accountRoutes(router, {auth, workspaces}) {
   });
   router.add('POST', '/api/agents/:id/tasks', 'member', async c => {
     const b = await c.body(), kind = String(b.kind || '');
-    const {task, duplicate} = agent.enqueueAgentTask(c.store, c.params.id, {kind, payload: b.payload || {}, idempotencyKey: b.idempotencyKey || null, createdBy: c.actor.email, permission: agent.permissionForKind(kind)});
+    // A browser payload can only do what a bot's browser block may do. This
+    // route used to forward `payload` verbatim, which skipped MAX_STEPS, the
+    // public http(s) check and the ban on clicking or typing on X.
+    let payload = b.payload || {};
+    if (kind.startsWith('browser.')) {
+      const request = validateBrowserRequest(payload);
+      if (request.kind !== kind) fail(`A ${kind} task does not match the payload: it describes a ${request.kind}.`, 400);
+      payload = {url: request.url, steps: request.steps};
+    }
+    const {task, duplicate} = agent.enqueueAgentTask(c.store, c.params.id, {kind, payload, idempotencyKey: b.idempotencyKey || null, createdBy: c.actor.email, permission: agent.permissionForKind(kind)});
     if (!duplicate) await c.store.update(s => activity(s, 'agent', `Queued ${kind} for a local agent.`, {taskId: task.id}));
     return reply(duplicate ? 200 : 201, {...task, payload: JSON.parse(task.payload), duplicate});
   });
@@ -105,22 +115,39 @@ export function accountRoutes(router, {auth, workspaces}) {
   router.add('GET', '/api/notification-prefs', 'viewer', c => notifications.getPreferences(c.store, c.actor.userId));
   router.add('PATCH', '/api/notification-prefs', 'member', async c => { const b = await c.body(); return notifications.updatePreferences(c.store, c.actor.userId, b); });
 
-  // Backup: export and restore. Credentials and sessions never travel. Owner
-  // only. A backup of the primary workspace carries every account's password
-  // hash; other workspaces export only their own rows. Restore replaces the
-  // current workspace database, so either one in an admin's hands is a way up.
+  // Backup: export and restore. Credentials, agent secrets and password hashes
+  // never travel. Owner only. Restore replaces the current workspace database,
+  // so either one in an admin's hands is a way up.
   router.add('GET', '/api/admin/backup', 'owner', c => backup.exportBackup(c.store));
   // Restore replaces this workspace's database, so it runs outside the work
   // tracker: the tracker is what the restore waits for (`tracksWork: false`).
   router.add('POST', '/api/admin/restore', 'owner', async c => {
     // A backup document can be far larger than a normal request; allow up to 32 MB.
     const b = await c.body(32 * 1024 * 1024);
+    const discarding = Array.isArray(b?.discardWorkspaces) ? b.discardWorkspaces.map(String) : [];
+    // A primary restore reconciles every workspace on disk against the restored
+    // rows, so a backup written before a workspace existed would delete that
+    // workspace's database. Refuse here, before anything is written, so both
+    // the live database and the newer workspace files stay untouched.
+    if (c.actor.workspaceId === DEFAULT_WORKSPACE) {
+      const restored = new Set((Array.isArray(b?.tables?.workspaces) ? b.tables.workspaces : []).map(w => String(w?.id)));
+      // Both the restored account rows and the stores currently open: `sync()`
+      // reconciles the open set, so a workspace that only exists on disk here
+      // must be refused before it too, not after the import has already
+      // rewritten the account rows.
+      const current = new Set([...auth.workspaceIds(), ...workspaces.all().map(w => w.id)]);
+      const refused = [...current].filter(id => !restored.has(id) && !discarding.includes(id));
+      if (refused.length) fail(`This backup was written before workspace ${refused.join(', ')} existed. Restoring it would delete that workspace and its data: export it first, or send its id in discardWorkspaces to confirm.`, 409);
+    }
     const restore = async store => {
       const result = backup.importBackup(store, b, {force: Boolean(b.force), primaryWorkspace: c.actor.workspaceId === DEFAULT_WORKSPACE});
       // A backup of the first workspace carries the list of workspaces.
-      await workspaces.sync();
+      await workspaces.sync({discard: discarding});
       await store.update(s => activity(s, 'backup', `Restored a backup into this installation (${result.restored} rows).`));
-      return result;
+      // A primary restore deletes every session (see backup.importBackup), so
+      // the caller's cookie is dead the moment this returns: say so instead of
+      // answering 200 as if they were still signed in.
+      return c.actor.workspaceId === DEFAULT_WORKSPACE ? {...result, signedOut: true} : result;
     };
     // A primary restore replaces global memberships and sessions, so fence
     // work in every workspace while those account records are being replaced.

@@ -205,8 +205,9 @@ function backupPanel() {
 }
 
 /** Model ids offered by a picker. Bounded so a provider with a huge catalogue
- * (OpenRouter) does not bloat the page. */
-const MODEL_LIMIT = 200;
+ * (OpenRouter) does not bloat the page, and matched to the server's own cap so a
+ * model the API sent is never silently unpickable. */
+const MODEL_LIMIT = 300;
 /** The row still reports the size of the whole catalogue, so the page keeps more
  * ids than it offers. The server sends at most 300 per provider. */
 const MODEL_CACHE = 300;
@@ -240,6 +241,7 @@ function rememberListing(listing) {
   if (listing.keyOptional !== undefined) next.keyOptional = Boolean(listing.keyOptional);
   if (listing.modelsAt !== undefined) next.modelsAt = listing.modelsAt || null;
   if (listing.modelsError !== undefined) next.modelsError = String(listing.modelsError || '');
+  if (listing.modelsTruncated !== undefined) next.modelsTruncated = Boolean(listing.modelsTruncated);
   listings.set(listing.id, next);
 }
 /** A provider row with what the panel knows, from the listing if this response
@@ -256,6 +258,7 @@ const providerView = p => {
     hasHeaders: Array.isArray(p.hasHeaders) ? idList(p.hasHeaders) : cached.hasHeaders || [],
     labels: {...(cached.labels || {}), ...labelMap(p.labels)},
     modelsError: p.modelsError || cached.modelsError || '',
+    modelsTruncated: p.modelsTruncated ?? cached.modelsTruncated ?? false,
     models: (Array.isArray(p.models) ? idList(p.models) : cached.models || []).slice(0, MODEL_CACHE),
     chatModels: fellBack ? null : (Array.isArray(p.chatModels) ? idList(p.chatModels) : cached.chatModels || []).slice(0, MODEL_CACHE),
     allModels: (Array.isArray(p.allModels) ? idList(p.allModels) : cached.allModels || []).slice(0, MODEL_CACHE)};
@@ -310,19 +313,28 @@ function syncApiVersionField(form, protocol) {
 }
 /** Custom request headers, one `Name: value` per line. */
 const headersField = value => field('Custom headers', `<textarea class="input" name="headers" rows="3" placeholder="X-Api-Key: ... / anthropic-beta: ..." autocomplete="off" spellcheck="false">${esc(value)}</textarea>`, 'Optional: one Name: value per line, sent with every request.');
-/** The object the server stores. Blank lines and lines without a colon are
- * dropped, and only the edges are trimmed, so a header value is kept as typed. */
+/** Custom request headers, one `Name: value` per line. Returns the object the
+ * server stores plus any line that could not be read: a dropped typo used to be
+ * silent, and the only symptom was a 401 from the provider. */
 function parseHeaders(text) {
-  const out = {};
-  for (const line of String(text || '').split('\n')) {
-    const at = line.indexOf(':');
-    if (at < 1) continue;
-    const name = line.slice(0, at).trim(), value = line.slice(at + 1).trim();
-    if (!name || !value) continue;
-    out[name] = value;
-  }
-  return out;
+  const headers = {}, invalid = [];
+  String(text || '').split('\n').forEach((line, index) => {
+    const raw = line.trim();
+    if (!raw || raw.startsWith('#')) return;
+    const at = raw.indexOf(':');
+    const name = at < 1 ? '' : raw.slice(0, at).trim();
+    const value = at < 1 ? '' : raw.slice(at + 1).trim();
+    // The same name rule the server enforces, checked here so the sheet says so
+    // instead of accepting a line and then losing it.
+    if (!name || !value || !/^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,64}$/.test(name)) invalid.push({line: index + 1, text: raw.slice(0, 60)});
+    else headers[name] = value;
+  });
+  return {headers, invalid};
 }
+/** The error to show when a header line could not be read, or ''. */
+const headerProblem = invalid => (invalid.length
+  ? `Header line${invalid.length > 1 ? 's' : ''} ${invalid.map(item => item.line).join(', ')} could not be read. Use one "Name: value" per line.`
+  : '');
 const modelsToast = (p, verb) => p.modelsError
   ? `Provider "${p.label}" ${verb}, but its model list could not be read: ${p.modelsError}`
   : `Provider "${p.label}" ${verb} with ${chatCount(providerView(p))} model(s).`;
@@ -362,7 +374,7 @@ function aiPanel(res) {
       const version = needsApiVersion(p.protocol) && p.apiVersion ? ` · api-version ${esc(p.apiVersion)}` : '';
       return actionRow(
         `${esc(p.label)} ${p.isDefault || p.id === res.defaultProviderId ? tag('default', 'good') : ''}`,
-        `${esc(p.host)} · ${esc(protocolName(p.protocol))} · ${chat} model(s)${extra}${version}${p.modelsError ? ` ${tag(p.modelsError, 'warn')}` : ''}`,
+        `${esc(p.host)} · ${esc(protocolName(p.protocol))} · ${chat} model(s)${extra}${p.modelsTruncated ? ' · list capped' : ''}${version}${p.modelsError ? ` ${tag(p.modelsError, 'warn')}` : ''}`,
         btn('Test', 'ai-test-provider', {id: p.id, small: true})
           + btn('Refresh models', 'ai-load-models', {id: p.id, small: true})
           + btn('Edit', 'ai-edit-provider', {id: p.id, small: true})
@@ -647,7 +659,9 @@ export const adminForms = {
     toast('Pairing code created. It is shown once.');
   },
   'ai-provider-form': async (form, values, ctx) => {
-    const headers = parseHeaders(values.headers);
+    const parsed = parseHeaders(values.headers), problem = headerProblem(parsed.invalid);
+    if (problem) throw new Error(problem);
+    const headers = parsed.headers;
     const p = await api('/api/ai/providers', 'POST', {
       label: values.label,
       // A pasted endpoint path ("…/v1/chat/completions") is trimmed back to its base.
@@ -676,7 +690,11 @@ export const adminForms = {
     // typed replaces it wholesale - text with no usable line clears the set, which
     // is what the sheet says it will do.
     const headerText = String(values.headers || '').trim();
-    if (headerText) body.headers = parseHeaders(headerText);
+    if (headerText) {
+      const parsed = parseHeaders(headerText), problem = headerProblem(parsed.invalid);
+      if (problem) throw new Error(problem);
+      body.headers = parsed.headers;
+    }
     const p = await api(`/api/ai/providers/${values.id}`, 'PATCH', body);
     rememberListing(p);
     closeSheet();

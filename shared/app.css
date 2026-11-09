@@ -127,7 +127,6 @@ body:not(.has-info) .pane-info{display:none}
 .filter.on{background:var(--brand);color:var(--on-brand);font-weight:600}
 .chat-list{flex:1;overflow-y:auto;padding:6px 8px}
 .chat-row{display:flex;align-items:center;gap:12px;width:100%;padding:10px;border-radius:16px;transition:background .12s}
-.chat-row:hover{background:var(--surface)}
 .chat-row.current{background:var(--brand-soft)}
 .chat-row:hover:not(.current){background:var(--raised)}
 .chat-row-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
@@ -235,7 +234,6 @@ body:not(.has-info) .pane-info{display:none}
 
 /* desktop landing */
 .home{margin:auto;width:100%;max-width:620px;display:flex;flex-direction:column;align-items:center;gap:14px;padding:24px;text-align:center}
-.home-mark{display:inline-flex;color:var(--brand)}
 .home h1{font-size:30px;font-weight:700;letter-spacing:-.02em}
 .home p{color:var(--muted);max-width:460px}
 .home .composer{width:100%;padding:10px 0 4px}
@@ -248,7 +246,7 @@ body:not(.has-info) .pane-info{display:none}
 .pane-main>.pane-head{border-bottom:1px solid var(--line)}
 .page-body{flex:1;overflow-y:auto;width:100%;max-width:680px;margin:0 auto;padding:6px 0 28px}
 .hero{display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 24px 8px;text-align:center}
-.hero h2{margin-top:8px;font-size:22px;font-weight:700}
+.hero h2{margin-top:8px;font-size:22px;font-weight:700;overflow-wrap:anywhere}
 .hero p{color:var(--muted);font-size:14px}
 .box-label{margin:20px 28px 0;font-size:13px;font-weight:400;color:var(--muted)}
 .box{margin:8px 14px 0;border-radius:var(--r-box);background:var(--surface);overflow:hidden}
@@ -263,7 +261,7 @@ body:not(.has-info) .pane-info{display:none}
 button.row:hover{background:var(--raised)}
 button.row>svg:last-child{flex:none;color:var(--muted)}
 .row-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
-.row-title{font-size:15px}.row-sub{font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+.row-title{font-size:15px;overflow-wrap:anywhere}.row-sub{font-size:13px;color:var(--muted);overflow-wrap:anywhere}
 .row-right{flex:none;font-size:14px;color:var(--muted)}
 .row-right.warn{color:var(--wait);font-weight:600}
 .row.tone-bad .row-title{color:var(--bad)}

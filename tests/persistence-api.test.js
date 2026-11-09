@@ -20,8 +20,13 @@ async function installation() {
     const r = await fetch(base + url, {method, headers: {'Content-Type': 'application/json', ...(cookie ? {Cookie: cookie} : {})}, body: body === undefined ? undefined : JSON.stringify(body)});
     return {status: r.status, body: await r.json(), cookie: r.headers.get('set-cookie')};
   };
+  let output = '';
   async function start() {
-    child = spawn(process.execPath, ['src/server.js'], {cwd: root, env, stdio: 'ignore'});
+    child = spawn(process.execPath, ['src/server.js'], {cwd: root, env, stdio: ['ignore', 'pipe', 'pipe']});
+    // The console is the reset-token transport on a local install, so the test
+    // reads it the way an operator would.
+    child.stdout.on('data', chunk => { output += chunk.toString(); });
+    child.stderr.on('data', chunk => { output += chunk.toString(); });
     for (let i = 0; i < 90; i++) {
       try { if ((await fetch(base + '/api/health')).ok) return; } catch { /* Not listening yet. */ }
       await new Promise(r => setTimeout(r, 70));
@@ -29,8 +34,8 @@ async function installation() {
     throw new Error('Server did not start.');
   }
   async function stop() { if (!child) return; child.kill('SIGINT'); await new Promise(resolve => child.once('exit', resolve)); child = null; }
-  const login = async () => (await send('POST', '/api/login', {password: 'test-password-1234'})).cookie.split(';')[0];
-  return {send, start, stop, login, async remove() { await stop(); await fs.rm(dir, {recursive: true, force: true}); }};
+  const login = async (password = 'test-password-1234') => (await send('POST', '/api/login', {password})).cookie.split(';')[0];
+  return {send, start, stop, login, log: () => output, async remove() { await stop(); await fs.rm(dir, {recursive: true, force: true}); }};
 }
 
 test('drafts, reminders and conversations survive a restart and stay editable', {timeout: 30000}, async () => {
@@ -96,7 +101,7 @@ test('a viewer never receives the capture token, and backups are for the owner o
     const viewer = await make('viewer@example.com', 'viewer'), admin = await make('admin@example.com', 'admin');
     assert.equal(typeof (await t.send('GET', '/api/state', undefined, owner)).body.captureToken, 'string');
     assert.equal((await t.send('GET', '/api/state', undefined, viewer)).body.captureToken, undefined);
-    // A backup carries password hashes and a restore rewrites roles: not for admins.
+    // A backup carries no usable password and a restore rewrites roles: not for admins.
     assert.equal((await t.send('GET', '/api/admin/backup', undefined, admin)).status, 403);
     assert.equal((await t.send('POST', '/api/admin/restore', {force: true}, admin)).status, 403);
     const backup = (await t.send('GET', '/api/admin/backup', undefined, owner)).body;
@@ -116,8 +121,15 @@ test('a viewer never receives the capture token, and backups are for the owner o
     assert.equal((await t.send('POST', '/api/admin/restore', noSum, owner)).status, 400, 'A backup without a checksum is refused.');
     const injected = tamper(x => { x.groups[0] = {...x.groups[0], 'name) VALUES (1); DROP TABLE users; --': 'x'}; });
     assert.equal((await t.send('POST', '/api/admin/restore', injected, owner)).status, 200, 'Unknown columns are ignored, not spliced into SQL.');
-    // A restore signs everyone out; the owner's account must still be there to sign in to.
-    assert.equal((await t.send('GET', '/api/users', undefined, await t.login())).status, 200, 'The users table must survive.');
+    // A restore signs everyone out and replaces every password hash with a
+    // placeholder, so the account survives but the old password does not work.
+    // The console reset token is the documented way back in.
+    assert.equal((await t.send('POST', '/api/login', {password: 'test-password-1234'})).status, 401, 'a restored hash is a placeholder, not a credential');
+    assert.equal((await t.send('POST', '/api/auth/forgot', {email: 'owner@localhost'})).status, 200);
+    const token = /Password reset token for owner@localhost[^\n]*\n\s+(\S+)/.exec(t.log())?.[1];
+    assert.ok(token, `the console carries the reset token: ${t.log()}`);
+    assert.equal((await t.send('POST', '/api/auth/reset', {token, password: 'recovered-password-1234'})).status, 200);
+    assert.equal((await t.send('GET', '/api/users', undefined, await t.login('recovered-password-1234'))).status, 200, 'The users table must survive.');
   } finally { await t.remove(); }
 });
 

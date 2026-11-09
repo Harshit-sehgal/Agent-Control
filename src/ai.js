@@ -17,7 +17,7 @@ import {normaliseProtocol,inferProtocol,normaliseBaseUrl,isChatModel,DEFAULT_PRO
 //                are accepted and inferred from the host when unset).
 //   AI_TIMEOUT_MS request budget; free-tier routing can be slow (default 180s).
 //
-// The four protocols live in shared/ai-presets.js so the settings page offers the
+// The five protocols live in shared/ai-presets.js so the settings page offers the
 // same names this file sends. A config carries `protocol`; `style` is still read
 // from older saved records and hand-written configs.
 const firstEnv=(...names)=>{for(const name of names){const value=String(process.env[name]||'').trim();if(value)return value;}return '';};
@@ -90,7 +90,7 @@ function requestFor(config,{instructions,input,maxTokens,temperature=null}){
   const headers=headersFor(config,protocol);
   if(protocol==='anthropic')return {protocol,url:`${config.baseUrl}/messages`,headers,body:{model:config.model,max_tokens:maxTokens,system:instructions,messages:[{role:'user',content:input}],...tuning}};
   if(protocol==='gemini')return {protocol,url:`${config.baseUrl}/models/${encodeURIComponent(config.model)}:generateContent`,headers,body:{systemInstruction:{parts:[{text:instructions}]},contents:[{role:'user',parts:[{text:input}]}],generationConfig:{maxOutputTokens:maxTokens,...tuning}}};
-  if(protocol==='openai-responses')return {protocol,url:`${config.baseUrl}/responses`,headers,body:{model:config.model,instructions,input,max_output_tokens:maxTokens,...tuning}};
+  if(protocol==='openai-responses')return {protocol,url:`${config.baseUrl}/responses`,headers,body:{model:config.model,instructions,input,max_output_tokens:maxTokens,store:false,...tuning}};
   // Azure puts the deployment (the model you made) in the path and the API
   // version in the query; the body has no `model` field. Newer resources also
   // expose the OpenAI-compatible `/openai/v1` base, which takes `model` in the
@@ -135,29 +135,51 @@ function geminiText(data){
  * answer `text/event-stream` even when `stream` was never asked for. Reading it
  * as JSON failed with "could not be reached". Fold the events back into the one
  * payload shape the protocol's extractor already reads. */
+/** Split an event stream into its events, not its lines. An SSE event is a
+ * blank-line-delimited block whose `data:` lines are joined with newlines by
+ * spec, so a pretty-printed JSON payload arrives spread over several lines. A
+ * proxy that puts every event on one line without blank separators is also real,
+ * so a block that will not parse as a whole is retried line by line. */
 function streamEvents(text){
   const events=[];
-  for(const raw of String(text||'').split(/\r?\n/)){
-    const line=raw.trim();
-    if(!line.startsWith('data:'))continue;
-    const payload=line.slice(5).trim();
-    if(!payload||payload==='[DONE]')continue;
-    try{events.push(JSON.parse(payload));}catch{/* a keep-alive comment or a partial frame */}
+  const parse=payload=>{
+    const trimmed=String(payload||'').trim();
+    if(!trimmed||trimmed==='[DONE]')return;
+    try{events.push(JSON.parse(trimmed));}catch{/* a keep-alive comment */}
+  };
+  for(const block of String(text||'').split(/\r?\n\r?\n/)){
+    const dataLines=block.split(/\r?\n/).filter(line=>line.trimStart().startsWith('data:')).map(line=>line.trimStart().slice(5).replace(/^ /,''));
+    if(!dataLines.length)continue;
+    if(dataLines.length===1){parse(dataLines[0]);continue;}
+    const whole=dataLines.join('\n');
+    const before=events.length;
+    parse(whole);
+    if(events.length===before)for(const line of dataLines)parse(line);
   }
   return events;
 }
 function foldStream(protocol,text){
   const pieces=[];
   for(const event of streamEvents(text)){
-    if(event?.type==='error'||event?.error){
-      throw upstream(`AI provider returned an error: ${cleanText(event?.error?.message||event?.message||'stream error',200)}`,502);
+    if(event?.type==='error'||event?.error||event?.type==='response.failed'){
+      const said=providerSaid(event)||providerSaid(event?.response)||'stream error';
+      throw upstream(`AI provider returned an error: ${cleanText(said,200)}`,502);
     }
-    if(protocol==='anthropic')pieces.push(event?.delta?.text);
-    else if(protocol==='gemini'){
+    // A gateway may answer a streaming request with one whole (non-streaming)
+    // frame. Reading only `delta` turned that into "empty response".
+    if(protocol==='anthropic'){
+      const blocks=Array.isArray(event?.content)?event.content:[event?.content_block];
+      pieces.push(event?.delta?.text,event?.completion,...blocks.map(b=>b?.type==='text'?b.text:null));
+    }else if(protocol==='gemini'){
       const parts=event?.candidates?.[0]?.content?.parts;
       if(Array.isArray(parts))for(const part of parts)if(part&&part.thought!==true)pieces.push(part.text);
-    }else if(protocol==='openai-responses')pieces.push(typeof event?.delta==='string'?event.delta:event?.output_text?.text);
-    else pieces.push(event?.choices?.[0]?.delta?.content);
+      if(!Array.isArray(parts))pieces.push(geminiText(event));
+    }else if(protocol==='openai-responses'){
+      pieces.push(typeof event?.delta==='string'?event.delta:event?.output_text?.text,responseText(event));
+    }else{
+      const choice=event?.choices?.[0];
+      pieces.push(choice?.delta?.content,choice?.message?.content,typeof choice?.text==='string'?choice.text:null);
+    }
   }
   const body=pieces.filter(piece=>typeof piece==='string').join('');
   if(!body)return null;
@@ -176,7 +198,15 @@ function extract(config,data){
   const protocol=protocolOf(config);
   const text=sanitize(protocolText(protocol,data));
   if(!text){
+    // An empty answer has a reason, and the reason names the fix. A refusal is
+    // not a broken provider, and a truncated answer is not a safety block.
+    const refusal=cleanText(data?.choices?.[0]?.message?.refusal,200);
+    if(refusal)throw upstream(`AI provider refused the request: ${refusal}`,422);
+    const finish=String(data?.choices?.[0]?.finish_reason||'').trim();
+    if(finish==='length')throw upstream('AI provider ran out of output tokens before answering (finish_reason: length). Raise the max tokens for this bot.',422);
+    if(finish==='content_filter')throw upstream('AI provider blocked the request (content_filter).',422);
     const blocked=String(data?.promptFeedback?.blockReason||data?.candidates?.[0]?.finishReason||'').trim();
+    if(protocol==='gemini'&&blocked==='MAX_TOKENS')throw upstream('AI provider ran out of output tokens before answering (MAX_TOKENS), often because reasoning used the budget. Raise the max tokens for this bot.',422);
     if(protocol==='gemini'&&blocked)throw upstream(`AI provider blocked the request (${blocked}).`,422);
     throw upstream('AI returned an empty response.');
   }
@@ -210,9 +240,20 @@ const upstream=(message,status=502)=>Object.assign(new Error(message),{status});
 // Only redact a key long enough to be a real secret: a five-character local
 // password ("local") would otherwise turn "blocked" into "bloc[redacted]ed".
 const redact=(message,secret)=>{const text=String(message??''),key=String(secret||'');return key.length>=8?text.split(key).join('[redacted]'):text;};
-const errorText=(data,status,secret,hint='')=>{
-  const said=redact(cleanText(data?.error?.message||data?.message||data?._error,200)||`provider responded ${status}`,secret);
+const errorText=(data,status,config,hint='')=>{
+  // Redact first, then bound: cutting to 200 chars first can leave the head of a
+  // key that straddles the boundary.
+  const said=cleanText(redactAll(providerSaid(data)||`provider responded ${status}`,config),200);
   return hint?`${said} (${hint})`:said;
+};
+/** Every secret in a config, not just the key: a gateway's custom header is
+ * stored encrypted precisely because it is a credential, so a provider that
+ * echoes it back must not print it. */
+const redactAll=(message,config)=>{
+  let text=String(message??'');
+  const secrets=[config?.apiKey,...Object.values(config?.headers&&typeof config.headers==='object'?config.headers:{})];
+  for(const secret of secrets)text=redact(text,secret);
+  return text;
 };
 /** A status code alone leaves the user guessing. Name the usual fix, because
  * "401" and "404 with a correct key" are the two most common setup mistakes. */
@@ -224,16 +265,35 @@ function statusHint(status,protocol){
   if(status>=500)return 'the provider is having trouble; try again';
   return '';
 }
-const providerSaid=data=>String(data?.error?.message||data?.message||data?._error||'');
-/** What a 400 is asking for, when it is one of the two parameters that the
+const providerSaid=data=>{
+  const error=data?.error;
+  const nested=error&&typeof error==='object'?[error.message,error.code,error.type,error.error?.message]:[];
+  const said=[
+    typeof error==='string'?error:null,
+    ...nested,
+    data?.message,
+    data?._error,
+    typeof data?.detail==='string'?data.detail:data?.detail?.message,
+    data?.error_description,
+    typeof data?.response?.error==='object'?data.response.error.message:null,
+  ].find(value=>typeof value==='string'&&value.trim());
+  return said?said.trim():'';
+};
+/** What a 400 is asking for, when it is one of the parameters that the
  * o1/o3/gpt-5-style reasoning models refuse. Anything else is a real error and
  * must not be retried, so a wrong key or a typo still reports itself. */
-function parameterFix(data){
+function parameterFix(data,protocol){
   const said=providerSaid(data);
   const completionTokens=/max_completion_tokens/i.test(said);
   const dropTemperature=/temperature/i.test(said)&&/unsupported|not support|invalid/i.test(said);
-  return {completionTokens,dropTemperature,changes:completionTokens||dropTemperature};
+  // o1-preview takes no system message at all; the prompt has to move into the
+  // first user turn. Named by the same 400, so it is the same one retry.
+  const mergeSystem=/\bsystem\b/i.test(said)&&(/role/i.test(said)||/unsupported|not support/i.test(said));
+  return {completionTokens,dropTemperature,mergeSystem,changes:completionTokens||dropTemperature||mergeSystem};
 }
+/** The token-limit field a 400 is pointing at: chat and Azure use
+ * `max_completion_tokens`, the Responses API its own `max_output_tokens`. */
+const completionField=protocol=>protocol==='openai-responses'?'max_output_tokens':'max_completion_tokens';
 const providerHost=config=>{try{return new URL(config.baseUrl).host;}catch{return 'the provider';}};
 
 const maxCalls=()=>{const n=Number(process.env.AI_MAX_CONCURRENCY);return Number.isInteger(n)&&n>=1?n:4;};
@@ -243,11 +303,15 @@ async function callModel({instructions,input,maxTokens,config,temperature=null})
   if(!configReady(cfg))throw upstream('No AI provider is configured. Add one under You → AI and models.',422);
   const protocol=protocolOf(cfg);
   if(needsConcreteModel(protocol)&&(!cfg.model||cfg.model==='auto'))throw upstream('This provider needs a concrete model id. Pick one under You → AI and models.',422);
-  if(activeCalls>=maxCalls())throw upstream('The AI provider is busy with other requests. Try again in a moment.',429);
+  if(activeCalls>=maxCalls())throw Object.assign(upstream('The AI provider is busy with other requests. Try again in a moment.',429),{permanent:true});
   activeCalls++;
+  const timeoutError=()=>upstream(`AI provider timed out after ${Math.round(timeoutMs()/1000)}s.`,504);
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs());
   try{
     const request=requestFor(cfg,{instructions,input,maxTokens,temperature});
+    // A body read can be aborted mid-stream by the timeout; without this the
+    // abort surfaces as "empty response" and the caller retries a timed-out call.
+    const readBody=async promise=>{try{return await promise;}catch(e){if(controller.signal.aborted)throw timeoutError();throw e;}};
     /** One POST, tolerant about how the answer arrives: JSON normally, SSE when
      * a gateway streams anyway. */
     const send=async body=>{
@@ -255,32 +319,52 @@ async function callModel({instructions,input,maxTokens,config,temperature=null})
       if(res.status>=300&&res.status<400)throw upstream(`AI provider redirected (${res.status}). Refusing to follow.`);
       const type=String(res.headers.get('content-type')||'');
       if(type.includes('text/event-stream')){
-        const raw=await res.text();
+        const raw=await readBody(res.text());
         const folded=res.ok?foldStream(protocol,raw):null;
         // An error coming back as a stream has no other body to quote.
         return {res,data:folded||(res.ok?null:{error:{message:cleanText(raw,300)}})};
       }
-      return {res,data:await res.json().catch(()=>null)};
+      let data=null;
+      try{data=await readBody(res.json());}catch(e){if(e.status)throw e;}
+      return {res,data};
     };
     let out=await send(request.body);
     // Newer OpenAI reasoning models reject `max_tokens`, and some reject any
     // temperature but the default, with a 400 that names the parameter. Retry
     // once with what they asked for instead of failing a turn over a spelling.
     if(out.res.status===400&&protocol!=='anthropic'&&protocol!=='gemini'){
-      const fix=parameterFix(out.data);
+      const fix=parameterFix(out.data,protocol);
       if(fix.changes){
         const body={...request.body};
-        if(fix.completionTokens){body.max_completion_tokens=maxTokens;delete body.max_tokens;}
+        if(fix.completionTokens){body[completionField(protocol)]=maxTokens;delete body.max_tokens;}
         if(fix.dropTemperature)delete body.temperature;
+        if(fix.mergeSystem){
+          // Chat shapes carry the instructions as a message; Responses as a field.
+          const messages=Array.isArray(body.messages)?body.messages:null;
+          const system=messages?.find(m=>m.role==='system');
+          if(messages&&system){
+            body.messages=messages.filter(m=>m.role!=='system');
+            const firstUser=body.messages.find(m=>m.role==='user');
+            const text=String(system.content||'');
+            if(firstUser&&typeof firstUser.content==='string')firstUser.content=`${text}\n\n${firstUser.content}`;
+            else body.messages.unshift({role:'user',content:text});
+          }else if(typeof body.instructions==='string'){
+            body.input=`${body.instructions}\n\n${body.input||''}`;
+            delete body.instructions;
+          }
+        }
         out=await send(body);
       }
     }
-    if(!out.res.ok)throw upstream(`AI provider returned ${out.res.status}: ${errorText(out.data,out.res.status,cfg.apiKey,statusHint(out.res.status,protocol))}`);
+    if(!out.res.ok)throw upstream(`AI provider returned ${out.res.status}: ${errorText(out.data,out.res.status,cfg,statusHint(out.res.status,protocol))}`);
     return extract(cfg,out.data||{});
   }catch(e){
-    if(e.name==='AbortError')throw upstream(`AI provider timed out after ${Math.round(timeoutMs()/1000)}s.`,504);
-    if(e.status){e.message=redact(e.message,cfg.apiKey);throw e;}
-    throw upstream(`AI provider at ${providerHost(cfg)} could not be reached.`);
+    if(e.status){e.message=redactAll(e.message,cfg);throw e;}
+    if(controller.signal.aborted)throw timeoutError();
+    // Keep the cause: a TLS failure, a JSON parse error and an empty body are
+    // three different fixes, and "could not be reached" named none of them.
+    const why=cleanText(redactAll(e?.message,cfg),200);
+    throw upstream(`AI provider at ${providerHost(cfg)} could not be reached${why?`: ${why}`:'.'}`);
   }finally{clearTimeout(timer);activeCalls--;}
 }
 
@@ -363,8 +447,15 @@ export async function discoverModels(config){
     return {ok:res.ok,status:res.status,data};
   };
   try{
-    let page=catalogStart(cfg,protocol),seen=new Map(),pages=0,first=null;
+    // A next link is provider-supplied data. Following one to another origin
+    // would send this key to a host the operator never typed (and the catalogue
+    // read is the one call that follows a URL a provider chose).
+    const sameOrigin=url=>{try{return new URL(url).origin===new URL(cfg.baseUrl).origin;}catch{return false;}};
+    let page=catalogStart(cfg,protocol),seen=new Map(),pages=0,first=null,truncated=false;
+    const visited=new Set();
     while(page&&pages<5){
+      if(!sameOrigin(page)||visited.has(page)){truncated=true;break;}
+      visited.add(page);
       const res=await get(page);
       if(!res.ok){
         const fallback=nativeCatalog(cfg,protocol);
@@ -373,20 +464,23 @@ export async function discoverModels(config){
           if(native.ok){
             const entries=catalogEntries(protocol,native.data);
             const ids=[...new Set(entries.map(e=>e.id))].sort();
-            return {...catalogueOf(ids,entries),protocol,at:new Date().toISOString(),source:'native'};
+            return {...catalogueOf(ids,entries),protocol,at:new Date().toISOString(),source:'native',truncated:false};
           }
         }
-        throw upstream(`Provider returned ${res.status}: ${errorText(res.data,res.status,cfg.apiKey,statusHint(res.status,protocol))}`);
+        throw upstream(`Provider returned ${res.status}: ${errorText(res.data,res.status,cfg,statusHint(res.status,protocol))}`);
       }
       first??=res.data;
       for(const entry of catalogEntries(protocol,res.data))seen.set(entry.id,entry.label?{label:entry.label}:LABEL_SEEN);
       pages++;
       const next=catalogNext(protocol,res.data,cfg.baseUrl);
       page=next;
+      // Past the page budget the list is real but no longer the whole account,
+      // and a picker that silently hides models is a bug report waiting.
+      if(page&&pages>=5)truncated=true;
     }
     if(!first)throw upstream('AI returned an empty response.');
     const entries=[...seen.entries()].map(([id,value])=>({id,label:value===LABEL_SEEN?'':value.label}));
-    return {...catalogueOf(entries.map(e=>e.id),entries),protocol,at:new Date().toISOString()};
+    return {...catalogueOf(entries.map(e=>e.id),entries),protocol,at:new Date().toISOString(),truncated};
   }catch(e){
     if(e.name==='AbortError')throw upstream('The provider did not answer in time.',504);
     throw e.status?e:upstream(`Could not reach ${providerHost(cfg)} to list models.`);
@@ -445,7 +539,15 @@ function boundBotInput(input, max=MAX_BOT_INPUT){
   delete env.thread;
   const tight=JSON.stringify(env);
   if(tight.length<=max)return tight;
-  return JSON.stringify({objective:cut(env.objective,2000),botId:env.botId,runId:env.runId,step:env.step,page:cut(env.page,1800),memory:env.memory,peerAnswer:env.peerAnswer,restrictions:env.restrictions,tools:env.tools,note:'The full task was truncated to fit the model input limit.'});
+  // Last resort: keep what the bot cannot work without, including its own
+  // earlier output — a multi-step run restarted blind without it — and cap the
+  // lists that can be arbitrarily long.
+  const list=value=>Array.isArray(value)?value.slice(0,8).map(item=>cut(item,120)):cut(value,600);
+  const slim={objective:cut(env.objective,1200),botId:env.botId,runId:env.runId,step:env.step,page:cut(env.page,1200),memory:env.memory,peerAnswer:env.peerAnswer,previous:env.previous&&typeof env.previous==='object'?{...env.previous,output:cut(env.previous.output,600)}:env.previous,restrictions:list(env.restrictions),tools:list(env.tools),note:'The full task was truncated to fit the model input limit.'};
+  let out=JSON.stringify(slim);
+  if(out.length>max)out=JSON.stringify({...slim,memory:undefined,peerAnswer:undefined,restrictions:undefined,tools:undefined});
+  // Never return more than the limit, even if every field was cut already.
+  return out.length>max?out.slice(0,max):out;
 }
 export async function executeCustomBot(bot,input,config) {
   if(!configReady(config||envConfig())) throw Object.assign(new Error('No AI provider is configured. Add one under You → AI and models (bring your own key).'),{status:422});

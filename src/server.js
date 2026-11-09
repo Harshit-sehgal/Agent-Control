@@ -49,6 +49,20 @@ auth.ensureBootstrap(PASSWORD);
 // auto-generated keyfile that lives with the data directory.
 agent.attachVault(store,STORE_PATH);
 const push=createPush(store);
+/** Agent-protocol retention. Pairing codes and agent tasks are not part of the
+ * workflow document, so `pruneState()` never sees them; this is the same daily
+ * sweep for those two tables. Work is tracked so a workspace being restored
+ * never has raw SQL run against its file mid-swap. */
+function startAgentRetention(ws,intervalMs=86400000){
+  let busy=false,stopped=false;
+  const run=async()=>{if(busy||stopped)return;busy=true;try{
+    const report=ws.trackWork?await ws.trackWork(async()=>ws.pruneAgentRows()):ws.pruneAgentRows();
+    if(report.pairingCodes||report.agentTasks)console.log(`Retention pruned ${report.pairingCodes} pairing code(s), ${report.agentTasks} agent task record(s).`);
+  }catch(e){if(e?.status!==503)console.error('Agent retention error:',e.message);}finally{busy=false;}};
+  void run();
+  const timer=setInterval(()=>void run(),intervalMs);timer.unref();
+  return async()=>{stopped=true;clearInterval(timer);if(busy)await new Promise(resolve=>setTimeout(resolve,50));};
+}
 /** Everything that runs in the background for one workspace: the handoff
  * clock, retention and the task queue, each bound to that workspace's store.
  * Returns the function that stops them. */
@@ -69,7 +83,7 @@ function startWorkspace(ws,workspaceId){
   // Nothing runs until recovery has finished, so a stalled task is re-armed
   // before the first sweep can see it.
   let stops=[],stopped=false;
-  ready.then(()=>{if(!stopped)stops=[startScheduler(ws),startRetention(ws),queue.start()];}).catch(error=>console.error(`Workspace ${workspaceId} failed to start:`,error.message));
+  ready.then(()=>{if(!stopped)stops=[startScheduler(ws),startRetention(ws),startAgentRetention(ws),queue.start()];}).catch(error=>console.error(`Workspace ${workspaceId} failed to start:`,error.message));
   const stop=async()=>{stopped=true;await ready.catch(()=>{});for(const s of stops)await s();};
   stop.ready=ready;
   return stop;
@@ -88,7 +102,16 @@ async function processCandidate(store,id){
     const result=await makeDraft(context.candidate,context.settings,'',resolveConfig(store,null));
     return await store.update(s=>wf.finishProcessing(s,id,evaluation,result));
   } catch(e){
-    await store.update(s=>wf.failProcessing(s,id,e.message));
+    // The candidate may have been deleted (or the write may have failed) while
+    // the provider was working. Recording the failure must never replace the
+    // real drafting error with the transition's own 404 or leave the row in
+    // `processing`, so the fallback writes the stored document directly.
+    try{await store.update(s=>wf.failProcessing(s,id,e.message));}
+    catch(releaseError){
+      try{store.failCandidate(id);}
+      catch(resetError){console.error(`Could not release candidate ${id}:`,resetError.message);}
+      if(releaseError?.status!==404)console.error(`Could not record the draft failure for ${id}:`,releaseError.message);
+    }
     throw e;
   }
 }
@@ -196,3 +219,6 @@ server.listen(PORT,HOST,()=>{
   if(HOST!=='127.0.0.1'&&HOST!=='localhost')console.warn('WARNING: Use HTTPS plus a private network / access proxy for remote access.');
 });
 process.on('SIGINT',()=>{void workspaces.stop().finally(()=>server.close(()=>process.exit(0)));});
+// A container stops the process with SIGTERM, so it needs the same drain as
+// Ctrl-C instead of being killed with requests and leases still open.
+process.on('SIGTERM',()=>{void workspaces.stop().finally(()=>server.close(()=>process.exit(0)));});

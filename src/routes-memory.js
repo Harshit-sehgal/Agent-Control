@@ -6,7 +6,7 @@
  * is an explicit action here and a background pass during runs.
  */
 import {cleanText} from '../shared/core.js';
-import {addRules, forgetChat, forgetRulebook, modelKey, publicMemory, removeRule} from '../shared/memory.js';
+import {addRules, findRulebook, forgetChat, forgetRulebook, modelKey, publicMemory, removeRule} from '../shared/memory.js';
 import {consolidateModel} from './memory.js';
 import {resolveConfig} from './ai-providers.js';
 import {fail} from './http.js';
@@ -33,8 +33,10 @@ export function memoryRoutes(router) {
     const model = cleanText(query(c).get('model'), 200);
     if (!model) fail('Which model does this rule belong to?', 400);
     const result = await c.store.update(s => {
-      const book = s.memory?.rulebooks?.[model];
-      if (!book || !book.rules.some(rule => rule.id === c.params.id)) fail('Rule not found.', 404);
+      // `rulebook()` would create the book it is asked to look for, and indexing
+      // the map directly can read an inherited property.
+      const book = findRulebook(s, model);
+      if (!book || !(book.rules || []).some(rule => rule.id === c.params.id)) fail('Rule not found.', 404);
       return removeRule(s, model, c.params.id);
     });
     return result;

@@ -11,14 +11,14 @@
  *   ui-dialogs  toast, sheet, confirm/ask   ui-actions action/form tables
  *   ui-fx       confetti, the send arrow, and when the bots react
  */
-import {parseRoute} from './ui-model.js?v=7dbf8dcc0b';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, isAdmin, canWrite, applyTheme, watchSystemTheme, retireSession, sessionEpoch} from './ui-store.js?v=7dbf8dcc0b';
-import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=7dbf8dcc0b';
-import {listShell, renderList, threadShell, renderThread, homeView, renderMentions} from './ui-views.js?v=7dbf8dcc0b';
-import {renderInfo, refreshLists, renderPage} from './ui-panel.js?v=7dbf8dcc0b';
-import {showLogin, hideLogin, openCommandPalette, closeCommandPalette, paletteOpen, updateCommandResults, chooseCommand, moveCommand} from './ui-sheets.js?v=7dbf8dcc0b';
-import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=7dbf8dcc0b';
-import {bringBotsToLife} from './ui-fx.js?v=7dbf8dcc0b';
+import {parseRoute} from './ui-model.js?v=fd5883cb06';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, isAdmin, canWrite, applyTheme, watchSystemTheme, retireSession, resetChatState, sessionEpoch} from './ui-store.js?v=fd5883cb06';
+import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=fd5883cb06';
+import {listShell, renderList, threadShell, renderThread, homeView, renderMentions} from './ui-views.js?v=fd5883cb06';
+import {renderInfo, refreshLists, renderPage} from './ui-panel.js?v=fd5883cb06';
+import {showLogin, hideLogin, openCommandPalette, closeCommandPalette, paletteOpen, updateCommandResults, chooseCommand, moveCommand} from './ui-sheets.js?v=fd5883cb06';
+import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=fd5883cb06';
+import {bringBotsToLife} from './ui-fx.js?v=fd5883cb06';
 
 const el = id => document.getElementById(id);
 const hashRoute = () => parseRoute(location.hash, store.state, {server: !isStaticDemo(), admin: isAdmin(), write: canWrite()});
@@ -26,10 +26,18 @@ const hashRoute = () => parseRoute(location.hash, store.state, {server: !isStati
 const typingIn = node => { const a = document.activeElement; return Boolean(a && node?.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)); };
 let lastView = '', syncTimer = null, syncDue = 0, refreshing = false;
 const LIVE_RUN = new Set(['running', 'queued', 'awaiting_feed', 'awaiting_browser']);
+/** Refresh failures already shown. A dashboard stuck on a stale snapshot must
+ * say so, but a poll every few seconds must not repeat the same toast. */
+const syncFailures = new Set();
+/** One request per press, keyed by what was pressed. The guard cannot live on
+ * the button: most actions repaint and replace the node, so the next press lands
+ * on a fresh button and a slow DELETE or approval would be sent twice. */
+const running = new Set();
+const pressKey = button => [button.dataset.action, button.dataset.id, button.dataset.text, button.dataset.section, button.dataset.page, button.dataset.theme].map(part => part ?? '').join('|');
 
 /** A repaint replaces nodes, so remember which control had focus by its stable
  * attributes and give focus back to its replacement. */
-const FOCUS_KEYS = ['action', 'id', 'filter', 'section', 'page', 'status', 'index'];
+const FOCUS_KEYS = ['action', 'id', 'filter', 'section', 'page', 'status', 'index', 'theme'];
 function keepFocus(paint) {
   const a = document.activeElement, pane = a?.closest?.('.pane');
   const selector = pane && a.dataset?.action ? `#${pane.id} ${a.tagName.toLowerCase()}` + FOCUS_KEYS.filter(k => a.dataset[k] !== undefined).map(k => `[data-${k}="${CSS.escape(a.dataset[k])}"]`).join('') : null;
@@ -92,8 +100,19 @@ function scheduleSync() {
     const ticket = sessionEpoch();
     syncTimer = null;
     refreshing = true;
-    try { await sync(); }
-    catch (e) { if (e.status === 401 && ticket === sessionEpoch()) lockScreen('Your session expired. Sign in again.'); }
+    try { await sync(); syncFailures.clear(); }
+    catch (e) {
+      if (ticket === sessionEpoch() && e?.status === 401) { lockScreen('Your session expired. Sign in again.'); return; }
+      if (ticket !== sessionEpoch()) return;
+      // Anything else (403, 500, offline) leaves the last snapshot on screen, so
+      // the dashboard silently goes stale. Say it once per distinct failure and
+      // keep polling: the loop below re-arms, and a recovery needs no click.
+      const detail = e?.message || 'The server did not answer.';
+      const message = e?.status ? `${detail} (${e.status})` : detail;
+      if (syncFailures.has(message)) return;
+      syncFailures.add(message);
+      toast(`Showing the last saved state: ${message}`, true);
+    }
     finally {
       // Sign-out bumps the epoch and may already have armed nothing. Do not
       // clear a newer session's refresh, and do not start this one again.
@@ -196,10 +215,14 @@ document.body.addEventListener('click', ev => {
     if (button.tagName === 'SELECT' || button.tagName === 'INPUT') return; // handled on change
     ev.preventDefault();
     const run = actions[button.dataset.action];
-    // One request per press: a second click while it runs is ignored.
-    if (!run || button.dataset.busy) return;
+    if (!run) return;
+    // One request per press: a second click while it runs is ignored, even when
+    // a repaint has already replaced the button it was pressed on.
+    const key = pressKey(button);
+    if (running.has(key)) return;
+    running.add(key);
     button.dataset.busy = '1';
-    Promise.resolve().then(() => run(button)).catch(fail).finally(() => { delete button.dataset.busy; });
+    Promise.resolve().then(() => run(button)).catch(fail).finally(() => { running.delete(key); delete button.dataset.busy; });
   } else if (ev.target.id === 'modal') closeSheet();
   else if (ev.target.id === 'command') closeCommandPalette();
 });
@@ -237,7 +260,7 @@ document.body.addEventListener('keydown', ev => {
   // keyCode 229: Safari reports the Enter that commits an IME candidate without isComposing.
   if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing && ev.keyCode !== 229 && ev.target.matches('.composer textarea')) { ev.preventDefault(); if (ev.target.value.trim()) ev.target.form.requestSubmit(); }
 });
-window.addEventListener('popstate', event => { syncDepth(event); if (!store.state) return; closeSheet(); closeCommandPalette(); const next = hashRoute(); if (next.chat !== store.route.chat) { store.editDraft = null; store.editText = null; } store.route = next; changed('route'); });
+window.addEventListener('popstate', event => { syncDepth(event); if (!store.state) return; closeSheet(); closeCommandPalette(); const next = hashRoute(); if (next.chat !== store.route.chat) resetChatState(); store.route = next; changed('route'); });
 window.addEventListener('resize', () => { if (store.state) setInert(); });
 // `toggle` does not bubble, so listen in the capture phase to remember open source panels.
 document.addEventListener('toggle', ev => { const id = ev.target.dataset?.evidence; if (!id) return; if (ev.target.open) { store.openEvidence.add(id); if (store.openEvidence.size > 50) store.openEvidence.delete(store.openEvidence.values().next().value); } else store.openEvidence.delete(id); }, true);

@@ -1,11 +1,16 @@
 /** Offline group coordination. Intentionally not AI: demonstrates real context passing. */
-import {createRun,createEnvelope,handoffTargets,instructLead,wakeBots,assessTask,runNote} from './coordination.js?v=7dbf8dcc0b';
-import {botSettings,groupSettings,threadContext} from './bot-settings.js?v=7dbf8dcc0b';
-import {normalizeBot,canBot} from './contracts.js?v=7dbf8dcc0b';
+import {createRun,createEnvelope,handoffTargets,instructLead,wakeBots,assessTask,runNote} from './coordination.js?v=fd5883cb06';
+import {botSettings,groupSettings,threadContext} from './bot-settings.js?v=fd5883cb06';
+import {normalizeBot,canBot} from './contracts.js?v=fd5883cb06';
 
 export async function simulateGroup({group, message, directBotId=null, guests=[], state, api, makeId, emit, chatKey=null, started=false, resume=null, shouldStop=()=>false}) {
   let run, previous, i;
   if (resume) {
+    // Only a pause resumes. A finished, failed or cancelled record handed back by
+    // a stale tab or a double click would otherwise be pushed back to `running`
+    // and repeat steps the trace says already ran. The server's continue route
+    // refuses the same way.
+    if (resume.status !== 'awaiting_checkpoint') throw Object.assign(new Error('Only a run paused at a checkpoint can be continued.'), {status: 409});
     run = {...resume, status: 'running'};
     if (run.checkpointsEnabled == null) run.checkpointsEnabled = groupSettings(group).checkpoints === true;
     i = Number(resume.checkpoint?.nextStep) || 0;

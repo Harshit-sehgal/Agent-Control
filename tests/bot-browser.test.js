@@ -10,7 +10,7 @@ import {createRun, createEnvelope} from '../shared/coordination.js';
 import {coordinationState, runGroup, resumeFeedRun, resumeBrowserRun} from '../src/coordination.js';
 import {dispatchBrowserRequest, onAgentTaskResult, autoDispatch, continueBrowserWork} from '../src/bot-browser.js';
 import {refusePostingAction} from '../agent/browser.mjs';
-import {parseBrowserRequests, validateBrowserRequest, recordBrowserRequests, stripBrowserBlocks, denyBrowserRequest, browserResultText, capturePageText, feedPageText, requestOfMessage, queueFeedRead, MAX_BROWSER_DEPTH, BROWSER_PERMISSION} from '../shared/bot-browser.js';
+import {parseBrowserRequests, validateBrowserRequest, recordBrowserRequests, stripBrowserBlocks, denyBrowserRequest, browserResultText, capturePageText, feedPageText, requestOfMessage, queueFeedRead, pruneBrowserRequests, MAX_BROWSER_REQUESTS, MAX_BROWSER_DEPTH, BROWSER_PERMISSION} from '../shared/bot-browser.js';
 import {addChatMessages} from '../shared/chats.js';
 import {validateBotSettings} from '../shared/bot-settings.js';
 import {ACTIONS} from '../shared/contracts.js';
@@ -533,4 +533,29 @@ test('browser requests survive a restart of the SQLite store', async () => {
     const again = await new SqliteStore(path.join(dir, 'state.db'), path.join(dir, 'state.json')).init();
     assert.equal(again.read().browserRequests[0].url, 'https://example.com/');
   } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});
+
+test('pruning page history never drops a request that is still open', () => {
+  const open = r => ['pending', 'dispatched'].includes(r.status);
+  // Finished history overflows the cap while a run is still waiting on a page.
+  const state = {browserRequests: [
+    ...Array.from({length: 30}, (_, n) => ({id: `done-${n}`, status: 'done'})),
+    ...Array.from({length: MAX_BROWSER_REQUESTS - 10}, (_, n) => ({id: `open-${n}`, status: n % 2 ? 'dispatched' : 'pending'})),
+    ...Array.from({length: 20}, (_, n) => ({id: `denied-${n}`, status: 'denied'})),
+  ]};
+  assert.ok(state.browserRequests.length > MAX_BROWSER_REQUESTS);
+  const kept = pruneBrowserRequests(state);
+  assert.equal(kept.length, MAX_BROWSER_REQUESTS, 'Finished history is bounded by the cap.');
+  const waiting = kept.filter(open);
+  assert.equal(waiting.length, MAX_BROWSER_REQUESTS - 10, 'Every open request survives, whatever the overflow.');
+  assert.ok(waiting.every(r => r.id.startsWith('open-')), 'Only the open requests fill that part of the list.');
+  assert.equal(kept.filter(r => !open(r)).length, 10, 'Finished requests fill whatever room is left.');
+  // Open requests alone may exceed the cap: a waiting page is never discarded.
+  const held = {browserRequests: Array.from({length: MAX_BROWSER_REQUESTS + 5}, (_, n) => ({id: `hold-${n}`, status: 'pending'}))};
+  const all = pruneBrowserRequests(held);
+  assert.equal(all.length, MAX_BROWSER_REQUESTS + 5);
+  assert.ok(all.every(open));
+  // Nothing to do under the cap, and a missing collection is created.
+  assert.deepEqual(pruneBrowserRequests({browserRequests: [{id: 'one', status: 'denied'}]}).map(r => r.id), ['one']);
+  assert.deepEqual(pruneBrowserRequests({}), []);
 });

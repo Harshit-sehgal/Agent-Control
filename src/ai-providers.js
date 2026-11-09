@@ -96,7 +96,7 @@ const publicProvider=p=>({id:p.id,label:p.label,protocol:protocolOfProvider(p),h
 /** The settings page gets the full picture: the endpoint, both model lists, the
  * friendly labels, the Azure version and the header NAMES. Values stay in the
  * vault, so even this listing cannot leak one. */
-const providerListing=p=>({...publicProvider(p),baseUrl:safeBase(p.baseUrl),models:Array.isArray(p.models)?p.models:[],chatModels:capList(p.chatModels||p.models,300),allModels:capList(p.allModels||p.models,2000),labels:labelsOf(p),apiVersion:p.apiVersion||null,hasHeaders:headerNamesOf(p),modelsAt:p.modelsAt||null,modelsError:p.modelsError||null,keyOptional:Boolean(p.keyOptional)});
+const providerListing=p=>({...publicProvider(p),baseUrl:safeBase(p.baseUrl),models:Array.isArray(p.models)?p.models:[],chatModels:capList(p.chatModels||p.models,300),allModels:capList(p.allModels||p.models,2000),labels:labelsOf(p),apiVersion:p.apiVersion||null,hasHeaders:headerNamesOf(p),modelsAt:p.modelsAt||null,modelsError:p.modelsError||null,modelsTruncated:Boolean(p.modelsTruncated),keyOptional:Boolean(p.keyOptional)});
 function publicBots(bots){
   const out={};
   if(!bots||typeof bots!=='object')return out;
@@ -220,8 +220,8 @@ export async function refreshModels(store,providerId){
     const chatModels=capList(found.models,2000);
     const allModels=capList(found.allModels||found.models,2000);
     const labels=labelsOf(found);
-    await store.update(s=>{const p=aiState(s).providers.find(x=>x.id===providerId);if(!p)return;p.models=chatModels;p.chatModels=chatModels;p.allModels=allModels;p.labels=labels;p.modelsAt=at;p.modelsError=null;});
-    return {models:chatModels,chatModels,allModels,labels,protocol:found.protocol,at};
+    await store.update(s=>{const p=aiState(s).providers.find(x=>x.id===providerId);if(!p)return;p.models=chatModels;p.chatModels=chatModels;p.allModels=allModels;p.labels=labels;p.modelsAt=at;p.modelsError=null;p.modelsTruncated=Boolean(found.truncated);});
+    return {models:chatModels,chatModels,allModels,labels,protocol:found.protocol,at,truncated:Boolean(found.truncated)};
   }catch(error){
     // Keep the last good catalogue: a transient failure should cost the picker
     // its freshness, not every bot its model (Anthropic and Gemini have no
@@ -302,7 +302,10 @@ export async function testProvider(store,providerId,{model}={}){
   const pick=clean(model,120)||first||concreteModel(config.protocol,'auto',listed,config.models);
   const started=Date.now();
   try{
-    const reply=await complete({instructions:'You are a connectivity check. Reply with the single word OK.',input:'ping',maxTokens:16,config:{...config,model:pick}});
+    // A reasoning model spends its budget before it says anything: 16 tokens
+    // came back empty and read as a broken key. 256 fits a one-word answer plus
+    // the hidden reasoning that newer models bill for.
+    const reply=await complete({instructions:'You are a connectivity check. Reply with the single word OK.',input:'ping',maxTokens:256,config:{...config,model:pick}});
     return {ok:true,model:pick,reply:String(reply??'').slice(0,300),ms:Date.now()-started};
   }catch(error){
     // src/ai.js already redacted the key and named the usual fix; pass its own
@@ -311,7 +314,12 @@ export async function testProvider(store,providerId,{model}={}){
   }
 }
 
-export async function setDefaults(store,{providerId,model}={}){
+export async function setDefaults(store,body={}){
+  // Only the two knobs this route owns. A typo (`temprature`) used to save
+  // nothing and report success, which reads like the setting applied.
+  const {providerId,model,...unknown}=body&&typeof body==='object'&&!Array.isArray(body)?body:{};
+  const stray=Object.keys(unknown);
+  if(stray.length)fail(`Unknown AI setting${stray.length>1?'s':''}: ${stray.slice(0,4).join(', ')}.`,400);
   await store.update(s=>{const ai=aiState(s);
     if(providerId!==undefined){if(providerId&&!ai.providers.some(p=>p.id===providerId))throw fail('Provider not found.',404);ai.defaultProviderId=providerId||null;}
     if(model!==undefined)ai.defaultModel=clean(model,120)||null;

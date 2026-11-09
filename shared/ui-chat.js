@@ -215,11 +215,13 @@ async function reply(conv, message) {
   }
   if (!isStaticDemo()) {
     const run = await api('/api/bots/run', 'POST', {botId: bot.id, input: message});
-    return appendMessage(id, {id: run.id, role: 'bot', text: run.output || 'The bot returned no output.', mode: 'ai'});
+    // The sender is named, so the write fence keeps this a bot line rather than
+    // rewriting it as something the user said.
+    return appendMessage(id, {id: run.id, role: 'bot', senderId: bot.id, senderName: bot.name, text: run.output || 'The bot returned no output.', mode: 'ai'});
   }
   const text = await localReply(conv, message);
   await wait(BEAT_MS);
-  appendMessage(id, {role: 'bot', text});
+  appendMessage(id, {role: 'bot', senderId: bot.id, senderName: bot.name, text});
 }
 
 /** Send `text` to a conversation and let the right engine answer. */

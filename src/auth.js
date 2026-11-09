@@ -186,7 +186,11 @@ export class Auth {
     const mail = String(email || '').trim().toLowerCase();
     if (!validEmail(mail)) throw Object.assign(new Error('Enter a valid email address.'), {status: 400});
     const workspaceId = actor.workspaceId || DEFAULT_WORKSPACE;
-    const next = ROLES.includes(role) ? role : 'member';
+    // An unknown role used to be silently downgraded to member, so a typo
+    // (`"owner "`, `"Admin"`) quietly created the wrong account.
+    const wanted = String(role ?? '').trim().toLowerCase();
+    if (wanted && !ROLES.includes(wanted)) throw Object.assign(new Error('Unknown role.'), {status: 400});
+    const next = wanted || 'member';
     if (rank(next) >= rank(actor.role)) throw Object.assign(new Error('You cannot grant a role at or above your own.'), {status: 403});
     // An address that already has an account joins this workspace with the
     // password it has; the one typed here is not applied to it.
@@ -213,6 +217,10 @@ export class Auth {
     if (body.role !== undefined) {
       if (!ROLES.includes(body.role)) throw Object.assign(new Error('Unknown role.'), {status: 400});
       if (rank(body.role) >= rank(actor.role)) throw Object.assign(new Error('You cannot grant a role at or above your own.'), {status: 403});
+      // Demoting the only owner leaves a workspace nobody can administer: no one
+      // could invite, remove or reconfigure anyone, and no later request could
+      // put an owner back. Refuse it instead of allowing a one-way lockout.
+      if (target.role === 'owner' && body.role !== 'owner' && this.owners(workspaceId, userId) === 0) throw Object.assign(new Error('This is the last owner of this workspace. Make someone else an owner first.'), {status: 409});
       this.store.run('UPDATE workspace_members SET role=? WHERE user_id=? AND workspace_id=?', body.role, userId, workspaceId);
     }
     // Disabling locks the whole account, so one workspace's admin may not do it
@@ -220,6 +228,8 @@ export class Auth {
     if (body.disabled !== undefined && this.elsewhere(userId, workspaceId)) throw Object.assign(new Error('This account also belongs to another workspace. Remove it from this one instead.'), {status: 409});
     if (body.disabled === true) {
       if (target.id === actor.userId) throw Object.assign(new Error('You cannot disable your own account.'), {status: 409});
+      // A disabled owner cannot administer either, so this is the same lockout.
+      if (target.role === 'owner' && this.owners(workspaceId, userId) === 0) throw Object.assign(new Error('This is the last owner of this workspace. Make someone else an owner first.'), {status: 409});
       this.store.run('UPDATE users SET disabled_at=? WHERE id=?', now(), userId);
       this.store.run('UPDATE sessions SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL', now(), userId);
     }
@@ -230,6 +240,12 @@ export class Auth {
   elsewhere(userId, workspaceId) {
     return Boolean(this.store.get('SELECT 1 AS x FROM workspace_members WHERE user_id=? AND workspace_id<>? LIMIT 1', userId, workspaceId));
   }
+  /** Owners of a workspace other than `excludeUserId`, so "is this the last
+   * one?" is one query at the point of change instead of a read-then-write. */
+  owners(workspaceId, excludeUserId = '') {
+    const row = this.store.get("SELECT COUNT(*) AS n FROM workspace_members WHERE workspace_id=? AND role='owner' AND user_id<>?", workspaceId, excludeUserId);
+    return Number(row?.n || 0);
+  }
   deleteUser(actor, userId) {
     if (rank(actor.role) < rank('admin')) throw Object.assign(new Error('Only admins can remove users.'), {status: 403});
     if (userId === actor.userId) throw Object.assign(new Error('Use account deletion to remove your own account.'), {status: 409});
@@ -237,6 +253,8 @@ export class Auth {
     const target = this.store.get('SELECT m.role FROM workspace_members m WHERE m.user_id=? AND m.workspace_id=?', userId, workspaceId);
     if (!target) throw Object.assign(new Error('User not found.'), {status: 404});
     if (rank(target.role) >= rank(actor.role)) throw Object.assign(new Error('You cannot remove a user at or above your own role.'), {status: 403});
+    // Removing the only owner leaves the workspace unadministrable.
+    if (target.role === 'owner' && this.owners(workspaceId, userId) === 0) throw Object.assign(new Error('This is the last owner of this workspace. Make someone else an owner first.'), {status: 409});
     // Someone who belongs to another workspace only leaves this one. Their
     // account, and their sessions elsewhere, are not this admin's to remove.
     if (this.elsewhere(userId, workspaceId)) {
@@ -298,6 +316,15 @@ export class Auth {
   selfDeleteAccount(userId, password) {
     const row = this.store.get('SELECT password_hash FROM users WHERE id=?', userId);
     if (!row || !verifyPassword(password, row.password_hash)) throw Object.assign(new Error('Password is incorrect.'), {status: 401});
+    // Leaving a workspace with other people in it and no owner strands them:
+    // nobody can invite, remove or reconfigure anyone afterwards. A workspace
+    // where this is the only account is fine to walk away from — the install
+    // returns to first-run setup.
+    const stranded = this.store.get(`SELECT w.id FROM workspaces w
+      JOIN workspace_members m ON m.workspace_id=w.id AND m.user_id=? AND m.role='owner'
+      WHERE (SELECT COUNT(*) FROM workspace_members o WHERE o.workspace_id=w.id AND o.role='owner')<=1
+        AND (SELECT COUNT(*) FROM workspace_members a WHERE a.workspace_id=w.id)>1 LIMIT 1`, userId);
+    if (stranded) throw Object.assign(new Error('You are the last owner of a workspace that has other members. Make someone else an owner, or remove them, before deleting your account.'), {status: 409});
     this.store.transaction(() => {
       this.store.run('UPDATE sessions SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL', now(), userId);
       this.store.run('DELETE FROM notification_prefs WHERE user_id=?', userId);

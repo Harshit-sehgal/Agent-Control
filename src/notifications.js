@@ -25,6 +25,7 @@ import {resolvePublicAddress, pinnedRequest} from '../agent/net-guard.mjs';
 import crypto from 'node:crypto';
 import {encryptJson, decryptJson} from './vault.js';
 import {smtpConfig, sendMail} from './mail.js';
+import {MAX_ATTEMPTS_DEFAULT} from '../shared/tasks.js';
 
 const now = () => new Date().toISOString();
 const MAX_IN_APP = 200;
@@ -81,16 +82,19 @@ export function updatePreferences(store, userId, body) {
   return next;
 }
 
-/** Record an in-app notification immediately (durable row), and enqueue
- * outbound delivery for the opt-in channels through the task queue. */
+/** Record one notification row on one channel, and enqueue outbound delivery
+ * for the opt-in channels through the task queue. Every channel gets its own
+ * row: a single shared row let the in-app copy's `delivered` stand for an email
+ * that never left, and one `sent_at` claimed both had gone. */
 export function notify(store, queue, {workspaceId = 'default', userId, title, body, kind = 'event', meta = {}, channels}) {
   const prefs = userId ? getPreferences(store, userId) : {inApp: true, webhook: false, email: false};
   const wanted = channels || CHANNELS.filter(c => prefs[c === 'in_app' ? 'inApp' : c]);
   const id = crypto.randomUUID();
+  const insert = (rowId, channel, status) => store.run(`INSERT INTO notifications (id,workspace_id,user_id,channel,title,body,meta,status,created_at)
+    VALUES (?,?,?,?,?,?,?,?,?)`, rowId, workspaceId || null, userId || null, channel,
+    String(title).slice(0, 200), String(body || '').slice(0, 2000), JSON.stringify(meta || {}), status, now());
   if (prefs.inApp || wanted.includes('in_app')) {
-    store.run(`INSERT INTO notifications (id,workspace_id,user_id,channel,title,body,meta,status,created_at)
-      VALUES (?,?,?,?,?,?,?,?,?)`, id, workspaceId || null, userId || null, 'in_app',
-      String(title).slice(0, 200), String(body || '').slice(0, 2000), JSON.stringify(meta || {}), 'delivered', now());
+    insert(id, 'in_app', 'delivered');
     // Bound the in-app feed; oldest goes first so the newest stays readable.
     // created_at is only millisecond-precise, so rowid breaks ties: the row
     // just inserted has the highest rowid and must not be the one deleted.
@@ -111,24 +115,70 @@ export function notify(store, queue, {workspaceId = 'default', userId, title, bo
       ? prefs.webhookCredentialId
       : prefs.emailAddress;
     if (!notifier) continue;
-    if (queue) queue(store, {
+    const rowId = crypto.randomUUID();
+    insert(rowId, channel, 'queued');
+    // No queue available (browser demo context): the row itself records the
+    // attempt rather than pretending it was sent.
+    if (!queue) continue;
+    const spec = {
       kind: 'notification',
-      payload: {notificationId: id, channel, target: notifier, title, body, meta},
-      idempotencyKey: `notify:${channel}:${id}`,
-    });
-    else {
-      // No queue available (browser demo context): record the attempt so the
-      // status is visible rather than pretending it was sent.
-      store.run(`INSERT INTO notifications (id,workspace_id,user_id,channel,title,body,meta,status,created_at)
-        VALUES (?,?,?,?,?,?,?,?,?)`, crypto.randomUUID(), workspaceId || null, userId || null, channel,
-        String(title).slice(0, 200), String(body || '').slice(0, 2000), JSON.stringify(meta || {}), 'queued', now());
-    }
+      payload: {notificationId: rowId, channel, target: notifier, title, body, meta},
+      idempotencyKey: `notify:${channel}:${rowId}`,
+    };
+    // A task that never lands leaves no retry behind, so the row must stop
+    // reading `queued` as if one were coming.
+    const failed = error => {
+      const message = String(error?.message ?? error ?? 'The delivery task was not queued.').slice(0, 400);
+      console.error('Notification enqueue:', message);
+      setStatus(store, rowId, channel, 'failed', message);
+    };
+    let pending;
+    try { pending = queue(store, spec); } catch (error) { failed(error); continue; }
+    Promise.resolve(pending).then(result => { if (result?.enqueued === false) failed(result.error); }, failed);
   }
   return id;
 }
 
-/** Deliver one queued notification. Throws to trigger the queue's retry. */
+/** Move one channel's own row and nothing else. The channel is part of the
+ * WHERE clause so a task can never report on a row it does not own. */
+function setStatus(store, id, channel, status, error = null) {
+  if (!id) return false;
+  try {
+    if (error) {
+      store.run(`UPDATE notifications SET status=?, meta=json_set(CASE WHEN json_valid(meta) THEN meta ELSE '{}' END,'$.deliveryError',?) WHERE id=? AND channel=?`,
+        status, String(error).slice(0, 400), id, channel);
+    } else {
+      store.run(`UPDATE notifications SET status=?, sent_at=? WHERE id=? AND channel=?`, status, now(), id, channel);
+    }
+    return true;
+  } catch (e) {
+    // Delivery already happened; a row that could not be updated is a display
+    // problem, not a reason to retry the send.
+    console.error('Notification status:', e.message);
+    return false;
+  }
+}
+
+/** Deliver one queued notification. Throws to trigger the queue's retry, and
+ * writes the outcome on this channel's own row: `sent` when it left, `failed`
+ * only when the queue has no attempt left, and `queued` while a retry is still
+ * coming, so the feed never claims a delivery that is still in doubt. */
 export async function deliver(store, task) {
+  const {channel} = task.payload;
+  const id = task.payload.notificationId;
+  try {
+    const result = await deliverOnce(store, task);
+    setStatus(store, id, channel, 'sent');
+    return result;
+  } catch (error) {
+    const spent = Number(task.attempts || 0) >= Number(task.maxAttempts ?? MAX_ATTEMPTS_DEFAULT);
+    if (spent) setStatus(store, id, channel, 'failed', error?.message);
+    throw error;
+  }
+}
+
+/** One delivery attempt, channel by channel. */
+async function deliverOnce(store, task) {
   const {channel, target, title, body, meta} = task.payload;
   if (channel === 'webhook') {
     const row = store.get('SELECT * FROM credentials WHERE id=?', target);

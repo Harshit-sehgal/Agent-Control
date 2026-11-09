@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {CSP} from '../shared/core.js';
+import {CSP, META_CSP} from '../shared/core.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const [indexHtml, serverJs, httpJs, css] = await Promise.all([
@@ -16,7 +16,13 @@ const [indexHtml, serverJs, httpJs, css] = await Promise.all([
 test('the Node header and the Pages meta tag declare one identical CSP', () => {
   const meta = indexHtml.match(/<meta http-equiv="Content-Security-Policy" content="([^"]+)">/);
   assert.ok(meta, 'The Pages index must declare a CSP meta tag.');
-  assert.equal(meta[1], CSP, 'shared/index.html CSP drifted from shared/core.js CSP.');
+  assert.equal(meta[1], META_CSP, 'shared/index.html CSP drifted from shared/core.js META_CSP.');
+  // A CSP in a <meta> element cannot enforce frame-ancestors: browsers ignore
+  // that directive there, so the Pages tag must not claim it. Framing is still
+  // denied on the Node build by the header (CSP + X-Frame-Options), and the
+  // Pages build is a static file host with nothing to protect behind it.
+  assert.doesNotMatch(meta[1], /frame-ancestors/, 'A meta CSP cannot enforce frame-ancestors; do not claim it there.');
+  assert.equal(META_CSP, CSP.replace("; frame-ancestors 'none'", ''), 'META_CSP must be the header CSP minus frame-ancestors, never a weaker policy.');
   // The server must source the policy from the shared constant rather than
   // restating it, so the two can never diverge again.
   assert.match(serverJs, /'Content-Security-Policy':CSP/, 'The server must send the shared CSP constant.');
@@ -24,6 +30,7 @@ test('the Node header and the Pages meta tag declare one identical CSP', () => {
 });
 
 test('the CSP denies framing and cross-origin embedding', () => {
+  // The header copy, which browsers do obey for this directive.
   assert.match(CSP, /frame-ancestors 'none'/);
   assert.match(CSP, /base-uri 'none'/);
   assert.match(CSP, /form-action 'self'/);

@@ -14,7 +14,7 @@
  * survives even with no AI provider. `mergeConsolidation` applies the result of
  * one model-written consolidation pass. Both are pure and bounded.
  */
-import {cleanText} from './core.js?v=7dbf8dcc0b';
+import {cleanText} from './core.js?v=fd5883cb06';
 
 export const MEMORY_VERSION = 1;
 export const MAX_RULES = 50;
@@ -30,6 +30,18 @@ export const CONSOLIDATE_MIN_MS = 5 * 60 * 1000;
 
 const PENDING_LIMIT = 24;
 const normalize = value => String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+/** Keys arrive from an HTTP body and are used as object keys, so the three names
+ * that reach a prototype must never pass. `rulebooks['__proto__']` *is*
+ * `Object.prototype`, and `book.rules = []` would then write onto every object
+ * in the process — a request could change behaviour far outside memory. */
+const RESERVED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+const memoryKey = (value, limit = 200) => {
+  const key = cleanText(value, limit);
+  if (RESERVED_KEYS.has(key)) throw Object.assign(new Error('That name is reserved. Pick another one.'), {status: 400});
+  return key;
+};
+/** An own-property read: an inherited one is never a stored record. */
+const own = (map, key) => (map && Object.hasOwn(map, key) ? map[key] : undefined);
 
 /** Ensure the memory shape exists. Idempotent; called from workflow.migrate. */
 export function memoryState(state) {
@@ -59,8 +71,8 @@ export function modelLabel(config) {
 /** The book for a key, created lazily. */
 export function rulebook(state, key, {label = ''} = {}) {
   const memory = memoryState(state);
-  const id = cleanText(key, 200);
-  let book = memory.rulebooks[id];
+  const id = memoryKey(key);
+  let book = own(memory.rulebooks, id);
   if (!book || typeof book !== 'object' || Array.isArray(book)) {
     book = {model: id, label: cleanText(label, 160) || id, rules: [], summary: '', pending: [], turns: 0, consolidatedTurns: 0, createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString(), consolidatedAt: null};
     memory.rulebooks[id] = book;
@@ -72,6 +84,10 @@ export function rulebook(state, key, {label = ''} = {}) {
   if (!Number.isInteger(book.consolidatedTurns)) book.consolidatedTurns = 0;
   return book;
 }
+
+/** The stored book for a key, or null. The read-only counterpart of
+ * `rulebook`: checking whether a rule exists must not create a book. */
+export const findRulebook = (state, key) => own(memoryState(state).rulebooks, memoryKey(key)) || null;
 
 /** True when a model-written pass is due: enough new material and enough time. */
 export function consolidationDue(book, now = Date.now()) {
@@ -178,7 +194,7 @@ export function addRules(state, key, texts, {source = 'user', now = new Date().t
 
 export function removeRule(state, key, ruleId, now = new Date().toISOString()) {
   const memory = memoryState(state);
-  const book = memory.rulebooks[cleanText(key, 200)];
+  const book = own(memory.rulebooks, memoryKey(key));
   if (!book) return {ok: true, removed: 0};
   const before = book.rules.length;
   book.rules = book.rules.filter(rule => rule.id !== ruleId);
@@ -188,7 +204,7 @@ export function removeRule(state, key, ruleId, now = new Date().toISOString()) {
 
 export function forgetRulebook(state, key) {
   const memory = memoryState(state);
-  delete memory.rulebooks[cleanText(key, 200)];
+  delete memory.rulebooks[memoryKey(key)];
   return {ok: true};
 }
 
@@ -224,10 +240,10 @@ export function digestConversation(messages, {max = MAX_CHAT_SUMMARY} = {}) {
  * that request, so the next turn cannot quietly bring the recap back. */
 export function noteChat(state, chatKey, {now = new Date().toISOString(), messages = null} = {}) {
   const memory = memoryState(state);
-  const key = cleanText(chatKey, 120);
+  const key = memoryKey(chatKey, 120);
   if (!key) return null;
   const list = Array.isArray(messages) ? messages : (state.chats?.[key] || []);
-  const forgottenAt = memory.forgottenChats[key];
+  const forgottenAt = own(memory.forgottenChats, key);
   if (forgottenAt) {
     const stamp = Number.isFinite(Date.parse(forgottenAt)) ? Date.parse(forgottenAt) : 0;
     const fresh = list.some(message => Date.parse(message?.at || '') > stamp);
@@ -241,7 +257,7 @@ export function noteChat(state, chatKey, {now = new Date().toISOString(), messag
     pruneMemory(state);
     return null;
   }
-  const previous = memory.chats[key];
+  const previous = own(memory.chats, key);
   // A model-written recap survives the next few turns. The digest is only the
   // fallback: rebuilding it every turn would throw away the consolidation the
   // user just paid for and put a raw slice of the thread back in the prompt.
@@ -262,10 +278,10 @@ export function noteChat(state, chatKey, {now = new Date().toISOString(), messag
  * when the model returned nothing usable). */
 export function setChatSummary(state, chatKey, summary, {now = new Date().toISOString()} = {}) {
   const memory = memoryState(state);
-  const key = cleanText(chatKey, 120);
+  const key = memoryKey(chatKey, 120);
   const value = cleanText(summary, MAX_CHAT_SUMMARY);
-  if (!key || !value) return memory.chats[key] || null;
-  const previous = memory.chats[key];
+  if (!key || !value) return own(memory.chats, key) || null;
+  const previous = own(memory.chats, key);
   const turns = Number(previous?.turns || 0);
   const entry = {chat: key, summary: value, turns, updatedAt: now, summarizedAt: now, summarizedTurns: turns};
   memory.chats[key] = entry;
@@ -278,7 +294,7 @@ export function setChatSummary(state, chatKey, summary, {now = new Date().toISOS
  * next turn cannot rebuild what the person just deleted. */
 export function forgetChat(state, chatKey, {now = new Date().toISOString()} = {}) {
   const memory = memoryState(state);
-  const key = cleanText(chatKey, 120);
+  const key = memoryKey(chatKey, 120);
   if (!key) return {ok: true};
   delete memory.chats[key];
   memory.forgottenChats[key] = now;

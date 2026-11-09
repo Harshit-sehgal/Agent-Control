@@ -15,16 +15,24 @@ import {adminActions, adminForms, adminChanges} from './ui-admin.js';
 const adminCtx = {reload: reloadAdminPage};
 const chatId = () => store.route.chat;
 const findBot = id => groupOfBot(id)?.bots.find(b => b.id === id) || (() => { throw new Error('Bot not found'); })();
-const patchBot = (id, body) => api(`/api/groups/${groupOfBot(id).id}/bots/${id}`, 'PATCH', body);
+/** Patch a bot by id. A bot removed in another tab fails with a sentence the
+ * toast can show, not "Cannot read properties of undefined". */
+const patchBot = (id, body) => {
+  const group = groupOfBot(id);
+  if (!group) throw new Error('That bot is no longer in a group.');
+  return api(`/api/groups/${group.id}/bots/${id}`, 'PATCH', body);
+};
 
 async function copyText(text, done) {
   if (!navigator.clipboard?.writeText) throw new Error('Clipboard is not available here.');
   await navigator.clipboard.writeText(text); toast(done);
 }
-/** Home prompt: open the first group chat and hand the message to the group. */
-export async function startGroupChat(text) {
+/** Home prompt: open the group chat the prompt belongs to and hand the message
+ * to the group. Without an id it is the first group, which is where the landing
+ * page's own chips and form point. */
+export async function startGroupChat(text, groupId) {
   const message = String(text || '').trim(); if (!message) return;
-  const group = groups()[0]; if (!group) throw new Error('Create a bot group first.');
+  const group = (groupId ? findGroup(groupId) : null) || groups()[0]; if (!group) throw new Error('Create a bot group first.');
   go({chat: teamKey(group.id)});
   await sendChat(teamKey(group.id), message);
 }
@@ -72,7 +80,7 @@ export const actions = {
     const input = document.querySelector('#chat-form textarea'); if (!input) return;
     input.value = completeMention(input.value, b.dataset.name); input.focus(); renderMentions(input.value);
   },
-  'home-ask': b => startGroupChat(b.dataset.text),
+  'home-ask': b => startGroupChat(b.dataset.text, b.dataset.id),
   'copy-chat': async b => {
     const rows = store.messages[b.dataset.id] || []; if (!rows.length) throw new Error('This conversation is empty.');
     const name = conversation(b.dataset.id)?.name || 'Bot';

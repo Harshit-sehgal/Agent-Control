@@ -83,11 +83,18 @@ export function activity(state,type,message,meta={}) {
   state.events.unshift({id:uuid(),at:new Date().toISOString(),type,message,meta});
   state.events=state.events.slice(0,200);
 }
-/** Content Security Policy shared by the Node response header and the static
- * Pages <meta http-equiv> tag. Both copies must stay byte-identical;
- * tests/security-headers.test.js asserts they match, so editing one without the
- * other fails the build instead of silently weakening the demo. */
+/** Content Security Policy for the Node response header, which is the copy that
+ * can enforce every directive including frame-ancestors. The static Pages build
+ * sends the rest of it in a <meta> tag; see META_CSP below for why the two
+ * differ, and tests/security-headers.test.js for the assertion that keeps them
+ * in step instead of letting one drift weaker than the other. */
 export const CSP="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+/** The same policy for the static Pages build, minus `frame-ancestors`. A CSP
+ * delivered in a <meta> element cannot enforce framing directives: browsers
+ * ignore them there, so a tag that claimed `frame-ancestors 'none'` would only
+ * look like protection. The Node server keeps the full policy in its header,
+ * which does enforce it, and also sends `X-Frame-Options: DENY`. */
+export const META_CSP=CSP.replace("; frame-ancestors 'none'",'');
 /** The sample posts the demo seeds. The Node `/api/demo/seed` route and the
  * browser-local transport both load from here, so the two demos cannot drift
  * into different fixtures. */

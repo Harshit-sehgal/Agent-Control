@@ -16,7 +16,8 @@
  * Posting stays human: interaction (click, type) is refused on X and Twitter
  * hosts, so no bot can press Post there. Reading those pages is allowed.
  */
-import {cleanText, validHttpUrl} from './core.js?v=7dbf8dcc0b';
+import {cleanText, validHttpUrl} from './core.js?v=fd5883cb06';
+import {controlFence} from './bot-link.js?v=fd5883cb06';
 
 export const BROWSER_PERMISSION = 'browser.use';
 export const MAX_REQUESTS_PER_REPLY = 2;
@@ -26,8 +27,9 @@ export const STEP_OPS = ['navigate', 'click', 'type', 'waitFor', 'read', 'scroll
 export const HOME_FEED_URL = 'https://x.com/home';
 const INTERACTIVE = ['click', 'type'];
 const POSTING_HOSTS = ['x.com', 'twitter.com'];
-// The AI client trims a fence that ends a reply, so the last block may be unclosed.
-const BLOCK = /```browser[ \t]*\r?\n([\s\S]*?)(?:```|$(?![\s\S]))/gi;
+// One fence grammar shared with every other control block (see bot-link.js):
+// the last block in a reply may be unclosed, and the strip path removes it.
+const BLOCK = () => controlFence('browser');
 
 function fail(message, status = 400) { throw Object.assign(new Error(message), {status}); }
 // `x.com.` and `x.com%2e` are x.com. Leaving the trailing dot on treated that
@@ -73,7 +75,7 @@ export function validateBrowserRequest(body) {
  * so a reply cannot flood the chat with error cards. */
 export function parseBrowserRequests(output) {
   const found = [];
-  for (const match of String(output ?? '').matchAll(BLOCK)) {
+  for (const match of String(output ?? '').matchAll(BLOCK())) {
     if (found.length >= MAX_REQUESTS_PER_REPLY) break;
     try {
       let body;
@@ -85,7 +87,7 @@ export function parseBrowserRequests(output) {
 }
 
 /** The reply as the chat shows it: the blocks are replaced by request cards. */
-export const stripBrowserBlocks = output => String(output ?? '').replace(BLOCK, '').replace(/\n{3,}/g, '\n\n').trim();
+export const stripBrowserBlocks = output => String(output ?? '').replace(BLOCK(), '').replace(/\n{3,}/g, '\n\n').trim();
 
 /** What a bot is told about the tool when it holds the permission. */
 export const BROWSER_TOOL_HINT = 'You can read or use a web page through the user\'s own local browser agent. Put one block per page in your reply, e.g. ```browser\n{"url":"https://example.com","steps":[{"op":"read","selector":"main"}]}\n``` Ops: navigate, click, type, waitFor, read, scroll. Scroll only moves the page. Only hosts the user allowlisted on their device work. You can never click or type on X or Twitter. The result comes back in the chat.';

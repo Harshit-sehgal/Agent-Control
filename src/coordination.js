@@ -85,6 +85,10 @@ export async function queueGroupRun(store,{groupId,message,directBotId=null,chec
     s.groupRuns.unshift(run);s.groupRuns=s.groupRuns.slice(0,100);
     s.groupMessages[groupId]??=[];
     s.groupMessages[groupId].push({id:randomUUID(),runId:run.id,role:'user',text:run.input,at:stamp()});
+    // The run log belongs to the group and every message adds one line to it.
+    // Cap it here as well as at the step write, or the queue is the one path
+    // that can grow it without a limit.
+    s.groupMessages[groupId]=s.groupMessages[groupId].slice(-300);
     activity(s,'group-run',`Queued ${group.name} coordination run`,{runId:run.id});return run.id;
   });
   let status=store.read().groupRuns.find(r=>r.id===id)?.status||'queued';
@@ -92,7 +96,7 @@ export async function queueGroupRun(store,{groupId,message,directBotId=null,chec
   // before any bot runs, so the reply can say it is waiting. Everything else starts now.
   if(status==='queued'){
     const held=await holdForFeed(store,id);
-    if(!held)void runGroup(store,id).catch(error=>console.error('Group execution:',error.message));
+    if(!held)startRun(store,id);
     status=store.read().groupRuns.find(r=>r.id===id)?.status||status;
   }
   return {runId:id,status};
@@ -131,6 +135,28 @@ export async function runBotTask(store,task,{queue=queueGroupRun,available=aiAva
 export function runGroup(store,id,executor=executeCustomBot){
   const run = () => runGroupInner(store,id,executor);
   return typeof store.trackWork === 'function' ? store.trackWork(run) : run();
+}
+/** Start a run in the background, and make sure a start that never happened does
+ * not stay `queued`. `store.trackWork` refuses while its workspace is paused for
+ * a restore, and `queued` is a busy status: the group would answer 409 to every
+ * later message with no Start button to press and no way out until a restart. */
+function startRun(store,id,executor){
+  void runGroup(store,id,executor).catch(error=>{
+    console.error('Group execution:',error.message);
+    return failRunStart(store,id,error);
+  });
+}
+/** Record on the run that it never began. Only a run that was about to start
+ * moves: a run paused at a plan or a checkpoint has its own way forward, and a
+ * finished one keeps the outcome it already reported. */
+function failRunStart(store,id,error){
+  const message=clean(error?.message)||'The run could not start.';
+  return Promise.resolve(store.update(s=>{
+    const r=s.groupRuns?.find(x=>x.id===id);
+    if(!r||r.status!=='queued')return;
+    r.status='failed';r.error=message;r.completedAt=stamp();
+    say(s,r,runNote(r));
+  })).catch(updateError=>console.error('A run that could not start was not marked failed:',updateError.message));
 }
 async function runGroupInner(store,id,executor){
   if(running.has(id))return;running.add(id);
@@ -191,8 +217,16 @@ async function runGroupInner(store,id,executor){
       const asked=parseBrowserRequests(output);
       const stripped=stripBrowserBlocks(output);
       if(!stripped.trim()&&!asked.length)throw new Error('Bot returned empty output.');
-      if(stripped.trim())assertContractOutput(bot,stripped);
-      previous={botId:bot.id,output:stripped.slice(0,3600)};
+      // The gate returns the value it validated. Passing the raw text on left a
+      // structured result as its fenced JSON, while the object the contract
+      // approved is what every downstream reader (sources, trace, the next
+      // envelope) should see. A text contract returns the same string.
+      const validated=stripped.trim()?assertContractOutput(bot,stripped):stripped;
+      // What the contract approved, as text: the string for a text contract, the
+      // object as JSON for a structured one. Both of these feed the next bot, so
+      // neither keeps the fences the model happened to wrap around them.
+      const gated=typeof validated==='string'?validated:JSON.stringify(validated);
+      previous={botId:bot.id,output:gated.slice(0,3600)};
       let toBotId=null,auto=[],holdBrowser=false;
       await store.update(s=>{coordinationState(s);const live=s.groupRuns.find(x=>x.id===id);if(!live||live.status!=='running')throw new Error('Run no longer active');
         const host=s.groups.find(x=>x.id===live.groupId);
@@ -200,7 +234,9 @@ async function runGroupInner(store,id,executor){
         const priorUrls=Array.isArray(live.browserUrls)?live.browserUrls:String(live.browserUrl||'').split(' | ').filter(Boolean);
         const skip=[...(live.task?.feedText?[HOME_FEED_URL]:[]),...priorUrls];
         const browsed=recordBrowserRequests(s,{bot,groupId:live.groupId,chatKey:live.chatKey||`team-${live.groupId}`,output,depth:live.browserDepth||0,makeId:randomUUID,skipUrls:skip,runId:id});
-        previous.output=browsed.text.slice(0,3600);
+        // Text around the browser fences is the browser helper's view of the
+        // reply; with nothing to browse, the approved value is the output.
+        previous.output=(browsed.records.length?browsed.text:gated).slice(0,3600);
         const actor=host?.bots.find(b=>b.id===bot.id)||bot;
         const sources=[live.input,...live.trace.map(step=>step.output),previous.output].filter(Boolean).join('\n');
         // A refused browser-only reply has no answer to draft. The browser
@@ -261,7 +297,7 @@ async function runGroupInner(store,id,executor){
     // A fast local agent can return while autoDispatch is still awaited above.
     // Its resume changes the run to queued, but runGroup's in-process lock
     // rejects that early restart. Pick it up once this invocation releases it.
-    if(store.read().groupRuns?.some(r=>r.id===id&&r.status==='queued'))queueMicrotask(()=>void runGroup(store,id,executor).catch(error=>console.error('Group execution:',error.message)));
+    if(store.read().groupRuns?.some(r=>r.id===id&&r.status==='queued'))queueMicrotask(()=>startRun(store,id,executor));
   }
 }
 /** A tracked feed read pauses before any bot runs. The source bot's request
@@ -304,7 +340,7 @@ export async function resumeFeedRun(store,request,{ok,text='',executor}={}){
     return true;
   }
   await store.update(s=>{const live=s.groupRuns.find(r=>r.id===id);if(!live||live.status!=='awaiting_feed')return;live.task={...live.task,feedText:page};live.status='queued';});
-  void runGroup(store,id,executor).catch(error=>console.error('Group execution:',error.message));
+  startRun(store,id,executor);
   return true;
 }
 /** A page the run asked for mid-step. Success gives that same bot another
@@ -357,7 +393,7 @@ export async function resumeBrowserRun(store,request,{ok,text='',executor}={}){
     live.status='queued';
     return true;
   });
-  if(start)void runGroup(store,id,executor).catch(error=>console.error('Group execution:',error.message));
+  if(start)startRun(store,id,executor);
   return true;
 }
 /** Start or drop a tracked plan that was shown before any bot ran. */
@@ -374,7 +410,7 @@ export async function decidePlan(store,id,{approve}){
   });
   if(result.start){
     const held=await holdForFeed(store,id);
-    if(!held)void runGroup(store,id).catch(error=>console.error('Group execution:',error.message));
+    if(!held)startRun(store,id);
   }
   return {runId:result.runId,status:store.read().groupRuns.find(r=>r.id===id)?.status||result.status};
 }

@@ -1,10 +1,10 @@
 /** Single source of UI state: the server snapshot, the route, the conversations
  * it carries and cosmetic preferences. Views read from `store` and never
  * keep their own copies, so one `sync()` + one render keeps every pane current. */
-import {normalizeUiPrefs, UI_PREFS_KEY} from './usability.js?v=7dbf8dcc0b';
-import {routeHash, tintOf} from './ui-model.js?v=7dbf8dcc0b';
-import {createOutbox} from './chats.js?v=7dbf8dcc0b';
-import {LOCAL_RUNS_KEY, patchLocalRun as patchStoredRun, cancelLocalRunsForChat} from './local-runs.js?v=7dbf8dcc0b';
+import {normalizeUiPrefs, UI_PREFS_KEY} from './usability.js?v=fd5883cb06';
+import {routeHash, tintOf} from './ui-model.js?v=fd5883cb06';
+import {createOutbox} from './chats.js?v=fd5883cb06';
+import {LOCAL_RUNS_KEY, patchLocalRun as patchStoredRun, cancelLocalRunsForChat} from './local-runs.js?v=fd5883cb06';
 
 // Where an earlier build kept conversations; read once by importLocalChats().
 const CHAT_KEY = 'agent-control-bot-chats-v2';
@@ -218,12 +218,22 @@ export const syncDepth = event => { depth = (event && event.state && typeof even
 /** In-app back: pop our own history entry when there is one, else go to `fallback`. */
 export function back(fallback = {}) { if (depth > 0) history.back(); else go(fallback, {replace: true}); }
 
+/** Everything that belongs to one conversation: the draft being edited, the
+ * source panels that were open, and the Posts search. Called on every chat
+ * change, from go() and from popstate, so Back/Forward cannot carry one chat's
+ * editor or search into another. */
+export function resetChatState() {
+  store.editDraft = null;
+  store.editText = null;
+  store.openEvidence.clear();
+  store.postQuery = '';
+}
+
 /** Navigate. Every pane repaints from `store.route`, and the hash keeps
  * browser Back/Forward and reload working. */
 export function go({chat = null, page = null, info = null} = {}, {replace = false} = {}) {
   // An edit in progress survives opening the info panel, not leaving the chat.
-  // Which evidence panels were open is per-conversation, so drop it on a switch.
-  if (chat !== store.route.chat) { store.editDraft = null; store.editText = null; store.openEvidence.clear(); }
+  if (chat !== store.route.chat) resetChatState();
   store.route = {chat, page, info};
   const hash = `#${routeHash(store.route)}`;
   if (location.hash !== hash) {

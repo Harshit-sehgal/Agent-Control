@@ -238,7 +238,10 @@ export function draftAction(state, id, action, body = {}) {
     // The evidence gate: disputed source material blocks approval, the same
     // way an empty draft does. Confidence values alone never unblock it.
     const summary = evidenceSummary(evidenceForDraft(state, id));
-    if (!summary.approved) fail('Resolve disputed evidence before approving this draft.', 409);
+    if (summary.disputed > 0) fail('Resolve disputed evidence before approving this draft.', 409);
+    // Material marked "do not reuse" cannot be published, whatever anyone thinks
+    // of it, so it blocks the same way a dispute does — with its own reason.
+    if (summary.reuseBlocked > 0) fail(`${summary.reuseBlocked} piece${summary.reuseBlocked === 1 ? '' : 's'} of this draft's evidence is marked "do not reuse". Remove it or change the reuse policy before approving.`, 409);
     scheduleApproval(x, body.minDelay ?? state.settings.minDelay, body.maxDelay ?? state.settings.maxDelay);
     // Freeze the evidence picture the approval was made against, so a later
     // evidence edit can never retroactively change what was approved.
@@ -305,6 +308,11 @@ export function updateBot(state, groupId, botId, body) {
   const name = body.name === undefined ? bot.name : cleanText(body.name, 80);
   const instructions = body.instructions === undefined ? bot.instructions : cleanText(body.instructions, 3000);
   if (!name || !instructions) fail('Bot name and instructions required.');
+  // One name per group, the same rule addBot and a model-created bot meet. A
+  // rename is how a duplicate used to slip in, and findPeer/mentionedBots
+  // resolve a name to whichever bot is first in the roster, so a handoff would
+  // land on the wrong teammate.
+  if (g.bots.some(other => other !== bot && other.name.trim().toLowerCase() === name.toLowerCase())) fail(`A bot named ${name} is already in this group.`, 409);
   const settings = body.settings === undefined ? undefined : validateBotSettings(body.settings, bot.settings);
   if (body.contract !== undefined) bot.contract = contracts.validateContract(body.contract);
   if (body.permissions !== undefined) bot.permissions = contracts.validatePermissions(body.permissions);
@@ -367,6 +375,15 @@ export function removeBot(state, groupId, botId) {
   const g = findGroup(state, groupId);
   const bot = g.bots.find(x => x.id === botId);
   if (!bot) fail('Bot not found.', 404);
+  // A pipeline is an explicit choice of which bots run, and `null` means "every
+  // bot". Removing its last bot would therefore switch the group to bots the
+  // person never picked once prunePipeline clears the emptied list, so the
+  // choice has to be changed first. Entries already pointing at a bot that left
+  // are ignored: they are not a choice the group can still honour.
+  const pipeline = Array.isArray(g.settings?.pipeline) ? g.settings.pipeline.filter(id => g.bots.some(b => b.id === id)) : [];
+  if (pipeline.includes(botId) && pipeline.every(id => id === botId)) {
+    fail(`${bot.name} is the only bot in this group's pipeline. Add another bot to the pipeline, or clear it, before removing ${bot.name}.`, 409);
+  }
   g.bots = g.bots.filter(x => x.id !== botId);
   prunePipeline(g);
   forgetBot(state, botId);

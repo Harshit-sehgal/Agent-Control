@@ -218,12 +218,22 @@ export const syncDepth = event => { depth = (event && event.state && typeof even
 /** In-app back: pop our own history entry when there is one, else go to `fallback`. */
 export function back(fallback = {}) { if (depth > 0) history.back(); else go(fallback, {replace: true}); }
 
+/** Everything that belongs to one conversation: the draft being edited, the
+ * source panels that were open, and the Posts search. Called on every chat
+ * change, from go() and from popstate, so Back/Forward cannot carry one chat's
+ * editor or search into another. */
+export function resetChatState() {
+  store.editDraft = null;
+  store.editText = null;
+  store.openEvidence.clear();
+  store.postQuery = '';
+}
+
 /** Navigate. Every pane repaints from `store.route`, and the hash keeps
  * browser Back/Forward and reload working. */
 export function go({chat = null, page = null, info = null} = {}, {replace = false} = {}) {
   // An edit in progress survives opening the info panel, not leaving the chat.
-  // Which evidence panels were open is per-conversation, so drop it on a switch.
-  if (chat !== store.route.chat) { store.editDraft = null; store.editText = null; store.openEvidence.clear(); }
+  if (chat !== store.route.chat) resetChatState();
   store.route = {chat, page, info};
   const hash = `#${routeHash(store.route)}`;
   if (location.hash !== hash) {

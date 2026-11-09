@@ -140,6 +140,9 @@ export function groupRoutes(router) {
   // Durable text-only bot coordination. Humans approve every external action separately.
   router.add('GET', '/api/groups/:group/chat', 'viewer', c => {
     const s = c.store.read(); coordinationState(s);
+    // POST answers 404 for an unknown group, so the read must too instead of
+    // rendering an empty thread for a group that does not exist.
+    if (!s.groups.some(g => g.id === c.params.group)) fail('Group not found.', 404);
     return {messages: (s.groupMessages[c.params.group] || []).slice(-300), runs: s.groupRuns.filter(r => r.groupId === c.params.group).slice(0, 50)};
   });
   router.add('POST', '/api/groups/:group/chat', 'member', async c => {

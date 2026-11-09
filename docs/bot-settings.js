@@ -7,8 +7,8 @@
  * off, but never grant an action (that is `contracts.js` permissions) or lift
  * the hard step cap.
  */
-import {cleanText} from './core.js?v=7dbf8dcc0b';
-import {TINT_COUNT} from './ui-kit.js?v=7dbf8dcc0b';
+import {cleanText} from './core.js?v=fd5883cb06';
+import {TINT_COUNT} from './ui-kit.js?v=fd5883cb06';
 
 export const REPLY_LENGTHS = {short: 500, medium: 1500, long: 3000};
 export const ROUTING_MODES = ['pipeline', 'mentions', 'everyone'];
@@ -181,7 +181,11 @@ export function pipelineOf(group) {
   return order.filter(on);
 }
 
-/** Drop pipeline entries for bots that left the group. Idempotent. */
+/** Drop pipeline entries for bots that left the group. Idempotent, and the
+ * repair path only: it runs on a stored state that is already inconsistent, so
+ * it cannot refuse anything. An empty pipeline reads as "every bot", which is
+ * why `removeBot` refuses to strip a pipeline's last bot in the first place and
+ * a person has to clear the pipeline to choose "every bot" deliberately. */
 export function prunePipeline(group) {
   if (!isObject(group?.settings) || !Array.isArray(group.settings.pipeline)) return group;
   const ids = new Set((group.bots || []).map(b => b.id));

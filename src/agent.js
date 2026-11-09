@@ -209,6 +209,20 @@ export function touchAgent(store, agentId) {
   store.run('UPDATE agents SET last_seen_at=?, status=? WHERE id=?', now(), 'online', agentId);
 }
 
+/** Push the lease of every task this agent is still running out again.
+ *
+ * A device heartbeats while it works, so a *live* long job (a slow page, a
+ * serial queue) must not look abandoned. Without this, `recoverAgentTasks`
+ * re-armed any task whose 120s lease had lapsed even though the device was
+ * still executing it, and the task ran twice. Call this before recovery in the
+ * heartbeat. Returns how many leases were pushed out. */
+export function renewAgentTaskLeases(store, agentId, {leaseMs = 120000, nowMs = Date.now()} = {}) {
+  const result = store.run(
+    `UPDATE agent_tasks SET lease_until=?, updated_at=? WHERE agent_id=? AND status='running'`,
+    new Date(nowMs + leaseMs).toISOString(), now(), agentId);
+  return Number(result.changes || 0);
+}
+
 export function listAgents(store, workspaceId) {
   const agents = store.all('SELECT * FROM agents WHERE workspace_id=? ORDER BY paired_at DESC', workspaceId);
   return agents.map(a => ({

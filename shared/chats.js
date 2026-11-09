@@ -25,16 +25,31 @@ const groupOf = (state, key) => (state.groups || []).find(g => `team-${g.id}` ==
 /** What a browser may claim about a message it writes. It can never mark a
  * message as model output (`mode`), and it can never name a sender the
  * conversation does not have: in a group the sender must be one of the group's
- * bots and takes that bot's real name; in a bot's own chat there is no choice.
+ * bots and takes that bot's real name, and in a bot's own chat the only bot is
+ * the chat's own.
+ * A browser cannot speak as a bot it cannot name: a `bot` line survives only when
+ * its sender resolves to a real bot of the group (see `addChatMessages`). A
+ * `system` notice is plain text the app writes for itself ("that did not go
+ * through"), so it stays allowed — but it carries `origin: 'browser'`.
  * Only the server, writing a run it executed itself, is `trusted`. */
 function untrusted(state, key, message) {
   delete message.mode; delete message.senderId; delete message.senderName; delete message.toBotId;
   if (message.role !== 'user') message.origin = 'browser';
   return message;
 }
+/** A claim only survives when the roster backs it: a bot line keeps `bot` and
+ * its real name when the sender is a bot of this group (or a summonable guest).
+ * A bot's own chat has exactly one bot, so a bot line there resolves to that bot
+ * and there is nobody else it could claim to be. Anything else is the user
+ * writing, so a nameless teammate line cannot reach the thread. */
 function claimedSender(state, key, raw, message) {
-  if (message.role !== 'bot' || !key.startsWith('team-')) return message;
+  if (message.role !== 'bot') return message;
   const group = groupOf(state, key);
+  if (!key.startsWith('team-')) {
+    const bot = (group?.bots || []).find(b => b.id === key);
+    if (bot) { message.senderId = bot.id; message.senderName = bot.name; }
+    return message;
+  }
   if (!group) return message;
   const roster = [...(group.bots || []), ...summonableGuests(state.groups, group.id, {includeOff: true})];
   const sender = roster.find(b => b.id === raw.senderId), next = roster.find(b => b.id === raw.toBotId);
@@ -64,22 +79,37 @@ export function addChatMessages(state, key, messages, {makeId = () => crypto.ran
   if (!chatKeys(state).has(key)) fail('Conversation not found.', 404);
   if (!Array.isArray(messages) || !messages.length) fail('Send at least one message.');
   if (messages.length > MAX_CHAT_MESSAGES) fail(`Send at most ${MAX_CHAT_MESSAGES} messages at once.`);
-  const clean = messages.map(m => { const e = entry(m, makeId, now); return trusted ? e : claimedSender(state, key, m, untrusted(state, key, e)); });
+  const clean = messages.map(m => {
+    if (trusted) return entry(m, makeId, now);
+    const e = claimedSender(state, key, m, untrusted(state, key, entry(m, makeId, now)));
+    // Only a resolved bot may speak as a bot: a nameless `bot` line would
+    // otherwise plant text that reads as a teammate's, and the reader has no way
+    // to tell. Everything a browser sends that claims a bot without naming one
+    // lands as the user's own line instead. A `system` notice is allowed through
+    // (it is text, escaped, with no authority) because the UI writes its own
+    // error and status lines this way.
+    if (e.role === 'bot' && !e.senderId) e.role = 'user';
+    return e;
+  });
   state.chats ??= {};
   const list = state.chats[key] || [], seen = new Map(list.map((m, i) => [m.id, i]));
-  let added = 0;
+  const written = new Set();
   for (const m of clean) {
     const at = seen.get(m.id);
     if (at !== undefined) {
-      if (trusted) { list[at] = m; added++; }
+      if (trusted) { list[at] = m; written.add(m.id); }
       continue;
     }
     seen.set(m.id, list.length);
     list.push(m);
-    added++;
+    written.add(m.id);
   }
   state.chats[key] = list.slice(-MAX_CHAT_MESSAGES);
-  return {ok: true, added};
+  // `added` counts the messages a reader can actually see. A batch that pushes
+  // an earlier line (a trusted replacement, say) out of the window must not be
+  // reported as fully stored: the caller uses this count to reconcile the UI.
+  const stored = new Set(state.chats[key].map(m => m.id));
+  return {ok: true, added: [...written].filter(id => stored.has(id)).length};
 }
 
 /** Clearing the thread also ends work that thread was blocking: waiting

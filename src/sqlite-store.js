@@ -255,10 +255,19 @@ export class SqliteStore {
     await fs.mkdir(path.dirname(this.dbPath), {recursive: true});
     const {DatabaseSync} = await sqlite();
     this.db = new DatabaseSync(this.dbPath);
-    this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
-    this.migrate();
+    try {
+      this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
+      this.migrate();
+      this.cache = await this.loadDocument();
+    } catch (e) {
+      // A store that failed to open must not keep the file handle: a newer
+      // schema or a corrupt legacy import would otherwise leak it for the
+      // process lifetime (and on some platforms keep the file locked).
+      try { this.db.close(); } catch { /* already unusable */ }
+      this.db = null;
+      throw e;
+    }
     try {await fs.chmod(this.dbPath, 0o600);} catch {}
-    this.cache = await this.loadDocument();
     return this;
   }
   migrate() {
@@ -282,7 +291,7 @@ export class SqliteStore {
       this.db.prepare('INSERT INTO schema_meta (id,version,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version, updated_at=excluded.updated_at')
         .run(MIGRATIONS.length, now());
       this.db.exec('COMMIT');
-    } catch (e) { this.db.exec('ROLLBACK'); throw e; }
+    } catch (e) { rollback(this.db); throw e; }
   }
   kvGet(key) { return this.db.prepare('SELECT value FROM kv WHERE key=?').get(key)?.value ?? null; }
   kvSet(key, value) { this.db.prepare('INSERT INTO kv (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, value); }
@@ -293,7 +302,37 @@ export class SqliteStore {
   transaction(fn) {
     this.db.exec('BEGIN');
     try { const out = fn(); this.db.exec('COMMIT'); return out; }
-    catch (e) { this.db.exec('ROLLBACK'); throw e; }
+    catch (e) { rollback(this.db); throw e; }
+  }
+  /** Retention for the agent protocol's own tables. They live outside the
+   * workflow document, so `pruneState()` never sees them: a consumed pairing
+   * code and a finished agent task would otherwise be kept forever. Deleting a
+   * finished task also drops its idempotency key, which is why the window is
+   * generous (a duplicate request that late is not a real retry). */
+  pruneAgentRows({now = Date.now(), pairingMs = 24 * 3600000, taskMs = 30 * 86400000} = {}) {
+    const pairing = this.db.prepare('DELETE FROM pairing_codes WHERE (consumed_at IS NOT NULL AND consumed_at < ?) OR (consumed_at IS NULL AND expires_at < ?)')
+      .run(new Date(now - pairingMs).toISOString(), new Date(now - pairingMs).toISOString());
+    const tasks = this.db.prepare("DELETE FROM agent_tasks WHERE status IN ('done','failed') AND COALESCE(completed_at, updated_at, created_at) < ?")
+      .run(new Date(now - taskMs).toISOString());
+    return {pairingCodes: Number(pairing.changes || 0), agentTasks: Number(tasks.changes || 0)};
+  }
+  /** Release a candidate whose draft failed when the normal transition cannot
+   * run (the row was deleted while the provider was working, so the workflow
+   * helper would throw its own 404). The stored document is authoritative for
+   * reads, so both it and the typed column are updated. Returns false when the
+   * row is gone, which is not an error. */
+  failCandidate(id) {
+    const row = this.db.prepare('SELECT doc FROM candidates WHERE id=?').get(id);
+    if (!row) return false;
+    let doc = null;
+    try { doc = row.doc ? JSON.parse(row.doc) : null; } catch { doc = null; }
+    if (doc) {
+      doc.status = 'error';
+      this.db.prepare('UPDATE candidates SET status=?, doc=? WHERE id=?').run('error', JSON.stringify(doc), id);
+    } else {
+      this.db.prepare('UPDATE candidates SET status=? WHERE id=?').run('error', id);
+    }
+    return true;
   }
 
   /** Rebuild the workflow document from SQL and fold in a newer legacy JSON
@@ -472,6 +511,14 @@ export class SqliteStore {
     this.serial = op.catch(() => {});
     return op;
   }
+}
+
+/** ROLLBACK can itself fail: SQLite already rolls the transaction back on
+ * SQLITE_FULL, SQLITE_IOERR and some SQLITE_BUSY cases, so the second attempt
+ * throws "cannot rollback - no transaction is active" and replaces the real
+ * error with a confusing one. Best effort, then rethrow the original. */
+function rollback(db) {
+  try { db.exec('ROLLBACK'); } catch { /* the transaction is already gone */ }
 }
 
 export function resolveDbPath(dataFile) {

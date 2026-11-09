@@ -15,19 +15,30 @@
  * This module is pure: parse, validate, resolve a name, build prompts. The
  * orchestrator runs the round (`src/bot-link.js`).
  */
-import {cleanText} from './core.js?v=7dbf8dcc0b';
+import {cleanText} from './core.js?v=fd5883cb06';
 
 export const BOT_ASK_PERMISSION = 'bot.ask';
 export const MAX_ASKS_PER_REPLY = 1;
 export const MAX_ASK_TASK = 1500;
 export const MAX_PEER_ANSWER = 2000;
 export const MAX_ASK_DEPTH = 1;
-/** A fenced block must be closed. An unterminated fence stays in the reply as
- * plain text instead of swallowing the rest of the answer. */
-const BLOCK = /```ask[ \t]*\r?\n([\s\S]{1,6000}?)```/gi;
-/** Control fences a teammate's answer must never carry back into the asker's
- * prompt: the peer has no tools, so these are text it copied, not requests. */
-const CONTROL = /```(?:ask|spawn|create-bot|browser)[\s\S]*?```/gi;
+/** Every control block in a bot reply: ask, spawn, create-bot, browser. */
+export const CONTROL_FENCES = ['ask', 'spawn', 'create-bot', 'browser'];
+/** ONE fence grammar for all of them, so no two parsers disagree about what a
+ * block is. The AI client trims a fence that ends a reply, so an unclosed
+ * *final* fence is a real block: the body runs to the end of the text. Every
+ * parser and every strip path calls this, so whatever one accepts the others
+ * remove; a fence a parser ignores cannot survive as visible control text and
+ * a fence a strip removes cannot come back as a request.
+ *
+ * With no names it matches every control fence (the strip path). With names it
+ * matches those only (one parser each). Call it per use: the `g` flag carries
+ * matching state, so a shared RegExp object is not safe to hand around. */
+export function controlFence(...names) {
+  const which = names.length ? names : CONTROL_FENCES;
+  return new RegExp('```(?:' + which.join('|') + ')[ \\t]*\\r?\\n([\\s\\S]*?)(?:```|$(?![\\s\\S]))', 'gi');
+}
+const ASK_FENCE = () => controlFence('ask');
 const normalize = value => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 
 function fail(message, status = 400) { throw Object.assign(new Error(message), {status}); }
@@ -45,7 +56,7 @@ export function validateAskRequest(body) {
  * reported instead of dropped. At most one block is read per reply. */
 export function parseAskRequests(output) {
   const found = [];
-  for (const match of String(output ?? '').matchAll(BLOCK)) {
+  for (const match of String(output ?? '').matchAll(ASK_FENCE())) {
     if (found.length >= MAX_ASKS_PER_REPLY) break;
     try {
       let body;
@@ -56,10 +67,18 @@ export function parseAskRequests(output) {
   return found;
 }
 
-export const stripAskBlocks = output => String(output ?? '').replace(BLOCK, '').replace(/\n{3,}/g, '\n\n').trim();
+export const stripAskBlocks = output => String(output ?? '').replace(ASK_FENCE(), '').replace(/\n{3,}/g, '\n\n').trim();
 
-/** Remove every control fence from text that is data, not a request. */
-export const stripControlBlocks = output => String(output ?? '').replace(CONTROL, '').replace(/\n{3,}/g, '\n\n').trim();
+/** Remove every control fence from text that is data, not a request. Control
+ * fences a teammate's answer must never carry back into the asker's prompt: the
+ * peer has no tools, so these are text it copied, not requests. Two passes: the
+ * shared grammar (what the parsers accept, unclosed final fence included), then
+ * the closed form opened without a line break, which no parser reads but which
+ * a prompt should still not carry. */
+export const stripControlBlocks = output => String(output ?? '')
+  .replace(controlFence(), '')
+  .replace(/```(?:ask|spawn|create-bot|browser)[\s\S]*?```/gi, '')
+  .replace(/\n{3,}/g, '\n\n').trim();
 
 /** Find the teammate a block names. An exact id wins, then a case-insensitive
  * name. An ambiguous name resolves to null so the chat can say so. */

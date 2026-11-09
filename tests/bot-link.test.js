@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   BOT_ASK_PERMISSION, MAX_ASK_TASK,
-  validateAskRequest, parseAskRequests, stripAskBlocks, findPeer,
+  validateAskRequest, parseAskRequests, stripAskBlocks, stripControlBlocks, findPeer,
   peerAskInstructions, peerAskInput, peerAnswerTurn, askStartedText, askRefusedText,
 } from '../shared/bot-link.js';
 import {askPeerRound} from '../src/bot-link.js';
@@ -203,4 +203,46 @@ test('the turn after an answer keeps the bot\'s own create-bot and page requests
   const result = await askPeerRound({bot: asker, first: askBlock('Which source?'), executor, peers: [asker, peer], makeId, now: () => at});
   assert.match(result.output, /```create-bot/, 'The bot asked for a new teammate in its own reply; that request must survive.');
   assert.equal(result.output.split('```create-bot').length, 2, 'Only the ask block is removed.');
+});
+
+test('every control fence uses one grammar, so an unclosed final fence cannot survive as text', async () => {
+  // The AI client trims a fence that ends a reply. The spawn and browser parsers
+  // accepted that unclosed final fence while the ask parser and the strip path
+  // required the closing ```, so a bot echoing a teammate's block shipped the raw
+  // control text on — or, once echoed into a fresh reply, filed a real page
+  // request. One grammar means one answer: parsed and stripped, or neither.
+  const {parseSpawnRequests, stripSpawnBlocks} = await import('../shared/subagents.js');
+  const {parseBrowserRequests, stripBrowserBlocks} = await import('../shared/bot-browser.js');
+  const cases = [
+    ['ask', '{"to":"Researcher","task":"Which source?"}', text => parseAskRequests(text)[0]?.request?.to, stripAskBlocks],
+    ['spawn', '{"task":"Check the figure."}', text => parseSpawnRequests(text)[0]?.request?.task, stripSpawnBlocks],
+    ['browser', '{"url":"https://example.com/docs"}', text => parseBrowserRequests(text)[0]?.request?.url, stripBrowserBlocks],
+  ];
+  const askerText = 'Before\n```ask\n{"to":"Researcher","task":"Which source?"}';
+  assert.equal(parseAskRequests(askerText)[0]?.request?.to, 'Researcher', 'An unclosed ask is a real ask.');
+  assert.equal(stripAskBlocks(askerText), 'Before');
+  for (const [name, body, parse, strip] of cases) {
+    const unclosed = `Before\n\`\`\`${name}\n${body}`;
+    assert.ok(parse(unclosed), `${name}: the unclosed final fence is parsed`);
+    assert.equal(strip(unclosed), 'Before', `${name}: and the same text is stripped`);
+    assert.deepEqual(parse(`Before\n\`\`\`${name}\n${body}\n\`\`\``), parse(unclosed), `${name}: a closed block and an unclosed final block read the same`);
+  }
+  // A stripped peer answer carries no fence at all, closed or not, for any of
+  // the four control blocks.
+  for (const name of ['ask', 'spawn', 'create-bot', 'browser']) {
+    const unclosed = `Peer said:\n\`\`\`${name}\n{"x":1}`;
+    const closed = `Peer said:\n\`\`\`${name}\n{"x":1}\n\`\`\``;
+    assert.equal(stripControlBlocks(unclosed), 'Peer said:', `${name}: an unclosed fence is removed`);
+    assert.equal(stripControlBlocks(closed), 'Peer said:', `${name}: a closed fence is removed`);
+  }
+  // A block has to open with the name on its own line for a parser to read it,
+  // and text without a fence at all is left exactly as it was.
+  const prose = 'The docs say a reply block must start on its own line.';
+  assert.equal(stripControlBlocks(prose), prose);
+  // The closed form with no line break is not a block any parser reads, but the
+  // strip path has always removed it, so a quoted one still cannot reach a prompt.
+  assert.equal(stripControlBlocks('Note:```ask{"to":"x","task":"y"}```'), 'Note:');
+  assert.equal(stripControlBlocks('Note:\n```spawn{"task":"x"}```\nAfter.'), 'Note:\n\nAfter.');
+  assert.doesNotMatch(stripControlBlocks('The docs say ```browser``` and ```ask``` are reply blocks.'), /```/);
+  assert.equal(stripControlBlocks('Plain text, nothing fenced.'), 'Plain text, nothing fenced.');
 });

@@ -223,7 +223,7 @@ function threadHead(conv) {
   const planPill = plans === 1 ? 'A plan is waiting' : `${plans} plans waiting`;
   const pausePill = pauses === 1 ? 'Approve the next step' : `${pauses} steps waiting`;
   return `${iconBtn('back', 'Back to chats', 'back-to-list', {cls: 'back'})}
-    <button type="button" class="thread-title" data-action="open-info" aria-label="${esc(conv.name)}, open details">${face}<span class="thread-title-text"><strong>${esc(conv.name)}</strong><span>${esc(sub)}</span></span></button>
+    <button type="button" class="thread-title" data-action="open-info" aria-expanded="${Boolean(store.route.info)}" aria-controls="inspector" aria-label="${esc(conv.name)}, open details">${face}<span class="thread-title-text"><strong>${esc(conv.name)}</strong><span>${esc(sub)}</span></span></button>
     ${pages ? `<span class="needs-pill">${pagePill}</span>` : feeds ? `<span class="needs-pill">Feed read still open</span>` : ''}${plans ? `<span class="needs-pill">${planPill}</span>` : ''}${pauses ? `<span class="needs-pill">${pausePill}</span>` : ''}${drafts ? `<button type="button" class="needs-pill" data-action="open-section" data-section="drafts">${drafts} need${drafts === 1 ? 's' : ''} you</button>` : ''}`;
 }
 
@@ -313,18 +313,27 @@ export function renderThread() {
   el('thread-chips').innerHTML = suggestions(conv);
 }
 
-/** Desktop landing when no chat is open: say what you want, the group takes it. */
+/** Desktop landing when no chat is open: say what you want, the group takes it.
+ * The chips belong to the group the form sends to, so a workspace with more than
+ * one group does not get X-engage prompts that quietly run in the first group. */
+function homePrompts(group) {
+  if (!group) return [];
+  if (isXGroup(group)) return ['Draft a reply to the top post', 'What needs my approval?', 'Summarize the latest post', 'Show status'];
+  const bot = group.bots.find(b => botSettings(b).lead) || group.bots[0];
+  return botSuggestions(bot?.name || group.name, group.name);
+}
+
 export function homeView() {
-  const write = canWrite();
-  const prompts = ['Draft a reply to the top post', 'What needs my approval?', 'Summarize the latest post', 'Show status'];
+  const write = canWrite(), group = groups()[0], prompts = homePrompts(group);
+  const who = group ? `Message ${esc(group.name)} or a bot in it.` : 'Message a bot or the whole group.';
   return `<section class="home">
     <button type="button" class="poke" data-action="poke" aria-label="Say hi">${mascot()}</button>
     <h1>What should your bots work on?</h1>
-    <p>Message a bot or the whole group. They hand work to each other, and the final Post click stays with you.</p>
+    <p>${who} They hand work to each other, and the final Post click stays with you.</p>
     ${write ? `<form id="home-prompt" class="composer" autocomplete="off">
       <textarea name="prompt" rows="1" placeholder="Ask your group to research, draft or review something" aria-label="Ask your bot group" maxlength="4000" required></textarea>
       <button type="submit" class="icon-btn send" aria-label="Send to group chat">${icon('send', 20)}</button>
     </form>
-    <div class="chips center">${prompts.map(s => `<button type="button" class="chip" data-action="home-ask" data-text="${esc(s)}">${esc(s)}</button>`).join('')}</div>` : '<p class="quiet">Viewers can read chats. A member can send.</p>'}
+    <div class="chips center">${prompts.map(s => `<button type="button" class="chip" data-action="home-ask" data-id="${esc(group?.id || '')}" data-text="${esc(s)}">${esc(s)}</button>`).join('')}</div>` : '<p class="quiet">Viewers can read chats. A member can send.</p>'}
   </section>`;
 }

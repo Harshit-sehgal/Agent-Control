@@ -52,6 +52,7 @@ export function createQueue(store, handlers = {}, {intervalMs = 2000, workerId, 
       // task still waiting its turn would otherwise look stalled to another
       // worker's sweep and be claimed and run twice.
       const live = new Set(claimed.map(task => task.id));
+      let warnedLeaseAt = 0;
       const beat = setInterval(() => {
         if (!live.size) return;
         void store.update(s => {
@@ -59,7 +60,14 @@ export function createQueue(store, handlers = {}, {intervalMs = 2000, workerId, 
             if (!live.has(t.id) || t.status !== 'running' || t.leaseOwner !== id) continue;
             t.leaseUntil = new Date(Date.now() + leaseMs).toISOString();
           }
-        }).catch(() => { /* best effort */ });
+        }).catch(error => {
+          // A failed renewal means another worker may claim these tasks and run
+          // them twice, so it cannot be silent. One line per minute keeps a
+          // persistent write failure from flooding the log every beat.
+          if (Date.now() - warnedLeaseAt < 60000) return;
+          warnedLeaseAt = Date.now();
+          console.error(`Queue lease renewal failed for ${live.size} task(s) (${[...live].join(', ')}), lease ${leaseMs}ms: ${error?.message || error}`);
+        });
       }, Math.max(1000, Math.floor(leaseMs / 3)));
       beat.unref?.();
       try {

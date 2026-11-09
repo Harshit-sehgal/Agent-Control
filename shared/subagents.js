@@ -16,6 +16,7 @@
  * runs the round and the orchestrator decides what the answer means.
  */
 import {cleanText} from './core.js';
+import {controlFence} from './bot-link.js';
 
 export const SUBAGENT_PERMISSION = 'subagent.spawn';
 /** One helper per reply. Every spawn is a child call plus an extra turn for the
@@ -28,8 +29,9 @@ export const MAX_TASK = 2000;
 export const MAX_SUBAGENT_RESULT = 1800;
 export const SUBAGENT_NAME = 'helper';
 
-// The AI client trims a fence that ends a reply, so the last block may be unclosed.
-const BLOCK = /```spawn[ \t]*\r?\n([\s\S]*?)(?:```|$(?![\s\S]))/gi;
+// One fence grammar shared with every other control block (see bot-link.js):
+// the last block in a reply may be unclosed, and the strip path removes it.
+const BLOCK = () => controlFence('spawn');
 
 function fail(message, status = 400) { throw Object.assign(new Error(message), {status}); }
 
@@ -46,7 +48,7 @@ export function validateSpawnRequest(body) {
  * `MAX_SPAWNS_PER_REPLY` blocks are read in total, valid or invalid. */
 export function parseSpawnRequests(output) {
   const found = [];
-  for (const match of String(output ?? '').matchAll(BLOCK)) {
+  for (const match of String(output ?? '').matchAll(BLOCK())) {
     if (found.length >= MAX_SPAWNS_PER_REPLY) break;
     try {
       let body;
@@ -58,7 +60,7 @@ export function parseSpawnRequests(output) {
 }
 
 /** The reply as the bot wrote it, without the block. */
-export const stripSpawnBlocks = output => String(output ?? '').replace(BLOCK, '').replace(/\n{3,}/g, '\n\n').trim();
+export const stripSpawnBlocks = output => String(output ?? '').replace(BLOCK(), '').replace(/\n{3,}/g, '\n\n').trim();
 
 /** What a bot is told about the tool when it holds the permission. */
 export const SUBAGENT_TOOL_HINT = 'You can hand one small job to a helper model. Put one block in your reply, e.g. ```spawn\n{"name":"Fact check","task":"Does this claim hold?"}\n``` The helper has no tools, no web access and no memory of this conversation: give it everything it needs in the task. Its answer comes back to you and you write the real reply. One helper per reply.';

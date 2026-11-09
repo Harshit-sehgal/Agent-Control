@@ -62,8 +62,12 @@ export function evidenceSummary(items) {
   const reuseBlocked = items.filter(e => e.reuse === 'none').length;
   return {
     total: items.length, disputed, verified, unverified, reuseBlocked,
-    approved: disputed === 0,
-    level: items.length === 0 ? 'none' : disputed > 0 ? 'blocked' : verified > 0 ? 'supported' : 'claimed',
+    // `reuse: 'none'` says this material may not be reused at all, so a draft
+    // leaning on it cannot go out either. It was counted and then ignored, which
+    // made the policy a label instead of a gate.
+    approved: disputed === 0 && reuseBlocked === 0,
+    sourced: items.length > 0,
+    level: items.length === 0 ? 'none' : disputed > 0 || reuseBlocked > 0 ? 'blocked' : verified > 0 ? 'supported' : 'claimed',
   };
 }
 

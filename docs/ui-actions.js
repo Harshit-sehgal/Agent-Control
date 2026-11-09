@@ -1,30 +1,38 @@
 /** What the UI can do, as three lookup tables keyed by `data-action`, form id and
  * control id. app.js owns the DOM events and dispatches here; handlers throw on
  * failure and the dispatcher turns that into one toast. */
-import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, setPref, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns, patchLocalRun, appendMessage} from './ui-store.js?v=7dbf8dcc0b';
-import {botSettings, groupSettings} from './bot-settings.js?v=7dbf8dcc0b';
-import {completeMention, moveRow, pipelineValue} from './ui-model.js?v=7dbf8dcc0b';
-import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=7dbf8dcc0b';
-import {sendChat, streamGroupRun, watchQueuedRun, continueDemoPlan} from './ui-chat.js?v=7dbf8dcc0b';
-import {confetti, whoosh, react, poke} from './ui-fx.js?v=7dbf8dcc0b';
-import {renderList, renderMentions} from './ui-views.js?v=7dbf8dcc0b';
-import {refreshLists, reloadAdminPage, pipelineList} from './ui-panel.js?v=7dbf8dcc0b';
-import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, botTaskSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=7dbf8dcc0b';
-import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=7dbf8dcc0b';
+import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, setPref, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns, patchLocalRun, appendMessage} from './ui-store.js?v=fd5883cb06';
+import {botSettings, groupSettings} from './bot-settings.js?v=fd5883cb06';
+import {completeMention, moveRow, pipelineValue} from './ui-model.js?v=fd5883cb06';
+import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=fd5883cb06';
+import {sendChat, streamGroupRun, watchQueuedRun, continueDemoPlan} from './ui-chat.js?v=fd5883cb06';
+import {confetti, whoosh, react, poke} from './ui-fx.js?v=fd5883cb06';
+import {renderList, renderMentions} from './ui-views.js?v=fd5883cb06';
+import {refreshLists, reloadAdminPage, pipelineList} from './ui-panel.js?v=fd5883cb06';
+import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, botTaskSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=fd5883cb06';
+import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=fd5883cb06';
 
 const adminCtx = {reload: reloadAdminPage};
 const chatId = () => store.route.chat;
 const findBot = id => groupOfBot(id)?.bots.find(b => b.id === id) || (() => { throw new Error('Bot not found'); })();
-const patchBot = (id, body) => api(`/api/groups/${groupOfBot(id).id}/bots/${id}`, 'PATCH', body);
+/** Patch a bot by id. A bot removed in another tab fails with a sentence the
+ * toast can show, not "Cannot read properties of undefined". */
+const patchBot = (id, body) => {
+  const group = groupOfBot(id);
+  if (!group) throw new Error('That bot is no longer in a group.');
+  return api(`/api/groups/${group.id}/bots/${id}`, 'PATCH', body);
+};
 
 async function copyText(text, done) {
   if (!navigator.clipboard?.writeText) throw new Error('Clipboard is not available here.');
   await navigator.clipboard.writeText(text); toast(done);
 }
-/** Home prompt: open the first group chat and hand the message to the group. */
-export async function startGroupChat(text) {
+/** Home prompt: open the group chat the prompt belongs to and hand the message
+ * to the group. Without an id it is the first group, which is where the landing
+ * page's own chips and form point. */
+export async function startGroupChat(text, groupId) {
   const message = String(text || '').trim(); if (!message) return;
-  const group = groups()[0]; if (!group) throw new Error('Create a bot group first.');
+  const group = (groupId ? findGroup(groupId) : null) || groups()[0]; if (!group) throw new Error('Create a bot group first.');
   go({chat: teamKey(group.id)});
   await sendChat(teamKey(group.id), message);
 }
@@ -72,7 +80,7 @@ export const actions = {
     const input = document.querySelector('#chat-form textarea'); if (!input) return;
     input.value = completeMention(input.value, b.dataset.name); input.focus(); renderMentions(input.value);
   },
-  'home-ask': b => startGroupChat(b.dataset.text),
+  'home-ask': b => startGroupChat(b.dataset.text, b.dataset.id),
   'copy-chat': async b => {
     const rows = store.messages[b.dataset.id] || []; if (!rows.length) throw new Error('This conversation is empty.');
     const name = conversation(b.dataset.id)?.name || 'Bot';

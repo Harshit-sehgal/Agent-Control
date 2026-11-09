@@ -14,10 +14,12 @@ export const MAX_ATTEMPTS_DEFAULT = 5;
  * crafted request cannot enqueue a kind the worker does not know how to run. */
 const PAYLOAD_KINDS = {
   reminder: body => {
-    if (!['once', 'interval'].includes(body.kind)) throw fail('Label and valid schedule kind required.', 400);
+    // Name the schedule kinds: a rejected reminder used to say only that a
+    // "valid schedule kind" was required without saying which ones are.
+    if (!['once', 'interval'].includes(body.kind)) throw fail(`A valid schedule kind is required: ${SCHEDULE_KINDS.join(' or ')}.`, 400);
     const kind = body.kind;
     const label = cleanText(body.label, 200);
-    if (!label) throw fail('Label and valid schedule kind required.', 400);
+    if (!label) throw fail('A reminder needs a label.', 400);
     return {label, ...timing(body)};
   },
   'bot-task': body => {
@@ -59,6 +61,9 @@ function timing(body) {
   return {kind: 'interval', intervalMinutes};
 }
 const SCHEDULED = ['reminder', 'bot-task'];
+/** The kinds a one-off or repeating schedule may name, in the order the error
+ * message lists them. */
+const SCHEDULE_KINDS = ['once', 'interval'];
 
 export const taskKinds = () => Object.keys(PAYLOAD_KINDS);
 
@@ -199,17 +204,22 @@ export function failTask(state, id, message, now = Date.now(), {conflict = false
   return task;
 }
 
-/** Requeue a task by hand: a failed run an operator wants to try again. */
+/** Requeue a task by hand: a failed run an operator wants to try again. A
+ * cancelled task stays cancelled, and a done one has nothing to retry. */
 export function retryTask(state, id) {
   const task = state.tasks.find(t => t.id === id);
   if (!task) fail('Task not found.', 404);
-  if (!['failed', 'cancelled', 'done'].includes(task.status)) fail('This task is already queued or running.', 409);
+  if (task.status === 'cancelled') fail('A cancelled task cannot be retried. Enqueue a new one.', 409);
+  if (task.status !== 'failed') fail('Only a failed task can be retried.', 409);
   task.status = 'queued';
   task.runAt = new Date().toISOString();
   task.attempts = 0;
   task.lastError = null;
   task.result = null;
   task.updatedAt = new Date().toISOString();
+  // A reminder carries its next fire in the payload too, and a stale `nextAt`
+  // would make the retried run report itself as overdue on the way in.
+  if (task.payload && typeof task.payload === 'object' && task.payload.nextAt) task.payload = {...task.payload, nextAt: task.runAt};
   activity(state, 'task', `Requeued task: ${task.title}`, {taskId: task.id});
   return task;
 }

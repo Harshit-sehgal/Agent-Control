@@ -4,8 +4,10 @@
 <meta name="theme-color" content="#fbfaf8"><meta name="color-scheme" content="light dark">
 <meta name="description" content="Agent Control: chat with your bots. They draft, you approve and post.">
 <meta name="agent-backend" content="server">
-<!-- Mirrors the Node server's CSP header so the static Pages build is protected too. Keep the two in sync. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'">
+<!-- The Node server's CSP header minus frame-ancestors, which a <meta> CSP cannot
+     enforce (browsers ignore it there; the header still sends it, with
+     X-Frame-Options: DENY). Keep this in sync with META_CSP in shared/core.js. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'">
 <title>Agent Control</title>
 <link rel="manifest" href="./manifest.webmanifest"><link rel="apple-touch-icon" href="./icon-192.png"><link rel="icon" href="./icon-192.png">
 <link rel="stylesheet" href="./app.css">

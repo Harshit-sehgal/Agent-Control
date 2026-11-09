@@ -98,7 +98,10 @@ export async function claimLocalRun(run, {existing = false} = {}) {
       if (reclaimed.changed) writeLocalRuns(runs);
       fail('That run is no longer active.', 409);
     }
-    if (current?.leaseOwner && Date.parse(current.leaseUntil || '') > Date.now()) {
+    // A lease held by another tab is the one to respect. A caller presenting the
+    // same `leaseOwner` is the tab that already holds it, so a re-claim after a
+    // retry is not "another browser tab" and must not be refused by its own lease.
+    if (current?.leaseOwner && current.leaseOwner !== run.leaseOwner && Date.parse(current.leaseUntil || '') > Date.now()) {
       if (reclaimed.changed) writeLocalRuns(runs);
       fail('That run is already active in another browser tab.', 409);
     }

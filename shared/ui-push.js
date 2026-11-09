@@ -31,9 +31,12 @@ export async function pushStatus() {
   if (!window.isSecureContext) return {state: 'insecure', devices: 0};
   if (!supported()) return {state: 'unsupported', devices: 0};
   const [server, mine] = await Promise.all([api('/api/push'), current()]);
-  const devices = server.endpoints.length;
+  // A reply without the endpoint list means "no devices", not a crash that
+  // blanks the Notifications page it was loading for.
+  const endpoints = Array.isArray(server?.endpoints) ? server.endpoints : [];
+  const devices = endpoints.length;
   if (Notification.permission === 'denied') return {state: 'blocked', devices};
-  return {state: mine && server.endpoints.includes(mine.endpoint) ? 'on' : 'off', devices};
+  return {state: mine && endpoints.includes(mine.endpoint) ? 'on' : 'off', devices};
 }
 
 /** Ask for permission, subscribe this browser and register it with the server. */

@@ -200,3 +200,26 @@ test('a scheduled Pages task that cannot run is failed, not stored as done',asyn
   assert.match(row.lastError,/switched off/i);
   assert.match((after.chats?.handoff||[]).map(m=>m.text).join('\n'),/did not run/);
 });
+
+test('the Pages demo approves with the delay window the person picked',async()=>{
+  // The Approve button sends {minDelay,maxDelay}; the demo ignored the body and
+  // used the workspace default, so the choice a person made had no effect here
+  // while the Node build honoured it. The default window is 2-10 minutes.
+  const {request}=setup(makeStorage());
+  const d=await seed(request);
+  const before=Date.now();
+  const approved=await request(`/api/drafts/${d.id}/approve`,'POST',{minDelay:45,maxDelay:45});
+  assert.equal(approved.status,'scheduled');
+  const minutes=(Date.parse(approved.dueAt)-before)/60000;
+  assert.ok(minutes>=44&&minutes<=46,`the chosen 45 minute window sets the due time, got ${minutes} minutes`);
+});
+test('the Pages demo refuses a notification task exactly like the Node server',async()=>{
+  // src/routes-workflow.js answers 403: a delivery task comes from a person's own
+  // notification preferences, never from a request body.
+  const store=makeStorage();
+  const {request}=setup(store);
+  await request('/api/state');
+  await assert.rejects(request('/api/tasks','POST',{kind:'notification',payload:{notificationId:'n1'}}),error=>error.status===403&&/server, not by request/.test(error.message));
+  const after=await request('/api/state');
+  assert.equal(after.tasks.length,0,'A refused delivery task is not stored either.');
+});

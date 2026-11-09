@@ -10,7 +10,7 @@ import {
   MEMORY_VERSION, MAX_RULES, MAX_RULEBOOKS, CONSOLIDATE_AFTER,
   memoryState, modelKey, modelLabel, rulebook, consolidationDue, ruleLines,
   promptMemory, memoryBlock, extractRuleCandidates, addRules, removeRule,
-  forgetRulebook, digestConversation, noteChat, forgetChat, pruneMemory,
+  forgetRulebook, findRulebook, digestConversation, noteChat, forgetChat, pruneMemory,
   consolidationInstructions, consolidationInput, parseConsolidation,
   mergeConsolidation, noteTurn, publicMemory, setChatSummary,
 } from '../shared/memory.js';
@@ -366,4 +366,26 @@ test('a group conversation merges its run log with the chat record, in order', (
   };
   assert.deepEqual(conversationMessages(state, 'team-g1').map(m => m.text), ['first', 'second'], 'A message stored twice appears once.');
   assert.deepEqual(conversationMessages(state, 'writer'), []);
+});
+
+test('a model key cannot reach a prototype', () => {
+  const state = {};
+  // `rulebooks['__proto__']` *is* Object.prototype, so the old read-then-mutate
+  // path wrote `rules` onto every object in the process.
+  for (const key of ['__proto__', 'constructor', 'prototype']) {
+    assert.throws(() => rulebook(state, key), error => error.status === 400, `${key} must be refused`);
+    assert.throws(() => addRules(state, key, ['a durable rule']), error => error.status === 400);
+    assert.throws(() => forgetRulebook(state, key), error => error.status === 400);
+  }
+  assert.equal(({}).rules, undefined, 'Object.prototype must be untouched');
+  assert.equal(Object.hasOwn(Object.prototype, 'rules'), false);
+
+  // A real key still works, and a look-up of a missing one does not create it.
+  addRules(state, 'env:model-a', ['keep replies short']);
+  assert.equal(findRulebook(state, 'env:missing'), null);
+  assert.equal(Object.keys(state.memory.rulebooks).length, 1);
+
+  // The chat recap goes through the same key guard.
+  assert.throws(() => forgetChat(state, '__proto__'), error => error.status === 400);
+  assert.deepEqual(Object.keys(state.memory.forgottenChats), [], 'nothing was recorded for the refused key');
 });

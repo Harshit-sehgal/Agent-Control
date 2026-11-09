@@ -191,3 +191,103 @@ test('behind a trusted proxy the rate limit keys on the forwarded client address
     assert.equal((await send('10.0.0.2')).status, 401, 'another client is unaffected');
   } finally { await t.stop(); }
 });
+
+/** Shared login + request helper for the API invariants below. */
+async function session(){
+  const t=await launch();
+  const send=async(method,url,body,cookie)=>{
+    const r=await fetch(t.base+url,{method,headers:{'Content-Type':'application/json',...(cookie?{Cookie:cookie}:{})},body:body===undefined?undefined:JSON.stringify(body)});
+    const text=await r.text();
+    return {status:r.status,body:text?JSON.parse(text):null,cookie:r.headers.get('set-cookie')};
+  };
+  const login=await send('POST','/api/login',{password:'test-password-1234'});
+  assert.equal(login.status,200);
+  return {t,send,cookie:login.cookie.split(';')[0]};
+}
+
+test('an unknown group has no chat thread instead of an empty one', {timeout:25000}, async()=>{
+  const {t,send,cookie}=await session();
+  try{
+    const state=(await send('GET','/api/state',undefined,cookie)).body;
+    assert.ok(state.groups.length,'the install ships a group');
+    const known=await send('GET',`/api/groups/${state.groups[0].id}/chat`,undefined,cookie);
+    assert.equal(known.status,200);
+    // POST to an unknown group answers 404, so the read must agree rather than
+    // render an empty conversation for a group that does not exist.
+    const unknown=await send('GET','/api/groups/not-a-group/chat',undefined,cookie);
+    assert.equal(unknown.status,404);
+    assert.match(unknown.body.error,/Group not found/);
+  }finally{await t.stop();}
+});
+
+test('a browser task is validated before it is queued', {timeout:25000}, async()=>{
+  const {t,send,cookie}=await session();
+  try{
+    const queue=(kind,payload)=>send('POST','/api/agents/no-such-agent/tasks',{kind,payload},cookie);
+    // MAX_STEPS is the same limit a bot's browser block has.
+    const tooMany=await queue('browser.action',{url:'https://example.com',steps:Array.from({length:26},()=>({op:'read',selector:'main'}))});
+    assert.equal(tooMany.status,400);
+    assert.match(tooMany.body.error,/at most 25 steps/);
+    // Clicking or typing on X stays impossible from this route too.
+    const xClick=await queue('browser.action',{url:'https://x.com/home',steps:[{op:'click',selector:'article'}]});
+    assert.equal(xClick.status,403);
+    assert.match(xClick.body.error,/never click or type there/);
+    // A url that is not http(s) is refused, and the payload is normalized.
+    assert.equal((await queue('browser.capture',{url:'javascript:alert(1)'})).status,400);
+    // The kind has to match what the payload describes.
+    assert.equal((await queue('browser.capture',{url:'https://example.com',steps:[{op:'read',selector:'main'}]})).status,400);
+    // A valid request gets past validation: the only failure left is the
+    // unknown agent (404), not the payload (400).
+    const valid=await queue('browser.capture',{url:'https://example.com/home'});
+    assert.equal(valid.status,404);
+    // Non-browser kinds are untouched by browser validation.
+    assert.equal((await queue('http.check',{url:'https://example.com'})).status,404);
+  }finally{await t.stop();}
+});
+
+test('a restore cannot silently delete a workspace created after the backup, and says the caller is signed out', {timeout:30000}, async()=>{
+  const crypto=await import('node:crypto');
+  const {t,send,cookie}=await session();
+  try{
+    const created=await send('POST','/api/workspaces',{name:'Client work'},cookie);
+    assert.equal(created.status,201);
+    const id=created.body.id;
+    const file=path.join(t.dir,'state.ws-'+id+'.db');
+    assert.ok(await fs.access(file).then(()=>true,()=>false),'the second workspace has a database');
+
+    const document=(await send('GET','/api/admin/backup',undefined,cookie)).body;
+    assert.ok(document.tables.workspaces.some(w=>w.id===id));
+    // The same document, as it was written before that workspace existed.
+    const tables={...document.tables,workspaces:document.tables.workspaces.filter(w=>w.id!==id),workspace_members:document.tables.workspace_members.filter(m=>m.workspace_id!==id)};
+    const older={...document,tables,checksum:crypto.createHash('sha256').update(JSON.stringify(tables)).digest('hex')};
+
+    const refused=await send('POST','/api/admin/restore',{...older,force:true},cookie);
+    assert.equal(refused.status,409);
+    assert.match(refused.body.error,new RegExp(id),'the refusal names the workspace it would delete');
+    const stillThere=await send('GET','/api/workspaces',undefined,cookie);
+    assert.equal(stillThere.status,200,'nothing was restored, so the session and the data are intact');
+    assert.ok(stillThere.body.workspaces.some(w=>w.id===id),'the newer workspace is still listed');
+    assert.ok(await fs.access(file).then(()=>true,()=>false),'and its database is still on disk');
+
+    // Naming it is the operator's explicit confirmation.
+    const restored=await send('POST','/api/admin/restore',{...older,force:true,discardWorkspaces:[id]},cookie);
+    assert.equal(restored.status,200);
+    assert.equal(restored.body.signedOut,true,'a primary restore deletes every session, so it must say so');
+    assert.equal(await fs.access(file).then(()=>true,()=>false),false,'the named workspace is discarded');
+    assert.equal((await send('GET','/api/workspaces',undefined,cookie)).status,401,'the old cookie is dead, as the body said');
+  }finally{await t.stop();}
+});
+
+test('SIGTERM drains the server like Ctrl-C instead of killing it', {timeout:25000}, async()=>{
+  const t=await launch();
+  try{
+    const exited=new Promise(resolve=>t.child.once('exit',(code,signal)=>resolve({code,signal})));
+    t.child.kill('SIGTERM');
+    // A signal that is not handled shows up as a signal death (code null).
+    assert.deepEqual(await exited,{code:0,signal:null},'SIGTERM runs the same shutdown as SIGINT');
+    await assert.rejects(fetch(t.base+'/api/health'),'and the socket is released');
+  }finally{
+    if(t.child.exitCode===null&&t.child.signalCode===null)t.child.kill('SIGKILL');
+    await fs.rm(t.dir,{recursive:true,force:true});
+  }
+});

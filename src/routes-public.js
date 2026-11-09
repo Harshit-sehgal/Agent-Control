@@ -143,6 +143,10 @@ export function publicRoutes(router, {auth, workspaces, version}) {
       const device = agent.verifyAgentRequest(store, c.req.headers, 'POST', c.path, raw);
       agent.touchAgent(store, device.id);
       const nowMs = Date.now();
+      // Renew this device's running leases first: it is heartbeating because it
+      // is alive, so a task it is still executing (a slow page, a serial queue)
+      // must not be re-armed by the recovery pass below and run twice.
+      agent.renewAgentTaskLeases(store, device.id, {nowMs});
       const staleBrowserTasks = store.all(
         `SELECT id FROM agent_tasks WHERE kind='browser.action' AND status='running' AND (lease_until IS NULL OR lease_until<=?)`,
         new Date(nowMs).toISOString(),

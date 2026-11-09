@@ -130,14 +130,23 @@ export async function openWorkspaces(primary, auth, start) {
       return trackChange(async () => load(typeof idOrCreate === 'function' ? await idOrCreate() : idOrCreate));
     },
     /** Reconcile stores after a restore: start listed workspaces and stop
-     * services for workspaces the restored account database no longer lists. */
-    async sync() {
+     * services for workspaces the restored account database no longer lists.
+     *
+     * A restore of an older backup would otherwise silently destroy every
+     * workspace created since it was written: `discard()` rm's the database
+     * file. The caller must name those ids in `discard` — anything it does not
+     * name is refused before a single file is touched, and nothing is loaded or
+     * discarded in that case. */
+    async sync({discard: discardable = []} = {}) {
       if (!globallyPaused) await waitForChanges();
       const ids = new Set(auth.workspaceIds());
-      for (const [id, entry] of open) {
-        if (ids.has(id)) continue;
-        await discard(id, entry);
+      const allowed = new Set((Array.isArray(discardable) ? discardable : []).map(String));
+      const orphaned = [...open.keys()].filter(id => !ids.has(id));
+      const refused = orphaned.filter(id => !allowed.has(id));
+      if (refused.length) {
+        throw Object.assign(new Error(`This backup was written before ${refused.length === 1 ? 'workspace' : 'workspaces'} ${refused.join(', ')} existed. Restoring it would delete ${refused.length === 1 ? 'that workspace' : 'those workspaces'} and their data; export ${refused.length === 1 ? 'it' : 'them'} first, or send the ids in discardWorkspaces to delete ${refused.length === 1 ? 'it' : 'them'}.`), {status: 409, workspaces: refused});
       }
+      for (const id of orphaned) await discard(id, open.get(id));
       for (const id of ids) if (!open.has(id)) await load(id, globallyPaused);
     },
     /** Stop background services, drain model work, and run a synchronous

@@ -6,6 +6,11 @@ import {normalizeBot,canBot} from './contracts.js';
 export async function simulateGroup({group, message, directBotId=null, guests=[], state, api, makeId, emit, chatKey=null, started=false, resume=null, shouldStop=()=>false}) {
   let run, previous, i;
   if (resume) {
+    // Only a pause resumes. A finished, failed or cancelled record handed back by
+    // a stale tab or a double click would otherwise be pushed back to `running`
+    // and repeat steps the trace says already ran. The server's continue route
+    // refuses the same way.
+    if (resume.status !== 'awaiting_checkpoint') throw Object.assign(new Error('Only a run paused at a checkpoint can be continued.'), {status: 409});
     run = {...resume, status: 'running'};
     if (run.checkpointsEnabled == null) run.checkpointsEnabled = groupSettings(group).checkpoints === true;
     i = Number(resume.checkpoint?.nextStep) || 0;

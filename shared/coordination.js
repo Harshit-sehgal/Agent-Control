@@ -25,11 +25,13 @@ const enabled = b => botSettings(b).enabled;
 const stepCap = run => Math.min(run.maxSteps ?? MAX_HANDOFFS, MAX_STEPS_LIMIT);
 
 export function assertGroup(group) {
-  if (!group || !Array.isArray(group.bots)) throw new Error('Bot group was not found.');
-  if (!group.bots.length) throw new Error('Add a bot to this group first.');
-  if (group.bots.length > 100) throw new Error('Group exceeds supported size.');
+  // These are what the person asked for, not what the server broke: they carry a
+  // status so the route answers 400/404 instead of masking them as a 500.
+  if (!group || !Array.isArray(group.bots)) throw fail('Bot group was not found.', 404);
+  if (!group.bots.length) throw fail('Add a bot to this group first.', 400);
+  if (group.bots.length > 100) throw fail('Group exceeds supported size.', 400);
   const ids = group.bots.map(b => b.id);
-  if (new Set(ids).size !== ids.length) throw new Error('Bot identities must be unique.');
+  if (new Set(ids).size !== ids.length) throw fail('Bot identities must be unique.', 400);
   return group;
 }
 
@@ -197,11 +199,11 @@ export function wakeBots(group, ids) {
 export function planHandoffs(group, message, {directBotId = null, guests = []} = {}) {
   assertGroup(group);
   const text = String(message ?? '').trim();
-  if (!text || text.length > 4000) throw new Error('Message must contain 1–4000 characters.');
+  if (!text || text.length > 4000) throw fail('Message must contain 1–4000 characters.', 400);
   const roster = group.bots, settings = groupSettings(group);
   const cap = Math.min(settings.maxSteps, MAX_STEPS_LIMIT);
   const direct = directBotId ? roster.find(b => b.id === directBotId) : null;
-  if (directBotId && !direct) throw new Error('Direct-message recipient does not belong to this group.');
+  if (directBotId && !direct) throw fail('Direct-message recipient does not belong to this group.', 400);
   const reachable = [...roster, ...(guests || []).filter(b => botSettings(b).summonable && !roster.some(r => r.id === b.id))];
   let plan;
   if (/(^|\s)@everyone\b/i.test(text)) plan = {recipients: roster.filter(enabled).map(b => b.id), mode: 'mention'};
@@ -286,7 +288,10 @@ export function createEnvelope({run,bot,previous=null,thread=[],team=[],memory=n
     groupId:run.groupId,
     runId:run.id,
     step:run.currentStep + 1,
-    maxSteps:run.maxSteps ?? run.recipients.length,
+    // The same ceiling the loop and `handoffTargets` use. Falling back to the
+    // recipient count told the model a run of one bot had one step even when the
+    // engine would still let it hand off up to MAX_HANDOFFS.
+    maxSteps:stepCap(run),
     botId:bot.id,
     botRole:safe(bot.instructions),
     // The declared contract tells the model what it must return, and the
@@ -337,7 +342,7 @@ export function handoffTargets({run,roster,fromBot,output,home=null}){
 
 export function assertValidHandoff(group,fromBotId,toBotId){
   assertGroup(group);
-  if(!group.bots.some(b=>b.id===fromBotId)||!group.bots.some(b=>b.id===toBotId))throw new Error('Cross-group bot messages are not permitted.');
-  if(fromBotId===toBotId)throw new Error('A bot cannot hand off a task to itself.');
+  if(!group.bots.some(b=>b.id===fromBotId)||!group.bots.some(b=>b.id===toBotId))throw fail('Cross-group bot messages are not permitted.', 400);
+  if(fromBotId===toBotId)throw fail('A bot cannot hand off a task to itself.', 400);
   return true;
 }

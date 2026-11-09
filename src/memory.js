@@ -106,13 +106,19 @@ export async function consolidateModel(store, {key, config, chatKey = '', label 
  * because the deterministic recap and pending rules are still stored. */
 export async function maybeConsolidate(store, {key, config, chatKey = '', label = '', executor = null, now = Date.now()}) {
   if (!config) return null;
+  const run = () => consolidateModel(store, {key, config, chatKey, label, executor, now: new Date(now).toISOString()});
+  // This pass writes the book, so it is workspace work like any other. A
+  // workspace that is paused for a restore refuses it, and consolidation is
+  // best effort: skip quietly rather than surfacing a 503 the user never asked
+  // about, or appending to a book that is about to be replaced.
+  const tracked = typeof store.trackWork === 'function' ? () => store.trackWork(run) : run;
   try {
     const state = store.read();
     const book = state.memory?.rulebooks?.[cleanText(key, 200)];
     if (!consolidationDue(book, now)) return null;
-    return await consolidateModel(store, {key, config, chatKey, label, executor, now: new Date(now).toISOString()});
+    return await tracked();
   } catch (error) {
-    console.error('Memory consolidation failed:', error.message);
+    if (error?.status !== 503) console.error('Memory consolidation failed:', error.message);
     return null;
   }
 }

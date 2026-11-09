@@ -106,3 +106,35 @@ test('evidence stays on the draft it was attached to', () => {
   assert.throws(() => evidence.addEvidence(s, {draftId: draft.id, candidateId: other.candidateId, kind: 'claim', claim: 'This belongs on the other post.', confidence: 0.2}), /different draft/);
   assert.throws(() => evidence.addEvidence(s, {draftId: draft.id, kind: 'link', link: '   ', claim: 'A blank link is not a source.', confidence: 0.2}), /needs the URL/);
 });
+
+test('a do-not-reuse source blocks approval instead of only being counted', () => {
+  const s = store();
+  const draft = draftFor(s);
+  const item = evidence.addEvidence(s, {draftId: draft.id, kind: 'claim', claim: 'Private context.', confidence: 0.9, reuse: 'none'});
+  const blocked = evidence.evidenceSummary(evidence.evidenceForDraft(s, draft.id));
+  assert.equal(blocked.reuseBlocked, 1);
+  assert.equal(blocked.approved, false, 'a source that may not be reused cannot support a published draft');
+  assert.equal(blocked.level, 'blocked');
+  assert.throws(() => draftAction(s, draft.id, 'approve', {}), /do not reuse/);
+  // Confidence never unblocks it, and neither does verifying it: the policy is
+  // about permitted reuse, not about whether the fact is true.
+  evidence.verifyEvidence(s, item.id, 'user_verified', {actor: 'owner@example.test'});
+  assert.throws(() => draftAction(s, draft.id, 'approve', {}), /do not reuse/);
+  // A usable policy on the same evidence unblocks the draft.
+  evidence.dropEvidence(s, item.id);
+  evidence.addEvidence(s, {draftId: draft.id, kind: 'claim', claim: 'Private context.', confidence: 0.9, reuse: 'internal'});
+  assert.equal(evidence.evidenceSummary(evidence.evidenceForDraft(s, draft.id)).approved, true);
+  assert.equal(draftAction(s, draft.id, 'approve', {}).status, 'scheduled');
+});
+
+test('an unsourced draft is reported as unsourced, not as supported', () => {
+  const s = store();
+  const draft = draftFor(s);
+  // A template draft is seeded with the captured post as unverified link evidence,
+  // so drop it to reach the "nothing to show" case a hand-written draft starts in.
+  for (const item of evidence.evidenceForDraft(s, draft.id)) evidence.dropEvidence(s, item.id);
+  const summary = evidence.evidenceSummary(evidence.evidenceForDraft(s, draft.id));
+  assert.equal(summary.total, 0);
+  assert.equal(summary.sourced, false, 'the page can tell "no evidence" from "evidence that supports it"');
+  assert.equal(summary.level, 'none');
+});

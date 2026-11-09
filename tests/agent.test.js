@@ -134,6 +134,36 @@ test('browser actions are not retried, and failing a task drops queued work', as
   await fs.rm(dir, {recursive: true, force: true});
 });
 
+test('a live device renews its running leases so a slow task is not run twice', async () => {
+  const {store, dir} = await harness();
+  try {
+    const {code} = agent.createPairing(store, 'default', {});
+    const {agentId} = agent.redeemPairing(store, {code, name: 'Device', permissions: ['http.check']});
+    const {code: other} = agent.createPairing(store, 'default', {});
+    const second = agent.redeemPairing(store, {code: other, name: 'Other', permissions: ['http.check']});
+    const t0 = Date.now();
+    const {task: slow} = agent.enqueueAgentTask(store, agentId, {kind: 'http.check', payload: {url: 'https://example.com'}});
+    const {task: queued} = agent.enqueueAgentTask(store, agentId, {kind: 'http.check', payload: {url: 'https://example.org'}});
+    const {task: foreign} = agent.enqueueAgentTask(store, second.agentId, {kind: 'http.check', payload: {url: 'https://example.net'}});
+    // One task at a time on this device, like its serial queue.
+    agent.claimAgentTasks(store, agentId, {leaseMs: 1000, limit: 1, nowMs: t0});
+    // The other device holds a long lease and is not heartbeating in this test.
+    agent.claimAgentTasks(store, second.agentId, {leaseMs: 60000, nowMs: t0});
+    // Not queued work, not another device's lease: only this device's running task.
+    assert.equal(agent.renewAgentTaskLeases(store, agentId, {leaseMs: 1000, nowMs: t0 + 900}), 1);
+    // The heartbeat arrives after the original lease would have lapsed; the task
+    // is still executing, so recovery must leave it alone.
+    assert.equal(agent.recoverAgentTasks(store, t0 + 1500), 0, 'a renewed lease is not a disconnect');
+    assert.equal(store.get('SELECT status FROM agent_tasks WHERE id=?', slow.id).status, 'running');
+    assert.equal(store.get('SELECT status FROM agent_tasks WHERE id=?', queued.id).status, 'queued');
+    // Without the renewal the same moment re-arms it (the bug this fixes).
+    store.run('UPDATE agent_tasks SET lease_until=? WHERE id=?', new Date(t0 + 1000).toISOString(), slow.id);
+    assert.equal(agent.recoverAgentTasks(store, t0 + 1500), 1);
+    assert.equal(store.get('SELECT status FROM agent_tasks WHERE id=?', slow.id).status, 'queued');
+    assert.equal(store.get('SELECT status FROM agent_tasks WHERE id=?', foreign.id).status, 'running', 'the other device keeps its lease');
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});
+
 test('the HTTP protocol pairs, dispatches and collects results end to end', {timeout: 40000}, async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-http-'));
   const port = await new Promise((resolve, reject) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); s.on('error', reject); });

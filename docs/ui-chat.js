@@ -3,13 +3,13 @@
  * model is configured and in the deterministic simulator otherwise. A custom bot
  * runs its own instructions on the server; everything else answers from the
  * offline command set. Nothing here can publish. */
-import {classifyMessage, statusSummary} from './chat-engine.js?v=7dbf8dcc0b';
-import {simulateGroup} from './group-simulator.js?v=7dbf8dcc0b';
-import {planHandoffs, leadShouldRunGroup, runNote, summonableGuests, BUSY_STATUSES} from './coordination.js?v=7dbf8dcc0b';
-import {feedPauseAction} from './ui-model.js?v=7dbf8dcc0b';
-import {botSettings, groupSettings} from './bot-settings.js?v=7dbf8dcc0b';
-import {store, api, sync, conversation, appendMessage, setTyping, isStaticDemo, teamKey, groups, recentRuns} from './ui-store.js?v=7dbf8dcc0b';
-import {claimLocalRun, renewLocalRun, finishLocalRun, localRunCancelled} from './local-runs.js?v=7dbf8dcc0b';
+import {classifyMessage, statusSummary} from './chat-engine.js?v=fd5883cb06';
+import {simulateGroup} from './group-simulator.js?v=fd5883cb06';
+import {planHandoffs, leadShouldRunGroup, runNote, summonableGuests, BUSY_STATUSES} from './coordination.js?v=fd5883cb06';
+import {feedPauseAction} from './ui-model.js?v=fd5883cb06';
+import {botSettings, groupSettings} from './bot-settings.js?v=fd5883cb06';
+import {store, api, sync, conversation, appendMessage, setTyping, isStaticDemo, teamKey, groups, recentRuns} from './ui-store.js?v=fd5883cb06';
+import {claimLocalRun, renewLocalRun, finishLocalRun, localRunCancelled} from './local-runs.js?v=fd5883cb06';
 
 const TERMINAL = ['completed', 'failed', 'interrupted', 'awaiting_checkpoint', 'awaiting_plan', 'awaiting_feed', 'awaiting_browser', 'cancelled'];
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -215,11 +215,13 @@ async function reply(conv, message) {
   }
   if (!isStaticDemo()) {
     const run = await api('/api/bots/run', 'POST', {botId: bot.id, input: message});
-    return appendMessage(id, {id: run.id, role: 'bot', text: run.output || 'The bot returned no output.', mode: 'ai'});
+    // The sender is named, so the write fence keeps this a bot line rather than
+    // rewriting it as something the user said.
+    return appendMessage(id, {id: run.id, role: 'bot', senderId: bot.id, senderName: bot.name, text: run.output || 'The bot returned no output.', mode: 'ai'});
   }
   const text = await localReply(conv, message);
   await wait(BEAT_MS);
-  appendMessage(id, {role: 'bot', text});
+  appendMessage(id, {role: 'bot', senderId: bot.id, senderName: bot.name, text});
 }
 
 /** Send `text` to a conversation and let the right engine answer. */

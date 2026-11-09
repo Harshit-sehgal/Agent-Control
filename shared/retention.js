@@ -9,6 +9,7 @@
  * src/notifications.js — so there is no retention knob for them here.)
  */
 import {activity} from './core.js';
+import {BUSY_STATUSES} from './coordination.js';
 
 export const RETENTION_DEFAULTS = {events: 90, doneTasks: 30, runs: 30};
 
@@ -27,6 +28,14 @@ export function normalizeRetention(body = {}) {
 
 const cutoff = (days, now) => (days > 0 ? new Date(now - days * 86400000).toISOString() : null);
 
+/** A record that never said when it happened is not old: the old parse fed the
+ * number `now` into Date.parse, which is NaN, and every untimestamped record was
+ * pruned as if it were ancient. */
+const happenedAt = (record, keys, now) => {
+  for (const key of keys) if (record[key]) return Date.parse(record[key]);
+  return now;
+};
+
 /** Prune the workflow document. `dryRun` reports what would go without
  * touching the state, so the settings UI can preview a policy. */
 export function pruneState(state, {now = Date.now(), dryRun = false, policy} = {}) {
@@ -36,19 +45,30 @@ export function pruneState(state, {now = Date.now(), dryRun = false, policy} = {
   const taskCutoff = cutoff(settings.doneTasks, now);
   const runCutoff = cutoff(settings.runs, now);
   if (eventCutoff) {
-    const keep = state.events.filter(e => Date.parse(e.at || e.createdAt || now) >= Date.parse(eventCutoff));
+    const keep = state.events.filter(e => happenedAt(e, ['at', 'createdAt'], now) >= Date.parse(eventCutoff));
     report.events = state.events.length - keep.length;
     if (!dryRun) state.events = keep;
   }
   if (taskCutoff) {
-    const keep = state.tasks.filter(t => !(['done', 'failed', 'cancelled'].includes(t.status) && Date.parse(t.completedAt || t.updatedAt || now) < Date.parse(taskCutoff)));
+    const keep = state.tasks.filter(t => !(['done', 'failed', 'cancelled'].includes(t.status) && happenedAt(t, ['completedAt', 'updatedAt'], now) < Date.parse(taskCutoff)));
     report.doneTasks = state.tasks.length - keep.length;
     if (!dryRun) state.tasks = keep;
   }
   if (runCutoff) {
-    const keep = state.runs.filter(r => Date.parse(r.at || now) >= Date.parse(runCutoff));
+    const keep = state.runs.filter(r => happenedAt(r, ['at'], now) >= Date.parse(runCutoff));
     report.runs = state.runs.length - keep.length;
     if (!dryRun) state.runs = keep;
+    // Group runs are run records too, and they were never pruned at all, so the
+    // transaction log grew with every message. A run that is still open is the
+    // one a restart, a feed or a human approval resumes: only a settled one is
+    // exhaust. They are counted in `runs` because that is the policy that owns
+    // them and the preview the settings page shows.
+    if (Array.isArray(state.groupRuns)) {
+      const settled = Date.parse(runCutoff);
+      const kept = state.groupRuns.filter(g => BUSY_STATUSES.includes(g.status) || happenedAt(g, ['completedAt', 'updatedAt', 'createdAt'], now) >= settled);
+      report.runs += state.groupRuns.length - kept.length;
+      if (!dryRun) state.groupRuns = kept;
+    }
   }
   if (!dryRun && report.events + report.doneTasks + report.runs > 0) {
     activity(state, 'retention', `Pruned ${report.events} event(s), ${report.doneTasks} task record(s), ${report.runs} run record(s).`);

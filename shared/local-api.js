@@ -169,7 +169,7 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
       const direction = cleanText(body?.direction, 240);
       result = rewriteDraft(state, m[1], {text: templateDraft(candidate, state.settings, direction), mode: 'template', note: direction ? 'Template draft. The requested direction is recorded but was not applied by an AI model.' : 'Template draft. Rewrite instructions have not been processed by an AI model.'});
     } else {
-      result = draftAction(state, m[1], m[2]);
+      result = draftAction(state, m[1], m[2], body);
     }
     save(state);
     return result;
@@ -188,7 +188,12 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
   if (path === '/api/schedules' && method === 'POST') { const s = addSchedule(state, body); save(state); return s; }
   if ((m = path.match(/^\/api\/schedules\/([a-z0-9-]+)$/)) && method === 'DELETE') { const r = removeSchedule(state, m[1]); save(state); return r; }
   // Structured task endpoints, identical to the Node server's queue surface.
-  if (path === '/api/tasks' && method === 'POST') { const t = enqueueTask(state, body); save(state); return t.task; }
+  if (path === '/api/tasks' && method === 'POST') {
+    // Delivery tasks are created by the server from a user's own preferences.
+    // Taken from a request, one would send to any stored webhook.
+    if (body.kind === 'notification') throw Object.assign(new Error('Notification deliveries are queued by the server, not by request.'), {status: 403});
+    const t = enqueueTask(state, body); save(state); return t.task;
+  }
   if ((m = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/retry$/)) && method === 'POST') { const r = retryTask(state, m[1]); save(state); return r; }
   if ((m = path.match(/^\/api\/tasks\/([a-f0-9-]+)$/)) && method === 'DELETE') { const r = cancelTask(state, m[1]); save(state); return r; }
   if ((m = path.match(/^\/api\/drafts\/([a-f0-9-]+)\/evidence$/)) && method === 'POST') { const e = addEvidence(state, {...body, draftId: m[1]}); save(state); return e; }

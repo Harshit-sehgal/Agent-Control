@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import {migrate,updateSettings,addCandidate,seedDemo,beginProcessing,finishProcessing,failProcessing,editDraft,draftAction,addGroup,addBot,updateBot,removeBot,removeGroup,recoverInterrupted,addSchedule,removeSchedule,resetDemo,findDraft,findCandidate,attachRunDraft,SCHEMA_VERSION} from '../shared/workflow.js';
+import {migrate,updateSettings,addCandidate,seedDemo,beginProcessing,finishProcessing,failProcessing,editDraft,draftAction,addGroup,addBot,updateBot,updateGroup,removeBot,removeGroup,recoverInterrupted,addSchedule,removeSchedule,resetDemo,findDraft,findCandidate,attachRunDraft,SCHEMA_VERSION} from '../shared/workflow.js';
 import {enqueueTask, completeTask, failTask} from '../shared/tasks.js';
 import {initialState} from '../shared/core.js';
 import {createRouter} from '../src/router.js';
@@ -180,6 +180,50 @@ test('bot profile edits persist through the shared workflow rules', () => {
   assert.throws(() => updateBot(s, g.id, 'missing', {name: 'x', instructions: 'y'}), /Bot not found/);
   assert.throws(() => updateBot(s, 'missing', bot.id, {name: 'x', instructions: 'y'}), /Group not found/);
   assert.throws(() => updateBot(s, g.id, bot.id, {name: '  ', instructions: 'y'}), /required/);
+});
+
+test('a rename cannot duplicate a name another bot already has', () => {
+  // addBot and a model-created bot both refuse a duplicate. A rename was the way
+  // in, and findPeer/mentionedBots resolve a name to whichever bot comes first,
+  // so a handoff naming the duplicate reached the wrong teammate.
+  const s = store();
+  const g = s.groups[0];
+  const reviewer = g.bots.find(b => b.id === 'reviewer');
+  assert.throws(() => updateBot(s, g.id, reviewer.id, {name: 'Writer'}), error => error.status === 409 && /already in this group/.test(error.message));
+  assert.equal(g.bots.find(b => b.id === 'reviewer').name, 'Reviewer', 'A refused rename changes nothing.');
+  // Case and padding do not make a different name.
+  assert.throws(() => updateBot(s, g.id, reviewer.id, {name: ' writer '}), {status: 409});
+  // Renaming itself, or to a name nobody uses, still works.
+  assert.equal(updateBot(s, g.id, reviewer.id, {name: 'Senior Reviewer'}).name, 'Senior Reviewer');
+  assert.equal(updateBot(s, g.id, reviewer.id, {name: 'Senior Reviewer', instructions: 'Review deeply.'}).name, 'Senior Reviewer');
+});
+
+test('removing the last bot of a pipeline is refused instead of switching to every bot', () => {
+  // An empty pipeline reads as "every bot", so dropping the pipeline's last bot
+  // used to start bots the person never picked.
+  const s = store();
+  const g = addGroup(s, {name: 'Pipeline group', description: 'Ordered'});
+  const one = addBot(s, g.id, {name: 'First', instructions: 'Do the first step well.'});
+  const two = addBot(s, g.id, {name: 'Second', instructions: 'Do the second step well.'});
+  updateGroup(s, g.id, {settings: {pipeline: [one.id]}});
+  assert.throws(() => removeBot(s, g.id, one.id), error => error.status === 409 && /only bot in this group's pipeline/.test(error.message));
+  assert.deepEqual(g.bots.map(b => b.id), [one.id, two.id], 'The bot stays when the removal is refused.');
+  assert.deepEqual(g.settings.pipeline, [one.id], 'The pipeline the person chose is kept.');
+  // With two bots in the pipeline, either one can go and the pipeline shrinks.
+  updateGroup(s, g.id, {settings: {pipeline: [one.id, two.id]}});
+  removeBot(s, g.id, two.id);
+  assert.deepEqual(g.settings.pipeline, [one.id]);
+  // A pipeline entry for a bot that already left is not a choice the group can
+  // still honour, so it does not keep the survivor in place.
+  const three = addBot(s, g.id, {name: 'Third', instructions: 'Do the third step well.'});
+  updateGroup(s, g.id, {settings: {pipeline: [one.id, three.id]}});
+  removeBot(s, g.id, three.id);
+  updateBot(s, g.id, one.id, {name: 'Only one'});
+  assert.deepEqual(g.settings.pipeline, [one.id]);
+  // Clearing the pipeline is the deliberate way to run every bot.
+  updateGroup(s, g.id, {settings: {pipeline: null}});
+  removeBot(s, g.id, one.id);
+  assert.deepEqual(g.bots, []);
 });
 
 test('a group-run reply becomes a pending draft only for a captured post the bot may draft', () => {

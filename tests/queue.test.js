@@ -171,6 +171,33 @@ test('a claimed batch keeps every lease alive while an earlier task runs', async
   await fs.rm(dir, {recursive: true, force: true});
 });
 
+test('a failed lease renewal is logged instead of silently swallowed', async () => {
+  const {store, dir} = await harness();
+  const realUpdate = store.update.bind(store);
+  let renewalFails = false;
+  store.update = fn => (renewalFails ? Promise.reject(new Error('database is locked')) : realUpdate(fn));
+  const lines = [];
+  const realError = console.error;
+  console.error = (...args) => { lines.push(args.map(String).join(' ')); };
+  try {
+    // Two beats fit inside the handler, so the rate limit is exercised too.
+    const queue = createQueue(store, {slow: async () => {
+      renewalFails = true;
+      await new Promise(resolve => setTimeout(resolve, 2400));
+      renewalFails = false;
+      return {ok: true};
+    }}, {intervalMs: 60000, leaseMs: 3000});
+    const task = await store.update(s => rawTask(s, {kind: 'slow', title: 'slow'}));
+    await queue.sweep();
+    assert.equal(store.read().tasks[0].status, 'done', 'the task still completes once the write path recovers');
+    const warnings = lines.filter(line => /lease renewal failed/.test(line));
+    assert.equal(warnings.length, 1, `one warning per minute, not one per beat: ${JSON.stringify(lines)}`);
+    assert.match(warnings[0], new RegExp(task.id), 'the warning names the task');
+    assert.match(warnings[0], /3000ms/, 'and the lease length');
+    assert.match(warnings[0], /database is locked/, 'and why the renewal failed');
+  } finally { console.error = realError; await fs.rm(dir, {recursive: true, force: true}); }
+});
+
 test('duplicate work delivery: two workers claiming at once get one task each', async () => {
   const {store, dir} = await harness();
   await store.update(s => { rawTask(s, {kind: 'echo', title: 'A'}); rawTask(s, {kind: 'echo', title: 'B'}); });
