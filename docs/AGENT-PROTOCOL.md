@@ -133,3 +133,24 @@ above. `shared/bot-browser.js` validates the block and then:
 When the device reports back, the result is posted in the chat and the same bot
 is asked to continue with it. A failure is posted as a message and is never
 handed to the bot as a page.
+
+### Bots that spawn a sub-agent (`subagent.spawn`, opt-in)
+
+A bot holding `subagent.spawn` may hand one small job to a helper model by
+putting a fenced `spawn` block in its reply: `{"name": "...", "task": "..."}`,
+with the task capped at 2000 characters. `shared/subagents.js` validates the
+block and then:
+
+- strips it from the chat and shows a `started a sub-agent` line instead;
+- runs the task as one separate model call. The helper holds no permissions,
+  gets no tools, cannot reach a page, and has no memory of the conversation, so
+  everything it needs must be in the task;
+- never parses the helper's own reply for a block, so a helper cannot spawn a
+  helper and the tree stays one level deep;
+- allows one block per reply and one round per task;
+- feeds the answer back to the bot that asked, marked as untrusted text, and
+  asks for the real reply. A failed helper is reported in the chat and the bot
+  answers without it.
+
+A sub-agent is extra thinking, not extra authority: it can neither approve
+anything nor post anything, and it never sees a server token or a bare key.

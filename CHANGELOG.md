@@ -25,6 +25,12 @@ Bots that work together, with settings you control.
   for a page in its reply, the chat shows an Approve/Decline card (or the bot
   is set to run without asking), a paired local agent opens it, and the bot
   continues with the result. Click and type on X are refused.
+- **Sub-agents on demand** (`subagent.spawn`, opt-in): a bot may hand one small
+  job to a helper model by putting a fenced `spawn` block in its reply. The
+  helper runs as a separate call with no permissions, no tools, no web access
+  and no memory of the chat, its own reply is never parsed for a block, and its
+  answer goes back to the bot that asked, which writes the real reply. One
+  helper per reply; a failed helper never costs the reply.
 - **Reset password from the sign-in screen.** Forgot password asks
   `POST /api/auth/forgot`; the server still prints the one-time token in its
   log. A second form submits that token to `POST /api/auth/reset`.

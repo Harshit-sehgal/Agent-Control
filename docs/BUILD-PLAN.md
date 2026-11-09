@@ -115,3 +115,11 @@ work should be added as a fresh section.
 - [x] Dispatch to a paired local agent with the needed permission; result posted in the chat and the bot continues (`src/bot-browser.js`)
 - [x] Requests persisted in SQLite; Pages demo explains it needs the Node build
 - [x] Tests (`tests/bot-browser.test.js`); check, test and build:pages green
+
+## Phase S — sub-agents a bot can spawn
+- [x] `subagent.spawn` permission on any bot; envelope and system prompt describe the spawn block only to bots holding it
+- [x] Fenced `spawn` blocks validated (`shared/subagents.js`): one per reply, task capped at 2000 characters, JSON only
+- [x] The helper runs as a separate model call with no permissions, no tools, no web access and no conversation memory; its reply is never parsed for a block, so the tree is one level deep
+- [x] The bot that asked gets one more turn carrying the answer, marked as untrusted data, and writes the real reply; a failed helper never loses that reply
+- [x] Started/answered/refused lines in the chat, and the helpers each run spawned kept on the run record
+- [x] Tests (`tests/subagents.test.js`); check, test and build:pages green

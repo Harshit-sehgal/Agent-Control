@@ -1,6 +1,8 @@
 /** Persistent Node group orchestrator. Model workers get no publication tool.
  * A bot holding `browser.use` may only ask for a page; the request runs on the
- * user's paired local agent after approval (see src/bot-browser.js).
+ * user's paired local agent after approval (see src/bot-browser.js). A bot
+ * holding `subagent.spawn` may hand one small job to a helper model, which has
+ * no tools at all (see src/subagents.js).
  */
 import {randomUUID} from 'node:crypto';
 import {createRun,createEnvelope,runNote,planHandoffs,handoffTargets,instructLead,wakeBots,assessTask,summonableGuests,MAX_HANDOFFS,BUSY_STATUSES as BUSY,INTERRUPT_STATUSES as INTERRUPT} from '../shared/coordination.js';
@@ -8,7 +10,9 @@ import {botSettings,groupSettings,threadContext,MAX_STEPS_LIMIT} from '../shared
 import {addChatMessages} from '../shared/chats.js';
 import {assertContractOutput} from '../shared/contracts.js';
 import {recordBrowserRequests,queueFeedRead,stripBrowserBlocks,parseBrowserRequests,HOME_FEED_URL,MAX_BROWSER_DEPTH} from '../shared/bot-browser.js';
+import {MAX_SUBAGENT_DEPTH} from '../shared/subagents.js';
 import {autoDispatch} from './bot-browser.js';
+import {replyWithSubagents} from './subagents.js';
 import {executeCustomBot} from './ai.js';
 import {resolveConfig,aiAvailable} from './ai-providers.js';
 import {activity} from '../shared/core.js';
@@ -155,7 +159,10 @@ async function runGroupInner(store,id,executor){
       const thread=threadContext(current.chats?.[r.chatKey],botSettings(bot).contextMessages);
       const envelope=createEnvelope({run:r,bot,previous,thread,team:roster});
       // Each bot runs on its own chosen model/provider, else the workspace default.
-      const output=await executor(bot,JSON.stringify(envelope),resolveConfig(store,bot.id));
+      // A bot that spawns a helper gets one more turn; the second reply is its output.
+      const rounds=(r.subagents||[]).some(spawn=>spawn.botId===bot.id)?MAX_SUBAGENT_DEPTH:0;
+      const reply=await replyWithSubagents({bot,envelope,executor,config:resolveConfig(store,bot.id),rounds,makeId:randomUUID,now:stamp});
+      const output=reply.output;
       if(typeof output!=='string'||!output.trim())throw new Error('Bot returned empty output.');
       // Strip browser fences before the contract gate: a structured bot may
       // still ask for a page, and the next bot must not see the fences.
@@ -188,8 +195,12 @@ async function runGroupInner(store,id,executor){
         const said={id:randomUUID(),runId:id,role:'bot',senderId:bot.id,senderName:bot.name,toBotId,text:previous.output,at:stamp()};
         chat.push(said);
         s.groupMessages[live.groupId]=chat.slice(-300);
+        // What the helper did runs before the reply that used it, so the thread
+        // reads in the order the work happened.
+        for(const line of reply.lines)say(s,live,{...line,runId:id});
         say(s,live,{...said,mode:'ai'});
         for(const line of browsed.lines)say(s,live,line);
+        if(reply.spawns.length)live.subagents=[...(live.subagents||[]),...reply.spawns.map(spawn=>({...spawn,botId:bot.id,at:stamp()}))].slice(-6);
         if(browsed.records.length){
           live.status='awaiting_browser';
           live.browserPage=null;

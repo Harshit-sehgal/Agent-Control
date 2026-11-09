@@ -177,7 +177,7 @@ async function api(req,res,u){
   if(req.method==='HEAD'){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...SECURITY,...headers});return res.end();}
   send(res,status,body,headers);
 }
-const ASSETS=new Set(['index.html','app.css','transport.js','local-api.js','app.js','ui-kit.js','ui-model.js','ui-store.js','ui-dialogs.js','ui-chat.js','ui-views.js','ui-panel.js','ui-sheets.js','ui-admin.js','ui-actions.js','ui-fx.js','ui-push.js','sw.js','manifest.webmanifest','icon-192.png','icon-512.png','core.js','workflow.js','tasks.js','evidence.js','contracts.js','bot-settings.js','bot-browser.js','retention.js','coordination.js','chats.js','group-simulator.js','chat-engine.js','usability.js','local-runs.js','demo-feed.html']);
+const ASSETS=new Set(['index.html','app.css','transport.js','local-api.js','app.js','ui-kit.js','ui-model.js','ui-store.js','ui-dialogs.js','ui-chat.js','ui-views.js','ui-panel.js','ui-sheets.js','ui-admin.js','ui-actions.js','ui-fx.js','ui-push.js','sw.js','manifest.webmanifest','icon-192.png','icon-512.png','core.js','workflow.js','tasks.js','evidence.js','contracts.js','bot-settings.js','bot-browser.js','subagents.js','retention.js','coordination.js','chats.js','group-simulator.js','chat-engine.js','usability.js','local-runs.js','demo-feed.html']);
 async function serve(req,res,u){
   let rel=u.pathname==='/'?'index.html':u.pathname.slice(1);
   if(!ASSETS.has(rel))return send(res,404,{error:'Not found'});

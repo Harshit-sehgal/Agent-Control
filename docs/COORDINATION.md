@@ -53,6 +53,7 @@ A chat's info panel → Scheduled tasks (or the composer's + → Schedule a task
 - **No secret or account access** from text-only model workers.
 - **No X post automation** from chat. A bot with `browser.use` may read an X page through the local agent, but click and type there are refused. X posts still require a manual final action.
 - **Browser use is opt-in per bot** (`browser.use`), runs only on a paired local agent, asks for approval by default, and is capped at 2 requests per reply and 3 round trips per turn (`shared/bot-browser.js`). A page request pauses that run (`awaiting_browser`) until the result is back, then that same bot continues; a home-feed read still uses `awaiting_feed`.
+- **Sub-agents are opt-in per bot** (`subagent.spawn`), one per reply and one round per task (`shared/subagents.js`). The helper is a separate model call with no permissions, no tools, no web access and no conversation memory, and its reply is never parsed for a block, so it cannot spawn a helper of its own. Its answer goes back to the bot that asked, marked as untrusted text, and that bot writes the real reply; a failed helper never costs the reply. It is extra thinking, not extra authority.
 - **No external action without a separate approval**. A bot's agreement is not a human approval.
 - **Per-group single-flight** on the Node worker; a scheduled task that meets a busy group retries with backoff.
 

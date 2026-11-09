@@ -164,6 +164,21 @@ test('a leftover think closer does not drop a browser fence',async()=>{
   }finally{close();}
 });
 
+test('a reply that is only a spawn fence keeps its fences, and the tool is described only with the permission',async()=>{
+  const block='```spawn\n{"name":"Fact check","task":"Does the figure hold?"}\n```';
+  const {requests,port,close}=await stub({status:200,json:{choices:[{message:{content:block}}]}});
+  try{
+    const out=await withEnv({AI_BASE_URL:`http://127.0.0.1:${port}/v1`,AI_API_KEY:'k',AI_API_STYLE:'chat',AI_MODEL:'m'},()=>executeCustomBot({instructions:'Draft it',permissions:['subagent.spawn']},'go'));
+    assert.match(out,/```spawn/);
+    assert.match(requests[0].body.messages[0].content,/spawn block/);
+  }finally{close();}
+  const plain=await stub({status:200,json:{choices:[{message:{content:'ok'}}]}});
+  try{
+    await withEnv({AI_BASE_URL:`http://127.0.0.1:${plain.port}/v1`,AI_API_KEY:'k',AI_API_STYLE:'chat',AI_MODEL:'m'},()=>executeCustomBot({instructions:'Draft it'},'go'));
+    assert.match(plain.requests[0].body.messages[0].content,/cannot access websites or run tools/);
+  }finally{plain.close();}
+});
+
 test('AI calls do not follow redirects',async()=>{
   const server=http.createServer((req,res)=>{
     if(req.url==='/v1/chat/completions'){res.writeHead(302,{Location:'/v1/ok'});res.end();return;}

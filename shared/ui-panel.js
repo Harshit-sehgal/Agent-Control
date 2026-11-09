@@ -197,7 +197,7 @@ function botHome(conv) {
 }
 export const tintPicker = current => `<div class="tints" role="group" aria-label="Color">${Array.from({length: TINT_COUNT}, (_, i) => `<button type="button" class="tint ${tintClass(i)}${i === current ? ' on' : ''}" data-action="avatar" data-index="${i}" aria-label="Color ${i + 1}" aria-pressed="${i === current}">${icon('check', 18)}</button>`).join('')}</div>`;
 const BROWSER_CHOICES = [['ask', 'Ask me before each page'], ['auto', 'Run on my local agent without asking']];
-const PERMISSION_LABELS = {'browser.use': 'browser.use · open pages with my local browser agent'};
+const PERMISSION_LABELS = {'browser.use': 'browser.use · open pages with my local browser agent', 'subagent.spawn': 'subagent.spawn · hand one small job to a helper model'};
 const LENGTHS = [['short', 'Short, a few lines'], ['medium', 'Medium'], ['long', 'Long and detailed']];
 function behaviourFields(bot) {
   const s = botSettings(bot);
@@ -229,7 +229,7 @@ function botEdit(conv) {
       ${modelBlock}
       <div class="form-grid">${field('Answers in', `<select class="input" name="outputKind">${options(OUTPUT_KINDS.map(k => [k, k === 'structured' ? 'Structured JSON' : 'Plain text']), kind)}</select>`)}${field('Required fields', `<input class="input" name="fields" value="${esc((bot.contract?.output?.fields || []).map(x => x.name).join(', '))}" placeholder="verdict, reason">`)}</div>
       ${behaviourFields(bot)}
-      <fieldset class="contract-fieldset"><legend>What it may do</legend>${ACTIONS.map(a => `<label class="check-row"><input type="checkbox" name="permissions" value="${esc(a)}" ${(bot.permissions || []).includes(a) ? 'checked' : ''}><span>${esc(PERMISSION_LABELS[a] || a)}</span></label>`).join('')}<p class="field-help">Publishing is never automated and cannot be granted here.</p></fieldset>
+      <fieldset class="contract-fieldset"><legend>What it may do</legend>${ACTIONS.map(a => `<label class="check-row"><input type="checkbox" name="permissions" value="${esc(a)}" ${(bot.permissions || []).includes(a) ? 'checked' : ''}><span>${esc(PERMISSION_LABELS[a] || a)}</span></label>`).join('')}<p class="field-help">Publishing is never automated and cannot be granted here. The browser and sub-agent permissions need the Node build.</p></fieldset>
       ${btn('Save profile', null, {kind: 'primary', type: 'submit', wide: true})}
     </form>`;
 }

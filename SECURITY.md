@@ -11,7 +11,9 @@ description of what is and is not defended.
   gives a bot `browser.use`. Each request then goes to a paired local agent,
   after approval unless the user turned approval off for that bot. Device-side
   allowlist, private-address proxy and an empty profile still apply. Click
-  or type on X is always refused. Scroll only moves the page.
+  or type on X is always refused. Scroll only moves the page. A bot given
+  `subagent.spawn` may spawn a helper model, which holds no permissions and no
+  tools at all: it cannot reach a page, a post or the network.
 
 ## Connected accounts
 This product does not OAuth into X or any other platform.
@@ -66,6 +68,8 @@ replay cache reject replays; agents run only permission-gated task kinds.
   steps) granted per device and refused on X. With `AGENT_BROWSER=1` capture
   and action run in a real browser with an empty profile. Bots reach a
   browser only through opt-in `browser.use`. Nothing the agent does can post.
+  A spawned sub-agent is a model call, not a client: it never sees a token, a
+  device or a request queue.
 - TLS: for anything beyond loopback, terminate HTTPS at a reverse proxy
   (recommended) or set `TLS_CERT` and `TLS_KEY` together for in-process
   HTTPS. HSTS, startup validation and `docs/DEPLOYMENT.md` cover the rest.

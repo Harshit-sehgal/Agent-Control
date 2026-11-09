@@ -1,15 +1,15 @@
 /** Everything that used to be a dashboard tab now hangs off a conversation:
  * the info panel of the open chat (drafts, posts, reminders, runs, voice, the
  * bot's profile) and the "You" pages (account, admin, about). */
-import {filterCandidates, filterDrafts} from './usability.js?v=20376b59b1';
-import {ACTIONS, OUTPUT_KINDS} from './contracts.js?v=20376b59b1';
-import {BOT_DEFAULTS, MAX_CONTEXT_MESSAGES, MAX_STEPS_LIMIT, botSettings, groupSettings, pipelineOf} from './bot-settings.js?v=20376b59b1';
-import {BUSY_STATUSES} from './coordination.js?v=20376b59b1';
-import {ACTIVE_DRAFTS, chatTasks, pipelineRows, retryTarget, runBelongsToChat} from './ui-model.js?v=20376b59b1';
-import {esc, icon, avatar, groupAvatar, tintClass, TINT_COUNT, btn, iconBtn, row, box, field, note, empty, tag, pageHead, fullDate} from './ui-kit.js?v=20376b59b1';
-import {store, conversation, isStaticDemo, isAdmin, canWrite, isXGroup, botTint, recentRuns, THEMES, themeChoice} from './ui-store.js?v=20376b59b1';
-import {draftCard, postCard} from './ui-views.js?v=20376b59b1';
-import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=20376b59b1';
+import {filterCandidates, filterDrafts} from './usability.js?v=e5bbe2496b';
+import {ACTIONS, OUTPUT_KINDS} from './contracts.js?v=e5bbe2496b';
+import {BOT_DEFAULTS, MAX_CONTEXT_MESSAGES, MAX_STEPS_LIMIT, botSettings, groupSettings, pipelineOf} from './bot-settings.js?v=e5bbe2496b';
+import {BUSY_STATUSES} from './coordination.js?v=e5bbe2496b';
+import {ACTIVE_DRAFTS, chatTasks, pipelineRows, retryTarget, runBelongsToChat} from './ui-model.js?v=e5bbe2496b';
+import {esc, icon, avatar, groupAvatar, tintClass, TINT_COUNT, btn, iconBtn, row, box, field, note, empty, tag, pageHead, fullDate} from './ui-kit.js?v=e5bbe2496b';
+import {store, conversation, isStaticDemo, isAdmin, canWrite, isXGroup, botTint, recentRuns, THEMES, themeChoice} from './ui-store.js?v=e5bbe2496b';
+import {draftCard, postCard} from './ui-views.js?v=e5bbe2496b';
+import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=e5bbe2496b';
 
 const el = id => document.getElementById(id);
 const options = (pairs, current) => pairs.map(([value, label]) => `<option value="${esc(value)}"${value === current ? ' selected' : ''}>${esc(label)}</option>`).join('');
@@ -197,7 +197,7 @@ function botHome(conv) {
 }
 export const tintPicker = current => `<div class="tints" role="group" aria-label="Color">${Array.from({length: TINT_COUNT}, (_, i) => `<button type="button" class="tint ${tintClass(i)}${i === current ? ' on' : ''}" data-action="avatar" data-index="${i}" aria-label="Color ${i + 1}" aria-pressed="${i === current}">${icon('check', 18)}</button>`).join('')}</div>`;
 const BROWSER_CHOICES = [['ask', 'Ask me before each page'], ['auto', 'Run on my local agent without asking']];
-const PERMISSION_LABELS = {'browser.use': 'browser.use · open pages with my local browser agent'};
+const PERMISSION_LABELS = {'browser.use': 'browser.use · open pages with my local browser agent', 'subagent.spawn': 'subagent.spawn · hand one small job to a helper model'};
 const LENGTHS = [['short', 'Short, a few lines'], ['medium', 'Medium'], ['long', 'Long and detailed']];
 function behaviourFields(bot) {
   const s = botSettings(bot);
@@ -229,7 +229,7 @@ function botEdit(conv) {
       ${modelBlock}
       <div class="form-grid">${field('Answers in', `<select class="input" name="outputKind">${options(OUTPUT_KINDS.map(k => [k, k === 'structured' ? 'Structured JSON' : 'Plain text']), kind)}</select>`)}${field('Required fields', `<input class="input" name="fields" value="${esc((bot.contract?.output?.fields || []).map(x => x.name).join(', '))}" placeholder="verdict, reason">`)}</div>
       ${behaviourFields(bot)}
-      <fieldset class="contract-fieldset"><legend>What it may do</legend>${ACTIONS.map(a => `<label class="check-row"><input type="checkbox" name="permissions" value="${esc(a)}" ${(bot.permissions || []).includes(a) ? 'checked' : ''}><span>${esc(PERMISSION_LABELS[a] || a)}</span></label>`).join('')}<p class="field-help">Publishing is never automated and cannot be granted here.</p></fieldset>
+      <fieldset class="contract-fieldset"><legend>What it may do</legend>${ACTIONS.map(a => `<label class="check-row"><input type="checkbox" name="permissions" value="${esc(a)}" ${(bot.permissions || []).includes(a) ? 'checked' : ''}><span>${esc(PERMISSION_LABELS[a] || a)}</span></label>`).join('')}<p class="field-help">Publishing is never automated and cannot be granted here. The browser and sub-agent permissions need the Node build.</p></fieldset>
       ${btn('Save profile', null, {kind: 'primary', type: 'submit', wide: true})}
     </form>`;
 }

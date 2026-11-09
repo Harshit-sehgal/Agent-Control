@@ -157,6 +157,8 @@ test('a feed-permission failure keeps Grant and Retry, and the demo still shows 
   assert.deepEqual(threadLineActions({status: 'awaiting_checkpoint', live: false, note: true, latest: true}), {grant: false, plan: false, checkpoint: true, retry: false});
   assert.deepEqual(threadLineActions({status: 'failed', live: true, note: true, latest: false}), {grant: false, plan: false, checkpoint: false, retry: false});
   assert.equal(isRunNote({role: 'system', runId: 'r', kind: 'browser'}), false);
+  // A sub-agent line never takes the Start/Retry button from the run's real note.
+  assert.equal(isRunNote({role: 'system', runId: 'r', kind: 'subagent'}), false);
   assert.equal(isRunNote({role: 'system', runId: 'r'}), true);
   assert.equal(isRunNote({role: 'bot', runId: 'r'}), false);
 });

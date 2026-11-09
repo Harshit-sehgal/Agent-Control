@@ -2,13 +2,13 @@
  * Both are thin renderers over ui-model.js. The list shell and the composer are
  * painted once and then only their contents change, so a background refresh can
  * never wipe what the user is typing. */
-import {botSuggestions} from './chat-engine.js?v=20376b59b1';
-import {summonableGuests} from './coordination.js?v=20376b59b1';
-import {botSettings, groupSettings} from './bot-settings.js?v=20376b59b1';
-import {requestOfMessage} from './bot-browser.js?v=20376b59b1';
-import {chatRows, timeline, pendingBrowser, stuckFeedReads, draftStage, mentionSuggestions, retryTarget, threadLineActions, isRunNote, runBelongsToChat, ACTIVE_DRAFTS} from './ui-model.js?v=20376b59b1';
-import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=20376b59b1';
-import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, isXGroup, botTint, recentRuns} from './ui-store.js?v=20376b59b1';
+import {botSuggestions} from './chat-engine.js?v=e5bbe2496b';
+import {summonableGuests} from './coordination.js?v=e5bbe2496b';
+import {botSettings, groupSettings} from './bot-settings.js?v=e5bbe2496b';
+import {requestOfMessage} from './bot-browser.js?v=e5bbe2496b';
+import {chatRows, timeline, pendingBrowser, stuckFeedReads, draftStage, mentionSuggestions, retryTarget, threadLineActions, isRunNote, runBelongsToChat, ACTIVE_DRAFTS} from './ui-model.js?v=e5bbe2496b';
+import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=e5bbe2496b';
+import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, isXGroup, botTint, recentRuns} from './ui-store.js?v=e5bbe2496b';
 
 const el = id => document.getElementById(id);
 const FILTERS = [['all', 'All'], ['needs', 'Needs you'], ['groups', 'Groups'], ['bots', 'Bots']];

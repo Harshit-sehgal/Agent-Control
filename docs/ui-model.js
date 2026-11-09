@@ -2,8 +2,8 @@
  * a pane shows: the chat list, a thread's timeline, the "needs you" count and
  * the hash route. No DOM and no globals, so the product rules here are unit
  * tested directly (tests/ui-model.test.js). */
-import {fullDate} from './ui-kit.js?v=20376b59b1';
-import {botSettings} from './bot-settings.js?v=20376b59b1';
+import {fullDate} from './ui-kit.js?v=e5bbe2496b';
+import {botSettings} from './bot-settings.js?v=e5bbe2496b';
 
 export const ACTIVE_DRAFTS = ['pending', 'scheduled', 'ready'];
 const X_GROUP = 'x-engage';
@@ -63,12 +63,17 @@ export function feedPauseAction(request, {graceUsed = false} = {}) {
   return {action: 'wait', text: FEED_WAIT};
 }
 
-/** A system line that may carry Start, Retry or Approve. A browser card has
- * its own buttons and returns before those, so it must not count as the note:
- * otherwise the action is computed for a line that never paints it. */
+// System lines with a kind of their own paint a card, not a run note.
+const RUN_LESS_KINDS = new Set(['browser', 'subagent']);
+
+/** A system line that may carry Start, Retry or Approve. A browser card or a
+ * sub-agent line has its own presentation and returns before those, so it must
+ * not count as the note: otherwise the action is computed for a line that never
+ * paints it, and the real note loses its button. */
 export function isRunNote(message) {
-  return Boolean(message && message.role === 'system' && message.runId && message.kind !== 'browser');
+  return Boolean(message && message.role === 'system' && message.runId && !RUN_LESS_KINDS.has(message.kind));
 }
+
 
 /** Buttons one system line may show at once. They stack. A missing feed
  * permission is also a failed run, so Grant must not hide Retry. Plans and
