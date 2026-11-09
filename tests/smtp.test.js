@@ -224,3 +224,51 @@ test('with SMTP_REQUIRE_TLS=0 a refused upgrade still sends, since that is what 
     assert.match(server.state.message, /^To: ops@example\.com$/m);
   } finally { await server.close(); }
 });
+
+test('an address header encodes the display name and never the address', () => {
+  const message = (from, to = 'ops@example.com') => buildMessage({from, to, subject: 's', text: 'b'});
+  const header = (text, name) => text.split('\r\n\r\n')[0].split('\r\n').find(line => line.startsWith(`${name}: `));
+
+  // RFC 2047 forbids encoding the addr-spec. The address stays literal, so the
+  // server can route the message even when the name is in another script.
+  const international = header(message('Café Crème <bot@example.com>'), 'From');
+  assert.match(international, /<bot@example\.com>$/);
+  assert.match(international, /^From: =\?UTF-8\?B\?/);
+  assert.equal(
+    Buffer.from(/=\?UTF-8\?B\?([^?]+)\?=/.exec(international)[1], 'base64').toString('utf8'), 'Café Crème');
+
+  // A bare address stays bare; a quoted ASCII name loses the quotes but keeps
+  // the address, and a name with a comma is quoted so it stays one entry.
+  assert.equal(header(message('bot@example.com'), 'From'), 'From: bot@example.com');
+  assert.equal(header(message('"Agent Control" <bot@example.com>'), 'From'), 'From: Agent Control <bot@example.com>');
+  assert.equal(header(message('Agent, Control <bot@example.com>'), 'From'), 'From: "Agent, Control" <bot@example.com>');
+});
+
+test('a header value cannot inject another header, and encoded words never split a character', () => {
+  const message = buildMessage({
+    from: 'bot@example.com',
+    to: 'ops@example.com\r\nBcc: silent@evil.example',
+    subject: 'Draft waiting\r\nX-Injected: yes\nBcc: silent@evil.example',
+    text: 'b',
+  });
+  const head = message.split('\r\n\r\n')[0];
+  // The newline is flattened into the value, so the words survive as text and
+  // never become a header of their own.
+  assert.doesNotMatch(head, /^Bcc:/m, 'no injected Bcc line');
+  assert.doesNotMatch(head, /^X-Injected:/m, 'no injected header line');
+  assert.match(head, /^Subject: Draft waiting X-Injected: yes Bcc: silent@evil\.example$/m,
+    'the attempted header is part of the subject text, one line');
+  assert.equal(head.split('\r\n').filter(line => /^\w[\w-]*: /.test(line)).length, 10,
+    'exactly the ten headers the builder writes, one line each');
+
+  // A four-byte emoji must survive the 45-byte word split whole: the words
+  // must decode back to the exact subject, and none may exceed its limit.
+  const subject = 'x'.repeat(43) + '🙂' + 'y'.repeat(40);
+  const encoded = /^Subject: ([\s\S]*?)\r\n(?:[A-Z][\w-]*: |\r\n)/m.exec(
+    buildMessage({from: 'a@b.c', to: 'd@e.f', subject, text: 'b'}))?.[1];
+  assert.ok(encoded, 'the subject header is there');
+  const words = [...encoded.matchAll(/=\?UTF-8\?B\?([^?]+)\?=/g)].map(m => Buffer.from(m[1], 'base64'));
+  assert.equal(Buffer.concat(words).toString('utf8'), subject, 'the subject decodes back to itself');
+  for (const word of words) assert.ok(word.length <= 45, 'no encoded word exceeds its limit');
+  assert.doesNotMatch(encoded.replace(/=\?UTF-8\?B\?[^?]+\?=|\r\n /g, ''), /[^\s]/, 'nothing outside the encoded words');
+});

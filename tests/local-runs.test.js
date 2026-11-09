@@ -1,9 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {claimLocalRun, patchLocalRun, renewLocalRun, finishLocalRun, readLocalRuns, LOCAL_RUNS_KEY} from '../shared/local-runs.js';
+import {installWebLocks} from './web-locks.js';
 
-// The run store is localStorage, and every write takes a Web Lock. Node has the
-// lock manager; give it the storage a browser tab would have.
+// The run store is localStorage, and every write takes a Web Lock. A browser
+// tab has both; give the process what it needs before importing the module.
+// Node 22 has no `navigator.locks`, so without this the suite fails there.
+installWebLocks();
+const {claimLocalRun, patchLocalRun, renewLocalRun, finishLocalRun, readLocalRuns, LOCAL_RUNS_KEY} =
+  await import('../shared/local-runs.js');
+
 const store = new Map();
 globalThis.localStorage = {
   getItem: key => (store.has(key) ? store.get(key) : null),

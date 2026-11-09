@@ -65,7 +65,12 @@ function addressOf(value, setting) {
  * is not printable ASCII, folded at 45 bytes so no encoded word exceeds 75. */
 function headerValue(value, limit = 400) {
   const text = String(value ?? '').replace(/[\r\n\t]+/g, ' ').replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, limit);
-  if (/^[\x20-\x7e]*$/.test(text)) return text;
+  return /^[\x20-\x7e]*$/.test(text) ? text : encodeWords(text);
+}
+
+/** RFC 2047 encoded words for one run of text, folded so no word exceeds 75
+ * bytes. A character is never split across two words. */
+function encodeWords(text) {
   const words = [];
   let rest = Buffer.from(text, 'utf8');
   while (rest.length) {
@@ -76,6 +81,21 @@ function headerValue(value, limit = 400) {
     rest = rest.subarray(take);
   }
   return words.join('\r\n ');
+}
+
+/** `Name <a@b>` as a From/To header. RFC 2047 allows an encoded *display name*
+ * and forbids encoding the addr-spec: mailing it as one encoded word makes some
+ * servers reject the message and others show the address as garbage. */
+function addressHeader(value, limit = 400) {
+  const text = String(value ?? '').replace(/[\r\n\t]+/g, ' ').replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, limit);
+  const match = /^(.*?)<([^<>]+)>$/.exec(text);
+  if (!match) return headerValue(text, limit);
+  const address = match[2].trim();
+  const name = match[1].trim().replace(/^"(.*)"$/, '$1').trim();
+  if (!name) return address;
+  // A plain ASCII name is left alone unless it needs quoting to stay one word.
+  if (/^[\x20-\x7e]*$/.test(name) && !/["(),.:;<>@\[\\\]]/.test(name)) return `${name} <${address}>`;
+  return `${/^[\x20-\x7e]*$/.test(name) ? `"${name}"` : encodeWords(name)} <${address}>`;
 }
 
 function heloName() {
@@ -89,8 +109,8 @@ export function buildMessage({from, to, subject, text, date = new Date(), messag
   const body = Buffer.from(String(text ?? '').replace(/\r\n/g, '\n').replace(/\n/g, '\r\n'), 'utf8')
     .toString('base64').replace(/.{1,76}/g, '$&\r\n');
   const headers = [
-    `From: ${headerValue(from)}`,
-    `To: ${headerValue(to)}`,
+    `From: ${addressHeader(from)}`,
+    `To: ${addressHeader(to)}`,
     `Subject: ${headerValue(subject || 'Agent Control')}`,
     `Date: ${date.toUTCString()}`,
     `Message-ID: <${messageId}@${heloName()}>`,
