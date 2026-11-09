@@ -92,7 +92,9 @@ test('custom bots run through the Node provider only on the server build',()=>{
   // When a provider is connected, the actual model id is surfaced if known.
   assert.match(app,/Connected · \$\{esc\(model\)\}/);
   assert.match(app,/state\?\.aiModel/);
-  assert.match(app,/stuck \? btn\('Cancel', 'cancel-plan'/);
+  // A run that is still working can be stopped from its card, in the same build
+  // that shows the thread's Stop button: the card used to offer nothing at all.
+  assert.match(app,/BUSY_STATUSES\.includes\(status\) && status !== 'awaiting_checkpoint' \? btn\('Cancel', 'cancel-run'/);
 });
 test('bot profiles never mirror name/instructions into browser-local UI state',()=>{
   // `profile()` spreads the cosmetic UI record over the bot, so a name/instructions

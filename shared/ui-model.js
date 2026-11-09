@@ -274,7 +274,10 @@ export function pipelineValue(rows, group) {
 }
 
 const GROUP_SECTIONS = ['home', 'drafts', 'posts', 'reminders', 'runs', 'voice', 'group-settings', 'tasks'];
-const BOT_SECTIONS = ['home', 'edit', 'tasks'];
+// `memory` is here because the bot panel links to it ("Memory and rules"):
+// without it the route parser fell back to home, so the row and the URL
+// disagreed and a reload dropped the person out of the page they were on.
+const BOT_SECTIONS = ['home', 'edit', 'memory', 'tasks'];
 const LEGACY_TABS = {overview: 'home', discovery: 'posts', approvals: 'drafts', schedules: 'reminders', activity: 'runs', settings: 'voice'};
 const PAGES = ['you', 'about', 'notifications', 'workspaces', 'ai', 'team', 'agents', 'data'];
 const SERVER_PAGES = ['notifications', 'workspaces'];

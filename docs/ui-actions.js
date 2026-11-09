@@ -1,16 +1,16 @@
 /** What the UI can do, as three lookup tables keyed by `data-action`, form id and
  * control id. app.js owns the DOM events and dispatches here; handlers throw on
  * failure and the dispatcher turns that into one toast. */
-import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, setPref, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns, patchLocalRun, appendMessage} from './ui-store.js?v=06d1ba940d';
-import {botSettings, groupSettings} from './bot-settings.js?v=06d1ba940d';
-import {completeMention, moveRow, pipelineValue, draftLength, lengthLabel} from './ui-model.js?v=06d1ba940d';
-import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=06d1ba940d';
-import {sendChat, streamGroupRun, watchQueuedRun, continueDemoPlan} from './ui-chat.js?v=06d1ba940d';
-import {confetti, whoosh, react, poke} from './ui-fx.js?v=06d1ba940d';
-import {renderList, renderMentions} from './ui-views.js?v=06d1ba940d';
-import {refreshLists, reloadAdminPage, pipelineList} from './ui-panel.js?v=06d1ba940d';
-import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, botTaskSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=06d1ba940d';
-import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=06d1ba940d';
+import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, setPref, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns, patchLocalRun, appendMessage} from './ui-store.js?v=3dfd17aba5';
+import {botSettings, groupSettings} from './bot-settings.js?v=3dfd17aba5';
+import {completeMention, moveRow, pipelineValue, draftLength, lengthLabel} from './ui-model.js?v=3dfd17aba5';
+import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=3dfd17aba5';
+import {sendChat, streamGroupRun, watchQueuedRun, continueDemoPlan} from './ui-chat.js?v=3dfd17aba5';
+import {confetti, whoosh, react, poke} from './ui-fx.js?v=3dfd17aba5';
+import {renderList, renderMentions} from './ui-views.js?v=3dfd17aba5';
+import {refreshLists, reloadAdminPage, pipelineList} from './ui-panel.js?v=3dfd17aba5';
+import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, botTaskSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=3dfd17aba5';
+import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=3dfd17aba5';
 
 const adminCtx = {reload: reloadAdminPage};
 const chatId = () => store.route.chat;
@@ -96,7 +96,7 @@ export const actions = {
   'avatar': async b => {
     const index = Number(b.dataset.index); pickTint(index);
     if (!b.closest('#edit-bot-form')) return;
-    if (!canWrite()) throw new Error('A member can edit a bot.');
+    if (!canWrite()) throw new Error('Only a member can edit a bot; this account can read it.');
     // The colour syncs through the server; the local pick paints it at once.
     const bot = findBot(chatId());
     setProfile(bot.id, {avatarIndex: index}); bot.settings = {...(bot.settings || {}), tint: index}; changed('thread');
@@ -155,7 +155,13 @@ export const actions = {
   },
   'draft-candidate': async b => { const d = await api(`/api/candidates/${b.dataset.id}/process`, 'POST', {}); toast(`Draft ready (${d.score}/100). It is waiting on you.`); await sync(); },
   'approve-draft': b => { react('cheer', 1400); return draftOp(b.dataset.id, 'approve', 'Approved. Manual posting handoff scheduled.'); },
-  'reject-draft': b => { react('aww', 1200); return draftOp(b.dataset.id, 'reject', 'Draft skipped.'); },
+  'reject-draft': async b => {
+    // Skipping is one click and permanent: a skipped draft has no restore, and
+    // the button sits next to Approve on a card somebody is reading quickly.
+    const scheduled = store.state.drafts.find(d => d.id === b.dataset.id)?.status === 'scheduled';
+    if (!await confirmSheet(scheduled ? 'Cancel this scheduled draft?' : 'Skip this draft?', {confirm: 'Discard', danger: true, detail: scheduled ? 'It stops waiting to go out. You can draft the post again.' : 'It leaves the queue. The captured post and its sources stay.'})) return;
+    react('aww', 1200); return draftOp(b.dataset.id, 'reject', 'Draft skipped.');
+  },
   'ready-draft': b => draftOp(b.dataset.id, 'ready', 'Ready to post.'),
   'posted-draft': async b => {
     if (!await confirmSheet('Did you post this on X yourself?', {confirm: 'Yes, I posted it', detail: 'This only records it. Agent Control never posts for you.'})) return;
@@ -347,7 +353,7 @@ export const forms = {
     closeSheet(); await sync(); go({chat: teamKey(group.id), info: 'home'}); toast('Group created. Add a bot to get started.');
   },
   'edit-bot-form': async (form, f) => {
-    if (!canWrite()) throw new Error('A member can edit a bot.');
+    if (!canWrite()) throw new Error('Only a member can edit a bot; this account can read it.');
     const b = conversation()?.bot; if (!b) throw new Error('Bot not found');
     // The lasting profile goes through the API so it survives a reload and is
     // shared across devices. Only the cosmetic tint stays in localStorage.
@@ -359,7 +365,7 @@ export const forms = {
     const settings = {
       enabled: on('enabled'), replyLength: f.replyLength, style: f.style || '',
       temperature: String(f.temperature ?? '').trim() === '' ? null : Number(f.temperature),
-      contextMessages: Number(f.contextMessages), summonable: on('summonable'), canHandoff: on('canHandoff'), lead: on('lead'),
+      contextMessages: Number(f.contextMessages), memory: on('memory'), summonable: on('summonable'), canHandoff: on('canHandoff'), lead: on('lead'),
       ...(f.browserApproval ? {browserApproval: f.browserApproval} : {}),
       ...(picked ? {tint: Number(picked.dataset.index)} : {}),
     };

@@ -286,9 +286,6 @@ const providerView = p => {
 const chatCount = p => (Array.isArray(p.chatModels) ? p.chatModels.length : Number(p.modelCount ?? 0));
 /** Ids past the chat filter, so a row can show the whole catalogue was read. */
 const listedCount = p => (Array.isArray(p.allModels) ? p.allModels.length : 0);
-/** Model ids to suggest for a provider from another pane (the bot model picker):
- * chat-capable only and capped, so an embedding model is never offered there. */
-export const providerModels = p => idList(providerView(p || {}).chatModels).slice(0, MODEL_LIMIT);
 
 const protocolName = id => protocolById(id)?.label || String(id || DEFAULT_PROTOCOL);
 const needsApiVersion = protocol => Boolean(protocolById(protocol)?.needsApiVersion);

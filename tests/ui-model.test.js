@@ -522,3 +522,16 @@ test('draft length warns about X\'s standard limit without ever acting like a wa
   assert.equal(lengthLabel('x'.repeat(280)), '280 of 280 · 0 left');
   assert.equal(lengthLabel('x'.repeat(283)), "283 characters · 3 over X's 280");
 });
+
+test('every bot info section the panel links to is a route the parser accepts', () => {
+  // The bot panel renders "Memory and rules" and pushes #chat/<bot>/info/memory.
+  // Without `memory` in BOT_SECTIONS the parser fell back to home, so the row
+  // appeared to do nothing and a reload dropped the person out of the page.
+  const botId = (state().groups[0].bots[0] || {}).id || 'scout';
+  for (const section of ['home', 'edit', 'memory', 'tasks']) {
+    assert.equal(parseRoute(`#chat/${botId}/info/${section}`, state()).info, section, section);
+    assert.equal(routeHash({chat: botId, page: null, info: section}), `chat/${botId}/info${section === 'home' ? '' : `/${section}`}`);
+  }
+  // A section a bot does not have still falls back rather than painting nothing.
+  assert.equal(parseRoute(`#chat/${botId}/info/drafts`, state()).info, 'home');
+});

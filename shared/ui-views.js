@@ -91,9 +91,11 @@ export function renderList() {
 export function draftCard(draft) {
   const stage = draftStage(draft), open = ACTIVE_DRAFTS.includes(draft.status), editing = store.editDraft === draft.id;
   const write = canWrite(), id = esc(draft.id), postHref = validHttpUrl(draft.url);
-  // The text on screen is the edit when there is one, so the count follows the
-  // caret and the card header tells the same truth about the same draft.
-  const shown = store.editText ?? draft.text, over = draftLength(shown).over;
+  // The text on screen is the edit when this card has one, so the count follows
+  // the caret and the header tells the same truth about the same draft. It is
+  // read per card: `store.editText` is one value for the whole list, so an
+  // unqualified read put "long for X" on every other draft while one was open.
+  const shown = editing ? (store.editText ?? draft.text) : draft.text, over = draftLength(shown).over;
   const body = editing
     ? `<form class="edit-form" data-id="${id}"><textarea class="input" name="text" rows="4" required aria-label="Edit this draft">${esc(shown)}</textarea><p class="draft-count${over ? ' over' : ''}" aria-live="polite">${esc(lengthLabel(shown))}</p><div class="card-actions">${btn('Save', null, {kind: 'primary', type: 'submit'})}${btn('Cancel', 'cancel-edit')}</div></form>`
     : `<p class="draft-text">${esc(draft.text)}</p>`;
@@ -232,7 +234,7 @@ function threadHead(conv) {
   const pausePill = pauses === 1 ? 'Approve the next step' : `${pauses} steps waiting`;
   return `${iconBtn('back', 'Back to chats', 'back-to-list', {cls: 'back'})}
     <button type="button" class="thread-title" data-action="open-info" aria-expanded="${Boolean(store.route.info)}" aria-controls="inspector" aria-label="${esc(conv.name)}, open details">${face}<span class="thread-title-text"><strong>${esc(conv.name)}</strong><span>${esc(sub)}</span></span></button>
-    ${pages ? `<span class="needs-pill">${pagePill}</span>` : feeds ? `<span class="needs-pill">Feed read still open</span>` : ''}${plans ? `<span class="needs-pill">${planPill}</span>` : ''}${pauses ? `<span class="needs-pill">${pausePill}</span>` : ''}${drafts ? `<button type="button" class="needs-pill" data-action="open-section" data-section="drafts">${drafts} need${drafts === 1 ? 's' : ''} you</button>` : ''}`;
+    ${pages ? `<span class="needs-pill">${pagePill}</span>` : feeds ? `<span class="needs-pill">Feed read still open</span>` : ''}${plans ? `<button type="button" class="needs-pill" data-action="open-section" data-section="runs">${planPill}</button>` : ''}${pauses ? `<button type="button" class="needs-pill" data-action="open-section" data-section="runs">${pausePill}</button>` : ''}${drafts ? `<button type="button" class="needs-pill" data-action="open-section" data-section="drafts">${drafts} need${drafts === 1 ? 's' : ''} you</button>` : ''}`;
 }
 
 function suggestions(conv) {

@@ -258,3 +258,15 @@ test('cleanText truncates untrusted input to its declared bound', () => {
   assert.equal(cleanText({toString: () => 'x'}, 10), '');
   assert.equal(cleanText(null, 10), '');
 });
+
+test('a draft length warning is read per card, not from one shared edit buffer', () => {
+  // `store.editText` is one value for the whole list. Reading it unqualified put
+  // "· long for X" on every other draft while one long draft was being edited,
+  // so the header disagreed with the text the reader could see.
+  const views = sources['ui-views.js'];
+  assert.match(views, /const shown = editing \? \(store\.editText \?\? draft\.text\) : draft\.text, over = draftLength\(shown\)\.over;/);
+  assert.doesNotMatch(views, /const shown = store\.editText \?\? draft\.text/);
+  // The meter and the header still read the same variable, so they cannot drift.
+  assert.match(views, /draft-count\$\{over \? ' over' : ''\}/);
+  assert.match(views, /\$\{over \? ' · long for X' : ''\}/);
+});

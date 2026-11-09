@@ -2,14 +2,14 @@
  * Both are thin renderers over ui-model.js. The list shell and the composer are
  * painted once and then only their contents change, so a background refresh can
  * never wipe what the user is typing. */
-import {botSuggestions} from './chat-engine.js?v=06d1ba940d';
-import {summonableGuests} from './coordination.js?v=06d1ba940d';
-import {botSettings, groupSettings} from './bot-settings.js?v=06d1ba940d';
-import {requestOfMessage} from './bot-browser.js?v=06d1ba940d';
-import {validHttpUrl} from './core.js?v=06d1ba940d';
-import {chatRows, timeline, pendingBrowser, stuckFeedReads, draftStage, draftLength, lengthLabel, mentionSuggestions, retryTarget, threadLineActions, isRunNote, runBelongsToChat, ACTIVE_DRAFTS} from './ui-model.js?v=06d1ba940d';
-import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=06d1ba940d';
-import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, isXGroup, botTint, recentRuns} from './ui-store.js?v=06d1ba940d';
+import {botSuggestions} from './chat-engine.js?v=3dfd17aba5';
+import {summonableGuests} from './coordination.js?v=3dfd17aba5';
+import {botSettings, groupSettings} from './bot-settings.js?v=3dfd17aba5';
+import {requestOfMessage} from './bot-browser.js?v=3dfd17aba5';
+import {validHttpUrl} from './core.js?v=3dfd17aba5';
+import {chatRows, timeline, pendingBrowser, stuckFeedReads, draftStage, draftLength, lengthLabel, mentionSuggestions, retryTarget, threadLineActions, isRunNote, runBelongsToChat, ACTIVE_DRAFTS} from './ui-model.js?v=3dfd17aba5';
+import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=3dfd17aba5';
+import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, isXGroup, botTint, recentRuns} from './ui-store.js?v=3dfd17aba5';
 
 const el = id => document.getElementById(id);
 const FILTERS = [['all', 'All'], ['needs', 'Needs you'], ['groups', 'Groups'], ['bots', 'Bots']];
@@ -91,9 +91,11 @@ export function renderList() {
 export function draftCard(draft) {
   const stage = draftStage(draft), open = ACTIVE_DRAFTS.includes(draft.status), editing = store.editDraft === draft.id;
   const write = canWrite(), id = esc(draft.id), postHref = validHttpUrl(draft.url);
-  // The text on screen is the edit when there is one, so the count follows the
-  // caret and the card header tells the same truth about the same draft.
-  const shown = store.editText ?? draft.text, over = draftLength(shown).over;
+  // The text on screen is the edit when this card has one, so the count follows
+  // the caret and the header tells the same truth about the same draft. It is
+  // read per card: `store.editText` is one value for the whole list, so an
+  // unqualified read put "long for X" on every other draft while one was open.
+  const shown = editing ? (store.editText ?? draft.text) : draft.text, over = draftLength(shown).over;
   const body = editing
     ? `<form class="edit-form" data-id="${id}"><textarea class="input" name="text" rows="4" required aria-label="Edit this draft">${esc(shown)}</textarea><p class="draft-count${over ? ' over' : ''}" aria-live="polite">${esc(lengthLabel(shown))}</p><div class="card-actions">${btn('Save', null, {kind: 'primary', type: 'submit'})}${btn('Cancel', 'cancel-edit')}</div></form>`
     : `<p class="draft-text">${esc(draft.text)}</p>`;
@@ -232,7 +234,7 @@ function threadHead(conv) {
   const pausePill = pauses === 1 ? 'Approve the next step' : `${pauses} steps waiting`;
   return `${iconBtn('back', 'Back to chats', 'back-to-list', {cls: 'back'})}
     <button type="button" class="thread-title" data-action="open-info" aria-expanded="${Boolean(store.route.info)}" aria-controls="inspector" aria-label="${esc(conv.name)}, open details">${face}<span class="thread-title-text"><strong>${esc(conv.name)}</strong><span>${esc(sub)}</span></span></button>
-    ${pages ? `<span class="needs-pill">${pagePill}</span>` : feeds ? `<span class="needs-pill">Feed read still open</span>` : ''}${plans ? `<span class="needs-pill">${planPill}</span>` : ''}${pauses ? `<span class="needs-pill">${pausePill}</span>` : ''}${drafts ? `<button type="button" class="needs-pill" data-action="open-section" data-section="drafts">${drafts} need${drafts === 1 ? 's' : ''} you</button>` : ''}`;
+    ${pages ? `<span class="needs-pill">${pagePill}</span>` : feeds ? `<span class="needs-pill">Feed read still open</span>` : ''}${plans ? `<button type="button" class="needs-pill" data-action="open-section" data-section="runs">${planPill}</button>` : ''}${pauses ? `<button type="button" class="needs-pill" data-action="open-section" data-section="runs">${pausePill}</button>` : ''}${drafts ? `<button type="button" class="needs-pill" data-action="open-section" data-section="drafts">${drafts} need${drafts === 1 ? 's' : ''} you</button>` : ''}`;
 }
 
 function suggestions(conv) {

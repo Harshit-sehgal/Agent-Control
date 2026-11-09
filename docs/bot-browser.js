@@ -16,8 +16,8 @@
  * Posting stays human: interaction (click, type) is refused on X and Twitter
  * hosts, so no bot can press Post there. Reading those pages is allowed.
  */
-import {cleanText, validHttpUrl} from './core.js?v=06d1ba940d';
-import {controlFence} from './bot-link.js?v=06d1ba940d';
+import {cleanText, validHttpUrl} from './core.js?v=3dfd17aba5';
+import {controlFence} from './bot-link.js?v=3dfd17aba5';
 
 export const BROWSER_PERMISSION = 'browser.use';
 export const MAX_REQUESTS_PER_REPLY = 2;

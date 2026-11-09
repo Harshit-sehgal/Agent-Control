@@ -2,8 +2,8 @@
  * a pane shows: the chat list, a thread's timeline, the "needs you" count and
  * the hash route. No DOM and no globals, so the product rules here are unit
  * tested directly (tests/ui-model.test.js). */
-import {fullDate} from './ui-kit.js?v=06d1ba940d';
-import {botSettings} from './bot-settings.js?v=06d1ba940d';
+import {fullDate} from './ui-kit.js?v=3dfd17aba5';
+import {botSettings} from './bot-settings.js?v=3dfd17aba5';
 
 export const ACTIVE_DRAFTS = ['pending', 'scheduled', 'ready'];
 const X_GROUP = 'x-engage';
@@ -274,7 +274,10 @@ export function pipelineValue(rows, group) {
 }
 
 const GROUP_SECTIONS = ['home', 'drafts', 'posts', 'reminders', 'runs', 'voice', 'group-settings', 'tasks'];
-const BOT_SECTIONS = ['home', 'edit', 'tasks'];
+// `memory` is here because the bot panel links to it ("Memory and rules"):
+// without it the route parser fell back to home, so the row and the URL
+// disagreed and a reload dropped the person out of the page they were on.
+const BOT_SECTIONS = ['home', 'edit', 'memory', 'tasks'];
 const LEGACY_TABS = {overview: 'home', discovery: 'posts', approvals: 'drafts', schedules: 'reminders', activity: 'runs', settings: 'voice'};
 const PAGES = ['you', 'about', 'notifications', 'workspaces', 'ai', 'team', 'agents', 'data'];
 const SERVER_PAGES = ['notifications', 'workspaces'];

@@ -3,13 +3,14 @@
  * model is configured and in the deterministic simulator otherwise. A custom bot
  * runs its own instructions on the server; everything else answers from the
  * offline command set. Nothing here can publish. */
-import {classifyMessage, statusSummary} from './chat-engine.js?v=06d1ba940d';
-import {simulateGroup} from './group-simulator.js?v=06d1ba940d';
-import {planHandoffs, leadShouldRunGroup, runNote, summonableGuests, BUSY_STATUSES} from './coordination.js?v=06d1ba940d';
-import {feedPauseAction} from './ui-model.js?v=06d1ba940d';
-import {botSettings, groupSettings} from './bot-settings.js?v=06d1ba940d';
-import {store, api, sync, conversation, appendMessage, setTyping, isStaticDemo, teamKey, groups, recentRuns} from './ui-store.js?v=06d1ba940d';
-import {claimLocalRun, renewLocalRun, finishLocalRun, localRunCancelled} from './local-runs.js?v=06d1ba940d';
+import {classifyMessage, statusSummary} from './chat-engine.js?v=3dfd17aba5';
+import {simulateGroup} from './group-simulator.js?v=3dfd17aba5';
+import {planHandoffs, leadShouldRunGroup, runNote, summonableGuests, BUSY_STATUSES} from './coordination.js?v=3dfd17aba5';
+import {feedPauseAction} from './ui-model.js?v=3dfd17aba5';
+import {botSettings, groupSettings} from './bot-settings.js?v=3dfd17aba5';
+import {store, api, sync, conversation, appendMessage, setTyping, isStaticDemo, teamKey, groups, recentRuns} from './ui-store.js?v=3dfd17aba5';
+import {claimLocalRun, renewLocalRun, finishLocalRun, localRunCancelled} from './local-runs.js?v=3dfd17aba5';
+import {toast} from './ui-dialogs.js?v=3dfd17aba5';
 
 const TERMINAL = ['completed', 'failed', 'interrupted', 'awaiting_checkpoint', 'awaiting_plan', 'awaiting_feed', 'awaiting_browser', 'cancelled'];
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -37,7 +38,7 @@ export async function streamGroupRun(groupId, key = teamKey(groupId), runId = nu
   if (isStaticDemo() || !runId) return;
   const seen = new Set((store.messages[key] || []).map(m => m.id));
   const skip = new Set(ignore);
-  let last = null, graceUsed = false;
+  let last = null, graceUsed = false, failures = 0;
   // Free-tier routing can take minutes per bot, so poll generously and only
   // stop on a terminal state; the run keeps executing server-side regardless.
   for (let i = 0; i < 200; ) {
@@ -47,7 +48,12 @@ export async function streamGroupRun(groupId, key = teamKey(groupId), runId = nu
     // the next lines. A failed refresh still leaves the run log to follow.
     await sync().catch(() => {});
     for (const m of store.messages[key] || []) seen.add(m.id);
-    let snap; try { snap = await api(`/api/groups/${groupId}/chat`); } catch { i++; continue; }
+    let snap; try { snap = await api(`/api/groups/${groupId}/chat`); failures = 0; } catch {
+      // A run log that cannot be read looks exactly like a run that is thinking,
+      // for up to ten minutes. Say it once, then keep trying quietly.
+      if (++failures === 4) toast('Still trying to reach the run log. The run keeps going on the server.');
+      i++; continue;
+    }
     for (const m of snap.messages || []) {
       // The endpoint returns the whole group's history; keep only this run's.
       if (seen.has(m.id) || m.role === 'user' || (runId && m.runId !== runId)) continue;

@@ -15,8 +15,8 @@
  *
  * This module is pure. `src/bot-create.js` applies it inside the run.
  */
-import {cleanText} from './core.js?v=06d1ba940d';
-import {defaultContract} from './contracts.js?v=06d1ba940d';
+import {cleanText} from './core.js?v=3dfd17aba5';
+import {defaultContract} from './contracts.js?v=3dfd17aba5';
 
 export const BOT_CREATE_PERMISSION = 'bot.create';
 export const MAX_NEW_BOTS_PER_REPLY = 1;

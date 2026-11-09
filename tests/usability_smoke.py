@@ -206,8 +206,12 @@ async def edit_skip_rewrite(page, base):
     await card.locator('[data-action="rewrite-draft"]').click()
     await page.keyboard.press('Escape')
     await expect(ask).to_be_hidden()
-    # Skip rejects the draft and clears the pill.
+    # Skip asks first: one click next to Approve must not throw a draft away.
     await card.locator('[data-action="reject-draft"]').click()
+    sheet = page.locator('#modal .sheet')
+    await expect(sheet).to_contain_text('Skip this draft?')
+    await expect(sheet.locator('[data-action="sheet-confirm"]')).to_have_class(re.compile('danger'))
+    await page.locator('[data-action="sheet-confirm"]').click()
     await expect(card.locator('.draft-state')).to_contain_text('Skipped.')
     await expect(card).to_have_class(re.compile(r'tone-off'))
     await expect(page.locator('.needs-pill')).to_have_count(0)

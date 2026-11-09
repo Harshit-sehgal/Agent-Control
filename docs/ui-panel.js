@@ -1,16 +1,16 @@
 /** Everything that used to be a dashboard tab now hangs off a conversation:
  * the info panel of the open chat (drafts, posts, reminders, runs, voice, the
  * bot's profile) and the "You" pages (account, admin, about). */
-import {filterCandidates, filterDrafts} from './usability.js?v=06d1ba940d';
-import {ACTIONS, OUTPUT_KINDS} from './contracts.js?v=06d1ba940d';
-import {BOT_DEFAULTS, MAX_CONTEXT_MESSAGES, MAX_STEPS_LIMIT, botSettings, groupSettings, pipelineOf} from './bot-settings.js?v=06d1ba940d';
-import {BUSY_STATUSES} from './coordination.js?v=06d1ba940d';
-import {modelKey} from './memory.js?v=06d1ba940d';
-import {ACTIVE_DRAFTS, chatTasks, pipelineRows, retryTarget, runBelongsToChat} from './ui-model.js?v=06d1ba940d';
-import {esc, icon, avatar, groupAvatar, tintClass, TINT_COUNT, btn, iconBtn, row, box, field, note, empty, tag, pageHead, fullDate} from './ui-kit.js?v=06d1ba940d';
-import {store, conversation, isStaticDemo, isAdmin, canWrite, isXGroup, botTint, recentRuns, THEMES, themeChoice} from './ui-store.js?v=06d1ba940d';
-import {draftCard, postCard} from './ui-views.js?v=06d1ba940d';
-import {ADMIN_PAGES, adminPage, providerModelOptions} from './ui-admin.js?v=06d1ba940d';
+import {filterCandidates, filterDrafts} from './usability.js?v=3dfd17aba5';
+import {ACTIONS, OUTPUT_KINDS} from './contracts.js?v=3dfd17aba5';
+import {BOT_DEFAULTS, MAX_CONTEXT_MESSAGES, MAX_STEPS_LIMIT, botSettings, groupSettings, pipelineOf} from './bot-settings.js?v=3dfd17aba5';
+import {BUSY_STATUSES} from './coordination.js?v=3dfd17aba5';
+import {modelKey} from './memory.js?v=3dfd17aba5';
+import {ACTIVE_DRAFTS, chatTasks, pipelineRows, retryTarget, runBelongsToChat} from './ui-model.js?v=3dfd17aba5';
+import {esc, icon, avatar, groupAvatar, tintClass, TINT_COUNT, btn, iconBtn, row, box, field, note, empty, tag, pageHead, fullDate} from './ui-kit.js?v=3dfd17aba5';
+import {store, conversation, isStaticDemo, isAdmin, canWrite, isXGroup, botTint, recentRuns, THEMES, themeChoice} from './ui-store.js?v=3dfd17aba5';
+import {draftCard, postCard} from './ui-views.js?v=3dfd17aba5';
+import {ADMIN_PAGES, adminPage, providerModelOptions} from './ui-admin.js?v=3dfd17aba5';
 
 const el = id => document.getElementById(id);
 const options = (pairs, current) => pairs.map(([value, label]) => `<option value="${esc(value)}"${value === current ? ' selected' : ''}>${esc(label)}</option>`).join('');
@@ -104,7 +104,9 @@ function tasksSection(conv) {
   const rows = list.map(t => {
     const every = Number(t.intervalMinutes ?? t.payload?.intervalMinutes);
     const when = TASK_STATE[t.status] || `Next ${fullDate(t.runAt)}`;
-    const retry = write && ['failed', 'cancelled'].includes(t.status) ? btn('Retry', 'retry-bot-task', {id: t.id, small: true}) : '';
+    // A cancelled task never reaches this list (`chatTasks` drops it), so Retry
+    // is only ever a failed task's second chance.
+    const retry = write && t.status === 'failed' ? btn('Retry', 'retry-bot-task', {id: t.id, small: true}) : '';
     const remove = write && t.status !== 'running' ? btn('Remove', 'remove-bot-task', {id: t.id, small: true, kind: 'danger'}) : '';
     return `<div class="row"><span class="row-main"><span class="row-title">${esc(t.payload?.label || String(t.payload?.message || t.title || '').slice(0, 90))}</span><span class="row-sub">${t.payload?.kind === 'interval' ? `Every ${every} min` : 'Once'} · ${esc(when)}${t.lastError ? ` · ${esc(t.lastError)}` : ''}</span></span>${write && (retry || remove) ? `<span class="row-actions">${retry}${remove}</span>` : ''}</div>`;
   }).join('') || empty('Nothing scheduled', `Ask ${conv.isTeam ? 'the group' : conv.name} to do something on a timer.`);
@@ -119,8 +121,11 @@ function draftsBody() {
   return list.map(d => ACTIVE_DRAFTS.includes(d.status) ? draftCard(d) : `<div class="row"><span class="row-main"><span class="row-title">${esc(d.author)}</span><span class="row-sub">${esc(String(d.text).slice(0, 160))}</span></span>${tag(d.status === 'posted' ? 'Posted' : 'Skipped', d.status === 'posted' ? 'good' : '')}</div>`).join('');
 }
 function draftsSection() {
-  const pending = store.state.drafts.filter(d => d.status === 'pending').length;
-  return `${pageHead('Waiting on you', {sub: `${pending} to decide. Nothing posts by itself.`, back: 'open-info'})}
+  // Count what the default filter below shows, not just `pending`: the header
+  // said "1 to decide" over three cards, because scheduled and ready drafts are
+  // waiting on a person too.
+  const active = store.state.drafts.filter(d => ACTIVE_DRAFTS.includes(d.status)).length;
+  return `${pageHead('Waiting on you', {sub: `${active} waiting on you. Nothing posts by itself.`, back: 'open-info'})}
     <div class="toolbar">${select('draft-status', 'Show', [['active', 'Active'], ['pending', 'To decide'], ['scheduled', 'Scheduled'], ['ready', 'Ready to post'], ['posted', 'Posted'], ['rejected', 'Skipped'], ['all', 'Everything']], store.prefs.draftStatus)}${select('draft-sort', 'Sort', [['newest', 'Newest'], ['oldest', 'Oldest'], ['score-high', 'Top score']], store.prefs.draftSort)}</div>
     <div class="stack" id="approval-results">${draftsBody()}</div>`;
 }
@@ -156,10 +161,12 @@ const RUN_TONE = {completed: 'good', failed: 'bad', interrupted: 'bad', running:
 function runCard(group, run) {
   const name = id => group.bots.find(b => b.id === id)?.name || id, steps = run.recipients || [], live = !isStaticDemo(), status = String(run.status || 'unknown');
   const plan = status === 'awaiting_plan' ? `${btn('Start', 'approve-plan', {id: group.id, small: true, kind: 'primary', data: {run: run.id}})}${btn('Cancel', 'cancel-plan', {id: group.id, small: true, data: {run: run.id}})}` : '';
-  const stuck = !plan && isStaticDemo() && BUSY_STATUSES.includes(status) && status !== 'awaiting_checkpoint';
+  // Every status that is still working can be stopped from here, not only the
+  // one the thread happens to show a note for: a run older than the newest note
+  // was otherwise stoppable from nowhere, and a stuck one stays stuck.
+  const stop = !plan && BUSY_STATUSES.includes(status) && status !== 'awaiting_checkpoint' ? btn('Cancel', 'cancel-run', {id: group.id, small: true, data: {run: run.id}}) : '';
   const action = !canWrite() ? '' : plan || (status === 'awaiting_checkpoint' ? btn('Approve next step', 'continue-run', {id: group.id, small: true, kind: 'primary', data: {run: run.id}})
-    : stuck ? btn('Cancel', 'cancel-plan', {id: group.id, small: true, data: {run: run.id}})
-    : live && ['failed', 'interrupted'].includes(status) ? btn('Retry', 'retry-run', {id: group.id, small: true, data: {run: run.id, message: run.input || '', ...retryTarget(group, run)}}) : '');
+    : stop || (!live ? '' : ['failed', 'interrupted'].includes(status) ? btn('Retry', 'retry-run', {id: group.id, small: true, data: {run: run.id, message: run.input || '', ...retryTarget(group, run)}}) : ''));
   const trace = (run.trace || []).map(t => `<li class="run-step"><strong>${esc(name(t.botId))}${t.toBotId ? ` ${icon('arrow', 12)} ${esc(name(t.toBotId))}` : ''}</strong><span>${esc((t.output || '').slice(0, 240))}</span></li>`).join('');
   return `<article class="run-card"><header><span class="row-main"><span class="row-title">${esc((run.input || 'Run').slice(0, 90))}</span><span class="row-sub">${esc(run.mode || 'run')} · step ${Number(run.currentStep || 0)} of ${steps.length} · ${esc(fullDate(run.createdAt))}${run.error ? ` · ${esc(run.error)}` : ''}</span></span>${tag(status.replace('_', ' '), RUN_TONE[status] || '')}</header>${trace ? `<ol class="run-timeline">${trace}</ol>` : ''}${action ? `<div class="card-actions">${action}</div>` : ''}</article>`;
 }

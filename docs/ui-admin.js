@@ -2,11 +2,11 @@
  * `adminPage(kind)` fetches and returns the body HTML; the handler tables are
  * wired by the host's delegated click, submit and change listeners. Handlers do
  * not catch errors, the host toasts them. */
-import {esc, btn, row, box, field, note, empty, tag, fullDate, textInput} from './ui-kit.js?v=06d1ba940d';
-import {store, api, sync} from './ui-store.js?v=06d1ba940d';
-import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=06d1ba940d';
-import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js?v=06d1ba940d';
-import {pushStatus, enablePush, disablePush} from './ui-push.js?v=06d1ba940d';
+import {esc, btn, row, box, field, note, empty, tag, fullDate, textInput} from './ui-kit.js?v=3dfd17aba5';
+import {store, api, sync} from './ui-store.js?v=3dfd17aba5';
+import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=3dfd17aba5';
+import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js?v=3dfd17aba5';
+import {pushStatus, enablePush, disablePush} from './ui-push.js?v=3dfd17aba5';
 
 /** Title + one-line description per page, used by the host for the page header. */
 export const ADMIN_PAGES = {
@@ -286,9 +286,6 @@ const providerView = p => {
 const chatCount = p => (Array.isArray(p.chatModels) ? p.chatModels.length : Number(p.modelCount ?? 0));
 /** Ids past the chat filter, so a row can show the whole catalogue was read. */
 const listedCount = p => (Array.isArray(p.allModels) ? p.allModels.length : 0);
-/** Model ids to suggest for a provider from another pane (the bot model picker):
- * chat-capable only and capped, so an embedding model is never offered there. */
-export const providerModels = p => idList(providerView(p || {}).chatModels).slice(0, MODEL_LIMIT);
 
 const protocolName = id => protocolById(id)?.label || String(id || DEFAULT_PROTOCOL);
 const needsApiVersion = protocol => Boolean(protocolById(protocol)?.needsApiVersion);
