@@ -92,6 +92,35 @@ a network.
   Azure; `AI_API_KEY` and `OPENAI_API_KEY` keep working.
 
 ### Fixed
+- **A display name in another script no longer breaks the address.** `From` and
+  `To` were RFC 2047-encoded whole, so `Café Crème <bot@example.com>` left as one
+  base64 word and some servers rejected the message while others showed an
+  address nobody could route. Only the name is encoded (or quoted, when it holds
+  a comma); the addr-spec stays literal.
+- **A relay that advertises `STARTTLS` and refuses it no longer blocks the send.**
+  With `SMTP_REQUIRE_TLS=0` the refusal falls back to the cleartext session the
+  operator asked for; with TLS required it fails loudly, names the refusal and
+  the way out. Neither path puts a password on the socket: no `AUTH` is sent
+  before the handshake succeeds.
+- **Ownership can be handed over, which the account-deletion refusal demanded.**
+  Deleting your account while other members were around told you to "make someone
+  else an owner", but `updateUser` refused every role at or above your own, so no
+  second owner could exist and the owner of the first workspace (which cannot be
+  deleted) could only leave by removing everyone. An owner may now promote a
+  member of their own workspace to owner; an admin still cannot grant admin, and
+  an owner still cannot demote or disable another owner.
+- **The deploy recipe starts on its own first command.** `deploy/compose.yaml`
+  requires `DOMAIN` and `deploy/.env.example` did not mention it, so the documented
+  `cp ../.env.example .env && docker compose up -d --build` failed before building.
+  `tests/deploy.test.js` now checks every variable compose requires is in the
+  example, that the docs name the same copy command, and that the database lives
+  in the mounted volume.
+- **The test suite no longer depends on the Node version.** `shared/local-runs.js`
+  and the demo take a Web Lock; Node 22 has no lock manager, so four lease tests
+  failed on CI and passed locally. `tests/web-locks.js` installs the contract
+  before anything from `shared/` is imported, and its own test proves the
+  contract: one holder per name, a queue behind it, parallel names, release after
+  a throw.
 - **A tool block the model puts last keeps its closing fence.** The reply
   cleanup that unwraps a ```` ```markdown ```` answer also stripped a trailing
   closing fence, so an `ask` or `create-bot` block that ended the reply arrived
