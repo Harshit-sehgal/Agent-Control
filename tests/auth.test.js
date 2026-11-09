@@ -214,3 +214,38 @@ test('changing your own password keeps the acting session and signs out the othe
     assert.equal(auth.session(other.sessionId), null, 'the other session is revoked');
   } finally { await fs.rm(dir, {recursive: true, force: true}); }
 });
+
+test('the last owner of a shared workspace cannot delete their account out from under it', async () => {
+  const {auth, dir} = await harness();
+  auth.ensureBootstrap('owner-secret-1');
+  const owner = auth.login({password: 'owner-secret-1'});
+  // A second person in the same workspace: deleting the only owner now would
+  // leave a workspace nobody can administer.
+  auth.createUser({userId: owner.userId, role: 'owner', workspaceId: auth.session(owner.sessionId).workspaceId},
+    {email: 'second@example.com', password: 'second-secret-1', role: 'member'});
+
+  assert.throws(() => auth.selfDeleteAccount(owner.userId, 'owner-secret-1'), error => {
+    assert.equal(error.status, 409);
+    assert.match(error.message, /last owner/i);
+    return true;
+  });
+  assert.notEqual(auth.session(owner.sessionId), null, 'the refusal must not sign the owner out');
+
+  // The remedy the refusal names — "make someone else an owner" — has to be an
+  // action the API actually offers, or the owner of the first workspace (which
+  // cannot be deleted) is locked in for good.
+  const ownerActor = {userId: owner.userId, role: 'owner', workspaceId: auth.session(owner.sessionId).workspaceId};
+  const member = auth.login({email: 'second@example.com', password: 'second-secret-1'});
+  assert.throws(() => auth.updateUser({...ownerActor, role: 'admin'}, member.userId, {role: 'owner'}),
+    /cannot grant a role at or above your own/, 'only an owner hands over ownership');
+  auth.updateUser(ownerActor, member.userId, {role: 'owner'});
+  assert.equal(auth.roleOf(member.userId, ownerActor.workspaceId), 'owner');
+  // A second owner is now administering, so leaving is allowed.
+  assert.throws(() => auth.updateUser(ownerActor, member.userId, {role: 'member'}),
+    /cannot change a user at or above your own role/, 'an owner cannot demote another owner');
+
+  auth.selfDeleteAccount(owner.userId, 'owner-secret-1');
+  assert.equal(auth.session(owner.sessionId), null);
+  assert.equal(auth.listUsers().length, 1);
+  await fs.rm(dir, {recursive: true, force: true});
+});

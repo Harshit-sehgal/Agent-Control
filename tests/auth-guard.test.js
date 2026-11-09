@@ -1,7 +1,8 @@
 /** Workspace ownership cannot be given away when there is nobody left to run it.
  *
  * The owner role is the only one that can grant the owner role (`updateUser`
- * refuses to grant a role at or above the actor's own), so an owner who demotes
+ * refuses to grant a role at or above the actor's own, with the single exception
+ * of an owner handing ownership to a member), so an owner who demotes
  * themselves leaves a workspace whose settings, restores and workspace
  * management nobody can reach again — a one-click, unrecoverable lockout.
  *

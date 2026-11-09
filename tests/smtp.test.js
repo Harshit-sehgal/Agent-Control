@@ -272,3 +272,61 @@ test('a header value cannot inject another header, and encoded words never split
   for (const word of words) assert.ok(word.length <= 45, 'no encoded word exceeds its limit');
   assert.doesNotMatch(encoded.replace(/=\?UTF-8\?B\?[^?]+\?=|\r\n /g, ''), /[^\s]/, 'nothing outside the encoded words');
 });
+
+/** A server that answers however the test says, for the cases where the right
+ * answer is "the client must give up rather than hang or leak". */
+async function rawSmtp(onConnect) {
+  const server = net.createServer(socket => {
+    socket.on('error', () => {});
+    onConnect(socket);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const {port} = server.address();
+  return {port, close: () => new Promise(resolve => server.close(resolve)), server};
+}
+
+const configFor = (port, extra = {}) => ({
+  host: '127.0.0.1', port, secure: false, requireTls: true,
+  user: 'bot@example.com', pass: 'hunter2', from: 'bot@example.com', timeoutMs: 1000, ...extra,
+});
+const mail = {to: 'ops@example.com', subject: 's', text: 'b'};
+
+test('a reply that never ends fails instead of growing the buffer forever', async () => {
+  const sink = await rawSmtp(socket => socket.write(`220 ${'x'.repeat(200 * 1024)}`));
+  try {
+    await assert.rejects(sendMail(mail, configFor(sink.port)), /too large/);
+  } finally { await sink.close(); }
+});
+
+test('a server that never greets times out, and says how long it waited', async () => {
+  const sink = await rawSmtp(() => {});
+  try {
+    await assert.rejects(sendMail(mail, configFor(sink.port, {timeoutMs: 1000})), /timed out after 1s/);
+  } finally { await sink.close(); }
+});
+
+test('a server that lies about STARTTLS fails at the handshake, before any credential', async () => {
+  // It advertises STARTTLS, accepts the command, then speaks plaintext at the
+  // TLS client. The client must not fall back on its own: that would put the
+  // password on a cleartext socket while the notification claimed to be sent.
+  const seen = [];
+  let lying = false;
+  const sink = await rawSmtp(socket => {
+    socket.write('220 test.local ESMTP\r\n');
+    socket.setEncoding('utf8');
+    socket.on('data', chunk => {
+      if (lying) { socket.end('HTTP/1.1 400 Bad Request\r\n\r\n'); return; }
+      for (const line of chunk.split('\r\n').filter(Boolean)) {
+        seen.push(line);
+        if (/^EHLO/i.test(line)) socket.write('250-test.local\r\n250 STARTTLS\r\n');
+        else if (/^STARTTLS$/i.test(line)) { lying = true; socket.write('220 go ahead\r\n'); }
+      }
+    });
+  });
+  try {
+    await assert.rejects(sendMail(mail, configFor(sink.port, {timeoutMs: 3000})));
+    assert.ok(seen.some(line => /^STARTTLS$/i.test(line)), 'the upgrade was attempted');
+    assert.ok(!seen.some(line => /^AUTH\b/i.test(line)) && !seen.some(line => /^MAIL FROM/i.test(line)),
+      'nothing past the handshake was sent, so no credential crossed the socket');
+  } finally { await sink.close(); }
+});

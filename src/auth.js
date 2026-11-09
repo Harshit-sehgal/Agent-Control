@@ -221,7 +221,15 @@ export class Auth {
     // Every guard runs before the first write: a 409 that lands after the role
     // was already changed leaves the caller told "no" and the store changed.
     if (body.role !== undefined && !ROLES.includes(body.role)) throw Object.assign(new Error('Unknown role.'), {status: 400});
-    if (body.role !== undefined && rank(body.role) >= rank(actor.role)) throw Object.assign(new Error('You cannot grant a role at or above your own.'), {status: 403});
+    // A peer or higher role is an escalation one person should not be able to
+    // hand out, with one deliberate exception: an owner may make another member
+    // of their own workspace an owner. Without that, "make someone else an
+    // owner" (the remedy the last-owner guards below and in selfDeleteAccount
+    // name) is not an action the API offers, and an owner of the first
+    // workspace — which cannot be deleted — could only ever leave by removing
+    // everybody else.
+    const handingOver = actor.role === 'owner' && body.role === 'owner' && target.role !== 'owner';
+    if (body.role !== undefined && rank(body.role) >= rank(actor.role) && !handingOver) throw Object.assign(new Error('You cannot grant a role at or above your own.'), {status: 403});
     // Demoting the only owner leaves a workspace nobody can administer: no one
     // could invite, remove or reconfigure anyone, and no later request could
     // put an owner back. Refuse it instead of allowing a one-way lockout.
