@@ -23,3 +23,28 @@ jobs:
             git --no-pager diff --stat docs
             exit 1
           fi
+
+  # The Node suite imports modules; this job drives the real server in a real
+  # browser, which is the only layer that catches a stale runtime, a key the
+  # server rejects, or a session that never reaches the queue. The two visual
+  # smokes (polish, usability) stay local: they assert layout, and CI fonts make
+  # those assertions the flaky kind of truthful.
+  live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Cache Playwright's Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
+      - run: pip install playwright
+      - run: python -m playwright install --with-deps chromium
+      - name: Live end-to-end (real server, stub model, real browser)
+        run: python tests/live_smoke.py
