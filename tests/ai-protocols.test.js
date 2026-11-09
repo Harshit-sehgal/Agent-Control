@@ -427,3 +427,23 @@ test('Anthropic display_name and Gemini displayName become the picker labels', a
     assert.deepEqual(found.labels,{'gemini-2.5-pro':'Gemini 2.5 Pro'});
   }finally{gemini.close();}
 });
+
+test('a tool fence the model puts last keeps its closing fence', async () => {
+  // The trailing-fence cleanup exists to unwrap ```markdown answers. It used to
+  // eat the closing fence of an ask block, and an unclosed block is plain text,
+  // so the bot's request silently never happened.
+  const reply = 'Draft.\n```ask\n{"to":"Researcher","task":"Which source?"}\n```';
+  const {port,close} = await stub({status:200,json:{choices:[{message:{content:reply}}]}});
+  try {
+    const bot = {id: 'b', name: 'Writer', instructions: 'Write posts.', permissions: ['bot.ask']};
+    const result = await executeCustomBot(bot, 'Write a post.', config(port, {protocol: 'openai-chat'}));
+    assert.equal(result, reply, 'The block must reach the orchestrator intact.');
+  } finally { close(); }
+  const wrapped = '\u0060\u0060\u0060markdown\nAn ordinary answer.\n\u0060\u0060\u0060';
+  const {port: port2, close: close2} = await stub({status:200,json:{choices:[{message:{content:wrapped}}]}});
+  try {
+    const bot = {id: 'b', name: 'Writer', instructions: 'Write posts.'};
+    const result = await executeCustomBot(bot, 'Write a post.', config(port2, {protocol: 'openai-chat'}));
+    assert.equal(result, 'An ordinary answer.', 'A wrapper fence is still unwrapped.');
+  } finally { close2(); }
+});

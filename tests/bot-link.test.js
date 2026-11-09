@@ -196,3 +196,11 @@ test('a failed final turn keeps the first reply rather than losing the step', as
   assert.equal(result.output, 'First draft.');
   assert.ok(result.lines.some(line => /could not use Researcher's answer/.test(line.text)));
 });
+
+test('the turn after an answer keeps the bot\'s own create-bot and page requests', async () => {
+  const block = '```create-bot\n{"name":"Source scout","job":"Find posts that mention the project."}\n```';
+  const executor = async bot => (bot.id === 'researcher' ? 'The source is example.com/report.' : `Final.\n${block}`);
+  const result = await askPeerRound({bot: asker, first: askBlock('Which source?'), executor, peers: [asker, peer], makeId, now: () => at});
+  assert.match(result.output, /```create-bot/, 'The bot asked for a new teammate in its own reply; that request must survive.');
+  assert.equal(result.output.split('```create-bot').length, 2, 'Only the ask block is removed.');
+});

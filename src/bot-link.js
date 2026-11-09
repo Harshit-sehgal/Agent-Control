@@ -81,9 +81,13 @@ export async function askPeerRound({bot, envelope = {}, first, executor, config,
   let second = text;
   try {
     const reply = String(await executor(bot, JSON.stringify({...envelope, ...turn, restrictions: [...(envelope.restrictions || []), ...turn.restrictions]}), config) ?? '');
-    second = stripControlBlocks(reply);
+    // Only a second ask is removed here. The answer is untrusted, so it cannot
+    // carry a control block in (it was stripped when it came back), but this
+    // turn is the bot's own reply: a page, helper or new-bot request in it is
+    // the bot's to make and the orchestrator reads it downstream.
+    second = reply;
     if (parseAskRequests(reply).length) {
-      second = stripAskBlocks(second);
+      second = stripAskBlocks(reply);
       say(askRefusedText(bot, 'one bot-to-bot exchange per reply is the limit.'));
     }
   } catch (error) {

@@ -70,6 +70,19 @@ a network.
   Azure; `AI_API_KEY` and `OPENAI_API_KEY` keep working.
 
 ### Fixed
+- **A tool block the model puts last keeps its closing fence.** The reply
+  cleanup that unwraps a ```` ```markdown ```` answer also stripped a trailing
+  closing fence, so an `ask` or `create-bot` block that ended the reply arrived
+  unclosed at the parser. An unclosed block is plain text, so the bot's request
+  silently never happened and the raw JSON reached the draft. Tool fences are
+  now held back from that cleanup, and a long reply is sliced only when it
+  carries no tool block (`tests/ai-protocols.test.js`).
+- **The turn after a teammate answers keeps its own requests.** That turn was
+  run through the control-block stripper, which threw away a `create-bot`,
+  `browser` or `spawn` block the bot wrote after its question was answered, so
+  asking a teammate silently disabled every other capability for that step. The
+  peer's answer is still stripped (it is untrusted); the bot's own reply is only
+  checked for a second ask (`tests/bot-link.test.js`).
 - **A claimed batch keeps every lease alive.** One heartbeat renewed only the
   task being run, so a batch behind a slow model call looked dead to the next
   sweep and a waiting task could be executed twice. The heartbeat now renews

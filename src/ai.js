@@ -139,17 +139,20 @@ function extract(config,data){
   }
   // The token limit already bounds the call. Slicing here cut a fence that
   // models put last, so the orchestrator never paused for the page.
-  if(/```(?:browser|spawn)\b/i.test(text))return text;
+  if(/```(?:browser|spawn|ask|create-bot)\b/i.test(text))return text;
   return text.slice(0,3000);
 }
 /** Strip leaked chain-of-thought so a draft is the answer, not the scratchpad.
  * A reply that is only a ```browser or ```spawn block must keep those fences:
  * the orchestrator files the page or the sub-agent from them. Stripping them
- * left raw JSON, no pause, and the next bot ran as if the work had happened. */
+ * left raw JSON, no pause, and the next bot ran as if the work had happened.
+ * ```ask and ```create-bot are the same request in another shape, so they are
+ * held back here too: the trailing-fence cleanup below used to eat their
+ * closing fence, and an unclosed block is text, so the ask never happened. */
 function sanitize(text){
   const raw=String(text);
   const fences=[];
-  const withoutFences=raw.replace(/```(?:browser|spawn)[ \t]*\r?\n[\s\S]*?(?:```|$)/gi,block=>{fences.push(block);return '';});
+  const withoutFences=raw.replace(/```(?:browser|spawn|ask|create-bot)[ \t]*\r?\n[\s\S]*?(?:```|$)/gi,block=>{fences.push(block);return '';});
   const stripPaired=s=>s.replace(/<(think|thinking|reasoning)>[\s\S]*?<\/\1>/gi,'');
   // Remove tool fences before reasoning cleanup, then put them back. A
   // reasoning tag may wrap the fence, and either a paired or unclosed tag must
