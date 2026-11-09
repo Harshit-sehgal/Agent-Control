@@ -269,10 +269,13 @@ export function createEnvelope({run,bot,previous=null,thread=[],team=[],memory=n
   // Only the tools this identity actually holds are described, and each is a
   // request the engine files; neither runs anything by itself.
   const grants=Array.isArray(bot.permissions)?bot.permissions:[];
+  // Hand-offs switched off means no roster and no ask block: a tool that is
+  // always refused only teaches the model to waste a turn.
+  const canAsk=mayHandoff(run,bot);
   const tools={
     ...(grants.includes(BROWSER_PERMISSION)?{browser:BROWSER_TOOL_HINT}:{}),
     ...(grants.includes(SUBAGENT_PERMISSION)?{subagent:SUBAGENT_TOOL_HINT}:{}),
-    ...(grants.includes(BOT_ASK_PERMISSION)?{ask:BOT_ASK_TOOL_HINT}:{}),
+    ...(canAsk&&grants.includes(BOT_ASK_PERMISSION)?{ask:BOT_ASK_TOOL_HINT}:{}),
     ...(grants.includes(BOT_CREATE_PERMISSION)?{createBot:BOT_CREATE_TOOL_HINT}:{}),
   };
   // What this model and this conversation remember. It is notes, not a second

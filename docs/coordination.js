@@ -2,12 +2,12 @@
  * LLM output may only extend a run's recipients through `handoffTargets`, which
  * revalidates every target against this policy and the step cap.
  */
-import {botSettings,groupSettings,pipelineOf,MAX_STEPS_LIMIT} from './bot-settings.js?v=c011d81ee9';
-import {BROWSER_PERMISSION,BROWSER_TOOL_HINT} from './bot-browser.js?v=c011d81ee9';
-import {SUBAGENT_PERMISSION,SUBAGENT_TOOL_HINT} from './subagents.js?v=c011d81ee9';
-import {BOT_ASK_PERMISSION,BOT_ASK_TOOL_HINT} from './bot-link.js?v=c011d81ee9';
-import {BOT_CREATE_PERMISSION,BOT_CREATE_TOOL_HINT} from './bot-create.js?v=c011d81ee9';
-import {memoryBlock} from './memory.js?v=c011d81ee9';
+import {botSettings,groupSettings,pipelineOf,MAX_STEPS_LIMIT} from './bot-settings.js?v=b942270899';
+import {BROWSER_PERMISSION,BROWSER_TOOL_HINT} from './bot-browser.js?v=b942270899';
+import {SUBAGENT_PERMISSION,SUBAGENT_TOOL_HINT} from './subagents.js?v=b942270899';
+import {BOT_ASK_PERMISSION,BOT_ASK_TOOL_HINT} from './bot-link.js?v=b942270899';
+import {BOT_CREATE_PERMISSION,BOT_CREATE_TOOL_HINT} from './bot-create.js?v=b942270899';
+import {memoryBlock} from './memory.js?v=b942270899';
 
 /** The default step count of a run; a group may set its own up to MAX_STEPS_LIMIT. */
 export const MAX_HANDOFFS = 6;
@@ -269,10 +269,13 @@ export function createEnvelope({run,bot,previous=null,thread=[],team=[],memory=n
   // Only the tools this identity actually holds are described, and each is a
   // request the engine files; neither runs anything by itself.
   const grants=Array.isArray(bot.permissions)?bot.permissions:[];
+  // Hand-offs switched off means no roster and no ask block: a tool that is
+  // always refused only teaches the model to waste a turn.
+  const canAsk=mayHandoff(run,bot);
   const tools={
     ...(grants.includes(BROWSER_PERMISSION)?{browser:BROWSER_TOOL_HINT}:{}),
     ...(grants.includes(SUBAGENT_PERMISSION)?{subagent:SUBAGENT_TOOL_HINT}:{}),
-    ...(grants.includes(BOT_ASK_PERMISSION)?{ask:BOT_ASK_TOOL_HINT}:{}),
+    ...(canAsk&&grants.includes(BOT_ASK_PERMISSION)?{ask:BOT_ASK_TOOL_HINT}:{}),
     ...(grants.includes(BOT_CREATE_PERMISSION)?{createBot:BOT_CREATE_TOOL_HINT}:{}),
   };
   // What this model and this conversation remember. It is notes, not a second

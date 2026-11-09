@@ -35,9 +35,13 @@ async function withStore(fn) {
 async function stub(reply) {
   const requests = [];
   const server = http.createServer((req, res) => {
-    requests.push({method: req.method, url: req.url, headers: req.headers});
-    res.writeHead(reply.status, {'Content-Type': 'application/json'});
-    res.end(JSON.stringify(reply.json));
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      requests.push({method: req.method, url: req.url, headers: req.headers, body: body ? JSON.parse(body) : null});
+      res.writeHead(reply.status, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify(reply.json));
+    });
   });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   return {requests, port: server.address().port, close: () => server.close()};
@@ -317,6 +321,165 @@ test('the create route saves a provider and returns the catalogue it just read',
       assert.equal(JSON.stringify(created.body).includes('stub-key'), false, 'the key is never returned');
       assert.equal(srv.requests[0].url, '/v1/models');
       assert.equal(srv.requests[0].headers.authorization, 'Bearer stub-key');
+    } finally { srv.close(); }
+  });
+});
+
+test('custom headers ride on the call but never into the state or a listing', async () => {
+  await withStore(async store => {
+    const srv = await stub({status: 200, json: {choices: [{message: {content: 'OK'}}]}});
+    try {
+      const p = await ai.addProvider(store, 'default', {label: 'Gateway', baseUrl: `http://127.0.0.1:${srv.port}/v1`, apiKey: 'gw-secret-key-123',
+        headers: {'X-Api-Key': 'pasted-header-value', 'X-Beta': 'on'}});
+      assert.deepEqual(p.hasHeaders, ['X-Api-Key', 'X-Beta'], 'the listing names the headers, nothing more');
+      await ai.testProvider(store, p.id, {model: 'gateway-model'});
+      assert.equal(srv.requests[0].headers['x-api-key'], 'pasted-header-value', 'a gateway header is sent alongside the protocol one');
+      assert.equal(srv.requests[0].headers.authorization, 'Bearer gw-secret-key-123', 'the bearer key is still sent for a chat provider');
+      assert.equal(srv.requests[0].headers['x-beta'], 'on');
+
+      // A proxy that wants its own Authorization is a real provider, not a mistake.
+      await ai.updateProvider(store, 'default', p.id, {headers: {'Authorization': 'Token pasted-token', 'X-Api-Key': 'pasted-header-value'}});
+      await ai.testProvider(store, p.id, {model: 'gateway-model'});
+      assert.equal(srv.requests[1].headers.authorization, 'Token pasted-token', 'a pasted Authorization wins over the bearer header');
+      assert.equal(srv.requests[1].headers['x-api-key'], 'pasted-header-value');
+
+      const secrets = ['pasted-header-value', 'pasted-token', 'gw-secret-key-123'];
+      const state = JSON.stringify(store.read());
+      for (const secret of secrets) assert.equal(state.includes(secret), false, `${secret} must not be readable from the state document`);
+      const listings = JSON.stringify(ai.listProviderListings(store));
+      const viewer = JSON.stringify(ai.publicAi(store.read()));
+      for (const secret of secrets) {
+        assert.equal(listings.includes(secret), false, `the admin listing must not carry ${secret}`);
+        assert.equal(viewer.includes(secret), false, `the viewer payload must not carry ${secret}`);
+      }
+      assert.deepEqual(ai.listProviderListings(store).providers[0].hasHeaders, ['Authorization', 'X-Api-Key'], 'only names are listed');
+      assert.equal(ai.publicAi(store.read()).providers[0].hasHeaders, undefined, 'a viewer does not even get the names');
+    } finally { srv.close(); }
+  });
+});
+
+test('a rejected header set is refused before any key or header is stored', async () => {
+  await withStore(async store => {
+    const nine = Object.fromEntries(Array.from({length: 9}, (_, i) => [`X-H${i}`, 'v']));
+    const cases = [
+      [{'Bad Name': 'x'}, /not a valid header name/i],
+      [{'X-Evil\r\nX-Injected': '1'}, /not a valid header name/i],
+      [{'X-Test': 'a\r\nX-Injected: 1'}, /line break/i],
+      [{'X-Test': 42}, /text value/i],
+      [{'X-Test': ''}, /1 to 2000/i],
+      [nine, /at most 8/i],
+    ];
+    for (const [headers, expected] of cases) {
+      await assert.rejects(
+        () => ai.addProvider(store, 'default', {label: 'X', baseUrl: 'https://gw.example/v1', apiKey: 'k', headers}),
+        e => e.status === 400 && expected.test(e.message),
+      );
+    }
+    assert.equal(store.read().ai.providers.length, 0, 'a rejected save creates no provider');
+    assert.equal(credentials.listCredentials(store, 'default').length, 0, 'and leaves no orphan credential behind');
+  });
+});
+
+test('editing headers keeps, replaces in place, or clears the saved set', async () => {
+  await withStore(async store => {
+    const p = await ai.addProvider(store, 'default', {label: 'Gateway', baseUrl: 'https://gw.example/v1', apiKey: 'gw-key', headers: {'X-Lane': '1', 'X-Beta': '2'}});
+    const saved = () => store.read().ai.providers.find(x => x.id === p.id);
+    const headerId = saved().headersCredentialId;
+    assert.ok(headerId, 'the header values live in the vault, not the record');
+    await store.update(s => { const prov = s.ai.providers.find(x => x.id === p.id); prov.chatModels = ['m']; prov.models = ['m']; });
+
+    // Omitted headers (a rename) must not wipe the set: the form may not resend it.
+    const renamed = await ai.updateProvider(store, 'default', p.id, {label: 'Renamed'});
+    assert.deepEqual(renamed.hasHeaders, ['X-Beta', 'X-Lane']);
+    assert.equal(saved().headersCredentialId, headerId, 'the same vault row is still referenced');
+    assert.deepEqual(JSON.parse(credentials.revealValue(store, headerId)), {'X-Lane': '1', 'X-Beta': '2'});
+
+    // The same set again is not a change, so the cached catalogue survives.
+    const same = await ai.updateProvider(store, 'default', p.id, {headers: {'X-Beta': '2', 'X-Lane': '1'}});
+    assert.equal(same.endpointChanged, false);
+    assert.equal(saved().headersCredentialId, headerId);
+
+    // A changed set replaces the credential in place, so nothing dangles.
+    const changed = await ai.updateProvider(store, 'default', p.id, {headers: {'X-Beta': '3'}});
+    assert.equal(changed.endpointChanged, true, 'headers shape the request, so the old catalogue is stale');
+    assert.deepEqual(changed.hasHeaders, ['X-Beta']);
+    assert.equal(saved().headersCredentialId, headerId, 'the record keeps the same credential id');
+    assert.deepEqual(JSON.parse(credentials.revealValue(store, headerId)), {'X-Beta': '3'});
+    assert.deepEqual(saved().chatModels, [], 'the picker is re-read rather than left with stale models');
+
+    // {} is the explicit clear.
+    const cleared = await ai.updateProvider(store, 'default', p.id, {headers: {}});
+    assert.deepEqual(cleared.hasHeaders, []);
+    assert.equal(saved().headersCredentialId, null);
+    assert.throws(() => credentials.revealValue(store, headerId), e => e.status === 404, 'the header credential is gone');
+    assert.equal(ai.providerConfig(store, saved()).headers && Object.keys(ai.providerConfig(store, saved()).headers).length, 0, 'a call now carries only the protocol headers');
+  });
+});
+
+test('an Azure provider resolves a real deployment instead of the literal "auto"', async () => {
+  await withStore(async store => {
+    const azure = await ai.addProvider(store, 'default', {label: 'Azure', baseUrl: 'https://res.openai.azure.com', apiKey: 'az-key-123', protocol: 'azure-openai', apiVersion: '2024-06-01'});
+    await store.update(s => {
+      const prov = s.ai.providers.find(x => x.id === azure.id);
+      prov.models = ['whisper-1', 'gpt-4o'];
+      prov.chatModels = ['gpt-4o'];
+      prov.allModels = ['gpt-4o', 'whisper-1'];
+    });
+    const cfg = ai.resolveConfig(store, null);
+    assert.equal(cfg.protocol, 'azure-openai');
+    assert.equal(cfg.model, 'gpt-4o', 'the first chat-capable model wins; "auto" would be a guaranteed 400');
+    assert.equal(cfg.apiVersion, '2024-06-01', 'the saved version reaches the call');
+    assert.equal(ai.listProviders(store.read()).providers.find(x => x.id === azure.id).apiVersion, '2024-06-01');
+
+    // A provider saved before chatModels existed still avoids "auto".
+    const older = await ai.addProvider(store, 'default', {label: 'Azure 2', baseUrl: 'https://res2.openai.azure.com', apiKey: 'az-key-456', protocol: 'azure-openai'});
+    await store.update(s => { s.ai.providers.find(x => x.id === older.id).models = ['gpt-4o-mini']; s.ai.defaultProviderId = older.id; });
+    assert.equal(ai.resolveConfig(store, null).model, 'gpt-4o-mini');
+  });
+});
+
+test('the test route makes one real call and returns the model, reply and timing', async () => {
+  await withStore(async store => {
+    const srv = await stub({status: 200, json: {choices: [{message: {content: 'OK'}}]}});
+    try {
+      const p = await ai.addProvider(store, 'default', {label: 'Local', baseUrl: `http://127.0.0.1:${srv.port}/v1`, apiKey: 'stub-key-123'});
+      const router = createRouter();
+      aiRoutes(router);
+      const found = router.find('POST', `/api/ai/providers/${p.id}/test`);
+      assert.ok(found, 'POST /api/ai/providers/:id/test is registered');
+      assert.equal(found.route.access, 'admin', 'spending a provider call is an admin action');
+      assert.equal(found.params.id, p.id, 'the :id segment is captured for the handler');
+      const ctx = body => ({body: async () => body, store, actor: {workspaceId: 'default', email: 'owner@localhost', role: 'admin'}, params: found.params});
+
+      const result = await found.route.handler(ctx({model: 'gateway-model'}));
+      assert.deepEqual(Object.keys(result).sort(), ['model', 'ms', 'ok', 'reply']);
+      assert.equal(result.ok, true);
+      assert.equal(result.model, 'gateway-model', 'the picked model is the one called');
+      assert.equal(result.reply, 'OK');
+      assert.ok(Number.isInteger(result.ms) && result.ms >= 0, 'the round trip is timed');
+      assert.equal(srv.requests.length, 1, 'exactly one call, not a catalogue read as well');
+      assert.equal(srv.requests[0].url, '/v1/chat/completions');
+      assert.equal(srv.requests[0].body.model, 'gateway-model');
+
+      const ghost = router.find('POST', '/api/ai/providers/ghost-provider/test');
+      await assert.rejects(
+        () => ghost.route.handler({body: async () => ({}), store, actor: {workspaceId: 'default', email: 'owner@localhost', role: 'admin'}, params: ghost.params}),
+        e => e.status === 404 && /not found/i.test(e.message),
+      );
+    } finally { srv.close(); }
+  });
+});
+
+test('a failed provider test reports the provider\'s own words, not a generic failure', async () => {
+  await withStore(async store => {
+    const srv = await stub({status: 401, json: {error: {message: 'that key is not valid here'}}});
+    try {
+      const p = await ai.addProvider(store, 'default', {label: 'Local', baseUrl: `http://127.0.0.1:${srv.port}/v1`, apiKey: 'stub-key-123'});
+      await assert.rejects(
+        () => ai.testProvider(store, p.id, {model: 'm'}),
+        e => e.status === 502 && /that key is not valid here/.test(e.message) && /401/.test(e.message) && /key was rejected/i.test(e.message)
+          && !/did not answer/i.test(e.message) && !e.message.includes('stub-key-123'),
+      );
     } finally { srv.close(); }
   });
 });

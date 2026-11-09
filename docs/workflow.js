@@ -8,17 +8,17 @@
  * Keeping transitions here is the single source of truth for the draft
  * lifecycle: candidate -> draft -> approved/scheduled -> ready -> posted.
  */
-import {activity,candidateInput,cleanText,scheduleApproval,scoreCandidate} from './core.js?v=c011d81ee9';
-import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js?v=c011d81ee9';
-import {evidenceSummary,evidenceForDraft,seedCandidateEvidence} from './evidence.js?v=c011d81ee9';
-import {normalizeRetention} from './retention.js?v=c011d81ee9';
-import * as contracts from './contracts.js?v=c011d81ee9';
-import {pruneChats, releaseChatWork} from './chats.js?v=c011d81ee9';
-import {denyBrowserRequest} from './bot-browser.js?v=c011d81ee9';
-import {BUSY_STATUSES} from './coordination.js?v=c011d81ee9';
-import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=c011d81ee9';
-import {memoryState} from './memory.js?v=c011d81ee9';
-import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=c011d81ee9';
+import {activity,candidateInput,cleanText,scheduleApproval,scoreCandidate} from './core.js?v=b942270899';
+import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js?v=b942270899';
+import {evidenceSummary,evidenceForDraft,seedCandidateEvidence} from './evidence.js?v=b942270899';
+import {normalizeRetention} from './retention.js?v=b942270899';
+import * as contracts from './contracts.js?v=b942270899';
+import {pruneChats, releaseChatWork} from './chats.js?v=b942270899';
+import {denyBrowserRequest} from './bot-browser.js?v=b942270899';
+import {BUSY_STATUSES} from './coordination.js?v=b942270899';
+import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=b942270899';
+import {memoryState} from './memory.js?v=b942270899';
+import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=b942270899';
 
 export const SCHEMA_VERSION = 3;
 /** Posts are never pruned by age, so their number is bounded here. */

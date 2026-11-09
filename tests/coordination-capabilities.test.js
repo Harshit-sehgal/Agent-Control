@@ -4,7 +4,7 @@ import {mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
-import {createRun} from '../shared/coordination.js';
+import {createRun, createEnvelope} from '../shared/coordination.js';
 import {SqliteStore} from '../src/sqlite-store.js';
 import {coordinationState, runGroup} from '../src/coordination.js';
 
@@ -100,4 +100,15 @@ test('a group step can create a teammate that starts with no permissions', async
     assert.equal(state.groupRuns.find(r => r.id === 'run-create').status, 'completed');
     assert.match(state.chats['team-g'].map(m => m.text).join('\n'), /Writer created a new bot for this work: Source scout/);
   }, {group, message: 'Grow the team', runId: 'run-create'});
+});
+
+test('hand-offs switched off mean no roster and no ask block in the envelope', () => {
+  const writer = bot('writer', 'Writer', {permissions: ['bot.ask']});
+  const base = {id: 'r1', groupId: 'g', input: 'Do it.', recipients: ['writer'], currentStep: 0, maxSteps: 1, peerAsks: []};
+  const on = createEnvelope({run: {...base}, bot: writer, team: [writer, bot('other', 'Other')]});
+  assert.ok(on.tools?.ask, 'A permitted bot is told about the ask block.');
+  assert.equal(on.team.length, 1);
+  const off = createEnvelope({run: {...base, botHandoffs: false}, bot: writer, team: [writer, bot('other', 'Other')]});
+  assert.equal(off.tools?.ask, undefined, 'A block that would always be refused is not offered.');
+  assert.deepEqual(off.team, []);
 });

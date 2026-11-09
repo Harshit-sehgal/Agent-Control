@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {PROTOCOLS,PROTOCOL_IDS,DEFAULT_PROTOCOL,PROVIDER_PRESETS,normaliseProtocol,inferProtocol,protocolById,presetById} from '../shared/ai-presets.js';
+import {PROTOCOLS,PROTOCOL_IDS,DEFAULT_PROTOCOL,PROVIDER_PRESETS,normaliseProtocol,inferProtocol,normaliseBaseUrl,protocolById,presetById} from '../shared/ai-presets.js';
 
 // shared/ai-presets.js is the one list the settings page and the server share.
 // A typo here is a provider that saves and then sends the wrong body shape, so
@@ -78,4 +78,51 @@ test('protocolById and presetById are case-insensitive and return null for unkno
   assert.equal(presetById('  Gemini ').protocol,'gemini');
   assert.equal(presetById(''),null);
   assert.equal(presetById('not-a-provider'),null);
+});
+
+test('the server speaks exactly five wire protocols, Azure among them', () => {
+  assert.deepEqual(PROTOCOL_IDS,['openai-chat','openai-responses','anthropic','gemini','azure-openai'],'the list the settings page renders is the one the server sends');
+  assert.equal(protocolById('azure-openai').needsApiVersion,true,'Azure carries the version in the query, so the form has to ask for it');
+  assert.equal(Boolean(protocolById('openai-chat').needsApiVersion),false,'only Azure needs a version');
+});
+
+test('the Azure preset ships no endpoint and asks for one, and so does custom', () => {
+  const azure=presetById('azure');
+  assert.equal(azure.protocol,'azure-openai');
+  assert.equal(azure.baseUrl,'','a per-tenant resource endpoint cannot be baked into the preset');
+  assert.equal(azure.needsEndpoint,true,'picking Azure must reveal the endpoint field');
+  assert.equal(protocolById(azure.protocol).needsApiVersion,true,'picking Azure must reveal the API version field too');
+  const custom=presetById('custom');
+  assert.equal(custom.baseUrl,'');
+  assert.equal(custom.needsEndpoint,true);
+  // A preset without an endpoint is only useful if the form knows to ask for it.
+  for(const preset of PROVIDER_PRESETS)if(!preset.baseUrl)assert.equal(preset.needsEndpoint,true,`${preset.id} ships no endpoint, so it must ask for one`);
+});
+
+test('the Azure, Claude and Google aliases every client guesses at map onto one protocol id each', () => {
+  for(const alias of ['azure','azure-openai','openai_azure','azureopenai',' AZURE '])assert.equal(normaliseProtocol(alias),'azure-openai',`"${alias}" is Azure`);
+  for(const alias of ['claude','messages'])assert.equal(normaliseProtocol(alias),'anthropic');
+  assert.equal(normaliseProtocol('google'),'gemini');
+  assert.equal(inferProtocol('https://my-resource.openai.azure.com'),'azure-openai','an Azure host is recognised instead of being sent the chat body');
+  assert.equal(inferProtocol('https://my-resource.openai.azure.com/openai/deployments/dep'),'azure-openai');
+});
+
+test('normaliseBaseUrl trims a pasted call endpoint, a trailing slash and an Azure deployment path', () => {
+  // Pasting the URL out of an SDK call means the base, not that one endpoint.
+  assert.equal(normaliseBaseUrl('https://api.openai.com/v1/chat/completions'),'https://api.openai.com/v1');
+  assert.equal(normaliseBaseUrl('https://api.anthropic.com/v1/messages'),'https://api.anthropic.com/v1');
+  assert.equal(normaliseBaseUrl('https://api.openai.com/v1/responses'),'https://api.openai.com/v1');
+  assert.equal(normaliseBaseUrl('https://api.openai.com/v1/models'),'https://api.openai.com/v1');
+  assert.equal(normaliseBaseUrl('https://api.deepseek.com/v1/completions'),'https://api.deepseek.com/v1');
+  assert.equal(normaliseBaseUrl('https://api.together.xyz/v1/embeddings'),'https://api.together.xyz/v1');
+  assert.equal(normaliseBaseUrl('https://api.groq.com/openai/v1/'),'https://api.groq.com/openai/v1','a trailing slash is dropped');
+  // An Azure deployment URL is the resource endpoint plus a path the client builds itself.
+  assert.equal(normaliseBaseUrl('https://res.openai.azure.com/openai/deployments/dep/chat/completions?api-version=2024-10-21'),'https://res.openai.azure.com');
+  assert.equal(normaliseBaseUrl('https://res.openai.azure.com/openai/deployments/dep'),'https://res.openai.azure.com');
+  assert.equal(normaliseBaseUrl('https://api.openai.com/v1/chat/completions?trace=1#frag'),'https://api.openai.com/v1','a pasted query and fragment go, or the call path would never match');
+  assert.equal(normaliseBaseUrl('https://api.groq.com/openai/v1?foo=1#bar'),'https://api.groq.com/openai/v1');
+  assert.equal(normaliseBaseUrl('  https://x.example/v1/chat/completions  '),'https://x.example/v1');
+  assert.equal(normaliseBaseUrl(''),'');
+  assert.equal(normaliseBaseUrl(undefined),'');
+  assert.equal(normaliseBaseUrl('not a url   '),'not a url','junk is returned trimmed instead of thrown at the form');
 });
