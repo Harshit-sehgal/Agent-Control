@@ -127,11 +127,14 @@ ports 80 and 443, then:
 
 ```sh
 cd deploy
-cp ../.env.example .env     # set DASHBOARD_PASSWORD and add DOMAIN=dash.example.com
+cp ../.env.example .env     # then set DASHBOARD_PASSWORD and DOMAIN (the example ships dash.example.com)
 docker compose up -d --build
 ```
 
-The databases and the vault key are kept in the `data` volume. The image runs
+The databases and the vault key are kept in the `data` volume. An install that
+predates the volume and bind-mounted `./data` keeps its database: copy it in once
+with `docker compose cp ../data/. app:/data/` before the first start, or the app
+opens on an empty database while the old one sits untouched on the host. The image runs
 as a non-root user and reports its health from `/api/health`.
 
 **Your own machine, over Tailscale.** No domain and no open ports: Tailscale

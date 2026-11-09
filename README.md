@@ -128,7 +128,12 @@ The static Pages dashboard includes functional navigation controls (not real AI 
 - **Persisted UI preferences:** sort and filter options remain in browser local storage across reloads.
 - **Confirmation sheets** before marking a draft as posted, removing a reminder, or clearing a conversation.
 
-Use `npm test` for Node unit tests. For a local Chromium UI smoke test, install Python Playwright and Chromium, then run `python tests/usability_smoke.py`. The Pages edition remains a browser-local simulation without authenticated cloud agents, X browsing, or automatic posting.
+Use `npm test` for Node unit tests. Three browser layers sit on top, each optional and each needing Python Playwright plus Chromium:
+
+- `npm run test:ui` drives the generated Pages bundle: layout, navigation, first run, keyboard, phone panes.
+- `npm run test:e2e` starts the real server on a free port with a temporary database and a stub OpenAI-compatible endpoint, signs in through the UI, sends a message, and checks that a bot answers, that the provider received the key, the model id and the user's text, that the reply survives a reload, and that a rejected key is reported in the conversation instead of failing silently.
+
+The Pages edition remains a browser-local simulation without authenticated cloud agents, X browsing, or automatic posting.
 
 ## What works now
 
