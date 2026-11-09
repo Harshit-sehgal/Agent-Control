@@ -163,7 +163,7 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
     return draft;
   }
   if ((m = path.match(/^\/api\/drafts\/([a-z0-9-]+)$/)) && method === 'PATCH') { const d = editDraft(state, m[1], body.text); save(state); return d; }
-  if ((m = path.match(/^\/api\/drafts\/([a-z0-9-]+)\/(approve|reject|ready|posted|rewrite)$/)) && method === 'POST') {
+  if ((m = path.match(/^\/api\/drafts\/([a-z0-9-]+)\/(approve|reject|ready|restore|posted|rewrite)$/)) && method === 'POST') {
     const draft = findDraft(state, m[1]);
     let result;
     if (m[2] === 'rewrite') {

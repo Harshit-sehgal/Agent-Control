@@ -92,9 +92,31 @@ test('credentials are encrypted at rest, listed without values, and revealed by 
   const expiredId = credentials.listCredentials(store, 'default').find(c => c.name === 'old').id;
   store.run('UPDATE credentials SET expires_at=? WHERE id=?', new Date(Date.now() - 1000).toISOString(), expiredId);
   assert.throws(() => credentials.revealCredential(store, 'default', expiredId), /expired/);
+  // A member who had opted into this webhook is turned off with it: leaving the
+  // id behind queues a delivery that can only fail, five times, for a URL that
+  // no longer exists.
+  store.run(`INSERT INTO notification_prefs (user_id,in_app,webhook,webhook_url,email,email_address,updated_at)
+    VALUES ('member@localhost',1,1,?,'0','',?)`, row.id, new Date().toISOString());
   // Deletion is immediate.
-  assert.deepEqual(credentials.deleteCredential(store, 'default', row.id), {ok: true});
+  assert.deepEqual(credentials.deleteCredential(store, 'default', row.id), {ok: true, clearedPreferences: true});
+  assert.deepEqual(
+    {...store.get('SELECT webhook, webhook_url FROM notification_prefs WHERE user_id=?', 'member@localhost')},
+    {webhook: 0, webhook_url: null});
   assert.throws(() => credentials.deleteCredential(store, 'default', row.id), /not found/);
+  // And the pair is one write: a failure between the DELETE and the preference
+  // update must leave the credential in place rather than a preference that
+  // points at a row nothing will ever find.
+  const second = credentials.addCredential(store, 'default', {name: 'hook', value: 'https://hooks.example.test/abc'});
+  store.run('UPDATE notification_prefs SET webhook=1, webhook_url=? WHERE user_id=?', second.id, 'member@localhost');
+  const realRun = store.run.bind(store);
+  store.run = (sql, ...params) => {
+    if (sql.startsWith('UPDATE notification_prefs')) throw new Error('database is locked');
+    return realRun(sql, ...params);
+  };
+  try { assert.throws(() => credentials.deleteCredential(store, 'default', second.id), /locked/); }
+  finally { store.run = realRun; }
+  assert.equal(store.get('SELECT count(*) AS n FROM credentials WHERE id=?', second.id).n, 1, 'the credential is still there');
+  assert.equal(store.get('SELECT webhook_url FROM notification_prefs WHERE user_id=?', 'member@localhost').webhook_url, second.id, 'and the preference still points at a row that exists');
   await fs.rm(dir, {recursive: true, force: true});
 });
 

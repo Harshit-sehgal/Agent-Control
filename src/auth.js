@@ -268,7 +268,10 @@ export class Auth {
     if (rank(actor.role) < rank('admin')) throw Object.assign(new Error('Only admins can remove users.'), {status: 403});
     if (userId === actor.userId) throw Object.assign(new Error('Use account deletion to remove your own account.'), {status: 409});
     const workspaceId = actor.workspaceId || DEFAULT_WORKSPACE;
-    const target = this.store.get('SELECT m.role FROM workspace_members m WHERE m.user_id=? AND m.workspace_id=?', userId, workspaceId);
+    // The email travels with the role: the caller has workspace-side rows to
+    // clear (a paired device is keyed by `paired_by`), and it must not have to
+    // ask the primary database a second question that could disagree.
+    const target = this.store.get('SELECT m.role, u.email FROM workspace_members m JOIN users u ON u.id=m.user_id WHERE m.user_id=? AND m.workspace_id=?', userId, workspaceId);
     if (!target) throw Object.assign(new Error('User not found.'), {status: 404});
     // This also covers the last owner: an owner can never remove an owner (this
     // line runs first), so the workspace keeps at least the one making the call.
@@ -335,10 +338,11 @@ export class Auth {
     });
     return {ok: true};
   }
-  /** Delete the acting account and everything only it could see. */
-  selfDeleteAccount(userId, password) {
-    const row = this.store.get('SELECT password_hash FROM users WHERE id=?', userId);
-    if (!row || !verifyPassword(password, row.password_hash)) throw Object.assign(new Error('Password is incorrect.'), {status: 401});
+  /** Every guard `selfDeleteAccount` applies, and nothing else, so a route with
+   * workspace-side rows to clear can refuse before it writes any of them. */
+  assertCanDeleteAccount(userId, password) {
+    const row = this.store.get('SELECT password_hash AS hash, email FROM users WHERE id=?', userId);
+    if (!row || !verifyPassword(password, row.hash)) throw Object.assign(new Error('Password is incorrect.'), {status: 401});
     // Leaving a workspace with other people in it and no owner strands them:
     // nobody can invite, remove or reconfigure anyone afterwards. A workspace
     // where this is the only account is fine to walk away from — the install
@@ -348,6 +352,11 @@ export class Auth {
       WHERE (SELECT COUNT(*) FROM workspace_members o WHERE o.workspace_id=w.id AND o.role='owner')<=1
         AND (SELECT COUNT(*) FROM workspace_members a WHERE a.workspace_id=w.id)>1 LIMIT 1`, userId);
     if (stranded) throw Object.assign(new Error('You are the last owner of a workspace that has other members. Make someone else an owner, or remove them, before deleting your account.'), {status: 409});
+    return row;
+  }
+  /** Delete the acting account and everything only it could see. */
+  selfDeleteAccount(userId, password) {
+    this.assertCanDeleteAccount(userId, password);
     this.store.transaction(() => {
       this.store.run('UPDATE sessions SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL', now(), userId);
       this.store.run('DELETE FROM notification_prefs WHERE user_id=?', userId);

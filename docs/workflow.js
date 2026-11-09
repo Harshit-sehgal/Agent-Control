@@ -8,17 +8,23 @@
  * Keeping transitions here is the single source of truth for the draft
  * lifecycle: candidate -> draft -> approved/scheduled -> ready -> posted.
  */
-import {activity,candidateInput,cleanText,scheduleApproval,scoreCandidate} from './core.js?v=66c6785991';
-import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js?v=66c6785991';
-import {evidenceSummary,evidenceForDraft,seedCandidateEvidence} from './evidence.js?v=66c6785991';
-import {normalizeRetention} from './retention.js?v=66c6785991';
-import * as contracts from './contracts.js?v=66c6785991';
-import {pruneChats, releaseChatWork} from './chats.js?v=66c6785991';
-import {denyBrowserRequest} from './bot-browser.js?v=66c6785991';
-import {BUSY_STATUSES} from './coordination.js?v=66c6785991';
-import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=66c6785991';
-import {memoryState} from './memory.js?v=66c6785991';
-import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=66c6785991';
+import {activity,candidateInput,cleanText,scheduleApproval,scheduleApprovalAt,scoreCandidate,validHttpUrl} from './core.js?v=6734c0a812';
+
+// How far ahead an approval may be pinned. A year-long pin is not a schedule a
+// person can still be sure of, and a draft nobody looks at again is worse than
+// one that goes out on the delay window.
+const APPROVAL_HORIZON_MS = 7*24*60*60*1000;
+const APPROVAL_LEAD_MS = 60*1000;
+import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js?v=6734c0a812';
+import {evidenceSummary,evidenceForDraft,seedCandidateEvidence} from './evidence.js?v=6734c0a812';
+import {normalizeRetention} from './retention.js?v=6734c0a812';
+import * as contracts from './contracts.js?v=6734c0a812';
+import {pruneChats, releaseChatWork} from './chats.js?v=6734c0a812';
+import {denyBrowserRequest} from './bot-browser.js?v=6734c0a812';
+import {BUSY_STATUSES} from './coordination.js?v=6734c0a812';
+import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=6734c0a812';
+import {memoryState} from './memory.js?v=6734c0a812';
+import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=6734c0a812';
 
 export const SCHEMA_VERSION = 3;
 /** Posts are never pruned by age, so their number is bounded here. */
@@ -246,7 +252,18 @@ export function draftAction(state, id, action, body = {}) {
     // Material marked "do not reuse" cannot be published, whatever anyone thinks
     // of it, so it blocks the same way a dispute does — with its own reason.
     if (summary.reuseBlocked > 0) fail(`${summary.reuseBlocked} piece${summary.reuseBlocked === 1 ? '' : 's'} of this draft's evidence is marked "do not reuse". Remove it or change the reuse policy before approving.`, 409);
-    scheduleApproval(x, body.minDelay ?? state.settings.minDelay, body.maxDelay ?? state.settings.maxDelay);
+    if (body.dueAt) {
+      // A time a person picked replaces the delay window, and is checked here
+      // rather than in the browser: the same rule has to hold for the extension
+      // and for anything else that posts to this route.
+      const at = new Date(body.dueAt).getTime();
+      if (!Number.isFinite(at)) fail('That time cannot be read.');
+      if (at < Date.now()+APPROVAL_LEAD_MS) fail('Pick a time at least a minute from now.');
+      if (at > Date.now()+APPROVAL_HORIZON_MS) fail('Pick a time within the next 7 days.');
+      scheduleApprovalAt(x, at);
+    } else {
+      scheduleApproval(x, body.minDelay ?? state.settings.minDelay, body.maxDelay ?? state.settings.maxDelay);
+    }
     // Freeze the evidence picture the approval was made against, so a later
     // evidence edit can never retroactively change what was approved.
     x.approvedEvidence = evidenceForDraft(state, id).map(e => structuredClone(e));
@@ -259,11 +276,24 @@ export function draftAction(state, id, action, body = {}) {
     if (x.status !== 'scheduled') fail('Only scheduled drafts can become ready.', 409);
     x.status = 'ready';
     activity(state, 'ready', 'Draft released for manual posting.', {draftId: id});
+  } else if (action === 'restore') {
+    // Skipping is one click and confirmed, but a confirmed accident is still an
+    // accident: the captured post and its evidence are untouched, so the draft can
+    // come back to the queue instead of being written again from scratch.
+    if (x.status !== 'rejected') fail('Only a skipped draft can be restored.', 409);
+    x.status = 'pending';
+    delete x.postedAt; delete x.postedUrl;
+    activity(state, 'restore', 'Restored a skipped draft to the queue.', {draftId: id});
   } else if (action === 'posted') {
     if (x.status !== 'ready') fail('Only ready drafts may be marked posted.', 409);
     if (x.approvedRevision !== x.revision || x.approvedText !== x.text) fail('Approval no longer matches draft.', 409);
+    // The link is optional, but a link that is not one is not recorded: the panel
+    // renders it as an anchor, and an unusable href is a dead button.
+    const posted = cleanText(body.url, 500);
+    if (posted && !validHttpUrl(posted)) fail('That post link is not a web address.');
     x.status = 'posted';
     x.postedAt = new Date().toISOString();
+    if (posted) x.postedUrl = posted;
     activity(state, 'posted', 'User marked a draft as posted manually.', {draftId: id});
   }
   return x;
@@ -434,6 +464,13 @@ export function recoverInterrupted(state) {
  * `reminder`-kind task with retries, leases and status events. */
 export function addSchedule(state, body) {
   const task = enqueueTask(state, {kind: 'reminder', payload: {label: body.label, kind: body.kind, intervalMinutes: body.intervalMinutes, nextAt: body.nextAt}}).task;
+  // "Every 60 minutes" begins with a window, not with a run. Firing the moment the
+  // reminder is saved reads as a duplicate and spends a paid group run nobody
+  // asked for yet; the migration path already gives a legacy interval its next
+  // fire instead of starting it at `now`.
+  if (task.payload?.kind === 'interval' && !body.nextAt) {
+    task.runAt = new Date(Date.parse(task.createdAt) + task.intervalMinutes * 60000).toISOString();
+  }
   return scheduleView(task);
 }
 

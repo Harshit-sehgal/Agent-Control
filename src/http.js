@@ -5,7 +5,12 @@ import crypto from 'node:crypto';
 
 export function fail(message, status = 400) { throw Object.assign(new Error(message), {status}); }
 
-export const HSTS_ENABLED = process.env.HSTS === '1' || String(process.env.PUBLIC_ORIGIN || '').startsWith('https://');
+/** A flag an operator writes as `HSTS=true` must not silently turn the header
+ * off: the sibling SMTP flag is spelled the same way, and the unsafe outcome is
+ * the one that needs no warning to be noticed. Unrecognised values fall through
+ * to the PUBLIC_ORIGIN check rather than failing open. */
+const on = value => /^(1|true|on|yes)$/i.test(String(value || '').trim());
+export const HSTS_ENABLED = on(process.env.HSTS) || String(process.env.PUBLIC_ORIGIN || '').startsWith('https://');
 export const SECURITY = {'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer',...(HSTS_ENABLED?{'Strict-Transport-Security':'max-age=31536000; includeSubDomains'}:{})};
 
 export function send(res,status,value,headers={}){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...SECURITY,...headers});res.end(JSON.stringify(value));}

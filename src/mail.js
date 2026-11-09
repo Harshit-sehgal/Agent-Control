@@ -185,8 +185,27 @@ async function reply(next, what) {
   }
   return {
     code: Number(collected[0].slice(0, 3)),
-    text: collected.map(line => line.slice(4)).join(' ').slice(0, 400),
+    // The whole reply, capped by MAX_REPLY_CHARS on the socket side. Truncating
+    // it here hid capabilities: a relay with a long extension list was read as
+    // "no STARTTLS"/"no LOGIN" from a 400-character prefix, so mail to it could
+    // never be sent and the error blamed the server for something it offers.
+    text: collected.map(line => line.slice(4)).join(' '),
   };
+}
+
+/** The credentials travel inside base64 arguments, so redacting the plain
+ * values is not enough: a relay that echoes the AUTH line back would otherwise
+ * store the encoded pair - which decodes to the password - in the notification
+ * error the feed shows and the logs keep. Longest form first, because the
+ * combined blob contains neither of the single fields by accident but must not
+ * be left half-replaced. */
+function redactCredentials(message, config) {
+  let text = String(message || 'SMTP delivery failed.');
+  const secrets = [b64(`\u0000${config.user}\u0000${config.pass}`), b64(config.pass), b64(config.user), config.pass, config.user]
+    .filter(secret => typeof secret === 'string' && secret.length >= 4)
+    .sort((a, b) => b.length - a.length);
+  for (const secret of secrets) text = text.split(secret).join('[redacted]');
+  return text;
 }
 
 function expect(replyValue, codes, what) {
@@ -300,9 +319,8 @@ export async function sendMail({to, subject, text}, config = smtpConfig()) {
     return {sent: true};
   } catch (error) {
     quit();
-    // The password only ever travels inside a base64 argument; make sure a
-    // server that echoes a command back cannot put it in an error message.
-    const message = String(error?.message || 'SMTP delivery failed.');
-    throw new Error(config.pass ? message.split(config.pass).join('[redacted]').split(b64(config.pass)).join('[redacted]') : message);
+    // A server that echoes a command back cannot put the credentials in an
+    // error message, in either the plain or the encoded form.
+    throw new Error(redactCredentials(error?.message, config));
   }
 }

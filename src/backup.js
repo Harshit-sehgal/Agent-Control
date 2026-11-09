@@ -138,7 +138,21 @@ export function validateBackup(document, {primaryWorkspace = false} = {}) {
   // the normal write paths enforce both, so a restore must not be a way round.
   for (const m of document.tables.workspace_members) {
     if (!m || !ROLES.includes(m.role)) fail('Backup holds an unknown role.');
-    if (workspaceIds.size && !workspaceIds.has(m.workspace_id)) fail('Backup membership references an unknown workspace.');
+    // Unconditional: guarding this on "the document names any workspace at all"
+    // accepted exactly the document that lost them, a membership row pointing at
+    // a workspace the restore would not create.
+    if (!workspaceIds.has(m.workspace_id)) fail('Backup membership references an unknown workspace.');
+  }
+  // A restore of the first workspace replaces the account tables, so a document
+  // that carries account-owned rows (a notification, an opt-in, a paired device)
+  // while its `users` table is empty would delete every account and insert none
+  // - a successful-looking restore of an installation with no users. Such a
+  // document was exported from a secondary workspace, whose file holds those
+  // rows but not the accounts; restoring it into a secondary workspace is fine,
+  // because its account tables were empty already.
+  const accountScoped = ['notification_prefs', 'notifications', 'agents'].filter(name => (document.tables[name] || []).length);
+  if (primaryWorkspace && accountScoped.length && !document.tables.users.length) {
+    fail(`Backup carries ${accountScoped.join(', ')} but no users: it was exported from a workspace other than the first one, which is the only one that holds the accounts. Export the first workspace instead.`);
   }
   // The SQL reader parses these columns after commit. Reject malformed JSON
   // and wrong shapes before import so a bad settings value cannot poison the
@@ -159,6 +173,23 @@ export function validateBackup(document, {primaryWorkspace = false} = {}) {
   jsonShape('bots', 'contract', object, 'an object');
   jsonShape('bots', 'permissions', Array.isArray, 'a list');
   jsonShape('group_runs', 'doc', object, 'an object');
+  // Everything else the row readers parse with no fallback. The import commits
+  // before the cache is rebuilt, so a malformed `events.meta` used to restore
+  // fine, throw a 500 on the read-back (the restore was already durable), and
+  // then let the next unrelated write replace every table from an empty
+  // document - the restore was silently wiped by the first chat message after it.
+  jsonShape('events', 'meta', object, 'an object');
+  jsonShape('tasks', 'payload', object, 'an object');
+  jsonShape('tasks', 'result', () => true, 'JSON');
+  jsonShape('bots', 'created_by', object, 'an object');
+  jsonShape('chat_messages', 'doc', object, 'an object');
+  for (const name of ['candidates', 'drafts', 'runs', 'group_runs', 'group_messages']) jsonShape(name, 'doc', object, 'an object');
+  // A forgotten chat's row is the moment it was forgotten, and older rows hold
+  // `true`; only "is this JSON at all" is true of every kind of memory row.
+  jsonShape('memory', 'doc', () => true, 'JSON');
+  jsonShape('group_runs', 'recipients', Array.isArray, 'a list');
+  jsonShape('group_runs', 'trace', () => true, 'JSON');
+  jsonShape('group_runs', 'checkpoint', () => true, 'JSON');
   const link = (value, where) => { if (value && !validHttpUrl(value)) fail(`Backup holds a link that is not http(s) in ${where}.`); };
   for (const e of document.tables.evidence) link(e.link, 'evidence');
   for (const name of ['candidates', 'drafts']) for (const row of document.tables[name]) {

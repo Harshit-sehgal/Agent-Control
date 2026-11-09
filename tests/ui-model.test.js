@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ACTIVE_DRAFTS, draftStage, needsYou, chatRows, timeline, parseRoute, routeHash, feedPauseAction, retryTarget, threadLineActions, isRunNote, runBelongsToChat, FEED_WAIT, FEED_OPEN, POST_LIMIT, draftLength, lengthLabel} from '../shared/ui-model.js';
+import {ACTIVE_DRAFTS, draftStage, needsYou, chatRows, timeline, parseRoute, routeHash, feedPauseAction, retryTarget, threadLineActions, isRunNote, runBelongsToChat, FEED_WAIT, FEED_OPEN, POST_LIMIT, draftLength, lengthLabel, threadParts} from '../shared/ui-model.js';
 
 // ---- fixtures -------------------------------------------------------------------------
 
@@ -520,7 +520,27 @@ test('draft length warns about X\'s standard limit without ever acting like a wa
   // Missing text is zero, not a crash: a draft can be empty while it is written.
   assert.deepEqual(draftLength(undefined), {count: 0, limit: 280, over: false, left: 280});
   assert.equal(lengthLabel('x'.repeat(280)), '280 of 280 · 0 left');
-  assert.equal(lengthLabel('x'.repeat(283)), "283 characters · 3 over X's 280");
+  // Over the limit it also says how many posts the same text needs, because
+  // "post it yourself" is not usable advice for 900 characters.
+  assert.equal(lengthLabel('x'.repeat(283)), "283 characters · 3 over X's 280 · 2 posts if threaded");
+  assert.equal(lengthLabel('word '.repeat(80).trim()), "399 characters · 119 over X's 280 · 2 posts if threaded");
+});
+
+test('a thread keeps every word, and splits on word boundaries', () => {
+  assert.deepEqual(threadParts('one two three four', 9), ['one two', 'three', 'four']);
+  // Nothing is dropped and nothing is invented: the parts rejoin to the draft.
+  const text = 'The pricing page says one thing and the docs say another. Here is what I checked, and what I could not.';
+  const parts = threadParts(text, 60);
+  assert.ok(parts.length > 1);
+  assert.equal(parts.join(' '), text);
+  for (const part of parts) assert.ok([...part].length <= 60, part);
+  // A single word longer than the limit (a URL) is broken rather than left
+  // unpostable, and an emoji is one character, not two halves.
+  assert.deepEqual(threadParts('abcdefghij', 4), ['abcd', 'efgh', 'ij']);
+  assert.deepEqual(threadParts('🙂🙂🙂', 2), ['🙂🙂', '🙂']);
+  // Empty and whitespace-only text is no post at all, not one empty post.
+  assert.deepEqual(threadParts('   '), []);
+  assert.deepEqual(threadParts(undefined), []);
 });
 
 test('every bot info section the panel links to is a route the parser accepts', () => {

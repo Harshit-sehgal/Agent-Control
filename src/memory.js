@@ -13,6 +13,7 @@ import {
   modelKey, modelLabel, promptMemory, rulebook, noteTurn, noteChat,
   consolidationInstructions, consolidationInput, parseConsolidation, mergeConsolidation,
   consolidationDue, publicMemory, addRules, removeRule, forgetRulebook, forgetChat,
+  findRulebook,
 } from '../shared/memory.js';
 import {complete} from './ai.js';
 import {botSettings} from '../shared/bot-settings.js';
@@ -84,18 +85,28 @@ export async function consolidateModel(store, {key, config, chatKey = '', label 
     const call = executor || ((instructions, body, cfg) => complete({instructions, input: body, maxTokens: 1600, config: cfg}));
     const raw = await call(consolidationInstructions(), input, config);
     const parsed = parseConsolidation(raw);
+    // The model call can take minutes, and the person who started it can press
+    // "Forget this model" while it runs. `rulebook()` creates a book that is not
+    // there, so every write below would resurrect the thing they just deleted -
+    // and stamping `consolidatedAt` would keep them from re-adding it cleanly.
     if (!parsed) {
       // A reply we cannot read still spends the cooldown, otherwise every later
       // step retries the same paid call with no pause at all.
       const stamped = await store.update(current => {
-        const book = rulebook(current, id, {label: label || modelLabel(config)});
+        const book = findRulebook(current, id);
+        if (!book) return null;
         book.consolidatedAt = now;
         book.updatedAt = now;
         return book;
       });
+      if (!stamped) return {book: null, skipped: true, reason: 'The rulebook was removed while the model was answering.'};
       return {book: stamped, skipped: true, reason: 'The model returned no usable memory update.'};
     }
-    const updated = await store.update(current => mergeConsolidation(current, id, parsed, {now, label: label || modelLabel(config), chatKey: chatKey || null, sentPending, sentTurns}));
+    const updated = await store.update(current => {
+      if (!findRulebook(current, id)) return null;
+      return mergeConsolidation(current, id, parsed, {now, label: label || modelLabel(config), chatKey: chatKey || null, sentPending, sentTurns});
+    });
+    if (!updated) return {book: null, skipped: true, reason: 'The rulebook was removed while the model was answering.'};
     return {book: updated, skipped: false};
   } finally {
     running.delete(id);

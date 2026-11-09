@@ -2,14 +2,14 @@
  * Both are thin renderers over ui-model.js. The list shell and the composer are
  * painted once and then only their contents change, so a background refresh can
  * never wipe what the user is typing. */
-import {botSuggestions} from './chat-engine.js?v=66c6785991';
-import {summonableGuests} from './coordination.js?v=66c6785991';
-import {botSettings, groupSettings} from './bot-settings.js?v=66c6785991';
-import {requestOfMessage} from './bot-browser.js?v=66c6785991';
-import {validHttpUrl} from './core.js?v=66c6785991';
-import {chatRows, timeline, pendingBrowser, stuckFeedReads, draftStage, draftLength, lengthLabel, mentionSuggestions, retryTarget, threadLineActions, isRunNote, runBelongsToChat, ACTIVE_DRAFTS} from './ui-model.js?v=66c6785991';
-import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=66c6785991';
-import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, isXGroup, botTint, recentRuns} from './ui-store.js?v=66c6785991';
+import {botSuggestions} from './chat-engine.js?v=6734c0a812';
+import {summonableGuests} from './coordination.js?v=6734c0a812';
+import {botSettings, groupSettings} from './bot-settings.js?v=6734c0a812';
+import {requestOfMessage} from './bot-browser.js?v=6734c0a812';
+import {validHttpUrl} from './core.js?v=6734c0a812';
+import {chatRows, timeline, pendingBrowser, stuckFeedReads, draftStage, draftLength, lengthLabel, mentionSuggestions, retryTarget, threadLineActions, isRunNote, runBelongsToChat, ACTIVE_DRAFTS} from './ui-model.js?v=6734c0a812';
+import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=6734c0a812';
+import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, isXGroup, botTint, recentRuns} from './ui-store.js?v=6734c0a812';
 
 const el = id => document.getElementById(id);
 const FILTERS = [['all', 'All'], ['needs', 'Needs you'], ['groups', 'Groups'], ['bots', 'Bots']];
@@ -103,17 +103,18 @@ export function draftCard(draft) {
   // either navigates to this page or, with an empty url, does nothing at all.
   const copyReady = draft.status === 'ready' ? btn('Copy text', 'copy-draft', {kind: 'primary', id: draft.id}) + (postHref ? `<a class="btn quiet" href="${esc(postHref)}" target="_blank" rel="noopener noreferrer"><span>Open post</span></a>` : '') : '';
   const actions = editing ? '' : copyReady || (write ? {
-    pending: btn('Approve', 'approve-draft', {kind: 'primary', id: draft.id}) + btn('Edit', 'edit-draft', {id: draft.id}) + btn('Skip', 'reject-draft', {id: draft.id}),
+    pending: btn('Approve', 'approve-draft', {kind: 'primary', id: draft.id}) + btn('Schedule…', 'schedule-draft', {id: draft.id}) + btn('Edit', 'edit-draft', {id: draft.id}) + btn('Skip', 'reject-draft', {id: draft.id}),
     scheduled: btn('Edit', 'edit-draft', {id: draft.id}) + btn('Cancel', 'reject-draft', {id: draft.id}),
   }[draft.status] || '' : '');
   const side = write ? {scheduled: btn('Ready now', 'ready-draft', {id: draft.id, small: true}), ready: btn('I posted it', 'posted-draft', {id: draft.id, kind: 'good', small: true})}[draft.status] || '' : '';
+  const thread = over ? btn('Copy as thread', 'copy-thread', {id: draft.id, small: true, kind: 'quiet'}) : '';
   const mark = {wait: '<i class="dot"></i>', ok: icon(draft.status === 'ready' ? 'checks' : 'check', 15), done: icon('checks', 15), off: ''}[stage.tone];
   return `<article class="draft tone-${stage.tone}" data-draft="${id}">
     <header><span class="draft-to">Reply to ${esc(draft.author)}</span><span class="draft-score">${Number(draft.score || 0)}/100${draft.mode === 'template' ? ' · template' : ''}${draft.revision > 1 ? ` · rev ${Number(draft.revision)}` : ''}${over ? ' · long for X' : ''}</span></header>
     ${body}
     ${open ? evidencePanel(draft) : ''}
     ${actions ? `<div class="card-actions">${actions}${open && !editing && write ? btn('Rewrite', 'rewrite-draft', {id: draft.id, kind: 'ghost'}) : ''}</div>` : ''}
-    <footer class="draft-state">${mark}<span>${esc(stage.line)}</span>${side}</footer>
+    <footer class="draft-state">${mark}<span>${esc(stage.line)}</span>${thread}${side}</footer>
   </article>`;
 }
 

@@ -81,14 +81,16 @@ test('an explicit lease window is the one that gets stored', () => {
     enqueueTask(state, {kind: 'group-run', payload: {groupId: 'g', message: 'm'}, runAt: new Date().toISOString()});
     return state;
   };
+  // The rows have to exist before the clock is read: a task whose `runAt` is one
+  // millisecond in the future is not due, so a `now` captured first made this test
+  // fail about one run in three.
+  const asked = one(), quiet = one();
   const now = Date.now();
-  const asked = one();
   // The old default (`leaseTTL = 60000`) then overwrote the caller's 1500 ms with
   // the defaulted `leaseMs`: one wrong 60 s window before the heartbeat fixed it.
   claimTasks(asked, {workerId: 'w', now, leaseTTL: 1500});
   assert.equal(Date.parse(asked.tasks[0].leaseUntil) - now, 1500);
   // Asked for nothing at all, the lease is the documented minute.
-  const quiet = one();
   claimTasks(quiet, {workerId: 'w', now});
   assert.equal(quiet.tasks[0].leaseUntil, new Date(now + 60000).toISOString());
 });

@@ -31,6 +31,9 @@ export function createQueue(store, handlers = {}, {intervalMs = 2000, workerId, 
   // re-armed and the work runs once more, which is the failure mode we cannot
   // avoid here and can live with.
   const pendingResults = new Map();
+  /** How many times a stored result was refused because the row was mid-re-arm.
+   * Bounded so a row that can never be completed stops trying. */
+  const completionMisses = new Map();
 
   async function sweep(now = Date.now()) {
     if (busy) return; // one sweep at a time; the store serializes writes anyway
@@ -115,11 +118,26 @@ export function createQueue(store, handlers = {}, {intervalMs = 2000, workerId, 
       const result = pendingResults.get(task.id) ?? null;
       await store.update(s => tasks.completeTask(s, task.id, result));
       pendingResults.delete(task.id);
+      completionMisses.delete(task.id);
     } catch (e) {
-      // A definitive refusal — the row is gone, or another worker already moved
-      // it on — cannot be fixed by asking again, and keeping the result would
+      // A definitive refusal — the row is gone, or it is already in a terminal
+      // state — cannot be fixed by asking again, and keeping the result would
       // retry it forever. Nothing ran twice either way.
       if (e?.status === 404 || e?.status === 409) {
+        // A 409 is not always "somebody else finished it". A lease that lapsed
+        // (a paused workspace, a slow write) is re-armed to `queued` by
+        // `recoverStalledTasks`, and completing a queued row is refused. Dropping
+        // the result there meant the next sweep claimed that row again and ran the
+        // handler a second time - a second webhook POST, a second paid run. Keep
+        // the result instead: the next claim writes it without executing.
+        const row = (store.read().tasks || []).find(t => t.id === task.id);
+        const misses = (completionMisses.get(task.id) || 0) + 1;
+        if (row && ['queued', 'running'].includes(row.status) && misses < 5) {
+          completionMisses.set(task.id, misses);
+          console.error(`Queue could not record completion of ${task.id} (${e.message}); it will write the stored result when the task is claimed again, and will not run the handler again.`);
+          return;
+        }
+        completionMisses.delete(task.id);
         pendingResults.delete(task.id);
         console.error(`Queue dropped the result of ${task.id} (${e.message}).`);
         return;

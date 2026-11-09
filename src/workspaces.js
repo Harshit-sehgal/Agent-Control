@@ -147,7 +147,19 @@ export async function openWorkspaces(primary, auth, start) {
         throw Object.assign(new Error(`This backup was written before ${refused.length === 1 ? 'workspace' : 'workspaces'} ${refused.join(', ')} existed. Restoring it would delete ${refused.length === 1 ? 'that workspace' : 'those workspaces'} and their data; export ${refused.length === 1 ? 'it' : 'them'} first, or send the ids in discardWorkspaces to delete ${refused.length === 1 ? 'it' : 'them'}.`), {status: 409, workspaces: refused});
       }
       for (const id of orphaned) await discard(id, open.get(id));
-      for (const id of ids) if (!open.has(id)) await load(id, globallyPaused);
+      // A workspace the restored document lists but whose data it does not
+      // carry is opened with an empty database - there is nothing else to open.
+      // Report those, so a single-workspace backup restored into another
+      // installation does not look like a complete restore while its other
+      // workspaces stand empty.
+      const created = [];
+      for (const id of ids) {
+        if (open.has(id)) continue;
+        const existed = await fs.access(workspaceDbPath(primary.dbPath, id)).then(() => true, () => false);
+        await load(id, globallyPaused);
+        if (!existed) created.push(id);
+      }
+      return {created};
     },
     /** Stop background services, drain model work, and run a synchronous
      * database replacement without allowing an old model result to land after it. */

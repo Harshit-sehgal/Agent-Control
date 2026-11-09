@@ -3,13 +3,13 @@
  * failure and the dispatcher turns that into one toast. */
 import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, setPref, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns, patchLocalRun, appendMessage} from './ui-store.js';
 import {botSettings, groupSettings} from './bot-settings.js';
-import {completeMention, moveRow, pipelineValue, draftLength, lengthLabel} from './ui-model.js';
+import {completeMention, moveRow, pipelineValue, draftLength, lengthLabel, threadParts} from './ui-model.js';
 import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js';
 import {sendChat, streamGroupRun, watchQueuedRun, continueDemoPlan} from './ui-chat.js';
 import {confetti, whoosh, react, poke} from './ui-fx.js';
 import {renderList, renderMentions} from './ui-views.js';
 import {refreshLists, reloadAdminPage, pipelineList} from './ui-panel.js';
-import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, botTaskSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js';
+import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, botTaskSheet, scheduleDraftSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js';
 import {adminActions, adminForms, adminChanges} from './ui-admin.js';
 
 const adminCtx = {reload: reloadAdminPage};
@@ -36,7 +36,7 @@ export async function startGroupChat(text, groupId) {
   go({chat: teamKey(group.id)});
   await sendChat(teamKey(group.id), message);
 }
-async function draftOp(id, op, done) { await api(`/api/drafts/${id}/${op}`, 'POST', {}); toast(done); await sync(); }
+async function draftOp(id, op, done, body = {}) { await api(`/api/drafts/${id}/${op}`, 'POST', body); toast(done); await sync(); }
 
 export const actions = {
   // navigation
@@ -163,11 +163,19 @@ export const actions = {
     react('aww', 1200); return draftOp(b.dataset.id, 'reject', 'Draft skipped.');
   },
   'ready-draft': b => draftOp(b.dataset.id, 'ready', 'Ready to post.'),
+  'schedule-draft': b => scheduleDraftSheet(b.dataset.id),
+  // The captured post and its evidence are untouched by a skip, so a draft can
+  // come back to the queue without being written again.
+  'restore-draft': b => draftOp(b.dataset.id, 'restore', 'Back in the queue.'),
   'posted-draft': async b => {
-    if (!await confirmSheet('Did you post this on X yourself?', {confirm: 'Yes, I posted it', detail: 'This only records it. Agent Control never posts for you.'})) return;
+    // The confirm and the link are one question: a second sheet after a confirm
+    // reads as "did that work?", and the link is what makes the history useful
+    // later, when the post is the only thing left of this draft.
+    const url = await askSheet('Did you post this on X yourself?', {sub: 'This only records it; Agent Control never posts for you. Paste the link if you have it.', placeholder: 'https://x.com/…', submit: 'Yes, I posted it'});
+    if (url === null) return;
     confetti(document.querySelector(`[data-draft="${CSS.escape(b.dataset.id)}"] .draft-state`));
     react('cheer', 1600);
-    await draftOp(b.dataset.id, 'posted', 'Marked as posted.');
+    await draftOp(b.dataset.id, 'posted', 'Marked as posted.', url.trim() ? {url: url.trim()} : {});
   },
   'edit-draft': b => {
     store.editDraft = b.dataset.id; store.editText = null; changed();
@@ -182,6 +190,14 @@ export const actions = {
   'copy-draft': async b => {
     const draft = store.state.drafts.find(d => d.id === b.dataset.id); if (!draft) throw new Error('Draft not found');
     await copyText(draft.text, 'Copied. Post it on X yourself.');
+  },
+  // A draft over X's limit is not one post, and copying it into the composer only
+  // to have X reject it wastes the person's turn. The parts are the same draft,
+  // numbered so they cannot be posted out of order by accident.
+  'copy-thread': async b => {
+    const draft = store.state.drafts.find(d => d.id === b.dataset.id); if (!draft) throw new Error('Draft not found');
+    const parts = threadParts(draft.text);
+    await copyText(parts.map((part, i) => `${i + 1}/${parts.length} ${part}`).join('\n\n'), `${parts.length} posts copied. Post them in order.`);
   },
   'verify-evidence': async b => { await api(`/api/evidence/${b.dataset.id}/verify`, 'POST', {status: b.dataset.status}); toast('Source updated.'); await sync(); },
   'remove-candidate': async b => {
@@ -343,6 +359,16 @@ export const forms = {
   },
   'home-prompt': (form, f) => startGroupChat(f.prompt),
   'ask-form': (form, f) => closeSheet(String(f.answer || '')),
+  'approve-form': async (form, f) => {
+    // `datetime-local` has no timezone: parsing it with `new Date` is the browser's
+    // local reading, which is the one the person chose.
+    const at = new Date(String(f.at || '')).getTime();
+    if (!Number.isFinite(at)) throw new Error('Pick a date and time.');
+    await draftOp(String(f.draft), 'approve', 'Approved for that time.', {dueAt: new Date(at).toISOString()});
+    // Close only after the server accepted the time: a refusal keeps the sheet open
+    // on the value that has to change, with the reason in the toast.
+    closeSheet();
+  },
   'new-bot-form': async (form, f) => {
     const bot = await api(`/api/groups/${f.group}/bots`, 'POST', {name: f.name, instructions: f.instructions, settings: {tint: pickedTint}});
     setProfile(bot.id, {avatarIndex: pickedTint});

@@ -218,7 +218,11 @@ async function accountHarness() {
   auth.ensureBootstrap('owner-secret-1');
   const actor = {userId: store.get('SELECT id FROM users LIMIT 1').id, role: 'owner', workspaceId: DEFAULT_WORKSPACE, sessionId: 's-owner', email: 'owner@localhost'};
   const router = createRouter();
-  accountRoutes(router, {auth, workspaces: services});
+  // The account routes that reconcile workspaces need the set of open stores,
+  // not just an inert stub: a deletion has to reach every workspace a person was
+  // a member of, so `all()` is what the handler iterates.
+  const scope = new Proxy({all: () => [{id: DEFAULT_WORKSPACE, store}], sync: async () => ({})}, {get: (target, key) => (key in target ? target[key] : services)});
+  accountRoutes(router, {auth, workspaces: scope});
   const call = async (method, target, body, who = actor) => {
     const found = router.find(method, target);
     assert.ok(found, `${method} ${target} is not registered`);
@@ -231,6 +235,14 @@ test("removing a user clears this workspace's notifications before the account",
   const {dir, store, auth, actor, call} = await accountHarness();
   const guest = auth.createUser(actor, {email: 'guest@example.com', password: 'guest-secret-1', role: 'member'});
   notifications.updatePreferences(store, guest.id, {email: true, emailAddress: 'guest@example.com'});
+  // A laptop this person paired. Its secret is a live HMAC credential with the
+  // permissions it was granted, and the only writer of `revoked_at` was the
+  // revoke button on the agent - so removing the account used to leave the
+  // device able to claim work for a workspace its owner no longer belonged to.
+  store.run(`INSERT INTO agents (id,workspace_id,name,secret_hash,status,permissions,paired_by,paired_at)
+    VALUES ('agent-guest','default','Guest laptop','stored-hash','paired','["browser.capture"]','guest@example.com',?)`, new Date().toISOString());
+  store.run(`INSERT INTO agent_tasks (id,agent_id,kind,payload,status,created_at,updated_at)
+    VALUES ('at-guest','agent-guest','browser.capture','{"url":"https://x.com/home"}','queued',?,?)`, new Date().toISOString(), new Date().toISOString());
   notifications.notify(store, null, {userId: guest.id, title: 'Pending', body: ''});
   assert.equal(store.get('SELECT count(*) AS n FROM notifications WHERE user_id=?', guest.id).n, 2, 'An in-app row and a queued delivery row.');
 
@@ -251,6 +263,12 @@ test("removing a user clears this workspace's notifications before the account",
   // A complete removal still finishes the job, including the account.
   await call('DELETE', `/api/users/${guest.id}`);
   assert.equal(store.get('SELECT count(*) AS n FROM users WHERE id=?', guest.id).n, 0);
+  // The device went with the account, and work aimed at it was failed instead of
+  // waiting for a laptop that can no longer authenticate.
+  const agent = store.get('SELECT status, revoked_at, secret_enc FROM agents WHERE id=?', 'agent-guest');
+  assert.equal(agent.status, 'revoked');
+  assert.ok(agent.revoked_at, 'the revocation is stamped');
+  assert.equal(store.get('SELECT status, error FROM agent_tasks WHERE id=?', 'at-guest').status, 'failed');
   await fs.rm(dir, {recursive: true, force: true});
 });
 
@@ -283,5 +301,27 @@ test('an agent rename and its permission list land together or not at all', asyn
   await assert.rejects(rename('Renamed anyway', ['take-over-the-world']), /Unknown agent permission/);
   assert.equal(row().name, 'Checked laptop', 'The rename rolls back with the refused permissions.');
   assert.equal(row().permissions, '["http.check"]', 'The old scope is still the one in force.');
+  await fs.rm(dir, {recursive: true, force: true});
+});
+
+test('deleting your own account takes your paired devices with it, and only after the password', async () => {
+  const {dir, store, actor, call} = await accountHarness();
+  const stamp = new Date().toISOString();
+  notifications.updatePreferences(store, actor.userId, {inApp: true});
+  store.run(`INSERT INTO agents (id,workspace_id,name,secret_hash,status,permissions,paired_by,paired_at)
+    VALUES ('agent-mine','default','My laptop','stored-hash','paired','["browser.capture"]',?,?)`, actor.email, stamp);
+  store.run(`INSERT INTO agent_tasks (id,agent_id,kind,payload,status,created_at,updated_at)
+    VALUES ('at-mine','agent-mine','browser.capture','{}','queued',?,?)`, stamp, stamp);
+
+  // A wrong password is a typo, not a decision: no row may move.
+  await assert.rejects(call('DELETE', '/api/account', {password: 'not-my-password'}), /Password is incorrect/);
+  assert.equal(store.get('SELECT status FROM agents WHERE id=?', 'agent-mine').status, 'paired');
+  assert.equal(store.get('SELECT count(*) AS n FROM notification_prefs WHERE user_id=?', actor.userId).n, 1);
+  assert.equal(store.get('SELECT status FROM agent_tasks WHERE id=?', 'at-mine').status, 'queued');
+
+  await call('DELETE', '/api/account', {password: 'owner-secret-1'});
+  assert.equal(store.get('SELECT status FROM agents WHERE id=?', 'agent-mine').status, 'revoked');
+  assert.equal(store.get('SELECT count(*) AS n FROM notification_prefs WHERE user_id=?', actor.userId).n, 0);
+  assert.equal(store.get('SELECT status FROM agent_tasks WHERE id=?', 'at-mine').status, 'failed');
   await fs.rm(dir, {recursive: true, force: true});
 });

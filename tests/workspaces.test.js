@@ -147,3 +147,77 @@ test('a reminder is pushed to the devices of the workspace it fired in, and a fa
     assert.equal((await t.send('DELETE', '/api/push/subscriptions', {endpoint: 'https://127.0.0.1:9/push'}, owner)).body.removed, 1);
   } finally { await t.remove(); }
 });
+
+test('deleting your account reaches the workspaces the request did not come from', {timeout: 40000}, async () => {
+  const t = await installation();
+  try {
+    await t.start();
+    const owner = await t.login();
+    // The same person in two workspaces: one is where they sign in, the other is
+    // where they paired a laptop. `selfDeleteAccount` removes every membership
+    // it finds, so the device has to go too - its secret is a live credential in
+    // a database this request never touched.
+    assert.equal((await t.send('POST', '/api/users', {email: 'guest@example.com', password: 'guest-password-1', role: 'admin'}, owner)).status, 201);
+    const client = (await t.send('POST', '/api/workspaces', {name: 'Client work'}, owner)).body;
+    assert.equal((await t.send('POST', '/api/workspaces/switch', {id: client.id}, owner)).status, 200);
+    assert.equal((await t.send('POST', '/api/users', {email: 'guest@example.com', role: 'admin'}, owner)).status, 201);
+    assert.equal((await t.send('POST', '/api/workspaces/switch', {id: 'default'}, owner)).status, 200);
+    const guestId = (await t.send('GET', '/api/users', undefined, owner)).body.users.find(u => u.email === 'guest@example.com').id;
+
+    const guest = await t.login('guest@example.com', 'guest-password-1');
+    assert.equal((await t.send('POST', '/api/workspaces/switch', {id: client.id}, guest)).status, 200);
+    const paired = await t.send('POST', '/api/agents/pair', {label: 'guest laptop', permissions: ['browser.capture']}, guest);
+    assert.equal(paired.status, 201, JSON.stringify(paired.body));
+    const redeemed = await t.send('POST', '/api/agent/pair', {code: paired.body.code, name: 'guest laptop'}, null);
+    assert.equal(redeemed.status, 201, JSON.stringify(redeemed.body));
+
+    // The device is paired in the workspace the deletion will *not* be sent from.
+    const {DatabaseSync} = await import('node:sqlite');
+    const readClient = (sql, ...values) => {
+      const db = new DatabaseSync(workspaceDbPath(path.join(t.dir, 'state.db'), client.id));
+      try { return db.prepare(sql).get(...values); } finally { db.close(); }
+    };
+    assert.equal(readClient('SELECT count(*) AS n FROM agents WHERE paired_by=?', 'guest@example.com').n, 1, 'the device was paired here');
+
+    // Back where they signed in, so the deletion is sent from the other workspace.
+    assert.equal((await t.send('POST', '/api/workspaces/switch', {id: 'default'}, guest)).status, 200);
+    const removed = await t.send('DELETE', '/api/account', {password: 'guest-password-1'}, guest);
+    assert.equal(removed.status, 200, JSON.stringify(removed.body));
+
+    const agent = readClient('SELECT status, revoked_at FROM agents WHERE paired_by=?', 'guest@example.com');
+    assert.equal(agent.status, 'revoked', 'the device in the other workspace is revoked too');
+    assert.ok(agent.revoked_at, 'and the revocation is stamped');
+    assert.equal(readClient('SELECT count(*) AS n FROM notification_prefs WHERE user_id=?', guestId).n, 0);
+  } finally { await t.remove(); }
+});
+
+test('a restore that names a workspace it did not carry says the workspace started empty', {timeout: 40000}, async () => {
+  const t = await installation();
+  try {
+    await t.start();
+    const owner = await t.login();
+    const exported = (await t.send('GET', '/api/admin/backup', undefined, owner)).body;
+    // A document that lists a workspace this installation never had, which is
+    // what a backup of the first workspace looks like on a machine where the
+    // other workspaces were created after that file was written. Its data is
+    // not in the document - the document holds one store's tables - so the only
+    // honest answer is that the workspace came back empty.
+    const now = new Date().toISOString();
+    exported.tables.workspaces.push({id: 'old-client', name: 'Old client', created_at: now});
+    const crypto = await import('node:crypto');
+    exported.checksum = crypto.createHash('sha256').update(JSON.stringify(exported.tables)).digest('hex');
+    const restored = await t.send('POST', '/api/admin/restore', {...exported, force: true}, owner);
+    assert.equal(restored.status, 200, JSON.stringify(restored.body).slice(0, 300));
+    assert.equal(restored.body.signedOut, true, 'a primary restore ends every session');
+    assert.deepEqual(restored.body.startedEmpty, ['old-client']);
+    await assert.doesNotReject(fs.stat(workspaceDbPath(path.join(t.dir, 'state.db'), 'old-client')));
+
+    // The note is in the log as well, because the response is only read once.
+    const {DatabaseSync} = await import('node:sqlite');
+    const db = new DatabaseSync(path.join(t.dir, 'state.db'));
+    try {
+      const line = db.prepare(`SELECT message FROM events WHERE type='backup' ORDER BY rowid DESC LIMIT 1`).get();
+      assert.match(String(line?.message || ''), /started empty: old-client/);
+    } finally { db.close(); }
+  } finally { await t.remove(); }
+});

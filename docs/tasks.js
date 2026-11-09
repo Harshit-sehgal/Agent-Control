@@ -6,7 +6,7 @@
  * These transitions are pure and mirror `workflow.js`: the Node worker and the
  * browser-local demo both run them, so the two backends cannot drift.
  */
-import {activity, cleanText} from './core.js?v=66c6785991';
+import {activity, cleanText} from './core.js?v=6734c0a812';
 
 export const MAX_ATTEMPTS_DEFAULT = 5;
 
@@ -24,7 +24,7 @@ export const RETRY_WINDOW_MS = 6 * 3600000;
  * state and the payload is the only part of the row that survives a restart
  * verbatim, so the anchor lives there. Every payload validator builds a fresh
  * object, so this is scheduling metadata a caller cannot set. */
-const RETRY_STARTED = 'retryStartedAt';
+export const RETRY_STARTED = 'retryStartedAt';
 
 /** Drop the anchor once a run succeeds or is re-armed by hand: a stale one
  * would make the next failure look like it was already spent. */
@@ -132,7 +132,14 @@ export function enqueueTask(state, body = {}) {
     const group = (state.groups || []).find(g => g.id === payload.groupId);
     if (!group || (payload.botId && !group.bots.some(b => b.id === payload.botId))) fail('That bot or group no longer exists.', 404);
   }
-  const intervalMinutes = (SCHEDULED.includes(kind) && payload.kind === 'interval') ? payload.intervalMinutes : (Number.isInteger(body.intervalMinutes) ? body.intervalMinutes : null);
+  // Only a schedule may repeat, and only at a length its validator already
+  // bounded. The old fallback took `body.intervalMinutes` for *every* kind with no
+  // bound, so a stray field turned a one-off group run into an unbounded recurring
+  // spend, and `1e15` made `new Date(now + n * 60000)` invalid: `completeTask` threw,
+  // the row stayed `running`, the sweep re-claimed it and ran the paid work again,
+  // forever.
+  const intervalMinutes = payload.kind === 'interval' ? Number(payload.intervalMinutes) : null;
+  if (intervalMinutes !== null && (!Number.isInteger(intervalMinutes) || intervalMinutes < 1 || intervalMinutes > 10080)) fail('Interval must be 1\u201310080 minutes.');
   if (idempotencyKey) {
     const existing = state.tasks.find(t => t.idempotencyKey === idempotencyKey);
     if (existing && existing.status !== 'cancelled') return {task: existing, duplicate: true};
@@ -252,7 +259,10 @@ export function failTask(state, id, message, now = Date.now(), {conflict = false
   // A busy group run outlasts both budgets. A 409 must wait it out instead of
   // being the error that marks the task failed. A permanent miss (the bot or
   // group is gone) fails on this attempt.
-  if (permanent || (task.attempts >= task.maxAttempts && spent && !conflict)) {
+  // A conflict waits out the attempt count, but not the window: a group parked on
+  // a checkpoint made every task for it spin at five-minute intervals with nothing
+  // recorded and nothing said. Once the six hours are gone the task says why.
+  if (permanent || (spent && (conflict || task.attempts >= task.maxAttempts))) {
     // A recurring task that ran out of budget missed windows, it did not
     // retire: the schedule is the point of the task, so it re-arms for its
     // next window with a fresh budget and keeps the error visible until a run

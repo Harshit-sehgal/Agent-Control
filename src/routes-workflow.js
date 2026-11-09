@@ -52,7 +52,7 @@ export function workflowRoutes(router, {auth, processCandidate}) {
   });
 
   router.add('PATCH', '/api/drafts/:id', 'member', async c => { const b = await c.body(); return c.store.update(s => wf.editDraft(s, c.params.id, b.text)); });
-  for (const action of ['approve', 'reject', 'ready', 'posted']) {
+  for (const action of ['approve', 'reject', 'ready', 'restore', 'posted']) {
     router.add('POST', `/api/drafts/:id/${action}`, 'member', async c => { const b = await c.body(); return c.store.update(s => wf.draftAction(s, c.params.id, action, b)); });
   }
   router.add('POST', '/api/drafts/:id/rewrite', 'member', async c => {
@@ -90,6 +90,12 @@ export function workflowRoutes(router, {auth, processCandidate}) {
     // kind with `cleanText`, so `" notification"` passed a raw comparison and
     // became a real delivery task addressed to any stored webhook.
     if (cleanText(b.kind, 64) === 'notification') fail('Notification deliveries are queued by the server, not by request.', 403);
+    // A job for a paired device carries an action the device will run in the
+    // signed-in browser. Every other browser path (a bot's reply, a feed read)
+    // files an approval card first; this one had none, so any member could click
+    // and type in the owner's session with no record and no card. Devices are
+    // administered by an admin, and so is this.
+    if (cleanText(b.kind, 64) === 'agent-job' && !allows(c.actor.role, 'admin')) fail('Only an admin can dispatch a job to a paired device.', 403);
     const result = await c.store.update(s => tasks.enqueueTask(s, b));
     return reply(result.duplicate ? 200 : 201, result.task);
   });

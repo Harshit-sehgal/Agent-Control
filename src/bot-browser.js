@@ -37,22 +37,36 @@ export async function dispatchBrowserRequest(store, id, {actor = null} = {}) {
     if (!live || live.status !== 'pending') fail(live ? 'This browser request is no longer waiting.' : 'Browser request not found.', live ? 409 : 404);
     live.status = 'dispatched'; live.approvedBy = actor || 'auto'; live.updatedAt = stamp();
   });
-  let queued = false;
+  // `enqueueAgentTask` inserts its own row (auto-commit) from inside this document
+  // write, so the task can exist even when the document write is rejected. Track
+  // it separately from "the write landed", or the revert below is skipped and the
+  // request stays dispatched forever with no ids to match the device's page.
+  let taskId = null;
+  let committed = false;
   try {
-    return await store.update(s => {
-      const live = (s.browserRequests || []).find(r => r.id === id);
+    const live = await store.update(s => {
+      const current = (s.browserRequests || []).find(r => r.id === id);
       // A feed can still be denied after the claim and before this enqueue.
-      if (!live || live.status !== 'dispatched') fail(live ? 'This browser request is no longer waiting.' : 'Browser request not found.', live ? 409 : 404);
+      if (!current || current.status !== 'dispatched') fail(current ? 'This browser request is no longer waiting.' : 'Browser request not found.', current ? 409 : 404);
       const {task} = agent.enqueueAgentTask(store, agentId, {kind: request.kind, payload: {url: request.url, steps: request.steps}, idempotencyKey: `browser:${id}`, createdBy: actor || `bot:${request.botId}`});
-      queued = true;
-      live.agentTaskIds = [task.id]; live.updatedAt = stamp();
-      activity(s, 'agent', `Sent ${live.botName}'s browser request to a local agent.`, {requestId: id, taskId: task.id});
-      return live;
+      taskId = task.id;
+      current.agentTaskIds = [task.id]; current.updatedAt = stamp();
+      activity(s, 'agent', `Sent ${current.botName}'s browser request to a local agent.`, {requestId: id, taskId: task.id});
+      return current;
     });
+    committed = true;
+    return live;
   } catch (error) {
+    // An orphaned task row would let the device open a page for a request that is
+    // about to be pending again (and the idempotency key would then hand the same
+    // dead task to the next approval), so fail it before reverting.
+    if (!committed && taskId) {
+      try { agent.discardAgentTask(store, taskId); }
+      catch (cleanupError) { error.cause = cleanupError; }
+    }
     // The claim already committed. Put it back unless a denial won, or the
     // task row exists and must stay tied to this dispatched request.
-    if (!queued && error.status !== 404 && !(error.status === 409 && /no longer waiting/.test(error.message || ''))) {
+    if (!committed && error.status !== 404 && !(error.status === 409 && /no longer waiting/.test(error.message || ''))) {
       try {
         await store.update(s => {
           const live = (s.browserRequests || []).find(r => r.id === id);
@@ -141,7 +155,10 @@ export async function onAgentTaskResult(store, taskId, {continueRun, resumeFeed,
     // The agent POST times out at 15s. A 1:1 model turn can take minutes, so
     // do not hold that request open for it.
     void Promise.resolve(continueRun(store, {groupId: done.groupId, message: follow, page: String(capturedAll).slice(0, 4000), directBotId: own ? done.botId : null, chatKey: done.chatKey, browserDepth: done.depth + 1}))
-      .catch(error => store.update(s => say(s, done.chatKey, `The result could not be handed back to ${done.botName}: ${error.message}`)));
+      .catch(error => store.update(s => say(s, done.chatKey, `The result could not be handed back to ${done.botName}: ${error.message}`)))
+      // That handler is itself a write (a paused or restoring workspace refuses
+      // it), and an unhandled rejection takes the whole server down.
+      .catch(error => console.error('Handing a page back to a bot:', error.message));
   }
   return done;
 }

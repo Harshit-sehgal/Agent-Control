@@ -313,6 +313,19 @@ export function failAgentTasks(store, ids, error) {
   }
 }
 
+/** Drop a task row that never became an instruction anybody could act on.
+ *
+ * Deleting is the point, not tidying: the enqueue is idempotent on
+ * `agent_id + idempotency_key`, so a dead row left behind would be handed back as
+ * "already queued" on the next approval and the request could never be dispatched.
+ * A row a device already claimed is failed instead - the page really is in its
+ * hands and the history has to say so. */
+export function discardAgentTask(store, id) {
+  if (!id || typeof store.run !== 'function') return;
+  store.run("DELETE FROM agent_tasks WHERE id=? AND status='queued'", id);
+  failAgentTasks(store, [id], 'The browser request could not be recorded; approve it again.');
+}
+
 /** Grant or shrink an agent's permissions. Only the server can widen them:
  * an agent's heartbeat body is never trusted for its own scope. */
 export function setAgentPermissions(store, agentId, permissions) {

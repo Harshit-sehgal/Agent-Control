@@ -77,7 +77,15 @@ export function replaceCredential(store, workspaceId, id, value) {
 }
 
 export function deleteCredential(store, workspaceId, id) {
-  const result = store.run('DELETE FROM credentials WHERE id=? AND workspace_id=?', id, workspaceId);
-  if (result.changes === 0) fail('Credential not found.', 404);
-  return {ok: true};
+  // One transaction, because the two statements are one decision: a crash
+  // between them leaves the preference pointing at a row that no longer exists,
+  // which is exactly the "retrying a URL that is gone" feed this prevents.
+  // Everyone who had opted in pointed at this row, and the preference is turned
+  // off with it - what the person would choose if asked.
+  store.transaction(() => {
+    const result = store.run('DELETE FROM credentials WHERE id=? AND workspace_id=?', id, workspaceId);
+    if (result.changes === 0) fail('Credential not found.', 404);
+    store.run('UPDATE notification_prefs SET webhook=0, webhook_url=NULL, updated_at=? WHERE webhook_url=?', now(), id);
+  });
+  return {ok: true, clearedPreferences: true};
 }

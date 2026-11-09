@@ -97,6 +97,32 @@ test('a run the workspace refuses to start is marked failed, not left queued', a
   assert.ok(!BUSY_STATUSES.includes(run.status), 'A run that never ran must not block the group.');
 });
 
+test('one task, one run: a re-armed task finds the run it already started', async t => {
+  const store = await workspace(t);
+  await store.update(state => { state.groups.push(group()); });
+  // Freeze the run at the point where it has been created but not executed, so
+  // the retry the scheduler would make can be replayed exactly.
+  store.trackWork = () => Promise.reject(Object.assign(new Error('This workspace is being restored. Try again shortly.'), {status: 503}));
+  const call = taskId => quietly(() => coordination.queueGroupRun(store, {groupId: 'x-engage', message: 'Coordinate these bots', chatKey: 'engage', taskId}));
+  const first = await call('task-1');
+  await until(() => store.read().groupRuns.find(run => run.id === first.runId)?.status === 'failed');
+  const runs = store.read().groupRuns.length;
+  const notes = (store.read().groupMessages.engage || []).length;
+
+  // A crash after the run was written re-arms the task, and the scheduler asks
+  // for the same `taskId` again. That must not start a second paid run or post
+  // a second line in the thread.
+  const again = await call('task-1');
+  assert.equal(again.runId, first.runId);
+  assert.equal(again.deduped, true);
+  assert.equal(store.read().groupRuns.length, runs, 'no second run row');
+  assert.equal((store.read().groupMessages.engage || []).length, notes, 'no second chat line');
+
+  // A different task is a different intent and still gets its own run.
+  const other = await call('task-2');
+  assert.notEqual(other.runId, first.runId);
+});
+
 test('a structured result reaches the next bot as the value the contract approved', async t => {
   const store = await workspace(t);
   // The model writes readable, indented JSON; the contract approves the object.
@@ -213,6 +239,28 @@ test('a person can stop a run that is working, and the stop is what the thread s
   // A second press is not a second outcome.
   await assert.rejects(() => coordination.cancelRun(store, 'run-stop'), /cannot be stopped/);
   await assert.rejects(() => coordination.cancelRun(store, 'nope'), /Run not found/);
+});
+
+test('stopping a run also calls back the page it already sent', async t => {
+  // `awaiting_browser` is stoppable, and the page for it may already be on a
+  // device. Flipping the run alone left the approval card live and the device
+  // lease held, so a page opened after Stop came back to a run nobody was
+  // waiting for and approving the card queued work for it.
+  const store = await workspace(t);
+  const now = new Date().toISOString();
+  await store.update(state => {
+    state.groupRuns.push({id: 'run-page', groupId: 'x-engage', chatKey: 'team-x-engage', mode: 'pipeline', status: 'awaiting_browser', input: 'x', recipients: ['scout'], trace: [], createdAt: now});
+    state.browserRequests = [
+      {id: 'req-live', runId: 'run-page', botId: 'scout', botName: 'Scout', chatKey: 'team-x-engage', status: 'dispatched', agentTaskIds: ['task-a'], url: 'https://example.com/', kind: 'browser.capture', updatedAt: now},
+      {id: 'req-other', runId: 'run-two', botId: 'scout', botName: 'Scout', chatKey: 'team-x-engage', status: 'dispatched', agentTaskIds: ['task-b'], url: 'https://example.com/', kind: 'browser.capture', updatedAt: now},
+    ];
+  });
+  await coordination.cancelRun(store, 'run-page');
+  const after = store.read();
+  const live = after.browserRequests.find(r => r.id === 'req-live');
+  assert.equal(live.status, 'denied', 'a page nobody is waiting for must not stay approvable');
+  assert.ok(live.updatedAt);
+  assert.equal(after.browserRequests.find(r => r.id === 'req-other').status, 'dispatched', 'another run keeps its page');
 });
 
 test('stopping a run between steps takes effect at the next boundary, not mid-call', async t => {

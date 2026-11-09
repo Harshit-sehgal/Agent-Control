@@ -118,3 +118,19 @@ test('renaming an agent that does not exist is a 404, not a 200 and a false audi
   assert.match(String(missing.body.error), /Agent not found/);
   assert.equal(store.read().events.length, before, 'a refused rename must not write an audit line');
 });
+
+test('a member cannot dispatch a job to a paired device, because that bypasses the approval card', async t => {
+  const store = await workspace(t);
+  const call = harness(workflowRoutes);
+  const body = {kind: 'agent-job', payload: {action: 'browser.capture', params: {url: 'https://x.com/home'}}};
+
+  const refused = await call(store, {method: 'POST', path: '/api/tasks', body, actor: {email: 'member@example.test', role: 'member', userId: 'u2'}});
+  assert.equal(refused.status, 403, `a member dispatch must be refused, got ${refused.status} ${JSON.stringify(refused.body)}`);
+  assert.match(String(refused.body.error), /admin/i);
+  assert.equal(store.read().tasks.length, 0, 'nothing reached the queue');
+
+  // An admin may. It still fails later if no device holds the permission, which
+  // is a different question from who is allowed to ask.
+  const allowed = await call(store, {method: 'POST', path: '/api/tasks', body});
+  assert.equal(allowed.status, 201, JSON.stringify(allowed.body));
+});

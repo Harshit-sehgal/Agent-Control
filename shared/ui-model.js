@@ -21,11 +21,38 @@ export function draftLength(text) {
   const count = [...String(text ?? '')].length;
   return {count, limit: POST_LIMIT, over: count > POST_LIMIT, left: Math.max(0, POST_LIMIT - count)};
 }
+/** The same text, cut into posts a thread can carry: whole words where it can,
+ * mid-word only for a single word longer than the limit (a URL, a hash). Nothing
+ * is dropped, so the parts joined with a space are the draft that was approved. */
+export function threadParts(text, limit = POST_LIMIT) {
+  const source = String(text ?? '').trim();
+  if (!source) return [];
+  const words = source.split(/\s+/), parts = [];
+  let part = '';
+  for (const word of words) {
+    if (!part) { part = word; }
+    else if ([...`${part} ${word}`].length <= limit) { part = `${part} ${word}`; }
+    else { parts.push(part); part = word; }
+    // A word longer than a post has to be broken somewhere; half a link is at
+    // least readable, and refusing to split would leave an unpostable draft.
+    while ([...part].length > limit) {
+      const chars = [...part];
+      parts.push(chars.slice(0, limit).join(''));
+      part = chars.slice(limit).join('');
+    }
+  }
+  if (part) parts.push(part);
+  return parts;
+}
 /** The one line the editor shows beside the text, and the same line a card
- * carries when it is not being edited. */
+ * carries when it is not being edited. A draft that is over the limit says how
+ * many posts it needs, because "post it yourself" is not advice for 900
+ * characters. */
 export function lengthLabel(text) {
   const {count, over} = draftLength(text);
-  return over ? `${count} characters · ${count - POST_LIMIT} over X's ${POST_LIMIT}` : `${count} of ${POST_LIMIT} · ${POST_LIMIT - count} left`;
+  if (!over) return `${count} of ${POST_LIMIT} · ${POST_LIMIT - count} left`;
+  const parts = threadParts(text).length;
+  return `${count} characters · ${count - POST_LIMIT} over X's ${POST_LIMIT} · ${parts} posts if threaded`;
 }
 
 /** Where a draft is in the human-approval lifecycle, and the one line that says so. */

@@ -62,12 +62,16 @@ export function taskHandlers({ws, workspaceId, auth, push, notify, processCandid
       // A deleted candidate is a miss, not a transient error. Say it once, with
       // the status a person would get from the same request.
       if (!ws.get('SELECT id FROM candidates WHERE id=?', task.payload.candidateId)) {
-        throw Object.assign(new Error('Candidate not found.'), {status: 404});
+        // `permanent` is what stops the queue retrying: without it a 404 spent the
+        // whole six-hour window before the person heard anything.
+        throw Object.assign(new Error('Candidate not found.'), {status: 404, permanent: true});
       }
       return processCandidate(ws, task.payload.candidateId);
     },
     'group-run': async task => {
-      await queueGroupRun(ws, {groupId: task.payload.groupId, message: task.payload.message, directBotId: task.payload.directBotId});
+      // `taskId` makes the run idempotent: a crash between queueing the run and
+      // recording the completion used to queue a second run on recovery.
+      await queueGroupRun(ws, {groupId: task.payload.groupId, message: task.payload.message, directBotId: task.payload.directBotId, taskId: task.id});
     },
     'bot-task': async task => runBotTask(ws, task),
     'agent-job': async task => {
@@ -81,13 +85,13 @@ export function taskHandlers({ws, workspaceId, auth, push, notify, processCandid
       // A job aimed at one agent that is no longer paired is a miss. Falling
       // through would hand it to whichever agent happens to be left.
       if (wanted && !paired.some(a => a.id === wanted)) {
-        throw Object.assign(new Error('That local agent is not paired, or was revoked.'), {status: 404});
+        throw Object.assign(new Error('That local agent is not paired, or was revoked.'), {status: 404, permanent: true});
       }
       const agents = paired
         .map(a => ({id: a.id, permissions: permissionsOf(a)}))
         .filter(a => !wanted || a.id === wanted)
         .filter(a => a.permissions.includes(kind));
-      if (!agents.length) throw new Error('No paired local agent holds the permission this job needs.');
+      if (!agents.length) throw Object.assign(new Error('No paired local agent holds the permission this job needs.'), {status: 409, permanent: true});
       // One agent's refusal must not drop the work the others accepted, so both
       // outcomes are recorded and the task reports them.
       const dispatchedTo = [], refused = [];

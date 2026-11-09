@@ -108,3 +108,24 @@ test('a pass that reads nothing usable says so instead of vanishing', async () =
     assert.match(warned.join('\n'), /Memory consolidation skipped: The model returned no usable memory update\./);
   } finally { console.warn = original; }
 });
+
+test('a book forgotten while the model is answering is not resurrected by the answer', async () => {
+  // "Forget this model" is one click and the model call can take minutes.
+  // `rulebook()` creates a book that is not there, so the write after the call used
+  // to put back everything the person had just deleted - with the model's rules in
+  // it - and stamp `consolidatedAt` on it.
+  const read = bookStore();
+  const forget = async () => { delete read.state.memory.rulebooks.k; return answer(); };
+  const out = await consolidateModel(read, {key: 'k', config, executor: forget});
+  assert.equal(out.skipped, true);
+  assert.match(out.reason, /removed while the model was answering/);
+  assert.equal(read.state.memory.rulebooks.k, undefined, 'the forgotten book stays forgotten');
+
+  // Same rule for an unreadable answer, which is the branch that stamps the
+  // cooldown: the stamp must not land on a book nobody has.
+  const unreadable = bookStore();
+  const forgetThenNothing = async () => { delete unreadable.state.memory.rulebooks.k; return 'nothing I can parse'; };
+  const second = await consolidateModel(unreadable, {key: 'k', config, executor: forgetThenNothing});
+  assert.equal(second.skipped, true);
+  assert.equal(unreadable.state.memory.rulebooks.k, undefined);
+});

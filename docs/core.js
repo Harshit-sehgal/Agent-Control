@@ -57,13 +57,21 @@ export function initialState() {
     {id:'handoff',name:'Handoff',instructions:'Prepare copy/manual posting. Never click Post. When the user tells you what they want, the other bots in this group take the job.',type:'manual',settings:{lead:true}}
   ]}],candidates:[],drafts:[],runs:[],schedules:[],events:[]};
 }
-export function scheduleApproval(draft, min, max, now=Date.now(), random) {
+/** Approve a draft and freeze it, with the same guarantees whenever it goes out. */
+export function scheduleApprovalAt(draft, when, now=Date.now()) {
   if(draft.status!=='pending') throw Object.assign(new Error('Only pending drafts can be approved.'),{status:409});
   if(!cleanText(draft.text)) throw Object.assign(new Error('Draft is empty.'),{status:400});
-  const delay=delayWindow(min,max,random);
+  const at = new Date(when).getTime();
+  if(!Number.isFinite(at)) throw Object.assign(new Error('That time cannot be read.'),{status:400});
   draft.status='scheduled'; draft.approvedText=draft.text; draft.approvedRevision=draft.revision;
-  draft.approvedAt=new Date(now).toISOString(); draft.dueAt=new Date(now+delay).toISOString();
+  draft.approvedAt=new Date(now).toISOString(); draft.dueAt=new Date(at).toISOString();
   return draft;
+}
+export function scheduleApproval(draft, min, max, now=Date.now(), random) {
+  // The delay window is only a way of choosing the time; the approval itself has
+  // to be identical to one scheduled by hand, or a hand-picked time would skip
+  // the frozen text the poster and the due check rely on.
+  return scheduleApprovalAt(draft, now+delayWindow(min,max,random), now);
 }
 export function markDue(draft,now=Date.now()) {
   if(draft.status!=='scheduled') return false;

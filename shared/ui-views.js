@@ -103,17 +103,18 @@ export function draftCard(draft) {
   // either navigates to this page or, with an empty url, does nothing at all.
   const copyReady = draft.status === 'ready' ? btn('Copy text', 'copy-draft', {kind: 'primary', id: draft.id}) + (postHref ? `<a class="btn quiet" href="${esc(postHref)}" target="_blank" rel="noopener noreferrer"><span>Open post</span></a>` : '') : '';
   const actions = editing ? '' : copyReady || (write ? {
-    pending: btn('Approve', 'approve-draft', {kind: 'primary', id: draft.id}) + btn('Edit', 'edit-draft', {id: draft.id}) + btn('Skip', 'reject-draft', {id: draft.id}),
+    pending: btn('Approve', 'approve-draft', {kind: 'primary', id: draft.id}) + btn('Schedule…', 'schedule-draft', {id: draft.id}) + btn('Edit', 'edit-draft', {id: draft.id}) + btn('Skip', 'reject-draft', {id: draft.id}),
     scheduled: btn('Edit', 'edit-draft', {id: draft.id}) + btn('Cancel', 'reject-draft', {id: draft.id}),
   }[draft.status] || '' : '');
   const side = write ? {scheduled: btn('Ready now', 'ready-draft', {id: draft.id, small: true}), ready: btn('I posted it', 'posted-draft', {id: draft.id, kind: 'good', small: true})}[draft.status] || '' : '';
+  const thread = over ? btn('Copy as thread', 'copy-thread', {id: draft.id, small: true, kind: 'quiet'}) : '';
   const mark = {wait: '<i class="dot"></i>', ok: icon(draft.status === 'ready' ? 'checks' : 'check', 15), done: icon('checks', 15), off: ''}[stage.tone];
   return `<article class="draft tone-${stage.tone}" data-draft="${id}">
     <header><span class="draft-to">Reply to ${esc(draft.author)}</span><span class="draft-score">${Number(draft.score || 0)}/100${draft.mode === 'template' ? ' · template' : ''}${draft.revision > 1 ? ` · rev ${Number(draft.revision)}` : ''}${over ? ' · long for X' : ''}</span></header>
     ${body}
     ${open ? evidencePanel(draft) : ''}
     ${actions ? `<div class="card-actions">${actions}${open && !editing && write ? btn('Rewrite', 'rewrite-draft', {id: draft.id, kind: 'ghost'}) : ''}</div>` : ''}
-    <footer class="draft-state">${mark}<span>${esc(stage.line)}</span>${side}</footer>
+    <footer class="draft-state">${mark}<span>${esc(stage.line)}</span>${thread}${side}</footer>
   </article>`;
 }
 

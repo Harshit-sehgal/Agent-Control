@@ -1,7 +1,7 @@
 /** Overlays: the toast, the bottom sheet (#modal) and its confirm/ask helpers.
  * Sheets replace `window.confirm`/`prompt` so a decision never leaves the chat's
  * visual language, and they hand focus back to whatever opened them. */
-import {esc, btn, iconBtn} from './ui-kit.js?v=66c6785991';
+import {esc, btn, iconBtn} from './ui-kit.js?v=6734c0a812';
 
 const el = id => document.getElementById(id);
 let toastTimer = null, lastFocus = null, settle = null;

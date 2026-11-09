@@ -52,15 +52,24 @@ export async function markInterrupted(store){
       say(s,r,runNote(r));
     }
   });
-  failAgentTasks(store, [...taskIds], 'The server restarted before this group run completed.');
+  // Cleanup is best effort: the run flips above are already committed, and a
+  // rejected device-task write must not reject `markInterrupted` - the caller only
+  // logs that, and the workspace would then start with no scheduler, no queue and
+  // no retention until the next restart.
+  try{await failAgentTasks(store, [...taskIds], 'The server restarted before this group run completed.');}
+  catch(error){console.error('Agent task cleanup after a restart:', error.message);}
 }
-export async function queueGroupRun(store,{groupId,message,directBotId=null,checkpoints=false,chatKey=null,browserDepth=0,confirmPlan}={}){
+export async function queueGroupRun(store,{groupId,message,directBotId=null,checkpoints=false,chatKey=null,browserDepth=0,confirmPlan,taskId=null}={}){
   // Validate the request against the store first so a missing group reports 404
   // and a busy group reports 409, instead of the AI-key check shadowing them
   // with a misleading 422 on an instance that simply has no key yet.
   const snapshot=store.read();
   const probe=snapshot.groups.find(g=>g.id===groupId);
   if(!probe)throw Object.assign(new Error('Group not found'),{status:404});
+  // One task, one run. A crash between the run's first write and the task's own
+  // completion re-arms the task, and the retry used to queue the same message a
+  // second time - a duplicate line in the chat and a second paid run.
+  if(taskId){const prior=snapshot.groupRuns?.find(r=>r.taskId===taskId);if(prior)return {runId:prior.id,status:prior.status,deduped:true};}
   if(snapshot.groupRuns?.filter(r=>r.groupId===groupId&&BUSY.includes(r.status)).length>=1)throw Object.assign(new Error('A group run is already active. Wait or retry later.'),{status:409});
   try{planHandoffs(probe,clean(message),{directBotId,guests:summonableGuests(snapshot.groups,groupId,{includeOff:true})});}catch(e){if(e.status)throw e;}
   if(!aiAvailable(store))throw Object.assign(new Error('No AI provider is configured. Add one under You → AI and models, or set AI_API_KEY on the server. GitHub Pages runs a labeled simulation.'),{status:422});
@@ -68,6 +77,7 @@ export async function queueGroupRun(store,{groupId,message,directBotId=null,chec
     coordinationState(s);
     const group=s.groups.find(g=>g.id===groupId);
     if(!group)throw Object.assign(new Error('Group not found'),{status:404});
+    if(taskId){const prior=s.groupRuns.find(r=>r.taskId===taskId);if(prior)return prior.id;}
     if(s.groupRuns.filter(r=>r.groupId===groupId&&BUSY.includes(r.status)).length>=1)throw Object.assign(new Error('A group run is already active. Wait or retry later.'),{status:409});
     const messageText=clean(message);
     const guests=summonableGuests(s.groups,groupId,{includeOff:true});
@@ -78,6 +88,7 @@ export async function queueGroupRun(store,{groupId,message,directBotId=null,chec
     const confirm=confirmPlan===undefined?groupSettings(group).confirmPlan:Boolean(confirmPlan);
     const task=instructed.task?{...instructed.task,confirm}:null;
     const run=createRun({group,message:messageText,directBotId:instructed.directBotId,makeId:randomUUID,checkpoints:Boolean(checkpoints),chatKey,guests,task});
+    if(taskId)run.taskId=taskId;
     if(run.status!=='awaiting_plan')wakeBots(group,run.task?.woke);
     if(run.task)say(s,run,{id:randomUUID(),role:'system',text:`${run.task.summary} ${run.task.doneWhen}${run.status==='awaiting_plan'?' Start it when you are ready.':''}`,runId:run.id,at:stamp()});
     if(run.recipients.length>Math.min(run.maxSteps??MAX_HANDOFFS,MAX_STEPS_LIMIT))throw Object.assign(new Error('Run too long.'),{status:400});
@@ -129,7 +140,15 @@ export async function runBotTask(store,task,{queue=queueGroupRun,available=aiAva
   // Queue first. A 409 or a validation error must not leave a "Scheduled task"
   // line for a run that never started; the queue retries those.
   const result=await queue(store,{groupId,message,directBotId:botId,chatKey,confirmPlan:false});
-  await note(`Scheduled task: ${message}`);
+  // The run is queued and durable; the line in the conversation is not. A failed
+  // note used to reject the handler, which the queue retried - and the retry
+  // queued the same message again, so one reminder cost two model runs. Only a
+  // refused queue may fail the task.
+  // A deduplicated retry already announced the run; announcing it again is the
+  // duplicate this whole path exists to prevent.
+  if(result?.deduped)return result;
+  try{await note(`Scheduled task: ${message}`);}
+  catch(error){console.error('Scheduled task note:', error.message);}
   return result;
 }
 export function runGroup(store,id,executor=executeCustomBot){
@@ -417,11 +436,24 @@ export async function cancelRun(store,id,{actor=null}={}){
     if(!STOPPABLE.includes(r.status))throw Object.assign(new Error(`A ${r.status} run cannot be stopped.`),{status:409});
     const midStep=r.status==='running';
     r.status='cancelled';r.completedAt=stamp();r.checkpoint=null;
+    // A run stopped while a page was out still had that page in flight: the local
+    // device would open it after the person pressed Stop, and the approval card
+    // would enqueue work for a run that no longer exists. Deny the request and
+    // remember its device tasks so the browser is not left holding a lease for a
+    // run nobody is waiting on.
+    const taskIds=[];
+    for(const request of s.browserRequests||[]){
+      if(request.runId!==id||!['pending','dispatched'].includes(request.status))continue;
+      if(request.status==='dispatched')for(const task of request.agentTaskIds||[])taskIds.push(task);
+      request.status='denied';request.updatedAt=stamp();request.error='The run was stopped before this page was opened.';
+    }
     say(s,r,{id:randomUUID(),role:'system',text:midStep?'Stopped. The reply being written when you stopped it was discarded; nothing after it runs.':'Stopped before it started. Nothing ran.',runId:id,at:stamp()});
     activity(s,'group-run','Stopped a bot coordination run',{runId:id,by:actor});
-    return {runId:id,status:'cancelled'};
+    return {runId:id,status:'cancelled',taskIds};
   });
-  return result;
+  if(result.taskIds.length)try{failAgentTasks(store, result.taskIds, 'The run was stopped before this page was opened.');}
+  catch(error){console.error('Agent task cleanup after a stop:', error.message);}
+  return {runId:result.runId,status:result.status};
 }
 
 /** Start or drop a tracked plan that was shown before any bot ran. */

@@ -9,6 +9,7 @@ import {modelKey} from './memory.js';
 import {ACTIVE_DRAFTS, chatTasks, pipelineRows, retryTarget, runBelongsToChat} from './ui-model.js';
 import {esc, icon, avatar, groupAvatar, tintClass, TINT_COUNT, btn, iconBtn, row, box, field, note, empty, tag, pageHead, fullDate} from './ui-kit.js';
 import {store, conversation, isStaticDemo, isAdmin, canWrite, isXGroup, botTint, recentRuns, THEMES, themeChoice} from './ui-store.js';
+import {validHttpUrl} from './core.js';
 import {draftCard, postCard} from './ui-views.js';
 import {ADMIN_PAGES, adminPage, providerModelOptions} from './ui-admin.js';
 
@@ -118,7 +119,14 @@ function tasksSection(conv) {
 function draftsBody() {
   const list = filterDrafts(store.state.drafts, {status: store.prefs.draftStatus, sort: store.prefs.draftSort});
   if (!list.length) return empty('No drafts here', 'Change the filter, or ask the group to draft a reply.');
-  return list.map(d => ACTIVE_DRAFTS.includes(d.status) ? draftCard(d) : `<div class="row"><span class="row-main"><span class="row-title">${esc(d.author)}</span><span class="row-sub">${esc(String(d.text).slice(0, 160))}</span></span>${tag(d.status === 'posted' ? 'Posted' : 'Skipped', d.status === 'posted' ? 'good' : '')}</div>`).join('');
+  // A skipped draft is one click from being usable again, and a posted one knows
+  // where it went: this row is the only place left that can say either.
+  const write = canWrite();
+  return list.map(d => {
+    if (ACTIVE_DRAFTS.includes(d.status)) return draftCard(d);
+    const link = validHttpUrl(d.postedUrl);
+    return `<div class="row" data-draft-row="${esc(d.id)}"><span class="row-main"><span class="row-title">${esc(d.author)}</span><span class="row-sub">${esc(String(d.text).slice(0, 160))}</span></span><span class="row-actions">${link ? `<a class="btn quiet small" href="${esc(link)}" target="_blank" rel="noopener noreferrer"><span>Open post</span></a>` : ''}${d.status === 'rejected' && write ? btn('Restore', 'restore-draft', {id: d.id, small: true}) : ''}${tag(d.status === 'posted' ? 'Posted' : 'Skipped', d.status === 'posted' ? 'good' : '')}</span></div>`;
+  }).join('');
 }
 function draftsSection() {
   // Count what the default filter below shows, not just `pending`: the header

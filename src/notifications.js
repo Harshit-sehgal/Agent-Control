@@ -25,7 +25,7 @@ import {resolvePublicAddress, pinnedRequest} from '../agent/net-guard.mjs';
 import crypto from 'node:crypto';
 import {encryptJson, decryptJson} from './vault.js';
 import {smtpConfig, sendMail} from './mail.js';
-import {MAX_ATTEMPTS_DEFAULT} from '../shared/tasks.js';
+import {MAX_ATTEMPTS_DEFAULT, RETRY_STARTED, RETRY_WINDOW_MS} from '../shared/tasks.js';
 
 const now = () => new Date().toISOString();
 const MAX_IN_APP = 200;
@@ -222,7 +222,22 @@ export function reapOrphanedDeliveries(store, {now = Date.now(), graceMs = ORPHA
      AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.kind='notification'
        AND json_valid(t.payload) AND json_extract(t.payload,'$.notificationId')=n.id)`, cutoff);
   for (const row of orphans) setStatus(store, row.id, row.channel, 'failed', 'The delivery task was never queued.');
-  return orphans.length;
+  // A row whose task finished but whose own status write was refused (a busy or
+  // restoring workspace) is not an orphan by the query above - the task exists -
+  // and it used to read `queued` in the feed forever with nothing left to re-drive
+  // it. Settle it from the task's own outcome.
+  const settled = store.all(
+    `SELECT n.id, n.channel, t.status AS task_status, t.last_error FROM notifications n
+     JOIN tasks t ON t.kind='notification' AND json_valid(t.payload)
+       AND json_extract(t.payload,'$.notificationId')=n.id
+       AND json_extract(t.payload,'$.channel')=n.channel
+     WHERE n.status='queued' AND n.created_at < ?
+     AND t.status IN ('done','failed','cancelled')`, cutoff);
+  for (const row of settled) {
+    if (row.task_status === 'done') setStatus(store, row.id, row.channel, 'sent');
+    else setStatus(store, row.id, row.channel, 'failed', row.last_error || 'The delivery did not finish.');
+  }
+  return orphans.length + settled.length;
 }
 
 /** Move one channel's own row and nothing else. The channel is part of the
@@ -257,8 +272,24 @@ export async function deliver(store, task) {
     setStatus(store, id, channel, 'sent');
     return result;
   } catch (error) {
-    const spent = Number(task.attempts || 0) >= Number(task.maxAttempts ?? MAX_ATTEMPTS_DEFAULT);
-    if (spent) setStatus(store, id, channel, 'failed', error?.message);
+    // The queue decides when a task is really finished: `failTask` re-arms while
+    // the attempt count *and* the six-hour window still allow it. Marking the row
+    // failed on the count alone told the person "failed" hours before the last
+    // attempt, so a webhook that recovered on the next try silently flipped the
+    // line they had already acted on back to `sent`.
+    const attempts = Number(task.attempts || 0);
+    const budget = Number(task.maxAttempts ?? MAX_ATTEMPTS_DEFAULT);
+    // The queue writes the anchor as `retryStartedAt` (`shared/tasks.js`). Reading
+    // `retryStarted` meant the window was never spent, so a channel that had used
+    // every attempt stayed `queued` in the feed forever.
+    const started = Number(task.payload?.[RETRY_STARTED]);
+    // No anchor yet means the window has just opened: `failTask` writes it on the
+    // first failure, so a missing one is the first failure, not a spent budget.
+    const windowSpent = Number.isFinite(started) && Date.now() - started >= RETRY_WINDOW_MS;
+    if (attempts >= budget && windowSpent) setStatus(store, id, channel, 'failed', error?.message);
+    // Still in doubt: keep the row `queued` and record why, so the feed can say
+    // "retrying" instead of showing nothing.
+    else setStatus(store, id, channel, 'queued', error?.message);
     throw error;
   }
 }

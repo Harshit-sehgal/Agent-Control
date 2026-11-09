@@ -11,6 +11,7 @@ async function fakeSmtp({
   pass = 'hunter2',
   rejectRecipient = false,
   starttls = false,
+  echoAuth = false,
 } = {}) {
   const state = {commands: [], auth: null, mailFrom: null, recipient: null, message: null};
   const sockets = new Set();
@@ -43,7 +44,7 @@ async function fakeSmtp({
           else {
             mode = 'command';
             const ok = state.auth.user === user && state.auth.pass === pass;
-            socket.write(ok ? '235 2.7.0 accepted\r\n' : '535 5.7.8 authentication failed\r\n');
+            socket.write(echoAuth ? `534 5.7.9 refused: ${line}\r\n` : ok ? '235 2.7.0 accepted\r\n' : '535 5.7.8 authentication failed\r\n');
           }
           continue;
         }
@@ -64,7 +65,9 @@ async function fakeSmtp({
             const parts = Buffer.from(argument || '', 'base64').toString('utf8').split('\u0000');
             state.auth = {user: parts[1] || '', pass: parts[2] || ''};
             const ok = state.auth.user === user && state.auth.pass === pass;
-            socket.write(ok ? '235 2.7.0 accepted\r\n' : '535 5.7.8 authentication failed\r\n');
+            // A relay that quotes the command it did not like: the exact shape
+            // that put an AUTH PLAIN argument into a stored error.
+            socket.write(echoAuth ? `534 5.7.9 refused: ${line}\r\n` : ok ? '235 2.7.0 accepted\r\n' : '535 5.7.8 authentication failed\r\n');
           } else {
             mode = 'login-user';
             socket.write('334 VXNlcm5hbWU6\r\n');
@@ -329,4 +332,36 @@ test('a server that lies about STARTTLS fails at the handshake, before any crede
     assert.ok(!seen.some(line => /^AUTH\b/i.test(line)) && !seen.some(line => /^MAIL FROM/i.test(line)),
       'nothing past the handshake was sent, so no credential crossed the socket');
   } finally { await sink.close(); }
+});
+
+test('an echoed AUTH line cannot leak the credentials, plain or encoded', async () => {
+  const user = 'x@y.zz', pass = 'S3cr3t-pass-value';
+  const server = await fakeSmtp({user, pass, echoAuth: true, capabilities: ['AUTH PLAIN LOGIN']});
+  try {
+    // AUTH PLAIN's argument is b64("\0user\0pass"); its length is not a
+    // multiple of three here, so b64(pass) alone is not a substring of it and
+    // redacting the plain password left a decodable blob in the message.
+    const error = await sendMail({to: 'ops@example.com', subject: 's', text: 'b'},
+      {...config(server.port), user, pass}).catch(e => e);
+    const b64 = value => Buffer.from(value, 'utf8').toString('base64');
+    const message = String(error.message);
+    for (const secret of [pass, b64(pass), b64(`\u0000${user}\u0000${pass}`)]) {
+      assert.equal(message.includes(secret), false, `the error still carries ${secret}: ${message}`);
+    }
+    assert.match(message, /534/);
+  } finally { await server.close(); }
+});
+
+test('a long capability list is read to the end, so STARTTLS is found where it is offered', async () => {
+  // The reply is one line per capability. A client that truncates the joined
+  // text before looking for STARTTLS reports "the server does not offer it" for
+  // a server that does, and the mail is never sent.
+  const long = Array.from({length: 13}, (_, i) => `250-X-EXTENSION-${String(i).padStart(2, '0')}-ABCDEFGHIJKLMNOPQRSTUVWXYZ`);
+  const server = await fakeSmtp({capabilities: [...long.map(row => row.slice(4)), 'STARTTLS'], requireTls: false});
+  try {
+    assert.ok(long.join(' ').length > 400, 'the list has to overflow the old 400-character cut');
+    const error = await sendMail({to: 'ops@example.com', subject: 's', text: 'b'}, {...config(server.port), requireTls: true}).catch(e => e);
+    assert.match(String(error.message), /offered STARTTLS but refused/);
+    assert.ok(server.state.commands.includes('STARTTLS'), 'the client asked for the upgrade it was offered');
+  } finally { await server.close(); }
 });

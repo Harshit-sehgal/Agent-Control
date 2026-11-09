@@ -559,3 +559,42 @@ test('pruning page history never drops a request that is still open', () => {
   assert.deepEqual(pruneBrowserRequests({browserRequests: [{id: 'one', status: 'denied'}]}).map(r => r.id), ['one']);
   assert.deepEqual(pruneBrowserRequests({}), []);
 });
+
+test('a document write that fails after the task row was inserted fails the task too', async () => {
+  const {dir, store} = await harness();
+  try {
+    const {code} = agent.createPairing(store, 'default', {});
+    const device = agent.redeemPairing(store, {code, name: 'Laptop', permissions: ['browser.capture']});
+    const now = new Date().toISOString();
+    await store.update(s => {
+      wf.migrate(s);
+      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}];
+      s.browserRequests = [{id: 'fr-commit', botId: 'web', botName: 'Web', groupId: 'lab', chatKey: 'web', url: 'https://example.com/', steps: [], kind: 'browser.capture', depth: 0, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: now, updatedAt: now}];
+    });
+    const orig = store.update.bind(store);
+    let calls = 0;
+    store.update = async fn => {
+      calls += 1;
+      // The claim commits. The next write runs the callback - so the agent task
+      // INSERT really lands, it is a `store.run` of its own - and then fails, as a
+      // paused workspace or a full disk does.
+      if (calls === 2) {
+        fn(structuredClone(store.read()));
+        throw Object.assign(new Error('The state file could not be written.'), {status: 503});
+      }
+      return orig(fn);
+    };
+    await assert.rejects(dispatchBrowserRequest(store, 'fr-commit'), error => error.status === 503);
+    store.update = orig;
+    const left = store.read().browserRequests.find(r => r.id === 'fr-commit');
+    assert.equal(left.status, 'pending', 'the request goes back for a person to approve again');
+    const orphan = store.get("SELECT status FROM agent_tasks WHERE idempotency_key='browser:fr-commit'");
+    // The row is dropped (it never reached a device) or failed (a device already
+    // held it). Queued is the one outcome that is wrong: a page would open.
+    assert.ok(!orphan || orphan.status !== 'queued', `the committed task row must not stay claimable, got ${orphan?.status}`);
+    assert.equal(agent.claimAgentTasks(store, device.agentId).length, 0, 'the device is never asked to open a page for a request that is pending again');
+    const sent = await dispatchBrowserRequest(store, 'fr-commit');
+    assert.equal(sent.status, 'dispatched');
+    assert.equal(agent.claimAgentTasks(store, device.agentId).length, 1, 'approving again works, because the dead task is out of the way');
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});

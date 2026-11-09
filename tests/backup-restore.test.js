@@ -99,3 +99,46 @@ test('sync refuses to delete a workspace the restore did not name', async () => 
     await fs.rm(dir, {recursive: true, force: true});
   }
 });
+
+test('a backup whose JSON column cannot be parsed is refused before anything is written', async () => {
+  const dir = await temp();
+  try {
+    const store = await new SqliteStore(path.join(dir, 'state.db'), path.join(dir, 'state.json')).init();
+    store.run("INSERT INTO workspaces (id,name,created_at) VALUES ('default','Primary workspace',?)", new Date().toISOString());
+    await store.update(s => {
+      wf.migrate(s);
+      s.events.unshift({id: 'e-kept', type: 'task', message: 'Kept', meta: {note: 'fine'}, createdAt: new Date().toISOString()});
+      s.candidates.unshift({id: 'c-kept', url: 'https://x.com/a/status/1', author: '@a', text: 'Original post', status: 'new', createdAt: new Date().toISOString()});
+    });
+    const document = JSON.parse(JSON.stringify(backup.exportBackup(store)));
+    // `validateBackup` parsed a fixed list of JSON columns; `events.meta` was not
+    // one of them. The import transaction therefore committed, then the cache
+    // rebuild threw a raw SyntaxError: the operator saw a 500 that said nothing
+    // had happened, the restore route skipped its bookkeeping, and the next
+    // unrelated write re-saved the empty document over the restore.
+    const row = document.tables.events.find(event => event.id === 'e-kept');
+    assert.ok(row, 'the exported backup holds the seeded event');
+    row.meta = '{not json';
+    const crypto = await import('node:crypto');
+    document.checksum = crypto.createHash('sha256').update(JSON.stringify(document.tables)).digest('hex');
+
+    const restored = await new SqliteStore(path.join(dir, 'restored.db'), path.join(dir, 'restored.json')).init();
+    // Something of its own already in the target, so "the document survived" is
+    // observable: a committed-then-thrown import would have written the backup
+    // rows and, after the cache rebuild failed, left the target's document empty.
+    await restored.update(s => s.candidates.unshift({id: 'c-target', url: 'https://x.com/b/status/2', author: '@b', text: 'Target post', status: 'new', createdAt: new Date().toISOString()}));
+    await assert.rejects(
+      async () => backup.importBackup(restored, document, {force: true, primaryWorkspace: true}),
+      error => /events.*meta|JSON/i.test(String(error.message)));
+
+    // Nothing was written: the live document still holds the row the broken backup
+    // would have replaced it with.
+    await restored.update(s => s);
+    assert.ok(restored.read().candidates.some(c => c.id === 'c-target'), 'a refused import must not leave an empty document behind');
+    assert.ok(!restored.read().candidates.some(c => c.id === 'c-kept'), 'and must not have written the backup either');
+    assert.ok(store.read().candidates.some(c => c.id === 'c-kept'), 'the source installation is untouched');
+    await store.close?.(); await restored.close?.();
+  } finally {
+    await fs.rm(dir, {recursive: true, force: true});
+  }
+});

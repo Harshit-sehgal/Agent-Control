@@ -84,6 +84,25 @@ export function botTaskSheet() {
   </form>`, {title: 'Schedule a task', sub: `${conv.isTeam ? conv.group.name : conv.name} answers in this chat.`});
   toggleReminderFields('bot-task-form');
 }
+/** A `datetime-local` value is the wall clock the person is looking at, so the
+ * sheet builds and sends it in local time and the server only ever sees an ISO
+ * instant. */
+function localInput(when) {
+  const d = new Date(when.getTime() - when.getTimezoneOffset() * 60000);
+  return d.toISOString().slice(0, 16);
+}
+/** Approve now, publish at a time a person picked instead of the delay window. */
+export function scheduleDraftSheet(id) {
+  const draft = store.state.drafts.find(d => d.id === id);
+  if (!draft) throw new Error('That draft is no longer here.');
+  const soon = new Date(Date.now() + 30 * 60000);
+  openSheet(`<form id="approve-form" class="form">
+    <input type="hidden" name="draft" value="${esc(id)}">
+    ${field('Publish at', `<input class="input" type="datetime-local" name="at" required autofocus value="${esc(localInput(soon))}" min="${esc(localInput(new Date(Date.now() + 60000)))}">`)}
+    ${btn('Approve for that time', null, {kind: 'primary', type: 'submit', wide: true})}
+  </form>${note('Approving freezes the exact text. If you edit it afterwards, the approval is cleared.')}`, {title: 'Schedule this draft', sub: `${esc(draft.author)} · revision ${Number(draft.revision)}`});
+}
+
 /** Repeat shows the interval; Once swaps it for a date and time. */
 export function toggleReminderFields(formId = 'schedule-form') {
   const form = el(formId); if (!form) return;
@@ -112,6 +131,20 @@ function commands() {
   }
   return items;
 }
+/** Drafts and captured posts by their text, not just their names: "where was
+ * that reply about the pricing page" is the search people actually run, and the
+ * palette is the only search the app has. */
+function textResults(q) {
+  if (q.length < 2) return [];
+  const feed = groups().find(isXGroup); if (!feed) return [];
+  const team = teamKey(feed.id), clip = text => { const s = String(text || '').replace(/\s+/g, ' ').trim(); return s.length > 70 ? `${s.slice(0, 70)}…` : s; };
+  const out = [];
+  for (const d of (store.state.drafts || []).filter(d => String(d.text || '').toLowerCase().includes(q)).slice(0, 4))
+    out.push({label: clip(d.text), hint: `Draft · ${d.status}`, run: () => go({chat: team, info: 'drafts'})});
+  for (const c of (store.state.candidates || []).filter(c => `${c.text || ''} ${c.author || ''}`.toLowerCase().includes(q)).slice(0, 4))
+    out.push({label: clip(c.text), hint: `Post · ${c.author || 'unknown author'}`, run: () => go({chat: team, info: 'posts'})});
+  return out;
+}
 export const paletteOpen = () => !el('command').classList.contains('hidden');
 /** Focus never leaves #command-input (the arrows only move a class), so the input
  * is the combobox and the highlighted option is announced through
@@ -126,7 +159,9 @@ function syncCommandActive() {
 }
 export function updateCommandResults(value = '') {
   const q = value.trim().toLowerCase();
-  entries = commands().filter(x => `${x.label} ${x.hint}`.toLowerCase().includes(q)).slice(0, 16);
+  // What matched by name first, then what matched by text: a page called
+  // "Waiting on you" should not be pushed below a draft that quotes the word.
+  entries = [...commands().filter(x => `${x.label} ${x.hint}`.toLowerCase().includes(q)), ...textResults(q)].slice(0, 16);
   const area = el('command-results'); if (!area) return;
   area.innerHTML = entries.length ? entries.map((entry, i) => `<button type="button" class="command-item${i === 0 ? ' selected' : ''}" id="command-item-${i}" data-action="command-choice" data-index="${i}" role="option" aria-selected="${i === 0}"><span>${esc(entry.label)}</span><small>${esc(entry.hint)}</small></button>`).join('') : '<div class="empty"><strong>Nothing matches</strong></div>';
   area.setAttribute('aria-label', entries.length ? `${entries.length} results` : 'No results');
@@ -141,7 +176,7 @@ export function openCommandPalette() {
   const origin = focusOrigin();
   closeSheet(); captureFocus(origin || undefined);
   const layer = el('command'); layer.classList.remove('hidden');
-  layer.innerHTML = `<div class="command-card" role="dialog" aria-modal="true" aria-label="Quick navigation"><label class="search">${icon('search', 18)}<input id="command-input" role="combobox" aria-label="Search pages and bots" aria-autocomplete="list" aria-expanded="true" aria-controls="command-results" aria-haspopup="listbox" autocomplete="off" placeholder="Jump to a bot, group or page" maxlength="120"></label><div class="command-results" id="command-results" role="listbox"></div><p class="command-foot">Up and Down to move · Enter to open · Esc to close</p></div>`;
+  layer.innerHTML = `<div class="command-card" role="dialog" aria-modal="true" aria-label="Quick navigation"><label class="search">${icon('search', 18)}<input id="command-input" role="combobox" aria-label="Search pages and bots" aria-autocomplete="list" aria-expanded="true" aria-controls="command-results" aria-haspopup="listbox" autocomplete="off" placeholder="Search chats, bots, drafts and posts" maxlength="120"></label><div class="command-results" id="command-results" role="listbox"></div><p class="command-foot">Up and Down to move · Enter to open · Esc to close</p></div>`;
   updateCommandResults(); el('command-input').focus();
 }
 export function chooseCommand(index) { const entry = entries[index]; if (!entry) return; closeCommandPalette(); entry.run(); }

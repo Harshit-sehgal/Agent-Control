@@ -62,3 +62,22 @@ test('no external font or stylesheet origin is imported and the CSP declares non
   assert.match(CSP, /style-src 'self' 'unsafe-inline'/);
   assert.match(css, /--font:system-ui,/, 'app.css should use the system font stack.');
 });
+
+test('HSTS spelled the way every other flag is spelled turns the header on', async () => {
+  // `HSTS=true` used to mean "off" while `SMTP_REQUIRE_TLS=false` was the one
+  // that meant off: an operator asking for the control silently got none.
+  const saved = {HSTS: process.env.HSTS, PUBLIC_ORIGIN: process.env.PUBLIC_ORIGIN};
+  try {
+    delete process.env.PUBLIC_ORIGIN;
+    for (const [value, expected] of [['true', true], ['TRUE', true], ['1', true], ['on', true], ['yes', true], ['0', false], ['', false], ['maybe', false]]) {
+      if (value === '') delete process.env.HSTS; else process.env.HSTS = value;
+      const mod = await import(`../src/http.js?hsts=${encodeURIComponent(value)}`);
+      assert.equal(mod.HSTS_ENABLED, expected, `HSTS=${JSON.stringify(value)}`);
+      assert.equal(mod.SECURITY['Strict-Transport-Security'] !== undefined, expected, `header for HSTS=${JSON.stringify(value)}`);
+    }
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
+});

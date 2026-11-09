@@ -13,6 +13,25 @@ import {DEFAULT_WORKSPACE, ROLES, clearCookie} from './auth.js';
 import {fail} from './http.js';
 import {reply} from './router.js';
 
+/** The rows a removed account owns in the *workspace* database, cleared in or
+ * before the caller's own transaction. The account itself lives in the primary
+ * database, so the two can never share a commit; every caller clears this side
+ * first, which leaves (at worst) an account whose feed is already gone.
+ *
+ * A paired device belongs here too. It is a live HMAC credential with the
+ * permissions it was granted and its `revoked_at` is written by no one else, so
+ * leaving it behind let a removed person's laptop keep claiming work. */
+function clearWorkspaceAccount(store, {userId, email}) {
+  store.run('DELETE FROM notification_prefs WHERE user_id=?', userId);
+  store.run('DELETE FROM notifications WHERE user_id=?', userId);
+  if (!email) return;
+  const stamp = new Date().toISOString();
+  store.run("UPDATE agents SET status='revoked', revoked_at=?, secret_enc=NULL WHERE paired_by=? AND revoked_at IS NULL", stamp, email);
+  store.run(`UPDATE agent_tasks SET status='failed', error=?, lease_until=NULL, updated_at=?, completed_at=?
+    WHERE status IN ('queued','running') AND agent_id IN (SELECT id FROM agents WHERE paired_by=?)`,
+  'The device belonged to an account that was removed.', stamp, stamp, email);
+}
+
 export function accountRoutes(router, {auth, workspaces}) {
   // The signed-in user's own account and sessions.
   router.add('GET', '/api/me', 'viewer', c => ({email: c.actor.email, role: c.actor.role}));
@@ -22,6 +41,16 @@ export function accountRoutes(router, {auth, workspaces}) {
   router.add('DELETE', '/api/sessions/:id', 'viewer', c => { if (!auth.revokeSession(c.actor.userId, c.params.id)) fail('Session not found.', 404); return {ok: true}; });
   router.add('DELETE', '/api/account', 'viewer', async c => {
     const b = await c.body();
+    // The password and the last-owner check run before a single row here is
+    // touched: a typo must not cost the caller their paired devices.
+    const me = auth.assertCanDeleteAccount(c.actor.userId, b.password);
+    // `selfDeleteAccount` removes the account and every membership it had, so
+    // the rows that go with it are in *every* workspace's database, not only
+    // the one this request happened to be sent from. The search path opens
+    // every workspace a member belongs to, so all of them are here.
+    for (const {store} of workspaces.all()) {
+      store.transaction(() => clearWorkspaceAccount(store, {userId: c.actor.userId, email: me.email}));
+    }
     auth.selfDeleteAccount(c.actor.userId, b.password);
     return reply(200, {ok: true}, {'Set-Cookie': clearCookie()});
   });
@@ -44,11 +73,8 @@ export function accountRoutes(router, {auth, workspaces}) {
     // through the same function `auth.deleteUser` uses below: a 404 or 409 that
     // lands after this step would have removed the person's notifications while
     // telling the admin the removal did not happen.
-    auth.assertCanRemoveUser(c.actor, c.params.id);
-    c.store.transaction(() => {
-      c.store.run('DELETE FROM notification_prefs WHERE user_id=?', c.params.id);
-      c.store.run('DELETE FROM notifications WHERE user_id=?', c.params.id);
-    });
+    const target = auth.assertCanRemoveUser(c.actor, c.params.id);
+    c.store.transaction(() => clearWorkspaceAccount(c.store, {userId: c.params.id, email: target.email}));
     return auth.deleteUser(c.actor, c.params.id);
   });
 
@@ -164,12 +190,17 @@ export function accountRoutes(router, {auth, workspaces}) {
     const restore = async store => {
       const result = backup.importBackup(store, b, {force: Boolean(b.force), primaryWorkspace: c.actor.workspaceId === DEFAULT_WORKSPACE});
       // A backup of the first workspace carries the list of workspaces.
-      await workspaces.sync({discard: discarding});
-      await store.update(s => activity(s, 'backup', `Restored a backup into this installation (${result.restored} rows).`));
+      const {created = []} = (await workspaces.sync({discard: discarding})) || {};
+      // A backup document carries one workspace's data plus the account rows.
+      // Any workspace it names but did not carry has just been started empty,
+      // and a 200 that does not say so reads as "everything came back".
+      const missing = created.length ? ` ${created.length === 1 ? 'One workspace it names had' : `${created.length} workspaces it names had`} no data in the file and ${created.length === 1 ? 'was' : 'were'} started empty: ${created.join(', ')}.` : '';
+      await store.update(s => activity(s, 'backup', `Restored a backup into this installation (${result.restored} rows).${missing}`));
       // A primary restore deletes every session (see backup.importBackup), so
       // the caller's cookie is dead the moment this returns: say so instead of
       // answering 200 as if they were still signed in.
-      return c.actor.workspaceId === DEFAULT_WORKSPACE ? {...result, signedOut: true} : result;
+      const answered = c.actor.workspaceId === DEFAULT_WORKSPACE ? {...result, signedOut: true} : result;
+      return created.length ? {...answered, startedEmpty: created} : answered;
     };
     // A primary restore replaces global memberships and sessions, so fence
     // work in every workspace while those account records are being replaced.

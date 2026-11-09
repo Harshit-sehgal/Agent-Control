@@ -63,7 +63,10 @@ test('chat clearing and sensitive changes require confirmation',()=>{
  // window.confirm was replaced by the in-app confirmSheet; it must still gate
  // every destructive or record-changing action.
  assert.match(js,/confirmSheet\('Clear this conversation/);
- assert.match(js,/confirmSheet\('Did you post this on X yourself\?'/);
+ // "I posted it" asks one question, and that question is also where the link is
+ // recorded: a second sheet after a confirm reads as "did that work?".
+ assert.match(js,/askSheet\('Did you post this on X yourself\?'/);
+ assert.match(js,/await draftOp\(b\.dataset\.id, 'posted', 'Marked as posted\.', url\.trim\(\) \? \{url: url\.trim\(\)\} : \{\}\)/);
  assert.match(js,/confirmSheet\('Remove this reminder/);
  assert.match(js,/confirmSheet\('Remove the sample posts/);
  assert.match(js,/confirmSheet\('Remove this source/);

@@ -88,6 +88,37 @@ test('editing a draft always invalidates a prior approval and schedule', () => {
   assert.throws(() => draftAction(s, draft.id, 'ready'), /Only scheduled/);
 });
 
+test('an approval can be pinned to a time, and only a sane one', () => {
+  const s = store();
+  const c = addCandidate(s, {url: 'https://x.com/a/status/6', text: 'A candidate used to test a pinned approval'}).candidate;
+  const draft = finishProcessing(s, c.id, {score: 50}, {text: 'Pinned copy', mode: 'template', note: 'n'});
+  const soon = Date.now() + 30 * 60000;
+  assert.throws(() => draftAction(s, draft.id, 'approve', {dueAt: 'next tuesday'}), /cannot be read/);
+  assert.throws(() => draftAction(s, draft.id, 'approve', {dueAt: new Date(Date.now() - 60000).toISOString()}), /at least a minute/);
+  assert.throws(() => draftAction(s, draft.id, 'approve', {dueAt: new Date(Date.now() + 8 * 86400000).toISOString()}), /within the next 7 days/);
+  // A refused time changes nothing: the draft is still waiting for a decision.
+  assert.equal(draft.status, 'pending');
+  const pinned = draftAction(s, draft.id, 'approve', {dueAt: new Date(soon).toISOString()});
+  assert.equal(pinned.status, 'scheduled');
+  assert.equal(new Date(pinned.dueAt).getTime(), soon, 'the exact instant is kept, not rounded to the delay window');
+  // The frozen text is what makes the due check safe, so a pinned approval is the
+  // same approval as a delay-window one.
+  assert.equal(pinned.approvedText, 'Pinned copy');
+  assert.equal(pinned.approvedRevision, pinned.revision);
+});
+
+test('a skipped draft can come back, and nothing else can', () => {
+  const s = store();
+  const c = addCandidate(s, {url: 'https://x.com/a/status/7', text: 'A candidate used to test restoring a skip'}).candidate;
+  const draft = finishProcessing(s, c.id, {score: 30}, {text: 'Draft worth keeping', mode: 'template', note: 'n'});
+  assert.throws(() => draftAction(s, draft.id, 'restore'), /Only a skipped draft/);
+  draftAction(s, draft.id, 'reject');
+  const back = draftAction(s, draft.id, 'restore');
+  assert.equal(back.status, 'pending');
+  assert.equal(back.text, 'Draft worth keeping', 'the text is the one that was skipped, not a rewrite');
+  assert.ok(s.events.some(e => e.type === 'restore' && e.meta?.draftId === draft.id), 'the history says it came back');
+});
+
 test('posted requires a matching ready approval and cannot be edited after', () => {
   const s = store();
   const c = addCandidate(s, {url: 'https://x.com/a/status/5', text: 'Yet another long enough candidate body here'}).candidate;
@@ -95,9 +126,12 @@ test('posted requires a matching ready approval and cannot be edited after', () 
   assert.throws(() => draftAction(s, draft.id, 'posted'), /Only ready/);
   draftAction(s, draft.id, 'approve', {minDelay: 0, maxDelay: 0});
   draftAction(s, draft.id, 'ready');
-  const posted = draftAction(s, draft.id, 'posted');
+  assert.throws(() => draftAction(s, draft.id, 'posted', {url: 'javascript:alert(1)'}), /not a web address/);
+  assert.equal(draft.status, 'ready', 'a refused link does not consume the ready state');
+  const posted = draftAction(s, draft.id, 'posted', {url: ' https://x.com/a/status/5 '});
   assert.equal(posted.status, 'posted');
   assert.ok(posted.postedAt);
+  assert.equal(posted.postedUrl, 'https://x.com/a/status/5', 'the link is recorded without the whitespace somebody pasted');
   assert.throws(() => editDraft(s, draft.id, 'too late'), /cannot be edited/);
   assert.throws(() => draftAction(s, draft.id, 'reject'), /Cannot reject/);
 });

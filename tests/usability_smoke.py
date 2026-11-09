@@ -18,6 +18,7 @@ import sys
 import tempfile
 import threading
 import traceback
+from datetime import datetime, timedelta
 from pathlib import Path
 from playwright.async_api import async_playwright, expect
 
@@ -163,7 +164,10 @@ async def approve_to_posted(page, base):
     await expect(sheet).to_be_hidden()
     await expect(card.locator('.draft-state')).to_contain_text('Ready. Post it on X yourself.')
     await trigger.click()
-    await page.locator('[data-action="sheet-confirm"]').click()
+    # The confirming question is also where the link goes: one sheet, and the
+    # posted row can open what was posted instead of forgetting it.
+    await page.locator('#ask-form textarea').fill('https://x.com/example/status/42')
+    await page.locator('#ask-form button[type=submit]').click()
     await expect(sheet).to_be_hidden()
     await expect(card).to_have_class(re.compile(r'tone-done'))
     await expect(card.locator('.draft-state')).to_contain_text('Posted by you.')
@@ -174,6 +178,31 @@ async def approve_to_posted(page, base):
     await page.locator('#draft-status').select_option('posted')
     await expect(page.locator('#approval-results .row')).to_have_count(1)
     await expect(page.locator('#approval-results .tag')).to_have_text('Posted')
+    await expect(page.locator('#approval-results .row a', has_text='Open post')).to_have_attribute('href', 'https://x.com/example/status/42')
+
+
+async def schedule_exact_time(page, base):
+    """Approve now, publish at a time a person picked rather than the delay window."""
+    card = await draft_one(page, base)
+    await card.locator('[data-action="schedule-draft"]').click()
+    sheet = page.get_by_role('dialog', name='Schedule this draft')
+    await expect(sheet).to_be_visible()
+    field = page.locator('#approve-form input[name=at]')
+    # The sheet opens on a real wall-clock value in local time, a minute or more out.
+    assert await field.input_value(), 'the time field starts filled in'
+    await field.fill('2030-01-01T09:30')
+    await page.locator('#approve-form button[type=submit]').click()
+    # Seven days is the horizon, so 2030 is refused, the draft stays undecided, and
+    # the sheet stays open on the value the person has to correct.
+    await expect(page.locator('#toast')).to_contain_text('within the next 7 days')
+    await expect(sheet).to_be_visible()
+    await expect(card.locator('[data-action="approve-draft"]')).to_have_count(1)
+    await field.fill((datetime.now() + timedelta(minutes=45)).strftime('%Y-%m-%dT%H:%M'))
+    await page.locator('#approve-form button[type=submit]').click()
+    await expect(sheet).to_be_hidden()
+    await expect(card).to_have_class(re.compile(r'tone-ok'))
+    await expect(card.locator('.draft-state')).to_contain_text('Approved. Ready')
+    await expect(page.locator('#toast')).to_contain_text('Approved for that time')
 
 
 async def edit_skip_rewrite(page, base):
@@ -668,6 +697,7 @@ async def main():
             h = Harness(browser, base, shots)
             print(f'Usability smoke against {base}')
             await h.scenario('draft: approve -> ready -> posted via confirm sheet', approve_to_posted)
+            await h.scenario('draft: pick the exact minute it goes out', schedule_exact_time)
             await h.scenario('draft: edit, cancel, rewrite, skip', edit_skip_rewrite)
             await h.scenario('drafts list: filters persist', draft_filters)
             await h.scenario('posts: share via + sheet, search and filters', share_and_find_post)

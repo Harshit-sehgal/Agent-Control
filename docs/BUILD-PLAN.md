@@ -90,6 +90,7 @@ work should be added as a fresh section.
 
 ## Phase O — adversarial security review
 - [x] Owner-only backup and restore; restore validates roles, links and column names
+- [x] A restore refuses a document whose memberships name no workspace, or that carries account rows with no accounts in the first workspace, and reports the workspaces it had to start empty
 - [x] Hashed session ids; one answer for unknown address and wrong password
 - [x] Sign-in and forgot-password attempts counted before the body is read
 - [x] Capture token withheld from viewers; request-made notification tasks refused
@@ -182,3 +183,12 @@ work should be added as a fresh section.
 - [x] A failure carries the server's own reply code, and redacts the password, the user and the recipient from the message that reaches the notification feed
 - [x] Docs: `.env.example`, `docs/DEPLOYMENT.md`, `docs/ROADMAP.md`, `SECURITY.md`
 - [x] Tests (`tests/smtp.test.js` against a scripted loopback server, plus the relay/SMTP precedence case in `tests/notifications.test.js`); check and test green
+
+## Phase Y — the moves an approval queue was missing
+- [x] **Approve at a time you pick**: `PATCH/POST /api/drafts/:id/approve {dueAt}` pins the exact instant (a minute to 7 days out, refused otherwise and the draft stays pending), through the same `scheduleApprovalAt` the delay window now uses, so the frozen text and revision are identical either way
+- [x] `Schedule…` on a pending draft card opens the one field that matters, in local time; the server only ever sees an ISO instant
+- [x] **Restore a skipped draft** (`POST /api/drafts/:id/restore`, `restore-draft`): a confirmed skip is reversible, because the captured post and its evidence were never touched
+- [x] **Say where a post went** when marking a draft posted: the link is optional, validated as a web address, and rendered as one on the posted row
+- [x] **Copy as thread**: a draft over X's 280 is cut on word boundaries by `threadParts` (`shared/ui-model.js`), nothing dropped, and the card says how many posts it needs
+- [x] **The palette searches text**, not only names: drafts and captured posts match by their words and open the section they live in
+- [x] Tests: `tests/workflow.test.js` (pinned approval, its three refusals, restore, posted link), `tests/ui-model.test.js` (`threadParts`, threaded length line), `tests/usability.test.js` (the posted question records a link); check and test green
