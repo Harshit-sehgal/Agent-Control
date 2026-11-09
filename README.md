@@ -149,8 +149,9 @@ The Pages edition remains a browser-local simulation without authenticated cloud
 - Persistent once-only and recurring reminder tasks, stored with task history.
 - Event/activity log, strict capture token, local file persistence, HTTP-only session cookie, basic login rate limiting.
 - Zero npm runtime dependencies. Requires Node.js 22.5 or newer: before Node
-  23.4, `node:sqlite` needs `--experimental-sqlite`, which every `npm` script
-  here passes.
+  23.4, `node:sqlite` needs `--experimental-sqlite`. The scripts that load it
+  pass the flag (`start`, `dev`, `test`, `test:coverage`, `backup`), and so
+  does the Dockerfile.
 
 ### Important boundaries
 
@@ -264,7 +265,7 @@ npm run build:pages   # regenerate the static GitHub Pages bundle in docs/
 
 The suite checks scoring, invalid URLs, scheduling boundaries, state persistence, recovery across reloads, and a live HTTP end-to-end lifecycle including auth, extension-token intake, editing, double-approval rejection, manual publishing confirmation, and cross-origin protection.
 
-`npm run check` syntax-checks every source file under `src/`, `shared/`, `agent/`, `extension/` and `scripts/` (75 files); `npm test` runs the Node suite.
+`npm run check` syntax-checks every `.js`/`.mjs` file under `src/`, `shared/`, `agent/`, `extension/` and `scripts/`; `npm test` runs the Node suite.
 
 ## Repository creation
 
@@ -332,7 +333,7 @@ Both paths run the same `shared/workflow.js` rules, so the demo and the real das
 - State lives in a transactional SQLite database, and there is no other store. `DATA_FILE` is the JSON sibling path (default `data/state.json`); the SQLite file is the same name with `.db` (`data/state.db`), or `DATA_DB` when set. A `state.json` written by 0.6 is imported once, then left beside the database. A database written by a newer build is refused at boot with both schema versions in the message, instead of being opened. Sessions are server-side and revocable, so a restart no longer signs users out.
 - Secrets (paired-agent secrets, stored credentials) are AES-256-GCM encrypted; the master key is `MASTER_KEY` or a `0600` keyfile beside the database. **Back the key up with the data.**
 - Roles are `viewer < member < admin < owner`; every route is registered with the least role it needs (`src/router.js`, `tests/authz-matrix.test.js`).
-- Sign-in and forgot-password requests are rate-limited per client address and per account (8 attempts / 15 minutes each), and the attempt is counted before the request is read. Behind `TRUST_PROXY=1` the client address is the rightmost `X-Forwarded-For` hop; the leftmost is whatever the caller sent. Reset itself consumes a one-time token. An unknown address and a wrong password get the same answer. Forgot password prints a one-time token in the server log unless `RESET_TOKEN_CONSOLE=0`.
+- Sign-in is rate-limited to 8 attempts / 15 minutes per client address and per account+address, and to 32 per account across addresses: the account bucket is deliberately looser so guesses spread over many addresses are still cut off without one client locking the mailbox. Forgot-password allows 8 per account. The attempt is counted before the request body is read. Behind `TRUST_PROXY=1` the client address is the rightmost `X-Forwarded-For` hop; the leftmost is whatever the caller sent. Reset itself consumes a one-time token. An unknown address and a wrong password get the same answer. Forgot password prints a one-time token in the server log unless `RESET_TOKEN_CONSOLE=0`.
 - The session cookie is `HttpOnly` + `SameSite=Strict`; the database holds only a hash of each session id. Cross-origin writes are rejected.
 - **Backup and restore are for the owner only.** A backup of the primary workspace carries every account's password hash; other workspaces export only their own rows. Restore replaces data in the current workspace database (credentials, sessions and paired-agent credentials are excluded). Restored agent records are revoked and queued or running agent tasks fail; pair devices again after restore. The file is checksum-protected JSON, not encrypted — protect it like the database. A restore rejects unknown roles and any link that is not http(s).
 - The extension capture token is a write credential, so viewers do not receive it.

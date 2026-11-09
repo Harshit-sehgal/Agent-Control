@@ -31,9 +31,11 @@ This product does not OAuth into X or any other platform.
   (anonymous 401, wrong role 403, escalation blocked).
 - CSRF: the session cookie is `HttpOnly` + `SameSite=Strict`, and `checkOrigin`
   rejects cross-origin writes (403).
-- Sign-in and `POST /api/auth/forgot` are rate-limited (8 attempts / 15
-  minutes), counted per client address and per account, before the request body
-  is read. Behind `TRUST_PROXY=1` the client address is the rightmost
+- Sign-in is rate-limited before the request body is read: 8 attempts / 15
+  minutes per client address and per address+account, and 32 per account across
+  addresses (`LOGIN_ACCOUNT_ATTEMPTS = LOGIN_ATTEMPTS * 4` in
+  `src/routes-public.js`; the looser account bucket still cuts off guesses spread
+  over many addresses). `POST /api/auth/forgot` allows 8 per account. Behind `TRUST_PROXY=1` the client address is the rightmost
   `X-Forwarded-For` hop, which is the one the proxy wrote. `POST
   /api/auth/reset` consumes a one-hour, single-use token. The
   server prints that token to the console unless `RESET_TOKEN_CONSOLE=0`.

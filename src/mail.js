@@ -232,11 +232,22 @@ export async function sendMail({to, subject, text}, config = smtpConfig()) {
         }
       } else {
         say(socket, 'STARTTLS');
-        expect(await reply(stream.next, 'STARTTLS'), [220], 'STARTTLS');
-        stream.detach();
-        socket = await upgrade(socket, config);
-        stream = lines(socket);
-        await hello();
+        const offered = await reply(stream.next, 'STARTTLS');
+        // A server can advertise STARTTLS and still refuse the command (454 is
+        // common when its own certificate is broken). With the explicit
+        // SMTP_REQUIRE_TLS=0 opt-out the operator asked to send anyway, so a
+        // refusal falls back to the cleartext session instead of blocking the
+        // notification. The default (TLS required) still fails loudly.
+        if (offered.code === 220) {
+          stream.detach();
+          socket = await upgrade(socket, config);
+          stream = lines(socket);
+          await hello();
+        } else if (config.requireTls) {
+          throw new Error(`The SMTP server offered STARTTLS but refused it (${offered.code} ${offered.text}), so nothing was sent. Fix the relay's certificate, or set SMTP_REQUIRE_TLS=0 only for a relay on your own network.`.trim());
+        } else {
+          console.warn(`[mail] SMTP offered STARTTLS but refused it (${offered.code}); continuing without TLS because SMTP_REQUIRE_TLS=0.`);
+        }
       }
     }
     if (config.user) {

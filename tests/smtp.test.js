@@ -197,3 +197,30 @@ test('a refused recipient and a refused password both fail loudly, without leaki
       });
   } finally { await wrongPassword.close(); }
 });
+
+test('a server that offers STARTTLS and then refuses it fails loudly when TLS is required', async () => {
+  const server = await fakeSmtp({starttls: true});
+  try {
+    await assert.rejects(
+      sendMail({to: 'ops@example.com', subject: 's', text: 'b'}, {...config(server.port), requireTls: true}),
+      error => {
+        assert.match(error.message, /offered STARTTLS but refused it \(454/);
+        assert.match(error.message, /SMTP_REQUIRE_TLS=0/, 'the message should name the way out');
+        return true;
+      });
+    assert.equal(server.state.auth, null, 'Nothing authenticated after a refused upgrade.');
+    assert.equal(server.state.message, null, 'And nothing was delivered.');
+  } finally { await server.close(); }
+});
+
+test('with SMTP_REQUIRE_TLS=0 a refused upgrade still sends, since that is what was asked for', async () => {
+  const server = await fakeSmtp({starttls: true});
+  try {
+    assert.deepEqual(
+      await sendMail({to: 'ops@example.com', subject: 's', text: 'b'}, {...config(server.port), requireTls: false}),
+      {sent: true});
+    assert.ok(server.state.commands.includes('STARTTLS'), 'it should try the upgrade first');
+    assert.equal(server.state.auth.pass, 'hunter2', 'then fall back to the cleartext session');
+    assert.match(server.state.message, /^To: ops@example\.com$/m);
+  } finally { await server.close(); }
+});

@@ -92,9 +92,10 @@ Set `PUBLIC_ORIGIN=https://dash.example.com` so same-origin writes pass the CSRF
 check, and `HSTS=1` once HTTPS is confirmed working. HSTS is a one-way door —
 browsers will refuse plain HTTP for `max-age`, so enable it last.
 
-With `TRUST_PROXY=1`, sign-in is limited per client address and per account
-(8 attempts / 15 minutes each). The client address is the **rightmost**
-`X-Forwarded-For` hop, which is the one your proxy wrote, not the leftmost one a
+With `TRUST_PROXY=1`, sign-in is limited to 8 attempts / 15 minutes per client
+address and per address+account, and 32 per account across addresses (so a proxy
+that rotates addresses does not multiply the guesses available against one
+mailbox). The client address is the **rightmost** `X-Forwarded-For` hop, which is the one your proxy wrote, not the leftmost one a
 caller can invent. A proxy that appends rather than replaces is fine for the same
 reason; one that passes the header through untouched is not.
 
@@ -112,8 +113,10 @@ reason; one that passes the header through untouched is not.
   are failed, so pair devices again after a restore. `POST /api/admin/restore`
   imports one (owner only, with a validation step). Back up the vault key
   alongside the export. Protect the JSON file like the database.
-- Retention is configurable and prunes only exhaust (events, finished tasks,
-  sent notifications, runs) — never drafts, candidates or evidence.
+- Retention has three knobs (`events` 90 days, `doneTasks` 30, `runs` 30) and
+  prunes only exhaust: events, finished tasks, runs and settled group runs —
+  never drafts, candidates, evidence, memory or notifications. The notification
+  feed is capped separately at 200 in-app entries, oldest dropped first.
   `GET /api/retention/preview` shows what a prune would remove before you run it.
 
 ## Keeping it on
