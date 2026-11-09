@@ -30,11 +30,15 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFile} from 'node:fs/promises';
+import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createRouter,ACCESS,allows} from '../src/router.js';
-import {ROLES} from '../src/auth.js';
+import {Auth,DEFAULT_WORKSPACE,ROLES} from '../src/auth.js';
+import {SqliteStore} from '../src/sqlite-store.js';
+import * as notifications from '../src/notifications.js';
 import {publicRoutes} from '../src/routes-public.js';
 import {workflowRoutes} from '../src/routes-workflow.js';
 import {groupRoutes} from '../src/routes-groups.js';
@@ -108,7 +112,7 @@ const LEAST_ROLE = {
 };
 
 test('the server registers exactly the modules this test enumerates', async () => {
-  const server = await readFile(path.join(root, 'src/server.js'), 'utf8');
+  const server = await fs.readFile(path.join(root, 'src/server.js'), 'utf8');
   for (const [name] of MODULES) {
     assert.match(server, new RegExp(`\\b${name}\\b`), `${name} is enumerated here but src/server.js does not use it`);
   }
@@ -202,4 +206,82 @@ test("every pattern's matcher resolves back to that same route", () => {
     for (const name of route.names) assert.ok(found.params[name], `${key(route)} did not capture :${name} from ${target}`);
   }
   assert.equal(router.find('GET', '/api/not-a-route'), null, 'an unknown path must not resolve');
+});
+
+/** A real store and the real account routes, driven the way the dispatcher
+ * drives them (`handler({params, actor, store, body})`), so the ordering and
+ * transaction of a write can be asserted instead of only its access level. */
+async function accountHarness() {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'route-roles-'));
+  const store = await new SqliteStore(path.join(dir, 'state.db'), path.join(dir, 'state.json')).init();
+  const auth = new Auth(store);
+  auth.ensureBootstrap('owner-secret-1');
+  const actor = {userId: store.get('SELECT id FROM users LIMIT 1').id, role: 'owner', workspaceId: DEFAULT_WORKSPACE, sessionId: 's-owner', email: 'owner@localhost'};
+  const router = createRouter();
+  accountRoutes(router, {auth, workspaces: services});
+  const call = async (method, target, body, who = actor) => {
+    const found = router.find(method, target);
+    assert.ok(found, `${method} ${target} is not registered`);
+    return found.route.handler({params: found.params, actor: who, store, raw: async () => '', body: async () => body});
+  };
+  return {dir, store, auth, actor, call};
+}
+
+test("removing a user clears this workspace's notifications before the account", async () => {
+  const {dir, store, auth, actor, call} = await accountHarness();
+  const guest = auth.createUser(actor, {email: 'guest@example.com', password: 'guest-secret-1', role: 'member'});
+  notifications.updatePreferences(store, guest.id, {email: true, emailAddress: 'guest@example.com'});
+  notifications.notify(store, null, {userId: guest.id, title: 'Pending', body: ''});
+  assert.equal(store.get('SELECT count(*) AS n FROM notifications WHERE user_id=?', guest.id).n, 2, 'An in-app row and a queued delivery row.');
+
+  // The cross-database step (the account, in the primary database) must run
+  // LAST, so a crash in between leaves an account whose rows are already gone.
+  // The other order left rows no account could ever match again, holding the
+  // MAX_IN_APP cap slots forever. Crashing it here proves which side of the
+  // pair runs first.
+  const removeUser = auth.deleteUser;
+  auth.deleteUser = () => { throw new Error('process died before the account delete.'); };
+  try {
+    await assert.rejects(call('DELETE', `/api/users/${guest.id}`), /process died/);
+  } finally { auth.deleteUser = removeUser; }
+  assert.equal(store.get('SELECT count(*) AS n FROM notifications WHERE user_id=?', guest.id).n, 0, "This workspace's rows are gone first.");
+  assert.equal(store.get('SELECT count(*) AS n FROM notification_prefs WHERE user_id=?', guest.id).n, 0);
+  assert.ok(store.get('SELECT id FROM users WHERE id=?', guest.id), 'The account is still there, because that step had not run.');
+
+  // A complete removal still finishes the job, including the account.
+  await call('DELETE', `/api/users/${guest.id}`);
+  assert.equal(store.get('SELECT count(*) AS n FROM users WHERE id=?', guest.id).n, 0);
+  await fs.rm(dir, {recursive: true, force: true});
+});
+
+test('removing an id that is not a member here deletes nothing', async () => {
+  const {dir, store, auth, actor, call} = await accountHarness();
+  const guest = auth.createUser(actor, {email: 'guest@example.com', password: 'guest-secret-1', role: 'member'});
+  notifications.notify(store, null, {userId: guest.id, title: 'Kept', body: ''});
+  // A stale id from another workspace, or a typo, must not clear a real
+  // member's feed: the guard runs before the first delete.
+  await assert.rejects(call('DELETE', '/api/users/00000000-0000-4000-8000-000000000000'), /User not found/);
+  assert.equal(store.get('SELECT count(*) AS n FROM notifications WHERE user_id=?', guest.id).n, 1);
+  await fs.rm(dir, {recursive: true, force: true});
+});
+
+test('an agent rename and its permission list land together or not at all', async () => {
+  const {dir, store, call} = await accountHarness();
+  const agentId = crypto.randomUUID();
+  store.run(`INSERT INTO agents (id,workspace_id,name,secret_hash,status,permissions,paired_at)
+    VALUES (?,?,?,?,?,?,?)`, agentId, DEFAULT_WORKSPACE, 'Old name', 'hash', 'paired', '[]', new Date().toISOString());
+  const rename = (name, permissions) => call('PATCH', `/api/agents/${agentId}`, {name, permissions});
+  const row = () => store.get('SELECT name, permissions FROM agents WHERE id=?', agentId);
+
+  assert.deepEqual(await rename('Checked laptop', ['http.check']), {ok: true, permissions: ['http.check']});
+  assert.equal(row().name, 'Checked laptop');
+  assert.equal(row().permissions, '["http.check"]');
+
+  // A refused permission list must not keep the new name, and a crash between
+  // the two writes can leave neither of them: three commits let an agent be
+  // renamed with a scope an operator did not approve.
+  await assert.rejects(rename('Renamed anyway', ['take-over-the-world']), /Unknown agent permission/);
+  assert.equal(row().name, 'Checked laptop', 'The rename rolls back with the refused permissions.');
+  assert.equal(row().permissions, '["http.check"]', 'The old scope is still the one in force.');
+  await fs.rm(dir, {recursive: true, force: true});
 });

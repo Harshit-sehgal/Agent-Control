@@ -171,28 +171,74 @@ async function run() {
   const interval = Math.max(2000, Number(config.pollIntervalMs || POLL_MS));
   console.log(`Agent ${config.agentId} polling ${config.server} every ${interval / 1000}s. Ctrl+C to stop.`);
   process.on('SIGINT', () => { stopping = true; console.log('\nagent: stopped.'); process.exit(0); });
-  while (!stopping) {
+
+  // Tasks handed over by a heartbeat that arrived while a task was executing.
+  const inbox = new Map();
+  let busy = false;
+  let beatSeq = 0;
+
+  /** One heartbeat. `beat` rides in the signed body because two heartbeats in
+   * the same millisecond would otherwise be identical bytes, which the server
+   * rejects as a replayed signature. */
+  const heartbeat = async () => {
+    const beat = await call(config, '/api/agent/heartbeat', {version: '1', os: process.platform, node: process.version, beat: ++beatSeq, at: Date.now()});
+    config.lastSeenAt = new Date().toISOString();
+    if (Array.isArray(beat.agent?.permissions)) config.permissions = beat.agent.permissions;
+    for (const task of beat.tasks || []) if (task && task.id && !inbox.has(task.id)) inbox.set(task.id, task);
+  };
+
+  // The heartbeat has to keep going while `execute()` blocks. A task can outlive
+  // its 120s server lease easily (25 browser steps at up to 15s each), and a
+  // device that only heartbeats between tasks looks disconnected: the server
+  // then fails a browser.action whose click did land and reports a failure the
+  // person reads as "The agent disconnected", while the honest result that comes
+  // later is refused as already completed. This timer renews the running lease
+  // from inside the block.
+  const keepalive = setInterval(() => {
+    if (!busy) return;
+    heartbeat().catch(error => console.error(`agent: keepalive heartbeat failed (${error.message}).`));
+  }, interval);
+  keepalive.unref();
+
+  /** Execute one delivered task and report it. The result carries the attempt
+   * the task was claimed with so the server can tell this run's outcome from a
+   * later attempt's if the lease lapsed meanwhile. */
+  const runTask = async task => {
+    console.log(`agent: running ${task.kind} ${task.id}`);
     try {
-      const beat = await call(config, '/api/agent/heartbeat', {version: '1', os: process.platform, node: process.version});
-      config.lastSeenAt = new Date().toISOString();
-      if (Array.isArray(beat.agent?.permissions)) config.permissions = beat.agent.permissions;
-      for (const task of beat.tasks || []) {
-        console.log(`agent: running ${task.kind} ${task.id}`);
-        try {
-          const result = await execute(task, config);
-          await call(config, `/api/agent/tasks/${task.id}/result`, {status: 'done', result});
-          console.log(`agent: ${task.kind} ${task.id} done`);
-        } catch (e) {
-          console.error(`agent: ${task.kind} ${task.id} failed: ${e.message}`);
-          await call(config, `/api/agent/tasks/${task.id}/result`, {status: 'failed', error: e.message}).catch(() => {});
-        }
+      const result = await execute(task, config);
+      // Reporting is separate from executing: a refused report (409, a superseded
+      // attempt) is not a local failure and must not be re-reported as one.
+      try {
+        await call(config, `/api/agent/tasks/${task.id}/result`, {status: 'done', result, attempts: task.attempts});
+        console.log(`agent: ${task.kind} ${task.id} done`);
+      } catch (error) {
+        console.error(`agent: ${task.kind} ${task.id} result was refused: ${error.message}`);
       }
-      saveConfig({...config, lastSeenAt: config.lastSeenAt});
     } catch (e) {
-      console.error(`agent: heartbeat failed (${e.message}). Retrying in ${interval / 1000}s.`);
+      console.error(`agent: ${task.kind} ${task.id} failed: ${e.message}`);
+      await call(config, `/api/agent/tasks/${task.id}/result`, {status: 'failed', error: e.message, attempts: task.attempts}).catch(() => {});
     }
-    await new Promise(r => setTimeout(r, interval));
-  }
+  };
+
+  try {
+    while (!stopping) {
+      try {
+        // A pending task needs no new poll; poll only when there is nothing to do.
+        if (!inbox.size) await heartbeat();
+        while (!stopping && inbox.size) {
+          const [id, task] = inbox.entries().next().value;
+          inbox.delete(id);
+          busy = true;
+          try { await runTask(task); } finally { busy = false; }
+        }
+        saveConfig({...config, lastSeenAt: config.lastSeenAt});
+      } catch (e) {
+        console.error(`agent: heartbeat failed (${e.message}). Retrying in ${interval / 1000}s.`);
+      }
+      await new Promise(r => setTimeout(r, interval));
+    }
+  } finally { clearInterval(keepalive); }
 }
 
 function status() {

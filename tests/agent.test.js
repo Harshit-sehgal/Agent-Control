@@ -183,6 +183,65 @@ test('a live device renews its running leases so a slow task is not run twice', 
   } finally { await fs.rm(dir, {recursive: true, force: true}); }
 });
 
+test('a live device keeps its task through a lapsed lease, and a superseded result is fenced', async () => {
+  const {store, dir} = await harness();
+  try {
+    const {code} = agent.createPairing(store, 'default', {});
+    const {agentId} = agent.redeemPairing(store, {code, name: 'Device', permissions: ['browser.action', 'browser.capture']});
+    const t0 = Date.now();
+    // A click that outlives its lease: 25 steps at up to 15s each is minutes.
+    const {task: click} = agent.enqueueAgentTask(store, agentId, {kind: 'browser.action', payload: {url: 'https://example.com', steps: [{op: 'click', selector: 'button'}]}});
+    const [claimedClick] = agent.claimAgentTasks(store, agentId, {leaseMs: 1000, nowMs: t0});
+    assert.equal(claimedClick.attempts, 1);
+    // The device is still working: it was seen a minute ago, and the lease has
+    // lapsed because that heartbeat did not renew it (the loop was blocked).
+    agent.touchAgent(store, agentId);
+    store.run('UPDATE agent_tasks SET lease_until=? WHERE id=?', new Date(t0).toISOString(), click.id);
+    assert.equal(agent.recoverAgentTasks(store, t0 + 60000), 0, 'a device seen inside the lease window is not a disconnect');
+    assert.equal(store.get('SELECT status FROM agent_tasks WHERE id=?', click.id).status, 'running',
+      'a click that landed is not reported as "The agent disconnected" while the device is alive');
+    // The honest result then lands, for the attempt it was claimed with.
+    assert.deepEqual(agent.completeAgentTask(store, agentId, click.id, {status: 'done', result: {clicked: true}, attempts: claimedClick.attempts}), {ok: true, status: 'done'});
+
+    // A capture is the same: re-queueing it would read the page a second time.
+    const {task: read} = agent.enqueueAgentTask(store, agentId, {kind: 'browser.capture', payload: {url: 'https://example.com'}});
+    agent.claimAgentTasks(store, agentId, {leaseMs: 1000, nowMs: t0});
+    agent.touchAgent(store, agentId);
+    store.run('UPDATE agent_tasks SET lease_until=? WHERE id=?', new Date(t0).toISOString(), read.id);
+    assert.equal(agent.recoverAgentTasks(store, t0 + 60000), 0, 'a capture a live device is running is not re-armed as duplicate work');
+    assert.equal(agent.claimAgentTasks(store, agentId, {nowMs: t0 + 60000}).length, 0, 'so it cannot be delivered a second time either');
+    assert.equal(agent.completeAgentTask(store, agentId, read.id, {status: 'done', result: {title: 'Docs'}, attempts: 1}).status, 'done');
+
+    // A device that has not been seen for ten minutes is gone: that lease is a
+    // real disconnect, and a browser action still fails instead of retrying.
+    const {task: abandoned} = agent.enqueueAgentTask(store, agentId, {kind: 'browser.action', payload: {url: 'https://example.com', steps: [{op: 'read', selector: 'main'}]}});
+    agent.claimAgentTasks(store, agentId, {leaseMs: 1000, nowMs: t0});
+    store.run('UPDATE agent_tasks SET lease_until=? WHERE id=?', new Date(t0).toISOString(), abandoned.id);
+    assert.equal(agent.recoverAgentTasks(store, t0 + 600000), 1);
+    assert.equal(store.get('SELECT status FROM agent_tasks WHERE id=?', abandoned.id).status, 'failed');
+
+    // Fencing: a task recovered and claimed again runs as attempt 2, and the
+    // first attempt's late result must not overwrite the run in progress.
+    const {task: late} = agent.enqueueAgentTask(store, agentId, {kind: 'browser.capture', payload: {url: 'https://example.com/late'}});
+    const [firstAttempt] = agent.claimAgentTasks(store, agentId, {leaseMs: 1000, nowMs: t0});
+    assert.equal(firstAttempt.attempts, 1);
+    store.run('UPDATE agent_tasks SET lease_until=? WHERE id=?', new Date(t0).toISOString(), late.id);
+    assert.equal(agent.recoverAgentTasks(store, t0 + 600000), 1);
+    const [secondAttempt] = agent.claimAgentTasks(store, agentId, {nowMs: t0 + 600000});
+    assert.equal(secondAttempt.attempts, 2);
+    assert.throws(
+      () => agent.completeAgentTask(store, agentId, late.id, {status: 'done', result: {title: 'stale'}, attempts: firstAttempt.attempts}),
+      error => error.status === 409 && /earlier attempt/.test(error.message),
+      'a result for a superseded attempt is refused, not silently accepted');
+    const running = store.get('SELECT status, attempts, result FROM agent_tasks WHERE id=?', late.id);
+    assert.deepEqual([running.status, running.attempts], ['running', 2], 'the newer attempt is untouched by the stale result');
+    assert.equal(running.result, null);
+    // The attempt that is actually running completes normally.
+    assert.equal(agent.completeAgentTask(store, agentId, late.id, {status: 'done', result: {title: 'fresh'}, attempts: secondAttempt.attempts}).status, 'done');
+    assert.deepEqual(JSON.parse(store.get('SELECT result FROM agent_tasks WHERE id=?', late.id).result), {title: 'fresh'});
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});
+
 test('the HTTP protocol pairs, dispatches and collects results end to end', {timeout: 40000}, async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-http-'));
   const port = await new Promise((resolve, reject) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); s.on('error', reject); });

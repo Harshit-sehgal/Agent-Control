@@ -151,11 +151,18 @@ test('a plan and a pending page on the same chat both count', () => {
 });
 
 test('a feed-permission failure keeps Grant and Retry, and the demo still shows a plan', () => {
-  assert.deepEqual(threadLineActions({kind: 'feed-permission', senderId: 'scout', status: 'failed', live: true, note: true, latest: true}), {grant: true, plan: false, checkpoint: false, retry: true});
+  assert.deepEqual(threadLineActions({kind: 'feed-permission', senderId: 'scout', status: 'failed', live: true, note: true, latest: true}), {grant: true, plan: false, checkpoint: false, stop: false, retry: true});
   assert.equal(threadLineActions({kind: 'feed-permission', senderId: 'scout', status: 'failed', live: false, note: true, latest: true}).grant, true);
-  assert.deepEqual(threadLineActions({status: 'awaiting_plan', live: false, note: true, latest: true}), {grant: false, plan: true, checkpoint: false, retry: false});
-  assert.deepEqual(threadLineActions({status: 'awaiting_checkpoint', live: false, note: true, latest: true}), {grant: false, plan: false, checkpoint: true, retry: false});
-  assert.deepEqual(threadLineActions({status: 'failed', live: true, note: true, latest: false}), {grant: false, plan: false, checkpoint: false, retry: false});
+  assert.deepEqual(threadLineActions({status: 'awaiting_plan', live: false, note: true, latest: true}), {grant: false, plan: true, checkpoint: false, stop: false, retry: false});
+  assert.deepEqual(threadLineActions({status: 'awaiting_checkpoint', live: false, note: true, latest: true}), {grant: false, plan: false, checkpoint: true, stop: false, retry: false});
+  assert.deepEqual(threadLineActions({status: 'awaiting_checkpoint', live: true, note: true, latest: true}), {grant: false, plan: false, checkpoint: true, stop: true, retry: false});
+  assert.deepEqual(threadLineActions({status: 'failed', live: true, note: true, latest: false}), {grant: false, plan: false, checkpoint: false, stop: false, retry: false});
+  // Stop is the opposite of Retry: a run that can still work offers Stop, and a
+  // run that ended offers Retry. The plan note has its own Cancel next to Start,
+  // so it is not offered a second button that stops the same run.
+  assert.deepEqual(threadLineActions({status: 'running', live: true, note: true, latest: true}), {grant: false, plan: false, checkpoint: false, stop: true, retry: false});
+  assert.equal(threadLineActions({status: 'awaiting_plan', live: true, note: true, latest: true}).stop, false);
+  assert.equal(threadLineActions({status: 'completed', live: true, note: true, latest: true}).stop, false);
   assert.equal(isRunNote({role: 'system', runId: 'r', kind: 'browser'}), false);
   // A sub-agent line never takes the Start/Retry button from the run's real note.
   assert.equal(isRunNote({role: 'system', runId: 'r', kind: 'subagent'}), false);

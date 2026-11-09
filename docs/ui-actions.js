@@ -1,16 +1,16 @@
 /** What the UI can do, as three lookup tables keyed by `data-action`, form id and
  * control id. app.js owns the DOM events and dispatches here; handlers throw on
  * failure and the dispatcher turns that into one toast. */
-import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, setPref, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns, patchLocalRun, appendMessage} from './ui-store.js?v=4f8cfed5b9';
-import {botSettings, groupSettings} from './bot-settings.js?v=4f8cfed5b9';
-import {completeMention, moveRow, pipelineValue, draftLength, lengthLabel} from './ui-model.js?v=4f8cfed5b9';
-import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=4f8cfed5b9';
-import {sendChat, streamGroupRun, watchQueuedRun, continueDemoPlan} from './ui-chat.js?v=4f8cfed5b9';
-import {confetti, whoosh, react, poke} from './ui-fx.js?v=4f8cfed5b9';
-import {renderList, renderMentions} from './ui-views.js?v=4f8cfed5b9';
-import {refreshLists, reloadAdminPage, pipelineList} from './ui-panel.js?v=4f8cfed5b9';
-import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, botTaskSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=4f8cfed5b9';
-import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=4f8cfed5b9';
+import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, setPref, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns, patchLocalRun, appendMessage} from './ui-store.js?v=165e836e5a';
+import {botSettings, groupSettings} from './bot-settings.js?v=165e836e5a';
+import {completeMention, moveRow, pipelineValue, draftLength, lengthLabel} from './ui-model.js?v=165e836e5a';
+import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=165e836e5a';
+import {sendChat, streamGroupRun, watchQueuedRun, continueDemoPlan} from './ui-chat.js?v=165e836e5a';
+import {confetti, whoosh, react, poke} from './ui-fx.js?v=165e836e5a';
+import {renderList, renderMentions} from './ui-views.js?v=165e836e5a';
+import {refreshLists, reloadAdminPage, pipelineList} from './ui-panel.js?v=165e836e5a';
+import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, botTaskSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=165e836e5a';
+import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=165e836e5a';
 
 const adminCtx = {reload: reloadAdminPage};
 const chatId = () => store.route.chat;
@@ -121,6 +121,10 @@ export const actions = {
     await sync(); go({chat: copy.id}); toast('Bot duplicated. Its chat starts empty.');
   },
   'copy-capture-token': () => copyText(store.state.captureToken || '', 'Capture token copied'),
+  'rotate-capture-token': async () => {
+    if (!await confirmSheet('Replace the capture token?', {confirm: 'Replace', danger: true, detail: 'The token in every browser extension stops working until the new one is pasted in. Captured posts already here are not affected.'})) return;
+    await api('/api/capture-token', 'POST', {}); toast('New capture token created. Paste it into the extension.'); await sync();
+  },
   'copy-bot-instructions': b => copyText(findBot(b.dataset.id).instructions || '', 'Instructions copied'),
 
   // memory: per-model rulebook and per-chat recap
@@ -174,6 +178,10 @@ export const actions = {
     await copyText(draft.text, 'Copied. Post it on X yourself.');
   },
   'verify-evidence': async b => { await api(`/api/evidence/${b.dataset.id}/verify`, 'POST', {status: b.dataset.status}); toast('Source updated.'); await sync(); },
+  'remove-candidate': async b => {
+    if (!await confirmSheet('Remove this captured post?', {confirm: 'Remove', danger: true, detail: 'Its drafts and their sources go too. A scheduled or posted draft has to go first.'})) return;
+    await api(`/api/candidates/${b.dataset.id}`, 'DELETE', {}); toast('Captured post removed.'); await sync();
+  },
   'drop-evidence': async b => {
     if (!await confirmSheet('Remove this source?', {confirm: 'Remove', danger: true})) return;
     await api(`/api/evidence/${b.dataset.id}`, 'DELETE', {}); toast('Source removed.'); await sync();
@@ -263,6 +271,16 @@ export const actions = {
       await streamGroupRun(b.dataset.id, key, b.dataset.run, {ignore: request?.status === 'dispatched' ? ['awaiting_feed'] : []});
     } finally { setTyping(key, false); }
     await sync();
+  },
+  'cancel-run': async b => {
+    if (isStaticDemo()) {
+      const run = recentRuns(b.dataset.id).find(r => r.id === b.dataset.run);
+      if (!run) throw new Error('Run not found');
+      await patchLocalRun(run.id, {status: 'cancelled'});
+      appendMessage(run.chatKey || chatId() || teamKey(b.dataset.id), {role: 'system', text: 'Stopped. Nothing after this runs.', runId: run.id});
+      return;
+    }
+    await api(`/api/groups/${b.dataset.id}/runs/${b.dataset.run}/cancel`, 'POST', {}); toast('Run stopped.'); await sync();
   },
   'cancel-plan': async b => {
     if (isStaticDemo()) {

@@ -10,9 +10,9 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'">
 <title>Agent Control</title>
 <link rel="manifest" href="./manifest.webmanifest"><link rel="apple-touch-icon" href="./icon-192.png"><link rel="icon" href="./icon-192.png">
-<link rel="stylesheet" href="./app.css?v=4f8cfed5b9">
+<link rel="stylesheet" href="./app.css?v=165e836e5a">
 </head><body data-pane="list">
-<div id="progress" class="progress hidden" role="presentation"></div>
+<div id="progress" class="progress hidden" role="status" aria-live="polite"><span class="sr-only">Loading</span></div>
 <div id="root" class="app">
   <aside class="pane pane-list" id="sidebar" aria-label="Chats"></aside>
   <main class="pane pane-main" id="main" tabindex="-1"><div class="splash" role="status" aria-live="polite"><p>Opening your chats…</p></div></main>
@@ -22,8 +22,8 @@
 <div id="command" class="command-layer hidden" role="presentation"></div>
 <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 <div id="announce" class="sr-only" aria-live="polite"></div>
-<script type="module" src="./local-api.js?v=4f8cfed5b9"></script>
-<script defer src="./transport.js?v=4f8cfed5b9"></script>
-<script type="module" src="./app.js?v=4f8cfed5b9"></script>
+<script type="module" src="./local-api.js?v=165e836e5a"></script>
+<script defer src="./transport.js?v=165e836e5a"></script>
+<script type="module" src="./app.js?v=165e836e5a"></script>
 <!-- Data is saved only in this browser. No real AI or remote backend on GitHub Pages. -->
 </body></html>

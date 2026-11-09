@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import {migrate,updateSettings,addCandidate,seedDemo,beginProcessing,finishProcessing,failProcessing,editDraft,draftAction,addGroup,addBot,updateBot,updateGroup,removeBot,removeGroup,recoverInterrupted,addSchedule,removeSchedule,resetDemo,findDraft,findCandidate,attachRunDraft,SCHEMA_VERSION} from '../shared/workflow.js';
+import {migrate,updateSettings,addCandidate,seedDemo,beginProcessing,finishProcessing,failProcessing,editDraft,draftAction,addGroup,addBot,updateBot,updateGroup,removeBot,removeGroup,recoverInterrupted,addSchedule,removeSchedule,resetDemo,removeCandidate,rotateCaptureToken,findDraft,findCandidate,attachRunDraft,SCHEMA_VERSION} from '../shared/workflow.js';
 import {enqueueTask, completeTask, failTask} from '../shared/tasks.js';
 import {initialState} from '../shared/core.js';
 import {createRouter} from '../src/router.js';
@@ -343,4 +343,43 @@ test('rewrite drops the previous approval, and a provider failure leaves it', as
     restore();
     await new Promise(r => down.close(r));
   }
+});
+
+test('removing a captured post takes its uncommitted work and refuses a committed one', () => {
+  const s = store();
+  const c = addCandidate(s, {url: 'https://x.com/a/status/11', text: 'A captured post that should be removable'}).candidate;
+  const draft = finishProcessing(s, c.id, {score: 40}, {text: 'Pending copy', mode: 'template', note: 'n'});
+  assert.ok(s.evidence.some(e => e.candidateId === c.id), 'the capture seeded its own source');
+  removeCandidate(s, c.id);
+  assert.equal(s.candidates.length, 0);
+  assert.equal(s.drafts.length, 0);
+  // The sources went with the drafts: a row pointing at a post nobody can open
+  // is a claim with no subject, and it would keep counting in every summary.
+  assert.equal(s.evidence.filter(e => e.draftId === draft.id || e.candidateId === c.id).length, 0);
+
+  // An approved draft is a person's decision. Deleting the capture under it
+  // would withdraw that approval without asking, so it refuses and names the
+  // draft that has to go first.
+  const kept = addCandidate(s, {url: 'https://x.com/a/status/12', text: 'Another captured post with an approval'}).candidate;
+  const approved = finishProcessing(s, kept.id, {score: 50}, {text: 'Approved copy', mode: 'template', note: 'n'});
+  draftAction(s, approved.id, 'approve', {minDelay: 0, maxDelay: 0});
+  assert.equal(approved.status, 'scheduled');
+  assert.throws(() => removeCandidate(s, kept.id), /scheduled draft/);
+  assert.equal(s.candidates.length, 1);
+  assert.throws(() => removeCandidate(s, 'missing'), /Candidate not found/);
+});
+
+test('the capture token can be replaced without wiping the workspace', () => {
+  const s = store();
+  const before = s.captureToken;
+  assert.ok(before, 'a workspace starts with a token');
+  const {captureToken} = rotateCaptureToken(s);
+  assert.notEqual(captureToken, before);
+  assert.equal(s.captureToken, captureToken);
+  assert.match(captureToken, /^[a-z0-9]{32}$/, 'the shape the extension and the capture route expect');
+  // Replacing a credential is an event somebody should be able to find later.
+  assert.ok(s.events.some(e => /capture token/i.test(e.message)));
+  // Nothing else moves: the posts, drafts and bots are the workspace, and the
+  // point of this is that a lost token is not a lost workspace.
+  assert.equal(s.candidates.length, store().candidates.length);
 });

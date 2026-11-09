@@ -2,7 +2,7 @@
  * reminder), plus the two full-screen layers: quick navigation and sign-in. */
 import {esc, icon, btn, row, field, note} from './ui-kit.js';
 import {store, groups, conversation, isStaticDemo, isAdmin, isXGroup, teamKey, go} from './ui-store.js';
-import {openSheet, closeSheet, captureFocus, restoreFocus} from './ui-dialogs.js';
+import {openSheet, closeSheet, captureFocus, restoreFocus, focusOrigin} from './ui-dialogs.js';
 import {tintPicker} from './ui-panel.js';
 
 const el = id => document.getElementById(id);
@@ -134,7 +134,12 @@ export function updateCommandResults(value = '') {
 }
 export function closeCommandPalette() { if (!paletteOpen()) return; el('command').classList.add('hidden'); el('command').innerHTML = ''; entries = []; restoreFocus(); }
 export function openCommandPalette() {
-  closeSheet(); captureFocus();
+  // Ctrl+K works from inside a sheet. closeSheet() hands focus back to that sheet's
+  // own opener and then forgets it, so take the target first: capturing afterwards
+  // grabbed whatever the emptied sheet left focused (often <body>) and Esc from the
+  // palette dropped the user at the top of the page.
+  const origin = focusOrigin();
+  closeSheet(); captureFocus(origin || undefined);
   const layer = el('command'); layer.classList.remove('hidden');
   layer.innerHTML = `<div class="command-card" role="dialog" aria-modal="true" aria-label="Quick navigation"><label class="search">${icon('search', 18)}<input id="command-input" role="combobox" aria-label="Search pages and bots" aria-autocomplete="list" aria-expanded="true" aria-controls="command-results" aria-haspopup="listbox" autocomplete="off" placeholder="Jump to a bot, group or page" maxlength="120"></label><div class="command-results" id="command-results" role="listbox"></div><p class="command-foot">Up and Down to move · Enter to open · Esc to close</p></div>`;
   updateCommandResults(); el('command-input').focus();

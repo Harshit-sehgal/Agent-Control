@@ -223,12 +223,6 @@ body:not(.has-info) .pane-info{display:none}
 .chips.center{justify-content:center;flex-wrap:wrap;padding:0}
 .chip{flex:none;height:36px;padding:0 14px;border:1px solid var(--control);border-radius:18px;font-size:14px;white-space:nowrap;transition:background .15s}
 .chip:hover{background:var(--raised)}
-/* A finger needs a taller target than a mouse pointer does. */
-@media (pointer:coarse){.chip{height:44px;border-radius:22px}
-  /* A finger is not a mouse: the compact desktop sizes are pointer-sized only, so
-     the small buttons and filter pills take the same 44px the file uses elsewhere. */
-  .btn.small{min-height:44px}.filter{height:44px;border-radius:22px}
-  .contract-fieldset .check-row{min-height:44px;padding:9px 0}}
 .composer{flex:none;display:flex;align-items:flex-end;gap:8px;padding:0 max(12px,calc((100% - 764px)/2)) max(14px,env(safe-area-inset-bottom))}
 .composer textarea{flex:1;min-width:0;min-height:46px;max-height:180px;padding:12px 18px;border:0;outline:0;border-radius:23px;background:var(--raised);font-size:16px;line-height:1.35;resize:none}
 .composer textarea:focus{box-shadow:0 0 0 2px var(--control)}
@@ -528,8 +522,17 @@ body.booting .chat-row:nth-child(2){animation-delay:30ms}body.booting .chat-row:
   .form-grid{grid-template-columns:1fr}
   .list-head h1{font-size:30px}
 }
+/* A narrow thread header fits the title or the pills, not both. Only the pill
+   that does something (N need you) earns the room; the status-only ones are
+   repeated in the info panel below. */
+@media(max-width:520px){
+  .thread-head .needs-pill:not([data-action]){display:none}
+}
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+  /* The in-flight bar is a moving gradient, and frozen mid-slide it is a static
+     stripe that says nothing. A solid bar carries the same "working" cue. */
+  .progress{animation:none;background:var(--brand)}
 }
 
 /* ---------- bots working together ---------- */
@@ -542,3 +545,20 @@ body.booting .chat-row:nth-child(2){animation-delay:30ms}body.booting .chat-row:
 .pipe-row .check-row{flex:1;min-width:0}
 .pipe-row .btn[disabled]{opacity:.4;cursor:default}
 .behaviour{display:flex;flex-direction:column;gap:12px}
+
+/* ---------- coarse pointer: last, because it overrides desktop sizes ----------
+ * Every rule below replaces a smaller desktop size declared earlier in this
+ * file. It has to stay at the very end: at equal specificity a 44px target
+ * declared before the compact rule it replaces simply loses, which is how the
+ * permission checkboxes and routing radios stayed ~34px on a phone. */
+/* A finger needs a taller target than a mouse pointer does. */
+@media (pointer:coarse){.chip{height:44px;border-radius:22px}
+  /* A finger is not a mouse: the compact desktop sizes are pointer-sized only, so
+     the small buttons and filter pills take the same 44px the file uses elsewhere. */
+  .btn.small{min-height:44px}.filter{height:44px;border-radius:22px}
+  .contract-fieldset .check-row{min-height:44px;padding:9px 0}
+  /* Same defect one row type over: the Admin notification-channel toggles live in
+     a .box>form row with no coarse size at all, so they measured ~28px. */
+  .box>form .check-row{min-height:44px;padding:9px 0}
+  .needs-pill{height:44px;border-radius:22px}
+  .evidence-panel summary{min-height:44px}}

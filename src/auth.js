@@ -246,7 +246,13 @@ export class Auth {
     const row = this.store.get("SELECT COUNT(*) AS n FROM workspace_members WHERE workspace_id=? AND role='owner' AND user_id<>?", workspaceId, excludeUserId);
     return Number(row?.n || 0);
   }
-  deleteUser(actor, userId) {
+  /** Every guard `deleteUser` applies, and nothing else.
+   *
+   * A route that has other work to do first (deleting this workspace's own rows,
+   * in a different database) asks this before its first write: a refusal that
+   * lands after the write tells the caller "no" while the rows are already gone.
+   * The guard and the deletion read the same rows, so the answer cannot drift. */
+  assertCanRemoveUser(actor, userId) {
     if (rank(actor.role) < rank('admin')) throw Object.assign(new Error('Only admins can remove users.'), {status: 403});
     if (userId === actor.userId) throw Object.assign(new Error('Use account deletion to remove your own account.'), {status: 409});
     const workspaceId = actor.workspaceId || DEFAULT_WORKSPACE;
@@ -255,6 +261,11 @@ export class Auth {
     // This also covers the last owner: an owner can never remove an owner (this
     // line runs first), so the workspace keeps at least the one making the call.
     if (rank(target.role) >= rank(actor.role)) throw Object.assign(new Error('You cannot remove a user at or above your own role.'), {status: 403});
+    return target;
+  }
+  deleteUser(actor, userId) {
+    this.assertCanRemoveUser(actor, userId);
+    const workspaceId = actor.workspaceId || DEFAULT_WORKSPACE;
     // Someone who belongs to another workspace only leaves this one. Their
     // account, and their sessions elsewhere, are not this admin's to remove.
     if (this.elsewhere(userId, workspaceId)) {

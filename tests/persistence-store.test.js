@@ -118,6 +118,15 @@ test('a candidate whose draft failed is released even when the workflow transiti
     const row = store.get('SELECT status, doc FROM candidates WHERE id=?', id);
     assert.equal(row.status, 'error', 'the typed column the queue reads is released');
     assert.equal(JSON.parse(row.doc).status, 'error', 'the document the UI reads is released too');
+    // `candidates` is rewritten wholesale from the store's document cache on
+    // every update, so a release that only touches SQL is undone by the next
+    // unrelated write: the row goes back to `processing`, re-processing 409s
+    // forever and no retry task exists. Prove the very next write does not revert.
+    await store.update(s => { s.settings.style = 'a write that has nothing to do with this candidate'; });
+    const after = store.get('SELECT status, doc FROM candidates WHERE id=?', id);
+    assert.equal(after.status, 'error', 'an unrelated update must not put the candidate back in processing');
+    assert.equal(JSON.parse(after.doc).status, 'error');
+    assert.equal(store.read().candidates.find(c => c.id === id).status, 'error', 'the document cache agrees with the row');
     // A candidate deleted mid-draft is not an error for the fallback.
     assert.equal(store.failCandidate('gone'), false);
     // The workflow transition itself throws for that case, which is exactly why

@@ -17,20 +17,25 @@ import {defaultHandlers} from './queue.js';
  * function the queue handlers and routes call. */
 export function createNotifier({ws, workspaceId, auth, push}) {
   // The task and the notification row are separate records, so the outcome is
-  // returned rather than swallowed: `notifications.notify` marks that channel's
-  // row failed when the task never landed. `push.announce` only needs the call.
+  // returned rather than swallowed: `notifications.notify` retries a transient
+  // failure and marks that channel's row failed when the task never landed.
   const enqueue = (s, spec) => s.update(st => { tasks.enqueueTask(st, spec); })
     .then(() => ({enqueued: true}), error => {
       console.error('Notification enqueue:', error.message);
       return {enqueued: false, error: error.message};
     });
-  return event => {
+  // Async so `await notify(event)` means more than "a row exists": the
+  // delivery tasks are written (or honestly failed) before this resolves, and a
+  // caller that waits can never be the reason a row is left reading `queued`
+  // with no task behind it while the process exits.
+  return async event => {
     const id = notifications.notify(ws, enqueue, {workspaceId, userId: null, ...event});
     // A notification for one person goes to that person's devices; one for the
     // workspace goes to every member who can still sign in.
     const members = auth.listUsers(workspaceId).filter(u => !u.disabled).map(u => u.id);
     push.announce(ws, enqueue, event.userId ? members.filter(id => id === event.userId) : members,
       {id, title: event.title, body: event.body});
+    await notifications.deliveriesQueued();
     return id;
   };
 }

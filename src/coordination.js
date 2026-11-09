@@ -396,6 +396,34 @@ export async function resumeBrowserRun(store,request,{ok,text='',executor}={}){
   if(start)startRun(store,id,executor);
   return true;
 }
+/** Statuses where a run still holds work: it is about to start, it is between
+ * steps, or it is waiting on a person. A finished, failed or cancelled run has
+ * nothing left to stop. */
+const STOPPABLE = ['queued','running','awaiting_plan','awaiting_checkpoint','awaiting_browser','awaiting_feed'];
+
+/** Stop a run.
+ *
+ * The loop reads the run's status between steps and refuses to write a step of a
+ * run that is no longer `running`, so the flip takes effect at the next boundary:
+ * a model call already in flight is not aborted (the HTTP client owns it) and its
+ * reply is discarded rather than appended to a run somebody stopped. Nothing
+ * already said is removed - the thread would lose the reasoning that led here -
+ * and the note says what happened so the thread does not just go quiet.
+ */
+export async function cancelRun(store,id,{actor=null}={}){
+  const result=await store.update(s=>{
+    const r=s.groupRuns?.find(x=>x.id===id);
+    if(!r)throw Object.assign(new Error('Run not found.'),{status:404});
+    if(!STOPPABLE.includes(r.status))throw Object.assign(new Error(`A ${r.status} run cannot be stopped.`),{status:409});
+    const midStep=r.status==='running';
+    r.status='cancelled';r.completedAt=stamp();r.checkpoint=null;
+    say(s,r,{id:randomUUID(),role:'system',text:midStep?'Stopped. The reply being written when you stopped it was discarded; nothing after it runs.':'Stopped before it started. Nothing ran.',runId:id,at:stamp()});
+    activity(s,'group-run','Stopped a bot coordination run',{runId:id,by:actor});
+    return {runId:id,status:'cancelled'};
+  });
+  return result;
+}
+
 /** Start or drop a tracked plan that was shown before any bot ran. */
 export async function decidePlan(store,id,{approve}){
   const result=await store.update(s=>{

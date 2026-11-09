@@ -62,6 +62,65 @@ const listen = () => new Promise(resolve => {
   server.listen(0, '127.0.0.1', () => resolve(server));
 });
 
+test('the device keeps heartbeating while a task blocks, so its lease cannot lapse', {timeout: 30000}, async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-keepalive-'));
+  const config = path.join(dir, 'agent.config.json');
+  let delivered = false;
+  let reportAt = 0;
+  let reportDoneAt = 0;
+  const beatsDuringReport = [];
+  const front = await listen();
+  const base = `http://127.0.0.1:${front.address().port}`;
+  // A server that hands over one task and then holds the result report open, the
+  // way a long browser task holds the device's serial loop open.
+  front.on('request', (req, res) => {
+    let raw = '';
+    req.on('data', chunk => { raw += chunk; });
+    req.on('end', async () => {
+      const json = body => { res.writeHead(200, {'Content-Type': 'application/json'}); res.end(JSON.stringify(body)); };
+      if (req.url === '/api/agent/heartbeat') {
+        if (reportAt && !reportDoneAt) beatsDuringReport.push(Date.now() - reportAt);
+        const tasks = delivered ? [] : [{id: 'task-1', kind: 'http.check', payload: {url: 'http://example.com/'}, attempts: 1}];
+        delivered = true;
+        json({ok: true, agent: {id: 'device-1', name: 'Device', permissions: []}, tasks});
+        return;
+      }
+      if (req.url === '/api/agent/tasks/task-1/result') {
+        reportAt = Date.now();
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        reportDoneAt = Date.now();
+        json({ok: true, status: 'failed'});
+        return;
+      }
+      res.writeHead(404).end('{}');
+    });
+  });
+  await fs.writeFile(config, JSON.stringify({server: base, agentId: 'device-1', secret: 'secret', workspaceId: 'default', permissions: [], pollIntervalMs: 2000}));
+  const child = spawn(process.execPath, ['agent/agent.mjs', 'run'], {
+    cwd: root,
+    env: {...process.env, AGENT_SKIP_DOTENV: '1', AGENT_CONFIG: config},
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let output = '';
+  child.stdout.on('data', chunk => { output += chunk; });
+  child.stderr.on('data', chunk => { output += chunk; });
+  try {
+    // The report is held for 5s, so a device that only polls between tasks sends
+    // nothing while it is blocked; only a heartbeat on its own timer can arrive
+    // inside that window.
+    const deadline = Date.now() + 15000;
+    while (!beatsDuringReport.length && Date.now() < deadline && child.exitCode === null) await new Promise(r => setTimeout(r, 100));
+    assert.ok(reportAt, `the device never reported its task: ${output}`);
+    assert.ok(beatsDuringReport.length >= 1,
+      `a heartbeat must arrive while the report is still in flight; got none before it was answered: ${output}`);
+  } finally {
+    child.kill('SIGKILL');
+    await new Promise(resolve => child.once('exit', resolve));
+    front.close();
+    await fs.rm(dir, {recursive: true, force: true});
+  }
+});
+
 test('pairing asks for the admin scope and neither pairing nor polling follows a redirect', {timeout: 20000}, async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-cli-'));
   const config = path.join(dir, 'agent.config.json');

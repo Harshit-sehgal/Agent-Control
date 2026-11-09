@@ -31,11 +31,25 @@ export function accountRoutes(router, {auth, workspaces}) {
   router.add('POST', '/api/users', 'admin', async c => { const b = await c.body(); return reply(201, auth.createUser(c.actor, b)); });
   router.add('PATCH', '/api/users/:id', 'admin', async c => { const b = await c.body(); return auth.updateUser(c.actor, c.params.id, b); });
   router.add('DELETE', '/api/users/:id', 'admin', c => {
-    const result = auth.deleteUser(c.actor, c.params.id);
-    // What this workspace kept for them goes with the membership.
-    c.store.run('DELETE FROM notification_prefs WHERE user_id=?', c.params.id);
-    c.store.run('DELETE FROM notifications WHERE user_id=?', c.params.id);
-    return result;
+    // This workspace's rows live in its own database; the account, its
+    // memberships and its sessions live in the primary one, so the two can
+    // never share a commit. Order is the whole point here: the workspace rows
+    // go FIRST and the account LAST. Interrupted after the first step, what is
+    // left is an account with no old notifications - harmless, and a retry
+    // finishes it. The other order left rows and preferences that no account
+    // could ever match again: they kept holding the MAX_IN_APP cap slots and
+    // showed a feed for a person who no longer exists.
+    //
+    // Every guard (role, self-removal, membership) runs before the first write,
+    // through the same function `auth.deleteUser` uses below: a 404 or 409 that
+    // lands after this step would have removed the person's notifications while
+    // telling the admin the removal did not happen.
+    auth.assertCanRemoveUser(c.actor, c.params.id);
+    c.store.transaction(() => {
+      c.store.run('DELETE FROM notification_prefs WHERE user_id=?', c.params.id);
+      c.store.run('DELETE FROM notifications WHERE user_id=?', c.params.id);
+    });
+    return auth.deleteUser(c.actor, c.params.id);
   });
 
   // Paired local agents.
@@ -57,8 +71,16 @@ export function accountRoutes(router, {auth, workspaces}) {
   });
   router.add('PATCH', '/api/agents/:id', 'admin', async c => {
     const b = await c.body(), id = c.params.id;
-    if (b.name !== undefined) c.store.run('UPDATE agents SET name=? WHERE id=?', cleanText(b.name, 120) || 'Local agent', id);
-    const result = b.permissions !== undefined ? agent.setAgentPermissions(c.store, id, b.permissions) : {ok: true};
+    // A name and its permission list are one grant, not two. As separate
+    // commits a crash between them could leave an agent renamed with its old
+    // scope (or a new scope under the old name), which an operator reads as the
+    // agent they just approved. One transaction makes the pair land together or
+    // not at all - including a refused permission list, which now also rolls
+    // back the rename instead of keeping it.
+    const result = c.store.transaction(() => {
+      if (b.name !== undefined) c.store.run('UPDATE agents SET name=? WHERE id=?', cleanText(b.name, 120) || 'Local agent', id);
+      return b.permissions !== undefined ? agent.setAgentPermissions(c.store, id, b.permissions) : {ok: true};
+    });
     await c.store.update(s => activity(s, 'agent', 'Updated local agent permissions.', {agentId: id}));
     return result;
   });

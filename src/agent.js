@@ -26,6 +26,9 @@ import {encryptJson,decryptJson,sha256,loadMasterKey} from './vault.js';
 export const AGENT_ACTIONS = ['http.check', 'browser.capture', 'browser.action'];
 const PAIRING_TTL_MS = 10 * 60000;
 const CLOCK_SKEW_MS = 5 * 60000;
+// How long a claimed task stays leased to the device. It is also how recently a
+// device must have been seen for it to count as alive in recovery below.
+const DEFAULT_LEASE_MS = 120000;
 // A task kind is its own permission: 'browser.action' exists beside
 // 'browser.capture' because acting on a page is a deliberate grant, not a read.
 // AGENT_ACTIONS is the list; a separate kind table only ever repeated it.
@@ -157,7 +160,7 @@ export function enqueueAgentTask(store, agentId, {kind, payload = {}, idempotenc
 
 /** Claim due agent tasks for one agent. Claims set a lease; a heartbeat after
  * the lease expired means the agent disconnected, so the task is redelivered. */
-export function claimAgentTasks(store, agentId, {leaseMs = 120000, limit = 5, nowMs = Date.now()} = {}) {
+export function claimAgentTasks(store, agentId, {leaseMs = DEFAULT_LEASE_MS, limit = 5, nowMs = Date.now()} = {}) {
   const due = store.all(
     `SELECT * FROM agent_tasks WHERE agent_id=? AND status='queued' AND (lease_until IS NULL OR lease_until<=?)
      ORDER BY created_at LIMIT ?`, agentId, new Date(nowMs).toISOString(), limit);
@@ -172,14 +175,37 @@ export function claimAgentTasks(store, agentId, {leaseMs = 120000, limit = 5, no
 }
 
 /** Record an agent's result. Completing twice is rejected, so a duplicate
- * delivery can never be applied twice. */
-export function completeAgentTask(store, agentId, taskId, {status, result, error}) {
+ * delivery can never be applied twice.
+ *
+ * The device reports the attempt number the task was claimed with. The write is
+ * fenced on it: when a lease lapsed and the task was re-delivered, the honest
+ * but late result of the earlier attempt must not overwrite the run that is
+ * executing now (and must not re-queue it as failed either). Without the fence
+ * the second report silently won, and whatever it said became the task's
+ * outcome even though it described an attempt nobody was running any more.
+ * A report that carries no attempt number (an older device build) is accepted
+ * as before; there is no attempt to fence on. */
+export function completeAgentTask(store, agentId, taskId, {status, result, error, attempts}) {
   const task = store.get('SELECT * FROM agent_tasks WHERE id=? AND agent_id=?', taskId, agentId);
   if (!task) fail('Task not found.', 404);
   if (task.status === 'done' || task.status === 'failed') fail('This task was already completed.', 409);
+  const claimed = attempts === undefined || attempts === null || attempts === '' ? null : Number(attempts);
+  const fence = claimed === null || !Number.isFinite(claimed) ? '' : ' AND attempts=?';
+  const fenceArgs = fence ? [claimed] : [];
+  /** A write that matched no row is a result for an attempt the server has
+   * already replaced: the task is running again for another attempt. */
+  const superseded = () => {
+    if (store.get('SELECT id FROM agent_tasks WHERE id=?', taskId)) {
+      fail('This result is for an earlier attempt: the task was re-delivered and is running again, so the result was not applied.', 409);
+    }
+    fail('Task not found.', 404);
+  };
   if (status === 'done') {
-    store.run('UPDATE agent_tasks SET status=?,result=?,lease_until=NULL,updated_at=?,completed_at=? WHERE id=?',
-      'done', JSON.stringify(result ?? null), now(), now(), taskId);
+    const written = store.run(
+      `UPDATE agent_tasks SET status='done', result=?, lease_until=NULL, updated_at=?, completed_at=?
+       WHERE id=? AND status IN ('queued','running')${fence}`,
+      JSON.stringify(result ?? null), now(), now(), taskId, ...fenceArgs);
+    if (written.changes !== 1) superseded();
     return {ok: true, status: 'done'};
   }
   if (status !== 'failed') fail('Result status must be done or failed.', 400);
@@ -187,21 +213,34 @@ export function completeAgentTask(store, agentId, taskId, {status, result, error
   // gets the task again on a later heartbeat. `attempts` was already incremented
   // when the task was claimed, so this is the count for the run that just failed
   // — incrementing again here made a max_attempts=3 task run only twice.
-  const attempts = task.attempts || 0;
-  const retry = attempts < (task.max_attempts || 3);
-  store.run('UPDATE agent_tasks SET status=?,attempts=?,error=?,lease_until=NULL,updated_at=? WHERE id=?',
-    retry ? 'queued' : 'failed', attempts, cleanText(error, 400) || 'Agent reported failure.', now(), taskId);
+  const used = task.attempts || 0;
+  const retry = used < (task.max_attempts || 3);
+  const written = store.run(
+    `UPDATE agent_tasks SET status=?, attempts=?, error=?, lease_until=NULL, updated_at=?, completed_at=?
+     WHERE id=? AND status IN ('queued','running')${fence}`,
+    retry ? 'queued' : 'failed', used, cleanText(error, 400) || 'Agent reported failure.', now(), retry ? null : now(), taskId, ...fenceArgs);
+  if (written.changes !== 1) superseded();
   return {ok: true, status: retry ? 'queued' : 'failed'};
 }
 
 /** Tasks orphaned by a disconnected agent: expired leases return to queued,
- * except browser actions which fail instead (never retried). Returns how
- * many stale tasks were settled. */
-export function recoverAgentTasks(store, nowMs = Date.now()) {
+ * except browser actions which fail instead (never retried). Returns how many
+ * stale tasks were settled.
+ *
+ * A lapsed lease is only evidence of a disconnect when the device has also
+ * stopped being seen. A device that is alive and still working (seen inside the
+ * lease window) is skipped rather than re-armed: re-queueing a capture it is
+ * running would run it twice, and failing a browser action would report a click
+ * that actually landed as "The agent disconnected". The device renews its own
+ * leases on every heartbeat; this is the backstop for the heartbeat that did
+ * not reach the server. */
+export function recoverAgentTasks(store, nowMs = Date.now(), {aliveMs = DEFAULT_LEASE_MS} = {}) {
   const stale = store.all(`SELECT * FROM agent_tasks WHERE status='running' AND (lease_until IS NULL OR lease_until<=?)`,
     new Date(nowMs).toISOString());
+  const aliveSince = nowMs - aliveMs;
   let rearmed = 0;
   for (const row of stale) {
+    if (agentSeenSince(store, row.agent_id, aliveSince)) continue;
     rearmed++;
     if (row.kind === 'browser.action') {
       store.run(`UPDATE agent_tasks SET status='failed', lease_until=NULL, error=?, updated_at=?, completed_at=? WHERE id=?`,
@@ -218,6 +257,13 @@ export function touchAgent(store, agentId) {
   store.run('UPDATE agents SET last_seen_at=?, status=? WHERE id=?', now(), 'online', agentId);
 }
 
+/** Whether this device has heartbeated since `sinceMs`: the difference between a
+ * device that is working and one that is gone. */
+function agentSeenSince(store, agentId, sinceMs) {
+  const seen = store.get('SELECT last_seen_at FROM agents WHERE id=?', agentId)?.last_seen_at;
+  return Boolean(seen) && Date.parse(seen) > sinceMs;
+}
+
 /** Push the lease of every task this agent is still running out again.
  *
  * A device heartbeats while it works, so a *live* long job (a slow page, a
@@ -225,7 +271,7 @@ export function touchAgent(store, agentId) {
  * re-armed any task whose 120s lease had lapsed even though the device was
  * still executing it, and the task ran twice. Call this before recovery in the
  * heartbeat. Returns how many leases were pushed out. */
-export function renewAgentTaskLeases(store, agentId, {leaseMs = 120000, nowMs = Date.now()} = {}) {
+export function renewAgentTaskLeases(store, agentId, {leaseMs = DEFAULT_LEASE_MS, nowMs = Date.now()} = {}) {
   const result = store.run(
     `UPDATE agent_tasks SET lease_until=?, updated_at=? WHERE agent_id=? AND status='running'`,
     new Date(nowMs + leaseMs).toISOString(), now(), agentId);

@@ -7,7 +7,7 @@ import * as chats from '../shared/chats.js';
 import {botSettings, threadContext} from '../shared/bot-settings.js';
 import {executeCustomBot} from './ai.js';
 import {resolveConfig} from './ai-providers.js';
-import {queueGroupRun, resumeGroupRun, resumeFeedRun, resumeBrowserRun, decidePlan, coordinationState, summonableGuests} from './coordination.js';
+import {queueGroupRun, resumeGroupRun, resumeFeedRun, resumeBrowserRun, decidePlan, cancelRun, coordinationState, summonableGuests} from './coordination.js';
 import {recordBrowserRequests, denyBrowserRequest, BROWSER_PERMISSION, BROWSER_TOOL_HINT} from '../shared/bot-browser.js';
 import {SUBAGENT_PERMISSION, SUBAGENT_TOOL_HINT} from '../shared/subagents.js';
 import {BOT_ASK_PERMISSION, BOT_ASK_TOOL_HINT} from '../shared/bot-link.js';
@@ -151,6 +151,9 @@ export function groupRoutes(router) {
   });
   // Approve the next handoff of a run paused at a human checkpoint.
   router.add('POST', '/api/groups/:group/runs/:run/continue', 'member', async c => reply(202, await resumeGroupRun(c.store, c.params.run)));
+  // Stop a run: a start, a step in flight, or a pause. The flip is read between
+  // steps, so it stops the next handoff rather than a model call already sent.
+  router.add('POST', '/api/groups/:group/runs/:run/cancel', 'member', async c => reply(202, await cancelRun(c.store, c.params.run, {actor: c.actor.email})));
   router.add('POST', '/api/groups/:group/runs/:run/plan', 'member', async c => {
     const b = await c.body();
     return reply(202, await decidePlan(c.store, c.params.run, {approve: b?.approve !== false}));

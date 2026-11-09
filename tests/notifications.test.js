@@ -84,8 +84,22 @@ test('a webhook delivery is a durable task that retries and then fails loudly', 
   await store.update(s => { s.tasks.find(t => t.id === task.id).runAt = new Date(Date.now() - 1000).toISOString(); });
   await queue.sweep();
   after = store.read().tasks.find(t => t.id === task.id);
-  assert.equal(after.status, 'failed', 'After the budget it stays failed, never silently sent.');
+  // Attempts are no longer the whole budget: a retry that gave up after four
+  // attempts (about fifteen seconds on the backoff ladder) let a webhook 502
+  // end a reminder that fires every hour. The budget is now a wall-clock window
+  // as well, so this one is still waiting for its next try.
+  assert.equal(after.status, 'queued', 'Past the attempt cap the task still waits inside the retry window.');
   assert.equal(attempts.length, 2);
+  // Age the retry window past its end: only then is the endpoint declared dead.
+  await store.update(s => {
+    const t = s.tasks.find(x => x.id === task.id);
+    t.payload.retryStartedAt = Date.now() - 7 * 3600000;
+    t.runAt = new Date(Date.now() - 1000).toISOString();
+  });
+  await queue.sweep();
+  after = store.read().tasks.find(t => t.id === task.id);
+  assert.equal(after.status, 'failed', 'After the window it stays failed, never silently sent.');
+  assert.equal(attempts.length, 3);
   await fs.rm(dir, {recursive: true, force: true });
 });
 

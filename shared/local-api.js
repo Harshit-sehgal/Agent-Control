@@ -9,6 +9,7 @@ import {
   migrate, seedDemo, updateSettings, addCandidate, beginProcessing,
   finishProcessing, editDraft, findDraft, rewriteDraft, draftAction, addGroup,
   addBot, updateBot, updateGroup, removeBot, removeGroup, addSchedule, removeSchedule, resetDemo,
+  removeCandidate,
 } from './workflow.js';
 import {enqueueTask, retryTask, cancelTask} from './tasks.js';
 import {addEvidence, verifyEvidence, dropEvidence} from './evidence.js';
@@ -155,6 +156,7 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
   if (path === '/api/candidates' && method === 'POST') { const r = addCandidate(state, body); save(state); return {...r.candidate, duplicate: r.duplicate}; }
 
   let m;
+  if ((m = path.match(/^\/api\/candidates\/([a-z0-9-]+)$/)) && method === 'DELETE') { const r = removeCandidate(state, m[1]); save(state); return r; }
   if ((m = path.match(/^\/api\/candidates\/([a-z0-9-]+)\/process$/)) && method === 'POST') {
     const draft = processLocal(state, m[1]);
     save(state);

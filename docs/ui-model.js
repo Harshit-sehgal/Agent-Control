@@ -2,8 +2,8 @@
  * a pane shows: the chat list, a thread's timeline, the "needs you" count and
  * the hash route. No DOM and no globals, so the product rules here are unit
  * tested directly (tests/ui-model.test.js). */
-import {fullDate} from './ui-kit.js?v=4f8cfed5b9';
-import {botSettings} from './bot-settings.js?v=4f8cfed5b9';
+import {fullDate} from './ui-kit.js?v=165e836e5a';
+import {botSettings} from './bot-settings.js?v=165e836e5a';
 
 export const ACTIVE_DRAFTS = ['pending', 'scheduled', 'ready'];
 const X_GROUP = 'x-engage';
@@ -102,9 +102,20 @@ export function threadLineActions({kind, senderId, status, live = false, note = 
     grant: Boolean(kind === 'feed-permission' && senderId),
     plan: Boolean(note && status === 'awaiting_plan'),
     checkpoint: Boolean(note && status === 'awaiting_checkpoint'),
+    // Anything the run can still do is something a person can call off: waiting
+    // on a plan, paused at a checkpoint, or working right now. Retry is its
+    // opposite, so a run can never offer both.
+    stop: Boolean(live && note && latest && STOPPABLE.has(status)),
     retry: Boolean(live && note && latest && failed),
   };
 }
+
+/** Run statuses that still have work ahead of them: about to start, between two
+ * steps, or waiting on a person. A finished, failed or cancelled run has nothing
+ * left to stop, so it must not offer one. `awaiting_plan` is left out on purpose:
+ * that note already offers Cancel next to Start, and two buttons that stop the
+ * same run in one row read as two different outcomes. */
+const STOPPABLE = new Set(['queued', 'running', 'awaiting_checkpoint', 'awaiting_browser', 'awaiting_feed']);
 
 /** Workspace runs first, then any same-id local simulation record only when
  * the workspace has no copy. A stale local "waiting" plan must not outvote

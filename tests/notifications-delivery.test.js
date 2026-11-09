@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -95,7 +96,9 @@ test('a delivery task that never lands marks its row failed instead of leaving i
     // A successful enqueue must keep reading as queued, not as failed.
     notifications.notify(store, () => Promise.resolve({enqueued: true}),
       {userId: 'u1', title: 'Now', body: '', channels: ['email']});
-    await new Promise(resolve => setTimeout(resolve, 50));
+    // Every enqueue is tracked, so waiting on the module is deterministic: no
+    // fixed sleep, and no retry that outlives the test.
+    await notifications.deliveriesQueued();
   });
   const states = rows(store, 'email').map(row => row.status);
   assert.deepEqual(states, ['failed', 'failed', 'queued'], 'A task that never landed is not still "queued".');
@@ -112,10 +115,65 @@ test('an enqueue that reports failure without throwing still fails the row', asy
   await quietly(async () => {
     notifications.notify(store, (s, spec) => Promise.resolve({enqueued: false, error: 'Duplicate delivery task.'}),
       {userId: 'u1', title: 'Now', body: '', channels: ['email']});
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await notifications.deliveriesQueued();
   });
   const row = rows(store, 'email')[0];
   assert.equal(row.status, 'failed');
   assert.match(row.meta, /Duplicate delivery task/);
+  await fs.rm(dir, {recursive: true, force: true});
+});
+
+test('a transient enqueue failure is retried instead of stranding the row', async () => {
+  const {store, dir} = await harness();
+  await quietly(async () => {
+    notifications.updatePreferences(store, 'u1', {email: true, emailAddress: 'ops@example.com'});
+    const specs = [];
+    // The first attempt is the one a restore or a busy database refuses; the
+    // next one lands. Giving up after the first was the defect.
+    notifications.notify(store, (s, spec) => {
+      specs.push(spec);
+      return specs.length === 1
+        ? Promise.reject(new Error('This workspace is being restored. Try again shortly.'))
+        : Promise.resolve({enqueued: true});
+    }, {userId: 'u1', title: 'Now', body: '', channels: ['email']});
+    await notifications.deliveriesQueued();
+    assert.equal(specs.length, 2, 'A transient failure is retried rather than abandoned.');
+    assert.equal(specs[1].idempotencyKey, specs[0].idempotencyKey, 'The retry is the same task, not a second one.');
+  });
+  assert.equal(rows(store, 'email')[0].status, 'queued', 'A retried enqueue leaves the row honestly queued.');
+  await fs.rm(dir, {recursive: true, force: true});
+});
+
+test('a row whose delivery task never landed is reaped, and one that did is left alone', async () => {
+  const {store, dir} = await harness();
+  const ago = ms => new Date(Date.now() - ms).toISOString();
+  const insert = (id, channel, createdAt) => store.run(
+    `INSERT INTO notifications (id,workspace_id,user_id,channel,title,body,meta,status,created_at)
+     VALUES (?,?,?,?,?,?,?,?,?)`, id, 'default', 'u1', channel, 'Interrupted', '', '{}', 'queued', createdAt);
+  // The process exited between the row's commit and the task's: the row reads
+  // `queued` and no task exists to deliver it.
+  const orphan = crypto.randomUUID();
+  insert(orphan, 'email', ago(11 * 60000));
+  // A row written a moment ago may still be waiting on `store.update`.
+  const fresh = crypto.randomUUID();
+  insert(fresh, 'email', ago(1000));
+  // A row whose task did land is queued in the honest sense.
+  const queued = crypto.randomUUID();
+  insert(queued, 'email', ago(30 * 60000));
+  const {enqueueTask} = await import('../shared/tasks.js');
+  await store.update(s => { enqueueTask(s, {kind: 'notification', idempotencyKey: `notify:email:${queued}`,
+    payload: {notificationId: queued, channel: 'email', target: 'ops@example.com', title: 't', body: ''}}); });
+  assert.equal(notifications.reapOrphanedDeliveries(store), 1, 'Only the row with no task behind it is reaped.');
+  const row = id => store.get('SELECT status, meta FROM notifications WHERE id=?', id);
+  assert.equal(row(orphan).status, 'failed');
+  assert.match(row(orphan).meta, /never queued/);
+  assert.equal(row(fresh).status, 'queued', 'A row younger than the grace window is left alone.');
+  assert.equal(row(queued).status, 'queued', 'A row with a delivery task is left alone.');
+  // Recording anything reaps on its own, so the feed cannot show a pending
+  // delivery forever while nothing sweeps.
+  const stale = crypto.randomUUID();
+  insert(stale, 'webhook', ago(60 * 60000));
+  notifications.notify(store, null, {userId: 'u1', title: 'Later', body: ''});
+  assert.equal(row(stale).status, 'failed', 'The next notification corrects the stale row.');
   await fs.rm(dir, {recursive: true, force: true});
 });

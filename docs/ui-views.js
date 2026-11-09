@@ -2,14 +2,14 @@
  * Both are thin renderers over ui-model.js. The list shell and the composer are
  * painted once and then only their contents change, so a background refresh can
  * never wipe what the user is typing. */
-import {botSuggestions} from './chat-engine.js?v=4f8cfed5b9';
-import {summonableGuests} from './coordination.js?v=4f8cfed5b9';
-import {botSettings, groupSettings} from './bot-settings.js?v=4f8cfed5b9';
-import {requestOfMessage} from './bot-browser.js?v=4f8cfed5b9';
-import {validHttpUrl} from './core.js?v=4f8cfed5b9';
-import {chatRows, timeline, pendingBrowser, stuckFeedReads, draftStage, draftLength, lengthLabel, mentionSuggestions, retryTarget, threadLineActions, isRunNote, runBelongsToChat, ACTIVE_DRAFTS} from './ui-model.js?v=4f8cfed5b9';
-import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=4f8cfed5b9';
-import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, isXGroup, botTint, recentRuns} from './ui-store.js?v=4f8cfed5b9';
+import {botSuggestions} from './chat-engine.js?v=165e836e5a';
+import {summonableGuests} from './coordination.js?v=165e836e5a';
+import {botSettings, groupSettings} from './bot-settings.js?v=165e836e5a';
+import {requestOfMessage} from './bot-browser.js?v=165e836e5a';
+import {validHttpUrl} from './core.js?v=165e836e5a';
+import {chatRows, timeline, pendingBrowser, stuckFeedReads, draftStage, draftLength, lengthLabel, mentionSuggestions, retryTarget, threadLineActions, isRunNote, runBelongsToChat, ACTIVE_DRAFTS} from './ui-model.js?v=165e836e5a';
+import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=165e836e5a';
+import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, isXGroup, botTint, recentRuns} from './ui-store.js?v=165e836e5a';
 
 const el = id => document.getElementById(id);
 const FILTERS = [['all', 'All'], ['needs', 'Needs you'], ['groups', 'Groups'], ['bots', 'Bots']];
@@ -137,7 +137,7 @@ function evidencePanel(draft) {
 export function postCard(post, drafted) {
   return `<div class="post">
     <a class="post-quote" href="${esc(safeHref(post.url))}" target="_blank" rel="noopener noreferrer"><strong>${esc(post.author || 'Post')} on X</strong><span>${esc(post.text)}</span></a>
-    <div class="post-meta"><span>${esc(post.topic || 'No topic')}${post.score?.score != null ? ` · ${Number(post.score.score)}/100` : ''}${post.demo ? ' · sample' : ''}</span>${drafted ? tag('Drafted', 'good') : canWrite() ? btn('Draft reply', 'draft-candidate', {id: post.id, small: true, kind: 'primary'}) : ''}</div>
+    <div class="post-meta"><span>${esc(post.topic || 'No topic')}${post.score?.score != null ? ` · ${Number(post.score.score)}/100` : ''}${post.demo ? ' · sample' : ''}</span>${drafted ? tag('Drafted', 'good') : canWrite() ? btn('Draft reply', 'draft-candidate', {id: post.id, small: true, kind: 'primary'}) : ''}${canWrite() ? btn('Remove', 'remove-candidate', {id: post.id, small: true, kind: 'danger'}) : ''}</div>
   </div>`;
 }
 
@@ -182,7 +182,8 @@ function messageHtml(item, conv, latestRunNote) {
     const checkpoint = write && flags.checkpoint ? btn('Approve next step', 'continue-run', {id: conv.group.id, small: true, kind: 'primary', data: {run: run.id}}) : '';
     // Retry only the latest run: once a newer one exists, the old failure is history.
     const retry = write && flags.retry ? btn('Retry', 'retry-run', {id: conv.group.id, small: true, data: {run: run.id, message: run.input || '', ...retryTarget(conv.group, run)}}) : '';
-    return `<div class="event"><span>${esc(m.text)}</span>${grant}${plan}${checkpoint}${retry}</div>`;
+    const stop = write && flags.stop ? btn('Stop', 'cancel-run', {id: conv.group.id, small: true, data: {run: run.id}}) : '';
+    return `<div class="event"><span>${esc(m.text)}</span>${grant}${plan}${checkpoint}${retry}${stop}</div>`;
   }
   if (m.role === 'user') return `<div class="msg me${item.lead ? ' lead' : ''}"><div class="bubble"><span class="text">${esc(m.text)}</span><time>${esc(clock(m.at))}</time></div></div>`;
   const sender = m.senderId ? findBot(m.senderId) : null, guest = Boolean(sender) && !conv.group.bots.some(b => b.id === m.senderId);

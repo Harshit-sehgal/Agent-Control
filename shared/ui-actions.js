@@ -121,6 +121,10 @@ export const actions = {
     await sync(); go({chat: copy.id}); toast('Bot duplicated. Its chat starts empty.');
   },
   'copy-capture-token': () => copyText(store.state.captureToken || '', 'Capture token copied'),
+  'rotate-capture-token': async () => {
+    if (!await confirmSheet('Replace the capture token?', {confirm: 'Replace', danger: true, detail: 'The token in every browser extension stops working until the new one is pasted in. Captured posts already here are not affected.'})) return;
+    await api('/api/capture-token', 'POST', {}); toast('New capture token created. Paste it into the extension.'); await sync();
+  },
   'copy-bot-instructions': b => copyText(findBot(b.dataset.id).instructions || '', 'Instructions copied'),
 
   // memory: per-model rulebook and per-chat recap
@@ -174,6 +178,10 @@ export const actions = {
     await copyText(draft.text, 'Copied. Post it on X yourself.');
   },
   'verify-evidence': async b => { await api(`/api/evidence/${b.dataset.id}/verify`, 'POST', {status: b.dataset.status}); toast('Source updated.'); await sync(); },
+  'remove-candidate': async b => {
+    if (!await confirmSheet('Remove this captured post?', {confirm: 'Remove', danger: true, detail: 'Its drafts and their sources go too. A scheduled or posted draft has to go first.'})) return;
+    await api(`/api/candidates/${b.dataset.id}`, 'DELETE', {}); toast('Captured post removed.'); await sync();
+  },
   'drop-evidence': async b => {
     if (!await confirmSheet('Remove this source?', {confirm: 'Remove', danger: true})) return;
     await api(`/api/evidence/${b.dataset.id}`, 'DELETE', {}); toast('Source removed.'); await sync();
@@ -263,6 +271,16 @@ export const actions = {
       await streamGroupRun(b.dataset.id, key, b.dataset.run, {ignore: request?.status === 'dispatched' ? ['awaiting_feed'] : []});
     } finally { setTyping(key, false); }
     await sync();
+  },
+  'cancel-run': async b => {
+    if (isStaticDemo()) {
+      const run = recentRuns(b.dataset.id).find(r => r.id === b.dataset.run);
+      if (!run) throw new Error('Run not found');
+      await patchLocalRun(run.id, {status: 'cancelled'});
+      appendMessage(run.chatKey || chatId() || teamKey(b.dataset.id), {role: 'system', text: 'Stopped. Nothing after this runs.', runId: run.id});
+      return;
+    }
+    await api(`/api/groups/${b.dataset.id}/runs/${b.dataset.run}/cancel`, 'POST', {}); toast('Run stopped.'); await sync();
   },
   'cancel-plan': async b => {
     if (isStaticDemo()) {

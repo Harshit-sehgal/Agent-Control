@@ -29,6 +29,18 @@ import {MAX_ATTEMPTS_DEFAULT} from '../shared/tasks.js';
 
 const now = () => new Date().toISOString();
 const MAX_IN_APP = 200;
+/** How long a `queued` row may sit without a delivery task before it is a lie.
+ * Generous on purpose: the task write is a separate transaction, so a row
+ * recorded moments ago may still be waiting on `store.update`. */
+const ORPHAN_GRACE_MS = 10 * 60000;
+/** Backoff for a transient enqueue failure. Small, because the enqueue is one
+ * local write and a busy/restoring workspace is the usual reason it refuses. */
+const ENQUEUE_RETRY_MS = [50, 150];
+/** Enqueues started by `notify`, kept until they settle so a caller that needs
+ * the durability promise can wait for them instead of hoping a floating
+ * promise outlives the request (`deliveriesQueued`). */
+const pendingEnqueues = new Set();
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 const isEmailAddress = value => typeof value === 'string' && value.length <= 200 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 const privateRelayAllowed = () => process.env.WEBHOOK_ALLOW_PRIVATE === '1';
 async function postPublic(url, {headers, body} = {}) {
@@ -85,8 +97,18 @@ export function updatePreferences(store, userId, body) {
 /** Record one notification row on one channel, and enqueue outbound delivery
  * for the opt-in channels through the task queue. Every channel gets its own
  * row: a single shared row let the in-app copy's `delivered` stand for an email
- * that never left, and one `sent_at` claimed both had gone. */
+ * that never left, and one `sent_at` claimed both had gone.
+ *
+ * The row is written before this returns (the feed must show the notice now)
+ * and the returned id is that row. The delivery task is a second commit - the
+ * queue writes through `store.update`, which owns its own transaction - so the
+ * enqueue runs in the background and is tracked: `deliveriesQueued()` settles
+ * once it is written or has failed honestly, which is what `createNotifier`
+ * awaits. */
 export function notify(store, queue, {workspaceId = 'default', userId, title, body, kind = 'event', meta = {}, channels}) {
+  // Self-healing pass, see reapOrphanedDeliveries: it rides on the writes this
+  // module already makes instead of needing a sweeper of its own.
+  try { reapOrphanedDeliveries(store); } catch (error) { console.error('Notification reap:', error.message); }
   const prefs = userId ? getPreferences(store, userId) : {inApp: true, webhook: false, email: false};
   const wanted = channels || CHANNELS.filter(c => prefs[c === 'in_app' ? 'inApp' : c]);
   const id = crypto.randomUUID();
@@ -125,18 +147,79 @@ export function notify(store, queue, {workspaceId = 'default', userId, title, bo
       payload: {notificationId: rowId, channel, target: notifier, title, body, meta},
       idempotencyKey: `notify:${channel}:${rowId}`,
     };
-    // A task that never lands leaves no retry behind, so the row must stop
-    // reading `queued` as if one were coming.
-    const failed = error => {
-      const message = String(error?.message ?? error ?? 'The delivery task was not queued.').slice(0, 400);
-      console.error('Notification enqueue:', message);
-      setStatus(store, rowId, channel, 'failed', message);
-    };
-    let pending;
-    try { pending = queue(store, spec); } catch (error) { failed(error); continue; }
-    Promise.resolve(pending).then(result => { if (result?.enqueued === false) failed(result.error); }, failed);
+    enqueueDelivery(store, queue, spec, rowId, channel);
   }
   return id;
+}
+
+/** Resolve once every delivery `notify` started has been written to the task
+ * queue (or has failed honestly). `createNotifier` awaits this, so a caller
+ * that awaits it treats "the event was recorded" and "the delivery is durably
+ * queued" as one outcome. */
+export function deliveriesQueued() {
+  return pendingEnqueues.size ? Promise.allSettled([...pendingEnqueues]).then(() => undefined) : Promise.resolve();
+}
+
+/** True when the queue already holds a delivery task for this row. */
+function taskQueued(store, rowId) {
+  try {
+    return Boolean(store.get("SELECT 1 AS x FROM tasks WHERE kind='notification' AND json_valid(payload) AND json_extract(payload,'$.notificationId')=? LIMIT 1", rowId));
+  } catch { return false; }
+}
+
+/** Enqueue one delivery task, retrying a transient failure before the row is
+ * marked failed. `store.update` rejects while a workspace is being restored or
+ * the database is busy, and one rejection used to strand the row for good even
+ * though the next attempt would have landed. A queue that throws synchronously
+ * (no queue bound) is misconfigured, not busy, so it fails at once instead of
+ * repeating the same throw. */
+function enqueueDelivery(store, queue, spec, rowId, channel) {
+  const failRow = error => {
+    const message = String(error?.message ?? error ?? 'The delivery task was not queued.').slice(0, 400);
+    console.error('Notification enqueue:', message);
+    setStatus(store, rowId, channel, 'failed', message);
+  };
+  const attempt = n => {
+    let pending;
+    try { pending = queue(store, spec); }
+    catch (error) { failRow(error); return Promise.resolve(); }
+    // A refused enqueue can also mean the task is already there (a duplicate
+    // idempotency key): what settles a row is a task for it, not a reply.
+    return Promise.resolve(pending).then(result => {
+      if (result?.enqueued === false && !taskQueued(store, rowId)) {
+        throw new Error(result.error ?? 'The delivery task was not queued.');
+      }
+    }).catch(error => {
+      if (taskQueued(store, rowId)) return undefined;
+      if (n >= ENQUEUE_RETRY_MS.length) { failRow(error); return undefined; }
+      return wait(ENQUEUE_RETRY_MS[n]).then(() => attempt(n + 1));
+    });
+  };
+  const settled = attempt(0);
+  pendingEnqueues.add(settled);
+  const done = () => pendingEnqueues.delete(settled);
+  settled.then(done, done);
+  return settled;
+}
+
+/** Mark rows whose delivery task never landed as failed.
+ *
+ * The row and its task are two commits, so a process that exits between them
+ * leaves a row reading `queued` with nothing left to run it: the feed promised
+ * a delivery that no retry would ever perform, and the row kept a slot the
+ * MAX_IN_APP trim counts. Any notification write makes this bounded pass, so
+ * the lie is corrected on the next event instead of surviving forever. Only
+ * rows older than the grace window are considered, so an enqueue still being
+ * written is never mistaken for a missing one. */
+export function reapOrphanedDeliveries(store, {now = Date.now(), graceMs = ORPHAN_GRACE_MS} = {}) {
+  const cutoff = new Date(now - graceMs).toISOString();
+  const orphans = store.all(
+    `SELECT id, channel FROM notifications n
+     WHERE n.status='queued' AND n.created_at < ?
+     AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.kind='notification'
+       AND json_valid(t.payload) AND json_extract(t.payload,'$.notificationId')=n.id)`, cutoff);
+  for (const row of orphans) setStatus(store, row.id, row.channel, 'failed', 'The delivery task was never queued.');
+  return orphans.length;
 }
 
 /** Move one channel's own row and nothing else. The channel is part of the

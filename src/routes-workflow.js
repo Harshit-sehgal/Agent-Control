@@ -33,6 +33,9 @@ export function workflowRoutes(router, {auth, processCandidate}) {
   router.add('POST', '/api/demo/seed', 'member', c => c.store.update(s=>wf.seedDemo(s,DEMO_SAMPLES)));
   router.add('POST', '/api/reset-demo', 'member', c => c.store.update(s => wf.resetDemo(s)));
 
+  // The capture token is a credential every paired browser holds, so replacing it
+  // is an admin action, not a writer's convenience.
+  router.add('POST', '/api/capture-token', 'admin', c => c.store.update(s => wf.rotateCaptureToken(s)));
   router.add('POST', '/api/candidates', 'member', async c => {
     const b = await c.body();
     // Report duplicates the same way /api/capture does, so the UI can tell the
@@ -42,6 +45,7 @@ export function workflowRoutes(router, {auth, processCandidate}) {
     const result = await c.store.update(s => wf.addCandidate(s, b));
     return reply(result.duplicate ? 200 : 201, {...result.candidate, duplicate: result.duplicate});
   });
+  router.add('DELETE', '/api/candidates/:id', 'member', c => c.store.update(s => wf.removeCandidate(s, c.params.id)));
   router.add('POST', '/api/candidates/:id/process', 'member', async c => {
     const run = () => processCandidate(c.store, c.params.id);
     return reply(201, await (c.store.trackWork ? c.store.trackWork(run) : run()));

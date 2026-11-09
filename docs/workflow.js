@@ -8,17 +8,17 @@
  * Keeping transitions here is the single source of truth for the draft
  * lifecycle: candidate -> draft -> approved/scheduled -> ready -> posted.
  */
-import {activity,candidateInput,cleanText,scheduleApproval,scoreCandidate} from './core.js?v=4f8cfed5b9';
-import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js?v=4f8cfed5b9';
-import {evidenceSummary,evidenceForDraft,seedCandidateEvidence} from './evidence.js?v=4f8cfed5b9';
-import {normalizeRetention} from './retention.js?v=4f8cfed5b9';
-import * as contracts from './contracts.js?v=4f8cfed5b9';
-import {pruneChats, releaseChatWork} from './chats.js?v=4f8cfed5b9';
-import {denyBrowserRequest} from './bot-browser.js?v=4f8cfed5b9';
-import {BUSY_STATUSES} from './coordination.js?v=4f8cfed5b9';
-import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=4f8cfed5b9';
-import {memoryState} from './memory.js?v=4f8cfed5b9';
-import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=4f8cfed5b9';
+import {activity,candidateInput,cleanText,scheduleApproval,scoreCandidate} from './core.js?v=165e836e5a';
+import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js?v=165e836e5a';
+import {evidenceSummary,evidenceForDraft,seedCandidateEvidence} from './evidence.js?v=165e836e5a';
+import {normalizeRetention} from './retention.js?v=165e836e5a';
+import * as contracts from './contracts.js?v=165e836e5a';
+import {pruneChats, releaseChatWork} from './chats.js?v=165e836e5a';
+import {denyBrowserRequest} from './bot-browser.js?v=165e836e5a';
+import {BUSY_STATUSES} from './coordination.js?v=165e836e5a';
+import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=165e836e5a';
+import {memoryState} from './memory.js?v=165e836e5a';
+import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=165e836e5a';
 
 export const SCHEMA_VERSION = 3;
 /** Posts are never pruned by age, so their number is bounded here. */
@@ -450,6 +450,42 @@ const scheduleView = task => ({
   intervalMinutes: task.intervalMinutes,
   enabled: task.status === 'queued' || task.status === 'running',
 });
+
+/** Replace the capture token.
+ *
+ * The token is a long-lived secret: any browser holding it can capture into this
+ * workspace. Until this existed the only way to retire a leaked one was to wipe
+ * the workspace, so a laptop sold, a token pasted into the wrong extension, or a
+ * shared bookmark cost the whole document. Captures look the token up against
+ * the workspace's current value, so the old one stops working the moment this
+ * lands, and the extension needs the new one pasted in.
+ */
+export function rotateCaptureToken(state) {
+  state.captureToken = crypto.randomUUID().replaceAll('-', '');
+  activity(state, 'settings', 'Replaced the capture token.');
+  return {captureToken: state.captureToken};
+}
+
+/** Remove a captured post and the work nobody committed to.
+ *
+ * Drafts that are still `pending` or were `rejected` are work in progress, so
+ * they go with the capture that produced them, and so does their source
+ * evidence. A `scheduled`, `ready` or `posted` draft is a commitment a person
+ * made - approved, queued for a window, or already out - and deleting the
+ * capture under it would withdraw that approval without asking. Those refuse and
+ * name what has to go first. */
+export function removeCandidate(state, id) {
+  const candidate = findCandidate(state, id);
+  const drafts = state.drafts.filter(d => d.candidateId === id);
+  const committed = drafts.find(d => ['scheduled', 'ready', 'posted'].includes(d.status));
+  if (committed) fail(`This post has a ${committed.status} draft, and removing it would withdraw an approval nobody withdrew. Remove the draft first.`, 409);
+  const draftIds = new Set(drafts.map(d => d.id));
+  state.drafts = state.drafts.filter(d => !draftIds.has(d.id));
+  state.candidates = state.candidates.filter(c => c.id !== id);
+  state.evidence = (state.evidence || []).filter(e => e.candidateId !== id && !draftIds.has(e.draftId));
+  activity(state, 'capture', `Removed a captured post from ${candidate.author || 'X'}.`, {candidateId: id});
+  return {ok: true};
+}
 
 export function resetDemo(state) {
   state.candidates = state.candidates.filter(x => !x.demo);

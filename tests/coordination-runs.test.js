@@ -186,3 +186,40 @@ test('the coordination refusals a person can cause answer 400 or 404, not 500', 
   // not a server fault.
   assert.throws(() => assertValidHandoff(group(), 'scout', 'writer'), error => error.status === 400 && /Cross-group/.test(error.message));
 });
+
+test('a person can stop a run that is working, and the stop is what the thread says', async t => {
+  const store = await workspace(t);
+  await store.update(state => { state.groups.push(group()); });
+  await store.update(state => {
+    state.groupRuns.push({id: 'run-stop', groupId: 'x-engage', chatKey: 'team-x-engage', mode: 'pipeline', status: 'running', input: 'Coordinate these bots', recipients: ['scout'], trace: [], createdAt: new Date().toISOString(), startedAt: new Date().toISOString()});
+  });
+  const stopped = await coordination.cancelRun(store, 'run-stop', {actor: 'owner@example.test'});
+  assert.deepEqual(stopped, {runId: 'run-stop', status: 'cancelled'});
+  const after = store.read();
+  const run = after.groupRuns.find(row => row.id === 'run-stop');
+  assert.equal(run.status, 'cancelled');
+  assert.ok(run.completedAt, 'a stopped run is finished, not left without a time');
+  assert.equal(run.checkpoint, null);
+  // The thread has to say it stopped: a run that just goes quiet reads as a
+  // crash, and the person who pressed Stop cannot tell the difference.
+  const lines = (after.chats['team-x-engage'] || []).filter(m => m.runId === 'run-stop');
+  assert.equal(lines.length, 1);
+  assert.match(lines[0].text, /discarded/);
+  // A second press is not a second outcome.
+  await assert.rejects(() => coordination.cancelRun(store, 'run-stop'), /cannot be stopped/);
+  await assert.rejects(() => coordination.cancelRun(store, 'nope'), /Run not found/);
+});
+
+test('stopping a run between steps takes effect at the next boundary, not mid-call', async t => {
+  // The loop refuses to write a step of a run that is no longer `running`, which
+  // is what makes a cancel safe while a model call is in flight: the reply is
+  // discarded rather than appended to a run somebody stopped.
+  const store = await workspace(t);
+  await store.update(state => { state.groupRuns.push({id: 'run-late', groupId: 'x-engage', chatKey: 'team-x-engage', mode: 'pipeline', status: 'awaiting_checkpoint', input: 'x', recipients: ['scout'], trace: [], createdAt: new Date().toISOString(), checkpoint: {nextStep: 0}}); });
+  await coordination.cancelRun(store, 'run-late');
+  const run = store.read().groupRuns.find(row => row.id === 'run-late');
+  // A pending checkpoint no longer exists to be approved, so the continue route
+  // has nothing to resume.
+  assert.equal(run.checkpoint, null);
+  await assert.rejects(() => coordination.resumeGroupRun(store, 'run-late'), /not waiting for a checkpoint/);
+});

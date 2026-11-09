@@ -6,9 +6,33 @@
  * These transitions are pure and mirror `workflow.js`: the Node worker and the
  * browser-local demo both run them, so the two backends cannot drift.
  */
-import {activity, cleanText} from './core.js?v=4f8cfed5b9';
+import {activity, cleanText} from './core.js?v=165e836e5a';
 
 export const MAX_ATTEMPTS_DEFAULT = 5;
+
+/** Wall-clock retry budget: a task keeps retrying until this long after the
+ * first failure of the current run, however many attempts that takes. Five
+ * attempts on the 1s-5min ladder is about fifteen seconds, and any outage
+ * longer than that (a webhook 502, a greylisted SMTP relay, a provider having a
+ * bad afternoon) used to end the task — which for a recurring schedule means
+ * ending the schedule. Six hours covers an overnight outage; past it the task
+ * is either broken or the outage is somebody's incident, and a recurring task
+ * re-arms for its next window instead of giving up for good. */
+export const RETRY_WINDOW_MS = 6 * 3600000;
+
+/** Where that window starts. The tasks row has no column for retry-session
+ * state and the payload is the only part of the row that survives a restart
+ * verbatim, so the anchor lives there. Every payload validator builds a fresh
+ * object, so this is scheduling metadata a caller cannot set. */
+const RETRY_STARTED = 'retryStartedAt';
+
+/** Drop the anchor once a run succeeds or is re-armed by hand: a stale one
+ * would make the next failure look like it was already spent. */
+function clearRetryAnchor(task) {
+  if (!task.payload || typeof task.payload !== 'object' || !(RETRY_STARTED in task.payload)) return;
+  const {[RETRY_STARTED]: _spent, ...rest} = task.payload;
+  task.payload = rest;
+}
 
 /** Payload validators per kind. Unknown kinds are refused, so a stale UI or a
  * crafted request cannot enqueue a kind the worker does not know how to run. */
@@ -106,8 +130,32 @@ export function enqueueTask(state, body = {}) {
   }
   const intervalMinutes = (SCHEDULED.includes(kind) && payload.kind === 'interval') ? payload.intervalMinutes : (Number.isInteger(body.intervalMinutes) ? body.intervalMinutes : null);
   if (idempotencyKey) {
-    const existing = state.tasks.find(t => t.idempotencyKey === idempotencyKey && t.status !== 'cancelled');
-    if (existing) return {task: existing, duplicate: true};
+    const existing = state.tasks.find(t => t.idempotencyKey === idempotencyKey);
+    if (existing && existing.status !== 'cancelled') return {task: existing, duplicate: true};
+    if (existing) {
+      // A cancelled task keeps its key (see cancelTask), so asking for the same
+      // intent again has to re-open that row rather than insert a second one:
+      // the store's unique index on the key refuses the duplicate and takes
+      // every later write of the document down with it. Re-opening keeps one
+      // row per key for good, and the work runs on the fresh timing the caller
+      // just gave.
+      existing.kind = kind;
+      existing.title = cleanText(body.title, 200) || taskTitle(kind, payload);
+      existing.payload = payload;
+      existing.status = 'queued';
+      existing.runAt = payload.nextAt || new Date().toISOString();
+      existing.intervalMinutes = intervalMinutes;
+      existing.attempts = 0;
+      existing.maxAttempts = Math.max(1, Math.min(20, Number(body.maxAttempts) || MAX_ATTEMPTS_DEFAULT));
+      existing.leaseOwner = null;
+      existing.leaseUntil = null;
+      existing.lastError = null;
+      existing.result = null;
+      existing.completedAt = null;
+      existing.updatedAt = new Date().toISOString();
+      activity(state, 'task', `Re-queued task: ${existing.title}`, {taskId: existing.id});
+      return {task: existing, duplicate: false};
+    }
   }
   const task = {
     id: crypto.randomUUID(), kind, title: cleanText(body.title, 200) || taskTitle(kind, payload),
@@ -164,6 +212,7 @@ export function completeTask(state, id, result = null, now = Date.now()) {
   task.leaseOwner = null;
   task.leaseUntil = null;
   task.lastError = null;
+  clearRetryAnchor(task);
   // A recurring task re-arms itself for the next window instead of finishing.
   if (task.intervalMinutes) {
     task.status = 'queued';
@@ -187,14 +236,36 @@ export function failTask(state, id, message, now = Date.now(), {conflict = false
   task.leaseOwner = null;
   task.leaseUntil = null;
   task.updatedAt = new Date(now).toISOString();
-  // A busy group run outlasts the retry budget. A 409 must wait it out
-  // instead of being the error that marks the task failed. A permanent miss
-  // (the bot or group is gone) fails on this attempt.
-  if (permanent || (task.attempts >= task.maxAttempts && !conflict)) {
-    task.status = 'failed';
-    task.lastError = error;
-    task.completedAt = new Date(now).toISOString();
-    activity(state, 'task-error', `Task failed after ${task.attempts} attempts: ${task.title}`, {taskId: task.id});
+  // The window is measured from the first failure of this run, not from
+  // `createdAt`: a recurring task keeps its id for months, and a long-lived one
+  // must still get a full budget when today's provider hiccups.
+  if (!Number.isFinite(Number(task.payload?.[RETRY_STARTED]))) {
+    task.payload = {...(task.payload || {}), [RETRY_STARTED]: now};
+  }
+  const spent = now - Number(task.payload[RETRY_STARTED]) >= RETRY_WINDOW_MS;
+  // A busy group run outlasts both budgets. A 409 must wait it out instead of
+  // being the error that marks the task failed. A permanent miss (the bot or
+  // group is gone) fails on this attempt.
+  if (permanent || (task.attempts >= task.maxAttempts && spent && !conflict)) {
+    // A recurring task that ran out of budget missed windows, it did not
+    // retire: the schedule is the point of the task, so it re-arms for its
+    // next window with a fresh budget and keeps the error visible until a run
+    // succeeds. A permanent miss stays failed — a deleted group is not an
+    // outage — and is retried by hand if it comes back.
+    if (task.intervalMinutes && !permanent) {
+      clearRetryAnchor(task);
+      task.status = 'queued';
+      task.lastError = error;
+      task.runAt = new Date(now + task.intervalMinutes * 60000).toISOString();
+      task.completedAt = null;
+      task.attempts = 0;
+      activity(state, 'task-retry', `Task missed its window and will run again at its next one: ${task.title}`, {taskId: task.id});
+    } else {
+      task.status = 'failed';
+      task.lastError = error;
+      task.completedAt = new Date(now).toISOString();
+      activity(state, 'task-error', `Task failed after ${task.attempts} attempts: ${task.title}`, {taskId: task.id});
+    }
   } else {
     task.status = 'queued';
     task.lastError = error;
@@ -217,6 +288,7 @@ export function retryTask(state, id) {
   task.lastError = null;
   task.result = null;
   task.updatedAt = new Date().toISOString();
+  clearRetryAnchor(task);
   // A reminder carries its next fire in the payload too, and a stale `nextAt`
   // would make the retried run report itself as overdue on the way in.
   if (task.payload && typeof task.payload === 'object' && task.payload.nextAt) task.payload = {...task.payload, nextAt: task.runAt};
@@ -229,6 +301,12 @@ export function cancelTask(state, id) {
   if (!task) fail('Task not found.', 404);
   if (task.status === 'running') fail('A running task cannot be cancelled. Wait for it to finish.', 409);
   task.status = 'cancelled';
+  // The key stays on the row on purpose. The store's unique index is what makes
+  // a duplicate submission impossible, and `enqueueTask` re-opens a cancelled
+  // row that still holds the key instead of inserting a second one. Dropping
+  // the key here would let a replayed legacy schedule (`schedule:<id>`, see
+  // migrateSchedules) resurrect work a person cancelled.
+  clearRetryAnchor(task);
   task.updatedAt = new Date().toISOString();
   activity(state, 'task', `Cancelled task: ${task.title}`, {taskId: task.id});
   return task;
@@ -246,21 +324,39 @@ export function migrateSchedules(state) {
   const stamp = () => new Date().toISOString();
   for (const item of state.schedules) {
     const idempotencyKey = `schedule:${item.id}`;
-    // Already converted on an earlier run: leave it, and do not count it as a
-    // new conversion in the report.
-    if (state.tasks.some(t => t.idempotencyKey === idempotencyKey)) continue;
     const kind = item.kind === 'once' ? 'once' : 'interval';
     const label = cleanText(item.label, 200) || 'Reminder';
     const past = Date.parse(item.nextAt);
     const intervalMinutes = Number.isInteger(item.intervalMinutes) && item.intervalMinutes >= 1 && item.intervalMinutes <= 10080 ? item.intervalMinutes : null;
     const onceAt = Number.isFinite(past) && past > Date.now() + 1000 ? new Date(past).toISOString() : new Date(Date.now() + 60000).toISOString();
+    // A future interval keeps its next fire. Starting it at `now` would run
+    // a reminder that was not due yet. An overdue one is due immediately.
+    const runAt = kind === 'once' ? onceAt : (Number.isFinite(past) && past > Date.now() ? new Date(past).toISOString() : stamp());
+    const existing = state.tasks.find(t => t.idempotencyKey === idempotencyKey);
+    if (existing) {
+      // Already converted on an earlier run, and do not count it as a new
+      // conversion in the report. A cancelled one stays cancelled: the person
+      // who cancelled it meant it, and re-creating a reminder they removed is
+      // worse than a stale legacy row. A failed one only spent a retry budget,
+      // and the legacy schedule is the record that says it should still fire,
+      // so re-arm the row it already owns — a second row under the same key is
+      // forbidden by the store's unique index.
+      if (existing.status !== 'failed') continue;
+      existing.status = 'queued';
+      existing.runAt = runAt;
+      existing.attempts = 0;
+      existing.lastError = null;
+      existing.completedAt = null;
+      existing.updatedAt = stamp();
+      clearRetryAnchor(existing);
+      migrated++;
+      continue;
+    }
     const task = {
       id: crypto.randomUUID(), kind: 'reminder', title: label,
       payload: kind === 'once' ? {label, kind, nextAt: onceAt} : {label, kind, intervalMinutes: intervalMinutes ?? 60},
       status: 'queued',
-      // A future interval keeps its next fire. Starting it at `now` would run
-      // a reminder that was not due yet. An overdue one is due immediately.
-      runAt: kind === 'once' ? onceAt : (Number.isFinite(past) && past > Date.now() ? new Date(past).toISOString() : stamp()),
+      runAt,
       intervalMinutes: kind === 'interval' ? (intervalMinutes ?? 60) : null,
       idempotencyKey, attempts: 0, maxAttempts: 5, leaseOwner: null, leaseUntil: null,
       lastError: null, result: null, createdBy: null, createdAt: stamp(), updatedAt: stamp(), completedAt: null,

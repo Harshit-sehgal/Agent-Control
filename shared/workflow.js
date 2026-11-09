@@ -451,6 +451,42 @@ const scheduleView = task => ({
   enabled: task.status === 'queued' || task.status === 'running',
 });
 
+/** Replace the capture token.
+ *
+ * The token is a long-lived secret: any browser holding it can capture into this
+ * workspace. Until this existed the only way to retire a leaked one was to wipe
+ * the workspace, so a laptop sold, a token pasted into the wrong extension, or a
+ * shared bookmark cost the whole document. Captures look the token up against
+ * the workspace's current value, so the old one stops working the moment this
+ * lands, and the extension needs the new one pasted in.
+ */
+export function rotateCaptureToken(state) {
+  state.captureToken = crypto.randomUUID().replaceAll('-', '');
+  activity(state, 'settings', 'Replaced the capture token.');
+  return {captureToken: state.captureToken};
+}
+
+/** Remove a captured post and the work nobody committed to.
+ *
+ * Drafts that are still `pending` or were `rejected` are work in progress, so
+ * they go with the capture that produced them, and so does their source
+ * evidence. A `scheduled`, `ready` or `posted` draft is a commitment a person
+ * made - approved, queued for a window, or already out - and deleting the
+ * capture under it would withdraw that approval without asking. Those refuse and
+ * name what has to go first. */
+export function removeCandidate(state, id) {
+  const candidate = findCandidate(state, id);
+  const drafts = state.drafts.filter(d => d.candidateId === id);
+  const committed = drafts.find(d => ['scheduled', 'ready', 'posted'].includes(d.status));
+  if (committed) fail(`This post has a ${committed.status} draft, and removing it would withdraw an approval nobody withdrew. Remove the draft first.`, 409);
+  const draftIds = new Set(drafts.map(d => d.id));
+  state.drafts = state.drafts.filter(d => !draftIds.has(d.id));
+  state.candidates = state.candidates.filter(c => c.id !== id);
+  state.evidence = (state.evidence || []).filter(e => e.candidateId !== id && !draftIds.has(e.draftId));
+  activity(state, 'capture', `Removed a captured post from ${candidate.author || 'X'}.`, {candidateId: id});
+  return {ok: true};
+}
+
 export function resetDemo(state) {
   state.candidates = state.candidates.filter(x => !x.demo);
   state.drafts = state.drafts.filter(x => state.candidates.some(c => c.id === x.candidateId));

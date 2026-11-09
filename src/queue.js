@@ -23,6 +23,14 @@ export function createQueue(store, handlers = {}, {intervalMs = 2000, workerId, 
   let timer = null;
   let started = false;
   const idleWaiters = [];
+  // Handler results whose completion write failed, keyed by task id. The work
+  // is finished, so running the handler again would repeat its side effects (a
+  // second webhook POST, a second group run); the next sweep records the result
+  // instead. It lives in memory because this module does not own a schema
+  // column for it: if the process dies before the write lands, the row is
+  // re-armed and the work runs once more, which is the failure mode we cannot
+  // avoid here and can live with.
+  const pendingResults = new Map();
 
   async function sweep(now = Date.now()) {
     if (busy) return; // one sweep at a time; the store serializes writes anyway
@@ -72,7 +80,10 @@ export function createQueue(store, handlers = {}, {intervalMs = 2000, workerId, 
       beat.unref?.();
       try {
         for (const task of claimed) {
-          try { await runTask(task); }
+          // The release has to reach `runTask`: it drops the id before the
+          // failure transition, so a heartbeat that is already queued cannot
+          // renew a lease that transition just expired.
+          try { await runTask(task, () => live.delete(task.id)); }
           finally { live.delete(task.id); }
         }
       } finally {
@@ -86,15 +97,55 @@ export function createQueue(store, handlers = {}, {intervalMs = 2000, workerId, 
     }
   }
 
+  /** Expire one task's lease so the next sweep can claim and finish it. A write
+   * that failed may keep failing, so the lease lapsing on its own is the
+   * fallback. */
+  async function expireLease(taskId) {
+    await store.update(s => {
+      const t = (s.tasks || []).find(x => x.id === taskId);
+      if (t && t.status === 'running' && t.leaseOwner === id) t.leaseUntil = new Date(0).toISOString();
+    }).catch(() => { /* the lease lapses on its own */ });
+  }
+
+  /** Write the outcome a handler already produced. A failure here is a
+   * bookkeeping problem, never a handler failure: the result stays in
+   * `pendingResults` and a later sweep writes it, with no second execution. */
+  async function recordCompletion(task, release) {
+    try {
+      const result = pendingResults.get(task.id) ?? null;
+      await store.update(s => tasks.completeTask(s, task.id, result));
+      pendingResults.delete(task.id);
+    } catch (e) {
+      // A definitive refusal — the row is gone, or another worker already moved
+      // it on — cannot be fixed by asking again, and keeping the result would
+      // retry it forever. Nothing ran twice either way.
+      if (e?.status === 404 || e?.status === 409) {
+        pendingResults.delete(task.id);
+        console.error(`Queue dropped the result of ${task.id} (${e.message}).`);
+        return;
+      }
+      console.error(`Queue could not record completion of ${task.id} (${e.message}); the result is kept and the next sweep records it, the handler will not run again.`);
+      release();
+      await expireLease(task.id);
+    }
+  }
+
   /** Run one claimed task to a terminal transition. A handler failure re-queues
    * the task with backoff while attempts remain, or marks it failed. */
-  async function runTask(task) {
-    const handler = handlers[task.kind];
+  async function runTask(task, release) {
+    // This task's handler already returned on an earlier attempt: write that
+    // result, never run the work again.
+    if (pendingResults.has(task.id)) return recordCompletion(task, release);
+    let result;
     try {
+      const handler = handlers[task.kind];
       if (!handler) throw new Error(`No handler is registered for task kind "${task.kind}".`);
-      const result = await handler(task);
-      await store.update(s => tasks.completeTask(s, task.id, result ?? null));
+      result = await handler(task);
     } catch (e) {
+      // Stop renewing before the failure path: a heartbeat already queued on
+      // the store's serial chain would otherwise commit after the lease-expiry
+      // fallback below and give a stuck task another full `running` window.
+      release();
       // A busy-group 409 outlasts the attempt budget; errors marked
       // permanent (for example, a missing bot) fail immediately.
       const conflict = e?.status === 409 && /already active/i.test(String(e?.message || ''));
@@ -107,17 +158,20 @@ export function createQueue(store, handlers = {}, {intervalMs = 2000, workerId, 
         // The failure record itself failed, so the task is still `running` with
         // a lease and nobody is heartbeating it. Expire the lease now so the
         // next sweep re-arms it instead of waiting for the window to lapse.
-        await store.update(s => {
-          const t = (s.tasks || []).find(x => x.id === task.id);
-          if (t && t.status === 'running' && t.leaseOwner === id) t.leaseUntil = new Date(0).toISOString();
-        }).catch(() => { /* the lease lapse still recovers it */ });
+        await expireLease(task.id);
       }
       // Notify only after the retry policy reaches a terminal failure. A
       // transient provider error must not announce failure while requeued.
       if (transition?.status === 'failed') {
         try { if (onFail) await onFail(task, e); } catch (notifyError) { console.error('Failure notify error:', notifyError.message); }
       }
+      return;
     }
+    // The handler returned: the outcome is known and the work is done, so a
+    // failing completion write must never be read as a handler failure. Keep
+    // the result before the write so a later sweep can record it.
+    pendingResults.set(task.id, result ?? null);
+    await recordCompletion(task, release);
   }
 
   return {

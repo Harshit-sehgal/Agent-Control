@@ -68,8 +68,14 @@ test('a failing handler retries with backoff, then fails loudly after the attemp
   assert.equal(after.attempts, 2);
   assert.equal(after.lastError, null);
   // Now the same handler failing repeatedly exhausts the budget and reports it.
+  // Both budgets: the attempt cap is spent on the first attempt, and the retry
+  // window has to be spent too, or a single failure inside six hours retries.
   const doomed = await store.update(s => rawTask(s, {kind: 'flaky', title: 'Doomed', runAt: new Date(Date.now() - 1000).toISOString(), maxAttempts: 1}));
-  await store.update(s => { s.tasks.find(t => t.id === doomed.id).runAt = new Date(Date.now() - 1000).toISOString(); });
+  await store.update(s => {
+    const t = s.tasks.find(x => x.id === doomed.id);
+    t.runAt = new Date(Date.now() - 1000).toISOString();
+    t.payload.retryStartedAt = Date.now() - tasks.RETRY_WINDOW_MS - 1000;
+  });
   fail = true;
   await queue.sweep();
   after = store.read().tasks.find(t => t.id === doomed.id);
@@ -280,9 +286,11 @@ test('a busy 409 keeps retrying with backoff after the attempt budget', async ()
   assert.equal(after.attempts, 2);
   assert.ok(Date.parse(after.runAt) > Date.now());
   assert.equal(notices.length, 0);
-  // A different 409 is permanent once the budget is spent.
+  // A different 409 is permanent once both budgets (attempts and the wall-clock
+  // retry window) are spent.
   await store.update(s => { s.tasks.find(t => t.id === task.id).runAt = new Date(Date.now() + 3_600_000).toISOString(); });
   const other = await store.update(s => rawTask(s, {kind: 'busy', title: 'Off', maxAttempts: 1, runAt: new Date(Date.now() - 1000).toISOString()}));
+  await store.update(s => { s.tasks.find(t => t.id === other.id).payload.retryStartedAt = Date.now() - tasks.RETRY_WINDOW_MS - 1000; });
   const queue2 = createQueue(store, {
     busy: async () => { throw Object.assign(new Error('No bot in this group is switched on.'), {status: 409}); },
   }, {intervalMs: 60000, onFail: (_task, error) => { notices.push(error.message); }});

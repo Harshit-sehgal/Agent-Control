@@ -15,14 +15,22 @@ export function toast(message, error = false) {
   // some screen readers only announce a change that happens inside a live region.
   node.setAttribute('role', error ? 'alert' : 'status');
   node.setAttribute('aria-live', error ? 'assertive' : 'polite');
-  node.textContent = message; node.classList.toggle('error', Boolean(error)); node.classList.remove('hidden');
+  // Reveal first, then write. #toast is display:none between messages, and a
+  // mutation made inside a hidden subtree never reaches the live region: the
+  // first toast after each hide went unannounced, and toasts are the only
+  // channel failure is reported on.
+  node.classList.remove('hidden');
+  node.textContent = message; node.classList.toggle('error', Boolean(error));
   clearTimeout(toastTimer); toastTimer = setTimeout(() => node.classList.add('hidden'), 3800);
 }
 
 // Dialogs declare aria-modal, so they must hand focus back to the control that
 // opened them; without this a keyboard user is dropped at the top of the page.
-export function captureFocus() { lastFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null; }
+export function captureFocus(node = document.activeElement) { lastFocus = node instanceof HTMLElement ? node : null; }
 export function restoreFocus() { const node = lastFocus; lastFocus = null; if (node && document.contains(node) && typeof node.focus === 'function') node.focus(); }
+/** The element the open sheet will hand focus back to. A control that replaces the
+ * sheet (Ctrl+K pressed inside one) adopts it instead of losing it. */
+export const focusOrigin = () => lastFocus;
 
 export const sheetOpen = () => !el('modal').classList.contains('hidden');
 
@@ -48,7 +56,12 @@ export function closeSheet(result = null) {
 /** Resolves true only when the user picks the confirming action. */
 export function confirmSheet(message, {confirm = 'Confirm', danger = false, detail = ''} = {}) {
   return new Promise(resolve => {
-    openSheet(`<div class="sheet-actions">${btn(confirm, 'sheet-confirm', {kind: danger ? 'danger' : 'primary', wide: true})}${btn('Cancel', 'close-sheet', {wide: true})}</div>`, {title: message, sub: detail});
+    // Cancel is rendered first because openSheet focuses the first button when
+    // nothing is marked primary: for a danger prompt (delete account, remove bot,
+    // clear conversation) that used to put initial focus on the destructive
+    // button, where one stray Enter destroyed data. A benign prompt still lands
+    // on its confirm button through the button.primary in the focus selector.
+    openSheet(`<div class="sheet-actions">${btn('Cancel', 'close-sheet', {wide: true})}${btn(confirm, 'sheet-confirm', {kind: danger ? 'danger' : 'primary', wide: true})}</div>`, {title: message, sub: detail});
     settle = value => resolve(value === true);
   });
 }

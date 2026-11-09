@@ -137,7 +137,7 @@ function evidencePanel(draft) {
 export function postCard(post, drafted) {
   return `<div class="post">
     <a class="post-quote" href="${esc(safeHref(post.url))}" target="_blank" rel="noopener noreferrer"><strong>${esc(post.author || 'Post')} on X</strong><span>${esc(post.text)}</span></a>
-    <div class="post-meta"><span>${esc(post.topic || 'No topic')}${post.score?.score != null ? ` · ${Number(post.score.score)}/100` : ''}${post.demo ? ' · sample' : ''}</span>${drafted ? tag('Drafted', 'good') : canWrite() ? btn('Draft reply', 'draft-candidate', {id: post.id, small: true, kind: 'primary'}) : ''}</div>
+    <div class="post-meta"><span>${esc(post.topic || 'No topic')}${post.score?.score != null ? ` · ${Number(post.score.score)}/100` : ''}${post.demo ? ' · sample' : ''}</span>${drafted ? tag('Drafted', 'good') : canWrite() ? btn('Draft reply', 'draft-candidate', {id: post.id, small: true, kind: 'primary'}) : ''}${canWrite() ? btn('Remove', 'remove-candidate', {id: post.id, small: true, kind: 'danger'}) : ''}</div>
   </div>`;
 }
 
@@ -182,7 +182,8 @@ function messageHtml(item, conv, latestRunNote) {
     const checkpoint = write && flags.checkpoint ? btn('Approve next step', 'continue-run', {id: conv.group.id, small: true, kind: 'primary', data: {run: run.id}}) : '';
     // Retry only the latest run: once a newer one exists, the old failure is history.
     const retry = write && flags.retry ? btn('Retry', 'retry-run', {id: conv.group.id, small: true, data: {run: run.id, message: run.input || '', ...retryTarget(conv.group, run)}}) : '';
-    return `<div class="event"><span>${esc(m.text)}</span>${grant}${plan}${checkpoint}${retry}</div>`;
+    const stop = write && flags.stop ? btn('Stop', 'cancel-run', {id: conv.group.id, small: true, data: {run: run.id}}) : '';
+    return `<div class="event"><span>${esc(m.text)}</span>${grant}${plan}${checkpoint}${retry}${stop}</div>`;
   }
   if (m.role === 'user') return `<div class="msg me${item.lead ? ' lead' : ''}"><div class="bubble"><span class="text">${esc(m.text)}</span><time>${esc(clock(m.at))}</time></div></div>`;
   const sender = m.senderId ? findBot(m.senderId) : null, guest = Boolean(sender) && !conv.group.bots.some(b => b.id === m.senderId);

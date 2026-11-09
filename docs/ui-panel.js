@@ -1,16 +1,16 @@
 /** Everything that used to be a dashboard tab now hangs off a conversation:
  * the info panel of the open chat (drafts, posts, reminders, runs, voice, the
  * bot's profile) and the "You" pages (account, admin, about). */
-import {filterCandidates, filterDrafts} from './usability.js?v=4f8cfed5b9';
-import {ACTIONS, OUTPUT_KINDS} from './contracts.js?v=4f8cfed5b9';
-import {BOT_DEFAULTS, MAX_CONTEXT_MESSAGES, MAX_STEPS_LIMIT, botSettings, groupSettings, pipelineOf} from './bot-settings.js?v=4f8cfed5b9';
-import {BUSY_STATUSES} from './coordination.js?v=4f8cfed5b9';
-import {modelKey} from './memory.js?v=4f8cfed5b9';
-import {ACTIVE_DRAFTS, chatTasks, pipelineRows, retryTarget, runBelongsToChat} from './ui-model.js?v=4f8cfed5b9';
-import {esc, icon, avatar, groupAvatar, tintClass, TINT_COUNT, btn, iconBtn, row, box, field, note, empty, tag, pageHead, fullDate} from './ui-kit.js?v=4f8cfed5b9';
-import {store, conversation, isStaticDemo, isAdmin, canWrite, isXGroup, botTint, recentRuns, THEMES, themeChoice} from './ui-store.js?v=4f8cfed5b9';
-import {draftCard, postCard} from './ui-views.js?v=4f8cfed5b9';
-import {ADMIN_PAGES, adminPage, providerModelOptions} from './ui-admin.js?v=4f8cfed5b9';
+import {filterCandidates, filterDrafts} from './usability.js?v=165e836e5a';
+import {ACTIONS, OUTPUT_KINDS} from './contracts.js?v=165e836e5a';
+import {BOT_DEFAULTS, MAX_CONTEXT_MESSAGES, MAX_STEPS_LIMIT, botSettings, groupSettings, pipelineOf} from './bot-settings.js?v=165e836e5a';
+import {BUSY_STATUSES} from './coordination.js?v=165e836e5a';
+import {modelKey} from './memory.js?v=165e836e5a';
+import {ACTIVE_DRAFTS, chatTasks, pipelineRows, retryTarget, runBelongsToChat} from './ui-model.js?v=165e836e5a';
+import {esc, icon, avatar, groupAvatar, tintClass, TINT_COUNT, btn, iconBtn, row, box, field, note, empty, tag, pageHead, fullDate} from './ui-kit.js?v=165e836e5a';
+import {store, conversation, isStaticDemo, isAdmin, canWrite, isXGroup, botTint, recentRuns, THEMES, themeChoice} from './ui-store.js?v=165e836e5a';
+import {draftCard, postCard} from './ui-views.js?v=165e836e5a';
+import {ADMIN_PAGES, adminPage, providerModelOptions} from './ui-admin.js?v=165e836e5a';
 
 const el = id => document.getElementById(id);
 const options = (pairs, current) => pairs.map(([value, label]) => `<option value="${esc(value)}"${value === current ? ' selected' : ''}>${esc(label)}</option>`).join('');
@@ -291,7 +291,7 @@ function youPage() {
   return `${pageHead('You', {back: 'back-to-list'})}
     <div class="page-body">
       <div class="hero"><span class="avatar avatar-plain" style="width:84px;height:84px">${icon('lock', 34)}</span><h2>${esc(me?.email || 'This browser')}</h2><p>${esc(me?.role ? `Signed in as ${me.role}${workspace ? ` in ${workspace.name}` : ''}` : 'Local demo. Nothing leaves this browser.')}</p></div>
-      ${box((demo ? '' : row({title: 'Workspace', right: esc(workspace?.name || ''), action: 'open-page', data: {page: 'workspaces'}}) + row({title: 'Notifications', right: state.unread ? `${state.unread} unread` : '', tone: state.unread ? 'warn' : '', action: 'open-page', data: {page: 'notifications'}}) + (me?.email ? row({title: 'Change password', action: 'change-password'}) : '')) + (write ? row({title: 'New bot', action: 'new-bot'}) + row({title: 'New group', action: 'new-group'}) : '') + row({title: 'Jump to anything', right: 'Ctrl K', action: 'command-open'}) + (!demo && state.captureToken ? row({title: 'Copy capture token', sub: 'Paste it into the browser extension to capture posts.', action: 'copy-capture-token'}) : ''))}
+      ${box((demo ? '' : row({title: 'Workspace', right: esc(workspace?.name || ''), action: 'open-page', data: {page: 'workspaces'}}) + row({title: 'Notifications', right: state.unread ? `${state.unread} unread` : '', tone: state.unread ? 'warn' : '', action: 'open-page', data: {page: 'notifications'}}) + (me?.email ? row({title: 'Change password', action: 'change-password'}) : '')) + (write ? row({title: 'New bot', action: 'new-bot'}) + row({title: 'New group', action: 'new-group'}) : '') + row({title: 'Jump to anything', right: 'Ctrl K', action: 'command-open'}) + (!demo && state.captureToken ? row({title: 'Copy capture token', sub: 'Paste it into the browser extension to capture posts.', action: 'copy-capture-token'}) + (write ? row({title: 'Replace capture token', sub: 'Stops the old one working. Every browser needs the new one.', action: 'rotate-capture-token'}) : '') : ''))}
       ${box(`<div class="themes" role="group" aria-label="Colour theme">${THEMES.map(t => `<button type="button" class="theme${t.id === themeChoice() ? ' on' : ''}" data-action="set-theme" data-theme="${t.id}" aria-pressed="${t.id === themeChoice()}"><span class="theme-dots">${t.dots.map(c => `<i style="background:${c}"></i>`).join('')}</span><strong>${esc(t.name)}</strong><small>${esc(t.sub)}</small></button>`).join('')}</div>`, 'Colours')}
       ${admin}
       ${box(row({title: 'About this build', action: 'open-page', data: {page: 'about'}}) + (demo ? '' : row({title: 'Sign out', action: 'logout', tone: 'bad'}) + (me?.email ? row({title: 'Delete my account', action: 'delete-account', tone: 'bad'}) : '')))}

@@ -332,6 +332,22 @@ export class SqliteStore {
     } else {
       this.db.prepare('UPDATE candidates SET status=? WHERE id=?').run('error', id);
     }
+    // The SQL above releases the row for whoever reads it now, but `candidates`
+    // is also rewritten wholesale from `this.cache` on every later update. A
+    // cache still holding `processing` would put the row back there on the next
+    // unrelated write, where it 409s on re-process forever and no retry task
+    // exists. So the document is released in the cache too: immediately (this
+    // caller is not awaited) and again inside the serial queue, because an
+    // update already in flight will finish by installing its own older clone.
+    const release = state => {
+      const candidate = state.candidates.find(c => c.id === id);
+      if (candidate) candidate.status = 'error';
+    };
+    release(this.cache);
+    // Nothing can be reported back to this caller (it does not await), and the
+    // synchronous release above already stands, so a failed queue write is only
+    // logged rather than left as an unhandled rejection.
+    this.enqueue(state => { release(state); }).catch(error => console.error(`Could not release candidate ${id} in the document cache:`, error.message));
     return true;
   }
 
@@ -500,7 +516,11 @@ export class SqliteStore {
   read() { return structuredClone(this.cache); }
   captureToken() { return this.cache.captureToken; }
   async persist(state = this.cache) { this.writeCollections(state); this.cache = state; }
-  update(fn) {
+  /** Queue one read-copy-write of the whole document behind every write already
+   * waiting. Every change to the cache has to pass through here: a mutation made
+   * outside the queue is overwritten by the clone of whichever write was already
+   * in flight, and the next write then persists that stale document. */
+  enqueue(fn) {
     const op = this.serial.then(async () => {
       const next = structuredClone(this.cache);
       const result = await fn(next);
@@ -511,6 +531,7 @@ export class SqliteStore {
     this.serial = op.catch(() => {});
     return op;
   }
+  update(fn) { return this.enqueue(fn); }
 }
 
 /** ROLLBACK can itself fail: SQLite already rolls the transaction back on
