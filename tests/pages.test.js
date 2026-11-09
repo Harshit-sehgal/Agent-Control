@@ -11,6 +11,22 @@ const html=await readFile(path.join(root,'shared/index.html'),'utf8');
 let storage={getItem:()=>null,setItem:()=>{}};
 globalThis.window=globalThis.window||{};
 Object.defineProperty(globalThis,'localStorage',{configurable:true,get:()=>storage,set:value=>{storage=value;}});
+// The demo coordinates tabs through Web Locks, so the harness has to provide
+// the lock a browser provides. Node 24 happens to expose `navigator.locks` and
+// Node 22 (what CI runs) does not, which made these tests depend on the Node
+// version. This stand-in queues one exclusive holder per name, which is the
+// contract `withLocalLock` relies on, on every runtime.
+if(typeof globalThis.navigator?.locks?.request!=='function'){
+  const tails=new Map();
+  Object.defineProperty(globalThis,'navigator',{configurable:true,writable:true,value:{
+    ...globalThis.navigator,
+    locks:{request:(name,options,callback)=>{
+      const run=(tails.get(name)||Promise.resolve()).then(()=>callback({name,mode:'exclusive'}));
+      tails.set(name,run.then(()=>{},()=>{}));
+      return run;
+    }},
+  }});
+}
 await import(path.join(root,'shared/local-api.js'));
 
 function makeStorage(){const map=new Map();return {map,getItem:key=>map.get(key)??null,setItem:(key,value)=>map.set(key,String(value))};}
