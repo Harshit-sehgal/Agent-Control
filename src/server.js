@@ -138,7 +138,14 @@ async function api(req,res,u){
   if(access!=='public'&&access!=='agent'){
     actor=auth.session(cookie(req,'agent_session'));
     if(!actor)fail('Sign in first.',401);
-    if(!found)fail('Unknown endpoint.',404);
+    if(!found){
+      // The path exists, the verb does not. Anonymous callers still get the same
+      // "sign in first" above, so this tells a signed-in client nothing it could
+      // not already read from the UI.
+      const methods=router.methodsFor(u.pathname);
+      if(!methods.length)fail('Unknown endpoint.',404);
+      throw Object.assign(new Error('Method not allowed.'),{status:405,allow:methods.join(', ')});
+    }
     if(!allows(actor.role,access))fail(`This action needs the ${access} role or higher.`,403);
   }
   // Bodies are read on demand: a handler that rate-limits or verifies a
@@ -179,7 +186,7 @@ const handler=async(req,res)=>{
     if(url.pathname.startsWith('/api/'))await api(req,res,url);
     else if(req.method==='GET'||req.method==='HEAD')await serve(req,res,url);
     else fail('Method not allowed.',405);
-  }catch(e){let status=e.status||500;console.error(status===500?'Server error: '+e.message:'');if(res.headersSent){res.end();return;}send(res,status,{error:status===500?'Internal server error':e.message});}
+  }catch(e){let status=e.status||500;console.error(status===500?'Server error: '+e.message:'');if(res.headersSent){res.end();return;}send(res,status,{error:status===500?'Internal server error':e.message},e.allow?{Allow:e.allow}:undefined);}
 };
 // Optional in-process TLS. A reverse proxy is still the recommended front for
 // a real deployment; this exists so a private single-host install can serve

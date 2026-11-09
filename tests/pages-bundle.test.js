@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {ASSETS} from '../shared/assets.js';
+import {stampDocument, stampImports} from '../scripts/pages-rewrites.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const shared = path.join(root, 'shared');
@@ -44,13 +45,13 @@ const shippedVersion = await (async () => {
  * than something a normaliser can hide. Mirrors the two rewrites in the build:
  * the backend marker swap, then `?v=<hash>` on href/src and on relative imports. */
 function buildLike(name, source) {
+  // The build's own rewrites, imported rather than copied: two regexes with the
+  // same blind spot would let a module ship unstamped and still pass.
   if (name === 'index.html') {
     const marked = source.replace('<meta name="agent-backend" content="server">', '<meta name="agent-backend" content="static">');
-    return marked.replace(/(href|src)="(\.\/[^"?]+\.(?:js|css))"/g, (_, attr, url) => `${attr}="${url}?v=${version}"`);
+    return stampDocument(marked, version);
   }
-  if (name.endsWith('.js')) {
-    return source.replace(/((?:from|import)\s*)(['"])(\.\/[\w-]+\.js)\2/g, (_, kw, quote, url) => `${kw}${quote}${url}?v=${version}${quote}`);
-  }
+  if (name.endsWith('.js')) return stampImports(source, version);
   return source;
 }
 
@@ -124,4 +125,15 @@ test('the Pages index is marked browser-local and cache-busted', async () => {
   assert.ok(stamps.length >= 3, `expected a stamp on every script/link tag, found ${stamps.length}`);
   assert.equal(new Set(stamps).size, 1, 'every tag in the index must carry the same version');
   assert.match(built, /\.\/app\.js\?v=[0-9a-f]{10}/);
+});
+
+test('every kind of local module and tag gets a cache-busting suffix', () => {
+  // The old regexes only matched `./<word>.js`, and the test used the same
+  // pattern, so a subdirectory or dotted module shipped stale and passed.
+  assert.equal(stampImports("import {a} from './ui/x.js';", 'abc1234567'), "import {a} from './ui/x.js?v=abc1234567';");
+  assert.equal(stampImports("import './ui-kit.v2.js';", 'abc1234567'), "import './ui-kit.v2.js?v=abc1234567';");
+  assert.equal(stampDocument('<script src="./app.js"></script>', 'abc1234567'), '<script src="./app.js?v=abc1234567"></script>');
+  assert.equal(stampDocument('<link href="app.css">', 'abc1234567'), '<link href="app.css?v=abc1234567">');
+  // An absolute URL is not a local asset and must keep its own cache semantics.
+  assert.equal(stampDocument('<script src="https://cdn.example.com/x.js"></script>', 'abc1234567'), '<script src="https://cdn.example.com/x.js"></script>');
 });

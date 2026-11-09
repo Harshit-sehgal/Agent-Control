@@ -15,6 +15,10 @@ import crypto from 'node:crypto';
 export const ROLES = ['viewer', 'member', 'admin', 'owner'];
 export const DEFAULT_WORKSPACE = 'default';
 const OWNER_EMAIL = 'owner@localhost';
+/** Which account a sign-in is about. A body with no email means the owner, so
+ * a per-account guard keyed on the raw body would never see the guesses that
+ * matter: they always name that one mailbox. */
+export const resolveAccount = email => String(email || OWNER_EMAIL).trim().toLowerCase();
 const SESSION_TTL_MS = 7 * 86400000;
 const RESET_TTL_MS = 3600000;
 const SCRYPT = {N: 16384, r: 8, p: 1};
@@ -63,7 +67,7 @@ export class Auth {
   login({email, password}, {ip, userAgent} = {}) {
     // Omitting the email keeps the single-owner behavior of the prototype:
     // one shared password for the bootstrapped owner account.
-    const mail = String(email || OWNER_EMAIL).trim().toLowerCase();
+    const mail = resolveAccount(email);
     const row = this.store.get('SELECT * FROM users WHERE email=?', mail);
     // One answer for an unknown address, a wrong password and a disabled
     // account, after the same amount of work, so sign-in cannot be used to

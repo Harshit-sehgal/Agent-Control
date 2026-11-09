@@ -23,6 +23,9 @@ __pycache__/
 Thumbs.db
 
 # Local agent tooling
+# The pairing secret and the control plane URL live here; one `git add -A` (which
+# this repo warns agents against) must not be able to commit them.
+agent/agent.config.json
 .freebuff/
 .claude/settings.local.json
 .playwright-mcp/

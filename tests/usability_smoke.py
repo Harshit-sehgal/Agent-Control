@@ -32,8 +32,9 @@ expect.set_options(timeout=6000)
 def build_site(tmp):
     """Run scripts/build-pages.js against a copy of shared/, so docs/ is untouched."""
     shutil.copytree(ROOT / 'shared', tmp / 'shared')
-    (tmp / 'scripts').mkdir()
-    shutil.copy(ROOT / 'scripts/build-pages.js', tmp / 'scripts/build-pages.js')
+    # The whole scripts/ directory: the build imports its own helper modules, and
+    # a hardcoded copy list breaks the moment one is added (ERR_MODULE_NOT_FOUND).
+    shutil.copytree(ROOT / 'scripts', tmp / 'scripts')
     (tmp / 'package.json').write_text('{"type":"module"}')
     subprocess.run(['node', 'scripts/build-pages.js'], cwd=tmp, check=True, capture_output=True)
     return tmp / 'docs'

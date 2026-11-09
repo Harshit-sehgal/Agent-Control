@@ -77,6 +77,10 @@ export function accountRoutes(router, {auth, workspaces}) {
     // agent they just approved. One transaction makes the pair land together or
     // not at all - including a refused permission list, which now also rolls
     // back the rename instead of keeping it.
+    // The rename is an UPDATE with no rows for an unknown id, so a PATCH that
+    // carried only a name answered 200 and logged "Updated local agent
+    // permissions." for an agent that does not exist.
+    if (!c.store.get('SELECT id FROM agents WHERE id=?', id)) fail('Agent not found.', 404);
     const result = c.store.transaction(() => {
       if (b.name !== undefined) c.store.run('UPDATE agents SET name=? WHERE id=?', cleanText(b.name, 120) || 'Local agent', id);
       return b.permissions !== undefined ? agent.setAgentPermissions(c.store, id, b.permissions) : {ok: true};
@@ -125,7 +129,10 @@ export function accountRoutes(router, {auth, workspaces}) {
   router.add('GET', '/api/notifications', 'viewer', c => ({notifications: notifications.listNotifications(c.store, c.actor.userId), unread: notifications.unreadCount(c.store, c.actor.userId)}));
   router.add('POST', '/api/notifications/read', 'viewer', async c => {
     const b = await c.body();
-    return notifications.markRead(c.store, c.actor.userId, Array.isArray(b?.ids) ? b.ids : [b?.ids].filter(Boolean));
+    // Ids are bound into SQL, and a non-scalar binding is a TypeError with no
+    // status: a body-shape mistake answered 500 and was logged as a server fault.
+    const list = Array.isArray(b?.ids) ? b.ids : [b?.ids];
+    return notifications.markRead(c.store, c.actor.userId, list.filter(id => typeof id === 'string' && id.trim()).slice(0, 200));
   });
   router.add('GET', '/api/notification-prefs', 'viewer', c => notifications.getPreferences(c.store, c.actor.userId));
   router.add('PATCH', '/api/notification-prefs', 'member', async c => { const b = await c.body(); return notifications.updatePreferences(c.store, c.actor.userId, b); });

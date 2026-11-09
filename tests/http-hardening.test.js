@@ -38,7 +38,7 @@ async function freePort() {
   });
 }
 
-async function launch() {
+async function launch(extra = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-http-'));
   const port = await freePort();
   const base = `http://127.0.0.1:${port}`;
@@ -51,6 +51,7 @@ async function launch() {
       AI_API_KEY: '', OPENAI_API_KEY: '', AI_BASE_URL: '', OPENAI_BASE_URL: '',
       DASHBOARD_PASSWORD: PASSWORD, HOST: '127.0.0.1', PORT: String(port),
       DATA_FILE: path.join(dir, 'state.json'),
+      ...extra,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -80,20 +81,25 @@ async function launch() {
   };
 }
 
+/** One request helper, so a second scenario does not grow a second dialect. */
+function client(base) {
+  return async (method, url, body, cookie, headers = {}) => {
+    const r = await fetch(base + url, {
+      method,
+      headers: {'Content-Type': 'application/json', ...headers, ...(cookie ? {Cookie: cookie} : {})},
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const text = await r.text();
+    let value = null;
+    try { value = JSON.parse(text); } catch { value = text; }
+    return {status: r.status, body: value, setCookie: r.headers.get('set-cookie'), headers: r.headers};
+  };
+}
+
 test('one authenticated request cannot reach a prototype key, a phantom setting, a lockout, a typo role, or an unusable source', {timeout: 40000}, async () => {
   const t = await launch();
   try {
-    const send = async (method, url, body, cookie, headers = {}) => {
-      const r = await fetch(t.base + url, {
-        method,
-        headers: {'Content-Type': 'application/json', ...headers, ...(cookie ? {Cookie: cookie} : {})},
-        body: body === undefined ? undefined : JSON.stringify(body),
-      });
-      const text = await r.text();
-      let value = null;
-      try { value = JSON.parse(text); } catch { value = text; }
-      return {status: r.status, body: value, setCookie: r.headers.get('set-cookie')};
-    };
+    const send = client(t.base);
 
     const login = await send('POST', '/api/login', {password: PASSWORD});
     assert.equal(login.status, 200, 'the bootstrap owner must be able to sign in');
@@ -166,6 +172,67 @@ test('one authenticated request cannot reach a prototype key, a phantom setting,
     }
     const allowed = await send('POST', `/api/drafts/${draftId}/approve`, {minDelay: 0, maxDelay: 0}, cookie);
     assert.equal(allowed.status, 200, `approval should succeed once the reuse policy allows it: ${JSON.stringify(allowed.body)}`);
+  } finally {
+    await t.stop();
+  }
+});
+
+test('a wrong verb, a non-scalar id and a wrong-typed credential are client mistakes, not server faults', {timeout: 40000}, async () => {
+  const t = await launch();
+  try {
+    const send = client(t.base);
+    const login = await send('POST', '/api/login', {password: PASSWORD});
+    assert.equal(login.status, 200);
+    const cookie = String(login.setCookie).split(';')[0];
+
+    // A path that exists under another verb says so, and names the verbs it does
+    // take. It used to answer 404 "Unknown endpoint." for `POST /api/state`.
+    const wrongVerb = await send('POST', '/api/state', {}, cookie);
+    assert.equal(wrongVerb.status, 405);
+    assert.match(String(wrongVerb.body?.error || ''), /method not allowed/i);
+    assert.match(String(wrongVerb.headers.get('allow') || ''), /GET/);
+
+    // An id that is an object used to be bound into SQL: better-sqlite3 throws a
+    // TypeError with no status, which the dispatcher reported as a 500 and
+    // logged as a server fault.
+    const pref = await send('PATCH', '/api/notification-prefs', {webhook: true, webhookCredentialId: {a: 1}}, cookie);
+    assert.ok(pref.status < 500, `a wrong-typed credential must not be a 500, got ${pref.status}`);
+    assert.equal(pref.status, 400, 'webhook on with no usable credential is still a bad request');
+
+    const read = await send('POST', '/api/notifications/read', {ids: [{}, null, 7]}, cookie);
+    assert.equal(read.status, 200, `object ids must be ignored, not bound into SQL: ${JSON.stringify(read.body)}`);
+  } finally {
+    await t.stop();
+  }
+});
+
+test('guesses at the owner account are counted against that account, not just the guesser', {timeout: 60000}, async () => {
+  // Behind a trusted proxy every request has its own client address, so the
+  // per-IP buckets never fill. What stops a password spray here is the account
+  // bucket - and it only works if it is keyed on the account the request is
+  // *about*: `auth.login` falls back to the bootstrapped owner when the body has
+  // no email, so keying on the raw body meant every one of these guesses was
+  // counted per address and the owner mailbox was never protected.
+  const t = await launch({TRUST_PROXY: '1'});
+  try {
+    const send = client(t.base);
+    const from = ip => ({'X-Forwarded-For': ip});
+    let refused = 0;
+    for (let i = 0; i < 32; i++) {
+      const res = await send('POST', '/api/login', {password: 'wrong-password'}, undefined, from(`10.1.0.${i}`));
+      assert.equal(res.status, 401, `guess ${i + 1} should be a normal refusal, got ${res.status}`);
+      refused += 1;
+    }
+    assert.equal(refused, 32);
+    // The next guess, from yet another address and spelled the way an attacker
+    // would spell the same mailbox, is refused by the account bucket.
+    const locked = await send('POST', '/api/login', {email: 'OWNER@localhost ', password: 'wrong-password'}, undefined, from('10.2.0.1'));
+    assert.equal(locked.status, 429, `the account bucket must have filled: ${JSON.stringify(locked.body)}`);
+    // And the owner cannot sign in either until the window passes: the honest
+    // cost of the bucket, pinned so it stays a deliberate trade instead of a
+    // surprise. A password reset is the way out.
+    const owner = await send('POST', '/api/login', {password: PASSWORD}, undefined, from('10.2.0.2'));
+    assert.equal(owner.status, 429);
   } finally {
     await t.stop();
   }

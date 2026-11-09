@@ -46,5 +46,12 @@ export function createRouter() {
     }
     return null;
   }
-  return {add, find, routes};
+  /** Every method registered for a path, so a known path with the wrong verb can
+   * answer 405 and name the verbs it does accept instead of claiming 404. */
+  function methodsFor(path) {
+    const methods = new Set();
+    for (const route of routes) if (route.regex.test(path)) methods.add(route.method);
+    return [...methods];
+  }
+  return {add, find, methodsFor, routes};
 }

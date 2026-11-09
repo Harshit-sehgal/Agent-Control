@@ -7,12 +7,15 @@ import * as agent from './agent.js';
 import {onAgentTaskResult, continueBrowserWork} from './bot-browser.js';
 import {queueGroupRun, resumeFeedRun, resumeBrowserRun} from './coordination.js';
 import {runOneBot} from './routes-groups.js';
-import {sessionCookie, clearCookie, DEFAULT_WORKSPACE} from './auth.js';
+import {sessionCookie, clearCookie, DEFAULT_WORKSPACE, resolveAccount} from './auth.js';
 import {sha256} from './vault.js';
 import {fail, cookie, safeJson} from './http.js';
 import {reply} from './router.js';
 
-const LOGIN_WINDOW_MS = 900000, LOGIN_ATTEMPTS = 8;
+// The per-account bucket is deliberately looser than the per-IP one: it exists to
+// stop guesses spread across many addresses, not to let one client lock a
+// mailbox out of the whole internet after eight tries.
+const LOGIN_WINDOW_MS = 900000, LOGIN_ATTEMPTS = 8, LOGIN_ACCOUNT_ATTEMPTS = LOGIN_ATTEMPTS * 4;
 
 export function publicRoutes(router, {auth, workspaces, version}) {
   // Failed sign-ins per client IP. A record only matters while its window is
@@ -59,16 +62,22 @@ export function publicRoutes(router, {auth, workspaces, version}) {
     attempt(`login:${ip}`, LOGIN_ATTEMPTS);
     const b = await c.body();
     // A per-account bucket as well: an attacker who can burn addresses one at a
-    // time must still not get unlimited guesses at one mailbox. A request that
-    // names no account cannot burn an account's budget, and an empty email is
-    // not an account — otherwise every anonymous guess would share one bucket
-    // and one client could lock out all the others.
-    const account = String(b.email || '').trim().toLowerCase().slice(0, 200);
-    if (account) attempt(`login:account:${account}`, LOGIN_ATTEMPTS);
+    // time must still not get unlimited guesses at one mailbox. It is keyed on
+    // the account the request is *about*, resolved the way `auth.login` resolves
+    // it — a body with no email means the owner, and keying on the raw body
+    // meant the guesses aimed at that one mailbox were counted per IP only.
+    const account = resolveAccount(b.email).slice(0, 200);
+    if (account) {
+      attempt(`login:account:${account}:${ip}`, LOGIN_ATTEMPTS);
+      attempt(`login:account:${account}`, LOGIN_ACCOUNT_ATTEMPTS);
+    }
     const result = auth.login({email: b.email, password: b.password}, {ip, userAgent: c.req.headers['user-agent']});
     if (!result.ok) fail(result.error, result.status);
     attempts.delete(`login:${ip}`);
-    if (account) attempts.delete(`login:account:${account}`);
+    if (account) {
+      attempts.delete(`login:account:${account}:${ip}`);
+      attempts.delete(`login:account:${account}`);
+    }
     const secure = Boolean(c.req.socket.encrypted || (trustProxy() && c.req.headers['x-forwarded-proto'] === 'https'));
     return reply(200, {ok: true, me: {email: result.user.email, role: result.role}}, {'Set-Cookie': sessionCookie(result.sessionId, {secure})});
   });

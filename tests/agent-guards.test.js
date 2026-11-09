@@ -188,3 +188,124 @@ test('pairing asks for the admin scope and neither pairing nor polling follows a
     await fs.rm(dir, {recursive: true, force: true});
   }
 });
+
+/** Spawn the CLI and collect everything it said, with a hard ceiling so a hang
+ * fails as a hang rather than a timeout on the whole file. */
+function runCli(args, env = {}, timeoutMs = 25000) {
+  return new Promise(resolve => {
+    const child = spawn(process.execPath, ['agent/agent.mjs', ...args], {
+      cwd: root,
+      env: {...process.env, AGENT_SKIP_DOTENV: '1', ...env},
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let output = '';
+    child.stdout.on('data', chunk => { output += chunk; });
+    child.stderr.on('data', chunk => { output += chunk; });
+    const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
+    child.on('exit', code => { clearTimeout(timer); resolve({code, output, child}); });
+  });
+}
+
+test('a pairing answer that is not a credential leaves the working pairing alone', {timeout: 30000}, async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-pair-'));
+  const config = path.join(dir, 'agent.config.json');
+  const working = JSON.stringify({server: 'https://control.example', agentId: 'device-old', secret: 'old-secret', permissions: ['http.check']}, null, 2);
+  await fs.writeFile(config, working);
+  const seen = [];
+  const front = await listen();
+  front.on('request', (req, res) => {
+    let raw = '';
+    req.on('data', chunk => { raw += chunk; });
+    req.on('end', () => {
+      seen.push(JSON.parse(raw || '{}'));
+      if (seen.length === 1) {
+        // A 2xx that is not the control plane: a proxy error page, a captive portal.
+        res.writeHead(200, {'Content-Type': 'text/html'}).end('<html>Sign in to WiFi</html>');
+        return;
+      }
+      res.writeHead(201, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({agentId: 'device-new', secret: 'new-secret', workspaceId: 'default', permissions: JSON.parse(raw).permissions}));
+    });
+  });
+  const base = `http://127.0.0.1:${front.address().port}`;
+  try {
+    const bad = await runCli(['pair', '--server', base, '--code', 'ABCD234567'], {AGENT_CONFIG: config});
+    assert.equal(bad.code, 1, bad.output);
+    assert.match(bad.output, /did not return an agent credential/);
+    assert.equal(await fs.readFile(config, 'utf8'), working, 'a failed pairing must not overwrite working credentials');
+
+    // An explicitly empty permission list asks for nothing; only an absent flag
+    // asks for the full scope. Both used to read as "absent".
+    const empty = await runCli(['pair', '--server', base, '--code', 'ABCD234567', '--permissions', ''], {AGENT_CONFIG: config});
+    assert.equal(empty.code, 0, empty.output);
+    assert.deepEqual(seen[1].permissions, []);
+    assert.match(empty.output, /Granted permissions: \(none\)/);
+    assert.equal(JSON.parse(await fs.readFile(config, 'utf8')).agentId, 'device-new');
+  } finally {
+    front.close();
+    await fs.rm(dir, {recursive: true, force: true});
+  }
+});
+
+test('a poll interval that is not a number does not become a one-millisecond spin, and Ctrl+C still cleans up', {timeout: 30000}, async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-interval-'));
+  const config = path.join(dir, 'agent.config.json');
+  // No `pollIntervalMs`, exactly what an older pairing wrote.
+  await fs.writeFile(config, JSON.stringify({server: 'http://127.0.0.1:1', agentId: 'device-1', secret: 's', permissions: ['http.check']}));
+  let beats = 0;
+  const front = await listen();
+  front.on('request', (req, res) => {
+    req.resume();
+    beats += 1;
+    res.writeHead(200, {'Content-Type': 'application/json'}).end(JSON.stringify({agent: {permissions: ['http.check']}, tasks: []}));
+  });
+  const base = `http://127.0.0.1:${front.address().port}`;
+  await fs.writeFile(config, JSON.stringify({server: base, agentId: 'device-1', secret: 's', permissions: ['http.check']}));
+  const child = spawn(process.execPath, ['agent/agent.mjs', 'run'], {
+    cwd: root,
+    env: {...process.env, AGENT_SKIP_DOTENV: '1', AGENT_CONFIG: config, AGENT_POLL_MS: '15s'},
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let output = '';
+  child.stdout.on('data', chunk => { output += chunk; });
+  child.stderr.on('data', chunk => { output += chunk; });
+  try {
+    const deadline = Date.now() + 10000;
+    while (!/polling .* every 15s/.test(output) && Date.now() < deadline && child.exitCode === null) {
+      await new Promise(r => setTimeout(r, 50));
+    }
+    assert.match(output, /every 15s/, `a non-numeric interval must fall back to the default, not to NaN: ${output}`);
+    // Two seconds of a 15 s interval must not be a heartbeat storm.
+    const before = beats;
+    await new Promise(r => setTimeout(r, 1200));
+    assert.ok(beats - before <= 1, `polling must stay paced, saw ${beats - before} beats in 1.2s`);
+    child.kill('SIGTERM');
+    const code = await new Promise(resolve => child.once('exit', resolve));
+    assert.equal(code, 0, `SIGTERM must stop the loop cleanly: ${output}`);
+    assert.match(output, /agent: stopped\./, 'the cleanup path must run, not be skipped by a hard exit');
+  } finally {
+    if (child.exitCode === null) child.kill('SIGKILL');
+    front.close();
+    await fs.rm(dir, {recursive: true, force: true});
+  }
+});
+
+test('a device the server keeps refusing says so and stops instead of retrying forever', {timeout: 40000}, async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-revoked-'));
+  const config = path.join(dir, 'agent.config.json');
+  const front = await listen();
+  front.on('request', (req, res) => {
+    req.resume();
+    res.writeHead(403, {'Content-Type': 'application/json'}).end(JSON.stringify({error: 'This device was revoked.'}));
+  });
+  await fs.writeFile(config, JSON.stringify({server: `http://127.0.0.1:${front.address().port}`, agentId: 'device-1', secret: 's', permissions: [], pollIntervalMs: 2000}));
+  try {
+    const run = await runCli(['run'], {AGENT_CONFIG: config}, 30000);
+    assert.equal(run.code, 1, run.output);
+    assert.match(run.output, /keeps refusing this device/);
+    assert.match(run.output, /Re-pair/);
+  } finally {
+    front.close();
+    await fs.rm(dir, {recursive: true, force: true});
+  }
+});

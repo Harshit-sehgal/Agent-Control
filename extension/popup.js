@@ -29,14 +29,25 @@ $('capture').addEventListener('click',async()=>{
     if(!token)throw new Error('Enter capture token from Dashboard → Settings.');
     // The dashboard may run on a port other than the bundled 4173.
     if(!await ensureOriginAccess(url))throw new Error('Permission for this dashboard origin was denied.');
-    await chrome.storage.local.set({endpoint,token,topic});
+    // The endpoint and topic are worth remembering even if the capture is
+    // refused; the token is not, or a rejected one would be pre-filled next time
+    // exactly like a good one.
+    await chrome.storage.local.set({endpoint,topic});
     const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
     if(!tab?.id)throw new Error('No active tab found.');
     const data=await chrome.scripting.executeScript({target:{tabId:tab.id},func:readSelectedPost});
+    // On a restricted target (chrome://, the PDF viewer, the Web Store) the
+    // injection result is null; reading `.text` off it showed the user an
+    // internal TypeError instead of saying this page cannot be read.
+    if(!data?.[0]?.result)throw new Error('This page cannot be read; open the post itself and try again.');
     const candidate={...data[0].result,topic};
     if(candidate.text.length<12)throw new Error('Select a post containing at least 12 characters.');
     const res=await fetch(`${endpoint}/api/capture`,{method:'POST',headers:{'Content-Type':'application/json','X-Capture-Token':token},body:JSON.stringify(candidate)});
-    const body=await res.json();if(!res.ok)throw new Error(body.error||`HTTP ${res.status}`);
+    // A refusal is not always JSON (a proxy error page, a captive portal), and
+    // `res.json()` would then report a parse error instead of the status.
+    const body=await res.json().catch(()=>null);
+    if(!res.ok)throw new Error(body?.error||`HTTP ${res.status}`);
+    await chrome.storage.local.set({token});
     status(body.duplicate?'This post is already in the queue.':'Captured. Open the dashboard → Discovery to draft a reply.');
   }catch(e){status('Capture failed: '+e.message);}
 });

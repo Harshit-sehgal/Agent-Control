@@ -149,12 +149,22 @@ export function groupRoutes(router) {
     const b = await c.body();
     return reply(202, await queueGroupRun(c.store, {groupId: c.params.group, message: b.message, directBotId: b.directBotId || null, checkpoints: b.checkpoints === true, chatKey: typeof b.chatKey === 'string' ? b.chatKey : null}));
   });
+  // A run is addressed under the group it belongs to, so the path has to name
+  // that group. Without this a run belonging to another group (or a group that
+  // does not exist) could be continued, stopped or planned through a URL that
+  // reads as if it never touched it.
+  const ownRun = c => {
+    const run = c.store.read().groupRuns.find(r => r.id === c.params.run);
+    if (!run || run.groupId !== c.params.group) fail('Run not found.', 404);
+    return run;
+  };
   // Approve the next handoff of a run paused at a human checkpoint.
-  router.add('POST', '/api/groups/:group/runs/:run/continue', 'member', async c => reply(202, await resumeGroupRun(c.store, c.params.run)));
+  router.add('POST', '/api/groups/:group/runs/:run/continue', 'member', async c => { ownRun(c); return reply(202, await resumeGroupRun(c.store, c.params.run)); });
   // Stop a run: a start, a step in flight, or a pause. The flip is read between
   // steps, so it stops the next handoff rather than a model call already sent.
-  router.add('POST', '/api/groups/:group/runs/:run/cancel', 'member', async c => reply(202, await cancelRun(c.store, c.params.run, {actor: c.actor.email})));
+  router.add('POST', '/api/groups/:group/runs/:run/cancel', 'member', async c => { ownRun(c); return reply(202, await cancelRun(c.store, c.params.run, {actor: c.actor.email})); });
   router.add('POST', '/api/groups/:group/runs/:run/plan', 'member', async c => {
+    ownRun(c);
     const b = await c.body();
     return reply(202, await decidePlan(c.store, c.params.run, {approve: b?.approve !== false}));
   });

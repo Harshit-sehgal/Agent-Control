@@ -1,7 +1,7 @@
 /** The X-engage workflow over HTTP: the state snapshot, settings, posts,
  * drafts and their evidence, reminders, the task queue and retention. The rules
  * live in `shared/`; a route only reads the request and applies one transition. */
-import {DEMO_SAMPLES} from '../shared/core.js';
+import {DEMO_SAMPLES, cleanText} from '../shared/core.js';
 import * as wf from '../shared/workflow.js';
 import * as tasks from '../shared/tasks.js';
 import * as evidence from '../shared/evidence.js';
@@ -86,7 +86,10 @@ export function workflowRoutes(router, {auth, processCandidate}) {
     const b = await c.body();
     // Delivery tasks are created by the server from a user's own preferences.
     // Taken from a request, one would send to any stored webhook.
-    if (b.kind === 'notification') fail('Notification deliveries are queued by the server, not by request.', 403);
+    // Compare what the queue will actually store: `enqueueTask` normalizes the
+    // kind with `cleanText`, so `" notification"` passed a raw comparison and
+    // became a real delivery task addressed to any stored webhook.
+    if (cleanText(b.kind, 64) === 'notification') fail('Notification deliveries are queued by the server, not by request.', 403);
     const result = await c.store.update(s => tasks.enqueueTask(s, b));
     return reply(result.duplicate ? 200 : 201, result.task);
   });

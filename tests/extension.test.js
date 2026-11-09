@@ -36,3 +36,19 @@ test('the capture extension refuses plaintext remote endpoints and empty tokens'
   assert.match(popup, /window\.getSelection\(\)/);
   assert.match(popupHtml, /Capture one visible post/);
 });
+
+test('a refused capture is not remembered as a working one, and a restricted page says so', () => {
+  // The token used to be stored before the POST, so a rejected token was
+  // pre-filled on the next open exactly like a good one. Only the endpoint and
+  // topic survive a failure; the token is saved once the server accepts it.
+  const saveBefore = popup.indexOf('chrome.storage.local.set({endpoint,topic})');
+  const saveTokenAfter = popup.indexOf('chrome.storage.local.set({token})');
+  assert.ok(saveBefore >= 0 && saveTokenAfter > saveBefore, 'the endpoint is remembered up front, the token only on success');
+  assert.ok(popup.indexOf('if(!res.ok)throw new Error') < saveTokenAfter, 'nothing is saved before the response is checked');
+
+  // A restricted target (chrome://, the PDF viewer, the Web Store) injects to a
+  // null result; reading `.text` off it showed the user a TypeError.
+  assert.match(popup, /if\(!data\?\.\[0\]\?\.result\)throw new Error\('This page cannot be read/);
+  // A refusal is not always JSON, and a parse error must not hide the status.
+  assert.match(popup, /res\.json\(\)\.catch\(\(\)=>null\)/);
+});

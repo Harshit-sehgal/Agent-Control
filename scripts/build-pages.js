@@ -13,6 +13,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {ASSETS} from '../shared/assets.js';
+import {stampDocument, stampImports} from './pages-rewrites.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const src = path.join(root, 'shared');
@@ -51,14 +52,14 @@ await fs.writeFile(indexPath, marked);
 // Cache-bust the browser-local assets with a content hash so a returning
 // visitor cannot keep a stale bundle after a deploy.
 const version = await bundleVersion(files.filter(f => /\.(js|css)$/.test(f)));
-const stamped = marked.replace(/(href|src)="(\.\/[^"?]+\.(?:js|css))"/g, (_, attr, url) => `${attr}="${url}?v=${version}"`);
+const stamped = stampDocument(marked, version);
 await fs.writeFile(indexPath, stamped);
 
 // Relative ES module imports must carry the same version, otherwise a browser
 // can serve a cached older module while the entry point is fresh.
 for (const name of files.filter(f => f.endsWith('.js'))) {
   const file = path.join(dest, name);
-  const body = (await fs.readFile(file, 'utf8')).replace(/((?:from|import)\s*)(['"])(\.\/[\w-]+\.js)\2/g, (_, kw, quote, url) => `${kw}${quote}${url}?v=${version}${quote}`);
+  const body = stampImports(await fs.readFile(file, 'utf8'), version);
   await fs.writeFile(file, body);
 }
 // Prevent Jekyll from stripping files that start with an underscore.

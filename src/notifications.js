@@ -74,7 +74,10 @@ export function updatePreferences(store, userId, body) {
   const next = {
     inApp: body.inApp === undefined ? current.inApp : Boolean(body.inApp),
     webhook: body.webhook === undefined ? current.webhook : Boolean(body.webhook),
-    webhookCredentialId: body.webhookCredentialId === undefined ? current.webhookCredentialId : (body.webhookCredentialId || null),
+    // A credential id is bound straight into SQL, and a non-scalar binding is a
+    // TypeError with no status: an object here answered 500 as a server fault.
+    webhookCredentialId: body.webhookCredentialId === undefined ? current.webhookCredentialId
+      : (typeof body.webhookCredentialId === 'string' && body.webhookCredentialId.trim() ? body.webhookCredentialId.trim().slice(0, 200) : null),
     email: body.email === undefined ? current.email : Boolean(body.email),
     emailAddress: body.emailAddress === undefined ? current.emailAddress : String(body.emailAddress || '').slice(0, 200),
   };

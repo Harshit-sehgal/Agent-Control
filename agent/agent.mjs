@@ -34,7 +34,10 @@ const CONFIG = process.env.AGENT_CONFIG ? path.resolve(process.env.AGENT_CONFIG)
 // the server intersects the request with the code and treats an empty list as
 // "grant nothing".
 const TASK_KINDS = ['http.check', 'browser.capture', 'browser.action'];
-const POLL_MS = Number(process.env.AGENT_POLL_MS || 15000);
+// `Number('15s')` is NaN, `Number('')` is 0, and `Math.max(2000, NaN)` is NaN,
+// which `setTimeout` turns into a 1 ms loop: an unpaced heartbeat storm. A value
+// that is not a positive number is the default, not a spin.
+const POLL_MS = (() => { const n = Number(process.env.AGENT_POLL_MS); return Number.isFinite(n) && n > 0 ? n : 15000; })();
 const TIMEOUT_MS = 15000;
 
 function loadConfig() {
@@ -94,7 +97,9 @@ async function pair(argv) {
   const server = argValue(argv, '--server');
   const code = argValue(argv, '--code');
   if (!server || !code) fail('pair requires --server and --code.');
-  const requested = argValue(argv, '--permissions');
+  // `--permissions ""` asks for nothing; only an absent flag asks for the full
+  // scope. Reading both as "absent" meant a typo granted browser.action.
+  const requested = argv.includes('--permissions') ? (argValue(argv, '--permissions') || '') : null;
   const permissions = requested === null ? TASK_KINDS : requested.split(',').map(s => s.trim()).filter(Boolean);
   const name = argValue(argv, '--name') || `${process.env.COMPUTERNAME || process.env.HOSTNAME || 'device'}-agent`;
   const url = new URL(server.replace(/\/+$/, '') + '/api/agent/pair');
@@ -104,9 +109,14 @@ async function pair(argv) {
   catch (e) { fail(e.message); }
   const value = await res.json().catch(() => null);
   if (!res.ok) fail(`pairing failed: ${value?.error || res.status}`);
-  saveConfig({server: server.replace(/\/+$/, ''), agentId: value.agentId, secret: value.secret, workspaceId: value.workspaceId, permissions: value.permissions, pollIntervalMs: value.pollIntervalMs, name});
+  // A 2xx from something that is not the control plane (a proxy error page, a
+  // captive portal) parses to null. Saving that would overwrite a working
+  // pairing with empty credentials and then crash on `permissions.join`.
+  if (!value || typeof value.agentId !== 'string' || typeof value.secret !== 'string') fail('the server did not return an agent credential; nothing was saved.');
+  const granted = Array.isArray(value.permissions) ? value.permissions : [];
+  saveConfig({server: server.replace(/\/+$/, ''), agentId: value.agentId, secret: value.secret, workspaceId: value.workspaceId, permissions: granted, pollIntervalMs: value.pollIntervalMs, name});
   console.log(`Paired as "${name}". Credentials saved to ${CONFIG} (mode 0600).`);
-  console.log('Granted permissions:', value.permissions.join(', ') || '(none)');
+  console.log('Granted permissions:', granted.join(', ') || '(none)');
   console.log('Start the loop with: node agent/agent.mjs run');
 }
 
@@ -117,7 +127,7 @@ function argValue(argv, flag) {
 
 /** Local, permission-gated execution. Returns a JSON-serializable result. */
 async function execute(task, config) {
-  if (!config.permissions.includes(task.kind)) {
+  if (!(config.permissions || []).includes(task.kind)) {
     throw new Error(`This agent lacks the "${task.kind}" permission. Grant it from the dashboard.`);
   }
   if (task.kind === 'http.check') {
@@ -168,9 +178,29 @@ async function execute(task, config) {
 let stopping = false;
 async function run() {
   const config = loadConfig();
-  const interval = Math.max(2000, Number(config.pollIntervalMs || POLL_MS));
+  if (!Array.isArray(config.permissions)) config.permissions = [];
+  const configured = Number(config.pollIntervalMs);
+  const interval = Math.max(2000, Number.isFinite(configured) && configured > 0 ? configured : POLL_MS);
   console.log(`Agent ${config.agentId} polling ${config.server} every ${interval / 1000}s. Ctrl+C to stop.`);
-  process.on('SIGINT', () => { stopping = true; console.log('\nagent: stopped.'); process.exit(0); });
+  /** Resolves the wait between polls; a signal wakes it so Ctrl+C does not take
+   * up to a full interval to take effect. */
+  let wake = null;
+  const sleep = ms => new Promise(resolve => {
+    const done = () => { clearTimeout(timer); wake = null; resolve(); };
+    const timer = setTimeout(done, ms);
+    wake = done;
+  });
+  // Only a flag, never `process.exit` from the handler: exiting there skips the
+  // `finally` that clears the keepalive timer and the cleanup of a browser that
+  // is mid-task, leaving an orphan Chrome and a throwaway profile in tmp.
+  const stop = signal => {
+    if (stopping) return;
+    stopping = true;
+    console.log(`\nagent: ${signal} received, stopping after the current task.`);
+    wake?.();
+  };
+  process.on('SIGINT', () => stop('SIGINT'));
+  process.on('SIGTERM', () => stop('SIGTERM'));
 
   // Tasks handed over by a heartbeat that arrived while a task was executing.
   const inbox = new Map();
@@ -221,8 +251,10 @@ async function run() {
     }
   };
 
+  let failures = 0;
   try {
     while (!stopping) {
+      let wait = interval;
       try {
         // A pending task needs no new poll; poll only when there is nothing to do.
         if (!inbox.size) await heartbeat();
@@ -232,20 +264,34 @@ async function run() {
           busy = true;
           try { await runTask(task); } finally { busy = false; }
         }
-        saveConfig({...config, lastSeenAt: config.lastSeenAt});
+        failures = 0;
+        // Reported separately: an unwritable config file is not a network
+        // problem, and saying "heartbeat failed" sends the operator to the wrong
+        // subsystem while the heartbeat is fine.
+        try { saveConfig({...config, lastSeenAt: config.lastSeenAt}); }
+        catch (e) { console.error(`agent: could not save agent config (${e.message}). The heartbeat itself is working.`); }
       } catch (e) {
-        console.error(`agent: heartbeat failed (${e.message}). Retrying in ${interval / 1000}s.`);
+        failures += 1;
+        // 401/403/409 mean the grant was revoked, the device deleted or a newer
+        // pairing replaced it. Retrying that forever is a log flood, not a
+        // recovery: say so once and stop. Anything else backs off, so a control
+        // plane that is down is not hammered once per interval.
+        const permanent = /server responded (401|403|409)\b/.test(e.message);
+        if (permanent && failures >= 5) fail(`the server keeps refusing this device (${e.message}). Re-pair it with \`node agent/agent.mjs pair\`.`);
+        wait = permanent ? interval : Math.min(interval * 2 ** Math.min(failures - 1, 4), 300000);
+        console.error(`agent: heartbeat failed (${e.message}). Retrying in ${Math.round(wait / 1000)}s.`);
       }
-      await new Promise(r => setTimeout(r, interval));
+      if (stopping) break;
+      await sleep(wait);
     }
-  } finally { clearInterval(keepalive); }
+  } finally { clearInterval(keepalive); console.log('agent: stopped.'); }
 }
 
 function status() {
   const config = loadConfig();
   console.log(`server:      ${config.server}`);
   console.log(`agent id:    ${config.agentId}`);
-  console.log(`permissions: ${config.permissions.join(', ') || '(none)'}`);
+  console.log(`permissions: ${(Array.isArray(config.permissions) ? config.permissions : []).join(', ') || '(none)'}`);
   console.log(`last seen:   ${config.lastSeenAt || 'never (no successful heartbeat)'}`);
 }
 
