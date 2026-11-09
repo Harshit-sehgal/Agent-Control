@@ -6,6 +6,17 @@ The JSON store is gone, one list decides what ships, and the app opens without
 a network.
 
 ### Added
+- **A streaming answer and a reasoning model both work.** A gateway that
+  answers `text/event-stream` without being asked is folded back into a reply
+  for every protocol, and an error delivered as a stream keeps the provider's
+  words. A `400` that asks for `max_completion_tokens` (or refuses a custom
+  temperature) is retried once with that fix; anything else is reported as-is.
+- **Azure's newer `/openai/v1` base.** A resource endpoint pasted that way uses
+  `/chat/completions` with the model in the body and `api-version` in the
+  query, while the classic `/openai/deployments/{name}` path still works.
+- **A wider catalogue parser.** Rows are read from `data`, `models`, `value`,
+  `result`, a nested `data.models`, or a bare array, so any
+  OpenAI-compatible proxy's model list is understood.
 - **One list of served files**: `shared/assets.js`. `scripts/build-pages.js` and
   `src/server.js` both import it, so a module imported by `index.html` reaches
   the Pages bundle and the Node server, or neither. `tests/assets.test.js`

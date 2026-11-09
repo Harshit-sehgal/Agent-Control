@@ -2,7 +2,7 @@
  *
  * A provider is not just "an OpenAI URL": Anthropic's Messages API, Google's
  * generateContent and OpenAI's two shapes disagree about headers, body and the
- * model catalogue. This file names the four wire protocols once, so the server
+ * model catalogue. This file names the five wire protocols once, so the server
  * (`src/ai.js`) and the settings page (`shared/ui-admin.js`) agree on the ids
  * and the preset endpoints instead of each keeping a list.
  *
@@ -81,7 +81,7 @@ export function inferProtocol(baseUrl) {
  * "https://api.openai.com/v1/chat/completions" out of an SDK call means the base,
  * and "…/v1/models" the same, so the path is trimmed back to a base URL. */
 const ENDPOINT_SUFFIX = /\/(?:chat\/completions|completions|responses|messages|models|embeddings)$/i;
-const AZURE_SUFFIX = /\/openai\/deployments\/[^/]+(?:\/chat\/completions)?$|\/openai$/i;
+const AZURE_DEPLOYMENT = /\/openai\/deployments\/[^/]+(?:\/chat\/completions)?$/i;
 
 /** @returns {string} base URL without a pasted endpoint path or trailing slash. */
 export function normaliseBaseUrl(baseUrl, protocol = DEFAULT_PROTOCOL) {
@@ -90,7 +90,13 @@ export function normaliseBaseUrl(baseUrl, protocol = DEFAULT_PROTOCOL) {
   try {
     const parsed = new URL(url);
     let path = parsed.pathname.replace(/\/+$/, '');
-    path = path.replace(AZURE_SUFFIX, '').replace(ENDPOINT_SUFFIX, '');
+    // A deployment path is unmistakably Azure, whatever protocol was selected.
+    path = path.replace(AZURE_DEPLOYMENT, '');
+    // The bare "/openai" suffix is only ours to drop on Azure: on any other
+    // protocol it is a real segment (a gateway may live at .../openai/models),
+    // and stripping it sent the catalogue request to /models instead.
+    if (protocol === 'azure-openai') path = path.replace(/\/openai$/i, '');
+    path = path.replace(ENDPOINT_SUFFIX, '');
     // A base of "/v1" is kept; an empty path stays empty and the 404 hint tells
     // the user which suffix that provider needs.
     parsed.pathname = path || '/';
@@ -106,7 +112,7 @@ export function normaliseBaseUrl(baseUrl, protocol = DEFAULT_PROTOCOL) {
 /** Model ids that cannot answer a chat request. Providers list everything on
  * one endpoint (embeddings, speech, image, moderation), so the picker offers the
  * conversational ones and keeps the rest selectable by hand. */
-const NON_CHAT = /(embed|whisper|(^|[/-])tts|dall-e|gpt-image|image-|imagen|moderation|rerank|(^|[/-])bge|(^|[/-])e5-|stable-diffusion|sdxl|(^|[/-])flux|audio|realtime|transcribe)/i;
+const NON_CHAT = /(embed|whisper|(^|[/-])tts|dall-e|gpt-image|image-|imagen|moderation|rerank|(^|[/-])bge|(^|[/-])e5-|stable-diffusion|sdxl|(^|[/-])flux|audio|realtime|transcribe|veo|chirp|(^|[/-])aqa)/i;
 export function isChatModel(id) {
   return typeof id === 'string' && id.length > 0 && !NON_CHAT.test(id);
 }

@@ -354,6 +354,12 @@ test('custom headers ride on the call but never into the state or a listing', as
       }
       assert.deepEqual(ai.listProviderListings(store).providers[0].hasHeaders, ['Authorization', 'X-Api-Key'], 'only names are listed');
       assert.equal(ai.publicAi(store.read()).providers[0].hasHeaders, undefined, 'a viewer does not even get the names');
+      // The per-bot model picker is a member control, so model ids reach a viewer;
+      // the endpoint path and the last catalogue error do not.
+      const viewerProvider = ai.publicAi(store.read()).providers[0];
+      assert.ok(Array.isArray(viewerProvider.chatModels), 'a viewer always gets a list to pick from');
+      assert.equal(viewerProvider.baseUrl, undefined, 'the endpoint path stays admin-only');
+      assert.equal(viewerProvider.modelsError, undefined);
     } finally { srv.close(); }
   });
 });
@@ -481,5 +487,70 @@ test('a failed provider test reports the provider\'s own words, not a generic fa
           && !/did not answer/i.test(e.message) && !e.message.includes('stub-key-123'),
       );
     } finally { srv.close(); }
+  });
+});
+
+test('the viewer payload carries the model ids a member picks from, and nothing else', () => {
+  const state = {ai: {providers: [{id: 'p1', label: 'Gateway', baseUrl: 'https://gw.example/v1', keyOptional: false,
+    chatModels: ['model-a', 'model-b'], allModels: ['model-a', 'model-b', 'embed-1'], labels: {'model-a': 'Model A'},
+    modelsError: 'last read failed', headersCredentialId: 'cred-1', headerNames: ['X-Secret'], apiVersion: '2024-10-21'}],
+    defaultProviderId: 'p1', defaultModel: 'model-a', bots: {}}};
+  const viewer = ai.publicAi(state).providers[0];
+  assert.deepEqual(viewer.chatModels, ['model-a', 'model-b'], 'the per-bot picker needs the ids');
+  assert.deepEqual(viewer.labels, {'model-a': 'Model A'}, 'and the friendly names');
+  for (const hidden of ['baseUrl', 'modelsError', 'hasHeaders', 'headersCredentialId', 'allModels', 'apiVersion']) {
+    assert.equal(viewer[hidden], undefined, `${hidden} stays on the admin payload`);
+  }
+});
+
+test('the admin payload carries the endpoint, the error and the header names', () => {
+  const state = {ai: {providers: [{id: 'p1', label: 'Gateway', baseUrl: 'https://gw.example/v1', apiVersion: '2024-10-21',
+    chatModels: ['model-a'], allModels: ['model-a', 'embed-1'], modelsError: 'last read failed', headerNames: ['X-Secret']}],
+    defaultProviderId: 'p1', defaultModel: 'model-a', bots: {}}};
+  const admin = ai.listProviderListings({read: () => state}).providers[0];
+  assert.equal(admin.baseUrl, 'https://gw.example/v1');
+  assert.equal(admin.modelsError, 'last read failed');
+  assert.deepEqual(admin.hasHeaders, ['X-Secret']);
+  assert.deepEqual(admin.allModels, ['model-a', 'embed-1']);
+});
+
+test('Test names the first model the key lists instead of "auto"', async () => {
+  await withStore(async store => {
+    // One server for both shapes: the catalogue read, then the tiny chat call.
+    const requests = [];
+    const server = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', chunk => body += chunk);
+      req.on('end', () => {
+        requests.push({method: req.method, url: req.url, body: body ? JSON.parse(body) : null});
+        const catalogue = !body;
+        res.writeHead(200, {'Content-Type': 'application/json'});
+        res.end(JSON.stringify(catalogue
+          ? {data: [{id: 'embed-1'}, {id: 'gateway-model'}, {id: 'other-model'}]}
+          : {choices: [{message: {content: 'OK'}}]}));
+      });
+    });
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    try {
+      const p = await ai.addProvider(store, 'default', {label: 'Gateway', baseUrl: `http://127.0.0.1:${server.address().port}/v1`, apiKey: 'stub-key-123'});
+      await ai.refreshModels(store, p.id);
+      assert.deepEqual(store.read().ai.providers.find(x => x.id === p.id).chatModels, ['gateway-model', 'other-model'], 'the embedding model is filtered out of the chat list');
+
+      const noModel = await ai.testProvider(store, p.id);
+      assert.equal(noModel.model, 'gateway-model', 'the first id the key lists beats a literal "auto"');
+      assert.equal(noModel.ok, true);
+      const call = requests.find(r => r.body);
+      assert.equal(call.body.model, 'gateway-model', 'and that is the id that reaches the wire');
+
+      // A caller that names a model still wins, which is what the form sends.
+      const chosen = await ai.testProvider(store, p.id, {model: 'other-model'});
+      assert.equal(chosen.model, 'other-model');
+
+      // A provider whose catalogue was never read has nothing to name, so the
+      // old fallback still applies rather than testing an empty id.
+      await store.update(s => { const prov = s.ai.providers.find(x => x.id === p.id); prov.chatModels = []; prov.models = []; });
+      const empty = await ai.testProvider(store, p.id);
+      assert.equal(empty.model, 'auto');
+    } finally { server.close(); }
   });
 });

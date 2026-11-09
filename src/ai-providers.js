@@ -89,7 +89,10 @@ const protocolOfProvider=p=>protocolOf({protocol:p?.protocol,style:p?.style,base
 const modelCount=p=>Array.isArray(p?.models)?p.models.length:0;
 // The base URL may contain a secret path segment. The browser only needs the
 // host for display, so never return the full URL in public provider metadata.
-const publicProvider=p=>({id:p.id,label:p.label,protocol:protocolOfProvider(p),host:hostOf(p.baseUrl),modelCount:modelCount(p),createdAt:p.createdAt,createdBy:p.createdBy||null});
+// A viewer gets the model ids because the per-bot model picker is a member
+// control and an empty datalist is a broken one. Ids and labels are not secrets;
+// the endpoint path, the catalogue error and the header NAMES stay admin-only.
+const publicProvider=p=>({id:p.id,label:p.label,protocol:protocolOfProvider(p),host:hostOf(p.baseUrl),modelCount:modelCount(p),chatModels:capList(p.chatModels||p.models,300),labels:labelsOf(p),createdAt:p.createdAt,createdBy:p.createdBy||null});
 /** The settings page gets the full picture: the endpoint, both model lists, the
  * friendly labels, the Azure version and the header NAMES. Values stay in the
  * vault, so even this listing cannot leak one. */
@@ -291,7 +294,12 @@ export async function testProvider(store,providerId,{model}={}){
   const provider=store.read().ai?.providers?.find(p=>p.id===providerId);
   if(!provider)fail('Provider not found.',404);
   const config=providerConfig(store,provider);
-  const pick=clean(model,120)||concreteModel(config.protocol,'auto',Array.isArray(provider.chatModels)?provider.chatModels:config.models,config.models);
+  // Test the first model the key actually lists before falling back to "auto":
+  // "auto" only means something to OpenAI-style servers, and a test that reports
+  // "Connected · auto" tells the operator less than one that names a real id.
+  const listed=(Array.isArray(provider.chatModels)&&provider.chatModels.length?provider.chatModels:config.models)||[];
+  const first=Array.isArray(listed)?listed.find(id=>typeof id==='string'&&id):'';
+  const pick=clean(model,120)||first||concreteModel(config.protocol,'auto',listed,config.models);
   const started=Date.now();
   try{
     const reply=await complete({instructions:'You are a connectivity check. Reply with the single word OK.',input:'ping',maxTokens:16,config:{...config,model:pick}});

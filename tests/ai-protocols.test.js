@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import {makeDraft,executeCustomBot,discoverModels} from '../src/ai.js';
+import {makeDraft,executeCustomBot,discoverModels,complete} from '../src/ai.js';
 
-// The four wire protocols share one client. Each test drives a real loopback
+// The five wire protocols share one client. Each test drives a real loopback
 // server so the request path, headers, body shape and response parsing are
 // checked as they go on the wire, not through a mocked fetch.
 const candidate={url:'https://x.com/a/status/1',text:'A post about robotics reliability.',author:'Tester',topic:'robotics'};
@@ -446,4 +446,164 @@ test('a tool fence the model puts last keeps its closing fence', async () => {
     const result = await executeCustomBot(bot, 'Write a post.', config(port2, {protocol: 'openai-chat'}));
     assert.equal(result, 'An ordinary answer.', 'A wrapper fence is still unwrapped.');
   } finally { close2(); }
+});
+
+/** A stub whose every answer is scripted, for sequences (retry) and for bodies
+ * that are not JSON at all (SSE). */
+async function scripted(handler){
+  const requests=[];
+  const srv=http.createServer((req,res)=>{
+    let body='';req.on('data',c=>body+=c);
+    req.on('end',()=>{
+      const parsed=body?JSON.parse(body):null;
+      requests.push({url:req.url,headers:req.headers,body:parsed});
+      handler(req,res,parsed,requests.length-1);
+    });
+  });
+  await new Promise(r=>srv.listen(0,'127.0.0.1',r));
+  return {requests,port:srv.address().port,close:()=>srv.close()};
+}
+const sse=(res,frames)=>{
+  res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-cache'});
+  for(const frame of frames)res.write(`data: ${JSON.stringify(frame)}\n\n`);
+  res.write('data: [DONE]\n\n');
+  res.end();
+};
+
+test('a gateway that streams anyway is folded back into a reply, for every protocol', async () => {
+  const chat=await scripted((req,res)=>sse(res,[
+    {choices:[{delta:{role:'assistant'}}]},
+    {choices:[{delta:{content:'Streamed '}}]},
+    {choices:[{delta:{content:'chat reply.'}}]},
+  ]));
+  try{
+    const out=await executeCustomBot({instructions:'Say hi'},'go',config(chat.port,{protocol:'openai-chat'}));
+    assert.equal(out,'Streamed chat reply.','delta.content is joined, and the role-only frame adds nothing');
+  }finally{chat.close();}
+
+  const anthropic=await scripted((req,res)=>sse(res,[
+    {type:'message_start',message:{id:'m'}},
+    {type:'content_block_delta',delta:{type:'text_delta',text:'Streamed '}},
+    {type:'content_block_delta',delta:{type:'text_delta',text:'Claude reply.'}},
+    {type:'message_stop'},
+  ]));
+  try{
+    const out=await executeCustomBot({instructions:'Say hi'},'go',config(anthropic.port,{protocol:'anthropic',model:'claude-sonnet-4-5'}));
+    assert.equal(out,'Streamed Claude reply.');
+  }finally{anthropic.close();}
+
+  const gemini=await scripted((req,res)=>sse(res,[
+    {candidates:[{content:{parts:[{text:'Streamed '}]}}]},
+    {candidates:[{content:{parts:[{text:'Gemini reply.'}]}}]},
+  ]));
+  try{
+    const out=await executeCustomBot({instructions:'Say hi'},'go',config(gemini.port,{protocol:'gemini',model:'gemini-2.5-pro'}));
+    assert.equal(out,'Streamed Gemini reply.');
+  }finally{gemini.close();}
+
+  const responses=await scripted((req,res)=>sse(res,[
+    {type:'response.output_text.delta',delta:'Streamed '},
+    {type:'response.output_text.delta',delta:'response.'},
+    {type:'response.completed'},
+  ]));
+  try{
+    const out=await executeCustomBot({instructions:'Say hi'},'go',config(responses.port,{protocol:'openai-responses',model:'gpt-4.1-mini'}));
+    assert.equal(out,'Streamed response.');
+  }finally{responses.close();}
+});
+
+test('an error that arrives as a stream is quoted, not dropped as an empty body', async () => {
+  const srv=await scripted((req,res)=>{res.writeHead(401,{'Content-Type':'text/event-stream'});res.end('data: {"error":{"message":"invalid x-api-key"}}\n\n');});
+  try{
+    await assert.rejects(
+      ()=>executeCustomBot({instructions:'Say hi'},'go',config(srv.port,{protocol:'openai-chat'})),
+      /invalid x-api-key/,'the provider words reach the operator even when the channel was a stream',
+    );
+  }finally{srv.close();}
+});
+
+test('a reasoning model that rejects max_tokens is retried once with max_completion_tokens', async () => {
+  const srv=await scripted((req,res,body,index)=>{
+    if(index===0){
+      res.writeHead(400,{'Content-Type':'application/json'});
+      res.end(JSON.stringify({error:{message:"Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead."}}));
+      return;
+    }
+    res.writeHead(200,{'Content-Type':'application/json'});
+    res.end(JSON.stringify({choices:[{message:{content:'Second try answered.'}}]}));
+  });
+  try{
+    const out=await complete({instructions:'Say hi',input:'go',config:config(srv.port,{protocol:'openai-chat',model:'o3-mini'}),temperature:0.3});
+    assert.equal(out,'Second try answered.');
+  }finally{srv.close();}
+  assert.equal(srv.requests.length,2,'exactly one retry, not a loop');
+  assert.ok(Number.isInteger(srv.requests[0].body.max_tokens));
+  assert.equal(srv.requests[0].body.temperature,0.3);
+  assert.equal('max_tokens' in srv.requests[1].body,false,'the rejected parameter is gone from the retry');
+  assert.ok(Number.isInteger(srv.requests[1].body.max_completion_tokens),'the replacement parameter is sent');
+  assert.equal(srv.requests[1].body.temperature,0.3,'a temperature the error never mentioned is kept');
+});
+
+test('a 400 that is not about max_tokens fails normally instead of retrying', async () => {
+  const srv=await scripted((req,res)=>{
+    res.writeHead(400,{'Content-Type':'application/json'});
+    res.end(JSON.stringify({error:{message:'model not found'}}));
+  });
+  try{
+    await assert.rejects(()=>executeCustomBot({instructions:'x'},'go',config(srv.port,{protocol:'openai-chat'})),/model not found/);
+  }finally{srv.close();}
+  assert.equal(srv.requests.length,1,'no retry for an unrelated 400');
+});
+
+test('a model that refuses the temperature is retried without it, and the token limit stays', async () => {
+  const srv=await scripted((req,res,body,index)=>{
+    if(index===0){
+      res.writeHead(400,{'Content-Type':'application/json'});
+      res.end(JSON.stringify({error:{message:"Unsupported value: 'temperature' does not support 0.3 with this model. Only the default (1) is supported."}}));
+      return;
+    }
+    res.writeHead(200,{'Content-Type':'application/json'});
+    res.end(JSON.stringify({choices:[{message:{content:'Answered at the default temperature.'}}]}));
+  });
+  try{
+    const out=await complete({instructions:'Say hi',input:'go',config:config(srv.port,{protocol:'openai-chat',model:'o3-mini'}),temperature:0.3});
+    assert.equal(out,'Answered at the default temperature.');
+  }finally{srv.close();}
+  assert.equal(srv.requests.length,2);
+  assert.equal('temperature' in srv.requests[0].body,true);
+  assert.equal('temperature' in srv.requests[1].body,false,'the refused temperature is gone');
+  assert.ok(Number.isInteger(srv.requests[1].body.max_tokens),'the token limit was never the problem, so it stays');
+});
+
+test('catalogue envelopes other than data/models/value are read, including a bare array', async () => {
+  for(const [json,expected] of [
+    [{result:[{id:'alpha-chat'}]},['alpha-chat']],
+    [{data:{models:[{id:'beta-chat'}]}},['beta-chat']],
+    [[{id:'gamma-chat'}],['gamma-chat']],
+  ]){
+    const srv=await stub({status:200,json});
+    try{
+      const found=await discoverModels(config(srv.port,{protocol:'openai-chat'}));
+      assert.deepEqual(found.models,expected,'every OpenAI-compatible proxy names its rows differently');
+    }finally{srv.close();}
+  }
+});
+
+test('the Responses API convenience output_text is read when output is absent', async () => {
+  const srv=await stub({status:200,json:{output_text:'Only this field.'}});
+  try{
+    const out=await executeCustomBot({instructions:'x'},'go',config(srv.port,{protocol:'openai-responses',model:'gpt-4.1-mini'}));
+    assert.equal(out,'Only this field.');
+  }finally{srv.close();}
+});
+
+test('an Azure resource on the newer /openai/v1 base uses the model from the body and the api-version in the query', async () => {
+  const srv=await stub({status:200,json:{choices:[{message:{content:'Newer Azure answered.'}}]}});
+  try{
+    const out=await executeCustomBot({instructions:'x'},'go',{baseUrl:`http://127.0.0.1:${srv.port}/openai/v1`,apiKey:'az-key',model:'dep-gpt4o',protocol:'azure-openai',apiVersion:'2025-01-01-preview'});
+    assert.equal(out,'Newer Azure answered.');
+  }finally{srv.close();}
+  assert.equal(srv.requests[0].url,'/openai/v1/chat/completions?api-version=2025-01-01-preview');
+  assert.equal(srv.requests[0].headers['api-key'],'az-key');
+  assert.equal(srv.requests[0].body.model,'dep-gpt4o','the v1 shape takes the deployment in the body, not the path');
 });

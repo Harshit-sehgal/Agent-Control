@@ -92,8 +92,13 @@ function requestFor(config,{instructions,input,maxTokens,temperature=null}){
   if(protocol==='gemini')return {protocol,url:`${config.baseUrl}/models/${encodeURIComponent(config.model)}:generateContent`,headers,body:{systemInstruction:{parts:[{text:instructions}]},contents:[{role:'user',parts:[{text:input}]}],generationConfig:{maxOutputTokens:maxTokens,...tuning}}};
   if(protocol==='openai-responses')return {protocol,url:`${config.baseUrl}/responses`,headers,body:{model:config.model,instructions,input,max_output_tokens:maxTokens,...tuning}};
   // Azure puts the deployment (the model you made) in the path and the API
-  // version in the query; the body has no `model` field.
-  if(protocol==='azure-openai')return {protocol,url:`${config.baseUrl}/openai/deployments/${encodeURIComponent(config.model)}/chat/completions?api-version=${encodeURIComponent(apiVersionOf(config))}`,headers,body:{messages:[{role:'system',content:instructions},{role:'user',content:input}],max_tokens:maxTokens,...tuning}};
+  // version in the query; the body has no `model` field. Newer resources also
+  // expose the OpenAI-compatible `/openai/v1` base, which takes `model` in the
+  // body instead — honour whichever base was saved.
+  if(protocol==='azure-openai'){
+    if(/\/openai\/v1$/.test(config.baseUrl))return {protocol,url:`${config.baseUrl}/chat/completions?api-version=${encodeURIComponent(apiVersionOf(config))}`,headers,body:{model:config.model,messages:[{role:'system',content:instructions},{role:'user',content:input}],max_tokens:maxTokens,...tuning}};
+    return {protocol,url:`${config.baseUrl}/openai/deployments/${encodeURIComponent(config.model)}/chat/completions?api-version=${encodeURIComponent(apiVersionOf(config))}`,headers,body:{messages:[{role:'system',content:instructions},{role:'user',content:input}],max_tokens:maxTokens,...tuning}};
+  }
   return {protocol,url:`${config.baseUrl}/chat/completions`,headers,body:{model:config.model,messages:[{role:'system',content:instructions},{role:'user',content:input}],max_tokens:maxTokens,...tuning}};
 }
 /** Chat content is a string or a list of parts. Stringifying a part object
@@ -105,6 +110,9 @@ function chatText(content){
   return '';
 }
 function responseText(data){
+  // The Responses API also sets a convenience `output_text` next to `output`;
+  // a compatible gateway may send only that one.
+  if(typeof data?.output_text==='string'&&data.output_text)return data.output_text;
   const chunks=[];
   for(const item of Array.isArray(data?.output)?data.output:[]){
     const parts=Array.isArray(item?.content)?item.content:(item?.type==='output_text'?[item]:[]);
@@ -122,6 +130,41 @@ function geminiText(data){
   const candidate=Array.isArray(data?.candidates)?data.candidates[0]:null;
   const parts=Array.isArray(candidate?.content?.parts)?candidate.content.parts:[];
   return parts.filter(p=>p&&p.thought!==true&&typeof p.text==='string').map(p=>p.text).join('\n');
+}
+/** Some gateways (self-hosted vLLM, LiteLLM, a proxy with a streaming default)
+ * answer `text/event-stream` even when `stream` was never asked for. Reading it
+ * as JSON failed with "could not be reached". Fold the events back into the one
+ * payload shape the protocol's extractor already reads. */
+function streamEvents(text){
+  const events=[];
+  for(const raw of String(text||'').split(/\r?\n/)){
+    const line=raw.trim();
+    if(!line.startsWith('data:'))continue;
+    const payload=line.slice(5).trim();
+    if(!payload||payload==='[DONE]')continue;
+    try{events.push(JSON.parse(payload));}catch{/* a keep-alive comment or a partial frame */}
+  }
+  return events;
+}
+function foldStream(protocol,text){
+  const pieces=[];
+  for(const event of streamEvents(text)){
+    if(event?.type==='error'||event?.error){
+      throw upstream(`AI provider returned an error: ${cleanText(event?.error?.message||event?.message||'stream error',200)}`,502);
+    }
+    if(protocol==='anthropic')pieces.push(event?.delta?.text);
+    else if(protocol==='gemini'){
+      const parts=event?.candidates?.[0]?.content?.parts;
+      if(Array.isArray(parts))for(const part of parts)if(part&&part.thought!==true)pieces.push(part.text);
+    }else if(protocol==='openai-responses')pieces.push(typeof event?.delta==='string'?event.delta:event?.output_text?.text);
+    else pieces.push(event?.choices?.[0]?.delta?.content);
+  }
+  const body=pieces.filter(piece=>typeof piece==='string').join('');
+  if(!body)return null;
+  if(protocol==='anthropic')return {content:[{type:'text',text:body}]};
+  if(protocol==='gemini')return {candidates:[{content:{parts:[{text:body}]}}]};
+  if(protocol==='openai-responses')return {output:[{content:[{type:'output_text',text:body}]}]};
+  return {choices:[{message:{content:body}}]};
 }
 function protocolText(protocol,data){
   if(protocol==='anthropic')return anthropicText(data);
@@ -181,6 +224,16 @@ function statusHint(status,protocol){
   if(status>=500)return 'the provider is having trouble; try again';
   return '';
 }
+const providerSaid=data=>String(data?.error?.message||data?.message||data?._error||'');
+/** What a 400 is asking for, when it is one of the two parameters that the
+ * o1/o3/gpt-5-style reasoning models refuse. Anything else is a real error and
+ * must not be retried, so a wrong key or a typo still reports itself. */
+function parameterFix(data){
+  const said=providerSaid(data);
+  const completionTokens=/max_completion_tokens/i.test(said);
+  const dropTemperature=/temperature/i.test(said)&&/unsupported|not support|invalid/i.test(said);
+  return {completionTokens,dropTemperature,changes:completionTokens||dropTemperature};
+}
 const providerHost=config=>{try{return new URL(config.baseUrl).host;}catch{return 'the provider';}};
 
 const maxCalls=()=>{const n=Number(process.env.AI_MAX_CONCURRENCY);return Number.isInteger(n)&&n>=1?n:4;};
@@ -195,11 +248,35 @@ async function callModel({instructions,input,maxTokens,config,temperature=null})
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs());
   try{
     const request=requestFor(cfg,{instructions,input,maxTokens,temperature});
-    const res=await fetch(request.url,{method:'POST',headers:request.headers,body:JSON.stringify(request.body),signal:controller.signal,redirect:'manual'});
-    if(res.status>=300&&res.status<400)throw upstream(`AI provider redirected (${res.status}). Refusing to follow.`);
-    let data=null;try{data=await res.json();}catch{/* non-JSON error body */}
-    if(!res.ok)throw upstream(`AI provider returned ${res.status}: ${errorText(data,res.status,cfg.apiKey,statusHint(res.status,protocol))}`);
-    return extract(cfg,data||{});
+    /** One POST, tolerant about how the answer arrives: JSON normally, SSE when
+     * a gateway streams anyway. */
+    const send=async body=>{
+      const res=await fetch(request.url,{method:'POST',headers:request.headers,body:JSON.stringify(body),signal:controller.signal,redirect:'manual'});
+      if(res.status>=300&&res.status<400)throw upstream(`AI provider redirected (${res.status}). Refusing to follow.`);
+      const type=String(res.headers.get('content-type')||'');
+      if(type.includes('text/event-stream')){
+        const raw=await res.text();
+        const folded=res.ok?foldStream(protocol,raw):null;
+        // An error coming back as a stream has no other body to quote.
+        return {res,data:folded||(res.ok?null:{error:{message:cleanText(raw,300)}})};
+      }
+      return {res,data:await res.json().catch(()=>null)};
+    };
+    let out=await send(request.body);
+    // Newer OpenAI reasoning models reject `max_tokens`, and some reject any
+    // temperature but the default, with a 400 that names the parameter. Retry
+    // once with what they asked for instead of failing a turn over a spelling.
+    if(out.res.status===400&&protocol!=='anthropic'&&protocol!=='gemini'){
+      const fix=parameterFix(out.data);
+      if(fix.changes){
+        const body={...request.body};
+        if(fix.completionTokens){body.max_completion_tokens=maxTokens;delete body.max_tokens;}
+        if(fix.dropTemperature)delete body.temperature;
+        out=await send(body);
+      }
+    }
+    if(!out.res.ok)throw upstream(`AI provider returned ${out.res.status}: ${errorText(out.data,out.res.status,cfg.apiKey,statusHint(out.res.status,protocol))}`);
+    return extract(cfg,out.data||{});
   }catch(e){
     if(e.name==='AbortError')throw upstream(`AI provider timed out after ${Math.round(timeoutMs()/1000)}s.`,504);
     if(e.status){e.message=redact(e.message,cfg.apiKey);throw e;}
@@ -217,7 +294,7 @@ export async function complete({instructions, input, maxTokens = 1500, config = 
  * JSON key. Pagination is real for the two that page (Anthropic by `has_more`,
  * Gemini by `nextPageToken`), so follow it instead of showing the first page. */
 function catalogStart(cfg,protocol){
-  if(protocol==='azure-openai')return `${cfg.baseUrl}/openai/deployments?api-version=${encodeURIComponent(apiVersionOf(cfg))}`;
+  if(protocol==='azure-openai')return /\/openai\/v1$/.test(cfg.baseUrl)?`${cfg.baseUrl}/models?api-version=${encodeURIComponent(apiVersionOf(cfg))}`:`${cfg.baseUrl}/openai/deployments?api-version=${encodeURIComponent(apiVersionOf(cfg))}`;
   if(protocol==='anthropic')return `${cfg.baseUrl}/models?limit=1000`;
   if(protocol==='gemini')return `${cfg.baseUrl}/models?pageSize=200`;
   return `${cfg.baseUrl}/models`;
@@ -228,15 +305,15 @@ function catalogStart(cfg,protocol){
 function catalogEntries(protocol,data){
   if(protocol==='gemini'){
     const rows=Array.isArray(data?.models)?data.models:[];
-    return rows.filter(m=>{
-      if(!m||typeof m.name!=='string')return false;
-      // Embedding-only models cannot answer a chat request; hide them.
-      return !Array.isArray(m.supportedGenerationMethods)||m.supportedGenerationMethods.includes('generateContent');
-    }).map(m=>({id:m.name.replace(/^models\//,''),label:typeof m.displayName==='string'?m.displayName:''}));
+    // Every Gemini row is kept here; `catalogueOf` decides what can chat. The
+    // full list is the promise of the picker, so filtering at the source would
+    // make `allModels` a lie about what the key can reach.
+    return rows.filter(m=>m&&typeof m.name==='string')
+      .map(m=>({id:m.name.replace(/^models\//,''),label:typeof m.displayName==='string'?m.displayName:''}));
   }
   // OpenAI-compatible answers put rows in `data`, Gemini in `models`, and
   // Azure's deployment list in `value` (the Azure REST envelope).
-  const rows=[data?.data,data?.models,data?.value].find(Array.isArray)||[];
+  const rows=[data?.data,data?.models,data?.value,data?.result,data?.data?.models,data].find(Array.isArray)||[];
   return rows.map(m=>{
     if(typeof m==='string')return {id:m,label:''};
     const id=m?.id||m?.slug||m?.name;

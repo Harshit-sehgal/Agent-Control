@@ -121,6 +121,14 @@ test('normaliseBaseUrl trims a pasted call endpoint, a trailing slash and an Azu
   assert.equal(normaliseBaseUrl('https://res.openai.azure.com/openai/deployments/dep'),'https://res.openai.azure.com');
   assert.equal(normaliseBaseUrl('https://api.openai.com/v1/chat/completions?trace=1#frag'),'https://api.openai.com/v1','a pasted query and fragment go, or the call path would never match');
   assert.equal(normaliseBaseUrl('https://api.groq.com/openai/v1?foo=1#bar'),'https://api.groq.com/openai/v1');
+  // A bare /openai is the resource path on Azure and ours to drop there. On any
+  // other protocol it is a real segment — a gateway may serve /openai/models —
+  // and dropping it sent the catalogue request to the wrong place.
+  assert.equal(normaliseBaseUrl('https://gw.example.com/openai/models'),'https://gw.example.com/openai');
+  assert.equal(normaliseBaseUrl('https://gw.example.com/openai/models?x=1'),'https://gw.example.com/openai');
+  assert.equal(normaliseBaseUrl('https://gw.example.com/openai/models','azure-openai'),'https://gw.example.com','on Azure the bare /openai is the resource path');
+  assert.equal(normaliseBaseUrl('https://gw.example.com/openai/chat/completions'),'https://gw.example.com/openai');
+  assert.equal(normaliseBaseUrl('https://gw.example.com/openai/deployments/dep','openai-chat'),'https://gw.example.com','a deployment path is unmistakably Azure, whatever protocol was picked');
   assert.equal(normaliseBaseUrl('  https://x.example/v1/chat/completions  '),'https://x.example/v1');
   assert.equal(normaliseBaseUrl(''),'');
   assert.equal(normaliseBaseUrl(undefined),'');

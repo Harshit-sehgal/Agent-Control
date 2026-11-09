@@ -1,4 +1,4 @@
-# Build plan — complete except host/push verification (106/107)
+# Build plan — complete except host/push verification (119/120)
 
 All v0.2/v0.3 roadmap items that can ship in this repo are delivered. Every
 phase ended green (`npm run check && npm test && npm run build:pages`). The
@@ -162,3 +162,13 @@ work should be added as a fresh section.
 - [x] Refused, duplicate and over-limit requests say why in the chat and write nothing
 - [x] `bot.create` is re-checked against the roster inside the write, so a permission revoked while the reply was written still refuses; schema v10 keeps `origin` and `created_by` across a restart
 - [x] Tests (`tests/bot-create.test.js`); check, test and build:pages green
+
+## Phase W — a provider client that survives real gateways
+- [x] A gateway that answers `text/event-stream` without being asked is folded back into a reply for every protocol, and an error delivered as a stream keeps the provider's own words
+- [x] A `400` that asks for `max_completion_tokens`, or refuses a custom temperature, is retried once with that fix; any other `400` is reported as-is
+- [x] Azure's newer `/openai/v1` base uses `/chat/completions` with the model in the body and reads its catalogue from `/models`, while the classic `/openai/deployments/{name}` base still works
+- [x] The catalogue parser reads rows from `data`, `models`, `value`, `result`, a nested `data.models` or a bare array; Gemini rows are kept whole so the chat filter, not the parser, decides
+- [x] A base URL keeps a real `/openai` segment on every protocol but Azure, where the bare segment is the resource path and is stripped
+- [x] The Responses API's convenience `output_text` is read when `output` is absent
+- [x] **Test** names the first model the key lists instead of reporting "Connected · auto", and a viewer's provider row carries the chat ids so the per-bot picker is not empty
+- [x] Tests (`tests/ai-protocols.test.js`, `tests/ai-providers.test.js`, `tests/ai-presets.test.js`); check, test and build:pages green
