@@ -36,7 +36,7 @@
 - **Run timeline.** The group's Runs section in its info panel shows every coordination run with per-step traces, handoffs, status, and one-click **Retry** for failed/interrupted runs.
 - **Human checkpoint gates.** An "Approve between steps" toggle pauses a run before each handoff; the run waits in `awaiting_checkpoint` until a member continues (`POST /api/groups/:id/runs/:id/continue` on Node; Approve next step in the Pages simulator).
 - **Admin surfaces (Node build).** Team & access (users, roles, sessions), Local agents (pairing, permissions, revoke), and **Data & security** (credential vault, retention preview/prune, checksum-protected JSON backup export/restore).
-- **Notifications** (`src/notifications.js`): an unread count under You, an in-app feed, and per-user channel preferences (in-app/webhook/email relay).
+- **Notifications** (`src/notifications.js`): an unread count under You, an in-app feed, and per-user channel preferences (in-app/webhook/email). Email submits over SMTP (`src/mail.js`, no dependency) or to an `EMAIL_RELAY_URL` gateway.
 - **Server structure.** API routes are declared in a route table with the access each one needs (`src/router.js`, `src/routes-*.js`); `src/server.js` only starts services and dispatches.
 - **Durable history.** Conversations are stored with the workspace and follow the account across devices; the orchestrator writes each run's messages and outcome into its conversation, so a run shows up even if the tab that started it was closed; every workflow record reads back unchanged after a restart (`src/sqlite-store.js`, `shared/chats.js`).
 - **Deployment hardening**: optional in-process HTTPS (`TLS_CERT`/`TLS_KEY`), HSTS, startup validation, and [`DEPLOYMENT.md`](DEPLOYMENT.md).
@@ -52,7 +52,7 @@
 
 - **A host that is actually on.** The deploy files are tested locally, but nothing here rents a machine or points a domain at it. Until the server runs somewhere always on, the scheduler and queue only work while your machine is up.
 - **Push on a real phone.** A test push was delivered end to end through Google's push service (the one Android uses) to desktop Chrome. Apple's push service, and a physical phone, are not yet tried.
-- **SMTP.** Email delivery is a JSON POST to `EMAIL_RELAY_URL` (an HTTPS gateway you run). This repo still does not speak SMTP; with the variable unset, delivery fails instead of claiming the message was sent.
+- **Email is outbound only.** The channel speaks SMTP itself (`src/mail.js`, no dependency) or POSTs to the older `EMAIL_RELAY_URL` gateway; `STARTTLS` is required rather than optional, so a missing upgrade fails the send. There is no inbound mail and no IMAP.
 - **Workspaces for hostile tenants.** Workspaces share one process, vault key and AI provider key. Billing-grade isolation is a different design.
 - **GitHub Pages has no live model.** Group chat uses the deterministic simulator (handoffs, guests, checkpoints). Real model chat would need a key in the browser. Visual routing graphs and model-chosen first-roster routing stay out on purpose (`docs/COORDINATION.md`).
 

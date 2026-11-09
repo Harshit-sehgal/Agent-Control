@@ -6,6 +6,17 @@ The JSON store is gone, one list decides what ships, and the app opens without
 a network.
 
 ### Added
+- **Email without a relay.** The email notification channel speaks SMTP itself
+  (`src/mail.js`, on `node:net` and `node:tls`, still no dependency): `EHLO`,
+  `STARTTLS`, `AUTH PLAIN` or `LOGIN`, one recipient, one plain-text message.
+  `SMTP_HOST` is enough, so a mailbox no longer needs the gateway you used to
+  write yourself; `EMAIL_RELAY_URL` is still honoured and loses to `SMTP_HOST`.
+  `STARTTLS` is required rather than optional — a server that does not offer it
+  fails the send before `AUTH` instead of putting a password on a cleartext
+  socket (`SMTP_REQUIRE_TLS=0` is the explicit opt-out for a relay on your own
+  network), and certificates are never unverified. Failures keep the server's
+  reply code and redact the credentials, so a retried queue task cannot leak
+  anything into the notification feed.
 - **A streaming answer and a reasoning model both work.** A gateway that
   answers `text/event-stream` without being asked is folded back into a reply
   for every protocol, and an error delivered as a stream keeps the provider's

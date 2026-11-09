@@ -11,11 +11,12 @@
  *   vault path of the preferences... stored in plaintext preferences is
  *   avoided: the URL often contains a token, so it is stored encrypted in the
  *   credentials table and referenced here by id.
- * - `email` POSTs `{to, title, body, meta, at}` to `EMAIL_RELAY_URL` when that
- *   HTTP(S) gateway is set. An optional `EMAIL_RELAY_TOKEN` is sent as
- *   `Authorization: Bearer` only over HTTPS. This process does not speak SMTP. With no relay
- *   configured, delivery throws so the queue retries instead of claiming the
- *   message was sent.
+ * - `email` speaks SMTP itself when `SMTP_HOST` is set (`src/mail.js`), so a
+ *   mailbox needs no gateway. `EMAIL_RELAY_URL` remains for an HTTP(S) relay:
+ *   it POSTs `{to, title, body, meta, at}`, and an optional `EMAIL_RELAY_TOKEN`
+ *   is sent as `Authorization: Bearer` only over HTTPS. SMTP wins when both are
+ *   configured. With neither, delivery throws so the queue retries instead of
+ *   claiming the message was sent.
  *
  * Delivery is durable: outbound notifications are queue tasks with the same
  * retry/backoff rules as everything else, and a failure never claims success.
@@ -23,6 +24,7 @@
 import {resolvePublicAddress, pinnedRequest} from '../agent/net-guard.mjs';
 import crypto from 'node:crypto';
 import {encryptJson, decryptJson} from './vault.js';
+import {smtpConfig, sendMail} from './mail.js';
 
 const now = () => new Date().toISOString();
 const MAX_IN_APP = 200;
@@ -147,13 +149,28 @@ export async function deliver(store, task) {
     return {delivered: 'webhook'};
   }
   if (channel === 'email') {
+    if (!isEmailAddress(target)) throw new Error('Email recipient is not a valid address.');
+    // A configured mailbox first: the app speaks SMTP itself, so the common
+    // case needs no relay at all. The relay stays for a gateway someone already
+    // runs, and SMTP winning keeps one path in charge when both are set.
+    const mail = smtpConfig();
+    if (mail) {
+      try {
+        await sendMail({to: target, subject: title ?? 'Agent Control', text: body ?? ''}, mail);
+      } catch (e) {
+        // The recipient address and the credentials never belong in an error
+        // that ends up in the notification feed.
+        throw new Error(redactSecrets(`Email delivery failed: ${e?.message || 'SMTP error.'}`, [mail.pass, mail.user, target]));
+      }
+      return {delivered: 'email'};
+    }
     const relay = process.env.EMAIL_RELAY_URL || '';
     if (!relay) {
-      // No gateway: fail the queue task. Completing it would mark mail sent
-      // that never left. Operators set EMAIL_RELAY_URL or switch the channel off.
-      throw new Error('Email delivery needs an external relay, which is not configured. Switch off the email channel or add a relay.');
+      // No mailbox and no gateway: fail the queue task. Completing it would mark
+      // mail sent that never left. Operators set SMTP_HOST or EMAIL_RELAY_URL,
+      // or switch the channel off.
+      throw new Error('Email delivery needs an external relay or a mailbox: set SMTP_HOST (or EMAIL_RELAY_URL). Switch the email channel off to stop trying.');
     }
-    if (!isEmailAddress(target)) throw new Error('Email recipient is not a valid address.');
     let parsed;
     try { parsed = new URL(relay); }
     catch { throw new Error('Email relay URL must be http(s).'); }

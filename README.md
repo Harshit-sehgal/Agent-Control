@@ -155,6 +155,7 @@ Use `npm test` for Node unit tests. For a local Chromium UI smoke test, install 
 - An installation can hold several workspaces, each with its own data and members, but it is self-hosted software for people you trust, not a hardened multi-tenant SaaS.
 - Custom bots have no file-system access. Browser access is the same opt-in `browser.use` permission as any other bot, and it still needs your approval and a paired local agent.
 - Push notifications reach a phone or desktop only after you turn them on for that device under **You → Notifications**, and only when the server is served over HTTPS (or on `localhost`). On an iPhone or iPad the app must first be added to the Home Screen. The service worker caches the app shell, so the installed app opens when the network is down, and tapping a notification opens the screen that message is about.
+- Email notifications are **outbound only**: set `SMTP_HOST` (STARTTLS on 587, or `SMTP_SECURE=1` for TLS on 465) and the app submits the mail itself, or point `EMAIL_RELAY_URL` at an HTTPS gateway. There is no inbox read and no IMAP. With neither configured, sending fails loudly rather than pretending it went out.
 - No external accounts, secrets, or private files are transmitted unless you explicitly configure a paid AI provider for text drafting.
 
 ## Quick start (Linux/macOS/Windows with Node 22.5+)

@@ -1,4 +1,4 @@
-# Build plan — complete except host/push verification (119/120)
+# Build plan — complete except host/push verification
 
 All v0.2/v0.3 roadmap items that can ship in this repo are delivered. Every
 phase ended green (`npm run check && npm test && npm run build:pages`). The
@@ -49,7 +49,7 @@ work should be added as a fresh section.
 - [x] Retention pruning, account deletion, checksum-protected JSON backup export/import
 
 ## Phase H — notifications
-- [x] Preferences (in-app/webhook/email-relay) + dispatcher w/ retry
+- [x] Preferences (in-app/webhook/email) + dispatcher w/ retry
 
 ## Phase I — deployment readiness
 - [x] Optional TLS termination, HSTS, startup validation, `docs/DEPLOYMENT.md`
@@ -172,3 +172,13 @@ work should be added as a fresh section.
 - [x] The Responses API's convenience `output_text` is read when `output` is absent
 - [x] **Test** names the first model the key lists instead of reporting "Connected · auto", and a viewer's provider row carries the chat ids so the per-bot picker is not empty
 - [x] Tests (`tests/ai-protocols.test.js`, `tests/ai-providers.test.js`, `tests/ai-presets.test.js`); check, test and build:pages green
+
+## Phase X — an email channel that needs no relay
+- [x] SMTP client on `node:net`/`node:tls` (`src/mail.js`): greeting, `EHLO`, `STARTTLS`, `AUTH PLAIN`/`LOGIN`, `MAIL FROM`/`RCPT TO`/`DATA`/`QUIT`, idle timeout
+- [x] `STARTTLS` is required by default: a server that does not offer it fails the send before `AUTH`, so no password goes out in cleartext. `SMTP_REQUIRE_TLS=0` is the explicit opt-out for a relay on your own network
+- [x] Implicit TLS on submission port 465 (`SMTP_SECURE=1`); certificates are always verified, with no knob to turn that off
+- [x] One recipient per message, a header value can never contain a line break, non-ASCII text becomes folded RFC 2047 words, and the base64 body keeps CRLF endings
+- [x] `SMTP_HOST` wins when both it and `EMAIL_RELAY_URL` are set; with neither, delivery still throws so the queue retries instead of claiming the mail left
+- [x] A failure carries the server's own reply code, and redacts the password, the user and the recipient from the message that reaches the notification feed
+- [x] Docs: `.env.example`, `docs/DEPLOYMENT.md`, `docs/ROADMAP.md`, `SECURITY.md`
+- [x] Tests (`tests/smtp.test.js` against a scripted loopback server, plus the relay/SMTP precedence case in `tests/notifications.test.js`); check and test green

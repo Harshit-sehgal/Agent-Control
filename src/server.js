@@ -16,6 +16,7 @@ import {startScheduler,startRetention} from './scheduler.js';
 import {markInterrupted} from './coordination.js';
 import {createQueue,recoverQueue} from './queue.js';
 import {taskHandlers,createNotifier} from './handlers.js';
+import {smtpConfig} from './mail.js';
 import {Auth} from './auth.js';
 import {openWorkspaces} from './workspaces.js';
 import {createPush} from './push.js';
@@ -178,6 +179,14 @@ function preflight(){
   if(HSTS_ENABLED&&!origin.startsWith('https://'))console.warn('config: HSTS is on but PUBLIC_ORIGIN is not https. Only enable it behind TLS termination.');
   if(!process.env.DASHBOARD_PASSWORD)console.warn('config: no DASHBOARD_PASSWORD set. A random password is printed each boot; set one for a stable login.');
   if(HOST!=='127.0.0.1'&&HOST!=='localhost'&&!origin.startsWith('https://'))console.warn('config: binding to '+HOST+' without HTTPS. Put TLS in front (reverse proxy).');
+  // A mailbox typo should surface at boot, not on the first reminder: an
+  // impossible value throws here, and a risky one is only warned about.
+  const mail=smtpConfig();
+  if(mail){
+    if(!mail.requireTls&&!mail.secure)console.warn('config: SMTP_REQUIRE_TLS=0, so mail may be submitted in cleartext. Only do that for a relay on your own network.');
+    if(!mail.from)console.warn('config: SMTP_HOST is set without SMTP_FROM or SMTP_USER, so there is no sender address.');
+    if(mail.user&&!mail.pass)console.warn('config: SMTP_USER is set without SMTP_PASS; AUTH will fail.');
+  }
 }
 preflight();
 server.listen(PORT,HOST,()=>{

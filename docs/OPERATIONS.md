@@ -52,6 +52,29 @@ Probe it from a timer and alert on failure:
 Watch the process log for `config:` warnings (startup validation) and
 `Group execution:` errors from failed runs.
 
+## Email, without a gateway
+
+The email notification channel submits over SMTP when `SMTP_HOST` is set
+(`src/mail.js`; the settings are listed in
+[`DEPLOYMENT.md`](DEPLOYMENT.md)). `STARTTLS` is required by default, so a
+server that does not offer it fails the send rather than accepting a password
+in cleartext. Check a mailbox without waiting for a notification:
+
+```bash
+cd /path/to/agent_control
+SMTP_HOST=smtp.example.com SMTP_USER=agent@example.com SMTP_PASS=… \
+SMTP_FROM='Agent Control <agent@example.com>' node --input-type=module -e '
+  import {smtpConfig, sendMail} from "./src/mail.js";
+  console.log(await sendMail({to: "you@example.com", subject: "SMTP check", text: "It works."}, smtpConfig()));
+'
+```
+
+`{sent:true}` means the server accepted the message. A throw carries the
+server's reply code (`SMTP RCPT TO failed: 550 …`), which is the same text the
+queue logs and retries on. The recipient address in the notification feed is
+redacted from that message. `EMAIL_RELAY_URL` still works for an HTTPS gateway
+and is ignored when `SMTP_HOST` is set.
+
 ## Backup & restore — proven drill
 
 Backups are a single JSON document (workflow + relational surfaces; **credential

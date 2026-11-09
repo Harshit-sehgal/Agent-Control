@@ -108,12 +108,17 @@ test('deliver() resolves the webhook URL from the encrypted credential and rejec
   // No EMAIL_RELAY_URL: delivery must fail loudly rather than let the queue
   // mark the notification "sent".
   const previousRelay = process.env.EMAIL_RELAY_URL;
+  const previousSmtpHost = process.env.SMTP_HOST;
   delete process.env.EMAIL_RELAY_URL;
+  // A developer's real .env may point at a mailbox; this test is about the
+  // case where nothing at all is configured.
+  delete process.env.SMTP_HOST;
   try {
     await assert.rejects(notifications.deliver(store, {payload: {channel: 'email', target: 'ops@example.com', title: 't', body: 'b'}}), /external relay/i);
   } finally {
     if (previousRelay === undefined) delete process.env.EMAIL_RELAY_URL;
     else process.env.EMAIL_RELAY_URL = previousRelay;
+    if (previousSmtpHost !== undefined) process.env.SMTP_HOST = previousSmtpHost;
   }
   // Unknown channels fail.
   await assert.rejects(notifications.deliver(store, {payload: {channel: 'carrier-pigeon', target: 'x', title: 't', body: 'b'}}), /Unknown notification channel/);
@@ -212,6 +217,27 @@ test('a configured email relay receives the notification and a failure still thr
       assert.doesNotMatch(error.message, /93\.184\.216\.34/);
       return true;
     });
+
+    // A mailbox wins when both are configured: the relay must not also send.
+    // The port is closed, so the attempt fails at connect — which is the proof
+    // that SMTP was chosen instead of the relay that is still reachable.
+    const closedPort = await new Promise(resolve => {
+      const probe = http.createServer().listen(0, '127.0.0.1', () => {
+        const port = probe.address().port;
+        probe.close(() => resolve(port));
+      });
+    });
+    const beforeSmtp = requests.length;
+    process.env.SMTP_HOST = '127.0.0.1';
+    process.env.SMTP_PORT = String(closedPort);
+    process.env.SMTP_REQUIRE_TLS = '0';
+    process.env.SMTP_FROM = 'bot@example.com';
+    try {
+      await assert.rejects(notifications.deliver(store, task({})), /Email delivery failed/);
+      assert.equal(requests.length, beforeSmtp, 'The relay is not used when a mailbox is configured.');
+    } finally {
+      for (const key of ['SMTP_HOST', 'SMTP_PORT', 'SMTP_REQUIRE_TLS', 'SMTP_FROM']) delete process.env[key];
+    }
   } finally {
     globalThis.fetch = previousFetch;
     restoreEnv();
