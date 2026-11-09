@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {buildPayload, retryDelay, migrateSchedules, enqueueTask, completeTask, failTask} from '../shared/tasks.js';
+import {buildPayload, retryDelay, migrateSchedules, enqueueTask, completeTask, failTask, claimTasks} from '../shared/tasks.js';
 import {initialState} from '../shared/core.js';
 
 test('a task kind rejects requests missing the field it actually needs', () => {
@@ -65,4 +65,30 @@ test('completing or failing a cancelled task does not requeue it', () => {
   assert.equal(failTask(state, task.id, 'A group run is already active.').status, 'cancelled');
   assert.equal(task.status, 'cancelled');
   assert.equal(task.runAt, runAt);
+});
+
+test('an inherited object key is not a task kind', () => {
+  // `PAYLOAD_KINDS[kind]` on a prototype key returned a function, so validation
+  // was skipped and the row reached the floor, where `Object` "completed" it.
+  for (const kind of ['constructor', 'toString', 'valueOf', '__proto__', 'hasOwnProperty']) {
+    assert.throws(() => buildPayload(kind, {message: 'x'}), error => error.status === 400 && /Unknown task kind/.test(error.message), kind);
+  }
+});
+
+test('an explicit lease window is the one that gets stored', () => {
+  const one = () => {
+    const state = {tasks: [], events: []};
+    enqueueTask(state, {kind: 'group-run', payload: {groupId: 'g', message: 'm'}, runAt: new Date().toISOString()});
+    return state;
+  };
+  const now = Date.now();
+  const asked = one();
+  // The old default (`leaseTTL = 60000`) then overwrote the caller's 1500 ms with
+  // the defaulted `leaseMs`: one wrong 60 s window before the heartbeat fixed it.
+  claimTasks(asked, {workerId: 'w', now, leaseTTL: 1500});
+  assert.equal(Date.parse(asked.tasks[0].leaseUntil) - now, 1500);
+  // Asked for nothing at all, the lease is the documented minute.
+  const quiet = one();
+  claimTasks(quiet, {workerId: 'w', now});
+  assert.equal(quiet.tasks[0].leaseUntil, new Date(now + 60000).toISOString());
 });

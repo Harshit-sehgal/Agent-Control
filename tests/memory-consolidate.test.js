@@ -73,3 +73,38 @@ test('a book that is not due is never touched, queued or not', async () => {
   assert.equal(touched, 0);
   assert.equal(await consolidateModel(store, {key: '', config, executor: answer}).catch(error => error.status), 400);
 });
+
+test('a rule learned during the model call is not wiped by the answer to the last one', async () => {
+  const store = bookStore();
+  store.state.memory.rulebooks.k.pending = ['Always cite the source.'];
+  const {result} = await quietly(() => consolidateModel(store, {
+    key: 'k', config,
+    // A person keeps talking while the model thinks; `noteTurn` is deliberately
+    // not locked out, so this sentence was never sent to the model.
+    executor: async () => {
+      store.state.memory.rulebooks.k.pending.push('Never use exclamation marks.');
+      store.state.memory.rulebooks.k.turns += 1;
+      return '{"rules": ["Always cite the source."], "summary": "Short replies."}';
+    },
+  }));
+  assert.equal(result.skipped, false);
+  // The sent instruction became a rule and left the queue; the one that arrived
+  // during the call must still be pending, or it is silently forgotten.
+  assert.deepEqual(store.state.memory.rulebooks.k.pending, ['Never use exclamation marks.']);
+  assert.equal(store.state.memory.rulebooks.k.consolidatedTurns, 9, 'only the turns that were read count as consolidated');
+  assert.equal(store.state.memory.rulebooks.k.turns, 10);
+});
+
+test('a pass that reads nothing usable says so instead of vanishing', async () => {
+  const store = bookStore();
+  const original = console.warn;
+  const warned = [];
+  console.warn = (...args) => warned.push(args.join(' '));
+  try {
+    const out = await maybeConsolidate(store, {key: 'k', config, executor: async () => 'I could not do that.'});
+    assert.equal(out.skipped, true);
+    // The caller is fire-and-forget, so this line is the only trace a provider
+    // whose JSON never parses leaves; without it the pass is invisible forever.
+    assert.match(warned.join('\n'), /Memory consolidation skipped: The model returned no usable memory update\./);
+  } finally { console.warn = original; }
+});

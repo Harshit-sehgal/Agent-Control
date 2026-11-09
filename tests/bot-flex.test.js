@@ -634,3 +634,13 @@ test('a person cannot grow a group past the bot limit or reuse a name',()=>{
   const added=wf.addBot(s,'g',{name:'C',instructions:'Do c'});
   assert.equal(added.name,'C');
 });
+
+test('a count setting refuses a boolean or an array, whatever Number() makes of it', () => {
+  const state = {groups: [{id: 'g', name: 'G', bots: [{id: 'b', name: 'Bot', instructions: 'Act as a bot', settings: {}}]}], events: []};
+  // `Number(true)` is 1 and `Number([3])` is 3, so these reached the stored
+  // settings as counts: a body with `maxSteps: true` became a one-step run.
+  for (const bad of [true, false, [3], [], null]) {
+    assert.throws(() => wf.updateBot(state, 'g', 'b', {settings: {contextMessages: bad}}), error => error.status === 400 && /whole number/.test(error.message), JSON.stringify(bad));
+  }
+  assert.equal(wf.updateBot(state, 'g', 'b', {settings: {contextMessages: '4'}}).settings.contextMessages, 4, 'a numeric string is still a count');
+});

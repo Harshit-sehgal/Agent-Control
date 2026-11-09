@@ -383,3 +383,35 @@ test('the capture token can be replaced without wiping the workspace', () => {
   // point of this is that a lost token is not a lost workspace.
   assert.equal(s.candidates.length, store().candidates.length);
 });
+
+test('a post with a draft waiting on a person is not processed into a second one', () => {
+  const s = store();
+  const c = addCandidate(s, {url: 'https://x.com/someone/status/9', text: 'A candidate with enough text to draft.'}).candidate;
+  beginProcessing(s, c.id);
+  finishProcessing(s, c.id, {score: 50}, {text: 'first draft', mode: 'template', note: 'n'});
+  // `finishProcessing` unshifts, so a second pass left two drafts for one post and
+  // approving either one stranded the other in the queue forever.
+  assert.throws(() => beginProcessing(s, c.id), error => error.status === 409 && /already has a draft waiting/.test(error.message));
+  assert.equal(s.drafts.filter(d => d.candidateId === c.id).length, 1);
+  // Once the draft is decided, a new pass is allowed again.
+  draftAction(s, s.drafts[0].id, 'reject');
+  assert.equal(beginProcessing(s, c.id).candidate.status, 'processing');
+});
+
+test('a demo reset takes the demo evidence with it', () => {
+  const s = store();
+  seedDemo(s, [{url: 'https://example.com/demo', text: 'demo candidate text here', author: 'Demo', topic: 'AI'}]);
+  const demo = s.candidates[0];
+  finishProcessing(s, demo.id, {score: 10}, {text: 'demo draft', mode: 'template', note: 'n'});
+  assert.ok(s.evidence.some(e => e.candidateId === demo.id));
+  // Reset twice: the old reset only dropped candidates and drafts, so each cycle
+  // left another orphaned evidence row behind, forever.
+  for (let i = 0; i < 2; i++) {
+    resetDemo(s);
+    assert.deepEqual(s.evidence.filter(e => e.candidateId === demo.id), []);
+    seedDemo(s, [{url: 'https://example.com/demo', text: 'demo candidate text here', author: 'Demo', topic: 'AI'}]);
+    finishProcessing(s, s.candidates.find(c => c.demo).id, {score: 10}, {text: 'demo draft', mode: 'template', note: 'n'});
+  }
+  resetDemo(s);
+  assert.equal(s.evidence.length, 0, 'nothing is left pointing at a candidate that is gone');
+});

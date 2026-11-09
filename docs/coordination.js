@@ -2,12 +2,12 @@
  * LLM output may only extend a run's recipients through `handoffTargets`, which
  * revalidates every target against this policy and the step cap.
  */
-import {botSettings,groupSettings,pipelineOf,MAX_STEPS_LIMIT} from './bot-settings.js?v=3dfd17aba5';
-import {BROWSER_PERMISSION,BROWSER_TOOL_HINT} from './bot-browser.js?v=3dfd17aba5';
-import {SUBAGENT_PERMISSION,SUBAGENT_TOOL_HINT} from './subagents.js?v=3dfd17aba5';
-import {BOT_ASK_PERMISSION,BOT_ASK_TOOL_HINT} from './bot-link.js?v=3dfd17aba5';
-import {BOT_CREATE_PERMISSION,BOT_CREATE_TOOL_HINT} from './bot-create.js?v=3dfd17aba5';
-import {memoryBlock} from './memory.js?v=3dfd17aba5';
+import {botSettings,groupSettings,pipelineOf,MAX_STEPS_LIMIT} from './bot-settings.js?v=66c6785991';
+import {BROWSER_PERMISSION,BROWSER_TOOL_HINT} from './bot-browser.js?v=66c6785991';
+import {SUBAGENT_PERMISSION,SUBAGENT_TOOL_HINT} from './subagents.js?v=66c6785991';
+import {BOT_ASK_PERMISSION,BOT_ASK_TOOL_HINT} from './bot-link.js?v=66c6785991';
+import {BOT_CREATE_PERMISSION,BOT_CREATE_TOOL_HINT} from './bot-create.js?v=66c6785991';
+import {memoryBlock} from './memory.js?v=66c6785991';
 
 /** The default step count of a run; a group may set its own up to MAX_STEPS_LIMIT. */
 export const MAX_HANDOFFS = 6;
@@ -171,7 +171,6 @@ export function instructLead(group, message, directBotId, guests = []) {
   if (/(^|\s)@everyone\b/i.test(text) || mentionedBots(heardBots(group, guests), text).length) return idle;
   const task = planTracked(group, message);
   if (!task.matched) return idle;
-  if (!task.botIds.length) return {...idle, task, empty: true};
   const woke = [];
   for (const id of task.botIds) {
     const bot = group.bots.find(b => b.id === id);

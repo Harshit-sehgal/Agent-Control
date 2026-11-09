@@ -89,3 +89,13 @@ test('retention still refuses a typo and 0 disables pruning', () => {
   assert.deepEqual(report, {events: 0, doneTasks: 0, runs: 0, dryRun: false});
   assert.equal(state.groupRuns.length, 1);
 });
+
+test('a null retention body is the defaults, not a 500 that poisons the store', () => {
+  // `PATCH /api/settings {retention: null}` used to reach `Number(body[key])` on
+  // a null, throw a TypeError with no status (a 500), and still store the null,
+  // after which every preview and prune threw the same way.
+  for (const body of [null, undefined, '', 7, [], 'nope']) {
+    assert.deepEqual(normalizeRetention(body), policy, String(body));
+  }
+  assert.deepEqual(normalizeRetention({runs: null, events: '', doneTasks: 0}), {events: 90, doneTasks: 0, runs: 30});
+});

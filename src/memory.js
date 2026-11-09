@@ -79,6 +79,7 @@ export async function consolidateModel(store, {key, config, chatKey = '', label 
     const book = rulebook(state, id, {label: label || modelLabel(config)});
     const chatEntry = chatKey ? state.memory?.chats?.[chatKey] : null;
     const messages = chatKey ? conversationMessages(state, chatKey) : [];
+    const sentPending = [...(book.pending || [])], sentTurns = Number(book.turns || 0);
     const input = consolidationInput({book, messages, chatSummary: chatEntry?.summary || ''});
     const call = executor || ((instructions, body, cfg) => complete({instructions, input: body, maxTokens: 1600, config: cfg}));
     const raw = await call(consolidationInstructions(), input, config);
@@ -94,7 +95,7 @@ export async function consolidateModel(store, {key, config, chatKey = '', label 
       });
       return {book: stamped, skipped: true, reason: 'The model returned no usable memory update.'};
     }
-    const updated = await store.update(current => mergeConsolidation(current, id, parsed, {now, label: label || modelLabel(config), chatKey: chatKey || null}));
+    const updated = await store.update(current => mergeConsolidation(current, id, parsed, {now, label: label || modelLabel(config), chatKey: chatKey || null, sentPending, sentTurns}));
     return {book: updated, skipped: false};
   } finally {
     running.delete(id);
@@ -116,7 +117,12 @@ export async function maybeConsolidate(store, {key, config, chatKey = '', label 
     const state = store.read();
     const book = state.memory?.rulebooks?.[cleanText(key, 200)];
     if (!consolidationDue(book, now)) return null;
-    return await tracked();
+    const out = await tracked();
+    // The caller is fire-and-forget, so the only place "the model answered with
+    // nothing I can read" can be seen is here. Without it a provider whose JSON
+    // never parses is skipped silently on every pass, forever.
+    if (out?.skipped && out.reason) console.warn('Memory consolidation skipped:', out.reason);
+    return out;
   } catch (error) {
     if (error?.status !== 503) console.error('Memory consolidation failed:', error.message);
     return null;

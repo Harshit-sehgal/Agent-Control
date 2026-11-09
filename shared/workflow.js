@@ -141,6 +141,10 @@ export function seedDemo(state, sample = []) {
 export function beginProcessing(state, id) {
   const c = findCandidate(state, id);
   if (c.status === 'processing') fail('Candidate already processing.', 409);
+  // Processing a post that already has a draft waiting on a person is the same
+  // work twice: `finishProcessing` unshifts, so the queue showed two identical
+  // drafts for one post and approving either left the other behind.
+  if ((state.drafts || []).some(d => d.candidateId === id && d.status === 'pending')) fail('That post already has a draft waiting on you.', 409);
   c.status = 'processing';
   return {candidate: structuredClone(c), settings: structuredClone(state.settings)};
 }
@@ -490,6 +494,9 @@ export function removeCandidate(state, id) {
 export function resetDemo(state) {
   state.candidates = state.candidates.filter(x => !x.demo);
   state.drafts = state.drafts.filter(x => state.candidates.some(c => c.id === x.candidateId));
+  // Evidence belongs to a candidate, so a reset that keeps candidates must drop
+  // the rows whose candidate is gone, or every seed/reset cycle leaves orphans.
+  state.evidence = (state.evidence || []).filter(e => state.candidates.some(c => c.id === e.candidateId));
   activity(state, 'demo', 'Removed demo candidates and drafts.');
   return {ok: true};
 }

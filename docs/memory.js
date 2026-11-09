@@ -14,7 +14,7 @@
  * survives even with no AI provider. `mergeConsolidation` applies the result of
  * one model-written consolidation pass. Both are pure and bounded.
  */
-import {cleanText} from './core.js?v=3dfd17aba5';
+import {cleanText} from './core.js?v=66c6785991';
 
 export const MEMORY_VERSION = 1;
 export const MAX_RULES = 50;
@@ -378,7 +378,7 @@ export function parseConsolidation(text) {
 
 /** Apply one consolidation result to a model book. Existing rule ids are kept
  * for rules that survive, so a UI row does not jump on every pass. */
-export function mergeConsolidation(state, key, result, {now = new Date().toISOString(), makeId = () => crypto.randomUUID(), label = '', chatKey = null} = {}) {
+export function mergeConsolidation(state, key, result, {now = new Date().toISOString(), makeId = () => crypto.randomUUID(), label = '', chatKey = null, sentPending = null, sentTurns} = {}) {
   const book = rulebook(state, key, {label});
   if (!result) return book;
   const existing = new Map(book.rules.map(rule => [normalize(rule.text), rule]));
@@ -391,8 +391,15 @@ export function mergeConsolidation(state, key, result, {now = new Date().toISOSt
   // model serves, so the two only meet when the pass had no chat at all.
   if (result.summary && chatKey) setChatSummary(state, chatKey, result.summary, {now});
   else if (result.summary) book.summary = cleanText(result.summary, MAX_MODEL_SUMMARY);
-  book.pending = [];
-  book.consolidatedTurns = book.turns;
+  // Clear only the instructions this pass actually sent. `noteTurn` is not
+  // locked out during the model call, so a sentence that arrived meanwhile has
+  // never been to the model: dropping it deleted the rule and marked its turn
+  // consolidated anyway.
+  if (Array.isArray(sentPending)) {
+    const sent = new Set(sentPending.map(normalize));
+    book.pending = book.pending.filter(rule => !sent.has(normalize(rule)));
+  } else book.pending = [];
+  book.consolidatedTurns = Number.isFinite(sentTurns) ? Math.min(sentTurns, book.turns) : book.turns;
   book.consolidatedAt = now;
   book.updatedAt = now;
   pruneMemory(state);

@@ -8,12 +8,16 @@
  * workflow document — they are bounded by the in-app feed cap in
  * src/notifications.js — so there is no retention knob for them here.)
  */
-import {activity} from './core.js?v=3dfd17aba5';
-import {BUSY_STATUSES} from './coordination.js?v=3dfd17aba5';
+import {activity} from './core.js?v=66c6785991';
+import {BUSY_STATUSES} from './coordination.js?v=66c6785991';
 
 export const RETENTION_DEFAULTS = {events: 90, doneTasks: 30, runs: 30};
 
-export function normalizeRetention(body = {}) {
+export function normalizeRetention(input = {}) {
+  // `PATCH /api/settings {retention: null}` reached `Number(body[key])` on a
+  // null and threw a TypeError with no status: a 500 that still stored the null,
+  // after which every preview and prune from then on threw the same way.
+  const body = input && typeof input === 'object' ? input : {};
   const out = {...RETENTION_DEFAULTS};
   for (const key of Object.keys(RETENTION_DEFAULTS)) {
     const value = Number(body[key]);

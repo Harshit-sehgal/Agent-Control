@@ -103,7 +103,11 @@ const REQUIRED_FIELDS = {
 
 /** Validate a task request and build the canonical payload for its kind. */
 export function buildPayload(kind, body = {}) {
-  const validate = PAYLOAD_KINDS[kind];
+  // `hasOwn`, not truthiness: `constructor`, `toString` and `valueOf` are
+  // functions on the prototype, so a bare lookup accepted them as kinds, skipped
+  // payload validation, and shipped the row to the floor where `Object` happily
+  // "completed" it.
+  const validate = Object.hasOwn(PAYLOAD_KINDS, kind) ? PAYLOAD_KINDS[kind] : null;
   if (!validate) fail(`Unknown task kind. Expected one of: ${taskKinds().join(', ')}.`);
   const payload = validate(body || {});
   if (REQUIRED_FIELDS[kind]) REQUIRED_FIELDS[kind](payload);
@@ -179,9 +183,11 @@ const taskTitle = (kind, payload) => ({
 
 /** Claim due tasks for execution. Leases are what make execution durable: a
  * crashed worker's task is visibly stale and can be re-claimed by anyone. */
-export function claimTasks(state, {workerId, now = Date.now(), leaseMs = 60000, limit = 5, leaseTTL = 60000} = {}) {
+export function claimTasks(state, {workerId, now = Date.now(), limit = 5, leaseMs = 60000, leaseTTL = leaseMs} = {}) {
   if (!workerId) fail('A worker id is required to claim tasks.', 500);
-  if (leaseMs !== leaseTTL) leaseTTL = leaseMs; // one lease window, one meaning
+  // One lease window, one meaning, and its length is the caller's: the old
+  // `leaseTTL = 60000` default then overwrote an explicit TTL with the defaulted
+  // `leaseMs`, so a queue configured for a 1.5 s lease got a 60 s first window.
   const claimed = [];
   for (const task of state.tasks) {
     if (claimed.length >= limit) break;

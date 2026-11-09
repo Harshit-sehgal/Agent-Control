@@ -13,7 +13,11 @@ import {BUSY_STATUSES} from './coordination.js';
 
 export const RETENTION_DEFAULTS = {events: 90, doneTasks: 30, runs: 30};
 
-export function normalizeRetention(body = {}) {
+export function normalizeRetention(input = {}) {
+  // `PATCH /api/settings {retention: null}` reached `Number(body[key])` on a
+  // null and threw a TypeError with no status: a 500 that still stored the null,
+  // after which every preview and prune from then on threw the same way.
+  const body = input && typeof input === 'object' ? input : {};
   const out = {...RETENTION_DEFAULTS};
   for (const key of Object.keys(RETENTION_DEFAULTS)) {
     const value = Number(body[key]);

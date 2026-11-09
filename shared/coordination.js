@@ -171,7 +171,6 @@ export function instructLead(group, message, directBotId, guests = []) {
   if (/(^|\s)@everyone\b/i.test(text) || mentionedBots(heardBots(group, guests), text).length) return idle;
   const task = planTracked(group, message);
   if (!task.matched) return idle;
-  if (!task.botIds.length) return {...idle, task, empty: true};
   const woke = [];
   for (const id of task.botIds) {
     const bot = group.bots.find(b => b.id === id);

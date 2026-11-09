@@ -8,17 +8,17 @@
  * Keeping transitions here is the single source of truth for the draft
  * lifecycle: candidate -> draft -> approved/scheduled -> ready -> posted.
  */
-import {activity,candidateInput,cleanText,scheduleApproval,scoreCandidate} from './core.js?v=3dfd17aba5';
-import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js?v=3dfd17aba5';
-import {evidenceSummary,evidenceForDraft,seedCandidateEvidence} from './evidence.js?v=3dfd17aba5';
-import {normalizeRetention} from './retention.js?v=3dfd17aba5';
-import * as contracts from './contracts.js?v=3dfd17aba5';
-import {pruneChats, releaseChatWork} from './chats.js?v=3dfd17aba5';
-import {denyBrowserRequest} from './bot-browser.js?v=3dfd17aba5';
-import {BUSY_STATUSES} from './coordination.js?v=3dfd17aba5';
-import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=3dfd17aba5';
-import {memoryState} from './memory.js?v=3dfd17aba5';
-import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=3dfd17aba5';
+import {activity,candidateInput,cleanText,scheduleApproval,scoreCandidate} from './core.js?v=66c6785991';
+import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js?v=66c6785991';
+import {evidenceSummary,evidenceForDraft,seedCandidateEvidence} from './evidence.js?v=66c6785991';
+import {normalizeRetention} from './retention.js?v=66c6785991';
+import * as contracts from './contracts.js?v=66c6785991';
+import {pruneChats, releaseChatWork} from './chats.js?v=66c6785991';
+import {denyBrowserRequest} from './bot-browser.js?v=66c6785991';
+import {BUSY_STATUSES} from './coordination.js?v=66c6785991';
+import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=66c6785991';
+import {memoryState} from './memory.js?v=66c6785991';
+import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=66c6785991';
 
 export const SCHEMA_VERSION = 3;
 /** Posts are never pruned by age, so their number is bounded here. */
@@ -141,6 +141,10 @@ export function seedDemo(state, sample = []) {
 export function beginProcessing(state, id) {
   const c = findCandidate(state, id);
   if (c.status === 'processing') fail('Candidate already processing.', 409);
+  // Processing a post that already has a draft waiting on a person is the same
+  // work twice: `finishProcessing` unshifts, so the queue showed two identical
+  // drafts for one post and approving either left the other behind.
+  if ((state.drafts || []).some(d => d.candidateId === id && d.status === 'pending')) fail('That post already has a draft waiting on you.', 409);
   c.status = 'processing';
   return {candidate: structuredClone(c), settings: structuredClone(state.settings)};
 }
@@ -490,6 +494,9 @@ export function removeCandidate(state, id) {
 export function resetDemo(state) {
   state.candidates = state.candidates.filter(x => !x.demo);
   state.drafts = state.drafts.filter(x => state.candidates.some(c => c.id === x.candidateId));
+  // Evidence belongs to a candidate, so a reset that keeps candidates must drop
+  // the rows whose candidate is gone, or every seed/reset cycle leaves orphans.
+  state.evidence = (state.evidence || []).filter(e => state.candidates.some(c => c.id === e.candidateId));
   activity(state, 'demo', 'Removed demo candidates and drafts.');
   return {ok: true};
 }

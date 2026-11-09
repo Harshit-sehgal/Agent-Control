@@ -11,7 +11,10 @@ export async function simulateGroup({group, message, directBotId=null, guests=[]
     // and repeat steps the trace says already ran. The server's continue route
     // refuses the same way.
     if (resume.status !== 'awaiting_checkpoint') throw Object.assign(new Error('Only a run paused at a checkpoint can be continued.'), {status: 409});
-    run = {...resume, status: 'running'};
+    // Deep: a resumed run pushes into `trace`/`recipients` while it works, and a
+    // shallow copy meant those pushes landed in the caller's object, which still
+    // claimed to be awaiting a checkpoint.
+    run = {...structuredClone(resume), status: 'running'};
     if (run.checkpointsEnabled == null) run.checkpointsEnabled = groupSettings(group).checkpoints === true;
     i = Number(resume.checkpoint?.nextStep) || 0;
     previous = resume.checkpoint?.previous || null;

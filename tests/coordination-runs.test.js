@@ -172,6 +172,11 @@ test('a run that is not paused at a checkpoint cannot be resumed', async () => {
   const done = await simulateGroup({group: group(), message: 'Coordinate these bots', state, api, makeId: () => 'm', emit: () => {}, resume: paused});
   assert.equal(done.status, 'completed', done.error || '');
   assert.equal(done.trace.length, 1);
+  // The resumed run works on its own copy. It used to push into the record it was
+  // handed, so `shared/local-runs.js` stored the caller's stale checkpoint state
+  // next to a trace that had already grown.
+  assert.equal(paused.trace.length, 0, 'the caller\'s record is not written through');
+  assert.equal(paused.status, 'awaiting_checkpoint');
 });
 
 test('the coordination refusals a person can cause answer 400 or 404, not 500', () => {
