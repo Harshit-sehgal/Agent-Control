@@ -3,13 +3,13 @@
  * model is configured and in the deterministic simulator otherwise. A custom bot
  * runs its own instructions on the server; everything else answers from the
  * offline command set. Nothing here can publish. */
-import {classifyMessage, statusSummary} from './chat-engine.js?v=165e836e5a';
-import {simulateGroup} from './group-simulator.js?v=165e836e5a';
-import {planHandoffs, leadShouldRunGroup, runNote, summonableGuests, BUSY_STATUSES} from './coordination.js?v=165e836e5a';
-import {feedPauseAction} from './ui-model.js?v=165e836e5a';
-import {botSettings, groupSettings} from './bot-settings.js?v=165e836e5a';
-import {store, api, sync, conversation, appendMessage, setTyping, isStaticDemo, teamKey, groups, recentRuns} from './ui-store.js?v=165e836e5a';
-import {claimLocalRun, renewLocalRun, finishLocalRun, localRunCancelled} from './local-runs.js?v=165e836e5a';
+import {classifyMessage, statusSummary} from './chat-engine.js?v=06d1ba940d';
+import {simulateGroup} from './group-simulator.js?v=06d1ba940d';
+import {planHandoffs, leadShouldRunGroup, runNote, summonableGuests, BUSY_STATUSES} from './coordination.js?v=06d1ba940d';
+import {feedPauseAction} from './ui-model.js?v=06d1ba940d';
+import {botSettings, groupSettings} from './bot-settings.js?v=06d1ba940d';
+import {store, api, sync, conversation, appendMessage, setTyping, isStaticDemo, teamKey, groups, recentRuns} from './ui-store.js?v=06d1ba940d';
+import {claimLocalRun, renewLocalRun, finishLocalRun, localRunCancelled} from './local-runs.js?v=06d1ba940d';
 
 const TERMINAL = ['completed', 'failed', 'interrupted', 'awaiting_checkpoint', 'awaiting_plan', 'awaiting_feed', 'awaiting_browser', 'cancelled'];
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));

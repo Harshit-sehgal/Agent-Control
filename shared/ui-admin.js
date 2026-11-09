@@ -48,12 +48,30 @@ const PUSH_HELP = {
   off: 'Get reminders, failed tasks and alerts on this device, even when the app is closed.',
   on: 'This device gets reminders, failed tasks and alerts, even when the app is closed.',
 };
+/** The host of a push endpoint, and nothing else: the path is a capability URL,
+ * so it is only carried to the button that deletes it. */
+function endpointHost(endpoint) {
+  try { return new URL(endpoint).host; } catch { return 'a device this browser cannot read'; }
+}
+
+function deviceList(push) {
+  const endpoints = Array.isArray(push.endpoints) ? push.endpoints : [];
+  if (endpoints.length < 1) return '';
+  const rows = endpoints.map(endpoint => actionRow(
+    `${esc(endpointHost(endpoint))}${endpoint === push.mine ? ` ${tag('this device', 'good')}` : ''}`,
+    endpoint === push.mine ? 'Signed in here.' : 'Signed in somewhere else.',
+    btn('Remove', 'push-remove', {small: true, kind: 'danger', data: {endpoint}}),
+  )).join('');
+  return box(rows, `Devices, ${endpoints.length}`);
+}
+
 function pushPanel(push) {
   const buttons = push.state === 'on' ? btn('Send a test', 'push-test', {small: true}) + btn('Turn off', 'push-off', {small: true})
     : push.state === 'off' ? btn('Turn on', 'push-on', {kind: 'primary', small: true}) : '';
   const others = push.devices - (push.state === 'on' ? 1 : 0);
   return box(actionRow(`Push on this device ${tag(push.state === 'on' ? 'on' : 'off', push.state === 'on' ? 'good' : '')}`,
-    esc(PUSH_HELP[push.state] || 'Push status is unavailable in this browser.') + (others > 0 ? ` ${others} other device${others === 1 ? '' : 's'} of yours ${others === 1 ? 'is' : 'are'} subscribed.` : ''), buttons), 'Push');
+    esc(PUSH_HELP[push.state] || 'Push status is unavailable in this browser.') + (others > 0 ? ` ${others} other device${others === 1 ? '' : 's'} of yours ${others === 1 ? 'is' : 'are'} subscribed.` : ''), buttons), 'Push')
+    + deviceList(push);
 }
 
 function workspacesPanel(res) {
@@ -473,6 +491,15 @@ export const adminActions = {
   'push-off': async (button, ctx) => {
     await disablePush();
     toast('Push is off for this device.');
+    await ctx.reload();
+  },
+  'push-remove': async (button, ctx) => {
+    // A stale device cannot be reached to unsubscribe itself, so this is the
+    // only way to stop sending to it. The current device is allowed too: it is
+    // the same thing the Turn off button does, and refusing it here would read
+    // as a broken button.
+    await api('/api/push/subscriptions', 'DELETE', {endpoint: button.dataset.endpoint});
+    toast('That device will not be sent to again.');
     await ctx.reload();
   },
   'push-test': async () => {

@@ -1,7 +1,7 @@
 /** Push notifications on this device: what the browser allows, whether this
  * device is subscribed, and turning it on or off. The server keeps one
  * subscription per device and only ever sends to the signed-in account's own. */
-import {api} from './ui-store.js?v=165e836e5a';
+import {api} from './ui-store.js?v=06d1ba940d';
 
 const supported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 const keyBytes = text => {
@@ -26,17 +26,22 @@ const current = async () => {
   } catch { return null; }
 };
 
-/** @returns {{state: 'unsupported'|'insecure'|'blocked'|'off'|'on', devices: number}} */
+/** @returns {{state: 'unsupported'|'insecure'|'blocked'|'off'|'on', devices: number, endpoints: string[], mine: string}} */
 export async function pushStatus() {
-  if (!window.isSecureContext) return {state: 'insecure', devices: 0};
-  if (!supported()) return {state: 'unsupported', devices: 0};
-  const [server, mine] = await Promise.all([api('/api/push'), current()]);
+  if (!window.isSecureContext) return {state: 'insecure', devices: 0, endpoints: [], mine: ''};
+  if (!supported()) return {state: 'unsupported', devices: 0, endpoints: [], mine: ''};
+  const [server, local] = await Promise.all([api('/api/push'), current()]);
   // A reply without the endpoint list means "no devices", not a crash that
   // blanks the Notifications page it was loading for.
   const endpoints = Array.isArray(server?.endpoints) ? server.endpoints : [];
   const devices = endpoints.length;
-  if (Notification.permission === 'denied') return {state: 'blocked', devices};
-  return {state: mine && endpoints.includes(mine.endpoint) ? 'on' : 'off', devices};
+  // `endpoints` is the server's list, one push URL per device this account has
+  // registered. The page shows them so a phone that was lost, or a browser
+  // somebody stopped using, can be dropped without turning push off here first:
+  // the only way to remove a stale device used to be to sign in on it.
+  const mine = local && endpoints.includes(local.endpoint) ? local.endpoint : '';
+  if (Notification.permission === 'denied') return {state: 'blocked', devices, endpoints, mine};
+  return {state: mine ? 'on' : 'off', devices, endpoints, mine};
 }
 
 /** Ask for permission, subscribe this browser and register it with the server. */

@@ -116,7 +116,7 @@ test('a push status reply with no endpoint list reads as no devices', async () =
   const {pushStatus} = await import('../shared/ui-push.js');
   // `server.endpoints.length` on a reply without the list threw and blanked the
   // whole Notifications page it was loading for.
-  assert.deepEqual(await pushStatus(), {state: 'off', devices: 0});
+  assert.deepEqual(await pushStatus(), {state: 'off', devices: 0, endpoints: [], mine: ''});
 });
 
 // ---- markup, guards and CSS that only a browser would notice -----------------
