@@ -97,8 +97,11 @@ test('custom bots run through the Node provider only on the server build',()=>{
 test('bot profiles never mirror name/instructions into browser-local UI state',()=>{
   // `profile()` spreads the cosmetic UI record over the bot, so a name/instructions
   // copy there would shadow the server value permanently and edits made on another
-  // device could never appear.
-  assert.match(app,/delete store\.profiles\[id\]\.name; delete store\.profiles\[id\]\.instructions/);
+  // device could never appear. The strip is behaviourally covered by
+  // tests/usability.test.js ('legacy profile fields cannot shadow the server value').
+  assert.match(app,/for \(const legacy of \['name', 'instructions'\]\)[\s\S]*?delete entry\[legacy\]/);
+  // And it must land on disk, or the same stale fields return on every load.
+  assert.match(app,/if \(cleanProfiles\(store\.profiles\)\) saveLocal\(META_KEY, store\.profiles\)/);
   // Nothing may write name/instructions into the local profile record.
   for (const call of app.match(/setProfile\([^;]*\);/g)||[]) assert.doesNotMatch(call,/\b(name|instructions)\b/,`setProfile must stay cosmetic: ${call}`);
   // Saving a profile must round-trip through the API, not only localStorage.

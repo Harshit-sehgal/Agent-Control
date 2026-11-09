@@ -1,16 +1,16 @@
 /** What the UI can do, as three lookup tables keyed by `data-action`, form id and
  * control id. app.js owns the DOM events and dispatches here; handlers throw on
  * failure and the dispatcher turns that into one toast. */
-import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, setPref, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns, patchLocalRun, appendMessage} from './ui-store.js?v=e5bbe2496b';
-import {botSettings, groupSettings} from './bot-settings.js?v=e5bbe2496b';
-import {completeMention, moveRow, pipelineValue} from './ui-model.js?v=e5bbe2496b';
-import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=e5bbe2496b';
-import {sendChat, streamGroupRun, watchQueuedRun, continueDemoPlan} from './ui-chat.js?v=e5bbe2496b';
-import {confetti, whoosh, react, poke} from './ui-fx.js?v=e5bbe2496b';
-import {renderList, renderMentions} from './ui-views.js?v=e5bbe2496b';
-import {refreshLists, reloadAdminPage, pipelineList} from './ui-panel.js?v=e5bbe2496b';
-import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, botTaskSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=e5bbe2496b';
-import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=e5bbe2496b';
+import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, setPref, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns, patchLocalRun, appendMessage} from './ui-store.js?v=c011d81ee9';
+import {botSettings, groupSettings} from './bot-settings.js?v=c011d81ee9';
+import {completeMention, moveRow, pipelineValue} from './ui-model.js?v=c011d81ee9';
+import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=c011d81ee9';
+import {sendChat, streamGroupRun, watchQueuedRun, continueDemoPlan} from './ui-chat.js?v=c011d81ee9';
+import {confetti, whoosh, react, poke} from './ui-fx.js?v=c011d81ee9';
+import {renderList, renderMentions} from './ui-views.js?v=c011d81ee9';
+import {refreshLists, reloadAdminPage, pipelineList} from './ui-panel.js?v=c011d81ee9';
+import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, botTaskSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=c011d81ee9';
+import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=c011d81ee9';
 
 const adminCtx = {reload: reloadAdminPage};
 const chatId = () => store.route.chat;
@@ -114,6 +114,26 @@ export const actions = {
   },
   'copy-capture-token': () => copyText(store.state.captureToken || '', 'Capture token copied'),
   'copy-bot-instructions': b => copyText(findBot(b.dataset.id).instructions || '', 'Instructions copied'),
+
+  // memory: per-model rulebook and per-chat recap
+  'update-memory': async b => {
+    if (isStaticDemo()) { toast('Updating memory needs the Node build and an AI provider.'); return; }
+    const bot = findBot(b.dataset.id);
+    const result = await api('/api/memory/consolidate', 'POST', {botId: bot.id, chat: b.dataset.chat || bot.id});
+    await sync();
+    toast(result.skipped ? 'Memory is already up to date.' : 'Memory updated.');
+  },
+  'forget-rule': async b => {
+    await api(`/api/memory/rules/${encodeURIComponent(b.dataset.rule)}?model=${encodeURIComponent(b.dataset.model)}`, 'DELETE');
+    await sync();
+    toast('Rule forgotten.');
+  },
+  'forget-chat-memory': async b => {
+    if (!await confirmSheet('Forget this chat for the model?', {confirm: 'Forget', danger: true, detail: 'The recap goes. Messages stay in the conversation.'})) return;
+    await api('/api/memory/forget', 'POST', {chat: b.dataset.chat});
+    await sync();
+    toast('Chat memory forgotten.');
+  },
 
   // posts and drafts
   'load-samples': async () => { closeSheet(); const r = await api('/api/demo/seed', 'POST', {}); toast(`Loaded ${r.added} sample post(s).`); await sync(); },

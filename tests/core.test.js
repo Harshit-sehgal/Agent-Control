@@ -66,7 +66,7 @@ test('core fails fast with an actionable message when Web Crypto is missing',asy
   // "crypto is not defined" inside initialState. The guard must name the fix.
   const source=await readFile(path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))),'shared','core.js'),'utf8');
   assert.match(source,/typeof crypto === 'undefined'/);
-  assert.match(source,/requires Node\.js 22\+/);
+  assert.match(source,/requires Node\.js 22\.5\+/);
 });
 test('the demo fixtures live in one place and both backends load them',async()=>{
   // The Node /api/demo/seed route used to restate the samples inline, so an edit

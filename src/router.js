@@ -9,6 +9,14 @@
  *
  * A handler receives one context object and returns the JSON to send (status
  * 200), or `reply(status, body, headers)` for anything else.
+ *
+ * `options` carries route-specific behaviour that the dispatcher in server.js
+ * would otherwise have to know by pattern:
+ *
+ *   tracksWork  default true. A workspace counts requests that are inside its
+ *               `trackWork` wrapper, which a restore or a delete uses to wait
+ *               for them. A route that manages the whole workspace must run
+ *               outside that wrapper, or it would wait for itself.
  */
 import {ROLES} from './auth.js';
 
@@ -24,11 +32,11 @@ export const allows = (role, access) => ROLES.indexOf(role) >= ROLES.indexOf(acc
 export function createRouter() {
   const routes = [];
   /** `pattern` is a literal path; `:name` matches one id segment. */
-  function add(method, pattern, access, handler) {
+  function add(method, pattern, access, handler, options = {}) {
     if (!ACCESS.includes(access)) throw new Error(`Unknown access "${access}" for ${method} ${pattern}.`);
     if (routes.some(r => r.method === method && r.pattern === pattern)) throw new Error(`Route ${method} ${pattern} is registered twice.`);
     const names = [...pattern.matchAll(PARAM)].map(m => m[1]);
-    routes.push({method, pattern, access, handler, names, regex: new RegExp(`^${pattern.replace(PARAM, '([a-z0-9-]+)')}$`)});
+    routes.push({method, pattern, access, handler, names, tracksWork: options.tracksWork !== false, regex: new RegExp(`^${pattern.replace(PARAM, '([a-z0-9-]+)')}$`)});
   }
   function find(method, path) {
     for (const route of routes) {

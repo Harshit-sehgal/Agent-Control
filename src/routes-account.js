@@ -110,6 +110,8 @@ export function accountRoutes(router, {auth, workspaces}) {
   // hash; other workspaces export only their own rows. Restore replaces the
   // current workspace database, so either one in an admin's hands is a way up.
   router.add('GET', '/api/admin/backup', 'owner', c => backup.exportBackup(c.store));
+  // Restore replaces this workspace's database, so it runs outside the work
+  // tracker: the tracker is what the restore waits for (`tracksWork: false`).
   router.add('POST', '/api/admin/restore', 'owner', async c => {
     // A backup document can be far larger than a normal request; allow up to 32 MB.
     const b = await c.body(32 * 1024 * 1024);
@@ -125,5 +127,5 @@ export function accountRoutes(router, {auth, workspaces}) {
     return c.actor.workspaceId === DEFAULT_WORKSPACE
       ? workspaces.withAllPaused(restore)
       : workspaces.withPaused(c.actor.workspaceId, restore);
-  });
+  }, {tracksWork: false});
 }

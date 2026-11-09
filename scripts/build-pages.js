@@ -12,6 +12,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
+import {ASSETS} from '../shared/assets.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const src = path.join(root, 'shared');
@@ -25,17 +26,10 @@ async function bundleVersion(names) {
 }
 
 // The demo cannot execute the Node coordinators, so it ships only the
-// browser-safe modules plus the pages and styles.
-const files = [
-  'index.html', 'app.css',
-  'transport.js', 'local-api.js', 'app.js',
-  'ui-kit.js', 'ui-model.js', 'ui-store.js', 'ui-dialogs.js', 'ui-chat.js', 'ui-views.js', 'ui-panel.js', 'ui-sheets.js', 'ui-admin.js', 'ui-actions.js', 'ui-fx.js', 'ui-push.js', 'sw.js',
-  'core.js', 'workflow.js', 'tasks.js', 'evidence.js', 'contracts.js', 'bot-settings.js', 'bot-browser.js', 'subagents.js', 'retention.js',
-  'coordination.js', 'chats.js', 'group-simulator.js',
-  'chat-engine.js', 'usability.js', 'demo-feed.html',
-  'local-runs.js',
-  'manifest.webmanifest', 'icon-192.png', 'icon-512.png',
-];
+// browser-safe modules plus the pages and styles. That list is shared with the
+// Node server (shared/assets.js), so a UI module cannot ship to one and be
+// missing from the other.
+const files = ASSETS;
 // Files that used to live in docs/ before the UI moved to shared/.
 const stale = ['polish.css', 'usability.css', 'demo-api.js', 'app.css.map', 'usability.mjs', 'coordination.mjs', 'group-simulator.mjs', 'chat-engine.mjs'];
 

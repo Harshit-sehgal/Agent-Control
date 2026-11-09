@@ -58,6 +58,39 @@ test('URLs are validated before being placed in an href', () => {
   assert.equal(validHttpUrl(esc('javascript:alert(1)')), null);
 });
 
+// The helper above is worth nothing if the views do not call it: esc('javascript:x')
+// is still javascript:x. So the test also reads the call sites.
+test('every untrusted URL in the views goes through validHttpUrl', () => {
+  const views = sources['ui-views.js'];
+  assert.match(views, /import \{[^}]*\bvalidHttpUrl\b[^}]*\} from '\.\/core\.js'/);
+  // The four sinks: a captured draft's url, an evidence link, the post a draft is
+  // about and the page a bot asked to open.
+  for (const sink of ['draft.url', 'e.link']) {
+    const match = new RegExp(`(\\w+) = validHttpUrl\\(${sink.replace('.', '\\.')}\\)`).exec(views);
+    assert.ok(match, `${sink} must be validated where it is read`);
+  }
+  for (const sink of ['post.url', 'request.url']) {
+    assert.ok(views.includes(`safeHref(${sink})`), `${sink} must be validated where it is used`);
+  }
+  // No href may be built from esc() alone: anything else either uses safeHref()
+  // inline or a local name that this test proves came from validHttpUrl().
+  const hrefs = [...views.matchAll(/href="\$\{([^}]+)\}?"/g)].map(m => m[1]).filter(Boolean);
+  assert.ok(hrefs.length >= 4, `expected the four URL sinks, found ${hrefs.length} hrefs`);
+  for (const expression of hrefs) {
+    if (expression.startsWith('esc(safeHref(')) continue;
+    const local = /^esc\((\w+)\)$/.exec(expression)?.[1];
+    assert.ok(local, `href built from ${expression}; use safeHref() or a validated local`);
+    assert.match(views, new RegExp(`\\b${local} = validHttpUrl\\(`), `${local} must come from validHttpUrl()`);
+  }
+});
+
+// An undefined url used to render an 'Open post' anchor with no href at all.
+test('a draft without a usable url renders no Open post link', () => {
+  const views = sources['ui-views.js'];
+  assert.ok(views.includes("postHref = validHttpUrl(draft.url)"), 'the draft url must be validated when the card is built');
+  assert.ok(views.includes('+ (postHref ? `<a class="btn quiet" href="${esc(postHref)}"'), 'the Open post link must only exist for a validated url');
+});
+
 // ---- static scan of every HTML-producing template ----------------------------------
 
 /** Walk JS source and return every template literal with its static text and the
@@ -121,7 +154,7 @@ function stripCalls(text, names) {
 // behaviorally in the next test, so an expression passed through them may name a
 // user-text property without its own esc(). `pageHead` escapes title and sub; its
 // `right` slot only ever receives iconBtn(...) markup.
-const ESCAPING_HELPERS = ['esc', 'btn', 'iconBtn', 'tag', 'empty', 'avatar', 'groupAvatar', 'pageHead'];
+const ESCAPING_HELPERS = ['esc', 'btn', 'iconBtn', 'tag', 'empty', 'avatar', 'groupAvatar', 'pageHead', 'textInput'];
 const USER_TEXT = /\??\.(text|instructions|name|author|description|message|topic|claim|label|title|email|error)\b(?!\s*:)/;
 // A property used only as a ternary / && condition is tested, not printed.
 const CONDITION = /[\w$.\]\[?]+?\s*(?:\?(?!\.)|&&)/g;
@@ -150,6 +183,7 @@ test('the escaping helpers neutralize hostile text in every slot they accept', (
     kit.pageHead(bad, {sub: bad}),
     kit.box('', bad),
     kit.field(bad, '', bad),
+    kit.textInput('name', {value: bad, placeholder: bad, 'aria-label': bad, required: true}),
   ];
   for (const html of markup) {
     // Blank every quoted attribute value and every text node: whatever is left

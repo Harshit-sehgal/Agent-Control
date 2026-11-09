@@ -32,12 +32,14 @@ export function workspaceRoutes(router, {auth, workspaces}) {
     return result;
   });
   // Deleting removes the workspace's database. The typed name is the check
-  // that the owner means this workspace and not the one in another tab.
+  // that the owner means this workspace and not the one in another tab. It runs
+  // outside the work tracker for the same reason as a restore: the delete waits
+  // for in-flight requests, so it must not count as one.
   router.add('DELETE', '/api/workspaces/current', 'owner', async c => {
     const b = await c.body();
     const current = mine(c.actor).find(w => w.current);
     if (String(b.confirm || '').trim() !== current.name) fail('Type the workspace name exactly to delete it.', 400);
     await workspaces.remove(c.actor.workspaceId, () => auth.deleteWorkspace(c.actor));
     return {ok: true};
-  });
+  }, {tracksWork: false});
 }

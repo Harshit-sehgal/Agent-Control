@@ -2,6 +2,113 @@
 
 ## Unreleased
 
+The JSON store is gone, one list decides what ships, and the app opens without
+a network.
+
+### Added
+- **One list of served files**: `shared/assets.js`. `scripts/build-pages.js` and
+  `src/server.js` both import it, so a module imported by `index.html` reaches
+  the Pages bundle and the Node server, or neither. `tests/assets.test.js`
+  walks the import closure against it.
+- **`npm run check` walks the tree**: `scripts/check.mjs` checks every `.js` and
+  `.mjs` file under `src/`, `shared/`, `agent/`, `extension/` and `scripts/`
+  (75 files) instead of a list kept by hand.
+- **An offline shell.** The service worker caches the app shell as it installs
+  and serves it when the server or the network is down; `/api/*` is never
+  cached. A notification tap opens the app on the screen that message is about.
+- **Per-account sign-in limit.** Sign-in and forgot password count attempts
+  against the named account as well as the client address, 8 per 15 minutes
+  each, so burning addresses does not buy unlimited guesses at one mailbox. A
+  request that names no account does not touch an account bucket.
+- **Unsaved admin typing survives the repaint** a click on the page triggers. A
+  reveal used to blur the credential field on another row and drop it.
+- **Five wire protocols for a provider.** A saved provider speaks
+  `openai-chat` (`POST {base}/chat/completions`, bearer token),
+  `openai-responses` (`POST {base}/responses`, bearer token), `anthropic`
+  (`POST {base}/messages` with `x-api-key` and `anthropic-version`), `gemini`
+  (`POST {base}/models/{model}:generateContent` with `x-goog-api-key` and
+  `systemInstruction`/`contents`/`generationConfig`) or `azure-openai` (`POST
+  {base}/openai/deployments/{deployment}/chat/completions?api-version=` with an
+  `api-key` header, no `model` in the body). The ids and the preset endpoints
+  live once in `shared/ai-presets.js`, so the server and the settings page
+  cannot disagree. Presets cover OpenAI, Anthropic (Claude), Google Gemini,
+  xAI, Groq, Mistral, DeepSeek, OpenRouter, Together, Fireworks, Perplexity,
+  Cerebras, Cohere, Qwen, Moonshot, Zhipu, DeepInfra, Hyperbolic, Nebius, NVIDIA
+  NIM, GitHub Models, Azure OpenAI, LiteLLM, Ollama, LM Studio, vLLM/llama.cpp,
+  LocalAI, Jan and a custom endpoint; the local ones ignore the key.
+- **A provider can carry custom headers and an Azure API version.** The form
+  takes headers as one `Name: value` per line, up to eight, sent with every
+  request and applied last (so a gateway may replace the auth header). Only the
+  header names are ever listed again; the values join the key in the encrypted
+  vault. Azure's version field falls back to `2024-10-21`, and the model id
+  there is the deployment name.
+- **`Test` proves a provider with one small call.** `POST
+  /api/ai/providers/:id/test` sends a 16-token request with the stored key and
+  reports the model and the round-trip time, so a wrong key or model shows up in
+  the settings page instead of in a later drafting failure.
+- **Saving a provider reads its own model catalogue** with the key just given
+  (`GET {base}/models`; Anthropic paging on `has_more`, Gemini on
+  `nextPageToken` with embedding-only models hidden; an Ollama `/v1` endpoint
+  without `/v1/models` falls back to `/api/tags`). Both the chat-capable ids and
+  the full list the key can see are stored, so a hidden model can still be typed
+  by hand. A failed read is stored as `modelsError` and shown next to the
+  provider without losing the save: a refresh keeps the last good list, and a
+  changed endpoint, key, header set or API version starts a fresh one. Anthropic,
+  Gemini and Azure need a concrete model id, so a fresh provider starts on the
+  first model the catalogue reported rather than `auto`.
+- **A provider can be edited, not only replaced.** `PATCH
+  /api/ai/providers/:id` renames it, re-points it, rotates the key without
+  deleting it — a blank key keeps the stored one — and changes its headers or
+  API version; any of those re-reads the catalogue. The vault ciphertext is
+  replaced in place and nothing secret is ever returned.
+- **Protocol and keys from the environment.** `AI_API_STYLE` accepts `chat`,
+  `responses`, `anthropic`, `gemini` and `azure` (aliases `messages`/`claude`,
+  `google`, `openai`/`compatible`), and infers the protocol from the host when
+  blank. With no base URL, `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` alone
+  point the app at Anthropic, `GEMINI_API_KEY`/`GOOGLE_GENAI_API_KEY` alone at
+  Gemini, and `AZURE_OPENAI_ENDPOINT` plus `AZURE_OPENAI_API_VERSION` reach
+  Azure; `AI_API_KEY` and `OPENAI_API_KEY` keep working.
+
+### Fixed
+- **A claimed batch keeps every lease alive.** One heartbeat renewed only the
+  task being run, so a batch behind a slow model call looked dead to the next
+  sweep and a waiting task could be executed twice. The heartbeat now renews
+  every claimed task until its own turn ends.
+- **A client cannot post under a run id.** A message whose id is already stored
+  is skipped, and only a trusted server write of a run it executed replaces one.
+  A client could otherwise reuse an id it was handed and swallow the bot's
+  reply (`tests/chats.test.js`).
+- **Behind `TRUST_PROXY=1` the client address is the rightmost
+  `X-Forwarded-For` hop**, the one the proxy wrote; the leftmost one a caller
+  invents no longer earns a fresh attempt bucket.
+- **The command palette is a combobox** (`aria-controls`,
+  `aria-activedescendant`, `aria-autocomplete="list"`), and an error toast is
+  announced assertively while the rest stay polite.
+- **Panes use `100dvh` and honour the notch and home-indicator insets**, text
+  fields are 16px so iOS stops zooming on focus, and the small controls are
+  44px on a coarse pointer.
+- **Every untrusted URL is validated before it reaches an `href`.** The four
+  sinks — a captured post's URL, an evidence link, the post a draft is about
+  and the page a bot asked to open — go through `validHttpUrl`, so a
+  `javascript:`, `data:` or credentialed URL never survives as a link, and a
+  draft whose URL does not validate renders no link at all.
+- Tests for the store's serialized `update()` path, the scheduler's ticks and
+  its boot-order retention sweep, and a task re-armed from a dead process while
+  a live lease is left alone.
+
+### Changed
+- **The JSON store is removed.** `src/store.js` and `STORE_BACKEND` are gone;
+  `src/server.js` opens the SQLite store directly. A `state.json` written by 0.6
+  is still imported once and left beside the database.
+- **`node:sqlite` needs `--experimental-sqlite` below Node 23.4.** `npm start`,
+  `dev`, `test`, `test:coverage`, `backup` and the Dockerfile `CMD` pass it, and
+  the server no longer re-execs itself to add it.
+- **A database written by a newer build is refused at boot**, with both schema
+  versions in the message, instead of being opened against columns this build
+  cannot write.
+
+## Unreleased — bots, settings and browser control
+
 Bots that work together, with settings you control.
 
 ### Added
@@ -31,6 +138,27 @@ Bots that work together, with settings you control.
   and no memory of the chat, its own reply is never parsed for a block, and its
   answer goes back to the bot that asked, which writes the real reply. One
   helper per reply; a failed helper never costs the reply.
+- **Bots remember the chat and keep a rulebook** (schema v9): every bot turn
+  receives a recap of the conversation and the rules learned for *its* model,
+  and leaves both behind. Durable instructions a person writes in the chat
+  become rules immediately; on a cadence one extra model call rewrites the
+  book and the recap into something compact. The recap is bounded, rebuilt from
+  stored messages when no provider is set, kept for `CONSOLIDATE_AFTER` turns
+  after a model rewrite, and a forgotten chat stays forgotten until a newer
+  message arrives. Memory is context, never a second system prompt: the task
+  still wins, and a bot can be set to leave memory out entirely.
+- **Bots ask each other** (`bot.ask`, opt-in): a bot may put one fenced `ask`
+  block in its reply and a teammate answers as itself, on its own model and
+  rulebook, with no permissions and no tools. The asker gets one more turn with
+  the answer marked as untrusted text; the exchange is one round deep, a
+  control block in the answer is stripped, and a refused or failed ask never
+  costs the asker's reply.
+- **Bots create bots** (`bot.create`, opt-in): a bot may put one fenced
+  `create-bot` block in its reply, and the new bot becomes a normal roster
+  record — always `custom`, no permissions, no model, no contract escalation.
+  The permission is checked again against the roster inside the write, the name
+  must be free, the group limit is enforced for people too, and a reply with two
+  blocks creates one and says why. Schema v10 keeps who created it and how.
 - **Reset password from the sign-in screen.** Forgot password asks
   `POST /api/auth/forgot`; the server still prints the one-time token in its
   log. A second form submits that token to `POST /api/auth/reset`.

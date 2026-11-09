@@ -3,15 +3,13 @@ import assert from 'node:assert/strict';
 import {readFile, access} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {ASSETS} from '../shared/assets.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const buildScript = await readFile(path.join(root, 'scripts/build-pages.js'), 'utf8');
 
-// Derive the bundle file list straight from the build script so this test can
-// never disagree with `npm run build:pages` about what ships to Pages.
-const listMatch = buildScript.match(/const files\s*=\s*\[([\s\S]*?)\]/);
-assert.ok(listMatch, 'Could not locate the bundle file list in scripts/build-pages.js.');
-const bundleFiles = [...listMatch[1].matchAll(/'([^']+)'/g)].map(m => m[1]);
+// The bundle file list is the one registry both readers import, so this test
+// can never disagree with `npm run build:pages` about what ships to Pages.
+const bundleFiles = ASSETS;
 assert.ok(bundleFiles.includes('index.html') && bundleFiles.includes('app.js'), 'Unexpected bundle file list.');
 
 /** Undo the two build-time transformations so docs/ and shared/ are comparable:

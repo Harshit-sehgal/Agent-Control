@@ -13,7 +13,6 @@ import {MAX_STEPS_LIMIT,X_ENGAGE_PIPELINE,REPLY_LENGTHS,pipelineOf} from '../sha
 import {simulateGroup} from '../shared/group-simulator.js';
 import * as wf from '../shared/workflow.js';
 import {enqueueTask,claimTasks,completeTask,buildPayload} from '../shared/tasks.js';
-import {JsonStore} from '../src/store.js';
 import {SqliteStore} from '../src/sqlite-store.js';
 import {coordinationState,runGroup,runBotTask,queueGroupRun,decidePlan,resumeFeedRun,markInterrupted} from '../src/coordination.js';
 import {executeCustomBot} from '../src/ai.js';
@@ -26,7 +25,7 @@ const status=code=>error=>error.status===code;
 
 async function tempStore(fn){
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'ac-flex-'));
-  try{const store=await new JsonStore(path.join(dir,'state.json')).init();return await fn(store);}
+  try{const store=await new SqliteStore(path.join(dir,'state.db'),path.join(dir,'state.json')).init();return await fn(store);}
   finally{await fs.rm(dir,{recursive:true,force:true});}
 }
 
@@ -194,7 +193,9 @@ test('the pages demo says it cannot open the feed and still drafts from a captur
 });
 
 test('a restart releases a feed read that was still out',async()=>tempStore(async store=>{
-  await store.update(s=>{coordinationState(s);s.groups=[team('g',['a'])];s.groupRuns.push({id:'feed-cut',groupId:'g',chatKey:'team-g',status:'awaiting_feed',task:{needsFeed:true}});s.browserRequests=[{id:'fr',runId:'feed-cut',purpose:'feed',status:'pending'}];});
+  await store.update(s=>{coordinationState(s);s.groups=[team('g',['a'])];// A persisted run carries the columns the schema requires (NOT NULL input,
+  // recipients, mode); only its transient fields are partial here.
+  s.groupRuns.push({id:'feed-cut',groupId:'g',chatKey:'team-g',input:'read the feed',recipients:['a'],mode:'lead',status:'awaiting_feed',task:{needsFeed:true}});s.browserRequests=[{id:'fr',runId:'feed-cut',purpose:'feed',status:'pending'}];});
   await markInterrupted(store);
   const run=store.read().groupRuns[0];
   assert.equal(run.status,'interrupted');
@@ -211,9 +212,9 @@ test('a restart leaves a shown plan and a checkpoint in place',async()=>tempStor
     coordinationState(s);
     s.groups=[team('g',['a'])];
     s.groupRuns.push(
-      {id:'plan',groupId:'g',status:'awaiting_plan'},
-      {id:'gate',groupId:'g',status:'awaiting_checkpoint',checkpoint:{nextStep:1}},
-      {id:'live',groupId:'g',status:'running'},
+      {id:'plan',groupId:'g',status:'awaiting_plan',input:'plan it',recipients:['a'],mode:'lead'},
+      {id:'gate',groupId:'g',status:'awaiting_checkpoint',checkpoint:{nextStep:1},input:'gate it',recipients:['a'],mode:'lead'},
+      {id:'live',groupId:'g',status:'running',input:'live',recipients:['a'],mode:'lead'},
     );
   });
   await markInterrupted(store);
@@ -622,4 +623,14 @@ test('group and bot edit routes enforce roles over HTTP',{timeout:40000},async()
     assert.equal((await call('DELETE',`/api/groups/${g.id}`,undefined,owner)).status,200);
     assert.equal((await call('GET','/api/state',undefined,owner)).body.groups.some(x=>x.id===g.id),false);
   }finally{child.kill('SIGINT');await new Promise(r=>child.once('exit',r));await fs.rm(dir,{recursive:true,force:true});}
+});
+
+test('a person cannot grow a group past the bot limit or reuse a name',()=>{
+  const many=Array.from({length:40},(_,i)=>bot(`b${i}`));
+  const s=wf.migrate({candidates:[],groups:[team('g',['a','b']),team('full',many)]});
+  assert.throws(()=>wf.addBot(s,'g',{name:'A',instructions:'Do what A does, please.'}),/already in this group/);
+  assert.throws(()=>wf.addBot(s,'full',{name:'One more',instructions:'Do one more thing.',}),/already has 40 bots/);
+  assert.equal(s.groups[0].bots.length,2);
+  const added=wf.addBot(s,'g',{name:'C',instructions:'Do c'});
+  assert.equal(added.name,'C');
 });

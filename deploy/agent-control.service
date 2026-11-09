@@ -12,7 +12,8 @@ Type=simple
 User=agent-control
 WorkingDirectory=/srv/agent-control
 EnvironmentFile=/srv/agent-control/.env
-ExecStart=/usr/bin/node src/server.js
+# node:sqlite needs the flag on Node 22.5-23.3; npm start passes it for you.
+ExecStart=/usr/bin/node --experimental-sqlite src/server.js
 Restart=on-failure
 RestartSec=3
 # Hardening: the app only writes under data/ (SQLite + vault keyfile).

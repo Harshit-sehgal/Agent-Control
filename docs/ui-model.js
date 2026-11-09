@@ -2,8 +2,8 @@
  * a pane shows: the chat list, a thread's timeline, the "needs you" count and
  * the hash route. No DOM and no globals, so the product rules here are unit
  * tested directly (tests/ui-model.test.js). */
-import {fullDate} from './ui-kit.js?v=e5bbe2496b';
-import {botSettings} from './bot-settings.js?v=e5bbe2496b';
+import {fullDate} from './ui-kit.js?v=c011d81ee9';
+import {botSettings} from './bot-settings.js?v=c011d81ee9';
 
 export const ACTIVE_DRAFTS = ['pending', 'scheduled', 'ready'];
 const X_GROUP = 'x-engage';
@@ -64,7 +64,7 @@ export function feedPauseAction(request, {graceUsed = false} = {}) {
 }
 
 // System lines with a kind of their own paint a card, not a run note.
-const RUN_LESS_KINDS = new Set(['browser', 'subagent']);
+const RUN_LESS_KINDS = new Set(['browser', 'subagent', 'peer', 'bot-created']);
 
 /** A system line that may carry Start, Retry or Approve. A browser card or a
  * sub-agent line has its own presentation and returns before those, so it must

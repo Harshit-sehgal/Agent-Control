@@ -14,13 +14,13 @@
 
 - `shared/workflow.js` owns every workflow transition; the HTTP routes no longer contain business rules.
 - Versioned state schema (`SCHEMA_VERSION`) with an idempotent `migrate()` run at startup.
-- One UI in `shared/`, served directly by Node and copied to `docs/` for Pages with `npm run build:pages`.
+- One UI in `shared/`, served directly by Node and copied to `docs/` for Pages with `npm run build:pages`. `shared/assets.js` is the only list of those files: the build script and the server both import it, so the two cannot drift.
 - `shared/transport.js` selects the real `/api` backend under Node and the browser-local backend on Pages, so both run identical rules.
 - The browser-local demo (`shared/local-api.js`) reuses `shared/workflow.js` instead of duplicating lifecycle logic.
 
 ## Delivered: platform (v0.2 / v0.3)
 
-- **Transactional store.** `node:sqlite` behind the same `read()`/`update()` interface, with a schema-migration ledger and legacy JSON import (`src/sqlite-store.js`).
+- **Transactional store.** `node:sqlite` behind the same `read()`/`update()` interface, with a schema-migration ledger and legacy JSON import (`src/sqlite-store.js`). A database written by a newer build is refused at boot instead of being opened, and the JSON store it replaced was removed rather than kept behind a switch.
 - **Multi-user control plane.** Accounts, revocable server-side sessions, workspaces and `viewer < member < admin < owner` roles; every write is gated by a route matrix and verified by `tests/authz-matrix.test.js` (`src/auth.js`).
 - **Structured tasks + durable queue.** Reminders became real tasks with status, attempts, leases and idempotency keys (`shared/tasks.js`, `src/queue.js`).
 - **Source evidence model.** Claims carry links, confidence, verification status and reuse policy; disputed evidence blocks approval (`shared/evidence.js`).

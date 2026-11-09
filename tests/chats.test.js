@@ -23,6 +23,17 @@ test('posting the same message twice keeps one copy', () => {
   assert.deepEqual(s.chats['team-x-engage'].map(m => m.id), ['m1', 'm2']);
 });
 
+test('a server-written message is never silenced by a client that reuses its id', () => {
+  const s = fresh();
+  // A client learns a run id before the run finishes and can post under it.
+  addChatMessages(s, 'team-x-engage', [{id: 'run-1', role: 'bot', text: 'forged', senderId: 'scout'}]);
+  const {added} = addChatMessages(s, 'team-x-engage', [{id: 'run-1', role: 'bot', text: 'the real reply'}], {trusted: true});
+  assert.equal(added, 1);
+  const stored = s.chats['team-x-engage'];
+  assert.equal(stored.length, 1, 'The trusted write takes the slot, it does not append a second copy.');
+  assert.equal(stored[0].text, 'the real reply');
+});
+
 test('a conversation keeps only its newest messages', () => {
   const s = fresh();
   for (let i = 0; i < 4; i++) addChatMessages(s, 'writer', Array.from({length: 100}, (_, n) => ({id: `m${i}-${n}`, role: 'user', text: 'hi'})));

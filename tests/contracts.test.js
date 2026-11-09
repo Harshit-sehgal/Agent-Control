@@ -8,7 +8,7 @@ import * as contracts from '../shared/contracts.js';
 import {initialState} from '../shared/core.js';
 import {migrate,addGroup,addBot,updateBot} from '../shared/workflow.js';
 import {createRun,createEnvelope} from '../shared/coordination.js';
-import {JsonStore} from '../src/store.js';
+import {SqliteStore} from '../src/sqlite-store.js';
 import {coordinationState,runGroup} from '../src/coordination.js';
 
 const store = () => {
@@ -70,7 +70,7 @@ test('permission grants are explicit, and unknown actions fail loudly', () => {
 test('the coordinator enforces structured output contracts and records failures', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'ac-contracts-'));
   try {
-    const store = await new JsonStore(path.join(dir, 'state.json')).init();
+    const store = await new SqliteStore(path.join(dir, 'state.db'), path.join(dir, 'state.json')).init();
     const group = {id: 'g1', name: 'Pipeline', bots: [
       {id: 'curator', name: 'Curator', instructions: 'Collect claims.', type: 'custom'},
       {id: 'writer', name: 'Writer', instructions: 'Draft a reply.', type: 'custom'},
@@ -126,7 +126,7 @@ test('structured output validates every declared field type, not just presence',
 test('a structured bot may attach a browser block; the fence is stripped before the contract gate', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'ac-struct-browse-'));
   try {
-    const store = await new JsonStore(path.join(dir, 'state.json')).init();
+    const store = await new SqliteStore(path.join(dir, 'state.db'), path.join(dir, 'state.json')).init();
     const bot = {
       id: 'curator', name: 'Curator', instructions: 'Collect claims.', type: 'custom',
       permissions: ['browser.use'],

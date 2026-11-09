@@ -5,7 +5,7 @@
  * no tools at all (see src/subagents.js).
  */
 import {randomUUID} from 'node:crypto';
-import {createRun,createEnvelope,runNote,planHandoffs,handoffTargets,instructLead,wakeBots,assessTask,summonableGuests,MAX_HANDOFFS,BUSY_STATUSES as BUSY,INTERRUPT_STATUSES as INTERRUPT} from '../shared/coordination.js';
+import {createRun,createEnvelope,runNote,planHandoffs,handoffTargets,instructLead,wakeBots,assessTask,summonableGuests,mayHandoff,MAX_HANDOFFS,BUSY_STATUSES as BUSY,INTERRUPT_STATUSES as INTERRUPT} from '../shared/coordination.js';
 import {botSettings,groupSettings,threadContext,MAX_STEPS_LIMIT} from '../shared/bot-settings.js';
 import {addChatMessages} from '../shared/chats.js';
 import {assertContractOutput} from '../shared/contracts.js';
@@ -13,6 +13,9 @@ import {recordBrowserRequests,queueFeedRead,stripBrowserBlocks,parseBrowserReque
 import {MAX_SUBAGENT_DEPTH} from '../shared/subagents.js';
 import {autoDispatch} from './bot-browser.js';
 import {replyWithSubagents} from './subagents.js';
+import {askPeerRound} from './bot-link.js';
+import {createBotsFromReply} from './bot-create.js';
+import {memoryFor,rememberTurn,maybeConsolidate} from './memory.js';
 import {executeCustomBot} from './ai.js';
 import {resolveConfig,aiAvailable} from './ai-providers.js';
 import {activity} from '../shared/core.js';
@@ -22,6 +25,9 @@ const running=new Set();
 const clean=v=>String(v??'').slice(0,4000);
 const stamp=()=>new Date().toISOString();
 export function coordinationState(s){s.groupMessages??={};s.groupRuns??=[];}
+// The roster a run may summon is part of the shared run model; the server route
+// layer picks guests with it, so keep one import for it rather than two paths.
+export {summonableGuests};
 /** Put a line into the run's conversation. The server writes these itself, so a
  * run still shows up in the chat when the tab that started it was closed. A
  * conversation that no longer exists is skipped: the run log keeps the record. */
@@ -137,6 +143,10 @@ async function runGroupInner(store,id,executor){
     await store.update(s=>{coordinationState(s);const r=s.groupRuns.find(x=>x.id===id);if(!r||!['queued','running','awaiting_checkpoint'].includes(r.status))throw new Error('Run is not runnable');r.status='running';r.startedAt=r.startedAt||stamp();r.checkpoint=null;});
     if(await holdForFeed(store,id))return;
     // The recipient list is read live each step: a bot's reply may append to it.
+    // A bot created during this run is not a recipient of it: it has no settings
+    // a person has checked yet, and handing it work the same minute it exists is
+    // how a loop of fresh bots starts. It becomes available from the next run.
+    const fledglings=new Set();
     let i=start;
     while(true){
       const current=store.read();const r=current.groupRuns.find(x=>x.id===id);
@@ -157,11 +167,23 @@ async function runGroupInner(store,id,executor){
       r.currentStep=i;
       const roster=[...g.bots,...summonableGuests(current.groups,g.id)];
       const thread=threadContext(current.chats?.[r.chatKey],botSettings(bot).contextMessages);
-      const envelope=createEnvelope({run:r,bot,previous,thread,team:roster});
+      // This bot's own model, so its rulebook and the chat recap are the right ones.
+      const config=resolveConfig(store,bot.id);
+      const memory=memoryFor(store,{bot,config,chatKey:r.chatKey});
+      const envelope=createEnvelope({run:r,bot,previous,thread,team:roster,memory});
       // Each bot runs on its own chosen model/provider, else the workspace default.
       // A bot that spawns a helper gets one more turn; the second reply is its output.
       const rounds=(r.subagents||[]).some(spawn=>spawn.botId===bot.id)?MAX_SUBAGENT_DEPTH:0;
-      const reply=await replyWithSubagents({bot,envelope,executor,config:resolveConfig(store,bot.id),rounds,makeId:randomUUID,now:stamp});
+      const sub=await replyWithSubagents({bot,envelope,executor,config,rounds,makeId:randomUUID,now:stamp});
+      // Then, if it asked a teammate, that teammate answers as itself and this
+      // bot gets one more turn. A peer answer is data, never a tool call.
+      const peer=await askPeerRound({bot,envelope,first:sub.output,executor,config,peers:roster,configFor:peerId=>resolveConfig(store,peerId),memoryForPeer:(mate,mateConfig)=>memoryFor(store,{bot:mate,config:mateConfig,chatKey:r.chatKey}),handoffAllowed:mayHandoff(r,bot),rounds:(r.peerAsks||[]).some(ask=>ask.botId===bot.id&&!ask.error)?1:0,makeId:randomUUID,now:stamp});
+      // Finally a bot holding bot.create may add one lasting teammate to its own
+      // group. The record starts with no permissions.
+      const home=current.groups.find(x=>(x.bots||[]).some(b=>b.id===bot.id));
+      const made=home?await createBotsFromReply(store,{bot,groupId:home.id,output:peer.output,runId:id,makeId:randomUUID,now:stamp}):{text:peer.output,created:[],lines:[]};
+      for(const record of made.created||[])fledglings.add(record.id);
+      const reply={output:made.text,lines:[...sub.lines,...peer.lines,...made.lines],spawns:sub.spawns,asks:peer.asks,created:made.created};
       const output=reply.output;
       if(typeof output!=='string'||!output.trim())throw new Error('Bot returned empty output.');
       // Strip browser fences before the contract gate: a structured bot may
@@ -185,7 +207,7 @@ async function runGroupInner(store,id,executor){
         // helper supplies a placeholder for display; do not count it as work.
         if(!browsed.records.length&&(stripped.trim()||!asked.length))attachRunDraft(s,{bot:actor,output:previous.output,sources,runId:id});
         if(botSettings(bot).browserApproval==='auto')auto=browsed.records;
-        const added=host?handoffTargets({run:live,roster:[...host.bots,...summonableGuests(s.groups,host.id)],fromBot:bot,output:previous.output,home:host.bots}):[];
+        const added=host?handoffTargets({run:live,roster:[...host.bots.filter(b=>!fledglings.has(b.id)),...summonableGuests(s.groups,host.id)],fromBot:bot,output:previous.output,home:host.bots}):[];
         live.recipients.push(...added);
         const guests=added.filter(x=>!host.bots.some(b=>b.id===x));
         if(guests.length)live.guestIds=[...(live.guestIds||[]),...guests];
@@ -201,6 +223,7 @@ async function runGroupInner(store,id,executor){
         say(s,live,{...said,mode:'ai'});
         for(const line of browsed.lines)say(s,live,line);
         if(reply.spawns.length)live.subagents=[...(live.subagents||[]),...reply.spawns.map(spawn=>({...spawn,botId:bot.id,at:stamp()}))].slice(-6);
+        if(reply.asks.length)live.peerAsks=[...(live.peerAsks||[]),...reply.asks.map(ask=>({...ask,botId:bot.id,at:stamp()}))].slice(-6);
         if(browsed.records.length){
           live.status='awaiting_browser';
           live.browserPage=null;
@@ -213,6 +236,12 @@ async function runGroupInner(store,id,executor){
         }
       });
       if(auto.length)await autoDispatch(store,auto);
+      // Keep what this model learned. The reply is already stored, so a memory
+      // failure is logged and never turns a finished step into a failed run.
+      if(memory)try{
+        await rememberTurn(store,{bot,config,chatKey:r.chatKey,userText:r.input,botText:previous.output});
+        void maybeConsolidate(store,{key:memory.key,config,chatKey:r.chatKey,label:memory.label});
+      }catch(error){console.error('Memory update:',error.message);}
       if(holdBrowser)return;
       // Human checkpoint: pause before the next handoff until a person approves,
       // so a multi-step run never advances unattended when enabled.

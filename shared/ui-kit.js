@@ -106,6 +106,12 @@ export function row({title, sub = '', right = '', lead = '', action, id, data = 
   return `<button type="button" class="${cls}" data-action="${esc(action)}"${attrs(dataset)}>${body}${icon('chevron', 16)}</button>`;
 }
 export const box = (inner, label = '') => `${label ? `<h3 class="box-label">${esc(label)}</h3>` : ''}<div class="box">${inner}</div>`;
+/** A text input. `value` and every other attribute are escaped here, so callers
+ * pass raw user text and never a pre-escaped string. */
+export const textInput = (name, {type = 'text', value = '', ...rest} = {}) => {
+  const extra = Object.entries(rest).map(([k, v]) => (v === true ? ` ${k}` : ` ${k}="${esc(v)}"`)).join('');
+  return `<input class="input" name="${esc(name)}" type="${esc(type)}" value="${esc(value)}"${extra}>`;
+};
 export const field = (label, control, help = '') => `<label class="field"><span class="field-label">${esc(label)}</span>${control}${help ? `<small class="field-help">${esc(help)}</small>` : ''}</label>`;
 export const note = (text, tone = '') => `<p class="note ${tone}">${text}</p>`;
 export const empty = (title, text = '') => `<div class="empty"><strong>${esc(title)}</strong>${text ? `<span>${esc(text)}</span>` : ''}</div>`;

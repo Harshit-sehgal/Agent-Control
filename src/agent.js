@@ -25,14 +25,9 @@ import {encryptJson,decryptJson,sha256,loadMasterKey} from './vault.js';
 export const AGENT_ACTIONS = ['http.check', 'browser.capture', 'browser.action'];
 const PAIRING_TTL_MS = 10 * 60000;
 const CLOCK_SKEW_MS = 5 * 60000;
-const TASK_KINDS = {
-  'http.check': 'http.check',
-  'browser.capture': 'browser.capture',
-  // Interact with a page (navigate/click/type/wait/read) inside the same
-  // allowlist and proxy as a read. A separate permission because it acts, not
-  // just reads, so an operator grants it deliberately.
-  'browser.action': 'browser.action',
-};
+// A task kind is its own permission: 'browser.action' exists beside
+// 'browser.capture' because acting on a page is a deliberate grant, not a read.
+// AGENT_ACTIONS is the list; a separate kind table only ever repeated it.
 const signatureNonces = new Map(); // agentId -> Set of recently used signatures
 
 const now = () => new Date().toISOString();
@@ -122,12 +117,12 @@ export function redeemPairing(store, {code, name, permissions = []}) {
   return {agentId, secret, workspaceId: row.workspace_id, permissions: granted, pollIntervalMs: 30000};
 }
 
-export const agentTaskKinds = () => Object.keys(TASK_KINDS);
+export const agentTaskKinds = () => [...AGENT_ACTIONS];
 
 /** Enqueue work for a paired agent. Idempotency is per-agent so a repeated
  * request (double-clicked button, retried polling) cannot run a job twice. */
 export function enqueueAgentTask(store, agentId, {kind, payload = {}, idempotencyKey, createdBy, permission}) {
-  if (!TASK_KINDS[kind]) fail(`Unknown agent task kind. Expected one of: ${agentTaskKinds().join(', ')}.`);
+  if (!AGENT_ACTIONS.includes(kind)) fail(`Unknown agent task kind. Expected one of: ${agentTaskKinds().join(', ')}.`);
   const agent = store.get('SELECT * FROM agents WHERE id=?', agentId);
   if (!agent) fail('Agent not found.', 404);
   if (agent.revoked_at) fail('This agent has been revoked.', 409);
@@ -265,11 +260,4 @@ export function setAgentPermissions(store, agentId, permissions) {
 }
 
 /** The permission a task kind requires. */
-export const permissionForKind = kind => TASK_KINDS[kind] || null;
-
-export function agentPublicRow(row) {
-  return {
-    id: row.id, name: row.name, status: row.status, permissions: JSON.parse(row.permissions || '[]'),
-    pairedAt: row.paired_at, lastSeenAt: row.last_seen_at, revokedAt: row.revoked_at,
-  };
-}
+export const permissionForKind = kind => (AGENT_ACTIONS.includes(kind) ? kind : null);

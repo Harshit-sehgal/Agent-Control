@@ -1,15 +1,16 @@
 /** Everything that used to be a dashboard tab now hangs off a conversation:
  * the info panel of the open chat (drafts, posts, reminders, runs, voice, the
  * bot's profile) and the "You" pages (account, admin, about). */
-import {filterCandidates, filterDrafts} from './usability.js?v=e5bbe2496b';
-import {ACTIONS, OUTPUT_KINDS} from './contracts.js?v=e5bbe2496b';
-import {BOT_DEFAULTS, MAX_CONTEXT_MESSAGES, MAX_STEPS_LIMIT, botSettings, groupSettings, pipelineOf} from './bot-settings.js?v=e5bbe2496b';
-import {BUSY_STATUSES} from './coordination.js?v=e5bbe2496b';
-import {ACTIVE_DRAFTS, chatTasks, pipelineRows, retryTarget, runBelongsToChat} from './ui-model.js?v=e5bbe2496b';
-import {esc, icon, avatar, groupAvatar, tintClass, TINT_COUNT, btn, iconBtn, row, box, field, note, empty, tag, pageHead, fullDate} from './ui-kit.js?v=e5bbe2496b';
-import {store, conversation, isStaticDemo, isAdmin, canWrite, isXGroup, botTint, recentRuns, THEMES, themeChoice} from './ui-store.js?v=e5bbe2496b';
-import {draftCard, postCard} from './ui-views.js?v=e5bbe2496b';
-import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=e5bbe2496b';
+import {filterCandidates, filterDrafts} from './usability.js?v=c011d81ee9';
+import {ACTIONS, OUTPUT_KINDS} from './contracts.js?v=c011d81ee9';
+import {BOT_DEFAULTS, MAX_CONTEXT_MESSAGES, MAX_STEPS_LIMIT, botSettings, groupSettings, pipelineOf} from './bot-settings.js?v=c011d81ee9';
+import {BUSY_STATUSES} from './coordination.js?v=c011d81ee9';
+import {modelKey} from './memory.js?v=c011d81ee9';
+import {ACTIVE_DRAFTS, chatTasks, pipelineRows, retryTarget, runBelongsToChat} from './ui-model.js?v=c011d81ee9';
+import {esc, icon, avatar, groupAvatar, tintClass, TINT_COUNT, btn, iconBtn, row, box, field, note, empty, tag, pageHead, fullDate} from './ui-kit.js?v=c011d81ee9';
+import {store, conversation, isStaticDemo, isAdmin, canWrite, isXGroup, botTint, recentRuns, THEMES, themeChoice} from './ui-store.js?v=c011d81ee9';
+import {draftCard, postCard} from './ui-views.js?v=c011d81ee9';
+import {ADMIN_PAGES, adminPage, providerModelOptions} from './ui-admin.js?v=c011d81ee9';
 
 const el = id => document.getElementById(id);
 const options = (pairs, current) => pairs.map(([value, label]) => `<option value="${esc(value)}"${value === current ? ' selected' : ''}>${esc(label)}</option>`).join('');
@@ -192,12 +193,12 @@ function botHome(conv) {
   return `${pageHead('Bot info', {back: 'close-info'})}
     <div class="hero"><button type="button" class="poke" data-action="poke" aria-label="Say hi to ${esc(bot.name)}">${avatar(bot.name, conv.tint, 84)}</button><h2>${esc(bot.name)} ${offTag(bot)}</h2><p>${esc(group.name)}</p></div>
     ${box(`<p class="prose">${esc(bot.instructions || 'No job set yet.')}</p>`, 'Job')}
-    ${box((write ? row({title: 'Edit profile', action: 'open-section', data: {section: 'edit'}}) + row({title: on ? 'Switch off' : 'Switch on', sub: on ? 'It stops answering until you turn it back on.' : 'It is off and will not answer.', action: 'toggle-bot', id: bot.id}) : '') + row({title: 'Scheduled tasks', right: scheduled ? String(scheduled) : 'None', action: 'open-section', data: {section: 'tasks'}}) + row({title: pinned ? 'Unpin from top' : 'Pin to top', action: 'pin-bot', id: bot.id}) + (write ? row({title: 'Duplicate bot', action: 'duplicate-bot', id: bot.id}) : '') + row({title: 'Copy instructions', action: 'copy-bot-instructions', id: bot.id}))}
+    ${box((write ? row({title: 'Edit profile', action: 'open-section', data: {section: 'edit'}}) + row({title: on ? 'Switch off' : 'Switch on', sub: on ? 'It stops answering until you turn it back on.' : 'It is off and will not answer.', action: 'toggle-bot', id: bot.id}) : '') + row({title: 'Memory and rules', sub: 'What it keeps for its model and this chat', action: 'open-section', data: {section: 'memory'}}) + row({title: 'Scheduled tasks', right: scheduled ? String(scheduled) : 'None', action: 'open-section', data: {section: 'tasks'}}) + row({title: pinned ? 'Unpin from top' : 'Pin to top', action: 'pin-bot', id: bot.id}) + (write ? row({title: 'Duplicate bot', action: 'duplicate-bot', id: bot.id}) : '') + row({title: 'Copy instructions', action: 'copy-bot-instructions', id: bot.id}))}
     ${box(row({title: 'Copy conversation', action: 'copy-chat', id: conv.id}) + (write ? row({title: 'Clear conversation', action: 'clear-chat', id: conv.id, tone: 'bad'}) + row({title: 'Remove from group', action: 'remove-bot', id: bot.id, tone: 'bad'}) : ''))}`;
 }
 export const tintPicker = current => `<div class="tints" role="group" aria-label="Color">${Array.from({length: TINT_COUNT}, (_, i) => `<button type="button" class="tint ${tintClass(i)}${i === current ? ' on' : ''}" data-action="avatar" data-index="${i}" aria-label="Color ${i + 1}" aria-pressed="${i === current}">${icon('check', 18)}</button>`).join('')}</div>`;
 const BROWSER_CHOICES = [['ask', 'Ask me before each page'], ['auto', 'Run on my local agent without asking']];
-const PERMISSION_LABELS = {'browser.use': 'browser.use · open pages with my local browser agent', 'subagent.spawn': 'subagent.spawn · hand one small job to a helper model'};
+const PERMISSION_LABELS = {'browser.use': 'browser.use · open pages with my local browser agent', 'subagent.spawn': 'subagent.spawn · hand one small job to a helper model', 'bot.ask': 'bot.ask · ask a teammate bot one direct question', 'bot.create': 'bot.create · add a new bot to its group for lasting work'};
 const LENGTHS = [['short', 'Short, a few lines'], ['medium', 'Medium'], ['long', 'Long and detailed']];
 function behaviourFields(bot) {
   const s = botSettings(bot);
@@ -206,6 +207,7 @@ function behaviourFields(bot) {
     <div class="form-grid">${field('Reply length', `<select class="input" name="replyLength">${options(LENGTHS, s.replyLength)}</select>`)}${field('Creativity', `<input class="input" type="number" name="temperature" min="0" max="2" step="0.1" inputmode="decimal" value="${s.temperature ?? ''}" placeholder="Default">`, '0 to 2. Blank uses the model default.')}</div>
     ${field('Tone and style', `<textarea class="input" name="style" rows="2" maxlength="600" placeholder="Friendly, no jargon">${esc(s.style)}</textarea>`, 'Optional. Added to its job.')}
     ${field('Remembers the last messages', `<input class="input" type="number" name="contextMessages" min="0" max="${MAX_CONTEXT_MESSAGES}" step="1" inputmode="numeric" value="${Number(s.contextMessages ?? BOT_DEFAULTS.contextMessages)}" required>`, `0 to ${MAX_CONTEXT_MESSAGES} messages of this chat.`)}
+    ${checkRow('memory', 'Keeps a memory', 'A recap of this chat and a rulebook for its model, kept in this workspace.', s.memory !== false)}
     ${checkRow('summonable', 'Can be @mentioned from other chats', 'Bots in other groups and their chats can ask it.', s.summonable)}
     ${checkRow('canHandoff', 'Can pass work to other bots', 'It may @mention another bot in its reply.', s.canHandoff)}
     ${checkRow('lead', 'Primary bot', 'Tell this one what to do. It switches the others in the group on and they take the job. Only one primary per group.', s.lead)}
@@ -216,10 +218,12 @@ function botEdit(conv) {
   if (!canWrite()) return botHome(conv);
   const {bot} = conv, kind = bot.contract?.output?.kind || 'text';
   const ai = store.state?.ai || {}, providers = ai.providers || [], override = ai.bots?.[bot.id] || {};
+  // The picker only gets a datalist: a free-form model id is still allowed.
+  const pickedProvider = providers.find(p => p.id === (override.providerId || ai.defaultProviderId));
   // Only offer a model picker when at least one provider exists (or the server
   // has an env key), so the form is not shown with nothing to choose.
   const modelBlock = (providers.length || store.state?.aiEnabled)
-    ? `<div class="form-grid">${field('Model provider', `<select class="input" name="providerId"><option value="">Workspace default</option>${providers.map(p => `<option value="${esc(p.id)}" ${override.providerId === p.id ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select>`)}${field('Model', `<input class="input" name="model" value="${esc(override.model || '')}" placeholder="auto, gpt-4o-mini…" autocomplete="off">`)}</div>`
+    ? `<div class="form-grid">${field('Model provider', `<select class="input" name="providerId"><option value="">Workspace default</option>${providers.map(p => `<option value="${esc(p.id)}" ${override.providerId === p.id ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select>`)}${field('Model', `<input class="input" name="model" value="${esc(override.model || '')}" placeholder="auto, gpt-4o-mini…" autocomplete="off" list="bot-models">`)}</div><datalist id="bot-models">${providerModelOptions(pickedProvider)}</datalist>`
     : '';
   return `${pageHead(`Edit ${bot.name}`, {sub: 'The job lasts. One-off requests go in the chat.', back: 'open-info'})}
     <form id="edit-bot-form" class="form">
@@ -234,13 +238,43 @@ function botEdit(conv) {
     </form>`;
 }
 
+/** The model key the server will use for this bot: its own override, then the
+ * workspace default, then the server environment. Kept in step with
+ * `resolveConfig` in src/ai-providers.js so the panel reads the right book. */
+function botModel(conv) {
+  const {bot} = conv, ai = store.state?.ai || {}, override = ai.bots?.[bot.id] || {};
+  const provider = (ai.providers || []).find(p => p.id === (override.providerId || ai.defaultProviderId));
+  const model = override.model || ai.defaultModel || (provider ? 'auto' : (store.state?.aiModel || 'unconfigured'));
+  return {key: modelKey({providerId: provider?.id || null, source: provider ? 'byok' : 'env', model}), label: `${provider?.label || (provider ? 'saved provider' : 'server key')} · ${model}`};
+}
+function botMemorySection(conv) {
+  const {bot} = conv, mem = store.state.memory || {}, model = botModel(conv);
+  const book = mem.rulebooks?.[model.key] || {rules: [], summary: '', turns: 0};
+  const chat = mem.chats?.[conv.id] || null;
+  const write = canWrite();
+  const rules = (book.rules || []).map(rule => row({
+    title: esc(rule.text),
+    sub: `${rule.source === 'model' ? 'Learned automatically' : 'From a message'} · ${esc(fullDate(rule.createdAt))}`,
+    action: write ? 'forget-rule' : undefined,
+    data: {rule: rule.id, model: model.key},
+  })).join('');
+  const chatBox = write
+    ? `${note(chat ? esc(chat.summary) : 'Nothing is remembered about this chat yet. It gains a recap after the first exchange.')}<div class="card-actions">${btn(chat ? 'Update memory now' : 'Remember this chat now', 'update-memory', {id: bot.id, data: {chat: conv.id}})}${chat ? btn('Forget this chat', 'forget-chat-memory', {id: bot.id, data: {chat: conv.id}}) : ''}</div>`
+    : note(chat ? esc(chat.summary) : 'Nothing is remembered about this chat.');
+  return `${pageHead('Memory', {sub: 'What this bot keeps for its model and this chat.', back: 'open-info'})}
+    ${box(chatBox, 'This conversation')}
+    ${box(book.summary ? note(esc(book.summary)) : '', 'How it works with you here')}
+    ${box(rules || empty('No rules yet', 'Say "always …" or "never …" in the chat. Durable instructions become rules; a model pass tidies them later.'), `Rulebook · ${model.label}`)}
+    ${note('Rules belong to the model, not the bot, so two bots on the same model share them. Only the one consolidation call goes to your provider; everything else stays in this workspace.')}`;
+}
+
 /** Paint the info panel for the open chat, or empty it when closed. */
 export function renderInfo() {
   const node = el('inspector'), conv = conversation(), section = store.route.info;
   if (!conv || !section) { node.innerHTML = ''; return; }
   node.innerHTML = conv.isTeam
     ? ({drafts: draftsSection, posts: postsSection, reminders: remindersSection, runs: runsSection, voice: voiceSection, 'group-settings': groupSettingsSection, tasks: tasksSection}[section] || groupHome)(conv)
-    : ({edit: botEdit, tasks: tasksSection}[section] || botHome)(conv);
+    : ({edit: botEdit, memory: botMemorySection, tasks: tasksSection}[section] || botHome)(conv);
 }
 /** Refresh only the filtered lists, so the search box keeps its focus. */
 export function refreshLists() {
@@ -284,8 +318,37 @@ export async function renderPage() {
   main.innerHTML = `${pageHead(meta.title, {sub: meta.sub, back: 'open-page-you'})}<div class="page-body" id="admin-panel">${note('Loading…')}</div>`;
   await reloadAdminPage();
 }
+/** The text-entry values a user has typed but not submitted, keyed by form and
+ * field name. Selects, radios and checkboxes commit on change, so their value is
+ * already the server's and must follow a repaint (it is often what the reload is
+ * correcting); only typing is unsaved work worth carrying across. */
+const typedKey = field => `${field.form?.id || ''}|${field.name || ''}`;
+const typedFields = root => [...root.querySelectorAll('form input, form textarea')].filter(f => !['checkbox', 'radio', 'hidden', 'file', 'submit', 'button'].includes(f.type) && !f.readOnly);
+function unsavedText(root) {
+  const saved = new Map();
+  for (const field of typedFields(root)) if (field.value !== field.defaultValue) saved.set(typedKey(field), field.value);
+  return saved;
+}
+function restoreText(root, saved) {
+  if (!saved.size) return;
+  for (const field of typedFields(root)) {
+    const value = saved.get(typedKey(field));
+    if (value !== undefined) field.value = value;
+  }
+}
 export async function reloadAdminPage() {
   const page = store.route.page, panel = el('admin-panel'); if (!panel || !ADMIN_PAGES[page]) return;
-  try { const html = await adminPage(page); if (store.route.page === page && el('admin-panel')) el('admin-panel').innerHTML = html; }
+  try {
+    const html = await adminPage(page);
+    if (store.route.page !== page || !el('admin-panel')) return;
+    const target = el('admin-panel');
+    // Replacing the panel wholesale used to throw away half-typed work: "Reveal"
+    // on one row blurs the credential field on another, so a focus check would
+    // miss it. The typed text is carried over the repaint instead, which keeps the
+    // page fresh (the reply the click asked for still appears) without losing it.
+    const typed = unsavedText(target);
+    target.innerHTML = html;
+    restoreText(target, typed);
+  }
   catch (error) { panel.innerHTML = empty('Could not load this page', error.message || 'Unknown error'); }
 }

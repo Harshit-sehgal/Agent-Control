@@ -113,17 +113,30 @@ function commands() {
   return items;
 }
 export const paletteOpen = () => !el('command').classList.contains('hidden');
+/** Focus never leaves #command-input (the arrows only move a class), so the input
+ * is the combobox and the highlighted option is announced through
+ * aria-activedescendant. Without it the listbox role promised a relationship
+ * nothing maintained, and a screen reader had no idea what Enter would open. */
+function syncCommandActive() {
+  const input = el('command-input'), area = el('command-results');
+  if (!input || !area) return;
+  const active = area.querySelector('.command-item.selected');
+  if (active && active.id) input.setAttribute('aria-activedescendant', active.id);
+  else input.removeAttribute('aria-activedescendant');
+}
 export function updateCommandResults(value = '') {
   const q = value.trim().toLowerCase();
   entries = commands().filter(x => `${x.label} ${x.hint}`.toLowerCase().includes(q)).slice(0, 16);
   const area = el('command-results'); if (!area) return;
-  area.innerHTML = entries.length ? entries.map((entry, i) => `<button type="button" class="command-item${i === 0 ? ' selected' : ''}" data-action="command-choice" data-index="${i}" role="option" aria-selected="${i === 0}"><span>${esc(entry.label)}</span><small>${esc(entry.hint)}</small></button>`).join('') : '<div class="empty"><strong>Nothing matches</strong></div>';
+  area.innerHTML = entries.length ? entries.map((entry, i) => `<button type="button" class="command-item${i === 0 ? ' selected' : ''}" id="command-item-${i}" data-action="command-choice" data-index="${i}" role="option" aria-selected="${i === 0}"><span>${esc(entry.label)}</span><small>${esc(entry.hint)}</small></button>`).join('') : '<div class="empty"><strong>Nothing matches</strong></div>';
+  area.setAttribute('aria-label', entries.length ? `${entries.length} results` : 'No results');
+  syncCommandActive();
 }
 export function closeCommandPalette() { if (!paletteOpen()) return; el('command').classList.add('hidden'); el('command').innerHTML = ''; entries = []; restoreFocus(); }
 export function openCommandPalette() {
   closeSheet(); captureFocus();
   const layer = el('command'); layer.classList.remove('hidden');
-  layer.innerHTML = `<div class="command-card" role="dialog" aria-modal="true" aria-label="Quick navigation"><label class="search">${icon('search', 18)}<input id="command-input" aria-label="Search pages and bots" autocomplete="off" placeholder="Jump to a bot, group or page" maxlength="120"></label><div class="command-results" id="command-results" role="listbox"></div><p class="command-foot">Up and Down to move · Enter to open · Esc to close</p></div>`;
+  layer.innerHTML = `<div class="command-card" role="dialog" aria-modal="true" aria-label="Quick navigation"><label class="search">${icon('search', 18)}<input id="command-input" role="combobox" aria-label="Search pages and bots" aria-autocomplete="list" aria-expanded="true" aria-controls="command-results" aria-haspopup="listbox" autocomplete="off" placeholder="Jump to a bot, group or page" maxlength="120"></label><div class="command-results" id="command-results" role="listbox"></div><p class="command-foot">Up and Down to move · Enter to open · Esc to close</p></div>`;
   updateCommandResults(); el('command-input').focus();
 }
 export function chooseCommand(index) { const entry = entries[index]; if (!entry) return; closeCommandPalette(); entry.run(); }
@@ -132,6 +145,7 @@ export function moveCommand(delta) {
   const next = nodes[(nodes.findIndex(n => n.classList.contains('selected')) + delta + nodes.length) % nodes.length];
   nodes.forEach(n => { n.classList.remove('selected'); n.setAttribute('aria-selected', 'false'); });
   next.classList.add('selected'); next.setAttribute('aria-selected', 'true'); next.scrollIntoView({block: 'nearest'});
+  syncCommandActive();
 }
 
 /* ---------- sign-in (Node build) ---------- */

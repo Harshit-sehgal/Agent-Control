@@ -11,14 +11,14 @@
  *   ui-dialogs  toast, sheet, confirm/ask   ui-actions action/form tables
  *   ui-fx       confetti, the send arrow, and when the bots react
  */
-import {parseRoute} from './ui-model.js?v=e5bbe2496b';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, isAdmin, canWrite, applyTheme, watchSystemTheme, retireSession, sessionEpoch} from './ui-store.js?v=e5bbe2496b';
-import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=e5bbe2496b';
-import {listShell, renderList, threadShell, renderThread, homeView, renderMentions} from './ui-views.js?v=e5bbe2496b';
-import {renderInfo, refreshLists, renderPage} from './ui-panel.js?v=e5bbe2496b';
-import {showLogin, hideLogin, openCommandPalette, closeCommandPalette, paletteOpen, updateCommandResults, chooseCommand, moveCommand} from './ui-sheets.js?v=e5bbe2496b';
-import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=e5bbe2496b';
-import {bringBotsToLife} from './ui-fx.js?v=e5bbe2496b';
+import {parseRoute} from './ui-model.js?v=c011d81ee9';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, isAdmin, canWrite, applyTheme, watchSystemTheme, retireSession, sessionEpoch} from './ui-store.js?v=c011d81ee9';
+import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=c011d81ee9';
+import {listShell, renderList, threadShell, renderThread, homeView, renderMentions} from './ui-views.js?v=c011d81ee9';
+import {renderInfo, refreshLists, renderPage} from './ui-panel.js?v=c011d81ee9';
+import {showLogin, hideLogin, openCommandPalette, closeCommandPalette, paletteOpen, updateCommandResults, chooseCommand, moveCommand} from './ui-sheets.js?v=c011d81ee9';
+import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=c011d81ee9';
+import {bringBotsToLife} from './ui-fx.js?v=c011d81ee9';
 
 const el = id => document.getElementById(id);
 const hashRoute = () => parseRoute(location.hash, store.state, {server: !isStaticDemo(), admin: isAdmin(), write: canWrite()});
@@ -177,6 +177,16 @@ forms['reset-form'] = async (form, f) => {
   } catch (error) { const node = el('login-error'); if (node) node.textContent = error.message; }
 };
 
+/** Register the worker at boot, not only when push is turned on: it is what
+ * lets the installed app open offline, and until a user opted into
+ * notifications there was no registration at all, so an installed icon opened
+ * to a blank error page. An unsupported browser, an insecure origin or a failed
+ * install only costs this console line; the app itself does not need it. */
+function registerWorker() {
+  if (!window.isSecureContext || !('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.register('./sw.js').catch(error => console.warn('Service worker not registered:', error?.message));
+}
+
 const fail = error => toast(error?.message || 'That did not work.', true);
 const autoGrow = node => { node.style.height = 'auto'; node.style.height = `${Math.min(node.scrollHeight, 180)}px`; };
 
@@ -232,5 +242,5 @@ window.addEventListener('resize', () => { if (store.state) setInert(); });
 // `toggle` does not bubble, so listen in the capture phase to remember open source panels.
 document.addEventListener('toggle', ev => { const id = ev.target.dataset?.evidence; if (!id) return; if (ev.target.open) { store.openEvidence.add(id); if (store.openEvidence.size > 50) store.openEvidence.delete(store.openEvidence.values().next().value); } else store.openEvidence.delete(id); }, true);
 
-applyTheme(); watchSystemTheme(); bringBotsToLife();
+applyTheme(); watchSystemTheme(); bringBotsToLife(); registerWorker();
 boot();

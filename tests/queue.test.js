@@ -144,6 +144,33 @@ test('a task whose worker died is re-armed, never stuck; a recurring task re-arm
   await fs.rm(dir, {recursive: true, force: true});
 });
 
+test('a claimed batch keeps every lease alive while an earlier task runs', async () => {
+  const {store, dir} = await harness();
+  const calls = [];
+  let openGate;
+  const gate = new Promise(resolve => { openGate = resolve; });
+  const leaseMs = 1500;
+  // Handlers run serially. Only the first blocks, so a second worker that
+  // wrongly re-claims a task records the duplicate instead of deadlocking.
+  const handler = async task => { calls.push(task.id); if (calls.length === 1) await gate; };
+  const a = createQueue(store, {slow: handler}, {intervalMs: 60000, workerId: 'worker-a', leaseMs, batch: 2});
+  const b = createQueue(store, {slow: handler}, {intervalMs: 60000, workerId: 'worker-b', leaseMs, batch: 2});
+  const first = await store.update(s => rawTask(s, {kind: 'slow', title: 'first'}));
+  const second = await store.update(s => rawTask(s, {kind: 'slow', title: 'second'}));
+  const running = a.sweep();
+  // Wait past the original lease window while the first task still runs. Every
+  // claim in the batch must have been renewed by then, or the waiting second
+  // task looks stalled and gets executed twice.
+  await new Promise(resolve => setTimeout(resolve, leaseMs + 400));
+  await b.sweep();
+  assert.equal(calls.length, 1, 'the waiting task must not be re-claimed by another worker');
+  openGate();
+  await running;
+  assert.deepEqual([...calls].sort(), [first.id, second.id].sort(), 'each task ran exactly once');
+  for (const task of store.read().tasks) assert.equal(task.status, 'done');
+  await fs.rm(dir, {recursive: true, force: true});
+});
+
 test('duplicate work delivery: two workers claiming at once get one task each', async () => {
   const {store, dir} = await harness();
   await store.update(s => { rawTask(s, {kind: 'echo', title: 'A'}); rawTask(s, {kind: 'echo', title: 'B'}); });

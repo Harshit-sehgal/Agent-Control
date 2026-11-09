@@ -17,6 +17,8 @@ import {pruneChats, releaseChatWork} from './chats.js';
 import {denyBrowserRequest} from './bot-browser.js';
 import {BUSY_STATUSES} from './coordination.js';
 import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js';
+import {memoryState} from './memory.js';
+import {MAX_BOTS_PER_GROUP} from './bot-create.js';
 
 export const SCHEMA_VERSION = 3;
 /** Posts are never pruned by age, so their number is bounded here. */
@@ -56,6 +58,8 @@ export function migrate(state) {
   state.ai.bots ??= {};
   if (state.ai.defaultProviderId === undefined) state.ai.defaultProviderId = null;
   if (state.ai.defaultModel === undefined) state.ai.defaultModel = null;
+  // Durable per-chat recaps and per-model rulebooks (see shared/memory.js).
+  memoryState(state);
   pruneChats(state);
   // Backfill bot contracts and permissions. An older stored bot gains the
   // defaults for its type; explicitly configured values are left alone.
@@ -273,6 +277,10 @@ export function addBot(state, groupId, body) {
   if (!name || !instructions) fail('Bot name and instructions required.');
   const g = state.groups.find(x => x.id === groupId);
   if (!g) fail('Group not found.', 404);
+  // The same limit a model-created bot meets. A person can raise it by removing
+  // a bot; nothing may grow a group past it, and two bots cannot share a name.
+  if ((g.bots || []).length >= MAX_BOTS_PER_GROUP) fail(`This group already has ${MAX_BOTS_PER_GROUP} bots. Remove one first.`, 409);
+  if (g.bots.some(bot => bot.name.trim().toLowerCase() === name.toLowerCase())) fail(`A bot named ${name} is already in this group.`, 409);
   const bot = contracts.normalizeBot({
     id: crypto.randomUUID(), name, instructions, type: 'custom',
     contract: contracts.validateContract(body.contract),

@@ -14,7 +14,7 @@
  *
  * Pure functions over bot records, like the other shared modules.
  */
-import {validHttpUrl} from './core.js?v=e5bbe2496b';
+import {validHttpUrl} from './core.js?v=c011d81ee9';
 
 export const CONTRACT_VERSION = 1;
 
@@ -27,8 +27,10 @@ export const FIELD_TYPES = ['text', 'number', 'boolean', 'string_list', 'evidenc
  * `browser.use` asks the user's paired local agent for a page; see
  * bot-browser.js for why it still cannot press Post on X. `subagent.spawn`
  * lets a bot hand one small job to a helper model; see subagents.js for why
- * that helper has no tools at all. */
-export const ACTIONS = ['evidence.add', 'draft.create', 'schedule.set', 'agent.dispatch', 'chat.send', 'browser.use', 'subagent.spawn'];
+ * that helper has no tools at all. `bot.ask` lets a bot put one question to a
+ * teammate, and `bot.create` lets it add a permissionless bot to its group;
+ * see bot-link.js and bot-create.js. */
+export const ACTIONS = ['evidence.add', 'draft.create', 'schedule.set', 'agent.dispatch', 'chat.send', 'browser.use', 'subagent.spawn', 'bot.ask', 'bot.create'];
 
 export function fail(message, status = 400) {
   throw Object.assign(new Error(message), {status});

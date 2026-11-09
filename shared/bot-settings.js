@@ -29,6 +29,9 @@ export const BOT_DEFAULTS = Object.freeze({
   style: '',
   /** How many recent messages of the conversation the bot sees. */
   contextMessages: 10,
+  /** Keep durable memory for this bot's model: a per-model rulebook and a
+   * rolling recap of the conversation, both stored in the workspace. */
+  memory: true,
   /** May be @mentioned from a chat outside its own group. */
   summonable: true,
   /** May pass work on by @mentioning another bot in its reply. */
@@ -104,6 +107,7 @@ export function validateBotSettings(body, current = {}) {
     next.style = cleanText(body.style, 600);
   }
   if (body.contextMessages !== undefined) next.contextMessages = integer(body.contextMessages, 0, MAX_CONTEXT_MESSAGES, 'Context messages');
+  if (body.memory !== undefined) next.memory = flag(body.memory, 'Memory');
   if (body.summonable !== undefined) next.summonable = flag(body.summonable, 'Summonable');
   if (body.canHandoff !== undefined) next.canHandoff = flag(body.canHandoff, 'Can hand off');
   if (body.lead !== undefined) next.lead = flag(body.lead, 'Primary bot');

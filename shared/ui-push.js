@@ -13,7 +13,18 @@ const sameKey = (subscription, key) => {
   const currentKey = keyView(subscription?.options?.applicationServerKey), next = keyView(key);
   return !!currentKey && !!next && currentKey.length === next.length && currentKey.every((byte, i) => byte === next[i]);
 };
-const current = async () => (await navigator.serviceWorker.getRegistration())?.pushManager.getSubscription() ?? null;
+/** The live subscription of this browser, or null when it has none. A browser
+ * that will not answer (no registration, pushManager blocked) is reported as
+ * unsubscribed rather than throwing the whole status call: a device that is off
+ * must read as off. */
+const current = async () => {
+  // Both calls are awaited: getSubscription() is async too, and awaiting only
+  // the first left its rejection outside this try.
+  try {
+    const registration = await navigator.serviceWorker.getRegistration();
+    return await registration?.pushManager.getSubscription() ?? null;
+  } catch { return null; }
+};
 
 /** @returns {{state: 'unsupported'|'insecure'|'blocked'|'off'|'on', devices: number}} */
 export async function pushStatus() {
@@ -29,6 +40,9 @@ export async function pushStatus() {
 export async function enablePush() {
   if (await Notification.requestPermission() !== 'granted') throw new Error('Notifications are blocked for this site. Allow them in the browser settings, then try again.');
   const {publicKey} = await api('/api/push');
+  // app.js already registers the worker at boot; registering an existing scope
+  // returns that same registration instead of adding a second one. `ready`
+  // still has to be awaited, because registration does not imply activation.
   const registration = await navigator.serviceWorker.register('./sw.js');
   await navigator.serviceWorker.ready;
   const key = keyBytes(publicKey);
@@ -47,6 +61,12 @@ export async function enablePush() {
 export async function disablePush() {
   const subscription = await current();
   if (!subscription) return;
-  await api('/api/push/subscriptions', 'DELETE', {endpoint: subscription.endpoint});
+  const endpoint = subscription.endpoint;
+  // Local first. If this throws, the server still holds the live device and the
+  // two sides agree; deleting on the server first and then failing to
+  // unsubscribe left a subscription nobody would ever deliver to or forget.
+  // The reverse failure (local gone, server still listed) heals itself: the
+  // next delivery gets a 410 and src/push.js drops the endpoint.
   await subscription.unsubscribe();
+  await api('/api/push/subscriptions', 'DELETE', {endpoint});
 }

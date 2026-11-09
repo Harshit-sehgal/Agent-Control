@@ -1,10 +1,10 @@
 /** Single source of UI state: the server snapshot, the route, the conversations
  * it carries and cosmetic preferences. Views read from `store` and never
  * keep their own copies, so one `sync()` + one render keeps every pane current. */
-import {normalizeUiPrefs, UI_PREFS_KEY} from './usability.js?v=e5bbe2496b';
-import {routeHash, tintOf} from './ui-model.js?v=e5bbe2496b';
-import {createOutbox} from './chats.js?v=e5bbe2496b';
-import {LOCAL_RUNS_KEY, mutateLocalRuns, patchLocalRun as patchStoredRun, cancelLocalRunsForChat} from './local-runs.js?v=e5bbe2496b';
+import {normalizeUiPrefs, UI_PREFS_KEY} from './usability.js?v=c011d81ee9';
+import {routeHash, tintOf} from './ui-model.js?v=c011d81ee9';
+import {createOutbox} from './chats.js?v=c011d81ee9';
+import {LOCAL_RUNS_KEY, patchLocalRun as patchStoredRun, cancelLocalRunsForChat} from './local-runs.js?v=c011d81ee9';
 
 // Where an earlier build kept conversations; read once by importLocalChats().
 const CHAT_KEY = 'agent-control-bot-chats-v2';
@@ -46,7 +46,22 @@ export const store = {
 };
 // `profiles` is cosmetic UI state only (tint, pin). An earlier build also wrote
 // name/instructions here, which would shadow the server's values forever.
-for (const id of Object.keys(store.profiles)) { delete store.profiles[id].name; delete store.profiles[id].instructions; }
+const cleanProfiles = profiles => {
+  let changed = false;
+  for (const id of Object.keys(profiles)) {
+    const entry = profiles[id];
+    if (!entry || typeof entry !== 'object') { delete profiles[id]; changed = true; continue; }
+    for (const legacy of ['name', 'instructions']) {
+      if (legacy in entry) { delete entry[legacy]; changed = true; }
+    }
+  }
+  return changed;
+};
+if (!store.profiles || typeof store.profiles !== 'object' || Array.isArray(store.profiles)) store.profiles = {};
+// Stripping in memory only re-ran on every load against the same stored object,
+// so the keys came straight back. Write the cleaned copy once instead, and the
+// legacy shape never comes back after the first boot on this build.
+if (cleanProfiles(store.profiles)) saveLocal(META_KEY, store.profiles);
 
 export const isStaticDemo = () => { const m = document.querySelector('meta[name="agent-backend"]'); return !m || m.getAttribute('content') === 'static'; };
 export const isAdmin = () => !isStaticDemo() && ['owner', 'admin'].includes(store.state?.me?.role);
@@ -155,7 +170,18 @@ export async function clearMessages(key) {
 }
 export function setTyping(key, on) { on ? store.typing.add(key) : store.typing.delete(key); changed('thread'); }
 export function setProfile(botId, patch) { store.profiles[botId] = {...(store.profiles[botId] || {}), ...patch}; saveLocal(META_KEY, store.profiles); }
-export function setPref(key, value) { Object.assign(store.prefs, normalizeUiPrefs({...store.prefs, [key]: value})); saveLocal(UI_PREFS_KEY, store.prefs); }
+// normalizeUiPrefs is a whitelist, so it answers a caller with the default of any
+// key or value it does not know: the control would look stuck and the caller's
+// value would vanish. Both cases are refused out loud instead (the host toasts a
+// thrown error), and the four keys it does answer are the only prefs there are.
+const PREF_KEYS = Object.keys(normalizeUiPrefs());
+export function setPref(key, value) {
+  if (!PREF_KEYS.includes(key)) throw new Error(`Unknown UI preference: ${key}`);
+  const next = normalizeUiPrefs({...store.prefs, [key]: value});
+  if (next[key] !== value) throw new Error(`Unsupported value for ${key}: ${String(value)}`);
+  Object.assign(store.prefs, next);
+  saveLocal(UI_PREFS_KEY, store.prefs);
+}
 /** What the user picked: 'system' (default), 'cream' or 'cocoa'. */
 export const themeChoice = () => { const id = loadLocal(THEME_KEY, 'system'); return THEMES.some(t => t.id === id) ? id : 'system'; };
 const nightQuery = () => matchMedia('(prefers-color-scheme: dark)');
@@ -179,9 +205,6 @@ export function recentRuns(groupId) {
   const local = loadLocal(LOCAL_RUNS_KEY, []).filter(r => r.groupId === groupId);
   const byId = new Map([...local, ...server].map(r => [r.id, r]));
   return [...byId.values()].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
-}
-export async function logLocalRun(run) {
-  return mutateLocalRuns(runs => { runs.unshift(run); runs.splice(50); });
 }
 export async function patchLocalRun(id, patch) { return patchStoredRun(id, patch); }
 

@@ -12,23 +12,22 @@ Local-first, **zero-npm-runtime-dependency** multi-bot dashboard with human-appr
 - `tests/` — `node --test`. `docs/BUILD-PLAN.md` tracks the roadmap phases.
 
 ## Commands — every change must leave these green
-- `npm run check` — syntax-check every source file.
+- `npm run check` — syntax-check every source file (`node scripts/check.mjs` walks `src/`, `shared/`, `agent/`, `extension/`, `scripts/`).
 - `npm test` — unit/integration tests.
 - `npm run build:pages` — regenerate `docs/` from `shared/`.
 - `npm run test:coverage` — tests with V8 coverage.
 CI (`.github/workflows/ci.yml`) runs `check`, `test`, and a **docs-drift** check (re-builds and fails if `docs/` is stale).
 
 ## Hard invariants (each is enforced by a test — do not work around them)
-1. **Asset registry.** Every module reachable from the `index.html` scripts (`app.js`, `local-api.js`, `transport.js`) must be listed in **both** `scripts/build-pages.js` → `files` and `src/server.js` → `ASSETS`. Miss one and the served UI dies on a bare 404. → `tests/assets.test.js`.
-2. **Syntax coverage.** Every `src/*.js` and `shared/*.js` must appear in the `check` script. → `tests/check-coverage.test.js`.
+1. **Asset registry.** Every module reachable from the `index.html` scripts (`app.js`, `local-api.js`, `transport.js`) must be listed in `shared/assets.js`. Miss one and the served UI dies on a bare 404. → `tests/assets.test.js`.
+2. **Syntax coverage.** Every file under the `check` script's roots must be walked by `scripts/check.mjs`. → `tests/check-coverage.test.js`.
 3. **No docs drift.** Copied UI assets in `docs/` are generated. Edit `shared/`, then `npm run build:pages`; CI + `tests/pages-bundle.test.js` fail otherwise. Hand-written markdown in `docs/` is edited in place.
 4. **CSP parity.** The `Content-Security-Policy` meta in `shared/index.html` must equal the `CSP` constant in `shared/core.js` (also sent as a header). → `tests/security-headers.test.js`.
 
 ## Adding a shared module (the #1 source of regressions)
 1. Create `shared/<name>.js` (browser-safe).
-2. Add `'<name>.js'` to `scripts/build-pages.js` `files` **and** `src/server.js` `ASSETS`.
-3. Add `node --check shared/<name>.js` to the `check` script.
-4. `npm run build:pages`.
+2. Add `'<name>.js'` to `shared/assets.js` — the one list read by both `scripts/build-pages.js` and `src/server.js`.
+3. `npm run build:pages`.
 `tests/assets.test.js` walks the import closure, so step 2 cannot be forgotten silently.
 
 ## Working alongside other agents
@@ -40,7 +39,7 @@ More than one agent may edit this tree at the same time. To stay safe:
 
 ## Security
 - `.env` is git-ignored and loaded at startup by `src/env.js`. **Never commit or print secrets.** Set `AGENT_SKIP_DOTENV=1` to ignore it (tests do this).
-- AI providers are the environment (`AI_BASE_URL`, `AI_API_KEY` or `OPENAI_API_KEY`, `AI_MODEL`, `AI_API_STYLE` `chat` | `responses`, `AI_TIMEOUT_MS`) plus saved BYOK providers in the workspace vault (**You → AI and models**). Any OpenAI-compatible endpoint works. Never commit or print keys.
+- AI providers are the environment (`AI_BASE_URL`, `AI_API_KEY` or `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY`, `AI_MODEL`, `AI_API_STYLE` `chat` | `responses` | `anthropic` | `gemini`, `AI_TIMEOUT_MS`) plus saved BYOK providers in the workspace vault (**You → AI and models**). Four wire shapes are spoken (`shared/ai-presets.js` is the one list of protocols and provider presets): OpenAI chat completions, OpenAI responses, Anthropic Messages and Google Gemini. Saving a provider reads that provider's own model catalogue with the pasted key, so the picker offers models the key can use; `PATCH /api/ai/providers/:id` renames, re-points or rotates the key. A key is never returned and never printed. Never commit or print keys.
 - Model output never gets publication/filesystem tools; the **final Post click is always human**. A bot reaches a browser only through the opt-in `browser.use` permission: it requests a page in its reply, a member approves (or set that bot to auto), and a paired local agent runs it (`shared/bot-browser.js`, `src/bot-browser.js`). Click/type on X is refused in validation; keep it that way.
 
 ## Commits

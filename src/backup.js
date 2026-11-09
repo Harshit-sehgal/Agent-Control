@@ -16,7 +16,7 @@ import crypto from 'node:crypto';
 import * as wf from '../shared/workflow.js';
 import {initialState, validHttpUrl} from '../shared/core.js';
 import {DEFAULT_WORKSPACE, ROLES} from './auth.js';
-import {readDocuments} from './sqlite-store.js';
+import {readDocuments, readMemory} from './sqlite-store.js';
 import {INTERRUPT_STATUSES} from '../shared/coordination.js';
 import {validWorkspaceId} from './workspaces.js';
 
@@ -27,7 +27,7 @@ export function fail(message, status = 400) { throw Object.assign(new Error(mess
 const EXPORT_TABLES = ['users', 'password_resets', 'workspaces', 'workspace_members', 'agents', 'agent_tasks', 'jobs', 'notifications', 'notification_prefs', 'settings', 'tasks', 'groups', 'bots', 'candidates', 'drafts', 'evidence', 'runs', 'events', 'group_runs', 'group_messages'];
 // Added after the first backups were written: exported when present, and an
 // older file that lacks them still restores.
-const OPTIONAL_TABLES = ['chat_messages'];
+const OPTIONAL_TABLES = ['chat_messages', 'memory'];
 // Never exported, by design: credential ciphertext cannot be decrypted under a
 // different key, pairing codes are single-use, and a live session id is a
 // credential an attacker holding a backup must not obtain.
@@ -234,5 +234,6 @@ export function tablesToState(tables) {
   s.evidence = (tables.evidence || []).map(e => ({...e}));
   s.events = (tables.events || []).map(e => ({...e}));
   s.tasks = (tables.tasks || []).map(t => ({...t, payload: JSON.parse(t.payload || '{}'), result: t.result ? JSON.parse(t.result) : null}));
+  s.memory = readMemory(kind => (tables.memory || []).filter(row => row.kind === kind));
   return s;
 }

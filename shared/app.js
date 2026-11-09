@@ -177,6 +177,16 @@ forms['reset-form'] = async (form, f) => {
   } catch (error) { const node = el('login-error'); if (node) node.textContent = error.message; }
 };
 
+/** Register the worker at boot, not only when push is turned on: it is what
+ * lets the installed app open offline, and until a user opted into
+ * notifications there was no registration at all, so an installed icon opened
+ * to a blank error page. An unsupported browser, an insecure origin or a failed
+ * install only costs this console line; the app itself does not need it. */
+function registerWorker() {
+  if (!window.isSecureContext || !('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.register('./sw.js').catch(error => console.warn('Service worker not registered:', error?.message));
+}
+
 const fail = error => toast(error?.message || 'That did not work.', true);
 const autoGrow = node => { node.style.height = 'auto'; node.style.height = `${Math.min(node.scrollHeight, 180)}px`; };
 
@@ -232,5 +242,5 @@ window.addEventListener('resize', () => { if (store.state) setInert(); });
 // `toggle` does not bubble, so listen in the capture phase to remember open source panels.
 document.addEventListener('toggle', ev => { const id = ev.target.dataset?.evidence; if (!id) return; if (ev.target.open) { store.openEvidence.add(id); if (store.openEvidence.size > 50) store.openEvidence.delete(store.openEvidence.values().next().value); } else store.openEvidence.delete(id); }, true);
 
-applyTheme(); watchSystemTheme(); bringBotsToLife();
+applyTheme(); watchSystemTheme(); bringBotsToLife(); registerWorker();
 boot();

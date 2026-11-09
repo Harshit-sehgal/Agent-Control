@@ -41,6 +41,22 @@ export function fromRow(row, {json = [], drop = []} = {}) {
 }
 /** Rebuild the collections that are stored one document per row. `rows(table)`
  * abstracts the source, so a live database and a backup file share one reader. */
+/** A forgotten chat is stored as the moment it was forgotten, so a message
+ * written after that request rebuilds the recap. Older rows stored `true`. */
+const parseForgotten = doc => {
+  try { return JSON.parse(doc); } catch { return true; }
+};
+
+/** Rebuild durable memory (per-model rulebooks, per-chat recaps) from rows.
+ * `rows(kind)` yields `{key, doc}`. Missing kinds are simply empty. */
+export function readMemory(rows) {
+  const memory = {version: 1, rulebooks: {}, chats: {}, forgottenChats: {}};
+  for (const row of rows('rulebook')) memory.rulebooks[row.key] = JSON.parse(row.doc);
+  for (const row of rows('chat')) memory.chats[row.key] = JSON.parse(row.doc);
+  for (const row of rows('forgotten')) memory.forgottenChats[row.key] = parseForgotten(row.doc);
+  return memory;
+}
+
 export function readDocuments(rows) {
   const s = {};
   s.candidates = rows('candidates').map(c => c.doc ? fromRow(c) : {...fromRow(c, {json: ['score']}), demo: Boolean(c.demo)});
@@ -68,7 +84,7 @@ const MIGRATIONS = [
       CREATE TABLE IF NOT EXISTS bots (
         id TEXT PRIMARY KEY, group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
         name TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', type TEXT NOT NULL DEFAULT 'custom',
-        contract TEXT, permissions TEXT, created_at TEXT NOT NULL);
+        contract TEXT, permissions TEXT, created_at TEXT NOT NULL, origin TEXT, created_by TEXT);
       CREATE TABLE IF NOT EXISTS candidates (
         id TEXT PRIMARY KEY, url TEXT NOT NULL, author TEXT NOT NULL, topic TEXT NOT NULL DEFAULT '',
         text TEXT NOT NULL, status TEXT NOT NULL, score TEXT, demo INTEGER NOT NULL DEFAULT 0,
@@ -204,6 +220,24 @@ const MIGRATIONS = [
   // does not fall back to the defaults after You → Data saves a policy.
   {to: 8, up(db) {
     db.exec('ALTER TABLE settings ADD COLUMN retention TEXT');
+  }},
+  // v9: durable memory gets its own table. A rulebook and a chat recap are
+  // variable-size JSON keyed by model or conversation, which suits neither the
+  // typed tables nor kv (kv is excluded from backups on purpose).
+  {to: 9, up(db) {
+    db.exec(`CREATE TABLE IF NOT EXISTS memory (
+      kind TEXT NOT NULL, key TEXT NOT NULL, doc TEXT NOT NULL,
+      PRIMARY KEY (kind, key))`);
+  }},
+  // v10: a bot created by another bot keeps how it came to exist. Without these
+  // columns the creator is only known for the life of the process. The CREATE
+  // TABLE above already declares them, so an unconditional ALTER would abort a
+  // fresh database's boot with "duplicate column name: origin"; only a table
+  // made before this change needs them added.
+  {to: 10, up(db) {
+    const columns = db.prepare('PRAGMA table_info(bots)').all().map(c => c.name);
+    if (!columns.includes('origin')) db.exec('ALTER TABLE bots ADD COLUMN origin TEXT');
+    if (!columns.includes('created_by')) db.exec('ALTER TABLE bots ADD COLUMN created_by TEXT');
   }}];
 /** Current schema version, derived from the migration list so it cannot drift.
  * Tests and operators read it. */
@@ -233,7 +267,13 @@ export class SqliteStore {
     this.db.exec(`CREATE TABLE IF NOT EXISTS schema_meta (id INTEGER PRIMARY KEY CHECK (id=1), version INTEGER NOT NULL, updated_at TEXT NOT NULL);`);
     const row = this.db.prepare('SELECT version FROM schema_meta WHERE id=1').get();
     const current = row?.version ?? 0;
-    if (current >= MIGRATIONS.length) return;
+    // A database written by a newer build cannot be read by this one: the
+    // columns the code expects may not exist yet, or may have been renamed.
+    // Refusing loudly beats silently running against a schema we do not know.
+    if (current > MIGRATIONS.length) {
+      throw new Error(`${this.dbPath} was written by a newer version of this app (schema v${current}; this build understands v${MIGRATIONS.length}). Update the app, or restore a backup taken with this version.`);
+    }
+    if (current === MIGRATIONS.length) return;
     this.db.exec('BEGIN');
     try {
       for (const migration of MIGRATIONS) {
@@ -307,6 +347,7 @@ export class SqliteStore {
       groupMessages: {}, groupRuns: [], chats: {},
       ai: (() => { try { return JSON.parse(this.kvGet('ai') || '{}'); } catch { return {}; } })(),
       browserRequests: (() => { try { return JSON.parse(this.kvGet('browser_requests') || '[]'); } catch { return []; } })(),
+      memory: readMemory(kind => this.db.prepare('SELECT key, doc FROM memory WHERE kind=? ORDER BY rowid').all(kind)),
     };
     const cfg = this.db.prepare('SELECT * FROM settings WHERE id=1').get();
     if (cfg) {
@@ -325,6 +366,8 @@ export class SqliteStore {
         ...(b.contract ? {contract: JSON.parse(b.contract)} : {}),
         ...(b.permissions ? {permissions: JSON.parse(b.permissions)} : {}),
         ...(b.settings ? {settings: JSON.parse(b.settings)} : {}),
+        ...(b.origin ? {origin: b.origin} : {}),
+        ...(b.created_by ? {createdBy: JSON.parse(b.created_by)} : {}),
       }));
       delete g.rowid;
       if (g.settings) g.settings = JSON.parse(g.settings); else delete g.settings;
@@ -348,7 +391,7 @@ export class SqliteStore {
   }
   writeCollections(state) {
     const t = this.transaction(() => {
-      for (const table of ['groups', 'bots', 'candidates', 'drafts', 'evidence', 'runs', 'events', 'group_messages', 'group_runs', 'tasks', 'chat_messages']) {
+      for (const table of ['groups', 'bots', 'candidates', 'drafts', 'evidence', 'runs', 'events', 'group_messages', 'group_runs', 'tasks', 'chat_messages', 'memory']) {
         this.db.prepare(`DELETE FROM ${table}`).run();
       }
       this.db.prepare('INSERT INTO kv (key,value) VALUES (\'created_at\',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(state.createdAt || now());
@@ -362,8 +405,8 @@ export class SqliteStore {
         this.db.prepare('INSERT INTO groups (id,name,description,created_at,settings) VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, description=excluded.description, settings=excluded.settings')
           .run(g.id, g.name, g.description || '', g.createdAt || now(), g.settings ? JSON.stringify(g.settings) : null);
         for (const b of g.bots) {
-          this.db.prepare('INSERT INTO bots (id,group_id,name,instructions,type,contract,permissions,created_at,settings) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, instructions=excluded.instructions, type=excluded.type, contract=excluded.contract, permissions=excluded.permissions, settings=excluded.settings')
-            .run(b.id, g.id, b.name, b.instructions || '', b.type || 'custom', b.contract ? JSON.stringify(b.contract) : null, b.permissions ? JSON.stringify(b.permissions) : null, b.createdAt || now(), b.settings ? JSON.stringify(b.settings) : null);
+          this.db.prepare('INSERT INTO bots (id,group_id,name,instructions,type,contract,permissions,created_at,settings,origin,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, instructions=excluded.instructions, type=excluded.type, contract=excluded.contract, permissions=excluded.permissions, settings=excluded.settings, origin=excluded.origin, created_by=excluded.created_by')
+            .run(b.id, g.id, b.name, b.instructions || '', b.type || 'custom', b.contract ? JSON.stringify(b.contract) : null, b.permissions ? JSON.stringify(b.permissions) : null, b.createdAt || now(), b.settings ? JSON.stringify(b.settings) : null, b.origin ?? null, b.createdBy ? JSON.stringify(b.createdBy) : null);
         }
       }
       for (const c of state.candidates) {
@@ -394,7 +437,7 @@ export class SqliteStore {
       }
       for (const r of state.groupRuns) {
         this.db.prepare('INSERT INTO group_runs (id,group_id,input,recipients,mode,status,current_step,created_at,started_at,completed_at,trace,last_output,error,checkpoint,doc) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-          .run(r.id, r.groupId, r.input, JSON.stringify(r.recipients), r.mode, r.status, r.currentStep ?? 0, r.createdAt, r.startedAt ?? null, r.completedAt ?? null, JSON.stringify(r.trace || []), r.lastOutput ?? null, r.error ?? null, r.checkpoint ? JSON.stringify(r.checkpoint) : null, JSON.stringify(r));
+          .run(r.id, r.groupId, r.input, JSON.stringify(r.recipients), r.mode, r.status, r.currentStep ?? 0, r.createdAt || now(), r.startedAt ?? null, r.completedAt ?? null, JSON.stringify(r.trace || []), r.lastOutput ?? null, r.error ?? null, r.checkpoint ? JSON.stringify(r.checkpoint) : null, JSON.stringify(r));
       }
       for (const [groupId, list] of Object.entries(state.groupMessages || {})) {
         for (const m of list || []) {
@@ -405,6 +448,11 @@ export class SqliteStore {
       for (const [key, list] of Object.entries(state.chats || {})) {
         for (const m of list || []) this.db.prepare('INSERT INTO chat_messages (id,chat_key,doc,at) VALUES (?,?,?,?)').run(`${key}/${m.id}`, key, JSON.stringify(m), m.at || now());
       }
+      const memory = state.memory || {};
+      const putMemory = this.db.prepare('INSERT INTO memory (kind,key,doc) VALUES (?,?,?)');
+      for (const [key, doc] of Object.entries(memory.rulebooks || {})) putMemory.run('rulebook', key, JSON.stringify(doc));
+      for (const [key, doc] of Object.entries(memory.chats || {})) putMemory.run('chat', key, JSON.stringify(doc));
+      for (const [key, doc] of Object.entries(memory.forgottenChats || {})) putMemory.run('forgotten', key, JSON.stringify(doc));
     });
     return t;
   }

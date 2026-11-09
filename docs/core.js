@@ -3,7 +3,7 @@
 // global, so without this guard the first failure is a bare "crypto is not
 // defined" deep inside state setup. Fail early with the actual fix instead.
 if (typeof crypto === 'undefined' || typeof crypto.randomUUID !== 'function') {
-  throw new Error('Agent Control requires Node.js 22+ (global Web Crypto). Run `nvm use` (see .nvmrc) or install Node 22.');
+  throw new Error('Agent Control requires Node.js 22.5+ (global Web Crypto, node:sqlite). Run `nvm use` (see .nvmrc) or install Node 22.');
 }
 export const uuid = () => crypto.randomUUID();
 export const clamp = (n, min, max) => Math.max(min, Math.min(max, n));

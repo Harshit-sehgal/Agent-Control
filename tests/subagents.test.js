@@ -8,7 +8,7 @@ import {ACTIONS,canBot} from '../shared/contracts.js';
 import {createRun,createEnvelope} from '../shared/coordination.js';
 import {replyWithSubagents} from '../src/subagents.js';
 import {coordinationState,runGroup} from '../src/coordination.js';
-import {JsonStore} from '../src/store.js';
+import {SqliteStore} from '../src/sqlite-store.js';
 
 const block = body => '```spawn\n' + (typeof body === 'string' ? body : JSON.stringify(body)) + '\n```';
 const bot = (id, extra = {}) => ({id, name: id[0].toUpperCase() + id.slice(1), instructions: `Act as ${id}`, type: 'custom', ...extra});
@@ -140,7 +140,7 @@ test('the envelope describes the tool only to a bot that holds it', () => {
 test('a group run files the helper lines and keeps the final reply as the step output', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ac-subagent-'));
   try {
-    const store = await new JsonStore(path.join(dir, 'state.json')).init();
+    const store = await new SqliteStore(path.join(dir,'state.db'),path.join(dir,'state.json')).init();
     const parent = bot('writer', {type: 'writing', permissions: [SUBAGENT_PERMISSION]});
     const group = {id: 'g', name: 'G', bots: [parent]};
     await store.update(s => { s.groups = [group]; coordinationState(s); s.groupRuns.push(createRun({group, message: 'draft a reply', makeId: () => 'run-1', chatKey: 'team-g'})); });

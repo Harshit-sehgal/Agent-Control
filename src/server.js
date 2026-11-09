@@ -5,22 +5,17 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import crypto from 'node:crypto';
+import {ASSETS} from '../shared/assets.js';
 import {openStore as openSqliteStore} from './sqlite-store.js';
-// The JSON store remains available behind STORE_BACKEND=json for testing and
-// as an explicit escape hatch; SQLite is the default persistence engine.
-const openStore = async file => process.env.STORE_BACKEND === 'json'
-  ? new (await import('./store.js')).JsonStore(file).init()
-  : openSqliteStore(file);
 import {scoreCandidate,CSP} from '../shared/core.js';
 import * as wf from '../shared/workflow.js';
-import * as tasks from '../shared/tasks.js';
 import * as agent from './agent.js';
-import * as notifications from './notifications.js';
 import {aiEnabled,aiModel,aiProvider,makeDraft} from './ai.js';
 import {resolveConfig} from './ai-providers.js';
 import {startScheduler,startRetention} from './scheduler.js';
-import {queueGroupRun,markInterrupted,runBotTask} from './coordination.js';
-import {createQueue,recoverQueue,defaultHandlers} from './queue.js';
+import {markInterrupted} from './coordination.js';
+import {createQueue,recoverQueue} from './queue.js';
+import {taskHandlers,createNotifier} from './handlers.js';
 import {Auth} from './auth.js';
 import {openWorkspaces} from './workspaces.js';
 import {createPush} from './push.js';
@@ -33,6 +28,7 @@ import {accountRoutes} from './routes-account.js';
 import {workspaceRoutes} from './routes-workspaces.js';
 import {pushRoutes} from './routes-push.js';
 import {aiRoutes} from './routes-ai.js';
+import {memoryRoutes} from './routes-memory.js';
 
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const PUBLIC=path.join(ROOT,'shared');
@@ -43,7 +39,7 @@ const PORT=Number(process.env.PORT||4173);
 const HOST=process.env.HOST||'127.0.0.1';
 const STORE_PATH=process.env.DATA_FILE||path.join(ROOT,'data','state.json');
 const PASSWORD=process.env.DASHBOARD_PASSWORD||crypto.randomBytes(12).toString('base64url');
-const store=await openStore(STORE_PATH);
+const store=await openSqliteStore(STORE_PATH);
 // First boot bootstraps the owner account from DASHBOARD_PASSWORD; afterwards
 // sessions, resets and roles live in the database.
 const auth=new Auth(store);
@@ -65,46 +61,10 @@ function startWorkspace(ws,workspaceId){
   // than left leased to a process that no longer exists.
   const recoveredAgentTasks=agent.recoverAgentTasks(ws);
   if(recoveredAgentTasks)console.log(`Re-armed ${recoveredAgentTasks} agent task(s) from a previous run.`);
-  // Notifications enqueue themselves as queue tasks.
-  const enqueue=(s,spec)=>s.update(st=>{tasks.enqueueTask(st,spec);}).catch(error=>console.error('Notification enqueue:',error.message));
-  const notify=(event)=>{
-    const id=notifications.notify(ws,enqueue,{workspaceId,userId:null,...event});
-    // A notification for one person goes to that person's devices; one for the
-    // workspace goes to every member who can still sign in.
-    const members=auth.listUsers(workspaceId).filter(u=>!u.disabled).map(u=>u.id);
-    push.announce(ws,enqueue,event.userId?members.filter(id=>id===event.userId):members,{id,title:event.title,body:event.body});
-    return id;
-  };
-  // Task kinds map to handlers here rather than inside the queue module, so the
-  // worker stays independent of the server surface it drives.
-  const queue=createQueue(ws,{
-    ...defaultHandlers(ws,notify),  'candidate-draft': async task=>processCandidate(ws,task.payload.candidateId),
-    'group-run': async task=>{ await queueGroupRun(ws,{groupId:task.payload.groupId,message:task.payload.message,directBotId:task.payload.directBotId}); },
-    'bot-task': async task=>runBotTask(ws,task),
-    'agent-job': async task=>{
-      // Dispatch to a paired local agent: enqueue an agent task for each agent
-      // that holds the required permission. The queue's idempotency and the
-      // agent-side lease make exactly-once practical without claiming more than
-      // the protocol can prove.
-      const kind=task.payload.action;
-      const agents=ws.all("SELECT id,permissions FROM agents WHERE revoked_at IS NULL").map(a=>({id:a.id,permissions:JSON.parse(a.permissions||'[]')}))
-        .filter(a=>!task.payload.agentId||a.id===task.payload.agentId)
-        .filter(a=>a.permissions.includes(kind));
-      if(!agents.length)throw new Error('No paired local agent holds the permission this job needs.');
-      for(const a of agents){
-        agent.enqueueAgentTask(ws,a.id,{kind,payload:task.payload.params||{},idempotencyKey:`job:${task.id}:${a.id}`,createdBy:task.createdBy});
-      }
-      return {dispatchedTo:agents.map(a=>a.id)};
-    },
-    'notification': async task=>{
-      // A push goes to a device, not to a stored webhook, and a failed one
-      // raises no notification of its own: that would be pushed again.
-      if(task.payload.channel==='push')return push.deliver(task);
-      const result=await notifications.deliver(ws,task);
-      ws.run('UPDATE notifications SET status=?, sent_at=? WHERE id=?','sent',new Date().toISOString(),task.payload.notificationId);
-      return result;
-    },
-  },{onFail:(task,error)=>task.payload?.channel==='push'?null:Promise.resolve(notify({title:'A background task failed',body:`${task.title}: ${error.message}`,kind:'task-failure',meta:{taskId:task.id}}))});
+  // Notifications enqueue themselves as queue tasks and fan out to the member's
+  // devices; the queue handler map lives in src/handlers.js.
+  const notify=createNotifier({ws,workspaceId,auth,push});
+  const queue=createQueue(ws,taskHandlers({ws,workspaceId,auth,push,notify,processCandidate}),{onFail:(task,error)=>task.payload?.channel==='push'?null:Promise.resolve(notify({title:'A background task failed',body:`${task.title}: ${error.message}`,kind:'task-failure',meta:{taskId:task.id}}))});
   // Nothing runs until recovery has finished, so a stalled task is re-armed
   // before the first sweep can see it.
   let stops=[],stopped=false;
@@ -143,6 +103,7 @@ accountRoutes(router,app);
 workspaceRoutes(router,app);
 pushRoutes(router,app);
 aiRoutes(router,app);
+memoryRoutes(router);
 
 async function api(req,res,u){
   const found=router.find(req.method,u.pathname),access=found?.route.access;
@@ -169,18 +130,22 @@ async function api(req,res,u){
     // (a backup restore) ask for more than the 128 KB default.
     body:async(limit=128*1024)=>parsed??=safeJson(await rawBody(req,limit))};
   const invoke=()=>found.route.handler(context);
-  const managesWorkspace=found.route.pattern==='/api/admin/restore'||(req.method==='DELETE'&&found.route.pattern==='/api/workspaces/current');
-  const result=scope?.trackWork&&!managesWorkspace
+  // A route that manages the whole workspace (restore, delete) runs outside the
+  // work tracker: the tracker exists so those operations can wait for in-flight
+  // requests, so the operation itself must not count as one and wait on itself.
+  const result=scope?.trackWork&&found.route.tracksWork
     ? await scope.trackWork(invoke)
     : await invoke();
   const {status,body,headers}=isReply(result)?result:{status:200,body:result,headers:{}};
   if(req.method==='HEAD'){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...SECURITY,...headers});return res.end();}
   send(res,status,body,headers);
 }
-const ASSETS=new Set(['index.html','app.css','transport.js','local-api.js','app.js','ui-kit.js','ui-model.js','ui-store.js','ui-dialogs.js','ui-chat.js','ui-views.js','ui-panel.js','ui-sheets.js','ui-admin.js','ui-actions.js','ui-fx.js','ui-push.js','sw.js','manifest.webmanifest','icon-192.png','icon-512.png','core.js','workflow.js','tasks.js','evidence.js','contracts.js','bot-settings.js','bot-browser.js','subagents.js','retention.js','coordination.js','chats.js','group-simulator.js','chat-engine.js','usability.js','local-runs.js','demo-feed.html']);
+// The served files are the same list the Pages build ships (shared/assets.js),
+// so a UI module cannot be added to one and forgotten in the other.
+const SERVED=new Set(ASSETS);
 async function serve(req,res,u){
   let rel=u.pathname==='/'?'index.html':u.pathname.slice(1);
-  if(!ASSETS.has(rel))return send(res,404,{error:'Not found'});
+  if(!SERVED.has(rel))return send(res,404,{error:'Not found'});
   try {const body=await fs.readFile(path.join(PUBLIC,rel));res.writeHead(200,{'Content-Type':TYPES[rel.split('.').pop()]||'application/octet-stream','Content-Security-Policy':CSP,...SECURITY,'Cache-Control':'no-store'});res.end(req.method==='HEAD'?undefined:body);}catch{return send(res,404,{error:'Missing asset'});}
 }
 const handler=async(req,res)=>{

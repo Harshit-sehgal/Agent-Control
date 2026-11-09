@@ -40,19 +40,61 @@ Bots behave like Grok bots on X: mention one anywhere and it answers in that cha
 - **Group info → Group settings:** name and description; routing (bots take turns in order, only the first bot answers unless you mention others, or every bot answers); pipeline order and members; step limit (1 to 12); approve between steps; and bot handoffs. You can remove bots from a group, and an admin can delete any group except X-engage.
 - **Browser control on your own device:** tick `browser.use` in any bot's profile (What it may do). The bot can then ask for a web page in its reply. A card in the chat shows the URL and steps, with Approve and Decline. Approved requests run on your paired local agent (`agent/agent.mjs`, see [`docs/AGENT-PROTOCOL.md`](docs/AGENT-PROTOCOL.md)), and the bot continues with the result. Set *Browser requests* to "Run on my local agent without asking" to skip the card for that bot. Bots may read X but can never click or type there.
 - **Sub-agents on demand:** tick `subagent.spawn` in a bot's profile (What it may do) and that bot can hand one small job to a helper model. The helper has no tools, no web access and no memory of the chat, cannot spawn another helper, and its answer comes back to the bot, which writes the reply. One helper per reply.
+- **Durable memory:** every model keeps a rulebook of lasting instructions and a rolling recap of each conversation, stored in the workspace, so a later turn starts with the context instead of a blank slate. Durable user sentences ("always…", "from now on…") are captured immediately, and one bounded model pass occasionally condenses both. The memory is per model, not per bot, and you can read, correct or forget it in the bot profile or through `/api/memory`. Switch **Memory** off on a bot to leave that bot's turns out of it.
+- **Bots that ask each other:** tick `bot.ask` and a bot can put one `ask` block in its reply to get a direct answer from a named teammate. The teammate answers as itself, on its own model and rulebook, and the asker gets one more turn with the answer marked as untrusted text. One round only; the teammate cannot ask anyone else.
+- **Bots that add a teammate:** tick `bot.create` and a bot can add one lasting bot to its group with a name and a job. The new bot is a normal roster record with **no permissions** and a custom type; a person reviews it and grants anything it needs. A model can never mint itself extra authority.
 - **Scheduled tasks:** a chat's info panel → Scheduled tasks (or + → Schedule a task) asks a bot or a group to run a prompt once or every N minutes. The results post into that chat.
 
 Settings are validated by one shared module (`shared/bot-settings.js`), so the server and the Pages demo accept the same values. The exact routing and safety rules are in [`docs/COORDINATION.md`](docs/COORDINATION.md).
 
 ## AI: bring your own key (BYOK) and model selection
 
-Bots run on **your own** models. Open **You → AI and models** (admin) and add any OpenAI-compatible provider — OpenAI, Groq, OpenRouter, a local Ollama/vLLM, or a router like FreeLLMAPI. Each provider is a name, a base URL and an API key:
+Bots run on **your own** models. Open **You → AI and models** (admin) and add a provider. A provider is a name, an endpoint, an API key and one of five wire protocols, so Claude, Gemini and Azure are first-class instead of "an OpenAI URL":
 
-- **Keys are stored encrypted** in the workspace vault (AES-256-GCM) and are never shown again; only the provider name, host and model list are visible.
-- **Load models** fetches the provider's own `GET /v1/models`, so the picker lists what the provider actually offers.
+| protocol | it calls | auth header | when you need it |
+|---|---|---|---|
+| `openai-chat` | `POST {base}/chat/completions` | `authorization: Bearer <key>` | the default; almost every gateway, router and local server speaks it |
+| `openai-responses` | `POST {base}/responses` | `authorization: Bearer <key>` | OpenAI's newer shape; `api.openai.com` is detected as this |
+| `anthropic` | `POST {base}/messages` | `x-api-key` plus `anthropic-version: 2023-06-01` | Claude; the system prompt travels as its own field |
+| `gemini` | `POST {base}/models/{model}:generateContent` | `x-goog-api-key` | Google AI Studio keys; the body is `systemInstruction`, `contents` and `generationConfig` |
+| `azure-openai` | `POST {base}/openai/deployments/{deployment}/chat/completions?api-version=…` | `api-key` | Azure OpenAI; the model id is the deployment name and the API version is required |
+
+A preset fills the endpoint and the protocol. There are 29: OpenAI, Anthropic (Claude), Google Gemini, xAI, Groq, Mistral, DeepSeek, OpenRouter, Together, Fireworks, Perplexity, Cerebras, Cohere, Qwen (DashScope), Moonshot, Zhipu (GLM), DeepInfra, Hyperbolic, Nebius, NVIDIA NIM, GitHub Models, Azure OpenAI, LiteLLM, Ollama, LM Studio, vLLM/llama.cpp, LocalAI, Jan, and a custom endpoint. Azure and a custom endpoint ask you to type the URL; the local servers ignore the key, so any string works.
+
+- **Any OpenAI-compatible endpoint works.** Cohere's compatibility endpoint, GitHub Models, NVIDIA NIM, a Cloudflare-style gateway, LiteLLM, an Open WebUI-style proxy or a local server all speak `openai-chat`: pick **Custom endpoint** and paste its URL. The protocol is auto-detected from the host (`api.anthropic.com` → anthropic, `generativelanguage.googleapis.com` → gemini, `*.openai.azure.com` → Azure, `api.openai.com` → responses, anything else → chat completions), and **Protocol** overrides the guess.
+- **Keys and custom header values are stored encrypted** in the workspace vault (AES-256-GCM) and are never shown again; only the provider name, host, model list and the header *names* are visible.
+- **Custom headers** are optional: one `Name: value` per line in the provider form, sent with every request, up to eight. Yours are applied last, so a gateway that wants `x-api-key` instead of a bearer token works. Values are write-only: an empty box keeps the saved set and typing replaces the whole set.
+- **Azure needs its API version.** The form shows an **API version** field for that protocol, and a blank one means `2024-10-21`. The model id is the deployment name you created. The catalogue is read from `GET {base}/openai/deployments?api-version=…`; if that list comes back empty, type the deployment name into the model field.
+- **The model list is read from the provider with the key you saved.** Saving a provider immediately fetches its own catalogue, so the picker lists the models that key can actually use: `GET {base}/models` for the OpenAI shapes, `GET {base}/models?limit=1000` paging on `has_more` for Anthropic, and `GET {base}/models?pageSize=200` paging on `nextPageToken` for Gemini, which hides embedding-only models. An Ollama `/v1` endpoint without `/v1/models` falls back to `GET /api/tags`.
+- **The whole catalogue is kept.** Both the chat-capable ids and the full list the key can see are stored with the provider, so the row reads `12 model(s) (+30 listed)`, and a model the filter hides can still be typed by hand. **Refresh models** re-reads the list.
+- **A failed catalogue read costs freshness, not the provider.** On a refresh the error is recorded and shown on that row while the last good list stays. A save that changes the endpoint, key, header set or API version starts a new list instead, because the old one no longer describes the provider; the provider is saved either way.
+- **Test** sends one tiny request with the stored key and reports the model and the round-trip time, which separates a working key from a plausible one without waiting for a drafting failure.
+- **Anthropic, Gemini and Azure need a concrete model id**, so a fresh provider starts on the first model its catalogue reported rather than "auto".
 - Choose a **default provider + model** for the workspace, then **override it per bot** in the bot's profile (Edit profile → Model provider / Model). Different bots can run on different models.
-- Resolution order at run time: **the bot's override → the workspace default → the server environment** (`AI_API_KEY`). Routes: `POST /api/ai/providers`, `DELETE /api/ai/providers/:id`, `POST /api/ai/providers/:id/models`, `PATCH /api/ai`, `PATCH /api/ai/bots/:bot`.
-- The server still accepts `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` for a single env-configured provider. A saved workspace provider is used when the bot or the workspace default points at it.
+- **Edit or rotate a key without deleting the provider**: open it, change its name, endpoint, key, API version or headers, then save. A blank key keeps the stored one, and a changed endpoint, key, version or header set re-reads the catalogue. Routes: `POST /api/ai/providers`, `PATCH /api/ai/providers/:id`, `DELETE /api/ai/providers/:id`, `POST /api/ai/providers/:id/models`, `POST /api/ai/providers/:id/test`, `PATCH /api/ai`, `PATCH /api/ai/bots/:bot`.
+- **Model ids and endpoints:** most gateways need `/v1` in the base URL. A pasted full endpoint (`…/chat/completions`, `…/responses`, `…/messages`, `…/models`) is trimmed back to the base for you. A 404 usually means the `/v1` suffix is missing and a 401 usually means the key belongs to another provider; the app appends that hint to the provider's own error.
+- Resolution order at run time: **the bot's override → the workspace default → the server environment** (`AI_API_KEY`).
+
+A Claude, Gemini or Azure key in three steps:
+
+1. **You → AI and models → Add a provider**, pick **Anthropic (Claude)**, **Google Gemini** or **Azure OpenAI** — the preset fills the endpoint and protocol, and Azure also asks for your resource URL and API version — then paste the key from that provider's console and **Save provider**.
+2. The model list arrives from the provider with that key. Pick the workspace **default model** from it, or type a deployment name for Azure.
+3. Leave it as the workspace default, or point individual bots at it in **Edit profile → Model provider / Model**. **Test** confirms the key before anyone runs a bot.
+
+The server still accepts a provider from the environment, which is what runs when no saved provider is chosen:
+
+| var | values |
+|---|---|
+| `AI_BASE_URL` | the endpoint, e.g. `https://api.groq.com/openai/v1`. Unset, it falls back to `OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL` or `AZURE_OPENAI_ENDPOINT`, then to `https://api.openai.com/v1` or the endpoint implied by a key below |
+| `AI_API_KEY` | the key. `OPENAI_API_KEY` works in its place, and a saved workspace provider is used when the bot or the workspace default points at one |
+| `AI_MODEL` | a model id, or `auto` for a router that chooses (default `gpt-4.1-mini`; `OPENAI_MODEL` is the older name) |
+| `AI_API_STYLE` | wire protocol: `chat`, `responses`, `anthropic`, `gemini`, `azure`. Aliases `messages`/`claude` mean anthropic, `google` means gemini, `openai`/`compatible` mean chat; blank infers it from the host (`api.anthropic.com` → anthropic, `generativelanguage.googleapis.com` → gemini, `*.openai.azure.com` → azure, `api.openai.com` → responses, anything else → chat) |
+| `AI_TIMEOUT_MS` | request budget in milliseconds (default 180000; values under 1000 are ignored) |
+| `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` | work in place of `AI_API_KEY`. With no base URL, either one alone points the app at `https://api.anthropic.com/v1` |
+| `GEMINI_API_KEY` / `GOOGLE_GENAI_API_KEY` | same, for Gemini: alone and without a base URL they point the app at `https://generativelanguage.googleapis.com/v1beta` (`GOOGLE_API_KEY` is the older name) |
+| `AZURE_OPENAI_API_KEY` / `AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_API_VERSION` | Azure: the key, the resource endpoint (`https://NAME.openai.azure.com`) and the API version (default `2024-10-21`). The endpoint has to be set for Azure; a bare Azure key does not pick an endpoint of its own |
+
+`AI_API_KEY` and `OPENAI_API_KEY` keep working, and a saved workspace provider is used when the bot or the workspace default points at it. No SDK is involved: every protocol is plain HTTPS from the server, no key is sent to the browser, and no model gets a publication tool — the final Post click stays yours.
 
 The static Pages demo has no providers; it stays a browser-local simulation (group handoffs and offline commands, no live model).
 
@@ -91,14 +133,16 @@ Use `npm test` for Node unit tests. For a local Chromium UI smoke test, install 
 - Persistent candidate inbox; add URLs/text directly or capture one visible post from a Chrome extension.
 - Built-in X-engage bots: Scout, Ranker, Researcher, Writer, Reviewer, Handoff.
 - Deterministic topic-based relevance ranking. This is a heuristic, not a learned engagement predictor.
-- Real AI drafting through any OpenAI-compatible provider (chat-completions or OpenAI Responses), with template-only fallback when no provider is configured.
+- Real AI drafting through any provider speaking OpenAI chat completions, OpenAI Responses, Anthropic Messages, Google Gemini or Azure OpenAI, with template-only fallback when no provider is configured.
 - Editable drafts; revisions invalidate earlier approvals and scheduled publication handoffs.
 - Random delay after approval, configurable from 0 to 1440 minutes. When due, the draft becomes **ready for manual posting**; no automatic posting occurs.
 - Copy approved text, open source URL, and manually confirm publication.
 - Create custom bot groups and custom text bots; run custom bots when an AI key is configured.
 - Persistent once-only and recurring reminder tasks, stored with task history.
 - Event/activity log, strict capture token, local file persistence, HTTP-only session cookie, basic login rate limiting.
-- Zero npm runtime dependencies. Requires Node.js 22+.
+- Zero npm runtime dependencies. Requires Node.js 22.5 or newer: before Node
+  23.4, `node:sqlite` needs `--experimental-sqlite`, which every `npm` script
+  here passes.
 
 ### Important boundaries
 
@@ -107,10 +151,10 @@ Use `npm test` for Node unit tests. For a local Chromium UI smoke test, install 
 - The scheduler runs on the host computer. For 24/7 service, run the container or the systemd unit in `deploy/` on a machine that stays on (see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)).
 - An installation can hold several workspaces, each with its own data and members, but it is self-hosted software for people you trust, not a hardened multi-tenant SaaS.
 - Custom bots have no file-system access. Browser access is the same opt-in `browser.use` permission as any other bot, and it still needs your approval and a paired local agent.
-- Push notifications reach a phone or desktop only after you turn them on for that device under **You → Notifications**, and only when the server is served over HTTPS (or on `localhost`). On an iPhone or iPad the app must first be added to the Home Screen.
+- Push notifications reach a phone or desktop only after you turn them on for that device under **You → Notifications**, and only when the server is served over HTTPS (or on `localhost`). On an iPhone or iPad the app must first be added to the Home Screen. The service worker caches the app shell, so the installed app opens when the network is down, and tapping a notification opens the screen that message is about.
 - No external accounts, secrets, or private files are transmitted unless you explicitly configure a paid AI provider for text drafting.
 
-## Quick start (Linux/macOS/Windows with Node 22+)
+## Quick start (Linux/macOS/Windows with Node 22.5+)
 
 ```bash
 # Unzip the download, then open its project folder.
@@ -118,6 +162,8 @@ cd agent-control-prototype
 npm test
 npm start
 ```
+
+`npm start`, `dev`, `test`, `test:coverage` and `backup` pass `--experimental-sqlite` for you, and so does the Dockerfile. If you run `node src/server.js` yourself, pass the flag too.
 
 Open **http://127.0.0.1:4173**. On first startup without environment variables, the terminal prints a randomly generated dashboard password. Later restarts may print a different random string that does not update the stored owner password — set `DASHBOARD_PASSWORD` or change password under **You**. For a stable password:
 
@@ -146,7 +192,7 @@ DASHBOARD_PASSWORD='use-a-long-random-password' npm start
 AI_BASE_URL='https://api.openai.com/v1' AI_API_KEY='YOUR_OWN_KEY' AI_MODEL='gpt-4.1-mini' DASHBOARD_PASSWORD='use-a-long-random-password' npm start
 ```
 
-`AI_API_STYLE` picks the wire format (`chat` for `/v1/chat/completions`, `responses` for OpenAI's `/v1/responses`); it is inferred from `AI_BASE_URL` when unset. `AI_TIMEOUT_MS` (default 180000) budgets slow free-tier routing. The startup banner reports the environment provider when `AI_API_KEY` is set. Saved providers under **You → AI and models** are used at run time even when the banner says none.
+`AI_API_STYLE` picks the wire format (`chat` for `/v1/chat/completions`, `responses` for OpenAI's `/v1/responses`, `anthropic` for Claude's `/v1/messages`, `gemini` for Google's `generateContent`, `azure` for an Azure deployment; aliases and the host-based default are in the BYOK section above). `AI_TIMEOUT_MS` (default 180000) budgets slow free-tier routing. The startup banner reports the environment provider when `AI_API_KEY` is set. Saved providers under **You → AI and models** are used at run time even when the banner says none.
 
 Secrets are read **only on the server**. Never place an AI provider key in the browser extension or Git repository. When a key is configured, draft creation may incur API charges. If the provider request fails, the backend reports an error; it does not pretend to have generated a successful AI answer.
 
@@ -209,6 +255,8 @@ npm run build:pages   # regenerate the static GitHub Pages bundle in docs/
 
 The suite checks scoring, invalid URLs, scheduling boundaries, state persistence, recovery across reloads, and a live HTTP end-to-end lifecycle including auth, extension-token intake, editing, double-approval rejection, manual publishing confirmation, and cross-origin protection.
 
+`npm run check` syntax-checks every source file under `src/`, `shared/`, `agent/`, `extension/` and `scripts/` (75 files); `npm test` runs the Node suite.
+
 ## Repository creation
 
 To create a private repo after downloading/unzipping the project:
@@ -247,15 +295,15 @@ Note: Browser actions that X does not authorize are not enabled.
 - `src/push.js`: Web Push (message encryption and VAPID signing) with `node:crypto`, no library.
 - `agent/browser.mjs`: the local agent's real browser: allowlisted reads plus `browser.action` click/type/read/scroll, driving an installed Chrome over the DevTools protocol. Click and type on X are refused.
 - `src/http.js`: JSON responses with the security headers, bounded body readers and the same-origin check.
-- `src/sqlite-store.js`: the default store. Each record is kept whole next to its typed columns, so a restart reads back exactly what was written.
+- `src/sqlite-store.js`: the store. Each record is kept whole next to its typed columns, so a restart reads back exactly what was written. A database written by a newer build is refused at boot instead of being opened.
+- `shared/assets.js`: the one list of files that make up the UI. Both `scripts/build-pages.js` and `src/server.js` import it, so a module imported by `index.html` cannot ship to one and be missing from the other.
 - `shared/chats.js`: conversation history rules, shared by the server and the browser-local transport.
 - `shared/workflow.js`: the single source of workflow transitions (candidates, drafts, approval, schedules) plus the versioned schema migration.
 - `shared/core.js`: validation, ranking, scheduling state transitions.
 - `src/ai.js`: optional provider adapter and clearly labeled offline fallback.
-- `src/store.js`: the older JSON store, kept behind `STORE_BACKEND=json` for tests.
 - `src/scheduler.js`: due-task and reminder reconciliation.
 - `shared/`: the dashboard UI, its browser-safe logic, and the local transport. The Node server serves this folder directly.
-- `scripts/build-pages.js`: copies `shared/` into `docs/` for the static GitHub Pages build (`npm run build:pages`).
+- `scripts/build-pages.js`: copies the files in `shared/assets.js` into `docs/` and marks the page browser-local, for the static GitHub Pages build (`npm run build:pages`).
 - `extension/`: Manifest V3 capture extension.
 - `tests/`: unit tests, the HTTP integration test, and optional Playwright smoke tests.
 - `docs/ROADMAP.md`: phased path to the production architecture.
@@ -272,10 +320,10 @@ Both paths run the same `shared/workflow.js` rules, so the demo and the real das
 ## Security and operational notes
 
 - Set a strong, stable `DASHBOARD_PASSWORD` before exposing the server beyond localhost.
-- State lives in a transactional SQLite database. `DATA_FILE` is the JSON sibling path (default `data/state.json`); the SQLite file is the same name with `.db` (`data/state.db`), or `DATA_DB` when set. Sessions are server-side and revocable, so a restart no longer signs users out.
+- State lives in a transactional SQLite database, and there is no other store. `DATA_FILE` is the JSON sibling path (default `data/state.json`); the SQLite file is the same name with `.db` (`data/state.db`), or `DATA_DB` when set. A `state.json` written by 0.6 is imported once, then left beside the database. A database written by a newer build is refused at boot with both schema versions in the message, instead of being opened. Sessions are server-side and revocable, so a restart no longer signs users out.
 - Secrets (paired-agent secrets, stored credentials) are AES-256-GCM encrypted; the master key is `MASTER_KEY` or a `0600` keyfile beside the database. **Back the key up with the data.**
 - Roles are `viewer < member < admin < owner`; every route is registered with the least role it needs (`src/router.js`, `tests/authz-matrix.test.js`).
-- Sign-in and forgot-password requests are rate-limited per client IP (8 attempts / 15 minutes), and the attempt is counted before the request is read. Reset itself consumes a one-time token. An unknown address and a wrong password get the same answer. Forgot password prints a one-time token in the server log unless `RESET_TOKEN_CONSOLE=0`.
+- Sign-in and forgot-password requests are rate-limited per client address and per account (8 attempts / 15 minutes each), and the attempt is counted before the request is read. Behind `TRUST_PROXY=1` the client address is the rightmost `X-Forwarded-For` hop; the leftmost is whatever the caller sent. Reset itself consumes a one-time token. An unknown address and a wrong password get the same answer. Forgot password prints a one-time token in the server log unless `RESET_TOKEN_CONSOLE=0`.
 - The session cookie is `HttpOnly` + `SameSite=Strict`; the database holds only a hash of each session id. Cross-origin writes are rejected.
 - **Backup and restore are for the owner only.** A backup of the primary workspace carries every account's password hash; other workspaces export only their own rows. Restore replaces data in the current workspace database (credentials, sessions and paired-agent credentials are excluded). Restored agent records are revoked and queued or running agent tasks fail; pair devices again after restore. The file is checksum-protected JSON, not encrypted — protect it like the database. A restore rejects unknown roles and any link that is not http(s).
 - The extension capture token is a write credential, so viewers do not receive it.

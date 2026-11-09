@@ -13,6 +13,7 @@ import {
 import {enqueueTask, retryTask, cancelTask} from './tasks.js';
 import {addEvidence, verifyEvidence, dropEvidence} from './evidence.js';
 import {addChatMessages, clearChat} from './chats.js';
+import {publicMemory, addRules, removeRule, forgetChat, forgetRulebook} from './memory.js';
 import {summonableGuests} from './coordination.js';
 import {simulateGroup} from './group-simulator.js';
 import {botSettings} from './bot-settings.js';
@@ -196,6 +197,27 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
   // Conversation history, stored with the rest of the browser-local state.
   if ((m = path.match(/^\/api\/chats\/([a-z0-9-]+)\/messages$/)) && method === 'POST') { const r = addChatMessages(state, m[1], Array.isArray(body.messages) ? body.messages : [body]); save(state); return r; }
   if ((m = path.match(/^\/api\/chats\/([a-z0-9-]+)$/)) && method === 'DELETE') { const r = clearChat(state, m[1]); await cancelLocalRunsForChat(state, m[1], 'Chat cleared.'); save(state); return r; }
+  // Durable memory: the rulebook and chat recap are part of local state, so a
+  // person can delete a rule here too. A model-written pass needs the Node build.
+  if (path === '/api/memory' && method === 'GET') return publicMemory(state);
+  if (path === '/api/memory/rules' && method === 'POST') {
+    if (!body.model) throw new Error('Which model should keep this rule?');
+    const r = addRules(state, body.model, [body.text], {source: 'user', label: body.label});
+    save(state);
+    return {ok: true, model: body.model, rules: r.book.rules.map(rule => ({id: rule.id, text: rule.text, source: rule.source}))};
+  }
+  const memoryPath = path.split('?')[0];
+  if ((m = memoryPath.match(/^\/api\/memory\/rules\/([a-z0-9-]+)$/)) && method === 'DELETE') {
+    const model = new URLSearchParams(path.split('?')[1] || '').get('model') || '';
+    const r = removeRule(state, model, m[1]); save(state); return r;
+  }
+  if (path === '/api/memory/forget' && method === 'POST') {
+    if (body.model) forgetRulebook(state, body.model);
+    if (body.chat) forgetChat(state, body.chat);
+    save(state);
+    return {ok: true, model: body.model || null, chat: body.chat || null};
+  }
+  if (path === '/api/memory/consolidate' && method === 'POST') throw Object.assign(new Error('Updating memory needs the Node build and an AI provider. Rules you add by hand still work here.'), {status: 409});
   if (path === '/api/reset-demo' && method === 'POST') { const r = resetDemo(state); save(state); return r; }
   throw new Error(`Not available in the browser-local demo: ${method} ${path}`);
 }

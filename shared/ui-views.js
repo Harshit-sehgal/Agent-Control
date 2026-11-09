@@ -6,12 +6,18 @@ import {botSuggestions} from './chat-engine.js';
 import {summonableGuests} from './coordination.js';
 import {botSettings, groupSettings} from './bot-settings.js';
 import {requestOfMessage} from './bot-browser.js';
+import {validHttpUrl} from './core.js';
 import {chatRows, timeline, pendingBrowser, stuckFeedReads, draftStage, mentionSuggestions, retryTarget, threadLineActions, isRunNote, runBelongsToChat, ACTIVE_DRAFTS} from './ui-model.js';
 import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js';
 import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, isXGroup, botTint, recentRuns} from './ui-store.js';
 
 const el = id => document.getElementById(id);
 const FILTERS = [['all', 'All'], ['needs', 'Needs you'], ['groups', 'Groups'], ['bots', 'Bots']];
+/** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
+ * unchanged, so it is never enough for an href. Untrusted URLs are validated
+ * here; where the anchor is the card itself it falls back to '#' rather than
+ * disappearing, and where it is optional decoration the caller drops it. */
+const safeHref = value => validHttpUrl(value) || '#';
 
 /* ---------- chat list ---------- */
 
@@ -34,8 +40,8 @@ export function listShell() {
     <footer class="list-foot">
       <span class="promise">${icon('lock', 14)} Bots draft. You post. Always.</span>
       <span class="backend">${server ? 'Connected to Node server' : 'Browser-only prototype · data stays in this browser'}</span>
-    </footer>
-    ${write ? `<button type="button" class="fab" data-action="new-chat" aria-label="New chat">${icon('plus', 24)}</button>` : ''}`;
+      ${write ? `<button type="button" class="fab" data-action="new-chat" aria-label="New chat">${icon('plus', 24)}</button>` : ''}
+    </footer>`;
 }
 
 function chatRow(row) {
@@ -84,11 +90,13 @@ export function renderList() {
  * footer always says who the next move belongs to. */
 export function draftCard(draft) {
   const stage = draftStage(draft), open = ACTIVE_DRAFTS.includes(draft.status), editing = store.editDraft === draft.id;
-  const write = canWrite(), id = esc(draft.id);
+  const write = canWrite(), id = esc(draft.id), postHref = validHttpUrl(draft.url);
   const body = editing
     ? `<form class="edit-form" data-id="${id}"><textarea class="input" name="text" rows="4" required aria-label="Edit this draft">${esc(store.editText ?? draft.text)}</textarea><div class="card-actions">${btn('Save', null, {kind: 'primary', type: 'submit'})}${btn('Cancel', 'cancel-edit')}</div></form>`
     : `<p class="draft-text">${esc(draft.text)}</p>`;
-  const copyReady = draft.status === 'ready' ? btn('Copy text', 'copy-draft', {kind: 'primary', id: draft.id}) + `<a class="btn quiet" href="${esc(draft.url)}" target="_blank" rel="noopener noreferrer"><span>Open post</span></a>` : '';
+  // No validated URL means no link at all: an <a href=""> called "Open post"
+  // either navigates to this page or, with an empty url, does nothing at all.
+  const copyReady = draft.status === 'ready' ? btn('Copy text', 'copy-draft', {kind: 'primary', id: draft.id}) + (postHref ? `<a class="btn quiet" href="${esc(postHref)}" target="_blank" rel="noopener noreferrer"><span>Open post</span></a>` : '') : '';
   const actions = editing ? '' : copyReady || (write ? {
     pending: btn('Approve', 'approve-draft', {kind: 'primary', id: draft.id}) + btn('Edit', 'edit-draft', {id: draft.id}) + btn('Skip', 'reject-draft', {id: draft.id}),
     scheduled: btn('Edit', 'edit-draft', {id: draft.id}) + btn('Cancel', 'reject-draft', {id: draft.id}),
@@ -110,7 +118,10 @@ function evidencePanel(draft) {
   const items = (store.state.evidence || []).filter(e => e.draftId === draft.id || (draft.candidateId && e.candidateId === draft.candidateId));
   const disputed = items.filter(e => e.verification === 'disputed').length, verified = items.filter(e => e.verification === 'user_verified').length;
   const summary = items.length ? `${items.length} source(s)${verified ? ` · ${verified} verified` : ''}${disputed ? ` · ${disputed} disputed` : ''}` : 'No sources yet';
-  const list = items.map(e => `<div class="evidence-item"><span class="row-main"><span class="row-title">${esc(e.claim)}</span><span class="row-sub">${e.link ? `<a href="${esc(e.link)}" target="_blank" rel="noopener noreferrer">Source</a> · ` : ''}${Math.round((e.confidence || 0) * 100)}% sure · ${esc(String(e.verification || '').replace('_', ' '))}</span></span>${write ? `<span class="row-actions">${e.verification !== 'user_verified' ? btn('Verify', 'verify-evidence', {id: e.id, small: true, data: {status: 'user_verified'}}) : ''}${e.verification !== 'disputed' ? btn('Dispute', 'verify-evidence', {id: e.id, small: true, data: {status: 'disputed'}}) : ''}${btn('Drop', 'drop-evidence', {id: e.id, small: true, kind: 'danger'})}</span>` : ''}</div>`).join('');
+  const list = items.map(e => {
+    const sourceHref = validHttpUrl(e.link);
+    return `<div class="evidence-item"><span class="row-main"><span class="row-title">${esc(e.claim)}</span><span class="row-sub">${sourceHref ? `<a href="${esc(sourceHref)}" target="_blank" rel="noopener noreferrer">Source</a> · ` : ''}${Math.round((e.confidence || 0) * 100)}% sure · ${esc(String(e.verification || '').replace('_', ' '))}</span></span>${write ? `<span class="row-actions">${e.verification !== 'user_verified' ? btn('Verify', 'verify-evidence', {id: e.id, small: true, data: {status: 'user_verified'}}) : ''}${e.verification !== 'disputed' ? btn('Dispute', 'verify-evidence', {id: e.id, small: true, data: {status: 'disputed'}}) : ''}${btn('Drop', 'drop-evidence', {id: e.id, small: true, kind: 'danger'})}</span>` : ''}</div>`;
+  }).join('');
   return `<details class="evidence-panel" data-evidence="${esc(draft.id)}"${store.openEvidence.has(draft.id) ? ' open' : ''}><summary><span>${icon('link', 14)} ${esc(summary)}</span></summary>${list}
     ${write ? `<form class="evidence-form" data-id="${esc(draft.id)}">
       <input class="input" name="claim" placeholder="What does this source support?" required maxlength="600" aria-label="Claim">
@@ -122,7 +133,7 @@ function evidencePanel(draft) {
 
 export function postCard(post, drafted) {
   return `<div class="post">
-    <a class="post-quote" href="${esc(post.url)}" target="_blank" rel="noopener noreferrer"><strong>${esc(post.author || 'Post')} on X</strong><span>${esc(post.text)}</span></a>
+    <a class="post-quote" href="${esc(safeHref(post.url))}" target="_blank" rel="noopener noreferrer"><strong>${esc(post.author || 'Post')} on X</strong><span>${esc(post.text)}</span></a>
     <div class="post-meta"><span>${esc(post.topic || 'No topic')}${post.score?.score != null ? ` · ${Number(post.score.score)}/100` : ''}${post.demo ? ' · sample' : ''}</span>${drafted ? tag('Drafted', 'good') : canWrite() ? btn('Draft reply', 'draft-candidate', {id: post.id, small: true, kind: 'primary'}) : ''}</div>
   </div>`;
 }
@@ -144,7 +155,7 @@ function browserCard(m) {
   const decline = btn('Decline', 'deny-browser', {id: request.id, small: true});
   const actions = !canWrite() ? '' : request.status === 'pending' ? `<div class="card-actions">${btn('Approve', 'approve-browser', {id: request.id, small: true, kind: 'primary'})}${decline}</div>`
     : request.status === 'dispatched' ? `<div class="card-actions">${decline}</div>` : '';
-  return `<div class="event browser-request"><span>${esc(m.text)} ${tag(label, tone)}</span><a href="${esc(request.url)}" target="_blank" rel="noopener noreferrer">${esc(request.url)}</a>${steps}${request.error ? `<small>${esc(request.error)}</small>` : ''}${actions}</div>`;
+  return `<div class="event browser-request"><span>${esc(m.text)} ${tag(label, tone)}</span><a href="${esc(safeHref(request.url))}" target="_blank" rel="noopener noreferrer">${esc(request.url)}</a>${steps}${request.error ? `<small>${esc(request.error)}</small>` : ''}${actions}</div>`;
 }
 
 function messageHtml(item, conv, latestRunNote) {

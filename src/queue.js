@@ -47,46 +47,68 @@ export function createQueue(store, handlers = {}, {intervalMs = 2000, workerId, 
         tasks.recoverStalledTasks(s, now);
         return tasks.claimTasks(s, {workerId: id, now, leaseTTL: leaseMs, limit: batch});
       });
-      for (const task of claimed) {
-        // Keep the lease alive while the handler runs: a handler may legitimately
-        // take minutes (model calls), and re-claiming it in sweep would double-run.
-        const beat = setInterval(() => {
-          void store.update(s => {
-            const t = (s.tasks || []).find(x => x.id === task.id);
-            if (t && t.status === 'running' && t.leaseOwner === id) t.leaseUntil = new Date(Date.now() + leaseMs).toISOString();
-          }).catch(() => { /* best effort */ });
-        }, Math.max(1000, Math.floor(leaseMs / 3)));
-        beat.unref?.();
-        const handler = handlers[task.kind];
-        try {
-          if (!handler) throw new Error(`No handler is registered for task kind "${task.kind}".`);
-          const result = await handler(task);
-          await store.update(s => tasks.completeTask(s, task.id, result ?? null));
-        } catch (e) {
-          // A busy-group 409 outlasts the attempt budget; errors marked
-          // permanent (for example, a missing bot) fail immediately.
-          const conflict = e?.status === 409 && /already active/i.test(String(e?.message || ''));
-          const permanent = e?.permanent === true;
-          let transition = null;
-          try {
-            transition = await store.update(s => tasks.failTask(s, task.id, e?.message, undefined, {conflict, permanent}));
-          } catch (transitionError) {
-            console.error('Queue could not record task failure:', transitionError.message);
+      // One heartbeat renews the whole batch, not just the task being run. The
+      // handlers are serial and a single model call can outlast the lease, so a
+      // task still waiting its turn would otherwise look stalled to another
+      // worker's sweep and be claimed and run twice.
+      const live = new Set(claimed.map(task => task.id));
+      const beat = setInterval(() => {
+        if (!live.size) return;
+        void store.update(s => {
+          for (const t of s.tasks || []) {
+            if (!live.has(t.id) || t.status !== 'running' || t.leaseOwner !== id) continue;
+            t.leaseUntil = new Date(Date.now() + leaseMs).toISOString();
           }
-          // Notify only after the retry policy reaches a terminal failure. A
-          // transient provider error must not announce failure while requeued.
-          if (transition?.status === 'failed') {
-            try { if (onFail) await onFail(task, e); } catch (notifyError) { console.error('Failure notify error:', notifyError.message); }
-          }
-        } finally {
-          clearInterval(beat);
+        }).catch(() => { /* best effort */ });
+      }, Math.max(1000, Math.floor(leaseMs / 3)));
+      beat.unref?.();
+      try {
+        for (const task of claimed) {
+          try { await runTask(task); }
+          finally { live.delete(task.id); }
         }
+      } finally {
+        clearInterval(beat);
       }
     } catch (e) {
       console.error('Queue sweep error:', e.message);
     } finally {
       busy = false;
       for (const resolve of idleWaiters.splice(0)) resolve();
+    }
+  }
+
+  /** Run one claimed task to a terminal transition. A handler failure re-queues
+   * the task with backoff while attempts remain, or marks it failed. */
+  async function runTask(task) {
+    const handler = handlers[task.kind];
+    try {
+      if (!handler) throw new Error(`No handler is registered for task kind "${task.kind}".`);
+      const result = await handler(task);
+      await store.update(s => tasks.completeTask(s, task.id, result ?? null));
+    } catch (e) {
+      // A busy-group 409 outlasts the attempt budget; errors marked
+      // permanent (for example, a missing bot) fail immediately.
+      const conflict = e?.status === 409 && /already active/i.test(String(e?.message || ''));
+      const permanent = e?.permanent === true;
+      let transition = null;
+      try {
+        transition = await store.update(s => tasks.failTask(s, task.id, e?.message, undefined, {conflict, permanent}));
+      } catch (transitionError) {
+        console.error('Queue could not record task failure:', transitionError.message);
+        // The failure record itself failed, so the task is still `running` with
+        // a lease and nobody is heartbeating it. Expire the lease now so the
+        // next sweep re-arms it instead of waiting for the window to lapse.
+        await store.update(s => {
+          const t = (s.tasks || []).find(x => x.id === task.id);
+          if (t && t.status === 'running' && t.leaseOwner === id) t.leaseUntil = new Date(0).toISOString();
+        }).catch(() => { /* the lease lapse still recovers it */ });
+      }
+      // Notify only after the retry policy reaches a terminal failure. A
+      // transient provider error must not announce failure while requeued.
+      if (transition?.status === 'failed') {
+        try { if (onFail) await onFail(task, e); } catch (notifyError) { console.error('Failure notify error:', notifyError.message); }
+      }
     }
   }
 

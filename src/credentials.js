@@ -64,6 +64,18 @@ export function revealValue(store, id) {
   catch { fail('This credential cannot be decrypted with the current MASTER_KEY.', 500); }
 }
 
+/** Replace a credential's secret in place, keeping its id and metadata, so a
+ * rotated provider key does not leave a dangling reference behind. */
+export function replaceCredential(store, workspaceId, id, value) {
+  const row = store.get('SELECT id FROM credentials WHERE id=? AND workspace_id=?', id, workspaceId);
+  if (!row) fail('Credential not found.', 404);
+  if (typeof value !== 'string' || !value) fail('Credential value is required.');
+  const sealed = encryptJson(store.vaultKey, { value });
+  store.run('UPDATE credentials SET ciphertext=?,iv=?,tag=? WHERE id=? AND workspace_id=?',
+    sealed.ciphertext, sealed.iv, sealed.tag, id, workspaceId);
+  return { ok: true, id };
+}
+
 export function deleteCredential(store, workspaceId, id) {
   const result = store.run('DELETE FROM credentials WHERE id=? AND workspace_id=?', id, workspaceId);
   if (result.changes === 0) fail('Credential not found.', 404);

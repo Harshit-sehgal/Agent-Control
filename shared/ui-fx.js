@@ -18,6 +18,11 @@ export function confetti(origin) {
     dot.style.setProperty('--dy', `${Math.sin(angle) * reach - 20}px`);
     dot.style.setProperty('--rot', `${Math.round(Math.random() * 540 - 270)}deg`);
     dot.addEventListener('animationend', () => dot.remove(), {once: true});
+    // animationend is the tidy exit, but a tab that is hidden mid-throw may never
+    // fire it (or fires it late), and these dots are fixed-position children of
+    // <body>: without a timer they pile up over the whole page. The timer is the
+    // guarantee; the second remove() is harmless.
+    setTimeout(() => dot.remove(), 1200);
     document.body.appendChild(dot);
   }
 }
@@ -53,20 +58,23 @@ export function poke(button) {
   const said = document.createElement('span');
   said.className = 'poke-say'; said.textContent = word;
   said.addEventListener('animationend', () => said.remove(), {once: true});
+  setTimeout(() => said.remove(), 1200); // as above: a hidden tab may skip the event
   button.appendChild(said);
-  if (calm()) setTimeout(() => said.remove(), 900);
 }
 
 const NAP_AFTER_MS = 40000;
-/** Wire the ambient behaviour once: big faces follow the pointer, the bots doze
- * off when nothing happens for a while and startle awake when you come back,
- * and they watch the composer while you write. */
-export function bringBotsToLife() {
-  if (calm()) return;
+/** The ambient wiring, in a function of its own so it can be taken apart again:
+ * every listener and pending frame is registered here and undone by the disposer. */
+function wireBots() {
   let frame = 0, napTimer = null;
+  const listeners = [];
+  const on = (target, type, fn, opts) => { target.addEventListener(type, fn, opts); listeners.push([target, type, fn]); };
   const big = '.thread-title .face, .poke .face, .mascot';
   const follow = ev => {
-    if (frame) return;
+    // A hidden tab draws no frames and a page without a big face on it (the chat
+    // list, the admin pages) has nothing to move: both bail before the geometry
+    // pass, so the pointer loop costs one selector hit instead of a rect per node.
+    if (frame || document.hidden || !document.querySelector(big)) return;
     frame = requestAnimationFrame(() => {
       frame = 0;
       for (const face of document.querySelectorAll(big)) {
@@ -79,14 +87,41 @@ export function bringBotsToLife() {
     });
   };
   const stir = () => {
-    const root = stage();
+    const root = stage(); if (!root) return;
     if (root.classList.contains('sleepy')) { root.classList.remove('sleepy'); react('woke', 700); }
     clearTimeout(napTimer); napTimer = setTimeout(() => root.classList.add('sleepy'), NAP_AFTER_MS);
   };
-  addEventListener('pointermove', ev => { follow(ev); stir(); }, {passive: true});
-  addEventListener('keydown', stir, {passive: true});
-  addEventListener('pointerdown', stir, {passive: true});
-  document.addEventListener('focusin', ev => { if (ev.target.matches?.('.composer textarea')) stage().classList.add('composing'); });
-  document.addEventListener('focusout', ev => { if (ev.target.matches?.('.composer textarea')) stage().classList.remove('composing'); });
+  const composing = ev => {
+    if (ev.target.matches?.('.composer textarea')) stage()?.classList.toggle('composing', ev.type === 'focusin');
+  };
+  on(window, 'pointermove', ev => { follow(ev); stir(); }, {passive: true});
+  on(window, 'keydown', stir, {passive: true});
+  on(window, 'pointerdown', stir, {passive: true});
+  on(document, 'focusin', composing);
+  on(document, 'focusout', composing);
   stir();
+  return () => {
+    clearTimeout(napTimer); if (frame) cancelAnimationFrame(frame);
+    for (const [target, type, fn] of listeners) target.removeEventListener(type, fn);
+    const root = stage(); if (root) root.classList.remove('composing', 'sleepy');
+  };
+}
+
+/** Wire the ambient behaviour: big faces follow the pointer, the bots doze off when
+ * nothing happens for a while and startle awake when you come back, and they watch
+ * the composer while you write. Safe to call again; the returned disposer unhooks. */
+export function bringBotsToLife() {
+  const query = matchMedia('(prefers-reduced-motion: reduce)');
+  let stop = null;
+  // Reduced motion can be turned on while the page is open (the OS setting, a test
+  // harness, a battery saver), so the wiring follows the query rather than being
+  // decided once at boot: it is torn down when the preference flips on and back
+  // when it flips off.
+  const sync = () => {
+    if (query.matches) { stop?.(); stop = null; }
+    else if (!stop) stop = wireBots();
+  };
+  sync();
+  query.addEventListener('change', sync);
+  return () => { query.removeEventListener('change', sync); stop?.(); stop = null; };
 }

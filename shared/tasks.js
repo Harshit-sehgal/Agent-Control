@@ -8,7 +8,6 @@
  */
 import {activity, cleanText} from './core.js';
 
-export const TASK_STATUSES = ['queued', 'running', 'done', 'failed', 'cancelled'];
 export const MAX_ATTEMPTS_DEFAULT = 5;
 
 /** Payload validators per kind. Unknown kinds are refused, so a stale UI or a

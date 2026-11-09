@@ -115,6 +115,26 @@ export const actions = {
   'copy-capture-token': () => copyText(store.state.captureToken || '', 'Capture token copied'),
   'copy-bot-instructions': b => copyText(findBot(b.dataset.id).instructions || '', 'Instructions copied'),
 
+  // memory: per-model rulebook and per-chat recap
+  'update-memory': async b => {
+    if (isStaticDemo()) { toast('Updating memory needs the Node build and an AI provider.'); return; }
+    const bot = findBot(b.dataset.id);
+    const result = await api('/api/memory/consolidate', 'POST', {botId: bot.id, chat: b.dataset.chat || bot.id});
+    await sync();
+    toast(result.skipped ? 'Memory is already up to date.' : 'Memory updated.');
+  },
+  'forget-rule': async b => {
+    await api(`/api/memory/rules/${encodeURIComponent(b.dataset.rule)}?model=${encodeURIComponent(b.dataset.model)}`, 'DELETE');
+    await sync();
+    toast('Rule forgotten.');
+  },
+  'forget-chat-memory': async b => {
+    if (!await confirmSheet('Forget this chat for the model?', {confirm: 'Forget', danger: true, detail: 'The recap goes. Messages stay in the conversation.'})) return;
+    await api('/api/memory/forget', 'POST', {chat: b.dataset.chat});
+    await sync();
+    toast('Chat memory forgotten.');
+  },
+
   // posts and drafts
   'load-samples': async () => { closeSheet(); const r = await api('/api/demo/seed', 'POST', {}); toast(`Loaded ${r.added} sample post(s).`); await sync(); },
   'reset-demo': async () => {

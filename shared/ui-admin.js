@@ -2,9 +2,10 @@
  * `adminPage(kind)` fetches and returns the body HTML; the handler tables are
  * wired by the host's delegated click, submit and change listeners. Handlers do
  * not catch errors, the host toasts them. */
-import {esc, btn, row, box, field, note, empty, tag, fullDate} from './ui-kit.js';
+import {esc, btn, row, box, field, note, empty, tag, fullDate, textInput} from './ui-kit.js';
 import {store, api, sync} from './ui-store.js';
-import {toast, confirmSheet, askSheet} from './ui-dialogs.js';
+import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js';
+import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js';
 import {pushStatus, enablePush, disablePush} from './ui-push.js';
 
 /** Title + one-line description per page, used by the host for the page header. */
@@ -39,11 +40,6 @@ export const ADMIN_PAGES = {
 let lastPairing = null;
 
 const actionRow = (title, sub, buttons) => `<div class="row"><span class="row-main"><span class="row-title">${title}</span>${sub ? `<span class="row-sub">${sub}</span>` : ''}</span><span class="row-actions">${buttons}</span></div>`;
-
-const textInput = (name, {type = 'text', value = '', ...rest} = {}) => {
-  const extra = Object.entries(rest).map(([k, v]) => (v === true ? ` ${k}` : ` ${k}="${esc(v)}"`)).join('');
-  return `<input class="input" name="${esc(name)}" type="${esc(type)}" value="${esc(value)}"${extra}>`;
-};
 
 const PUSH_HELP = {
   insecure: 'Push needs a secure address. Open this app over https, or on localhost.',
@@ -208,31 +204,192 @@ function backupPanel() {
     + box(inner, 'Backup and restore');
 }
 
+/** Model ids offered by a picker. Bounded so a provider with a huge catalogue
+ * (OpenRouter) does not bloat the page. */
+const MODEL_LIMIT = 200;
+/** The row still reports the size of the whole catalogue, so the page keeps more
+ * ids than it offers. The server sends at most 300 per provider. */
+const MODEL_CACHE = 300;
+/** GET /api/ai reports a model count only, so the ids, the endpoint, the model
+ * labels, the API version, any custom-header NAMES and the catalogue error are
+ * remembered from the save/refresh responses that do send them. Kept for the life
+ * of the page, which is exactly what the pickers and the edit sheet need. */
+const listings = new Map();
+const idList = value => (Array.isArray(value) ? value.filter(id => typeof id === 'string' && id !== '') : []);
+const labelMap = value => (value && typeof value === 'object' && !Array.isArray(value) ? value : {});
+/** Fold one listing into what the page knows. Only the keys the caller sends are
+ * replaced, so a catalogue refresh keeps the endpoint and a rename keeps the ids. */
+function rememberListing(listing) {
+  if (!listing?.id) return;
+  const previous = listings.get(listing.id) || {};
+  const next = {...previous, id: listing.id};
+  if (Array.isArray(listing.models) || Array.isArray(listing.chatModels) || Array.isArray(listing.allModels)) {
+    // A newer listing sends chat-capable ids in `models` and labels them; the
+    // filter is the fallback for a flat list that was not pre-filtered.
+    const flat = idList(listing.models), chat = idList(listing.chatModels), all = idList(listing.allModels);
+    next.chatModels = (chat.length ? chat : flat.filter(isChatModel)).slice(0, MODEL_CACHE);
+    next.models = (flat.length ? flat : next.chatModels).slice(0, MODEL_CACHE);
+    next.allModels = (all.length ? all : next.models).slice(0, MODEL_CACHE);
+    next.idsKnown = true;
+  }
+  if (listing.labels !== undefined) next.labels = {...(previous.labels || {}), ...labelMap(listing.labels)};
+  for (const key of ['baseUrl', 'protocol', 'apiVersion']) {
+    if (listing[key] !== undefined) next[key] = String(listing[key] || '');
+  }
+  if (listing.hasHeaders !== undefined) next.hasHeaders = idList(listing.hasHeaders).slice(0, 40);
+  if (listing.keyOptional !== undefined) next.keyOptional = Boolean(listing.keyOptional);
+  if (listing.modelsAt !== undefined) next.modelsAt = listing.modelsAt || null;
+  if (listing.modelsError !== undefined) next.modelsError = String(listing.modelsError || '');
+  listings.set(listing.id, next);
+}
+/** A provider row with what the panel knows, from the listing if this response
+ * carried it and from the cache otherwise. `chatModels` stays null when the page
+ * has never seen the ids, so a row falls back to the count the summary reported. */
+const providerView = p => {
+  const cached = listings.get(p.id) || {};
+  const fellBack = !Array.isArray(p.models) && !Array.isArray(p.chatModels) && !Array.isArray(p.allModels) && !cached.idsKnown;
+  return {...p,
+    baseUrl: p.baseUrl || cached.baseUrl || '',
+    protocol: p.protocol || cached.protocol || '',
+    apiVersion: p.apiVersion || cached.apiVersion || '',
+    keyOptional: p.keyOptional ?? cached.keyOptional ?? false,
+    hasHeaders: Array.isArray(p.hasHeaders) ? idList(p.hasHeaders) : cached.hasHeaders || [],
+    labels: {...(cached.labels || {}), ...labelMap(p.labels)},
+    modelsError: p.modelsError || cached.modelsError || '',
+    models: (Array.isArray(p.models) ? idList(p.models) : cached.models || []).slice(0, MODEL_CACHE),
+    chatModels: fellBack ? null : (Array.isArray(p.chatModels) ? idList(p.chatModels) : cached.chatModels || []).slice(0, MODEL_CACHE),
+    allModels: (Array.isArray(p.allModels) ? idList(p.allModels) : cached.allModels || []).slice(0, MODEL_CACHE)};
+};
+/** Chat-capable count for a row: the ids when the page has them, else the count
+ * the summary reported. */
+const chatCount = p => (Array.isArray(p.chatModels) ? p.chatModels.length : Number(p.modelCount ?? 0));
+/** Ids past the chat filter, so a row can show the whole catalogue was read. */
+const listedCount = p => (Array.isArray(p.allModels) ? p.allModels.length : 0);
+/** Model ids to suggest for a provider from another pane (the bot model picker):
+ * chat-capable only and capped, so an embedding model is never offered there. */
+export const providerModels = p => idList(providerView(p || {}).chatModels).slice(0, MODEL_LIMIT);
+
+const protocolName = id => protocolById(id)?.label || String(id || DEFAULT_PROTOCOL);
+const needsApiVersion = protocol => Boolean(protocolById(protocol)?.needsApiVersion);
+// An empty value means "let the server read the host", which is what a custom
+// endpoint wants: paste an Anthropic URL and it speaks Messages.
+const protocolSelect = current => `<select class="input" name="protocol" data-action="ai-protocol"><option value=""${normaliseProtocol(current) ? '' : ' selected'}>Auto-detect from URL</option>${PROTOCOLS.map(p => `<option value="${esc(p.id)}"${p.id === normaliseProtocol(current) ? ' selected' : ''}>${esc(p.label)}</option>`).join('')}</select>`;
+/** Azure is per-tenant and a custom gateway is anyone's, so both ship no endpoint:
+ * the option has to say the URL is the user's to type. */
+const presetLabel = preset => (preset.needsEndpoint ? `${preset.label} (enter your endpoint)` : preset.label);
+const ENDPOINT_HINTS = {azure: 'https://NAME.openai.azure.com', custom: 'https://your-gateway.example/v1'};
+const BASE_PLACEHOLDER = 'https://api.openai.com/v1';
+const presetSelect = () => `<select class="input" name="preset" data-action="ai-preset"><option value="">Choose a provider…</option>${PROVIDER_PRESETS.map(p => `<option value="${esc(p.id)}">${esc(presetLabel(p))}</option>`).join('')}</select>`;
+/** A picker of model ids. The value stays the id so free text still works, and
+ * `labels[id]` is what the list shows when the provider names its models. */
+const modelOptions = (models, labels = {}) => idList(models).slice(0, MODEL_LIMIT).map(id => {
+  const shown = String(labelMap(labels)[id] ?? '').trim();
+  return shown && shown !== id
+    ? `<option value="${esc(id)}" label="${esc(shown)}">${esc(shown)}</option>`
+    : `<option value="${esc(id)}"></option>`;
+}).join('');
+/** The datalist for a provider's chat-capable models, labelled when the provider
+ * names them. The AI page and the per-bot override both offer this list. */
+export const providerModelOptions = p => {
+  const view = providerView(p || {});
+  return modelOptions(view.chatModels || [], view.labels);
+};
+/** Azure wants its api-version in the query string. The field is in both forms but
+ * hidden (and disabled, so it never posts) unless the protocol needs it, so the
+ * form does not grow for everyone else. */
+const apiVersionField = (value = '', shown = false) => `<div data-ai-version${shown ? '' : ' hidden'}>${field('API version', textInput('apiVersion', {value, placeholder: '2024-10-21', autocomplete: 'off', ...(shown ? {} : {disabled: true})}), 'Azure only - the value from your deployment.')}</div>`;
+/** Show or hide the API version field for the protocol now selected. Client-side,
+ * so switching presets costs no round trip. */
+function syncApiVersionField(form, protocol) {
+  const wrap = form?.querySelector?.('[data-ai-version]');
+  if (!wrap) return;
+  const needed = needsApiVersion(protocol);
+  wrap.hidden = !needed;
+  const input = wrap.querySelector('[name=apiVersion]');
+  if (input) input.disabled = !needed;
+}
+/** Custom request headers, one `Name: value` per line. */
+const headersField = value => field('Custom headers', `<textarea class="input" name="headers" rows="3" placeholder="X-Api-Key: ... / anthropic-beta: ..." autocomplete="off" spellcheck="false">${esc(value)}</textarea>`, 'Optional: one Name: value per line, sent with every request.');
+/** The object the server stores. Blank lines and lines without a colon are
+ * dropped, and only the edges are trimmed, so a header value is kept as typed. */
+function parseHeaders(text) {
+  const out = {};
+  for (const line of String(text || '').split('\n')) {
+    const at = line.indexOf(':');
+    if (at < 1) continue;
+    const name = line.slice(0, at).trim(), value = line.slice(at + 1).trim();
+    if (!name || !value) continue;
+    out[name] = value;
+  }
+  return out;
+}
+const modelsToast = (p, verb) => p.modelsError
+  ? `Provider "${p.label}" ${verb}, but its model list could not be read: ${p.modelsError}`
+  : `Provider "${p.label}" ${verb} with ${chatCount(providerView(p))} model(s).`;
+
+/** Rename, re-point or rotate the key of a saved provider. */
+function editProviderSheet(provider) {
+  const view = providerView(provider);
+  const saved = (view.hasHeaders || []).map(esc).join(', ');
+  const headerNote = view.hasHeaders?.length
+    ? note(`Saved headers: ${saved}. Values are never sent to this page, and an empty box keeps them; anything you type replaces the whole set.`)
+    : note('Custom headers are optional: one Name: value per line, sent with every request.');
+  openSheet(`<form id="ai-edit-form" class="form">
+    <input type="hidden" name="id" value="${esc(provider.id)}">
+    ${field('Name', textInput('label', {value: provider.label, required: true, maxlength: 80}))}
+    ${field('Base URL', textInput('baseUrl', {value: view.baseUrl, placeholder: `https://… (blank keeps ${provider.host || 'the saved URL'})`, autocomplete: 'off'}))}
+    ${field('Protocol', protocolSelect(provider.protocol), 'The body shape this endpoint speaks.')}
+    ${apiVersionField(view.apiVersion, needsApiVersion(view.protocol))}
+    ${field('New API key (leave blank to keep the saved one)', textInput('apiKey', {type: 'password', autocomplete: 'off'}))}
+    ${headersField('')}
+    ${headerNote}
+    ${note('Changing the endpoint or the key re-reads the model list with the saved key.')}
+    <div class="sheet-actions">${btn('Save provider', null, {kind: 'primary', type: 'submit', wide: true})}${btn('Cancel', 'close-sheet', {wide: true})}</div>
+  </form>`, {title: `Edit ${provider.label}`, sub: provider.host});
+}
+
 function aiPanel(res) {
-  const providers = res.providers || [];
+  // Keep every listing this response carried, so switching the default provider
+  // repaints the picker and the edit sheet from memory, without a round trip.
+  for (const p of res.providers || []) if (!listings.has(p.id) && Array.isArray(p.chatModels || p.models)) rememberListing(p);
+  const providers = (res.providers || []).map(providerView);
   const rows = providers.length
-    ? providers.map(p => actionRow(
-      `${esc(p.label)} ${p.id === res.defaultProviderId ? tag('default', 'good') : ''}`,
-      `${esc(p.host)} · ${esc(p.style)}`,
-      (p.id === res.defaultProviderId ? '' : btn('Make default', 'ai-default-provider', {id: p.id, small: true}))
-        + btn('Delete', 'ai-delete-provider', {kind: 'danger', id: p.id, small: true}),
-    )).join('')
+    ? providers.map(p => {
+      // N is what can answer a chat; the rest of the account's catalogue is a
+      // quiet count beside it, so a long model list is visibly read in full.
+      const chat = chatCount(p), listed = listedCount(p);
+      const extra = listed > chat ? ` (+${listed - chat} listed)` : '';
+      const version = needsApiVersion(p.protocol) && p.apiVersion ? ` · api-version ${esc(p.apiVersion)}` : '';
+      return actionRow(
+        `${esc(p.label)} ${p.isDefault || p.id === res.defaultProviderId ? tag('default', 'good') : ''}`,
+        `${esc(p.host)} · ${esc(protocolName(p.protocol))} · ${chat} model(s)${extra}${version}${p.modelsError ? ` ${tag(p.modelsError, 'warn')}` : ''}`,
+        btn('Test', 'ai-test-provider', {id: p.id, small: true})
+          + btn('Refresh models', 'ai-load-models', {id: p.id, small: true})
+          + btn('Edit', 'ai-edit-provider', {id: p.id, small: true})
+          + (p.id === res.defaultProviderId ? '' : btn('Make default', 'ai-default-provider', {id: p.id, small: true}))
+          + btn('Delete', 'ai-delete-provider', {kind: 'danger', id: p.id, small: true}),
+      );
+    }).join('')
     : empty('No providers yet');
   const add = `<form id="ai-provider-form">
+    ${field('Provider preset', presetSelect(), 'Fills the name, endpoint and protocol below. Azure and a custom gateway ask you to type the endpoint.')}
     ${field('Name', textInput('label', {required: true, maxlength: 80, placeholder: 'OpenAI, Groq, my router'}))}
-    ${field('Base URL', textInput('baseUrl', {required: true, placeholder: 'https://api.openai.com/v1', autocomplete: 'off'}))}
+    ${field('Base URL', textInput('baseUrl', {required: true, placeholder: BASE_PLACEHOLDER, autocomplete: 'off'}))}
+    ${field('Protocol', protocolSelect(''), 'The body shape this endpoint speaks. Auto-detect reads the host; chat completions is what almost every other provider accepts.')}
+    ${apiVersionField('', false)}
     ${field('API key', textInput('apiKey', {type: 'password', required: true, autocomplete: 'off'}))}
-    ${field('API style', '<select class="input" name="style"><option value="">Auto-detect</option><option value="chat">Chat completions</option><option value="responses">Responses</option></select>')}
+    ${headersField('')}
     ${btn('Save provider', null, {kind: 'primary', type: 'submit'})}
   </form>`;
   const options = providers.map(p => `<option value="${esc(p.id)}" ${p.id === res.defaultProviderId ? 'selected' : ''}>${esc(p.label)}</option>`).join('');
+  const picked = providers.find(p => p.id === res.defaultProviderId) || providers[0];
   const defaults = providers.length ? `<form id="ai-default-form">
-    ${field('Default provider', `<select class="input" name="providerId">${options}</select>`)}
-    ${field('Default model', textInput('model', {value: res.defaultModel || '', placeholder: 'auto, gpt-4o-mini, llama-3.3-70b', list: 'ai-models', autocomplete: 'off'}))}
-    <datalist id="ai-models"></datalist>
+    ${field('Default provider', `<select class="input" name="providerId" data-action="ai-default-provider-pick">${options}</select>`)}
+    ${field('Default model', textInput('model', {value: res.defaultModel || '', placeholder: 'auto, gpt-4o-mini, llama-3.3-70b', list: 'ai-models', autocomplete: 'off'}), 'Pick one from the list, or type an id the provider accepts.')}
+    <datalist id="ai-models">${providerModelOptions(picked)}</datalist>
     <p>${btn('Load models', 'ai-load-models', {small: true})} ${btn('Save', null, {kind: 'primary', type: 'submit'})}</p>
   </form>` : '';
-  return note('Bring your own key. Add any OpenAI-compatible provider (OpenAI, Groq, OpenRouter, a local vLLM/Ollama, or a router). Keys are stored encrypted and never shown again — only the provider name, host and model list are visible.')
+  return note('Bring your own key. Five wire protocols work: OpenAI chat completions, OpenAI responses, Anthropic Messages for Claude, Google Gemini, and Azure OpenAI (which needs your resource endpoint and an API version). The model list comes from the provider with your saved key, so the picker shows models that key can actually use. Keys are stored encrypted and never shown again - only the provider name, host, model list and the NAMES of any custom headers are visible. Local servers (Ollama, LM Studio, vLLM, Jan) accept any string as the key.')
     + box(rows, `Providers, ${providers.length}`)
     + box(add, 'Add a provider')
     + (defaults ? box(defaults, 'Default for this workspace') : '');
@@ -240,7 +397,14 @@ function aiPanel(res) {
 
 /** Fetches what the page needs and returns its body HTML (no page header). Throws on API error. */
 export async function adminPage(kind) {
-  if (kind === 'ai') { const res = await api('/api/ai'); return aiPanel(res); }
+  if (kind === 'ai') {
+    const res = await api('/api/ai');
+    // Admin-only detail (endpoints, cached model ids, catalogue errors). The demo
+    // shim has no such route, so a failure just falls back to the summary.
+    const full = await api('/api/ai/providers').catch(() => null);
+    if (full?.providers?.length) { full.providers.forEach(rememberListing); return aiPanel({...res, providers: full.providers}); }
+    return aiPanel(res);
+  }
   if (kind === 'team') {
     const [users, sessions] = await Promise.all([api('/api/users'), api('/api/sessions')]);
     return teamPanel(users, sessions);
@@ -369,14 +533,50 @@ export const adminActions = {
     toast('Default provider set.');
     await sync(); await ctx.reload();
   },
-  'ai-load-models': async button => {
-    const form = button.closest('form'), id = form?.querySelector('[name=providerId]')?.value;
+  'ai-edit-provider': async button => {
+    // Read the listing again: the panel may be older than another admin's change.
+    const providers = (await api('/api/ai')).providers || [];
+    const provider = providers.find(p => p.id === button.dataset.id);
+    if (!provider) throw new Error('Provider not found.');
+    editProviderSheet(provider);
+  },
+  'ai-test-provider': async button => {
+    const id = button.dataset.id;
+    if (!id) return;
+    // One small round trip with the stored key: the quickest proof the endpoint,
+    // the key and the model really work. A failure is the provider's own message,
+    // which the host toasts as-is.
+    button.disabled = true;
+    try {
+      const res = await api(`/api/ai/providers/${id}/test`, 'POST', {});
+      toast(`Connected · ${res.model || 'model'} · ${Number(res.ms) || 0} ms`);
+    } finally {
+      button.disabled = false;
+    }
+  },
+  'ai-load-models': async (button, ctx) => {
+    // A row button names its own provider; the default form uses its select.
+    const form = button.closest('form'), id = button.dataset.id || form?.querySelector('[name=providerId]')?.value;
     if (!id) { toast('Add a provider first.'); return; }
-    const res = await api(`/api/ai/providers/${id}/models`, 'POST', {});
-    const models = res.models || [];
-    const list = form?.querySelector('#ai-models');
-    if (list) list.innerHTML = models.map(m => `<option value="${esc(m)}"></option>`).join('');
+    let res;
+    try {
+      res = await api(`/api/ai/providers/${id}/models`, 'POST', {});
+    } catch (error) {
+      // The server keeps the failure on the provider, so show it where the row is.
+      const message = String(error.message || 'Could not read the model list.');
+      rememberListing({id, modelsError: message});
+      toast(message, true);
+      if (button.dataset.id) await ctx.reload();
+      return;
+    }
+    // A newer response names the chat-capable list and labels the ids; an older
+    // one sends a single list, which the row still keeps in full.
+    const models = (res.chatModels?.length ? res.chatModels : res.models) || [];
+    rememberListing({id, models: res.models, chatModels: res.chatModels, allModels: res.allModels, labels: res.labels, protocol: res.protocol, modelsError: ''});
+    const list = form?.querySelector('#ai-models') || document.getElementById('ai-models');
+    if (list) list.innerHTML = modelOptions(models, res.labels || listings.get(id)?.labels || {});
     toast(models.length ? `${models.length} model(s) available — pick one above.` : 'The provider returned no model list.');
+    if (button.dataset.id) await ctx.reload();
   },
   'reveal-credential': async button => {
     const res = await api(`/api/credentials/${button.dataset.id}/reveal`, 'POST', {});
@@ -447,10 +647,40 @@ export const adminForms = {
     toast('Pairing code created. It is shown once.');
   },
   'ai-provider-form': async (form, values, ctx) => {
-    const p = await api('/api/ai/providers', 'POST', {label: values.label, baseUrl: values.baseUrl, apiKey: values.apiKey, style: values.style || undefined});
+    const headers = parseHeaders(values.headers);
+    const p = await api('/api/ai/providers', 'POST', {
+      label: values.label,
+      // A pasted endpoint path ("…/v1/chat/completions") is trimmed back to its base.
+      baseUrl: normaliseBaseUrl(values.baseUrl, values.protocol),
+      apiKey: values.apiKey,
+      protocol: values.protocol || undefined,
+      preset: values.preset || undefined,
+      apiVersion: (values.apiVersion || '').trim() || undefined,
+      headers: Object.keys(headers).length ? headers : undefined,
+    });
+    rememberListing(p);
     form.reset();
-    toast(`Provider "${p.label}" saved.`);
+    // reset() restores the empty protocol but not the hidden branch, so re-apply it.
+    syncApiVersionField(form, form.elements.namedItem('protocol')?.value || '');
+    toast(modelsToast(p, 'saved'));
     // Providers change what "AI is available" means app-wide, so refresh the snapshot.
+    await sync(); await ctx.reload();
+  },
+  'ai-edit-form': async (form, values, ctx) => {
+    // A blank endpoint or key keeps what is stored, so only what was typed travels.
+    const body = {label: values.label, protocol: values.protocol};
+    if ((values.baseUrl || '').trim()) body.baseUrl = normaliseBaseUrl(values.baseUrl, values.protocol);
+    if ((values.apiKey || '').trim()) body.apiKey = values.apiKey.trim();
+    if ((values.apiVersion || '').trim()) body.apiVersion = values.apiVersion.trim();
+    // Values are never shown here, so an empty box keeps the saved set and anything
+    // typed replaces it wholesale - text with no usable line clears the set, which
+    // is what the sheet says it will do.
+    const headerText = String(values.headers || '').trim();
+    if (headerText) body.headers = parseHeaders(headerText);
+    const p = await api(`/api/ai/providers/${values.id}`, 'PATCH', body);
+    rememberListing(p);
+    closeSheet();
+    toast(modelsToast(p, 'updated'));
     await sync(); await ctx.reload();
   },
   'ai-default-form': async (form, values, ctx) => {
@@ -486,6 +716,28 @@ export const adminForms = {
 
 /** `change` event handlers keyed by the control's data-action: (control, ctx). */
 export const adminChanges = {
+  // Picking a preset fills the endpoint fields and hides or shows the API version;
+  // the protocol follows the preset.
+  'ai-preset': control => {
+    const preset = presetById(control.value), form = control.form;
+    if (!preset || !form) return;
+    const set = (name, value) => { const node = form.elements.namedItem(name); if (node && typeof value === 'string') node.value = value; };
+    set('label', preset.label);
+    // A custom endpoint or a per-tenant cloud ships no URL, so clear the box and
+    // say what belongs there instead of leaving the last provider's endpoint.
+    set('baseUrl', preset.needsEndpoint ? '' : preset.baseUrl);
+    const url = form.elements.namedItem('baseUrl');
+    if (url) url.placeholder = preset.needsEndpoint ? (ENDPOINT_HINTS[preset.id] || BASE_PLACEHOLDER) : BASE_PLACEHOLDER;
+    set('protocol', preset.protocol);
+    syncApiVersionField(form, preset.protocol);
+  },
+  // Azure is the only protocol that needs the query-string version, so the field
+  // appears and disappears with the selection, without a server round trip.
+  'ai-protocol': control => syncApiVersionField(control.form, control.value),
+  'ai-default-provider-pick': control => {
+    const list = control.form?.querySelector('#ai-models');
+    if (list) list.innerHTML = providerModelOptions({id: control.value});
+  },
   'set-role': async (control, ctx) => {
     try {
       await api(`/api/users/${control.dataset.id}`, 'PATCH', {role: control.value});

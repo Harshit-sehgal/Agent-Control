@@ -1,13 +1,20 @@
 /** Overlays: the toast, the bottom sheet (#modal) and its confirm/ask helpers.
  * Sheets replace `window.confirm`/`prompt` so a decision never leaves the chat's
  * visual language, and they hand focus back to whatever opened them. */
-import {esc, btn, iconBtn} from './ui-kit.js?v=e5bbe2496b';
+import {esc, btn, iconBtn} from './ui-kit.js?v=c011d81ee9';
 
 const el = id => document.getElementById(id);
 let toastTimer = null, lastFocus = null, settle = null;
 
 export function toast(message, error = false) {
   const node = el('toast'); if (!node) return;
+  // #toast is the one node for success and failure alike, and index.html ships it
+  // as role=status/polite. A failed destructive action must not queue politely
+  // behind whatever the screen reader is already saying, so the live-region kind
+  // is set per call: an alert interrupts. Attributes go on before the text, since
+  // some screen readers only announce a change that happens inside a live region.
+  node.setAttribute('role', error ? 'alert' : 'status');
+  node.setAttribute('aria-live', error ? 'assertive' : 'polite');
   node.textContent = message; node.classList.toggle('error', Boolean(error)); node.classList.remove('hidden');
   clearTimeout(toastTimer); toastTimer = setTimeout(() => node.classList.add('hidden'), 3800);
 }

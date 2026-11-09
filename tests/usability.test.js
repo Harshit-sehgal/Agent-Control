@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile,readdir} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {filterCandidates,filterDrafts,normalizeUiPrefs} from '../shared/usability.js';
+import {filterCandidates,filterDrafts,normalizeUiPrefs,UI_PREFS_KEY} from '../shared/usability.js';
 const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 // The UI is app.js plus every ui-*.js module; assertions match across all of them.
 const sharedDir=path.join(root,'shared');
@@ -198,4 +198,83 @@ test('the UI adapts its copy and adds sign-out for the Node server build',()=>{
  assert.match(js,/rewrite-draft/);
  // Sign-out also stops the poll and drops the cached state.
  assert.match(js,/lockScreen\('Signed out\.'\)/);
+});
+
+/* ---------- UI state: preferences and saved profiles ---------- */
+
+// ui-store reads localStorage while it loads, so every case gets its own module
+// instance (a distinct specifier) over its own fake storage.
+let storeCase=0;
+async function freshStore(seed={}){
+ const data=new Map(Object.entries(seed));
+ globalThis.localStorage={getItem:k=>data.has(k)?data.get(k):null,setItem:(k,v)=>data.set(k,String(v)),removeItem:k=>data.delete(k)};
+ return {data,ui:await import(`../shared/ui-store.js?case=${storeCase++}`)};
+}
+
+test('setPref stores every preference it accepts and refuses the rest out loud', async()=>{
+ const {data,ui}=await freshStore();
+ ui.setPref('draftStatus','ready');
+ assert.equal(ui.store.prefs.draftStatus,'ready');
+ assert.equal(JSON.parse(data.get(UI_PREFS_KEY)).draftStatus,'ready');
+ // normalizeUiPrefs is a whitelist of four keys: anything else came back as a
+ // default and was saved as if the caller's value had been kept.
+ assert.throws(()=>ui.setPref('theme','cocoa'),/Unknown UI preference: theme/);
+ assert.throws(()=>ui.setPref('candidateSort','sideways'),/Unsupported value for candidateSort/);
+ assert.equal(ui.store.prefs.candidateSort,'newest');
+ assert.equal(ui.store.prefs.theme,undefined);
+});
+
+test('legacy name/instructions are stripped from saved profiles once', async()=>{
+ const key='agent-control-bot-profiles-v2';
+ const {data,ui}=await freshStore({[key]:JSON.stringify({bot1:{tint:2,pinned:true,name:'Old name',instructions:'Old job'}})});
+ assert.deepEqual(ui.store.profiles,{bot1:{tint:2,pinned:true}});
+ // Deleting from the object loaded out of localStorage only cleaned it in
+ // memory, so the keys were back on the next load: the result is written back.
+ assert.deepEqual(JSON.parse(data.get(key)),{bot1:{tint:2,pinned:true}});
+ const second=await freshStore(Object.fromEntries(data));
+ assert.deepEqual(second.ui.store.profiles,{bot1:{tint:2,pinned:true}});
+});
+
+/* ---------- accessibility of the shared chrome ---------- */
+
+test('a failed action is announced as an alert, not queued politely',()=>{
+ // index.html ships one #toast for success and failure alike, as role=status.
+ assert.match(html,/id="toast"[^>]*role="status"[^>]*aria-live="polite"/);
+ assert.match(js,/node\.setAttribute\('role', error \? 'alert' : 'status'\)/);
+ assert.match(js,/node\.setAttribute\('aria-live', error \? 'assertive' : 'polite'\)/);
+});
+
+test('the command palette is a combobox pointing at the highlighted row',()=>{
+ // Focus never leaves the input: the arrows only move a class, so the listbox
+ // role promised a relationship nothing maintained until there was an
+ // aria-activedescendant on the combobox.
+ assert.match(js,/id="command-input" role="combobox"/);
+ assert.match(js,/aria-controls="command-results"/);
+ assert.match(js,/aria-autocomplete="list"/);
+ assert.match(js,/id="command-item-\$\{i\}"/);
+ assert.match(js,/input\.setAttribute\('aria-activedescendant', active\.id\)/);
+ assert.match(js,/next\.scrollIntoView\(\{block: 'nearest'\}\);\s*syncCommandActive\(\)/);
+});
+
+test('an admin refresh carries unsaved typing over the repaint',()=>{
+ // Reveal on one row blurs the credential field on another, so a focus check
+ // would not notice and the wholesale repaint used to drop the secret.
+ assert.match(js,/function unsavedText\(root\)/);
+ assert.match(js,/const typed = unsavedText\(target\);/);
+ assert.match(js,/restoreText\(target, typed\)/);
+ assert.match(js,/field\.value !== field\.defaultValue/);
+ // A select commits on change, so it has to follow the repaint, not overwrite it.
+ assert.match(js,/\['checkbox', 'radio', 'hidden', 'file', 'submit', 'button'\]\.includes\(f\.type\)/);
+});
+
+test('ambient motion cleans up after itself and follows a reduced-motion change',()=>{
+ // A tab hidden mid-throw may never fire animationend, and those dots are fixed
+ // children of <body>: the timer is what guarantees they go away.
+ assert.match(js,/setTimeout\(\(\) => dot\.remove\(\), 1200\)/);
+ // The ambient listeners are wired in one place so they can be removed again,
+ // and the reduced-motion preference is read live instead of once at boot.
+ assert.match(js,/function wireBots\(\)/);
+ assert.match(js,/query\.addEventListener\('change', sync\)/);
+ assert.match(js,/for \(const \[target, type, fn\] of listeners\) target\.removeEventListener\(type, fn\)/);
+ assert.match(js,/document\.hidden \|\| !document\.querySelector\(big\)/);
 });

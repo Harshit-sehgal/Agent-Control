@@ -8,7 +8,7 @@ import {SqliteStore} from '../src/sqlite-store.js';
 import {loadMasterKey} from '../src/vault.js';
 import {Auth} from '../src/auth.js';
 import {createPush, encryptPayload, vapidHeader, generateVapidKeys} from '../src/push.js';
-import {enablePush} from '../shared/ui-push.js';
+import {enablePush, disablePush, pushStatus} from '../shared/ui-push.js';
 
 /** A browser's side of a subscription: its key pair and shared secret. */
 function device(endpoint = 'https://push.example.com/send/abc') {
@@ -145,47 +145,58 @@ test('turning push on keeps a subscription made for this server key', async () =
   }
 });
 
-test('the service worker shows the payload and re-registers a rotated subscription', async () => {
-  const listeners = {};
-  const fetches = [];
-  let shown = null;
-  const next = {endpoint: 'https://push.example.com/send/new', toJSON: () => ({endpoint: 'https://push.example.com/send/new', keys: {p256dh: 'p', auth: 'a'}})};
-  globalThis.self = {
-    skipWaiting() {},
-    registration: {
-      scope: 'https://dash.example/',
-      showNotification: async (title, options) => { shown = {title, options}; },
-      pushManager: {subscribe: async () => { throw new Error('the new subscription was already provided'); }},
-    },
-    clients: {claim() {}, matchAll: async () => [], openWindow: async () => {}},
-    addEventListener(type, fn) { listeners[type] = fn; },
-  };
-  const previousFetch = globalThis.fetch;
-  globalThis.fetch = async (url, init) => { fetches.push({url: String(url), init}); return {ok: true, status: 201}; };
+test('turning push off unsubscribes locally first, and an unsubscribed device reads as off', async () => {
+  const calls = [];
+  const endpoint = 'https://push.example.com/send/off';
+  let refuse = false, live = null;
+  const subscription = () => ({endpoint, unsubscribe: async () => { calls.push('unsubscribe'); if (refuse) throw new Error('the browser refused'); live = null; }, toJSON: () => ({endpoint})});
+  const serverEndpoints = [];
+  const previous = {window: globalThis.window, Notification: globalThis.Notification, navigator: Object.getOwnPropertyDescriptor(globalThis, 'navigator')};
+  globalThis.document = {getElementById: () => null, querySelector: () => null};
+  globalThis.Notification = {permission: 'granted'};
+  globalThis.window = {isSecureContext: true, PushManager: function PushManager() {}, Notification: globalThis.Notification,
+    AGENT_API: async (path, method = 'GET') => { calls.push(`${method} ${path}`); return {publicKey: '', endpoints: [...serverEndpoints]}; }};
+  Object.defineProperty(globalThis, 'navigator', {configurable: true, writable: true, value: {
+    serviceWorker: {getRegistration: async () => (live === undefined ? undefined : {pushManager: {getSubscription: async () => live}})},
+  }});
   try {
-    await import('../shared/sw.js');
-    await listeners.push({data: {json: () => ({title: 'Draft ready', body: 'For @tester'})}, waitUntil: p => p});
-    assert.deepEqual(shown, {title: 'Draft ready', options: {body: 'For @tester', icon: './icon-192.png', badge: './icon-192.png', tag: 'agent-control'}});
-    shown = null;
-    await listeners.push({data: {json: () => ({web_push: 8030, notification: {title: 'Nested', body: 'Inside'}})}, waitUntil: p => p});
-    assert.equal(shown.title, 'Nested');
-    assert.equal(shown.options.body, 'Inside');
-    shown = null;
-    await listeners.push({data: null, notification: {title: 'From the browser', body: 'Shown'}, waitUntil: p => p});
-    assert.equal(shown.title, 'From the browser');
-    assert.equal(shown.options.body, 'Shown');
-    await listeners.pushsubscriptionchange({
-      newSubscription: next,
-      oldSubscription: {endpoint: 'https://push.example.com/send/old', options: {}},
-      waitUntil: p => p,
-    });
-    assert.equal(fetches[0].init.method, 'POST');
-    assert.equal(fetches[0].url, 'https://dash.example/api/push/subscriptions');
-    assert.equal(JSON.parse(fetches[0].init.body).endpoint, next.endpoint);
-    assert.equal(fetches[1].init.method, 'DELETE');
-    assert.equal(JSON.parse(fetches[1].init.body).endpoint, 'https://push.example.com/send/old');
-  } finally { globalThis.fetch = previousFetch; }
+    // Both sides subscribed: the local unsubscribe runs first, so a failure here
+    // cannot leave a live subscription the server has already forgotten.
+    live = subscription();
+    await disablePush();
+    assert.deepEqual(calls, ['unsubscribe', 'DELETE /api/push/subscriptions']);
+    assert.equal(await pushStatus().then(status => status.state), 'off');
+
+    // A refused local unsubscribe means the server is never told: the device
+    // keeps receiving exactly what the server still has.
+    calls.length = 0; refuse = true; live = subscription();
+    await assert.rejects(disablePush(), /the browser refused/);
+    assert.deepEqual(calls, ['unsubscribe'], 'a failed unsubscribe must not delete the server row');
+
+    // No local subscription at all: nothing to delete, and the device says off
+    // even though the server still lists an old endpoint for it.
+    calls.length = 0; serverEndpoints.push(endpoint); live = null;
+    await disablePush();
+    assert.deepEqual(calls, [], 'with nothing to unsubscribe there is nothing to delete');
+    const off = await pushStatus();
+    assert.deepEqual(calls, ['GET /api/push'], 'the status is still asked of the server');
+    assert.deepEqual([off.state, off.devices], ['off', 1]);
+
+    // No registration, or a push manager that will not answer, is still off.
+    live = undefined;
+    assert.equal((await pushStatus()).state, 'off');
+    Object.defineProperty(globalThis, 'navigator', {configurable: true, writable: true, value: {serviceWorker: {
+      getRegistration: async () => ({pushManager: {getSubscription: async () => { throw new Error('no push manager'); }}}),
+    }}});
+    assert.equal((await pushStatus()).state, 'off');
+  } finally {
+    if (previous.Notification === undefined) delete globalThis.Notification; else globalThis.Notification = previous.Notification;
+    Object.defineProperty(globalThis, 'navigator', previous.navigator);
+    if (previous.window === undefined) delete globalThis.window; else globalThis.window = previous.window;
+    delete globalThis.document;
+  }
 });
+
 
 test('a push endpoint on a private network is never called', async () => {
   let called = false;

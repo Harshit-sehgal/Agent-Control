@@ -63,7 +63,7 @@ need one:
 curl -fsS -b cookie.txt http://127.0.0.1:4173/api/admin/backup > backup.json
 
 # 2. Restore into a throwaway instance on another port and compare.
-PORT=4174 DATA_FILE=/tmp/drill.json DASHBOARD_PASSWORD=x node src/server.js &
+PORT=4174 DATA_FILE=/tmp/drill.json DASHBOARD_PASSWORD=x node --experimental-sqlite src/server.js &
 #   POST the document itself (plus force:true) as the JSON body:
 curl -fsS -X POST http://127.0.0.1:4174/api/admin/restore \
   -H 'Content-Type: application/json' -b cookie2.txt -d "$(cat backup.json | jq -c '. + {force:true}')"
@@ -77,6 +77,15 @@ credential + a provider → export (21 tables, checksummed) → restore into a
 fresh instance → **3 candidates + 1 draft restored**, credentials/providers
 `0/0` (excluded by design), and a **tampered document refused** (checksum).
 Covered by `tests/persistence-api.test.js` (checksum tampering, force-restore).
+
+**Provider keys after a restore.** A backup excludes the credential vault and
+the `kv` document that holds AI providers, so a restored instance has none: add
+each provider and key again under **You → AI and models**. To rotate a key
+without a restore, edit the same provider there and paste the new value — a
+blank key field keeps the stored one, and a new key, endpoint, header set or
+API version re-reads that provider's model catalogue. A wrong or expired key is
+not silent: the provider's own error is shown next to that provider, and
+**Test** makes one small call to say whether the key works before a bot uses it.
 
 ## Sustained load
 

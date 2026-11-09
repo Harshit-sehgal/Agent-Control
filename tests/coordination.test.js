@@ -6,7 +6,7 @@ import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {createRun,planHandoffs,createEnvelope,assertValidHandoff,runNote,MAX_HANDOFFS} from '../shared/coordination.js';
 import {simulateGroup} from '../shared/group-simulator.js';
-import {JsonStore} from '../src/store.js';
+import {SqliteStore} from '../src/sqlite-store.js';
 import {coordinationState,runGroup,markInterrupted} from '../src/coordination.js';
 const group={id:'x-engage',name:'X-engage',bots:['scout','ranker','researcher','writer','reviewer','handoff'].map(id=>({id,name:id[0].toUpperCase()+id.slice(1),instructions:`Act as ${id}`,type:({scout:'source',ranker:'scoring',researcher:'context',writer:'writing',reviewer:'review',handoff:'manual'})[id]}))};
 
@@ -56,7 +56,7 @@ test('browser simulation passes steps between real bot identities and creates pe
 test('server-side agent execution persists messages and real previous outputs',async()=>{
   const dir=await mkdtemp(path.join(tmpdir(),'ac-coord-'));
   try{
-    const store=await new JsonStore(path.join(dir,'state.json')).init();
+    const store=await new SqliteStore(path.join(dir,'state.db'),path.join(dir,'state.json')).init();
     await store.update(s=>{s.groups=[group];coordinationState(s);s.groupRuns.push(createRun({group,message:'Coordinate',makeId:()=> 'run-1'}));});
     const contexts=[];
     await runGroup(store,'run-1',async(bot,input)=>{const e=JSON.parse(input);contexts.push(e);return `Response from ${bot.name}`;});
@@ -65,7 +65,7 @@ test('server-side agent execution persists messages and real previous outputs',a
     assert.equal(contexts[1].previous.output,'Response from Scout');
     assert.equal(s.groupMessages['x-engage'][0].toBotId,'ranker');
     assert.equal(s.groupMessages['x-engage'][4].toBotId,null);
-    const persisted=await new JsonStore(path.join(dir,'state.json')).init();
+    const persisted=await new SqliteStore(path.join(dir,'state.db'),path.join(dir,'state.json')).init();
     assert.equal(persisted.read().groupRuns[0].status,'completed');
     await persisted.update(s=>{s.groupRuns[0].status='running';});
     await markInterrupted(persisted);assert.equal(persisted.read().groupRuns[0].status,'interrupted');
@@ -75,7 +75,7 @@ test('server-side agent execution persists messages and real previous outputs',a
 test('a checkpointed run pauses between steps and resumes on human approval',async()=>{
   const dir=await mkdtemp(path.join(tmpdir(),'ac-coord-cp-'));
   try{
-    const store=await new JsonStore(path.join(dir,'state.json')).init();
+    const store=await new SqliteStore(path.join(dir,'state.db'),path.join(dir,'state.json')).init();
     const three={id:'x-engage',name:'X-engage',bots:group.bots.slice(0,3)};
     await store.update(s=>{s.groups=[three];coordinationState(s);s.groupRuns.push(createRun({group:three,message:'Coordinate',makeId:()=> 'run-cp',checkpoints:true}));});
     const {resumeGroupRun}=await import('../src/coordination.js');
@@ -103,7 +103,7 @@ test('a checkpointed run pauses between steps and resumes on human approval',asy
 test('orchestrator records execution failure and never publishes',async()=>{
   const dir=await mkdtemp(path.join(tmpdir(),'ac-coord-fail-'));
   try{
-    const store=await new JsonStore(path.join(dir,'state.json')).init();
+    const store=await new SqliteStore(path.join(dir,'state.db'),path.join(dir,'state.json')).init();
     await store.update(s=>{s.groups=[group];coordinationState(s);s.groupRuns.push(createRun({group,message:'Coordinate',makeId:()=> 'run-2'}));});
     await runGroup(store,'run-2',async()=>{throw Error('Model unavailable');});
     const s=store.read();assert.equal(s.groupRuns[0].status,'failed');assert.match(s.groupRuns[0].error,/Model unavailable/);
@@ -116,7 +116,7 @@ test('queuing a run reports a missing group before complaining about the AI key'
   // does not exist. Validation order matters.
   const dir=await mkdtemp(path.join(tmpdir(),'ac-coord-404-'));
   try{
-    const store=await new JsonStore(path.join(dir,'state.json')).init();
+    const store=await new SqliteStore(path.join(dir,'state.db'),path.join(dir,'state.json')).init();
     await store.update(s=>{coordinationState(s);s.groups=[group];});
     const {queueGroupRun:queue}=await import('../src/coordination.js');
     await assert.rejects(queue(store,{groupId:'missing',message:'hi'}),error=>error.status===404);
@@ -145,7 +145,7 @@ test('a repeated group run does not create a second draft for the same candidate
 test('a run writes its messages and outcome into the conversation it was started from',async()=>{
   const dir=await mkdtemp(path.join(tmpdir(),'ac-coord-'));
   try{
-    const store=await new JsonStore(path.join(dir,'state.json')).init();
+    const store=await new SqliteStore(path.join(dir,'state.db'),path.join(dir,'state.json')).init();
     await store.update(s=>{s.groups=[group];coordinationState(s);
       s.groupRuns.push(createRun({group,message:'@scout @writer go',makeId:()=> 'run-chat',chatKey:'writer',checkpoints:true}));});
     assert.equal(store.read().groupRuns[0].chatKey,'writer');

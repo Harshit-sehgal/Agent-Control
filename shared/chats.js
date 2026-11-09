@@ -54,16 +54,30 @@ function entry(raw, makeId, now) {
 }
 
 /** Append messages to a conversation. A message whose id is already stored is
- * skipped, so a client can safely resend after a dropped connection. */
+ * skipped, so a client can safely resend after a dropped connection.
+ *
+ * A trusted write (the server recording a run it executed) *replaces* a stored
+ * message with the same id instead of being skipped. Without that, a client
+ * could post a message using a run id it was handed before the run finished and
+ * silence the bot's real reply. */
 export function addChatMessages(state, key, messages, {makeId = () => crypto.randomUUID(), now = new Date().toISOString(), trusted = false} = {}) {
   if (!chatKeys(state).has(key)) fail('Conversation not found.', 404);
   if (!Array.isArray(messages) || !messages.length) fail('Send at least one message.');
   if (messages.length > MAX_CHAT_MESSAGES) fail(`Send at most ${MAX_CHAT_MESSAGES} messages at once.`);
   const clean = messages.map(m => { const e = entry(m, makeId, now); return trusted ? e : claimedSender(state, key, m, untrusted(state, key, e)); });
   state.chats ??= {};
-  const list = state.chats[key] || [], seen = new Set(list.map(m => m.id));
+  const list = state.chats[key] || [], seen = new Map(list.map((m, i) => [m.id, i]));
   let added = 0;
-  for (const m of clean) { if (seen.has(m.id)) continue; seen.add(m.id); list.push(m); added++; }
+  for (const m of clean) {
+    const at = seen.get(m.id);
+    if (at !== undefined) {
+      if (trusted) { list[at] = m; added++; }
+      continue;
+    }
+    seen.set(m.id, list.length);
+    list.push(m);
+    added++;
+  }
   state.chats[key] = list.slice(-MAX_CHAT_MESSAGES);
   return {ok: true, added};
 }

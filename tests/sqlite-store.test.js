@@ -30,6 +30,16 @@ test('a fresh database seeds the built-in workspace and persists updates across 
   await fs.rm(path.dirname(db), {recursive: true, force: true});
 });
 
+test('a database written by a newer build is refused instead of silently accepted', async () => {
+  const {dir, db, legacy} = await sandbox();
+  const store = await new SqliteStore(db, legacy).init();
+  store.run('UPDATE schema_meta SET version=? WHERE id=1', SCHEMA_DB_VERSION + 1);
+  // Close the handle before reopening the same file.
+  await store.close?.();
+  await assert.rejects(() => new SqliteStore(db, legacy).init(), /newer version of this app/);
+  await fs.rm(dir, {recursive: true, force: true});
+});
+
 test('a newer legacy JSON export is imported, and an older one is ignored', async () => {
   const {dir, db, legacy} = await sandbox();
   const fresh = await new SqliteStore(db, legacy).init();
@@ -133,4 +143,31 @@ test('workspace retention settings survive a restart', async () => {
   const reopened = await new SqliteStore(db, path.join(path.dirname(db), 'state.json')).init();
   assert.deepEqual(reopened.read().settings.retention, {events: 7, doneTasks: 3, runs: 14});
   await fs.rm(path.dirname(db), {recursive: true, force: true});
+});
+
+test('a bot keeps how it came to exist, and an older database gains the columns', async () => {
+  const at = '2026-01-01T00:00:00.000Z';
+  const {dir, db, legacy} = await sandbox();
+  const first = await new SqliteStore(db, legacy).init();
+  await first.update(s => {
+    const group = s.groups.find(g => g.id === 'x-engage');
+    group.bots.push({id: 'made', name: 'Source scout', instructions: 'Find posts.', type: 'custom', permissions: [],
+      origin: 'bot', createdBy: {botId: 'scout', botName: 'Scout', runId: 'r1', at}, createdAt: at});
+  });
+  first.db.close();
+  const reopened = await new SqliteStore(db, legacy).init();
+  const made = reopened.read().groups.find(g => g.id === 'x-engage').bots.find(b => b.id === 'made');
+  assert.equal(made.origin, 'bot');
+  assert.deepEqual(made.createdBy, {botId: 'scout', botName: 'Scout', runId: 'r1', at});
+
+  // A database written before v10 has neither column: the migration must add
+  // them without dropping the bots already in it.
+  reopened.db.exec('ALTER TABLE bots DROP COLUMN origin');
+  reopened.db.exec('ALTER TABLE bots DROP COLUMN created_by');
+  reopened.run('UPDATE schema_meta SET version=? WHERE id=1', 9);
+  reopened.db.close();
+  const upgraded = await new SqliteStore(db, legacy).init();
+  assert.ok(upgraded.read().groups.find(g => g.id === 'x-engage').bots.some(b => b.id === 'made'), 'The bot must survive the migration.');
+  assert.equal(upgraded.get('SELECT version FROM schema_meta WHERE id=1').version, SCHEMA_DB_VERSION);
+  await fs.rm(dir, {recursive: true, force: true});
 });

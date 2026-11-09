@@ -3,9 +3,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import http from 'node:http';
 import {SqliteStore} from '../src/sqlite-store.js';
 import {loadMasterKey} from '../src/vault.js';
 import * as ai from '../src/ai-providers.js';
+import * as credentials from '../src/credentials.js';
+import {envConfig} from '../src/ai.js';
 import {migrate} from '../shared/workflow.js';
 import {createRouter} from '../src/router.js';
 import {aiRoutes} from '../src/routes-ai.js';
@@ -28,12 +31,31 @@ async function withStore(fn) {
   }
 }
 
+/** A loopback provider stub, so a catalogue read never leaves the machine. */
+async function stub(reply) {
+  const requests = [];
+  const server = http.createServer((req, res) => {
+    requests.push({method: req.method, url: req.url, headers: req.headers});
+    res.writeHead(reply.status, {'Content-Type': 'application/json'});
+    res.end(JSON.stringify(reply.json));
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  return {requests, port: server.address().port, close: () => server.close()};
+}
+
+// Apply env for one test and restore it exactly afterwards.
+async function withEnv(env, fn) {
+  const keys = Object.keys(env), saved = Object.fromEntries(keys.map(k => [k, process.env[k]]));
+  Object.assign(process.env, env);
+  try { return await fn(); } finally { for (const k of keys) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } }
+}
+
 test('a BYOK provider stores its key encrypted and never lists it', async () => {
   await withStore(async store => {
     const p = await ai.addProvider(store, 'default', {label: 'OpenAI', baseUrl: 'https://api.openai.com/v1/', apiKey: 'sk-secret-123', createdBy: 'owner@localhost'});
     assert.equal(p.label, 'OpenAI');
     assert.equal(p.baseUrl, 'https://api.openai.com/v1', 'base URL is trimmed of a trailing slash');
-    assert.equal(p.style, 'responses', 'OpenAI hosts infer the Responses API');
+    assert.equal(p.protocol, 'openai-responses', 'OpenAI hosts infer the Responses API');
     assert.equal(p.host, 'api.openai.com');
 
     const listed = ai.listProviders(store.read());
@@ -53,7 +75,7 @@ test('a BYOK provider stores its key encrypted and never lists it', async () => 
 test('the workspace default model and a per-bot override both apply', async () => {
   await withStore(async store => {
     const p = await ai.addProvider(store, 'default', {label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', apiKey: 'gsk_x'});
-    assert.equal(ai.resolveConfig(store, null).style, 'chat', 'non-OpenAI hosts use chat completions');
+    assert.equal(ai.resolveConfig(store, null).protocol, 'openai-chat', 'non-OpenAI hosts use chat completions');
 
     await ai.setDefaults(store, {providerId: p.id, model: 'llama-3.3-70b'});
     assert.equal(ai.resolveConfig(store, null).model, 'llama-3.3-70b');
@@ -137,5 +159,164 @@ test('a key hidden in a provider URL is refused and never returned', async () =>
     assert.equal(body.ai.providers.find(p => p.id === 'p').label, 'L');
     assert.equal(body.ai.bots.writer.model, 'm');
     assert.equal(body.ai.bots.writer.apiKey, undefined);
+  });
+});
+
+test('an explicit protocol is stored as given, and saving a provider never calls the endpoint', async () => {
+  await withStore(async store => {
+    const srv = await stub({status: 200, json: {data: [{id: 'claude-sonnet-4-5'}]}});
+    try {
+      const p = await ai.addProvider(store, 'default', {label: 'Claude', baseUrl: `http://127.0.0.1:${srv.port}/v1`, apiKey: 'sk-ant-1', protocol: 'anthropic'});
+      assert.equal(p.protocol, 'anthropic', 'the requested protocol wins over host detection');
+      assert.deepEqual(srv.requests, [], 'addProvider only saves; the route is what reads the catalogue');
+      assert.equal(ai.listProviders(store.read()).providers[0].protocol, 'anthropic');
+      assert.equal(ai.resolveConfig(store, null).protocol, 'anthropic', 'the saved shape is what a call speaks');
+      assert.equal(ai.resolveConfig(store, null).apiKey, 'sk-ant-1');
+    } finally { srv.close(); }
+  });
+});
+
+test('refreshModels stores the catalogue and clears an earlier failure', async () => {
+  await withStore(async store => {
+    const srv = await stub({status: 200, json: {data: [{id: 'model-b'}, {id: 'model-a'}]}});
+    try {
+      const p = await ai.addProvider(store, 'default', {label: 'Groq', baseUrl: `http://127.0.0.1:${srv.port}/v1`, apiKey: 'gsk_stub'});
+      await store.update(s => { s.ai.providers.find(x => x.id === p.id).modelsError = 'an older failure'; });
+      const found = await ai.refreshModels(store, p.id);
+      assert.deepEqual(found.models, ['model-a', 'model-b']);
+      const listed = ai.listProviders(store.read()).providers.find(x => x.id === p.id);
+      assert.deepEqual(listed.models, ['model-a', 'model-b']);
+      assert.ok(listed.modelsAt, 'the read is timestamped');
+      assert.equal(listed.modelsError, null, 'a good read clears the old error');
+      assert.equal(srv.requests[0].url, '/v1/models');
+      assert.equal(srv.requests[0].headers.authorization, 'Bearer gsk_stub');
+    } finally { srv.close(); }
+  });
+});
+
+test('a failed catalogue read is recorded on the provider instead of losing it', async () => {
+  await withStore(async store => {
+    const srv = await stub({status: 500, json: {error: {message: 'catalogue exploded'}}});
+    try {
+      const p = await ai.addProvider(store, 'default', {label: 'Flaky', baseUrl: `http://127.0.0.1:${srv.port}/v1`, apiKey: 'flaky-key'});
+      await assert.rejects(() => ai.refreshModels(store, p.id), e => /500/.test(e.message) && /catalogue exploded/.test(e.message));
+      const listed = ai.listProviders(store.read()).providers.find(x => x.id === p.id);
+      assert.ok(listed, 'the provider is still saved');
+      assert.match(listed.modelsError, /catalogue exploded/);
+      assert.deepEqual(listed.models, []);
+      assert.ok(listed.modelsAt, 'the failed attempt is timestamped too');
+      assert.equal(ai.resolveConfig(store, null).apiKey, 'flaky-key', 'the key survived the failure');
+    } finally { srv.close(); }
+  });
+});
+
+test('renaming a provider keeps its stored key untouched', async () => {
+  await withStore(async store => {
+    const p = await ai.addProvider(store, 'default', {label: 'Old name', baseUrl: 'https://api.groq.com/openai/v1', apiKey: 'orig-key'});
+    const credentialId = store.read().ai.providers.find(x => x.id === p.id).credentialId;
+    const updated = await ai.updateProvider(store, 'default', p.id, {label: 'New name'});
+    assert.equal(updated.label, 'New name');
+    assert.equal(updated.baseUrl, 'https://api.groq.com/openai/v1', 'the endpoint is unchanged');
+    assert.equal(updated.endpointChanged, false, 'a rename keeps the model catalogue');
+    assert.equal(store.read().ai.providers.find(x => x.id === p.id).credentialId, credentialId);
+    assert.equal(credentials.revealValue(store, credentialId), 'orig-key');
+  });
+});
+
+test('rotating a key replaces the vault secret in place and drops the stale catalogue', async () => {
+  await withStore(async store => {
+    const p = await ai.addProvider(store, 'default', {label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', apiKey: 'old-key'});
+    const credentialId = store.read().ai.providers.find(x => x.id === p.id).credentialId;
+    await store.update(s => { const prov = s.ai.providers.find(x => x.id === p.id); prov.models = ['stale-model']; prov.modelsAt = 'earlier'; });
+    const updated = await ai.updateProvider(store, 'default', p.id, {apiKey: 'new-key'});
+    assert.equal(updated.endpointChanged, true, 'a new key invalidates the old list');
+    assert.equal(store.read().ai.providers.find(x => x.id === p.id).credentialId, credentialId, 'the vault reference is reused, so nothing dangles');
+    assert.equal(credentials.revealValue(store, credentialId), 'new-key');
+    assert.equal(credentials.revealValue(store, credentialId).includes('old-key'), false, 'the old key no longer decrypts');
+    assert.deepEqual(updated.models, [], 'the stale catalogue is cleared until the route re-reads it');
+    assert.equal(ai.resolveConfig(store, null).apiKey, 'new-key');
+  });
+});
+
+test('updating a provider that does not exist is a 404', async () => {
+  await withStore(async store => {
+    await assert.rejects(() => ai.updateProvider(store, 'default', 'ghost-provider', {label: 'X'}), e => e.status === 404 && /not found/i.test(e.message));
+    assert.equal(store.read().ai.providers.length, 0, 'nothing was created by the failed update');
+  });
+});
+
+test('resolveConfig uses the first catalogue model where "auto" cannot work', async () => {
+  await withStore(async store => {
+    const anthropic = await ai.addProvider(store, 'default', {label: 'Claude', baseUrl: 'https://api.anthropic.com/v1', apiKey: 'sk-ant', protocol: 'anthropic'});
+    await store.update(s => { s.ai.providers.find(x => x.id === anthropic.id).models = ['claude-sonnet-4-5', 'claude-haiku-4-5']; });
+    assert.equal(ai.resolveConfig(store, null).model, 'claude-sonnet-4-5', 'Anthropic cannot run "auto", so the first model is used');
+
+    const gemini = await ai.addProvider(store, 'default', {label: 'Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', apiKey: 'gp-key', protocol: 'gemini'});
+    await store.update(s => { s.ai.providers.find(x => x.id === gemini.id).models = ['gemini-2.5-flash']; });
+    await ai.setDefaults(store, {providerId: gemini.id});
+    assert.equal(ai.resolveConfig(store, null).model, 'gemini-2.5-flash');
+
+    const groq = await ai.addProvider(store, 'default', {label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', apiKey: 'gsk_x'});
+    await store.update(s => { s.ai.providers.find(x => x.id === groq.id).models = ['llama-3.3-70b']; });
+    await ai.setDefaults(store, {providerId: groq.id});
+    assert.equal(ai.resolveConfig(store, null).model, 'auto', 'a chat provider keeps the router\'s own choice');
+
+    await ai.setDefaults(store, {providerId: anthropic.id, model: 'claude-opus-4-1'});
+    assert.equal(ai.resolveConfig(store, null).model, 'claude-opus-4-1', 'an explicit choice still wins');
+  });
+});
+
+test('a provider saved before protocols existed resolves from its legacy style', async () => {
+  await withStore(async store => {
+    const cred = credentials.addCredential(store, 'default', {name: 'AI key · Legacy', kind: 'ai_provider', value: 'legacy-key'});
+    await store.update(s => {
+      const state = ai.aiState(s);
+      state.providers.push({id: 'legacy', label: 'Legacy', baseUrl: 'https://api.groq.com/openai/v1', style: 'chat', credentialId: cred.id, createdAt: 't'});
+      state.defaultProviderId = 'legacy';
+    });
+    assert.equal(ai.listProviders(store.read()).providers.find(p => p.id === 'legacy').protocol, 'openai-chat');
+    const cfg = ai.resolveConfig(store, null);
+    assert.equal(cfg.protocol, 'openai-chat', 'style:"chat" predates protocol and still resolves');
+    assert.equal(cfg.style, 'chat');
+    assert.equal(cfg.apiKey, 'legacy-key');
+  });
+});
+
+test('an environment key alone picks the Anthropic or Gemini endpoint', async () => {
+  await withEnv({AI_BASE_URL: '', OPENAI_BASE_URL: '', AI_API_KEY: '', OPENAI_API_KEY: '', AI_API_STYLE: '', GEMINI_API_KEY: '', GOOGLE_API_KEY: '', ANTHROPIC_API_KEY: 'sk-ant-env'}, async () => {
+    const cfg = envConfig();
+    assert.equal(cfg.baseUrl, 'https://api.anthropic.com/v1');
+    assert.equal(cfg.protocol, 'anthropic');
+    assert.equal(cfg.apiKey, 'sk-ant-env');
+    assert.equal(cfg.source, 'env');
+  });
+  await withEnv({AI_BASE_URL: '', OPENAI_BASE_URL: '', AI_API_KEY: '', OPENAI_API_KEY: '', AI_API_STYLE: '', ANTHROPIC_API_KEY: '', GEMINI_API_KEY: 'gm-env'}, async () => {
+    const cfg = envConfig();
+    assert.equal(cfg.baseUrl, 'https://generativelanguage.googleapis.com/v1beta');
+    assert.equal(cfg.protocol, 'gemini');
+    assert.equal(cfg.apiKey, 'gm-env');
+  });
+});
+
+test('the create route saves a provider and returns the catalogue it just read', async () => {
+  await withStore(async store => {
+    const srv = await stub({status: 200, json: {data: [{id: 'model-b'}, {id: 'model-a'}]}});
+    try {
+      const router = createRouter();
+      aiRoutes(router);
+      const handler = router.find('POST', '/api/ai/providers').route.handler;
+      const created = await handler({
+        body: async () => ({label: 'Local server', baseUrl: `http://127.0.0.1:${srv.port}/v1`, apiKey: 'stub-key'}),
+        store, actor: {workspaceId: 'default', email: 'owner@localhost', role: 'admin'}, params: {},
+      });
+      assert.equal(created.status, 201);
+      assert.deepEqual(created.body.models, ['model-a', 'model-b'], 'the reply carries the models the key can use');
+      assert.equal(created.body.modelsError, null);
+      assert.ok(created.body.modelsAt);
+      assert.equal(created.body.protocol, 'openai-chat');
+      assert.equal(JSON.stringify(created.body).includes('stub-key'), false, 'the key is never returned');
+      assert.equal(srv.requests[0].url, '/v1/models');
+      assert.equal(srv.requests[0].headers.authorization, 'Bearer stub-key');
+    } finally { srv.close(); }
   });
 });

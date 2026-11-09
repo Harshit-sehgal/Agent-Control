@@ -1,4 +1,4 @@
-# Build plan — complete except host/push verification (38/39)
+# Build plan — complete except host/push verification (106/107)
 
 All v0.2/v0.3 roadmap items that can ship in this repo are delivered. Every
 phase ended green (`npm run check && npm test && npm run build:pages`). The
@@ -7,21 +7,25 @@ a host that stays on. The items below are the record of what shipped; new
 work should be added as a fresh section.
 
 ## Phase A — transactional store
-- [x] `node:sqlite` store behind the existing `read()`/`update()` interface (Node 22 re-exec guard)
+- [x] `node:sqlite` store behind the existing `read()`/`update()` interface (launched with the `--experimental-sqlite` flag the npm scripts and the Dockerfile pass)
 - [x] Schema v1 + `schema_meta` migration ledger
 - [x] Legacy `state.json` import on boot (mtime-guarded, supports operator JSON restore)
 - [x] Atomic WAL transactions; `recoveredFrom` quarantine kept
-- Also landed: completed the in-flight `.env` loader + provider-agnostic AI client
+- [x] Schema v9; a database written by a newer build is refused at boot with both versions in the message
+- [x] The JSON store removed: `src/store.js` and `STORE_BACKEND` are gone and `src/server.js` opens SQLite directly
+- Also landed: completed the in-flight `.env` loader + provider-agnostic AI client (now five wire protocols, provider presets, custom headers, Azure API version)
 
 ## Phase B — multi-user control plane
 - [x] users, server-side sessions (revocable), password reset tokens
 - [x] workspaces + membership roles (owner/admin/member/viewer)
 - [x] First-run owner bootstrap from `DASHBOARD_PASSWORD`; `/api/login` unchanged
 - [x] Authz matrix on every route; session list/revoke endpoints
+- [x] Sign-in limited per client address (the rightmost `X-Forwarded-For` hop behind `TRUST_PROXY=1`) and per account
 
 ## Phase C — structured tasks + durable queue
 - [x] `shared/tasks.js` transition rules (pure, replaces reminder events)
 - [x] `src/queue.js` worker: idempotency keys, leases, backoff, crash recovery
+- [x] One heartbeat renews every task in a claimed batch, so a slow handler cannot let a waiting task's lease expire and be executed twice
 - [x] `schedules` → tasks migration; scheduler keeps draft release + task dispatch
 
 ## Phase D — source evidence model
@@ -59,6 +63,8 @@ work should be added as a fresh section.
 - [x] Disconnect, duplicate delivery, partial-execution recovery
 - [x] Adversarial prompt-injection suite
 - [x] Authorization matrix tests
+- [x] Serialized store `update()`, scheduler ticks and boot-order retention, and lease recovery from a dead process
+- [x] `npm run check` walks every source file under `src/`, `shared/`, `agent/`, `extension/` and `scripts/` (75 files) instead of a hand-kept list
 
 ## Phase L — docs
 - [x] ROADMAP/README/COORDINATION updates, AGENT-PROTOCOL.md, SECURITY.md
@@ -71,6 +77,7 @@ work should be added as a fresh section.
 - [x] UI split into `shared/ui-*.js` modules with a pure view-model layer
 - [x] Single stylesheet (`shared/app.css`), system fonts, tightened CSP
 - [x] Tests and Playwright smokes updated for the new UI
+- [x] Command palette as a combobox with `aria-activedescendant`, error toasts announced assertively, `100dvh` panes with notch and home-indicator insets, 16px text fields, 44px touch targets
 
 ## Phase N — server structure and durable history
 - [x] Route table with declared access per route (`src/router.js`, `src/routes-*.js`)
@@ -79,6 +86,7 @@ work should be added as a fresh section.
 - [x] Conversations stored with the workspace, with a one-time import from the browser
 - [x] Sheets take focus as they open (fixes text landing in the wrong field)
 - [x] Group runs report into their conversation from the server
+- [x] `shared/assets.js` as the only list of served UI files, imported by both `scripts/build-pages.js` and `src/server.js`
 
 ## Phase O — adversarial security review
 - [x] Owner-only backup and restore; restore validates roles, links and column names
@@ -87,12 +95,14 @@ work should be added as a fresh section.
 - [x] Capture token withheld from viewers; request-made notification tasks refused
 - [x] Local agent refuses private-network targets; model calls and posts are bounded
 - [x] Only the server can mark a chat message as model output or name its sender
+- [x] A stored message id cannot be reused by a client to replace the bot's reply
 - [x] Webhooks refuse private-network targets unless allowed on purpose
 
 ## Phase P — workspaces, push, browser reader, deploy files
 - [x] One database per workspace; sessions carry a workspace and can switch (schema v5)
 - [x] Create, rename and delete workspaces; members invited per workspace
 - [x] Web Push without a library: encryption, VAPID, queue delivery, service worker, manifest
+- [x] Service worker caches the app shell so it opens offline, and a notification tap opens the screen it is about
 - [x] Local agent reads allowlisted pages with the installed browser over DevTools
 - [x] Dockerfile, Compose with Caddy, and a systemd unit
 - [x] Push delivered end to end through Google's push service to desktop Chrome
@@ -123,3 +133,32 @@ work should be added as a fresh section.
 - [x] The bot that asked gets one more turn carrying the answer, marked as untrusted data, and writes the real reply; a failed helper never loses that reply
 - [x] Started/answered/refused lines in the chat, and the helpers each run spawned kept on the run record
 - [x] Tests (`tests/subagents.test.js`); check, test and build:pages green
+
+## Phase T — durable memory
+- [x] `shared/memory.js`: per-model rulebook and per-chat recap, bounded (50 rules, 40 books, 120 chats) and pure
+- [x] Durable user sentences captured deterministically; one model consolidation pass on a cadence, with a cooldown and an injectable executor (`src/memory.js`)
+- [x] Memory block in every bot envelope and system prompt; per-bot `memory` setting can leave a bot out
+- [x] Memory persisted with the workspace (schema v9 `memory` table) and carried by backups
+- [x] A model-written recap is not thrown away by the next deterministic digest (it lasts `CONSOLIDATE_AFTER` turns); a forgotten chat stays forgotten until a message written after the forget arrives
+- [x] An unreadable consolidation reply still spends the cooldown, so one bad answer cannot buy a paid call every step
+- [x] A durable sentence must address the bot, not merely contain a modal, so "we must ship today" is not kept as a rule
+- [x] UI: bot profile memory section with rule add/delete, chat forget, and an explicit "update rulebook" action (`/api/memory`)
+- [x] Tests (`tests/memory.test.js`, `tests/memory-routes.test.js`); check, test and build:pages green
+
+## Phase U — bots that ask each other
+- [x] `bot.ask` permission on any bot; envelope and system prompt describe the block only to bots holding it
+- [x] Fenced `ask` blocks validated (`shared/bot-link.js`): one per reply, JSON only, capped question length
+- [x] The teammate answers as itself on its own model and rulebook, with no tools; the asker gets one more turn with the answer marked as untrusted text
+- [x] One round deep: the teammate's reply is never parsed for another ask; refused, missing or failed asks never lose the asker's reply
+- [x] Started/answered/refused lines in the chat, and asks kept on the run record
+- [x] A control block in a teammate's answer is stripped before the asker sees it; hand-offs switched off for the group refuse the ask without costing the reply
+- [x] Tests (`tests/bot-link.test.js`); check, test and build:pages green
+
+## Phase V — bots that create bots
+- [x] `bot.create` permission on any bot; envelope and system prompt describe the block only to bots holding it
+- [x] Fenced `create-bot` blocks validated (`shared/bot-create.js`): one per reply, bounded name and job, JSON only
+- [x] The new bot is a lasting roster record: always `custom`, no permissions, no model/contract escalation, capped by the group's bot limit
+- [x] A group with an explicit pipeline adds the new bot at the end; created bots are reviewed and editable like any other
+- [x] Refused, duplicate and over-limit requests say why in the chat and write nothing
+- [x] `bot.create` is re-checked against the roster inside the write, so a permission revoked while the reply was written still refuses; schema v10 keeps `origin` and `created_by` across a restart
+- [x] Tests (`tests/bot-create.test.js`); check, test and build:pages green

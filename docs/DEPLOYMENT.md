@@ -6,8 +6,10 @@ terminate HTTPS — usually at a reverse proxy. Optional in-process TLS is
 knobs.
 
 ## Requirements
-- **Node.js 22+** (`.nvmrc`). The SQLite store uses `node:sqlite`, which the
-  server re-execs itself with `--experimental-sqlite` to load on Node 22.
+- **Node.js 22.5 or newer** (`.nvmrc`). The SQLite store uses `node:sqlite`,
+  which needs `--experimental-sqlite` before Node 23.4. Every `npm` script
+  (`start`, `dev`, `test`, `test:coverage`, `backup`) and the Dockerfile `CMD`
+  pass the flag; a bare `node src/server.js` has to pass it too.
 - No npm runtime dependencies.
 - A writable directory for the data file and the vault keyfile.
 
@@ -18,19 +20,34 @@ knobs.
 |---|---|
 | `DASHBOARD_PASSWORD` | bootstraps the owner on first run; **set a long one** |
 | `HOST` / `PORT` | bind address (default `127.0.0.1:4173`) |
-| `DATA_FILE` | JSON sibling path (default `data/state.json`); SQLite is the same name with `.db`, or `DATA_DB` |
-| `STORE_BACKEND` | `json` forces the legacy JSON store (escape hatch/tests) |
+| `DATA_FILE` | JSON sibling path (default `data/state.json`), used to find the database and to import a 0.6 `state.json` once; the SQLite file is the same name with `.db`, or `DATA_DB` |
 | `PUBLIC_ORIGIN` | absolute `https://…` URL; enables the origin/CSRF check for that host |
 | `HSTS` | `1` to send `Strict-Transport-Security` (only behind TLS) |
 | `TLS_CERT` / `TLS_KEY` | optional paths to a certificate and key; both must be set to serve HTTPS in-process |
-| `TRUST_PROXY` | `1` when a reverse proxy sets `X-Forwarded-For` / `X-Forwarded-Proto`; the rate limiter and Secure-cookie hint then use those headers |
+| `TRUST_PROXY` | `1` when a reverse proxy sets `X-Forwarded-For` / `X-Forwarded-Proto`. The rate limiter then keys on the rightmost `X-Forwarded-For` hop and the Secure-cookie hint follows `X-Forwarded-Proto` |
 | `RESET_TOKEN_CONSOLE` | `0` on a hosted install so password-reset tokens are not printed to the process log |
 | `WEBHOOK_ALLOW_PRIVATE` | `1` to let webhook and email-relay notifications reach private or local addresses |
 | `EMAIL_RELAY_URL` | optional HTTPS gateway. The email channel POSTs `{to, title, body, meta, at}` there. Unset, delivery fails instead of claiming the message was sent |
 | `EMAIL_RELAY_TOKEN` | optional bearer token for `EMAIL_RELAY_URL`; the relay must use HTTPS when set. This app does not speak SMTP |
 | `VAPID_SUBJECT` | contact for push services, `mailto:you@example.com` or an https URL; defaults to `PUBLIC_ORIGIN`. Apple rejects pushes without a real one |
 | `MASTER_KEY` | 32-byte key (64 hex chars) for the credential vault; else a `0600` keyfile is generated beside the DB |
-| `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` / `AI_API_STYLE` / `AI_TIMEOUT_MS` / `AI_MAX_CONCURRENCY` | optional OpenAI-compatible provider |
+| `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` | optional provider from the environment: the endpoint, the key (`OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL` are the older names) and the model id, or `auto` for a router that chooses |
+| `AI_API_STYLE` | the wire protocol: `chat` (`/chat/completions`), `responses` (OpenAI's `/responses`), `anthropic` (Claude's `/messages`), `gemini` (Google's `generateContent`), `azure` (an Azure deployment). Aliases `messages`/`claude` mean anthropic, `google` means gemini, `openai`/`compatible` mean chat; blank infers it from the host (`api.anthropic.com` → anthropic, `generativelanguage.googleapis.com` → gemini, `*.openai.azure.com` → azure, `api.openai.com` → responses, anything else → chat). `AI_API_PROTOCOL` is read as the same value |
+| `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_BASE_URL` | alternative key and endpoint for `AI_API_KEY` / `AI_BASE_URL`. With no base URL, either key alone picks `https://api.anthropic.com/v1` |
+| `GEMINI_API_KEY` / `GOOGLE_GENAI_API_KEY` | same, for Gemini: alone and without a base URL they pick `https://generativelanguage.googleapis.com/v1beta` (`GOOGLE_API_KEY` is the older name) |
+| `AZURE_OPENAI_API_KEY` / `AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_API_VERSION` | Azure OpenAI: the key, the resource endpoint (`https://NAME.openai.azure.com`, needed — a bare Azure key picks no endpoint) and the API version (default `2024-10-21`). `AZURE_OPENAI_ENDPOINT` also serves as the base URL, and its host selects the `azure` protocol |
+| `AI_TIMEOUT_MS` / `AI_MAX_CONCURRENCY` | request budget in milliseconds (default 180000) and the cap on model calls in flight (default 4) |
+
+AI providers do not need a restart and do not need these variables. **You →
+AI and models** saves a provider at run time — a preset or a typed endpoint, a
+key, one of the five protocols above (`openai-chat`, `openai-responses`,
+`anthropic`, `gemini`, `azure-openai`), optional custom headers
+(one `Name: value` per line) and, for Azure, an API version — and the key and
+the header values go into the credential vault, encrypted with `MASTER_KEY`. A
+saved provider wins over the environment for any bot or workspace default that
+points at it. Saving reads that provider's model catalogue with the key just
+given (both the chat-capable ids and the full list), **Refresh models** re-reads
+it, and **Test** makes one small call and reports the model and the latency.
 
 Local-agent knobs (`AGENT_BROWSER`, allowlist, profile, path) are read by
 `node agent/agent.mjs`, not this process. They are listed in `.env.example`
@@ -38,7 +55,10 @@ and [`AGENT-PROTOCOL.md`](AGENT-PROTOCOL.md).
 
 `preflight()` refuses to boot on an invalid `PUBLIC_ORIGIN` and warns when HSTS
 is on without HTTPS, when no `DASHBOARD_PASSWORD` is set, or when the server is
-bound off-loopback without HTTPS.
+bound off-loopback without HTTPS. The store refuses to open a database written
+by a newer build: the message names the database's schema version and the one
+this build understands, so an accidental downgrade stops instead of running
+against columns it does not know.
 
 ## TLS via a reverse proxy
 Terminate TLS at the proxy and forward to the loopback server. **Caddy** is the
@@ -64,6 +84,12 @@ location / {
 Set `PUBLIC_ORIGIN=https://dash.example.com` so same-origin writes pass the CSRF
 check, and `HSTS=1` once HTTPS is confirmed working. HSTS is a one-way door —
 browsers will refuse plain HTTP for `max-age`, so enable it last.
+
+With `TRUST_PROXY=1`, sign-in is limited per client address and per account
+(8 attempts / 15 minutes each). The client address is the **rightmost**
+`X-Forwarded-For` hop, which is the one your proxy wrote, not the leftmost one a
+caller can invent. A proxy that appends rather than replaces is fine for the same
+reason; one that passes the header through untouched is not.
 
 ## Secrets & the vault
 - Without `MASTER_KEY`, a `vault.key` (mode `0600`) is created beside the
@@ -115,8 +141,10 @@ that machine is.
 
 **systemd, without Docker.** Copy the repository to `/srv/agent-control`, write
 its `.env`, install `deploy/agent-control.service` and put a reverse proxy in
-front as described above. The unit restarts the server on failure and can write
-only to the data directory.
+front as described above. The unit's `ExecStart` must pass
+`--experimental-sqlite` on Node 22 (`/usr/bin/node --experimental-sqlite
+src/server.js`), the way `npm start` does. The unit restarts the server on
+failure and can write only to the data directory.
 
 Nothing in this repository creates the host or the DNS record for you.
 
@@ -134,6 +162,11 @@ device under **You → Notifications**. On an iPhone or iPad the app has to be
 added to the Home Screen first. The key pair that identifies this installation
 to push services is created on first use and stored encrypted with the vault
 key; if the vault key changes, devices have to subscribe again.
+
+The service worker caches the app shell while it installs, so an installed app
+opens from the cache when the server or the network is down; `/api/*` is never
+cached. Tapping a notification opens the app on the screen that message is
+about.
 
 ## Health & smoke
 `GET /api/health` returns `{ok:true,version}` and supports `HEAD`. It is

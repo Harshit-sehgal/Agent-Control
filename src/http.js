@@ -40,4 +40,3 @@ export async function rawBody(req, limit = 64 * 1024) {
   return Buffer.concat(chunks).toString('utf8');
 }
 export function safeJson(raw) { try { return JSON.parse(raw || '{}'); } catch { fail('Invalid JSON.', 400); } }
-export async function jsonBody(req) { return safeJson(await rawBody(req, 128 * 1024)); }

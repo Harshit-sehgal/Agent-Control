@@ -34,7 +34,14 @@ export function publicRoutes(router, {auth, workspaces, version}) {
   // front (TRUST_PROXY=1), for both the client ip and the https hint.
   const trustProxy = () => process.env.TRUST_PROXY === '1';
   const clientIp = req => {
-    if (trustProxy()) { const fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim(); if (fwd) return fwd; }
+    if (trustProxy()) {
+      // The *rightmost* entry is the one the proxy in front of us appended. The
+      // leftmost is whatever the client sent, so keying the limiter on it would
+      // let an attacker rotate a fake X-Forwarded-For per guess and never be
+      // counted.
+      const hops = String(req.headers['x-forwarded-for'] || '').split(',').map(h => h.trim()).filter(Boolean);
+      if (hops.length) return hops[hops.length - 1];
+    }
     return req.socket.remoteAddress || 'unknown';
   };
 
@@ -49,11 +56,19 @@ export function publicRoutes(router, {auth, workspaces, version}) {
     const ip = clientIp(c.req);
     // The attempt is counted before the body is read, so a burst of parallel
     // requests cannot all slip past the limit while the first is still open.
-    attempt(ip, LOGIN_ATTEMPTS);
+    attempt(`login:${ip}`, LOGIN_ATTEMPTS);
     const b = await c.body();
+    // A per-account bucket as well: an attacker who can burn addresses one at a
+    // time must still not get unlimited guesses at one mailbox. A request that
+    // names no account cannot burn an account's budget, and an empty email is
+    // not an account — otherwise every anonymous guess would share one bucket
+    // and one client could lock out all the others.
+    const account = String(b.email || '').trim().toLowerCase().slice(0, 200);
+    if (account) attempt(`login:account:${account}`, LOGIN_ATTEMPTS);
     const result = auth.login({email: b.email, password: b.password}, {ip, userAgent: c.req.headers['user-agent']});
     if (!result.ok) fail(result.error, result.status);
-    attempts.delete(ip);
+    attempts.delete(`login:${ip}`);
+    if (account) attempts.delete(`login:account:${account}`);
     const secure = Boolean(c.req.socket.encrypted || (trustProxy() && c.req.headers['x-forwarded-proto'] === 'https'));
     return reply(200, {ok: true, me: {email: result.user.email, role: result.role}}, {'Set-Cookie': sessionCookie(result.sessionId, {secure})});
   });
@@ -68,6 +83,13 @@ export function publicRoutes(router, {auth, workspaces, version}) {
     // Each request replaces the pending reset, so it is limited like sign-in.
     attempt(`forgot:${clientIp(c.req)}`, LOGIN_ATTEMPTS);
     const b = await c.body();
+    // Same per-account budget as sign-in: reset requests must not be a cheaper
+    // way to hammer one mailbox or probe whether it exists. No email, no
+    // account bucket (see the note in /api/login).
+    const email = String(b.email || '').trim().toLowerCase().slice(0, 200);
+    // Its own bucket, not the sign-in one: naming a victim's address here must
+    // not be a way to lock them out of signing in.
+    if (email) attempt(`forgot:account:${email}`, LOGIN_ATTEMPTS);
     const token = auth.requestPasswordReset(b.email);
     // Local-first: the console prints the token because no mail transport is
     // configured. Set RESET_TOKEN_CONSOLE=0 on a hosted deployment so reset

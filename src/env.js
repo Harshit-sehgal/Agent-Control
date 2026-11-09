@@ -1,53 +1,51 @@
-/** Zero-dependency `.env` loading, imported by src/server.js before anything
- * reads `process.env`. Real environment variables always win, so
- * `AI_API_KEY=… npm start` still overrides the file. Set AGENT_SKIP_DOTENV=1 to
- * opt out (tests use this to stay hermetic against a developer's local setup).
+/** `.env` loading, imported by src/server.js before anything reads
+ * `process.env`.
  *
- * This is deliberately minimal: `export`-style expansion and multi-line values
- * are not supported, because they invite subtle injection into the process
- * environment of a dashboard that holds AI keys.
+ * The parser is Node's own (`process.loadEnvFile`, built in since 20.12): quote
+ * handling and multi-line values are its semantics now, not a hand-rolled
+ * approximation that invited subtle injection into the environment of a
+ * dashboard that holds AI keys. Two behaviours are ours and are load-bearing:
+ *
+ * - Real environment variables win, so `AI_API_KEY=… npm start` still overrides
+ *   the file. The native loader does not overwrite either, but the snapshot and
+ *   restore below make that a guarantee of this module rather than a detail of
+ *   the current Node release.
+ * - `AGENT_SKIP_DOTENV=1` skips loading entirely, so the test suite stays
+ *   hermetic against a developer's local `.env`.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-/** Parse dotenv text into an ordered list of entries. Exported for tests. */
-export function parseDotEnv(text) {
-  const out = [];
-  for (const rawLine of String(text).split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('#')) continue;
-    const eq = line.indexOf('=');
-    if (eq <= 0) continue;
-    const key = line.slice(0, eq).trim();
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
-    let value = line.slice(eq + 1).trim();
-    // Strip one layer of matching quotes; `"a#b"` keeps its hash, bare `a#b`
-    // does not get comment-stripped mid-value, matching common dotenv behavior.
-    if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
-      value = value.slice(1, -1);
-    }
-    out.push([key, value]);
-  }
-  return out;
-}
-
-/** Load `<root>/.env` into process.env without overwriting existing values. */
+/** Load `<root>/.env` into process.env without overwriting existing values.
+ * Returns how many settings the file actually contributed. */
 export function loadDotEnv(root = ROOT) {
   if (process.env.AGENT_SKIP_DOTENV === '1') return {loaded: 0};
-  let text;
-  try { text = fs.readFileSync(path.join(root, '.env'), 'utf8'); }
-  catch (e) {
-    if (e && e.code !== 'ENOENT') console.warn(`WARNING: could not read .env (${e.message}); continuing without it.`);
+  // A copy, not a live view: process.env is mutated in place by the loader.
+  const before = {...process.env};
+  try {
+    process.loadEnvFile(path.join(root, '.env'));
+  } catch (e) {
+    // No `.env` is the normal case for a deployment that sets variables in the
+    // environment; anything else is worth a warning but must not stop boot.
+    if (e?.code !== 'ENOENT') console.warn(`WARNING: could not load .env (${e.message}); continuing without it.`);
+    restore(before);
     return {loaded: 0};
   }
   let loaded = 0;
-  for (const [key, value] of parseDotEnv(text)) {
-    if (process.env[key] === undefined) { process.env[key] = value; loaded++; }
+  for (const key of Object.keys(process.env)) {
+    if (key in before) {
+      if (process.env[key] !== before[key]) process.env[key] = before[key];
+    } else loaded++;
   }
   return {loaded};
+}
+
+/** Put the environment back the way it was before a failed load. */
+function restore(before) {
+  for (const key of Object.keys(process.env)) if (!(key in before)) delete process.env[key];
+  for (const [key, value] of Object.entries(before)) process.env[key] = value;
 }
 
 const result = loadDotEnv();
