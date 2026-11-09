@@ -214,22 +214,22 @@ export class Auth {
     const target = this.store.get('SELECT u.id, m.role FROM users u JOIN workspace_members m ON m.user_id=u.id WHERE u.id=? AND m.workspace_id=?', userId, workspaceId);
     if (!target) throw Object.assign(new Error('User not found.'), {status: 404});
     if (rank(target.role) >= rank(actor.role) && target.id !== actor.userId) throw Object.assign(new Error('You cannot change a user at or above your own role.'), {status: 403});
-    if (body.role !== undefined) {
-      if (!ROLES.includes(body.role)) throw Object.assign(new Error('Unknown role.'), {status: 400});
-      if (rank(body.role) >= rank(actor.role)) throw Object.assign(new Error('You cannot grant a role at or above your own.'), {status: 403});
-      // Demoting the only owner leaves a workspace nobody can administer: no one
-      // could invite, remove or reconfigure anyone, and no later request could
-      // put an owner back. Refuse it instead of allowing a one-way lockout.
-      if (target.role === 'owner' && body.role !== 'owner' && this.owners(workspaceId, userId) === 0) throw Object.assign(new Error('This is the last owner of this workspace. Make someone else an owner first.'), {status: 409});
-      this.store.run('UPDATE workspace_members SET role=? WHERE user_id=? AND workspace_id=?', body.role, userId, workspaceId);
-    }
+    // Every guard runs before the first write: a 409 that lands after the role
+    // was already changed leaves the caller told "no" and the store changed.
+    if (body.role !== undefined && !ROLES.includes(body.role)) throw Object.assign(new Error('Unknown role.'), {status: 400});
+    if (body.role !== undefined && rank(body.role) >= rank(actor.role)) throw Object.assign(new Error('You cannot grant a role at or above your own.'), {status: 403});
+    // Demoting the only owner leaves a workspace nobody can administer: no one
+    // could invite, remove or reconfigure anyone, and no later request could
+    // put an owner back. Refuse it instead of allowing a one-way lockout.
+    if (body.role !== undefined && target.role === 'owner' && body.role !== 'owner' && this.owners(workspaceId, userId) === 0) throw Object.assign(new Error('This is the last owner of this workspace. Make someone else an owner first.'), {status: 409});
     // Disabling locks the whole account, so one workspace's admin may not do it
     // to someone who also belongs to another workspace.
     if (body.disabled !== undefined && this.elsewhere(userId, workspaceId)) throw Object.assign(new Error('This account also belongs to another workspace. Remove it from this one instead.'), {status: 409});
+    if (body.disabled === true && target.id === actor.userId) throw Object.assign(new Error('You cannot disable your own account.'), {status: 409});
+    // A disabled owner cannot administer either, so this is the same lockout.
+    if (body.disabled === true && target.role === 'owner' && this.owners(workspaceId, userId) === 0) throw Object.assign(new Error('This is the last owner of this workspace. Make someone else an owner first.'), {status: 409});
+    if (body.role !== undefined) this.store.run('UPDATE workspace_members SET role=? WHERE user_id=? AND workspace_id=?', body.role, userId, workspaceId);
     if (body.disabled === true) {
-      if (target.id === actor.userId) throw Object.assign(new Error('You cannot disable your own account.'), {status: 409});
-      // A disabled owner cannot administer either, so this is the same lockout.
-      if (target.role === 'owner' && this.owners(workspaceId, userId) === 0) throw Object.assign(new Error('This is the last owner of this workspace. Make someone else an owner first.'), {status: 409});
       this.store.run('UPDATE users SET disabled_at=? WHERE id=?', now(), userId);
       this.store.run('UPDATE sessions SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL', now(), userId);
     }
@@ -252,9 +252,9 @@ export class Auth {
     const workspaceId = actor.workspaceId || DEFAULT_WORKSPACE;
     const target = this.store.get('SELECT m.role FROM workspace_members m WHERE m.user_id=? AND m.workspace_id=?', userId, workspaceId);
     if (!target) throw Object.assign(new Error('User not found.'), {status: 404});
+    // This also covers the last owner: an owner can never remove an owner (this
+    // line runs first), so the workspace keeps at least the one making the call.
     if (rank(target.role) >= rank(actor.role)) throw Object.assign(new Error('You cannot remove a user at or above your own role.'), {status: 403});
-    // Removing the only owner leaves the workspace unadministrable.
-    if (target.role === 'owner' && this.owners(workspaceId, userId) === 0) throw Object.assign(new Error('This is the last owner of this workspace. Make someone else an owner first.'), {status: 409});
     // Someone who belongs to another workspace only leaves this one. Their
     // account, and their sessions elsewhere, are not this admin's to remove.
     if (this.elsewhere(userId, workspaceId)) {

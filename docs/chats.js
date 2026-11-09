@@ -7,9 +7,9 @@
  *
  * Messages are display records only. Nothing here runs a bot or publishes.
  */
-import {cleanText} from './core.js?v=fd5883cb06';
-import {summonableGuests, BUSY_STATUSES} from './coordination.js?v=fd5883cb06';
-import {denyBrowserRequest} from './bot-browser.js?v=fd5883cb06';
+import {cleanText} from './core.js?v=4f8cfed5b9';
+import {summonableGuests, BUSY_STATUSES} from './coordination.js?v=4f8cfed5b9';
+import {denyBrowserRequest} from './bot-browser.js?v=4f8cfed5b9';
 
 export const MAX_CHAT_MESSAGES = 300;
 const MAX_TEXT = 8000;
@@ -28,9 +28,12 @@ const groupOf = (state, key) => (state.groups || []).find(g => `team-${g.id}` ==
  * bots and takes that bot's real name, and in a bot's own chat the only bot is
  * the chat's own.
  * A browser cannot speak as a bot it cannot name: a `bot` line survives only when
- * its sender resolves to a real bot of the group (see `addChatMessages`). A
- * `system` notice is plain text the app writes for itself ("that did not go
- * through"), so it stays allowed — but it carries `origin: 'browser'`.
+ * its sender resolves to a real bot of the conversation (see `addChatMessages`).
+ * A `system` notice is plain text the app writes for itself ("that did not go
+ * through"), so it stays allowed — but it carries `origin: 'browser'`, and
+ * `ui-views.js` will not paint a run note's buttons or a browser card from one:
+ * only a server-written note may carry that authority. Least of all a `mode`, so
+ * no browser write can claim a model wrote it.
  * Only the server, writing a run it executed itself, is `trusted`. */
 function untrusted(state, key, message) {
   delete message.mode; delete message.senderId; delete message.senderName; delete message.toBotId;
@@ -39,17 +42,14 @@ function untrusted(state, key, message) {
 }
 /** A claim only survives when the roster backs it: a bot line keeps `bot` and
  * its real name when the sender is a bot of this group (or a summonable guest).
- * A bot's own chat has exactly one bot, so a bot line there resolves to that bot
- * and there is nobody else it could claim to be. Anything else is the user
- * writing, so a nameless teammate line cannot reach the thread. */
+ * A bot's own chat resolves the *same* roster: `@mention` in a DM reaches the
+ * group's bots and its summonable guests (`planHandoffs` builds one reachable
+ * list for both), so a guest's paragraph there is legitimate and must keep its
+ * real author instead of being re-signed as the DM bot's own words. Anything
+ * else is the user writing, so a nameless teammate line cannot reach the thread. */
 function claimedSender(state, key, raw, message) {
   if (message.role !== 'bot') return message;
   const group = groupOf(state, key);
-  if (!key.startsWith('team-')) {
-    const bot = (group?.bots || []).find(b => b.id === key);
-    if (bot) { message.senderId = bot.id; message.senderName = bot.name; }
-    return message;
-  }
   if (!group) return message;
   const roster = [...(group.bots || []), ...summonableGuests(state.groups, group.id, {includeOff: true})];
   const sender = roster.find(b => b.id === raw.senderId), next = roster.find(b => b.id === raw.toBotId);
@@ -107,7 +107,8 @@ export function addChatMessages(state, key, messages, {makeId = () => crypto.ran
   state.chats[key] = list.slice(-MAX_CHAT_MESSAGES);
   // `added` counts the messages a reader can actually see. A batch that pushes
   // an earlier line (a trusted replacement, say) out of the window must not be
-  // reported as fully stored: the caller uses this count to reconcile the UI.
+  // reported as fully stored, so a caller — or a test — can tell a full write
+  // from one the window ate.
   const stored = new Set(state.chats[key].map(m => m.id));
   return {ok: true, added: [...written].filter(id => stored.has(id)).length};
 }

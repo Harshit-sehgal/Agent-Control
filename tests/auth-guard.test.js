@@ -89,3 +89,34 @@ test('the guard is about ownership, not about demoting yourself',async()=>{
     assert.equal(roleOf(store,actor.userId),'owner','and that must not touch the owner');
   }finally{ await cleanup(); }
 });
+
+test('a refused change writes nothing: the profile is the same after a 409',async()=>{
+  const {store,auth,actor,cleanup}=await harness();
+  try{
+    const member=auth.createUser(actor,{email:'member@example.test',password:'member-password-1',role:'member'});
+    // A second workspace makes `disabled` impossible to apply from this one; the
+    // role in the same request must not land either.
+    store.run('INSERT INTO workspaces (id, name, created_at) VALUES (?,?,?)','other','Other',new Date().toISOString());
+    store.run('INSERT INTO workspace_members (workspace_id,user_id,role,created_at) VALUES (?,?,?,?)','other',member.id,'member',new Date().toISOString());
+    assert.throws(()=>auth.updateUser(actor,member.id,{role:'admin',disabled:true}),error=>{
+      assert.equal(error.status,409);
+      return true;
+    });
+    assert.equal(roleOf(store,member.id),'member','the refused request must not demote or promote anybody');
+    assert.equal(store.get('SELECT disabled_at FROM users WHERE id=?',member.id).disabled_at,null,'the account must still be enabled');
+  }finally{await cleanup();}
+});
+
+test('removing an owner is refused outright, so the last owner can never be removed',async()=>{
+  const {store,auth,actor,cleanup}=await harness();
+  try{
+    const owner=addSecondOwner(store,auth,actor);
+    // Both owners are owners: neither can remove the other, which is why the
+    // workspace always keeps at least the caller.
+    assert.throws(()=>auth.deleteUser(actor,owner.id),error=>{
+      assert.equal(error.status,403);
+      return true;
+    });
+    assert.equal(roleOf(store,owner.id),'owner');
+  }finally{await cleanup();}
+});

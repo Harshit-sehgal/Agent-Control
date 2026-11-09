@@ -58,7 +58,10 @@ test('a job reaches only the agents that hold its permission',async()=>{
     assert.equal(rows.length,1,'the other agent must not get a queued task');
     assert.equal(rows[0].agent_id,'agent-capture');
     assert.equal(rows[0].kind,'browser.capture');
-    assert.deepEqual(JSON.parse(rows[0].payload),{url:'https://example.test/page'});
+    // The payload is the validated request, not the job's own fields: the enqueue
+    // is the one door every caller goes through, so it stores what the browser
+    // rule accepts and nothing else.
+    assert.deepEqual(JSON.parse(rows[0].payload),{url:'https://example.test/page',steps:[]});
     assert.equal(rows[0].status,'queued');
     assert.equal(rows[0].created_by,'user-1','the agent task must record who asked for the job');
   }finally{

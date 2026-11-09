@@ -195,6 +195,10 @@ body:not(.has-info) .pane-info{display:none}
 .stack .draft{width:100%}
 .draft>header{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:11px 14px 0;font-size:13px}
 .draft-to{font-weight:600}.draft-score{color:var(--muted);font-size:12px;white-space:nowrap}
+/* X's standard limit is a warning, not a wall: a premium account posts longer and
+   the final click is the human's, so this only tells the truth about the count. */
+.draft-count{margin:4px 2px 0;color:var(--muted);font-size:12px}
+.draft-count.over{color:var(--wait);font-weight:600}
 .draft-text{padding:8px 14px 12px;white-space:pre-wrap;line-height:1.4;overflow-wrap:anywhere}
 .card-actions{display:flex;flex-wrap:wrap;gap:8px;padding:0 10px 10px}
 .card-actions .btn{flex:1 1 auto}

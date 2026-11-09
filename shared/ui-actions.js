@@ -3,7 +3,7 @@
  * failure and the dispatcher turns that into one toast. */
 import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, setPref, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns, patchLocalRun, appendMessage} from './ui-store.js';
 import {botSettings, groupSettings} from './bot-settings.js';
-import {completeMention, moveRow, pipelineValue} from './ui-model.js';
+import {completeMention, moveRow, pipelineValue, draftLength, lengthLabel} from './ui-model.js';
 import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js';
 import {sendChat, streamGroupRun, watchQueuedRun, continueDemoPlan} from './ui-chat.js';
 import {confetti, whoosh, react, poke} from './ui-fx.js';
@@ -408,5 +408,14 @@ export function onControlChange(control) {
 export function onControlInput(control) {
   if (control.id === 'chat-search') { store.listQuery = control.value; renderList(); }
   if (control.id === 'candidate-search') { store.postQuery = control.value; refreshLists(); }
-  if (control.matches('.edit-form textarea')) store.editText = control.value;
+  if (control.matches('.edit-form textarea')) {
+    store.editText = control.value;
+    // Count live, in place: re-rendering the form would take the caret away.
+    const meter = control.parentElement?.querySelector('.draft-count');
+    if (meter) {
+      const length = draftLength(control.value);
+      meter.textContent = lengthLabel(control.value);
+      meter.classList.toggle('over', length.over);
+    }
+  }
 }

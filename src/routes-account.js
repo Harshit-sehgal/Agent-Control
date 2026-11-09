@@ -8,7 +8,6 @@ import * as backup from './backup.js';
 import * as notifications from './notifications.js';
 import {deleteProvider} from './ai-providers.js';
 import {onAgentTaskResult} from './bot-browser.js';
-import {validateBrowserRequest} from '../shared/bot-browser.js';
 import {resumeFeedRun, resumeBrowserRun} from './coordination.js';
 import {DEFAULT_WORKSPACE, ROLES, clearCookie} from './auth.js';
 import {fail} from './http.js';
@@ -49,16 +48,10 @@ export function accountRoutes(router, {auth, workspaces}) {
   });
   router.add('POST', '/api/agents/:id/tasks', 'member', async c => {
     const b = await c.body(), kind = String(b.kind || '');
-    // A browser payload can only do what a bot's browser block may do. This
-    // route used to forward `payload` verbatim, which skipped MAX_STEPS, the
-    // public http(s) check and the ban on clicking or typing on X.
-    let payload = b.payload || {};
-    if (kind.startsWith('browser.')) {
-      const request = validateBrowserRequest(payload);
-      if (request.kind !== kind) fail(`A ${kind} task does not match the payload: it describes a ${request.kind}.`, 400);
-      payload = {url: request.url, steps: request.steps};
-    }
-    const {task, duplicate} = agent.enqueueAgentTask(c.store, c.params.id, {kind, payload, idempotencyKey: b.idempotencyKey || null, createdBy: c.actor.email, permission: agent.permissionForKind(kind)});
+    // `enqueueAgentTask` validates a browser payload itself (MAX_STEPS, a public
+    // http(s) url, and never a click or type on X), so the scheduler's own path
+    // cannot skip the rule this route used to be the only one to apply.
+    const {task, duplicate} = agent.enqueueAgentTask(c.store, c.params.id, {kind, payload: b.payload || {}, idempotencyKey: b.idempotencyKey || null, createdBy: c.actor.email, permission: agent.permissionForKind(kind)});
     if (!duplicate) await c.store.update(s => activity(s, 'agent', `Queued ${kind} for a local agent.`, {taskId: task.id}));
     return reply(duplicate ? 200 : 201, {...task, payload: JSON.parse(task.payload), duplicate});
   });

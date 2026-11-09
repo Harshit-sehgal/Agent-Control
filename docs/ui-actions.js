@@ -1,16 +1,16 @@
 /** What the UI can do, as three lookup tables keyed by `data-action`, form id and
  * control id. app.js owns the DOM events and dispatches here; handlers throw on
  * failure and the dispatcher turns that into one toast. */
-import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, setPref, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns, patchLocalRun, appendMessage} from './ui-store.js?v=fd5883cb06';
-import {botSettings, groupSettings} from './bot-settings.js?v=fd5883cb06';
-import {completeMention, moveRow, pipelineValue} from './ui-model.js?v=fd5883cb06';
-import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=fd5883cb06';
-import {sendChat, streamGroupRun, watchQueuedRun, continueDemoPlan} from './ui-chat.js?v=fd5883cb06';
-import {confetti, whoosh, react, poke} from './ui-fx.js?v=fd5883cb06';
-import {renderList, renderMentions} from './ui-views.js?v=fd5883cb06';
-import {refreshLists, reloadAdminPage, pipelineList} from './ui-panel.js?v=fd5883cb06';
-import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, botTaskSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=fd5883cb06';
-import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=fd5883cb06';
+import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, setPref, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns, patchLocalRun, appendMessage} from './ui-store.js?v=4f8cfed5b9';
+import {botSettings, groupSettings} from './bot-settings.js?v=4f8cfed5b9';
+import {completeMention, moveRow, pipelineValue, draftLength, lengthLabel} from './ui-model.js?v=4f8cfed5b9';
+import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=4f8cfed5b9';
+import {sendChat, streamGroupRun, watchQueuedRun, continueDemoPlan} from './ui-chat.js?v=4f8cfed5b9';
+import {confetti, whoosh, react, poke} from './ui-fx.js?v=4f8cfed5b9';
+import {renderList, renderMentions} from './ui-views.js?v=4f8cfed5b9';
+import {refreshLists, reloadAdminPage, pipelineList} from './ui-panel.js?v=4f8cfed5b9';
+import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, botTaskSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=4f8cfed5b9';
+import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=4f8cfed5b9';
 
 const adminCtx = {reload: reloadAdminPage};
 const chatId = () => store.route.chat;
@@ -408,5 +408,14 @@ export function onControlChange(control) {
 export function onControlInput(control) {
   if (control.id === 'chat-search') { store.listQuery = control.value; renderList(); }
   if (control.id === 'candidate-search') { store.postQuery = control.value; refreshLists(); }
-  if (control.matches('.edit-form textarea')) store.editText = control.value;
+  if (control.matches('.edit-form textarea')) {
+    store.editText = control.value;
+    // Count live, in place: re-rendering the form would take the caret away.
+    const meter = control.parentElement?.querySelector('.draft-count');
+    if (meter) {
+      const length = draftLength(control.value);
+      meter.textContent = lengthLabel(control.value);
+      meter.classList.toggle('over', length.over);
+    }
+  }
 }

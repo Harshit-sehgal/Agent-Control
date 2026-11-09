@@ -4,21 +4,21 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {scoreCandidate, templateDraft, cleanText, initialState, markDue, activity, DEMO_SAMPLES} from './core.js?v=fd5883cb06';
+import {scoreCandidate, templateDraft, cleanText, initialState, markDue, activity, DEMO_SAMPLES} from './core.js?v=4f8cfed5b9';
 import {
   migrate, seedDemo, updateSettings, addCandidate, beginProcessing,
   finishProcessing, editDraft, findDraft, rewriteDraft, draftAction, addGroup,
   addBot, updateBot, updateGroup, removeBot, removeGroup, addSchedule, removeSchedule, resetDemo,
-} from './workflow.js?v=fd5883cb06';
-import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=fd5883cb06';
-import {addEvidence, verifyEvidence, dropEvidence} from './evidence.js?v=fd5883cb06';
-import {addChatMessages, clearChat} from './chats.js?v=fd5883cb06';
-import {publicMemory, addRules, removeRule, forgetChat, forgetRulebook} from './memory.js?v=fd5883cb06';
-import {summonableGuests} from './coordination.js?v=fd5883cb06';
-import {simulateGroup} from './group-simulator.js?v=fd5883cb06';
-import {botSettings} from './bot-settings.js?v=fd5883cb06';
-import {denyBrowserRequest} from './bot-browser.js?v=fd5883cb06';
-import {withLocalLock, claimLocalRun, renewLocalRun, finishLocalRun, localRunCancelled, reclaimExpiredLocalRuns, cancelLocalRunsForChat} from './local-runs.js?v=fd5883cb06';
+} from './workflow.js?v=4f8cfed5b9';
+import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=4f8cfed5b9';
+import {addEvidence, verifyEvidence, dropEvidence} from './evidence.js?v=4f8cfed5b9';
+import {addChatMessages, clearChat} from './chats.js?v=4f8cfed5b9';
+import {publicMemory, addRules, removeRule, forgetChat, forgetRulebook} from './memory.js?v=4f8cfed5b9';
+import {summonableGuests} from './coordination.js?v=4f8cfed5b9';
+import {simulateGroup} from './group-simulator.js?v=4f8cfed5b9';
+import {botSettings} from './bot-settings.js?v=4f8cfed5b9';
+import {denyBrowserRequest} from './bot-browser.js?v=4f8cfed5b9';
+import {withLocalLock, claimLocalRun, renewLocalRun, finishLocalRun, localRunCancelled, reclaimExpiredLocalRuns, cancelLocalRunsForChat} from './local-runs.js?v=4f8cfed5b9';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();

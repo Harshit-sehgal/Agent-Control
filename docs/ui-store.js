@@ -1,10 +1,10 @@
 /** Single source of UI state: the server snapshot, the route, the conversations
  * it carries and cosmetic preferences. Views read from `store` and never
  * keep their own copies, so one `sync()` + one render keeps every pane current. */
-import {normalizeUiPrefs, UI_PREFS_KEY} from './usability.js?v=fd5883cb06';
-import {routeHash, tintOf} from './ui-model.js?v=fd5883cb06';
-import {createOutbox} from './chats.js?v=fd5883cb06';
-import {LOCAL_RUNS_KEY, patchLocalRun as patchStoredRun, cancelLocalRunsForChat} from './local-runs.js?v=fd5883cb06';
+import {normalizeUiPrefs, UI_PREFS_KEY} from './usability.js?v=4f8cfed5b9';
+import {routeHash, tintOf} from './ui-model.js?v=4f8cfed5b9';
+import {createOutbox} from './chats.js?v=4f8cfed5b9';
+import {LOCAL_RUNS_KEY, patchLocalRun as patchStoredRun, cancelLocalRunsForChat} from './local-runs.js?v=4f8cfed5b9';
 
 // Where an earlier build kept conversations; read once by importLocalChats().
 const CHAT_KEY = 'agent-control-bot-chats-v2';
@@ -118,14 +118,23 @@ export async function importLocalChats() {
   const legacy = loadLocal(CHAT_KEY, null);
   if (!legacy || typeof legacy !== 'object' || store.state?.me?.role === 'viewer') return;
   let offline = false;
+  // What still has to travel. A refusal is this key's own news (the bot is gone,
+  // or the role is read-only) and would be refused again on every boot, so it is
+  // dropped; a network failure keeps the key for the next try. Deleting the
+  // whole blob after one refused key used to throw away every other transcript.
+  const unsent = {};
   for (const [key, list] of Object.entries(legacy)) {
     if (!Array.isArray(list) || store.messages[key]?.length || !conversation(key)) continue;
     const messages = list.slice(-300).filter(m => m?.text && ['user', 'bot', 'system'].includes(m.role)).map(m => ({...m, id: m.id || crypto.randomUUID()}));
     if (!messages.length) continue;
     try { await window.AGENT_API(`/api/chats/${key}/messages`, 'POST', {messages}); }
-    catch (error) { if (!error?.status) offline = true; }
+    catch (error) {
+      if (error?.status) continue;
+      offline = true;
+      unsent[key] = list;
+    }
   }
-  if (offline) return;
+  if (offline && Object.keys(unsent).length) { saveLocal(CHAT_KEY, unsent); return; }
   try { localStorage.removeItem(CHAT_KEY); } catch { /* Storage is unavailable; nothing to remove. */ }
   await loadState();
 }

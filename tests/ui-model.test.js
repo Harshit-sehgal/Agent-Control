@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ACTIVE_DRAFTS, draftStage, needsYou, chatRows, timeline, parseRoute, routeHash, feedPauseAction, retryTarget, threadLineActions, isRunNote, runBelongsToChat, FEED_WAIT, FEED_OPEN} from '../shared/ui-model.js';
+import {ACTIVE_DRAFTS, draftStage, needsYou, chatRows, timeline, parseRoute, routeHash, feedPauseAction, retryTarget, threadLineActions, isRunNote, runBelongsToChat, FEED_WAIT, FEED_OPEN, POST_LIMIT, draftLength, lengthLabel} from '../shared/ui-model.js';
 
 // ---- fixtures -------------------------------------------------------------------------
 
@@ -498,4 +498,20 @@ test('routeHash round-trips through parseRoute', () => {
     {chat: 'odd bot', page: null, info: null},
   ];
   for (const route of routes) assert.deepEqual(parseRoute(`#${routeHash(route)}`, s, opts), route, `round trip of ${JSON.stringify(route)} via ${routeHash(route)}`);
+});
+
+// ---- draft length ---------------------------------------------------------------------
+
+test('draft length warns about X\'s standard limit without ever acting like a wall', () => {
+  assert.equal(POST_LIMIT, 280);
+  assert.deepEqual(draftLength('x'.repeat(279)), {count: 279, limit: 280, over: false, left: 1});
+  // Exactly at the limit fits; one more does not.
+  assert.equal(draftLength('x'.repeat(280)).over, false);
+  assert.equal(draftLength('x'.repeat(281)).over, true);
+  // An emoji is one character to a reader, so it counts as one here.
+  assert.equal(draftLength('🙂🙂').count, 2);
+  // Missing text is zero, not a crash: a draft can be empty while it is written.
+  assert.deepEqual(draftLength(undefined), {count: 0, limit: 280, over: false, left: 280});
+  assert.equal(lengthLabel('x'.repeat(280)), '280 of 280 · 0 left');
+  assert.equal(lengthLabel('x'.repeat(283)), "283 characters · 3 over X's 280");
 });

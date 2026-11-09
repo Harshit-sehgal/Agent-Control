@@ -20,6 +20,7 @@
  */
 import crypto from 'node:crypto';
 import {cleanText} from '../shared/core.js';
+import {validateBrowserRequest} from '../shared/bot-browser.js';
 import {encryptJson,decryptJson,sha256,loadMasterKey} from './vault.js';
 
 export const AGENT_ACTIONS = ['http.check', 'browser.capture', 'browser.action'];
@@ -123,6 +124,14 @@ export const agentTaskKinds = () => [...AGENT_ACTIONS];
  * request (double-clicked button, retried polling) cannot run a job twice. */
 export function enqueueAgentTask(store, agentId, {kind, payload = {}, idempotencyKey, createdBy, permission}) {
   if (!AGENT_ACTIONS.includes(kind)) fail(`Unknown agent task kind. Expected one of: ${agentTaskKinds().join(', ')}.`);
+  // Every enqueue goes through here — the pairing route, the queue scheduler and
+  // the bot's own request — so the browser rules are enforced once, at the choke
+  // point, instead of at whichever route happened to remember them.
+  if (kind.startsWith('browser.')) {
+    const request = validateBrowserRequest(payload);
+    if (request.kind !== kind) fail(`A ${kind} task does not match the payload: it describes a ${request.kind}.`, 400);
+    payload = {url: request.url, steps: request.steps};
+  }
   const agent = store.get('SELECT * FROM agents WHERE id=?', agentId);
   if (!agent) fail('Agent not found.', 404);
   if (agent.revoked_at) fail('This agent has been revoked.', 409);

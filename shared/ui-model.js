@@ -10,6 +10,24 @@ const X_GROUP = 'x-engage';
 const teamKey = groupId => `team-${groupId}`;
 const time = value => { const t = Date.parse(value || ''); return Number.isFinite(t) ? t : 0; };
 
+/** X's standard post limit, in characters. This is a warning, never a rule: a
+ * premium account posts far longer, the number is per-account, and the final
+ * click is the human's either way. */
+export const POST_LIMIT = 280;
+/** How long a draft is, counted the way a reader counts it (one emoji is one
+ * character, not two halves). A link is not shortened here, so a post with a URL
+ * may fit X even when this says it is over. */
+export function draftLength(text) {
+  const count = [...String(text ?? '')].length;
+  return {count, limit: POST_LIMIT, over: count > POST_LIMIT, left: Math.max(0, POST_LIMIT - count)};
+}
+/** The one line the editor shows beside the text, and the same line a card
+ * carries when it is not being edited. */
+export function lengthLabel(text) {
+  const {count, over} = draftLength(text);
+  return over ? `${count} characters · ${count - POST_LIMIT} over X's ${POST_LIMIT}` : `${count} of ${POST_LIMIT} · ${POST_LIMIT - count} left`;
+}
+
 /** Where a draft is in the human-approval lifecycle, and the one line that says so. */
 export function draftStage(draft) {
   switch (draft.status) {

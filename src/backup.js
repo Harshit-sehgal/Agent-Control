@@ -48,6 +48,12 @@ const REDACTED_AGENT_HASH = 'redacted';
 // placeholder can never authenticate and the account resets after a restore
 // (see the module header).
 const REDACTED_PASSWORD_HASH = 'redacted';
+// `notification_prefs.webhook_url` and a notification task's `target` hold a
+// credential *id* (or an email address), not the webhook URL: the URL itself
+// lives in `credentials`, which is excluded above. They are exported unredacted
+// on purpose — a restored delivery task needs its reference — and redacting them
+// would only break retries. If a future column ever holds the URL itself, it
+// belongs in the vault, not here.
 
 /** Browser-request cards live in kv, which backups exclude. A restored
  * awaiting_feed/browser run would 409 the group with no card to finish it. */

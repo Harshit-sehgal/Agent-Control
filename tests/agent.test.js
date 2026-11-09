@@ -114,6 +114,25 @@ test('agent task leasing, duplicate results and disconnect recovery', async () =
   await fs.rm(dir, {recursive: true, force: true});
 });
 
+test('the enqueue itself enforces the browser rule, so no caller can skip it', async () => {
+  const {store, dir} = await harness();
+  try {
+    const {code} = agent.createPairing(store, 'default', {});
+    const {agentId} = agent.redeemPairing(store, {code, name: 'Device', permissions: ['browser.action', 'browser.capture']});
+    // A click on X is refused here, not only at the route: the scheduler reaches
+    // this function directly and used to forward whatever a job carried.
+    assert.throws(() => agent.enqueueAgentTask(store, agentId, {kind: 'browser.action', payload: {url: 'https://x.com/home', steps: [{op: 'click', selector: '[data-testid=tweetButton]'}]}}), /never click or type there/);
+    // The step count and the url scheme are the same rule, checked in one place.
+    assert.throws(() => agent.enqueueAgentTask(store, agentId, {kind: 'browser.action', payload: {url: 'https://example.com', steps: Array.from({length: 26}, () => ({op: 'read', selector: 'main'}))}}), /at most/);
+    assert.throws(() => agent.enqueueAgentTask(store, agentId, {kind: 'browser.capture', payload: {url: 'file:///etc/passwd'}}), /public http\(s\) url/);
+    // A payload that describes a capture cannot be queued as an action.
+    assert.throws(() => agent.enqueueAgentTask(store, agentId, {kind: 'browser.action', payload: {url: 'https://example.com'}}), /describes a browser.capture/);
+    // What survives is the canonical shape, not the caller's extra fields.
+    const {task} = agent.enqueueAgentTask(store, agentId, {kind: 'browser.action', payload: {url: 'https://example.com', steps: [{op: 'read', selector: 'main'}], sneaky: true}});
+    assert.deepEqual(Object.keys(JSON.parse(task.payload)).sort(), ['steps', 'url']);
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});
+
 test('browser actions are not retried, and failing a task drops queued work', async () => {
   const {store, dir} = await harness();
   const {code} = agent.createPairing(store, 'default', {});

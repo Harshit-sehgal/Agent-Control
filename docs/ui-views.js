@@ -2,14 +2,14 @@
  * Both are thin renderers over ui-model.js. The list shell and the composer are
  * painted once and then only their contents change, so a background refresh can
  * never wipe what the user is typing. */
-import {botSuggestions} from './chat-engine.js?v=fd5883cb06';
-import {summonableGuests} from './coordination.js?v=fd5883cb06';
-import {botSettings, groupSettings} from './bot-settings.js?v=fd5883cb06';
-import {requestOfMessage} from './bot-browser.js?v=fd5883cb06';
-import {validHttpUrl} from './core.js?v=fd5883cb06';
-import {chatRows, timeline, pendingBrowser, stuckFeedReads, draftStage, mentionSuggestions, retryTarget, threadLineActions, isRunNote, runBelongsToChat, ACTIVE_DRAFTS} from './ui-model.js?v=fd5883cb06';
-import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=fd5883cb06';
-import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, isXGroup, botTint, recentRuns} from './ui-store.js?v=fd5883cb06';
+import {botSuggestions} from './chat-engine.js?v=4f8cfed5b9';
+import {summonableGuests} from './coordination.js?v=4f8cfed5b9';
+import {botSettings, groupSettings} from './bot-settings.js?v=4f8cfed5b9';
+import {requestOfMessage} from './bot-browser.js?v=4f8cfed5b9';
+import {validHttpUrl} from './core.js?v=4f8cfed5b9';
+import {chatRows, timeline, pendingBrowser, stuckFeedReads, draftStage, draftLength, lengthLabel, mentionSuggestions, retryTarget, threadLineActions, isRunNote, runBelongsToChat, ACTIVE_DRAFTS} from './ui-model.js?v=4f8cfed5b9';
+import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=4f8cfed5b9';
+import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, isXGroup, botTint, recentRuns} from './ui-store.js?v=4f8cfed5b9';
 
 const el = id => document.getElementById(id);
 const FILTERS = [['all', 'All'], ['needs', 'Needs you'], ['groups', 'Groups'], ['bots', 'Bots']];
@@ -91,8 +91,11 @@ export function renderList() {
 export function draftCard(draft) {
   const stage = draftStage(draft), open = ACTIVE_DRAFTS.includes(draft.status), editing = store.editDraft === draft.id;
   const write = canWrite(), id = esc(draft.id), postHref = validHttpUrl(draft.url);
+  // The text on screen is the edit when there is one, so the count follows the
+  // caret and the card header tells the same truth about the same draft.
+  const shown = store.editText ?? draft.text, over = draftLength(shown).over;
   const body = editing
-    ? `<form class="edit-form" data-id="${id}"><textarea class="input" name="text" rows="4" required aria-label="Edit this draft">${esc(store.editText ?? draft.text)}</textarea><div class="card-actions">${btn('Save', null, {kind: 'primary', type: 'submit'})}${btn('Cancel', 'cancel-edit')}</div></form>`
+    ? `<form class="edit-form" data-id="${id}"><textarea class="input" name="text" rows="4" required aria-label="Edit this draft">${esc(shown)}</textarea><p class="draft-count${over ? ' over' : ''}" aria-live="polite">${esc(lengthLabel(shown))}</p><div class="card-actions">${btn('Save', null, {kind: 'primary', type: 'submit'})}${btn('Cancel', 'cancel-edit')}</div></form>`
     : `<p class="draft-text">${esc(draft.text)}</p>`;
   // No validated URL means no link at all: an <a href=""> called "Open post"
   // either navigates to this page or, with an empty url, does nothing at all.
@@ -104,7 +107,7 @@ export function draftCard(draft) {
   const side = write ? {scheduled: btn('Ready now', 'ready-draft', {id: draft.id, small: true}), ready: btn('I posted it', 'posted-draft', {id: draft.id, kind: 'good', small: true})}[draft.status] || '' : '';
   const mark = {wait: '<i class="dot"></i>', ok: icon(draft.status === 'ready' ? 'checks' : 'check', 15), done: icon('checks', 15), off: ''}[stage.tone];
   return `<article class="draft tone-${stage.tone}" data-draft="${id}">
-    <header><span class="draft-to">Reply to ${esc(draft.author)}</span><span class="draft-score">${Number(draft.score || 0)}/100${draft.mode === 'template' ? ' · template' : ''}${draft.revision > 1 ? ` · rev ${Number(draft.revision)}` : ''}</span></header>
+    <header><span class="draft-to">Reply to ${esc(draft.author)}</span><span class="draft-score">${Number(draft.score || 0)}/100${draft.mode === 'template' ? ' · template' : ''}${draft.revision > 1 ? ` · rev ${Number(draft.revision)}` : ''}${over ? ' · long for X' : ''}</span></header>
     ${body}
     ${open ? evidencePanel(draft) : ''}
     ${actions ? `<div class="card-actions">${actions}${open && !editing && write ? btn('Rewrite', 'rewrite-draft', {id: draft.id, kind: 'ghost'}) : ''}</div>` : ''}
@@ -161,12 +164,16 @@ function browserCard(m) {
 function messageHtml(item, conv, latestRunNote) {
   const m = item.message;
   if (m.role === 'system') {
-    if (m.kind === 'browser') return browserCard(m);
+    // A card or a run note carries buttons, so only the server's own line may
+    // paint one: a browser-written `kind:'browser'` was a way to grow an Approve
+    // card with the writer's own heading, wired to somebody else's request. The
+    // Pages build has no server, so there the browser *is* the writer.
+    if (m.kind === 'browser' && (m.origin !== 'browser' || isStaticDemo())) return browserCard(m);
     // Only the newest note of a run carries its action, so a button never repeats.
     // Browser cards are not notes: they return above, and counting them here
     // would throw the Start or Retry button away.
     const runs = recentRuns(conv.group.id), live = !isStaticDemo();
-    const noted = Boolean(m.runId && latestRunNote.get(m.runId) === m.id);
+    const noted = Boolean(m.runId && latestRunNote.get(m.runId) === m.id && (m.origin !== 'browser' || isStaticDemo()));
     const run = noted ? runs.find(r => r.id === m.runId) : null;
     const flags = threadLineActions({kind: m.kind, senderId: m.senderId, status: run?.status, live, note: Boolean(run), latest: Boolean(run) && runs[0]?.id === run.id});
     const write = canWrite();

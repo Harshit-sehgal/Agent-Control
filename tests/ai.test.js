@@ -192,3 +192,76 @@ test('AI calls do not follow redirects',async()=>{
     });
   }finally{server.close();}
 });
+
+// A server that answers raw bytes, for the stream shapes a JSON stub cannot make.
+async function rawStub({status=200,type='text/event-stream',body='',delay=0}){
+  const server=http.createServer((req,res)=>{req.resume();req.on('end',()=>{setTimeout(()=>{res.writeHead(status,{'Content-Type':type});res.end(body);},delay);});});
+  await new Promise(r=>server.listen(0,'127.0.0.1',r));
+  return {port:server.address().port,close:()=>server.close()};
+}
+
+test('a streamed error is redacted before it is shortened, so no key head survives',async()=>{
+  // The key sits past the 200-character bound: redacting afterwards cannot match
+  // a key that was already cut, and the visible head is exactly what leaks.
+  const key='sk-proj-A1b2C3d4E5f6G7h8I9j0K1L2M3N4O5P6Q7R8S9T0';
+  const said='x'.repeat(170)+` invalid key ${key}`;
+  const {port,close}=await rawStub({body:`data: ${JSON.stringify({error:{message:said}})}\n\n`});
+  try{
+    await assert.rejects(
+      withEnv({AI_BASE_URL:`http://127.0.0.1:${port}/v1`,AI_API_KEY:key,AI_API_STYLE:'chat',AI_MODEL:'auto'},()=>makeDraft(candidate,settings)),
+      error=>{assert.doesNotMatch(error.message,/sk-proj-A1b2/);assert.doesNotMatch(error.message,new RegExp(key.slice(0,16)));return true;},
+    );
+  }finally{close();}
+});
+
+test('a stream that stops on length says why instead of reporting an empty answer',async()=>{
+  const {port,close}=await rawStub({body:'data: {"choices":[{"delta":{"role":"assistant"},"finish_reason":"length"}]}\n\ndata: [DONE]\n\n'});
+  try{
+    await assert.rejects(
+      withEnv({AI_BASE_URL:`http://127.0.0.1:${port}/v1`,AI_API_KEY:'k-test-key',AI_API_STYLE:'chat',AI_MODEL:'auto'},()=>makeDraft(candidate,settings)),
+      /ran out of output tokens/,
+    );
+  }finally{close();}
+});
+
+test('a streamed refusal is reported as a refusal, not as a broken provider',async()=>{
+  const {port,close}=await rawStub({body:'data: {"choices":[{"message":{"refusal":"I cannot help with that."}}]}\n\n'});
+  try{
+    await assert.rejects(
+      withEnv({AI_BASE_URL:`http://127.0.0.1:${port}/v1`,AI_API_KEY:'k-test-key',AI_API_STYLE:'chat',AI_MODEL:'auto'},()=>makeDraft(candidate,settings)),
+      /refused the request/,
+    );
+  }finally{close();}
+});
+
+test('the reason for an empty answer is named on every protocol, not just chat',async()=>{
+  const responses=await stub({status:200,json:{status:'incomplete',incomplete_details:{reason:'max_output_tokens'},output:[]}});
+  try{
+    await assert.rejects(
+      withEnv({AI_BASE_URL:`http://127.0.0.1:${responses.port}/v1`,AI_API_KEY:'sk-test',AI_API_STYLE:'responses',AI_MODEL:'gpt-4.1-mini'},()=>makeDraft(candidate,settings)),
+      /ran out of output tokens/,
+    );
+  }finally{responses.close();}
+  const anthropic=await stub({status:200,json:{content:[],stop_reason:'max_tokens'}});
+  try{
+    await assert.rejects(
+      withEnv({AI_BASE_URL:`http://127.0.0.1:${anthropic.port}/v1`,AI_API_KEY:'sk-ant-test',AI_API_STYLE:'anthropic',AI_MODEL:'claude-3-5-haiku-latest'},()=>makeDraft(candidate,settings)),
+      /ran out of output tokens/,
+    );
+  }finally{anthropic.close();}
+});
+
+test('a busy provider is retryable, so a queued run is not failed by a local 429',async()=>{
+  const {port,close}=await rawStub({type:'application/json',body:JSON.stringify({choices:[{message:{content:'ok'}}]}),delay:150});
+  try{
+    await withEnv({AI_BASE_URL:`http://127.0.0.1:${port}/v1`,AI_API_KEY:'k-test-key',AI_API_STYLE:'chat',AI_MODEL:'auto',AI_MAX_CONCURRENCY:'1'},async()=>{
+      const first=makeDraft(candidate,settings);
+      const second=makeDraft(candidate,settings).catch(error=>error);
+      await first;
+      const busy=await second;
+      assert.equal(busy.status,429);
+      assert.equal(busy.permanent,undefined,'the queue must be allowed to retry a busy call');
+      assert.match(busy.message,/busy with other requests/);
+    });
+  }finally{close();}
+});

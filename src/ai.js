@@ -158,13 +158,23 @@ function streamEvents(text){
   }
   return events;
 }
-function foldStream(protocol,text){
+function foldStream(protocol,text,config){
   const pieces=[];
+  // A stream says why it stopped in the last frame, not in the text. Keeping
+  // just the text turned a truncation or a refusal into "empty response".
+  let finish='', refusal='', blocked='';
   for(const event of streamEvents(text)){
     if(event?.type==='error'||event?.error||event?.type==='response.failed'){
       const said=providerSaid(event)||providerSaid(event?.response)||'stream error';
-      throw upstream(`AI provider returned an error: ${cleanText(said,200)}`,502);
+      // Redact before bounding: a key cut at 200 characters no longer matches,
+      // and the head of it is what leaks.
+      throw upstream(`AI provider returned an error: ${cleanText(redactAll(said,config),200)}`,502);
     }
+    if(typeof event?.choices?.[0]?.finish_reason==='string')finish=event.choices[0].finish_reason;
+    if(typeof event?.choices?.[0]?.message?.refusal==='string')refusal=event.choices[0].message.refusal;
+    if(typeof event?.stop_reason==='string')finish=event.stop_reason;
+    if(typeof event?.candidates?.[0]?.finishReason==='string')blocked=event.candidates[0].finishReason;
+    if(typeof event?.incomplete_details?.reason==='string')finish=event.incomplete_details.reason;
     // A gateway may answer a streaming request with one whole (non-streaming)
     // frame. Reading only `delta` turned that into "empty response".
     if(protocol==='anthropic'){
@@ -182,11 +192,15 @@ function foldStream(protocol,text){
     }
   }
   const body=pieces.filter(piece=>typeof piece==='string').join('');
-  if(!body)return null;
-  if(protocol==='anthropic')return {content:[{type:'text',text:body}]};
-  if(protocol==='gemini')return {candidates:[{content:{parts:[{text:body}]}}]};
-  if(protocol==='openai-responses')return {output:[{content:[{type:'output_text',text:body}]}]};
-  return {choices:[{message:{content:body}}]};
+  // An empty body with a reason is not a failed read: it is a truncated answer
+  // or a refusal, and the frame has to carry the reason to say so.
+  if(!body&&!finish&&!refusal&&!blocked)return null;
+  // The folded frame is shaped like the provider's own non-streaming answer, so
+  // `extract` reads one shape and reports one set of reasons.
+  if(protocol==='anthropic')return {content:[{type:'text',text:body}],stop_reason:finish};
+  if(protocol==='gemini')return {candidates:[{content:{parts:[{text:body}]},finishReason:blocked}]};
+  if(protocol==='openai-responses')return {output:[{content:[{type:'output_text',text:body}]}],status:finish==='max_output_tokens'?'incomplete':'completed',incomplete_details:finish?{reason:finish}:undefined};
+  return {choices:[{message:{content:body,refusal:refusal||undefined},finish_reason:finish||undefined}]};
 }
 function protocolText(protocol,data){
   if(protocol==='anthropic')return anthropicText(data);
@@ -200,11 +214,14 @@ function extract(config,data){
   if(!text){
     // An empty answer has a reason, and the reason names the fix. A refusal is
     // not a broken provider, and a truncated answer is not a safety block.
-    const refusal=cleanText(data?.choices?.[0]?.message?.refusal,200);
+    const refusal=cleanText(data?.choices?.[0]?.message?.refusal,200)
+      ||cleanText((Array.isArray(data?.output)?data.output:[]).flatMap(row=>Array.isArray(row?.content)?row.content:[]).find(part=>part?.type==='refusal')?.refusal,200);
     if(refusal)throw upstream(`AI provider refused the request: ${refusal}`,422);
-    const finish=String(data?.choices?.[0]?.finish_reason||'').trim();
-    if(finish==='length')throw upstream('AI provider ran out of output tokens before answering (finish_reason: length). Raise the max tokens for this bot.',422);
-    if(finish==='content_filter')throw upstream('AI provider blocked the request (content_filter).',422);
+    // Chat `finish_reason`, Anthropic `stop_reason`, Responses `incomplete_details`
+    // and Gemini `finishReason` all say the same thing in a different word.
+    const finish=String(data?.choices?.[0]?.finish_reason||data?.stop_reason||data?.incomplete_details?.reason||'').trim();
+    if(finish==='length'||finish==='max_tokens'||finish==='max_output_tokens'||finish==='MAX_TOKENS')throw upstream(`AI provider ran out of output tokens before answering (${finish}), often because reasoning used the budget. Raise the max tokens for this bot.`,422);
+    if(finish==='content_filter'||finish==='refusal'||finish==='SAFETY'||finish==='PROHIBITED_CONTENT'||finish==='BLOCKLIST')throw upstream(`AI provider blocked the request (${finish}).`,422);
     const blocked=String(data?.promptFeedback?.blockReason||data?.candidates?.[0]?.finishReason||'').trim();
     if(protocol==='gemini'&&blocked==='MAX_TOKENS')throw upstream('AI provider ran out of output tokens before answering (MAX_TOKENS), often because reasoning used the budget. Raise the max tokens for this bot.',422);
     if(protocol==='gemini'&&blocked)throw upstream(`AI provider blocked the request (${blocked}).`,422);
@@ -288,7 +305,9 @@ function parameterFix(data,protocol){
   const dropTemperature=/temperature/i.test(said)&&/unsupported|not support|invalid/i.test(said);
   // o1-preview takes no system message at all; the prompt has to move into the
   // first user turn. Named by the same 400, so it is the same one retry.
-  const mergeSystem=/\bsystem\b/i.test(said)&&(/role/i.test(said)||/unsupported|not support/i.test(said));
+  // Role-shaped only: a model *named* `system-1` being retired is not a request
+  // to move the prompt, and rewriting it would spend the retry on a real error.
+  const mergeSystem=/\bsystem\b[^.]{0,32}(role|message|prompt)/i.test(said)&&/unsupported|not support|invalid/i.test(said);
   return {completionTokens,dropTemperature,mergeSystem,changes:completionTokens||dropTemperature||mergeSystem};
 }
 /** The token-limit field a 400 is pointing at: chat and Azure use
@@ -303,7 +322,9 @@ async function callModel({instructions,input,maxTokens,config,temperature=null})
   if(!configReady(cfg))throw upstream('No AI provider is configured. Add one under You → AI and models.',422);
   const protocol=protocolOf(cfg);
   if(needsConcreteModel(protocol)&&(!cfg.model||cfg.model==='auto'))throw upstream('This provider needs a concrete model id. Pick one under You → AI and models.',422);
-  if(activeCalls>=maxCalls())throw Object.assign(upstream('The AI provider is busy with other requests. Try again in a moment.',429),{permanent:true});
+  // Not `permanent`: the queue reads that flag as "never retry", and this is the
+  // one error that heals itself a moment later.
+  if(activeCalls>=maxCalls())throw upstream('The AI provider is busy with other requests. Try again in a moment.',429);
   activeCalls++;
   const timeoutError=()=>upstream(`AI provider timed out after ${Math.round(timeoutMs()/1000)}s.`,504);
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs());
@@ -320,9 +341,11 @@ async function callModel({instructions,input,maxTokens,config,temperature=null})
       const type=String(res.headers.get('content-type')||'');
       if(type.includes('text/event-stream')){
         const raw=await readBody(res.text());
-        const folded=res.ok?foldStream(protocol,raw):null;
-        // An error coming back as a stream has no other body to quote.
-        return {res,data:folded||(res.ok?null:{error:{message:cleanText(raw,300)}})};
+        const folded=res.ok?foldStream(protocol,raw,cfg):null;
+        // An error coming back as a stream has no other body to quote. Keep it
+        // whole: errorText redacts first and bounds second, and a body cut here
+        // would leave the head of a key that straddles the limit.
+        return {res,data:folded||(res.ok?null:{error:{message:String(raw||'')}})};
       }
       let data=null;
       try{data=await readBody(res.json());}catch(e){if(e.status)throw e;}
@@ -336,8 +359,11 @@ async function callModel({instructions,input,maxTokens,config,temperature=null})
       const fix=parameterFix(out.data,protocol);
       if(fix.changes){
         const body={...request.body};
-        if(fix.completionTokens){body[completionField(protocol)]=maxTokens;delete body.max_tokens;}
-        if(fix.dropTemperature)delete body.temperature;
+        // A provider can name a token field the body already carries (the
+        // Responses API always sends max_output_tokens); reposting the same
+        // bytes would spend the one retry on nothing.
+        if(fix.completionTokens&&!(completionField(protocol) in body)){body[completionField(protocol)]=maxTokens;delete body.max_tokens;}
+        if(fix.dropTemperature&&'temperature' in body)delete body.temperature;
         if(fix.mergeSystem){
           // Chat shapes carry the instructions as a message; Responses as a field.
           const messages=Array.isArray(body.messages)?body.messages:null;
@@ -543,7 +569,11 @@ function boundBotInput(input, max=MAX_BOT_INPUT){
   // earlier output — a multi-step run restarted blind without it — and cap the
   // lists that can be arbitrarily long.
   const list=value=>Array.isArray(value)?value.slice(0,8).map(item=>cut(item,120)):cut(value,600);
-  const slim={objective:cut(env.objective,1200),botId:env.botId,runId:env.runId,step:env.step,page:cut(env.page,1200),memory:env.memory,peerAnswer:env.peerAnswer,previous:env.previous&&typeof env.previous==='object'?{...env.previous,output:cut(env.previous.output,600)}:env.previous,restrictions:list(env.restrictions),tools:list(env.tools),note:'The full task was truncated to fit the model input limit.'};
+  // `contract`, `botRole`, `message` and `maxSteps` define *what* the job is; a
+  // bot asked in prose for JSON that its contract required answers in prose.
+  // Memory is the only field here that is context and not the job, so it goes
+  // first when the cut still does not fit.
+  const slim={objective:cut(env.objective,1200),botId:env.botId,runId:env.runId,step:env.step,contract:env.contract,botRole:cut(env.botRole,1200),message:cut(env.message,1200),maxSteps:env.maxSteps,permissions:list(env.permissions),page:cut(env.page,1200),memory:env.memory,peerAnswer:env.peerAnswer,previous:env.previous&&typeof env.previous==='object'?{...env.previous,output:cut(env.previous.output,600)}:env.previous,restrictions:list(env.restrictions),tools:list(env.tools),note:'The full task was truncated to fit the model input limit.'};
   let out=JSON.stringify(slim);
   if(out.length>max)out=JSON.stringify({...slim,memory:undefined,peerAnswer:undefined,restrictions:undefined,tools:undefined});
   // Never return more than the limit, even if every field was cut already.
