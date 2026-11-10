@@ -2,12 +2,12 @@
  * LLM output may only extend a run's recipients through `handoffTargets`, which
  * revalidates every target against this policy and the step cap.
  */
-import {botSettings,groupSettings,pipelineOf,MAX_STEPS_LIMIT} from './bot-settings.js?v=b874c836b3';
-import {BROWSER_PERMISSION,BROWSER_TOOL_HINT} from './bot-browser.js?v=b874c836b3';
-import {SUBAGENT_PERMISSION,SUBAGENT_TOOL_HINT} from './subagents.js?v=b874c836b3';
-import {BOT_ASK_PERMISSION,BOT_ASK_TOOL_HINT} from './bot-link.js?v=b874c836b3';
-import {BOT_CREATE_PERMISSION,BOT_CREATE_TOOL_HINT} from './bot-create.js?v=b874c836b3';
-import {memoryBlock} from './memory.js?v=b874c836b3';
+import {botSettings,groupSettings,pipelineOf,MAX_STEPS_LIMIT} from './bot-settings.js?v=1ab2a4f06e';
+import {BROWSER_PERMISSION,BROWSER_TOOL_HINT} from './bot-browser.js?v=1ab2a4f06e';
+import {SUBAGENT_PERMISSION,SUBAGENT_TOOL_HINT} from './subagents.js?v=1ab2a4f06e';
+import {BOT_ASK_PERMISSION,BOT_ASK_TOOL_HINT} from './bot-link.js?v=1ab2a4f06e';
+import {BOT_CREATE_PERMISSION,BOT_CREATE_TOOL_HINT} from './bot-create.js?v=1ab2a4f06e';
+import {memoryBlock} from './memory.js?v=1ab2a4f06e';
 
 /** The default step count of a run; a group may set its own up to MAX_STEPS_LIMIT. */
 export const MAX_HANDOFFS = 6;
@@ -15,7 +15,7 @@ export const MAX_CONTEXT_CHARS = 3600;
 /** Which run statuses are busy or interruptible is decided once in
  * `shared/run-state.js`; re-exported here because callers have reached for them
  * through the coordination module since they were declared here. */
-export {BUSY_STATUSES, INTERRUPT_STATUSES} from './run-state.js?v=b874c836b3';
+export {BUSY_STATUSES, INTERRUPT_STATUSES} from './run-state.js?v=1ab2a4f06e';
 const normalize = value => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 const safe = value => String(value ?? '').slice(0, MAX_CONTEXT_CHARS);
 const fail = (message, status) => Object.assign(new Error(message), {status});

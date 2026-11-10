@@ -4,9 +4,8 @@
 import {filterCandidates, filterDrafts} from './usability.js';
 import {ACTIONS, OUTPUT_KINDS} from './contracts.js';
 import {BOT_DEFAULTS, MAX_CONTEXT_MESSAGES, MAX_STEPS_LIMIT, botSettings, groupSettings, pipelineOf} from './bot-settings.js';
-import {BUSY_STATUSES} from './coordination.js';
 import {modelKey} from './memory.js';
-import {ACTIVE_DRAFTS, chatTasks, pipelineRows, retryTarget, runBelongsToChat} from './ui-model.js';
+import {ACTIVE_DRAFTS, chatTasks, pipelineRows, retryTarget, runButtons, waitingOnYou} from './ui-model.js';
 import {esc, icon, avatar, groupAvatar, tintClass, TINT_COUNT, btn, iconBtn, row, box, field, note, empty, tag, pageHead, fullDate} from './ui-kit.js';
 import {store, conversation, isStaticDemo, isAdmin, canWrite, isXGroup, botTint, recentRuns, THEMES, themeChoice} from './ui-store.js';
 import {validHttpUrl} from './core.js';
@@ -36,10 +35,10 @@ const offTag = bot => botSettings(bot).enabled ? (botSettings(bot).lead ? tag('P
 
 function groupHome(conv) {
   const {group} = conv, {state} = store, x = isXGroup(group), runs = recentRuns(group.id);
-  const draftWait = x ? (state.drafts || []).filter(d => d.status === 'pending' || d.status === 'ready').length : 0;
-  const paused = runs.filter(r => r.status === 'awaiting_checkpoint' && runBelongsToChat(r, conv.id)).length;
-  const plans = runs.filter(r => r.status === 'awaiting_plan' && runBelongsToChat(r, conv.id)).length;
-  const pages = runs.filter(r => (r.status === 'awaiting_feed' || r.status === 'awaiting_browser') && runBelongsToChat(r, conv.id)).length;
+  // One answer from the view model, the same the chat list and thread header
+  // read: drafts, paused runs, plans, pending pages and stuck feed reads.
+  const waiting = waitingOnYou(state, conv.id, runs);
+  const draftWait = waiting.drafts, paused = waiting.pauses, plans = waiting.plans, pages = waiting.pages + waiting.feeds;
   const runRight = paused ? `${paused} paused` : plans ? (plans === 1 ? 'A plan is waiting' : `${plans} plans waiting`) : pages ? 'Waiting on a page' : (runs.length ? `Last ${fullDate(runs[0].createdAt)}` : 'None yet');
   const reminders = (state.tasks || []).filter(t => t.kind === 'reminder' && !['done', 'cancelled'].includes(t.status)).length;
   const scheduled = chatTasks(state.tasks, group.id, null).length;
@@ -168,13 +167,16 @@ function remindersSection() {
 const RUN_TONE = {completed: 'good', failed: 'bad', interrupted: 'bad', running: 'warn', queued: 'warn', awaiting_checkpoint: 'warn', awaiting_plan: 'warn', awaiting_feed: 'warn', awaiting_browser: 'warn'};
 function runCard(group, run) {
   const name = id => group.bots.find(b => b.id === id)?.name || id, steps = run.recipients || [], live = !isStaticDemo(), status = String(run.status || 'unknown');
-  const plan = status === 'awaiting_plan' ? `${btn('Start', 'approve-plan', {id: group.id, small: true, kind: 'primary', data: {run: run.id}})}${btn('Cancel', 'cancel-plan', {id: group.id, small: true, data: {run: run.id}})}` : '';
+  // One rule for a run's buttons, shared with the thread's run note: a plan's
+  // Start/Cancel, a checkpoint's Approve, Stop while it works, Retry when it ended.
+  const flags = runButtons({status, live});
+  const plan = flags.plan ? `${btn('Start', 'approve-plan', {id: group.id, small: true, kind: 'primary', data: {run: run.id}})}${btn('Cancel', 'cancel-plan', {id: group.id, small: true, data: {run: run.id}})}` : '';
   // Every status that is still working can be stopped from here, not only the
   // one the thread happens to show a note for: a run older than the newest note
   // was otherwise stoppable from nowhere, and a stuck one stays stuck.
-  const stop = !plan && BUSY_STATUSES.includes(status) && status !== 'awaiting_checkpoint' ? btn('Cancel', 'cancel-run', {id: group.id, small: true, data: {run: run.id}}) : '';
-  const action = !canWrite() ? '' : plan || (status === 'awaiting_checkpoint' ? btn('Approve next step', 'continue-run', {id: group.id, small: true, kind: 'primary', data: {run: run.id}})
-    : stop || (!live ? '' : ['failed', 'interrupted'].includes(status) ? btn('Retry', 'retry-run', {id: group.id, small: true, data: {run: run.id, message: run.input || '', ...retryTarget(group, run)}}) : ''));
+  const action = !canWrite() ? '' : plan || (flags.checkpoint ? btn('Approve next step', 'continue-run', {id: group.id, small: true, kind: 'primary', data: {run: run.id}})
+    : flags.stop ? btn('Cancel', 'cancel-run', {id: group.id, small: true, data: {run: run.id}})
+    : flags.retry ? btn('Retry', 'retry-run', {id: group.id, small: true, data: {run: run.id, message: run.input || '', ...retryTarget(group, run)}}) : '');
   const trace = (run.trace || []).map(t => `<li class="run-step"><strong>${esc(name(t.botId))}${t.toBotId ? ` ${icon('arrow', 12)} ${esc(name(t.toBotId))}` : ''}</strong><span>${esc((t.output || '').slice(0, 240))}</span></li>`).join('');
   return `<article class="run-card"><header><span class="row-main"><span class="row-title">${esc((run.input || 'Run').slice(0, 90))}</span><span class="row-sub">${esc(run.mode || 'run')} · step ${Number(run.currentStep || 0)} of ${steps.length} · ${esc(fullDate(run.createdAt))}${run.error ? ` · ${esc(run.error)}` : ''}</span></span>${tag(status.replace('_', ' '), RUN_TONE[status] || '')}</header>${trace ? `<ol class="run-timeline">${trace}</ol>` : ''}${action ? `<div class="card-actions">${action}</div>` : ''}</article>`;
 }

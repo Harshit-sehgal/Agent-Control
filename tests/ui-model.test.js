@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ACTIVE_DRAFTS, draftStage, needsYou, chatRows, timeline, parseRoute, routeHash, feedPauseAction, retryTarget, threadLineActions, isRunNote, runBelongsToChat, FEED_WAIT, FEED_OPEN, POST_LIMIT, draftLength, lengthLabel, threadParts, threadPosts} from '../shared/ui-model.js';
+import {ACTIVE_DRAFTS, draftStage, needsYou, chatRows, timeline, parseRoute, routeHash, feedPauseAction, retryTarget, threadLineActions, runButtons, waitingOnYou, totalWaitingOnYou, isRunNote, runBelongsToChat, FEED_WAIT, FEED_OPEN, POST_LIMIT, draftLength, lengthLabel, threadParts, threadPosts} from '../shared/ui-model.js';
 
 // ---- fixtures -------------------------------------------------------------------------
 
@@ -64,6 +64,55 @@ test('needsYou adds drafts and paused runs together and handles empty input', ()
   assert.equal(needsYou(null, s.groups[0]), 0);
   assert.equal(needsYou(s, null), 0);
   assert.equal(needsYou({groups: [xGroup()]}, xGroup()), 0, 'missing drafts/groupRuns arrays count as zero');
+});
+
+// ---- waitingOnYou ---------------------------------------------------------------------
+
+test('waitingOnYou answers once per chat: drafts, plans, pauses, pending pages and stuck feeds', () => {
+  const s = state({
+    drafts: [draft('1', 'pending'), draft('2', 'ready'), draft('3', 'scheduled')],
+    groupRuns: [
+      {id: 'p1', groupId: X, chatKey: 'team-x-engage', status: 'awaiting_plan'},
+      {id: 'c1', groupId: X, chatKey: 'team-x-engage', status: 'awaiting_checkpoint'},
+      {id: 'f1', groupId: X, chatKey: 'team-x-engage', status: 'awaiting_feed'},
+      {id: 'other', groupId: 'research', chatKey: 'team-research', status: 'awaiting_plan'},
+    ],
+    browserRequests: [
+      {id: 'b1', status: 'pending', chatKey: 'team-x-engage'},
+      {id: 'f1r', purpose: 'feed', status: 'dispatched', chatKey: 'team-x-engage', runId: 'f1'},
+    ],
+  });
+  assert.deepEqual(waitingOnYou(s, 'team-x-engage'), {drafts: 2, plans: 1, pauses: 1, pages: 1, feeds: 1});
+  assert.equal(totalWaitingOnYou(waitingOnYou(s, 'team-x-engage')), 6);
+  // Another chat gets its own answer; a plan there is not the X group's.
+  assert.deepEqual(waitingOnYou(s, 'team-research'), {drafts: 0, plans: 1, pauses: 0, pages: 0, feeds: 0});
+});
+
+test('waitingOnYou counts drafts only for the X-engage group chat and tolerates empty state', () => {
+  const s = state({drafts: [draft('1', 'pending')]});
+  assert.equal(waitingOnYou(s, 'scout').drafts, 0, 'a one-to-one X chat has no drafts section');
+  assert.deepEqual(waitingOnYou(null, 'team-x-engage'), {drafts: 0, plans: 0, pauses: 0, pages: 0, feeds: 0});
+  assert.equal(totalWaitingOnYou(), 0);
+});
+
+test('waitingOnYou reads the runs a caller merged in, so a demo plan still counts', () => {
+  const s = state();
+  const local = waitingOnYou(s, 'analyst', [{id: 'local', groupId: 'research', chatKey: 'analyst', status: 'awaiting_plan'}]);
+  assert.equal(local.plans, 1);
+  assert.equal(waitingOnYou(s, 'analyst').plans, 0, 'the workspace state alone has no such run');
+});
+
+// ---- runButtons -----------------------------------------------------------------------
+
+test('runButtons answers a run status once, for the thread note and the info card alike', () => {
+  assert.deepEqual(runButtons({status: 'awaiting_plan'}), {plan: true, checkpoint: false, stop: false, retry: false});
+  assert.deepEqual(runButtons({status: 'awaiting_checkpoint', live: true}), {plan: false, checkpoint: true, stop: true, retry: false});
+  assert.deepEqual(runButtons({status: 'running', live: true}), {plan: false, checkpoint: false, stop: true, retry: false});
+  assert.deepEqual(runButtons({status: 'failed', live: true}), {plan: false, checkpoint: false, stop: false, retry: true});
+  assert.deepEqual(runButtons({status: 'interrupted', live: true}), {plan: false, checkpoint: false, stop: false, retry: true});
+  assert.equal(runButtons({status: 'failed'}).retry, false, 'Retry needs the Node build');
+  assert.equal(runButtons({status: 'completed', live: true}).stop, false, 'a finished run offers nothing');
+  assert.deepEqual(runButtons({}), {plan: false, checkpoint: false, stop: false, retry: false});
 });
 
 // ---- chatRows -------------------------------------------------------------------------

@@ -4,6 +4,7 @@
  * tested directly (tests/ui-model.test.js). */
 import {fullDate} from './ui-kit.js';
 import {botSettings} from './bot-settings.js';
+import {STOPPABLE_STATUSES} from './run-state.js';
 
 export const ACTIVE_DRAFTS = ['pending', 'scheduled', 'ready'];
 const X_GROUP = 'x-engage';
@@ -128,29 +129,46 @@ export function isRunNote(message) {
 }
 
 
-/** Buttons one system line may show at once. They stack. A missing feed
- * permission is also a failed run, so Grant must not hide Retry. Plans and
- * checkpoints also show on the static demo; Retry needs the Node build. */
-export function threadLineActions({kind, senderId, status, live = false, note = false, latest = false} = {}) {
-  const failed = status === 'failed' || status === 'interrupted';
+/** Run statuses that still have work ahead of them: about to start, between two
+ * steps, or waiting on a person. The vocabulary lives in `shared/run-state.js`
+ * with the server's, so the two cannot drift. `awaiting_plan` is left out on
+ * purpose: that note already offers Cancel next to Start, and two buttons that
+ * stop the same run in one row read as two different outcomes. */
+const STOPPABLE = new Set(STOPPABLE_STATUSES.filter(status => status !== 'awaiting_plan'));
+
+/** The buttons a run's status offers, from the status alone: Start and Cancel
+ * at a plan, Approve at a checkpoint, Stop while it still has work, Retry once
+ * it failed or was interrupted. Retry needs the Node build, so `live` gates it;
+ * the rest are answered by the status. The thread's run note and the run card in
+ * the info panel both read this, so the two cannot drift apart. */
+export function runButtons({status, live = false} = {}) {
   return {
-    grant: Boolean(kind === 'feed-permission' && senderId),
-    plan: Boolean(note && status === 'awaiting_plan'),
-    checkpoint: Boolean(note && status === 'awaiting_checkpoint'),
-    // Anything the run can still do is something a person can call off: waiting
-    // on a plan, paused at a checkpoint, or working right now. Retry is its
-    // opposite, so a run can never offer both.
-    stop: Boolean(live && note && latest && STOPPABLE.has(status)),
-    retry: Boolean(live && note && latest && failed),
+    plan: status === 'awaiting_plan',
+    checkpoint: status === 'awaiting_checkpoint',
+    stop: STOPPABLE.has(status),
+    retry: Boolean(live) && (status === 'failed' || status === 'interrupted'),
   };
 }
 
-/** Run statuses that still have work ahead of them: about to start, between two
- * steps, or waiting on a person. A finished, failed or cancelled run has nothing
- * left to stop, so it must not offer one. `awaiting_plan` is left out on purpose:
- * that note already offers Cancel next to Start, and two buttons that stop the
- * same run in one row read as two different outcomes. */
-const STOPPABLE = new Set(['queued', 'running', 'awaiting_checkpoint', 'awaiting_browser', 'awaiting_feed']);
+/** Buttons one system line may show at once. They stack. A missing feed
+ * permission is also a failed run, so Grant must not hide Retry. Plans and
+ * checkpoints also show on the static demo; Stop and Retry act on the newest
+ * note of the newest run, and Retry needs the Node build. */
+export function threadLineActions({kind, senderId, status, live = false, note = false, latest = false} = {}) {
+  const newest = Boolean(note && live && latest);
+  const buttons = runButtons({status, live: newest});
+  return {
+    grant: Boolean(kind === 'feed-permission' && senderId),
+    // A plan and a checkpoint are answered on any build: the run stopped for a
+    // person, and the demo pauses too.
+    plan: Boolean(note && buttons.plan),
+    checkpoint: Boolean(note && buttons.checkpoint),
+    // Anything the run can still do is something a person can call off, and
+    // Retry is its opposite, so a run never offers both.
+    stop: newest && buttons.stop,
+    retry: newest && buttons.retry,
+  };
+}
 
 /** Workspace runs first, then any same-id local simulation record only when
  * the workspace has no copy. A stale local "waiting" plan must not outvote
@@ -176,6 +194,29 @@ export function stuckFeedReads(state, chatKey) {
   return (state?.browserRequests || []).filter(r => r.purpose === 'feed' && r.status === 'dispatched' && r.chatKey === chatKey && waiting.has(r.runId)).length;
 }
 
+/** Everything in one chat that is blocked on the human: drafts to decide (the
+ * X-engage group chat only), runs paused at a plan or a checkpoint, browser
+ * pages still waiting on approval, and a feed read the device has not answered.
+ * The chat list, the chat header and the info panel all read this one answer, so
+ * the three cannot disagree about what needs a person.
+ *
+ * `runs` lets a caller pass the runs it merged against its own local copy (the
+ * Pages demo keeps a run in localStorage); by default the state's own list. */
+export function waitingOnYou(state, chatKey, runs = state?.groupRuns || []) {
+  const view = {...(state || {}), groupRuns: runs};
+  return {
+    drafts: chatKey === teamKey(X_GROUP) ? (view.drafts || []).filter(d => d.status === 'pending' || d.status === 'ready').length : 0,
+    plans: runs.filter(r => r.status === 'awaiting_plan' && runBelongsToChat(r, chatKey)).length,
+    pauses: runs.filter(r => r.status === 'awaiting_checkpoint' && runBelongsToChat(r, chatKey)).length,
+    pages: pendingBrowser(view, chatKey),
+    feeds: stuckFeedReads(view, chatKey),
+  };
+}
+
+/** How many things one chat's `waitingOnYou` answer adds up to: the badge the
+ * chat list and the "needs you" filter count. */
+export const totalWaitingOnYou = ({drafts = 0, plans = 0, pauses = 0, pages = 0, feeds = 0} = {}) => drafts + plans + pauses + pages + feeds;
+
 function preview(history, {isTeam, fallback}) {
   const last = history[history.length - 1];
   if (!last) return {text: fallback, sender: ''};
@@ -194,25 +235,20 @@ export function chatRows({state, messages = {}, profiles = {}, typing = new Set(
   for (const group of state?.groups || []) {
     const tint = bot => tintOf(bot, group.bots.indexOf(bot), profiles);
     const members = group.bots.map(bot => ({name: bot.name, tint: tint(bot)}));
-    const teamId = teamKey(group.id), teamHistory = messages[teamId] || [], pages = pendingBrowser(view, teamId), feeds = stuckFeedReads(view, teamId);
-    const plans = groupRuns.filter(r => r.status === 'awaiting_plan' && runBelongsToChat(r, teamId)).length;
-    const pauses = groupRuns.filter(r => r.status === 'awaiting_checkpoint' && runBelongsToChat(r, teamId)).length;
-    const drafts = group.id === X_GROUP ? (view.drafts || []).filter(d => d.status === 'pending' || d.status === 'ready').length : 0;
-    const needs = drafts + pauses + pages + feeds + plans;
+    const teamId = teamKey(group.id), teamHistory = messages[teamId] || [];
+    const team = waitingOnYou(view, teamId), needs = totalWaitingOnYou(team);
     rows.push({
       id: teamId, isTeam: true, name: group.name, members, needs, pinned: false, typing: typing.has(teamId),
       at: teamHistory[teamHistory.length - 1]?.at || '',
-      ...(pages ? {text: pages === 1 ? 'Wants to open a page' : `${pages} pages waiting on you`, sender: ''} : feeds ? {text: 'A feed read is still open', sender: ''} : preview(teamHistory, {isTeam: true, fallback: needs ? `${needs} waiting on you` : (group.description || 'Message the whole team')})),
+      ...(team.pages ? {text: team.pages === 1 ? 'Wants to open a page' : `${team.pages} pages waiting on you`, sender: ''} : team.feeds ? {text: 'A feed read is still open', sender: ''} : preview(teamHistory, {isTeam: true, fallback: needs ? `${needs} waiting on you` : (group.description || 'Message the whole team')})),
     });
     for (const bot of group.bots) {
-      const history = messages[bot.id] || [], botPages = pendingBrowser(view, bot.id), botFeeds = stuckFeedReads(view, bot.id);
-      const plans = groupRuns.filter(r => r.status === 'awaiting_plan' && runBelongsToChat(r, bot.id)).length;
-      const pauses = groupRuns.filter(r => r.status === 'awaiting_checkpoint' && runBelongsToChat(r, bot.id)).length;
+      const history = messages[bot.id] || [], mine = waitingOnYou(view, bot.id);
       rows.push({
-        id: bot.id, isTeam: false, name: bot.name, tint: tint(bot), needs: botPages + botFeeds + plans + pauses, groupName: group.name,
+        id: bot.id, isTeam: false, name: bot.name, tint: tint(bot), needs: totalWaitingOnYou(mine), groupName: group.name,
         pinned: Boolean(profiles[bot.id]?.pinned), typing: typing.has(bot.id),
         at: history[history.length - 1]?.at || '',
-        ...(botPages ? {text: botPages === 1 ? 'Wants to open a page' : `${botPages} pages waiting on you`, sender: ''} : botFeeds ? {text: 'A feed read is still open', sender: ''} : preview(history, {isTeam: false, fallback: bot.instructions || 'Say what you need'})),
+        ...(mine.pages ? {text: mine.pages === 1 ? 'Wants to open a page' : `${mine.pages} pages waiting on you`, sender: ''} : mine.feeds ? {text: 'A feed read is still open', sender: ''} : preview(history, {isTeam: false, fallback: bot.instructions || 'Say what you need'})),
       });
     }
   }

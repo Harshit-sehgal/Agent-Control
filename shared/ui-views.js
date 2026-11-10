@@ -7,7 +7,7 @@ import {summonableGuests} from './coordination.js';
 import {botSettings, groupSettings} from './bot-settings.js';
 import {requestOfMessage} from './bot-browser.js';
 import {validHttpUrl} from './core.js';
-import {chatRows, timeline, pendingBrowser, stuckFeedReads, draftStage, draftLength, lengthLabel, mentionSuggestions, retryTarget, threadLineActions, isRunNote, runBelongsToChat, ACTIVE_DRAFTS} from './ui-model.js';
+import {chatRows, timeline, waitingOnYou, draftStage, draftLength, lengthLabel, mentionSuggestions, retryTarget, threadLineActions, isRunNote, ACTIVE_DRAFTS} from './ui-model.js';
 import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js';
 import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, isXGroup, botTint, recentRuns} from './ui-store.js';
 
@@ -228,11 +228,10 @@ function welcome(conv) {
 }
 
 function threadHead(conv) {
-  const drafts = isXGroup(conv.group) ? (store.state.drafts || []).filter(d => d.status === 'pending' || d.status === 'ready').length : 0;
-  const pages = pendingBrowser(store.state, conv.id), feeds = stuckFeedReads(store.state, conv.id);
+  // The counts a header pill can show all come from one answer in the view
+  // model, so the header, the chat list and the info panel cannot disagree.
   const held = recentRuns(conv.group.id);
-  const plans = held.filter(r => r.status === 'awaiting_plan' && runBelongsToChat(r, conv.id)).length;
-  const pauses = held.filter(r => r.status === 'awaiting_checkpoint' && runBelongsToChat(r, conv.id)).length;
+  const {drafts, plans, pauses, pages, feeds} = waitingOnYou(store.state, conv.id, held);
   const face = conv.isTeam ? groupAvatar(conv.group.bots.map(b => ({name: b.name, tint: botTint(conv.group, b.id)})), 42) : avatar(conv.name, conv.tint, 42);
   const sub = store.typing.has(conv.id) ? 'typing…' : conv.isTeam ? (conv.group.bots.map(b => b.name).join(', ') || 'No bots yet') : conv.group.name;
   const pagePill = pages === 1 ? 'Wants to open a page' : `${pages} pages waiting on you`;

@@ -106,7 +106,7 @@ test('the UI wires settings, scheduled tasks and guest mentions to the engine co
   assert.match(js, /isRunNote\(i\.message\)/);
   assert.match(js, /threadLineActions\(/);
   assert.doesNotMatch(js, /grant \|\| plan/);
-  assert.match(js, /status === 'awaiting_plan' \? `\$\{btn\('Start', 'approve-plan'/);
+  assert.match(js, /flags\.plan \? `\$\{btn\('Start', 'approve-plan'/);
   assert.match(js, /if \(!canWrite\(\)\) return botHome\(conv\)/);
   assert.match(js, /const lock = writable \? '' : ' disabled'/);
   assert.match(js, /label: 'AI and models'/);

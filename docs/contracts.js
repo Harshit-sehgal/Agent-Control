@@ -14,8 +14,8 @@
  *
  * Pure functions over bot records, like the other shared modules.
  */
-import {validHttpUrl} from './core.js?v=b874c836b3';
-import {fail} from './errors.js?v=b874c836b3';
+import {validHttpUrl} from './core.js?v=1ab2a4f06e';
+import {fail} from './errors.js?v=1ab2a4f06e';
 
 export const CONTRACT_VERSION = 1;
 

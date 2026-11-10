@@ -61,8 +61,12 @@ test('custom bots run through the Node provider only on the server build',()=>{
   assert.match(app,/shouldStop: \(\) => localRunCancelled\(lease\.id\)/);
   assert.match(app,/const finished = await finishLocalRun\(lease, run\);/);
   assert.match(app,/'continue-run': async b => \{[\s\S]*?isStaticDemo\(\)[\s\S]*?resume: run/);
-  assert.match(app,/status === 'awaiting_checkpoint' \? btn\('Approve next step', 'continue-run'/);
+  assert.match(app,/runButtons\(\{status, live\}\)/);
+  assert.match(app,/flags\.checkpoint \? btn\('Approve next step', 'continue-run'/);
   assert.match(app,/drafts \? `<button type="button" class="needs-pill" data-action="open-section" data-section="drafts"/);
+  // The chat header and the info panel read the same "waiting on you" answer.
+  assert.match(app,/const \{drafts, plans, pauses, pages, feeds\} = waitingOnYou\(store\.state, conv\.id, held\)/);
+  assert.match(app,/const waiting = waitingOnYou\(state, conv\.id, runs\)/);
   assert.match(app,/paused \? `\$\{paused\} paused`/);
   assert.match(app,/Waiting on a page/);
   assert.match(app,/An admin sets voice and timing for this workspace/);
@@ -94,7 +98,9 @@ test('custom bots run through the Node provider only on the server build',()=>{
   assert.match(app,/state\?\.aiModel/);
   // A run that is still working can be stopped from its card, in the same build
   // that shows the thread's Stop button: the card used to offer nothing at all.
-  assert.match(app,/BUSY_STATUSES\.includes\(status\) && status !== 'awaiting_checkpoint' \? btn\('Cancel', 'cancel-run'/);
+  // Both buttons now come from the one `runButtons` rule in the view model.
+  assert.match(app,/flags\.stop \? btn\('Cancel', 'cancel-run'/);
+  assert.match(app,/flags\.retry \? btn\('Retry', 'retry-run'/);
 });
 test('bot profiles never mirror name/instructions into browser-local UI state',()=>{
   // `profile()` spreads the cosmetic UI record over the bot, so a name/instructions

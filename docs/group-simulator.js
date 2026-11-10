@@ -1,7 +1,7 @@
 /** Offline group coordination. Intentionally not AI: demonstrates real context passing. */
-import {createRun,createEnvelope,handoffTargets,instructLead,wakeBots,assessTask,runNote} from './coordination.js?v=b874c836b3';
-import {botSettings,groupSettings,threadContext} from './bot-settings.js?v=b874c836b3';
-import {normalizeBot,canBot} from './contracts.js?v=b874c836b3';
+import {createRun,createEnvelope,handoffTargets,instructLead,wakeBots,assessTask,runNote} from './coordination.js?v=1ab2a4f06e';
+import {botSettings,groupSettings,threadContext} from './bot-settings.js?v=1ab2a4f06e';
+import {normalizeBot,canBot} from './contracts.js?v=1ab2a4f06e';
 
 export async function simulateGroup({group, message, directBotId=null, guests=[], state, api, makeId, emit, chatKey=null, started=false, resume=null, shouldStop=()=>false}) {
   let run, previous, i;

@@ -226,6 +226,20 @@ a network.
   paths call it, so whatever one accepts the others remove. The browser request
   card's permission check also now asks `canBot` like every other block instead
   of a raw `.includes` on the record.
+- **"Waiting on you" is decided once.** The chat list, the chat header and the
+  info panel each worked out what was blocked on a person for themselves, and
+  the info panel's page count used a different rule (runs awaiting a page) from
+  the header's (pending page requests), so the two could disagree. One
+  `waitingOnYou(state, chatKey, runs)` in `shared/ui-model.js` now returns the
+  drafts, plans, pauses, pending pages and stuck feed reads for a chat, and all
+  three readers ask it and compute nothing; the chat-list badge is the plain sum
+  (`totalWaitingOnYou`). The run buttons were doubled the same way — the thread's
+  run note and the info panel's run card — and are now the one
+  `runButtons(status, live)` rule, and the thread's stoppable list derives from
+  `STOPPABLE_STATUSES` in `shared/run-state.js` instead of a second hand-written
+  set. A one-to-one X chat no longer shows a drafts pill with no drafts section
+  behind it. The counts and the buttons are covered by `tests/ui-model.test.js`
+  rather than by regexes over the DOM modules.
 - **A write now costs what changed, not what exists.** `SqliteStore` kept the
   same `read()` / `update()` document interface but rewrote every row of every
   collection on each update, so one chat message re-inserted every message, run
