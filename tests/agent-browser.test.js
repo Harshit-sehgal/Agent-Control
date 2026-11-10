@@ -20,6 +20,14 @@ test('an allowlist entry and a URL are compared on the host, not the spelling', 
   assert.equal(hostAllowed('https://[::1]:8080/a', parseAllowlist('[::1]')), true);
   assert.deepEqual(parseAllowlist(' X.com. , docs.example.com:8443 ,, '), ['x.com', 'docs.example.com']);
   assert.deepEqual(parseAllowlist(undefined), []);
+  // `*` is any public host — a name is still required, so a scheme with no host
+  // is not a page this opens.
+  assert.deepEqual(parseAllowlist(' * '), ['*']);
+  assert.equal(hostAllowed('https://anything.test/a', ['*']), true);
+  assert.equal(hostAllowed('https://anything.test:8443/a', ['*']), true);
+  assert.equal(hostAllowed('file:///etc/passwd', ['*']), false);
+  assert.equal(hostAllowed('mailto:someone@example.com', ['*']), false);
+  assert.equal(hostAllowed('not a url', ['*']), false);
 });
 
 test('a page must be on the allowlist, and only http(s) is loaded', () => {

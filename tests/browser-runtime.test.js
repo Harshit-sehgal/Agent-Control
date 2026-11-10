@@ -34,6 +34,22 @@ test('BROWSER_RUNTIME and the allowlist are read leniently, and spelled one way'
   assert.equal(runtimeMode({BROWSER_RUNTIME: 'nonsense'}), 'auto', 'An unknown value is not a guess.');
   assert.deepEqual(browserAllowlist({AGENT_BROWSER_ALLOWLIST: ' X.com. , docs.example.com:8443 ,, '}), ['x.com', 'docs.example.com']);
   assert.deepEqual(browserAllowlist({}), []);
+  // `*` is one entry meaning any public host, and it is what makes the server
+  // runtime available without naming every site.
+  assert.deepEqual(browserAllowlist({AGENT_BROWSER_ALLOWLIST: ' * '}), ['*']);
+});
+
+test('a `*` allowlist makes the server runtime available and reaches the capture', async () => {
+  const seen = [];
+  const runtime = createBrowserRuntime({
+    env: env({AGENT_BROWSER_ALLOWLIST: '*', BROWSER_IDLE_MS: '50'}),
+    find: () => '/usr/bin/chrome',
+    start: async () => ({capture: async (url, opts) => { seen.push(opts.allow); return {url}; }, close: async () => {}}),
+  });
+  assert.equal(runtime.available(), true, 'One entry is enough to run; it does not have to name every site.');
+  await runtime.run({url: 'https://anything.test/a'});
+  assert.deepEqual(seen, [['*']], 'The capture gets the entry, so the same rule decides the page.');
+  await runtime.close();
 });
 
 test('with no browser, or no allowlist, the request is refused rather than attempted', async () => {

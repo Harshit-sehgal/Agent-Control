@@ -53,11 +53,21 @@ export const normalizeHost = value => {
 /** `AGENT_BROWSER_ALLOWLIST`, read the way an operator writes it. */
 export const parseAllowlist = value => String(value ?? '').split(',').map(normalizeHost).filter(Boolean);
 
+/** The one entry that means "any public host", instead of naming them all.
+ * It is spelled like a host so the same parser and the same comparison apply,
+ * and it is still only a host rule: the egress proxy refuses private and local
+ * addresses whatever this says, and X keeps its click/type refusal. */
+export const ALLOW_ALL = '*';
+
 /** May `url` be opened? Matching is on the host, so the same page is allowed
- * whether the URL spells the port or not, and an empty host never matches. */
+ * whether the URL spells the port or not, and an empty host never matches.
+ * A list containing `*` allows any host with a name; it never allows a URL
+ * that has none (`file:`, `mailto:`, `about:`). */
 export const hostAllowed = (url, allow = []) => {
   const host = hostOf(url);
-  return Boolean(host) && (allow || []).some(entry => normalizeHost(entry) === host);
+  if (!host) return false;
+  const entries = (allow || []).map(normalizeHost);
+  return entries.includes(ALLOW_ALL) || entries.includes(host);
 };
 
 export const isPostingHost = url => { const host = hostOf(url); return POSTING_HOSTS.some(h => host === h || host.endsWith(`.${h}`)); };

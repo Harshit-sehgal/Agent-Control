@@ -42,7 +42,7 @@ export async function dispatchBrowserRequest(store, id, {actor = null, runtime =
   const agentId = here ? null : pickAgent(store, request.kind);
   if (!here && !agentId) fail(`No paired local agent holds the ${request.kind} permission. ${runtime.mode === 'agent'
     ? 'This install only runs browser requests on a paired device (BROWSER_RUNTIME=agent). Pair one under You → Local agents and grant it, then approve again.'
-    : 'Pair one under You → Local agents and grant it, or give this server a browser: set AGENT_BROWSER_ALLOWLIST and install Chrome (or point AGENT_BROWSER_PATH at one). Then approve again.'}`, 409);
+    : 'Pair one under You → Local agents and grant it, or give this server a browser: set AGENT_BROWSER_ALLOWLIST=* for any public site (or name hosts) and install Chrome, or point AGENT_BROWSER_PATH at one. Then approve again.'}`, 409);
   // Claim pending before any agent task exists. A denial that commits first
   // stays denied, and the device is never asked to open the page.
   const claimed = await store.update(s => {

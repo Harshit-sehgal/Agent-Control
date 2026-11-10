@@ -68,7 +68,7 @@ picks whose:
 | Variable | Meaning |
 | --- | --- |
 | `BROWSER_RUNTIME` | `auto` (default), `server` or `agent`. `auto` uses this server when it has an allowlist and a browser, and a paired local agent otherwise |
-| `AGENT_BROWSER_ALLOWLIST` | the only hosts a bot may open, read by both runtimes |
+| `AGENT_BROWSER_ALLOWLIST` | the hosts a bot may open, read by both runtimes; `*` means any public host (the egress proxy still refuses private and local addresses) |
 | `AGENT_BROWSER_PATH` | the browser binary; else the first Chrome, Chromium or Edge found on `PATH` |
 | `BROWSER_TIMEOUT_MS` / `BROWSER_IDLE_MS` | the per-request budget (25s) and how long an idle browser is kept (120s) |
 | `BROWSER_NO_SANDBOX` | `1` in a container, where Chrome's own sandbox cannot start. The allowlist, the egress proxy and the fresh context per page still apply |

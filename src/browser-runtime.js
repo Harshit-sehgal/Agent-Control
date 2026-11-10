@@ -96,7 +96,7 @@ export function createBrowserRuntime({env = process.env, start = startBrowserSes
       if (closed) throw Object.assign(new Error('The browser runtime is shutting down.'), {status: 503});
       if (!available()) {
         throw Object.assign(new Error(mode === 'server'
-          ? 'This install runs browser requests on the server, but no browser or allowlist is configured there. Set AGENT_BROWSER_ALLOWLIST (and install Chrome, or AGENT_BROWSER_PATH), or switch BROWSER_RUNTIME=agent.'
+          ? 'This install runs browser requests on the server, but no browser or allowlist is configured there. Set AGENT_BROWSER_ALLOWLIST (a host list, or * for any public site) and install Chrome, or point AGENT_BROWSER_PATH at one; or switch BROWSER_RUNTIME=agent.'
           : 'No browser is available on this server.'), {status: 503});
       }
       const live = await ensure();

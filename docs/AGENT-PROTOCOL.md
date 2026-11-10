@@ -70,7 +70,9 @@ blocked, and so is any request the page makes to a private or local address.
 `AGENT_BROWSER_ALLOWLIST` is read by the device and by the server the same way:
 one host name per entry, compared on the host, so a trailing dot or a `:port`
 on either side does not name a second site. A whole URL in the list names its
-host.
+host. Write `*` instead of a list to allow **any public host**; that is a
+statement about names only — the proxy below still refuses private and local
+addresses, and X and Twitter still refuse click and type.
 
 `browser.action` may click, type, wait, read or scroll on an allowlisted
 page. Click and type on X are always refused. The agent never uploads or

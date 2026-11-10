@@ -17,9 +17,9 @@
  * Posting stays human: interaction (click, type) is refused on X and Twitter
  * hosts, so no bot can press Post there. Reading those pages is allowed.
  */
-import {cleanText, validHttpUrl} from './core.js?v=e2879b2fbc';
-import {fail} from './errors.js?v=e2879b2fbc';
-import {controlFence} from './bot-link.js?v=e2879b2fbc';
+import {cleanText, validHttpUrl} from './core.js?v=db1039acfd';
+import {fail} from './errors.js?v=db1039acfd';
+import {controlFence} from './bot-link.js?v=db1039acfd';
 
 export const BROWSER_PERMISSION = 'browser.use';
 export const MAX_REQUESTS_PER_REPLY = 2;
@@ -53,11 +53,21 @@ export const normalizeHost = value => {
 /** `AGENT_BROWSER_ALLOWLIST`, read the way an operator writes it. */
 export const parseAllowlist = value => String(value ?? '').split(',').map(normalizeHost).filter(Boolean);
 
+/** The one entry that means "any public host", instead of naming them all.
+ * It is spelled like a host so the same parser and the same comparison apply,
+ * and it is still only a host rule: the egress proxy refuses private and local
+ * addresses whatever this says, and X keeps its click/type refusal. */
+export const ALLOW_ALL = '*';
+
 /** May `url` be opened? Matching is on the host, so the same page is allowed
- * whether the URL spells the port or not, and an empty host never matches. */
+ * whether the URL spells the port or not, and an empty host never matches.
+ * A list containing `*` allows any host with a name; it never allows a URL
+ * that has none (`file:`, `mailto:`, `about:`). */
 export const hostAllowed = (url, allow = []) => {
   const host = hostOf(url);
-  return Boolean(host) && (allow || []).some(entry => normalizeHost(entry) === host);
+  if (!host) return false;
+  const entries = (allow || []).map(normalizeHost);
+  return entries.includes(ALLOW_ALL) || entries.includes(host);
 };
 
 export const isPostingHost = url => { const host = hostOf(url); return POSTING_HOSTS.some(h => host === h || host.endsWith(`.${h}`)); };

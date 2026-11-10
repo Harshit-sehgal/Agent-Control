@@ -15,9 +15,9 @@
  * This module is pure. It parses and bounds the request; `src/subagents.js`
  * runs the round and the orchestrator decides what the answer means.
  */
-import {cleanText} from './core.js?v=e2879b2fbc';
-import {fail} from './errors.js?v=e2879b2fbc';
-import {controlFence} from './bot-link.js?v=e2879b2fbc';
+import {cleanText} from './core.js?v=db1039acfd';
+import {fail} from './errors.js?v=db1039acfd';
+import {controlFence} from './bot-link.js?v=db1039acfd';
 
 export const SUBAGENT_PERMISSION = 'subagent.spawn';
 /** One helper per reply. Every spawn is a child call plus an extra turn for the
