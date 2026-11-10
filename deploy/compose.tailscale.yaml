@@ -8,6 +8,10 @@
 # listens on loopback, so nothing else can reach it, and it can call an AI
 # gateway running on this machine. Settings come from the repository's .env;
 # data stays in the repository's data/ folder.
+#
+# Reached through a Cloudflare Tunnel instead (or as well)? Set PUBLIC_ORIGIN to
+# the URL people actually open, e.g. PUBLIC_ORIGIN=https://app.example.com; the
+# Tailscale name is only the default.
 services:
   app:
     build:
@@ -24,6 +28,6 @@ services:
       HOST: 127.0.0.1
       PORT: "4173"
       DATA_FILE: /data/state.json
-      PUBLIC_ORIGIN: https://${TS_HOST:?Set TS_HOST to this machine's Tailscale name}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-https://${TS_HOST:?Set TS_HOST to this machine's Tailscale name}}
     volumes:
       - ../data:/data
