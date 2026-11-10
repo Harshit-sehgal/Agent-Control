@@ -50,6 +50,17 @@ button:focus-visible,input:focus-visible,[tabindex]:focus-visible{outline:2px so
 .act time{color:var(--muted);font-size:11.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .act .face{width:22px;height:22px;border-radius:7px}
 .undo{font-size:11.5px;color:var(--violet);text-decoration:underline}
+.status{display:flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:7px 10px;font-size:12.5px;text-align:left;width:100%}
+.status .w{flex:1;min-width:0;color:var(--muted)}
+.status .dot{width:8px;height:8px;border-radius:50%;background:var(--mint);flex:none}
+.status .act2{font-size:11.5px;color:var(--muted);opacity:0}
+.status:hover .act2,.status:focus-visible .act2{opacity:1}
+.status.on{border-color:var(--violet);background:var(--violet-soft)}
+.status.on .dot{background:var(--violet)}
+.status.on .act2{opacity:1;color:var(--violet)}
+.you{margin-top:auto;display:flex;align-items:center;gap:8px;padding:6px 8px;border-top:1px solid var(--line);padding-top:12px}
+.you .w{flex:1}
+.item svg{color:var(--muted);flex:none;margin:0 6px}
 .feed{flex:1;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:14px}
 .empty{margin:auto;max-width:440px;text-align:center;color:var(--muted)}
 .empty h1{font-family:var(--display);color:var(--fg);font-size:24px;margin:0 0 6px;text-wrap:balance}
@@ -144,17 +155,16 @@ button:focus-visible,input:focus-visible,[tabindex]:focus-visible{outline:2px so
   </div>
   <aside class="side" aria-label="Navigation">
     <div class="brand">Your company <span class="tag">demo</span><button class="ghost closer" data-close>Close</button></div>
+    <button class="status" id="pauseBtn" aria-label="Pause all bots"><span class="dot"></span><span class="w" id="statusText">Atlas on watch · others asleep</span><span class="act2">Pause all</span></button>
     <button class="newbtn" id="newThread">+ New thread<br><span style="font-size:12px;color:var(--muted)">No bot to pick. The right one picks it up.</span></button>
+    <div class="sec"><button class="item" id="actBtn"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg><span class="t">Activity</span></button><button class="item" id="orgBtn"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="5" rx="1.5"/><rect x="3" y="16" width="6" height="5" rx="1.5"/><rect x="15" y="16" width="6" height="5" rx="1.5"/><path d="M12 8v4M6 16v-2h12v2"/></svg><span class="t">Company</span></button></div>
     <div class="sec"><h3>Needs you</h3><div id="needs"></div></div>
     <div class="sec"><h3>Threads</h3><div id="threads"></div></div>
     <div class="sec"><h3>Direct</h3><div id="direct"></div></div>
+    <div class="you"><span class="face" style="--t:#9fe3c6"><i></i><i></i></span><span class="w">You</span><button class="icon" id="setBtn" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button></div>
   </aside>
   <main class="main">
-    <div class="head"><h2 id="title">New thread</h2>
-      <button class="icon" id="actBtn" aria-label="Activity" title="Activity"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></button>
-      <button class="icon" id="pauseBtn" aria-label="Pause all bots" title="Pause all bots"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M9 6v12M15 6v12"/></svg></button>
-      <button class="icon" id="orgBtn" aria-label="Company chart" title="Company chart"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="5" rx="1.5"/><rect x="3" y="16" width="6" height="5" rx="1.5"/><rect x="15" y="16" width="6" height="5" rx="1.5"/><path d="M12 8v4M6 16v-2h12v2"/></svg></button>
-      <button class="icon" id="setBtn" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button></div>
+    <div class="head"><h2 id="title">New thread</h2></div>
     <div class="paused" id="pausedBar" hidden>All bots are paused. Nothing runs until you resume. <button id="resume">Resume</button></div>
     <div class="feed" id="feed" role="log" aria-live="polite"></div>
     <form class="composer" id="form"><input id="box" autocomplete="off" placeholder="Ask for anything. You don't need to say who." aria-label="Message"><button class="send">Send</button></form>
@@ -360,16 +370,16 @@ document.addEventListener('click',e=>{
     t.owner=nb.id;state.view={type:'bot',id:nb.id};render();
   }
   else if(el.id==='newThread'){state.cur=null;app.classList.remove('show-side');render();$('box').focus()}
-  else if(el.id==='actBtn'){state.view={type:'activity'};renderRight();app.classList.add('show-right')}
+  else if(el.id==='actBtn'){state.view={type:'activity'};renderRight();app.classList.remove('show-side');app.classList.add('show-right')}
   else if(el.dataset.filter){state.filter=el.dataset.filter;renderRight()}
   else if(el.dataset.actbot){state.view={type:'activity',bot:el.dataset.actbot};state.filter='all';renderRight()}
   else if('actall' in el.dataset){state.view={type:'activity'};renderRight()}
   else if(el.id==='pauseBtn'||el.id==='resume'){
-    state.paused=el.id==='pauseBtn'?!state.paused:false;$('pausedBar').hidden=!state.paused;$('pauseBtn').classList.toggle('on',state.paused);
+    state.paused=el.id==='pauseBtn'?!state.paused:false;$('pausedBar').hidden=!state.paused;$('pauseBtn').classList.toggle('on',state.paused);$('statusText').textContent=state.paused?'All bots paused':'Atlas on watch · others asleep';$('pauseBtn').querySelector('.act2').textContent=state.paused?'Resume':'Pause all';
     log('atlas','bots',state.paused?'You paused all bots':'You resumed all bots',null);
   }
-  else if(el.id==='setBtn'){state.view={type:'settings'};renderRight();app.classList.add('show-right')}
-  else if(el.id==='orgBtn'||el.id==='mRight'){state.view={type:'org'};renderRight();app.classList.add('show-right')}
+  else if(el.id==='setBtn'){state.view={type:'settings'};renderRight();app.classList.remove('show-side');app.classList.add('show-right')}
+  else if(el.id==='orgBtn'){state.view={type:'org'};renderRight();app.classList.remove('show-side');app.classList.add('show-right')}
   else if(el.id==='mSide'){app.classList.add('show-side')}
   else if('close' in el.dataset){app.classList.remove('show-side','show-right')}
   else if(el.id==='hire'){

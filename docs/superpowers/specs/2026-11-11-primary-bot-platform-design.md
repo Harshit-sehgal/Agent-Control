@@ -75,7 +75,13 @@ This revision replaces groups. Where it conflicts with anything below, this sect
 - **Managers' powers** within their own team (everything below them in the chart): create, edit, pause and reassign bots, and settle who owns a task. The primary has these powers over the whole company, plus everything listed under primary-only powers.
 - **Context is automatic.** There is no per-bot context setting. Each turn the app assembles the bot's job, its memory, the thread so far and teammates' replies. The bot can ask for more (older thread messages, more memory) through a tool. When a thread nears the model's limit, older parts are summarised. `contextMessages` and similar settings are removed.
 - **Memory per bot.** Each bot has its own private memory: what it learned about the owner and its job. The owner can see, edit and delete every line from the bot's profile. There is also one shared company notebook every bot can read. Build on the existing durable memory (`shared/memory.js`, Phase T); do not add a second memory system.
-- **Settings are not the company chart.** The chart and Settings are two icon buttons (an org-chart symbol and a gear, with tooltips and accessible labels) in the thread's top bar, not text buttons. **Settings** holds only app-wide things: subscriptions (Claude, ChatGPT, with signed-in status), API keys, the default model for new bots, and connectors (Google, MCP servers).
+- **The top bar carries only the thread** (its title). No app-wide buttons live there. App-wide places sit in the sidebar, like Slack:
+  - top: a status line that doubles as the pause control ("● Atlas on watch · others asleep", "Pause all" on hover; violet "All bots paused · Resume" when paused);
+  - then *New thread*, then two rows with small icons: *Activity* and *Company* (the chart);
+  - then Needs you, Threads, Direct;
+  - bottom: the owner's own row with a gear for Settings.
+  - On phones the same sidebar opens from the ☰ button.
+- **Settings are not the company chart.** **Settings** holds only app-wide things: subscriptions (Claude, ChatGPT, with signed-in status), API keys, the default model for new bots, and connectors (Google, MCP servers).
 - **Per-bot settings live on the bot.** A bot's profile holds its job, manager, model, memory and permissions. Nothing per-bot appears in Settings.
 - **Per-bot permission choices.** Every permission a bot has been given is listed on that bot's profile, with a choice of **Always allow / Ask each time / Deny**. Payment permissions offer only Ask each time / Deny. Deny means the bot stops and tells the owner where to change it. This is how the owner takes back an Always allow.
 
@@ -83,13 +89,13 @@ This revision replaces groups. Where it conflicts with anything below, this sect
 
 - **Where it lives.** Three places, each showing only what fits there, so nothing is repeated:
   - *The thread* already shows its own story (route, bot-to-bot lines, asks, reply). The log never repeats this chatter.
-  - *Activity* is an icon (clock) in the top bar, next to the company chart and Settings. It opens in the side panel, not a full page.
+  - *Activity* is a sidebar row (clock icon) above Company. It opens in the side panel, not a full page.
   - *Each bot's profile* shows its last three entries and "See all of <bot>'s activity", which opens Activity filtered to that bot.
 - **What gets an entry.** Only events the owner might need to find later: anything that left the app (email sent, page opened with a signed-in session, file changed, event added, post, payment), permission changes, and bots created, moved, paused or deleted. Never routing, thinking, bot-to-bot messages or reads inside the app.
 - **How it reads.** One plain sentence per entry with the bot's face and the time ("Mailroom sent an email to Northwind: 'Wednesday works. 11:00?'"). Grouped by day (Today, Yesterday, then dates), newest first. Tapping an entry opens its thread.
 - **Filters are four chips**, default first: *Left the app* · *Permissions* · *Bots* · *All*. No search box or date picker in v1.
 - **Undo window.** An Always-allowed email send is held for 30 seconds; its entry and the thread show Undo during that window.
-- **Pause all.** A pause icon in the top bar stops every bot-initiated run at once and shows a banner "All bots are paused. Nothing runs until you resume." with Resume. Pausing and resuming are logged under *Bots*. It reuses the runaway guard's pause mechanism.
+- **Pause all.** The sidebar's status line stops every bot-initiated run at once and shows a banner "All bots are paused. Nothing runs until you resume." with Resume. Pausing and resuming are logged under *Bots*. It reuses the runaway guard's pause mechanism.
 - Storage: one append-only table (`activity`: id, at, botId, kind `outside|perm|bots`, text, threadId, undoUntil). Retention follows the existing retention rules.
 
 ## Architecture (builder's latitude inside these lines)
