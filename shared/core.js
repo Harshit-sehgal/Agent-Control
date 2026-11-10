@@ -58,6 +58,12 @@ export function initialState() {
   ]}],candidates:[],drafts:[],runs:[],schedules:[],events:[]};
 }
 /** Approve a draft and freeze it, with the same guarantees whenever it goes out. */
+/** The earliest instant a `datetime-local` input may offer. The server wants a
+ * full minute of lead time, and the input's value has no seconds, so rounding
+ * *down* (what truncating to the minute does) can hand back an instant a
+ * fraction of a minute away - a value the form declared valid and the server
+ * refuses. Round up instead. */
+export function minuteCeil(ms) { return Math.ceil(ms / 60000) * 60000; }
 export function scheduleApprovalAt(draft, when, now=Date.now()) {
   if(draft.status!=='pending') throw Object.assign(new Error('Only pending drafts can be approved.'),{status:409});
   if(!cleanText(draft.text)) throw Object.assign(new Error('Draft is empty.'),{status:400});

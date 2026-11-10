@@ -4,6 +4,7 @@ import {esc, icon, btn, row, field, note} from './ui-kit.js';
 import {store, groups, conversation, isStaticDemo, isAdmin, isXGroup, teamKey, go} from './ui-store.js';
 import {openSheet, closeSheet, captureFocus, restoreFocus, focusOrigin} from './ui-dialogs.js';
 import {tintPicker} from './ui-panel.js';
+import {minuteCeil} from './core.js';
 
 const el = id => document.getElementById(id);
 
@@ -98,7 +99,7 @@ export function scheduleDraftSheet(id) {
   const soon = new Date(Date.now() + 30 * 60000);
   openSheet(`<form id="approve-form" class="form">
     <input type="hidden" name="draft" value="${esc(id)}">
-    ${field('Publish at', `<input class="input" type="datetime-local" name="at" required autofocus value="${esc(localInput(soon))}" min="${esc(localInput(new Date(Date.now() + 60000)))}">`)}
+    ${field('Publish at', `<input class="input" type="datetime-local" name="at" required autofocus value="${esc(localInput(soon))}" min="${esc(localInput(new Date(minuteCeil(Date.now() + 60000))))}">`)}
     ${btn('Approve for that time', null, {kind: 'primary', type: 'submit', wide: true})}
   </form>${note('Approving freezes the exact text. If you edit it afterwards, the approval is cleared.')}`, {title: 'Schedule this draft', sub: `${esc(draft.author)} · revision ${Number(draft.revision)}`});
 }

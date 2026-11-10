@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import {migrate,updateSettings,addCandidate,seedDemo,beginProcessing,finishProcessing,failProcessing,editDraft,draftAction,addGroup,addBot,updateBot,updateGroup,removeBot,removeGroup,recoverInterrupted,addSchedule,removeSchedule,resetDemo,removeCandidate,rotateCaptureToken,findDraft,findCandidate,attachRunDraft,SCHEMA_VERSION} from '../shared/workflow.js';
 import {enqueueTask, completeTask, failTask} from '../shared/tasks.js';
-import {initialState} from '../shared/core.js';
+import {initialState, minuteCeil} from '../shared/core.js';
 import {createRouter} from '../src/router.js';
 import {workflowRoutes} from '../src/routes-workflow.js';
 
@@ -103,6 +103,16 @@ test('an approval can be pinned to a time, and only a sane one', () => {
   assert.equal(new Date(pinned.dueAt).getTime(), soon, 'the exact instant is kept, not rounded to the delay window');
   // The frozen text is what makes the due check safe, so a pinned approval is the
   // same approval as a delay-window one.
+  // The schedule sheet's own floor is a minute boundary rounded *up*: its value
+  // has no seconds, so truncating "now + 60s" offers an instant as little as one
+  // second away - valid to the input, refused by the server.
+  for (const seconds of [0, 1, 45, 59]) {
+    const wall = Math.floor(Date.now() / 60000) * 60000 + seconds * 1000;
+    assert.ok(minuteCeil(wall + 60000) - wall >= 60000, `the floor for :${seconds} is at least a minute out`);
+  }
+  const offered = minuteCeil(Date.now() + 60000);
+  const later = finishProcessing(s, addCandidate(s, {url: 'https://x.com/a/status/7', text: 'Another candidate for the floor'}).candidate.id, {score: 50}, {text: 'Floor copy', mode: 'template', note: 'n'});
+  assert.equal(draftAction(s, later.id, 'approve', {dueAt: new Date(offered).toISOString()}).status, 'scheduled', 'the earliest time the sheet can offer is accepted');
   assert.equal(pinned.approvedText, 'Pinned copy');
   assert.equal(pinned.approvedRevision, pinned.revision);
 });
