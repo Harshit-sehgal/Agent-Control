@@ -64,6 +64,18 @@ kbd{font-family:var(--body);font-size:11px;color:var(--muted);border:1px solid v
 .state.working{background:var(--mint);animation:pulse 1.4s var(--ease) infinite}
 .state.waiting{background:var(--violet)}
 @keyframes pulse{50%{opacity:.35}}
+.strip{display:flex;gap:6px;flex-wrap:wrap;padding:2px 8px 4px}
+.strip button{border-radius:10px;padding:2px;position:relative}
+.strip button:hover{background:var(--line)}
+.strip .more{width:32px;height:32px;display:grid;place-items:center;color:var(--muted);font-size:12px;font-weight:600}
+.strip .dotw{position:absolute;right:0;bottom:0;width:8px;height:8px;border-radius:50%;background:var(--mint);box-shadow:0 0 0 2px var(--sunk)}
+.mention{position:absolute;left:0;right:0;bottom:calc(100% + 6px);background:var(--raise);border-radius:12px;box-shadow:var(--shadow);padding:6px;display:flex;flex-direction:column;max-width:320px}
+.mention button{display:flex;gap:10px;align-items:center;padding:7px 9px;border-radius:8px;text-align:left}
+.mention button:hover,.mention button.hl{background:var(--sunk)}
+.mention small{margin-left:auto}
+.boxwrap{position:relative;max-width:720px;margin:0 auto}
+.ownerbtn{border-radius:10px;padding:2px}
+.ownerbtn:hover{background:var(--sunk)}
 .foot{margin-top:auto;padding-top:10px;border-top:1px solid var(--line)}
 
 /* main */
@@ -230,6 +242,8 @@ select.sel{border:1px solid var(--line2);border-radius:8px;background:var(--rais
     <button class="row" data-go="palette"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg><span class="t">Jump to…</span><kbd class="k">⌘K</kbd></button>
     <button class="row" data-panel="activity"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg><span class="t">Activity</span></button>
     <button class="row" data-panel="company"><svg class="i" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="5" rx="1.5"/><rect x="3" y="16" width="6" height="5" rx="1.5"/><rect x="15" y="16" width="6" height="5" rx="1.5"/><path d="M12 8v4M6 16v-2h12v2"/></svg><span class="t">Company</span></button>
+    <div class="label">Bots</div>
+    <div class="strip" id="strip"></div>
     <div id="needs"></div>
     <div class="label">Threads</div>
     <div id="threads"></div>
@@ -257,7 +271,7 @@ const by=id=>BOTS.find(b=>b.id===id);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const short=b=>b.job.split(/[.:]/)[0];
 const chain=id=>{const o=[];let b=by(id);while(b){o.unshift(b);b=b.boss&&by(b.boss)}return o};
-const S={threads:[],cur:null,panel:null,tab:'overview',busy:new Set(),paused:false,filter:'outside',actAll:null,palIdx:0,hire:false,
+const S={threads:[],cur:null,panel:null,tab:'overview',busy:new Set(),paused:false,filter:'outside',actAll:null,palIdx:0,hire:false,palBots:false,recent:['mail','sch','plan'],
   grants:{mail:{'Gmail: send email':'always','Gmail: read':'always'},plan:{'Google Calendar: edit':'ask'},ledger:{'Pay or spend money':'ask'}},activity:[]};
 const faceState=b=>S.busy.has(b.id)?'read':(b.id==='atlas'?'':'sleep');
 const face=(b,size='',st='')=>`<span class="face ${size} ${b.role!=='Bot'?'m':''} ${st}" style="--t:${b.tint};--d:${(b.name.length%5)*.8}s" aria-hidden="true"><i></i><i></i></span>`;
@@ -298,6 +312,9 @@ function renderSide(){
   $('needs').innerHTML=p.length?`<div class="label">Needs you</div>`+p.map(a=>`<button class="row" data-open="${a.thread}">${face(by(a.bot),'s')}<span class="t">${by(a.bot).name}: ${esc(a.short)}</span><span class="badge">1</span></button>`).join(''):'';
   $('threads').innerHTML=S.threads.map(t=>{const o=t.owner&&by(t.owner);const st=p.some(a=>a.thread===t.id)?'waiting':(t.running?'working':'');
     return `<button class="row ${S.cur===t.id?'on':''}" data-open="${t.id}">${o?face(o,'s'):'<span class="face s" style="--t:var(--line2)"><i></i><i></i></span>'}<span class="t">${esc(t.title)}</span>${st?`<span class="state ${st}" title="${st==='waiting'?'Waiting on you':'Working'}"></span>`:''}</button>`}).join('');
+  const order=[...S.recent,...BOTS.map(b=>b.id).filter(id=>!S.recent.includes(id))].map(by).filter(Boolean);
+  const shown=order.slice(0,7);
+  $('strip').innerHTML=shown.map(b=>`<button data-dm="${b.id}" title="Message ${b.name}" aria-label="Message ${b.name}">${face(b,'',faceState(b))}${S.busy.has(b.id)?'<span class="dotw"></span>':''}</button>`).join('')+(order.length>7?`<button class="more" data-allbots title="All bots" aria-label="All bots">+${order.length-7}</button>`:`<button class="more" data-allbots title="All bots" aria-label="All bots"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg></button>`);
   document.querySelectorAll('.side [data-panel]').forEach(b=>b.classList.toggle('on',S.panel===b.dataset.panel));
   document.querySelector('.side [data-go="home"]').classList.toggle('on',!S.cur);
   $('pause').classList.toggle('paused',S.paused);
@@ -307,12 +324,15 @@ function renderSide(){
 
 /* ---------- main ---------- */
 function composer(home){
-  return `<form class="composer" data-form><div class="box"><input name="q" placeholder="${home?'Ask for anything. No need to say who.':'Reply, or ask for something new'}" autocomplete="off" aria-label="Message"><button class="send" aria-label="Send">${ICON.send}</button></div>${home?'':`<div class="under"><span>The right bot picks it up. Type @ to send it to someone.</span><span class="k"><kbd>⌘K</kbd> jump · <kbd>Esc</kbd> close</span></div>`}</form>`;
+  const t=S.threads.find(x=>x.id===S.cur),dm=t&&t.dm&&by(t.dm);
+  const ph=home?'Ask for anything. No need to say who. Type @ to pick a bot.':dm?`Message ${dm.name}`:'Reply, or type @ to bring in another bot';
+  return `<form class="composer" data-form><div class="boxwrap"><div class="mention" id="mention" hidden></div><div class="box"><input name="q" placeholder="${ph}" autocomplete="off" aria-label="Message"><button class="send" aria-label="Send">${ICON.send}</button></div></div>${home?'':`<div class="under"><span>${dm?`Only ${dm.name} reads this. It can still ask teammates for help.`:'The bot that owns this thread answers. @name brings someone else in.'}</span><span class="k"><kbd>⌘K</kbd> jump · <kbd>Esc</kbd> close</span></div>`}</form>`;
 }
 function itemHTML(it,t){
   const b=it.bot&&by(it.bot);
   switch(it.k){
     case 'me':return `<div class="me fadein">${esc(it.text)}</div>`;
+    case 'direct':return `<div class="route fadein">Sent to ${esc(by(it.owner).name)} directly</div>`;
     case 'route':return `<div class="route fadein"><span>${esc(by(it.owner).name)} took this</span><span>·</span><span>via ${chain(it.owner).slice(0,-1).map(x=>esc(x.name)).join(' → ')||'Atlas'}</span><span>·</span><button class="link" data-why="${t.id}">${it.quiet.length} stayed asleep</button></div>${t.why?`<div class="why">${it.quiet.map(id=>`${by(id).name}: ${short(by(id)).toLowerCase()}`).join(' · ')}</div>`:''}`;
     case 'work':return `<div class="working">${face(b,'','read')}<span>${b.name} is working${it.note?' · '+esc(it.note):''}</span></div>`;
     case 'hop':{const f=by(it.from),to=by(it.to);return `<details class="hop fadein"><summary>${face(f,'s')}<span><b>${f.name}</b> messaged <b>${to.name}</b></span></summary><div class="said">${esc(it.text)}</div></details>`}
@@ -327,7 +347,7 @@ function renderMain(){
   const banner=S.paused?`<div class="banner">All bots are paused. Nothing runs until you resume.<button data-resume>Resume</button></div>`:'';
   const menu=`<button class="x menu" data-nav aria-label="Open menu">${ICON.menu}</button>`;
   if(!t){
-    $('main').innerHTML=`<div class="top">${menu}<div class="grow"></div></div>${banner}<div class="home"><div class="faces">${BOTS.filter(b=>b.role==='Bot'||b.id==='atlas').slice(0,6).map(b=>face(b,'',faceState(b))).join('')}</div><h2>What should the company get done?</h2><p class="lede">Say it once. Atlas hands it to the bot whose job it is; everyone else stays asleep.</p>${composer(true)}<div class="chips">
+    $('main').innerHTML=`<div class="top">${menu}<div class="grow"></div></div>${banner}<div class="home"><div class="faces">${BOTS.filter(b=>b.role==='Bot'||b.id==='atlas').slice(0,6).map(b=>`<button class="ownerbtn" data-dm="${b.id}" title="Message ${b.name}" aria-label="Message ${b.name}">${face(b,'',faceState(b))}</button>`).join('')}</div><h2>What should the company get done?</h2><p class="lede">Say it once. Atlas hands it to the bot whose job it is; everyone else stays asleep.</p>${composer(true)}<div class="chips">
       <button class="chip" data-try="Find recent papers on small language models and write me a short summary">Find papers and summarise them</button>
       <button class="chip" data-try="Plan my week around any client emails in my inbox">Plan my week from my inbox</button>
       <button class="chip" data-try="How much did I spend on food this month?">What did I spend on food?</button>
@@ -336,7 +356,8 @@ function renderMain(){
   }
   const o=t.owner&&by(t.owner);
   const live=pending().some(a=>a.thread===t.id)?'Waiting on you':t.running?`${[...S.busy].map(id=>by(id).name).join(' and ')} working`:o?`${o.name} owns this`:'Routing…';
-  $('main').innerHTML=`<div class="top">${menu}<div class="grow"><h1>${esc(t.title)}</h1><span class="live">${live}</span></div></div>${banner}<div class="scroll" id="scroll"><div class="col" role="log" aria-live="polite">${t.items.map(i=>itemHTML(i,t)).join('')}</div></div>${composer(false)}`;
+  const ownerBtn=o?`<button class="ownerbtn" data-bot="${o.id}" title="Open ${o.name}'s profile" aria-label="Open ${o.name}'s profile">${face(o,'',faceState(o))}</button>`:'';
+  $('main').innerHTML=`<div class="top">${menu}${ownerBtn}<div class="grow"><h1>${esc(t.title)}</h1><span class="live">${live}</span></div></div>${banner}<div class="scroll" id="scroll"><div class="col" role="log" aria-live="polite">${t.items.map(i=>itemHTML(i,t)).join('')}</div></div>${composer(false)}`;
   const sc=$('scroll');sc.scrollTop=sc.scrollHeight;
 }
 
@@ -408,12 +429,18 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
 const up=t=>{if(S.cur===t.id)renderMain();renderSide();if(S.panel)renderPanel()};
 async function send(text){
   if(S.paused)return;
-  const t={id:'t'+Date.now(),title:text.length>44?text.slice(0,42)+'…':text,owner:null,items:[],running:true};
-  S.threads.unshift(t);S.cur=t.id;t.items.push({k:'me',text});render();
-  await wait(550);
-  const r=routeFor(text),owner=by(r.owner);t.owner=owner.id;
-  const quiet=BOTS.filter(b=>b.role==='Bot'&&b.id!==owner.id&&!r.helpers.includes(b.id)).map(b=>b.id);
-  t.items.push({k:'route',owner:owner.id,quiet});S.busy.add(owner.id);
+  const mb=[...BOTS].sort((a,b)=>b.name.length-a.name.length).find(b=>text.toLowerCase().startsWith('@'+b.name.toLowerCase()));
+  let t=S.threads.find(x=>x.id===S.cur);const isNew=!t;
+  if(!t){t={id:'t'+Date.now(),title:text.replace(/^@\S+\s*/,'').slice(0,42)||text,owner:null,items:[]};S.threads.unshift(t);S.cur=t.id}
+  t.running=true;t.items.push({k:'me',text});render();
+  await wait(450);
+  const forced=mb?.id||(t.dm)||(!isNew&&t.owner);
+  const r=forced?(SCRIPTS.find(x=>x.owner===forced&&x.match(text))||{owner:forced,helpers:[],reply:`${by(forced).name} here. On it: done, and here is what I did.`,learn:by(forced).role==='Bot'?[forced,'You asked: '+text.replace(/^@\S+\s*/,'').slice(0,40)]:null}):routeFor(text);
+  const owner=by(r.owner);if(!t.dm)t.owner=owner.id;
+  S.recent=[owner.id,...S.recent.filter(x=>x!==owner.id)];
+  if(mb)t.items.push({k:'direct',owner:owner.id});
+  else if(!forced){const quiet=BOTS.filter(b=>b.role==='Bot'&&b.id!==owner.id&&!r.helpers.includes(b.id)).map(b=>b.id);t.items.push({k:'route',owner:owner.id,quiet})}
+  S.busy.add(owner.id);
   const work={k:'work',bot:owner.id};t.items.push(work);up(t);
   await wait(800);
   if(r.ask){
@@ -446,14 +473,20 @@ async function send(text){
 /* ---------- palette ---------- */
 function palItems(q){
   const all=[...S.threads.map(t=>({label:t.title,hint:'Thread',go:()=>{S.cur=t.id;render()}})),
-    ...BOTS.map(b=>({label:b.name,hint:b.role==='Bot'?short(b):b.role,face:b,go:()=>{S.panel=b.id;S.tab='overview';render()}})),
+    ...BOTS.map(b=>({label:b.name,hint:'Message · '+(b.role==='Bot'?short(b):b.role),face:b,bot:true,go:()=>openDM(b.id)})),
     {label:'New thread',hint:'Page',go:()=>{S.cur=null;render()}},{label:'Activity',hint:'Page',go:()=>{S.panel='activity';render()}},
     {label:'Company',hint:'Page',go:()=>{S.panel='company';render()}},{label:'Settings',hint:'Page',go:()=>{S.panel='settings';render()}}];
-  q=q.toLowerCase().trim();return q?all.filter(i=>(i.label+' '+i.hint).toLowerCase().includes(q)):all;
+  const pool=S.palBots?all.filter(i=>i.bot):all;
+  q=q.toLowerCase().trim();return q?pool.filter(i=>(i.label+' '+i.hint).toLowerCase().includes(q)):pool;
 }
 function renderPal(){const it=palItems($('palIn').value);S.palIdx=Math.min(S.palIdx,Math.max(it.length-1,0));
   $('palList').innerHTML=it.map((i,n)=>`<li><button class="${n===S.palIdx?'hl':''}" data-pal="${n}">${i.face?face(i.face,'s'):''}<span>${esc(i.label)}</span><small>${esc(i.hint)}</small></button></li>`).join('')||'<li class="sub" style="padding:10px">No matches.</li>'}
-function openPal(){$('pal').classList.add('show');$('palIn').value='';S.palIdx=0;renderPal();$('palIn').focus()}
+function openDM(id){
+  let t=S.threads.find(x=>x.dm===id);const b=by(id);
+  if(!t){t={id:'dm'+id,title:b.name,owner:id,dm:id,items:[{k:'note',text:`Direct thread with ${b.name}. ${b.name}'s job: ${b.job}`}]};S.threads.unshift(t)}
+  S.recent=[id,...S.recent.filter(x=>x!==id)];S.cur=t.id;S.panel=null;$('app').classList.remove('navopen');render();
+}
+function openPal(bots){S.palBots=!!bots;$('palIn').placeholder=bots?'Message a bot':'Jump to a thread, a bot or a page';$('pal').classList.add('show');$('palIn').value='';S.palIdx=0;renderPal();$('palIn').focus()}
 function closePal(){$('pal').classList.remove('show')}
 $('palIn').addEventListener('input',()=>{S.palIdx=0;renderPal()});
 $('palIn').addEventListener('keydown',e=>{const it=palItems($('palIn').value);
@@ -483,7 +516,9 @@ document.addEventListener('click',e=>{
   else if(d.filter){S.filter=d.filter;renderPanel()}
   else if(d.actall){S.actAll=S.actAll===d.actall?null:d.actall;renderPanel()}
   else if(d.forget!==undefined){const b=by(d.b);b.mem.splice(+d.forget,1);b.fresh=null;renderPanel()}
-  else if(d.dm){S.panel=null;S.cur=null;render();const i=$('main').querySelector('input');i.value='@'+by(d.dm).name+' ';i.focus()}
+  else if(d.dm){openDM(d.dm)}
+  else if(d.allbots!==undefined){$('app').classList.remove('navopen');openPal(true)}
+  else if(d.pick){const i=$('main').querySelector('input');i.value=i.value.replace(/@\w*$/,'@'+by(d.pick).name+' ');$('mention').hidden=true;i.focus()}
   else if(d.hireOpen!==undefined){S.hire=true;renderPanel();$('panel').querySelector('[name=what]').focus()}
   else if(d.hireCancel!==undefined){S.hire=false;renderPanel()}
   else if(d.hireFrom){const t=S.threads.find(x=>x.id===d.hireFrom);const nb={id:'b'+Date.now(),name:'Concierge',role:'Bot',boss:'ops',tint:'#e7b3f0',job:'Books tables, tickets and travel.',kw:['book','table','ticket','travel'],mem:['Hired by Atlas from your thread']};BOTS.push(nb);t.owner=nb.id;
@@ -495,6 +530,12 @@ document.addEventListener('submit',e=>{e.preventDefault();const f=e.target;
   else if(f.dataset.hire!==undefined){const what=f.what.value.trim();if(!what)return;const names=['Scout','Pilot','Keeper','Tally','Echo'];const nb={id:'b'+Date.now(),name:names[BOTS.length%names.length],role:'Bot',boss:f.boss.value||null,tint:'#9ee0e6',job:what.replace(/^./,c=>c.toUpperCase()).replace(/\.?$/,'.'),kw:what.toLowerCase().split(/\W+/).filter(w=>w.length>3),mem:['Hired by you from the company chart']};BOTS.push(nb);S.hire=false;log('atlas','bots',`hired ${nb.name}${nb.boss?' under '+by(nb.boss).name:', with no manager'}`);S.panel=nb.id;S.tab='overview';render()}
   else if(f.dataset.addmem){const b=by(f.dataset.addmem),v=f.m.value.trim();if(v){b.mem.push(v);b.fresh=b.mem.length-1;renderPanel()}}
 });
+document.addEventListener('input',e=>{const i=e.target;if(i.name!=='q')return;const m=$('mention');const q=i.value.match(/(?:^|\s)@(\w*)$/);
+  if(!q){m.hidden=true;return}
+  const list=BOTS.filter(b=>b.name.toLowerCase().startsWith(q[1].toLowerCase())).slice(0,6);
+  m.hidden=!list.length;m.innerHTML=list.map((b,n)=>`<button type="button" class="${n===0?'hl':''}" data-pick="${b.id}">${face(b,'s')}<span>${b.name}</span><small>${esc(b.role==='Bot'?short(b):b.role)}</small></button>`).join('');
+});
+document.addEventListener('keydown',e=>{const m=$('mention');if(m&&!m.hidden&&(e.key==='Enter'||e.key==='Tab')&&e.target.name==='q'){const f=m.querySelector('button');if(f){e.preventDefault();f.click()}}},true);
 document.addEventListener('change',e=>{const s=e.target;
   if(s.dataset.perm){S.grants[s.dataset.perm][s.dataset.scope]=s.value;log(s.dataset.perm,'perm',`was set to ${s.selectedOptions[0].text} for "${s.dataset.scope}"`);renderPanel()}
   else if(s.dataset.boss){const b=by(s.dataset.boss);b.boss=s.value||null;log('atlas','bots',`moved ${b.name} ${b.boss?'under '+by(b.boss).name:'to no manager'}`);renderPanel()}

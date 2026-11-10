@@ -95,7 +95,14 @@ This revision replaces groups. Where it conflicts with anything below, this sect
 - **Messages:** the owner's messages are mint bubbles on the right. Bot replies are unboxed: face, name, short job, text. Under a reply, one muted line: what it used ("Used 3 memories and Quill's reply") and "Wrong bot?", which offers the other bots in place; picking one hands the thread over and Atlas remembers the correction.
 - **Route line** sits under the owner's message: "Scholar took this · via Atlas → Research lead · 4 stayed asleep"; "stayed asleep" expands the reasons.
 - **Ask cards** are the only raised surface in a thread (soft elevation, no border): one sentence and three buttons. Answered cards collapse to one muted line.
-- **⌘K palette** jumps to any thread, bot or page. Arrow keys and Enter work.
+- **⌘K palette** jumps to any thread, bot or page. Arrow keys and Enter work. Choosing a bot opens a direct thread with it.
+- **Contacting one bot is one tap:**
+  - *Bots strip* in the sidebar: up to seven faces, most recently used first, with a mint dot on any that are working. Tapping a face opens the direct thread with that bot. The last slot ("+N", or a search icon) opens the palette filtered to bots.
+  - *Direct threads* are one per bot and reopen where you left off. Only that bot reads them, though it can still ask teammates for help. They appear in Threads with the bot's face.
+  - *@mentions*: typing @ in any composer shows a picker of bots; Enter or Tab picks. A message starting with @Name goes to that bot directly ("Sent to Scholar directly") and skips routing.
+  - *Replies stay with the owner*: a follow-up in an existing thread goes to the bot that owns it, with no re-routing, unless it @mentions someone else.
+  - The owner's face in the thread header opens that bot's profile; the faces on the home screen open direct threads; "Message <bot>" on a profile opens its direct thread.
+- The sidebar label is **Bots**, above Needs you.
 - **Bot profile has three tabs:** Overview (job; model, manager, automatic context, team; permissions with Always allow / Ask each time / Deny), Memory (lines with Forget, plus "Tell <bot> something to remember"), Activity (local to the bot).
 - **Hiring** happens inline at the bottom of Company: "What is this bot for?" plus a manager picker. Moving a bot is a Manager picker on its profile.
 - Phones: the sidebar slides in from the left via the menu button; panels fill the screen.
