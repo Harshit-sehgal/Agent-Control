@@ -23,6 +23,7 @@ CI (`.github/workflows/ci.yml`) runs `check`, `test`, and a **docs-drift** check
 2. **Syntax coverage.** Every file under the `check` script's roots must be walked by `scripts/check.mjs`. → `tests/check-coverage.test.js`.
 3. **No docs drift.** Copied UI assets in `docs/` are generated. Edit `shared/`, then `npm run build:pages`; CI + `tests/pages-bundle.test.js` fail otherwise. Hand-written markdown in `docs/` is edited in place.
 4. **CSP parity.** The `Content-Security-Policy` meta in `shared/index.html` must equal `META_CSP` in `shared/core.js`, which is the `CSP` header value minus `frame-ancestors 'none'` (a meta tag cannot carry that directive; the header does). → `tests/security-headers.test.js`.
+5. **Module graph.** `shared/` may not import a `node:` builtin, `../src/`, or read `process.env`; no relative import may form a cycle; every `src/` module must be reachable from `src/server.js`; and every `TABLE_SHAPES` entry must match the table it writes. → `tests/architecture.test.js`, `tests/store-incremental.test.js`.
 
 ## Adding a shared module (the #1 source of regressions)
 1. Create `shared/<name>.js` (browser-safe).

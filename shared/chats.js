@@ -8,6 +8,7 @@
  * Messages are display records only. Nothing here runs a bot or publishes.
  */
 import {cleanText} from './core.js';
+import {fail} from './errors.js';
 import {summonableGuests, BUSY_STATUSES} from './coordination.js';
 import {denyBrowserRequest} from './bot-browser.js';
 
@@ -16,8 +17,6 @@ const MAX_TEXT = 8000;
 const ROLES = ['user', 'bot', 'system'];
 /** Optional short fields a message may carry; anything else is dropped. */
 const LABELS = ['senderId', 'senderName', 'toBotId', 'runId', 'mode', 'kind'];
-
-function fail(message, status = 400) { throw Object.assign(new Error(message), {status}); }
 
 const chatKeys = state => new Set((state.groups || []).flatMap(g => [`team-${g.id}`, ...(g.bots || []).map(b => b.id)]));
 const groupOf = (state, key) => (state.groups || []).find(g => `team-${g.id}` === key || (g.bots || []).some(b => b.id === key));

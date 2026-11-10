@@ -161,6 +161,18 @@ a network.
   a live lease is left alone.
 
 ### Changed
+- **A write now costs what changed, not what exists.** `SqliteStore` kept the
+  same `read()` / `update()` document interface but rewrote every row of every
+  collection on each update, so one chat message re-inserted every message, run
+  and event in the workspace. Each table's shape is now declared once
+  (`TABLE_SHAPES`) and compared with the last write: changed rows are upserted in
+  place, removed rows are deleted, unchanged rows are not touched at all.
+  Measured at 4 000 row-writes per update, 27 ms → 10 ms, and the cost no longer
+  grows with the workspace.
+- **One `fail()` instead of fourteen.** The "throw an Error with an HTTP status"
+  one-liner existed in a dozen modules; it now lives in `shared/errors.js`, which
+  has no imports and is safe on both sides, and the modules that exported their
+  own copy re-export it so callers are unchanged.
 - **The JSON store is removed.** `src/store.js` and `STORE_BACKEND` are gone;
   `src/server.js` opens the SQLite store directly. A `state.json` written by 0.6
   is still imported once and left beside the database.

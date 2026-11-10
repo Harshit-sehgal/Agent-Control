@@ -17,6 +17,7 @@
  * hosts, so no bot can press Post there. Reading those pages is allowed.
  */
 import {cleanText, validHttpUrl} from './core.js';
+import {fail} from './errors.js';
 import {controlFence} from './bot-link.js';
 
 export const BROWSER_PERMISSION = 'browser.use';
@@ -31,7 +32,6 @@ const POSTING_HOSTS = ['x.com', 'twitter.com'];
 // the last block in a reply may be unclosed, and the strip path removes it.
 const BLOCK = () => controlFence('browser');
 
-function fail(message, status = 400) { throw Object.assign(new Error(message), {status}); }
 // `x.com.` and `x.com%2e` are x.com. Leaving the trailing dot on treated that
 // spelling as a different site, so a click or type there was allowed.
 const hostOf = url => { try { return new URL(url).hostname.toLowerCase().replace(/\.+$/, ''); } catch { return ''; } };

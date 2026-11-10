@@ -6,11 +6,11 @@
  * inside its own allowlist and proxy; the server only queues signed work for it.
  */
 import * as agent from './agent.js';
+import {fail} from '../shared/errors.js';
 import {addChatMessages} from '../shared/chats.js';
 import {activity, cleanText} from '../shared/core.js';
 import {browserResultText, capturePageText, feedPageText, MAX_BROWSER_DEPTH} from '../shared/bot-browser.js';
 
-const fail = (message, status = 400) => { throw Object.assign(new Error(message), {status}); };
 const stamp = () => new Date().toISOString();
 const say = (s, key, text) => { try { addChatMessages(s, key, [{role: 'system', kind: 'browser-result', text}], {trusted: true}); } catch { /* Conversation removed. */ } };
 

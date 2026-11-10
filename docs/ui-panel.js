@@ -1,17 +1,17 @@
 /** Everything that used to be a dashboard tab now hangs off a conversation:
  * the info panel of the open chat (drafts, posts, reminders, runs, voice, the
  * bot's profile) and the "You" pages (account, admin, about). */
-import {filterCandidates, filterDrafts} from './usability.js?v=a9bafba092';
-import {ACTIONS, OUTPUT_KINDS} from './contracts.js?v=a9bafba092';
-import {BOT_DEFAULTS, MAX_CONTEXT_MESSAGES, MAX_STEPS_LIMIT, botSettings, groupSettings, pipelineOf} from './bot-settings.js?v=a9bafba092';
-import {BUSY_STATUSES} from './coordination.js?v=a9bafba092';
-import {modelKey} from './memory.js?v=a9bafba092';
-import {ACTIVE_DRAFTS, chatTasks, pipelineRows, retryTarget, runBelongsToChat} from './ui-model.js?v=a9bafba092';
-import {esc, icon, avatar, groupAvatar, tintClass, TINT_COUNT, btn, iconBtn, row, box, field, note, empty, tag, pageHead, fullDate} from './ui-kit.js?v=a9bafba092';
-import {store, conversation, isStaticDemo, isAdmin, canWrite, isXGroup, botTint, recentRuns, THEMES, themeChoice} from './ui-store.js?v=a9bafba092';
-import {validHttpUrl} from './core.js?v=a9bafba092';
-import {draftCard, postCard} from './ui-views.js?v=a9bafba092';
-import {ADMIN_PAGES, adminPage, providerModelOptions} from './ui-admin.js?v=a9bafba092';
+import {filterCandidates, filterDrafts} from './usability.js?v=cfd4a90dbc';
+import {ACTIONS, OUTPUT_KINDS} from './contracts.js?v=cfd4a90dbc';
+import {BOT_DEFAULTS, MAX_CONTEXT_MESSAGES, MAX_STEPS_LIMIT, botSettings, groupSettings, pipelineOf} from './bot-settings.js?v=cfd4a90dbc';
+import {BUSY_STATUSES} from './coordination.js?v=cfd4a90dbc';
+import {modelKey} from './memory.js?v=cfd4a90dbc';
+import {ACTIVE_DRAFTS, chatTasks, pipelineRows, retryTarget, runBelongsToChat} from './ui-model.js?v=cfd4a90dbc';
+import {esc, icon, avatar, groupAvatar, tintClass, TINT_COUNT, btn, iconBtn, row, box, field, note, empty, tag, pageHead, fullDate} from './ui-kit.js?v=cfd4a90dbc';
+import {store, conversation, isStaticDemo, isAdmin, canWrite, isXGroup, botTint, recentRuns, THEMES, themeChoice} from './ui-store.js?v=cfd4a90dbc';
+import {validHttpUrl} from './core.js?v=cfd4a90dbc';
+import {draftCard, postCard} from './ui-views.js?v=cfd4a90dbc';
+import {ADMIN_PAGES, adminPage, providerModelOptions} from './ui-admin.js?v=cfd4a90dbc';
 
 const el = id => document.getElementById(id);
 const options = (pairs, current) => pairs.map(([value, label]) => `<option value="${esc(value)}"${value === current ? ' selected' : ''}>${esc(label)}</option>`).join('');

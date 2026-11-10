@@ -22,6 +22,7 @@
  * retry/backoff rules as everything else, and a failure never claims success.
  */
 import {resolvePublicAddress, pinnedRequest} from '../agent/net-guard.mjs';
+import {fail} from '../shared/errors.js';
 import crypto from 'node:crypto';
 import {encryptJson, decryptJson} from './vault.js';
 import {smtpConfig, sendMail} from './mail.js';
@@ -58,7 +59,7 @@ function redactSecrets(message, secrets) {
 
 export const CHANNELS = ['in_app', 'webhook', 'email'];
 
-export function fail(message, status = 400) { throw Object.assign(new Error(message), {status}); }
+export {fail};
 
 export function getPreferences(store, userId) {
   const row = store.get('SELECT * FROM notification_prefs WHERE user_id=?', userId);

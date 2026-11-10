@@ -19,6 +19,7 @@
  * cannot widen its own scope.
  */
 import crypto from 'node:crypto';
+import {fail} from '../shared/errors.js';
 import {cleanText} from '../shared/core.js';
 import {validateBrowserRequest} from '../shared/bot-browser.js';
 import {encryptJson,decryptJson,sha256,loadMasterKey} from './vault.js';
@@ -36,7 +37,7 @@ const signatureNonces = new Map(); // agentId -> Set of recently used signatures
 
 const now = () => new Date().toISOString();
 
-export function fail(message, status = 400) { throw Object.assign(new Error(message), {status}); }
+export {fail};
 
 /** Body-independent signature material: method, path, timestamp, body hash. */
 export function signRequest(secret, {method, path, timestamp, body}) {

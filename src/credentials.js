@@ -10,11 +10,12 @@
  * re-enters secrets instead of copying an unreadable blob around.
  */
 import crypto from 'node:crypto';
+import {fail} from '../shared/errors.js';
 import {encryptJson, decryptJson} from './vault.js';
 
 const now = () => new Date().toISOString();
 
-export function fail(message, status = 400) { throw Object.assign(new Error(message), {status}); }
+export {fail};
 
 export function addCredential(store, workspaceId, {name, kind, value, expiresAt, createdBy}) {
   const label = String(name || '').trim();

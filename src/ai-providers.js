@@ -8,11 +8,11 @@
  * different bots can run on different models the way Grok/Open Agents tiles do.
  */
 import * as credentials from './credentials.js';
+import {fail} from '../shared/errors.js';
 import {envConfig,discoverModels,protocolOf,configReady,complete} from './ai.js';
 import {normaliseProtocol,inferProtocol,presetById,protocolById} from '../shared/ai-presets.js';
 import {uuid} from '../shared/core.js';
 
-const fail=(message,status=400)=>{throw Object.assign(new Error(message),{status});};
 const clean=(v,n)=>String(v??'').trim().slice(0,n);
 const validBase=u=>{try{const x=new URL(u);return (x.protocol==='http:'||x.protocol==='https:')&&!x.username&&!x.password&&!x.search&&!x.hash;}catch{return false;}};
 const hostOf=u=>{try{return new URL(u).host;}catch{return '';}};

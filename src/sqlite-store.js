@@ -70,6 +70,131 @@ export function readDocuments(rows) {
   return s;
 }
 
+const json = value => (value ? JSON.stringify(value) : null);
+
+/** One table's shape: the columns it writes, the primary key that identifies a
+ * row, and the row parameters built from the document. Declared once, so the
+ * diff, the DELETE and the UPSERT cannot disagree about a column.
+ *
+ * `sig` is the value compared with the last write for that key: the row's
+ * stored document when it has one, otherwise its parameters. A row whose `sig`
+ * is unchanged is not written again at all. */
+export const TABLE_SHAPES = [
+  {
+    table: 'groups', pk: ['id'],
+    columns: ['id', 'name', 'description', 'created_at', 'settings'],
+    rows: state => (state.groups || []).map(g => ({
+      key: g.id, pk: [g.id],
+      params: [g.id, g.name, g.description || '', g.createdAt || now(), json(g.settings)],
+    })),
+  },
+  {
+    table: 'bots', pk: ['id'],
+    columns: ['id', 'group_id', 'name', 'instructions', 'type', 'contract', 'permissions', 'created_at', 'settings', 'origin', 'created_by'],
+    rows: state => (state.groups || []).flatMap(g => (g.bots || []).map(b => ({
+      key: b.id, pk: [b.id],
+      params: [b.id, g.id, b.name, b.instructions || '', b.type || 'custom', json(b.contract), json(b.permissions), b.createdAt || now(), json(b.settings), b.origin ?? null, json(b.createdBy)],
+    }))),
+  },
+  {
+    table: 'candidates', pk: ['id'], ordered: true, docColumn: 9,
+    columns: ['id', 'url', 'author', 'topic', 'text', 'status', 'score', 'demo', 'created_at', 'doc'],
+    rows: state => (state.candidates || []).map(c => ({
+      key: c.id, pk: [c.id],
+      params: [c.id, c.url, c.author, c.topic || '', c.text, c.status, c.score ? JSON.stringify(c.score) : null, c.demo ? 1 : 0, c.createdAt || now(), JSON.stringify(c)],
+    })),
+  },
+  {
+    table: 'drafts', pk: ['id'], ordered: true, docColumn: 17,
+    columns: ['id', 'candidate_id', 'author', 'url', 'source_text', 'text', 'revision', 'status', 'score', 'mode', 'note', 'approved_text', 'approved_revision', 'approved_at', 'due_at', 'posted_at', 'created_at', 'doc'],
+    rows: state => (state.drafts || []).map(d => ({
+      key: d.id, pk: [d.id],
+      params: [d.id, d.candidateId, d.author, d.url, d.sourceText || '', d.text, d.revision, d.status, d.score ?? null, d.mode || null, d.note || null, d.approvedText ?? null, d.approvedRevision ?? null, d.approvedAt ?? null, d.dueAt ?? null, d.postedAt ?? null, d.createdAt || now(), JSON.stringify(d)],
+    })),
+  },
+  {
+    table: 'evidence', pk: ['id'], ordered: true,
+    columns: ['id', 'draft_id', 'candidate_id', 'kind', 'link', 'claim', 'confidence', 'verification', 'reuse', 'note', 'created_by', 'created_at'],
+    rows: state => (state.evidence || []).map(e => ({
+      key: e.id, pk: [e.id],
+      params: [e.id, e.draftId ?? null, e.candidateId ?? null, e.kind, e.link ?? null, e.claim, e.confidence, e.verification, e.reuse, e.note ?? null, e.createdBy ?? null, e.createdAt || now()],
+    })),
+  },
+  {
+    table: 'runs', pk: ['id'], ordered: true, docColumn: 6,
+    columns: ['id', 'bot_id', 'bot_name', 'input', 'output', 'at', 'doc'],
+    rows: state => (state.runs || []).map(r => ({
+      key: r.id, pk: [r.id],
+      params: [r.id, r.botId, r.botName, r.input ?? null, r.output ?? null, r.at || now(), JSON.stringify(r)],
+    })),
+  },
+  {
+    table: 'group_runs', pk: ['id'], ordered: true, docColumn: 14,
+    columns: ['id', 'group_id', 'input', 'recipients', 'mode', 'status', 'current_step', 'created_at', 'started_at', 'completed_at', 'trace', 'last_output', 'error', 'checkpoint', 'doc'],
+    rows: state => (state.groupRuns || []).map(r => ({
+      key: r.id, pk: [r.id],
+      params: [r.id, r.groupId, r.input, JSON.stringify(r.recipients), r.mode, r.status, r.currentStep ?? 0, r.createdAt || now(), r.startedAt ?? null, r.completedAt ?? null, JSON.stringify(r.trace || []), r.lastOutput ?? null, r.error ?? null, json(r.checkpoint), JSON.stringify(r)],
+    })),
+  },
+  {
+    table: 'group_messages', pk: ['id'], docColumn: 10,
+    columns: ['id', 'group_id', 'run_id', 'role', 'sender_id', 'sender_name', 'to_bot_id', 'text', 'kind', 'at', 'doc'],
+    rows: state => Object.entries(state.groupMessages || {}).flatMap(([groupId, list]) => (list || []).map(m => ({
+      key: m.id, pk: [m.id],
+      params: [m.id, groupId, m.runId ?? null, m.role, m.senderId ?? null, m.senderName ?? null, m.toBotId ?? null, m.text, m.kind ?? null, m.at || now(), JSON.stringify(m)],
+    }))),
+  },
+  {
+    table: 'tasks', pk: ['id'], ordered: true,
+    columns: ['id', 'kind', 'title', 'payload', 'status', 'run_at', 'interval_minutes', 'idempotency_key', 'attempts', 'max_attempts', 'lease_owner', 'lease_until', 'last_error', 'result', 'created_by', 'created_at', 'updated_at', 'completed_at', 'enabled', 'label', 'next_at'],
+    rows: state => (state.tasks || []).map(t => ({
+      key: t.id, pk: [t.id],
+      params: [t.id, t.kind, t.title, JSON.stringify(t.payload || {}), t.status, t.runAt, t.intervalMinutes ?? null, t.idempotencyKey ?? null, t.attempts ?? 0, t.maxAttempts ?? 5, t.leaseOwner ?? null, t.leaseUntil ?? null, t.lastError ?? null, json(t.result), t.createdBy ?? null, t.createdAt || now(), t.updatedAt || now(), t.completedAt ?? null, 1, t.title, t.runAt],
+    })),
+  },
+  {
+    table: 'events', pk: ['id'], ordered: true,
+    columns: ['id', 'at', 'type', 'message', 'meta', 'group_id'],
+    rows: state => (state.events || []).map(e => ({
+      key: e.id, pk: [e.id],
+      params: [e.id, e.at || now(), e.type, e.message, JSON.stringify(e.meta || {}), e.meta?.groupId || null],
+    })),
+  },
+  {
+    table: 'chat_messages', pk: ['id'],
+    columns: ['id', 'chat_key', 'doc', 'at'],
+    rows: state => Object.entries(state.chats || {}).flatMap(([chatKey, list]) => (list || []).map(m => ({
+      key: `${chatKey}/${m.id}`, pk: [`${chatKey}/${m.id}`],
+      params: [`${chatKey}/${m.id}`, chatKey, JSON.stringify(m), m.at || now()],
+    }))),
+  },
+  {
+    table: 'memory', pk: ['kind', 'key'], docColumn: 2,
+    columns: ['kind', 'key', 'doc'],
+    rows: state => {
+      const memory = state.memory || {};
+      return ['rulebook', 'chat', 'forgotten'].flatMap(kind => {
+        const source = kind === 'rulebook' ? memory.rulebooks : kind === 'chat' ? memory.chats : memory.forgottenChats;
+        return Object.entries(source || {}).map(([key, doc]) => ({
+          key: `${kind}/${key}`, pk: [kind, key],
+          params: [kind, key, JSON.stringify(doc)],
+        }));
+      });
+    },
+  },
+];
+
+/** The statement that writes one row of a shape: an upsert, so a row that did
+ * not exist is inserted and a changed row is replaced in place (its rowid, and
+ * therefore the table's read order, survives). */
+function upsertSql({table, columns, pk}) {
+  const updates = columns.filter(column => !pk.includes(column)).map(column => `${column}=excluded.${column}`);
+  return `INSERT INTO ${table} (${columns.join(',')}) VALUES (${columns.map(() => '?').join(',')}) ON CONFLICT(${pk.join(',')}) DO UPDATE SET ${updates.join(',')}`;
+}
+function deleteSql({table, pk}) {
+  return `DELETE FROM ${table} WHERE ${pk.map(column => `${column}=?`).join(' AND ')}`;
+}
+
 const MIGRATIONS = [
   {to: 1, up(db) {
     db.exec(`
@@ -250,6 +375,10 @@ export class SqliteStore {
     this.serial = Promise.resolve();
     this.db = null;
     this.recoveredFrom = null;
+    // Per-table key -> {pk, sig} of the last write, so an update only writes
+    // the rows that changed; and one prepared statement per piece of SQL.
+    this.written = new Map();
+    this.stmts = new Map();
   }
   async init() {
     await fs.mkdir(path.dirname(this.dbPath), {recursive: true});
@@ -294,7 +423,7 @@ export class SqliteStore {
     } catch (e) { rollback(this.db); throw e; }
   }
   kvGet(key) { return this.db.prepare('SELECT value FROM kv WHERE key=?').get(key)?.value ?? null; }
-  kvSet(key, value) { this.db.prepare('INSERT INTO kv (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, value); }
+  kvSet(key, value) { this.stmt('INSERT INTO kv (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, value); }
   /** Read-only accessors for the non-document tables (auth, agents, queue). */
   all(sql, ...params) { return this.db.prepare(sql).all(...params); }
   get(sql, ...params) { return this.db.prepare(sql).get(...params); }
@@ -446,73 +575,79 @@ export class SqliteStore {
   }
   writeCollections(state) {
     const t = this.transaction(() => {
-      for (const table of ['groups', 'bots', 'candidates', 'drafts', 'evidence', 'runs', 'events', 'group_messages', 'group_runs', 'tasks', 'chat_messages', 'memory']) {
-        this.db.prepare(`DELETE FROM ${table}`).run();
+      // Diff each table against the last write: one document update usually
+      // touches one row, and rewriting the whole table (all chat messages, all
+      // events) for it made every update cost O(rows) forever.
+      const work = TABLE_SHAPES.map(shape => {
+        const rows = shape.rows(state);
+        const previous = this.written.get(shape.table) || this.existingRows(shape);
+        const seq = rows.map(row => row.key);
+        // The document's array order is part of what `read()` returns, and rows
+        // come back in rowid order. A row that is prepended (`events.unshift`,
+        // a captured post) would otherwise read back last after a restart, so
+        // a table whose order changed is rewritten in document order. Append
+        // and in-place edits, the common case, still write only their own row.
+        const reordered = shape.ordered && (seq.length !== previous.seq.length || seq.some((key, i) => key !== previous.seq[i]));
+        const next = new Map(), upserts = [];
+        for (const row of rows) {
+          // The stored document, where the table has one, is already built for
+          // the column: reusing it as the change signature costs one compare.
+          const sig = shape.docColumn === undefined ? JSON.stringify(row.params) : String(row.params[shape.docColumn]);
+          next.set(row.key, {pk: row.pk, sig});
+          const was = previous.map.get(row.key);
+          if (reordered || !was || was.sig !== sig) upserts.push(row);
+        }
+        const deletes = [];
+        if (!reordered) for (const [key, was] of previous.map) if (!next.has(key)) deletes.push(was.pk);
+        this.written.set(shape.table, {map: next, seq});
+        return {shape, deletes, upserts, reordered};
+      });
+      // Children first on the way out, parents first on the way in: the one
+      // foreign key is bots.group_id -> groups.id, so a removed group must lose
+      // its bots before the parent row goes.
+      for (const {shape, deletes} of [...work].reverse()) {
+        const remove = this.stmt(deleteSql(shape));
+        for (const pk of deletes) remove.run(...pk);
       }
-      this.db.prepare('INSERT INTO kv (key,value) VALUES (\'created_at\',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(state.createdAt || now());
-      this.db.prepare('INSERT INTO kv (key,value) VALUES (\'capture_token\',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(state.captureToken);
-      this.db.prepare('INSERT INTO kv (key,value) VALUES (\'ai\',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(JSON.stringify(state.ai || {}));
-      this.db.prepare('INSERT INTO kv (key,value) VALUES (\'browser_requests\',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(JSON.stringify(state.browserRequests || []));
-      this.db.prepare('INSERT INTO settings (id,topics,style,opinions,min_delay,max_delay,retention) VALUES (1,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET topics=excluded.topics, style=excluded.style, opinions=excluded.opinions, min_delay=excluded.min_delay, max_delay=excluded.max_delay, retention=excluded.retention')
+      for (const {shape, upserts, reordered} of work) {
+        // A rewrite starts from an empty table so every row lands in document
+        // order; otherwise only the changed rows are upserted in place.
+        if (reordered) this.stmt(`DELETE FROM ${shape.table}`).run();
+        const upsert = this.stmt(upsertSql(shape));
+        for (const row of upserts) upsert.run(...row.params);
+      }
+      this.kvSet('created_at', state.createdAt || now());
+      this.kvSet('capture_token', state.captureToken);
+      this.kvSet('ai', JSON.stringify(state.ai || {}));
+      this.kvSet('browser_requests', JSON.stringify(state.browserRequests || []));
+      this.stmt('INSERT INTO settings (id,topics,style,opinions,min_delay,max_delay,retention) VALUES (1,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET topics=excluded.topics, style=excluded.style, opinions=excluded.opinions, min_delay=excluded.min_delay, max_delay=excluded.max_delay, retention=excluded.retention')
         .run(JSON.stringify(state.settings.topics), state.settings.style, state.settings.opinions, state.settings.minDelay, state.settings.maxDelay, state.settings.retention ? JSON.stringify(state.settings.retention) : null);
-      // Groups before bots: the foreign key requires the parent row to exist.
-      for (const g of state.groups) {
-        this.db.prepare('INSERT INTO groups (id,name,description,created_at,settings) VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, description=excluded.description, settings=excluded.settings')
-          .run(g.id, g.name, g.description || '', g.createdAt || now(), g.settings ? JSON.stringify(g.settings) : null);
-        for (const b of g.bots) {
-          this.db.prepare('INSERT INTO bots (id,group_id,name,instructions,type,contract,permissions,created_at,settings,origin,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, instructions=excluded.instructions, type=excluded.type, contract=excluded.contract, permissions=excluded.permissions, settings=excluded.settings, origin=excluded.origin, created_by=excluded.created_by')
-            .run(b.id, g.id, b.name, b.instructions || '', b.type || 'custom', b.contract ? JSON.stringify(b.contract) : null, b.permissions ? JSON.stringify(b.permissions) : null, b.createdAt || now(), b.settings ? JSON.stringify(b.settings) : null, b.origin ?? null, b.createdBy ? JSON.stringify(b.createdBy) : null);
-        }
-      }
-      for (const c of state.candidates) {
-        this.db.prepare('INSERT INTO candidates (id,url,author,topic,text,status,score,demo,created_at,doc) VALUES (?,?,?,?,?,?,?,?,?,?)')
-          .run(c.id, c.url, c.author, c.topic || '', c.text, c.status, c.score ? JSON.stringify(c.score) : null, c.demo ? 1 : 0, c.createdAt || now(), JSON.stringify(c));
-      }
-      for (const d of state.drafts) {
-        this.db.prepare('INSERT INTO drafts (id,candidate_id,author,url,source_text,text,revision,status,score,mode,note,approved_text,approved_revision,approved_at,due_at,posted_at,created_at,doc) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-          .run(d.id, d.candidateId, d.author, d.url, d.sourceText || '', d.text, d.revision, d.status, d.score ?? null, d.mode || null, d.note || null, d.approvedText ?? null, d.approvedRevision ?? null, d.approvedAt ?? null, d.dueAt ?? null, d.postedAt ?? null, d.createdAt || now(), JSON.stringify(d));
-      }
-      for (const r of state.runs) {
-        this.db.prepare('INSERT INTO runs (id,bot_id,bot_name,input,output,at,doc) VALUES (?,?,?,?,?,?,?)')
-          .run(r.id, r.botId, r.botName, r.input ?? null, r.output ?? null, r.at || now(), JSON.stringify(r));
-      }
-      for (const e of (state.evidence || [])) {
-        this.db.prepare('INSERT INTO evidence (id,draft_id,candidate_id,kind,link,claim,confidence,verification,reuse,note,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
-          .run(e.id, e.draftId ?? null, e.candidateId ?? null, e.kind, e.link ?? null, e.claim, e.confidence, e.verification, e.reuse, e.note ?? null, e.createdBy ?? null, e.createdAt || now());
-      }
-      for (const t of (state.tasks || [])) {
-        this.db.prepare('INSERT INTO tasks (id,kind,title,payload,status,run_at,interval_minutes,idempotency_key,attempts,max_attempts,lease_owner,lease_until,last_error,result,created_by,created_at,updated_at,completed_at,enabled,label,next_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-          .run(t.id, t.kind, t.title, JSON.stringify(t.payload || {}), t.status, t.runAt, t.intervalMinutes ?? null, t.idempotencyKey ?? null, t.attempts ?? 0, t.maxAttempts ?? 5, t.leaseOwner ?? null, t.leaseUntil ?? null, t.lastError ?? null, t.result ? JSON.stringify(t.result) : null, t.createdBy ?? null, t.createdAt || now(), t.updatedAt || now(), t.completedAt ?? null, 1, t.title, t.runAt);
-      }
-      // Legacy reminder schedules were migrated into reminder-kind tasks by
-      // wf.migrate(); the store only ever sees state.tasks now.
-      for (const e of state.events) {
-        this.db.prepare('INSERT INTO events (id,at,type,message,meta,group_id) VALUES (?,?,?,?,?,?)')
-          .run(e.id, e.at || now(), e.type, e.message, JSON.stringify(e.meta || {}), e.meta?.groupId || null);
-      }
-      for (const r of state.groupRuns) {
-        this.db.prepare('INSERT INTO group_runs (id,group_id,input,recipients,mode,status,current_step,created_at,started_at,completed_at,trace,last_output,error,checkpoint,doc) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-          .run(r.id, r.groupId, r.input, JSON.stringify(r.recipients), r.mode, r.status, r.currentStep ?? 0, r.createdAt || now(), r.startedAt ?? null, r.completedAt ?? null, JSON.stringify(r.trace || []), r.lastOutput ?? null, r.error ?? null, r.checkpoint ? JSON.stringify(r.checkpoint) : null, JSON.stringify(r));
-      }
-      for (const [groupId, list] of Object.entries(state.groupMessages || {})) {
-        for (const m of list || []) {
-          this.db.prepare('INSERT INTO group_messages (id,group_id,run_id,role,sender_id,sender_name,to_bot_id,text,kind,at,doc) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-            .run(m.id, groupId, m.runId ?? null, m.role, m.senderId ?? null, m.senderName ?? null, m.toBotId ?? null, m.text, m.kind ?? null, m.at || now(), JSON.stringify(m));
-        }
-      }
-      for (const [key, list] of Object.entries(state.chats || {})) {
-        for (const m of list || []) this.db.prepare('INSERT INTO chat_messages (id,chat_key,doc,at) VALUES (?,?,?,?)').run(`${key}/${m.id}`, key, JSON.stringify(m), m.at || now());
-      }
-      const memory = state.memory || {};
-      const putMemory = this.db.prepare('INSERT INTO memory (kind,key,doc) VALUES (?,?,?)');
-      for (const [key, doc] of Object.entries(memory.rulebooks || {})) putMemory.run('rulebook', key, JSON.stringify(doc));
-      for (const [key, doc] of Object.entries(memory.chats || {})) putMemory.run('chat', key, JSON.stringify(doc));
-      for (const [key, doc] of Object.entries(memory.forgottenChats || {})) putMemory.run('forgotten', key, JSON.stringify(doc));
     });
     return t;
   }
+  /** The keys already in a table, used the first time this process writes it:
+   * rows the document no longer carries are then deleted rather than left
+   * behind. Signatures start unknown, so every present row is written once. */
+  existingRows(shape) {
+    const map = new Map(), seq = [];
+    for (const row of this.db.prepare(`SELECT ${shape.pk.join(',')} FROM ${shape.table} ORDER BY rowid`).all()) {
+      const pk = shape.pk.map(column => row[column]);
+      const key = pk.length === 1 ? String(pk[0]) : pk.join('/');
+      map.set(key, {pk, sig: undefined});
+      seq.push(key);
+    }
+    return {map, seq};
+  }
+  /** One prepared statement per piece of SQL, kept for the life of the store:
+   * the write path now runs a handful of statements per update instead of one
+   * per row. */
+  stmt(sql) {
+    let statement = this.stmts.get(sql);
+    if (!statement) { statement = this.db.prepare(sql); this.stmts.set(sql, statement); }
+    return statement;
+  }
   /** Wait for queued writes, then release the file. Used when a workspace is deleted. */
-  async close() { await this.serial; this.db.close(); }
+  async close() { await this.serial; this.stmts.clear(); this.written.clear(); this.db.close(); }
   read() { return structuredClone(this.cache); }
   captureToken() { return this.cache.captureToken; }
   async persist(state = this.cache) { this.writeCollections(state); this.cache = state; }

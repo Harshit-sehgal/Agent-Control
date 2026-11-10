@@ -21,6 +21,7 @@
  * before touching the store.
  */
 import crypto from 'node:crypto';
+import {fail} from '../shared/errors.js';
 import * as wf from '../shared/workflow.js';
 import {initialState, validHttpUrl} from '../shared/core.js';
 import {DEFAULT_WORKSPACE, ROLES} from './auth.js';
@@ -30,7 +31,7 @@ import {validWorkspaceId} from './workspaces.js';
 
 export const BACKUP_VERSION = 1;
 
-export function fail(message, status = 400) { throw Object.assign(new Error(message), {status}); }
+export {fail};
 
 const EXPORT_TABLES = ['users', 'password_resets', 'workspaces', 'workspace_members', 'agents', 'agent_tasks', 'jobs', 'notifications', 'notification_prefs', 'settings', 'tasks', 'groups', 'bots', 'candidates', 'drafts', 'evidence', 'runs', 'events', 'group_runs', 'group_messages'];
 // Added after the first backups were written: exported when present, and an

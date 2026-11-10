@@ -2,8 +2,9 @@
  * helper, JSON responses with the security headers, bounded body readers and
  * the same-origin check. Nothing here knows about routes or the store. */
 import crypto from 'node:crypto';
+import {fail} from '../shared/errors.js';
 
-export function fail(message, status = 400) { throw Object.assign(new Error(message), {status}); }
+export {fail};
 
 /** A flag an operator writes as `HSTS=true` must not silently turn the header
  * off: the sibling SMTP flag is spelled the same way, and the unsafe outcome is

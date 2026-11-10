@@ -16,6 +16,7 @@
  * runs the round and the orchestrator decides what the answer means.
  */
 import {cleanText} from './core.js';
+import {fail} from './errors.js';
 import {controlFence} from './bot-link.js';
 
 export const SUBAGENT_PERMISSION = 'subagent.spawn';
@@ -32,8 +33,6 @@ export const SUBAGENT_NAME = 'helper';
 // One fence grammar shared with every other control block (see bot-link.js):
 // the last block in a reply may be unclosed, and the strip path removes it.
 const BLOCK = () => controlFence('spawn');
-
-function fail(message, status = 400) { throw Object.assign(new Error(message), {status}); }
 
 /** Validate one request body into the helper job it becomes. */
 export function validateSpawnRequest(body) {

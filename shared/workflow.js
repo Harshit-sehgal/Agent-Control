@@ -9,6 +9,7 @@
  * lifecycle: candidate -> draft -> approved/scheduled -> ready -> posted.
  */
 import {activity,candidateInput,cleanText,scheduleApproval,scheduleApprovalAt,scoreCandidate,validHttpUrl} from './core.js';
+import {fail} from './errors.js';
 
 // How far ahead an approval may be pinned. A year-long pin is not a schedule a
 // person can still be sure of, and a draft nobody looks at again is worse than
@@ -30,9 +31,7 @@ export const SCHEMA_VERSION = 3;
 /** Posts are never pruned by age, so their number is bounded here. */
 export const MAX_CANDIDATES = 2000;
 
-export function fail(message, status = 400) {
-  throw Object.assign(new Error(message), {status});
-}
+export {fail};
 
 /** Add required coordination fields to legacy states. Idempotent. */
 export function migrate(state) {
@@ -457,7 +456,6 @@ export function recoverInterrupted(state) {
   if (recovered) activity(state, 'recovery', `Released ${recovered} candidate(s) interrupted by a restart.`);
   return {recovered};
 }
-
 
 /** Reminder compatibility layer: the UI and both transports still create
  * reminders through these helpers, but the record they write is a structured

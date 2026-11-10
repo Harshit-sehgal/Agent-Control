@@ -8,6 +8,7 @@
  * the hard step cap.
  */
 import {cleanText} from './core.js';
+import {fail} from './errors.js';
 import {TINT_COUNT} from './ui-kit.js';
 
 export const REPLY_LENGTHS = {short: 500, medium: 1500, long: 3000};
@@ -63,9 +64,6 @@ export const GROUP_DEFAULTS = Object.freeze({
   confirmPlan: false,
 });
 
-function fail(message, status = 400) {
-  throw Object.assign(new Error(message), {status});
-}
 const isObject = v => v && typeof v === 'object' && !Array.isArray(v);
 const integer = (value, min, max, label) => {
   // `Number(true)` is 1 and `Number([3])` is 3, so a JSON body could smuggle a

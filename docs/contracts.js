@@ -14,7 +14,8 @@
  *
  * Pure functions over bot records, like the other shared modules.
  */
-import {validHttpUrl} from './core.js?v=a9bafba092';
+import {validHttpUrl} from './core.js?v=cfd4a90dbc';
+import {fail} from './errors.js?v=cfd4a90dbc';
 
 export const CONTRACT_VERSION = 1;
 
@@ -32,9 +33,7 @@ export const FIELD_TYPES = ['text', 'number', 'boolean', 'string_list', 'evidenc
  * see bot-link.js and bot-create.js. */
 export const ACTIONS = ['evidence.add', 'draft.create', 'schedule.set', 'agent.dispatch', 'chat.send', 'browser.use', 'subagent.spawn', 'bot.ask', 'bot.create'];
 
-export function fail(message, status = 400) {
-  throw Object.assign(new Error(message), {status});
-}
+export {fail};
 
 export function defaultContract() {
   return {version: CONTRACT_VERSION, inputs: [...INPUTS], output: {kind: 'text', fields: []}};

@@ -16,8 +16,9 @@
  * Posting stays human: interaction (click, type) is refused on X and Twitter
  * hosts, so no bot can press Post there. Reading those pages is allowed.
  */
-import {cleanText, validHttpUrl} from './core.js?v=a9bafba092';
-import {controlFence} from './bot-link.js?v=a9bafba092';
+import {cleanText, validHttpUrl} from './core.js?v=cfd4a90dbc';
+import {fail} from './errors.js?v=cfd4a90dbc';
+import {controlFence} from './bot-link.js?v=cfd4a90dbc';
 
 export const BROWSER_PERMISSION = 'browser.use';
 export const MAX_REQUESTS_PER_REPLY = 2;
@@ -31,7 +32,6 @@ const POSTING_HOSTS = ['x.com', 'twitter.com'];
 // the last block in a reply may be unclosed, and the strip path removes it.
 const BLOCK = () => controlFence('browser');
 
-function fail(message, status = 400) { throw Object.assign(new Error(message), {status}); }
 // `x.com.` and `x.com%2e` are x.com. Leaving the trailing dot on treated that
 // spelling as a different site, so a click or type there was allowed.
 const hostOf = url => { try { return new URL(url).hostname.toLowerCase().replace(/\.+$/, ''); } catch { return ''; } };

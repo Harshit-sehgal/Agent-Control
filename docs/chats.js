@@ -7,9 +7,10 @@
  *
  * Messages are display records only. Nothing here runs a bot or publishes.
  */
-import {cleanText} from './core.js?v=a9bafba092';
-import {summonableGuests, BUSY_STATUSES} from './coordination.js?v=a9bafba092';
-import {denyBrowserRequest} from './bot-browser.js?v=a9bafba092';
+import {cleanText} from './core.js?v=cfd4a90dbc';
+import {fail} from './errors.js?v=cfd4a90dbc';
+import {summonableGuests, BUSY_STATUSES} from './coordination.js?v=cfd4a90dbc';
+import {denyBrowserRequest} from './bot-browser.js?v=cfd4a90dbc';
 
 export const MAX_CHAT_MESSAGES = 300;
 const MAX_TEXT = 8000;
@@ -17,7 +18,6 @@ const ROLES = ['user', 'bot', 'system'];
 /** Optional short fields a message may carry; anything else is dropped. */
 const LABELS = ['senderId', 'senderName', 'toBotId', 'runId', 'mode', 'kind'];
 
-function fail(message, status = 400) { throw Object.assign(new Error(message), {status}); }
 
 const chatKeys = state => new Set((state.groups || []).flatMap(g => [`team-${g.id}`, ...(g.bots || []).map(b => b.id)]));
 const groupOf = (state, key) => (state.groups || []).find(g => `team-${g.id}` === key || (g.bots || []).some(b => b.id === key));

@@ -15,8 +15,9 @@
  *
  * This module is pure. `src/bot-create.js` applies it inside the run.
  */
-import {cleanText} from './core.js?v=a9bafba092';
-import {defaultContract} from './contracts.js?v=a9bafba092';
+import {cleanText} from './core.js?v=cfd4a90dbc';
+import {fail} from './errors.js?v=cfd4a90dbc';
+import {defaultContract} from './contracts.js?v=cfd4a90dbc';
 
 export const BOT_CREATE_PERMISSION = 'bot.create';
 export const MAX_NEW_BOTS_PER_REPLY = 1;
@@ -31,7 +32,6 @@ export const BOT_REPLY_LENGTHS = ['short', 'medium', 'long'];
 const BLOCK = /```create-bot[ \t]*\r?\n([\s\S]{1,8000}?)```/gi;
 const MAX_BLOCKS_READ = 5;
 
-function fail(message, status = 400) { throw Object.assign(new Error(message), {status}); }
 
 export function validateCreateBotRequest(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) fail('A new-bot request must be an object.');
