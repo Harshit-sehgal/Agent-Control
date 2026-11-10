@@ -192,6 +192,22 @@ a network.
   a live lease is left alone.
 
 ### Changed
+- **One owner for a bot turn.** The sequence that turns a single model reply
+  into a bot's answer — a sub-agent round, then a peer ask, then a new-bot block
+  — was written out twice, once in the group loop and again in the 1:1 route,
+  and the copies had already drifted. It now lives in `src/bot-turn.js`
+  (`runBotTurn`), and both callers hand it a bot and the input it was built with.
+  The callers keep what genuinely differs (envelope, roster, round budgets, the
+  handoff rule, and what happens to the answer); the order is owned in one
+  place, so a new capability in it lands once.
+- **One owner for the fence grammar.** `ask`, `spawn` and `browser` blocks were
+  read with the shared fence rule in `shared/bot-link.js`, but `create-bot` had
+  kept its own regex, so an unclosed final `create-bot` fence was visible text
+  where the other three were real blocks. The grammar and the list of control
+  fences now live in `shared/reply-blocks.js`, and all four parsers and strip
+  paths call it, so whatever one accepts the others remove. The browser request
+  card's permission check also now asks `canBot` like every other block instead
+  of a raw `.includes` on the record.
 - **A write now costs what changed, not what exists.** `SqliteStore` kept the
   same `read()` / `update()` document interface but rewrote every row of every
   collection on each update, so one chat message re-inserted every message, run

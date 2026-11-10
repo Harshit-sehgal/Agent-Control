@@ -312,6 +312,8 @@ Note: Browser actions that X does not authorize are not enabled.
 - `shared/assets.js`: the one list of files that make up the UI. Both `scripts/build-pages.js` and `src/server.js` import it, so a module imported by `index.html` cannot ship to one and be missing from the other.
 - `shared/chats.js`: conversation history rules, shared by the server and the browser-local transport.
 - `shared/workflow.js`: the single source of workflow transitions (candidates, drafts, approval, schedules) plus the versioned schema migration.
+- `src/bot-turn.js`: the one sequence a bot step runs — sub-agent round, peer ask, new-bot block — shared by the group loop and a 1:1 chat so the two cannot drift apart.
+- `shared/reply-blocks.js`: the one fence grammar every control block (`ask`, `spawn`, `create-bot`, `browser`) is parsed and stripped with, so no two parsers disagree about what a block is.
 - `shared/core.js`: validation, ranking, scheduling state transitions.
 - `src/ai.js`: optional provider adapter and clearly labeled offline fallback.
 - `src/scheduler.js`: due-task and reminder reconciliation.

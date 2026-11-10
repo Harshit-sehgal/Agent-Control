@@ -42,6 +42,12 @@ The model provider and model per bot are set in the same profile (see BYOK in th
 
 A restart marks a run that was still calling a model, queued, or waiting on a page as `interrupted`, rather than repeating an uncertain model call. A shown plan and a checkpoint stay, so Start and Continue still work.
 
+## One bot turn
+
+Every bot step — a group handoff and a 1:1 chat alike — runs one sequence, owned by `src/bot-turn.js` (`runBotTurn`): read the reply for a sub-agent block, run the helper and let the bot write its real answer, then read *that* answer for a `bot.ask` block and let the teammate answer, then read it for a `bot.create` block. The three reads are ordered and each hands the next the text the one before it produced. The two callers differ only in what they pass in (envelope, roster, round budgets, handoff rule) and what they do with the answer, so a new capability in the sequence lands once.
+
+**Recorded decision: a 1:1 chat has no contract gate.** The group path runs the answer through `assertContractOutput` before the next bot sees it, because a handoff is a promise made to another bot. A 1:1 chat has no next bot and no handoff, so there is nothing to promise: it stores the answer as a chat run without the gate. The gate exists to stop one bot surprising the next, not to police a person's own conversation. A structured output's `contract` still describes the bot's shape, but on the 1:1 path it is advisory only. This was true before `runBotTurn` existed; naming it here is what stops it being read as an oversight.
+
 ## Scheduled bot tasks
 
 A chat's info panel → Scheduled tasks (or the composer's + → Schedule a task) asks a bot or a group to run a prompt once or every N minutes. The task is a `bot-task` queue record with retries and leases. When it fires, the chat shows `Scheduled task: …` and the run's replies follow. Scheduling the task is the approval, so **Show me the plan first** does not make a timer wait for Start. If the bot is switched off or no AI provider is configured, the chat says the task was skipped. On Pages, scheduled tasks run the deterministic simulator while the page is open.
