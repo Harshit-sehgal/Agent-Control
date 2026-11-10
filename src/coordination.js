@@ -12,9 +12,7 @@ import {assertContractOutput} from '../shared/contracts.js';
 import {recordBrowserRequests,queueFeedRead,stripBrowserBlocks,parseBrowserRequests,HOME_FEED_URL,MAX_BROWSER_DEPTH} from '../shared/bot-browser.js';
 import {MAX_SUBAGENT_DEPTH} from '../shared/subagents.js';
 import {autoDispatch} from './bot-browser.js';
-import {replyWithSubagents} from './subagents.js';
-import {askPeerRound} from './bot-link.js';
-import {createBotsFromReply} from './bot-create.js';
+import {runBotTurn} from './bot-turn.js';
 import {memoryFor,rememberTurn,maybeConsolidate} from './memory.js';
 import {executeCustomBot} from './ai.js';
 import {resolveConfig,aiAvailable} from './ai-providers.js';
@@ -216,19 +214,14 @@ async function runGroupInner(store,id,executor){
       const config=resolveConfig(store,bot.id);
       const memory=memoryFor(store,{bot,config,chatKey:r.chatKey});
       const envelope=createEnvelope({run:r,bot,previous,thread,team:roster,memory});
-      // Each bot runs on its own chosen model/provider, else the workspace default.
-      // A bot that spawns a helper gets one more turn; the second reply is its output.
-      const rounds=(r.subagents||[]).some(spawn=>spawn.botId===bot.id)?MAX_SUBAGENT_DEPTH:0;
-      const sub=await replyWithSubagents({bot,envelope,executor,config,rounds,makeId:randomUUID,now:stamp});
-      // Then, if it asked a teammate, that teammate answers as itself and this
-      // bot gets one more turn. A peer answer is data, never a tool call.
-      const peer=await askPeerRound({bot,envelope,first:sub.output,executor,config,peers:roster,configFor:peerId=>resolveConfig(store,peerId),memoryForPeer:(mate,mateConfig)=>memoryFor(store,{bot:mate,config:mateConfig,chatKey:r.chatKey}),handoffAllowed:mayHandoff(r,bot),rounds:(r.peerAsks||[]).some(ask=>ask.botId===bot.id&&!ask.error)?1:0,makeId:randomUUID,now:stamp});
-      // Finally a bot holding bot.create may add one lasting teammate to its own
-      // group. The record starts with no permissions.
+      // Each bot runs on its own chosen model/provider, else the workspace
+      // default. The turn itself is the one sequence every caller runs: a
+      // sub-agent round, then a peer ask, then a new-bot block. A bot that
+      // already spawned a helper in this run gets one more turn; that second
+      // reply is its output. `runBotTurn` owns the order (see src/bot-turn.js).
       const home=current.groups.find(x=>(x.bots||[]).some(b=>b.id===bot.id));
-      const made=home?await createBotsFromReply(store,{bot,groupId:home.id,output:peer.output,runId:id,makeId:randomUUID,now:stamp}):{text:peer.output,created:[],lines:[]};
-      for(const record of made.created||[])fledglings.add(record.id);
-      const reply={output:made.text,lines:[...sub.lines,...peer.lines,...made.lines],spawns:sub.spawns,asks:peer.asks,created:made.created};
+      const reply=await runBotTurn(store,{bot,envelope,executor,config,peers:roster,configFor:peerId=>resolveConfig(store,peerId),memoryForPeer:(mate,mateConfig)=>memoryFor(store,{bot:mate,config:mateConfig,chatKey:r.chatKey}),handoffAllowed:mayHandoff(r,bot),spawnRounds:(r.subagents||[]).some(spawn=>spawn.botId===bot.id)?MAX_SUBAGENT_DEPTH:0,askRounds:(r.peerAsks||[]).some(ask=>ask.botId===bot.id&&!ask.error)?1:0,groupId:home?.id??null,runId:id,makeId:randomUUID,now:stamp});
+      for(const record of reply.created||[])fledglings.add(record.id);
       const output=reply.output;
       if(typeof output!=='string'||!output.trim())throw new Error('Bot returned empty output.');
       // Strip browser fences before the contract gate: a structured bot may
