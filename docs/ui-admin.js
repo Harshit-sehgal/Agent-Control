@@ -2,11 +2,11 @@
  * `adminPage(kind)` fetches and returns the body HTML; the handler tables are
  * wired by the host's delegated click, submit and change listeners. Handlers do
  * not catch errors, the host toasts them. */
-import {esc, btn, row, box, field, note, empty, tag, fullDate, textInput} from './ui-kit.js?v=1aee2cb08a';
-import {store, api, sync} from './ui-store.js?v=1aee2cb08a';
-import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=1aee2cb08a';
-import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js?v=1aee2cb08a';
-import {pushStatus, enablePush, disablePush} from './ui-push.js?v=1aee2cb08a';
+import {esc, btn, row, box, field, note, empty, tag, fullDate, textInput} from './ui-kit.js?v=e2879b2fbc';
+import {store, api, sync} from './ui-store.js?v=e2879b2fbc';
+import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=e2879b2fbc';
+import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js?v=e2879b2fbc';
+import {pushStatus, enablePush, disablePush} from './ui-push.js?v=e2879b2fbc';
 
 /** Title + one-line description per page, used by the host for the page header. */
 export const ADMIN_PAGES = {

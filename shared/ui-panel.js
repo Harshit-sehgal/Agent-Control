@@ -226,7 +226,7 @@ function behaviourFields(bot) {
     ${checkRow('summonable', 'Can be @mentioned from other chats', 'Bots in other groups and their chats can ask it.', s.summonable)}
     ${checkRow('canHandoff', 'Can pass work to other bots', 'It may @mention another bot in its reply.', s.canHandoff)}
     ${checkRow('lead', 'Primary bot', 'Tell this one what to do. It switches the others in the group on and they take the job. Only one primary per group.', s.lead)}
-    ${field('Browser requests', `<select class="input" name="browserApproval">${options(BROWSER_CHOICES, s.browserApproval)}</select>`, 'Needs the browser.use permission below and a paired local agent. It can never click or type on X.')}
+    ${field('Browser requests', `<select class="input" name="browserApproval">${options(BROWSER_CHOICES, s.browserApproval)}</select>`, 'Needs the browser.use permission below. The page is opened by this server when it has a browser and an allowlist, otherwise by a paired local agent — the card says which. It can never click or type on X.')}
   </fieldset>`;
 }
 function botEdit(conv) {
