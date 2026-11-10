@@ -2,14 +2,14 @@
  * Both are thin renderers over ui-model.js. The list shell and the composer are
  * painted once and then only their contents change, so a background refresh can
  * never wipe what the user is typing. */
-import {botSuggestions} from './chat-engine.js?v=db1039acfd';
-import {summonableGuests} from './coordination.js?v=db1039acfd';
-import {botSettings, groupSettings} from './bot-settings.js?v=db1039acfd';
-import {requestOfMessage} from './bot-browser.js?v=db1039acfd';
-import {validHttpUrl} from './core.js?v=db1039acfd';
-import {chatRows, timeline, pendingBrowser, stuckFeedReads, draftStage, draftLength, lengthLabel, mentionSuggestions, retryTarget, threadLineActions, isRunNote, runBelongsToChat, ACTIVE_DRAFTS} from './ui-model.js?v=db1039acfd';
-import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=db1039acfd';
-import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, isXGroup, botTint, recentRuns} from './ui-store.js?v=db1039acfd';
+import {botSuggestions} from './chat-engine.js?v=fa63e67302';
+import {summonableGuests} from './coordination.js?v=fa63e67302';
+import {botSettings, groupSettings} from './bot-settings.js?v=fa63e67302';
+import {requestOfMessage} from './bot-browser.js?v=fa63e67302';
+import {validHttpUrl} from './core.js?v=fa63e67302';
+import {chatRows, timeline, pendingBrowser, stuckFeedReads, draftStage, draftLength, lengthLabel, mentionSuggestions, retryTarget, threadLineActions, isRunNote, runBelongsToChat, ACTIVE_DRAFTS} from './ui-model.js?v=fa63e67302';
+import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=fa63e67302';
+import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, isXGroup, botTint, recentRuns} from './ui-store.js?v=fa63e67302';
 
 const el = id => document.getElementById(id);
 const FILTERS = [['all', 'All'], ['needs', 'Needs you'], ['groups', 'Groups'], ['bots', 'Bots']];
@@ -161,7 +161,10 @@ function browserCard(m) {
   const where = request.status === 'pending' ? '' : ` · ${request.via === 'server' ? 'this server' : 'your device'}`;
   const steps = request.steps?.length ? `<ol class="browser-steps">${request.steps.map(s => `<li>${esc(s.op)} ${esc(s.url || (s.index ? `#${s.index}` : s.selector) || '')}${s.text ? ` · "${esc(String(s.text).slice(0, 60))}"` : ''}</li>`).join('')}</ol>` : '';
   const decline = btn('Decline', 'deny-browser', {id: request.id, small: true});
-  const actions = !canWrite() ? '' : request.status === 'pending' ? `<div class="card-actions">${btn('Approve', 'approve-browser', {id: request.id, small: true, kind: 'primary'})}${decline}</div>`
+  // A page that needs a sign-in: the person can drive it themselves. Only the
+  // Node build has a server browser to take over; the static demo has none.
+  const takeover = !isStaticDemo() && request.status === 'pending' ? btn('Take over', 'takeover-browser', {id: request.id, small: true}) : '';
+  const actions = !canWrite() ? '' : request.status === 'pending' ? `<div class="card-actions">${btn('Approve', 'approve-browser', {id: request.id, small: true, kind: 'primary'})}${takeover}${decline}</div>`
     : request.status === 'dispatched' ? `<div class="card-actions">${decline}</div>` : '';
   return `<div class="event browser-request"><span>${esc(m.text)} ${tag(`${label}${where}`, tone)}</span><a href="${esc(safeHref(request.url))}" target="_blank" rel="noopener noreferrer">${esc(request.url)}</a>${steps}${request.error ? `<small>${esc(request.error)}</small>` : ''}${actions}</div>`;
 }

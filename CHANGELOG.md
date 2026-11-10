@@ -24,6 +24,19 @@ a network.
   reliable on a page the bot has never seen. `AGENT_BROWSER_ALLOWLIST` is now
   read identically by the server and the device: entries are host names, matched
   on the host, so a trailing dot or a `:port` does not name a second site.
+- **Take the page over and sign in yourself.** A page behind a sign-in, a 2FA
+  prompt or a challenge is one a headless browser cannot reach, and a fresh
+  empty context is exactly what makes that true. The request card now carries a
+  **Take over** action that opens the page in a context the server *keeps*,
+  sends the person a picture of it, and lets them click, type and navigate until
+  they are through (`shared/ui-takeover.js`, `src/browser-runtime.js`,
+  `agent/browser.mjs`). The same allowlist, the same egress proxy and the same
+  click/type refusal on X apply to every step, so it is a way to sign in, never
+  a way around the rules. **Hand back to the bot** reads the page as the person
+  left it and continues the bot from there; the kept context is disposed when
+  the takeover ends, so nothing the next capture opens is signed in either. A
+  takeover times out on its own (`BROWSER_LIVE_MS`, `BROWSER_LIVE_MAX_MS`), and
+  while one is open the runtime refuses a second takeover and a bot's own run.
 - **Email without a relay.** The email notification channel speaks SMTP itself
   (`src/mail.js`, on `node:net` and `node:tls`, still no dependency): `EHLO`,
   `STARTTLS`, `AUTH PLAIN` or `LOGIN`, one recipient, one plain-text message.

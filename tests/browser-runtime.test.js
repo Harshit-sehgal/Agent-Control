@@ -10,7 +10,8 @@ import {browserAllowlist, createBrowserRuntime, runtimeMode} from '../src/browse
 const env = extra => ({AGENT_BROWSER_ALLOWLIST: 'example.com', ...extra});
 const never = async () => assert.fail('a browser must not be launched here');
 
-/** A fake session, and the launches that produced it. */
+/** A fake session, and the launches that produced it. `open` is a takeover: it
+ * returns a handle whose page survives between calls, unlike `capture`. */
 function harness({fail = null, idleMs = '30', ...extra} = {}) {
   const launches = [], log = [];
   const start = async options => {
@@ -20,6 +21,18 @@ function harness({fail = null, idleMs = '30', ...extra} = {}) {
         if (fail) throw fail;
         log.push(['capture', url, opts.allow]);
         return {url, text: `page: ${url}`};
+      },
+      open: async (url, opts) => {
+        if (fail) throw fail;
+        log.push(['open', url, opts.allow]);
+        let page = {url, title: 'Takeover', text: `page: ${url}`, elements: [{index: 1, tag: 'button', text: 'Sign in'}], elementCount: 1, blockedRequests: 0, image: 'data:image/jpeg;base64,AAAA'};
+        return {
+          act: async step => ({ok: true, reason: '', ...(step?.op === 'page' ? {} : {readText: null}), ...(step?.url ? {url: step.url} : {})}),
+          view: async () => page,
+          page: async () => (page = {url, title: 'Takeover', text: `page: ${url}`, elements: [], elementCount: 0, blockedRequests: 0}),
+          snapshot: async () => page,
+          close: async () => { log.push(['live-close', url]); },
+        };
       },
       close: async () => { log.push(['close']); },
     };
@@ -173,6 +186,67 @@ test('closing the runtime waits for the request already in flight', async () => 
   await runtime.close();
   assert.equal(finished, true, 'A drain does not kill a page it is still serving.');
   assert.equal((await inFlight).url, 'https://example.com/a');
+});
+
+test('a takeover opens one page, keeps it, and refuses a second', async () => {
+  const {runtime, launches, log} = harness({BROWSER_LIVE_MS: '5000'});
+  const live = await runtime.beginLive({url: 'https://example.com/login', requestId: 'req-1'});
+  assert.match(live.id, /^takeover-/, 'The person gets an id to act on.');
+  assert.equal(live.title, 'Takeover');
+  assert.match(live.image || '', /^data:image\/jpeg;base64,/, 'The reply carries the picture the person sees.');
+  assert.deepEqual(live.elements.map(e => e.text), ['Sign in']);
+  assert.equal(launches.length, 1, 'The takeover reuses the same browser process.');
+  // A second takeover would fight the first for the same process.
+  await assert.rejects(runtime.beginLive({url: 'https://example.com/other'}), error => error.status === 409 && /already open/.test(error.message));
+  // Acting keeps the same page: no second open, no launch.
+  const acted = await runtime.liveAct(live.id, {op: 'click', index: 1});
+  assert.equal(acted.ok, true);
+  assert.equal(launches.length, 1, 'An action is not a new page.');
+  const back = await runtime.endLive(live.id);
+  assert.equal(back.requestId, 'req-1', 'Handing back says which request the page belongs to.');
+  assert.equal(back.page.url, 'https://example.com/login', 'Handing back returns the page the person left.');
+  assert.deepEqual(log.filter(entry => entry[0] === 'live-close'), [['live-close', 'https://example.com/login']]);
+  assert.equal(runtime.liveIds().length, 0);
+  await runtime.close();
+});
+
+test('a person using the browser blocks a bot, and the bot blocks a person', async () => {
+  const {runtime} = harness({BROWSER_LIVE_MS: '5000'});
+  const live = await runtime.beginLive({url: 'https://example.com/a'});
+  await assert.rejects(runtime.run({url: 'https://example.com/b'}), error => error.status === 409 && /A person is using the browser/.test(error.message));
+  await runtime.endLive(live.id);
+  // With the takeover closed the bot may run again.
+  assert.equal((await runtime.run({url: 'https://example.com/b'})).url, 'https://example.com/b');
+  await runtime.close();
+});
+
+test('a takeover ends itself when the person walks away, and again at the hard cap', async () => {
+  const {runtime, log} = harness({BROWSER_LIVE_MS: '40', BROWSER_LIVE_MAX_MS: '100000'});
+  const live = await runtime.beginLive({url: 'https://example.com/a'});
+  assert.equal(runtime.liveIds().length, 1);
+  await new Promise(resolve => setTimeout(resolve, 70));
+  assert.equal(runtime.liveIds().length, 0, 'A forgotten tab does not keep a signed-in context alive.');
+  assert.deepEqual(log.filter(entry => entry[0] === 'live-close'), [['live-close', 'https://example.com/a']]);
+  await assert.rejects(runtime.liveView(live.id), error => error.status === 404);
+
+  // The hard cap ends a takeover that stays busy, so a loop of looks cannot hold
+  // one open forever.
+  const capped = harness({BROWSER_LIVE_MS: '5000', BROWSER_LIVE_MAX_MS: '40'});
+  const busy = await capped.runtime.beginLive({url: 'https://example.com/a'});
+  await new Promise(resolve => setTimeout(resolve, 60));
+  await assert.rejects(capped.runtime.liveAct(busy.id, {op: 'click', index: 1}), error => error.status === 409 && /open too long/.test(error.message));
+  assert.equal(capped.runtime.liveIds().length, 0);
+  await capped.runtime.close();
+  await runtime.close();
+});
+
+test('every takeover is closed when the runtime drains', async () => {
+  const {runtime, log} = harness({BROWSER_LIVE_MS: '5000'});
+  await runtime.beginLive({url: 'https://example.com/a'});
+  await runtime.close();
+  assert.equal(runtime.liveIds().length, 0);
+  assert.ok(log.some(entry => entry[0] === 'live-close'), 'A drain disposes the signed-in context, not only the process.');
+  await assert.rejects(runtime.beginLive({url: 'https://example.com/a'}), error => error.status === 503);
 });
 
 test('the runtime reads a real page through a real browser', {skip: !findBrowser() && 'no browser installed', timeout: 60000}, async () => {

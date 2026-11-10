@@ -208,6 +208,23 @@ test("every pattern's matcher resolves back to that same route", () => {
   assert.equal(router.find('GET', '/api/not-a-route'), null, 'an unknown path must not resolve');
 });
 
+test('the live takeover surface is member-level and lives under /api/browser-sessions', () => {
+  // A person driving the browser is a write, like approving a card, so it needs
+  // the writer role. Pinned here so widening it to viewer is a test failure.
+  const surface = routes.filter(route => route.pattern.startsWith('/api/browser-sessions')).map(key).sort();
+  assert.deepEqual(surface, [
+    'DELETE /api/browser-sessions/:session',
+    'GET /api/browser-sessions',
+    'GET /api/browser-sessions/:session',
+    'POST /api/browser-sessions',
+    'POST /api/browser-sessions/:session/act',
+    'POST /api/browser-sessions/:session/handback',
+  ].sort());
+  for (const route of routes) {
+    if (route.pattern.startsWith('/api/browser-sessions')) assert.equal(route.access, 'member', `${key(route)} must stay at member or above`);
+  }
+});
+
 /** A real store and the real account routes, driven the way the dispatcher
  * drives them (`handler({params, actor, store, body})`), so the ordering and
  * transaction of a write can be asserted instead of only its access level. */

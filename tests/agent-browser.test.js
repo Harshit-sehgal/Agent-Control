@@ -155,6 +155,41 @@ test('browser.action types, clicks and reads, and refuses off-allowlist navigati
   } finally { server.close(); }
 });
 
+test('a takeover keeps one page open, so a person can sign in and hand it back', {skip: !browser && 'no browser installed', timeout: 60000}, async () => {
+  const server = http.createServer((req, res) => {
+    const signedIn = /session=yes/.test(req.headers.cookie || '');
+    res.writeHead(200, {'Content-Type': 'text/html'});
+    res.end(req.url === '/login'
+      ? `<title>Sign in</title><form onsubmit="event.preventDefault();document.cookie='session=yes; path=/';location.href='/member';return false"><input id="u" placeholder="Email"><input id="p" type="password" placeholder="Password"><button type="submit">Sign in</button></form>`
+      : `<title>Member</title><h1>${signedIn ? 'Hello, Ada' : 'Signed out'}</h1><button>Sign out</button>`);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const host = `127.0.0.1:${server.address().port}`, base = `http://${host}`;
+  const session = await startBrowserSession({binary: browser, permit: () => true});
+  try {
+    const live = await session.open(`${base}/login`, {allow: [host]});
+    const start = await live.view();
+    assert.equal(start.title, 'Sign in');
+    assert.match(start.image || '', /^data:image\/jpeg;base64,/, 'the person sees the page, not only its text');
+    const at = text => start.elements.find(e => e.text === text).index;
+    // A person types and submits; the cookie they earn must survive to the next
+    // call, which is the whole point of a takeover.
+    assert.equal((await live.act({op: 'type', index: at('Email'), text: 'ada@example.com'})).ok, true);
+    await live.act({op: 'type', index: at('Password'), text: 'hunter2'});
+    const clicked = await live.act({op: 'click', index: at('Sign in')});
+    assert.equal(clicked.ok, true);
+    assert.equal(clicked.url, `${base}/member`, 'the click navigated, and the reply is the page landed on');
+    assert.match((await live.page()).text, /Hello, Ada/, 'the sign-in persisted inside the takeover');
+    // The allowlist still decides where a person may go.
+    assert.equal((await live.act({op: 'navigate', url: 'https://example.com/'})).ok, false);
+    await live.close();
+    // Handing the page back must not leave a signed-in browser for the next one.
+    const next = await session.open(`${base}/member`, {allow: [host]});
+    assert.match((await next.page()).text, /Signed out/, 'each takeover starts with its own empty context');
+    await next.close();
+  } finally { await session.close(); server.close(); }
+});
+
 test('a session reuses one browser, numbers the controls, and signs nothing in', {skip: !browser && 'no browser installed', timeout: 60000}, async () => {
   const server = http.createServer((req, res) => {
     res.writeHead(200, {'Content-Type': 'text/html'});

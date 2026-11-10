@@ -16,7 +16,8 @@ import {memoryBlock} from '../shared/memory.js';
 import {askPeerRound} from './bot-link.js';
 import {createBotsFromReply} from './bot-create.js';
 import {memoryFor, rememberTurn, maybeConsolidate} from './memory.js';
-import {dispatchBrowserRequest, autoDispatch} from './bot-browser.js';
+import {dispatchBrowserRequest, autoDispatch, beginTakeover, handBackTakeover} from './bot-browser.js';
+import {browserRuntime} from './browser-runtime.js';
 import {replyWithSubagents} from './subagents.js';
 import {failAgentTasks} from './agent.js';
 import {fail} from './http.js';
@@ -184,6 +185,26 @@ export function groupRoutes(router) {
     if (request?.purpose === 'feed') await resumeFeedRun(c.store, request, {ok: false});
     else if (request?.runId) await resumeBrowserRun(c.store, request, {ok: false});
     return request;
+  });
+
+  // Live takeover: a person drives the page a bot asked for, to sign in or
+  // answer a challenge the browser cannot. The page is kept open between these
+  // calls, and handed back (or closed) to finish. The allowlist and the egress
+  // proxy still decide where the page may go, and X still refuses click/type.
+  router.add('GET', '/api/browser-sessions', 'member', () => ({sessions: browserRuntime.liveList()}));
+  router.add('POST', '/api/browser-sessions', 'member', async c => {
+    const b = await c.body();
+    return reply(201, await beginTakeover(c.store, String(b?.requestId || ''), {actor: c.actor.email}));
+  });
+  router.add('GET', '/api/browser-sessions/:session', 'member', c => browserRuntime.liveView(c.params.session));
+  router.add('POST', '/api/browser-sessions/:session/act', 'member', async c => {
+    const b = await c.body();
+    return browserRuntime.liveAct(c.params.session, {op: b?.op, index: b?.index, selector: b?.selector, text: b?.text, url: b?.url});
+  });
+  router.add('POST', '/api/browser-sessions/:session/handback', 'member', c => handBackTakeover(c.store, c.params.session));
+  router.add('DELETE', '/api/browser-sessions/:session', 'member', async c => {
+    const {requestId, page} = await browserRuntime.endLive(c.params.session);
+    return {closed: true, requestId: requestId || null, url: page?.url || null};
   });
 
   // Conversation history. It is part of the state snapshot, so there is no

@@ -8,7 +8,7 @@ import {SqliteStore} from '../src/sqlite-store.js';
 import * as wf from '../shared/workflow.js';
 import {createRun, createEnvelope} from '../shared/coordination.js';
 import {coordinationState, runGroup, resumeFeedRun, resumeBrowserRun} from '../src/coordination.js';
-import {dispatchBrowserRequest, onAgentTaskResult, autoDispatch, continueBrowserWork, setBrowserResultHooks} from '../src/bot-browser.js';
+import {dispatchBrowserRequest, onAgentTaskResult, autoDispatch, continueBrowserWork, setBrowserResultHooks, beginTakeover, handBackTakeover} from '../src/bot-browser.js';
 import {refusePostingAction} from '../agent/browser.mjs';
 import {parseBrowserRequests, validateBrowserRequest, recordBrowserRequests, stripBrowserBlocks, denyBrowserRequest, browserResultText, capturePageText, feedPageText, requestOfMessage, queueFeedRead, pruneBrowserRequests, MAX_BROWSER_REQUESTS, MAX_BROWSER_DEPTH, MAX_ELEMENT_INDEX, BROWSER_PERMISSION} from '../shared/bot-browser.js';
 import {addChatMessages} from '../shared/chats.js';
@@ -603,6 +603,72 @@ test('a one-to-one browse continues that bot, not a group run', async () => {
     runGroup: async (s, spec) => group.push(spec),
   });
   assert.equal(group.length, 1);
+});
+
+test('a person takes over the page, and handing it back resumes the bot from it', async () => {
+  const {dir, store} = await harness();
+  try {
+    const now = new Date().toISOString();
+    await store.update(s => {
+      wf.migrate(s); coordinationState(s);
+      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}];
+      s.browserRequests = [{id: 'takeover-req', botId: 'web', botName: 'Web', groupId: 'lab', chatKey: 'web', url: 'https://x.com/home', steps: [], kind: 'browser.capture', depth: 0, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: now, updatedAt: now}];
+    });
+    const opened = [];
+    let sessionOpen = false;
+    const runtime = {
+      mode: 'auto',
+      available: () => true,
+      beginLive: async ({url, requestId, openedBy}) => {
+        // One person at a time, as the real runtime enforces.
+        if (sessionOpen) throw Object.assign(new Error('A takeover is already open. Finish or close it first — one page at a time.'), {status: 409});
+        sessionOpen = true;
+        opened.push({url, requestId, openedBy});
+        return {id: 'takeover-1', url, title: 'Home', text: 'Sign in to X', elements: [{index: 1, tag: 'button', text: 'Sign in'}], elementCount: 1, blockedRequests: 0, image: 'data:image/jpeg;base64,AAAA'};
+      },
+      endLive: async id => { sessionOpen = false; assert.equal(id, 'takeover-1'); return {requestId: 'takeover-req', page: {url: 'https://x.com/home', title: 'Home', text: 'Ada posted about rockets and the next launch window.', elements: [], elementCount: 0, blockedRequests: 0}}; },
+    };
+    const view = await beginTakeover(store, 'takeover-req', {actor: 'owner@localhost', runtime});
+    assert.equal(view.id, 'takeover-1');
+    assert.equal(view.requestId, 'takeover-req');
+    assert.deepEqual(opened, [{url: 'https://x.com/home', requestId: 'takeover-req', openedBy: 'owner@localhost'}]);
+    const held = store.read().browserRequests.find(r => r.id === 'takeover-req');
+    assert.equal(held.status, 'pending', 'The request still waits on a person while they hold the page, so a takeover that times out leaves nothing stuck.');
+    // Only one takeover at a time.
+    await assert.rejects(beginTakeover(store, 'takeover-req', {runtime}), status(409));
+
+    const continued = [];
+    setBrowserResultHooks({continueRun: async (s, spec) => { continued.push(spec); }});
+    const handed = await handBackTakeover(store, 'takeover-1', {runtime});
+    assert.equal(handed.handedBack, true);
+    const done = store.read().browserRequests.find(r => r.id === 'takeover-req');
+    assert.equal(done.status, 'done');
+    assert.equal(done.result.title, 'Home');
+    assert.match(done.result.page, /Ada posted about rockets/, 'The bot is handed the page the person reached.');
+    assert.match(store.read().chats.web.find(m => m.kind === 'browser-result').text, /Browser result for Web/);
+    assert.equal(continued.length, 1, 'The bot continues from the page the person signed in for.');
+    assert.match(continued[0].page, /Ada posted about rockets/);
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});
+
+test('a takeover is refused where there is no browser, and a finished request cannot be taken over', async () => {
+  const {dir, store} = await harness();
+  try {
+    const now = new Date().toISOString();
+    await store.update(s => {
+      wf.migrate(s);
+      s.browserRequests = [{id: 'r1', botId: 'web', botName: 'Web', groupId: 'lab', chatKey: 'web', url: 'https://example.com/', steps: [], kind: 'browser.capture', depth: 0, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: now, updatedAt: now}];
+    });
+    // A device-only install has no browser here to take over.
+    await assert.rejects(beginTakeover(store, 'r1', {runtime: {mode: 'agent', available: () => false, beginLive: async () => assert.fail('must not open')}}), status(409));
+    await assert.rejects(beginTakeover(store, 'missing', {runtime: {mode: 'auto', available: () => true, beginLive: async () => assert.fail('must not open')}}), status(404));
+    await store.update(s => { s.browserRequests[0].status = 'done'; });
+    await assert.rejects(beginTakeover(store, 'r1', {runtime: {mode: 'auto', available: () => true, beginLive: async () => assert.fail('must not open')}}), status(409));
+    // Handing back a request that finished meanwhile does not resurrect it.
+    const result = await handBackTakeover(store, 'takeover-9', {runtime: {endLive: async () => ({requestId: 'r1', page: {url: 'https://example.com/'}})}});
+    assert.equal(result.handedBack, false);
+    assert.equal(store.read().browserRequests.find(r => r.id === 'r1').status, 'done');
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
 });
 
 test('browser requests survive a restart of the SQLite store', async () => {

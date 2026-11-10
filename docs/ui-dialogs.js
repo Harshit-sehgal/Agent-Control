@@ -1,10 +1,10 @@
 /** Overlays: the toast, the bottom sheet (#modal) and its confirm/ask helpers.
  * Sheets replace `window.confirm`/`prompt` so a decision never leaves the chat's
  * visual language, and they hand focus back to whatever opened them. */
-import {esc, btn, iconBtn} from './ui-kit.js?v=db1039acfd';
+import {esc, btn, iconBtn} from './ui-kit.js?v=fa63e67302';
 
 const el = id => document.getElementById(id);
-let toastTimer = null, lastFocus = null, settle = null;
+let toastTimer = null, lastFocus = null, settle = null, dismiss = null;
 
 export function toast(message, error = false) {
   const node = el('toast'); if (!node) return;
@@ -34,11 +34,14 @@ export const focusOrigin = () => lastFocus;
 
 export const sheetOpen = () => !el('modal').classList.contains('hidden');
 
-/** Show `html` as a sheet. `label` names the dialog for assistive tech. */
-export function openSheet(html, {label, title = '', sub = ''} = {}) {
+/** Show `html` as a sheet. `label` names the dialog for assistive tech.
+ * `onDismiss` runs when the sheet closes for any reason — including Escape,
+ * which a takeover needs to release the page it is holding. */
+export function openSheet(html, {label, title = '', sub = '', onDismiss = null} = {}) {
   if (!sheetOpen()) captureFocus();
   // A sheet opened over a pending confirm/ask answers that one as dismissed.
   const pending = settle; settle = null; if (pending) pending(null);
+  dismiss = onDismiss;
   const layer = el('modal');
   layer.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(label || title)}"><div class="sheet-grip" aria-hidden="true"></div>${title ? `<div class="sheet-head"><div><h2>${esc(title)}</h2>${sub ? `<p>${esc(sub)}</p>` : ''}</div>${iconBtn('x', 'Close', 'close-sheet')}</div>` : ''}${html}</div>`;
   layer.classList.remove('hidden');
@@ -50,6 +53,9 @@ export function closeSheet(result = null) {
   if (!sheetOpen()) return;
   el('modal').classList.add('hidden'); el('modal').innerHTML = '';
   const done = settle; settle = null; if (done) done(result);
+  // Read the dismiss hook before clearing it, and after the sheet is hidden, so
+  // its own handler can decide what to do about what the sheet was holding.
+  const away = dismiss; dismiss = null; if (away) away();
   restoreFocus();
 }
 

@@ -193,7 +193,7 @@ async function connect(address) {
       const {resolve, reject} = waiting.get(message.id); waiting.delete(message.id);
       return message.error ? reject(new Error(message.error.message)) : resolve(message.result);
     }
-    for (const listener of listeners.get(message.method) || []) listener(message.params);
+    for (const listener of listeners.get(message.method) || []) listener({...message.params, sessionId: message.sessionId});
   };
   return {
     send: (method, params = {}, sessionId) => new Promise((resolve, reject) => { const id = ++next; waiting.set(id, {resolve, reject}); socket.send(JSON.stringify({id, method, params, sessionId})); }),
@@ -246,9 +246,14 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
         ({browserContextId: contextId} = await cdp.send('Target.createBrowserContext'));
         ({targetId} = await cdp.send('Target.createTarget', {url: 'about:blank', browserContextId: contextId}));
         const {sessionId} = await cdp.send('Target.attachToTarget', {targetId, flatten: true});
+        // One DevTools connection carries events for every attached target, so a
+        // listener has to know which page it is for: a second context (a person's
+        // takeover while a capture runs) would otherwise consume this page's
+        // events and answer its paused requests.
+        const pageOn = (method, fn) => cdp.on(method, params => { if (params.sessionId && params.sessionId !== sessionId) return; fn(params); });
         // The page's own requests pause here first, so it cannot be sent to a
         // page nobody allowed.
-        const offPaused = cdp.on('Fetch.requestPaused', ({requestId, request, resourceType}) => {
+        const offPaused = pageOn('Fetch.requestPaused', ({requestId, request, resourceType}) => {
           const verdict = requestVerdict({url: request.url, isDocument: resourceType === 'Document', method: request.method, resourceType}, {allow});
           if (!verdict.allow) blocked.push(`${request.url.slice(0, 120)}: ${verdict.reason}`);
           cdp.send(verdict.allow ? 'Fetch.continueRequest' : 'Fetch.failRequest', verdict.allow ? {requestId} : {requestId, errorReason: 'BlockedByClient'}, sessionId).catch(() => {});
@@ -256,7 +261,7 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
         try {
           await cdp.send('Fetch.enable', {patterns: [{urlPattern: '*'}]}, sessionId);
           await cdp.send('Page.enable', {}, sessionId);
-          const loaded = new Promise(resolve => { const off = cdp.on('Page.loadEventFired', () => { off(); resolve(); }); });
+          const loaded = new Promise(resolve => { const off = pageOn('Page.loadEventFired', () => { off(); resolve(); }); });
           const navigation = await cdp.send('Page.navigate', {url}, sessionId);
           // The proxy's own refusal is the useful sentence: "it is on a private
           // or local network" says what happened, where ERR_HTTP_RESPONSE_CODE_
@@ -345,7 +350,129 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
     }
   }
 
-  return {capture, close};
+  /** Open one page and keep it open, so a person can act on it between calls.
+   *
+   * This is the one thing a fresh context per page cannot do: a sign-in, a 2FA
+   * prompt or a challenge that only a person can answer. The context here is
+   * deliberately not disposed until `close()`, so the cookies earned in it
+   * survive from one call to the next — and die with it, so no bot inherits a
+   * signed-in browser: handing the page back is a read of what the person
+   * reached, not a session the next capture can reuse.
+   *
+   * The rules that bound a capture still bound this: the page and every
+   * navigation must be on the allowlist, the egress proxy still refuses private
+   * and local addresses, and click and type on X and Twitter is still refused.
+   * Signing in is the point; publishing from here is not. */
+  async function open(url, {allow, timeoutMs = 25000} = {}) {
+    if (!hostAllowed(url, allow)) throw new Error(`Refusing to open ${url}: its host is not in AGENT_BROWSER_ALLOWLIST.`);
+    const blockedBefore = refused.length, blocked = [];
+    const {browserContextId: contextId} = await cdp.send('Target.createBrowserContext');
+    let targetId = null;
+    try {
+      ({targetId} = await cdp.send('Target.createTarget', {url: 'about:blank', browserContextId: contextId}));
+      const {sessionId} = await cdp.send('Target.attachToTarget', {targetId, flatten: true});
+      const pageOn = (method, fn) => cdp.on(method, params => { if (params.sessionId && params.sessionId !== sessionId) return; fn(params); });
+      const offPaused = pageOn('Fetch.requestPaused', ({requestId, request, resourceType}) => {
+        const verdict = requestVerdict({url: request.url, isDocument: resourceType === 'Document', method: request.method, resourceType}, {allow});
+        if (!verdict.allow) blocked.push(`${request.url.slice(0, 120)}: ${verdict.reason}`);
+        cdp.send(verdict.allow ? 'Fetch.continueRequest' : 'Fetch.failRequest', verdict.allow ? {requestId} : {requestId, errorReason: 'BlockedByClient'}, sessionId).catch(() => {});
+      });
+      await cdp.send('Fetch.enable', {patterns: [{urlPattern: '*'}]}, sessionId);
+      await cdp.send('Page.enable', {}, sessionId);
+      // A desktop viewport, because the person is looking at a phone: a page
+      // laid out for a desktop is the page they meant to open.
+      await cdp.send('Emulation.setDeviceMetricsOverride', {width: 1024, height: 768, deviceScaleFactor: 1, mobile: false}, sessionId).catch(() => {});
+      const evaluate = expression => cdp.send('Runtime.evaluate', {expression, returnByValue: true, awaitPromise: true}, sessionId);
+
+      async function read() {
+        const {result} = await evaluate(`JSON.stringify({url: location.href, title: document.title, ready: document.readyState, text: (document.body ? document.body.innerText : "").slice(0, 20000), snapshot: ${SNAPSHOT}})`);
+        const page = JSON.parse(result.value);
+        const snap = page.snapshot && typeof page.snapshot === 'object' ? page.snapshot : {count: 0, elements: []};
+        return {
+          url: page.url, title: page.title || null,
+          text: String(page.text || '').replace(/\s+/g, ' ').trim().slice(0, 4000),
+          elements: Array.isArray(snap.elements) ? snap.elements : [], elementCount: Number(snap.count) || 0,
+          blockedRequests: blocked.length + (refused.length - blockedBefore),
+        };
+      }
+      const done = () => evaluate('document.readyState').then(({result}) => result?.value === 'complete').catch(() => false);
+      /** An action may start a navigation, and the app is being read by a person
+       * who expects the result to be the page they land on. Wait, bounded, for
+       * the document to be complete and to stop moving; a slow site must not
+       * hold the request open forever. */
+      async function settled(previous) {
+        const deadline = Date.now() + 8000;
+        let last = previous || '';
+        while (Date.now() < deadline) {
+          await new Promise(resolve => setTimeout(resolve, 200));
+          if (!await done()) continue;
+          const here = await read().catch(() => null);
+          if (here && here.url === last) return here;
+          last = here?.url || last;
+        }
+        return read();
+      }
+      /** What the person sees: the page, and a picture of it. JPEG, because the
+       * whole picture rides in one JSON reply to a phone. */
+      async function view(withImage = true) {
+        // A page can be mid-navigation when the person asks for it; an empty
+        // frame with the address they are heading to is more useful than a 500.
+        const page = await read().catch(() => ({url, title: null, text: '', elements: [], elementCount: 0, blockedRequests: blocked.length + (refused.length - blockedBefore)}));
+        if (!withImage) return page;
+        const {data} = await cdp.send('Page.captureScreenshot', {format: 'jpeg', quality: 70, captureBeyondViewport: false}, sessionId).catch(() => ({data: null}));
+        return {...page, image: data ? `data:image/jpeg;base64,${data}` : null};
+      }
+
+      const navigation = await cdp.send('Page.navigate', {url}, sessionId);
+      const lastRefusal = refused.length > blockedBefore ? refused[refused.length - 1] : '';
+      if (navigation.errorText) throw new Error(blocked[0] ? `The page was not opened. ${blocked[0]}`
+        : lastRefusal ? `The page was not opened. ${lastRefusal}`
+        : `The page could not be opened: ${navigation.errorText}.`);
+      const current = await settled(url);
+
+      return {
+        url,
+        /** One action, then the page as it is now. */
+        async act(step) {
+          const op = String(step?.op || '');
+          if (op === 'navigate') {
+            const target = String(step.url || '');
+            if (!hostAllowed(target, allow)) return {ok: false, reason: 'That host is not in AGENT_BROWSER_ALLOWLIST.', ...await view()};
+            const nav = await cdp.send('Page.navigate', {url: target}, sessionId).catch(error => ({errorText: error.message}));
+            return {ok: !nav.errorText, reason: nav.errorText || '', ...await settled(target)};
+          }
+          const here = await read().catch(() => ({url: ''}));
+          const refusal = refusePostingAction(op, here.url);
+          if (refusal) return {ok: false, reason: refusal, ...here};
+          const expression = actionExpression(step || {});
+          if (!expression) return {ok: false, reason: 'That action is not supported.', ...here};
+          const {result} = await evaluate(expression).catch(error => ({result: {value: {ok: false, reason: error.message}}}));
+          const value = result?.value && typeof result.value === 'object' ? result.value : {ok: false, reason: 'The page did not answer.'};
+          const page = await settled(here.url);
+          // `read` returns an element's text; keep it next to the page instead of
+          // letting the page's own text win the spread.
+          return {ok: Boolean(value.ok), reason: String(value.reason || ''), readText: typeof value.text === 'string' ? value.text : null, ...page};
+        },
+        /** The page as the person left it: what the bot is handed back. */
+        view: () => view(),
+        page: () => view(false),
+        snapshot: () => view(false),
+        close: async () => {
+          offPaused();
+          await cdp.send('Target.closeTarget', {targetId}).catch(() => {});
+          await cdp.send('Target.disposeBrowserContext', {browserContextId: contextId}).catch(() => {});
+        },
+      };
+    } catch (error) {
+      // A page that never opened must not leave a context behind: the next
+      // takeover would inherit its cookies.
+      if (targetId) await cdp.send('Target.closeTarget', {targetId}).catch(() => {});
+      await cdp.send('Target.disposeBrowserContext', {browserContextId: contextId}).catch(() => {});
+      throw error;
+    }
+  }
+
+  return {capture, open, close};
 }
 
 /** One page in a browser that lives only for that page. The device process and

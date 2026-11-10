@@ -71,6 +71,7 @@ picks whose:
 | `AGENT_BROWSER_ALLOWLIST` | the hosts a bot may open, read by both runtimes; `*` means any public host (the egress proxy still refuses private and local addresses) |
 | `AGENT_BROWSER_PATH` | the browser binary; else the first Chrome, Chromium or Edge found on `PATH` |
 | `BROWSER_TIMEOUT_MS` / `BROWSER_IDLE_MS` | the per-request budget (25s) and how long an idle browser is kept (120s) |
+| `BROWSER_LIVE_MS` / `BROWSER_LIVE_MAX_MS` | how long a person may hold a page they took over: idle limit (10 min) and hard cap (30 min) |
 | `BROWSER_NO_SANDBOX` | `1` in a container, where Chrome's own sandbox cannot start. The allowlist, the egress proxy and the fresh context per page still apply |
 
 The server browser is one child process: started with the first request, closed
@@ -78,6 +79,14 @@ after `BROWSER_IDLE_MS` without work, and closed again when the server drains.
 Each page gets a new, empty context, so a warm browser is never signed in to
 anything. It reaches the network only through a proxy in this process that
 refuses private and local addresses.
+
+A page that needs a sign-in can be **taken over** from its request card: the
+server keeps that one context open and shows the person a picture of the page,
+and they click, type and navigate until they are through. It is still bound by
+the same allowlist, the same proxy and the same X refusal — a way to sign in,
+not a way around the rules — and the kept context is disposed when the takeover
+ends, so nothing the next capture opens is signed in either. See
+[AGENT-PROTOCOL.md](AGENT-PROTOCOL.md).
 
 The image in `Dockerfile` does not ship Chrome by default. Both compose files
 build with `INSTALL_BROWSER=1`, which installs Chromium and sets

@@ -11,6 +11,7 @@ import {renderList, renderMentions} from './ui-views.js';
 import {refreshLists, reloadAdminPage, pipelineList} from './ui-panel.js';
 import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, botTaskSheet, scheduleDraftSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js';
 import {adminActions, adminForms, adminChanges} from './ui-admin.js';
+import {takeoverActions, takeoverForms} from './ui-takeover.js';
 
 const adminCtx = {reload: reloadAdminPage};
 const chatId = () => store.route.chat;
@@ -347,6 +348,7 @@ export const actions = {
   },
 
   ...Object.fromEntries(Object.entries(adminActions).map(([name, run]) => [name, b => run(b, adminCtx)])),
+  ...takeoverActions,
 };
 
 /** Submit handlers by form id; `.edit-form` and `.evidence-form` repeat per draft so they key on class. */
@@ -436,6 +438,7 @@ export const forms = {
   '.edit-form': async (form, f) => { await api(`/api/drafts/${form.dataset.id}`, 'PATCH', {text: f.text}); store.editDraft = null; store.editText = null; await sync(); toast('Draft updated. It needs your approval again.'); },
   '.evidence-form': async (form, f) => { await api(`/api/drafts/${form.dataset.id}/evidence`, 'POST', {kind: f.kind, claim: f.claim, confidence: Number(f.confidence), link: (f.link || '').trim() || null}); await sync(); toast('Source added.'); },
   ...Object.fromEntries(Object.entries(adminForms).map(([id, run]) => [id, (form, f) => run(form, f, adminCtx)])),
+  ...takeoverForms,
 };
 
 const PREF_BY_CONTROL = {'candidate-status': 'candidateStatus', 'candidate-sort': 'candidateSort', 'draft-status': 'draftStatus', 'draft-sort': 'draftSort'};

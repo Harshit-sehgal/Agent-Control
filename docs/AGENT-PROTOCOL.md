@@ -153,6 +153,29 @@ and each page still gets a fresh, empty context, so a warm browser is never a
 signed-in one. Whichever runtime runs it, the request is the same record and the
 result is handled the same way.
 
+### Taking the page over (a person signs in)
+
+A page behind a sign-in — a 2FA prompt, a CAPTCHA, an account wall — is one a
+headless browser cannot reach on its own, and a fresh empty context is exactly
+what makes that true. The request card carries a **Take over** action
+(`POST /api/browser-sessions`) that opens the same page in a context the server
+**keeps** until the person is done, and lets them drive it:
+
+- the server sends a JPEG of the page and a numbered list of its controls, and
+  the person sends back one click, one type or a navigation at a time
+  (`POST /api/browser-sessions/:id/act`, `GET /api/browser-sessions/:id`);
+- the same `AGENT_BROWSER_ALLOWLIST`, the same egress proxy and the same
+  click/type refusal on X and Twitter apply to every step and every navigation,
+  so a takeover is a way to **sign in**, never a way around the rules;
+- **Hand back to the bot** reads the page as the person left it and finishes the
+  request with it, so the bot continues from the page now that the sign-in is
+  done. Closing without handing back discards it and the request stays waiting;
+- the kept context exists only for that takeover and is disposed when it ends,
+  so nothing the next capture sees is signed in. A takeover ends itself after
+  `BROWSER_LIVE_MS` with no action, and outright after `BROWSER_LIVE_MAX_MS`;
+- while a person holds the page, the runtime refuses both a second takeover and
+  a bot's own browser run, so one Chromium serves one page at a time.
+
 When the browser reports back, the result is posted in the chat and the same bot
 is asked to continue with it. A failure is posted as a message and is never
 handed to the bot as a page.

@@ -15,7 +15,7 @@ export const ASSETS = [
   'index.html', 'app.css',
   // The UI modules the entry points import.
   'transport.js', 'local-api.js', 'app.js',
-  'ui-kit.js', 'ui-model.js', 'ui-store.js', 'ui-dialogs.js', 'ui-chat.js', 'ui-views.js', 'ui-panel.js', 'ui-sheets.js', 'ui-admin.js', 'ui-actions.js', 'ui-fx.js', 'ui-push.js', 'sw.js',
+  'ui-kit.js', 'ui-model.js', 'ui-store.js', 'ui-dialogs.js', 'ui-chat.js', 'ui-views.js', 'ui-panel.js', 'ui-sheets.js', 'ui-admin.js', 'ui-actions.js', 'ui-takeover.js', 'ui-fx.js', 'ui-push.js', 'sw.js',
   // Browser-safe logic shared with the server.
   'core.js', 'errors.js', 'workflow.js', 'tasks.js', 'evidence.js', 'contracts.js', 'bot-settings.js', 'bot-browser.js', 'bot-create.js', 'bot-link.js', 'subagents.js', 'retention.js', 'memory.js',
   'coordination.js', 'chats.js', 'group-simulator.js', 'chat-engine.js', 'usability.js', 'local-runs.js', 'ai-presets.js',

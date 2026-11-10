@@ -127,6 +127,7 @@ work should be added as a fresh section.
 - [x] Steps may name a control by the index in the last result, so a bot can act on a page it has only read once (`agent/browser.mjs`)
 - [x] `BROWSER_RUNTIME`: the server runs a browser of its own (one child process, serial, closed when idle) when it has an allowlist and a browser, else a paired agent (`src/browser-runtime.js`)
 - [x] Requests persisted in SQLite; Pages demo explains it needs the Node build
+- [x] **Take over the page to sign in:** a kept browser context a person drives by screenshot (`POST /api/browser-sessions`, click/type/navigate), handed back so the bot continues from the page they reached (`shared/ui-takeover.js`, `agent/browser.mjs` `open`, `src/browser-runtime.js` live registry)
 - [x] Tests (`tests/bot-browser.test.js`, `tests/browser-runtime.test.js`, `tests/agent-browser.test.js`); check, test and build:pages green
 
 ## Phase S — sub-agents a bot can spawn

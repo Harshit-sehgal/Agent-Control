@@ -157,6 +157,20 @@ body:not(.has-info) .pane-info{display:none}
 .browser-request{flex-direction:column;align-items:stretch;text-align:left;padding:10px 14px}
 .browser-request a{overflow-wrap:anywhere;color:var(--text)}
 .browser-steps{margin:0;padding-left:18px;overflow-wrap:anywhere}
+
+/* live takeover: a person driving the page a bot asked for */
+.takeover-page{display:flex;flex-direction:column;gap:8px}
+.takeover-shot{width:100%;height:auto;border-radius:12px;border:1px solid var(--line);background:var(--surface)}
+.takeover-here{font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+.takeover-here a{color:var(--text)}
+.takeover-go{display:flex;gap:8px;margin-top:10px}
+.takeover-go .input{flex:1;min-width:0}
+.takeover-controls{display:flex;flex-wrap:wrap;gap:6px;max-height:140px;overflow-y:auto;margin-top:12px;padding:8px;border-radius:12px;background:var(--surface)}
+.takeover-control{flex:none;max-width:100%;padding:6px 10px;border-radius:10px;background:var(--control);color:var(--text);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.takeover-control.on{background:var(--tint);color:var(--on-me)}
+.takeover-type{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px}
+.takeover-type .field-label{flex-basis:100%;margin:0}
+.takeover-type .input{flex:1;min-width:0}
 .msg{display:flex;align-items:flex-end;gap:8px;max-width:100%}
 .msg.lead{margin-top:9px}
 .msg.me{justify-content:flex-end}

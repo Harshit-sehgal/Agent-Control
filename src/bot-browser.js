@@ -191,6 +191,50 @@ export async function finishBrowserRequest(store, request, {ok, result = null, e
   return done;
 }
 
+/** A person takes over the page a bot asked for, to sign in or answer a
+ * challenge the browser cannot pass on its own.
+ *
+ * The page is opened in a context the runtime keeps until `handBackTakeover`,
+ * so a cookie earned here survives from one call to the next — and nothing
+ * else: the next capture still starts with a fresh, signed-out context. The
+ * request stays waiting on a person meanwhile, so a takeover that times out
+ * leaves nothing stuck: the runtime refuses a second takeover and a bot's page
+ * while the person is holding it, and the request can be taken over again. The
+ * bot is resumed when the person hands the page back, with the page as they
+ * left it. */
+export async function beginTakeover(store, requestId, {actor = null, runtime = browserRuntime} = {}) {
+  const request = (store.read().browserRequests || []).find(r => r.id === requestId);
+  if (!request) fail('Browser request not found.', 404);
+  if (['done', 'failed', 'denied'].includes(request.status)) fail('That browser request has already finished.', 409);
+  if (runtime.mode === 'agent' || !runtime.available()) fail(`No browser is available on this server to take over. ${runtime.mode === 'agent'
+    ? 'This install only runs browser requests on a paired device (BROWSER_RUNTIME=agent).'
+    : 'Set AGENT_BROWSER_ALLOWLIST (a host list, or * for any public site) and install Chrome, or point AGENT_BROWSER_PATH at one.'}`, 409);
+  const view = await runtime.beginLive({url: request.url, requestId: request.id, openedBy: actor});
+  return {...view, requestId: request.id};
+}
+
+/** The person is done: hand the page they reached back to the bot that asked.
+ * The context is disposed either way — a takeover is not a session the next
+ * capture inherits. */
+export async function handBackTakeover(store, sessionId, {runtime = browserRuntime} = {}) {
+  const {requestId, page} = await runtime.endLive(sessionId);
+  if (!requestId) return {handedBack: false, reason: 'That takeover was not opened for a bot request.', page};
+  const request = (store.read().browserRequests || []).find(r => r.id === requestId);
+  if (!request || ['done', 'failed', 'denied'].includes(request.status)) return {handedBack: false, reason: 'That browser request has already finished.', page};
+  const url = page?.url || request.url;
+  const text = String(page?.text || '');
+  const result = {
+    url, finalUrl: url, title: page?.title || null,
+    excerpt: text.slice(0, 600), text: text.slice(0, 4000),
+    elements: Array.isArray(page?.elements) ? page.elements : [],
+    elementCount: Number(page?.elementCount) || 0,
+    blockedRequests: Number(page?.blockedRequests) || 0,
+    engine: 'browser', capturedAt: stamp(),
+  };
+  const done = await finishBrowserRequest(store, request, {ok: true, result});
+  return {handedBack: true, requestId, request: done, page};
+}
+
 /** An agent reported on a task. A task that will retry changes nothing yet. */
 export async function onAgentTaskResult(store, taskId, hooks = {}) {
   const request = (store.read().browserRequests || []).find(r => (r.agentTaskIds || []).includes(taskId));
