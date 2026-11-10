@@ -1,0 +1,393 @@
+<title>Bot Company Demo</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700&family=Inter:wght@400;500;600&display=swap">
+<style>
+/* Layout: Slack-like three panes. Sidebar (needs you, threads, company) | thread | company chart and bot profile. */
+:root{
+  --bg:#fbfaf8; --panel:#ffffff; --sunk:#f3f1ed; --line:#e9e5df; --fg:#1d1c1a; --muted:#6f6a63;
+  --mint:#1fa97a; --mint-soft:#dcf4ea; --violet:#7454f6; --violet-soft:#ece6ff; --amber:#b7791f;
+  --display:"Bricolage Grotesque", "Inter", system-ui, sans-serif;
+  --body:"Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#1a1a1d; --panel:#222226; --sunk:#1e1e21; --line:#313137; --fg:#ecebee; --muted:#a09ea8;
+  --mint:#4fd3a4; --mint-soft:#1d3a30; --violet:#a58cff; --violet-soft:#2e2748; --amber:#e0a84a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#1a1a1d; --panel:#222226; --sunk:#1e1e21; --line:#313137; --fg:#ecebee; --muted:#a09ea8;
+  --mint:#4fd3a4; --mint-soft:#1d3a30; --violet:#a58cff; --violet-soft:#2e2748; --amber:#e0a84a; color-scheme:dark}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:14px;line-height:1.45}
+*{box-sizing:border-box}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--violet);outline-offset:2px}
+.app{display:grid;grid-template-columns:232px minmax(0,1fr) 300px;height:100%}
+.side{background:var(--sunk);border-right:1px solid var(--line);display:flex;flex-direction:column;gap:18px;padding-block:16px;padding-left:max(14px,env(safe-area-inset-left,0px));padding-right:14px;overflow:auto}
+.brand{font-family:var(--display);font-weight:700;font-size:17px;display:flex;align-items:center;gap:8px}
+.tag{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-family:var(--body);font-weight:600;border:1px solid var(--line);border-radius:99px;padding:1px 7px}
+.sec h3{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin:0 0 6px;font-weight:600}
+.item{display:flex;align-items:center;gap:8px;width:100%;border:0;background:none;padding:6px 8px;border-radius:8px;text-align:left}
+.item:hover{background:var(--line)}
+.item.on{background:var(--panel);box-shadow:0 0 0 1px var(--line)}
+.item .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pill{background:var(--violet);color:#fff;border-radius:99px;font-size:11px;padding:0 7px;font-weight:600}
+.newbtn{border:1px dashed var(--line);background:var(--panel);border-radius:10px;padding:8px 10px;text-align:left;width:100%}
+.main{display:flex;flex-direction:column;min-width:0;height:100%}
+.head{border-bottom:1px solid var(--line);padding:12px 18px;display:flex;align-items:center;gap:10px;background:var(--panel)}
+.head h2{font-family:var(--display);font-size:17px;margin:0;font-weight:600;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ghost{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:5px 10px;font-size:13px}
+.icon{width:34px;height:34px;display:grid;place-items:center;border:0;background:none;border-radius:9px;color:var(--muted)}
+.icon:hover,.icon.on{background:var(--sunk);color:var(--fg)}
+.paused{background:var(--violet-soft);color:var(--fg);font-size:13px;padding:8px 18px;display:flex;gap:10px;align-items:center;border-bottom:1px solid var(--line)}
+.paused button{border:0;background:var(--violet);color:#fff;border-radius:7px;padding:3px 10px;font-size:12.5px}
+.filters{display:flex;gap:6px;flex-wrap:wrap}
+.filters button{border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:3px 10px;font-size:12px}
+.filters button.on{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.day{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:600;margin-top:4px}
+.act{display:flex;gap:8px;align-items:flex-start;width:100%;border:0;background:none;text-align:left;padding:6px;border-radius:8px;font-size:12.5px}
+.act:hover{background:var(--sunk)}
+.act .w{flex:1;min-width:0}
+.act time{color:var(--muted);font-size:11.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.act .face{width:22px;height:22px;border-radius:7px}
+.undo{font-size:11.5px;color:var(--violet);text-decoration:underline}
+.feed{flex:1;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:14px}
+.empty{margin:auto;max-width:440px;text-align:center;color:var(--muted)}
+.empty h1{font-family:var(--display);color:var(--fg);font-size:24px;margin:0 0 6px;text-wrap:balance}
+.chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:14px}
+.chip{border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:6px 12px;font-size:13px}
+.chip:hover{border-color:var(--violet)}
+.msg{display:flex;gap:10px;max-width:720px}
+.msg.me{align-self:flex-end;flex-direction:row-reverse}
+.bubble{border-radius:14px;padding:9px 12px;background:var(--panel);border:1px solid var(--line);min-width:0}
+.me .bubble{background:var(--mint-soft);border-color:transparent}
+.who{font-size:12px;color:var(--muted);margin-bottom:2px}
+.who b{color:var(--fg);font-weight:600}
+.route{align-self:center;font-size:12.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:center;text-align:center}
+.route .path{background:var(--sunk);border:1px solid var(--line);border-radius:99px;padding:3px 10px}
+.quiet{border:0;background:none;color:var(--muted);text-decoration:underline dotted;font-size:12.5px;padding:0}
+.quietlist{font-size:12px;color:var(--muted);text-align:center;align-self:center;max-width:520px}
+.hop{margin-left:40px;font-size:12.5px;color:var(--muted);max-width:560px}
+.hop summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px}
+.hop summary::-webkit-details-marker{display:none}
+.hop summary .face{width:18px;height:18px;border-radius:6px}
+.hop summary b{color:var(--fg);font-weight:500}
+.hop summary:hover b{text-decoration:underline dotted}
+.hop .said{margin:6px 0 2px 24px;padding:8px 10px;border-radius:10px;background:var(--sunk);border:1px solid var(--line);color:var(--fg);font-size:13px}
+.perm{display:flex;align-items:center;gap:8px;font-size:12.5px;padding:6px 0;border-top:1px solid var(--line)}
+.perm:first-of-type{border-top:0}
+.perm .w{flex:1;min-width:0}
+.perm select{font:inherit;font-size:12px;border:1px solid var(--line);border-radius:7px;background:var(--panel);color:var(--fg);padding:3px 6px}
+.row2{display:flex;align-items:center;gap:8px;font-size:12.5px;padding:5px 0}
+.row2 .w{flex:1;min-width:0}
+.ok{color:var(--mint);font-size:12px}
+.warn{color:var(--amber);font-size:12px}
+.ask{border:1px solid var(--violet);background:var(--violet-soft);border-radius:14px;padding:12px;max-width:520px;margin-left:40px}
+.ask p{margin:0 0 10px}
+.ask .row{display:flex;gap:8px;flex-wrap:wrap}
+.ask button{border-radius:8px;padding:6px 12px;border:1px solid var(--line);background:var(--panel)}
+.ask button.primary{background:var(--violet);color:#fff;border-color:var(--violet)}
+.ask .done{font-size:13px;color:var(--muted)}
+.foot{font-size:11.5px;color:var(--muted);margin-top:6px;display:flex;gap:10px;flex-wrap:wrap}
+.mem{align-self:flex-start;margin-left:40px;font-size:12.5px;color:var(--mint);background:var(--mint-soft);border-radius:99px;padding:3px 10px}
+.working{font-size:13px;color:var(--muted);display:flex;gap:8px;align-items:center;margin-left:0}
+.dots span{display:inline-block;width:4px;height:4px;border-radius:50%;background:var(--muted);margin-right:3px;animation:dot 1s infinite}
+.dots span:nth-child(2){animation-delay:.15s}.dots span:nth-child(3){animation-delay:.3s}
+@keyframes dot{50%{opacity:.25}}
+.composer{border-top:1px solid var(--line);padding-block:12px;padding-left:18px;padding-right:18px;background:var(--panel);display:flex;gap:8px}
+.composer input{flex:1;min-width:0;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:10px;padding:10px 12px;font:inherit}
+.send{background:var(--fg);color:var(--bg);border:0;border-radius:10px;padding:0 16px;font-weight:600}
+.hint{font-size:11.5px;color:var(--muted);padding:0 18px 10px;background:var(--panel)}
+.right{border-left:1px solid var(--line);background:var(--panel);overflow:auto;padding-block:16px;padding-left:16px;padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:14px}
+.right h3{font-family:var(--display);font-size:15px;margin:0;font-weight:600}
+.sub{font-size:12px;color:var(--muted);margin:-8px 0 0}
+.tree{list-style:none;margin:0;padding:0}
+.tree ul{list-style:none;margin:0;padding-left:16px;border-left:1px solid var(--line);margin-left:13px}
+.node{display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:8px;width:100%;border:0;background:none;text-align:left}
+.node:hover{background:var(--sunk)}
+.node.busy .nm::after{content:" · working";color:var(--mint);font-size:11px}
+.node .nm{font-weight:500}
+.node .rl{font-size:11px;color:var(--muted)}
+.card{border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:8px}
+.kv{font-size:12.5px;display:grid;grid-template-columns:78px 1fr;gap:4px 8px}
+.kv dt{color:var(--muted)}.kv dd{margin:0;min-width:0}
+.memlist{margin:0;padding-left:16px;font-size:12.5px;display:flex;flex-direction:column;gap:4px}
+.memlist li.new{color:var(--mint)}
+.back{border:0;background:none;color:var(--muted);padding:0;font-size:12.5px;text-align:left}
+/* faces */
+.face{--t:#ddd;width:28px;height:28px;flex:none;border-radius:9px;background:color-mix(in srgb,var(--t) 70%,var(--panel));position:relative;display:inline-block}
+.face.lg{width:44px;height:44px;border-radius:13px}
+.face.mgr{border-radius:50%}
+.face i{position:absolute;top:40%;width:13%;height:22%;background:var(--fg);border-radius:3px;animation:blink 4.6s infinite;animation-delay:var(--d,0s);transform-origin:center}
+.face i:first-child{left:28%}.face i:last-child{right:28%}
+.face.read i{animation:read 1.1s infinite alternate}
+.face.sleep i{height:5%;top:52%;animation:none;opacity:.7}
+@keyframes blink{0%,94%,100%{transform:scaleY(1)}97%{transform:scaleY(.1)}}
+@keyframes read{from{translate:-2px 0}to{translate:2px 0}}
+.mobilebar{display:none}
+@media (max-width:860px){
+  .app{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
+  .side{display:none}.right{display:none}
+  .app.show-side .side,.app.show-right .right{display:flex;position:fixed;inset:0;z-index:20;padding-top:calc(16px + env(safe-area-inset-top,0px))}
+  .mobilebar{display:flex;gap:8px;align-items:center;padding-block:8px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));border-bottom:1px solid var(--line);background:var(--sunk)}
+  .mobilebar .brand{flex:1}
+  .closer{display:inline-block!important}
+}
+.closer{display:none}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="app" id="app">
+  <div class="mobilebar">
+    <button class="ghost" id="mSide" aria-label="Open threads">☰</button>
+    <div class="brand">Company</div>
+    <button class="icon" id="mRight" aria-label="Company chart" title="Company chart"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="5" rx="1.5"/><rect x="3" y="16" width="6" height="5" rx="1.5"/><rect x="15" y="16" width="6" height="5" rx="1.5"/><path d="M12 8v4M6 16v-2h12v2"/></svg></button>
+  </div>
+  <aside class="side" aria-label="Navigation">
+    <div class="brand">Your company <span class="tag">demo</span><button class="ghost closer" data-close>Close</button></div>
+    <button class="newbtn" id="newThread">+ New thread<br><span style="font-size:12px;color:var(--muted)">No bot to pick. The right one picks it up.</span></button>
+    <div class="sec"><h3>Needs you</h3><div id="needs"></div></div>
+    <div class="sec"><h3>Threads</h3><div id="threads"></div></div>
+    <div class="sec"><h3>Direct</h3><div id="direct"></div></div>
+  </aside>
+  <main class="main">
+    <div class="head"><h2 id="title">New thread</h2>
+      <button class="icon" id="actBtn" aria-label="Activity" title="Activity"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></button>
+      <button class="icon" id="pauseBtn" aria-label="Pause all bots" title="Pause all bots"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M9 6v12M15 6v12"/></svg></button>
+      <button class="icon" id="orgBtn" aria-label="Company chart" title="Company chart"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="5" rx="1.5"/><rect x="3" y="16" width="6" height="5" rx="1.5"/><rect x="15" y="16" width="6" height="5" rx="1.5"/><path d="M12 8v4M6 16v-2h12v2"/></svg></button>
+      <button class="icon" id="setBtn" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button></div>
+    <div class="paused" id="pausedBar" hidden>All bots are paused. Nothing runs until you resume. <button id="resume">Resume</button></div>
+    <div class="feed" id="feed" role="log" aria-live="polite"></div>
+    <form class="composer" id="form"><input id="box" autocomplete="off" placeholder="Ask for anything. You don't need to say who." aria-label="Message"><button class="send">Send</button></form>
+    <div class="hint">Example data. Replies are scripted; routing matches each bot's job.</div>
+  </main>
+  <aside class="right" id="right" aria-label="Company"></aside>
+</div>
+
+<script>
+const BOTS=[
+ {id:'atlas',name:'Atlas',role:'Primary',boss:null,tint:'#b9a6f5',job:'Runs the company: routes new threads, settles who owns what, creates bots.',kw:[],mem:['You like short answers first, detail after','Ops lead and Research lead report to me']},
+ {id:'ops',name:'Ops lead',role:'Manager',boss:'atlas',tint:'#9fd8c4',job:'Manages inbox and calendar work.',kw:[],mem:['Mailroom flags clients; Planner owns your week']},
+ {id:'mail',name:'Mailroom',role:'Bot',boss:'ops',tint:'#f5c59f',job:'Reads and triages your Gmail.',kw:['inbox','email','mail','gmail','client','reply'],mem:['Clients: anyone from @northwind.example','You archive newsletters unread']},
+ {id:'plan',name:'Planner',role:'Bot',boss:'ops',tint:'#a9c8f5',job:'Plans your week, meetings and reminders.',kw:['week','meeting','calendar','schedule','plan','tomorrow','remind'],mem:['No meetings before 10:00','Gym Tue and Thu evenings']},
+ {id:'rl',name:'Research lead',role:'Manager',boss:'atlas',tint:'#f2b8cf',job:'Manages research and writing.',kw:[],mem:['Scholar finds, Quill writes']},
+ {id:'sch',name:'Scholar',role:'Bot',boss:'rl',tint:'#c8e39b',job:'Finds and reads sources: papers, docs, the web.',kw:['paper','papers','research','source','find','learn','compare','study'],mem:['You trust arXiv and official docs over blogs']},
+ {id:'quill',name:'Quill',role:'Bot',boss:'rl',tint:'#f1df8f',job:'Writes drafts, summaries and posts.',kw:['write','draft','summary','summarize','post','tweet','blog'],mem:['Your voice: plain, no emoji, short sentences']},
+ {id:'ledger',name:'Ledger',role:'Bot',boss:null,tint:'#d7c2a6',job:'Tracks spending and receipts. No manager.',kw:['spend','spent','receipt','expense','money','budget','invoice'],mem:['Monthly budget: example 40,000']},
+];
+const by=id=>BOTS.find(b=>b.id===id);
+const face=(b,cls='')=>`<span class="face ${b.role!=='Bot'?'mgr':''} ${cls}" data-face="${b.id}" style="--t:${b.tint};--d:${(b.name.length%5)*.7}s"><i></i><i></i></span>`;
+const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const chain=id=>{const out=[];let b=by(id);while(b){out.unshift(b);b=b.boss&&by(b.boss)}return out};
+
+const SCRIPTS=[
+ {match:t=>/paper|research/i.test(t)&&/summar|write|draft|post/i.test(t),owner:'sch',helpers:['quill'],
+  ask:{action:'use the shared browser on arxiv.org',scope:'arxiv.org'},
+  side:[['sch','Quill, I have three papers. Can you turn my notes into a 5-line summary in the owner\'s voice?'],['quill','Done. Kept it plain, no emoji. Sending it back to you.']],
+  reply:'Here are 3 recent papers with a short summary each, written up by Quill. The best one for your use is the second: it has code and a benchmark you can rerun.',
+  learn:['sch','You wanted papers with code first']},
+ {match:t=>/week|plan|meeting|calendar/i.test(t)&&/mail|inbox|email|client/i.test(t),owner:'plan',helpers:['mail'],
+  ask:{action:'read your Gmail (Google connector)',scope:'Gmail: you@example.com'},
+  side:[['plan','Mailroom, any client emails this week that need a meeting?'],['mail','Two: Northwind wants a call Wednesday, and an invoice question that can wait for email.']],
+  reply:'Your week is planned. I booked the Northwind call for Wednesday 11:00 (after your 10:00 rule), kept Tue and Thu evenings free for the gym, and left the invoice question in Mailroom\'s list.',
+  learn:['plan','Client calls go late morning']},
+];
+function routeFor(t){
+  const s=SCRIPTS.find(x=>x.match(t)); if(s) return s;
+  let best=null,score=0;
+  BOTS.filter(b=>b.role==='Bot').forEach(b=>{const n=b.kw.filter(k=>t.toLowerCase().includes(k)).length;if(n>score){score=n;best=b}});
+  if(!best) return {owner:'atlas',helpers:[],reply:'No bot here owns this yet. I can handle it myself once, or create a bot whose job this is.',create:true};
+  return {owner:best.id,helpers:[],reply:`On it. This is ${best.name}'s job: ${best.job.toLowerCase()} Here is what I found and did.`,learn:[best.id,'You asked about: '+t.slice(0,40)]};
+}
+
+const state={threads:[],cur:null,needs:[],view:{type:'org'},busy:new Set(),
+  grants:{mail:{'Gmail: send email':'always','Gmail: read':'always'},plan:{'Google Calendar: edit':'ask'},ledger:{'Pay or spend money':'ask'}}};
+state.paused=false;state.filter='outside';
+const H=60*60*1000,now=Date.now();
+state.activity=[
+ {at:now-26*H,bot:'atlas',kind:'bots',text:'Created Ledger, with no manager',thread:null},
+ {at:now-25*H,bot:'mail',kind:'perm',text:'You set "Gmail: send email" to Always allow',thread:null},
+ {at:now-3*H,bot:'mail',kind:'outside',text:'Sent an email to Northwind: "Wednesday works. 11:00?"',thread:'seed'},
+ {at:now-3*H+60000,bot:'plan',kind:'outside',text:'Added "Northwind call" to Google Calendar, Wed 11:00',thread:'seed'},
+];
+function log(bot,kind,text,thread,undo){state.activity.push({at:Date.now(),bot,kind,text,thread,undo});if(state.view.type==='activity')renderRight()}
+const KINDS=[['outside','Left the app'],['perm','Permissions'],['bots','Bots'],['all','All']];
+function dayName(ts){const d=new Date(ts),t=new Date();const diff=Math.floor((new Date(t.toDateString())-new Date(d.toDateString()))/864e5);return diff===0?'Today':diff===1?'Yesterday':d.toLocaleDateString(undefined,{weekday:'long',day:'numeric',month:'short'})}
+function actRows(list){
+  if(!list.length)return '<div style="font-size:12.5px;color:var(--muted)">Nothing here yet.</div>';
+  let out='',last='';
+  [...list].sort((a,b)=>b.at-a.at).forEach(a=>{const d=dayName(a.at);if(d!==last){out+=`<div class="day">${d}</div>`;last=d}
+    const b=by(a.bot);out+=`<button class="act" ${a.thread?`data-open="${a.thread}"`:''}>${face(b)}<span class="w"><b>${b.name}</b> ${esc(a.text)}${a.undo&&Date.now()-a.at<30000?' <span class="undo">Undo</span>':''}</span><time>${new Date(a.at).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})}</time></button>`});
+  return out;
+}
+const isPay=s=>/pay|spend/i.test(s);
+const permSel=(bot,scope)=>{const v=state.grants[bot][scope];const opts=isPay(scope)?[['ask','Ask each time'],['deny','Deny']]:[['always','Always allow'],['ask','Ask each time'],['deny','Deny']];
+  return `<select data-perm="${bot}" data-scope="${esc(scope)}" aria-label="${esc(scope)}">${opts.map(([k,l])=>`<option value="${k}" ${v===k?'selected':''}>${l}</option>`).join('')}</select>`};
+const permRows=bot=>Object.keys(state.grants[bot]||{}).map(s=>`<div class="perm"><span class="w">${esc(s)}</span>${permSel(bot,s)}</div>`).join('');
+const $=id=>document.getElementById(id);
+
+function renderSide(){
+  $('needs').innerHTML=state.needs.length?state.needs.map(n=>`<button class="item" data-open="${n.thread}">${face(by(n.bot))}<span class="t">${by(n.bot).name} asks to ${n.action.split(' ').slice(0,3).join(' ')}…</span><span class="pill">1</span></button>`).join(''):'<div style="font-size:12.5px;color:var(--muted);padding:4px 8px">Nothing waiting on you.</div>';
+  $('threads').innerHTML=state.threads.map(t=>`<button class="item ${state.cur===t.id?'on':''}" data-open="${t.id}">${t.owner?face(by(t.owner)):'<span class="face" style="--t:var(--line)"><i></i><i></i></span>'}<span class="t">${esc(t.title)}</span></button>`).join('')||'<div style="font-size:12.5px;color:var(--muted);padding:4px 8px">Your threads show here.</div>';
+  $('direct').innerHTML=BOTS.map(b=>`<button class="item" data-bot="${b.id}">${face(b,state.busy.has(b.id)?'read':(b.id==='atlas'?'':'sleep'))}<span class="t">${b.name}</span></button>`).join('');
+}
+function renderRight(){
+  const r=$('right');
+  if(state.view.type==='activity'){
+    const f=state.filter,who=state.view.bot;
+    const list=state.activity.filter(a=>(f==='all'||a.kind===f)&&(!who||a.bot===who));
+    r.innerHTML=`<h3>Activity${who?' · '+by(who).name:''}</h3><p class="sub">${f==='outside'?'Things your bots did outside the app: emails, posts, edits, payments.':f==='perm'?'Permissions you gave or changed.':f==='bots'?'Bots created, moved or paused.':'Everything, newest first.'} Tap a line to open its thread.</p><button class="ghost closer" data-close>Close</button>
+    <div class="filters">${KINDS.map(([k,l])=>`<button class="${f===k?'on':''}" data-filter="${k}">${l}</button>`).join('')}</div>
+    ${who?`<button class="back" data-actall>Show all bots</button>`:''}
+    <div>${actRows(list)}</div>`;
+    return;
+  }
+  if(state.view.type==='settings'){
+    r.innerHTML=`<h3>Settings</h3><p class="sub">Models, keys and connectors. Each bot's own settings live on that bot.</p><button class="ghost closer" data-close>Close</button>
+    <div class="card"><h3 style="font-size:13px">Subscriptions</h3>
+      <div class="row2"><span class="w">Claude (Max) · on your laptop</span><span class="ok">Signed in</span></div>
+      <div class="row2"><span class="w">ChatGPT (Plus) · on your laptop</span><span class="warn">Run <code>codex</code> to sign in</span></div></div>
+    <div class="card"><h3 style="font-size:13px">API keys</h3>
+      <div class="row2"><span class="w">OpenAI · gpt-5 family</span><span class="ok">Saved</span></div>
+      <div class="row2"><span class="w">Gemini</span><button class="ghost">Add key</button></div>
+      <div class="row2"><span class="w">Default model for new bots</span><select aria-label="Default model"><option>Claude (subscription)</option><option>ChatGPT (subscription)</option><option>OpenAI key</option></select></div></div>
+    <div class="card"><h3 style="font-size:13px">Connectors</h3>
+      <div class="row2"><span class="w">Google: Gmail, Drive, Calendar</span><span class="ok">Connected</span></div>
+      <div class="row2"><span class="w">MCP servers: GitHub, Notion</span><button class="ghost">Add server</button></div></div>`;
+    return;
+  }
+  if(state.view.type==='bot'){
+    const b=by(state.view.id),reports=BOTS.filter(x=>x.boss===b.id);
+    const g=Object.keys(state.grants[b.id]||{});
+    r.innerHTML=`<button class="back" data-org>← Company chart</button><button class="ghost closer" data-close>Close</button>
+    <div style="display:flex;gap:10px;align-items:center">${face(b,'lg')}<div><h3>${b.name}</h3><div class="sub" style="margin:0">${b.role}${b.boss?' · reports to '+by(b.boss).name:' · no manager'}</div></div></div>
+    <div class="card"><dl class="kv"><dt>Job</dt><dd>${b.job}</dd><dt>Model</dt><dd><select aria-label="Model for ${b.name}" style="font:inherit;font-size:12px;border:1px solid var(--line);border-radius:7px;background:var(--panel);color:var(--fg);padding:2px 6px"><option>Claude (subscription)</option><option>ChatGPT (subscription)</option><option>OpenAI key</option></select></dd><dt>Context</dt><dd>Automatic. It pulls its memory and the thread as it needs them.</dd>${reports.length?`<dt>Team</dt><dd>${reports.map(x=>x.name).join(', ')}</dd>`:''}</dl></div>
+    <div class="card"><h3 style="font-size:13px">What ${b.name} may do</h3>${g.length?permRows(b.id)+'<div style="font-size:11.5px;color:var(--muted)">Payments never get Always allow.</div>':'<div style="font-size:12.5px;color:var(--muted)">Basic kit only. It asks you for anything else.</div>'}</div>
+    <div class="card"><h3 style="font-size:13px">What ${b.name} remembers</h3><ul class="memlist">${b.mem.map((m,i)=>`<li class="${b.fresh===i?'new':''}">${esc(m)}</li>`).join('')}</ul><div style="font-size:11.5px;color:var(--muted)">Private to ${b.name}. You can edit or delete any line.</div></div>
+    <div class="card"><h3 style="font-size:13px">Recent</h3>${actRows(state.activity.filter(a=>a.bot===b.id).sort((x,y)=>y.at-x.at).slice(0,3))}<button class="back" data-actbot="${b.id}">See all of ${b.name}'s activity</button></div>
+    <button class="chip" data-dm="${b.id}">Message ${b.name} directly</button>`;
+  } else {
+    const kids=id=>BOTS.filter(b=>b.boss===id);
+    const node=b=>`<li><button class="node ${state.busy.has(b.id)?'busy':''}" data-bot="${b.id}">${face(b,state.busy.has(b.id)?'read':(b.id==='atlas'?'':'sleep'))}<span><span class="nm">${b.name}</span><br><span class="rl">${b.role==='Bot'?b.job.split(':')[0].split('.')[0]:b.role}</span></span></button>${kids(b.id).length?`<ul>${kids(b.id).map(node).join('')}</ul>`:''}</li>`;
+    const roots=BOTS.filter(b=>!b.boss);
+    r.innerHTML=`<h3>Company chart</h3><p class="sub">Atlas stays awake and routes. The rest sleep until work arrives. Managers are optional; Ledger has none.</p><button class="ghost closer" data-close>Close</button>
+    <ul class="tree">${roots.filter(b=>b.id==='atlas').map(node).join('')}</ul>
+    <ul class="tree">${roots.filter(b=>b.id!=='atlas').map(node).join('')}</ul>
+    <button class="newbtn" id="hire">+ New bot<br><span style="font-size:12px;color:var(--muted)">Say what it's for. Pick a manager, or none.</span></button>`;
+  }
+}
+function renderFeed(){
+  const t=state.threads.find(x=>x.id===state.cur);
+  $('title').textContent=t?t.title:'New thread';
+  if(!t){$('feed').innerHTML=`<div class="empty"><h1>Say what you need</h1><p>Start a thread without choosing a bot. The bot whose job matches picks it up, pulls in teammates if it needs help, and answers here. Everyone else stays quiet.</p><div class="chips">
+  <button class="chip" data-try="Find recent papers on small language models and write me a short summary">Find papers and summarise them</button>
+  <button class="chip" data-try="Plan my week around any client emails in my inbox">Plan my week from my inbox</button>
+  <button class="chip" data-try="How much did I spend on food this month?">What did I spend on food?</button>
+  <button class="chip" data-try="Book a table for two on Friday">Something no bot owns</button></div></div>`;return}
+  $('feed').innerHTML=t.items.map(it=>it.html).join('');
+  $('feed').scrollTop=1e9;
+}
+function render(){renderSide();renderRight();renderFeed()}
+
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+function push(t,html){t.items.push({html});if(state.cur===t.id)renderFeed()}
+function botMsg(b,text,foot){return `<div class="msg">${face(b)}<div class="bubble"><div class="who"><b>${b.name}</b> · ${b.role==='Bot'?b.job.split(/[:.]/)[0]:b.role}</div>${text}${foot?`<div class="foot">${foot}</div>`:''}</div></div>`}
+
+async function send(text){
+  if(state.paused){$('pausedBar').animate?.([{opacity:.4},{opacity:1}],{duration:400});return}
+  const t={id:'t'+Date.now(),title:text.length>42?text.slice(0,40)+'…':text,owner:null,items:[]};
+  state.threads.unshift(t);state.cur=t.id;
+  push(t,`<div class="msg me"><div class="bubble">${esc(text)}</div></div>`);render();
+  await wait(600);
+  const r=routeFor(text),owner=by(r.owner);t.owner=owner.id;
+  const path=chain(owner.id).map(b=>b.name).join(' → ');
+  const quiet=BOTS.filter(b=>b.role==='Bot'&&b.id!==owner.id&&!r.helpers.includes(b.id));
+  push(t,`<div class="route"><span class="path">Routed ${esc(path)}</span><button class="quiet" data-q="${t.id}">${quiet.length} bots stayed quiet</button></div><div class="quietlist" id="q${t.id}" hidden>${quiet.map(b=>`${b.name}: not my job (${b.job.split(/[:.]/)[0].toLowerCase()})`).join(' · ')}</div>`);
+  state.busy.add(owner.id);render();
+  push(t,`<div class="working" id="w${t.id}">${face(owner,'read')} ${owner.name} is working<span class="dots"><span></span><span></span><span></span></span></div>`);
+  await wait(900);
+  const g0=(state.grants[owner.id]||{})[r.ask?.scope];
+  if(r.ask&&g0==='deny'){t.items=t.items.filter(it=>!it.html.includes(`id="w${t.id}"`));state.busy.delete(owner.id);push(t,botMsg(owner,`You set "${esc(r.ask.scope)}" to Deny for me, so I stopped. Change it on my profile if you want me to go ahead.`));render();return}
+  if(r.ask&&g0!=='always'){
+    const askId='a'+Date.now();
+    state.needs.push({id:askId,thread:t.id,bot:owner.id,action:r.ask.action});
+    push(t,`<div class="ask" id="${askId}"><p><b>${owner.name}</b> wants to ${esc(r.ask.action)}.</p><div class="row"><button class="primary" data-ans="always" data-ask="${askId}">Always allow for ${owner.name}</button><button data-ans="once" data-ask="${askId}">Allow once</button><button data-ans="no" data-ask="${askId}">Decline</button></div></div>`);
+    renderSide();
+    const ans=await new Promise(res=>{asks[askId]=res});
+    state.needs=state.needs.filter(n=>n.id!==askId);
+    const label={always:`Always allowed: ${owner.name} may ${r.ask.action}.`,once:'Allowed once.',no:'Declined.'}[ans];
+    t.items=t.items.map(it=>it.html.includes(`id="${askId}"`)?{html:`<div class="ask"><div class="done">${esc(label)}</div></div>`}:it);
+    (state.grants[owner.id]=state.grants[owner.id]||{})[r.ask.scope]={always:'always',once:'ask',no:'deny'}[ans];
+    if(ans==='once')delete state.grants[owner.id][r.ask.scope];
+    log(owner.id,'perm',{always:`You set "${r.ask.scope}" to Always allow`,once:`You allowed "${r.ask.scope}" once`,no:`You declined "${r.ask.scope}"`}[ans],t.id);
+    render();
+    if(ans==='no'){t.items=t.items.filter(it=>!it.html.includes(`id="w${t.id}"`));state.busy.delete(owner.id);push(t,botMsg(owner,'Okay, I won\'t. I can still answer from what I already know, or you can allow it later from my profile.'));render();return}
+  }
+  if(r.side){
+    for(const h of r.helpers)state.busy.add(h);render();
+    await wait(800);
+    for(const [w,m] of r.side){
+      const from=by(w),to=w===owner.id?by(r.helpers[0]):owner;
+      push(t,`<details class="hop"><summary>${face(from)}<span><b>${from.name}</b> messaged <b>${to.name}</b></span></summary><div class="said">${esc(m)}</div></details>`);
+      await wait(700);
+    }
+    for(const h of r.helpers)state.busy.delete(h);
+  }
+  t.items=t.items.filter(it=>!it.html.includes(`id="w${t.id}"`));
+  state.busy.delete(owner.id);
+  const ctx=`Context: ${owner.mem.length} memories · this thread${r.helpers.length?' · '+r.helpers.map(h=>by(h).name+"'s reply").join(', '):''} · picked automatically`;
+  push(t,botMsg(owner,esc(r.reply)+(r.create?`<div class="chips" style="justify-content:flex-start"><button class="chip" data-create="${t.id}">Create a bot for bookings</button><button class="chip">Handle it once</button></div>`:''),ctx));
+  if(r.owner==='plan')log('plan','outside','Added "Northwind call" to Google Calendar, Wed 11:00',t.id,true);
+  if(r.owner==='sch')log('sch','outside','Opened 3 pages on arxiv.org',t.id);
+  if(r.learn){const b=by(r.learn[0]);b.mem.push(r.learn[1]);b.fresh=b.mem.length-1;push(t,`<div class="mem">${b.name} remembered: ${esc(r.learn[1])}</div>`)}
+  render();
+}
+const asks={};
+
+document.addEventListener('click',e=>{
+  const el=e.target.closest('button');if(!el)return;
+  const app=$('app');
+  if(el.dataset.try){send(el.dataset.try);app.classList.remove('show-side')}
+  else if(el.dataset.open){state.cur=el.dataset.open;app.classList.remove('show-side');render()}
+  else if(el.dataset.bot){state.view={type:'bot',id:el.dataset.bot};renderRight();app.classList.remove('show-side');app.classList.add('show-right')}
+  else if('org' in el.dataset){state.view={type:'org'};renderRight()}
+  else if(el.dataset.ans){asks[el.dataset.ask]?.(el.dataset.ans)}
+  else if(el.dataset.q){const q=$('q'+el.dataset.q);if(q)q.hidden=!q.hidden}
+  else if(el.dataset.create){
+    const nb={id:'book'+Date.now(),name:'Concierge',role:'Bot',boss:'ops',tint:'#e7b3f0',job:'Books tables, tickets and travel.',kw:['book','table','ticket','travel','flight'],mem:['Created by Atlas from your thread']};
+    BOTS.push(nb);log('atlas','bots','Created Concierge under Ops lead',el.dataset.create);const t=state.threads.find(x=>x.id===el.dataset.create);
+    push(t,`<div class="route"><span class="path">Atlas created Concierge under Ops lead</span></div>`);
+    push(t,botMsg(nb,'Hi, I own bookings now. Which restaurant, and what time on Friday?'));
+    t.owner=nb.id;state.view={type:'bot',id:nb.id};render();
+  }
+  else if(el.id==='newThread'){state.cur=null;app.classList.remove('show-side');render();$('box').focus()}
+  else if(el.id==='actBtn'){state.view={type:'activity'};renderRight();app.classList.add('show-right')}
+  else if(el.dataset.filter){state.filter=el.dataset.filter;renderRight()}
+  else if(el.dataset.actbot){state.view={type:'activity',bot:el.dataset.actbot};state.filter='all';renderRight()}
+  else if('actall' in el.dataset){state.view={type:'activity'};renderRight()}
+  else if(el.id==='pauseBtn'||el.id==='resume'){
+    state.paused=el.id==='pauseBtn'?!state.paused:false;$('pausedBar').hidden=!state.paused;$('pauseBtn').classList.toggle('on',state.paused);
+    log('atlas','bots',state.paused?'You paused all bots':'You resumed all bots',null);
+  }
+  else if(el.id==='setBtn'){state.view={type:'settings'};renderRight();app.classList.add('show-right')}
+  else if(el.id==='orgBtn'||el.id==='mRight'){state.view={type:'org'};renderRight();app.classList.add('show-right')}
+  else if(el.id==='mSide'){app.classList.add('show-side')}
+  else if('close' in el.dataset){app.classList.remove('show-side','show-right')}
+  else if(el.id==='hire'){
+    const nb={id:'n'+Date.now(),name:'Scout',role:'Bot',boss:'rl',tint:'#9ee0e6',job:'Watches news on topics you pick.',kw:['news','watch','topic'],mem:['Created by you from the company chart']};
+    BOTS.push(nb);log('atlas','bots','You created Scout under Research lead',null);state.view={type:'bot',id:nb.id};render();
+  }
+});
+document.addEventListener('change',e=>{const s=e.target.closest('select[data-perm]');if(s){state.grants[s.dataset.perm][s.dataset.scope]=s.value;renderRight()}});
+$('form').addEventListener('submit',e=>{e.preventDefault();const v=$('box').value.trim();if(!v)return;$('box').value='';send(v)});
+
+// seed one finished example thread
+(function(){
+  const t={id:'seed',title:'Reply to the Northwind email',owner:'mail',items:[]};
+  const m=by('mail');
+  t.items.push({html:`<div class="msg me"><div class="bubble">Reply to the Northwind email and say we can do Wednesday</div></div>`});
+  t.items.push({html:`<div class="route"><span class="path">Routed Atlas → Ops lead → Mailroom</span><span>6 bots stayed quiet</span></div>`});
+  t.items.push({html:botMsg(m,'Draft ready and sent after you allowed it: "Wednesday works. 11:00?" I also told Planner, who holds the slot.','Context: 2 memories · this thread · picked automatically')});
+  state.threads.push(t);
+})();
+render();
+</script>

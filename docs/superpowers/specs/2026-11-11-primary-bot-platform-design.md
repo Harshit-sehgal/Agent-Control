@@ -1,0 +1,194 @@
+# Primary bot platform: design
+
+Date: 2026-11-11. Status: draft for owner review.
+
+## Intent
+
+Agent Control turns from an "X-engage drafting demo with extras" into a general personal bot platform. The owner signs in and finds one bot, the **primary bot**. Everything else grows from there: the owner (or any bot) creates bots, each with one job; bots talk to each other and hand work along but never do another bot's job; they share one browser the owner can take over; they run on the owner's own Claude and ChatGPT subscriptions as well as API keys; they reach Gmail, Drive and other services through connectors.
+
+The owner's reference point is Grok's agent experience: lots of automated work, high flexibility, one bot can spawn many, bots organised into groups, work goes to whichever bot matches it.
+
+Why now: the owner will only deploy and use the app daily once this structure exists. Success is the owner running real work through it every day.
+
+## Goals
+
+1. First sign-in shows exactly one bot: the primary bot. No preset bots, no preset groups.
+2. Any bot can create any number of bots, from a one-sentence description of what the new bot is for.
+3. Every bot has a clear job. Bots communicate and hand off, but a bot never does work that belongs to another bot.
+4. A bot never answers "I can't do that" for lack of permission. It asks the owner, with three answers: **Decline**, **Allow**, **Always allow for this bot**.
+5. One shared browser for all bots, with one set of sign-ins. If the owner signs in to Gmail there, every bot can use that session. The owner can take the browser over at any time and hand it back.
+6. Bots can run on the owner's Claude subscription and ChatGPT subscription, not only on API keys.
+7. Connectors for Gmail, Drive and more.
+8. Few options on screen. Per-bot permission toggles and most per-bot/per-group settings go away.
+
+## Non-goals
+
+- Multi-tenant or hosted use by other people with their subscriptions. Subscription-backed bots are owner-only (see Constraints).
+- An X-specific workflow. X-engage is deleted, not kept as a template.
+- Publishing to the public web from the app without the owner being asked.
+
+## Anti-goals (a failure even if it works)
+
+- A screen full of switches and settings the owner has to understand before anything works.
+- A bot replying "I don't have permission" instead of asking.
+- Two bots doing the same job, or a bot drifting into another bot's job.
+- The app storing or proxying the owner's claude.ai or ChatGPT login tokens.
+- A runaway loop of bots creating bots that burns through subscription limits overnight.
+
+## Constraints
+
+- **Repo rules still hold** (`AGENTS.md`): zero npm runtime dependencies, browser-safe `shared/`, asset registry, docs drift, CSP parity, module graph. All new work keeps `npm run check`, `npm test`, `npm run build:pages` green.
+- **Subscription terms** (checked 2026-11-11 against code.claude.com and learn.chatgpt.com docs):
+  - Anthropic forbids third-party apps from offering claude.ai login, routing requests through Pro/Max plan credentials on behalf of users, or collecting/storing claude.ai tokens. It does not stop an end user from signing in to the unmodified Claude Code binary with their own subscription, and its usage limits "assume ordinary, individual usage of Claude Code and the Agent SDK".
+  - OpenAI's Codex CLI supports "Sign in with ChatGPT"; docs recommend API keys for automation and say not to expose Codex execution in untrusted environments. OpenAI's "Sign in with ChatGPT" programme is the sanctioned route for third-party apps; not needed for owner-only use.
+  - Google forbids using Gemini CLI OAuth in third-party tools. Gemini stays API-key only.
+  - Consequence: subscription-backed bots run **only on the owner's machine, through the unmodified `claude` and `codex` CLIs, signed in by the owner in their own terminal**. The app never sees, stores or forwards those logins. Headless `claude -p` must not use `--bare` (bare mode ignores the subscription login; it may become the `-p` default later, so pass the opt-out explicitly once one exists).
+- **Prompt injection**: every page and email a bot reads can carry hidden instructions. With a signed-in shared browser and Gmail connector, an injected instruction could reach the owner's accounts. The ask mechanism is the defence.
+
+## Decided with the owner
+
+- **One primary bot at first sign-in.** The owner can rename it and change its personality and model later.
+- **Bots are created** by the owner directly or by asking any bot ("make me a bot that watches my inbox and flags client mail"). From that sentence the creating bot writes the new bot's name, job and instructions. The owner can edit them.
+- **No limit** on how many bots any bot can create.
+- **Basic kit, every bot, no asking:** chat with the owner; message and hand work to any bot; create bots; add bots to groups; its own memory of its job and past work; schedule its own recurring tasks; ask the owner for anything it lacks.
+- **Asks first, every bot:** using the shared browser; using a connector; anything that sends, posts, deletes or spends.
+- **Ask card:** Decline / Allow / Always allow for this bot. This replaces per-bot permission toggles, the `browserApproval` select, and "Grant browser access".
+- **Primary-bot-only powers:**
+  - sees every bot's work and runs; can pause, stop, edit or delete any bot;
+  - settles ownership: when two bots' jobs overlap, or a task matches no bot, the primary decides who takes it (or creates a bot for it);
+  - holds setup: connecting subscriptions and connectors, the default model for new bots;
+  - answers "who is allowed what" and can revoke an Always allow;
+  - cannot be deleted.
+- **Runaway guard:** no cap on bot count, but if bot creation forms a loop or exceeds about 20 bots in a few minutes, all bot activity pauses and the primary asks the owner to continue.
+- **X-engage and its five example bots are removed entirely.**
+
+## Company model and threads (owner revision, 2026-11-11)
+
+This revision replaces groups. Where it conflicts with anything below, this section wins.
+
+- **Org chart, like a company.** Every bot has at most one manager (`reportsTo`, a bot id or none). A manager is an ordinary bot that has reports. The primary bot sits at the top. Managers can report to the primary or to other managers, to any depth. A bot may have no manager at all. It must stay a tree: one manager per bot, no cycles.
+- **Threads, Slack-style, with no assignee.** The owner starts a thread without picking a bot. The bot whose job matches picks it up, answers in the thread, and every other bot stays quiet. The owner can still message a bot directly.
+- **Routing is one cheap step, never a broadcast.** Bots do not each read the message and decide whether to react: that would cost one model call per bot per message. One routing call, made by the primary from every bot's name and job (memory excluded), picks the owner. When the match is clear it goes straight to the owning bot; managers are consulted only when the primary can't tell which of their reports owns it. Quiet bots never see the message. Owner's framing: the primary stays awake and every other bot sleeps until work is routed to it; the chart and chat list show sleeping, working and waiting-on-you states.
+- **The route is shown.** The thread shows a one-line path ("Atlas → Ops lead → Mailroom") and a "N bots stayed quiet" note the owner can open to see why each one skipped. One click ("wrong bot? hand to…") reassigns the thread, and the correction goes into the primary's memory.
+- **No bot owns it:** the primary says so and offers to handle it once or create a bot for it, under whichever manager fits.
+- **Help between bots.** The owning bot messages other bots directly, gets the answer, and replies to the owner in the thread. Each bot-to-bot message shows in the thread as one line, "Scholar messaged Quill". Tapping that line (it is a message, not a button) shows exactly what was sent. Replies show the same way.
+- **Managers' powers** within their own team (everything below them in the chart): create, edit, pause and reassign bots, and settle who owns a task. The primary has these powers over the whole company, plus everything listed under primary-only powers.
+- **Context is automatic.** There is no per-bot context setting. Each turn the app assembles the bot's job, its memory, the thread so far and teammates' replies. The bot can ask for more (older thread messages, more memory) through a tool. When a thread nears the model's limit, older parts are summarised. `contextMessages` and similar settings are removed.
+- **Memory per bot.** Each bot has its own private memory: what it learned about the owner and its job. The owner can see, edit and delete every line from the bot's profile. There is also one shared company notebook every bot can read. Build on the existing durable memory (`shared/memory.js`, Phase T); do not add a second memory system.
+- **Settings are not the company chart.** The chart and Settings are two icon buttons (an org-chart symbol and a gear, with tooltips and accessible labels) in the thread's top bar, not text buttons. **Settings** holds only app-wide things: subscriptions (Claude, ChatGPT, with signed-in status), API keys, the default model for new bots, and connectors (Google, MCP servers).
+- **Per-bot settings live on the bot.** A bot's profile holds its job, manager, model, memory and permissions. Nothing per-bot appears in Settings.
+- **Per-bot permission choices.** Every permission a bot has been given is listed on that bot's profile, with a choice of **Always allow / Ask each time / Deny**. Payment permissions offer only Ask each time / Deny. Deny means the bot stops and tells the owner where to change it. This is how the owner takes back an Always allow.
+
+## Activity log and Pause all (owner asked for both; the log must stay clean)
+
+- **Where it lives.** Three places, each showing only what fits there, so nothing is repeated:
+  - *The thread* already shows its own story (route, bot-to-bot lines, asks, reply). The log never repeats this chatter.
+  - *Activity* is an icon (clock) in the top bar, next to the company chart and Settings. It opens in the side panel, not a full page.
+  - *Each bot's profile* shows its last three entries and "See all of <bot>'s activity", which opens Activity filtered to that bot.
+- **What gets an entry.** Only events the owner might need to find later: anything that left the app (email sent, page opened with a signed-in session, file changed, event added, post, payment), permission changes, and bots created, moved, paused or deleted. Never routing, thinking, bot-to-bot messages or reads inside the app.
+- **How it reads.** One plain sentence per entry with the bot's face and the time ("Mailroom sent an email to Northwind: 'Wednesday works. 11:00?'"). Grouped by day (Today, Yesterday, then dates), newest first. Tapping an entry opens its thread.
+- **Filters are four chips**, default first: *Left the app* · *Permissions* · *Bots* · *All*. No search box or date picker in v1.
+- **Undo window.** An Always-allowed email send is held for 30 seconds; its entry and the thread show Undo during that window.
+- **Pause all.** A pause icon in the top bar stops every bot-initiated run at once and shows a banner "All bots are paused. Nothing runs until you resume." with Resume. Pausing and resuming are logged under *Bots*. It reuses the runaway guard's pause mechanism.
+- Storage: one append-only table (`activity`: id, at, botId, kind `outside|perm|bots`, text, threadId, undoUntil). Retention follows the existing retention rules.
+
+## Architecture (builder's latitude inside these lines)
+
+### Bots, jobs and the primary
+
+- The existing bot record (`TABLE_SHAPES` bots in `src/sqlite-store.js`) gains `primary` (exactly one per workspace) and keeps `contract` as the bot's job. The seed in `SqliteStore.init` (`sqlite-store.js:513-520`) and `initialState()` (`shared/core.js:50-59`) creates one primary bot and no groups.
+- **1:1 chats are first class.** Today bots live inside `state.groups[].bots[]`. A bot must exist without a group (the primary does). My call: make bots top level and groups a list of bot ids; migrate existing data. Builder may choose another shape if migration is simpler, as long as a bot can exist ungrouped and belong to several groups.
+- **Duty routing**: a message goes to the bot it is addressed to (direct chat or @mention). In a group without a mention, the primary's ownership rule picks the bot whose job matches. A bot that receives work outside its job hands it to the owning bot via `handoffTargets` (`shared/coordination.js:324`, still the only way model text adds recipients), or to the primary if no owner exists. Each bot's system prompt states its job and the names and jobs of the other bots.
+- The X-specific "tracked" mode (`planTracked`, `assessTask`, `awaiting_feed`) is deleted with X-engage.
+
+### One ask mechanism
+
+- New shared module (e.g. `shared/asks.js`, registered in `shared/assets.js`): an ask record `{id, botId, action, target, detail, status: pending|allowed|declined, scope: once|always, createdAt}`, plus a per-bot grants list for Always allow.
+- `canBot` (`shared/contracts.js:97`) becomes: granted → proceed; not granted → create an ask and pause that step (run status `awaiting_ask`), resume on answer. Existing `awaiting_plan` and `awaiting_checkpoint` flows fold into the same record and card if that is cheap; otherwise leave them and remove later.
+- Actions: `browser.use`, `connector.<name>.read`, `connector.<name>.write`, `send`, `post`, `delete`, `spend`. Basic-kit actions (`bot.create`, `bot.ask`, handoff, `schedule.set`, memory) are always granted and never asked.
+- The ask card renders in the thread where the bot is working and in the primary's chat (one "Needs you" list). Amber pill count = pending asks.
+
+### Models: API keys plus subscriptions
+
+- Keep `src/ai.js` and `shared/ai-presets.js` as they are for API-key providers.
+- Add a provider kind `local-cli` with two engines, `claude` and `codex`. A bot on `local-cli` runs as a local-agent task, not a server fetch: new agent task kind `model.run` (next to `browser.capture`, `browser.action` in `src/agent.js:27`).
+- `agent/` spawns the CLI directly (`claude -p --output-format stream-json`, `codex exec --json`) with `node:child_process`. No SDK packages: both SDKs only spawn these binaries anyway, and spawning keeps the zero-dependency rule. The agent reports "claude signed in / codex signed in" in its heartbeat by checking the CLI's own status command; the app shows "Run `claude` and sign in on that machine" if not.
+- Each bot has one model. New bots start on the creator's model, or the primary's default. Owner can change it on the bot. If a subscription hits its limit, the run fails with a clear message and an Ask-style card offering "Switch this bot to <other connected model>". (My call: no silent fallback.)
+- Tools for CLI-run bots: the app's own actions (handoff, create bot, ask, browser, connectors) are passed as instructions plus a structured fence format, the same as API-key bots today. The CLI's built-in file/shell tools are disabled (`--allowedTools` / sandbox flags) so a bot cannot touch the owner's filesystem. Keep the "model output never gets publication or filesystem tools" rule.
+
+### Shared browser with takeover
+
+- Today: `agent/browser.mjs` launches headless Chrome over raw CDP with a throwaway profile; takeover (`ui-takeover.js`, `src/bot-browser.js:205`) is screenshot-based and server-runtime only.
+- New: the local agent keeps **one persistent browser profile** (in the agent's config dir, mode 0700) shared by all bots. Sign-ins made there are available to every bot.
+- Takeover works in agent mode: the app streams screenshots (CDP `Page.startScreencast`) and forwards the owner's clicks and keys, reusing the existing takeover UI. While the owner holds the browser, bots wait. "Hand back" resumes them.
+- One bot drives the browser at a time; others queue. Each bot gets its own tab.
+- Every browser use goes through the ask mechanism; reading a page after Always allow is free, submit/send/post/delete-like clicks get their own ask with Always allow per origin, and payment clicks ask every time (see Owner answers 1).
+- The old X click/type refusal goes with X-engage; the general rule above replaces it.
+
+### Connectors
+
+- Native Google sign-in plus MCP servers (see Owner answers 2). Whatever the transport, a connector is: a name, a set of read and write actions, credentials held in the existing vault (`src/vault.js`, `src/credentials.js`), and set up through the primary bot. Bots ask the first time they use one.
+
+### UI
+
+- Chat list: the primary first, then bots and groups. New chat: "New bot" (one sentence: what is it for) and "New group".
+- Bot info panel: name, job, model, what it has been allowed (with revoke). Nothing else by default. Temperature, reply length, context size and similar move behind one "Advanced" disclosure or are removed if unused.
+- Group settings shrink to name, members, and an optional "ask me between steps".
+- X-engage UI (drafts, posts found, reminders tab, voice and timing, `BOT_TEMPLATES`) is deleted.
+
+### Pages demo
+
+- `shared/group-simulator.js` is the whole Pages engine and is X-specific. My call: replace it with a small simulator where the primary bot answers with canned replies and can "create" a bot from a sentence, so the Pages demo still shows the core idea. No browser, connectors or subscriptions on Pages.
+
+## Phases (each lands green, one commit or PR each)
+
+0. **Commit or branch the current uncommitted work** on `main` (40 files) before anything else. Owner's call how.
+1. **Remove X-engage.** Delete the footprint mapped below, delete/rewrite its tests, update README, AGENTS.md, COORDINATION.md, BUILD-PLAN. About 1,600-1,900 source lines.
+2. **Primary bot, company model and threads.** Seed one primary; top-level bots with `reportsTo`; groups replaced by threads with no assignee; one-call routing with the visible route and quiet note; bot-to-bot message lines; manager and primary powers; unlimited creation from a sentence; runaway guard; automatic context; per-bot memory on the existing memory module; company chart view; Settings view; new Pages simulator. The approved clickable mock (`2026-11-11-primary-bot-platform-mock.html`, next to this file; throwaway code, scripted replies) is the UX reference.
+3. **Ask mechanism.** Ask records, card, grants with Always allow / Ask each time / Deny per bot (in the bot profile and Settings), `awaiting_ask`; activity log and Pause all; remove permission checkboxes and `browserApproval`.
+4. **Subscription models.** `local-cli` provider, `model.run` agent task, sign-in status, limit-hit card.
+5. **Shared browser and takeover in agent mode.**
+6. **Connectors**: Google sign-in (Gmail, Drive), then the MCP client.
+7. **Move to the Oracle VM** (later, owner-triggered).
+
+Phases 4, 5 and 6 are independent of each other once 3 lands.
+
+## X-engage footprint (for phase 1)
+
+- Seed and helpers: `shared/core.js:15-119`; `shared/workflow.js:75-81, 91-298, 430, 463-502`; `shared/evidence.js`; `shared/bot-settings.js:22, 125-146`.
+- Feed/tracked logic: `shared/coordination.js:69-139`; `shared/bot-browser.js:32, 202-232`; `src/coordination.js:281, 343-382`; `shared/run-state.js:20`.
+- Server: `src/routes-workflow.js:30-82`; `src/routes-public.js:135`; `src/app.js:44`; `src/handlers.js:61`; draft tick in `src/scheduler.js`; `src/ai.js:513`; `reminder` and `candidate-draft` in `shared/tasks.js`; candidates/drafts/evidence tables and seed in `src/sqlite-store.js`.
+- `extension/` (whole folder) and its test; `shared/demo-feed.html`; X routes in `shared/local-api.js`; `shared/group-simulator.js`, `shared/chat-engine.js`.
+- UI: `ui-panel.js:118-215`; `ui-views.js:75-140, 205-228`; `ui-actions.js:73-74, 125-211, 353-378`; `ui-sheets.js:11-108`; X parts of `ui-model.js`, `ui-chat.js:90-103`, `ui-store.js:145`.
+- Tests to delete: `extension`, `evidence`, draft half of `scheduler`. Many others need edits (workflow, ui-model, bot-flex, coordination*, core, bot-browser, chats, pages, e2e-journey, usability, api, sqlite-store, persistence-*, credentials-backup, task-validation, engine-parity, Python smokes).
+
+## Calls made after the builder check (my calls, owner may override)
+
+- **The app classifies risk, never the bot.** Browser actions are structured (`navigate`, `read`, `click`, `type`, `submit`). Always asks: any form submit, any non-GET request the action triggers, any click on an element whose text or role matches send / post / publish / delete / remove / pay / buy / confirm / submit, and any `navigate` whose URL carries data from a connector or another page in its query string. Connector write actions are declared by the connector, not the bot.
+- **Grant scope:** per bot, per action, per origin for `browser.use`, per account for connectors. Bots never inherit their creator's grants. "Who is allowed what" lists grants in that shape.
+- **Who answers:** asks, "Needs you" and primary-only powers belong to workspace `owner` and `admin` roles. One primary per workspace. Multi-member support stays; `member` and `viewer` cannot answer asks or bind subscription bots.
+- **Runaway guard is a general limiter:** a per-workspace counter of bot-initiated runs and bot creations (handoffs, scheduled runs, creations all count). Over about 20 creations or 60 bot-initiated runs in 5 minutes, or a handoff cycle seen 3 times, all bot-initiated work pauses and the primary asks the owner. Owner-initiated chats keep working. The existing per-run step cap stays.
+- **Pending asks hold nothing.** A bot releases the browser before it asks. Asks push a notification. Asks from unattended runs expire after 24 hours as declined.
+- **Primary routing failure:** if the primary's model is unavailable, the group message gets a card asking the owner which bot should take it.
+- **No token streaming for `local-cli` bots in v1.** The thread shows "working…" until the result returns.
+
+## Owner answers (2026-11-11)
+
+1. **Always allow is offered for every action except payments.** Send, post, delete, connector writes and browser submits all get Decline / Allow / Always allow. Anything that pays or spends money (checkout, card or wallet forms, purchase buttons, the `spend` action) only offers Decline / Allow, every time. The risk classifier above still runs: it decides which card appears, and an Always allow grant for a risky action still stays per bot, per action, per origin or account.
+2. **Connectors: both native Google sign-in and MCP servers; MCP preferred** for everything beyond Google.
+   - *Google (Gmail, Drive):* OAuth 2.0 authorization-code flow with PKCE, run by the server, tokens in the vault. The owner creates their own Google Cloud OAuth client and pastes the client id and secret under the primary's setup. Note: while that OAuth app is in "Testing" status, Google expires refresh tokens after 7 days for sensitive scopes, so the UI must show "reconnect Google" cleanly; publishing the app for personal use removes this. The redirect is `http://localhost:<port>/...` on the laptop and needs an HTTPS hostname on the VM.
+   - *MCP:* a small hand-written MCP client (JSON-RPC 2.0; no npm dependency). Stdio servers run inside the local agent; streamable-HTTP servers can be called from the server. Each MCP server is one connector; its tools become that connector's actions. Tool annotations (`readOnlyHint`, `destructiveHint`) feed the classifier; tools without annotations are treated as write. `local-cli` bots get MCP through the app's own tool fences, not the CLI's MCP config, so every call goes through the ask mechanism.
+3. **The server runs on the owner's laptop first, then moves to the owner's Oracle VM.** Leave room for that:
+   - keep the server and the local agent as separate processes paired over HTTP even when they share a machine (they already are);
+   - no hard-coded `localhost` in server logic; base URL and OAuth redirect come from config;
+   - data moves with the existing backup/restore; document the move in `docs/DEPLOYMENT.md`;
+   - on the VM, subscription CLIs, the shared browser profile and stdio MCP servers live wherever the local agent runs: the laptop (then they pause when it sleeps) or an agent on the VM too (owner signs in to `claude` and `codex` there once).
+   - Tracked as the last item of Phase Z in `docs/BUILD-PLAN.md`.
+
+## Left to the builder
+
+- Exact data migration for existing workspaces (dropping X tables is fine; owner has no production data to keep — confirm in phase 1 PR).
+- Ask record storage shape, card styling, run-status naming.
+- How the primary's ownership rule is prompted (model-decided with the bot list as context is fine).
+- Screencast frame rate and input forwarding details.
+- Which advanced bot settings survive.

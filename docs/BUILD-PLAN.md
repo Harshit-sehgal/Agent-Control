@@ -195,3 +195,12 @@ work should be added as a fresh section.
 - [x] **Copy as thread**: a draft over X's 280 is cut on word boundaries by `threadParts` (`shared/ui-model.js`), nothing dropped, and the card says how many posts it needs
 - [x] **The palette searches text**, not only names: drafts and captured posts match by their words and open the section they live in
 - [x] Tests: `tests/workflow.test.js` (pinned approval, its three refusals, restore, posted link), `tests/ui-model.test.js` (`threadParts`, threaded length line), `tests/usability.test.js` (the posted question records a link); check and test green
+
+## Phase Z — primary bot platform (design: `docs/superpowers/specs/2026-11-11-primary-bot-platform-design.md`)
+- [ ] Remove X-engage and its example bots
+- [ ] One primary bot at first sign-in; bots can exist without a group; any bot creates bots
+- [ ] One Ask card (Decline / Allow / Always allow for this bot) replaces per-bot permission toggles
+- [ ] Bots on the owner's Claude and ChatGPT subscriptions through the local agent
+- [ ] One shared browser for all bots, with takeover from the app
+- [ ] Connectors: native Google sign-in (Gmail, Drive) and MCP servers
+- [ ] **Move the server from the laptop to the Oracle VM** (it runs on the laptop first)
