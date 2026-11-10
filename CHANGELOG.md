@@ -192,6 +192,16 @@ a network.
   a live lease is left alone.
 
 ### Changed
+- **One vocabulary for the life of a run.** The ten run statuses and the three
+  lists derived from them — busy, interruptible, stoppable — were declared three
+  times: in `shared/coordination.js`, in `shared/local-runs.js` as
+  `LOCAL_RUN_BUSY`, and as a local `STOPPABLE` in `src/coordination.js`. They now
+  live in `shared/run-state.js` and every reader derives from it, so the server,
+  the Pages demo and the stop route cannot disagree about what "busy" means.
+  Ending a run also goes through one helper (`endRun`), and the "deny the pages
+  this run still has open and drop the device tasks they were sent as" cleanup —
+  already written twice, in the restart cut and in Stop — is now `denyRunPages`,
+  written once.
 - **One owner for a bot turn.** The sequence that turns a single model reply
   into a bot's answer — a sub-agent round, then a peer ask, then a new-bot block
   — was written out twice, once in the group loop and again in the 1:1 route,

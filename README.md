@@ -314,6 +314,7 @@ Note: Browser actions that X does not authorize are not enabled.
 - `shared/workflow.js`: the single source of workflow transitions (candidates, drafts, approval, schedules) plus the versioned schema migration.
 - `src/bot-turn.js`: the one sequence a bot step runs — sub-agent round, peer ask, new-bot block — shared by the group loop and a 1:1 chat so the two cannot drift apart.
 - `shared/reply-blocks.js`: the one fence grammar every control block (`ask`, `spawn`, `create-bot`, `browser`) is parsed and stripped with, so no two parsers disagree about what a block is.
+- `shared/run-state.js`: the one vocabulary for a run's life — which statuses are busy, interruptible or stoppable — shared by the orchestrator, the Pages demo and the UI.
 - `shared/core.js`: validation, ranking, scheduling state transitions.
 - `src/ai.js`: optional provider adapter and clearly labeled offline fallback.
 - `src/scheduler.js`: due-task and reminder reconciliation.

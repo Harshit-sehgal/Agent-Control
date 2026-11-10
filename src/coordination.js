@@ -6,6 +6,7 @@
  */
 import {randomUUID} from 'node:crypto';
 import {createRun,createEnvelope,runNote,planHandoffs,handoffTargets,instructLead,wakeBots,assessTask,summonableGuests,mayHandoff,MAX_HANDOFFS,BUSY_STATUSES as BUSY,INTERRUPT_STATUSES as INTERRUPT} from '../shared/coordination.js';
+import {STOPPABLE_STATUSES} from '../shared/run-state.js';
 import {botSettings,groupSettings,threadContext,MAX_STEPS_LIMIT} from '../shared/bot-settings.js';
 import {addChatMessages} from '../shared/chats.js';
 import {assertContractOutput} from '../shared/contracts.js';
@@ -33,6 +34,34 @@ function say(s,run,entry){
   if(!entry)return;
   try{addChatMessages(s,run.chatKey||`team-${run.groupId}`,[entry],{trusted:true});}catch{/* Conversation removed mid-run. */}
 }
+/** End a run here. One place writes what every finished run carries — the
+ * status, when it ended, and no checkpoint left behind (a checkpoint on a
+ * finished run would offer Continue for something already over) — so
+ * `completed`, `failed`, `cancelled` and `interrupted` cannot disagree about the
+ * shape of a finished run. The caller still owns the reason, the thread note and
+ * the activity line, because those differ per ending. */
+function endRun(run,status,{error=null}={}){
+  run.status=status;
+  run.completedAt=stamp();
+  run.checkpoint=null;
+  if(error!==null)run.error=error;
+  return run;
+}
+/** Deny the pages a run still has open and return the device tasks those pages
+ * had already been sent as. A run that stops, or that a restart cuts, must not
+ * leave the paired browser holding work for a run nobody is waiting on. The
+ * request row and its device task are two records that have to move together,
+ * which is why this is one function and not two loops that can drift. */
+function denyRunPages(state,runId,reason=''){
+  const ids=[];
+  for(const request of state.browserRequests||[]){
+    if(request.runId!==runId||!['pending','dispatched'].includes(request.status))continue;
+    if(request.status==='dispatched')for(const id of request.agentTaskIds||[])ids.push(id);
+    request.status='denied';request.updatedAt=stamp();
+    if(reason)request.error=reason;
+  }
+  return ids;
+}
 export async function markInterrupted(store){
   const taskIds = new Set();
   await store.update(s=>{
@@ -40,13 +69,9 @@ export async function markInterrupted(store){
     for(const r of s.groupRuns){
       if(!INTERRUPT.includes(r.status))continue;
       const feed=r.status==='awaiting_feed', page=r.status==='awaiting_browser';
-      r.status='interrupted';
-      r.error=feed?'Server restarted while waiting for the home feed. Ask again.':page?'Server restarted while waiting for a page. Ask again.':'Server restarted before the run completed. Retry explicitly to avoid duplicate model calls.';
-      if(feed||page)for(const request of s.browserRequests||[])if(request.runId===r.id&&['pending','dispatched'].includes(request.status)){
-        if(request.status==='dispatched')for(const id of request.agentTaskIds||[])taskIds.add(id);
-        request.status='denied';
-        request.updatedAt=stamp();
-      }
+      const reason=feed?'Server restarted while waiting for the home feed. Ask again.':page?'Server restarted while waiting for a page. Ask again.':'Server restarted before the run completed. Retry explicitly to avoid duplicate model calls.';
+      endRun(r,'interrupted',{error:reason});
+      if(feed||page)for(const id of denyRunPages(s,r.id))taskIds.add(id);
       say(s,r,runNote(r));
     }
   });
@@ -171,7 +196,7 @@ function failRunStart(store,id,error){
   return Promise.resolve(store.update(s=>{
     const r=s.groupRuns?.find(x=>x.id===id);
     if(!r||r.status!=='queued')return;
-    r.status='failed';r.error=message;r.completedAt=stamp();
+    endRun(r,'failed',{error:message});
     say(s,r,runNote(r));
   })).catch(updateError=>console.error('A run that could not start was not marked failed:',updateError.message));
 }
@@ -299,11 +324,11 @@ async function runGroupInner(store,id,executor){
       }
       i++;
     }
-    await store.update(s=>{const r=s.groupRuns.find(x=>x.id===id);if(r.task)r.task.closing=assessTask(r,{drafts:s.drafts||[]}).note;r.status='completed';r.completedAt=stamp();r.checkpoint=null;r.lastOutput=previous?.output??null;say(s,r,runNote(r));activity(s,'group-run','Completed bot coordination run',{runId:id});});
+    await store.update(s=>{const r=s.groupRuns.find(x=>x.id===id);if(r.task)r.task.closing=assessTask(r,{drafts:s.drafts||[]}).note;endRun(r,'completed');r.lastOutput=previous?.output??null;say(s,r,runNote(r));activity(s,'group-run','Completed bot coordination run',{runId:id});});
   // Only a run that was actually executing may be marked failed. A restart marks
   // live runs `interrupted`; overwriting that with `failed` would report a crash
   // the operator never saw as a model error and hide the explicit retry advice.
-  }catch(e){await store.update(s=>{const r=s.groupRuns?.find(x=>x.id===id);if(r&&r.status==='running'){r.status='failed';r.error=clean(e.message);r.completedAt=stamp();say(s,r,runNote(r));activity(s,'group-error',`Coordination failed: ${clean(e.message)}`,{runId:id});}});}
+  }catch(e){await store.update(s=>{const r=s.groupRuns?.find(x=>x.id===id);if(r&&r.status==='running'){endRun(r,'failed',{error:clean(e.message)});say(s,r,runNote(r));activity(s,'group-error',`Coordination failed: ${clean(e.message)}`,{runId:id});}});}
   finally{
     running.delete(id);
     // A fast local agent can return while autoDispatch is still awaited above.
@@ -326,10 +351,10 @@ async function holdForFeed(store,id){
     const group=s.groups.find(g=>g.id===live.groupId);
     const bot=group?.bots.find(b=>b.id===live.task.feedBotId);
     const now=stamp();
-    if(!bot){live.status='failed';live.error='No bot can read the feed.';live.completedAt=now;say(s,live,runNote(live));return {held:true,auto:[]};}
+    if(!bot){endRun(live,'failed',{error:'No bot can read the feed.'});say(s,live,runNote(live));return {held:true,auto:[]};}
     const result=queueFeedRead(s,{bot,groupId:live.groupId,chatKey:live.chatKey||`team-${live.groupId}`,runId:id,makeId:randomUUID,now});
     say(s,live,result.line);
-    if(!result.record){live.status='failed';live.error=result.line?.text||'The feed was not opened, so nothing else ran.';live.completedAt=now;return {held:true,auto:[]};}
+    if(!result.record){endRun(live,'failed',{error:result.line?.text||'The feed was not opened, so nothing else ran.'});return {held:true,auto:[]};}
     live.task={...live.task,feedRequestId:result.record.id};
     live.status='awaiting_feed';
     return {held:true,auto:botSettings(bot).browserApproval==='auto'?[result.record]:[]};
@@ -348,7 +373,7 @@ export async function resumeFeedRun(store,request,{ok,text='',executor}={}){
   const page=clean(text).trim();
   if(!ok||page.length<80){
     const error=!ok?'The feed was not opened, so nothing else ran.':'The home feed came back without posts. Sign in once in the browser profile, allow x.com on the device, and ask again. Nothing else ran.';
-    await store.update(s=>{const live=s.groupRuns.find(r=>r.id===id);if(!live||live.status!=='awaiting_feed')return;live.status='failed';live.error=error;live.completedAt=stamp();say(s,live,runNote(live));});
+    await store.update(s=>{const live=s.groupRuns.find(r=>r.id===id);if(!live||live.status!=='awaiting_feed')return;endRun(live,'failed',{error});say(s,live,runNote(live));});
     return true;
   }
   await store.update(s=>{const live=s.groupRuns.find(r=>r.id===id);if(!live||live.status!=='awaiting_feed')return;live.task={...live.task,feedText:page};live.status='queued';});
@@ -408,10 +433,9 @@ export async function resumeBrowserRun(store,request,{ok,text='',executor}={}){
   if(start)startRun(store,id,executor);
   return true;
 }
-/** Statuses where a run still holds work: it is about to start, it is between
- * steps, or it is waiting on a person. A finished, failed or cancelled run has
- * nothing left to stop. */
-const STOPPABLE = ['queued','running','awaiting_plan','awaiting_checkpoint','awaiting_browser','awaiting_feed'];
+/** A run a person can stop: it is queued or working, or it is waiting on a
+ * person. The set is declared with the other run-status categories in
+ * `shared/run-state.js`. */
 
 /** Stop a run.
  *
@@ -426,20 +450,13 @@ export async function cancelRun(store,id,{actor=null}={}){
   const result=await store.update(s=>{
     const r=s.groupRuns?.find(x=>x.id===id);
     if(!r)throw Object.assign(new Error('Run not found.'),{status:404});
-    if(!STOPPABLE.includes(r.status))throw Object.assign(new Error(`A ${r.status} run cannot be stopped.`),{status:409});
+    if(!STOPPABLE_STATUSES.includes(r.status))throw Object.assign(new Error(`A ${r.status} run cannot be stopped.`),{status:409});
     const midStep=r.status==='running';
-    r.status='cancelled';r.completedAt=stamp();r.checkpoint=null;
+    endRun(r,'cancelled');
     // A run stopped while a page was out still had that page in flight: the local
     // device would open it after the person pressed Stop, and the approval card
-    // would enqueue work for a run that no longer exists. Deny the request and
-    // remember its device tasks so the browser is not left holding a lease for a
-    // run nobody is waiting on.
-    const taskIds=[];
-    for(const request of s.browserRequests||[]){
-      if(request.runId!==id||!['pending','dispatched'].includes(request.status))continue;
-      if(request.status==='dispatched')for(const task of request.agentTaskIds||[])taskIds.push(task);
-      request.status='denied';request.updatedAt=stamp();request.error='The run was stopped before this page was opened.';
-    }
+    // would enqueue work for a run that no longer exists.
+    const taskIds=denyRunPages(s,id,'The run was stopped before this page was opened.');
     say(s,r,{id:randomUUID(),role:'system',text:midStep?'Stopped. The reply being written when you stopped it was discarded; nothing after it runs.':'Stopped before it started. Nothing ran.',runId:id,at:stamp()});
     activity(s,'group-run','Stopped a bot coordination run',{runId:id,by:actor});
     return {runId:id,status:'cancelled',taskIds};
@@ -455,7 +472,7 @@ export async function decidePlan(store,id,{approve}){
     const r=s.groupRuns.find(x=>x.id===id);
     if(!r)throw Object.assign(new Error('Run not found.'),{status:404});
     if(r.status!=='awaiting_plan')throw Object.assign(new Error('This run is not waiting on a plan.'),{status:409});
-    if(!approve){r.status='cancelled';r.completedAt=stamp();say(s,r,{id:randomUUID(),role:'system',text:'Plan cancelled. Nothing ran.',runId:id,at:stamp()});return {runId:id,status:'cancelled'};}
+    if(!approve){endRun(r,'cancelled');say(s,r,{id:randomUUID(),role:'system',text:'Plan cancelled. Nothing ran.',runId:id,at:stamp()});return {runId:id,status:'cancelled'};}
     const group=s.groups.find(g=>g.id===r.groupId);
     if(group)wakeBots(group,r.task?.woke);
     r.status='queued';say(s,r,{id:randomUUID(),role:'system',text:'Starting.',runId:id,at:stamp()});

@@ -1,9 +1,12 @@
 /** Cross-tab coordination for Pages-demo runs. Web Locks provide an atomic
  * short claim; localStorage leases keep live work visible and recoverable. */
 import {groupIdOfChat, matchesBusyChat} from './chats.js';
+import {BUSY_STATUSES} from './run-state.js';
 
 export const LOCAL_RUNS_KEY = 'agent-control-coordination-runs-v1';
-export const LOCAL_RUN_BUSY = ['running', 'queued', 'awaiting_feed', 'awaiting_browser', 'awaiting_plan', 'awaiting_checkpoint'];
+// The same statuses that block a new run on the server (see shared/run-state.js),
+// so a tab and the workspace agree on when a group is busy.
+export const LOCAL_RUN_BUSY = BUSY_STATUSES;
 const ACTIVE = new Set(['running', 'queued']);
 const LEASE_MS = 5 * 60_000;
 const now = () => new Date().toISOString();

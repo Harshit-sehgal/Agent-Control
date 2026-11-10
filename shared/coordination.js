@@ -12,12 +12,10 @@ import {memoryBlock} from './memory.js';
 /** The default step count of a run; a group may set its own up to MAX_STEPS_LIMIT. */
 export const MAX_HANDOFFS = 6;
 export const MAX_CONTEXT_CHARS = 3600;
-/** A second run waits while any of these are open. Plans and checkpoints count:
- * Start or Continue is the way through, not another message. */
-export const BUSY_STATUSES = ['running', 'queued', 'awaiting_feed', 'awaiting_browser', 'awaiting_plan', 'awaiting_checkpoint'];
-/** A restart only cuts a run that was still calling a model or waiting on a
- * page. A shown plan and a checkpoint stay, so Start and Continue still work. */
-export const INTERRUPT_STATUSES = ['running', 'queued', 'awaiting_feed', 'awaiting_browser'];
+/** Which run statuses are busy or interruptible is decided once in
+ * `shared/run-state.js`; re-exported here because callers have reached for them
+ * through the coordination module since they were declared here. */
+export {BUSY_STATUSES, INTERRUPT_STATUSES} from './run-state.js';
 const normalize = value => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 const safe = value => String(value ?? '').slice(0, MAX_CONTEXT_CHARS);
 const fail = (message, status) => Object.assign(new Error(message), {status});
