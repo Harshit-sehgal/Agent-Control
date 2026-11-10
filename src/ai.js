@@ -27,9 +27,6 @@ export const aiModel=()=>process.env.AI_MODEL||process.env.OPENAI_MODEL||'gpt-4.
 const envBase=()=>String(process.env.AI_BASE_URL||process.env.OPENAI_BASE_URL||process.env.ANTHROPIC_BASE_URL||process.env.AZURE_OPENAI_ENDPOINT||'').replace(/\/+$/,'');
 export function aiProvider(){try{return new URL(envConfig().baseUrl).host;}catch{return 'custom endpoint';}}
 const timeoutMs=()=>{const n=Number(process.env.AI_TIMEOUT_MS);return Number.isFinite(n)&&n>=1000?n:180000;};
-// Kept for callers written against the two-shape world: chat is the default
-// compatibility mode, responses is the other OpenAI shape.
-export const inferStyle=base=>inferProtocol(base)==='openai-responses'?'responses':'chat';
 
 /** Where the environment points, and with which key. A key other than
  * AI_API_KEY/OPENAI_API_KEY implies the endpoint only when no base URL is set,
@@ -511,11 +508,6 @@ export async function discoverModels(config){
     if(e.name==='AbortError')throw upstream('The provider did not answer in time.',504);
     throw e.status?e:upstream(`Could not reach ${providerHost(cfg)} to list models.`);
   }finally{clearTimeout(timer);}
-}
-
-/** List the models a provider offers, for the model picker. */
-export async function listModels(config){
-  return (await discoverModels(config)).models;
 }
 
 export async function makeDraft(candidate,settings,override='',config){

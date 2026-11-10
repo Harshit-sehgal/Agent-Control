@@ -12,8 +12,7 @@ import {cleanText} from '../shared/core.js';
 import {
   modelKey, modelLabel, promptMemory, rulebook, noteTurn, noteChat,
   consolidationInstructions, consolidationInput, parseConsolidation, mergeConsolidation,
-  consolidationDue, publicMemory, addRules, removeRule, forgetRulebook, forgetChat,
-  findRulebook,
+  consolidationDue, findRulebook,
 } from '../shared/memory.js';
 import {complete} from './ai.js';
 import {botSettings} from '../shared/bot-settings.js';
@@ -138,19 +137,4 @@ export async function maybeConsolidate(store, {key, config, chatKey = '', label 
     if (error?.status !== 503) console.error('Memory consolidation failed:', error.message);
     return null;
   }
-}
-
-/** Preference changes made by a person in the UI. */
-export function editMemory(store, {model, action, text = '', ruleId = '', chat = ''}) {
-  const key = cleanText(model, 200);
-  return store.update(state => {
-    if (action === 'add') {
-      if (!key) throw Object.assign(new Error('Which model should keep this rule?'), {status: 400});
-      return addRules(state, key, [text], {source: 'user'}).book;
-    }
-    if (action === 'remove') return removeRule(state, key, ruleId);
-    if (action === 'forget-model') return forgetRulebook(state, key);
-    if (action === 'forget-chat') return forgetChat(state, chat);
-    return publicMemory(state);
-  });
 }

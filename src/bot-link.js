@@ -19,15 +19,7 @@ import {cleanText} from '../shared/core.js';
 
 const stamp = () => new Date().toISOString();
 
-/** Run one bot step with at most one peer-ask round.
- * `executor(bot, input, config)` is the model call, `peers` is the roster this
- * bot may ask, and `configFor(botId)` resolves a teammate's own provider. */
-export async function replyWithPeerAsk({bot, envelope = {}, executor, config, peers = [], configFor = () => null, memoryForPeer = null, handoffAllowed = true, rounds = 0, makeId = randomUUID, now = stamp}) {
-  const first = String(await executor(bot, JSON.stringify(envelope), config) ?? '');
-  return askPeerRound({bot, envelope, first, executor, config, peers, configFor, memoryForPeer, handoffAllowed, rounds, makeId, now});
-}
-
-/** The same round, starting from a reply the orchestrator already has. This is
+/** The round, starting from a reply the orchestrator already has. This is
  * what a step uses after the sub-agent round, so the model is not called twice. */
 export async function askPeerRound({bot, envelope = {}, first, executor, config, peers = [], configFor = () => null, memoryForPeer = null, handoffAllowed = true, rounds = 0, makeId = randomUUID, now = stamp}) {
   const found = parseAskRequests(first);
