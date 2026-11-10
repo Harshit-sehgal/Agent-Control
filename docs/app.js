@@ -11,14 +11,14 @@
  *   ui-dialogs  toast, sheet, confirm/ask   ui-actions action/form tables
  *   ui-fx       confetti, the send arrow, and when the bots react
  */
-import {parseRoute} from './ui-model.js?v=fa63e67302';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, isAdmin, canWrite, applyTheme, watchSystemTheme, retireSession, resetChatState, sessionEpoch} from './ui-store.js?v=fa63e67302';
-import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=fa63e67302';
-import {listShell, renderList, threadShell, renderThread, homeView, renderMentions} from './ui-views.js?v=fa63e67302';
-import {renderInfo, refreshLists, renderPage} from './ui-panel.js?v=fa63e67302';
-import {showLogin, hideLogin, openCommandPalette, closeCommandPalette, paletteOpen, updateCommandResults, chooseCommand, moveCommand} from './ui-sheets.js?v=fa63e67302';
-import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=fa63e67302';
-import {bringBotsToLife} from './ui-fx.js?v=fa63e67302';
+import {parseRoute} from './ui-model.js?v=83a07c5dc5';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, isAdmin, canWrite, applyTheme, watchSystemTheme, retireSession, resetChatState, sessionEpoch} from './ui-store.js?v=83a07c5dc5';
+import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=83a07c5dc5';
+import {listShell, renderList, threadShell, renderThread, homeView, renderMentions} from './ui-views.js?v=83a07c5dc5';
+import {renderInfo, refreshLists, renderPage} from './ui-panel.js?v=83a07c5dc5';
+import {showLogin, hideLogin, openCommandPalette, closeCommandPalette, paletteOpen, updateCommandResults, chooseCommand, moveCommand} from './ui-sheets.js?v=83a07c5dc5';
+import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=83a07c5dc5';
+import {bringBotsToLife} from './ui-fx.js?v=83a07c5dc5';
 
 const el = id => document.getElementById(id);
 const hashRoute = () => parseRoute(location.hash, store.state, {server: !isStaticDemo(), admin: isAdmin(), write: canWrite()});

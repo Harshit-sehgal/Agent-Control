@@ -18,6 +18,7 @@
 import {cleanText} from './core.js';
 import {fail} from './errors.js';
 import {defaultContract} from './contracts.js';
+import {controlFence} from './reply-blocks.js';
 
 export const BOT_CREATE_PERMISSION = 'bot.create';
 export const MAX_NEW_BOTS_PER_REPLY = 1;
@@ -27,9 +28,11 @@ export const MAX_BOT_NAME = 60;
 export const MAX_BOT_JOB = 3000;
 export const MIN_BOT_JOB = 20;
 export const BOT_REPLY_LENGTHS = ['short', 'medium', 'long'];
-/** A block must be closed. An unterminated fence stays in the reply as plain
- * text instead of swallowing the rest of the answer. */
-const BLOCK = /```create-bot[ \t]*\r?\n([\s\S]{1,8000}?)```/gi;
+// One fence grammar shared with every other control block (see
+// shared/reply-blocks.js): the reply is read and stripped with the same rule as
+// the ask, spawn and browser blocks, so an unclosed final fence behaves the same
+// for all of them instead of surviving here as visible control text.
+const BLOCK = () => controlFence('create-bot');
 const MAX_BLOCKS_READ = 5;
 
 export function validateCreateBotRequest(body) {
@@ -44,7 +47,7 @@ export function validateCreateBotRequest(body) {
 
 export function parseCreateBotRequests(output) {
   const found = [];
-  for (const match of String(output ?? '').matchAll(BLOCK)) {
+  for (const match of String(output ?? '').matchAll(BLOCK())) {
     if (found.length >= MAX_BLOCKS_READ) break;
     // Past the first block the reply is over its limit. Reported, not dropped:
     // a silent second request looks like the bot simply ignored the ask.
@@ -61,7 +64,7 @@ export function parseCreateBotRequests(output) {
   return found;
 }
 
-export const stripCreateBotBlocks = output => String(output ?? '').replace(BLOCK, '').replace(/\n{3,}/g, '\n\n').trim();
+export const stripCreateBotBlocks = output => String(output ?? '').replace(BLOCK(), '').replace(/\n{3,}/g, '\n\n').trim();
 
 /** The lasting bot record the block becomes. No permissions, always custom:
  * the model cannot widen what the new bot may do. */

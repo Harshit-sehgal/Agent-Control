@@ -17,9 +17,10 @@
  * Posting stays human: interaction (click, type) is refused on X and Twitter
  * hosts, so no bot can press Post there. Reading those pages is allowed.
  */
-import {cleanText, validHttpUrl} from './core.js?v=fa63e67302';
-import {fail} from './errors.js?v=fa63e67302';
-import {controlFence} from './bot-link.js?v=fa63e67302';
+import {cleanText, validHttpUrl} from './core.js?v=83a07c5dc5';
+import {fail} from './errors.js?v=83a07c5dc5';
+import {canBot} from './contracts.js?v=83a07c5dc5';
+import {controlFence} from './reply-blocks.js?v=83a07c5dc5';
 
 export const BROWSER_PERMISSION = 'browser.use';
 export const MAX_REQUESTS_PER_REPLY = 2;
@@ -183,7 +184,7 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
   const found = parseBrowserRequests(output), text = stripBrowserBlocks(output), lines = [], records = [];
   if (!found.length) return {text: String(output ?? ''), records, lines};
   const say = line => lines.push({id: makeId(), role: 'system', text: line, at: now});
-  if (!(bot.permissions || []).includes(BROWSER_PERMISSION)) say(`${bot.name} asked for a web page but does not hold the ${BROWSER_PERMISSION} permission. Grant it in the bot profile to allow this.`);
+  if (!canBot(bot, BROWSER_PERMISSION)) say(`${bot.name} asked for a web page but does not hold the ${BROWSER_PERMISSION} permission. Grant it in the bot profile to allow this.`);
   else if (depth >= MAX_BROWSER_DEPTH) say(`${bot.name} asked for another web page, but ${MAX_BROWSER_DEPTH} browsing rounds in a row is the limit. Ask again to continue.`);
   else for (const item of found) {
     if (!item.ok) { say(`${bot.name} asked for a web page, but the request was refused: ${item.error}`); continue; }
@@ -220,7 +221,7 @@ export function homeFeedRequest() {
 /** File that request for the source bot, or a line saying why it cannot.
  * The record carries `runId` so the result resumes that run and a denial stops it. */
 export function queueFeedRead(state, {bot, groupId, chatKey, runId, makeId = () => crypto.randomUUID(), now = new Date().toISOString()}) {
-  if (!(bot.permissions || []).includes(BROWSER_PERMISSION)) {
+  if (!canBot(bot, BROWSER_PERMISSION)) {
     return {record: null, line: {id: makeId(), role: 'system', kind: 'feed-permission', senderId: bot.id, runId, text: `${bot.name} would open your X home feed, but it does not hold the ${BROWSER_PERMISSION} permission. Grant it in the bot profile. Nothing else ran.`, at: now}};
   }
   const record = {id: makeId(), botId: bot.id, botName: bot.name, groupId, chatKey, runId, purpose: 'feed', ...homeFeedRequest(), depth: 0, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: now, updatedAt: now};

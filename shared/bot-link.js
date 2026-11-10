@@ -22,22 +22,11 @@ export const MAX_ASKS_PER_REPLY = 1;
 export const MAX_ASK_TASK = 1500;
 export const MAX_PEER_ANSWER = 2000;
 export const MAX_ASK_DEPTH = 1;
-/** Every control block in a bot reply: ask, spawn, create-bot, browser. */
-export const CONTROL_FENCES = ['ask', 'spawn', 'create-bot', 'browser'];
-/** ONE fence grammar for all of them, so no two parsers disagree about what a
- * block is. The AI client trims a fence that ends a reply, so an unclosed
- * *final* fence is a real block: the body runs to the end of the text. Every
- * parser and every strip path calls this, so whatever one accepts the others
- * remove; a fence a parser ignores cannot survive as visible control text and
- * a fence a strip removes cannot come back as a request.
- *
- * With no names it matches every control fence (the strip path). With names it
- * matches those only (one parser each). Call it per use: the `g` flag carries
- * matching state, so a shared RegExp object is not safe to hand around. */
-export function controlFence(...names) {
-  const which = names.length ? names : CONTROL_FENCES;
-  return new RegExp('```(?:' + which.join('|') + ')[ \\t]*\\r?\\n([\\s\\S]*?)(?:```|$(?![\\s\\S]))', 'gi');
-}
+/** Every control block in a bot reply, and the one grammar that reads them,
+ * live in `shared/reply-blocks.js`. Re-exported here because this module was
+ * their first home and callers still reach for them through it. */
+import {controlFence} from './reply-blocks.js';
+export {CONTROL_FENCES, controlFence} from './reply-blocks.js';
 const ASK_FENCE = () => controlFence('ask');
 const normalize = value => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 

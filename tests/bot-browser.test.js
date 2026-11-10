@@ -111,6 +111,12 @@ test('a reply becomes request cards only for a bot holding browser.use, within t
   assert.equal(out.lines[0].kind, 'browser'); assert.equal(requestOfMessage(state, out.lines[0].id).id, out.records[0].id);
   const none = recordBrowserRequests(state, {bot: browserBot({permissions: []}), groupId: 'g', chatKey: 'web', output: block({url: 'https://example.com'})});
   assert.equal(none.records.length, 0); assert.match(none.lines[0].text, /does not hold the browser\.use permission/);
+  // The permission gate asks the same question every other control block does
+  // (`canBot`), not a `.includes` on whatever the field happens to be: a
+  // malformed record whose permissions is a bare string is refused, where a
+  // string's own `.includes` would have matched the permission name.
+  const malformed = recordBrowserRequests(state, {bot: browserBot({permissions: BROWSER_PERMISSION}), groupId: 'g', chatKey: 'web', output: block({url: 'https://example.com'})});
+  assert.equal(malformed.records.length, 0); assert.match(malformed.lines[0].text, /does not hold the browser\.use permission/);
   const deep = recordBrowserRequests(state, {bot: browserBot(), groupId: 'g', chatKey: 'web', output: block({url: 'https://example.com'}), depth: MAX_BROWSER_DEPTH});
   assert.equal(deep.records.length, 0); assert.match(deep.lines[0].text, /limit/);
   const refused = recordBrowserRequests(state, {bot: browserBot(), groupId: 'g', chatKey: 'web', output: block({url: 'https://x.com', steps: [{op: 'click', selector: 'button'}]})});

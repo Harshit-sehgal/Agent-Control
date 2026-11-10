@@ -17,7 +17,7 @@
  */
 import {cleanText} from './core.js';
 import {fail} from './errors.js';
-import {controlFence} from './bot-link.js';
+import {controlFence} from './reply-blocks.js';
 
 export const SUBAGENT_PERMISSION = 'subagent.spawn';
 /** One helper per reply. Every spawn is a child call plus an extra turn for the

@@ -2,12 +2,12 @@
  * LLM output may only extend a run's recipients through `handoffTargets`, which
  * revalidates every target against this policy and the step cap.
  */
-import {botSettings,groupSettings,pipelineOf,MAX_STEPS_LIMIT} from './bot-settings.js?v=fa63e67302';
-import {BROWSER_PERMISSION,BROWSER_TOOL_HINT} from './bot-browser.js?v=fa63e67302';
-import {SUBAGENT_PERMISSION,SUBAGENT_TOOL_HINT} from './subagents.js?v=fa63e67302';
-import {BOT_ASK_PERMISSION,BOT_ASK_TOOL_HINT} from './bot-link.js?v=fa63e67302';
-import {BOT_CREATE_PERMISSION,BOT_CREATE_TOOL_HINT} from './bot-create.js?v=fa63e67302';
-import {memoryBlock} from './memory.js?v=fa63e67302';
+import {botSettings,groupSettings,pipelineOf,MAX_STEPS_LIMIT} from './bot-settings.js?v=83a07c5dc5';
+import {BROWSER_PERMISSION,BROWSER_TOOL_HINT} from './bot-browser.js?v=83a07c5dc5';
+import {SUBAGENT_PERMISSION,SUBAGENT_TOOL_HINT} from './subagents.js?v=83a07c5dc5';
+import {BOT_ASK_PERMISSION,BOT_ASK_TOOL_HINT} from './bot-link.js?v=83a07c5dc5';
+import {BOT_CREATE_PERMISSION,BOT_CREATE_TOOL_HINT} from './bot-create.js?v=83a07c5dc5';
+import {memoryBlock} from './memory.js?v=83a07c5dc5';
 
 /** The default step count of a run; a group may set its own up to MAX_STEPS_LIMIT. */
 export const MAX_HANDOFFS = 6;

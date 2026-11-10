@@ -213,9 +213,11 @@ test('every control fence uses one grammar, so an unclosed final fence cannot su
   // request. One grammar means one answer: parsed and stripped, or neither.
   const {parseSpawnRequests, stripSpawnBlocks} = await import('../shared/subagents.js');
   const {parseBrowserRequests, stripBrowserBlocks} = await import('../shared/bot-browser.js');
+  const {parseCreateBotRequests, stripCreateBotBlocks} = await import('../shared/bot-create.js');
   const cases = [
     ['ask', '{"to":"Researcher","task":"Which source?"}', text => parseAskRequests(text)[0]?.request?.to, stripAskBlocks],
     ['spawn', '{"task":"Check the figure."}', text => parseSpawnRequests(text)[0]?.request?.task, stripSpawnBlocks],
+    ['create-bot', '{"name":"Scout","job":"Find posts and list their links."}', text => parseCreateBotRequests(text)[0]?.request?.name, stripCreateBotBlocks],
     ['browser', '{"url":"https://example.com/docs"}', text => parseBrowserRequests(text)[0]?.request?.url, stripBrowserBlocks],
   ];
   const askerText = 'Before\n```ask\n{"to":"Researcher","task":"Which source?"}';

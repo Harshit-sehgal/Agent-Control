@@ -2,14 +2,14 @@
  * Both are thin renderers over ui-model.js. The list shell and the composer are
  * painted once and then only their contents change, so a background refresh can
  * never wipe what the user is typing. */
-import {botSuggestions} from './chat-engine.js?v=fa63e67302';
-import {summonableGuests} from './coordination.js?v=fa63e67302';
-import {botSettings, groupSettings} from './bot-settings.js?v=fa63e67302';
-import {requestOfMessage} from './bot-browser.js?v=fa63e67302';
-import {validHttpUrl} from './core.js?v=fa63e67302';
-import {chatRows, timeline, pendingBrowser, stuckFeedReads, draftStage, draftLength, lengthLabel, mentionSuggestions, retryTarget, threadLineActions, isRunNote, runBelongsToChat, ACTIVE_DRAFTS} from './ui-model.js?v=fa63e67302';
-import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=fa63e67302';
-import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, isXGroup, botTint, recentRuns} from './ui-store.js?v=fa63e67302';
+import {botSuggestions} from './chat-engine.js?v=83a07c5dc5';
+import {summonableGuests} from './coordination.js?v=83a07c5dc5';
+import {botSettings, groupSettings} from './bot-settings.js?v=83a07c5dc5';
+import {requestOfMessage} from './bot-browser.js?v=83a07c5dc5';
+import {validHttpUrl} from './core.js?v=83a07c5dc5';
+import {chatRows, timeline, pendingBrowser, stuckFeedReads, draftStage, draftLength, lengthLabel, mentionSuggestions, retryTarget, threadLineActions, isRunNote, runBelongsToChat, ACTIVE_DRAFTS} from './ui-model.js?v=83a07c5dc5';
+import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=83a07c5dc5';
+import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, isXGroup, botTint, recentRuns} from './ui-store.js?v=83a07c5dc5';
 
 const el = id => document.getElementById(id);
 const FILTERS = [['all', 'All'], ['needs', 'Needs you'], ['groups', 'Groups'], ['bots', 'Bots']];
