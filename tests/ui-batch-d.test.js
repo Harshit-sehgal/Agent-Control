@@ -121,7 +121,7 @@ test('a push status reply with no endpoint list reads as no devices', async () =
 
 // ---- markup, guards and CSS that only a browser would notice -----------------
 
-const [appJs, views, actions, css, indexHtml] = await Promise.all(['app.js', 'ui-views.js', 'ui-actions.js', 'app.css', 'index.html'].map(shared));
+const [appJs, views, actions, css, indexHtml, panel] = await Promise.all(['app.js', 'ui-views.js', 'ui-actions.js', 'app.css', 'index.html', 'ui-panel.js'].map(shared));
 
 test('the details button announces what it opens', () => {
   assert.match(views, /class="thread-title" data-action="open-info" aria-expanded="\$\{Boolean\(store\.route\.info\)\}" aria-controls="inspector"/);
@@ -160,6 +160,14 @@ test('a landing chip asks the group it belongs to', () => {
   assert.match(actions, /const group = \(groupId \? findGroup\(groupId\) : null\) \|\| groups\(\)\[0\]/);
   assert.match(views, /function homePrompts\(group\)/);
   assert.match(views, /data-action="home-ask" data-id="\$\{esc\(group\?\.id \|\| ''\)\}"/);
+});
+
+test('a control is offered to the role the route behind it accepts', () => {
+  // Replacing the capture token is admin-only at the route, and `canWrite()`
+  // includes members: a member saw the row, confirmed a consequence ("every
+  // browser needs the new one") that would not happen, and got a 403.
+  assert.match(panel, /isAdmin\(\) \? row\(\{title: 'Replace capture token'/);
+  assert.doesNotMatch(panel, /canWrite\(\) \? row\(\{title: 'Replace capture token'/);
 });
 
 test('long titles wrap instead of overflowing, and dead hover rules stay deleted', () => {
