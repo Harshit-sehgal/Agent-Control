@@ -38,7 +38,9 @@ test('Specialist suggestions remain relevant',()=>{
 test('custom bots run through the Node provider only on the server build',()=>{
   // The README promises custom bots run when a key is configured; the UI used
   // to answer every custom bot with the offline command demo instead.
-  assert.match(app,/if \(!isStaticDemo\(\)\) return runOnServer/);
+  // The group-run path is the same on both builds: POST /chat, then follow the
+  // run through its routes. Only a plain 1:1 message still differs by build.
+  assert.match(app,/return runOnServer\(group, message, directBotId, id\)/);
   assert.match(app,/\/api\/bots\/run', 'POST', \{botId: bot\.id/);
   assert.match(app,/export const isLive = \(\) => !isStaticDemo\(\) && Boolean\(store\.state\?\.aiEnabled\)/);
   assert.match(app,/\/api\/bots\/run/);
@@ -53,16 +55,12 @@ test('custom bots run through the Node provider only on the server build',()=>{
   assert.match(app,/await pollRun\(\{/);
   assert.match(app,/await streamGroupRun\(groupId, key, run\.runId\);\n    return true;/);
   assert.match(app,/const key = run\?\.chatKey \|\| chatId\(\) \|\| teamKey\(b\.dataset\.id\)/);
-  assert.match(app,/continueDemoPlan\(group, run\.input, key, \{runId: run\.id\}\)/);
-  assert.match(app,/BUSY_STATUSES\.includes\(r\.status\)/);
-  assert.match(app,/groupInFlight\(group\) > 1/);
-  assert.match(app,/continueDemoPlan\(group, message, key, \{runId, resume\} = \{\}\)/);
-  assert.match(app,/A group run is already active\. Wait or retry later/);
-  assert.match(app,/const lease = await claimLocalRun\(started/);
-  assert.match(app,/const heartbeat = setInterval\(\(\) => \{ void renewLocalRun\(lease\)\.catch\(\(\) => \{\}\); \}, 30_000\);/);
-  assert.match(app,/shouldStop: \(\) => localRunCancelled\(lease\.id\)/);
-  assert.match(app,/const finished = await finishLocalRun\(lease, run\);/);
-  assert.match(app,/'continue-run': async b => \{[\s\S]*?isStaticDemo\(\)[\s\S]*?resume: run/);
+  // A run decision goes to its route in both builds: continue, plan, cancel.
+  assert.match(app,/runs\/\$\{b\.dataset\.run\}\/continue`, 'POST'/);
+  assert.match(app,/runs\/\$\{b\.dataset\.run\}\/plan`, 'POST', \{approve: true\}/);
+  assert.match(app,/runs\/\$\{b\.dataset\.run\}\/plan`, 'POST', \{approve: false\}/);
+  assert.match(app,/runs\/\$\{b\.dataset\.run\}\/cancel`, 'POST'/);
+  assert.match(app,/runWithTyping\(\{key, setTyping, sync, concurrent: true,/);
   assert.match(app,/runButtons\(\{status, live\}\)/);
   assert.match(app,/flags\.checkpoint \? btn\('Approve next step', 'continue-run'/);
   assert.match(app,/drafts \? `<button type="button" class="needs-pill" data-action="open-section" data-section="drafts"/);
@@ -78,8 +76,9 @@ test('custom bots run through the Node provider only on the server build',()=>{
   assert.match(app,/write \? iconBtn\('plus', 'Share a post'/);
   assert.match(app,/write && flags\.checkpoint \? btn\('Approve next step'/);
   assert.match(app,/Viewers can read chats\. A member can send\./);
-  assert.match(app,/patchLocalRun\(run\.id, \{status: 'awaiting_plan'\}\)/);
-  assert.doesNotMatch(app,/if \(error\.status !== 409\) patchLocalRun/);
+  // A plan's Start and Cancel are now routed like every other decision, not
+  // patched into a browser-side run log.
+  assert.match(app,/runs\/\$\{b\.dataset\.run\}\/plan`, 'POST', \{approve: false\}/);
   assert.match(app,/'delete-account'/);
   assert.match(app,/\/api\/account', 'DELETE'/);
   assert.match(app,/'toggle-user-disabled'/);

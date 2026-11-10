@@ -3,8 +3,8 @@
  * A run is a coordination run: a group pipeline, or the page turn a 1:1 bot
  * takes. It is `queued`, then `running`; it may stop at a plan, a checkpoint, a
  * page or a feed read; and it ends. Those ten words are read by the Node
- * orchestrator (`src/coordination.js`), the Pages demo
- * (`shared/local-runs.js`) and the UI (`shared/ui-model.js`,
+ * orchestrator (`src/coordination.js`), the Pages demo engine
+ * (`shared/local-api.js`) and the UI (`shared/ui-model.js`,
  * `shared/ui-panel.js`) — and each of them used to keep its own hand-written
  * list of which of the words count as busy, interruptible or stoppable, so the
  * three could disagree about what "busy" meant after any change.

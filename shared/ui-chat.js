@@ -4,28 +4,20 @@
  * runs its own instructions on the server; everything else answers from the
  * offline command set. Nothing here can publish. */
 import {classifyMessage, statusSummary} from './chat-engine.js';
-import {simulateGroup} from './group-simulator.js';
-import {planHandoffs, leadShouldRunGroup, summonableGuests, BUSY_STATUSES} from './coordination.js';
+import {planHandoffs, leadShouldRunGroup, summonableGuests} from './coordination.js';
 import {feedPauseAction} from './ui-model.js';
 import {pollRun} from './run-follow.js';
 import {botSettings, groupSettings} from './bot-settings.js';
-import {store, api, sync, conversation, appendMessage, setTyping, isStaticDemo, teamKey, groups, recentRuns} from './ui-store.js';
-import {claimLocalRun, renewLocalRun, finishLocalRun, localRunCancelled} from './local-runs.js';
+import {store, api, sync, conversation, appendMessage, setTyping, isStaticDemo, teamKey, groups} from './ui-store.js';
 import {toast} from './ui-dialogs.js';
 
-const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 /** In-flight sends per conversation, so two overlapping sends keep the typing
  * indicator up until the last one finishes instead of the first clearing it. */
 const inFlight = new Map();
-function groupInFlight(group) {
-  const chats = new Set([`team-${group.id}`, ...(group.bots || []).map(b => b.id)]);
-  let n = 0;
-  for (const [id, count] of inFlight) if (chats.has(id)) n += count;
-  return n;
-}
 // Offline replies are computed instantly; a short beat between them lets the
 // bot be seen thinking, so a handoff reads as a conversation, not a dump.
 const BEAT_MS = 450;
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 /** Stream a server-coordinated group run into the conversation until it finishes
  * or pauses at a human checkpoint. The loop itself is `pollRun` in
@@ -36,7 +28,7 @@ function sayOnce(key, text) {
 }
 
 export async function streamGroupRun(groupId, key = teamKey(groupId), runId = null, {ignore = []} = {}) {
-  if (isStaticDemo() || !runId) return;
+  if (!runId) return;
   await pollRun({
     runId, groupId, ignore,
     wait: ms => new Promise(resolve => setTimeout(resolve, ms)),
@@ -54,7 +46,6 @@ export async function streamGroupRun(groupId, key = teamKey(groupId), runId = nu
 /** A queued run the server has already paused or stopped. Returns true when the
  * chat should show that record and not claim the others are already working. */
 export async function watchQueuedRun(groupId, key, run) {
-  if (isStaticDemo()) return false;
   if (['failed', 'interrupted', 'awaiting_plan', 'awaiting_checkpoint', 'completed', 'cancelled'].includes(run?.status)) {
     await sync().catch(() => {});
     return true;
@@ -89,63 +80,6 @@ async function runOnServer(group, message, directBotId, key) {
   await streamGroupRun(group.id, key, run?.runId || null);
 }
 
-async function runSimulated(group, message, directBotId, guests, key, {started = false, runId = null, resume = null} = {}) {
-  // Start is the way through a shown plan. Another send must wait, same as Node.
-  // inFlight includes this call, so 1 is the live send or Start; 2 is a pile-up.
-  if (groupInFlight(group) > 1 || (!started && recentRuns(group.id).some(r => BUSY_STATUSES.includes(r.status)))) {
-    throw Object.assign(new Error('A group run is already active. Wait or retry later.'), {status: 409});
-  }
-  // Validate recipients before execution; messages cannot cross group boundaries
-  // except to bots their own group lets be @mentioned.
-  if (!resume) planHandoffs(group, message, {directBotId, guests});
-  // Claim the group across tabs before /api/state can advance due tasks.
-  const lease = await claimLocalRun(started
-    ? {id: runId, groupId: group.id}
-    : {id: crypto.randomUUID(), groupId: group.id, input: message, mode: 'simulated', recipients: [], status: 'running', createdAt: new Date().toISOString(), chatKey: key},
-  {existing: started});
-  const heartbeat = setInterval(() => { void renewLocalRun(lease).catch(() => {}); }, 30_000);
-  try {
-    // Refresh first: the simulator reads state.drafts to pick a post that still
-    // needs a draft, so a stale snapshot would re-draft one already handled.
-    const state = await api('/api/state');
-    const said = [];
-    let used = false;
-    const makeId = () => {
-      if (!used) { used = true; return lease.id; }
-      return crypto.randomUUID();
-    };
-    const run = await simulateGroup({group, message, directBotId, guests, state, api, makeId, emit: entry => said.push(entry), chatKey: key, started: started || Boolean(resume), resume, shouldStop: () => localRunCancelled(lease.id)});
-    if (!localRunCancelled(lease.id)) {
-      for (const entry of said) {
-        await wait(BEAT_MS);
-        if (localRunCancelled(lease.id)) break;
-        appendMessage(key, {...entry, at: new Date().toISOString()});
-      }
-    }
-    const finished = await finishLocalRun(lease, run);
-    return finished?.status === 'cancelled' ? {...run, status: 'cancelled'} : run;
-  } catch (error) {
-    await finishLocalRun(lease, {status: 'failed', error: String(error?.message || error).slice(0, 400)});
-    throw error;
-  } finally {
-    clearInterval(heartbeat);
-  }
-}
-
-/** The demo's Start button, and Approve next step for a paused simulation. */
-export async function continueDemoPlan(group, message, key, {runId, resume} = {}) {
-  const lead = (group?.bots || []).find(b => botSettings(b).lead);
-  const guests = summonableGuests(groups(), group.id, {includeOff: true});
-  const count = (inFlight.get(key) || 0) + 1;
-  inFlight.set(key, count);
-  if (count === 1) setTyping(key, true);
-  try { return await runSimulated(group, message, lead?.id || null, guests, key, {started: true, runId, resume}); }
-  finally {
-    const left = (inFlight.get(key) || 1) - 1;
-    if (left <= 0) { inFlight.delete(key); setTyping(key, false); } else inFlight.set(key, left);
-  }
-}
-
 /** The offline command set for a direct chat with a built-in bot. */
 async function localReply(conv, message) {
   const {state} = store, {bot, group} = conv, demo = isStaticDemo();
@@ -178,10 +112,9 @@ async function reply(conv, message) {
   const mention = !isTeam && planHandoffs(group, message, {directBotId: bot.id, guests}).mode === 'mention';
   if (isTeam || mention || leadShouldRunGroup(group, message, bot.id)) {
     const directBotId = isTeam ? null : bot.id;
-    // The static Pages build has no provider, so it simulates. The Node server
-    // always asks the model; a missing key or a failed call is an error, not a demo.
-    if (!isStaticDemo()) return runOnServer(group, message, directBotId, id);
-    return runSimulated(group, message, directBotId, guests, id);
+    // Both backends answer `POST /api/groups/:group/chat`; the local adapter
+    // runs the offline simulator, the server asks the model.
+    return runOnServer(group, message, directBotId, id);
   }
   if (!isStaticDemo()) {
     const run = await api('/api/bots/run', 'POST', {botId: bot.id, input: message});

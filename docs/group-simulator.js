@@ -1,7 +1,7 @@
 /** Offline group coordination. Intentionally not AI: demonstrates real context passing. */
-import {createRun,createEnvelope,handoffTargets,instructLead,wakeBots,assessTask,runNote} from './coordination.js?v=f61d657a50';
-import {botSettings,groupSettings,threadContext} from './bot-settings.js?v=f61d657a50';
-import {normalizeBot,canBot} from './contracts.js?v=f61d657a50';
+import {createRun,createEnvelope,handoffTargets,instructLead,wakeBots,assessTask,runNote} from './coordination.js?v=3b5334879a';
+import {botSettings,groupSettings,threadContext} from './bot-settings.js?v=3b5334879a';
+import {normalizeBot,canBot} from './contracts.js?v=3b5334879a';
 
 export async function simulateGroup({group, message, directBotId=null, guests=[], state, api, makeId, emit, chatKey=null, started=false, resume=null, shouldStop=()=>false}) {
   let run, previous, i;
@@ -19,7 +19,7 @@ export async function simulateGroup({group, message, directBotId=null, guests=[]
     i = Number(resume.checkpoint?.nextStep) || 0;
     previous = resume.checkpoint?.previous || null;
     // The pause this run resumed from is spent. Keeping it would persist a stale
-    // checkpoint on a finished run (shared/local-runs.js stores whatever comes back).
+    // checkpoint on a finished run (shared/local-api.js stores whatever comes back).
     run.checkpoint = null;
   } else {
     const instructed=instructLead(group,message,directBotId,guests);

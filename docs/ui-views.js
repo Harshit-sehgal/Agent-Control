@@ -2,14 +2,14 @@
  * Both are thin renderers over ui-model.js. The list shell and the composer are
  * painted once and then only their contents change, so a background refresh can
  * never wipe what the user is typing. */
-import {botSuggestions} from './chat-engine.js?v=f61d657a50';
-import {summonableGuests} from './coordination.js?v=f61d657a50';
-import {botSettings, groupSettings} from './bot-settings.js?v=f61d657a50';
-import {requestOfMessage} from './bot-browser.js?v=f61d657a50';
-import {validHttpUrl} from './core.js?v=f61d657a50';
-import {chatRows, timeline, waitingOnYou, draftStage, draftLength, lengthLabel, mentionSuggestions, retryTarget, threadLineActions, isRunNote, ACTIVE_DRAFTS} from './ui-model.js?v=f61d657a50';
-import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=f61d657a50';
-import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, isXGroup, botTint, recentRuns} from './ui-store.js?v=f61d657a50';
+import {botSuggestions} from './chat-engine.js?v=3b5334879a';
+import {summonableGuests} from './coordination.js?v=3b5334879a';
+import {botSettings, groupSettings} from './bot-settings.js?v=3b5334879a';
+import {requestOfMessage} from './bot-browser.js?v=3b5334879a';
+import {validHttpUrl} from './core.js?v=3b5334879a';
+import {chatRows, timeline, waitingOnYou, draftStage, draftLength, lengthLabel, mentionSuggestions, retryTarget, threadLineActions, isRunNote, ACTIVE_DRAFTS} from './ui-model.js?v=3b5334879a';
+import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=3b5334879a';
+import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, isXGroup, botTint, recentRuns} from './ui-store.js?v=3b5334879a';
 
 const el = id => document.getElementById(id);
 const FILTERS = [['all', 'All'], ['needs', 'Needs you'], ['groups', 'Groups'], ['bots', 'Bots']];
@@ -57,25 +57,9 @@ function chatRow(row) {
   </button>`;
 }
 
-/** Demo plans live in the local run log, not on the workspace snapshot. The
- * list still has to count them, and a workspace copy of the same id wins. */
-function localOnlyRuns(state) {
-  if (!isStaticDemo()) return [];
-  const seen = new Set((state?.groupRuns || []).map(r => r.id));
-  const extra = [];
-  for (const group of state?.groups || []) {
-    for (const run of recentRuns(group.id)) {
-      if (!run?.id || seen.has(run.id)) continue;
-      seen.add(run.id);
-      extra.push(run);
-    }
-  }
-  return extra;
-}
-
 export function renderList() {
   const {state} = store; if (!state || !el('chat-list')) return;
-  const listed = {state, messages: store.messages, profiles: store.profiles, typing: store.typing, localRuns: localOnlyRuns(state)};
+  const listed = {state, messages: store.messages, profiles: store.profiles, typing: store.typing};
   const waiting = chatRows({...listed, filter: 'all'}).reduce((n, r) => n + r.needs, 0);
   el('list-filters').innerHTML = FILTERS.map(([key, label]) => `<button type="button" class="filter${store.listFilter === key ? ' on' : ''}" data-action="list-filter" data-filter="${key}" aria-pressed="${store.listFilter === key}">${label}${key === 'needs' && waiting ? `<span class="badge">${waiting}</span>` : ''}</button>`).join('');
   const rows = chatRows({...listed, filter: store.listFilter, query: store.listQuery});

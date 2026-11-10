@@ -400,7 +400,7 @@ test('a step that throws is not retried, and both engines record the failure', a
 test('a resumed run clears the checkpoint it came from on both engines', async t => {
   // The simulator resumes by copying the paused run. It used to keep that run's
   // `checkpoint`, so a finished Pages run still carried the pause it resumed from
-  // (and shared/local-runs.js persists whatever the loop returns). Nothing reads
+  // (and the demo store persists whatever the loop returns). Nothing reads
   // `checkpoint` past `awaiting_checkpoint`, but a stale field on a finished run
   // is a lie the next reader would have to know about; the server clears it on
   // completion, so the simulator does too.

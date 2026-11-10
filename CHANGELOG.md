@@ -254,6 +254,23 @@ a network.
   which drives fake snapshots through the states a run actually passes:
   new lines only, a pending page versus a dispatched one, a feed read that
   waits or is followed, an unreadable log, and every terminal status.
+- **A run goes through the transport seam, so the UI never asks which build it
+  is on.** The Pages demo ran its group `simulateGroup` inline in
+  `shared/ui-chat.js`, kept the run in a second localStorage log
+  (`shared/local-runs.js`) and patched it from the UI, so Continue, Start,
+  Cancel and the chat list each carried an `isStaticDemo()` branch and the run
+  store could drift from the workspace. The demo now answers the same routes the
+  Node orchestrator serves — `GET/POST /api/groups/:group/chat` and
+  `POST /api/groups/:group/runs/:run/continue|plan|cancel` — and keeps the run,
+  its conversation lines and its run log in the workspace snapshot exactly where
+  `src/coordination.js` puts them; the offline engine moved into
+  `shared/local-api.js`. `shared/ui-chat.js` is now just the store adapter, the
+  four run handlers in `shared/ui-actions.js` send one request each, and
+  `recentRuns` reads the snapshot in both builds. The second store is gone:
+  `shared/local-runs.js` — which held the demo's run log, leases and cancel
+  bookkeeping — is deleted, leaving its one still-needed piece, the cross-tab
+  Web Lock, in `shared/locks.js`. `tests/pages.test.js` drives the demo's run
+  routes by behaviour instead of matching a localStorage key.
 - **A write now costs what changed, not what exists.** `SqliteStore` kept the
   same `read()` / `update()` document interface but rewrote every row of every
   collection on each update, so one chat message re-inserted every message, run

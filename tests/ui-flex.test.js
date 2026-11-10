@@ -6,6 +6,9 @@ import {mentionSuggestions, completeMention, chatTasks, pipelineRows, moveRow, p
 const sharedDir = new URL('../shared/', import.meta.url);
 const uiFiles = ['app.js', ...(await readdir(sharedDir)).filter(f => /^ui-.+\.js$/.test(f)).sort()];
 const js = (await Promise.all(uiFiles.map(f => readFile(new URL(f, sharedDir), 'utf8')))).join('\n');
+// The offline run engine now lives in the local adapter, behind the same routes
+// the server serves, not in the UI modules.
+const localApi = await readFile(new URL('local-api.js', sharedDir), 'utf8');
 
 const roster = [{id: 'scout', name: 'Scout'}, {id: 'writer', name: 'Writer'}, {id: 'web', name: 'Web Researcher'}];
 const group = {id: 'g', bots: [{id: 'a', name: 'A'}, {id: 'b', name: 'B'}, {id: 'c', name: 'C'}]};
@@ -86,7 +89,8 @@ test('the UI wires settings, scheduled tasks and guest mentions to the engine co
   assert.match(js, /kind: 'bot-task', payload/);
   assert.match(js, /'PATCH', \{name: f\.name, description: f\.description \|\| '', settings: \{/);
   assert.match(js, /summonableGuests\(groups\(\), group\.id, \{includeOff: true\}\)/, 'A mention of a switched-off guest must reach the planner so it is refused by name.');
-  assert.match(js, /simulateGroup\(\{group, message, directBotId, guests,/);
+  assert.match(localApi, /simulateGroup\(\{/);
+  assert.match(localApi, /summonableGuests\(state\.groups, groupId, \{includeOff: true\}\)/);
   assert.match(js, /is switched off\. Turn it on in its profile\./);
   // The approval gate is the group's server-side setting now, not a local toggle.
   assert.doesNotMatch(js, /checkpoint-toggle|store\.checkpoints/);
@@ -98,11 +102,10 @@ test('the UI wires settings, scheduled tasks and guest mentions to the engine co
   assert.match(js, /const removable = !isXGroup\(group\) && \(isAdmin\(\) \|\| isStaticDemo\(\)\)/);
   assert.match(js, /An admin sets voice and timing for this workspace/);
   assert.match(js, /canEdit \? btn\('Save'/);
-  // A demo plan is not on the workspace snapshot, and a browser card must not
-  // eat the run's Start or Retry button. Grant does not replace Retry.
-  assert.match(js, /localRuns: localOnlyRuns\(state\)/);
-  assert.match(js, /if \(!isStaticDemo\(\)\) return \[\];/);
-  assert.match(js, /if \(!isStaticDemo\(\)\) return server\.sort/, 'A live Node session must not surface leftover Pages demo runs.');
+  // Runs now live on the workspace snapshot in both builds, so the list and
+  // timeline read `recentRuns()` with no per-build merge and no separate log.
+  assert.doesNotMatch(js, /localOnlyRuns|localRuns:/);
+  assert.match(js, /store\.state\?\.groupRuns \|\| \[\]\)\.filter\(r => r\.groupId === groupId\)/);
   assert.match(js, /isRunNote\(i\.message\)/);
   assert.match(js, /threadLineActions\(/);
   assert.doesNotMatch(js, /grant \|\| plan/);

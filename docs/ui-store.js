@@ -1,10 +1,9 @@
 /** Single source of UI state: the server snapshot, the route, the conversations
  * it carries and cosmetic preferences. Views read from `store` and never
  * keep their own copies, so one `sync()` + one render keeps every pane current. */
-import {normalizeUiPrefs, UI_PREFS_KEY} from './usability.js?v=f61d657a50';
-import {routeHash, tintOf} from './ui-model.js?v=f61d657a50';
-import {createOutbox} from './chats.js?v=f61d657a50';
-import {LOCAL_RUNS_KEY, patchLocalRun as patchStoredRun, cancelLocalRunsForChat} from './local-runs.js?v=f61d657a50';
+import {normalizeUiPrefs, UI_PREFS_KEY} from './usability.js?v=3b5334879a';
+import {routeHash, tintOf} from './ui-model.js?v=3b5334879a';
+import {createOutbox} from './chats.js?v=3b5334879a';
 
 // Where an earlier build kept conversations; read once by importLocalChats().
 const CHAT_KEY = 'agent-control-bot-chats-v2';
@@ -170,9 +169,9 @@ export function appendMessage(key, entry) {
   changed('thread');
 }
 export async function clearMessages(key) {
-  if (isStaticDemo()) await cancelLocalRunsForChat(store.state, key, 'Chat cleared.');
   // Let queued sends land before the DELETE: a send that was already queued
-  // would otherwise POST after the clear and repopulate the conversation.
+  // would otherwise POST after the clear and repopulate the conversation. The
+  // DELETE also cancels the runs this chat was waiting on, in both backends.
   await outbox.settle();
   await api(`/api/chats/${key}`, 'DELETE');
   outbox.forget(key); delete store.messages[key]; store.openEvidence.clear(); changed();
@@ -205,17 +204,12 @@ export function applyTheme(choice = themeChoice()) {
 /** Re-resolve when the device flips between light and dark. */
 export function watchSystemTheme() { nightQuery().addEventListener('change', () => { if (themeChoice() === 'system') applyTheme('system'); }); }
 
-/** Coordination runs, newest first. The Pages demo keeps them in localStorage.
- * The Node build must ignore that log: leftover demo pauses would otherwise
- * show Approve on a live server. */
+/** Coordination runs, newest first. Both backends keep them in the workspace
+ * snapshot, so a leftover demo pause can never show Approve on a live server. */
 export function recentRuns(groupId) {
-  const server = (store.state?.groupRuns || []).filter(r => r.groupId === groupId);
-  if (!isStaticDemo()) return server.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
-  const local = loadLocal(LOCAL_RUNS_KEY, []).filter(r => r.groupId === groupId);
-  const byId = new Map([...local, ...server].map(r => [r.id, r]));
-  return [...byId.values()].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  return (store.state?.groupRuns || []).filter(r => r.groupId === groupId)
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 }
-export async function patchLocalRun(id, patch) { return patchStoredRun(id, patch); }
 
 /** Entries this session pushed, so an in-app back arrow can pop one instead of
  * stacking a new entry that the system Back button would bounce off. */

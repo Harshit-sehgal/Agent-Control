@@ -1,7 +1,7 @@
 /** The run-status vocabulary is declared once, in `shared/run-state.js`, and
- * every reader derives from it. These tests are what stop the three readers —
- * the orchestrator (`shared/coordination.js`), the Pages demo
- * (`shared/local-runs.js`) and the stop route (`src/coordination.js`) — from
+ * every reader derives from it. These tests are what stop the readers — the
+ * orchestrator (`shared/coordination.js`), the Pages demo engine
+ * (`shared/local-api.js`) and the stop route (`src/coordination.js`) — from
  * growing their own lists again and quietly disagreeing about what "busy" means.
  */
 import test from 'node:test';
@@ -9,14 +9,21 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import {BUSY_STATUSES, INTERRUPT_STATUSES, STOPPABLE_STATUSES} from '../shared/run-state.js';
 import {BUSY_STATUSES as VIA_COORDINATION, INTERRUPT_STATUSES as INTERRUPT_VIA_COORDINATION} from '../shared/coordination.js';
-import {LOCAL_RUN_BUSY} from '../shared/local-runs.js';
 
 test('one declaration is the source every reader sees', () => {
   // The coordination module re-exports the same arrays rather than copies, so a
   // change in one place reaches every importer.
   assert.equal(VIA_COORDINATION, BUSY_STATUSES);
   assert.equal(INTERRUPT_VIA_COORDINATION, INTERRUPT_STATUSES);
-  assert.deepEqual(LOCAL_RUN_BUSY, BUSY_STATUSES, 'the demo tab and the server agree on busy');
+});
+
+test('the Pages run engine derives from the one declaration', async () => {
+  // The demo used to keep its own copy of the busy set in `shared/local-runs.js`
+  // and store runs beside it. It answers the same routes now and reads the same
+  // vocabulary, so a fourth list cannot grow back.
+  const source = await fs.readFile(new URL('../shared/local-api.js', import.meta.url), 'utf8');
+  assert.match(source, /from '\.\/run-state\.js'/);
+  assert.doesNotMatch(source, /local-runs\.js/);
 });
 
 test('the categories nest the way the transitions need them to', () => {

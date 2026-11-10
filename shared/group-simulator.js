@@ -19,7 +19,7 @@ export async function simulateGroup({group, message, directBotId=null, guests=[]
     i = Number(resume.checkpoint?.nextStep) || 0;
     previous = resume.checkpoint?.previous || null;
     // The pause this run resumed from is spent. Keeping it would persist a stale
-    // checkpoint on a finished run (shared/local-runs.js stores whatever comes back).
+    // checkpoint on a finished run (shared/local-api.js stores whatever comes back).
     run.checkpoint = null;
   } else {
     const instructed=instructLead(group,message,directBotId,guests);

@@ -106,7 +106,7 @@ test('a due scheduled task runs on Pages even when the group shows its plan firs
   assert.equal(after.groups.find(g=>g.id==='x-engage').settings.confirmPlan,true);
   assert.ok((after.chats?.handoff||[]).some(m=>m.role==='bot'&&m.senderId),'A scheduled reply keeps the bot that wrote it.');
   assert.equal(after.tasks.find(t=>t.id===task.id).status,'done');
-  const runs=JSON.parse(store.map.get('agent-control-coordination-runs-v1')||'[]');
+  const runs=after.groupRuns||[];
   assert.ok(runs.some(r=>r.groupId==='x-engage'&&r.status==='completed'),'A scheduled task occupies the group, then frees it.');
   assert.ok(runs.every(r=>r.groupId!=='x-engage'||!['running','queued','awaiting_plan','awaiting_browser','awaiting_feed','awaiting_checkpoint'].includes(r.status)));
 });
@@ -118,35 +118,47 @@ test('a due scheduled Pages task with checkpoints leaves the group paused',async
   const saved=JSON.parse(store.map.get('agent-control-ghpages-v1'));
   saved.tasks.find(t=>t.id===task.id).runAt=new Date(Date.now()-1000).toISOString();
   store.map.set('agent-control-ghpages-v1',JSON.stringify(saved));
-  await request('/api/state');
-  const runs=JSON.parse(store.map.get('agent-control-coordination-runs-v1')||'[]');
+  const after=await request('/api/state');
+  const runs=after.groupRuns||[];
   const paused=runs.find(r=>r.groupId==='x-engage');
   assert.equal(paused?.status,'awaiting_checkpoint');
   assert.equal(paused.checkpointsEnabled,true);
   assert.ok(paused.input);
   assert.ok(paused.checkpoint?.nextStep);
 });
-test('Pages due() and the chat run log share one storage key',async()=>{
-  const runs=await readFile(path.join(root,'shared/local-runs.js'),'utf8');
-  const local=await readFile(path.join(root,'shared/local-api.js'),'utf8');
-  const ui=await readFile(path.join(root,'shared/ui-store.js'),'utf8');
-  assert.match(runs,/agent-control-coordination-runs-v1/);
-  assert.match(local,/from '\.\/local-runs\.js'/);
-  assert.match(ui,/from '\.\/local-runs\.js'/);
-});
-test('clearing a Pages chat cancels the local run log that was blocking the group',async()=>{
+test('the Pages engine answers the same run routes the server serves',async()=>{
   const store=makeStorage();
   const {request}=setup(store);
-  await request('/api/state');
-  store.map.set('agent-control-coordination-runs-v1',JSON.stringify([{id:'h',groupId:'x-engage',chatKey:'handoff',status:'awaiting_plan',createdAt:new Date().toISOString()}]));
+  // Pause the run so there is something a person can still stop.
+  await request('/api/groups/x-engage','PATCH',{settings:{checkpoints:true,coordination:'tracked'}});
+  const run=await request('/api/groups/x-engage/chat','POST',{message:'go',chatKey:'team-x-engage'});
+  assert.ok(run.runId,'POST /chat returns a run id, like the server');
+  assert.equal(run.status,'awaiting_checkpoint');
+  const log=await request('/api/groups/x-engage/chat');
+  assert.ok(Array.isArray(log.messages)&&Array.isArray(log.runs),'GET /chat returns messages and runs');
+  assert.ok(log.runs.some(r=>r.id===run.runId),'the run is read back from the workspace snapshot');
+  const cancelled=await request(`/api/groups/x-engage/runs/${run.runId}/cancel`,'POST',{});
+  assert.equal(cancelled.status,'cancelled');
+  assert.equal((await request('/api/state')).groupRuns.find(r=>r.id===run.runId).status,'cancelled','the cancel is stored, not only returned');
+  const local=await readFile(path.join(root,'shared/local-api.js'),'utf8');
+  const ui=await readFile(path.join(root,'shared/ui-store.js'),'utf8');
+  assert.doesNotMatch(local,/claimLocalRun|finishLocalRun|localRunCancelled/,'the demo no longer keeps a second run store');
+  assert.doesNotMatch(ui,/local-runs\.js/);
+});
+test('clearing a Pages chat cancels the run that was blocking the group',async()=>{
+  const store=makeStorage();
+  const {request}=setup(store);
+  const before=await request('/api/state');
+  store.map.set('agent-control-ghpages-v1',JSON.stringify({...before,groupRuns:[{id:'h',groupId:'x-engage',chatKey:'team-x-engage',status:'awaiting_plan',createdAt:new Date().toISOString()}]}));
   await request('/api/chats/team-x-engage','DELETE');
-  const runs=JSON.parse(store.map.get('agent-control-coordination-runs-v1'));
-  assert.equal(runs[0].status,'cancelled');
+  const after=await request('/api/state');
+  assert.equal(after.groupRuns.find(r=>r.id==='h').status,'cancelled');
 });
 test('a due scheduled Pages task waits while a plan is already on screen',async()=>{
   const store=makeStorage();
   const {request}=setup(store);
-  store.map.set('agent-control-coordination-runs-v1',JSON.stringify([{id:'plan-1',groupId:'x-engage',status:'awaiting_plan',createdAt:new Date().toISOString()}]));
+  const base=await request('/api/state');
+  store.map.set('agent-control-ghpages-v1',JSON.stringify({...base,groupRuns:[{id:'plan-1',groupId:'x-engage',status:'awaiting_plan',createdAt:new Date().toISOString()}]}));
   const task=await request('/api/tasks','POST',{kind:'bot-task',payload:{groupId:'x-engage',botId:'handoff',message:'draft a reply',label:'Draft check',kind:'once',nextAt:new Date(Date.now()+3600000).toISOString()}});
   const saved=JSON.parse(store.map.get('agent-control-ghpages-v1'));
   saved.tasks.find(t=>t.id===task.id).runAt=new Date(Date.now()-1000).toISOString();

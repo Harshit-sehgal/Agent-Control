@@ -8,24 +8,24 @@
  * Keeping transitions here is the single source of truth for the draft
  * lifecycle: candidate -> draft -> approved/scheduled -> ready -> posted.
  */
-import {activity,candidateInput,cleanText,scheduleApproval,scheduleApprovalAt,scoreCandidate,validHttpUrl} from './core.js?v=f61d657a50';
-import {fail} from './errors.js?v=f61d657a50';
+import {activity,candidateInput,cleanText,scheduleApproval,scheduleApprovalAt,scoreCandidate,validHttpUrl} from './core.js?v=3b5334879a';
+import {fail} from './errors.js?v=3b5334879a';
 
 // How far ahead an approval may be pinned. A year-long pin is not a schedule a
 // person can still be sure of, and a draft nobody looks at again is worse than
 // one that goes out on the delay window.
 const APPROVAL_HORIZON_MS = 7*24*60*60*1000;
 const APPROVAL_LEAD_MS = 60*1000;
-import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js?v=f61d657a50';
-import {evidenceSummary,evidenceForDraft,seedCandidateEvidence} from './evidence.js?v=f61d657a50';
-import {normalizeRetention} from './retention.js?v=f61d657a50';
-import * as contracts from './contracts.js?v=f61d657a50';
-import {pruneChats, releaseChatWork} from './chats.js?v=f61d657a50';
-import {denyBrowserRequest} from './bot-browser.js?v=f61d657a50';
-import {BUSY_STATUSES} from './coordination.js?v=f61d657a50';
-import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=f61d657a50';
-import {memoryState} from './memory.js?v=f61d657a50';
-import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=f61d657a50';
+import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js?v=3b5334879a';
+import {evidenceSummary,evidenceForDraft,seedCandidateEvidence} from './evidence.js?v=3b5334879a';
+import {normalizeRetention} from './retention.js?v=3b5334879a';
+import * as contracts from './contracts.js?v=3b5334879a';
+import {pruneChats, releaseChatWork} from './chats.js?v=3b5334879a';
+import {denyBrowserRequest} from './bot-browser.js?v=3b5334879a';
+import {BUSY_STATUSES} from './coordination.js?v=3b5334879a';
+import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=3b5334879a';
+import {memoryState} from './memory.js?v=3b5334879a';
+import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=3b5334879a';
 
 export const SCHEMA_VERSION = 3;
 /** Posts are never pruned by age, so their number is bounded here. */

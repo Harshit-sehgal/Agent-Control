@@ -1,18 +1,18 @@
 /** What the UI can do, as three lookup tables keyed by `data-action`, form id and
  * control id. app.js owns the DOM events and dispatches here; handlers throw on
  * failure and the dispatcher turns that into one toast. */
-import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, setPref, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns, patchLocalRun, appendMessage} from './ui-store.js?v=f61d657a50';
-import {botSettings, groupSettings} from './bot-settings.js?v=f61d657a50';
-import {completeMention, moveRow, pipelineValue, draftLength, lengthLabel, threadPosts} from './ui-model.js?v=f61d657a50';
-import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=f61d657a50';
-import {sendChat, streamGroupRun, watchQueuedRun, continueDemoPlan} from './ui-chat.js?v=f61d657a50';
-import {runWithTyping} from './run-follow.js?v=f61d657a50';
-import {confetti, whoosh, react, poke} from './ui-fx.js?v=f61d657a50';
-import {renderList, renderMentions} from './ui-views.js?v=f61d657a50';
-import {refreshLists, reloadAdminPage, pipelineList} from './ui-panel.js?v=f61d657a50';
-import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, botTaskSheet, scheduleDraftSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=f61d657a50';
-import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=f61d657a50';
-import {takeoverActions, takeoverForms} from './ui-takeover.js?v=f61d657a50';
+import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, setPref, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns} from './ui-store.js?v=3b5334879a';
+import {botSettings, groupSettings} from './bot-settings.js?v=3b5334879a';
+import {completeMention, moveRow, pipelineValue, draftLength, lengthLabel, threadPosts} from './ui-model.js?v=3b5334879a';
+import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=3b5334879a';
+import {sendChat, streamGroupRun, watchQueuedRun} from './ui-chat.js?v=3b5334879a';
+import {runWithTyping} from './run-follow.js?v=3b5334879a';
+import {confetti, whoosh, react, poke} from './ui-fx.js?v=3b5334879a';
+import {renderList, renderMentions} from './ui-views.js?v=3b5334879a';
+import {refreshLists, reloadAdminPage, pipelineList} from './ui-panel.js?v=3b5334879a';
+import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, botTaskSheet, scheduleDraftSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=3b5334879a';
+import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=3b5334879a';
+import {takeoverActions, takeoverForms} from './ui-takeover.js?v=3b5334879a';
 
 const adminCtx = {reload: reloadAdminPage};
 const chatId = () => store.route.chat;
@@ -245,18 +245,6 @@ export const actions = {
     const group = findGroup(b.dataset.id);
     const run = recentRuns(group?.id).find(r => r.id === b.dataset.run);
     const key = run?.chatKey || chatId() || teamKey(b.dataset.id);
-    if (isStaticDemo()) {
-      if (!group || !run || run.status !== 'awaiting_checkpoint') throw new Error('This run is not waiting for a checkpoint.');
-      await patchLocalRun(run.id, {status: 'queued'});
-      changed();
-      try {
-        await continueDemoPlan(group, run.input, key, {runId: run.id, resume: run});
-      } catch (error) {
-        await patchLocalRun(run.id, {status: 'awaiting_checkpoint'});
-        throw error;
-      } finally { changed(); }
-      return;
-    }
     // The POST only returns when the next bot is done, so stream alongside it.
     await runWithTyping({key, setTyping, sync, concurrent: true,
       send: () => api(`/api/groups/${b.dataset.id}/runs/${b.dataset.run}/continue`, 'POST', {}),
@@ -267,23 +255,6 @@ export const actions = {
     const group = findGroup(b.dataset.id);
     const run = recentRuns(group?.id).find(r => r.id === b.dataset.run);
     const key = run?.chatKey || chatId() || teamKey(b.dataset.id);
-    if (isStaticDemo()) {
-      if (!group || !run) throw new Error('That plan is no longer waiting.');
-      // Hide Start while the same plan runs. A failure puts it back; success
-      // must not leave the record queued, or it looks like work is still going.
-      await patchLocalRun(run.id, {status: 'queued'});
-      changed();
-      try {
-        await continueDemoPlan(group, run.input, key, {runId: run.id});
-      } catch (error) {
-        // Any failure, including 409 from another in-flight send in this
-        // group, puts Start back. Leaving it queued hid Start forever
-        // because queued counts as busy but Start only paints for awaiting_plan.
-        await patchLocalRun(run.id, {status: 'awaiting_plan'});
-        throw error;
-      } finally { changed(); }
-      return;
-    }
     await runWithTyping({key, setTyping, sync,
       send: async () => { await api(`/api/groups/${b.dataset.id}/runs/${b.dataset.run}/plan`, 'POST', {approve: true}); await sync(); },
       follow: () => {
@@ -292,22 +263,9 @@ export const actions = {
       }});
   },
   'cancel-run': async b => {
-    if (isStaticDemo()) {
-      const run = recentRuns(b.dataset.id).find(r => r.id === b.dataset.run);
-      if (!run) throw new Error('Run not found');
-      await patchLocalRun(run.id, {status: 'cancelled'});
-      appendMessage(run.chatKey || chatId() || teamKey(b.dataset.id), {role: 'system', text: 'Stopped. Nothing after this runs.', runId: run.id});
-      return;
-    }
     await api(`/api/groups/${b.dataset.id}/runs/${b.dataset.run}/cancel`, 'POST', {}); toast('Run stopped.'); await sync();
   },
   'cancel-plan': async b => {
-    if (isStaticDemo()) {
-      const run = recentRuns(b.dataset.id).find(r => r.id === b.dataset.run);
-      await patchLocalRun(b.dataset.run, {status: 'cancelled'});
-      appendMessage(run?.chatKey || chatId() || teamKey(b.dataset.id), {role: 'system', text: 'Plan cancelled. No further replies will be added.', runId: b.dataset.run});
-      return;
-    }
     await api(`/api/groups/${b.dataset.id}/runs/${b.dataset.run}/plan`, 'POST', {approve: false}); toast('Plan cancelled.'); await sync();
   },
   'approve-browser': async b => {

@@ -17,16 +17,16 @@ import {addChatMessages, clearChat} from './chats.js';
 import {publicMemory, addRules, removeRule, forgetChat, forgetRulebook} from './memory.js';
 import {summonableGuests} from './coordination.js';
 import {simulateGroup} from './group-simulator.js';
+import {BUSY_STATUSES} from './run-state.js';
 import {botSettings} from './bot-settings.js';
 import {denyBrowserRequest} from './bot-browser.js';
-import {withLocalLock, claimLocalRun, renewLocalRun, finishLocalRun, localRunCancelled, reclaimExpiredLocalRuns, cancelLocalRunsForChat} from './local-runs.js';
+import {withLocalLock} from './locks.js';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
 let dueDepth = 0;
 
 async function read() {
-  await reclaimExpiredLocalRuns();
   try {
     const value = localStorage.getItem(KEY);
     if (value) {
@@ -55,7 +55,8 @@ function processLocal(state, id) {
   return finishProcessing(state, id, scoreCandidate(ctx.candidate, ctx.settings.topics), result);
 }
 
-/** A due scheduled bot task runs through the same offline simulator as a chat. */
+/** A due scheduled bot task runs through the same offline engine as a chat, so
+ * both store the run, its lines and its record in the same places. */
 async function runBotTask(state, t) {
   const {groupId, botId, message, label} = t.payload;
   const group = state.groups.find(g => g.id === groupId), bot = botId ? group?.bots.find(b => b.id === botId) : null;
@@ -65,36 +66,111 @@ async function runBotTask(state, t) {
     addChatMessages(state, chatKey, [{role: 'system', text: `Scheduled task "${label}" skipped: ${bot.name} is switched off.`}], {trusted: true});
     return;
   }
-  const entries = [];
-  const holdId = crypto.randomUUID();
-  const lease = await claimLocalRun({id: holdId, groupId, chatKey, status: 'running', createdAt: now()});
-  const heartbeat = setInterval(() => { void renewLocalRun(lease).catch(() => {}); }, 30_000);
-  // `started` skips the plan gate. Scheduling the task was the approval.
-  // includeOff so a mention of a switched-off guest is refused by name.
-  let run;
+  // A busy group is a delay, not a skipped task: refuse before writing the
+  // "Scheduled task" line, so a wait does not read as work that happened.
+  if (state.groupRuns.some(r => r.groupId === groupId && BUSY_STATUSES.includes(r.status))) {
+    throw Object.assign(new Error('A group run is already active. Wait or retry later.'), {status: 409});
+  }
+  addChatMessages(state, chatKey, [{role: 'system', text: `Scheduled task: ${message}`}], {trusted: true});
   try {
-    run = await simulateGroup({
-      group, message, directBotId: botId, guests: summonableGuests(state.groups, groupId, {includeOff: true}),
-      state: {...state, drafts: [...state.drafts]},
-      api: async (url, method) => {
-        const m = url.match(/^\/api\/candidates\/([a-z0-9-]+)\/process$/);
-        if (!m || method !== 'POST') throw new Error(`Not available to a scheduled task: ${method} ${url}`);
-        return processLocal(state, m[1]);
-      },
-      makeId: () => crypto.randomUUID(), emit: e => entries.push(e), chatKey, started: true,
-      shouldStop: () => localRunCancelled(holdId),
-    });
+    // `started` skips the plan gate. Scheduling the task was the approval.
+    await localRun(state, groupId, {message, directBotId: botId, chatKey, started: true});
   } catch (error) {
-    clearInterval(heartbeat);
-    const finished = await finishLocalRun(lease, {status: 'failed', error: String(error.message || error).slice(0, 400)});
-    if (finished?.status === 'cancelled') return;
     addChatMessages(state, chatKey, [{role: 'system', text: `Scheduled task "${label}" did not run: ${error.message}`}], {trusted: true});
     throw error;
   }
-  clearInterval(heartbeat);
-  const finished = await finishLocalRun(lease, run);
-  if (finished?.status === 'cancelled') return;
-  addChatMessages(state, chatKey, [{role: 'system', text: `Scheduled task: ${message}`}, ...entries], {trusted: true});
+}
+
+/** First id a run mints is the id it was given, so starting a shown plan or
+ * resuming a pause updates that record instead of forking a second one. */
+function idFactory(preferred) {
+  let used = false;
+  return () => (!used && preferred ? (used = true, preferred) : crypto.randomUUID());
+}
+
+/** The API the offline simulator is allowed to call mid-run. It answers against
+ * the in-memory state directly, never back through `localApi`: the state lock is
+ * already held by the request that started the run, and a nested lock would
+ * deadlock. Same reason the server runs its steps inside one store update. */
+function runApi(state) {
+  return async (url, method = 'POST', body = {}) => {
+    let m;
+    if ((m = url.match(/^\/api\/candidates\/([a-z0-9-]+)\/process$/)) && method === 'POST') return processLocal(state, m[1]);
+    if ((m = url.match(/^\/api\/groups\/([a-z0-9-]+)\/bots\/([a-z0-9-]+)$/)) && method === 'PATCH') return updateBot(state, m[1], m[2], body);
+    throw new Error(`Not available to a browser-local run: ${method} ${url}`);
+  };
+}
+
+/** Store one run's emitted lines where the server stores them: the conversation
+ * (`chats`) is what a reader sees, `groupMessages` is the run log the streaming
+ * read returns. Only bot lines go in the log; a user line is already there. */
+function storeRunLines(state, run, entries) {
+  const key = run.chatKey || `team-${run.groupId}`;
+  const log = (state.groupMessages[run.groupId] ??= []);
+  for (const entry of entries) {
+    const line = {id: entry.id || crypto.randomUUID(), runId: run.id, role: entry.role, senderId: entry.senderId, senderName: entry.senderName, toBotId: entry.toBotId, text: entry.text, at: entry.at || now()};
+    if (line.role === 'bot') log.push({...line, kind: entry.kind});
+    try { addChatMessages(state, key, [line], {trusted: true}); } catch { /* The conversation was removed mid-run. */ }
+  }
+  state.groupMessages[run.groupId] = log.slice(-300);
+}
+
+function upsertRun(state, run) {
+  const i = state.groupRuns.findIndex(r => r.id === run.id);
+  if (i === -1) state.groupRuns.unshift(run); else state.groupRuns[i] = run;
+  state.groupRuns = state.groupRuns.slice(0, 100);
+}
+
+/** End the runs a chat is waiting on when that chat, bot or group goes away. */
+function cancelRunsForChat(state, key, reason) {
+  for (const run of state.groupRuns) {
+    if (!BUSY_STATUSES.includes(run.status) || (run.chatKey || `team-${run.groupId}`) !== key) continue;
+    run.status = 'cancelled'; run.completedAt = now(); run.checkpoint = null; run.error = reason;
+  }
+}
+
+/** One offline coordination run, behind the routes the Node orchestrator serves.
+ *
+ * The demo used to run this in the UI and keep the run in localStorage, so the
+ * only way to continue, start or stop it was a branch on `isStaticDemo()`. Now
+ * the run is created, run and stored here, and the UI reaches it only through
+ * `POST/GET /api/groups/:group/chat` and the `runs/:run/*` routes — the same
+ * paths the server answers — so nothing above the transport asks which backend
+ * it is talking to. */
+async function localRun(state, groupId, {message = '', directBotId = null, checkpoints = false, chatKey = null, runId = null, resume = false, started = false, approve = null} = {}) {
+  const group = state.groups.find(g => g.id === groupId);
+  if (!group) throw Object.assign(new Error('Group not found.'), {status: 404});
+  const prior = runId ? state.groupRuns.find(r => r.id === runId) : null;
+  if (runId && (!prior || prior.groupId !== groupId)) throw Object.assign(new Error('Run not found.'), {status: 404});
+  // Declining a shown plan is a cancel, and is answered even on an old record.
+  if (approve === false) {
+    prior.status = 'cancelled'; prior.completedAt = now(); prior.checkpoint = null;
+    storeRunLines(state, prior, [{id: crypto.randomUUID(), role: 'system', text: 'Plan cancelled. Nothing ran.'}]);
+    return {runId, status: 'cancelled'};
+  }
+  if (resume && prior.status !== 'awaiting_checkpoint') throw Object.assign(new Error('Only a run paused at a checkpoint can be continued.'), {status: 409});
+  // One live run per group. Any other busy run blocks the start; a Start or
+  // Continue of a run that is itself busy is the way through, same as the server.
+  if (state.groupRuns.some(r => r.groupId === groupId && BUSY_STATUSES.includes(r.status) && r.id !== runId)) {
+    throw Object.assign(new Error('A group run is already active. Wait or retry later.'), {status: 409});
+  }
+  const guests = summonableGuests(state.groups, groupId, {includeOff: true});
+  const entries = [];
+  // The simulator reads `state.drafts` to pick a post that still needs a draft;
+  // it also pushes the draft it creates. Pass it a copy of the draft list so
+  // that push lands on the copy, while `runApi` still writes the real one —
+  // otherwise one Writer step files the same draft twice.
+  const scratch = {...state, drafts: [...(state.drafts || [])]};
+  const run = await simulateGroup({
+    group, message: resume ? prior.input : message, directBotId, guests, state: scratch, api: runApi(state),
+    makeId: idFactory(runId), emit: e => entries.push(e),
+    chatKey: chatKey || prior?.chatKey || null,
+    started: started || resume, resume: resume ? prior : null,
+    checkpoints,
+  });
+  upsertRun(state, run);
+  storeRunLines(state, run, entries);
+  return {runId: run.id, status: run.status};
 }
 
 async function due(state) {
@@ -181,9 +257,30 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
   // Keep lasting bot profile edits in the store so they survive a reload, exactly
   // like the Node backend, instead of living only in browser-local UI state.
   if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/bots\/([a-z0-9-]+)$/)) && method === 'PATCH') { const b = updateBot(state, m[1], m[2], body); save(state); return b; }
-  if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/bots\/([a-z0-9-]+)$/)) && method === 'DELETE') { const r = removeBot(state, m[1], m[2]); await cancelLocalRunsForChat(state, m[2], 'Bot removed.'); save(state); return r; }
+  if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/bots\/([a-z0-9-]+)$/)) && method === 'DELETE') { const r = removeBot(state, m[1], m[2]); cancelRunsForChat(state, m[2], 'Bot removed.'); save(state); return r; }
   if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)$/)) && method === 'PATCH') { const g = updateGroup(state, m[1], body); save(state); return g; }
-  if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)$/)) && method === 'DELETE') { const r = removeGroup(state, m[1]); await cancelLocalRunsForChat(state, `team-${m[1]}`, 'Group removed.'); save(state); return r; }
+  if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)$/)) && method === 'DELETE') { const r = removeGroup(state, m[1]); cancelRunsForChat(state, `team-${m[1]}`, 'Group removed.'); save(state); return r; }
+  // Durable group coordination: the same paths and shapes the Node orchestrator
+  // serves, so the UI drives the demo and the server identically.
+  if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/chat$/)) && method === 'GET') {
+    if (!state.groups.some(g => g.id === m[1])) throw Object.assign(new Error('Group not found.'), {status: 404});
+    return {messages: (state.groupMessages[m[1]] || []).slice(-300), runs: state.groupRuns.filter(r => r.groupId === m[1]).slice(0, 50)};
+  }
+  if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/chat$/)) && method === 'POST') {
+    const r = await localRun(state, m[1], {message: body.message, directBotId: body.directBotId || null, checkpoints: body.checkpoints === true, chatKey: typeof body.chatKey === 'string' ? body.chatKey : null});
+    save(state); return r;
+  }
+  if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/runs\/([a-z0-9-]+)\/continue$/)) && method === 'POST') { const r = await localRun(state, m[1], {runId: m[2], resume: true}); save(state); return r; }
+  if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/runs\/([a-z0-9-]+)\/plan$/)) && method === 'POST') { const r = await localRun(state, m[1], {runId: m[2], started: body?.approve !== false, approve: body?.approve}); save(state); return r; }
+  if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/runs\/([a-z0-9-]+)\/cancel$/)) && method === 'POST') {
+    const run = state.groupRuns.find(r => r.id === m[2] && r.groupId === m[1]);
+    if (!run) throw Object.assign(new Error('Run not found.'), {status: 404});
+    if (BUSY_STATUSES.includes(run.status)) {
+      run.status = 'cancelled'; run.completedAt = now(); run.checkpoint = null;
+      storeRunLines(state, run, [{id: crypto.randomUUID(), role: 'system', text: 'Stopped. Nothing after this runs.'}]);
+    }
+    save(state); return {runId: run.id, status: run.status};
+  }
   if (path === '/api/bots/run') throw new Error('Running AI bots requires the separate Node backend, not GitHub Pages.');
   if ((m = path.match(/^\/api\/browser-requests\/([a-z0-9-]+)\/approve$/)) && method === 'POST') throw Object.assign(new Error('Browser requests run on your own device through a paired local agent, which needs the Node build. This demo cannot open pages.'), {status: 409});
   if ((m = path.match(/^\/api\/browser-requests\/([a-z0-9-]+)\/deny$/)) && method === 'POST') { const r = denyBrowserRequest(state, m[1]); save(state); return r; }
@@ -203,7 +300,7 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
   if ((m = path.match(/^\/api\/evidence\/([a-f0-9-]+)$/)) && method === 'DELETE') { const r = dropEvidence(state, m[1]); save(state); return r; }
   // Conversation history, stored with the rest of the browser-local state.
   if ((m = path.match(/^\/api\/chats\/([a-z0-9-]+)\/messages$/)) && method === 'POST') { const r = addChatMessages(state, m[1], Array.isArray(body.messages) ? body.messages : [body]); save(state); return r; }
-  if ((m = path.match(/^\/api\/chats\/([a-z0-9-]+)$/)) && method === 'DELETE') { const r = clearChat(state, m[1]); await cancelLocalRunsForChat(state, m[1], 'Chat cleared.'); save(state); return r; }
+  if ((m = path.match(/^\/api\/chats\/([a-z0-9-]+)$/)) && method === 'DELETE') { const r = clearChat(state, m[1]); cancelRunsForChat(state, m[1], 'Chat cleared.'); save(state); return r; }
   // Durable memory: the rulebook and chat recap are part of local state, so a
   // person can delete a rule here too. A model-written pass needs the Node build.
   if (path === '/api/memory' && method === 'GET') return publicMemory(state);

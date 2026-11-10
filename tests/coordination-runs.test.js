@@ -199,8 +199,8 @@ test('a run that is not paused at a checkpoint cannot be resumed', async () => {
   assert.equal(done.status, 'completed', done.error || '');
   assert.equal(done.trace.length, 1);
   // The resumed run works on its own copy. It used to push into the record it was
-  // handed, so `shared/local-runs.js` stored the caller's stale checkpoint state
-  // next to a trace that had already grown.
+  // handed, so the caller's store kept a stale checkpoint state next to a trace
+  // that had already grown.
   assert.equal(paused.trace.length, 0, 'the caller\'s record is not written through');
   assert.equal(paused.status, 'awaiting_checkpoint');
 });
