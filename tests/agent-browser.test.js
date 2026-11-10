@@ -91,7 +91,13 @@ test('a real browser reads a script-rendered page and blocks what the policy ref
     res.writeHead(200, {'Content-Type': 'text/plain'}).end('ok');
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const host = `127.0.0.1:${server.address().port}`, profiles = () => fs.readdirSync(os.tmpdir()).filter(n => n.startsWith('agent-browser-')).length, before = profiles();
+  // Profiles are counted inside a private temp dir: test files run in parallel
+  // processes and every real-browser test creates one, so the shared /tmp
+  // would make "no profile was left behind" depend on the other files.
+  const sandbox = fs.mkdtempSync(`${os.tmpdir()}/ab-sandbox-`);
+  const previousTmp = process.env.TMPDIR;
+  process.env.TMPDIR = sandbox;
+  const host = `127.0.0.1:${server.address().port}`, profiles = () => fs.readdirSync(sandbox).filter(n => n.startsWith('agent-browser-')).length, before = profiles();
   // The page's own host is reachable; `localhost` stands in for a private address.
   const permit = host => host !== 'localhost';
   try {
@@ -101,7 +107,12 @@ test('a real browser reads a script-rendered page and blocks what the policy ref
     assert.equal(hits.some(h => h.startsWith('localhost')), false, 'A blocked request never leaves the browser.');
     await assert.rejects(captureWithBrowser(`http://${host}/away`, {allow: [host], binary: browser, permit}), /not opened|not in AGENT_BROWSER_ALLOWLIST/, 'A redirect off the allowlist is refused.');
     assert.equal(profiles(), before, 'The temporary browser profile is deleted.');
-  } finally { server.close(); }
+  } finally {
+    if (previousTmp === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = previousTmp;
+    fs.rmSync(sandbox, {recursive: true, force: true});
+    server.close();
+  }
 });
 
 test('browser.action types, clicks and reads, and refuses off-allowlist navigations', {skip: !browser && 'no browser installed', timeout: 60000}, async () => {

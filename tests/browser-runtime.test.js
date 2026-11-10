@@ -1,8 +1,10 @@
 /** The server-owned browser runtime: one Chromium, one page at a time, started
  * on demand and closed after an idle spell. These tests inject the launch, so
- * they run without a browser installed. */
+ * they run without a browser installed; the last one uses a real browser. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
+import {findBrowser} from '../agent/browser.mjs';
 import {browserAllowlist, createBrowserRuntime, runtimeMode} from '../src/browser-runtime.js';
 
 const env = extra => ({AGENT_BROWSER_ALLOWLIST: 'example.com', ...extra});
@@ -155,4 +157,35 @@ test('closing the runtime waits for the request already in flight', async () => 
   await runtime.close();
   assert.equal(finished, true, 'A drain does not kill a page it is still serving.');
   assert.equal((await inFlight).url, 'https://example.com/a');
+});
+
+test('the runtime reads a real page through a real browser', {skip: !findBrowser() && 'no browser installed', timeout: 60000}, async () => {
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, {'Content-Type': 'text/html'});
+    res.end('<title>Runtime</title><button id="go">Press me</button><p id="body">body text</p>');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${server.address().port}/`;
+  // A loopback page on purpose, in a test: the default policy would refuse it.
+  const before = process.env.AGENT_ALLOW_PRIVATE;
+  process.env.AGENT_ALLOW_PRIVATE = '1';
+  const runtime = createBrowserRuntime({env: {AGENT_BROWSER_ALLOWLIST: '127.0.0.1', BROWSER_IDLE_MS: '200'}, find: () => findBrowser()});
+  try {
+    assert.equal(runtime.available(), true);
+    const page = await runtime.run({url});
+    assert.equal(page.title, 'Runtime');
+    assert.match(page.text, /body text/);
+    assert.ok(page.elements.some(e => e.text === 'Press me'), `the controls came back: ${JSON.stringify(page.elements)}`);
+    // The allowlist is checked before the browser is handed a URL.
+    await assert.rejects(runtime.run({url: 'https://example.com/'}), /not in AGENT_BROWSER_ALLOWLIST/);
+    // One process serves both pages, and each still gets a fresh context.
+    const second = await runtime.run({url, steps: [{op: 'read', selector: '#body'}]});
+    assert.equal(runtime.open, true, 'The warm process is reused.');
+    assert.equal(second.actions[0].text, 'body text');
+  } finally {
+    await runtime.close();
+    if (before === undefined) delete process.env.AGENT_ALLOW_PRIVATE;
+    else process.env.AGENT_ALLOW_PRIVATE = before;
+    server.close();
+  }
 });
