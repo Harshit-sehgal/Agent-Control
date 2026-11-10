@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ACTIVE_DRAFTS, draftStage, needsYou, chatRows, timeline, parseRoute, routeHash, feedPauseAction, retryTarget, threadLineActions, isRunNote, runBelongsToChat, FEED_WAIT, FEED_OPEN, POST_LIMIT, draftLength, lengthLabel, threadParts} from '../shared/ui-model.js';
+import {ACTIVE_DRAFTS, draftStage, needsYou, chatRows, timeline, parseRoute, routeHash, feedPauseAction, retryTarget, threadLineActions, isRunNote, runBelongsToChat, FEED_WAIT, FEED_OPEN, POST_LIMIT, draftLength, lengthLabel, threadParts, threadPosts} from '../shared/ui-model.js';
 
 // ---- fixtures -------------------------------------------------------------------------
 
@@ -538,6 +538,14 @@ test('a thread keeps every word, and splits on word boundaries', () => {
   // unpostable, and an emoji is one character, not two halves.
   assert.deepEqual(threadParts('abcdefghij', 4), ['abcd', 'efgh', 'ij']);
   assert.deepEqual(threadParts('🙂🙂🙂', 2), ['🙂🙂', '🙂']);
+  // Every part is copied with a "3/7 " prefix, and X counts that too: filling
+  // each part to the limit and prefixing afterwards produces posts the composer
+  // leaves disabled, which is exactly what a threaded draft must not do.
+  const long = `${'A sentence that is long enough to need splitting. '.repeat(30)}Done.`;
+  const posts = threadPosts(long);
+  assert.ok(posts.length > 1, 'the fixture really does need a thread');
+  posts.forEach((post, i) => assert.ok([...post].length <= POST_LIMIT, `post ${i + 1} is ${[...post].length} characters`));
+  assert.equal(posts.map((post, i) => post.replace(`${i + 1}/${posts.length} `, '')).join(' '), long.trim(), 'and nothing is lost to the prefix');
   // Empty and whitespace-only text is no post at all, not one empty post.
   assert.deepEqual(threadParts('   '), []);
   assert.deepEqual(threadParts(undefined), []);

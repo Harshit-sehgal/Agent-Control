@@ -3,7 +3,7 @@
  * failure and the dispatcher turns that into one toast. */
 import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, setPref, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns, patchLocalRun, appendMessage} from './ui-store.js';
 import {botSettings, groupSettings} from './bot-settings.js';
-import {completeMention, moveRow, pipelineValue, draftLength, lengthLabel, threadParts} from './ui-model.js';
+import {completeMention, moveRow, pipelineValue, draftLength, lengthLabel, threadPosts} from './ui-model.js';
 import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js';
 import {sendChat, streamGroupRun, watchQueuedRun, continueDemoPlan} from './ui-chat.js';
 import {confetti, whoosh, react, poke} from './ui-fx.js';
@@ -196,8 +196,8 @@ export const actions = {
   // numbered so they cannot be posted out of order by accident.
   'copy-thread': async b => {
     const draft = store.state.drafts.find(d => d.id === b.dataset.id); if (!draft) throw new Error('Draft not found');
-    const parts = threadParts(draft.text);
-    await copyText(parts.map((part, i) => `${i + 1}/${parts.length} ${part}`).join('\n\n'), `${parts.length} posts copied. Post them in order.`);
+    const posts = threadPosts(draft.text);
+    await copyText(posts.join('\n\n'), `${posts.length} posts copied. Post them in order.`);
   },
   'verify-evidence': async b => { await api(`/api/evidence/${b.dataset.id}/verify`, 'POST', {status: b.dataset.status}); toast('Source updated.'); await sync(); },
   'remove-candidate': async b => {
