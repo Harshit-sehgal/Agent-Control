@@ -273,7 +273,8 @@ function renderRight(){
     <div class="card"><dl class="kv"><dt>Job</dt><dd>${b.job}</dd><dt>Model</dt><dd><select aria-label="Model for ${b.name}" style="font:inherit;font-size:12px;border:1px solid var(--line);border-radius:7px;background:var(--panel);color:var(--fg);padding:2px 6px"><option>Claude (subscription)</option><option>ChatGPT (subscription)</option><option>OpenAI key</option></select></dd><dt>Context</dt><dd>Automatic. It pulls its memory and the thread as it needs them.</dd>${reports.length?`<dt>Team</dt><dd>${reports.map(x=>x.name).join(', ')}</dd>`:''}</dl></div>
     <div class="card"><h3 style="font-size:13px">What ${b.name} may do</h3>${g.length?permRows(b.id)+'<div style="font-size:11.5px;color:var(--muted)">Payments never get Always allow.</div>':'<div style="font-size:12.5px;color:var(--muted)">Basic kit only. It asks you for anything else.</div>'}</div>
     <div class="card"><h3 style="font-size:13px">What ${b.name} remembers</h3><ul class="memlist">${b.mem.map((m,i)=>`<li class="${b.fresh===i?'new':''}">${esc(m)}</li>`).join('')}</ul><div style="font-size:11.5px;color:var(--muted)">Private to ${b.name}. You can edit or delete any line.</div></div>
-    <div class="card"><h3 style="font-size:13px">Recent</h3>${actRows(state.activity.filter(a=>a.bot===b.id).sort((x,y)=>y.at-x.at).slice(0,3))}<button class="back" data-actbot="${b.id}">See all of ${b.name}'s activity</button></div>
+    ${(()=>{const mine=state.activity.filter(a=>a.bot===b.id).sort((x,y)=>y.at-x.at);const open=state.botActAll===b.id;
+      return `<div class="card"><h3 style="font-size:13px">${b.name}'s activity</h3>${actRows(open?mine:mine.slice(0,5))}${mine.length>5?`<button class="back" data-botact="${b.id}">${open?'Show less':'Show all '+mine.length}</button>`:''}</div>`})()}
     <button class="chip" data-dm="${b.id}">Message ${b.name} directly</button>`;
   } else {
     const kids=id=>BOTS.filter(b=>b.boss===id);
@@ -372,7 +373,7 @@ document.addEventListener('click',e=>{
   else if(el.id==='newThread'){state.cur=null;app.classList.remove('show-side');render();$('box').focus()}
   else if(el.id==='actBtn'){state.view={type:'activity'};renderRight();app.classList.remove('show-side');app.classList.add('show-right')}
   else if(el.dataset.filter){state.filter=el.dataset.filter;renderRight()}
-  else if(el.dataset.actbot){state.view={type:'activity',bot:el.dataset.actbot};state.filter='all';renderRight()}
+  else if(el.dataset.botact){state.botActAll=state.botActAll===el.dataset.botact?null:el.dataset.botact;renderRight()}
   else if('actall' in el.dataset){state.view={type:'activity'};renderRight()}
   else if(el.id==='pauseBtn'||el.id==='resume'){
     state.paused=el.id==='pauseBtn'?!state.paused:false;$('pausedBar').hidden=!state.paused;$('pauseBtn').classList.toggle('on',state.paused);$('statusText').textContent=state.paused?'All bots paused':'Atlas on watch · others asleep';$('pauseBtn').querySelector('.act2').textContent=state.paused?'Resume':'Pause all';

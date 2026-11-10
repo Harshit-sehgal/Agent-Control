@@ -90,7 +90,7 @@ This revision replaces groups. Where it conflicts with anything below, this sect
 - **Where it lives.** Three places, each showing only what fits there, so nothing is repeated:
   - *The thread* already shows its own story (route, bot-to-bot lines, asks, reply). The log never repeats this chatter.
   - *Activity* is a sidebar row (clock icon) above Company. It opens in the side panel, not a full page.
-  - *Each bot's profile* shows its last three entries and "See all of <bot>'s activity", which opens Activity filtered to that bot.
+  - *Each bot's profile* has its own activity section, local to that bot: its five newest entries grouped by day, and "Show all N" expands the full list in place. It never leaves the profile.
 - **What gets an entry.** Only events the owner might need to find later: anything that left the app (email sent, page opened with a signed-in session, file changed, event added, post, payment), permission changes, and bots created, moved, paused or deleted. Never routing, thinking, bot-to-bot messages or reads inside the app.
 - **How it reads.** One plain sentence per entry with the bot's face and the time ("Mailroom sent an email to Northwind: 'Wednesday works. 11:00?'"). Grouped by day (Today, Yesterday, then dates), newest first. Tapping an entry opens its thread.
 - **Filters are four chips**, default first: *Left the app* · *Permissions* · *Bots* · *All*. No search box or date picker in v1.
