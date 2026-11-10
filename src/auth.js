@@ -31,7 +31,7 @@ const refuse = (message, status) => { throw Object.assign(new Error(message), {s
 const MAX_WORKSPACES = 50;
 const workspaceName = value => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, 60);
 
-const hashPassword = password => {
+export const hashPassword = password => {
   const salt = crypto.randomBytes(16).toString('hex');
   const hash = crypto.scryptSync(String(password), salt, 64, SCRYPT).toString('hex');
   return `scrypt$${SCRYPT.N}$${salt}$${hash}`;

@@ -16,6 +16,12 @@ import {reply} from './router.js';
 // stop guesses spread across many addresses, not to let one client lock a
 // mailbox out of the whole internet after eight tries.
 const LOGIN_WINDOW_MS = 900000, LOGIN_ATTEMPTS = 8, LOGIN_ACCOUNT_ATTEMPTS = LOGIN_ATTEMPTS * 4;
+// A test install that only its owner can reach does not want a lockout of its
+// own: one wrong guess from a laptop plus one from a phone share a bucket when
+// the app is behind a tunnel. `AUTH_RATE_LIMIT=off` removes the limiter, and
+// nothing else; the default stays on, because this is the only brake on
+// password guessing.
+const rateLimitOn = () => String(process.env.AUTH_RATE_LIMIT || '').toLowerCase() !== 'off';
 
 export function publicRoutes(router, {auth, workspaces, version}) {
   // Failed sign-ins per client IP. A record only matters while its window is
@@ -24,6 +30,7 @@ export function publicRoutes(router, {auth, workspaces, version}) {
   const pruneExpired = () => { const now = Date.now(); for (const [ip, r] of attempts) if (now > r.until) attempts.delete(ip); };
   /** Count one try from `key` in the current window, or refuse with 429. */
   function attempt(key, limit) {
+    if (!rateLimitOn()) return;
     pruneExpired();
     const record = attempts.get(key) || {count: 0, until: Date.now() + LOGIN_WINDOW_MS};
     attempts.set(key, record);

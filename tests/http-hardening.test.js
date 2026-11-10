@@ -206,6 +206,25 @@ test('a wrong verb, a non-scalar id and a wrong-typed credential are client mist
   }
 });
 
+test('the limiter can be switched off for a test install, and stays on by default', {timeout: 60000}, async () => {
+  // A tunnel puts every client behind one address, so a test install's owner
+  // can lock themselves out with a handful of typos. `AUTH_RATE_LIMIT=off` is
+  // that escape hatch; it must not change the default, which this file's other
+  // test pins.
+  const t = await launch({AUTH_RATE_LIMIT: 'off'});
+  try {
+    const send = client(t.base);
+    for (let i = 0; i < 40; i++) {
+      const res = await send('POST', '/api/login', {password: 'wrong-password'});
+      assert.equal(res.status, 401, `guess ${i + 1} must be a plain refusal, got ${res.status}`);
+    }
+    const good = await send('POST', '/api/login', {password: PASSWORD});
+    assert.equal(good.status, 200, 'the right password still works after all those guesses');
+  } finally {
+    await t.stop();
+  }
+});
+
 test('guesses at the owner account are counted against that account, not just the guesser', {timeout: 60000}, async () => {
   // Behind a trusted proxy every request has its own client address, so the
   // per-IP buckets never fill. What stops a password spray here is the account

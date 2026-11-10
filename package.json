@@ -15,6 +15,7 @@
     "build:pages": "node scripts/build-pages.js",
     "check": "node scripts/check.mjs",
     "backup": "node --experimental-sqlite scripts/backup.mjs",
+    "reset-password": "node --experimental-sqlite scripts/reset-password.mjs",
     "test:e2e": "python3 tests/live_smoke.py",
     "test:ui": "python3 tests/polish_smoke.py && python3 tests/usability_smoke.py"
   }
