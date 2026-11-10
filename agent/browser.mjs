@@ -438,8 +438,16 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
           if (op === 'navigate') {
             const target = String(step.url || '');
             if (!hostAllowed(target, allow)) return {ok: false, reason: 'That host is not in AGENT_BROWSER_ALLOWLIST.', ...await view()};
+            const blockedBefore = blocked.length, refusedBefore = refused.length;
             const nav = await cdp.send('Page.navigate', {url: target}, sessionId).catch(error => ({errorText: error.message}));
-            return {ok: !nav.errorText, reason: nav.errorText || '', ...await settled(target)};
+            const page = await settled(target);
+            // A refusal during this navigation names the reason: the allowlist
+            // says which host was not allowed, and the proxy says when the
+            // address is on a private or local network. A bare Chrome error code
+            // says only that something did not work.
+            const refusal = blocked.length > blockedBefore ? blocked[blocked.length - 1]
+              : refused.length > refusedBefore ? refused[refused.length - 1] : '';
+            return {ok: !nav.errorText && !refusal, reason: nav.errorText || refusal ? `The page was not opened. ${refusal || nav.errorText}` : '', ...page};
           }
           const here = await read().catch(() => ({url: ''}));
           const refusal = refusePostingAction(op, here.url);

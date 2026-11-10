@@ -165,9 +165,9 @@ test('a takeover keeps one page open, so a person can sign in and hand it back',
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const host = `127.0.0.1:${server.address().port}`, base = `http://${host}`;
-  const session = await startBrowserSession({binary: browser, permit: () => true});
+  const session = await startBrowserSession({binary: browser, permit: host => host !== 'localhost'});
   try {
-    const live = await session.open(`${base}/login`, {allow: [host]});
+    const live = await session.open(`${base}/login`, {allow: [host, 'localhost']});
     const start = await live.view();
     assert.equal(start.title, 'Sign in');
     assert.match(start.image || '', /^data:image\/jpeg;base64,/, 'the person sees the page, not only its text');
@@ -181,7 +181,14 @@ test('a takeover keeps one page open, so a person can sign in and hand it back',
     assert.equal(clicked.url, `${base}/member`, 'the click navigated, and the reply is the page landed on');
     assert.match((await live.page()).text, /Hello, Ada/, 'the sign-in persisted inside the takeover');
     // The allowlist still decides where a person may go.
-    assert.equal((await live.act({op: 'navigate', url: 'https://example.com/'})).ok, false);
+    const offList = await live.act({op: 'navigate', url: 'https://example.com/'});
+    assert.equal(offList.ok, false, 'a host off the allowlist is refused');
+    assert.match(offList.reason, /AGENT_BROWSER_ALLOWLIST/);
+    // The egress proxy still refuses a private address, and the person is told
+    // the reason rather than shown a bare Chrome error code.
+    const privateNav = await live.act({op: 'navigate', url: `http://localhost:${server.address().port}/`});
+    assert.equal(privateNav.ok, false, 'a private or local address is refused even when allowlisted');
+    assert.match(privateNav.reason, /private or local network/, 'the refusal names why');
     await live.close();
     // Handing the page back must not leave a signed-in browser for the next one.
     const next = await session.open(`${base}/member`, {allow: [host]});
