@@ -1,17 +1,18 @@
 /** What the UI can do, as three lookup tables keyed by `data-action`, form id and
  * control id. app.js owns the DOM events and dispatches here; handlers throw on
  * failure and the dispatcher turns that into one toast. */
-import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, setPref, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns, patchLocalRun, appendMessage} from './ui-store.js?v=1ab2a4f06e';
-import {botSettings, groupSettings} from './bot-settings.js?v=1ab2a4f06e';
-import {completeMention, moveRow, pipelineValue, draftLength, lengthLabel, threadPosts} from './ui-model.js?v=1ab2a4f06e';
-import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=1ab2a4f06e';
-import {sendChat, streamGroupRun, watchQueuedRun, continueDemoPlan} from './ui-chat.js?v=1ab2a4f06e';
-import {confetti, whoosh, react, poke} from './ui-fx.js?v=1ab2a4f06e';
-import {renderList, renderMentions} from './ui-views.js?v=1ab2a4f06e';
-import {refreshLists, reloadAdminPage, pipelineList} from './ui-panel.js?v=1ab2a4f06e';
-import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, botTaskSheet, scheduleDraftSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=1ab2a4f06e';
-import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=1ab2a4f06e';
-import {takeoverActions, takeoverForms} from './ui-takeover.js?v=1ab2a4f06e';
+import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, setPref, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns, patchLocalRun, appendMessage} from './ui-store.js?v=f61d657a50';
+import {botSettings, groupSettings} from './bot-settings.js?v=f61d657a50';
+import {completeMention, moveRow, pipelineValue, draftLength, lengthLabel, threadPosts} from './ui-model.js?v=f61d657a50';
+import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=f61d657a50';
+import {sendChat, streamGroupRun, watchQueuedRun, continueDemoPlan} from './ui-chat.js?v=f61d657a50';
+import {runWithTyping} from './run-follow.js?v=f61d657a50';
+import {confetti, whoosh, react, poke} from './ui-fx.js?v=f61d657a50';
+import {renderList, renderMentions} from './ui-views.js?v=f61d657a50';
+import {refreshLists, reloadAdminPage, pipelineList} from './ui-panel.js?v=f61d657a50';
+import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, botTaskSheet, scheduleDraftSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=f61d657a50';
+import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=f61d657a50';
+import {takeoverActions, takeoverForms} from './ui-takeover.js?v=f61d657a50';
 
 const adminCtx = {reload: reloadAdminPage};
 const chatId = () => store.route.chat;
@@ -257,12 +258,9 @@ export const actions = {
       return;
     }
     // The POST only returns when the next bot is done, so stream alongside it.
-    setTyping(key, true);
-    try {
-      const post = api(`/api/groups/${b.dataset.id}/runs/${b.dataset.run}/continue`, 'POST', {});
-      await Promise.all([post, streamGroupRun(b.dataset.id, key, b.dataset.run)]);
-    } finally { setTyping(key, false); }
-    await sync();
+    await runWithTyping({key, setTyping, sync, concurrent: true,
+      send: () => api(`/api/groups/${b.dataset.id}/runs/${b.dataset.run}/continue`, 'POST', {}),
+      follow: () => streamGroupRun(b.dataset.id, key, b.dataset.run)});
   },
   // A bot asked to use the local browser agent.
   'approve-plan': async b => {
@@ -286,14 +284,12 @@ export const actions = {
       } finally { changed(); }
       return;
     }
-    setTyping(key, true);
-    try {
-      await api(`/api/groups/${b.dataset.id}/runs/${b.dataset.run}/plan`, 'POST', {approve: true});
-      await sync();
-      const request = (store.state.browserRequests || []).find(r => r.runId === b.dataset.run && r.purpose === 'feed');
-      await streamGroupRun(b.dataset.id, key, b.dataset.run, {ignore: request?.status === 'dispatched' ? ['awaiting_feed'] : []});
-    } finally { setTyping(key, false); }
-    await sync();
+    await runWithTyping({key, setTyping, sync,
+      send: async () => { await api(`/api/groups/${b.dataset.id}/runs/${b.dataset.run}/plan`, 'POST', {approve: true}); await sync(); },
+      follow: () => {
+        const request = (store.state.browserRequests || []).find(r => r.runId === b.dataset.run && r.purpose === 'feed');
+        return streamGroupRun(b.dataset.id, key, b.dataset.run, {ignore: request?.status === 'dispatched' ? ['awaiting_feed'] : []});
+      }});
   },
   'cancel-run': async b => {
     if (isStaticDemo()) {
@@ -322,10 +318,7 @@ export const actions = {
     if (!request?.runId || !request.groupId) return;
     const key = request.chatKey || teamKey(request.groupId);
     const pause = request.purpose === 'feed' ? 'awaiting_feed' : 'awaiting_browser';
-    setTyping(key, true);
-    try { await streamGroupRun(request.groupId, key, request.runId, {ignore: [pause]}); }
-    finally { setTyping(key, false); }
-    await sync();
+    await runWithTyping({key, setTyping, sync, follow: () => streamGroupRun(request.groupId, key, request.runId, {ignore: [pause]})});
   },
   'deny-browser': async b => {
     await api(`/api/browser-requests/${b.dataset.id}/deny`, 'POST', {});
@@ -334,10 +327,7 @@ export const actions = {
     const request = (store.state.browserRequests || []).find(r => r.id === b.dataset.id);
     if (!request?.runId || !request.groupId) return;
     const key = request.chatKey || teamKey(request.groupId);
-    setTyping(key, true);
-    try { await streamGroupRun(request.groupId, key, request.runId); }
-    finally { setTyping(key, false); }
-    await sync();
+    await runWithTyping({key, setTyping, sync, follow: () => streamGroupRun(request.groupId, key, request.runId)});
   },
   'retry-run': async b => {
     const key = b.dataset.chat || chatId() || teamKey(b.dataset.id);

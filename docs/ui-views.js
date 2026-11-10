@@ -2,14 +2,14 @@
  * Both are thin renderers over ui-model.js. The list shell and the composer are
  * painted once and then only their contents change, so a background refresh can
  * never wipe what the user is typing. */
-import {botSuggestions} from './chat-engine.js?v=1ab2a4f06e';
-import {summonableGuests} from './coordination.js?v=1ab2a4f06e';
-import {botSettings, groupSettings} from './bot-settings.js?v=1ab2a4f06e';
-import {requestOfMessage} from './bot-browser.js?v=1ab2a4f06e';
-import {validHttpUrl} from './core.js?v=1ab2a4f06e';
-import {chatRows, timeline, waitingOnYou, draftStage, draftLength, lengthLabel, mentionSuggestions, retryTarget, threadLineActions, isRunNote, ACTIVE_DRAFTS} from './ui-model.js?v=1ab2a4f06e';
-import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=1ab2a4f06e';
-import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, isXGroup, botTint, recentRuns} from './ui-store.js?v=1ab2a4f06e';
+import {botSuggestions} from './chat-engine.js?v=f61d657a50';
+import {summonableGuests} from './coordination.js?v=f61d657a50';
+import {botSettings, groupSettings} from './bot-settings.js?v=f61d657a50';
+import {requestOfMessage} from './bot-browser.js?v=f61d657a50';
+import {validHttpUrl} from './core.js?v=f61d657a50';
+import {chatRows, timeline, waitingOnYou, draftStage, draftLength, lengthLabel, mentionSuggestions, retryTarget, threadLineActions, isRunNote, ACTIVE_DRAFTS} from './ui-model.js?v=f61d657a50';
+import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=f61d657a50';
+import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, isXGroup, botTint, recentRuns} from './ui-store.js?v=f61d657a50';
 
 const el = id => document.getElementById(id);
 const FILTERS = [['all', 'All'], ['needs', 'Needs you'], ['groups', 'Groups'], ['bots', 'Bots']];

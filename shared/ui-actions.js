@@ -6,6 +6,7 @@ import {botSettings, groupSettings} from './bot-settings.js';
 import {completeMention, moveRow, pipelineValue, draftLength, lengthLabel, threadPosts} from './ui-model.js';
 import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js';
 import {sendChat, streamGroupRun, watchQueuedRun, continueDemoPlan} from './ui-chat.js';
+import {runWithTyping} from './run-follow.js';
 import {confetti, whoosh, react, poke} from './ui-fx.js';
 import {renderList, renderMentions} from './ui-views.js';
 import {refreshLists, reloadAdminPage, pipelineList} from './ui-panel.js';
@@ -257,12 +258,9 @@ export const actions = {
       return;
     }
     // The POST only returns when the next bot is done, so stream alongside it.
-    setTyping(key, true);
-    try {
-      const post = api(`/api/groups/${b.dataset.id}/runs/${b.dataset.run}/continue`, 'POST', {});
-      await Promise.all([post, streamGroupRun(b.dataset.id, key, b.dataset.run)]);
-    } finally { setTyping(key, false); }
-    await sync();
+    await runWithTyping({key, setTyping, sync, concurrent: true,
+      send: () => api(`/api/groups/${b.dataset.id}/runs/${b.dataset.run}/continue`, 'POST', {}),
+      follow: () => streamGroupRun(b.dataset.id, key, b.dataset.run)});
   },
   // A bot asked to use the local browser agent.
   'approve-plan': async b => {
@@ -286,14 +284,12 @@ export const actions = {
       } finally { changed(); }
       return;
     }
-    setTyping(key, true);
-    try {
-      await api(`/api/groups/${b.dataset.id}/runs/${b.dataset.run}/plan`, 'POST', {approve: true});
-      await sync();
-      const request = (store.state.browserRequests || []).find(r => r.runId === b.dataset.run && r.purpose === 'feed');
-      await streamGroupRun(b.dataset.id, key, b.dataset.run, {ignore: request?.status === 'dispatched' ? ['awaiting_feed'] : []});
-    } finally { setTyping(key, false); }
-    await sync();
+    await runWithTyping({key, setTyping, sync,
+      send: async () => { await api(`/api/groups/${b.dataset.id}/runs/${b.dataset.run}/plan`, 'POST', {approve: true}); await sync(); },
+      follow: () => {
+        const request = (store.state.browserRequests || []).find(r => r.runId === b.dataset.run && r.purpose === 'feed');
+        return streamGroupRun(b.dataset.id, key, b.dataset.run, {ignore: request?.status === 'dispatched' ? ['awaiting_feed'] : []});
+      }});
   },
   'cancel-run': async b => {
     if (isStaticDemo()) {
@@ -322,10 +318,7 @@ export const actions = {
     if (!request?.runId || !request.groupId) return;
     const key = request.chatKey || teamKey(request.groupId);
     const pause = request.purpose === 'feed' ? 'awaiting_feed' : 'awaiting_browser';
-    setTyping(key, true);
-    try { await streamGroupRun(request.groupId, key, request.runId, {ignore: [pause]}); }
-    finally { setTyping(key, false); }
-    await sync();
+    await runWithTyping({key, setTyping, sync, follow: () => streamGroupRun(request.groupId, key, request.runId, {ignore: [pause]})});
   },
   'deny-browser': async b => {
     await api(`/api/browser-requests/${b.dataset.id}/deny`, 'POST', {});
@@ -334,10 +327,7 @@ export const actions = {
     const request = (store.state.browserRequests || []).find(r => r.id === b.dataset.id);
     if (!request?.runId || !request.groupId) return;
     const key = request.chatKey || teamKey(request.groupId);
-    setTyping(key, true);
-    try { await streamGroupRun(request.groupId, key, request.runId); }
-    finally { setTyping(key, false); }
-    await sync();
+    await runWithTyping({key, setTyping, sync, follow: () => streamGroupRun(request.groupId, key, request.runId)});
   },
   'retry-run': async b => {
     const key = b.dataset.chat || chatId() || teamKey(b.dataset.id);

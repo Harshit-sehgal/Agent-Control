@@ -47,8 +47,10 @@ test('custom bots run through the Node provider only on the server build',()=>{
   assert.match(app,/will not answer with the demo/);
   // Retry of a feed read must wait or keep watching, the same as the first send.
   assert.match(app,/if \(await watchQueuedRun\(b\.dataset\.id, key, run\)\) return/);
-  assert.match(app,/await sync\(\)\.catch\(\(\) => \{\}\);\n    for \(const m of store\.messages\[key\] \|\| \[\]\) seen\.add\(m\.id\);/);
-  assert.match(app,/await sync\(\)\.catch\(\(\) => \{\}\);\n    const request = \(store\.state\.browserRequests \|\| \[\]\)\.find\(r => r\.runId === last\.id/);
+  // The watch loop now lives in shared/run-follow.js over injected pieces, and
+  // tests/run-follow.test.js drives it with fake snapshots instead of matching
+  // its text; this only checks that the chat module still hands it the run.
+  assert.match(app,/await pollRun\(\{/);
   assert.match(app,/await streamGroupRun\(groupId, key, run\.runId\);\n    return true;/);
   assert.match(app,/const key = run\?\.chatKey \|\| chatId\(\) \|\| teamKey\(b\.dataset\.id\)/);
   assert.match(app,/continueDemoPlan\(group, run\.input, key, \{runId: run\.id\}\)/);
@@ -83,7 +85,10 @@ test('custom bots run through the Node provider only on the server build',()=>{
   assert.match(app,/'toggle-user-disabled'/);
   assert.match(app,/Temporary password \(min 8 chars\)/);
   assert.match(app,/EMAIL_RELAY_URL/);
-  assert.match(app,/const waiting = last && skip.has\(last.status\)/);
+  // The "is this pause still this run?" check moved into the watch loop
+  // (shared/run-follow.js, behaviour-tested); the retry path still decides
+  // wait vs follow the same way here.
+  assert.match(app,/feedPauseAction\(request, \{graceUsed: true\}\)/);
   assert.match(app,/request.status === 'dispatched' \? `<div class="card-actions">\$\{decline\}/);
   assert.match(app,/<form id="login-form"[\s\S]*?name="email"/);
   assert.match(app,/id="password-form"/);

@@ -1,7 +1,7 @@
 /** Cross-tab coordination for Pages-demo runs. Web Locks provide an atomic
  * short claim; localStorage leases keep live work visible and recoverable. */
-import {groupIdOfChat, matchesBusyChat} from './chats.js?v=1ab2a4f06e';
-import {BUSY_STATUSES} from './run-state.js?v=1ab2a4f06e';
+import {groupIdOfChat, matchesBusyChat} from './chats.js?v=f61d657a50';
+import {BUSY_STATUSES} from './run-state.js?v=f61d657a50';
 
 export const LOCAL_RUNS_KEY = 'agent-control-coordination-runs-v1';
 // The same statuses that block a new run on the server (see shared/run-state.js),

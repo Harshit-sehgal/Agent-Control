@@ -5,14 +5,14 @@
  * offline command set. Nothing here can publish. */
 import {classifyMessage, statusSummary} from './chat-engine.js';
 import {simulateGroup} from './group-simulator.js';
-import {planHandoffs, leadShouldRunGroup, runNote, summonableGuests, BUSY_STATUSES} from './coordination.js';
+import {planHandoffs, leadShouldRunGroup, summonableGuests, BUSY_STATUSES} from './coordination.js';
 import {feedPauseAction} from './ui-model.js';
+import {pollRun} from './run-follow.js';
 import {botSettings, groupSettings} from './bot-settings.js';
 import {store, api, sync, conversation, appendMessage, setTyping, isStaticDemo, teamKey, groups, recentRuns} from './ui-store.js';
 import {claimLocalRun, renewLocalRun, finishLocalRun, localRunCancelled} from './local-runs.js';
 import {toast} from './ui-dialogs.js';
 
-const TERMINAL = ['completed', 'failed', 'interrupted', 'awaiting_checkpoint', 'awaiting_plan', 'awaiting_feed', 'awaiting_browser', 'cancelled'];
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 /** In-flight sends per conversation, so two overlapping sends keep the typing
  * indicator up until the last one finishes instead of the first clearing it. */
@@ -28,7 +28,8 @@ function groupInFlight(group) {
 const BEAT_MS = 450;
 
 /** Stream a server-coordinated group run into the conversation until it finishes
- * or pauses at a human checkpoint. */
+ * or pauses at a human checkpoint. The loop itself is `pollRun` in
+ * `shared/run-follow.js`; this is the store-and-transport adapter around it. */
 function sayOnce(key, text) {
   if (!text || (store.messages[key] || []).some(m => m.text === text)) return;
   appendMessage(key, {role: 'system', text});
@@ -36,55 +37,18 @@ function sayOnce(key, text) {
 
 export async function streamGroupRun(groupId, key = teamKey(groupId), runId = null, {ignore = []} = {}) {
   if (isStaticDemo() || !runId) return;
-  const seen = new Set((store.messages[key] || []).map(m => m.id));
-  const skip = new Set(ignore);
-  let last = null, graceUsed = false, failures = 0;
-  // Free-tier routing can take minutes per bot, so poll generously and only
-  // stop on a terminal state; the run keeps executing server-side regardless.
-  for (let i = 0; i < 200; ) {
-    await wait(3000);
-    // The run log is not the conversation. Browser cards and their Approve
-    // buttons live on the workspace snapshot, so refresh that before painting
-    // the next lines. A failed refresh still leaves the run log to follow.
-    await sync().catch(() => {});
-    for (const m of store.messages[key] || []) seen.add(m.id);
-    let snap; try { snap = await api(`/api/groups/${groupId}/chat`); failures = 0; } catch {
-      // A run log that cannot be read looks exactly like a run that is thinking,
-      // for up to ten minutes. Say it once, then keep trying quietly.
-      if (++failures === 4) toast('Still trying to reach the run log. The run keeps going on the server.');
-      i++; continue;
-    }
-    for (const m of snap.messages || []) {
-      // The endpoint returns the whole group's history; keep only this run's.
-      if (seen.has(m.id) || m.role === 'user' || (runId && m.runId !== runId)) continue;
-      seen.add(m.id);
-      appendMessage(key, {id: m.id, role: m.role, senderId: m.senderId, senderName: m.senderName, toBotId: m.toBotId, text: m.text, at: m.at, mode: 'ai', kind: m.kind, runId: m.runId});
-    }
-    last = (snap.runs || []).find(r => runId ? r.id === runId : r.groupId === groupId) || null;
-    // A dispatched feed or page still counts as this run. Do not spend the
-    // poll budget on it; keep watching until the status actually changes.
-    const waiting = last && skip.has(last.status);
-    if (!last || !TERMINAL.includes(last.status) || waiting) { if (!waiting) i++; continue; }
-    if (last.status === 'awaiting_browser') {
-      const open = (store.state.browserRequests || []).find(r => r.runId === last.id && ['pending', 'dispatched'].includes(r.status) && r.purpose !== 'feed');
-      if (open?.status === 'dispatched') { skip.add('awaiting_browser'); continue; }
-      break;
-    }
-    if (last.status !== 'awaiting_feed') break;
-    // Start answers before the read is filed. Look once more, then either
-    // keep watching a read that was sent or stop on the Approve card.
-    // A failed refresh must not abandon the run log; the lines are still there.
-    await sync().catch(() => {});
-    const request = (store.state.browserRequests || []).find(r => r.runId === last.id && r.purpose === 'feed');
-    const choice = feedPauseAction(request, {graceUsed});
-    if (choice.action === 'follow') { skip.add('awaiting_feed'); sayOnce(key, choice.text); continue; }
-    if (choice.action === 'lookAgain') { graceUsed = true; i++; continue; }
-    sayOnce(key, choice.text);
-    break;
-  }
-  // The server writes the same line under the same id, so it is stored once.
-  const note = last && runNote(last);
-  if (note && !(store.messages[key] || []).some(m => m.id === note.id)) appendMessage(key, note);
+  await pollRun({
+    runId, groupId, ignore,
+    wait: ms => new Promise(resolve => setTimeout(resolve, ms)),
+    sync: () => sync().catch(() => {}),
+    readLog: () => api(`/api/groups/${groupId}/chat`),
+    messages: () => store.messages[key] || [],
+    requests: () => store.state.browserRequests || [],
+    onLine: m => appendMessage(key, {id: m.id, role: m.role, senderId: m.senderId, senderName: m.senderName, toBotId: m.toBotId, text: m.text, at: m.at, mode: 'ai', kind: m.kind, runId: m.runId}),
+    onSay: text => sayOnce(key, text),
+    onNote: note => appendMessage(key, note),
+    onStall: () => toast('Still trying to reach the run log. The run keeps going on the server.'),
+  });
 }
 
 /** A queued run the server has already paused or stopped. Returns true when the

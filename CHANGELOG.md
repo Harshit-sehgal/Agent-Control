@@ -240,6 +240,20 @@ a network.
   set. A one-to-one X chat no longer shows a drafts pill with no drafts section
   behind it. The counts and the buttons are covered by `tests/ui-model.test.js`
   rather than by regexes over the DOM modules.
+- **Run following is one module, and it is tested by behaviour.** Continue,
+  Start, Approve page and Decline page each wrote out the same five steps —
+  turn typing on, send the decision, follow the run, turn typing off, refresh —
+  and the loop that watches a server run's log is the densest UI logic with no
+  DOM in it, yet it could only be checked by a regex over its own source. Both
+  now live in `shared/run-follow.js`: `runWithTyping` owns the ritual (a
+  Continue's POST is raced with the follow, an approve is sent first) and
+  `pollRun` owns the watch, over injected pieces — the log reader, the message
+  and request accessors, the append effects, the wait and the sync.
+  `shared/ui-chat.js` keeps only the store-and-transport adapter. The regex
+  assertions over the loop are gone, replaced by `tests/run-follow.test.js`,
+  which drives fake snapshots through the states a run actually passes:
+  new lines only, a pending page versus a dispatched one, a feed read that
+  waits or is followed, an unreadable log, and every terminal status.
 - **A write now costs what changed, not what exists.** `SqliteStore` kept the
   same `read()` / `update()` document interface but rewrote every row of every
   collection on each update, so one chat message re-inserted every message, run
