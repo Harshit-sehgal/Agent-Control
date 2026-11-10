@@ -64,7 +64,8 @@ kbd{font-family:var(--body);font-size:11px;color:var(--muted);border:1px solid v
 .state.working{background:var(--mint);animation:pulse 1.4s var(--ease) infinite}
 .state.waiting{background:var(--violet)}
 @keyframes pulse{50%{opacity:.35}}
-.strip{display:flex;gap:6px;flex-wrap:wrap;padding:2px 8px 4px}
+.strip{display:flex;flex-direction:column}
+.row .job{color:var(--muted);font-size:12.5px}
 .strip button{border-radius:10px;padding:2px;position:relative}
 .strip button:hover{background:var(--line)}
 .strip .more{width:32px;height:32px;display:grid;place-items:center;color:var(--muted);font-size:12px;font-weight:600}
@@ -313,8 +314,8 @@ function renderSide(){
   $('threads').innerHTML=S.threads.map(t=>{const o=t.owner&&by(t.owner);const st=p.some(a=>a.thread===t.id)?'waiting':(t.running?'working':'');
     return `<button class="row ${S.cur===t.id?'on':''}" data-open="${t.id}">${o?face(o,'s'):'<span class="face s" style="--t:var(--line2)"><i></i><i></i></span>'}<span class="t">${esc(t.title)}</span>${st?`<span class="state ${st}" title="${st==='waiting'?'Waiting on you':'Working'}"></span>`:''}</button>`}).join('');
   const order=[...S.recent,...BOTS.map(b=>b.id).filter(id=>!S.recent.includes(id))].map(by).filter(Boolean);
-  const shown=order.slice(0,7);
-  $('strip').innerHTML=shown.map(b=>`<button data-dm="${b.id}" title="Message ${b.name}" aria-label="Message ${b.name}">${face(b,'',faceState(b))}${S.busy.has(b.id)?'<span class="dotw"></span>':''}</button>`).join('')+(order.length>7?`<button class="more" data-allbots title="All bots" aria-label="All bots">+${order.length-7}</button>`:`<button class="more" data-allbots title="All bots" aria-label="All bots"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg></button>`);
+  const shown=order.slice(0,5);
+  $('strip').innerHTML=shown.map(b=>{const st=S.busy.has(b.id)?'working':(b.id==='atlas'?'':'');return `<button class="row ${S.threads.find(t=>t.id===S.cur)?.dm===b.id?'on':''}" data-dm="${b.id}" title="Message ${b.name}">${face(b,'s',faceState(b))}<span class="t">${b.name}<span class="job"> · ${esc(b.role==='Bot'?short(b):b.role)}</span></span>${st?'<span class="state working" title="Working"></span>':''}</button>`}).join('')+`<button class="row" data-allbots><span class="face s" style="--t:var(--line2)"><i></i><i></i></span><span class="t" style="color:var(--muted)">All ${order.length} bots…</span></button>`;
   document.querySelectorAll('.side [data-panel]').forEach(b=>b.classList.toggle('on',S.panel===b.dataset.panel));
   document.querySelector('.side [data-go="home"]').classList.toggle('on',!S.cur);
   $('pause').classList.toggle('paused',S.paused);

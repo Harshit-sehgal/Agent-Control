@@ -97,7 +97,7 @@ This revision replaces groups. Where it conflicts with anything below, this sect
 - **Ask cards** are the only raised surface in a thread (soft elevation, no border): one sentence and three buttons. Answered cards collapse to one muted line.
 - **⌘K palette** jumps to any thread, bot or page. Arrow keys and Enter work. Choosing a bot opens a direct thread with it.
 - **Contacting one bot is one tap:**
-  - *Bots strip* in the sidebar: up to seven faces, most recently used first, with a mint dot on any that are working. Tapping a face opens the direct thread with that bot. The last slot ("+N", or a search icon) opens the palette filtered to bots.
+  - *Bots list* in the sidebar: up to five rows, most recently used first. Each row shows the face, the **name** and a short job ("Scholar · Finds and reads sources"), plus a mint dot when working; a face alone is never enough to tell bots apart. Tapping a row opens the direct thread with that bot. The last row, "All N bots…", opens the palette filtered to bots.
   - *Direct threads* are one per bot and reopen where you left off. Only that bot reads them, though it can still ask teammates for help. They appear in Threads with the bot's face.
   - *@mentions*: typing @ in any composer shows a picker of bots; Enter or Tab picks. A message starting with @Name goes to that bot directly ("Sent to Scholar directly") and skips routing.
   - *Replies stay with the owner*: a follow-up in an existing thread goes to the bot that owns it, with no re-routing, unless it @mentions someone else.
