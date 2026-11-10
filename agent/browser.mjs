@@ -258,7 +258,13 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
           await cdp.send('Page.enable', {}, sessionId);
           const loaded = new Promise(resolve => { const off = cdp.on('Page.loadEventFired', () => { off(); resolve(); }); });
           const navigation = await cdp.send('Page.navigate', {url}, sessionId);
-          if (navigation.errorText) throw new Error(blocked[0] ? `The page was not opened. ${blocked[0]}` : `The page could not be opened: ${navigation.errorText}.`);
+          // The proxy's own refusal is the useful sentence: "it is on a private
+          // or local network" says what happened, where ERR_HTTP_RESPONSE_CODE_
+          // FAILURE says only that something did.
+          const lastRefusal = refused.length > blockedBefore ? refused[refused.length - 1] : '';
+          if (navigation.errorText) throw new Error(blocked[0] ? `The page was not opened. ${blocked[0]}`
+            : lastRefusal ? `The page was not opened. ${lastRefusal}`
+            : `The page could not be opened: ${navigation.errorText}.`);
           await loaded;
           // Give scripts a moment to render what they fetched.
           await new Promise(resolve => setTimeout(resolve, 600));

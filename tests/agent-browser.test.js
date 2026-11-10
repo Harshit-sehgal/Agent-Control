@@ -114,6 +114,8 @@ test('a real browser reads a script-rendered page and blocks what the policy ref
     assert.equal(page.blockedRequests, 1, 'The image on the refused host is blocked.');
     assert.equal(hits.some(h => h.startsWith('localhost')), false, 'A blocked request never leaves the browser.');
     await assert.rejects(captureWithBrowser(`http://${host}/away`, {allow: [host], binary: browser, permit}), /not opened|not in AGENT_BROWSER_ALLOWLIST/, 'A redirect off the allowlist is refused.');
+    // An address the proxy refuses names the reason, not a bare Chrome code.
+    await assert.rejects(captureWithBrowser(`http://localhost:${server.address().port}/page`, {allow: ['localhost'], binary: browser, permit}), /private or local network/, 'A refused address explains itself.');
     assert.equal(profiles(), before, 'The temporary browser profile is deleted.');
   } finally {
     if (previousTmp === undefined) delete process.env.TMPDIR;
