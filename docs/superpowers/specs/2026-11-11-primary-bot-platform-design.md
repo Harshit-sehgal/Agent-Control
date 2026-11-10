@@ -85,6 +85,21 @@ This revision replaces groups. Where it conflicts with anything below, this sect
 - **Per-bot settings live on the bot.** A bot's profile holds its job, manager, model, memory and permissions. Nothing per-bot appears in Settings.
 - **Per-bot permission choices.** Every permission a bot has been given is listed on that bot's profile, with a choice of **Always allow / Ask each time / Deny**. Payment permissions offer only Ask each time / Deny. Deny means the bot stops and tells the owner where to change it. This is how the owner takes back an Always allow.
 
+## Interaction model (mock v8, the UX reference)
+
+- **One reading column.** The thread is a single centred column (max about 720px). No third pane is open by default.
+- **Slide-over panels.** Company, Activity, Settings and every bot profile open as one panel sliding in from the right, over the thread, closed with Esc, the close button or a click outside. Only one is open at a time; a bot profile has a back arrow to Company.
+- **Home is a composer.** A new thread opens to one question ("What should the company get done?"), a large composer, and four starters. After sending, the normal thread view takes over.
+- **Sidebar, top to bottom:** company name; status line that is also Pause all; New thread; Jump to… (⌘K); Activity; Company; Needs you (only when something is waiting); Threads (each with its owner's face and a dot: mint pulsing = working, violet = waiting on you); the owner's row with Settings at the bottom. There is no list of every bot: bots are reached through Company or ⌘K, so the sidebar does not grow with the company.
+- **Thread header** shows the title and one live line ("Scholar and Quill working", "Waiting on you", "Mailroom owns this").
+- **Messages:** the owner's messages are mint bubbles on the right. Bot replies are unboxed: face, name, short job, text. Under a reply, one muted line: what it used ("Used 3 memories and Quill's reply") and "Wrong bot?", which offers the other bots in place; picking one hands the thread over and Atlas remembers the correction.
+- **Route line** sits under the owner's message: "Scholar took this · via Atlas → Research lead · 4 stayed asleep"; "stayed asleep" expands the reasons.
+- **Ask cards** are the only raised surface in a thread (soft elevation, no border): one sentence and three buttons. Answered cards collapse to one muted line.
+- **⌘K palette** jumps to any thread, bot or page. Arrow keys and Enter work.
+- **Bot profile has three tabs:** Overview (job; model, manager, automatic context, team; permissions with Always allow / Ask each time / Deny), Memory (lines with Forget, plus "Tell <bot> something to remember"), Activity (local to the bot).
+- **Hiring** happens inline at the bottom of Company: "What is this bot for?" plus a manager picker. Moving a bot is a Manager picker on its profile.
+- Phones: the sidebar slides in from the left via the menu button; panels fill the screen.
+
 ## Activity log and Pause all (owner asked for both; the log must stay clean)
 
 - **Where it lives.** Three places, each showing only what fits there, so nothing is repeated:
