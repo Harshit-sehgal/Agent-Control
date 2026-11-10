@@ -151,17 +151,19 @@ function botFace(conv, senderId, name) {
   return {face: avatar(name, index, 30), color: tintClass(index)};
 }
 
-const BROWSER_STATUS = {pending: ['Waiting on you', 'warn'], dispatched: ['On your local agent', 'warn'], done: ['Done', 'good'], failed: ['Failed', 'bad'], denied: ['Declined', '']};
-/** A bot's request to open a page with the user's local browser agent. */
+const BROWSER_STATUS = {pending: ['Waiting on you', 'warn'], dispatched: ['Running', 'warn'], done: ['Done', 'good'], failed: ['Failed', 'bad'], denied: ['Declined', '']};
+/** A bot's request to open a page in a browser. It says where it runs: this
+ * server, or a paired device, so "nothing happened" has an obvious cause. */
 function browserCard(m) {
   const request = requestOfMessage(store.state, m.id);
   if (!request) return `<div class="event"><span>${esc(m.text)}</span></div>`;
   const [label, tone] = BROWSER_STATUS[request.status] || [request.status, ''];
-  const steps = request.steps?.length ? `<ol class="browser-steps">${request.steps.map(s => `<li>${esc(s.op)} ${esc(s.url || s.selector || '')}${s.text ? ` · "${esc(String(s.text).slice(0, 60))}"` : ''}</li>`).join('')}</ol>` : '';
+  const where = request.status === 'pending' ? '' : ` · ${request.via === 'server' ? 'this server' : 'your device'}`;
+  const steps = request.steps?.length ? `<ol class="browser-steps">${request.steps.map(s => `<li>${esc(s.op)} ${esc(s.url || (s.index ? `#${s.index}` : s.selector) || '')}${s.text ? ` · "${esc(String(s.text).slice(0, 60))}"` : ''}</li>`).join('')}</ol>` : '';
   const decline = btn('Decline', 'deny-browser', {id: request.id, small: true});
   const actions = !canWrite() ? '' : request.status === 'pending' ? `<div class="card-actions">${btn('Approve', 'approve-browser', {id: request.id, small: true, kind: 'primary'})}${decline}</div>`
     : request.status === 'dispatched' ? `<div class="card-actions">${decline}</div>` : '';
-  return `<div class="event browser-request"><span>${esc(m.text)} ${tag(label, tone)}</span><a href="${esc(safeHref(request.url))}" target="_blank" rel="noopener noreferrer">${esc(request.url)}</a>${steps}${request.error ? `<small>${esc(request.error)}</small>` : ''}${actions}</div>`;
+  return `<div class="event browser-request"><span>${esc(m.text)} ${tag(`${label}${where}`, tone)}</span><a href="${esc(safeHref(request.url))}" target="_blank" rel="noopener noreferrer">${esc(request.url)}</a>${steps}${request.error ? `<small>${esc(request.error)}</small>` : ''}${actions}</div>`;
 }
 
 function messageHtml(item, conv, latestRunNote) {

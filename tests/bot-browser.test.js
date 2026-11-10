@@ -8,9 +8,9 @@ import {SqliteStore} from '../src/sqlite-store.js';
 import * as wf from '../shared/workflow.js';
 import {createRun, createEnvelope} from '../shared/coordination.js';
 import {coordinationState, runGroup, resumeFeedRun, resumeBrowserRun} from '../src/coordination.js';
-import {dispatchBrowserRequest, onAgentTaskResult, autoDispatch, continueBrowserWork} from '../src/bot-browser.js';
+import {dispatchBrowserRequest, onAgentTaskResult, autoDispatch, continueBrowserWork, setBrowserResultHooks} from '../src/bot-browser.js';
 import {refusePostingAction} from '../agent/browser.mjs';
-import {parseBrowserRequests, validateBrowserRequest, recordBrowserRequests, stripBrowserBlocks, denyBrowserRequest, browserResultText, capturePageText, feedPageText, requestOfMessage, queueFeedRead, pruneBrowserRequests, MAX_BROWSER_REQUESTS, MAX_BROWSER_DEPTH, BROWSER_PERMISSION} from '../shared/bot-browser.js';
+import {parseBrowserRequests, validateBrowserRequest, recordBrowserRequests, stripBrowserBlocks, denyBrowserRequest, browserResultText, capturePageText, feedPageText, requestOfMessage, queueFeedRead, pruneBrowserRequests, MAX_BROWSER_REQUESTS, MAX_BROWSER_DEPTH, MAX_ELEMENT_INDEX, BROWSER_PERMISSION} from '../shared/bot-browser.js';
 import {addChatMessages} from '../shared/chats.js';
 import {validateBotSettings} from '../shared/bot-settings.js';
 import {ACTIONS} from '../shared/contracts.js';
@@ -47,6 +47,29 @@ test('browser blocks are parsed, bounded and kept away from posting on X', () =>
   assert.equal(capturePageText({actions: [{text: 'Hello'}]}), 'Hello');
   assert.equal(capturePageText({text: 'x'.repeat(2000)}, 1500).length, 1500);
   assert.equal(capturePageText({text: 'x'.repeat(2000)}).length, 2000);
+});
+
+test('a step can name an element by its index from the last result', () => {
+  const at = (op, index, extra = {}) => ({op, index, ...extra});
+  assert.deepEqual(validateBrowserRequest({url: 'https://example.com', steps: [at('click', 3), at('type', 4, {text: 'hi'})]}).steps, [{op: 'click', index: 3}, {op: 'type', index: 4, text: 'hi'}]);
+  assert.deepEqual(validateBrowserRequest({url: 'https://example.com', steps: [{op: 'read', selector: 'main'}]}).steps, [{op: 'read', selector: 'main'}], 'A CSS selector still works.');
+  // An index is only meaningful if it came from a result, so zero, a fraction,
+  // a word and a value past the cap all need a selector instead.
+  for (const bad of [0, -1, 2.5, MAX_ELEMENT_INDEX + 1, 'three']) {
+    assert.throws(() => validateBrowserRequest({url: 'https://example.com', steps: [at('click', bad)]}), /index from the last result/, String(bad));
+  }
+  // An index is a click like any other, so X refuses it too.
+  assert.throws(() => validateBrowserRequest({url: 'https://x.com/home', steps: [at('click', 2)]}), status(403));
+  // The index survives validation; it is what the device (or the server) uses.
+  assert.equal(validateBrowserRequest({url: 'https://example.com', steps: [at('click', 3)]}).steps[0].index, 3);
+});
+
+test('the numbered controls a result returned are what the next turn acts on', () => {
+  const page = capturePageText({text: 'Body text', elements: [{index: 1, tag: 'input', text: 'Search'}, {index: 2, tag: 'button', text: 'Go'}, {index: 3, tag: 'a'}]});
+  assert.match(page, /Body text/);
+  assert.match(page, /Controls: \[1\] input Search · \[2\] button Go/);
+  assert.equal(page.includes('[3]'), false, 'A control with no text is not worth a line.');
+  assert.equal(capturePageText({actions: [{text: 'Read text'}], elements: [{index: 1, tag: 'a', text: 'Link'}]}), 'Read text\n\nControls: [1] a Link');
 });
 
 test('a trailing dot is still X or Twitter, so click and type stay refused', () => {
@@ -269,6 +292,62 @@ test('a feed denied while it is being sent stays denied, and its result does not
     await onAgentTaskResult(store, linked.id, hooks);
     assert.deepEqual(started, [], 'A page that arrives after the feed was denied does not start the other bots.');
     assert.equal(store.read().browserRequests.find(r => r.id === 'fr2').status, 'denied');
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});
+
+test('a request runs on this server when no device is paired, and continues like a device result', async () => {
+  const {dir, store} = await harness();
+  const until = async (check, note) => {
+    for (let i = 0; i < 100; i++) { const value = check(); if (value) return value; await new Promise(resolve => setTimeout(resolve, 10)); }
+    throw new Error(`timed out waiting for ${note}`);
+  };
+  try {
+    const now = new Date().toISOString();
+    const pending = id => ({id, botId: 'web', botName: 'Web', groupId: 'lab', chatKey: 'web', url: 'https://example.com/docs', steps: [], kind: 'browser.capture', depth: 0, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: now, updatedAt: now});
+    await store.update(s => {
+      wf.migrate(s); coordinationState(s);
+      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}];
+      s.browserRequests = [pending('here')];
+    });
+    const ran = [];
+    let broken = false;
+    const runtime = {
+      mode: 'auto',
+      available: () => true,
+      run: async request => {
+        if (broken) throw new Error('The page did not finish loading within 25s.');
+        ran.push(request);
+        return {title: 'Docs', finalUrl: 'https://example.com/docs', text: 'Install with npm and restart the service once.'};
+      },
+      close: async () => {},
+    };
+    const continued = [];
+    setBrowserResultHooks({continueRun: async (s, spec) => { continued.push(spec); }});
+    const sent = await dispatchBrowserRequest(store, 'here', {actor: 'owner@localhost', runtime});
+    assert.equal(sent.status, 'dispatched');
+    assert.equal(sent.via, 'server', 'The card says where the page is being opened.');
+    assert.deepEqual(sent.agentTaskIds, [], 'No device is asked to open the page.');
+    const done = await until(() => { const r = store.read().browserRequests.find(x => x.id === 'here'); return r.status === 'dispatched' ? null : r; }, 'the server to read the page');
+    assert.equal(done.status, 'done');
+    assert.deepEqual(ran, [{url: 'https://example.com/docs', steps: []}]);
+    assert.equal(done.result.title, 'Docs');
+    assert.match(done.result.page, /Install with npm/);
+    assert.match(store.read().chats.web.find(m => m.kind === 'browser-result').text, /Browser result for Web: Docs/);
+    await until(() => continued.length, 'the bot to continue from the page');
+    assert.equal(continued[0].directBotId, 'web');
+    assert.match(continued[0].page, /Install with npm/);
+
+    // A browser failure is reported the same way a device failure is, and is
+    // never handed back as a page.
+    broken = true;
+    await store.update(s => { s.browserRequests.unshift(pending('here-2')); });
+    await dispatchBrowserRequest(store, 'here-2', {runtime});
+    const failed = await until(() => { const r = store.read().browserRequests.find(x => x.id === 'here-2'); return r.status === 'dispatched' ? null : r; }, 'the failure to be reported');
+    assert.equal(failed.status, 'failed');
+    assert.equal(failed.result, null);
+    assert.match(failed.error, /did not finish loading/);
+    assert.match(store.read().chats.web.find(m => m.kind === 'browser-result' && /failed/.test(m.text)).text, /Web's browser request failed: The page did not finish loading/);
+    assert.equal(continued.length, 1, 'A failed page does not start a model turn.');
   } finally { await fs.rm(dir, {recursive: true, force: true}); }
 });
 

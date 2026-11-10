@@ -1,4 +1,5 @@
-/** Bot browser control through the user's own paired local agent.
+/** Bot browser control: how a bot asks for a web page, and the rules that
+ * bound the request.
  *
  * A bot holding the `browser.use` permission may ask for a page by putting a
  * fenced block in its reply:
@@ -9,20 +10,22 @@
  *
  * The engine turns each block into a request record. A person approves it in
  * the chat (the default), or it runs at once when the bot's `browserApproval`
- * is `auto`. Either way it executes on the local agent, inside that device's
- * own allowlist, proxy and permissions. This module only parses and bounds the
- * request; it never runs anything.
+ * is `auto`. It then runs in a headless browser — the server's own, or a paired
+ * local agent's — inside that runtime's allowlist and egress proxy. This module
+ * only parses and bounds the request; it never runs anything.
  *
  * Posting stays human: interaction (click, type) is refused on X and Twitter
  * hosts, so no bot can press Post there. Reading those pages is allowed.
  */
-import {cleanText, validHttpUrl} from './core.js?v=cfd4a90dbc';
-import {fail} from './errors.js?v=cfd4a90dbc';
-import {controlFence} from './bot-link.js?v=cfd4a90dbc';
+import {cleanText, validHttpUrl} from './core.js?v=1aee2cb08a';
+import {fail} from './errors.js?v=1aee2cb08a';
+import {controlFence} from './bot-link.js?v=1aee2cb08a';
 
 export const BROWSER_PERMISSION = 'browser.use';
 export const MAX_REQUESTS_PER_REPLY = 2;
 export const MAX_STEPS = 25;
+/** The highest index a request may name; matches what a snapshot reports. */
+export const MAX_ELEMENT_INDEX = 500;
 export const MAX_BROWSER_REQUESTS = 200;
 export const STEP_OPS = ['navigate', 'click', 'type', 'waitFor', 'read', 'scroll'];
 export const HOME_FEED_URL = 'https://x.com/home';
@@ -34,10 +37,35 @@ const BLOCK = () => controlFence('browser');
 
 // `x.com.` and `x.com%2e` are x.com. Leaving the trailing dot on treated that
 // spelling as a different site, so a click or type there was allowed.
-const hostOf = url => { try { return new URL(url).hostname.toLowerCase().replace(/\.+$/, ''); } catch { return ''; } };
+export const hostOf = url => { try { return new URL(url).hostname.toLowerCase().replace(/\.+$/, ''); } catch { return ''; } };
+
+/** An allowlist entry in the same spelling as `hostOf`: no scheme, no path, no
+ * port, no trailing dot, lower case. `https://Docs.Example.com:8443/x`,
+ * `docs.example.com:8443` and `docs.example.com.` are one host, so the server
+ * and the device cannot read the same `AGENT_BROWSER_ALLOWLIST` differently.
+ * An IPv6 literal keeps its brackets, which is how a URL writes one. */
+export const normalizeHost = value => {
+  const text = String(value ?? '').trim().toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, '').split('/')[0];
+  const host = text.startsWith('[') ? text.slice(0, text.indexOf(']') + 1) : text.split(':')[0];
+  return host.replace(/\.+$/, '');
+};
+
+/** `AGENT_BROWSER_ALLOWLIST`, read the way an operator writes it. */
+export const parseAllowlist = value => String(value ?? '').split(',').map(normalizeHost).filter(Boolean);
+
+/** May `url` be opened? Matching is on the host, so the same page is allowed
+ * whether the URL spells the port or not, and an empty host never matches. */
+export const hostAllowed = (url, allow = []) => {
+  const host = hostOf(url);
+  return Boolean(host) && (allow || []).some(entry => normalizeHost(entry) === host);
+};
+
 export const isPostingHost = url => { const host = hostOf(url); return POSTING_HOSTS.some(h => host === h || host.endsWith(`.${h}`)); };
 
-/** Validate one request body into the agent task it becomes. */
+/** Validate one request body into the agent task it becomes. A step targets an
+ * element by `index` from the result's numbered list, or by `selector` when a
+ * page is stable enough to name it. An index is what lets a second request act
+ * on a page the model has only read once. */
 export function validateBrowserRequest(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) fail('A browser request must be an object.');
   const url = validHttpUrl(cleanText(body.url, 2000));
@@ -55,8 +83,12 @@ export function validateBrowserRequest(body) {
       out.url = validHttpUrl(cleanText(step.url, 2000));
       if (!out.url) fail('A navigate step needs a public http(s) url.');
     } else {
-      out.selector = cleanText(step.selector, 300);
-      if (!out.selector) fail(`A ${step.op} step needs a CSS selector.`);
+      const index = Number(step.index);
+      if (Number.isInteger(index) && index >= 1 && index <= MAX_ELEMENT_INDEX) out.index = index;
+      else {
+        out.selector = cleanText(step.selector, 300);
+        if (!out.selector) fail(`A ${step.op} step needs an index from the last result, or a CSS selector.`);
+      }
     }
     if (step.op === 'type') out.text = cleanText(step.text, 2000);
     if (step.op === 'waitFor' && Number.isFinite(Number(step.timeoutMs))) out.timeoutMs = Math.min(15000, Math.max(0, Number(step.timeoutMs)));
@@ -90,13 +122,23 @@ export function parseBrowserRequests(output) {
 export const stripBrowserBlocks = output => String(output ?? '').replace(BLOCK(), '').replace(/\n{3,}/g, '\n\n').trim();
 
 /** What a bot is told about the tool when it holds the permission. */
-export const BROWSER_TOOL_HINT = 'You can read or use a web page through the user\'s own local browser agent. Put one block per page in your reply, e.g. ```browser\n{"url":"https://example.com","steps":[{"op":"read","selector":"main"}]}\n``` Ops: navigate, click, type, waitFor, read, scroll. Scroll only moves the page. Only hosts the user allowlisted on their device work. You can never click or type on X or Twitter. The result comes back in the chat.';
+export const BROWSER_TOOL_HINT = 'You can read or use a web page through a headless browser. Put one block per page in your reply, e.g. ```browser\n{"url":"https://example.com"}\n``` That returns the page text and a numbered list of controls. To act, name a control by its number in the same block: {"url":"https://example.com","steps":[{"op":"click","index":3}]} then read the result. Ops: navigate, click, type, waitFor, read, scroll. A CSS selector also works instead of an index. Scroll only moves the page. Only hosts the user allowlisted work. You can never click or type on X or Twitter. The result comes back in the chat.';
+
+/** The numbered controls a snapshot returned, in one line. The model acts on
+ * these; a page of raw HTML is not something it can click. */
+const controlLine = elements => (Array.isArray(elements) ? elements : [])
+  .filter(e => e && Number.isInteger(e.index) && e.text)
+  .slice(0, 24)
+  .map(e => `[${e.index}] ${e.tag || 'element'} ${e.text}`.trim())
+  .join(' · ');
 
 /** Page text the next bot turn can draft from. The chat line uses a shorter cap. */
 export function capturePageText(result, limit = 3600) {
   const r = result && typeof result === 'object' ? result : {};
   const reads = Array.isArray(r.actions) ? r.actions.filter(a => a && typeof a.text === 'string').map(a => a.text) : [];
-  return cleanText(reads.join('\n') || r.text || r.excerpt || '', limit);
+  const controls = controlLine(r.elements);
+  const body = reads.join('\n') || r.text || r.excerpt || '';
+  return cleanText([body, controls ? `Controls: ${controls}` : ''].filter(Boolean).join('\n\n'), limit);
 }
 
 /** A short chat line summarising an agent's result. */
@@ -138,7 +180,7 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
     if (skipUrls.some(url => samePage(url, item.request.url))) { say(`${bot.name} already has that page, so it was not opened again.`); continue; }
     const record = {id: makeId(), botId: bot.id, botName: bot.name, groupId, chatKey, ...(runId ? {runId} : {}), ...item.request, depth, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: now, updatedAt: now};
     records.push(record);
-    lines.push({id: browserMessageId(record.id), role: 'system', kind: 'browser', text: `${bot.name} wants to ${describe(record)} with your local browser agent.`, at: now});
+    lines.push({id: browserMessageId(record.id), role: 'system', kind: 'browser', text: `${bot.name} wants to ${describe(record)}.`, at: now});
   }
   state.browserRequests ??= [];
   state.browserRequests.unshift(...records);
@@ -175,7 +217,7 @@ export function queueFeedRead(state, {bot, groupId, chatKey, runId, makeId = () 
   state.browserRequests ??= [];
   state.browserRequests.unshift(record);
   pruneBrowserRequests(state);
-  return {record, line: {id: browserMessageId(record.id), role: 'system', kind: 'browser', runId, text: `${bot.name} wants to scroll and read your X home feed with your local browser agent. It does not click or type. You still post.`, at: now}};
+  return {record, line: {id: browserMessageId(record.id), role: 'system', kind: 'browser', runId, text: `${bot.name} wants to scroll and read your X home feed. It does not click or type. You still post.`, at: now}};
 }
 
 /** A person turns down a request that is still waiting, including one already

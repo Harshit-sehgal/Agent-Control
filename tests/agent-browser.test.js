@@ -3,14 +3,27 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
-import {findBrowser, hostAllowed, requestVerdict, startProxy, captureWithBrowser} from '../agent/browser.mjs';
+import {findBrowser, hostAllowed, requestVerdict, startProxy, captureWithBrowser, startBrowserSession} from '../agent/browser.mjs';
+import {parseAllowlist} from '../shared/bot-browser.js';
 
-test('a page must be on the allowlist, and only http(s) is loaded', () => {
+test('an allowlist entry and a URL are compared on the host, not the spelling', () => {
   const allow = ['docs.example.com'];
   assert.equal(hostAllowed('https://docs.example.com/a', allow), true);
   assert.equal(hostAllowed('https://DOCS.example.com/a', allow), true);
   assert.equal(hostAllowed('https://evil.example.com/docs.example.com', allow), false);
   assert.equal(hostAllowed('not a url', allow), false);
+  // A port is not part of the host: the same page is allowed with or without it.
+  assert.equal(hostAllowed('https://docs.example.com:8443/a', allow), true);
+  assert.equal(hostAllowed('https://docs.example.com./a', ['docs.example.com.']), true);
+  assert.equal(hostAllowed('https://docs.example.com', ['https://Docs.Example.com:8443/docs']), true, 'A whole URL in the list names its host.');
+  assert.equal(hostAllowed('https://docs.example.com.evil.test/a', allow), false);
+  assert.equal(hostAllowed('https://[::1]:8080/a', parseAllowlist('[::1]')), true);
+  assert.deepEqual(parseAllowlist(' X.com. , docs.example.com:8443 ,, '), ['x.com', 'docs.example.com']);
+  assert.deepEqual(parseAllowlist(undefined), []);
+});
+
+test('a page must be on the allowlist, and only http(s) is loaded', () => {
+  const allow = ['docs.example.com'];
   assert.deepEqual(requestVerdict({url: 'https://docs.example.com/a', isDocument: true}, {allow}), {allow: true});
   // A redirect or a frame to another site is a document on a host nobody allowed.
   assert.equal(requestVerdict({url: 'https://x.com/home', isDocument: true}, {allow}).allow, false);
@@ -119,4 +132,33 @@ test('browser.action types, clicks and reads, and refuses off-allowlist navigati
     assert.match(bad.reason, /unsupported/);
     assert.equal(missing.ok, false, 'a step without an op is refused');
   } finally { server.close(); }
+});
+
+test('a session reuses one browser, numbers the controls, and signs nothing in', {skip: !browser && 'no browser installed', timeout: 60000}, async () => {
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, {'Content-Type': 'text/html'});
+    res.end(req.url === '/one'
+      ? `<title>One</title><input id="q" placeholder="Search box"><button id="go" onclick="document.getElementById('out').textContent='clicked'">Press me</button><button disabled>Off</button><p id="out">fresh</p><script>document.cookie='seen=1; path=/';</script>`
+      : `<title>Two</title><p id="out">none</p><script>document.getElementById('out').textContent='cookie:'+document.cookie;</script>`);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`, allow = ['127.0.0.1'];
+  const session = await startBrowserSession({binary: browser, permit: () => true});
+  try {
+    const first = await session.capture(`${base}/one`, {allow});
+    assert.equal(first.title, 'One');
+    const pressMe = first.elements.find(e => e.text === 'Press me');
+    assert.ok(pressMe, `the snapshot numbered the controls: ${JSON.stringify(first.elements)}`);
+    assert.equal(first.elements.some(e => e.text === 'Off'), false, 'A disabled control is not offered.');
+    assert.equal(first.elementCount, first.elements.length);
+    // Act on the element by the number the snapshot gave it, not a selector.
+    const acted = await session.capture(`${base}/one`, {allow, steps: [{op: 'click', index: pressMe.index}, {op: 'read', selector: '#out'}]});
+    assert.equal(acted.actions[0].ok, true, `click by index: ${JSON.stringify(acted.actions)}`);
+    assert.equal(acted.actions[1].text, 'clicked', 'the index named the button the snapshot numbered');
+    // The process is warm, but each page starts in a new, empty context.
+    const second = await session.capture(`${base}/two`, {allow, steps: [{op: 'read', selector: '#out'}]});
+    assert.equal(second.actions[0].text, 'cookie:', 'a reused browser is not a signed-in one');
+    // The allowlist is per request: the previous capture does not authorise this one.
+    await assert.rejects(session.capture(`${base}/one`, {allow: ['other.example.com']}), /not in AGENT_BROWSER_ALLOWLIST/);
+  } finally { await session.close(); server.close(); }
 });

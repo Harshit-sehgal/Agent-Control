@@ -174,7 +174,7 @@ export function groupRoutes(router) {
     return reply(201, await runOneBot(c.store, {botId: b.botId, input: cleanText(b.input, 4000), browserDepth: Number(b.browserDepth) || 0}));
   });
 
-  // A bot's request to use the local browser agent: a person approves or declines it.
+  // A bot's request to open a page: a person approves or declines it.
   router.add('POST', '/api/browser-requests/:id/approve', 'member', async c => dispatchBrowserRequest(c.store, c.params.id, {actor: c.actor.email}));
   router.add('POST', '/api/browser-requests/:id/deny', 'member', async c => {
     const current = (c.store.read().browserRequests || []).find(r => r.id === c.params.id);

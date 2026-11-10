@@ -6,6 +6,24 @@ The JSON store is gone, one list decides what ships, and the app opens without
 a network.
 
 ### Added
+- **A browser the app owns, so a bot can read a page with nothing paired.**
+  An approved `browser.use` request now runs on the server itself when
+  `AGENT_BROWSER_ALLOWLIST` is set and a Chrome, Chromium or Edge is installed
+  (`BROWSER_RUNTIME=auto|server|agent`, `src/browser-runtime.js`). One child
+  process serves a burst of requests, serial and closed after `BROWSER_IDLE_MS`
+  without work and again when the server drains; each page gets a new, empty
+  browser context, so a warm browser is never a signed-in one, and the egress
+  proxy and allowlist are the same ones the paired agent uses. A paired agent
+  still runs the request when the server has no browser, and the chat card says
+  which of the two is doing it. Reaching it needs no library: the DevTools
+  protocol over Node's own WebSocket (`agent/browser.mjs`).
+- **A page reports the controls a bot can act on.** Every read returns a
+  numbered list of the interactive elements a person would see (`[3] button
+  Sign in`), disabled and invisible ones left out, and a step may name one by
+  that `index` instead of a CSS selector — which is what makes the second step
+  reliable on a page the bot has never seen. `AGENT_BROWSER_ALLOWLIST` is now
+  read identically by the server and the device: entries are host names, matched
+  on the host, so a trailing dot or a `:port` does not name a second site.
 - **Email without a relay.** The email notification channel speaks SMTP itself
   (`src/mail.js`, on `node:net` and `node:tls`, still no dependency): `EHLO`,
   `STARTTLS`, `AUTH PLAIN` or `LOGIN`, one recipient, one plain-text message.

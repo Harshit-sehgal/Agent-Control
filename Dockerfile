@@ -1,7 +1,19 @@
-# Agent Control as a container. There is nothing to install: the app has no
-# npm dependencies, so the image is Node plus the source.
+# Agent Control as a container. The app has no npm dependencies, so the image is
+# Node plus the source. The one optional package is a browser for bots
+# (`browser.use`), off by default because it is large; build with
+# `--build-arg INSTALL_BROWSER=1` (the compose file here does) to include it.
 FROM node:22-slim
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=4173 DATA_FILE=/data/state.json
+ARG INSTALL_BROWSER=0
+ARG DEBIAN_FRONTEND=noninteractive
+# A container has no user namespaces, so Chrome's own sandbox cannot start; the
+# `1` from the same argument turns `--no-sandbox` on. The allowlist, egress
+# proxy and fresh context per page in `agent/browser.mjs` still apply.
+ENV BROWSER_NO_SANDBOX=${INSTALL_BROWSER}
+RUN if [ "$INSTALL_BROWSER" = "1" ]; then \
+      apt-get update && apt-get install -y --no-install-recommends chromium && \
+      rm -rf /var/lib/apt/lists/*; \
+    fi
 WORKDIR /app
 COPY package.json ./
 COPY src ./src

@@ -20,6 +20,7 @@ import {smtpConfig} from './mail.js';
 import {Auth} from './auth.js';
 import {openWorkspaces} from './workspaces.js';
 import {createPush} from './push.js';
+import {browserRuntime} from './browser-runtime.js';
 import {fail,send,cookie,checkOrigin,rawBody,safeJson,SECURITY,HSTS_ENABLED} from './http.js';
 import {createRouter,isReply,allows} from './router.js';
 import {publicRoutes} from './routes-public.js';
@@ -225,7 +226,10 @@ server.listen(PORT,HOST,()=>{
   console.log(`AI mode: ${isLive()?`Connected · ${aiModel()} @ ${aiProvider()}`:'No AI_API_KEY in the environment. Add a provider under You → AI and models, or set AI_API_KEY.'}`);
   if(HOST!=='127.0.0.1'&&HOST!=='localhost')console.warn('WARNING: Use HTTPS plus a private network / access proxy for remote access.');
 });
-process.on('SIGINT',()=>{void workspaces.stop().finally(()=>server.close(()=>process.exit(0)));});
+// A server-side browser is a child process: leave it behind and a container
+// restart keeps an orphan holding memory. Closing it is part of the drain.
+const drain=()=>Promise.allSettled([workspaces.stop(),browserRuntime.close()]).finally(()=>server.close(()=>process.exit(0)));
+process.on('SIGINT',()=>{void drain();});
 // A container stops the process with SIGTERM, so it needs the same drain as
 // Ctrl-C instead of being killed with requests and leases still open.
-process.on('SIGTERM',()=>{void workspaces.stop().finally(()=>server.close(()=>process.exit(0)));});
+process.on('SIGTERM',()=>{void drain();});

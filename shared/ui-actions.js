@@ -314,8 +314,8 @@ export const actions = {
     await api(`/api/groups/${b.dataset.id}/runs/${b.dataset.run}/plan`, 'POST', {approve: false}); toast('Plan cancelled.'); await sync();
   },
   'approve-browser': async b => {
-    await api(`/api/browser-requests/${b.dataset.id}/approve`, 'POST', {});
-    toast('Sent to your local agent. The result will appear here.');
+    const sent = await api(`/api/browser-requests/${b.dataset.id}/approve`, 'POST', {});
+    toast(sent?.via === 'server' ? 'Running on this server. The result will appear here.' : 'Sent to your local agent. The result will appear here.');
     await sync();
     const request = (store.state.browserRequests || []).find(r => r.id === b.dataset.id);
     if (!request?.runId || !request.groupId) return;

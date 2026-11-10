@@ -60,6 +60,33 @@ Local-agent knobs (`AGENT_BROWSER`, allowlist, profile, path) are read by
 `node agent/agent.mjs`, not this process. They are listed in `.env.example`
 and [`AGENT-PROTOCOL.md`](AGENT-PROTOCOL.md).
 
+### The browser a bot may use
+
+An approved `browser.use` request runs in a headless browser. `BROWSER_RUNTIME`
+picks whose:
+
+| Variable | Meaning |
+| --- | --- |
+| `BROWSER_RUNTIME` | `auto` (default), `server` or `agent`. `auto` uses this server when it has an allowlist and a browser, and a paired local agent otherwise |
+| `AGENT_BROWSER_ALLOWLIST` | the only hosts a bot may open, read by both runtimes |
+| `AGENT_BROWSER_PATH` | the browser binary; else the first Chrome, Chromium or Edge found on `PATH` |
+| `BROWSER_TIMEOUT_MS` / `BROWSER_IDLE_MS` | the per-request budget (25s) and how long an idle browser is kept (120s) |
+| `BROWSER_NO_SANDBOX` | `1` in a container, where Chrome's own sandbox cannot start. The allowlist, the egress proxy and the fresh context per page still apply |
+
+The server browser is one child process: started with the first request, closed
+after `BROWSER_IDLE_MS` without work, and closed again when the server drains.
+Each page gets a new, empty context, so a warm browser is never signed in to
+anything. It reaches the network only through a proxy in this process that
+refuses private and local addresses.
+
+The image in `Dockerfile` does not ship Chrome by default. Both compose files
+build with `INSTALL_BROWSER=1`, which installs Chromium and sets
+`BROWSER_NO_SANDBOX=1` (a container has no user namespaces for Chrome's own
+sandbox); the allowlist, the egress proxy and the fresh context per page still
+apply. Building without that argument keeps the image small, and requests then
+fall back to a paired local agent — with neither, the chat says which one is
+missing.
+
 `preflight()` refuses to boot on an invalid `PUBLIC_ORIGIN` and warns when HSTS
 is on without HTTPS, when no `DASHBOARD_PASSWORD` is set, or when the server is
 bound off-loopback without HTTPS. The store refuses to open a database written

@@ -212,8 +212,8 @@ function botHome(conv) {
     ${box(row({title: 'Copy conversation', action: 'copy-chat', id: conv.id}) + (write ? row({title: 'Clear conversation', action: 'clear-chat', id: conv.id, tone: 'bad'}) + row({title: 'Remove from group', action: 'remove-bot', id: bot.id, tone: 'bad'}) : ''))}`;
 }
 export const tintPicker = current => `<div class="tints" role="group" aria-label="Color">${Array.from({length: TINT_COUNT}, (_, i) => `<button type="button" class="tint ${tintClass(i)}${i === current ? ' on' : ''}" data-action="avatar" data-index="${i}" aria-label="Color ${i + 1}" aria-pressed="${i === current}">${icon('check', 18)}</button>`).join('')}</div>`;
-const BROWSER_CHOICES = [['ask', 'Ask me before each page'], ['auto', 'Run on my local agent without asking']];
-const PERMISSION_LABELS = {'browser.use': 'browser.use · open pages with my local browser agent', 'subagent.spawn': 'subagent.spawn · hand one small job to a helper model', 'bot.ask': 'bot.ask · ask a teammate bot one direct question', 'bot.create': 'bot.create · add a new bot to its group for lasting work'};
+const BROWSER_CHOICES = [['ask', 'Ask me before each page'], ['auto', 'Run approved pages without asking']];
+const PERMISSION_LABELS = {'browser.use': 'browser.use · open pages in a browser', 'subagent.spawn': 'subagent.spawn · hand one small job to a helper model', 'bot.ask': 'bot.ask · ask a teammate bot one direct question', 'bot.create': 'bot.create · add a new bot to its group for lasting work'};
 const LENGTHS = [['short', 'Short, a few lines'], ['medium', 'Medium'], ['long', 'Long and detailed']];
 function behaviourFields(bot) {
   const s = botSettings(bot);

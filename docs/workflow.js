@@ -8,24 +8,24 @@
  * Keeping transitions here is the single source of truth for the draft
  * lifecycle: candidate -> draft -> approved/scheduled -> ready -> posted.
  */
-import {activity,candidateInput,cleanText,scheduleApproval,scheduleApprovalAt,scoreCandidate,validHttpUrl} from './core.js?v=cfd4a90dbc';
-import {fail} from './errors.js?v=cfd4a90dbc';
+import {activity,candidateInput,cleanText,scheduleApproval,scheduleApprovalAt,scoreCandidate,validHttpUrl} from './core.js?v=1aee2cb08a';
+import {fail} from './errors.js?v=1aee2cb08a';
 
 // How far ahead an approval may be pinned. A year-long pin is not a schedule a
 // person can still be sure of, and a draft nobody looks at again is worse than
 // one that goes out on the delay window.
 const APPROVAL_HORIZON_MS = 7*24*60*60*1000;
 const APPROVAL_LEAD_MS = 60*1000;
-import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js?v=cfd4a90dbc';
-import {evidenceSummary,evidenceForDraft,seedCandidateEvidence} from './evidence.js?v=cfd4a90dbc';
-import {normalizeRetention} from './retention.js?v=cfd4a90dbc';
-import * as contracts from './contracts.js?v=cfd4a90dbc';
-import {pruneChats, releaseChatWork} from './chats.js?v=cfd4a90dbc';
-import {denyBrowserRequest} from './bot-browser.js?v=cfd4a90dbc';
-import {BUSY_STATUSES} from './coordination.js?v=cfd4a90dbc';
-import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=cfd4a90dbc';
-import {memoryState} from './memory.js?v=cfd4a90dbc';
-import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=cfd4a90dbc';
+import {enqueueTask,cancelTask,migrateSchedules} from './tasks.js?v=1aee2cb08a';
+import {evidenceSummary,evidenceForDraft,seedCandidateEvidence} from './evidence.js?v=1aee2cb08a';
+import {normalizeRetention} from './retention.js?v=1aee2cb08a';
+import * as contracts from './contracts.js?v=1aee2cb08a';
+import {pruneChats, releaseChatWork} from './chats.js?v=1aee2cb08a';
+import {denyBrowserRequest} from './bot-browser.js?v=1aee2cb08a';
+import {BUSY_STATUSES} from './coordination.js?v=1aee2cb08a';
+import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=1aee2cb08a';
+import {memoryState} from './memory.js?v=1aee2cb08a';
+import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=1aee2cb08a';
 
 export const SCHEMA_VERSION = 3;
 /** Posts are never pruned by age, so their number is bounded here. */
@@ -456,7 +456,6 @@ export function recoverInterrupted(state) {
   if (recovered) activity(state, 'recovery', `Released ${recovered} candidate(s) interrupted by a restart.`);
   return {recovered};
 }
-
 
 /** Reminder compatibility layer: the UI and both transports still create
  * reminders through these helpers, but the record they write is a structured

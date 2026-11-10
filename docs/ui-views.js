@@ -2,14 +2,14 @@
  * Both are thin renderers over ui-model.js. The list shell and the composer are
  * painted once and then only their contents change, so a background refresh can
  * never wipe what the user is typing. */
-import {botSuggestions} from './chat-engine.js?v=cfd4a90dbc';
-import {summonableGuests} from './coordination.js?v=cfd4a90dbc';
-import {botSettings, groupSettings} from './bot-settings.js?v=cfd4a90dbc';
-import {requestOfMessage} from './bot-browser.js?v=cfd4a90dbc';
-import {validHttpUrl} from './core.js?v=cfd4a90dbc';
-import {chatRows, timeline, pendingBrowser, stuckFeedReads, draftStage, draftLength, lengthLabel, mentionSuggestions, retryTarget, threadLineActions, isRunNote, runBelongsToChat, ACTIVE_DRAFTS} from './ui-model.js?v=cfd4a90dbc';
-import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=cfd4a90dbc';
-import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, isXGroup, botTint, recentRuns} from './ui-store.js?v=cfd4a90dbc';
+import {botSuggestions} from './chat-engine.js?v=1aee2cb08a';
+import {summonableGuests} from './coordination.js?v=1aee2cb08a';
+import {botSettings, groupSettings} from './bot-settings.js?v=1aee2cb08a';
+import {requestOfMessage} from './bot-browser.js?v=1aee2cb08a';
+import {validHttpUrl} from './core.js?v=1aee2cb08a';
+import {chatRows, timeline, pendingBrowser, stuckFeedReads, draftStage, draftLength, lengthLabel, mentionSuggestions, retryTarget, threadLineActions, isRunNote, runBelongsToChat, ACTIVE_DRAFTS} from './ui-model.js?v=1aee2cb08a';
+import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=1aee2cb08a';
+import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, isXGroup, botTint, recentRuns} from './ui-store.js?v=1aee2cb08a';
 
 const el = id => document.getElementById(id);
 const FILTERS = [['all', 'All'], ['needs', 'Needs you'], ['groups', 'Groups'], ['bots', 'Bots']];
@@ -151,17 +151,19 @@ function botFace(conv, senderId, name) {
   return {face: avatar(name, index, 30), color: tintClass(index)};
 }
 
-const BROWSER_STATUS = {pending: ['Waiting on you', 'warn'], dispatched: ['On your local agent', 'warn'], done: ['Done', 'good'], failed: ['Failed', 'bad'], denied: ['Declined', '']};
-/** A bot's request to open a page with the user's local browser agent. */
+const BROWSER_STATUS = {pending: ['Waiting on you', 'warn'], dispatched: ['Running', 'warn'], done: ['Done', 'good'], failed: ['Failed', 'bad'], denied: ['Declined', '']};
+/** A bot's request to open a page in a browser. It says where it runs: this
+ * server, or a paired device, so "nothing happened" has an obvious cause. */
 function browserCard(m) {
   const request = requestOfMessage(store.state, m.id);
   if (!request) return `<div class="event"><span>${esc(m.text)}</span></div>`;
   const [label, tone] = BROWSER_STATUS[request.status] || [request.status, ''];
-  const steps = request.steps?.length ? `<ol class="browser-steps">${request.steps.map(s => `<li>${esc(s.op)} ${esc(s.url || s.selector || '')}${s.text ? ` · "${esc(String(s.text).slice(0, 60))}"` : ''}</li>`).join('')}</ol>` : '';
+  const where = request.status === 'pending' ? '' : ` · ${request.via === 'server' ? 'this server' : 'your device'}`;
+  const steps = request.steps?.length ? `<ol class="browser-steps">${request.steps.map(s => `<li>${esc(s.op)} ${esc(s.url || (s.index ? `#${s.index}` : s.selector) || '')}${s.text ? ` · "${esc(String(s.text).slice(0, 60))}"` : ''}</li>`).join('')}</ol>` : '';
   const decline = btn('Decline', 'deny-browser', {id: request.id, small: true});
   const actions = !canWrite() ? '' : request.status === 'pending' ? `<div class="card-actions">${btn('Approve', 'approve-browser', {id: request.id, small: true, kind: 'primary'})}${decline}</div>`
     : request.status === 'dispatched' ? `<div class="card-actions">${decline}</div>` : '';
-  return `<div class="event browser-request"><span>${esc(m.text)} ${tag(label, tone)}</span><a href="${esc(safeHref(request.url))}" target="_blank" rel="noopener noreferrer">${esc(request.url)}</a>${steps}${request.error ? `<small>${esc(request.error)}</small>` : ''}${actions}</div>`;
+  return `<div class="event browser-request"><span>${esc(m.text)} ${tag(`${label}${where}`, tone)}</span><a href="${esc(safeHref(request.url))}" target="_blank" rel="noopener noreferrer">${esc(request.url)}</a>${steps}${request.error ? `<small>${esc(request.error)}</small>` : ''}${actions}</div>`;
 }
 
 function messageHtml(item, conv, latestRunNote) {

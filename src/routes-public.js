@@ -4,13 +4,23 @@
 import {activity, candidateInput} from '../shared/core.js';
 import * as wf from '../shared/workflow.js';
 import * as agent from './agent.js';
-import {onAgentTaskResult, continueBrowserWork} from './bot-browser.js';
+import {onAgentTaskResult, continueBrowserWork, setBrowserResultHooks} from './bot-browser.js';
 import {queueGroupRun, resumeFeedRun, resumeBrowserRun} from './coordination.js';
 import {runOneBot} from './routes-groups.js';
 import {sessionCookie, clearCookie, DEFAULT_WORKSPACE, resolveAccount} from './auth.js';
 import {sha256} from './vault.js';
 import {fail, cookie, safeJson} from './http.js';
 import {reply} from './router.js';
+
+// A page read by this server's own browser finishes exactly where a device's
+// result does: the same chat line, the same continuation. Those functions live
+// in modules that import `bot-browser.js`, so the dependency is registered here
+// instead of imported there (that would be a cycle).
+setBrowserResultHooks({
+  continueRun: (store, spec) => continueBrowserWork(store, spec, {runBot: runOneBot, runGroup: queueGroupRun}),
+  resumeFeed: resumeFeedRun,
+  resumeBrowser: resumeBrowserRun,
+});
 
 // The per-account bucket is deliberately looser than the per-IP one: it exists to
 // stop guesses spread across many addresses, not to let one client lock a

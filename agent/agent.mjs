@@ -25,6 +25,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import crypto from 'node:crypto';
 import {captureWithBrowser, ACTION_OPS, MAX_ACTIONS} from './browser.mjs';
+import {hostAllowed, hostOf, parseAllowlist} from '../shared/bot-browser.js';
 import {resolvePublicAddress, pinnedRequest} from './net-guard.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -143,10 +144,9 @@ async function execute(task, config) {
   }
   if (task.kind === 'browser.capture') {
     const target = String(task.payload?.url || '');
-    const allow = (process.env.AGENT_BROWSER_ALLOWLIST || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-    const host = new URL(target).host.toLowerCase();
-    if (!allow.includes(host)) {
-      throw new Error(`Refusing to read ${host}: it is not in AGENT_BROWSER_ALLOWLIST. Only explicitly allowed pages are read.`);
+    const allow = parseAllowlist(process.env.AGENT_BROWSER_ALLOWLIST);
+    if (!hostAllowed(target, allow)) {
+      throw new Error(`Refusing to read ${hostOf(target) || target}: it is not in AGENT_BROWSER_ALLOWLIST. Only explicitly allowed pages are read.`);
     }
     if (process.env.AGENT_BROWSER === '1') return captureWithBrowser(target, {allow});
     // The fetch fallback must not become a second way onto the local network: it
@@ -161,9 +161,8 @@ async function execute(task, config) {
   }
   if (task.kind === 'browser.action') {
     const target = String(task.payload?.url || '');
-    const allow = (process.env.AGENT_BROWSER_ALLOWLIST || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-    const host = new URL(target).host.toLowerCase();
-    if (!allow.includes(host)) throw new Error(`Refusing to act on ${host}: it is not in AGENT_BROWSER_ALLOWLIST. Only explicitly allowed pages are driven.`);
+    const allow = parseAllowlist(process.env.AGENT_BROWSER_ALLOWLIST);
+    if (!hostAllowed(target, allow)) throw new Error(`Refusing to act on ${hostOf(target) || target}: it is not in AGENT_BROWSER_ALLOWLIST. Only explicitly allowed pages are driven.`);
     const steps = Array.isArray(task.payload?.steps) ? task.payload.steps.slice(0, MAX_ACTIONS) : [];
     if (!steps.length) throw new Error('browser.action needs at least one step.');
     const bad = steps.find(step => !step || !ACTION_OPS.includes(step.op));

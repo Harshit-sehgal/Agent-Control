@@ -8,7 +8,12 @@
 # domain's DNS at this host and open ports 80 and 443 first.
 services:
   app:
-    build: ..
+    build:
+      context: ..
+      args:
+        # The browser a bot may use (`browser.use`). It is a large package, so
+        # it is opt-in; its hosts still have to be in AGENT_BROWSER_ALLOWLIST.
+        INSTALL_BROWSER: "1"
     restart: unless-stopped
     env_file: .env
     environment:

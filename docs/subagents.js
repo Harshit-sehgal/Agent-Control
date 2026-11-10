@@ -15,9 +15,9 @@
  * This module is pure. It parses and bounds the request; `src/subagents.js`
  * runs the round and the orchestrator decides what the answer means.
  */
-import {cleanText} from './core.js?v=cfd4a90dbc';
-import {fail} from './errors.js?v=cfd4a90dbc';
-import {controlFence} from './bot-link.js?v=cfd4a90dbc';
+import {cleanText} from './core.js?v=1aee2cb08a';
+import {fail} from './errors.js?v=1aee2cb08a';
+import {controlFence} from './bot-link.js?v=1aee2cb08a';
 
 export const SUBAGENT_PERMISSION = 'subagent.spawn';
 /** One helper per reply. Every spawn is a child call plus an extra turn for the
@@ -33,7 +33,6 @@ export const SUBAGENT_NAME = 'helper';
 // One fence grammar shared with every other control block (see bot-link.js):
 // the last block in a reply may be unclosed, and the strip path removes it.
 const BLOCK = () => controlFence('spawn');
-
 
 /** Validate one request body into the helper job it becomes. */
 export function validateSpawnRequest(body) {

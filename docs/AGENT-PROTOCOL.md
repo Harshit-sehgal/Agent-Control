@@ -60,11 +60,17 @@ it; `AGENT_ALLOW_PRIVATE=1` on the device lifts that on purpose.
 the device, the agent opens the page in the Chrome, Chromium or Edge already
 installed there (`AGENT_BROWSER_PATH` names one explicitly;
 `AGENT_BROWSER_ARGS` adds flags such as `--no-sandbox` for containers) and
-returns the title and visible text, so pages that need JavaScript can be read.
+returns the title, the visible text and a numbered list of the controls on the
+page (see the index steps below), so pages that need JavaScript can be read.
 That browser starts with an empty profile that is deleted afterwards, so it is
 signed in to nothing, unless `AGENT_BROWSER_PROFILE` points at a directory to
 keep. A page, a frame or a redirect outside the allowlist is
 blocked, and so is any request the page makes to a private or local address.
+
+`AGENT_BROWSER_ALLOWLIST` is read by the device and by the server the same way:
+one host name per entry, compared on the host, so a trailing dot or a `:port`
+on either side does not name a second site. A whole URL in the list names its
+host.
 
 `browser.action` may click, type, wait, read or scroll on an allowlisted
 page. Click and type on X are always refused. The agent never uploads or
@@ -98,6 +104,12 @@ is required).
            {"op": "read", "selector": "#results"}]}
 ```
 
+A step names an element either with a CSS `selector` (above) or with the
+`index` the browser printed in its last result. Every capture returns the
+controls a person would see as a numbered list — `[3] button Sign in` — so a
+bot that has just read a page it has never seen can act on it by number:
+`{"op": "click", "index": 3}`. Both spellings run under the same rules.
+
 Boundaries — the same as a read, plus interaction:
 
 - every host (the page **and** any step's `navigate`) must be in
@@ -121,7 +133,7 @@ above. `shared/bot-browser.js` validates the block and then:
 
 - strips it from the chat and shows a request card instead;
 - dispatches nothing until a member presses **Approve**, unless that bot's
-  *Browser requests* setting is "Run on my local agent without asking";
+  *Browser requests* setting is "Run approved pages without asking";
 - refuses any click or type on x.com or twitter.com, whatever the setting.
   Bots may read X; posting stays a human action;
 - allows at most 2 requests per reply and 3 browser round trips per
@@ -130,7 +142,16 @@ above. `shared/bot-browser.js` validates the block and then:
   permission the request needs (`browser.capture` or `browser.action`). The
   device allowlist, proxy and fresh profile above still apply.
 
-When the device reports back, the result is posted in the chat and the same bot
+`BROWSER_RUNTIME` decides who opens the page. `auto` (the default) uses **this
+server's own** headless browser when `AGENT_BROWSER_ALLOWLIST` and a browser are
+present there, and a paired agent otherwise; `server` or `agent` forces one.
+The server path exists so a bot can read a page with no device paired and
+nothing of the user's awake — the same allowlist and egress proxy apply to it,
+and each page still gets a fresh, empty context, so a warm browser is never a
+signed-in one. Whichever runtime runs it, the request is the same record and the
+result is handled the same way.
+
+When the browser reports back, the result is posted in the chat and the same bot
 is asked to continue with it. A failure is posted as a message and is never
 handed to the bot as a page.
 

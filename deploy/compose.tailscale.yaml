@@ -10,7 +10,13 @@
 # data stays in the repository's data/ folder.
 services:
   app:
-    build: ..
+    build:
+      context: ..
+      args:
+        # The browser a bot may use (`browser.use`) inside this container. Its
+        # hosts still have to be listed in AGENT_BROWSER_ALLOWLIST; without that
+        # variable a request falls back to a paired local agent.
+        INSTALL_BROWSER: "1"
     restart: unless-stopped
     network_mode: host
     env_file: ../.env

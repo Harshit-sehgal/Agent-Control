@@ -124,8 +124,10 @@ work should be added as a fresh section.
 - [x] Fenced `browser` blocks validated (`shared/bot-browser.js`): public http(s) only, 25 steps, 2 per reply, 3 round trips per turn, no click/type on X
 - [x] Approve/Decline card in the chat; per-bot "Browser requests" setting (ask, or run without asking)
 - [x] Dispatch to a paired local agent with the needed permission; result posted in the chat and the bot continues (`src/bot-browser.js`)
+- [x] Steps may name a control by the index in the last result, so a bot can act on a page it has only read once (`agent/browser.mjs`)
+- [x] `BROWSER_RUNTIME`: the server runs a browser of its own (one child process, serial, closed when idle) when it has an allowlist and a browser, else a paired agent (`src/browser-runtime.js`)
 - [x] Requests persisted in SQLite; Pages demo explains it needs the Node build
-- [x] Tests (`tests/bot-browser.test.js`); check, test and build:pages green
+- [x] Tests (`tests/bot-browser.test.js`, `tests/browser-runtime.test.js`, `tests/agent-browser.test.js`); check, test and build:pages green
 
 ## Phase S — sub-agents a bot can spawn
 - [x] `subagent.spawn` permission on any bot; envelope and system prompt describe the spawn block only to bots holding it

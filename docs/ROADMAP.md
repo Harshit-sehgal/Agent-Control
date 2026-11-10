@@ -46,6 +46,7 @@
 - **More than one workspace.** Each workspace has its own database file, members and roles; a session works on one workspace at a time and can switch (`src/workspaces.js`, `src/routes-workspaces.js`). Local agents, credentials, notifications, capture tokens and backups are per workspace.
 - **Mobile push.** Web Push to any subscribed device, encrypted and signed with `node:crypto` (`src/push.js`), delivered through the task queue with retries. A service worker shows the notification (`shared/sw.js`), and a web manifest lets the app be installed, which iOS requires for push.
 - **A real browser reader.** With `AGENT_BROWSER=1` the local agent opens allowlisted pages in the installed Chrome over the DevTools protocol (`agent/browser.mjs`). No dependency was added. Click and type run as `browser.action` except on X and Twitter, where they stay refused.
+- **A browser the app owns.** A `browser.use` request runs on the server itself when it has an allowlist and a browser (`BROWSER_RUNTIME=auto|server`, `src/browser-runtime.js`), so a bot can read a page with no device paired; a paired agent still runs it when the server has no Chrome, and both paths read `AGENT_BROWSER_ALLOWLIST` the same way. Every page gets a fresh, empty context, and each result reports the controls on the page as a numbered list so the next step can name one by index instead of inventing a selector.
 - **Deploy files.** `Dockerfile`, `deploy/compose.yaml` (Caddy for HTTPS) and `deploy/agent-control.service`.
 
 ## What is left

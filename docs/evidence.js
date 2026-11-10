@@ -8,7 +8,7 @@
  *
  * Pure transitions over the state object, like workflow.js and tasks.js.
  */
-import {activity, cleanText, validHttpUrl} from './core.js?v=cfd4a90dbc';
+import {activity, cleanText, validHttpUrl} from './core.js?v=1aee2cb08a';
 
 export const VERIFICATION_STATUSES = ['unverified', 'user_verified', 'disputed', 'unverifiable'];
 export const REUSE_POLICIES = ['internal', 'quote', 'summarize', 'none'];

@@ -1,16 +1,16 @@
 /** What the UI can do, as three lookup tables keyed by `data-action`, form id and
  * control id. app.js owns the DOM events and dispatches here; handlers throw on
  * failure and the dispatcher turns that into one toast. */
-import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, setPref, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns, patchLocalRun, appendMessage} from './ui-store.js?v=cfd4a90dbc';
-import {botSettings, groupSettings} from './bot-settings.js?v=cfd4a90dbc';
-import {completeMention, moveRow, pipelineValue, draftLength, lengthLabel, threadPosts} from './ui-model.js?v=cfd4a90dbc';
-import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=cfd4a90dbc';
-import {sendChat, streamGroupRun, watchQueuedRun, continueDemoPlan} from './ui-chat.js?v=cfd4a90dbc';
-import {confetti, whoosh, react, poke} from './ui-fx.js?v=cfd4a90dbc';
-import {renderList, renderMentions} from './ui-views.js?v=cfd4a90dbc';
-import {refreshLists, reloadAdminPage, pipelineList} from './ui-panel.js?v=cfd4a90dbc';
-import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, botTaskSheet, scheduleDraftSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=cfd4a90dbc';
-import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=cfd4a90dbc';
+import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, setPref, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns, patchLocalRun, appendMessage} from './ui-store.js?v=1aee2cb08a';
+import {botSettings, groupSettings} from './bot-settings.js?v=1aee2cb08a';
+import {completeMention, moveRow, pipelineValue, draftLength, lengthLabel, threadPosts} from './ui-model.js?v=1aee2cb08a';
+import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=1aee2cb08a';
+import {sendChat, streamGroupRun, watchQueuedRun, continueDemoPlan} from './ui-chat.js?v=1aee2cb08a';
+import {confetti, whoosh, react, poke} from './ui-fx.js?v=1aee2cb08a';
+import {renderList, renderMentions} from './ui-views.js?v=1aee2cb08a';
+import {refreshLists, reloadAdminPage, pipelineList} from './ui-panel.js?v=1aee2cb08a';
+import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, botTaskSheet, scheduleDraftSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=1aee2cb08a';
+import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=1aee2cb08a';
 
 const adminCtx = {reload: reloadAdminPage};
 const chatId = () => store.route.chat;
@@ -314,8 +314,8 @@ export const actions = {
     await api(`/api/groups/${b.dataset.id}/runs/${b.dataset.run}/plan`, 'POST', {approve: false}); toast('Plan cancelled.'); await sync();
   },
   'approve-browser': async b => {
-    await api(`/api/browser-requests/${b.dataset.id}/approve`, 'POST', {});
-    toast('Sent to your local agent. The result will appear here.');
+    const sent = await api(`/api/browser-requests/${b.dataset.id}/approve`, 'POST', {});
+    toast(sent?.via === 'server' ? 'Running on this server. The result will appear here.' : 'Sent to your local agent. The result will appear here.');
     await sync();
     const request = (store.state.browserRequests || []).find(r => r.id === b.dataset.id);
     if (!request?.runId || !request.groupId) return;

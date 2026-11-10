@@ -27,7 +27,13 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import {isPrivateAddress} from './net-guard.mjs';
-import {isPostingHost} from '../shared/bot-browser.js';
+import {hostAllowed, isPostingHost} from '../shared/bot-browser.js';
+
+// The allowlist rule lives with the rest of the browser-block rules in
+// `shared/bot-browser.js`, so the server runtime and this device read the same
+// `AGENT_BROWSER_ALLOWLIST` identically. Re-exported because the device process
+// and its tests read it here.
+export {hostAllowed};
 
 /** May the browser connect to `address`, which `host` resolved to? */
 const publicOnly = (host, address) => process.env.AGENT_ALLOW_PRIVATE === '1' || !isPrivateAddress(address);
@@ -49,23 +55,38 @@ export function findBrowser(env = process.env) {
   return [...onPath, ...FIXED].find(file => { try { return fs.statSync(file).isFile(); } catch { return false; } }) || null;
 }
 
-export const hostAllowed = (url, allow) => { try { return allow.includes(new URL(url).host.toLowerCase()); } catch { return false; } };
-
 /** Actions a `browser.action` task may run, and the hard cap per task. Every
  * click, typed value and navigation is still gated by the same allowlist and
  * proxy as a read: this adds interaction, not a way around the boundary. */
 export const ACTION_OPS = ['navigate', 'click', 'type', 'waitFor', 'read', 'scroll'];
 export const MAX_ACTIONS = 25;
+/** How many interactive elements a snapshot reports. A long page can have
+ * hundreds of links; the first screenful is what a model can use, and the rest
+ * would only pad the chat record. */
+export const MAX_ELEMENTS = 60;
 const jsLiteral = value => JSON.stringify(String(value ?? ''));
 const postingPage = `(()=>{try{const host=new URL(location.href).hostname.toLowerCase().replace(/\\.+$/,'');return host==='x.com'||host.endsWith('.x.com')||host==='twitter.com'||host.endsWith('.twitter.com');}catch{return false;}})()`;
 const postingRefusal = `Bots may read X and Twitter pages but never click or type there.`;
+/** The elements a person could interact with, filtered the way a person sees
+ * them: not disabled, with a real box on the page. Shared by the snapshot and
+ * by every index-based step, so "index 3" means the same element in both. */
+const PICKABLE = `(function(){var sel='a[href],button,input,textarea,select,[role=button],[role=link],[role=tab],[onclick],[contenteditable="true"]';return Array.prototype.filter.call(document.querySelectorAll(sel),function(e){if(e.disabled)return false;var r=e.getBoundingClientRect();if(r.width<=0||r.height<=0)return false;var s=getComputedStyle(e);return s.visibility!=='hidden'&&s.display!=='none';});})()`;
+/** Number the interactive elements and report them. Indices let the model act
+ * without inventing a CSS selector, which is what makes an agent's second step
+ * reliable on a page it has never seen; the attributes make the step cheap.
+ * Both lists come from the same `PICKABLE` expression in the same page load. */
+const SNAPSHOT = `(function(){var els=${PICKABLE};els.forEach(function(e,i){e.setAttribute('data-agent-index',String(i+1));});return {count:els.length,elements:els.slice(0,${MAX_ELEMENTS}).map(function(e,i){var t=(e.innerText||e.value||e.getAttribute('aria-label')||e.getAttribute('placeholder')||e.name||'');return {index:i+1,tag:e.tagName.toLowerCase(),text:String(t).replace(/\\s+/g,' ').trim().slice(0,80)};})};})()`;
+/** A step targets an element by the index from the last snapshot, or by a CSS
+ * selector when the model prefers one. */
+const targetOf = step => step.index ? jsLiteral(`[data-agent-index="${Math.round(step.index)}"]`) : jsLiteral(step.selector);
 function actionExpression(step) {
-  const sel = jsLiteral(step.selector);
+  const sel = targetOf(step);
   switch (step.op) {
     case 'click': return `(()=>{const blocked=()=>${postingPage};if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};el.scrollIntoView();if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};el.click();return{ok:true};})()`;
     case 'type': return `(()=>{const blocked=()=>${postingPage};if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};const v=${jsLiteral(step.text)};if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};if('value' in el){el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}else{el.textContent=v;}return{ok:true};})()`;
     case 'waitFor': return `new Promise(res=>{const sel=${sel};const end=Date.now()+${Number(step.timeoutMs) > 0 ? Math.min(Number(step.timeoutMs), 15000) : 5000};const tick=()=>{if(document.querySelector(sel))return res({ok:true});if(Date.now()>end)return res({ok:false,reason:'timed out'});setTimeout(tick,100);};tick();})`;
     case 'read': return `(()=>{const el=document.querySelector(${sel});return{ok:Boolean(el),text:el?String(el.textContent).slice(0,4000):null};})()`;
+    case 'snapshot': return SNAPSHOT;
     case 'scroll': {
       const times = Math.min(4, Math.max(1, Number(step.times) || 2));
       return `new Promise(async res=>{for(let i=0;i<${times};i++){window.scrollBy(0, Math.max(400, window.innerHeight||800));await new Promise(r=>setTimeout(r,400));}res({ok:true,times:${times}});})`;
@@ -140,8 +161,13 @@ export async function startProxy({permit = publicOnly, lookup = dns.lookup, refu
 
 /** Start the browser and resolve its DevTools address. */
 function launch(binary, profile, proxyPort, extraArgs) {
+  // A container normally has no user namespaces, so Chrome's own sandbox cannot
+  // start. The opt-in flag trades renderer isolation for a browser that runs;
+  // the egress proxy, the allowlist and the fresh context still apply.
+  const noSandbox = /^(1|true|on|yes)$/i.test(String(process.env.BROWSER_NO_SANDBOX || ''));
   const child = spawn(binary, ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check',
     '--disable-extensions', '--disable-background-networking', '--disable-sync', '--disable-gpu', '--mute-audio',
+    ...(noSandbox ? ['--no-sandbox', '--disable-dev-shm-usage'] : []),
     // Everything goes through the proxy, loopback included, and nothing may
     // leave another way (WebRTC would otherwise send UDP directly).
     `--proxy-server=http://127.0.0.1:${proxyPort}`, '--proxy-bypass-list=<-loopback>', '--force-webrtc-ip-handling-policy=disable_non_proxied_udp', '--disable-quic',
@@ -171,87 +197,135 @@ async function connect(address) {
   };
   return {
     send: (method, params = {}, sessionId) => new Promise((resolve, reject) => { const id = ++next; waiting.set(id, {resolve, reject}); socket.send(JSON.stringify({id, method, params, sessionId})); }),
-    on: (method, listener) => { listeners.set(method, [...(listeners.get(method) || []), listener]); },
+    // `on` returns the unsubscribe, so a page's listener does not outlive the
+    // page: a reused connection would otherwise deliver the closed target's
+    // requests to the next capture's handler.
+    on: (method, listener) => {
+      const existing = listeners.get(method) || [];
+      listeners.set(method, [...existing, listener]);
+      return () => listeners.set(method, (listeners.get(method) || []).filter(entry => entry !== listener));
+    },
     close: () => socket.close(),
   };
 }
 
-/** Open `url` in a headless browser and return what a reader would see. */
-export async function captureWithBrowser(url, {allow, steps = [], binary = findBrowser(), permit = publicOnly, timeoutMs = 20000, extraArgs = String(process.env.AGENT_BROWSER_ARGS || '').split(' ').filter(Boolean)} = {}) {
+/** One browser process and one egress proxy, reused across captures.
+ *
+ * Each capture gets its own browser context, so a warm process is not a
+ * signed-in one: cookies, storage and cache are per capture, exactly what a
+ * fresh profile gave. A caller that reads several pages pays the launch cost
+ * (about a second) once, which is what makes a server-side browser practical.
+ */
+export async function startBrowserSession({binary = findBrowser(), permit = publicOnly, profile = process.env.AGENT_BROWSER_PROFILE || null, extraArgs = String(process.env.AGENT_BROWSER_ARGS || '').split(' ').filter(Boolean)} = {}) {
   if (!binary) throw new Error('No Chrome, Chromium or Edge was found on this device. Install one, or set AGENT_BROWSER_PATH.');
-  if (!hostAllowed(url, allow)) throw new Error(`Refusing to open ${url}: its host is not in AGENT_BROWSER_ALLOWLIST.`);
   // A throwaway profile by default; a kept one only when the operator opts in.
-  const keepProfile = process.env.AGENT_BROWSER_PROFILE || null;
+  const keepProfile = profile;
   if (keepProfile) fs.mkdirSync(keepProfile, {recursive: true});
-  const profile = keepProfile || fs.mkdtempSync(path.join(os.tmpdir(), 'agent-browser-'));
-  const blocked = [];
-  const proxy = await startProxy({permit, refused: blocked});
-  const {child, address} = launch(binary, profile, proxy.port, extraArgs);
-  let cdp = null;
-  let deadlineTimer = null;
-  const deadline = new Promise((_, reject) => { deadlineTimer = setTimeout(() => reject(new Error(`The page did not finish loading within ${timeoutMs / 1000}s.`)), timeoutMs); deadlineTimer.unref(); });
-  try {
-    return await Promise.race([deadline, (async () => {
-      cdp = await connect(await address);
-      const {targetId} = await cdp.send('Target.createTarget', {url: 'about:blank'});
-      const {sessionId} = await cdp.send('Target.attachToTarget', {targetId, flatten: true});
-      // The page's own requests pause here first, so it cannot be sent to a
-      // page nobody allowed.
-      cdp.on('Fetch.requestPaused', ({requestId, request, resourceType}) => {
-        const verdict = requestVerdict({url: request.url, isDocument: resourceType === 'Document', method: request.method, resourceType}, {allow});
-        if (!verdict.allow) blocked.push(`${request.url.slice(0, 120)}: ${verdict.reason}`);
-        cdp.send(verdict.allow ? 'Fetch.continueRequest' : 'Fetch.failRequest', verdict.allow ? {requestId} : {requestId, errorReason: 'BlockedByClient'}, sessionId).catch(() => {});
-      });
-      await cdp.send('Fetch.enable', {patterns: [{urlPattern: '*'}]}, sessionId);
-      await cdp.send('Page.enable', {}, sessionId);
-      const loaded = new Promise(resolve => cdp.on('Page.loadEventFired', resolve));
-      const navigation = await cdp.send('Page.navigate', {url}, sessionId);
-      if (navigation.errorText) throw new Error(blocked[0] ? `The page was not opened. ${blocked[0]}` : `The page could not be opened: ${navigation.errorText}.`);
-      await loaded;
-      // Give scripts a moment to render what they fetched.
-      await new Promise(resolve => setTimeout(resolve, 600));
-      // Optional interaction steps (a `browser.action` task). Each is bounded and
-      // still gated by the allowlist + proxy; a `navigate` is checked here too.
-      const actions = [];
-      const plannedPages = [url, ...steps.filter(step => step?.op === 'navigate').map(step => step.url)];
-      const touchesPosting = plannedPages.some(page => isPostingHost(page));
-      const currentUrl = async () => {
-        const {result} = await cdp.send('Runtime.evaluate', {expression: 'location.href', returnByValue: true}, sessionId);
-        return typeof result?.value === 'string' ? result.value : '';
-      };
-      for (const step of steps.slice(0, MAX_ACTIONS)) {
-        if (step?.op === 'click' || step?.op === 'type') {
-          // The planned URL can be a trailing-dot spelling of X, or the page
-          // can land there by redirect after validation only saw another host.
-          const reason = refusePostingAction(step.op, await currentUrl()) || (touchesPosting ? 'Bots may read X and Twitter pages but never click or type there.' : '');
-          if (reason) { actions.push({op: step.op, ok: false, reason}); continue; }
-        }
-        if (step?.op === 'navigate') {
-          const target = String(step.url || '');
-          if (!hostAllowed(target, allow)) { actions.push({op: 'navigate', ok: false, reason: 'host not in AGENT_BROWSER_ALLOWLIST'}); continue; }
-          const nav = await cdp.send('Page.navigate', {url: target}, sessionId);
-          if (nav.errorText) { actions.push({op: 'navigate', ok: false, reason: nav.errorText}); continue; }
-          await new Promise(resolve => setTimeout(resolve, 500));
-          actions.push({op: 'navigate', ok: true, url: target});
-          continue;
-        }
-        const expression = actionExpression(step || {});
-        if (!expression) { actions.push({op: String(step?.op || 'unknown'), ok: false, reason: 'unsupported action'}); continue; }
-        const {result} = await cdp.send('Runtime.evaluate', {expression, awaitPromise: true, returnByValue: true}, sessionId);
-        actions.push({op: step.op, ...(result?.value && typeof result.value === 'object' ? result.value : {ok: false})});
-      }
-      const {result} = await cdp.send('Runtime.evaluate', {returnByValue: true, expression: 'JSON.stringify({url: location.href, title: document.title, text: (document.body ? document.body.innerText : "").slice(0, 20000)})'}, sessionId);
-      const page = JSON.parse(result.value);
-      if (!hostAllowed(page.url, allow)) throw new Error(`The page ended up on ${new URL(page.url).host}, which is not in AGENT_BROWSER_ALLOWLIST.`);
-      const text = page.text.replace(/\s+/g, ' ').trim();
-      return {url, finalUrl: page.url, title: page.title || null, excerpt: text.slice(0, 600), text: text.slice(0, 4000), blockedRequests: blocked.length, engine: 'browser', capturedAt: new Date().toISOString(), ...(steps.length ? {actions} : {})};
-    })()]);
-  } finally {
-    // The deadline only matters while loading; clear it so a successful capture
-    // does not leave a timer holding a closure until it fires.
-    clearTimeout(deadlineTimer);
-    address.catch(() => {});
-    try { cdp?.close(); } catch { /* Already closed. */ }
+  const dir = keepProfile || fs.mkdtempSync(path.join(os.tmpdir(), 'agent-browser-'));
+  const refused = [];
+  const proxy = await startProxy({permit, refused});
+  const {child, address} = launch(binary, dir, proxy.port, extraArgs);
+  let cdp;
+  try { cdp = await connect(await address); }
+  catch (error) {
+    // A process that never answered is still a process holding a port and a
+    // profile directory; close both before the caller sees the error.
+    proxy.close();
+    child.kill('SIGKILL');
+    throw error;
+  }
+
+  /** Open `url` in a fresh context and return what a reader would see. */
+  async function capture(url, {allow, steps = [], timeoutMs = 20000} = {}) {
+    if (!hostAllowed(url, allow)) throw new Error(`Refusing to open ${url}: its host is not in AGENT_BROWSER_ALLOWLIST.`);
+    const blockedBefore = refused.length, blocked = [];
+    let deadlineTimer = null, contextId = null, targetId = null;
+    const deadline = new Promise((_, reject) => { deadlineTimer = setTimeout(() => reject(new Error(`The page did not finish loading within ${timeoutMs / 1000}s.`)), timeoutMs); deadlineTimer.unref(); });
+    try {
+      return await Promise.race([deadline, (async () => {
+        ({browserContextId: contextId} = await cdp.send('Target.createBrowserContext'));
+        ({targetId} = await cdp.send('Target.createTarget', {url: 'about:blank', browserContextId: contextId}));
+        const {sessionId} = await cdp.send('Target.attachToTarget', {targetId, flatten: true});
+        // The page's own requests pause here first, so it cannot be sent to a
+        // page nobody allowed.
+        const offPaused = cdp.on('Fetch.requestPaused', ({requestId, request, resourceType}) => {
+          const verdict = requestVerdict({url: request.url, isDocument: resourceType === 'Document', method: request.method, resourceType}, {allow});
+          if (!verdict.allow) blocked.push(`${request.url.slice(0, 120)}: ${verdict.reason}`);
+          cdp.send(verdict.allow ? 'Fetch.continueRequest' : 'Fetch.failRequest', verdict.allow ? {requestId} : {requestId, errorReason: 'BlockedByClient'}, sessionId).catch(() => {});
+        });
+        try {
+          await cdp.send('Fetch.enable', {patterns: [{urlPattern: '*'}]}, sessionId);
+          await cdp.send('Page.enable', {}, sessionId);
+          const loaded = new Promise(resolve => { const off = cdp.on('Page.loadEventFired', () => { off(); resolve(); }); });
+          const navigation = await cdp.send('Page.navigate', {url}, sessionId);
+          if (navigation.errorText) throw new Error(blocked[0] ? `The page was not opened. ${blocked[0]}` : `The page could not be opened: ${navigation.errorText}.`);
+          await loaded;
+          // Give scripts a moment to render what they fetched.
+          await new Promise(resolve => setTimeout(resolve, 600));
+          // Number the interactive elements once, before the steps, so an
+          // `index` step and the list the model was shown agree.
+          await cdp.send('Runtime.evaluate', {expression: SNAPSHOT, returnByValue: true}, sessionId);
+          // Optional interaction steps (a `browser.action` task). Each is bounded and
+          // still gated by the allowlist + proxy; a `navigate` is checked here too.
+          const actions = [];
+          const plannedPages = [url, ...steps.filter(step => step?.op === 'navigate').map(step => step.url)];
+          const touchesPosting = plannedPages.some(page => isPostingHost(page));
+          const currentUrl = async () => {
+            const {result} = await cdp.send('Runtime.evaluate', {expression: 'location.href', returnByValue: true}, sessionId);
+            return typeof result?.value === 'string' ? result.value : '';
+          };
+          for (const step of steps.slice(0, MAX_ACTIONS)) {
+            if (step?.op === 'click' || step?.op === 'type') {
+              // The planned URL can be a trailing-dot spelling of X, or the page
+              // can land there by redirect after validation only saw another host.
+              const reason = refusePostingAction(step.op, await currentUrl()) || (touchesPosting ? 'Bots may read X and Twitter pages but never click or type there.' : '');
+              if (reason) { actions.push({op: step.op, ok: false, reason}); continue; }
+            }
+            if (step?.op === 'navigate') {
+              const target = String(step.url || '');
+              if (!hostAllowed(target, allow)) { actions.push({op: 'navigate', ok: false, reason: 'host not in AGENT_BROWSER_ALLOWLIST'}); continue; }
+              const nav = await cdp.send('Page.navigate', {url: target}, sessionId);
+              if (nav.errorText) { actions.push({op: 'navigate', ok: false, reason: nav.errorText}); continue; }
+              await new Promise(resolve => setTimeout(resolve, 500));
+              actions.push({op: 'navigate', ok: true, url: target});
+              continue;
+            }
+            const expression = actionExpression(step || {});
+            if (!expression) { actions.push({op: String(step?.op || 'unknown'), ok: false, reason: 'unsupported action'}); continue; }
+            const {result} = await cdp.send('Runtime.evaluate', {expression, awaitPromise: true, returnByValue: true}, sessionId);
+            actions.push({op: step.op, ...(result?.value && typeof result.value === 'object' ? result.value : {ok: false})});
+          }
+          const {result} = await cdp.send('Runtime.evaluate', {returnByValue: true, expression: `JSON.stringify({url: location.href, title: document.title, text: (document.body ? document.body.innerText : "").slice(0, 20000), snapshot: ${SNAPSHOT}})`}, sessionId);
+          const page = JSON.parse(result.value);
+          if (!hostAllowed(page.url, allow)) throw new Error(`The page ended up on ${new URL(page.url).host}, which is not in AGENT_BROWSER_ALLOWLIST.`);
+          const text = page.text.replace(/\s+/g, ' ').trim();
+          const snapshot = page.snapshot && typeof page.snapshot === 'object' ? page.snapshot : {count: 0, elements: []};
+          return {
+            url, finalUrl: page.url, title: page.title || null,
+            excerpt: text.slice(0, 600), text: text.slice(0, 4000),
+            // What the model can act on next: a short, numbered list of the
+            // controls a person would see, not the raw HTML.
+            elements: Array.isArray(snapshot.elements) ? snapshot.elements : [],
+            elementCount: Number(snapshot.count) || 0,
+            blockedRequests: blocked.length + (refused.length - blockedBefore),
+            engine: 'browser', capturedAt: new Date().toISOString(),
+            ...(steps.length ? {actions} : {}),
+          };
+        } finally { offPaused(); }
+      })()]);
+    } finally {
+      // The deadline only matters while loading; clear it so a successful capture
+      // does not leave a timer holding a closure until it fires.
+      clearTimeout(deadlineTimer);
+      // Close the page and throw the whole cookie jar away: the next capture
+      // starts signed out even though the process is reused.
+      if (targetId) await cdp.send('Target.closeTarget', {targetId}).catch(() => {});
+      if (contextId) await cdp.send('Target.disposeBrowserContext', {browserContextId: contextId}).catch(() => {});
+    }
+  }
+
+  async function close() {
+    try { cdp.close(); } catch { /* Already closed. */ }
     proxy.close();
     child.kill('SIGKILL');
     await new Promise(resolve => (child.exitCode !== null || child.signalCode ? resolve() : child.once('exit', resolve)));
@@ -260,8 +334,21 @@ export async function captureWithBrowser(url, {allow, steps = [], binary = findB
     // the directory for a moment after the parent exits (maxRetries only helps
     // on Windows), so retry and never let a cleanup race mask the real result.
     if (!keepProfile) for (let attempt = 0; attempt < 5; attempt++) {
-      try { fs.rmSync(profile, {recursive: true, force: true}); break; }
+      try { fs.rmSync(dir, {recursive: true, force: true}); break; }
       catch { await new Promise(resolve => setTimeout(resolve, 120)); }
     }
   }
+
+  return {capture, close};
+}
+
+/** One page in a browser that lives only for that page. The device process and
+ * a one-shot server read both use this; a caller with several pages starts a
+ * session instead. */
+export async function captureWithBrowser(url, opts = {}) {
+  // Refuse before launching: a host nobody allowed must not cost a process.
+  if (!hostAllowed(url, opts.allow)) throw new Error(`Refusing to open ${url}: its host is not in AGENT_BROWSER_ALLOWLIST.`);
+  const session = await startBrowserSession(opts);
+  try { return await session.capture(url, opts); }
+  finally { await session.close(); }
 }

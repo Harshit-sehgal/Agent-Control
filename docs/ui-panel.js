@@ -1,17 +1,17 @@
 /** Everything that used to be a dashboard tab now hangs off a conversation:
  * the info panel of the open chat (drafts, posts, reminders, runs, voice, the
  * bot's profile) and the "You" pages (account, admin, about). */
-import {filterCandidates, filterDrafts} from './usability.js?v=cfd4a90dbc';
-import {ACTIONS, OUTPUT_KINDS} from './contracts.js?v=cfd4a90dbc';
-import {BOT_DEFAULTS, MAX_CONTEXT_MESSAGES, MAX_STEPS_LIMIT, botSettings, groupSettings, pipelineOf} from './bot-settings.js?v=cfd4a90dbc';
-import {BUSY_STATUSES} from './coordination.js?v=cfd4a90dbc';
-import {modelKey} from './memory.js?v=cfd4a90dbc';
-import {ACTIVE_DRAFTS, chatTasks, pipelineRows, retryTarget, runBelongsToChat} from './ui-model.js?v=cfd4a90dbc';
-import {esc, icon, avatar, groupAvatar, tintClass, TINT_COUNT, btn, iconBtn, row, box, field, note, empty, tag, pageHead, fullDate} from './ui-kit.js?v=cfd4a90dbc';
-import {store, conversation, isStaticDemo, isAdmin, canWrite, isXGroup, botTint, recentRuns, THEMES, themeChoice} from './ui-store.js?v=cfd4a90dbc';
-import {validHttpUrl} from './core.js?v=cfd4a90dbc';
-import {draftCard, postCard} from './ui-views.js?v=cfd4a90dbc';
-import {ADMIN_PAGES, adminPage, providerModelOptions} from './ui-admin.js?v=cfd4a90dbc';
+import {filterCandidates, filterDrafts} from './usability.js?v=1aee2cb08a';
+import {ACTIONS, OUTPUT_KINDS} from './contracts.js?v=1aee2cb08a';
+import {BOT_DEFAULTS, MAX_CONTEXT_MESSAGES, MAX_STEPS_LIMIT, botSettings, groupSettings, pipelineOf} from './bot-settings.js?v=1aee2cb08a';
+import {BUSY_STATUSES} from './coordination.js?v=1aee2cb08a';
+import {modelKey} from './memory.js?v=1aee2cb08a';
+import {ACTIVE_DRAFTS, chatTasks, pipelineRows, retryTarget, runBelongsToChat} from './ui-model.js?v=1aee2cb08a';
+import {esc, icon, avatar, groupAvatar, tintClass, TINT_COUNT, btn, iconBtn, row, box, field, note, empty, tag, pageHead, fullDate} from './ui-kit.js?v=1aee2cb08a';
+import {store, conversation, isStaticDemo, isAdmin, canWrite, isXGroup, botTint, recentRuns, THEMES, themeChoice} from './ui-store.js?v=1aee2cb08a';
+import {validHttpUrl} from './core.js?v=1aee2cb08a';
+import {draftCard, postCard} from './ui-views.js?v=1aee2cb08a';
+import {ADMIN_PAGES, adminPage, providerModelOptions} from './ui-admin.js?v=1aee2cb08a';
 
 const el = id => document.getElementById(id);
 const options = (pairs, current) => pairs.map(([value, label]) => `<option value="${esc(value)}"${value === current ? ' selected' : ''}>${esc(label)}</option>`).join('');
@@ -212,8 +212,8 @@ function botHome(conv) {
     ${box(row({title: 'Copy conversation', action: 'copy-chat', id: conv.id}) + (write ? row({title: 'Clear conversation', action: 'clear-chat', id: conv.id, tone: 'bad'}) + row({title: 'Remove from group', action: 'remove-bot', id: bot.id, tone: 'bad'}) : ''))}`;
 }
 export const tintPicker = current => `<div class="tints" role="group" aria-label="Color">${Array.from({length: TINT_COUNT}, (_, i) => `<button type="button" class="tint ${tintClass(i)}${i === current ? ' on' : ''}" data-action="avatar" data-index="${i}" aria-label="Color ${i + 1}" aria-pressed="${i === current}">${icon('check', 18)}</button>`).join('')}</div>`;
-const BROWSER_CHOICES = [['ask', 'Ask me before each page'], ['auto', 'Run on my local agent without asking']];
-const PERMISSION_LABELS = {'browser.use': 'browser.use · open pages with my local browser agent', 'subagent.spawn': 'subagent.spawn · hand one small job to a helper model', 'bot.ask': 'bot.ask · ask a teammate bot one direct question', 'bot.create': 'bot.create · add a new bot to its group for lasting work'};
+const BROWSER_CHOICES = [['ask', 'Ask me before each page'], ['auto', 'Run approved pages without asking']];
+const PERMISSION_LABELS = {'browser.use': 'browser.use · open pages in a browser', 'subagent.spawn': 'subagent.spawn · hand one small job to a helper model', 'bot.ask': 'bot.ask · ask a teammate bot one direct question', 'bot.create': 'bot.create · add a new bot to its group for lasting work'};
 const LENGTHS = [['short', 'Short, a few lines'], ['medium', 'Medium'], ['long', 'Long and detailed']];
 function behaviourFields(bot) {
   const s = botSettings(bot);
