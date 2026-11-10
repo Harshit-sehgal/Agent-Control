@@ -24,8 +24,8 @@
  *   checked, not the behaviour behind it. `tests/authz-matrix.test.js` drives
  *   real HTTP requests for the write surface; the per-module tests cover the
  *   rest.
- * - That `src/server.js` calls some module we forgot to import here. The list
- *   below is asserted against what the server imports.
+ * - That `src/app.js` calls some module we forgot to import here. The list
+ *   below is asserted against what the dispatcher imports.
  * - Anything about the session/cookie mechanics (tests/auth.test.js).
  */
 import test from 'node:test';
@@ -112,15 +112,17 @@ const LEAST_ROLE = {
 };
 
 test('the server registers exactly the modules this test enumerates', async () => {
-  const server = await fs.readFile(path.join(root, 'src/server.js'), 'utf8');
+  // The route modules are registered by the dispatcher, `src/app.js`, which
+  // `src/server.js` imports and hands the live services to.
+  const app = await fs.readFile(path.join(root, 'src/app.js'), 'utf8');
   for (const [name] of MODULES) {
-    assert.match(server, new RegExp(`\\b${name}\\b`), `${name} is enumerated here but src/server.js does not use it`);
+    assert.match(app, new RegExp(`\\b${name}\\b`), `${name} is enumerated here but src/app.js does not use it`);
   }
-  const imported = [...server.matchAll(/import\s*\{([^}]+)\}\s*from\s*'\.\/routes-[\w-]+\.js'/g)]
+  const imported = [...app.matchAll(/import\s*\{([^}]+)\}\s*from\s*'\.\/routes-[\w-]+\.js'/g)]
     .flatMap(m => m[1].split(',').map(s => s.trim()))
     .filter(Boolean);
   assert.deepEqual(imported.sort(), MODULES.map(([name]) => name).sort(),
-    'src/server.js imports a different set of route modules than this test enumerates');
+    'src/app.js imports a different set of route modules than this test enumerates');
 });
 
 test('every route is an /api route with an explicit access level and a handler', () => {

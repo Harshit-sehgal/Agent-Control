@@ -192,6 +192,14 @@ a network.
   a live lease is left alone.
 
 ### Changed
+- **The request dispatcher is no longer the listening file.** `src/server.js`
+  used to do everything at import time, so importing it opened a port and the
+  dispatcher that guards every route — the anonymous-then-role check, the
+  405-for-a-known-path, the static file server — had no in-process test. It now
+  lives in `src/app.js` (`createApp`, `createWorkspaceStarter`,
+  `processCandidate`), and `server.js` only opens the store, wires the real
+  services in and listens. `tests/app-seam.test.js` drives the same handler the
+  running server uses with fake requests and no socket.
 - **One vocabulary for the life of a run.** The ten run statuses and the three
   lists derived from them — busy, interruptible, stoppable — were declared three
   times: in `shared/coordination.js`, in `shared/local-runs.js` as

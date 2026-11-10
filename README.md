@@ -299,7 +299,8 @@ Note: Browser actions that X does not authorize are not enabled.
 
 ### Key paths
 
-- `src/server.js`: starts the services (store, auth, queue, scheduler), then dispatches each request through the route table.
+- `src/server.js`: opens the store and the real services, then listens. It wires them into `src/app.js` and does nothing else.
+- `src/app.js`: the request dispatcher without a listener — the route table, the anonymous-then-role check, the static file server and the per-workspace background services. Importing it opens no port, so the dispatcher every route passes through is exercised in-process (`tests/app-seam.test.js`).
 - `src/router.js`: the route table. Every route is registered with the access it needs (`public`, `agent`, or a least role), so a permission cannot be forgotten.
 - `src/routes-*.js`: the routes themselves, grouped by area: `public` (sign-in, password reset, capture, local-agent protocol), `workflow` (posts, drafts, evidence, tasks), `groups` (groups, bots, runs, conversations), `account` (users, sessions, agents, vault, backups), `workspaces`, `push`, and `ai` (BYOK providers).
 - `src/workspaces.js`: one database file per workspace. A request works on its session's workspace and no other.
@@ -309,7 +310,7 @@ Note: Browser actions that X does not authorize are not enabled.
 - `shared/ui-takeover.js`: the takeover sheet — a picture of the page, its numbered controls, and the click/type/navigate actions that drive it.
 - `src/http.js`: JSON responses with the security headers, bounded body readers and the same-origin check.
 - `src/sqlite-store.js`: the store. Each record is kept whole next to its typed columns, so a restart reads back exactly what was written. A database written by a newer build is refused at boot instead of being opened.
-- `shared/assets.js`: the one list of files that make up the UI. Both `scripts/build-pages.js` and `src/server.js` import it, so a module imported by `index.html` cannot ship to one and be missing from the other.
+- `shared/assets.js`: the one list of files that make up the UI. Both `scripts/build-pages.js` and `src/app.js` import it, so a module imported by `index.html` cannot ship to one and be missing from the other.
 - `shared/chats.js`: conversation history rules, shared by the server and the browser-local transport.
 - `shared/workflow.js`: the single source of workflow transitions (candidates, drafts, approval, schedules) plus the versioned schema migration.
 - `src/bot-turn.js`: the one sequence a bot step runs — sub-agent round, peer ask, new-bot block — shared by the group loop and a 1:1 chat so the two cannot drift apart.

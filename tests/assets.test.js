@@ -150,7 +150,9 @@ test('styles, install assets and the page itself are in the one list',async()=>{
 
 test('both readers import the same list instead of keeping a copy',async()=>{
   // The duplicate is what this test would otherwise have to compare forever.
-  for(const file of ['scripts/build-pages.js','src/server.js']){
+  // The Nodeside reader is the dispatcher (`src/app.js`), which serves the files;
+  // `src/server.js` only wires the services into it.
+  for(const file of ['scripts/build-pages.js','src/app.js']){
     const source=await readFile(path.join(root,file),'utf8');
     assert.match(source,/from '\.\.\/shared\/assets\.js'/,`${file} must import shared/assets.js`);
   }

@@ -6,9 +6,10 @@ import {fileURLToPath} from 'node:url';
 import {CSP, META_CSP} from '../shared/core.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const [indexHtml, serverJs, httpJs, css] = await Promise.all([
+const [indexHtml, serverJs, appJs, httpJs, css] = await Promise.all([
   readFile(path.join(root, 'shared', 'index.html'), 'utf8'),
   readFile(path.join(root, 'src', 'server.js'), 'utf8'),
+  readFile(path.join(root, 'src', 'app.js'), 'utf8'),
   readFile(path.join(root, 'src', 'http.js'), 'utf8'),
   readFile(path.join(root, 'shared', 'app.css'), 'utf8'),
 ]);
@@ -24,9 +25,10 @@ test('the Node header and the Pages meta tag declare one identical CSP', () => {
   assert.doesNotMatch(meta[1], /frame-ancestors/, 'A meta CSP cannot enforce frame-ancestors; do not claim it there.');
   assert.equal(META_CSP, CSP.replace("; frame-ancestors 'none'", ''), 'META_CSP must be the header CSP minus frame-ancestors, never a weaker policy.');
   // The server must source the policy from the shared constant rather than
-  // restating it, so the two can never diverge again.
-  assert.match(serverJs, /'Content-Security-Policy':CSP/, 'The server must send the shared CSP constant.');
-  assert.doesNotMatch(serverJs, /default-src 'self'/, 'The server must not inline its own copy of the CSP.');
+  // restating it, so the two can never diverge again. The dispatcher that sends
+  // it lives in `src/app.js`; `server.js` is now only the listener.
+  assert.match(appJs, /'Content-Security-Policy':\s*CSP/, 'The dispatcher must send the shared CSP constant.');
+  assert.doesNotMatch(serverJs + appJs, /default-src 'self'/, 'The server must not inline its own copy of the CSP.');
 });
 
 test('the CSP denies framing and cross-origin embedding', () => {
@@ -44,7 +46,7 @@ test('the server sends clickjacking and sniffing headers on every response', () 
   assert.match(httpJs, /'X-Content-Type-Options':'nosniff'/);
   // Both the JSON and the static-asset paths must carry them.
   assert.match(httpJs, /function send\(res,status,value,headers=\{\}\)\{[^}]*\.\.\.SECURITY/);
-  assert.match(serverJs, /'Content-Security-Policy':CSP,\.\.\.SECURITY/);
+  assert.match(appJs, /'Content-Security-Policy':\s*CSP,\s*\.\.\.SECURITY/);
 });
 
 test('no external font or stylesheet origin is imported and the CSP declares none', () => {

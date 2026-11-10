@@ -6,7 +6,7 @@ Guidance for agents (and humans) changing this repo. Any `CLAUDE.md` still appli
 Local-first, **zero-npm-runtime-dependency** multi-bot dashboard with human-approved X drafting. Node `>=22` (`.nvmrc`).
 
 - `shared/` — code used by **both** the browser UI and the Node server. Must stay browser-safe (no Node builtins). The chat UI is split into `shared/ui-*.js`: `ui-kit.js` (string builders: icons, avatars, rows, time labels), `ui-model.js` (pure view models: chat list rows, thread timeline, needs-you count, routes), `ui-store.js` (single state object, API wrapper, navigation), `ui-chat.js` (what happens after send), `ui-views.js` (chat list and thread), `ui-panel.js` (chat info panel and You pages), `ui-sheets.js` (sheets, quick navigation, sign-in), `ui-admin.js` (admin pages), `ui-dialogs.js` (toast, sheet, confirm/ask), and `ui-actions.js` (action and form lookup tables). Conversation history rules live in `shared/chats.js` and bot/group settings rules in `shared/bot-settings.js`; both transports use them. Model text may only add run recipients through `handoffTargets` in `shared/coordination.js`. `ui-model.js` and `ui-kit.js` must stay pure (no DOM, no globals) because Node tests import them.
-- `src/` — Node-only: server, stores, auth, queue, scheduler, AI client, local agent, vault. `server.js` only starts services and dispatches; API routes live in `src/routes-*.js` and are registered through `src/router.js` with the access each one needs (`public`, `agent`, or a least role). Add a route there, never as a branch in `server.js`. A route handler uses `c.store`, the store of the session's workspace (`src/workspaces.js` keeps one database per workspace); only accounts, sessions, memberships and push subscriptions live in the first workspace's store.
+- `src/` — Node-only: server, stores, auth, queue, scheduler, AI client, local agent, vault. `server.js` only opens the store, wires the services into `src/app.js` and listens; `app.js` owns the request dispatcher and the per-workspace start-up, so it can be imported (and tested) without binding a port. API routes live in `src/routes-*.js` and are registered through `src/router.js` with the access each one needs (`public`, `agent`, or a least role). Add a route there, never as a branch in `app.js`. A route handler uses `c.store`, the store of the session's workspace (`src/workspaces.js` keeps one database per workspace); only accounts, sessions, memberships and push subscriptions live in the first workspace's store.
 - `docs/` — the GitHub Pages bundle. JS/CSS/HTML copied from `shared/` are generated (`npm run build:pages`); hand-written markdown in this folder is edited in place.
 - `extension/` — Chrome capture extension. `agent/` — the local device process.
 - `tests/` — `node --test`. `docs/BUILD-PLAN.md` tracks the roadmap phases.
@@ -27,7 +27,7 @@ CI (`.github/workflows/ci.yml`) runs `check`, `test`, and a **docs-drift** check
 
 ## Adding a shared module (the #1 source of regressions)
 1. Create `shared/<name>.js` (browser-safe).
-2. Add `'<name>.js'` to `shared/assets.js` — the one list read by both `scripts/build-pages.js` and `src/server.js`.
+2. Add `'<name>.js'` to `shared/assets.js` — the one list read by both `scripts/build-pages.js` and `src/app.js`.
 3. `npm run build:pages`.
 `tests/assets.test.js` walks the import closure, so step 2 cannot be forgotten silently.
 
