@@ -6,7 +6,7 @@
  * These transitions are pure and mirror `workflow.js`: the Node worker and the
  * browser-local demo both run them, so the two backends cannot drift.
  */
-import {activity, cleanText} from './core.js?v=83a07c5dc5';
+import {activity, cleanText} from './core.js?v=288bdd4577';
 
 export const MAX_ATTEMPTS_DEFAULT = 5;
 
@@ -237,6 +237,30 @@ export function completeTask(state, id, result = null, now = Date.now()) {
   return task;
 }
 
+/** Was that the last attempt the queue will make? One rule, in one place.
+ *
+ * The task transition below reads it to choose re-arm versus fail, and a handler
+ * that has to record its own outcome — a notification's per-channel delivery row
+ * (`src/notifications.js`) — reads the same rule instead of predicting it a
+ * second time. Predicting it twice is what let a channel show "failed" hours
+ * before its real last attempt, and what a payload-key mismatch
+ * (`retryStarted` vs the real `retryStartedAt`) once turned into a row stuck on
+ * "queued" forever.
+ *
+ * The window runs from this run's first failure (`RETRY_STARTED`, written by
+ * `failTask`), not from `createdAt`: a recurring task keeps its id for months. No
+ * anchor yet means the window has just opened, so a first failure is never
+ * spent. A 409 conflict (a busy group run) is held to the window but not the
+ * attempt count, so a park on a checkpoint cannot spin forever. A permanent miss
+ * (a deleted group) is spent on the first attempt. */
+export function attemptSpent({attempts = 0, maxAttempts, payload = {}, now = Date.now(), conflict = false, permanent = false} = {}) {
+  if (permanent) return true;
+  const started = Number(payload?.[RETRY_STARTED]);
+  const windowSpent = Number.isFinite(started) && now - started >= RETRY_WINDOW_MS;
+  const budget = Number.isFinite(Number(maxAttempts)) ? Number(maxAttempts) : MAX_ATTEMPTS_DEFAULT;
+  return windowSpent && (conflict || Number(attempts) >= budget);
+}
+
 /** Record a failure. The task goes back to `queued` with a backoff while
  * attempts remain, and only then to `failed`. A 409 conflict (a busy group
  * run) keeps that backoff past the budget instead of ending the task. */
@@ -255,14 +279,14 @@ export function failTask(state, id, message, now = Date.now(), {conflict = false
   if (!Number.isFinite(Number(task.payload?.[RETRY_STARTED]))) {
     task.payload = {...(task.payload || {}), [RETRY_STARTED]: now};
   }
-  const spent = now - Number(task.payload[RETRY_STARTED]) >= RETRY_WINDOW_MS;
+  const spent = attemptSpent({attempts: task.attempts, maxAttempts: task.maxAttempts, payload: task.payload, now, conflict, permanent});
   // A busy group run outlasts both budgets. A 409 must wait it out instead of
   // being the error that marks the task failed. A permanent miss (the bot or
   // group is gone) fails on this attempt.
   // A conflict waits out the attempt count, but not the window: a group parked on
   // a checkpoint made every task for it spin at five-minute intervals with nothing
   // recorded and nothing said. Once the six hours are gone the task says why.
-  if (permanent || (spent && (conflict || task.attempts >= task.maxAttempts))) {
+  if (spent) {
     // A recurring task that ran out of budget missed windows, it did not
     // retire: the schedule is the point of the task, so it re-arms for its
     // next window with a fresh budget and keeps the error visible until a run

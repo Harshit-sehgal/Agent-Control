@@ -1,10 +1,10 @@
 /** The sheets a conversation can raise (new chat, new bot, share a post, set a
  * reminder), plus the two full-screen layers: quick navigation and sign-in. */
-import {esc, icon, btn, row, field, note} from './ui-kit.js?v=83a07c5dc5';
-import {store, groups, conversation, isStaticDemo, isAdmin, isXGroup, teamKey, go} from './ui-store.js?v=83a07c5dc5';
-import {openSheet, closeSheet, captureFocus, restoreFocus, focusOrigin} from './ui-dialogs.js?v=83a07c5dc5';
-import {tintPicker} from './ui-panel.js?v=83a07c5dc5';
-import {minuteCeil} from './core.js?v=83a07c5dc5';
+import {esc, icon, btn, row, field, note} from './ui-kit.js?v=288bdd4577';
+import {store, groups, conversation, isStaticDemo, isAdmin, isXGroup, teamKey, go} from './ui-store.js?v=288bdd4577';
+import {openSheet, closeSheet, captureFocus, restoreFocus, focusOrigin} from './ui-dialogs.js?v=288bdd4577';
+import {tintPicker} from './ui-panel.js?v=288bdd4577';
+import {minuteCeil} from './core.js?v=288bdd4577';
 
 const el = id => document.getElementById(id);
 

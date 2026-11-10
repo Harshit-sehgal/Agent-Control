@@ -26,7 +26,7 @@ import {fail} from '../shared/errors.js';
 import crypto from 'node:crypto';
 import {encryptJson, decryptJson} from './vault.js';
 import {smtpConfig, sendMail} from './mail.js';
-import {MAX_ATTEMPTS_DEFAULT, RETRY_STARTED, RETRY_WINDOW_MS} from '../shared/tasks.js';
+import {attemptSpent} from '../shared/tasks.js';
 
 const now = () => new Date().toISOString();
 const MAX_IN_APP = 200;
@@ -274,20 +274,14 @@ export async function deliver(store, task) {
     return result;
   } catch (error) {
     // The queue decides when a task is really finished: `failTask` re-arms while
-    // the attempt count *and* the six-hour window still allow it. Marking the row
-    // failed on the count alone told the person "failed" hours before the last
-    // attempt, so a webhook that recovered on the next try silently flipped the
-    // line they had already acted on back to `sent`.
-    const attempts = Number(task.attempts || 0);
-    const budget = Number(task.maxAttempts ?? MAX_ATTEMPTS_DEFAULT);
-    // The queue writes the anchor as `retryStartedAt` (`shared/tasks.js`). Reading
-    // `retryStarted` meant the window was never spent, so a channel that had used
-    // every attempt stayed `queued` in the feed forever.
-    const started = Number(task.payload?.[RETRY_STARTED]);
-    // No anchor yet means the window has just opened: `failTask` writes it on the
-    // first failure, so a missing one is the first failure, not a spent budget.
-    const windowSpent = Number.isFinite(started) && Date.now() - started >= RETRY_WINDOW_MS;
-    if (attempts >= budget && windowSpent) setStatus(store, id, channel, 'failed', error?.message);
+    // the attempt count *and* the six-hour window still allow it, and only then
+    // marks the task failed. This row must agree with that one decision instead
+    // of predicting it: `attemptSpent` is the same rule the task transition
+    // reads, so a webhook that recovers on the next try cannot leave a line the
+    // person already acted on reading `failed` for hours. Marking `failed` on the
+    // attempt count alone did exactly that, and reading a payload key the queue
+    // never wrote (`retryStarted`) left a spent channel `queued` forever.
+    if (attemptSpent({attempts: task.attempts, maxAttempts: task.maxAttempts, payload: task.payload})) setStatus(store, id, channel, 'failed', error?.message);
     // Still in doubt: keep the row `queued` and record why, so the feed can say
     // "retrying" instead of showing nothing.
     else setStatus(store, id, channel, 'queued', error?.message);
