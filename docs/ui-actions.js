@@ -1,16 +1,16 @@
 /** What the UI can do, as three lookup tables keyed by `data-action`, form id and
  * control id. app.js owns the DOM events and dispatches here; handlers throw on
  * failure and the dispatcher turns that into one toast. */
-import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, setPref, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns, patchLocalRun, appendMessage} from './ui-store.js?v=6734c0a812';
-import {botSettings, groupSettings} from './bot-settings.js?v=6734c0a812';
-import {completeMention, moveRow, pipelineValue, draftLength, lengthLabel, threadParts} from './ui-model.js?v=6734c0a812';
-import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=6734c0a812';
-import {sendChat, streamGroupRun, watchQueuedRun, continueDemoPlan} from './ui-chat.js?v=6734c0a812';
-import {confetti, whoosh, react, poke} from './ui-fx.js?v=6734c0a812';
-import {renderList, renderMentions} from './ui-views.js?v=6734c0a812';
-import {refreshLists, reloadAdminPage, pipelineList} from './ui-panel.js?v=6734c0a812';
-import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, botTaskSheet, scheduleDraftSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=6734c0a812';
-import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=6734c0a812';
+import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, setPref, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns, patchLocalRun, appendMessage} from './ui-store.js?v=a9bafba092';
+import {botSettings, groupSettings} from './bot-settings.js?v=a9bafba092';
+import {completeMention, moveRow, pipelineValue, draftLength, lengthLabel, threadPosts} from './ui-model.js?v=a9bafba092';
+import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=a9bafba092';
+import {sendChat, streamGroupRun, watchQueuedRun, continueDemoPlan} from './ui-chat.js?v=a9bafba092';
+import {confetti, whoosh, react, poke} from './ui-fx.js?v=a9bafba092';
+import {renderList, renderMentions} from './ui-views.js?v=a9bafba092';
+import {refreshLists, reloadAdminPage, pipelineList} from './ui-panel.js?v=a9bafba092';
+import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, botTaskSheet, scheduleDraftSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=a9bafba092';
+import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=a9bafba092';
 
 const adminCtx = {reload: reloadAdminPage};
 const chatId = () => store.route.chat;
@@ -196,8 +196,8 @@ export const actions = {
   // numbered so they cannot be posted out of order by accident.
   'copy-thread': async b => {
     const draft = store.state.drafts.find(d => d.id === b.dataset.id); if (!draft) throw new Error('Draft not found');
-    const parts = threadParts(draft.text);
-    await copyText(parts.map((part, i) => `${i + 1}/${parts.length} ${part}`).join('\n\n'), `${parts.length} posts copied. Post them in order.`);
+    const posts = threadPosts(draft.text);
+    await copyText(posts.join('\n\n'), `${posts.length} posts copied. Post them in order.`);
   },
   'verify-evidence': async b => { await api(`/api/evidence/${b.dataset.id}/verify`, 'POST', {status: b.dataset.status}); toast('Source updated.'); await sync(); },
   'remove-candidate': async b => {

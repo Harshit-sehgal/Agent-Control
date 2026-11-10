@@ -2,8 +2,8 @@
  * a pane shows: the chat list, a thread's timeline, the "needs you" count and
  * the hash route. No DOM and no globals, so the product rules here are unit
  * tested directly (tests/ui-model.test.js). */
-import {fullDate} from './ui-kit.js?v=6734c0a812';
-import {botSettings} from './bot-settings.js?v=6734c0a812';
+import {fullDate} from './ui-kit.js?v=a9bafba092';
+import {botSettings} from './bot-settings.js?v=a9bafba092';
 
 export const ACTIVE_DRAFTS = ['pending', 'scheduled', 'ready'];
 const X_GROUP = 'x-engage';
@@ -24,25 +24,33 @@ export function draftLength(text) {
 /** The same text, cut into posts a thread can carry: whole words where it can,
  * mid-word only for a single word longer than the limit (a URL, a hash). Nothing
  * is dropped, so the parts joined with a space are the draft that was approved. */
-export function threadParts(text, limit = POST_LIMIT) {
+export function threadParts(text, limit = POST_LIMIT, reserved = 0) {
   const source = String(text ?? '').trim();
   if (!source) return [];
+  const budget = Math.max(1, limit - reserved);
   const words = source.split(/\s+/), parts = [];
   let part = '';
   for (const word of words) {
     if (!part) { part = word; }
-    else if ([...`${part} ${word}`].length <= limit) { part = `${part} ${word}`; }
+    else if ([...`${part} ${word}`].length <= budget) { part = `${part} ${word}`; }
     else { parts.push(part); part = word; }
     // A word longer than a post has to be broken somewhere; half a link is at
     // least readable, and refusing to split would leave an unpostable draft.
-    while ([...part].length > limit) {
+    while ([...part].length > budget) {
       const chars = [...part];
-      parts.push(chars.slice(0, limit).join(''));
-      part = chars.slice(limit).join('');
+      parts.push(chars.slice(0, budget).join(''));
+      part = chars.slice(budget).join('');
     }
   }
   if (part) parts.push(part);
   return parts;
+}
+/** The posts a thread actually becomes: each part numbered, and the numbering
+ * counted against the limit, because that is what X counts. Six characters of
+ * reserve covers "99/99 " - more parts than a draft can hold. */
+export function threadPosts(text, limit = POST_LIMIT) {
+  const parts = threadParts(text, limit, 6);
+  return parts.map((part, i) => `${i + 1}/${parts.length} ${part}`);
 }
 /** The one line the editor shows beside the text, and the same line a card
  * carries when it is not being edited. A draft that is over the limit says how
@@ -51,8 +59,8 @@ export function threadParts(text, limit = POST_LIMIT) {
 export function lengthLabel(text) {
   const {count, over} = draftLength(text);
   if (!over) return `${count} of ${POST_LIMIT} · ${POST_LIMIT - count} left`;
-  const parts = threadParts(text).length;
-  return `${count} characters · ${count - POST_LIMIT} over X's ${POST_LIMIT} · ${parts} posts if threaded`;
+  const posts = threadPosts(text).length;
+  return `${count} characters · ${count - POST_LIMIT} over X's ${POST_LIMIT} · ${posts} posts if threaded`;
 }
 
 /** Where a draft is in the human-approval lifecycle, and the one line that says so. */
