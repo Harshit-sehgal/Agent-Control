@@ -119,7 +119,7 @@ function cancelRunsForChat(state, key, reason) {
  * `POST/GET /api/groups/:group/chat` and the `runs/:run/*` routes — the same
  * paths the server answers — so nothing above the transport asks which backend
  * it is talking to. */
-async function localRun(state, groupId, {message = '', directBotId = null, checkpoints = false, chatKey = null, runId = null, resume = false, started = false, approve = null} = {}) {
+async function localRun(state, groupId, {message = '', directBotId = null, checkpoints = false, chatKey = null, runId = null, resume = false, started = false, approve = null, anyway = false} = {}) {
   const group = state.groups.find(g => g.id === groupId);
   if (!group) throw Object.assign(new Error('Group not found.'), {status: 404});
   const prior = runId ? state.groupRuns.find(r => r.id === runId) : null;
@@ -144,7 +144,7 @@ async function localRun(state, groupId, {message = '', directBotId = null, check
     makeId: idFactory(runId), emit: e => entries.push(e),
     chatKey: chatKey || prior?.chatKey || null,
     started: started || resume, resume: resume ? prior : null,
-    checkpoints,
+    checkpoints, anyway,
   });
   upsertRun(state, run);
   storeRunLines(state, run, entries);
@@ -214,7 +214,7 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
     return {messages: (state.groupMessages[m[1]] || []).slice(-300), runs: state.groupRuns.filter(r => r.groupId === m[1]).slice(0, 50)};
   }
   if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/chat$/)) && method === 'POST') {
-    const r = await localRun(state, m[1], {message: body.message, directBotId: body.directBotId || null, checkpoints: body.checkpoints === true, chatKey: typeof body.chatKey === 'string' ? body.chatKey : null});
+    const r = await localRun(state, m[1], {message: body.message, directBotId: body.directBotId || null, checkpoints: body.checkpoints === true, chatKey: typeof body.chatKey === 'string' ? body.chatKey : null, anyway: body.anyway === true});
     save(state); return r;
   }
   if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/runs\/([a-z0-9-]+)\/continue$/)) && method === 'POST') { const r = await localRun(state, m[1], {runId: m[2], resume: true}); save(state); return r; }

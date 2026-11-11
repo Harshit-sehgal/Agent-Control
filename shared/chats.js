@@ -16,7 +16,7 @@ export const MAX_CHAT_MESSAGES = 300;
 const MAX_TEXT = 8000;
 const ROLES = ['user', 'bot', 'system'];
 /** Optional short fields a message may carry; anything else is dropped. */
-const LABELS = ['senderId', 'senderName', 'toBotId', 'runId', 'mode', 'kind'];
+const LABELS = ['senderId', 'senderName', 'toBotId', 'runId', 'mode', 'kind', 'botId'];
 
 const chatKeys = state => new Set((state.groups || []).flatMap(g => [`team-${g.id}`, ...(g.bots || []).map(b => b.id)]));
 const groupOf = (state, key) => (state.groups || []).find(g => `team-${g.id}` === key || (g.bots || []).some(b => b.id === key));
@@ -36,6 +36,8 @@ const groupOf = (state, key) => (state.groups || []).find(g => `team-${g.id}` ==
  * Only the server, writing a run it executed itself, is `trusted`. */
 function untrusted(state, key, message) {
   delete message.mode; delete message.senderId; delete message.senderName; delete message.toBotId;
+  // An out-of-job refusal carries the owner's request for its buttons; only the server writes one.
+  delete message.request; delete message.botId;
   if (message.role !== 'user') message.origin = 'browser';
   return message;
 }
@@ -64,6 +66,8 @@ function entry(raw, makeId, now) {
   if (!text) fail('A message needs text.');
   const out = {id: cleanText(raw.id, 64) || makeId(), role: raw.role, text, at: Number.isFinite(Date.parse(raw.at)) ? new Date(raw.at).toISOString() : now};
   for (const key of LABELS) { const value = cleanText(raw[key], 120); if (value) out[key] = value; }
+  const request = cleanText(raw.request, 4000);
+  if (request) out.request = request;
   return out;
 }
 

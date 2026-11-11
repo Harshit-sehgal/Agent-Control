@@ -1,10 +1,11 @@
 /** Offline group coordination. Intentionally not AI: demonstrates real context passing. */
-import {createRun,createEnvelope,handoffTargets,instructLead,wakeBots,assessTask,runNote} from './coordination.js';
+import {createRun,createEnvelope,handoffTargets,instructLead,wakeBots,assessTask,runNote,rosterFor,previousFor,enlist} from './coordination.js';
+import {isLead} from './company.js';
 import {botSettings,groupSettings,threadContext} from './bot-settings.js';
 import {normalizeBot} from './contracts.js';
 import {isThread,noteMember} from './threads.js';
 
-export async function simulateGroup({group, message, directBotId=null, guests=[], state, api, makeId, emit, chatKey=null, started=false, resume=null, shouldStop=()=>false}) {
+export async function simulateGroup({group, message, directBotId=null, guests=[], state, api, makeId, emit, chatKey=null, started=false, resume=null, shouldStop=()=>false, anyway=false}) {
   let run, previous, i;
   if (resume) {
     // Only a pause resumes. A finished, failed or cancelled record handed back by
@@ -26,7 +27,7 @@ export async function simulateGroup({group, message, directBotId=null, guests=[]
     const instructed=instructLead(group,message,directBotId,guests);
     directBotId=instructed.directBotId;
     const task=instructed.task?{...instructed.task,confirm:started?false:groupSettings(group).confirmPlan}:null;
-    run=createRun({group,message,directBotId,guests,makeId,task,chatKey});
+    run=createRun({group,message,directBotId,guests,makeId,task,chatKey,anyway});
     if(shouldStop()){run.status='cancelled';return run;}
     // `started` is the demo's Start button: the plan line is already in the chat.
     if(run.task&&!started)emit({id:makeId(),role:'system',text:`${run.task.summary} ${run.task.doneWhen}${run.status==='awaiting_plan'?' Start it when you are ready.':''}`,runId:run.id,at:new Date().toISOString()});
@@ -51,6 +52,9 @@ export async function simulateGroup({group, message, directBotId=null, guests=[]
   // agree with a snapshot taken before the switch. A caller that only passes a
   // `guests` list keeps that list, which is how the offline demos are driven.
   const liveGroups=Array.isArray(state?.groups)&&state.groups.length?state.groups:null;
+  // Who leads whom is read from the whole company; a caller with no state of its
+  // own has only this group to go on.
+  const world=liveGroups?state:{groups:[group]};
   try {
     while(i<run.recipients.length){
       if(shouldStop()){run.status='cancelled';return run;}
@@ -69,11 +73,16 @@ export async function simulateGroup({group, message, directBotId=null, guests=[]
         return run;
       }
       const bot=normalizeBot(target);
-      const envelope=createEnvelope({run,bot,previous,team:roster,thread:threadContext(state?.chats?.[run.chatKey],botSettings(bot).contextMessages)});
+      // The same rules as the server loop: a lead hears about its team and a plain
+      // bot about the group; a lead's closing step is handed the team's answers.
+      const lead=isLead(world,bot.id), closing=run.closeAt===i;
+      const handed=previousFor(run,i,[...world.groups.flatMap(g=>g.bots||[]),...roster]);
+      if(handed)previous=handed;
+      const envelope=createEnvelope({run,bot,previous,team:closing?[]:rosterFor(world,bot,roster,{thread:isThread(group)}),thread:threadContext(state?.chats?.[run.chatKey],botSettings(bot).contextMessages),lead,closing});
       const output=`${bot.name} received the task and ${previous?`a handoff from ${roster.find(b=>b.id===previous.botId)?.name||previous.botId}`:'its initial instructions'}. This Pages demo cannot run its custom AI instructions.\nTask: ${envelope.objective.slice(0,220)}\n${previous?`Previous handoff: ${previous.output.slice(0,220)}`:''}`;
       previous={botId:bot.id,output};
-      const added=handoffTargets({run,roster,fromBot:bot,output,home:isThread(group)?null:group.bots});
-      run.recipients.push(...added);
+      const added=closing?[]:handoffTargets({run,roster:rosterFor(world,bot,roster,{thread:isThread(group)}),fromBot:bot,output,home:lead||isThread(group)?null:group.bots,reserve:lead&&run.closeAt==null?1:0});
+      enlist(run,{fromId:bot.id,added,output,lead});
       if(isThread(group))for(const id2 of added)noteMember(group,id2);
       const recipient=roster.find(b=>b.id===run.recipients[i+1]);
       run.trace.push({botId:bot.id,output,at:new Date().toISOString(),toBotId:recipient?.id||null});

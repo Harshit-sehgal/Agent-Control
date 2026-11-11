@@ -5,8 +5,10 @@
  * no tools at all (see src/subagents.js).
  */
 import {randomUUID} from 'node:crypto';
-import {createRun,createEnvelope,runNote,planHandoffs,handoffTargets,instructLead,wakeBots,assessTask,summonableGuests,mayHandoff,chatKeyFor,chatIsBusy,MAX_HANDOFFS,INTERRUPT_STATUSES as INTERRUPT} from '../shared/coordination.js';
+import {createRun,createEnvelope,runNote,planHandoffs,handoffTargets,instructLead,wakeBots,assessTask,summonableGuests,mayHandoff,chatKeyFor,chatIsBusy,rosterFor,previousFor,enlist,MAX_HANDOFFS,INTERRUPT_STATUSES as INTERRUPT} from '../shared/coordination.js';
 import {isThread,noteMember} from '../shared/threads.js';
+import {isLead} from '../shared/company.js';
+import {parseOffJob,offJobMessage} from '../shared/off-job.js';
 import {STOPPABLE_STATUSES} from '../shared/run-state.js';
 import {botSettings,groupSettings,threadContext,MAX_STEPS_LIMIT} from '../shared/bot-settings.js';
 import {addChatMessages} from '../shared/chats.js';
@@ -82,7 +84,7 @@ export async function markInterrupted(store){
   try{await failAgentTasks(store, [...taskIds], 'The server restarted before this group run completed.');}
   catch(error){console.error('Agent task cleanup after a restart:', error.message);}
 }
-export async function queueGroupRun(store,{groupId,message,directBotId=null,checkpoints=false,chatKey=null,browserDepth=0,confirmPlan,taskId=null}={}){
+export async function queueGroupRun(store,{groupId,message,directBotId=null,checkpoints=false,chatKey=null,browserDepth=0,confirmPlan,taskId=null,anyway=false}={}){
   // Validate the request against the store first so a missing group reports 404
   // and a busy group reports 409, instead of the AI-key check shadowing them
   // with a misleading 422 on an instance that simply has no key yet.
@@ -110,7 +112,7 @@ export async function queueGroupRun(store,{groupId,message,directBotId=null,chec
     // timer was already the approval, so it must not sit on Start.
     const confirm=confirmPlan===undefined?groupSettings(group).confirmPlan:Boolean(confirmPlan);
     const task=instructed.task?{...instructed.task,confirm}:null;
-    const run=createRun({group,message:messageText,directBotId:instructed.directBotId,makeId:randomUUID,checkpoints:Boolean(checkpoints),chatKey,guests,task});
+    const run=createRun({group,message:messageText,directBotId:instructed.directBotId,makeId:randomUUID,checkpoints:Boolean(checkpoints),chatKey,guests,task,anyway:anyway===true});
     if(taskId)run.taskId=taskId;
     if(run.status!=='awaiting_plan')wakeBots(group,run.task?.woke);
     if(run.task)say(s,run,{id:randomUUID(),role:'system',text:`${run.task.summary} ${run.task.doneWhen}${run.status==='awaiting_plan'?' Start it when you are ready.':''}`,runId:run.id,at:stamp()});
@@ -231,31 +233,43 @@ async function runGroupInner(store,id,executor){
       const bot=resolveBot(current,g,r,r.recipients[i]);
       r.currentStep=i;
       const roster=[...g.bots,...summonableGuests(current.groups,g.id)];
+      // A lead is told about its team and a plain bot about the group. A lead's
+      // closing step reports what the team said and hands nothing out.
+      const lead=isLead(current,bot.id);
+      const closing=r.closeAt===i;
+      const handed=previousFor(r,i,current.groups.flatMap(x=>x.bots||[]));
+      if(handed)previous=handed;
       const thread=threadContext(current.chats?.[r.chatKey],botSettings(bot).contextMessages);
       // This bot's own model, so its rulebook and the chat recap are the right ones.
       const config=resolveConfig(store,bot.id);
       const memory=memoryFor(store,{bot,config,chatKey:r.chatKey});
-      const envelope=createEnvelope({run:r,bot,previous,thread,team:roster,memory});
+      const envelope=createEnvelope({run:r,bot,previous,thread,team:closing?[]:rosterFor(current,bot,roster,{thread:isThread(g)}),memory,lead,closing});
       // Each bot runs on its own chosen model/provider, else the workspace
       // default. The turn itself is the one sequence every caller runs: a
       // sub-agent round, then a peer ask, then a new-bot block. A bot that
       // already spawned a helper in this run gets one more turn; that second
       // reply is its output. `runBotTurn` owns the order (see src/bot-turn.js).
       const home=current.groups.find(x=>(x.bots||[]).some(b=>b.id===bot.id));
-      const reply=await runBotTurn(store,{bot,envelope,executor,config,peers:roster,configFor:peerId=>resolveConfig(store,peerId),memoryForPeer:(mate,mateConfig)=>memoryFor(store,{bot:mate,config:mateConfig,chatKey:r.chatKey}),handoffAllowed:mayHandoff(r,bot),spawnRounds:(r.subagents||[]).some(spawn=>spawn.botId===bot.id)?MAX_SUBAGENT_DEPTH:0,askRounds:(r.peerAsks||[]).some(ask=>ask.botId===bot.id&&!ask.error)?1:0,groupId:home?.id??null,runId:id,makeId:randomUUID,now:stamp});
+      const reply=await runBotTurn(store,{bot,envelope,executor,config,peers:roster,configFor:peerId=>resolveConfig(store,peerId),memoryForPeer:(mate,mateConfig)=>memoryFor(store,{bot:mate,config:mateConfig,chatKey:r.chatKey}),handoffAllowed:mayHandoff(r,bot)&&!closing,spawnRounds:(r.subagents||[]).some(spawn=>spawn.botId===bot.id)?MAX_SUBAGENT_DEPTH:0,askRounds:(r.peerAsks||[]).some(ask=>ask.botId===bot.id&&!ask.error)?1:0,groupId:home?.id??null,runId:id,makeId:randomUUID,now:stamp});
       for(const record of reply.created||[])fledglings.add(record.id);
       const output=reply.output;
       if(typeof output!=='string'||!output.trim())throw new Error('Bot returned empty output.');
+      // A plain bot in its own chat may answer that the request is not its job.
+      // That reply is not gated by its contract (a structured bot could not say
+      // it), files no page and hands nothing on; the chat shows it with its choices.
+      const off=!lead&&r.chatKey===bot.id&&!r.anyway?parseOffJob(output):null;
+      const offMsg=off?offJobMessage({bot,reason:off.reason,request:r.input,id:randomUUID(),runId:id,at:stamp()}):null;
+      const body=offMsg?offMsg.text:output;
       // Strip browser fences before the contract gate: a structured bot may
       // still ask for a page, and the next bot must not see the fences.
-      const asked=parseBrowserRequests(output);
-      const stripped=stripBrowserBlocks(output);
+      const asked=off?[]:parseBrowserRequests(body);
+      const stripped=off?body:stripBrowserBlocks(body);
       if(!stripped.trim()&&!asked.length)throw new Error('Bot returned empty output.');
       // The gate returns the value it validated. Passing the raw text on left a
       // structured result as its fenced JSON, while the object the contract
       // approved is what every downstream reader (sources, trace, the next
       // envelope) should see. A text contract returns the same string.
-      const validated=stripped.trim()?assertContractOutput(bot,stripped):stripped;
+      const validated=off?stripped:stripped.trim()?assertContractOutput(bot,stripped):stripped;
       // What the contract approved, as text: the string for a text contract, the
       // object as JSON for a structured one. Both of these feed the next bot, so
       // neither keeps the fences the model happened to wrap around them.
@@ -267,20 +281,25 @@ async function runGroupInner(store,id,executor){
         // File fences from the full reply, then hand the next bot the text around them.
         const priorUrls=Array.isArray(live.browserUrls)?live.browserUrls:String(live.browserUrl||'').split(' | ').filter(Boolean);
         const skip=priorUrls;
-        const browsed=recordBrowserRequests(s,{bot,groupId:live.groupId,chatKey:live.chatKey||`team-${live.groupId}`,output,depth:live.browserDepth||0,makeId:randomUUID,skipUrls:skip,runId:id});
+        const browsed=recordBrowserRequests(s,{bot,groupId:live.groupId,chatKey:live.chatKey||`team-${live.groupId}`,output:body,depth:live.browserDepth||0,makeId:randomUUID,skipUrls:skip,runId:id});
         // Text around the browser fences is the browser helper's view of the
         // reply; with nothing to browse, the approved value is the output.
         previous.output=(browsed.records.length?browsed.text:gated).slice(0,3600);
         if(botSettings(bot).browserApproval==='auto')auto=browsed.records;
-        const added=host?handoffTargets({run:live,roster:[...host.bots.filter(b=>!fledglings.has(b.id)),...summonableGuests(s.groups,host.id)],fromBot:bot,output:previous.output,home:isThread(host)?null:host.bots}):[];
-        live.recipients.push(...added);
+        // A lead hands work to its team only and keeps a step back for its closing
+        // reply; a plain bot hands to the group (in a thread, to no one). A closing
+        // reply and an out-of-job reply hand nothing out.
+        const reach=host?[...host.bots.filter(b=>!fledglings.has(b.id)),...summonableGuests(s.groups,host.id)]:[];
+        const leads=isLead(s,bot.id);
+        const added=host&&!closing&&!off?handoffTargets({run:live,roster:rosterFor(s,bot,reach,{thread:isThread(host)}),fromBot:bot,output:previous.output,home:leads||isThread(host)?null:host.bots,reserve:leads&&live.closeAt==null?1:0}):[];
+        enlist(live,{fromId:bot.id,added,output:previous.output,lead:leads});
         if(isThread(host))for(const id of added)noteMember(host,id);
         const guests=added.filter(x=>!host.bots.some(b=>b.id===x));
         if(guests.length)live.guestIds=[...(live.guestIds||[]),...guests];
         toBotId=live.recipients[i+1]??null;
         live.currentStep=i+1;live.trace.push({botId:bot.id,output:previous.output,toBotId,at:stamp()});
         const chat=s.groupMessages[live.groupId]??=[];
-        const said={id:randomUUID(),runId:id,role:'bot',senderId:bot.id,senderName:bot.name,toBotId,text:previous.output,at:stamp()};
+        const said=offMsg?{...offMsg,toBotId}:{id:randomUUID(),runId:id,role:'bot',senderId:bot.id,senderName:bot.name,toBotId,text:previous.output,at:stamp()};
         chat.push(said);
         s.groupMessages[live.groupId]=chat.slice(-300);
         // What the helper did runs before the reply that used it, so the thread

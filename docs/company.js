@@ -11,7 +11,7 @@
  *
  * Pure and browser-safe: the server and the Pages engine share these rules.
  */
-import {fail} from './errors.js?v=e7680a40cb';
+import {fail} from './errors.js?v=b55825ff2c';
 
 export const PRIMARY_GROUP = 'home';
 export const SHAPES = ['rounded', 'circle', 'hexagon', 'pebble', 'drop', 'shield', 'arch', 'egg', 'blob', 'bean'];

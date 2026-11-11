@@ -4,18 +4,18 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {initialState, cleanText} from './core.js?v=e7680a40cb';
-import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup} from './workflow.js?v=e7680a40cb';
-import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=e7680a40cb';
-import {addChatMessages, clearChat} from './chats.js?v=e7680a40cb';
-import {publicMemory, addRules, removeRule, forgetChat, forgetRulebook} from './memory.js?v=e7680a40cb';
-import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=e7680a40cb';
-import {createThread, titleFrom} from './threads.js?v=e7680a40cb';
-import {simulateGroup} from './group-simulator.js?v=e7680a40cb';
-import {BUSY_STATUSES} from './run-state.js?v=e7680a40cb';
-import {botSettings} from './bot-settings.js?v=e7680a40cb';
-import {denyBrowserRequest} from './bot-browser.js?v=e7680a40cb';
-import {withLocalLock} from './locks.js?v=e7680a40cb';
+import {initialState, cleanText} from './core.js?v=b55825ff2c';
+import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup} from './workflow.js?v=b55825ff2c';
+import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=b55825ff2c';
+import {addChatMessages, clearChat} from './chats.js?v=b55825ff2c';
+import {publicMemory, addRules, removeRule, forgetChat, forgetRulebook} from './memory.js?v=b55825ff2c';
+import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=b55825ff2c';
+import {createThread, titleFrom} from './threads.js?v=b55825ff2c';
+import {simulateGroup} from './group-simulator.js?v=b55825ff2c';
+import {BUSY_STATUSES} from './run-state.js?v=b55825ff2c';
+import {botSettings} from './bot-settings.js?v=b55825ff2c';
+import {denyBrowserRequest} from './bot-browser.js?v=b55825ff2c';
+import {withLocalLock} from './locks.js?v=b55825ff2c';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
@@ -119,7 +119,7 @@ function cancelRunsForChat(state, key, reason) {
  * `POST/GET /api/groups/:group/chat` and the `runs/:run/*` routes — the same
  * paths the server answers — so nothing above the transport asks which backend
  * it is talking to. */
-async function localRun(state, groupId, {message = '', directBotId = null, checkpoints = false, chatKey = null, runId = null, resume = false, started = false, approve = null} = {}) {
+async function localRun(state, groupId, {message = '', directBotId = null, checkpoints = false, chatKey = null, runId = null, resume = false, started = false, approve = null, anyway = false} = {}) {
   const group = state.groups.find(g => g.id === groupId);
   if (!group) throw Object.assign(new Error('Group not found.'), {status: 404});
   const prior = runId ? state.groupRuns.find(r => r.id === runId) : null;
@@ -144,7 +144,7 @@ async function localRun(state, groupId, {message = '', directBotId = null, check
     makeId: idFactory(runId), emit: e => entries.push(e),
     chatKey: chatKey || prior?.chatKey || null,
     started: started || resume, resume: resume ? prior : null,
-    checkpoints,
+    checkpoints, anyway,
   });
   upsertRun(state, run);
   storeRunLines(state, run, entries);
@@ -214,7 +214,7 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
     return {messages: (state.groupMessages[m[1]] || []).slice(-300), runs: state.groupRuns.filter(r => r.groupId === m[1]).slice(0, 50)};
   }
   if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/chat$/)) && method === 'POST') {
-    const r = await localRun(state, m[1], {message: body.message, directBotId: body.directBotId || null, checkpoints: body.checkpoints === true, chatKey: typeof body.chatKey === 'string' ? body.chatKey : null});
+    const r = await localRun(state, m[1], {message: body.message, directBotId: body.directBotId || null, checkpoints: body.checkpoints === true, chatKey: typeof body.chatKey === 'string' ? body.chatKey : null, anyway: body.anyway === true});
     save(state); return r;
   }
   if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/runs\/([a-z0-9-]+)\/continue$/)) && method === 'POST') { const r = await localRun(state, m[1], {runId: m[2], resume: true}); save(state); return r; }

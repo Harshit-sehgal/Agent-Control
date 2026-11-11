@@ -2,15 +2,16 @@
  * LLM output may only extend a run's recipients through `handoffTargets`, which
  * revalidates every target against this policy and the step cap.
  */
-import {botSettings,groupSettings,pipelineOf,MAX_STEPS_LIMIT} from './bot-settings.js?v=e7680a40cb';
-import {BROWSER_PERMISSION,BROWSER_TOOL_HINT} from './bot-browser.js?v=e7680a40cb';
-import {SUBAGENT_PERMISSION,SUBAGENT_TOOL_HINT} from './subagents.js?v=e7680a40cb';
-import {BOT_ASK_PERMISSION,BOT_ASK_TOOL_HINT} from './bot-link.js?v=e7680a40cb';
-import {BOT_CREATE_PERMISSION,BOT_CREATE_TOOL_HINT} from './bot-create.js?v=e7680a40cb';
-import {memoryBlock} from './memory.js?v=e7680a40cb';
-import {isThread} from './threads.js?v=e7680a40cb';
-import {BUSY_STATUSES as BUSY} from './run-state.js?v=e7680a40cb';
-import {companyBots,PRIMARY_GROUP} from './company.js?v=e7680a40cb';
+import {botSettings,groupSettings,pipelineOf,MAX_STEPS_LIMIT} from './bot-settings.js?v=b55825ff2c';
+import {BROWSER_PERMISSION,BROWSER_TOOL_HINT} from './bot-browser.js?v=b55825ff2c';
+import {SUBAGENT_PERMISSION,SUBAGENT_TOOL_HINT} from './subagents.js?v=b55825ff2c';
+import {BOT_ASK_PERMISSION,BOT_ASK_TOOL_HINT} from './bot-link.js?v=b55825ff2c';
+import {BOT_CREATE_PERMISSION,BOT_CREATE_TOOL_HINT} from './bot-create.js?v=b55825ff2c';
+import {memoryBlock} from './memory.js?v=b55825ff2c';
+import {isThread} from './threads.js?v=b55825ff2c';
+import {BUSY_STATUSES as BUSY} from './run-state.js?v=b55825ff2c';
+import {companyBots,PRIMARY_GROUP,isLead,teamOf} from './company.js?v=b55825ff2c';
+import {OFFJOB_RULE,OFFJOB_ANYWAY} from './off-job.js?v=b55825ff2c';
 
 /** The default step count of a run; a group may set its own up to MAX_STEPS_LIMIT. */
 export const MAX_HANDOFFS = 6;
@@ -18,7 +19,7 @@ export const MAX_CONTEXT_CHARS = 3600;
 /** Which run statuses are busy or interruptible is decided once in
  * `shared/run-state.js`; re-exported here because callers have reached for them
  * through the coordination module since they were declared here. */
-export {BUSY_STATUSES, INTERRUPT_STATUSES} from './run-state.js?v=e7680a40cb';
+export {BUSY_STATUSES, INTERRUPT_STATUSES} from './run-state.js?v=b55825ff2c';
 const normalize = value => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 const safe = value => String(value ?? '').slice(0, MAX_CONTEXT_CHARS);
 const fail = (message, status) => Object.assign(new Error(message), {status});
@@ -206,7 +207,7 @@ export function chatIsBusy(runs, group, key) {
   return (runs||[]).some(r=>r.groupId===group.id&&BUSY.includes(r.status)&&(group.id!==PRIMARY_GROUP||(r.chatKey||`team-${r.groupId}`)===key));
 }
 
-export function createRun({group, message, directBotId=null, now=new Date().toISOString(), makeId, checkpoints=false, chatKey=null, guests=[], task=null}) {
+export function createRun({group, message, directBotId=null, now=new Date().toISOString(), makeId, checkpoints=false, chatKey=null, guests=[], task=null, anyway=false}) {
   if(isThread(group))directBotId=null;
   const settings=groupSettings(group);
   const cap=Math.min(settings.maxSteps, MAX_STEPS_LIMIT);
@@ -218,6 +219,8 @@ export function createRun({group, message, directBotId=null, now=new Date().toIS
     guestIds:recipients.filter(id=>!group.bots.some(b=>b.id===id)),
     maxSteps:cap, botHandoffs:settings.botHandoffs!==false,
     mode, status: task?.confirm ? 'awaiting_plan' : 'queued', currentStep:0, createdAt:now,
+    // "Do it anyway": the owner chose to have this bot do a request that is not its job, once.
+    ...(anyway?{anyway:true}:{}),
     task: task?.botIds?.length ? {objective: safe(message), botIds: recipients, doneWhen: task.doneWhen, summary: task.summary, retried: false, woke: recipients.filter(id => { const bot = group.bots.find(b => b.id === id); return bot && !enabled(bot); })} : null,
     trace:[], lastOutput:null,
     // A checkpointed run pauses between steps until a human approves each
@@ -241,11 +244,58 @@ export function runNote(run){
   return {id:`${run.id}-${run.status==='awaiting_checkpoint'?`paused-${run.currentStep}`:run.status}`.slice(0,64),role:'system',text,runId:run.id};
 }
 
+const LEAD_RULE='You lead this team. Hand each part of the request to the teammate whose job it is by writing @Name and what you need; answer yourself only what is your own job. If nobody on your team does this work, say so and offer to create a bot for it.';
+const CLOSING_RULE='Your team has replied; their answers are in the previous message. Give the owner the result now, in your own words. Do not hand work out again.';
+
+/** Who a bot's reply may hand work to, and who it is told about. A lead (the
+ * primary, or any bot with reports) works with its team only, and the primary's
+ * team is the whole company. A plain bot keeps the group's roster, except in a
+ * thread, where only leads hand work out. `reach` is everyone the host group can
+ * summon right now, so a team member who cannot be summoned is not offered. */
+export function rosterFor(state, bot, reach, {thread=false}={}) {
+  if(isLead(state,bot.id)){const team=new Set(teamOf(state,bot.id).map(b=>b.id));return (reach||[]).filter(b=>team.has(b.id));}
+  return thread?[]:(reach||[]);
+}
+
+/** What the teammates said, one `Name: text` paragraph each (600 characters), for
+ * the lead's closing step. */
+export function teamReplies(run, leadId, bots) {
+  const name=id=>(bots||[]).find(b=>b.id===id)?.name||id;
+  return (run.trace||[]).filter(step=>step.botId!==leadId&&String(step.output||'').trim())
+    .map(step=>`${name(step.botId)}: ${String(step.output).slice(0,600)}`).join('\n\n');
+}
+
+/** The previous message a step is handed. A teammate a lead handed work to sees
+ * the lead's assignment; the lead's closing step sees every teammate's answer.
+ * Null leaves the step with whatever the pipeline carried. */
+export function previousFor(run, i, bots) {
+  if(run.closeAt===i){
+    const text=teamReplies(run,run.closeWith,bots);
+    const last=[...(run.trace||[])].reverse().find(step=>step.botId!==run.closeWith);
+    return text?{botId:last?.botId||run.closeWith,output:text}:null;
+  }
+  return run.assignment&&run.recipients[i]!==run.assignment.botId?run.assignment:null;
+}
+
+/** Add the recipients a reply named. When a lead hands work out for the first
+ * time, it is also appended once more after them: that is its closing step, where
+ * it reports the result (`closeAt`). Anyone added later runs before that step. */
+export function enlist(run, {fromId, added, output, lead=false}) {
+  if(!added.length)return;
+  if(run.closeAt!=null){run.recipients.splice(run.closeAt,0,...added);run.closeAt+=added.length;return;}
+  run.recipients.push(...added);
+  if(!lead)return;
+  run.assignment={botId:fromId,output:safe(output)};
+  run.closeWith=fromId;
+  run.recipients.push(fromId);
+  run.closeAt=run.recipients.length-1;
+}
+
 /** Whether this bot may address teammates at all: the group can switch it off
  * for everyone, and each bot has its own allowance. */
 export const mayHandoff=(run,bot)=>run.botHandoffs!==false&&botSettings(bot).canHandoff;
 
-export function createEnvelope({run,bot,previous=null,thread=[],team=[],memory=null}){
+export function createEnvelope({run,bot,previous=null,thread=[],team=[],memory=null,lead=false,closing=false}){
   if(!run.recipients.includes(bot.id)) throw new Error('Bot is not a recipient of this run.');
   const mates=mayHandoff(run,bot)?(team||[]).filter(b=>b.id!==bot.id).map(b=>({name:b.name,job:String(b.instructions||'').slice(0,160)})):[];
   // Only the tools this identity actually holds are described, and each is a
@@ -296,6 +346,11 @@ export function createEnvelope({run,bot,previous=null,thread=[],team=[],memory=n
       'Do not publish, send external messages, or bypass human approvals.',
       'You may only respond for your own configured bot identity.',
       ...(mates.length?['To hand work to a teammate, mention them as @Name in your reply.']:[]),
+      ...(lead&&!closing?[LEAD_RULE]:[]),
+      ...(closing?[CLOSING_RULE]:[]),
+      // A plain bot in its own chat says so when the request is not its job, unless
+      // the owner has just chosen to have it done anyway. Leads hand work out instead.
+      ...(!lead&&run.chatKey===bot.id?[run.anyway?OFFJOB_ANYWAY:OFFJOB_RULE]:[]),
     ],
   };
 }
@@ -304,9 +359,10 @@ export function createEnvelope({run,bot,previous=null,thread=[],team=[],memory=n
  * group's bots plus guests that are still summonable. `home` is the host
  * group's own bots: anyone else must still be summonable. Never the sender, a
  * bot already in the run, or a switched-off bot, and never past the step cap. */
-export function handoffTargets({run,roster,fromBot,output,home=null}){
+export function handoffTargets({run,roster,fromBot,output,home=null,reserve=0}){
   if(!mayHandoff(run,fromBot))return [];
-  const room=stepCap(run)-run.recipients.length;
+  // `reserve` keeps steps back for what must still run, such as a lead's closing step.
+  const room=stepCap(run)-run.recipients.length-reserve;
   if(room<=0)return [];
   const homeIds=Array.isArray(home)?new Set(home.map(b=>b.id)):null;
   return mentionedBots(roster,output)

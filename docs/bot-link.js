@@ -15,7 +15,7 @@
  * This module is pure: parse, validate, resolve a name, build prompts. The
  * orchestrator runs the round (`src/bot-link.js`).
  */
-import {cleanText} from './core.js?v=e7680a40cb';
+import {cleanText} from './core.js?v=b55825ff2c';
 
 export const BOT_ASK_PERMISSION = 'bot.ask';
 export const MAX_ASKS_PER_REPLY = 1;
@@ -25,8 +25,8 @@ export const MAX_ASK_DEPTH = 1;
 /** Every control block in a bot reply, and the one grammar that reads them,
  * live in `shared/reply-blocks.js`. Re-exported here because this module was
  * their first home and callers still reach for them through it. */
-import {controlFence} from './reply-blocks.js?v=e7680a40cb';
-export {CONTROL_FENCES, controlFence} from './reply-blocks.js?v=e7680a40cb';
+import {controlFence} from './reply-blocks.js?v=b55825ff2c';
+export {CONTROL_FENCES, controlFence} from './reply-blocks.js?v=b55825ff2c';
 const ASK_FENCE = () => controlFence('ask');
 const normalize = value => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 
@@ -66,7 +66,7 @@ export const stripAskBlocks = output => String(output ?? '').replace(ASK_FENCE()
  * a prompt should still not carry. */
 export const stripControlBlocks = output => String(output ?? '')
   .replace(controlFence(), '')
-  .replace(/```(?:ask|spawn|create-bot|browser)[\s\S]*?```/gi, '')
+  .replace(/```(?:ask|spawn|create-bot|browser|not-my-job)[\s\S]*?```/gi, '')
   .replace(/\n{3,}/g, '\n\n').trim();
 
 /** Find the teammate a block names. An exact id wins, then a case-insensitive
