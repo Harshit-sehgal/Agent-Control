@@ -114,9 +114,8 @@ Layout (owner's design, 2026-11-11):
   - **Desks:** Atlas at the head, then one tinted table per manager with their bots seated as large faces with names. Bots with no manager get their own small table.
   - Lately (the five latest threads) sits under List, Orbit and Desks; Chats already is that.
 - **New bot** (owner, 2026-11-11): the form asks only for a name, an optional manager and a colour (eight tints, the first unused one picked), with a live preview of the face. "Create and open chat" opens the bot's own chat, where it asks what it should do. Your first message there becomes its job (saved to its memory); you change the job the same way later.
-- **Your threads** (owner, 2026-11-11): a Threads button beside You at the bottom left, a threads icon in every chat header, and the T key open a searchable list grouped Waiting on you, Today and Earlier, with face, title, last message and time.
-- **Chat screens stay clean** (owner, 2026-11-11): in a thread and on the new-thread page the floating buttons (You, Threads, New thread, New bot) are hidden; the header's Back and threads icon cover navigation.
-- **The settings button is "You"** (owner, 2026-11-11): a pill with a sliders icon on a mint disc and the word You (icon only on phones), replacing the bare gear.
+- **Grok-style chrome** (owner, 2026-11-11, mock v24): top left is a round profile picture (the Google photo; initials such as "HS" when there is none) that opens settings, with no text label and a badge when something needs you. Top right is + New bot. At the bottom a wide Search pill sits beside a round New thread button. Focusing Search lists your threads (Waiting on you, Today, Earlier); typing searches bot names and jobs and thread titles. T or / focuses it. There is no separate Threads button; chat headers keep a threads icon.
+- **Chat screens stay clean** (owner, 2026-11-11): in a thread and on the new-thread page the profile picture, the bottom bar and New bot are hidden; the header's Back and threads icon cover navigation.
 - **Settings opens a drawer from the left:**
   - the owner and how many bots they have
   - a power switch, "Bots are running", which is Pause all; switched off it reads "Everything is paused"

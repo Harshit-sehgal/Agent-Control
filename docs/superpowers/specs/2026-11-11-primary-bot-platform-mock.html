@@ -85,15 +85,24 @@ kbd{font-family:var(--body);font-size:11px;color:var(--muted);border:1px solid v
 .fab:hover{transform:translateY(-2px)}
 .fab-bot{top:calc(16px + env(safe-area-inset-top,0px));right:max(18px,env(safe-area-inset-right,0px));width:46px;height:46px;justify-content:center}
 .fab-bot svg{width:20px;height:20px}
-.dock{position:fixed;z-index:20;left:max(18px,env(safe-area-inset-left,0px));bottom:calc(18px + env(safe-area-inset-bottom,0px));display:flex;gap:10px;align-items:center;transition:bottom .35s var(--ease)}
-.has-composer .dock{bottom:calc(104px + env(safe-area-inset-bottom,0px))}
-.dock .fab{position:static}
-.fab-set{height:46px;padding:0 16px 0 6px;position:relative;font-weight:600}
-.me-dot{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:color-mix(in srgb,var(--mint) 22%,var(--sunk));color:var(--fg)}
-.me-dot .i{width:17px;height:17px;stroke-width:1.9}
-.fab-set:hover .me-dot{background:color-mix(in srgb,var(--mint) 34%,var(--sunk))}
-.fab-set .badge{position:absolute;top:-3px;right:-3px}
-.fab-thr{height:46px;padding:0 16px 0 13px;font-weight:600;position:relative}.fab-thr .badge{position:absolute;top:-3px;right:-3px}
+.fab-me{top:calc(16px + env(safe-area-inset-top,0px));left:max(18px,env(safe-area-inset-left,0px));width:46px;height:46px;justify-content:center;padding:0}
+.ini{width:100%;height:100%;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:15px;letter-spacing:.02em;color:color-mix(in srgb,var(--fg) 82%,transparent);background:linear-gradient(180deg,color-mix(in srgb,var(--fg) 14%,var(--raise)),var(--raise));box-shadow:inset 0 0 0 1px var(--line)}
+.fab-me .badge,.fab-new .badge{position:absolute;top:-3px;right:-3px}
+.bbar{position:fixed;z-index:20;left:50%;translate:-50% 0;bottom:calc(16px + env(safe-area-inset-bottom,0px));width:min(720px,calc(100% - 32px));display:flex;gap:10px;align-items:center}
+.bbar .fab{position:relative}
+.fab-new{width:52px;height:52px;flex:none;justify-content:center;padding:0}
+.fab-new .i{width:21px;height:21px}
+.spill{flex:1;height:52px;display:flex;align-items:center;gap:10px;padding:0 18px;border-radius:99px;background:var(--raise);box-shadow:var(--float),inset 0 0 0 1px var(--line);cursor:text;transition:box-shadow .2s}
+.spill:focus-within{box-shadow:var(--float),inset 0 0 0 1.5px var(--violet)}
+.spill .i{width:20px;height:20px;color:var(--muted)}
+.spill input{flex:1;min-width:0;border:0;background:none;outline:none;font-size:16px;color:var(--fg)}
+.spill input::-webkit-search-cancel-button{display:none}
+.sres{position:absolute;left:0;right:0;bottom:62px;max-height:min(60vh,520px);overflow:auto;background:var(--raise);border-radius:20px;box-shadow:0 18px 44px -12px rgba(0,0,0,.55),0 0 0 1px var(--line);padding:6px 10px 10px;animation:menuin .16s ease-out;transform-origin:bottom center}
+.sres .thg h4:first-child{margin-top:8px}
+.sres .bres{display:flex;gap:8px;overflow-x:auto;padding:4px 0 2px;scrollbar-width:none}
+.sres .bres button{display:flex;flex-direction:column;align-items:center;gap:6px;width:72px;flex:none;padding:8px 0;border-radius:var(--r-s);font-size:12.5px}
+.sres .bres button:hover{background:var(--sunk)}
+.has-composer .fab-me{display:none}
 .thsearch{width:100%;border:0;border-radius:var(--r-s);background:var(--sunk);padding:10px 12px;font-size:14px;color:var(--fg);outline:none}
 .thsearch:focus{box-shadow:0 0 0 2px var(--violet)}
 .thg h4{margin:16px 0 4px}
@@ -103,11 +112,9 @@ kbd{font-family:var(--body);font-size:11px;color:var(--muted);border:1px solid v
 .th small{display:block;color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .th time{font-size:12px;color:var(--muted);flex:none;align-self:flex-start;margin-top:2px}
 .th .wt{color:var(--violet);font-weight:600}
-.fab-new{height:46px;padding:0 18px 0 14px;font-weight:600;background:var(--fg);color:var(--bg);right:max(18px,env(safe-area-inset-right,0px));bottom:calc(18px + env(safe-area-inset-bottom,0px))}
-.has-composer .fab-new{bottom:calc(104px + env(safe-area-inset-bottom,0px))}
 .looks{position:fixed;z-index:20;bottom:calc(18px + env(safe-area-inset-bottom,0px));left:50%;translate:-50% 0;display:flex;gap:2px;background:var(--raise);box-shadow:var(--float);border-radius:99px;padding:4px;font-size:12.5px}
 .has-composer .looks{display:none}
-.has-composer .dock,.has-composer .fab-new,.has-composer .fab-bot{display:none}
+.has-composer .bbar,.has-composer .fab-bot{display:none}
 .thead .thbtn{flex:none;width:38px;height:38px;border-radius:50%;display:grid;place-items:center;color:var(--soft);position:relative}
 .thead .thbtn:hover{background:var(--sunk);color:var(--fg)}.thead .thbtn .badge{position:absolute;top:-2px;right:-2px}
 .looks span{padding:6px 8px 6px 12px;color:var(--muted)}
@@ -188,7 +195,7 @@ button.tog:hover{background:var(--sunk);color:var(--fg)}
 .kids>ul>li{opacity:0;transform:translateY(-20px);transition:opacity .18s ease,transform .26s cubic-bezier(.5,0,.75,0)}
 .open>.kids>ul>li{opacity:1;transform:none;transition:opacity .3s ease calc(var(--i) * 60ms),transform .6s cubic-bezier(.34,1.5,.64,1) calc(var(--i) * 60ms)}
 /* home: a sentence, the team, lately */
-.home{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:44px;padding-top:30px}
+.home{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:44px;padding-top:56px}
 .when{font-size:13px;color:var(--muted)}
 .roll{font-family:var(--display);font-weight:600;font-size:clamp(26px,4.4vw,40px);line-height:1.2;letter-spacing:-.025em;margin:6px 0 0;text-wrap:pretty;max-width:24ch}
 .app[data-look="ink"] .roll{font-weight:500}
@@ -510,15 +517,11 @@ select.sel{border:0;border-radius:8px;background:var(--sunk);padding:5px 8px;fon
 @keyframes fade{from{opacity:.001;translate:0 8px}}
 
 @media (max-width:640px){
-  .fab-set .lbl{display:none}.fab-set{width:46px;padding:0;justify-content:center}
-  .fab-thr .lbl{display:none}.fab-thr{width:46px;padding:0;justify-content:center}
   .card{flex-basis:168px;min-height:184px}
   .atlas{padding:16px;gap:14px}
   .hop,.ask,.settled,.mem{margin-left:0}
   .me{max-width:88%}
   .looks span{display:none}
-  .fab-new .lbl{display:none}
-  .fab-new{width:46px;padding:0;justify-content:center}
   .looks{left:50%;translate:-50% 0}
   .looks button{padding:6px 9px}
 }
@@ -528,11 +531,12 @@ select.sel{border:0;border-radius:8px;background:var(--sunk);padding:5px 8px;fon
 <div class="app" id="app" data-look="soft">
   <div id="root" style="height:100%"></div>
   <button class="fab fab-bot" id="fabBot" aria-label="New bot" title="New bot"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
-  <div class="dock">
-    <button class="fab fab-set" id="fabSet" aria-label="You: settings and more" title="You: settings and more"><span class="me-dot"><svg class="i" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></span><span class="lbl">You</span><span id="setBadge"></span></button>
-    <button class="fab fab-thr" id="fabThr" aria-label="Your threads" title="Your threads (T)"><svg class="i" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-5A8 8 0 1 1 21 12z"/><path d="M8.5 10h7M8.5 13.5h4.5"/></svg><span class="lbl">Threads</span><span id="thrBadge"></span></button>
+  <button class="fab fab-me" id="fabSet" aria-label="Your account and settings" title="Your account and settings"><span class="ini" id="meIni"></span><span id="setBadge"></span></button>
+  <div class="bbar" id="bbar">
+    <div class="sres" id="sres" hidden></div>
+    <button class="fab fab-new" id="fabNew" aria-label="New thread" title="New thread"><svg class="i" viewBox="0 0 24 24"><path d="M6 3.5h9.5A2.5 2.5 0 0 1 18 6v12.5a2 2 0 0 1-2 2H6z"/><path d="M6 3.5v17M9.5 8h5M9.5 11.5h3"/><path d="m20.5 9.5-6.2 6.2-2.3.6.6-2.3 6.2-6.2a1.2 1.2 0 0 1 1.7 1.7z"/></svg><span id="thrBadge"></span></button>
+    <label class="spill"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="sq" type="search" placeholder="Search" aria-label="Search bots and threads" autocomplete="off"></label>
   </div>
-  <button class="fab fab-new" id="fabNew" aria-label="New thread"><svg class="i" viewBox="0 0 24 24"><path d="M6 3.5h9.5A2.5 2.5 0 0 1 18 6v12.5a2 2 0 0 1-2 2H6z"/><path d="M6 3.5v17M9.5 8h5M9.5 11.5h3"/><path d="m20.5 9.5-6.2 6.2-2.3.6.6-2.3 6.2-6.2a1.2 1.2 0 0 1 1.7 1.7z"/></svg><span class="lbl">New thread</span></button>
   <div class="scrim" id="scrim"></div>
   <div class="cm-scrim" id="cmScrim"></div>
   <div class="cmenu" id="cmenu" role="menu" aria-label="Bot options"></div>
@@ -701,12 +705,18 @@ function threadList(q){q=q.trim().toLowerCase();const wait=new Set(pending().map
   const row=t=>{const o=t.owner&&by(t.owner),w=wait.has(t.id);return `<button class="th${S.view==='thread'&&S.cur===t.id?' cur':''}" data-open="${t.id}">${o?face(o,'s',w?'wait':''):face(by('atlas'),'s','')}<span class="w"><b>${esc(t.title)}</b><small>${w?'<span class="wt">Waiting on you · </span>':''}${esc(preview(t)||'No replies yet')}</small></span><time>${t.at?ago(ts(t)):''}</time></button>`};
   const g=[['Waiting on you',list.filter(t=>wait.has(t.id))],['Today',list.filter(t=>!wait.has(t.id)&&ts(t)>=day)],['Earlier',list.filter(t=>!wait.has(t.id)&&ts(t)<day)]].filter(x=>x[1].length);
   return g.map(([h,l])=>`<div class="thg"><h4>${h}</h4>${l.map(row).join('')}</div>`).join('')||`<p class="sub">${q?'No thread matches that.':'No threads yet. Start one with New thread.'}</p>`}
+const ME={name:'Harshit Sehgal'};
+const initials=n=>n.split(/\s+/).filter(Boolean).map(w=>w[0]).slice(0,2).join('').toUpperCase();
+function searchHTML(q){const t=q.trim().toLowerCase(),bots=t?BOTS.filter(vis).filter(b=>(b.name+' '+b.job).toLowerCase().includes(t)):[];
+  return (bots.length?`<div class="thg"><h4>Bots</h4><div class="bres">${bots.map(b=>`<button data-dm="${b.id}">${face(b,'m','')}<span>${esc(b.name)}</span></button>`).join('')}</div></div>`:'')+((tl=>bots.length&&!tl.includes('class="th')?'':tl)(threadList(q)))}
+function openSearch(){const r=$('sres');r.innerHTML=searchHTML($('sq').value);r.hidden=false}
+function closeSearch(){$('sres').hidden=true}
 function renderMain(){
   const app=$('app');app.classList.toggle('has-composer',S.view!=='bots');
   $('root').innerHTML=S.view==='bots'?botsView():S.view==='new'?newView():threadView();
   if(S.view==='thread'){const sc=$('scroll');sc.scrollTop=sc.scrollHeight}
   if(S.view==='new'){const i=$('root').querySelector('input');i&&i.focus({preventScroll:true})}
-  packDesks();const thr=$('thrBadge');if(thr){const w=new Set(pending().map(x=>x.thread)).size;thr.innerHTML=w?`<span class="badge">${w}</span>`:''}
+  closeSearch();$('meIni').textContent=initials(ME.name);packDesks();const thr=$('thrBadge');if(thr){const w=new Set(pending().map(x=>x.thread)).size;thr.innerHTML=w?`<span class="badge">${w}</span>`:''}
   const p=pending().length;$('setBadge').innerHTML=p?`<span class="badge">${p}</span>`:'';
 }
 
@@ -806,7 +816,7 @@ function renderOver(){
   if(S.panel)$('panel').innerHTML=panelHTML();
 }
 function render(){renderMain();renderOver()}
-function go(view,id){S.view=view;if(view==='thread')S.cur=id;else S.cur=null;S.left=false;S.panel=null;render()}
+function go(view,id){$('sq').value='';$('sq').blur();S.view=view;if(view==='thread')S.cur=id;else S.cur=null;S.left=false;S.panel=null;render()}
 
 /* ---------- the run ---------- */
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
@@ -895,7 +905,6 @@ document.addEventListener('click',e=>{
   if(d.bot){e.stopPropagation();S.panel=d.bot;S.tab='overview';S.left=false;renderOver();return}
   if(el.id==='fabBot'){S.panel='hire';S.left=false;renderOver();setTimeout(()=>{const f=$('panel').querySelector('[data-hire]');f?.nm.focus();f?.dispatchEvent(new Event('input',{bubbles:true}))},300)}
   else if(d.threads!==undefined){S.panel='threads';S.left=false;renderOver();setTimeout(()=>$('thQ')?.focus(),250)}
-  else if(el.id==='fabThr'){S.panel=S.panel==='threads'?null:'threads';S.left=false;renderOver();setTimeout(()=>$('thQ')?.focus(),250)}
   else if(el.id==='fabSet'){S.left=!S.left;S.panel=null;renderOver()}
   else if(el.id==='fabNew'||d.new!==undefined){go('new')}
   else if(d.home!==undefined){go('bots')}
@@ -999,7 +1008,7 @@ function endDrag(){const d=drag;drag=null;const it=d.item;document.querySelector
   if(d.toShelf||d.unpin){const id=it.dataset.sid,arr=S.pins.bots;d.toShelf?arr.includes(id)||arr.push(id):arr.splice(arr.indexOf(id),1);saveLayout();setTimeout(renderMain,d.toShelf?260:0);return}
   saveOrder(d.box,it);
   if(d.box!==d.box0){saveOrder(d.box0);const b=by(it.dataset.sid),nb=bossOfKey(d.box.dataset.sortkey);b.boss=nb;if(nb)S.open[nb]=true;log('atlas','bots',`moved ${b.name} ${nb?'under '+by(nb).name:'to Solo'}`);setTimeout(renderMain,520)}}
-document.addEventListener('input',e=>{if(e.target.id==='thQ'){$('thList').innerHTML=threadList(e.target.value);return}const f=e.target.closest?.('[data-hire]');if(!f)return;const nm=f.nm.value.trim()||'New bot',c=f.querySelector('[name=tint]:checked')?.value;$('hirePrev').innerHTML=`${face({id:'_',name:nm,role:'Bot',tint:c},'s','')}<span><b>${esc(nm)}</b><small>${f.boss.value?'Reports to '+esc(by(f.boss.value).name):'Reports to Atlas'}</small></span>`});
+document.addEventListener('input',e=>{if(e.target.id==='sq'){openSearch();return}if(e.target.id==='thQ'){$('thList').innerHTML=threadList(e.target.value);return}const f=e.target.closest?.('[data-hire]');if(!f)return;const nm=f.nm.value.trim()||'New bot',c=f.querySelector('[name=tint]:checked')?.value;$('hirePrev').innerHTML=`${face({id:'_',name:nm,role:'Bot',tint:c},'s','')}<span><b>${esc(nm)}</b><small>${f.boss.value?'Reports to '+esc(by(f.boss.value).name):'Reports to Atlas'}</small></span>`});
 document.addEventListener('pointerdown',e=>{lastType=e.pointerType||'mouse';if(e.button>0)return;
   if($('cmenu').classList.contains('show')&&!e.target.closest('#cmenu')){closeMenu();return}
   const item=homeItem(e.target);if(!item)return;
@@ -1035,6 +1044,9 @@ function openMenu(item,x,y,touch){const key=item.parentElement.dataset.sortkey,k
   m.querySelector('button')?.focus({preventScroll:true})}
 function closeMenu(){$('cmenu').classList.remove('show');$('cmScrim').classList.remove('show')}
 $('cmScrim').addEventListener('click',closeMenu);
+$('sq').addEventListener('focus',openSearch);
+document.addEventListener('pointerdown',e=>{if(!$('sres').hidden&&!e.target.closest('#bbar'))closeSearch()},true);
+$('sq').addEventListener('keydown',e=>{if(e.key==='Escape'){closeSearch();e.target.blur()}else if(e.key==='Enter'){const f=$('sres').querySelector('button');if(f){e.preventDefault();f.click()}}});
 function moveBot(id,nb){const b=by(id);if(!b||b.boss===nb)return;b.boss=nb;log('atlas','bots',`moved ${b.name} ${nb?'under '+by(nb).name:'to Solo'}`);if(nb){S.open[nb]=true}renderMain()}
 function cmAction(a){const c=S.cm,b=c.bot&&by(c.bot);
   if(a==='moveopen'){const box=$('cmenu').querySelector('.cm-move'),btn=$('cmenu').querySelector('[data-cm="moveopen"]');box.hidden=!box.hidden;btn.setAttribute('aria-expanded',String(!box.hidden));if(!box.hidden)box.querySelector('button')?.focus();return}
@@ -1048,7 +1060,7 @@ function doDelete(){const b=by(S.cm.bot);$('confirm').classList.remove('show');i
   BOTS.splice(BOTS.indexOf(b),1);GONE.push(b);BOTS.forEach(x=>{if(x.boss===b.id)x.boss=null});Object.values(S.pins).forEach(arr=>{const i=arr.indexOf(b.id);if(i>=0)arr.splice(i,1)});
   saveLayout();log('atlas','bots',`removed ${b.name}`);renderMain()}
 document.addEventListener('keydown',e=>{
-  if(e.key==='t'&&!e.metaKey&&!e.ctrlKey&&!e.altKey&&!/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName||'')){e.preventDefault();S.panel=S.panel==='threads'?null:'threads';S.left=false;renderOver();setTimeout(()=>$('thQ')?.focus(),250);return}
+  if((e.key==='t'||e.key==='/')&&S.view==='bots'&&!e.metaKey&&!e.ctrlKey&&!e.altKey&&!/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName||'')){e.preventDefault();$('sq').focus();return}
   const m=$('cmenu');if(m.classList.contains('show')){const btns=[...m.querySelectorAll('button')].filter(x=>x.offsetParent);const i=btns.indexOf(document.activeElement);
     if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeMenu()}else if(e.key==='ArrowDown'){e.preventDefault();btns[(i+1)%btns.length]?.focus()}else if(e.key==='ArrowUp'){e.preventDefault();btns[(i-1+btns.length)%btns.length]?.focus()}return}
   if($('confirm').classList.contains('show')&&e.key==='Escape'){$('confirm').classList.remove('show');return}
