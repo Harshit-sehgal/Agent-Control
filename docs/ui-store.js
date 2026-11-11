@@ -1,9 +1,9 @@
 /** Single source of UI state: the server snapshot, the route, the conversations
  * it carries and cosmetic preferences. Views read from `store` and never
  * keep their own copies, so one `sync()` + one render keeps every pane current. */
-import {routeHash, tintOf} from './ui-model.js?v=1549188fc1';
-import {companyRoute, companyHash} from './ui-company.js?v=1549188fc1';
-import {createOutbox} from './chats.js?v=1549188fc1';
+import {routeHash, tintOf} from './ui-model.js?v=fce098c91c';
+import {companyRoute, companyHash} from './ui-company.js?v=fce098c91c';
+import {createOutbox} from './chats.js?v=fce098c91c';
 
 // Where an earlier build kept conversations; read once by importLocalChats().
 const CHAT_KEY = 'agent-control-bot-chats-v2';

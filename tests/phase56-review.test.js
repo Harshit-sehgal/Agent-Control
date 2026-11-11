@@ -26,6 +26,7 @@ import * as report from '../agent/report-result.mjs';
 import * as connectors from '../shared/connectors.js';
 const {GOOGLE_ACTIONS, connectorNeeds, recordConnectorCalls} = connectors;
 const argsHash = value => connectors.argsHash(value);
+const connectorIdentity = c => connectors.connectorIdentity(c);
 import * as bb from '../shared/bot-browser.js';
 import {answerAsk, decide, verdict, setGrant, sweepGrants, grantFor} from '../shared/asks.js';
 import {askCard, grantWhat} from '../shared/ui-asks.js';
@@ -65,7 +66,7 @@ test('C1: a click on a child with no text, on a control inside a payment form, o
   const host = `127.0.0.1:${server.address().port}`, permit = h => h !== 'localhost';
   try {
     const steps = [{op: 'click', selector: '#icon'}, {op: 'click', selector: '#agree'}, {op: 'click', selector: '#next-icon'}, {op: 'read', selector: '#out'}];
-    const cart = await captureWithBrowser(`http://${host}/`, {allow: [host], binary: browser, permit, steps, approved: ['send']});
+    const cart = await captureWithBrowser(`http://${host}/`, {allow: [host], binary: browser, permit, steps, approved: [`send@http://${host}`]});
     const [icon, agree, next, read] = cart.actions;
     assert.equal(icon.ok, false, 'the icon inside Pay now is the Pay now button');
     assert.equal(icon.risk, 'spend');
@@ -73,11 +74,11 @@ test('C1: a click on a child with no text, on a control inside a payment form, o
     assert.equal(agree.risk, 'spend');
     assert.equal(next.ok, true, 'an icon inside Next is harmless');
     assert.equal(read.text, 'next;', 'no refused click reached the page');
-    const checkout = await captureWithBrowser(`http://${host}/checkout`, {allow: [host], binary: browser, permit, steps: [{op: 'click', selector: '#go'}, {op: 'read', selector: '#out'}], approved: ['send']});
+    const checkout = await captureWithBrowser(`http://${host}/checkout`, {allow: [host], binary: browser, permit, steps: [{op: 'click', selector: '#go'}, {op: 'read', selector: '#out'}], approved: [`send@http://${host}`]});
     assert.equal(checkout.actions[0].ok, false, 'any click on a checkout page is a payment');
     assert.match(checkout.actions[0].reason, /checkout/i);
     assert.equal(checkout.actions[1].text, '');
-    const paid = await captureWithBrowser(`http://${host}/checkout`, {allow: [host], binary: browser, permit, steps: [{op: 'click', selector: '#go'}, {op: 'read', selector: '#out'}], approved: ['spend']});
+    const paid = await captureWithBrowser(`http://${host}/checkout`, {allow: [host], binary: browser, permit, steps: [{op: 'click', selector: '#go'}, {op: 'read', selector: '#out'}], approved: [`spend@http://${host}`]});
     assert.equal(paid.actions[0].ok, true, 'with a payment approved the checkout click goes');
   } finally { server.close(); }
 });
@@ -193,7 +194,7 @@ async function rig(t) {
     s.groupRuns.unshift(run);
     return run.id;
   });
-  const call = (extra = {}) => ({id: crypto.randomUUID(), connectorId: notes.id, connectorName: 'Notes', tool: 'add_note', args: {text: 'milk'}, write: true, botId: ids.mail, botName: 'Mailroom', status: 'go', chatKey: ids.mail, ...extra});
+  const call = (extra = {}) => ({id: crypto.randomUUID(), connectorId: notes.id, identity: connectorIdentity(notes), connectorName: 'Notes', tool: 'add_note', args: {text: 'milk'}, write: true, botId: ids.mail, botName: 'Mailroom', status: 'go', chatKey: ids.mail, ...extra});
   const lines = [];
   const say = (s, run, line) => lines.push(line);
   return {store, ids, server, runId, call, lines, say};

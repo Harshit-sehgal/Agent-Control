@@ -11,7 +11,7 @@ import {cleanText} from '../shared/core.js';
 import {logActivity} from '../shared/activity-log.js';
 import {useConnector} from './connector-use.js';
 import {holdSend} from './held-sends.js';
-import {argsHash} from '../shared/connectors.js';
+import {argsHash, connectorIdentity} from '../shared/connectors.js';
 
 /** Total a run keeps of what its connectors answered. */
 const MAX_PAGE_CHARS = 5000;
@@ -27,7 +27,9 @@ const outsideText = call => (call.tool === 'gmail.send'
 
 const missing = (connector, call) => (!connector
   ? `${call.connectorName} was removed, so nothing was done.`
-  : (connector.status || 'ready') === 'reconnect' ? `${connector.name} needs to be reconnected (Settings → Connectors), so nothing was done.` : '');
+  : (connector.status || 'ready') === 'reconnect' ? `${connector.name} needs to be reconnected (Settings → Connectors), so nothing was done.`
+  // Bound to the connector the owner was asked about: one replaced under the same id, or on another account, is not it.
+  : call.identity !== connectorIdentity(connector) ? 'The connector changed after you were asked; ask again.' : '');
 
 /** A call its ask did not show: the arguments changed after the owner was asked. */
 const changed = (state, call) => {

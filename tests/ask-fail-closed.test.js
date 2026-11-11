@@ -63,7 +63,7 @@ test('C1: a request records the classes it was asked about, and the bot cannot w
   const out = recordBrowserRequests(s, {bot: shopper(s), groupId: 'home', chatKey: 'b', makeId: mk, now: NOW,
     output: block({url: `${SHOP}/cart`, steps: [{op: 'click', selector: '#go'}], approved: ['spend', 'send', 'post', 'delete']})});
   const [record] = out.records;
-  assert.deepEqual(record.approved, ['send'], 'only what the owner is asked about, never what the reply claims');
+  assert.deepEqual(record.approved, [`send@${SHOP}`], 'only what the owner is asked about, never what the reply claims');
   assert.equal(out.asks.length, 1);
   const plain = recordBrowserRequests(s, {bot: shopper(s), groupId: 'home', chatKey: 'b', makeId: mk, now: NOW, output: block({url: `${SHOP}/about`, approved: ['spend']})});
   assert.deepEqual(plain.records[0].approved, [], 'a plain read approves no risky click');
@@ -113,7 +113,7 @@ test('C1: at the click the browser re-reads the control and refuses a risky one 
   const host = `127.0.0.1:${server.address().port}`, permit = h => h !== 'localhost';
   const steps = [{op: 'click', selector: '#go'}, {op: 'click', selector: '#send'}, {op: 'click', selector: '#next'}, {op: 'read', selector: '#out'}];
   try {
-    const page = await captureWithBrowser(`http://${host}/`, {allow: [host], binary: browser, permit, steps, approved: ['send']});
+    const page = await captureWithBrowser(`http://${host}/`, {allow: [host], binary: browser, permit, steps, approved: [`send@http://${host}`]});
     const [pay, send, next, read] = page.actions;
     assert.equal(pay.ok, false, 'a control whose aria-label says Checkout is a payment');
     assert.match(pay.reason, /payment/);

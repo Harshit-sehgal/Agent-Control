@@ -14,9 +14,9 @@
  *
  * Pure and browser-safe, like the other shared modules.
  */
-import {cleanText} from './core.js?v=1549188fc1';
-import {controlFence} from './reply-blocks.js?v=1549188fc1';
-import {decide, createAsk} from './asks.js?v=1549188fc1';
+import {cleanText} from './core.js?v=fce098c91c';
+import {controlFence} from './reply-blocks.js?v=fce098c91c';
+import {decide, createAsk} from './asks.js?v=fce098c91c';
 
 export const CONNECTOR_KINDS = ['google', 'mcp'];
 /** `ready` works; `setup` is Google with a client saved and no sign-in yet; `reconnect` is a sign-in that
@@ -80,6 +80,10 @@ export const publicConnector = c => ({
   actions: (c.actions || []).map(a => ({name: a.name, write: Boolean(a.write), description: cleanText(a.description, 200)})),
   addedAt: c.addedAt ?? null, checkedAt: c.checkedAt ?? null,
 });
+/** Which connector a call was cleared for: its id, kind, account, server and when it was added. No secret and no
+ * vault id. A call carries the one it was created with, and is refused at execution when the connector of that id
+ * no longer matches: removed and re-added under the same name, or reconnected to another account. */
+export const connectorIdentity = c => JSON.stringify([c.id, c.kind, c.account ?? null, c.transport ?? null, c.host ?? null, c.agentServer ?? null, c.addedAt ?? null]);
 export const publicConnectors = state => (Array.isArray(state?.connectors) ? state.connectors : []).map(publicConnector);
 
 /** The one action in a connector by name, or null. */
@@ -206,7 +210,7 @@ export function recordConnectorCalls(state, {bot, run, chatKey, output, unattend
     if (!needs) { say(`${bot.name} asked ${connector.name} for "${tool}", but ${connector.name} has no tool called "${tool}".`); continue; }
     const decision = decide(state, bot, needs);
     if (decision.verdict === 'deny') { say(`${bot.name} asked to ${needs[0].detail}. ${decision.message}`); continue; }
-    const call = {id: makeId(), connectorId: connector.id, connectorName: connector.name, tool, args, write: actionOf(connector, tool).write, botId: bot.id, botName: bot.name, status: 'go', chatKey};
+    const call = {id: makeId(), connectorId: connector.id, identity: connectorIdentity(connector), connectorName: connector.name, tool, args, write: actionOf(connector, tool).write, botId: bot.id, botName: bot.name, status: 'go', chatKey};
     if (decision.verdict === 'ask') {
       const {need} = decision;
       const asked = createAsk(state, {botId: bot.id, runId: run.id, chatKey, action: need.action, target: need.target, detail: need.detail, body: need.body, argsHash: argsHash(args), unattended, requestId: call.id, implies: decision.implies, now, makeId});

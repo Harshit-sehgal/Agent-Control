@@ -7,9 +7,9 @@
  * shows what the mock shows: the owner's lines, the lead's reply, one pill that
  * keeps updating while work is under way and then reads "A and B helped", and the
  * cards that wait on the owner. The handoffs live behind the pill, not in the log. */
-import {handoffs, progressPill} from './ui-company.js?v=1549188fc1';
-import {isRunNote, runBelongsToChat} from './ui-model.js?v=1549188fc1';
-import {connectorLine, modelLimitLine} from './ui-connect-model.js?v=1549188fc1';
+import {handoffs, progressPill} from './ui-company.js?v=fce098c91c';
+import {isRunNote, runBelongsToChat} from './ui-model.js?v=fce098c91c';
+import {connectorLine, modelLimitLine} from './ui-connect-model.js?v=fce098c91c';
 
 const isActive = status => status === 'queued' || status === 'running';
 const isAwaiting = status => String(status || '').startsWith('awaiting');

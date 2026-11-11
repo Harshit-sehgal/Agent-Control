@@ -20,10 +20,10 @@
  * Posting stays human: interaction (click, type) is refused on X and Twitter
  * hosts, so no bot can press Post there. Reading those pages is allowed.
  */
-import {cleanText, validHttpUrl} from './core.js?v=1549188fc1';
-import {fail} from './errors.js?v=1549188fc1';
-import {decide, createAsk, scopeOf} from './asks.js?v=1549188fc1';
-import {controlFence} from './reply-blocks.js?v=1549188fc1';
+import {cleanText, validHttpUrl} from './core.js?v=fce098c91c';
+import {fail} from './errors.js?v=fce098c91c';
+import {decide, createAsk, scopeOf} from './asks.js?v=fce098c91c';
+import {controlFence} from './reply-blocks.js?v=fce098c91c';
 
 export const BROWSER_PERMISSION = 'browser.use';
 export const MAX_REQUESTS_PER_REPLY = 2;
@@ -188,28 +188,40 @@ export function controlLabels(state, botId, chatKey) {
   return labels;
 }
 
+/** The origin a page URL is on ("https://b.example"), or '' when it is not a web page. */
+const originOf = url => { try { const u = new URL(url); return /^https?:$/.test(u.protocol) ? u.origin.toLowerCase() : ''; } catch { return ''; } };
+/** One `approved` entry: a risky class cleared for one origin, "send@https://b.example". The browser
+ * checks it against `location.origin` at the click (agent/browser.mjs). */
+export const approvedFor = (action, url) => `${action}@${originOf(url)}`;
+
 /** Everything one request needs the owner's say on, riskiest first, the page itself last: a send, a
- * post, a delete or a payment where a step's control says so, and `browser.use` for each origin it
- * reaches. [{action, target, detail}]. */
+ * post, a delete or a payment where a step's control says so, on the page that step runs on (the request
+ * URL, then each `navigate`), and `browser.use` for each origin it reaches. [{action, target, detail}],
+ * one per action and origin. */
 export function browserNeeds(request, controls = new Map()) {
-  const host = hostOf(request.url) || request.url;
   const needs = [], seen = new Set();
+  const add = (action, target, detail) => {
+    const key = approvedFor(action, target);
+    if (seen.has(key)) return;
+    seen.add(key);
+    needs.push({action, target, detail});
+  };
+  let here = request.url;
   for (const step of request.steps || []) {
+    if (step.op === 'navigate') { here = step.url; continue; }
     if (!INTERACTIVE.includes(step.op)) continue;
     const label = step.index ? controls.get(step.index) || '' : '';
     const named = label || step.selector || `control ${step.index}`;
     const actions = riskOf(label || step.selector);
     // Not labelled on a page this bot was shown: the app cannot tell what it does, so it is at least a Send.
     if (!label && !actions.length) actions.push('send');
-    for (const action of actions) {
-      if (seen.has(action)) continue;
-      seen.add(action);
-      needs.push({action, target: request.url, detail: `${step.op === 'type' ? 'type into' : 'click'} "${named.slice(0, 60)}" on ${host}`});
-    }
+    for (const action of actions) add(action, here, `${step.op === 'type' ? 'type into' : 'click'} "${named.slice(0, 60)}" on ${hostOf(here) || here}`);
   }
   const pages = [request.url, ...(request.steps || []).filter(s => s.op === 'navigate').map(s => s.url)];
-  if (!seen.has('spend') && pages.some(u => { try { return CHECKOUT_PATH.test(new URL(u).pathname); } catch { return false; } })) {
-    needs.push({action: 'spend', target: request.url, detail: `open a checkout page on ${host}`});
+  for (const u of pages) {
+    let checkout = false;
+    try { checkout = CHECKOUT_PATH.test(new URL(u).pathname); } catch { /* Not a URL: validation refused it already. */ }
+    if (checkout) add('spend', u, `open a checkout page on ${hostOf(u)}`);
   }
   needs.sort((a, b) => RISKS.findIndex(r => r[0] === a.action) - RISKS.findIndex(r => r[0] === b.action));
   const origins = new Map();
@@ -252,9 +264,10 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
     const decision = decide(state, bot, needs);
     if (decision.verdict === 'deny') { say(`${bot.name} asked to ${describe(item.request)}. ${decision.message}`); continue; }
     // `approved`: the risky classes this request is cleared for once it is sent (a grant, or the owner's
-    // answer to its ask). Written here after the validated request, so a reply cannot set it; the browser
-    // refuses any other risky control it meets (agent/browser.mjs).
-    const approved = [...new Set(needs.map(n => n.action).filter(a => a !== BROWSER_PERMISSION))];
+    // answer to its ask), each for the origin it runs on ("send@https://b.example"). Written here after the
+    // validated request, so a reply cannot set it; the browser refuses any other risky control it meets,
+    // and one approved for another origin (agent/browser.mjs).
+    const approved = needs.filter(n => n.action !== BROWSER_PERMISSION).map(n => approvedFor(n.action, n.target));
     const record = {id: makeId(), botId: bot.id, botName: bot.name, groupId, chatKey, ...(runId ? {runId} : {}), ...item.request, approved, depth, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: now, updatedAt: now};
     records.push(record);
     if (decision.verdict === 'ask') {

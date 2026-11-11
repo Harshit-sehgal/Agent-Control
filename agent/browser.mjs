@@ -90,16 +90,19 @@ const CONTROL = 'button,a[href],input,[role=button],[role=link],summary,label,[o
  * between. `approved` null is a person's own click: no check. */
 function riskGuard(approved, verb, click = false) {
   if (approved === null) return '';
-  const open = RISKS.filter(([action]) => !approved.includes(action)).map(([action, pattern]) => [action, pattern.source, pattern.flags, RISK_WORDS[action]]);
-  if (!open.length) return '';
-  const checkout = click && open.some(([action]) => action === 'spend')
-    ? `if(new RegExp(${jsLiteral(CHECKOUT_PATH.source)},${jsLiteral(CHECKOUT_PATH.flags)}).test(location.pathname))return{ok:false,risk:'spend',reason:'This is a checkout page and nobody approved a payment, so it was not ${verb}. A payment needs the owner to answer a payment ask.'};`
+  // Each entry is "class@origin" (shared/bot-browser.js approvedFor): a class is cleared only on the origin the
+  // page is on at this click, so a Send approved for one site is refused after a navigate to another.
+  const cleared = approved.filter(a => typeof a === 'string' && a.includes('@'));
+  const risks = RISKS.map(([action, pattern]) => [action, pattern.source, pattern.flags, RISK_WORDS[action]]);
+  const checkout = click
+    ? `if(open.some(r=>r[0]==='spend')&&new RegExp(${jsLiteral(CHECKOUT_PATH.source)},${jsLiteral(CHECKOUT_PATH.flags)}).test(location.pathname))return{ok:false,risk:'spend',reason:'This is a checkout page and nobody approved a payment, so it was not ${verb}. A payment needs the owner to answer a payment ask.'};`
     : '';
-  return `const ctl=el.closest(${jsLiteral(CONTROL)})||el;`
+  return `const ok=${JSON.stringify(cleared)};const open=${JSON.stringify(risks)}.filter(r=>!ok.includes(r[0]+'@'+location.origin));`
+    + `const ctl=el.closest(${jsLiteral(CONTROL)})||el;`
     + (click ? `const form=ctl.form||ctl.closest('form');const sub=form&&form.querySelector('button[type=submit],button:not([type]),input[type=submit],input[type=image]');` : 'const sub=null;')
     + `const words=n=>n?[n.innerText,n.value,n.getAttribute('aria-label'),n.getAttribute('placeholder'),n.getAttribute('title'),n.getAttribute('alt')]:[];`
     + `const full=[...words(el),...(ctl!==el?words(ctl):[]),...(sub&&sub!==ctl&&sub!==el?words(sub):[])].filter(t=>typeof t==='string'&&t.trim()).join(' ').replace(/\\s+/g,' ').trim().slice(0,2000);const label=full.slice(0,120);`
-    + `const risky=${JSON.stringify(open)}.find(r=>new RegExp(r[1],r[2]).test(full));`
+    + `const risky=open.find(r=>new RegExp(r[1],r[2]).test(full));`
     + `if(risky)return{ok:false,risk:risky[0],reason:'This control says "'+label.slice(0,60)+'", which is '+risky[3]+' nobody approved, so it was not ${verb}.'+(risky[0]==='spend'?' A payment needs the owner to answer a payment ask.':'')};`
     + checkout;
 }
