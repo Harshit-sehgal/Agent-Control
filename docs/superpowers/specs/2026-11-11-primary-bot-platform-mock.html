@@ -563,7 +563,7 @@ const isMgr=b=>b.id!=='atlas'&&(b.role==='Manager'||BOTS.some(x=>x.boss===b.id))
 const roleOf=b=>b.id==='atlas'?'Primary':isMgr(b)?'Manager':'Bot';
 const chain=id=>{const o=[];let b=by(id);while(b){o.unshift(b);b=b.boss&&by(b.boss)}return o};
 const LAY=(()=>{try{return JSON.parse(localStorage.getItem('home-layout')||'{}')}catch(e){return{}}})();
-const S={home:LAY.def||'desks',def:LAY.def||'desks',order:LAY.order||{},pins:(p=>(p.bots=p.bots||[...new Set([...(p.chats||[]),...(p.seats||[]),...(p.tree||[])])].filter(x=>x!=='atlas'),p))(Object.assign({desks:[]},LAY.pins||{})),hidden:LAY.hidden||[],chatF:'all',open:{atlas:true},view:'bots',threads:[],cur:null,left:false,panel:null,tab:'overview',busy:new Set(),paused:false,filter:'outside',actAll:null,palIdx:0,palBots:false,preview:null,recent:['mail','sch','plan'],
+const S={home:LAY.def||'tree',def:LAY.def||'tree',order:LAY.order||{},pins:(p=>(p.bots=p.bots||['atlas',...new Set([...(p.chats||[]),...(p.seats||[]),...(p.tree||[])])],p))(Object.assign({desks:[],bots:LAY.pins?undefined:['atlas']},LAY.pins||{})),hidden:LAY.hidden||[],chatF:'all',open:{atlas:true},view:'bots',threads:[],cur:null,left:false,panel:null,tab:'overview',busy:new Set(),paused:false,filter:'outside',actAll:null,palIdx:0,palBots:false,preview:null,recent:['mail','sch','plan'],
   col:(()=>{try{return JSON.parse(localStorage.getItem('drawer-col')||'{}')}catch(e){return{}}})(),
   grants:{mail:{'Gmail: send email':'always','Gmail: read':'always'},plan:{'Google Calendar: edit':'ask'},ledger:{'Pay or spend money':'ask'}},activity:[]};
 const faceState=b=>S.busy.has(b.id)?'read':(b.id==='atlas'?'':'sleep');
@@ -612,11 +612,11 @@ const gripBtn=b=>'';
 const gripBtnOld=b=>`<button class="grip" data-grip aria-label="Move ${b.name}: drag, or use the arrow keys" title="Drag to move">${GRIP}</button>`;
 const arrange=(kind,key,list)=>{const o=S.order[key];const l=o?[...list].sort((x,y)=>{const i=o.indexOf(x.id),j=o.indexOf(y.id);return (i<0?999:i)-(j<0?999:j)}):list;return kind?[...l.filter(b=>isPin(kind,b.id)),...l.filter(b=>!isPin(kind,b.id))]:l};
 const saveLayout=()=>{try{localStorage.setItem('home-layout',JSON.stringify({order:S.order,pins:S.pins,def:S.def,hidden:S.hidden}))}catch(e){}};
-function shelf(){const pins=arrange(null,'shelf',BOTS.filter(b=>b.id!=='atlas'&&isPin('bots',b.id)&&vis(b))),a=by('atlas');
+function shelf(){const pins=arrange(null,'shelf',BOTS.filter(b=>isPin('bots',b.id)&&vis(b)));if(!pins.length)return '';
   const one=(b,sid)=>{const st=stateOf(b);return `<button class="pin2" data-dm="${b.id}"${sid?` data-sid="${b.id}"`:''}>${face(b,'xl',st==='waiting'?'wait':undefined)}<b>${b.name}</b>${st==='working'||st==='waiting'?`<small class="${st==='waiting'?'wt':''}">${st==='waiting'?'waiting on you':'working'}</small>`:''}</button>`};
-  return `<div class="shelf" data-sortkey="shelf" aria-label="Pinned bots">${one(a,false)}${pins.map(b=>one(b,true)).join('')}</div>`}
+  return `<div class="shelf" data-sortkey="shelf" aria-label="Pinned bots">${pins.map(b=>one(b,true)).join('')}</div>`}
 function treeHome(){
-  const row=(b,k,open,flat)=>{const st=stateOf(b);return `<div class="brow">${!flat&&k.length?`<button class="tog" data-tog="${b.id}" aria-expanded="${open}" aria-label="${b.name}'s team">${IC.chev}</button>`:'<span class="tog"></span>'}<button class="bmain" data-dm="${b.id}" aria-label="Message ${b.name}">${face(b,b.id==='atlas'&&!flat?'m':'',st==='waiting'?'wait':undefined)}<span class="w"><b>${b.name}</b><small>${esc(roleOf(b)==='Bot'?short(b):`${roleOf(b)} · ${kidsOf(b.id).length} ${kidsOf(b.id).length===1?'report':'reports'}`)}</small></span>${st==='working'?'<span class="st">working</span>':st==='waiting'?'<span class="st wait">waiting on you</span>':''}</button><button class="prof" data-bot="${b.id}">Profile</button>${b.id==='atlas'?'':pinMark('bots',b.id)}</div>`};
+  const row=(b,k,open,flat)=>{const st=stateOf(b);return `<div class="brow">${!flat&&k.length?`<button class="tog" data-tog="${b.id}" aria-expanded="${open}" aria-label="${b.name}'s team">${IC.chev}</button>`:'<span class="tog"></span>'}<button class="bmain" data-dm="${b.id}" aria-label="Message ${b.name}">${face(b,b.id==='atlas'&&!flat?'m':'',st==='waiting'?'wait':undefined)}<span class="w"><b>${b.name}</b><small>${esc(roleOf(b)==='Bot'?short(b):`${roleOf(b)} · ${kidsOf(b.id).length} ${kidsOf(b.id).length===1?'report':'reports'}`)}</small></span>${st==='working'?'<span class="st">working</span>':st==='waiting'?'<span class="st wait">waiting on you</span>':''}</button><button class="prof" data-bot="${b.id}">Profile</button>${pinMark('bots',b.id)}</div>`};
   const node=(b,i)=>{const k=arrange(null,'tree:'+b.id,kidsOf(b.id)),open=!!S.open[b.id];
     return `<li class="${open?'open':''}" style="--i:${i}" data-sid="${b.id}">${row(b,k,open,false)}${k.length||isMgr(b)||b.id==='atlas'?`<div class="kids" ${open?'':'inert'}><ul data-sortkey="tree:${b.id}">${k.map(node).join('')}</ul></div>`:''}</li>`};
   return `${shelf()}<section><ul class="btree">${node(by('atlas'),0)}</ul></section>`;
@@ -624,7 +624,7 @@ function treeHome(){
 function chatsHome(){
   const p=pending(),f=S.chatF||'all',mgrs=BOTS.filter(b=>b.boss==='atlas'&&isMgr(b));
   let list=S.order.chats?BOTS:[by('atlas'),...BOTS.filter(b=>b.id!=='atlas').sort((x,y)=>((lastT(y)||{}).at||0)-((lastT(x)||{}).at||0))];
-  list=arrange(null,'chats',list).filter(b=>b.id!=='atlas'&&!isPin('bots',b.id));
+  list=arrange(null,'chats',list).filter(b=>!isPin('bots',b.id));
   list=list.filter(vis);if(f!=='all')list=list.filter(b=>b.id===f||b.boss===f);
   return `${shelf()}<div class="cfilt">${[['all','All'],...mgrs.map(m=>[m.id,m.name.replace(' lead','')])].map(([k,l])=>`<button class="chip ${f===k?'on':''}" data-cf="${k}">${l}</button>`).join('')}</div>
   <div class="chats" data-sortkey="chats">${list.map(b=>{const st=stateOf(b),t=lastT(b),ask=p.find(x=>x.bot===b.id);
@@ -991,7 +991,7 @@ function dragFrame(){const d=drag;if(!d)return;
         if(ti<ii?pos<mid:pos>mid){d.lock=Date.now()+120;flip([d.box],()=>d.box.insertBefore(it,ti<ii?t:t.nextSibling))}}}}
   place();requestAnimationFrame(dragFrame)}
 function startDrag(item,x0,y0,x,y){closeMenu();markPins();item.getAnimations().forEach(an=>an.cancel());const r=item.getBoundingClientRect(),box=item.parentElement,key=box.dataset.sortkey,b=by(item.dataset.sid);
-  drag={item,box,box0:box,gx:x0-r.left,gy:y0-r.top,x,y,px:x,tx:0,ty:0,rot:0,lock:0,cross:(famOf(key)==='team'||famOf(key)==='tree')&&!!b&&roleOf(b)==='Bot',pinable:!!b&&b.id!=='atlas'&&!isPin('bots',b.id)};
+  drag={item,box,box0:box,gx:x0-r.left,gy:y0-r.top,x,y,px:x,tx:0,ty:0,rot:0,lock:0,cross:(famOf(key)==='team'||famOf(key)==='tree')&&!!b&&roleOf(b)==='Bot',pinable:!!b&&!isPin('bots',b.id)};
   item.style.transition='box-shadow .25s ease-out';item.classList.add('dragging');document.body.classList.add('sorting');requestAnimationFrame(dragFrame)}
 function endDrag(){const d=drag;drag=null;const it=d.item;document.querySelectorAll('.drop-on').forEach(x=>x.classList.remove('drop-on'));
   it.style.transition='transform .45s cubic-bezier(.3,1.35,.5,1),box-shadow .35s ease-out';it.style.transform='';it.classList.remove('dragging');
@@ -1027,7 +1027,7 @@ function openMenu(item,x,y,touch){const key=item.parentElement.dataset.sortkey,k
   const leads=b&&roleOf(b)==='Bot'?[...BOTS.filter(x=>isMgr(x)&&x.id!==b.boss&&vis(x)).map(x=>[x.id,x.name,x]),...(b.boss?[['','Solo (report to Atlas)',null]]:[])]:[];
   m.innerHTML=`<div class="cm-h">${b?face(b,'',''):face(by('atlas'),'s','')}<span><b>${b?b.name:'Solo desk'}</b><small>${b?roleOf(b)+(b.boss?' · '+by(b.boss).name:''):'Bots that report to Atlas'}</small></span></div>
     ${b?`<button role="menuitem" data-cm="msg">Message ${esc(b.name)}</button><button role="menuitem" data-cm="prof">Profile</button>`:''}
-    ${kind&&sid!=='atlas'?`<button role="menuitem" data-cm="pin">${pinned?'Unpin':kind==='desks'?'Pin desk to top':'Pin to the top row'}</button>`:''}
+    ${kind?`<button role="menuitem" data-cm="pin">${pinned?'Unpin':kind==='desks'?'Pin desk to top':'Pin to the top row'}</button>`:''}
     ${leads.length?`<button role="menuitem" data-cm="moveopen" aria-expanded="false">Move to…</button><div class="cm-move" hidden>${leads.map(([id,n,x])=>`<button role="menuitem" data-cm-move="${id}">${x?face(x,'s',''):face(by('atlas'),'s','')}${esc(n)}</button>`).join('')}</div>`:''}
     ${b&&b.id!=='atlas'?`<hr><button role="menuitem" data-cm="hide">Hide</button><button role="menuitem" class="danger" data-cm="del">Delete…</button>`:''}`;
   m.classList.toggle('sheet',!!touch);m.classList.add('show');$('cmScrim').classList.toggle('show',!!touch);
