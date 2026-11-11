@@ -178,7 +178,7 @@ export const agentTaskKinds = () => [...AGENT_ACTIONS];
 
 /** Enqueue work for a paired agent. Idempotency is per-agent so a repeated
  * request (double-clicked button, retried polling) cannot run a job twice. */
-export function enqueueAgentTask(store, agentId, {kind, payload = {}, idempotencyKey, createdBy, permission}) {
+export function enqueueAgentTask(store, agentId, {kind, payload = {}, idempotencyKey, createdBy, permission, approved = []}) {
   if (!AGENT_ACTIONS.includes(kind)) fail(`Unknown agent task kind. Expected one of: ${agentTaskKinds().join(', ')}.`);
   // Every enqueue goes through here — the pairing route, the queue scheduler and
   // the bot's own request — so the browser rules are enforced once, at the choke
@@ -189,7 +189,11 @@ export function enqueueAgentTask(store, agentId, {kind, payload = {}, idempotenc
     // `botId` picks the bot's own tab in the device's shared browser. It is only a label for
     // that tab, so it is bounded text or nothing.
     const botId = typeof payload?.botId === 'string' ? cleanText(payload.botId, 64) : '';
-    payload = {url: request.url, steps: request.steps, ...(botId ? {botId} : {})};
+    // `approved` (the risky classes the owner cleared) is an argument, never read from the payload:
+    // only the bot-browser dispatch passes it, so no route, schedule or model text can widen it. Absent
+    // means none: the device refuses every risky control.
+    const cleared = (Array.isArray(approved) ? approved : []).filter(a => typeof a === 'string').slice(0, 8);
+    payload = {url: request.url, steps: request.steps, ...(botId ? {botId} : {}), ...(cleared.length ? {approved: cleared} : {})};
   }
   if (kind === 'model.run') payload = validateModelRun(payload);
   if (kind === 'mcp.call') payload = validateMcpCall(payload);

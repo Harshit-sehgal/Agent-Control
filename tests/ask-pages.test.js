@@ -37,7 +37,7 @@ function seed(state) {
   const make = (n, extra) => createAsk(state, {botId: 'atlas', chatKey: 'atlas', makeId: () => ids(n), now: NOW, ...extra});
   make(1, {action: 'browser.use', target: 'https://docs.example.com/x', detail: 'read docs.example.com', runId: 'run-1'});
   make(2, {action: 'spend', target: 'https://shop.example.com/checkout', detail: 'pay', runId: null});
-  make(3, {action: 'send', target: 'x', detail: 'send it', runId: null});
+  make(3, {action: 'send', target: 'https://x.example/', detail: 'send it', runId: null});
   make(4, {action: 'post', target: 'x', detail: 'post it', runId: 'run-gone'});
   make(5, {action: 'delete', target: 'x', detail: 'delete it', runId: null, unattended: true, now: old});
   state.groupRuns.push({id: 'run-1', groupId: 'home', chatKey: 'atlas', status: 'awaiting_ask', mode: 'pipeline', askIds: ['ask-1'], recipients: ['atlas'], input: 'look', trace: [], createdAt: NOW, checkpoint: {nextStep: 0, afterStep: 1, previous: null}});
@@ -100,7 +100,7 @@ test('both engines make the same decision for every answer, and refuse the same 
   assert.equal(pages.again.status, 409);
   assert.equal(pages.alwaysPayment.status, 400);
   assert.equal(pages.missing.status, 404);
-  assert.deepEqual(pages.grants, ['atlas|send||always']);
+  assert.deepEqual(pages.grants, ['atlas|send|https://x.example|always']);
 });
 
 test('both engines refuse the same grants', async t => {

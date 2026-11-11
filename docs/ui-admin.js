@@ -2,14 +2,14 @@
  * `adminPage(kind)` fetches and returns the body HTML; the handler tables are
  * wired by the host's delegated click, submit and change listeners. Handlers do
  * not catch errors, the host toasts them. */
-import {esc, btn, row, box, field, note, empty, tag, fullDate, textInput} from './ui-kit.js?v=588d41953d';
-import {store, api, sync} from './ui-store.js?v=588d41953d';
-import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=588d41953d';
-import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js?v=588d41953d';
-import {pushStatus, enablePush, disablePush} from './ui-push.js?v=588d41953d';
-import {connectorsPanel, loadConnectors, connectActions, connectForms} from './ui-connect.js?v=588d41953d';
-import {cliDraft, agentCliRows, subscriptionLine, SIGN_IN_HINT} from './ui-connect-model.js?v=588d41953d';
-import {LOCAL_CLI_ENGINES, LOCAL_CLI_KIND} from './ai-presets.js?v=588d41953d';
+import {esc, btn, row, box, field, note, empty, tag, fullDate, textInput} from './ui-kit.js?v=fcc80b2016';
+import {store, api, sync} from './ui-store.js?v=fcc80b2016';
+import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=fcc80b2016';
+import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js?v=fcc80b2016';
+import {pushStatus, enablePush, disablePush} from './ui-push.js?v=fcc80b2016';
+import {connectorsPanel, loadConnectors, connectActions, connectForms} from './ui-connect.js?v=fcc80b2016';
+import {cliDraft, agentCliRows, subscriptionLine, SIGN_IN_HINT} from './ui-connect-model.js?v=fcc80b2016';
+import {LOCAL_CLI_ENGINES, LOCAL_CLI_KIND} from './ai-presets.js?v=fcc80b2016';
 
 /** Title + one-line description per page, used by the host for the page header. */
 export const ADMIN_PAGES = {

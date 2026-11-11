@@ -17,6 +17,8 @@ import {browserResultText, capturePageText, hostOf, MAX_BROWSER_DEPTH} from '../
 import {logActivity} from '../shared/activity-log.js';
 
 const stamp = () => new Date().toISOString();
+/** The risky classes the owner cleared this request for; none for a request recorded before they were. */
+const approvedOf = request => (Array.isArray(request.approved) ? request.approved.filter(a => typeof a === 'string') : []);
 const say = (s, key, text) => { try { addChatMessages(s, key, [{role: 'system', kind: 'browser-result', text}], {trusted: true}); } catch { /* Conversation removed. */ } };
 
 /** How to hand a finished page back to the conversation. The modules that own
@@ -72,7 +74,7 @@ export async function dispatchBrowserRequest(store, id, {actor = null, runtime =
       const current = (s.browserRequests || []).find(r => r.id === id);
       // A feed can still be denied after the claim and before this enqueue.
       if (!current || current.status !== 'dispatched') fail(current ? 'This browser request is no longer waiting.' : 'Browser request not found.', current ? 409 : 404);
-      const {task} = agent.enqueueAgentTask(store, agentId, {kind: request.kind, payload: {url: request.url, steps: request.steps, botId: request.botId}, idempotencyKey: `browser:${id}`, createdBy: actor || `bot:${request.botId}`});
+      const {task} = agent.enqueueAgentTask(store, agentId, {kind: request.kind, payload: {url: request.url, steps: request.steps, botId: request.botId}, approved: approvedOf(request), idempotencyKey: `browser:${id}`, createdBy: actor || `bot:${request.botId}`});
       taskId = task.id;
       current.agentTaskIds = [task.id]; current.updatedAt = stamp();
       activity(s, 'agent', `Sent ${current.botName}'s browser request to a local agent.`, {requestId: id, taskId: task.id});
@@ -110,7 +112,7 @@ async function runHere(store, id, runtime) {
   const request = (store.read().browserRequests || []).find(r => r.id === id);
   if (!request) return;
   try {
-    const result = await runtime.run({url: request.url, steps: request.steps || []});
+    const result = await runtime.run({url: request.url, steps: request.steps || [], approved: approvedOf(request)});
     await finishBrowserRequest(store, request, {ok: true, result});
   } catch (error) {
     await finishBrowserRequest(store, request, {ok: false, error: error.message});

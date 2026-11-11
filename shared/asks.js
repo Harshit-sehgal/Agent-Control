@@ -48,9 +48,14 @@ export const MAX_SETTLED_ASKS = 500;
 const iso = () => new Date().toISOString();
 const botIds = state => new Set((state.groups || []).flatMap(g => (g.bots || []).map(b => b.id)));
 
-/** Where a grant applies: the origin for a browser page, the account for a connector, nothing else. */
+/** The actions whose grant is for one site: a page, and a Send, Post or Delete click on it. */
+const PER_ORIGIN = ['browser.use', 'send', 'post', 'delete'];
+const SITE_WORD = {'browser.use': 'browser', send: 'send', post: 'post', delete: 'delete'};
+
+/** Where a grant applies: the origin for a browser page or a click on one, the account for a connector,
+ * nothing else (a payment is asked every time, so its Deny is the only grant it has). */
 export function scopeOf({action, target} = {}) {
-  if (action === 'browser.use') {
+  if (PER_ORIGIN.includes(action)) {
     try {
       const url = new URL(String(target ?? ''));
       return /^https?:$/.test(url.protocol) ? url.origin.toLowerCase() : '';
@@ -67,7 +72,7 @@ function verbOf(action, scope) {
   if (action === 'spend') return 'spend money';
   const connector = CONNECTOR.exec(action);
   if (connector) return `${connector[2]} ${connector[1]}${scope ? ` (${scope})` : ''}`;
-  return action;
+  return scope ? `${action} on ${scope.replace(/^https?:\/\//, '')}` : action;
 }
 /** The log's sentence for a grant change. */
 const grantSentence = (name, action, scope, choice) => {
@@ -96,8 +101,8 @@ export function setGrant(state, botId, action, scope, choice, now = iso(), {log 
   if (!GRANT_CHOICES.includes(choice)) fail('Choose always, ask or deny.');
   if (action === 'spend' && choice === 'always') fail('A payment is asked every time. Choose Ask each time or Deny.');
   if (!botIds(state).has(botId)) fail('Bot not found.', 404);
-  const where = action === 'browser.use' || CONNECTOR.test(action) ? scopeOf({action, target: scope}) : '';
-  if (action === 'browser.use' && !where) fail('A browser grant is for one site. Say which.');
+  const where = PER_ORIGIN.includes(action) || CONNECTOR.test(action) ? scopeOf({action, target: scope}) : '';
+  if (PER_ORIGIN.includes(action) && !where) fail(`A ${SITE_WORD[action]} grant is for one site. Say which.`);
   if (CONNECTOR.test(action) && !where) fail('A connector grant is for one account. Say which.');
   state.grants ??= [];
   const found = state.grants.find(g => sameGrant(g, botId, action, where));
@@ -110,15 +115,14 @@ export function setGrant(state, botId, action, scope, choice, now = iso(), {log 
 const settled = ask => ask.status !== 'pending';
 
 /** The gate for one action: allowed, refused with a place to change it, or an ask is needed.
- * A permission a bot held before asks existed still counts: with the old "run without asking"
- * setting it was Always allow, otherwise it was Ask each time. An explicit grant wins over it. */
+ * Only an explicit grant allows. The old permission checkbox and "run without asking" are settings a
+ * member can change, so they read as Ask each time. */
 export function verdict(state, bot, action, target = '') {
   if (isBasicKit(action)) return {verdict: 'allow', scope: ''};
   if (!isAskAction(action)) return {verdict: 'deny', scope: '', message: `${bot?.name || 'This bot'} cannot do that.`};
   // `target` may be the page URL or the origin itself; a connector's is its account.
   const scope = scopeOf({action, target});
-  let choice = grantFor(state, bot?.id, action, scope);
-  if (!choice && action !== 'spend' && Array.isArray(bot?.permissions) && bot.permissions.includes(action) && bot.settings?.browserApproval === 'auto') choice = 'always';
+  const choice = grantFor(state, bot?.id, action, scope);
   if (choice === 'always') return {verdict: 'allow', scope};
   if (choice === 'deny') {
     const name = bot?.name || 'this bot';
@@ -139,8 +143,8 @@ export function decide(state, bot, needs) {
     else if (v.verdict === 'ask') rest.push({...need, scope: v.scope});
   }
   if (!ask) return {verdict: 'allow'};
-  // Always allow on the riskiest ask also covers the rest of what the same request needs.
-  return {verdict: 'ask', need: ask, implies: rest.filter(n => n.action !== 'spend').map(n => ({action: n.action, scope: n.scope}))};
+  // Always allow on the riskiest ask also covers the rest of what the same request needs on that site.
+  return {verdict: 'ask', need: ask, implies: rest.filter(n => n.action !== 'spend' && n.scope === ask.scope).map(n => ({action: n.action, scope: n.scope}))};
 }
 
 /** Create a pending ask. An ask from an unattended run (nobody typed in it) lapses after 24 hours. */
@@ -185,7 +189,7 @@ export function answerAsk(state, askId, answer, now = iso()) {
   if (answer === 'always' && botIds(state).has(ask.botId)) {
     // One entry for the answer, in the chat it was asked in; what the same request also covered is not a second event.
     setGrant(state, ask.botId, ask.action, ask.grantScope, 'always', now, {threadId: ask.chatKey});
-    for (const extra of ask.implies || []) if (extra.action !== 'spend') setGrant(state, ask.botId, extra.action, extra.scope, 'always', now, {log: false});
+    for (const extra of ask.implies || []) if (extra.action !== 'spend' && extra.scope === ask.grantScope) setGrant(state, ask.botId, extra.action, extra.scope, 'always', now, {log: false});
   }
   const run = parked(state, ask.runId);
   return {ask, resumeRunId: run && !holds(state, ask) ? run.id : null};
@@ -223,12 +227,14 @@ export function lapseOrphans(state, now = iso()) {
 export const pendingAsks = state => (state.asks || []).filter(a => a.status === 'pending').reverse();
 
 /** Drop grants that cannot be honoured: a bot that is gone, an action nobody asks about, a choice
- * that is not one, a payment set to Always. Idempotent; run on every load and restore. */
+ * that is not one, a payment set to Always, a per-site grant with no site (a Send, Post or Delete
+ * grant stored before those were per site). Idempotent; run on every load and restore. */
 export function sweepGrants(state) {
   const ids = botIds(state);
   state.grants = (Array.isArray(state.grants) ? state.grants : []).filter(g => g && typeof g === 'object'
     && ids.has(g.botId) && isAskAction(g.action) && typeof g.scope === 'string'
-    && GRANT_CHOICES.includes(g.choice) && !(g.action === 'spend' && g.choice === 'always'));
+    && GRANT_CHOICES.includes(g.choice) && !(g.action === 'spend' && g.choice === 'always')
+    && !(PER_ORIGIN.includes(g.action) && !g.scope));
   return state;
 }
 

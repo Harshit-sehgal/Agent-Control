@@ -27,7 +27,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import {isPrivateAddress} from './net-guard.mjs';
-import {hostAllowed, isPostingHost} from '../shared/bot-browser.js';
+import {hostAllowed, isPostingHost, RISKS} from '../shared/bot-browser.js';
 
 // The allowlist rule lives with the rest of the browser-block rules in
 // `shared/bot-browser.js`, so the server runtime and this device read the same
@@ -79,11 +79,24 @@ const SNAPSHOT = `(function(){var els=${PICKABLE};els.forEach(function(e,i){e.se
 /** A step targets an element by the index from the last snapshot, or by a CSS
  * selector when the model prefers one. */
 const targetOf = step => step.index ? jsLiteral(`[data-agent-index="${Math.round(step.index)}"]`) : jsLiteral(step.selector);
-function actionExpression(step) {
+const RISK_WORDS = {spend: 'a payment', delete: 'a delete', post: 'a post', send: 'a send'};
+/** In the page, at the moment of a bot's click or typed field: read the control's visible text, value,
+ * aria-label and placeholder, and refuse it when they name a risky class the owner did not approve
+ * (`approved`, from the server; the model cannot set it). The check and the click are one evaluation,
+ * so the page cannot swap the label in between. `approved` null is a person's own click: no check. */
+function riskGuard(approved, verb) {
+  if (approved === null) return '';
+  const open = RISKS.filter(([action]) => !approved.includes(action)).map(([action, pattern]) => [action, pattern.source, pattern.flags, RISK_WORDS[action]]);
+  if (!open.length) return '';
+  return `const label=[el.innerText,el.value,el.getAttribute('aria-label'),el.getAttribute('placeholder')].filter(t=>typeof t==='string'&&t.trim()).join(' ').replace(/\\s+/g,' ').trim().slice(0,120);`
+    + `const risky=${JSON.stringify(open)}.find(r=>new RegExp(r[1],r[2]).test(label));`
+    + `if(risky)return{ok:false,risk:risky[0],reason:'This control says "'+label.slice(0,60)+'", which is '+risky[3]+' nobody approved, so it was not ${verb}.'+(risky[0]==='spend'?' A payment needs the owner to answer a payment ask.':'')};`;
+}
+function actionExpression(step, approved = null) {
   const sel = targetOf(step);
   switch (step.op) {
-    case 'click': return `(()=>{const blocked=()=>${postingPage};if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};el.scrollIntoView();if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};el.click();return{ok:true};})()`;
-    case 'type': return `(()=>{const blocked=()=>${postingPage};if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};const v=${jsLiteral(step.text)};if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};if('value' in el){el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}else{el.textContent=v;}return{ok:true};})()`;
+    case 'click': return `(()=>{const blocked=()=>${postingPage};if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};${riskGuard(approved, 'clicked')}el.scrollIntoView();if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};el.click();return{ok:true};})()`;
+    case 'type': return `(()=>{const blocked=()=>${postingPage};if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};${riskGuard(approved, 'typed into')}const v=${jsLiteral(step.text)};if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};if('value' in el){el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}else{el.textContent=v;}return{ok:true};})()`;
     case 'waitFor': return `new Promise(res=>{const sel=${sel};const end=Date.now()+${Number(step.timeoutMs) > 0 ? Math.min(Number(step.timeoutMs), 15000) : 5000};const tick=()=>{if(document.querySelector(sel))return res({ok:true});if(Date.now()>end)return res({ok:false,reason:'timed out'});setTimeout(tick,100);};tick();})`;
     case 'read': return `(()=>{const el=document.querySelector(${sel});return{ok:Boolean(el),text:el?String(el.textContent).slice(0,4000):null};})()`;
     case 'snapshot': return SNAPSHOT;
@@ -275,7 +288,7 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
    * remaining step is reported as not run instead of being applied to a page
    * someone else changed, and the result says `tookOver`. The gate may wait, so
    * the load deadline is paused for as long as it does. */
-  async function capture(url, {allow, steps = [], timeoutMs = 20000, tab = null, onPage = null, settleMs = 600, gate = null} = {}) {
+  async function capture(url, {allow, steps = [], approved = [], timeoutMs = 20000, tab = null, onPage = null, settleMs = 600, gate = null} = {}) {
     if (!hostAllowed(url, allow)) throw new Error(`Refusing to open ${url}: its host is not in AGENT_BROWSER_ALLOWLIST.`);
     const blockedBefore = refused.length, blocked = [];
     let deadlineTimer = null, contextId = null, targetId = tab ? tab.targetId : null, left = timeoutMs, armedAt = 0, fail;
@@ -356,7 +369,7 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
               onPage?.({url: target, title: null});
               continue;
             }
-            const expression = actionExpression(step || {});
+            const expression = actionExpression(step || {}, Array.isArray(approved) ? approved : []);
             if (!expression) { actions.push({op: String(step?.op || 'unknown'), ok: false, reason: 'unsupported action'}); continue; }
             const {result} = await cdp.send('Runtime.evaluate', {expression, awaitPromise: true, returnByValue: true}, sessionId);
             actions.push({op: step.op, ...(result?.value && typeof result.value === 'object' ? result.value : {ok: false})});

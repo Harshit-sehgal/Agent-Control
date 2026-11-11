@@ -17,10 +17,11 @@ import {validateBotSettings} from '../shared/bot-settings.js';
 import {ACTIONS} from '../shared/contracts.js';
 
 const block = body => `Let me look.\n\`\`\`browser\n${JSON.stringify(body)}\n\`\`\`\nBack soon.`;
-// These tests are about how a page travels (request, device, result, resume). A bot already holding the
-// permission with "run without asking" goes straight to that; a bot that has to ask the owner first is
-// covered by tests/ask-runs.test.js.
+// These tests are about how a page travels (request, device, result, resume). A bot the owner has given
+// Always allow for example.com (`cleared`) goes straight to that; a bot that has to ask the owner first is
+// covered by tests/ask-runs.test.js. The old permission + "run without asking" no longer clears a bot.
 const browserBot = (extra = {}) => ({id: 'web', name: 'Web', instructions: 'Look things up.', type: 'custom', permissions: [BROWSER_PERMISSION], settings: {browserApproval: 'auto'}, ...extra});
+const cleared = (s, ...ids) => { s.grants = (ids.length ? ids : ['web']).map(botId => ({botId, action: 'browser.use', scope: 'https://example.com', choice: 'always', at: new Date().toISOString()})); };
 const status = code => error => error.status === code;
 
 test('browser blocks are parsed, bounded and kept away from posting on X', () => {
@@ -91,18 +92,18 @@ test('a trailing dot is still X or Twitter, so click and type stay refused', () 
 });
 
 test('a reply becomes a request card for a bot already cleared, an ask for one that is not, and nothing for a Deny, within the depth limit', () => {
-  const state = wf.migrate({candidates: [], groups: []});
+  const state = wf.migrate({candidates: [], groups: [{id: 'g', name: 'G', bots: [browserBot()]}]});
+  cleared(state);
   const out = recordBrowserRequests(state, {bot: browserBot(), groupId: 'g', chatKey: 'web', output: block({url: 'https://example.com'}), makeId: (() => { let n = 0; return () => `id-${++n}`; })()});
   assert.equal(out.text, 'Let me look.\n\nBack soon.');
   assert.equal(out.records.length, 1); assert.equal(state.browserRequests[0].status, 'pending');
   assert.equal(out.lines[0].kind, 'browser'); assert.equal(requestOfMessage(state, out.lines[0].id).id, out.records[0].id);
   // A bot with no permission never hears "I don't have permission": it asks, and the owner answers.
-  const none = recordBrowserRequests(state, {bot: browserBot({permissions: [], settings: {}}), groupId: 'g', chatKey: 'web', output: block({url: 'https://example.com'})});
+  const none = recordBrowserRequests(state, {bot: browserBot({id: 'plain', permissions: [], settings: {}}), groupId: 'g', chatKey: 'web', output: block({url: 'https://example.com'})});
   assert.equal(none.records.length, 1); assert.equal(none.asks.length, 1); assert.equal(none.asks[0].action, 'browser.use');
   assert.equal(none.records[0].askId, none.asks[0].id); assert.deepEqual(none.lines, [], 'the ask is the card');
-  // The permission list is read the way every other control block reads it: a malformed record whose
-  // permissions is a bare string is not "Always allow" (a string's own `.includes` would have matched).
-  const malformed = recordBrowserRequests(state, {bot: browserBot({permissions: BROWSER_PERMISSION}), groupId: 'g', chatKey: 'web', output: block({url: 'https://example.com'})});
+  // The old permission (even a malformed bare string) and "run without asking" are not Always allow.
+  const malformed = recordBrowserRequests(state, {bot: browserBot({id: 'plain', permissions: BROWSER_PERMISSION}), groupId: 'g', chatKey: 'web', output: block({url: 'https://example.com'})});
   assert.equal(malformed.asks.length, 1);
   // An owner's Deny refuses outright, and says where to change it.
   state.grants = [{botId: 'web', action: 'browser.use', scope: 'https://denied.example.com', choice: 'deny', at: new Date().toISOString()}];
@@ -201,7 +202,7 @@ test('a request runs on this server when no device is paired, and continues like
     const pending = id => ({id, botId: 'web', botName: 'Web', groupId: 'lab', chatKey: 'web', url: 'https://example.com/docs', steps: [], kind: 'browser.capture', depth: 0, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: now, updatedAt: now});
     await store.update(s => {
       wf.migrate(s); coordinationState(s);
-      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}];
+      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}]; cleared(s);
       s.browserRequests = [pending('here')];
     });
     const ran = [];
@@ -224,7 +225,7 @@ test('a request runs on this server when no device is paired, and continues like
     assert.deepEqual(sent.agentTaskIds, [], 'No device is asked to open the page.');
     const done = await until(() => { const r = store.read().browserRequests.find(x => x.id === 'here'); return r.status === 'dispatched' ? null : r; }, 'the server to read the page');
     assert.equal(done.status, 'done');
-    assert.deepEqual(ran, [{url: 'https://example.com/docs', steps: []}]);
+    assert.deepEqual(ran, [{url: 'https://example.com/docs', steps: [], approved: []}]);
     assert.equal(done.result.title, 'Docs');
     assert.match(done.result.page, /Install with npm/);
     assert.match(store.read().chats.web.find(m => m.kind === 'browser-result').text, /Browser result for Web: Docs/);
@@ -254,7 +255,7 @@ test('a failed enqueue puts the claimed request back to pending', async () => {
     const now = new Date().toISOString();
     await store.update(s => {
       wf.migrate(s);
-      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}];
+      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}]; cleared(s);
       s.browserRequests = [{id: 'fr', botId: 'web', botName: 'Web', groupId: 'lab', chatKey: 'web', url: 'https://example.com/', steps: [], kind: 'browser.capture', depth: 0, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: now, updatedAt: now}];
     });
     const orig = store.run.bind(store);
@@ -281,7 +282,7 @@ test('auto-approval with no agent stays pending and is reported, and a denial is
     const request = (id, status) => ({id, botId: 'web', botName: 'Web', groupId: 'lab', chatKey: 'web', url: 'https://example.com/', steps: [], kind: 'browser.capture', depth: 0, status, agentTaskIds: [], result: null, error: null, createdAt: now, updatedAt: now});
     await store.update(s => {
       wf.migrate(s);
-      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}];
+      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}]; cleared(s);
       s.browserRequests = [request('pending-one', 'pending')];
     });
     await autoDispatch(store, store.read().browserRequests);
@@ -294,12 +295,12 @@ test('auto-approval with no agent stays pending and is reported, and a denial is
   } finally { await fs.rm(dir, {recursive: true, force: true}); }
 });
 
-test('a bot set to run without asking sends its request at once, and a failure is reported', async () => {
+test('a bot with Always allow for the site sends its request at once, and a failure is reported', async () => {
   const {dir, store} = await harness();
   try {
     const {code} = agent.createPairing(store, 'default', {});
     const device = agent.redeemPairing(store, {code, name: 'Laptop', permissions: ['browser.capture']});
-    await store.update(s => { wf.migrate(s); coordinationState(s); s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot({settings: {browserApproval: 'auto'}})]}]; s.groupRuns.push(createRun({group: s.groups[0], message: 'Read it', makeId: () => 'run-2', chatKey: 'team-lab'})); });
+    await store.update(s => { wf.migrate(s); coordinationState(s); s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot({settings: {browserApproval: 'auto'}})]}]; cleared(s); s.groupRuns.push(createRun({group: s.groups[0], message: 'Read it', makeId: () => 'run-2', chatKey: 'team-lab'})); });
     await runGroup(store, 'run-2', async () => block({url: 'https://example.com'}));
     assert.equal(store.read().browserRequests[0].status, 'dispatched');
     const [task] = agent.claimAgentTasks(store, device.agentId);
@@ -321,7 +322,7 @@ test('the next bot waits until the page is back, then that same bot continues', 
     const reviewer = {id: 'reviewer', name: 'Reviewer', instructions: 'Check.', type: 'review'};
     await store.update(s => {
       wf.migrate(s); coordinationState(s);
-      s.groups = [{id: 'lab', name: 'Lab', bots: [writer, reviewer]}];
+      s.groups = [{id: 'lab', name: 'Lab', bots: [writer, reviewer]}]; cleared(s, 'writer');
       s.groupRuns.push(createRun({group: s.groups[0], message: '@Writer @Reviewer draft from the docs', makeId: () => 'run-p', chatKey: 'team-lab'}));
     });
     const seen = [];
@@ -345,7 +346,7 @@ test('a long reply still files both browser fences', async () => {
   try {
     await store.update(s => {
       wf.migrate(s); coordinationState(s);
-      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}];
+      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}]; cleared(s);
       s.groupRuns.push(createRun({group: s.groups[0], message: 'Look both up', makeId: () => 'run-long', chatKey: 'team-lab'}));
     });
     const pad = `Note.\n${'x'.repeat(4000)}`;
@@ -360,7 +361,7 @@ test('the second page of one reply is waited for before the bot continues', asyn
   try {
     await store.update(s => {
       wf.migrate(s); coordinationState(s);
-      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}];
+      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}]; cleared(s);
       s.groupRuns.push(createRun({group: s.groups[0], message: 'Look both up', makeId: () => 'run-two', chatKey: 'team-lab'}));
     });
     const seen = [];
@@ -391,7 +392,7 @@ test('a duplicate result delivery neither double-appends nor restarts the run', 
   try {
     await store.update(s => {
       wf.migrate(s); coordinationState(s);
-      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}];
+      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}]; cleared(s);
       s.groupRuns.push(createRun({group: s.groups[0], message: 'Look it up', makeId: () => 'run-dup', chatKey: 'team-lab'}));
     });
     await runGroup(store, 'run-dup', async () => block({url: 'https://example.com/a'}));
@@ -416,7 +417,7 @@ test('denying a page still pauses at a checkpoint before the next bot', async ()
     const writer = {id: 'writer', name: 'Writer', instructions: 'Write.', type: 'custom'};
     await store.update(s => {
       wf.migrate(s); coordinationState(s);
-      s.groups = [{id: 'lab', name: 'Lab', settings: {checkpoints: true}, bots: [browserBot(), writer]}];
+      s.groups = [{id: 'lab', name: 'Lab', settings: {checkpoints: true}, bots: [browserBot(), writer]}]; cleared(s);
       s.groupRuns.push(createRun({group: s.groups[0], message: '@Web @Writer go', makeId: () => 'run-ck', chatKey: 'team-lab'}));
     });
     const seen = [];
@@ -437,7 +438,7 @@ test('a one-to-one browse result does not wait on the follow-up model call', asy
   try {
     await store.update(s => {
       wf.migrate(s); coordinationState(s);
-      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}];
+      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}]; cleared(s);
       recordBrowserRequests(s, {bot: browserBot(), groupId: 'lab', chatKey: 'web', output: block({url: 'https://example.com/docs', steps: [{op: 'read', selector: 'main'}]})});
     });
     const {code} = agent.createPairing(store, 'default', {});
@@ -463,7 +464,7 @@ test('a one-to-one reply with two pages waits for both before continuing', async
   try {
     await store.update(s => {
       wf.migrate(s); coordinationState(s);
-      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}];
+      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}]; cleared(s);
       recordBrowserRequests(s, {bot: browserBot(), groupId: 'lab', chatKey: 'web', output: `${block({url: 'https://example.com/a', steps: [{op: 'read', selector: 'main'}]})}\n${block({url: 'https://example.com/b', steps: [{op: 'read', selector: 'main'}]})}`});
     });
     const {code} = agent.createPairing(store, 'default', {});
@@ -506,7 +507,7 @@ test('a person takes over the page, and handing it back resumes the bot from it'
     const now = new Date().toISOString();
     await store.update(s => {
       wf.migrate(s); coordinationState(s);
-      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}];
+      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}]; cleared(s);
       s.browserRequests = [{id: 'takeover-req', botId: 'web', botName: 'Web', groupId: 'lab', chatKey: 'web', url: 'https://x.com/home', steps: [], kind: 'browser.capture', depth: 0, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: now, updatedAt: now}];
     });
     const opened = [];
@@ -608,7 +609,7 @@ test('a document write that fails after the task row was inserted fails the task
     const now = new Date().toISOString();
     await store.update(s => {
       wf.migrate(s);
-      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}];
+      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}]; cleared(s);
       s.browserRequests = [{id: 'fr-commit', botId: 'web', botName: 'Web', groupId: 'lab', chatKey: 'web', url: 'https://example.com/', steps: [], kind: 'browser.capture', depth: 0, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: now, updatedAt: now}];
     });
     const orig = store.update.bind(store);

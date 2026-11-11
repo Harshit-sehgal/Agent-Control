@@ -40,7 +40,7 @@ const host = scope => { try { return new URL(scope).host; } catch { return Strin
 export function grantWhat(action, scope = '') {
   if (action === 'browser.use') return scope ? `Open ${host(scope)}` : 'Open web pages';
   const plain = {send: 'Send', post: 'Post', delete: 'Delete', spend: 'Spend money'}[action];
-  if (plain) return plain;
+  if (plain) return scope && action !== 'spend' ? `${plain} on ${host(scope)}` : plain;
   const match = /^connector\.([a-z0-9_-]+)\.(read|write)$/.exec(String(action));
   if (match) return `${match[2] === 'read' ? 'Read' : 'Change'} ${match[1]}${scope ? ` (${scope})` : ''}`;
   return String(action);
@@ -50,8 +50,8 @@ export const scopeOfAction = (action, target) => scopeOf({action, target});
 const rank = action => { const i = ASK_ACTIONS.indexOf(action); return i < 0 ? ASK_ACTIONS.length : i; };
 
 /** One bot's rules. Each row carries the choices it may be set to (spend has no Always allow) and which one is
- * on. A permission the bot held before asks existed, with no grant of its own, is listed read-only: it counts as
- * Always allow only when it ran without asking. */
+ * on. A permission the bot held before asks existed, with no grant of its own, is listed read-only as Ask each
+ * time: only an explicit grant allows (see verdict in shared/asks.js). */
 export function grantRows(state, botId) {
   const bot = roster(state).find(b => b.id === botId);
   if (!bot) return [];
@@ -63,7 +63,7 @@ export function grantRows(state, botId) {
     .map(g => row(g.action, g.scope || '', grantFor(state, botId, g.action, g.scope || '') || 'ask', false))
     .sort((a, b) => rank(a.action) - rank(b.action) || a.action.localeCompare(b.action) || a.scope.localeCompare(b.scope));
   const old = (bot.permissions || []).filter(a => isAskAction(a) && !explicit.some(r => r.action === a))
-    .map(a => row(a, '', a !== 'spend' && bot.settings?.browserApproval === 'auto' ? 'always' : 'ask', true));
+    .map(a => row(a, '', 'ask', true));
   return [...explicit, ...old];
 }
 /** Every rule of every bot, in roster order. */

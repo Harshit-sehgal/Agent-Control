@@ -13,14 +13,14 @@
  * Polling is what makes the device cast: the server tells the agent to stream a tab only
  * while somebody is looking, so the loop stops when the page is hidden or the view closes.
  * Input goes out in order, one request at a time, with typed letters joined. */
-import {esc, icon} from './ui-kit.js?v=588d41953d';
-import {botColor} from './ui-face.js?v=588d41953d';
-import {store, api, findBot, canWrite, changed, onChange, go} from './ui-store.js?v=588d41953d';
-import {toast} from './ui-dialogs.js?v=588d41953d';
+import {esc, icon} from './ui-kit.js?v=fcc80b2016';
+import {botColor} from './ui-face.js?v=fcc80b2016';
+import {store, api, findBot, canWrite, changed, onChange, go} from './ui-store.js?v=fcc80b2016';
+import {toast} from './ui-dialogs.js?v=fcc80b2016';
 import {
   PAGE, KEY_CHIPS, clickInput, wheelInput, keyInput, coalesce, navigateAddress, rowLabel, statusOf, stateLine, mergeView, veilFor, frameDelay, listDelay, wantsList,
   chipFor, pagesRows,
-} from './ui-computer.js?v=588d41953d';
+} from './ui-computer.js?v=fcc80b2016';
 
 const el = id => document.getElementById(id);
 const raw = (path, method = 'GET', body) => window.AGENT_API(path, method, body);   // no progress bar: these run all the time

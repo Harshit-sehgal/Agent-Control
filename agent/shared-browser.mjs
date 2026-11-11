@@ -110,7 +110,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
 
   /** Run one page read or action list on this bot's tab. A browser that died
    * under it is noticed by `ensure` on the next task. */
-  async function run(botId, {url, steps = []}) {
+  async function run(botId, {url, steps = [], approved = []}) {
     // A host nobody allowed costs no process, and no place in the queue.
     if (!hostAllowed(url, allowed())) throw new Error(`Refusing to open ${url}: its host is not in AGENT_BROWSER_ALLOWLIST.`);
     const id = botId || ANONYMOUS_BOT;
@@ -126,7 +126,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
         if (driving) { parked = true; notify(); try { await until(() => driving === null); } finally { parked = false; } return false; }
         return epoch === startEpoch;
       };
-      return await live.capture(url, {allow: allowed(), steps, tab, timeoutMs, settleMs, onPage: remember, gate});
+      return await live.capture(url, {allow: allowed(), steps, approved, tab, timeoutMs, settleMs, onPage: remember, gate});
     } finally { release(); }
   }
 
@@ -274,5 +274,7 @@ export async function runBrowserTask(task, {shared, allow, env = process.env}) {
     // Interaction needs the real browser; the fetch fallback cannot click or type.
     if (env.AGENT_BROWSER !== '1') throw new Error('browser.action needs a real browser: set AGENT_BROWSER=1 on this device.');
   }
-  return shared.run(typeof payload.botId === 'string' && payload.botId ? payload.botId : ANONYMOUS_BOT, {url: target, steps});
+  // `approved` is what the server cleared (never the model): the browser refuses any other risky control.
+  const approved = Array.isArray(payload.approved) ? payload.approved.filter(a => typeof a === 'string') : [];
+  return shared.run(typeof payload.botId === 'string' && payload.botId ? payload.botId : ANONYMOUS_BOT, {url: target, steps, approved});
 }

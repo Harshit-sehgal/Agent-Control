@@ -167,7 +167,7 @@ test('removing a connector removes its vault credential and its grants, and leav
   await store.update(s => {
     const bot = wf.addBot(s, 'home', {name: 'Scribe', instructions: 'Writes.'});
     setGrant(s, bot.id, `connector.${made.id}.read`, made.account, 'always', undefined, {log: false});
-    setGrant(s, bot.id, 'send', '', 'always', undefined, {log: false});
+    setGrant(s, bot.id, 'send', 'https://x.example', 'always', undefined, {log: false});
     createAsk(s, {botId: bot.id, action: `connector.${made.id}.write`, target: made.account, detail: 'save a note'});
   });
   const bot = store.read().groups.flatMap(g => g.bots).find(b => b.name === 'Scribe');
@@ -176,7 +176,7 @@ test('removing a connector removes its vault credential and its grants, and leav
   const after = store.read();
   assert.deepEqual(after.connectors, []);
   assert.equal(grantFor(after, bot.id, `connector.${made.id}.read`, made.account), null, 'its grants go with it');
-  assert.equal(grantFor(after, bot.id, 'send', ''), 'always', 'other grants stay');
+  assert.equal(grantFor(after, bot.id, 'send', 'https://x.example'), 'always', 'other grants stay');
   assert.equal(store.get("SELECT count(*) AS n FROM credentials").n, 0, 'the secret is deleted, not left behind');
   assert.equal(after.asks[0].status, 'pending', 'an ask for it is not silently dropped');
   await assert.rejects(call('DELETE', `/api/connectors/${made.id}`), error => error.status === 404);

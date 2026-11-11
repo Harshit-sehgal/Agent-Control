@@ -20,10 +20,10 @@
  * Posting stays human: interaction (click, type) is refused on X and Twitter
  * hosts, so no bot can press Post there. Reading those pages is allowed.
  */
-import {cleanText, validHttpUrl} from './core.js?v=588d41953d';
-import {fail} from './errors.js?v=588d41953d';
-import {decide, createAsk, scopeOf} from './asks.js?v=588d41953d';
-import {controlFence} from './reply-blocks.js?v=588d41953d';
+import {cleanText, validHttpUrl} from './core.js?v=fcc80b2016';
+import {fail} from './errors.js?v=fcc80b2016';
+import {decide, createAsk, scopeOf} from './asks.js?v=fcc80b2016';
+import {controlFence} from './reply-blocks.js?v=fcc80b2016';
 
 export const BROWSER_PERMISSION = 'browser.use';
 export const MAX_REQUESTS_PER_REPLY = 2;
@@ -166,14 +166,18 @@ export function browserResultText(request, result) {
 export const MAX_BROWSER_DEPTH = 3;
 /** The words that make a click or a typed field something the owner is asked about, riskiest first.
  * The app classifies, never the bot: a step names a control by index or selector, and the label comes
- * from the page result the bot was last shown. */
-const RISKS = [
+ * from the page result the bot was last shown. A control the bot was not shown a label for is at least
+ * a Send. The browser reads the control again when it acts (agent/browser.mjs) with the same words. */
+export const RISKS = [
   ['spend', /\b(pay|payment|buy|purchase|checkout|check out|place (?:your |the )?order|subscribe|donate|card number|cvc|cvv)\b/i],
   ['delete', /\b(delete|remove|erase|destroy)\b/i],
   ['post', /\b(post|publish|tweet)\b/i],
   ['send', /\b(send|submit|confirm)\b/i],
 ];
 const CHECKOUT_PATH = /\/(checkout|payment|billing)(\/|$)/i;
+
+/** The risk classes a control's label names, riskiest first: ['spend'], ['send'], [] ... */
+export const riskOf = label => RISKS.filter(([, pattern]) => pattern.test(String(label ?? ''))).map(([action]) => action);
 
 /** `{index → label}` for the controls of the page this bot last read in this chat ("[3] button Send"). */
 export function controlLabels(state, botId, chatKey) {
@@ -191,9 +195,13 @@ export function browserNeeds(request, controls = new Map()) {
   const needs = [], seen = new Set();
   for (const step of request.steps || []) {
     if (!INTERACTIVE.includes(step.op)) continue;
-    const named = (step.index ? controls.get(step.index) : '') || step.selector || '';
-    for (const [action, pattern] of RISKS) {
-      if (!named || !pattern.test(named) || seen.has(action)) continue;
+    const label = step.index ? controls.get(step.index) || '' : '';
+    const named = label || step.selector || `control ${step.index}`;
+    const actions = riskOf(label || step.selector);
+    // Not labelled on a page this bot was shown: the app cannot tell what it does, so it is at least a Send.
+    if (!label && !actions.length) actions.push('send');
+    for (const action of actions) {
+      if (seen.has(action)) continue;
       seen.add(action);
       needs.push({action, target: request.url, detail: `${step.op === 'type' ? 'type into' : 'click'} "${named.slice(0, 60)}" on ${host}`});
     }
@@ -239,9 +247,14 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
   else for (const item of found) {
     if (!item.ok) { say(`${bot.name} asked for a web page, but the request was refused: ${item.error}`); continue; }
     if (skipUrls.some(url => samePage(url, item.request.url))) { say(`${bot.name} already has that page, so it was not opened again.`); continue; }
-    const decision = decide(state, bot, browserNeeds(item.request, controlLabels(state, bot.id, chatKey)));
+    const needs = browserNeeds(item.request, controlLabels(state, bot.id, chatKey));
+    const decision = decide(state, bot, needs);
     if (decision.verdict === 'deny') { say(`${bot.name} asked to ${describe(item.request)}. ${decision.message}`); continue; }
-    const record = {id: makeId(), botId: bot.id, botName: bot.name, groupId, chatKey, ...(runId ? {runId} : {}), ...item.request, depth, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: now, updatedAt: now};
+    // `approved`: the risky classes this request is cleared for once it is sent (a grant, or the owner's
+    // answer to its ask). Written here after the validated request, so a reply cannot set it; the browser
+    // refuses any other risky control it meets (agent/browser.mjs).
+    const approved = [...new Set(needs.map(n => n.action).filter(a => a !== BROWSER_PERMISSION))];
+    const record = {id: makeId(), botId: bot.id, botName: bot.name, groupId, chatKey, ...(runId ? {runId} : {}), ...item.request, approved, depth, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: now, updatedAt: now};
     records.push(record);
     if (decision.verdict === 'ask') {
       const {need} = decision;

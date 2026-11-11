@@ -285,7 +285,8 @@ test('a request that classifies as a send, post, delete or payment asks about th
   // Always allow on the send also covers reading that site, so the bot is not asked twice for one request.
   const send = store.read().asks.find(a => a.action === 'send');
   await answerAskFlow(store, send.id, 'always', {actor: 'owner@example.test', executor: model().executor});
-  assert.equal(grantFor(store.read(), ids.mail, 'send', ''), 'always');
+  assert.equal(grantFor(store.read(), ids.mail, 'send', 'https://mail.example.com'), 'always', 'for the site it was asked on');
+  assert.equal(grantFor(store.read(), ids.mail, 'send', 'https://bank.example.com'), null);
   assert.equal(grantFor(store.read(), ids.mail, 'browser.use', 'https://mail.example.com'), 'always');
 });
 
@@ -338,8 +339,9 @@ test('the routes: only an admin answers or grants, and the old approve/deny rout
   await until(() => runOf(store, second.id).status !== 'awaiting_ask', 'the second run to leave the wait');
   assert.equal(store.read().asks.find(a => a.runId === second.id).status, 'declined');
   // A grant is set by the owner, per bot, action and origin; a payment can never be Always allow.
-  await call('POST', '/api/grants', {botId: ids.mail, action: 'delete', choice: 'deny'});
-  assert.equal(grantFor(store.read(), ids.mail, 'delete', ''), 'deny');
+  await call('POST', '/api/grants', {botId: ids.mail, action: 'delete', scope: 'https://mail.example.com', choice: 'deny'});
+  assert.equal(grantFor(store.read(), ids.mail, 'delete', 'https://mail.example.com'), 'deny');
+  await assert.rejects(call('POST', '/api/grants', {botId: ids.mail, action: 'delete', choice: 'deny'}), e => e.status === 400, 'a delete grant names its site');
   await assert.rejects(call('POST', '/api/grants', {botId: ids.mail, action: 'spend', choice: 'always'}), e => e.status === 400);
   await assert.rejects(call('POST', '/api/grants', {botId: 'nobody', action: 'send', choice: 'ask'}), e => e.status === 404);
 });

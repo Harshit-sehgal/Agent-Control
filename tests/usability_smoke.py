@@ -707,10 +707,11 @@ async def phone_long_press_menu_and_drag(page, base):
 
 # ---------------------------------------------------------------- asks, permissions, activity and the pause banner
 
+# A send or post is asked about for the site it is on, so its Always allow is for that site only.
 ASKS = [
-    ['a1', 'send', '', 'send an email to Northwind'],
+    ['a1', 'send', 'https://mail.example.com/compose', 'send an email to Northwind'],
     ['a2', 'spend', '', 'pay £40 to Northwind Printing'],
-    ['a3', 'post', '', 'post the draft to the company page'],
+    ['a3', 'post', 'https://social.example.com/new', 'post the draft to the company page'],
 ]
 
 
@@ -725,7 +726,7 @@ async def seed_asks(page, bot_id, asks=ASKS, name='Researcher'):
     script = '''
         const [bot, primary, asks, name] = %s;
         const at = new Date().toISOString();
-        s.asks = asks.map(([id, action, target, detail]) => ({id, botId: bot, runId: null, chatKey: bot, action, target, detail, grantScope: '', status: 'pending', scope: null, createdAt: at}));
+        s.asks = asks.map(([id, action, target, detail]) => ({id, botId: bot, runId: null, chatKey: bot, action, target, detail, grantScope: target ? new URL(target).origin : '', status: 'pending', scope: null, createdAt: at}));
         const line = (id, text) => ({id: 'ask-' + id, role: 'system', kind: 'ask', askId: id, text, at});
         s.chats[bot] = [...(s.chats[bot] || []), ...asks.map(([id, , , detail]) => line(id, name + ' wants to ' + detail + '.'))];
         s.chats[primary] = [...(s.chats[primary] || []), ...asks.map(([id, , , detail]) => line(id, 'Needs you: ' + name + ' wants to ' + detail + '.'))];
@@ -789,7 +790,7 @@ async def ask_cards_answer_and_collapse(page, base):
 async def permissions_edit_in_place_and_deny(page, base):
     ids = await open_app(page, base, bots={'Researcher': EXTRA_BOTS['Researcher'], 'Writer': EXTRA_BOTS['Writer']})
     r, w = ids['Researcher'], ids['Writer']
-    grants = [[r, 'browser.use', 'https://example.com', 'always'], [r, 'spend', '', 'ask'], [r, 'send', '', 'always'], [w, 'post', '', 'ask']]
+    grants = [[r, 'browser.use', 'https://example.com', 'always'], [r, 'spend', '', 'ask'], [r, 'send', 'https://mail.example.com', 'always'], [w, 'post', 'https://social.example.com', 'ask']]
     await patch_state(page, 's.grants = %s.map(([botId, action, scope, choice]) => ({botId, action, scope, choice, at: new Date().toISOString()}));' % json.dumps(grants))
     await page.goto(f'{base}/index.html#profile/{r}')
     await page.reload()
@@ -797,7 +798,7 @@ async def permissions_edit_in_place_and_deny(page, base):
     await page.locator('#main .rw', has_text='Permissions').click()
     rows = page.locator('#main .gr')
     await expect(rows).to_have_count(3)
-    assert [t.split('\n')[0] for t in await rows.all_inner_texts()] == ['Open example.com', 'Send', 'Spend money']
+    assert [t.split('\n')[0] for t in await rows.all_inner_texts()] == ['Open example.com', 'Send on mail.example.com', 'Spend money']
     # Every rule has the three choices; a payment never has Always allow.
     assert await rows.nth(0).locator('button').all_inner_texts() == ['Always allow', 'Ask each time', 'Deny']
     assert await rows.nth(2).locator('button').all_inner_texts() == ['Ask each time', 'Deny']

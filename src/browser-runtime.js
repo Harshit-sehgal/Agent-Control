@@ -117,7 +117,7 @@ export function createBrowserRuntime({env = process.env, start = startBrowserSes
       clearTimeout(idle);
       idle = null;
       try {
-        return await live.capture(request.url, {allow: allowed(), steps: request.steps || [], timeoutMs});
+        return await live.capture(request.url, {allow: allowed(), steps: request.steps || [], approved: request.approved || [], timeoutMs});
       } catch (error) {
         // A capture can fail because the page did, or because the process died.
         // Only the second is worth paying a relaunch for, and a dead process

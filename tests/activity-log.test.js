@@ -133,13 +133,13 @@ test('Pause all, Resume and the guard tripping by itself are logged under Bots',
 test('grant changes are logged under Permissions; Allow once and a Decline are not', () => {
   const s = state();
   setGrant(s, 'atlas', 'browser.use', 'https://docs.example.com', 'always', NOW);
-  setGrant(s, 'atlas', 'send', '', 'deny', NOW);
-  setGrant(s, 'atlas', 'delete', '', 'ask', NOW);
+  setGrant(s, 'atlas', 'send', 'https://mail.example.com', 'deny', NOW);
+  setGrant(s, 'atlas', 'delete', 'https://mail.example.com', 'ask', NOW);
   setGrant(s, 'atlas', 'spend', '', 'deny', NOW);
   assert.deepEqual(texts(s, 'perm'), [
     'Atlas is always allowed to open docs.example.com.',
-    'Atlas is not allowed to send.',
-    'Atlas will ask you each time to delete.',
+    'Atlas is not allowed to send on mail.example.com.',
+    'Atlas will ask you each time to delete on mail.example.com.',
     'Atlas is not allowed to spend money.',
   ]);
   assert.ok(s.activity.every(a => a.botId === 'atlas'));
@@ -279,10 +279,10 @@ test('the Pages demo logs the same events and serves the same page, with no log 
   const bot = await request('/api/groups/home/bots', 'POST', {name: 'Scout', instructions: 'Looks things up.'});
   await request(`/api/groups/home/bots/${bot.id}`, 'PATCH', {settings: {enabled: false}});
   await request('/api/guard', 'POST', {paused: true});
-  await request('/api/grants', 'POST', {botId: bot.id, action: 'send', choice: 'deny'});
+  await request('/api/grants', 'POST', {botId: bot.id, action: 'send', scope: 'https://mail.example.com', choice: 'deny'});
   const all = await request('/api/activity?filter=all');
   assert.deepEqual(all.items.map(a => a.text), [
-    'Scout is not allowed to send.',
+    'Scout is not allowed to send on mail.example.com.',
     'All bots were paused.',
     'Scout was paused.',
     'Scout was created.',

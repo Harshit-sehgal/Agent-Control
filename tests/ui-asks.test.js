@@ -81,13 +81,13 @@ test('grants of a bot that is gone, or of another bot, are not listed', () => {
   assert.deepEqual(allGrantRows(s).map(r => `${r.botId}:${r.label}`), ['quill:Post', 'quill:Open web pages'], 'Quill\'s own post rule, then the page permission it was given before asks existed');
 });
 
-test('a permission set before asks existed shows as read-only, and counts as Always allow only when it ran without asking', () => {
+test('a permission set before asks existed shows as read-only, and is Ask each time even when it ran without asking', () => {
   const s = stateOf();
   const old = grantRows(s, 'quill');
   assert.deepEqual(old.map(r => [r.label, r.legacy, r.choices]), [['Open web pages', true, []]], 'only actions that ask are listed');
   assert.equal(old[0].choice, 'ask');
   quill.settings.browserApproval = 'auto';
-  assert.equal(grantRows(s, 'quill')[0].choice, 'always');
+  assert.equal(grantRows(s, 'quill')[0].choice, 'ask', 'a member setting is not an admin grant (review I3)');
   delete quill.settings.browserApproval;
   // an explicit grant for the same action replaces the old row
   assert.deepEqual(grantRows(stateOf({grants: [grant({botId: 'quill', action: 'browser.use', scope: 'https://a.com', choice: 'ask'})]}), 'quill').map(r => r.legacy), [false]);
@@ -105,6 +105,9 @@ test('the words of an action: a site, a connector account, and the plain ones', 
   assert.equal(grantWhat('post', ''), 'Post');
   assert.equal(grantWhat('delete', ''), 'Delete');
   assert.equal(grantWhat('spend', ''), 'Spend money');
+  // A send, post or delete rule is for one site, and says which (review I2).
+  assert.equal(grantWhat('send', 'https://mail.example.com'), 'Send on mail.example.com');
+  assert.equal(grantWhat('delete', 'https://files.example.com'), 'Delete on files.example.com');
   assert.equal(grantWhat('connector.gmail.read', 'me@x.com'), 'Read gmail (me@x.com)');
   assert.equal(grantWhat('connector.gmail.write', ''), 'Change gmail');
 });

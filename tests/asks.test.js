@@ -47,7 +47,7 @@ test('scope: the origin for a browser, the account for a connector, nothing else
   assert.equal(scopeOf({action: 'browser.use', target: 'not a url'}), '');
   assert.equal(scopeOf({action: 'browser.use', target: 'file:///etc/passwd'}), '');
   assert.equal(scopeOf({action: 'connector.gmail.write', target: ' Me@Example.com '}), 'me@example.com');
-  assert.equal(scopeOf({action: 'send', target: 'https://example.com'}), '');
+  assert.equal(scopeOf({action: 'send', target: 'https://example.com/compose'}), 'https://example.com', 'a Send click is per site (review I2)');
   assert.equal(scopeOf({action: 'delete'}), '');
 });
 
@@ -81,9 +81,10 @@ test('setGrant refuses what cannot be a grant', () => {
   // spend may be set to ask or deny.
   setGrant(s, 'b', 'spend', '', 'deny', NOW);
   assert.equal(grantFor(s, 'b', 'spend', ''), 'deny');
-  // A scope is only kept where it means something.
-  setGrant(s, 'b', 'send', 'https://ignored.com', 'always', NOW);
-  assert.equal(grantFor(s, 'b', 'send', ''), 'always');
+  // A Send, Post or Delete grant is for one site, stored as its origin (review I2).
+  assert.throws(() => setGrant(s, 'b', 'send', '', 'always', NOW), e => e.status === 400, 'a send grant names its site');
+  setGrant(s, 'b', 'send', 'https://Mail.com/compose', 'always', NOW);
+  assert.equal(grantFor(s, 'b', 'send', 'https://mail.com'), 'always');
   // A browser scope given as a full URL is stored as its origin.
   setGrant(s, 'b', 'browser.use', 'https://Site.com/some/page', 'always', NOW);
   assert.equal(grantFor(s, 'b', 'browser.use', 'https://site.com'), 'always');
@@ -117,10 +118,10 @@ test('verdict: basic kit allowed, always allowed, deny refused with where to cha
   assert.equal(verdict(s, b, 'bogus', '').verdict, 'deny', 'an action nobody declared is not allowed');
 });
 
-test('a permission a bot held before asks existed still counts, except where an explicit grant says otherwise', () => {
+test('a permission a bot held before asks existed reads as Ask each time; only an explicit grant allows', () => {
   const s = state();
   const holds = bot('b', {permissions: ['browser.use'], settings: {browserApproval: 'auto'}});
-  assert.equal(verdict(s, holds, 'browser.use', 'https://a.com').verdict, 'allow', 'permission plus auto was always allow');
+  assert.equal(verdict(s, holds, 'browser.use', 'https://a.com').verdict, 'ask', 'permission plus auto is a member setting, not an admin grant (review I3)');
   const asks = bot('b', {permissions: ['browser.use'], settings: {browserApproval: 'ask'}});
   assert.equal(verdict(s, asks, 'browser.use', 'https://a.com').verdict, 'ask', 'permission plus ask was ask each time');
   setGrant(s, 'b', 'browser.use', 'https://a.com', 'ask', NOW);
@@ -137,9 +138,10 @@ test('canBot: the same answer, with a grant store to read', () => {
   assert.equal(canBot(b, 'browser.use', {state: s, scope: 'https://a.com'}), false, 'ask needed is not allowed yet');
   setGrant(s, 'b', 'browser.use', 'https://a.com', 'always', NOW);
   assert.equal(canBot(b, 'browser.use', {state: s, scope: 'https://a.com'}), true);
-  assert.equal(canBot(b, 'send', {state: s}), false);
-  setGrant(s, 'b', 'send', '', 'always', NOW);
-  assert.equal(canBot(b, 'send', {state: s}), true);
+  assert.equal(canBot(b, 'send', {state: s, scope: 'https://a.com'}), false);
+  setGrant(s, 'b', 'send', 'https://a.com', 'always', NOW);
+  assert.equal(canBot(b, 'send', {state: s, scope: 'https://a.com/compose'}), true);
+  assert.equal(canBot(b, 'send', {state: s}), false, 'a send grant is for its site only');
 });
 
 test('an ask is created pending, answered once, and the answer is the card', () => {
@@ -202,11 +204,11 @@ test('Review focus 4: two asks pending in one run resume it only when the last i
 test('Review focus 1: an answer after the run was cancelled or deleted is recorded and resumes nothing', () => {
   const s = state();
   s.groupRuns.push({id: 'r1', groupId: 'home', status: 'cancelled'});
-  const ask = createAsk(s, {botId: 'b', runId: 'r1', chatKey: 'b', action: 'send', target: 'x', now: NOW, makeId: mk});
+  const ask = createAsk(s, {botId: 'b', runId: 'r1', chatKey: 'b', action: 'send', target: 'https://x.example/', now: NOW, makeId: mk});
   const out = answerAsk(s, ask.id, 'always', NOW);
   assert.equal(out.ask.status, 'allowed');
   assert.equal(out.resumeRunId, null);
-  assert.equal(grantFor(s, 'b', 'send', ''), 'always', 'the owner\'s choice stands even though the run is gone');
+  assert.equal(grantFor(s, 'b', 'send', 'https://x.example'), 'always', 'the owner\'s choice stands even though the run is gone');
   const gone = createAsk(s, {botId: 'b', runId: 'deleted', chatKey: 'b', action: 'send', target: 'x', now: NOW, makeId: mk});
   assert.equal(answerAsk(s, gone.id, 'allow', NOW).resumeRunId, null);
 });
@@ -237,7 +239,7 @@ test('an ask whose run ended gets an expiry so it cannot sit in Needs you for ev
 
 test('Review focus 5: a grant for a bot that no longer exists is ignored and swept, and nothing crashes', () => {
   const s = state();
-  setGrant(s, 'b', 'send', '', 'always', NOW);
+  setGrant(s, 'b', 'send', 'https://x.example', 'always', NOW);
   s.grants.push({botId: 'ghost', action: 'send', scope: '', choice: 'always', at: NOW});
   s.grants.push({botId: 'b', action: 'nonsense', scope: '', choice: 'always', at: NOW});
   s.grants.push({botId: 'b', action: 'send', scope: '', choice: 'maybe', at: NOW});
@@ -263,7 +265,7 @@ test('the card copy: one sentence, the three buttons, and the collapsed line', (
   assert.equal(answeredText(ask), 'Waiting for you');
   answerAsk(s, ask.id, 'allow', NOW);
   assert.equal(answeredText(s.asks[0]), 'You allowed it once');
-  const other = createAsk(s, {botId: 'b', runId: null, chatKey: 'b', action: 'send', target: 'x', now: NOW, makeId: mk});
+  const other = createAsk(s, {botId: 'b', runId: null, chatKey: 'b', action: 'send', target: 'https://x.example/', now: NOW, makeId: mk});
   answerAsk(s, other.id, 'always', NOW);
   assert.equal(answeredText(s.asks[1]), 'You always allow it for this bot');
   const third = createAsk(s, {botId: 'b', runId: null, chatKey: 'b', action: 'post', target: 'x', now: NOW, makeId: mk});
@@ -287,7 +289,7 @@ test('schema v12: asks, grants and the activity log are stored, and survive a re
   try {
     const {id} = (await t.store.update(s => {
       setGrant(s, 'atlas', 'browser.use', 'https://a.com', 'always', NOW, {log: false});
-      setGrant(s, 'atlas', 'send', '', 'deny', NOW, {log: false});
+      setGrant(s, 'atlas', 'send', 'https://x.example', 'deny', NOW, {log: false});
       const ask = createAsk(s, {botId: 'atlas', runId: 'r1', chatKey: 'atlas', action: 'delete', target: 'x', detail: 'delete it', unattended: true, now: NOW, makeId: mk});
       s.activity.push({id: 'act-1', at: NOW, botId: 'atlas', kind: 'perm', text: 'Atlas may browse a.com', threadId: 'atlas', undoUntil: null});
       return ask;
@@ -300,7 +302,7 @@ test('schema v12: asks, grants and the activity log are stored, and survive a re
     try {
       const s = again.read();
       assert.equal(grantFor(s, 'atlas', 'browser.use', 'https://a.com'), 'always');
-      assert.equal(grantFor(s, 'atlas', 'send', ''), 'deny');
+      assert.equal(grantFor(s, 'atlas', 'send', 'https://x.example'), 'deny');
       assert.equal(s.asks.length, 1);
       assert.equal(s.asks[0].expiresAt, '2026-11-12T10:00:00.000Z', 'the whole record comes back, not only its columns');
       assert.equal(s.asks[0].detail, 'delete it');
@@ -315,7 +317,7 @@ test('backup: the new tables travel, restore, and a grant for a missing bot is i
   const t = await sandbox();
   try {
     await t.store.update(s => {
-      setGrant(s, 'atlas', 'post', '', 'always', NOW, {log: false});
+      setGrant(s, 'atlas', 'post', 'https://x.example', 'always', NOW, {log: false});
       createAsk(s, {botId: 'atlas', runId: null, chatKey: 'atlas', action: 'send', target: 'x', now: NOW, makeId: mk});
       s.activity.push({id: 'act-1', at: NOW, botId: 'atlas', kind: 'bots', text: 'Atlas was created', threadId: null, undoUntil: null});
     });
@@ -332,7 +334,7 @@ test('backup: the new tables travel, restore, and a grant for a missing bot is i
       assert.doesNotThrow(() => backup.importBackup(other.store, sealed, {force: true}));
       const s = other.store.read();
       assert.equal(grantFor(s, 'ghost', 'send', ''), null, 'a grant for a missing bot is ignored');
-      assert.equal(grantFor(s, 'atlas', 'post', ''), 'always', 'the real one is restored');
+      assert.equal(grantFor(s, 'atlas', 'post', 'https://x.example'), 'always', 'the real one is restored');
       assert.equal(s.asks.length, 1);
       assert.equal(s.activity.length, 1);
       // And the next write sweeps the orphan out of the table.

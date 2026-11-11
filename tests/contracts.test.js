@@ -131,6 +131,8 @@ test('a structured bot may attach a browser block; the fence is stripped before 
     };
     await store.update(s => {
       s.groups = [{id: 'g1', name: 'Lab', bots: [bot]}];
+      // Cleared for the page by an explicit grant (the old permission + auto is no longer one).
+      s.grants = [{botId: 'curator', action: 'browser.use', scope: 'https://example.com', choice: 'always', at: new Date().toISOString()}];
       coordinationState(s);
       s.groupRuns.push(createRun({group: s.groups[0], message: 'Look it up', makeId: () => 'run-s'}));
     });
