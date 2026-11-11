@@ -8,7 +8,7 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const shared = path.join(root, 'shared');
 // The UI is app.js plus every ui-*.js module.
 const uiFiles = ['app.js', ...(await readdir(shared)).filter(f => /^ui-.+\.js$/.test(f)).sort()];
-const [html, css] = await Promise.all(['index.html', 'app.css'].map(f => readFile(path.join(shared, f), 'utf8')));
+const [html, css, shell] = await Promise.all(['index.html', 'app.css', 'shell.css'].map(f => readFile(path.join(shared, f), 'utf8')));
 const app = (await Promise.all(uiFiles.map(f => readFile(path.join(shared, f), 'utf8')))).join('\n');
 
 test('colour is a themed token system: a light and a dark theme, following the system', () => {
@@ -35,16 +35,17 @@ test('colour is a themed token system: a light and a dark theme, following the s
   assert.doesNotMatch(rest, /#[0-9a-f]{3,8}\b/i, 'use a colour token instead of a hex value');
 });
 
-test('there is exactly one stylesheet and the retired ones are not linked', () => {
-  assert.deepEqual([...html.matchAll(/<link rel="stylesheet" href="([^"]+)"/g)].map(m => m[1]), ['./app.css']);
+test('there are exactly two stylesheets (tokens and pages, then the shell) and the retired ones are not linked', () => {
+  assert.deepEqual([...html.matchAll(/<link rel="stylesheet" href="([^"]+)"/g)].map(m => m[1]), ['./app.css', './shell.css']);
   assert.doesNotMatch(html, /polish\.css|usability\.css/);
 });
 
-test('home starts a group run from a Grok-style intent prompt', () => {
-  assert.match(app, /id="home-prompt"/);
-  assert.match(app, /function startGroupChat\(/);
+test('the new thread page starts a thread run by Atlas from one box', () => {
+  assert.match(app, /id="new-thread-form"/);
+  assert.match(app, /export async function startThread\(/);
   // The submit handler is keyed by the form id in the forms table.
-  assert.match(app, /'home-prompt': \(form, f\) => startGroupChat\(f\.prompt\)/);
+  assert.match(app, /'new-thread-form': \(form, f\) => startThread\(f\.message\)/);
+  assert.match(app, /api\('\/api\/threads', 'POST', \{message\}\)/);
 });
 
 test('navigation marks the current page and dialogs return focus', () => {
@@ -88,15 +89,13 @@ test('touch targets are 44px on a coarse pointer', () => {
   for (const rule of [/\.chip\{height:44px/, /\.btn\.small\{min-height:44px\}/, /\.filter\{height:44px/, /\.contract-fieldset \.check-row\{min-height:44px/]) assert.match(block, rule);
 });
 
-test('the phone FAB floats above the footer instead of over it', () => {
-  // It used to be a sibling pinned at bottom:64px, which covered .list-foot as
-  // soon as the two footer lines wrapped. It is now the footer's last child and
-  // is anchored above it, so no footer copy can slide under it at any height.
-  assert.match(css, /\.list-foot\{position:relative/);
-  assert.match(css, /\.fab\{position:absolute;right:18px;bottom:calc\(100% \+ 12px\)/);
-  assert.match(app, /<footer class="list-foot">[\s\S]*?data-action="new-chat"[\s\S]*?<\/footer>/);
-  // The list keeps room so the last chat can scroll clear of the button.
-  assert.match(css, /\.chat-list\{padding-bottom:78px\}/);
+test('the phone bottom bar sits 16px from each edge with a fade behind it, and the chrome hides on desktop', () => {
+  // Pinned with max(16px, ...) so it cannot run off a narrow phone; the fade stops
+  // list rows showing through the search pill.
+  assert.match(shell, /\.ch-bar\{position:absolute;left:max\(16px,calc\(50% - 360px\)\);right:max\(16px,calc\(50% - 360px\)\)/);
+  assert.match(shell, /\.ch-bar::before\{[^}]*linear-gradient\(to bottom,transparent,var\(--bg\) 45%\)/);
+  assert.match(shell, /@media\(min-width:1024px\)\{[\s\S]*?\.chrome\{display:none\}/);
+  assert.match(app, /class="ch-thread" data-action="new-thread" aria-label="New thread"/);
 });
 
 test('the select chevron follows the theme instead of a hard-coded colour', () => {

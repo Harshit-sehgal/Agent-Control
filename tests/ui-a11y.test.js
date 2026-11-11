@@ -85,13 +85,12 @@ test('a danger confirm opens with focus on Cancel, not on the destructive button
   assert.match(confirm, /kind: danger \? 'danger' : 'primary'/, 'the confirm button keeps its kind');
 });
 
-test('Ctrl+K from inside a sheet returns focus to where the sheet was opened', () => {
-  const palette = body(sheets, 'export function openCommandPalette(');
-  const adopted = palette.indexOf('focusOrigin()');
-  const closed = palette.indexOf('closeSheet()');
-  assert.ok(adopted >= 0 && closed >= 0, 'the palette must read the origin and close the sheet');
-  // closeSheet() restores and clears the origin, so it has to be read first.
-  assert.ok(adopted < closed, 'the origin must be captured before closing the sheet');
-  assert.match(palette, /captureFocus\(origin/);
-  assert.match(dialogs, /export const focusOrigin/, 'ui-dialogs must expose the stored origin');
+test('a sheet hands focus back to the control that opened it', () => {
+  // The quick-navigation palette is gone (search replaced it), so the rule now
+  // rests on the sheet alone: openSheet remembers the opener, closeSheet returns to it.
+  const open = body(dialogs, 'export function openSheet(');
+  const close = body(dialogs, 'export function closeSheet(');
+  assert.match(open, /if \(!sheetOpen\(\)\) captureFocus\(\)/);
+  assert.match(close, /restoreFocus\(\)/);
+  assert.match(dialogs, /export const focusOrigin/);
 });

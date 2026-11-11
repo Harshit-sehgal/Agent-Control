@@ -16,6 +16,7 @@ export const SHAPES = ['rounded', 'circle', 'hexagon', 'pebble', 'drop', 'shield
  * only once that constant is raised. */
 export const COLORS = ['#9ee0e6', '#c6b7f7', '#f7b8a8', '#b5e3a1', '#f5d38a', '#f2a7c8', '#a9c8f5', '#d9c7a8', '#f6c49a', '#c9c7cf'];
 
+let drawn = 0;
 const STATES = ['awake', 'asleep', 'working', 'waiting'];
 const INK = '#1b1a18';
 
@@ -44,7 +45,7 @@ const mix = (hex, to, pct) => '#' + [1, 3, 5].map(i => {
 }).join('');
 
 const EYES = {
-  open: `<rect class="face-eye" x="37" y="19" width="12" height="19" rx="6" fill="${INK}"/><rect class="face-eye" x="71" y="20" width="10" height="17.5" rx="5" fill="${INK}"/><ellipse class="face-light" cx="41.2" cy="22.8" rx="1.8" ry="1.9" fill="#fff" fill-opacity=".7"/><ellipse class="face-light" cx="74.5" cy="23.5" rx="1.5" ry="1.75" fill="#fff" fill-opacity=".7"/>`,
+  open: `<rect class="face-eye" x="37" y="19" width="12" height="19" rx="6" fill="${INK}"/><rect class="face-eye" x="71" y="20" width="10" height="17.5" rx="5" fill="${INK}"/><ellipse class="face-light" cx="41.2" cy="22.8" rx="1.8" ry="1.9" fill="#fff" fill-opacity=".7"/><ellipse class="face-light" cx="74.5" cy="23.5" rx="1.5" ry="1.75" fill="#fff" fill-opacity=".7"/><path class="face-joy" d="M37,34 Q43,21 49,34" fill="none" stroke="${INK}" stroke-width="3.6" stroke-linecap="round"/><path class="face-joy" d="M71.5,33 Q76,22 80.5,33" fill="none" stroke="${INK}" stroke-width="3.2" stroke-linecap="round"/>`,
   closed: `<rect class="face-eye" x="37" y="29" width="12" height="5" rx="2.5" fill="${INK}" fill-opacity=".6"/><rect class="face-eye" x="71" y="29.5" width="10" height="4.5" rx="2.25" fill="${INK}" fill-opacity=".6"/>`,
 };
 const MOUTHS = {
@@ -53,6 +54,7 @@ const MOUTHS = {
   waiting: `<rect class="face-mouth" x="53" y="42" width="10" height="11" rx="5" fill="${INK}" fill-opacity=".6"/>`,
   asleep: '',
 };
+const SLEEP_Z = `<text class="face-z" x="80" y="16" aria-hidden="true">z</text>`;
 const STAR = `<circle class="face-star" cx="16" cy="84" r="15" fill="#f5a524" style="stroke:var(--bg,#fff);stroke-width:3"/><path class="face-star-mark" transform="translate(6.7 74.7) scale(.775)" d="M12 3.5l2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.8l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z" fill="#fff"/>`;
 
 /** `bot` is a stored bot ({id, name, settings:{lead, shape, tint}}). Options:
@@ -75,13 +77,23 @@ export function face(bot, {size = 40, state = 'awake', primary = false, manager 
     if (name.length % 2) cls.push('face--blink2');
     if (hop) cls.push('face--hop');
   }
-  const gid = `fb-${color.slice(1)}`;
+  // Every face owns its gradient ids. Faces repeat on one page (the sidebar and the
+  // phone list both draw Atlas), and a url(#id) that resolves to a gradient inside a
+  // display:none svg paints nothing.
+  const uid = (++drawn).toString(36), gid = `fb${uid}`, sid = `fs${uid}`;
   const eyes = st === 'asleep' ? EYES.closed : EYES.open;
   const look = st === 'waiting' ? ' transform="translate(7 7)"' : '';
   return `<svg class="${esc(cls.join(' '))}" data-shape="${esc(shape)}" viewBox="0 0 100 100" width="${px}" height="${px}" style="--d:${(name.length % 5) * 0.9}s" aria-hidden="true" focusable="false">`
     + `<defs><linearGradient id="${gid}" x1=".37" y1="0" x2=".63" y2="1"><stop offset="0" stop-color="${mix(color, '#ffffff', 0.14)}"/><stop offset=".7" stop-color="${color}"/><stop offset="1" stop-color="${color}"/></linearGradient>`
-    + `<linearGradient id="fs" x1=".2" y1=".6" x2=".6" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".14"/></linearGradient></defs>`
-    + outline(shape, 'face-body', `url(#${gid})`) + outline(shape, 'face-shade', 'url(#fs)')
+    + `<linearGradient id="${sid}" x1=".2" y1=".6" x2=".6" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".14"/></linearGradient></defs>`
+    + outline(shape, 'face-body', `url(#${gid})`) + outline(shape, 'face-shade', `url(#${sid})`)
     + `<ellipse class="face-blush" cx="31" cy="44.5" rx="8" ry="4.5" fill="#ff6978" fill-opacity=".2"/><ellipse class="face-blush" cx="88.5" cy="44.5" rx="5.5" ry="4.5" fill="#ff6978" fill-opacity=".2"/>`
-    + `<g class="face-eyes"${look}>${eyes}</g>${MOUTHS[st]}${isPrimary && px >= 40 ? STAR : ''}</svg>`;
+    + `<g class="face-eyes"${look}>${eyes}</g>${MOUTHS[st]}${st === 'asleep' && px >= 36 ? SLEEP_Z : ''}${isPrimary && px >= 40 ? STAR : ''}</svg>`;
+}
+
+/** The tint colour a bot is drawn in (and its bubbles are washed with): the
+ * settings.tint index, else the bot's position, like `face`. */
+export function botColor(bot, index = 0) {
+  const tint = Number.isInteger(bot?.settings?.tint) ? bot.settings.tint : Math.max(0, Math.trunc(Number(index)) || 0);
+  return COLORS[Math.abs(tint) % COLORS.length];
 }

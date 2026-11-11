@@ -96,17 +96,20 @@ test('a push status reply with no endpoint list reads as no devices', async () =
 
 // ---- markup, guards and CSS that only a browser would notice -----------------
 
-const [appJs, views, actions, css, indexHtml, panel] = await Promise.all(['app.js', 'ui-views.js', 'ui-actions.js', 'app.css', 'index.html', 'ui-panel.js'].map(shared));
+const [appJs, conversation, actions, css, indexHtml] = await Promise.all(['app.js', 'ui-conversation.js', 'ui-actions.js', 'app.css', 'index.html'].map(shared));
 
-test('the details button announces what it opens', () => {
-  assert.match(views, /class="thread-title" data-action="open-info" aria-expanded="\$\{Boolean\(store\.route\.info\)\}" aria-controls="inspector"/);
-  assert.match(indexHtml, /id="inspector"/, 'aria-controls must name the panel that actually exists');
+test('a chat header names its own back button and the profile it opens', () => {
+  // The shell replaced the details button and the inspector panel: the header's
+  // face opens the bot's profile, and the back button names where it goes.
+  assert.match(conversation, /data-action="open-profile" data-id="\$\{esc\(bot\.id\)\}"[^>]*aria-label="\$\{esc\(bot\.name\)\}'s profile"/);
+  assert.match(conversation, /data-action="back-to-list" aria-label="Back to \$\{label\}"/);
+  assert.doesNotMatch(indexHtml, /id="inspector"/, 'the inspector panel is gone with the old info routes');
 });
 
 test('a chat that no longer exists falls back to the list instead of a blank thread', () => {
-  // renderThread bails out when conversation() is null; without this the main
-  // pane kept the previous chat's markup under a route for a deleted one.
-  assert.match(appJs, /if \(chat && !conversation\(\)\) return go\(\{\}, \{replace: true\}\)/);
+  // renderConversation bails out when conversation() is null; without this the
+  // main pane kept the previous chat's markup under a route for a deleted one.
+  assert.match(appJs, /if \(\(route\.bot \|\| route\.thread\) && !conversation\(\)\) return go\(\{\}, \{replace: true\}\)/);
 });
 
 test('one press of an action sends one request, even across a repaint', () => {
@@ -130,11 +133,9 @@ test('a bot removed in another tab says so instead of crashing', () => {
   assert.match(actions, /if \(!group\) throw new Error\('That bot is no longer in a group\.'\)/);
 });
 
-test('a landing chip asks the group it belongs to', () => {
-  assert.match(actions, /'home-ask': b => startGroupChat\(b\.dataset\.text, b\.dataset\.id\)/);
-  assert.match(actions, /const group = \(groupId \? findGroup\(groupId\) : null\) \|\| groups\(\)\[0\]/);
-  assert.match(views, /function homePrompts\(group\)/);
-  assert.match(views, /data-action="home-ask" data-id="\$\{esc\(group\?\.id \|\| ''\)\}"/);
+test('a starter chip on the new thread page starts a thread, not a group message', () => {
+  assert.match(conversation, /'quick-thread': b => startThread\(b\.dataset\.text\)/);
+  assert.match(conversation, /data-action="quick-thread" data-text="\$\{esc\(text\)\}"/);
 });
 
 test('long titles wrap instead of overflowing, and dead hover rules stay deleted', () => {

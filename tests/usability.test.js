@@ -44,11 +44,12 @@ test('the Node build runs real multi-bot coordination with a run timeline',()=>{
 });
 test('the Node build exposes a notifications feed and preferences',()=>{
   assert.match(js,/function notificationsPanel\(/);
-  assert.match(js,/data-action="open-page" data-page="notifications"/);
+  // The bell left with the old list header (the avatar carries no badge now), so
+  // the feed is reached from the You page's Notifications row, which shows the unread count.
+  assert.match(js,/row\(\{title: 'Notifications', right: state\.unread/);
   assert.match(js,/notif-prefs-form/);
-  assert.match(js,/badge-dot/);
   // Not offered on the static demo (no server to hold notifications).
-  assert.match(js,/\$\{server \? `<span id="bell-slot">/);
+  assert.match(js,/\(demo \? '' : row\(\{title: 'Workspace'/);
 });
 test('the Node build exposes Data & security admin surfaces',()=>{
   assert.match(js,/function credentialsPanel\(/);
@@ -66,12 +67,12 @@ test('the Node build exposes Team and Local agents admin surfaces',()=>{
   assert.match(js,/'toggle-user-disabled'/);
   assert.match(js,/Temporary password \(min 8 chars\)/);
   // Admin surfaces are gated off on the static Pages demo and for non-admins:
-  // the role check, the You-page entry, the quick-nav entries and the route parser.
+  // the role check, the You-page entry and the settings route that names an old page.
   assert.match(js,/export const isAdmin = \(\) => !isStaticDemo\(\) && \['owner', 'admin'\]\.includes/);
   assert.match(js,/export const canWrite = \(\) => isStaticDemo\(\) \|\| \['owner', 'admin', 'member'\]\.includes/);
   assert.match(js,/isAdmin\(\) \? box\(\['ai', 'team', 'agents', 'data'\]/);
-  assert.match(js,/if \(isAdmin\(\)\) items\.push\(/);
-  assert.match(js,/parseRoute\(location\.hash, store\.state, \{server: !isStaticDemo\(\), admin: isAdmin\(\), write: canWrite\(\)\}\)/);
+  assert.match(js,/\['ai', 'team', 'agents', 'data'\]\.includes\(page\) && isAdmin\(\)/);
+  assert.match(js,/\['notifications', 'workspaces'\]\.includes\(page\) && !isStaticDemo\(\)/);
 });
 test('destructive admin actions ask first and say what they do',()=>{
   for (const message of ['Sign out every other session','Remove this user from the workspace','Disable this account','Delete your account','Revoke this local agent','Delete this credential','Prune exhaust older than the retention policy','Replace this workspace with the pasted backup'])
@@ -88,10 +89,12 @@ test('the shell is integrated: one search, animated routes, one progress bar',()
   assert.match(html,/id="progress"/);
   assert.match(html,/class="splash"/);
   assert.match(html,/id="main" tabindex="-1"/);
-  // One search entry point per job: the chat-list filter and Ctrl+K quick nav.
-  assert.match(js,/id="chat-search"/);
+  // One search per screen size, and Ctrl+K reaches whichever is on screen: the
+  // sidebar's box on a laptop, the phone's bottom bar otherwise.
+  assert.match(js,/id="rail-q"/);
+  assert.match(js,/id="sq"/);
   assert.match(js,/ev\.key\.toLowerCase\(\) === 'k'/);
-  assert.match(js,/label: 'AI and models'/);
+  assert.match(js,/title: 'AI and models'/);
   assert.match(js,/lastView/);
   assert.match(js,/classList\.add\('view-enter'\)/);
   assert.match(js,/function setBusy\(/);
@@ -102,16 +105,18 @@ test('hash routes respond to browser Back and Forward',()=>{
   assert.match(js,/pushState/);
   // Opening a sheet or the palette is dismissed by Back rather than stranded,
   // and the history depth is read from the entry (Back and Forward both fire it).
-  assert.match(js,/popstate', event => \{ syncDepth\(event\); if \(!store\.state\) return; closeSheet\(\); closeCommandPalette\(\)/);
+  assert.match(js,/popstate', event => \{ syncDepth\(event\); if \(!store\.state\) return; closeSheet\(\); closeSearch\(\)/);
 });
 test('a background refresh never wipes an in-progress form or the sign-in',()=>{
   // Idle data refreshes every 30s. A page request or a live group run shortens
   // that to 3s, and a keystroke must not push the poll back. The poll used to
   // re-render unconditionally, discarding whatever the user had typed, and
   // rebuilding the sign-in dialog (clearing the password) on every 401.
-  assert.match(js,/const typingIn = node =>/);
-  assert.match(js,/if \(!typingIn\(el\('chat-space'\)\)\) renderThread\(\)/);
-  assert.match(js,/scope === 'all' && !typingIn\(el\('inspector'\)\)\) renderInfo\(\)/);
+  // The composer is painted once per opened chat; a refresh only rewrites the log
+  // and the status line, and skips even that when the markup did not change.
+  assert.match(js,/if \(html === lastHtml\) return;/);
+  assert.match(js,/const scroller = el\('cv-scroll'\)/);
+  assert.match(js,/renderRail\(\); renderChrome\(\);\s*\n?\s*if \(scope === 'list'\) return refreshHome\(\);\s*\n?\s*renderConversation\(\); refreshHome\(\);/);
   assert.match(js,/clearInterval\(syncTimer\)/);
   assert.match(js,/workspaceBusy\(\) \? 3000 : 30000/);
   assert.match(js,/syncTimer && syncDue <= due/);
@@ -131,7 +136,7 @@ test('the UI adapts its copy and adds sign-out for the Node server build',()=>{
  assert.match(js,/isStaticDemo = \(\) =>/);
  assert.match(js,/agent-backend/);
  assert.match(js,/actions\.logout = async \(\) =>/);
- assert.match(js,/Connected to Node server/);
+ assert.match(js,/fact\('Storage', demo \? 'This browser' : 'Node server'\)/);
  assert.match(js,/Your session expired/);
  // Sign-out also stops the poll and drops the cached state.
  assert.match(js,/lockScreen\('Signed out\.'\)/);
@@ -167,16 +172,12 @@ test('a failed action is announced as an alert, not queued politely',()=>{
  assert.match(js,/node\.setAttribute\('aria-live', error \? 'assertive' : 'polite'\)/);
 });
 
-test('the command palette is a combobox pointing at the highlighted row',()=>{
- // Focus never leaves the input: the arrows only move a class, so the listbox
- // role promised a relationship nothing maintained until there was an
- // aria-activedescendant on the combobox.
- assert.match(js,/id="command-input" role="combobox"/);
- assert.match(js,/aria-controls="command-results"/);
- assert.match(js,/aria-autocomplete="list"/);
- assert.match(js,/id="command-item-\$\{i\}"/);
- assert.match(js,/input\.setAttribute\('aria-activedescendant', active\.id\)/);
- assert.match(js,/next\.scrollIntoView\(\{block: 'nearest'\}\);\s*syncCommandActive\(\)/);
+test('search is a labelled box with a results popover on the phone and a live filter on a laptop',()=>{
+ // The quick-navigation combobox is gone: search covers it.
+ assert.match(js,/<input id="rail-q" type="search" placeholder="Search bots and threads" aria-label="Search bots and threads"/);
+ assert.match(js,/<input id="sq" type="search" placeholder="Search" aria-label="Search bots and threads"/);
+ assert.match(js,/<div class="ch-res" id="ch-res" hidden>/);
+ assert.match(js,/if \(searchOpen\(\)\) \{ ev\.preventDefault\(\); closeSearch\(\); el\('sq'\)\?\.blur\(\); \}/);
 });
 
 test('an admin refresh carries unsaved typing over the repaint',()=>{

@@ -452,3 +452,9 @@ test('group sections hold no X surfaces', async () => {
   assert.equal(ASSETS.includes('usability.js'), false);
   assert.equal(ASSETS.includes('chat-engine.js'), false);
 });
+
+test('a limit card and a runaway-guard line carry their own buttons, so neither is a run note', () => {
+  assert.equal(isRunNote({role: 'system', runId: 'r1', kind: 'limit'}), false);
+  assert.equal(isRunNote({role: 'system', kind: 'guard'}), false);
+  assert.equal(isRunNote({role: 'system', runId: 'r1'}), true);
+});

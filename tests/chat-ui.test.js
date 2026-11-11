@@ -9,7 +9,7 @@ const app=(await Promise.all(uiFiles.map(f=>readFile(new URL(f,sharedDir),'utf8'
 const css=await readFile(new URL('../shared/app.css',import.meta.url),'utf8');
 test('Pages build has safe relative assets, modal and accessible chat structure',()=>{
   assert.match(html,/\.\/app\.js/);assert.match(html,/\.\/app\.css/);assert.match(html,/\.\/local-api\.js/);
-  assert.match(html,/Data is saved only in this browser/);assert.match(html,/id="inspector"/);
+  assert.match(html,/Data is saved only in this browser/);assert.match(html,/id="chrome"/);assert.match(html,/\.\/shell\.css/);
   assert.match(app,/id="chat-form"/);assert.match(app,/id="new-bot-form"/);
   assert.match(app,/id="new-group-form"/);
   assert.match(css,/@media\(max-width:850px\)/);
@@ -17,15 +17,17 @@ test('Pages build has safe relative assets, modal and accessible chat structure'
 test('custom bots run through the Node provider only on the server build',()=>{
   // The README promises custom bots run when a key is configured; the UI used
   // to answer every custom bot with the offline command demo instead.
-  // The group-run path is the same on both builds: POST /chat, then follow the
-  // run through its routes. Only a plain 1:1 message still differs by build.
-  assert.match(app,/return runOnServer\(group, message, directBotId, id\)/);
-  assert.match(app,/\/api\/bots\/run', 'POST', \{botId: bot\.id/);
+  // The group-run path is the same on both builds, and now for every chat: a bot
+  // chat posts to the company group with the bot as directBotId, a thread to its
+  // own group, then the run is followed through its routes. There is no separate
+  // 1:1 path any more, so no plain `/api/bots/run` call either.
+  assert.match(app,/return runOnServer\(group, message, isTeam \? null : bot\.id, id\)/);
+  assert.match(app,/\/api\/groups\/\$\{group\.id\}\/chat`, 'POST', \{message, directBotId: directBotId \|\| null, chatKey: key/);
+  assert.doesNotMatch(app,/\/api\/bots\/run', 'POST', \{botId: bot\.id/);
   assert.match(app,/export const isLive = \(\) => !isStaticDemo\(\) && Boolean\(store\.state\?\.aiEnabled\)/);
-  assert.match(app,/\/api\/bots\/run/);
   // Built-in bots use the same provider. A missing key is an error, not the demo.
-  assert.match(app,/This bot answers with your AI provider/);
-  assert.match(app,/will not answer with the demo/);
+  assert.match(app,/Answers come from your AI provider/);
+  assert.match(app,/this chat cannot answer/);
   // A retry watches a queued run the same way as the first send.
   assert.match(app,/if \(await watchQueuedRun\(b\.dataset\.id, key, run\)\) return/);
   // The watch loop now lives in shared/run-follow.js over injected pieces, and
@@ -42,13 +44,13 @@ test('custom bots run through the Node provider only on the server build',()=>{
   assert.match(app,/runButtons\(\{status, live\}\)/);
   assert.match(app,/flags\.checkpoint \? btn\('Approve next step', 'continue-run'/);
   // The chat header and the info panel read the same "waiting on you" answer.
-  assert.match(app,/const \{plans, pauses, pages\} = waitingOnYou\(store\.state, conv\.id, held\)/);
+  assert.match(app,/const waiting = totalWaitingOnYou\(waitingOnYou\(state, conv\.id\)\) > 0/);
   assert.match(app,/const waiting = waitingOnYou\(state, conv\.id, runs\)/);
   assert.match(app,/paused \? `\$\{paused\} paused`/);
   assert.match(app,/Waiting on a page/);
   assert.match(app,/Viewers cannot send messages/);
   assert.match(app,/A member can change group settings/);
-  assert.match(app,/write && flags\.checkpoint \? btn\('Approve next step'/);
+  assert.match(app,/flags\.checkpoint && btn\('Approve next step', 'continue-run'/);
   assert.match(app,/Viewers can read chats\. A member can send\./);
   // A plan's Start and Cancel are now routed like every other decision, not
   // patched into a browser-side run log.
@@ -58,13 +60,13 @@ test('custom bots run through the Node provider only on the server build',()=>{
   assert.match(app,/'toggle-user-disabled'/);
   assert.match(app,/Temporary password \(min 8 chars\)/);
   assert.match(app,/EMAIL_RELAY_URL/);
-  assert.match(app,/request.status === 'dispatched' \? `<div class="card-actions">\$\{decline\}/);
+  assert.match(app,/request.status === 'dispatched' \? `<div class="acts">\$\{decline\}/);
   assert.match(app,/<form id="login-form"[\s\S]*?name="email"/);
   assert.match(app,/id="password-form"/);
   assert.match(app,/\/api\/auth\/password/);
   assert.match(app,/'deny-browser': async b => \{[\s\S]*?streamGroupRun\(request\.groupId/);
   assert.match(app,/'retry-bot-task'/);
-  assert.match(app,/\['failed', 'interrupted', 'awaiting_plan', 'awaiting_checkpoint', 'completed', 'cancelled'\]\.includes\(run\?\.status\)/);
+  assert.match(app,/\['failed', 'interrupted', 'awaiting_plan', 'awaiting_checkpoint', 'awaiting_limit', 'completed', 'cancelled'\]\.includes\(run\?\.status\)/);
   // When a provider is connected, the actual model id is surfaced if known.
   assert.match(app,/Connected · \$\{esc\(model\)\}/);
   assert.match(app,/state\?\.aiModel/);

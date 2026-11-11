@@ -2,9 +2,9 @@
  * a pane shows: the chat list, a thread's timeline, the "needs you" count and
  * the hash route. No DOM and no globals, so the product rules here are unit
  * tested directly (tests/ui-model.test.js). */
-import {botSettings} from './bot-settings.js?v=690c6178e3';
-import {STOPPABLE_STATUSES} from './run-state.js?v=690c6178e3';
-import {INPUTS} from './contracts.js?v=690c6178e3';
+import {botSettings} from './bot-settings.js?v=6e65d8c448';
+import {STOPPABLE_STATUSES} from './run-state.js?v=6e65d8c448';
+import {INPUTS} from './contracts.js?v=6e65d8c448';
 
 /** The contract inputs a profile save sends. A bot whose stored inputs were
  * all removed ones (X-engage) loads with none, and must still save. */
@@ -41,7 +41,7 @@ export function retryTarget(group, run) {
 }
 
 // System lines with a kind of their own paint a card, not a run note.
-const RUN_LESS_KINDS = new Set(['browser', 'subagent', 'peer', 'bot-created']);
+const RUN_LESS_KINDS = new Set(['browser', 'subagent', 'peer', 'bot-created', 'limit', 'guard']);
 
 /** A system line that may carry Start, Retry or Approve. A browser card or a
  * sub-agent line has its own presentation and returns before those, so it must

@@ -71,7 +71,7 @@ test('a log that cannot be read says so once and keeps trying', async () => {
 });
 
 test('every terminal status ends the watch, and a busy one does not', () => {
-  for (const status of ['completed', 'failed', 'interrupted', 'awaiting_checkpoint', 'awaiting_plan', 'awaiting_browser', 'cancelled'])
+  for (const status of ['completed', 'failed', 'interrupted', 'awaiting_checkpoint', 'awaiting_limit', 'awaiting_plan', 'awaiting_browser', 'cancelled'])
     assert.ok(RUN_TERMINAL.includes(status), `${status} ends a watch`);
   assert.ok(!RUN_TERMINAL.includes('running') && !RUN_TERMINAL.includes('queued'));
 });

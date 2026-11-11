@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {botRows, threadRows, progressPill, handoffs, chatStatus, companyRoute, companyHash} from '../shared/ui-company.js';
+import {botRows, botStatus, botIsManager, threadRows, progressPill, handoffs, chatStatus, companyRoute, companyHash} from '../shared/ui-company.js';
 
 const bot = (id, name, settings = {}, instructions = '') => ({id, name, instructions, settings});
 const atlas = bot('atlas', 'Atlas', {lead: true, pinned: true}, 'Runs the company and hands work out.');
@@ -130,6 +130,21 @@ test('a row previews its own chat, with You: before the owner\'s words', () => {
   assert.equal(rowOf(rows, 'plan').preview, 'Planned.');
   assert.equal(rowOf(rows, 'ledger').preview, '');
   assert.equal(rowOf(rows, 'ledger').at, '');
+});
+
+test('a row previews the last thing said, not a system line after it', () => {
+  const s = stateOf({chats: {mail: [{role: 'bot', text: 'Sent it.', at: '2026-11-11T10:00:00Z'}, {role: 'system', text: 'Done in 2 step(s).', at: '2026-11-11T10:00:01Z'}]}});
+  assert.equal(rowOf(botRows(s), 'mail').preview, 'Sent it.');
+});
+
+test('botStatus and botIsManager answer for one bot, outside the list', () => {
+  const s = stateOf({groupRuns: [run({status: 'running', recipients: ['mail']})]});
+  assert.equal(botStatus(s, 'mail'), 'working');
+  assert.equal(botStatus(s, 'plan'), 'asleep');
+  assert.equal(botStatus(s, 'atlas'), 'awake');
+  assert.equal(botStatus(s, 'nobody'), 'asleep');
+  assert.equal(botIsManager(s, 'ops'), true);
+  assert.equal(botIsManager(s, 'atlas'), false);
 });
 
 test('a row counts what waits on the person in its own chat', () => {

@@ -151,7 +151,7 @@ def sign_in(page, base):
     page.goto(f'{base}/index.html')
     page.locator('#login-form input[name=password]').fill(PASSWORD)
     page.locator('#login-form button[type=submit]').click()
-    page.locator('.chat-row').first.wait_for()
+    page.locator('#sidebar .pin').first.wait_for()
 
 
 def run(base, stub, errors, bad):
@@ -171,20 +171,20 @@ def run(base, stub, errors, bad):
         sign_in(page, base)
         phase['signed_in'] = True
 
-        # The first-run workspace seeds the Home group with its primary bot Atlas;
+        # The first-run workspace seeds the company with its primary bot Atlas, pinned;
         # if that ever stops happening, a brand new install opens on an empty screen.
-        team = page.locator('.chat-row[data-id="team-home"]')
-        expect(team).to_have_count(1)
-        team.click()
+        # A laptop opens on Atlas's own chat.
+        expect(page.locator('#sidebar .pin')).to_have_count(1)
+        expect(page.locator('#main h1')).to_have_text('Atlas')
 
         composer = page.locator('#chat-form textarea[name=message]')
         composer.fill('Draft a short reply about local models and cost.')
         composer.press('Enter')
-        expect(page.locator('#chat-space')).to_contain_text('local models and cost')
+        expect(page.locator('#cv-log')).to_contain_text('local models and cost')
 
         # The whole point: a bot answers, which means session → route → queue →
         # model call → store → render all worked in one pass.
-        expect(page.locator('#chat-space')).to_contain_text(REPLY, timeout=45000)
+        expect(page.locator('#cv-log')).to_contain_text(REPLY, timeout=45000)
 
         # The provider saw a real request, with the key and a chat body.
         assert stub.requests, 'the app never called the model endpoint'
@@ -196,8 +196,7 @@ def run(base, stub, errors, bad):
         assert messages and any('local models and cost' in json.dumps(m) for m in messages), \
             'the user message never reached the model'
 
-        # One message runs the group's bots in turn (just Atlas on a fresh install,
-        # more once bots are added), so one or more calls are expected. Identical bodies would mean the app
+        # One message runs Atlas, and any bot it hands work to, so one or more calls are expected. Identical bodies would mean the app
         # retried the same request instead of advancing, which looks like work
         # in the run log and costs money.
         bodies = [json.dumps(r['body'], sort_keys=True) for r in stub.requests]
@@ -208,7 +207,7 @@ def run(base, stub, errors, bad):
 
         # Persistence: a reload must show the same conversation, not a rebuild.
         page.reload()
-        expect(page.locator('#chat-space')).to_contain_text(REPLY, timeout=20000)
+        expect(page.locator('#cv-log')).to_contain_text(REPLY, timeout=20000)
         phase['signed_in'] = True
 
         # A provider that rejects the key must say so in the conversation. A
@@ -219,18 +218,18 @@ def run(base, stub, errors, bad):
         composer = page.locator('#chat-form textarea[name=message]')
         composer.fill('A second question that the provider will reject.')
         composer.press('Enter')
-        expect(page.locator('#chat-space')).to_contain_text('A second question', timeout=20000)
+        expect(page.locator('#cv-log')).to_contain_text('A second question', timeout=20000)
         # Look for the provider's own words, not ours: matching /reject/ would
         # pass on the user's own message text and assert nothing.
         page.wait_for_function(
             '''() => /Incorrect API key|401/i.test(
-                [...document.querySelectorAll('#chat-space *')]
-                  .filter(n => !n.closest('form') && !n.matches('.msg-user, .msg-user *'))
+                [...document.querySelectorAll('#cv-log *')]
+                  .filter(n => !n.closest('form') && !n.matches('.cv-me, .cv-me *'))
                   .map(n => n.textContent).join(' '))''',
             timeout=45000,
         )
         assert len(stub.requests) > before, 'the failing message never reached the provider'
-        log_text = page.locator('#chat-space').inner_text()
+        log_text = page.locator('#cv-log').inner_text()
         print('    error surfaced as: ' + ' | '.join(
             line.strip() for line in log_text.splitlines() if 'key' in line.lower() or '401' in line)[:200])
         stub.mode = 'ok'

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {face, SHAPES, COLORS} from '../shared/ui-face.js';
+import {face, botColor, SHAPES, COLORS} from '../shared/ui-face.js';
 import {TINT_COUNT} from '../shared/ui-kit.js';
 
 const bot = (settings = {}, extra = {}) => ({id: 'b1', name: 'Mailroom', settings, ...extra});
@@ -144,10 +144,25 @@ test('face copes with a missing bot', () => {
   assert.match(face(null, {}), /data-shape="rounded"/);
 });
 
-test('gradient ids are per colour, so two faces on one page never borrow each other\'s tint', () => {
-  const id = html => /<linearGradient id="([^"]+)"/.exec(html)[1];
-  assert.notEqual(id(face(bot({tint: 0}))), id(face(bot({tint: 1}))));
-  assert.equal(id(face(bot({tint: 0}))), id(face(bot({tint: 0}, {id: 'other'}))));
+test('every face owns its gradient ids, so a face inside a hidden sidebar never starves a visible one', () => {
+  // A url(#id) that resolves to a gradient inside a display:none svg paints nothing.
+  const ids = html => [...html.matchAll(/<linearGradient id="([^"]+)"/g)].map(m => m[1]);
+  const a = ids(face(bot({tint: 0}))), b = ids(face(bot({tint: 0})));
+  assert.equal(a.length, 2);
+  assert.ok(a.every(id => !b.includes(id)));
+});
+
+test('a face draws the happy-eyes paths and, asleep at 36px or more, a small z', () => {
+  assert.match(face(bot()), /class="face-joy"/);
+  assert.match(face(bot(), {state: 'asleep', size: 40}), /class="face-z"/);
+  assert.doesNotMatch(face(bot(), {state: 'asleep', size: 24}), /class="face-z"/);
+  assert.doesNotMatch(face(bot(), {state: 'awake', size: 40}), /class="face-z"/);
+});
+
+test('botColor gives the colour a face is drawn in', () => {
+  assert.equal(botColor(bot({tint: 3})), COLORS[3]);
+  assert.equal(botColor(bot({tint: null}), 2), COLORS[2]);
+  assert.equal(botColor(undefined), COLORS[0]);
 });
 
 test('hop adds the happy-hop class only when motion is on', () => {

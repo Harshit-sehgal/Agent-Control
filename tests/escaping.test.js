@@ -5,6 +5,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {validHttpUrl, cleanText} from '../shared/core.js';
 import * as kit from '../shared/ui-kit.js';
+import {face} from '../shared/ui-face.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 // The UI is app.js plus every ui-*.js module.
@@ -61,7 +62,7 @@ test('URLs are validated before being placed in an href', () => {
 // The helper above is worth nothing if the views do not call it: esc('javascript:x')
 // is still javascript:x. So the test also reads the call sites.
 test('every untrusted URL in the views goes through validHttpUrl', () => {
-  const views = sources['ui-views.js'];
+  const views = sources['ui-conversation.js'];
   assert.match(views, /import \{[^}]*\bvalidHttpUrl\b[^}]*\} from '\.\/core\.js'/);
   // The sink: the page a bot asked to open.
   for (const sink of ['request.url']) {
@@ -142,7 +143,7 @@ function stripCalls(text, names) {
 // behaviorally in the next test, so an expression passed through them may name a
 // user-text property without its own esc(). `pageHead` escapes title and sub; its
 // `right` slot only ever receives iconBtn(...) markup.
-const ESCAPING_HELPERS = ['esc', 'btn', 'iconBtn', 'tag', 'empty', 'avatar', 'groupAvatar', 'pageHead', 'textInput'];
+const ESCAPING_HELPERS = ['esc', 'btn', 'iconBtn', 'tag', 'empty', 'avatar', 'groupAvatar', 'pageHead', 'textInput', 'face', 'botFace'];
 const USER_TEXT = /\??\.(text|instructions|name|author|description|message|topic|claim|label|title|email|error)\b(?!\s*:)/;
 // A property used only as a ternary / && condition is tested, not printed.
 const CONDITION = /[\w$.\]\[?]+?\s*(?:\?(?!\.)|&&)/g;
@@ -168,6 +169,8 @@ test('the escaping helpers neutralize hostile text in every slot they accept', (
     kit.empty(bad, bad),
     kit.avatar(bad, 0),
     kit.groupAvatar([{name: bad, tint: 0}, {name: bad, tint: 1}]),
+    // The bot face never prints the name (it only seeds a delay); shape and state are whitelisted.
+    face({id: bad, name: bad, settings: {shape: bad, tint: 0}}, {state: bad, size: bad}),
     kit.pageHead(bad, {sub: bad}),
     kit.box('', bad),
     kit.field(bad, '', bad),

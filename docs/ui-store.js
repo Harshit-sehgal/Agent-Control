@@ -1,8 +1,9 @@
 /** Single source of UI state: the server snapshot, the route, the conversations
  * it carries and cosmetic preferences. Views read from `store` and never
  * keep their own copies, so one `sync()` + one render keeps every pane current. */
-import {routeHash, tintOf} from './ui-model.js?v=690c6178e3';
-import {createOutbox} from './chats.js?v=690c6178e3';
+import {routeHash, tintOf} from './ui-model.js?v=6e65d8c448';
+import {companyRoute, companyHash} from './ui-company.js?v=6e65d8c448';
+import {createOutbox} from './chats.js?v=6e65d8c448';
 
 // Where an earlier build kept conversations; read once by importLocalChats().
 const CHAT_KEY = 'agent-control-bot-chats-v2';
@@ -22,9 +23,13 @@ export function saveLocal(key, data) { try { localStorage.setItem(key, JSON.stri
 
 export const store = {
   state: null,
-  /** chat: conversation id (`team-<groupId>` or a bot id). page: a "You" page.
-   * info: null | 'home' | a section name for the open chat's info panel. */
-  route: {chat: null, page: null, info: null},
+  /** The open screen, in the shape ui-company's companyRoute returns: {home},
+   * {bot}, {thread}, {profile, sub}, {settings}, {newBot, job}, {newThread},
+   * {company} or {activity}. The chat it shows is `chatKeyOf(store.route)`. */
+  route: {home: true},
+  /** Which half of the phone home is showing: 'bots' or 'threads'. Opening a chat
+   * leaves it alone, so Back returns to the half the chat was opened from. */
+  section: 'bots',
   /** Conversations by id: the workspace's copy plus anything still being sent. */
   messages: {},
   profiles: loadLocal(META_KEY, {}),
@@ -142,7 +147,7 @@ export const botTint = (group, botId) => {
 export const findBot = botId => groupOfBot(botId)?.bots.find(b => b.id === botId) || null;
 
 /** Resolve a conversation id to what the views need, or null if it is gone. */
-export function conversation(id = store.route.chat) {
+export function conversation(id = chatKeyOf(store.route)) {
   if (!id) return null;
   if (id.startsWith('team-')) {
     const group = groups().find(g => teamKey(g.id) === id);
@@ -200,11 +205,27 @@ export const syncDepth = event => { depth = (event && event.state && typeof even
 /** In-app back: pop our own history entry when there is one, else go to `fallback`. */
 export function back(fallback = {}) { if (depth > 0) history.back(); else go(fallback, {replace: true}); }
 
+/** The chat a route shows: a bot's own chat (key = bot id) or a thread's
+ * (`team-<threadId>`). Null for every other screen. */
+export const chatKeyOf = route => route?.bot || (route?.thread ? teamKey(route.thread) : null);
+
+// Settings pages the old "You" renderer still paints, until ui-settings.js takes them over.
+const LEGACY_PAGES = ['you', 'about', 'notifications', 'workspaces', 'ai', 'team', 'agents', 'data'];
+/** A route with something to show. Anything empty or unknown is home; a settings
+ * route that names one of the old pages carries `page` for the old renderer. */
+export function normalizeRoute(route) {
+  const r = route && typeof route === 'object' ? route : {};
+  if (typeof r.settings === 'string') { const page = r.settings || 'you'; return LEGACY_PAGES.includes(page) ? {...r, page} : r; }
+  return ['bot', 'thread', 'profile', 'newBot', 'newThread', 'company', 'activity'].some(key => r[key]) ? r : {home: true};
+}
+
 /** Navigate. Every pane repaints from `store.route`, and the hash keeps
- * browser Back/Forward and reload working. */
-export function go({chat = null, page = null, info = null} = {}, {replace = false} = {}) {
-  store.route = {chat, page, info};
-  const hash = `#${routeHash(store.route)}`;
+ * browser Back/Forward and reload working. Callers pass a company route; the
+ * pre-company {chat, page, info} shape still maps to the nearest new screen. */
+export function go(route = {}, {replace = false} = {}) {
+  const legacy = ['chat', 'page', 'info'].some(key => key in route) || !Object.keys(route).length;
+  store.route = normalizeRoute(legacy ? companyRoute(routeHash({chat: route.chat ?? null, page: route.page ?? null, info: route.info ?? null}), store.state) : route);
+  const hash = `#${companyHash(store.route)}`;
   if (location.hash !== hash) {
     depth = replace ? depth : depth + 1;
     history[replace ? 'replaceState' : 'pushState']({depth}, '', hash);

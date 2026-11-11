@@ -1,29 +1,33 @@
-/** Agent Control UI entry point. Boots the store, paints the three panes from
+/** Agent Control UI entry point. Boots the store, paints the chats shell from
  * the route, and turns DOM events into the lookups in ui-actions.js.
  *
  * Module map (all browser-safe, all in shared/):
- *   ui-kit      string builders: icons, avatars, rows, time labels
- *   ui-model    pure view models: chat list, timeline, needs-you, routes
- *   ui-store    the one state object, API wrapper, navigation
- *   ui-chat     what happens after send (server run, simulator, commands)
- *   ui-views    chat list + thread          ui-panel   chat info + You pages
- *   ui-sheets   sheets, quick nav, sign-in  ui-admin   admin pages
- *   ui-dialogs  toast, sheet, confirm/ask   ui-actions action/form tables
- *   ui-fx       confetti, the send arrow, and when the bots react
+ *   ui-kit          string builders: icons, rows, buttons, time labels
+ *   ui-model        pure view models: timeline, needs-you, run buttons
+ *   ui-company      pure view models: bot and thread rows, pill, handoffs, routes
+ *   ui-feed         pure: what a conversation shows, in order
+ *   ui-face         a bot's face, as one inline svg
+ *   ui-store        the one state object, API wrapper, navigation
+ *   ui-chat         what happens after send (server run, threads, checkpoints)
+ *   ui-shell        sidebar, phone chrome and home, search, the page frame
+ *   ui-conversation a bot chat or a thread: header, feed, cards, composer
+ *   ui-panel        the old "You" pages (until ui-settings.js replaces them)
+ *   ui-sheets       sign-in and password sheets   ui-admin   admin pages
+ *   ui-dialogs      toast, sheet, confirm/ask      ui-actions action/form tables
+ *   ui-fx           confetti and the send arrow
  */
-import {parseRoute} from './ui-model.js';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, isAdmin, canWrite, applyTheme, watchSystemTheme, retireSession, sessionEpoch} from './ui-store.js';
+import {companyRoute} from './ui-company.js';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, isAdmin, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js';
 import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js';
-import {listShell, renderList, threadShell, renderThread, homeView, renderMentions} from './ui-views.js';
-import {renderInfo, renderPage} from './ui-panel.js';
-import {showLogin, hideLogin, openCommandPalette, closeCommandPalette, paletteOpen, updateCommandResults, chooseCommand, moveCommand} from './ui-sheets.js';
+import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, closeSearch, homeView, placeholderView} from './ui-shell.js';
+import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js';
+import {renderPage} from './ui-panel.js';
+import {showLogin, hideLogin} from './ui-sheets.js';
 import {actions, forms, onControlChange, onControlInput} from './ui-actions.js';
 import {bringBotsToLife} from './ui-fx.js';
 
 const el = id => document.getElementById(id);
-const hashRoute = () => parseRoute(location.hash, store.state, {server: !isStaticDemo(), admin: isAdmin(), write: canWrite()});
-/** True while the user is typing inside `node`, so a repaint must not replace it. */
-const typingIn = node => { const a = document.activeElement; return Boolean(a && node?.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)); };
+const hashRoute = () => normalizeRoute(companyRoute(location.hash, store.state));
 let lastView = '', syncTimer = null, syncDue = 0, refreshing = false;
 const LIVE_RUN = new Set(['running', 'queued', 'awaiting_browser']);
 /** Refresh failures already shown. A dashboard stuck on a stale snapshot must
@@ -33,43 +37,67 @@ const syncFailures = new Set();
  * the button: most actions repaint and replace the node, so the next press lands
  * on a fresh button and a slow DELETE or approval would be sent twice. */
 const running = new Set();
-const pressKey = button => [button.dataset.action, button.dataset.id, button.dataset.text, button.dataset.section, button.dataset.page, button.dataset.theme].map(part => part ?? '').join('|');
+const pressKey = button => [button.dataset.action, button.dataset.id, button.dataset.text, button.dataset.section, button.dataset.page, button.dataset.theme, button.dataset.message, button.dataset.choice, button.dataset.run].map(part => part ?? '').join('|');
 
 /** A repaint replaces nodes, so remember which control had focus by its stable
  * attributes and give focus back to its replacement. */
 const FOCUS_KEYS = ['action', 'id', 'filter', 'section', 'page', 'status', 'index', 'theme'];
 function keepFocus(paint) {
-  const a = document.activeElement, pane = a?.closest?.('.pane');
+  const a = document.activeElement, pane = a?.closest?.('#sidebar, #main, #chrome');
   const selector = pane && a.dataset?.action ? `#${pane.id} ${a.tagName.toLowerCase()}` + FOCUS_KEYS.filter(k => a.dataset[k] !== undefined).map(k => `[data-${k}="${CSS.escape(a.dataset[k])}"]`).join('') : null;
   paint();
   if (selector && !document.contains(a)) document.querySelector(selector)?.focus({preventScroll: true});
 }
-/** While the info panel covers the thread (narrow screens), keep Tab and
- * assistive tech out of what is underneath. */
-function setInert() {
-  const {info, chat, page} = store.route, phone = matchMedia('(max-width:850px)').matches;
-  el('main').inert = Boolean(info) && matchMedia('(max-width:1180px)').matches;
-  el('sidebar').inert = phone && Boolean(info || chat || page);
+/** The hook for the screens that are still being built. ui-profile.js and
+ * ui-settings.js register a renderer per route key ('profile', 'settings',
+ * 'newBot', 'company', 'activity'): it gets the route and returns the page's
+ * markup. Until then the shell's placeholders stand in (placeholderView). */
+export const PAGE_VIEWS = {};
+const PAGE_KEYS = ['profile', 'settings', 'newBot', 'company', 'activity'];
+/** The old "You" pages still serve the settings routes that name one of them. */
+const legacyPageAllowed = page => ['you', 'about'].includes(page) || (['notifications', 'workspaces'].includes(page) && !isStaticDemo()) || (['ai', 'team', 'agents', 'data'].includes(page) && isAdmin());
+
+function pageView(route) {
+  const key = PAGE_KEYS.find(k => (k === 'settings' ? typeof route.settings === 'string' : route[k]));
+  if (PAGE_VIEWS[key]) return PAGE_VIEWS[key](route);
+  if (key === 'settings' && legacyPageAllowed(route.page)) return null;
+  return placeholderView(route);
 }
 
+let lastDesk = null, lastHome = '';
 /** Repaint everything for the current route. One view key drives the
  * transition and focus move, so reopening the same screen never jumps. */
 function renderRoute() {
-  const {chat, page, info} = store.route, main = el('main');
-  if (chat && !conversation()) return go({}, {replace: true});
-  document.body.dataset.pane = info ? 'info' : (chat || page) ? 'main' : 'list';
-  document.body.classList.toggle('has-info', Boolean(info));
-  const view = page ? `page:${page}` : chat ? `chat:${chat}` : 'home';
+  const route = store.route, main = el('main'), desk = isDesk();
+  // A chat that was deleted in another tab falls back home, not to a blank thread.
+  if ((route.bot || route.thread) && !conversation()) return go({}, {replace: true});
+  document.body.dataset.view = route.bot || route.thread ? 'chat' : route.home ? 'home' : 'page';
+  const view = `${JSON.stringify(route)}|${desk}`;
   if (view !== lastView) {
-    if (page) renderPage(); else if (chat) threadShell(conversation()); else main.innerHTML = homeView();
+    lastDesk = desk;
+    if (route.bot || route.thread) conversationShell(conversation());
+    else if (route.newThread) main.innerHTML = newThreadView();
+    else if (route.home) main.innerHTML = desk ? `<div class="rail-none"><p>Select a chat</p><button type="button" class="link" data-action="new-thread">or start a new thread</button></div>` : homeView();
+    else { const html = pageView(route); if (html === null) renderPage(); else main.innerHTML = html; }
+    lastHome = main.innerHTML;
     main.classList.remove('view-enter'); void main.offsetWidth; main.classList.add('view-enter');
     // Only pull focus where it will not pop a phone keyboard open.
-    if (matchMedia('(pointer:fine)').matches) (main.querySelector('.composer textarea') || main.querySelector('h2'))?.focus?.({preventScroll: true});
+    if (matchMedia('(pointer:fine)').matches) (main.querySelector('[autofocus]') || main.querySelector('textarea') || main.querySelector('input'))?.focus?.({preventScroll: true});
   }
   lastView = view;
-  setInert();
-  renderList(); renderThread(); renderInfo();
-  if (info) el('inspector').querySelector('.back')?.focus({preventScroll: true});
+  renderRail(); renderChrome(); renderConversation();
+}
+
+/** The phone home follows the snapshot: new replies, a bot waking up. The scroll
+ * position stays where the person left it. */
+function refreshHome() {
+  const main = el('main'); if (!store.route.home || isDesk() || !main) return;
+  const html = homeView();
+  if (html === lastHome) return;
+  const scroll = main.querySelector('.hv')?.scrollTop || 0, shelf = main.querySelector('.shelf')?.scrollLeft || 0;
+  main.innerHTML = html; lastHome = html;
+  const view = main.querySelector('.hv'); if (view) view.scrollTop = scroll;
+  const row = main.querySelector('.shelf'); if (row) row.scrollLeft = shelf;
 }
 
 /** A page request or a live group run finishes outside this tab, and a
@@ -128,11 +156,9 @@ onChange(scope => {
   scheduleSync();
   if (scope === 'route') return renderRoute();
   keepFocus(() => {
-    renderList();
-    if (scope === 'list') return;
-    if (!typingIn(el('chat-space'))) renderThread();
-    // Never repaint the panel under the user's cursor; it catches up on the next change.
-    if (scope === 'all' && !typingIn(el('inspector'))) renderInfo();
+    renderRail(); renderChrome();
+    if (scope === 'list') return refreshHome();
+    renderConversation(); refreshHome();
   });
 });
 
@@ -146,11 +172,12 @@ async function boot() {
       localStorage.setItem('ac-v2-welcome', '1');
     }
     await importLocalChats();
-    listShell(); lastView = '';
-    // First paint only: the chat rows arrive one after another.
-    document.body.classList.add('booting'); setTimeout(() => document.body.classList.remove('booting'), 900);
+    mountRail(); mountChrome(); lastView = '';
     clearInterval(syncTimer); syncTimer = null; syncDue = 0;
-    store.route = hashRoute(); changed('route');
+    store.route = hashRoute();
+    // A laptop opens on the primary bot's chat; a phone opens on the home.
+    const primary = (groups().find(g => g.id === 'home')?.bots || []).find(b => b.settings?.lead === true);
+    if (isDesk() && store.route.home && !location.hash && primary) go({bot: primary.id}, {replace: true}); else changed('route');
   } catch (e) {
     if (e.status === 401) return showLogin(e.message);
     el('main').innerHTML = `<section class="home"><h1>Could not start</h1><p></p><p>${isStaticDemo() ? 'Enable browser local storage and reload. If the page was cached from an older deploy, hard-refresh once.' : 'Check that the Node server is running and reload.'}</p></section>`;
@@ -162,9 +189,9 @@ function lockScreen(message) {
   retireSession();
   refreshing = false;
   clearInterval(syncTimer); syncTimer = null; syncDue = 0;
-  closeSheet(); closeCommandPalette();
+  closeSheet(); closeSearch();
   store.state = null; store.messages = {}; lastView = '';
-  for (const id of ['sidebar', 'main', 'inspector']) el(id).innerHTML = '';
+  for (const id of ['sidebar', 'main', 'chrome']) el(id).innerHTML = '';
   showLogin(message);
 }
 actions.logout = async () => {
@@ -226,7 +253,6 @@ document.body.addEventListener('click', ev => {
     button.dataset.busy = '1';
     Promise.resolve().then(() => run(button)).catch(fail).finally(() => { running.delete(key); delete button.dataset.busy; });
   } else if (ev.target.id === 'modal') closeSheet();
-  else if (ev.target.id === 'command') closeCommandPalette();
 });
 document.body.addEventListener('submit', ev => {
   const form = ev.target, key = forms[form.id] ? form.id : null;
@@ -239,32 +265,22 @@ document.body.addEventListener('submit', ev => {
 });
 document.body.addEventListener('change', ev => { Promise.resolve().then(() => onControlChange(ev.target)).catch(fail); });
 document.body.addEventListener('input', ev => {
-  if (ev.target.id === 'command-input') return updateCommandResults(ev.target.value);
-  if (ev.target.matches('.composer textarea')) { if (ev.target.closest('#chat-form')) renderMentions(ev.target.value); return autoGrow(ev.target); }
+  if (ev.target.matches('.cv-box textarea')) return autoGrow(ev.target);
   onControlInput(ev.target);
 });
 document.body.addEventListener('keydown', ev => {
   trapTab(ev);
-  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') { ev.preventDefault(); paletteOpen() ? closeCommandPalette() : openCommandPalette(); return; }
-  if (ev.key === 'Escape') {
-    if (paletteOpen()) { ev.preventDefault(); closeCommandPalette(); }
-    else if (sheetOpen()) { ev.preventDefault(); closeSheet(); }
-    // Escape closes the whole info panel back to the thread, not one section.
-    else if (store.route.info) { ev.preventDefault(); go({chat: store.route.chat}, {replace: true}); }
-    return;
-  }
-  if (ev.target.id === 'command-input') {
-    if (ev.key === 'Enter') { ev.preventDefault(); chooseCommand(Number(el('command-results')?.querySelector('.selected')?.dataset.index ?? 0)); }
-    else if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') { ev.preventDefault(); moveCommand(ev.key === 'ArrowDown' ? 1 : -1); }
-    return;
-  }
+  if (ev.key === 'Escape') { if (sheetOpen()) { ev.preventDefault(); closeSheet(); } return; }
   // Enter sends, Shift+Enter makes a new line.
   // keyCode 229: Safari reports the Enter that commits an IME candidate without isComposing.
-  if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing && ev.keyCode !== 229 && ev.target.matches('.composer textarea')) { ev.preventDefault(); if (ev.target.value.trim()) ev.target.form.requestSubmit(); }
+  if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing && ev.keyCode !== 229 && ev.target.matches('.cv-box textarea')) { ev.preventDefault(); if (ev.target.value.trim()) ev.target.form.requestSubmit(); }
 });
-window.addEventListener('popstate', event => { syncDepth(event); if (!store.state) return; closeSheet(); closeCommandPalette(); const next = hashRoute(); store.route = next; changed('route'); });
-window.addEventListener('resize', () => { if (store.state) setInert(); });
-// `toggle` does not bubble, so listen in the capture phase to remember open source panels.
+window.addEventListener('popstate', event => { syncDepth(event); if (!store.state) return; closeSheet(); closeSearch(); const next = hashRoute(); store.route = next; changed('route'); });
+// Crossing 1024px swaps the phone layout for the sidebar layout.
+window.addEventListener('resize', () => { if (store.state && isDesk() !== lastDesk) changed('route'); });
+// `toggle` does not bubble, so listen in the capture phase to remember which handoff cards are open.
+document.addEventListener('toggle', trackOpen, true);
+wireShell();
 
 applyTheme(); watchSystemTheme(); bringBotsToLife(); registerWorker();
 boot();

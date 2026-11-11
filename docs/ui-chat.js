@@ -1,21 +1,17 @@
 /** Conversation controller: what happens after the user hits send.
- * Group messages (and @mentions) run the group, on the server orchestrator when a
- * model is configured and in the deterministic simulator otherwise. A custom bot
- * runs its own instructions on the server; everything else answers from the
- * offline command set. Nothing here can publish. */
-import {planHandoffs, leadShouldRunGroup, summonableGuests} from './coordination.js?v=690c6178e3';
-import {pollRun} from './run-follow.js?v=690c6178e3';
-import {botSettings, groupSettings} from './bot-settings.js?v=690c6178e3';
-import {store, api, sync, conversation, appendMessage, setTyping, isStaticDemo, teamKey, groups} from './ui-store.js?v=690c6178e3';
-import {toast} from './ui-dialogs.js?v=690c6178e3';
+ * A bot's own chat and a thread both run through the group routes
+ * (`POST /api/groups/:group/chat`): a bot chat posts to the company group with
+ * the bot as `directBotId`, a thread posts to its own group and Atlas answers.
+ * The server orchestrator runs them when a model is configured and the offline
+ * simulator does otherwise; the UI cannot tell which. Nothing here can publish. */
+import {pollRun, runWithTyping} from './run-follow.js?v=6e65d8c448';
+import {botSettings} from './bot-settings.js?v=6e65d8c448';
+import {store, api, sync, go, conversation, appendMessage, setTyping, teamKey} from './ui-store.js?v=6e65d8c448';
+import {toast} from './ui-dialogs.js?v=6e65d8c448';
 
 /** In-flight sends per conversation, so two overlapping sends keep the typing
  * indicator up until the last one finishes instead of the first clearing it. */
 const inFlight = new Map();
-// Offline replies are computed instantly; a short beat between them lets the
-// bot be seen thinking, so a handoff reads as a conversation, not a dump.
-const BEAT_MS = 450;
-const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 /** Stream a server-coordinated group run into the conversation until it finishes
  * or pauses at a human checkpoint. The loop itself is `pollRun` in
@@ -38,7 +34,7 @@ export async function streamGroupRun(groupId, key = teamKey(groupId), runId = nu
 /** A queued run the server has already paused or stopped. Returns true when the
  * chat should show that record and not claim the others are already working. */
 export async function watchQueuedRun(groupId, key, run) {
-  if (['failed', 'interrupted', 'awaiting_plan', 'awaiting_checkpoint', 'completed', 'cancelled'].includes(run?.status)) {
+  if (['failed', 'interrupted', 'awaiting_plan', 'awaiting_checkpoint', 'awaiting_limit', 'completed', 'cancelled'].includes(run?.status)) {
     await sync().catch(() => {});
     return true;
   }
@@ -51,49 +47,56 @@ export async function watchQueuedRun(groupId, key, run) {
   return false;
 }
 
-async function runOnServer(group, message, directBotId, key) {
-  const bringing = leadShouldRunGroup(group, message, directBotId);
-  const run = await api(`/api/groups/${group.id}/chat`, 'POST', {message, directBotId: directBotId || null, checkpoints: groupSettings(group).checkpoints, chatKey: key});
+/** Start a run in a chat and follow it. The progress pill, not a chat line, says
+ * what is happening, so nothing is appended here. `anyway` is the owner's "Do it
+ * anyway" on an out-of-job reply: the bot does the request once. */
+async function runOnServer(group, message, directBotId, key, {anyway = false} = {}) {
+  const run = await api(`/api/groups/${group.id}/chat`, 'POST', {message, directBotId: directBotId || null, chatKey: key, ...(anyway ? {anyway: true} : {})});
   if (await watchQueuedRun(group.id, key, run)) return;
-  appendMessage(key, {role: 'system', text: bringing ? 'Bringing the others in.' : directBotId ? 'Working on it.' : 'Passing this to the group.'});
   await streamGroupRun(group.id, key, run?.runId || null);
-}
-
-/** A name in "create a bot named X", or null when the message asks for none. */
-const BOT_NAME = /(?:create|add|make)\s+(?:(?:a|an|new)\s+)*bot\s+(?:named|called)\s+([\w][\w \-]{1,45})/i;
-
-/** The offline reply for a direct chat with a built-in bot. */
-async function localReply(conv, message) {
-  const {bot, group} = conv, demo = isStaticDemo();
-  if (/\b(create|add|make)\b.{0,24}\bbot\b/i.test(message)) {
-    const name = message.match(BOT_NAME)?.[1]?.replace(/\s+(?:that|which|who|to)\b.*$/i, '').trim();
-    if (!name || name.length < 2 || name.length >= 60) return 'Tap + in the chat list to create a bot with a name, a group and a job.';
-    const created = await api(`/api/groups/${group.id}/bots`, 'POST', {name, instructions: `Custom bot ${name}. Update this profile with a clear job, permitted tools and approval boundaries.`});
-    return `Created ${created.name} in ${group.name}. It is in your chat list now. Open its profile to give it a real job.`;
-  }
-  return `I'm ${bot.name}. My job: ${bot.instructions || 'not set yet.'}\n\n${demo ? 'This is an offline demo, not a connected AI model.' : 'Direct chat uses built-in commands; group runs use the server model when a key is set.'} Try "Create a bot named Researcher".`;
 }
 
 async function reply(conv, message) {
   const {group, bot, isTeam, id} = conv;
   if (!isTeam && !botSettings(bot).enabled) return appendMessage(id, {role: 'system', text: `${bot.name} is switched off. Turn it on in its profile.`});
-  const guests = summonableGuests(groups(), group.id, {includeOff: true});
-  const mention = !isTeam && planHandoffs(group, message, {directBotId: bot.id, guests}).mode === 'mention';
-  if (isTeam || mention || leadShouldRunGroup(group, message, bot.id)) {
-    const directBotId = isTeam ? null : bot.id;
-    // Both backends answer `POST /api/groups/:group/chat`; the local adapter
-    // runs the offline simulator, the server asks the model.
-    return runOnServer(group, message, directBotId, id);
-  }
-  if (!isStaticDemo()) {
-    const run = await api('/api/bots/run', 'POST', {botId: bot.id, input: message});
-    // The sender is named, so the write fence keeps this a bot line rather than
-    // rewriting it as something the user said.
-    return appendMessage(id, {id: run.id, role: 'bot', senderId: bot.id, senderName: bot.name, text: run.output || 'The bot returned no output.', mode: 'ai'});
-  }
-  const text = await localReply(conv, message);
-  await wait(BEAT_MS);
-  appendMessage(id, {role: 'bot', senderId: bot.id, senderName: bot.name, text});
+  // A thread always goes to Atlas (the server ignores @ there); a bot chat to that bot.
+  return runOnServer(group, message, isTeam ? null : bot.id, id);
+}
+
+/** "Do it anyway" under an out-of-job reply: the same request again, once. */
+export async function runAnyway(botId, request) {
+  const conv = conversation(botId); if (!conv || conv.isTeam) throw new Error('That bot is no longer here.');
+  setTyping(botId, true);
+  try { await runOnServer(conv.group, request, botId, botId, {anyway: true}); }
+  finally { setTyping(botId, false); }
+  await sync().catch(() => {});
+}
+
+/** A new thread, run by Atlas. The server writes the owner's first line itself, so
+ * it is not posted again: refresh, open the thread, then follow Atlas's run. */
+export async function startThread(text) {
+  const message = String(text ?? '').trim(); if (!message) return null;
+  const {thread, run} = await api('/api/threads', 'POST', {message});
+  const key = teamKey(thread.id);
+  await sync().catch(() => {});
+  // Leaving the new-thread page, so Back does not return to an empty box.
+  go({thread: thread.id}, {replace: Boolean(store.route.newThread)});
+  setTyping(key, true);
+  try { if (!(await watchQueuedRun(thread.id, key, run))) await streamGroupRun(thread.id, key, run?.runId || null); }
+  finally { setTyping(key, false); }
+  await sync().catch(() => {});
+  return thread;
+}
+
+/** The owner's answer to a checkpoint card: keep going, keep going without
+ * asking again for this task, or stop. The POST answers when the next step is done,
+ * so the log is followed beside it. */
+export async function answerLimit(groupId, runId, choice) {
+  const run = (store.state?.groupRuns || []).find(r => r.id === runId);
+  const key = run?.chatKey || teamKey(groupId);
+  await runWithTyping({key, setTyping, sync, concurrent: true,
+    send: () => api(`/api/groups/${groupId}/runs/${runId}/continue`, 'POST', {choice}),
+    follow: () => streamGroupRun(groupId, key, runId)});
 }
 
 /** Send `text` to a conversation and let the right engine answer. */

@@ -88,7 +88,9 @@ test('the UI wires settings, scheduled tasks and guest mentions to the engine co
   assert.match(js, /title: 'Schedule a task'/);
   assert.match(js, /kind: 'bot-task', payload/);
   assert.match(js, /'PATCH', \{name: f\.name, description: f\.description \|\| '', settings: \{/);
-  assert.match(js, /summonableGuests\(groups\(\), group\.id, \{includeOff: true\}\)/, 'A mention of a switched-off guest must reach the planner so it is refused by name.');
+  // The UI no longer plans mentions itself: a bot chat posts to the group route and the
+  // engine (server or simulator) refuses a switched-off bot by name.
+  assert.doesNotMatch(js, /summonableGuests|planHandoffs/);
   assert.match(localApi, /simulateGroup\(\{/);
   assert.match(localApi, /summonableGuests\(state\.groups, groupId, \{includeOff: true\}\)/);
   assert.match(js, /is switched off\. Turn it on in its profile\./);
@@ -104,11 +106,11 @@ test('the UI wires settings, scheduled tasks and guest mentions to the engine co
   // timeline read `recentRuns()` with no per-build merge and no separate log.
   assert.doesNotMatch(js, /localOnlyRuns|localRuns:/);
   assert.match(js, /store\.state\?\.groupRuns \|\| \[\]\)\.filter\(r => r\.groupId === groupId\)/);
-  assert.match(js, /isRunNote\(i\.message\)/);
+  assert.match(js, /isRunNote\(m\)/);
   assert.match(js, /threadLineActions\(/);
   assert.doesNotMatch(js, /grant \|\| plan/);
-  assert.match(js, /flags\.plan \? `\$\{btn\('Start', 'approve-plan'/);
+  assert.match(js, /flags\.plan && btn\('Start', 'approve-plan'/);
   assert.match(js, /if \(!canWrite\(\)\) return botHome\(conv\)/);
   assert.match(js, /const lock = writable \? '' : ' disabled'/);
-  assert.match(js, /label: 'AI and models'/);
+  assert.match(js, /title: 'AI and models'/);
 });

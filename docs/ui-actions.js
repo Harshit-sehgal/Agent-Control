@@ -1,21 +1,22 @@
 /** What the UI can do, as three lookup tables keyed by `data-action`, form id and
  * control id. app.js owns the DOM events and dispatches here; handlers throw on
  * failure and the dispatcher turns that into one toast. */
-import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns} from './ui-store.js?v=690c6178e3';
-import {botSettings, groupSettings} from './bot-settings.js?v=690c6178e3';
-import {completeMention, moveRow, pipelineValue, editableInputs} from './ui-model.js?v=690c6178e3';
-import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=690c6178e3';
-import {sendChat, streamGroupRun, watchQueuedRun} from './ui-chat.js?v=690c6178e3';
-import {runWithTyping} from './run-follow.js?v=690c6178e3';
-import {confetti, whoosh, react, poke} from './ui-fx.js?v=690c6178e3';
-import {renderList, renderMentions} from './ui-views.js?v=690c6178e3';
-import {reloadAdminPage, pipelineList} from './ui-panel.js?v=690c6178e3';
-import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, botTaskSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=690c6178e3';
-import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=690c6178e3';
-import {takeoverActions, takeoverForms} from './ui-takeover.js?v=690c6178e3';
+import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, setProfile, clearMessages, isStaticDemo, canWrite, recentRuns, chatKeyOf} from './ui-store.js?v=6e65d8c448';
+import {botSettings, groupSettings} from './bot-settings.js?v=6e65d8c448';
+import {moveRow, pipelineValue, editableInputs} from './ui-model.js?v=6e65d8c448';
+import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=6e65d8c448';
+import {sendChat, streamGroupRun, watchQueuedRun} from './ui-chat.js?v=6e65d8c448';
+import {runWithTyping} from './run-follow.js?v=6e65d8c448';
+import {whoosh, react} from './ui-fx.js?v=6e65d8c448';
+import {shellActions, shellForms} from './ui-shell.js?v=6e65d8c448';
+import {conversationActions, conversationForms} from './ui-conversation.js?v=6e65d8c448';
+import {reloadAdminPage, pipelineList} from './ui-panel.js?v=6e65d8c448';
+import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, botTaskSheet, toggleReminderFields, changePasswordSheet} from './ui-sheets.js?v=6e65d8c448';
+import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=6e65d8c448';
+import {takeoverActions, takeoverForms} from './ui-takeover.js?v=6e65d8c448';
 
 const adminCtx = {reload: reloadAdminPage};
-const chatId = () => store.route.chat;
+const chatId = () => chatKeyOf(store.route);
 const findBot = id => groupOfBot(id)?.bots.find(b => b.id === id) || (() => { throw new Error('Bot not found'); })();
 /** Patch a bot by id. A bot removed in another tab fails with a sentence the
  * toast can show, not "Cannot read properties of undefined". */
@@ -29,37 +30,17 @@ async function copyText(text, done) {
   if (!navigator.clipboard?.writeText) throw new Error('Clipboard is not available here.');
   await navigator.clipboard.writeText(text); toast(done);
 }
-/** Home prompt: open the group chat the prompt belongs to and hand the message
- * to the group. Without an id it is the first group, which is where the landing
- * page's own chips and form point. */
-export async function startGroupChat(text, groupId) {
-  const message = String(text || '').trim(); if (!message) return;
-  const group = (groupId ? findGroup(groupId) : null) || groups()[0]; if (!group) throw new Error('Create a bot group first.');
-  go({chat: teamKey(group.id)});
-  await sendChat(teamKey(group.id), message);
-}
-
 export const actions = {
-  // navigation
-  'open-chat': b => go({chat: b.dataset.id}),
-  'back-to-list': () => back({}),
-  // The same arrow opens the panel from the thread and steps back from a section.
-  'open-info': () => store.route.info && store.route.info !== 'home' ? back({chat: chatId(), info: 'home'}) : go({chat: chatId(), info: 'home'}),
-  'close-info': () => back({chat: chatId()}),
-  'open-section': b => { if (b.dataset.section === 'group-settings') store.pipelineDraft = null; go({chat: chatId(), info: b.dataset.section}); },
+  // navigation: the shell's and the conversation's own tables come first
+  ...shellActions,
+  ...conversationActions,
   'open-page': b => go({page: b.dataset.page}),
   'open-page-you': () => back({page: 'you'}),
   'change-password': () => changePasswordSheet(),
-  'poke': b => poke(b),
-  'list-filter': b => { store.listFilter = b.dataset.filter; renderList(); },
   'set-theme': b => { applyTheme(b.dataset.theme); changed('route'); },
-  'command-open': () => openCommandPalette(),
-  'command-dismiss': () => closeCommandPalette(),
-  'command-choice': b => chooseCommand(Number(b.dataset.index)),
 
   // sheets
   'new-chat': () => newChatSheet(),
-  'new-bot': () => newBotSheet(),
   'new-group': () => newGroupSheet(),
   'add-bot-to-group': b => newBotSheet(b.dataset.id),
   'attach': () => attachSheet(),
@@ -68,12 +49,6 @@ export const actions = {
   'sheet-confirm': () => closeSheet(true),
 
   // conversation
-  'quick-chat': b => sendChat(chatId(), b.dataset.text),
-  'mention-pick': b => {
-    const input = document.querySelector('#chat-form textarea'); if (!input) return;
-    input.value = completeMention(input.value, b.dataset.name); input.focus(); renderMentions(input.value);
-  },
-  'home-ask': b => startGroupChat(b.dataset.text, b.dataset.id),
   'copy-chat': async b => {
     const rows = store.messages[b.dataset.id] || []; if (!rows.length) throw new Error('This conversation is empty.');
     const name = conversation(b.dataset.id)?.name || 'Bot';
@@ -220,11 +195,12 @@ export const actions = {
 export const forms = {
   'chat-form': async form => {
     const input = form.elements.namedItem('message'), text = input.value;
-    input.value = ''; input.style.height = ''; renderMentions('');
+    input.value = ''; input.style.height = '';
     whoosh(form.querySelector('.send')); react('nod', 700);
     await sendChat(chatId(), text);
   },
-  'home-prompt': (form, f) => startGroupChat(f.prompt),
+  ...shellForms,
+  ...conversationForms,
   'ask-form': (form, f) => closeSheet(String(f.answer || '')),
   'new-bot-form': async (form, f) => {
     const bot = await api(`/api/groups/${f.group}/bots`, 'POST', {name: f.name, instructions: f.instructions, settings: {tint: pickedTint}});
@@ -295,6 +271,4 @@ export function onControlChange(control) {
   if (admin) return admin(control, adminCtx);
 }
 /** `input` events for the live filters. */
-export function onControlInput(control) {
-  if (control.id === 'chat-search') { store.listQuery = control.value; renderList(); }
-}
+export function onControlInput() {}

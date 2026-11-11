@@ -46,11 +46,23 @@ function statusOf(bot, runs, primary) {
   return working ? 'working' : bot === primary ? 'awake' : 'asleep';
 }
 
-// First sentence of a bot's instructions: what the list shows under its name.
-const jobOf = bot => String(bot?.instructions || '').split(/[.:]/)[0].trim() || 'New, no job yet';
+/** One bot's state ('asleep', 'working', 'waiting'; an idle primary is 'awake'),
+ * for the faces outside the list: a chat header, a bubble. */
+export function botStatus(state, botId) {
+  const bots = botsOf(state), bot = bots.find(b => b.id === botId);
+  return bot ? statusOf(bot, state?.groupRuns || [], primaryOf(bots)) : 'asleep';
+}
+/** True for a bot that has reports and is not the primary: it is drawn as a hexagon. */
+export const botIsManager = (state, botId) => { const bots = botsOf(state), bot = bots.find(b => b.id === botId); return Boolean(bot) && managerOf(bot, bots); };
 
+// First sentence of a bot's instructions: what the list shows under its name.
+export const jobOf = bot => String(bot?.instructions || '').split(/[.:]/)[0].trim() || 'New, no job yet';
+
+// A row previews what was said, not the system lines around it ("Done in 4 steps").
 function lastLine(history) {
-  const last = (history || [])[(history || []).length - 1];
+  // The newest by time, not by position: a run's lines can be stored before the owner's own line lands.
+  const newest = list => list.reduce((a, m) => (a && time(a.at) > time(m.at) ? a : m), null);
+  const last = newest((history || []).filter(m => m.role !== 'system')) || newest(history || []);
   if (!last) return {preview: '', at: ''};
   const text = oneLine(last.text, 120);
   return {preview: last.role === 'user' ? `You: ${text}` : text, at: last.at || ''};

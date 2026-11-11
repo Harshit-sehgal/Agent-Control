@@ -4,20 +4,20 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {initialState, cleanText} from './core.js?v=690c6178e3';
-import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=690c6178e3';
-import {RETENTION_DEFAULTS} from './retention.js?v=690c6178e3';
-import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=690c6178e3';
-import {addChatMessages, clearChat} from './chats.js?v=690c6178e3';
-import {publicMemory, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=690c6178e3';
-import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=690c6178e3';
-import {createThread, titleFrom} from './threads.js?v=690c6178e3';
-import {pauseAll, resumeGuard} from './runaway.js?v=690c6178e3';
-import {simulateGroup} from './group-simulator.js?v=690c6178e3';
-import {BUSY_STATUSES} from './run-state.js?v=690c6178e3';
-import {botSettings} from './bot-settings.js?v=690c6178e3';
-import {denyBrowserRequest} from './bot-browser.js?v=690c6178e3';
-import {withLocalLock} from './locks.js?v=690c6178e3';
+import {initialState, cleanText} from './core.js?v=6e65d8c448';
+import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=6e65d8c448';
+import {RETENTION_DEFAULTS} from './retention.js?v=6e65d8c448';
+import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=6e65d8c448';
+import {addChatMessages, clearChat} from './chats.js?v=6e65d8c448';
+import {publicMemory, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=6e65d8c448';
+import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=6e65d8c448';
+import {createThread, titleFrom} from './threads.js?v=6e65d8c448';
+import {pauseAll, resumeGuard} from './runaway.js?v=6e65d8c448';
+import {simulateGroup} from './group-simulator.js?v=6e65d8c448';
+import {BUSY_STATUSES} from './run-state.js?v=6e65d8c448';
+import {botSettings} from './bot-settings.js?v=6e65d8c448';
+import {denyBrowserRequest} from './bot-browser.js?v=6e65d8c448';
+import {withLocalLock} from './locks.js?v=6e65d8c448';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();

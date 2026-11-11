@@ -41,7 +41,7 @@ export function retryTarget(group, run) {
 }
 
 // System lines with a kind of their own paint a card, not a run note.
-const RUN_LESS_KINDS = new Set(['browser', 'subagent', 'peer', 'bot-created']);
+const RUN_LESS_KINDS = new Set(['browser', 'subagent', 'peer', 'bot-created', 'limit', 'guard']);
 
 /** A system line that may carry Start, Retry or Approve. A browser card or a
  * sub-agent line has its own presentation and returns before those, so it must

@@ -1,9 +1,9 @@
 /** The sheets a conversation can raise (new chat, new bot, a scheduled task),
  * plus the two full-screen layers: quick navigation and sign-in. */
-import {esc, icon, btn, row, field, note} from './ui-kit.js?v=690c6178e3';
-import {groups, conversation, isStaticDemo, isAdmin, teamKey, go} from './ui-store.js?v=690c6178e3';
-import {openSheet, closeSheet, captureFocus, restoreFocus, focusOrigin} from './ui-dialogs.js?v=690c6178e3';
-import {tintPicker} from './ui-panel.js?v=690c6178e3';
+import {esc, icon, btn, row, field, note} from './ui-kit.js?v=6e65d8c448';
+import {groups, conversation} from './ui-store.js?v=6e65d8c448';
+import {openSheet} from './ui-dialogs.js?v=6e65d8c448';
+import {tintPicker} from './ui-panel.js?v=6e65d8c448';
 
 const el = id => document.getElementById(id);
 
@@ -68,66 +68,6 @@ export function toggleReminderFields(formId = 'bot-task-form') {
   const once = form.elements.namedItem('kind').value === 'once', every = form.elements.namedItem('intervalMinutes'), at = form.elements.namedItem('nextAt');
   every.disabled = once; at.disabled = !once; at.required = once;
   every.closest('label').hidden = once; at.closest('label').hidden = !once;
-}
-
-/* ---------- quick navigation (Ctrl+K). Local only: never runs a bot tool. ---------- */
-
-let entries = [];
-function commands() {
-  const items = [
-    {label: 'Chats', hint: 'Home', run: () => go({})},
-    {label: 'You and settings', hint: 'Account', run: () => go({page: 'you'})},
-    {label: 'About this build', hint: 'How it works', run: () => go({page: 'about'})},
-  ];
-  if (!isStaticDemo()) items.push({label: 'Notifications', hint: 'Account', run: () => go({page: 'notifications'})}, {label: 'Workspaces', hint: 'Account', run: () => go({page: 'workspaces'})});
-  if (isAdmin()) items.push({label: 'Team and access', hint: 'Admin', run: () => go({page: 'team'})}, {label: 'Local agents', hint: 'Admin', run: () => go({page: 'agents'})}, {label: 'Data and security', hint: 'Admin', run: () => go({page: 'data'})}, {label: 'AI and models', hint: 'Account', run: () => go({page: 'ai'})});
-  for (const g of groups()) {
-    const team = teamKey(g.id);
-    items.push({label: g.name, hint: 'Group chat', run: () => go({chat: team})});
-    for (const [section, label] of [['runs', 'Runs'], ['group-settings', 'Group settings'], ['tasks', 'Scheduled tasks']]) items.push({label: `${g.name} · ${label}`, hint: 'Group', run: () => go({chat: team, info: section})});
-    for (const b of g.bots) items.push({label: b.name, hint: `${g.name} · bot`, run: () => go({chat: b.id})}, {label: `${b.name} · Scheduled tasks`, hint: `${g.name} · bot`, run: () => go({chat: b.id, info: 'tasks'})});
-  }
-  return items;
-}
-export const paletteOpen = () => !el('command').classList.contains('hidden');
-/** Focus never leaves #command-input (the arrows only move a class), so the input
- * is the combobox and the highlighted option is announced through
- * aria-activedescendant. Without it the listbox role promised a relationship
- * nothing maintained, and a screen reader had no idea what Enter would open. */
-function syncCommandActive() {
-  const input = el('command-input'), area = el('command-results');
-  if (!input || !area) return;
-  const active = area.querySelector('.command-item.selected');
-  if (active && active.id) input.setAttribute('aria-activedescendant', active.id);
-  else input.removeAttribute('aria-activedescendant');
-}
-export function updateCommandResults(value = '') {
-  const q = value.trim().toLowerCase();
-  entries = commands().filter(x => `${x.label} ${x.hint}`.toLowerCase().includes(q)).slice(0, 16);
-  const area = el('command-results'); if (!area) return;
-  area.innerHTML = entries.length ? entries.map((entry, i) => `<button type="button" class="command-item${i === 0 ? ' selected' : ''}" id="command-item-${i}" data-action="command-choice" data-index="${i}" role="option" aria-selected="${i === 0}"><span>${esc(entry.label)}</span><small>${esc(entry.hint)}</small></button>`).join('') : '<div class="empty"><strong>Nothing matches</strong></div>';
-  area.setAttribute('aria-label', entries.length ? `${entries.length} results` : 'No results');
-  syncCommandActive();
-}
-export function closeCommandPalette() { if (!paletteOpen()) return; el('command').classList.add('hidden'); el('command').innerHTML = ''; entries = []; restoreFocus(); }
-export function openCommandPalette() {
-  // Ctrl+K works from inside a sheet. closeSheet() hands focus back to that sheet's
-  // own opener and then forgets it, so take the target first: capturing afterwards
-  // grabbed whatever the emptied sheet left focused (often <body>) and Esc from the
-  // palette dropped the user at the top of the page.
-  const origin = focusOrigin();
-  closeSheet(); captureFocus(origin || undefined);
-  const layer = el('command'); layer.classList.remove('hidden');
-  layer.innerHTML = `<div class="command-card" role="dialog" aria-modal="true" aria-label="Quick navigation"><label class="search">${icon('search', 18)}<input id="command-input" role="combobox" aria-label="Search pages and bots" aria-autocomplete="list" aria-expanded="true" aria-controls="command-results" aria-haspopup="listbox" autocomplete="off" placeholder="Search chats, bots, drafts and posts" maxlength="120"></label><div class="command-results" id="command-results" role="listbox"></div><p class="command-foot">Up and Down to move · Enter to open · Esc to close</p></div>`;
-  updateCommandResults(); el('command-input').focus();
-}
-export function chooseCommand(index) { const entry = entries[index]; if (!entry) return; closeCommandPalette(); entry.run(); }
-export function moveCommand(delta) {
-  const nodes = [...el('command-results').querySelectorAll('.command-item')]; if (!nodes.length) return;
-  const next = nodes[(nodes.findIndex(n => n.classList.contains('selected')) + delta + nodes.length) % nodes.length];
-  nodes.forEach(n => { n.classList.remove('selected'); n.setAttribute('aria-selected', 'false'); });
-  next.classList.add('selected'); next.setAttribute('aria-selected', 'true'); next.scrollIntoView({block: 'nearest'});
-  syncCommandActive();
 }
 
 /* ---------- sign-in (Node build) ---------- */
