@@ -5,13 +5,9 @@
  * the job the creator wrote. Nothing here can grant it a capability.
  */
 import {randomUUID} from 'node:crypto';
-import {activity} from '../shared/core.js';
-import {isLead, managerOf, companyBots} from '../shared/company.js';
-import {noteBotWork} from '../shared/runaway.js';
-import {TINT_COUNT} from '../shared/ui-kit.js';
+import {addCreatedBot} from '../shared/hire.js';
 import {
-  MAX_BOTS_PER_GROUP,
-  parseCreateBotRequests, stripCreateBotBlocks, buildCreatedBot, nameFromSentence, firstUnusedTint,
+  parseCreateBotRequests, stripCreateBotBlocks,
   botCreatedText, botCreateRefusedText,
 } from '../shared/bot-create.js';
 
@@ -33,31 +29,7 @@ export async function createBotsFromReply(store, {bot, groupId, output, runId = 
     say(botCreateRefusedText(bot, `the request was refused: ${item.error}`));
     return {text: text || `${bot.name} tried to create a bot.`, created, lines};
   }
-  const result = await store.update(state => {
-    const group = (state.groups || []).find(g => g.id === groupId);
-    if (!group) return {refused: 'the group no longer exists.'};
-    // Counted against the runaway guard in the same write that makes the bot, so
-    // the bot that crosses the limit is the one refused.
-    if (noteBotWork(state, 'creation', now()).paused) return {refused: 'bots are paused. Resume them to let bots make bots.'};
-    if ((group.bots || []).length >= MAX_BOTS_PER_GROUP) return {refused: `the group already has ${MAX_BOTS_PER_GROUP} bots. Remove one first.`};
-    // One name in the whole company, so an @mention or an ask never lands on the wrong bot.
-    const everyone = companyBots(state);
-    const names = everyone.map(other => other.name);
-    const request = {...item.request};
-    if (request.derived) request.name = nameFromSentence(request.job, names);
-    else if (names.some(taken => taken.trim().toLowerCase() === request.name.toLowerCase())) return {refused: `a bot named ${request.name} is already in the company.`};
-    // It reports to its creator when the creator leads a team, else to the creator's manager.
-    const reportsTo = isLead(state, bot.id) ? bot.id : managerOf(state, bot.id)?.id ?? null;
-    const record = buildCreatedBot(request, {bot, runId, now: now(), makeId, reportsTo, tint: firstUnusedTint(everyone, TINT_COUNT)});
-    group.bots.push(record);
-    // A group with an explicit pipeline keeps it ordered, so the new bot joins
-    // the end instead of silently never running on a default message.
-    if (Array.isArray(group.settings?.pipeline) && !group.settings.pipeline.includes(record.id)) {
-      group.settings.pipeline = [...group.settings.pipeline, record.id].slice(0, MAX_BOTS_PER_GROUP);
-    }
-    activity(state, 'bot', `${bot.name} created ${record.name}.`, {botId: record.id, runId});
-    return {record, groupName: group.name};
-  });
+  const result = await store.update(state => addCreatedBot(state, {bot, groupId, request: item.request, runId, now: now(), makeId}));
   if (!result.record) {
     say(botCreateRefusedText(bot, result.refused || 'the request could not be saved.'));
     return {text: text || `${bot.name} tried to create a bot.`, created, lines};

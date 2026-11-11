@@ -31,6 +31,10 @@ import {MAX_HANDOFFS, createRun, instructLead, summonableGuests, wakeBots} from 
 import {simulateGroup} from '../shared/group-simulator.js';
 import {SqliteStore} from '../src/sqlite-store.js';
 import {coordinationState, resumeGroupRun, runGroup} from '../src/coordination.js';
+import {createThread} from '../shared/threads.js';
+import {pauseAll} from '../shared/runaway.js';
+import {companyBots} from '../shared/company.js';
+import {company, model, ask} from './run-fixture.js';
 
 /* ------------------------------------------------------------------ fixtures */
 
@@ -419,4 +423,63 @@ test('a guest switched off after the plan is made is refused by both engines', a
   };
   assert.deepEqual(decisions(demo.run, demo.conversation), expected);
   assert.deepEqual(serverDecisions(server.store, server.runId), expected);
+});
+
+
+/* ---- The company (Phase 2): the Pages demo and the served loop make the same decisions ---- */
+
+/** The Pages world for a fixture company: the served state, copied. */
+const demoWorld = store => structuredClone(store.read());
+
+test('Pages creates a bot from a sentence: the same bot the served loop makes', async t => {
+  const sentence = 'Make a bot that watches my inbox and drafts replies';
+  const {store} = await company(t);
+  const served = await ask(store, {message: sentence, to: 'atlas', executor: model({Atlas: `Hiring.\n\`\`\`create-bot\n${JSON.stringify({job: sentence})}\n\`\`\``}).executor});
+  assert.equal(served.status, 'completed', served.error);
+  const world = demoWorld(store);
+  world.groups[0].bots = world.groups[0].bots.filter(b => b.origin !== 'bot');
+  const emitted = [];
+  let n = 0;
+  const run = await simulateGroup({group: world.groups[0], message: sentence, directBotId: 'atlas', guests: [], state: world, api: async () => {}, makeId: () => `d-${++n}`, emit: e => emitted.push(e), chatKey: 'atlas'});
+  assert.equal(run.status, 'completed');
+  const pick = b => ({name: b.name, job: b.instructions, reportsTo: b.settings.reportsTo, tint: b.settings.tint, permissions: b.permissions, origin: b.origin});
+  assert.deepEqual(pick(companyBots(world).find(b => b.origin === 'bot')), pick(companyBots(store.read()).find(b => b.origin === 'bot')));
+  assert.ok(emitted.some(line => line.kind === 'bot-created'));
+});
+
+test('Pages threads are run by Atlas: the same route and closing step as the served loop', async t => {
+  const {store, ids} = await company(t);
+  const message = 'Please book my dentist appointment';
+  let runId;
+  await store.update(s => {
+    const thread = createThread(s, {title: 'Dentist', makeId: () => 'pt'});
+    s.groups.push(thread);
+    const run = createRun({group: thread, message, guests: summonableGuests(s.groups, thread.id, {includeOff: true}), makeId: () => 'r-pt'});
+    s.groupRuns.unshift(run); runId = run.id;
+  });
+  const ai = model({Atlas: env => (env.previous ? 'All done.' : 'I will hand this to @Planner.'), Planner: 'On it.'});
+  await runGroup(store, runId, ai.executor);
+  const served = store.read().groupRuns.find(r => r.id === runId);
+  const world = demoWorld(store);
+  world.groups = world.groups.filter(g => g.id !== 'th-pt');
+  const thread = createThread(world, {title: 'Dentist', makeId: () => 'pt'});
+  world.groups.push(thread);
+  const local = await simulateGroup({group: thread, message, guests: summonableGuests(world.groups, thread.id, {includeOff: true}), state: world, api: async () => {}, makeId: () => 'r-pt', emit: () => {}});
+  assert.deepEqual(local.recipients, served.recipients);
+  assert.equal(local.closeAt, served.closeAt);
+  assert.deepEqual(local.recipients, [ids.atlas, ids.plan, ids.atlas]);
+  assert.deepEqual(local.trace.map(s => s.botId), served.trace.filter(s => !s.kind).map(s => s.botId));
+});
+
+test('a run parked by Pause all is parked at the same step on both engines', async t => {
+  const {store, ids} = await company(t);
+  await store.update(s => pauseAll(s));
+  const message = 'Please book my dentist appointment';
+  const ai = model({Atlas: env => (env.previous ? 'All done.' : 'I will hand this to @Planner.'), Planner: 'On it.'});
+  const served = await ask(store, {message, to: 'atlas', executor: ai.executor});
+  const world = demoWorld(store);
+  const local = await simulateGroup({group: world.groups[0], message, directBotId: 'atlas', guests: [], state: world, api: async () => {}, makeId: () => 'g-1', emit: () => {}, chatKey: 'atlas'});
+  assert.deepEqual([local.status, local.limit.kind, local.checkpoint.nextStep], [served.status, served.limit.kind, served.checkpoint.nextStep]);
+  assert.deepEqual([local.status, local.limit.kind, local.checkpoint.nextStep], ['awaiting_limit', 'guard', 1]);
+  assert.deepEqual(local.trace.map(s => s.botId), [ids.atlas]);
 });

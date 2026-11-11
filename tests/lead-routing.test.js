@@ -140,8 +140,8 @@ test('the Pages engine routes through the same rules: roster, closing step, cap'
   assert.equal(run.status, 'completed');
   assert.deepEqual(names(run.trace), ['atlas', scout.id, 'atlas']);
   assert.ok(!run.recipients.includes(quiet.id));
-  assert.match(run.trace[1].output, /Previous handoff: Atlas received/, 'a teammate is handed the lead\'s assignment');
-  assert.match(run.trace[2].output, /Previous handoff: Scout: Scout received/, 'the closing step is handed the teammate\'s answer');
+  assert.equal(run.trace[1].output, 'On it: Please ask @Scout to look this up', 'the teammate answers the owner\'s request');
+  assert.match(run.trace[2].output, /^All done\. Here is what the team said:\nScout: On it: Please ask @Scout/, 'the closing step is handed the teammate\'s answer');
   assert.deepEqual(thread.settings.members, [scout.id]);
 });
 

@@ -4,20 +4,20 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {initialState, cleanText} from './core.js?v=6e65d8c448';
-import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=6e65d8c448';
-import {RETENTION_DEFAULTS} from './retention.js?v=6e65d8c448';
-import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=6e65d8c448';
-import {addChatMessages, clearChat} from './chats.js?v=6e65d8c448';
-import {publicMemory, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=6e65d8c448';
-import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=6e65d8c448';
-import {createThread, titleFrom} from './threads.js?v=6e65d8c448';
-import {pauseAll, resumeGuard} from './runaway.js?v=6e65d8c448';
-import {simulateGroup} from './group-simulator.js?v=6e65d8c448';
-import {BUSY_STATUSES} from './run-state.js?v=6e65d8c448';
-import {botSettings} from './bot-settings.js?v=6e65d8c448';
-import {denyBrowserRequest} from './bot-browser.js?v=6e65d8c448';
-import {withLocalLock} from './locks.js?v=6e65d8c448';
+import {initialState, cleanText} from './core.js?v=be9cc8e5c5';
+import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=be9cc8e5c5';
+import {RETENTION_DEFAULTS} from './retention.js?v=be9cc8e5c5';
+import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=be9cc8e5c5';
+import {addChatMessages, clearChat} from './chats.js?v=be9cc8e5c5';
+import {publicMemory, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=be9cc8e5c5';
+import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=be9cc8e5c5';
+import {createThread, titleFrom} from './threads.js?v=be9cc8e5c5';
+import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=be9cc8e5c5';
+import {simulateGroup} from './group-simulator.js?v=be9cc8e5c5';
+import {BUSY_STATUSES} from './run-state.js?v=be9cc8e5c5';
+import {botSettings} from './bot-settings.js?v=be9cc8e5c5';
+import {denyBrowserRequest} from './bot-browser.js?v=be9cc8e5c5';
+import {withLocalLock} from './locks.js?v=be9cc8e5c5';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
@@ -56,6 +56,11 @@ async function runBotTask(state, t) {
   if (chatIsBusy(state.groupRuns, group, chatKey)) {
     throw Object.assign(new Error('A group run is already active. Wait or retry later.'), {status: 409});
   }
+  // A timer is bot-initiated work: counted against the runaway guard, and skipped while bots are paused.
+  if (noteBotWork(state, 'run').paused) {
+    addChatMessages(state, chatKey, [{role: 'system', text: `Scheduled task "${label}" skipped: bots are paused.`}], {trusted: true});
+    return;
+  }
   addChatMessages(state, chatKey, [{role: 'system', text: `Scheduled task: ${message}`}], {trusted: true});
   try {
     // `started` skips the plan gate. Scheduling the task was the approval.
@@ -92,7 +97,10 @@ function storeRunLines(state, run, entries) {
   const key = run.chatKey || `team-${run.groupId}`;
   const log = (state.groupMessages[run.groupId] ??= []);
   for (const entry of entries) {
-    const line = {id: entry.id || crypto.randomUUID(), runId: run.id, role: entry.role, senderId: entry.senderId, senderName: entry.senderName, toBotId: entry.toBotId, text: entry.text, at: entry.at || now()};
+    const line = {id: entry.id || crypto.randomUUID(), runId: run.id, role: entry.role, senderId: entry.senderId, senderName: entry.senderName, toBotId: entry.toBotId, text: entry.text, at: entry.at || now(),
+      // The cards a conversation draws (out of job, a hire, a limit) carry their kind;
+      // a plain reply's `handoff` kind is only the run log's.
+      ...(entry.kind && entry.kind !== 'handoff' ? {kind: entry.kind} : {}), ...(entry.request ? {request: entry.request} : {}), ...(entry.botId ? {botId: entry.botId} : {}), ...(entry.mode ? {mode: entry.mode} : {})};
     if (line.role === 'bot') log.push({...line, kind: entry.kind});
     try { addChatMessages(state, key, [line], {trusted: true}); } catch { /* The conversation was removed mid-run. */ }
   }
@@ -132,7 +140,9 @@ async function localRun(state, groupId, {message = '', directBotId = null, check
     storeRunLines(state, prior, [{id: crypto.randomUUID(), role: 'system', text: 'Plan cancelled. Nothing ran.'}]);
     return {runId, status: 'cancelled'};
   }
-  if (resume && prior.status !== 'awaiting_checkpoint') throw Object.assign(new Error('Only a run paused at a checkpoint can be continued.'), {status: 409});
+  if (resume && prior.status !== 'awaiting_checkpoint' && prior.status !== 'awaiting_limit') throw Object.assign(new Error('Only a run paused at a checkpoint can be continued.'), {status: 409});
+  // A run parked by the runaway guard goes on once bots are resumed, not before.
+  if (resume && prior.status === 'awaiting_limit' && botsPaused(state)) throw Object.assign(new Error('Bots are paused. Resume them first.'), {status: 409});
   // One live run per chat (per group, for every group but the company). Any other
   // busy run blocks the start; a Start or Continue of a run that is itself busy
   // is the way through, same as the server.
@@ -208,8 +218,12 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
     if (body.paused) { pauseAll(state); save(state); return {guard: state.guard, resumed: 0, cancelled: 0}; }
     resumeGuard(state);
     const parked = state.groupRuns.filter(r => r.status === 'awaiting_limit' && r.limit?.kind === 'guard');
-    if (body.stop === true) for (const run of parked) { run.status = 'cancelled'; run.completedAt = now(); run.checkpoint = null; }
-    save(state); return {guard: state.guard, resumed: 0, cancelled: body.stop === true ? parked.length : 0};
+    // Keep going starts each parked run again where it waited; Stop cancels it.
+    for (const run of parked) {
+      if (body.stop === true) { run.status = 'cancelled'; run.completedAt = now(); run.checkpoint = null; storeRunLines(state, run, [{id: crypto.randomUUID(), role: 'system', text: 'Stopped. Bots were paused and nothing else ran.'}]); }
+      else await localRun(state, run.groupId, {runId: run.id, resume: true});
+    }
+    save(state); return {guard: state.guard, resumed: body.stop === true ? 0 : parked.length, cancelled: body.stop === true ? parked.length : 0};
   }
   if (path === '/api/groups' && method === 'POST') { const g = addGroup(state, body); save(state); return g; }
   if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/bots$/)) && method === 'POST') { const b = addBot(state, m[1], body); save(state); return b; }
@@ -229,7 +243,20 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
     const r = await localRun(state, m[1], {message: body.message, directBotId: body.directBotId || null, checkpoints: body.checkpoints === true, chatKey: typeof body.chatKey === 'string' ? body.chatKey : null, anyway: body.anyway === true});
     save(state); return r;
   }
-  if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/runs\/([a-z0-9-]+)\/continue$/)) && method === 'POST') { const r = await localRun(state, m[1], {runId: m[2], resume: true}); save(state); return r; }
+  if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/runs\/([a-z0-9-]+)\/continue$/)) && method === 'POST') {
+    // A run parked at a limit asks which way to go: more and unlimited carry on (when
+    // bots are not paused), stop ends the task.
+    const parked = state.groupRuns.find(r => r.id === m[2] && r.groupId === m[1]);
+    if (parked?.status === 'awaiting_limit') {
+      if (!['more', 'unlimited', 'stop'].includes(body?.choice)) throw Object.assign(new Error('Choose more, unlimited or stop.'), {status: 400});
+      if (body.choice === 'stop') {
+        parked.status = 'cancelled'; parked.completedAt = now(); parked.checkpoint = null; delete parked.limit;
+        storeRunLines(state, parked, [{id: crypto.randomUUID(), role: 'system', text: 'Stopped. Bots were paused and nothing else ran.'}]);
+        save(state); return {runId: parked.id, status: 'cancelled'};
+      }
+    }
+    const r = await localRun(state, m[1], {runId: m[2], resume: true}); save(state); return r;
+  }
   if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/runs\/([a-z0-9-]+)\/plan$/)) && method === 'POST') { const r = await localRun(state, m[1], {runId: m[2], started: body?.approve !== false, approve: body?.approve}); save(state); return r; }
   if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/runs\/([a-z0-9-]+)\/cancel$/)) && method === 'POST') {
     const run = state.groupRuns.find(r => r.id === m[2] && r.groupId === m[1]);

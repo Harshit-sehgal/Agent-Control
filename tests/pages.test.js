@@ -211,3 +211,110 @@ test('the demo keeps memory per bot with a company notebook, over the same route
   await assert.rejects(request('/api/memory/rules','POST',{text:'Whose rule?'}),error=>error.status===400);
   assert.equal((await request('/api/memory?bot=atlas')).bot.rules.length,0);
 });
+
+/* ---- The Pages demo runs the company offline (Phase 2, Task 7) ---- */
+const chatText=state=>key=>(state.chats?.[key]||[]).map(m=>m.text).join('\n');
+const addPlanner=request=>request('/api/groups/home/bots','POST',{name:'Planner',instructions:'Plans the owner\'s week and books appointments.'});
+const botNamed=(state,name)=>state.groups.flatMap(g=>g.bots).find(b=>b.name===name);
+
+test('Pages creates a bot from a sentence',async()=>{
+  const {request}=setup();
+  const sent=await request('/api/groups/home/chat','POST',{message:'Make a bot that watches my inbox and drafts replies',directBotId:'atlas',chatKey:'atlas'});
+  assert.equal(sent.status,'completed');
+  const state=await request('/api/state');
+  const made=botNamed(state,'Inbox');
+  assert.ok(made,'a bot was made, named from the sentence');
+  assert.equal(made.settings.reportsTo,'atlas','it reports to its creator');
+  assert.deepEqual(made.permissions,[]);
+  assert.equal(made.origin,'bot');
+  const lines=state.chats.atlas;
+  assert.ok(lines.some(m=>m.kind==='bot-created'&&/created a new bot/.test(m.text)&&/Inbox/.test(m.text)),'the chat says so');
+  assert.doesNotMatch(chatText(state)('atlas'),/```create-bot/,'the block does not reach the chat');
+  const again=await request('/api/groups/home/chat','POST',{message:'Make a bot that watches my inbox and drafts replies',directBotId:'atlas',chatKey:'atlas'});
+  assert.equal(again.status,'completed');
+  assert.ok(botNamed(await request('/api/state'),'Inbox 2'),'a second one with the same job gets a number');
+});
+
+test('Pages Atlas greets, and answers what it cannot place in a few words',async()=>{
+  const {request}=setup();
+  await request('/api/groups/home/chat','POST',{message:'Hello there',directBotId:'atlas',chatKey:'atlas'});
+  await request('/api/groups/home/chat','POST',{message:'Quarterly tax paperwork due soon',directBotId:'atlas',chatKey:'atlas'});
+  const text=chatText(await request('/api/state'))('atlas');
+  assert.match(text,/Hello! I'm Atlas/);
+  assert.match(text,/make a bot for it/i);
+});
+
+test('Pages threads are run by Atlas, which hands work to the bot whose job it is',async()=>{
+  const {request}=setup();
+  await addPlanner(request);
+  await request('/api/groups/home/bots','POST',{name:'Scholar',instructions:'Checks facts and finds sources.'});
+  const started=await request('/api/threads','POST',{message:'Please book my dentist appointment'});
+  assert.equal(started.run.status,'completed');
+  const state=await request('/api/state');
+  const run=state.groupRuns.find(r=>r.id===started.run.runId);
+  const planner=botNamed(state,'Planner').id;
+  assert.deepEqual(run.recipients,['atlas',planner,'atlas'],'Atlas, the bot that owns the job, then Atlas again to report');
+  assert.equal(run.closeAt,2);
+  assert.deepEqual(state.groups.find(g=>g.id===started.thread.id).settings.members,[planner]);
+  const talk=chatText(state)(`team-${started.thread.id}`);
+  assert.match(talk,/I'll hand this to @Planner/);
+  assert.match(talk,/On it: Please book my dentist appointment/);
+  assert.match(talk,/All done\. Here is what the team said/);
+  assert.equal(botNamed(state,'Scholar')&&run.recipients.includes(botNamed(state,'Scholar').id),false,'a bot whose job does not match is not woken');
+});
+
+test('a Pages bot says it is not its job in its own chat, and does it when told to',async()=>{
+  const {request}=setup();
+  const planner=await addPlanner(request);
+  await request('/api/groups/home/chat','POST',{message:'What is the capital of France',directBotId:planner.id,chatKey:planner.id});
+  let state=await request('/api/state');
+  const refusal=state.chats[planner.id].find(m=>m.kind==='offjob');
+  assert.ok(refusal,'the reply is the same out-of-job message the server writes');
+  assert.equal(refusal.request,'What is the capital of France');
+  assert.equal(refusal.botId,planner.id);
+  await request('/api/groups/home/chat','POST',{message:'What is the capital of France',directBotId:planner.id,chatKey:planner.id,anyway:true});
+  state=await request('/api/state');
+  assert.match(chatText(state)(planner.id),/On it: What is the capital of France/);
+  await request('/api/groups/home/chat','POST',{message:'Please book my dentist appointment',directBotId:planner.id,chatKey:planner.id});
+  state=await request('/api/state');
+  assert.equal(state.chats[planner.id].filter(m=>m.kind==='offjob').length,1,'its own job is not refused');
+});
+
+test('Pause all parks what bots start on Pages, and Keep going finishes it',async()=>{
+  const {request}=setup();
+  const planner=await addPlanner(request);
+  await request('/api/guard','POST',{paused:true});
+  const owner=await request('/api/groups/home/chat','POST',{message:'Hello there',directBotId:'atlas',chatKey:'atlas'});
+  assert.equal(owner.status,'completed','the owner\'s own chat keeps working');
+  const sent=await request('/api/groups/home/chat','POST',{message:'Please book my dentist appointment',directBotId:'atlas',chatKey:'atlas'});
+  assert.equal(sent.status,'awaiting_limit');
+  let state=await request('/api/state');
+  const run=state.groupRuns.find(r=>r.id===sent.runId);
+  assert.equal(run.limit.kind,'guard');
+  assert.ok(state.chats.atlas.some(m=>m.kind==='limit'&&m.runId===run.id));
+  assert.doesNotMatch(chatText(state)('atlas'),/On it: Please book/,'the hand-off has not run');
+  await assert.rejects(request(`/api/groups/home/runs/${run.id}/continue`,'POST',{choice:'more'}),error=>error.status===409,'it will not go on while bots are paused');
+  const resumed=await request('/api/guard','POST',{paused:false});
+  assert.equal(resumed.resumed,1);
+  state=await request('/api/state');
+  assert.equal(state.guard.paused,false);
+  assert.equal(state.groupRuns.find(r=>r.id===sent.runId).status,'completed');
+  assert.match(chatText(state)('atlas'),/On it: Please book my dentist appointment/);
+  await request('/api/guard','POST',{paused:true});
+  const second=await request('/api/groups/home/chat','POST',{message:'Please book my dentist appointment',directBotId:'atlas',chatKey:'atlas'});
+  const stopped=await request(`/api/groups/home/runs/${second.runId}/continue`,'POST',{choice:'stop'});
+  assert.equal(stopped.status,'cancelled');
+});
+
+test('a scheduled Pages task is skipped, with a line in its chat, while bots are paused',async()=>{
+  const store=makeStorage();
+  const {request}=setup(store);
+  await request('/api/guard','POST',{paused:true});
+  const task=await request('/api/tasks','POST',{kind:'bot-task',payload:{groupId:'home',botId:'atlas',message:'weekly check',label:'Weekly',kind:'once',nextAt:new Date(Date.now()+3600000).toISOString()}});
+  const saved=JSON.parse(store.map.get('agent-control-ghpages-v1'));
+  saved.tasks.find(t=>t.id===task.id).runAt=new Date(Date.now()-1000).toISOString();
+  store.map.set('agent-control-ghpages-v1',JSON.stringify(saved));
+  const after=await request('/api/state');
+  assert.match(chatText(after)('atlas'),/Scheduled task "Weekly" skipped: bots are paused/);
+  assert.equal((after.groupRuns||[]).some(r=>r.input==='weekly check'),false);
+});

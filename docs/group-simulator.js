@@ -1,9 +1,17 @@
-/** Offline group coordination. Intentionally not AI: demonstrates real context passing. */
-import {createRun,createEnvelope,handoffTargets,instructLead,wakeBots,assessTask,runNote,rosterFor,previousFor,enlist} from './coordination.js?v=6e65d8c448';
-import {isLead} from './company.js?v=6e65d8c448';
-import {botSettings,groupSettings,threadContext} from './bot-settings.js?v=6e65d8c448';
-import {normalizeBot} from './contracts.js?v=6e65d8c448';
-import {isThread,noteMember} from './threads.js?v=6e65d8c448';
+/** Offline group coordination. Intentionally not AI: demonstrates real context passing.
+ * The bots answer with canned replies (shared/offline-bots.js), and everything a
+ * reply asks for goes through the rules the served loop uses: hand-offs, hires,
+ * the out-of-job refusal, checkpoints and the runaway guard. */
+import {createRun,createEnvelope,handoffTargets,instructLead,wakeBots,assessTask,runNote,rosterFor,previousFor,enlist} from './coordination.js?v=be9cc8e5c5';
+import {offlineReply} from './offline-bots.js?v=be9cc8e5c5';
+import {parseOffJob,offJobMessage} from './off-job.js?v=be9cc8e5c5';
+import {parseCreateBotRequests,stripCreateBotBlocks,botCreatedText,botCreateRefusedText} from './bot-create.js?v=be9cc8e5c5';
+import {addCreatedBot} from './hire.js?v=be9cc8e5c5';
+import {noteBotWork} from './runaway.js?v=be9cc8e5c5';
+import {isLead} from './company.js?v=be9cc8e5c5';
+import {botSettings,groupSettings,threadContext} from './bot-settings.js?v=be9cc8e5c5';
+import {normalizeBot} from './contracts.js?v=be9cc8e5c5';
+import {isThread,noteMember} from './threads.js?v=be9cc8e5c5';
 
 export async function simulateGroup({group, message, directBotId=null, guests=[], state, api, makeId, emit, chatKey=null, started=false, resume=null, shouldStop=()=>false, anyway=false}) {
   let run, previous, i;
@@ -12,7 +20,7 @@ export async function simulateGroup({group, message, directBotId=null, guests=[]
     // a stale tab or a double click would otherwise be pushed back to `running`
     // and repeat steps the trace says already ran. The server's continue route
     // refuses the same way.
-    if (resume.status !== 'awaiting_checkpoint') throw Object.assign(new Error('Only a run paused at a checkpoint can be continued.'), {status: 409});
+    if (resume.status !== 'awaiting_checkpoint' && resume.status !== 'awaiting_limit') throw Object.assign(new Error('Only a run paused at a checkpoint can be continued.'), {status: 409});
     // Deep: a resumed run pushes into `trace`/`recipients` while it works, and a
     // shallow copy meant those pushes landed in the caller's object, which still
     // claimed to be awaiting a checkpoint.
@@ -23,6 +31,7 @@ export async function simulateGroup({group, message, directBotId=null, guests=[]
     // The pause this run resumed from is spent. Keeping it would persist a stale
     // checkpoint on a finished run (shared/local-api.js stores whatever comes back).
     run.checkpoint = null;
+    delete run.limit;
   } else {
     const instructed=instructLead(group,message,directBotId,guests);
     directBotId=instructed.directBotId;
@@ -58,6 +67,16 @@ export async function simulateGroup({group, message, directBotId=null, guests=[]
   try {
     while(i<run.recipients.length){
       if(shouldStop()){run.status='cancelled';return run;}
+      // The runaway guard, as the served loop applies it: the first step is the
+      // owner's own message; every later one is a bot handing work to a bot, and
+      // waits while bots are paused.
+      if(i>0&&Array.isArray(state?.groups)&&noteBotWork(state,'run').paused){
+        const at=new Date().toISOString();
+        run.status='awaiting_limit';run.limit={kind:'guard',at};run.checkpoint={nextStep:i,previous,at};
+        const held=runNote(run);
+        emit({id:held.id,role:'system',kind:held.kind,text:held.text,runId:run.id,at});
+        return run;
+      }
       run.currentStep=i;
       const id=run.recipients[i];
       const isGuest=!group.bots.some(b=>b.id===id);
@@ -78,15 +97,35 @@ export async function simulateGroup({group, message, directBotId=null, guests=[]
       const lead=isLead(world,bot.id), closing=run.closeAt===i;
       const handed=previousFor(run,i,[...world.groups.flatMap(g=>g.bots||[]),...roster]);
       if(handed)previous=handed;
-      const envelope=createEnvelope({run,bot,previous,team:closing?[]:rosterFor(world,bot,roster,{thread:isThread(group)}),thread:threadContext(state?.chats?.[run.chatKey]),lead,closing});
-      const output=`${bot.name} received the task and ${previous?`a handoff from ${roster.find(b=>b.id===previous.botId)?.name||previous.botId}`:'its initial instructions'}. This Pages demo cannot run its custom AI instructions.\nTask: ${envelope.objective.slice(0,220)}\n${previous?`Previous handoff: ${previous.output.slice(0,220)}`:''}`;
+      const team=closing?[]:rosterFor(world,bot,roster,{thread:isThread(group)});
+      const envelope=createEnvelope({run,bot,previous,team,thread:threadContext(state?.chats?.[run.chatKey]),lead,closing});
+      const own=!lead&&run.chatKey===bot.id;
+      const reply=offlineReply({bot,request:envelope.objective,team:closing?[]:team.length?team:roster,previous,closing,lead,own,anyway:run.anyway===true});
+      // Read the reply as the served loop reads a model's: a not-my-job block is
+      // the out-of-job refusal (a plain bot in its own chat only), and a create-bot
+      // block hires a bot, then the block is stripped.
+      const off=own&&!run.anyway?parseOffJob(reply):null;
+      const offMsg=off?offJobMessage({bot,reason:off.reason,request:run.input,id:makeId(),runId:run.id,at:new Date().toISOString()}):null;
+      const hires=!off&&Array.isArray(state?.groups)?parseCreateBotRequests(reply):[];
+      const hireLines=[];
+      if(hires.length){
+        const [item]=hires;
+        if(!item.ok)hireLines.push(botCreateRefusedText(bot,`the request was refused: ${item.error}`));
+        else{
+          const home=state.groups.find(g=>(g.bots||[]).some(b=>b.id===bot.id));
+          const made=home?addCreatedBot(state,{bot,groupId:home.id,request:item.request,runId:run.id,makeId}):{refused:'it has no group.'};
+          hireLines.push(made.record?botCreatedText(bot,made.record,made.groupName):botCreateRefusedText(bot,made.refused));
+        }
+      }
+      const output=offMsg?offMsg.text:hires.length?(stripCreateBotBlocks(reply)||`${bot.name} added a bot to the team.`):reply;
       previous={botId:bot.id,output};
-      const added=closing?[]:handoffTargets({run,roster:rosterFor(world,bot,roster,{thread:isThread(group)}),fromBot:bot,output,home:lead||isThread(group)?null:group.bots,reserve:lead&&run.closeAt==null?1:0});
+      const added=closing||off?[]:handoffTargets({run,roster:rosterFor(world,bot,roster,{thread:isThread(group)}),fromBot:bot,output,home:lead||isThread(group)?null:group.bots,reserve:lead&&run.closeAt==null?1:0});
       enlist(run,{fromId:bot.id,added,output,lead});
       if(isThread(group))for(const id2 of added)noteMember(group,id2);
       const recipient=roster.find(b=>b.id===run.recipients[i+1]);
       run.trace.push({botId:bot.id,output,at:new Date().toISOString(),toBotId:recipient?.id||null});
-      emit({id:makeId(),role:'bot',senderId:bot.id,senderName:bot.name,toBotId:recipient?.id||null,text:output,runId:run.id,kind:'handoff',at:new Date().toISOString()});
+      for(const text of hireLines)emit({id:makeId(),role:'system',kind:'bot-created',text,runId:run.id,at:new Date().toISOString()});
+      emit(offMsg?{...offMsg,toBotId:recipient?.id||null}:{id:makeId(),role:'bot',senderId:bot.id,senderName:bot.name,toBotId:recipient?.id||null,text:output,runId:run.id,kind:'handoff',at:new Date().toISOString()});
       i++;
       run.currentStep=i;
       if(run.checkpointsEnabled&&i<run.recipients.length){
