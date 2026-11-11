@@ -162,7 +162,10 @@ export function enqueueAgentTask(store, agentId, {kind, payload = {}, idempotenc
   if (kind.startsWith('browser.')) {
     const request = validateBrowserRequest(payload);
     if (request.kind !== kind) fail(`A ${kind} task does not match the payload: it describes a ${request.kind}.`, 400);
-    payload = {url: request.url, steps: request.steps};
+    // `botId` picks the bot's own tab in the device's shared browser. It is only a label for
+    // that tab, so it is bounded text or nothing.
+    const botId = typeof payload?.botId === 'string' ? cleanText(payload.botId, 64) : '';
+    payload = {url: request.url, steps: request.steps, ...(botId ? {botId} : {})};
   }
   if (kind === 'model.run') payload = validateModelRun(payload);
   const agent = store.get('SELECT * FROM agents WHERE id=?', agentId);

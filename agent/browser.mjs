@@ -159,19 +159,25 @@ export async function startProxy({permit = publicOnly, lookup = dns.lookup, refu
   return {port: server.address().port, refused, close: () => { for (const connection of outgoing) connection.destroy(); server.closeAllConnections(); server.close(); }};
 }
 
+/** The Chrome command line. `profile` is the user-data-dir: a directory that is
+ * kept (the shared browser's) or a throwaway one. Pure, so a test can read it. */
+export function browserArgs({profile, proxyPort, extraArgs = [], noSandbox = false}) {
+  return ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check',
+    '--disable-extensions', '--disable-background-networking', '--disable-sync', '--disable-gpu', '--mute-audio',
+    ...(noSandbox ? ['--no-sandbox', '--disable-dev-shm-usage'] : []),
+    // Everything goes through the proxy, loopback included, and nothing may
+    // leave another way (WebRTC would otherwise send UDP directly).
+    `--proxy-server=http://127.0.0.1:${proxyPort}`, '--proxy-bypass-list=<-loopback>', '--force-webrtc-ip-handling-policy=disable_non_proxied_udp', '--disable-quic',
+    '--block-new-web-contents', ...extraArgs, 'about:blank'];
+}
+
 /** Start the browser and resolve its DevTools address. */
 function launch(binary, profile, proxyPort, extraArgs) {
   // A container normally has no user namespaces, so Chrome's own sandbox cannot
   // start. The opt-in flag trades renderer isolation for a browser that runs;
   // the egress proxy, the allowlist and the fresh context still apply.
   const noSandbox = /^(1|true|on|yes)$/i.test(String(process.env.BROWSER_NO_SANDBOX || ''));
-  const child = spawn(binary, ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check',
-    '--disable-extensions', '--disable-background-networking', '--disable-sync', '--disable-gpu', '--mute-audio',
-    ...(noSandbox ? ['--no-sandbox', '--disable-dev-shm-usage'] : []),
-    // Everything goes through the proxy, loopback included, and nothing may
-    // leave another way (WebRTC would otherwise send UDP directly).
-    `--proxy-server=http://127.0.0.1:${proxyPort}`, '--proxy-bypass-list=<-loopback>', '--force-webrtc-ip-handling-policy=disable_non_proxied_udp', '--disable-quic',
-    '--block-new-web-contents', ...extraArgs, 'about:blank'], {stdio: ['ignore', 'ignore', 'pipe']});
+  const child = spawn(binary, browserArgs({profile, proxyPort, extraArgs, noSandbox}), {stdio: ['ignore', 'ignore', 'pipe']});
   const address = new Promise((resolve, reject) => {
     let log = '';
     child.stderr.on('data', chunk => { log += chunk; const found = /DevTools listening on (ws:\/\/\S+)/.exec(log); if (found) resolve(found[1]); });
@@ -181,19 +187,28 @@ function launch(binary, profile, proxyPort, extraArgs) {
   return {child, address};
 }
 
-/** A DevTools connection: `send` resolves with the reply, `on` hears events. */
-async function connect(address) {
+/** A DevTools connection: `send` resolves with the reply, `on` hears events
+ * (the listener gets the params with the flat session id, and the browser's
+ * own params as a second argument: a screencast frame's ack id is a field
+ * named `sessionId` too), `onClose` hears the browser go away. */
+export async function connect(address) {
   const socket = new WebSocket(address);
   await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = () => reject(new Error('Could not connect to the browser.')); });
   let next = 0;
-  const waiting = new Map(), listeners = new Map();
+  const waiting = new Map(), listeners = new Map(), closers = [];
+  // A browser that exits must not leave a command waiting for a reply that never comes.
+  socket.onclose = () => {
+    for (const {reject} of waiting.values()) reject(new Error('The browser connection closed.'));
+    waiting.clear();
+    for (const closer of closers) closer();
+  };
   socket.onmessage = event => {
     const message = JSON.parse(event.data);
     if (message.id && waiting.has(message.id)) {
       const {resolve, reject} = waiting.get(message.id); waiting.delete(message.id);
       return message.error ? reject(new Error(message.error.message)) : resolve(message.result);
     }
-    for (const listener of listeners.get(message.method) || []) listener({...message.params, sessionId: message.sessionId});
+    for (const listener of listeners.get(message.method) || []) listener({...message.params, sessionId: message.sessionId}, message.params);
   };
   return {
     send: (method, params = {}, sessionId) => new Promise((resolve, reject) => { const id = ++next; waiting.set(id, {resolve, reject}); socket.send(JSON.stringify({id, method, params, sessionId})); }),
@@ -205,6 +220,7 @@ async function connect(address) {
       listeners.set(method, [...existing, listener]);
       return () => listeners.set(method, (listeners.get(method) || []).filter(entry => entry !== listener));
     },
+    onClose: listener => { closers.push(listener); },
     close: () => socket.close(),
   };
 }
@@ -216,36 +232,56 @@ async function connect(address) {
  * fresh profile gave. A caller that reads several pages pays the launch cost
  * (about a second) once, which is what makes a server-side browser practical.
  */
-export async function startBrowserSession({binary = findBrowser(), permit = publicOnly, profile = process.env.AGENT_BROWSER_PROFILE || null, extraArgs = String(process.env.AGENT_BROWSER_ARGS || '').split(' ').filter(Boolean)} = {}) {
-  if (!binary) throw new Error('No Chrome, Chromium or Edge was found on this device. Install one, or set AGENT_BROWSER_PATH.');
+export async function startBrowserSession({binary = findBrowser(), permit = publicOnly, profile = process.env.AGENT_BROWSER_PROFILE || null, extraArgs = String(process.env.AGENT_BROWSER_ARGS || '').split(' ').filter(Boolean), connection = null} = {}) {
+  // `connection` is a DevTools connection that already exists (a test's scripted
+  // one): nothing is launched and no proxy is started.
+  if (!binary && !connection) throw new Error('No Chrome, Chromium or Edge was found on this device. Install one, or set AGENT_BROWSER_PATH.');
   // A throwaway profile by default; a kept one only when the operator opts in.
   const keepProfile = profile;
-  if (keepProfile) fs.mkdirSync(keepProfile, {recursive: true});
-  const dir = keepProfile || fs.mkdtempSync(path.join(os.tmpdir(), 'agent-browser-'));
+  // A kept profile holds cookies: private to this user, repaired if it was not.
+  if (keepProfile) { fs.mkdirSync(keepProfile, {recursive: true, mode: 0o700}); fs.chmodSync(keepProfile, 0o700); }
+  const dir = connection ? keepProfile : keepProfile || fs.mkdtempSync(path.join(os.tmpdir(), 'agent-browser-'));
   const refused = [];
-  const proxy = await startProxy({permit, refused});
-  const {child, address} = launch(binary, dir, proxy.port, extraArgs);
-  let cdp;
-  try { cdp = await connect(await address); }
-  catch (error) {
-    // A process that never answered is still a process holding a port and a
-    // profile directory; close both before the caller sees the error.
-    proxy.close();
-    child.kill('SIGKILL');
-    throw error;
+  let proxy = null, child = null, cdp;
+  if (connection) cdp = connection.cdp;
+  else {
+    proxy = await startProxy({permit, refused});
+    const started = launch(binary, dir, proxy.port, extraArgs);
+    child = started.child;
+    try { cdp = await connect(await started.address); }
+    catch (error) {
+      // A process that never answered is still a process holding a port and a
+      // profile directory; close both before the caller sees the error.
+      proxy.close();
+      child.kill('SIGKILL');
+      throw error;
+    }
   }
+  // A browser that exited on its own is dead for good: whoever keeps this
+  // session across tasks asks `dead` before reusing it.
+  let dead = false;
+  cdp.onClose?.(() => { dead = true; });
 
-  /** Open `url` in a fresh context and return what a reader would see. */
-  async function capture(url, {allow, steps = [], timeoutMs = 20000} = {}) {
+  /** Open `url` in a fresh context and return what a reader would see.
+   *
+   * With `tab` (from `newTab`) it uses that page in the default context instead,
+   * the one the kept profile belongs to, and leaves it open afterwards: the
+   * shared browser's way. `onPage({url, title})` hears each page the tab shows.
+   * `settleMs` is how long scripts get to render after a load. */
+  async function capture(url, {allow, steps = [], timeoutMs = 20000, tab = null, onPage = null, settleMs = 600} = {}) {
     if (!hostAllowed(url, allow)) throw new Error(`Refusing to open ${url}: its host is not in AGENT_BROWSER_ALLOWLIST.`);
     const blockedBefore = refused.length, blocked = [];
-    let deadlineTimer = null, contextId = null, targetId = null;
+    let deadlineTimer = null, contextId = null, targetId = tab ? tab.targetId : null;
     const deadline = new Promise((_, reject) => { deadlineTimer = setTimeout(() => reject(new Error(`The page did not finish loading within ${timeoutMs / 1000}s.`)), timeoutMs); deadlineTimer.unref(); });
+    // The tab's own guard answers its paused requests; this capture only listens to what it blocks.
+    if (tab) tab.sink = blocked;
     try {
       return await Promise.race([deadline, (async () => {
-        ({browserContextId: contextId} = await cdp.send('Target.createBrowserContext'));
-        ({targetId} = await cdp.send('Target.createTarget', {url: 'about:blank', browserContextId: contextId}));
-        const {sessionId} = await cdp.send('Target.attachToTarget', {targetId, flatten: true});
+        if (!tab) {
+          ({browserContextId: contextId} = await cdp.send('Target.createBrowserContext'));
+          ({targetId} = await cdp.send('Target.createTarget', {url: 'about:blank', browserContextId: contextId}));
+        }
+        const {sessionId} = tab ? tab : await cdp.send('Target.attachToTarget', {targetId, flatten: true});
         // One DevTools connection carries events for every attached target, so a
         // listener has to know which page it is for: a second context (a person's
         // takeover while a capture runs) would otherwise consume this page's
@@ -253,14 +289,16 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
         const pageOn = (method, fn) => cdp.on(method, params => { if (params.sessionId && params.sessionId !== sessionId) return; fn(params); });
         // The page's own requests pause here first, so it cannot be sent to a
         // page nobody allowed.
-        const offPaused = pageOn('Fetch.requestPaused', ({requestId, request, resourceType}) => {
+        const offPaused = tab ? () => {} : pageOn('Fetch.requestPaused', ({requestId, request, resourceType}) => {
           const verdict = requestVerdict({url: request.url, isDocument: resourceType === 'Document', method: request.method, resourceType}, {allow});
           if (!verdict.allow) blocked.push(`${request.url.slice(0, 120)}: ${verdict.reason}`);
           cdp.send(verdict.allow ? 'Fetch.continueRequest' : 'Fetch.failRequest', verdict.allow ? {requestId} : {requestId, errorReason: 'BlockedByClient'}, sessionId).catch(() => {});
         });
         try {
-          await cdp.send('Fetch.enable', {patterns: [{urlPattern: '*'}]}, sessionId);
-          await cdp.send('Page.enable', {}, sessionId);
+          if (!tab) {
+            await cdp.send('Fetch.enable', {patterns: [{urlPattern: '*'}]}, sessionId);
+            await cdp.send('Page.enable', {}, sessionId);
+          }
           const loaded = new Promise(resolve => { const off = pageOn('Page.loadEventFired', () => { off(); resolve(); }); });
           const navigation = await cdp.send('Page.navigate', {url}, sessionId);
           // The proxy's own refusal is the useful sentence: "it is on a private
@@ -271,8 +309,9 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
             : lastRefusal ? `The page was not opened. ${lastRefusal}`
             : `The page could not be opened: ${navigation.errorText}.`);
           await loaded;
+          onPage?.({url, title: null});
           // Give scripts a moment to render what they fetched.
-          await new Promise(resolve => setTimeout(resolve, 600));
+          await new Promise(resolve => setTimeout(resolve, settleMs));
           // Number the interactive elements once, before the steps, so an
           // `index` step and the list the model was shown agree.
           await cdp.send('Runtime.evaluate', {expression: SNAPSHOT, returnByValue: true}, sessionId);
@@ -297,8 +336,9 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
               if (!hostAllowed(target, allow)) { actions.push({op: 'navigate', ok: false, reason: 'host not in AGENT_BROWSER_ALLOWLIST'}); continue; }
               const nav = await cdp.send('Page.navigate', {url: target}, sessionId);
               if (nav.errorText) { actions.push({op: 'navigate', ok: false, reason: nav.errorText}); continue; }
-              await new Promise(resolve => setTimeout(resolve, 500));
+              await new Promise(resolve => setTimeout(resolve, Math.min(500, settleMs)));
               actions.push({op: 'navigate', ok: true, url: target});
+              onPage?.({url: target, title: null});
               continue;
             }
             const expression = actionExpression(step || {});
@@ -308,6 +348,7 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
           }
           const {result} = await cdp.send('Runtime.evaluate', {returnByValue: true, expression: `JSON.stringify({url: location.href, title: document.title, text: (document.body ? document.body.innerText : "").slice(0, 20000), snapshot: ${SNAPSHOT}})`}, sessionId);
           const page = JSON.parse(result.value);
+          onPage?.({url: page.url, title: page.title || null});
           if (!hostAllowed(page.url, allow)) throw new Error(`The page ended up on ${new URL(page.url).host}, which is not in AGENT_BROWSER_ALLOWLIST.`);
           const text = page.text.replace(/\s+/g, ' ').trim();
           const snapshot = page.snapshot && typeof page.snapshot === 'object' ? page.snapshot : {count: 0, elements: []};
@@ -328,23 +369,32 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
       // The deadline only matters while loading; clear it so a successful capture
       // does not leave a timer holding a closure until it fires.
       clearTimeout(deadlineTimer);
+      if (tab) tab.sink = null;
       // Close the page and throw the whole cookie jar away: the next capture
-      // starts signed out even though the process is reused.
-      if (targetId) await cdp.send('Target.closeTarget', {targetId}).catch(() => {});
+      // starts signed out even though the process is reused. A tab from
+      // `newTab` is the shared browser's: it stays, with the profile's cookies.
+      if (targetId && !tab) await cdp.send('Target.closeTarget', {targetId}).catch(() => {});
       if (contextId) await cdp.send('Target.disposeBrowserContext', {browserContextId: contextId}).catch(() => {});
     }
   }
 
   async function close() {
+    const exited = () => !child || child.exitCode !== null || child.signalCode;
+    // A kept profile holds sign-ins that Chrome writes out lazily: ask it to quit
+    // (which flushes them) and give it a moment before the kill below.
+    if (keepProfile && child && !exited()) {
+      await Promise.race([cdp.send('Browser.close').catch(() => {}), new Promise(resolve => setTimeout(resolve, 1500))]);
+      await Promise.race([new Promise(resolve => (exited() ? resolve() : child.once('exit', resolve))), new Promise(resolve => setTimeout(resolve, 3000))]);
+    }
     try { cdp.close(); } catch { /* Already closed. */ }
-    proxy.close();
-    child.kill('SIGKILL');
-    await new Promise(resolve => (child.exitCode !== null || child.signalCode ? resolve() : child.once('exit', resolve)));
+    proxy?.close();
+    child?.kill('SIGKILL');
+    if (child) await new Promise(resolve => (exited() ? resolve() : child.once('exit', resolve)));
     // A kept profile (AGENT_BROWSER_PROFILE) survives so its sign-in does; a
     // throwaway one is removed. Chromium child processes can still be flushing
     // the directory for a moment after the parent exits (maxRetries only helps
     // on Windows), so retry and never let a cleanup race mask the real result.
-    if (!keepProfile) for (let attempt = 0; attempt < 5; attempt++) {
+    if (!keepProfile && !connection) for (let attempt = 0; attempt < 5; attempt++) {
       try { fs.rmSync(dir, {recursive: true, force: true}); break; }
       catch { await new Promise(resolve => setTimeout(resolve, 120)); }
     }
@@ -480,7 +530,39 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
     }
   }
 
-  return {capture, open, close};
+  /** A page in the default context, which is the kept profile: what a bot's tab
+   * in the shared browser is. Its own guard stays on for the tab's lifetime, so
+   * a bot's step and a person's click are held to the same allowlist. */
+  async function newTab({allow, viewport = {width: 1280, height: 800}} = {}) {
+    const {targetId} = await cdp.send('Target.createTarget', {url: 'about:blank'});
+    const {sessionId} = await cdp.send('Target.attachToTarget', {targetId, flatten: true});
+    const tab = {targetId, sessionId, blocked: [], sink: null, viewport, off: () => {}};
+    tab.off = cdp.on('Fetch.requestPaused', ({requestId, request, resourceType, sessionId: from}) => {
+      if (from && from !== sessionId) return;
+      const verdict = requestVerdict({url: request.url, isDocument: resourceType === 'Document', method: request.method, resourceType}, {allow});
+      if (!verdict.allow) {
+        const sink = tab.sink || tab.blocked;
+        sink.push(`${request.url.slice(0, 120)}: ${verdict.reason}`);
+        if (sink.length > 50) sink.shift();
+      }
+      cdp.send(verdict.allow ? 'Fetch.continueRequest' : 'Fetch.failRequest', verdict.allow ? {requestId} : {requestId, errorReason: 'BlockedByClient'}, sessionId).catch(() => {});
+    });
+    try {
+      await cdp.send('Fetch.enable', {patterns: [{urlPattern: '*'}]}, sessionId);
+      await cdp.send('Page.enable', {}, sessionId);
+      await cdp.send('Emulation.setDeviceMetricsOverride', {...viewport, deviceScaleFactor: 1, mobile: false}, sessionId).catch(() => {});
+    } catch (error) {
+      tab.off();
+      await cdp.send('Target.closeTarget', {targetId}).catch(() => {});
+      throw error;
+    }
+    return tab;
+  }
+  /** The page ids the browser has now: a tab id that is not here is gone. */
+  const liveTargets = async () => (await cdp.send('Target.getTargets')).targetInfos || [];
+  const closeTab = async tab => { tab.off(); await cdp.send('Target.closeTarget', {targetId: tab.targetId}).catch(() => {}); };
+
+  return {capture, open, close, newTab, closeTab, liveTargets, cdp, get dead() { return dead; }};
 }
 
 /** One page in a browser that lives only for that page. The device process and

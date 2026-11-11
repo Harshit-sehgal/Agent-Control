@@ -19,15 +19,18 @@
  * "browser.capture" reads a page on a host the operator explicitly allowlists
  * (AGENT_BROWSER_ALLOWLIST). By default that is a plain HTTP read. With
  * AGENT_BROWSER=1 the page is opened in the Chrome, Chromium or Edge installed
- * on this device (see agent/browser.mjs). "browser.action" may click, type,
- * scroll and read there, except on X and Twitter, where click and type stay
- * refused. Posting is never this process's job.
+ * on this device (see agent/browser.mjs), in one browser that every bot shares
+ * and that keeps its sign-ins in `browser-profile` next to this config
+ * (agent/shared-browser.mjs): each bot has its own tab, one bot drives at a
+ * time. "browser.action" may click, type, scroll and read there, except on X
+ * and Twitter, where click and type stay refused. Posting is never this
+ * process's job.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import crypto from 'node:crypto';
-import {captureWithBrowser, ACTION_OPS, MAX_ACTIONS} from './browser.mjs';
+import {createSharedBrowser, browserProfileDir, runBrowserTask} from './shared-browser.mjs';
 import {runModelTask} from './cli-model.mjs';
 import {cliStatusReporter} from './cli-status.mjs';
 import {hostAllowed, hostOf, parseAllowlist} from '../shared/bot-browser.js';
@@ -131,6 +134,10 @@ function argValue(argv, flag) {
   return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : null;
 }
 
+/** The browser every bot shares, started on first use and kept between tasks. */
+let sharedBrowser = null;
+const shared = () => sharedBrowser ??= createSharedBrowser({allow: () => parseAllowlist(process.env.AGENT_BROWSER_ALLOWLIST), profile: browserProfileDir(process.env, CONFIG)});
+
 /** Local, permission-gated execution. Returns a JSON-serializable result. */
 async function execute(task, config) {
   if (!(config.permissions || []).includes(task.kind)) {
@@ -153,7 +160,7 @@ async function execute(task, config) {
     if (!hostAllowed(target, allow)) {
       throw new Error(`Refusing to read ${hostOf(target) || target}: it is not in AGENT_BROWSER_ALLOWLIST. Only explicitly allowed pages are read.`);
     }
-    if (process.env.AGENT_BROWSER === '1') return captureWithBrowser(target, {allow});
+    if (process.env.AGENT_BROWSER === '1') return runBrowserTask(task, {shared: shared(), allow});
     // The fetch fallback must not become a second way onto the local network: it
     // is vetted like http.check and pinned to the vetted address, and redirects
     // are reported rather than followed.
@@ -164,18 +171,7 @@ async function execute(task, config) {
     const excerpt = html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 600);
     return {url: target, httpStatus: res.status, title, excerpt, capturedAt: new Date().toISOString()};
   }
-  if (task.kind === 'browser.action') {
-    const target = String(task.payload?.url || '');
-    const allow = parseAllowlist(process.env.AGENT_BROWSER_ALLOWLIST);
-    if (!hostAllowed(target, allow)) throw new Error(`Refusing to act on ${hostOf(target) || target}: it is not in AGENT_BROWSER_ALLOWLIST. Only explicitly allowed pages are driven.`);
-    const steps = Array.isArray(task.payload?.steps) ? task.payload.steps.slice(0, MAX_ACTIONS) : [];
-    if (!steps.length) throw new Error('browser.action needs at least one step.');
-    const bad = steps.find(step => !step || !ACTION_OPS.includes(step.op));
-    if (bad) throw new Error(`Unsupported action "${String(bad?.op)}". Allowed: ${ACTION_OPS.join(', ')}.`);
-    // Interaction needs the real browser; the fetch fallback cannot click or type.
-    if (process.env.AGENT_BROWSER !== '1') throw new Error('browser.action needs a real browser: set AGENT_BROWSER=1 on this device.');
-    return captureWithBrowser(target, {allow, steps});
-  }
+  if (task.kind === 'browser.action') return runBrowserTask(task, {shared: shared(), allow: parseAllowlist(process.env.AGENT_BROWSER_ALLOWLIST)});
   if (task.kind === 'model.run') {
     // Runs the owner's own signed-in `claude` or `codex` CLI. A failure the CLI
     // reports (not signed in, a usage limit) is an answer, not an agent error, so
@@ -300,7 +296,7 @@ async function run() {
       if (stopping) break;
       await sleep(wait);
     }
-  } finally { clearInterval(keepalive); console.log('agent: stopped.'); }
+  } finally { clearInterval(keepalive); await sharedBrowser?.close(); console.log('agent: stopped.'); }
 }
 
 function status() {

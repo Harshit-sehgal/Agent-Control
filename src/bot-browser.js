@@ -72,7 +72,7 @@ export async function dispatchBrowserRequest(store, id, {actor = null, runtime =
       const current = (s.browserRequests || []).find(r => r.id === id);
       // A feed can still be denied after the claim and before this enqueue.
       if (!current || current.status !== 'dispatched') fail(current ? 'This browser request is no longer waiting.' : 'Browser request not found.', current ? 409 : 404);
-      const {task} = agent.enqueueAgentTask(store, agentId, {kind: request.kind, payload: {url: request.url, steps: request.steps}, idempotencyKey: `browser:${id}`, createdBy: actor || `bot:${request.botId}`});
+      const {task} = agent.enqueueAgentTask(store, agentId, {kind: request.kind, payload: {url: request.url, steps: request.steps, botId: request.botId}, idempotencyKey: `browser:${id}`, createdBy: actor || `bot:${request.botId}`});
       taskId = task.id;
       current.agentTaskIds = [task.id]; current.updatedAt = stamp();
       activity(s, 'agent', `Sent ${current.botName}'s browser request to a local agent.`, {requestId: id, taskId: task.id});

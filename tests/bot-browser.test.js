@@ -167,7 +167,7 @@ test('a bot browses through the paired local agent and continues from the result
     await assert.rejects(dispatchBrowserRequest(store, request.id), status(409), 'A request is sent once.');
     const [task] = agent.claimAgentTasks(store, device.agentId);
     assert.equal(task.kind, 'browser.action');
-    assert.deepEqual(JSON.parse(task.payload), {url: 'https://example.com/docs', steps: [{op: 'read', selector: 'main'}]});
+    assert.deepEqual(JSON.parse(task.payload), {url: 'https://example.com/docs', steps: [{op: 'read', selector: 'main'}], botId: 'web'});
 
     const longPage = `Install with npm.\n${'Keep this paragraph for the next draft. '.repeat(60)}`;
     agent.completeAgentTask(store, device.agentId, task.id, {status: 'done', result: {title: 'Docs', finalUrl: 'https://example.com/docs', actions: [{op: 'read', ok: true, text: longPage}]}});
