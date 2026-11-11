@@ -24,43 +24,22 @@ const ICONS = {
   bot: '<rect x="4" y="8" width="16" height="12" rx="4"/><path d="M12 8V4M9 14h.01M15 14h.01"/>',
   copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>',
   trash: '<path d="M3 6h18M8 6V4h8v2m3 0-1 15H6L5 6m5 4v7m4-7v7"/>',
+  note: '<path d="M6 3.5h12v17l-6-4-6 4z"/>',
+  pulse: '<path d="M3 12h4l3-7 4 14 3-7h4"/>',
+  shield: '<path d="M12 3 4.500 6v5.500c0 4.400 3.100 8.300 7.500 9.500 4.400-1.200 7.500-5.100 7.500-9.500V6z"/>',
+  chip: '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2.500V6M15 2.500V6M9 18v3.500M15 18v3.500M2.500 9H6M2.500 15H6M18 9h3.500M18 15h3.500"/>',
+  monitor: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2.500v3M12 18.500v3M2.500 12h3M18.500 12h3M5.300 5.300l2.100 2.100M16.600 16.600l2.100 2.100M5.300 18.700l2.100-2.100M16.600 7.400l2.100-2.100"/>',
+  half: '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/>',
+  key: '<circle cx="8" cy="15" r="4"/><path d="m10.800 12.200 8.700-8.700M17 6l2.500 2.500M14.500 8.500 17 11"/>',
+  plug: '<path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0zM12 16v5"/>',
+  chart: '<path d="M5 20V12M10 20V6M15 20v-9M20 20V4"/>',
   spark: '<path d="m12 3 1.600 6.400L20 11l-6.400 1.600L12 19l-1.600-6.400L4 11l6.400-1.600z"/>',
 };
 export const icon = (name, size = 20) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ICONS.spark}</svg>`;
 
-// Each bot gets one of six tints. The class sets --tile and --tint from the
-// active theme (app.css), so avatars and sender names recolour with it, the way
-// a messenger tells group members apart.
-export const TINT_COUNT = 6;
-export const tintClass = index => `t${Math.abs(Number(index) || 0) % TINT_COUNT}`;
-
-// Every bot is a small character, not a letter in a circle. The face is drawn
-// from the bot's tint index, so the same bot always looks the same: three head
-// tops and three mouths give nine combinations across the six tints. CSS makes
-// it blink and glance (each bot on its own beat) and look up while it thinks.
-const TOPS = [
-  '<path d="M24 11V6" fill="none" stroke="currentColor" stroke-width="2.200" stroke-linecap="round"/><circle cx="24" cy="5" r="2.400"/>',
-  '<path d="M17.500 11 15 6.500M30.500 11 33 6.500" fill="none" stroke="currentColor" stroke-width="2.200" stroke-linecap="round"/><circle cx="14.500" cy="5.500" r="2"/><circle cx="33.500" cy="5.500" r="2"/>',
-  '<path d="M17 10.500 20 6l4 4 4-4 3 4.500" fill="none" stroke="currentColor" stroke-width="2.200" stroke-linecap="round" stroke-linejoin="round"/>',
-];
-const MOUTHS = [
-  '<path d="M19.500 31q4.500 4 9 0" fill="none" stroke="currentColor" stroke-width="2.200" stroke-linecap="round"/>',
-  '<path d="M20 30.500q4 5.500 8 0z"/>',
-  '<ellipse cx="24" cy="32" rx="2.400" ry="2"/>',
-];
-export function avatar(name, index = 0, size = 48) {
-  const i = Math.abs(Number(index) || 0), beat = ((i * 1.7) % 5).toFixed(1);
-  return `<span class="avatar face ${tintClass(i)}" style="width:${size}px;height:${size}px;--beat:-${beat}s" aria-hidden="true"><svg viewBox="0 0 48 48" fill="currentColor"><g class="top">${TOPS[i % 3]}</g><circle class="cheek" cx="11.500" cy="29.500" r="3"/><circle class="cheek" cx="36.500" cy="29.500" r="3"/><g class="look"><g class="eyes"><ellipse class="eye" cx="17.500" cy="23" rx="2.800" ry="3.800"/><ellipse class="eye" cx="30.500" cy="23" rx="2.800" ry="3.800"/></g></g><g class="mouth">${MOUTHS[Math.floor(i / 3) % 3]}</g><text class="zz" x="37" y="12">z</text><text class="zz zz2" x="42" y="6">z</text></svg></span>`;
-}
-/** A group shows its first two members overlapped, like a group chat photo. */
-export function groupAvatar(members, size = 48) {
-  if (members.length < 2) return `<span class="avatar avatar-plain" style="width:${size}px;height:${size}px" aria-hidden="true">${icon('people', Math.round(size * 0.46))}</span>`;
-  const small = Math.round(size * 0.62);
-  return `<span class="avatar-pair" style="width:${size}px;height:${size}px" aria-hidden="true">${members.slice(0, 2).map(m => avatar(m.name, m.tint, small)).join('')}</span>`;
-}
-
-/** The app's mascot: a small bot that blinks. Colours and motion come from CSS. */
-export const mascot = () => `<svg class="mascot face" viewBox="0 0 96 96" aria-hidden="true"><g class="antenna"><path d="M48 22V10" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><circle cx="48" cy="8" r="5" fill="currentColor"/></g><rect x="12" y="22" width="72" height="60" rx="24" fill="currentColor"/><rect class="face" x="22" y="34" width="52" height="36" rx="16"/><g class="look"><g class="eyes"><circle class="eye" cx="38" cy="50" r="5" fill="currentColor"/><circle class="eye" cx="58" cy="50" r="5" fill="currentColor"/></g></g><circle class="cheek" cx="29" cy="59" r="3.500"/><circle class="cheek" cx="67" cy="59" r="3.500"/><path d="M43 60q5 5 10 0" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>`;
+/** How many colours a bot can be (settings.tint indexes ui-face COLORS, which has this many). */
+export const TINT_COUNT = 10;
 
 const dayStart = date => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 export const clock = value => {
@@ -116,5 +95,7 @@ export const field = (label, control, help = '') => `<label class="field"><span 
 export const note = (text, tone = '') => `<p class="note ${tone}">${text}</p>`;
 export const empty = (title, text = '') => `<div class="empty"><strong>${esc(title)}</strong>${text ? `<span>${esc(text)}</span>` : ''}</div>`;
 export const tag = (text, tone = '') => `<span class="tag ${tone}">${esc(text)}</span>`;
-/** Header for a drill-in page inside a pane. */
-export const pageHead = (title, {sub = '', back = 'back', right = ''} = {}) => `<header class="pane-head">${back ? iconBtn('back', 'Back', back, {cls: 'back'}) : ''}<div class="pane-head-text"><h2 tabindex="-1">${esc(title)}</h2>${sub ? `<p>${esc(sub)}</p>` : ''}</div>${right}</header>`;
+/** A round 44px button with an icon, named for assistive tech. */
+export const roundBtn = (glyph, label, action, {id, cls = ''} = {}) => `<button type="button" class="rbtn${cls ? ` ${cls}` : ''}" data-action="${esc(action)}"${id === undefined ? '' : ` data-id="${esc(id)}"`} aria-label="${esc(label)}">${icon(glyph, 20)}</button>`;
+/** An on/off switch. `extra` is trusted attribute markup the caller has already escaped. */
+export const switchBtn = (checked, label, extra = '') => `<button type="button" role="switch" class="swt" aria-checked="${checked ? 'true' : 'false'}" aria-label="${esc(label)}"${extra}><span class="knob" aria-hidden="true"></span></button>`;

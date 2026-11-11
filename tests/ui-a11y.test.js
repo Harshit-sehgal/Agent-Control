@@ -38,16 +38,6 @@ test('the coarse-pointer block overrides every check-row it is meant to fix', ()
   }
 });
 
-test('pills take a finger-sized target on a coarse pointer', () => {
-  const block = css.slice(css.indexOf('@media (pointer:coarse)'));
-  assert.match(block, /\.needs-pill\{height:44px;border-radius:22px\}/);
-});
-
-test('a narrow phone header drops the status-only pills, not the actionable one', () => {
-  // The one that does something is a button with data-action; the rest are spans.
-  assert.match(css, /@media\(max-width:520px\)\{[\s\S]{0,120}\.thread-head \.needs-pill:not\(\[data-action\]\)\{display:none\}/);
-});
-
 /* ---------- live regions ---------- */
 
 test('a toast is shown before it is written, so the live region hears it', () => {

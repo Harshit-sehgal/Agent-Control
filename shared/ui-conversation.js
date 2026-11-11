@@ -13,6 +13,7 @@ import {requestOfMessage} from './bot-browser.js';
 import {validHttpUrl} from './core.js';
 import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js';
 import {botStatus, botIsManager, chatStatus, jobOf} from './ui-company.js';
+import {hasJob} from './ui-profile-model.js';
 import {feed} from './ui-feed.js';
 import {face, botColor} from './ui-face.js';
 import {esc, icon, btn, dayLabel, tag} from './ui-kit.js';
@@ -172,7 +173,7 @@ function entryHtml(entry, conv) {
 
 function welcome(conv) {
   const bot = conv.bot, server = !isStaticDemo();
-  const about = conv.isTeam ? 'Atlas plans it and hands each part to the bot whose job it is.' : (bot.instructions || 'New, no job yet. Tell it what it should do.');
+  const about = conv.isTeam ? 'Atlas plans it and hands each part to the bot whose job it is.' : (hasJob(bot) ? bot.instructions : 'New, no job yet. Tell it what it should do.');
   const mode = isLive() ? 'Answers come from your AI provider. If a call fails, the chat says why.'
     : server ? 'No AI provider is configured. Add one under Settings, Models and keys. Until then this chat cannot answer.'
       : 'This is an offline demo: replies are built in, not from a live AI model.';

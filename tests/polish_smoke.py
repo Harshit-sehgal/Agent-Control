@@ -98,7 +98,7 @@ class Harness:
             await context.close()
 
 
-SCREEN = '#main .cv, #main .hv, #main .rail-none, #main .nv, #main .pg, #main .page-body'
+SCREEN = '#main .cv, #main .hv, #main .rail-none, #main .nv, #main .pg, #main .st-wrap'
 
 
 async def open_app(page, base, hash_='', bots=None):
@@ -181,7 +181,7 @@ async def bot_chat_flow(page, base):
     # The sidebar keeps its order: messaging a bot never moves it up.
     after = await page.locator('#sidebar .crow').evaluate_all('rows => rows.map(r => r.dataset.id)')
     assert after == before, (before, after)
-    await expect(page.locator(f'#sidebar .crow[data-id="{ids["Writer"]}"] .crow-prev')).to_contain_text('Writer')
+    await expect(page.locator(f'#sidebar .crow[data-id="{ids["Writer"]}"] .crow-prev')).to_contain_text('Draft a reply')
     # The conversation survives a reload, on the same hash.
     await page.reload()
     await expect(page.locator('.cv-me').first).to_have_text('Draft a reply')
@@ -259,21 +259,22 @@ async def history_routes(page, base):
     await page.go_forward()
     await expect(page.locator('#main h1')).to_have_text('Writer')
     # Deep links work cold, in a fresh load; unknown targets fall back to the list.
-    await page.goto(f'{base}/index.html#chat/{PRIMARY}/info/edit')  # an old hash lands on the bot's profile
+    await page.goto(f'{base}/index.html#chat/{PRIMARY}/info/edit')  # an old hash lands on the bot's Edit page
     await page.reload()
-    await expect(page.locator('#main h1')).to_have_text('Atlas')
+    await expect(page.locator('#main .pr-subbar h1')).to_have_text('Edit')
+    await expect(page.locator('#edit-bot-form input[name=name]')).to_have_value('Atlas')
     await page.goto(f'{base}/index.html#new-bot')
     await page.reload()
-    await expect(page.locator('#new-bot-lite-form')).to_be_visible()
+    await expect(page.locator('#new-bot-form')).to_be_visible()
     await page.goto(f'{base}/index.html#you/about')
     await page.reload()
-    await expect(page.locator('#main h2')).to_have_text('About this build')
+    await expect(page.locator('#main .st-head h2')).to_have_text('About this build')
     await page.goto(f'{base}/index.html#thread/does-not-exist')
     await page.reload()
     await expect(page.locator('#main .rail-none')).to_contain_text('Select a chat')
     await page.goto(f'{base}/index.html#team')  # an admin page is refused without a server session
     await page.reload()
-    await expect(page.locator('#main .pg h1')).to_have_text('Settings')
+    await expect(page.locator('#main .st-head h2')).to_have_text('General')
     await page.goto(f'{base}/index.html#bot/does-not-exist')
     await page.reload()
     await expect(page.locator('#main .rail-none')).to_contain_text('Select a chat')
@@ -283,12 +284,13 @@ async def you_pages(page, base):
     await open_app(page, base)
     await page.locator('#sidebar .rail-me').click()
     assert await hash_(page) == '#settings'
-    await expect(page.locator('#main h2').first).to_have_text('You')
-    await expect(page.locator('#main')).to_contain_text('Local demo. Nothing leaves this browser.')
-    await page.locator('#main [data-action="open-page"][data-page="about"]').click()
-    assert await hash_(page) == '#you/about' or await hash_(page) == '#settings/about', await hash_(page)
-    await page.go_back()
-    await expect(page.locator('#main h2').first).to_have_text('You')
+    await expect(page.locator('#main .st-head h2')).to_have_text('General')
+    await expect(page.locator('#main')).to_contain_text('Browser-only demo')
+    await page.locator('#main [data-action="settings-open"][data-section="about"]').click()
+    assert await hash_(page) == '#settings/about', await hash_(page)
+    await expect(page.locator('#main .st-head h2')).to_have_text('About this build')
+    await page.locator('#main .st-nav [data-section="look"]').click()
+    await expect(page.locator('#main .st-head h2')).to_have_text('Appearance')
 
 
 async def phone_flow(page, base):
@@ -429,7 +431,7 @@ async def main():
             await h.scenario('thread: run by Atlas, handoff pill, follow-up', thread_run)
             await h.scenario('search shortcuts: / T Ctrl+K Esc', search_shortcuts)
             await h.scenario('Back/Forward walk the hash routes', history_routes)
-            await h.scenario('Settings opens the You pages', you_pages)
+            await h.scenario('Settings opens its sections', you_pages)
             await h.scenario('desktop sidebar layout, and the 1024px switch', layout_split)
             await h.scenario('phone: Bots | Threads, chat, thread, search', phone_flow, PHONE)
             await h.scenario('no horizontal overflow at 390px and 1360px', no_overflow, PHONE)

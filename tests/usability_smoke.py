@@ -1,4 +1,4 @@
-"""Interactive browser checks for the chats shell: new bots, the cards that wait on you, faces and keyboard.
+"""Interactive browser checks for the chats shell: new bots, the profile, Settings, the cards that wait on you, faces and keyboard.
 
 Drives the real generated static build (the same files GitHub Pages serves), not
 a concatenated copy. The script rebuilds the bundle from `shared/` into a temp
@@ -98,7 +98,7 @@ class Harness:
             await context.close()
 
 
-SCREEN = '#main .cv, #main .hv, #main .rail-none, #main .nv, #main .pg, #main .page-body'
+SCREEN = '#main .cv, #main .hv, #main .rail-none, #main .nv, #main .pg, #main .st-wrap'
 
 
 async def open_app(page, base, hash_='', bots=None):
@@ -151,43 +151,244 @@ async def toast_text(page):
 
 # ---------------------------------------------------------------- scenarios
 
+async def api_state(page):
+    return await page.evaluate('() => window.AGENT_API("/api/state")')
+
+
+def company_bot(state, name):
+    return next(b for g in state['groups'] for b in g['bots'] if b['name'] == name)
+
+
 async def create_bot_from_page(page, base):
     await open_app(page, base)
     await page.locator('#sidebar [data-action="new-bot"]').click()
     assert await hash_(page) == '#new-bot'
-    form = page.locator('#new-bot-lite-form')
+    form = page.locator('#new-bot-form')
     await expect(form).to_be_visible()
     await expect(form.locator('input[name=name]')).to_be_focused()
+    # Create waits for a name; the first unused colour is already picked.
+    create = form.locator('.nb-go')
+    await expect(create).to_be_disabled()
+    await expect(form.locator('input[name=tint]:checked')).to_have_value('1')
     await form.locator('input[name=name]').fill('Publishing assistant')
-    await form.locator('textarea[name=instructions]').fill('Check drafts for unsupported facts.')
-    await form.locator('button[type=submit]').click()
-    # Lands in the new bot's own chat, which says what the bot is for.
+    await expect(create).to_be_enabled()
+    # A shape and a colour: the live preview follows both.
+    await form.locator('.lk-shape[title="Hexagon"]').click()
+    await form.locator('.lk-dot:nth-child(8)').click()
+    await expect(form.locator('.lk-preview svg')).to_have_attribute('data-shape', 'hexagon')
+    await create.click()
+    # Lands in the new bot's own chat, which asks for its job.
     await expect(page.locator('#main h1')).to_have_text('Publishing assistant')
     assert (await hash_(page)).startswith('#bot/'), await hash_(page)
-    await expect(page.locator('#cv-log .cv-empty')).to_contain_text('Check drafts for unsupported facts')
+    await expect(page.locator('#cv-log .cv-empty')).to_contain_text('Tell it what it should do')
     await expect(page.locator('#toast')).to_contain_text('Publishing assistant is ready')
     await expect(page.locator('#sidebar .crow', has_text='Publishing assistant')).to_have_count(1)
     await expect(page.locator('#sidebar .crow.on')).to_contain_text('Publishing assistant')
-    # A bot answers in its own chat, and says when it is the offline demo.
-    await page.locator('#chat-form textarea').fill('hello')
+    await expect(page.locator('#sidebar .crow.on svg.face')).to_have_attribute('data-shape', 'hexagon')
+    made = company_bot(await api_state(page), 'Publishing assistant')
+    assert made['settings']['shape'] == 'hexagon' and made['settings']['tint'] == 7, made['settings']
+    # The first message is its job, and the bot answers in its own chat.
+    await page.locator('#chat-form textarea').fill('Check drafts for unsupported facts.')
     await page.locator('#chat-form textarea').press('Enter')
-    await expect(page.locator('.cv-bot .cv-body').last).to_contain_text('Pages demo', timeout=10000)
+    await expect(page.locator('.cv-bot .cv-body').last).to_be_visible(timeout=10000)
+    made = company_bot(await api_state(page), 'Publishing assistant')
+    assert made['instructions'] == 'Check drafts for unsupported facts.', made['instructions']
     await page.reload()
     await expect(page.locator('#main h1')).to_have_text('Publishing assistant')
+
+
+async def edit_rename_and_move(page, base):
+    ids = await open_app(page, base, bots=EXTRA_BOTS)
+    writer, researcher = ids['Writer'], ids['Researcher']
+    await page.locator(f'#sidebar .crow[data-id="{writer}"]').click()
+    await page.locator('#main .cv-who').click()
+    assert await hash_(page) == f'#profile/{writer}', await hash_(page)
+    await expect(page.locator('#main .pr-hero h1')).to_have_text('Writer')
+    await expect(page.locator('#main .pr-hero small')).to_have_text('Bot · reports to Atlas')
+    # Edit changes the name, and nothing else when nothing else is touched.
+    await page.locator('#main .pill-btn', has_text='Edit').click()
+    assert await hash_(page) == f'#profile/{writer}/edit', await hash_(page)
+    await page.locator('#edit-bot-form input[name=name]').fill('Drafter')
+    await page.locator('#edit-bot-form button[type=submit]').click()
+    await expect(page.locator('#main .pr-hero h1')).to_have_text('Drafter')
+    await expect(page.locator('#sidebar .crow', has_text='Drafter')).to_have_count(1)
+    await expect(page.locator('#sidebar .crow', has_text='Writer')).to_have_count(0)
+    drafter = company_bot(await api_state(page), 'Drafter')
+    assert drafter.get('settings', {}).get('shape') in (None, ''), drafter.get('settings')
+    # Move it under a manager from the options menu: Researcher gets its first report.
+    await page.locator('#main [data-action="bot-menu"]').click()
+    await expect(page.locator('#cmenu')).to_be_visible()
+    await page.locator('#cmenu [data-action="menu-move"]').click()
+    await page.locator('#cmenu [data-action="menu-move-to"]', has_text='Researcher').click()
+    await expect(page.locator('#toast')).to_contain_text('Drafter now reports to Researcher')
+    await expect(page.locator('#main .pr-hero small')).to_have_text("Bot · Researcher's team")
+    moved = company_bot(await api_state(page), 'Drafter')
+    assert moved['settings']['reportsTo'] == researcher, moved['settings']
+    # Researcher is a manager now: its profile lists a Team, and the Company chart nests Drafter.
+    await page.goto(f'{base}/index.html#profile/{researcher}')
+    await page.reload()
+    await expect(page.locator('#main .pr-hero small')).to_have_text('Manager · reports to Atlas')
+    await expect(page.locator('#main .rw', has_text='Team')).to_contain_text('1 bot')
+    await page.goto(f'{base}/index.html#company')
+    await page.reload()
+    await expect(page.locator('#main .co-tree ul .co-node', has_text='Drafter')).to_have_count(1)
+    # Esc leaves a menu before it leaves a page; Esc on the page goes back.
+    await page.goto(f'{base}/index.html#profile/{researcher}')
+    await page.reload()
+    await page.locator('#main [data-action="bot-menu"]').click()
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#cmenu')).to_have_count(0)
+    assert await hash_(page) == f'#profile/{researcher}'
+
+
+async def delete_bot_reports_go_solo(page, base):
+    ids = await open_app(page, base, bots=EXTRA_BOTS)
+    researcher, writer, reviewer = ids['Researcher'], ids['Writer'], ids['Reviewer']
+    for child in (writer, reviewer):
+        await page.evaluate('([g, id, boss]) => window.AGENT_API(`/api/groups/${g}/bots/${id}`, "PATCH", {settings: {reportsTo: boss}})', ['home', child, researcher])
+    await page.goto(f'{base}/index.html#profile/{researcher}')
+    await page.reload()
+    await expect(page.locator('#main .rw', has_text='Team')).to_contain_text('2 bots')
+    await page.locator('#main [data-action="bot-menu"]').click()
+    await page.locator('#cmenu [data-action="menu-delete"]').click()
+    sheet = page.locator('#modal .sheet')
+    await expect(sheet).to_contain_text('Delete Researcher?')
+    await expect(sheet).to_contain_text("Its job, memory and permissions are deleted. This can't be undone.")
+    await expect(sheet).to_contain_text('Its 2 reports move to Solo.')
+    await expect(sheet).to_contain_text('Its threads stay.')
+    await sheet.get_by_role('button', name='Delete', exact=True).click()
+    await expect(page.locator('#toast')).to_contain_text('Researcher deleted')
+    # The profile closes, and the bot leaves the list; its reports stay, and are Solo.
+    assert await hash_(page) == '#chats', await hash_(page)
+    await expect(page.locator('#sidebar .crow', has_text='Researcher')).to_have_count(0)
+    await expect(page.locator('#sidebar .crow', has_text='Writer')).to_have_count(1)
+    state = await api_state(page)
+    for name in ('Writer', 'Reviewer'):
+        assert company_bot(state, name)['settings'].get('reportsTo') in (None, ''), company_bot(state, name)['settings']
+    assert not any(b['name'] == 'Researcher' for g in state['groups'] for b in g['bots'])
+
+
+async def atlas_has_no_delete(page, base):
+    await open_app(page, base, bots=EXTRA_BOTS)
+    await page.goto(f'{base}/index.html#profile/{PRIMARY}')
+    await page.reload()
+    await expect(page.locator('#main .pr-hero small')).to_have_text('Primary')
+    await page.locator('#main [data-action="bot-menu"]').click()
+    items = await page.locator('#cmenu [role=menuitem]').all_inner_texts()
+    # Atlas starts pinned for everyone, so its pin item is Unpin; it has no Move, Hide or Delete.
+    assert items == ['Message Atlas', 'Unpin'], items
+    # The chart's row menu for Atlas offers the same two, and a bot offers all five.
+    await page.keyboard.press('Escape')
+    await page.goto(f'{base}/index.html#company')
+    await page.reload()
+    await page.locator('#main .co-row', has_text='Atlas').locator('[data-action="bot-menu"]').click()
+    assert await page.locator('#cmenu [role=menuitem]').all_inner_texts() == ['Message Atlas', 'Unpin']
+    await page.keyboard.press('Escape')
+    await page.locator('#main .co-row', has_text='Writer').locator('[data-action="bot-menu"]').click()
+    items = await page.locator('#cmenu > [role=menuitem]').all_inner_texts()
+    assert items == ['Message Writer', 'Pin', 'Move to…', 'Hide', 'Delete…'], items
+    # Pin from the menu puts a bot in the pinned row.
+    await page.locator('#cmenu [data-action="menu-pin"]').click()
+    await expect(page.locator('#sidebar .pin', has_text='Writer')).to_have_count(1)
+
+
+async def settings_from_avatar_and_esc(page, base):
+    await open_app(page, base)
+    await page.locator('#sidebar .rail-me').click()
+    assert await hash_(page) == '#settings', await hash_(page)
+    dialog = page.locator('#main .st-dlg')
+    await expect(dialog).to_be_visible()
+    await expect(dialog.locator('.st-nav button')).to_have_text(['General', 'Appearance', 'Models and keys', 'Connectors', 'Permissions', 'Usage', 'Computer', 'Activity', 'Company'])
+    # The Bots running switch is the pause switch, and it works in place.
+    switch = dialog.locator('[data-pause]')
+    await expect(switch).to_have_attribute('aria-checked', 'true')
+    await switch.click()
+    await expect(switch).to_have_attribute('aria-checked', 'false')
+    await expect(dialog.locator('[data-pause-sub]')).to_have_text('Everything is paused')
+    await switch.click()
+    await expect(switch).to_have_attribute('aria-checked', 'true')
+    # Tab stays inside the dialog.
+    for _ in range(25):
+        await page.keyboard.press('Tab')
+        assert await page.evaluate("!!document.activeElement.closest('.st-dlg')"), 'Tab left the Settings dialog'
+    await dialog.locator('.st-nav [data-section="conn"]').click()
+    await expect(dialog.locator('.st-head h2')).to_have_text('Connectors')
+    await expect(dialog).to_contain_text('Coming in a later phase')
+    # Esc closes it and the chat behind it is back.
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#main .st-dlg')).to_have_count(0)
+    assert (await hash_(page)).startswith('#bot/'), await hash_(page)
+    # So does the close button and a click outside.
+    await page.locator('#sidebar .rail-me').click()
+    await page.locator('#main [data-action="settings-close"][aria-label]').click()
+    await expect(page.locator('#main .st-dlg')).to_have_count(0)
+    await page.locator('#sidebar .rail-me').click()
+    await page.mouse.click(1330, 840)
+    await expect(page.locator('#main .st-dlg')).to_have_count(0)
+
+
+async def activity_page_and_counts(page, base):
+    ids = await open_app(page, base, bots=EXTRA_BOTS)
+    writer = ids['Writer']
+    # Settings links to Activity and Company; the chips are Left the app, Permissions, Bots, All.
+    await page.locator('#sidebar .rail-me').click()
+    await page.locator('#main .st-nav [data-action="go-activity"]').click()
+    assert await hash_(page) == '#activity', await hash_(page)
+    chips = page.locator('#main .ay-chips button')
+    await expect(chips).to_have_text(['Left the app', 'Permissions', 'Bots', 'All'])
+    await expect(chips.first).to_have_attribute('aria-selected', 'true')
+    await expect(page.locator('#ay-list')).to_contain_text('Nothing has left the app yet.')
+    # Making bots is logged under Bots, one plain sentence with the bot's name and a time.
+    await chips.nth(2).click()
+    await expect(chips.nth(2)).to_have_attribute('aria-selected', 'true')
+    await expect(page.locator('#ay-list .ay-row', has_text='Writer')).to_have_count(1)
+    await expect(page.locator('#ay-list .ay-day').first).to_have_text('Today')
+    await chips.nth(3).click()
+    assert await page.locator('#ay-list .ay-row').count() >= 3
+    # A profile shows its own count, and its Activity page lists only what names it.
+    await page.goto(f'{base}/index.html#profile/{writer}')
+    await page.reload()
+    await expect(page.locator('#main [data-activity-count]')).to_have_text('1')
+    await page.locator('#main .rw', has_text='Activity').click()
+    await expect(page.locator('#pr-activity .ay-row')).to_have_count(1)
+    await expect(page.locator('#pr-activity .ay-row')).to_contain_text('Writer')
+
+
+async def phone_settings_cards(page, base):
+    await open_app(page, base)
+    await page.locator('.ch-me').click()
+    cards = page.locator('#main .st-phone')
+    await expect(cards).to_be_visible()
+    await expect(cards.locator('.rw', has_text='Bots running')).to_be_visible()
+    await expect(cards.locator('.rw', has_text='Activity')).to_be_visible()
+    assert await overflow(page) <= 0
+    # A row opens its section; Back returns to the cards; Esc closes the page.
+    await cards.locator('.rw', has_text='Permissions').click()
+    await expect(page.locator('#main .pr-subbar h1')).to_have_text('Permissions')
+    await page.locator('#main [data-action="settings-back"]').click()
+    await expect(page.locator('#main .st-phone .pr-subbar')).to_have_count(0)
+    await page.keyboard.press('Escape')
+    await expect(page.locator('body')).to_have_attribute('data-view', 'home')
+    # The phone profile menu is a sheet from the bottom.
+    await page.goto(f'{base}/index.html#profile/{PRIMARY}')
+    await page.reload()
+    await page.locator('#main [data-action="bot-menu"]').click()
+    await expect(page.locator('#cmenu.sheet')).to_be_visible()
 
 
 async def phone_create_bot(page, base):
     await open_app(page, base)
     await page.locator('.ch-new').click()
-    await page.locator('#new-bot-lite-form input[name=name]').fill('Market scanner')
-    await page.locator('#new-bot-lite-form textarea[name=instructions]').fill('Watch the market and report moves.')
-    await page.locator('#new-bot-lite-form button[type=submit]').click()
+    await page.locator('#new-bot-form input[name=name]').fill('Market scanner')
+    await page.locator('#new-bot-form .lk-shape[title="Drop"]').click()
+    await page.locator('#new-bot-form .nb-go').click()
     await expect(page.locator('body')).to_have_attribute('data-view', 'chat')
     await expect(page.locator('#main h1')).to_have_text('Market scanner')
     assert await overflow(page) <= 0
     await page.locator('#main .cv-head .rbtn').first.click()
     await expect(page.locator('body')).to_have_attribute('data-view', 'home')
     await expect(page.locator('#main .crow', has_text='Market scanner')).to_have_count(1)
+    await expect(page.locator('#main .crow', has_text='Market scanner').locator('svg.face')).to_have_attribute('data-shape', 'drop')
 
 
 async def out_of_job_card(page, base):
@@ -208,7 +409,7 @@ async def out_of_job_card(page, base):
     # Make a new bot opens the New bot page with the request as the job.
     await card.get_by_role('button', name='Make a new bot').click()
     assert (await hash_(page)).startswith('#new-bot/'), await hash_(page)
-    await expect(page.locator('#new-bot-lite-form textarea[name=instructions]')).to_have_value('Book me a table for Friday')
+    await expect(page.locator('#new-bot-form .nb-job')).to_contain_text('Book me a table for Friday')
     await page.go_back()
     # Ask Atlas starts a thread with the request; the owner's line is written once.
     await page.locator('.cv-card').get_by_role('button', name='Ask Atlas').click()
@@ -320,19 +521,25 @@ async def main():
             h = Harness(browser, base, shots)
             print(f'Usability smoke against {base}')
             await h.scenario('bot: create from the New bot page and land in its chat', create_bot_from_page)
+            await h.scenario('bot: edit renames it and a menu move puts it under a manager', edit_rename_and_move)
+            await h.scenario('bot: delete asks first, and its reports go Solo', delete_bot_reports_go_solo)
+            await h.scenario('bot: Atlas has no Delete or Hide; pin from the menu', atlas_has_no_delete)
+            await h.scenario('settings: opens from the avatar, Bots running pauses, Esc closes', settings_from_avatar_and_esc)
+            await h.scenario('activity: four chips, bots made are logged, a profile counts its own', activity_page_and_counts)
             await h.scenario('out-of-job reply: three buttons, each does its thing', out_of_job_card)
             await h.scenario('checkpoint card and page ask: the waiting face sits above', checkpoint_and_ask_cards)
             await h.scenario('faces: hello hop, one hop per first reply, awake and asleep', faces_come_alive)
             await h.scenario('keyboard: Tab, Enter, Ctrl+K and Esc in the sidebar', keyboard_and_escape)
             await h.scenario('phone: create a bot from the + button', phone_create_bot, PHONE)
             await h.scenario('phone: bottom search opens on focus and closes on Esc or a tap', phone_search_and_escape, PHONE)
+            await h.scenario('phone: Settings cards, a section, Back, Esc, and the menu sheet', phone_settings_cards, PHONE)
             await browser.close()
             server.shutdown()
         failed = [name for name, error in h.results if error]
         if failed:
             print(f'USABILITY SMOKE FAIL: {len(failed)} of {len(h.results)} scenarios: {failed}')
             return 1
-        print(f'USABILITY SMOKE PASS: {len(h.results)} scenarios; new bot, out-of-job card, checkpoint card, faces, keyboard, phone search, no console errors')
+        print(f'USABILITY SMOKE PASS: {len(h.results)} scenarios; new bot, edit and move, delete, Atlas, settings, out-of-job card, checkpoint card, faces, keyboard, phone, no console errors')
         return 0
     finally:
         shutil.rmtree(site_dir, ignore_errors=True)

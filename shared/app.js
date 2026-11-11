@@ -11,17 +11,20 @@
  *   ui-chat         what happens after send (server run, threads, checkpoints)
  *   ui-shell        sidebar, phone chrome and home, search, the page frame
  *   ui-conversation a bot chat or a thread: header, feed, cards, composer
- *   ui-panel        the old "You" pages (until ui-settings.js replaces them)
+ *   ui-profile      a bot's profile, Edit, the New bot page and the bot options menu
+ *   ui-settings     Settings, the Company chart and Activity
+ *   ui-profile-model pure view models behind those screens
  *   ui-sheets       sign-in and password sheets   ui-admin   admin pages
  *   ui-dialogs      toast, sheet, confirm/ask      ui-actions action/form tables
- *   ui-fx           confetti and the send arrow
+ *   ui-fx           confetti, the send arrow and the bots' ambient life
  */
 import {companyRoute} from './ui-company.js';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, isAdmin, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js';
 import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js';
-import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, closeSearch, homeView, placeholderView} from './ui-shell.js';
+import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, closeSearch, homeView} from './ui-shell.js';
 import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js';
-import {renderPage} from './ui-panel.js';
+import {profileViews, wirePages} from './ui-profile.js';
+import {settingsViews} from './ui-settings.js';
 import {showLogin, hideLogin} from './ui-sheets.js';
 import {actions, forms, onControlChange, onControlInput} from './ui-actions.js';
 import {bringBotsToLife} from './ui-fx.js';
@@ -48,21 +51,10 @@ function keepFocus(paint) {
   paint();
   if (selector && !document.contains(a)) document.querySelector(selector)?.focus({preventScroll: true});
 }
-/** The hook for the screens that are still being built. ui-profile.js and
- * ui-settings.js register a renderer per route key ('profile', 'settings',
- * 'newBot', 'company', 'activity'): it gets the route and returns the page's
- * markup. Until then the shell's placeholders stand in (placeholderView). */
-export const PAGE_VIEWS = {};
+/** One renderer per route key: it gets the route and returns the page's markup. */
+export const PAGE_VIEWS = {...profileViews, ...settingsViews};
 const PAGE_KEYS = ['profile', 'settings', 'newBot', 'company', 'activity'];
-/** The old "You" pages still serve the settings routes that name one of them. */
-const legacyPageAllowed = page => ['you', 'about'].includes(page) || (['notifications', 'workspaces'].includes(page) && !isStaticDemo()) || (['ai', 'team', 'agents', 'data'].includes(page) && isAdmin());
-
-function pageView(route) {
-  const key = PAGE_KEYS.find(k => (k === 'settings' ? typeof route.settings === 'string' : route[k]));
-  if (PAGE_VIEWS[key]) return PAGE_VIEWS[key](route);
-  if (key === 'settings' && legacyPageAllowed(route.page)) return null;
-  return placeholderView(route);
-}
+const pageView = route => PAGE_VIEWS[PAGE_KEYS.find(k => (k === 'settings' ? typeof route.settings === 'string' : route[k]))](route);
 
 let lastDesk = null, lastHome = '';
 /** Repaint everything for the current route. One view key drives the
@@ -78,7 +70,7 @@ function renderRoute() {
     if (route.bot || route.thread) conversationShell(conversation());
     else if (route.newThread) main.innerHTML = newThreadView();
     else if (route.home) main.innerHTML = desk ? `<div class="rail-none"><p>Select a chat</p><button type="button" class="link" data-action="new-thread">or start a new thread</button></div>` : homeView();
-    else { const html = pageView(route); if (html === null) renderPage(); else main.innerHTML = html; }
+    else main.innerHTML = pageView(route);
     lastHome = main.innerHTML;
     main.classList.remove('view-enter'); void main.offsetWidth; main.classList.add('view-enter');
     // Only pull focus where it will not pop a phone keyboard open.
@@ -280,7 +272,7 @@ window.addEventListener('popstate', event => { syncDepth(event); if (!store.stat
 window.addEventListener('resize', () => { if (store.state && isDesk() !== lastDesk) changed('route'); });
 // `toggle` does not bubble, so listen in the capture phase to remember which handoff cards are open.
 document.addEventListener('toggle', trackOpen, true);
-wireShell();
+wireShell(); wirePages();
 
 applyTheme(); watchSystemTheme(); bringBotsToLife(); registerWorker();
 boot();

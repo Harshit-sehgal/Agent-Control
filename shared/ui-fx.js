@@ -47,21 +47,6 @@ const stage = () => document.getElementById('root');
  * or posted), 'aww' (you skipped one), 'woke' (they were dozing). */
 export const react = (mood, ms = 1100) => flash(stage(), mood, ms);
 
-const HELLOS = ['hi!', 'hehe', 'beep!', 'boop', 'ready!', 'yay', '\u2665'];
-const MOVES = ['boing', 'spin', 'wink', 'shy'];
-let pokes = 0;
-/** Poke a big bot face: it picks a trick and says something small. */
-export function poke(button) {
-  if (!button) return;
-  const move = MOVES[pokes % MOVES.length], word = HELLOS[pokes % HELLOS.length]; pokes++;
-  flash(button, move, 900);
-  const said = document.createElement('span');
-  said.className = 'poke-say'; said.textContent = word;
-  said.addEventListener('animationend', () => said.remove(), {once: true});
-  setTimeout(() => said.remove(), 1200); // as above: a hidden tab may skip the event
-  button.appendChild(said);
-}
-
 const NAP_AFTER_MS = 40000;
 /** The ambient wiring, in a function of its own so it can be taken apart again:
  * every listener and pending frame is registered here and undone by the disposer. */
@@ -69,7 +54,7 @@ function wireBots() {
   let frame = 0, napTimer = null;
   const listeners = [];
   const on = (target, type, fn, opts) => { target.addEventListener(type, fn, opts); listeners.push([target, type, fn]); };
-  const big = '.thread-title .face, .poke .face, .mascot';
+  const big = '.pr-face .face--awake, .lk-preview .face--awake';
   const follow = ev => {
     // A hidden tab draws no frames and a page without a big face on it (the chat
     // list, the admin pages) has nothing to move: both bail before the geometry
@@ -78,8 +63,8 @@ function wireBots() {
     frame = requestAnimationFrame(() => {
       frame = 0;
       for (const face of document.querySelectorAll(big)) {
-        const look = face.querySelector('.look'); if (!look) continue;
-        const box = face.getBoundingClientRect(), reach = face.classList.contains('mascot') ? 4 : 2.200;
+        const look = face.querySelector('.face-eyes'); if (!look) continue;
+        const box = face.getBoundingClientRect(), reach = 4; // in the face's own 100-unit box
         const dx = ev.clientX - (box.left + box.width / 2), dy = ev.clientY - (box.top + box.height / 2), far = Math.hypot(dx, dy) || 1;
         const pull = Math.min(1, far / 220);
         look.style.transform = `translate(${(dx / far * reach * pull).toFixed(2)}px, ${(dy / far * reach * pull).toFixed(2)}px)`;

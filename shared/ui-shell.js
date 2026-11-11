@@ -7,9 +7,8 @@
  * right. The lists come from ui-company.js (pure); this file is markup and events. */
 import {botRows, threadRows} from './ui-company.js';
 import {face} from './ui-face.js';
-import {esc, icon, btn, stamp, field, textInput} from './ui-kit.js';
-import {store, api, sync, go, back, groups, findBot, canWrite, loadLocal, isStaticDemo} from './ui-store.js';
-import {toast} from './ui-dialogs.js';
+import {esc, icon, stamp} from './ui-kit.js';
+import {store, go, back, groups, findBot, canWrite, loadLocal, isStaticDemo} from './ui-store.js';
 
 const el = id => document.getElementById(id);
 const DESK = '(min-width:1024px)';
@@ -35,10 +34,14 @@ const bots = () => groups().find(g => g.id === 'home')?.bots || [];
 /** The bots in the pinned row. Atlas starts pinned for everyone; a person's own
  * pins and order, once they make any, are saved under this key (see ui-gestures). */
 export const PINS_KEY = 'ac-pins';
+/** Bots the person hid from their list (the profile menu's Hide); a link under the list brings them back. */
+export const HIDDEN_KEY = 'ac-hidden';
+const hiddenBots = () => { const list = loadLocal(HIDDEN_KEY, []); return Array.isArray(list) ? list.filter(id => bots().some(b => b.id === id && b.settings?.lead !== true)) : []; };
 function chatRows(query = '') {
   const saved = loadLocal(PINS_KEY, null), primary = bots().find(b => b.settings?.lead === true);
-  return botRows(store.state, {query, pins: Array.isArray(saved) ? saved : primary ? [primary.id] : []});
+  return botRows(store.state, {query, pins: Array.isArray(saved) ? saved : primary ? [primary.id] : [], hidden: hiddenBots()});
 }
+const hiddenLink = () => { const n = hiddenBots().length; return n ? `<button type="button" class="link hv-hidden" data-action="show-hidden">Show ${n} hidden</button>` : ''; };
 const bigFace = (row, size) => { const bot = findBot(row.id); return bot ? face(bot, {size, state: row.status, primary: row.isPrimary, manager: row.isManager, index: bots().indexOf(bot)}) : ''; };
 
 function botRow(row) {
@@ -80,7 +83,7 @@ export function homeView() {
   const rows = chatRows(), pinned = rows.filter(r => r.pinned), rest = rows.filter(r => !r.pinned);
   const shelf = pinned.length ? `<div class="shelf" aria-label="Pinned bots">${pinned.map(r => pinnedRow(r, 76)).join('')}</div>` : '';
   const list = rest.length ? `<div class="crows">${rest.map(botRow).join('')}</div>` : (pinned.length === rows.length && rows.length < 2 ? '<p class="hv-empty"><strong>Atlas is your only bot</strong>Make another with the + button.</p>' : '');
-  return `<div class="hv" data-section="bots"><div class="hv-in">${shelf}${list}</div></div>`;
+  return `<div class="hv" data-section="bots"><div class="hv-in">${shelf}${list}${hiddenLink()}</div></div>`;
 }
 
 /** Switch the phone home between Bots and Threads. The page slides a short way,
@@ -125,7 +128,7 @@ export function renderRail() {
   const demo = isStaticDemo() ? '<p class="rail-demo">Browser-only demo · data stays in this browser</p>' : '';
   body.innerHTML = `${query ? '' : `<div class="rail-status"><i aria-hidden="true"></i>${esc(line)}</div>${demo}`}
     ${pinned.length ? `<div class="shelf">${pinned.map(r => pinnedRow(r, 72)).join('')}</div>` : ''}
-    <div class="crows">${rest.map(botRow).join('')}</div>
+    <div class="crows">${rest.map(botRow).join('')}</div>${query ? '' : hiddenLink()}
     ${threads ? `<div class="rail-h">Threads</div>${threads}` : ''}
     ${query && !hasRows && !threads ? '<p class="hv-empty"><strong>No match</strong>No bot or thread has that.</p>' : ''}`;
   el('rail-ini').textContent = initials(); el('rail-name').textContent = ownerName();
@@ -226,25 +229,12 @@ export function wireShell() {
   });
 }
 
-/* ---------- the page frame, and the screens still to come ---------- */
+/* ---------- the page frame ---------- */
 
 /** A page opened from the shell: a round back button, a title, then `body`. The
  * profile, settings, new bot, company and activity screens sit in this. */
 export function pageFrame({title, body = '', back = 'back-to-list', backId = '', backLabel = 'Back'}) {
   return `<section class="pg"><header class="pg-head"><button type="button" class="rbtn" data-action="${esc(back)}"${backId ? ` data-id="${esc(backId)}"` : ''} aria-label="${esc(backLabel)}">${icon('back', 20)}</button><h1>${esc(title)}</h1></header><div class="pg-body">${body}</div></section>`;
-}
-
-/** Stand-ins until ui-profile.js and ui-settings.js land. The new bot page is a
- * plain name and job form that already creates a working bot. */
-export function placeholderView(route) {
-  if (route.newBot) {
-    const form = `<form id="new-bot-lite-form" class="form" autocomplete="off">${field('Name', textInput('name', {placeholder: 'Mailroom', maxlength: 80, required: true, autofocus: true}))}${field('Job', `<textarea class="input" name="instructions" rows="4" maxlength="3000" placeholder="What is it good at? What must it never do?" required>${esc(route.job || '')}</textarea>`)}${btn('Create bot and open chat', null, {kind: 'primary', type: 'submit', wide: true})}</form>`;
-    return pageFrame({title: 'New bot', body: form, backLabel: 'Back'});
-  }
-  const bot = route.profile ? findBot(route.profile) : null;
-  const title = bot ? bot.name : route.company ? 'Company' : route.activity ? 'Activity' : 'Settings';
-  const body = bot ? `<p>${esc(bot.instructions || 'No job yet.')}</p>${btn('Message', 'open-bot', {id: bot.id, kind: 'primary'})}` : '<p>This page is being rebuilt.</p>';
-  return pageFrame({title, body, back: bot ? 'open-bot' : 'back-to-list', backId: bot?.id, backLabel: 'Back'});
 }
 
 export const shellActions = {
@@ -255,9 +245,4 @@ export const shellActions = {
   'new-thread': () => go({newThread: true}),
   'back-to-list': () => back({home: true}),
 };
-export const shellForms = {
-  'new-bot-lite-form': async (form, f) => {
-    const bot = await api('/api/groups/home/bots', 'POST', {name: f.name, instructions: f.instructions});
-    await sync(); go({bot: bot.id}, {replace: true}); toast(`${bot.name} is ready.`);
-  },
-};
+

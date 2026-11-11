@@ -1,140 +1,32 @@
 /** What the UI can do, as three lookup tables keyed by `data-action`, form id and
  * control id. app.js owns the DOM events and dispatches here; handlers throw on
  * failure and the dispatcher turns that into one toast. */
-import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, setProfile, clearMessages, isStaticDemo, canWrite, recentRuns, chatKeyOf} from './ui-store.js?v=9489b66344';
-import {botSettings, groupSettings} from './bot-settings.js?v=9489b66344';
-import {moveRow, pipelineValue, editableInputs} from './ui-model.js?v=9489b66344';
-import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=9489b66344';
-import {sendChat, streamGroupRun, watchQueuedRun} from './ui-chat.js?v=9489b66344';
-import {runWithTyping} from './run-follow.js?v=9489b66344';
-import {whoosh, react} from './ui-fx.js?v=9489b66344';
-import {shellActions, shellForms} from './ui-shell.js?v=9489b66344';
-import {conversationActions, conversationForms} from './ui-conversation.js?v=9489b66344';
-import {reloadAdminPage, pipelineList} from './ui-panel.js?v=9489b66344';
-import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, botTaskSheet, toggleReminderFields, changePasswordSheet} from './ui-sheets.js?v=9489b66344';
-import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=9489b66344';
-import {takeoverActions, takeoverForms} from './ui-takeover.js?v=9489b66344';
+import {store, api, sync, setTyping, conversation, findGroup, teamKey, recentRuns, chatKeyOf} from './ui-store.js?v=3b9121ac3d';
+import {groupSettings} from './bot-settings.js?v=3b9121ac3d';
+import {toast, closeSheet} from './ui-dialogs.js?v=3b9121ac3d';
+import {sendChat, streamGroupRun, watchQueuedRun} from './ui-chat.js?v=3b9121ac3d';
+import {runWithTyping} from './run-follow.js?v=3b9121ac3d';
+import {whoosh, react} from './ui-fx.js?v=3b9121ac3d';
+import {shellActions} from './ui-shell.js?v=3b9121ac3d';
+import {conversationActions, conversationForms} from './ui-conversation.js?v=3b9121ac3d';
+import {profileActions, profileForms, lookChanged, nameTyped, adoptFirstMessage} from './ui-profile.js?v=3b9121ac3d';
+import {settingsActions, reloadAdminPage} from './ui-settings.js?v=3b9121ac3d';
+import {changePasswordSheet} from './ui-sheets.js?v=3b9121ac3d';
+import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=3b9121ac3d';
+import {takeoverActions, takeoverForms} from './ui-takeover.js?v=3b9121ac3d';
 
 const adminCtx = {reload: reloadAdminPage};
 const chatId = () => chatKeyOf(store.route);
-const findBot = id => groupOfBot(id)?.bots.find(b => b.id === id) || (() => { throw new Error('Bot not found'); })();
-/** Patch a bot by id. A bot removed in another tab fails with a sentence the
- * toast can show, not "Cannot read properties of undefined". */
-const patchBot = (id, body) => {
-  const group = groupOfBot(id);
-  if (!group) throw new Error('That bot is no longer in a group.');
-  return api(`/api/groups/${group.id}/bots/${id}`, 'PATCH', body);
-};
 
-async function copyText(text, done) {
-  if (!navigator.clipboard?.writeText) throw new Error('Clipboard is not available here.');
-  await navigator.clipboard.writeText(text); toast(done);
-}
 export const actions = {
-  // navigation: the shell's and the conversation's own tables come first
+  // navigation: the shell's, the conversation's, the profile's and Settings' own tables come first
   ...shellActions,
   ...conversationActions,
-  'open-page': b => go({page: b.dataset.page}),
-  'open-page-you': () => back({page: 'you'}),
+  ...profileActions,
+  ...settingsActions,
   'change-password': () => changePasswordSheet(),
-  'set-theme': b => { applyTheme(b.dataset.theme); changed('route'); },
-
-  // sheets
-  'new-chat': () => newChatSheet(),
-  'new-group': () => newGroupSheet(),
-  'add-bot-to-group': b => newBotSheet(b.dataset.id),
-  'attach': () => attachSheet(),
-  'new-bot-task': () => botTaskSheet(),
   'close-sheet': () => closeSheet(),
   'sheet-confirm': () => closeSheet(true),
-
-  // conversation
-  'copy-chat': async b => {
-    const rows = store.messages[b.dataset.id] || []; if (!rows.length) throw new Error('This conversation is empty.');
-    const name = conversation(b.dataset.id)?.name || 'Bot';
-    await copyText(rows.map(m => `[${m.at || ''}] ${m.role === 'user' ? 'You' : (m.senderName || (m.role === 'system' ? 'Event' : name))}: ${m.text}`).join('\n\n'), 'Conversation copied');
-  },
-  'clear-chat': async b => {
-    if (!store.messages[b.dataset.id]?.length) return toast('This conversation is already empty');
-    if (!await confirmSheet('Clear this conversation?', {confirm: 'Clear', danger: true, detail: 'Messages are removed for everyone in this workspace.'})) return;
-    await clearMessages(b.dataset.id); toast('Conversation cleared');
-  },
-
-  // bots
-  'avatar': async b => {
-    const index = Number(b.dataset.index); pickTint(index);
-    if (!b.closest('#edit-bot-form')) return;
-    if (!canWrite()) throw new Error('Only a member can edit a bot; this account can read it.');
-    // The colour syncs through the server; the local pick paints it at once.
-    const bot = findBot(chatId());
-    setProfile(bot.id, {avatarIndex: index}); bot.settings = {...(bot.settings || {}), tint: index}; changed('thread');
-    await patchBot(bot.id, {settings: {tint: index}});
-  },
-  'toggle-bot': async b => {
-    const bot = findBot(b.dataset.id), enabled = !botSettings(bot).enabled;
-    await patchBot(bot.id, {settings: {enabled}}); await sync(); toast(enabled ? `${bot.name} is on.` : `${bot.name} is switched off.`);
-  },
-  'remove-bot': async b => {
-    const bot = findBot(b.dataset.id), group = groupOfBot(bot.id);
-    if (!await confirmSheet(`Remove ${bot.name} from ${group.name}?`, {confirm: 'Remove', danger: true, detail: 'Its chat and scheduled tasks stop. Past group messages stay.'})) return;
-    await api(`/api/groups/${group.id}/bots/${bot.id}`, 'DELETE', {});
-    await sync(); go({chat: teamKey(group.id)}, {replace: true}); toast(`${bot.name} removed.`);
-  },
-  'pin-bot': b => { findBot(b.dataset.id); const pinned = !store.profiles[b.dataset.id]?.pinned; setProfile(b.dataset.id, {pinned}); changed(); toast(pinned ? 'Pinned to the top' : 'Unpinned'); },
-  'duplicate-bot': async b => {
-    const id = b.dataset.id, group = groupOfBot(id), base = findBot(id);
-    const copy = await api(`/api/groups/${group.id}/bots`, 'POST', {name: `${base.name} copy`.slice(0, 80), instructions: base.instructions, settings: {...botSettings(base), lead: false}});
-    if (base.contract || base.permissions) await api(`/api/groups/${group.id}/bots/${copy.id}`, 'PATCH', {contract: base.contract, permissions: base.permissions || []});
-    setProfile(copy.id, {avatarIndex: store.profiles[id]?.avatarIndex ?? 0});
-    await sync(); go({chat: copy.id}); toast('Bot duplicated. Its chat starts empty.');
-  },
-  'copy-bot-instructions': b => copyText(findBot(b.dataset.id).instructions || '', 'Instructions copied'),
-
-  // memory: per-model rulebook and per-chat recap
-  'update-memory': async b => {
-    if (isStaticDemo()) { toast('Updating memory needs the Node build and an AI provider.'); return; }
-    const bot = findBot(b.dataset.id);
-    const result = await api('/api/memory/consolidate', 'POST', {botId: bot.id, chat: b.dataset.chat || bot.id});
-    await sync();
-    toast(result.skipped ? 'Memory is already up to date.' : 'Memory updated.');
-  },
-  'forget-rule': async b => {
-    await api(`/api/memory/rules/${encodeURIComponent(b.dataset.rule)}?model=${encodeURIComponent(b.dataset.model)}`, 'DELETE');
-    await sync();
-    toast('Rule forgotten.');
-  },
-  'forget-chat-memory': async b => {
-    if (!await confirmSheet('Forget this chat for the model?', {confirm: 'Forget', danger: true, detail: 'The recap goes. Messages stay in the conversation.'})) return;
-    await api('/api/memory/forget', 'POST', {chat: b.dataset.chat});
-    await sync();
-    toast('Chat memory forgotten.');
-  },
-
-  'remove-bot-task': async b => {
-    if (!await confirmSheet('Remove this scheduled task?', {confirm: 'Remove', danger: true, detail: 'It stops running. Answers it already gave stay in the chat.'})) return;
-    await api(`/api/tasks/${b.dataset.id}`, 'DELETE', {}); toast('Scheduled task removed'); await sync();
-  },
-  'retry-bot-task': async b => {
-    await api(`/api/tasks/${b.dataset.id}/retry`, 'POST', {}); toast('Task queued again.'); await sync();
-  },
-
-  // groups
-  'pipeline-move': b => {
-    const draft = store.pipelineDraft, group = conversation()?.group; if (!draft || !group) return;
-    const index = Number(b.dataset.index), delta = Number(b.dataset.delta), to = index + delta;
-    draft.rows = moveRow(draft.rows, index, delta);
-    const list = document.getElementById('pipeline-rows'); if (!list) return;
-    list.innerHTML = pipelineList(group);
-    // Keep the keyboard on the bot that moved, or on its other arrow at an end.
-    const same = list.querySelector(`[data-action="pipeline-move"][data-index="${to}"][data-delta="${delta}"]`);
-    (same && !same.disabled ? same : list.querySelector(`[data-action="pipeline-move"][data-index="${to}"][data-delta="${-delta}"]`))?.focus();
-  },
-  'delete-group': async b => {
-    const group = findGroup(b.dataset.id); if (!group) throw new Error('Group not found');
-    if (!await confirmSheet(`Delete ${group.name}?`, {confirm: 'Delete group', danger: true, detail: 'Its bots, their chats and its scheduled tasks are removed. This cannot be undone.'})) return;
-    await api(`/api/groups/${group.id}`, 'DELETE', {});
-    store.pipelineDraft = null; await sync(); go({}, {replace: true}); toast('Group deleted.');
-  },
 
   // runs (Node build)
   'continue-run': async b => {
@@ -196,59 +88,14 @@ export const forms = {
   'chat-form': async form => {
     const input = form.elements.namedItem('message'), text = input.value;
     input.value = ''; input.style.height = '';
-    whoosh(form.querySelector('.send')); react('nod', 700);
+    whoosh(form.querySelector('.cv-send')); react('nod', 700);
+    // The first message to a bot made without a job is its job.
+    await adoptFirstMessage(chatId(), text);
     await sendChat(chatId(), text);
   },
-  ...shellForms,
   ...conversationForms,
+  ...profileForms,
   'ask-form': (form, f) => closeSheet(String(f.answer || '')),
-  'new-bot-form': async (form, f) => {
-    const bot = await api(`/api/groups/${f.group}/bots`, 'POST', {name: f.name, instructions: f.instructions, settings: {tint: pickedTint}});
-    setProfile(bot.id, {avatarIndex: pickedTint});
-    closeSheet(); await sync(); go({chat: bot.id}); toast(`${bot.name} is ready.`);
-  },
-  'new-group-form': async (form, f) => {
-    const group = await api('/api/groups', 'POST', {name: f.name, description: f.description});
-    closeSheet(); await sync(); go({chat: teamKey(group.id), info: 'home'}); toast('Group created. Add a bot to get started.');
-  },
-  'edit-bot-form': async (form, f) => {
-    if (!canWrite()) throw new Error('Only a member can edit a bot; this account can read it.');
-    const b = conversation()?.bot; if (!b) throw new Error('Bot not found');
-    // The lasting profile goes through the API so it survives a reload and is
-    // shared across devices. Only the cosmetic tint stays in localStorage.
-    const permissions = [...form.querySelectorAll('input[name="permissions"]:checked')].map(x => x.value);
-    const kind = f.outputKind === 'structured' ? 'structured' : 'text';
-    const inputs = editableInputs(b);
-    const fields = kind === 'structured' ? String(f.fields || '').split(',').map(s => s.trim()).filter(Boolean).map(name => ({name, type: 'text', required: true})) : [];
-    const on = name => Boolean(form.elements.namedItem(name)?.checked), picked = form.querySelector('.tint.on');
-    const settings = {
-      enabled: on('enabled'), replyLength: f.replyLength, style: f.style || '',
-      temperature: String(f.temperature ?? '').trim() === '' ? null : Number(f.temperature),
-      contextMessages: Number(f.contextMessages), memory: on('memory'), summonable: on('summonable'), canHandoff: on('canHandoff'), lead: on('lead'),
-      ...(f.browserApproval ? {browserApproval: f.browserApproval} : {}),
-      ...(picked ? {tint: Number(picked.dataset.index)} : {}),
-    };
-    await api(`/api/groups/${groupOfBot(b.id).id}/bots/${b.id}`, 'PATCH', {name: f.name, instructions: f.instructions, contract: {version: 1, inputs, output: {kind, fields}}, permissions, settings});
-    // Per-bot model override (bring your own key); only when the picker is shown.
-    if (form.querySelector('[name="model"]')) await api(`/api/ai/bots/${b.id}`, 'PATCH', {providerId: f.providerId || null, model: f.model || ''});
-    await sync(); go({chat: b.id, info: 'home'}); toast('Profile saved.');
-  },
-  'group-settings-form': async (form, f) => {
-    if (!canWrite()) throw new Error('A member can change group settings.');
-    const group = conversation()?.group; if (!group) throw new Error('Group not found');
-    const rows = store.pipelineDraft?.groupId === group.id ? store.pipelineDraft.rows : [];
-    const pipeline = pipelineValue(rows, group);
-    if (Array.isArray(pipeline) && !pipeline.length) throw new Error('Tick at least one bot to take turns.');
-    const on = name => Boolean(form.elements.namedItem(name)?.checked);
-    await api(`/api/groups/${group.id}`, 'PATCH', {name: f.name, description: f.description || '', settings: {routing: f.routing || groupSettings(group).routing, coordination: f.coordination || groupSettings(group).coordination, pipeline, maxSteps: Number(f.maxSteps), checkpoints: on('checkpoints'), confirmPlan: on('confirmPlan'), botHandoffs: on('botHandoffs')}});
-    store.pipelineDraft = null; await sync(); toast('Group settings saved.');
-  },
-  'bot-task-form': async (form, f) => {
-    const once = f.kind === 'once';
-    const payload = {groupId: f.groupId, botId: f.botId || null, message: f.message, kind: once ? 'once' : 'interval', ...(once ? {nextAt: new Date(f.nextAt).toISOString()} : {intervalMinutes: Number(f.intervalMinutes)})};
-    await api('/api/tasks', 'POST', {kind: 'bot-task', payload, ...(once ? {} : {intervalMinutes: payload.intervalMinutes})});
-    closeSheet(); await sync(); toast(once ? 'Task scheduled.' : `Task scheduled every ${payload.intervalMinutes} min.`);
-  },
   'password-form': async (form, f) => {
     await api('/api/auth/password', 'POST', {currentPassword: f.currentPassword, newPassword: f.newPassword});
     closeSheet(); toast('Password updated. Other sessions are signed out.');
@@ -257,18 +104,11 @@ export const forms = {
   ...takeoverForms,
 };
 
-/** `change` events, by control id (or data-action for the admin tables). */
+/** `change` events: the shape and colour pickers, then the admin tables. */
 export function onControlChange(control) {
-  if (control.id === 'bot-template') {
-    const template = BOT_TEMPLATES[control.value] || BOT_TEMPLATES.blank, form = control.form;
-    form.elements.namedItem('name').value = template.name; form.elements.namedItem('instructions').value = template.instructions;
-  }
-  if (control.matches('#bot-task-form [name=kind]')) toggleReminderFields(control.form.id);
-  if (control.matches('[name=pipeline-include]') && store.pipelineDraft) {
-    const r = store.pipelineDraft.rows[Number(control.dataset.index)]; if (r) r.included = control.checked;
-  }
+  if (lookChanged(control)) return;
   const admin = adminChanges[control.dataset.action];
   if (admin) return admin(control, adminCtx);
 }
-/** `input` events for the live filters. */
-export function onControlInput() {}
+/** `input` events: the New bot name switches Create on. */
+export function onControlInput(control) { nameTyped(control); }

@@ -1,0 +1,421 @@
+/** A bot's profile (a hero, a card of rows, one page behind each row), the Edit page,
+ * the New bot page and the bot options menu that opens from ⋯ (and, in Task 11, from
+ * a right-click or long press). Ported from mock v46. The view models are pure and
+ * tested in ui-profile-model.js; this file is markup, events and the API calls.
+ *
+ * Pages repaint only when the route changes, so each in-place change (a switch, a
+ * forgotten note, a picked colour) updates its own node instead. */
+import {SHAPES, COLORS, face} from './ui-face.js';
+import {botStatus, botIsManager} from './ui-company.js';
+import {primaryOf} from './company.js';
+import {esc, icon, field, textInput, clock, roundBtn, switchBtn} from './ui-kit.js';
+import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isStaticDemo, loadLocal, saveLocal} from './ui-store.js';
+import {PINS_KEY, HIDDEN_KEY} from './ui-shell.js';
+import {toast, confirmSheet} from './ui-dialogs.js';
+import {sendChat} from './ui-chat.js';
+import {
+  MAX_NAME, hasJob, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, lookOf, newBotDefaults,
+  newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, directReports, permissionLabel, closeTarget,
+} from './ui-profile-model.js';
+
+const el = id => document.getElementById(id);
+const MUTED_KEY = 'ac-muted';
+const SHAPE_LABELS = {rounded: 'Rounded square', circle: 'Circle', hexagon: 'Hexagon', pebble: 'Pebble', drop: 'Drop', shield: 'Shield', arch: 'Arch', egg: 'Egg', blob: 'Blob', bean: 'Bean'};
+
+/* ---------- small helpers ---------- */
+
+const roster = () => (store.state?.groups || []).find(g => g.id === 'home')?.bots || [];
+/** A bot's face. Resting bots look awake on their own profile; only work or a wait changes that. */
+export function faceOf(bot, size, {state, hop = false, motion = true} = {}) {
+  const live = botStatus(store.state, bot.id);
+  return face(bot, {size, state: state ?? (live === 'asleep' ? 'awake' : live), primary: bot.settings?.lead === true, manager: botIsManager(store.state, bot.id), index: Math.max(0, roster().indexOf(bot)), hop, motion});
+}
+const svg = (inner, size = 22) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+/** Pages sit in the stage with the same fade a route change gets: bump `v` so the same route paints again. */
+export const repaint = () => go({...store.route, v: (store.route.v || 0) + 1}, {replace: true});
+
+const savedList = (key, fallback = []) => { const v = loadLocal(key, null); return Array.isArray(v) ? v : fallback; };
+/** Pins as the list sees them: the saved ones, else Atlas (pinned by default for everyone). */
+function currentPins() {
+  const saved = loadLocal(PINS_KEY, null), primary = primaryOf(store.state);
+  return Array.isArray(saved) ? saved : primary ? [primary.id] : [];
+}
+export const isPinned = id => currentPins().includes(id);
+export function togglePin(id) {
+  const pins = currentPins(), on = pins.includes(id);
+  saveLocal(PINS_KEY, on ? pins.filter(x => x !== id) : [...pins, id]);
+  changed();
+  return !on;
+}
+/** Forget a bot that is gone from the per-person lists. */
+function forget(id) {
+  for (const key of [PINS_KEY, HIDDEN_KEY, MUTED_KEY]) { const list = loadLocal(key, null); if (Array.isArray(list) && list.includes(id)) saveLocal(key, list.filter(x => x !== id)); }
+}
+
+/** Where a profile was opened from: Back goes to that thread, else to the bot's chat. */
+let prevRoute = store.route, fromThread = null;
+onChange(scope => {
+  if (scope !== 'route') return;
+  const route = store.route;
+  if (route.profile) { if (!prevRoute.profile) fromThread = prevRoute.thread || null; } else fromThread = null;
+  prevRoute = route;
+  closeBotMenu();
+});
+
+/* ---------- the options menu ---------- */
+
+let menu = null;
+const phoneMenu = () => matchMedia('(max-width:640px), (pointer:coarse)').matches;
+export function closeBotMenu({restore = true} = {}) {
+  if (!menu) return;
+  const {node, scrim, opener} = menu; menu = null;
+  node.remove(); scrim?.remove();
+  if (restore && opener && document.contains(opener)) opener.focus({preventScroll: true});
+}
+export const botMenuOpen = () => Boolean(menu);
+
+const menuButton = (action, id, label, extra = '', cls = '') => `<button type="button" role="menuitem" class="${cls}" data-action="${action}" data-id="${esc(id)}"${extra}>${label}</button>`;
+/** Open the options menu for a bot. `x`/`y` place it at a pointer (a right-click);
+ * otherwise it hangs from `opener`. A phone gets a sheet from the bottom. */
+export function openBotMenu(botId, {opener = null, x = null, y = null, touch = null} = {}) {
+  closeBotMenu({restore: false});
+  const bot = findBot(botId); if (!bot) return;
+  const items = menuItems(store.state, botId, {pinned: isPinned(botId)}), sheet = touch ?? phoneMenu();
+  const body = items.map(item => {
+    if (item.id === 'move') {
+      const kids = item.targets.map(t => `<button type="button" role="menuitem" data-action="menu-move-to" data-id="${esc(botId)}" data-to="${esc(t.id ?? '')}">${t.id ? faceOf(findBot(t.id) || {id: t.id, name: t.label, settings: {}}, 20, {state: 'asleep', motion: false}) : ''}<span>${esc(t.label)}</span></button>`).join('');
+      return `<button type="button" role="menuitem" aria-expanded="false" data-action="menu-move" data-id="${esc(botId)}">${esc(item.label)}</button><div class="mn-move" hidden>${kids}</div>`;
+    }
+    const act = {message: 'menu-message', pin: 'menu-pin', hide: 'menu-hide', delete: 'menu-delete'}[item.id];
+    return `${item.id === 'hide' ? '<hr>' : ''}${menuButton(act, botId, esc(item.label), '', item.danger ? 'danger' : '')}`;
+  }).join('');
+  const node = document.createElement('div');
+  node.id = 'cmenu'; node.className = `mn${sheet ? ' sheet' : ''}`; node.setAttribute('role', 'menu'); node.setAttribute('aria-label', `Options for ${bot.name}`);
+  node.innerHTML = `<div class="mn-h">${faceOf(bot, 32, {state: 'awake', motion: false})}<span><b>${esc(bot.name)}</b><small>${esc(teamLine(store.state, botId))}</small></span></div>${body}`;
+  const scrim = sheet ? Object.assign(document.createElement('div'), {className: 'mn-scrim'}) : null;
+  if (scrim) { scrim.addEventListener('click', () => closeBotMenu()); document.body.append(scrim); }
+  document.body.append(node);
+  if (!sheet) {
+    const at = opener?.getBoundingClientRect(), w = node.offsetWidth, h = node.offsetHeight;
+    const px = x ?? (at ? at.right - w : 8), py = y ?? (at ? at.bottom + 6 : 8);
+    node.style.left = `${Math.max(8, Math.min(px, innerWidth - w - 8))}px`; node.style.top = `${Math.max(8, Math.min(py, innerHeight - h - 8))}px`;
+  }
+  menu = {node, scrim, opener: opener || document.activeElement};
+  node.querySelector('button')?.focus({preventScroll: true});
+}
+
+/* ---------- the profile ---------- */
+
+const MORE = svg('<circle cx="5.5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="18.5" cy="12" r="1.4" fill="currentColor"/>', 20);
+const ROW_ICONS = {memory: 'note', activity: 'pulse', permissions: 'shield', model: 'chip', computer: 'monitor', team: 'people'};
+const SUB_TITLES = {memory: 'Memory', activity: 'Activity', permissions: 'Permissions', model: 'Model', computer: 'Computer', team: 'Team', edit: 'Edit'};
+
+const bar = (left, right = '') => `<header class="pr-bar">${left}<span class="pr-grow"></span>${right}</header>`;
+const subBar = (bot, title) => `<header class="pr-bar pr-subbar">${roundBtn('back', `Back to ${bot.name}`, 'profile-up', {id: bot.id})}<h1>${esc(title)}</h1><span class="rbtn ghost" aria-hidden="true"></span></header>`;
+const mutedBots = () => savedList(MUTED_KEY);
+
+function hero(bot) {
+  const state = store.state, job = hasJob(bot) ? esc(bot.instructions) : `No job yet. Tell ${esc(bot.name)} what to do in its chat.`;
+  return `<div class="pr-hero">
+    <button type="button" class="pr-face" data-action="hop" aria-label="Say hi to ${esc(bot.name)}">${faceOf(bot, 84, {hop: false})}</button>
+    <h1>${esc(bot.name)}</h1><small>${esc(teamLine(state, bot.id))}</small><p>${job}</p>
+    ${canWrite() ? `<button type="button" class="pill-btn" data-action="profile-sub" data-id="${esc(bot.id)}" data-sub="edit">Edit</button>` : ''}
+  </div>`;
+}
+
+function profileMain(bot) {
+  // The log is not in the snapshot, so the Activity count is filled in after the page paints.
+  const value = r => (r.key === 'activity' ? `<span class="pv" data-activity-count="${esc(bot.id)}"></span>` : r.value ? `<span class="pv">${esc(r.value)}</span>` : '');
+  const rows = profileRows(store.state, bot.id).map(r => `<button type="button" class="rw" data-action="profile-sub" data-id="${esc(bot.id)}" data-sub="${r.key}"><span class="rw-i">${icon(ROW_ICONS[r.key], 22)}</span><span class="w">${esc(r.label)}</span>${value(r)}${icon('chevron', 18)}</button>`).join('');
+  const on = !mutedBots().includes(bot.id);
+  return `${bar(roundBtn('back', `Back to ${bot.name}'s chat`, 'profile-back', {id: bot.id}), `<button type="button" class="rbtn" data-action="bot-menu" data-id="${esc(bot.id)}" aria-haspopup="menu" aria-label="More for ${esc(bot.name)}">${MORE}</button>`)}
+    <div class="pg-body pr-body">
+      ${hero(bot)}
+      <div class="cd">${rows}</div>
+      <div><div class="cd"><div class="rw"><span class="w">Notifications</span>${switchBtn(on, `Notifications for ${bot.name}`, ` data-action="profile-notify" data-id="${esc(bot.id)}"`)}</div></div>
+      <p class="pr-note">Get notified when ${esc(bot.name)} finishes or is waiting for you.</p></div>
+    </div>`;
+}
+
+/* ----- the pages behind the rows ----- */
+
+function memoryList(bot) {
+  const notes = memoryNotes(store.state, bot.id), write = canWrite();
+  if (!notes.length) return `<p class="pr-note">Nothing yet. Tell ${esc(bot.name)} to remember something, or add a note below.</p>`;
+  return `<div class="cd">${notes.map(n => `<div class="rw memo"><span class="w">${esc(n.text)}</span>${write ? `<button type="button" class="memo-x" data-action="memory-forget" data-id="${esc(bot.id)}" data-rule="${esc(n.id)}" aria-label="Forget this note">Forget</button>` : ''}</div>`).join('')}</div>`;
+}
+function memoryPage(bot) {
+  const write = canWrite();
+  return `<p class="pr-note">Private to ${esc(bot.name)}. It reads these when they help.</p>
+    <div id="pr-memory">${memoryList(bot)}</div>
+    ${write ? `<form id="memory-form" class="pr-add" data-bot="${esc(bot.id)}" autocomplete="off"><input class="input" name="text" minlength="4" maxlength="240" placeholder="Tell ${esc(bot.name)} something to remember" aria-label="New memory" required><button type="submit" class="btn primary">Add</button></form>` : ''}`;
+}
+
+/** One activity entry: the bot's face (a dot when it is gone), one sentence, the time; tapping opens its thread. */
+export function activityRowHtml(entry) {
+  const bot = entry.botId ? findBot(entry.botId) : null, to = activityTarget(entry);
+  const lead = bot ? faceOf(bot, 28, {state: 'asleep', motion: false}) : `<span class="ay-dot">${icon('pulse', 14)}</span>`;
+  const inner = `${lead}<span class="w">${esc(entry.text)}</span><time>${esc(clock(entry.at))}</time>`;
+  if (!to) return `<div class="rw ay-row">${inner}</div>`;
+  return `<button type="button" class="rw ay-row" data-action="${to.thread ? 'open-thread' : 'open-bot'}" data-id="${esc(to.thread || to.bot)}">${inner}</button>`;
+}
+/** Entries under Today, Yesterday and dates, each day one card. */
+export const activityBlocks = items => activityDays(items).map(d => `<div class="ay-day">${esc(d.label)}</div><div class="cd">${d.rows.map(activityRowHtml).join('')}</div>`).join('');
+
+let showAll = null;
+const SHOWN = 5;
+async function loadBotActivity(botId) {
+  const node = el('pr-activity'); if (!node) return;
+  const open = showAll === botId;
+  try {
+    const page = await api(activityUrl({filter: 'all', botId, limit: open ? 200 : SHOWN}));
+    if (!node.isConnected) return;
+    node.innerHTML = !page.items.length ? '<p class="pr-note">Nothing yet.</p>'
+      : `${activityBlocks(page.items)}${page.total > SHOWN ? `<button type="button" class="link" data-action="profile-activity-all" data-id="${esc(botId)}">${open ? 'Show less' : `Show all ${page.total}`}</button>` : ''}`;
+  } catch (error) { if (node.isConnected) node.innerHTML = `<p class="pr-note">${esc(error.message || 'Could not load activity.')}</p>`; }
+}
+async function fillActivityCount(botId) {
+  try {
+    const page = await api(activityUrl({filter: 'all', botId, limit: 1}));
+    const node = document.querySelector('[data-activity-count]');
+    if (node && node.dataset.activityCount === botId && page.total) node.textContent = String(page.total);
+  } catch { /* The count is a nicety; the page works without it. */ }
+}
+const activityPage = bot => { setTimeout(() => loadBotActivity(bot.id), 0); return '<div id="pr-activity" class="pr-stack"><p class="pr-note">Loading…</p></div>'; };
+
+function permissionsPage(bot) {
+  const list = bot.permissions || [];
+  const rows = list.map(a => `<div class="rw"><span class="w">${esc(permissionLabel(a))}<small>${esc(a)}</small></span><span class="pv">Allowed</span></div>`).join('');
+  return `${list.length ? `<div class="cd">${rows}</div>` : `<p class="pr-note">${esc(bot.name)} has no extra permissions. It can chat with you and hand work to other bots.</p>`}
+    <p class="pr-note">This list is read-only for now. Paying or spending money will never get Always allow.</p>`;
+}
+
+function modelPage(bot) {
+  const ai = store.state?.ai || {}, own = ai.bots?.[bot.id] || {}, providers = ai.providers || [];
+  const options = [['', 'Workspace default'], ...providers.map(p => [p.id, p.label || p.id])].map(([v, l]) => `<option value="${esc(v)}"${v === (own.providerId || '') ? ' selected' : ''}>${esc(l)}</option>`).join('');
+  const picker = !isStaticDemo() && canWrite() && (providers.length || store.state?.aiEnabled)
+    ? `<form id="bot-model-form" class="pr-form" data-bot="${esc(bot.id)}" autocomplete="off">${field('Model provider', `<select class="input" name="providerId">${options}</select>`)}${field('Model', textInput('model', {value: own.model || '', placeholder: 'Leave empty for the default', maxlength: 120}))}<button type="submit" class="btn primary wide">Save model</button></form>` : '';
+  return `<div class="cd"><div class="rw"><span class="w">Context<small>Picks what it needs from memory and the thread</small></span><span class="pv">Automatic</span></div></div>
+    ${picker || `<p class="pr-note">${isStaticDemo() ? 'This demo answers with built-in replies, so there is no model to pick. Models need the Node server.' : 'Add a model provider under Settings, then pick one here.'}</p>`}`;
+}
+
+const computerPage = bot => `<div class="cd"><div class="rw"><span class="w">Shared browser<small>Bots use it only with your permission, and you can take over.</small></span><span class="pv">Idle</span></div></div>
+  <p class="pr-note">When ${esc(bot.name)} opens a page, you can watch it here. Nothing is running now.</p>`;
+
+function teamPage(bot) {
+  const reports = directReports(store.state, bot.id);
+  return `<div class="cd">${reports.map(b => `<button type="button" class="rw" data-action="open-bot" data-id="${esc(b.id)}">${faceOf(b, 40)}<span class="w">${esc(b.name)}<small>${esc(hasJob(b) ? b.instructions.split(/[.:]/)[0] : 'No job yet')}</small></span>${icon('chevron', 18)}</button>`).join('')}</div>`;
+}
+
+/* ----- shape and colour: shared by Edit and New bot ----- */
+
+const stand = (shape, tint, name = 'x') => ({id: '_pick', name, settings: {shape, tint}});
+/** The shape grid and the colour dots. The inputs are native radios, so the keyboard works. */
+export function lookPicker({shape, tint}) {
+  const shapes = SHAPES.map(s => `<label class="lk-shape" title="${SHAPE_LABELS[s]}"><input type="radio" name="shape" value="${s}"${s === shape ? ' checked' : ''} aria-label="${SHAPE_LABELS[s]}"><span>${face(stand(s, tint), {size: 32, state: 'awake', motion: false})}</span></label>`).join('');
+  const dots = COLORS.map((c, i) => `<label class="lk-dot" style="--c:${c}"><input type="radio" name="tint" value="${i}"${i === tint ? ' checked' : ''} aria-label="Colour ${i + 1}"><span></span></label>`).join('');
+  return `<fieldset class="lk"><legend class="sr-only">Shape</legend><div class="lk-shapes">${shapes}</div></fieldset><fieldset class="lk"><legend class="sr-only">Colour</legend><div class="lk-dots">${dots}</div></fieldset>`;
+}
+const previewFace = (form, base = {}) => {
+  const shape = form.elements.shape?.value || 'rounded', tint = Number(form.elements.tint?.value) || 0;
+  return face({...base, settings: {...(base.settings || {}), shape, tint}}, {size: 84, state: 'awake', primary: base.settings?.lead === true});
+};
+/** A radio changed in an Edit or New bot form: redraw the big preview, and the
+ * shape faces when the colour changed. The inputs themselves stay put, so focus does too. */
+export function lookChanged(control) {
+  const form = control.form;
+  if (!form || !['shape', 'tint'].includes(control.name) || !form.matches('#edit-bot-form, #new-bot-form')) return false;
+  const base = form.id === 'edit-bot-form' ? findBot(form.dataset.bot) || {} : {name: 'x', settings: {}};
+  const preview = form.querySelector('.lk-preview'); if (preview) preview.innerHTML = previewFace(form, base);
+  if (control.name === 'tint') for (const label of form.querySelectorAll('.lk-shape')) label.querySelector('span').innerHTML = face(stand(label.querySelector('input').value, Number(control.value)), {size: 32, state: 'awake', motion: false});
+  return true;
+}
+
+function managerSelect(botId, current) {
+  const options = managerOptions(store.state, botId), group = (label, kind) => { const list = options.filter(o => o.kind === kind); return list.length ? `<optgroup label="${label}">${list.map(o => `<option value="${esc(o.id)}"${o.id === current ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}</optgroup>` : ''; };
+  const primary = primaryOf(store.state)?.name || 'Atlas';
+  return `<select class="input" name="reportsTo"><option value="">None, reports to ${esc(primary)}</option>${group('Managers', 'manager')}${group('Other bots', 'bot')}</select>`;
+}
+
+function editPage(bot) {
+  const look = lookOf(store.state, bot.id), isPrimary = primaryOf(store.state)?.id === bot.id;
+  return `<form id="edit-bot-form" class="pr-form" data-bot="${esc(bot.id)}" data-was="${esc(JSON.stringify(look))}" autocomplete="off">
+    <div class="lk-preview">${face({...bot, settings: {...(bot.settings || {}), shape: look.shape, tint: look.tint}}, {size: 84, state: 'awake', primary: isPrimary})}</div>
+    ${field('Name', textInput('name', {value: bot.name, maxlength: MAX_NAME, required: true}))}
+    ${isPrimary ? '' : field('Manager', managerSelect(bot.id, look.reportsTo))}
+    ${lookPicker(look)}
+    <p class="pr-note">To change what ${esc(bot.name)} does, tell it in its chat.</p>
+    <button type="submit" class="btn primary wide big">Save</button>
+  </form>`;
+}
+
+const SUBS = {memory: memoryPage, activity: activityPage, permissions: permissionsPage, model: modelPage, computer: computerPage, team: teamPage, edit: editPage};
+
+export function profileView(route) {
+  const bot = findBot(route.profile);
+  if (!bot) return `<section class="pg pr">${bar(roundBtn('back', 'Back', 'back-to-list', {}))}<div class="pg-body pr-body"><p class="pr-note">That bot is no longer here.</p></div></section>`;
+  const page = SUBS[route.sub];
+  if (!page || (route.sub === 'edit' && !canWrite())) { setTimeout(() => fillActivityCount(bot.id), 0); return `<section class="pg pr" data-bot="${esc(bot.id)}">${profileMain(bot)}</section>`; }
+  return `<section class="pg pr" data-bot="${esc(bot.id)}">${subBar(bot, SUB_TITLES[route.sub])}<div class="pg-body pr-body">${page(bot)}</div></section>`;
+}
+
+/* ---------- the New bot page ---------- */
+
+export function newBotView(route) {
+  const defaults = newBotDefaults(store.state), write = canWrite();
+  const job = String(route.job || '').trim();
+  return `<section class="pg nb"><header class="pr-bar">${roundBtn('back', 'Close', 'back-to-list', {})}<h1 class="nb-title">New bot</h1></header>
+    <form id="new-bot-form" class="pg-body nb-body" autocomplete="off">
+      <div class="lk-preview">${face({name: 'x', settings: {shape: defaults.shape, tint: defaults.tint}}, {size: 84, state: 'awake'})}</div>
+      <input class="nb-name" name="name" required maxlength="${MAX_NAME}" placeholder="Name your bot" aria-label="Bot name" autocomplete="off" autofocus${write ? '' : ' disabled'}>
+      ${lookPicker(defaults)}
+      <label class="nb-boss"><span>Manager</span>${managerSelect(null, '')}</label>
+      <p class="pr-note nb-note">You set its job in the chat.</p>
+      ${job ? `<p class="nb-job"><b>First job</b>${esc(job)}</p><input type="hidden" name="job" value="${esc(job)}">` : ''}
+      <button type="submit" class="nb-go" disabled>Create</button>
+    </form></section>`;
+}
+/** Create stays off until the bot has a name. */
+export function nameTyped(control) {
+  if (control.form?.id !== 'new-bot-form' || control.name !== 'name') return false;
+  const create = control.form.querySelector('.nb-go'); if (create) create.disabled = !canCreate({name: control.value});
+  return true;
+}
+
+/* ---------- what the buttons do ---------- */
+
+const patchBot = (id, body) => {
+  const group = groupOfBot(id);
+  if (!group) throw new Error('That bot is no longer in the company.');
+  return api(`/api/groups/${group.id}/bots/${id}`, 'PATCH', body);
+};
+const botName = id => findBot(id)?.name || 'The bot';
+const close = () => closeBotMenu({restore: false});
+
+/** Leave whatever page is open: back through history when this session put it
+ * there, else to where the route goes. A profile never goes to the Company page. */
+export function closePage() {
+  const target = closeTarget(store.route, fromThread);
+  if (target.pop) back(target.route); else go(target.route, {replace: true});
+}
+
+async function removeBot(id) {
+  const bot = findBot(id); if (!bot) return;
+  const copy = deleteCopy(store.state, id);
+  if (!await confirmSheet(copy.title, {confirm: 'Delete', danger: true, detail: copy.detail})) return;
+  await api(`/api/groups/${groupOfBot(id).id}/bots/${id}`, 'DELETE', {});
+  forget(id); await sync();
+  const route = store.route;
+  if (route.bot === id || route.profile === id) go({home: true}, {replace: true}); else if (route.company) repaint();
+  toast(`${bot.name} deleted.`);
+}
+async function moveBot(id, to) {
+  await patchBot(id, {settings: {reportsTo: to || null}});
+  await sync();
+  toast(to ? `${botName(id)} now reports to ${botName(to)}.` : `${botName(id)} reports to ${primaryOf(store.state)?.name || 'Atlas'} directly.`);
+  if (store.route.profile === id || store.route.company) repaint();
+}
+
+export const profileActions = {
+  'profile-back': b => go(profileBackRoute(b.dataset.id, fromThread), {replace: true}),
+  'profile-up': b => go({profile: b.dataset.id}, {replace: true}),
+  'profile-sub': b => go({profile: b.dataset.id, sub: b.dataset.sub}),
+  'bot-menu': b => (botMenuOpen() ? closeBotMenu() : openBotMenu(b.dataset.id, {opener: b})),
+  'profile-notify': b => {
+    const id = b.dataset.id, muted = mutedBots(), on = muted.includes(id);
+    saveLocal(MUTED_KEY, on ? muted.filter(x => x !== id) : [...muted, id]);
+    b.setAttribute('aria-checked', String(on));
+  },
+  'profile-activity-all': b => { showAll = showAll === b.dataset.id ? null : b.dataset.id; return loadBotActivity(b.dataset.id); },
+  'memory-forget': async b => {
+    await api(`/api/memory/rules/${encodeURIComponent(b.dataset.rule)}?bot=${encodeURIComponent(b.dataset.id)}`, 'DELETE');
+    await sync();
+    const node = el('pr-memory'), bot = findBot(b.dataset.id); if (node && bot) node.innerHTML = memoryList(bot);
+    toast('Forgotten.');
+  },
+  'menu-message': b => { close(); go({bot: b.dataset.id}); },
+  'menu-pin': b => { close(); toast(togglePin(b.dataset.id) ? 'Pinned to the top' : 'Unpinned'); },
+  'menu-hide': b => { close(); saveListAdd(HIDDEN_KEY, b.dataset.id); changed(); toast(`${botName(b.dataset.id)} is hidden. Show hidden bots from the list.`); },
+  'menu-move': b => {
+    const box = b.nextElementSibling; if (!box?.classList.contains('mn-move')) return;
+    box.hidden = !box.hidden; b.setAttribute('aria-expanded', String(!box.hidden));
+    if (!box.hidden) box.querySelector('button')?.focus();
+  },
+  'menu-move-to': async b => { close(); await moveBot(b.dataset.id, b.dataset.to); },
+  'menu-delete': async b => { close(); await removeBot(b.dataset.id); },
+  'show-hidden': () => { saveLocal(HIDDEN_KEY, []); changed(); },
+};
+const saveListAdd = (key, id) => { const list = savedList(key); if (!list.includes(id)) saveLocal(key, [...list, id]); };
+
+export const profileForms = {
+  'new-bot-form': async (form, f) => {
+    if (!canCreate(f)) throw new Error('Give the bot a name first.');
+    const payload = newBotPayload({name: f.name, job: f.job, tint: f.tint, shape: f.shape, reportsTo: f.reportsTo});
+    const bot = await api('/api/groups/home/bots', 'POST', payload);
+    await sync();
+    go({bot: bot.id}, {replace: true});
+    toast(`${bot.name} is ready. Tell it what to do.`);
+    // From "Make a new bot": the request is its job and its first message.
+    if (f.job) sendChat(bot.id, f.job).catch(error => toast(error?.message || 'That did not go through.', true));
+  },
+  'edit-bot-form': async (form, f) => {
+    if (!canWrite()) throw new Error('Only a member can edit a bot.');
+    const id = form.dataset.bot, change = editChanges(JSON.parse(form.dataset.was || '{}'), f);
+    if (!change) { go({profile: id}, {replace: true}); return; }
+    await patchBot(id, change);
+    await sync(); go({profile: id}, {replace: true}); toast('Saved.');
+  },
+  'memory-form': async (form, f) => {
+    const id = form.dataset.bot;
+    await api('/api/memory/rules', 'POST', {bot: id, text: f.text});
+    await sync(); form.reset();
+    const node = el('pr-memory'), bot = findBot(id); if (node && bot) node.innerHTML = memoryList(bot);
+    toast('Remembered.');
+  },
+  'bot-model-form': async (form, f) => {
+    await api(`/api/ai/bots/${form.dataset.bot}`, 'PATCH', {providerId: f.providerId || null, model: f.model || ''});
+    await sync(); toast('Model saved.');
+  },
+};
+
+/** The first message in a new bot's chat is its job. Called before the message is
+ * sent; a failure leaves the bot as it was and the message still goes. */
+export async function adoptFirstMessage(botId, text) {
+  const bot = findBot(botId), job = String(text ?? '').trim();
+  if (!bot || hasJob(bot) || !job) return;
+  try { await patchBot(botId, {instructions: job.slice(0, 3000)}); bot.instructions = job.slice(0, 3000); }
+  catch (error) { toast(error?.message || 'Could not save its job.', true); }
+}
+
+/** Document-level wiring: Esc and a click outside close the menu, and Esc closes an
+ * open page. Called once from app.js. */
+export function wirePages() {
+  document.addEventListener('keydown', ev => {
+    if (menu) {
+      if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); closeBotMenu(); return; }
+      const items = [...menu.node.querySelectorAll('button')].filter(b => b.offsetParent), at = items.indexOf(document.activeElement);
+      if (ev.key === 'ArrowDown') { ev.preventDefault(); items[(at + 1) % items.length]?.focus(); }
+      else if (ev.key === 'ArrowUp') { ev.preventDefault(); items[(at - 1 + items.length) % items.length]?.focus(); }
+      else if (ev.key === 'Tab') closeBotMenu({restore: false});
+      return;
+    }
+    // The Settings dialog is aria-modal: Tab stays inside it, like the sheets (ui-dialogs trapTab).
+    const dlg = ev.key === 'Tab' ? document.querySelector('.st-dlg') : null;
+    if (dlg && document.getElementById('modal')?.classList.contains('hidden') !== false) {
+      const nodes = [...dlg.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')].filter(n => n.offsetParent !== null);
+      const first = nodes[0], last = nodes[nodes.length - 1], at = document.activeElement;
+      if (first && ((ev.shiftKey && (at === first || !dlg.contains(at))) || (!ev.shiftKey && (at === last || !dlg.contains(at))))) { ev.preventDefault(); (ev.shiftKey ? last : first).focus(); }
+      return;
+    }
+    if (ev.key !== 'Escape' || ev.defaultPrevented || !store.state || document.getElementById('modal')?.classList.contains('hidden') === false) return;
+    const route = store.route;
+    if (!(route.profile || route.newBot || route.company || route.activity || typeof route.settings === 'string')) return;
+    // A half-typed name stays: Esc in a field with text only leaves the field.
+    const t = ev.target;
+    if (/^(INPUT|TEXTAREA)$/.test(t?.tagName || '') && t.value && t.type !== 'radio') { t.blur(); return; }
+    ev.preventDefault(); closePage();
+  }, true);
+  document.addEventListener('pointerdown', ev => { if (menu && !ev.target.closest('#cmenu') && !ev.target.closest('[data-action="bot-menu"]')) closeBotMenu({restore: false}); }, true);
+}
+export const profileViews = {profile: profileView, newBot: newBotView};

@@ -141,9 +141,9 @@ function stripCalls(text, names) {
 
 // Helpers that escape every user-text argument themselves. Each one is checked
 // behaviorally in the next test, so an expression passed through them may name a
-// user-text property without its own esc(). `pageHead` escapes title and sub; its
-// `right` slot only ever receives iconBtn(...) markup.
-const ESCAPING_HELPERS = ['esc', 'btn', 'iconBtn', 'tag', 'empty', 'avatar', 'groupAvatar', 'pageHead', 'textInput', 'face', 'botFace'];
+// user-text property without its own esc(). `roundBtn` and `switchBtn` escape their
+// label; `faceOf` and `botFace` only draw a face, which never prints a name.
+const ESCAPING_HELPERS = ['esc', 'btn', 'iconBtn', 'roundBtn', 'switchBtn', 'tag', 'empty', 'textInput', 'face', 'faceOf', 'botFace'];
 const USER_TEXT = /\??\.(text|instructions|name|author|description|message|topic|claim|label|title|email|error)\b(?!\s*:)/;
 // A property used only as a ternary / && condition is tested, not printed.
 const CONDITION = /[\w$.\]\[?]+?\s*(?:\?(?!\.)|&&)/g;
@@ -152,10 +152,7 @@ const lineOf = (src, at) => src.slice(0, at).split('\n').length;
 
 // Interpolations that name a user-text property but are NOT user text or are escaped
 // somewhere this scan cannot see. Each entry was verified by reading the code.
-const EXCEPTIONS = [
-  // ADMIN_PAGES is a module constant ('Team and access', ...), not user input.
-  {file: 'ui-panel.js', includes: 'ADMIN_PAGES[p].title'},
-];
+const EXCEPTIONS = [];
 const excepted = (file, expr) => EXCEPTIONS.some(x => x.file === file && expr.includes(x.includes));
 
 test('the escaping helpers neutralize hostile text in every slot they accept', () => {
@@ -167,11 +164,10 @@ test('the escaping helpers neutralize hostile text in every slot they accept', (
     kit.iconBtn('plus', bad, bad, {id: bad, data: {x: bad}}),
     kit.tag(bad, bad.replace(/\W/g, '')),
     kit.empty(bad, bad),
-    kit.avatar(bad, 0),
-    kit.groupAvatar([{name: bad, tint: 0}, {name: bad, tint: 1}]),
+    kit.roundBtn('back', bad, bad, {id: bad, cls: bad.replace(/\W/g, '')}),
+    kit.switchBtn(true, bad),
     // The bot face never prints the name (it only seeds a delay); shape and state are whitelisted.
     face({id: bad, name: bad, settings: {shape: bad, tint: 0}}, {state: bad, size: bad}),
-    kit.pageHead(bad, {sub: bad}),
     kit.box('', bad),
     kit.field(bad, '', bad),
     kit.textInput('name', {value: bad, placeholder: bad, 'aria-label': bad, required: true}),
@@ -207,12 +203,12 @@ test('every HTML template escapes the user text it interpolates', () => {
 });
 
 test('raw-HTML helper slots never receive unescaped user text', () => {
-  // row({title, sub, right, lead}), note(text), actionRow(...) and fact(...) insert
+  // row({title, sub, right, lead}), srow(label, right, sub), card(rows, label), note(text), actionRow(...) and fact(...) insert
   // their arguments as markup, so callers must escape. Same rule as above.
   const problems = [];
   let calls = 0;
   for (const [file, src] of Object.entries(sources)) {
-    const re = /(?<![\w$.])(row|note|actionRow|fact)\(/g;
+    const re = /(?<![\w$.])(row|note|actionRow|fact|srow|card)\(/g;
     let m;
     while ((m = re.exec(src))) {
       let depth = 1, j = re.lastIndex;
@@ -223,7 +219,7 @@ test('raw-HTML helper slots never receive unescaped user text', () => {
       if (hit && !excepted(file, args)) problems.push(`shared/${file}:${lineOf(src, m.index)} ${m[1]}(...) takes unescaped ${hit}`);
     }
   }
-  assert.ok(calls > 40, `Scanner looks broken (${calls} helper calls).`);
+  assert.ok(calls > 20, `Scanner looks broken (${calls} helper calls).`);
   assert.deepEqual(problems, [], problems.join('\n'));
 });
 

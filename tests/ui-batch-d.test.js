@@ -129,8 +129,8 @@ test('a theme change repaints without losing focus', () => {
   assert.match(appJs, /FOCUS_KEYS = \[[^\]]*'theme'/);
 });
 
-test('a bot removed in another tab says so instead of crashing', () => {
-  assert.match(actions, /if \(!group\) throw new Error\('That bot is no longer in a group\.'\)/);
+test('a bot removed in another tab says so instead of crashing', async () => {
+  assert.match(await shared('ui-profile.js'), /if \(!group\) throw new Error\('That bot is no longer in the company\.'\)/);
 });
 
 test('a starter chip on the new thread page starts a thread, not a group message', () => {
@@ -138,11 +138,9 @@ test('a starter chip on the new thread page starts a thread, not a group message
   assert.match(conversation, /data-action="quick-thread" data-text="\$\{esc\(text\)\}"/);
 });
 
-test('long titles wrap instead of overflowing, and dead hover rules stay deleted', () => {
-  assert.match(css, /\.hero h2\{margin-top:8px;font-size:22px;font-weight:700;overflow-wrap:anywhere\}/);
+test('long titles wrap instead of overflowing, and the retired list and thread rules stay deleted', async () => {
+  assert.match(await shared('profile.css'), /\.pr-hero h1\{[^}]*overflow-wrap:anywhere/);
   assert.match(css, /\.row-title\{font-size:15px;overflow-wrap:anywhere\}/);
-  // `.chat-row:hover{background:var(--surface)}` was always overridden by the
-  // `:not(.current)` rule below it, and `.home-mark` had no markup left at all.
-  assert.doesNotMatch(css, /\.chat-row:hover\{/);
-  assert.doesNotMatch(css, /\.home-mark\{/);
+  // The old frame, chat list, thread and avatar rules went with the shell rebuild.
+  assert.doesNotMatch(css, /\.chat-row|\.thread-head|\.pane-|\.avatar|\.hero\b|\.home-mark/);
 });

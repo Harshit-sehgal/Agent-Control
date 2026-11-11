@@ -7,13 +7,12 @@
  * file just names the classes (face--sway, face--nod, face--blink2, face--hop)
  * and the state (face--awake|asleep|working|waiting). Muting on dark is a CSS
  * filter on `.face`, since the theme is not known here. */
-import {esc} from './ui-kit.js?v=9489b66344';
+import {esc} from './ui-kit.js?v=3b9121ac3d';
 
 export const SHAPES = ['rounded', 'circle', 'hexagon', 'pebble', 'drop', 'shield', 'arch', 'egg', 'blob', 'bean'];
 
 /** The mock's ten pastel tints, in index order. `bot.settings.tint` indexes this list.
- * bot-settings validates tint against TINT_COUNT (6) today, so 6..9 are reachable
- * only once that constant is raised. */
+ * bot-settings validates tint against TINT_COUNT (10, ui-kit.js), so all ten are valid. */
 export const COLORS = ['#9ee0e6', '#c6b7f7', '#f7b8a8', '#b5e3a1', '#f5d38a', '#f2a7c8', '#a9c8f5', '#d9c7a8', '#f6c49a', '#c9c7cf'];
 
 let drawn = 0;
@@ -80,13 +79,15 @@ export function face(bot, {size = 40, state = 'awake', primary = false, manager 
   // Every face owns its gradient ids. Faces repeat on one page (the sidebar and the
   // phone list both draw Atlas), and a url(#id) that resolves to a gradient inside a
   // display:none svg paints nothing.
-  const uid = (++drawn).toString(36), gid = `fb${uid}`, sid = `fs${uid}`;
+  const uid = (++drawn).toString(36), gid = `fb${uid}`, sid = `fs${uid}`, rid = `fr${uid}`;
   const eyes = st === 'asleep' ? EYES.closed : EYES.open;
   const look = st === 'waiting' ? ' transform="translate(7 7)"' : '';
   return `<svg class="${esc(cls.join(' '))}" data-shape="${esc(shape)}" viewBox="0 0 100 100" width="${px}" height="${px}" style="--d:${(name.length % 5) * 0.9}s" aria-hidden="true" focusable="false">`
     + `<defs><linearGradient id="${gid}" x1=".37" y1="0" x2=".63" y2="1"><stop offset="0" stop-color="${mix(color, '#ffffff', 0.14)}"/><stop offset=".7" stop-color="${color}"/><stop offset="1" stop-color="${color}"/></linearGradient>`
-    + `<linearGradient id="${sid}" x1=".2" y1=".6" x2=".6" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".14"/></linearGradient></defs>`
-    + outline(shape, 'face-body', `url(#${gid})`) + outline(shape, 'face-shade', `url(#${sid})`)
+    // Light falls from the top left, so the head is shaded under the chin (fs) and down the far, right side (fr), like the mock's two inset shadows.
+    + `<linearGradient id="${sid}" x1="0" y1="0" x2="0" y2="1"><stop offset=".78" stop-color="#000" stop-opacity="0"/><stop offset=".93" stop-color="#000" stop-opacity=".09"/><stop offset="1" stop-color="#000" stop-opacity=".14"/></linearGradient>`
+    + `<linearGradient id="${rid}" x1="0" y1="0" x2="1" y2="0"><stop offset=".86" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".09"/></linearGradient></defs>`
+    + outline(shape, 'face-body', `url(#${gid})`) + outline(shape, 'face-shade', `url(#${sid})`) + outline(shape, 'face-shade-far', `url(#${rid})`)
     + `<ellipse class="face-blush" cx="31" cy="44.5" rx="8" ry="4.5" fill="#ff6978" fill-opacity=".2"/><ellipse class="face-blush" cx="88.5" cy="44.5" rx="5.5" ry="4.5" fill="#ff6978" fill-opacity=".2"/>`
     + `<g class="face-eyes"${look}>${eyes}</g>${MOUTHS[st]}${st === 'asleep' && px >= 36 ? SLEEP_Z : ''}${isPrimary && px >= 40 ? STAR : ''}</svg>`;
 }

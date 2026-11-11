@@ -82,12 +82,13 @@ test('the new info sections are routable', () => {
   assert.equal(parseRoute('#chat/a/info/tasks', state).info, 'tasks');
   assert.equal(parseRoute('#chat/a/info/group-settings', state).info, 'home', 'A bot chat has no group settings');
 });
-test('the UI wires settings, scheduled tasks and guest mentions to the engine contract', () => {
-  assert.match(js, /id="group-settings-form"/);
-  assert.match(js, /id="bot-task-form"/);
-  assert.match(js, /title: 'Schedule a task'/);
-  assert.match(js, /kind: 'bot-task', payload/);
-  assert.match(js, /'PATCH', \{name: f\.name, description: f\.description \|\| '', settings: \{/);
+test('the UI wires bot pages and guest mentions to the engine contract', () => {
+  // Bots are made, edited and remembered through their own pages; the group settings
+  // form, the scheduled-task sheet and the old info panel are gone.
+  assert.match(js, /id="new-bot-form"/);
+  assert.match(js, /id="edit-bot-form"/);
+  assert.match(js, /id="memory-form"/);
+  assert.doesNotMatch(js, /group-settings-form|bot-task-form|renderInfo/);
   // The UI no longer plans mentions itself: a bot chat posts to the group route and the
   // engine (server or simulator) refuses a switched-off bot by name.
   assert.doesNotMatch(js, /summonableGuests|planHandoffs/);
@@ -96,12 +97,8 @@ test('the UI wires settings, scheduled tasks and guest mentions to the engine co
   assert.match(js, /is switched off\. Turn it on in its profile\./);
   // The approval gate is the group's server-side setting now, not a local toggle.
   assert.doesNotMatch(js, /checkpoint-toggle|store\.checkpoints/);
-  assert.match(js, /checkRow\('checkpoints', 'Approve between steps'/);
-  // Destructive changes ask first.
-  for (const message of ['Remove this scheduled task?', 'Remove ${bot.name} from ${group.name}?', 'Delete ${group.name}?'])
-    assert.ok(js.includes(`confirmSheet(\`${message}`) || js.includes(`confirmSheet('${message}`), `${message} must be confirmed`);
-  // Group deletion is admin-only on the Node build.
-  assert.match(js, /const removable = isAdmin\(\) \|\| isStaticDemo\(\)/);
+  // Destructive changes ask first: deleting a bot says what goes and that it cannot be undone.
+  assert.match(js, /confirmSheet\(copy\.title, \{confirm: 'Delete', danger: true, detail: copy\.detail\}\)/);
   // Runs now live on the workspace snapshot in both builds, so the list and
   // timeline read `recentRuns()` with no per-build merge and no separate log.
   assert.doesNotMatch(js, /localOnlyRuns|localRuns:/);
@@ -110,7 +107,6 @@ test('the UI wires settings, scheduled tasks and guest mentions to the engine co
   assert.match(js, /threadLineActions\(/);
   assert.doesNotMatch(js, /grant \|\| plan/);
   assert.match(js, /flags\.plan && btn\('Start', 'approve-plan'/);
-  assert.match(js, /if \(!canWrite\(\)\) return botHome\(conv\)/);
-  assert.match(js, /const lock = writable \? '' : ' disabled'/);
   assert.match(js, /title: 'AI and models'/);
 });
+

@@ -14,8 +14,8 @@ test('colours are ten pastel hex tints, indexed by the bot tint setting', () => 
   assert.equal(COLORS.length, 10);
   assert.ok(COLORS.every(c => /^#[0-9a-f]{6}$/i.test(c)));
   assert.equal(COLORS[0], '#9ee0e6');
-  // bot-settings only accepts 0..TINT_COUNT-1 today; the palette covers all of those.
-  assert.ok(COLORS.length >= TINT_COUNT);
+  // bot-settings accepts 0..TINT_COUNT-1, so every colour the palette draws must be a valid tint.
+  assert.equal(COLORS.length, TINT_COUNT);
 });
 
 test('face is an svg sized by opts.size, 40 by default', () => {
@@ -113,6 +113,28 @@ test('eyes sit in the top fifth, the mouth just below the middle', () => {
   assert.ok(mouthY >= 45 && mouthY <= 55);
 });
 
+test('the face is turned: eyes, blush and mouth all sit right of centre, the highlights high in each eye', () => {
+  const html = face(bot());
+  const eyes = [...html.matchAll(/class="face-eye" x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)"/g)].map(m => m.slice(1).map(Number));
+  // The middle of the pair, not of the head, is what reads as a turn.
+  const centre = (eyes[0][0] + eyes[1][0] + eyes[1][2]) / 2;
+  assert.ok(centre > 55, `eye pair centre ${centre}`);
+  const mouth = /class="face-mouth" x="([\d.]+)" y="[\d.]+" width="([\d.]+)"/.exec(html);
+  assert.ok(Number(mouth[1]) + Number(mouth[2]) / 2 > 50, 'mouth right of centre');
+  const [near, far] = [...html.matchAll(/class="face-light" cx="([\d.]+)" cy="([\d.]+)"/g)].map(m => [Number(m[1]), Number(m[2])]);
+  assert.ok(near[1] < eyes[0][1] + eyes[0][3] / 3 && far[1] < eyes[1][1] + eyes[1][3] / 3, 'catch-lights in the upper third of each eye');
+});
+
+test('a soft shade sits under the chin and a second one on the far (right) side', () => {
+  const html = face(bot());
+  assert.equal(html.match(/class="face-shade"/g).length, 1);
+  assert.equal(html.match(/class="face-shade-far"/g).length, 1);
+  const chin = /<linearGradient id="fs[\w]+" x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" y2="([\d.]+)"/.exec(html).slice(1).map(Number);
+  assert.ok(chin[1] === 0 && chin[3] === 1 && Math.abs(chin[0] - chin[2]) < 0.05, 'chin shade runs top to bottom');
+  const far = /<linearGradient id="fr[\w]+" x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" y2="([\d.]+)"/.exec(html).slice(1).map(Number);
+  assert.ok(far[0] < far[2] && far[1] === far[3], 'far shade runs left to right, so it darkens the right edge');
+});
+
 test('the primary gets a star badge at size 40 and up', () => {
   assert.match(face(bot({lead: true}), {size: 40}), /class="face-star"/);
   assert.match(face(bot(), {primary: true, size: 88}), /class="face-star"/);
@@ -148,7 +170,7 @@ test('every face owns its gradient ids, so a face inside a hidden sidebar never 
   // A url(#id) that resolves to a gradient inside a display:none svg paints nothing.
   const ids = html => [...html.matchAll(/<linearGradient id="([^"]+)"/g)].map(m => m[1]);
   const a = ids(face(bot({tint: 0}))), b = ids(face(bot({tint: 0})));
-  assert.equal(a.length, 2);
+  assert.equal(a.length, 3);
   assert.ok(a.every(id => !b.includes(id)));
 });
 

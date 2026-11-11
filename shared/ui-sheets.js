@@ -1,74 +1,10 @@
-/** The sheets a conversation can raise (new chat, new bot, a scheduled task),
- * plus the two full-screen layers: quick navigation and sign-in. */
-import {esc, icon, btn, row, field, note} from './ui-kit.js';
-import {groups, conversation} from './ui-store.js';
+/** The two full-screen layers a signed-in person can still raise: sign-in (when the
+ * session ends) and the change-password sheet. Everything else that used to be a
+ * sheet here (new bot, new group, attach, scheduled task) is a page now (ui-profile.js). */
+import {esc, btn, field} from './ui-kit.js';
 import {openSheet} from './ui-dialogs.js';
-import {tintPicker} from './ui-panel.js';
 
 const el = id => document.getElementById(id);
-
-export const BOT_TEMPLATES = {
-  blank: {name: '', instructions: ''},
-  scout: {name: 'Scout', instructions: 'Collect relevant user-selected sources. Summarize the content and include direct links. Do not invent sources.'},
-  research: {name: 'Researcher', instructions: 'Review evidence, distinguish facts from opinions, and flag claims that need verification. Provide citations when possible.'},
-  writer: {name: 'Writer', instructions: 'Write clear, concise drafts in the user-approved tone. Do not invent their opinions. Return drafts for approval.'},
-  review: {name: 'Reviewer', instructions: 'Check drafts for unsupported facts, unclear language, and permissions. Request revisions if needed. Never publish content.'},
-  organize: {name: 'Coordinator', instructions: 'Route work to other bots in this group. Explain handoffs and summarize results. Require user approval before external actions.'},
-};
-/** The tint chosen in the open new-bot sheet. */
-export let pickedTint = 0;
-export const pickTint = index => { pickedTint = Number(index) || 0; document.querySelectorAll('.tint').forEach(b => { const on = Number(b.dataset.index) === pickedTint; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); }); };
-
-export function newChatSheet() {
-  openSheet(`<div class="box">${row({lead: `<span class="avatar avatar-plain small">${icon('bot', 20)}</span>`, title: 'New bot', sub: 'One job, one chat. Add it to a group.', action: 'new-bot'})}${row({lead: `<span class="avatar avatar-plain small">${icon('people', 20)}</span>`, title: 'New group', sub: 'Bots that hand work to each other.', action: 'new-group'})}</div>`, {title: 'New chat'});
-}
-export function newBotSheet(groupId = conversation()?.group.id) {
-  pickedTint = 0;
-  openSheet(`<form id="new-bot-form" class="form">
-    ${tintPicker(0)}
-    ${field('Start from', `<select class="input" id="bot-template" aria-label="Bot template"><option value="blank">Blank bot</option><option value="scout">Scout · finds sources</option><option value="research">Researcher · checks context</option><option value="writer">Writer · drafts content</option><option value="review">Reviewer · checks quality</option><option value="organize">Coordinator · routes tasks</option></select>`)}
-    ${field('Name', `<input class="input" name="name" placeholder="Content strategist" maxlength="80" required autofocus>`)}
-    ${field('Group', `<select class="input" name="group">${groups().map(g => `<option value="${esc(g.id)}"${g.id === groupId ? ' selected' : ''}>${esc(g.name)}</option>`).join('')}</select>`)}
-    ${field('Job', `<textarea class="input" name="instructions" rows="4" placeholder="What is it good at? What must it never do?" maxlength="3000" required></textarea>`)}
-    ${btn('Create bot and open chat', null, {kind: 'primary', type: 'submit', wide: true})}
-  </form>`, {title: 'New bot', sub: 'Give it a name and one clear job.'});
-}
-export function newGroupSheet() {
-  openSheet(`<form id="new-group-form" class="form">
-    ${field('Name', `<input class="input" name="name" placeholder="Product research" maxlength="80" required autofocus>`)}
-    ${field('What is it for?', `<textarea class="input" name="description" rows="3" maxlength="300"></textarea>`)}
-    ${btn('Create group', null, {kind: 'primary', type: 'submit', wide: true})}
-  </form>`, {title: 'New group', sub: 'Bots in a group share one chat and hand work to each other.'});
-}
-/** The composer's + button: what you can drop into this conversation. */
-export function attachSheet() {
-  const conv = conversation(); if (!conv) return;
-  const lead = glyph => `<span class="avatar avatar-plain small">${icon(glyph, 20)}</span>`;
-  openSheet(`<div class="box">
-    ${row({lead: lead('clock'), title: 'Schedule a task', sub: `${conv.isTeam ? 'The group' : esc(conv.name)} does it on a timer and answers here.`, action: 'new-bot-task'})}
-    ${row({lead: lead('bot'), title: 'Add a bot', sub: `A new bot in ${esc(conv.group.name)}.`, action: 'add-bot-to-group', id: conv.group.id})}
-  </div>`, {title: 'Add to this chat'});
-}
-/** A scheduled prompt for the open chat; its answer posts back into the chat. */
-export function botTaskSheet() {
-  const conv = conversation(); if (!conv) return;
-  openSheet(`<form id="bot-task-form" class="form">
-    <input type="hidden" name="groupId" value="${esc(conv.group.id)}"><input type="hidden" name="botId" value="${conv.isTeam ? '' : esc(conv.bot.id)}">
-    ${field('What should it do?', `<textarea class="input" name="message" rows="3" maxlength="2000" placeholder="Summarise new posts about robotics" required autofocus></textarea>`)}
-    ${field('How often', `<select class="input" name="kind"><option value="interval">Repeat</option><option value="once">Once, at a set time</option></select>`)}
-    ${field('Every (minutes)', `<input class="input" name="intervalMinutes" type="number" value="60" min="1" max="10080" inputmode="numeric">`)}
-    ${field('At', `<input class="input" name="nextAt" type="datetime-local">`)}
-    ${btn('Schedule', null, {kind: 'primary', type: 'submit', wide: true})}
-  </form>`, {title: 'Schedule a task', sub: `${conv.isTeam ? conv.group.name : conv.name} answers in this chat.`});
-  toggleReminderFields('bot-task-form');
-}
-/** Repeat shows the interval; Once swaps it for a date and time. */
-export function toggleReminderFields(formId = 'bot-task-form') {
-  const form = el(formId); if (!form) return;
-  const once = form.elements.namedItem('kind').value === 'once', every = form.elements.namedItem('intervalMinutes'), at = form.elements.namedItem('nextAt');
-  every.disabled = once; at.disabled = !once; at.required = once;
-  every.closest('label').hidden = once; at.closest('label').hidden = !once;
-}
 
 /* ---------- sign-in (Node build) ---------- */
 

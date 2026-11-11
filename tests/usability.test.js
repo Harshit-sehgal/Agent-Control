@@ -9,19 +9,20 @@ const sharedDir=path.join(root,'shared');
 const uiFiles=['app.js',...(await readdir(sharedDir)).filter(f=>/^ui-.+\.js$/.test(f)).sort()];
 const [html,css]=await Promise.all(['index.html','app.css'].map(f=>readFile(path.join(sharedDir,f),'utf8')));
 const js=(await Promise.all(uiFiles.map(f=>readFile(path.join(sharedDir,f),'utf8')))).join('\n');
-test('bot creation templates and focus styles are present',()=>{
+test('the New bot page asks for a name, and focus styles are present',()=>{
  // Filters are plain native controls; the old custom dropdown menus were removed by the chat redesign.
  assert.doesNotMatch(html,/usability\.css/);
- assert.match(js,/bot-template/);
+ // A bot is made from a name, a shape, a colour and an optional manager; its job is set in its chat.
+ assert.match(js,/placeholder="Name your bot"/);
+ assert.match(js,/You set its job in the chat\./);
+ assert.match(js,/<button type="submit" class="nb-go" disabled>Create<\/button>/);
  assert.match(css,/focus-visible/);
 });
-test('chat clearing and sensitive changes require confirmation',()=>{
+test('deleting a bot and other sensitive changes require confirmation',()=>{
  // window.confirm was replaced by the in-app confirmSheet; it must still gate
  // every destructive or record-changing action.
- assert.match(js,/confirmSheet\('Clear this conversation/);
- assert.match(js,/copy-chat/);
- assert.match(js,/duplicate-bot/);
- assert.match(js,/pin-bot/);
+ assert.match(js,/confirmSheet\(copy\.title/);
+ assert.match(js,/'menu-delete': async b =>/);
  // The confirming button is the only thing that resolves the sheet with `true`.
  assert.match(js,/'sheet-confirm': \(\) => closeSheet\(true\)/);
  assert.match(js,/settle = value => resolve\(value === true\)/);
@@ -34,22 +35,17 @@ test('the Node build runs real multi-bot coordination with a run timeline',()=>{
  assert.match(js,/'login-forgot'/);
   assert.match(js,/async function runOnServer\(/);
   assert.match(js,/function streamGroupRun\(/);
-  assert.match(js,/run-timeline/);
   assert.match(js,/'continue-run'/);
   assert.match(js,/'retry-run'/);
-  // Approve-between-steps is the group's server-side setting, edited in Group settings.
-  assert.match(js,/checkRow\('checkpoints', 'Approve between steps'/);
   // A paused run can only be continued by the human, via the server API.
   assert.match(js,/\/runs\/\$\{b\.dataset\.run\}\/continue/);
 });
 test('the Node build exposes a notifications feed and preferences',()=>{
   assert.match(js,/function notificationsPanel\(/);
-  // The bell left with the old list header (the avatar carries no badge now), so
-  // the feed is reached from the You page's Notifications row, which shows the unread count.
-  assert.match(js,/row\(\{title: 'Notifications', right: state\.unread/);
+  // The feed is a Settings page reached from General, not offered on the static demo
+  // (no server to hold notifications).
   assert.match(js,/notif-prefs-form/);
-  // Not offered on the static demo (no server to hold notifications).
-  assert.match(js,/\(demo \? '' : row\(\{title: 'Workspace'/);
+  assert.match(js,/if \(!demo\) extra\.push\(\['notifications', 'Notifications'\], \['workspaces', 'Workspaces'\]\)/);
 });
 test('the Node build exposes Data & security admin surfaces',()=>{
   assert.match(js,/function credentialsPanel\(/);
@@ -67,23 +63,25 @@ test('the Node build exposes Team and Local agents admin surfaces',()=>{
   assert.match(js,/'toggle-user-disabled'/);
   assert.match(js,/Temporary password \(min 8 chars\)/);
   // Admin surfaces are gated off on the static Pages demo and for non-admins:
-  // the role check, the You-page entry and the settings route that names an old page.
+  // the role check, the Settings section list and the loader that names an admin page.
   assert.match(js,/export const isAdmin = \(\) => !isStaticDemo\(\) && \['owner', 'admin'\]\.includes/);
   assert.match(js,/export const canWrite = \(\) => isStaticDemo\(\) \|\| \['owner', 'admin', 'member'\]\.includes/);
-  assert.match(js,/isAdmin\(\) \? box\(\['ai', 'team', 'agents', 'data'\]/);
-  assert.match(js,/\['ai', 'team', 'agents', 'data'\]\.includes\(page\) && isAdmin\(\)/);
-  assert.match(js,/\['notifications', 'workspaces'\]\.includes\(page\) && !isStaticDemo\(\)/);
+  assert.match(js,/if \(admin && !demo\) extra\.push\(\['team', 'Team and access'\], \['agents', 'Local agents'\], \['data', 'Data and security'\]\)/);
+  assert.match(js,/\(key === 'notifications' \|\| key === 'workspaces' \|\| isAdmin\(\)\) && !isStaticDemo\(\)/);
 });
 test('destructive admin actions ask first and say what they do',()=>{
   for (const message of ['Sign out every other session','Remove this user from the workspace','Disable this account','Delete your account','Revoke this local agent','Delete this credential','Prune exhaust older than the retention policy','Replace this workspace with the pasted backup'])
     assert.match(js,new RegExp(`confirmSheet\\('${message}`),`${message} must be confirmed`);
 });
-test('the bot editor exposes contract and permission controls (Phase E UI)',()=>{
+test('the bot profile edits name, manager, shape and colour, and lists permissions read-only',()=>{
   assert.match(js,/id="edit-bot-form"/);
-  assert.match(js,/name="outputKind"/);
-  assert.match(js,/name="permissions"/);
-  assert.match(js,/contract-fieldset/);
-  assert.match(js,/Publishing is never automated/);
+  assert.match(js,/name="reportsTo"/);
+  assert.match(js,/name="shape" value=/);
+  assert.match(js,/name="tint" value=/);
+  // The job is changed by telling the bot in its chat, not in this form.
+  assert.match(js,/To change what \$\{esc\(bot\.name\)\} does, tell it in its chat\./);
+  // Grants are shown, not edited, until the ask cards land; paying never gets Always allow.
+  assert.match(js,/This list is read-only for now\. Paying or spending money will never get Always allow\./);
 });
 test('the shell is integrated: one search, animated routes, one progress bar',()=>{
   assert.match(html,/id="progress"/);
@@ -186,7 +184,7 @@ test('an admin refresh carries unsaved typing over the repaint',()=>{
  assert.match(js,/function unsavedText\(root\)/);
  assert.match(js,/const typed = unsavedText\(target\);/);
  assert.match(js,/restoreText\(target, typed\)/);
- assert.match(js,/field\.value !== field\.defaultValue/);
+ assert.match(js,/f\.value !== f\.defaultValue/);
  // A select commits on change, so it has to follow the repaint, not overwrite it.
  assert.match(js,/\['checkbox', 'radio', 'hidden', 'file', 'submit', 'button'\]\.includes\(f\.type\)/);
 });
