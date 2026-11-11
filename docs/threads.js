@@ -7,7 +7,7 @@
  *
  * Pure and browser-safe: the server and the Pages engine share these rules.
  */
-import {primaryOf} from './company.js?v=374eb42963';
+import {primaryOf} from './company.js?v=8bbac178a9';
 
 export const isThread = group => group?.settings?.kind === 'thread';
 

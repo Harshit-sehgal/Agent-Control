@@ -63,3 +63,12 @@ test('a member cannot add, refresh or remove a connector; a viewer can only look
   assert.equal((await call('GET', '/api/connectors')).status, 200);
   assert.deepEqual(server.calls, [], 'a refused request never reached the server');
 });
+
+test('an email waiting out its Undo window is never in the state snapshot', async t => {
+  const {store, call} = await rig(t);
+  await store.update(s => { s.heldSends = [{id: 'h1', connectorId: 'google', args: {to: 'bob@example.org', subject: 'S', body: 'PRIVATE BODY'}, botId: 'atlas', botName: 'Atlas', chatKey: 'atlas', undoUntil: new Date(Date.now() + 30000).toISOString(), status: 'held'}]; });
+  const state = await call('GET', '/api/state');
+  assert.equal(JSON.stringify(state.body).includes('PRIVATE BODY'), false);
+  assert.equal('heldSends' in state.body, false);
+  assert.equal(store.read().heldSends.length, 1, 'it is still held on the server');
+});

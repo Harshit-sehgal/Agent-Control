@@ -106,17 +106,32 @@ export function connectorNeeds(connector, tool, args = {}) {
   if (!action) return null;
   return [{action: connectorAction(connector, action.write), target: String(connector.account || connector.name || connector.id), detail: describeCall(connector, tool, args)}];
 }
+const oneLine = (value, max) => {
+  const text = (typeof value === 'string' ? value : value === undefined || value === null ? '' : JSON.stringify(value)).replace(/[\u0000-\u001f\u007f\s]+/g, ' ').trim();
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+};
 /** The arguments as a short line for the ask card, so the owner sees what a write would carry: `(text: Buy milk, to: a@b.c)`.
  * At most four top-level keys, each value cut, control characters gone. Empty when there are none. */
 export function argsPreview(args) {
-  const parts = Object.entries(args && typeof args === 'object' && !Array.isArray(args) ? args : {}).slice(0, 4).map(([key, value]) => {
-    const text = (typeof value === 'string' ? value : JSON.stringify(value) ?? '').replace(/[\u0000-\u001f\u007f\s]+/g, ' ').trim();
-    return `${cleanText(key, 30)}: ${text.length > 50 ? `${text.slice(0, 50)}…` : text}`;
-  });
+  const parts = Object.entries(args && typeof args === 'object' && !Array.isArray(args) ? args : {}).slice(0, 4).map(([key, value]) => `${cleanText(key, 30)}: ${oneLine(value, 50)}`);
   return parts.length ? ` (${parts.join(', ')})` : '';
 }
-/** One plain sentence end for the ask card: "use Notes: add_note (text: Buy milk)". */
-export const describeCall = (connector, tool, args = {}) => cleanText(`use ${connector.name}: ${tool}${argsPreview(args)}`, 280);
+const recipients = value => (Array.isArray(value) ? value : [value]).map(v => oneLine(v, 80)).filter(Boolean).join(', ');
+/** One plain sentence end for the ask card: "use Notes: add_note (text: Buy milk)", or for Google what the mail or search is:
+ * `send an email to bob@example.org: "Lunch" (See you at noon.)`. The owner reads this before saying yes. */
+export function describeCall(connector, tool, args = {}) {
+  const a = args && typeof args === 'object' ? args : {};
+  if (connector.kind === 'google') {
+    const mail = verb => `${verb} to ${recipients(a.to) || '(no recipient)'}: "${oneLine(a.subject, 80)}"${a.body ? ` (${oneLine(a.body, 120)})` : ''}`;
+    if (tool === 'gmail.send') return cleanText(mail('send an email'), 280);
+    if (tool === 'gmail.draft') return cleanText(mail('save a draft email'), 280);
+    if (tool === 'gmail.search') return cleanText(`search Gmail for "${oneLine(a.query, 100)}"`, 280);
+    if (tool === 'gmail.read') return 'read an email in Gmail';
+    if (tool === 'drive.search') return cleanText(`search Drive for "${oneLine(a.query, 100)}"`, 280);
+    if (tool === 'drive.read') return 'read a file in Drive';
+  }
+  return cleanText(`use ${connector.name}: ${tool}${argsPreview(args)}`, 280);
+}
 
 /** The connectors a bot may be told about: ready ones, with their tools by name and description. No secret,
  * no vault id, bounded in size so the envelope stays small. */
@@ -159,15 +174,32 @@ export function recordConnectorCalls(state, {bot, run, chatKey, output, unattend
     if (!needs) { say(`${bot.name} asked ${connector.name} for "${tool}", but ${connector.name} has no tool called "${tool}".`); continue; }
     const decision = decide(state, bot, needs);
     if (decision.verdict === 'deny') { say(`${bot.name} asked to ${needs[0].detail}. ${decision.message}`); continue; }
-    const call = {id: makeId(), connectorId: connector.id, connectorName: connector.name, tool, args, write: actionOf(connector, tool).write, botId: bot.id, botName: bot.name, status: 'go'};
+    const call = {id: makeId(), connectorId: connector.id, connectorName: connector.name, tool, args, write: actionOf(connector, tool).write, botId: bot.id, botName: bot.name, status: 'go', chatKey};
     if (decision.verdict === 'ask') {
       const {need} = decision;
       const asked = createAsk(state, {botId: bot.id, runId: run.id, chatKey, action: need.action, target: need.target, detail: need.detail, unattended, requestId: call.id, implies: decision.implies, now, makeId});
       Object.assign(call, {status: 'pending', askId: asked.id});
       asks.push(asked);
     }
+    // An email send the owner has Always-allowed (no ask this time) waits out an Undo window before it goes.
+    if (call.status === 'go' && holdsForUndo(connector, tool)) call.hold = true;
     calls.push(call);
   }
   if (calls.length) { run.connectorCalls = calls; run.connectorDepth = depth + 1; }
   return {text, calls, lines, asks};
 }
+
+// --- Google ------------------------------------------------------------------------------------------------
+/** The built-in actions of the Google connector (Gmail and Drive). Reads and writes are declared here, by the
+ * connector, never by a bot. */
+export const GOOGLE_ACTIONS = [
+  {name: 'gmail.search', write: false, description: 'Search the mailbox. args: query (Gmail search words), max (1-10).'},
+  {name: 'gmail.read', write: false, description: 'Read one email by id (from a search). args: id.'},
+  {name: 'gmail.draft', write: true, description: 'Save a draft email without sending it. args: to, subject, body, cc (optional).'},
+  {name: 'gmail.send', write: true, description: 'Send an email. args: to, subject, body, cc (optional).'},
+  {name: 'drive.search', write: false, description: 'Search Drive files by words in their name or text. args: query, max (1-10).'},
+  {name: 'drive.read', write: false, description: 'Read one Drive file as text by id (from a search). args: id.'},
+];
+/** An email send by an Always-allowed bot waits 30 seconds so the owner can Undo it. */
+export const holdsForUndo = (connector, tool) => connector?.kind === 'google' && tool === 'gmail.send';
+export const UNDO_WINDOW_MS = 30000;

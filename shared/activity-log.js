@@ -66,3 +66,10 @@ export function activityPage(state, {filter = 'outside', before = null, limit = 
   const items = matching.slice(0, size);
   return {items, next: matching.length > size ? items.at(-1).id : null, total};
 }
+
+/** Close an Undo window: the send was undone (or is over). Clears `undoUntil` on that one entry; nothing else about it changes. */
+export function closeUndo(state, id) {
+  const entry = (state.activity || []).find(a => a.id === id);
+  if (entry) entry.undoUntil = null;
+  return entry || null;
+}

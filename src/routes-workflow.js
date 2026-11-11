@@ -22,6 +22,8 @@ export function workflowRoutes(router, {auth}) {
     s.ai = publicAi(s);
     // A connector record is metadata (its secrets are vault credentials), but the snapshot gets the public view anyway.
     s.connectors = publicConnectors(s);
+    // An email waiting out its Undo window carries its text; the snapshot never does.
+    delete s.heldSends;
     // The log can be thousands of entries; the snapshot the browser polls leaves it out. GET /api/activity pages it.
     delete s.activity;
     const hasSavedDefault = s.ai?.providers?.some(provider => provider.id === s.ai.defaultProviderId);

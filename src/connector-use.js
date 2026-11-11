@@ -9,9 +9,11 @@
 import {fail} from '../shared/errors.js';
 import {mcpCall} from './mcp-client.js';
 import {mcpTarget} from './connectors.js';
+import {callGoogle} from './google-actions.js';
 
 /** Run one call. Returns `{ok, text}`; throws for a failure the service did not report as a tool result. */
 export async function useConnector(store, connector, tool, args = {}) {
   if (connector.kind === 'mcp') return mcpCall(mcpTarget(store, connector), tool, args);
+  if (connector.kind === 'google') return callGoogle(store, connector, tool, args);
   fail(`${connector.name} cannot be used yet.`, 422);
 }

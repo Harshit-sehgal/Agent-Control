@@ -5,20 +5,20 @@
  *
  * Pages repaint only when the route changes, so each in-place change (a switch, a
  * forgotten note, a picked colour) updates its own node instead. */
-import {SHAPES, COLORS, face} from './ui-face.js?v=374eb42963';
-import {botStatus, botIsManager} from './ui-company.js?v=374eb42963';
-import {primaryOf} from './company.js?v=374eb42963';
-import {esc, icon, field, textInput, clock, roundBtn, switchBtn} from './ui-kit.js?v=374eb42963';
-import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=374eb42963';
-import {GRANT_LABELS} from './asks.js?v=374eb42963';
-import {grantRows, allGrantRows, grantUrl} from './ui-asks.js?v=374eb42963';
-import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=374eb42963';
-import {toast, confirmSheet} from './ui-dialogs.js?v=374eb42963';
-import {sendChat} from './ui-chat.js?v=374eb42963';
+import {SHAPES, COLORS, face} from './ui-face.js?v=8bbac178a9';
+import {botStatus, botIsManager} from './ui-company.js?v=8bbac178a9';
+import {primaryOf} from './company.js?v=8bbac178a9';
+import {esc, icon, field, textInput, clock, roundBtn, switchBtn} from './ui-kit.js?v=8bbac178a9';
+import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=8bbac178a9';
+import {GRANT_LABELS} from './asks.js?v=8bbac178a9';
+import {grantRows, allGrantRows, grantUrl} from './ui-asks.js?v=8bbac178a9';
+import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=8bbac178a9';
+import {toast, confirmSheet} from './ui-dialogs.js?v=8bbac178a9';
+import {sendChat} from './ui-chat.js?v=8bbac178a9';
 import {
   MAX_NAME, hasJob, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, lookOf, newBotDefaults,
   newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, directReports, closeTarget,
-} from './ui-profile-model.js?v=374eb42963';
+} from './ui-profile-model.js?v=8bbac178a9';
 
 const el = id => document.getElementById(id);
 const MUTED_KEY = 'ac-muted';

@@ -86,6 +86,9 @@ const PUBLIC_ROUTES = [
   'POST /api/logout',
   'POST /api/auth/forgot',
   'POST /api/auth/reset',
+  // Google sends the owner back here from another site, so no session cookie arrives; the handler
+  // checks a single-use state nonce and a flow cookie (src/google.js). It takes no id.
+  'GET /api/connectors/google/callback',
 ];
 
 /** A public route with an id segment would be an unauthenticated lookup by id.
@@ -120,6 +123,10 @@ const LEAST_ROLE = {
   'DELETE /api/agents/:id': 'admin',
   // A connector is a way out of the app: only an admin adds, refreshes or removes one.
   'POST /api/connectors': 'admin',
+  // The Google client secret is the owner's to paste.
+  'POST /api/connectors/google/setup': 'owner',
+  'GET /api/connectors/google/start': 'admin',
+  'POST /api/activity/:id/undo': 'admin',
   'POST /api/connectors/:id/refresh': 'admin',
   'DELETE /api/connectors/:id': 'admin',
   'GET /api/admin/backup': 'owner',

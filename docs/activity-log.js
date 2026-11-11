@@ -15,8 +15,8 @@
  * for a held send. Entries are only ever added: the cap and retention remove old
  * ones, and no route edits one. Pure and browser-safe, like the other shared modules.
  */
-import {fail} from './errors.js?v=374eb42963';
-import {cleanText} from './core.js?v=374eb42963';
+import {fail} from './errors.js?v=8bbac178a9';
+import {cleanText} from './core.js?v=8bbac178a9';
 
 export const ACTIVITY_KINDS = ['outside', 'perm', 'bots'];
 export const ACTIVITY_FILTERS = [...ACTIVITY_KINDS, 'all'];
@@ -65,4 +65,11 @@ export function activityPage(state, {filter = 'outside', before = null, limit = 
   }
   const items = matching.slice(0, size);
   return {items, next: matching.length > size ? items.at(-1).id : null, total};
+}
+
+/** Close an Undo window: the send was undone (or is over). Clears `undoUntil` on that one entry; nothing else about it changes. */
+export function closeUndo(state, id) {
+  const entry = (state.activity || []).find(a => a.id === id);
+  if (entry) entry.undoUntil = null;
+  return entry || null;
 }

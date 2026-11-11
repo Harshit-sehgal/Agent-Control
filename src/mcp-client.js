@@ -38,10 +38,10 @@ function secretsOf(url, headers) {
 }
 const redactWith = secrets => text => secrets.reduce((out, secret) => out.split(secret).join('[redacted]'), String(text ?? ''));
 
-class TooLarge extends Error {}
+export class TooLarge extends Error {}
 
 /** The whole body as text, or TooLarge once it passes `limit` bytes. */
-async function readText(res, limit) {
+export async function readText(res, limit) {
   if (!res.body) return '';
   const reader = res.body.getReader(), decoder = new TextDecoder();
   let total = 0, text = '';
