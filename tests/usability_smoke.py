@@ -1280,6 +1280,437 @@ async def phone_computer_view(page, base):
     await eventually(lambda: len([e for e in live.inputs() if e['type'] == 'click']) == 1)
 
 
+# ---------------------------------------------------------------- connectors, subscriptions, and their chat lines
+
+def via_fetch(prefixes):
+    """Like VIA_FETCH, for these path prefixes: the static build's transport is browser-local, so a page.route
+    cannot see it. Those paths go to fetch (which page.route answers); everything else still goes to the demo."""
+    return VIA_FETCH.replace("String(path).startsWith('/api/browser-live')", f"{json.dumps(prefixes)}.some(p => String(path).startsWith(p))")
+
+
+def slug(name):
+    return re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')
+
+
+GOOGLE_STEPS = [
+    'Open the Google Cloud Console and create a project, or pick one you already use.',
+    'Under APIs & Services, enable the Gmail API and the Google Drive API.',
+    'On the OAuth consent screen choose External and add your own account under Test users.',
+    'Create an OAuth client ID of type Web application.',
+    'Under Authorized redirect URIs add exactly the address shown here.',
+    'Copy the Client ID and Client secret, paste them here and save, then choose Connect Google.',
+]
+REDIRECT = 'http://127.0.0.1:8787/api/connectors/google/callback'
+TOOLS = [{'name': 'search_notes', 'write': False, 'description': 'Find notes'}, {'name': 'add_note', 'write': True, 'description': 'Add a note'}]
+
+
+def connector(name, **kw):
+    return {'id': slug(name), 'kind': 'mcp', 'name': name, 'account': 'notes.example.org', 'status': 'ready', 'statusMessage': '', 'transport': 'http',
+            'host': 'notes.example.org', 'agentServer': None, 'actions': TOOLS, 'addedAt': '2026-11-11T10:00:00Z', 'checkedAt': '2026-11-11T10:00:00Z', **kw}
+
+
+class Server:
+    """A stand-in for /api/connectors*, /api/ai*, /api/agents and the Undo route, answered through page.route.
+    It keeps what a real server would, so a page reload shows the change."""
+
+    def __init__(self, **kw):
+        self.connectors = []
+        self.google = {'configured': False, 'connected': False, 'status': 'none', 'account': None, 'redirectUri': REDIRECT, 'scopes': [], 'steps': GOOGLE_STEPS,
+                       'testingNote': 'While the consent screen is in Testing, Google ends the sign-in after 7 days and this page shows Reconnect Google.'}
+        self.providers, self.default_provider = [], None
+        self.agents = [
+            {'id': 'a1', 'name': 'Laptop', 'status': 'online', 'permissions': ['model.run'], 'lastSeenAt': '2026-11-11T10:00:00Z', 'tasks': {'queued': 0, 'running': 0, 'failed': 0},
+             'cli': {'claude': 'signed-in', 'codex': 'signed-out', 'checkedAt': '2026-11-11T10:00:00Z'}},
+            {'id': 'a2', 'name': 'Desk PC', 'status': 'stale', 'permissions': ['model.run'], 'lastSeenAt': '2026-11-10T10:00:00Z', 'tasks': {'queued': 0, 'running': 0, 'failed': 0},
+             'cli': {'claude': 'missing', 'codex': 'signed-in', 'checkedAt': '2026-11-10T10:00:00Z'}},
+        ]
+        self.late = {'act-late'}
+        self.calls = []
+        self.__dict__.update(kw)
+
+    def sent(self, method, path):
+        return [body for m, p, body in self.calls if m == method and p == path]
+
+    def provider_listing(self, p):
+        return {**p, 'baseUrl': '', 'models': [], 'allModels': [], 'chatModels': [], 'labels': {}, 'apiVersion': None, 'hasHeaders': [], 'modelsAt': None, 'modelsError': None, 'modelsTruncated': False, 'keyOptional': False}
+
+    async def handle(self, route):
+        request = route.request
+        path = re.sub(r'^https?://[^/]+', '', request.url).split('?')[0]
+        method = request.method
+        body = json.loads(request.post_data) if request.post_data else None
+        if method != 'GET':
+            self.calls.append((method, path, body))
+
+        async def reply(data, status=200):
+            await route.fulfill(status=status, content_type='application/json', body=json.dumps(data))
+        if path == '/api/connectors':
+            if method == 'GET':
+                return await reply({'connectors': self.connectors, 'google': self.google})
+            if any(c['name'].lower() == body['name'].lower() for c in self.connectors):
+                return await reply({'error': f"A connector called \"{body['name']}\" is already added."}, 409)
+            made = connector(body['name'], **({'transport': 'stdio', 'host': None, 'agentServer': body['agentServer'], 'account': f"agent:{body['agentServer']}"} if 'agentServer' in body else {}))
+            self.connectors.append(made)
+            return await reply(made, 201)
+        if path == '/api/connectors/google/setup':
+            self.google.update(configured=True, status='setup')
+            return await reply({'ok': True, 'configured': True, 'redirectUri': REDIRECT})
+        m = re.match(r'^/api/connectors/([a-z0-9-]+)(/refresh)?$', path)
+        if m and m.group(2) and method == 'POST':
+            found = next(c for c in self.connectors if c['id'] == m.group(1))
+            found.update(status='ready', statusMessage='')
+            return await reply(found)
+        if m and method == 'DELETE':
+            self.connectors = [c for c in self.connectors if c['id'] != m.group(1)]
+            if m.group(1) == 'google':
+                self.google.update(configured=False, connected=False, status='none', account=None)
+            return await reply({'ok': True})
+        if path == '/api/agents':
+            return await reply({'agents': self.agents, 'actions': ['browser', 'model.run']})
+        if path == '/api/ai':
+            return await reply({'providers': [{k: v for k, v in p.items() if k in ('id', 'label', 'kind', 'engine', 'model', 'protocol', 'host', 'modelCount')} for p in self.providers],
+                                'defaultProviderId': self.default_provider, 'defaultModel': None, 'bots': {}})
+        if path == '/api/ai/providers' and method == 'GET':
+            return await reply({'providers': [self.provider_listing(p) for p in self.providers], 'defaultProviderId': self.default_provider, 'defaultModel': None, 'bots': {}})
+        if path == '/api/ai/providers' and method == 'POST':
+            assert 'apiKey' not in body and 'baseUrl' not in body, 'a subscription holds no key'
+            made = {'id': f'p-{len(self.providers) + 1}', 'label': body['label'], 'kind': 'local-cli', 'engine': body['engine'], 'model': body['model'], 'protocol': 'local-cli', 'host': None, 'modelCount': 0}
+            self.providers.insert(0, made)
+            self.default_provider = self.default_provider or made['id']
+            return await reply(self.provider_listing(made), 201)
+        m = re.match(r'^/api/ai/providers/([a-z0-9-]+)(/test)?$', path)
+        if m and m.group(2):
+            return await reply({'ok': True, 'status': 'signed-in', 'agent': 'Laptop', 'message': 'Claude is signed in on Laptop.', 'engine': 'claude', 'model': None})
+        if m and method == 'DELETE':
+            self.providers = [p for p in self.providers if p['id'] != m.group(1)]
+            return await reply({'ok': True})
+        if re.match(r'^/api/ai/bots/[a-z0-9-]+$', path) and method == 'PATCH':
+            return await reply({'ok': True})
+        m = re.match(r'^/api/activity/([a-z0-9-]+)/undo$', path)
+        if m and method == 'POST':
+            if m.group(1) in self.late:
+                return await reply({'error': 'It already went out, so it cannot be undone.'}, 409)
+            return await reply({'ok': True})
+        return await reply({'error': 'unexpected'}, 404)
+
+
+async def install(page, **kw):
+    server = Server(**kw)
+    await page.add_init_script(via_fetch(['/api/connectors', '/api/ai', '/api/agents', '/api/activity/']))
+    await page.route('**/api/connectors**', server.handle)
+    await page.route('**/api/ai**', server.handle)
+    await page.route('**/api/agents**', server.handle)
+    await page.route('**/api/activity/**', server.handle)
+    return server
+
+
+async def open_settings(page, section):
+    """Desktop: the avatar opens the dialog; a nav button picks the section."""
+    await page.locator('#sidebar .rail-me').click()
+    await page.locator(f'#main .st-dlg .st-nav [data-section="{section}"]').click()
+
+
+async def goto_settings_section(page, section):
+    await page.locator(f'#main .st-dlg .st-nav [data-section="{section}"]').click()
+
+
+async def connectors_add_and_delete_mcp(page, base):
+    server = await install(page)
+    await open_app(page, base)
+    await open_settings(page, 'conn')
+    body = page.locator('#main .st-dlg .st-body')
+    await expect(body.locator('.st-h', has_text='MCP servers')).to_be_visible()
+    await expect(body).to_contain_text('No servers yet')
+    # Add a server over HTTP: the address and a header go out once.
+    form = page.locator('#connector-add-form')
+    await form.locator('input[name="name"]').fill('Notes')
+    await form.locator('input[name="url"]').fill('https://notes.example.org/mcp?key=sekrit')
+    await form.locator('textarea[name="headers"]').fill('Authorization: Bearer abc123')
+    await expect(form.locator('input[name="agentServer"]')).to_be_hidden()
+    await form.get_by_role('button', name='Add server').click()
+    row = page.locator('.cn-mcp[data-connector="notes"]')
+    await expect(row).to_be_visible()
+    await expect(row).to_contain_text('notes.example.org')
+    await expect(row).to_contain_text('2 tools, 1 can change things')
+    await expect(row.locator('.cn-head .tag')).to_have_text('Ready')
+    assert server.sent('POST', '/api/connectors') == [{'kind': 'mcp', 'name': 'Notes', 'url': 'https://notes.example.org/mcp?key=sekrit', 'headers': {'Authorization': 'Bearer abc123'}}]
+    # The address and the header are never painted back: only the host is.
+    html = await page.content()
+    assert 'sekrit' not in html and 'abc123' not in html, 'a secret was painted on the page'
+    await expect(form.locator('input[name="name"]')).to_have_value('')
+    # Its tools open, and a tool that changes things says so.
+    await row.locator('.cn-tools summary').click()
+    await expect(row.locator('.cn-tools li', has_text='add_note')).to_contain_text('changes things')
+    await expect(row.locator('.cn-tools li', has_text='search_notes').locator('.tag')).to_have_count(0)
+    # Refresh asks the server again.
+    await row.get_by_role('button', name='Refresh tools').click()
+    await expect(page.locator('#toast')).to_contain_text('Notes is ready')
+    assert len(server.sent('POST', '/api/connectors/notes/refresh')) == 1
+    # A server that runs on the agent is only a name: no address, no headers.
+    await form.locator('label', has_text='On my agent').click()
+    await expect(form.locator('input[name="url"]')).to_be_hidden()
+    await expect(form.locator('input[name="agentServer"]')).to_be_visible()
+    await form.locator('input[name="name"]').fill('Files')
+    await form.locator('input[name="agentServer"]').fill('files')
+    await form.get_by_role('button', name='Add server').click()
+    files = page.locator('.cn-mcp[data-connector="files"]')
+    await expect(files).to_contain_text('On your agent · files')
+    assert server.sent('POST', '/api/connectors')[-1] == {'kind': 'mcp', 'name': 'Files', 'agentServer': 'files'}
+    # A name that is taken says so and adds nothing.
+    await form.locator('label', has_text='Web address').click()
+    await form.locator('input[name="name"]').fill('Notes')
+    await form.locator('input[name="url"]').fill('https://other.example.org/mcp')
+    await form.get_by_role('button', name='Add server').click()
+    await expect(page.locator('#toast')).to_contain_text('already added')
+    await expect(page.locator('.cn-mcp')).to_have_count(2)
+    # Delete asks first; Cancel changes nothing.
+    await row.get_by_role('button', name='Delete').click()
+    await expect(page.locator('#modal')).to_contain_text('Remove Notes?')
+    await page.locator('#modal').get_by_role('button', name='Cancel').click()
+    await expect(row).to_be_visible()
+    assert server.sent('DELETE', '/api/connectors/notes') == []
+    await row.get_by_role('button', name='Delete').click()
+    await page.locator('#modal').get_by_role('button', name='Remove').click()
+    await expect(page.locator('.cn-mcp[data-connector="notes"]')).to_have_count(0)
+    assert len(server.sent('DELETE', '/api/connectors/notes')) == 1
+    await expect(page.locator('.cn-mcp')).to_have_count(1)
+
+
+async def google_setup_form_connect_and_reconnect(page, base):
+    server = await install(page)
+    await open_app(page, base)
+    await open_settings(page, 'conn')
+    card = page.locator('[data-connector="google"]')
+    # Not set up: the steps, the address to register, the testing note, and no way to sign in yet.
+    await expect(card.locator('.cn-steps li')).to_have_count(6)
+    await expect(card.locator('.cn-redirect code')).to_have_text(REDIRECT)
+    await expect(card.locator('.cn-testing')).to_contain_text('7 days')
+    await expect(card.get_by_role('link', name='Connect Google')).to_have_count(0)
+    form = card.locator('#google-setup-form')
+    await expect(form.locator('input[name="clientSecret"]')).to_have_attribute('type', 'password')
+    await form.locator('input[name="clientId"]').fill('1234567890-abc.apps.googleusercontent.com')
+    await form.locator('input[name="clientSecret"]').fill('GOCSPX-supersecretvalue')
+    await form.get_by_role('button', name='Save client').click()
+    # Saved: Connect Google is a plain link to the start route, and the secret is gone from the page.
+    link = card.get_by_role('link', name='Connect Google')
+    await expect(link).to_have_attribute('href', '/api/connectors/google/start')
+    assert await link.evaluate('n => n.tagName') == 'A'
+    assert server.sent('POST', '/api/connectors/google/setup') == [{'clientId': '1234567890-abc.apps.googleusercontent.com', 'clientSecret': 'GOCSPX-supersecretvalue'}]
+    assert 'GOCSPX-supersecretvalue' not in await page.content()
+    await expect(card.locator('[data-google-client]')).to_be_hidden()
+    await card.get_by_role('button', name='Change client').click()
+    await expect(card.locator('[data-google-client] input[name="clientId"]')).to_be_visible()
+    # Connected: the account, the tools, and no Connect link.
+    server.google.update(configured=True, connected=True, status='ready', account='me@example.org')
+    server.connectors = [{'id': 'google', 'kind': 'google', 'name': 'Google', 'account': 'me@example.org', 'status': 'ready', 'statusMessage': '', 'transport': None, 'host': None, 'agentServer': None,
+                          'actions': [{'name': 'gmail.search', 'write': False, 'description': 'Search the mailbox.'}, {'name': 'gmail.send', 'write': True, 'description': 'Send an email.'}], 'addedAt': None, 'checkedAt': None}]
+    await goto_settings_section(page, 'general')
+    await goto_settings_section(page, 'conn')
+    await expect(card).to_contain_text('Signed in as me@example.org')
+    await expect(card.locator('.cn-head .tag')).to_have_text('Connected')
+    await expect(card.get_by_role('link', name='Connect Google')).to_have_count(0)
+    await expect(page.locator('.cn-mcp')).to_have_count(0)
+    # Google ended the sign-in: the card says Reconnect and offers it.
+    server.google.update(connected=False, status='reconnect')
+    server.connectors[0].update(status='reconnect')
+    await goto_settings_section(page, 'general')
+    await goto_settings_section(page, 'conn')
+    await expect(card.locator('.cn-head .tag')).to_have_text('Reconnect')
+    await expect(card.get_by_role('link', name='Reconnect Google')).to_have_attribute('href', '/api/connectors/google/start')
+    await expect(card).to_contain_text('me@example.org')
+    # Disconnect asks first.
+    await card.get_by_role('button', name='Disconnect').click()
+    await expect(page.locator('#modal')).to_contain_text('Remove Google?')
+    await page.locator('#modal').get_by_role('button', name='Remove').click()
+    await expect(card.locator('.cn-steps li')).to_have_count(6)
+    assert len(server.sent('DELETE', '/api/connectors/google')) == 1
+
+
+async def google_return_toast_and_clean_address(page, base):
+    await install(page)
+    await page.goto(f'{base}/index.html?google=connected')
+    await page.locator(SCREEN).first.wait_for()
+    await expect(page.locator('#toast')).to_contain_text('Google is connected.')
+    assert await page.evaluate('location.search') == '', 'the parameter should be stripped'
+    await expect(page.locator('#main .st-head h2')).to_have_text('Connectors')
+    # A reload does not say it again.
+    await page.reload()
+    await page.locator(SCREEN).first.wait_for()
+    await expect(page.locator('#toast.show')).to_have_count(0)
+    # A failure says why, in words.
+    await page.goto(f'{base}/index.html?google=error&reason=denied')
+    await page.locator(SCREEN).first.wait_for()
+    await expect(page.locator('#toast')).to_contain_text('cancelled')
+    assert await page.evaluate('location.search') == ''
+
+
+async def subscription_provider_and_cli_status(page, base):
+    server = await install(page)
+    await open_app(page, base)
+    await open_settings(page, 'models')
+    body = page.locator('#main .st-dlg .st-body')
+    # Each paired agent says whether claude and codex are signed in there.
+    laptop = body.locator('.row', has_text='Laptop')
+    await expect(laptop).to_contain_text('Claude · Signed in')
+    await expect(laptop).to_contain_text('ChatGPT · Signed out')
+    await expect(laptop).to_contain_text('in a terminal on that machine to sign in')
+    desk = body.locator('.row', has_text='Desk PC')
+    await expect(desk).to_contain_text('Claude · Not installed')
+    await expect(desk).to_contain_text('not running now')
+    # There is no key field for a subscription.
+    form = page.locator('#cli-provider-form')
+    assert await form.locator('input[type="password"], input[name="apiKey"], input[name="baseUrl"]').count() == 0
+    await form.locator('input[name="label"]').fill('My Claude')
+    await form.locator('select[name="engine"]').select_option('claude')
+    await form.get_by_role('button', name='Add subscription').click()
+    row = body.locator('.row', has_text='My Claude')
+    await expect(row).to_contain_text('Claude subscription · default model · signed in on Laptop')
+    await expect(row.locator('.tag')).to_have_text('default')
+    assert server.sent('POST', '/api/ai/providers') == [{'kind': 'local-cli', 'label': 'My Claude', 'engine': 'claude', 'model': ''}]
+    # Check sign-in never sends a prompt: it reads the agent's report.
+    await row.get_by_role('button', name='Check sign-in').click()
+    await expect(page.locator('#toast')).to_contain_text('Claude is signed in on Laptop.')
+    assert len(server.sent('POST', '/api/ai/providers/p-1/test')) == 1
+    # A model name rides along for the second engine; a bad one is refused before it leaves.
+    await form.locator('input[name="label"]').fill('My ChatGPT')
+    await form.locator('select[name="engine"]').select_option('codex')
+    await form.locator('input[name="model"]').fill('--bad')
+    await form.get_by_role('button', name='Add subscription').click()
+    await expect(page.locator('#toast')).to_contain_text('model name is not valid')
+    assert len(server.sent('POST', '/api/ai/providers')) == 1
+    await form.locator('input[name="model"]').fill('gpt-5')
+    await form.get_by_role('button', name='Add subscription').click()
+    await expect(body.locator('.row', has_text='My ChatGPT')).to_contain_text('ChatGPT subscription · gpt-5 · signed out on Laptop')
+    assert 'apiKey' not in json.dumps(server.calls)
+    # Delete asks first.
+    await row.get_by_role('button', name='Delete').click()
+    await page.locator('#modal').get_by_role('button', name='Delete').click()
+    await expect(body.locator('.row', has_text='My Claude')).to_have_count(0)
+
+
+async def demo_says_connectors_and_models_need_the_server(page, base):
+    await open_app(page, base)
+    await open_settings(page, 'conn')
+    await expect(page.locator('#main .st-body')).to_contain_text('Connectors need the Node server')
+    await goto_settings_section(page, 'models')
+    await expect(page.locator('#main .st-body')).to_contain_text('Models and keys need the Node server')
+    await expect(page.locator('#cli-provider-form')).to_have_count(0)
+
+
+HELD_TEMPLATE = """
+    const at = new Date().toISOString();
+    s.connectors = [{id: 'google', kind: 'google', name: 'Google', account: 'me@example.org', status: 'ready', actions: []}];
+    s.chats[WRITER] = [
+      {id: 'u1', role: 'user', text: 'Email Bob that lunch is at noon', at},
+      {id: 'c0', role: 'system', kind: 'connector', connectorId: 'google', text: 'Atlas used Google: gmail.search.', at},
+      {id: 'c1', role: 'system', kind: 'connector', connectorId: 'google', activityId: 'act-1', undoUntil: new Date(Date.now() + 60000).toISOString(),
+       text: 'Atlas is sending an email to bob@example.org. You can undo it until it goes out.', at},
+      {id: 'c2', role: 'system', kind: 'connector-error', connectorId: 'google', text: 'Atlas could not use Google: drive.read. Google did not answer.', at},
+    ];"""
+
+
+held_state = lambda writer: HELD_TEMPLATE.replace('WRITER', repr(writer))
+limit_state = lambda writer: LIMIT_TEMPLATE.replace('WRITER', repr(writer))
+
+
+async def chat_connector_lines_and_undo(page, base):
+    server = await install(page)
+    writer = (await open_app(page, base, bots={'Writer': EXTRA_BOTS['Writer']}))['Writer']
+    await patch_state(page, held_state(writer))
+    await page.goto(f'{base}/index.html#bot/{writer}')
+    await page.reload()
+    # What was read, on which account, and a failure in the error colour.
+    used = page.locator('.cv-conn', has_text='used Google')
+    await expect(used).to_contain_text('me@example.org')
+    await expect(page.locator('.cv-conn.bad')).to_contain_text('could not use Google')
+    # The held send is a card with Undo while its window runs.
+    held = page.locator('.cv-held')
+    await expect(held).to_contain_text('sending an email to bob@example.org')
+    await expect(held).to_contain_text('me@example.org')
+    await held.get_by_role('button', name='Undo').click()
+    await expect(page.locator('#toast')).to_contain_text('Undone')
+    assert server.sent('POST', '/api/activity/act-1/undo') == [{}]
+    # The server's own line says it was undone; that settles the card into one muted line.
+    await patch_state(page, f"""
+        s.chats[{writer!r}].push({{id: 'send-act-1', role: 'system', kind: 'connector', connectorId: 'google', text: 'You undid the email to bob@example.org. It was not sent.', at: new Date().toISOString()}});""")
+    await expect(page.locator('.cv-held')).to_have_count(0)
+    await expect(page.locator('.cv-conn', has_text='You undid')).to_be_visible()
+    await expect(page.locator('.cv-conn', has_text='sending an email')).not_to_contain_text('You can undo')
+    assert await page.locator('.cv-conn .btn, .cv-conn button').count() == 0
+
+
+async def chat_held_send_closes_by_itself_and_late_undo_says_so(page, base):
+    server = await install(page)
+    writer = (await open_app(page, base, bots={'Writer': EXTRA_BOTS['Writer']}))['Writer']
+    await patch_state(page, held_state(writer).replace('Date.now() + 60000', 'Date.now() + 2500'))
+    await page.goto(f'{base}/index.html#bot/{writer}')
+    await page.reload()
+    await expect(page.locator('.cv-held .btn')).to_have_text('Undo')
+    # Nothing repaints the chat, yet the button goes when the window ends.
+    await expect(page.locator('.cv-held')).to_have_count(0, timeout=6000)
+    await expect(page.locator('.cv-conn', has_text='sending an email')).not_to_contain_text('You can undo')
+    # Late: the server says it already went out, and the chat is not left in a false state.
+    await patch_state(page, held_state(writer).replace("activityId: 'act-1'", "activityId: 'act-late'"))
+    await expect(page.locator('.cv-held')).to_have_count(1)
+    await page.locator('.cv-held').get_by_role('button', name='Undo').click()
+    await expect(page.locator('#toast')).to_contain_text('already went out')
+
+
+LIMIT_TEMPLATE = """
+    const at = new Date().toISOString();
+    s.ai = {providers: [{id: 'p1', label: 'My Claude', kind: 'local-cli', engine: 'claude'}, {id: 'p2', label: 'OpenAI', kind: 'api'}], defaultProviderId: 'p1', defaultModel: null, bots: {}};
+    s.chats[WRITER] = [
+      {id: 'u1', role: 'user', text: 'Summarise my week', at},
+      {id: 'r1-model-limit', role: 'system', kind: 'model-limit', runId: 'r1', botId: WRITER, switchTo: 'p2',
+       text: 'Atlas could not answer: My Claude has reached its usage limit. You can switch Atlas to OpenAI.', at},
+    ];"""
+
+
+async def chat_model_limit_switch(page, base):
+    server = await install(page)
+    writer = (await open_app(page, base, bots={'Writer': EXTRA_BOTS['Writer']}))['Writer']
+    await patch_state(page, limit_state(writer))
+    await page.goto(f'{base}/index.html#bot/{writer}')
+    await page.reload()
+    card = page.locator('.cv-card', has_text='usage limit')
+    await expect(card.get_by_role('button', name='Switch to OpenAI')).to_be_visible()
+    await card.get_by_role('button', name='Switch to OpenAI').click()
+    await expect(page.locator('#toast')).to_contain_text('Switched to OpenAI')
+    assert server.sent('PATCH', f'/api/ai/bots/{writer}') == [{'providerId': 'p2', 'model': ''}]
+    # Once the bot uses that provider the card is one muted line, with no button.
+    await patch_state(page, f"s.ai.bots = {{{writer!r}: {{providerId: 'p2', model: null}}}};")
+    await expect(page.locator('.cv-card', has_text='usage limit')).to_have_count(0)
+    await expect(page.locator('.cv-conn', has_text='usage limit')).to_be_visible()
+    # Nothing to switch to: no button, only the sentence.
+    await patch_state(page, f"s.ai.bots = {{}}; delete s.chats[{writer!r}][1].switchTo; s.chats[{writer!r}][1].text = 'Atlas could not answer: My Claude has reached its usage limit. Connect another model in Settings to switch Atlas.';")
+    await expect(page.locator('.cv-conn', has_text='Connect another model')).to_be_visible()
+    await expect(page.locator('.cv-card .btn')).to_have_count(0)
+
+
+async def phone_connectors_and_models_fit(page, base):
+    await install(page, connectors=[connector('Notes')])
+    writer = (await open_app(page, base, bots={'Writer': EXTRA_BOTS['Writer']}))['Writer']
+    await page.locator('.ch-me').click()
+    await page.locator('#main .st-phone .rw', has_text='Connect apps').click()
+    await expect(page.locator('#main .pr-subbar h1')).to_have_text('Connectors')
+    await expect(page.locator('#main .cn-mcp')).to_have_count(1)
+    await expect(page.locator('#connector-add-form')).to_be_visible()
+    assert await overflow(page) <= 0, 'Connectors overflows the phone'
+    await page.locator('#main [data-action="settings-back"]').click()
+    await page.locator('#main .st-phone .rw', has_text='Models and keys').click()
+    await expect(page.locator('#cli-provider-form')).to_be_visible()
+    await expect(page.locator('#main .row', has_text='Laptop')).to_be_visible()
+    assert await overflow(page) <= 0, 'Models and keys overflows the phone'
+    await page.goto(f'{base}/index.html#bot/{writer}')
+    await page.evaluate(f"""localStorage.setItem({KEY!r}, JSON.stringify((s => {{ const at = new Date().toISOString();
+        s.connectors = [{{id: 'google', kind: 'google', name: 'Google', account: 'me@example.org'}}];
+        s.chats[{writer!r}] = [{{id: 'c1', role: 'system', kind: 'connector', connectorId: 'google', activityId: 'a', undoUntil: new Date(Date.now() + 60000).toISOString(), text: 'Atlas is sending an email to bob@example.org. You can undo it until it goes out.', at}}];
+        return s; }})(JSON.parse(localStorage.getItem({KEY!r})))))""")
+    await page.reload()
+    await expect(page.locator('.cv-held .btn')).to_have_text('Undo')
+    assert await overflow(page) <= 0, 'the held send overflows the phone'
+
+
 async def main():
     shots = Path(tempfile.mkdtemp(prefix='usability-smoke-shots-'))
     site_dir = Path(tempfile.mkdtemp(prefix='usability-smoke-site-'))
@@ -1318,13 +1749,22 @@ async def main():
             await h.scenario('computer: the demo has no browser, and Atlas has no Computer row', computer_demo_has_no_browser)
             await h.scenario('computer: the pill carries the site chip, opens the view and says You are driving', computer_site_chip_on_the_pill)
             await h.scenario('phone: the Computer view fits and its controls are thumb-sized', phone_computer_view, PHONE)
+            await h.scenario('connectors: add an MCP server over HTTP and on the agent, refresh its tools, delete asks first, no secret is painted', connectors_add_and_delete_mcp)
+            await h.scenario('connectors: the Google setup form, a plain Connect Google link, connected and reconnect states', google_setup_form_connect_and_reconnect)
+            await h.scenario('connectors: ?google=connected toasts once, strips the address and opens Connectors; an error says why', google_return_toast_and_clean_address)
+            await h.scenario('models: a subscription is a name and an engine with no key field, and each agent shows its CLI sign-in', subscription_provider_and_cli_status)
+            await h.scenario('demo: Connectors and Models and keys say they need the server', demo_says_connectors_and_models_need_the_server)
+            await h.scenario('chat: connector lines name the account, a held send has Undo, then collapses to a muted line', chat_connector_lines_and_undo)
+            await h.scenario('chat: the Undo button goes when its window ends, and a late Undo says it already went out', chat_held_send_closes_by_itself_and_late_undo_says_so)
+            await h.scenario('chat: a usage limit offers Switch to the provider named, then settles', chat_model_limit_switch)
+            await h.scenario('phone: Connectors, Models and keys and a held send fit and are usable', phone_connectors_and_models_fit, PHONE)
             await browser.close()
             server.shutdown()
         failed = [name for name, error in h.results if error]
         if failed:
             print(f'USABILITY SMOKE FAIL: {len(failed)} of {len(h.results)} scenarios: {failed}')
             return 1
-        print(f'USABILITY SMOKE PASS: {len(h.results)} scenarios; new bot, edit and move, delete, Atlas, pin and reorder, ask cards, permissions, pause banner, settings, out-of-job card, checkpoint card, faces, keyboard, phone, Computer view (row, frame, takeover input, hand back, no device, demo, site chip), no console errors')
+        print(f'USABILITY SMOKE PASS: {len(h.results)} scenarios; new bot, edit and move, delete, Atlas, pin and reorder, ask cards, permissions, pause banner, settings, out-of-job card, checkpoint card, faces, keyboard, phone, Computer view (row, frame, takeover input, hand back, no device, demo, site chip), Connectors (MCP add and delete, Google setup, return toast), subscription providers and CLI status, Undo and Switch lines in chat, no console errors')
         return 0
     finally:
         shutil.rmtree(site_dir, ignore_errors=True)
