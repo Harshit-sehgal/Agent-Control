@@ -152,6 +152,47 @@ button.tog:hover{background:var(--sunk);color:var(--fg)}
 .kids>ul{overflow:hidden;min-height:0}
 .kids>ul>li{opacity:0;transform:translateY(-20px);transition:opacity .18s ease,transform .26s cubic-bezier(.5,0,.75,0)}
 .open>.kids>ul>li{opacity:1;transform:none;transition:opacity .3s ease calc(var(--i) * 60ms),transform .6s cubic-bezier(.34,1.5,.64,1) calc(var(--i) * 60ms)}
+/* home: a sentence, the team, lately */
+.home{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:44px;padding-top:30px}
+.when{font-size:13px;color:var(--muted)}
+.roll{font-family:var(--display);font-weight:600;font-size:clamp(26px,4.4vw,40px);line-height:1.2;letter-spacing:-.025em;margin:6px 0 0;text-wrap:pretty;max-width:24ch}
+.app[data-look="ink"] .roll{font-weight:500}
+.nm{font:inherit;color:inherit;letter-spacing:inherit;text-decoration:underline;text-decoration-thickness:.08em;text-underline-offset:.15em;text-decoration-color:color-mix(in srgb,var(--t) 90%,transparent);border-radius:6px}
+.nm:hover{text-decoration-color:var(--fg)}
+.nm.w{color:var(--violet);text-decoration-color:currentColor}
+.roll .quiet{color:var(--muted)}
+.lbl{font-size:13px;font-weight:600;color:var(--soft);margin:0 0 8px}
+.brow .st{font-size:12.5px;color:var(--mint);white-space:nowrap;margin-left:auto;padding-left:8px}
+.brow .st.wait{color:var(--violet)}
+.prof{font-size:12.5px;color:var(--muted);padding:6px 8px;border-radius:8px;opacity:0;transition:opacity .2s}
+.prof:hover{background:var(--sunk);color:var(--fg)}
+.brow:hover .prof,.prof:focus-visible{opacity:1}
+@media (hover:none){.prof{opacity:1}}
+.btree>li>.brow .bmain b{font-family:var(--display);font-size:20px;letter-spacing:-.015em}
+/* drawer */
+.ph .you{flex:1}
+.switch{display:flex;align-items:center;gap:12px;width:100%;padding:12px 14px;border-radius:var(--r);background:var(--sunk);text-align:left;font-weight:500}
+.switch .w{flex:1}
+.switch .w small{display:block;color:var(--muted);font-size:12px;font-weight:400}
+.knob{width:40px;height:24px;flex:none;border-radius:99px;background:var(--mint);position:relative;transition:background .25s}
+.knob::after{content:'';position:absolute;top:3px;left:19px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:left .35s var(--ease)}
+.switch[aria-checked="false"] .knob{background:var(--line2)}
+.switch[aria-checked="false"] .knob::after{left:3px}
+.big{font-family:var(--display);font-size:38px;font-weight:650;letter-spacing:-.03em;line-height:1}
+.app[data-look="ink"] .big{font-weight:500}
+.big small{font-family:var(--body);font-size:13px;font-weight:400;color:var(--muted);letter-spacing:0;margin-left:8px}
+.stack{display:flex;gap:2px;height:10px;border-radius:99px;overflow:hidden;background:var(--sunk);margin:14px 0 10px}
+.stack span{height:100%}
+.whoused{display:flex;flex-wrap:wrap;gap:8px 14px;font-size:12.5px;color:var(--soft)}
+.whoused span{display:inline-flex;gap:6px;align-items:center}
+.whoused em{font-style:normal;color:var(--muted);font-variant-numeric:tabular-nums}
+.sw{width:12px;height:12px;border-radius:4px;background:var(--line2);display:inline-block}
+.navl .line .w{font-size:14px;color:var(--fg)}
+.foot{font-size:12px;color:var(--muted);margin:auto 0 0}
+/* faces: cheeks and a catch-light */
+.face::before{content:'';position:absolute;left:14%;right:14%;top:58%;height:14%;background:radial-gradient(circle at 10% 50%,rgba(255,110,120,.32) 0 34%,transparent 36%),radial-gradient(circle at 90% 50%,rgba(255,110,120,.32) 0 34%,transparent 36%);pointer-events:none}
+.face i::after{content:'';position:absolute;top:16%;left:18%;width:38%;height:26%;border-radius:50%;background:#fff;opacity:.85}
+.face.sleep i::after{display:none}
 .recent h3{font-size:13px;font-weight:600;color:var(--soft);margin:0 0 6px}
 .trow{display:flex;gap:12px;align-items:center;width:100%;padding:10px 4px;border-top:1px solid var(--line);text-align:left}
 .trow:first-of-type{border-top:0}
@@ -323,7 +364,6 @@ select.sel{border:0;border-radius:8px;background:var(--sunk);padding:5px 8px;fon
     <button class="fab fab-set" id="fabSet" aria-label="Settings and more" title="Settings and more"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M4 7.4l2.1 1.2M17.9 15.4l2.1 1.2M4 16.6l2.1-1.2M17.9 8.6 20 7.4"/></svg><span id="setBadge"></span></button>
   </div>
   <button class="fab fab-new" id="fabNew" aria-label="New thread"><svg class="i" viewBox="0 0 24 24"><path d="M6 3.5h9.5A2.5 2.5 0 0 1 18 6v12.5a2 2 0 0 1-2 2H6z"/><path d="M6 3.5v17M9.5 8h5M9.5 11.5h3"/><path d="m20.5 9.5-6.2 6.2-2.3.6.6-2.3 6.2-6.2a1.2 1.2 0 0 1 1.7 1.7z"/></svg><span class="lbl">New thread</span></button>
-  <div class="looks" role="group" aria-label="Compare looks"><span>Compare looks</span><button data-look="soft" class="on">Soft studio</button><button data-look="ink">Ink &amp; paper</button><button data-look="night">Night desk</button></div>
   <div class="scrim" id="scrim"></div>
   <aside class="drawer" id="drawer" aria-label="Menu" aria-hidden="true"></aside>
   <aside class="panel" id="panel" aria-label="Details" aria-hidden="true"></aside>
@@ -384,12 +424,25 @@ function botsView(){
   const p=pending();
   const kidsOf=id=>id==='atlas'?BOTS.filter(b=>b.id!=='atlas'&&(b.boss==='atlas'||!b.boss)):BOTS.filter(b=>b.boss===id);
   const node=(b,i)=>{const k=kidsOf(b.id),open=!!S.open[b.id],st=stateOf(b);
-    return `<li class="${open?'open':''}" style="--i:${i}"><div class="brow">${k.length?`<button class="tog" data-tog="${b.id}" aria-expanded="${open}" aria-label="${b.name}'s team">${IC.chev}</button>`:'<span class="tog"></span>'}<button class="bmain" data-dm="${b.id}" aria-label="Message ${b.name}">${face(b,b.id==='atlas'?'m':'')}<span class="w"><b>${b.name}</b><small>${esc(roleOf(b)==='Bot'?short(b):`${roleOf(b)} · ${k.length} ${k.length===1?'report':'reports'}`)}</small></span></button><span class="pill ${st}">${st==='waiting'?'waiting on you':st}</span><button class="x" data-bot="${b.id}" aria-label="${b.name}'s profile" title="Profile">${IC.info}</button></div>${k.length?`<div class="kids" ${open?'':'inert'}><ul>${k.map(node).join('')}</ul></div>`:''}</li>`};
-  return `<div class="view"><div class="wrap">
-    <div class="hello"><h1>Your company</h1><button class="status ${S.paused?'paused':''}" data-pause><span class="dot"></span>${S.paused?'All bots paused · Resume':S.busy.size?[...S.busy].map(id=>by(id).name).join(', ')+' working':'Atlas on watch · others asleep'}</button></div>
-    ${p.length?`<div class="needs">${p.map(x=>`<button class="need" data-open="${x.thread}">${face(by(x.bot),'',' ')}<span class="w"><b>${by(x.bot).name}</b> wants to ${esc(x.action)}</span><span class="go">Answer</span></button>`).join('')}</div>`:''}
-    <section><ul class="btree">${node(by('atlas'),0)}</ul></section>
-    <section class="recent"><h3>Recent threads</h3>${S.threads.slice(0,5).map(t=>{const o=t.owner&&by(t.owner);return `<button class="trow" data-open="${t.id}">${o?face(o,'s'):''}<span class="w">${esc(t.title)}</span><small>${o?o.name:''}</small></button>`}).join('')||'<p class="sub">Your threads will show here.</p>'}</section>
+    return `<li class="${open?'open':''}" style="--i:${i}"><div class="brow">${k.length?`<button class="tog" data-tog="${b.id}" aria-expanded="${open}" aria-label="${b.name}'s team">${IC.chev}</button>`:'<span class="tog"></span>'}<button class="bmain" data-dm="${b.id}" aria-label="Message ${b.name}">${face(b,b.id==='atlas'?'m':'',st==='waiting'?'wait':undefined)}<span class="w"><b>${b.name}</b><small>${esc(roleOf(b)==='Bot'?short(b):`${roleOf(b)} · ${k.length} ${k.length===1?'report':'reports'}`)}</small></span>${st==='working'?'<span class="st">working</span>':st==='waiting'?'<span class="st wait">waiting on you</span>':''}</button><button class="prof" data-bot="${b.id}">Profile</button></div>${k.length?`<div class="kids" ${open?'':'inert'}><ul>${k.map(node).join('')}</ul></div>`:''}</li>`};
+  const nm=id=>{const b=by(id);return `<button class="nm" data-dm="${id}" style="--t:${b.tint}">${esc(b.name)}</button>`};
+  const list=a=>a.length<2?a.join(''):a.slice(0,-1).join(', ')+' and '+a[a.length-1];
+  const waitB=[...new Set(p.map(x=>x.bot))],busy=[...S.busy].filter(id=>!waitB.includes(id));
+  let s='';
+  if(S.paused)s=`Everything is paused. <button class="nm" data-pause style="--t:var(--violet)">Resume</button>`;
+  else{
+    if(!busy.includes('atlas')&&!waitB.includes('atlas'))s+=`${nm('atlas')} is on watch. `;
+    if(busy.length)s+=`${list(busy.map(nm))} ${busy.length>1?'are':'is'} working. `;
+    if(waitB.length)s+=`${list(waitB.map(id=>`<button class="nm w" data-open="${p.find(x=>x.bot===id).thread}">${esc(by(id).name)}</button>`))} ${waitB.length>1?'are':'is'} waiting on you. `;
+    const rest=BOTS.filter(b=>b.id!=='atlas'&&!busy.includes(b.id)&&!waitB.includes(b.id)).length;
+    if(rest)s+=`<span class="quiet">${rest===BOTS.length-1?'Everyone else':`The other ${rest}`} ${rest===1?'is':'are'} asleep.</span>`;
+  }
+  const d=new Date(),h=d.getHours(),part=h<12?'morning':h<17?'afternoon':'evening';
+  const ago=ts=>{const m=Math.round((Date.now()-ts)/6e4);return m<1?'just now':m<60?m+' min ago':m<1440?Math.round(m/60)+' h ago':Math.round(m/1440)+' d ago'};
+  return `<div class="view"><div class="home">
+    <header><div class="when">${d.toLocaleDateString(undefined,{weekday:'long'})} ${part}</div><p class="roll" aria-live="polite">${s}</p></header>
+    <section><h3 class="lbl">The team</h3><ul class="btree">${node(by('atlas'),0)}</ul></section>
+    <section class="recent"><h3 class="lbl">Lately</h3>${S.threads.slice(0,5).map(t=>{const o=t.owner&&by(t.owner);return `<button class="trow" data-open="${t.id}">${o?face(o,'s',''):''}<span class="w">${esc(t.title)}</span><small>${o?o.name:''}${t.at?' · '+ago(t.at):''}</small></button>`}).join('')||'<p class="sub">Nothing yet. Start a thread from the bottom right.</p>'}</section>
   </div></div>`;
 }
 function composer(){
@@ -447,25 +500,26 @@ function acts(list,showName=true){
   return h;
 }
 const secH=(k,label,count,badge)=>`<button class="sec-h" data-sec="${k}" aria-expanded="${!S.col[k]}">${IC.chev}<span>${label}</span>${badge?`<span class="badge" style="margin-left:auto">${count}</span>`:`<span class="cnt">${S.col[k]?count:''}</span>`}</button>`;
+const USE=[{f:'sch',n:'Scholar',p:26},{f:'plan',n:'Planner',p:8},{f:'mail',n:'Mailroom',p:5},{n:'Others',p:3,c:'var(--line2)'}];
 function drawerHTML(){
-  const p=pending();
-  return `<div class="ph"><h3>Menu</h3><button class="x" data-closeall aria-label="Close">${IC.x}</button></div><div class="pb">
-    <div class="you"><span class="face m" style="--t:#8fe0bf"><span class="eyes"><i></i><i></i></span><b></b></span><div><b>You</b><div class="sub">Owner · laptop server</div></div></div>
-    <button class="status ${S.paused?'paused':''}" data-pause style="align-self:flex-start"><span class="dot"></span>${S.paused?'All bots paused · Resume':'Atlas on watch · Pause all'}</button>
-    <div class="group"><h4>Usage this week (example)</h4>
-      <div class="line" style="display:block"><div style="display:flex"><span class="w">Claude Max</span><span class="sub">42% of weekly limit</span></div><div class="meter"><span style="width:42%"></span></div></div>
-      <div class="line" style="display:block"><div style="display:flex"><span class="w">OpenAI key</span><span class="sub">$3.10 of $20</span></div><div class="meter"><span style="width:16%"></span></div></div>
-      <div class="line"><span class="w">Busiest bot</span><span class="sub">Scholar · 61% of use</span></div></div>
-    ${p.length?`<div class="group">${secH('needs','Needs you',p.length,true)}${S.col.needs?'':p.map(a=>`<button class="line" data-open="${a.thread}">${face(by(a.bot),'s','')}<span class="w">${by(a.bot).name}: ${esc(a.action)}</span></button>`).join('')}</div>`:''}
-    <div class="group">${secH('threads','Threads',S.threads.length)}${S.col.threads?'':S.threads.map(t=>{const o=t.owner&&by(t.owner);return `<button class="line" data-open="${t.id}">${o?face(o,'s',''):''}<span class="w">${esc(t.title)}</span>${t.running?'<span class="pill working">working</span>':''}</button>`}).join('')}</div>
-    <div class="group">${secH('places','Go to',3)}${S.col.places?'':`
-      <button class="line" data-panel="activity"><span class="w">Activity<small>What your bots did outside the app</small></span></button>
-      <button class="line" data-panel="company"><span class="w">Company<small>Who reports to whom</small></span></button>
-      <button class="line" data-palette><span class="w">Jump to…</span><kbd>⌘K</kbd></button>`}</div>
-    <div class="group">${secH('settings','Settings',3)}${S.col.settings?'':`
-      <button class="line" data-panel="settings" data-sect="models"><span class="w">Subscriptions and API keys</span><span class="ok">1 signed in</span></button>
+  const p=pending(),look={soft:'Soft studio',ink:'Ink & paper',night:'Night desk'}[$('app').dataset.look];
+  return `<div class="ph"><div class="you"><span class="face m" style="--t:#8fe0bf"><span class="eyes"><i></i><i></i></span><b></b></span><div><b>You</b><div class="sub">Owner of ${BOTS.length} bots</div></div></div><button class="x" data-closeall aria-label="Close">${IC.x}</button></div><div class="pb">
+    <button class="switch" role="switch" aria-checked="${!S.paused}" data-pause><span class="w">${S.paused?'Everything is paused':'Bots are running'}<small>${S.paused?'Nothing runs until you switch this back on':'Switch off to pause every bot at once'}</small></span><span class="knob" aria-hidden="true"></span></button>
+    ${p.length?`<div class="group"><h4>Needs you</h4>${p.map(a=>`<button class="line" data-open="${a.thread}">${face(by(a.bot),'s','wait')}<span class="w">${by(a.bot).name} wants to ${esc(a.action)}</span></button>`).join('')}</div>`:''}
+    <div class="group use"><h4>This week · resets Monday</h4>
+      <div class="big">42%<small>of Claude Max</small></div>
+      <div class="stack" role="img" aria-label="Scholar 26%, Planner 8%, Mailroom 5%, others 3% of the weekly limit">${USE.map(u=>`<span style="width:${u.p}%;background:${u.c||by(u.f).tint}"></span>`).join('')}</div>
+      <div class="whoused">${USE.map(u=>`<span>${u.f?face(by(u.f),'s',''):'<i class="sw"></i>'}${u.n} <em>${u.p}%</em></span>`).join('')}</div>
+      <p class="sub" style="margin-top:12px">OpenAI key: $3.10 of your $20 cap. Example numbers.</p></div>
+    <div class="group navl"><h4>Go to</h4>
+      <button class="line" data-panel="activity"><span class="w">Activity</span><span class="sub">What left the app</span></button>
+      <button class="line" data-panel="company"><span class="w">Company</span><span class="sub">Who reports to whom</span></button>
+      <button class="line" data-palette><span class="w">Jump to…</span><kbd>⌘K</kbd></button></div>
+    <div class="group navl"><h4>Settings</h4>
+      <button class="line" data-panel="settings" data-sect="models"><span class="w">Models and keys</span><span class="ok">Claude signed in</span></button>
       <button class="line" data-panel="settings" data-sect="conn"><span class="w">Connectors</span><span class="ok">Google</span></button>
-      <button class="line" data-panel="settings" data-sect="look"><span class="w">Appearance</span><span class="sub">${{soft:'Soft studio',ink:'Ink & paper',night:'Night desk'}[$('app').dataset.look]}</span></button>`}</div>
+      <button class="line" data-panel="settings" data-sect="look"><span class="w">Appearance</span><span class="sub">${look}</span></button></div>
+    <p class="foot">Server: this laptop. Moving it to your Oracle VM is on the plan.</p>
   </div>`;
 }
 function panelHTML(){
@@ -532,7 +586,7 @@ async function send(text){
   if(S.paused)return;
   const mb=[...BOTS].sort((a,b)=>b.name.length-a.name.length).find(b=>text.toLowerCase().startsWith('@'+b.name.toLowerCase()));
   let t=S.view==='thread'&&S.threads.find(x=>x.id===S.cur);const isNew=!t;
-  if(!t){t={id:'t'+Date.now(),title:text.replace(/^@\S+\s*/,'').slice(0,42)||text,owner:null,items:[]};S.threads.unshift(t)}
+  if(!t){t={id:'t'+Date.now(),at:Date.now(),title:text.replace(/^@\S+\s*/,'').slice(0,42)||text,owner:null,items:[]};S.threads.unshift(t)}
   S.view='thread';S.cur=t.id;S.preview=null;t.running=true;t.items.push({k:'me',text});render();
   await wait(450);
   const forced=mb?.id||t.dm||(!isNew&&t.owner);
@@ -563,7 +617,7 @@ async function send(text){
   up();
 }
 function openDM(id){let t=S.threads.find(x=>x.dm===id);const b=by(id);
-  if(!t){t={id:'dm'+id,title:b.name,owner:id,dm:id,items:[{k:'note',text:`Direct thread with ${b.name}. Only ${b.name} reads this; it can still ask teammates for help.`}]};S.threads.unshift(t)}
+  if(!t){t={id:'dm'+id,at:Date.now(),title:b.name,owner:id,dm:id,items:[{k:'note',text:`Direct thread with ${b.name}. Only ${b.name} reads this; it can still ask teammates for help.`}]};S.threads.unshift(t)}
   S.recent=[id,...S.recent.filter(x=>x!==id)];go('thread',t.id)}
 
 /* ---------- palette ---------- */
@@ -652,7 +706,7 @@ document.addEventListener('keydown',e=>{
 /* eyes follow the pointer, gently */
 let raf=0;document.addEventListener('pointermove',e=>{if(raf)return;raf=requestAnimationFrame(()=>{raf=0;const x=(e.clientX/innerWidth-.5)*2,y=(e.clientY/innerHeight-.5)*2;document.documentElement.style.setProperty('--lx',x.toFixed(2));document.documentElement.style.setProperty('--ly',y.toFixed(2))})});
 
-S.threads.push({id:'seed',title:'Reply to the Northwind email',owner:'mail',items:[
+S.threads.push({id:'seed',at:now-3*H,title:'Reply to the Northwind email',owner:'mail',items:[
   {k:'me',text:'Reply to the Northwind email and say we can do Wednesday'},
   {k:'route',owner:'mail',quiet:['plan','sch','quill','ledger']},
   {k:'hop',from:'mail',to:'plan',text:'Northwind confirmed Wednesday. Can you hold 11:00?'},

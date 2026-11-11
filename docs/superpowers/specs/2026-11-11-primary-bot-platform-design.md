@@ -88,25 +88,29 @@ This revision replaces groups. Where it conflicts with anything below, this sect
 ## Interaction model (mock v12, the UX reference)
 
 Layout (owner's design, 2026-11-11):
-- **Home is the bots, as a dropdown list** (owner, 2026-11-11). It opens with the status line (also Pause all) and Needs you (only when something is waiting). Below that is one tree list. The primary is at the top and is open by default. Its chevron drops down the managers and the bots with no manager, and each manager's chevron drops down its team. Children fall into place with a short stagger and a small bounce, and rise back up when the list folds. Each row shows the face, the **name**, a short job (or "Manager · 2 reports"), a state pill and an (i) for the profile. Tapping the row opens the direct thread. Recent threads sit under the list.
+- **Home is a sentence, the team and Lately** (mock v15).
+  - **The sentence** sits at the top, under a small "Wednesday evening". It is set large and written live from state, for example "Atlas is on watch. Planner is waiting on you. Everyone else is asleep." Each bot name in it is a link that opens its direct thread; a waiting name is violet and opens the ask. When everything is paused it reads "Everything is paused. Resume".
+  - **The team** is the dropdown tree: Atlas at the top and open by default, its chevron dropping down the managers and the bots with no manager, and each manager dropping down its team. Children fall in with a stagger and a small bounce and rise when folded. A row is the face, the name and a short job. There are no state pills: the face shows the state (asleep, reading, waiting), and a word appears only for "working" or "waiting on you". "Profile" shows on hover, or always on touch screens. Tapping the row opens the direct thread.
+  - **Lately** lists the five latest threads, each with the owner's face, the owner's name and how long ago.
 - **There is no sidebar.** Three floating buttons stay put while the page scrolls:
   - **+** at the top right hires a new bot.
   - **Settings** sits in the bottom-left corner.
   - **New thread** (notebook-and-pen icon) sits in the bottom-right corner (owner, 2026-11-11).
   - Both bottom buttons lift above the composer when a thread is open.
 - **New thread** opens the composer screen. It shows the lineup of bot faces, the question "What should the company get done?", a large composer and four starters.
-- **Settings opens a drawer from the left** with:
-  - the owner, plus Pause all
-  - usage this week, with a meter per subscription or key and the busiest bot
-  - Needs you
-  - Threads
-  - Go to: Activity, Company, Jump to… ⌘K
-  - Settings: subscriptions and keys, connectors, appearance
-  - Every section folds, and folding is remembered per device; Needs you keeps its violet badge when folded.
+- **Settings opens a drawer from the left:**
+  - the owner and how many bots they have
+  - a power switch, "Bots are running", which is Pause all; switched off it reads "Everything is paused"
+  - Needs you, only when something waits
+  - **This week:** the share of the subscription limit in large type, then one bar split by bot in each bot's tint, so the bar shows who used it, with a legend of faces and percentages and the key spend cap below
+  - Go to: Activity, Company, Jump to ⌘K
+  - Settings: Models and keys, Connectors, Appearance
+  - a footer line saying where the server runs (the laptop now, the Oracle VM later)
+  - Threads moved out of the drawer: they are on the home screen under Lately and in ⌘K.
 - **Details slide over from the right**: Company, Activity, Settings, New bot and every bot profile. Esc, the close button or a click outside closes them.
 
 Characters and looks:
-- **Faces are characters.**
+- **Faces are characters** (blush cheeks and a catch-light in each eye since v15).
   - Each face has a tint gradient, eyes that blink and gently follow the pointer, and a small mouth.
   - States: asleep (closed eyes), awake, reading (working), waiting and wake (lifts up).
   - **Role shapes:** a circle for the primary, a rounded hexagon for managers, a rounded square for bots. There are no per-bot shapes.
@@ -115,7 +119,7 @@ Characters and looks:
   - Soft studio: off-white with soft depth. It follows the system's light or dark setting.
   - Ink & paper: warm paper, a serif display face and flat faces. It also follows the system's light or dark setting.
   - Night desk: always dark, with glowing tints.
-  - The switch lives on the home screen and under Settings → Appearance. The mock keeps the switch so the owner can pick one; the build ships the chosen look plus light and dark.
+  - The look is picked under Settings → Appearance. The floating switch is gone from the home screen. The build ships the chosen look plus light and dark.
 
 Threads:
 - **Header:** a back link to Bots, the owner's face (which opens the profile), the title and one live line ("Waiting on you", "Scholar and Quill working"). A soft wash of the owner's tint sits behind the top of the thread.
