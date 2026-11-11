@@ -99,6 +99,10 @@ The server still accepts a provider from the environment, which is what runs whe
 
 `AI_API_KEY` and `OPENAI_API_KEY` keep working, and a saved workspace provider is used when the bot or the workspace default points at it. No SDK is involved: every protocol is plain HTTPS from the server, no key is sent to the browser, and no model gets a publication tool — the final Post click stays yours.
 
+### Use your Claude / ChatGPT subscription
+
+Instead of a key, a bot can run on your own plan. The paired local agent starts the unmodified `claude` or `codex` command that you signed in to in your own terminal; the app never sees, stores or forwards that login. Add a provider of kind `local-cli` (a name, an engine `claude` or `codex` and an optional model, no key; the Settings page for it comes with the UI work), keep `node agent/agent.mjs run` going on that machine, and pick the provider for a bot. The prompt goes to the CLI on stdin, its own file, shell and web tools are off, and the agent reports whether each CLI is signed in (`GET /api/agents` → `cli`). If you have no agent paired the run says "Pair a local agent and run `claude` on that machine to sign in."; on a usage limit it fails and offers to switch that bot to another connected model. Subscription providers are for the owner's own machine only, and there is no token streaming. Setup, limits and timeouts are in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#use-your-claude--chatgpt-subscription).
+
 The static Pages demo has no providers; it stays a browser-local simulation (group handoffs and offline commands, no live model).
 
 ## GitHub Pages: chat-first UI

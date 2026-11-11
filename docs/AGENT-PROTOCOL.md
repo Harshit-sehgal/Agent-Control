@@ -38,6 +38,9 @@ Verification (`verifyAgentRequest`):
 
 ## 3. Endpoints (all signed, all agent-initiated)
 - `POST /api/agent/heartbeat` → marks the agent online and returns due tasks.
+  The body may carry `cli: {claude, codex}`, each `signed-in`, `signed-out`,
+  `missing` or `unknown`, taken from the CLIs' own status commands; the server
+  keeps only those four words and shows them in `GET /api/agents`.
 - `POST /api/agent/tasks/:id/result` `{status, result, error}` → records a
   result. Completing an already-completed task is rejected (409); a `failed`
   result re-queues while attempts remain, then fails permanently.
@@ -96,6 +99,7 @@ is required).
 | `http.check` | `http.check` | GET a URL, report status and latency. Redirects are reported, not followed. |
 | `browser.capture` | `browser.capture` | Read a page on an allowlisted host with the installed browser (or a plain fetch). |
 | `browser.action` | `browser.action` | **Interact** with an allowlisted page: `steps` of `navigate` / `click` / `type` / `waitFor` / `read` / `scroll` (max 25). `scroll` only moves the page. |
+| `model.run` | `model.run` | Run one prompt through the owner's signed-in `claude` or `codex` CLI. Payload `{engine, model?, instructions?, input, timeoutMs?}`. The prompt goes in on stdin, the CLI's own tools are off, and it is never retried. The result is `{ok: true, text, engine, model, ms}` or `{ok: false, code, message}` with `code` one of `not-signed-in`, `usage-limit`, `cli-missing`, `timeout`, `output-too-large`, `empty-reply`, `bad-request`, `cli-failed`. |
 
 `browser.action` payload:
 

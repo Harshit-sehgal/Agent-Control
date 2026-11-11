@@ -60,6 +60,64 @@ Local-agent knobs (`AGENT_BROWSER`, allowlist, profile, path) are read by
 `node agent/agent.mjs`, not this process. They are listed in `.env.example`
 and [`AGENT-PROTOCOL.md`](AGENT-PROTOCOL.md).
 
+### Use your Claude / ChatGPT subscription
+
+A bot can run on your own Claude or ChatGPT plan instead of an API key. This
+works only through the paired local agent, which starts the **unmodified**
+`claude` or `codex` command that you signed in to yourself. The app never sees,
+stores or forwards that login: it holds no key for these providers and keeps no
+token. The providers' terms forbid third-party apps from offering or routing a
+plan login; running their own CLI yourself, on your own machine, is the ordinary
+way to use a plan. So these providers are for the workspace owner only, they are
+not a way to share a plan with other people, and the plan's limits assume
+ordinary individual use.
+
+1. On the machine that will run the bots, install the CLI and sign in once in a
+   terminal: run `claude` (Claude Code) or `codex login` (Codex CLI) and finish
+   the sign-in.
+2. Pair a local agent on that machine (`node agent/agent.mjs pair`, with a
+   pairing code from the agents list) and leave `node agent/agent.mjs run` going.
+   A new pairing asks for the `model.run` permission by default; an agent paired
+   earlier needs it added (`PATCH /api/agents/:id`).
+3. Add a subscription provider: `POST /api/ai/providers` with
+   `{"kind": "local-cli", "engine": "claude", "label": "My Claude"}` (engine
+   `claude` or `codex`; an optional `model`, which must be a plain name that
+   cannot read as a flag; no key). Then point a bot at it with
+   `PATCH /api/ai/bots/:bot` `{"providerId": "…"}`, or make it the workspace
+   default. The Settings page for this arrives with the UI work.
+
+How a turn works: the bot's model call becomes a `model.run` task, the agent runs
+the CLI with the prompt on **stdin** (never on the command line, so it cannot
+appear in `ps`), and the answer comes back to the chat. The thread shows
+"working…" until it returns; there is no token streaming. The CLI runs in an
+empty scratch directory with its own file, shell and web tools switched off
+(`claude --tools ""`, `codex -s read-only`), and the environment's
+`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY` and
+`CODEX_API_KEY` are not passed on, so the plan is what gets used. App actions
+(hand-offs, asks, creating bots, the browser) still travel as text fences, as for
+any bot.
+
+What to expect:
+
+- **Sign-in status** is reported by the agent in its heartbeat, from the CLIs'
+  own status commands (`claude auth status`, `codex login status`; neither makes
+  a model call), and cached for ten minutes. `GET /api/agents` returns it as
+  `cli: {claude, codex}` with `signed-in`, `signed-out`, `missing` or `unknown`,
+  and **Test** on a subscription provider reads it instead of sending a message.
+- **No agent, or it is not running:** the run fails with "Pair a local agent and
+  run `claude` on that machine to sign in." (or a note that the agent is not
+  running or may not run models). Nothing is queued.
+- **Usage limit:** the run fails with a clear message and the chat gets a card
+  offering to switch that bot to another connected model, through
+  `PATCH /api/ai/bots/:bot`. There is no silent fallback and no retry; a retry
+  would spend the plan twice.
+- **Pickup delay:** the agent polls (`AGENT_POLL_MS`, 15s by default), so a turn
+  can start up to one poll interval late.
+- **Timeouts:** a turn waits `AI_CLI_TIMEOUT_MS` in all (default 300000), and the
+  agent stops its CLI a little before that. A hung CLI is killed with its child
+  processes; more than 8 MB of output is cut off; neither stops the agent.
+- Gemini stays API-key only: Google does not allow its CLI login in other tools.
+
 ### The browser a bot may use
 
 An approved `browser.use` request runs in a headless browser. `BROWSER_RUNTIME`
