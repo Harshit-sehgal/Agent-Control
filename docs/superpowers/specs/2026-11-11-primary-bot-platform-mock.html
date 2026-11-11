@@ -357,6 +357,23 @@ button.prow:active{background:var(--sunk)}
   .newv .lineup{flex-wrap:nowrap;justify-content:flex-start;overflow-x:auto;scrollbar-width:none;margin:0;padding:4px 2px;min-height:0;gap:12px}
   .newv .lineup .who{flex:none}
   .has-composer .thead{padding-right:0}}
+/* bot profile */
+.panel.pro{background:var(--bg)}
+.panel.pro .ph{justify-content:space-between;padding-bottom:4px}
+.panel.pro .ph h3{text-align:center}
+.rb{width:44px;height:44px;flex:none;border-radius:50%;display:grid;place-items:center;background:var(--raise);box-shadow:inset 0 0 0 1px var(--line);color:var(--fg)}
+.rb .i{width:20px;height:20px}.rb.ghost{visibility:hidden}
+.panel.pro .grow{flex:1}
+.bhero{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;padding:4px 0 2px}
+.bhero .face.xl{--s:112px;margin-bottom:6px}
+.bhero h2{font-family:var(--display);font-size:26px;font-weight:650;letter-spacing:-.02em;margin:0}
+.bhero small{color:var(--muted);font-size:13.5px}
+.bhero p{margin:2px 0 0;color:var(--soft);font-size:14px;max-width:32ch;line-height:1.45}
+.pillbtn{margin-top:8px;padding:9px 22px;border-radius:99px;background:var(--raise);box-shadow:inset 0 0 0 1px var(--line);font-weight:600;font-size:15px}
+.prow>.i:first-child{width:22px;height:22px;color:var(--soft);flex:none}
+.prow:has(>.i:first-child,>.face:first-child)::before{left:54px!important}
+.prow .sel{max-width:52%}
+.pnote{margin:10px 18px 0;font-size:13px;color:var(--muted)}
 /* desktop split: bots on the left, the chat on the right */
 .is-desk .fab-me,.is-desk .bbar,.is-desk .fab-bot{display:none!important}
 .split{display:grid;grid-template-columns:292px 1fr;height:100%}
@@ -657,7 +674,7 @@ const isMgr=b=>b.id!=='atlas'&&(b.role==='Manager'||BOTS.some(x=>x.boss===b.id))
 const roleOf=b=>b.id==='atlas'?'Primary':isMgr(b)?'Manager':'Bot';
 const chain=id=>{const o=[];let b=by(id);while(b){o.unshift(b);b=b.boss&&by(b.boss)}return o};
 const LAY=(()=>{try{return JSON.parse(localStorage.getItem('home-layout')||'{}')}catch(e){return{}}})();
-const S={home:LAY.def||'tree',def:LAY.def||'tree',order:LAY.order||{},pins:(p=>(p.bots=p.bots||['atlas',...new Set([...(p.chats||[]),...(p.seats||[]),...(p.tree||[])])],p))(Object.assign({desks:[],bots:LAY.pins?undefined:['atlas']},LAY.pins||{})),hidden:LAY.hidden||[],chatF:'all',open:{atlas:true},view:'bots',threads:[],cur:null,left:false,panel:null,tab:'overview',busy:new Set(),paused:false,filter:'outside',actAll:null,palIdx:0,palBots:false,preview:null,recent:['mail','sch','plan'],
+const S={mute:new Set(),home:LAY.def||'tree',def:LAY.def||'tree',order:LAY.order||{},pins:(p=>(p.bots=p.bots||['atlas',...new Set([...(p.chats||[]),...(p.seats||[]),...(p.tree||[])])],p))(Object.assign({desks:[],bots:LAY.pins?undefined:['atlas']},LAY.pins||{})),hidden:LAY.hidden||[],chatF:'all',open:{atlas:true},view:'bots',threads:[],cur:null,left:false,panel:null,tab:'overview',busy:new Set(),paused:false,filter:'outside',actAll:null,palIdx:0,palBots:false,preview:null,recent:['mail','sch','plan'],
   col:(()=>{try{return JSON.parse(localStorage.getItem('drawer-col')||'{}')}catch(e){return{}}})(),
   grants:{mail:{'Gmail: send email':'always','Gmail: read':'always'},plan:{'Google Calendar: edit':'ask'},ledger:{'Pay or spend money':'ask'}},activity:[]};
 const faceState=b=>S.busy.has(b.id)?'read':(b.id==='atlas'?'':'sleep');
@@ -898,7 +915,7 @@ function drawerHTML(){
   </div>`;
 }
 function panelHTML(){
-  const close=`<button class="x" data-closeall aria-label="Close">${IC.x}</button>`;let head='',body='';
+  let close=`<button class="x" data-closeall aria-label="Close">${IC.x}</button>`,head='',body='';
   if(S.panel==='company'){
     const kids=id=>BOTS.filter(b=>b.boss===id);
     const node=b=>`<li><button class="node" data-bot="${b.id}">${face(b)}<span class="w"><b>${b.name}</b><small>${roleOf(b)==='Bot'?esc(short(b)):roleOf(b)}</small></span><span class="pill ${stateOf(b)}">${stateOf(b)}</span></button>${kids(b.id).length?`<ul>${kids(b.id).map(node).join('')}</ul>`:''}</li>`;
@@ -921,20 +938,34 @@ function panelHTML(){
     head='<h3>Activity</h3>';const f=S.filter,list=S.activity.filter(a=>f==='all'||a.kind===f);
     body=`<div class="seg" role="tablist">${[['outside','Left the app'],['perm','Permissions'],['bots','Bots'],['all','All']].map(([k,l])=>`<button class="${f===k?'on':''}" data-filter="${k}" role="tab" aria-selected="${f===k}">${l}</button>`).join('')}</div><div>${acts(list)}</div>`;
   } else {
-    const b=by(S.panel),reports=BOTS.filter(x=>x.boss===b.id),g=S.grants[b.id]||{},mine=S.activity.filter(a=>a.bot===b.id);
-    head=`<button class="x" data-pback="${b.id}" aria-label="Back to ${b.name}'s chat">${IC.back}</button><h3>${b.name}</h3>`;
-    body=`<div class="whois">${face(b,'l')}<div><b>${b.name}</b><span class="sub">${roleOf(b)}${b.boss?` · reports to ${by(b.boss).name}`:b.id==='atlas'?'':' · no manager'}</span></div></div>
-      <div class="acts"><button class="btn primary" data-dm="${b.id}">Message ${b.name}</button></div>
-      <div class="tabs" role="tablist">${['overview','memory','activity'].map(k=>`<button class="${S.tab===k?'on':''}" data-tab="${k}" role="tab" aria-selected="${S.tab===k}">${k[0].toUpperCase()+k.slice(1)}</button>`).join('')}</div>`;
-    if(S.tab==='overview')body+=`<div class="group"><h4>Job</h4><p style="margin:0">${esc(b.job)}</p></div>
-      <div class="group"><h4>Setup</h4>
-        <div class="line"><span class="w">Model</span><select class="sel" aria-label="Model"><option>Claude (subscription)</option><option>ChatGPT (subscription)</option><option>OpenAI key</option></select></div>
-        ${b.id==='atlas'?'':`<div class="line"><span class="w">Manager</span><select class="sel" data-boss="${b.id}" aria-label="Manager"><option value="">No manager</option>${BOTS.filter(x=>(x.id==='atlas'||isMgr(x))&&x.id!==b.id).map(x=>`<option value="${x.id}" ${b.boss===x.id?'selected':''}>${x.name}</option>`).join('')}</select></div>`}
-        <div class="line"><span class="w">Context<small>Picks what it needs from memory and the thread</small></span><span class="sub">Automatic</span></div>
-        ${reports.length?`<div class="line"><span class="w">Team</span><span class="sub">${reports.map(x=>x.name).join(', ')}</span></div>`:''}</div>
-      <div class="group"><h4>Permissions</h4>${Object.keys(g).length?Object.keys(g).map(s=>`<div class="line"><span class="w">${esc(s)}</span><select class="sel" data-perm="${b.id}" data-scope="${esc(s)}" aria-label="${esc(s)}">${PERM_OPTS(s).map(([k,l])=>`<option value="${k}" ${g[s]===k?'selected':''}>${l}</option>`).join('')}</select></div>`).join(''):`<p class="sub">Nothing extra yet. ${b.name} asks you the first time it needs something.</p>`}</div>`;
-    if(S.tab==='memory')body+=`<p class="sub">Private to ${b.name}. It reads these when they help.</p><div>${b.mem.map((m,i)=>`<div class="memo ${b.fresh===i?'fresh':''}"><span class="w">${esc(m)}</span><button data-forget="${i}" data-b="${b.id}">Forget</button></div>`).join('')}</div><form class="inrow" data-addmem="${b.id}"><input name="m" placeholder="Tell ${b.name} something to remember" aria-label="New memory"><button class="btn">Add</button></form>`;
-    if(S.tab==='activity'){const open=S.actAll===b.id;body+=`<div>${acts(open?mine:mine.slice(0,5),false)}</div>${mine.length>5?`<button class="link" data-actall="${b.id}" style="align-self:flex-start">${open?'Show less':`Show all ${mine.length}`}</button>`:''}`}
+    const b=by(S.panel),reports=BOTS.filter(x=>x.boss===b.id),g=S.grants[b.id]||{},mine=S.activity.filter(a=>a.bot===b.id),t=S.tab||'overview',nr=Object.keys(g).length;
+    const PI={mem:'<svg class="i" viewBox="0 0 24 24"><path d="M6 3.5h12v17l-6-4-6 4z"/></svg>',act:'<svg class="i" viewBox="0 0 24 24"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>',perm:SETI.perm,model:'<svg class="i" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2.5V6M15 2.5V6M9 18v3.5M15 18v3.5M2.5 9H6M2.5 15H6M18 9h3.5M18 15h3.5"/></svg>',team:'<svg class="i" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="9" r="2.6"/><path d="M15.5 14.2A5 5 0 0 1 21 19"/></svg>'};
+    const row=(k,ic,l,v)=>`<button class="prow" data-tab="${k}">${ic}<span class="w">${l}</span>${v!==''?`<span class="pv">${v}</span>`:''}${IC.chev}</button>`;
+    const sub=title=>{head=`<button class="rb" data-tab="overview" aria-label="Back to ${b.name}">${IC.back}</button><h3>${title}</h3><span class="rb ghost" aria-hidden="true"></span>`};
+    close='';
+    if(t==='overview'){
+      head=`<button class="rb" data-pback="${b.id}" aria-label="Back to ${b.name}'s chat">${IC.back}</button><span class="grow"></span><button class="rb" data-pmore="${b.id}" aria-label="More for ${b.name}"><svg class="i" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="18.5" cy="12" r="1.4" fill="currentColor"/></svg></button>`;
+      body=`<div class="bhero">${face(b,'xl')}<h2>${esc(b.name)}</h2><small>${roleOf(b)}${b.boss?` · ${esc(by(b.boss).name)}'s team`:b.id==='atlas'?'':' · reports to Atlas'}</small>${b.job?`<p>${esc(b.job)}</p>`:`<p>No job yet. Tell ${esc(b.name)} what to do in its chat.</p>`}<button class="pillbtn" data-tab="edit">Edit</button></div>
+      <div class="pcard">${row('memory',PI.mem,'Memory',b.mem.length?`${b.mem.length} ${b.mem.length===1?'note':'notes'}`:'Empty')}${row('activity',PI.act,'Activity',mine.length||'')}${row('perms',PI.perm,'Permissions',nr?`${nr} ${nr===1?'rule':'rules'}`:'None')}${row('setup',PI.model,'Model','Claude')}${reports.length?row('team',PI.team,'Team',`${reports.length} ${reports.length===1?'bot':'bots'}`):''}</div>
+      <div><div class="pcard"><div class="prow"><span class="w">Notifications</span><button class="switch mini" role="switch" aria-checked="${!S.mute.has(b.id)}" data-bnote="${b.id}" aria-label="Notifications for ${b.name}"><span class="knob" aria-hidden="true"></span></button></div></div><p class="pnote">Get notified when ${esc(b.name)} finishes or is waiting for you.</p></div>`;
+    } else if(t==='edit'){sub('Edit');
+      body=`<form class="hire" data-bedit="${b.id}"><div class="bhero">${face(b,'xl')}</div>
+        <label class="fl">Name<input name="nm" required maxlength="24" value="${esc(b.name)}" aria-label="Bot name" autocomplete="off"></label>
+        ${b.id==='atlas'?'':`<label class="fl">Manager<select class="sel" name="boss"><option value="">None, reports to Atlas</option>${BOTS.filter(x=>isMgr(x)&&x.id!==b.id).map(x=>`<option value="${x.id}" ${b.boss===x.id?'selected':''}>${x.name}</option>`).join('')}</select></label>`}
+        <fieldset class="fl"><legend>Colour</legend><div class="swatches">${TINTS.map(c=>`<label class="swc" style="--c:${c}"><input type="radio" name="tint" value="${c}"${c===b.tint?' checked':''} aria-label="Colour ${c}"><span></span></label>`).join('')}</div></fieldset>
+        <p class="sub" style="margin:0">To change what ${esc(b.name)} does, tell it in its chat.</p>
+        <button class="btn primary">Save</button></form>`;
+    } else if(t==='memory'){sub('Memory');
+      body=`<p class="sub">Private to ${b.name}. It reads these when they help.</p><div>${b.mem.map((m,i)=>`<div class="memo ${b.fresh===i?'fresh':''}"><span class="w">${esc(m)}</span><button data-forget="${i}" data-b="${b.id}">Forget</button></div>`).join('')}</div><form class="inrow" data-addmem="${b.id}"><input name="m" placeholder="Tell ${b.name} something to remember" aria-label="New memory"><button class="btn">Add</button></form>`;
+    } else if(t==='activity'){sub('Activity');const open=S.actAll===b.id;
+      body=`<div>${mine.length?acts(open?mine:mine.slice(0,8),false):'<p class="sub">Nothing yet.</p>'}</div>${mine.length>8?`<button class="link" data-actall="${b.id}" style="align-self:flex-start">${open?'Show less':`Show all ${mine.length}`}</button>`:''}`;
+    } else if(t==='perms'){sub('Permissions');
+      body=nr?`<div class="pcard">${Object.keys(g).map(sc=>`<div class="prow"><span class="w">${esc(sc)}</span><select class="sel" data-perm="${b.id}" data-scope="${esc(sc)}" aria-label="${esc(sc)}">${PERM_OPTS(sc).map(([k,l])=>`<option value="${k}" ${g[sc]===k?'selected':''}>${l}</option>`).join('')}</select></div>`).join('')}</div><p class="pnote">Paying or spending money never gets Always allow.</p>`:`<p class="sub">Nothing extra yet. ${b.name} asks you the first time it needs something.</p>`;
+    } else if(t==='setup'){sub('Model');
+      body=`<div class="pcard"><div class="prow"><span class="w">Model</span><select class="sel" aria-label="Model"><option>Claude (subscription)</option><option>ChatGPT (subscription)</option><option>OpenAI key</option></select></div><div class="prow"><span class="w">Context<small>Picks what it needs from memory and the thread</small></span><span class="pv">Automatic</span></div></div>`;
+    } else if(t==='team'){sub('Team');
+      body=`<div class="pcard">${reports.map(x=>`<button class="prow" data-bot="${x.id}">${face(x,'m')}<span class="w">${esc(x.name)}<small>${esc(short(x))}</small></span>${IC.chev}</button>`).join('')}</div>`;
+    }
   }
   return `<div class="ph">${head}${close}</div><div class="pb">${body}</div>`;
 }
@@ -942,6 +973,7 @@ function renderOver(){
   const app=$('app');app.classList.toggle('open-l',S.left);app.classList.toggle('open-r',!!S.panel);
   $('drawer').setAttribute('aria-hidden',String(!S.left));$('panel').setAttribute('aria-hidden',String(!S.panel));
   if(S.left)$('drawer').innerHTML=drawerHTML();
+  $('panel').classList.toggle('pro',!!(S.panel&&by(S.panel)));
   if(S.panel)$('panel').innerHTML=panelHTML();
 }
 function render(){renderMain();renderOver();redrawSettings()}
@@ -1034,6 +1066,8 @@ document.addEventListener('click',e=>{
   if(d.pal!==undefined){const it=palItems($('palIn').value)[+d.pal];closePal();it&&it.go();return}
   if(d.sidesearch!==undefined){const f=document.querySelector('.sfind');f.hidden=!f.hidden;if(!f.hidden)$('sideq').focus();else{S.sideQ='';$('sidelist').innerHTML=sideList('')}return}
   if(d.me!==undefined){S.left=!S.left;S.panel=null;renderOver();return}
+  if(d.pmore){e.stopPropagation();const box=document.createElement('div'),it=document.createElement('div');box.dataset.sortkey='side';it.dataset.sid=d.pmore;box.appendChild(it);const r=el.getBoundingClientRect();openMenu(it,r.right-8,r.bottom+6,matchMedia('(max-width:640px)').matches);$('cmenu').querySelector('[data-cm=prof]')?.remove();return}
+  if(d.bnote){S.mute.has(d.bnote)?S.mute.delete(d.bnote):S.mute.add(d.bnote);renderOver();return}
   if(d.pback){e.stopPropagation();if(S.view==='thread'){S.panel=null;renderOver()}else openDM(d.pback);return}
   if(d.bot){e.stopPropagation();S.panel=d.bot;S.tab='overview';S.left=false;renderOver();return}
   if(el.id==='fabBot'||d.newbot!==undefined){S.panel='hire';S.left=false;renderOver();setTimeout(()=>{const f=$('panel').querySelector('[data-hire]');f?.nm.focus();f?.dispatchEvent(new Event('input',{bubbles:true}))},300)}
@@ -1071,6 +1105,7 @@ document.addEventListener('submit',e=>{e.preventDefault();const f=e.target;
     const nb={id:'b'+Date.now(),name:nm,role:'Bot',boss:f.boss.value||null,tint:f.querySelector('[name=tint]:checked')?.value||TINTS[0],job:'',kw:[],mem:[]};
     BOTS.push(nb);log('atlas','bots',`added ${nb.name}${nb.boss?' under '+by(nb.boss).name:', reporting to Atlas'}`);S.panel=null;
     openDM(nb.id);const t=S.threads.find(x=>x.dm===nb.id);t.items.push({k:'reply',bot:nb.id,text:`Hi, I'm ${nb.name}. What should I do? Tell me my job here and I'll stick to it.`});render();setTimeout(()=>document.querySelector('#root textarea, #root input[name=q]')?.focus(),200)}
+  else if(f.dataset.bedit){const b=by(f.dataset.bedit),nm=f.nm.value.trim();if(!nm)return;b.name=nm;b.tint=f.querySelector('[name=tint]:checked')?.value||b.tint;if(f.boss&&(f.boss.value||null)!==b.boss)moveBot(b.id,f.boss.value||null);S.tab='overview';render()}
   else if(f.dataset.addmem){const b=by(f.dataset.addmem),v=f.m.value.trim();if(v){b.mem.push(v);b.fresh=b.mem.length-1;renderOver()}}
 });
 let pv=0;
@@ -1200,7 +1235,7 @@ function cmAction(a){const c=S.cm,b=c.bot&&by(c.bot);
   else if(a==='del'){const reps=BOTS.filter(x=>x.boss===b.id).length;$('cfH').textContent=`Delete ${b.name}?`;$('cfP').textContent=`${b.name}'s job, memory and permissions go with it, and this can't be undone.${reps?` Its ${reps} ${reps===1?'report moves':'reports move'} to the Solo desk.`:''} Its threads stay.`;$('confirm').classList.add('show');$('confirm').querySelector('[data-del-no]').focus()}}
 function doDelete(){const b=by(S.cm.bot);$('confirm').classList.remove('show');if(!b||b.id==='atlas')return;
   BOTS.splice(BOTS.indexOf(b),1);GONE.push(b);BOTS.forEach(x=>{if(x.boss===b.id)x.boss=null});Object.values(S.pins).forEach(arr=>{const i=arr.indexOf(b.id);if(i>=0)arr.splice(i,1)});
-  saveLayout();log('atlas','bots',`removed ${b.name}`);renderMain()}
+  saveLayout();log('atlas','bots',`removed ${b.name}`);if(S.panel===b.id)S.panel=null;const ct=S.view==='thread'&&S.threads.find(x=>x.id===S.cur);if(ct&&ct.dm===b.id)go('bots');else render()}
 document.addEventListener('keydown',e=>{
   if((e.key==='t'||e.key==='/')&&S.view==='bots'&&!e.metaKey&&!e.ctrlKey&&!e.altKey&&!/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName||'')){e.preventDefault();focusSearch();return}
   const m=$('cmenu');if(m.classList.contains('show')){const btns=[...m.querySelectorAll('button')].filter(x=>x.offsetParent);const i=btns.indexOf(document.activeElement);
