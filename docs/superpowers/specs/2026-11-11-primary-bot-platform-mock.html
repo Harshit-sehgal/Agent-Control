@@ -334,6 +334,33 @@ button.tog:hover{background:var(--sunk);color:var(--fg)}
   .shead{top:calc(-12px - env(safe-area-inset-top,0px))}
   .srow.acct{flex-wrap:wrap;padding:14px 0}.srow.acct .w{flex:1 1 calc(100% - 60px)}.srow.acct .btn{flex:1}
 }
+/* desktop split: bots on the left, the chat on the right */
+.is-desk .fab-me,.is-desk .bbar,.is-desk .fab-bot{display:none!important}
+.split{display:grid;grid-template-columns:292px 1fr;height:100%}
+.side{display:flex;flex-direction:column;min-height:0;background:color-mix(in srgb,var(--sunk) 70%,var(--bg));border-right:1px solid var(--line);padding:12px 10px 10px}
+.stop{display:flex;justify-content:flex-end;gap:6px;padding:2px 2px 8px}
+.sib{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;background:var(--raise);color:var(--soft);position:relative;flex:none}
+.sib:hover{color:var(--fg);background:color-mix(in srgb,var(--fg) 8%,var(--raise))}
+.sib .i{width:18px;height:18px}.sib .badge{position:absolute;top:-3px;right:-3px}
+.sfind input{width:100%;border:0;border-radius:99px;background:var(--raise);padding:9px 14px;font-size:13.5px;color:var(--fg);outline:none;margin-bottom:8px}
+.sfind input:focus{box-shadow:0 0 0 1.5px var(--violet)}
+.sshelf{display:flex;justify-content:center;flex-wrap:wrap;gap:4px 14px;padding:4px 4px 14px}
+.spin{display:flex;flex-direction:column;align-items:center;gap:6px;width:76px;padding:6px 0;border-radius:var(--r);font-size:12.5px;color:var(--soft)}
+.spin .face.l{--s:54px}.spin:hover,.spin.on{color:var(--fg)}.spin.on{background:var(--raise)}
+.spin span{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.slist{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:2px;scrollbar-width:thin}
+.srw{display:flex;align-items:center;gap:11px;width:100%;padding:8px 9px;border-radius:12px;text-align:left;position:relative}
+.srw:hover{background:color-mix(in srgb,var(--raise) 60%,transparent)}.srw.on{background:var(--raise)}
+.srw .face.m{--s:38px}.srw .w{flex:1;min-width:0}
+.srw b{display:block;font-size:14px;font-weight:500}.srw small{display:block;font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.srw .wt{color:var(--violet)}
+.sfoot{display:flex;align-items:center;gap:8px;padding-top:10px;border-top:1px solid var(--line);margin-top:8px}
+.sme{flex:1;min-width:0;display:flex;align-items:center;gap:10px;padding:6px;border-radius:12px;text-align:left;font-size:14px;font-weight:500;position:relative}
+.sme:hover{background:var(--raise)}.sme .w{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ini.av.sm{width:34px;height:34px;font-size:12.5px}
+.mainp{min-width:0;height:100%;position:relative;overflow:hidden}
+.is-desk .thead,.is-desk .hh{padding-right:0}
+.mention[hidden]{display:none}
 /* new bot */
 .hire .fl{display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:var(--muted);border:0;padding:0;margin:0}
 .hire .fl legend{padding:0;margin-bottom:6px}
@@ -744,9 +771,23 @@ function searchHTML(q){const t=q.trim().toLowerCase(),bots=t?BOTS.filter(vis).fi
   return (bots.length?`<div class="thg"><h4>Bots</h4><div class="bres">${bots.map(b=>`<button data-dm="${b.id}">${face(b,'m','')}<span>${esc(b.name)}</span></button>`).join('')}</div></div>`:'')+((tl=>bots.length&&!tl.includes('class="th')?'':tl)(threadList(q)))}
 function openSearch(){const r=$('sres');r.innerHTML=searchHTML($('sq').value);r.hidden=false}
 function closeSearch(){$('sres').hidden=true}
+const DESK=matchMedia('(min-width:1024px)');
+const curBot=()=>{if(S.view!=='thread')return null;const t=S.threads.find(x=>x.id===S.cur);return t&&(t.dm||t.owner)};
+function sideList(q){q=(q||'').trim().toLowerCase();const cur=curBot(),p=pending();
+  let list=BOTS.filter(vis).filter(b=>!isPin('bots',b.id)).sort((x,y)=>((lastT(y)||{}).at||0)-((lastT(x)||{}).at||0));
+  if(q)list=BOTS.filter(vis).filter(b=>(b.name+' '+b.job).toLowerCase().includes(q));
+  const rows=list.map(b=>{const st=stateOf(b),t=lastT(b),ask=p.find(x=>x.bot===b.id);return `<button class="srw${cur===b.id?' on':''}" data-dm="${b.id}">${face(b,'m',st==='waiting'?'wait':undefined)}<span class="w"><b>${esc(b.name)}</b><small>${st==='working'?'working…':ask?`<span class="wt">Wants to ${esc(ask.action)}</span>`:esc(preview(t)||short(b))}</small></span>${ask?'<span class="badge">1</span>':''}</button>`}).join('');
+  return rows+(q?threadList(q).replace(/No thread matches that\./,''):'')||'<p class="sub" style="padding:8px">No bot matches that.</p>'}
+function sideHTML(){const pins=arrange(null,'shelf',BOTS.filter(b=>isPin('bots',b.id)&&vis(b))),cur=curBot(),w=new Set(pending().map(x=>x.thread)).size;
+  return `<div class="stop"><button class="sib" data-sidesearch aria-label="Search bots and threads" title="Search">${'<svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>'}</button><button class="sib" data-newbot aria-label="New bot" title="New bot"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button></div>
+  <div class="sfind" ${S.sideQ?'':'hidden'}><input id="sideq" type="search" placeholder="Search bots and threads" aria-label="Search bots and threads" autocomplete="off" value="${esc(S.sideQ||'')}"></div>
+  ${pins.length?`<div class="sshelf">${pins.map(b=>`<button class="spin${cur===b.id?' on':''}" data-dm="${b.id}">${face(b,'l',stateOf(b)==='waiting'?'wait':undefined)}<span>${esc(b.name)}</span></button>`).join('')}</div>`:''}
+  <div class="slist" id="sidelist">${sideList(S.sideQ)}</div>
+  <div class="sfoot"><button class="sme" data-me aria-label="Your account and settings"><span class="ini av sm">${initials(ME.name)}</span><span class="w">${esc(ME.name)}</span>${pending().length?`<span class="badge">${pending().length}</span>`:''}</button><button class="sib" data-new aria-label="New thread" title="New thread"><svg class="i" viewBox="0 0 24 24"><path d="M6 3.5h9.5A2.5 2.5 0 0 1 18 6v12.5a2 2 0 0 1-2 2H6z"/><path d="M6 3.5v17M9.5 8h5M9.5 11.5h3"/><path d="m20.5 9.5-6.2 6.2-2.3.6.6-2.3 6.2-6.2a1.2 1.2 0 0 1 1.7 1.7z"/></svg>${w?`<span class="badge">${w}</span>`:''}</button></div>`}
 function renderMain(){
   const app=$('app');app.classList.toggle('has-composer',S.view!=='bots');
-  $('root').innerHTML=S.view==='bots'?botsView():S.view==='new'?newView():threadView();
+  const main=S.view==='bots'?botsView():S.view==='new'?newView():threadView(),wide=DESK.matches;app.classList.toggle('is-desk',wide);
+  $('root').innerHTML=wide?`<div class="split"><aside class="side" aria-label="Bots">${sideHTML()}</aside><main class="mainp">${main}</main></div>`:main;
   if(S.view==='thread'){const sc=$('scroll');sc.scrollTop=sc.scrollHeight}
   if(S.view==='new'){const i=$('root').querySelector('input');i&&i.focus({preventScroll:true})}
   closeSearch();$('meIni').textContent=initials(ME.name);packDesks();const thr=$('thrBadge');if(thr){const w=new Set(pending().map(x=>x.thread)).size;thr.innerHTML=w?`<span class="badge">${w}</span>`:''}
@@ -806,8 +847,7 @@ function drawerHTML(){
     ${p.length?`<div class="group"><h4>Needs you</h4>${p.map(a=>`<button class="line" data-open="${a.thread}">${face(by(a.bot),'s','wait')}<span class="w">${by(a.bot).name} wants to ${esc(a.action)}</span></button>`).join('')}</div>`:''}
     <div class="group navl"><h4>Go to</h4>
       <button class="line" data-panel="activity"><span class="w">Activity</span><span class="sub">What left the app</span></button>
-      <button class="line" data-panel="company"><span class="w">Company</span><span class="sub">Who reports to whom</span></button>
-      <button class="line" data-palette><span class="w">Jump to…</span><kbd>⌘K</kbd></button></div>
+      <button class="line" data-panel="company"><span class="w">Company</span><span class="sub">Who reports to whom</span></button></div>
     <div class="group navl"><button class="line setline" data-settings>${SETI.general}<span class="w">Settings</span><span class="sub">Account, models, connectors, looks</span></button></div>
     ${usageHTML()}
     <p class="foot">Server: this laptop. Moving it to your Oracle VM is on the plan.</p>
@@ -918,6 +958,7 @@ function palItems(q){
   const pool=S.palBots?all.filter(i=>i.bot):all;q=q.toLowerCase().trim();return q?pool.filter(i=>(i.label+' '+i.hint).toLowerCase().includes(q)):pool}
 function renderPal(){const it=palItems($('palIn').value);S.palIdx=Math.min(S.palIdx,Math.max(it.length-1,0));
   $('palList').innerHTML=it.map((i,n)=>`<li><button class="${n===S.palIdx?'hl':''}" data-pal="${n}">${i.face?face(i.face,'s',''):''}<span>${esc(i.label)}</span><small>${esc(i.hint)}</small></button></li>`).join('')||'<li class="sub" style="padding:10px">No matches.</li>'}
+function focusSearch(){S.left=false;S.panel=null;renderOver();if(DESK.matches){if(S.view!=='bots'&&!document.querySelector('.side'))return;const f=document.querySelector('.sfind');f.hidden=false;$('sideq').focus()}else{if(S.view!=='bots')go('bots');$('sq').focus()}}
 function openPal(bots){S.palBots=!!bots;$('palIn').placeholder=bots?'Message a bot':'Jump to a thread, a bot or a page';$('pal').classList.add('show');$('palIn').value='';S.palIdx=0;renderPal();$('palIn').focus()}
 function closePal(){$('pal').classList.remove('show')}
 $('palIn').addEventListener('input',()=>{S.palIdx=0;renderPal()});
@@ -947,8 +988,10 @@ document.addEventListener('click',e=>{
   if(d.tog){const li=el.closest('li'),open=!S.open[d.tog];S.open[d.tog]=open;li.classList.toggle('open',open);el.setAttribute('aria-expanded',String(open));const k=li.querySelector(':scope>.kids');if(k)k.inert=!open;return}
   if(d.sec){S.col[d.sec]=!S.col[d.sec];try{localStorage.setItem('drawer-col',JSON.stringify(S.col))}catch(e){}renderOver();return}
   if(d.pal!==undefined){const it=palItems($('palIn').value)[+d.pal];closePal();it&&it.go();return}
+  if(d.sidesearch!==undefined){const f=document.querySelector('.sfind');f.hidden=!f.hidden;if(!f.hidden)$('sideq').focus();else{S.sideQ='';$('sidelist').innerHTML=sideList('')}return}
+  if(d.me!==undefined){S.left=!S.left;S.panel=null;renderOver();return}
   if(d.bot){e.stopPropagation();S.panel=d.bot;S.tab='overview';S.left=false;renderOver();return}
-  if(el.id==='fabBot'){S.panel='hire';S.left=false;renderOver();setTimeout(()=>{const f=$('panel').querySelector('[data-hire]');f?.nm.focus();f?.dispatchEvent(new Event('input',{bubbles:true}))},300)}
+  if(el.id==='fabBot'||d.newbot!==undefined){S.panel='hire';S.left=false;renderOver();setTimeout(()=>{const f=$('panel').querySelector('[data-hire]');f?.nm.focus();f?.dispatchEvent(new Event('input',{bubbles:true}))},300)}
   else if(d.threads!==undefined){S.panel='threads';S.left=false;renderOver();setTimeout(()=>$('thQ')?.focus(),250)}
   else if(el.id==='fabSet'){S.left=!S.left;S.panel=null;renderOver()}
   else if(el.id==='fabNew'||d.new!==undefined){go('new')}
@@ -1006,7 +1049,7 @@ document.addEventListener('change',e=>{const s=e.target;
   else if(s.dataset.themeSel!==undefined){s.value?document.documentElement.setAttribute('data-theme',s.value):document.documentElement.removeAttribute('data-theme');try{localStorage.setItem('theme',s.value)}catch(e){}}
 });
 document.addEventListener('keydown',e=>{
-  if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();$('pal').classList.contains('show')?closePal():openPal()}
+  if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();focusSearch()}
   else if(e.key==='Escape'){if(!$('setwrap').hidden)closeSettings();else if($('pal').classList.contains('show'))closePal();else if(S.panel||S.left){S.panel=null;S.left=false;renderOver()}}
 });
 /* Gestures on the home views. Phone: touch and hold a bot; move to drag it, or let go without moving for its menu.
@@ -1057,7 +1100,7 @@ function endDrag(){const d=drag;drag=null;const it=d.item;document.querySelector
   if(d.toShelf||d.unpin){const id=it.dataset.sid,arr=S.pins.bots;d.toShelf?arr.includes(id)||arr.push(id):arr.splice(arr.indexOf(id),1);saveLayout();setTimeout(renderMain,d.toShelf?260:0);return}
   saveOrder(d.box,it);
   if(d.box!==d.box0){saveOrder(d.box0);const b=by(it.dataset.sid),nb=bossOfKey(d.box.dataset.sortkey);b.boss=nb;if(nb)S.open[nb]=true;log('atlas','bots',`moved ${b.name} ${nb?'under '+by(nb).name:'to Solo'}`);setTimeout(renderMain,520)}}
-document.addEventListener('input',e=>{if(e.target.id==='sq'){openSearch();return}if(e.target.id==='thQ'){$('thList').innerHTML=threadList(e.target.value);return}const f=e.target.closest?.('[data-hire]');if(!f)return;const nm=f.nm.value.trim()||'New bot',c=f.querySelector('[name=tint]:checked')?.value;$('hirePrev').innerHTML=`${face({id:'_',name:nm,role:'Bot',tint:c},'s','')}<span><b>${esc(nm)}</b><small>${f.boss.value?'Reports to '+esc(by(f.boss.value).name):'Reports to Atlas'}</small></span>`});
+document.addEventListener('input',e=>{if(e.target.id==='sideq'){S.sideQ=e.target.value;$('sidelist').innerHTML=sideList(S.sideQ);return}if(e.target.id==='sq'){openSearch();return}if(e.target.id==='thQ'){$('thList').innerHTML=threadList(e.target.value);return}const f=e.target.closest?.('[data-hire]');if(!f)return;const nm=f.nm.value.trim()||'New bot',c=f.querySelector('[name=tint]:checked')?.value;$('hirePrev').innerHTML=`${face({id:'_',name:nm,role:'Bot',tint:c},'s','')}<span><b>${esc(nm)}</b><small>${f.boss.value?'Reports to '+esc(by(f.boss.value).name):'Reports to Atlas'}</small></span>`});
 document.addEventListener('pointerdown',e=>{lastType=e.pointerType||'mouse';if(e.button>0)return;
   if($('cmenu').classList.contains('show')&&!e.target.closest('#cmenu')){closeMenu();return}
   const item=homeItem(e.target);if(!item)return;
@@ -1093,6 +1136,7 @@ function openMenu(item,x,y,touch){const key=item.parentElement.dataset.sortkey,k
   m.querySelector('button')?.focus({preventScroll:true})}
 function closeMenu(){$('cmenu').classList.remove('show');$('cmScrim').classList.remove('show')}
 $('cmScrim').addEventListener('click',closeMenu);
+DESK.addEventListener('change',()=>render());
 $('setwrap').addEventListener('click',e=>{if(e.target.id==='setwrap')closeSettings()});
 $('sq').addEventListener('focus',openSearch);
 document.addEventListener('pointerdown',e=>{if(!$('sres').hidden&&!e.target.closest('#bbar'))closeSearch()},true);
@@ -1110,7 +1154,7 @@ function doDelete(){const b=by(S.cm.bot);$('confirm').classList.remove('show');i
   BOTS.splice(BOTS.indexOf(b),1);GONE.push(b);BOTS.forEach(x=>{if(x.boss===b.id)x.boss=null});Object.values(S.pins).forEach(arr=>{const i=arr.indexOf(b.id);if(i>=0)arr.splice(i,1)});
   saveLayout();log('atlas','bots',`removed ${b.name}`);renderMain()}
 document.addEventListener('keydown',e=>{
-  if((e.key==='t'||e.key==='/')&&S.view==='bots'&&!e.metaKey&&!e.ctrlKey&&!e.altKey&&!/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName||'')){e.preventDefault();$('sq').focus();return}
+  if((e.key==='t'||e.key==='/')&&S.view==='bots'&&!e.metaKey&&!e.ctrlKey&&!e.altKey&&!/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName||'')){e.preventDefault();focusSearch();return}
   const m=$('cmenu');if(m.classList.contains('show')){const btns=[...m.querySelectorAll('button')].filter(x=>x.offsetParent);const i=btns.indexOf(document.activeElement);
     if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeMenu()}else if(e.key==='ArrowDown'){e.preventDefault();btns[(i+1)%btns.length]?.focus()}else if(e.key==='ArrowUp'){e.preventDefault();btns[(i-1+btns.length)%btns.length]?.focus()}return}
   if($('confirm').classList.contains('show')&&e.key==='Escape'){$('confirm').classList.remove('show');return}
