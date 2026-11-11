@@ -529,7 +529,11 @@ body.sorting,body.sorting *{cursor:grabbing!important;user-select:none;-webkit-u
 .back{display:inline-flex;align-items:center;gap:4px;color:var(--muted);font-size:13px;border-radius:8px;padding:4px 8px 4px 2px}
 .back:hover{color:var(--fg);background:var(--sunk)}
 .thead .grow{flex:1;min-width:0}
-.thead h1{font-family:var(--display);font-size:18px;font-weight:600;letter-spacing:-.015em;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tv .thead{gap:12px;margin-bottom:16px;padding-right:0}
+.back2{width:40px;height:40px}.back2 .i{width:19px;height:19px}
+.tface{flex:none;display:grid;place-items:center;border-radius:12px}.tface .face{--s:36px}
+.tface .pf .star{--sz:15px;right:-4px;bottom:-4px}
+.thead h1{font-family:var(--display);font-size:17px;line-height:1.25;font-weight:600;letter-spacing:-.015em;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .app[data-look="ink"] .thead h1{font-weight:500}
 .thead .live{font-size:12.5px;color:var(--muted)}
 .wash{position:absolute;inset:0 0 auto;height:260px;pointer-events:none;background:linear-gradient(to bottom,color-mix(in srgb,var(--owner,transparent) 16%,transparent),transparent);transition:background .6s var(--ease)}
@@ -546,21 +550,23 @@ body.sorting,body.sorting *{cursor:grabbing!important;user-select:none;-webkit-u
 .bot p{margin:3px 0 0;max-width:62ch}
 .meta{display:flex;gap:14px;margin-top:6px;font-size:12px;color:var(--muted);flex-wrap:wrap}
 .working{display:flex;gap:10px;align-items:center;color:var(--muted);font-size:13px}
-.prog{align-self:stretch;margin:2px 0;font-size:13.5px}
-.prog.live{display:flex;align-items:center;gap:9px;padding:9px 12px;border-radius:14px;background:var(--sunk);color:var(--soft);min-height:42px}
-.prog.live .cur{flex:1;min-width:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.4;animation:curin .35s ease-out}
-@keyframes curin{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+.prog{align-self:center;max-width:min(92%,560px);margin:4px 0;font-size:12.5px}
+.prog.live{display:inline-flex;align-items:center;gap:8px;padding:5px 14px 5px 6px;border-radius:99px;background:var(--sunk);color:var(--soft)}
+.prog.live .face{--s:22px}
+.prog.live .cur{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;animation:curin .35s ease-out}
+@keyframes curin{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){.prog.live .cur{animation:none}}
-.prog.done summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:12px;color:var(--muted);font-size:13px}
+.prog.done{display:flex;flex-direction:column;align-items:center}
+.prog.done summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:5px 10px 5px 14px;border-radius:99px;background:var(--sunk);color:var(--muted);transition:color .15s}
 .prog.done summary::-webkit-details-marker{display:none}
-.prog.done summary:hover{background:var(--sunk);color:var(--fg)}
-.prog.done summary .w{flex:1;min-width:0}
-.prog.done summary .chev{width:15px;height:15px;transition:transform .2s}
+.prog.done summary:hover,.prog.done summary:focus-visible{color:var(--fg);outline:none}
+.prog.done summary span{white-space:nowrap}.prog.done[open]{align-self:stretch;max-width:none}
+.prog.done summary .n{opacity:.7}.prog.done summary .n::before{content:'·';margin-right:6px}
+.prog.done summary .chev{width:13px;height:13px;transition:transform .2s}
 .prog.done[open] summary .chev{transform:rotate(90deg)}
-.prog .stack{display:flex}.prog .stack .face{box-shadow:0 0 0 2px var(--bg)}.prog .stack .face+.face{margin-left:-6px}
-.plog{list-style:none;margin:4px 0 4px 18px;padding:0 0 0 12px;border-left:2px solid var(--line);display:flex;flex-direction:column;gap:10px}
-.plog .who{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted)}.plog .who b{color:var(--soft);font-weight:600}
-.plog p{margin:4px 0 0;color:var(--fg);font-size:13px;line-height:1.45}
+.plog{list-style:none;margin:10px 0 2px;padding:16px 18px;width:100%;border-radius:18px;background:var(--sunk);display:flex;flex-direction:column;gap:16px;text-align:left;animation:curin .25s ease-out}
+.plog .who{display:flex;align-items:baseline;gap:6px;font-size:12px}.plog .who b{color:var(--soft);font-weight:600}.plog .who .to{color:var(--muted)}
+.plog p{margin:3px 0 0;color:var(--fg);font-size:13.5px;line-height:1.5}
 .hand{align-self:stretch;display:flex;flex-direction:column;gap:5px;margin:2px 0 2px 6px;padding-left:12px;border-left:2px solid var(--line);font-size:13px}
 .hand .hh2{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12.5px}.hand .hh2 b{color:var(--soft);font-weight:600}.hand .arr{color:var(--muted)}
 .hand .said{align-self:flex-start;max-width:56ch;padding:8px 12px;border-radius:4px 14px 14px 14px;background:var(--sunk);color:var(--fg);line-height:1.45}
@@ -841,7 +847,7 @@ function composer(){
 }
 function newView(){
   const line=BOTS.filter(b=>roleOf(b)==='Bot'||b.id==='atlas');
-  return `<div class="tv"><div class="view" style="padding-bottom:20px"><div class="thead"><button class="back" data-home>${IC.back}${S.sect==='threads'?'Threads':'Bots'}</button><div class="grow"></div></div>
+  return `<div class="tv"><div class="view" style="padding-bottom:20px"><div class="thead"><button class="rb back2" data-home aria-label="Back to ${S.sect==='threads'?'Threads':'Bots'}">${IC.back}</button><div class="grow"></div></div>
     <div class="newv"><div class="lineup" id="lineup">${line.map(b=>`<div class="who ${S.preview===b.id?'on':''}" data-w="${b.id}">${face(b,b.id==='atlas'?'l':'m',S.preview===b.id?'wake':b.id==='atlas'?'':'sleep')}<span>${b.name}</span></div>`).join('')}</div>
     <h2>What should the company get done?</h2><p class="preview" id="preview">Atlas plans it and hands each part to the bot whose job it is.</p>
     <div class="boxwrap"><form data-form class="box"><input name="q" placeholder="What should get done?" autocomplete="off" aria-label="Message" data-preview><button class="send" aria-label="Send">${IC.send}</button></form></div>
@@ -858,7 +864,7 @@ function itemHTML(it,t){
     case 'direct':case 'route':return '';
     case 'prog':{if(!it.done&&it.cur){const c=it.cur,b=by(c.bot);return `<div class="prog live">${face(b,'s',c.wait?'wait':'read')}<span class="cur">${esc(c.text)}</span></div>`}
       if(!it.log.length)return '';const L=by(it.lead),ppl=[...new Set(it.log.flatMap(l=>[l.from,l.to]))].filter(id=>id!==it.lead).map(by);
-      return `<details class="prog done" data-pid="${it.id}"${it.open?' open':''}><summary><span class="stack">${[L,...ppl].map(x=>face(x,'s','')).join('')}</span><span class="w">${L.name} worked with ${ppl.map(x=>x.name).join(' and ')}</span>${IC.chev}</summary><ol class="plog">${it.log.map(l=>`<li><span class="who">${face(by(l.from),'s','')}<b>${by(l.from).name}</b> to <b>${by(l.to).name}</b></span><p>${esc(l.text)}</p></li>`).join('')}</ol></details>`}
+      return `<details class="prog done" data-pid="${it.id}"${it.open?' open':''}><summary><span>${ppl.map(x=>x.name).join(' and ')} helped</span><span class="n">${it.log.length} messages</span>${IC.chev}</summary><ol class="plog">${it.log.map(l=>`<li><span class="who"><b>${by(l.from).name}</b><span class="to">to ${by(l.to).name}</span></span><p>${esc(l.text)}</p></li>`).join('')}</ol></details>`}
     case 'hand':{const f=by(it.from),to=by(it.to);return `<div class="hand fadein"><div class="hh2">${face(f,'s','')}<b>${f.name}</b><span class="arr">to</span>${face(to,'s','')}<b>${to.name}</b></div><div class="said">${esc(it.text)}</div></div>`}
     case 'work':return it.wait?`<div class="working">${face(b,'','wait')}<span>${b.name} is waiting on you<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></span></div>`:`<div class="working">${face(b,'','read')}<span>${b.name} is working${it.note?' · '+esc(it.note):''}</span></div>`;
     case 'hop':{const f=by(it.from),to=by(it.to);return `<details class="hop fadein"><summary>${face(f,'s','')}<span><b>${f.name}</b> messaged <b>${to.name}</b></span></summary><div class="said">${esc(it.text)}</div></details>`}
@@ -870,8 +876,8 @@ function itemHTML(it,t){
 }
 function threadView(){
   const t=S.threads.find(x=>x.id===S.cur),o=t.owner&&by(t.owner);
-  const live=pending().some(a=>a.thread===t.id)?'Waiting on you':t.running?`${[...S.busy].map(id=>by(id).name).join(' and ')||'Atlas'} working`:o?(t.dm?(o.id==='atlas'?'Hands work to any bot':isMgr(o)?'Hands work to its team':'One continuous chat'):'Atlas runs this thread'):'Atlas runs this thread';
-  return `<div class="tv" style="--owner:${o?o.tint:'transparent'};position:relative"><div class="wash"></div><div class="view" id="scroll" style="padding-bottom:20px"><div class="thead"><button class="back" data-home>${IC.back}${t.dm?'Bots':'Threads'}</button>${o?`<button data-bot="${o.id}" title="${o.name}'s profile" aria-label="${o.name}'s profile">${face(o,'m')}</button>`:''}<div class="grow"><h1>${esc(t.title)}</h1><span class="live">${live}</span></div></div>
+  const live=pending().some(a=>a.thread===t.id)?'Waiting on you':t.running?`${[...S.busy].map(id=>by(id).name).join(' and ')||(t.dm?o.name:'Atlas')} working`:o?(t.dm?(o.id==='atlas'?'Hands work to any bot':isMgr(o)?'Hands work to its team':'One continuous chat'):'Atlas runs this thread'):'Atlas runs this thread';
+  return `<div class="tv" style="--owner:${o?o.tint:'transparent'};position:relative"><div class="wash"></div><div class="view" id="scroll" style="padding-bottom:20px"><div class="thead"><button class="rb back2" data-home aria-label="Back to ${t.dm?'Bots':'Threads'}">${IC.back}</button>${t.dm&&o?`<button class="tface" data-bot="${o.id}" title="${o.name}'s profile" aria-label="${o.name}'s profile">${face(o,'')}</button>`:''}<div class="grow"><h1>${esc(t.title)}</h1><span class="live">${live}</span></div></div>
     ${S.paused?`<div class="col" style="margin-bottom:10px"><div class="need"><span class="w">All bots are paused. Nothing runs until you resume.</span><button class="go" data-pause>Resume</button></div></div>`:''}
     <div class="col" role="log" aria-live="polite">${t.items.map(i=>itemHTML(i,t)).join('')}</div></div>${composer()}</div>`;
 }
