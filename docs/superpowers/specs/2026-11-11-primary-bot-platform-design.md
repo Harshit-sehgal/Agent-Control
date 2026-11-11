@@ -88,7 +88,7 @@ This revision replaces groups. Where it conflicts with anything below, this sect
 ## Interaction model (mock v12, the UX reference)
 
 Layout (owner's design, 2026-11-11):
-- **Home is the bots.** The landing page is a scrollable view of the company. At the top is the status line, which is also Pause all. Then comes Needs you, shown only when something is waiting. Then a large Atlas card that starts a thread. Below it, one horizontally scrolling row per manager's team, then "No manager", then Recent threads. Each bot card shows the face, the **name**, a short job, a state pill (asleep / awake / working / waiting on you) and its latest thread. Tapping a card opens the direct thread; the (i) corner opens the profile.
+- **Home is the bots, as a dropdown list** (owner, 2026-11-11). It opens with the status line (also Pause all) and Needs you (only when something is waiting). Below that is one tree list. The primary is at the top and is open by default. Its chevron drops down the managers and the bots with no manager, and each manager's chevron drops down its team. Children fall into place with a short stagger and a small bounce, and rise back up when the list folds. Each row shows the face, the **name**, a short job (or "Manager · 2 reports"), a state pill and an (i) for the profile. Tapping the row opens the direct thread. Recent threads sit under the list.
 - **There is no sidebar.** Three floating buttons stay put while the page scrolls:
   - **+** at the top right hires a new bot.
   - **Settings** sits in the bottom-left corner.
@@ -119,10 +119,9 @@ Characters and looks:
 
 Threads:
 - **Header:** a back link to Bots, the owner's face (which opens the profile), the title and one live line ("Waiting on you", "Scholar and Quill working"). A soft wash of the owner's tint sits behind the top of the thread.
-- **Messages:** the owner's messages are mint bubbles on the right. Bot replies are unboxed: face, name, short job and text. **No routing chatter:** no route line, no "N stayed asleep", no "Wrong bot?" and no "Used N memories" line (owner, 2026-11-11). Who owns the thread shows in the header.
-- **Side conversations** are one line ("Scholar messaged Quill"); clicking it reveals the message.
+- **Messages, WhatsApp-style:** the owner's messages are mint bubbles on the right. Each bot reply is a bubble on the left, lightly tinted in that bot's colour, with the face beside it and the name on top. **No routing chatter:** no route line, no "N stayed asleep", no "Wrong bot?" and no "Used N memories" line (owner, 2026-11-11). Who owns the thread shows in the header.
+- **System lines are centred pills,** like WhatsApp date and system notes: side conversations ("Scholar messaged Quill", tap to reveal the message), answered asks ("You allowed it once"), direct-thread notes, and memory lines (mint).
 - **Asks keep the bot on screen.** While an ask card waits, the asking bot's face stays above it in a waiting state: it sways gently, looks down at the card, and shows three pulsing violet dots ("Planner is waiting on you"). It goes back to reading once the owner answers. The card is the only raised surface: one sentence and three buttons (Always allow / Allow once / Decline). An answered card collapses to one muted line.
-- **Memory learned** shows as one mint line ("Scholar will remember: …").
 - **Contacting one bot:** tap its card on the home screen, use "Message <bot>" on its profile, use ⌘K, or type @ in any composer. A message that starts with @Name skips routing. Follow-ups stay with the thread's owner.
 - **Bot profile** has three tabs: Overview (job, model, manager, automatic context, team, and permissions with Always allow / Ask each time / Deny), Memory and Activity (local to the bot).
 - **Motion:** only transform and opacity animate, with short ease-outs, and none at all under reduced motion. The waiting animation is CSS, not three.js. It stays light and dependency-free, and it is enough for faces this small.
