@@ -385,7 +385,10 @@ async function runGroupInner(store,id,executor){
         // reply and an out-of-job reply hand nothing out.
         const reach=host?[...host.bots,...summonableGuests(s.groups,host.id)]:[];
         const leads=isLead(s,bot.id);
-        const added=host&&!closing&&!stopped&&!off&&!declinedTurn?handoffTargets({run:live,roster:rosterFor(s,bot,reach,{thread:isThread(host)}),fromBot:bot,output:previous.output,home:leads||isThread(host)?null:host.bots,reserve:leads&&live.closeAt==null?1:0}):[];
+        // A bot made in this reply was made for this task: it gets the work even when the reply forgot to @mention it.
+        const madeNow=(reply.created||[]).filter(r=>!new RegExp(`@${r.name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}\\b`,'i').test(previous.output));
+        const routed=madeNow.length?`${previous.output}\n${madeNow.map(r=>`@${r.name}`).join(' ')}`:previous.output;
+        const added=host&&!closing&&!stopped&&!off&&!declinedTurn?handoffTargets({run:live,roster:rosterFor(s,bot,reach,{thread:isThread(host)}),fromBot:bot,output:routed,home:leads||isThread(host)?null:host.bots,reserve:leads&&live.closeAt==null?1:0}):[];
         enlist(live,{fromId:bot.id,added,output:previous.output,lead:leads});
         if(isThread(host))for(const id of added)noteMember(host,id);
         const guests=added.filter(x=>!host.bots.some(b=>b.id===x));

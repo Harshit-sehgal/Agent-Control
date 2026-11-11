@@ -135,3 +135,35 @@ test('a bot made in this run takes the work it was made for in the same run, and
     assert.match(chat, /cannot make bots of its own yet/);
   }, {group, message: 'Tell me the tech news', runId: 'run-new'});
 });
+
+test('a bot made for the task starts on it in the same run even when the reply forgets to @mention it', async () => {
+  const group = {id: 'g', name: 'G', bots: [bot('writer', 'Writer', {settings: {memory: false}})]};
+  const said = [], seen = {};
+  await withStore(async store => {
+    await runGroup(store, 'run-auto', async (b, input) => {
+      said.push(b.name); seen[b.name] = String(input);
+      if (b.name === 'Writer') return 'I made a scout for this.\n```create-bot\n{"name":"Tech scout","job":"Find the tech news of the last day and list the headlines."}\n```';
+      return 'Headlines: one, two.';
+    });
+    assert.deepEqual(said.slice(0, 2), ['Writer', 'Tech scout'], 'the new bot answered in the run that made it');
+    assert.match(seen['Tech scout'], /Tell me the tech news/, 'it was handed the owner\'s request');
+    assert.equal(store.read().groupRuns.find(r => r.id === 'run-auto').status, 'completed');
+  }, {group, message: 'Tell me the tech news', runId: 'run-auto'});
+});
+
+test('Atlas in its own chat makes a bot and that bot does the work at once, then Atlas reports back', async () => {
+  const group = {id: 'home', name: 'Home', bots: [bot('atlas', 'Atlas', {settings: {lead: true, memory: false}})]};
+  const said = [];
+  await withStore(async store => {
+    await runGroup(store, 'run-atlas', async b => {
+      said.push(b.name);
+      if (b.name === 'Atlas' && said.length === 1) return 'Making a researcher.\n```create-bot\n{"name":"Researcher","job":"Find the latest Node.js LTS version."}\n```\n@Researcher find the latest Node.js LTS version.';
+      if (b.name === 'Researcher') return 'Node.js 24 is the active LTS.';
+      return 'The researcher found it: Node.js 24 is the active LTS.';
+    });
+    assert.deepEqual(said, ['Atlas', 'Researcher', 'Atlas']);
+    const run = store.read().groupRuns.find(r => r.id === 'run-atlas');
+    assert.equal(run.status, 'completed');
+    assert.match(run.lastOutput, /Node\.js 24/);
+  }, {group, message: 'Make a researcher bot and have it find the latest Node LTS', runId: 'run-atlas', directBotId: 'atlas'});
+});
