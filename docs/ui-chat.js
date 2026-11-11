@@ -4,10 +4,10 @@
  * the bot as `directBotId`, a thread posts to its own group and Atlas answers.
  * The server orchestrator runs them when a model is configured and the offline
  * simulator does otherwise; the UI cannot tell which. Nothing here can publish. */
-import {pollRun, runWithTyping} from './run-follow.js?v=a7167143ee';
-import {botSettings} from './bot-settings.js?v=a7167143ee';
-import {store, api, sync, go, conversation, appendMessage, setTyping, teamKey} from './ui-store.js?v=a7167143ee';
-import {toast} from './ui-dialogs.js?v=a7167143ee';
+import {pollRun, runWithTyping} from './run-follow.js?v=b1289b89af';
+import {botSettings} from './bot-settings.js?v=b1289b89af';
+import {store, api, sync, go, conversation, appendMessage, setTyping, teamKey} from './ui-store.js?v=b1289b89af';
+import {toast} from './ui-dialogs.js?v=b1289b89af';
 
 /** In-flight sends per conversation, so two overlapping sends keep the typing
  * indicator up until the last one finishes instead of the first clearing it. */
@@ -108,7 +108,12 @@ export async function sendChat(id, text) {
   inFlight.set(id, count);
   if (count === 1) setTyping(id, true);
   try { await reply(conv, message); }
-  catch (error) { appendMessage(id, {role: 'system', text: `That did not go through: ${error?.message || String(error)}`}); }
+  catch (error) {
+    // The server's busy refusal is matched by its own retry logic, so it is reworded here, not there.
+    const said = error?.message || String(error);
+    const text = /already active/i.test(said) ? 'Still working on your last message. Send this again once it is done.' : `That did not go through: ${said}`;
+    appendMessage(id, {role: 'system', text});
+  }
   finally {
     const left = (inFlight.get(id) || 1) - 1;
     if (left <= 0) { inFlight.delete(id); setTyping(id, false); } else inFlight.set(id, left);

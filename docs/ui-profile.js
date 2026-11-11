@@ -5,21 +5,21 @@
  *
  * Pages repaint only when the route changes, so each in-place change (a switch, a
  * forgotten note, a picked colour) updates its own node instead. */
-import {SHAPES, COLORS, face} from './ui-face.js?v=a7167143ee';
-import {botStatus, botIsManager} from './ui-company.js?v=a7167143ee';
-import {primaryOf} from './company.js?v=a7167143ee';
-import {esc, icon, field, textInput, clock, roundBtn} from './ui-kit.js?v=a7167143ee';
-import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=a7167143ee';
-import {GRANT_LABELS} from './asks.js?v=a7167143ee';
-import {grantRows, allGrantRows, grantUrl} from './ui-asks.js?v=a7167143ee';
-import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=a7167143ee';
-import {toast, confirmSheet} from './ui-dialogs.js?v=a7167143ee';
-import {sendChat} from './ui-chat.js?v=a7167143ee';
-import {computerPage as computerView, computerLabel, keysOwned} from './ui-computer-view.js?v=a7167143ee';
+import {SHAPES, COLORS, face} from './ui-face.js?v=b1289b89af';
+import {botStatus, botIsManager} from './ui-company.js?v=b1289b89af';
+import {primaryOf} from './company.js?v=b1289b89af';
+import {esc, icon, field, textInput, clock, roundBtn} from './ui-kit.js?v=b1289b89af';
+import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=b1289b89af';
+import {GRANT_LABELS} from './asks.js?v=b1289b89af';
+import {grantRows, allGrantRows, grantUrl} from './ui-asks.js?v=b1289b89af';
+import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=b1289b89af';
+import {toast, confirmSheet} from './ui-dialogs.js?v=b1289b89af';
+import {sendChat} from './ui-chat.js?v=b1289b89af';
+import {computerPage as computerView, computerLabel, keysOwned} from './ui-computer-view.js?v=b1289b89af';
 import {
   MAX_NAME, hasJob, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, lookOf, newBotDefaults,
   newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, closeTarget,
-} from './ui-profile-model.js?v=a7167143ee';
+} from './ui-profile-model.js?v=b1289b89af';
 
 const el = id => document.getElementById(id);
 const SHAPE_LABELS = {rounded: 'Rounded square', circle: 'Circle', hexagon: 'Hexagon', pebble: 'Pebble', drop: 'Drop', shield: 'Shield', arch: 'Arch', egg: 'Egg', blob: 'Blob', bean: 'Bean'};

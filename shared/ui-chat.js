@@ -108,7 +108,12 @@ export async function sendChat(id, text) {
   inFlight.set(id, count);
   if (count === 1) setTyping(id, true);
   try { await reply(conv, message); }
-  catch (error) { appendMessage(id, {role: 'system', text: `That did not go through: ${error?.message || String(error)}`}); }
+  catch (error) {
+    // The server's busy refusal is matched by its own retry logic, so it is reworded here, not there.
+    const said = error?.message || String(error);
+    const text = /already active/i.test(said) ? 'Still working on your last message. Send this again once it is done.' : `That did not go through: ${said}`;
+    appendMessage(id, {role: 'system', text});
+  }
   finally {
     const left = (inFlight.get(id) || 1) - 1;
     if (left <= 0) { inFlight.delete(id); setTyping(id, false); } else inFlight.set(id, left);

@@ -237,13 +237,24 @@ export function createRun({group, message, directBotId=null, now=new Date().toIS
 /** The line a conversation shows when a run stops or pauses, or null while it
  * is still going. The id is derived from the run, so the server and a client
  * that both report the same outcome store it once. */
+/** A provider's raw error, said plainly. Anything that is not a provider error is kept as it was. */
+const TRY_AGAIN='Try again in a minute, or pick another model on the bot\'s profile.';
+function failureText(error){
+  const said=String(error||'').trim();
+  if(!said)return 'unknown error';
+  if(!/^AI provider returned/.test(said))return said;
+  if(/timeout|timed out|did not answer/i.test(said))return `the model did not answer in time. ${TRY_AGAIN}`;
+  const status=/^AI provider returned (\d{3})/.exec(said)?.[1];
+  return `the model provider had an error${status?` (${status})`:''}. ${TRY_AGAIN}`;
+}
+
 export function runNote(run){
   const text={
     completed: run.task?.closing || `Done in ${stepsOf(run).length} step(s).`,
     awaiting_checkpoint:`Paused after step ${run.currentStep}. Approve the next step to continue.`,
     awaiting_limit:run.limit?.kind==='guard'?'Bots are paused. This task goes on when you resume them.':limitText(run),
     awaiting_browser:'Waiting for the page to come back.',
-    failed:`The run failed: ${run.error||'unknown error'}`,
+    failed:`The run failed: ${failureText(run.error)}`,
     interrupted: run.error || 'The run was interrupted by a restart.',
   }[run.status];
   if(!text)return null;

@@ -194,7 +194,7 @@ function botEntry(m, conv) {
 function entryHtml(entry, conv) {
   switch (entry.kind) {
     case 'day': return `<div class="cv-day">${esc(dayLabel(entry.at))}</div>`;
-    case 'me': return `<div class="cv-me">${esc(entry.message.text)}</div>`;
+    case 'me': return `<div class="cv-me md">${md(entry.message.text)}</div>`;
     case 'bot': return botEntry(entry.message, conv);
     case 'offjob': return offjobEntry(entry, conv);
     case 'browser': return browserEntry(entry.message, conv);

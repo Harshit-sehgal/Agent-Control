@@ -2,18 +2,18 @@
  * LLM output may only extend a run's recipients through `handoffTargets`, which
  * revalidates every target against this policy and the step cap.
  */
-import {botSettings,groupSettings,pipelineOf,MAX_STEPS_LIMIT} from './bot-settings.js?v=a7167143ee';
-import {BROWSER_TOOL_HINT} from './bot-browser.js?v=a7167143ee';
-import {CONNECTOR_TOOL_HINT} from './connectors.js?v=a7167143ee';
-import {SUBAGENT_PERMISSION,SUBAGENT_TOOL_HINT} from './subagents.js?v=a7167143ee';
-import {BOT_ASK_TOOL_HINT,companyList} from './bot-link.js?v=a7167143ee';
-import {limitText} from './ask-limits.js?v=a7167143ee';
-import {BOT_CREATE_TOOL_HINT,MAX_BOTS_PER_GROUP} from './bot-create.js?v=a7167143ee';
-import {memoryBlock} from './memory.js?v=a7167143ee';
-import {isThread} from './threads.js?v=a7167143ee';
-import {BUSY_STATUSES as BUSY} from './run-state.js?v=a7167143ee';
-import {companyBots,PRIMARY_GROUP,isLead,teamOf} from './company.js?v=a7167143ee';
-import {OFFJOB_RULE,OFFJOB_ANYWAY} from './off-job.js?v=a7167143ee';
+import {botSettings,groupSettings,pipelineOf,MAX_STEPS_LIMIT} from './bot-settings.js?v=b1289b89af';
+import {BROWSER_TOOL_HINT} from './bot-browser.js?v=b1289b89af';
+import {CONNECTOR_TOOL_HINT} from './connectors.js?v=b1289b89af';
+import {SUBAGENT_PERMISSION,SUBAGENT_TOOL_HINT} from './subagents.js?v=b1289b89af';
+import {BOT_ASK_TOOL_HINT,companyList} from './bot-link.js?v=b1289b89af';
+import {limitText} from './ask-limits.js?v=b1289b89af';
+import {BOT_CREATE_TOOL_HINT,MAX_BOTS_PER_GROUP} from './bot-create.js?v=b1289b89af';
+import {memoryBlock} from './memory.js?v=b1289b89af';
+import {isThread} from './threads.js?v=b1289b89af';
+import {BUSY_STATUSES as BUSY} from './run-state.js?v=b1289b89af';
+import {companyBots,PRIMARY_GROUP,isLead,teamOf} from './company.js?v=b1289b89af';
+import {OFFJOB_RULE,OFFJOB_ANYWAY} from './off-job.js?v=b1289b89af';
 
 /** The default step count of a run; a group may set its own up to MAX_STEPS_LIMIT. */
 export const MAX_HANDOFFS = 6;
@@ -21,7 +21,7 @@ export const MAX_CONTEXT_CHARS = 3600;
 /** Which run statuses are busy or interruptible is decided once in
  * `shared/run-state.js`; re-exported here because callers have reached for them
  * through the coordination module since they were declared here. */
-export {BUSY_STATUSES, INTERRUPT_STATUSES} from './run-state.js?v=a7167143ee';
+export {BUSY_STATUSES, INTERRUPT_STATUSES} from './run-state.js?v=b1289b89af';
 const normalize = value => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 const safe = value => String(value ?? '').slice(0, MAX_CONTEXT_CHARS);
 const fail = (message, status) => Object.assign(new Error(message), {status});
@@ -237,13 +237,24 @@ export function createRun({group, message, directBotId=null, now=new Date().toIS
 /** The line a conversation shows when a run stops or pauses, or null while it
  * is still going. The id is derived from the run, so the server and a client
  * that both report the same outcome store it once. */
+/** A provider's raw error, said plainly. Anything that is not a provider error is kept as it was. */
+const TRY_AGAIN='Try again in a minute, or pick another model on the bot\'s profile.';
+function failureText(error){
+  const said=String(error||'').trim();
+  if(!said)return 'unknown error';
+  if(!/^AI provider returned/.test(said))return said;
+  if(/timeout|timed out|did not answer/i.test(said))return `the model did not answer in time. ${TRY_AGAIN}`;
+  const status=/^AI provider returned (\d{3})/.exec(said)?.[1];
+  return `the model provider had an error${status?` (${status})`:''}. ${TRY_AGAIN}`;
+}
+
 export function runNote(run){
   const text={
     completed: run.task?.closing || `Done in ${stepsOf(run).length} step(s).`,
     awaiting_checkpoint:`Paused after step ${run.currentStep}. Approve the next step to continue.`,
     awaiting_limit:run.limit?.kind==='guard'?'Bots are paused. This task goes on when you resume them.':limitText(run),
     awaiting_browser:'Waiting for the page to come back.',
-    failed:`The run failed: ${run.error||'unknown error'}`,
+    failed:`The run failed: ${failureText(run.error)}`,
     interrupted: run.error || 'The run was interrupted by a restart.',
   }[run.status];
   if(!text)return null;
