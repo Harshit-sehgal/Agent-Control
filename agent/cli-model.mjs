@@ -128,7 +128,7 @@ function classify(said, spec) {
 }
 
 /** Kill the process group, so a CLI's own children go too. */
-function kill(child) {
+export function kill(child) {
   try { if (process.platform !== 'win32') process.kill(-child.pid, 'SIGKILL'); else child.kill('SIGKILL'); }
   catch { try { child.kill('SIGKILL'); } catch { /* Already gone. */ } }
 }

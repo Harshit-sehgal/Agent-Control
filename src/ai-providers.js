@@ -12,7 +12,7 @@ import {fail} from '../shared/errors.js';
 import {envConfig,discoverModels,protocolOf,configReady,complete} from './ai.js';
 import {normaliseProtocol,inferProtocol,presetById,protocolById,LOCAL_CLI_KIND,LOCAL_CLI_ENGINES,cliEngineById,cleanCliModel} from '../shared/ai-presets.js';
 import {uuid} from '../shared/core.js';
-import {cliRunner} from './cli-model.js';
+import {cliRunner,cliSignIn} from './cli-model.js';
 
 const clean=(v,n)=>String(v??'').trim().slice(0,n);
 const validBase=u=>{try{const x=new URL(u);return (x.protocol==='http:'||x.protocol==='https:')&&!x.username&&!x.password&&!x.search&&!x.hash;}catch{return false;}};
@@ -338,7 +338,7 @@ export async function testProvider(store,providerId,{model}={}){
   if(!provider)fail('Provider not found.',404);
   // A test message would spend the owner's subscription. A subscription is
   // checked by the sign-in status its paired agent reports, never by a prompt.
-  if(isCli(provider))fail('A subscription is not tested with a message. Its sign-in status comes from the paired agent.',400);
+  if(isCli(provider))return {...cliSignIn(store,provider.engine),engine:provider.engine,model:provider.model||null};
   const config=providerConfig(store,provider);
   // Test the first model the key actually lists before falling back to "auto":
   // "auto" only means something to OpenAI-style servers, and a test that reports

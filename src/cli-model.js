@@ -13,7 +13,7 @@
  * on an answer nobody is waiting for.
  */
 import {cliEngineById, LOCAL_CLI_KIND} from '../shared/ai-presets.js';
-import {enqueueAgentTask, failAgentTasks} from './agent.js';
+import {enqueueAgentTask, failAgentTasks, readAgentCli} from './agent.js';
 
 const ONLINE_MS = 180000; // the same window the agent list calls "online"
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -37,6 +37,27 @@ function pickAgent(store, spec, nowMs = Date.now()) {
   const live = may.find(row => row.last_seen_at && Date.parse(row.last_seen_at) > nowMs - ONLINE_MS);
   if (!live) throw problem('Your paired agent is not running. Start it on that machine (`node agent/agent.mjs run`), then try again.', 422, 'agent-offline');
   return live;
+}
+
+/** Is this engine signed in on the paired machine? Read from what the agent's
+ * heartbeat last reported of the CLI's own status command; no model is called, so
+ * checking costs nothing on the plan. `status` is signed-in, signed-out, missing
+ * or unknown, or no-agent / no-permission / agent-offline when no usable agent. */
+export function cliSignIn(store, engine, nowMs = Date.now()) {
+  const spec = cliEngineById(engine);
+  if (!spec) throw problem('Unknown engine. Use claude or codex.', 400, 'bad-request');
+  let device;
+  try { device = pickAgent(store, spec, nowMs); }
+  catch (error) { return {ok: false, status: error.code, agent: null, message: error.message, checkedAt: null}; }
+  const reported = readAgentCli(store, device.id);
+  const status = ['signed-in', 'signed-out', 'missing'].includes(reported?.[spec.id]) ? reported[spec.id] : 'unknown';
+  const message = {
+    'signed-in': `${spec.label.replace(/ \(.*/, '')} is signed in on ${device.name}.`,
+    'signed-out': `${spec.label.replace(/ \(.*/, '')} is not signed in on ${device.name}. ${spec.signIn}`,
+    missing: `The ${spec.binary} command was not found on ${device.name}. Install it, then run \`${spec.binary}\` to sign in.`,
+    unknown: `${device.name} has not reported whether ${spec.binary} is signed in yet. Give it a minute, or ${spec.signIn.charAt(0).toLowerCase()}${spec.signIn.slice(1)}`,
+  }[status];
+  return {ok: status === 'signed-in', status, agent: device.name, message, checkedAt: reported?.checkedAt || null};
 }
 
 /** Run one prompt on the paired agent and return the reply text. */

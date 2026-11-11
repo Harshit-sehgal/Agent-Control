@@ -308,11 +308,30 @@ export function renewAgentTaskLeases(store, agentId, {leaseMs = DEFAULT_LEASE_MS
   return Number(result.changes || 0);
 }
 
+/** What the device reports about its CLIs. Only these four words are kept; any
+ * other value, and anything that is not an object, is ignored or `unknown`. The
+ * report lives in kv (never in a backup): it describes a machine, not the data. */
+export const CLI_STATES = ['signed-in', 'signed-out', 'missing', 'unknown'];
+export function recordAgentCli(store, agentId, report) {
+  if (!report || typeof report !== 'object' || Array.isArray(report) || typeof store.kvSet !== 'function') return;
+  const word = value => (CLI_STATES.includes(value) ? value : 'unknown');
+  store.kvSet(`agent_cli:${agentId}`, JSON.stringify({claude: word(report.claude), codex: word(report.codex), checkedAt: now()}));
+}
+export function readAgentCli(store, agentId) {
+  try {
+    const raw = typeof store.kvGet === 'function' ? store.kvGet(`agent_cli:${agentId}`) : null;
+    const value = raw ? JSON.parse(raw) : null;
+    return value ? {claude: value.claude, codex: value.codex, checkedAt: value.checkedAt} : null;
+  } catch { return null; }
+}
+
 export function listAgents(store, workspaceId) {
   const agents = store.all('SELECT * FROM agents WHERE workspace_id=? ORDER BY paired_at DESC', workspaceId);
   return agents.map(a => ({
     id: a.id, name: a.name, status: a.revoked_at ? 'revoked' : (a.last_seen_at && Date.parse(a.last_seen_at) > Date.now() - 180000 ? 'online' : (a.last_seen_at ? 'stale' : 'paired')),
     permissions: JSON.parse(a.permissions || '[]'), pairedAt: a.paired_at, lastSeenAt: a.last_seen_at,
+    // Whether `claude` and `codex` are signed in on that machine, as the device last said.
+    cli: a.revoked_at ? null : readAgentCli(store, a.id),
     tasks: {queued: store.get("SELECT count(*) AS n FROM agent_tasks WHERE agent_id=? AND status='queued'", a.id).n,
       running: store.get("SELECT count(*) AS n FROM agent_tasks WHERE agent_id=? AND status='running'", a.id).n,
       failed: store.get("SELECT count(*) AS n FROM agent_tasks WHERE agent_id=? AND status='failed'", a.id).n},

@@ -29,6 +29,7 @@ import {fileURLToPath} from 'node:url';
 import crypto from 'node:crypto';
 import {captureWithBrowser, ACTION_OPS, MAX_ACTIONS} from './browser.mjs';
 import {runModelTask} from './cli-model.mjs';
+import {cliStatusReporter} from './cli-status.mjs';
 import {hostAllowed, hostOf, parseAllowlist} from '../shared/bot-browser.js';
 import {resolvePublicAddress, pinnedRequest} from './net-guard.mjs';
 
@@ -211,6 +212,7 @@ async function run() {
   process.on('SIGINT', () => stop('SIGINT'));
   process.on('SIGTERM', () => stop('SIGTERM'));
 
+  const cliStatus = cliStatusReporter();
   // Tasks handed over by a heartbeat that arrived while a task was executing.
   const inbox = new Map();
   let busy = false;
@@ -220,7 +222,10 @@ async function run() {
    * the same millisecond would otherwise be identical bytes, which the server
    * rejects as a replayed signature. */
   const heartbeat = async () => {
-    const beat = await call(config, '/api/agent/heartbeat', {version: '1', os: process.platform, node: process.version, beat: ++beatSeq, at: Date.now()});
+    // Whether the owner's CLIs are signed in, from their own status commands (cached
+    // ten minutes, no model call). Only a device allowed to run models looks.
+    const cli = (config.permissions || []).includes('model.run') ? cliStatus.snapshot() : undefined;
+    const beat = await call(config, '/api/agent/heartbeat', {version: '1', os: process.platform, node: process.version, beat: ++beatSeq, at: Date.now(), ...(cli ? {cli} : {})});
     config.lastSeenAt = new Date().toISOString();
     if (Array.isArray(beat.agent?.permissions)) config.permissions = beat.agent.permissions;
     for (const task of beat.tasks || []) if (task && task.id && !inbox.has(task.id)) inbox.set(task.id, task);
@@ -246,6 +251,8 @@ async function run() {
     console.log(`agent: running ${task.kind} ${task.id}`);
     try {
       const result = await execute(task, config);
+      // A model run that found the CLI signed out or missing: look again soon, the owner is about to fix it.
+      if (task.kind === 'model.run' && result?.ok === false && ['not-signed-in', 'cli-missing'].includes(result.code)) cliStatus.invalidate();
       // Reporting is separate from executing: a refused report (409, a superseded
       // attempt) is not a local failure and must not be re-reported as one.
       try {
