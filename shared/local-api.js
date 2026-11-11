@@ -9,7 +9,7 @@ import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGrou
 import {RETENTION_DEFAULTS} from './retention.js';
 import {enqueueTask, retryTask, cancelTask} from './tasks.js';
 import {addChatMessages, clearChat} from './chats.js';
-import {publicMemory, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js';
+import {publicMemory, rememberFromOwner, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js';
 import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js';
 import {createThread, titleFrom} from './threads.js';
 import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js';
@@ -291,6 +291,8 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
   }
   if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/chat$/)) && method === 'POST') {
     const r = await localRun(state, m[1], {message: body.message, directBotId: body.directBotId || null, checkpoints: body.checkpoints === true, chatKey: typeof body.chatKey === 'string' ? body.chatKey : null, anyway: body.anyway === true});
+    // What the owner asked every bot to remember is kept, as on the server.
+    rememberFromOwner(state, body.message);
     save(state); return r;
   }
   if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/runs\/([a-z0-9-]+)\/continue$/)) && method === 'POST') {

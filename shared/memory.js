@@ -191,6 +191,33 @@ export function extractRuleCandidates(text) {
   return out;
 }
 
+/** What the owner asks every bot to keep: "Remember: ...", "Remember that ...",
+ * "Keep in mind ...", and lasting habits ("From now on ...", "Always ...",
+ * "Never ..."). Narrower than extractRuleCandidates on purpose: it runs on every
+ * message, so a task ("Please find ..."), a question or a reminder ("Remember to
+ * ...") must never be saved. */
+const REMEMBER_CUE = /^(?:please\s+)?(?:remember|note|keep in mind)(?:\s*[:,-]\s*|\s+that\s+|\s+(?=(?:i|i'm|i am|my|we|our)\b))/i;
+const HABIT_CUE = /^(?:from now on|going forward|always|never)\b(?!\s+mind\b)/i;
+
+/** Save the owner's remember lines to the company notes. Returns the new rules. */
+export function rememberFromOwner(state, text, {now = new Date().toISOString()} = {}) {
+  const keep = [];
+  for (const raw of String(text ?? '').split(SPLIT)) {
+    const sentence = cleanText(raw, MAX_RULE_CHARS + 40).trim();
+    if (!sentence || QUESTION.test(sentence)) continue;
+    let note = '';
+    const cue = sentence.match(REMEMBER_CUE);
+    if (cue) note = sentence.slice(cue[0].length).trim();
+    else if (HABIT_CUE.test(sentence)) note = sentence;
+    if (note.length < 6 || note.length > MAX_RULE_CHARS) continue;
+    note = note[0].toUpperCase() + note.slice(1);
+    if (!/[.!]$/.test(note)) note += '.';
+    keep.push(note);
+  }
+  if (!keep.length) return [];
+  return addRules(state, COMPANY_KEY, keep, {source: 'user', now}).added;
+}
+
 /** Add rules to a book. Duplicates (case- and space-insensitive) are refreshed,
  * not repeated. Returns the book and the rules that were new. */
 export function addRules(state, key, texts, {source = 'user', now = new Date().toISOString(), makeId = () => crypto.randomUUID(), label = ''} = {}) {

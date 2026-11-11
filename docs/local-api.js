@@ -4,23 +4,23 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {initialState, cleanText} from './core.js?v=1a5551460d';
-import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=1a5551460d';
-import {RETENTION_DEFAULTS} from './retention.js?v=1a5551460d';
-import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=1a5551460d';
-import {addChatMessages, clearChat} from './chats.js?v=1a5551460d';
-import {publicMemory, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=1a5551460d';
-import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=1a5551460d';
-import {createThread, titleFrom} from './threads.js?v=1a5551460d';
-import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=1a5551460d';
-import {simulateGroup} from './group-simulator.js?v=1a5551460d';
-import {BUSY_STATUSES} from './run-state.js?v=1a5551460d';
-import {botSettings} from './bot-settings.js?v=1a5551460d';
-import {denyBrowserRequest} from './bot-browser.js?v=1a5551460d';
-import {answerAsk, expireAsks, orphanAsks, setGrant, setAskBasics} from './asks.js?v=1a5551460d';
-import {setLimits} from './limits.js?v=1a5551460d';
-import {activityPage} from './activity-log.js?v=1a5551460d';
-import {withLocalLock} from './locks.js?v=1a5551460d';
+import {initialState, cleanText} from './core.js?v=7f0bbfbfb6';
+import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=7f0bbfbfb6';
+import {RETENTION_DEFAULTS} from './retention.js?v=7f0bbfbfb6';
+import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=7f0bbfbfb6';
+import {addChatMessages, clearChat} from './chats.js?v=7f0bbfbfb6';
+import {publicMemory, rememberFromOwner, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=7f0bbfbfb6';
+import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=7f0bbfbfb6';
+import {createThread, titleFrom} from './threads.js?v=7f0bbfbfb6';
+import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=7f0bbfbfb6';
+import {simulateGroup} from './group-simulator.js?v=7f0bbfbfb6';
+import {BUSY_STATUSES} from './run-state.js?v=7f0bbfbfb6';
+import {botSettings} from './bot-settings.js?v=7f0bbfbfb6';
+import {denyBrowserRequest} from './bot-browser.js?v=7f0bbfbfb6';
+import {answerAsk, expireAsks, orphanAsks, setGrant, setAskBasics} from './asks.js?v=7f0bbfbfb6';
+import {setLimits} from './limits.js?v=7f0bbfbfb6';
+import {activityPage} from './activity-log.js?v=7f0bbfbfb6';
+import {withLocalLock} from './locks.js?v=7f0bbfbfb6';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
@@ -291,6 +291,8 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
   }
   if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/chat$/)) && method === 'POST') {
     const r = await localRun(state, m[1], {message: body.message, directBotId: body.directBotId || null, checkpoints: body.checkpoints === true, chatKey: typeof body.chatKey === 'string' ? body.chatKey : null, anyway: body.anyway === true});
+    // What the owner asked every bot to remember is kept, as on the server.
+    rememberFromOwner(state, body.message);
     save(state); return r;
   }
   if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/runs\/([a-z0-9-]+)\/continue$/)) && method === 'POST') {

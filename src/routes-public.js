@@ -32,6 +32,10 @@ const LOGIN_WINDOW_MS = 900000, LOGIN_ATTEMPTS = 8, LOGIN_ACCOUNT_ATTEMPTS = LOG
 // password guessing.
 const rateLimitOn = () => String(process.env.AUTH_RATE_LIMIT || '').toLowerCase() !== 'off';
 
+/** A browser result carries a whole page (60,000 characters, often 3 bytes each,
+ * plus links and controls), so the result route reads more than the default 64KB. */
+export const RESULT_BODY_LIMIT = 1024 * 1024;
+
 export function publicRoutes(router, {auth, workspaces, version}) {
   // Failed sign-ins per client IP. A record only matters while its window is
   // open, so lapsed ones are dropped and a long-lived process cannot grow it.
@@ -180,7 +184,7 @@ export function publicRoutes(router, {auth, workspaces, version}) {
     return store.trackWork ? store.trackWork(heartbeat) : heartbeat();
   });
   router.add('POST', '/api/agent/tasks/:id/result', 'agent', async c => {
-    const raw = await c.raw(), store = agentStore(c);
+    const raw = await c.raw(RESULT_BODY_LIMIT), store = agentStore(c);
     const report = async () => {
       const device = agent.verifyAgentRequest(store, c.req.headers, 'POST', c.path, raw);
       const b = safeJson(raw);

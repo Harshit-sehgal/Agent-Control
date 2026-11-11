@@ -26,6 +26,7 @@ import {recordConnectorCalls,parseConnectorCalls,stripConnectorBlocks,envelopeCo
 import {runConnectorCalls} from './connector-runs.js';
 import {runBotTurn} from './bot-turn.js';
 import {memoryFor,rememberTurn,maybeConsolidate} from './memory.js';
+import {rememberFromOwner} from '../shared/memory.js';
 import {executeCustomBot} from './ai.js';
 import {holdFollowUp} from './follow-ups.js';
 import {resolveConfig,aiAvailable} from './ai-providers.js';
@@ -137,6 +138,8 @@ export async function queueGroupRun(store,{groupId,message,directBotId=null,chec
     const confirm=confirmPlan===undefined?groupSettings(group).confirmPlan:Boolean(confirmPlan);
     const task=instructed.task?{...instructed.task,confirm}:null;
     const run=createRun({group,message:messageText,directBotId:instructed.directBotId,makeId:randomUUID,checkpoints:Boolean(checkpoints),chatKey,guests,task,anyway:anyway===true});
+    // What the owner typed and asked every bot to remember goes to the company notes before the run reads them.
+    if(!taskId&&!scheduleId&&!unattended)rememberFromOwner(s,messageText);
     if(taskId)run.taskId=taskId;
     // The schedule a timer run came from, so its end can count toward stopping a schedule that keeps failing.
     if(scheduleId)run.scheduleId=scheduleId;
