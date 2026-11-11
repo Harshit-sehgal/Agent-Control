@@ -353,6 +353,7 @@ export function workspaceBrief(state, {agents = [], connectors = [], speaker = n
     teams,
     computer,
     // Saved answers, what waits on the owner and the open threads: what Atlas needs to say where things stand.
+    basicAccess: state?.askBasics ? 'every bot asks the owner before opening a web page or reading a connected app' : 'every bot opens web pages and reads connected apps without asking; sending, posting, deleting and paying ask',
     rules: rules.length ? rules : 'none',
     waitingOnOwner: waiting.length ? waiting : 'nothing',
     threads: threads.length ? threads : 'none',

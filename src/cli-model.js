@@ -64,7 +64,7 @@ export function cliSignIn(store, engine, nowMs = Date.now()) {
 export async function runOnAgent(store, {engine, model = '', effort = '', instructions = '', input, label = '', waitMs = cliWaitMs(), pollMs = 250, botId = null, providerId = null}) {
   const spec = cliEngineById(engine);
   if (!spec) throw problem('Unknown engine. Use claude or codex.', 400, 'bad-request');
-  const meta = {engine: spec.id, botId, providerId};
+  const meta = {engine: spec.id, botId, providerId, model: model || null};
   const device = pickAgent(store, spec);
   // The agent stops its CLI before the server stops waiting, leaving room for the
   // agent's own pickup delay and the report back.
@@ -77,6 +77,12 @@ export async function runOnAgent(store, {engine, model = '', effort = '', instru
     if (!row) throw problem('The model task disappeared before it finished.', 502, 'agent-failed', meta);
     if (row.status === 'done') return readResult(row.result, spec, meta);
     if (row.status === 'failed') throw problem(`The paired agent could not run the model: ${row.error || 'it reported a failure'}`, 502, 'agent-failed', meta);
+    // A laptop that sleeps or an agent that is killed stops beating: give up now, not at the end of the wait.
+    const seen = store.get('SELECT last_seen_at FROM agents WHERE id=?', device.id)?.last_seen_at;
+    if (!seen || Date.parse(seen) <= Date.now() - ONLINE_MS) {
+      failAgentTasks(store, [task.id], 'The computer went offline before the model answered.');
+      throw problem(`Your computer went offline while running ${label || spec.label}. Start the app on it again, then retry.`, 503, 'agent-offline', meta);
+    }
     if (Date.now() >= deadline) {
       failAgentTasks(store, [task.id], 'The run timed out waiting for the agent.');
       throw problem(`${label || spec.label} did not answer in time. Check that the agent is running and the CLI is signed in.`, 504, 'timeout', meta);
@@ -85,7 +91,7 @@ export async function runOnAgent(store, {engine, model = '', effort = '', instru
   }
 }
 
-const STATUS = {'not-signed-in': 422, 'usage-limit': 429, 'cli-missing': 422, timeout: 504, 'bad-request': 400, 'output-too-large': 502, 'empty-reply': 502, 'cli-failed': 502};
+const STATUS = {'not-signed-in': 422, 'usage-limit': 429, 'model-not-found': 422, 'cli-missing': 422, timeout: 504, 'bad-request': 400, 'output-too-large': 502, 'empty-reply': 502, 'cli-failed': 502};
 
 /** What the agent reported: the text, or an error with the agent's own code. */
 function readResult(raw, spec, meta) {
@@ -108,16 +114,25 @@ export function cliRunner(store, {botId = null, provider}) {
  * the bot, and `switchTo`: the id of another connected model, one that is not the
  * same CLI login. The card's button sends the existing bot PATCH
  * (`PATCH /api/ai/bots/:bot` with `{providerId: switchTo, model: ''}`). */
+const WHAT_WENT_WRONG = {
+  'usage-limit': plan => `${plan} has reached its usage limit`,
+  quota: plan => `${plan} is out of credit or quota`,
+  'model-not-found': (plan, model) => `${plan} does not offer ${model || 'that model'}`,
+  auth: plan => `${plan} rejected its key`,
+  'rate-limit': plan => `${plan} is rate limiting this key`,
+};
 export function modelLimitLine(state, error, {runId}) {
-  if (error?.code !== 'usage-limit') return null;
+  const said = WHAT_WENT_WRONG[error?.code];
+  if (!said) return null;
   const providers = state.ai?.providers || [];
   const failing = providers.find(p => p.id === error.providerId);
   const bot = (state.groups || []).flatMap(g => g.bots || []).find(b => b.id === error.botId);
   const other = providers.find(p => p.id !== error.providerId && !(p.kind === LOCAL_CLI_KIND && failing?.kind === LOCAL_CLI_KIND && p.engine === failing.engine));
   const who = bot?.name || 'This bot';
   const plan = failing?.label || cliEngineById(error.engine)?.label || 'subscription';
+  const why = said(plan, error.model);
   const text = other
-    ? `${who} could not answer: ${plan} has reached its usage limit. You can switch ${who} to ${other.label}.`
-    : `${who} could not answer: ${plan} has reached its usage limit. Connect another model in Settings to switch ${who}.`;
+    ? `${who} could not answer: ${why}. You can switch ${who} to ${other.label}.`
+    : `${who} could not answer: ${why}. Connect another model in Settings to switch ${who}.`;
   return {id: `${runId}-model-limit`.slice(0, 64), role: 'system', kind: 'model-limit', text, runId, ...(error.botId ? {botId: error.botId} : {}), ...(other ? {switchTo: other.id} : {})};
 }

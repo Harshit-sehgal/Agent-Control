@@ -92,7 +92,7 @@ test('a trailing dot is still X or Twitter, so click and type stay refused', () 
 });
 
 test('a reply becomes a request card for a bot already cleared, an ask for one that is not, and nothing for a Deny, within the depth limit', () => {
-  const state = wf.migrate({candidates: [], groups: [{id: 'g', name: 'G', bots: [browserBot()]}]});
+  const state = wf.migrate({askBasics: true, candidates: [], groups: [{id: 'g', name: 'G', bots: [browserBot()]}]});
   cleared(state);
   const out = recordBrowserRequests(state, {bot: browserBot(), groupId: 'g', chatKey: 'web', output: block({url: 'https://example.com'}), makeId: (() => { let n = 0; return () => `id-${++n}`; })()});
   assert.equal(out.text, 'Let me look.\n\nBack soon.');
@@ -149,7 +149,7 @@ test('a bot browses through the paired local agent and continues from the result
   const {dir, store} = await harness();
   try {
     // This bot has no grant, so its page waits for the owner's answer (an ask) before it reaches the device.
-    await store.update(s => { wf.migrate(s); coordinationState(s); s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot({permissions: [], settings: {}})]}]; s.groupRuns.push(createRun({group: s.groups[0], message: 'Find the docs', makeId: () => 'run-1', chatKey: 'web'})); });
+    await store.update(s => { wf.migrate(s); coordinationState(s); s.askBasics = true; s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot({permissions: [], settings: {}})]}]; s.groupRuns.push(createRun({group: s.groups[0], message: 'Find the docs', makeId: () => 'run-1', chatKey: 'web'})); });
     await runGroup(store, 'run-1', async () => block({url: 'https://example.com/docs', steps: [{op: 'read', selector: 'main'}]}));
     let s = store.read();
     const request = s.browserRequests[0];
@@ -300,7 +300,7 @@ test('a bot with Always allow for the site sends its request at once, and a fail
   try {
     const {code} = agent.createPairing(store, 'default', {});
     const device = agent.redeemPairing(store, {code, name: 'Laptop', permissions: ['browser.capture']});
-    await store.update(s => { wf.migrate(s); coordinationState(s); s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot({settings: {browserApproval: 'auto'}})]}]; cleared(s); s.groupRuns.push(createRun({group: s.groups[0], message: 'Read it', makeId: () => 'run-2', chatKey: 'team-lab'})); });
+    await store.update(s => { wf.migrate(s); coordinationState(s); s.askBasics = true; s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot({settings: {browserApproval: 'auto'}})]}]; cleared(s); s.groupRuns.push(createRun({group: s.groups[0], message: 'Read it', makeId: () => 'run-2', chatKey: 'team-lab'})); });
     await runGroup(store, 'run-2', async () => block({url: 'https://example.com'}));
     assert.equal(store.read().browserRequests[0].status, 'dispatched');
     const [task] = agent.claimAgentTasks(store, device.agentId);

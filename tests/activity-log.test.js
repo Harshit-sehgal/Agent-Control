@@ -244,6 +244,7 @@ test('the log has one read route and no write route, and it is not part of the s
 
 test('an answer to an ask that opens a page lands in the log once the page is sent', async t => {
   const {store, ids} = await company(t);
+  await store.update(s => { s.askBasics = true; }); // the owner asks even before a page opens
   const ai = model({Mailroom: envelope => (envelope.page ? 'Read it.' : '```browser\n{"url":"https://docs.example.com/guide"}\n```')});
   const {browserRuntime} = await import('../src/browser-runtime.js');
   const real = [browserRuntime.available, browserRuntime.run];
@@ -296,4 +297,9 @@ test('the Pages demo logs the same events and serves the same page, with no log 
   await assert.rejects(request('/api/activity?filter=nope'), e => e.status === 400);
   const snapshot = await request('/api/state');
   assert.equal(Object.hasOwn(snapshot, 'activity'), false);
+  // The owner's switch for the basics is logged as a permission change, and the demo keeps it.
+  await request('/api/permissions/basics', 'POST', {ask: true});
+  assert.equal((await request('/api/state')).askBasics, true);
+  assert.equal((await request('/api/activity?filter=perm')).items[0].text, 'Bots now ask before opening a web page or reading a connected app.');
+  await assert.rejects(request('/api/permissions/basics', 'POST', {ask: 'yes'}), e => e.status === 400);
 });

@@ -53,8 +53,14 @@ export async function runMcpTask(payload, servers, {timeoutMs, maxBytes = MAX_ST
   const env = Object.fromEntries(KEEP_ENV.filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]]));
   Object.assign(env, config.env);
   let child;
+  // Why it would not start, in words an owner can act on: a missing program is usually npx (Node.js) or uvx (uv).
+  // Only the program's own name: the full command line stays on this machine.
+  const program = String(config.command).split(/[\\/]/).at(-1).slice(0, 40);
+  const startFailed = error => error?.code === 'ENOENT'
+    ? `The MCP server "${name}" could not start: "${program}" was not found on this computer. Install it (npx comes with Node.js, uvx with uv), then try again.`
+    : `The MCP server "${name}" could not be started${error?.code ? ` (${error.code})` : ''}. Check its command in the agent config.`;
   try { child = spawn(config.command, config.args, {cwd: config.cwd, env, stdio: ['pipe', 'pipe', 'ignore'], detached: process.platform !== 'win32', windowsHide: true}); }
-  catch { return failure('cannot-start', `The MCP server "${name}" could not be started. Check its command in the agent config.`); }
+  catch (error) { return failure('cannot-start', startFailed(error)); }
 
   const pending = new Map();
   let stopped = null, timer = null, nextId = 1, bytes = 0, buffer = '';
@@ -64,8 +70,9 @@ export async function runMcpTask(payload, servers, {timeoutMs, maxBytes = MAX_ST
     catch { try { child.kill('SIGKILL'); } catch { /* Already gone. */ } }
   };
   child.stdin.on('error', () => {});
-  child.on('error', () => end(new Stop('cannot-start', `The MCP server "${name}" could not be started. Check its command in the agent config.`)));
-  child.on('close', () => end(new Stop('exited', `The MCP server "${name}" stopped before it answered.`)));
+  child.on('error', error => end(new Stop('cannot-start', startFailed(error))));
+  // Only the exit code and the program's name: stderr can hold anything, a token included, so it stays here.
+  child.on('close', code => end(new Stop('exited', `The MCP server "${name}" (${program}) stopped before it answered${Number.isInteger(code) ? ` (exit ${code})` : ''}. A wrong token or a missing folder is the usual cause: check what it needs, then try again.`)));
   child.stdout.on('data', chunk => {
     bytes += chunk.length;
     if (bytes > maxBytes) { end(new Stop('output-too-large', `The MCP server "${name}" sent more than this agent reads.`)); killGroup(); return; }

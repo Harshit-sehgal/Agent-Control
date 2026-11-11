@@ -100,8 +100,12 @@ const conn = () => (adminKeyOf('conn') ? adminHost('conn') : card(srow('Connecto
 function perm(arg) {
   const bot = arg ? findBot(arg) : null;
   const chip = bot ? `<div class="st-chip">${faceOf(bot, 22, {state: 'asleep', motion: false})}<span>Showing <b>${esc(bot.name)}</b></span><button type="button" class="link" data-action="perm-all">Show all</button></div>` : '';
-  return `<p class="st-note">What each bot may do beyond chatting and handing work on. Anything that leaves the app asks you first.</p>${chip}<div data-grants="${bot ? esc(bot.id) : 'all'}">${grantsHtml(bot?.id || null)}</div>${grantNote('st-note')}`;
+  const ask = Boolean(store.state?.askBasics), owner = canPause();
+  const basics = card(`<div class="rw"><span class="w">Browse and read without asking<small data-basics-sub>${basicsWords(ask)}</small></span>${switchBtn(!ask, 'Browse and read without asking', ` data-action="settings-basics" data-basics${owner ? '' : ' disabled'}`)}</div>`);
+  return `<p class="st-note">Every bot can chat, hand work to its team, make bots and set schedules. Sending, posting, deleting and paying ask you first; you can Always allow a bot per site.</p>${basics}${chip}<div data-grants="${bot ? esc(bot.id) : 'all'}">${grantsHtml(bot?.id || null)}</div>${grantNote('st-note')}`;
 }
+
+const basicsWords = ask => (ask ? 'Bots ask you before opening a web page or reading a connected app' : 'Bots open web pages and read connected apps on their own; a site you set to Ask or Deny still asks or refuses');
 
 function usage() {
   const {total, rows} = weekUsage(store.state);
@@ -272,6 +276,14 @@ export const settingsActions = {
     await sync();
     document.querySelectorAll('[data-pause]').forEach(x => x.setAttribute('aria-checked', String(!paused())));
     document.querySelectorAll('[data-pause-sub]').forEach(x => { x.textContent = paused() ? 'Everything is paused' : 'Switch off to pause every bot at once'; });
+  },
+  'settings-basics': async () => {
+    if (!canPause()) throw new Error('Only the owner can change this.');
+    await api('/api/permissions/basics', 'POST', {ask: !store.state?.askBasics});
+    await sync();
+    const ask = Boolean(store.state?.askBasics);
+    document.querySelectorAll('[data-basics]').forEach(x => x.setAttribute('aria-checked', String(!ask)));
+    document.querySelectorAll('[data-basics-sub]').forEach(x => { x.textContent = basicsWords(ask); });
   },
   // The filter chip on Permissions: back to every bot's rules, in place of the filtered page.
   'perm-all': () => go({settings: 'perm'}, {replace: true}),

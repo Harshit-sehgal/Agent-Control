@@ -23,14 +23,14 @@
  *   make itself the primary bot, save a rule without the owner's tap, or reach a route the owner could not.
  *
  * Pure and browser-safe: the server reads replies with it and the UI paints the card from it. */
-import {cleanText} from './core.js?v=697f915fc5';
-import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=697f915fc5';
-import {everyMinutes, cleanAt, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=697f915fc5';
-import {controlFence} from './reply-blocks.js?v=697f915fc5';
-import {companyBots, primaryOf} from './company.js?v=697f915fc5';
-import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js?v=697f915fc5';
-import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=697f915fc5';
-import {grantWhat} from './ui-asks.js?v=697f915fc5';
+import {cleanText} from './core.js?v=8ce3bc47dc';
+import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=8ce3bc47dc';
+import {everyMinutes, cleanAt, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=8ce3bc47dc';
+import {controlFence} from './reply-blocks.js?v=8ce3bc47dc';
+import {companyBots, primaryOf} from './company.js?v=8ce3bc47dc';
+import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js?v=8ce3bc47dc';
+import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=8ce3bc47dc';
+import {grantWhat} from './ui-asks.js?v=8ce3bc47dc';
 
 export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'schedule', 'open'];
 /** The bot settings a bot may propose. Not the primary role, the browser approval mode, or layout (pins, order). */
@@ -353,6 +353,7 @@ export function workspaceBrief(state, {agents = [], connectors = [], speaker = n
     teams,
     computer,
     // Saved answers, what waits on the owner and the open threads: what Atlas needs to say where things stand.
+    basicAccess: state?.askBasics ? 'every bot asks the owner before opening a web page or reading a connected app' : 'every bot opens web pages and reads connected apps without asking; sending, posting, deleting and paying ask',
     rules: rules.length ? rules : 'none',
     waitingOnOwner: waiting.length ? waiting : 'nothing',
     threads: threads.length ? threads : 'none',

@@ -22,8 +22,9 @@ import * as wf from '../shared/workflow.js';
 import {openStore, TABLE_SHAPES} from '../src/sqlite-store.js';
 import * as backup from '../src/backup.js';
 
+// These tests are about the ask card, so the owner's switch to ask even before a page or a read is on.
 const state = () => wf.migrate({
-  settings: {}, runs: [], tasks: [], events: [], groupMessages: {}, groupRuns: [],
+  askBasics: true, settings: {}, runs: [], tasks: [], events: [], groupMessages: {}, groupRuns: [],
   groups: [{id: 'home', name: 'Home', bots: [{id: 'a', name: 'Atlas', instructions: 'lead'}, {id: 'b', name: 'Mailroom', instructions: 'mail'}]}],
 });
 const mk = (() => { let n = 0; return () => `id-${++n}`; })();

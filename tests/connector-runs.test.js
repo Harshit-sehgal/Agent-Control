@@ -15,7 +15,9 @@ import {addMcpConnector, removeConnector} from '../src/connectors.js';
 import {cancelRun} from '../src/coordination.js';
 import {grantFor, setGrant} from '../shared/asks.js';
 import {MAX_CONNECTOR_DEPTH} from '../shared/connectors.js';
-import {company, model, ask} from './run-fixture.js';
+import {company as plainCompany, model, ask} from './run-fixture.js';
+// These tests are about the ask card, so the owner's switch to ask even before a page or a read is on.
+const company = async (...a) => { const r = await plainCompany(...a); await r.store.update(s => { s.askBasics = true; }); return r; };
 import {fakeMcpHttp} from './mcp-fixture.js';
 
 const fence = (tool, args = {}, use = 'notes') => `One moment.\n\`\`\`connector\n${JSON.stringify({use, tool, args})}\n\`\`\``;
@@ -261,4 +263,20 @@ test('an ask from an unattended run lapses after 24 hours as declined, and the b
   await until(() => runOf(store, run.id).status === 'completed', 'the run');
   assert.deepEqual(toolCalls(server), []);
   assert.match(ai.of('Mailroom')[1].declined, /no answer in 24 hours/);
+});
+
+test('a server that stops answering mid-use shows as a problem in Settings, not ready; a tool\'s own error does not', async t => {
+  const {store, ids, server} = await rig(t);
+  await store.update(s => { setGrant(s, ids.mail, 'connector.notes.read', s.connectors[0].account, 'always', undefined, {log: false}); s.connectors[0].actions.push({name: 'boom', write: false, description: ''}); });
+  const own = model({Mailroom: envelope => (envelope.connectorResult ? 'ok' : fence('boom'))});
+  const first = await ask(store, {message: 'use boom', to: ids.mail, executor: own.executor});
+  await until(() => runOf(store, first.id).status === 'completed', 'the boom run');
+  assert.equal(store.read().connectors[0].status, 'ready', 'the server answered; only the tool failed');
+  await server.close();
+  const ai = model({Mailroom: envelope => (envelope.connectorResult ? 'ok' : fence('search_notes', {q: 'x'}))});
+  const run = await ask(store, {message: 'search', to: ids.mail, executor: ai.executor});
+  await until(() => runOf(store, run.id).status === 'completed', 'the run');
+  const notes = store.read().connectors[0];
+  assert.equal(notes.status, 'error');
+  assert.ok(notes.statusMessage, 'it says what went wrong');
 });

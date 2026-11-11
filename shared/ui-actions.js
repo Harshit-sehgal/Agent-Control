@@ -15,6 +15,7 @@ import {changePasswordSheet} from './ui-sheets.js';
 import {adminActions, adminForms, adminChanges} from './ui-admin.js';
 import {takeoverActions, takeoverForms} from './ui-takeover.js';
 import {computerActions, computerForms} from './ui-computer-view.js';
+import {catalogSearch} from './ui-connect.js';
 
 const adminCtx = {reload: reloadAdminPage};
 const chatId = () => chatKeyOf(store.route);
@@ -112,5 +113,5 @@ export function onControlChange(control) {
   const admin = adminChanges[control.dataset.action];
   if (admin) return admin(control, adminCtx);
 }
-/** `input` events: the New bot name switches Create on. */
-export function onControlInput(control) { nameTyped(control); }
+/** `input` events: the Connect apps search filters live; the New bot name switches Create on. */
+export function onControlInput(control) { if (catalogSearch(control)) return; nameTyped(control); }

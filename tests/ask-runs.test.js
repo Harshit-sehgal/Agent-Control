@@ -17,7 +17,9 @@ import {answerAskFlow, expirePendingAsks} from '../src/ask-runs.js';
 import {grantFor, setGrant, pendingAsks} from '../shared/asks.js';
 import {BUSY_STATUSES, STOPPABLE_STATUSES, INTERRUPT_STATUSES} from '../shared/run-state.js';
 import {chatIsBusy} from '../shared/coordination.js';
-import {company, model, ask} from './run-fixture.js';
+import {company as plainCompany, model, ask} from './run-fixture.js';
+// These tests are about the ask card, so the owner's switch to ask even before a page or a read is on.
+const company = async (...a) => { const r = await plainCompany(...a); await r.store.update(s => { s.askBasics = true; }); return r; };
 
 const fence = (url, steps) => `One moment.\n\`\`\`browser\n${JSON.stringify(steps ? {url, steps} : {url})}\n\`\`\``;
 const until = async (check, note) => {
@@ -313,6 +315,7 @@ test('the routes: only an admin answers or grants, and the old approve/deny rout
   groupRoutes(router, {});
   assert.equal(router.find('POST', '/api/asks/abc').route.access, 'admin');
   assert.equal(router.find('POST', '/api/grants').route.access, 'admin');
+  assert.equal(router.find('POST', '/api/permissions/basics').route.access, 'admin', 'only an admin switches the basics');
   const {store, ids} = await company(t);
   const ai = browsing('https://docs.example.com/guide');
   wire(ai.executor);

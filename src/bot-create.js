@@ -22,19 +22,13 @@ export async function createBotsFromReply(store, {bot, groupId, output, runId = 
   const created = [], lines = [];
   if (!found.length) return {text: String(output ?? ''), created, lines};
   const say = value => lines.push({id: makeId(), role: 'system', kind: 'bot-created', text: value, at: now()});
-  const item = found[0];
-  // A second block is a refused request, not something to drop in silence.
-  for (const extra of found.slice(1)) say(botCreateRefusedText(bot, extra.error || 'the request was refused.'));
-  if (!item.ok) {
-    say(botCreateRefusedText(bot, `the request was refused: ${item.error}`));
-    return {text: text || `${bot.name} tried to create a bot.`, created, lines};
+  for (const item of found) {
+    if (!item.ok) { say(botCreateRefusedText(bot, `the request was refused: ${item.error}`)); continue; }
+    const result = await store.update(state => addCreatedBot(state, {bot, groupId, request: item.request, runId, now: now(), makeId}));
+    if (!result.record) { say(botCreateRefusedText(bot, result.refused || 'the request could not be saved.')); continue; }
+    created.push(result.record);
+    say(botCreatedText(bot, result.record, result.groupName));
   }
-  const result = await store.update(state => addCreatedBot(state, {bot, groupId, request: item.request, runId, now: now(), makeId}));
-  if (!result.record) {
-    say(botCreateRefusedText(bot, result.refused || 'the request could not be saved.'));
-    return {text: text || `${bot.name} tried to create a bot.`, created, lines};
-  }
-  created.push(result.record);
-  say(botCreatedText(bot, result.record, result.groupName));
-  return {text: text || `${bot.name} added ${result.record.name} to the team.`, created, lines};
+  if (!created.length) return {text: text || `${bot.name} tried to create a bot.`, created, lines};
+  return {text: text || `${bot.name} added ${created.map(r => r.name).join(', ')} to the team.`, created, lines};
 }

@@ -280,8 +280,9 @@ export async function deleteProvider(store,workspaceId,id){
   await store.update(s=>{const ai=aiState(s);ai.providers=ai.providers.filter(p=>p.id!==id);if(ai.defaultProviderId===id)ai.defaultProviderId=ai.providers[0]?.id||null;
     for(const [botId,override] of Object.entries(ai.bots)){
       if(override?.providerId!==id)continue;
-      const model=override.model||null;
-      if(!model)delete ai.bots[botId];else ai.bots[botId]={providerId:null,model};
+      // Its model id belonged to the provider that is gone; sent to another one it is a 404. Effort stays.
+      const effort=cleanEffort(override.effort);
+      if(!effort)delete ai.bots[botId];else ai.bots[botId]={providerId:null,model:null,effort};
     }
   });
   return {ok:true};

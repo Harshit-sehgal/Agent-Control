@@ -18,13 +18,14 @@
  *
  * This module is pure. `src/bot-create.js` applies it inside the run.
  */
-import {cleanText} from './core.js?v=697f915fc5';
-import {fail} from './errors.js?v=697f915fc5';
-import {defaultContract} from './contracts.js?v=697f915fc5';
-import {controlFence} from './reply-blocks.js?v=697f915fc5';
+import {cleanText} from './core.js?v=8ce3bc47dc';
+import {fail} from './errors.js?v=8ce3bc47dc';
+import {defaultContract} from './contracts.js?v=8ce3bc47dc';
+import {controlFence} from './reply-blocks.js?v=8ce3bc47dc';
 
 export const BOT_CREATE_PERMISSION = 'bot.create';
-export const MAX_NEW_BOTS_PER_REPLY = 1;
+/** A lead can staff a job in one reply ("make five bots, one per site"); the runaway guard paces the rest. */
+export const MAX_NEW_BOTS_PER_REPLY = 5;
 /** A hard safety cap on one group's bots, whoever creates them. The company has
  * no working limit of its own: the runaway guard paces what models create. */
 export const MAX_BOTS_PER_GROUP = 500;
@@ -37,7 +38,7 @@ export const BOT_REPLY_LENGTHS = ['short', 'medium', 'long'];
 // the ask, spawn and browser blocks, so an unclosed final fence behaves the same
 // for all of them instead of surviving here as visible control text.
 const BLOCK = () => controlFence('create-bot');
-const MAX_BLOCKS_READ = 5;
+const MAX_BLOCKS_READ = 8;
 
 const WORDS = s => String(s ?? '').replace(/[^\p{L}\p{N}'’\s-]/gu, ' ').split(/\s+/).filter(Boolean);
 const LEAD_IN = new Set('please can could you i want need would like make create build add hire set up me us a an the my our your new bot helper agent assistant that which who to for someone somebody'.split(' '));
@@ -95,10 +96,10 @@ export function parseCreateBotRequests(output) {
   const found = [];
   for (const match of String(output ?? '').matchAll(BLOCK())) {
     if (found.length >= MAX_BLOCKS_READ) break;
-    // Past the first block the reply is over its limit. Reported, not dropped:
+    // Past the limit the reply is over it. Reported, not dropped:
     // a silent second request looks like the bot simply ignored the ask.
     if (found.length >= MAX_NEW_BOTS_PER_REPLY) {
-      found.push({ok: false, error: `only ${MAX_NEW_BOTS_PER_REPLY} new bot per reply is allowed.`});
+      found.push({ok: false, error: `only ${MAX_NEW_BOTS_PER_REPLY} new bots per reply are allowed.`});
       continue;
     }
     try {
@@ -141,8 +142,8 @@ export function buildCreatedBot(request, {bot, runId = null, now = new Date().to
   };
 }
 
-export const botCreatedText = (creator, created, groupName) => `${creator?.name || 'A bot'} created a new bot for this work: ${created.name} in ${groupName || 'this group'}. It has no permissions; review its job in its profile and grant anything it needs.`;
+export const botCreatedText = (creator, created, groupName) => `${creator?.name || 'A bot'} created a new bot for this work: ${created.name} in ${groupName || 'this group'}. It can browse and read connected apps like every bot; sending, posting, deleting and paying still ask you.`;
 export const botCreateRefusedText = (bot, reason) => `${bot?.name || 'The bot'} tried to create a new bot, but ${reason}`;
 
 /** What every bot is told about the tool. */
-export const BOT_CREATE_TOOL_HINT = 'You can add one new bot to the company when a task needs help that lasts beyond this reply. Put one block in your reply with its job in one sentence (the name is optional), like ```create-bot\n{"name":"Source scout","job":"Find posts that mention the project and list their links."}\n``` — write your own, do not copy this example. It reports to you if you lead a team, else to your manager. The new bot gets no permissions; a person reviews it. One bot per reply.';
+export const BOT_CREATE_TOOL_HINT = `You can add new bots to the company when a task needs help that lasts beyond this reply, up to ${MAX_NEW_BOTS_PER_REPLY} in one reply. Put one block per bot in your reply with its job in one sentence (the name is optional), like \`\`\`create-bot\n{"name":"Source scout","job":"Find posts that mention the project and list their links."}\n\`\`\` — write your own, do not copy this example. Put what the owner already told you that the job needs (who they are, what they want, their limits) into the job sentence. It reports to you if you lead a team, else to your manager, and it can browse and read connected apps like every bot. In the same reply, after the blocks, hand each new bot its first task: write @Name and exactly what to do now, so it starts at once instead of waiting.`;

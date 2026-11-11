@@ -149,8 +149,11 @@ const SIGNED_OUT = /not (logged|signed) in|please (run )?\/?log ?in|run [`'"]?\/
 const tidy = (text, n = 300) => String(text || '').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n);
 
 /** Name what the CLI said it could not do. */
-function classify(said, spec) {
+const NO_MODEL = /issue with the selected model|model[^.]{0,80}(does not exist|not found|not available|no access|do not have access)|(unknown|invalid|unsupported) model/i;
+function classify(said, spec, model = '') {
   const detail = tidy(said);
+  // Before the sign-in check: "you do not have access" is about the model, not the login.
+  if (NO_MODEL.test(said)) return new CliModelError('model-not-found', `${spec.label.replace(/ \(.*/, '')} does not offer ${model || 'that model'}. Pick another model on the bot's profile.`, detail);
   if (LIMIT.test(said)) return new CliModelError('usage-limit', `${spec.label.replace(/ \(.*/, '')} subscription has reached its usage limit.`, detail);
   if (SIGNED_OUT.test(said)) return new CliModelError('not-signed-in', `${spec.label.replace(/ \(.*/, '')} is not signed in on this machine. ${spec.signIn}`, detail);
   return new CliModelError('cli-failed', `The ${spec.binary} command failed${detail ? `: ${detail}` : '.'}`, detail);
@@ -207,7 +210,7 @@ async function runCliOnce({engine, model = '', effort = '', instructions = '', i
         if (code === 0 && !read.error && text) return done(null, {text: capReplyText(text), engine: spec.id, model: cleanCliModel(model) || null, ms: Date.now() - started});
         const said = [read.error, err].filter(Boolean).join('\n');
         if (code === 0 && !said.trim()) return done(new CliModelError('empty-reply', `The ${spec.binary} command finished without an answer.`));
-        done(classify(said, spec));
+        done(classify(said, spec, cleanCliModel(model) || ''));
       });
       // codex has no system-prompt flag, so it gets the same fixed words as a lead-in.
       child.stdin.end(spec.id === 'codex' ? `${SYSTEM_TEXT}\n\n${prompt}` : prompt);

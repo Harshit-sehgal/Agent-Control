@@ -29,6 +29,7 @@ process.stdin.on('end', () => {
   const said = {
     signedout: engine === 'claude' ? 'Invalid API key · Please run /login' : 'Not logged in. Please run codex login.',
     limit: engine === 'claude' ? 'Claude AI usage limit reached|1731000000' : "You've hit your usage limit. Try again at 3pm.",
+    badmodel: engine === 'claude' ? "There's an issue with the selected model (claude-foo-9). It may not exist or you may not have access to it. Run --model to pick a different model." : 'The model gpt-foo-9 does not exist or you do not have access to it.',
   }[mode];
   if (engine === 'claude') {
     out({type: 'system', subtype: 'init', tools: []});
@@ -138,6 +139,16 @@ test('a usage limit is its own code, for both engines', async t => {
   for (const engine of ['claude', 'codex']) {
     const error = await fails(runCliModel({engine, input: 'x', env: env({FAKE_MODE: 'limit'})}), 'usage-limit');
     assert.match(error.message, /limit/i);
+  }
+});
+
+test('a model the CLI does not have is its own code, with app advice, not terminal flags', async t => {
+  const {env} = rig(t);
+  for (const engine of ['claude', 'codex']) {
+    const error = await fails(runCliModel({engine, model: engine === 'claude' ? 'claude-foo-9' : 'gpt-foo-9', input: 'x', env: env({FAKE_MODE: 'badmodel'})}), 'model-not-found');
+    assert.match(error.message, /foo-9/);
+    assert.match(error.message, /pick another model on the bot's profile/i);
+    assert.doesNotMatch(error.message, /Run --model/);
   }
 });
 

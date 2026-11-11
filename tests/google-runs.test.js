@@ -10,7 +10,9 @@ import {answerAskFlow} from '../src/ask-runs.js';
 import {HOLD, undoHeldSend, settleHeldOnStart} from '../src/held-sends.js';
 import {setGrant} from '../shared/asks.js';
 import {activityPage} from '../shared/activity-log.js';
-import {company, model, ask} from './run-fixture.js';
+import {company as plainCompany, model, ask} from './run-fixture.js';
+// These tests are about the ask card, so the owner's switch to ask even before a page or a read is on.
+const company = async (...a) => { const r = await plainCompany(...a); await r.store.update(s => { s.askBasics = true; }); return r; };
 import {fakeGoogle, CLIENT} from './google-fixture.js';
 import {connect, rig} from './google-rig.js';
 import * as wf from '../shared/workflow.js';

@@ -116,12 +116,15 @@ test('a bot pinned to a deleted provider uses the workspace default', async () =
     const gone = await ai.addProvider(store, 'default', {label: 'Old', baseUrl: 'https://old.example/v1', apiKey: 'old-key'});
     const kept = await ai.addProvider(store, 'default', {label: 'Kept', baseUrl: 'https://kept.example/v1', apiKey: 'kept-key'});
     await ai.setDefaults(store, {providerId: kept.id, model: 'kept-model'});
-    await ai.setBotModel(store, 'writer', {providerId: gone.id, model: 'old-model'});
+    await ai.setBotModel(store, 'writer', {providerId: gone.id, model: 'old-model', effort: 'high'});
     await ai.deleteProvider(store, 'default', gone.id);
     const cfg = ai.resolveConfig(store, 'writer');
     assert.equal(cfg.apiKey, 'kept-key');
     assert.equal(cfg.baseUrl, 'https://kept.example/v1');
-    assert.equal(cfg.model, 'old-model');
+    // The old model id belonged to the provider that is gone: another provider would answer 404.
+    assert.equal(cfg.model, 'kept-model');
+    assert.equal(cfg.effort, 'high', 'how hard it thinks is the bot\'s own and stays');
+    assert.deepEqual(store.read().ai.bots.writer, {providerId: null, model: null, effort: 'high'});
   });
 });
 

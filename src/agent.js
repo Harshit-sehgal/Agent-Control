@@ -31,6 +31,8 @@ const CLOCK_SKEW_MS = 5 * 60000;
 // How long a claimed task stays leased to the device. It is also how recently a
 // device must have been seen for it to count as alive in recovery below.
 const DEFAULT_LEASE_MS = 120000;
+/** How recently a device must have been seen to count as online: the agent list, and every picker that hands it work. */
+export const AGENT_ONLINE_MS = 180000;
 // A task kind is its own permission: 'browser.action' exists beside
 // 'browser.capture' because acting on a page is a deliberate grant, not a read.
 // AGENT_ACTIONS is the list; a separate kind table only ever repeated it.
@@ -363,7 +365,7 @@ export function readAgentCli(store, agentId) {
 export function listAgents(store, workspaceId) {
   const agents = store.all('SELECT * FROM agents WHERE workspace_id=? ORDER BY paired_at DESC', workspaceId);
   return agents.map(a => ({
-    id: a.id, name: a.name, status: a.revoked_at ? 'revoked' : (a.last_seen_at && Date.parse(a.last_seen_at) > Date.now() - 180000 ? 'online' : (a.last_seen_at ? 'stale' : 'paired')),
+    id: a.id, name: a.name, status: a.revoked_at ? 'revoked' : (a.last_seen_at && Date.parse(a.last_seen_at) > Date.now() - AGENT_ONLINE_MS ? 'online' : (a.last_seen_at ? 'stale' : 'paired')),
     permissions: JSON.parse(a.permissions || '[]'), pairedAt: a.paired_at, lastSeenAt: a.last_seen_at,
     // Whether `claude` and `codex` are signed in on that machine, as the device last said.
     cli: a.revoked_at ? null : readAgentCli(store, a.id),
@@ -378,7 +380,7 @@ export function listAgents(store, workspaceId) {
 export function agentsBrief(store) {
   if (typeof store?.all !== 'function') return [];
   return store.all('SELECT * FROM agents WHERE revoked_at IS NULL ORDER BY last_seen_at DESC').map(a => ({
-    name: a.name, online: Boolean(a.last_seen_at && Date.parse(a.last_seen_at) > Date.now() - 180000),
+    name: a.name, online: Boolean(a.last_seen_at && Date.parse(a.last_seen_at) > Date.now() - AGENT_ONLINE_MS),
     permissions: (() => { try { return JSON.parse(a.permissions || '[]'); } catch { return []; } })(), cli: readAgentCli(store, a.id),
   }));
 }

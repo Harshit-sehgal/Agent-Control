@@ -84,7 +84,7 @@ test('createEnvelope offers the tool only when a connector is ready, and marks a
 });
 
 test('with no grant a connector action asks, reads and writes separately; Always allow on a read does not cover a write', () => {
-  const state = {groups: [{id: 'home', bots: [{id: 'b1', name: 'Mailroom'}]}], grants: [], connectors: [notes]};
+  const state = {askBasics: true, groups: [{id: 'home', bots: [{id: 'b1', name: 'Mailroom'}]}], grants: [], connectors: [notes]};
   const bot = state.groups[0].bots[0];
   assert.equal(verdict(state, bot, 'connector.notes.read', 'mcp.example.com').verdict, 'ask');
   setGrant(state, 'b1', 'connector.notes.read', 'mcp.example.com', 'always', undefined, {log: false});

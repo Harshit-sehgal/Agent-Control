@@ -17,7 +17,7 @@ import {simulateGroup} from './group-simulator.js';
 import {BUSY_STATUSES} from './run-state.js';
 import {botSettings} from './bot-settings.js';
 import {denyBrowserRequest} from './bot-browser.js';
-import {answerAsk, expireAsks, orphanAsks, setGrant} from './asks.js';
+import {answerAsk, expireAsks, orphanAsks, setGrant, setAskBasics} from './asks.js';
 import {activityPage} from './activity-log.js';
 import {withLocalLock} from './locks.js';
 
@@ -318,6 +318,7 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
   }
   // The owner answers an ask, and sets what a bot may do without asking.
   if ((m = path.match(/^\/api\/asks\/([a-z0-9-]+)$/)) && method === 'POST') { const r = answerAskLocal(state, m[1], body?.answer); save(state); return r; }
+  if (path === '/api/permissions/basics' && method === 'POST') { const r = setAskBasics(state, body?.ask); save(state); return r; }
   if (path === '/api/grants' && method === 'POST') { const g = setGrant(state, String(body?.botId ?? ''), String(body?.action ?? ''), body?.scope ?? '', body?.choice); save(state); return g; }
   if (path === '/api/bots/run') throw new Error('Running AI bots requires the separate Node backend, not GitHub Pages.');
   // The old approve and deny routes answer the request's ask (Allow, Decline) for one phase; a request with no ask cannot be opened here.

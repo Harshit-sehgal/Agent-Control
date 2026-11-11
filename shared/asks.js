@@ -13,7 +13,8 @@
  *   state.grants [{botId, action, scope, choice 'always'|'ask'|'deny', at}]
  *
  * The basic kit (ask a bot, make a bot, set a schedule) is never asked about;
- * its limits are checkpoints and the runaway guard. Payments (`spend`) are
+ * its limits are checkpoints and the runaway guard. Basic access (open a web page, read a connected app) is
+ * allowed until the owner sets Ask each time or Deny for that site or account. Payments (`spend`) are
  * asked every time: no answer path and no stored grant can make them automatic.
  *
  * Pure and browser-safe, like the other shared modules: the server and the
@@ -37,6 +38,10 @@ const umbrellaOf = action => { const match = connectorOf(action); return match?.
 
 export const isAskAction = action => ASK_ACTIONS.includes(action) || isConnector(action);
 export const isBasicKit = action => BASIC_KIT.includes(action);
+/** What every bot may do with no grant: open a web page, and read a connected app. A click that sends, posts,
+ * deletes or pays on that page is its own action and still asks; so does every connector write. */
+export const BASIC_ACCESS = ['browser.use', 'connector read'];
+export const isBasicAccess = action => action === 'browser.use' || connectorOf(action)?.[2] === 'read';
 
 export const ASK_ANSWERS = ['decline', 'allow', 'always'];
 export const GRANT_CHOICES = ['always', 'ask', 'deny'];
@@ -121,12 +126,21 @@ export function setGrant(state, botId, action, scope, choice, now = iso(), {log 
   return state.grants.find(g => sameGrant(g, botId, action, where));
 }
 
+/** The owner's switch: `ask` true makes every bot ask before it opens a page or reads a connected app, as
+ * it does for everything else; false (the default) lets them. Logged like a grant change. */
+export function setAskBasics(state, ask, now = iso()) {
+  if (typeof ask !== 'boolean') fail('Say true or false.');
+  state.askBasics = ask;
+  logActivity(state, {kind: 'perm', text: ask ? 'Bots now ask before opening a web page or reading a connected app.' : 'Bots now open web pages and read connected apps without asking.', now});
+  return {askBasics: ask};
+}
+
 const settled = ask => ask.status !== 'pending';
 
 /** The gate for one action: allowed, refused with a place to change it, or an ask is needed.
  * Only an explicit grant allows. The old permission checkbox and "run without asking" are settings a
  * member can change, so they read as Ask each time. */
-export function verdict(state, bot, action, target = '') {
+export function verdict(state, bot, action, target = '', {readPrivate = false} = {}) {
   if (isBasicKit(action)) return {verdict: 'allow', scope: ''};
   if (!isAskAction(action)) return {verdict: 'deny', scope: '', message: `${bot?.name || 'This bot'} cannot do that.`};
   // `target` may be the page URL or the origin itself; a connector's is its account.
@@ -139,16 +153,20 @@ export function verdict(state, bot, action, target = '') {
     const name = bot?.name || 'this bot';
     return {verdict: 'deny', scope, message: `${name} is set to Deny for this. Change it on ${name}'s profile → Permissions.`};
   }
+  // The basics need no answer. But once this run has read private data from a connector, a page on a site the
+  // bot has no grant for asks: opening an address is enough to carry what was read off to that site.
+  // `askBasics` is the owner's switch to have even these asked (Settings → Permissions).
+  if (choice === null && !state?.askBasics && isBasicAccess(action) && !(readPrivate && action === 'browser.use')) return {verdict: 'allow', scope};
   return {verdict: 'ask', scope};
 }
 
 /** One action after another, riskiest first: any Deny stops it, otherwise the first one that is not
  * yet Always allow is what the owner is asked about. `needs` is [{action, target, detail}]. */
-export function decide(state, bot, needs) {
+export function decide(state, bot, needs, guard = {}) {
   let ask = null;
   const rest = [];
   for (const need of needs) {
-    const v = verdict(state, bot, need.action, need.target);
+    const v = verdict(state, bot, need.action, need.target, guard);
     if (v.verdict === 'deny') return {verdict: 'deny', need, message: v.message};
     if (v.verdict === 'ask' && !ask) ask = {...need, scope: v.scope};
     else if (v.verdict === 'ask') rest.push({...need, scope: v.scope});

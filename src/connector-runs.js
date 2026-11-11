@@ -54,7 +54,7 @@ export async function runConnectorCalls(store, runId, {say, now = () => new Date
     const connector = (state.connectors || []).find(c => c.id === call.connectorId) || null;
     let outcome;
     const blocked = missing(connector, call) || changed(state, call);
-    if (blocked) outcome = {ok: false, text: blocked};
+    if (blocked) outcome = {ok: false, blocked: true, text: blocked};
     else if (!await store.update(s => {
       const stored = (s.groupRuns || []).find(r => r.id === runId && r.status === 'running')?.connectorCalls?.find(c => c.id === call.id && c.status === 'go');
       if (stored) stored.status = 'running';
@@ -62,7 +62,7 @@ export async function runConnectorCalls(store, runId, {say, now = () => new Date
     })) return false;
     else {
       try { outcome = call.hold ? await holdSend(store, connector, call) : await useConnector(store, connector, call.tool, call.args); }
-      catch (error) { outcome = {ok: false, text: cleanText(error?.message, 300) || 'The connector failed.'}; }
+      catch (error) { outcome = {ok: false, unreachable: true, text: cleanText(error?.message, 300) || 'The connector failed.'}; }
     }
     results.push({call, outcome});
   }
@@ -70,6 +70,7 @@ export async function runConnectorCalls(store, runId, {say, now = () => new Date
     const live = (s.groupRuns || []).find(r => r.id === runId);
     if (!live || live.status !== 'running') return false;
     let page = live.connectorPage || '';
+    markHealth(s, results, now());
     for (const {call, outcome} of results) {
       const stored = (live.connectorCalls || []).find(c => c.id === call.id);
       if (stored) { stored.status = outcome.unknown ? 'unknown' : outcome.ok ? 'done' : 'failed'; delete stored.args; }
@@ -86,4 +87,15 @@ export async function runConnectorCalls(store, runId, {say, now = () => new Date
     live.connectorPage = page.length > MAX_PAGE_CHARS ? `${page.slice(0, MAX_PAGE_CHARS)}\n[cut]` : page;
     return true;
   });
+}
+
+/** A call that could not reach its server (down, 401, timed out) shows the connector as a problem in Settings; the next
+ * call that answers makes it ready again. A tool that answered with its own error says nothing about the server. */
+function markHealth(state, results, at) {
+  for (const {call, outcome} of results) {
+    const connector = (state.connectors || []).find(c => c.id === call.connectorId);
+    if (!connector || connector.kind !== 'mcp' || outcome.unknown) continue;
+    if (outcome.unreachable) Object.assign(connector, {status: 'error', statusMessage: cleanText(outcome.text, 300), checkedAt: at});
+    else if (connector.status === 'error' && outcome.text !== undefined && !outcome.blocked) Object.assign(connector, {status: 'ready', statusMessage: '', checkedAt: at});
+  }
 }

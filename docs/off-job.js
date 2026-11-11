@@ -8,8 +8,8 @@
  *
  * Pure and browser-safe. The block grammar is the shared one in `reply-blocks.js`.
  */
-import {cleanText} from './core.js?v=697f915fc5';
-import {controlFence} from './reply-blocks.js?v=697f915fc5';
+import {cleanText} from './core.js?v=8ce3bc47dc';
+import {controlFence} from './reply-blocks.js?v=8ce3bc47dc';
 
 /** The buttons under an out-of-job reply, in order. "Do it anyway" sends the same
  * request again with `anyway`, "Ask Atlas" starts a thread with it, and "Make a
@@ -21,7 +21,23 @@ export const OFFJOB_CHOICES = [
 ];
 
 /** What a plain bot in its own chat is told about work that is not its job. */
-export const OFFJOB_RULE = 'If the request is not part of your job, do not do it: reply only with a not-my-job block giving one short reason. The block is ```not-my-job followed by {"reason":"..."} and a closing ```.';
+export const OFFJOB_RULE = 'Answer anything quick and general yourself, in one short reply: greetings, thanks, questions about you or your work, short facts or explanations, and follow-ups to your earlier replies. Only when the request is real work that belongs to a different job (a task, a draft, research or an action outside what you do), do not do it: reply only with a not-my-job block giving one short reason. The block is ```not-my-job followed by {"reason":"..."} and a closing ```.';
+
+/** A message any bot answers itself, with no job check: a greeting, thanks, a yes or ok, or a question about the
+ * bot itself. The whole message must be that, so "thanks, now email Pat" is still work. */
+const BASIC = [
+  ['greeting', /^(hi|hello|hey|hiya|yo|howdy|good (morning|afternoon|evening|night))( there| all| everyone)?$/],
+  ['thanks', /^(thanks|thank you|thx|ty|cheers|many thanks)( so much| a lot| again| very much)?$/],
+  ['ack', /^(ok|okay|k|got it|cool|great|nice|perfect|sounds good|sure|yes|no|yep|nope|alright|all good)$/],
+  ['self', /^(what can you do|who are you|what are you|what is your job|whats your job|what do you do|how do you work|how can you help|help)$/],
+];
+/** Which basic ask a message is (greeting, thanks, ack or self), or null. */
+export function basicKind(text) {
+  const words = String(text ?? '').toLowerCase().replace(/[’']/g, '').replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!words || words.length > 40) return null;
+  return BASIC.find(([, re]) => re.test(words))?.[0] ?? null;
+}
+export const basicAsk = text => basicKind(text) !== null;
 /** What it is told when the owner has chosen "Do it anyway". */
 export const OFFJOB_ANYWAY = 'The owner asked you to do this once even though it is outside your job.';
 

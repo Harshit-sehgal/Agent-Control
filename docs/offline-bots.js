@@ -9,9 +9,10 @@
  *
  * Pure and browser-safe.
  */
-import {cleanText} from './core.js?v=697f915fc5';
-import {mentionedBots} from './coordination.js?v=697f915fc5';
-import {MIN_BOT_JOB} from './bot-create.js?v=697f915fc5';
+import {cleanText} from './core.js?v=8ce3bc47dc';
+import {mentionedBots} from './coordination.js?v=8ce3bc47dc';
+import {MIN_BOT_JOB} from './bot-create.js?v=8ce3bc47dc';
+import {basicKind} from './off-job.js?v=8ce3bc47dc';
 
 const FILLER = new Set('about after also and are can could does from have here into just like make more need please should some than that their them then there these they this those want what when where which will with would your you for the'.split(' '));
 /** Content words of a text, lower-case, with a trailing plural `s` dropped, so
@@ -70,6 +71,11 @@ export function offlineReply({bot, request, team = [], previous = null, closing 
   const task = cleanText(request, 220);
   if (closing) return `All done. Here is what the team said:\n${cleanText(previous?.output, 600)}`;
   if (GREETING.test(request ?? '')) return `Hello! I'm ${bot.name}. Tell me what you need${lead ? " and I'll get the right bot on it" : ''}.`;
+  // Thanks, ok and "what can you do?" are answered by any bot itself, never refused or handed on.
+  const basic = basicKind(request);
+  if (basic === 'self') return lead ? `I'm ${bot.name}. Ask me anything: I answer quick things myself and hand real work to the bot whose job it is.` : `I'm ${bot.name}. ${cleanText(bot.instructions, 300)}`;
+  if (basic === 'thanks') return 'Glad to help.';
+  if (basic === 'ack') return 'Okay.';
   const setup = offlineSetup(request, [bot, ...team], own || lead ? bot : null);
   if (setup) return `Here is that change.\n${setup}`;
   if (lead) {

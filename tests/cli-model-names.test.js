@@ -33,3 +33,15 @@ test('a bot naming a version gets that exact model; a family alone gets the shor
   assert.deepEqual(modelFor(claude, 'Sonnet'), {ok: true, model: 'sonnet'});
   assert.match(modelFor(claude, 'haiku 9.9').error, /no Claude Haiku 9\.9.*claude-haiku-5-5/);
 });
+
+import {buildCommand} from '../agent/cli-model.mjs';
+test('every listed model reaches its CLI as that exact id', () => {
+  for (const [id] of CLI_MODELS.claude) {
+    const {args} = buildCommand('claude', {model: id, dir: '/tmp'});
+    assert.equal(args[args.indexOf('--model') + 1], id, id);
+  }
+  for (const [id] of CLI_MODELS.codex) {
+    const {args} = buildCommand('codex', {model: id, dir: '/tmp'});
+    assert.ok(args.includes(id), id);
+  }
+});

@@ -248,17 +248,27 @@ test('the reason for an empty answer is named on every protocol, not just chat',
   }finally{anthropic.close();}
 });
 
-test('a busy provider is retryable, so a queued run is not failed by a local 429',async()=>{
+test('a call over the app\'s own limit waits for a free slot instead of failing the turn',async()=>{
   const {port,close}=await rawStub({type:'application/json',body:JSON.stringify({choices:[{message:{content:'ok'}}]}),delay:150});
   try{
     await withEnv({AI_BASE_URL:`http://127.0.0.1:${port}/v1`,AI_API_KEY:'k-test-key',AI_API_STYLE:'chat',AI_MODEL:'auto',AI_MAX_CONCURRENCY:'1'},async()=>{
+      const [a,b]=await Promise.all([ask(),ask()]);
+      assert.deepEqual([a,b],['ok','ok'],'the second call ran once the first was done');
+    });
+  }finally{close();}
+});
+
+test('a call that still finds no free slot is retryable and says it is this app\'s queue',async()=>{
+  const {port,close}=await rawStub({type:'application/json',body:JSON.stringify({choices:[{message:{content:'ok'}}]}),delay:400});
+  try{
+    await withEnv({AI_BASE_URL:`http://127.0.0.1:${port}/v1`,AI_API_KEY:'k-test-key',AI_API_STYLE:'chat',AI_MODEL:'auto',AI_MAX_CONCURRENCY:'1',AI_SLOT_WAIT_MS:'60'},async()=>{
       const first=ask();
-      const second=ask().catch(error=>error);
+      const busy=await ask().catch(error=>error);
       await first;
-      const busy=await second;
       assert.equal(busy.status,429);
       assert.equal(busy.permanent,undefined,'the queue must be allowed to retry a busy call');
-      assert.match(busy.message,/busy with other requests/);
+      assert.match(busy.message,/already running 1 model call/);
+      assert.doesNotMatch(busy.message,/provider is busy/);
     });
   }finally{close();}
 });

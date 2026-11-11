@@ -12,8 +12,9 @@ import {answerAskFlow} from '../src/ask-runs.js';
 
 const NOW = '2026-11-11T10:00:00.000Z';
 const A = 'https://a.example', B = 'https://b.example';
+// These tests are about the ask card, so the owner's switch to ask even before a page or a read is on.
 const state = () => wf.migrate({
-  settings: {}, runs: [], tasks: [], events: [], groupMessages: {}, groupRuns: [],
+  askBasics: true, settings: {}, runs: [], tasks: [], events: [], groupMessages: {}, groupRuns: [],
   groups: [{id: 'home', name: 'Home', bots: [{id: 'a', name: 'Atlas', instructions: 'lead'}, {id: 'b', name: 'Shopper', instructions: 'shop'}]}],
 });
 const shopper = s => s.groups[0].bots.find(b => b.id === 'b');

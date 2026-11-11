@@ -55,11 +55,11 @@ test('create-bot blocks parse one at a time and invalid JSON is reported', () =>
   const [short] = parseCreateBotRequests(blockFor({name: 'Scout', job: 'short'}));
   assert.equal(short.ok, false);
   assert.match(short.error, /job/);
-  const two = parseCreateBotRequests(blockFor({name: 'Aaa', job: 'x'.repeat(50)}) + blockFor({name: 'Bbb', job: 'x'.repeat(50)}));
-  assert.equal(two.length, 2, 'the second block must be reported, not silently dropped');
-  assert.equal(two[0].ok, true);
-  assert.equal(two[1].ok, false);
-  assert.match(two[1].error, /1 new bot per reply/);
+  const names = ['Aaa', 'Bbb', 'Ccc', 'Ddd', 'Eee', 'Fff'];
+  const six = parseCreateBotRequests(names.map(name => blockFor({name, job: 'x'.repeat(50)})).join(''));
+  assert.equal(six.length, 6, 'the sixth block must be reported, not silently dropped');
+  assert.deepEqual(six.map(x => x.ok), [true, true, true, true, true, false]);
+  assert.match(six[5].error, /5 new bots per reply/);
   assert.equal(stripCreateBotBlocks(`Before\n${blockFor({name: 'Scout', job: 'x'.repeat(50)})}\nAfter`), 'Before\n\nAfter');
   assert.equal(stripCreateBotBlocks('No block here.'), 'No block here.');
 });
@@ -75,7 +75,7 @@ test('a built bot is always custom, unprivileged and owned by its creator', () =
   assert.deepEqual(record.createdBy, {botId: 'writer', botName: 'Writer', runId: 'run-1', at});
   assert.equal(record.origin, 'bot');
   assert.throws(() => buildCreatedBot({name: 'Only a name'}), /name and a job/);
-  assert.match(botCreatedText(creator, record, 'Research team'), /It has no permissions/);
+  assert.match(botCreatedText(creator, record, 'Research team'), /browse and read connected apps like every bot; sending, posting, deleting and paying still ask you/);
 });
 
 test('a permitted bot creates a lasting teammate and is told what happened', async () => {
@@ -139,15 +139,14 @@ test('a duplicate name and a full group are refused', async () => {
   assert.match(gone.lines[0].text, /group no longer exists/);
 });
 
-test('a reply with two blocks creates one bot and says why', async () => {
+test('a reply with several blocks creates each bot, up to five, and says why past that', async () => {
   const store = memoryStore(baseState());
-  const result = await createBotsFromReply(store, {
-    bot: creator, groupId: 'g1', makeId, now: () => at,
-    output: blockFor({name: 'Source scout', job: 'Find posts that mention the project and list their links.'}) + blockFor({name: 'Second scout', job: 'Also find posts that mention the project.'}),
-  });
-  assert.equal(result.created.length, 1);
-  assert.equal(store.state().groups[0].bots.length, 2);
-  assert.ok(result.lines.some(line => /1 new bot per reply/.test(line.text)), 'The extra request is refused out loud.');
+  const jobs = ['Source', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth'].map(name => blockFor({name: `${name} scout`, job: `Find posts that mention the project from the ${name.toLowerCase()} list.`}));
+  const result = await createBotsFromReply(store, {bot: creator, groupId: 'g1', makeId, now: () => at, output: jobs.join('')});
+  assert.equal(result.created.length, 5);
+  assert.equal(store.state().groups[0].bots.length, 6);
+  assert.ok(result.lines.some(line => /5 new bots per reply/.test(line.text)), 'The extra request is refused out loud.');
+  assert.equal(result.lines.filter(line => /created a new bot/.test(line.text)).length, 5);
 });
 
 test('a reply without a block passes through unchanged', async () => {

@@ -48,7 +48,7 @@ test('a plain bot asked for another job replies not-my-job and the chat shows th
   const {store, ids} = await company(t);
   const ai = model({Scholar: fence('Booking appointments is Planner\'s job.')});
   const run = await ask(store, {message: 'Book me a dentist for Tuesday', to: ids.scholar, executor: ai.executor});
-  assert.match(ai.of('Scholar')[0].restrictions.join('\n'), /not part of your job.*not-my-job block/s);
+  assert.match(ai.of('Scholar')[0].restrictions.join('\n'), /belongs to a different job.*not-my-job block/s);
   assert.equal(run.status, 'completed');
   assert.deepEqual(run.recipients, [ids.scholar], 'nobody else is pulled in');
   const reply = store.read().chats[ids.scholar].filter(m => m.role === 'bot').at(-1);

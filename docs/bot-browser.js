@@ -20,10 +20,10 @@
  * Posting stays human: interaction (click, type) is refused on X and Twitter
  * hosts, so no bot can press Post there. Reading those pages is allowed.
  */
-import {cleanText, validHttpUrl} from './core.js?v=697f915fc5';
-import {fail} from './errors.js?v=697f915fc5';
-import {decide, createAsk, scopeOf} from './asks.js?v=697f915fc5';
-import {controlFence} from './reply-blocks.js?v=697f915fc5';
+import {cleanText, validHttpUrl} from './core.js?v=8ce3bc47dc';
+import {fail} from './errors.js?v=8ce3bc47dc';
+import {decide, createAsk, scopeOf} from './asks.js?v=8ce3bc47dc';
+import {controlFence} from './reply-blocks.js?v=8ce3bc47dc';
 
 export const BROWSER_PERMISSION = 'browser.use';
 export const MAX_REQUESTS_PER_REPLY = 2;
@@ -135,7 +135,7 @@ export function parseBrowserRequests(output) {
 export const stripBrowserBlocks = output => String(output ?? '').replace(BLOCK(), '').replace(/\n{3,}/g, '\n\n').trim();
 
 /** What a bot is told about the tool when it holds the permission. */
-export const BROWSER_TOOL_HINT = 'You can read or use a web page through a headless browser. Put one block per page in your reply, e.g. ```browser\n{"url":"https://example.com"}\n``` That returns the page text and a numbered list of controls. To act, name a control by its number in the same block: {"url":"https://example.com","steps":[{"op":"click","index":3}]} then read the result. Ops: navigate, click, type, waitFor, read, scroll. A CSS selector also works instead of an index. Scroll only moves the page. Only hosts the user allowlisted work. You can never click or type on X or Twitter. The result comes back in the chat.';
+export const BROWSER_TOOL_HINT = 'You can read or use a web page through a headless browser. Put one block per page in your reply, e.g. ```browser\n{"url":"https://example.com"}\n``` That returns the page text and a numbered list of controls. To act, name a control by its number in the same block: {"url":"https://example.com","steps":[{"op":"click","index":3}]} then read the result. Ops: navigate, click, type, waitFor, read, scroll. A CSS selector also works instead of an index. Scroll only moves the page. Any public site works, including X and YouTube pages (read them; you can never click or type on X or Twitter). To find something you have no link for, search first: open https://html.duckduckgo.com/html/?q=your+search+words and then open the results that fit. Do not ask the owner for a link you can find this way, and do not answer from memory when the question is about now. You may put up to 2 blocks in one reply to read pages side by side, and ask for more pages after you read those. The result comes back in the chat.';
 
 /** The numbered controls a snapshot returned, in one line. The model acts on
  * these; a page of raw HTML is not something it can click. */
@@ -274,11 +274,13 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
   // says Allow, Always allow or Decline. A Deny the owner set is the one thing that refuses outright.
   if (depth >= MAX_BROWSER_DEPTH) say(`${bot.name} asked for another web page, but ${MAX_BROWSER_DEPTH} browsing rounds in a row is the limit. Ask again to continue.`);
   else if (closed) say(`${bot.name} asked for another web page, but you had just declined, so nothing was opened.`);
-  else for (const item of found) {
+  // A run that has already read a connector carries private data: a new site asks (asks.js verdict).
+  const readPrivate = Boolean(runId && (state.groupRuns || []).find(r => r.id === runId)?.connectorPage);
+  if (depth < MAX_BROWSER_DEPTH && !closed) for (const item of found) {
     if (!item.ok) { say(`${bot.name} asked for a web page, but the request was refused: ${item.error}`); continue; }
     if (skipUrls.some(url => samePage(url, item.request.url))) { say(`${bot.name} already has that page, so it was not opened again.`); continue; }
     const needs = browserNeeds(item.request, controlLabels(state, bot.id, chatKey));
-    const decision = decide(state, bot, needs);
+    const decision = decide(state, bot, needs, {readPrivate});
     if (decision.verdict === 'deny') { say(`${bot.name} asked to ${describe(item.request)}. ${decision.message}`); continue; }
     // `approved`: the risky classes this request is cleared for once it is sent (a grant, or the owner's
     // answer to its ask), each for the origin it runs on ("send@https://b.example"). Written here after the

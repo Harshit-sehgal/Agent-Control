@@ -76,10 +76,9 @@ test('no group means the new-bot block is skipped, not silently applied', async 
   });
   assert.equal(turn.created.length, 0, 'a create-bot block with no group creates nothing');
   assert.equal(state.groups[0].bots.length, 2, 'the workspace is untouched');
-  // With nowhere to put the bot the fence is not read, so it stays as plain
-  // text. That is the pre-existing behaviour of the 1:1 path; this only pins it
-  // so the two callers cannot start disagreeing about it by accident.
-  assert.match(turn.output, /create-bot/);
+  // With nowhere to put the bot the block is dropped and the chat says why, rather than showing the raw fence.
+  assert.equal(turn.output, 'Plain reply.');
+  assert.match(turn.lines.at(-1).text, /cannot make bots of its own yet/);
 });
 
 test('the round budgets are honoured, so a resumed step does not repeat a block', async () => {

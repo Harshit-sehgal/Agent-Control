@@ -4,6 +4,7 @@
  * holding `subagent.spawn` may hand one small job to a helper model, which has
  * no tools at all (see src/subagents.js).
  */
+import {scheduleRunEnded} from '../shared/schedules.js';
 import {randomUUID} from 'node:crypto';
 import {createRun,createEnvelope,declinedOf,runNote,planHandoffs,handoffTargets,instructLead,wakeBots,assessTask,summonableGuests,mayHandoff,chatKeyFor,chatIsBusy,rosterFor,previousFor,enlist,MAX_HANDOFFS,INTERRUPT_STATUSES as INTERRUPT} from '../shared/coordination.js';
 import {isThread,noteMember} from '../shared/threads.js';
@@ -101,7 +102,7 @@ export async function markInterrupted(store){
   try{await failAgentTasks(store, [...taskIds], 'The server restarted before this group run completed.');}
   catch(error){console.error('Agent task cleanup after a restart:', error.message);}
 }
-export async function queueGroupRun(store,{groupId,message,directBotId=null,checkpoints=false,chatKey=null,browserDepth=0,confirmPlan,taskId=null,anyway=false,unattended=false}={}){
+export async function queueGroupRun(store,{groupId,message,directBotId=null,checkpoints=false,chatKey=null,browserDepth=0,confirmPlan,taskId=null,anyway=false,unattended=false,scheduleId=null}={}){
   // Validate the request against the store first so a missing group reports 404
   // and a busy group reports 409, instead of the AI-key check shadowing them
   // with a misleading 422 on an instance that simply has no key yet.
@@ -131,6 +132,8 @@ export async function queueGroupRun(store,{groupId,message,directBotId=null,chec
     const task=instructed.task?{...instructed.task,confirm}:null;
     const run=createRun({group,message:messageText,directBotId:instructed.directBotId,makeId:randomUUID,checkpoints:Boolean(checkpoints),chatKey,guests,task,anyway:anyway===true});
     if(taskId)run.taskId=taskId;
+    // The schedule a timer run came from, so its end can count toward stopping a schedule that keeps failing.
+    if(scheduleId)run.scheduleId=scheduleId;
     // Nobody typed in this run (a timer started it): an ask it makes lapses after 24 hours.
     if(unattended)run.unattended=true;
     if(run.status!=='awaiting_plan')wakeBots(group,run.task?.woke);
@@ -184,7 +187,7 @@ export async function runBotTask(store,task,{queue=queueGroupRun,available=aiAva
   if(await store.update(st=>noteBotWork(st,'run').paused)){await note(`Scheduled task "${label}" skipped: bots are paused.`);return {skipped:'paused'};}
   // Queue first. A 409 or a validation error must not leave a "Scheduled task"
   // line for a run that never started; the queue retries those.
-  const result=await queue(store,{groupId,message,directBotId:botId,chatKey,confirmPlan:false,unattended:true});
+  const result=await queue(store,{groupId,message,directBotId:botId,chatKey,confirmPlan:false,unattended:true,scheduleId:task.id});
   // The run is queued and durable; the line in the conversation is not. A failed
   // note used to reject the handler, which the queue retried - and the retry
   // queued the same message again, so one reminder cost two model runs. Only a
@@ -236,9 +239,9 @@ async function runGroupInner(store,id,executor){
     const stopNow=Boolean(before?.checkpoint?.stop);
     await store.update(s=>{coordinationState(s);const r=s.groupRuns.find(x=>x.id===id);if(!r||!['queued','running','awaiting_checkpoint','awaiting_limit'].includes(r.status))throw new Error('Run is not runnable');r.status='running';r.startedAt=r.startedAt||stamp();r.checkpoint=null;delete r.limit;});
     // The recipient list is read live each step: a bot's reply may append to it.
-    // A bot created during this run is not a recipient of it: it has no settings
-    // a person has checked yet, and handing it work the same minute it exists is
-    // how a loop of fresh bots starts. It becomes available from the next run.
+    // A bot created during this run may take the work it was made for in this run
+    // (the step cap bounds how many turns that is), but it makes no bots of its
+    // own here: that is how a loop of fresh bots would start.
     const fledglings=new Set();
     let i=start;
     while(true){
@@ -311,7 +314,7 @@ async function runGroupInner(store,id,executor){
         if(live.trace.length>400)live.trace=live.trace.slice(-400);
       });
       const gate=()=>store.update(s=>noteBotWork(s,'run').paused);
-      const reply=await runBotTurn(store,{bot,envelope,executor,config,peers:everyone,configFor:peerId=>resolveConfig(store,peerId),memoryForPeer:(mate,mateConfig)=>memoryFor(store,{bot:mate,config:mateConfig,chatKey:r.chatKey}),handoffAllowed:mayHandoff(r,bot)&&!closing&&!declinedTurn,spawnRounds:(r.subagents||[]).some(spawn=>spawn.botId===bot.id)?MAX_SUBAGENT_DEPTH:0,budget,onEvent,gate,resume:resumed,stop:stopped,groupId:home?.id??null,runId:id,makeId:randomUUID,now:stamp});
+      const reply=await runBotTurn(store,{bot,envelope,executor,config,peers:everyone,configFor:peerId=>resolveConfig(store,peerId),memoryForPeer:(mate,mateConfig)=>memoryFor(store,{bot:mate,config:mateConfig,chatKey:r.chatKey}),handoffAllowed:mayHandoff(r,bot)&&!closing&&!declinedTurn,spawnRounds:(r.subagents||[]).some(spawn=>spawn.botId===bot.id)?MAX_SUBAGENT_DEPTH:0,budget,onEvent,gate,resume:resumed,stop:stopped,groupId:fledglings.has(bot.id)?null:home?.id??null,runId:id,makeId:randomUUID,now:stamp});
       if(reply.limit){
         // A checkpoint, not a failure: what was said stays said, the bots still
         // waiting on an answer are kept, and the owner picks what happens next.
@@ -370,7 +373,7 @@ async function runGroupInner(store,id,executor){
         // A lead hands work to its team only and keeps a step back for its closing
         // reply; a plain bot hands to the group (in a thread, to no one). A closing
         // reply and an out-of-job reply hand nothing out.
-        const reach=host?[...host.bots.filter(b=>!fledglings.has(b.id)),...summonableGuests(s.groups,host.id)]:[];
+        const reach=host?[...host.bots,...summonableGuests(s.groups,host.id)]:[];
         const leads=isLead(s,bot.id);
         const added=host&&!closing&&!stopped&&!off&&!declinedTurn?handoffTargets({run:live,roster:rosterFor(s,bot,reach,{thread:isThread(host)}),fromBot:bot,output:previous.output,home:leads||isThread(host)?null:host.bots,reserve:leads&&live.closeAt==null?1:0}):[];
         enlist(live,{fromId:bot.id,added,output:previous.output,lead:leads});
@@ -436,11 +439,19 @@ async function runGroupInner(store,id,executor){
       }
       i++;
     }
-    await store.update(s=>{const r=s.groupRuns.find(x=>x.id===id);if(r.task)r.task.closing=assessTask(r).note;endRun(r,'completed');r.lastOutput=previous?.output??null;say(s,r,runNote(r));activity(s,'group-run','Completed bot coordination run',{runId:id});});
+    await store.update(s=>{const r=s.groupRuns.find(x=>x.id===id);if(r.task)r.task.closing=assessTask(r).note;endRun(r,'completed');r.lastOutput=previous?.output??null;say(s,r,runNote(r));if(r.scheduleId)scheduleRunEnded(s,r.scheduleId,{ok:true});activity(s,'group-run','Completed bot coordination run',{runId:id});});
   // Only a run that was actually executing may be marked failed. A restart marks
   // live runs `interrupted`; overwriting that with `failed` would report a crash
   // the operator never saw as a model error and hide the explicit retry advice.
-  }catch(e){await store.update(s=>{const r=s.groupRuns?.find(x=>x.id===id);if(r&&r.status==='running'){endRun(r,'failed',{error:clean(e.message)});say(s,r,runNote(r));say(s,r,modelLimitLine(s,e,{runId:id}));activity(s,'group-error',`Coordination failed: ${clean(e.message)}`,{runId:id});}});}
+  }catch(e){
+    let scheduled=null;
+    await store.update(s=>{const r=s.groupRuns?.find(x=>x.id===id);if(r&&r.status==='running'){endRun(r,'failed',{error:clean(e.message)});say(s,r,runNote(r));say(s,r,modelLimitLine(s,e,{runId:id}));
+      // A timer run fails with nobody watching: count it on its schedule (which stops itself when it keeps
+      // failing) and tell the owner, instead of re-arming the same failure every period in silence.
+      if(r.scheduleId){scheduled=scheduleRunEnded(s,r.scheduleId,{ok:false,error:{message:clean(e.message),code:e.code}});if(scheduled)say(s,r,{id:`${id}-schedule`.slice(0,64),role:'system',text:scheduled.text,runId:id});}
+      activity(s,'group-error',`Coordination failed: ${clean(e.message)}`,{runId:id});}});
+    if(scheduled)Promise.resolve().then(()=>store.notify?.({title:scheduled.paused?'A schedule stopped':'A scheduled task failed',body:scheduled.text,kind:'event',meta:{runId:id}})).catch(error=>console.error('Schedule notification:',error.message));
+  }
   finally{
     running.delete(id);
     // A fast local agent can return while autoDispatch is still awaited above.

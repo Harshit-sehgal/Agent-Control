@@ -190,6 +190,12 @@ async function viaAgent(target, {op, tool, args}, {timeoutMs = AGENT_WAIT_MS, po
       if (op === 'call' && typeof result?.ok === 'boolean' && typeof result.text === 'string') return {ok: result.ok, text: result.text.length > MAX_RESULT_CHARS ? `${result.text.slice(0, MAX_RESULT_CHARS)}\n[cut: the result was longer than ${MAX_RESULT_CHARS} characters]` : result.text};
       throw problem('The paired agent returned an answer this app could not read.', 502, 'agent-failed');
     }
+    // A laptop that sleeps or an agent that is killed stops beating: give up now, not at the end of the wait.
+    const seen = target.store.get('SELECT last_seen_at FROM agents WHERE id=?', device.id)?.last_seen_at;
+    if (!seen || Date.parse(seen) <= Date.now() - ONLINE_MS) {
+      failAgentTasks(target.store, [task.id], 'The computer went offline before the MCP server answered.');
+      throw problem(`Your computer went offline while running the MCP server "${target.server}". Start the app on it again, then retry.`, 503, 'agent-offline');
+    }
     if (Date.now() >= deadline) {
       failAgentTasks(target.store, [task.id], 'The MCP call timed out waiting for the agent.');
       throw problem('The MCP server did not answer in time. Check that the agent is running.', 504, 'timeout');

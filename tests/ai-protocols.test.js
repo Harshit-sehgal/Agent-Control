@@ -605,3 +605,34 @@ test('an Azure resource on the newer /openai/v1 base uses the model from the bod
   assert.equal(srv.requests[0].headers['api-key'],'az-key');
   assert.equal(srv.requests[0].body.model,'dep-gpt4o','the v1 shape takes the deployment in the body, not the path');
 });
+
+test('the error says what the provider meant: an unknown model, no credit, a bad key, and the code a Switch card can use', async () => {
+  const cases=[
+    [404,{error:{message:'The model `gpt-9` does not exist or you do not have access to it.',code:'model_not_found'}},'model-not-found',/not available on this provider.*pick another model/i],
+    [429,{error:{message:'You exceeded your current quota, please check your plan and billing details.',code:'insufficient_quota'}},'quota',/out of credit or quota/i],
+    [429,{error:{message:'Rate limit reached for requests'}},'rate-limit',/rate limited/i],
+    [401,{error:{message:'Incorrect API key provided'}},'auth',/key was rejected/i],
+    [503,{error:{message:'overloaded'}},'provider-down',/having trouble/i],
+  ];
+  for(const [status,json,code,hint] of cases){
+    const {port,close}=await stub({status,json});
+    try{
+      await assert.rejects(
+        () => executeCustomBot({instructions:'x'},'y',{...config(port,{protocol:'openai-chat',apiKey:'sk-long-enough-key'}),providerId:'p9'}),
+        e => {
+          assert.equal(e.code,code,`${status} ${json.error.message}`);
+          assert.equal(e.providerId,'p9');
+          assert.match(e.message,hint);
+          if(code==='model-not-found')assert.doesNotMatch(e.message,/\/v1 suffix/,'a missing model is not a base URL problem');
+          return true;
+        });
+    }finally{close();}
+  }
+});
+
+test('a provider that cannot be reached says why: refused, or no such host', async () => {
+  const cfg=port=>config(port,{protocol:'openai-chat',apiKey:'sk-long-enough-key'});
+  const {port,close}=await stub({status:200,json:{}});close();
+  await new Promise(resolve=>setTimeout(resolve,50));
+  await assert.rejects(() => executeCustomBot({instructions:'x'},'y',cfg(port)), /could not be reached.*ECONNREFUSED/);
+});

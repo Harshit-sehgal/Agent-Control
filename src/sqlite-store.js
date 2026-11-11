@@ -547,6 +547,8 @@ export class SqliteStore {
       heldSends: (() => { try { return JSON.parse(this.kvGet('held_sends') || '[]'); } catch { return []; } })(),
       // The runaway guard keeps its pause across a restart, so Pause all holds.
       guard: (() => { try { return {...freshGuard(), ...JSON.parse(this.kvGet('guard') || '{}')}; } catch { return freshGuard(); } })(),
+      // The owner's switch to ask before a bot opens a page or reads a connected app (shared/asks.js).
+      askBasics: this.kvGet('ask_basics') === '1',
       memory: readMemory(kind => this.db.prepare('SELECT key, doc FROM memory WHERE kind=? ORDER BY rowid').all(kind)),
     };
     const cfg = this.db.prepare('SELECT * FROM settings WHERE id=1').get();
@@ -627,6 +629,7 @@ export class SqliteStore {
       this.kvSet('connectors', JSON.stringify(state.connectors || []));
       this.kvSet('held_sends', JSON.stringify(state.heldSends || []));
       this.kvSet('guard', JSON.stringify(state.guard || freshGuard()));
+      this.kvSet('ask_basics', state.askBasics ? '1' : '0');
       this.stmt('INSERT INTO settings (id,retention) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET retention=excluded.retention')
         .run(state.settings?.retention ? JSON.stringify(state.settings.retention) : null);
     });

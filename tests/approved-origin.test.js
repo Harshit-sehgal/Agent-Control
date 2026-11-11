@@ -15,13 +15,16 @@ import {recordBrowserRequests} from '../shared/bot-browser.js';
 import {captureWithBrowser, findBrowser} from '../agent/browser.mjs';
 import {answerAskFlow} from '../src/ask-runs.js';
 import {addMcpConnector, removeConnector} from '../src/connectors.js';
-import {company, model, ask} from './run-fixture.js';
+import {company as plainCompany, model, ask} from './run-fixture.js';
+// These tests are about the ask card, so the owner's switch to ask even before a page or a read is on.
+const company = async (...a) => { const r = await plainCompany(...a); await r.store.update(s => { s.askBasics = true; }); return r; };
 import {fakeMcpHttp} from './mcp-fixture.js';
 
 const NOW = '2026-11-11T10:00:00.000Z';
 const A = 'https://a.example', B = 'https://b.example';
+// These tests are about the ask card, so the owner's switch to ask even before a page or a read is on.
 const state = () => wf.migrate({
-  settings: {}, runs: [], tasks: [], events: [], groupMessages: {}, groupRuns: [],
+  askBasics: true, settings: {}, runs: [], tasks: [], events: [], groupMessages: {}, groupRuns: [],
   groups: [{id: 'home', name: 'Home', bots: [{id: 'a', name: 'Atlas', instructions: 'lead'}, {id: 'b', name: 'Shopper', instructions: 'shop'}]}],
 });
 const shopper = s => s.groups[0].bots.find(b => b.id === 'b');

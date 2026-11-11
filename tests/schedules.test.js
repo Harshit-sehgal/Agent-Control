@@ -113,3 +113,45 @@ test('the Schedule page has its own address, so a link or a reload lands on it',
   const s = state();
   assert.deepEqual(companyRoute('#profile/inbox/schedule', s), {profile: 'inbox', sub: 'schedule'});
 });
+
+import {scheduleRunEnded} from '../shared/schedules.js';
+test('a scheduled run that keeps failing pauses its schedule and says why; a permanent error pauses it at once', () => {
+  const s = state();
+  const task = enqueueTask(s, {kind: 'bot-task', payload: {groupId: 'home', botId: 'inbox', message: 'Check the news', kind: 'interval', intervalMinutes: 60}}).task;
+  const flaky = {message: 'AI provider returned 503: overloaded', code: 'provider-down'};
+  assert.match(scheduleRunEnded(s, task.id, {ok: false, error: flaky}).text, /failed.*overloaded.*runs again/);
+  assert.equal(task.status, 'queued');
+  scheduleRunEnded(s, task.id, {ok: true});
+  assert.equal(task.payload.failures, 0, 'a good run resets the count');
+  scheduleRunEnded(s, task.id, {ok: false, error: flaky});
+  scheduleRunEnded(s, task.id, {ok: false, error: flaky});
+  const third = scheduleRunEnded(s, task.id, {ok: false, error: flaky});
+  assert.equal(task.status, 'cancelled');
+  assert.equal(third.paused, true);
+  assert.match(third.text, /stopped after 3 failed runs in a row/);
+
+  const daily = enqueueTask(s, {kind: 'bot-task', payload: {groupId: 'home', botId: 'inbox', message: 'Sum up', kind: 'interval', intervalMinutes: 1440}}).task;
+  const out = scheduleRunEnded(s, daily.id, {ok: false, error: {message: 'AI provider returned 401: bad key', code: 'auth'}});
+  assert.equal(daily.status, 'cancelled', 'waiting a day will not fix a bad key');
+  assert.match(out.text, /stopped.*bad key.*Fix it, then add it again on Inbox's Schedule page/);
+  assert.equal(scheduleRunEnded(s, 'nope', {ok: false, error: flaky}), null);
+});
+
+import {company, ask as askRun} from './run-fixture.js';
+test('a scheduled run whose model rejects the key stops its schedule, says so in the chat and tells the owner', async t => {
+  const {store, ids} = await company(t);
+  const told = [];
+  store.notify = n => { told.push(n); };
+  let taskId;
+  await store.update(s => { taskId = enqueueTask(s, {kind: 'bot-task', payload: {groupId: 'home', botId: ids.scholar, message: 'Find new papers', kind: 'interval', intervalMinutes: 1440}}).task.id; });
+  const executor = async () => { throw Object.assign(new Error('AI provider returned 401: Incorrect API key provided (the key was rejected)'), {status: 502, code: 'auth'}); };
+  const run = await askRun(store, {message: 'Find new papers', to: ids.scholar, executor, extra: {scheduleId: taskId}});
+  assert.equal(run.status, 'failed');
+  const task = store.read().tasks.find(x => x.id === taskId);
+  assert.equal(task.status, 'cancelled');
+  const lines = store.read().chats[ids.scholar].map(m => m.text).join('\n');
+  assert.match(lines, /Scheduled task "Find new papers" stopped: .*Incorrect API key/);
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(told.length, 1);
+  assert.equal(told[0].title, 'A schedule stopped');
+});

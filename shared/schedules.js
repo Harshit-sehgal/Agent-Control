@@ -62,3 +62,30 @@ export function scheduleTaskBody({botId, groupId, message, every, at}, now = new
   const timing = every ? {kind: 'interval', intervalMinutes: every} : {kind: 'once'};
   return {kind: 'bot-task', payload: {groupId, botId, message, ...timing, ...(time ? {at: time} : {}), ...(first ? {nextAt: first.toISOString()} : {})}};
 }
+
+/** Failures that waiting will not fix: the schedule stops at once instead of spending a run each time. */
+const PERMANENT = new Set(['auth', 'model-not-found', 'quota', 'not-signed-in', 'cli-missing']);
+/** Failed runs in a row before a schedule stops itself. */
+export const MAX_FAILED_RUNS = 3;
+
+/** Record how a scheduled run ended on its task, and stop the schedule when it keeps failing. Returns the line
+ * the bot's chat shows (and the owner is notified of), `paused` when the schedule stopped, or null for a
+ * success or an unknown task. Mutates `state`. */
+export function scheduleRunEnded(state, taskId, {ok, error = null}) {
+  const task = (state?.tasks || []).find(t => t.id === taskId && t.kind === 'bot-task');
+  if (!task) return null;
+  // In the payload: that is the part of a task the store keeps whole.
+  task.payload = {...task.payload, failures: ok ? 0 : (Number(task.payload?.failures) || 0) + 1};
+  if (ok) return null;
+  const failures = task.payload.failures;
+  const why = String(error?.message || 'unknown error').replace(/\s+/g, ' ').trim().slice(0, 300);
+  const what = `Scheduled task "${String(task.payload?.label || task.payload?.message || '').slice(0, 80)}"`;
+  const bot = (state.groups || []).flatMap(g => g.bots || []).find(b => b.id === task.payload?.botId);
+  const live = ['queued', 'running'].includes(task.status);
+  const stop = live && (PERMANENT.has(error?.code) || failures >= MAX_FAILED_RUNS);
+  if (!stop) return {paused: false, text: `${what} failed: ${why}${live ? ' It runs again at its next time.' : ''}`};
+  task.status = 'cancelled';
+  task.lastError = why;
+  const after = PERMANENT.has(error?.code) ? '' : ` after ${failures} failed runs in a row`;
+  return {paused: true, text: `${what} stopped${after}: ${why} Fix it, then add it again on ${bot?.name || 'the bot'}'s Schedule page.`};
+}

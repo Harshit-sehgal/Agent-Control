@@ -27,12 +27,20 @@ const say = (s, key, text) => { try { addChatMessages(s, key, [{role: 'system', 
 let resultHooks = {};
 export function setBrowserResultHooks(hooks) { resultHooks = {...resultHooks, ...hooks}; }
 
-/** The most recently seen agent that may run this kind, or null. */
+/** How long a page sent to a device may take before it is failed, so a run never waits on it forever. */
+export const BROWSER_WAIT_MS = 600000;
+const OFFLINE = 'Your computer\'s agent is offline. A server on your own computer restarts it within a few seconds; on another machine, start it there (`node agent/agent.mjs run`), then approve again.';
+/** Seen lately. A device paired a moment ago counts until its first beat lands. */
+const online = (row, nowMs = Date.now()) => Boolean(row?.last_seen_at || row?.paired_at) && Date.parse(row.last_seen_at || row.paired_at) > nowMs - agent.AGENT_ONLINE_MS;
+
+/** The most recently seen online agent that may run this kind; null when none may; throws when the ones that may are offline. */
 function pickAgent(store, kind) {
   if (typeof store.all !== 'function') return null;
-  const row = store.all('SELECT id,permissions FROM agents WHERE revoked_at IS NULL ORDER BY last_seen_at DESC')
-    .find(a => { try { return JSON.parse(a.permissions || '[]').includes(kind); } catch { return false; } });
-  return row?.id || null;
+  const may = store.all('SELECT id,permissions,last_seen_at,paired_at FROM agents WHERE revoked_at IS NULL ORDER BY last_seen_at DESC')
+    .filter(a => { try { return JSON.parse(a.permissions || '[]').includes(kind); } catch { return false; } });
+  const live = may.find(a => online(a));
+  if (may.length && !live) fail(OFFLINE, 409);
+  return live?.id || null;
 }
 
 /** Send a pending request to a local agent, or run it here. A request with no
@@ -76,7 +84,7 @@ export async function dispatchBrowserRequest(store, id, {actor = null, runtime =
       if (!current || current.status !== 'dispatched') fail(current ? 'This browser request is no longer waiting.' : 'Browser request not found.', current ? 409 : 404);
       const {task} = agent.enqueueAgentTask(store, agentId, {kind: request.kind, payload: {url: request.url, steps: request.steps, botId: request.botId}, approved: approvedOf(request), idempotencyKey: `browser:${id}`, createdBy: actor || `bot:${request.botId}`});
       taskId = task.id;
-      current.agentTaskIds = [task.id]; current.updatedAt = stamp();
+      current.agentTaskIds = [task.id]; current.notAfter = Date.now() + BROWSER_WAIT_MS; current.updatedAt = stamp();
       activity(s, 'agent', `Sent ${current.botName}'s browser request to a local agent.`, {requestId: id, taskId: task.id});
       return current;
     });
@@ -229,6 +237,43 @@ export async function handBackTakeover(store, sessionId, {runtime = browserRunti
   // The owner signed in and the bot was handed what they reached: that left the app too.
   await store.update(s => logActivity(s, {botId: request.botId, kind: 'outside', text: `${request.botName} was handed ${hostOf(url) || url} after you signed in.`, threadId: request.chatKey}));
   return {handedBack: true, requestId, request: done, page};
+}
+
+/** Fail every page a device was sent and will not deliver: its computer has stopped being seen, or the
+ * page is past its deadline. The task is failed first, so a device that wakes later is not handed it, and
+ * the request then finishes like any failed page, which lets a run that waited on it carry on. Returns
+ * how many pages were failed. */
+export async function expireBrowserTasks(store, hooks = resultHooks, nowMs = Date.now()) {
+  if (typeof store.get !== 'function') return 0;
+  let expired = 0;
+  for (const request of (store.read().browserRequests || []).filter(r => r.status === 'dispatched' && r.via === 'agent')) {
+    for (const taskId of request.agentTaskIds || []) {
+      const task = store.get('SELECT agent_id,status FROM agent_tasks WHERE id=?', taskId);
+      if (!task || !['queued', 'running'].includes(task.status)) continue;
+      const device = store.get('SELECT last_seen_at,paired_at,revoked_at FROM agents WHERE id=?', task.agent_id);
+      const reason = !online(device, nowMs) ? 'Your computer went offline before it opened the page. Start the app on it again, then ask again.'
+        : Number.isFinite(request.notAfter) && nowMs > request.notAfter ? 'Your computer did not open the page in time.' : null;
+      if (!reason) continue;
+      agent.failAgentTasks(store, [taskId], reason);
+      if (await onAgentTaskResult(store, taskId, hooks)) expired++;
+    }
+  }
+  return expired;
+}
+
+/** Run `expireBrowserTasks` on a short cadence, so a page waits a bounded time even when no device beats. */
+export function startBrowserExpiry(ws, intervalMs = 30000) {
+  let busy = false, stopped = false;
+  const run = async () => {
+    if (busy || stopped) return;
+    busy = true;
+    try { await (ws.trackWork ? ws.trackWork(() => expireBrowserTasks(ws)) : expireBrowserTasks(ws)); }
+    catch (e) { if (e?.status !== 503) console.error('Browser expiry error:', e.message); }
+    finally { busy = false; }
+  };
+  void run();
+  const timer = setInterval(() => void run(), intervalMs); timer.unref();
+  return async () => { stopped = true; clearInterval(timer); if (busy) await new Promise(resolve => setTimeout(resolve, 50)); };
 }
 
 /** An agent reported on a task. A task that will retry changes nothing yet. */

@@ -165,3 +165,15 @@ test('a call that waits too long is cancelled, so an agent waking late does not 
     assert.equal(row.status, 'failed');
   } finally { await store.close(); await fs.rm(dir, {recursive: true, force: true}); }
 });
+
+test('a server that cannot start says which command is missing, and a crash gives its exit code, never its stderr', async () => {
+  const missing = await runMcpTask({server: 'notion', op: 'list'}, {notion: {command: 'no-such-mcp-cmd-xyz', args: []}});
+  assert.equal(missing.ok, false);
+  assert.match(missing.message, /"no-such-mcp-cmd-xyz" was not found on this computer/);
+  const crash = `process.stderr.write('Error: NOTION_TOKEN ' + process.env.NOTION_TOKEN + ' is invalid\\n'); process.exit(3);`;
+  const crashed = await runMcpTask({server: 'notion', op: 'list'}, {notion: {command: process.execPath, args: ['-e', crash], env: {NOTION_TOKEN: 'ntn_secret_value_123'}}});
+  assert.equal(crashed.ok, false);
+  assert.match(crashed.message, /stopped before it answered \(exit 3\)/);
+  assert.match(crashed.message, /wrong token or a missing folder/);
+  assert.doesNotMatch(JSON.stringify(crashed), /ntn_secret_value_123/);
+});

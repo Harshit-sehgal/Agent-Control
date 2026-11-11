@@ -12,7 +12,7 @@ import {resolveConfig} from './ai-providers.js';
 import {pauseAll} from '../shared/runaway.js';
 import {queueGroupRun, resumeGuardedRuns, resumeGroupRun, resumeBrowserRun, decidePlan, cancelRun, coordinationState} from './coordination.js';
 import {recordBrowserRequests, denyBrowserRequest, BROWSER_TOOL_HINT} from '../shared/bot-browser.js';
-import {setGrant} from '../shared/asks.js';
+import {setGrant, setAskBasics} from '../shared/asks.js';
 import {addAskCards, notifyAsks} from './ask-cards.js';
 import {answerAskFlow} from './ask-runs.js';
 import {SUBAGENT_PERMISSION, SUBAGENT_TOOL_HINT} from '../shared/subagents.js';
@@ -242,6 +242,12 @@ export function groupRoutes(router) {
   router.add('POST', '/api/grants', 'admin', async c => {
     const b = await c.body();
     return c.store.update(s => setGrant(s, String(b?.botId ?? ''), String(b?.action ?? ''), b?.scope ?? '', b?.choice));
+  });
+
+  // Whether every bot asks before opening a page or reading a connected app: {ask: true|false}.
+  router.add('POST', '/api/permissions/basics', 'admin', async c => {
+    const b = await c.body();
+    return c.store.update(s => setAskBasics(s, b?.ask));
   });
 
   // A bot's request to open a page used to be approved here. It is an ask now, so these two are thin

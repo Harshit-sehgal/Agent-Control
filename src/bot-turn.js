@@ -22,6 +22,7 @@ import {randomUUID} from 'node:crypto';
 import {replyWithSubagents} from './subagents.js';
 import {askPeerRound} from './bot-link.js';
 import {createBotsFromReply} from './bot-create.js';
+import {parseCreateBotRequests, stripCreateBotBlocks, botCreateRefusedText} from '../shared/bot-create.js';
 import {setupCardsFromReply} from './setup-cards.js';
 
 const stamp = () => new Date().toISOString();
@@ -52,7 +53,10 @@ export async function runBotTurn(store, {
   if (peer.limit) return {limit: peer.limit, frames: peer.frames, lines: [...sub.lines, ...peer.lines], spawns: sub.spawns, asks: peer.asks, created: []};
   const made = groupId
     ? await createBotsFromReply(store, {bot, groupId, output: peer.output, runId, makeId, now})
-    : {text: peer.output, created: [], lines: []};
+    : parseCreateBotRequests(peer.output).length
+      // No group to add to (a bot made a moment ago, in its first run): the block is dropped, and said so.
+      ? {text: stripCreateBotBlocks(peer.output) || `${bot.name} tried to create a bot.`, created: [], lines: [{id: makeId(), role: 'system', kind: 'bot-created', text: botCreateRefusedText(bot, 'a bot made in this run cannot make bots of its own yet. Ask again in a new message.'), at: now()}]}
+      : {text: peer.output, created: [], lines: []};
   // Last, a proposed settings change becomes a card the owner taps; it changes nothing by itself.
   const setup = setupCardsFromReply(store, {bot, output: made.text, makeId, now});
   return {

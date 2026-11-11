@@ -7,19 +7,19 @@
  * team, agents, data) load the existing admin forms from ui-admin.js into the body.
  *
  * The lists behind it are pure and tested in ui-profile-model.js. */
-import {face} from './ui-face.js?v=697f915fc5';
-import {botStatus} from './ui-company.js?v=697f915fc5';
-import {esc, icon, btn, empty, note, roundBtn, switchBtn, fullDate} from './ui-kit.js?v=697f915fc5';
-import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, applyTheme, themeChoice, THEMES} from './ui-store.js?v=697f915fc5';
-import {isDesk, initials} from './ui-shell.js?v=697f915fc5';
-import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=697f915fc5';
-import {faceOf, headBar, activityBlocks, grantsHtml, grantNote} from './ui-profile.js?v=697f915fc5';
-import {allGrantRows} from './ui-asks.js?v=697f915fc5';
-import {toast, confirmSheet} from './ui-dialogs.js?v=697f915fc5';
+import {face} from './ui-face.js?v=8ce3bc47dc';
+import {botStatus} from './ui-company.js?v=8ce3bc47dc';
+import {esc, icon, btn, empty, note, roundBtn, switchBtn, fullDate} from './ui-kit.js?v=8ce3bc47dc';
+import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, applyTheme, themeChoice, THEMES} from './ui-store.js?v=8ce3bc47dc';
+import {isDesk, initials} from './ui-shell.js?v=8ce3bc47dc';
+import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=8ce3bc47dc';
+import {faceOf, headBar, activityBlocks, grantsHtml, grantNote} from './ui-profile.js?v=8ce3bc47dc';
+import {allGrantRows} from './ui-asks.js?v=8ce3bc47dc';
+import {toast, confirmSheet} from './ui-dialogs.js?v=8ce3bc47dc';
 import {
   ACTIVITY_FILTERS, activityUrl, companyTree, weekUsage, settingsSections, resolveSection, sectionArg,
-} from './ui-profile-model.js?v=697f915fc5';
-import {COLORS} from './ui-face.js?v=697f915fc5';
+} from './ui-profile-model.js?v=8ce3bc47dc';
+import {COLORS} from './ui-face.js?v=8ce3bc47dc';
 
 const el = id => document.getElementById(id);
 const ICONS = {general: 'gear', look: 'half', models: 'key', conn: 'plug', perm: 'shield', usage: 'chart'};
@@ -100,8 +100,12 @@ const conn = () => (adminKeyOf('conn') ? adminHost('conn') : card(srow('Connecto
 function perm(arg) {
   const bot = arg ? findBot(arg) : null;
   const chip = bot ? `<div class="st-chip">${faceOf(bot, 22, {state: 'asleep', motion: false})}<span>Showing <b>${esc(bot.name)}</b></span><button type="button" class="link" data-action="perm-all">Show all</button></div>` : '';
-  return `<p class="st-note">What each bot may do beyond chatting and handing work on. Anything that leaves the app asks you first.</p>${chip}<div data-grants="${bot ? esc(bot.id) : 'all'}">${grantsHtml(bot?.id || null)}</div>${grantNote('st-note')}`;
+  const ask = Boolean(store.state?.askBasics), owner = canPause();
+  const basics = card(`<div class="rw"><span class="w">Browse and read without asking<small data-basics-sub>${basicsWords(ask)}</small></span>${switchBtn(!ask, 'Browse and read without asking', ` data-action="settings-basics" data-basics${owner ? '' : ' disabled'}`)}</div>`);
+  return `<p class="st-note">Every bot can chat, hand work to its team, make bots and set schedules. Sending, posting, deleting and paying ask you first; you can Always allow a bot per site.</p>${basics}${chip}<div data-grants="${bot ? esc(bot.id) : 'all'}">${grantsHtml(bot?.id || null)}</div>${grantNote('st-note')}`;
 }
+
+const basicsWords = ask => (ask ? 'Bots ask you before opening a web page or reading a connected app' : 'Bots open web pages and read connected apps on their own; a site you set to Ask or Deny still asks or refuses');
 
 function usage() {
   const {total, rows} = weekUsage(store.state);
@@ -272,6 +276,14 @@ export const settingsActions = {
     await sync();
     document.querySelectorAll('[data-pause]').forEach(x => x.setAttribute('aria-checked', String(!paused())));
     document.querySelectorAll('[data-pause-sub]').forEach(x => { x.textContent = paused() ? 'Everything is paused' : 'Switch off to pause every bot at once'; });
+  },
+  'settings-basics': async () => {
+    if (!canPause()) throw new Error('Only the owner can change this.');
+    await api('/api/permissions/basics', 'POST', {ask: !store.state?.askBasics});
+    await sync();
+    const ask = Boolean(store.state?.askBasics);
+    document.querySelectorAll('[data-basics]').forEach(x => x.setAttribute('aria-checked', String(!ask)));
+    document.querySelectorAll('[data-basics-sub]').forEach(x => { x.textContent = basicsWords(ask); });
   },
   // The filter chip on Permissions: back to every bot's rules, in place of the filtered page.
   'perm-all': () => go({settings: 'perm'}, {replace: true}),

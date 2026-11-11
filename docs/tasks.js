@@ -6,7 +6,7 @@
  * These transitions are pure and mirror `workflow.js`: the Node worker and the
  * browser-local demo both run them, so the two backends cannot drift.
  */
-import {activity, cleanText} from './core.js?v=697f915fc5';
+import {activity, cleanText} from './core.js?v=8ce3bc47dc';
 
 export const MAX_ATTEMPTS_DEFAULT = 5;
 
