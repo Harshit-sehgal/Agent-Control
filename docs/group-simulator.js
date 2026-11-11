@@ -2,16 +2,16 @@
  * The bots answer with canned replies (shared/offline-bots.js), and everything a
  * reply asks for goes through the rules the served loop uses: hand-offs, hires,
  * the out-of-job refusal, checkpoints and the runaway guard. */
-import {createRun,createEnvelope,handoffTargets,instructLead,wakeBots,assessTask,runNote,rosterFor,previousFor,enlist} from './coordination.js?v=aa19414b51';
-import {offlineReply} from './offline-bots.js?v=aa19414b51';
-import {parseOffJob,offJobMessage} from './off-job.js?v=aa19414b51';
-import {parseCreateBotRequests,stripCreateBotBlocks,botCreatedText,botCreateRefusedText} from './bot-create.js?v=aa19414b51';
-import {addCreatedBot} from './hire.js?v=aa19414b51';
-import {noteBotWork} from './runaway.js?v=aa19414b51';
-import {isLead} from './company.js?v=aa19414b51';
-import {botSettings,groupSettings,threadContext} from './bot-settings.js?v=aa19414b51';
-import {normalizeBot} from './contracts.js?v=aa19414b51';
-import {isThread,noteMember} from './threads.js?v=aa19414b51';
+import {createRun,createEnvelope,handoffTargets,instructLead,wakeBots,assessTask,runNote,rosterFor,previousFor,enlist} from './coordination.js?v=374eb42963';
+import {offlineReply} from './offline-bots.js?v=374eb42963';
+import {parseOffJob,offJobMessage} from './off-job.js?v=374eb42963';
+import {parseCreateBotRequests,stripCreateBotBlocks,botCreatedText,botCreateRefusedText} from './bot-create.js?v=374eb42963';
+import {addCreatedBot} from './hire.js?v=374eb42963';
+import {noteBotWork} from './runaway.js?v=374eb42963';
+import {isLead} from './company.js?v=374eb42963';
+import {botSettings,groupSettings,threadContext} from './bot-settings.js?v=374eb42963';
+import {normalizeBot} from './contracts.js?v=374eb42963';
+import {isThread,noteMember} from './threads.js?v=374eb42963';
 
 export async function simulateGroup({group, message, directBotId=null, guests=[], state, api, makeId, emit, chatKey=null, started=false, resume=null, shouldStop=()=>false, anyway=false}) {
   let run, previous, i;

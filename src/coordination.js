@@ -20,6 +20,8 @@ import {orphanAsks} from '../shared/asks.js';
 import {addAskCards,notifyAsks} from './ask-cards.js';
 import {MAX_SUBAGENT_DEPTH} from '../shared/subagents.js';
 import {autoDispatch,dispatchBrowserRequest,finishBrowserRequest} from './bot-browser.js';
+import {recordConnectorCalls,parseConnectorCalls,stripConnectorBlocks,envelopeConnectors} from '../shared/connectors.js';
+import {runConnectorCalls} from './connector-runs.js';
 import {runBotTurn} from './bot-turn.js';
 import {memoryFor,rememberTurn,maybeConsolidate} from './memory.js';
 import {executeCustomBot} from './ai.js';
@@ -239,6 +241,9 @@ async function runGroupInner(store,id,executor){
     const fledglings=new Set();
     let i=start;
     while(true){
+      // Calls a bot asked for that are cleared (an answer, or nothing to ask) are made now, before this step's turn,
+      // so the same bot gets what came back. A run stopped meanwhile drops them.
+      if(!await runConnectorCalls(store,id,{say}))return;
       const current=store.read();const r=current.groupRuns.find(x=>x.id===id);
       if(!r||r.status!=='running')throw new Error('Run no longer active');
       if(i>=r.recipients.length){
@@ -283,7 +288,7 @@ async function runGroupInner(store,id,executor){
       // Context is automatic: the newest lines that fit; the stored recap, which is
       // in the memory block, stands in for whatever had to be cut.
       const thread=threadContext(current.chats?.[r.chatKey]);
-      const envelope=createEnvelope({run:r,bot,previous,thread,team:closing?[]:rosterFor(current,bot,roster,{thread:isThread(g)}),company:everyone,memory,lead,closing});
+      const envelope=createEnvelope({run:r,bot,previous,thread,team:closing?[]:rosterFor(current,bot,roster,{thread:isThread(g)}),company:everyone,memory,lead,closing,connectors:closing||declinedTurn?[]:envelopeConnectors(current)});
       // Each bot runs on its own chosen model/provider, else the workspace
       // default. The turn itself is the one sequence every caller runs: a
       // sub-agent round, then a peer ask, then a new-bot block. A bot that
@@ -329,8 +334,9 @@ async function runGroupInner(store,id,executor){
       // Strip browser fences before the contract gate: a structured bot may
       // still ask for a page, and the next bot must not see the fences.
       const asked=off?[]:parseBrowserRequests(body);
-      const stripped=off?body:stripBrowserBlocks(body);
-      if(!stripped.trim()&&!asked.length)throw new Error('Bot returned empty output.');
+      const connectorAsked=off?[]:parseConnectorCalls(body);
+      const stripped=off?body:stripConnectorBlocks(stripBrowserBlocks(body));
+      if(!stripped.trim()&&!asked.length&&!connectorAsked.length)throw new Error('Bot returned empty output.');
       // The gate returns the value it validated. Passing the raw text on left a
       // structured result as its fenced JSON, while the object the contract
       // approved is what every downstream reader (sources, trace, the next
@@ -347,11 +353,13 @@ async function runGroupInner(store,id,executor){
         // File fences from the full reply, then hand the next bot the text around them.
         const priorUrls=Array.isArray(live.browserUrls)?live.browserUrls:String(live.browserUrl||'').split(' | ').filter(Boolean);
         const skip=priorUrls;
-        const browsed=recordBrowserRequests(s,{bot,groupId:live.groupId,chatKey:live.chatKey||`team-${live.groupId}`,output:body,depth:live.browserDepth||0,makeId:randomUUID,skipUrls:skip,runId:id,unattended:Boolean(live.unattended),closed:declinedTurn});
-        newAsks=browsed.asks;
+        const browsed=recordBrowserRequests(s,{bot,groupId:live.groupId,chatKey:live.chatKey||`team-${live.groupId}`,output:stripConnectorBlocks(body),depth:live.browserDepth||0,makeId:randomUUID,skipUrls:skip,runId:id,unattended:Boolean(live.unattended),closed:declinedTurn});
+        // Connector blocks in the same reply: a page goes first, one kind at a time.
+        const conn=off?{text:'',calls:[],lines:[],asks:[]}:recordConnectorCalls(s,{bot,run:live,chatKey:live.chatKey||`team-${live.groupId}`,output:body,unattended:Boolean(live.unattended),closed:declinedTurn,blockedByPage:browsed.records.length>0,makeId:randomUUID,now:stamp()});
+        newAsks=[...browsed.asks,...conn.asks];
         // Text around the browser fences is the browser helper's view of the
         // reply; with nothing to browse, the approved value is the output.
-        previous.output=(browsed.records.length?browsed.text:gated).slice(0,3600);
+        previous.output=((browsed.records.length?browsed.text:gated).trim()?(browsed.records.length?browsed.text:gated):conn.text).slice(0,3600);
         // A page the owner is already fine with goes out at once. When any page in the reply needs an
         // answer the whole reply waits for it, so the pages come back together.
         if(!browsed.asks.length)auto=browsed.records;
@@ -377,7 +385,9 @@ async function runGroupInner(store,id,executor){
         for(const line of reply.lines)say(s,live,{...line,runId:id});
         say(s,live,{...said,mode:'ai'});
         for(const line of browsed.lines)say(s,live,line);
+        for(const line of conn.lines)say(s,live,line);
         for(const a of browsed.asks)addAskCards(s,a,bot);
+        for(const a of conn.asks)addAskCards(s,a,bot);
         if(reply.spawns.length)live.subagents=[...(live.subagents||[]),...reply.spawns.map(spawn=>({...spawn,botId:bot.id,at:stamp()}))].slice(-6);
         if(reply.asks.length)live.peerAsks=[...(live.peerAsks||[]),...reply.asks.map(ask=>({botId:bot.id,...ask,at:stamp()}))].slice(-6);
         if(browsed.records.length){
@@ -386,10 +396,20 @@ async function runGroupInner(store,id,executor){
           if(browsed.asks.length)live.askIds=browsed.asks.map(a=>a.id);
           live.browserPage=null;
           live.checkpoint={nextStep:i,afterStep:i+1,previous,at:stamp()};
+          live.connectorPage=null;
+          holdBrowser=true;
+        } else if(conn.calls.length){
+          // Parked on the owner (an ask), or about to make the calls it already may: either way this same bot takes
+          // the step again with what comes back, the way a page does.
+          live.browserPage=null;live.connectorPage=null;
+          live.checkpoint={nextStep:i,afterStep:i+1,previous,at:stamp()};
+          if(conn.asks.length){live.status='awaiting_ask';live.askIds=conn.asks.map(a=>a.id);}
+          else live.status='queued';
           holdBrowser=true;
         } else {
           // Extra turn consumed the page; later bots do not see it as `page`.
           live.browserPage=null;
+          live.connectorPage=null;live.connectorCalls=[];
         }
       });
       if(newAsks.length)notifyAsks(store,newAsks,bot.name);
@@ -490,6 +510,11 @@ export async function resumeAfterAsks(store,runId,{executor,runtime,actor=null}=
     const declined=mine.filter(a=>a.status==='declined').map(a=>a.expired?`${a.detail||a.action} (no answer in 24 hours)`:(a.detail||a.action));
     if(declined.length)live.declined=declined;
     live.askIds=[];
+    // Each connector call waits on its own ask: an allowed one is cleared to run when the step starts, a declined one never runs.
+    for(const call of live.connectorCalls||[]){
+      if(call.status!=='pending')continue;
+      call.status=mine.find(a=>a.id===call.askId)?.status==='allowed'?'go':'denied';
+    }
     // A page the owner turned down will never come back, so it must not hold the others up: it counts
     // as handled, the same as a denied page in `resumeBrowserRun`.
     const handled=new Set(live.browserConsumed||[]);

@@ -223,7 +223,7 @@ function extract(config,data){
   }
   // The token limit already bounds the call. Slicing here cut a fence that
   // models put last, so the orchestrator never paused for the page.
-  if(/```(?:browser|spawn|ask|create-bot)\b/i.test(text))return text;
+  if(/```(?:browser|spawn|ask|create-bot|connector)\b/i.test(text))return text;
   return text.slice(0,3000);
 }
 /** Strip leaked chain-of-thought so a draft is the answer, not the scratchpad.
@@ -236,7 +236,7 @@ function extract(config,data){
 function sanitize(text){
   const raw=String(text);
   const fences=[];
-  const withoutFences=raw.replace(/```(?:browser|spawn|ask|create-bot)[ \t]*\r?\n[\s\S]*?(?:```|$)/gi,block=>{fences.push(block);return '';});
+  const withoutFences=raw.replace(/```(?:browser|spawn|ask|create-bot|connector)[ \t]*\r?\n[\s\S]*?(?:```|$)/gi,block=>{fences.push(block);return '';});
   const stripPaired=s=>s.replace(/<(think|thinking|reasoning)>[\s\S]*?<\/\1>/gi,'');
   // Remove tool fences before reasoning cleanup, then put them back. A
   // reasoning tag may wrap the fence, and either a paired or unclosed tag must
@@ -527,6 +527,7 @@ function boundBotInput(input, max=MAX_BOT_INPUT){
   const cut=(v,n)=>typeof v==='string'?v.slice(0,n):v;
   if(env.previous&&typeof env.previous==='object')env.previous={...env.previous,output:cut(env.previous.output,1800)};
   if(typeof env.page==='string')env.page=cut(env.page,1800);
+  if(typeof env.connectorResult==='string')env.connectorResult=cut(env.connectorResult,3000);
   // A teammate's answer is the reason this bot got a second turn. Losing it in
   // the fallback below would make that paid round invisible to the model.
   if(env.peerAnswer&&typeof env.peerAnswer==='object')env.peerAnswer={...env.peerAnswer,output:cut(env.peerAnswer.output,1200)};
@@ -554,7 +555,7 @@ function boundBotInput(input, max=MAX_BOT_INPUT){
   // bot asked in prose for JSON that its contract required answers in prose.
   // Memory is the only field here that is context and not the job, so it goes
   // first when the cut still does not fit.
-  const slim={objective:cut(env.objective,1200),botId:env.botId,runId:env.runId,step:env.step,contract:env.contract,botRole:cut(env.botRole,1200),message:cut(env.message,1200),maxSteps:env.maxSteps,permissions:list(env.permissions),page:cut(env.page,1200),memory:env.memory,peerAnswer:env.peerAnswer,previous:env.previous&&typeof env.previous==='object'?{...env.previous,output:cut(env.previous.output,600)}:env.previous,restrictions:list(env.restrictions),tools:list(env.tools),note:'The full task was truncated to fit the model input limit.'};
+  const slim={objective:cut(env.objective,1200),botId:env.botId,runId:env.runId,step:env.step,contract:env.contract,botRole:cut(env.botRole,1200),message:cut(env.message,1200),maxSteps:env.maxSteps,permissions:list(env.permissions),page:cut(env.page,1200),connectors:env.connectors,connectorResult:cut(env.connectorResult,2000),memory:env.memory,peerAnswer:env.peerAnswer,previous:env.previous&&typeof env.previous==='object'?{...env.previous,output:cut(env.previous.output,600)}:env.previous,restrictions:list(env.restrictions),tools:list(env.tools),note:'The full task was truncated to fit the model input limit.'};
   let out=JSON.stringify(slim);
   if(out.length>max)out=JSON.stringify({...slim,memory:undefined,peerAnswer:undefined,restrictions:undefined,tools:undefined});
   // Never return more than the limit, even if every field was cut already.
@@ -569,6 +570,8 @@ export async function executeCustomBot(bot,input,config) {
   const allowed=[
     // Any bot may ask for a page: the owner answers, so there is no permission to hold first.
     'asking for a web page with the browser block described under tools in the task',
+    // Only when the task lists a connector under tools; the owner answers before it is used.
+    'using a connected service with the connector block described under tools in the task, when one is listed',
     ...(grants.includes(SUBAGENT_PERMISSION)?['handing one small job to a helper model with the spawn block described under tools in the task']:[]),
     // Asking a bot is part of every bot's basic kit.
     'asking another bot a direct question with the ask block described under tools in the task',

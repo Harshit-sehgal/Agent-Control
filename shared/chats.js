@@ -17,7 +17,7 @@ export const MAX_CHAT_MESSAGES = 300;
 const MAX_TEXT = 8000;
 const ROLES = ['user', 'bot', 'system'];
 /** Optional short fields a message may carry; anything else is dropped. */
-const LABELS = ['senderId', 'senderName', 'toBotId', 'runId', 'mode', 'kind', 'botId', 'askId', 'switchTo'];
+const LABELS = ['senderId', 'senderName', 'toBotId', 'runId', 'mode', 'kind', 'botId', 'askId', 'switchTo', 'connectorId', 'activityId', 'undoUntil'];
 
 const chatKeys = state => new Set((state.groups || []).flatMap(g => [`team-${g.id}`, ...(g.bots || []).map(b => b.id)]));
 const groupOf = (state, key) => (state.groups || []).find(g => `team-${g.id}` === key || (g.bots || []).some(b => b.id === key));
@@ -43,6 +43,8 @@ function untrusted(state, key, message) {
   delete message.askId;
   // A model-limit card offers a switch the server worked out; a browser cannot offer one.
   delete message.switchTo;
+  // A connector line may carry an Undo for a held send; only the server writes one.
+  delete message.activityId; delete message.undoUntil;
   if (message.role !== 'user') message.origin = 'browser';
   return message;
 }

@@ -20,17 +20,17 @@
  *   ui-dialogs      toast, sheet, confirm/ask      ui-actions action/form tables
  *   ui-fx           confetti, the send arrow and the bots' ambient life
  */
-import {companyRoute} from './ui-company.js?v=aa19414b51';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=aa19414b51';
-import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=aa19414b51';
-import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, renderPause, closeSearch, homeView} from './ui-shell.js?v=aa19414b51';
-import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=aa19414b51';
-import {profileViews, wirePages} from './ui-profile.js?v=aa19414b51';
-import {wireGestures, gesturesBusy} from './ui-gestures.js?v=aa19414b51';
-import {settingsViews} from './ui-settings.js?v=aa19414b51';
-import {showLogin, hideLogin} from './ui-sheets.js?v=aa19414b51';
-import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=aa19414b51';
-import {bringBotsToLife} from './ui-fx.js?v=aa19414b51';
+import {companyRoute} from './ui-company.js?v=374eb42963';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=374eb42963';
+import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=374eb42963';
+import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, renderPause, closeSearch, homeView} from './ui-shell.js?v=374eb42963';
+import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=374eb42963';
+import {profileViews, wirePages} from './ui-profile.js?v=374eb42963';
+import {wireGestures, gesturesBusy} from './ui-gestures.js?v=374eb42963';
+import {settingsViews} from './ui-settings.js?v=374eb42963';
+import {showLogin, hideLogin} from './ui-sheets.js?v=374eb42963';
+import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=374eb42963';
+import {bringBotsToLife} from './ui-fx.js?v=374eb42963';
 
 const el = id => document.getElementById(id);
 const hashRoute = () => normalizeRoute(companyRoute(location.hash, store.state));

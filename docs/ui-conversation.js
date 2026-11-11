@@ -7,20 +7,20 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=aa19414b51';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=aa19414b51';
-import {requestOfMessage} from './bot-browser.js?v=aa19414b51';
-import {validHttpUrl} from './core.js?v=aa19414b51';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=aa19414b51';
-import {botStatus, botIsManager, chatStatus, jobOf} from './ui-company.js?v=aa19414b51';
-import {hasJob} from './ui-profile-model.js?v=aa19414b51';
-import {feed} from './ui-feed.js?v=aa19414b51';
-import {askCard} from './ui-asks.js?v=aa19414b51';
-import {face, botColor} from './ui-face.js?v=aa19414b51';
-import {esc, icon, btn, dayLabel, tag} from './ui-kit.js?v=aa19414b51';
-import {store, conversation, findBot, groups, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync} from './ui-store.js?v=aa19414b51';
-import {runAnyway, startThread, answerLimit} from './ui-chat.js?v=aa19414b51';
-import {toast} from './ui-dialogs.js?v=aa19414b51';
+import {OFFJOB_CHOICES} from './off-job.js?v=374eb42963';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=374eb42963';
+import {requestOfMessage} from './bot-browser.js?v=374eb42963';
+import {validHttpUrl} from './core.js?v=374eb42963';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=374eb42963';
+import {botStatus, botIsManager, chatStatus, jobOf} from './ui-company.js?v=374eb42963';
+import {hasJob} from './ui-profile-model.js?v=374eb42963';
+import {feed} from './ui-feed.js?v=374eb42963';
+import {askCard} from './ui-asks.js?v=374eb42963';
+import {face, botColor} from './ui-face.js?v=374eb42963';
+import {esc, icon, btn, dayLabel, tag} from './ui-kit.js?v=374eb42963';
+import {store, conversation, findBot, groups, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync} from './ui-store.js?v=374eb42963';
+import {runAnyway, startThread, answerLimit} from './ui-chat.js?v=374eb42963';
+import {toast} from './ui-dialogs.js?v=374eb42963';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
