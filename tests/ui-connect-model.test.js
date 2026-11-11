@@ -285,3 +285,14 @@ test('a command for this computer starts the server there first, under a name ma
   assert.equal(mcpDraft({name: 'Files', via: 'agent', agentServer: 'fs', command: 'fs-mcp'}).local.name, 'fs');
   assert.match(mcpDraft({name: 'Files', via: 'agent', agentServer: 'Big_Name', command: 'x'}).error, /lowercase/);
 });
+
+test('cliChoice picks a signed-in engine on an online device, reusing a provider already added', async () => {
+  const {cliChoice} = await import('../shared/ui-connect-model.js');
+  const on = cli => [{id: 'a', status: 'online', cli}];
+  assert.deepEqual(cliChoice(on({claude: 'signed-in', codex: 'signed-in'}), []), {engine: 'claude', label: 'My Claude', providerId: null});
+  assert.deepEqual(cliChoice(on({claude: 'signed-out', codex: 'signed-in'}), []), {engine: 'codex', label: 'My ChatGPT', providerId: null});
+  assert.deepEqual(cliChoice(on({claude: 'signed-in'}), [{id: 'p9', kind: 'local-cli', engine: 'claude'}]), {engine: 'claude', label: 'My Claude', providerId: 'p9'});
+  assert.match(cliChoice(on({claude: 'signed-out'}), []).error, /claude/);
+  assert.match(cliChoice([{id: 'a', status: 'offline', cli: {claude: 'signed-in'}}], []).error, /not online/);
+  assert.match(cliChoice([], []).error, /No computer/);
+});

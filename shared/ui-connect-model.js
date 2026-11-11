@@ -236,3 +236,17 @@ export function modelLimitLine(message, {state}) {
   const using = state?.ai?.bots?.[message.botId]?.providerId;
   return {text: String(message.text ?? ''), botId: message.botId || null, switchTo, open: Boolean(switchTo && message.botId && using !== switchTo.id)};
 }
+
+/** The no-model card's one tap: which sign-in on this computer to use, and the provider it already has.
+ * Claude first, then ChatGPT, from a device that is online now. Pure.
+ * @returns {{engine: string, label: string, providerId: string|null}|{error: string}} */
+export function cliChoice(agents, providers) {
+  const live = (Array.isArray(agents) ? agents : []).filter(a => a && a.status !== 'revoked');
+  if (!live.length) return {error: 'No computer is connected. A server started on your own computer connects it by itself.'};
+  const online = live.filter(a => a.status === 'online');
+  if (!online.length) return {error: 'Your computer is not online right now. Restart the server on it and try again.'};
+  const engine = ['claude', 'codex'].find(id => online.some(a => a.cli?.[id] === 'signed-in'));
+  if (!engine) return {error: 'This computer is not signed in yet. Run `claude` (or `codex`) once in a terminal there to sign in, then tap again.'};
+  const have = (Array.isArray(providers) ? providers : []).find(p => p.kind === 'local-cli' && p.engine === engine);
+  return {engine, label: `My ${ENGINE_NAME[engine]}`, providerId: have?.id || null};
+}

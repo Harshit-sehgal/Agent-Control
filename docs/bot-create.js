@@ -18,10 +18,10 @@
  *
  * This module is pure. `src/bot-create.js` applies it inside the run.
  */
-import {cleanText} from './core.js?v=33723157a3';
-import {fail} from './errors.js?v=33723157a3';
-import {defaultContract} from './contracts.js?v=33723157a3';
-import {controlFence} from './reply-blocks.js?v=33723157a3';
+import {cleanText} from './core.js?v=7ad447f2c5';
+import {fail} from './errors.js?v=7ad447f2c5';
+import {defaultContract} from './contracts.js?v=7ad447f2c5';
+import {controlFence} from './reply-blocks.js?v=7ad447f2c5';
 
 export const BOT_CREATE_PERMISSION = 'bot.create';
 export const MAX_NEW_BOTS_PER_REPLY = 1;

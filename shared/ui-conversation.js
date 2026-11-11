@@ -24,6 +24,7 @@ import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, 
 import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js';
 import {toast} from './ui-dialogs.js';
 import {siteChip} from './ui-computer-view.js';
+import {cliChoice} from './ui-connect-model.js';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -198,7 +199,10 @@ function setupEntry({message: m, card, done}) {
 }
 
 function noModelEntry({message: m}) {
-  const open = canWrite() ? `<div class="acts">${btn('Open Models and keys', 'open-models', {kind: 'primary', small: true})}</div>` : '';
+  // Once a model is connected the card has done its job: a quiet line, no buttons.
+  if (isLive()) return `<div class="cv-note cv-conn" data-m="${esc(m.id)}"><span>${icon('check', 13)}A model is connected now.</span></div>`;
+  // A sign-in on this computer needs no key, so it is the first button; the page is the fallback.
+  const open = canWrite() && !isStaticDemo() ? `<div class="acts">${btn("Use this computer's sign-in", 'use-cli', {kind: 'primary', small: true, data: {message: m.id}})}${btn('Open Models and keys', 'open-models', {small: true})}</div>` : '';
   return `<div class="cv-card flat" data-m="${esc(m.id)}"><p>${esc(m.text)}</p>${open}</div>`;
 }
 
@@ -383,6 +387,22 @@ export const conversationActions = {
   // The bot that hit a usage limit moves to the provider the server named; '' clears the model that would not fit it.
   // Apply what a bot proposed, through the same routes the settings pages use.
   'open-models': () => go({settings: 'models'}),
+  // No model yet: use the Claude or ChatGPT sign-in this computer already has, make it everyone's default,
+  // and ask the owner's last message again. Nothing is typed, and no key is involved.
+  'use-cli': async b => {
+    const conv = conversation(); if (!conv) return;
+    const [agents, ai] = await Promise.all([api('/api/agents').catch(() => null), api('/api/ai').catch(() => null)]);
+    const pick = cliChoice(agents?.agents, ai?.providers);
+    if (pick.error) { toast(pick.error); return; }
+    const providerId = pick.providerId || (await api('/api/ai/providers', 'POST', {label: pick.label, kind: 'local-cli', engine: pick.engine}))?.id;
+    await api('/api/ai', 'PATCH', {providerId, model: ''});
+    await sync();
+    toast(`Using ${pick.label}. Asking again.`);
+    const lines = store.messages[conv.id] || store.state?.chats?.[conv.id] || [];
+    const at = lines.findIndex(x => x?.id === b.dataset.message);
+    const asked = lines.slice(0, at < 0 ? lines.length : at).reverse().find(x => x?.role === 'user')?.text;
+    if (asked) await rerun(conv.group.id, {message: asked, direct: conv.isTeam ? '' : conv.bot.id, chat: conv.id});
+  },
   'apply-setup': async b => {
     const message = Object.values(store.state?.chats || {}).flat().find(x => x?.id === b.dataset.message);
     const card = message && message.origin !== 'browser' ? setupCardOf(message) : null;
