@@ -85,28 +85,47 @@ This revision replaces groups. Where it conflicts with anything below, this sect
 - **Per-bot settings live on the bot.** A bot's profile holds its job, manager, model, memory and permissions. Nothing per-bot appears in Settings.
 - **Per-bot permission choices.** Every permission a bot has been given is listed on that bot's profile, with a choice of **Always allow / Ask each time / Deny**. Payment permissions offer only Ask each time / Deny. Deny means the bot stops and tells the owner where to change it. This is how the owner takes back an Always allow.
 
-## Interaction model (mock v8, the UX reference)
+## Interaction model (mock v12, the UX reference)
 
-- **One reading column.** The thread is a single centred column (max about 720px). No third pane is open by default.
-- **Slide-over panels.** Company, Activity, Settings and every bot profile open as one panel sliding in from the right, over the thread, closed with Esc, the close button or a click outside. Only one is open at a time; a bot profile has a back arrow to Company.
-- **Home is a composer.** A new thread opens to one question ("What should the company get done?"), a large composer, and four starters. After sending, the normal thread view takes over.
-- **Sidebar, top to bottom:** company name; status line that is also Pause all; New thread; Jump to… (⌘K); Activity; Company; Needs you (only when something is waiting); Threads (each with its owner's face and a dot: mint pulsing = working, violet = waiting on you); the owner's row with Settings at the bottom. There is no list of every bot: bots are reached through Company or ⌘K, so the sidebar does not grow with the company.
-- **Thread header** shows the title and one live line ("Scholar and Quill working", "Waiting on you", "Mailroom owns this").
-- **Messages:** the owner's messages are mint bubbles on the right. Bot replies are unboxed: face, name, short job, text. Under a reply, one muted line: what it used ("Used 3 memories and Quill's reply") and "Wrong bot?", which offers the other bots in place; picking one hands the thread over and Atlas remembers the correction.
-- **Route line** sits under the owner's message: "Scholar took this · via Atlas → Research lead · 4 stayed asleep"; "stayed asleep" expands the reasons.
-- **Ask cards** are the only raised surface in a thread (soft elevation, no border): one sentence and three buttons. Answered cards collapse to one muted line.
-- **⌘K palette** jumps to any thread, bot or page. Arrow keys and Enter work. Choosing a bot opens a direct thread with it.
-- **Contacting one bot is one tap:**
-  - *Bots list* in the sidebar: up to five rows, most recently used first. Each row shows the face, the **name** and a short job ("Scholar · Finds and reads sources"), plus a mint dot when working; a face alone is never enough to tell bots apart. Tapping a row opens the direct thread with that bot. The last row, "All N bots…", opens the palette filtered to bots.
-  - *Direct threads* are one per bot and reopen where you left off. Only that bot reads them, though it can still ask teammates for help. They appear in Threads with the bot's face.
-  - *@mentions*: typing @ in any composer shows a picker of bots; Enter or Tab picks. A message starting with @Name goes to that bot directly ("Sent to Scholar directly") and skips routing.
-  - *Replies stay with the owner*: a follow-up in an existing thread goes to the bot that owns it, with no re-routing, unless it @mentions someone else.
-  - The owner's face in the thread header opens that bot's profile; the faces on the home screen open direct threads; "Message <bot>" on a profile opens its direct thread.
-- The sidebar label is **Bots**, above Needs you.
-- **Every sidebar section folds.** Bots, Needs you and Threads each have a header with a chevron that collapses or expands the section. A collapsed section shows its count in the header (Needs you keeps its violet badge, so a waiting ask is never hidden). Which sections are folded is remembered per device. Fixed rows (New thread, Jump to…, Activity, Company, Settings) do not fold.
-- **Bot profile has three tabs:** Overview (job; model, manager, automatic context, team; permissions with Always allow / Ask each time / Deny), Memory (lines with Forget, plus "Tell <bot> something to remember"), Activity (local to the bot).
-- **Hiring** happens inline at the bottom of Company: "What is this bot for?" plus a manager picker. Moving a bot is a Manager picker on its profile.
-- Phones: the sidebar slides in from the left via the menu button; panels fill the screen.
+Layout (owner's design, 2026-11-11):
+- **Home is the bots.** The landing page is a scrollable view of the company. At the top is the status line, which is also Pause all. Then comes Needs you, shown only when something is waiting. Then a large Atlas card that starts a thread. Below it, one horizontally scrolling row per manager's team, then "No manager", then Recent threads. Each bot card shows the face, the **name**, a short job, a state pill (asleep / awake / working / waiting on you) and its latest thread. Tapping a card opens the direct thread; the (i) corner opens the profile.
+- **There is no sidebar.** Three floating buttons stay put while the page scrolls:
+  - **+** at the top right hires a new bot.
+  - **Settings** sits in the bottom-left corner.
+  - **New thread** (notebook-and-pen icon) sits next to it.
+  - The bottom-left pair lifts above the composer when a thread is open.
+- **New thread** opens the composer screen. It shows the lineup of bot faces, the question "What should the company get done?", a large composer and four starters.
+- **Settings opens a drawer from the left** with:
+  - the owner, plus Pause all
+  - usage this week, with a meter per subscription or key and the busiest bot
+  - Needs you
+  - Threads
+  - Go to: Activity, Company, Jump to… ⌘K
+  - Settings: subscriptions and keys, connectors, appearance
+  - Every section folds, and folding is remembered per device; Needs you keeps its violet badge when folded.
+- **Details slide over from the right**: Company, Activity, Settings, New bot and every bot profile. Esc, the close button or a click outside closes them.
+
+Characters and looks:
+- **Faces are characters.**
+  - Each face has a tint gradient, eyes that blink and gently follow the pointer, and a small mouth.
+  - States: asleep (closed eyes), awake, reading (working), waiting and wake (lifts up).
+  - **Role shapes:** a circle for the primary, a rounded hexagon for managers, a rounded square for bots. There are no per-bot shapes.
+- **Live routing preview.** While the owner types a new thread, the bot that would own it wakes in the lineup ("Planner would take this. Everyone else stays asleep."). An @mention wakes the picked bot.
+- **Three looks to compare:**
+  - Soft studio: off-white with soft depth. It follows the system's light or dark setting.
+  - Ink & paper: warm paper, a serif display face and flat faces. It also follows the system's light or dark setting.
+  - Night desk: always dark, with glowing tints.
+  - The switch lives on the home screen and under Settings → Appearance. The mock keeps the switch so the owner can pick one; the build ships the chosen look plus light and dark.
+
+Threads:
+- **Header:** a back link to Bots, the owner's face (which opens the profile), the title and one live line ("Waiting on you", "Scholar and Quill working"). A soft wash of the owner's tint sits behind the top of the thread.
+- **Messages:** the owner's messages are mint bubbles on the right. Bot replies are unboxed: face, name, short job and text. **No routing chatter:** no route line, no "N stayed asleep", no "Wrong bot?" and no "Used N memories" line (owner, 2026-11-11). Who owns the thread shows in the header.
+- **Side conversations** are one line ("Scholar messaged Quill"); clicking it reveals the message.
+- **Asks keep the bot on screen.** While an ask card waits, the asking bot's face stays above it in a waiting state: it sways gently, looks down at the card, and shows three pulsing violet dots ("Planner is waiting on you"). It goes back to reading once the owner answers. The card is the only raised surface: one sentence and three buttons (Always allow / Allow once / Decline). An answered card collapses to one muted line.
+- **Memory learned** shows as one mint line ("Scholar will remember: …").
+- **Contacting one bot:** tap its card on the home screen, use "Message <bot>" on its profile, use ⌘K, or type @ in any composer. A message that starts with @Name skips routing. Follow-ups stay with the thread's owner.
+- **Bot profile** has three tabs: Overview (job, model, manager, automatic context, team, and permissions with Always allow / Ask each time / Deny), Memory and Activity (local to the bot).
+- **Motion:** only transform and opacity animate, with short ease-outs, and none at all under reduced motion. The waiting animation is CSS, not three.js. It stays light and dependency-free, and it is enough for faces this small.
 
 ## Activity log and Pause all (owner asked for both; the log must stay clean)
 
