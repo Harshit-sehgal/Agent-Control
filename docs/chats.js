@@ -7,17 +7,17 @@
  *
  * Messages are display records only. Nothing here runs a bot or publishes.
  */
-import {cleanText} from './core.js?v=3b9121ac3d';
-import {fail} from './errors.js?v=3b9121ac3d';
-import {summonableGuests, BUSY_STATUSES} from './coordination.js?v=3b9121ac3d';
-import {denyBrowserRequest} from './bot-browser.js?v=3b9121ac3d';
-import {orphanAsks} from './asks.js?v=3b9121ac3d';
+import {cleanText} from './core.js?v=09349b7571';
+import {fail} from './errors.js?v=09349b7571';
+import {summonableGuests, BUSY_STATUSES} from './coordination.js?v=09349b7571';
+import {denyBrowserRequest} from './bot-browser.js?v=09349b7571';
+import {orphanAsks} from './asks.js?v=09349b7571';
 
 export const MAX_CHAT_MESSAGES = 300;
 const MAX_TEXT = 8000;
 const ROLES = ['user', 'bot', 'system'];
 /** Optional short fields a message may carry; anything else is dropped. */
-const LABELS = ['senderId', 'senderName', 'toBotId', 'runId', 'mode', 'kind', 'botId', 'askId'];
+const LABELS = ['senderId', 'senderName', 'toBotId', 'runId', 'mode', 'kind', 'botId', 'askId', 'switchTo'];
 
 const chatKeys = state => new Set((state.groups || []).flatMap(g => [`team-${g.id}`, ...(g.bots || []).map(b => b.id)]));
 const groupOf = (state, key) => (state.groups || []).find(g => `team-${g.id}` === key || (g.bots || []).some(b => b.id === key));
@@ -41,6 +41,8 @@ function untrusted(state, key, message) {
   delete message.request; delete message.botId;
   // An ask card is written by the server for an ask it created; a browser cannot forge one.
   delete message.askId;
+  // A model-limit card offers a switch the server worked out; a browser cannot offer one.
+  delete message.switchTo;
   if (message.role !== 'user') message.origin = 'browser';
   return message;
 }

@@ -7,6 +7,7 @@ import * as chats from '../shared/chats.js';
 import {botSettings, threadContext} from '../shared/bot-settings.js';
 import {createThread, titleFrom} from '../shared/threads.js';
 import {executeCustomBot} from './ai.js';
+import {modelLimitLine} from './cli-model.js';
 import {resolveConfig} from './ai-providers.js';
 import {pauseAll} from '../shared/runaway.js';
 import {queueGroupRun, resumeGuardedRuns, resumeGroupRun, resumeBrowserRun, decidePlan, cancelRun, coordinationState} from './coordination.js';
@@ -63,6 +64,17 @@ function cancelQueuedBrowserTasks(store, ids) {
   else cancel();
 }
 
+/** A usage limit on a subscription bot leaves a card in its chat before the
+ * error goes back to the caller, the same line a group run writes. */
+async function withLimitLine(store, bot, turn) {
+  try { return await turn(); }
+  catch (error) {
+    const line = modelLimitLine(store.read(), error, {runId: uuid()});
+    if (line) await store.update(s => chats.addChatMessages(s, bot.id, [line], {trusted: true})).catch(() => {});
+    throw error;
+  }
+}
+
 /** One bot in its own chat, not a group run. A page that comes back from a
  * 1:1 browse continues here so it does not start the whole pipeline. */
 export function runOneBot(store, options) {
@@ -108,7 +120,7 @@ async function runOneBotInner(store, {botId, input, page = '', browserDepth = 0}
   // One bot turn: a sub-agent round, a peer ask, then a new-bot block, in the
   // one order every caller uses. A 1:1 chat has no group to add a bot to, so
   // `groupId` is null and that step is skipped.
-  const turn = await runBotTurn(store, {bot, envelope, executor: executeCustomBot, config, peers: roster, configFor: peerId => resolveConfig(store, peerId), memoryForPeer: (mate, mateConfig) => memoryFor(store, {bot: mate, config: mateConfig, chatKey: bot.id}), handoffAllowed: botSettings(bot).canHandoff, groupId: group?.id ?? null});
+  const turn = await withLimitLine(store, bot, () => runBotTurn(store, {bot, envelope, executor: executeCustomBot, config, peers: roster, configFor: peerId => resolveConfig(store, peerId), memoryForPeer: (mate, mateConfig) => memoryFor(store, {bot: mate, config: mateConfig, chatKey: bot.id}), handoffAllowed: botSettings(bot).canHandoff, groupId: group?.id ?? null}));
   const raw = turn.output;
   const lines = turn.lines;
   const groupId = group?.id;

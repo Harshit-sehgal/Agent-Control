@@ -7,18 +7,18 @@
  * team, agents, data) load the existing admin forms from ui-admin.js into the body.
  *
  * The lists behind it are pure and tested in ui-profile-model.js. */
-import {face} from './ui-face.js?v=3b9121ac3d';
-import {botStatus} from './ui-company.js?v=3b9121ac3d';
-import {primaryOf} from './company.js?v=3b9121ac3d';
-import {esc, icon, btn, empty, note, roundBtn, switchBtn} from './ui-kit.js?v=3b9121ac3d';
-import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, loadLocal, applyTheme, themeChoice, THEMES} from './ui-store.js?v=3b9121ac3d';
-import {isDesk, initials, pageFrame, HIDDEN_KEY} from './ui-shell.js?v=3b9121ac3d';
-import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=3b9121ac3d';
-import {faceOf, activityBlocks} from './ui-profile.js?v=3b9121ac3d';
+import {face} from './ui-face.js?v=09349b7571';
+import {botStatus} from './ui-company.js?v=09349b7571';
+import {primaryOf} from './company.js?v=09349b7571';
+import {esc, icon, btn, empty, note, roundBtn, switchBtn} from './ui-kit.js?v=09349b7571';
+import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, loadLocal, applyTheme, themeChoice, THEMES} from './ui-store.js?v=09349b7571';
+import {isDesk, initials, pageFrame, HIDDEN_KEY} from './ui-shell.js?v=09349b7571';
+import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=09349b7571';
+import {faceOf, activityBlocks} from './ui-profile.js?v=09349b7571';
 import {
   ACTIVITY_FILTERS, activityUrl, companyTree, permissionRows, weekUsage, settingsSections, resolveSection,
-} from './ui-profile-model.js?v=3b9121ac3d';
-import {COLORS} from './ui-face.js?v=3b9121ac3d';
+} from './ui-profile-model.js?v=09349b7571';
+import {COLORS} from './ui-face.js?v=09349b7571';
 
 const el = id => document.getElementById(id);
 const ICONS = {general: 'gear', look: 'half', models: 'key', conn: 'plug', perm: 'shield', usage: 'chart', computer: 'monitor'};

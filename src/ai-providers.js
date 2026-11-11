@@ -12,6 +12,7 @@ import {fail} from '../shared/errors.js';
 import {envConfig,discoverModels,protocolOf,configReady,complete} from './ai.js';
 import {normaliseProtocol,inferProtocol,presetById,protocolById,LOCAL_CLI_KIND,LOCAL_CLI_ENGINES,cliEngineById,cleanCliModel} from '../shared/ai-presets.js';
 import {uuid} from '../shared/core.js';
+import {cliRunner} from './cli-model.js';
 
 const clean=(v,n)=>String(v??'').trim().slice(0,n);
 const validBase=u=>{try{const x=new URL(u);return (x.protocol==='http:'||x.protocol==='https:')&&!x.username&&!x.password&&!x.search&&!x.hash;}catch{return false;}};
@@ -316,7 +317,7 @@ export function resolveConfig(store,botId){
     // The workspace default model is an API model id; a CLI would only reject it.
     // A bot override that could read as a flag is dropped rather than passed on.
     const model=cleanCliModel(override?.model)||provider.model||'';
-    return {kind:LOCAL_CLI_KIND,engine:provider.engine,model,source:LOCAL_CLI_KIND,label:provider.label,providerId:provider.id,models:[]};
+    return {kind:LOCAL_CLI_KIND,engine:provider.engine,model,source:LOCAL_CLI_KIND,label:provider.label,providerId:provider.id,models:[],run:cliRunner(store,{botId,provider})};
   }
   if(provider){
     const config=providerConfig(store,provider);

@@ -24,6 +24,7 @@ import {runBotTurn} from './bot-turn.js';
 import {memoryFor,rememberTurn,maybeConsolidate} from './memory.js';
 import {executeCustomBot} from './ai.js';
 import {resolveConfig,aiAvailable} from './ai-providers.js';
+import {modelLimitLine} from './cli-model.js';
 import {activity} from '../shared/core.js';
 import {failAgentTasks} from './agent.js';
 const running=new Set();
@@ -414,7 +415,7 @@ async function runGroupInner(store,id,executor){
   // Only a run that was actually executing may be marked failed. A restart marks
   // live runs `interrupted`; overwriting that with `failed` would report a crash
   // the operator never saw as a model error and hide the explicit retry advice.
-  }catch(e){await store.update(s=>{const r=s.groupRuns?.find(x=>x.id===id);if(r&&r.status==='running'){endRun(r,'failed',{error:clean(e.message)});say(s,r,runNote(r));activity(s,'group-error',`Coordination failed: ${clean(e.message)}`,{runId:id});}});}
+  }catch(e){await store.update(s=>{const r=s.groupRuns?.find(x=>x.id===id);if(r&&r.status==='running'){endRun(r,'failed',{error:clean(e.message)});say(s,r,runNote(r));say(s,r,modelLimitLine(s,e,{runId:id}));activity(s,'group-error',`Coordination failed: ${clean(e.message)}`,{runId:id});}});}
   finally{
     running.delete(id);
     // A fast local agent can return while autoDispatch is still awaited above.

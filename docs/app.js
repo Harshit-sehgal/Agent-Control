@@ -18,16 +18,16 @@
  *   ui-dialogs      toast, sheet, confirm/ask      ui-actions action/form tables
  *   ui-fx           confetti, the send arrow and the bots' ambient life
  */
-import {companyRoute} from './ui-company.js?v=3b9121ac3d';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=3b9121ac3d';
-import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=3b9121ac3d';
-import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, closeSearch, homeView} from './ui-shell.js?v=3b9121ac3d';
-import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=3b9121ac3d';
-import {profileViews, wirePages} from './ui-profile.js?v=3b9121ac3d';
-import {settingsViews} from './ui-settings.js?v=3b9121ac3d';
-import {showLogin, hideLogin} from './ui-sheets.js?v=3b9121ac3d';
-import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=3b9121ac3d';
-import {bringBotsToLife} from './ui-fx.js?v=3b9121ac3d';
+import {companyRoute} from './ui-company.js?v=09349b7571';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=09349b7571';
+import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=09349b7571';
+import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, closeSearch, homeView} from './ui-shell.js?v=09349b7571';
+import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=09349b7571';
+import {profileViews, wirePages} from './ui-profile.js?v=09349b7571';
+import {settingsViews} from './ui-settings.js?v=09349b7571';
+import {showLogin, hideLogin} from './ui-sheets.js?v=09349b7571';
+import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=09349b7571';
+import {bringBotsToLife} from './ui-fx.js?v=09349b7571';
 
 const el = id => document.getElementById(id);
 const hashRoute = () => normalizeRoute(companyRoute(location.hash, store.state));

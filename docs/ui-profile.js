@@ -5,18 +5,18 @@
  *
  * Pages repaint only when the route changes, so each in-place change (a switch, a
  * forgotten note, a picked colour) updates its own node instead. */
-import {SHAPES, COLORS, face} from './ui-face.js?v=3b9121ac3d';
-import {botStatus, botIsManager} from './ui-company.js?v=3b9121ac3d';
-import {primaryOf} from './company.js?v=3b9121ac3d';
-import {esc, icon, field, textInput, clock, roundBtn, switchBtn} from './ui-kit.js?v=3b9121ac3d';
-import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=3b9121ac3d';
-import {PINS_KEY, HIDDEN_KEY} from './ui-shell.js?v=3b9121ac3d';
-import {toast, confirmSheet} from './ui-dialogs.js?v=3b9121ac3d';
-import {sendChat} from './ui-chat.js?v=3b9121ac3d';
+import {SHAPES, COLORS, face} from './ui-face.js?v=09349b7571';
+import {botStatus, botIsManager} from './ui-company.js?v=09349b7571';
+import {primaryOf} from './company.js?v=09349b7571';
+import {esc, icon, field, textInput, clock, roundBtn, switchBtn} from './ui-kit.js?v=09349b7571';
+import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=09349b7571';
+import {PINS_KEY, HIDDEN_KEY} from './ui-shell.js?v=09349b7571';
+import {toast, confirmSheet} from './ui-dialogs.js?v=09349b7571';
+import {sendChat} from './ui-chat.js?v=09349b7571';
 import {
   MAX_NAME, hasJob, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, lookOf, newBotDefaults,
   newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, directReports, permissionLabel, closeTarget,
-} from './ui-profile-model.js?v=3b9121ac3d';
+} from './ui-profile-model.js?v=09349b7571';
 
 const el = id => document.getElementById(id);
 const MUTED_KEY = 'ac-muted';
