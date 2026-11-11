@@ -92,8 +92,8 @@ Layout (owner's design, 2026-11-11):
 - **There is no sidebar.** Three floating buttons stay put while the page scrolls:
   - **+** at the top right hires a new bot.
   - **Settings** sits in the bottom-left corner.
-  - **New thread** (notebook-and-pen icon) sits next to it.
-  - The bottom-left pair lifts above the composer when a thread is open.
+  - **New thread** (notebook-and-pen icon) sits in the bottom-right corner (owner, 2026-11-11).
+  - Both bottom buttons lift above the composer when a thread is open.
 - **New thread** opens the composer screen. It shows the lineup of bot faces, the question "What should the company get done?", a large composer and four starters.
 - **Settings opens a drawer from the left** with:
   - the owner, plus Pause all

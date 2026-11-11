@@ -90,7 +90,8 @@ kbd{font-family:var(--body);font-size:11px;color:var(--muted);border:1px solid v
 .dock .fab{position:static}
 .fab-set{width:46px;height:46px;justify-content:center;position:relative}
 .fab-set .badge{position:absolute;top:-3px;right:-3px}
-.fab-new{height:46px;padding:0 18px 0 14px;font-weight:600;background:var(--fg);color:var(--bg)}
+.fab-new{height:46px;padding:0 18px 0 14px;font-weight:600;background:var(--fg);color:var(--bg);right:max(18px,env(safe-area-inset-right,0px));bottom:calc(18px + env(safe-area-inset-bottom,0px))}
+.has-composer .fab-new{bottom:calc(104px + env(safe-area-inset-bottom,0px))}
 .looks{position:fixed;z-index:20;bottom:calc(18px + env(safe-area-inset-bottom,0px));left:50%;translate:-50% 0;display:flex;gap:2px;background:var(--raise);box-shadow:var(--float);border-radius:99px;padding:4px;font-size:12.5px}
 .has-composer .looks{display:none}
 .looks span{padding:6px 8px 6px 12px;color:var(--muted)}
@@ -290,7 +291,8 @@ select.sel{border:0;border-radius:8px;background:var(--sunk);padding:5px 8px;fon
   .looks span{display:none}
   .fab-new .lbl{display:none}
   .fab-new{width:46px;padding:0;justify-content:center}
-  .looks{left:auto;right:max(18px,env(safe-area-inset-right,0px));translate:none}
+  .looks{left:50%;translate:-50% 0}
+  .looks button{padding:6px 9px}
 }
 @media (prefers-reduced-motion:reduce){*,*::before{animation:none!important;transition:none!important}}
 </style>
@@ -300,8 +302,8 @@ select.sel{border:0;border-radius:8px;background:var(--sunk);padding:5px 8px;fon
   <button class="fab fab-bot" id="fabBot" aria-label="New bot" title="New bot"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
   <div class="dock">
     <button class="fab fab-set" id="fabSet" aria-label="Settings and more" title="Settings and more"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M4 7.4l2.1 1.2M17.9 15.4l2.1 1.2M4 16.6l2.1-1.2M17.9 8.6 20 7.4"/></svg><span id="setBadge"></span></button>
-    <button class="fab fab-new" id="fabNew" aria-label="New thread"><svg class="i" viewBox="0 0 24 24"><path d="M6 3.5h9.5A2.5 2.5 0 0 1 18 6v12.5a2 2 0 0 1-2 2H6z"/><path d="M6 3.5v17M9.5 8h5M9.5 11.5h3"/><path d="m20.5 9.5-6.2 6.2-2.3.6.6-2.3 6.2-6.2a1.2 1.2 0 0 1 1.7 1.7z"/></svg><span class="lbl">New thread</span></button>
   </div>
+  <button class="fab fab-new" id="fabNew" aria-label="New thread"><svg class="i" viewBox="0 0 24 24"><path d="M6 3.5h9.5A2.5 2.5 0 0 1 18 6v12.5a2 2 0 0 1-2 2H6z"/><path d="M6 3.5v17M9.5 8h5M9.5 11.5h3"/><path d="m20.5 9.5-6.2 6.2-2.3.6.6-2.3 6.2-6.2a1.2 1.2 0 0 1 1.7 1.7z"/></svg><span class="lbl">New thread</span></button>
   <div class="looks" role="group" aria-label="Compare looks"><span>Compare looks</span><button data-look="soft" class="on">Soft studio</button><button data-look="ink">Ink &amp; paper</button><button data-look="night">Night desk</button></div>
   <div class="scrim" id="scrim"></div>
   <aside class="drawer" id="drawer" aria-label="Menu" aria-hidden="true"></aside>
