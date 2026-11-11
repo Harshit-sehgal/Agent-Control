@@ -91,7 +91,8 @@ test('an Always-allowed send is held, logged with an Undo window, and goes out w
   assert.equal(line.activityId, entry.id);
   assert.equal(line.undoUntil, entry.undoUntil);
   await until(() => w.google.state.sent.length === 1, 'the window to end');
-  assert.match(w.store.read().chats[w.ids.mail].filter(m => m.role === 'system').at(-1).text, /was sent/);
+  // The "was sent" line and the run's own "Done" note land in either order on a slow machine.
+  await until(() => w.store.read().chats[w.ids.mail].some(m => m.role === 'system' && /was sent/.test(m.text)), 'the sent line');
   assert.deepEqual(w.store.read().heldSends ?? [], []);
 });
 
