@@ -99,11 +99,12 @@
 .ch-me .ini{width:46px;height:46px}
 .ch-new{right:max(18px,env(safe-area-inset-right,0px));background:var(--raise);box-shadow:var(--ring);transition:scale .15s}
 .ch-new svg{width:20px;height:20px}
-.ch-ind{position:absolute;top:calc(22px + var(--pad-t));left:50%;translate:-50% 0;display:grid;grid-template-columns:1fr 1fr;padding:3px;border-radius:99px;background:var(--raise);box-shadow:var(--ring);font-size:13px;font-weight:600;pointer-events:none;user-select:none}
-.ch-ind span:not(.thumb){position:relative;z-index:1;padding:6px 14px;text-align:center;color:var(--muted);transition:color .25s}
+.ch-ind{position:absolute;top:calc(22px + var(--pad-t));left:50%;translate:-50% 0;display:grid;grid-template-columns:1fr 1fr;padding:3px;border-radius:99px;background:var(--raise);box-shadow:var(--ring);font-size:13px;font-weight:600;user-select:none}
+.ch-ind button{position:relative;z-index:1;padding:6px 14px;border:0;background:none;font:inherit;text-align:center;color:var(--muted);cursor:pointer;transition:color .25s}
 .ch-ind .thumb{position:absolute;top:3px;bottom:3px;left:3px;width:calc(50% - 3px);border-radius:99px;background:color-mix(in srgb,var(--fg) 13%,var(--raise));transition:transform .3s cubic-bezier(.2,.8,.2,1)}
 .ch-ind[data-on="threads"] .thumb{transform:translateX(100%)}
-.ch-ind[data-on="bots"] span:nth-child(2),.ch-ind[data-on="threads"] span:nth-child(3){color:var(--fg)}
+.ch-ind[data-on="bots"] button:nth-child(2),.ch-ind[data-on="threads"] button:nth-child(3){color:var(--fg)}
+.ch-ind button:focus-visible{outline:2px solid var(--wait);outline-offset:1px;border-radius:99px}
 .ch-bar{position:absolute;left:max(16px,calc(50% - 360px));right:max(16px,calc(50% - 360px));bottom:calc(14px + var(--pad-b));display:flex;gap:10px;align-items:center;min-width:0}
 .ch-bar::before{content:'';position:absolute;z-index:-1;left:-16px;right:-16px;top:-30px;bottom:calc(-14px - var(--pad-b));background:linear-gradient(to bottom,transparent,var(--bg) 45%);pointer-events:none}
 .ch-thread{position:relative;width:52px;height:52px;flex:none;border-radius:50%;display:grid;place-items:center;background:var(--raise);box-shadow:var(--ring);transition:scale .15s}

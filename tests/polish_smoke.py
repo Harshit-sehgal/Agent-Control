@@ -327,6 +327,12 @@ async def phone_flow(page, base):
     await expect(page.locator('#main .hv-empty')).to_contain_text('No threads yet')
     await swipe(60, 300)
     await expect(page.locator('#ch-ind')).to_have_attribute('data-on', 'bots')
+    # A tap on the pill switches too, not only a swipe.
+    await page.locator('#ch-ind [data-section="threads"]').click()
+    await expect(page.locator('#ch-ind')).to_have_attribute('data-on', 'threads')
+    await expect(page.locator('#main .hv')).to_have_attribute('data-section', 'threads')
+    await page.locator('#ch-ind [data-section="bots"]').click()
+    await expect(page.locator('#ch-ind')).to_have_attribute('data-on', 'bots')
     # A bot chat hides the chrome; back goes home, to the same section.
     await page.locator(f'#main .crow[data-id="{ids["Writer"]}"]').click()
     await expect(body).to_have_attribute('data-view', 'chat')

@@ -5,11 +5,11 @@
  * Home is the Chats layout only. On a phone it is two sections, Bots and Threads,
  * switched by swiping; on a laptop the sidebar holds both and the chat opens on the
  * right. The lists come from ui-company.js (pure); this file is markup and events. */
-import {botRows, threadRows} from './ui-company.js?v=b1289b89af';
-import {face} from './ui-face.js?v=b1289b89af';
-import {esc, icon, stamp} from './ui-kit.js?v=b1289b89af';
-import {pauseBanner} from './ui-asks.js?v=b1289b89af';
-import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, isStaticDemo} from './ui-store.js?v=b1289b89af';
+import {botRows, threadRows} from './ui-company.js?v=cdaeca7680';
+import {face} from './ui-face.js?v=cdaeca7680';
+import {esc, icon, stamp} from './ui-kit.js?v=cdaeca7680';
+import {pauseBanner} from './ui-asks.js?v=cdaeca7680';
+import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, isStaticDemo} from './ui-store.js?v=cdaeca7680';
 
 const el = id => document.getElementById(id);
 const DESK = '(min-width:1024px)';
@@ -158,7 +158,7 @@ export function mountChrome() {
   const write = canWrite();
   el('chrome').innerHTML = `
     <button type="button" class="ch-me" data-action="open-settings" aria-label="Your account and settings"><span class="ini" id="ch-ini"></span></button>
-    <div class="ch-ind" id="ch-ind" data-on="bots" role="status"><span class="thumb" aria-hidden="true"></span><span>Bots</span><span>Threads</span></div>
+    <div class="ch-ind" id="ch-ind" data-on="bots" role="tablist" aria-label="Show bots or threads"><span class="thumb" aria-hidden="true"></span>${SECTIONS.map(s => `<button type="button" role="tab" data-action="home-section" data-section="${s}">${s === 'bots' ? 'Bots' : 'Threads'}</button>`).join('')}</div>
     ${write ? `<button type="button" class="ch-new" data-action="new-bot" aria-label="New bot" title="New bot">${icon('plus', 20)}</button>` : ''}
     <div class="ch-bar">
       <div class="ch-res" id="ch-res" hidden></div>
@@ -176,7 +176,7 @@ export function renderChrome() {
   el('ch-ini').textContent = initials();
   const ind = el('ch-ind');
   ind.dataset.on = store.section;
-  ind.setAttribute('aria-label', store.section === 'threads' ? 'Threads. Swipe right for Bots.' : 'Bots. Swipe left for Threads.');
+  for (const tab of ind.querySelectorAll('[role="tab"]')) tab.setAttribute('aria-selected', String(tab.dataset.section === store.section));
   const waiting = waitingThreads(), badge = el('ch-badge');
   if (badge) badge.innerHTML = waiting ? `<span class="badge" aria-label="${waiting} waiting on you">${waiting}</span>` : '';
 }
@@ -268,6 +268,7 @@ export const shellActions = {
   'new-bot': () => go({newBot: true}),
   'new-thread': () => go({newThread: true}),
   'back-to-list': () => back({home: true}),
+  'home-section': b => switchSection(b.dataset.section, b.dataset.section === 'threads' ? 1 : -1),
   'rail-section': b => { if (SECTIONS.includes(b.dataset.section)) { store.section = b.dataset.section; renderRail(); } },
 };
 

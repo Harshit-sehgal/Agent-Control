@@ -22,19 +22,19 @@
  *   ui-dialogs      toast, sheet, confirm/ask      ui-actions action/form tables
  *   ui-fx           confetti, the send arrow and the bots' ambient life
  */
-import {companyRoute} from './ui-company.js?v=b1289b89af';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=b1289b89af';
-import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=b1289b89af';
-import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, renderPause, closeSearch, homeView} from './ui-shell.js?v=b1289b89af';
-import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=b1289b89af';
-import {profileViews, wirePages} from './ui-profile.js?v=b1289b89af';
-import {wireGestures, gesturesBusy} from './ui-gestures.js?v=b1289b89af';
-import {settingsViews} from './ui-settings.js?v=b1289b89af';
-import {showLogin, hideLogin} from './ui-sheets.js?v=b1289b89af';
-import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=b1289b89af';
-import {bringBotsToLife} from './ui-fx.js?v=b1289b89af';
-import {wireComputer} from './ui-computer-view.js?v=b1289b89af';
-import {googleReturn, withoutGoogleParams} from './ui-connect-model.js?v=b1289b89af';
+import {companyRoute} from './ui-company.js?v=cdaeca7680';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=cdaeca7680';
+import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=cdaeca7680';
+import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, renderPause, closeSearch, homeView} from './ui-shell.js?v=cdaeca7680';
+import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=cdaeca7680';
+import {profileViews, wirePages} from './ui-profile.js?v=cdaeca7680';
+import {wireGestures, gesturesBusy} from './ui-gestures.js?v=cdaeca7680';
+import {settingsViews} from './ui-settings.js?v=cdaeca7680';
+import {showLogin, hideLogin} from './ui-sheets.js?v=cdaeca7680';
+import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=cdaeca7680';
+import {bringBotsToLife} from './ui-fx.js?v=cdaeca7680';
+import {wireComputer} from './ui-computer-view.js?v=cdaeca7680';
+import {googleReturn, withoutGoogleParams} from './ui-connect-model.js?v=cdaeca7680';
 
 const el = id => document.getElementById(id);
 const hashRoute = () => normalizeRoute(companyRoute(location.hash, store.state));

@@ -2,18 +2,18 @@
  * LLM output may only extend a run's recipients through `handoffTargets`, which
  * revalidates every target against this policy and the step cap.
  */
-import {botSettings,groupSettings,pipelineOf,MAX_STEPS_LIMIT} from './bot-settings.js?v=b1289b89af';
-import {BROWSER_TOOL_HINT} from './bot-browser.js?v=b1289b89af';
-import {CONNECTOR_TOOL_HINT} from './connectors.js?v=b1289b89af';
-import {SUBAGENT_PERMISSION,SUBAGENT_TOOL_HINT} from './subagents.js?v=b1289b89af';
-import {BOT_ASK_TOOL_HINT,companyList} from './bot-link.js?v=b1289b89af';
-import {limitText} from './ask-limits.js?v=b1289b89af';
-import {BOT_CREATE_TOOL_HINT,MAX_BOTS_PER_GROUP} from './bot-create.js?v=b1289b89af';
-import {memoryBlock} from './memory.js?v=b1289b89af';
-import {isThread} from './threads.js?v=b1289b89af';
-import {BUSY_STATUSES as BUSY} from './run-state.js?v=b1289b89af';
-import {companyBots,PRIMARY_GROUP,isLead,teamOf} from './company.js?v=b1289b89af';
-import {OFFJOB_RULE,OFFJOB_ANYWAY} from './off-job.js?v=b1289b89af';
+import {botSettings,groupSettings,pipelineOf,MAX_STEPS_LIMIT} from './bot-settings.js?v=cdaeca7680';
+import {BROWSER_TOOL_HINT} from './bot-browser.js?v=cdaeca7680';
+import {CONNECTOR_TOOL_HINT} from './connectors.js?v=cdaeca7680';
+import {SUBAGENT_PERMISSION,SUBAGENT_TOOL_HINT} from './subagents.js?v=cdaeca7680';
+import {BOT_ASK_TOOL_HINT,companyList} from './bot-link.js?v=cdaeca7680';
+import {limitText} from './ask-limits.js?v=cdaeca7680';
+import {BOT_CREATE_TOOL_HINT,MAX_BOTS_PER_GROUP} from './bot-create.js?v=cdaeca7680';
+import {memoryBlock} from './memory.js?v=cdaeca7680';
+import {isThread} from './threads.js?v=cdaeca7680';
+import {BUSY_STATUSES as BUSY} from './run-state.js?v=cdaeca7680';
+import {companyBots,PRIMARY_GROUP,isLead,teamOf} from './company.js?v=cdaeca7680';
+import {OFFJOB_RULE,OFFJOB_ANYWAY} from './off-job.js?v=cdaeca7680';
 
 /** The default step count of a run; a group may set its own up to MAX_STEPS_LIMIT. */
 export const MAX_HANDOFFS = 6;
@@ -21,7 +21,7 @@ export const MAX_CONTEXT_CHARS = 3600;
 /** Which run statuses are busy or interruptible is decided once in
  * `shared/run-state.js`; re-exported here because callers have reached for them
  * through the coordination module since they were declared here. */
-export {BUSY_STATUSES, INTERRUPT_STATUSES} from './run-state.js?v=b1289b89af';
+export {BUSY_STATUSES, INTERRUPT_STATUSES} from './run-state.js?v=cdaeca7680';
 const normalize = value => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 const safe = value => String(value ?? '').slice(0, MAX_CONTEXT_CHARS);
 const fail = (message, status) => Object.assign(new Error(message), {status});
