@@ -651,7 +651,7 @@ function botsView(){
   const lately=`<section class="recent"><h3 class="sect">Lately</h3>${S.threads.slice(0,5).map(t=>{const o=t.owner&&by(t.owner);return `<button class="trow" data-open="${t.id}">${o?face(o,'s',''):''}<span class="w">${esc(t.title)}</span><small>${o?o.name:''}${t.at?' · '+ago(t.at):''}</small></button>`}).join('')||'<p class="sub">Nothing yet.</p>'}</section>`;
   return `<div class="view"><div class="home h-${v}">
     <header class="hh"><div><div class="when">${d.toLocaleDateString(undefined,{weekday:'long'})} ${part}${S.paused?' · <button class="link" data-pause>paused, resume</button>':''}</div><h1>${v==='chats'?'Chats':'Your bots'}</h1></div>
-      <div class="hv"><div class="seg" role="tablist" aria-label="Home view">${[['desks','Desks'],['tree','List'],['chats','Chats'],['orbit','Orbit']].map(([k,l])=>`<button class="${v===k?'on':''}" data-home-v="${k}" role="tab" aria-selected="${v===k}">${l}</button>`).join('')}</div><div class="dfl">${v===S.def?'Your default view':`<button class="link" data-defv="${v}">Make this my default</button>`}</div></div></header>
+</header>
     ${v==='orbit'?'':`<p class="hint">${matchMedia('(hover:none)').matches?'Touch and hold a bot to move it; drag it up to pin it. Hold still for options.':'Right-click a bot for options. Drag it onto another team, or up top to pin it.'}</p>`}
     ${body}${S.hidden.length?`<button class="link unhide" data-unhide>Show ${S.hidden.length} hidden</button>`:''}${v==='chats'?'':lately}
   </div></div>`;
@@ -778,7 +778,7 @@ function panelHTML(){
       <div class="line"><span class="w">Google<small>Gmail, Drive, Calendar</small></span><span class="ok">Connected</span></div>
       <div class="line"><span class="w">MCP servers<small>GitHub, Notion</small></span><button class="btn">Add server</button></div></div>
     <div class="group" id="sect-look"><h4>Appearance</h4>
-      <div class="line"><span class="w">Home view<small>What opens first</small></span><select class="sel" data-home-sel aria-label="Home view">${[['desks','Desks'],['tree','List'],['chats','Chats'],['orbit','Orbit']].map(([k,l])=>`<option value="${k}" ${S.def===k?'selected':''}>${l}</option>`).join('')}</select></div>
+      <div class="line"><span class="w">Home view<small>How your bots are laid out on the home page</small></span><select class="sel" data-home-sel aria-label="Home view">${[['desks','Desks'],['tree','List'],['chats','Chats'],['orbit','Orbit']].map(([k,l])=>`<option value="${k}" ${S.def===k?'selected':''}>${l}</option>`).join('')}</select></div>
       <div class="line"><span class="w">Look</span><select class="sel" data-look-sel aria-label="Look"><option value="soft" ${look==='soft'?'selected':''}>Soft studio</option><option value="ink" ${look==='ink'?'selected':''}>Ink &amp; paper</option><option value="night" ${look==='night'?'selected':''}>Night desk</option></select></div>
       <div class="line"><span class="w">Light or dark<small>Night desk is always dark</small></span><select class="sel" data-theme-sel aria-label="Light or dark"><option value="" ${th===''?'selected':''}>Follow system</option><option value="light" ${th==='light'?'selected':''}>Light</option><option value="dark" ${th==='dark'?'selected':''}>Dark</option></select></div></div>`;
   } else {

@@ -88,7 +88,7 @@ This revision replaces groups. Where it conflicts with anything below, this sect
 ## Interaction model (mock v12, the UX reference)
 
 Layout (owner's design, 2026-11-11):
-- **Home has four views** (mock v17): Desks, List, Chats and Orbit. A switch at the top right flips between them. **Desks is the default** (owner, 2026-11-11). Each person picks their own default with "Make this my default" under the switch, or with Settings → Appearance → Home view.
+- **Home has four layouts, one at a time** (owner, 2026-11-11, mock v22): Desks, List, Chats and Orbit. The home page shows only the chosen one, with no switch on the page. **Desks is the default**; each person picks theirs under Settings → Appearance → Home view, and it is remembered.
 - **Pin and move** (owner, 2026-11-11), in Desks, Chats and List:
   - **Pinned row** (owner, 2026-11-11, mock v21, after Grok's home): pinned bots sit in a centred row of large faces with names at the top of Desks, List and Chats. Atlas is always first and carries an orange star badge marking it as the primary; the star also shows on Atlas's face elsewhere at medium size and up. Pin from the menu or drag a bot up into the row (it outlines in mint); drag a pinned face down out of the row to unpin it, or sideways to reorder. In Chats, pinned bots leave the list. Desks themselves can still be pinned to the top.
   - **Gestures** (owner, 2026-11-11, mock v20). There are no pin or drag buttons; the whole bot is the handle. A small violet pin marks pinned items.
