@@ -98,10 +98,8 @@ test('the UI wires settings, scheduled tasks and guest mentions to the engine co
   // Destructive changes ask first.
   for (const message of ['Remove this scheduled task?', 'Remove ${bot.name} from ${group.name}?', 'Delete ${group.name}?'])
     assert.ok(js.includes(`confirmSheet(\`${message}`) || js.includes(`confirmSheet('${message}`), `${message} must be confirmed`);
-  // Group deletion is admin-only on the Node build and never offered for X-engage.
-  assert.match(js, /const removable = !isXGroup\(group\) && \(isAdmin\(\) \|\| isStaticDemo\(\)\)/);
-  assert.match(js, /An admin sets voice and timing for this workspace/);
-  assert.match(js, /canEdit \? btn\('Save'/);
+  // Group deletion is admin-only on the Node build.
+  assert.match(js, /const removable = isAdmin\(\) \|\| isStaticDemo\(\)/);
   // Runs now live on the workspace snapshot in both builds, so the list and
   // timeline read `recentRuns()` with no per-build merge and no separate log.
   assert.doesNotMatch(js, /localOnlyRuns|localRuns:/);

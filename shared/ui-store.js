@@ -1,7 +1,6 @@
 /** Single source of UI state: the server snapshot, the route, the conversations
  * it carries and cosmetic preferences. Views read from `store` and never
  * keep their own copies, so one `sync()` + one render keeps every pane current. */
-import {normalizeUiPrefs, UI_PREFS_KEY} from './usability.js';
 import {routeHash, tintOf} from './ui-model.js';
 import {createOutbox} from './chats.js';
 
@@ -29,15 +28,8 @@ export const store = {
   /** Conversations by id: the workspace's copy plus anything still being sent. */
   messages: {},
   profiles: loadLocal(META_KEY, {}),
-  prefs: normalizeUiPrefs(loadLocal(UI_PREFS_KEY, {})),
   listFilter: 'all',
   listQuery: '',
-  postQuery: '',
-  editDraft: null,
-  /** Unsaved text of the draft being edited, so a repaint cannot lose it. */
-  editText: null,
-  /** Draft ids whose sources panel is open; survives repaints. */
-  openEvidence: new Set(),
   /** Conversation ids with a reply in flight; drives the typing indicator. */
   typing: new Set(),
   /** The group settings pipeline being reordered: {groupId, rows}, unsaved. */
@@ -142,7 +134,6 @@ export const groups = () => store.state?.groups || [];
 export const teamKey = groupId => `team-${groupId}`;
 export const findGroup = id => groups().find(g => g.id === id);
 export const groupOfBot = botId => groups().find(g => g.bots.some(b => b.id === botId));
-export const isXGroup = group => group?.id === 'x-engage';
 export const botTint = (group, botId) => {
   const index = group?.bots.findIndex(b => b.id === botId) ?? 0;
   return tintOf(group?.bots[index] || {id: botId}, index, store.profiles);
@@ -174,22 +165,10 @@ export async function clearMessages(key) {
   // DELETE also cancels the runs this chat was waiting on, in both backends.
   await outbox.settle();
   await api(`/api/chats/${key}`, 'DELETE');
-  outbox.forget(key); delete store.messages[key]; store.openEvidence.clear(); changed();
+  outbox.forget(key); delete store.messages[key]; changed();
 }
 export function setTyping(key, on) { on ? store.typing.add(key) : store.typing.delete(key); changed('thread'); }
 export function setProfile(botId, patch) { store.profiles[botId] = {...(store.profiles[botId] || {}), ...patch}; saveLocal(META_KEY, store.profiles); }
-// normalizeUiPrefs is a whitelist, so it answers a caller with the default of any
-// key or value it does not know: the control would look stuck and the caller's
-// value would vanish. Both cases are refused out loud instead (the host toasts a
-// thrown error), and the four keys it does answer are the only prefs there are.
-const PREF_KEYS = Object.keys(normalizeUiPrefs());
-export function setPref(key, value) {
-  if (!PREF_KEYS.includes(key)) throw new Error(`Unknown UI preference: ${key}`);
-  const next = normalizeUiPrefs({...store.prefs, [key]: value});
-  if (next[key] !== value) throw new Error(`Unsupported value for ${key}: ${String(value)}`);
-  Object.assign(store.prefs, next);
-  saveLocal(UI_PREFS_KEY, store.prefs);
-}
 /** What the user picked: 'system' (default), 'cream' or 'cocoa'. */
 export const themeChoice = () => { const id = loadLocal(THEME_KEY, 'system'); return THEMES.some(t => t.id === id) ? id : 'system'; };
 const nightQuery = () => matchMedia('(prefers-color-scheme: dark)');
@@ -221,22 +200,9 @@ export const syncDepth = event => { depth = (event && event.state && typeof even
 /** In-app back: pop our own history entry when there is one, else go to `fallback`. */
 export function back(fallback = {}) { if (depth > 0) history.back(); else go(fallback, {replace: true}); }
 
-/** Everything that belongs to one conversation: the draft being edited, the
- * source panels that were open, and the Posts search. Called on every chat
- * change, from go() and from popstate, so Back/Forward cannot carry one chat's
- * editor or search into another. */
-export function resetChatState() {
-  store.editDraft = null;
-  store.editText = null;
-  store.openEvidence.clear();
-  store.postQuery = '';
-}
-
 /** Navigate. Every pane repaints from `store.route`, and the hash keeps
  * browser Back/Forward and reload working. */
 export function go({chat = null, page = null, info = null} = {}, {replace = false} = {}) {
-  // An edit in progress survives opening the info panel, not leaving the chat.
-  if (chat !== store.route.chat) resetChatState();
   store.route = {chat, page, info};
   const hash = `#${routeHash(store.route)}`;
   if (location.hash !== hash) {

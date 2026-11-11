@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile, readdir} from 'node:fs/promises';
-import {classifyMessage, botSuggestions, statusSummary} from '../shared/chat-engine.js';
 const html=await readFile(new URL('../shared/index.html',import.meta.url),'utf8');
 // The UI is app.js plus the ui-*.js modules; assertions match across all of them.
 const sharedDir=new URL('../shared/',import.meta.url);
@@ -12,29 +11,9 @@ test('Pages build has safe relative assets, modal and accessible chat structure'
   assert.match(html,/\.\/app\.js/);assert.match(html,/\.\/app\.css/);assert.match(html,/\.\/local-api\.js/);
   assert.match(html,/Data is saved only in this browser/);assert.match(html,/id="inspector"/);
   assert.match(app,/id="chat-form"/);assert.match(app,/id="new-bot-form"/);
-  assert.match(app,/id="candidate-form"/);assert.match(app,/id="new-group-form"/);
-  assert.match(app,/Manual posting handoff|Manual final posting|manual Post click/);
+  assert.match(app,/id="new-group-form"/);
   assert.match(css,/@media\(max-width:850px\)/);
 });
-test('Offline chat command classifier covers common workflows without inventing AI',()=>{
-  assert.equal(classifyMessage('show pending approvals').intent,'approvals');
-  assert.equal(classifyMessage('draft a reply').intent,'draft');
-  assert.equal(classifyMessage('scan candidates').intent,'discover');
-  assert.equal(classifyMessage('show status').intent,'status');
-  assert.equal(classifyMessage('set reminder').intent,'schedules');
-  assert.equal(classifyMessage('create bot named Analyst').name,'Analyst');
-  assert.equal(classifyMessage('').intent,'empty');
-  assert.equal(classifyMessage('Create a new bot').name,null);
-});
-test('Status reflects current draft states',()=>{
-  const summary=statusSummary({candidates:[{},{}],drafts:[{status:'pending'},{status:'ready'},{status:'posted'}]});
-  assert.match(summary,/2 candidates/);assert.match(summary,/1 awaiting approval/);assert.match(summary,/1 ready/);
-});
-test('Specialist suggestions remain relevant',()=>{
-  assert.ok(botSuggestions('Scout').some(x=>/candidate/i.test(x)));
-  assert.ok(botSuggestions('Writer').some(x=>/Draft/i.test(x)));
-});
-
 test('custom bots run through the Node provider only on the server build',()=>{
   // The README promises custom bots run when a key is configured; the UI used
   // to answer every custom bot with the offline command demo instead.
@@ -63,17 +42,13 @@ test('custom bots run through the Node provider only on the server build',()=>{
   assert.match(app,/runWithTyping\(\{key, setTyping, sync, concurrent: true,/);
   assert.match(app,/runButtons\(\{status, live\}\)/);
   assert.match(app,/flags\.checkpoint \? btn\('Approve next step', 'continue-run'/);
-  assert.match(app,/drafts \? `<button type="button" class="needs-pill" data-action="open-section" data-section="drafts"/);
   // The chat header and the info panel read the same "waiting on you" answer.
-  assert.match(app,/const \{drafts, plans, pauses, pages, feeds\} = waitingOnYou\(store\.state, conv\.id, held\)/);
+  assert.match(app,/const \{plans, pauses, pages, feeds\} = waitingOnYou\(store\.state, conv\.id, held\)/);
   assert.match(app,/const waiting = waitingOnYou\(state, conv\.id, runs\)/);
   assert.match(app,/paused \? `\$\{paused\} paused`/);
   assert.match(app,/Waiting on a page/);
-  assert.match(app,/An admin sets voice and timing for this workspace/);
-  assert.match(app,/if \(!isAdmin\(\) && !isStaticDemo\(\)\) throw new Error\('An admin sets voice and timing\.'\)/);
   assert.match(app,/Viewers cannot send messages/);
   assert.match(app,/A member can change group settings/);
-  assert.match(app,/write \? iconBtn\('plus', 'Share a post'/);
   assert.match(app,/write && flags\.checkpoint \? btn\('Approve next step'/);
   assert.match(app,/Viewers can read chats\. A member can send\./);
   // A plan's Start and Cancel are now routed like every other decision, not

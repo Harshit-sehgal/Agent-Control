@@ -107,6 +107,6 @@ test('the select chevron follows the theme instead of a hard-coded colour', () =
   assert.match(css, /select\.input\{appearance:none;padding-right:34px;background-image:linear-gradient\(45deg,transparent 50%,var\(--muted\) 50%\)/);
   // A `background` shorthand on a select would wipe the image back out, which is
   // why the host selectors below set the colour only.
-  assert.match(css, /\.box \.input,\.draft \.input,\.sheet \.input\{background-color:var\(--raised\)\}/);
+  assert.match(css, /\.box \.input,\.sheet \.input\{background-color:var\(--raised\)\}/);
   assert.match(css, /\.sheet \.input\{background-color:var\(--surface\)\}/);
 });

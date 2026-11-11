@@ -1,10 +1,9 @@
-/** The sheets a conversation can raise (new chat, new bot, share a post, set a
- * reminder), plus the two full-screen layers: quick navigation and sign-in. */
+/** The sheets a conversation can raise (new chat, new bot, a scheduled task),
+ * plus the two full-screen layers: quick navigation and sign-in. */
 import {esc, icon, btn, row, field, note} from './ui-kit.js';
-import {store, groups, conversation, isStaticDemo, isAdmin, isXGroup, teamKey, go} from './ui-store.js';
+import {groups, conversation, isStaticDemo, isAdmin, teamKey, go} from './ui-store.js';
 import {openSheet, closeSheet, captureFocus, restoreFocus, focusOrigin} from './ui-dialogs.js';
 import {tintPicker} from './ui-panel.js';
-import {minuteCeil} from './core.js';
 
 const el = id => document.getElementById(id);
 
@@ -44,33 +43,11 @@ export function newGroupSheet() {
 /** The composer's + button: what you can drop into this conversation. */
 export function attachSheet() {
   const conv = conversation(); if (!conv) return;
-  const x = isXGroup(conv.group);
   const lead = glyph => `<span class="avatar avatar-plain small">${icon(glyph, 20)}</span>`;
   openSheet(`<div class="box">
-    ${x ? row({lead: lead('link'), title: 'Share a post', sub: 'Paste a post from X for the bots to work on.', action: 'share-post'}) : ''}
-    ${x ? row({lead: lead('clock'), title: 'Set a reminder', sub: 'Get nudged to check new posts.', action: 'new-reminder'}) : ''}
-    ${x ? row({lead: lead('spark'), title: 'Load sample posts', sub: 'Three example posts to try the flow.', action: 'load-samples'}) : ''}
     ${row({lead: lead('clock'), title: 'Schedule a task', sub: `${conv.isTeam ? 'The group' : esc(conv.name)} does it on a timer and answers here.`, action: 'new-bot-task'})}
     ${row({lead: lead('bot'), title: 'Add a bot', sub: `A new bot in ${esc(conv.group.name)}.`, action: 'add-bot-to-group', id: conv.group.id})}
   </div>`, {title: 'Add to this chat'});
-}
-export function sharePostSheet() {
-  openSheet(`<form id="candidate-form" class="form">
-    ${field('Post link', `<input class="input" type="url" name="url" placeholder="https://x.com/user/status/…" required autofocus>`)}
-    ${field('What it says', `<textarea class="input" name="text" rows="4" minlength="12" placeholder="Paste the post text" required></textarea>`)}
-    <div class="form-grid">${field('Author', `<input class="input" name="author" placeholder="Account name">`)}${field('Topic', `<input class="input" name="topic" placeholder="AI, robotics">`)}</div>
-    ${btn('Share with the group', null, {kind: 'primary', type: 'submit', wide: true})}
-  </form>${note(isStaticDemo() ? 'The browser extension captures posts for the Node build. This demo takes pasted posts only.' : 'Tip: the browser extension captures a post in one click.')}`, {title: 'Share a post'});
-}
-export function reminderSheet() {
-  openSheet(`<form id="schedule-form" class="form">
-    ${field('Remind me to', `<input class="input" name="label" placeholder="Review new discussions" required autofocus>`)}
-    ${field('How often', `<select class="input" name="kind"><option value="interval">Repeat</option><option value="once">Once, at a set time</option></select>`)}
-    ${field('Every (minutes)', `<input class="input" name="intervalMinutes" type="number" value="60" min="1" max="10080">`)}
-    ${field('At', `<input class="input" name="nextAt" type="datetime-local">`)}
-    ${btn('Set reminder', null, {kind: 'primary', type: 'submit', wide: true})}
-  </form>`, {title: 'New reminder'});
-  toggleReminderFields();
 }
 /** A scheduled prompt for the open chat; its answer posts back into the chat. */
 export function botTaskSheet() {
@@ -85,27 +62,8 @@ export function botTaskSheet() {
   </form>`, {title: 'Schedule a task', sub: `${conv.isTeam ? conv.group.name : conv.name} answers in this chat.`});
   toggleReminderFields('bot-task-form');
 }
-/** A `datetime-local` value is the wall clock the person is looking at, so the
- * sheet builds and sends it in local time and the server only ever sees an ISO
- * instant. */
-function localInput(when) {
-  const d = new Date(when.getTime() - when.getTimezoneOffset() * 60000);
-  return d.toISOString().slice(0, 16);
-}
-/** Approve now, publish at a time a person picked instead of the delay window. */
-export function scheduleDraftSheet(id) {
-  const draft = store.state.drafts.find(d => d.id === id);
-  if (!draft) throw new Error('That draft is no longer here.');
-  const soon = new Date(Date.now() + 30 * 60000);
-  openSheet(`<form id="approve-form" class="form">
-    <input type="hidden" name="draft" value="${esc(id)}">
-    ${field('Publish at', `<input class="input" type="datetime-local" name="at" required autofocus value="${esc(localInput(soon))}" min="${esc(localInput(new Date(minuteCeil(Date.now() + 60000))))}">`)}
-    ${btn('Approve for that time', null, {kind: 'primary', type: 'submit', wide: true})}
-  </form>${note('Approving freezes the exact text. If you edit it afterwards, the approval is cleared.')}`, {title: 'Schedule this draft', sub: `${esc(draft.author)} · revision ${Number(draft.revision)}`});
-}
-
 /** Repeat shows the interval; Once swaps it for a date and time. */
-export function toggleReminderFields(formId = 'schedule-form') {
+export function toggleReminderFields(formId = 'bot-task-form') {
   const form = el(formId); if (!form) return;
   const once = form.elements.namedItem('kind').value === 'once', every = form.elements.namedItem('intervalMinutes'), at = form.elements.namedItem('nextAt');
   every.disabled = once; at.disabled = !once; at.required = once;
@@ -126,25 +84,10 @@ function commands() {
   for (const g of groups()) {
     const team = teamKey(g.id);
     items.push({label: g.name, hint: 'Group chat', run: () => go({chat: team})});
-    if (isXGroup(g)) for (const [section, label] of [['drafts', 'Waiting on you'], ['posts', 'Posts found'], ['reminders', 'Reminders'], ['runs', 'Runs'], ['voice', 'Voice and timing']]) items.push({label: `${g.name} · ${label}`, hint: 'Group', run: () => go({chat: team, info: section})});
-    for (const [section, label] of [['group-settings', 'Group settings'], ['tasks', 'Scheduled tasks']]) items.push({label: `${g.name} · ${label}`, hint: 'Group', run: () => go({chat: team, info: section})});
+    for (const [section, label] of [['runs', 'Runs'], ['group-settings', 'Group settings'], ['tasks', 'Scheduled tasks']]) items.push({label: `${g.name} · ${label}`, hint: 'Group', run: () => go({chat: team, info: section})});
     for (const b of g.bots) items.push({label: b.name, hint: `${g.name} · bot`, run: () => go({chat: b.id})}, {label: `${b.name} · Scheduled tasks`, hint: `${g.name} · bot`, run: () => go({chat: b.id, info: 'tasks'})});
   }
   return items;
-}
-/** Drafts and captured posts by their text, not just their names: "where was
- * that reply about the pricing page" is the search people actually run, and the
- * palette is the only search the app has. */
-function textResults(q) {
-  if (q.length < 2) return [];
-  const feed = groups().find(isXGroup); if (!feed) return [];
-  const team = teamKey(feed.id), clip = text => { const s = String(text || '').replace(/\s+/g, ' ').trim(); return s.length > 70 ? `${s.slice(0, 70)}…` : s; };
-  const out = [];
-  for (const d of (store.state.drafts || []).filter(d => String(d.text || '').toLowerCase().includes(q)).slice(0, 4))
-    out.push({label: clip(d.text), hint: `Draft · ${d.status}`, run: () => go({chat: team, info: 'drafts'})});
-  for (const c of (store.state.candidates || []).filter(c => `${c.text || ''} ${c.author || ''}`.toLowerCase().includes(q)).slice(0, 4))
-    out.push({label: clip(c.text), hint: `Post · ${c.author || 'unknown author'}`, run: () => go({chat: team, info: 'posts'})});
-  return out;
 }
 export const paletteOpen = () => !el('command').classList.contains('hidden');
 /** Focus never leaves #command-input (the arrows only move a class), so the input
@@ -160,9 +103,7 @@ function syncCommandActive() {
 }
 export function updateCommandResults(value = '') {
   const q = value.trim().toLowerCase();
-  // What matched by name first, then what matched by text: a page called
-  // "Waiting on you" should not be pushed below a draft that quotes the word.
-  entries = [...commands().filter(x => `${x.label} ${x.hint}`.toLowerCase().includes(q)), ...textResults(q)].slice(0, 16);
+  entries = commands().filter(x => `${x.label} ${x.hint}`.toLowerCase().includes(q)).slice(0, 16);
   const area = el('command-results'); if (!area) return;
   area.innerHTML = entries.length ? entries.map((entry, i) => `<button type="button" class="command-item${i === 0 ? ' selected' : ''}" id="command-item-${i}" data-action="command-choice" data-index="${i}" role="option" aria-selected="${i === 0}"><span>${esc(entry.label)}</span><small>${esc(entry.hint)}</small></button>`).join('') : '<div class="empty"><strong>Nothing matches</strong></div>';
   area.setAttribute('aria-label', entries.length ? `${entries.length} results` : 'No results');

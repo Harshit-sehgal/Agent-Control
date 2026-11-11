@@ -63,32 +63,20 @@ test('URLs are validated before being placed in an href', () => {
 test('every untrusted URL in the views goes through validHttpUrl', () => {
   const views = sources['ui-views.js'];
   assert.match(views, /import \{[^}]*\bvalidHttpUrl\b[^}]*\} from '\.\/core\.js'/);
-  // The four sinks: a captured draft's url, an evidence link, the post a draft is
-  // about and the page a bot asked to open.
-  for (const sink of ['draft.url', 'e.link']) {
-    const match = new RegExp(`(\\w+) = validHttpUrl\\(${sink.replace('.', '\\.')}\\)`).exec(views);
-    assert.ok(match, `${sink} must be validated where it is read`);
-  }
-  for (const sink of ['post.url', 'request.url']) {
+  // The sink: the page a bot asked to open.
+  for (const sink of ['request.url']) {
     assert.ok(views.includes(`safeHref(${sink})`), `${sink} must be validated where it is used`);
   }
   // No href may be built from esc() alone: anything else either uses safeHref()
   // inline or a local name that this test proves came from validHttpUrl().
   const hrefs = [...views.matchAll(/href="\$\{([^}]+)\}?"/g)].map(m => m[1]).filter(Boolean);
-  assert.ok(hrefs.length >= 4, `expected the four URL sinks, found ${hrefs.length} hrefs`);
+  assert.ok(hrefs.length >= 1, `expected the URL sink, found ${hrefs.length} hrefs`);
   for (const expression of hrefs) {
     if (expression.startsWith('esc(safeHref(')) continue;
     const local = /^esc\((\w+)\)$/.exec(expression)?.[1];
     assert.ok(local, `href built from ${expression}; use safeHref() or a validated local`);
     assert.match(views, new RegExp(`\\b${local} = validHttpUrl\\(`), `${local} must come from validHttpUrl()`);
   }
-});
-
-// An undefined url used to render an 'Open post' anchor with no href at all.
-test('a draft without a usable url renders no Open post link', () => {
-  const views = sources['ui-views.js'];
-  assert.ok(views.includes("postHref = validHttpUrl(draft.url)"), 'the draft url must be validated when the card is built');
-  assert.ok(views.includes('+ (postHref ? `<a class="btn quiet" href="${esc(postHref)}"'), 'the Open post link must only exist for a validated url');
 });
 
 // ---- static scan of every HTML-producing template ----------------------------------
@@ -259,14 +247,3 @@ test('cleanText truncates untrusted input to its declared bound', () => {
   assert.equal(cleanText(null, 10), '');
 });
 
-test('a draft length warning is read per card, not from one shared edit buffer', () => {
-  // `store.editText` is one value for the whole list. Reading it unqualified put
-  // "· long for X" on every other draft while one long draft was being edited,
-  // so the header disagreed with the text the reader could see.
-  const views = sources['ui-views.js'];
-  assert.match(views, /const shown = editing \? \(store\.editText \?\? draft\.text\) : draft\.text, over = draftLength\(shown\)\.over;/);
-  assert.doesNotMatch(views, /const shown = store\.editText \?\? draft\.text/);
-  // The meter and the header still read the same variable, so they cannot drift.
-  assert.match(views, /draft-count\$\{over \? ' over' : ''\}/);
-  assert.match(views, /\$\{over \? ' · long for X' : ''\}/);
-});

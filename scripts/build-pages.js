@@ -32,7 +32,7 @@ async function bundleVersion(names) {
 // missing from the other.
 const files = ASSETS;
 // Files that used to live in docs/ before the UI moved to shared/.
-const stale = ['polish.css', 'usability.css', 'demo-api.js', 'app.css.map', 'usability.mjs', 'coordination.mjs', 'group-simulator.mjs', 'chat-engine.mjs', 'local-runs.js', 'demo-feed.html'];
+const stale = ['polish.css', 'usability.css', 'demo-api.js', 'app.css.map', 'usability.mjs', 'coordination.mjs', 'group-simulator.mjs', 'chat-engine.mjs', 'local-runs.js', 'demo-feed.html', 'usability.js', 'chat-engine.js'];
 
 await fs.mkdir(dest, {recursive: true});
 const copied = [];

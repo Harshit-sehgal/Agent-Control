@@ -38,10 +38,9 @@ test('the coarse-pointer block overrides every check-row it is meant to fix', ()
   }
 });
 
-test('pills and the evidence summary take a finger-sized target on a coarse pointer', () => {
+test('pills take a finger-sized target on a coarse pointer', () => {
   const block = css.slice(css.indexOf('@media (pointer:coarse)'));
   assert.match(block, /\.needs-pill\{height:44px;border-radius:22px\}/);
-  assert.match(block, /\.evidence-panel summary\{min-height:44px\}/);
 });
 
 test('a narrow phone header drops the status-only pills, not the actionable one', () => {

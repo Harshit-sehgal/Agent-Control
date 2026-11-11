@@ -176,7 +176,6 @@ body:not(.has-info) .pane-info{display:none}
 .msg.me{justify-content:flex-end}
 .bubble{position:relative;max-width:min(78%,560px);padding:8px 13px;border-radius:var(--r-bubble);background:var(--them);overflow-wrap:anywhere}
 .msg.them .bubble{border-bottom-left-radius:6px;background:var(--bubble,var(--them))}
-.msg.them .bubble.card .post-quote{background:var(--surface)}
 .msg.me .bubble{background:var(--me);color:var(--on-me);border-bottom-right-radius:6px}
 .bubble .sender{display:block;margin-bottom:1px;font-size:12px;font-weight:600;color:var(--tint,var(--muted))}
 .bubble .text{white-space:pre-wrap;line-height:1.38}
@@ -194,43 +193,11 @@ body:not(.has-info) .pane-info{display:none}
 .welcome h2{margin-top:8px;font-size:22px}
 .welcome p{color:var(--muted)} .welcome .quiet{font-size:13px}
 
-/* a shared post, quoted inside a bubble */
-.post{display:flex;flex-direction:column;gap:6px}
-.post-quote{display:flex;flex-direction:column;gap:3px;padding:10px 12px;border-radius:14px;background:var(--raised);text-decoration:none;font-size:14px;line-height:1.36}
-.post-quote strong{font-size:12px;color:var(--muted);font-weight:600}
-.msg.me .post-quote{background:var(--me-quote)}.msg.me .post-quote strong{color:var(--on-me-muted)}
-.post-meta{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 6px 2px 8px;font-size:12px;color:var(--muted)}
-.msg.me .post-meta{color:var(--on-me-muted)}
-.msg.me .post-meta .btn.primary{background:var(--on-me);color:var(--me)}
 
-/* the decision card: a draft you answer in place */
-.draft{width:min(86%,460px);border-radius:var(--r-bubble);background:var(--them);overflow:hidden}
-.msg.them .draft{border-bottom-left-radius:6px}
-.stack .draft{width:100%}
-.draft>header{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:11px 14px 0;font-size:13px}
-.draft-to{font-weight:600}.draft-score{color:var(--muted);font-size:12px;white-space:nowrap}
-/* X's standard limit is a warning, not a wall: a premium account posts longer and
    the final click is the human's, so this only tells the truth about the count. */
-.draft-count{margin:4px 2px 0;color:var(--muted);font-size:12px}
-.draft-count.over{color:var(--wait);font-weight:600}
-.draft-text{padding:8px 14px 12px;white-space:pre-wrap;line-height:1.4;overflow-wrap:anywhere}
 .card-actions{display:flex;flex-wrap:wrap;gap:8px;padding:0 10px 10px}
 .card-actions .btn{flex:1 1 auto}
 .card-actions .btn.ghost{flex:0 0 auto}
-.draft-state{display:flex;align-items:center;gap:8px;min-height:40px;padding:6px 8px 6px 14px;background:var(--raised);color:var(--muted);font-size:12px;font-weight:600}
-.draft-state span{flex:1}
-.draft-state .dot{width:7px;height:7px;border-radius:50%;background:currentColor;animation:pulse 1.8s infinite}
-@keyframes pulse{50%{opacity:.35}}
-.tone-wait .draft-state{background:var(--wait-bg);color:var(--wait)}
-.tone-done .draft-state{color:var(--good)}
-.tone-off .draft-text,.tone-off .draft-to{color:var(--muted)}
-.edit-form{padding:8px 10px 0}.edit-form .card-actions{padding:8px 0 10px}
-.evidence-panel{margin:0 10px 10px;border-radius:12px;background:var(--raised);font-size:13px}
-.evidence-panel summary{display:flex;align-items:center;min-height:40px;padding:0 12px;color:var(--muted);cursor:pointer;list-style:none}
-.evidence-panel summary span{display:inline-flex;align-items:center;gap:7px}
-.evidence-panel summary::-webkit-details-marker{display:none}
-.evidence-item{display:flex;flex-direction:column;gap:8px;padding:10px 12px;border-top:1px solid var(--line)}
-.evidence-form{display:flex;flex-direction:column;gap:8px;padding:10px 12px 12px;border-top:1px solid var(--line)}
 
 /* composer */
 .chips{flex:none;display:flex;gap:8px;padding:4px max(14px,calc((100% - 760px)/2)) 8px;overflow-x:auto;scrollbar-width:none}
@@ -299,7 +266,7 @@ button.row>svg:last-child{flex:none;color:var(--muted)}
 .field-label,.contract-fieldset legend{font-size:13px;color:var(--muted)}
 .field-help{font-size:12px;color:var(--muted);margin:0}
 .input{width:100%;min-height:46px;padding:11px 14px;border:0;outline:0;border-radius:var(--r-ctl);background:var(--raised);font-size:16px}
-.box .input,.draft .input,.sheet .input{background-color:var(--raised)}
+.box .input,.sheet .input{background-color:var(--raised)}
 .sheet .input{background-color:var(--surface)}
 .input:focus{box-shadow:0 0 0 2px var(--muted)}
 textarea.input{resize:vertical;line-height:1.4}
@@ -353,18 +320,13 @@ select.input{appearance:none;padding-right:34px;background-image:linear-gradient
  * the bubble's tail so a message feels spoken, not printed. Only NEW items animate ([data-fresh], set by the thread
  * renderer with a negative delay so a repaint mid-animation carries on instead
  * of restarting). Everyday controls stay under 300ms. Nothing loops except the
- * mascot's blink, and the one celebration is saved for "I posted it". */
-.msg[data-fresh] .bubble,.msg[data-fresh] .draft{animation:pop-in .24s var(--spring) both;animation-delay:var(--age,0ms)}
-.msg.them[data-fresh] .bubble,.msg.them[data-fresh] .draft{transform-origin:0 100%}
+ * mascot's blink. */
+.msg[data-fresh] .bubble{animation:pop-in .24s var(--spring) both;animation-delay:var(--age,0ms)}
+.msg.them[data-fresh] .bubble{transform-origin:0 100%}
 .msg.me[data-fresh] .bubble{transform-origin:100% 100%}
 .event[data-fresh]{animation:fade-up .3s var(--ease) both;animation-delay:var(--age,0ms)}
 @keyframes pop-in{from{opacity:0;transform:scale(.95) translateY(6px)}}
 @keyframes fade-up{from{opacity:0;transform:translateY(6px)}}
-/* a draft changing state: the footer slides in and the tick draws itself */
-.draft[data-changed] .draft-state{animation:state-in .28s var(--ease) both;animation-delay:var(--age,0ms)}
-.draft[data-changed] .draft-state svg path{stroke-dasharray:40;animation:draw .5s .12s var(--ease) both}
-@keyframes state-in{from{opacity:0;transform:translateY(100%)}}
-@keyframes draw{from{stroke-dashoffset:40}to{stroke-dashoffset:0}}
 /* send: the arrow leaves, a new one arrives from below */
 .send.sent svg{animation:whoosh .42s var(--ease)}
 @keyframes whoosh{0%{transform:none}45%{transform:translateY(-34px) scale(.8);opacity:0}46%{transform:translateY(30px);opacity:0}100%{transform:none;opacity:1}}
@@ -524,7 +486,7 @@ body.booting .chat-row:nth-child(2){animation-delay:30ms}body.booting .chat-row:
   .fab{position:absolute;right:18px;bottom:calc(100% + 12px);z-index:5;display:inline-flex;align-items:center;justify-content:center;width:58px;height:58px;border-radius:20px;background:var(--brand);color:var(--on-brand);box-shadow:0 8px 24px var(--shade);transition:transform .14s var(--ease)}
   /* the FAB floats over the end of the list, so the last chat can scroll clear of it */
   .chat-list{padding-bottom:78px}
-  .bubble{max-width:84%}.bubble.card,.draft{width:min(92%,460px)}
+  .bubble{max-width:84%}.bubble.card{width:min(92%,460px)}
   .modal-layer{align-items:flex-end;padding:0}
   .sheet{max-width:none;border-radius:24px 24px 0 0;padding:10px 16px calc(18px + env(safe-area-inset-bottom))}
   .sheet-grip{display:block;width:38px;height:4px;margin:0 auto 12px;border-radius:2px;background:var(--control)}
@@ -574,5 +536,4 @@ body.booting .chat-row:nth-child(2){animation-delay:30ms}body.booting .chat-row:
   /* Same defect one row type over: the Admin notification-channel toggles live in
      a .box>form row with no coarse size at all, so they measured ~28px. */
   .box>form .check-row{min-height:44px;padding:9px 0}
-  .needs-pill{height:44px;border-radius:22px}
-  .evidence-panel summary{min-height:44px}}
+  .needs-pill{height:44px;border-radius:22px}}

@@ -1,18 +1,18 @@
 /** What the UI can do, as three lookup tables keyed by `data-action`, form id and
  * control id. app.js owns the DOM events and dispatches here; handlers throw on
  * failure and the dispatcher turns that into one toast. */
-import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, setPref, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns} from './ui-store.js?v=58435bfdb8';
-import {botSettings, groupSettings} from './bot-settings.js?v=58435bfdb8';
-import {completeMention, moveRow, pipelineValue, draftLength, lengthLabel, threadPosts} from './ui-model.js?v=58435bfdb8';
-import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=58435bfdb8';
-import {sendChat, streamGroupRun, watchQueuedRun} from './ui-chat.js?v=58435bfdb8';
-import {runWithTyping} from './run-follow.js?v=58435bfdb8';
-import {confetti, whoosh, react, poke} from './ui-fx.js?v=58435bfdb8';
-import {renderList, renderMentions} from './ui-views.js?v=58435bfdb8';
-import {refreshLists, reloadAdminPage, pipelineList} from './ui-panel.js?v=58435bfdb8';
-import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, botTaskSheet, scheduleDraftSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=58435bfdb8';
-import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=58435bfdb8';
-import {takeoverActions, takeoverForms} from './ui-takeover.js?v=58435bfdb8';
+import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns} from './ui-store.js?v=2d8fb27009';
+import {botSettings, groupSettings} from './bot-settings.js?v=2d8fb27009';
+import {completeMention, moveRow, pipelineValue} from './ui-model.js?v=2d8fb27009';
+import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=2d8fb27009';
+import {sendChat, streamGroupRun, watchQueuedRun} from './ui-chat.js?v=2d8fb27009';
+import {runWithTyping} from './run-follow.js?v=2d8fb27009';
+import {confetti, whoosh, react, poke} from './ui-fx.js?v=2d8fb27009';
+import {renderList, renderMentions} from './ui-views.js?v=2d8fb27009';
+import {reloadAdminPage, pipelineList} from './ui-panel.js?v=2d8fb27009';
+import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, botTaskSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=2d8fb27009';
+import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=2d8fb27009';
+import {takeoverActions, takeoverForms} from './ui-takeover.js?v=2d8fb27009';
 
 const adminCtx = {reload: reloadAdminPage};
 const chatId = () => store.route.chat;
@@ -38,7 +38,6 @@ export async function startGroupChat(text, groupId) {
   go({chat: teamKey(group.id)});
   await sendChat(teamKey(group.id), message);
 }
-async function draftOp(id, op, done, body = {}) { await api(`/api/drafts/${id}/${op}`, 'POST', body); toast(done); await sync(); }
 
 export const actions = {
   // navigation
@@ -70,8 +69,6 @@ export const actions = {
   'new-group': () => newGroupSheet(),
   'add-bot-to-group': b => newBotSheet(b.dataset.id),
   'attach': () => attachSheet(),
-  'share-post': () => sharePostSheet(),
-  'new-reminder': () => reminderSheet(),
   'new-bot-task': () => botTaskSheet(),
   'close-sheet': () => closeSheet(),
   'sheet-confirm': () => closeSheet(true),
@@ -90,7 +87,7 @@ export const actions = {
   },
   'clear-chat': async b => {
     if (!store.messages[b.dataset.id]?.length) return toast('This conversation is already empty');
-    if (!await confirmSheet('Clear this conversation?', {confirm: 'Clear', danger: true, detail: 'Messages are removed for everyone in this workspace. Drafts and posts stay.'})) return;
+    if (!await confirmSheet('Clear this conversation?', {confirm: 'Clear', danger: true, detail: 'Messages are removed for everyone in this workspace.'})) return;
     await clearMessages(b.dataset.id); toast('Conversation cleared');
   },
 
@@ -144,71 +141,6 @@ export const actions = {
     toast('Chat memory forgotten.');
   },
 
-  // posts and drafts
-  'load-samples': async () => { closeSheet(); const r = await api('/api/demo/seed', 'POST', {}); toast(`Loaded ${r.added} sample post(s).`); await sync(); },
-  'reset-demo': async () => {
-    if (!await confirmSheet('Remove the sample posts?', {confirm: 'Remove', danger: true, detail: 'Their drafts go too.'})) return;
-    await api('/api/reset-demo', 'POST', {}); toast('Sample posts removed.'); await sync();
-  },
-  'draft-candidate': async b => { const d = await api(`/api/candidates/${b.dataset.id}/process`, 'POST', {}); toast(`Draft ready (${d.score}/100). It is waiting on you.`); await sync(); },
-  'approve-draft': b => { react('cheer', 1400); return draftOp(b.dataset.id, 'approve', 'Approved. Manual posting handoff scheduled.'); },
-  'reject-draft': async b => {
-    // Skipping is one click and permanent: a skipped draft has no restore, and
-    // the button sits next to Approve on a card somebody is reading quickly.
-    const scheduled = store.state.drafts.find(d => d.id === b.dataset.id)?.status === 'scheduled';
-    if (!await confirmSheet(scheduled ? 'Cancel this scheduled draft?' : 'Skip this draft?', {confirm: 'Discard', danger: true, detail: scheduled ? 'It stops waiting to go out. You can draft the post again.' : 'It leaves the queue. The captured post and its sources stay.'})) return;
-    react('aww', 1200); return draftOp(b.dataset.id, 'reject', 'Draft skipped.');
-  },
-  'ready-draft': b => draftOp(b.dataset.id, 'ready', 'Ready to post.'),
-  'schedule-draft': b => scheduleDraftSheet(b.dataset.id),
-  // The captured post and its evidence are untouched by a skip, so a draft can
-  // come back to the queue without being written again.
-  'restore-draft': b => draftOp(b.dataset.id, 'restore', 'Back in the queue.'),
-  'posted-draft': async b => {
-    // The confirm and the link are one question: a second sheet after a confirm
-    // reads as "did that work?", and the link is what makes the history useful
-    // later, when the post is the only thing left of this draft.
-    const url = await askSheet('Did you post this on X yourself?', {sub: 'This only records it; Agent Control never posts for you. Paste the link if you have it.', placeholder: 'https://x.com/…', submit: 'Yes, I posted it'});
-    if (url === null) return;
-    confetti(document.querySelector(`[data-draft="${CSS.escape(b.dataset.id)}"] .draft-state`));
-    react('cheer', 1600);
-    await draftOp(b.dataset.id, 'posted', 'Marked as posted.', url.trim() ? {url: url.trim()} : {});
-  },
-  'edit-draft': b => {
-    store.editDraft = b.dataset.id; store.editText = null; changed();
-    document.querySelector(`[data-draft="${CSS.escape(b.dataset.id)}"] .edit-form textarea`)?.focus();
-  },
-  'cancel-edit': () => { store.editDraft = null; store.editText = null; changed(); },
-  'rewrite-draft': async b => {
-    const direction = await askSheet('Rewrite this draft', {sub: 'Optional: say what to change.', placeholder: 'Shorter, less hype', submit: 'Rewrite'});
-    if (direction === null) return;
-    await api(`/api/drafts/${b.dataset.id}/rewrite`, 'POST', {direction}); toast('Draft rewritten.'); await sync();
-  },
-  'copy-draft': async b => {
-    const draft = store.state.drafts.find(d => d.id === b.dataset.id); if (!draft) throw new Error('Draft not found');
-    await copyText(draft.text, 'Copied. Post it on X yourself.');
-  },
-  // A draft over X's limit is not one post, and copying it into the composer only
-  // to have X reject it wastes the person's turn. The parts are the same draft,
-  // numbered so they cannot be posted out of order by accident.
-  'copy-thread': async b => {
-    const draft = store.state.drafts.find(d => d.id === b.dataset.id); if (!draft) throw new Error('Draft not found');
-    const posts = threadPosts(draft.text);
-    await copyText(posts.join('\n\n'), `${posts.length} posts copied. Post them in order.`);
-  },
-  'verify-evidence': async b => { await api(`/api/evidence/${b.dataset.id}/verify`, 'POST', {status: b.dataset.status}); toast('Source updated.'); await sync(); },
-  'remove-candidate': async b => {
-    if (!await confirmSheet('Remove this captured post?', {confirm: 'Remove', danger: true, detail: 'Its drafts and their sources go too. A scheduled or posted draft has to go first.'})) return;
-    await api(`/api/candidates/${b.dataset.id}`, 'DELETE', {}); toast('Captured post removed.'); await sync();
-  },
-  'drop-evidence': async b => {
-    if (!await confirmSheet('Remove this source?', {confirm: 'Remove', danger: true})) return;
-    await api(`/api/evidence/${b.dataset.id}`, 'DELETE', {}); toast('Source removed.'); await sync();
-  },
-  'remove-task': async b => {
-    if (!await confirmSheet('Remove this reminder?', {confirm: 'Remove', danger: true})) return;
-    await api(`/api/tasks/${b.dataset.id}`, 'DELETE', {}); toast('Reminder removed'); await sync();
-  },
   'remove-bot-task': async b => {
     if (!await confirmSheet('Remove this scheduled task?', {confirm: 'Remove', danger: true, detail: 'It stops running. Answers it already gave stay in the chat.'})) return;
     await api(`/api/tasks/${b.dataset.id}`, 'DELETE', {}); toast('Scheduled task removed'); await sync();
@@ -294,7 +226,7 @@ export const actions = {
   ...takeoverActions,
 };
 
-/** Submit handlers by form id; `.edit-form` and `.evidence-form` repeat per draft so they key on class. */
+/** Submit handlers by form id. */
 export const forms = {
   'chat-form': async form => {
     const input = form.elements.namedItem('message'), text = input.value;
@@ -304,16 +236,6 @@ export const forms = {
   },
   'home-prompt': (form, f) => startGroupChat(f.prompt),
   'ask-form': (form, f) => closeSheet(String(f.answer || '')),
-  'approve-form': async (form, f) => {
-    // `datetime-local` has no timezone: parsing it with `new Date` is the browser's
-    // local reading, which is the one the person chose.
-    const at = new Date(String(f.at || '')).getTime();
-    if (!Number.isFinite(at)) throw new Error('Pick a date and time.');
-    await draftOp(String(f.draft), 'approve', 'Approved for that time.', {dueAt: new Date(at).toISOString()});
-    // Close only after the server accepted the time: a refusal keeps the sheet open
-    // on the value that has to change, with the reason in the toast.
-    closeSheet();
-  },
   'new-bot-form': async (form, f) => {
     const bot = await api(`/api/groups/${f.group}/bots`, 'POST', {name: f.name, instructions: f.instructions, settings: {tint: pickedTint}});
     setProfile(bot.id, {avatarIndex: pickedTint});
@@ -345,15 +267,6 @@ export const forms = {
     if (form.querySelector('[name="model"]')) await api(`/api/ai/bots/${b.id}`, 'PATCH', {providerId: f.providerId || null, model: f.model || ''});
     await sync(); go({chat: b.id, info: 'home'}); toast('Profile saved.');
   },
-  'candidate-form': async (form, f) => {
-    const r = await api('/api/candidates', 'POST', f);
-    closeSheet(); await sync(); toast(r?.duplicate ? 'That post is already here.' : 'Post shared with the group.');
-  },
-  'settings-form': async (form, f) => {
-    if (!isAdmin() && !isStaticDemo()) throw new Error('An admin sets voice and timing.');
-    await api('/api/settings', 'PATCH', {topics: f.topics.split(',').map(s => s.trim()).filter(Boolean), style: f.style, opinions: f.opinions, minDelay: Number(f.minDelay), maxDelay: Number(f.maxDelay)});
-    await sync(); toast('Saved.');
-  },
   'group-settings-form': async (form, f) => {
     if (!canWrite()) throw new Error('A member can change group settings.');
     const group = conversation()?.group; if (!group) throw new Error('Group not found');
@@ -370,30 +283,21 @@ export const forms = {
     await api('/api/tasks', 'POST', {kind: 'bot-task', payload, ...(once ? {} : {intervalMinutes: payload.intervalMinutes})});
     closeSheet(); await sync(); toast(once ? 'Task scheduled.' : `Task scheduled every ${payload.intervalMinutes} min.`);
   },
-  'schedule-form': async (form, f) => {
-    await api('/api/schedules', 'POST', {label: f.label, kind: f.kind, intervalMinutes: Number(f.intervalMinutes), nextAt: f.nextAt ? new Date(f.nextAt).toISOString() : undefined});
-    closeSheet(); await sync(); toast('Reminder set.');
-  },
   'password-form': async (form, f) => {
     await api('/api/auth/password', 'POST', {currentPassword: f.currentPassword, newPassword: f.newPassword});
     closeSheet(); toast('Password updated. Other sessions are signed out.');
   },
-  '.edit-form': async (form, f) => { await api(`/api/drafts/${form.dataset.id}`, 'PATCH', {text: f.text}); store.editDraft = null; store.editText = null; await sync(); toast('Draft updated. It needs your approval again.'); },
-  '.evidence-form': async (form, f) => { await api(`/api/drafts/${form.dataset.id}/evidence`, 'POST', {kind: f.kind, claim: f.claim, confidence: Number(f.confidence), link: (f.link || '').trim() || null}); await sync(); toast('Source added.'); },
   ...Object.fromEntries(Object.entries(adminForms).map(([id, run]) => [id, (form, f) => run(form, f, adminCtx)])),
   ...takeoverForms,
 };
 
-const PREF_BY_CONTROL = {'candidate-status': 'candidateStatus', 'candidate-sort': 'candidateSort', 'draft-status': 'draftStatus', 'draft-sort': 'draftSort'};
 /** `change` events, by control id (or data-action for the admin tables). */
 export function onControlChange(control) {
-  const pref = PREF_BY_CONTROL[control.id];
-  if (pref) { setPref(pref, control.value); return refreshLists(); }
   if (control.id === 'bot-template') {
     const template = BOT_TEMPLATES[control.value] || BOT_TEMPLATES.blank, form = control.form;
     form.elements.namedItem('name').value = template.name; form.elements.namedItem('instructions').value = template.instructions;
   }
-  if (control.matches('#schedule-form [name=kind], #bot-task-form [name=kind]')) toggleReminderFields(control.form.id);
+  if (control.matches('#bot-task-form [name=kind]')) toggleReminderFields(control.form.id);
   if (control.matches('[name=pipeline-include]') && store.pipelineDraft) {
     const r = store.pipelineDraft.rows[Number(control.dataset.index)]; if (r) r.included = control.checked;
   }
@@ -403,15 +307,4 @@ export function onControlChange(control) {
 /** `input` events for the live filters. */
 export function onControlInput(control) {
   if (control.id === 'chat-search') { store.listQuery = control.value; renderList(); }
-  if (control.id === 'candidate-search') { store.postQuery = control.value; refreshLists(); }
-  if (control.matches('.edit-form textarea')) {
-    store.editText = control.value;
-    // Count live, in place: re-rendering the form would take the caret away.
-    const meter = control.parentElement?.querySelector('.draft-count');
-    if (meter) {
-      const length = draftLength(control.value);
-      meter.textContent = lengthLabel(control.value);
-      meter.classList.toggle('over', length.over);
-    }
-  }
 }

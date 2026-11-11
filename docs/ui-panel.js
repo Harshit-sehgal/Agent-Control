@@ -1,16 +1,14 @@
 /** Everything that used to be a dashboard tab now hangs off a conversation:
- * the info panel of the open chat (drafts, posts, reminders, runs, voice, the
+ * the info panel of the open chat (runs, scheduled tasks, settings, the
  * bot's profile) and the "You" pages (account, admin, about). */
-import {filterCandidates, filterDrafts} from './usability.js?v=58435bfdb8';
-import {ACTIONS, OUTPUT_KINDS} from './contracts.js?v=58435bfdb8';
-import {BOT_DEFAULTS, MAX_CONTEXT_MESSAGES, MAX_STEPS_LIMIT, botSettings, groupSettings, pipelineOf} from './bot-settings.js?v=58435bfdb8';
-import {modelKey} from './memory.js?v=58435bfdb8';
-import {ACTIVE_DRAFTS, chatTasks, pipelineRows, retryTarget, runButtons, waitingOnYou} from './ui-model.js?v=58435bfdb8';
-import {esc, icon, avatar, groupAvatar, tintClass, TINT_COUNT, btn, iconBtn, row, box, field, note, empty, tag, pageHead, fullDate} from './ui-kit.js?v=58435bfdb8';
-import {store, conversation, isStaticDemo, isAdmin, canWrite, isXGroup, botTint, recentRuns, THEMES, themeChoice} from './ui-store.js?v=58435bfdb8';
-import {validHttpUrl} from './core.js?v=58435bfdb8';
-import {draftCard, postCard} from './ui-views.js?v=58435bfdb8';
-import {ADMIN_PAGES, adminPage, providerModelOptions} from './ui-admin.js?v=58435bfdb8';
+import {ACTIONS, OUTPUT_KINDS} from './contracts.js?v=2d8fb27009';
+import {BOT_DEFAULTS, MAX_CONTEXT_MESSAGES, MAX_STEPS_LIMIT, botSettings, groupSettings, pipelineOf} from './bot-settings.js?v=2d8fb27009';
+import {modelKey} from './memory.js?v=2d8fb27009';
+import {chatTasks, pipelineRows, retryTarget, runButtons, waitingOnYou} from './ui-model.js?v=2d8fb27009';
+import {esc, icon, avatar, groupAvatar, tintClass, TINT_COUNT, btn, iconBtn, row, box, field, note, empty, tag, pageHead, fullDate} from './ui-kit.js?v=2d8fb27009';
+import {store, conversation, isStaticDemo, isAdmin, canWrite, botTint, recentRuns, THEMES, themeChoice} from './ui-store.js?v=2d8fb27009';
+import {validHttpUrl} from './core.js?v=2d8fb27009';
+import {ADMIN_PAGES, adminPage, providerModelOptions} from './ui-admin.js?v=2d8fb27009';
 
 const el = id => document.getElementById(id);
 const options = (pairs, current) => pairs.map(([value, label]) => `<option value="${esc(value)}"${value === current ? ' selected' : ''}>${esc(label)}</option>`).join('');
@@ -34,23 +32,18 @@ function routingNote(group) {
 const offTag = bot => botSettings(bot).enabled ? (botSettings(bot).lead ? tag('Primary') : '') : tag('Off');
 
 function groupHome(conv) {
-  const {group} = conv, {state} = store, x = isXGroup(group), runs = recentRuns(group.id);
+  const {group} = conv, {state} = store, runs = recentRuns(group.id);
   // One answer from the view model, the same the chat list and thread header
-  // read: drafts, paused runs, plans, pending pages and stuck feed reads.
+  // read: paused runs, plans, pending pages and stuck feed reads.
   const waiting = waitingOnYou(state, conv.id, runs);
-  const draftWait = waiting.drafts, paused = waiting.pauses, plans = waiting.plans, pages = waiting.pages + waiting.feeds;
+  const paused = waiting.pauses, plans = waiting.plans, pages = waiting.pages + waiting.feeds;
   const runRight = paused ? `${paused} paused` : plans ? (plans === 1 ? 'A plan is waiting' : `${plans} plans waiting`) : pages ? 'Waiting on a page' : (runs.length ? `Last ${fullDate(runs[0].createdAt)}` : 'None yet');
-  const reminders = (state.tasks || []).filter(t => t.kind === 'reminder' && !['done', 'cancelled'].includes(t.status)).length;
   const scheduled = chatTasks(state.tasks, group.id, null).length;
   const members = group.bots.map(b => ({name: b.name, tint: botTint(group, b.id)}));
   const tools = [
-    x && row({title: 'Drafts', right: draftWait ? `${draftWait} waiting on you` : `${state.drafts.length}`, tone: draftWait ? 'warn' : '', action: 'open-section', data: {section: 'drafts'}}),
-    x && row({title: 'Posts found', right: String(state.candidates.length), action: 'open-section', data: {section: 'posts'}}),
-    x && row({title: 'Reminders', right: reminders ? String(reminders) : 'None', action: 'open-section', data: {section: 'reminders'}}),
     row({title: 'Runs', right: runRight, tone: (paused || plans || pages) ? 'warn' : '', action: 'open-section', data: {section: 'runs'}}),
     row({title: 'Scheduled tasks', right: scheduled ? String(scheduled) : 'None', action: 'open-section', data: {section: 'tasks'}}),
     row({title: 'Group settings', right: esc(ROUTING.find(r => r[0] === groupSettings(group).routing)?.[1] || ''), action: 'open-section', data: {section: 'group-settings'}}),
-    x && row({title: 'Voice and timing', right: `${state.settings.minDelay} to ${state.settings.maxDelay} min delay`, action: 'open-section', data: {section: 'voice'}}),
   ].filter(Boolean).join('');
   const write = canWrite();
   const bots = group.bots.map(b => row({lead: avatar(b.name, botTint(group, b.id), 38), title: esc(b.name), sub: esc((b.instructions || '').slice(0, 70)), right: offTag(b), action: 'open-chat', id: b.id})).join('')
@@ -77,7 +70,7 @@ function groupSettingsSection(conv) {
   const writable = canWrite();
   const lock = writable ? '' : ' disabled';
   const routing = ROUTING.map(([value, label, help]) => `<label class="check-row"><input type="radio" name="routing" value="${value}"${s.routing === value ? ' checked' : ''}${lock}><span>${esc(label)}<small>${esc(help)}</small></span></label>`).join('');
-  const removable = !isXGroup(group) && (isAdmin() || isStaticDemo());
+  const removable = isAdmin() || isStaticDemo();
   return `${pageHead('Group settings', {sub: 'How this group shares out work.', back: 'open-info'})}
     <form id="group-settings-form" class="form">
       ${field('Name', `<input class="input" name="name" value="${esc(group.name)}" maxlength="80" required${lock}>`)}
@@ -115,55 +108,6 @@ function tasksSection(conv) {
     ${note(isStaticDemo() ? 'This demo runs tasks only while the page is open.' : 'Tasks run with retries while the Node server is up.')}`;
 }
 
-function draftsBody() {
-  const list = filterDrafts(store.state.drafts, {status: store.prefs.draftStatus, sort: store.prefs.draftSort});
-  if (!list.length) return empty('No drafts here', 'Change the filter, or ask the group to draft a reply.');
-  // A skipped draft is one click from being usable again, and a posted one knows
-  // where it went: this row is the only place left that can say either.
-  const write = canWrite();
-  return list.map(d => {
-    if (ACTIVE_DRAFTS.includes(d.status)) return draftCard(d);
-    const link = validHttpUrl(d.postedUrl);
-    return `<div class="row" data-draft-row="${esc(d.id)}"><span class="row-main"><span class="row-title">${esc(d.author)}</span><span class="row-sub">${esc(String(d.text).slice(0, 160))}</span></span><span class="row-actions">${link ? `<a class="btn quiet small" href="${esc(link)}" target="_blank" rel="noopener noreferrer"><span>Open post</span></a>` : ''}${d.status === 'rejected' && write ? btn('Restore', 'restore-draft', {id: d.id, small: true}) : ''}${tag(d.status === 'posted' ? 'Posted' : 'Skipped', d.status === 'posted' ? 'good' : '')}</span></div>`;
-  }).join('');
-}
-function draftsSection() {
-  // Count what the default filter below shows, not just `pending`: the header
-  // said "1 to decide" over three cards, because scheduled and ready drafts are
-  // waiting on a person too.
-  const active = store.state.drafts.filter(d => ACTIVE_DRAFTS.includes(d.status)).length;
-  return `${pageHead('Waiting on you', {sub: `${active} waiting on you. Nothing posts by itself.`, back: 'open-info'})}
-    <div class="toolbar">${select('draft-status', 'Show', [['active', 'Active'], ['pending', 'To decide'], ['scheduled', 'Scheduled'], ['ready', 'Ready to post'], ['posted', 'Posted'], ['rejected', 'Skipped'], ['all', 'Everything']], store.prefs.draftStatus)}${select('draft-sort', 'Sort', [['newest', 'Newest'], ['oldest', 'Oldest'], ['score-high', 'Top score']], store.prefs.draftSort)}</div>
-    <div class="stack" id="approval-results">${draftsBody()}</div>`;
-}
-
-const visiblePosts = () => filterCandidates(store.state.candidates, {status: store.prefs.candidateStatus, sort: store.prefs.candidateSort, query: store.postQuery});
-function postsBody() {
-  const {state} = store, list = visiblePosts();
-  const count = el('candidate-count'); if (count) count.textContent = `${list.length} of ${state.candidates.length}`;
-  return list.map(c => `<div class="bubble card">${postCard(c, state.drafts.some(d => d.candidateId === c.id))}</div>`).join('') || empty('No posts match', 'Change the filters, or share a new post.');
-}
-function postsSection() {
-  const {state} = store;
-  const write = canWrite();
-  return `${pageHead('Posts found', {sub: 'Posts you shared or captured with the extension.', back: 'open-info', right: write ? iconBtn('plus', 'Share a post', 'share-post') : ''})}
-    <label class="search">${icon('search', 18)}<input id="candidate-search" type="search" placeholder="Search posts, topics, authors, links" aria-label="Search posts" value="${esc(store.postQuery)}"></label>
-    <div class="toolbar">${select('candidate-status', 'Show', [['all', 'All posts'], ['new', 'Not drafted'], ['drafted', 'Drafted'], ['high', 'Score 70+']], store.prefs.candidateStatus)}${select('candidate-sort', 'Sort', [['newest', 'Newest'], ['oldest', 'Oldest'], ['score-high', 'Top score'], ['score-low', 'Low score']], store.prefs.candidateSort)}</div>
-    <p class="count"><span id="candidate-count">${visiblePosts().length} of ${state.candidates.length}</span>${write ? `<span class="row-actions">${btn('Load samples', 'load-samples', {small: true})}${state.candidates.some(c => c.demo) ? btn('Remove samples', 'reset-demo', {small: true, kind: 'ghost'}) : ''}</span>` : ''}</p>
-    <div class="stack" id="candidate-results">${postsBody()}</div>`;
-}
-
-const taskLine = t => t.status === 'done' ? 'Completed' : t.status === 'failed' ? 'Failed' : t.status === 'cancelled' ? 'Removed' : t.status === 'running' ? 'Running' : `Due ${fullDate(t.runAt)}`;
-function remindersSection() {
-  const {state} = store, reminders = (state.tasks || []).filter(t => t.kind === 'reminder' && t.status !== 'cancelled'), scheduled = state.drafts.filter(d => d.status === 'scheduled');
-  const write = canWrite();
-  const list = reminders.map(t => `<div class="row"><span class="row-main"><span class="row-title">${esc(t.payload?.label || t.title)}</span><span class="row-sub">${t.payload?.kind === 'interval' ? `Every ${Number(t.intervalMinutes)} min` : 'One time'} · ${esc(taskLine(t))}${t.lastError ? ` · ${esc(t.lastError)}` : ''}</span></span>${write && t.status !== 'running' ? `<span class="row-actions">${btn('Remove', 'remove-task', {id: t.id, small: true, kind: 'danger'})}</span>` : ''}</div>`).join('') || empty('No reminders', 'Set one to be nudged to check new posts.');
-  const handoffs = scheduled.map(d => `<div class="row"><span class="row-main"><span class="row-title">${esc(d.author)}</span><span class="row-sub">Ready ${esc(fullDate(d.dueAt))}</span></span>${tag('Scheduled')}</div>`).join('') || empty('Nothing scheduled', 'Approve a draft and it waits here until it is ready.');
-  return `${pageHead('Reminders', {back: 'open-info', right: write ? iconBtn('plus', 'New reminder', 'new-reminder') : ''})}
-    ${box(list)}${box(handoffs, 'Approved, waiting to be ready')}
-    ${note(isStaticDemo() ? 'This demo checks timers only while the page is open.' : 'Reminders run as tasks with retries while the Node server is up.')}`;
-}
-
 const RUN_TONE = {completed: 'good', failed: 'bad', interrupted: 'bad', running: 'warn', queued: 'warn', awaiting_checkpoint: 'warn', awaiting_plan: 'warn', awaiting_feed: 'warn', awaiting_browser: 'warn'};
 function runCard(group, run) {
   const name = id => group.bots.find(b => b.id === id)?.name || id, steps = run.recipients || [], live = !isStaticDemo(), status = String(run.status || 'unknown');
@@ -185,20 +129,6 @@ function runsSection(conv) {
   return `${pageHead('Runs', {sub: isStaticDemo() ? 'Simulated in this browser.' : 'Run by the server orchestrator.', back: 'open-info'})}
     <div class="stack">${runs.slice(0, 12).map(r => runCard(conv.group, r)).join('') || empty('No runs yet', 'Message the group and each handoff is recorded here.')}</div>
     ${box(events.map(e => `<div class="row"><span class="row-main"><span class="row-title">${esc(e.message)}</span><span class="row-sub">${esc(fullDate(e.at))}</span></span></div>`).join('') || empty('No activity yet'), 'Activity log')}`;
-}
-
-function voiceSection() {
-  const s = store.state.settings;
-  const canEdit = isAdmin() || isStaticDemo();
-  const lock = canEdit ? '' : ' disabled';
-  return `${pageHead('Voice and timing', {sub: 'How drafts sound and how long they wait after you approve.', back: 'open-info'})}
-    <form id="settings-form" class="form">
-      ${field('Topics you care about', `<input class="input" name="topics" value="${esc(s.topics.join(', '))}" required${lock}>`, 'Separate with commas.')}
-      ${field('Writing style', `<textarea class="input" name="style" rows="3"${lock}>${esc(s.style)}</textarea>`)}
-      ${field('Opinions you approve of', `<textarea class="input" name="opinions" rows="3"${lock}>${esc(s.opinions)}</textarea>`, 'Optional. Bots never invent your opinions.')}
-      <div class="form-grid">${field('Shortest wait (min)', `<input class="input" type="number" name="minDelay" min="0" max="1440" value="${Number(s.minDelay)}" required${lock}>`)}${field('Longest wait (min)', `<input class="input" type="number" name="maxDelay" min="0" max="1440" value="${Number(s.maxDelay)}" required${lock}>`)}</div>
-      ${canEdit ? btn('Save', null, {kind: 'primary', type: 'submit', wide: true}) : note('An admin sets voice and timing for this workspace.')}
-    </form>`;
 }
 
 /* ---------- bot info ---------- */
@@ -290,15 +220,9 @@ export function renderInfo() {
   const node = el('inspector'), conv = conversation(), section = store.route.info;
   if (!conv || !section) { node.innerHTML = ''; return; }
   node.innerHTML = conv.isTeam
-    ? ({drafts: draftsSection, posts: postsSection, reminders: remindersSection, runs: runsSection, voice: voiceSection, 'group-settings': groupSettingsSection, tasks: tasksSection}[section] || groupHome)(conv)
+    ? ({runs: runsSection, 'group-settings': groupSettingsSection, tasks: tasksSection}[section] || groupHome)(conv)
     : ({edit: botEdit, memory: botMemorySection, tasks: tasksSection}[section] || botHome)(conv);
 }
-/** Refresh only the filtered lists, so the search box keeps its focus. */
-export function refreshLists() {
-  if (el('candidate-results')) el('candidate-results').innerHTML = postsBody();
-  if (el('approval-results')) el('approval-results').innerHTML = draftsBody();
-}
-
 /* ---------- "You" pages ---------- */
 
 function youPage() {
@@ -317,12 +241,12 @@ function youPage() {
 function aboutPage() {
   const {state} = store, demo = isStaticDemo(), ai = Boolean(state.aiEnabled), model = state?.aiModel;
   const text = demo ? 'GitHub Pages serves only static files, so bots answer with built-in commands instead of a language model, and everything stays in this browser. Do not type secrets into a chat.'
-    : ai ? 'A server-side AI provider is connected. Every bot answers with it. If a call fails, the chat says why. Model output still needs your review, and the final Post click is always yours.'
+    : ai ? 'A server-side AI provider is connected. Every bot answers with it. If a call fails, the chat says why.'
       : 'No AI provider is configured. Add one under You → AI and models, or set AI_API_KEY on the server. Bots will say so instead of answering with the demo.';
   const fact = (label, value) => `<div class="row"><span class="row-main"><span class="row-title">${label}</span></span><span class="row-right">${value}</span></div>`;
   return `${pageHead('About this build', {back: 'open-page-you'})}
     <div class="page-body">${note(esc(text))}
-      ${box(fact('Storage', demo ? 'This browser' : 'Node server') + fact('Real AI', demo || !ai ? 'Not connected' : (model ? `Connected · ${esc(model)}` : 'Connected')) + fact('Posting to X', 'Manual, by you') + fact('Sync across devices', demo ? 'Not available' : 'Server state'))}
+      ${box(fact('Storage', demo ? 'This browser' : 'Node server') + fact('Real AI', demo || !ai ? 'Not connected' : (model ? `Connected · ${esc(model)}` : 'Connected')) + fact('Sync across devices', demo ? 'Not available' : 'Server state'))}
     </div>`;
 }
 

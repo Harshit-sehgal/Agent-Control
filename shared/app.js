@@ -12,10 +12,10 @@
  *   ui-fx       confetti, the send arrow, and when the bots react
  */
 import {parseRoute} from './ui-model.js';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, isAdmin, canWrite, applyTheme, watchSystemTheme, retireSession, resetChatState, sessionEpoch} from './ui-store.js';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, isAdmin, canWrite, applyTheme, watchSystemTheme, retireSession, sessionEpoch} from './ui-store.js';
 import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js';
 import {listShell, renderList, threadShell, renderThread, homeView, renderMentions} from './ui-views.js';
-import {renderInfo, refreshLists, renderPage} from './ui-panel.js';
+import {renderInfo, renderPage} from './ui-panel.js';
 import {showLogin, hideLogin, openCommandPalette, closeCommandPalette, paletteOpen, updateCommandResults, chooseCommand, moveCommand} from './ui-sheets.js';
 import {actions, forms, onControlChange, onControlInput} from './ui-actions.js';
 import {bringBotsToLife} from './ui-fx.js';
@@ -85,8 +85,8 @@ function workspaceBusy() {
   if (!state) return false;
   if ((state.browserRequests || []).some(r => r.status === 'pending' || r.status === 'dispatched')) return true;
   if ((state.groupRuns || []).some(r => LIVE_RUN.has(r.status))) return true;
-  if ((state.tasks || []).some(t => t.status === 'queued' && (t.kind === 'bot-task' || t.kind === 'reminder') && dueWithin(t.runAt))) return true;
-  return (state.drafts || []).some(d => d.status === 'scheduled' && dueWithin(d.dueAt));
+  if ((state.tasks || []).some(t => t.status === 'queued' && t.kind === 'bot-task' && dueWithin(t.runAt))) return true;
+  return false;
 }
 function scheduleSync() {
   if (!store.state || refreshing) return;
@@ -227,7 +227,7 @@ document.body.addEventListener('click', ev => {
   else if (ev.target.id === 'command') closeCommandPalette();
 });
 document.body.addEventListener('submit', ev => {
-  const form = ev.target, key = forms[form.id] ? form.id : ['.edit-form', '.evidence-form'].find(k => form.classList.contains(k.slice(1)));
+  const form = ev.target, key = forms[form.id] ? form.id : null;
   if (!key) return;
   ev.preventDefault();
   if (form.dataset.busy) return;
@@ -260,10 +260,9 @@ document.body.addEventListener('keydown', ev => {
   // keyCode 229: Safari reports the Enter that commits an IME candidate without isComposing.
   if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing && ev.keyCode !== 229 && ev.target.matches('.composer textarea')) { ev.preventDefault(); if (ev.target.value.trim()) ev.target.form.requestSubmit(); }
 });
-window.addEventListener('popstate', event => { syncDepth(event); if (!store.state) return; closeSheet(); closeCommandPalette(); const next = hashRoute(); if (next.chat !== store.route.chat) resetChatState(); store.route = next; changed('route'); });
+window.addEventListener('popstate', event => { syncDepth(event); if (!store.state) return; closeSheet(); closeCommandPalette(); const next = hashRoute(); store.route = next; changed('route'); });
 window.addEventListener('resize', () => { if (store.state) setInert(); });
 // `toggle` does not bubble, so listen in the capture phase to remember open source panels.
-document.addEventListener('toggle', ev => { const id = ev.target.dataset?.evidence; if (!id) return; if (ev.target.open) { store.openEvidence.add(id); if (store.openEvidence.size > 50) store.openEvidence.delete(store.openEvidence.values().next().value); } else store.openEvidence.delete(id); }, true);
 
 applyTheme(); watchSystemTheme(); bringBotsToLife(); registerWorker();
 boot();

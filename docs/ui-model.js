@@ -2,94 +2,24 @@
  * a pane shows: the chat list, a thread's timeline, the "needs you" count and
  * the hash route. No DOM and no globals, so the product rules here are unit
  * tested directly (tests/ui-model.test.js). */
-import {fullDate} from './ui-kit.js?v=58435bfdb8';
-import {botSettings} from './bot-settings.js?v=58435bfdb8';
-import {STOPPABLE_STATUSES} from './run-state.js?v=58435bfdb8';
+import {botSettings} from './bot-settings.js?v=2d8fb27009';
+import {STOPPABLE_STATUSES} from './run-state.js?v=2d8fb27009';
 
-export const ACTIVE_DRAFTS = ['pending', 'scheduled', 'ready'];
-const X_GROUP = 'x-engage';
 const teamKey = groupId => `team-${groupId}`;
 const time = value => { const t = Date.parse(value || ''); return Number.isFinite(t) ? t : 0; };
-
-/** X's standard post limit, in characters. This is a warning, never a rule: a
- * premium account posts far longer, the number is per-account, and the final
- * click is the human's either way. */
-export const POST_LIMIT = 280;
-/** How long a draft is, counted the way a reader counts it (one emoji is one
- * character, not two halves). A link is not shortened here, so a post with a URL
- * may fit X even when this says it is over. */
-export function draftLength(text) {
-  const count = [...String(text ?? '')].length;
-  return {count, limit: POST_LIMIT, over: count > POST_LIMIT, left: Math.max(0, POST_LIMIT - count)};
-}
-/** The same text, cut into posts a thread can carry: whole words where it can,
- * mid-word only for a single word longer than the limit (a URL, a hash). Nothing
- * is dropped, so the parts joined with a space are the draft that was approved. */
-export function threadParts(text, limit = POST_LIMIT, reserved = 0) {
-  const source = String(text ?? '').trim();
-  if (!source) return [];
-  const budget = Math.max(1, limit - reserved);
-  const words = source.split(/\s+/), parts = [];
-  let part = '';
-  for (const word of words) {
-    if (!part) { part = word; }
-    else if ([...`${part} ${word}`].length <= budget) { part = `${part} ${word}`; }
-    else { parts.push(part); part = word; }
-    // A word longer than a post has to be broken somewhere; half a link is at
-    // least readable, and refusing to split would leave an unpostable draft.
-    while ([...part].length > budget) {
-      const chars = [...part];
-      parts.push(chars.slice(0, budget).join(''));
-      part = chars.slice(budget).join('');
-    }
-  }
-  if (part) parts.push(part);
-  return parts;
-}
-/** The posts a thread actually becomes: each part numbered, and the numbering
- * counted against the limit, because that is what X counts. Six characters of
- * reserve covers "99/99 " - more parts than a draft can hold. */
-export function threadPosts(text, limit = POST_LIMIT) {
-  const parts = threadParts(text, limit, 6);
-  return parts.map((part, i) => `${i + 1}/${parts.length} ${part}`);
-}
-/** The one line the editor shows beside the text, and the same line a card
- * carries when it is not being edited. A draft that is over the limit says how
- * many posts it needs, because "post it yourself" is not advice for 900
- * characters. */
-export function lengthLabel(text) {
-  const {count, over} = draftLength(text);
-  if (!over) return `${count} of ${POST_LIMIT} · ${POST_LIMIT - count} left`;
-  const posts = threadPosts(text).length;
-  return `${count} characters · ${count - POST_LIMIT} over X's ${POST_LIMIT} · ${posts} posts if threaded`;
-}
-
-/** Where a draft is in the human-approval lifecycle, and the one line that says so. */
-export function draftStage(draft) {
-  switch (draft.status) {
-    case 'pending': return {tone: 'wait', line: 'Waiting on you. Nothing posts by itself.'};
-    case 'scheduled': return {tone: 'ok', line: `Approved. Ready ${draft.dueAt ? fullDate(draft.dueAt) : 'soon'}.`};
-    case 'ready': return {tone: 'ok', line: 'Ready. Post it on X yourself.'};
-    case 'posted': return {tone: 'done', line: 'Posted by you.'};
-    case 'rejected': return {tone: 'off', line: 'Skipped.'};
-    default: return {tone: 'off', line: String(draft.status || 'Draft')};
-  }
-}
 
 /** A run with no chatKey is the group chat. Otherwise it is the conversation it started in. */
 export function runBelongsToChat(run, chatKey) {
   return run?.chatKey ? run.chatKey === chatKey : chatKey === teamKey(run?.groupId);
 }
 
-/** How many things in a group are blocked on the human: drafts to decide,
- * drafts ready to post, and runs paused at a checkpoint. Plans, page
+/** How many things in a group are blocked on the human: runs paused at a
+ * checkpoint. Plans, page
  * requests and 1:1 checkpoints are per chat, so the chat list adds those on
  * the row that holds them. */
 export function needsYou(state, group) {
   if (!state || !group) return 0;
-  const drafts = group.id === X_GROUP ? (state.drafts || []).filter(d => d.status === 'pending' || d.status === 'ready').length : 0;
-  const paused = (state.groupRuns || []).filter(r => r.groupId === group.id && r.status === 'awaiting_checkpoint').length;
-  return drafts + paused;
+  return (state.groupRuns || []).filter(r => r.groupId === group.id && r.status === 'awaiting_checkpoint').length;
 }
 
 /** Pending browser requests in one chat. Dispatched and finished ones are the device's, not the person's. */
@@ -194,8 +124,7 @@ export function stuckFeedReads(state, chatKey) {
   return (state?.browserRequests || []).filter(r => r.purpose === 'feed' && r.status === 'dispatched' && r.chatKey === chatKey && waiting.has(r.runId)).length;
 }
 
-/** Everything in one chat that is blocked on the human: drafts to decide (the
- * X-engage group chat only), runs paused at a plan or a checkpoint, browser
+/** Everything in one chat that is blocked on the human: runs paused at a plan or a checkpoint, browser
  * pages still waiting on approval, and a feed read the device has not answered.
  * The chat list, the chat header and the info panel all read this one answer, so
  * the three cannot disagree about what needs a person.
@@ -205,7 +134,6 @@ export function stuckFeedReads(state, chatKey) {
 export function waitingOnYou(state, chatKey, runs = state?.groupRuns || []) {
   const view = {...(state || {}), groupRuns: runs};
   return {
-    drafts: chatKey === teamKey(X_GROUP) ? (view.drafts || []).filter(d => d.status === 'pending' || d.status === 'ready').length : 0,
     plans: runs.filter(r => r.status === 'awaiting_plan' && runBelongsToChat(r, chatKey)).length,
     pauses: runs.filter(r => r.status === 'awaiting_checkpoint' && runBelongsToChat(r, chatKey)).length,
     pages: pendingBrowser(view, chatKey),
@@ -215,7 +143,7 @@ export function waitingOnYou(state, chatKey, runs = state?.groupRuns || []) {
 
 /** How many things one chat's `waitingOnYou` answer adds up to: the badge the
  * chat list and the "needs you" filter count. */
-export const totalWaitingOnYou = ({drafts = 0, plans = 0, pauses = 0, pages = 0, feeds = 0} = {}) => drafts + plans + pauses + pages + feeds;
+export const totalWaitingOnYou = ({plans = 0, pauses = 0, pages = 0, feeds = 0} = {}) => plans + pauses + pages + feeds;
 
 function preview(history, {isTeam, fallback}) {
   const last = history[history.length - 1];
@@ -264,20 +192,11 @@ export function chatRows({state, messages = {}, profiles = {}, typing = new Set(
     .map(x => x.row);
 }
 
-const MAX_POSTS = 20;
-/** A thread is the saved messages plus, in the X group, the posts and drafts
- * themselves as messages, so a decision is answered where it was asked. */
+/** A thread is the saved messages, in time order. */
 export function timeline({conv, state, messages = {}}) {
   const items = (messages[conv.id] || []).map(message => ({kind: 'message', at: message.at, message}));
-  if (conv.isTeam && conv.group.id === X_GROUP) {
-    const drafts = state?.drafts || [];
-    for (const draft of drafts) items.push({kind: 'draft', at: draft.createdAt, draft});
-    const posts = [...(state?.candidates || [])].sort((a, b) => time(b.createdAt) - time(a.createdAt)).slice(0, MAX_POSTS);
-    for (const post of posts) items.push({kind: 'post', at: post.createdAt, post, drafted: drafts.some(d => d.candidateId === post.id)});
-  }
-  const rank = {post: 0, draft: 1, message: 2};
   const sorted = items.map((item, order) => ({item, order}))
-    .sort((a, b) => time(a.item.at) - time(b.item.at) || rank[a.item.kind] - rank[b.item.kind] || a.order - b.order)
+    .sort((a, b) => time(a.item.at) - time(b.item.at) || a.order - b.order)
     .map(x => x.item);
   const out = [];
   let day = null, lastSender = null;
@@ -344,12 +263,11 @@ export function pipelineValue(rows, group) {
   return picked.length === ids.length && picked.every((id, i) => id === ids[i]) ? null : picked;
 }
 
-const GROUP_SECTIONS = ['home', 'drafts', 'posts', 'reminders', 'runs', 'voice', 'group-settings', 'tasks'];
+const GROUP_SECTIONS = ['home', 'runs', 'group-settings', 'tasks'];
 // `memory` is here because the bot panel links to it ("Memory and rules"):
 // without it the route parser fell back to home, so the row and the URL
 // disagreed and a reload dropped the person out of the page they were on.
 const BOT_SECTIONS = ['home', 'edit', 'memory', 'tasks'];
-const LEGACY_TABS = {overview: 'home', discovery: 'posts', approvals: 'drafts', schedules: 'reminders', activity: 'runs', settings: 'voice'};
 const PAGES = ['you', 'about', 'notifications', 'workspaces', 'ai', 'team', 'agents', 'data'];
 const SERVER_PAGES = ['notifications', 'workspaces'];
 const ADMIN_PAGES = ['ai', 'team', 'agents', 'data'];
@@ -368,11 +286,8 @@ export function parseRoute(hash, state, {server = false, admin = false, write = 
     if (info === 'edit' && !write) info = 'home';
     return {...none, chat: a, info};
   }
-  // Legacy #group/<id>/<tab> redirects only apply to the X-engage workspace:
-  // its tab names map to its info sections. Any other group falls back to its
-  // own home, so its panel never shows the X group's drafts or posts.
-  if (head === 'group' && groups.some(g => g.id === a)) return {...none, chat: teamKey(a), info: (a === X_GROUP && Object.hasOwn(LEGACY_TABS, b)) ? LEGACY_TABS[b] : 'home'};
-  if (head === 'inbox' && chatExists(teamKey(X_GROUP))) return {...none, chat: teamKey(X_GROUP), info: 'drafts'};
+  // The pre-chat #group/<id> route opens that group's chat.
+  if (head === 'group' && groups.some(g => g.id === a)) return {...none, chat: teamKey(a), info: 'home'};
   const page = head === 'you' ? (a || 'you') : head;
   if (PAGES.includes(page)) {
     if (ADMIN_PAGES.includes(page) && !admin) return none;

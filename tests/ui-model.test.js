@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ACTIVE_DRAFTS, draftStage, needsYou, chatRows, timeline, parseRoute, routeHash, feedPauseAction, retryTarget, threadLineActions, runButtons, waitingOnYou, totalWaitingOnYou, isRunNote, runBelongsToChat, FEED_WAIT, FEED_OPEN, POST_LIMIT, draftLength, lengthLabel, threadParts, threadPosts} from '../shared/ui-model.js';
+import {needsYou, chatRows, timeline, parseRoute, routeHash, feedPauseAction, retryTarget, threadLineActions, runButtons, waitingOnYou, totalWaitingOnYou, isRunNote, runBelongsToChat, FEED_WAIT, FEED_OPEN} from '../shared/ui-model.js';
 
 // ---- fixtures -------------------------------------------------------------------------
 
@@ -13,38 +13,7 @@ const state = (extra = {}) => ({groups: [xGroup(), otherGroup()], drafts: [], ca
 const at = (day, hour = 12) => `2026-03-${String(day).padStart(2, '0')}T${String(hour).padStart(2, '0')}:00:00Z`;
 const ids = rows => rows.map(r => r.id);
 
-// ---- draftStage -----------------------------------------------------------------------
-
-test('draftStage gives each lifecycle status a tone and a plain sentence', () => {
-  assert.equal(draftStage({status: 'pending'}).tone, 'wait');
-  assert.match(draftStage({status: 'pending'}).line, /Waiting on you\. Nothing posts by itself/);
-  assert.equal(draftStage({status: 'scheduled'}).tone, 'ok');
-  assert.match(draftStage({status: 'scheduled'}).line, /^Approved\. Ready soon\.$/);
-  assert.match(draftStage({status: 'scheduled', dueAt: at(2)}).line, /^Approved\. Ready .+\.$/);
-  assert.doesNotMatch(draftStage({status: 'scheduled', dueAt: at(2)}).line, /soon/);
-  assert.equal(draftStage({status: 'ready'}).tone, 'ok');
-  assert.match(draftStage({status: 'ready'}).line, /Post it on X yourself/);
-  assert.deepEqual(draftStage({status: 'posted'}), {tone: 'done', line: 'Posted by you.'});
-  assert.deepEqual(draftStage({status: 'rejected'}), {tone: 'off', line: 'Skipped.'});
-});
-
-test('draftStage never says a draft posted itself and tolerates unknown or missing status', () => {
-  assert.deepEqual(draftStage({status: 'weird'}), {tone: 'off', line: 'weird'});
-  assert.deepEqual(draftStage({}), {tone: 'off', line: 'Draft'});
-  for (const status of ['pending', 'scheduled', 'ready', 'rejected']) assert.doesNotMatch(draftStage({status}).line, /posted/i);
-});
-
-test('ACTIVE_DRAFTS are exactly the drafts a human can still act on', () => {
-  assert.deepEqual([...ACTIVE_DRAFTS].sort(), ['pending', 'ready', 'scheduled']);
-});
-
 // ---- needsYou -------------------------------------------------------------------------
-
-test('needsYou counts pending and ready drafts, only for the x-engage group', () => {
-  const s = state({drafts: [draft('1', 'pending'), draft('2', 'ready'), draft('3', 'scheduled'), draft('4', 'posted'), draft('5', 'rejected'), draft('6', 'pending')]});
-  assert.equal(needsYou(s, s.groups[0]), 3, 'two pending + one ready; scheduled, posted and skipped are not blocked on the human');
-  assert.equal(needsYou(s, s.groups[1]), 0, 'drafts belong to the x-engage group only');
-});
 
 test('needsYou counts paused runs (awaiting_checkpoint) for any group, scoped to that group', () => {
   const s = state({groupRuns: [
@@ -58,19 +27,18 @@ test('needsYou counts paused runs (awaiting_checkpoint) for any group, scoped to
   assert.equal(needsYou(s, s.groups[0]), 1);
 });
 
-test('needsYou adds drafts and paused runs together and handles empty input', () => {
-  const s = state({drafts: [draft('1', 'pending')], groupRuns: [{groupId: X, status: 'awaiting_checkpoint'}]});
+test('needsYou counts paused runs and handles empty input', () => {
+  const s = state({groupRuns: [{groupId: X, status: 'awaiting_checkpoint'}, {groupId: X, status: 'awaiting_checkpoint'}]});
   assert.equal(needsYou(s, s.groups[0]), 2);
   assert.equal(needsYou(null, s.groups[0]), 0);
   assert.equal(needsYou(s, null), 0);
-  assert.equal(needsYou({groups: [xGroup()]}, xGroup()), 0, 'missing drafts/groupRuns arrays count as zero');
+  assert.equal(needsYou({groups: [xGroup()]}, xGroup()), 0, 'a missing groupRuns array counts as zero');
 });
 
 // ---- waitingOnYou ---------------------------------------------------------------------
 
-test('waitingOnYou answers once per chat: drafts, plans, pauses, pending pages and stuck feeds', () => {
+test('waitingOnYou answers once per chat: plans, pauses, pending pages and stuck feeds', () => {
   const s = state({
-    drafts: [draft('1', 'pending'), draft('2', 'ready'), draft('3', 'scheduled')],
     groupRuns: [
       {id: 'p1', groupId: X, chatKey: 'team-x-engage', status: 'awaiting_plan'},
       {id: 'c1', groupId: X, chatKey: 'team-x-engage', status: 'awaiting_checkpoint'},
@@ -82,17 +50,10 @@ test('waitingOnYou answers once per chat: drafts, plans, pauses, pending pages a
       {id: 'f1r', purpose: 'feed', status: 'dispatched', chatKey: 'team-x-engage', runId: 'f1'},
     ],
   });
-  assert.deepEqual(waitingOnYou(s, 'team-x-engage'), {drafts: 2, plans: 1, pauses: 1, pages: 1, feeds: 1});
-  assert.equal(totalWaitingOnYou(waitingOnYou(s, 'team-x-engage')), 6);
+  assert.deepEqual(waitingOnYou(s, 'team-x-engage'), {plans: 1, pauses: 1, pages: 1, feeds: 1});
+  assert.equal(totalWaitingOnYou(waitingOnYou(s, 'team-x-engage')), 4);
   // Another chat gets its own answer; a plan there is not the X group's.
-  assert.deepEqual(waitingOnYou(s, 'team-research'), {drafts: 0, plans: 1, pauses: 0, pages: 0, feeds: 0});
-});
-
-test('waitingOnYou counts drafts only for the X-engage group chat and tolerates empty state', () => {
-  const s = state({drafts: [draft('1', 'pending')]});
-  assert.equal(waitingOnYou(s, 'scout').drafts, 0, 'a one-to-one X chat has no drafts section');
-  assert.deepEqual(waitingOnYou(null, 'team-x-engage'), {drafts: 0, plans: 0, pauses: 0, pages: 0, feeds: 0});
-  assert.equal(totalWaitingOnYou(), 0);
+  assert.deepEqual(waitingOnYou(s, 'team-research'), {plans: 1, pauses: 0, pages: 0, feeds: 0});
 });
 
 test('waitingOnYou reads the runs a caller merged in, so a demo plan still counts', () => {
@@ -149,7 +110,7 @@ test('chatRows keeps several pinned chats ordered by recency among themselves', 
 });
 
 test('chatRows filter "needs" keeps only conversations that are waiting on the human', () => {
-  const s = state({drafts: [draft('1', 'pending')], groupRuns: [{groupId: 'research', status: 'awaiting_checkpoint'}]});
+  const s = state({groupRuns: [{groupId: X, chatKey: 'team-x-engage', status: 'awaiting_plan'}, {groupId: 'research', status: 'awaiting_checkpoint'}]});
   assert.deepEqual(ids(chatRows({state: s, filter: 'needs'})), ['team-x-engage', 'team-research']);
   assert.deepEqual(ids(chatRows({state: state(), filter: 'needs'})), []);
 });
@@ -318,7 +279,7 @@ test('chatRows fallback preview when a chat is empty', () => {
   assert.equal(byId.scout.text, 'Scout does a job', 'bot: its instructions');
   assert.equal(byId.analyst.text, 'Say what you need', 'bot without instructions');
   assert.equal(byId.scout.sender, '');
-  const waiting = chatRows({state: state({drafts: [draft('1', 'pending'), draft('2', 'ready')]})}).find(r => r.id === 'team-x-engage');
+  const waiting = chatRows({state: state({groupRuns: [{groupId: X, chatKey: 'team-x-engage', status: 'awaiting_checkpoint'}, {groupId: X, chatKey: 'team-x-engage', status: 'awaiting_checkpoint'}]})}).find(r => r.id === 'team-x-engage');
   assert.equal(waiting.text, '2 waiting on you', 'an empty team chat with work for the human says so');
   assert.equal(waiting.needs, 2);
 });
@@ -342,56 +303,6 @@ test('chatRows copes with no state at all', () => {
 
 const xConv = () => ({id: 'team-x-engage', isTeam: true, group: xGroup()});
 const kinds = items => items.map(i => i.kind);
-
-test('timeline for the x-engage team chat merges messages, drafts and posts in time order', () => {
-  const s = state({
-    candidates: [{id: 'p1', createdAt: at(2, 9)}],
-    drafts: [draft('d1', 'pending', {candidateId: 'p1', createdAt: at(2, 10)})],
-  });
-  const messages = {'team-x-engage': [{id: 'm1', role: 'user', text: 'hello', at: at(2, 11)}]};
-  const items = timeline({conv: xConv(), state: s, messages});
-  assert.deepEqual(kinds(items), ['day', 'post', 'draft', 'message']);
-  assert.equal(items[1].post.id, 'p1');
-  assert.equal(items[2].draft.id, 'd1');
-  assert.equal(items[3].message.id, 'm1');
-});
-
-test('timeline puts a post before its draft before a message when they share a timestamp', () => {
-  const s = state({candidates: [{id: 'p1', createdAt: at(2)}], drafts: [draft('d1', 'pending', {createdAt: at(2)})]});
-  const items = timeline({conv: xConv(), state: s, messages: {'team-x-engage': [{role: 'user', text: 'x', at: at(2)}]}});
-  assert.deepEqual(kinds(items).filter(k => k !== 'day'), ['post', 'draft', 'message']);
-});
-
-test('timeline shows posts and drafts only in the x-engage team chat', () => {
-  const s = state({candidates: [{id: 'p1', createdAt: at(2)}], drafts: [draft('d1', 'pending')]});
-  const messages = {
-    'team-research': [{role: 'user', text: 'a', at: at(2)}],
-    scout: [{role: 'user', text: 'b', at: at(2)}],
-  };
-  const research = {id: 'team-research', isTeam: true, group: otherGroup()};
-  const direct = {id: 'scout', isTeam: false, group: xGroup(), bot: xGroup().bots[0]};
-  assert.deepEqual(kinds(timeline({conv: research, state: s, messages})), ['day', 'message']);
-  assert.deepEqual(kinds(timeline({conv: direct, state: s, messages})), ['day', 'message'], 'a direct bot chat in the x group is messages only');
-});
-
-test('timeline flags a post as drafted when any draft references it', () => {
-  const s = state({
-    candidates: [{id: 'p1', createdAt: at(2, 9)}, {id: 'p2', createdAt: at(2, 10)}],
-    drafts: [draft('d1', 'rejected', {candidateId: 'p1'})],
-  });
-  const posts = timeline({conv: xConv(), state: s}).filter(i => i.kind === 'post');
-  assert.deepEqual(posts.map(p => [p.post.id, p.drafted]), [['p1', true], ['p2', false]]);
-});
-
-test('timeline keeps only the 20 most recent posts', () => {
-  const candidates = Array.from({length: 25}, (_, i) => ({id: `p${i}`, createdAt: at(1 + i)}));
-  const items = timeline({conv: xConv(), state: state({candidates})});
-  const posts = items.filter(i => i.kind === 'post');
-  assert.equal(posts.length, 20);
-  assert.ok(posts.some(p => p.post.id === 'p24'), 'newest kept');
-  assert.ok(!posts.some(p => p.post.id === 'p4'), 'the five oldest are dropped');
-  assert.ok(posts.some(p => p.post.id === 'p5'));
-});
 
 test('timeline inserts a day divider whenever the day changes, oldest first', () => {
   const messages = {scout: [
@@ -441,14 +352,14 @@ test('parseRoute opens a team chat or a bot chat by id', () => {
 
 test('parseRoute reads the info panel and defaults an unknown section to home', () => {
   assert.equal(parse('#chat/team-x-engage/info').info, 'home');
-  assert.equal(parse('#chat/team-x-engage/info/drafts').info, 'drafts');
-  assert.equal(parse('#chat/team-x-engage/info/voice').info, 'voice');
+  assert.equal(parse('#chat/team-x-engage/info/runs').info, 'runs');
+  assert.equal(parse('#chat/team-x-engage/info/tasks').info, 'tasks');
   assert.equal(parse('#chat/team-x-engage/info/nonsense').info, 'home');
-  assert.equal(parse('#chat/team-x-engage/open/drafts').info, null, 'only /info/ opens the panel');
+  assert.equal(parse('#chat/team-x-engage/open/runs').info, null, 'only /info/ opens the panel');
   assert.equal(parse('#chat/scout/info/edit').info, 'edit');
   assert.equal(parse('#chat/scout/info/edit', {write: false}).info, 'home', 'Viewers do not open the bot edit form.');
-  // Sections are per kind: a bot has no drafts panel and a group has no edit panel.
-  assert.equal(parse('#chat/scout/info/drafts').info, 'home');
+  // Sections are per kind: a bot has no runs panel and a group has no edit panel.
+  assert.equal(parse('#chat/scout/info/runs').info, 'home');
   assert.equal(parse('#chat/team-x-engage/info/edit').info, 'home');
 });
 
@@ -468,19 +379,9 @@ test('parseRoute decodes percent-encoding and survives malformed escapes', () =>
   assert.deepEqual(parseRoute('#chat/%E0%A4%A', s), none);
 });
 
-test('parseRoute keeps the old #inbox route working as a redirect to the x-engage drafts', () => {
-  assert.deepEqual(parse('#inbox'), {chat: 'team-x-engage', page: null, info: 'drafts'});
-  assert.deepEqual(parseRoute('#inbox', state({groups: [otherGroup()]})), none, 'without an x-engage group there is nowhere to go');
-});
-
-test('parseRoute maps the old #group/<id>/<tab> routes onto info sections', () => {
-  const expected = {overview: 'home', discovery: 'posts', approvals: 'drafts', schedules: 'reminders', activity: 'runs', settings: 'voice'};
-  for (const [tab, section] of Object.entries(expected)) {
-    assert.deepEqual(parse(`#group/${X}/${tab}`), {chat: 'team-x-engage', page: null, info: section}, tab);
-  }
+test('parseRoute sends an old #group/<id> route to that chat\'s info home', () => {
+  for (const tab of ['overview', 'approvals', 'settings']) assert.deepEqual(parse(`#group/${X}/${tab}`), {chat: 'team-x-engage', page: null, info: 'home'}, tab);
   assert.deepEqual(parse(`#group/${X}`), {chat: 'team-x-engage', page: null, info: 'home'});
-  // Legacy tab names are X-engage's own; another group falls back to its home
-  // instead of showing the X group's drafts.
   assert.deepEqual(parse('#group/research/approvals'), {chat: 'team-research', page: null, info: 'home'});
   assert.equal(parse(`#group/${X}/never-heard-of-it`).info, 'home');
   assert.deepEqual(parse('#group/ghost/approvals'), none);
@@ -545,7 +446,7 @@ test('routeHash round-trips through parseRoute', () => {
     {chat: null, page: 'data', info: null},
     {chat: 'team-x-engage', page: null, info: null},
     {chat: 'team-x-engage', page: null, info: 'home'},
-    ...['drafts', 'posts', 'reminders', 'runs', 'voice'].map(info => ({chat: 'team-x-engage', page: null, info})),
+    ...['runs', 'group-settings', 'tasks'].map(info => ({chat: 'team-x-engage', page: null, info})),
     {chat: 'team-research', page: null, info: 'runs'},
     {chat: 'scout', page: null, info: null},
     {chat: 'scout', page: null, info: 'home'},
@@ -554,50 +455,6 @@ test('routeHash round-trips through parseRoute', () => {
     {chat: 'odd bot', page: null, info: null},
   ];
   for (const route of routes) assert.deepEqual(parseRoute(`#${routeHash(route)}`, s, opts), route, `round trip of ${JSON.stringify(route)} via ${routeHash(route)}`);
-});
-
-// ---- draft length ---------------------------------------------------------------------
-
-test('draft length warns about X\'s standard limit without ever acting like a wall', () => {
-  assert.equal(POST_LIMIT, 280);
-  assert.deepEqual(draftLength('x'.repeat(279)), {count: 279, limit: 280, over: false, left: 1});
-  // Exactly at the limit fits; one more does not.
-  assert.equal(draftLength('x'.repeat(280)).over, false);
-  assert.equal(draftLength('x'.repeat(281)).over, true);
-  // An emoji is one character to a reader, so it counts as one here.
-  assert.equal(draftLength('🙂🙂').count, 2);
-  // Missing text is zero, not a crash: a draft can be empty while it is written.
-  assert.deepEqual(draftLength(undefined), {count: 0, limit: 280, over: false, left: 280});
-  assert.equal(lengthLabel('x'.repeat(280)), '280 of 280 · 0 left');
-  // Over the limit it also says how many posts the same text needs, because
-  // "post it yourself" is not usable advice for 900 characters.
-  assert.equal(lengthLabel('x'.repeat(283)), "283 characters · 3 over X's 280 · 2 posts if threaded");
-  assert.equal(lengthLabel('word '.repeat(80).trim()), "399 characters · 119 over X's 280 · 2 posts if threaded");
-});
-
-test('a thread keeps every word, and splits on word boundaries', () => {
-  assert.deepEqual(threadParts('one two three four', 9), ['one two', 'three', 'four']);
-  // Nothing is dropped and nothing is invented: the parts rejoin to the draft.
-  const text = 'The pricing page says one thing and the docs say another. Here is what I checked, and what I could not.';
-  const parts = threadParts(text, 60);
-  assert.ok(parts.length > 1);
-  assert.equal(parts.join(' '), text);
-  for (const part of parts) assert.ok([...part].length <= 60, part);
-  // A single word longer than the limit (a URL) is broken rather than left
-  // unpostable, and an emoji is one character, not two halves.
-  assert.deepEqual(threadParts('abcdefghij', 4), ['abcd', 'efgh', 'ij']);
-  assert.deepEqual(threadParts('🙂🙂🙂', 2), ['🙂🙂', '🙂']);
-  // Every part is copied with a "3/7 " prefix, and X counts that too: filling
-  // each part to the limit and prefixing afterwards produces posts the composer
-  // leaves disabled, which is exactly what a threaded draft must not do.
-  const long = `${'A sentence that is long enough to need splitting. '.repeat(30)}Done.`;
-  const posts = threadPosts(long);
-  assert.ok(posts.length > 1, 'the fixture really does need a thread');
-  posts.forEach((post, i) => assert.ok([...post].length <= POST_LIMIT, `post ${i + 1} is ${[...post].length} characters`));
-  assert.equal(posts.map((post, i) => post.replace(`${i + 1}/${posts.length} `, '')).join(' '), long.trim(), 'and nothing is lost to the prefix');
-  // Empty and whitespace-only text is no post at all, not one empty post.
-  assert.deepEqual(threadParts('   '), []);
-  assert.deepEqual(threadParts(undefined), []);
 });
 
 test('every bot info section the panel links to is a route the parser accepts', () => {
@@ -611,4 +468,13 @@ test('every bot info section the panel links to is a route the parser accepts', 
   }
   // A section a bot does not have still falls back rather than painting nothing.
   assert.equal(parseRoute(`#chat/${botId}/info/drafts`, state()).info, 'home');
+});
+
+test('group sections hold no X surfaces', async () => {
+  const s = {groups: [{id: 'g', name: 'G', bots: [{id: 'b', name: 'B'}]}]};
+  for (const name of ['drafts', 'posts', 'reminders', 'voice'])
+    assert.equal(parseRoute(`#chat/team-g/info/${name}`, s).info, 'home', `${name} is still a group section`);
+  const {ASSETS} = await import('../shared/assets.js');
+  assert.equal(ASSETS.includes('usability.js'), false);
+  assert.equal(ASSETS.includes('chat-engine.js'), false);
 });

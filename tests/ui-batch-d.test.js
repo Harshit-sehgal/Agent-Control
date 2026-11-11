@@ -64,7 +64,7 @@ test('a request carries an abort timeout where the browser has one', async () =>
   assert.equal(calls[0].options.signal.abortedAfter, 20000);
 });
 
-// ---- ui-store: what a chat change resets -------------------------------------
+// ---- browser globals for the modules below -----------------------------------
 
 const META = {agentBackend: 'server'};
 globalThis.localStorage = {getItem: () => null, setItem() {}, removeItem() {}};
@@ -78,31 +78,6 @@ globalThis.location = {hash: ''};
 globalThis.history = {replaceState() {}, pushState() {}};
 globalThis.window = globalThis;
 globalThis.matchMedia = () => ({matches: false, addEventListener() {}});
-
-const {store, go, resetChatState} = await import('../shared/ui-store.js');
-
-test('leaving a chat clears its draft, its open sources and its post search', () => {
-  store.route = {chat: 'team-a', page: null, info: 'home'};
-  store.editDraft = 'd1'; store.editText = 'half written'; store.postQuery = 'launch';
-  store.openEvidence.add('ev1');
-  go({chat: 'team-b'});
-  assert.equal(store.editDraft, null);
-  assert.equal(store.editText, null);
-  assert.equal(store.postQuery, '', 'a Posts search must not follow the reader into another chat');
-  assert.equal(store.openEvidence.size, 0);
-});
-
-test('opening a panel in the same chat keeps the draft and the search', () => {
-  store.route = {chat: 'team-a', page: null, info: null};
-  store.editDraft = 'd1'; store.editText = 'half written'; store.postQuery = 'launch';
-  store.openEvidence.add('ev1');
-  go({chat: 'team-a', info: 'home'});
-  assert.equal(store.editDraft, 'd1');
-  assert.equal(store.editText, 'half written');
-  assert.equal(store.postQuery, 'launch');
-  assert.ok(store.openEvidence.has('ev1'));
-  resetChatState();
-});
 
 // ---- ui-push: a reply without the endpoint list ------------------------------
 

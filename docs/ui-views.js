@@ -2,16 +2,17 @@
  * Both are thin renderers over ui-model.js. The list shell and the composer are
  * painted once and then only their contents change, so a background refresh can
  * never wipe what the user is typing. */
-import {botSuggestions} from './chat-engine.js?v=58435bfdb8';
-import {summonableGuests} from './coordination.js?v=58435bfdb8';
-import {botSettings, groupSettings} from './bot-settings.js?v=58435bfdb8';
-import {requestOfMessage} from './bot-browser.js?v=58435bfdb8';
-import {validHttpUrl} from './core.js?v=58435bfdb8';
-import {chatRows, timeline, waitingOnYou, draftStage, draftLength, lengthLabel, mentionSuggestions, retryTarget, threadLineActions, isRunNote, ACTIVE_DRAFTS} from './ui-model.js?v=58435bfdb8';
-import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=58435bfdb8';
-import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, isXGroup, botTint, recentRuns} from './ui-store.js?v=58435bfdb8';
+import {summonableGuests} from './coordination.js?v=2d8fb27009';
+import {botSettings, groupSettings} from './bot-settings.js?v=2d8fb27009';
+import {requestOfMessage} from './bot-browser.js?v=2d8fb27009';
+import {validHttpUrl} from './core.js?v=2d8fb27009';
+import {chatRows, timeline, waitingOnYou, mentionSuggestions, retryTarget, threadLineActions, isRunNote} from './ui-model.js?v=2d8fb27009';
+import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=2d8fb27009';
+import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, botTint, recentRuns} from './ui-store.js?v=2d8fb27009';
 
 const el = id => document.getElementById(id);
+/** Starter prompts under an empty composer. */
+const CHIPS = ['What can you do?', 'Create a bot named Researcher'];
 const FILTERS = [['all', 'All'], ['needs', 'Needs you'], ['groups', 'Groups'], ['bots', 'Bots']];
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
  * unchanged, so it is never enough for an href. Untrusted URLs are validated
@@ -38,7 +39,7 @@ export function listShell() {
     <div class="filters" id="list-filters" role="group" aria-label="Filter chats"></div>
     <nav class="chat-list" id="chat-list" aria-label="Chats"></nav>
     <footer class="list-foot">
-      <span class="promise">${icon('lock', 14)} Bots draft. You post. Always.</span>
+      <span class="promise">${icon('lock', 14)} Bots ask before they act.</span>
       <span class="backend">${server ? 'Connected to Node server' : 'Browser-only prototype · data stays in this browser'}</span>
       ${write ? `<button type="button" class="fab" data-action="new-chat" aria-label="New chat">${icon('plus', 24)}</button>` : ''}
     </footer>`;
@@ -69,64 +70,6 @@ export function renderList() {
 }
 
 /* ---------- message parts ---------- */
-
-/** The signature element: a draft is a message you answer in place, and its
- * footer always says who the next move belongs to. */
-export function draftCard(draft) {
-  const stage = draftStage(draft), open = ACTIVE_DRAFTS.includes(draft.status), editing = store.editDraft === draft.id;
-  const write = canWrite(), id = esc(draft.id), postHref = validHttpUrl(draft.url);
-  // The text on screen is the edit when this card has one, so the count follows
-  // the caret and the header tells the same truth about the same draft. It is
-  // read per card: `store.editText` is one value for the whole list, so an
-  // unqualified read put "long for X" on every other draft while one was open.
-  const shown = editing ? (store.editText ?? draft.text) : draft.text, over = draftLength(shown).over;
-  const body = editing
-    ? `<form class="edit-form" data-id="${id}"><textarea class="input" name="text" rows="4" required aria-label="Edit this draft">${esc(shown)}</textarea><p class="draft-count${over ? ' over' : ''}" aria-live="polite">${esc(lengthLabel(shown))}</p><div class="card-actions">${btn('Save', null, {kind: 'primary', type: 'submit'})}${btn('Cancel', 'cancel-edit')}</div></form>`
-    : `<p class="draft-text">${esc(draft.text)}</p>`;
-  // No validated URL means no link at all: an <a href=""> called "Open post"
-  // either navigates to this page or, with an empty url, does nothing at all.
-  const copyReady = draft.status === 'ready' ? btn('Copy text', 'copy-draft', {kind: 'primary', id: draft.id}) + (postHref ? `<a class="btn quiet" href="${esc(postHref)}" target="_blank" rel="noopener noreferrer"><span>Open post</span></a>` : '') : '';
-  const actions = editing ? '' : copyReady || (write ? {
-    pending: btn('Approve', 'approve-draft', {kind: 'primary', id: draft.id}) + btn('Schedule…', 'schedule-draft', {id: draft.id}) + btn('Edit', 'edit-draft', {id: draft.id}) + btn('Skip', 'reject-draft', {id: draft.id}),
-    scheduled: btn('Edit', 'edit-draft', {id: draft.id}) + btn('Cancel', 'reject-draft', {id: draft.id}),
-  }[draft.status] || '' : '');
-  const side = write ? {scheduled: btn('Ready now', 'ready-draft', {id: draft.id, small: true}), ready: btn('I posted it', 'posted-draft', {id: draft.id, kind: 'good', small: true})}[draft.status] || '' : '';
-  const thread = over ? btn('Copy as thread', 'copy-thread', {id: draft.id, small: true, kind: 'quiet'}) : '';
-  const mark = {wait: '<i class="dot"></i>', ok: icon(draft.status === 'ready' ? 'checks' : 'check', 15), done: icon('checks', 15), off: ''}[stage.tone];
-  return `<article class="draft tone-${stage.tone}" data-draft="${id}">
-    <header><span class="draft-to">Reply to ${esc(draft.author)}</span><span class="draft-score">${Number(draft.score || 0)}/100${draft.mode === 'template' ? ' · template' : ''}${draft.revision > 1 ? ` · rev ${Number(draft.revision)}` : ''}${over ? ' · long for X' : ''}</span></header>
-    ${body}
-    ${open ? evidencePanel(draft) : ''}
-    ${actions ? `<div class="card-actions">${actions}${open && !editing && write ? btn('Rewrite', 'rewrite-draft', {id: draft.id, kind: 'ghost'}) : ''}</div>` : ''}
-    <footer class="draft-state">${mark}<span>${esc(stage.line)}</span>${thread}${side}</footer>
-  </article>`;
-}
-
-/** Review and attach the source evidence a draft relies on. */
-function evidencePanel(draft) {
-  const write = canWrite();
-  const items = (store.state.evidence || []).filter(e => e.draftId === draft.id || (draft.candidateId && e.candidateId === draft.candidateId));
-  const disputed = items.filter(e => e.verification === 'disputed').length, verified = items.filter(e => e.verification === 'user_verified').length;
-  const summary = items.length ? `${items.length} source(s)${verified ? ` · ${verified} verified` : ''}${disputed ? ` · ${disputed} disputed` : ''}` : 'No sources yet';
-  const list = items.map(e => {
-    const sourceHref = validHttpUrl(e.link);
-    return `<div class="evidence-item"><span class="row-main"><span class="row-title">${esc(e.claim)}</span><span class="row-sub">${sourceHref ? `<a href="${esc(sourceHref)}" target="_blank" rel="noopener noreferrer">Source</a> · ` : ''}${Math.round((e.confidence || 0) * 100)}% sure · ${esc(String(e.verification || '').replace('_', ' '))}</span></span>${write ? `<span class="row-actions">${e.verification !== 'user_verified' ? btn('Verify', 'verify-evidence', {id: e.id, small: true, data: {status: 'user_verified'}}) : ''}${e.verification !== 'disputed' ? btn('Dispute', 'verify-evidence', {id: e.id, small: true, data: {status: 'disputed'}}) : ''}${btn('Drop', 'drop-evidence', {id: e.id, small: true, kind: 'danger'})}</span>` : ''}</div>`;
-  }).join('');
-  return `<details class="evidence-panel" data-evidence="${esc(draft.id)}"${store.openEvidence.has(draft.id) ? ' open' : ''}><summary><span>${icon('link', 14)} ${esc(summary)}</span></summary>${list}
-    ${write ? `<form class="evidence-form" data-id="${esc(draft.id)}">
-      <input class="input" name="claim" placeholder="What does this source support?" required maxlength="600" aria-label="Claim">
-      <div class="form-grid"><select class="input" name="kind" aria-label="Kind"><option value="link">Link</option><option value="quote">Quote</option><option value="claim">Claim</option></select><input class="input" name="confidence" type="number" min="0" max="1" step="0.05" value="0.6" aria-label="Confidence from 0 to 1"></div>
-      <input class="input" name="link" type="url" placeholder="https://… (needed for a link)" aria-label="Link">
-      ${btn('Add source', null, {type: 'submit', small: true})}
-    </form>` : ''}</details>`;
-}
-
-export function postCard(post, drafted) {
-  return `<div class="post">
-    <a class="post-quote" href="${esc(safeHref(post.url))}" target="_blank" rel="noopener noreferrer"><strong>${esc(post.author || 'Post')} on X</strong><span>${esc(post.text)}</span></a>
-    <div class="post-meta"><span>${esc(post.topic || 'No topic')}${post.score?.score != null ? ` · ${Number(post.score.score)}/100` : ''}${post.demo ? ' · sample' : ''}</span>${drafted ? tag('Drafted', 'good') : canWrite() ? btn('Draft reply', 'draft-candidate', {id: post.id, small: true, kind: 'primary'}) : ''}${canWrite() ? btn('Remove', 'remove-candidate', {id: post.id, small: true, kind: 'danger'}) : ''}</div>
-  </div>`;
-}
 
 // A sender may be a guest: a bot from another group that was @mentioned here.
 function botFace(conv, senderId, name) {
@@ -187,14 +130,7 @@ function messageHtml(item, conv, latestRunNote) {
 function itemHtml(item, conv, latestRunNote) {
   if (item.kind === 'day') return `<div class="day">${esc(dayLabel(item.at))}</div>`;
   if (item.kind === 'message') return messageHtml(item, conv, latestRunNote);
-  if (item.kind === 'post') {
-    // Samples and extension captures arrive from Scout; a post you add is yours.
-    if (!item.post.demo) return `<div class="msg me lead"><div class="bubble card">${postCard(item.post, item.drafted)}</div></div>`;
-    const scout = conv.group.bots.find(b => b.type === 'source') || conv.group.bots[0], {face, color} = botFace(conv, scout?.id, scout?.name || 'Scout');
-    return `<div class="msg them lead ${color}">${face}<div class="bubble card"><span class="sender ${color}">${esc(scout?.name || 'Scout')}</span>${postCard(item.post, item.drafted)}</div></div>`;
-  }
-  const writer = conv.group.bots.find(b => b.type === 'writing') || conv.group.bots[0], {face} = botFace(conv, writer?.id, writer?.name || 'Writer');
-  return `<div class="msg them lead">${face}${draftCard(item.draft)}</div>`;
+  return '';
 }
 
 /* ---------- thread ---------- */
@@ -215,7 +151,7 @@ function threadHead(conv) {
   // The counts a header pill can show all come from one answer in the view
   // model, so the header, the chat list and the info panel cannot disagree.
   const held = recentRuns(conv.group.id);
-  const {drafts, plans, pauses, pages, feeds} = waitingOnYou(store.state, conv.id, held);
+  const {plans, pauses, pages, feeds} = waitingOnYou(store.state, conv.id, held);
   const face = conv.isTeam ? groupAvatar(conv.group.bots.map(b => ({name: b.name, tint: botTint(conv.group, b.id)})), 42) : avatar(conv.name, conv.tint, 42);
   const sub = store.typing.has(conv.id) ? 'typing…' : conv.isTeam ? (conv.group.bots.map(b => b.name).join(', ') || 'No bots yet') : conv.group.name;
   const pagePill = pages === 1 ? 'Wants to open a page' : `${pages} pages waiting on you`;
@@ -223,12 +159,12 @@ function threadHead(conv) {
   const pausePill = pauses === 1 ? 'Approve the next step' : `${pauses} steps waiting`;
   return `${iconBtn('back', 'Back to chats', 'back-to-list', {cls: 'back'})}
     <button type="button" class="thread-title" data-action="open-info" aria-expanded="${Boolean(store.route.info)}" aria-controls="inspector" aria-label="${esc(conv.name)}, open details">${face}<span class="thread-title-text"><strong>${esc(conv.name)}</strong><span>${esc(sub)}</span></span></button>
-    ${pages ? `<span class="needs-pill">${pagePill}</span>` : feeds ? `<span class="needs-pill">Feed read still open</span>` : ''}${plans ? `<button type="button" class="needs-pill" data-action="open-section" data-section="runs">${planPill}</button>` : ''}${pauses ? `<button type="button" class="needs-pill" data-action="open-section" data-section="runs">${pausePill}</button>` : ''}${drafts ? `<button type="button" class="needs-pill" data-action="open-section" data-section="drafts">${drafts} need${drafts === 1 ? 's' : ''} you</button>` : ''}`;
+    ${pages ? `<span class="needs-pill">${pagePill}</span>` : feeds ? `<span class="needs-pill">Feed read still open</span>` : ''}${plans ? `<button type="button" class="needs-pill" data-action="open-section" data-section="runs">${planPill}</button>` : ''}${pauses ? `<button type="button" class="needs-pill" data-action="open-section" data-section="runs">${pausePill}</button>` : ''}`;
 }
 
 function suggestions(conv) {
   if (!canWrite()) return '';
-  const list = conv.isTeam && isXGroup(conv.group) ? ['Draft a reply', 'What needs me?', 'Show status'] : botSuggestions(conv.name, conv.group.name);
+  const list = CHIPS;
   return list.map(s => `<button type="button" class="chip" data-action="quick-chat" data-text="${esc(s)}">${esc(s)}</button>`).join('');
 }
 
@@ -262,23 +198,16 @@ export function threadShell(conv) {
 }
 
 // Entrance motion is for NEW things only. The log is rebuilt on every refresh,
-// so remember when each item (and each draft status) first appeared and mark it
+// so remember when each item first appeared and mark it
 // fresh for a moment, with a negative delay so a rebuild resumes the animation.
 const FRESH_MS = 520;
-const born = {conv: null, items: new Map(), status: new Map()};
-const itemKey = item => item.kind === 'message' ? `m:${item.message.id}` : item.kind === 'draft' ? `d:${item.draft.id}` : item.kind === 'post' ? `p:${item.post.id}` : null;
+const born = {conv: null, items: new Map()};
+const itemKey = item => item.kind === 'message' ? `m:${item.message.id}` : null;
 function markFresh(html, item, conv, now) {
   const key = itemKey(item); if (!key) return html;
   if (!born.items.has(key)) born.items.set(key, born.conv === conv.id ? now : 0);
   const age = now - born.items.get(key);
-  let out = age < FRESH_MS ? html.replace('<div class="', `<div data-fresh style="--age:-${age}ms" class="`) : html;
-  if (item.kind === 'draft') {
-    const seen = born.status.get(key);
-    if (!seen || seen.status !== item.draft.status) born.status.set(key, {status: item.draft.status, at: seen && born.conv === conv.id ? now : 0});
-    const changed = now - born.status.get(key).at;
-    if (changed < FRESH_MS + 300) out = out.replace('<article class="', `<article data-changed style="--age:-${changed}ms" class="`);
-  }
-  return out;
+  return age < FRESH_MS ? html.replace('<div class="', `<div data-fresh style="--age:-${age}ms" class="`) : html;
 }
 
 // The log is rebuilt on every refresh, so it is not a live region itself: only
@@ -302,7 +231,7 @@ export function renderThread() {
   const latestRunNote = new Map(items.filter(i => i.kind === 'message' && isRunNote(i.message)).map(i => [i.message.runId, i.message.id]));
   announce(conv, items);
   const now = Date.now();
-  if (born.conv !== conv.id) { born.items.clear(); born.status.clear(); }
+  if (born.conv !== conv.id) born.items.clear();
   const html = items.map(item => markFresh(itemHtml(item, conv, latestRunNote), item, conv, now)).join('');
   born.conv = conv.id;
   log.innerHTML = (items.length ? html : welcome(conv))
@@ -314,12 +243,10 @@ export function renderThread() {
 
 /** Desktop landing when no chat is open: say what you want, the group takes it.
  * The chips belong to the group the form sends to, so a workspace with more than
- * one group does not get X-engage prompts that quietly run in the first group. */
+ * one group does not get prompts that quietly run in the first group. */
 function homePrompts(group) {
   if (!group) return [];
-  if (isXGroup(group)) return ['Draft a reply to the top post', 'What needs my approval?', 'Summarize the latest post', 'Show status'];
-  const bot = group.bots.find(b => botSettings(b).lead) || group.bots[0];
-  return botSuggestions(bot?.name || group.name, group.name);
+  return CHIPS;
 }
 
 export function homeView() {
@@ -328,7 +255,7 @@ export function homeView() {
   return `<section class="home">
     <button type="button" class="poke" data-action="poke" aria-label="Say hi">${mascot()}</button>
     <h1>What should your bots work on?</h1>
-    <p>${who} They hand work to each other, and the final Post click stays with you.</p>
+    <p>${who} They hand work to each other, and anything that goes out waits for your click.</p>
     ${write ? `<form id="home-prompt" class="composer" autocomplete="off">
       <textarea name="prompt" rows="1" placeholder="Ask your group to research, draft or review something" aria-label="Ask your bot group" maxlength="4000" required></textarea>
       <button type="submit" class="icon-btn send" aria-label="Send to group chat">${icon('send', 20)}</button>

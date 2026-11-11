@@ -3,13 +3,12 @@
  * model is configured and in the deterministic simulator otherwise. A custom bot
  * runs its own instructions on the server; everything else answers from the
  * offline command set. Nothing here can publish. */
-import {classifyMessage, statusSummary} from './chat-engine.js?v=58435bfdb8';
-import {planHandoffs, leadShouldRunGroup, summonableGuests} from './coordination.js?v=58435bfdb8';
-import {feedPauseAction} from './ui-model.js?v=58435bfdb8';
-import {pollRun} from './run-follow.js?v=58435bfdb8';
-import {botSettings, groupSettings} from './bot-settings.js?v=58435bfdb8';
-import {store, api, sync, conversation, appendMessage, setTyping, isStaticDemo, teamKey, groups} from './ui-store.js?v=58435bfdb8';
-import {toast} from './ui-dialogs.js?v=58435bfdb8';
+import {planHandoffs, leadShouldRunGroup, summonableGuests} from './coordination.js?v=2d8fb27009';
+import {feedPauseAction} from './ui-model.js?v=2d8fb27009';
+import {pollRun} from './run-follow.js?v=2d8fb27009';
+import {botSettings, groupSettings} from './bot-settings.js?v=2d8fb27009';
+import {store, api, sync, conversation, appendMessage, setTyping, isStaticDemo, teamKey, groups} from './ui-store.js?v=2d8fb27009';
+import {toast} from './ui-dialogs.js?v=2d8fb27009';
 
 /** In-flight sends per conversation, so two overlapping sends keep the typing
  * indicator up until the last one finishes instead of the first clearing it. */
@@ -80,29 +79,19 @@ async function runOnServer(group, message, directBotId, key) {
   await streamGroupRun(group.id, key, run?.runId || null);
 }
 
-/** The offline command set for a direct chat with a built-in bot. */
+/** A name in "create a bot named X", or null when the message asks for none. */
+const BOT_NAME = /(?:create|add|make)\s+(?:(?:a|an|new)\s+)*bot\s+(?:named|called)\s+([\w][\w \-]{1,45})/i;
+
+/** The offline reply for a direct chat with a built-in bot. */
 async function localReply(conv, message) {
-  const {state} = store, {bot, group} = conv, demo = isStaticDemo();
-  const cmd = classifyMessage(message);
-  const pending = state.drafts.filter(d => d.status === 'pending').length;
-  switch (cmd.intent) {
-    case 'status': return `Here is where things stand.\n\n${statusSummary(state)}`;
-    case 'approvals': return pending ? `${pending} draft(s) are waiting on you. Open the X-engage chat and tap "need you" to decide. Nothing posts by itself.` : 'Nothing is waiting on you right now.';
-    case 'discover': return `I have ${state.candidates.length} post(s) collected. ${demo ? 'This demo cannot read a live X feed.' : 'Ask the primary bot to scroll your home feed. That opens a read-only page you approve. The extension still captures one post at a time.'} Share a post in the X-engage chat with the + button.`;
-    case 'draft': {
-      const post = state.candidates.find(c => !state.drafts.some(d => d.candidateId === c.id)) || state.candidates[0];
-      if (!post) return 'There is no post to reply to yet. Share one in the X-engage chat with the + button.';
-      const draft = await api(`/api/candidates/${post.id}/process`, 'POST', {});
-      return `I drafted a reply to ${post.author} (score ${draft.score}/100). It is in the X-engage chat, waiting on you.\n\nIt is a template, not AI writing, so read it before you approve.`;
-    }
-    case 'create-bot': {
-      if (!cmd.name || cmd.name.length < 2 || cmd.name.length >= 60) return 'Tap + in the chat list to create a bot with a name, a group and a job.';
-      const created = await api(`/api/groups/${group.id}/bots`, 'POST', {name: cmd.name, instructions: `Custom bot ${cmd.name}. Update this profile with a clear job, permitted tools and approval boundaries.`});
-      return `Created ${created.name} in ${group.name}. It is in your chat list now. Open its profile to give it a real job.`;
-    }
-    case 'schedules': return `Approved drafts wait ${state.settings.minDelay} to ${state.settings.maxDelay} minutes before they are ready. Change it under Voice and timing in the X-engage chat info. ${demo ? 'This demo only checks timers while the page is open.' : 'The server scheduler runs while the Node process is up.'}`;
-    default: return `I'm ${bot.name}. My job: ${bot.instructions || 'not set yet.'}\n\n${demo ? 'This is an offline demo, not a connected AI model.' : 'Direct chat uses built-in commands; group runs use the server model when a key is set.'} Try "Show status", "Draft a reply" or "What needs me?".`;
+  const {bot, group} = conv, demo = isStaticDemo();
+  if (/\b(create|add|make)\b.{0,24}\bbot\b/i.test(message)) {
+    const name = message.match(BOT_NAME)?.[1]?.replace(/\s+(?:that|which|who|to)\b.*$/i, '').trim();
+    if (!name || name.length < 2 || name.length >= 60) return 'Tap + in the chat list to create a bot with a name, a group and a job.';
+    const created = await api(`/api/groups/${group.id}/bots`, 'POST', {name, instructions: `Custom bot ${name}. Update this profile with a clear job, permitted tools and approval boundaries.`});
+    return `Created ${created.name} in ${group.name}. It is in your chat list now. Open its profile to give it a real job.`;
   }
+  return `I'm ${bot.name}. My job: ${bot.instructions || 'not set yet.'}\n\n${demo ? 'This is an offline demo, not a connected AI model.' : 'Direct chat uses built-in commands; group runs use the server model when a key is set.'} Try "Create a bot named Researcher".`;
 }
 
 async function reply(conv, message) {

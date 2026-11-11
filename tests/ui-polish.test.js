@@ -30,8 +30,8 @@ test('hash routes respond to browser Back and Forward',()=>{
 test('polish preserves truthful Pages limitations and manual publishing',()=>{
   assert.match(html,/No real AI or remote backend/);
   assert.match(js,/Browser-only prototype/);
-  assert.match(js,/final Post click stays with you/i);
-  assert.match(js,/Bots draft\. You post\. Always\./);
+  assert.match(js,/anything that goes out waits for your click/i);
+  assert.match(js,/Bots ask before they act\./);
   assert.doesNotMatch(js,/OPENAI_API_KEY\s*=/);
 });
 test('the single stylesheet keeps motion, focus and small-screen rules',()=>{

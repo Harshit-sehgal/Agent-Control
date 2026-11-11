@@ -18,7 +18,7 @@ export const ASSETS = [
   'ui-kit.js', 'ui-model.js', 'ui-store.js', 'ui-dialogs.js', 'ui-chat.js', 'ui-views.js', 'ui-panel.js', 'ui-sheets.js', 'ui-admin.js', 'ui-actions.js', 'ui-takeover.js', 'ui-fx.js', 'ui-push.js', 'sw.js',
   // Browser-safe logic shared with the server.
   'core.js', 'errors.js', 'workflow.js', 'tasks.js', 'evidence.js', 'contracts.js', 'bot-settings.js', 'bot-browser.js', 'bot-create.js', 'bot-link.js', 'reply-blocks.js', 'subagents.js', 'retention.js', 'memory.js', 'run-state.js',
-  'coordination.js', 'chats.js', 'group-simulator.js', 'chat-engine.js', 'usability.js', 'locks.js', 'ai-presets.js', 'run-follow.js',
+  'coordination.js', 'chats.js', 'group-simulator.js', 'locks.js', 'ai-presets.js', 'run-follow.js',
   // Static pages and install assets.
   'manifest.webmanifest', 'icon-192.png', 'icon-512.png',
 ];
