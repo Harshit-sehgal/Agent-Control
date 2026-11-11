@@ -1,18 +1,18 @@
 /** What the UI can do, as three lookup tables keyed by `data-action`, form id and
  * control id. app.js owns the DOM events and dispatches here; handlers throw on
  * failure and the dispatcher turns that into one toast. */
-import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns} from './ui-store.js?v=b55825ff2c';
-import {botSettings, groupSettings} from './bot-settings.js?v=b55825ff2c';
-import {completeMention, moveRow, pipelineValue} from './ui-model.js?v=b55825ff2c';
-import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=b55825ff2c';
-import {sendChat, streamGroupRun, watchQueuedRun} from './ui-chat.js?v=b55825ff2c';
-import {runWithTyping} from './run-follow.js?v=b55825ff2c';
-import {confetti, whoosh, react, poke} from './ui-fx.js?v=b55825ff2c';
-import {renderList, renderMentions} from './ui-views.js?v=b55825ff2c';
-import {reloadAdminPage, pipelineList} from './ui-panel.js?v=b55825ff2c';
-import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, botTaskSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=b55825ff2c';
-import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=b55825ff2c';
-import {takeoverActions, takeoverForms} from './ui-takeover.js?v=b55825ff2c';
+import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns} from './ui-store.js?v=c2620e6bed';
+import {botSettings, groupSettings} from './bot-settings.js?v=c2620e6bed';
+import {completeMention, moveRow, pipelineValue, editableInputs} from './ui-model.js?v=c2620e6bed';
+import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=c2620e6bed';
+import {sendChat, streamGroupRun, watchQueuedRun} from './ui-chat.js?v=c2620e6bed';
+import {runWithTyping} from './run-follow.js?v=c2620e6bed';
+import {confetti, whoosh, react, poke} from './ui-fx.js?v=c2620e6bed';
+import {renderList, renderMentions} from './ui-views.js?v=c2620e6bed';
+import {reloadAdminPage, pipelineList} from './ui-panel.js?v=c2620e6bed';
+import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, botTaskSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=c2620e6bed';
+import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=c2620e6bed';
+import {takeoverActions, takeoverForms} from './ui-takeover.js?v=c2620e6bed';
 
 const adminCtx = {reload: reloadAdminPage};
 const chatId = () => store.route.chat;
@@ -242,7 +242,7 @@ export const forms = {
     // shared across devices. Only the cosmetic tint stays in localStorage.
     const permissions = [...form.querySelectorAll('input[name="permissions"]:checked')].map(x => x.value);
     const kind = f.outputKind === 'structured' ? 'structured' : 'text';
-    const inputs = b.contract?.inputs?.length ? b.contract.inputs : ['objective', 'previous_output', 'evidence', 'source_post', 'settings', 'identity'];
+    const inputs = editableInputs(b);
     const fields = kind === 'structured' ? String(f.fields || '').split(',').map(s => s.trim()).filter(Boolean).map(name => ({name, type: 'text', required: true})) : [];
     const on = name => Boolean(form.elements.namedItem(name)?.checked), picked = form.querySelector('.tint.on');
     const settings = {

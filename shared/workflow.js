@@ -51,6 +51,12 @@ export function migrate(state) {
     task.lastError = 'This task kind was removed with X-engage';
   }
   if (!Array.isArray(state.browserRequests)) state.browserRequests = [];
+  // The X feed read went with X-engage. Its page request would otherwise still
+  // wait on a person, and approving it would read x.com for a run that is gone.
+  for (const request of state.browserRequests) {
+    if (request?.purpose !== 'feed' || !['pending', 'dispatched'].includes(request.status)) continue;
+    try { denyBrowserRequest(state, request.id); } catch { request.status = 'denied'; }
+  }
   // Bring-your-own-key AI providers and the workspace/bot model choices.
   state.ai ??= {};
   state.ai.providers ??= [];

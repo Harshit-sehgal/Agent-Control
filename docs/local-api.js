@@ -4,18 +4,19 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {initialState, cleanText} from './core.js?v=b55825ff2c';
-import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup} from './workflow.js?v=b55825ff2c';
-import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=b55825ff2c';
-import {addChatMessages, clearChat} from './chats.js?v=b55825ff2c';
-import {publicMemory, addRules, removeRule, forgetChat, forgetRulebook} from './memory.js?v=b55825ff2c';
-import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=b55825ff2c';
-import {createThread, titleFrom} from './threads.js?v=b55825ff2c';
-import {simulateGroup} from './group-simulator.js?v=b55825ff2c';
-import {BUSY_STATUSES} from './run-state.js?v=b55825ff2c';
-import {botSettings} from './bot-settings.js?v=b55825ff2c';
-import {denyBrowserRequest} from './bot-browser.js?v=b55825ff2c';
-import {withLocalLock} from './locks.js?v=b55825ff2c';
+import {initialState, cleanText} from './core.js?v=c2620e6bed';
+import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=c2620e6bed';
+import {RETENTION_DEFAULTS} from './retention.js?v=c2620e6bed';
+import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=c2620e6bed';
+import {addChatMessages, clearChat} from './chats.js?v=c2620e6bed';
+import {publicMemory, addRules, removeRule, forgetChat, forgetRulebook} from './memory.js?v=c2620e6bed';
+import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=c2620e6bed';
+import {createThread, titleFrom} from './threads.js?v=c2620e6bed';
+import {simulateGroup} from './group-simulator.js?v=c2620e6bed';
+import {BUSY_STATUSES} from './run-state.js?v=c2620e6bed';
+import {botSettings} from './bot-settings.js?v=c2620e6bed';
+import {denyBrowserRequest} from './bot-browser.js?v=c2620e6bed';
+import {withLocalLock} from './locks.js?v=c2620e6bed';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
@@ -245,6 +246,7 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
   if ((m = path.match(/^\/api\/chats\/([a-z0-9-]+)$/)) && method === 'DELETE') { const r = clearChat(state, m[1]); cancelRunsForChat(state, m[1], 'Chat cleared.'); save(state); return r; }
   // Durable memory: the rulebook and chat recap are part of local state, so a
   // person can delete a rule here too. A model-written pass needs the Node build.
+  if (path === '/api/retention' && method === 'PATCH') { updateRetention(state, body); save(state); return {...RETENTION_DEFAULTS, ...state.settings.retention}; }
   if (path === '/api/memory' && method === 'GET') return publicMemory(state);
   if (path === '/api/memory/rules' && method === 'POST') {
     if (!body.model) throw new Error('Which model should keep this rule?');

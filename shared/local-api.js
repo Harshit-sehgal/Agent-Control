@@ -5,7 +5,8 @@
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
 import {initialState, cleanText} from './core.js';
-import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup} from './workflow.js';
+import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js';
+import {RETENTION_DEFAULTS} from './retention.js';
 import {enqueueTask, retryTask, cancelTask} from './tasks.js';
 import {addChatMessages, clearChat} from './chats.js';
 import {publicMemory, addRules, removeRule, forgetChat, forgetRulebook} from './memory.js';
@@ -245,6 +246,7 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
   if ((m = path.match(/^\/api\/chats\/([a-z0-9-]+)$/)) && method === 'DELETE') { const r = clearChat(state, m[1]); cancelRunsForChat(state, m[1], 'Chat cleared.'); save(state); return r; }
   // Durable memory: the rulebook and chat recap are part of local state, so a
   // person can delete a rule here too. A model-written pass needs the Node build.
+  if (path === '/api/retention' && method === 'PATCH') { updateRetention(state, body); save(state); return {...RETENTION_DEFAULTS, ...state.settings.retention}; }
   if (path === '/api/memory' && method === 'GET') return publicMemory(state);
   if (path === '/api/memory/rules' && method === 'POST') {
     if (!body.model) throw new Error('Which model should keep this rule?');

@@ -178,3 +178,10 @@ test('first Pages boot seeds the starting workspace',async()=>{
   // Loading backfills bot contracts, so compare with the seed as it loads.
   assert.deepEqual(s.groups,migrate(initialState()).groups);
 });
+
+test('Pages saves a retention policy the same way the server does',async()=>{
+  const {request}=setup();
+  const saved=await request('/api/retention','PATCH',{events:30,doneTasks:7,runs:14});
+  assert.deepEqual([saved.events,saved.doneTasks,saved.runs],[30,7,14]);
+  assert.equal((await request('/api/state')).settings.retention.events,30);
+});

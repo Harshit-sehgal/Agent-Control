@@ -3,7 +3,7 @@
  * failure and the dispatcher turns that into one toast. */
 import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns} from './ui-store.js';
 import {botSettings, groupSettings} from './bot-settings.js';
-import {completeMention, moveRow, pipelineValue} from './ui-model.js';
+import {completeMention, moveRow, pipelineValue, editableInputs} from './ui-model.js';
 import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js';
 import {sendChat, streamGroupRun, watchQueuedRun} from './ui-chat.js';
 import {runWithTyping} from './run-follow.js';
@@ -242,7 +242,7 @@ export const forms = {
     // shared across devices. Only the cosmetic tint stays in localStorage.
     const permissions = [...form.querySelectorAll('input[name="permissions"]:checked')].map(x => x.value);
     const kind = f.outputKind === 'structured' ? 'structured' : 'text';
-    const inputs = b.contract?.inputs?.length ? b.contract.inputs : ['objective', 'previous_output', 'evidence', 'source_post', 'settings', 'identity'];
+    const inputs = editableInputs(b);
     const fields = kind === 'structured' ? String(f.fields || '').split(',').map(s => s.trim()).filter(Boolean).map(name => ({name, type: 'text', required: true})) : [];
     const on = name => Boolean(form.elements.namedItem(name)?.checked), picked = form.querySelector('.tint.on');
     const settings = {

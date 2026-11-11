@@ -82,10 +82,14 @@ test('the authorization matrix gates every write by role and origin', {timeout: 
     assert.notEqual(memberChat.status, 403);
     assert.ok([202, 422].includes(memberChat.status), `member group chat got ${memberChat.status}`);
     assert.equal((await call('POST', '/api/retention/prune', {cookie: member, body: {}})).status, 403);
+    assert.equal((await call('PATCH', '/api/retention', {cookie: member, body: {events: 30}})).status, 403);
     assert.equal((await call('POST', '/api/users', {cookie: member, body: {email: 'm@x.test', password: 'long-enough-pass', role: 'member'}})).status, 403);
 
     // Admin: admin surfaces allowed.
     assert.equal((await call('POST', '/api/retention/prune', {cookie: admin, body: {}})).status, 200);
+    const policy = await call('PATCH', '/api/retention', {cookie: admin, body: {events: 30, doneTasks: 7, runs: 14}});
+    assert.equal(policy.status, 200);
+    assert.equal(policy.body.events, 30, 'retention can be configured again after X-engage took its settings route');
     assert.equal((await call('GET', '/api/users', {cookie: admin})).status, 200);
     // But an admin cannot mint an equal-or-higher role.
     assert.equal((await call('POST', '/api/users', {cookie: admin, body: {email: 'o@x.test', password: 'long-enough-pass', role: 'owner'}})).status, 403);

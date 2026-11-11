@@ -1,14 +1,14 @@
 /** Everything that used to be a dashboard tab now hangs off a conversation:
  * the info panel of the open chat (runs, scheduled tasks, settings, the
  * bot's profile) and the "You" pages (account, admin, about). */
-import {ACTIONS, OUTPUT_KINDS} from './contracts.js?v=b55825ff2c';
-import {BOT_DEFAULTS, MAX_CONTEXT_MESSAGES, MAX_STEPS_LIMIT, botSettings, groupSettings, pipelineOf} from './bot-settings.js?v=b55825ff2c';
-import {modelKey} from './memory.js?v=b55825ff2c';
-import {chatTasks, pipelineRows, retryTarget, runButtons, waitingOnYou} from './ui-model.js?v=b55825ff2c';
-import {esc, icon, avatar, groupAvatar, tintClass, TINT_COUNT, btn, iconBtn, row, box, field, note, empty, tag, pageHead, fullDate} from './ui-kit.js?v=b55825ff2c';
-import {store, conversation, isStaticDemo, isAdmin, canWrite, botTint, recentRuns, THEMES, themeChoice} from './ui-store.js?v=b55825ff2c';
-import {validHttpUrl} from './core.js?v=b55825ff2c';
-import {ADMIN_PAGES, adminPage, providerModelOptions} from './ui-admin.js?v=b55825ff2c';
+import {ACTIONS, OUTPUT_KINDS} from './contracts.js?v=c2620e6bed';
+import {BOT_DEFAULTS, MAX_CONTEXT_MESSAGES, MAX_STEPS_LIMIT, botSettings, groupSettings, pipelineOf} from './bot-settings.js?v=c2620e6bed';
+import {modelKey} from './memory.js?v=c2620e6bed';
+import {chatTasks, pipelineRows, retryTarget, runButtons, waitingOnYou} from './ui-model.js?v=c2620e6bed';
+import {esc, icon, avatar, groupAvatar, tintClass, TINT_COUNT, btn, iconBtn, row, box, field, note, empty, tag, pageHead, fullDate} from './ui-kit.js?v=c2620e6bed';
+import {store, conversation, isStaticDemo, isAdmin, canWrite, botTint, recentRuns, THEMES, themeChoice} from './ui-store.js?v=c2620e6bed';
+import {validHttpUrl} from './core.js?v=c2620e6bed';
+import {ADMIN_PAGES, adminPage, providerModelOptions} from './ui-admin.js?v=c2620e6bed';
 
 const el = id => document.getElementById(id);
 const options = (pairs, current) => pairs.map(([value, label]) => `<option value="${esc(value)}"${value === current ? ' selected' : ''}>${esc(label)}</option>`).join('');

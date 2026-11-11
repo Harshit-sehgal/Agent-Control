@@ -2,6 +2,7 @@
  * live in `shared/`; a route only reads the request and applies one transition. */
 import {cleanText} from '../shared/core.js';
 import * as tasks from '../shared/tasks.js';
+import * as wf from '../shared/workflow.js';
 import {pruneState, RETENTION_DEFAULTS} from '../shared/retention.js';
 import * as notifications from './notifications.js';
 import {aiModel} from './ai.js';
@@ -46,4 +47,9 @@ export function workflowRoutes(router, {auth}) {
   // Retention: preview, then apply the workspace policy.
   router.add('GET', '/api/retention/preview', 'viewer', c => { const state = c.store.read(); return {policy: retentionSettings(state), preview: pruneState(state, {dryRun: true})}; });
   router.add('POST', '/api/retention/prune', 'admin', c => c.store.update(s => pruneState(s)));
+  // The retention policy itself. Only the window sizes change; pruning is the route above.
+  router.add('PATCH', '/api/retention', 'admin', async c => {
+    const body = await c.body();
+    return c.store.update(s => { wf.updateRetention(s, body); return retentionSettings(s); });
+  });
 }

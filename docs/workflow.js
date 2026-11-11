@@ -5,18 +5,18 @@
  * They throw errors carrying an HTTP `status` so the same rules apply to the
  * Node HTTP routes and to any browser-local transport.
  */
-import {activity,cleanText} from './core.js?v=b55825ff2c';
-import {fail} from './errors.js?v=b55825ff2c';
-import {cancelTask} from './tasks.js?v=b55825ff2c';
-import {normalizeRetention} from './retention.js?v=b55825ff2c';
-import * as contracts from './contracts.js?v=b55825ff2c';
-import {pruneChats, releaseChatWork} from './chats.js?v=b55825ff2c';
-import {denyBrowserRequest} from './bot-browser.js?v=b55825ff2c';
-import {BUSY_STATUSES} from './coordination.js?v=b55825ff2c';
-import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=b55825ff2c';
-import {memoryState} from './memory.js?v=b55825ff2c';
-import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=b55825ff2c';
-import {assertManager, releaseReports, PRIMARY_GROUP} from './company.js?v=b55825ff2c';
+import {activity,cleanText} from './core.js?v=c2620e6bed';
+import {fail} from './errors.js?v=c2620e6bed';
+import {cancelTask} from './tasks.js?v=c2620e6bed';
+import {normalizeRetention} from './retention.js?v=c2620e6bed';
+import * as contracts from './contracts.js?v=c2620e6bed';
+import {pruneChats, releaseChatWork} from './chats.js?v=c2620e6bed';
+import {denyBrowserRequest} from './bot-browser.js?v=c2620e6bed';
+import {BUSY_STATUSES} from './coordination.js?v=c2620e6bed';
+import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=c2620e6bed';
+import {memoryState} from './memory.js?v=c2620e6bed';
+import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=c2620e6bed';
+import {assertManager, releaseReports, PRIMARY_GROUP} from './company.js?v=c2620e6bed';
 
 export const SCHEMA_VERSION = 3;
 
@@ -51,6 +51,12 @@ export function migrate(state) {
     task.lastError = 'This task kind was removed with X-engage';
   }
   if (!Array.isArray(state.browserRequests)) state.browserRequests = [];
+  // The X feed read went with X-engage. Its page request would otherwise still
+  // wait on a person, and approving it would read x.com for a run that is gone.
+  for (const request of state.browserRequests) {
+    if (request?.purpose !== 'feed' || !['pending', 'dispatched'].includes(request.status)) continue;
+    try { denyBrowserRequest(state, request.id); } catch { request.status = 'denied'; }
+  }
   // Bring-your-own-key AI providers and the workspace/bot model choices.
   state.ai ??= {};
   state.ai.providers ??= [];

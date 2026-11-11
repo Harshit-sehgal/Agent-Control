@@ -94,6 +94,7 @@ const PUBLIC_WITH_PARAM = [];
 /** Least role for the routes where "who may do this" is the whole point. */
 const LEAST_ROLE = {
   'POST /api/retention/prune': 'admin',
+  'PATCH /api/retention': 'admin',
   'GET /api/users': 'admin',
   'POST /api/users': 'admin',
   'PATCH /api/users/:id': 'admin',
