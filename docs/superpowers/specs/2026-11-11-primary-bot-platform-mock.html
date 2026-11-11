@@ -438,6 +438,41 @@ button.prow:active{background:var(--sunk)}
 .chip,.th,.prow,.trow,.chatmain,.bmain,.rb,.pillbtn,.send,.btn{transition:background-color .18s ease,color .18s ease,box-shadow .18s ease,transform .15s ease}
 .rb:active,.pillbtn:active,.mkgo:not(:disabled):active,.send:active,.btn:active,.chip:active{transform:scale(.96)}
 .panel,.drawer{transition-timing-function:cubic-bezier(.2,.8,.2,1)}
+
+/* bot computer (mock v46): one shared browser, a tab per bot, watched live from the profile */
+.pcv{display:flex;flex-direction:column;gap:12px}
+.pcwin{border-radius:20px;overflow:hidden;background:var(--raise);box-shadow:inset 0 0 0 1px var(--line)}
+.pcbar{display:flex;align-items:center;gap:8px;padding:10px 14px;font-size:13px;color:var(--soft);border-bottom:1px solid var(--line)}
+.pcbar .url{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:5px 10px;border-radius:99px;background:var(--sunk)}
+.pcdot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
+.pcdot.live{background:var(--mint);box-shadow:0 0 0 3px color-mix(in srgb,var(--mint) 25%,transparent)}
+.pcdot.you{background:var(--violet)}
+.pcscreen{position:relative;aspect-ratio:4/3;padding:16px;display:flex;flex-direction:column;gap:9px;background:color-mix(in srgb,var(--raise) 70%,var(--bg))}
+.pcscreen.idle{opacity:.55}
+.pcscreen h5{margin:0 0 4px;font-size:14px;font-weight:600;color:var(--fg)}
+.pcrow{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:10px;transition:background-color .3s ease}
+.pcrow i{width:22px;height:22px;border-radius:50%;background:color-mix(in srgb,var(--t) 55%,var(--sunk));flex:none}
+.pcrow span{flex:1;display:flex;flex-direction:column;gap:5px}
+.pcrow span::before,.pcrow span::after{content:'';height:7px;border-radius:9px;background:var(--line)}
+.pcrow span::before{width:var(--w,60%);background:color-mix(in srgb,var(--fg) 22%,transparent)}
+.pcrow.on{background:color-mix(in srgb,var(--t) 22%,transparent)}
+.pccur{position:absolute;width:18px;height:18px;left:var(--cx);top:var(--cy);transition:left .55s cubic-bezier(.77,0,.175,1),top .55s cubic-bezier(.77,0,.175,1);pointer-events:none;filter:drop-shadow(0 1px 1px rgba(0,0,0,.35))}
+.pccur svg{width:100%;height:100%}
+.pccur.tap::after{content:'';position:absolute;left:-7px;top:-7px;width:18px;height:18px;border-radius:50%;border:2px solid var(--mint);animation:tapring .5s cubic-bezier(.23,1,.32,1) forwards}
+@keyframes tapring{from{opacity:1;scale:.4}to{opacity:0;scale:1.6}}
+.pcveil{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:20px;font-size:13.5px;color:var(--soft);background:color-mix(in srgb,var(--bg) 35%,transparent)}
+.pcnow{display:flex;align-items:center;gap:10px;padding:12px 14px;font-size:14px;color:var(--fg);border-top:1px solid var(--line)}
+.pcnow .face{--s:22px}
+.pcnow .cur{animation:curin .3s ease-out}
+.pcact{display:flex;justify-content:center}
+.pctrail{list-style:none;margin:0;padding:0}
+.pctrail li{display:flex;gap:12px;align-items:baseline;padding:10px 18px;font-size:14px}
+.pctrail li+li{border-top:1px solid var(--line)}
+.pctrail small{color:var(--muted);font-size:12.5px;margin-left:auto;white-space:nowrap;max-width:45%;overflow:hidden;text-overflow:ellipsis}
+.pch{margin:14px 4px 8px;font-size:13px;font-weight:600;color:var(--muted)}
+.pchip{display:inline-flex;align-items:center;gap:5px;margin-left:4px;padding:2px 9px 2px 7px;border-radius:99px;background:var(--raise);color:var(--fg);font-size:12px;box-shadow:inset 0 0 0 1px var(--line);white-space:nowrap}
+.pchip svg{width:13px;height:13px}
+.pchip:active{transform:scale(.96)}
 /* desktop split: bots on the left, the chat on the right */
 .is-desk .fab-me,.is-desk .bbar,.is-desk .fab-bot{display:none!important}
 .split{display:grid;grid-template-columns:292px 1fr;height:100%}
@@ -556,7 +591,6 @@ body.sorting,body.sorting *{cursor:grabbing!important;user-select:none;-webkit-u
 .thead h1{font-family:var(--display);font-size:17px;line-height:1.25;font-weight:600;letter-spacing:-.015em;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .app[data-look="ink"] .thead h1{font-weight:500}
 .thead .live{font-size:12.5px;color:var(--muted)}
-.wash{position:absolute;inset:0 0 auto;height:260px;pointer-events:none;background:linear-gradient(to bottom,color-mix(in srgb,var(--owner,transparent) 16%,transparent),transparent);transition:background .6s var(--ease)}
 .col{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:20px;position:relative}
 .me{align-self:flex-end;max-width:78%;background:var(--mint-soft);border-radius:var(--r) var(--r) 5px var(--r);padding:10px 14px}
 .route{font-size:12.5px;color:var(--muted);margin-top:-12px;align-self:flex-end;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
@@ -882,11 +916,11 @@ function itemHTML(it,t){
   switch(it.k){
     case 'me':return `<div class="me fadein">${esc(it.text)}</div>`;
     case 'direct':case 'route':return '';
-    case 'prog':{if(!it.done&&it.cur){const c=it.cur,b=by(c.bot);return `<div class="prog live">${face(b,'s',c.wait?'wait':'read')}<span class="cur">${esc(c.text)}</span></div>`}
+    case 'prog':{if(!it.done&&it.cur){const c=it.cur,b=by(c.bot);return `<div class="prog live">${face(b,'s',c.wait?'wait':'read')}<span class="cur">${esc(c.text)}</span>${c.web?pcChip(c.web):''}</div>`}
       if(!it.log.length)return '';const L=by(it.lead),ppl=[...new Set(it.log.flatMap(l=>[l.from,l.to]))].filter(id=>id!==it.lead).map(by);
       return `<details class="prog done" data-pid="${it.id}"${it.open?' open':''}><summary><span>${ppl.map(x=>x.name).join(' and ')} helped</span><span class="n">${it.log.length} messages</span>${IC.chev}</summary><ol class="plog">${it.log.map(l=>`<li><span class="who"><b>${by(l.from).name}</b><span class="to">to ${by(l.to).name}</span></span><p>${esc(l.text)}</p></li>`).join('')}</ol></details>`}
     case 'hand':{const f=by(it.from),to=by(it.to);return `<div class="hand fadein"><div class="hh2">${face(f,'s','')}<b>${f.name}</b><span class="arr">to</span>${face(to,'s','')}<b>${to.name}</b></div><div class="said">${esc(it.text)}</div></div>`}
-    case 'work':return it.wait?`<div class="working">${face(b,'','wait')}<span>${b.name} is waiting on you<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></span></div>`:`<div class="working">${face(b,'','read')}<span>${b.name} is working${it.note?' · '+esc(it.note):''}</span></div>`;
+    case 'work':return it.wait?`<div class="working">${face(b,'','wait')}<span>${b.name} is waiting on you<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></span></div>`:`<div class="working">${face(b,'','read')}<span>${b.name} is working${it.note?' · '+esc(it.note):''}</span>${it.web?pcChip(it.web):''}</div>`;
     case 'hop':{const f=by(it.from),to=by(it.to);return `<details class="hop fadein"><summary>${face(f,'s','')}<span><b>${f.name}</b> messaged <b>${to.name}</b></span></summary><div class="said">${esc(it.text)}</div></details>`}
     case 'ask':return it.done?`<div class="settled">${esc(it.done)}</div>`:`<div class="ask fadein"><p><b>${b.name}</b> wants to ${esc(it.action)}.</p><div class="acts"><button class="btn primary" data-ans="always" data-ask="${it.id}">Always allow</button><button class="btn" data-ans="once" data-ask="${it.id}">Allow once</button><button class="btn" data-ans="no" data-ask="${it.id}">Decline</button></div></div>`;
     case 'reply':{const j=!it.seen;it.seen=1;return `<div class="bot fadein" style="--t:${b.tint};--tc:color-mix(in srgb,${b.tint} 45%,var(--fg))">${face(b,'',j?'joy':'')}<div class="body"><div class="name">${b.name}<span>${esc(short(b))}</span></div><p>${esc(it.text)}</p>${it.create?`<div class="picker"><button class="chip" data-hire-from="${t.id}">Hire a bot for bookings</button><button class="chip">Handle it once</button></div>`:''}</div></div>`}
@@ -897,7 +931,7 @@ function itemHTML(it,t){
 function threadView(){
   const t=S.threads.find(x=>x.id===S.cur),o=t.owner&&by(t.owner);
   const live=pending().some(a=>a.thread===t.id)?'Waiting on you':t.running?`${[...S.busy].map(id=>by(id).name).join(' and ')||(t.dm?o.name:'Atlas')} working`:o?(t.dm?(o.id==='atlas'?'Hands work to any bot':isMgr(o)?'Hands work to its team':'One continuous chat'):'Atlas runs this thread'):'Atlas runs this thread';
-  return `<div class="tv" style="--owner:${o?o.tint:'transparent'};position:relative"><div class="wash"></div><div class="view" id="scroll" style="padding-bottom:20px"><div class="thead"><button class="rb back2" data-home aria-label="Back to ${t.dm?'Bots':'Threads'}">${IC.back}</button>${t.dm&&o?`<button class="tface" data-bot="${o.id}" title="${o.name}'s profile" aria-label="${o.name}'s profile">${face(o,'')}</button>`:''}<div class="grow"><h1>${esc(t.title)}</h1><span class="live">${live}</span></div></div>
+  return `<div class="tv" style="--owner:${o?o.tint:'transparent'};position:relative"><div class="view" id="scroll" style="padding-bottom:20px"><div class="thead"><button class="rb back2" data-home aria-label="Back to ${t.dm?'Bots':'Threads'}">${IC.back}</button>${t.dm&&o?`<button class="tface" data-bot="${o.id}" title="${o.name}'s profile" aria-label="${o.name}'s profile">${face(o,'')}</button>`:''}<div class="grow"><h1>${esc(t.title)}</h1><span class="live">${live}</span></div></div>
     ${S.paused?`<div class="col" style="margin-bottom:10px"><div class="need"><span class="w">All bots are paused. Nothing runs until you resume.</span><button class="go" data-pause>Resume</button></div></div>`:''}
     <div class="col" role="log" aria-live="polite">${t.items.map(i=>itemHTML(i,t)).join('')}</div></div>${composer()}</div>`;
 }
@@ -1042,14 +1076,14 @@ function panelHTML(){
     body=`<div class="seg" role="tablist">${[['outside','Left the app'],['perm','Permissions'],['bots','Bots'],['all','All']].map(([k,l])=>`<button class="${f===k?'on':''}" data-filter="${k}" role="tab" aria-selected="${f===k}">${l}</button>`).join('')}</div><div>${acts(list)}</div>`;
   } else {
     const b=by(S.panel),reports=BOTS.filter(x=>x.boss===b.id),g=S.grants[b.id]||{},mine=S.activity.filter(a=>a.bot===b.id),t=S.tab||'overview',nr=Object.keys(g).length;
-    const PI={mem:'<svg class="i" viewBox="0 0 24 24"><path d="M6 3.5h12v17l-6-4-6 4z"/></svg>',act:'<svg class="i" viewBox="0 0 24 24"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>',perm:SETI.perm,model:'<svg class="i" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2.5V6M15 2.5V6M9 18v3.5M15 18v3.5M2.5 9H6M2.5 15H6M18 9h3.5M18 15h3.5"/></svg>',team:'<svg class="i" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="9" r="2.6"/><path d="M15.5 14.2A5 5 0 0 1 21 19"/></svg>'};
+    const PI={mem:'<svg class="i" viewBox="0 0 24 24"><path d="M6 3.5h12v17l-6-4-6 4z"/></svg>',act:'<svg class="i" viewBox="0 0 24 24"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>',perm:SETI.perm,model:'<svg class="i" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2.5V6M15 2.5V6M9 18v3.5M15 18v3.5M2.5 9H6M2.5 15H6M18 9h3.5M18 15h3.5"/></svg>',pc:'<svg class="i" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',team:'<svg class="i" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="9" r="2.6"/><path d="M15.5 14.2A5 5 0 0 1 21 19"/></svg>'};
     const row=(k,ic,l,v)=>`<button class="prow" data-tab="${k}">${ic}<span class="w">${l}</span>${v!==''?`<span class="pv">${v}</span>`:''}${IC.chev}</button>`;
     const sub=title=>{head=`<button class="rb" data-tab="overview" aria-label="Back to ${b.name}">${IC.back}</button><h3>${title}</h3><span class="rb ghost" aria-hidden="true"></span>`};
     close='';
     if(t==='overview'){
       head=`<button class="rb" data-pback="${b.id}" aria-label="Back to ${b.name}'s chat">${IC.back}</button><span class="grow"></span><button class="rb" data-pmore="${b.id}" aria-label="More for ${b.name}"><svg class="i" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="18.5" cy="12" r="1.4" fill="currentColor"/></svg></button>`;
       body=`<div class="bhero">${face(b,'xl')}<h2>${esc(b.name)}</h2><small>${roleOf(b)}${b.boss?` · ${esc(by(b.boss).name)}'s team`:b.id==='atlas'?'':' · reports to Atlas'}</small>${b.job?`<p>${esc(b.job)}</p>`:`<p>No job yet. Tell ${esc(b.name)} what to do in its chat.</p>`}<button class="pillbtn" data-tab="edit">Edit</button></div>
-      <div class="pcard">${row('memory',PI.mem,'Memory',b.mem.length?`${b.mem.length} ${b.mem.length===1?'note':'notes'}`:'Empty')}${row('activity',PI.act,'Activity',mine.length||'')}${row('perms',PI.perm,'Permissions',nr?`${nr} ${nr===1?'rule':'rules'}`:'None')}${row('setup',PI.model,'Model','Claude')}${reports.length?row('team',PI.team,'Team',`${reports.length} ${reports.length===1?'bot':'bots'}`):''}</div>
+      <div class="pcard">${row('memory',PI.mem,'Memory',b.mem.length?`${b.mem.length} ${b.mem.length===1?'note':'notes'}`:'Empty')}${row('activity',PI.act,'Activity',mine.length||'')}${row('perms',PI.perm,'Permissions',nr?`${nr} ${nr===1?'rule':'rules'}`:'None')}${row('setup',PI.model,'Model','Claude')}${b.id==='atlas'?'':row('computer',PI.pc,'Computer',pcLabel(b.id))}${reports.length?row('team',PI.team,'Team',`${reports.length} ${reports.length===1?'bot':'bots'}`):''}</div>
       <div><div class="pcard"><div class="prow"><span class="w">Notifications</span><button class="switch mini" role="switch" aria-checked="${!S.mute.has(b.id)}" data-bnote="${b.id}" aria-label="Notifications for ${b.name}"><span class="knob" aria-hidden="true"></span></button></div></div><p class="pnote">Get notified when ${esc(b.name)} finishes or is waiting for you.</p></div>`;
     } else if(t==='edit'){sub('Edit');
       body=`<form class="hire" data-bedit="${b.id}"><div class="bhero">${face(b,'xl')}</div>
@@ -1059,6 +1093,7 @@ function panelHTML(){
         <fieldset class="fl"><legend>Colour</legend><div class="swatches">${TINTS.map(c=>`<label class="swc" style="--c:${c}"><input type="radio" name="tint" value="${c}"${c===b.tint?' checked':''} aria-label="Colour ${c}"><span></span></label>`).join('')}</div></fieldset>
         <p class="sub" style="margin:0">To change what ${esc(b.name)} does, tell it in its chat.</p>
         <button class="btn primary">Save</button></form>`;
+    } else if(t==='computer'){sub('Computer');body=computerHTML(b);
     } else if(t==='memory'){sub('Memory');
       body=`<p class="sub">Private to ${b.name}. It reads these when they help.</p><div>${b.mem.map((m,i)=>`<div class="memo ${b.fresh===i?'fresh':''}"><span class="w">${esc(m)}</span><button data-forget="${i}" data-b="${b.id}">Forget</button></div>`).join('')}</div><form class="inrow" data-addmem="${b.id}"><input name="m" placeholder="Tell ${b.name} something to remember" aria-label="New memory"><button class="btn">Add</button></form>`;
     } else if(t==='activity'){sub('Activity');const open=S.actAll===b.id;
@@ -1086,6 +1121,36 @@ function ease(el){if(el&&!matchMedia('(prefers-reduced-motion: reduce)').matches
 
 /* ---------- the run ---------- */
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
+// The shared browser. Each bot has its own tab; sign-ins are shared. A run plays these pages.
+const SITES={
+  mail:[['mail.google.com/mail/u/0/#inbox','Inbox','Opening Gmail',0],['mail.google.com/mail/u/0/#inbox','Inbox','Reading 3 unread emails',1,1],['mail.google.com/mail/u/0/#inbox/northwind','Northwind: a time next week?','Reading the Northwind email',2],['mail.google.com/mail/u/0/#inbox/northwind','Northwind: a time next week?','Writing a reply',4,1]],
+  plan:[['calendar.google.com/calendar/r/week','This week','Opening Google Calendar',0],['calendar.google.com/calendar/r/week','Next week','Looking at next week',1,1],['calendar.google.com/calendar/r/week','Next week','Finding a free hour',3]],
+  web:[['www.google.com','Search','Opening a search',0],['www.google.com/search','Results','Searching the web',1,1],['www.google.com/search','Results','Reading the top results',2]]};
+const PC={};const pc=id=>PC[id]||(PC[id]={live:false,held:false,i:0,steps:null,trail:[],at:0});
+const pcLabel=id=>{const p=pc(id);return p.held?'You are driving':p.live?'Browsing':'Idle'};
+const host=u=>u.split('/')[0];
+async function browse(id,onStep){const p=pc(id),list=SITES[id]||SITES.web;p.steps=list;p.trail=[];p.live=true;p.at=Date.now();
+  for(let n=0;n<list.length;n++){while(p.held)await wait(250);p.i=n;const [url,,text]=list[n];p.trail.push({url,text});p.at=Date.now();
+    onStep&&onStep(text);pcPaint(id);await wait(1050)}
+  p.live=false;pcPaint(id)}
+// Repaint the live view without rebuilding it, so the cursor glides.
+function pcPaint(id){if(S.panel!==id||S.tab!=='computer')return;const old=document.querySelector('.pcv [data-cur]'),from=old&&[old.style.getPropertyValue('--cx'),old.style.getPropertyValue('--cy')];
+  renderOver();const c=document.querySelector('.pcv [data-cur]');if(!c||!from)return;const to=[c.style.getPropertyValue('--cx'),c.style.getPropertyValue('--cy')];
+  c.style.setProperty('--cx',from[0]);c.style.setProperty('--cy',from[1]);void c.offsetWidth;c.style.setProperty('--cx',to[0]);c.style.setProperty('--cy',to[1]);
+  const st=(pc(id).steps||[])[pc(id).i];if(st&&st[4]&&pc(id).live)setTimeout(()=>c.classList.add('tap'),560)}
+function computerHTML(b){const p=pc(b.id),st=p.steps&&p.steps[p.i],live=p.live&&!p.held,W=['62%','48%','70%','40%','56%'];
+  const page=st?`<h5>${esc(st[1])}</h5>${W.map((w,n)=>`<div class="pcrow${live&&n===st[3]?' on':''}" style="--w:${w}"><i></i><span></span></div>`).join('')}`:`<h5>New tab</h5>`;
+  const cur=st&&!p.held&&p.live?`<span class="pccur" data-cur style="--cx:${70+((st[3]*7)%15)}%;--cy:${19+st[3]*15}%"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6.2 1.6L9.5 19z" fill="#fff" stroke="#1b1a18" stroke-width="1.4" stroke-linejoin="round"/></svg></span>`:'';
+  const veil=p.held?`<div class="pcveil">You're driving. ${esc(b.name)} waits until you hand it back.</div>`:!st?`<div class="pcveil">${esc(b.name)} opens pages here when a job needs the web. Sign-ins are shared by all bots.</div>`:'';
+  const now=p.held?'You have the browser':live?st[2]:st?`Idle · last used ${ago(p.at)}`:'Idle';
+  return `<div class="pcv" style="--t:${b.tint}"><div class="pcwin"><div class="pcbar"><span class="pcdot ${p.held?'you':live?'live':''}"></span><span class="url">${st?esc(st[0]):'about:blank'}</span></div>
+    <div class="pcscreen${!live&&!p.held&&st?' idle':''}">${page}${cur}${veil}</div>
+    <div class="pcnow">${face(b,'',live?'read':p.held?'wait':'')}<span class="cur">${esc(now)}</span></div></div>
+    ${p.live||p.held?`<div class="pcact"><button class="pillbtn" data-pchold="${b.id}">${p.held?'Hand back':'Take over'}</button></div>`:''}
+    <p class="pnote">Sending, posting, deleting and paying still ask you first.</p>
+    ${p.trail.length?`<div><h4 class="pch">${p.live?'This run':'Last run'}</h4><div class="pcard"><ul class="pctrail">${p.trail.map(x=>`<li><span>${esc(x.text)}</span><small>${esc(host(x.url))}</small></li>`).join('')}</ul></div></div>`:''}</div>`}
+const pcChip=id=>pc(id).live?`<button class="pchip" data-pc="${id}" aria-label="Watch ${by(id).name}'s browser"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>${esc(host(pc(id).steps[pc(id).i][0]))}</button>`:'';
+
 const up=()=>{renderMain();renderOver()};
 // A happy hop: ^ ^ eyes for a moment. Tapping a big face does it too.
 function joy(f){if(!f)return;f.classList.remove('joy');void f.offsetWidth;f.classList.add('joy');clearTimeout(f._j);f._j=setTimeout(()=>f.classList.remove('joy'),900)}
@@ -1119,7 +1184,7 @@ async function orchestrate(t,text,lead){const p=planFor(text,lead),L=by(lead);
   if(p.create){stop();t.items.push({k:'reply',bot:lead,text:p.reply,create:true});up();return}
   for(const [id,task,report] of p.steps){const b=by(id);
     pg.log.push({from:lead,to:id,text:task});await say(lead,`Asking ${b.name}: ${task}`,1100,false);
-    await say(id,`${b.name} is on it`,900);
+    S.busy.add(id);await browse(id,txt=>{pg.cur={bot:id,text:`${b.name}: ${txt}`,web:id};up()});S.busy.delete(id);
     if(p.ask&&id===p.owner){pg.cur={bot:id,text:`${b.name} needs your OK`,wait:true};up();if(!await needOK(t,b,p.ask)){stop();return}await say(id,`${b.name} is on it`,600)}
     pg.log.push({from:id,to:lead,text:report});await say(id,`${b.name}: ${report}`,1200,false)}
   await say(lead,`${L.name} is putting it together`,700);
@@ -1130,7 +1195,7 @@ async function orchestrate(t,text,lead){const p=planFor(text,lead),L=by(lead);
   t.running=false;up()}
 // A plain bot answers in its own chat.
 async function direct(t,text,id){const b=by(id),s=SCRIPTS.find(x=>x.match(text)&&x.steps.some(y=>y[0]===id));
-  await step(t,id,'',900);
+  {S.busy.add(id);const w={k:'work',bot:id,note:'',web:id};t.items.push(w);up();await browse(id,txt=>{w.note=txt;up()});t.items.splice(t.items.indexOf(w),1);S.busy.delete(id)}
   if(s&&s.ask&&s.owner===id&&!await needOK(t,b,s.ask)){t.running=false;up();return}
   t.items.push({k:'reply',bot:id,text:s?s.steps.find(y=>y[0]===id)[2]:'Done. Here is what I did.',ctx:`${b.mem.length} ${b.mem.length===1?'memory':'memories'}`});
   t.running=false;up()}
@@ -1198,6 +1263,8 @@ document.addEventListener('click',e=>{
   if(d.bnote){S.mute.has(d.bnote)?S.mute.delete(d.bnote):S.mute.add(d.bnote);renderOver();return}
   if(d.pback){e.stopPropagation();if(S.view==='thread'){S.panel=null;renderOver()}else openDM(d.pback);return}
   if(d.bot){e.stopPropagation();S.panel=d.bot;S.tab='overview';S.left=false;renderOver();return}
+  if(d.pc){e.stopPropagation();S.panel=d.pc;S.tab='computer';S.left=false;renderOver();return}
+  if(d.pchold){const p=pc(d.pchold);p.held=!p.held;renderOver();up();return}
   if(el.id==='fabBot'||d.newbot!==undefined){S.panel='hire';S.left=false;renderOver();setTimeout(()=>{const f=$('panel').querySelector('[data-hire]');f?.nm.focus();f?.dispatchEvent(new Event('input',{bubbles:true}))},300)}
   else if(d.threads!==undefined){S.panel='threads';S.left=false;renderOver();setTimeout(()=>$('thQ')?.focus(),250)}
   else if(el.id==='fabSet'){S.left=false;S.panel=null;renderOver();openSettings()}
