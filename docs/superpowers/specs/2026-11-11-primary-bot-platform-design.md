@@ -88,7 +88,13 @@ This revision replaces groups. Where it conflicts with anything below, this sect
 ## Interaction model (mock v12, the UX reference)
 
 Layout (owner's design, 2026-11-11):
-- **Home: four ideas under comparison** (mock v16; the owner picks one). Each opens with a small "Wednesday morning" line and a plain title. A switch at the top right flips between them.
+- **Home has four views** (mock v17): Desks, List, Chats and Orbit. A switch at the top right flips between them. **Desks is the default** (owner, 2026-11-11). Each person picks their own default with "Make this my default" under the switch, or with Settings → Appearance → Home view.
+- **Pin and move** (owner, 2026-11-11), in Desks, Chats and List:
+  - Each desk, chat row and list row has a pin and a drag handle (six dots), shown on hover and always shown on touch screens. The handle also moves the item with the arrow keys.
+  - Pinned items stay on top. Dropping an item among the pinned ones pins it, and dragging a pinned one below them unpins it.
+  - While an item is dragged it lifts with a shadow, and its neighbours glide out of the way.
+  - Desks: whole desks move. Chats: Atlas is pinned by default, and moving is off while a team filter is on. List: pinned bots appear in a Pinned group above the tree, and rows move within their own team.
+  - The order, the pins and the default view are saved per person.
   - **List:** the dropdown tree. Atlas is at the top, managers fall open under it and teams under them, with the fall-and-rise animation. Only "working" or "waiting on you" shows as a word.
   - **Chats:** WhatsApp-style rows sorted by latest activity, with Atlas pinned. Each row shows the face, name, last message and time. A working bot shows "working…" with moving dots; a waiting bot shows its ask in violet and a badge. Filter chips are All and one per manager's team.
   - **Orbit:** Atlas sits in the centre, managers on an inner ring, their bots on an outer ring, joined by faint dashed lines. A line turns mint and flows while that bot works. Faces float gently and pop in on load.
