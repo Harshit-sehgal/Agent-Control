@@ -118,6 +118,78 @@ What to expect:
   processes; more than 8 MB of output is cut off; neither stops the agent.
 - Gemini stays API-key only: Google does not allow its CLI login in other tools.
 
+### Connectors: Gmail, Drive and MCP servers
+
+A connector is a service a bot may use once you have said yes. Every use goes
+through the ask card: the first time a bot uses a connector it asks (Decline,
+Allow, or Always allow for that bot and that account), and anything that changes
+something (a send, a draft, an MCP tool that writes) is a separate, second
+question. A tool nobody described as read-only counts as a write. The card shows
+what the call would carry: the recipient, subject and the start of the body for an
+email, the arguments for an MCP tool. What comes back (a mail, a file, a server's
+answer) reaches the same bot as untrusted data, not as instructions.
+
+Secrets (the Google client secret, the refresh token, an MCP server's address and
+headers) are stored encrypted in the vault and never returned by any route, put in
+the state snapshot, logged or written to a backup. Backups carry no credentials;
+after a restore onto another machine, add the connectors again.
+
+**Google (Gmail and Drive).** You make your own Google Cloud OAuth client; the app
+holds only what you paste.
+
+1. In the [Google Cloud Console](https://console.cloud.google.com) create a project
+   (or pick one) and, under APIs & Services → Library, enable the **Gmail API** and
+   the **Google Drive API**.
+2. Under OAuth consent screen choose **External**, fill in an app name and your
+   email, and add your own Google account under **Test users**.
+3. Under Credentials create an **OAuth client ID** of type **Web application** and
+   add the Authorized redirect URI that `GET /api/connectors` shows in
+   `google.redirectUri`: your `PUBLIC_BASE_URL` plus `/api/connectors/google/callback`.
+4. Paste the Client ID and Client secret: `POST /api/connectors/google/setup`
+   `{"clientId", "clientSecret"}` (owner only). Then open
+   `/api/connectors/google/start` in the browser (**Connect Google**) and approve
+   Gmail and Drive access.
+
+The redirect address comes from `PUBLIC_BASE_URL` (or `PUBLIC_ORIGIN`), else from
+the address the request came to; the code has no host of its own, so moving the
+server to the VM means changing that one setting and the redirect URI in Google
+Cloud. The scopes are `gmail.modify` and `drive.readonly`.
+
+**Testing status and the 7-day refresh.** While the consent screen is in *Testing*,
+Google ends the sign-in after 7 days. The connector then shows **reconnect**
+(`status: "reconnect"`) and bots are not offered it until you choose Connect Google
+again. Publishing the app (*In production*) for your own use removes the limit; you
+do not need Google's verification for an app only you use, but Google shows an
+"unverified app" notice at sign-in.
+
+Gmail and Drive actions: `gmail.search`, `gmail.read`, `drive.search`, `drive.read`
+(reads); `gmail.draft`, `gmail.send` (writes). **Undo:** an email send you have
+Always-allowed is held for 30 seconds, shown in Activity with an Undo
+(`POST /api/activity/:id/undo`), and goes out when the window ends. A send you
+answered Allow on its card goes at once. Every write that goes out is logged as
+having left the app. A server restart during the 30 seconds sends nothing and says so.
+
+**MCP servers.** Any MCP server is a connector; its tools are the connector's
+actions. The client is hand-written (JSON-RPC 2.0, no SDK).
+
+- *Over HTTP (streamable HTTP):* `POST /api/connectors`
+  `{"kind": "mcp", "name": "Notes", "url": "https://…", "headers": {"Authorization": "Bearer …"}}`.
+  The server is reached first (`initialize`, `tools/list`) and only a server that
+  answers is saved. Calls have a 30-second limit, a 1 MiB read cap, no redirects, and
+  a result longer than 12,000 characters is cut. `POST /api/connectors/:id/refresh`
+  lists the tools again; `DELETE /api/connectors/:id` removes it and its secrets.
+- *Over stdio (a program on your machine):* put the command in the **agent's**
+  config, never on the server: in `agent.config.json` add
+  `"mcpServers": {"files": {"command": "npx", "args": ["-y", "…"], "env": {"TOKEN": "…"}, "cwd": "/path"}}`,
+  allow the `mcp.call` permission for that agent, keep `node agent/agent.mjs run`
+  going, then add the connector with `{"kind": "mcp", "name": "Files", "agentServer": "files"}`.
+  A task carries only the server's name; the agent starts the program fresh for each
+  call with a small environment and kills it when it is slow or says too much.
+
+Environment: `PUBLIC_BASE_URL`; `GOOGLE_AUTH_URL`, `GOOGLE_TOKEN_URL` and
+`GOOGLE_API_BASE` (Google's own addresses by default; they exist so tests can use a
+fake).
+
 ### The browser a bot may use
 
 An approved `browser.use` request runs in a headless browser. `BROWSER_RUNTIME`

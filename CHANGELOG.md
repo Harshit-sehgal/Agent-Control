@@ -33,6 +33,19 @@ browser tasks, and accounts, workspaces and backup.
   thread.
 
 ### Added
+- **Connectors (backend).** Bots reach Gmail, Drive and MCP servers through
+  connectors, and every use is an ask. A hand-written MCP client speaks
+  streamable HTTP from the server and stdio through the paired agent (the new
+  `mcp.call` task; the program is named in the agent's own config, never sent by
+  the server). Google sign-in uses OAuth with PKCE on your own Cloud client; the
+  client secret and refresh token are encrypted in the vault and never returned,
+  logged or backed up, and a revoked sign-in shows as reconnect. A bot writes a
+  `connector` block; the connector, not the bot, says whether a tool reads or
+  writes (no annotations means write), the card shows what the call would carry,
+  and the result comes back as untrusted data. A send you have Always-allowed is
+  held 30 seconds with an Undo, and every write that goes out is logged under
+  "Left the app". Routes: `/api/connectors` (list, add, refresh, remove),
+  `/api/connectors/google/setup|start|callback`, `/api/activity/:id/undo`.
 - **A company of bots, in a new chats shell.** The three-pane messenger is
   replaced by a sidebar of bots on a laptop and a two-section home (Bots and
   Threads) on a phone. Each bot has a chat, a profile (job, memory, activity,
