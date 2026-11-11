@@ -41,10 +41,10 @@ const BLOCK = () => controlFence('create-bot');
 const MAX_BLOCKS_READ = 8;
 
 const WORDS = s => String(s ?? '').replace(/[^\p{L}\p{N}'’\s-]/gu, ' ').split(/\s+/).filter(Boolean);
-const LEAD_IN = new Set('please can could you i want need would like make create build add hire set up me us a an the my our your new bot helper agent assistant that which who to for someone somebody'.split(' '));
+const LEAD_IN = new Set('please can could you i want need would like make create build add hire set up me us a an the my our your new bot helper agent assistant that which who to for someone somebody what whats what’s is are how when where tell give show get'.split(' '));
 const VERBS = new Set('watch watches find finds read reads write writes track tracks check checks draft drafts plan plans book books monitor monitors summarise summarize summarises summarizes look looks keep keeps help helps handle handles answer answers send sends collect collects review reviews research researches manage manages organise organize organises organizes take takes scan scans triage triages'.split(' '));
 const STOP = new Set('and or that which who to for from on in of by with when whenever every each so then at'.split(' '));
-const title = word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+const title = word => (/^\p{Lu}{2,5}$/u.test(word) ? word : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
 
 /** A bot's name from the sentence that is its job: the first noun phrase after
  * the opening verb ("Watches my inbox and drafts replies" is "Inbox"), else

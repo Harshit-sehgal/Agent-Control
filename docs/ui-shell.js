@@ -5,11 +5,11 @@
  * Home is the Chats layout only. On a phone it is two sections, Bots and Threads,
  * switched by swiping; on a laptop the sidebar holds both and the chat opens on the
  * right. The lists come from ui-company.js (pure); this file is markup and events. */
-import {botRows, threadRows} from './ui-company.js?v=8a8eb3996e';
-import {face} from './ui-face.js?v=8a8eb3996e';
-import {esc, icon, stamp} from './ui-kit.js?v=8a8eb3996e';
-import {pauseBanner} from './ui-asks.js?v=8a8eb3996e';
-import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, isStaticDemo} from './ui-store.js?v=8a8eb3996e';
+import {botRows, threadRows} from './ui-company.js?v=1a5551460d';
+import {face} from './ui-face.js?v=1a5551460d';
+import {esc, icon, stamp} from './ui-kit.js?v=1a5551460d';
+import {pauseBanner} from './ui-asks.js?v=1a5551460d';
+import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, isStaticDemo, seenChats} from './ui-store.js?v=1a5551460d';
 
 const el = id => document.getElementById(id);
 const DESK = '(min-width:1024px)';
@@ -43,7 +43,7 @@ const hiddenBots = () => { const list = loadLocal(HIDDEN_KEY, []); return Array.
 function chatRows(query = '') {
   const saved = loadLocal(PINS_KEY, null), primary = bots().find(b => b.settings?.lead === true);
   const order = loadLocal(ORDER_KEY, []);
-  return botRows(store.state, {query, pins: Array.isArray(saved) ? saved : primary ? [primary.id] : [], order: Array.isArray(order) ? order : [], hidden: hiddenBots()});
+  return botRows(store.state, {query, pins: Array.isArray(saved) ? saved : primary ? [primary.id] : [], order: Array.isArray(order) ? order : [], hidden: hiddenBots(), seen: seenChats()});
 }
 const hiddenLink = () => { const n = hiddenBots().length; return n ? `<button type="button" class="link hv-hidden" data-action="show-hidden">Show ${n} hidden</button>` : ''; };
 const bigFace = (row, size) => { const bot = findBot(row.id); return bot ? face(bot, {size, state: row.status, primary: row.isPrimary, manager: row.isManager, index: bots().indexOf(bot)}) : ''; };
@@ -52,22 +52,26 @@ function botRow(row) {
   const current = store.route.bot === row.id;
   const prev = row.status === 'working' ? '<span class="crow-prev live">working<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></span>'
     : row.needs ? '<span class="crow-prev wt">Waiting on you</span>' : `<span class="crow-prev">${esc(row.preview || row.job)}</span>`;
-  return `<button type="button" class="crow${current ? ' on' : ''}" data-action="open-bot" data-id="${esc(row.id)}" data-team="${esc(row.team ?? '')}"${row.isManager ? ' data-manager="true"' : ''}${current ? ' aria-current="page"' : ''}>${row.face}<span class="crow-w"><span class="crow-top"><b>${esc(row.name)}</b><time>${esc(stamp(row.at))}</time></span>${prev}</span>${row.needs ? `<span class="badge" aria-label="${row.needs} waiting on you">${row.needs}</span>` : ''}</button>`;
+  return `<button type="button" class="crow${current ? ' on' : ''}${row.unread && !current && !row.needs ? ' new' : ''}" data-action="open-bot" data-id="${esc(row.id)}" data-team="${esc(row.team ?? '')}"${row.isManager ? ' data-manager="true"' : ''}${current ? ' aria-current="page"' : ''}>${row.face}<span class="crow-w"><span class="crow-top"><b>${esc(row.name)}</b><time>${esc(stamp(row.at))}</time></span>${prev}</span>${row.needs ? `<span class="badge" aria-label="${row.needs} waiting on you">${row.needs}</span>` : row.unread && !current ? UNREAD : ''}</button>`;
 }
 function pinnedRow(row, size) {
   const current = store.route.bot === row.id;
   return `<button type="button" class="pin${current ? ' on' : ''}" data-action="open-bot" data-id="${esc(row.id)}"${current ? ' aria-current="page"' : ''}>${bigFace(row, size)}<span>${esc(row.name)}</span>${row.needs ? `<span class="badge" aria-label="${row.needs} waiting on you">${row.needs}</span>` : ''}</button>`;
 }
+// An answer the person has not opened yet: one dot, like a chat app's unread mark.
+const UNREAD = '<span class="unread" aria-label="Unread"></span>';
 function threadRow(row) {
-  const current = store.route.thread === row.id;
-  const wait = row.waiting ? '<span class="wt">Waiting on you · </span>' : '';
-  return `<button type="button" class="trow${current ? ' on' : ''}" data-action="open-thread" data-id="${esc(row.id)}"${current ? ' aria-current="page"' : ''}>${row.face}<span class="trow-w"><b>${esc(row.title)}</b><small>${wait}${esc(row.preview || 'No replies yet')}</small></span><time>${esc(stamp(row.at))}</time></button>`;
+  const current = store.route.thread === row.id, unread = row.unread && !current;
+  // At work: what it is doing now, the way the open thread's live line says it. Waiting: that it needs you.
+  const line = row.working ? `<small class="live">${esc(row.activity)}<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></small>`
+    : `<small>${row.waiting ? '<span class="wt">Waiting on you · </span>' : ''}${esc(row.preview || 'No replies yet')}</small>`;
+  return `<button type="button" class="trow${current ? ' on' : ''}${unread ? ' new' : ''}" data-action="open-thread" data-id="${esc(row.id)}"${current ? ' aria-current="page"' : ''}>${row.face}<span class="trow-w"><b>${esc(row.title)}</b>${line}</span><span class="trow-end"><time>${esc(stamp(row.at))}</time>${unread ? UNREAD : ''}</span></button>`;
 }
 const GROUPS = [['waiting', 'Waiting on you'], ['today', 'Today'], ['earlier', 'Earlier']];
 /** Threads matching `query`, under Waiting on you, Today and Earlier headings, or
  * as one flat list (the sidebar has a Threads heading of its own). */
 function threadGroups(query = '', {headings = true} = {}) {
-  const q = query.trim().toLowerCase(), rows = threadRows(store.state);
+  const q = query.trim().toLowerCase(), rows = threadRows(store.state, {seen: seenChats()});
   const keep = list => list.filter(r => !q || `${r.title} ${r.preview}`.toLowerCase().includes(q));
   if (!headings) return GROUPS.flatMap(([key]) => keep(rows[key])).map(threadRow).join('');
   return GROUPS.map(([key, label]) => [label, keep(rows[key])]).filter(([, list]) => list.length)

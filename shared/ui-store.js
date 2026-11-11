@@ -20,6 +20,17 @@ export const THEMES = [
 export function loadLocal(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } }
 /** Returns false when the browser refused the write so callers can warn once. */
 export function saveLocal(key, data) { try { localStorage.setItem(key, JSON.stringify(data)); return true; } catch { return false; } }
+/** When the person last saw each chat (`ac-seen`, per person, never sent): a row with a newer answer is unread. */
+export const SEEN_KEY = 'ac-seen';
+export const seenChats = () => { const map = loadLocal(SEEN_KEY, {}); return map && typeof map === 'object' && !Array.isArray(map) ? map : {}; };
+export function markSeen(key) {
+  if (!key || (typeof document !== 'undefined' && document.hidden)) return;
+  const map = seenChats(), now = new Date().toISOString();
+  map[key] = now;
+  // Keep the newest 300 chats.
+  const keep = Object.entries(map).sort((a, b) => String(b[1]).localeCompare(String(a[1]))).slice(0, 300);
+  saveLocal(SEEN_KEY, Object.fromEntries(keep));
+}
 
 export const store = {
   state: null,

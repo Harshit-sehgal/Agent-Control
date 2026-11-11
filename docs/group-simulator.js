@@ -2,17 +2,17 @@
  * The bots answer with canned replies (shared/offline-bots.js), and everything a
  * reply asks for goes through the rules the served loop uses: hand-offs, hires,
  * the out-of-job refusal, checkpoints and the runaway guard. */
-import {createRun,createEnvelope,handoffTargets,instructLead,wakeBots,assessTask,runNote,rosterFor,previousFor,enlist} from './coordination.js?v=8a8eb3996e';
-import {offlineReply} from './offline-bots.js?v=8a8eb3996e';
-import {parseOffJob,offJobMessage} from './off-job.js?v=8a8eb3996e';
-import {parseCreateBotRequests,stripCreateBotBlocks,botCreatedText,botCreateRefusedText} from './bot-create.js?v=8a8eb3996e';
-import {addCreatedBot} from './hire.js?v=8a8eb3996e';
-import {parseSetupRequests,stripSetupBlocks,resolveSetup} from './setup.js?v=8a8eb3996e';
-import {noteBotWork} from './runaway.js?v=8a8eb3996e';
-import {isLead} from './company.js?v=8a8eb3996e';
-import {botSettings,groupSettings,threadContext} from './bot-settings.js?v=8a8eb3996e';
-import {normalizeBot} from './contracts.js?v=8a8eb3996e';
-import {isThread,noteMember} from './threads.js?v=8a8eb3996e';
+import {createRun,createEnvelope,handoffTargets,instructLead,wakeBots,assessTask,runNote,rosterFor,previousFor,enlist} from './coordination.js?v=1a5551460d';
+import {offlineReply} from './offline-bots.js?v=1a5551460d';
+import {parseOffJob,offJobMessage} from './off-job.js?v=1a5551460d';
+import {parseCreateBotRequests,stripCreateBotBlocks,botCreatedText,botCreateRefusedText} from './bot-create.js?v=1a5551460d';
+import {addCreatedBot} from './hire.js?v=1a5551460d';
+import {parseSetupRequests,stripSetupBlocks,resolveSetup} from './setup.js?v=1a5551460d';
+import {noteBotWork} from './runaway.js?v=1a5551460d';
+import {isLead} from './company.js?v=1a5551460d';
+import {botSettings,groupSettings,threadContext} from './bot-settings.js?v=1a5551460d';
+import {normalizeBot} from './contracts.js?v=1a5551460d';
+import {isThread,noteMember} from './threads.js?v=1a5551460d';
 
 export async function simulateGroup({group, message, directBotId=null, guests=[], state, api, makeId, emit, chatKey=null, started=false, resume=null, shouldStop=()=>false, anyway=false}) {
   let run, previous, i;
@@ -108,6 +108,7 @@ export async function simulateGroup({group, message, directBotId=null, guests=[]
       const off=own&&!run.anyway?parseOffJob(reply):null;
       const offMsg=off?offJobMessage({bot,reason:off.reason,request:run.input,id:makeId(),runId:run.id,at:new Date().toISOString()}):null;
       const hires=!off&&Array.isArray(state?.groups)?parseCreateBotRequests(reply):[];
+      let hired=null;
       const hireLines=[];
       if(hires.length){
         const [item]=hires;
@@ -116,6 +117,8 @@ export async function simulateGroup({group, message, directBotId=null, guests=[]
           const home=state.groups.find(g=>(g.bots||[]).some(b=>b.id===bot.id));
           const made=home?addCreatedBot(state,{bot,groupId:home.id,request:item.request,runId:run.id,makeId}):{refused:'it has no group.'};
           hireLines.push(made.record?botCreatedText(bot,made.record,made.groupName):botCreateRefusedText(bot,made.refused));
+          // The new bot was made for this task: it is on the roster at once and gets the work, as on the server.
+          if(made.record){hired=made.record;if(!roster.some(b=>b.id===made.record.id))roster.push(made.record);}
         }
       }
       // A setup block becomes a card the owner taps, as the served app does it (src/setup-cards.js).
@@ -127,7 +130,8 @@ export async function simulateGroup({group, message, directBotId=null, guests=[]
       const said=asks.length?(stripSetupBlocks(reply)||`${bot.name} suggested a change.`):reply;
       const output=offMsg?offMsg.text:hires.length?(stripCreateBotBlocks(said)||`${bot.name} added a bot to the team.`):said;
       previous={botId:bot.id,output};
-      const added=closing||off?[]:handoffTargets({run,roster:rosterFor(world,bot,roster,{thread:isThread(group)}),fromBot:bot,output,home:lead||isThread(group)?null:group.bots,reserve:lead&&run.closeAt==null?1:0});
+      const routed=hired&&!output.includes(`@${hired.name}`)?`${output}\n@${hired.name}`:output;
+      const added=closing||off?[]:handoffTargets({run,roster:rosterFor(world,bot,roster,{thread:isThread(group)}),fromBot:bot,output:routed,home:lead||isThread(group)?null:group.bots,reserve:lead&&run.closeAt==null?1:0});
       enlist(run,{fromId:bot.id,added,output,lead});
       if(isThread(group))for(const id2 of added)noteMember(group,id2);
       const recipient=roster.find(b=>b.id===run.recipients[i+1]);

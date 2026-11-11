@@ -9,6 +9,7 @@
  *
  * Pure and browser-safe.
  */
+import {titleFrom} from './threads.js';
 import {cleanText} from './core.js';
 import {mentionedBots} from './coordination.js';
 import {MIN_BOT_JOB} from './bot-create.js';
@@ -69,7 +70,8 @@ const jobFrom = request => {
  * `own` is true in the bot's own chat; `anyway` is "Do it anyway". */
 export function offlineReply({bot, request, team = [], previous = null, closing = false, lead = false, own = false, anyway = false}) {
   const task = cleanText(request, 220);
-  if (closing) return `All done. Here is what the team said:\n${cleanText(previous?.output, 600)}`;
+  // The closing reply is the result: the demo has no model, so it says so in one line instead of relaying the team.
+  if (closing) return `Done: ${titleFrom(request) || 'that'}.\nThis demo runs without a model, so the team's answers are stand-ins. Connect one in Settings → Models and keys for real results.`;
   if (GREETING.test(request ?? '')) return `Hello! I'm ${bot.name}. Tell me what you need${lead ? " and I'll get the right bot on it" : ''}.`;
   // Thanks, ok and "what can you do?" are answered by any bot itself, never refused or handed on.
   const basic = basicKind(request);
@@ -86,7 +88,8 @@ export function offlineReply({bot, request, team = [], previous = null, closing 
     const byJob = team.filter(b => !named.includes(b.id)).map(b => ({id: b.id, n: overlap(request, b.instructions)})).filter(x => x.n > 0).sort((a, b) => b.n - a.n).slice(0, 3).map(x => x.id);
     const chosen = [...named, ...byJob].map(id => team.find(b => b.id === id)).filter(Boolean);
     if (chosen.length) return `I'll hand this to ${chosen.map(b => `@${b.name}`).join(' and ')}.`;
-    return `I can take that. Ask me to make a bot for it, or tell me which bot should do it.`;
+    // No bot fits: Atlas makes one for the job and it starts at once, as the served app does.
+    return `Making a bot for this.\n\`\`\`create-bot\n${JSON.stringify({job: jobFrom(request)})}\n\`\`\``;
   }
   // A plain bot in its own chat says when a request is not its job, unless told to do it anyway.
   if (own && !anyway && !overlap(request, bot.instructions) && !mentionedBots(team, request).length) {

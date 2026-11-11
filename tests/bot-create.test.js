@@ -163,6 +163,8 @@ test('a name comes from the first noun phrase of the sentence, else Helper N', (
   assert.equal(nameFromSentence('Watches my inbox and drafts replies to the people who write to me.'), 'Inbox');
   assert.equal(nameFromSentence('Find posts that mention the project and list their links.'), 'Posts');
   assert.equal(nameFromSentence('Tracks the weekly budget for the family.'), 'Weekly Budget');
+  assert.equal(nameFromSentence('What is the weather in Delhi today'), 'Weather');
+  assert.equal(nameFromSentence('Tell me the USD to INR rate'), 'USD', 'an acronym keeps its capitals');
   assert.equal(nameFromSentence('Make me a bot'), 'Helper 1');
   assert.equal(nameFromSentence('Make me a bot', ['helper 1', 'Helper 2']), 'Helper 3');
   assert.equal(nameFromSentence('Watches my inbox.', ['Inbox']), 'Inbox 2', 'a taken name gets a number');

@@ -20,11 +20,11 @@
  * Posting stays human: interaction (click, type) is refused on X and Twitter
  * hosts, so no bot can press Post there. Reading those pages is allowed.
  */
-import {cleanText, validHttpUrl} from './core.js?v=8a8eb3996e';
-import {fail} from './errors.js?v=8a8eb3996e';
-import {decide, createAsk, scopeOf} from './asks.js?v=8a8eb3996e';
-import {controlFence} from './reply-blocks.js?v=8a8eb3996e';
-import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=8a8eb3996e';
+import {cleanText, validHttpUrl} from './core.js?v=1a5551460d';
+import {fail} from './errors.js?v=1a5551460d';
+import {decide, createAsk, scopeOf} from './asks.js?v=1a5551460d';
+import {controlFence} from './reply-blocks.js?v=1a5551460d';
+import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=1a5551460d';
 
 /** The most page text one model turn carries (the pages of a round together). */
 export const MAX_PAGE_CHARS = 24000;

@@ -12,7 +12,7 @@ import {LIMIT_CHOICES, limitText} from './ask-limits.js';
 import {requestOfMessage} from './bot-browser.js';
 import {validHttpUrl} from './core.js';
 import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js';
-import {botStatus, botIsManager, chatStatus, jobOf} from './ui-company.js';
+import {botStatus, botIsManager, chatStatus} from './ui-company.js';
 import {isPrimary} from './company.js';
 import {hasJob, modelChip} from './ui-profile-model.js';
 import {scheduleTaskBody} from './schedules.js';
@@ -21,7 +21,7 @@ import {setupCardOf, setupButton} from './setup.js';
 import {askCard} from './ui-asks.js';
 import {face, botColor} from './ui-face.js';
 import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync} from './ui-store.js';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js';
 import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js';
 import {toast} from './ui-dialogs.js';
 import {siteChip} from './ui-computer-view.js';
@@ -219,8 +219,8 @@ function offjobEntry({message: m, open}, conv) {
 
 function botEntry(m, conv) {
   const bot = m.senderId ? findBot(m.senderId) : conv.bot, name = bot?.name || m.senderName || conv.name;
-  const job = conv.isTeam && bot ? `<small>${esc(jobOf(bot))}</small>` : '';
-  return `<div class="cv-bot" data-m="${esc(m.id)}" style="--t:${tintOf(bot, name)}">${botFace(bot, name, 36)}<div class="cv-body"><div class="cv-name">${esc(name)}${job}</div><div class="md">${md(m.text)}</div></div></div>`;
+  // The name says who is talking in a thread; its job is on its profile, not on every reply.
+  return `<div class="cv-bot" data-m="${esc(m.id)}" style="--t:${tintOf(bot, name)}">${botFace(bot, name, 36)}<div class="cv-body"><div class="cv-name">${esc(name)}</div><div class="md">${md(m.text)}</div></div></div>`;
 }
 
 function entryHtml(entry, conv) {
@@ -304,6 +304,7 @@ function watchUndo(entries) {
 /** Refresh the open chat's status line and log without touching the composer. */
 export function renderConversation() {
   const conv = conversation(), log = el('cv-log'); if (!conv || !log) return;
+  markSeen(conv.id);
   const line = statusLine(conv), node = el('cv-line');
   if (node) { node.textContent = line.text; node.classList.toggle('wt', line.waiting); }
   // A setup card applied in this chat can change the model; keep the chip honest.

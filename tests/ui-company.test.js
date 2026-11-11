@@ -440,3 +440,25 @@ test('ids with slashes are encoded in hashes', () => {
   const s = stateOf({groups: [company([atlas, bot('a/b', 'Slashy')])]});
   assert.deepEqual(companyRoute('#bot/a%2Fb', s), {bot: 'a/b'});
 });
+
+test('a thread at work says what it is doing, under the face of the bot doing it', () => {
+  const live = run({id: 'r7', groupId: 't3', chatKey: 'team-t3', status: 'running', recipients: ['atlas', 'mail'], currentStep: 1, startedAt: local(11, 12), trace: [{botId: 'atlas', output: '@Mailroom draft it'}]});
+  const rows = threadRows(threadState({groupRuns: [live]}), {now: NOW}), row = [...rows.today, ...rows.earlier].find(r => r.id === 't3');
+  assert.equal(row.working, true);
+  assert.equal(row.activity, 'Checking with Mailroom');
+  assert.equal(row.faceBot, 'mail');
+  assert.match(row.face, /face--working/);
+});
+
+test('a thread or bot with an answer newer than when the person last opened it is unread', () => {
+  const s = threadState();
+  const t1 = threadRows(s, {now: NOW}).today.find(r => r.id === 't1');
+  // t1's newest line is the owner's own: nothing to read.
+  assert.equal(t1.unread, false);
+  const answered = {...s, chats: {...s.chats, 'team-t1': [...(s.chats['team-t1'] || []), {role: 'bot', senderId: 'atlas', text: 'Drafted.', at: local(11, 13)}]}};
+  assert.equal(threadRows(answered, {now: NOW}).today.find(r => r.id === 't1').unread, true);
+  assert.equal(threadRows(answered, {now: NOW, seen: {'team-t1': local(11, 13, 30)}}).today.find(r => r.id === 't1').unread, false);
+  const bots = stateOf({chats: {mail: [{role: 'bot', senderId: 'mail', text: 'Two new emails.', at: '2026-11-11T08:00:00Z'}]}});
+  assert.equal(rowOf(botRows(bots), 'mail').unread, true);
+  assert.equal(rowOf(botRows(bots, {seen: {mail: '2026-11-11T09:00:00Z'}}), 'mail').unread, false);
+});

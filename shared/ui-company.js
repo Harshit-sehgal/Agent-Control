@@ -65,17 +65,21 @@ function lastLine(history) {
   const newest = list => list.reduce((a, m) => (a && time(a.at) > time(m.at) ? a : m), null);
   const said = (history || []).filter(m => !m.step);
   const last = newest(said.filter(m => m.role !== 'system')) || newest(said);
-  if (!last) return {preview: '', at: ''};
+  if (!last) return {preview: '', at: '', answeredAt: ''};
   const text = oneLine(last.text, 120);
-  return {preview: last.role === 'user' ? `You: ${text}` : text, at: last.at || ''};
+  // Unread: the newest thing said is a bot's, and newer than when the person last opened the chat.
+  const answer = newest(said.filter(m => m.role === 'bot'));
+  return {preview: last.role === 'user' ? `You: ${text}` : text, at: last.at || '', answeredAt: last.role === 'bot' && answer ? answer.at || '' : ''};
 }
+
+const unreadOf = (line, seenAt) => Boolean(line.answeredAt) && !(seenAt && time(seenAt) >= time(line.answeredAt));
 
 /** The sidebar. Pinned bots first, then the company tree (Atlas, then each
  * manager followed by its reports, Solo bots under Atlas). The order is the
  * saved one, so activity never reorders it. A pinned Atlas is not repeated, so
  * the list then starts with Atlas's reports. Atlas cannot be hidden. `pins`
  * defaults to the bots whose settings.pinned is set. */
-export function botRows(state, {query = '', order = [], pins, hidden = []} = {}) {
+export function botRows(state, {query = '', order = [], pins, hidden = [], seen = {}} = {}) {
   const bots = botsOf(state), primary = primaryOf(bots), ids = new Set(bots.map(b => b.id));
   const pinned = (Array.isArray(pins) ? pins : bots.filter(b => settingsOf(b).pinned).map(b => b.id)).filter(id => ids.has(id));
   const rank = bot => { const i = order.indexOf(bot.id); return i < 0 ? order.length : i; };
@@ -94,7 +98,7 @@ export function botRows(state, {query = '', order = [], pins, hidden = []} = {})
       return {
         id: bot.id, name: bot.name, job: jobOf(bot),
         face: face(bot, {size: 40, state: status, primary: isPrimary, manager: isManager, index: bots.indexOf(bot)}),
-        status, ...lastLine(state?.chats?.[bot.id]),
+        status, ...(line => ({...line, unread: unreadOf(line, seen?.[bot.id])}))(lastLine(state?.chats?.[bot.id])),
         needs: totalWaitingOnYou(waitingOnYou(state, bot.id)),
         pinned: pinned.includes(bot.id), isPrimary, isManager, team: isPrimary ? null : parentOf(bot) ?? null,
       };
@@ -103,16 +107,22 @@ export function botRows(state, {query = '', order = [], pins, hidden = []} = {})
 }
 
 /** The Threads section: waiting on the person, then today, then earlier, each newest first. */
-export function threadRows(state, {now = Date.now()} = {}) {
+export function threadRows(state, {now = Date.now(), seen = {}} = {}) {
   const bots = botsOf(state), primary = primaryOf(bots), runs = state?.groupRuns || [];
   const rows = threadsOf(state).map(group => {
     const key = teamKey(group.id), line = lastLine(state?.chats?.[key]);
     const needs = totalWaitingOnYou(waitingOnYou(state, key));
     const waiting = needs > 0 || runs.some(r => r.groupId === group.id && isAwaiting(r.status));
+    // A thread at work says what it is doing, under the face of the bot doing it (Atlas, or the bot it asked).
+    const live = !waiting && runs.find(r => r.groupId === group.id && isActive(r.status));
+    const pill = live ? progressPill(live, state, {now}) : null;
+    const who = (pill && bots.find(b => b.id === pill.botId)) || primary;
     return {
       id: group.id, chatKey: key, title: group.name, ownerId: group.settings.ownerId || primary?.id || null,
-      face: primary ? face(primary, {size: 36, state: waiting ? 'waiting' : 'awake', primary: true}) : '',
+      faceBot: who?.id || null,
+      face: who ? face(who, {size: 36, state: waiting ? 'waiting' : pill ? 'working' : 'awake', primary: who === primary, index: bots.indexOf(who)}) : '',
       preview: line.preview, at: line.at || group.createdAt || '', needs, waiting,
+      working: Boolean(pill), activity: pill?.text || '', unread: !pill && unreadOf(line, seen?.[key]),
     };
   }).sort((a, b) => time(b.at) - time(a.at));
   return {

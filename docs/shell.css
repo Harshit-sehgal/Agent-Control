@@ -355,3 +355,13 @@ body[data-paused] .chrome{--pad-t:calc(var(--pause-h) + env(safe-area-inset-top,
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{animation:none!important;transition:none!important}
 }
+
+/* Thread rows say what a thread is doing while it works, and mark an answer not yet opened with one dot. */
+.trow small.live{color:var(--good);font-style:italic}
+.trow small.live .dots i{background:currentColor;opacity:.6}
+.trow-end{display:flex;flex-direction:column;align-items:flex-end;gap:7px;flex:none;align-self:flex-start;margin-top:2px}
+.trow-end time{margin-top:0}
+.unread{display:block;width:9px;height:9px;border-radius:50%;background:var(--good);flex:none}
+.trow.new b,.crow.new b{font-weight:700}
+.trow.new small{color:var(--text)}
+@media (prefers-reduced-motion:reduce){.trow small.live .dots i{animation:none}}

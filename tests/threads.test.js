@@ -73,13 +73,15 @@ const botId = (store, name) => store.read().groups.find(g => g.id === 'home').bo
 const router = () => { const r = createRouter(); groupRoutes(r); return r; };
 const startThread = async (store, message) => (await router().find('POST', '/api/threads').route.handler({store, params: {}, body: async () => ({message}), actor: {email: 'owner@example.test'}})).body;
 
-test('a thread title is the first line of the first message', () => {
+test('a thread title is a short name for the first message, like a chat app names it', () => {
   assert.equal(titleFrom('Plan my week\nand book the dentist'), 'Plan my week');
   assert.equal(titleFrom('   \n  Hello there  '), 'Hello there');
-  const long = 'Please look into the quarterly numbers and tell me which suppliers got more expensive this year';
-  const cut = titleFrom(long);
-  assert.ok(cut.length <= 60 && long.startsWith(cut) && /\w$/.test(cut), `cut at a word boundary: "${cut}"`);
-  assert.equal(titleFrom('x'.repeat(100)).length, 60, 'one long word is cut hard');
+  // The ask, without the politeness around it, cut before the second clause and kept to a few words.
+  assert.equal(titleFrom('Please look into the quarterly numbers and tell me which suppliers got more expensive this year'), 'Look into the quarterly numbers');
+  assert.equal(titleFrom('Plan a 3-day trip to Jaipur under 15k and find a hotel'), 'Plan a 3-day trip to Jaipur');
+  assert.equal(titleFrom('can you find me 5 remote internships posted this week, with links?'), 'Find me 5 remote internships');
+  assert.equal(titleFrom('What is the weather in Delhi today?'), 'Weather in Delhi today');
+  assert.equal(titleFrom('x'.repeat(100)).length, 40, 'one long word is cut hard');
   assert.equal(titleFrom('  \n '), '');
   const thread = createThread({groups: [{id: 'home', bots: [{id: 'atlas', settings: {lead: true}}]}]}, {title: titleFrom('Plan my week\nmore'), now: '2026-11-11T10:00:00.000Z', makeId: () => 'abc'});
   assert.equal(thread.name, 'Plan my week');
