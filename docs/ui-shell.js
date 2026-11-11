@@ -5,11 +5,11 @@
  * Home is the Chats layout only. On a phone it is two sections, Bots and Threads,
  * switched by swiping; on a laptop the sidebar holds both and the chat opens on the
  * right. The lists come from ui-company.js (pure); this file is markup and events. */
-import {botRows, threadRows} from './ui-company.js?v=d07529700a';
-import {face} from './ui-face.js?v=d07529700a';
-import {esc, icon, stamp} from './ui-kit.js?v=d07529700a';
-import {pauseBanner} from './ui-asks.js?v=d07529700a';
-import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, isStaticDemo, seenChats} from './ui-store.js?v=d07529700a';
+import {botRows, threadRows} from './ui-company.js?v=2595b79166';
+import {face} from './ui-face.js?v=2595b79166';
+import {esc, icon, stamp} from './ui-kit.js?v=2595b79166';
+import {pauseBanner} from './ui-asks.js?v=2595b79166';
+import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, isStaticDemo, seenChats} from './ui-store.js?v=2595b79166';
 
 const el = id => document.getElementById(id);
 const DESK = '(min-width:1024px)';

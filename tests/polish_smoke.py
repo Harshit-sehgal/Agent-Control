@@ -196,7 +196,7 @@ async def thread_run(page, base):
     await box.fill('Ask @Researcher to find papers and @Writer to summarise them')
     await box.press('Enter')
     # A thread is a new chat run by Atlas, never a bot's own chat.
-    await expect(page.locator('#cv-line')).to_have_text('Atlas runs this thread', timeout=10000)
+    await expect(page.locator('#cv-line')).to_have_text(re.compile(r'^Atlas( runs this thread|, | and )'), timeout=10000)
     assert (await hash_(page)).startswith('#thread/'), await hash_(page)
     await expect(page.locator('.cv-me')).to_have_count(1)  # the owner's first line is written once
     await expect(page.locator('#main .cv-who')).to_have_count(0)  # no face: Atlas runs every thread
@@ -354,7 +354,7 @@ async def phone_flow(page, base):
     assert await overflow(page) <= 0
     await page.locator('#new-thread-form textarea').fill('Ask @Writer for a draft')
     await page.locator('#new-thread-form textarea').press('Enter')
-    await expect(page.locator('#cv-line')).to_have_text('Atlas runs this thread', timeout=10000)
+    await expect(page.locator('#cv-line')).to_have_text(re.compile(r'^Atlas( runs this thread|, | and )'), timeout=10000)
     await page.locator('#main .cv-head .rbtn').first.click()
     await expect(body).to_have_attribute('data-view', 'home')
     await swipe(300, 60)

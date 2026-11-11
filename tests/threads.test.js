@@ -255,3 +255,10 @@ test('the Pages engine runs two bot chats at once', async () => {
   assert.ok(other.runId);
   await assert.rejects(request('/api/groups/home/chat', 'POST', {message: 'hi', directBotId: 'atlas', chatKey: 'atlas'}), /already active/);
 });
+
+test('a thread that makes a bot for a job is named by the job, not the hiring', () => {
+  assert.equal(titleFrom("Make a writer bot and have it draft a 3-line note about the latest Node release using the researcher's findings"), 'Draft a 3-line note');
+  assert.equal(titleFrom('Create a researcher bot, then ask it to find the latest Node.js LTS'), 'Find the latest Node.js LTS');
+  assert.equal(titleFrom('Make a bot'), 'Make a bot');
+  assert.equal(titleFrom('Make a writer bot and a researcher bot'), 'Make a writer bot');
+});

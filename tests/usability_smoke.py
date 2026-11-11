@@ -426,7 +426,7 @@ async def out_of_job_card(page, base):
     await page.go_back()
     # Ask Atlas starts a thread with the request; the owner's line is written once.
     await page.locator('.cv-card').get_by_role('button', name='Ask Atlas').click()
-    await expect(page.locator('#cv-line')).to_have_text('Atlas runs this thread', timeout=10000)
+    await expect(page.locator('#cv-line')).to_have_text(re.compile(r'^Atlas( runs this thread|, | and )'), timeout=10000)
     assert (await hash_(page)).startswith('#thread/'), await hash_(page)
     await expect(page.locator('.cv-me')).to_have_count(1)
     await expect(page.locator('.cv-me')).to_have_text('Book me a table for Friday')

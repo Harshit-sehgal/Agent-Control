@@ -40,6 +40,8 @@ import {runMcpTask} from './mcp-stdio.mjs';
 import {reportResult, skipExpired} from './report-result.mjs';
 import {hostAllowed, hostOf, parseAllowlist} from '../shared/bot-browser.js';
 import {resolvePublicAddress, pinnedRequest} from './net-guard.mjs';
+import {findBrowser} from './browser.mjs';
+import {readableHtml} from './page-fetch.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG = process.env.AGENT_CONFIG ? path.resolve(process.env.AGENT_CONFIG) : path.join(HERE, 'agent.config.json');
@@ -168,16 +170,17 @@ async function execute(task, config) {
     if (!hostAllowed(target, allow)) {
       throw new Error(`Refusing to read ${hostOf(target) || target}: it is not in AGENT_BROWSER_ALLOWLIST. Only explicitly allowed pages are read.`);
     }
-    if (process.env.AGENT_BROWSER === '1') return runBrowserTask(task, {shared: shared(), allow});
+    // A real browser when this computer has one. Without Chrome, Chromium or Edge the page is still read, by a plain fetch.
+    if (process.env.AGENT_BROWSER === '1' && findBrowser()) return runBrowserTask(task, {shared: shared(), allow});
     // The fetch fallback must not become a second way onto the local network: it
     // is vetted like http.check and pinned to the vetted address, and redirects
     // are reported rather than followed.
     const {address} = await resolvePublicAddress(target);
-    const res = await pinnedRequest(target, {address, timeoutMs: 15000, maxBytes: 200000});
-    const html = res.body.slice(0, 200000);
-    const title = /<title[^>]*>([^<]*)<\/title>/i.exec(html)?.[1]?.trim() || null;
-    const excerpt = html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 600);
-    return {url: target, httpStatus: res.status, title, excerpt, capturedAt: new Date().toISOString()};
+    const res = await pinnedRequest(target, {address, timeoutMs: 15000, maxBytes: 2_000_000});
+    const page = readableHtml(res.body, target);
+    const moved = res.status >= 300 && res.status < 400 && res.headers?.location;
+    return {url: target, finalUrl: target, httpStatus: res.status, title: page.title, excerpt: page.text.slice(0, 600), text: moved ? `This page moved to ${new URL(res.headers.location, target).href}. Open that address instead.` : page.text,
+      links: page.links, elements: [], elementCount: 0, engine: 'fetch', capturedAt: new Date().toISOString()};
   }
   if (task.kind === 'browser.action') return runBrowserTask(task, {shared: shared(), allow: parseAllowlist(process.env.AGENT_BROWSER_ALLOWLIST)});
   if (task.kind === 'model.run') {

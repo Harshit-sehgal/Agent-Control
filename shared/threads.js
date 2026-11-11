@@ -13,7 +13,9 @@ export const isThread = group => group?.settings?.kind === 'thread';
 
 // Politeness and framing before the ask, which a title does without.
 const LEAD_IN = /^(?:(?:hey|hi|hello|ok(?:ay)?|so|atlas)\b[,!.]?\s*)*(?:(?:please|pls|kindly)\s+|(?:can|could|would|will)\s+you\s+(?:please\s+)?|i\s+(?:want|need|would\s+like)\s+(?:you\s+)?to\s+|help\s+me\s+(?:to\s+)?|let'?s\s+)*/i;
-const DANGLING = /^(?:a|an|the|to|for|in|on|of|at|by|with|from|that|which|who|posted|and|or|my|your)$/i;
+const DANGLING = /^(?:a|an|the|to|for|in|on|of|at|by|with|from|about|that|which|who|posted|and|or|my|your)$/i;
+// "Make a writer bot and have it draft ...": making the bot is the setup, the job is what it is then asked to do.
+const HIRE_THEN = /^(?:make|create|build|set\s+up|hire|add)\s+(?:me\s+)?(?:a|an|the|one)?\s*[\w\s'-]{0,40}?\b(?:bot|agent|assistant)\b[\s,]*(?:and\s+|then\s+|and\s+then\s+)*(?:have|ask|get|tell|let)\s+(?:it|him|her|them)\s+(?:to\s+)?(?=\w)/i;
 const QUESTION = /^(?:what|whats|what's)\s+(?:is|are)\s+(?:the\s+)?/i;
 
 /** A short name for the first message, the way a chat app names a chat: the ask without the politeness around
@@ -23,6 +25,8 @@ export function titleFrom(text) {
   const bare = line.replace(/[?!.]+$/, '').trim(), ask = bare.replace(LEAD_IN, '').replace(QUESTION, '').trim();
   // "Hello there" is the whole message: keep it rather than a title of one word.
   line = ask.split(/\s+/).length >= 2 ? ask : bare;
+  const job = line.replace(HIRE_THEN, '');
+  if (job !== line && job.split(/\s+/).length >= 2) line = job;
   // Before the second clause: "find a hotel" after "and", or what follows a comma.
   const clause = line.split(/\s*,\s*|\s+and\s+(?=\w)|;\s*/)[0];
   if (clause.split(/\s+/).length >= 2) line = clause;

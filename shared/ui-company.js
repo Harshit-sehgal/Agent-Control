@@ -144,6 +144,15 @@ export function threadRows(state, {now = Date.now(), seen = {}} = {}) {
   };
 }
 
+/** Who has worked in a thread, for its header: Atlas first, then each bot in the
+ * order it first spoke there ("Atlas, Planner and Mailroom"). */
+export function threadCrew(state, groupId) {
+  const bots = botsOf(state), primary = primaryOf(bots);
+  const ids = [primary?.id, ...(state?.chats?.[teamKey(groupId)] || []).filter(m => m.role === 'bot').map(m => m.senderId)];
+  const names = [...new Set(ids.filter(Boolean))].map(id => bots.find(b => b.id === id)?.name).filter(Boolean);
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0] || 'Atlas';
+}
+
 /** The tap-open card: each message passed between bots, in order. A change of
  * bot between two steps hands over the earlier bot's words. */
 export function handoffs(run) {

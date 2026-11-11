@@ -12,7 +12,7 @@ import {LIMIT_CHOICES, limitText} from './ask-limits.js';
 import {requestOfMessage} from './bot-browser.js';
 import {validHttpUrl} from './core.js';
 import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js';
-import {botStatus, botIsManager, chatStatus} from './ui-company.js';
+import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js';
 import {isPrimary} from './company.js';
 import {hasJob, modelChip} from './ui-profile-model.js';
 import {scheduleTaskBody} from './schedules.js';
@@ -87,7 +87,10 @@ function statusLine(conv) {
     const name = askerOf(conv)?.name || conv.name;
     return {text: `${name} working`, waiting: false};
   }
-  return {text: conv.isTeam ? 'Atlas runs this thread' : chatStatus(state, conv.bot.id), waiting: false};
+  if (!conv.isTeam) return {text: chatStatus(state, conv.bot.id), waiting: false};
+  // Who has worked here, so a thread says which bots it brought in.
+  const crew = threadCrew(state, conv.group.id);
+  return {text: crew.includes(' and ') ? crew : 'Atlas runs this thread', waiting: false};
 }
 
 /* ---------- entries ---------- */

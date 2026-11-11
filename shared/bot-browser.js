@@ -345,7 +345,26 @@ export const requestOfMessage = (state, messageId) => (state?.browserRequests ||
  * lines that show them. Returns the reply text without the blocks, the new
  * records, and the lines to append. A bot without the permission, or a chain
  * past MAX_BROWSER_DEPTH, gets a line saying why nothing ran. */
+/** The words of a search, as a set: lower case, any order, plurals folded. */
+function searchWords(url) {
+  let parsed; try { parsed = new URL(url); } catch { return null; }
+  const engine = SEARCHES.find(e => e.host.test(parsed.hostname));
+  const q = engine && parsed.searchParams.get(engine.param);
+  if (!q) return null;
+  const words = q.toLowerCase().split(/[^\p{L}\p{N}:.%₹$]+/u).filter(Boolean).map(w => (w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w));
+  return [...new Set(words)].sort().join(' ');
+}
+/** Two searches, on any engines, for the same words: searching it again finds nothing new. */
+export function sameSearch(a, b) {
+  const left = searchWords(a);
+  return Boolean(left) && left === searchWords(b);
+}
+
+/** Page titles that mean the site turned this browser away. */
+const REFUSED = /^(?:access denied|403\b|forbidden|request blocked|you have been blocked|attention required|just a moment)/i;
+
 const samePage = (a, b) => {
+  if (sameSearch(a, b)) return true;
   try {
     const left = new URL(a), right = new URL(b);
     return left.host === right.host
@@ -358,14 +377,16 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
   depth = Math.max(0, Math.min(MAX_BROWSER_DEPTH, Number(depth) || 0));
   const rounds = roundsCap(state), perReply = pagesCap(state);
   const all = parseBrowserRequests(output), text = stripBrowserBlocks(output), lines = [], records = [], asks = [];
-  if (!all.length) return {text: String(output ?? ''), records, lines, asks, limited: false, repeated: 0, again: []};
+  if (!all.length) return {text: String(output ?? ''), records, lines, asks, limited: false, repeated: 0, again: [], refused: []};
   const found = all.slice(0, perReply);
   const say = line => lines.push({id: makeId(), role: 'system', text: line, at: now});
   // `limited`: the rounds ran out, so the caller gives the bot a closing turn instead of more pages.
   // `repeated`: pages it asked for again that it already has, which is no progress.
   const limited = depth >= rounds;
   let repeated = 0;
-  const again = [];
+  const again = [], refused = [];
+  const refusals = host => (state.browserRequests || []).filter(r => (runId ? r.runId === runId : r.chatKey === chatKey)
+    && hostOf(r.result?.finalUrl || r.url) === host && (REFUSED.test(String(r.result?.title || '').trim()) || r.result?.botCheck)).length;
   // A bot never answers "I don't have permission": a page it has no grant for is an ask, and the owner
   // says Allow, Always allow or Decline. A Deny the owner set is the one thing that refuses outright.
   if (limited) say(`${bot.name} asked for another web page, but ${rounds} browsing rounds in a row is the most ${rounds < BACKSTOP.rounds ? 'your limit in Settings allows' : 'one message may take'}.`);
@@ -382,6 +403,14 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
         && [r.url, r.result.finalUrl].some(u => u && samePage(u, item.request.url)));
       if (had) again.push(had.result.page); else repeated++;
       say(`${bot.name} already has that page, so it was not opened again.`);
+      continue;
+    }
+    // A site that refused this browser twice in the run (Access Denied, a block page) will refuse it again.
+    const host = hostOf(item.request.url);
+    if (!item.request.steps.length && refusals(host) >= 2) {
+      if (!refused.includes(host)) refused.push(host);
+      repeated++;
+      say(`${host} refused this browser twice, so it was not opened again.`);
       continue;
     }
     const needs = browserNeeds(item.request, controlLabels(state, bot.id, chatKey));
@@ -406,7 +435,7 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
   state.browserRequests ??= [];
   state.browserRequests.unshift(...records);
   pruneBrowserRequests(state);
-  return {text: text || `${bot.name} asked to open a web page.`, records, lines, asks, limited, repeated, again};
+  return {text: text || `${bot.name} asked to open a web page.`, records, lines, asks, limited, repeated, again, refused};
 }
 
 /** A person turns down a request that is still waiting, including one already

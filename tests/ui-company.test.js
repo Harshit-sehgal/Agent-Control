@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {botRows, botStatus, botIsManager, threadRows, progressPill, handoffs, chatStatus, companyRoute, companyHash} from '../shared/ui-company.js';
+import {botRows, botStatus, botIsManager, threadRows, progressPill, handoffs, chatStatus, companyRoute, companyHash, threadCrew} from '../shared/ui-company.js';
 
 const bot = (id, name, settings = {}, instructions = '') => ({id, name, instructions, settings});
 const atlas = bot('atlas', 'Atlas', {lead: true, pinned: true}, 'Runs the company and hands work out.');
@@ -488,4 +488,17 @@ test('a bot chat whose last run stopped says so on its row', () => {
   const row = rowOf(botRows(s), 'mail');
   assert.equal(row.stopped, true);
   assert.equal(row.preview, 'The model did not answer.');
+});
+
+test('a thread names the bots that took part, Atlas first, in the order they joined', () => {
+  const s = threadState();
+  s.chats['team-t1'] = [
+    {id: '1', role: 'user', text: 'Plan the week', at: local(11, 9)},
+    {id: '2', role: 'bot', senderId: 'plan', text: 'Draft plan.', at: local(11, 9, 2)},
+    {id: '3', role: 'bot', senderId: 'mail', text: 'Two emails.', at: local(11, 9, 3)},
+    {id: '4', role: 'bot', senderId: 'plan', text: 'Updated.', at: local(11, 9, 4)},
+  ];
+  assert.equal(threadCrew(s, 't1'), 'Atlas, Planner and Mailroom');
+  assert.equal(threadCrew(s, 't2'), 'Atlas');
+  assert.equal(threadCrew(s, 'nope'), 'Atlas');
 });

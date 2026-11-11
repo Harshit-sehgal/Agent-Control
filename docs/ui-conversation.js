@@ -7,25 +7,25 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=d07529700a';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=d07529700a';
-import {requestOfMessage} from './bot-browser.js?v=d07529700a';
-import {validHttpUrl} from './core.js?v=d07529700a';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=d07529700a';
-import {botStatus, botIsManager, chatStatus} from './ui-company.js?v=d07529700a';
-import {isPrimary} from './company.js?v=d07529700a';
-import {hasJob, modelChip} from './ui-profile-model.js?v=d07529700a';
-import {scheduleTaskBody} from './schedules.js?v=d07529700a';
-import {feed} from './ui-feed.js?v=d07529700a';
-import {setupCardOf, setupButton} from './setup.js?v=d07529700a';
-import {askCard} from './ui-asks.js?v=d07529700a';
-import {face, botColor} from './ui-face.js?v=d07529700a';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=d07529700a';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=d07529700a';
-import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=d07529700a';
-import {toast} from './ui-dialogs.js?v=d07529700a';
-import {siteChip} from './ui-computer-view.js?v=d07529700a';
-import {cliChoice} from './ui-connect-model.js?v=d07529700a';
+import {OFFJOB_CHOICES} from './off-job.js?v=2595b79166';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=2595b79166';
+import {requestOfMessage} from './bot-browser.js?v=2595b79166';
+import {validHttpUrl} from './core.js?v=2595b79166';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=2595b79166';
+import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=2595b79166';
+import {isPrimary} from './company.js?v=2595b79166';
+import {hasJob, modelChip} from './ui-profile-model.js?v=2595b79166';
+import {scheduleTaskBody} from './schedules.js?v=2595b79166';
+import {feed} from './ui-feed.js?v=2595b79166';
+import {setupCardOf, setupButton} from './setup.js?v=2595b79166';
+import {askCard} from './ui-asks.js?v=2595b79166';
+import {face, botColor} from './ui-face.js?v=2595b79166';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=2595b79166';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=2595b79166';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=2595b79166';
+import {toast} from './ui-dialogs.js?v=2595b79166';
+import {siteChip} from './ui-computer-view.js?v=2595b79166';
+import {cliChoice} from './ui-connect-model.js?v=2595b79166';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -87,7 +87,10 @@ function statusLine(conv) {
     const name = askerOf(conv)?.name || conv.name;
     return {text: `${name} working`, waiting: false};
   }
-  return {text: conv.isTeam ? 'Atlas runs this thread' : chatStatus(state, conv.bot.id), waiting: false};
+  if (!conv.isTeam) return {text: chatStatus(state, conv.bot.id), waiting: false};
+  // Who has worked here, so a thread says which bots it brought in.
+  const crew = threadCrew(state, conv.group.id);
+  return {text: crew.includes(' and ') ? crew : 'Atlas runs this thread', waiting: false};
 }
 
 /* ---------- entries ---------- */

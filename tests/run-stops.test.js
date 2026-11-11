@@ -154,3 +154,32 @@ test('a reply that only fetched pages is a working step, not an answer, so the c
   const bots = (store.read().chats[ids.mail] || []).filter(m => m.role === 'bot');
   assert.deepEqual(bots.map(m => [m.text, Boolean(m.step)]), [['Looking.', true], ['Acme is hiring.', false]]);
 });
+
+test('a bot that keeps opening pages is told, after many, to answer with what it has', async t => {
+  fakeBrowser(t, async request => ({title: 'Page', finalUrl: request.url, text: 'Some text', links: []}));
+  const {store, ids} = await company(t);
+  let n = 0, nudged = '';
+  // Search, then open a page, then search again: never three searches in a row, so only the page count can stop it.
+  const ai = model({Mailroom: e => { if (/opened \d+ pages/.test(e.note || '')) { nudged = e.note; return 'Here is what I found.'; } n++; return fence(n % 2 ? `https://www.bing.com/search?q=intern+${n}` : `https://jobs.example/${n}`); }});
+  wire(ai.executor);
+  const run = await ask(store, {message: 'find jobs', to: ids.mail, executor: ai.executor});
+  await until(() => ended(store, run.id), 'the run');
+  assert.match(nudged, /opened 15 pages/);
+  assert.equal(opened.length, 15);
+  assert.equal(runOf(store, run.id).status, 'completed');
+});
+
+test('a bot stuck on pages it already has gets one last turn to answer, and the run completes when it does', async t => {
+  fakeBrowser(t, async request => ({title: 'Page', finalUrl: request.url, text: 'Flipkart: 19,989'}));
+  const {store, ids} = await company(t);
+  let told = '';
+  const ai = model({Mailroom: e => { if (/Stop opening pages/.test(e.note || '')) { told = e.note; return 'Lowest price: 19,989 on Flipkart.'; } return fence('https://jobs.example/same'); }});
+  wire(ai.executor);
+  const run = await ask(store, {message: 'find the price', to: ids.mail, executor: ai.executor});
+  await until(() => ended(store, run.id), 'the run');
+  const done = runOf(store, run.id);
+  assert.equal(done.status, 'completed');
+  assert.match(done.lastOutput, /19,989/);
+  assert.match(told, /answer the owner now/i);
+  assert.equal(opened.length, 1);
+});

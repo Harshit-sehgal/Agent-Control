@@ -10,9 +10,9 @@
  * A run's trace holds one entry per step: {botId, output}. A bot-to-bot ask is
  * two entries, {botId: asker, kind: 'ask', to, task} and then
  * {botId: asked, kind: 'peer', to: asker, output}. */
-import {face} from './ui-face.js?v=d07529700a';
-import {plain} from './ui-kit.js?v=d07529700a';
-import {waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=d07529700a';
+import {face} from './ui-face.js?v=2595b79166';
+import {plain} from './ui-kit.js?v=2595b79166';
+import {waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=2595b79166';
 
 const teamKey = id => `team-${id}`;
 const settingsOf = bot => bot?.settings || {};
@@ -142,6 +142,15 @@ export function threadRows(state, {now = Date.now(), seen = {}} = {}) {
     today: rows.filter(r => !r.waiting && r.at && sameDay(r.at, now)),
     earlier: rows.filter(r => !r.waiting && !(r.at && sameDay(r.at, now))),
   };
+}
+
+/** Who has worked in a thread, for its header: Atlas first, then each bot in the
+ * order it first spoke there ("Atlas, Planner and Mailroom"). */
+export function threadCrew(state, groupId) {
+  const bots = botsOf(state), primary = primaryOf(bots);
+  const ids = [primary?.id, ...(state?.chats?.[teamKey(groupId)] || []).filter(m => m.role === 'bot').map(m => m.senderId)];
+  const names = [...new Set(ids.filter(Boolean))].map(id => bots.find(b => b.id === id)?.name).filter(Boolean);
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0] || 'Atlas';
 }
 
 /** The tap-open card: each message passed between bots, in order. A change of

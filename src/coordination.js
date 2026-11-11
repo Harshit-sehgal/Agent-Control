@@ -105,6 +105,17 @@ export async function markInterrupted(store){
   try{await failAgentTasks(store, [...taskIds], 'The server restarted before this group run completed.');}
   catch(error){console.error('Agent task cleanup after a restart:', error.message);}
 }
+/** Rounds with nothing new (FAIL_STREAK in a row) first earn the bot one last turn with browsing closed: it
+ * answers the owner from what the run read. True when that last turn was already given, so the run stops. */
+const LAST_CALL='Stop opening pages: this run has already read everything it can use. Do not ask for any page. Answer the owner now with what you found, and say in one line what is still missing.';
+function lastCallOrStop(live){
+  if(live.failStreak<FAIL_STREAK)return false;
+  if(live.lastCall)return true;
+  live.lastCall=true;live.browserDepth=1e6;live.browserPage=null;live.connectorPage=null;live.browserNote=LAST_CALL;
+  return false;
+}
+/** Pages one message may open before the bot is told to answer with what it has. */
+export const PAGE_NUDGE=15;
 export async function queueGroupRun(store,{groupId,message,directBotId=null,checkpoints=false,chatKey=null,browserDepth=0,confirmPlan,taskId=null,anyway=false,unattended=false,scheduleId=null,wait=false}={}){
   // Validate the request against the store first so a missing group reports 404
   // and a busy group reports 409, instead of the AI-key check shadowing them
@@ -424,6 +435,9 @@ async function runGroupInner(store,id,executor){
         if(browsed.records.length){
           live.searchStreak=browsed.records.every(r=>isSearchPage(r.url))?(Number(live.searchStreak)||0)+1:0;
           if(live.searchStreak>=3)live.browserNote=`You have searched ${live.searchStreak} times in a row. Do not search again: open the result pages that fit from the Links list, or answer the owner now with what you found.`;
+          // Many pages for one message is a sign it is circling: it is told once to answer with what it has.
+          live.pagesRead=(Number(live.pagesRead)||0)+browsed.records.length;
+          if(live.pagesRead>=PAGE_NUDGE&&!live.pageNudged){live.pageNudged=true;live.browserNote=`You have opened ${live.pagesRead} pages for this message. Answer the owner now with what you have found, and say in one line what is still missing; open another page only if the answer is impossible without it.`;}
         }
         const stuck=!browsed.records.length&&!conn.calls.length&&!declinedTurn&&!stopped&&!off&&(browsed.limited||browsed.repeated>0);
         const reread=!stuck&&!browsed.records.length&&!conn.calls.length&&!declinedTurn&&!stopped&&!off&&browsed.again?.length>0;
@@ -431,16 +445,19 @@ async function runGroupInner(store,id,executor){
           // Pages the run already read: the same bot takes the step again with them. Asking only for those, round
           // after round (FAIL_STREAK), is no progress and stops the run.
           live.failStreak=(Number(live.failStreak)||0)+1;
-          if(live.failStreak>=FAIL_STREAK){stuckStop=`${bot.name} kept asking for pages it already had, so the task stopped. Ask again with more detail, or name a different site.`;return;}
-          live.browserPage=browsed.again.join('\n\n---\n\n');live.connectorPage=null;
-          live.browserNote='You asked again for a page you already have, so here it is again. Do not ask for it again: open a different page from its Links list, or answer the owner now with what you found.';
+          if(lastCallOrStop(live)){stuckStop=`${bot.name} kept asking for pages it already had, so the task stopped. Ask again with more detail, or name a different site.`;return;}
+          if(!live.lastCall||live.failStreak<FAIL_STREAK){
+            live.browserPage=browsed.again.join('\n\n---\n\n');live.connectorPage=null;
+            live.browserNote='You asked again for a page you already have, so here it is again. Do not ask for it again: open a different page from its Links list, or answer the owner now with what you found.';
+          }
           live.checkpoint={nextStep:i,afterStep:i+1,previous,at:stamp()};
           live.status='queued';
           holdBrowser=true;
         } else if(stuck){
           live.failStreak=(Number(live.failStreak)||0)+1;
-          if(live.failStreak>=FAIL_STREAK){stuckStop=`${bot.name} kept asking for pages it already had, so the task stopped. Ask again with more detail, or name a different site.`;return;}
-          live.browserNote=browsed.limited?'You have used every round of pages for this message. Do not ask for more pages: answer the owner now with what you found, and say what is still missing.'
+          if(lastCallOrStop(live)){stuckStop=`${bot.name} kept asking for pages it already had, so the task stopped. Ask again with more detail, or name a different site.`;return;}
+          if(!live.lastCall||live.failStreak<FAIL_STREAK)live.browserNote=browsed.limited?'You have used every round of pages for this message. Do not ask for more pages: answer the owner now with what you found, and say what is still missing.'
+            :browsed.refused?.length?`${browsed.refused.join(' and ')} turned this browser away twice, so ${browsed.refused.length>1?'they are':'it is'} not opened again. Use other sites, or answer the owner now with what you found.`
             :'You asked again for pages you already read (a page can redirect to one you have). Do not ask for them again: open different pages, or answer the owner now with what you found.';
           live.browserPage=null;live.connectorPage=null;
           live.checkpoint={nextStep:i,afterStep:i+1,previous,at:stamp()};
