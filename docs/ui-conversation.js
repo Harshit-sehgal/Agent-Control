@@ -7,23 +7,23 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=91b9e97fa2';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=91b9e97fa2';
-import {requestOfMessage} from './bot-browser.js?v=91b9e97fa2';
-import {validHttpUrl} from './core.js?v=91b9e97fa2';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=91b9e97fa2';
-import {botStatus, botIsManager, chatStatus, jobOf} from './ui-company.js?v=91b9e97fa2';
-import {isPrimary} from './company.js?v=91b9e97fa2';
-import {hasJob} from './ui-profile-model.js?v=91b9e97fa2';
-import {feed} from './ui-feed.js?v=91b9e97fa2';
-import {setupCardOf, setupButton} from './setup.js?v=91b9e97fa2';
-import {askCard} from './ui-asks.js?v=91b9e97fa2';
-import {face, botColor} from './ui-face.js?v=91b9e97fa2';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=91b9e97fa2';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync} from './ui-store.js?v=91b9e97fa2';
-import {runAnyway, startThread, answerLimit} from './ui-chat.js?v=91b9e97fa2';
-import {toast} from './ui-dialogs.js?v=91b9e97fa2';
-import {siteChip} from './ui-computer-view.js?v=91b9e97fa2';
+import {OFFJOB_CHOICES} from './off-job.js?v=be2f2451d1';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=be2f2451d1';
+import {requestOfMessage} from './bot-browser.js?v=be2f2451d1';
+import {validHttpUrl} from './core.js?v=be2f2451d1';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=be2f2451d1';
+import {botStatus, botIsManager, chatStatus, jobOf} from './ui-company.js?v=be2f2451d1';
+import {isPrimary} from './company.js?v=be2f2451d1';
+import {hasJob} from './ui-profile-model.js?v=be2f2451d1';
+import {feed} from './ui-feed.js?v=be2f2451d1';
+import {setupCardOf, setupButton} from './setup.js?v=be2f2451d1';
+import {askCard} from './ui-asks.js?v=be2f2451d1';
+import {face, botColor} from './ui-face.js?v=be2f2451d1';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=be2f2451d1';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync} from './ui-store.js?v=be2f2451d1';
+import {runAnyway, startThread, answerLimit} from './ui-chat.js?v=be2f2451d1';
+import {toast} from './ui-dialogs.js?v=be2f2451d1';
+import {siteChip} from './ui-computer-view.js?v=be2f2451d1';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -388,10 +388,12 @@ export const conversationActions = {
     const card = message && message.origin !== 'browser' ? setupCardOf(message) : null;
     if (!card) throw new Error('That suggestion is no longer here.');
     if (card.action === 'open') return go({settings: card.section});
-    if (card.action === 'job') {
+    if (card.action === 'rule') await api('/api/grants', 'POST', {botId: card.botId, action: card.act, ...(card.scope ? {scope: card.scope} : {}), choice: card.choice});
+    else if (['job', 'rename', 'settings'].includes(card.action)) {
       const group = groupOfBot(card.botId);
       if (!group) throw new Error('That bot is no longer in the company.');
-      await api(`/api/groups/${group.id}/bots/${card.botId}`, 'PATCH', {instructions: card.job});
+      const body = card.action === 'job' ? {instructions: card.job} : card.action === 'rename' ? {name: card.name} : {settings: card.settings};
+      await api(`/api/groups/${group.id}/bots/${card.botId}`, 'PATCH', body);
     } else if (card.botId) await api(`/api/ai/bots/${encodeURIComponent(card.botId)}`, 'PATCH', {providerId: card.providerId, model: card.model || ''});
     else await api('/api/ai', 'PATCH', {providerId: card.providerId, model: card.model || ''});
     await sync();

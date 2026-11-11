@@ -388,10 +388,12 @@ export const conversationActions = {
     const card = message && message.origin !== 'browser' ? setupCardOf(message) : null;
     if (!card) throw new Error('That suggestion is no longer here.');
     if (card.action === 'open') return go({settings: card.section});
-    if (card.action === 'job') {
+    if (card.action === 'rule') await api('/api/grants', 'POST', {botId: card.botId, action: card.act, ...(card.scope ? {scope: card.scope} : {}), choice: card.choice});
+    else if (['job', 'rename', 'settings'].includes(card.action)) {
       const group = groupOfBot(card.botId);
       if (!group) throw new Error('That bot is no longer in the company.');
-      await api(`/api/groups/${group.id}/bots/${card.botId}`, 'PATCH', {instructions: card.job});
+      const body = card.action === 'job' ? {instructions: card.job} : card.action === 'rename' ? {name: card.name} : {settings: card.settings};
+      await api(`/api/groups/${group.id}/bots/${card.botId}`, 'PATCH', body);
     } else if (card.botId) await api(`/api/ai/bots/${encodeURIComponent(card.botId)}`, 'PATCH', {providerId: card.providerId, model: card.model || ''});
     else await api('/api/ai', 'PATCH', {providerId: card.providerId, model: card.model || ''});
     await sync();

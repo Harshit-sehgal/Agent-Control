@@ -7,7 +7,7 @@
 import {randomUUID} from 'node:crypto';
 import {createRun,createEnvelope,declinedOf,runNote,planHandoffs,handoffTargets,instructLead,wakeBots,assessTask,summonableGuests,mayHandoff,chatKeyFor,chatIsBusy,rosterFor,previousFor,enlist,MAX_HANDOFFS,INTERRUPT_STATUSES as INTERRUPT} from '../shared/coordination.js';
 import {isThread,noteMember} from '../shared/threads.js';
-import {isLead,isPrimary,companyBots} from '../shared/company.js';
+import {isLead,companyBots} from '../shared/company.js';
 import {extendLimits, ASK_CEILING} from '../shared/ask-limits.js';
 import {noteBotWork,paused as botsPaused,resumeGuard} from '../shared/runaway.js';
 import {parseOffJob,offJobMessage} from '../shared/off-job.js';
@@ -290,8 +290,8 @@ async function runGroupInner(store,id,executor){
       // in the memory block, stands in for whatever had to be cut.
       const thread=threadContext(current.chats?.[r.chatKey]);
       const envelope=createEnvelope({run:r,bot,previous,thread,team:closing?[]:rosterFor(current,bot,roster,{thread:isThread(g)}),company:everyone,memory,lead,closing,connectors:closing||declinedTurn?[]:envelopeConnectors(current),
-        // The primary bot knows the workspace, so the owner can ask it about the app instead of learning the settings.
-        workspace:isPrimary(current,bot.id)&&!closing?workspaceBrief(current,{agents:agentsBrief(store),connectors:envelopeConnectors(current)}):null});
+        // Every bot knows the workspace, so the owner can ask any of them to change a setting instead of learning Settings.
+        workspace:!closing?workspaceBrief(current,{agents:agentsBrief(store),connectors:envelopeConnectors(current),speaker:bot}):null});
       // Each bot runs on its own chosen model/provider, else the workspace
       // default. The turn itself is the one sequence every caller runs: a
       // sub-agent round, then a peer ask, then a new-bot block. A bot that

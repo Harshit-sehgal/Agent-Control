@@ -108,3 +108,35 @@ test('the brief also carries the saved rules, what waits on the owner and the op
   assert.equal(empty.rules, 'none');
   assert.equal(empty.waitingOnOwner, 'nothing');
 });
+
+test('rename, settings and rule cards: what Settings can change, a bot proposes', async () => {
+  const {resolveSetup, setupDone, setupCardOf, parseSetupRequests} = await import('../shared/setup.js');
+  const rename = resolveSetup(state, {action: 'rename', bot: 'Replier', name: 'Mailer'});
+  assert.deepEqual(rename.card, {action: 'rename', botId: 'rep', name: 'Mailer', text: 'Rename Replier to Mailer'});
+  assert.match(resolveSetup(state, {action: 'rename', bot: 'Replier', name: 'Atlas'}).error, /already called Atlas/);
+
+  const [{request}] = parseSetupRequests(block({action: 'settings', bot: 'Replier', settings: {replyLength: 'short', style: 'Warm and brief', memory: false, enabled: false, reportsTo: 'Atlas', lead: true, browserApproval: 'auto'}}));
+  const settings = resolveSetup(state, request);
+  assert.equal(settings.ok, true, settings.error);
+  assert.deepEqual(settings.card.settings, {replyLength: 'short', style: 'Warm and brief', memory: false, enabled: false, reportsTo: 'atlas'}, 'lead and browserApproval are not something a bot can change');
+  assert.equal(settings.card.text, 'Replier: short replies, style “Warm and brief”, no memory, switched off, reports to Atlas');
+  assert.match(resolveSetup(state, {action: 'settings', bot: 'Replier', settings: {replyLength: 'huge'}}).error, /reply length/i);
+  assert.match(resolveSetup(state, {action: 'settings', bot: 'Replier', settings: {lead: true}}).error, /nothing to change/);
+  assert.equal(setupDone(state, settings.card), false);
+
+  const rule = resolveSetup(state, {action: 'rule', bot: 'Replier', do: 'open', site: 'docs.example.org/path', choice: 'always'});
+  assert.deepEqual(rule.card, {action: 'rule', botId: 'rep', act: 'browser.use', scope: 'https://docs.example.org', choice: 'always', text: 'Replier: Always allow · Open docs.example.org'});
+  assert.match(resolveSetup(state, {action: 'rule', bot: 'Replier', do: 'spend', choice: 'always'}).error, /payment is asked every time/);
+  assert.match(resolveSetup(state, {action: 'rule', bot: 'Replier', do: 'open', site: 'x', choice: 'maybe'}).error, /always, ask or deny/);
+  const ruled = {...state, grants: [{botId: 'rep', action: 'browser.use', scope: 'https://docs.example.org', choice: 'always'}]};
+  assert.equal(setupDone(ruled, rule.card), true);
+  for (const card of [rename.card, settings.card, rule.card]) assert.deepEqual(setupCardOf({setup: JSON.stringify(card)}), card);
+  assert.equal(setupCardOf({setup: JSON.stringify({...rule.card, act: 'rm -rf'})}), null);
+});
+
+test('every bot is told the workspace; one that is not the primary is told who it is and who sets things up', () => {
+  const brief = workspaceBrief(state, {speaker: state.groups[0].bots[1]});
+  assert.match(brief.you, /^You are Replier\. Atlas is the primary bot/);
+  assert.ok(Array.isArray(brief.bots) && brief.models.length === 2);
+  assert.match(workspaceBrief(state, {speaker: state.groups[0].bots[0]}).you, /You are Atlas, the primary bot/);
+});

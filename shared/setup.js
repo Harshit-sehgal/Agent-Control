@@ -2,7 +2,7 @@
  *
  * Two halves:
  *
- * - `workspaceBrief(state, {agents, connectors})` is what the primary bot is told about this workspace:
+ * - `workspaceBrief(state, {agents, connectors})` is what every bot is told about this workspace:
  *   its models, its bots and which model each uses, whether this computer is connected (browser, claude
  *   and codex sign-in), the connected services, and a few facts about how the app works. So the owner
  *   can ask Atlas "why did that fail?" or "use Haiku for Replier" instead of learning the settings.
@@ -13,19 +13,27 @@
  *       {"action": "model", "bot": "Replier", "provider": "My Claude", "model": "haiku"}
  *       ```
  *
- *   `model` (a bot's model, or the default when `bot` is left out), `job` (a bot's job sentence), or
+ *   `model` (a bot's model, or the default when `bot` is left out), `job` (a bot's job sentence), `rename`,
+ *   `settings` (reply length, style, memory, hand-offs, @mentions, on or off, temperature, manager), `rule`
+ *   (Always allow / Ask each time / Deny for a bot, an action and a site; a payment is never Always), or
  *   `open` (a Settings page: models, connectors, permissions, agents, usage). The block never changes
  *   anything: it becomes a card in the chat with one button, and the owner's tap calls the same route
- *   the settings page calls, with the owner's own session. A model cannot add a key, grant a permission
- *   or reach a route the owner could not.
+ *   the settings page calls, with the owner's own session. A model cannot add a key, type a command,
+ *   make itself the primary bot, save a rule without the owner's tap, or reach a route the owner could not.
  *
  * Pure and browser-safe: the server reads replies with it and the UI paints the card from it. */
 import {cleanText} from './core.js';
 import {controlFence} from './reply-blocks.js';
 import {companyBots, primaryOf} from './company.js';
-import {GRANT_LABELS, askText, pendingAsks} from './asks.js';
+import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js';
+import {botSettings, validateBotSettings} from './bot-settings.js';
+import {grantWhat} from './ui-asks.js';
 
-export const SETUP_ACTIONS = ['model', 'job', 'open'];
+export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'rule', 'open'];
+/** The bot settings a bot may propose. Not the primary role, the browser approval mode, or layout (pins, order). */
+export const BOT_SETTABLE = ['replyLength', 'style', 'memory', 'canHandoff', 'summonable', 'enabled', 'temperature', 'reportsTo'];
+const RULE_WORDS = {open: 'browser.use', browse: 'browser.use', browser: 'browser.use', 'browser.use': 'browser.use', web: 'browser.use', send: 'send', email: 'send', post: 'post', delete: 'delete', spend: 'spend', pay: 'spend', payment: 'spend', buy: 'spend'};
+const PER_SITE = ['browser.use', 'send', 'post', 'delete'];
 /** Settings pages a bot may point to, by the word it uses, and the section key and title the app uses. */
 export const SETUP_PAGES = {
   models: ['models', 'Models and keys'], keys: ['models', 'Models and keys'],
@@ -38,6 +46,9 @@ const MIN_JOB = 20, MAX_JOB = 3000, MAX_BLOCKS = 3;
 export const SETUP_TOOL_HINT = 'To change a setting for the owner, put one fenced block named setup in your reply, holding JSON. '
   + '{"action":"model","bot":"<bot name, or leave out for everyone\'s default>","provider":"<a model name from workspace.models>","model":"<one of its models, or leave out for its default>"} sets a model. '
   + '{"action":"job","bot":"<bot name>","job":"<the new job, one or two sentences>"} rewrites a bot\'s job. '
+  + '{"action":"rename","bot":"<bot name>","name":"<new name>"} renames a bot. '
+  + '{"action":"settings","bot":"<bot name>","settings":{"replyLength":"short|medium|long","style":"<tone>","memory":true|false,"canHandoff":true|false,"summonable":true|false,"enabled":true|false,"temperature":0-2,"reportsTo":"<manager bot name, or none>"}} changes how a bot works; give only what changes. '
+  + '{"action":"rule","bot":"<bot name>","do":"open|send|post|delete|spend","site":"<site, e.g. github.com>","choice":"always|ask|deny"} saves what that bot may do without asking (a payment is never always). '
   + '{"action":"open","page":"models|connectors|permissions|agents|usage"} shows the owner a Settings page, for things only they can do, such as pasting a key. '
   + 'Nothing changes until the owner taps Apply on the card, so say in your reply what you proposed and why. Never ask for a key or password in chat.';
 
@@ -53,8 +64,8 @@ export function parseSetupRequests(output) {
     try { body = JSON.parse(match[1].trim()); } catch { found.push({ok: false, error: 'the setup block was not valid JSON.'}); continue; }
     if (!body || typeof body !== 'object' || Array.isArray(body)) { found.push({ok: false, error: 'the setup block was not an object.'}); continue; }
     const action = lower(body.action);
-    if (!SETUP_ACTIONS.includes(action)) { found.push({ok: false, error: `"${cleanText(body.action, 40) || 'nothing'}" is not something setup can do. Use model, job or open.`}); continue; }
-    found.push({ok: true, request: {action, bot: cleanText(body.bot, 60), provider: cleanText(body.provider, 80), model: cleanText(body.model, 120), job: cleanText(body.job, MAX_JOB + 1), page: lower(body.page)}});
+    if (!SETUP_ACTIONS.includes(action)) { found.push({ok: false, error: `"${cleanText(body.action, 40) || 'nothing'}" is not something setup can do. Use ${SETUP_ACTIONS.join(', ')}.`}); continue; }
+    found.push({ok: true, request: {action, bot: cleanText(body.bot, 60), provider: cleanText(body.provider, 80), model: cleanText(body.model, 120), job: cleanText(body.job, MAX_JOB + 1), page: lower(body.page), name: cleanText(body.name, 81), settings: body.settings && typeof body.settings === 'object' && !Array.isArray(body.settings) ? body.settings : null, do: lower(body.do), site: cleanText(body.site, 300), choice: lower(body.choice)}});
   }
   return found;
 }
@@ -111,6 +122,13 @@ export function resolveSetup(state, request, {speaker = null} = {}) {
     if (job.length < MIN_JOB || job.length > MAX_JOB) return {ok: false, error: `a job is ${MIN_JOB} to ${MAX_JOB} characters.`};
     return {ok: true, card: {action: 'job', botId: bot.id, job, text: `New job for ${bot.name}: “${job.length > 240 ? `${job.slice(0, 240)}…` : job}”`}};
   }
+  if (request.action === 'rename' || request.action === 'settings' || request.action === 'rule') {
+    const bot = botNamed(state, request.bot, speaker);
+    if (!bot) return {ok: false, error: `there is no bot called "${request.bot || 'blank'}".`};
+    if (request.action === 'rename') return renameCard(state, bot, request.name);
+    if (request.action === 'settings') return settingsCard(state, bot, request.settings, speaker);
+    return ruleCard(bot, request);
+  }
   const bot = request.bot ? botNamed(state, request.bot, speaker) : null;
   if (request.bot && !bot) return {ok: false, error: `there is no bot called "${request.bot}".`};
   const provider = providerNamed(providers, request.provider) || (!request.provider && request.model ? providers.find(p => p.id === (state?.ai?.bots?.[bot?.id]?.providerId || state?.ai?.defaultProviderId)) : null);
@@ -122,6 +140,55 @@ export function resolveSetup(state, request, {speaker = null} = {}) {
     text: bot ? `${bot.name} uses ${what}` : `Everyone's default model: ${what}`}};
 }
 
+function renameCard(state, bot, wanted) {
+  const name = String(wanted ?? '').trim();
+  if (!name || name.length > 80) return {ok: false, error: 'a bot name is 1 to 80 characters.'};
+  const taken = companyBots(state).find(b => b.id !== bot.id && lower(b.name) === lower(name));
+  if (taken) return {ok: false, error: `a bot is already called ${taken.name}.`};
+  return {ok: true, card: {action: 'rename', botId: bot.id, name, text: `Rename ${bot.name} to ${name}`}};
+}
+
+function settingsCard(state, bot, wanted, speaker) {
+  const picked = {};
+  for (const key of BOT_SETTABLE) if (wanted && Object.hasOwn(wanted, key)) picked[key] = wanted[key];
+  if (!Object.keys(picked).length) return {ok: false, error: `nothing to change. A bot may set ${BOT_SETTABLE.join(', ')}.`};
+  if (Object.hasOwn(picked, 'reportsTo')) {
+    const word = lower(picked.reportsTo);
+    if (!word || ['none', 'nobody', 'solo', 'no one'].includes(word)) picked.reportsTo = null;
+    else {
+      const manager = botNamed(state, picked.reportsTo, speaker);
+      if (!manager || manager.id === bot.id) return {ok: false, error: `there is no other bot called "${cleanText(picked.reportsTo, 60)}" to report to.`};
+      picked.reportsTo = manager.id;
+    }
+  }
+  let next;
+  try { next = validateBotSettings(picked, bot.settings || {}); } catch (error) { return {ok: false, error: lower(error.message).replace(/\.$/, '') + '.'}; }
+  const settings = Object.fromEntries(Object.keys(picked).map(key => [key, next[key]]));
+  const nameOf = id => companyBots(state).find(b => b.id === id)?.name || 'nobody';
+  const words = {
+    replyLength: v => `${v} replies`, style: v => (v ? `style “${short(v, 80)}”` : 'no extra style'), memory: v => (v ? 'memory on' : 'no memory'),
+    canHandoff: v => (v ? 'may hand work on' : 'keeps its work'), summonable: v => (v ? 'may be @mentioned anywhere' : 'only in its own group'),
+    enabled: v => (v ? 'switched on' : 'switched off'), temperature: v => (v === null ? 'default temperature' : `temperature ${v}`),
+    reportsTo: v => (v ? `reports to ${nameOf(v)}` : 'works solo'),
+  };
+  return {ok: true, card: {action: 'settings', botId: bot.id, settings, text: `${bot.name}: ${Object.entries(settings).map(([k, v]) => words[k](v)).join(', ')}`}};
+}
+
+function ruleCard(bot, request) {
+  const act = RULE_WORDS[request.do];
+  if (!act) return {ok: false, error: `a rule is for open, send, post, delete or spend, not "${request.do || 'blank'}".`};
+  const choice = request.choice === 'allow' ? 'always' : request.choice;
+  if (!GRANT_CHOICES.includes(choice)) return {ok: false, error: 'a rule is always, ask or deny.'};
+  if (!grantChoices(act).includes(choice)) return {ok: false, error: 'a payment is asked every time, so it can only be ask or deny.'};
+  let scope = '';
+  if (PER_SITE.includes(act)) {
+    const site = String(request.site || '').trim();
+    scope = scopeOf({action: act, target: /^https?:\/\//i.test(site) ? site : `https://${site}`});
+    if (!site || !scope) return {ok: false, error: 'name the site the rule is for, like github.com.'};
+  }
+  return {ok: true, card: {action: 'rule', botId: bot.id, act, scope, choice, text: `${bot.name}: ${GRANT_LABELS[choice]} · ${grantWhat(act, scope)}`}};
+}
+
 /** The card a setup message carries, read back safely. Anything malformed is null, so no button is painted. */
 export function setupCardOf(message) {
   let card;
@@ -129,12 +196,19 @@ export function setupCardOf(message) {
   if (!card || typeof card !== 'object' || !SETUP_ACTIONS.includes(card.action)) return null;
   if (card.action === 'open') return Object.values(SETUP_PAGES).some(([key]) => key === card.section) ? card : null;
   if (card.action === 'job') return typeof card.botId === 'string' && typeof card.job === 'string' ? card : null;
+  if (card.action === 'rename') return typeof card.botId === 'string' && typeof card.name === 'string' ? card : null;
+  if (card.action === 'settings') return typeof card.botId === 'string' && card.settings && typeof card.settings === 'object' && Object.keys(card.settings).length && Object.keys(card.settings).every(k => BOT_SETTABLE.includes(k)) ? card : null;
+  if (card.action === 'rule') return typeof card.botId === 'string' && ASK_ACTIONS.includes(card.act) && GRANT_CHOICES.includes(card.choice) && typeof card.scope === 'string' ? card : null;
   return typeof card.providerId === 'string' ? card : null;
 }
 /** Is the change already in place? Then the card is a done line with no button. An open card never is. */
 export function setupDone(state, card) {
   if (!card || card.action === 'open') return false;
   if (card.action === 'job') return companyBots(state).find(b => b.id === card.botId)?.instructions === card.job;
+  const bot = companyBots(state).find(b => b.id === card.botId);
+  if (card.action === 'rename') return bot?.name === card.name;
+  if (card.action === 'settings') { const now = botSettings(bot || {}); return Boolean(bot) && Object.entries(card.settings).every(([k, v]) => (now[k] ?? null) === v); }
+  if (card.action === 'rule') { const g = (state?.grants || []).find(x => x.botId === card.botId && x.action === card.act && (x.scope || '') === card.scope); return (g?.choice || 'ask') === card.choice; }
   const ai = state?.ai || {};
   if (card.botId) { const own = ai.bots?.[card.botId] || {}; return own.providerId === card.providerId && (own.model || '') === (card.model || ''); }
   return ai.defaultProviderId === card.providerId && (ai.defaultModel || '') === (card.model || '');
@@ -142,14 +216,20 @@ export function setupDone(state, card) {
 /** The button on a setup card. */
 export const setupButton = card => (card.action === 'open' ? `Open ${card.text.replace(/^Settings → /, '')}` : 'Apply');
 
-/* ---------- what the primary bot knows ---------- */
+/* ---------- what every bot knows ---------- */
+
+function youLine(primary, speaker) {
+  if (!primary) return undefined;
+  if (speaker && speaker.id !== primary.id) return `You are ${speaker.name}. ${primary.name} is the primary bot and sets the app up, but you know this workspace too: when the owner asks you to change a setting, propose it yourself with the setup block instead of sending them to Settings.`;
+  return `You are ${primary.name}, the primary bot. You know how this app works and you set it up for the owner, so they never have to learn the settings: when they ask for a change, propose it with the setup block.`;
+}
 
 const short = (text, n) => { const s = String(text ?? '').replace(/\s+/g, ' ').trim(); return s.length > n ? `${s.slice(0, n - 1)}…` : s; };
 const CLI_WORDS = {'signed-in': 'signed in', 'signed-out': 'signed out', missing: 'not installed', unknown: 'not reported yet'};
 
 /** A compact picture of the workspace for the primary bot's prompt. `agents` is the paired devices
  * ({name, online, permissions, cli}); `connectors` is the connected services ({name, status}). */
-export function workspaceBrief(state, {agents = [], connectors = []} = {}) {
+export function workspaceBrief(state, {agents = [], connectors = [], speaker = null} = {}) {
   const ai = state?.ai || {}, providers = ai.providers || [];
   const label = id => providers.find(p => p.id === id)?.label || null;
   const models = providers.map(p => ({
@@ -173,7 +253,7 @@ export function workspaceBrief(state, {agents = [], connectors = []} = {}) {
   const waiting = pendingAsks(state || {}).slice(0, 10).map(a => askText(a, named(a.botId) || 'A bot'));
   const threads = (state?.groups || []).filter(g => g?.settings?.kind === 'thread').slice(-10).map(g => g.name);
   return {
-    you: primaryOf(state) ? `You are ${primaryOf(state).name}, the primary bot. You know how this app works and you set it up for the owner, so they never have to learn the settings.` : undefined,
+    you: youLine(primaryOf(state), speaker),
     models: models.length ? models : 'none connected yet',
     defaultModel: ai.defaultProviderId ? `${label(ai.defaultProviderId) || 'unknown'}${ai.defaultModel ? ` · ${ai.defaultModel}` : ''}` : 'none',
     bots,
