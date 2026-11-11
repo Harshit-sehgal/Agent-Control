@@ -215,3 +215,11 @@ test('cliEnv drops the variables that would switch a CLI from the plan to a paid
   const env = cliEnv({PATH: '/bin', HOME: '/h', ANTHROPIC_API_KEY: 'a', ANTHROPIC_AUTH_TOKEN: 'b', OPENAI_API_KEY: 'c', CODEX_API_KEY: 'd', CLAUDE_CODE_OAUTH_TOKEN: 'keep'});
   assert.deepEqual(Object.keys(env).sort(), ['CLAUDE_CODE_OAUTH_TOKEN', 'HOME', 'PATH']);
 });
+
+test('codex: every tool that runs commands, drives a browser or the computer is switched off', async () => {
+  const {buildCommand} = await import('../agent/cli-model.mjs');
+  const {args} = buildCommand('codex', {dir: '/tmp/x'});
+  const off = args.flatMap((a, i) => a === '-c' ? [args[i + 1]] : []);
+  for (const feature of ['shell_tool', 'unified_exec', 'shell_snapshot', 'browser_use', 'browser_use_external', 'browser_use_full_cdp_access', 'in_app_browser', 'computer_use', 'apps'])
+    assert.ok(off.includes(`features.${feature}=false`), `${feature} must be off`);
+});

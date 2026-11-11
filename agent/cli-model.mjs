@@ -58,6 +58,8 @@ export class CliModelError extends Error {
 const SYSTEM_TEXT = 'You are answering as a text-only model. You have no tools: do not run commands, read or write files, or browse. Reply with text only, following the instructions in the message.';
 
 /** The program and argument list for one run. `dir` is the empty scratch directory. */
+const CODEX_FEATURES_OFF = ['shell_tool', 'unified_exec', 'shell_snapshot', 'browser_use', 'browser_use_external', 'browser_use_full_cdp_access', 'in_app_browser', 'computer_use', 'apps'];
+
 export function buildCommand(engine, {model = '', dir}) {
   const spec = cliEngineById(engine);
   if (!spec) throw new CliModelError('bad-request', 'Unknown engine. Use claude or codex.');
@@ -74,7 +76,11 @@ export function buildCommand(engine, {model = '', dir}) {
   }
   return {command: 'codex', spec, args: [
     'exec', '--json', '--ephemeral', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules',
-    '-s', 'read-only', '-C', dir, '-c', 'features.shell_tool=false',
+    '-s', 'read-only', '-C', dir,
+    // Every codex feature that runs a command, drives a browser or the computer
+    // (names from `codex features list`). Read-only still lets a shell read
+    // files, so none of them may be reachable from a bot's prompt.
+    ...CODEX_FEATURES_OFF.flatMap(f => ['-c', `features.${f}=false`]),
     ...(chosen ? ['-m', chosen] : []),
     '-',
   ]};
