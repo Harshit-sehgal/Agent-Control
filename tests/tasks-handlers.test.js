@@ -53,10 +53,10 @@ async function agentStore() {
   return {dir, store, add};
 }
 
-function handlers(store, {processCandidate = async () => ({ok: true})} = {}) {
+function handlers(store) {
   return taskHandlers({
     ws: store, workspaceId: 'default', auth: {}, push: {announce() {}, deliver: async () => ({})},
-    notify: () => {}, processCandidate,
+    notify: () => {},
   });
 }
 
@@ -111,17 +111,3 @@ test('a job aimed at a missing agent is a 404, not a job for whoever is left', a
   } finally { await rm(dir, {recursive: true, force: true}); }
 });
 
-test('a draft task for a deleted candidate fails as a 404 before drafting', async () => {
-  const {dir, store} = await agentStore();
-  try {
-    let drafted = 0;
-    const map = handlers(store, {processCandidate: async () => { drafted++; }});
-    await assert.rejects(map['candidate-draft']({id: 'task-5', payload: {candidateId: 'gone', direction: ''}}),
-      error => error.status === 404 && /Candidate not found/.test(error.message));
-    assert.equal(drafted, 0, 'A missing candidate must not reach the provider.');
-    // A candidate that exists still drafts, so the check is not a blanket refusal.
-    store.run("INSERT INTO candidates (id,url,author,text,status,created_at) VALUES ('c1','https://example.com/p','Demo','A post','new',?)", stamp());
-    await map['candidate-draft']({id: 'task-6', payload: {candidateId: 'c1', direction: ''}});
-    assert.equal(drafted, 1);
-  } finally { await rm(dir, {recursive: true, force: true}); }
-});

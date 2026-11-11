@@ -93,7 +93,6 @@ const PUBLIC_WITH_PARAM = [];
 
 /** Least role for the routes where "who may do this" is the whole point. */
 const LEAST_ROLE = {
-  'PATCH /api/settings': 'admin',
   'POST /api/retention/prune': 'admin',
   'GET /api/users': 'admin',
   'POST /api/users': 'admin',
@@ -157,8 +156,7 @@ test('the public surface is exactly the pinned list', () => {
   const publicRoutesFound = routes.filter(route => route.access === 'public').map(key);
   assert.deepEqual([...publicRoutesFound].sort(), [...PUBLIC_ROUTES].sort(),
     'A route now answers without a session (or one stopped doing so). Review it, then update PUBLIC_ROUTES.');
-  // Password reset and the extension capture endpoint still need a session or a
-  // token; they are public only in the sense that no role is checked.
+  // Password reset still needs a session; it is public only in the sense that no role is checked.
   assert.equal(publicRoutesFound.some(route => route.includes('/api/agent/')), false,
     'agent endpoints must keep the agent access level');
 });

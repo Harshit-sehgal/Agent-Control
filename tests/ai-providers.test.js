@@ -154,7 +154,7 @@ test('a key hidden in a provider URL is refused and never returned', async () =>
     assert.equal(listed.providers[0].baseUrl, 'https://evil.example/v1');
     assert.equal('credentialId' in listed.providers[0], false);
     const router = createRouter();
-    workflowRoutes(router, {auth: {listWorkspaces: () => [], roleOf: () => 'owner'}, processCandidate: async () => {}} );
+    workflowRoutes(router, {auth: {listWorkspaces: () => [], roleOf: () => 'owner'}} );
     const body = await router.find('GET', '/api/state').route.handler({
       store, actor: {email: 'a@b.c', role: 'owner', userId: 'u1', workspaceId: 'default'},
     });

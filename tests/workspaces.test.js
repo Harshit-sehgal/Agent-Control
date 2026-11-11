@@ -32,14 +32,16 @@ async function installation() {
   const login = async (email, password = 'test-password-1234') => (await send('POST', '/api/login', {email, password})).cookie.split(';')[0];
   return {dir, send, start, stop, login, async remove() { await stop(); await fs.rm(dir, {recursive: true, force: true}); }};
 }
-const post = n => ({url: `https://x.com/test/status/${n}`, text: `Post number ${n} about queues and retries.`, author: 'Tester', topic: 'AI'});
+// Per-workspace data marker: a uniquely named group (the seed ships its own).
+const addGroup = (t, name, cookie) => t.send('POST', '/api/groups', {name}, cookie);
+const named = (state, name) => state.groups.filter(g => g.name === name).map(g => g.name);
 
 test('a second workspace has its own data and members', {timeout: 40000}, async () => {
   const t = await installation();
   try {
     await t.start();
     const owner = await t.login();
-    assert.equal((await t.send('POST', '/api/candidates', post(1), owner)).status, 201);
+    assert.equal((await addGroup(t, 'Group one', owner)).status, 201);
     const first = (await t.send('GET', '/api/state', undefined, owner)).body;
     assert.deepEqual(first.workspaces.map(w => [w.name, w.role, w.current]), [['Primary workspace', 'owner', true]]);
 
@@ -51,19 +53,23 @@ test('a second workspace has its own data and members', {timeout: 40000}, async 
 
     // Nothing from the first workspace is visible in the new one.
     const second = (await t.send('GET', '/api/state', undefined, owner)).body;
-    assert.equal(second.candidates.length, 0);
+    assert.deepEqual(named(second, 'Group one'), []);
     assert.equal(second.workspaces.find(w => w.current).name, 'Client work');
-    assert.equal((await t.send('POST', '/api/candidates', post(2), owner)).status, 201);
+    assert.equal((await addGroup(t, 'Group two', owner)).status, 201);
     assert.equal((await t.send('POST', '/api/chats/writer/messages', {id: 'm1', role: 'user', text: 'only in client work'}, owner)).status, 200);
 
-    assert.equal((await t.send('GET', '/api/state', undefined, owner)).body.candidates.length, 1);
+    {
+      const here = (await t.send('GET', '/api/state', undefined, owner)).body;
+      assert.deepEqual(named(here, 'Group two'), ['Group two']);
+      assert.deepEqual(named(here, 'Group one'), []);
+    }
 
     // A member invited here cannot see, or switch to, the first workspace.
     assert.equal((await t.send('POST', '/api/users', {email: 'guest@example.com', password: 'guest-password-1', role: 'admin'}, owner)).status, 201);
     const guest = await t.login('guest@example.com', 'guest-password-1');
     const guestState = (await t.send('GET', '/api/state', undefined, guest)).body;
     assert.deepEqual(guestState.workspaces.map(w => w.name), ['Client work']);
-    assert.equal(guestState.candidates.length, 1);
+    assert.deepEqual(named(guestState, 'Group two'), ['Group two']);
     assert.equal(guestState.canCreateWorkspace, false);
     assert.equal((await t.send('POST', '/api/workspaces/switch', {id: 'default'}, guest)).status, 404);
     assert.equal((await t.send('POST', '/api/workspaces', {name: 'Mine'}, guest)).status, 403);
@@ -75,7 +81,8 @@ test('a second workspace has its own data and members', {timeout: 40000}, async 
     // Back in the first workspace, the owner sees only its own data and members.
     assert.equal((await t.send('POST', '/api/workspaces/switch', {id: 'default'}, owner)).status, 200);
     const back = (await t.send('GET', '/api/state', undefined, owner)).body;
-    assert.deepEqual(back.candidates.map(c => c.url), ['https://x.com/test/status/1']);
+    assert.deepEqual(named(back, 'Group one'), ['Group one']);
+    assert.deepEqual(named(back, 'Group two'), []);
     assert.equal(back.chats.writer, undefined);
     assert.deepEqual((await t.send('GET', '/api/users', undefined, owner)).body.users.map(u => u.email), ['owner@localhost']);
     // An account that belongs elsewhere cannot be changed from this workspace.
@@ -86,10 +93,13 @@ test('a second workspace has its own data and members', {timeout: 40000}, async 
     // Both workspaces survive a restart, each with its own data.
     await t.stop(); await t.start();
     const again = await t.login();
-    assert.equal((await t.send('GET', '/api/state', undefined, again)).body.candidates.length, 1);
+    const primaryAgain = (await t.send('GET', '/api/state', undefined, again)).body;
+    assert.deepEqual(named(primaryAgain, 'Group one'), ['Group one']);
+    assert.deepEqual(named(primaryAgain, 'Group two'), []);
     await t.send('POST', '/api/workspaces/switch', {id: created.body.id}, again);
     const reread = (await t.send('GET', '/api/state', undefined, again)).body;
-    assert.equal(reread.candidates.length, 1);
+    assert.deepEqual(named(reread, 'Group two'), ['Group two']);
+    assert.deepEqual(named(reread, 'Group one'), []);
     assert.deepEqual(reread.chats.writer.map(m => m.text), ['only in client work']);
 
     // Deleting needs the typed name, removes the file and ends the guest's access.
@@ -110,7 +120,7 @@ test('a workspace database path cannot be steered outside the data directory', (
   for (const bad of ['../x', 'a/b', '', 'A', 'x.db']) assert.throws(() => workspaceDbPath('/data/state.db', bad));
 });
 
-test('a reminder is pushed to the devices of the workspace it fired in, and a failed push raises nothing', {timeout: 40000}, async () => {
+test('a failed background task is pushed to the devices of its workspace, and a failed push raises nothing', {timeout: 40000}, async () => {
   const t = await installation();
   try {
     await t.start();
@@ -131,14 +141,17 @@ test('a reminder is pushed to the devices of the workspace it fired in, and a fa
     // A browser cannot queue a push itself.
     assert.equal((await t.send('POST', '/api/tasks', {kind: 'notification', payload: {channel: 'push', target: 'x', title: 'spoof'}}, owner)).status, 403);
 
-    assert.equal((await t.send('POST', '/api/schedules', {label: 'Check drafts', kind: 'once', nextAt: new Date(Date.now() + 1500).toISOString()}, owner)).status, 201);
+    // An agent job no paired device can run fails permanently on its first
+    // attempt, which raises the 'A background task failed' notification.
+    assert.equal((await t.send('POST', '/api/tasks', {kind: 'agent-job', payload: {action: 'no.such.permission'}}, owner)).status, 201);
     let pushes = [];
     for (let i = 0; i < 80 && !pushes.some(p => p.lastError); i++) {
       await new Promise(r => setTimeout(r, 250));
       pushes = (await t.send('GET', '/api/state', undefined, owner)).body.tasks.filter(x => x.kind === 'notification' && x.payload.channel === 'push');
     }
     assert.equal(pushes.length, 1, 'One delivery per device, and its failure must not queue another.');
-    assert.equal(pushes[0].payload.title, 'Check drafts');
+    assert.equal(pushes[0].payload.title, 'A background task failed');
+    assert.match(pushes[0].payload.body, /No paired local agent holds the permission/);
     assert.match(pushes[0].lastError, /Refusing to reach 127\.0\.0\.1/);
     assert.equal((await t.send('DELETE', '/api/push/subscriptions', {endpoint: 'https://127.0.0.1:9/push'}, owner)).body.removed, 1);
   } finally { await t.remove(); }

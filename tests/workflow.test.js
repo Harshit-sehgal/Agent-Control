@@ -1,11 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import http from 'node:http';
 import {migrate,updateSettings,addCandidate,seedDemo,beginProcessing,finishProcessing,failProcessing,editDraft,draftAction,addGroup,addBot,updateBot,updateGroup,removeBot,removeGroup,recoverInterrupted,addSchedule,removeSchedule,resetDemo,removeCandidate,findDraft,findCandidate,attachRunDraft,SCHEMA_VERSION} from '../shared/workflow.js';
 import {enqueueTask, completeTask, failTask} from '../shared/tasks.js';
 import {initialState, minuteCeil} from '../shared/core.js';
-import {createRouter} from '../src/router.js';
-import {workflowRoutes} from '../src/routes-workflow.js';
 
 const store = () => migrate(initialState());
 
@@ -352,41 +349,6 @@ test('removing a group cancels that group\'s busy runs', () => {
   removeGroup(s, g.id);
   assert.equal(s.groupRuns[0].status, 'cancelled');
   assert.equal(s.browserRequests[0].status, 'denied');
-});
-
-test('rewrite drops the previous approval, and a provider failure leaves it', async () => {
-  const s = store();
-  const c = addCandidate(s, {url: 'https://x.com/a/status/9', text: 'A candidate long enough to rewrite after approval'}).candidate;
-  const draft = finishProcessing(s, c.id, {score: 40}, {text: 'Approved copy', mode: 'template', note: 'n'});
-  draftAction(s, draft.id, 'approve', {minDelay: 0, maxDelay: 0});
-  assert.ok(draft.approvedEvidence?.length);
-  const router = createRouter();
-  workflowRoutes(router, {auth: {listWorkspaces: () => [], roleOf: () => 'owner'}, processCandidate: async () => {}});
-  const handler = router.find('POST', `/api/drafts/${draft.id}/rewrite`).route.handler;
-  const ctx = body => ({params: {id: draft.id}, body: async () => body, store: {read: () => s, update: async fn => fn(s)}, actor: {email: 'a@b.c', workspaceId: 'default'}});
-  const saved = ['AI_API_KEY', 'OPENAI_API_KEY', 'AI_BASE_URL', 'OPENAI_BASE_URL', 'AI_API_STYLE', 'AI_MODEL'].map(k => [k, process.env[k]]);
-  const setEnv = values => { for (const [k, v] of Object.entries(values)) { if (v) process.env[k] = v; else delete process.env[k]; } };
-  const restore = () => { for (const [k, v] of saved) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } };
-  const down = http.createServer((req, res) => { req.resume(); res.writeHead(500, {'Content-Type': 'application/json'}); res.end(JSON.stringify({error: {message: 'boom'}})); });
-  await new Promise(r => down.listen(0, '127.0.0.1', r));
-  try {
-    setEnv({AI_BASE_URL: `http://127.0.0.1:${down.address().port}/v1`, AI_API_KEY: 'sk-test-secret', AI_API_STYLE: 'chat', AI_MODEL: 'auto', OPENAI_API_KEY: '', OPENAI_BASE_URL: ''});
-    await assert.rejects(() => handler(ctx({direction: 'shorter'})), /500/);
-    assert.equal(draft.status, 'scheduled');
-    assert.equal(draft.approvedText, 'Approved copy');
-    assert.ok(draft.approvedEvidence?.length);
-    setEnv({AI_API_KEY: '', OPENAI_API_KEY: '', AI_BASE_URL: '', OPENAI_BASE_URL: '', AI_API_STYLE: '', AI_MODEL: ''});
-    const rewritten = await handler(ctx({direction: 'shorter'}));
-    assert.equal(rewritten.status, 'pending');
-    assert.equal(rewritten.revision, 2);
-    assert.equal(rewritten.approvedText, undefined);
-    assert.equal(rewritten.approvedRevision, undefined);
-    assert.equal(rewritten.approvedEvidence, undefined);
-    assert.equal(rewritten.dueAt, undefined);
-  } finally {
-    restore();
-    await new Promise(r => down.close(r));
-  }
 });
 
 test('removing a captured post takes its uncommitted work and refuses a committed one', () => {

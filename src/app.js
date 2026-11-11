@@ -2,8 +2,7 @@
  *
  * `src/server.js` is the only file that opens a port. Everything that has to
  * exist before a request can be answered — the route table, the
- * anonymous-then-role check, the static file server, the candidate-drafting
- * pipeline, and the background services a workspace starts — lives here, so a
+ * anonymous-then-role check, the static file server and the background services a workspace starts — lives here, so a
  * test can build the same dispatcher the running server uses and call it with a
  * fake request, without binding a socket or spawning a process.
  *
@@ -16,12 +15,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {ASSETS} from '../shared/assets.js';
-import {scoreCandidate,CSP} from '../shared/core.js';
+import {CSP} from '../shared/core.js';
 import * as wf from '../shared/workflow.js';
 import * as agent from './agent.js';
-import {makeDraft} from './ai.js';
-import {resolveConfig} from './ai-providers.js';
-import {startScheduler,startRetention} from './scheduler.js';
+import {startRetention} from './scheduler.js';
 import {markInterrupted} from './coordination.js';
 import {createQueue,recoverQueue} from './queue.js';
 import {taskHandlers,createNotifier} from './handlers.js';
@@ -37,30 +34,6 @@ import {aiRoutes} from './routes-ai.js';
 import {memoryRoutes} from './routes-memory.js';
 
 const PUBLIC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'shared');
-
-/** Score a candidate and produce a draft, releasing the candidate if anything
- * fails so a transient provider error never strands it. Shared by the HTTP route
- * and the queue worker. */
-export async function processCandidate(store, id) {
-  const context = await store.update(s => wf.beginProcessing(s, id));
-  try {
-    const evaluation = scoreCandidate(context.candidate, context.settings.topics);
-    const result = await makeDraft(context.candidate, context.settings, '', resolveConfig(store, null));
-    return await store.update(s => wf.finishProcessing(s, id, evaluation, result));
-  } catch (e) {
-    // The candidate may have been deleted (or the write may have failed) while
-    // the provider was working. Recording the failure must never replace the
-    // real drafting error with the transition's own 404 or leave the row in
-    // `processing`, so the fallback writes the stored document directly.
-    try { await store.update(s => wf.failProcessing(s, id, e.message)); }
-    catch (releaseError) {
-      try { store.failCandidate(id); }
-      catch (resetError) { console.error(`Could not release candidate ${id}:`, resetError.message); }
-      if (releaseError?.status !== 404) console.error(`Could not record the draft failure for ${id}:`, releaseError.message);
-    }
-    throw e;
-  }
-}
 
 /** Agent-protocol retention. Pairing codes and agent tasks are not part of the
  * workflow document, so `pruneState()` never sees them; this is the same daily
@@ -90,7 +63,7 @@ function startAgentRetention(ws, intervalMs = 86400000) {
 export function createWorkspaceStarter({auth, push}) {
   return function startWorkspace(ws, workspaceId) {
     const ready = (async () => {
-      await ws.update(s => { wf.migrate(s); wf.recoverInterrupted(s); });
+      await ws.update(s => { wf.migrate(s); });
       await markInterrupted(ws);
       await recoverQueue(ws);
     })();
@@ -101,11 +74,11 @@ export function createWorkspaceStarter({auth, push}) {
     // Notifications enqueue themselves as queue tasks and fan out to the member's
     // devices; the queue handler map lives in src/handlers.js.
     const notify = createNotifier({ws, workspaceId, auth, push});
-    const queue = createQueue(ws, taskHandlers({ws, workspaceId, auth, push, notify, processCandidate}), {onFail: (task, error) => task.payload?.channel === 'push' ? null : Promise.resolve(notify({title: 'A background task failed', body: `${task.title}: ${error.message}`, kind: 'task-failure', meta: {taskId: task.id}}))});
+    const queue = createQueue(ws, taskHandlers({ws, workspaceId, auth, push, notify}), {onFail: (task, error) => task.payload?.channel === 'push' ? null : Promise.resolve(notify({title: 'A background task failed', body: `${task.title}: ${error.message}`, kind: 'task-failure', meta: {taskId: task.id}}))});
     // Nothing runs until recovery has finished, so a stalled task is re-armed
     // before the first sweep can see it.
     let stops = [], stopped = false;
-    ready.then(() => { if (!stopped) stops = [startScheduler(ws), startRetention(ws), startAgentRetention(ws), queue.start()]; }).catch(error => console.error(`Workspace ${workspaceId} failed to start:`, error.message));
+    ready.then(() => { if (!stopped) stops = [startRetention(ws), startAgentRetention(ws), queue.start()]; }).catch(error => console.error(`Workspace ${workspaceId} failed to start:`, error.message));
     const stop = async () => { stopped = true; await ready.catch(() => {}); for (const s of stops) await s(); };
     stop.ready = ready;
     return stop;
@@ -121,11 +94,11 @@ const SERVED = new Set(ASSETS);
  * `push` and `version` are the live services; a test can pass the same shapes
  * with fakes. Returns the handler plus the pieces it is made of, so a caller can
  * exercise the dispatcher directly. */
-export function createApp({store, auth, workspaces, push, version, process = processCandidate}) {
+export function createApp({store, auth, workspaces, push, version}) {
   // Every API route lives in a route module and is registered with the access it
   // needs (see src/router.js). This function only wires them together.
   const router = createRouter();
-  const app = {store, auth, workspaces, push, processCandidate: process, version};
+  const app = {store, auth, workspaces, push, version};
   publicRoutes(router, app);
   workflowRoutes(router, app);
   groupRoutes(router, app);

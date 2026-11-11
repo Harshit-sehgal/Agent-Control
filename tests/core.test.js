@@ -68,18 +68,3 @@ test('core fails fast with an actionable message when Web Crypto is missing',asy
   assert.match(source,/typeof crypto === 'undefined'/);
   assert.match(source,/requires Node\.js 22\.5\+/);
 });
-test('the demo fixtures live in one place and both backends load them',async()=>{
-  // The Node /api/demo/seed route used to restate the samples inline, so an edit
-  // to one demo silently diverged from the other. Both must read DEMO_SAMPLES.
-  assert.equal(DEMO_SAMPLES.length,3);
-  for(const s of DEMO_SAMPLES){
-    assert.ok(s.url&&s.text&&s.author&&s.topic,'Fixture incomplete: '+JSON.stringify(s));
-    assert.ok(validHttpUrl(s.url),'Fixture URL invalid: '+s.url);
-    assert.ok(s.text.length>=12,'Fixture text too short: '+s.url);
-  }
-  const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-  const serverJs=await readFile(path.join(root,'src','routes-workflow.js'),'utf8');
-  assert.match(serverJs,/seedDemo\(s,DEMO_SAMPLES\)/,'The Node seed route must use the shared fixtures.');
-  // And neither file may carry its own restated copy of the fixtures.
-  assert.doesNotMatch(serverJs,/robotics-demo/,'The Node server restated the demo fixtures inline.');
-});

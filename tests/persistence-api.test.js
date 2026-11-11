@@ -38,28 +38,31 @@ async function installation() {
   return {send, start, stop, login, log: () => output, async remove() { await stop(); await fs.rm(dir, {recursive: true, force: true}); }};
 }
 
-test('drafts, reminders and conversations survive a restart and stay editable', {timeout: 30000}, async () => {
+test('groups, bots, tasks and conversations survive a restart and stay editable', {timeout: 30000}, async () => {
   const t = await installation();
   try {
     await t.start();
     let cookie = await t.login();
-    const candidate = (await t.send('POST', '/api/candidates', {url: 'https://x.com/test/status/901', text: 'Queues make retries boring, and boring is the goal.', author: 'Tester', topic: 'AI'}, cookie)).body;
-    const draft = (await t.send('POST', `/api/candidates/${candidate.id}/process`, {}, cookie)).body;
-    assert.equal((await t.send('POST', `/api/drafts/${draft.id}/approve`, {}, cookie)).status, 200);
-    assert.equal((await t.send('POST', '/api/schedules', {label: 'Check drafts', kind: 'interval', intervalMinutes: 60}, cookie)).status, 201);
+    const group = (await t.send('POST', '/api/groups', {name: 'Persisted group', description: 'Kept across restarts'}, cookie)).body;
+    const bot = (await t.send('POST', `/api/groups/${group.id}/bots`, {name: 'Keeper', instructions: 'Remember things.'}, cookie)).body;
+    assert.ok(bot.id);
+    const reminder = {kind: 'reminder', payload: {kind: 'interval', label: 'Check bots', intervalMinutes: 60}};
+    assert.equal((await t.send('POST', '/api/tasks', reminder, cookie)).status, 201);
     assert.equal((await t.send('POST', '/api/chats/writer/messages', {id: 'k1', role: 'user', text: 'make it shorter'}, cookie)).status, 200);
     const before = (await t.send('GET', '/api/state', undefined, cookie)).body;
 
     await t.stop(); await t.start(); cookie = await t.login();
     const after = (await t.send('GET', '/api/state', undefined, cookie)).body;
-    assert.deepEqual(after.drafts, before.drafts, 'A draft must read back exactly as it was stored.');
-    assert.deepEqual(after.candidates, before.candidates);
+    // The store stamps `created_at` on a group row as it is written; the live cache has not seen it yet.
+    const bare = groups => groups.map(({created_at: _stamp, ...g}) => g);
+    assert.deepEqual(bare(after.groups), bare(before.groups), 'A group and its bots must read back exactly as they were stored.');
     assert.equal(after.tasks.filter(x => x.kind === 'reminder').length, 1, 'A reminder must survive a restart.');
     assert.deepEqual(after.chats.writer.map(m => m.text), ['make it shorter']);
-    // The first write after a restart used to fail on every installation that held a draft.
-    const edited = await t.send('PATCH', `/api/drafts/${draft.id}`, {text: 'Edited after the restart.'}, cookie);
+    // The first write after a restart used to fail on every installation that held stored rows.
+    const edited = await t.send('PATCH', `/api/groups/${group.id}/bots/${bot.id}`, {instructions: 'Edited after the restart.'}, cookie);
     assert.equal(edited.status, 200, JSON.stringify(edited.body));
-    assert.equal((await t.send('GET', '/api/state', undefined, cookie)).body.drafts[0].text, 'Edited after the restart.');
+    const kept = (await t.send('GET', '/api/state', undefined, cookie)).body.groups.find(g => g.id === group.id);
+    assert.equal(kept.bots[0].instructions, 'Edited after the restart.');
   } finally { await t.remove(); }
 });
 
@@ -89,7 +92,7 @@ test('conversation history is validated, deduplicated, role-gated and clearable'
   } finally { await t.remove(); }
 });
 
-test('a viewer never receives the capture token, and backups are for the owner only', {timeout: 30000}, async () => {
+test('backups are for the owner only', {timeout: 30000}, async () => {
   const t = await installation();
   try {
     await t.start();
@@ -105,12 +108,12 @@ test('a viewer never receives the capture token, and backups are for the owner o
     const backup = (await t.send('GET', '/api/admin/backup', undefined, owner)).body;
     assert.equal(backup.backupVersion, 1);
 
-    // A restore cannot smuggle in a script link, an unknown role or SQL in a column name.
+    // A restore cannot smuggle in a malformed settings document, an unknown role or SQL in a column name.
     // Edit the tables and re-checksum, so the *content* rules are what reject
     // the bad documents (a missing checksum is itself rejected below).
     const tamper = change => { const copy = structuredClone(backup); change(copy.tables); copy.checksum = crypto.createHash('sha256').update(JSON.stringify(copy.tables)).digest('hex'); return {...copy, force: true}; };
     const bad = [
-      tamper(x => x.evidence.push({id: 'e1', kind: 'link', link: 'javascript:alert(1)', claim: 'c', confidence: 1, verification: 'unverified', reuse: 'quote', created_at: new Date().toISOString()})),
+      tamper(x => { x.groups[0].settings = '[1]'; }),
       tamper(x => { x.workspace_members[0].role = 'superuser'; }),
     ];
     for (const document of bad) assert.equal((await t.send('POST', '/api/admin/restore', document, owner)).status, 400);

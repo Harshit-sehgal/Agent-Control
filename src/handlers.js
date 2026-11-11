@@ -54,20 +54,10 @@ function permissionsOf(row) {
  * worker stays independent of the server surface it drives. `notify` defaults
  * to this workspace's fan-out, so a caller that only needs the map does not have
  * to build one. */
-export function taskHandlers({ws, workspaceId, auth, push, notify, processCandidate}) {
+export function taskHandlers({ws, workspaceId, auth, push, notify}) {
   const fanOut = notify ?? createNotifier({ws, workspaceId, auth, push});
   return {
     ...defaultHandlers(ws, fanOut),
-    'candidate-draft': async task => {
-      // A deleted candidate is a miss, not a transient error. Say it once, with
-      // the status a person would get from the same request.
-      if (!ws.get('SELECT id FROM candidates WHERE id=?', task.payload.candidateId)) {
-        // `permanent` is what stops the queue retrying: without it a 404 spent the
-        // whole six-hour window before the person heard anything.
-        throw Object.assign(new Error('Candidate not found.'), {status: 404, permanent: true});
-      }
-      return processCandidate(ws, task.payload.candidateId);
-    },
     'group-run': async task => {
       // `taskId` makes the run idempotent: a crash between queueing the run and
       // recording the completion used to queue a second run on recovery.

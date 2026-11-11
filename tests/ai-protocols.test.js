@@ -1,13 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import {makeDraft,executeCustomBot,discoverModels,complete} from '../src/ai.js';
+import {executeCustomBot,discoverModels,complete} from '../src/ai.js';
 
 // The five wire protocols share one client. Each test drives a real loopback
 // server so the request path, headers, body shape and response parsing are
 // checked as they go on the wire, not through a mocked fetch.
-const candidate={url:'https://x.com/a/status/1',text:'A post about robotics reliability.',author:'Tester',topic:'robotics'};
-const settings={style:'casual and direct',opinions:''};
+const ask=(cfg)=>complete({instructions:'You answer in one short sentence.',input:JSON.stringify({note:'robotics reliability'}),config:cfg});
 
 /** A throwaway provider that records every request it receives. */
 async function stub(reply){
@@ -28,9 +27,8 @@ const config=(port,extra)=>({baseUrl:`http://127.0.0.1:${port}/v1`,apiKey:'k',mo
 test('OpenAI chat completions put the instructions in a system message and the task in a user message', async () => {
   const {requests,port,close}=await stub({status:200,json:{choices:[{message:{content:'Chat reply'}}]}});
   try{
-    const draft=await makeDraft(candidate,settings,'',config(port,{protocol:'openai-chat'}));
-    assert.equal(draft.mode,'ai');
-    assert.equal(draft.text,'Chat reply');
+    const text=await ask(config(port,{protocol:'openai-chat'}));
+    assert.equal(text,'Chat reply');
   }finally{close();}
   assert.equal(requests.length,1);
   assert.equal(requests[0].method,'POST');
@@ -40,7 +38,7 @@ test('OpenAI chat completions put the instructions in a system message and the t
   assert.equal(requests[0].body.model,'m');
   assert.equal(requests[0].body.messages.length,2);
   assert.equal(requests[0].body.messages[0].role,'system');
-  assert.match(requests[0].body.messages[0].content,/draft a short, casual reply/i);
+  assert.match(requests[0].body.messages[0].content,/one short sentence/i);
   assert.equal(requests[0].body.messages[1].role,'user');
   assert.match(requests[0].body.messages[1].content,/robotics/);
   assert.ok(Number.isInteger(requests[0].body.max_tokens),'chat shape carries max_tokens');
@@ -115,8 +113,8 @@ test('a Gemini safety block is a 422 that names the reason', async () => {
 test('a config with only the legacy style field still speaks chat completions', async () => {
   const {requests,port,close}=await stub({status:200,json:{choices:[{message:{content:'Legacy reply'}}]}});
   try{
-    const draft=await makeDraft(candidate,settings,'',config(port,{style:'chat',model:'auto'}));
-    assert.equal(draft.text,'Legacy reply');
+    const text=await ask(config(port,{style:'chat',model:'auto'}));
+    assert.equal(text,'Legacy reply');
   }finally{close();}
   assert.equal(requests[0].url,'/v1/chat/completions','style:"chat" maps to openai-chat');
   assert.equal(requests[0].headers.authorization,'Bearer k');
@@ -135,7 +133,7 @@ test('Gemini refuses the "auto" model before a request is sent, naming the fix',
   assert.deepEqual(requests,[],'a guaranteed 400 is not worth a round trip');
 });
 
-test('an empty reply is a 502 rather than a blank draft', async () => {
+test('an empty reply is a 502 rather than a blank answer', async () => {
   const {port,close}=await stub({status:200,json:{choices:[{message:{content:''}}]}});
   try{
     await assert.rejects(
