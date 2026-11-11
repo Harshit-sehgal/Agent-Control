@@ -319,7 +319,7 @@ async def settings_from_avatar_and_esc(page, base):
         assert await page.evaluate("!!document.activeElement.closest('.st-dlg')"), 'Tab left the Settings dialog'
     await dialog.locator('.st-nav [data-section="conn"]').click()
     await expect(dialog.locator('.st-head h2')).to_have_text('Connectors')
-    await expect(dialog).to_contain_text('Coming in a later phase')
+    await expect(dialog).to_contain_text('Connectors need the Node server')
     # Esc closes it and the chat behind it is back.
     await page.keyboard.press('Escape')
     await expect(page.locator('#main .st-dlg')).to_have_count(0)
