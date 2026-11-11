@@ -142,6 +142,14 @@ test('a row previews the last thing said, not a system line after it', () => {
   assert.equal(rowOf(botRows(s), 'mail').preview, 'Sent it.');
 });
 
+test('a row never previews a bot\'s working step, only what it answered or was asked', () => {
+  const s = stateOf({chats: {mail: [
+    {role: 'user', text: 'Find jobs', at: '2026-11-11T10:00:00Z'},
+    {role: 'bot', text: 'Looking.', step: true, at: '2026-11-11T10:00:05Z'},
+  ]}});
+  assert.equal(rowOf(botRows(s), 'mail').preview, 'You: Find jobs');
+});
+
 test('botStatus and botIsManager answer for one bot, outside the list', () => {
   const s = stateOf({groupRuns: [run({status: 'running', recipients: ['mail']})]});
   assert.equal(botStatus(s, 'mail'), 'working');
@@ -272,29 +280,29 @@ test('handoffs is empty when one bot did everything, or there is no run', () => 
 const threadRun = (extra = {}) => run({groupId: 't1', chatKey: 'team-t1', recipients: ['atlas', 'plan', 'atlas'], ...extra});
 const pill = (r, s = stateOf()) => progressPill(r, s);
 
-test('progress starts with Atlas working out who does what', () => {
-  assert.deepEqual(pill(threadRun({recipients: ['atlas'], trace: []})), {botId: 'atlas', text: 'Atlas is working out who does what'});
+test('progress starts with Atlas thinking it through', () => {
+  assert.deepEqual(pill(threadRun({recipients: ['atlas'], trace: []})), {botId: 'atlas', text: 'Thinking it through'});
 });
 
-test('an ask in flight reads "<Asker> is messaging <Bot>", with the asked bot\'s face', () => {
+test('an ask in flight reads "Checking with <Bot>", with the asked bot\'s face', () => {
   const task = 'Please check whether the Northwind invoice from last month was paid and tell me the amount.';
   const out = pill(threadRun({trace: [{botId: 'atlas', output: 'x'}, {botId: 'atlas', kind: 'ask', to: 'mail', task}], currentStep: 1}));
-  assert.deepEqual(out, {botId: 'mail', text: 'Atlas is messaging Mailroom'});
+  assert.deepEqual(out, {botId: 'mail', text: 'Checking with Mailroom'});
 });
 
 test('a bot handed the turn by another reads as the hop in progress', () => {
   const out = pill(threadRun({trace: [{botId: 'atlas', output: '@Planner plan it'}], currentStep: 1}));
-  assert.deepEqual(out, {botId: 'plan', text: 'Atlas is messaging Planner'});
+  assert.deepEqual(out, {botId: 'plan', text: 'Checking with Planner'});
 });
 
-test('a run waiting on the person says the bot needs your OK', () => {
+test('a run waiting on the person says it needs your input', () => {
   const out = pill(threadRun({status: 'awaiting_checkpoint', trace: [{botId: 'atlas', output: 'x'}], currentStep: 1}));
-  assert.deepEqual(out, {botId: 'plan', text: 'Planner needs your OK'});
+  assert.deepEqual(out, {botId: 'plan', text: 'Needs your input'});
 });
 
 test('a helper handing back to Atlas reads as that hop', () => {
   const out = pill(threadRun({trace: [{botId: 'atlas', output: 'x'}, {botId: 'plan', output: 'y'}], currentStep: 2}));
-  assert.deepEqual(out, {botId: 'atlas', text: 'Planner is messaging Atlas'});
+  assert.deepEqual(out, {botId: 'atlas', text: 'Checking with Atlas'});
 });
 
 test('a finished run becomes a quiet pill naming its latest hop', () => {
@@ -327,11 +335,23 @@ test('no pill when Atlas did it alone, or the run failed, or there is no run', (
 
 test('a deleted bot never crashes the pill', () => {
   const out = pill(threadRun({trace: [{botId: 'atlas', output: 'x'}], currentStep: 1, recipients: ['atlas', 'ghost']}));
-  assert.equal(out.text, 'Atlas is messaging A bot');
+  assert.equal(out.text, 'Checking with A bot');
 });
 
-test('a bot-chat run says the bot is on it from the first moment', () => {
-  assert.deepEqual(pill(run({recipients: ['mail'], trace: []})), {botId: 'mail', text: 'Mailroom is on it'});
+test('a bot-chat run says it is working from the first moment, and the phrase moves on calmly', () => {
+  const r = run({recipients: ['mail'], trace: [], startedAt: '2026-11-12T00:00:00Z'});
+  const at = s => progressPill(r, stateOf(), {now: Date.parse('2026-11-12T00:00:00Z') + s * 1000}).text;
+  assert.equal(at(0), 'Working on it');
+  assert.equal(at(5), 'Working on it', 'a phrase holds for a while');
+  assert.notEqual(at(20), 'Working on it');
+});
+
+test('while a page is open the line says it is reading, and clicking when it acts on the page', () => {
+  const r = run({id: 'rb', recipients: ['mail'], trace: [], status: 'awaiting_browser'});
+  const s = {...stateOf(), browserRequests: [{id: 'q', runId: 'rb', status: 'dispatched', steps: []}]};
+  assert.deepEqual(progressPill(r, s), {botId: 'mail', text: 'Doing some reading'});
+  s.browserRequests[0].steps = [{op: 'click', index: 2}];
+  assert.equal(progressPill(r, s).text, 'Clicking through pages');
 });
 
 // ---- chatStatus ----

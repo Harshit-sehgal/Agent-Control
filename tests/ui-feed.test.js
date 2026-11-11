@@ -43,13 +43,13 @@ test('a live run shows the progress pill and keeps its lines back until it ends'
   const live = run({status: 'running', currentStep: 1, trace: [{botId: 'atlas', output: '@Planner plan it'}]});
   const out = build([msg('q', 'user', 1), msg('h', 'bot', 2, {senderId: 'atlas', runId: 'r1'})], [live]);
   assert.deepEqual(kinds(out), ['day', 'me', 'pill']);
-  assert.equal(out[2].pill.text, 'Atlas is messaging Planner');
+  assert.equal(out[2].pill.text, 'Checking with Planner');
 });
 
 test('a live run with no line yet puts its pill last', () => {
   const out = build([msg('q', 'user', 1)], [run({status: 'running', recipients: ['atlas'], trace: [], currentStep: 0})]);
   assert.deepEqual(kinds(out), ['day', 'me', 'pill']);
-  assert.equal(out[2].pill.text, 'Atlas is working out who does what');
+  assert.equal(out[2].pill.text, 'Thinking it through');
 });
 
 test('a run where one bot did everything leaves its lines alone and adds no pill', () => {
@@ -188,4 +188,11 @@ test('a "needs a model" line, even one the browser wrote, becomes a card that op
   const out = build([msg('q', 'user', 1), msg('n', 'system', 2, {kind: 'no-model', origin: 'browser'})]);
   assert.deepEqual(kinds(out), ['day', 'me', 'no-model']);
   assert.equal(out[2].message.id, 'n');
+});
+
+test('a bot\'s working step (it only went to fetch pages) stays out of the chat; its answer shows', () => {
+  const out = build([msg('u1', 'user', 1), msg('Looking it up.', 'bot', 2, {senderId: 'atlas', step: true}), msg('Acme is hiring.', 'bot', 3, {senderId: 'atlas'})]);
+  const texts = out.filter(e => e.message).map(e => e.message.text);
+  assert.ok(texts.includes('Acme is hiring.'));
+  assert.ok(!texts.includes('Looking it up.'));
 });

@@ -1283,7 +1283,7 @@ async def chat_hops_fold_into_one_line(page, base):
     await page.goto(f'{base}/index.html#bot/{PRIMARY}')
     await page.reload()
     line = page.locator('#cv-log .cv-going summary')
-    await expect(line.locator('.cv-cur')).to_have_text('Researcher is messaging Writer')
+    await expect(line.locator('.cv-cur')).to_have_text('Checking with Writer')
     await expect(page.locator('#cv-log .cv-bot')).to_have_count(0)
     for words in ('Browser result', 'already has that page', 'used Notes', 'read Papers'):
         await expect(page.locator('#cv-log', has_text=words)).to_have_count(0)

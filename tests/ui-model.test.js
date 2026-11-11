@@ -344,3 +344,10 @@ test('a limit card and a runaway-guard line carry their own buttons, so neither 
   assert.equal(isRunNote({role: 'system', kind: 'guard'}), false);
   assert.equal(isRunNote({role: 'system', runId: 'r1'}), true);
 });
+
+test('chatRows preview skips a bot\'s working step', () => {
+  const messages = {scout: [{role: 'user', text: 'Find posts', at: at(3)}, {role: 'bot', text: 'Looking.', step: true, at: at(4)}]};
+  const row = chatRows({state: state(), messages}).find(r => r.id === 'scout');
+  assert.equal(row.text, 'Find posts');
+  assert.equal(row.sender, 'You');
+});

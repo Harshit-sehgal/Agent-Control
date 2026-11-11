@@ -26,6 +26,9 @@ import {decide, createAsk, scopeOf} from './asks.js';
 import {controlFence} from './reply-blocks.js';
 import {BACKSTOP, pagesCap, roundsCap} from './limits.js';
 
+/** The most page text one model turn carries (the pages of a round together). */
+export const MAX_PAGE_CHARS = 24000;
+
 export const BROWSER_PERMISSION = 'browser.use';
 /** The most blocks one reply is read for: the backstop. The owner's own limit (Settings → Limits) may be lower. */
 export const MAX_REQUESTS_PER_REPLY = BACKSTOP.pages;
@@ -110,22 +113,46 @@ export function searchAlternates(url) {
 }
 
 /** The passages of a long page that hold the words, each with some text around it. */
+// Words a bot writes into `find` that say nothing about where the answer is.
+const FILLER = new Set('a an and are at be by for from in is it of on or the this that to with what which who how posted find show me my please any all'.split(' '));
+
+/** The parts of a long page that hold the words a bot asked for. A bot often writes a whole sentence; each
+ * passage is ranked by how many of its words it holds, so near matches come back instead of nothing. Up to
+ * `most` passages, in page order. */
 export function findPassages(text, find, {around = 300, most = 8} = {}) {
-  const page = String(text || ''), words = String(find || '').toLowerCase().split(/\s+/).filter(w => w.length > 1);
+  const page = String(text || ''), all = String(find || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w => w.length > 1);
+  const words = [...new Set(all.filter(w => !FILLER.has(w)))];
   if (!page || !words.length) return '';
-  const lower = page.toLowerCase(), spans = [];
-  // A passage holding every word first; then ones holding the first word.
-  for (const need of [words, words.slice(0, 1)]) {
-    let at = lower.indexOf(need[0]);
-    while (at >= 0 && spans.length < most) {
-      const start = Math.max(0, at - around), end = Math.min(page.length, at + around);
-      const piece = lower.slice(start, end);
-      if (need.every(w => piece.includes(w)) && !spans.some(([a, b]) => start < b && end > a)) spans.push([start, end]);
-      at = lower.indexOf(need[0], at + need[0].length);
-    }
-    if (spans.length) break;
+  const lower = page.toLowerCase(), found = [];
+  for (const w of words) for (let at = lower.indexOf(w), n = 0; at >= 0 && n < 4000; at = lower.indexOf(w, at + w.length), n++) found.push(at);
+  if (!found.length) return '';
+  const scored = found.map(at => {
+    const start = Math.max(0, at - around), end = Math.min(page.length, at + around), piece = lower.slice(start, end);
+    return {start, end, score: words.filter(w => piece.includes(w)).length};
+  }).sort((x, y) => y.score - x.score || x.start - y.start);
+  // A passage must hold at least half the words (or the best any passage holds, when that is less).
+  const floor = Math.min(scored[0].score, Math.ceil(words.length / 2));
+  const spans = [];
+  for (const span of scored) {
+    if (spans.length >= most || span.score < floor) break;
+    if (!spans.some(o => span.start < o.end && span.end > o.start)) spans.push(span);
   }
-  return spans.sort((a, b) => a[0] - b[0]).map(([a, b]) => `…${page.slice(a, b).trim()}…`).join('\n\n');
+  return spans.sort((x, y) => x.start - y.start).map(({start, end}) => `…${page.slice(start, end).trim()}…`).join('\n\n');
+}
+
+/** Raw HTML markup that came back as text (a README table read from a raw file) as plain words, links kept as
+ * their address, so a bot reads rows instead of tag soup. Text with few tags is returned as it is. */
+export function plainMarkup(text) {
+  const body = String(text || '');
+  if ((body.match(/<\/?(td|tr|div|a|img|span|p|li|table|strong)\b/gi) || []).length < 20) return body;
+  return body
+    .replace(/<a\b[^>]*\bhref="([^"]+)"[^>]*>/gi, ' $1 ')
+    .replace(/<img\b[^>]*\balt="([^"]*)"[^>]*>/gi, ' $1 ')
+    .replace(/<\/(tr|p|li|div|h\d)>/gi, '\n')
+    .replace(/<\/td>/gi, ' | ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/[ \t]+/g, ' ').replace(/ *\n[ \n]*/g, '\n').trim();
 }
 
 /** Validate one request body into the agent task it becomes. A step targets an
@@ -200,11 +227,11 @@ const controlLine = elements => (Array.isArray(elements) ? elements : [])
   .join(' · ');
 
 /** Page text the next bot turn can draft from. The chat line uses a shorter cap. */
-export function capturePageText(result, limit = 12000, find = '') {
+export function capturePageText(result, limit = MAX_PAGE_CHARS, find = '') {
   const r = result && typeof result === 'object' ? result : {};
   const reads = Array.isArray(r.actions) ? r.actions.filter(a => a && typeof a.text === 'string').map(a => a.text) : [];
   const controls = controlLine(r.elements);
-  let body = reads.join('\n') || r.text || r.excerpt || '';
+  let body = plainMarkup(reads.join('\n') || r.text || r.excerpt || '');
   // `find`: the bot asked for the parts of a long page that hold some words, so it can reach past the first screenful.
   if (find) body = findPassages(body, find) || `"${find}" is not on this page. The page starts: ${String(body).slice(0, 1500)}`;
   if (r.botCheck) body = `This site showed a human check to the browser. Do not try to solve it: read another site or search for the page elsewhere.\n\n${body}`;

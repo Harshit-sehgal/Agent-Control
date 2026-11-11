@@ -19,7 +19,8 @@ import {CSP} from '../shared/core.js';
 import * as wf from '../shared/workflow.js';
 import * as agent from './agent.js';
 import {startRetention} from './scheduler.js';
-import {markInterrupted} from './coordination.js';
+import {markInterrupted, queueGroupRun} from './coordination.js';
+import {startFollowUps} from './follow-ups.js';
 import {startAskExpiry} from './ask-runs.js';
 import {startHeldSends} from './held-sends.js';
 import {startBrowserExpiry} from './bot-browser.js';
@@ -87,7 +88,7 @@ export function createWorkspaceStarter({auth, push}) {
     // Nothing runs until recovery has finished, so a stalled task is re-armed
     // before the first sweep can see it.
     let stops = [], stopped = false;
-    ready.then(() => { if (!stopped) stops = [startRetention(ws), startAgentRetention(ws), startAskExpiry(ws), startHeldSends(ws), startBrowserExpiry(ws), queue.start()]; }).catch(error => console.error(`Workspace ${workspaceId} failed to start:`, error.message));
+    ready.then(() => { if (!stopped) stops = [startRetention(ws), startAgentRetention(ws), startAskExpiry(ws), startHeldSends(ws), startBrowserExpiry(ws), startFollowUps(ws, queueGroupRun), queue.start()]; }).catch(error => console.error(`Workspace ${workspaceId} failed to start:`, error.message));
     const stop = async () => { stopped = true; await ready.catch(() => {}); for (const s of stops) await s(); };
     stop.ready = ready;
     return stop;

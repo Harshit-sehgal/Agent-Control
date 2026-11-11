@@ -261,7 +261,7 @@ const shorten = (value, n) => {
 /** A compact recap from stored messages. Keeps the first asks (what the chat
  * is for) and the latest exchange (where it stands), not the whole thread. */
 export function digestConversation(messages, {max = MAX_CHAT_SUMMARY} = {}) {
-  const list = Array.isArray(messages) ? messages.filter(m => m && m.text && ['user', 'bot'].includes(m.role)) : [];
+  const list = Array.isArray(messages) ? messages.filter(m => m && m.text && !m.step && ['user', 'bot'].includes(m.role)) : [];
   if (!list.length) return '';
   const users = list.filter(m => m.role === 'user');
   const bots = list.filter(m => m.role === 'bot');

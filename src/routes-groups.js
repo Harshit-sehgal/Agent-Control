@@ -199,7 +199,7 @@ export function groupRoutes(router) {
   });
   router.add('POST', '/api/groups/:group/chat', 'member', async c => {
     const b = await c.body();
-    return reply(202, await queueGroupRun(c.store, {groupId: c.params.group, message: b.message, directBotId: b.directBotId || null, checkpoints: b.checkpoints === true, chatKey: typeof b.chatKey === 'string' ? b.chatKey : null, anyway: b.anyway === true}));
+    return reply(202, await queueGroupRun(c.store, {groupId: c.params.group, message: b.message, directBotId: b.directBotId || null, checkpoints: b.checkpoints === true, chatKey: typeof b.chatKey === 'string' ? b.chatKey : null, anyway: b.anyway === true, wait: true}));
   });
   // A run is addressed under the group it belongs to, so the path has to name
   // that group. Without this a run belonging to another group (or a group that

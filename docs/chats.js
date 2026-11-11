@@ -7,11 +7,11 @@
  *
  * Messages are display records only. Nothing here runs a bot or publishes.
  */
-import {cleanText} from './core.js?v=d3782feff1';
-import {fail} from './errors.js?v=d3782feff1';
-import {summonableGuests, BUSY_STATUSES} from './coordination.js?v=d3782feff1';
-import {denyBrowserRequest} from './bot-browser.js?v=d3782feff1';
-import {orphanAsks} from './asks.js?v=d3782feff1';
+import {cleanText} from './core.js?v=5f90d00e40';
+import {fail} from './errors.js?v=5f90d00e40';
+import {summonableGuests, BUSY_STATUSES} from './coordination.js?v=5f90d00e40';
+import {denyBrowserRequest} from './bot-browser.js?v=5f90d00e40';
+import {orphanAsks} from './asks.js?v=5f90d00e40';
 
 export const MAX_CHAT_MESSAGES = 300;
 const MAX_TEXT = 8000;
@@ -80,6 +80,8 @@ function entry(raw, makeId, now) {
   // A setup card's change, as JSON (shared/setup.js reads it back and refuses anything malformed).
   const setup = typeof raw.setup === 'string' ? raw.setup.slice(0, 4000) : '';
   if (setup) out.setup = setup;
+  // A bot's working step (it went to fetch pages or call apps): kept for the record, left out of the chat.
+  if (raw.step === true && raw.role === 'bot') out.step = true;
   return out;
 }
 

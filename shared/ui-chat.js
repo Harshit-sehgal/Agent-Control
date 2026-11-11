@@ -34,7 +34,8 @@ export async function streamGroupRun(groupId, key = teamKey(groupId), runId = nu
 /** A queued run the server has already paused or stopped. Returns true when the
  * chat should show that record and not claim the others are already working. */
 export async function watchQueuedRun(groupId, key, run) {
-  if (['failed', 'interrupted', 'awaiting_plan', 'awaiting_checkpoint', 'awaiting_limit', 'completed', 'cancelled'].includes(run?.status)) {
+  // `waiting`: the bot is still on the last message, and this one runs as soon as it is free (src/follow-ups.js).
+  if (['waiting', 'failed', 'interrupted', 'awaiting_plan', 'awaiting_checkpoint', 'awaiting_limit', 'completed', 'cancelled'].includes(run?.status)) {
     await sync().catch(() => {});
     return true;
   }

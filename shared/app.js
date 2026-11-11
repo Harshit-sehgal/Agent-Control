@@ -113,7 +113,8 @@ function workspaceBusy() {
   const state = store.state;
   if (!state) return false;
   if ((state.browserRequests || []).some(r => r.status === 'pending' || r.status === 'dispatched')) return true;
-  if ((state.groupRuns || []).some(r => LIVE_RUN.has(r.status))) return true;
+  // A message waiting for the bot (src/follow-ups.js) starts as soon as the run before it ends.
+  if ((state.groupRuns || []).some(r => LIVE_RUN.has(r.status) || r.followUps?.length)) return true;
   if ((state.tasks || []).some(t => t.status === 'queued' && t.kind === 'bot-task' && dueWithin(t.runAt))) return true;
   return false;
 }

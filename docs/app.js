@@ -22,19 +22,19 @@
  *   ui-dialogs      toast, sheet, confirm/ask      ui-actions action/form tables
  *   ui-fx           confetti, the send arrow and the bots' ambient life
  */
-import {companyRoute} from './ui-company.js?v=d3782feff1';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=d3782feff1';
-import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=d3782feff1';
-import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, renderPause, closeSearch, homeView} from './ui-shell.js?v=d3782feff1';
-import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=d3782feff1';
-import {profileViews, wirePages} from './ui-profile.js?v=d3782feff1';
-import {wireGestures, gesturesBusy} from './ui-gestures.js?v=d3782feff1';
-import {settingsViews} from './ui-settings.js?v=d3782feff1';
-import {showLogin, hideLogin} from './ui-sheets.js?v=d3782feff1';
-import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=d3782feff1';
-import {bringBotsToLife} from './ui-fx.js?v=d3782feff1';
-import {wireComputer} from './ui-computer-view.js?v=d3782feff1';
-import {googleReturn, withoutGoogleParams} from './ui-connect-model.js?v=d3782feff1';
+import {companyRoute} from './ui-company.js?v=5f90d00e40';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=5f90d00e40';
+import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=5f90d00e40';
+import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, renderPause, closeSearch, homeView} from './ui-shell.js?v=5f90d00e40';
+import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=5f90d00e40';
+import {profileViews, wirePages} from './ui-profile.js?v=5f90d00e40';
+import {wireGestures, gesturesBusy} from './ui-gestures.js?v=5f90d00e40';
+import {settingsViews} from './ui-settings.js?v=5f90d00e40';
+import {showLogin, hideLogin} from './ui-sheets.js?v=5f90d00e40';
+import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=5f90d00e40';
+import {bringBotsToLife} from './ui-fx.js?v=5f90d00e40';
+import {wireComputer} from './ui-computer-view.js?v=5f90d00e40';
+import {googleReturn, withoutGoogleParams} from './ui-connect-model.js?v=5f90d00e40';
 
 const el = id => document.getElementById(id);
 const hashRoute = () => normalizeRoute(companyRoute(location.hash, store.state));
@@ -113,7 +113,8 @@ function workspaceBusy() {
   const state = store.state;
   if (!state) return false;
   if ((state.browserRequests || []).some(r => r.status === 'pending' || r.status === 'dispatched')) return true;
-  if ((state.groupRuns || []).some(r => LIVE_RUN.has(r.status))) return true;
+  // A message waiting for the bot (src/follow-ups.js) starts as soon as the run before it ends.
+  if ((state.groupRuns || []).some(r => LIVE_RUN.has(r.status) || r.followUps?.length)) return true;
   if ((state.tasks || []).some(t => t.status === 'queued' && t.kind === 'bot-task' && dueWithin(t.runAt))) return true;
   return false;
 }

@@ -389,3 +389,13 @@ test('a model key cannot reach a prototype', () => {
   assert.throws(() => forgetChat(state, '__proto__'), error => error.status === 400);
   assert.deepEqual(Object.keys(state.memory.forgottenChats), [], 'nothing was recorded for the refused key');
 });
+
+test('the chat recap skips a bot\'s working steps and keeps what it answered', () => {
+  const text = digestConversation([
+    {role: 'user', text: 'Find jobs'},
+    {role: 'bot', senderName: 'Atlas', text: 'Looking it up.', step: true},
+    {role: 'bot', senderName: 'Atlas', text: 'Acme is hiring.'},
+  ]);
+  assert.match(text, /Atlas answered: Acme is hiring\./);
+  assert.doesNotMatch(text, /Looking it up/);
+});

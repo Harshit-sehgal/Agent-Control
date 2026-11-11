@@ -4,10 +4,10 @@
  * the bot as `directBotId`, a thread posts to its own group and Atlas answers.
  * The server orchestrator runs them when a model is configured and the offline
  * simulator does otherwise; the UI cannot tell which. Nothing here can publish. */
-import {pollRun, runWithTyping} from './run-follow.js?v=d3782feff1';
-import {botSettings, groupSettings} from './bot-settings.js?v=d3782feff1';
-import {store, api, sync, go, conversation, appendMessage, setTyping, teamKey} from './ui-store.js?v=d3782feff1';
-import {toast} from './ui-dialogs.js?v=d3782feff1';
+import {pollRun, runWithTyping} from './run-follow.js?v=5f90d00e40';
+import {botSettings, groupSettings} from './bot-settings.js?v=5f90d00e40';
+import {store, api, sync, go, conversation, appendMessage, setTyping, teamKey} from './ui-store.js?v=5f90d00e40';
+import {toast} from './ui-dialogs.js?v=5f90d00e40';
 
 /** In-flight sends per conversation, so two overlapping sends keep the typing
  * indicator up until the last one finishes instead of the first clearing it. */
@@ -34,7 +34,8 @@ export async function streamGroupRun(groupId, key = teamKey(groupId), runId = nu
 /** A queued run the server has already paused or stopped. Returns true when the
  * chat should show that record and not claim the others are already working. */
 export async function watchQueuedRun(groupId, key, run) {
-  if (['failed', 'interrupted', 'awaiting_plan', 'awaiting_checkpoint', 'awaiting_limit', 'completed', 'cancelled'].includes(run?.status)) {
+  // `waiting`: the bot is still on the last message, and this one runs as soon as it is free (src/follow-ups.js).
+  if (['waiting', 'failed', 'interrupted', 'awaiting_plan', 'awaiting_checkpoint', 'awaiting_limit', 'completed', 'cancelled'].includes(run?.status)) {
     await sync().catch(() => {});
     return true;
   }

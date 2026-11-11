@@ -27,6 +27,7 @@ import {runConnectorCalls} from './connector-runs.js';
 import {runBotTurn} from './bot-turn.js';
 import {memoryFor,rememberTurn,maybeConsolidate} from './memory.js';
 import {executeCustomBot} from './ai.js';
+import {holdFollowUp} from './follow-ups.js';
 import {resolveConfig,aiAvailable} from './ai-providers.js';
 import {modelLimitLine} from './cli-model.js';
 import {activity} from '../shared/core.js';
@@ -103,7 +104,7 @@ export async function markInterrupted(store){
   try{await failAgentTasks(store, [...taskIds], 'The server restarted before this group run completed.');}
   catch(error){console.error('Agent task cleanup after a restart:', error.message);}
 }
-export async function queueGroupRun(store,{groupId,message,directBotId=null,checkpoints=false,chatKey=null,browserDepth=0,confirmPlan,taskId=null,anyway=false,unattended=false,scheduleId=null}={}){
+export async function queueGroupRun(store,{groupId,message,directBotId=null,checkpoints=false,chatKey=null,browserDepth=0,confirmPlan,taskId=null,anyway=false,unattended=false,scheduleId=null,wait=false}={}){
   // Validate the request against the store first so a missing group reports 404
   // and a busy group reports 409, instead of the AI-key check shadowing them
   // with a misleading 422 on an instance that simply has no key yet.
@@ -114,7 +115,11 @@ export async function queueGroupRun(store,{groupId,message,directBotId=null,chec
   // completion re-arms the task, and the retry used to queue the same message a
   // second time - a duplicate line in the chat and a second paid run.
   if(taskId){const prior=snapshot.groupRuns?.find(r=>r.taskId===taskId);if(prior)return {runId:prior.id,status:prior.status,deduped:true};}
-  if(chatIsBusy(snapshot.groupRuns,probe,chatKeyFor(probe,{chatKey,directBotId})))throw Object.assign(new Error('A group run is already active. Wait or retry later.'),{status:409});
+  if(chatIsBusy(snapshot.groupRuns,probe,chatKeyFor(probe,{chatKey,directBotId}))){
+    // A person's message waits for the bot to be free and then runs (src/follow-ups.js); a timer retries on its own.
+    if(wait){let held=null;await store.update(s=>{held=holdFollowUp(s,{groupId,chatKey,directBotId,message:clean(message),checkpoints});});if(held)return {runId:held.runId,status:'waiting'};}
+    else throw Object.assign(new Error('A group run is already active. Wait or retry later.'),{status:409});
+  }
   try{planHandoffs(probe,clean(message),{directBotId,guests:summonableGuests(snapshot.groups,groupId,{includeOff:true})});}catch(e){if(e.status)throw e;}
   if(!aiAvailable(store))throw Object.assign(new Error('No AI provider is configured. Connect one in Settings → Models and keys.'),{status:422});
   const id=await store.update(s=>{
@@ -388,7 +393,10 @@ async function runGroupInner(store,id,executor){
         toBotId=live.recipients[i+1]??null;
         live.currentStep=i+1;live.trace.push({botId:bot.id,output:previous.output,toBotId,at:stamp()});
         const chat=s.groupMessages[live.groupId]??=[];
-        const said=offMsg?{...offMsg,toBotId}:{id:randomUUID(),runId:id,role:'bot',senderId:bot.id,senderName:bot.name,toBotId,text:previous.output,at:stamp()};
+        // A reply that went to fetch pages or call apps is a working step: the run's live line covers it, and
+        // only the answer it leads to belongs in the owner's chat.
+        const step=Boolean(browsed.records.length||conn.calls.length||browsed.again?.length||(browsedAny&&/ asked to open a web page\.$/.test(browsed.text)));
+        const said=offMsg?{...offMsg,toBotId}:{id:randomUUID(),runId:id,role:'bot',senderId:bot.id,senderName:bot.name,toBotId,text:previous.output,at:stamp(),...(step?{step:true}:{})};
         chat.push(said);
         s.groupMessages[live.groupId]=chat.slice(-300);
         // What the helper did runs before the reply that used it, so the thread
@@ -419,6 +427,7 @@ async function runGroupInner(store,id,executor){
           live.failStreak=(Number(live.failStreak)||0)+1;
           if(live.failStreak>=FAIL_STREAK){stuckStop=`${bot.name} kept asking for pages it already had, so the task stopped. Ask again with more detail, or name a different site.`;return;}
           live.browserPage=browsed.again.join('\n\n---\n\n');live.connectorPage=null;
+          live.browserNote='You asked again for a page you already have, so here it is again. Do not ask for it again: open a different page from its Links list, or answer the owner now with what you found.';
           live.checkpoint={nextStep:i,afterStep:i+1,previous,at:stamp()};
           live.status='queued';
           holdBrowser=true;

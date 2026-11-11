@@ -104,7 +104,7 @@ test('a live run shows one line with the latest hop in progress, and it can open
   assert.deepEqual(kinds(out), ['me', 'pill']);
   const line = out[2];
   assert.equal(line.pill.done, undefined);
-  assert.equal(line.pill.text, 'Scout is messaging Ranker');
+  assert.equal(line.pill.text, 'Checking with Ranker');
   assert.equal(line.handoffs.length, 2);
 });
 

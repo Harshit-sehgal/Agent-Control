@@ -17,7 +17,7 @@
  * survives even with no AI provider. `mergeConsolidation` applies the result of
  * one model-written consolidation pass. Both are pure and bounded.
  */
-import {cleanText} from './core.js?v=d3782feff1';
+import {cleanText} from './core.js?v=5f90d00e40';
 
 export const MEMORY_VERSION = 1;
 export const MAX_RULES = 50;
@@ -261,7 +261,7 @@ const shorten = (value, n) => {
 /** A compact recap from stored messages. Keeps the first asks (what the chat
  * is for) and the latest exchange (where it stands), not the whole thread. */
 export function digestConversation(messages, {max = MAX_CHAT_SUMMARY} = {}) {
-  const list = Array.isArray(messages) ? messages.filter(m => m && m.text && ['user', 'bot'].includes(m.role)) : [];
+  const list = Array.isArray(messages) ? messages.filter(m => m && m.text && !m.step && ['user', 'bot'].includes(m.role)) : [];
   if (!list.length) return '';
   const users = list.filter(m => m.role === 'user');
   const bots = list.filter(m => m.role === 'bot');

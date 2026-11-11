@@ -7,25 +7,25 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=d3782feff1';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=d3782feff1';
-import {requestOfMessage} from './bot-browser.js?v=d3782feff1';
-import {validHttpUrl} from './core.js?v=d3782feff1';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=d3782feff1';
-import {botStatus, botIsManager, chatStatus, jobOf} from './ui-company.js?v=d3782feff1';
-import {isPrimary} from './company.js?v=d3782feff1';
-import {hasJob, modelChip} from './ui-profile-model.js?v=d3782feff1';
-import {scheduleTaskBody} from './schedules.js?v=d3782feff1';
-import {feed} from './ui-feed.js?v=d3782feff1';
-import {setupCardOf, setupButton} from './setup.js?v=d3782feff1';
-import {askCard} from './ui-asks.js?v=d3782feff1';
-import {face, botColor} from './ui-face.js?v=d3782feff1';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=d3782feff1';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync} from './ui-store.js?v=d3782feff1';
-import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=d3782feff1';
-import {toast} from './ui-dialogs.js?v=d3782feff1';
-import {siteChip} from './ui-computer-view.js?v=d3782feff1';
-import {cliChoice} from './ui-connect-model.js?v=d3782feff1';
+import {OFFJOB_CHOICES} from './off-job.js?v=5f90d00e40';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=5f90d00e40';
+import {requestOfMessage} from './bot-browser.js?v=5f90d00e40';
+import {validHttpUrl} from './core.js?v=5f90d00e40';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=5f90d00e40';
+import {botStatus, botIsManager, chatStatus, jobOf} from './ui-company.js?v=5f90d00e40';
+import {isPrimary} from './company.js?v=5f90d00e40';
+import {hasJob, modelChip} from './ui-profile-model.js?v=5f90d00e40';
+import {scheduleTaskBody} from './schedules.js?v=5f90d00e40';
+import {feed} from './ui-feed.js?v=5f90d00e40';
+import {setupCardOf, setupButton} from './setup.js?v=5f90d00e40';
+import {askCard} from './ui-asks.js?v=5f90d00e40';
+import {face, botColor} from './ui-face.js?v=5f90d00e40';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=5f90d00e40';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync} from './ui-store.js?v=5f90d00e40';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=5f90d00e40';
+import {toast} from './ui-dialogs.js?v=5f90d00e40';
+import {siteChip} from './ui-computer-view.js?v=5f90d00e40';
+import {cliChoice} from './ui-connect-model.js?v=5f90d00e40';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -140,7 +140,7 @@ function noteEntry(entry, conv) {
   return `<div class="cv-note"><span>${esc(m.text)}</span>${parts.filter(Boolean).join('')}</div>`;
 }
 
-/** A run's one line: live while bots message each other ("Atlas is messaging Scout"), then quiet with its latest
+/** A run's one line: live while bots work ("Checking with Scout", "Doing some reading"), then quiet with its latest
  * hop ("Ranker messaged Atlas"). Either way a tap opens the hops, who wrote to whom and what they said. */
 const openRuns = new Set();
 const pillSeen = new Map();
@@ -318,7 +318,7 @@ export function renderConversation() {
   const asker = askerOf(conv), live = entries.some(e => e.kind === 'pill' && !e.pill.done) || entries.some(e => e.kind === 'limit');
   const chip = store.typing.has(conv.id) && !live ? siteChip({botId: asker?.id}) : null;
   const working = store.typing.has(conv.id) && !live
-    ? `<div class="cv-working">${botFace(asker, asker?.name || conv.name, 30, {state: 'working'})}<span>${chip?.driving ? 'You are driving' : `${esc(asker?.name || conv.name)} is working`}</span>${chip?.html || ''}</div>` : '';
+    ? `<div class="cv-working">${botFace(asker, asker?.name || conv.name, 30, {state: 'working'})}<span>${chip?.driving ? 'You are driving' : 'Thinking it through'}</span>${chip?.html || ''}</div>` : '';
   // The primary's own guard line already asks Keep going or Stop: a parked run's copy of that card would ask it twice.
   const guardOpen = entries.some(e => e.kind === 'guard' && e.open);
   const shown = guardOpen ? entries.filter(e => !(e.kind === 'limit' && e.run.limit?.kind === 'guard')) : entries;

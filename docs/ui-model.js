@@ -2,10 +2,10 @@
  * a pane shows: the chat list, a thread's timeline and the "needs you" count.
  * (The hash route lives in ui-company.js.) No DOM and no globals, so the product rules here are unit
  * tested directly (tests/ui-model.test.js). */
-import {botSettings} from './bot-settings.js?v=d3782feff1';
-import {STOPPABLE_STATUSES} from './run-state.js?v=d3782feff1';
-import {primaryOf} from './company.js?v=d3782feff1';
-import {plain} from './ui-kit.js?v=d3782feff1';
+import {botSettings} from './bot-settings.js?v=5f90d00e40';
+import {STOPPABLE_STATUSES} from './run-state.js?v=5f90d00e40';
+import {primaryOf} from './company.js?v=5f90d00e40';
+import {plain} from './ui-kit.js?v=5f90d00e40';
 
 const teamKey = groupId => `team-${groupId}`;
 const time = value => { const t = Date.parse(value || ''); return Number.isFinite(t) ? t : 0; };
@@ -133,7 +133,8 @@ export function waitingOnYou(state, chatKey, runs = state?.groupRuns || []) {
 export const totalWaitingOnYou = ({plans = 0, pauses = 0, pages = 0, asks = 0} = {}) => plans + pauses + pages + asks;
 
 function preview(history, {isTeam, fallback}) {
-  const last = history[history.length - 1];
+  // A bot's working step (it went to fetch pages) is not what the chat says; the answer after it is.
+  const last = history.filter(m => !m.step).at(-1);
   if (!last) return {text: fallback, sender: ''};
   const text = plain(last.text).slice(0, 120);
   if (last.role === 'user') return {text, sender: 'You'};

@@ -133,7 +133,8 @@ export function waitingOnYou(state, chatKey, runs = state?.groupRuns || []) {
 export const totalWaitingOnYou = ({plans = 0, pauses = 0, pages = 0, asks = 0} = {}) => plans + pauses + pages + asks;
 
 function preview(history, {isTeam, fallback}) {
-  const last = history[history.length - 1];
+  // A bot's working step (it went to fetch pages) is not what the chat says; the answer after it is.
+  const last = history.filter(m => !m.step).at(-1);
   if (!last) return {text: fallback, sender: ''};
   const text = plain(last.text).slice(0, 120);
   if (last.role === 'user') return {text, sender: 'You'};

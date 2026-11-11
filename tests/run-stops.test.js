@@ -130,3 +130,27 @@ test('a bot that only searches, round after round, is told to open the results o
   assert.match(nudged, /searched 3 times/);
   assert.equal(opened.length, 3);
 });
+
+test('a bot handed back a page it already had is told so, and answers from it', async t => {
+  fakeBrowser(t, async request => ({title: 'Page', finalUrl: request.url, text: 'Acme intern, stipend 30k'}));
+  const {store, ids} = await company(t);
+  let told = '';
+  const ai = model({Mailroom: e => { if (e.note) { told = e.note; return 'Acme pays 30k.'; } return fence('https://jobs.example/same'); }});
+  wire(ai.executor);
+  const run = await ask(store, {message: 'find jobs', to: ids.mail, executor: ai.executor});
+  await until(() => ended(store, run.id), 'the run');
+  assert.equal(runOf(store, run.id).status, 'completed');
+  assert.match(told, /already/);
+  assert.match(told, /Links|answer/);
+});
+
+test('a reply that only fetched pages is a working step, not an answer, so the chat can leave it out', async t => {
+  fakeBrowser(t, async request => ({title: 'Page', finalUrl: request.url, text: 'Acme intern'}));
+  const {store, ids} = await company(t);
+  const ai = model({Mailroom: e => (e.page ? 'Acme is hiring.' : fence('https://jobs.example/one'))});
+  wire(ai.executor);
+  const run = await ask(store, {message: 'find jobs', to: ids.mail, executor: ai.executor});
+  await until(() => ended(store, run.id), 'the run');
+  const bots = (store.read().chats[ids.mail] || []).filter(m => m.role === 'bot');
+  assert.deepEqual(bots.map(m => [m.text, Boolean(m.step)]), [['Looking.', true], ['Acme is hiring.', false]]);
+});

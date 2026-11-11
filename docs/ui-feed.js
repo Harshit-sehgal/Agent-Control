@@ -5,15 +5,15 @@
  *
  * The chat log holds every line a run wrote, helpers' lines included. The chat
  * shows only what the owner needs: their own lines, each final answer, one line
- * per run that keeps updating ("Atlas is messaging Scout", then "Ranker messaged
+ * per run that keeps updating ("Checking with Scout", then "Ranker messaged
  * Atlas") and opens the hops, the cards that wait on the owner, and a failure that
  * ended a run. What a bot read, which connector it used, and the lines a page or
  * connector call left on the way are stored but not shown (tests/clean-feed.test.js). */
-import {handoffs, hopLine, progressPill} from './ui-company.js?v=d3782feff1';
-import {isRunNote, runBelongsToChat} from './ui-model.js?v=d3782feff1';
-import {connectorLine, modelLimitLine} from './ui-connect-model.js?v=d3782feff1';
-import {setupCardOf, setupDone} from './setup.js?v=d3782feff1';
-import {requestOfMessage} from './bot-browser.js?v=d3782feff1';
+import {handoffs, hopLine, progressPill} from './ui-company.js?v=5f90d00e40';
+import {isRunNote, runBelongsToChat} from './ui-model.js?v=5f90d00e40';
+import {connectorLine, modelLimitLine} from './ui-connect-model.js?v=5f90d00e40';
+import {setupCardOf, setupDone} from './setup.js?v=5f90d00e40';
+import {requestOfMessage} from './bot-browser.js?v=5f90d00e40';
 
 const isActive = status => status === 'queued' || status === 'running';
 const isAwaiting = status => String(status || '').startsWith('awaiting');
@@ -35,6 +35,8 @@ const DONE_NOTE = /^Done in \d+ step\(s\)\.$/;
 
 /** True for a stored line the chat does not show. */
 function quiet(m, run, state) {
+  // A bot's working step (it went to fetch pages) is covered by the run's live line; only answers show.
+  if (m.role === 'bot') return Boolean(m.step);
   if (m.role !== 'system') return false;
   // An ask is a card only while it waits; once answered (or gone) it leaves the chat, and the work goes on.
   if (m.kind === 'ask') return (state?.asks || []).find(a => a.id === m.askId)?.status !== 'pending';

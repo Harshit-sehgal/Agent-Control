@@ -80,6 +80,8 @@ function entry(raw, makeId, now) {
   // A setup card's change, as JSON (shared/setup.js reads it back and refuses anything malformed).
   const setup = typeof raw.setup === 'string' ? raw.setup.slice(0, 4000) : '';
   if (setup) out.setup = setup;
+  // A bot's working step (it went to fetch pages or call apps): kept for the record, left out of the chat.
+  if (raw.step === true && raw.role === 'bot') out.step = true;
   return out;
 }
 

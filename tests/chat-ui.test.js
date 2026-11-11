@@ -60,7 +60,7 @@ test('custom bots run through the Node provider only on the server build',()=>{
   assert.match(app,/id="password-form"/);
   assert.match(app,/\/api\/auth\/password/);
   assert.match(app,/'deny-browser': async b => \{[\s\S]*?streamGroupRun\(request\.groupId/);
-  assert.match(app,/\['failed', 'interrupted', 'awaiting_plan', 'awaiting_checkpoint', 'awaiting_limit', 'completed', 'cancelled'\]\.includes\(run\?\.status\)/);
+  assert.match(app,/\['waiting', 'failed', 'interrupted', 'awaiting_plan', 'awaiting_checkpoint', 'awaiting_limit', 'completed', 'cancelled'\]\.includes\(run\?\.status\)/);
   // When a provider is connected, the actual model id is surfaced if known.
   assert.match(app,/Connected · \$\{esc\(model\)\}/);
   assert.match(app,/state\?\.aiModel/);

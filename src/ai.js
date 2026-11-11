@@ -572,8 +572,12 @@ export async function discoverModels(config){
 /** A run envelope carries the previous output and the chat thread (each up to
  * 3600 chars) plus the objective; cutting the JSON string in the middle leaves
  * the model with a broken task. Shrink fields instead, and keep it parseable. */
-export const MAX_BOT_INPUT=12000;
-function boundBotInput(input, max=MAX_BOT_INPUT){
+// Room for a full page (MAX_PAGE_CHARS) next to the job, the rules, the thread and memory.
+export const MAX_BOT_INPUT=64000;
+/** The task envelope cut to fit the model input. The page a bot asked for is the last thing cut: a page cut to a
+ * sliver looks like nothing came back, and the bot asks for it again and again. The app's `note` is never
+ * overwritten; a cut envelope says so in `truncated`. Always valid JSON when the input was. */
+export function boundBotInput(input, max=MAX_BOT_INPUT){
   const text=String(input??'');
   if(text.length<=max)return text;
   let env;
@@ -581,12 +585,12 @@ function boundBotInput(input, max=MAX_BOT_INPUT){
   if(!env||typeof env!=='object'||Array.isArray(env))return cleanText(text,max);
   const cut=(v,n)=>typeof v==='string'?v.slice(0,n):v;
   if(env.previous&&typeof env.previous==='object')env.previous={...env.previous,output:cut(env.previous.output,1800)};
-  if(typeof env.page==='string')env.page=cut(env.page,1800);
-  if(typeof env.connectorResult==='string')env.connectorResult=cut(env.connectorResult,3000);
+  if(typeof env.connectorResult==='string')env.connectorResult=cut(env.connectorResult,6000);
   // A teammate's answer is the reason this bot got a second turn. Losing it in
   // the fallback below would make that paid round invisible to the model.
   if(env.peerAnswer&&typeof env.peerAnswer==='object')env.peerAnswer={...env.peerAnswer,output:cut(env.peerAnswer.output,1200)};
   if(typeof env.objective==='string')env.objective=cut(env.objective,2000);
+  if(typeof env.botRole==='string')env.botRole=cut(env.botRole,4000);
   if(Array.isArray(env.thread))env.thread=env.thread.slice(-4).map(m=>m&&typeof m==='object'?{...m,text:cut(m.text,800)}:m);
   // Memory notes are context, so they shrink first: the objective and the job
   // must survive a long thread, a page and a full rulebook together.
@@ -597,11 +601,13 @@ function boundBotInput(input, max=MAX_BOT_INPUT){
     if(Array.isArray(memory.rules))memory.rules=memory.rules.filter(r=>typeof r==='string').slice(0,10).map(r=>r.slice(0,200));
     env.memory=memory;
   }
-  const next=JSON.stringify(env);
-  if(next.length<=max)return next;
+  const fit=()=>{const out=JSON.stringify(env);if(out.length<=max)return out;
+    // The page takes what is left, never less than a screenful.
+    if(typeof env.page==='string'){const room=env.page.length-(out.length-max)-64;if(room>=4000){env.page=env.page.slice(0,room);return JSON.stringify(env);}}
+    return null;};
+  let out=fit();if(out)return out;
   delete env.thread;
-  const tight=JSON.stringify(env);
-  if(tight.length<=max)return tight;
+  out=fit();if(out)return out;
   // Last resort: keep what the bot cannot work without, including its own
   // earlier output — a multi-step run restarted blind without it — and cap the
   // lists that can be arbitrarily long.
@@ -610,9 +616,10 @@ function boundBotInput(input, max=MAX_BOT_INPUT){
   // bot asked in prose for JSON that its contract required answers in prose.
   // Memory is the only field here that is context and not the job, so it goes
   // first when the cut still does not fit.
-  const slim={objective:cut(env.objective,1200),botId:env.botId,runId:env.runId,step:env.step,contract:env.contract,botRole:cut(env.botRole,1200),message:cut(env.message,1200),maxSteps:env.maxSteps,permissions:list(env.permissions),page:cut(env.page,1200),connectors:env.connectors,connectorResult:cut(env.connectorResult,2000),memory:env.memory,peerAnswer:env.peerAnswer,previous:env.previous&&typeof env.previous==='object'?{...env.previous,output:cut(env.previous.output,600)}:env.previous,restrictions:list(env.restrictions),tools:list(env.tools),note:'The full task was truncated to fit the model input limit.'};
-  let out=JSON.stringify(slim);
+  const slim={objective:cut(env.objective,1200),botId:env.botId,runId:env.runId,step:env.step,contract:env.contract,botRole:cut(env.botRole,1200),message:cut(env.message,1200),maxSteps:env.maxSteps,permissions:list(env.permissions),page:cut(env.page,Math.floor(max/2)),note:cut(env.note,600),connectors:env.connectors,connectorResult:cut(env.connectorResult,2000),memory:env.memory,peerAnswer:env.peerAnswer,previous:env.previous&&typeof env.previous==='object'?{...env.previous,output:cut(env.previous.output,600)}:env.previous,restrictions:list(env.restrictions),tools:list(env.tools),truncated:'The full task was cut to fit the model input limit.'};
+  out=JSON.stringify(slim);
   if(out.length>max)out=JSON.stringify({...slim,memory:undefined,peerAnswer:undefined,restrictions:undefined,tools:undefined});
+  if(out.length>max)out=JSON.stringify({...slim,memory:undefined,peerAnswer:undefined,restrictions:undefined,tools:undefined,page:cut(slim.page,4000),botRole:cut(slim.botRole,600)});
   // Never return more than the limit, even if every field was cut already.
   return out.length>max?out.slice(0,max):out;
 }

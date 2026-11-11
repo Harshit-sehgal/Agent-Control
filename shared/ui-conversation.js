@@ -140,7 +140,7 @@ function noteEntry(entry, conv) {
   return `<div class="cv-note"><span>${esc(m.text)}</span>${parts.filter(Boolean).join('')}</div>`;
 }
 
-/** A run's one line: live while bots message each other ("Atlas is messaging Scout"), then quiet with its latest
+/** A run's one line: live while bots work ("Checking with Scout", "Doing some reading"), then quiet with its latest
  * hop ("Ranker messaged Atlas"). Either way a tap opens the hops, who wrote to whom and what they said. */
 const openRuns = new Set();
 const pillSeen = new Map();
@@ -318,7 +318,7 @@ export function renderConversation() {
   const asker = askerOf(conv), live = entries.some(e => e.kind === 'pill' && !e.pill.done) || entries.some(e => e.kind === 'limit');
   const chip = store.typing.has(conv.id) && !live ? siteChip({botId: asker?.id}) : null;
   const working = store.typing.has(conv.id) && !live
-    ? `<div class="cv-working">${botFace(asker, asker?.name || conv.name, 30, {state: 'working'})}<span>${chip?.driving ? 'You are driving' : `${esc(asker?.name || conv.name)} is working`}</span>${chip?.html || ''}</div>` : '';
+    ? `<div class="cv-working">${botFace(asker, asker?.name || conv.name, 30, {state: 'working'})}<span>${chip?.driving ? 'You are driving' : 'Thinking it through'}</span>${chip?.html || ''}</div>` : '';
   // The primary's own guard line already asks Keep going or Stop: a parked run's copy of that card would ask it twice.
   const guardOpen = entries.some(e => e.kind === 'guard' && e.open);
   const shown = guardOpen ? entries.filter(e => !(e.kind === 'limit' && e.run.limit?.kind === 'guard')) : entries;

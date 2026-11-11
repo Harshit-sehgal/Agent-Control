@@ -10,9 +10,9 @@
  * A run's trace holds one entry per step: {botId, output}. A bot-to-bot ask is
  * two entries, {botId: asker, kind: 'ask', to, task} and then
  * {botId: asked, kind: 'peer', to: asker, output}. */
-import {face} from './ui-face.js?v=d3782feff1';
-import {plain} from './ui-kit.js?v=d3782feff1';
-import {waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=d3782feff1';
+import {face} from './ui-face.js?v=5f90d00e40';
+import {plain} from './ui-kit.js?v=5f90d00e40';
+import {waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=5f90d00e40';
 
 const teamKey = id => `team-${id}`;
 const settingsOf = bot => bot?.settings || {};
@@ -63,7 +63,8 @@ export const jobOf = bot => String(bot?.instructions || '').split(/[.:]/)[0].tri
 function lastLine(history) {
   // The newest by time, not by position: a run's lines can be stored before the owner's own line lands.
   const newest = list => list.reduce((a, m) => (a && time(a.at) > time(m.at) ? a : m), null);
-  const last = newest((history || []).filter(m => m.role !== 'system')) || newest(history || []);
+  const said = (history || []).filter(m => !m.step);
+  const last = newest(said.filter(m => m.role !== 'system')) || newest(said);
   if (!last) return {preview: '', at: ''};
   const text = oneLine(last.text, 120);
   return {preview: last.role === 'user' ? `You: ${text}` : text, at: last.at || ''};
@@ -152,19 +153,26 @@ export function hopLine(run, state) {
   return {done: true, text: `${name(last.from)} messaged ${name(last.to)}`};
 }
 
-/** The one live line a chat keeps updating: which bot is messaging which right now,
- * and once the work ends, the latest hop. `botId` is whose face the pill shows. */
-export function progressPill(run, state) {
+/** The one live line a chat keeps updating: the working bot's face and a plain phrase for what it is doing, never
+ * the mechanics. Reading a page, clicking through one, checking with a teammate, needing you; otherwise a calm phrase
+ * that moves on every ~12 seconds. Once the work ends, the latest hop. `botId` is whose face the pill shows. */
+const CALM = ['Working on it', 'Making progress', 'Putting it together', 'Chipping away'];
+export function progressPill(run, state, {now = Date.now()} = {}) {
   if (!run) return null;
   const bots = botsOf(state), primary = primaryOf(bots), name = nameIn(bots);
   if (run.status === 'completed') return hopLine(run, state);
   if (!isActive(run.status) && !isAwaiting(run.status)) return null;
   const t = turn(run, primary), prev = (run.trace || []).filter(s => s.kind !== 'ask').at(-1)?.botId;
-  if (isAwaiting(run.status)) return {botId: t.botId, text: `${name(t.botId)} needs your OK`};
-  if (t.from) return {botId: t.botId, text: `${name(t.from)} is messaging ${name(t.botId)}`};
-  if (t.planning) return {botId: t.botId, text: `${name(t.botId)} is working out who does what`};
-  if (prev && t.botId && prev !== t.botId) return {botId: t.botId, text: `${name(prev)} is messaging ${name(t.botId)}`};
-  return {botId: t.botId, text: `${name(t.botId)} is on it`};
+  if (run.status === 'awaiting_browser') {
+    const open = (state?.browserRequests || []).filter(r => r.runId === run.id && ['pending', 'dispatched'].includes(r.status));
+    return {botId: t.botId, text: open.some(r => r.steps?.length) ? 'Clicking through pages' : 'Doing some reading'};
+  }
+  if (isAwaiting(run.status)) return {botId: t.botId, text: 'Needs your input'};
+  if (t.from || (prev && t.botId && prev !== t.botId)) return {botId: t.botId, text: `Checking with ${name(t.botId)}`};
+  if (t.planning) return {botId: t.botId, text: 'Thinking it through'};
+  const since = Date.parse(run.startedAt || run.createdAt || '');
+  const step = Number.isFinite(since) ? Math.max(0, Math.floor((now - since) / 12000)) : 0;
+  return {botId: t.botId, text: CALM[step % CALM.length]};
 }
 
 /** The line under a bot chat's title. */
