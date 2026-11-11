@@ -87,7 +87,10 @@ This section wins over anything below about threads, routing or help between bot
   - Each bot's prompt lists every bot's name and job, so it knows whom to ask. It sends the message with the `bot.ask` action, which is part of the basic kit and never asks the owner. Model text adds the recipient only through `handoffTargets`.
   - The asked bot wakes, answers within its own job, and goes back to sleep. The asking bot stays responsible for the task and gives the final answer. Asking another bot is getting help; it is not handing your job away.
   - It shows where the work happens, in the same live progress pill and handoff card ("Mailroom asks Scholar: …", "Scholar to Mailroom: …"). It does not show in the asked bot's own chat. The asked bot's Activity lists it.
-  - Limits (owner asked to relax them, 2026-11-11). They are checkpoints, not walls. When one is reached, the bots pause and a card asks the owner **Keep going** (another round of the same size) or **Stop**. Nothing is lost.
+  - Limits (owner asked to relax them, 2026-11-11). They are checkpoints, not walls. When one is reached, the bots pause and a card offers three buttons. Nothing is lost.
+    - **Keep going:** another round of the same size.
+    - **Keep going, don't ask again:** this task runs on with no more bot-to-bot checkpoints. Other tasks keep theirs. The overall runaway guard (per 5 minutes) still applies.
+    - **Stop:** the task ends and the asking bot reports what it has so far.
     - A bot-to-bot chain can go 6 bots deep.
     - The same two bots can exchange 12 messages per task.
     - One task can use 60 bot-to-bot messages in total.
