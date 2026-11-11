@@ -4,15 +4,9 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {scoreCandidate, templateDraft, cleanText, initialState, markDue, activity, DEMO_SAMPLES} from './core.js';
-import {
-  migrate, seedDemo, updateSettings, addCandidate, beginProcessing,
-  finishProcessing, editDraft, findDraft, rewriteDraft, draftAction, addGroup,
-  addBot, updateBot, updateGroup, removeBot, removeGroup, addSchedule, removeSchedule, resetDemo,
-  removeCandidate,
-} from './workflow.js';
+import {initialState} from './core.js';
+import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup} from './workflow.js';
 import {enqueueTask, retryTask, cancelTask} from './tasks.js';
-import {addEvidence, verifyEvidence, dropEvidence} from './evidence.js';
 import {addChatMessages, clearChat} from './chats.js';
 import {publicMemory, addRules, removeRule, forgetChat, forgetRulebook} from './memory.js';
 import {summonableGuests} from './coordination.js';
@@ -34,7 +28,7 @@ async function read() {
       // Always migrate: a stored version equal to SCHEMA_VERSION can still be
       // missing a field added later in the same version, and a legacy shape must
       // gain every collection the UI indexes into.
-      if (state && typeof state === 'object' && Array.isArray(state.candidates)) return migrate(state);
+      if (state && typeof state === 'object' && Array.isArray(state.groups)) return migrate(state);
     }
   } catch { throw new Error('Browser storage is unavailable. Enable local storage to use this demo.'); }
   return migrate(initialState());
@@ -43,18 +37,6 @@ function save(state) {
   try { localStorage.setItem(KEY, JSON.stringify(state)); }
   catch { throw new Error('Unable to save browser-local data. Check available storage and private browsing settings.'); }
 }
-const find = (items, key) => items.find(x => x.id === key) || (() => { throw new Error('Item not found.'); })();
-
-/** Advance the local clock so scheduled drafts and due tasks resolve.
- * This mirrors the Node `src/scheduler.js` (drafts) and `src/queue.js`
- * (reminder tasks) with the same `markDue`/`activity` primitives, so a
- * transition logged by the Node backend is logged identically here. */
-function processLocal(state, id) {
-  const ctx = beginProcessing(state, id);
-  const result = {text: templateDraft(ctx.candidate, ctx.settings), mode: 'template', note: 'Static template only; not real AI, research or verified fact-checking.'};
-  return finishProcessing(state, id, scoreCandidate(ctx.candidate, ctx.settings.topics), result);
-}
-
 /** A due scheduled bot task runs through the same offline engine as a chat, so
  * both store the run, its lines and its record in the same places. */
 async function runBotTask(state, t) {
@@ -95,7 +77,6 @@ function idFactory(preferred) {
 function runApi(state) {
   return async (url, method = 'POST', body = {}) => {
     let m;
-    if ((m = url.match(/^\/api\/candidates\/([a-z0-9-]+)\/process$/)) && method === 'POST') return processLocal(state, m[1]);
     if ((m = url.match(/^\/api\/groups\/([a-z0-9-]+)\/bots\/([a-z0-9-]+)$/)) && method === 'PATCH') return updateBot(state, m[1], m[2], body);
     throw new Error(`Not available to a browser-local run: ${method} ${url}`);
   };
@@ -156,13 +137,8 @@ async function localRun(state, groupId, {message = '', directBotId = null, check
   }
   const guests = summonableGuests(state.groups, groupId, {includeOff: true});
   const entries = [];
-  // The simulator reads `state.drafts` to pick a post that still needs a draft;
-  // it also pushes the draft it creates. Pass it a copy of the draft list so
-  // that push lands on the copy, while `runApi` still writes the real one —
-  // otherwise one Writer step files the same draft twice.
-  const scratch = {...state, drafts: [...(state.drafts || [])]};
   const run = await simulateGroup({
-    group, message: resume ? prior.input : message, directBotId, guests, state: scratch, api: runApi(state),
+    group, message: resume ? prior.input : message, directBotId, guests, state, api: runApi(state),
     makeId: idFactory(runId), emit: e => entries.push(e),
     chatKey: chatKey || prior?.chatKey || null,
     started: started || resume, resume: resume ? prior : null,
@@ -176,23 +152,6 @@ async function localRun(state, groupId, {message = '', directBotId = null, check
 async function due(state) {
   const time = Date.now();
   let changed = false;
-  for (const d of state.drafts) {
-    if (markDue(d, time)) { changed = true; activity(state, 'ready', `Draft for ${d.author} is ready for manual posting.`, {draftId: d.id}); }
-  }
-  // Reminder tasks fire here exactly like the server's queue worker: a one-off
-  // completes, an interval re-arms for the next window.
-  for (const t of state.tasks) {
-    if (t.kind !== 'reminder' || t.status !== 'queued') continue;
-    if (!(Date.parse(t.runAt) <= time)) continue;
-    activity(state, 'reminder', t.payload.label, {taskId: t.id});
-    changed = true;
-    if (t.payload.kind === 'once') {
-      t.status = 'done';
-      t.completedAt = new Date(time).toISOString();
-    } else {
-      t.runAt = new Date(time + t.intervalMinutes * 60000).toISOString();
-    }
-  }
   for (const t of state.tasks) {
     if (t.kind !== 'bot-task' || t.status !== 'queued' || !(Date.parse(t.runAt) <= time)) continue;
     changed = true;
@@ -227,31 +186,7 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
   } finally { dueDepth--; }
   if (path === '/api/state' && method === 'GET') return {...state, aiEnabled: false, serverTime: now()};
 
-  if (path === '/api/demo/seed' && method === 'POST') { const r = seedDemo(state, DEMO_SAMPLES); save(state); return r; }
-  if (path === '/api/settings' && method === 'PATCH') { const r = updateSettings(state, body); save(state); return r; }
-  if (path === '/api/candidates' && method === 'POST') { const r = addCandidate(state, body); save(state); return {...r.candidate, duplicate: r.duplicate}; }
-
   let m;
-  if ((m = path.match(/^\/api\/candidates\/([a-z0-9-]+)$/)) && method === 'DELETE') { const r = removeCandidate(state, m[1]); save(state); return r; }
-  if ((m = path.match(/^\/api\/candidates\/([a-z0-9-]+)\/process$/)) && method === 'POST') {
-    const draft = processLocal(state, m[1]);
-    save(state);
-    return draft;
-  }
-  if ((m = path.match(/^\/api\/drafts\/([a-z0-9-]+)$/)) && method === 'PATCH') { const d = editDraft(state, m[1], body.text); save(state); return d; }
-  if ((m = path.match(/^\/api\/drafts\/([a-z0-9-]+)\/(approve|reject|ready|restore|posted|rewrite)$/)) && method === 'POST') {
-    const draft = findDraft(state, m[1]);
-    let result;
-    if (m[2] === 'rewrite') {
-      const candidate = find(state.candidates, draft.candidateId);
-      const direction = cleanText(body?.direction, 240);
-      result = rewriteDraft(state, m[1], {text: templateDraft(candidate, state.settings, direction), mode: 'template', note: direction ? 'Template draft. The requested direction is recorded but was not applied by an AI model.' : 'Template draft. Rewrite instructions have not been processed by an AI model.'});
-    } else {
-      result = draftAction(state, m[1], m[2], body);
-    }
-    save(state);
-    return result;
-  }
   if (path === '/api/groups' && method === 'POST') { const g = addGroup(state, body); save(state); return g; }
   if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/bots$/)) && method === 'POST') { const b = addBot(state, m[1], body); save(state); return b; }
   // Keep lasting bot profile edits in the store so they survive a reload, exactly
@@ -284,8 +219,6 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
   if (path === '/api/bots/run') throw new Error('Running AI bots requires the separate Node backend, not GitHub Pages.');
   if ((m = path.match(/^\/api\/browser-requests\/([a-z0-9-]+)\/approve$/)) && method === 'POST') throw Object.assign(new Error('Browser requests run on your own device through a paired local agent, which needs the Node build. This demo cannot open pages.'), {status: 409});
   if ((m = path.match(/^\/api\/browser-requests\/([a-z0-9-]+)\/deny$/)) && method === 'POST') { const r = denyBrowserRequest(state, m[1]); save(state); return r; }
-  if (path === '/api/schedules' && method === 'POST') { const s = addSchedule(state, body); save(state); return s; }
-  if ((m = path.match(/^\/api\/schedules\/([a-z0-9-]+)$/)) && method === 'DELETE') { const r = removeSchedule(state, m[1]); save(state); return r; }
   // Structured task endpoints, identical to the Node server's queue surface.
   if (path === '/api/tasks' && method === 'POST') {
     // Delivery tasks are created by the server from a user's own preferences.
@@ -295,9 +228,6 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
   }
   if ((m = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/retry$/)) && method === 'POST') { const r = retryTask(state, m[1]); save(state); return r; }
   if ((m = path.match(/^\/api\/tasks\/([a-f0-9-]+)$/)) && method === 'DELETE') { const r = cancelTask(state, m[1]); save(state); return r; }
-  if ((m = path.match(/^\/api\/drafts\/([a-f0-9-]+)\/evidence$/)) && method === 'POST') { const e = addEvidence(state, {...body, draftId: m[1]}); save(state); return e; }
-  if ((m = path.match(/^\/api\/evidence\/([a-f0-9-]+)\/verify$/)) && method === 'POST') { const e = verifyEvidence(state, m[1], body.status); save(state); return e; }
-  if ((m = path.match(/^\/api\/evidence\/([a-f0-9-]+)$/)) && method === 'DELETE') { const r = dropEvidence(state, m[1]); save(state); return r; }
   // Conversation history, stored with the rest of the browser-local state.
   if ((m = path.match(/^\/api\/chats\/([a-z0-9-]+)\/messages$/)) && method === 'POST') { const r = addChatMessages(state, m[1], Array.isArray(body.messages) ? body.messages : [body]); save(state); return r; }
   if ((m = path.match(/^\/api\/chats\/([a-z0-9-]+)$/)) && method === 'DELETE') { const r = clearChat(state, m[1]); cancelRunsForChat(state, m[1], 'Chat cleared.'); save(state); return r; }
@@ -322,8 +252,9 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
     return {ok: true, model: body.model || null, chat: body.chat || null};
   }
   if (path === '/api/memory/consolidate' && method === 'POST') throw Object.assign(new Error('Updating memory needs the Node build and an AI provider. Rules you add by hand still work here.'), {status: 409});
-  if (path === '/api/reset-demo' && method === 'POST') { const r = resetDemo(state); save(state); return r; }
-  throw new Error(`Not available in the browser-local demo: ${method} ${path}`);
+  // First boot of the demo: start from the same workspace the server seeds.
+  if (path === '/api/reset-workspace' && method === 'POST') { const fresh = migrate(initialState()); save(fresh); return {state: fresh}; }
+  throw Object.assign(new Error(`Not available in the browser-local demo: ${method} ${path}`), {status: 404});
 }
 
 window.AGENT_LOCAL_API = localApi;

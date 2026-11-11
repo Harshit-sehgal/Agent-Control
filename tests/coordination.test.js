@@ -40,19 +40,6 @@ test('the envelope prefers the newest page and bounds the bot role',()=>{
   assert.match(env.restrictions.join(' '),/Do not request that page again/);
 });
 
-test('browser simulation passes steps between real bot identities and creates pending draft only',async()=>{
-  const messages=[],drafts=[];
-  const state={settings:{topics:['robotics']},candidates:[{id:'c1',text:'New robotics architecture published, what do you think?',url:'https://example.com',author:'Demo'}],drafts};
-  const run=await simulateGroup({group,message:'Coordinate X-engage',state,makeId:randomUUID,emit:m=>messages.push(m),api:async(url,method)=>{
-    assert.match(url,/candidates\/c1\/process/);assert.equal(method,'POST');return {id:'d1',candidateId:'c1',author:'Demo',text:'Template draft',status:'pending'};
-  }});
-  assert.equal(run.status,'completed');assert.equal(run.trace.length,5);
-  assert.deepEqual(messages.filter(m=>m.role==='bot').map(m=>m.senderName),['Scout','Ranker','Researcher','Writer','Reviewer']);
-  assert.equal(messages.find(m=>m.senderId==='scout').toBotId,'ranker');
-  assert.equal(drafts[0].status,'pending');
-  assert.match(messages.find(m=>m.senderId==='reviewer').text,/approval/i);
-});
-
 test('server-side agent execution persists messages and real previous outputs',async()=>{
   const dir=await mkdtemp(path.join(tmpdir(),'ac-coord-'));
   try{
@@ -122,25 +109,6 @@ test('queuing a run reports a missing group before complaining about the AI key'
     await assert.rejects(queue(store,{groupId:'missing',message:'hi'}),error=>error.status===404);
   }finally{await rm(dir,{recursive:true,force:true});}
 });
-
-test('a repeated group run does not create a second draft for the same candidate',async()=>{
-  const drafts=[],messages=[];
-  const state={settings:{topics:['robotics']},candidates:[{id:'c1',text:'New robotics architecture published, what do you think?',url:'https://example.com',author:'Demo'}],drafts};
-  let calls=0;
-  const api=async(url)=>{calls++;return {id:`d${calls}`,candidateId:'c1',author:'Demo',text:'Template draft',status:'pending'};};
-  const first=await simulateGroup({group,message:'Coordinate X-engage',state,makeId:randomUUID,emit:m=>messages.push(m),api});
-  assert.equal(drafts.length,1);
-  // The simulator must consult the drafts it already recorded, not call the API
-  // again, so the approval inbox cannot fill with duplicates of one post.
-  const second=await simulateGroup({group,message:'Coordinate X-engage',state,makeId:randomUUID,emit:m=>messages.push(m),api});
-  assert.equal(calls,1,'The second run must not create another draft.');
-  assert.equal(drafts.length,1);
-  assert.match(messages.filter(m=>m.senderId==='writer').pop().text,/already exists/);
-  // Reviewer must report the real pending count, not merely "some drafts exist".
-  assert.match(messages.filter(m=>m.senderId==='reviewer').pop().text,/1 pending draft/);
-  assert.equal(first.status,'completed');assert.equal(second.status,'completed');
-});
-
 
 test('a run writes its messages and outcome into the conversation it was started from',async()=>{
   const dir=await mkdtemp(path.join(tmpdir(),'ac-coord-'));

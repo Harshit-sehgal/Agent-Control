@@ -21,71 +21,18 @@ await import(path.join(root,'shared/local-api.js'));
 function makeStorage(){const map=new Map();return {map,getItem:key=>map.get(key)??null,setItem:(key,value)=>map.set(key,String(value))};}
 function setup(target=makeStorage()){storage=target;return {request:globalThis.window.AGENT_LOCAL_API,storage:target};}
 
-const seed=async request=>{await request('/api/demo/seed','POST',{});const s=await request('/api/state');const item=s.candidates.find(x=>x.topic==='AI');return request(`/api/candidates/${item.id}/process`,'POST',{});};
 
 test('demo page uses path-relative assets and clearly discloses browser-local data',()=>{
   assert.match(html,/\.\/app\.css/);assert.match(html,/\.\/app\.js/);assert.match(html,/type="module" src="\.\/local-api\.js"/);assert.match(html,/\.\/transport\.js/);
   assert.match(html,/Data is saved only in this browser/);
   assert.doesNotMatch(html,/<script[^>]+src="\/app\.js/);
 });
-test('candidate process, edit invalidates approval, and manual posting flow persists',async()=>{
-  const store=makeStorage();
-  const {request}=setup(store);
-  let d=await seed(request);assert.equal(d.status,'pending');assert.equal(d.mode,'template');
-  await request('/api/settings','PATCH',{topics:['AI'],style:'short',opinions:'',minDelay:0,maxDelay:0});
-  d=await request(`/api/drafts/${d.id}/approve`,'POST',{});assert.equal(d.status,'scheduled');
-  d=await request(`/api/drafts/${d.id}`,'PATCH',{text:'A revised draft with my opinion.'});assert.equal(d.status,'pending');assert.equal(d.revision,2);assert.equal(d.approvedText,undefined);
-  await assert.rejects(request(`/api/drafts/${d.id}/posted`,'POST',{}),/Only ready/);
-  await request(`/api/drafts/${d.id}/approve`,'POST',{});
-  let s=await request('/api/state');d=s.drafts.find(x=>x.id===d.id);assert.equal(d.status,'ready');
-  d=await request(`/api/drafts/${d.id}/posted`,'POST',{});assert.equal(d.status,'posted');
-  const reopened=setup(store).request;
-  assert.equal((await reopened('/api/state')).drafts[0].status,'posted');
-});
-test('custom groups, bots, local reminders and unsupported AI execution',async()=>{
+test('custom groups, bots and unsupported AI execution',async()=>{
   const {request}=setup();
   const g=await request('/api/groups','POST',{name:'Insights',description:'Research notes'});assert.equal(g.name,'Insights');
   const b=await request(`/api/groups/${g.id}/bots`,'POST',{name:'Summarizer',instructions:'Summarize the input.'});
   assert.equal(b.name,'Summarizer');
   await assert.rejects(request('/api/bots/run','POST',{botId:b.id,input:'hello'}),/Node backend/);
-  const rem=await request('/api/schedules','POST',{label:'Check queue',kind:'interval',intervalMinutes:60});
-  assert.equal(rem.enabled,true);
-  await request(`/api/schedules/${rem.id}`,'DELETE');
-  const tasks=(await request('/api/state')).tasks;
-  assert.equal(tasks.length,1);
-  assert.equal(tasks[0].status,'cancelled','Removing a reminder cancels its structured task record.');
-});
-test('reject invalid input and impossible approval delays',async()=>{
-  const {request}=setup();
-  await assert.rejects(request('/api/candidates','POST',{url:'javascript:alert(1)',text:'an adequately long candidate'}),/valid public http/);
-  await assert.rejects(request('/api/candidates','POST',{url:'https://example.com',text:'short'}),/at least 12/);
-  await assert.rejects(request('/api/settings','PATCH',{topics:['AI'],minDelay:11,maxDelay:3}),/Invalid delay window/);
-});test('Pages resolves due drafts and reminders exactly like the Node scheduler',async()=>{
-  // src/scheduler.js records a `ready` event when a scheduled draft comes due and
-  // a `reminder` event when a schedule fires. The browser-local transport used to
-  // reimplement that logic inline and record neither, so the Pages Activity tab
-  // stayed empty while the Node build logged them.
-  const store=makeStorage();
-  const {request}=setup(store);
-  await request('/api/settings','PATCH',{minDelay:0,maxDelay:0});
-  const d=await seed(request);
-  await request(`/api/drafts/${d.id}/approve`,'POST',{});
-  const created=await request('/api/schedules','POST',{label:'Review the queue',kind:'once',nextAt:new Date(Date.now()+3600000).toISOString()});
-  // Rewrite both into the past, exactly as if the page had been left open.
-  const state=JSON.parse(store.map.get('agent-control-ghpages-v1'));
-  const draft=state.drafts.find(x=>x.id===d.id);
-  draft.dueAt=new Date(Date.now()-1000).toISOString();
-  const reminder=state.tasks.find(x=>x.id===created.id);
-  assert.ok(reminder,'A created reminder must persist as a structured task.');
-  reminder.runAt=new Date(Date.now()-1000).toISOString();
-  store.map.set('agent-control-ghpages-v1',JSON.stringify(state));
-  const after=await request('/api/state');
-  const resolved=after.drafts.find(x=>x.id===d.id);
-  const fired=after.tasks.find(x=>x.id===created.id);
-  assert.equal(resolved.status,'ready');
-  assert.equal(fired.status,'done','A one-off reminder must complete once it fires.');
-  assert.ok(after.events.some(e=>e.type==='ready'),'Pages must record the ready transition in the activity log.');
-  assert.ok(after.events.some(e=>e.type==='reminder'&&e.message==='Review the queue'),'Pages must record fired reminders in the activity log.');
 });
 test('a due scheduled task runs on Pages even when the group shows its plan first',async()=>{
   const store=makeStorage();
@@ -202,18 +149,6 @@ test('a scheduled Pages task that cannot run is failed, not stored as done',asyn
   assert.match((after.chats?.handoff||[]).map(m=>m.text).join('\n'),/did not run/);
 });
 
-test('the Pages demo approves with the delay window the person picked',async()=>{
-  // The Approve button sends {minDelay,maxDelay}; the demo ignored the body and
-  // used the workspace default, so the choice a person made had no effect here
-  // while the Node build honoured it. The default window is 2-10 minutes.
-  const {request}=setup(makeStorage());
-  const d=await seed(request);
-  const before=Date.now();
-  const approved=await request(`/api/drafts/${d.id}/approve`,'POST',{minDelay:45,maxDelay:45});
-  assert.equal(approved.status,'scheduled');
-  const minutes=(Date.parse(approved.dueAt)-before)/60000;
-  assert.ok(minutes>=44&&minutes<=46,`the chosen 45 minute window sets the due time, got ${minutes} minutes`);
-});
 test('the Pages demo refuses a notification task exactly like the Node server',async()=>{
   // src/routes-workflow.js answers 403: a delivery task comes from a person's own
   // notification preferences, never from a request body.
@@ -223,4 +158,19 @@ test('the Pages demo refuses a notification task exactly like the Node server',a
   await assert.rejects(request('/api/tasks','POST',{kind:'notification',payload:{notificationId:'n1'}}),error=>error.status===403&&/server, not by request/.test(error.message));
   const after=await request('/api/state');
   assert.equal(after.tasks.length,0,'A refused delivery task is not stored either.');
+});
+
+test('the Pages backend has no X routes',async()=>{
+  const {request}=setup();
+  for(const [path,method] of [['/api/candidates','POST'],['/api/drafts/x/approve','POST'],['/api/demo/seed','POST'],['/api/schedules','POST'],['/api/settings','PATCH']])
+    await assert.rejects(request(path,method,{}),error=>error.status===404,`${method} ${path}`);
+});
+test('first Pages boot seeds the starting workspace',async()=>{
+  const {request}=setup();
+  const {initialState}=await import(path.join(root,'shared/core.js'));
+  const {migrate}=await import(path.join(root,'shared/workflow.js'));
+  await request('/api/reset-workspace','POST',{});
+  const s=await request('/api/state');
+  // Loading backfills bot contracts, so compare with the seed as it loads.
+  assert.deepEqual(s.groups,migrate(initialState()).groups);
 });

@@ -79,10 +79,7 @@ test('the demo fixtures live in one place and both backends load them',async()=>
   }
   const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
   const serverJs=await readFile(path.join(root,'src','routes-workflow.js'),'utf8');
-  const localApi=await readFile(path.join(root,'shared','local-api.js'),'utf8');
   assert.match(serverJs,/seedDemo\(s,DEMO_SAMPLES\)/,'The Node seed route must use the shared fixtures.');
-  assert.match(localApi,/seedDemo\(state, DEMO_SAMPLES\)/,'The browser-local transport must use the shared fixtures.');
   // And neither file may carry its own restated copy of the fixtures.
   assert.doesNotMatch(serverJs,/robotics-demo/,'The Node server restated the demo fixtures inline.');
-  assert.doesNotMatch(localApi,/const samples\s*=\s*\[/,'local-api.js restated the demo fixtures inline.');
 });

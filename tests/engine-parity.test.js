@@ -315,63 +315,13 @@ test('a checkpoint pauses both engines after the same step and resumes the same 
   assert.deepEqual(serverDecisions(server.store, server.runId), completed);
 });
 
-test('both engines retry a missing outcome once, then close instead of looping', async t => {
-  // The tracked task asked for a draft. A Writer that refuses has produced no
-  // outcome, so the run asks it once more (`assessTask` gives one retry while a
-  // step is left) and then closes with "Not finished". Without this, a refused
-  // handoff either dies silently or retries forever.
-  const groups = [group('tracked', [
-    bot('lead', {type: 'custom', settings: {lead: true}}),
-    bot('writer', {type: 'writing'}),
-  ], {coordination: 'tracked'})];
-  const message = 'draft a reply to that post';
-  const refusal = 'I cannot draft without a post. Share one with the + button.';
-  const state = demoState();
-
-  const demo = await demoEngine({groups, groupId: 'tracked', message, directBotId: 'lead', state});
-  const server = await serverEngine(t, {
-    groups, groupId: 'tracked', message, directBotId: 'lead',
-    // The server writer's reply must be the same refusal, so `assessTask` sees
-    // the same missing outcome as the simulator's canned refusal.
-    executor: async () => refusal,
-  });
-  const expected = {
-    recipients: ['writer', 'writer'],
-    steps: [{botId: 'writer', toBotId: null}, {botId: 'writer', toBotId: null}],
-    status: 'completed',
-    currentStep: 2,
-    pausedAt: null,
-    error: null,
-    outcomes: [
-      {kind: 'retry', text: 'Writer has not finished its part. Asking once more.'},
-      {kind: 'completed', text: 'Not finished. A reply draft is waiting on you.'},
-    ],
-  };
-  assert.deepEqual(decisions(demo.run, demo.conversation), expected);
-  assert.deepEqual(serverDecisions(server.store, server.runId), expected);
-  // A refusal is not a draft on either engine.
-  assert.deepEqual(state.drafts, []);
-  assert.deepEqual(server.store.read().drafts, []);
-});
-
-test('a step that throws is not retried, and both engines record the failure', async t => {
-  // "Fails once then succeeds": neither loop retries a thrown step, so a stub
-  // that would succeed on its second call is called exactly once on both. The
-  // failure must then land somewhere the user can see: both engines mark the run
-  // failed with the error and write a "The run failed: ..." line into the chat.
-  // The simulator used to reject instead (shared/group-simulator.js had no catch
-  // around the api call), so a Pages user was dropped back into a silent chat
-  // with a failed run record and no step trace.
+test('a step that throws is not retried, and the server records the failure', async t => {
+  // "Fails once then succeeds": the loop does not retry a thrown step, so a stub
+  // that would succeed on its second call is called exactly once. The failure
+  // must then land somewhere the user can see: the run is marked failed with the
+  // error and a "The run failed: ..." line goes into the chat. The offline
+  // simulator makes no call that can throw, so only the server is driven here.
   const groups = [group('fail', [bot('writer', {type: 'writing'})])];
-  const state = demoState({
-    candidates: [{id: 'c1', author: 'Ada', text: 'A post about robotics', url: 'https://x.com/ada/status/1', status: 'ready'}],
-  });
-  let demoCalls = 0;
-  const demoApi = async () => {
-    demoCalls++;
-    if (demoCalls === 1) throw new Error('Model unavailable');
-    return {id: 'd1', candidateId: 'c1', status: 'pending', text: 'A drafted reply, long enough to count.'};
-  };
   let serverCalls = 0;
   const executor = async () => {
     serverCalls++;
@@ -379,8 +329,6 @@ test('a step that throws is not retried, and both engines record the failure', a
     return 'A drafted reply, long enough to count, citing https://x.com/ada/status/1';
   };
 
-  const demo = await demoEngine({groups, groupId: 'fail', message: '@Writer draft a reply', state, api: demoApi});
-  assert.equal(demoCalls, 1, 'the simulator retried a thrown step');
   const server = await serverEngine(t, {groups, groupId: 'fail', message: '@Writer draft a reply', executor});
   assert.equal(serverCalls, 1, 'the server retried a thrown step');
 
@@ -393,7 +341,6 @@ test('a step that throws is not retried, and both engines record the failure', a
     error: 'Model unavailable',
     outcomes: [{kind: 'failed', text: 'The run failed: Model unavailable'}],
   };
-  assert.deepEqual(decisions(demo.run, demo.conversation), expected);
   assert.deepEqual(serverDecisions(server.store, server.runId), expected);
 });
 

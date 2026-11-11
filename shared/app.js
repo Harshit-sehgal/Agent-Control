@@ -139,9 +139,11 @@ onChange(scope => {
 async function boot() {
   try {
     await loadState();
+    // First visit to the demo: start from the workspace the server seeds. A
+    // browser that already holds groups keeps them.
     if (isStaticDemo() && !localStorage.getItem('ac-v2-welcome')) {
-      await api('/api/demo/seed', 'POST', {}); localStorage.setItem('ac-v2-welcome', '1');
-      await loadState();
+      if (!store.state?.groups?.length) { await api('/api/reset-workspace', 'POST', {}); await loadState(); }
+      localStorage.setItem('ac-v2-welcome', '1');
     }
     await importLocalChats();
     listShell(); lastView = '';
