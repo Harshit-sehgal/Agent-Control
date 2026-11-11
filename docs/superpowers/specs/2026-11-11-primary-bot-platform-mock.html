@@ -58,6 +58,15 @@ kbd{font-family:var(--body);font-size:11px;color:var(--muted);border:1px solid v
 .app[data-look="ink"] .face{background:color-mix(in srgb,var(--t) 78%,var(--raise))}
 .face.primary{border-radius:50%}
 .face.mgr{border-radius:0;clip-path:polygon(25% 3%,75% 3%,99% 50%,75% 97%,25% 97%,1% 50%)}
+.face.sh-soft{border-radius:30%}.face.sh-round{border-radius:50%}
+.face.sh-hex{border-radius:0;clip-path:polygon(25% 3%,75% 3%,99% 50%,75% 97%,25% 97%,1% 50%)}
+.face.sh-pebble{border-radius:58% 42% 52% 48%/48% 56% 44% 52%}
+.face.sh-drop{border-radius:50% 50% 50% 14%}
+.face.sh-shield{border-radius:22% 22% 50% 50%}
+.face.sh-arch{border-radius:50% 50% 16% 16%}
+.face.sh-oct{border-radius:0;clip-path:polygon(30% 2%,70% 2%,98% 30%,98% 70%,70% 98%,30% 98%,2% 70%,2% 30%)}
+.face.sh-gem{border-radius:0;clip-path:polygon(50% 1%,99% 40%,80% 99%,20% 99%,1% 40%)}
+.face.sh-bean{border-radius:46% 54% 40% 60%/60% 40% 60% 40%}
 .face .eyes{position:absolute;inset:0;translate:calc(var(--lx,0) * var(--s) * .05) calc(var(--ly,0) * var(--s) * .04);transition:translate .25s var(--ease)}
 .face i{position:absolute;top:38%;width:12%;height:21%;background:#1b1a18;border-radius:99px;animation:blink 5s infinite;animation-delay:var(--d,0s)}
 .face i:first-child{left:29%}.face i:last-child{right:29%}
@@ -380,6 +389,22 @@ button.prow:active{background:var(--sunk)}
 .prow:has(>.i:first-child,>.face:first-child)::before{left:54px!important}
 .prow .sel{max-width:52%}
 .pnote{margin:10px 18px 0;font-size:13px;color:var(--muted)}
+/* create bot */
+.mk{display:flex;flex-direction:column;align-items:center;gap:22px;min-height:100%}
+.mkprev{height:150px;display:grid;place-items:center}.mkprev .face.xl{--s:124px}
+.mkname{width:100%;border:0;outline:none;text-align:center;font:600 20px/1.2 var(--body);color:var(--fg);padding:18px 16px;border-radius:22px;background:var(--raise);box-shadow:inset 0 0 0 1px var(--line)}
+.mkname:focus{box-shadow:inset 0 0 0 1.5px var(--violet)}
+.shapes{display:flex;flex-wrap:wrap;justify-content:center;gap:8px 10px}
+.shp{position:relative;cursor:pointer;padding:7px;border-radius:18px;transition:box-shadow .15s}
+.shp input{position:absolute;opacity:0;inset:0;margin:0;cursor:pointer}
+.shp span{display:block}.shp .face{--s:44px;display:block}
+.shp:has(input:checked){box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--fg) 45%,transparent)}
+.shp:has(input:focus-visible){box-shadow:inset 0 0 0 2px var(--violet)}
+.swatches.big{display:grid;grid-template-columns:repeat(5,auto);justify-content:center;gap:14px 22px}.swatches.big .swc span{width:34px;height:34px}
+.mkboss{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:10px 12px 10px 18px;border-radius:20px;background:var(--raise);box-shadow:inset 0 0 0 1px var(--line);font-size:15px}
+.mknote{margin:-8px 0 0}
+.mkgo{margin-top:auto;width:100%;height:56px;flex:none;border-radius:99px;background:var(--fg);color:var(--bg);font-weight:600;font-size:17px;position:sticky;bottom:0;transition:background .2s,color .2s}
+.mkgo:disabled{background:var(--raise);color:var(--muted);box-shadow:inset 0 0 0 1px var(--line)}
 /* desktop split: bots on the left, the chat on the right */
 .is-desk .fab-me,.is-desk .bbar,.is-desk .fab-bot{display:none!important}
 .split{display:grid;grid-template-columns:292px 1fr;height:100%}
@@ -674,7 +699,7 @@ const BOTS=[
 ];
 const GONE=[];const by=id=>BOTS.find(b=>b.id===id)||GONE.find(b=>b.id===id);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const TINTS=['#9ee0e6','#c6b7f7','#f7b8a8','#b5e3a1','#f5d38a','#f2a7c8','#a9c8f5','#d9c7a8'];
+const TINTS=['#9ee0e6','#c6b7f7','#f7b8a8','#b5e3a1','#f5d38a','#f2a7c8','#a9c8f5','#d9c7a8','#f6c49a','#c9c7cf'];
 const short=b=>b.job?b.job.split(/[.:]/)[0]:'New, no job yet';
 const isMgr=b=>b.id!=='atlas'&&(b.role==='Manager'||BOTS.some(x=>x.boss===b.id));
 const roleOf=b=>b.id==='atlas'?'Primary':isMgr(b)?'Manager':'Bot';
@@ -685,7 +710,8 @@ const S={mute:new Set(),home:LAY.def||'tree',def:LAY.def||'tree',order:LAY.order
   grants:{mail:{'Gmail: send email':'always','Gmail: read':'always'},plan:{'Google Calendar: edit':'ask'},ledger:{'Pay or spend money':'ask'}},activity:[]};
 const faceState=b=>S.busy.has(b.id)?'read':(b.id==='atlas'?'':'sleep');
 const face=(b,size='',st)=>b.id==='atlas'&&size&&size!=='s'?`<span class="pf">${face0(b,size,st)}<span class="star" title="Primary"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.8l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z"/></svg></span></span>`:face0(b,size,st);
-const face0=(b,size='',st)=>`<span class="face ${size} ${b.id==='atlas'?'primary':isMgr(b)?'mgr':''} ${st===undefined?faceState(b):st}" style="--t:${b.tint};--d:${(b.name.length%5)*.9}s" aria-hidden="true"><span class="eyes"><i></i><i></i></span><b></b></span>`;
+const SHAPES=[['soft','Rounded square'],['round','Circle'],['hex','Hexagon'],['pebble','Pebble'],['drop','Drop'],['shield','Shield'],['arch','Arch'],['oct','Octagon'],['gem','Gem'],['bean','Bean']];
+const face0=(b,size='',st)=>`<span class="face ${size} ${b.shape?'sh-'+b.shape:b.id==='atlas'?'primary':isMgr(b)?'mgr':''} ${st===undefined?faceState(b):st}" style="--t:${b.tint};--d:${(b.name.length%5)*.9}s" aria-hidden="true"><span class="eyes"><i></i><i></i></span><b></b></span>`;
 const asks={};const $=id=>document.getElementById(id);
 const pending=()=>S.threads.flatMap(t=>t.items.filter(i=>i.k==='ask'&&!i.done).map(i=>({...i,thread:t.id})));
 const stateOf=b=>pending().some(a=>a.bot===b.id)?'waiting':S.busy.has(b.id)?'working':b.id==='atlas'?'awake':'asleep';
@@ -921,6 +947,7 @@ function drawerHTML(){
     <p class="foot">Server: this laptop. Moving it to your Oracle VM is on the plan.</p>
   </div>`;
 }
+const shapePick=(cur,tint)=>`<div class="shapes" role="radiogroup" aria-label="Shape">${SHAPES.map(([k,l])=>`<label class="shp" title="${l}"><input type="radio" name="shape" value="${k}"${k===cur?' checked':''} aria-label="${l}"><span>${face({id:'_s',name:'x',tint,shape:k},'','')}</span></label>`).join('')}</div>`;
 function panelHTML(){
   let close=`<button class="x" data-closeall aria-label="Close">${IC.x}</button>`,head='',body='';
   if(S.panel==='company'){
@@ -931,14 +958,16 @@ function panelHTML(){
       <ul class="tree">${node(by('atlas'))}</ul>
       <div class="group"><h4>No manager</h4><ul class="tree">${BOTS.filter(b=>!b.boss&&b.id!=='atlas').map(node).join('')}</ul></div>`;
   } else if(S.panel==='hire'){
-    head='<h3>New bot</h3>';
+    head=`<button class="rb" data-closeall aria-label="Close">${IC.x}</button><h3 style="text-align:left">New bot</h3>`;close='';
     const used=new Set(BOTS.map(x=>x.tint)),tc=TINTS.find(c=>!used.has(c))||TINTS[0];
-    body=`<p class="sub">Give it a name. You tell it what to do in its chat, and you can change that any time.</p><form class="hire" data-hire>
-      <label class="fl">Name<input name="nm" required maxlength="24" placeholder="Scout" aria-label="Bot name" autocomplete="off"></label>
-      <label class="fl">Manager<select class="sel" name="boss"><option value="">None, reports to Atlas</option>${BOTS.filter(isMgr).filter(vis).map(b=>`<option value="${b.id}">${b.name}</option>`).join('')}</select></label>
-      <fieldset class="fl"><legend>Colour</legend><div class="swatches">${TINTS.map(c=>`<label class="swc" style="--c:${c}"><input type="radio" name="tint" value="${c}"${c===tc?' checked':''} aria-label="Colour ${c}"><span></span></label>`).join('')}</div></fieldset>
-      <div class="hire-prev" id="hirePrev"></div>
-      <button class="btn primary">Create and open chat</button></form>`;
+    body=`<form class="mk" data-hire>
+      <div class="mkprev" id="hirePrev">${face({id:'_p',name:'x',tint:tc,shape:'soft'},'xl','wake')}</div>
+      <input class="mkname" name="nm" required maxlength="24" placeholder="Name your bot" aria-label="Bot name" autocomplete="off">
+      ${shapePick('soft',tc)}
+      <div class="swatches big" role="radiogroup" aria-label="Colour">${TINTS.map(c=>`<label class="swc" style="--c:${c}"><input type="radio" name="tint" value="${c}"${c===tc?' checked':''} aria-label="Colour ${c}"><span></span></label>`).join('')}</div>
+      <label class="mkboss"><span>Manager</span><select class="sel" name="boss" aria-label="Manager"><option value="">None, reports to Atlas</option>${BOTS.filter(isMgr).filter(vis).map(b=>`<option value="${b.id}">${b.name}</option>`).join('')}</select></label>
+      <p class="sub mknote">You tell it what to do in its chat after this.</p>
+      <button class="mkgo" disabled>Create</button></form>`;
   } else if(S.panel==='threads'){
     head='<h3>Your threads</h3>';body=`<input class="thsearch" id="thQ" type="search" placeholder="Search threads" aria-label="Search threads" autocomplete="off"><div id="thList">${threadList('')}</div>`;
   } else if(S.panel==='activity'){
@@ -959,6 +988,7 @@ function panelHTML(){
       body=`<form class="hire" data-bedit="${b.id}"><div class="bhero">${face(b,'xl')}</div>
         <label class="fl">Name<input name="nm" required maxlength="24" value="${esc(b.name)}" aria-label="Bot name" autocomplete="off"></label>
         ${b.id==='atlas'?'':`<label class="fl">Manager<select class="sel" name="boss"><option value="">None, reports to Atlas</option>${BOTS.filter(x=>isMgr(x)&&x.id!==b.id).map(x=>`<option value="${x.id}" ${b.boss===x.id?'selected':''}>${x.name}</option>`).join('')}</select></label>`}
+        <fieldset class="fl"><legend>Shape</legend>${shapePick(b.shape||(b.id==='atlas'?'round':isMgr(b)?'hex':'soft'),b.tint)}</fieldset>
         <fieldset class="fl"><legend>Colour</legend><div class="swatches">${TINTS.map(c=>`<label class="swc" style="--c:${c}"><input type="radio" name="tint" value="${c}"${c===b.tint?' checked':''} aria-label="Colour ${c}"><span></span></label>`).join('')}</div></fieldset>
         <p class="sub" style="margin:0">To change what ${esc(b.name)} does, tell it in its chat.</p>
         <button class="btn primary">Save</button></form>`;
@@ -980,7 +1010,7 @@ function renderOver(){
   const app=$('app');app.classList.toggle('open-l',S.left);app.classList.toggle('open-r',!!S.panel);
   $('drawer').setAttribute('aria-hidden',String(!S.left));$('panel').setAttribute('aria-hidden',String(!S.panel));
   if(S.left)$('drawer').innerHTML=drawerHTML();
-  $('panel').classList.toggle('pro',!!(S.panel&&by(S.panel)));
+  $('panel').classList.toggle('pro',!!(S.panel&&(by(S.panel)||S.panel==='hire')));
   if(S.panel)$('panel').innerHTML=panelHTML();
 }
 function render(){renderMain();renderOver();redrawSettings()}
@@ -1110,10 +1140,10 @@ document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.tar
 document.addEventListener('submit',e=>{e.preventDefault();const f=e.target;
   if(f.dataset.form!==undefined){const v=f.q.value.trim();if(v){f.q.value='';send(v)}}
   else if(f.dataset.hire!==undefined){const nm=f.nm.value.trim().replace(/^./,c=>c.toUpperCase());if(!nm)return;
-    const nb={id:'b'+Date.now(),name:nm,role:'Bot',boss:f.boss.value||null,tint:f.querySelector('[name=tint]:checked')?.value||TINTS[0],job:'',kw:[],mem:[]};
+    const nb={id:'b'+Date.now(),name:nm,role:'Bot',boss:f.boss.value||null,tint:f.querySelector('[name=tint]:checked')?.value||TINTS[0],shape:f.querySelector('[name=shape]:checked')?.value||'soft',job:'',kw:[],mem:[]};
     BOTS.push(nb);log('atlas','bots',`added ${nb.name}${nb.boss?' under '+by(nb.boss).name:', reporting to Atlas'}`);S.panel=null;
     openDM(nb.id);const t=S.threads.find(x=>x.dm===nb.id);t.items.push({k:'reply',bot:nb.id,text:`Hi, I'm ${nb.name}. What should I do? Tell me my job here and I'll stick to it.`});render();setTimeout(()=>document.querySelector('#root textarea, #root input[name=q]')?.focus(),200)}
-  else if(f.dataset.bedit){const b=by(f.dataset.bedit),nm=f.nm.value.trim();if(!nm)return;b.name=nm;b.tint=f.querySelector('[name=tint]:checked')?.value||b.tint;if(f.boss&&(f.boss.value||null)!==b.boss)moveBot(b.id,f.boss.value||null);S.tab='overview';render()}
+  else if(f.dataset.bedit){const b=by(f.dataset.bedit),nm=f.nm.value.trim();if(!nm)return;b.name=nm;b.tint=f.querySelector('[name=tint]:checked')?.value||b.tint;b.shape=f.querySelector('[name=shape]:checked')?.value||b.shape;if(f.boss&&(f.boss.value||null)!==b.boss)moveBot(b.id,f.boss.value||null);S.tab='overview';render()}
   else if(f.dataset.addmem){const b=by(f.dataset.addmem),v=f.m.value.trim();if(v){b.mem.push(v);b.fresh=b.mem.length-1;renderOver()}}
 });
 let pv=0;
@@ -1191,7 +1221,7 @@ function endDrag(){const d=drag;drag=null;const it=d.item;document.querySelector
   if(d.toShelf||d.unpin){const id=it.dataset.sid,arr=S.pins.bots;d.toShelf?arr.includes(id)||arr.push(id):arr.splice(arr.indexOf(id),1);saveLayout();setTimeout(renderMain,d.toShelf?260:0);return}
   saveOrder(d.box,it);
   if(d.box!==d.box0){saveOrder(d.box0);const b=by(it.dataset.sid),nb=bossOfKey(d.box.dataset.sortkey);b.boss=nb;if(nb)S.open[nb]=true;log('atlas','bots',`moved ${b.name} ${nb?'under '+by(nb).name:'to Solo'}`);setTimeout(renderMain,520)}}
-document.addEventListener('input',e=>{if(e.target.id==='sideq'){S.sideQ=e.target.value;$('sidelist').innerHTML=sideList(S.sideQ);return}if(e.target.id==='sq'){openSearch();return}if(e.target.id==='thQ'){$('thList').innerHTML=threadList(e.target.value);return}const f=e.target.closest?.('[data-hire]');if(!f)return;const nm=f.nm.value.trim()||'New bot',c=f.querySelector('[name=tint]:checked')?.value;$('hirePrev').innerHTML=`${face({id:'_',name:nm,role:'Bot',tint:c},'s','')}<span><b>${esc(nm)}</b><small>${f.boss.value?'Reports to '+esc(by(f.boss.value).name):'Reports to Atlas'}</small></span>`});
+document.addEventListener('input',e=>{if(e.target.id==='sideq'){S.sideQ=e.target.value;$('sidelist').innerHTML=sideList(S.sideQ);return}if(e.target.id==='sq'){openSearch();return}if(e.target.id==='thQ'){$('thList').innerHTML=threadList(e.target.value);return}const f=e.target.closest?.('[data-hire],[data-bedit]');if(!f)return;const c=f.querySelector('[name=tint]:checked')?.value,sh=f.querySelector('[name=shape]:checked')?.value;f.querySelectorAll('.shp .face').forEach(x=>x.style.setProperty('--t',c));const pv=f.querySelector('.mkprev,.bhero');if(pv)pv.innerHTML=face({id:'_p',name:'x',tint:c,shape:sh},'xl','wake');const go=f.querySelector('.mkgo');if(go)go.disabled=!f.nm.value.trim()});
 document.addEventListener('pointerdown',e=>{lastType=e.pointerType||'mouse';if(e.button>0)return;
   if($('cmenu').classList.contains('show')&&!e.target.closest('#cmenu')){closeMenu();return}
   const item=homeItem(e.target);if(!item)return;
