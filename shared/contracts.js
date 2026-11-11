@@ -16,6 +16,7 @@
  */
 import {validHttpUrl} from './core.js';
 import {fail} from './errors.js';
+import {BASIC_KIT, isBasicKit, isAskAction, verdict} from './asks.js';
 
 export const CONTRACT_VERSION = 1;
 
@@ -35,8 +36,9 @@ export const ACTIONS = ['schedule.set', 'agent.dispatch', 'chat.send', 'browser.
 
 /** The basic kit: what every bot may do without being granted it. Asking a bot,
  * making a bot and setting a schedule never ask the owner; the limits on them
- * are checkpoints (`shared/ask-limits.js`) and the runaway guard. */
-export const BASIC_KIT = ['bot.ask', 'bot.create', 'schedule.set'];
+ * are checkpoints (`shared/ask-limits.js`) and the runaway guard. The list is
+ * declared with the asks (`shared/asks.js`), which this module reads. */
+export {BASIC_KIT};
 
 export {fail};
 
@@ -100,9 +102,15 @@ export function normalizeBot(bot) {
   return bot;
 }
 
-export function canBot(bot, action) {
-  if (!ACTIONS.includes(action) || !bot) return false;
-  if (BASIC_KIT.includes(action)) return true;
+/** May this bot do `action` right now? The basic kit: yes. Given the workspace (`{state, scope}`), an
+ * action that asks is allowed only when the owner said Always allow for this bot (at this origin or
+ * account); Deny and Ask each time both mean "not without an answer" here, and `verdict` in
+ * `shared/asks.js` says which of the two it is. With no workspace the old permission list decides. */
+export function canBot(bot, action, ctx) {
+  if (!bot) return false;
+  if (isBasicKit(action)) return true;
+  if (ctx?.state && isAskAction(action)) return verdict(ctx.state, bot, action, ctx.scope).verdict === 'allow';
+  if (!ACTIONS.includes(action)) return false;
   return Array.isArray(bot.permissions) && bot.permissions.includes(action);
 }
 

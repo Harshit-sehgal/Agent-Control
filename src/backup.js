@@ -25,7 +25,8 @@ import {fail} from '../shared/errors.js';
 import * as wf from '../shared/workflow.js';
 import {initialState} from '../shared/core.js';
 import {DEFAULT_WORKSPACE, ROLES} from './auth.js';
-import {readDocuments, readMemory} from './sqlite-store.js';
+import {readDocuments, readMemory, readAsks} from './sqlite-store.js';
+import {GRANT_CHOICES, isAskAction} from '../shared/asks.js';
 import {INTERRUPT_STATUSES} from '../shared/coordination.js';
 import {validWorkspaceId} from './workspaces.js';
 
@@ -36,7 +37,7 @@ export {fail};
 const EXPORT_TABLES = ['users', 'password_resets', 'workspaces', 'workspace_members', 'agents', 'agent_tasks', 'jobs', 'notifications', 'notification_prefs', 'settings', 'tasks', 'groups', 'bots', 'runs', 'events', 'group_runs', 'group_messages'];
 // Added after the first backups were written: exported when present, and an
 // older file that lacks them still restores.
-const OPTIONAL_TABLES = ['chat_messages', 'memory'];
+const OPTIONAL_TABLES = ['chat_messages', 'memory', 'asks', 'grants', 'activity'];
 // X-engage's tables, dropped at schema v11. A backup written before then lists
 // them; it still restores, and their rows are ignored.
 const RETIRED_TABLES = ['candidates', 'drafts', 'evidence'];
@@ -162,7 +163,7 @@ export function validateBackup(document, {primaryWorkspace = false} = {}) {
   // and wrong shapes before import so a bad settings value cannot poison the
   // workspace cache or make the next startup fail.
   const jsonShape = (table, column, accepts, expected) => {
-    for (const row of document.tables[table]) {
+    for (const row of document.tables[table] || []) {
       const value = row?.[column];
       if (value == null || value === '') continue;
       let parsed;
@@ -191,6 +192,17 @@ export function validateBackup(document, {primaryWorkspace = false} = {}) {
   // A forgotten chat's row is the moment it was forgotten, and older rows hold
   // `true`; only "is this JSON at all" is true of every kind of memory row.
   jsonShape('memory', 'doc', () => true, 'JSON');
+  jsonShape('asks', 'doc', object, 'an object');
+  // A grant is the owner's own word, so a restore cannot widen it: a choice that is not one of the
+  // three, an action nobody asks about, or Always allow for a payment is refused before anything is written.
+  // A grant for a bot that is not in the document is fine: it is ignored when the workspace loads.
+  for (const row of document.tables.grants || []) {
+    if (!row || typeof row.bot_id !== 'string' || !GRANT_CHOICES.includes(row.choice) || !isAskAction(row.action)) fail('Backup holds a grant that is not valid.');
+    if (row.action === 'spend' && row.choice === 'always') fail('Backup holds Always allow for a payment (spend). Payments are asked every time, so it is refused.');
+  }
+  for (const row of document.tables.activity || []) {
+    if (!row || !['outside', 'perm', 'bots'].includes(row.kind) || typeof row.text !== 'string') fail(`Backup row ${row?.id ?? '?'} in activity is not valid.`);
+  }
   jsonShape('group_runs', 'recipients', Array.isArray, 'a list');
   jsonShape('group_runs', 'trace', () => true, 'JSON');
   jsonShape('group_runs', 'checkpoint', () => true, 'JSON');
@@ -267,6 +279,10 @@ export function importBackup(store, document, {force = false, primaryWorkspace =
   });
   // The store's in-memory document must agree with what was just written, so it
   // is read back through the store's own row readers, not assembled here.
+  // The store remembers what it last wrote per table so an update touches only changed rows. A restore
+  // wrote around that memory, so forget it: the next write reads what is really there, which is also
+  // what deletes a restored row the loaded workspace chose to ignore (a grant for a bot that is gone).
+  store.written?.clear?.();
   if (store.cache && typeof store.readCollections === 'function') store.cache = wf.migrate(store.readCollections());
   return {restored: [...EXPORT_TABLES, ...OPTIONAL_TABLES].reduce((n, name) => n + (tables[name]?.length || 0), 0)};
 }
@@ -283,5 +299,6 @@ export function tablesToState(tables) {
   s.events = (tables.events || []).map(e => ({...e}));
   s.tasks = (tables.tasks || []).map(t => ({...t, payload: JSON.parse(t.payload || '{}'), result: t.result ? JSON.parse(t.result) : null}));
   s.memory = readMemory(kind => (tables.memory || []).filter(row => row.kind === kind));
+  Object.assign(s, readAsks(name => tables[name] || []));
   return s;
 }

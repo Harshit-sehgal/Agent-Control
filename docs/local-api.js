@@ -4,20 +4,20 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {initialState, cleanText} from './core.js?v=be9cc8e5c5';
-import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=be9cc8e5c5';
-import {RETENTION_DEFAULTS} from './retention.js?v=be9cc8e5c5';
-import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=be9cc8e5c5';
-import {addChatMessages, clearChat} from './chats.js?v=be9cc8e5c5';
-import {publicMemory, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=be9cc8e5c5';
-import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=be9cc8e5c5';
-import {createThread, titleFrom} from './threads.js?v=be9cc8e5c5';
-import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=be9cc8e5c5';
-import {simulateGroup} from './group-simulator.js?v=be9cc8e5c5';
-import {BUSY_STATUSES} from './run-state.js?v=be9cc8e5c5';
-import {botSettings} from './bot-settings.js?v=be9cc8e5c5';
-import {denyBrowserRequest} from './bot-browser.js?v=be9cc8e5c5';
-import {withLocalLock} from './locks.js?v=be9cc8e5c5';
+import {initialState, cleanText} from './core.js?v=ad1526a936';
+import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=ad1526a936';
+import {RETENTION_DEFAULTS} from './retention.js?v=ad1526a936';
+import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=ad1526a936';
+import {addChatMessages, clearChat} from './chats.js?v=ad1526a936';
+import {publicMemory, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=ad1526a936';
+import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=ad1526a936';
+import {createThread, titleFrom} from './threads.js?v=ad1526a936';
+import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=ad1526a936';
+import {simulateGroup} from './group-simulator.js?v=ad1526a936';
+import {BUSY_STATUSES} from './run-state.js?v=ad1526a936';
+import {botSettings} from './bot-settings.js?v=ad1526a936';
+import {denyBrowserRequest} from './bot-browser.js?v=ad1526a936';
+import {withLocalLock} from './locks.js?v=ad1526a936';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();

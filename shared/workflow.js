@@ -17,6 +17,7 @@ import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-s
 import {memoryState} from './memory.js';
 import {MAX_BOTS_PER_GROUP} from './bot-create.js';
 import {freshGuard} from './runaway.js';
+import {sweepGrants, forgetBotAsks} from './asks.js';
 import {assertManager, releaseReports, PRIMARY_GROUP} from './company.js';
 
 export const SCHEMA_VERSION = 3;
@@ -35,6 +36,11 @@ export function migrate(state) {
   state.groupRuns ??= [];
   // The runaway guard's window and pause flag (shared/runaway.js).
   if (!state.guard || typeof state.guard !== 'object') state.guard = freshGuard();
+  // Asks waiting on the owner, the grants their answers left, and the activity log
+  // (shared/asks.js, shared/activity-log.js). A grant for a bot that is gone is dropped.
+  if (!Array.isArray(state.asks)) state.asks = [];
+  if (!Array.isArray(state.activity)) state.activity = [];
+  sweepGrants(state);
   // X home-feed reading is gone. A run parked on it can never resume, and it
   // would hold its group busy, so it loads as cancelled.
   for (const run of [...state.runs, ...state.groupRuns]) {
@@ -160,6 +166,7 @@ function cancelBotTasks(state, match) {
   }
 }
 function forgetBot(state, botId) {
+  forgetBotAsks(state, botId);
   if (state.ai?.bots) delete state.ai.bots[botId];
   if (state.chats) delete state.chats[botId];
   releaseChatWork(state, botId);

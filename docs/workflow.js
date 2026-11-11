@@ -5,19 +5,20 @@
  * They throw errors carrying an HTTP `status` so the same rules apply to the
  * Node HTTP routes and to any browser-local transport.
  */
-import {activity,cleanText} from './core.js?v=be9cc8e5c5';
-import {fail} from './errors.js?v=be9cc8e5c5';
-import {cancelTask} from './tasks.js?v=be9cc8e5c5';
-import {normalizeRetention} from './retention.js?v=be9cc8e5c5';
-import * as contracts from './contracts.js?v=be9cc8e5c5';
-import {pruneChats, releaseChatWork} from './chats.js?v=be9cc8e5c5';
-import {denyBrowserRequest} from './bot-browser.js?v=be9cc8e5c5';
-import {BUSY_STATUSES} from './coordination.js?v=be9cc8e5c5';
-import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=be9cc8e5c5';
-import {memoryState} from './memory.js?v=be9cc8e5c5';
-import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=be9cc8e5c5';
-import {freshGuard} from './runaway.js?v=be9cc8e5c5';
-import {assertManager, releaseReports, PRIMARY_GROUP} from './company.js?v=be9cc8e5c5';
+import {activity,cleanText} from './core.js?v=ad1526a936';
+import {fail} from './errors.js?v=ad1526a936';
+import {cancelTask} from './tasks.js?v=ad1526a936';
+import {normalizeRetention} from './retention.js?v=ad1526a936';
+import * as contracts from './contracts.js?v=ad1526a936';
+import {pruneChats, releaseChatWork} from './chats.js?v=ad1526a936';
+import {denyBrowserRequest} from './bot-browser.js?v=ad1526a936';
+import {BUSY_STATUSES} from './coordination.js?v=ad1526a936';
+import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=ad1526a936';
+import {memoryState} from './memory.js?v=ad1526a936';
+import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=ad1526a936';
+import {freshGuard} from './runaway.js?v=ad1526a936';
+import {sweepGrants, forgetBotAsks} from './asks.js?v=ad1526a936';
+import {assertManager, releaseReports, PRIMARY_GROUP} from './company.js?v=ad1526a936';
 
 export const SCHEMA_VERSION = 3;
 
@@ -35,6 +36,11 @@ export function migrate(state) {
   state.groupRuns ??= [];
   // The runaway guard's window and pause flag (shared/runaway.js).
   if (!state.guard || typeof state.guard !== 'object') state.guard = freshGuard();
+  // Asks waiting on the owner, the grants their answers left, and the activity log
+  // (shared/asks.js, shared/activity-log.js). A grant for a bot that is gone is dropped.
+  if (!Array.isArray(state.asks)) state.asks = [];
+  if (!Array.isArray(state.activity)) state.activity = [];
+  sweepGrants(state);
   // X home-feed reading is gone. A run parked on it can never resume, and it
   // would hold its group busy, so it loads as cancelled.
   for (const run of [...state.runs, ...state.groupRuns]) {
@@ -160,6 +166,7 @@ function cancelBotTasks(state, match) {
   }
 }
 function forgetBot(state, botId) {
+  forgetBotAsks(state, botId);
   if (state.ai?.bots) delete state.ai.bots[botId];
   if (state.chats) delete state.chats[botId];
   releaseChatWork(state, botId);

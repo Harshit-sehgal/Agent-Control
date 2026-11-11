@@ -194,7 +194,7 @@ test('a v10 database with X data upgrades to v11', async () => {
 
   const upgraded = await new SqliteStore(db, legacy).init();
   try {
-    assert.equal(upgraded.get('SELECT version FROM schema_meta WHERE id=1').version, 11);
+    assert.equal(upgraded.get('SELECT version FROM schema_meta WHERE id=1').version, SCHEMA_DB_VERSION);
     const tables = upgraded.all("SELECT name FROM sqlite_master WHERE type='table'").map(t => t.name);
     for (const gone of ['candidates', 'drafts', 'evidence']) assert.equal(tables.includes(gone), false, `${gone} is still a table`);
     const columns = upgraded.all('PRAGMA table_info(settings)').map(c => c.name);

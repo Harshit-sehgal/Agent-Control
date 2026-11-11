@@ -69,6 +69,15 @@ export function readDocuments(rows) {
   return s;
 }
 
+/** Rebuild the asks, grants and activity log from rows. Same reader for a live database and a backup file. */
+export function readAsks(rows) {
+  return {
+    asks: rows('asks').map(r => fromRow(r)),
+    grants: rows('grants').map(g => ({botId: g.bot_id, action: g.action, scope: g.scope ?? '', choice: g.choice, at: g.at})),
+    activity: rows('activity').map(a => ({id: a.id, at: a.at, botId: a.bot_id ?? null, kind: a.kind, text: a.text, threadId: a.thread_id ?? null, undoUntil: a.undo_until ?? null})),
+  };
+}
+
 const json = value => (value ? JSON.stringify(value) : null);
 
 /** One table's shape: the columns it writes, the primary key that identifies a
@@ -156,6 +165,35 @@ export const TABLE_SHAPES = [
         }));
       });
     },
+  },
+  // Asks waiting on (or answered by) the owner. The whole record is the document;
+  // the columns are for queries and backups.
+  {
+    table: 'asks', pk: ['id'], docColumn: 11,
+    columns: ['id', 'bot_id', 'run_id', 'chat_key', 'action', 'target', 'detail', 'status', 'scope', 'created_at', 'answered_at', 'doc'],
+    rows: state => (state.asks || []).map(a => ({
+      key: a.id, pk: [a.id],
+      params: [a.id, a.botId, a.runId ?? null, a.chatKey ?? null, a.action, a.target ?? '', a.detail ?? '', a.status, a.scope ?? null, a.createdAt || now(), a.answeredAt ?? null, JSON.stringify(a)],
+    })),
+  },
+  // What the owner said Always allow / Ask each time / Deny to: one row per bot, action and origin or account.
+  {
+    table: 'grants', pk: ['bot_id', 'action', 'scope'],
+    columns: ['bot_id', 'action', 'scope', 'choice', 'at'],
+    rows: state => (state.grants || []).map(g => ({
+      key: `${g.botId}/${g.action}/${g.scope}`, pk: [g.botId, g.action, g.scope],
+      params: [g.botId, g.action, g.scope, g.choice, g.at || now()],
+    })),
+  },
+  // Everything that left the app, every permission change and every bot made, moved, paused or deleted.
+  // Append-only: a row is written once and only retention removes it.
+  {
+    table: 'activity', pk: ['id'],
+    columns: ['id', 'at', 'bot_id', 'kind', 'text', 'thread_id', 'undo_until'],
+    rows: state => (state.activity || []).map(a => ({
+      key: a.id, pk: [a.id],
+      params: [a.id, a.at || now(), a.botId ?? null, a.kind, a.text, a.threadId ?? null, a.undoUntil ?? null],
+    })),
   },
 ];
 
@@ -351,6 +389,26 @@ const MIGRATIONS = [
     }
     db.prepare("DELETE FROM kv WHERE key='capture_token'").run();
     db.prepare("UPDATE tasks SET status='cancelled', last_error='This task kind was removed with X-engage' WHERE kind IN ('reminder','candidate-draft') AND status NOT IN ('done','failed','cancelled')").run();
+  }},
+  // v12: the ask mechanism. An ask waits on the owner; a grant is what an answer of
+  // Always allow (or a later Ask each time / Deny) left behind, one per bot, action
+  // and origin or account; the activity log is the append-only record of what left
+  // the app and what changed. A grant has no foreign key to bots on purpose: a
+  // restore can carry one for a bot that is gone, and it is ignored, not an error.
+  {to: 12, up(db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS asks (
+        id TEXT PRIMARY KEY, bot_id TEXT NOT NULL, run_id TEXT, chat_key TEXT,
+        action TEXT NOT NULL, target TEXT NOT NULL DEFAULT '', detail TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL, scope TEXT, created_at TEXT NOT NULL, answered_at TEXT, doc TEXT);
+      CREATE TABLE IF NOT EXISTS grants (
+        bot_id TEXT NOT NULL, action TEXT NOT NULL, scope TEXT NOT NULL DEFAULT '',
+        choice TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (bot_id, action, scope));
+      CREATE TABLE IF NOT EXISTS activity (
+        id TEXT PRIMARY KEY, at TEXT NOT NULL, bot_id TEXT, kind TEXT NOT NULL,
+        text TEXT NOT NULL, thread_id TEXT, undo_until TEXT);
+      CREATE INDEX IF NOT EXISTS activity_at ON activity(at);
+    `);
   }}];
 /** Current schema version, derived from the migration list so it cannot drift.
  * Tests and operators read it. */
@@ -506,6 +564,7 @@ export class SqliteStore {
     }
     Object.assign(s, readDocuments(table => this.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()));
     s.events = this.db.prepare('SELECT * FROM events').all().map(e => ({...e, meta: JSON.parse(e.meta)}));
+    Object.assign(s, readAsks(table => this.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()));
     s.tasks = this.db.prepare('SELECT * FROM tasks ORDER BY rowid').all().map(t => ({
       id: t.id, kind: t.kind, title: t.title, payload: JSON.parse(t.payload), status: t.status,
       runAt: t.run_at, intervalMinutes: t.interval_minutes, idempotencyKey: t.idempotency_key,
