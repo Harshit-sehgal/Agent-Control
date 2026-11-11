@@ -21,7 +21,7 @@ async function open(prefix = 'store-update-') {
   return {dir, file, store, close, async done() { await close(); await fs.rm(dir, {recursive: true, force: true}); }};
 }
 
-const candidate = id => ({id, url: `https://x.com/test/status/${id}`, text: 'A post long enough to be captured.', author: 'Tester', topic: 'AI', status: 'new', createdAt: new Date().toISOString()});
+const run = id => ({id, botId: 'atlas', botName: 'Atlas', input: 'in', output: 'out', at: new Date().toISOString()});
 const kv = (store, key) => store.get('SELECT value FROM kv WHERE key=?', key)?.value ?? null;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -30,18 +30,18 @@ test('an async transition is awaited, then committed and persisted', async () =>
   try {
     const result = await t.store.update(async state => {
       await sleep(5);
-      state.candidates.push(candidate('async-1'));
+      state.runs.push(run('async-1'));
       return 'committed';
     });
     assert.equal(result, 'committed', 'the transition result is returned to the caller');
-    assert.deepEqual(t.store.read().candidates.map(c => c.id), ['async-1']);
+    assert.deepEqual(t.store.read().runs.map(c => c.id), ['async-1']);
 
     // The in-memory cache alone would pass the line above, so reopen the file:
     // writeCollections() must have run after the await, not before it.
     await t.close();
     const reopened = await new SqliteStore(t.file, path.join(path.dirname(t.file), 'state.json')).init();
     try {
-      assert.deepEqual(reopened.read().candidates.map(c => c.id), ['async-1'], 'the row a late-awaited transition added survives a restart');
+      assert.deepEqual(reopened.read().runs.map(c => c.id), ['async-1'], 'the row a late-awaited transition added survives a restart');
     } finally { await reopened.close(); }
   } finally { await t.done(); }
 });
@@ -49,22 +49,22 @@ test('an async transition is awaited, then committed and persisted', async () =>
 test('a throwing transition changes nothing and leaves the store usable', async () => {
   const t = await open();
   try {
-    await t.store.update(state => { state.candidates.push(candidate('kept')); });
+    await t.store.update(state => { state.runs.push(run('kept')); });
     const before = t.store.read();
 
     await assert.rejects(t.store.update(async state => {
-      state.candidates.push(candidate('doomed'));
-      state.settings.style = 'not this';
+      state.runs.push(run('doomed'));
+      state.settings.retention = {events: 1};
       await sleep(5);
       throw new Error('the transition said no');
     }), /the transition said no/);
 
     assert.deepEqual(t.store.read(), before, 'a half-applied transition must not be visible');
-    assert.deepEqual(t.store.get('SELECT COUNT(*) AS n FROM candidates').n, 1, 'nothing was written to SQL either');
+    assert.deepEqual(t.store.get('SELECT COUNT(*) AS n FROM runs').n, 1, 'nothing was written to SQL either');
 
     // The serial chain must not stay rejected: the next transition still commits.
-    await t.store.update(state => { state.candidates.push(candidate('after-failure')); });
-    assert.deepEqual(t.store.read().candidates.map(c => c.id), ['kept', 'after-failure']);
+    await t.store.update(state => { state.runs.push(run('after-failure')); });
+    assert.deepEqual(t.store.read().runs.map(c => c.id), ['kept', 'after-failure']);
   } finally { await t.done(); }
 });
 
@@ -81,8 +81,8 @@ test('an update() racing a raw run() loses neither write', async () => {
     const transition = t.store.update(async state => {
       entered();
       await held;
-      state.candidates.push(candidate('from-update'));
-      state.settings.style = 'set by update';
+      state.runs.push(run('from-update'));
+      state.settings.retention = {events: 7, doneTasks: 3, runs: 14};
     });
     await started;
 
@@ -96,8 +96,8 @@ test('an update() racing a raw run() loses neither write', async () => {
 
     assert.equal(kv(t.store, 'race_run'), 'kept by run', 'the update write must not clobber a concurrent raw run()');
     assert.equal(kv(t.store, 'race_tx'), 'kept by transaction', 'nor a write made inside a raw transaction()');
-    assert.deepEqual(t.store.read().candidates.map(c => c.id), ['from-update'], 'and the transition itself committed');
-    assert.equal(t.store.get('SELECT style FROM settings WHERE id=1').style, 'set by update');
+    assert.deepEqual(t.store.read().runs.map(c => c.id), ['from-update'], 'and the transition itself committed');
+    assert.deepEqual(JSON.parse(t.store.get('SELECT retention FROM settings WHERE id=1').retention), {events: 7, doneTasks: 3, runs: 14});
   } finally { await t.done(); }
 });
 
@@ -106,11 +106,11 @@ test('two transitions queued at once both apply, in call order', async () => {
   try {
     // update() serialises through this.serial; without that the second clone
     // would start from the pre-first state and drop its write.
-    const first = t.store.update(async state => { await sleep(10); state.settings.topics.push('first'); });
-    const second = t.store.update(async state => { await sleep(1); state.settings.topics.push('second'); });
+    const first = t.store.update(async state => { await sleep(10); state.runs.push(run('first')); });
+    const second = t.store.update(async state => { await sleep(1); state.runs.push(run('second')); });
     await Promise.all([first, second]);
-    const topics = t.store.read().settings.topics;
-    assert.deepEqual(topics.slice(-2), ['first', 'second']);
-    assert.equal(topics.filter(topic => topic === 'first').length, 1, 'the second clone must start from the first one\'s result');
+    const ids = t.store.read().runs.map(r => r.id);
+    assert.deepEqual(ids.slice(-2), ['first', 'second']);
+    assert.equal(ids.filter(id => id === 'first').length, 1, 'the second clone must start from the first one\'s result');
   } finally { await t.done(); }
 });

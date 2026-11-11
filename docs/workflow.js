@@ -5,17 +5,17 @@
  * They throw errors carrying an HTTP `status` so the same rules apply to the
  * Node HTTP routes and to any browser-local transport.
  */
-import {activity,cleanText} from './core.js?v=98402d35f0';
-import {fail} from './errors.js?v=98402d35f0';
-import {cancelTask} from './tasks.js?v=98402d35f0';
-import {normalizeRetention} from './retention.js?v=98402d35f0';
-import * as contracts from './contracts.js?v=98402d35f0';
-import {pruneChats, releaseChatWork} from './chats.js?v=98402d35f0';
-import {denyBrowserRequest} from './bot-browser.js?v=98402d35f0';
-import {BUSY_STATUSES} from './coordination.js?v=98402d35f0';
-import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=98402d35f0';
-import {memoryState} from './memory.js?v=98402d35f0';
-import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=98402d35f0';
+import {activity,cleanText} from './core.js?v=911b7c4b37';
+import {fail} from './errors.js?v=911b7c4b37';
+import {cancelTask} from './tasks.js?v=911b7c4b37';
+import {normalizeRetention} from './retention.js?v=911b7c4b37';
+import * as contracts from './contracts.js?v=911b7c4b37';
+import {pruneChats, releaseChatWork} from './chats.js?v=911b7c4b37';
+import {denyBrowserRequest} from './bot-browser.js?v=911b7c4b37';
+import {BUSY_STATUSES} from './coordination.js?v=911b7c4b37';
+import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=911b7c4b37';
+import {memoryState} from './memory.js?v=911b7c4b37';
+import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=911b7c4b37';
 
 export const SCHEMA_VERSION = 3;
 
@@ -38,6 +38,10 @@ export function migrate(state) {
     run.status = 'cancelled';
     run.error = 'X feed reading was removed';
   }
+  // X-engage's records and settings are gone. A workspace saved before it was
+  // removed still carries them; they are dropped rather than kept forever.
+  for (const key of ['candidates', 'drafts', 'evidence', 'schedules', 'captureToken']) delete state[key];
+  for (const key of ['topics', 'style', 'opinions', 'minDelay', 'maxDelay']) delete state.settings[key];
   // Reminders and candidate drafting went with X-engage. A queued one has no
   // handler left to run it, so it loads as cancelled instead of failing.
   for (const task of state.tasks) {

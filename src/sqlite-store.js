@@ -25,7 +25,7 @@ const now = () => new Date().toISOString();
 /** v1 ships the full target schema: the workflow document plus the surfaces
  * the roadmap adds (task queue, agents, vault, notifications, users). Adding a
  * table here is idempotent; later phases add numbered migrations for changes. */
-const DOC_TABLES = ['candidates', 'drafts', 'runs', 'group_runs', 'group_messages'];
+const DOC_TABLES = ['runs', 'group_runs', 'group_messages'];
 const camel = key => key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 /** One stored row as the workflow document it came from. Rows written before
  * v3 have no `doc`, so those are rebuilt from their columns: camelCase keys,
@@ -59,8 +59,6 @@ export function readMemory(rows) {
 
 export function readDocuments(rows) {
   const s = {};
-  s.candidates = rows('candidates').map(c => c.doc ? fromRow(c) : {...fromRow(c, {json: ['score']}), demo: Boolean(c.demo)});
-  s.drafts = rows('drafts').map(d => fromRow(d));
   s.runs = rows('runs').map(r => fromRow(r));
   s.groupRuns = rows('group_runs').map(r => fromRow(r, {json: ['recipients', 'trace', 'checkpoint']}));
   s.groupMessages = {};
@@ -95,30 +93,6 @@ export const TABLE_SHAPES = [
       key: b.id, pk: [b.id],
       params: [b.id, g.id, b.name, b.instructions || '', b.type || 'custom', json(b.contract), json(b.permissions), b.createdAt || now(), json(b.settings), b.origin ?? null, json(b.createdBy)],
     }))),
-  },
-  {
-    table: 'candidates', pk: ['id'], ordered: true, docColumn: 9,
-    columns: ['id', 'url', 'author', 'topic', 'text', 'status', 'score', 'demo', 'created_at', 'doc'],
-    rows: state => (state.candidates || []).map(c => ({
-      key: c.id, pk: [c.id],
-      params: [c.id, c.url, c.author, c.topic || '', c.text, c.status, c.score ? JSON.stringify(c.score) : null, c.demo ? 1 : 0, c.createdAt || now(), JSON.stringify(c)],
-    })),
-  },
-  {
-    table: 'drafts', pk: ['id'], ordered: true, docColumn: 17,
-    columns: ['id', 'candidate_id', 'author', 'url', 'source_text', 'text', 'revision', 'status', 'score', 'mode', 'note', 'approved_text', 'approved_revision', 'approved_at', 'due_at', 'posted_at', 'created_at', 'doc'],
-    rows: state => (state.drafts || []).map(d => ({
-      key: d.id, pk: [d.id],
-      params: [d.id, d.candidateId, d.author, d.url, d.sourceText || '', d.text, d.revision, d.status, d.score ?? null, d.mode || null, d.note || null, d.approvedText ?? null, d.approvedRevision ?? null, d.approvedAt ?? null, d.dueAt ?? null, d.postedAt ?? null, d.createdAt || now(), JSON.stringify(d)],
-    })),
-  },
-  {
-    table: 'evidence', pk: ['id'], ordered: true,
-    columns: ['id', 'draft_id', 'candidate_id', 'kind', 'link', 'claim', 'confidence', 'verification', 'reuse', 'note', 'created_by', 'created_at'],
-    rows: state => (state.evidence || []).map(e => ({
-      key: e.id, pk: [e.id],
-      params: [e.id, e.draftId ?? null, e.candidateId ?? null, e.kind, e.link ?? null, e.claim, e.confidence, e.verification, e.reuse, e.note ?? null, e.createdBy ?? null, e.createdAt || now()],
-    })),
   },
   {
     table: 'runs', pk: ['id'], ordered: true, docColumn: 6,
@@ -310,7 +284,8 @@ const MIGRATIONS = [
   // snake_case, which broke the next write. Conversations move to the server
   // here too, so they follow the account instead of one browser.
   {to: 3, up(db) {
-    for (const table of DOC_TABLES) db.exec(`ALTER TABLE ${table} ADD COLUMN doc TEXT`);
+    // The tables that existed at v3; candidates and drafts were dropped at v11.
+    for (const table of ['candidates', 'drafts', 'runs', 'group_runs', 'group_messages']) db.exec(`ALTER TABLE ${table} ADD COLUMN doc TEXT`);
     db.exec('CREATE TABLE IF NOT EXISTS chat_messages (id TEXT PRIMARY KEY, chat_key TEXT NOT NULL, doc TEXT NOT NULL, at TEXT NOT NULL)');
   }},
   // v4: session ids were stored as issued, so the database file (or the
@@ -363,6 +338,18 @@ const MIGRATIONS = [
     const columns = db.prepare('PRAGMA table_info(bots)').all().map(c => c.name);
     if (!columns.includes('origin')) db.exec('ALTER TABLE bots ADD COLUMN origin TEXT');
     if (!columns.includes('created_by')) db.exec('ALTER TABLE bots ADD COLUMN created_by TEXT');
+  }},
+  // v11: X-engage is gone. Its tables, its settings columns and the capture
+  // token go with it, and a queued reminder or drafting task, which no handler
+  // can run any more, is cancelled rather than left to fail on every sweep.
+  {to: 11, up(db) {
+    db.exec('DROP TABLE IF EXISTS candidates; DROP TABLE IF EXISTS drafts; DROP TABLE IF EXISTS evidence;');
+    const columns = db.prepare('PRAGMA table_info(settings)').all().map(c => c.name);
+    for (const column of ['topics', 'style', 'opinions', 'min_delay', 'max_delay']) {
+      if (columns.includes(column)) db.exec(`ALTER TABLE settings DROP COLUMN ${column}`);
+    }
+    db.prepare("DELETE FROM kv WHERE key='capture_token'").run();
+    db.prepare("UPDATE tasks SET status='cancelled', last_error='This task kind was removed with X-engage' WHERE kind IN ('reminder','candidate-draft') AND status NOT IN ('done','failed','cancelled')").run();
   }}];
 /** Current schema version, derived from the migration list so it cannot drift.
  * Tests and operators read it. */
@@ -445,41 +432,6 @@ export class SqliteStore {
       .run(new Date(now - taskMs).toISOString());
     return {pairingCodes: Number(pairing.changes || 0), agentTasks: Number(tasks.changes || 0)};
   }
-  /** Release a candidate whose draft failed when the normal transition cannot
-   * run (the row was deleted while the provider was working, so the workflow
-   * helper would throw its own 404). The stored document is authoritative for
-   * reads, so both it and the typed column are updated. Returns false when the
-   * row is gone, which is not an error. */
-  failCandidate(id) {
-    const row = this.db.prepare('SELECT doc FROM candidates WHERE id=?').get(id);
-    if (!row) return false;
-    let doc = null;
-    try { doc = row.doc ? JSON.parse(row.doc) : null; } catch { doc = null; }
-    if (doc) {
-      doc.status = 'error';
-      this.db.prepare('UPDATE candidates SET status=?, doc=? WHERE id=?').run('error', JSON.stringify(doc), id);
-    } else {
-      this.db.prepare('UPDATE candidates SET status=? WHERE id=?').run('error', id);
-    }
-    // The SQL above releases the row for whoever reads it now, but `candidates`
-    // is also rewritten wholesale from `this.cache` on every later update. A
-    // cache still holding `processing` would put the row back there on the next
-    // unrelated write, where it 409s on re-process forever and no retry task
-    // exists. So the document is released in the cache too: immediately (this
-    // caller is not awaited) and again inside the serial queue, because an
-    // update already in flight will finish by installing its own older clone.
-    const release = state => {
-      const candidate = state.candidates.find(c => c.id === id);
-      if (candidate) candidate.status = 'error';
-    };
-    release(this.cache);
-    // Nothing can be reported back to this caller (it does not await), and the
-    // synchronous release above already stands, so a failed queue write is only
-    // logged rather than left as an unhandled rejection.
-    this.enqueue(state => { release(state); }).catch(error => console.error(`Could not release candidate ${id} in the document cache:`, error.message));
-    return true;
-  }
-
   /** Rebuild the workflow document from SQL and fold in a newer legacy JSON
    * export when one exists (operator restore, or the old dev data dir). */
   async loadDocument() {
@@ -512,7 +464,7 @@ export class SqliteStore {
       this.kvSet('legacy_imported_mtime', this.kvGet('legacy_pending_mtime'));
     }
     // A brand-new database (or an imported document with an empty roster) still
-    // needs the built-in X-engage group, exactly like the old first-run path.
+    // needs the built-in Home group and its primary bot.
     if (!state.groups.length) {
       const seed = initialState();
       state.groups = seed.groups;
@@ -525,22 +477,16 @@ export class SqliteStore {
     const s = {
       version: 2,
       createdAt: this.kvGet('created_at') || now(),
-      settings: {topics: [], style: '', opinions: '', minDelay: 2, maxDelay: 10},
-      groups: [], candidates: [], drafts: [], runs: [], tasks: [], events: [],
+      settings: {},
+      groups: [], runs: [], tasks: [], events: [],
       groupMessages: {}, groupRuns: [], chats: {},
       ai: (() => { try { return JSON.parse(this.kvGet('ai') || '{}'); } catch { return {}; } })(),
       browserRequests: (() => { try { return JSON.parse(this.kvGet('browser_requests') || '[]'); } catch { return []; } })(),
       memory: readMemory(kind => this.db.prepare('SELECT key, doc FROM memory WHERE kind=? ORDER BY rowid').all(kind)),
     };
     const cfg = this.db.prepare('SELECT * FROM settings WHERE id=1').get();
-    if (cfg) {
-      s.settings = {
-        topics: JSON.parse(cfg.topics), style: cfg.style, opinions: cfg.opinions,
-        minDelay: cfg.min_delay, maxDelay: cfg.max_delay,
-      };
-      if (cfg.retention) {
-        try { s.settings.retention = JSON.parse(cfg.retention); } catch { /* ignore */ }
-      }
+    if (cfg?.retention) {
+      try { s.settings.retention = JSON.parse(cfg.retention); } catch { /* ignore */ }
     }
     for (const g of this.db.prepare('SELECT * FROM groups ORDER BY rowid').all()) {
       g.bots = this.db.prepare('SELECT * FROM bots WHERE group_id=? ORDER BY rowid').all(g.id).map(b => ({
@@ -556,11 +502,6 @@ export class SqliteStore {
       s.groups.push(g);
     }
     Object.assign(s, readDocuments(table => this.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()));
-    s.evidence = this.db.prepare('SELECT * FROM evidence').all().map(e => ({
-      id: e.id, kind: e.kind, link: e.link, claim: e.claim, confidence: e.confidence,
-      verification: e.verification, reuse: e.reuse, note: e.note,
-      draftId: e.draft_id, candidateId: e.candidate_id, createdBy: e.created_by, createdAt: e.created_at,
-    }));
     s.events = this.db.prepare('SELECT * FROM events').all().map(e => ({...e, meta: JSON.parse(e.meta)}));
     s.tasks = this.db.prepare('SELECT * FROM tasks ORDER BY rowid').all().map(t => ({
       id: t.id, kind: t.kind, title: t.title, payload: JSON.parse(t.payload), status: t.status,
@@ -617,8 +558,8 @@ export class SqliteStore {
       this.kvSet('created_at', state.createdAt || now());
       this.kvSet('ai', JSON.stringify(state.ai || {}));
       this.kvSet('browser_requests', JSON.stringify(state.browserRequests || []));
-      this.stmt('INSERT INTO settings (id,topics,style,opinions,min_delay,max_delay,retention) VALUES (1,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET topics=excluded.topics, style=excluded.style, opinions=excluded.opinions, min_delay=excluded.min_delay, max_delay=excluded.max_delay, retention=excluded.retention')
-        .run(JSON.stringify(state.settings.topics), state.settings.style, state.settings.opinions, state.settings.minDelay, state.settings.maxDelay, state.settings.retention ? JSON.stringify(state.settings.retention) : null);
+      this.stmt('INSERT INTO settings (id,retention) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET retention=excluded.retention')
+        .run(state.settings?.retention ? JSON.stringify(state.settings.retention) : null);
     });
     return t;
   }

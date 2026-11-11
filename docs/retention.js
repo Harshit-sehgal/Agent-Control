@@ -3,13 +3,13 @@
  * The workflow document only grows: events, runs and finished tasks. These are
  * pure prune rules over the state object so the Node server and the
  * browser-local demo can apply them identically, plus a workspace-level policy
- * in settings. Nothing here deletes drafts, candidates or evidence: those are
+ * in settings. Nothing here deletes groups, bots, chats or memory: those are
  * the user's working material, not exhaust. (Notifications are not part of the
  * workflow document — they are bounded by the in-app feed cap in
  * src/notifications.js — so there is no retention knob for them here.)
  */
-import {activity} from './core.js?v=98402d35f0';
-import {BUSY_STATUSES} from './coordination.js?v=98402d35f0';
+import {activity} from './core.js?v=911b7c4b37';
+import {BUSY_STATUSES} from './coordination.js?v=911b7c4b37';
 
 export const RETENTION_DEFAULTS = {events: 90, doneTasks: 30, runs: 30};
 

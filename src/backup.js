@@ -23,7 +23,7 @@
 import crypto from 'node:crypto';
 import {fail} from '../shared/errors.js';
 import * as wf from '../shared/workflow.js';
-import {initialState, validHttpUrl} from '../shared/core.js';
+import {initialState} from '../shared/core.js';
 import {DEFAULT_WORKSPACE, ROLES} from './auth.js';
 import {readDocuments, readMemory} from './sqlite-store.js';
 import {INTERRUPT_STATUSES} from '../shared/coordination.js';
@@ -33,10 +33,13 @@ export const BACKUP_VERSION = 1;
 
 export {fail};
 
-const EXPORT_TABLES = ['users', 'password_resets', 'workspaces', 'workspace_members', 'agents', 'agent_tasks', 'jobs', 'notifications', 'notification_prefs', 'settings', 'tasks', 'groups', 'bots', 'candidates', 'drafts', 'evidence', 'runs', 'events', 'group_runs', 'group_messages'];
+const EXPORT_TABLES = ['users', 'password_resets', 'workspaces', 'workspace_members', 'agents', 'agent_tasks', 'jobs', 'notifications', 'notification_prefs', 'settings', 'tasks', 'groups', 'bots', 'runs', 'events', 'group_runs', 'group_messages'];
 // Added after the first backups were written: exported when present, and an
 // older file that lacks them still restores.
 const OPTIONAL_TABLES = ['chat_messages', 'memory'];
+// X-engage's tables, dropped at schema v11. A backup written before then lists
+// them; it still restores, and their rows are ignored.
+const RETIRED_TABLES = ['candidates', 'drafts', 'evidence'];
 // Never exported, by design: credential ciphertext cannot be decrypted under a
 // different key, pairing codes are single-use, and a live session id is a
 // credential an attacker holding a backup must not obtain.
@@ -184,23 +187,18 @@ export function validateBackup(document, {primaryWorkspace = false} = {}) {
   jsonShape('tasks', 'result', () => true, 'JSON');
   jsonShape('bots', 'created_by', object, 'an object');
   jsonShape('chat_messages', 'doc', object, 'an object');
-  for (const name of ['candidates', 'drafts', 'runs', 'group_runs', 'group_messages']) jsonShape(name, 'doc', object, 'an object');
+  for (const name of ['runs', 'group_runs', 'group_messages']) jsonShape(name, 'doc', object, 'an object');
   // A forgotten chat's row is the moment it was forgotten, and older rows hold
   // `true`; only "is this JSON at all" is true of every kind of memory row.
   jsonShape('memory', 'doc', () => true, 'JSON');
   jsonShape('group_runs', 'recipients', Array.isArray, 'a list');
   jsonShape('group_runs', 'trace', () => true, 'JSON');
   jsonShape('group_runs', 'checkpoint', () => true, 'JSON');
-  const link = (value, where) => { if (value && !validHttpUrl(value)) fail(`Backup holds a link that is not http(s) in ${where}.`); };
-  for (const e of document.tables.evidence) link(e.link, 'evidence');
-  for (const name of ['candidates', 'drafts']) for (const row of document.tables[name]) {
-    link(row.url, name);
-    if (row.doc) { let doc; try { doc = JSON.parse(row.doc); } catch { fail(`Backup row in ${name} is not valid JSON.`); } link(doc?.url, name); }
-  }
   // The workflow document must survive a migration before being trusted.
-  const state = tablesToState(document.tables);
+  const tables = Object.fromEntries(Object.entries(document.tables).filter(([name]) => !RETIRED_TABLES.includes(name)));
+  const state = tablesToState(tables);
   wf.migrate(state);
-  return {tables: document.tables, state};
+  return {tables, state};
 }
 
 /** Restore into an empty-ish database inside one transaction. */
@@ -209,7 +207,7 @@ export function importBackup(store, document, {force = false, primaryWorkspace =
   const restoredAt = new Date().toISOString();
   // A freshly seeded database already contains the built-in group rows, so
   // "populated" means real content, not the defaults every install ships with.
-  const CONTENT_TABLES = ['users', 'candidates', 'drafts', 'tasks', 'events', 'runs', 'evidence', 'agents', 'agent_tasks', 'jobs', 'notifications', 'group_runs', 'group_messages'];
+  const CONTENT_TABLES = ['users', 'tasks', 'events', 'runs', 'agents', 'agent_tasks', 'jobs', 'notifications', 'group_runs', 'group_messages'];
   const populated = CONTENT_TABLES.some(name => {
     try { return store.get(`SELECT count(*) AS n FROM ${name}`).n > 0; } catch { return false; }
   });
@@ -279,14 +277,9 @@ export function importBackup(store, document, {force = false, primaryWorkspace =
 export function tablesToState(tables) {
   const state = structuredClone(initialState());
   const s = state;
-  s.settings = tables.settings?.length ? {
-    topics: JSON.parse(tables.settings[0].topics || '[]'), style: tables.settings[0].style, opinions: tables.settings[0].opinions,
-    minDelay: tables.settings[0].min_delay, maxDelay: tables.settings[0].max_delay,
-    ...(tables.settings[0].retention ? {retention: JSON.parse(tables.settings[0].retention)} : {}),
-  } : s.settings;
+  s.settings = tables.settings?.[0]?.retention ? {retention: JSON.parse(tables.settings[0].retention)} : s.settings;
   s.groups = (tables.groups || []).map(g => ({...g, bots: (tables.bots || []).filter(b => b.group_id === g.id).map(b => ({...b}))}));
   Object.assign(s, readDocuments(name => tables[name] || []));
-  s.evidence = (tables.evidence || []).map(e => ({...e}));
   s.events = (tables.events || []).map(e => ({...e}));
   s.tasks = (tables.tasks || []).map(t => ({...t, payload: JSON.parse(t.payload || '{}'), result: t.result ? JSON.parse(t.result) : null}));
   s.memory = readMemory(kind => (tables.memory || []).filter(row => row.kind === kind));

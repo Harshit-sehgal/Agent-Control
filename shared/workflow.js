@@ -38,6 +38,10 @@ export function migrate(state) {
     run.status = 'cancelled';
     run.error = 'X feed reading was removed';
   }
+  // X-engage's records and settings are gone. A workspace saved before it was
+  // removed still carries them; they are dropped rather than kept forever.
+  for (const key of ['candidates', 'drafts', 'evidence', 'schedules', 'captureToken']) delete state[key];
+  for (const key of ['topics', 'style', 'opinions', 'minDelay', 'maxDelay']) delete state.settings[key];
   // Reminders and candidate drafting went with X-engage. A queued one has no
   // handler left to run it, so it loads as cancelled instead of failing.
   for (const task of state.tasks) {

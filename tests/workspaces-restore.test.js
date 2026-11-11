@@ -13,7 +13,7 @@ import {DEFAULT_WORKSPACE} from '../src/auth.js';
 import {SqliteStore} from '../src/sqlite-store.js';
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const restored = id => ({id, url: `https://x.com/test/status/${id}`, text: 'Restored post long enough to keep.', author: 'Tester', topic: 'AI', status: 'new', createdAt: new Date().toISOString()});
+const restored = id => ({id, botId: 'atlas', botName: 'Atlas', input: 'in', output: 'Restored run to keep.', at: new Date().toISOString()});
 
 /** A real primary store plus one secondary workspace, with a `start` that only
  * records which workspace's services were started and stopped. */
@@ -48,7 +48,7 @@ test('restoring into a secondary workspace pauses it, swaps its data and resumes
   try {
     const client = t.workspaces.get('client');
     assert.ok(client, 'the secondary workspace is opened at boot');
-    assert.ok(!client.read().candidates.some(c => c.id === 'restored-1'));
+    assert.ok(!client.read().runs.some(c => c.id === 'restored-1'));
 
     // An in-flight piece of work must be drained before the data is replaced,
     // or a model result computed from the old rows lands after the restore.
@@ -60,7 +60,7 @@ test('restoring into a secondary workspace pauses it, swaps its data and resumes
       assert.deepEqual(t.clientCalls(), ['start', 'stop'], 'its services are stopped while the data is swapped');
       await assert.rejects(store.trackWork(async () => 'late'), error => error.status === 503, 'new work is refused while paused');
       // What backup.importBackup does: replace the collections inside the store.
-      await store.update(state => { state.candidates = [restored('restored-1')]; });
+      await store.update(state => { state.runs = [restored('restored-1')]; });
       return 'swapped';
     });
     await work;
@@ -70,7 +70,7 @@ test('restoring into a secondary workspace pauses it, swaps its data and resumes
     assert.deepEqual(t.clientCalls(), ['start', 'stop', 'start'], 'its services are started again afterwards');
 
     const after = t.workspaces.get('client');
-    assert.deepEqual(after.read().candidates.map(c => c.id), ['restored-1'], 'the restored rows are what the workspace now holds');
+    assert.deepEqual(after.read().runs.map(c => c.id), ['restored-1'], 'the restored rows are what the workspace now holds');
     assert.equal(await after.trackWork(async () => 'accepted'), 'accepted', 'the workspace accepts work again');
 
     // The first workspace was never fenced by a secondary restore.
@@ -82,24 +82,24 @@ test('a failed restore leaves the secondary workspace usable, not paused forever
   const t = await installation();
   try {
     const client = t.workspaces.get('client');
-    await client.update(state => { state.candidates = [restored('before-failure')]; });
+    await client.update(state => { state.runs = [restored('before-failure')]; });
     const before = t.services.length;
 
     await assert.rejects(t.workspaces.withPaused('client', async store => {
-      await store.update(state => { state.candidates = [restored('half-written')]; });
+      await store.update(state => { state.runs = [restored('half-written')]; });
       throw new Error('the backup document was rejected');
     }), /the backup document was rejected/);
 
     assert.deepEqual(t.services.slice(before).filter(([, id]) => id === 'client').map(([kind]) => kind), ['stop', 'start'],
       'the finally block must restart the services even when the restore throws');
     assert.equal(await t.workspaces.get('client').trackWork(async () => 'usable'), 'usable', 'not left refusing every request');
-    await t.workspaces.get('client').update(state => { state.candidates.push(restored('after-failure')); });
-    assert.deepEqual(t.workspaces.get('client').read().candidates.map(c => c.id), ['half-written', 'after-failure'],
+    await t.workspaces.get('client').update(state => { state.runs.push(restored('after-failure')); });
+    assert.deepEqual(t.workspaces.get('client').read().runs.map(c => c.id), ['half-written', 'after-failure'],
       'a failed restore keeps whatever it had written rather than rolling back into a broken state');
 
     // And the workspace is still the same live store, so later restores work.
-    await t.workspaces.withPaused('client', async store => { await store.update(state => { state.candidates = [restored('second-try')]; }); });
-    assert.deepEqual(t.workspaces.get('client').read().candidates.map(c => c.id), ['second-try']);
+    await t.workspaces.withPaused('client', async store => { await store.update(state => { state.runs = [restored('second-try')]; }); });
+    assert.deepEqual(t.workspaces.get('client').read().runs.map(c => c.id), ['second-try']);
     assert.deepEqual(t.clientCalls(), ['start', 'stop', 'start', 'stop', 'start']);
   } finally { await t.done(); }
 });

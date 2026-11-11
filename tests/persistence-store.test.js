@@ -1,7 +1,7 @@
 /** Store-level persistence guarantees that do not need a running server:
  * a failed transaction must surface the original error, a store that fails to
- * open must not leak its file handle, and the candidate release / agent
- * retention paths must survive the rows they are asked to touch.
+ * open must not leak its file handle, and the agent retention path must
+ * survive the rows it is asked to touch.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -102,32 +102,6 @@ test('a store that refuses to open closes its file handle', async () => {
     raw.close();
     const third = new SqliteStore(file, path.join(dir, 'state.json')).init();
     await assert.rejects(third, /duplicate column|already exists|no such/i, 'a downgraded file is still this build\'s problem to report');
-  } finally { await fs.rm(dir, {recursive: true, force: true}); }
-});
-
-test('a candidate whose draft failed is released even when the workflow transition cannot run', async () => {
-  const dir = await temp();
-  try {
-    const store = await openAt(dir);
-    const id = 'c9';
-    await store.update(s => { s.candidates.push({id, url: 'https://x.com/test/status/9', text: 'A post about queues and retries.', author: 'Tester', topic: 'AI', status: 'processing', createdAt: new Date().toISOString()}); });
-
-    assert.equal(store.failCandidate(id), true);
-    const row = store.get('SELECT status, doc FROM candidates WHERE id=?', id);
-    assert.equal(row.status, 'error', 'the typed column the queue reads is released');
-    assert.equal(JSON.parse(row.doc).status, 'error', 'the document the UI reads is released too');
-    // `candidates` is rewritten wholesale from the store's document cache on
-    // every update, so a release that only touches SQL is undone by the next
-    // unrelated write: the row goes back to `processing`, re-processing 409s
-    // forever and no retry task exists. Prove the very next write does not revert.
-    await store.update(s => { s.settings.style = 'a write that has nothing to do with this candidate'; });
-    const after = store.get('SELECT status, doc FROM candidates WHERE id=?', id);
-    assert.equal(after.status, 'error', 'an unrelated update must not put the candidate back in processing');
-    assert.equal(JSON.parse(after.doc).status, 'error');
-    assert.equal(store.read().candidates.find(c => c.id === id).status, 'error', 'the document cache agrees with the row');
-    // A candidate deleted mid-draft is not an error for the fallback.
-    assert.equal(store.failCandidate('gone'), false);
-    await store.close();
   } finally { await fs.rm(dir, {recursive: true, force: true}); }
 });
 

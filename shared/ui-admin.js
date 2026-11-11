@@ -211,7 +211,7 @@ function retentionPanel(policy, preview) {
     ? row({title: 'Would prune now', right: counts.map(([k, v]) => `${esc(k)} ${esc(String(v))}`).join(' · ')})
     : '';
   const inner = `${rows}${would}<p>${btn('Prune now', 'prune-retention', {kind: 'danger', small: true})}</p>`;
-  return note('Pruning removes only exhaust (events, finished tasks, sent notifications, runs), never drafts, candidates or evidence.')
+  return note('Pruning removes only exhaust (events, finished tasks, sent notifications, runs), never bots, chats or memory.')
     + box(inner, 'Retention');
 }
 
@@ -628,7 +628,7 @@ export const adminActions = {
     const ok = await confirmSheet('Prune exhaust older than the retention policy?', {
       confirm: 'Prune',
       danger: true,
-      detail: 'Drafts, candidates and evidence are never touched.',
+      detail: 'Bots, chats and memory are never touched.',
     });
     if (!ok) return;
     const res = await api('/api/retention/prune', 'POST', {});

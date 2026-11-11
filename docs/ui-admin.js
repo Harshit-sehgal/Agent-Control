@@ -2,11 +2,11 @@
  * `adminPage(kind)` fetches and returns the body HTML; the handler tables are
  * wired by the host's delegated click, submit and change listeners. Handlers do
  * not catch errors, the host toasts them. */
-import {esc, btn, row, box, field, note, empty, tag, fullDate, textInput} from './ui-kit.js?v=98402d35f0';
-import {store, api, sync} from './ui-store.js?v=98402d35f0';
-import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=98402d35f0';
-import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js?v=98402d35f0';
-import {pushStatus, enablePush, disablePush} from './ui-push.js?v=98402d35f0';
+import {esc, btn, row, box, field, note, empty, tag, fullDate, textInput} from './ui-kit.js?v=911b7c4b37';
+import {store, api, sync} from './ui-store.js?v=911b7c4b37';
+import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=911b7c4b37';
+import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js?v=911b7c4b37';
+import {pushStatus, enablePush, disablePush} from './ui-push.js?v=911b7c4b37';
 
 /** Title + one-line description per page, used by the host for the page header. */
 export const ADMIN_PAGES = {
@@ -211,7 +211,7 @@ function retentionPanel(policy, preview) {
     ? row({title: 'Would prune now', right: counts.map(([k, v]) => `${esc(k)} ${esc(String(v))}`).join(' · ')})
     : '';
   const inner = `${rows}${would}<p>${btn('Prune now', 'prune-retention', {kind: 'danger', small: true})}</p>`;
-  return note('Pruning removes only exhaust (events, finished tasks, sent notifications, runs), never drafts, candidates or evidence.')
+  return note('Pruning removes only exhaust (events, finished tasks, sent notifications, runs), never bots, chats or memory.')
     + box(inner, 'Retention');
 }
 
@@ -628,7 +628,7 @@ export const adminActions = {
     const ok = await confirmSheet('Prune exhaust older than the retention policy?', {
       confirm: 'Prune',
       danger: true,
-      detail: 'Drafts, candidates and evidence are never touched.',
+      detail: 'Bots, chats and memory are never touched.',
     });
     if (!ok) return;
     const res = await api('/api/retention/prune', 'POST', {});
