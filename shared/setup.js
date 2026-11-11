@@ -14,7 +14,8 @@
  *       ```
  *
  *   `model` (a bot's model, or the default when `bot` is left out), `job` (a bot's job sentence), `rename`,
- *   `settings` (reply length, style, memory, hand-offs, @mentions, on or off, temperature, manager), `rule`
+ *   `settings` (reply length, style, memory, hand-offs, @mentions, on or off, temperature, manager), `team`
+ *   (a team's "Approve between steps", step limit and hand-offs between its bots), `rule`
  *   (Always allow / Ask each time / Deny for a bot, an action and a site; a payment is never Always), or
  *   `open` (a Settings page: models, connectors, permissions, agents, usage). The block never changes
  *   anything: it becomes a card in the chat with one button, and the owner's tap calls the same route
@@ -26,12 +27,14 @@ import {cleanText} from './core.js';
 import {controlFence} from './reply-blocks.js';
 import {companyBots, primaryOf} from './company.js';
 import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js';
-import {botSettings, validateBotSettings} from './bot-settings.js';
+import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js';
 import {grantWhat} from './ui-asks.js';
 
-export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'rule', 'open'];
+export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'open'];
 /** The bot settings a bot may propose. Not the primary role, the browser approval mode, or layout (pins, order). */
 export const BOT_SETTABLE = ['replyLength', 'style', 'memory', 'canHandoff', 'summonable', 'enabled', 'temperature', 'reportsTo'];
+/** The team (group) settings a bot may propose: approve between steps, the step limit, hand-offs between its bots. */
+export const TEAM_SETTABLE = ['checkpoints', 'maxSteps', 'botHandoffs'];
 const RULE_WORDS = {open: 'browser.use', browse: 'browser.use', browser: 'browser.use', 'browser.use': 'browser.use', web: 'browser.use', send: 'send', email: 'send', post: 'post', delete: 'delete', spend: 'spend', pay: 'spend', payment: 'spend', buy: 'spend'};
 const PER_SITE = ['browser.use', 'send', 'post', 'delete'];
 /** Settings pages a bot may point to, by the word it uses, and the section key and title the app uses. */
@@ -48,6 +51,7 @@ export const SETUP_TOOL_HINT = 'To change a setting for the owner, put one fence
   + '{"action":"job","bot":"<bot name>","job":"<the new job, one or two sentences>"} rewrites a bot\'s job. '
   + '{"action":"rename","bot":"<bot name>","name":"<new name>"} renames a bot. '
   + '{"action":"settings","bot":"<bot name>","settings":{"replyLength":"short|medium|long","style":"<tone>","memory":true|false,"canHandoff":true|false,"summonable":true|false,"enabled":true|false,"temperature":0-2,"reportsTo":"<manager bot name, or none>"}} changes how a bot works; give only what changes. '
+  + '{"action":"team","team":"<team name, or leave out for your own team>","settings":{"checkpoints":true|false,"maxSteps":1-12,"botHandoffs":true|false}} changes how a team runs: checkpoints asks the owner before each step. '
   + '{"action":"rule","bot":"<bot name>","do":"open|send|post|delete|spend","site":"<site, e.g. github.com>","choice":"always|ask|deny"} saves what that bot may do without asking (a payment is never always). '
   + '{"action":"open","page":"models|connectors|permissions|agents|usage"} shows the owner a Settings page, for things only they can do, such as pasting a key. '
   + 'Nothing changes until the owner taps Apply on the card, so say in your reply what you proposed and why. Never ask for a key or password in chat.';
@@ -65,7 +69,7 @@ export function parseSetupRequests(output) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) { found.push({ok: false, error: 'the setup block was not an object.'}); continue; }
     const action = lower(body.action);
     if (!SETUP_ACTIONS.includes(action)) { found.push({ok: false, error: `"${cleanText(body.action, 40) || 'nothing'}" is not something setup can do. Use ${SETUP_ACTIONS.join(', ')}.`}); continue; }
-    found.push({ok: true, request: {action, bot: cleanText(body.bot, 60), provider: cleanText(body.provider, 80), model: cleanText(body.model, 120), job: cleanText(body.job, MAX_JOB + 1), page: lower(body.page), name: cleanText(body.name, 81), settings: body.settings && typeof body.settings === 'object' && !Array.isArray(body.settings) ? body.settings : null, do: lower(body.do), site: cleanText(body.site, 300), choice: lower(body.choice)}});
+    found.push({ok: true, request: {action, bot: cleanText(body.bot, 60), provider: cleanText(body.provider, 80), model: cleanText(body.model, 120), job: cleanText(body.job, MAX_JOB + 1), page: lower(body.page), name: cleanText(body.name, 81), team: cleanText(body.team, 80), settings: body.settings && typeof body.settings === 'object' && !Array.isArray(body.settings) ? body.settings : null, do: lower(body.do), site: cleanText(body.site, 300), choice: lower(body.choice)}});
   }
   return found;
 }
@@ -122,6 +126,7 @@ export function resolveSetup(state, request, {speaker = null} = {}) {
     if (job.length < MIN_JOB || job.length > MAX_JOB) return {ok: false, error: `a job is ${MIN_JOB} to ${MAX_JOB} characters.`};
     return {ok: true, card: {action: 'job', botId: bot.id, job, text: `New job for ${bot.name}: “${job.length > 240 ? `${job.slice(0, 240)}…` : job}”`}};
   }
+  if (request.action === 'team') return teamCard(state, request, speaker);
   if (request.action === 'rename' || request.action === 'settings' || request.action === 'rule') {
     const bot = botNamed(state, request.bot, speaker);
     if (!bot) return {ok: false, error: `there is no bot called "${request.bot || 'blank'}".`};
@@ -164,14 +169,39 @@ function settingsCard(state, bot, wanted, speaker) {
   let next;
   try { next = validateBotSettings(picked, bot.settings || {}); } catch (error) { return {ok: false, error: lower(error.message).replace(/\.$/, '') + '.'}; }
   const settings = Object.fromEntries(Object.keys(picked).map(key => [key, next[key]]));
+  const words = botWords(state);
+  return {ok: true, card: {action: 'settings', botId: bot.id, settings, text: `${bot.name}: ${Object.entries(settings).map(([k, v]) => words[k](v)).join(', ')}`}};
+}
+
+/** How a bot setting reads, for a card and for the brief. */
+function botWords(state) {
   const nameOf = id => companyBots(state).find(b => b.id === id)?.name || 'nobody';
-  const words = {
+  return {
     replyLength: v => `${v} replies`, style: v => (v ? `style “${short(v, 80)}”` : 'no extra style'), memory: v => (v ? 'memory on' : 'no memory'),
     canHandoff: v => (v ? 'may hand work on' : 'keeps its work'), summonable: v => (v ? 'may be @mentioned anywhere' : 'only in its own group'),
     enabled: v => (v ? 'switched on' : 'switched off'), temperature: v => (v === null ? 'default temperature' : `temperature ${v}`),
     reportsTo: v => (v ? `reports to ${nameOf(v)}` : 'works solo'),
   };
-  return {ok: true, card: {action: 'settings', botId: bot.id, settings, text: `${bot.name}: ${Object.entries(settings).map(([k, v]) => words[k](v)).join(', ')}`}};
+}
+const TEAM_WORDS = {
+  checkpoints: v => (v ? 'asks you before each step' : 'runs every step without asking'),
+  maxSteps: v => `at most ${v} steps`, botHandoffs: v => (v ? 'its bots may hand work to each other' : 'no hand-offs between its bots'),
+};
+
+function teamCard(state, request, speaker) {
+  const groups = state?.groups || [];
+  const want = lower(request.team);
+  const group = want && !['this', 'mine', 'my team', 'our team', 'here'].includes(want)
+    ? groups.find(g => lower(g.name) === want) || groups.find(g => lower(g.id) === want)
+    : groups.find(g => (g.bots || []).some(b => b.id === speaker?.id));
+  if (!group) return {ok: false, error: `there is no team called "${cleanText(request.team, 60) || 'blank'}".`};
+  const picked = {};
+  for (const key of TEAM_SETTABLE) if (request.settings && Object.hasOwn(request.settings, key)) picked[key] = request.settings[key];
+  if (!Object.keys(picked).length) return {ok: false, error: `nothing to change. A team card may set ${TEAM_SETTABLE.join(', ')}.`};
+  let next;
+  try { next = validateGroupSettings(group, picked, group.settings || {}); } catch (error) { return {ok: false, error: lower(error.message).replace(/\.$/, '') + '.'}; }
+  const settings = Object.fromEntries(Object.keys(picked).map(key => [key, next[key]]));
+  return {ok: true, card: {action: 'team', groupId: group.id, settings, text: `${group.name || 'This team'}: ${Object.entries(settings).map(([k, v]) => TEAM_WORDS[k](v)).join(', ')}`}};
 }
 
 function ruleCard(bot, request) {
@@ -198,6 +228,7 @@ export function setupCardOf(message) {
   if (card.action === 'job') return typeof card.botId === 'string' && typeof card.job === 'string' ? card : null;
   if (card.action === 'rename') return typeof card.botId === 'string' && typeof card.name === 'string' ? card : null;
   if (card.action === 'settings') return typeof card.botId === 'string' && card.settings && typeof card.settings === 'object' && Object.keys(card.settings).length && Object.keys(card.settings).every(k => BOT_SETTABLE.includes(k)) ? card : null;
+  if (card.action === 'team') return typeof card.groupId === 'string' && card.settings && typeof card.settings === 'object' && Object.keys(card.settings).length && Object.keys(card.settings).every(k => TEAM_SETTABLE.includes(k)) ? card : null;
   if (card.action === 'rule') return typeof card.botId === 'string' && ASK_ACTIONS.includes(card.act) && GRANT_CHOICES.includes(card.choice) && typeof card.scope === 'string' ? card : null;
   return typeof card.providerId === 'string' ? card : null;
 }
@@ -205,6 +236,7 @@ export function setupCardOf(message) {
 export function setupDone(state, card) {
   if (!card || card.action === 'open') return false;
   if (card.action === 'job') return companyBots(state).find(b => b.id === card.botId)?.instructions === card.job;
+  if (card.action === 'team') { const group = (state?.groups || []).find(g => g.id === card.groupId); const now = groupSettings(group || {}); return Boolean(group) && Object.entries(card.settings).every(([k, v]) => now[k] === v); }
   const bot = companyBots(state).find(b => b.id === card.botId);
   if (card.action === 'rename') return bot?.name === card.name;
   if (card.action === 'settings') { const now = botSettings(bot || {}); return Boolean(bot) && Object.entries(card.settings).every(([k, v]) => (now[k] ?? null) === v); }
@@ -241,7 +273,15 @@ export function workspaceBrief(state, {agents = [], connectors = [], speaker = n
   const bots = companyBots(state).map(b => {
     const own = ai.bots?.[b.id] || {};
     const model = own.providerId ? `${label(own.providerId) || 'a removed model'}${own.model ? ` · ${own.model}` : ''}` : 'the default';
-    return {name: b.name, job: short(b.instructions, 140) || 'no job yet', model, ...(b.enabled === false ? {off: true} : {})};
+    // Only what differs from a new bot, in the words a card uses; "off" stays its own flag.
+    const set = botSettings(b), words = botWords(state);
+    const changed = BOT_SETTABLE.filter(k => k !== 'enabled' && (set[k] ?? null) !== (BOT_DEFAULTS[k] ?? null)).map(k => words[k](set[k]));
+    return {name: b.name, job: short(b.instructions, 140) || 'no job yet', model, ...(set.enabled === false ? {off: true} : {}), ...(changed.length ? {settings: changed.join(', ')} : {})};
+  });
+  const teams = (state?.groups || []).filter(g => g?.settings?.kind !== 'thread').map(g => {
+    const set = groupSettings(g);
+    const changed = TEAM_SETTABLE.filter(k => set[k] !== GROUP_DEFAULTS[k]).map(k => TEAM_WORDS[k](set[k]).replace('asks you', 'asks the owner'));
+    return {name: g.name || g.id, bots: (g.bots || []).length, ...(changed.length ? {runs: changed.join(', ')} : {})};
   });
   const live = agents.filter(a => a.online && a.status !== 'revoked');
   const computer = live.length
@@ -257,6 +297,7 @@ export function workspaceBrief(state, {agents = [], connectors = [], speaker = n
     models: models.length ? models : 'none connected yet',
     defaultModel: ai.defaultProviderId ? `${label(ai.defaultProviderId) || 'unknown'}${ai.defaultModel ? ` · ${ai.defaultModel}` : ''}` : 'none',
     bots,
+    teams,
     computer,
     // Saved answers, what waits on the owner and the open threads: what Atlas needs to say where things stand.
     rules: rules.length ? rules : 'none',

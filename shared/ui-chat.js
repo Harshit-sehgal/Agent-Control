@@ -5,7 +5,7 @@
  * The server orchestrator runs them when a model is configured and the offline
  * simulator does otherwise; the UI cannot tell which. Nothing here can publish. */
 import {pollRun, runWithTyping} from './run-follow.js';
-import {botSettings} from './bot-settings.js';
+import {botSettings, groupSettings} from './bot-settings.js';
 import {store, api, sync, go, conversation, appendMessage, setTyping, teamKey} from './ui-store.js';
 import {toast} from './ui-dialogs.js';
 
@@ -97,6 +97,15 @@ export async function answerLimit(groupId, runId, choice) {
   await runWithTyping({key, setTyping, sync, concurrent: true,
     send: () => api(`/api/groups/${groupId}/runs/${runId}/continue`, 'POST', {choice}),
     follow: () => streamGroupRun(groupId, key, runId)});
+}
+
+/** Run a message again in the conversation it came from (Retry, or after a Switch to another model). */
+export async function rerun(groupId, {message, direct = '', chat = ''} = {}) {
+  const key = chat || teamKey(groupId), group = (store.state?.groups || []).find(g => g.id === groupId);
+  const run = await api(`/api/groups/${groupId}/chat`, 'POST', {message, directBotId: direct || null, checkpoints: groupSettings(group || {}).checkpoints, chatKey: key});
+  if (await watchQueuedRun(groupId, key, run)) return 'queued';
+  await streamGroupRun(groupId, key, run?.runId || null); await sync();
+  return 'ran';
 }
 
 /** Send `text` to a conversation and let the right engine answer. */

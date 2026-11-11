@@ -2,16 +2,17 @@
  * The bots answer with canned replies (shared/offline-bots.js), and everything a
  * reply asks for goes through the rules the served loop uses: hand-offs, hires,
  * the out-of-job refusal, checkpoints and the runaway guard. */
-import {createRun,createEnvelope,handoffTargets,instructLead,wakeBots,assessTask,runNote,rosterFor,previousFor,enlist} from './coordination.js?v=be2f2451d1';
-import {offlineReply} from './offline-bots.js?v=be2f2451d1';
-import {parseOffJob,offJobMessage} from './off-job.js?v=be2f2451d1';
-import {parseCreateBotRequests,stripCreateBotBlocks,botCreatedText,botCreateRefusedText} from './bot-create.js?v=be2f2451d1';
-import {addCreatedBot} from './hire.js?v=be2f2451d1';
-import {noteBotWork} from './runaway.js?v=be2f2451d1';
-import {isLead} from './company.js?v=be2f2451d1';
-import {botSettings,groupSettings,threadContext} from './bot-settings.js?v=be2f2451d1';
-import {normalizeBot} from './contracts.js?v=be2f2451d1';
-import {isThread,noteMember} from './threads.js?v=be2f2451d1';
+import {createRun,createEnvelope,handoffTargets,instructLead,wakeBots,assessTask,runNote,rosterFor,previousFor,enlist} from './coordination.js?v=33723157a3';
+import {offlineReply} from './offline-bots.js?v=33723157a3';
+import {parseOffJob,offJobMessage} from './off-job.js?v=33723157a3';
+import {parseCreateBotRequests,stripCreateBotBlocks,botCreatedText,botCreateRefusedText} from './bot-create.js?v=33723157a3';
+import {addCreatedBot} from './hire.js?v=33723157a3';
+import {parseSetupRequests,stripSetupBlocks,resolveSetup} from './setup.js?v=33723157a3';
+import {noteBotWork} from './runaway.js?v=33723157a3';
+import {isLead} from './company.js?v=33723157a3';
+import {botSettings,groupSettings,threadContext} from './bot-settings.js?v=33723157a3';
+import {normalizeBot} from './contracts.js?v=33723157a3';
+import {isThread,noteMember} from './threads.js?v=33723157a3';
 
 export async function simulateGroup({group, message, directBotId=null, guests=[], state, api, makeId, emit, chatKey=null, started=false, resume=null, shouldStop=()=>false, anyway=false}) {
   let run, previous, i;
@@ -117,7 +118,14 @@ export async function simulateGroup({group, message, directBotId=null, guests=[]
           hireLines.push(made.record?botCreatedText(bot,made.record,made.groupName):botCreateRefusedText(bot,made.refused));
         }
       }
-      const output=offMsg?offMsg.text:hires.length?(stripCreateBotBlocks(reply)||`${bot.name} added a bot to the team.`):reply;
+      // A setup block becomes a card the owner taps, as the served app does it (src/setup-cards.js).
+      const asks=!off?parseSetupRequests(reply):[];
+      const setupLines=asks.map(item=>{
+        const out=item.ok?resolveSetup(state,item.request,{speaker:bot}):item;
+        return out.ok?{role:'system',kind:'setup',botId:bot.id,setup:JSON.stringify(out.card),text:`${bot.name} suggests: ${out.card.text}`}:{role:'system',kind:'setup',botId:bot.id,text:`${bot.name} could not set that up: ${out.error}`};
+      });
+      const said=asks.length?(stripSetupBlocks(reply)||`${bot.name} suggested a change.`):reply;
+      const output=offMsg?offMsg.text:hires.length?(stripCreateBotBlocks(said)||`${bot.name} added a bot to the team.`):said;
       previous={botId:bot.id,output};
       const added=closing||off?[]:handoffTargets({run,roster:rosterFor(world,bot,roster,{thread:isThread(group)}),fromBot:bot,output,home:lead||isThread(group)?null:group.bots,reserve:lead&&run.closeAt==null?1:0});
       enlist(run,{fromId:bot.id,added,output,lead});
@@ -126,6 +134,7 @@ export async function simulateGroup({group, message, directBotId=null, guests=[]
       run.trace.push({botId:bot.id,output,at:new Date().toISOString(),toBotId:recipient?.id||null});
       for(const text of hireLines)emit({id:makeId(),role:'system',kind:'bot-created',text,runId:run.id,at:new Date().toISOString()});
       emit(offMsg?{...offMsg,toBotId:recipient?.id||null}:{id:makeId(),role:'bot',senderId:bot.id,senderName:bot.name,toBotId:recipient?.id||null,text:output,runId:run.id,kind:'handoff',at:new Date().toISOString()});
+      for(const line of setupLines)emit({...line,id:makeId(),runId:run.id,at:new Date().toISOString()});
       i++;
       run.currentStep=i;
       if(run.checkpointsEnabled&&i<run.recipients.length){

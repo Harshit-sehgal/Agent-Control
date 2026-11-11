@@ -9,9 +9,9 @@
  *
  * Pure and browser-safe.
  */
-import {cleanText} from './core.js?v=be2f2451d1';
-import {mentionedBots} from './coordination.js?v=be2f2451d1';
-import {MIN_BOT_JOB} from './bot-create.js?v=be2f2451d1';
+import {cleanText} from './core.js?v=33723157a3';
+import {mentionedBots} from './coordination.js?v=33723157a3';
+import {MIN_BOT_JOB} from './bot-create.js?v=33723157a3';
 
 const FILLER = new Set('about after also and are can could does from have here into just like make more need please should some than that their them then there these they this those want what when where which will with would your you for the'.split(' '));
 /** Content words of a text, lower-case, with a trailing plural `s` dropped, so
@@ -19,6 +19,27 @@ const FILLER = new Set('about after also and are can could does from have here i
 const stems = text => new Set((String(text ?? '').toLowerCase().match(/[a-z0-9]{3,}/g) || []).filter(w => w.length >= 4 && !FILLER.has(w)).map(w => w.replace(/s$/, '')));
 /** How many content words two texts share. */
 export const overlap = (a, b) => { const left = stems(a); let n = 0; for (const w of stems(b)) if (left.has(w)) n++; return n; };
+
+/** A settings request the demo can read without a model: rename a bot, change its reply length, switch it
+ * on or off, or have the team ask before each step. Returns the ```setup block a model would write (see shared/setup.js), or ''. `self` is the bot
+ * that is speaking, so "your replies" in its own chat means itself. */
+export function offlineSetup(request, bots = [], self = null) {
+  const text = String(request ?? '').trim();
+  const fence = body => `\`\`\`setup\n${JSON.stringify(body)}\n\`\`\``;
+  const named = bots.filter(b => b?.name && new RegExp(`\\b${b.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(text))[0];
+  const rename = text.match(/\brename\s+(.+?)\s+to\s+["“]?([^"”]+?)["”]?[.!?]*$/i);
+  if (rename) return fence({action: 'rename', bot: rename[1].replace(/^(the\s+)?bot\s+/i, ''), name: rename[2].trim()});
+  if (/\b(ask|check with) me (before|between) (each|every)\b|\bapprove (each|every) step\b/i.test(text)) return fence({action: 'team', settings: {checkpoints: true}});
+  if (/\b(stop asking|don'?t ask me)\b[^.?!]*\bstep/i.test(text)) return fence({action: 'team', settings: {checkpoints: false}});
+  const who = named?.name || (self && /\b(you|your|yourself)\b/i.test(text) ? 'me' : '');
+  if (!who) return '';
+  if (/\b(switch|turn)\b[^.?!]*\boff\b|\bdisable\b/i.test(text)) return fence({action: 'settings', bot: who, settings: {enabled: false}});
+  if (/\b(switch|turn)\b[^.?!]*\bon\b|\benable\b/i.test(text)) return fence({action: 'settings', bot: who, settings: {enabled: true}});
+  const replies = /\b(replies|answers|responses)\b/i.test(text);
+  if (replies && /\b(shorter|briefer|more concise|short)\b/i.test(text)) return fence({action: 'settings', bot: who, settings: {replyLength: 'short'}});
+  if (replies && /\b(longer|more detail(ed)?|long)\b/i.test(text)) return fence({action: 'settings', bot: who, settings: {replyLength: 'long'}});
+  return '';
+}
 
 const GREETING = /^\s*(hi|hello|hey|hiya|good (morning|afternoon|evening)|thanks|thank you)\b[\s\S]{0,40}$/i;
 const HIRE = /\b(make|create|build|hire|add|set up|need)\b[^.?!]*\b(bot|helper|assistant|agent)\b/i;
@@ -39,6 +60,8 @@ export function offlineReply({bot, request, team = [], previous = null, closing 
   const task = cleanText(request, 220);
   if (closing) return `All done. Here is what the team said:\n${cleanText(previous?.output, 600)}`;
   if (GREETING.test(request ?? '')) return `Hello! I'm ${bot.name}. Tell me what you need${lead ? " and I'll get the right bot on it" : ''}.`;
+  const setup = offlineSetup(request, [bot, ...team], own || lead ? bot : null);
+  if (setup) return `Here is that change.\n${setup}`;
   if (lead) {
     if (HIRE.test(request ?? '')) return `Hiring that now.\n\`\`\`create-bot\n${JSON.stringify({job: jobFrom(request)})}\n\`\`\``;
     // Bots named in the request, then the ones whose job shares words with it.

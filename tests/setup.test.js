@@ -140,3 +140,37 @@ test('every bot is told the workspace; one that is not the primary is told who i
   assert.ok(Array.isArray(brief.bots) && brief.models.length === 2);
   assert.match(workspaceBrief(state, {speaker: state.groups[0].bots[0]}).you, /You are Atlas, the primary bot/);
 });
+
+test('a team card turns on "Approve between steps" and the step limit for the speaker\'s group', async () => {
+  const {setupDone} = await import('../shared/setup.js');
+  const atlas = state.groups[0].bots[0];
+  const [ask] = parseSetupRequests(block({action: 'team', settings: {checkpoints: true, maxSteps: 4}}));
+  const out = resolveSetup(state, ask.request, {speaker: atlas});
+  assert.equal(out.ok, true, out.error);
+  assert.deepEqual(out.card, {action: 'team', groupId: 'home', settings: {checkpoints: true, maxSteps: 4}, text: 'This team: asks you before each step, at most 4 steps'});
+  assert.deepEqual(setupCardOf({setup: JSON.stringify(out.card)}), out.card);
+  assert.equal(setupDone(state, out.card), false);
+  assert.equal(setupDone({groups: [{...state.groups[0], settings: {checkpoints: true, maxSteps: 4}}]}, out.card), true);
+  assert.match(resolveSetup(state, {action: 'team', settings: {routing: 'everyone'}}, {speaker: atlas}).error, /checkpoints/);
+  assert.match(resolveSetup(state, {action: 'team', settings: {maxSteps: 99}}, {speaker: atlas}).error, /step limit/i);
+  assert.match(resolveSetup(state, {action: 'team', team: 'Nowhere', settings: {checkpoints: true}}, {speaker: atlas}).error, /no team/);
+  assert.equal(setupCardOf({setup: JSON.stringify({action: 'team', groupId: 'home', settings: {pipeline: []}})}), null, 'only the listed keys ride on a card');
+});
+
+test('the parser keeps the team a team card names', () => {
+  const [ask] = parseSetupRequests(block({action: 'team', team: 'Ops', settings: {checkpoints: false}}));
+  assert.equal(ask.request.team, 'Ops');
+});
+
+test('the brief says how each bot is set and how each team runs, so a bot knows what is already on', () => {
+  const s = {groups: [{id: 'home', name: 'Home', settings: {checkpoints: true, maxSteps: 4}, bots: [
+    {id: 'atlas', name: 'Atlas', instructions: 'Hands work out.', settings: {lead: true}},
+    {id: 'rep', name: 'Replier', instructions: 'Drafts replies.', settings: {enabled: false, replyLength: 'short', memory: false, reportsTo: 'atlas'}},
+  ]}, {id: 't1', name: 'Offsite', settings: {kind: 'thread'}, bots: []}]};
+  const brief = workspaceBrief(s);
+  const rep = brief.bots.find(b => b.name === 'Replier');
+  assert.equal(rep.off, true, 'a bot switched off in its settings is reported off');
+  assert.equal(rep.settings, 'short replies, no memory, reports to Atlas');
+  assert.equal(brief.bots.find(b => b.name === 'Atlas').settings, undefined, 'defaults are not listed');
+  assert.deepEqual(brief.teams, [{name: 'Home', bots: 2, runs: 'asks the owner before each step, at most 4 steps'}]);
+});

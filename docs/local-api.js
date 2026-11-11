@@ -4,22 +4,22 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {initialState, cleanText} from './core.js?v=be2f2451d1';
-import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=be2f2451d1';
-import {RETENTION_DEFAULTS} from './retention.js?v=be2f2451d1';
-import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=be2f2451d1';
-import {addChatMessages, clearChat} from './chats.js?v=be2f2451d1';
-import {publicMemory, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=be2f2451d1';
-import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=be2f2451d1';
-import {createThread, titleFrom} from './threads.js?v=be2f2451d1';
-import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=be2f2451d1';
-import {simulateGroup} from './group-simulator.js?v=be2f2451d1';
-import {BUSY_STATUSES} from './run-state.js?v=be2f2451d1';
-import {botSettings} from './bot-settings.js?v=be2f2451d1';
-import {denyBrowserRequest} from './bot-browser.js?v=be2f2451d1';
-import {answerAsk, expireAsks, orphanAsks, setGrant} from './asks.js?v=be2f2451d1';
-import {activityPage} from './activity-log.js?v=be2f2451d1';
-import {withLocalLock} from './locks.js?v=be2f2451d1';
+import {initialState, cleanText} from './core.js?v=33723157a3';
+import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=33723157a3';
+import {RETENTION_DEFAULTS} from './retention.js?v=33723157a3';
+import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=33723157a3';
+import {addChatMessages, clearChat} from './chats.js?v=33723157a3';
+import {publicMemory, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=33723157a3';
+import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=33723157a3';
+import {createThread, titleFrom} from './threads.js?v=33723157a3';
+import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=33723157a3';
+import {simulateGroup} from './group-simulator.js?v=33723157a3';
+import {BUSY_STATUSES} from './run-state.js?v=33723157a3';
+import {botSettings} from './bot-settings.js?v=33723157a3';
+import {denyBrowserRequest} from './bot-browser.js?v=33723157a3';
+import {answerAsk, expireAsks, orphanAsks, setGrant} from './asks.js?v=33723157a3';
+import {activityPage} from './activity-log.js?v=33723157a3';
+import {withLocalLock} from './locks.js?v=33723157a3';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
@@ -100,9 +100,9 @@ function storeRunLines(state, run, entries) {
   const log = (state.groupMessages[run.groupId] ??= []);
   for (const entry of entries) {
     const line = {id: entry.id || crypto.randomUUID(), runId: run.id, role: entry.role, senderId: entry.senderId, senderName: entry.senderName, toBotId: entry.toBotId, text: entry.text, at: entry.at || now(),
-      // The cards a conversation draws (out of job, a hire, a limit) carry their kind;
+      // The cards a conversation draws (out of job, a hire, a limit, a setup change) carry their kind;
       // a plain reply's `handoff` kind is only the run log's.
-      ...(entry.kind && entry.kind !== 'handoff' ? {kind: entry.kind} : {}), ...(entry.request ? {request: entry.request} : {}), ...(entry.botId ? {botId: entry.botId} : {}), ...(entry.mode ? {mode: entry.mode} : {})};
+      ...(entry.kind && entry.kind !== 'handoff' ? {kind: entry.kind} : {}), ...(entry.request ? {request: entry.request} : {}), ...(entry.botId ? {botId: entry.botId} : {}), ...(entry.mode ? {mode: entry.mode} : {}), ...(entry.setup ? {setup: entry.setup} : {})};
     if (line.role === 'bot') log.push({...line, kind: entry.kind});
     try { addChatMessages(state, key, [line], {trusted: true}); } catch { /* The conversation was removed mid-run. */ }
   }

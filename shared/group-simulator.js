@@ -7,6 +7,7 @@ import {offlineReply} from './offline-bots.js';
 import {parseOffJob,offJobMessage} from './off-job.js';
 import {parseCreateBotRequests,stripCreateBotBlocks,botCreatedText,botCreateRefusedText} from './bot-create.js';
 import {addCreatedBot} from './hire.js';
+import {parseSetupRequests,stripSetupBlocks,resolveSetup} from './setup.js';
 import {noteBotWork} from './runaway.js';
 import {isLead} from './company.js';
 import {botSettings,groupSettings,threadContext} from './bot-settings.js';
@@ -117,7 +118,14 @@ export async function simulateGroup({group, message, directBotId=null, guests=[]
           hireLines.push(made.record?botCreatedText(bot,made.record,made.groupName):botCreateRefusedText(bot,made.refused));
         }
       }
-      const output=offMsg?offMsg.text:hires.length?(stripCreateBotBlocks(reply)||`${bot.name} added a bot to the team.`):reply;
+      // A setup block becomes a card the owner taps, as the served app does it (src/setup-cards.js).
+      const asks=!off?parseSetupRequests(reply):[];
+      const setupLines=asks.map(item=>{
+        const out=item.ok?resolveSetup(state,item.request,{speaker:bot}):item;
+        return out.ok?{role:'system',kind:'setup',botId:bot.id,setup:JSON.stringify(out.card),text:`${bot.name} suggests: ${out.card.text}`}:{role:'system',kind:'setup',botId:bot.id,text:`${bot.name} could not set that up: ${out.error}`};
+      });
+      const said=asks.length?(stripSetupBlocks(reply)||`${bot.name} suggested a change.`):reply;
+      const output=offMsg?offMsg.text:hires.length?(stripCreateBotBlocks(said)||`${bot.name} added a bot to the team.`):said;
       previous={botId:bot.id,output};
       const added=closing||off?[]:handoffTargets({run,roster:rosterFor(world,bot,roster,{thread:isThread(group)}),fromBot:bot,output,home:lead||isThread(group)?null:group.bots,reserve:lead&&run.closeAt==null?1:0});
       enlist(run,{fromId:bot.id,added,output,lead});
@@ -126,6 +134,7 @@ export async function simulateGroup({group, message, directBotId=null, guests=[]
       run.trace.push({botId:bot.id,output,at:new Date().toISOString(),toBotId:recipient?.id||null});
       for(const text of hireLines)emit({id:makeId(),role:'system',kind:'bot-created',text,runId:run.id,at:new Date().toISOString()});
       emit(offMsg?{...offMsg,toBotId:recipient?.id||null}:{id:makeId(),role:'bot',senderId:bot.id,senderName:bot.name,toBotId:recipient?.id||null,text:output,runId:run.id,kind:'handoff',at:new Date().toISOString()});
+      for(const line of setupLines)emit({...line,id:makeId(),runId:run.id,at:new Date().toISOString()});
       i++;
       run.currentStep=i;
       if(run.checkpointsEnabled&&i<run.recipients.length){

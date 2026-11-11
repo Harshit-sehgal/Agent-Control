@@ -100,9 +100,9 @@ function storeRunLines(state, run, entries) {
   const log = (state.groupMessages[run.groupId] ??= []);
   for (const entry of entries) {
     const line = {id: entry.id || crypto.randomUUID(), runId: run.id, role: entry.role, senderId: entry.senderId, senderName: entry.senderName, toBotId: entry.toBotId, text: entry.text, at: entry.at || now(),
-      // The cards a conversation draws (out of job, a hire, a limit) carry their kind;
+      // The cards a conversation draws (out of job, a hire, a limit, a setup change) carry their kind;
       // a plain reply's `handoff` kind is only the run log's.
-      ...(entry.kind && entry.kind !== 'handoff' ? {kind: entry.kind} : {}), ...(entry.request ? {request: entry.request} : {}), ...(entry.botId ? {botId: entry.botId} : {}), ...(entry.mode ? {mode: entry.mode} : {})};
+      ...(entry.kind && entry.kind !== 'handoff' ? {kind: entry.kind} : {}), ...(entry.request ? {request: entry.request} : {}), ...(entry.botId ? {botId: entry.botId} : {}), ...(entry.mode ? {mode: entry.mode} : {}), ...(entry.setup ? {setup: entry.setup} : {})};
     if (line.role === 'bot') log.push({...line, kind: entry.kind});
     try { addChatMessages(state, key, [line], {trusted: true}); } catch { /* The conversation was removed mid-run. */ }
   }

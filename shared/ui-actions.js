@@ -4,7 +4,7 @@
 import {store, api, sync, setTyping, conversation, findGroup, teamKey, recentRuns, chatKeyOf} from './ui-store.js';
 import {groupSettings} from './bot-settings.js';
 import {toast, closeSheet} from './ui-dialogs.js';
-import {sendChat, streamGroupRun, watchQueuedRun} from './ui-chat.js';
+import {sendChat, streamGroupRun, rerun} from './ui-chat.js';
 import {runWithTyping} from './run-follow.js';
 import {whoosh, react} from './ui-fx.js';
 import {shellActions} from './ui-shell.js';
@@ -73,11 +73,8 @@ export const actions = {
     await runWithTyping({key, setTyping, sync, follow: () => streamGroupRun(request.groupId, key, request.runId)});
   },
   'retry-run': async b => {
-    const key = b.dataset.chat || chatId() || teamKey(b.dataset.id);
-    const run = await api(`/api/groups/${b.dataset.id}/chat`, 'POST', {message: b.dataset.message, directBotId: b.dataset.direct || null, checkpoints: groupSettings(findGroup(b.dataset.id)).checkpoints, chatKey: key});
-    if (await watchQueuedRun(b.dataset.id, key, run)) return;
-    toast('Run queued again.');
-    await streamGroupRun(b.dataset.id, key, run?.runId || null); await sync();
+    const chat = b.dataset.chat || chatId() || teamKey(b.dataset.id);
+    if (await rerun(b.dataset.id, {message: b.dataset.message, direct: b.dataset.direct, chat}) === 'ran') toast('Run queued again.');
   },
 
   ...Object.fromEntries(Object.entries(adminActions).map(([name, run]) => [name, b => run(b, adminCtx)])),

@@ -4,10 +4,10 @@
  * the bot as `directBotId`, a thread posts to its own group and Atlas answers.
  * The server orchestrator runs them when a model is configured and the offline
  * simulator does otherwise; the UI cannot tell which. Nothing here can publish. */
-import {pollRun, runWithTyping} from './run-follow.js?v=be2f2451d1';
-import {botSettings} from './bot-settings.js?v=be2f2451d1';
-import {store, api, sync, go, conversation, appendMessage, setTyping, teamKey} from './ui-store.js?v=be2f2451d1';
-import {toast} from './ui-dialogs.js?v=be2f2451d1';
+import {pollRun, runWithTyping} from './run-follow.js?v=33723157a3';
+import {botSettings, groupSettings} from './bot-settings.js?v=33723157a3';
+import {store, api, sync, go, conversation, appendMessage, setTyping, teamKey} from './ui-store.js?v=33723157a3';
+import {toast} from './ui-dialogs.js?v=33723157a3';
 
 /** In-flight sends per conversation, so two overlapping sends keep the typing
  * indicator up until the last one finishes instead of the first clearing it. */
@@ -97,6 +97,15 @@ export async function answerLimit(groupId, runId, choice) {
   await runWithTyping({key, setTyping, sync, concurrent: true,
     send: () => api(`/api/groups/${groupId}/runs/${runId}/continue`, 'POST', {choice}),
     follow: () => streamGroupRun(groupId, key, runId)});
+}
+
+/** Run a message again in the conversation it came from (Retry, or after a Switch to another model). */
+export async function rerun(groupId, {message, direct = '', chat = ''} = {}) {
+  const key = chat || teamKey(groupId), group = (store.state?.groups || []).find(g => g.id === groupId);
+  const run = await api(`/api/groups/${groupId}/chat`, 'POST', {message, directBotId: direct || null, checkpoints: groupSettings(group || {}).checkpoints, chatKey: key});
+  if (await watchQueuedRun(groupId, key, run)) return 'queued';
+  await streamGroupRun(groupId, key, run?.runId || null); await sync();
+  return 'ran';
 }
 
 /** Send `text` to a conversation and let the right engine answer. */

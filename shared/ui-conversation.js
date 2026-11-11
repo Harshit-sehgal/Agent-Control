@@ -21,7 +21,7 @@ import {askCard} from './ui-asks.js';
 import {face, botColor} from './ui-face.js';
 import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js';
 import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync} from './ui-store.js';
-import {runAnyway, startThread, answerLimit} from './ui-chat.js';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js';
 import {toast} from './ui-dialogs.js';
 import {siteChip} from './ui-computer-view.js';
 
@@ -187,7 +187,7 @@ function connectorEntry({message: m, line}) {
 /** A usage limit: the server's sentence and, until the bot already uses it, a button to the provider it named. */
 function modelLimitEntry({message: m, line}) {
   if (!line.open || !canWrite()) return `<div class="cv-note cv-conn" data-m="${esc(m.id)}"><span>${icon('chip', 13)}${esc(line.text)}</span></div>`;
-  return `<div class="cv-card flat" data-m="${esc(m.id)}"><p>${esc(line.text)}</p><div class="acts">${btn(`Switch to ${line.switchTo.label}`, 'switch-model', {id: line.botId, kind: 'primary', small: true, data: {provider: line.switchTo.id, name: line.switchTo.label}})}</div></div>`;
+  return `<div class="cv-card flat" data-m="${esc(m.id)}"><p>${esc(line.text)}</p><div class="acts">${btn(`Switch to ${line.switchTo.label}`, 'switch-model', {id: line.botId, kind: 'primary', small: true, data: {provider: line.switchTo.id, name: line.switchTo.label, run: m.runId || ''}})}</div></div>`;
 }
 
 /** A change a bot proposed: one tap applies it with the owner's own session. Once in place it is a done line. */
@@ -388,7 +388,8 @@ export const conversationActions = {
     const card = message && message.origin !== 'browser' ? setupCardOf(message) : null;
     if (!card) throw new Error('That suggestion is no longer here.');
     if (card.action === 'open') return go({settings: card.section});
-    if (card.action === 'rule') await api('/api/grants', 'POST', {botId: card.botId, action: card.act, ...(card.scope ? {scope: card.scope} : {}), choice: card.choice});
+    if (card.action === 'team') await api(`/api/groups/${encodeURIComponent(card.groupId)}`, 'PATCH', {settings: card.settings});
+    else if (card.action === 'rule') await api('/api/grants', 'POST', {botId: card.botId, action: card.act, ...(card.scope ? {scope: card.scope} : {}), choice: card.choice});
     else if (['job', 'rename', 'settings'].includes(card.action)) {
       const group = groupOfBot(card.botId);
       if (!group) throw new Error('That bot is no longer in the company.');
@@ -401,8 +402,12 @@ export const conversationActions = {
   },
   'switch-model': async b => {
     await api(`/api/ai/bots/${encodeURIComponent(b.dataset.id)}`, 'PATCH', {providerId: b.dataset.provider, model: ''});
-    toast(`Switched to ${b.dataset.name}.`);
     await sync();
+    // The message that hit the limit is asked again on the new model, so the owner does not type it twice.
+    const run = (store.state?.groupRuns || []).find(r => r.id === b.dataset.run);
+    if (!run?.input) return toast(`Switched to ${b.dataset.name}.`);
+    toast(`Switched to ${b.dataset.name}. Asking again.`);
+    await rerun(run.groupId, {message: run.input, ...retryTarget(groups().find(g => g.id === run.groupId), run)});
   },
   // Keep going or Stop after the runaway guard paused what bots started: one switch for all of it.
   'guard-resume': async () => { await api('/api/guard', 'POST', {paused: false}); await sync(); toast('Bots are running again.'); },

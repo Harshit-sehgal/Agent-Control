@@ -27,8 +27,10 @@ test('custom bots run through the Node provider only on the server build',()=>{
   // Built-in bots use the same provider. A missing key is an error, not the demo.
   assert.match(app,/Answers come from your AI provider/);
   assert.match(app,/Connect a model first, in Settings → Models and keys/);
-  // A retry watches a queued run the same way as the first send.
-  assert.match(app,/if \(await watchQueuedRun\(b\.dataset\.id, key, run\)\) return/);
+  // A retry (and Switch on a model-limit card) asks again through rerun, which
+  // watches a queued run the same way as the first send.
+  assert.match(app,/if \(await watchQueuedRun\(groupId, key, run\)\) return 'queued'/);
+  assert.match(app,/await rerun\(b\.dataset\.id, \{message: b\.dataset\.message, direct: b\.dataset\.direct, chat\}\)/);
   // The watch loop now lives in shared/run-follow.js over injected pieces, and
   // tests/run-follow.test.js drives it with fake snapshots instead of matching
   // its text; this only checks that the chat module still hands it the run.
