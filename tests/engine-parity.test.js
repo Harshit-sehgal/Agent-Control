@@ -223,14 +223,13 @@ test('both engines stop at the handoff maximum and at a smaller group cap', asyn
   // The cap is the product promise that one run cannot fan out forever. A drift
   // here shows up as a Pages run that spends six model calls where the server
   // spends nine, or vice versa.
-  const many = Array.from({length: 9}, (_, i) => bot(`b${i}`));
+  const many = Array.from({length: MAX_HANDOFFS + 3}, (_, i) => bot(`b${i}`));
   const groups = [group('big', many)];
   const demo = await demoEngine({groups, groupId: 'big', message: 'Coordinate'});
   const server = await serverEngine(t, {
     groups, groupId: 'big', message: 'Coordinate', executor: async b => `Report from ${b.name}`,
   });
   const capped = decisions(demo.run, demo.conversation);
-  assert.equal(MAX_HANDOFFS, 6, 'the harness assumes the default cap');
   assert.deepEqual(capped.recipients, many.slice(0, MAX_HANDOFFS).map(b => b.id));
   assert.equal(capped.steps.length, MAX_HANDOFFS, 'it stops at the cap, not at the end of the roster');
   assert.deepEqual(serverDecisions(server.store, server.runId), capped);

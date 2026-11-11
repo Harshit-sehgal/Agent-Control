@@ -4,18 +4,50 @@
  * (tests/ui-feed.test.js).
  *
  * The chat log holds every line a run wrote, helpers' lines included. The chat
- * shows what the mock shows: the owner's lines, the lead's reply, one pill that
- * keeps updating while work is under way and then reads "A and B helped", and the
- * cards that wait on the owner. The handoffs live behind the pill, not in the log. */
-import {handoffs, progressPill} from './ui-company.js';
+ * shows only what the owner needs: their own lines, each final answer, one line
+ * per run that keeps updating ("Atlas is messaging Scout", then "Ranker messaged
+ * Atlas") and opens the hops, the cards that wait on the owner, and a failure that
+ * ended a run. What a bot read, which connector it used, and the lines a page or
+ * connector call left on the way are stored but not shown (tests/clean-feed.test.js). */
+import {handoffs, hopLine, progressPill} from './ui-company.js';
 import {isRunNote, runBelongsToChat} from './ui-model.js';
 import {connectorLine, modelLimitLine} from './ui-connect-model.js';
 import {setupCardOf, setupDone} from './setup.js';
+import {requestOfMessage} from './bot-browser.js';
 
 const isActive = status => status === 'queued' || status === 'running';
 const isAwaiting = status => String(status || '').startsWith('awaiting');
 // These carry their own words and buttons (a note, a card), so a pill would repeat them.
 const NO_PILL = new Set(['awaiting_ask', 'awaiting_limit', 'awaiting_plan', 'awaiting_checkpoint', 'failed', 'cancelled', 'interrupted']);
+
+/* The lines a page or connector call leaves on its way (shared/bot-browser.js, shared/connectors.js write them
+ * with no kind). The bot's answer says what came of it, so the chat does not repeat them. */
+const CHATTER = [
+  / already has that page, so it was not opened again\.$/,
+  / asked for (another|a) web page, but /,
+  / asked to use a connector( again)?, but /,
+  / asked to use a connector and to open a web page in one reply\./,
+  / asked for a connector called "/,
+  / has no tool called "/,
+  /^Passing this (to the group|through \d+ bot)/,
+];
+const DONE_NOTE = /^Done in \d+ step\(s\)\.$/;
+
+/** True for a stored line the chat does not show. */
+function quiet(m, run, state) {
+  if (m.role !== 'system') return false;
+  // A page request is only a card while it waits on a person; a bot-to-bot message lives behind the run's line.
+  if (m.kind === 'browser') return requestOfMessage(state, m.id)?.status !== 'pending';
+  if (m.kind === 'browser-result' || m.kind === 'peer') return true;
+  // A send held for Undo, and what became of it, are the owner's to see; every other connector line is not.
+  if (m.kind === 'connector' || m.kind === 'connector-error') return !(m.undoUntil || m.activityId || String(m.id).startsWith('send-'));
+  if (m.kind) return false;
+  if (CHATTER.some(re => re.test(String(m.text || '')))) return true;
+  if (m.runId && m.id === `${m.runId}-completed`) return DONE_NOTE.test(String(m.text || '')) || run?.status === 'completed';
+  // "Waiting for the page to come back" only matters while the run still waits (it carries Stop).
+  if (m.runId && m.id === `${m.runId}-awaiting_browser`) return run?.status !== 'awaiting_browser';
+  return false;
+}
 
 /** The runs that belong to one chat, oldest first. */
 export function runsOfChat(state, key) {
@@ -24,11 +56,11 @@ export function runsOfChat(state, key) {
 }
 
 function pillEntry(run, state) {
-  if (NO_PILL.has(run.status)) return null;
-  const pill = progressPill(run, state), passed = handoffs(run);
-  // A bot that answered in its own chat did not "help" anyone: no handoff, no pill.
+  // A run that stopped at a card or a failure keeps its hops behind one muted line; the card says the rest.
+  const pill = NO_PILL.has(run.status) ? hopLine(run, state) : progressPill(run, state), passed = handoffs(run);
+  // A bot that answered in its own chat messaged no one: no line.
   if (pill?.done && !passed.length) return null;
-  return pill ? {kind: 'pill', run, pill, handoffs: pill.done ? passed : []} : null;
+  return pill ? {kind: 'pill', run, pill, handoffs: passed} : null;
 }
 
 /** `items` is `timeline()`'s output for the chat; `key` is the chat key (a bot id,
@@ -37,6 +69,8 @@ function pillEntry(run, state) {
 export function feed({items = [], state, key, now = Date.now()}) {
   const runs = runsOfChat(state, key), byId = new Map(runs.map(run => [run.id, run]));
   const lastLine = new Map(), lastNote = new Map();
+  // What the chat does not show is dropped first, so it can neither take a run's buttons nor be the last line.
+  items = items.filter(item => item.kind !== 'message' || !quiet(item.message, byId.get(item.message?.runId), state));
   items.forEach((item, index) => {
     const m = item.message;
     if (item.kind !== 'message' || !m?.runId) return;
@@ -60,7 +94,7 @@ export function feed({items = [], state, key, now = Date.now()}) {
     if (m.role === 'user') return out.push({kind: 'me', message: m});
     if (m.role === 'system') {
       // Only a line the server (or the Pages engine) wrote paints a card; a browser-written one is a plain note.
-      if (m.kind === 'browser' && m.origin !== 'browser') return out.push({kind: 'browser', message: m});
+      if (m.kind === 'browser') return m.origin === 'browser' ? undefined : out.push({kind: 'browser', message: m});
       // The card reads its status from state.asks, so it needs no pill: it carries the asking bot's waiting face.
       if (m.kind === 'ask') return out.push({kind: 'ask', message: m});
       // The paused run's own card says this, so its note line would say it twice.
@@ -82,7 +116,9 @@ export function feed({items = [], state, key, now = Date.now()}) {
       const answered = items.slice(index + 1).some(later => later.kind === 'message' && later.message.role !== 'system');
       return out.push({kind: 'offjob', message: m, open: !answered});
     }
-    // Helpers' lines wait behind the pill; a run that did not finish shows them all.
+    // A bot's message to another bot waits behind the run's line, whatever became of the run; so does every
+    // line of a live run, and every line but the last of a finished one: only the final answer is a bubble.
+    if (m.toBotId && m.toBotId !== 'None') return;
     if (run && folded.has(run.id) && (isActive(run.status) || run.status === 'awaiting_browser' || (run.status === 'completed' && index !== lastLine.get(run.id)))) return;
     out.push({kind: 'bot', message: m});
   });

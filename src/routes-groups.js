@@ -13,6 +13,7 @@ import {pauseAll} from '../shared/runaway.js';
 import {queueGroupRun, resumeGuardedRuns, resumeGroupRun, resumeBrowserRun, decidePlan, cancelRun, coordinationState} from './coordination.js';
 import {recordBrowserRequests, denyBrowserRequest, BROWSER_TOOL_HINT} from '../shared/bot-browser.js';
 import {setGrant, setAskBasics} from '../shared/asks.js';
+import {setLimits} from '../shared/limits.js';
 import {addAskCards, notifyAsks} from './ask-cards.js';
 import {answerAskFlow} from './ask-runs.js';
 import {SUBAGENT_PERMISSION, SUBAGENT_TOOL_HINT} from '../shared/subagents.js';
@@ -248,6 +249,12 @@ export function groupRoutes(router) {
   router.add('POST', '/api/permissions/basics', 'admin', async c => {
     const b = await c.body();
     return c.store.update(s => setAskBasics(s, b?.ask));
+  });
+
+  // How far bots go on one message: {pages, rounds, steps} as a number or null (no limit), {askCheckpoints}.
+  router.add('POST', '/api/limits', 'admin', async c => {
+    const b = await c.body();
+    return c.store.update(s => setLimits(s, b));
   });
 
   // A bot's request to open a page used to be approved here. It is an ask now, so these two are thin

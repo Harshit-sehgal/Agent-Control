@@ -168,7 +168,7 @@ test('mentions win over a direct recipient, and the step cap applies',()=>{
   const named=[bot('ann',{name:'Ann'}),bot('bob',{name:'Bob'})];
   assert.deepEqual(mentionedBots(named,'see a@bob.com then @ann then @bob'),['ann','bob'],'An email is not an earlier @mention.');
   assert.deepEqual(mentionedBots(named,'Email a@bob.com'),[]);
-  const many=team('m',Array.from({length:20},(_,i)=>`bot-${i}`));
+  const many=team('m',Array.from({length:MAX_HANDOFFS+10},(_,i)=>`bot-${i}`));
   assert.equal(planHandoffs(many,'go').recipients.length,MAX_HANDOFFS);
   assert.equal(planHandoffs({...many,settings:{maxSteps:2}},'@everyone').recipients.length,2);
   assert.equal(planHandoffs({...many,settings:{maxSteps:99}},'@everyone').recipients.length,MAX_STEPS_LIMIT,'A stored value past the ceiling is still capped.');
@@ -188,7 +188,7 @@ test('a bot from another group can be summoned by @mention unless it is private 
   const run=createRun({group:host,message:'@expert check',guests,makeId:()=> 'r',chatKey:'team-host'});
   assert.deepEqual(run.guestIds,['expert']);
   assert.equal(run.chatKey,'team-host');
-  assert.equal(run.maxSteps,6);assert.equal(run.botHandoffs,true);
+  assert.equal(run.maxSteps,MAX_HANDOFFS);assert.equal(run.botHandoffs,true);
   assert.equal(createRun({group:{...host,settings:{checkpoints:true}},message:'x',makeId:()=> 'r'}).checkpointsEnabled,true);
 });
 

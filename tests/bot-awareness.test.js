@@ -12,7 +12,7 @@ test('the browser hint says any public site works and how to search, and nothing
   assert.match(BROWSER_TOOL_HINT, /Any public site works, including X and YouTube/);
   assert.match(BROWSER_TOOL_HINT, /https:\/\/html\.duckduckgo\.com\/html\/\?q=/);
   assert.match(BROWSER_TOOL_HINT, /never click or type on X/);
-  assert.match(BROWSER_TOOL_HINT, new RegExp(`up to ${MAX_REQUESTS_PER_REPLY} blocks`));
+  assert.match(BROWSER_TOOL_HINT, /several blocks in one reply/);
 });
 
 test('the new-bot hint says how many, that the bot can browse, and to hand it the task at once', () => {

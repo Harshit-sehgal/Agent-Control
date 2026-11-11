@@ -137,31 +137,28 @@ function noteEntry(entry, conv) {
     flags.retry && btn('Retry', 'retry-run', {...group, data: {run: run.id, message: run.input || '', ...retryTarget(conv.group, run)}}),
     flags.stop && btn('Stop', 'cancel-run', {...group, data: {run: run.id}}),
   ] : [];
-  if (m.kind === 'browser-result') return readEntry(m);
   return `<div class="cv-note"><span>${esc(m.text)}</span>${parts.filter(Boolean).join('')}</div>`;
 }
 
-// A page a bot read: the bot answers from it next, so the chat shows what was read and folds the page text away.
-function readEntry(m) {
-  const at = String(m.text || '').indexOf('\n\n');
-  const head = (at < 0 ? m.text : m.text.slice(0, at)).replace(/^Browser result for (.+?): /, '$1 read ');
-  const body = at < 0 ? '' : m.text.slice(at + 2).trim();
-  return `<div class="cv-note cv-conn cv-read"><span>${icon('check', 13)}${esc(head)}</span>${body ? `<details><summary>Show what it read</summary><p>${esc(body)}</p></details>` : ''}</div>`;
-}
-
-/** The pill: live while work is under way, then quiet, opening the handoffs. */
+/** A run's one line: live while bots message each other ("Atlas is messaging Scout"), then quiet with its latest
+ * hop ("Ranker messaged Atlas"). Either way a tap opens the hops, who wrote to whom and what they said. */
 const openRuns = new Set();
 const pillSeen = new Map();
-function pillEntry({run, pill, handoffs}, conv) {
+function hopLog(hops, nameOf) {
+  return `<ol class="cv-plog">${hops.map(h => `<li><span class="who"><b>${esc(nameOf(h.from))}</b><span>to ${esc(nameOf(h.to))}</span></span><div class="md">${md(h.text)}</div></li>`).join('')}</ol>`;
+}
+function pillEntry({run, pill, handoffs: hops}, conv) {
   const bots = company(), nameOf = id => bots.find(b => b.id === id)?.name || 'A bot';
-  if (pill.done) {
-    const log = handoffs.map(h => `<li><span class="who"><b>${esc(nameOf(h.from))}</b><span>to ${esc(nameOf(h.to))}</span></span><div class="md">${md(h.text)}</div></li>`).join('');
-    return `<details class="cv-prog cv-done" data-pid="${esc(run.id)}"${openRuns.has(run.id) ? ' open' : ''}><summary><span>${esc(pill.text)}</span>${icon('chevron', 13)}</summary><ol class="cv-plog">${log}</ol></details>`;
-  }
+  const open = openRuns.has(run.id) ? ' open' : '', count = `<span class="sr-only">, ${hops.length} message${hops.length === 1 ? '' : 's'}</span>`;
+  if (pill.done) return `<details class="cv-prog cv-done" data-pid="${esc(run.id)}"${open}><summary><span>${esc(pill.text)}</span>${count}${icon('chevron', 13)}</summary>${hopLog(hops, nameOf)}</details>`;
   const bot = bots.find(b => b.id === pill.botId) || askerOf(conv), waiting = String(run.status).startsWith('awaiting');
   // While a bot browses the pill carries the site, which opens the live view; while you hold the browser it says so.
   const chip = siteChip({runId: run.id, botId: pill.botId}), text = chip?.driving ? 'You are driving' : pill.text;
-  return `<div class="cv-prog"><div class="cv-live" data-run="${esc(run.id)}">${botFace(bot, nameOf(pill.botId), 22, {state: waiting ? 'waiting' : 'working'})}<span class="cv-cur" data-text="${esc(text)}">${esc(text)}</span>${chip?.html || ''}</div></div>`;
+  const faceHtml = botFace(bot, nameOf(pill.botId), 22, {state: waiting ? 'waiting' : 'working'});
+  const dots = waiting ? '' : '<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>';
+  // The site chip is a button of its own, so a line carrying one is not also a disclosure.
+  if (!hops.length || chip) return `<div class="cv-prog"><div class="cv-live" data-run="${esc(run.id)}">${faceHtml}<span class="cv-cur" data-text="${esc(text)}">${esc(text)}</span>${chip?.html || dots}</div></div>`;
+  return `<details class="cv-prog cv-done cv-going" data-pid="${esc(run.id)}"${open}><summary class="cv-live" data-run="${esc(run.id)}">${faceHtml}<span class="cv-cur" data-text="${esc(text)}">${esc(text)}</span>${dots}${count}${icon('chevron', 13)}</summary>${hopLog(hops, nameOf)}</details>`;
 }
 
 /** What the runaway guard asks, in one card wherever it is shown: Keep going or Stop, for everything bots started. */

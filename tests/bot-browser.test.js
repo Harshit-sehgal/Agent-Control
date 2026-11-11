@@ -39,7 +39,9 @@ test('browser blocks are parsed, bounded and kept away from posting on X', () =>
   assert.throws(() => validateBrowserRequest({url: 'https://example.com', steps: Array(26).fill({op: 'read', selector: 'p'})}), /at most 25/);
   assert.throws(() => validateBrowserRequest({url: 'https://example.com', steps: [{op: 'eval', selector: 'p'}]}), /op/);
   const many = [1, 2, 3].map(i => block({url: `https://example.com/${i}`})).join('\n') + '\n```browser\nnot json\n```';
-  assert.equal(parseBrowserRequests(many).length, 2, 'At most two requests per reply.');
+  assert.equal(parseBrowserRequests(many).length, 4, 'Every block is read, the bad one reported.');
+  const flood = Array.from({length: 12}, (_, i) => block({url: `https://example.com/${i}`})).join('\n');
+  assert.equal(parseBrowserRequests(flood).length, 8, 'Only the safety backstop bounds one reply.');
   assert.deepEqual(parseBrowserRequests('```browser\n{oops\n```'), [{ok: false, error: 'The browser block is not valid JSON.'}]);
   assert.equal(stripBrowserBlocks(block({url: 'https://example.com'})), 'Let me look.\n\nBack soon.');
   const unclosed = 'Checking.\n```browser\n{"url":"https://example.com/docs"}';
@@ -112,7 +114,7 @@ test('a reply becomes a request card for a bot already cleared, an ask for one t
   assert.equal(denied.records.length, 0); assert.match(denied.lines[0].text, /profile → Permissions/);
   state.grants = [];
   const deep = recordBrowserRequests(state, {bot: browserBot(), groupId: 'g', chatKey: 'web', output: block({url: 'https://example.com'}), depth: MAX_BROWSER_DEPTH});
-  assert.equal(deep.records.length, 0); assert.match(deep.lines[0].text, /limit/);
+  assert.equal(deep.records.length, 0); assert.match(deep.lines[0].text, /browsing rounds in a row/);
   const refused = recordBrowserRequests(state, {bot: browserBot(), groupId: 'g', chatKey: 'web', output: block({url: 'https://x.com', steps: [{op: 'click', selector: 'button'}]})});
   assert.match(refused.lines[0].text, /refused: .*Posting stays yours/);
   assert.equal(recordBrowserRequests(state, {bot: browserBot(), groupId: 'g', chatKey: 'web', output: 'plain reply'}).text, 'plain reply');

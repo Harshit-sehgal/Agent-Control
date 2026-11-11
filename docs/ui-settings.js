@@ -7,19 +7,20 @@
  * team, agents, data) load the existing admin forms from ui-admin.js into the body.
  *
  * The lists behind it are pure and tested in ui-profile-model.js. */
-import {face} from './ui-face.js?v=8ce3bc47dc';
-import {botStatus} from './ui-company.js?v=8ce3bc47dc';
-import {esc, icon, btn, empty, note, roundBtn, switchBtn, fullDate} from './ui-kit.js?v=8ce3bc47dc';
-import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, applyTheme, themeChoice, THEMES} from './ui-store.js?v=8ce3bc47dc';
-import {isDesk, initials} from './ui-shell.js?v=8ce3bc47dc';
-import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=8ce3bc47dc';
-import {faceOf, headBar, activityBlocks, grantsHtml, grantNote} from './ui-profile.js?v=8ce3bc47dc';
-import {allGrantRows} from './ui-asks.js?v=8ce3bc47dc';
-import {toast, confirmSheet} from './ui-dialogs.js?v=8ce3bc47dc';
+import {face} from './ui-face.js?v=bc2b55c498';
+import {botStatus} from './ui-company.js?v=bc2b55c498';
+import {esc, icon, btn, empty, note, roundBtn, switchBtn, fullDate} from './ui-kit.js?v=bc2b55c498';
+import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, applyTheme, themeChoice, THEMES} from './ui-store.js?v=bc2b55c498';
+import {isDesk, initials} from './ui-shell.js?v=bc2b55c498';
+import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=bc2b55c498';
+import {faceOf, headBar, activityBlocks, grantsHtml, grantNote} from './ui-profile.js?v=bc2b55c498';
+import {allGrantRows} from './ui-asks.js?v=bc2b55c498';
+import {toast, confirmSheet} from './ui-dialogs.js?v=bc2b55c498';
 import {
   ACTIVITY_FILTERS, activityUrl, companyTree, weekUsage, settingsSections, resolveSection, sectionArg,
-} from './ui-profile-model.js?v=8ce3bc47dc';
-import {COLORS} from './ui-face.js?v=8ce3bc47dc';
+} from './ui-profile-model.js?v=bc2b55c498';
+import {COLORS} from './ui-face.js?v=bc2b55c498';
+import {limitsOf, limitWords, FAIL_STREAK} from './limits.js?v=bc2b55c498';
 
 const el = id => document.getElementById(id);
 const ICONS = {general: 'gear', look: 'half', models: 'key', conn: 'plug', perm: 'shield', usage: 'chart'};
@@ -102,7 +103,22 @@ function perm(arg) {
   const chip = bot ? `<div class="st-chip">${faceOf(bot, 22, {state: 'asleep', motion: false})}<span>Showing <b>${esc(bot.name)}</b></span><button type="button" class="link" data-action="perm-all">Show all</button></div>` : '';
   const ask = Boolean(store.state?.askBasics), owner = canPause();
   const basics = card(`<div class="rw"><span class="w">Browse and read without asking<small data-basics-sub>${basicsWords(ask)}</small></span>${switchBtn(!ask, 'Browse and read without asking', ` data-action="settings-basics" data-basics${owner ? '' : ' disabled'}`)}</div>`);
-  return `<p class="st-note">Every bot can chat, hand work to its team, make bots and set schedules. Sending, posting, deleting and paying ask you first; you can Always allow a bot per site.</p>${basics}${chip}<div data-grants="${bot ? esc(bot.id) : 'all'}">${grantsHtml(bot?.id || null)}</div>${grantNote('st-note')}`;
+  return `<p class="st-note">Every bot can chat, hand work to its team, make bots and set schedules. Sending, posting, deleting and paying ask you first; you can Always allow a bot per site.</p>${basics}${limitsCard(owner)}${chip}<div data-grants="${bot ? esc(bot.id) : 'all'}">${grantsHtml(bot?.id || null)}</div>${grantNote('st-note')}`;
+}
+
+// How far bots go on one message. Empty is no limit: only the safety stop (BACKSTOP) and the stop after repeated
+// failures apply. The owner picks a smaller number here when they want one.
+const LIMIT_ROWS = [
+  ['pages', 'Pages per reply', 'How many pages or app reads a bot opens at once', [1, 3, 5]],
+  ['rounds', 'Browsing rounds', 'How many times in a row a bot reads more before it answers', [2, 5, 10]],
+  ['steps', 'Bots per task', 'How many bot turns one message can take across a team', [3, 6, 12]],
+];
+function limitsCard(owner) {
+  const now = limitsOf(store.state);
+  const seg = (key, values) => [null, ...values].map(v => `<button type="button" data-action="settings-limit" data-key="${key}" data-value="${v ?? ''}" aria-pressed="${now[key] === v}"${owner ? '' : ' disabled'}>${esc(limitWords(v))}</button>`).join('');
+  const rows = LIMIT_ROWS.map(([key, label, sub, values]) => srow(label, `<span class="st-seg" role="group" aria-label="${esc(label)}">${seg(key, values)}</span>`, sub)).join('');
+  const check = `<div class="rw"><span class="w">Check in on long tasks<small>Pause and ask you when bots message each other a lot on one task</small></span>${switchBtn(now.askCheckpoints, 'Check in on long tasks', ` data-action="settings-limit-check" data-limit-check${owner ? '' : ' disabled'}`)}</div>`;
+  return card(rows + check, 'Limits') + `<p class="st-note">No limit is the default. A bot that fails ${FAIL_STREAK} times in a row stops and tells you.</p>`;
 }
 
 const basicsWords = ask => (ask ? 'Bots ask you before opening a web page or reading a connected app' : 'Bots open web pages and read connected apps on their own; a site you set to Ask or Deny still asks or refuses');
@@ -284,6 +300,20 @@ export const settingsActions = {
     const ask = Boolean(store.state?.askBasics);
     document.querySelectorAll('[data-basics]').forEach(x => x.setAttribute('aria-checked', String(!ask)));
     document.querySelectorAll('[data-basics-sub]').forEach(x => { x.textContent = basicsWords(ask); });
+  },
+  'settings-limit': async b => {
+    if (!canPause()) throw new Error('Only the owner can change this.');
+    const key = b.dataset.key, value = b.dataset.value === '' ? null : Number(b.dataset.value);
+    await api('/api/limits', 'POST', {[key]: value});
+    await sync();
+    document.querySelectorAll(`[data-action="settings-limit"][data-key="${key}"]`).forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  },
+  'settings-limit-check': async () => {
+    if (!canPause()) throw new Error('Only the owner can change this.');
+    await api('/api/limits', 'POST', {askCheckpoints: !limitsOf(store.state).askCheckpoints});
+    await sync();
+    const on = limitsOf(store.state).askCheckpoints;
+    document.querySelectorAll('[data-limit-check]').forEach(x => x.setAttribute('aria-checked', String(on)));
   },
   // The filter chip on Permissions: back to every bot's rules, in place of the filtered page.
   'perm-all': () => go({settings: 'perm'}, {replace: true}),

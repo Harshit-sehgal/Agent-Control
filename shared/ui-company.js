@@ -134,29 +134,36 @@ export function handoffs(run) {
       prev = step;
     }
   }
+  // A last step addressed to a bot that has not answered yet is a message on its way.
+  const to = prev?.toBotId;
+  if (to && to !== 'None' && to !== prev.botId && trace(run).at(-1) === prev) out.push({from: prev.botId, to, text: prev.output || ''});
   return out;
 }
+const trace = run => run?.trace || [];
 
-const list = names => names.length < 3 ? names.join(' and ') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+const nameIn = bots => id => bots.find(b => b.id === id)?.name || 'A bot';
 
-/** The one live line a chat keeps updating: who is doing what right now, and
- * once the work ends, who helped. `botId` is whose face the pill shows. */
+/** The quiet line a run's bot-to-bot traffic folds into once it stops: its latest hop,
+ * "Scout messaged Ranker". Null when no bot passed anything to another. */
+export function hopLine(run, state) {
+  const last = handoffs(run).at(-1);
+  if (!last) return null;
+  const name = nameIn(botsOf(state));
+  return {done: true, text: `${name(last.from)} messaged ${name(last.to)}`};
+}
+
+/** The one live line a chat keeps updating: which bot is messaging which right now,
+ * and once the work ends, the latest hop. `botId` is whose face the pill shows. */
 export function progressPill(run, state) {
   if (!run) return null;
-  const bots = botsOf(state), primary = primaryOf(bots);
-  const name = id => bots.find(b => b.id === id)?.name || 'A bot';
-  if (run.status === 'completed') {
-    const helpers = [...new Set((run.trace || []).map(s => s.botId))].filter(id => id && id !== primary?.id);
-    if (!helpers.length) return null;
-    const n = handoffs(run).length;
-    return {done: true, text: `${list(helpers.map(name))} helped · ${n} message${n === 1 ? '' : 's'}`};
-  }
+  const bots = botsOf(state), primary = primaryOf(bots), name = nameIn(bots);
+  if (run.status === 'completed') return hopLine(run, state);
   if (!isActive(run.status) && !isAwaiting(run.status)) return null;
-  const t = turn(run, primary);
+  const t = turn(run, primary), prev = (run.trace || []).filter(s => s.kind !== 'ask').at(-1)?.botId;
   if (isAwaiting(run.status)) return {botId: t.botId, text: `${name(t.botId)} needs your OK`};
-  if (t.from) return {botId: t.from, text: `Asking ${name(t.botId)}: ${oneLine(t.task, 60)}`};
+  if (t.from) return {botId: t.botId, text: `${name(t.from)} is messaging ${name(t.botId)}`};
   if (t.planning) return {botId: t.botId, text: `${name(t.botId)} is working out who does what`};
-  if (t.botId === primary?.id && run.trace?.length) return {botId: t.botId, text: `${name(t.botId)} is putting it together`};
+  if (prev && t.botId && prev !== t.botId) return {botId: t.botId, text: `${name(prev)} is messaging ${name(t.botId)}`};
   return {botId: t.botId, text: `${name(t.botId)} is on it`};
 }
 

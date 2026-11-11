@@ -73,9 +73,10 @@ test('a lead that hands nothing out does not speak twice', async t => {
 
 test('the closing step always fits under the step cap', async t => {
   const {store, ids} = await company(t);
+  // No cap by default; a smaller one (an owner's limit or the group's) is what this run has to fit under.
   const ai = model({Atlas: (env, n) => (n === 0 ? '@Ops lead @Mailroom @Planner @Scholar @Scribe all of you' : 'Done.')});
-  const run = await ask(store, {message: 'Everything at once', to: 'atlas', executor: ai.executor});
-  assert.equal(run.recipients.length, MAX_HANDOFFS);
+  const run = await ask(store, {message: 'Everything at once', to: 'atlas', executor: ai.executor, extra: {maxSteps: 6}});
+  assert.equal(run.recipients.length, 6);
   assert.equal(run.recipients.at(-1), ids.atlas);
   assert.equal(run.recipients.filter(id => id === ids.atlas).length, 2);
   assert.equal(run.status, 'completed');

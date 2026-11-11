@@ -15,7 +15,11 @@ import http from 'node:http';
 import {createRouter} from '../src/router.js';
 import {groupRoutes} from '../src/routes-groups.js';
 import {installWebLocks} from './web-locks.js';
-import {company, model, ask} from './run-fixture.js';
+import {company as bare, model, ask} from './run-fixture.js';
+
+// These checkpoints are the owner's choice now (Settings, Permissions, Limits): off by default, so each test here
+// turns them on. The last test checks the default.
+const company = async (t, o) => { const c = await bare(t, o); await c.store.update(s => { s.limits = {askCheckpoints: true}; }); return c; };
 
 installWebLocks();
 
@@ -228,4 +232,15 @@ test('the continue route takes a choice, and a stop through it ends the task', a
   assert.equal(result.status, 202);
   assert.equal(result.body.status, 'completed');
   assert.equal(store.read().groupRuns.find(r => r.id === paused.id).trace.at(-1).output, 'Wrapped up.');
+});
+
+test('by default nothing pauses: a chain 7 bots deep runs to the end on its own', async t => {
+  const {store, ids} = await bare(t, {extra: {x1: {name: 'Xa', instructions: 'x'}, x2: {name: 'Xb', instructions: 'x'}, x3: {name: 'Xc', instructions: 'x'}}});
+  const next = {Mailroom: 'Planner', Planner: 'Scholar', Scholar: 'Scribe', Scribe: 'Xa', Xa: 'Xb', Xb: 'Xc'};
+  const script = {};
+  for (const [name, to] of Object.entries(next)) script[name] = env => (env.peerAnswer ? `${name} relays: ${env.peerAnswer.output}` : block(`@${to}`, `from ${name}`));
+  script.Xc = 'The end of the line.';
+  const run = await ask(store, {message: 'Go deep', to: ids.mail, executor: model(script).executor});
+  assert.equal(run.status, 'completed');
+  assert.match(store.read().chats[ids.mail].map(m => m.text).join('\n'), /The end of the line/);
 });

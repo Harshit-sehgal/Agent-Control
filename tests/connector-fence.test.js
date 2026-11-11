@@ -22,7 +22,8 @@ test('connector is one of the control fences, so a peer never carries it and the
 
 test('a block is read: use, tool and args; a bad one is reported, not dropped', () => {
   const found = parseConnectorCalls(`Looking.\n${block({use: 'notes', tool: 'search_notes', args: {query: 'rent'}})}\n${block('{nope')}\n${block({tool: 'x'})}\n${block({use: 'notes'})}`);
-  assert.equal(found.length, MAX_CALLS_PER_REPLY, 'at most two blocks are looked at, valid or not');
+  assert.equal(found.length, 4, 'every block is looked at, valid or not');
+  assert.ok(MAX_CALLS_PER_REPLY >= 8, 'only the safety backstop bounds one reply');
   assert.deepEqual(found[0], {ok: true, call: {use: 'notes', tool: 'search_notes', args: {query: 'rent'}}});
   assert.equal(found[1].ok, false);
   assert.match(found[1].error, /not valid JSON/);

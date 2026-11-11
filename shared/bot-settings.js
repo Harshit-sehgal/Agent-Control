@@ -9,6 +9,7 @@
  */
 import {cleanText} from './core.js';
 import {fail} from './errors.js';
+import {BACKSTOP} from './limits.js';
 import {TINT_COUNT} from './ui-kit.js';
 import {SHAPES} from './company.js';
 
@@ -17,8 +18,9 @@ export const ROUTING_MODES = ['pipeline', 'mentions', 'everyone'];
 /** direct: you @mention or the pipeline runs. tracked: the primary bot plans
  * the bots a request needs and checks the outcome. */
 export const COORDINATION_MODES = ['direct', 'tracked'];
-/** The hard ceiling on bot steps in one run, whatever a group sets. */
-export const MAX_STEPS_LIMIT = 12;
+/** The hard ceiling on bot steps in one run, whatever a group sets: the backstop (shared/limits.js). A team, or the
+ * owner's workspace limit in Settings → Limits, may set fewer; by default nothing does. */
+export const MAX_STEPS_LIMIT = BACKSTOP.steps;
 /** The most recent lines a bot may read, before the character budget cuts further.
  * Context is automatic: there is no per-bot setting for it. */
 export const MAX_CONTEXT_MESSAGES = 30;
@@ -64,7 +66,8 @@ export const GROUP_DEFAULTS = Object.freeze({
   routing: 'pipeline',
   /** Ordered bot ids; null means every bot in the group, in roster order. */
   pipeline: null,
-  maxSteps: 6,
+  /** No limit of its own: the backstop. */
+  maxSteps: BACKSTOP.steps,
   checkpoints: false,
   /** Bots in this group may hand off to each other by @mention. */
   botHandoffs: true,

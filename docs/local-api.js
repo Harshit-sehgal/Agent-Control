@@ -4,22 +4,23 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {initialState, cleanText} from './core.js?v=8ce3bc47dc';
-import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=8ce3bc47dc';
-import {RETENTION_DEFAULTS} from './retention.js?v=8ce3bc47dc';
-import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=8ce3bc47dc';
-import {addChatMessages, clearChat} from './chats.js?v=8ce3bc47dc';
-import {publicMemory, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=8ce3bc47dc';
-import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=8ce3bc47dc';
-import {createThread, titleFrom} from './threads.js?v=8ce3bc47dc';
-import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=8ce3bc47dc';
-import {simulateGroup} from './group-simulator.js?v=8ce3bc47dc';
-import {BUSY_STATUSES} from './run-state.js?v=8ce3bc47dc';
-import {botSettings} from './bot-settings.js?v=8ce3bc47dc';
-import {denyBrowserRequest} from './bot-browser.js?v=8ce3bc47dc';
-import {answerAsk, expireAsks, orphanAsks, setGrant, setAskBasics} from './asks.js?v=8ce3bc47dc';
-import {activityPage} from './activity-log.js?v=8ce3bc47dc';
-import {withLocalLock} from './locks.js?v=8ce3bc47dc';
+import {initialState, cleanText} from './core.js?v=bc2b55c498';
+import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=bc2b55c498';
+import {RETENTION_DEFAULTS} from './retention.js?v=bc2b55c498';
+import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=bc2b55c498';
+import {addChatMessages, clearChat} from './chats.js?v=bc2b55c498';
+import {publicMemory, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=bc2b55c498';
+import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=bc2b55c498';
+import {createThread, titleFrom} from './threads.js?v=bc2b55c498';
+import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=bc2b55c498';
+import {simulateGroup} from './group-simulator.js?v=bc2b55c498';
+import {BUSY_STATUSES} from './run-state.js?v=bc2b55c498';
+import {botSettings} from './bot-settings.js?v=bc2b55c498';
+import {denyBrowserRequest} from './bot-browser.js?v=bc2b55c498';
+import {answerAsk, expireAsks, orphanAsks, setGrant, setAskBasics} from './asks.js?v=bc2b55c498';
+import {setLimits} from './limits.js?v=bc2b55c498';
+import {activityPage} from './activity-log.js?v=bc2b55c498';
+import {withLocalLock} from './locks.js?v=bc2b55c498';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
@@ -319,6 +320,7 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
   // The owner answers an ask, and sets what a bot may do without asking.
   if ((m = path.match(/^\/api\/asks\/([a-z0-9-]+)$/)) && method === 'POST') { const r = answerAskLocal(state, m[1], body?.answer); save(state); return r; }
   if (path === '/api/permissions/basics' && method === 'POST') { const r = setAskBasics(state, body?.ask); save(state); return r; }
+  if (path === '/api/limits' && method === 'POST') { const r = setLimits(state, body); save(state); return r; }
   if (path === '/api/grants' && method === 'POST') { const g = setGrant(state, String(body?.botId ?? ''), String(body?.action ?? ''), body?.scope ?? '', body?.choice); save(state); return g; }
   if (path === '/api/bots/run') throw new Error('Running AI bots requires the separate Node backend, not GitHub Pages.');
   // The old approve and deny routes answer the request's ask (Allow, Decline) for one phase; a request with no ask cannot be opened here.

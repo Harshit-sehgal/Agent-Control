@@ -23,14 +23,14 @@
  *   make itself the primary bot, save a rule without the owner's tap, or reach a route the owner could not.
  *
  * Pure and browser-safe: the server reads replies with it and the UI paints the card from it. */
-import {cleanText} from './core.js?v=8ce3bc47dc';
-import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=8ce3bc47dc';
-import {everyMinutes, cleanAt, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=8ce3bc47dc';
-import {controlFence} from './reply-blocks.js?v=8ce3bc47dc';
-import {companyBots, primaryOf} from './company.js?v=8ce3bc47dc';
-import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js?v=8ce3bc47dc';
-import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=8ce3bc47dc';
-import {grantWhat} from './ui-asks.js?v=8ce3bc47dc';
+import {cleanText} from './core.js?v=bc2b55c498';
+import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=bc2b55c498';
+import {everyMinutes, cleanAt, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=bc2b55c498';
+import {controlFence} from './reply-blocks.js?v=bc2b55c498';
+import {companyBots, primaryOf} from './company.js?v=bc2b55c498';
+import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js?v=bc2b55c498';
+import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=bc2b55c498';
+import {grantWhat} from './ui-asks.js?v=bc2b55c498';
 
 export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'schedule', 'open'];
 /** The bot settings a bot may propose. Not the primary role, the browser approval mode, or layout (pins, order). */
@@ -53,7 +53,7 @@ export const SETUP_TOOL_HINT = 'To change a setting for the owner, put one fence
   + '{"action":"job","bot":"<bot name>","job":"<the new job, one or two sentences>"} rewrites a bot\'s job. '
   + '{"action":"rename","bot":"<bot name>","name":"<new name>"} renames a bot. '
   + '{"action":"settings","bot":"<bot name>","settings":{"replyLength":"short|medium|long","style":"<tone>","memory":true|false,"canHandoff":true|false,"summonable":true|false,"enabled":true|false,"temperature":0-2,"reportsTo":"<manager bot name, or none>"}} changes how a bot works; give only what changes. '
-  + '{"action":"team","team":"<team name, or leave out for your own team>","settings":{"checkpoints":true|false,"maxSteps":1-12,"botHandoffs":true|false}} changes how a team runs: checkpoints asks the owner before each step. '
+  + '{"action":"team","team":"<team name, or leave out for your own team>","settings":{"checkpoints":true|false,"maxSteps":1-30,"botHandoffs":true|false}} changes how a team runs: checkpoints asks the owner before each step. '
   + '{"action":"rule","bot":"<bot name>","do":"open|send|post|delete|spend","site":"<site, e.g. github.com>","choice":"always|ask|deny"} saves what that bot may do without asking (a payment is never always). '
   + '{"action":"schedule","bot":"<bot name, or me>","do":"<the message that bot gets each time>","every":"day|hour|week|<minutes>","at":"<HH:MM, optional>"} puts work on a timer: the bot runs it in its own chat and the owner reads the result there. Give only "at" for a one-off later today or tomorrow. Add "stop":true with a few words of its message in "do" to stop one; workspace.schedules lists them. When the owner asks for something regular (every morning, each Monday), propose a schedule instead of telling them to come back. '
   + '{"action":"open","page":"models|connectors|permissions|agents|usage"} shows the owner a Settings page, for things only they can do, such as pasting a key. '

@@ -235,11 +235,6 @@
 .md code{font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;padding:1px 5px;border-radius:6px;background:color-mix(in srgb,var(--fg) 8%,transparent)}
 .md a{color:inherit;text-decoration:underline;text-underline-offset:2px}
 .cv-note{align-self:center;display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center;text-align:center;font-size:12px;color:var(--muted);background:var(--sunk);border-radius:18px;padding:5px 12px;max-width:90%}
-.cv-read{flex-direction:column;gap:4px}
-.cv-read details{width:100%}
-.cv-read summary{cursor:pointer;color:var(--muted);font-size:12px}
-.cv-read summary:focus-visible{outline:2px solid var(--wait);outline-offset:2px;border-radius:6px}
-.cv-read details p{margin:6px 0 2px;text-align:left;white-space:pre-wrap;max-height:240px;overflow:auto}
 .cv-working{display:flex;gap:10px;align-items:center;color:var(--muted);font-size:13px}
 /* the one pill that keeps updating, then the quiet one that opens the handoffs */
 .cv-prog{align-self:center;max-width:min(92%,560px);margin:4px 0;font-size:12.5px}
@@ -261,6 +256,11 @@
 .cv-done summary svg{width:13px;height:13px;transition:rotate .2s}
 .cv-done[open]{align-self:stretch}
 .cv-done[open] summary svg{rotate:90deg}
+/* the live line is a disclosure too: the same pill, its face and dots, and a chevron that opens the hops so far */
+.cv-going summary{padding:5px 10px 5px 6px;gap:8px;color:var(--soft);max-width:100%}
+.cv-going .cv-cur{min-width:0}
+.cv-live .dots{margin-left:-2px}
+.cv-live .dots i{background:currentColor;opacity:.55}
 .cv-plog{list-style:none;margin:10px 0 2px;padding:16px 18px;width:100%;border-radius:18px;background:var(--sunk);display:flex;flex-direction:column;gap:16px;text-align:left;animation:curin .25s ease-out}
 .cv-plog .who{display:flex;align-items:baseline;gap:6px;font-size:12px;color:var(--muted)}
 .cv-plog .who b{color:var(--soft);font-weight:600}

@@ -549,6 +549,8 @@ export class SqliteStore {
       guard: (() => { try { return {...freshGuard(), ...JSON.parse(this.kvGet('guard') || '{}')}; } catch { return freshGuard(); } })(),
       // The owner's switch to ask before a bot opens a page or reads a connected app (shared/asks.js).
       askBasics: this.kvGet('ask_basics') === '1',
+      // The owner's limits on how far bots go per message (shared/limits.js); empty is no limit.
+      limits: (() => { try { return JSON.parse(this.kvGet('limits') || '{}'); } catch { return {}; } })(),
       memory: readMemory(kind => this.db.prepare('SELECT key, doc FROM memory WHERE kind=? ORDER BY rowid').all(kind)),
     };
     const cfg = this.db.prepare('SELECT * FROM settings WHERE id=1').get();
@@ -630,6 +632,7 @@ export class SqliteStore {
       this.kvSet('held_sends', JSON.stringify(state.heldSends || []));
       this.kvSet('guard', JSON.stringify(state.guard || freshGuard()));
       this.kvSet('ask_basics', state.askBasics ? '1' : '0');
+      this.kvSet('limits', JSON.stringify(state.limits || {}));
       this.stmt('INSERT INTO settings (id,retention) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET retention=excluded.retention')
         .run(state.settings?.retention ? JSON.stringify(state.settings.retention) : null);
     });

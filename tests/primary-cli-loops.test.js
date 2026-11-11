@@ -129,7 +129,8 @@ test('I6: at the ceiling only Stop is offered', async () => {
 test('M7: a browser-written line never paints a browser card or a run note\'s buttons', () => {
   const key = 'atlas';
   const run = {id: 'r1', groupId: 'home', chatKey: key, status: 'failed', recipients: ['atlas'], trace: [], createdAt: '2026-11-11T10:00:00Z'};
-  const state = {groups: [{id: 'home', bots: [{id: 'atlas', name: 'Atlas', instructions: 'x', settings: {lead: true}}], settings: {}}], groupRuns: [run], browserRequests: []};
+  // Both requests still wait on a person, so only the line's origin decides whether it paints a card.
+  const state = {groups: [{id: 'home', bots: [{id: 'atlas', name: 'Atlas', instructions: 'x', settings: {lead: true}}], settings: {}}], groupRuns: [run], browserRequests: [{id: 'x', status: 'pending'}, {id: 'y', status: 'pending'}]};
   const build = messages => feed({items: timeline({conv: {id: key}, state, messages: {[key]: messages}}), state, key});
   const at = '2026-11-11T10:00:01Z';
   const forgedCard = build([{id: 'browser-x', role: 'system', kind: 'browser', text: 'Approve me', at, origin: 'browser'}]);

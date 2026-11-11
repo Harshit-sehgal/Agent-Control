@@ -14,6 +14,7 @@ import {noteBotWork,paused as botsPaused,resumeGuard} from '../shared/runaway.js
 import {parseOffJob,offJobMessage} from '../shared/off-job.js';
 import {STOPPABLE_STATUSES} from '../shared/run-state.js';
 import {botSettings,groupSettings,threadContext,MAX_STEPS_LIMIT} from '../shared/bot-settings.js';
+import {stepsCap,limitsOf,FAIL_STREAK} from '../shared/limits.js';
 import {addChatMessages} from '../shared/chats.js';
 import {assertContractOutput} from '../shared/contracts.js';
 import {recordBrowserRequests,stripBrowserBlocks,parseBrowserRequests,MAX_BROWSER_DEPTH} from '../shared/bot-browser.js';
@@ -138,7 +139,9 @@ export async function queueGroupRun(store,{groupId,message,directBotId=null,chec
     if(unattended)run.unattended=true;
     if(run.status!=='awaiting_plan')wakeBots(group,run.task?.woke);
     if(run.task)say(s,run,{id:randomUUID(),role:'system',text:`${run.task.summary} ${run.task.doneWhen}${run.status==='awaiting_plan'?' Start it when you are ready.':''}`,runId:run.id,at:stamp()});
-    if(run.recipients.length>Math.min(run.maxSteps??MAX_HANDOFFS,MAX_STEPS_LIMIT))throw Object.assign(new Error('Run too long.'),{status:400});
+    // The owner's workspace limit on steps (Settings → Limits), when there is one, bounds every team.
+    run.maxSteps=Math.min(run.maxSteps??MAX_HANDOFFS,stepsCap(s));
+    if(run.recipients.length>run.maxSteps)run.recipients=run.recipients.slice(0,run.maxSteps);
     run.browserDepth=Math.max(0,Math.min(MAX_BROWSER_DEPTH,Number(browserDepth)||0));
     s.groupRuns.unshift(run);s.groupRuns=s.groupRuns.slice(0,100);
     s.groupMessages[groupId]??=[];
@@ -303,7 +306,7 @@ async function runGroupInner(store,id,executor){
       const home=current.groups.find(x=>(x.bots||[]).some(b=>b.id===bot.id));
       // The run's ask tally: each ask is written to the run as it happens, so the
       // thread shows it in flight, and a checkpoint can stop the step and keep it.
-      const budget={asks:r.asks?structuredClone(r.asks):undefined,limitBase:r.limitBase,unlimitedAsks:r.unlimitedAsks};
+      const budget={asks:r.asks?structuredClone(r.asks):undefined,limitBase:r.limitBase,unlimitedAsks:r.unlimitedAsks??!limitsOf(current).askCheckpoints};
       const onEvent=event=>store.update(s=>{
         const live=s.groupRuns.find(x=>x.id===id);
         if(!live||live.status!=='running')throw new Error('Run no longer active');
@@ -353,7 +356,7 @@ async function runGroupInner(store,id,executor){
       // neither keeps the fences the model happened to wrap around them.
       const gated=typeof validated==='string'?validated:JSON.stringify(validated);
       previous={botId:bot.id,output:gated.slice(0,3600)};
-      let toBotId=null,auto=[],holdBrowser=false,newAsks=[];
+      let toBotId=null,auto=[],holdBrowser=false,newAsks=[],stuckStop=null;
       await store.update(s=>{coordinationState(s);const live=s.groupRuns.find(x=>x.id===id);if(!live||live.status!=='running')throw new Error('Run no longer active');
         const host=s.groups.find(x=>x.id===live.groupId);
         // File fences from the full reply, then hand the next bot the text around them.
@@ -398,7 +401,20 @@ async function runGroupInner(store,id,executor){
         for(const a of conn.asks)addAskCards(s,a,bot);
         if(reply.spawns.length)live.subagents=[...(live.subagents||[]),...reply.spawns.map(spawn=>({...spawn,botId:bot.id,at:stamp()}))].slice(-6);
         if(reply.asks.length)live.peerAsks=[...(live.peerAsks||[]),...reply.asks.map(ask=>({botId:bot.id,...ask,at:stamp()}))].slice(-6);
-        if(browsed.records.length){
+        // Nothing new to fetch: the rounds ran out, or every page asked for is one it already read. The bot gets a
+        // turn to answer from what it has; doing it again and again (FAIL_STREAK rounds) stops the run.
+        delete live.browserNote;
+        const stuck=!browsed.records.length&&!conn.calls.length&&!declinedTurn&&!stopped&&!off&&(browsed.limited||browsed.repeated>0);
+        if(stuck){
+          live.failStreak=(Number(live.failStreak)||0)+1;
+          if(live.failStreak>=FAIL_STREAK){stuckStop=`${bot.name} kept asking for pages it already had, so the task stopped. Ask again with more detail, or name a different site.`;return;}
+          live.browserNote=browsed.limited?'You have used every round of pages for this message. Do not ask for more pages: answer the owner now with what you found, and say what is still missing.'
+            :'You asked again for pages you already read (a page can redirect to one you have). Do not ask for them again: open different pages, or answer the owner now with what you found.';
+          live.browserPage=null;live.connectorPage=null;
+          live.checkpoint={nextStep:i,afterStep:i+1,previous,at:stamp()};
+          live.status='queued';
+          holdBrowser=true;
+        } else if(browsed.records.length){
           // Parked on the owner (an ask) or on the page coming back. Either way it holds nothing.
           live.status=browsed.asks.length?'awaiting_ask':'awaiting_browser';
           if(browsed.asks.length)live.askIds=browsed.asks.map(a=>a.id);
@@ -416,10 +432,11 @@ async function runGroupInner(store,id,executor){
           holdBrowser=true;
         } else {
           // Extra turn consumed the page; later bots do not see it as `page`.
-          live.browserPage=null;
+          live.browserPage=null;live.failStreak=0;
           live.connectorPage=null;live.connectorCalls=[];
         }
       });
+      if(stuckStop)throw Object.assign(new Error(stuckStop),{stopped:true});
       if(newAsks.length)notifyAsks(store,newAsks,bot.name);
       if(auto.length)await autoDispatch(store,auto);
       // Keep what this model learned. The reply is already stored, so a memory
@@ -444,13 +461,15 @@ async function runGroupInner(store,id,executor){
   // live runs `interrupted`; overwriting that with `failed` would report a crash
   // the operator never saw as a model error and hide the explicit retry advice.
   }catch(e){
-    let scheduled=null;
-    await store.update(s=>{const r=s.groupRuns?.find(x=>x.id===id);if(r&&r.status==='running'){endRun(r,'failed',{error:clean(e.message)});say(s,r,runNote(r));say(s,r,modelLimitLine(s,e,{runId:id}));
+    let scheduled=null,failedNote=null;
+    await store.update(s=>{const r=s.groupRuns?.find(x=>x.id===id);if(r&&r.status==='running'){endRun(r,'failed',{error:clean(e.message)});const note=runNote(r);failedNote=note.text;say(s,r,note);say(s,r,modelLimitLine(s,e,{runId:id}));
       // A timer run fails with nobody watching: count it on its schedule (which stops itself when it keeps
       // failing) and tell the owner, instead of re-arming the same failure every period in silence.
       if(r.scheduleId){scheduled=scheduleRunEnded(s,r.scheduleId,{ok:false,error:{message:clean(e.message),code:e.code}});if(scheduled)say(s,r,{id:`${id}-schedule`.slice(0,64),role:'system',text:scheduled.text,runId:id});}
       activity(s,'group-error',`Coordination failed: ${clean(e.message)}`,{runId:id});}});
     if(scheduled)Promise.resolve().then(()=>store.notify?.({title:scheduled.paused?'A schedule stopped':'A scheduled task failed',body:scheduled.text,kind:'event',meta:{runId:id}})).catch(error=>console.error('Schedule notification:',error.message));
+    // Any other run that stopped on an error tells the owner too, so a failure is never found only by looking.
+    else if(failedNote)Promise.resolve().then(()=>store.notify?.({title:'A task stopped',body:failedNote,kind:'event',meta:{runId:id}})).catch(error=>console.error('Run notification:',error.message));
   }
   finally{
     running.delete(id);
@@ -468,6 +487,7 @@ export async function resumeBrowserRun(store,request,{ok,text='',executor}={}){
   const cur=store.read().groupRuns?.find(r=>r.id===id);
   if(!cur||cur.status!=='awaiting_browser')return false;
   const page=clean(text).trim();
+  let stoppedRun=null;
   const start=await store.update(s=>{
     const live=s.groupRuns.find(r=>r.id===id);
     if(!live)return false;
@@ -495,7 +515,25 @@ export async function resumeBrowserRun(store,request,{ok,text='',executor}={}){
     if(live.status!=='awaiting_browser')return false;
     // A reply may ask for more than one page. Count the round if any request
     // succeeded, even when the final request in the batch was denied or failed.
-    if(live.browserPage)live.browserDepth=Math.min(MAX_BROWSER_DEPTH,(Number(live.browserDepth)||0)+1);
+    if(live.browserPage){live.browserDepth=Math.min(MAX_BROWSER_DEPTH,(Number(live.browserDepth)||0)+1);live.failStreak=0;}
+    // Every page of the round failed. The bot gets a turn to try another page or answer with what it has; the
+    // same thing FAIL_STREAK rounds in a row stops the run and tells the owner. A declined page is the owner's
+    // answer, not a failure, and goes on as before.
+    const why=!ok?clean(request?.error||text||'the page could not be opened.').slice(0,300):'';
+    if(!live.browserPage&&!ok&&request?.status==='failed'){
+      const step=Number.isInteger(live.checkpoint?.nextStep)?live.checkpoint.nextStep:live.currentStep;
+      const who=s.groups.find(g=>g.id===live.groupId)?.bots.find(b=>b.id===live.recipients[step])?.name||'The bot';
+      live.failStreak=(Number(live.failStreak)||0)+1;
+      if(live.failStreak>=FAIL_STREAK){
+        endRun(live,'failed',{error:`${who}'s pages failed ${FAIL_STREAK} times in a row, so the task stopped. The last one said: ${why}`});
+        say(s,live,runNote(live));
+        stoppedRun={title:'A task stopped',body:live.error};
+        return false;
+      }
+      live.browserNote=`The pages you asked for could not be opened (${why}). Try a different page or site, or answer the owner now with what you have.`;
+      live.status='queued';
+      return true;
+    }
     if(!live.browserPage){
       const after=live.checkpoint?.afterStep;
       const next=Number.isInteger(after)?after:(live.checkpoint?.nextStep||0)+1;
@@ -510,6 +548,7 @@ export async function resumeBrowserRun(store,request,{ok,text='',executor}={}){
     live.status='queued';
     return true;
   });
+  if(stoppedRun)Promise.resolve().then(()=>store.notify?.({...stoppedRun,kind:'event',meta:{runId:id}})).catch(error=>console.error('Run notification:',error.message));
   if(start)startRun(store,id,executor);
   return true;
 }

@@ -200,9 +200,10 @@ async def thread_run(page, base):
     assert (await hash_(page)).startswith('#thread/'), await hash_(page)
     await expect(page.locator('.cv-me')).to_have_count(1)  # the owner's first line is written once
     await expect(page.locator('#main .cv-who')).to_have_count(0)  # no face: Atlas runs every thread
-    # While it works one pill updates; when it is done a quiet pill names who helped.
-    await expect(page.locator('.cv-done summary')).to_contain_text('helped', timeout=10000)
-    await expect(page.locator('.cv-done summary')).to_contain_text('Researcher')
+    # While it works one line updates; when it is done a quiet line names the latest hop, and only the answer is a bubble.
+    await expect(page.locator('.cv-done summary')).to_contain_text('Writer messaged Atlas', timeout=10000)
+    await expect(page.locator('#cv-log .cv-bot')).to_have_count(1)
+    await expect(page.locator('#cv-log .cv-note', has_text='Passing this through')).to_have_count(0)
     await page.locator('.cv-done summary').click()
     await expect(page.locator('.cv-plog li').first).to_be_visible()
     assert await page.locator('.cv-plog li').count() >= 2

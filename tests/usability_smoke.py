@@ -1269,6 +1269,56 @@ async def computer_site_chip_on_the_pill(page, base):
     await expect(page.locator('#cv-log .pchip')).to_have_count(0)
 
 
+async def chat_hops_fold_into_one_line(page, base):
+    """A run's bot-to-bot messages are one line that updates and opens; browsing and connector use are not shown."""
+    ids = await open_app(page, base, bots=EXTRA_BOTS)
+    r, w = ids['Researcher'], ids['Writer']
+    await patch_state(page, f'''
+        const t = n => new Date(Date.now() - 60000 + n * 1000).toISOString();
+        s.chats[{PRIMARY!r}] = [
+          {{id: 'q', role: 'user', text: 'Find papers and sum them up', at: t(1)}},
+          {{id: 'h1', role: 'bot', senderId: {PRIMARY!r}, senderName: 'Atlas', toBotId: {r!r}, runId: 'run-hops', text: 'Researcher, find three papers.', at: t(2)}},
+          {{id: 'x1', role: 'system', kind: 'browser-result', text: 'Browser result for Researcher: Papers · https://example.org', at: t(3)}},
+          {{id: 'x2', role: 'system', text: 'Researcher already has that page, so it was not opened again.', at: t(3)}},
+          {{id: 'x3', role: 'system', kind: 'connector', text: 'Researcher used Notes: search.', at: t(3)}},
+          {{id: 'h2', role: 'bot', senderId: {r!r}, senderName: 'Researcher', toBotId: {w!r}, runId: 'run-hops', text: 'Here are three papers.', at: t(4)}}];
+        s.groupRuns.unshift({{id: 'run-hops', groupId: 'home', chatKey: {PRIMARY!r}, status: 'running', recipients: [{PRIMARY!r}, {r!r}, {w!r}, {PRIMARY!r}], currentStep: 2, createdAt: t(1),
+          trace: [{{botId: {PRIMARY!r}, output: 'Researcher, find three papers.', toBotId: {r!r}}}, {{botId: {r!r}, output: 'Here are three papers.', toBotId: {w!r}}}]}});''')
+    await page.goto(f'{base}/index.html#bot/{PRIMARY}')
+    await page.reload()
+    line = page.locator('#cv-log .cv-going summary')
+    await expect(line.locator('.cv-cur')).to_have_text('Researcher is messaging Writer')
+    await expect(page.locator('#cv-log .cv-bot')).to_have_count(0)
+    for words in ('Browser result', 'already has that page', 'used Notes', 'read Papers'):
+        await expect(page.locator('#cv-log', has_text=words)).to_have_count(0)
+    # Collapsed by default; the keyboard opens it, and the hops read who wrote to whom.
+    await expect(page.locator('#cv-log .cv-plog')).not_to_be_visible()
+    await line.focus()
+    await page.keyboard.press('Enter')
+    hops = page.locator('#cv-log .cv-plog li')
+    await expect(hops).to_have_count(2)
+    await expect(hops.nth(1)).to_contain_text('Researcher')
+    await expect(hops.nth(1)).to_contain_text('to Writer')
+    await expect(hops.nth(1)).to_contain_text('Here are three papers.')
+    assert await page.evaluate('() => document.documentElement.scrollWidth - innerWidth') <= 0
+    # Done: one quiet line with the latest hop, and the final answer is the only bubble.
+    await patch_state(page, f'''
+        const run = s.groupRuns.find(x => x.id === 'run-hops'), at = new Date().toISOString();
+        run.status = 'completed'; run.currentStep = 4;
+        run.trace.push({{botId: {w!r}, output: 'Summary drafted.', toBotId: {PRIMARY!r}}}, {{botId: {PRIMARY!r}, output: 'Here is the summary.'}});
+        s.chats[{PRIMARY!r}].push({{id: 'h3', role: 'bot', senderId: {w!r}, senderName: 'Writer', toBotId: {PRIMARY!r}, runId: 'run-hops', text: 'Summary drafted.', at}},
+          {{id: 'f', role: 'bot', senderId: {PRIMARY!r}, senderName: 'Atlas', runId: 'run-hops', text: 'Here is the summary.', at}},
+          {{id: 'run-hops-completed', role: 'system', runId: 'run-hops', text: 'Done in 4 step(s).', at}});''')
+    done = page.locator('#cv-log .cv-done summary')
+    await expect(done).to_contain_text('Writer messaged Atlas')
+    await expect(page.locator('#cv-log .cv-bot')).to_have_count(1)
+    await expect(page.locator('#cv-log .cv-bot')).to_contain_text('Here is the summary.')
+    await expect(page.locator('#cv-log', has_text='Done in 4 step')).to_have_count(0)
+    await done.click()
+    await expect(page.locator('#cv-log .cv-plog li')).to_have_count(3)
+    assert await page.evaluate('() => document.documentElement.scrollWidth - innerWidth') <= 0
+
+
 async def phone_computer_view(page, base):
     live, bot = await open_computer(page, base)
     await page.goto(f'{base}/index.html#profile/{bot}/computer')
@@ -2022,10 +2072,10 @@ async def chat_connector_lines_and_undo(page, base):
     await patch_state(page, held_state(writer))
     await page.goto(f'{base}/index.html#bot/{writer}')
     await page.reload()
-    # What was read, on which account, and a failure in the error colour.
-    used = page.locator('.cv-conn', has_text='used Google')
-    await expect(used).to_contain_text('me@example.org')
-    await expect(page.locator('.cv-conn.bad')).to_contain_text('could not use Google')
+    # What a connector read, and a call that failed without ending the run, are not shown: the bot's answer says it.
+    await expect(page.locator('#cv-log .cv-held')).to_have_count(1)
+    await expect(page.locator('#cv-log', has_text='used Google')).to_have_count(0)
+    await expect(page.locator('#cv-log', has_text='could not use Google')).to_have_count(0)
     # The held send is a card with Undo while its window runs.
     held = page.locator('.cv-held')
     await expect(held).to_contain_text('sending an email to bob@example.org')
@@ -2166,9 +2216,10 @@ async def main():
             await h.scenario('notifications: no webhook switch without a saved address, no email without a mailbox', notifications_hide_webhook_without_a_saved_address)
             await h.scenario('data: Reveal not offered for app-kept secrets, Prune and Restore ask first, backup is owner only', data_cards_keep_reveal_prune_and_restore_confirms)
             await h.scenario('demo: Connectors and Models and keys say they need the server', demo_says_connectors_and_models_need_the_server)
-            await h.scenario('chat: connector lines name the account, a held send has Undo, then collapses to a muted line', chat_connector_lines_and_undo)
+            await h.scenario('chat: connector use is hidden, a held send has Undo and names the account, then collapses to a muted line', chat_connector_lines_and_undo)
             await h.scenario('chat: the Undo button goes when its window ends, and a late Undo says it already went out', chat_held_send_closes_by_itself_and_late_undo_says_so)
             await h.scenario('chat: a usage limit offers Switch to the provider named, then settles', chat_model_limit_switch)
+            await h.scenario('chat: a run\'s hops fold into one line that updates and opens, at phone width', chat_hops_fold_into_one_line, {'width': 375, 'height': 812})
             await h.scenario('phone: Connectors, Models and keys and a held send fit and are usable', phone_connectors_and_models_fit, PHONE)
             await h.scenario('phone: Models and keys, with its dots, fits', phone_models_page_fits, PHONE)
             await browser.close()

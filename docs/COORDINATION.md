@@ -24,7 +24,7 @@ Each bot and each group carries settings (`shared/bot-settings.js`). The Node se
 
 The model provider and model per bot are set in the same profile (see BYOK in the README). Permissions stay in the bot contract; no setting can grant an action, and publishing is never grantable.
 
-**Group settings** (group info → Group settings): name, description, routing mode, pipeline order, step limit (1–12, default 6), approve between steps, whether bots may hand off, and who keeps a task on track. **I'll direct them** (`direct`): you @mention who you want, or the no-mention **routing** above runs; the primary bot does not run a tracked plan. **One bot keeps it on track** sends a plain message to the primary bot through a plan of only the bots that request needs, then checks the outcome. **Show me the plan first** waits for Start. Bots can be added, removed, and switched off; an admin can delete a group.
+**Group settings** (group info → Group settings): name, description, routing mode, pipeline order, step limit (1–30, default none: only the 30-step safety stop), approve between steps, whether bots may hand off, and who keeps a task on track. **I'll direct them** (`direct`): you @mention who you want, or the no-mention **routing** above runs; the primary bot does not run a tracked plan. **One bot keeps it on track** sends a plain message to the primary bot through a plan of only the bots that request needs, then checks the outcome. **Show me the plan first** waits for Start. Bots can be added, removed, and switched off; an admin can delete a group.
 
 ## How a message is routed
 
@@ -54,7 +54,7 @@ A chat's info panel → Scheduled tasks (or the composer's + → Schedule a task
 
 ## Boundaries and safety
 
-- **Hard cap of 12 bot steps per run** (`MAX_STEPS_LIMIT`), whatever a group sets; no self-handoff and no repeated recipient.
+- **No limits by default, a safety stop always** (`shared/limits.js`). The owner can set pages per reply, browsing rounds, bots per task and checkpoints under Settings → Permissions → Limits (`POST /api/limits`). Whatever is set, a run never passes 30 bot steps, 25 browsing rounds or 8 pages per reply (`BACKSTOP`), and three rounds in a row with nothing new (pages that fail, or only pages it already had) stop the run and notify the owner (`FAIL_STREAK`). No self-handoff and no repeated recipient.
 - **Guests are opt-in per bot** (`summonable`), keep their own permissions and contract, and report into the host conversation only.
 - **No self-reported authority**: outputs from other bots and chat history are untrusted input and cannot grant permission.
 - **No secret or account access** from text-only model workers.

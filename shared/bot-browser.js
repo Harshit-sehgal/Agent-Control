@@ -24,9 +24,11 @@ import {cleanText, validHttpUrl} from './core.js';
 import {fail} from './errors.js';
 import {decide, createAsk, scopeOf} from './asks.js';
 import {controlFence} from './reply-blocks.js';
+import {BACKSTOP, pagesCap, roundsCap} from './limits.js';
 
 export const BROWSER_PERMISSION = 'browser.use';
-export const MAX_REQUESTS_PER_REPLY = 2;
+/** The most blocks one reply is read for: the backstop. The owner's own limit (Settings → Limits) may be lower. */
+export const MAX_REQUESTS_PER_REPLY = BACKSTOP.pages;
 export const MAX_STEPS = 25;
 /** The highest index a request may name; matches what a snapshot reports. */
 export const MAX_ELEMENT_INDEX = 500;
@@ -135,7 +137,7 @@ export function parseBrowserRequests(output) {
 export const stripBrowserBlocks = output => String(output ?? '').replace(BLOCK(), '').replace(/\n{3,}/g, '\n\n').trim();
 
 /** What a bot is told about the tool when it holds the permission. */
-export const BROWSER_TOOL_HINT = 'You can read or use a web page through a headless browser. Put one block per page in your reply, e.g. ```browser\n{"url":"https://example.com"}\n``` That returns the page text and a numbered list of controls. To act, name a control by its number in the same block: {"url":"https://example.com","steps":[{"op":"click","index":3}]} then read the result. Ops: navigate, click, type, waitFor, read, scroll. A CSS selector also works instead of an index. Scroll only moves the page. Any public site works, including X and YouTube pages (read them; you can never click or type on X or Twitter). To find something you have no link for, search first: open https://html.duckduckgo.com/html/?q=your+search+words and then open the results that fit. Do not ask the owner for a link you can find this way, and do not answer from memory when the question is about now. You may put up to 2 blocks in one reply to read pages side by side, and ask for more pages after you read those. The result comes back in the chat.';
+export const BROWSER_TOOL_HINT = 'You can read or use a web page through a headless browser. Put one block per page in your reply, e.g. ```browser\n{"url":"https://example.com"}\n``` That returns the page text and a numbered list of controls. To act, name a control by its number in the same block: {"url":"https://example.com","steps":[{"op":"click","index":3}]} then read the result. Ops: navigate, click, type, waitFor, read, scroll. A CSS selector also works instead of an index. Scroll only moves the page. Any public site works, including X and YouTube pages (read them; you can never click or type on X or Twitter). To find something you have no link for, search first: open https://html.duckduckgo.com/html/?q=your+search+words and then open the results that fit. Do not ask the owner for a link you can find this way, and do not answer from memory when the question is about now. You may put several blocks in one reply to read pages side by side, and ask for more pages after you read those. The result comes back in the chat.';
 
 /** The numbered controls a snapshot returned, in one line. The model acts on
  * these; a page of raw HTML is not something it can click. */
@@ -162,8 +164,8 @@ export function browserResultText(request, result) {
   return `Browser result for ${request.botName}: ${head}${body ? `\n\n${body}` : '\n\nThe page returned no text.'}`;
 }
 
-/** How many browse-then-continue rounds one conversation turn may chain. */
-export const MAX_BROWSER_DEPTH = 3;
+/** The most browse-then-continue rounds one message may chain: the backstop. The owner's own limit may be lower. */
+export const MAX_BROWSER_DEPTH = BACKSTOP.rounds;
 /** The words that make a click or a typed field something the owner is asked about, riskiest first.
  * The app classifies, never the bot: a step names a control by index or selector, and the label comes
  * from the page result the bot was last shown. A control the bot was not shown a label for is at least
@@ -267,18 +269,25 @@ const samePage = (a, b) => {
 
 export function recordBrowserRequests(state, {bot, groupId, chatKey, output, depth = 0, skipUrls = [], runId = null, unattended = false, closed = false, makeId = () => crypto.randomUUID(), now = new Date().toISOString()}) {
   depth = Math.max(0, Math.min(MAX_BROWSER_DEPTH, Number(depth) || 0));
-  const found = parseBrowserRequests(output), text = stripBrowserBlocks(output), lines = [], records = [], asks = [];
-  if (!found.length) return {text: String(output ?? ''), records, lines, asks};
+  const rounds = roundsCap(state), perReply = pagesCap(state);
+  const all = parseBrowserRequests(output), text = stripBrowserBlocks(output), lines = [], records = [], asks = [];
+  if (!all.length) return {text: String(output ?? ''), records, lines, asks, limited: false, repeated: 0};
+  const found = all.slice(0, perReply);
   const say = line => lines.push({id: makeId(), role: 'system', text: line, at: now});
+  // `limited`: the rounds ran out, so the caller gives the bot a closing turn instead of more pages.
+  // `repeated`: pages it asked for again that it already has, which is no progress.
+  const limited = depth >= rounds;
+  let repeated = 0;
   // A bot never answers "I don't have permission": a page it has no grant for is an ask, and the owner
   // says Allow, Always allow or Decline. A Deny the owner set is the one thing that refuses outright.
-  if (depth >= MAX_BROWSER_DEPTH) say(`${bot.name} asked for another web page, but ${MAX_BROWSER_DEPTH} browsing rounds in a row is the limit. Ask again to continue.`);
+  if (limited) say(`${bot.name} asked for another web page, but ${rounds} browsing rounds in a row is the most ${rounds < BACKSTOP.rounds ? 'your limit in Settings allows' : 'one message may take'}.`);
   else if (closed) say(`${bot.name} asked for another web page, but you had just declined, so nothing was opened.`);
+  else if (all.length > found.length) say(`${bot.name} asked for ${all.length} pages at once; ${perReply} ${perReply === 1 ? 'is' : 'are'} opened per reply.`);
   // A run that has already read a connector carries private data: a new site asks (asks.js verdict).
   const readPrivate = Boolean(runId && (state.groupRuns || []).find(r => r.id === runId)?.connectorPage);
-  if (depth < MAX_BROWSER_DEPTH && !closed) for (const item of found) {
+  if (!limited && !closed) for (const item of found) {
     if (!item.ok) { say(`${bot.name} asked for a web page, but the request was refused: ${item.error}`); continue; }
-    if (skipUrls.some(url => samePage(url, item.request.url))) { say(`${bot.name} already has that page, so it was not opened again.`); continue; }
+    if (skipUrls.some(url => samePage(url, item.request.url))) { repeated++; say(`${bot.name} already has that page, so it was not opened again.`); continue; }
     const needs = browserNeeds(item.request, controlLabels(state, bot.id, chatKey));
     const decision = decide(state, bot, needs, {readPrivate});
     if (decision.verdict === 'deny') { say(`${bot.name} asked to ${describe(item.request)}. ${decision.message}`); continue; }
@@ -301,7 +310,7 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
   state.browserRequests ??= [];
   state.browserRequests.unshift(...records);
   pruneBrowserRequests(state);
-  return {text: text || `${bot.name} asked to open a web page.`, records, lines, asks};
+  return {text: text || `${bot.name} asked to open a web page.`, records, lines, asks, limited, repeated};
 }
 
 /** A person turns down a request that is still waiting, including one already

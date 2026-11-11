@@ -1,0 +1,94 @@
+/** A run with no limits still ends. When the rounds the owner set run out, the bot answers with what it has; when
+ * nothing new comes back three rounds in a row (pages that fail, or pages it already has), the run stops and the
+ * owner is told why. The model is scripted, the browser is a fake, and the run loop is the real one. */
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import {resumeBrowserRun, queueGroupRun} from '../src/coordination.js';
+import {BACKSTOP} from '../shared/limits.js';
+import {setBrowserResultHooks} from '../src/bot-browser.js';
+import {browserRuntime} from '../src/browser-runtime.js';
+import {company, model, ask} from './run-fixture.js';
+
+const fence = url => `Looking.\n\`\`\`browser\n${JSON.stringify({url})}\n\`\`\``;
+const until = async (check, note) => {
+  for (let i = 0; i < 500; i++) { const value = check(); if (value) return value; await new Promise(resolve => setTimeout(resolve, 10)); }
+  throw new Error(`timed out waiting for ${note}`);
+};
+const opened = [];
+const realRun = browserRuntime.run, realAvailable = browserRuntime.available;
+const fakeBrowser = (t, run) => {
+  opened.length = 0;
+  browserRuntime.available = () => true;
+  browserRuntime.run = async request => { opened.push(request.url); return run(request); };
+  t.after(() => { browserRuntime.available = realAvailable; browserRuntime.run = realRun; });
+};
+const wire = executor => setBrowserResultHooks({continueRun: async () => {}, resumeBrowser: (store, request, options) => resumeBrowserRun(store, request, {...options, executor})});
+const runOf = (store, id) => store.read().groupRuns.find(r => r.id === id);
+const ended = (store, id) => ['completed', 'failed'].includes(runOf(store, id)?.status);
+const notices = store => { const sent = []; store.notify = async n => { sent.push(n); }; return sent; };
+
+test('when the owner\'s rounds run out, the bot answers with what it read instead of stopping mid-way', async t => {
+  fakeBrowser(t, async request => ({title: 'Page', finalUrl: request.url, text: `Listing at ${request.url}`}));
+  const {store, ids} = await company(t);
+  await store.update(s => { s.limits = {rounds: 1}; });
+  const ai = model({Mailroom: e => (e.note ? `Shortlist from what I read: ${e.note.length > 0 ? 'one listing' : ''}` : e.page ? fence('https://jobs.example/two') : fence('https://jobs.example/one'))});
+  wire(ai.executor);
+  const run = await ask(store, {message: 'find jobs', to: ids.mail, executor: ai.executor});
+  await until(() => ended(store, run.id), 'the run');
+  assert.equal(runOf(store, run.id).status, 'completed');
+  assert.deepEqual(opened, ['https://jobs.example/one']);
+  assert.match(runOf(store, run.id).lastOutput, /Shortlist from what I read/);
+});
+
+test('asking again and again for pages it already has stops the run after three rounds and tells the owner', async t => {
+  fakeBrowser(t, async request => ({title: 'Page', finalUrl: request.url, text: 'Same page'}));
+  const {store, ids} = await company(t);
+  const sent = notices(store);
+  const ai = model({Mailroom: () => fence('https://jobs.example/same')});
+  wire(ai.executor);
+  const run = await ask(store, {message: 'find jobs', to: ids.mail, executor: ai.executor});
+  await until(() => ended(store, run.id), 'the run');
+  const done = runOf(store, run.id);
+  assert.equal(done.status, 'failed');
+  assert.match(done.error, /kept asking for pages it already had/);
+  assert.equal(opened.length, 1, 'the page was opened once');
+  await until(() => sent.length, 'the notice');
+  assert.equal(sent[0].title, 'A task stopped');
+  assert.match(sent[0].body, /Mailroom/);
+});
+
+test('pages that keep failing give the bot a turn to try another, then stop the run after three and tell the owner', async t => {
+  fakeBrowser(t, async () => { throw new Error('The page did not finish loading within 25s.'); });
+  const {store, ids} = await company(t);
+  const sent = notices(store);
+  let n = 0;
+  const ai = model({Mailroom: () => fence(`https://jobs.example/${++n}`)});
+  wire(ai.executor);
+  const run = await ask(store, {message: 'find jobs', to: ids.mail, executor: ai.executor});
+  await until(() => ended(store, run.id), 'the run');
+  const done = runOf(store, run.id);
+  assert.equal(done.status, 'failed');
+  assert.match(done.error, /3 times in a row/);
+  assert.match(done.error, /did not finish loading/);
+  assert.equal(opened.length, 3, 'it tried three different pages');
+  await until(() => sent.length, 'the notice');
+  assert.equal(sent[0].title, 'A task stopped');
+});
+
+test('an owner\'s step limit bounds a queued run; with none, the run has the backstop', async t => {
+  const server = http.createServer((request, response) => {
+    request.resume(); request.on('end', () => { response.writeHead(200, {'content-type': 'application/json'}); response.end(JSON.stringify({choices: [{message: {content: 'ok'}}]})); });
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  Object.assign(process.env, {AI_BASE_URL: `http://127.0.0.1:${server.address().port}/v1`, AI_API_KEY: 'test-key', AI_MODEL: 'test-model', AI_API_STYLE: 'chat'});
+  const {store, ids} = await company(t);
+  const free = await queueGroupRun(store, {groupId: 'home', message: 'Sort my inbox', directBotId: ids.mail, chatKey: ids.mail, anyway: true});
+  await until(() => ended(store, free.runId), 'the first run');
+  assert.equal(runOf(store, free.runId).maxSteps, BACKSTOP.steps);
+  await store.update(s => { s.limits = {steps: 3}; });
+  const tight = await queueGroupRun(store, {groupId: 'home', message: 'Sort it again', directBotId: ids.mail, chatKey: ids.mail, anyway: true});
+  await until(() => ended(store, tight.runId), 'the second run');
+  assert.equal(runOf(store, tight.runId).maxSteps, 3);
+});

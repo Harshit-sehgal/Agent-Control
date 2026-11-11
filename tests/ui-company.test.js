@@ -256,6 +256,12 @@ test('handoffs shows a bot-to-bot ask and its answer', () => {
   ]);
 });
 
+test('a last step addressed to a bot that has not answered yet is a hop on its way', () => {
+  const r = run({status: 'running', trace: [{botId: 'atlas', output: 'go', toBotId: 'mail'}]});
+  assert.deepEqual(handoffs(r), [{from: 'atlas', to: 'mail', text: 'go'}]);
+  assert.deepEqual(handoffs(run({trace: [{botId: 'atlas', output: 'done', toBotId: 'None'}]})), []);
+});
+
 test('handoffs is empty when one bot did everything, or there is no run', () => {
   assert.deepEqual(handoffs(run({trace: [{botId: 'atlas', output: 'Hi'}]})), []);
   assert.deepEqual(handoffs(undefined), []);
@@ -270,16 +276,15 @@ test('progress starts with Atlas working out who does what', () => {
   assert.deepEqual(pill(threadRun({recipients: ['atlas'], trace: []})), {botId: 'atlas', text: 'Atlas is working out who does what'});
 });
 
-test('an ask in flight reads Asking <Bot> with the first 60 characters', () => {
+test('an ask in flight reads "<Asker> is messaging <Bot>", with the asked bot\'s face', () => {
   const task = 'Please check whether the Northwind invoice from last month was paid and tell me the amount.';
   const out = pill(threadRun({trace: [{botId: 'atlas', output: 'x'}, {botId: 'atlas', kind: 'ask', to: 'mail', task}], currentStep: 1}));
-  assert.equal(out.text, `Asking Mailroom: ${task.slice(0, 60)}`);
-  assert.equal(out.text.length, 'Asking Mailroom: '.length + 60);
+  assert.deepEqual(out, {botId: 'mail', text: 'Atlas is messaging Mailroom'});
 });
 
-test('a bot with the turn is on it', () => {
+test('a bot handed the turn by another reads as the hop in progress', () => {
   const out = pill(threadRun({trace: [{botId: 'atlas', output: '@Planner plan it'}], currentStep: 1}));
-  assert.deepEqual(out, {botId: 'plan', text: 'Planner is on it'});
+  assert.deepEqual(out, {botId: 'plan', text: 'Atlas is messaging Planner'});
 });
 
 test('a run waiting on the person says the bot needs your OK', () => {
@@ -287,30 +292,30 @@ test('a run waiting on the person says the bot needs your OK', () => {
   assert.deepEqual(out, {botId: 'plan', text: 'Planner needs your OK'});
 });
 
-test('Atlas closing the run is putting it together', () => {
+test('a helper handing back to Atlas reads as that hop', () => {
   const out = pill(threadRun({trace: [{botId: 'atlas', output: 'x'}, {botId: 'plan', output: 'y'}], currentStep: 2}));
-  assert.deepEqual(out, {botId: 'atlas', text: 'Atlas is putting it together'});
+  assert.deepEqual(out, {botId: 'atlas', text: 'Planner is messaging Atlas'});
 });
 
-test('a finished run becomes a quiet pill naming who helped and how many messages', () => {
+test('a finished run becomes a quiet pill naming its latest hop', () => {
   const out = pill(threadRun({status: 'completed', trace: [
     {botId: 'atlas', output: 'a'}, {botId: 'plan', output: 'b'},
     {botId: 'atlas', kind: 'ask', to: 'mail', task: 'c'}, {botId: 'mail', kind: 'peer', to: 'atlas', output: 'd'},
     {botId: 'atlas', output: 'e'},
   ], currentStep: 3}));
-  assert.deepEqual(out, {done: true, text: 'Planner and Mailroom helped · 4 messages'});
+  assert.deepEqual(out, {done: true, text: 'Planner messaged Atlas'});
 });
 
-test('one helper and one message read in the singular', () => {
+test('one hop reads as that hop', () => {
   const out = pill(threadRun({status: 'completed', trace: [{botId: 'atlas', output: 'a'}, {botId: 'plan', output: 'b'}]}));
-  assert.deepEqual(out, {done: true, text: 'Planner helped · 1 message'});
+  assert.deepEqual(out, {done: true, text: 'Atlas messaged Planner'});
 });
 
-test('three helpers are listed with commas and an and', () => {
+test('a chain of three hops names only the last one', () => {
   const out = pill(threadRun({status: 'completed', trace: [
     {botId: 'atlas', output: 'a'}, {botId: 'plan', output: 'b'}, {botId: 'mail', output: 'c'}, {botId: 'ledger', output: 'd'},
   ]}), stateOf());
-  assert.equal(out.text, 'Planner, Mailroom and Ledger helped · 3 messages');
+  assert.equal(out.text, 'Mailroom messaged Ledger');
 });
 
 test('no pill when Atlas did it alone, or the run failed, or there is no run', () => {
@@ -322,7 +327,7 @@ test('no pill when Atlas did it alone, or the run failed, or there is no run', (
 
 test('a deleted bot never crashes the pill', () => {
   const out = pill(threadRun({trace: [{botId: 'atlas', output: 'x'}], currentStep: 1, recipients: ['atlas', 'ghost']}));
-  assert.equal(out.text, 'A bot is on it');
+  assert.equal(out.text, 'Atlas is messaging A bot');
 });
 
 test('a bot-chat run says the bot is on it from the first moment', () => {
