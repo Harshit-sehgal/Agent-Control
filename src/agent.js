@@ -22,9 +22,10 @@ import crypto from 'node:crypto';
 import {fail} from '../shared/errors.js';
 import {cleanText} from '../shared/core.js';
 import {validateBrowserRequest} from '../shared/bot-browser.js';
+import {cliEngineById,cleanCliModel,LOCAL_CLI_ENGINE_IDS} from '../shared/ai-presets.js';
 import {encryptJson,decryptJson,sha256,loadMasterKey} from './vault.js';
 
-export const AGENT_ACTIONS = ['http.check', 'browser.capture', 'browser.action'];
+export const AGENT_ACTIONS = ['http.check', 'browser.capture', 'browser.action', 'model.run'];
 const PAIRING_TTL_MS = 10 * 60000;
 const CLOCK_SKEW_MS = 5 * 60000;
 // How long a claimed task stays leased to the device. It is also how recently a
@@ -34,6 +35,33 @@ const DEFAULT_LEASE_MS = 120000;
 // 'browser.capture' because acting on a page is a deliberate grant, not a read.
 // AGENT_ACTIONS is the list; a separate kind table only ever repeated it.
 const signatureNonces = new Map(); // agentId -> Set of recently used signatures
+
+/** Kinds that are never run a second time. A browser action may already have
+ * clicked; a model run has already spent the owner's subscription. */
+const ONCE_ONLY = ['browser.action', 'model.run'];
+export const MODEL_RUN_TIMEOUT_MS = 180000;
+
+/** The canonical `model.run` payload: an engine, an optional model that cannot
+ * read as a flag, the bot's instructions and input as bounded text, and a
+ * timeout. Anything else the caller sent is dropped. */
+export function validateModelRun(payload) {
+  const p = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
+  const engine = cliEngineById(p.engine);
+  if (!engine) fail(`A model.run task needs an engine: ${LOCAL_CLI_ENGINE_IDS.join(' or ')}.`, 400);
+  const model = cleanCliModel(p.model);
+  if (model === null) fail('That model name is not valid for a CLI.', 400);
+  if (typeof p.input !== 'string' || !p.input.trim()) fail('A model.run task needs input text.', 400);
+  if (p.input.length > 100000) fail('A model.run input is too long (100000 characters at most).', 400);
+  if (p.instructions !== undefined && typeof p.instructions !== 'string') fail('Instructions must be text.', 400);
+  if ((p.instructions || '').length > 30000) fail('A model.run instruction is too long (30000 characters at most).', 400);
+  let timeoutMs = MODEL_RUN_TIMEOUT_MS;
+  if (p.timeoutMs !== undefined) {
+    timeoutMs = Number(p.timeoutMs);
+    if (!Number.isFinite(timeoutMs)) fail('The timeout must be a number of milliseconds.', 400);
+    timeoutMs = Math.min(600000, Math.max(5000, Math.round(timeoutMs)));
+  }
+  return {engine: engine.id, model, instructions: p.instructions || '', input: p.input, timeoutMs};
+}
 
 const now = () => new Date().toISOString();
 
@@ -136,6 +164,7 @@ export function enqueueAgentTask(store, agentId, {kind, payload = {}, idempotenc
     if (request.kind !== kind) fail(`A ${kind} task does not match the payload: it describes a ${request.kind}.`, 400);
     payload = {url: request.url, steps: request.steps};
   }
+  if (kind === 'model.run') payload = validateModelRun(payload);
   const agent = store.get('SELECT * FROM agents WHERE id=?', agentId);
   if (!agent) fail('Agent not found.', 404);
   if (agent.revoked_at) fail('This agent has been revoked.', 409);
@@ -152,7 +181,7 @@ export function enqueueAgentTask(store, agentId, {kind, payload = {}, idempotenc
   const id = crypto.randomUUID();
   const task = {
     id, agent_id: agentId, kind, payload: JSON.stringify(payload || {}), status: 'queued',
-    attempts: 0, max_attempts: kind === 'browser.action' ? 1 : 3, idempotency_key: idempotencyKey || null, created_by: createdBy || null, created_at: now(),
+    attempts: 0, max_attempts: ONCE_ONLY.includes(kind) ? 1 : 3, idempotency_key: idempotencyKey || null, created_by: createdBy || null, created_at: now(),
   };
   store.run('INSERT INTO agent_tasks (id,agent_id,kind,payload,status,attempts,max_attempts,idempotency_key,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
     task.id, task.agent_id, task.kind, task.payload, task.status, task.attempts, task.max_attempts, task.idempotency_key, task.created_by, task.created_at, now());
@@ -225,7 +254,7 @@ export function completeAgentTask(store, agentId, taskId, {status, result, error
 }
 
 /** Tasks orphaned by a disconnected agent: expired leases return to queued,
- * except browser actions which fail instead (never retried). Returns how many
+ * except browser actions and model runs, which fail instead (never retried). Returns how many
  * stale tasks were settled.
  *
  * A lapsed lease is only evidence of a disconnect when the device has also
@@ -243,9 +272,9 @@ export function recoverAgentTasks(store, nowMs = Date.now(), {aliveMs = DEFAULT_
   for (const row of stale) {
     if (agentSeenSince(store, row.agent_id, aliveSince)) continue;
     rearmed++;
-    if (row.kind === 'browser.action') {
+    if (ONCE_ONLY.includes(row.kind)) {
       store.run(`UPDATE agent_tasks SET status='failed', lease_until=NULL, error=?, updated_at=?, completed_at=? WHERE id=?`,
-        'The agent disconnected before completing. Browser actions are not retried.', now(), now(), row.id);
+        `The agent disconnected before completing. ${row.kind === 'model.run' ? 'Model runs' : 'Browser actions'} are not retried.`, now(), now(), row.id);
       continue;
     }
     store.run(`UPDATE agent_tasks SET status='queued', lease_until=NULL, error=?, updated_at=? WHERE id=?`,

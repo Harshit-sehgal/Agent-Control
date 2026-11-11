@@ -13,6 +13,9 @@
  * a hash of the body, and the server rejects replays and stale clocks.
  *
  * The agent executes only the task kinds its server-side permissions allow.
+ * "model.run" runs the owner's own `claude` or `codex` CLI (agent/cli-model.mjs),
+ * signed in on this machine, so a bot can use their subscription. The app never
+ * sees that login.
  * "browser.capture" reads a page on a host the operator explicitly allowlists
  * (AGENT_BROWSER_ALLOWLIST). By default that is a plain HTTP read. With
  * AGENT_BROWSER=1 the page is opened in the Chrome, Chromium or Edge installed
@@ -25,6 +28,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import crypto from 'node:crypto';
 import {captureWithBrowser, ACTION_OPS, MAX_ACTIONS} from './browser.mjs';
+import {runModelTask} from './cli-model.mjs';
 import {hostAllowed, hostOf, parseAllowlist} from '../shared/bot-browser.js';
 import {resolvePublicAddress, pinnedRequest} from './net-guard.mjs';
 
@@ -34,7 +38,7 @@ const CONFIG = process.env.AGENT_CONFIG ? path.resolve(process.env.AGENT_CONFIG)
 // does not narrow the list, is the only way to receive the admin's full scope:
 // the server intersects the request with the code and treats an empty list as
 // "grant nothing".
-const TASK_KINDS = ['http.check', 'browser.capture', 'browser.action'];
+const TASK_KINDS = ['http.check', 'browser.capture', 'browser.action', 'model.run'];
 // `Number('15s')` is NaN, `Number('')` is 0, and `Math.max(2000, NaN)` is NaN,
 // which `setTimeout` turns into a 1 ms loop: an unpaced heartbeat storm. A value
 // that is not a positive number is the default, not a spin.
@@ -170,6 +174,12 @@ async function execute(task, config) {
     // Interaction needs the real browser; the fetch fallback cannot click or type.
     if (process.env.AGENT_BROWSER !== '1') throw new Error('browser.action needs a real browser: set AGENT_BROWSER=1 on this device.');
     return captureWithBrowser(target, {allow, steps});
+  }
+  if (task.kind === 'model.run') {
+    // Runs the owner's own signed-in `claude` or `codex` CLI. A failure the CLI
+    // reports (not signed in, a usage limit) is an answer, not an agent error, so
+    // it is reported as a finished task and the server shows it in the chat.
+    return runModelTask(task.payload);
   }
   throw new Error(`Unknown task kind "${task.kind}".`);
 }
