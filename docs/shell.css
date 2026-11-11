@@ -272,6 +272,23 @@
 .pg-body{width:100%;max-width:560px;margin:0 auto;padding:12px max(16px,env(safe-area-inset-right,0px)) 40px max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:14px}
 .pg-body p{margin:0;color:var(--muted)}
 
+/* ---------- the pause banner: a bar across the top while every bot is paused ---------- */
+.pause{position:fixed;z-index:50;top:0;left:0;right:0;box-sizing:border-box;height:calc(var(--pause-h) + env(safe-area-inset-top,0px));padding:env(safe-area-inset-top,0px) max(14px,env(safe-area-inset-right,0px)) 0 max(14px,env(safe-area-inset-left,0px));display:flex;align-items:center;gap:10px;background:var(--wait-bg);color:var(--fg);font-size:13.5px;line-height:1.3;box-shadow:0 1px 0 color-mix(in srgb,var(--wait) 28%,transparent);animation:pausein .28s var(--ease)}
+.pause[hidden]{display:none}
+.pause-i{flex:none;display:grid;color:var(--wait)}
+.pause-t{flex:1;min-width:0;text-wrap:balance}
+.pause-go{flex:none;min-height:34px;padding:0 16px;border-radius:99px;background:var(--wait);color:var(--on-wait);font-size:13.5px;font-weight:600;transition:scale .15s}
+.pause-go:active{scale:.96}
+@keyframes pausein{from{translate:0 -100%}}
+body[data-paused]{--pause-h:44px}
+@media(max-width:1023px){body[data-paused]{--pause-h:54px}}
+/* the app sits under the bar; the safe-area inset the bar already covers is not counted twice */
+body[data-paused] .shell{padding-top:calc(var(--pause-h) + env(safe-area-inset-top,0px));box-sizing:border-box}
+body[data-paused] .stage{--pad-t:0px}
+body[data-paused] .chrome{--pad-t:calc(var(--pause-h) + env(safe-area-inset-top,0px))}
+.cv-asked{opacity:.92}
+.cv-card>a{font-size:13px;color:var(--soft)}
+
 /* ---------- pin and reorder: the whole bot is the handle (ui-gestures.js) ---------- */
 .crow,.pin{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 .shelf{position:relative}

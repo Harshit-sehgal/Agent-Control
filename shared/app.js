@@ -23,7 +23,7 @@
 import {companyRoute} from './ui-company.js';
 import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js';
 import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js';
-import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, closeSearch, homeView} from './ui-shell.js';
+import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, renderPause, closeSearch, homeView} from './ui-shell.js';
 import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js';
 import {profileViews, wirePages} from './ui-profile.js';
 import {wireGestures, gesturesBusy} from './ui-gestures.js';
@@ -35,6 +35,8 @@ import {bringBotsToLife} from './ui-fx.js';
 const el = id => document.getElementById(id);
 const hashRoute = () => normalizeRoute(companyRoute(location.hash, store.state));
 let lastView = '', syncTimer = null, syncDue = 0, refreshing = false;
+// Runs that move on their own, so the poll is quick. awaiting_ask is not here: it waits on the owner's answer (like a
+// checkpoint), and the answer itself is what starts the run again and brings the quick poll back.
 const LIVE_RUN = new Set(['running', 'queued', 'awaiting_browser']);
 /** Refresh failures already shown. A dashboard stuck on a stale snapshot must
  * say so, but a poll every few seconds must not repeat the same toast. */
@@ -80,7 +82,7 @@ function renderRoute() {
     if (matchMedia('(pointer:fine)').matches) (main.querySelector('[autofocus]') || main.querySelector('textarea') || main.querySelector('input'))?.focus?.({preventScroll: true});
   }
   lastView = view;
-  renderRail(); renderChrome(); renderConversation();
+  renderRail(); renderChrome(); renderPause(); renderConversation();
 }
 
 /** The phone home follows the snapshot: new replies, a bot waking up. The scroll
@@ -153,7 +155,7 @@ onChange(scope => {
   // A bot is lifted: the list under it stays put until it lands, which repaints.
   if (gesturesBusy()) return;
   keepFocus(() => {
-    renderRail(); renderChrome();
+    renderRail(); renderChrome(); renderPause();
     if (scope === 'list') return refreshHome();
     renderConversation(); refreshHome();
   });
@@ -189,6 +191,7 @@ function lockScreen(message) {
   closeSheet(); closeSearch();
   store.state = null; store.messages = {}; lastView = '';
   for (const id of ['sidebar', 'main', 'chrome']) el(id).innerHTML = '';
+  renderPause();
   showLogin(message);
 }
 actions.logout = async () => {

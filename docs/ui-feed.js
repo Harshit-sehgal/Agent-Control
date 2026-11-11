@@ -7,13 +7,13 @@
  * shows what the mock shows: the owner's lines, the lead's reply, one pill that
  * keeps updating while work is under way and then reads "A and B helped", and the
  * cards that wait on the owner. The handoffs live behind the pill, not in the log. */
-import {handoffs, progressPill} from './ui-company.js?v=b2a252f47f';
-import {isRunNote, runBelongsToChat} from './ui-model.js?v=b2a252f47f';
+import {handoffs, progressPill} from './ui-company.js?v=aa19414b51';
+import {isRunNote, runBelongsToChat} from './ui-model.js?v=aa19414b51';
 
 const isActive = status => status === 'queued' || status === 'running';
 const isAwaiting = status => String(status || '').startsWith('awaiting');
 // These carry their own words and buttons (a note, a card), so a pill would repeat them.
-const NO_PILL = new Set(['awaiting_limit', 'awaiting_plan', 'awaiting_checkpoint', 'failed', 'cancelled', 'interrupted']);
+const NO_PILL = new Set(['awaiting_ask', 'awaiting_limit', 'awaiting_plan', 'awaiting_checkpoint', 'failed', 'cancelled', 'interrupted']);
 
 /** The runs that belong to one chat, oldest first. */
 export function runsOfChat(state, key) {
@@ -30,7 +30,7 @@ function pillEntry(run, state) {
 }
 
 /** `items` is `timeline()`'s output for the chat; `key` is the chat key (a bot id,
- * or `team-<threadId>`). Entries: day, me, bot, offjob, note, browser, guard, pill, limit. */
+ * or `team-<threadId>`). Entries: day, me, bot, offjob, note, browser, ask, guard, pill, limit. */
 export function feed({items = [], state, key}) {
   const runs = runsOfChat(state, key), byId = new Map(runs.map(run => [run.id, run]));
   const lastLine = new Map(), lastNote = new Map();
@@ -56,6 +56,8 @@ export function feed({items = [], state, key}) {
     if (m.role === 'user') return out.push({kind: 'me', message: m});
     if (m.role === 'system') {
       if (m.kind === 'browser') return out.push({kind: 'browser', message: m});
+      // The card reads its status from state.asks, so it needs no pill: it carries the asking bot's waiting face.
+      if (m.kind === 'ask') return out.push({kind: 'ask', message: m});
       // The paused run's own card says this, so its note line would say it twice.
       if (m.kind === 'limit') return;
       if (m.kind === 'guard') return out.push({kind: 'guard', message: m, open: m.id === lastGuard && Boolean(state?.guard?.paused)});

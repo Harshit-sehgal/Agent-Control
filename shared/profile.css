@@ -197,3 +197,25 @@ button.rw:active{background:var(--sunk)}
 @media(max-width:640px){
   .pg-body .pr-hero p{font-size:15px}
 }
+
+/* ---------- permissions: a rule per row, its three choices under it ---------- */
+.gr{display:flex;flex-direction:column;gap:10px;padding:14px 18px 16px;position:relative}
+.gr+.gr::before{content:'';position:absolute;left:18px;right:0;top:0;border-top:1px solid var(--line)}
+.gr-top{display:flex;align-items:center;gap:12px}
+.gr-top .w{flex:1;min-width:0;font-size:16px;overflow-wrap:anywhere}
+.gr-top small{display:block;font-size:13px;color:var(--muted);margin-top:3px;line-height:1.35}
+.gr-seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:2px;padding:3px;border-radius:12px;background:var(--sunk)}
+.gr-seg button{min-height:40px;padding:0 4px;border-radius:9px;font-size:13px;white-space:nowrap;color:var(--muted);transition:background-color .15s,color .15s,scale .15s}
+.gr-seg button:active{scale:.97}
+.gr-seg button[aria-pressed="true"]{background:var(--raise);color:var(--fg);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.gr-seg button[aria-pressed="true"][data-choice="always"]{color:var(--good)}
+.gr-seg button[aria-pressed="true"][data-choice="deny"]{color:var(--bad)}
+.gr-seg button:disabled{opacity:.55}
+/* on the dark card the track is lighter than the card, so the chosen one is lifted above the track instead */
+:root[data-theme="cocoa"] .gr-seg button[aria-pressed="true"]{background:var(--control)}
+@media(prefers-color-scheme:dark){:root:not([data-theme]) .gr-seg button[aria-pressed="true"]{background:var(--control)}}
+.st-dlg .gr{padding:12px 0 14px}
+.st-dlg .gr+.gr::before{left:0}
+.st-dlg .gr-top .w{font-size:14px}
+.st-dlg .gr-seg button{min-height:34px}
+@media(pointer:coarse){.gr-seg button{min-height:44px}}

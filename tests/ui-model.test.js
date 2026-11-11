@@ -48,10 +48,10 @@ test('waitingOnYou answers once per chat: plans, pauses and pending pages', () =
       {id: 'b1', status: 'pending', chatKey: 'team-x-engage'},
     ],
   });
-  assert.deepEqual(waitingOnYou(s, 'team-x-engage'), {plans: 1, pauses: 1, pages: 1});
+  assert.deepEqual(waitingOnYou(s, 'team-x-engage'), {plans: 1, pauses: 1, pages: 1, asks: 0});
   assert.equal(totalWaitingOnYou(waitingOnYou(s, 'team-x-engage')), 3);
   // Another chat gets its own answer; a plan there is not the X group's.
-  assert.deepEqual(waitingOnYou(s, 'team-research'), {plans: 1, pauses: 0, pages: 0});
+  assert.deepEqual(waitingOnYou(s, 'team-research'), {plans: 1, pauses: 0, pages: 0, asks: 0});
 });
 
 test('waitingOnYou reads the runs a caller merged in, so a demo plan still counts', () => {
@@ -59,6 +59,27 @@ test('waitingOnYou reads the runs a caller merged in, so a demo plan still count
   const local = waitingOnYou(s, 'analyst', [{id: 'local', groupId: 'research', chatKey: 'analyst', status: 'awaiting_plan'}]);
   assert.equal(local.plans, 1);
   assert.equal(waitingOnYou(s, 'analyst').plans, 0, 'the workspace state alone has no such run');
+});
+
+test('a pending ask counts in the chat it is in, and a page request that has an ask is not counted twice', () => {
+  const s = state({
+    asks: [{id: 'a1', status: 'pending', chatKey: 'scout'}, {id: 'a2', status: 'allowed', chatKey: 'scout'}, {id: 'a3', status: 'pending', chatKey: 'analyst'}],
+    browserRequests: [{id: 'b1', status: 'pending', chatKey: 'scout', askId: 'a1'}, {id: 'b2', status: 'pending', chatKey: 'scout'}],
+  });
+  assert.deepEqual(waitingOnYou(s, 'scout'), {plans: 0, pauses: 0, pages: 1, asks: 1}, 'only the old-style request without an ask is a page');
+  assert.equal(totalWaitingOnYou(waitingOnYou(s, 'scout')), 2);
+  assert.equal(waitingOnYou(s, 'analyst').asks, 1);
+  assert.equal(waitingOnYou(s, 'writer').asks, 0);
+});
+
+test('the primary\'s chat holds every pending ask (its "Needs you" list), counted once each', () => {
+  const lead = bot('atlas', 'Atlas', {settings: {lead: true}});
+  const s = state({groups: [{id: 'home', name: 'Home', bots: [lead, bot('scout', 'Scout')]}], asks: [
+    {id: 'a1', status: 'pending', chatKey: 'scout'}, {id: 'a2', status: 'pending', chatKey: 'team-t1'}, {id: 'a3', status: 'pending', chatKey: 'atlas'}, {id: 'a4', status: 'declined', chatKey: 'scout'},
+  ]});
+  assert.equal(waitingOnYou(s, 'atlas').asks, 3);
+  assert.equal(waitingOnYou(s, 'scout').asks, 1);
+  assert.equal(waitingOnYou(s, 'team-t1').asks, 1);
 });
 
 // ---- runButtons -----------------------------------------------------------------------

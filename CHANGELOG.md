@@ -24,6 +24,9 @@ browser tasks, and accounts, workspaces and backup.
   draft release and `makeDraft` are removed.
 - **The X database tables.** Schema v11 drops them. A backup made before this
   change (schema v10 and earlier) still restores.
+- **The per-bot permission checkboxes and the "run without asking" choice.**
+  Grants replace them: no screen sets a bot's `permissions` or `browserApproval`
+  any more (an old permission is still honoured and shown read-only).
 - **The old chat list, chat info panel, You pages and group-settings UI**
   (`shared/ui-panel.js`, the new-bot and new-group sheets, the pipeline editor
   and the runs panel). Their work moved to the profile, Settings and the
@@ -46,6 +49,17 @@ browser tasks, and accounts, workspaces and backup.
   springs into its slot, and none of it moves under reduced motion. Pins and
   order are saved per person in the browser (`shared/ui-gestures.js`,
   `shared/ui-reorder.js`).
+
+- **Ask cards, per-bot permissions and the pause banner.** A bot that needs
+  something asks. The card sits in the chat where it works (and as "Needs you"
+  in Atlas's chat), with the bot's waiting face above one sentence and
+  Decline, Allow and Always allow for this bot; a payment offers only Decline
+  and Allow, and an answered card collapses to one line. The needs-you count
+  includes pending asks. Each bot's rules (Always allow, Ask each time, Deny)
+  are listed on its profile and, for every bot, under Settings → Permissions,
+  and change in place. While Bots running is off, a banner on every screen
+  says "All bots are paused. Nothing runs until you resume." with Resume
+  (`shared/ui-asks.js`).
 
 ### Changed
 - **A new workspace starts with Atlas.** The first sign-in seeds a primary bot,

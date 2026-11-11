@@ -5,21 +5,21 @@
  * They throw errors carrying an HTTP `status` so the same rules apply to the
  * Node HTTP routes and to any browser-local transport.
  */
-import {activity,cleanText} from './core.js?v=b2a252f47f';
-import {fail} from './errors.js?v=b2a252f47f';
-import {cancelTask} from './tasks.js?v=b2a252f47f';
-import {normalizeRetention} from './retention.js?v=b2a252f47f';
-import * as contracts from './contracts.js?v=b2a252f47f';
-import {pruneChats, releaseChatWork} from './chats.js?v=b2a252f47f';
-import {denyBrowserRequest} from './bot-browser.js?v=b2a252f47f';
-import {BUSY_STATUSES} from './coordination.js?v=b2a252f47f';
-import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=b2a252f47f';
-import {memoryState} from './memory.js?v=b2a252f47f';
-import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=b2a252f47f';
-import {freshGuard} from './runaway.js?v=b2a252f47f';
-import {sweepGrants, forgetBotAsks, lapseOrphans} from './asks.js?v=b2a252f47f';
-import {assertManager, releaseReports, companyBots, PRIMARY_GROUP} from './company.js?v=b2a252f47f';
-import {logActivity} from './activity-log.js?v=b2a252f47f';
+import {activity,cleanText} from './core.js?v=aa19414b51';
+import {fail} from './errors.js?v=aa19414b51';
+import {cancelTask} from './tasks.js?v=aa19414b51';
+import {normalizeRetention} from './retention.js?v=aa19414b51';
+import * as contracts from './contracts.js?v=aa19414b51';
+import {pruneChats, releaseChatWork} from './chats.js?v=aa19414b51';
+import {denyBrowserRequest} from './bot-browser.js?v=aa19414b51';
+import {BUSY_STATUSES} from './coordination.js?v=aa19414b51';
+import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=aa19414b51';
+import {memoryState} from './memory.js?v=aa19414b51';
+import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=aa19414b51';
+import {freshGuard} from './runaway.js?v=aa19414b51';
+import {sweepGrants, forgetBotAsks, lapseOrphans} from './asks.js?v=aa19414b51';
+import {assertManager, releaseReports, companyBots, PRIMARY_GROUP} from './company.js?v=aa19414b51';
+import {logActivity} from './activity-log.js?v=aa19414b51';
 
 export const SCHEMA_VERSION = 3;
 

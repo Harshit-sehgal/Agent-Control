@@ -73,15 +73,16 @@ test('destructive admin actions ask first and say what they do',()=>{
   for (const message of ['Sign out every other session','Remove this user from the workspace','Disable this account','Delete your account','Revoke this local agent','Delete this credential','Prune exhaust older than the retention policy','Replace this workspace with the pasted backup'])
     assert.match(js,new RegExp(`confirmSheet\\('${message}`),`${message} must be confirmed`);
 });
-test('the bot profile edits name, manager, shape and colour, and lists permissions read-only',()=>{
+test('the bot profile edits name, manager, shape and colour, and edits its permission rules in place',()=>{
   assert.match(js,/id="edit-bot-form"/);
   assert.match(js,/name="reportsTo"/);
   assert.match(js,/name="shape" value=/);
   assert.match(js,/name="tint" value=/);
   // The job is changed by telling the bot in its chat, not in this form.
   assert.match(js,/To change what \$\{esc\(bot\.name\)\} does, tell it in its chat\./);
-  // Grants are shown, not edited, until the ask cards land; paying never gets Always allow.
-  assert.match(js,/This list is read-only for now\. Paying or spending money will never get Always allow\./);
+  // Rules are edited in place with the three choices; paying never gets Always allow.
+  assert.match(js,/data-action="set-grant"/);
+  assert.match(js,/Payments are asked every time\. They never get Always allow\./);
 });
 test('the shell is integrated: one search, animated routes, one progress bar',()=>{
   assert.match(html,/id="progress"/);
@@ -114,7 +115,7 @@ test('a background refresh never wipes an in-progress form or the sign-in',()=>{
   // and the status line, and skips even that when the markup did not change.
   assert.match(js,/if \(html === lastHtml\) return;/);
   assert.match(js,/const scroller = el\('cv-scroll'\)/);
-  assert.match(js,/renderRail\(\); renderChrome\(\);\s*\n?\s*if \(scope === 'list'\) return refreshHome\(\);\s*\n?\s*renderConversation\(\); refreshHome\(\);/);
+  assert.match(js,/renderRail\(\); renderChrome\(\); renderPause\(\);\s*\n?\s*if \(scope === 'list'\) return refreshHome\(\);\s*\n?\s*renderConversation\(\); refreshHome\(\);/);
   assert.match(js,/clearInterval\(syncTimer\)/);
   assert.match(js,/workspaceBusy\(\) \? 3000 : 30000/);
   assert.match(js,/syncTimer && syncDue <= due/);

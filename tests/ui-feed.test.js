@@ -124,3 +124,24 @@ test('the runaway guard line asks Keep going or Stop only while bots are still p
   const done = feed({items: timeline({conv: {id: KEY}, state: resumed, messages: {[KEY]: lines}}), state: resumed, key: KEY}).filter(e => e.kind === 'guard');
   assert.deepEqual(done.map(e => e.open), [false, false]);
 });
+
+// ---- asks ----
+
+const askLine = (id, n, extra = {}) => msg(id, 'system', n, {kind: 'ask', askId: id.replace('ask-', ''), ...extra});
+
+test('an ask line becomes an ask entry that carries its line, and an answered one stays where it was', () => {
+  const out = build([msg('q', 'user', 1), askLine('ask-a1', 2), msg('later', 'bot', 3, {senderId: 'atlas'})]);
+  assert.deepEqual(kinds(out), ['day', 'me', 'ask', 'bot']);
+  assert.equal(out[2].message.askId, 'a1');
+});
+
+test('a run waiting on an ask shows the card, not a second "needs your OK" pill', () => {
+  const waiting = run({status: 'awaiting_ask', askIds: ['a1'], trace: [{botId: 'plan', output: 'I need a page.'}], recipients: ['plan'], currentStep: 0});
+  const out = build([msg('q', 'user', 1, {runId: 'r1'}), askLine('ask-a1', 2, {runId: 'r1'})], [waiting]);
+  assert.deepEqual(kinds(out), ['day', 'me', 'ask']);
+});
+
+test('the ask lines in the primary\'s chat read the same way', () => {
+  const out = build([askLine('ask-a1', 2, {text: 'Needs you: Planner wants to open example.com.'})], [], 'atlas');
+  assert.deepEqual(kinds(out), ['day', 'ask']);
+});

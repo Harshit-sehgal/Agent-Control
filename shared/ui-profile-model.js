@@ -10,6 +10,7 @@ import {firstUnusedTint} from './bot-create.js';
 import {TINT_COUNT, dayLabel} from './ui-kit.js';
 import {jobOf} from './ui-company.js';
 import {ACTIVITY_CHIPS} from './activity-log.js';
+import {grantRows} from './ui-asks.js';
 
 /** What a bot made without a job holds until the owner's first chat message
  * replaces it (the profile, the list and the chat all treat it as "no job yet"). */
@@ -105,7 +106,7 @@ export function profileRows(state, botId, {activityCount = 0} = {}) {
   const bot = botOf(state, botId);
   if (!bot) return [];
   const notes = memoryNotes(state, botId).length, acts = Number(activityCount) || 0;
-  const rules = (bot.permissions || []).length, team = directReports(state, botId).length;
+  const rules = grantRows(state, botId).length, team = directReports(state, botId).length;
   const rows = [
     {key: 'memory', label: 'Memory', value: notes ? plural(notes, 'note') : 'Empty'},
     {key: 'activity', label: 'Activity', value: acts ? String(acts) : ''},
@@ -209,19 +210,6 @@ export function companyTree(state) {
 }
 
 /* ---------- settings ---------- */
-
-const PERMISSION_LABELS = {
-  'schedule.set': 'Schedule its own tasks',
-  'agent.dispatch': 'Run work on your computer',
-  'chat.send': 'Send chat messages',
-  'browser.use': 'Open pages in the shared browser',
-  'subagent.spawn': 'Hand a small job to a helper model',
-  'bot.ask': 'Ask a teammate bot a question',
-  'bot.create': 'Create a new bot for lasting work',
-};
-export const permissionLabel = action => PERMISSION_LABELS[action] || String(action);
-/** Every grant of every bot, in roster order. Read-only until the ask cards land. */
-export const permissionRows = state => companyBots(state).flatMap(bot => (bot.permissions || []).map(action => ({botId: bot.id, botName: bot.name, action, label: permissionLabel(action)})));
 
 const WEEK = 7 * 86400000;
 /** Who did the work this week: each bot's turns in the runs of the last seven days.

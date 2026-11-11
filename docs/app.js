@@ -20,21 +20,23 @@
  *   ui-dialogs      toast, sheet, confirm/ask      ui-actions action/form tables
  *   ui-fx           confetti, the send arrow and the bots' ambient life
  */
-import {companyRoute} from './ui-company.js?v=b2a252f47f';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=b2a252f47f';
-import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=b2a252f47f';
-import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, closeSearch, homeView} from './ui-shell.js?v=b2a252f47f';
-import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=b2a252f47f';
-import {profileViews, wirePages} from './ui-profile.js?v=b2a252f47f';
-import {wireGestures, gesturesBusy} from './ui-gestures.js?v=b2a252f47f';
-import {settingsViews} from './ui-settings.js?v=b2a252f47f';
-import {showLogin, hideLogin} from './ui-sheets.js?v=b2a252f47f';
-import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=b2a252f47f';
-import {bringBotsToLife} from './ui-fx.js?v=b2a252f47f';
+import {companyRoute} from './ui-company.js?v=aa19414b51';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=aa19414b51';
+import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=aa19414b51';
+import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, renderPause, closeSearch, homeView} from './ui-shell.js?v=aa19414b51';
+import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=aa19414b51';
+import {profileViews, wirePages} from './ui-profile.js?v=aa19414b51';
+import {wireGestures, gesturesBusy} from './ui-gestures.js?v=aa19414b51';
+import {settingsViews} from './ui-settings.js?v=aa19414b51';
+import {showLogin, hideLogin} from './ui-sheets.js?v=aa19414b51';
+import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=aa19414b51';
+import {bringBotsToLife} from './ui-fx.js?v=aa19414b51';
 
 const el = id => document.getElementById(id);
 const hashRoute = () => normalizeRoute(companyRoute(location.hash, store.state));
 let lastView = '', syncTimer = null, syncDue = 0, refreshing = false;
+// Runs that move on their own, so the poll is quick. awaiting_ask is not here: it waits on the owner's answer (like a
+// checkpoint), and the answer itself is what starts the run again and brings the quick poll back.
 const LIVE_RUN = new Set(['running', 'queued', 'awaiting_browser']);
 /** Refresh failures already shown. A dashboard stuck on a stale snapshot must
  * say so, but a poll every few seconds must not repeat the same toast. */
@@ -80,7 +82,7 @@ function renderRoute() {
     if (matchMedia('(pointer:fine)').matches) (main.querySelector('[autofocus]') || main.querySelector('textarea') || main.querySelector('input'))?.focus?.({preventScroll: true});
   }
   lastView = view;
-  renderRail(); renderChrome(); renderConversation();
+  renderRail(); renderChrome(); renderPause(); renderConversation();
 }
 
 /** The phone home follows the snapshot: new replies, a bot waking up. The scroll
@@ -153,7 +155,7 @@ onChange(scope => {
   // A bot is lifted: the list under it stays put until it lands, which repaints.
   if (gesturesBusy()) return;
   keepFocus(() => {
-    renderRail(); renderChrome();
+    renderRail(); renderChrome(); renderPause();
     if (scope === 'list') return refreshHome();
     renderConversation(); refreshHome();
   });
@@ -189,6 +191,7 @@ function lockScreen(message) {
   closeSheet(); closeSearch();
   store.state = null; store.messages = {}; lastView = '';
   for (const id of ['sidebar', 'main', 'chrome']) el(id).innerHTML = '';
+  renderPause();
   showLogin(message);
 }
 actions.logout = async () => {

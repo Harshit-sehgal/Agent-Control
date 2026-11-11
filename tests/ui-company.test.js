@@ -57,8 +57,8 @@ test('a bot with a queued or running run is working', () => {
   }
 });
 
-test('a bot whose run waits on the person is waiting', () => {
-  for (const status of ['awaiting_checkpoint', 'awaiting_plan', 'awaiting_browser']) {
+test('a bot whose run waits on the person is waiting (an ask is the owner\'s to answer, not live work)', () => {
+  for (const status of ['awaiting_checkpoint', 'awaiting_plan', 'awaiting_browser', 'awaiting_ask']) {
     assert.equal(rowOf(botRows(stateOf({groupRuns: [run({status})]})), 'mail').status, 'waiting', status);
   }
 });

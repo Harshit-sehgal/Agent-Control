@@ -8,7 +8,8 @@
 import {botRows, threadRows} from './ui-company.js';
 import {face} from './ui-face.js';
 import {esc, icon, stamp} from './ui-kit.js';
-import {store, go, back, groups, findBot, canWrite, loadLocal, isStaticDemo} from './ui-store.js';
+import {pauseBanner} from './ui-asks.js';
+import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, isStaticDemo} from './ui-store.js';
 
 const el = id => document.getElementById(id);
 const DESK = '(min-width:1024px)';
@@ -126,7 +127,7 @@ export function renderRail() {
   const query = store.listQuery.trim(), rows = chatRows(query);
   const status = rows.filter(r => r.status === 'working').length, hasRows = rows.length;
   const primary = chatRows().find(r => r.isPrimary)?.name || 'Atlas';
-  const line = status ? `${status} working · others asleep` : `${primary} on watch · others asleep`;
+  const line = store.state?.guard?.paused ? 'Paused · nothing is running' : status ? `${status} working · others asleep` : `${primary} on watch · others asleep`;
   const pinned = rows.filter(r => r.pinned), rest = rows.filter(r => !r.pinned), threads = threadGroups(query, {headings: false});
   const demo = isStaticDemo() ? '<p class="rail-demo">Browser-only demo · data stays in this browser</p>' : '';
   body.innerHTML = `${query ? '' : `<div class="rail-status"><i aria-hidden="true"></i>${esc(line)}</div>${demo}`}
@@ -166,6 +167,21 @@ export function renderChrome() {
   ind.setAttribute('aria-label', store.section === 'threads' ? 'Threads. Swipe right for Bots.' : 'Bots. Swipe left for Threads.');
   const waiting = waitingThreads(), badge = el('ch-badge');
   if (badge) badge.innerHTML = waiting ? `<span class="badge" aria-label="${waiting} waiting on you">${waiting}</span>` : '';
+}
+
+/* ---------- the pause banner ---------- */
+
+const PAUSE_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1.4"/><rect x="14" y="5" width="4" height="14" rx="1.4"/></svg>';
+/** While everything bots start is paused, a bar across the top says so and offers Resume. It lives outside the
+ * screens, so it is there on every one; body[data-paused] makes room for it. */
+export function renderPause() {
+  const node = el('pause'); if (!node) return;
+  const banner = store.state ? pauseBanner(store.state, {canResume: isAdmin() || isStaticDemo()}) : null;
+  document.body.toggleAttribute('data-paused', Boolean(banner));
+  node.hidden = !banner;
+  if (!banner) { node.innerHTML = ''; return; }
+  const html = `<span class="pause-i">${PAUSE_ICON}</span><span class="pause-t">${esc(banner.text)}</span>${banner.resume ? '<button type="button" class="pause-go" data-action="guard-resume">Resume</button>' : ''}`;
+  if (node.innerHTML !== html) node.innerHTML = html;
 }
 
 /* ---------- search ---------- */

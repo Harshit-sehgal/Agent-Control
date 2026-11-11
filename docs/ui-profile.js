@@ -5,18 +5,20 @@
  *
  * Pages repaint only when the route changes, so each in-place change (a switch, a
  * forgotten note, a picked colour) updates its own node instead. */
-import {SHAPES, COLORS, face} from './ui-face.js?v=b2a252f47f';
-import {botStatus, botIsManager} from './ui-company.js?v=b2a252f47f';
-import {primaryOf} from './company.js?v=b2a252f47f';
-import {esc, icon, field, textInput, clock, roundBtn, switchBtn} from './ui-kit.js?v=b2a252f47f';
-import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=b2a252f47f';
-import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=b2a252f47f';
-import {toast, confirmSheet} from './ui-dialogs.js?v=b2a252f47f';
-import {sendChat} from './ui-chat.js?v=b2a252f47f';
+import {SHAPES, COLORS, face} from './ui-face.js?v=aa19414b51';
+import {botStatus, botIsManager} from './ui-company.js?v=aa19414b51';
+import {primaryOf} from './company.js?v=aa19414b51';
+import {esc, icon, field, textInput, clock, roundBtn, switchBtn} from './ui-kit.js?v=aa19414b51';
+import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=aa19414b51';
+import {GRANT_LABELS} from './asks.js?v=aa19414b51';
+import {grantRows, allGrantRows, grantUrl} from './ui-asks.js?v=aa19414b51';
+import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=aa19414b51';
+import {toast, confirmSheet} from './ui-dialogs.js?v=aa19414b51';
+import {sendChat} from './ui-chat.js?v=aa19414b51';
 import {
   MAX_NAME, hasJob, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, lookOf, newBotDefaults,
-  newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, directReports, permissionLabel, closeTarget,
-} from './ui-profile-model.js?v=b2a252f47f';
+  newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, directReports, closeTarget,
+} from './ui-profile-model.js?v=aa19414b51';
 
 const el = id => document.getElementById(id);
 const MUTED_KEY = 'ac-muted';
@@ -184,11 +186,35 @@ async function fillActivityCount(botId) {
 }
 const activityPage = bot => { setTimeout(() => loadBotActivity(bot.id), 0); return '<div id="pr-activity" class="pr-stack"><p class="pr-note">Loading…</p></div>'; };
 
+/* ----- permissions: what each bot may do, and the answers you gave ----- */
+
+/** Only an admin (or the one person of the demo) changes a rule. */
+const canGrant = () => isAdmin() || isStaticDemo();
+function grantRow(r) {
+  const off = canGrant() ? '' : ' disabled';
+  const seg = r.legacy ? `<span class="pv">${esc(GRANT_LABELS[r.choice])}</span>`
+    : `<div class="gr-seg" role="group" aria-label="${esc(`${r.label} for ${r.botName}`)}">${r.choices.map(c => `<button type="button" data-action="set-grant" data-id="${esc(r.botId)}" data-text="${esc(`${r.action} ${r.scope}`)}" data-act="${esc(r.action)}" data-scope="${esc(r.scope)}" data-choice="${c.id}" aria-pressed="${c.on}"${off}>${esc(c.label)}</button>`).join('')}</div>`;
+  const sub = r.legacy ? `<small>Set before asks existed. ${r.choice === 'always' ? 'It ran without asking.' : 'It asks each time.'}</small>` : '';
+  return `<div class="gr${r.legacy ? ' legacy' : ''}"><div class="gr-top"><span class="w">${esc(r.label)}${sub}</span>${r.legacy ? seg : ''}</div>${r.legacy ? '' : seg}</div>`;
+}
+/** One bot's rules as a card, or every bot's in a card each (Settings). The node is repainted in place when a choice is made. */
+export function grantsHtml(botId = null) {
+  if (botId) {
+    const rows = grantRows(store.state, botId), name = findBot(botId)?.name || 'This bot';
+    return rows.length ? `<div class="cd">${rows.map(grantRow).join('')}</div>`
+      : `<p class="pr-note">No rules yet. When ${esc(name)} needs something that leaves the app, it asks you first. Always allow and Deny choices are listed here.</p>`;
+  }
+  const rows = allGrantRows(store.state);
+  if (!rows.length) return '<div class="cd"><div class="rw"><span class="w st-quiet">No bot has a rule yet. When one needs something that leaves the app it asks you first, and the answers you keep are listed here.</span></div></div>';
+  const by = new Map();
+  for (const r of rows) by.set(r.botId, [...(by.get(r.botId) || []), r]);
+  return [...by].map(([id, list]) => `<section class="st-g"><h4 class="st-h">${esc(list[0].botName)}</h4><div class="cd">${list.map(grantRow).join('')}</div></section>`).join('');
+}
+/** The note under every list of rules. */
+export const grantNote = (cls = 'pr-note') => `<p class="${cls}">${canGrant() ? 'Payments are asked every time. They never get Always allow.' : 'Only the owner or an admin can change these. Payments are asked every time.'}</p>`;
+
 function permissionsPage(bot) {
-  const list = bot.permissions || [];
-  const rows = list.map(a => `<div class="rw"><span class="w">${esc(permissionLabel(a))}<small>${esc(a)}</small></span><span class="pv">Allowed</span></div>`).join('');
-  return `${list.length ? `<div class="cd">${rows}</div>` : `<p class="pr-note">${esc(bot.name)} has no extra permissions. It can chat with you and hand work to other bots.</p>`}
-    <p class="pr-note">This list is read-only for now. Paying or spending money will never get Always allow.</p>`;
+  return `<div data-grants="${esc(bot.id)}">${grantsHtml(bot.id)}</div>${grantNote()}`;
 }
 
 function modelPage(bot) {
@@ -333,6 +359,17 @@ export const profileActions = {
     await sync();
     const node = el('pr-memory'), bot = findBot(b.dataset.id); if (node && bot) node.innerHTML = memoryList(bot);
     toast('Forgotten.');
+  },
+  'set-grant': async b => {
+    const {id: botId, act: action, choice} = b.dataset, scope = b.dataset.scope || '';
+    const {url, body} = grantUrl({botId, action, scope}, choice);
+    await api(url, 'POST', body);
+    await sync();
+    for (const node of document.querySelectorAll('[data-grants]')) node.innerHTML = grantsHtml(node.dataset.grants === 'all' ? null : node.dataset.grants);
+    // The list was repainted, so keyboard focus goes to the same choice in the new copy.
+    const same = [['id', botId], ['act', action], ['scope', scope], ['choice', choice]].map(([k, v]) => `[data-${k}="${CSS.escape(v)}"]`).join('');
+    document.querySelector(`[data-grants] button${same}`)?.focus({preventScroll: true});
+    toast(`${botName(botId)}: ${GRANT_LABELS[choice].toLowerCase()}.`);
   },
   'menu-message': b => { close(); go({bot: b.dataset.id}); },
   'menu-pin': b => { close(); toast(togglePin(b.dataset.id) ? 'Pinned to the top' : 'Unpinned'); },

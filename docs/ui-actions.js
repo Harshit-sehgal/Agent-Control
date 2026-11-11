@@ -1,19 +1,19 @@
 /** What the UI can do, as three lookup tables keyed by `data-action`, form id and
  * control id. app.js owns the DOM events and dispatches here; handlers throw on
  * failure and the dispatcher turns that into one toast. */
-import {store, api, sync, setTyping, conversation, findGroup, teamKey, recentRuns, chatKeyOf} from './ui-store.js?v=b2a252f47f';
-import {groupSettings} from './bot-settings.js?v=b2a252f47f';
-import {toast, closeSheet} from './ui-dialogs.js?v=b2a252f47f';
-import {sendChat, streamGroupRun, watchQueuedRun} from './ui-chat.js?v=b2a252f47f';
-import {runWithTyping} from './run-follow.js?v=b2a252f47f';
-import {whoosh, react} from './ui-fx.js?v=b2a252f47f';
-import {shellActions} from './ui-shell.js?v=b2a252f47f';
-import {conversationActions, conversationForms} from './ui-conversation.js?v=b2a252f47f';
-import {profileActions, profileForms, lookChanged, nameTyped, adoptFirstMessage} from './ui-profile.js?v=b2a252f47f';
-import {settingsActions, reloadAdminPage} from './ui-settings.js?v=b2a252f47f';
-import {changePasswordSheet} from './ui-sheets.js?v=b2a252f47f';
-import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=b2a252f47f';
-import {takeoverActions, takeoverForms} from './ui-takeover.js?v=b2a252f47f';
+import {store, api, sync, setTyping, conversation, findGroup, teamKey, recentRuns, chatKeyOf} from './ui-store.js?v=aa19414b51';
+import {groupSettings} from './bot-settings.js?v=aa19414b51';
+import {toast, closeSheet} from './ui-dialogs.js?v=aa19414b51';
+import {sendChat, streamGroupRun, watchQueuedRun} from './ui-chat.js?v=aa19414b51';
+import {runWithTyping} from './run-follow.js?v=aa19414b51';
+import {whoosh, react} from './ui-fx.js?v=aa19414b51';
+import {shellActions} from './ui-shell.js?v=aa19414b51';
+import {conversationActions, conversationForms} from './ui-conversation.js?v=aa19414b51';
+import {profileActions, profileForms, lookChanged, nameTyped, adoptFirstMessage} from './ui-profile.js?v=aa19414b51';
+import {settingsActions, reloadAdminPage} from './ui-settings.js?v=aa19414b51';
+import {changePasswordSheet} from './ui-sheets.js?v=aa19414b51';
+import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=aa19414b51';
+import {takeoverActions, takeoverForms} from './ui-takeover.js?v=aa19414b51';
 
 const adminCtx = {reload: reloadAdminPage};
 const chatId = () => chatKeyOf(store.route);

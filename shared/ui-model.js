@@ -5,6 +5,7 @@
 import {botSettings} from './bot-settings.js';
 import {STOPPABLE_STATUSES} from './run-state.js';
 import {INPUTS} from './contracts.js';
+import {primaryOf} from './company.js';
 
 /** The contract inputs a profile save sends. A bot whose stored inputs were
  * all removed ones (X-engage) loads with none, and must still save. */
@@ -27,9 +28,17 @@ export function needsYou(state, group) {
   return (state.groupRuns || []).filter(r => r.groupId === group.id && r.status === 'awaiting_checkpoint').length;
 }
 
-/** Pending browser requests in one chat. Dispatched and finished ones are the device's, not the person's. */
+/** Pending browser requests in one chat that no ask covers (one made before asks existed). Dispatched and
+ * finished ones are the device's, not the person's; a request with an ask is counted as that ask. */
 export function pendingBrowser(state, chatKey) {
-  return (state?.browserRequests || []).filter(r => r.status === 'pending' && r.chatKey === chatKey).length;
+  return (state?.browserRequests || []).filter(r => r.status === 'pending' && !r.askId && r.chatKey === chatKey).length;
+}
+
+/** Asks waiting on the owner in one chat: the ones in it, and, in the primary's chat, every other one too
+ * (its "Needs you" list holds a copy of each). */
+export function pendingAsksIn(state, chatKey) {
+  const pending = (state?.asks || []).filter(a => a?.status === 'pending');
+  return pending.filter(a => a.chatKey === chatKey || (primaryOf(state)?.id === chatKey)).length;
 }
 
 /** Who a Retry should talk to, and which conversation it reports into.
@@ -119,12 +128,13 @@ export function waitingOnYou(state, chatKey, runs = state?.groupRuns || []) {
     plans: runs.filter(r => r.status === 'awaiting_plan' && runBelongsToChat(r, chatKey)).length,
     pauses: runs.filter(r => r.status === 'awaiting_checkpoint' && runBelongsToChat(r, chatKey)).length,
     pages: pendingBrowser(state, chatKey),
+    asks: pendingAsksIn(state, chatKey),
   };
 }
 
 /** How many things one chat's `waitingOnYou` answer adds up to: the badge the
  * chat list and the "needs you" filter count. */
-export const totalWaitingOnYou = ({plans = 0, pauses = 0, pages = 0} = {}) => plans + pauses + pages;
+export const totalWaitingOnYou = ({plans = 0, pauses = 0, pages = 0, asks = 0} = {}) => plans + pauses + pages + asks;
 
 function preview(history, {isTeam, fallback}) {
   const last = history[history.length - 1];

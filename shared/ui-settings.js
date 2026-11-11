@@ -14,9 +14,10 @@ import {esc, icon, btn, empty, note, roundBtn, switchBtn} from './ui-kit.js';
 import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, loadLocal, applyTheme, themeChoice, THEMES} from './ui-store.js';
 import {isDesk, initials, pageFrame, HIDDEN_KEY} from './ui-shell.js';
 import {ADMIN_PAGES, adminPage} from './ui-admin.js';
-import {faceOf, activityBlocks} from './ui-profile.js';
+import {faceOf, activityBlocks, grantsHtml, grantNote} from './ui-profile.js';
+import {allGrantRows} from './ui-asks.js';
 import {
-  ACTIVITY_FILTERS, activityUrl, companyTree, permissionRows, weekUsage, settingsSections, resolveSection,
+  ACTIVITY_FILTERS, activityUrl, companyTree, weekUsage, settingsSections, resolveSection,
 } from './ui-profile-model.js';
 import {COLORS} from './ui-face.js';
 
@@ -78,10 +79,7 @@ function models() {
 const conn = () => card(srow('Google', '<span class="pv">Coming in a later phase</span>', 'Gmail, Drive and Calendar') + srow('MCP servers', '<span class="pv">Coming in a later phase</span>', 'GitHub, Notion and more'), 'Connectors');
 
 function perm() {
-  const rows = permissionRows(store.state);
-  const list = rows.map(r => { const bot = findBot(r.botId); return `<div class="rw">${bot ? faceOf(bot, 28, {state: 'asleep', motion: false}) : ''}<span class="w">${esc(r.label)}<small>${esc(r.botName)}</small></span><span class="pv">Allowed</span></div>`; }).join('');
-  return `<p class="st-note">What each bot may do beyond chatting and handing work on. Paying or spending money never gets Always allow. Read-only for now.</p>`
-    + card(list || '<div class="rw"><span class="w st-quiet">No bot has an extra permission yet.</span></div>', 'Granted');
+  return `<p class="st-note">What each bot may do beyond chatting and handing work on. When a bot needs something that leaves the app it asks you; Always allow and Deny are kept here, per bot.</p><div data-grants="all">${grantsHtml()}</div>${grantNote('st-note')}`;
 }
 
 function usage() {
@@ -142,7 +140,7 @@ function dialog(sections, key) {
 }
 
 function phoneCards(sections) {
-  const {total} = weekUsage(store.state), rules = permissionRows(store.state).length;
+  const {total} = weekUsage(store.state), rules = allGrantRows(store.state).length;
   const more = sections.filter(s => s.extra).map(s => link(s.key, s.label)).join('');
   const mode = themeChoice();
   return `<section class="pg st-phone"><header class="pr-bar">${roundBtn('x', 'Close settings', 'settings-close', {cls: 'big'})}</header>

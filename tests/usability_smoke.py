@@ -11,6 +11,7 @@ No network and no credentials.
 """
 import asyncio
 import http.server
+import json
 import os
 import re
 import shutil
@@ -703,6 +704,198 @@ async def phone_long_press_menu_and_drag(page, base):
     assert await hash_(page) in ('', '#chats'), await hash_(page)
 
 
+# ---------------------------------------------------------------- asks, permissions, activity and the pause banner
+
+ASKS = [
+    ['a1', 'send', '', 'send an email to Northwind'],
+    ['a2', 'spend', '', 'pay £40 to Northwind Printing'],
+    ['a3', 'post', '', 'post the draft to the company page'],
+]
+
+
+async def primary_id(page):
+    state = await api_state(page)
+    return next(b['id'] for g in state['groups'] for b in g['bots'] if b['settings'].get('lead'))
+
+
+async def seed_asks(page, bot_id, asks=ASKS, name='Researcher'):
+    """The demo's bots never ask, so put asks (and the chat lines that carry them) into the stored workspace, the way the server writes them."""
+    primary = await primary_id(page)
+    script = '''
+        const [bot, primary, asks, name] = %s;
+        const at = new Date().toISOString();
+        s.asks = asks.map(([id, action, target, detail]) => ({id, botId: bot, runId: null, chatKey: bot, action, target, detail, grantScope: '', status: 'pending', scope: null, createdAt: at}));
+        const line = (id, text) => ({id: 'ask-' + id, role: 'system', kind: 'ask', askId: id, text, at});
+        s.chats[bot] = [...(s.chats[bot] || []), ...asks.map(([id, , , detail]) => line(id, name + ' wants to ' + detail + '.'))];
+        s.chats[primary] = [...(s.chats[primary] || []), ...asks.map(([id, , , detail]) => line(id, 'Needs you: ' + name + ' wants to ' + detail + '.'))];
+    ''' % json.dumps([bot_id, primary, asks, name])
+    await patch_state(page, script)
+
+
+async def ask_cards_answer_and_collapse(page, base):
+    ids = await open_app(page, base, bots={'Researcher': EXTRA_BOTS['Researcher']})
+    await seed_asks(page, ids['Researcher'])
+    # Three things wait on the owner: the bot's row and Atlas's face both carry the count.
+    row = page.locator('#sidebar .crow', has_text='Researcher')
+    await expect(row.locator('.badge')).to_have_text('3')
+    await expect(page.locator('#sidebar .pin', has_text='Atlas').locator('.badge')).to_have_text('3')
+    await row.click()
+    cards = page.locator('#cv-log .cv-card[data-ask]')
+    await expect(cards).to_have_count(3)
+    # One sentence, the three buttons in the owner's words, and the asking bot's face waiting above the card.
+    first = page.locator('#cv-log .cv-card[data-ask="a1"]')
+    await expect(first.locator('p')).to_have_text('Researcher wants to send an email to Northwind.')
+    assert await first.locator('.btn').all_inner_texts() == ['Decline', 'Allow', 'Always allow for this bot']
+    await expect(page.locator('#cv-log .cv-wait .face--waiting').first).to_be_visible()
+    await expect(page.locator('#cv-log .cv-wait').first).to_contain_text('Researcher is waiting on you')
+    # A payment is only ever Decline or Allow, and says so.
+    spend = page.locator('#cv-log .cv-card[data-ask="a2"]')
+    assert await spend.locator('.btn').all_inner_texts() == ['Decline', 'Allow']
+    await expect(spend).to_contain_text('Payments are asked every time.')
+    await expect(page.locator('#cv-line')).to_have_text('Waiting on you')
+    # Allow once: the card collapses to one muted line and the count drops.
+    await first.get_by_role('button', name='Allow', exact=True).click()
+    await expect(page.locator('#cv-log .cv-asked[data-ask="a1"]')).to_have_text('You allowed it once')
+    await expect(page.locator('#cv-log .cv-card[data-ask="a1"]')).to_have_count(0)
+    await expect(row.locator('.badge')).to_have_text('2')
+    state = await api_state(page)
+    mine = {a['id']: a for a in state['asks']}
+    assert mine['a1']['status'] == 'allowed' and mine['a1']['scope'] == 'once', mine['a1']
+    assert not [g for g in state.get('grants', []) if g['action'] == 'send'], 'Allow once stores no grant'
+    # Always allow: its own collapsed line, and the grant is kept for this bot.
+    await page.locator('#cv-log .cv-card[data-ask="a3"]').get_by_role('button', name='Always allow for this bot').click()
+    await expect(page.locator('#cv-log .cv-asked[data-ask="a3"]')).to_have_text('You always allow it for this bot')
+    grants = [(g['botId'], g['action'], g['choice']) for g in (await api_state(page))['grants']]
+    assert (ids['Researcher'], 'post', 'always') in grants, grants
+    # Decline.
+    await spend.get_by_role('button', name='Decline').click()
+    await expect(page.locator('#cv-log .cv-asked[data-ask="a2"]')).to_have_text('You declined it')
+    # Nothing is left to ask: no card, no badge, no second ask.
+    await expect(page.locator('#cv-log .cv-card[data-ask]')).to_have_count(0)
+    await expect(row.locator('.badge')).to_have_count(0)
+    await expect(page.locator('#cv-line')).not_to_have_text('Waiting on you')
+    # Atlas's copy of each card collapsed the same way, and says whose it was.
+    await page.locator('#sidebar .pin', has_text='Atlas').click()
+    await expect(page.locator('#cv-log .cv-asked')).to_have_count(3)
+    texts = await page.locator('#cv-log .cv-asked').all_inner_texts()
+    assert 'You allowed it once (Researcher)' in texts and 'You always allow it for this bot (Researcher)' in texts, texts
+    # The Always allow is a rule on the profile.
+    await page.goto(f'{base}/index.html#profile/{ids["Researcher"]}/permissions')
+    await page.reload()
+    await expect(page.locator('#main .gr', has_text='Post').locator('button[aria-pressed="true"]')).to_have_text('Always allow')
+
+
+async def permissions_edit_in_place_and_deny(page, base):
+    ids = await open_app(page, base, bots={'Researcher': EXTRA_BOTS['Researcher'], 'Writer': EXTRA_BOTS['Writer']})
+    r, w = ids['Researcher'], ids['Writer']
+    grants = [[r, 'browser.use', 'https://example.com', 'always'], [r, 'spend', '', 'ask'], [r, 'send', '', 'always'], [w, 'post', '', 'ask']]
+    await patch_state(page, 's.grants = %s.map(([botId, action, scope, choice]) => ({botId, action, scope, choice, at: new Date().toISOString()}));' % json.dumps(grants))
+    await page.goto(f'{base}/index.html#profile/{r}')
+    await page.reload()
+    await expect(page.locator('#main .rw', has_text='Permissions').locator('.pv')).to_have_text('3 rules')
+    await page.locator('#main .rw', has_text='Permissions').click()
+    rows = page.locator('#main .gr')
+    await expect(rows).to_have_count(3)
+    assert [t.split('\n')[0] for t in await rows.all_inner_texts()] == ['Open example.com', 'Send', 'Spend money']
+    # Every rule has the three choices; a payment never has Always allow.
+    assert await rows.nth(0).locator('button').all_inner_texts() == ['Always allow', 'Ask each time', 'Deny']
+    assert await rows.nth(2).locator('button').all_inner_texts() == ['Ask each time', 'Deny']
+    await expect(rows.nth(0).locator('button[aria-pressed="true"]')).to_have_text('Always allow')
+    # Edited in place: Deny, and the profile shows it at once.
+    await rows.nth(0).get_by_role('button', name='Deny').click()
+    await expect(page.locator('#main .gr').nth(0).locator('button[aria-pressed="true"]')).to_have_text('Deny')
+    await expect(page.locator('#toast')).to_contain_text('Researcher: deny.')
+    assert [g for g in (await api_state(page))['grants'] if g['action'] == 'browser.use'][0]['choice'] == 'deny'
+    # A payment can be set to Deny but never to Always allow: there is no button, and the server refuses it too.
+    await page.locator('#main .gr').nth(2).get_by_role('button', name='Deny').click()
+    await expect(page.locator('#main .gr').nth(2).locator('button[aria-pressed="true"]')).to_have_text('Deny')
+    refused = await page.evaluate('''botId => window.AGENT_API('/api/grants', 'POST', {botId, action: 'spend', choice: 'always'}).then(() => 'accepted', e => e.message)''', r)
+    assert refused != 'accepted', refused
+    # Settings lists the rules of every bot, one card each, and edits them in place.
+    await page.goto(f'{base}/index.html#settings/perm')
+    await page.reload()
+    dlg = page.locator('.st-dlg')
+    await expect(dlg.locator('.st-h', has_text='Researcher')).to_be_visible()
+    await expect(dlg.locator('.st-h', has_text='Writer')).to_be_visible()
+    await expect(dlg.locator('.gr')).to_have_count(4)
+    await dlg.locator('.gr', has_text='Post').get_by_role('button', name='Always allow').click()
+    await expect(dlg.locator('.gr', has_text='Post').locator('button[aria-pressed="true"]')).to_have_text('Always allow')
+    # The log keeps the changes under Permissions; Left the app does not show them.
+    await page.goto(f'{base}/index.html#activity')
+    await page.reload()
+    chips = page.locator('#main .ay-chips button')
+    await expect(chips).to_have_text(['Left the app', 'Permissions', 'Bots', 'All'])
+    await chips.nth(1).click()
+    await expect(page.locator('#ay-list .ay-row', has_text='not allowed to open example.com')).to_have_count(1)
+    await chips.nth(0).click()
+    await expect(page.locator('#ay-list .ay-row')).to_have_count(0)
+
+
+async def pause_banner_and_resume(page, base):
+    await open_app(page, base)
+    banner = page.locator('#pause')
+    await expect(banner).to_be_hidden()
+    await page.locator('#sidebar [data-action="open-settings"]').click()
+    await page.locator('.st-dlg [data-pause]').click()
+    await expect(banner).to_be_visible()
+    await expect(banner.locator('.pause-t')).to_have_text('All bots are paused. Nothing runs until you resume.')
+    assert (await api_state(page))['guard']['paused'] is True
+    await page.keyboard.press('Escape')
+    # The bar sits above the app, and the app sits under it (after its slide in).
+    await page.wait_for_timeout(450)
+    box, shell = await banner.bounding_box(), await page.locator('#main').bounding_box()
+    assert box['y'] == 0 and shell['y'] >= box['height'] - 1, (box, shell)
+    await page.reload()
+    await expect(banner).to_be_visible()
+    await page.locator('#sidebar .crow, #sidebar .pin').first.click()
+    await expect(banner).to_be_visible()
+    # Resume lifts it.
+    await banner.get_by_role('button', name='Resume').click()
+    await expect(banner).to_be_hidden()
+    await expect(page.locator('#toast')).to_contain_text('Bots are running again.')
+    assert (await api_state(page))['guard']['paused'] is False
+    assert (await page.locator('#main').bounding_box())['y'] == 0
+
+
+async def phone_ask_card_permissions_and_pause(page, base):
+    ids = await open_app(page, base, bots={'Researcher': EXTRA_BOTS['Researcher']})
+    await seed_asks(page, ids['Researcher'], asks=ASKS[:2])
+    await page.goto(f'{base}/index.html#bot/{ids["Researcher"]}')
+    await page.reload()
+    await expect(page.locator('#cv-log .cv-card[data-ask]')).to_have_count(2)
+    assert await overflow(page) <= 0, await overflow(page)
+    buttons = page.locator('#cv-log .cv-card[data-ask="a1"] .btn')
+    for i in range(3):
+        box = await buttons.nth(i).bounding_box()
+        assert box['height'] >= 40 and box['x'] >= 0 and box['x'] + box['width'] <= 390, box
+    await page.locator('#cv-log .cv-card[data-ask="a1"]').get_by_role('button', name='Always allow for this bot').click()
+    await expect(page.locator('#cv-log .cv-asked[data-ask="a1"]')).to_have_text('You always allow it for this bot')
+    # Permissions on a phone: full-width choices a thumb can hit.
+    await page.goto(f'{base}/index.html#profile/{ids["Researcher"]}/permissions')
+    await page.reload()
+    row = page.locator('#main .gr').first
+    await expect(row.locator('button[aria-pressed="true"]')).to_have_text('Always allow')
+    for i in range(3):
+        box = await row.locator('button').nth(i).bounding_box()
+        assert box['height'] >= 40 and box['x'] + box['width'] <= 390, box
+    await row.get_by_role('button', name='Deny').click()
+    await expect(page.locator('#main .gr').first.locator('button[aria-pressed="true"]')).to_have_text('Deny')
+    assert await overflow(page) <= 0
+    # The pause banner sits above the phone chrome, and Resume is a thumb-sized button.
+    await page.evaluate('() => window.AGENT_API("/api/guard", "POST", {paused: true})')
+    await page.goto(f'{base}/index.html#chats')
+    await page.reload()
+    banner = page.locator('#pause')
+    await expect(banner).to_be_visible()
+    box, me = await banner.bounding_box(), await page.locator('.ch-me').bounding_box()
+    assert me['y'] >= box['y'] + box['height'], (box, me)
+    go = await banner.get_by_role('button', name='Resume').bounding_box()
+    assert go['height'] >= 34 and go['x'] + go['width'] <= 390, go
+    assert await overflow(page) <= 0
+    await banner.get_by_role('button', name='Resume').click()
+    await expect(banner).to_be_hidden()
+
+
 async def main():
     shots = Path(tempfile.mkdtemp(prefix='usability-smoke-shots-'))
     site_dir = Path(tempfile.mkdtemp(prefix='usability-smoke-site-'))
@@ -720,6 +913,9 @@ async def main():
             await h.scenario('pin: the menu pins, the menu key opens it, Alt+arrows reorder and it is saved', pin_by_menu_and_move_by_keyboard)
             await h.scenario('pin: drag a row to the pinned row, reorder faces, drag one out, reorder rows, Esc cancels', drag_to_pin_reorder_and_unpin)
             await h.scenario('pin: dropping on a manager moves the bot to its team', drag_onto_a_manager_moves_it_to_the_team)
+            await h.scenario('asks: the card, Allow once, Always allow, Decline, and what is left', ask_cards_answer_and_collapse)
+            await h.scenario('permissions: edit a rule in place, Deny shows, payments never Always allow, the activity chips', permissions_edit_in_place_and_deny)
+            await h.scenario('pause: the banner says so on every screen and Resume lifts it', pause_banner_and_resume)
             await h.scenario('settings: opens from the avatar, Bots running pauses, Esc closes', settings_from_avatar_and_esc)
             await h.scenario('activity: four chips, bots made are logged, a profile counts its own', activity_page_and_counts)
             await h.scenario('out-of-job reply: three buttons, each does its thing', out_of_job_card)
@@ -729,6 +925,7 @@ async def main():
             await h.scenario('phone: create a bot from the + button', phone_create_bot, PHONE)
             await h.scenario('phone: bottom search opens on focus and closes on Esc or a tap', phone_search_and_escape, PHONE)
             await h.scenario('phone: Settings cards, a section, Back, Esc, and the menu sheet', phone_settings_cards, PHONE)
+            await h.scenario('phone: ask card, permissions and the pause banner', phone_ask_card_permissions_and_pause, PHONE)
             await h.scenario('phone: long press opens the options sheet; hold and drag pins', phone_long_press_menu_and_drag, PHONE)
             await browser.close()
             server.shutdown()
@@ -736,7 +933,7 @@ async def main():
         if failed:
             print(f'USABILITY SMOKE FAIL: {len(failed)} of {len(h.results)} scenarios: {failed}')
             return 1
-        print(f'USABILITY SMOKE PASS: {len(h.results)} scenarios; new bot, edit and move, delete, Atlas, pin and reorder, settings, out-of-job card, checkpoint card, faces, keyboard, phone, no console errors')
+        print(f'USABILITY SMOKE PASS: {len(h.results)} scenarios; new bot, edit and move, delete, Atlas, pin and reorder, ask cards, permissions, pause banner, settings, out-of-job card, checkpoint card, faces, keyboard, phone, no console errors')
         return 0
     finally:
         shutil.rmtree(site_dir, ignore_errors=True)

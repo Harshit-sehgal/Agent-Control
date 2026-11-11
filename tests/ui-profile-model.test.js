@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   NO_JOB, hasJob, lookOf, resolveSection, roleOf, teamLine, moveTargets, menuItems, deleteCopy, profileRows, profileBackRoute, closeTarget, memoryNotes, modelLine,
-  newBotDefaults, newBotPayload, canCreate, editChanges, ACTIVITY_FILTERS, activityUrl, activityTarget, activityDays, companyTree, permissionRows, weekUsage, settingsSections,
+  newBotDefaults, newBotPayload, canCreate, editChanges, ACTIVITY_FILTERS, activityUrl, activityTarget, activityDays, companyTree, weekUsage, settingsSections,
 } from '../shared/ui-profile-model.js';
 
 const bot = (id, name, settings = {}, instructions = 'Does its work.', extra = {}) => ({id, name, instructions, settings, ...extra});
@@ -107,7 +107,7 @@ test('row values count notes, rules and reports, and the computer is Idle', () =
   const row = key => profileRows(s, 'mail', {activityCount: 1}).find(r => r.key === key).value;
   assert.equal(row('memory'), '2 notes');
   assert.equal(row('activity'), '1');
-  assert.equal(row('permissions'), '2 rules');
+  assert.equal(row('permissions'), '1 rule', 'Mailroom holds one rule that asks: the page permission it was given before asks existed (bot.ask never asks)');
   assert.equal(row('computer'), 'Idle');
   assert.equal(profileRows(s, 'ops').find(r => r.key === 'team').value, '2 bots');
   assert.equal(profileRows(s, 'solo').find(r => r.key === 'memory').value, 'Empty');
@@ -229,10 +229,13 @@ test('a reporting cycle cannot hang the chart', () => {
 
 // ---- settings ----
 
-test('permission rows list every grant of every bot, read-only', () => {
-  const rows = permissionRows(stateOf());
-  assert.deepEqual(rows.map(r => `${r.botId}:${r.action}`), ['mail:browser.use', 'mail:bot.ask']);
-  assert.match(rows[0].label, /browser/i);
+test('the Permissions row counts the rules a bot has: its grants and the page permission it held before asks', () => {
+  const grants = [{botId: 'solo', action: 'send', scope: '', choice: 'always'}, {botId: 'solo', action: 'spend', scope: '', choice: 'deny'}, {botId: 'mail', action: 'post', scope: '', choice: 'ask'}];
+  const s = stateOf([atlas, ops, mail, plan, solo], {grants});
+  const row = id => profileRows(s, id).find(r => r.key === 'permissions').value;
+  assert.equal(row('solo'), '2 rules');
+  assert.equal(row('mail'), '2 rules');
+  assert.equal(row('plan'), 'None');
 });
 
 test('settings sections: seven for everyone, the admin ones only for an admin of a live server', () => {

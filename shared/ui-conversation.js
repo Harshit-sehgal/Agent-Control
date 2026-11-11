@@ -1,5 +1,5 @@
 /** A bot's own chat and a thread: header, the feed, the composer, and the cards
- * that wait on the owner (checkpoint, out-of-job, a page request). What the feed
+ * that wait on the owner (an ask, a checkpoint, out-of-job, a page request). What the feed
  * holds is decided by ui-feed.js; this file turns those entries into markup and
  * keeps the open chat's DOM current.
  *
@@ -15,6 +15,7 @@ import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYo
 import {botStatus, botIsManager, chatStatus, jobOf} from './ui-company.js';
 import {hasJob} from './ui-profile-model.js';
 import {feed} from './ui-feed.js';
+import {askCard} from './ui-asks.js';
 import {face, botColor} from './ui-face.js';
 import {esc, icon, btn, dayLabel, tag} from './ui-kit.js';
 import {store, conversation, findBot, groups, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync} from './ui-store.js';
@@ -98,6 +99,19 @@ function browserEntry(m, conv) {
   return `${waiting}<div class="cv-card${request.status === 'pending' ? '' : ' flat'}"><p>${esc(m.text)} ${tag(`${label}${where}`, tone)}</p><a href="${esc(safeHref(request.url))}" target="_blank" rel="noopener noreferrer">${esc(request.url)}</a>${steps}${request.error ? `<small>${esc(request.error)}</small>` : ''}${acts}</div>`;
 }
 
+/** An ask: a bot needs the owner's yes before it goes on. Open, it keeps the asking bot's waiting face above one
+ * sentence and its buttons (Decline, Allow, Always allow for this bot; a payment has no Always). Answered, it
+ * collapses to one muted line. Its status is read from state.asks, so the line itself never changes. */
+function askEntry({message: m}, conv) {
+  const card = askCard(store.state, m);
+  if (!card.open) return `<div class="cv-note cv-asked" data-ask="${esc(m.askId)}"><span>${esc(card.text)}</span></div>`;
+  const bot = findBot(card.botId) || askerOf(conv), name = card.botName;
+  const choose = ({id, label, primary}) => btn(label, 'ask-answer', {id: card.askId, small: true, kind: primary ? 'primary' : 'quiet', data: {choice: id}});
+  const acts = canWrite() ? `<div class="acts">${card.choices.map(choose).join('')}</div>` : '<small>Only a member can answer.</small>';
+  const target = card.target ? `<a href="${esc(safeHref(card.target))}" target="_blank" rel="noopener noreferrer">${esc(card.target)}</a>` : '';
+  return `<div class="cv-wait">${botFace(bot, name, 36, {state: 'waiting'})}<span>${esc(name)} is waiting on you<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></span></div><div class="cv-card" data-ask="${esc(m.askId)}"><p>${esc(m.text)}</p>${target}${card.note ? `<small>${esc(card.note)}</small>` : ''}${acts}</div>`;
+}
+
 /** A system line. The newest note of a run also carries what the run offers. */
 function noteEntry(entry, conv) {
   const {message: m, run} = entry, write = canWrite();
@@ -163,6 +177,7 @@ function entryHtml(entry, conv) {
     case 'bot': return botEntry(entry.message, conv);
     case 'offjob': return offjobEntry(entry, conv);
     case 'browser': return browserEntry(entry.message, conv);
+    case 'ask': return askEntry(entry, conv);
     case 'note': return noteEntry(entry, conv);
     case 'pill': return pillEntry(entry, conv);
     case 'limit': return limitEntry(entry, conv);
@@ -279,7 +294,16 @@ const offjobOf = button => {
 };
 const hop = node => { const f = node?.querySelector('.face'); if (f) { f.classList.remove('face--hop'); void f.getBoundingClientRect(); f.classList.add('face--hop'); } };
 
+/** The owner's answer to an ask card. The run that was parked on it carries on from the server, so the poll
+ * (and the pill) follow it from here. */
+async function answerAsk(id, answer) {
+  const {ask} = await api(`/api/asks/${encodeURIComponent(id)}`, 'POST', {answer});
+  await sync();
+  toast(answer === 'decline' ? 'Declined.' : answer === 'always' ? `${findBot(ask?.botId)?.name || 'The bot'} may always do this.` : 'Allowed once.');
+}
+
 export const conversationActions = {
+  'ask-answer': b => answerAsk(b.dataset.id, b.dataset.choice),
   'open-profile': b => go({profile: b.dataset.id}),
   hop: b => hop(b),
   'offjob-anyway': b => { const m = offjobOf(b); return runAnyway(m.botId, m.request); },
