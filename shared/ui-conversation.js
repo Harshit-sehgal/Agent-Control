@@ -422,6 +422,11 @@ export const conversationActions = {
     if (card.action === 'open') return go({settings: card.section});
     if (card.action === 'team') await api(`/api/groups/${encodeURIComponent(card.groupId)}`, 'PATCH', {settings: card.settings});
     else if (card.action === 'schedule') await (card.stop ? api(`/api/tasks/${encodeURIComponent(card.taskId)}`, 'DELETE') : api('/api/tasks', 'POST', scheduleTaskBody(card)));
+    else if (card.action === 'remove') {
+      const group = groupOfBot(card.botId);
+      if (!group) throw new Error('That bot is already gone.');
+      await api(`/api/groups/${group.id}/bots/${card.botId}`, 'DELETE', {});
+    }
     else if (card.action === 'rule') await api('/api/grants', 'POST', {botId: card.botId, action: card.act, ...(card.scope ? {scope: card.scope} : {}), choice: card.choice});
     else if (['job', 'rename', 'settings'].includes(card.action)) {
       const group = groupOfBot(card.botId);

@@ -6,7 +6,8 @@
  * These transitions are pure and mirror `workflow.js`: the Node worker and the
  * browser-local demo both run them, so the two backends cannot drift.
  */
-import {activity, cleanText} from './core.js?v=36ef817a97';
+import {activity, cleanText} from './core.js?v=768bcdd989';
+import {cleanDay} from './schedules.js?v=768bcdd989';
 
 export const MAX_ATTEMPTS_DEFAULT = 5;
 
@@ -48,7 +49,9 @@ const PAYLOAD_KINDS = {
     if (!['once', 'interval'].includes(body.kind)) fail('Choose once or interval.');
     // A time of day ("08:00") is kept only for the words the owner reads; the clock is `nextAt`.
     const at = /^\d{2}:\d{2}$/.test(String(body.at || '')) ? body.at : null;
-    return {groupId, botId, message, label: cleanText(body.label, 200) || message.slice(0, 60), ...timing(body), ...(at ? {at} : {})};
+    // The day a weekly schedule runs on, kept for the same words ("every Monday").
+    const on = body.kind === 'interval' && Number(body.intervalMinutes) === 10080 ? cleanDay(body.on) : '';
+    return {groupId, botId, message, label: cleanText(body.label, 200) || message.slice(0, 60), ...timing(body), ...(at ? {at} : {}), ...(on ? {on} : {})};
   },
   'group-run': body => ({groupId: cleanText(body.groupId, 64), message: cleanText(body.message, 4000), directBotId: cleanText(body.directBotId, 64) || null}),
   'agent-job': body => ({action: cleanText(body.action, 64), params: body.params && typeof body.params === 'object' ? body.params : {}, agentId: cleanText(body.agentId, 64) || null}),

@@ -23,16 +23,16 @@
  *   make itself the primary bot, save a rule without the owner's tap, or reach a route the owner could not.
  *
  * Pure and browser-safe: the server reads replies with it and the UI paints the card from it. */
-import {cleanText} from './core.js?v=36ef817a97';
-import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=36ef817a97';
-import {everyMinutes, cleanAt, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=36ef817a97';
-import {controlFence} from './reply-blocks.js?v=36ef817a97';
-import {companyBots, primaryOf} from './company.js?v=36ef817a97';
-import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js?v=36ef817a97';
-import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=36ef817a97';
-import {grantWhat} from './ui-asks.js?v=36ef817a97';
+import {cleanText} from './core.js?v=768bcdd989';
+import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=768bcdd989';
+import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=768bcdd989';
+import {controlFence} from './reply-blocks.js?v=768bcdd989';
+import {companyBots, primaryOf} from './company.js?v=768bcdd989';
+import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js?v=768bcdd989';
+import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=768bcdd989';
+import {grantWhat} from './ui-asks.js?v=768bcdd989';
 
-export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'schedule', 'open'];
+export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'schedule', 'remove', 'open'];
 /** The bot settings a bot may propose. Not the primary role, the browser approval mode, or layout (pins, order). */
 export const BOT_SETTABLE = ['replyLength', 'style', 'memory', 'canHandoff', 'summonable', 'enabled', 'temperature', 'reportsTo'];
 /** The team (group) settings a bot may propose: approve between steps, the step limit, hand-offs between its bots. */
@@ -55,7 +55,8 @@ export const SETUP_TOOL_HINT = 'To change a setting for the owner, put one fence
   + '{"action":"settings","bot":"<bot name>","settings":{"replyLength":"short|medium|long","style":"<tone>","memory":true|false,"canHandoff":true|false,"summonable":true|false,"enabled":true|false,"temperature":0-2,"reportsTo":"<manager bot name, or none>"}} changes how a bot works; give only what changes. '
   + '{"action":"team","team":"<team name, or leave out for your own team>","settings":{"checkpoints":true|false,"maxSteps":1-30,"botHandoffs":true|false}} changes how a team runs: checkpoints asks the owner before each step. '
   + '{"action":"rule","bot":"<bot name>","do":"open|send|post|delete|spend","site":"<site, e.g. github.com>","choice":"always|ask|deny"} saves what that bot may do without asking (a payment is never always). '
-  + '{"action":"schedule","bot":"<bot name, or me>","do":"<the message that bot gets each time>","every":"day|hour|week|<minutes>","at":"<HH:MM, optional>"} puts work on a timer: the bot runs it in its own chat and the owner reads the result there. Give only "at" for a one-off later today or tomorrow. Add "stop":true with a few words of its message in "do" to stop one; workspace.schedules lists them. When the owner asks for something regular (every morning, each Monday), propose a schedule instead of telling them to come back. '
+  + '{"action":"schedule","bot":"<bot name, or me>","do":"<the message that bot gets each time>","every":"day|hour|week|<minutes>","at":"<HH:MM, optional>","on":"<monday..sunday, optional: a weekly schedule on that day>"} puts work on a timer: the bot runs it in its own chat and the owner reads the result there. Give only "at" for a one-off later today or tomorrow. Add "stop":true with a few words of its message in "do" to stop one; workspace.schedules lists them. When the owner asks for something regular (every morning, each Monday), propose a schedule instead of telling them to come back. '
+  + '{"action":"remove","bot":"<bot name>"} removes a bot the owner no longer wants, with its chat and schedules (never Atlas). '
   + '{"action":"open","page":"models|connectors|permissions|agents|usage"} shows the owner a Settings page, for things only they can do, such as pasting a key. '
   + 'Nothing changes until the owner taps Apply on the card, so say in your reply what you proposed and why. Never ask for a key or password in chat.';
 
@@ -72,7 +73,7 @@ export function parseSetupRequests(output) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) { found.push({ok: false, error: 'the setup block was not an object.'}); continue; }
     const action = lower(body.action);
     if (!SETUP_ACTIONS.includes(action)) { found.push({ok: false, error: `"${cleanText(body.action, 40) || 'nothing'}" is not something setup can do. Use ${SETUP_ACTIONS.join(', ')}.`}); continue; }
-    found.push({ok: true, request: {action, bot: cleanText(body.bot, 60), provider: cleanText(body.provider, 80), model: cleanText(body.model, 120), job: cleanText(body.job, MAX_JOB + 1), page: lower(body.page), name: cleanText(body.name, 81), team: cleanText(body.team, 80), settings: body.settings && typeof body.settings === 'object' && !Array.isArray(body.settings) ? body.settings : null, do: lower(body.do), site: cleanText(body.site, 300), choice: lower(body.choice), what: cleanText(body.do, 2000), every: body.every ?? null, at: cleanText(body.at, 8), stop: body.stop === true, ...(body.effort !== undefined && body.effort !== null ? {effort: lower(body.effort)} : {})}});
+    found.push({ok: true, request: {action, bot: cleanText(body.bot, 60), provider: cleanText(body.provider, 80), model: cleanText(body.model, 120), job: cleanText(body.job, MAX_JOB + 1), page: lower(body.page), name: cleanText(body.name, 81), team: cleanText(body.team, 80), settings: body.settings && typeof body.settings === 'object' && !Array.isArray(body.settings) ? body.settings : null, do: lower(body.do), site: cleanText(body.site, 300), choice: lower(body.choice), what: cleanText(body.do, 2000), every: body.every ?? null, at: cleanText(body.at, 8), on: cleanText(body.on, 12), stop: body.stop === true, ...(body.effort !== undefined && body.effort !== null ? {effort: lower(body.effort)} : {})}});
   }
   return found;
 }
@@ -137,6 +138,12 @@ export function resolveSetup(state, request, {speaker = null} = {}) {
     const job = String(request.job || '').trim();
     if (job.length < MIN_JOB || job.length > MAX_JOB) return {ok: false, error: `a job is ${MIN_JOB} to ${MAX_JOB} characters.`};
     return {ok: true, card: {action: 'job', botId: bot.id, job, text: `New job for ${bot.name}: “${job.length > 240 ? `${job.slice(0, 240)}…` : job}”`}};
+  }
+  if (request.action === 'remove') {
+    const bot = botNamed(state, request.bot, speaker);
+    if (!bot) return {ok: false, error: `there is no bot called "${request.bot || 'blank'}". The bots are: ${companyBots(state).map(b => b.name).join(', ')}.`};
+    if (bot.id === primaryOf(state)?.id) return {ok: false, error: `${bot.name} runs the company and cannot be removed.`};
+    return {ok: true, card: {action: 'remove', botId: bot.id, text: `Remove ${bot.name}, with its chat and schedules`}};
   }
   if (request.action === 'team') return teamCard(state, request, speaker);
   if (request.action === 'schedule') return scheduleCard(state, request, speaker);
@@ -252,6 +259,7 @@ export function setupCardOf(message) {
   if (card.action === 'rename') return typeof card.botId === 'string' && typeof card.name === 'string' ? card : null;
   if (card.action === 'settings') return typeof card.botId === 'string' && card.settings && typeof card.settings === 'object' && Object.keys(card.settings).length && Object.keys(card.settings).every(k => BOT_SETTABLE.includes(k)) ? card : null;
   if (card.action === 'team') return typeof card.groupId === 'string' && card.settings && typeof card.settings === 'object' && Object.keys(card.settings).length && Object.keys(card.settings).every(k => TEAM_SETTABLE.includes(k)) ? card : null;
+  if (card.action === 'remove') return typeof card.botId === 'string' ? card : null;
   if (card.action === 'schedule') return typeof card.botId === 'string' && (card.stop ? typeof card.taskId === 'string' : typeof card.groupId === 'string' && typeof card.message === 'string' && (Number.isInteger(card.every) || Boolean(cleanAt(card.at)))) ? card : null;
   if (card.action === 'rule') return typeof card.botId === 'string' && ASK_ACTIONS.includes(card.act) && GRANT_CHOICES.includes(card.choice) && typeof card.scope === 'string' ? card : null;
   return typeof card.providerId === 'string' || (typeof card.effort === 'string' && cleanEffort(card.effort) !== null) ? card : null;
@@ -271,16 +279,21 @@ function scheduleCard(state, request, speaker) {
     return {ok: true, card: {action: 'schedule', stop: true, taskId: hits[0].id, botId: bot.id, text: `Stop ${bot.name}: “${hits[0].what}” ${hits[0].when}`}};
   }
   if (what.length < 3) return {ok: false, error: 'say what to do in "do", as the message the bot will get each time.'};
-  const every = everyMinutes(request.every), at = cleanAt(request.at);
+  // A day of the week ("every Monday") is a weekly schedule on that day.
+  const on = cleanDay(request.on);
+  if (request.on && !on) return {ok: false, error: `"${request.on}" is not a day of the week. Use monday to sunday.`};
+  const every = on && (request.every === undefined || request.every === null || request.every === '') ? 10080 : everyMinutes(request.every), at = cleanAt(request.at);
+  if (on && every !== 10080) return {ok: false, error: 'a day of the week goes with every week: leave "every" out or set it to week.'};
   if (every === null) return {ok: false, error: `"${request.every}" is not how often. Use day, hour, week, or a number of minutes (at least ${MIN_EVERY} minutes, at most ${MAX_EVERY}).`};
   if (every === undefined && !at) return {ok: false, error: 'say how often in "every" (day, hour, week or minutes) or when in "at" (HH:MM), or both.'};
   if (request.at && !at) return {ok: false, error: `"${request.at}" is not a time of day. Use HH:MM, such as 08:00.`};
   const group = (state?.groups || []).find(g => (g.bots || []).some(b => b.id === bot.id));
   if (!group) return {ok: false, error: `${bot.name} is not in a team.`};
-  return {ok: true, card: {action: 'schedule', botId: bot.id, groupId: group.id, message: what, ...(every ? {every} : {}), ...(at ? {at} : {}), text: `${bot.name}: “${what}” ${whenWords({every, at})}`}};
+  return {ok: true, card: {action: 'schedule', botId: bot.id, groupId: group.id, message: what, ...(every ? {every} : {}), ...(at ? {at} : {}), ...(on ? {on} : {}), text: `${bot.name}: “${what}” ${whenWords({every, at, on})}`}};
 }
 export function setupDone(state, card) {
   if (!card || card.action === 'open') return false;
+  if (card.action === 'remove') return !companyBots(state).some(b => b.id === card.botId);
   if (card.action === 'job') return companyBots(state).find(b => b.id === card.botId)?.instructions === card.job;
   if (card.action === 'schedule') {
     const rows = scheduleRows(state, card.botId);
@@ -298,7 +311,7 @@ export function setupDone(state, card) {
   return sameModel && sameEffort;
 }
 /** The button on a setup card. */
-export const setupButton = card => (card.action === 'open' ? `Open ${card.text.replace(/^Settings → /, '')}` : 'Apply');
+export const setupButton = card => (card.action === 'open' ? `Open ${card.text.replace(/^Settings → /, '')}` : card.action === 'remove' ? 'Remove' : 'Apply');
 
 /* ---------- what every bot knows ---------- */
 

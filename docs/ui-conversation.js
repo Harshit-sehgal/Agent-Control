@@ -7,25 +7,25 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=36ef817a97';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=36ef817a97';
-import {requestOfMessage} from './bot-browser.js?v=36ef817a97';
-import {validHttpUrl} from './core.js?v=36ef817a97';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=36ef817a97';
-import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=36ef817a97';
-import {isPrimary} from './company.js?v=36ef817a97';
-import {hasJob, modelChip} from './ui-profile-model.js?v=36ef817a97';
-import {scheduleTaskBody} from './schedules.js?v=36ef817a97';
-import {feed} from './ui-feed.js?v=36ef817a97';
-import {setupCardOf, setupButton} from './setup.js?v=36ef817a97';
-import {askCard} from './ui-asks.js?v=36ef817a97';
-import {face, botColor} from './ui-face.js?v=36ef817a97';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=36ef817a97';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=36ef817a97';
-import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=36ef817a97';
-import {toast} from './ui-dialogs.js?v=36ef817a97';
-import {siteChip} from './ui-computer-view.js?v=36ef817a97';
-import {cliChoice} from './ui-connect-model.js?v=36ef817a97';
+import {OFFJOB_CHOICES} from './off-job.js?v=768bcdd989';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=768bcdd989';
+import {requestOfMessage} from './bot-browser.js?v=768bcdd989';
+import {validHttpUrl} from './core.js?v=768bcdd989';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=768bcdd989';
+import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=768bcdd989';
+import {isPrimary} from './company.js?v=768bcdd989';
+import {hasJob, modelChip} from './ui-profile-model.js?v=768bcdd989';
+import {scheduleTaskBody} from './schedules.js?v=768bcdd989';
+import {feed} from './ui-feed.js?v=768bcdd989';
+import {setupCardOf, setupButton} from './setup.js?v=768bcdd989';
+import {askCard} from './ui-asks.js?v=768bcdd989';
+import {face, botColor} from './ui-face.js?v=768bcdd989';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=768bcdd989';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=768bcdd989';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=768bcdd989';
+import {toast} from './ui-dialogs.js?v=768bcdd989';
+import {siteChip} from './ui-computer-view.js?v=768bcdd989';
+import {cliChoice} from './ui-connect-model.js?v=768bcdd989';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -422,6 +422,11 @@ export const conversationActions = {
     if (card.action === 'open') return go({settings: card.section});
     if (card.action === 'team') await api(`/api/groups/${encodeURIComponent(card.groupId)}`, 'PATCH', {settings: card.settings});
     else if (card.action === 'schedule') await (card.stop ? api(`/api/tasks/${encodeURIComponent(card.taskId)}`, 'DELETE') : api('/api/tasks', 'POST', scheduleTaskBody(card)));
+    else if (card.action === 'remove') {
+      const group = groupOfBot(card.botId);
+      if (!group) throw new Error('That bot is already gone.');
+      await api(`/api/groups/${group.id}/bots/${card.botId}`, 'DELETE', {});
+    }
     else if (card.action === 'rule') await api('/api/grants', 'POST', {botId: card.botId, action: card.act, ...(card.scope ? {scope: card.scope} : {}), choice: card.choice});
     else if (['job', 'rename', 'settings'].includes(card.action)) {
       const group = groupOfBot(card.botId);

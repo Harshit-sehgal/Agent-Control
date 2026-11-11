@@ -155,3 +155,33 @@ test('a scheduled run whose model rejects the key stops its schedule, says so in
   assert.equal(told.length, 1);
   assert.equal(told[0].title, 'A schedule stopped');
 });
+
+// "Every Monday at 10am": a weekly schedule can name its day, so the bot never has to say it cannot.
+test('a weekly schedule on a named day starts on that day and says so', () => {
+  const wed = new Date(2026, 10, 11, 9, 30); // a Wednesday
+  assert.equal(nextAtFor('10:00', wed, 'monday').getTime(), new Date(2026, 10, 16, 10, 0).getTime());
+  assert.equal(nextAtFor('10:00', wed, 'wednesday').getTime(), new Date(2026, 10, 11, 10, 0).getTime(), 'still ahead today');
+  assert.equal(nextAtFor('08:00', wed, 'Wed').getTime(), new Date(2026, 10, 18, 8, 0).getTime(), 'already past today: next week');
+  assert.equal(whenWords({every: 10080, at: '10:00', on: 'monday'}), 'every Monday at 10:00');
+  const body = scheduleTaskBody({botId: 'inbox', groupId: 'home', message: 'Update my resume', every: 10080, at: '10:00', on: 'monday'}, wed);
+  assert.equal(body.payload.on, 'monday');
+  assert.equal(body.payload.nextAt, new Date(2026, 10, 16, 10, 0).toISOString());
+});
+
+test('a bot can propose "every Monday at 10"; a day alone means weekly', () => {
+  const made = ask(state(), {action: 'schedule', bot: 'Inbox', do: 'Remind me to update my resume', on: 'Monday', at: '10:00'});
+  assert.equal(made.ok, true, made.error);
+  assert.equal(made.card.every, 10080);
+  assert.equal(made.card.on, 'monday');
+  assert.match(made.card.text, /every Monday at 10:00/);
+  assert.match(ask(state(), {action: 'schedule', bot: 'Inbox', do: 'x x x', on: 'someday', at: '10:00'}).error, /day of the week/);
+  const rows = scheduleRows({tasks: [{id: 't', kind: 'bot-task', status: 'queued', payload: {botId: 'inbox', message: 'm', kind: 'interval', intervalMinutes: 10080, at: '10:00', on: 'monday'}}]});
+  assert.equal(rows[0].when, 'every Monday at 10:00');
+});
+
+test('the stored schedule keeps its day, so its words stay "every Monday"', () => {
+  const s = state();
+  const body = scheduleTaskBody({botId: 'inbox', groupId: 'home', message: 'Update my resume', every: 10080, at: '10:00', on: 'monday'}, new Date(2026, 10, 11, 9, 30));
+  enqueueTask(s, body);
+  assert.equal(scheduleRows(s)[0].when, 'every Monday at 10:00');
+});

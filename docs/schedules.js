@@ -28,26 +28,40 @@ export function cleanAt(value) {
   return `${m[1].padStart(2, '0')}:${m[2]}`;
 }
 
-/** The next moment the local clock reads `at` (today if still ahead, else tomorrow), or null. */
-export function nextAtFor(at, now = new Date()) {
+export const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+/** "Mon", "monday", "Mondays" as "monday", or '' when it is not a day of the week. */
+export function cleanDay(value) {
+  const text = String(value ?? '').trim().toLowerCase().replace(/s$/, '');
+  return text.length >= 3 ? DAYS.find(day => day.startsWith(text) || text === day) || '' : '';
+}
+
+/** The next moment the local clock reads `at` (today if still ahead, else tomorrow), or null. With `on`, the next
+ * such moment on that day of the week. */
+export function nextAtFor(at, now = new Date(), on = '') {
   const clean = cleanAt(at);
   if (!clean) return null;
   const [h, m] = clean.split(':').map(Number);
   const next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, 0, 0);
+  const day = DAYS.indexOf(cleanDay(on));
+  if (day >= 0) {
+    next.setDate(next.getDate() + ((day - next.getDay() + 7) % 7));
+    if (next.getTime() <= now.getTime() + 30000) next.setDate(next.getDate() + 7);
+    return next;
+  }
   if (next.getTime() <= now.getTime() + 30000) next.setDate(next.getDate() + 1);
   return next;
 }
 
 /** "every day at 08:00", "every 45 minutes", "once at 17:30". */
-export function whenWords({every, at} = {}) {
-  const time = cleanAt(at), when = time ? ` at ${time}` : '';
+export function whenWords({every, at, on} = {}) {
+  const time = cleanAt(at), when = time ? ` at ${time}` : '', day = cleanDay(on);
   if (!every) return `once${when || ' soon'}`;
-  const unit = every === 1440 ? 'every day' : every === 60 ? 'every hour' : every === 10080 ? 'every week' : `every ${every} minutes`;
+  const unit = every === 1440 ? 'every day' : every === 60 ? 'every hour' : every === 10080 ? (day ? `every ${day[0].toUpperCase()}${day.slice(1)}` : 'every week') : `every ${every} minutes`;
   return `${unit}${when}`;
 }
 
 const live = t => t?.kind === 'bot-task' && ['queued', 'running'].includes(t.status);
-const timingOf = t => ({every: t.payload?.kind === 'interval' ? Number(t.payload.intervalMinutes) || Number(t.intervalMinutes) : undefined, at: t.payload?.at || ''});
+const timingOf = t => ({every: t.payload?.kind === 'interval' ? Number(t.payload.intervalMinutes) || Number(t.intervalMinutes) : undefined, at: t.payload?.at || '', on: t.payload?.on || ''});
 
 /** A bot's live schedules (or every bot's, with no id), newest first: id, botId, what, when, next run. */
 export function scheduleRows(state, botId = null) {
@@ -57,10 +71,12 @@ export function scheduleRows(state, botId = null) {
 
 /** The `POST /api/tasks` body for a schedule card or the Schedule form, with the first run at the next local
  * `at` (the browser's clock, so "08:00" means the owner's 8 in the morning). */
-export function scheduleTaskBody({botId, groupId, message, every, at}, now = new Date()) {
-  const time = cleanAt(at), first = time ? nextAtFor(time, now) : null;
+export function scheduleTaskBody({botId, groupId, message, every, at, on}, now = new Date()) {
+  // A weekly schedule on a named day runs first on that day; the timer then steps a week from the planned time.
+  const day = every === 10080 ? cleanDay(on) : '';
+  const time = cleanAt(at) || (day ? '09:00' : ''), first = time ? nextAtFor(time, now, day) : null;
   const timing = every ? {kind: 'interval', intervalMinutes: every} : {kind: 'once'};
-  return {kind: 'bot-task', payload: {groupId, botId, message, ...timing, ...(time ? {at: time} : {}), ...(first ? {nextAt: first.toISOString()} : {})}};
+  return {kind: 'bot-task', payload: {groupId, botId, message, ...timing, ...(time ? {at: time} : {}), ...(day ? {on: day} : {}), ...(first ? {nextAt: first.toISOString()} : {})}};
 }
 
 /** Failures that waiting will not fix: the schedule stops at once instead of spending a run each time. */
