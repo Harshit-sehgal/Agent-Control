@@ -34,6 +34,7 @@ import {workspaceRoutes} from './routes-workspaces.js';
 import {pushRoutes} from './routes-push.js';
 import {aiRoutes} from './routes-ai.js';
 import {memoryRoutes} from './routes-memory.js';
+import {connectorRoutes} from './routes-connectors.js';
 
 const PUBLIC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'shared');
 
@@ -112,6 +113,7 @@ export function createApp({store, auth, workspaces, push, version}) {
   pushRoutes(router, app);
   aiRoutes(router, app);
   memoryRoutes(router);
+  connectorRoutes(router);
 
   async function api(req, res, u) {
     const found = router.find(req.method, u.pathname), access = found?.route.access;

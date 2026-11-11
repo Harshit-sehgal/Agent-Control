@@ -9,6 +9,7 @@ import {aiModel} from './ai.js';
 import {aiAvailable, publicAi} from './ai-providers.js';
 import {fail} from './http.js';
 import {activityPage} from '../shared/activity-log.js';
+import {publicConnectors} from '../shared/connectors.js';
 import {reply, allows} from './router.js';
 
 const retentionSettings = s => ({...RETENTION_DEFAULTS, ...(s.settings?.retention || {})});
@@ -19,6 +20,8 @@ export function workflowRoutes(router, {auth}) {
     // The stored provider row holds the vault id and may carry a key inside a
     // pasted base URL. The snapshot the browser receives is metadata only.
     s.ai = publicAi(s);
+    // A connector record is metadata (its secrets are vault credentials), but the snapshot gets the public view anyway.
+    s.connectors = publicConnectors(s);
     // The log can be thousands of entries; the snapshot the browser polls leaves it out. GET /api/activity pages it.
     delete s.activity;
     const hasSavedDefault = s.ai?.providers?.some(provider => provider.id === s.ai.defaultProviderId);

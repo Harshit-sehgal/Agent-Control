@@ -25,7 +25,7 @@ import {validateBrowserRequest} from '../shared/bot-browser.js';
 import {cliEngineById,cleanCliModel,LOCAL_CLI_ENGINE_IDS} from '../shared/ai-presets.js';
 import {encryptJson,decryptJson,sha256,loadMasterKey} from './vault.js';
 
-export const AGENT_ACTIONS = ['http.check', 'browser.capture', 'browser.action', 'model.run'];
+export const AGENT_ACTIONS = ['http.check', 'browser.capture', 'browser.action', 'model.run', 'mcp.call'];
 const PAIRING_TTL_MS = 10 * 60000;
 const CLOCK_SKEW_MS = 5 * 60000;
 // How long a claimed task stays leased to the device. It is also how recently a
@@ -38,7 +38,7 @@ const signatureNonces = new Map(); // agentId -> Set of recently used signatures
 
 /** Kinds that are never run a second time. A browser action may already have
  * clicked; a model run has already spent the owner's subscription. */
-const ONCE_ONLY = ['browser.action', 'model.run'];
+const ONCE_ONLY = ['browser.action', 'model.run', 'mcp.call'];
 export const MODEL_RUN_TIMEOUT_MS = 180000;
 
 /** The canonical `model.run` payload: an engine, an optional model that cannot
@@ -61,6 +61,30 @@ export function validateModelRun(payload) {
     timeoutMs = Math.min(600000, Math.max(5000, Math.round(timeoutMs)));
   }
   return {engine: engine.id, model, instructions: p.instructions || '', input: p.input, timeoutMs};
+}
+
+/** The canonical `mcp.call` payload: the NAME of an MCP server configured on the agent's own machine, an
+ * operation and, for a call, a tool and its arguments. There is no command and no environment here: what runs
+ * is decided by the agent's config alone. Anything else the caller sent is dropped. */
+export function validateMcpCall(payload) {
+  const p = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
+  if (typeof p.server !== 'string' || !/^[A-Za-z0-9._-]{1,40}$/.test(p.server)) fail('An mcp.call task needs the name of a server configured on the agent (letters, digits . _ - only).', 400);
+  if (p.op !== 'list' && p.op !== 'call') fail('An mcp.call task is a list or a call.', 400);
+  const out = {server: p.server, op: p.op};
+  if (p.op === 'call') {
+    if (typeof p.tool !== 'string' || !/^[A-Za-z0-9_.:-]{1,128}$/.test(p.tool)) fail('A call needs a tool name.', 400);
+    const args = p.args === undefined ? {} : p.args;
+    if (!args || typeof args !== 'object' || Array.isArray(args)) fail('Tool arguments must be an object.', 400);
+    if (JSON.stringify(args).length > 100000) fail('The tool arguments are too long (100000 characters at most).', 400);
+    Object.assign(out, {tool: p.tool, args});
+  }
+  let timeoutMs = 30000;
+  if (p.timeoutMs !== undefined) {
+    timeoutMs = Number(p.timeoutMs);
+    if (!Number.isFinite(timeoutMs)) fail('The timeout must be a number of milliseconds.', 400);
+    timeoutMs = Math.min(120000, Math.max(2000, Math.round(timeoutMs)));
+  }
+  return {...out, timeoutMs};
 }
 
 const now = () => new Date().toISOString();
@@ -168,6 +192,7 @@ export function enqueueAgentTask(store, agentId, {kind, payload = {}, idempotenc
     payload = {url: request.url, steps: request.steps, ...(botId ? {botId} : {})};
   }
   if (kind === 'model.run') payload = validateModelRun(payload);
+  if (kind === 'mcp.call') payload = validateMcpCall(payload);
   const agent = store.get('SELECT * FROM agents WHERE id=?', agentId);
   if (!agent) fail('Agent not found.', 404);
   if (agent.revoked_at) fail('This agent has been revoked.', 409);
@@ -277,7 +302,7 @@ export function recoverAgentTasks(store, nowMs = Date.now(), {aliveMs = DEFAULT_
     rearmed++;
     if (ONCE_ONLY.includes(row.kind)) {
       store.run(`UPDATE agent_tasks SET status='failed', lease_until=NULL, error=?, updated_at=?, completed_at=? WHERE id=?`,
-        `The agent disconnected before completing. ${row.kind === 'model.run' ? 'Model runs' : 'Browser actions'} are not retried.`, now(), now(), row.id);
+        `The agent disconnected before completing. ${row.kind === 'model.run' ? 'Model runs' : row.kind === 'mcp.call' ? 'Connector calls' : 'Browser actions'} are not retried.`, now(), now(), row.id);
       continue;
     }
     store.run(`UPDATE agent_tasks SET status='queued', lease_until=NULL, error=?, updated_at=? WHERE id=?`,

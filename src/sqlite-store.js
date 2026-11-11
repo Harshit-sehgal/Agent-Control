@@ -541,6 +541,8 @@ export class SqliteStore {
       groupMessages: {}, groupRuns: [], chats: {},
       ai: (() => { try { return JSON.parse(this.kvGet('ai') || '{}'); } catch { return {}; } })(),
       browserRequests: (() => { try { return JSON.parse(this.kvGet('browser_requests') || '[]'); } catch { return []; } })(),
+      // Connectors hold no secret (those are vault credentials); like the provider list they stay out of backups.
+      connectors: (() => { try { return JSON.parse(this.kvGet('connectors') || '[]'); } catch { return []; } })(),
       // The runaway guard keeps its pause across a restart, so Pause all holds.
       guard: (() => { try { return {...freshGuard(), ...JSON.parse(this.kvGet('guard') || '{}')}; } catch { return freshGuard(); } })(),
       memory: readMemory(kind => this.db.prepare('SELECT key, doc FROM memory WHERE kind=? ORDER BY rowid').all(kind)),
@@ -620,6 +622,7 @@ export class SqliteStore {
       this.kvSet('created_at', state.createdAt || now());
       this.kvSet('ai', JSON.stringify(state.ai || {}));
       this.kvSet('browser_requests', JSON.stringify(state.browserRequests || []));
+      this.kvSet('connectors', JSON.stringify(state.connectors || []));
       this.kvSet('guard', JSON.stringify(state.guard || freshGuard()));
       this.stmt('INSERT INTO settings (id,retention) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET retention=excluded.retention')
         .run(state.settings?.retention ? JSON.stringify(state.settings.retention) : null);

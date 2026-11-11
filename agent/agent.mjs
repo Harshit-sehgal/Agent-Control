@@ -16,6 +16,8 @@
  * "model.run" runs the owner's own `claude` or `codex` CLI (agent/cli-model.mjs),
  * signed in on this machine, so a bot can use their subscription. The app never
  * sees that login.
+ * "mcp.call" starts a stdio MCP server named in this machine's config (`mcpServers`, see agent/mcp-stdio.mjs)
+ * and lists its tools or calls one. A task names the server; it never carries a command.
  * "browser.capture" reads a page on a host the operator explicitly allowlists
  * (AGENT_BROWSER_ALLOWLIST). By default that is a plain HTTP read. With
  * AGENT_BROWSER=1 the page is opened in the Chrome, Chromium or Edge installed
@@ -33,6 +35,7 @@ import crypto from 'node:crypto';
 import {createSharedBrowser, browserProfileDir, runBrowserTask} from './shared-browser.mjs';
 import {runModelTask} from './cli-model.mjs';
 import {cliStatusReporter} from './cli-status.mjs';
+import {runMcpTask} from './mcp-stdio.mjs';
 import {hostAllowed, hostOf, parseAllowlist} from '../shared/bot-browser.js';
 import {resolvePublicAddress, pinnedRequest} from './net-guard.mjs';
 
@@ -42,7 +45,7 @@ const CONFIG = process.env.AGENT_CONFIG ? path.resolve(process.env.AGENT_CONFIG)
 // does not narrow the list, is the only way to receive the admin's full scope:
 // the server intersects the request with the code and treats an empty list as
 // "grant nothing".
-const TASK_KINDS = ['http.check', 'browser.capture', 'browser.action', 'model.run'];
+const TASK_KINDS = ['http.check', 'browser.capture', 'browser.action', 'model.run', 'mcp.call'];
 // `Number('15s')` is NaN, `Number('')` is 0, and `Math.max(2000, NaN)` is NaN,
 // which `setTimeout` turns into a 1 ms loop: an unpaced heartbeat storm. A value
 // that is not a positive number is the default, not a spin.
@@ -178,6 +181,8 @@ async function execute(task, config) {
     // it is reported as a finished task and the server shows it in the chat.
     return runModelTask(task.payload);
   }
+  // A stdio MCP server named in this machine's config (`mcpServers`); the task never carries a command.
+  if (task.kind === 'mcp.call') return runMcpTask(task.payload, config.mcpServers);
   throw new Error(`Unknown task kind "${task.kind}".`);
 }
 

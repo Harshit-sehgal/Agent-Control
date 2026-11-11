@@ -47,6 +47,7 @@ import {workspaceRoutes} from '../src/routes-workspaces.js';
 import {pushRoutes} from '../src/routes-push.js';
 import {aiRoutes} from '../src/routes-ai.js';
 import {memoryRoutes} from '../src/routes-memory.js';
+import {connectorRoutes} from '../src/routes-connectors.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -54,7 +55,7 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const MODULES = [
   ['publicRoutes', publicRoutes], ['workflowRoutes', workflowRoutes], ['groupRoutes', groupRoutes],
   ['accountRoutes', accountRoutes], ['workspaceRoutes', workspaceRoutes], ['pushRoutes', pushRoutes],
-  ['aiRoutes', aiRoutes], ['memoryRoutes', memoryRoutes],
+  ['aiRoutes', aiRoutes], ['memoryRoutes', memoryRoutes], ['connectorRoutes', connectorRoutes],
 ];
 
 /** Registration must not need a live server. Anything a module reads from the
@@ -110,6 +111,10 @@ const LEAST_ROLE = {
   'DELETE /api/credentials/:id': 'admin',
   'PATCH /api/agents/:id': 'admin',
   'DELETE /api/agents/:id': 'admin',
+  // A connector is a way out of the app: only an admin adds, refreshes or removes one.
+  'POST /api/connectors': 'admin',
+  'POST /api/connectors/:id/refresh': 'admin',
+  'DELETE /api/connectors/:id': 'admin',
   'GET /api/admin/backup': 'owner',
   'POST /api/admin/restore': 'owner',
   'PATCH /api/workspaces/current': 'owner',
