@@ -18,6 +18,7 @@ import {BUSY_STATUSES} from './run-state.js';
 import {botSettings} from './bot-settings.js';
 import {denyBrowserRequest} from './bot-browser.js';
 import {answerAsk, expireAsks, orphanAsks, setGrant} from './asks.js';
+import {activityPage} from './activity-log.js';
 import {withLocalLock} from './locks.js';
 
 const KEY = 'agent-control-ghpages-v1';
@@ -228,7 +229,14 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
     for (const runId of lapsed.resumeRunIds) settleParkedRun(state, runId, lapsed.expired.find(a => a.runId === runId));
     save(state);
   }
-  if (path === '/api/state' && method === 'GET') return {...state, aiEnabled: false, serverTime: now()};
+  // The log is paged through /api/activity, not carried in the snapshot (same as the server).
+  if (path === '/api/state' && method === 'GET') { const {activity: _log, ...snapshot} = state; return {...snapshot, aiEnabled: false, serverTime: now()}; }
+  if (path.split('?')[0] === '/api/activity' && method === 'GET') {
+    const q = new URLSearchParams(path.split('?')[1] || '');
+    const limit = q.has('limit') ? Number(q.get('limit')) : undefined;
+    if (q.has('limit') && !Number.isFinite(limit)) throw Object.assign(new Error('Limit must be a number.'), {status: 400});
+    return activityPage(state, {filter: q.get('filter') || undefined, before: q.get('before') || null, limit, botId: q.get('bot') || null});
+  }
 
   let m;
   // A thread: a new chat run by the primary bot, started in one call like the server's.

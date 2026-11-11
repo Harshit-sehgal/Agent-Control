@@ -8,6 +8,7 @@ import * as notifications from './notifications.js';
 import {aiModel} from './ai.js';
 import {aiAvailable, publicAi} from './ai-providers.js';
 import {fail} from './http.js';
+import {activityPage} from '../shared/activity-log.js';
 import {reply, allows} from './router.js';
 
 const retentionSettings = s => ({...RETENTION_DEFAULTS, ...(s.settings?.retention || {})});
@@ -18,10 +19,21 @@ export function workflowRoutes(router, {auth}) {
     // The stored provider row holds the vault id and may carry a key inside a
     // pasted base URL. The snapshot the browser receives is metadata only.
     s.ai = publicAi(s);
+    // The log can be thousands of entries; the snapshot the browser polls leaves it out. GET /api/activity pages it.
+    delete s.activity;
     const hasSavedDefault = s.ai?.providers?.some(provider => provider.id === s.ai.defaultProviderId);
     const model = live ? (s.ai?.defaultModel || (hasSavedDefault ? 'auto' : aiModel())) : null;
     return {...s, aiEnabled: live, aiModel: model, me: {email: me.email, role: me.role}, workspaces: auth.listWorkspaces(me.userId).map(w => ({...w, current: w.id === me.workspaceId})), canCreateWorkspace: auth.roleOf(me.userId) === 'owner', retention: retentionSettings(s),
       notifications: notifications.listNotifications(c.store, me.userId, 50), unread: notifications.unreadCount(c.store, me.userId), serverTime: new Date().toISOString()};
+  });
+  // The activity log, a page at a time: ?filter=outside|perm|bots|all (default outside, "Left the app"),
+  // ?before=<entry id> for older entries, ?limit= and ?bot=<bot id> for one profile's own section.
+  // Read only: nothing edits or deletes an entry.
+  router.add('GET', '/api/activity', 'viewer', c => {
+    const q = new URL(c.req.url, 'http://local').searchParams;
+    const limit = q.has('limit') ? Number(q.get('limit')) : undefined;
+    if (q.has('limit') && !Number.isFinite(limit)) fail('Limit must be a number.');
+    return activityPage(c.store.read(), {filter: q.get('filter') || undefined, before: q.get('before') || null, limit, botId: q.get('bot') || null});
   });
   // Structured task queue: the same records the internal worker executes.
   router.add('POST', '/api/tasks', 'member', async c => {

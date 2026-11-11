@@ -8,11 +8,12 @@
  * permission. It changes `state` in place, so the caller wraps it in its own
  * write (a store update, or the demo's state object).
  */
-import {activity} from './core.js?v=fbba8d53f7';
-import {isLead, managerOf, companyBots} from './company.js?v=fbba8d53f7';
-import {noteBotWork} from './runaway.js?v=fbba8d53f7';
-import {TINT_COUNT} from './ui-kit.js?v=fbba8d53f7';
-import {MAX_BOTS_PER_GROUP, buildCreatedBot, nameFromSentence, firstUnusedTint} from './bot-create.js?v=fbba8d53f7';
+import {activity} from './core.js?v=88aa35d78f';
+import {logActivity} from './activity-log.js?v=88aa35d78f';
+import {isLead, managerOf, companyBots} from './company.js?v=88aa35d78f';
+import {noteBotWork} from './runaway.js?v=88aa35d78f';
+import {TINT_COUNT} from './ui-kit.js?v=88aa35d78f';
+import {MAX_BOTS_PER_GROUP, buildCreatedBot, nameFromSentence, firstUnusedTint} from './bot-create.js?v=88aa35d78f';
 
 /** `{record, groupName}` for the bot that was added, or `{refused}` with the
  * reason, in words that follow "tried to create a new bot, but". */
@@ -38,5 +39,6 @@ export function addCreatedBot(state, {bot, groupId, request, runId = null, now =
     group.settings.pipeline = [...group.settings.pipeline, record.id].slice(0, MAX_BOTS_PER_GROUP);
   }
   activity(state, 'bot', `${bot.name} created ${record.name}.`, {botId: record.id, runId});
+  logActivity(state, {botId: record.id, kind: 'bots', text: `${bot.name} created ${record.name}.`, now});
   return {record, groupName: group.name};
 }

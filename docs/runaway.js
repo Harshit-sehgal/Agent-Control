@@ -11,9 +11,10 @@
  * window is a fixed five minutes from `since`; a quiet window starts the count
  * over. Pure and browser-safe: the server and the Pages demo share it.
  */
-import {activity} from './core.js?v=fbba8d53f7';
-import {addChatMessages} from './chats.js?v=fbba8d53f7';
-import {primaryOf} from './company.js?v=fbba8d53f7';
+import {activity} from './core.js?v=88aa35d78f';
+import {logActivity} from './activity-log.js?v=88aa35d78f';
+import {addChatMessages} from './chats.js?v=88aa35d78f';
+import {primaryOf} from './company.js?v=88aa35d78f';
 
 export const GUARD = {windowMs: 300000, creations: 50, runs: 300};
 
@@ -46,6 +47,7 @@ export function noteBotWork(state, kind, now = new Date().toISOString()) {
     Object.assign(g, {paused: true, pausedAt: now});
     say(state, g, `Bots were very busy: ${g.runs} runs and ${g.creations} new bots in 5 minutes. Everything bots started is paused.`);
     activity(state, 'bot', 'Bots were paused: they were very busy.', {runs: g.runs, creations: g.creations});
+    logActivity(state, {kind: 'bots', text: 'Bots were paused: they were very busy.', now});
     return {paused: true};
   }
   return {paused: false};
@@ -57,6 +59,7 @@ export function pauseAll(state, now = new Date().toISOString()) {
   if (g.paused) return g;
   Object.assign(g, {paused: true, pausedAt: now});
   activity(state, 'bot', 'Paused all bots.');
+  logActivity(state, {kind: 'bots', text: 'All bots were paused.', now});
   return g;
 }
 
@@ -65,6 +68,6 @@ export function resumeGuard(state, now = new Date().toISOString()) {
   const g = guardOf(state);
   const was = g.paused;
   Object.assign(g, {...freshGuard(), since: now});
-  if (was) activity(state, 'bot', 'Resumed all bots.');
+  if (was) { activity(state, 'bot', 'Resumed all bots.'); logActivity(state, {kind: 'bots', text: 'All bots were resumed.', now}); }
   return g;
 }

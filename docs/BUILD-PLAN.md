@@ -210,6 +210,7 @@ work should be added as a fresh section.
   - [x] X database tables dropped in schema v11; old backups still restore
 - [ ] One primary bot at first sign-in; bots can exist without a group; any bot creates bots
 - [x] (Phase 2, backend) Company model, threads run by Atlas, leads route to their team, out-of-job replies, any bot asks any bot behind checkpoints, any bot makes a bot behind the runaway guard, per-bot memory with a company notebook; the Pages demo runs the same company offline with canned replies (`shared/offline-bots.js`) through the same shared rules
+- [x] (Phase 3, backend) The ask mechanism: ask records and per-bot grants (`shared/asks.js`, schema v12, backups), runs park as `awaiting_ask` and go on at the owner's answer (`POST /api/asks/:id`, `POST /api/grants`, Pages twins; the old browser approve/deny are aliases), sends, posts, deletes and payments classified from the click, and an append-only activity log (`shared/activity-log.js`, `GET /api/activity`)
 - [ ] One Ask card (Decline / Allow / Always allow for this bot) replaces per-bot permission toggles
 - [ ] Bots on the owner's Claude and ChatGPT subscriptions through the local agent
 - [ ] One shared browser for all bots, with takeover from the app

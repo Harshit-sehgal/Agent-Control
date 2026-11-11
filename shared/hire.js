@@ -9,6 +9,7 @@
  * write (a store update, or the demo's state object).
  */
 import {activity} from './core.js';
+import {logActivity} from './activity-log.js';
 import {isLead, managerOf, companyBots} from './company.js';
 import {noteBotWork} from './runaway.js';
 import {TINT_COUNT} from './ui-kit.js';
@@ -38,5 +39,6 @@ export function addCreatedBot(state, {bot, groupId, request, runId = null, now =
     group.settings.pipeline = [...group.settings.pipeline, record.id].slice(0, MAX_BOTS_PER_GROUP);
   }
   activity(state, 'bot', `${bot.name} created ${record.name}.`, {botId: record.id, runId});
+  logActivity(state, {botId: record.id, kind: 'bots', text: `${bot.name} created ${record.name}.`, now});
   return {record, groupName: group.name};
 }

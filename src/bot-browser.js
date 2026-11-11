@@ -13,7 +13,8 @@ import {browserRuntime} from './browser-runtime.js';
 import {fail} from '../shared/errors.js';
 import {addChatMessages} from '../shared/chats.js';
 import {activity, cleanText} from '../shared/core.js';
-import {browserResultText, capturePageText, MAX_BROWSER_DEPTH} from '../shared/bot-browser.js';
+import {browserResultText, capturePageText, hostOf, MAX_BROWSER_DEPTH} from '../shared/bot-browser.js';
+import {logActivity} from '../shared/activity-log.js';
 
 const stamp = () => new Date().toISOString();
 const say = (s, key, text) => { try { addChatMessages(s, key, [{role: 'system', kind: 'browser-result', text}], {trusted: true}); } catch { /* Conversation removed. */ } };
@@ -49,6 +50,9 @@ export async function dispatchBrowserRequest(store, id, {actor = null, runtime =
     const live = (s.browserRequests || []).find(r => r.id === id);
     if (!live || live.status !== 'pending') fail(live ? 'This browser request is no longer waiting.' : 'Browser request not found.', live ? 409 : 404);
     live.status = 'dispatched'; live.approvedBy = actor || 'auto'; live.via = here ? 'server' : 'agent'; live.updatedAt = stamp();
+    // Sending the page out is the moment it leaves the app. A page nobody opened (declined, stopped) is never logged.
+    const n = (live.steps || []).length;
+    logActivity(s, {botId: live.botId, kind: 'outside', text: `${live.botName} ${n ? 'used' : 'read'} ${hostOf(live.url) || live.url}${n ? ` (${n} step${n === 1 ? '' : 's'})` : ''}.`, threadId: live.chatKey});
     return live;
   });
   // The server has the browser: run it in the background, so the approve
@@ -217,6 +221,8 @@ export async function handBackTakeover(store, sessionId, {runtime = browserRunti
     engine: 'browser', capturedAt: stamp(),
   };
   const done = await finishBrowserRequest(store, request, {ok: true, result});
+  // The owner signed in and the bot was handed what they reached: that left the app too.
+  await store.update(s => logActivity(s, {botId: request.botId, kind: 'outside', text: `${request.botName} was handed ${hostOf(url) || url} after you signed in.`, threadId: request.chatKey}));
   return {handedBack: true, requestId, request: done, page};
 }
 

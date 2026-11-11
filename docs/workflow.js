@@ -5,20 +5,21 @@
  * They throw errors carrying an HTTP `status` so the same rules apply to the
  * Node HTTP routes and to any browser-local transport.
  */
-import {activity,cleanText} from './core.js?v=fbba8d53f7';
-import {fail} from './errors.js?v=fbba8d53f7';
-import {cancelTask} from './tasks.js?v=fbba8d53f7';
-import {normalizeRetention} from './retention.js?v=fbba8d53f7';
-import * as contracts from './contracts.js?v=fbba8d53f7';
-import {pruneChats, releaseChatWork} from './chats.js?v=fbba8d53f7';
-import {denyBrowserRequest} from './bot-browser.js?v=fbba8d53f7';
-import {BUSY_STATUSES} from './coordination.js?v=fbba8d53f7';
-import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=fbba8d53f7';
-import {memoryState} from './memory.js?v=fbba8d53f7';
-import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=fbba8d53f7';
-import {freshGuard} from './runaway.js?v=fbba8d53f7';
-import {sweepGrants, forgetBotAsks, lapseOrphans} from './asks.js?v=fbba8d53f7';
-import {assertManager, releaseReports, PRIMARY_GROUP} from './company.js?v=fbba8d53f7';
+import {activity,cleanText} from './core.js?v=88aa35d78f';
+import {fail} from './errors.js?v=88aa35d78f';
+import {cancelTask} from './tasks.js?v=88aa35d78f';
+import {normalizeRetention} from './retention.js?v=88aa35d78f';
+import * as contracts from './contracts.js?v=88aa35d78f';
+import {pruneChats, releaseChatWork} from './chats.js?v=88aa35d78f';
+import {denyBrowserRequest} from './bot-browser.js?v=88aa35d78f';
+import {BUSY_STATUSES} from './coordination.js?v=88aa35d78f';
+import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=88aa35d78f';
+import {memoryState} from './memory.js?v=88aa35d78f';
+import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=88aa35d78f';
+import {freshGuard} from './runaway.js?v=88aa35d78f';
+import {sweepGrants, forgetBotAsks, lapseOrphans} from './asks.js?v=88aa35d78f';
+import {assertManager, releaseReports, companyBots, PRIMARY_GROUP} from './company.js?v=88aa35d78f';
+import {logActivity} from './activity-log.js?v=88aa35d78f';
 
 export const SCHEMA_VERSION = 3;
 
@@ -123,6 +124,7 @@ export function addBot(state, groupId, body) {
   g.bots.push(bot);
   if (bot.settings?.lead) for (const other of g.bots) if (other !== bot && other.settings?.lead) other.settings = {...other.settings, lead: false};
   activity(state, 'bot', `Created bot ${name}.`);
+  logActivity(state, {botId: bot.id, kind: 'bots', text: `${name} was created.`});
   return bot;
 }
 
@@ -147,9 +149,16 @@ export function updateBot(state, groupId, botId, body) {
   if (settings && settings.reportsTo !== (bot.settings?.reportsTo ?? null)) assertManager(state, bot.id, settings.reportsTo);
   if (body.contract !== undefined) bot.contract = contracts.validateContract(body.contract);
   if (body.permissions !== undefined) bot.permissions = contracts.validatePermissions(body.permissions);
+  const wasOn = bot.settings?.enabled !== false, wasUnder = bot.settings?.reportsTo ?? null;
   bot.name = name;
   bot.instructions = instructions;
   if (settings) bot.settings = settings;
+  // Moved, paused and resumed are events the owner may need to find; a rename or an edit is not.
+  if (settings && (settings.reportsTo ?? null) !== wasUnder) {
+    const boss = settings.reportsTo ? companyBots(state).find(b => b.id === settings.reportsTo)?.name : null;
+    logActivity(state, {botId: bot.id, kind: 'bots', text: boss ? `${name} now reports to ${boss}.` : `${name} now works on its own.`});
+  }
+  if (settings && (settings.enabled !== false) !== wasOn) logActivity(state, {botId: bot.id, kind: 'bots', text: `${name} was ${wasOn ? 'paused' : 'resumed'}.`});
   if (bot.settings?.lead) for (const other of g.bots) if (other !== bot && other.settings?.lead) other.settings = {...other.settings, lead: false};
   activity(state, 'bot', `Updated bot ${name}.`);
   return bot;
@@ -222,6 +231,7 @@ export function removeBot(state, groupId, botId) {
   forgetBot(state, botId);
   cancelBotTasks(state, p => p.botId === botId);
   activity(state, 'bot', `Removed bot ${bot.name}.`);
+  logActivity(state, {botId: botId, kind: 'bots', text: `${bot.name} was deleted.`});
   return {ok: true};
 }
 
@@ -242,6 +252,7 @@ export function removeGroup(state, groupId) {
     run.updatedAt = now;
   }
   cancelBotTasks(state, p => p.groupId === groupId);
+  for (const b of g.bots) logActivity(state, {botId: b.id, kind: 'bots', text: `${b.name} was deleted.`});
   activity(state, 'group', `Removed group ${g.name}.`);
   return {ok: true};
 }

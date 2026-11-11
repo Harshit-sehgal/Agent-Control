@@ -16,15 +16,15 @@
  *   ui-dialogs      toast, sheet, confirm/ask      ui-actions action/form tables
  *   ui-fx           confetti and the send arrow
  */
-import {companyRoute} from './ui-company.js?v=fbba8d53f7';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, isAdmin, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=fbba8d53f7';
-import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=fbba8d53f7';
-import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, closeSearch, homeView, placeholderView} from './ui-shell.js?v=fbba8d53f7';
-import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=fbba8d53f7';
-import {renderPage} from './ui-panel.js?v=fbba8d53f7';
-import {showLogin, hideLogin} from './ui-sheets.js?v=fbba8d53f7';
-import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=fbba8d53f7';
-import {bringBotsToLife} from './ui-fx.js?v=fbba8d53f7';
+import {companyRoute} from './ui-company.js?v=88aa35d78f';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, isAdmin, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=88aa35d78f';
+import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=88aa35d78f';
+import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, closeSearch, homeView, placeholderView} from './ui-shell.js?v=88aa35d78f';
+import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=88aa35d78f';
+import {renderPage} from './ui-panel.js?v=88aa35d78f';
+import {showLogin, hideLogin} from './ui-sheets.js?v=88aa35d78f';
+import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=88aa35d78f';
+import {bringBotsToLife} from './ui-fx.js?v=88aa35d78f';
 
 const el = id => document.getElementById(id);
 const hashRoute = () => normalizeRoute(companyRoute(location.hash, store.state));

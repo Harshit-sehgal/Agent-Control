@@ -19,8 +19,9 @@
  * Pure and browser-safe, like the other shared modules: the server and the
  * Pages demo share every rule here.
  */
-import {fail} from './errors.js?v=fbba8d53f7';
-import {cleanText} from './core.js?v=fbba8d53f7';
+import {fail} from './errors.js?v=88aa35d78f';
+import {cleanText} from './core.js?v=88aa35d78f';
+import {logActivity} from './activity-log.js?v=88aa35d78f';
 
 /** What every bot may do without a grant. */
 export const BASIC_KIT = ['bot.ask', 'bot.create', 'schedule.set'];
@@ -59,6 +60,21 @@ export function scopeOf({action, target} = {}) {
   return '';
 }
 
+const botNameOf = (state, id) => (state.groups || []).flatMap(g => g.bots || []).find(b => b.id === id)?.name || 'A bot';
+/** What a grant lets a bot do, as the end of a sentence. */
+function verbOf(action, scope) {
+  if (action === 'browser.use') return `open ${scope.replace(/^https?:\/\//, '')}`;
+  if (action === 'spend') return 'spend money';
+  const connector = CONNECTOR.exec(action);
+  if (connector) return `${connector[2]} ${connector[1]}${scope ? ` (${scope})` : ''}`;
+  return action;
+}
+/** The log's sentence for a grant change. */
+const grantSentence = (name, action, scope, choice) => {
+  const verb = verbOf(action, scope);
+  return choice === 'always' ? `${name} is always allowed to ${verb}.` : choice === 'deny' ? `${name} is not allowed to ${verb}.` : `${name} will ask you each time to ${verb}.`;
+};
+
 const sameGrant = (g, botId, action, scope) => g?.botId === botId && g.action === action && g.scope === scope;
 
 /** What the owner has said about this bot doing this: 'always', 'ask', 'deny', or null for nothing yet.
@@ -75,7 +91,7 @@ export const grantsOf = (state, botId) => (state.grants || []).filter(g => g?.bo
 
 /** Set one grant, replacing the same key. Refuses Always allow for a payment, an action that is not
  * asked about, a browser grant with no site and a connector grant with no account. */
-export function setGrant(state, botId, action, scope, choice, now = iso()) {
+export function setGrant(state, botId, action, scope, choice, now = iso(), {log = true, threadId = null} = {}) {
   if (!isAskAction(action)) fail(`"${String(action ?? '').slice(0, 60)}" is not something a bot asks about.`);
   if (!GRANT_CHOICES.includes(choice)) fail('Choose always, ask or deny.');
   if (action === 'spend' && choice === 'always') fail('A payment is asked every time. Choose Ask each time or Deny.');
@@ -87,6 +103,7 @@ export function setGrant(state, botId, action, scope, choice, now = iso()) {
   const found = state.grants.find(g => sameGrant(g, botId, action, where));
   if (found) Object.assign(found, {choice, at: now});
   else state.grants.push({botId, action, scope: where, choice, at: now});
+  if (log) logActivity(state, {botId, kind: 'perm', text: grantSentence(botNameOf(state, botId), action, where, choice), threadId, now});
   return state.grants.find(g => sameGrant(g, botId, action, where));
 }
 
@@ -166,8 +183,9 @@ export function answerAsk(state, askId, answer, now = iso()) {
   ask.answeredAt = now;
   delete ask.expiresAt;
   if (answer === 'always' && botIds(state).has(ask.botId)) {
-    setGrant(state, ask.botId, ask.action, ask.grantScope, 'always', now);
-    for (const extra of ask.implies || []) if (extra.action !== 'spend') setGrant(state, ask.botId, extra.action, extra.scope, 'always', now);
+    // One entry for the answer, in the chat it was asked in; what the same request also covered is not a second event.
+    setGrant(state, ask.botId, ask.action, ask.grantScope, 'always', now, {threadId: ask.chatKey});
+    for (const extra of ask.implies || []) if (extra.action !== 'spend') setGrant(state, ask.botId, extra.action, extra.scope, 'always', now, {log: false});
   }
   const run = parked(state, ask.runId);
   return {ask, resumeRunId: run && !holds(state, ask) ? run.id : null};

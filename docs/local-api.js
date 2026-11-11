@@ -4,21 +4,22 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {initialState, cleanText} from './core.js?v=fbba8d53f7';
-import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=fbba8d53f7';
-import {RETENTION_DEFAULTS} from './retention.js?v=fbba8d53f7';
-import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=fbba8d53f7';
-import {addChatMessages, clearChat} from './chats.js?v=fbba8d53f7';
-import {publicMemory, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=fbba8d53f7';
-import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=fbba8d53f7';
-import {createThread, titleFrom} from './threads.js?v=fbba8d53f7';
-import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=fbba8d53f7';
-import {simulateGroup} from './group-simulator.js?v=fbba8d53f7';
-import {BUSY_STATUSES} from './run-state.js?v=fbba8d53f7';
-import {botSettings} from './bot-settings.js?v=fbba8d53f7';
-import {denyBrowserRequest} from './bot-browser.js?v=fbba8d53f7';
-import {answerAsk, expireAsks, orphanAsks, setGrant} from './asks.js?v=fbba8d53f7';
-import {withLocalLock} from './locks.js?v=fbba8d53f7';
+import {initialState, cleanText} from './core.js?v=88aa35d78f';
+import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=88aa35d78f';
+import {RETENTION_DEFAULTS} from './retention.js?v=88aa35d78f';
+import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=88aa35d78f';
+import {addChatMessages, clearChat} from './chats.js?v=88aa35d78f';
+import {publicMemory, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=88aa35d78f';
+import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=88aa35d78f';
+import {createThread, titleFrom} from './threads.js?v=88aa35d78f';
+import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=88aa35d78f';
+import {simulateGroup} from './group-simulator.js?v=88aa35d78f';
+import {BUSY_STATUSES} from './run-state.js?v=88aa35d78f';
+import {botSettings} from './bot-settings.js?v=88aa35d78f';
+import {denyBrowserRequest} from './bot-browser.js?v=88aa35d78f';
+import {answerAsk, expireAsks, orphanAsks, setGrant} from './asks.js?v=88aa35d78f';
+import {activityPage} from './activity-log.js?v=88aa35d78f';
+import {withLocalLock} from './locks.js?v=88aa35d78f';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
@@ -228,7 +229,14 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
     for (const runId of lapsed.resumeRunIds) settleParkedRun(state, runId, lapsed.expired.find(a => a.runId === runId));
     save(state);
   }
-  if (path === '/api/state' && method === 'GET') return {...state, aiEnabled: false, serverTime: now()};
+  // The log is paged through /api/activity, not carried in the snapshot (same as the server).
+  if (path === '/api/state' && method === 'GET') { const {activity: _log, ...snapshot} = state; return {...snapshot, aiEnabled: false, serverTime: now()}; }
+  if (path.split('?')[0] === '/api/activity' && method === 'GET') {
+    const q = new URLSearchParams(path.split('?')[1] || '');
+    const limit = q.has('limit') ? Number(q.get('limit')) : undefined;
+    if (q.has('limit') && !Number.isFinite(limit)) throw Object.assign(new Error('Limit must be a number.'), {status: 400});
+    return activityPage(state, {filter: q.get('filter') || undefined, before: q.get('before') || null, limit, botId: q.get('bot') || null});
+  }
 
   let m;
   // A thread: a new chat run by the primary bot, started in one call like the server's.

@@ -53,6 +53,12 @@ export function pruneState(state, {now = Date.now(), dryRun = false, policy} = {
     report.events = state.events.length - keep.length;
     if (!dryRun) state.events = keep;
   }
+  // The activity log is pruned with events: same window, counted with them.
+  if (eventCutoff && Array.isArray(state.activity)) {
+    const keep = state.activity.filter(a => happenedAt(a, ['at'], now) >= Date.parse(eventCutoff));
+    report.events += state.activity.length - keep.length;
+    if (!dryRun) state.activity = keep;
+  }
   if (taskCutoff) {
     const keep = state.tasks.filter(t => !(['done', 'failed', 'cancelled'].includes(t.status) && happenedAt(t, ['completedAt', 'updatedAt'], now) < Date.parse(taskCutoff)));
     report.doneTasks = state.tasks.length - keep.length;

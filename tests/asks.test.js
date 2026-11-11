@@ -286,8 +286,8 @@ test('schema v12: asks, grants and the activity log are stored, and survive a re
   const t = await sandbox();
   try {
     const {id} = (await t.store.update(s => {
-      setGrant(s, 'atlas', 'browser.use', 'https://a.com', 'always', NOW);
-      setGrant(s, 'atlas', 'send', '', 'deny', NOW);
+      setGrant(s, 'atlas', 'browser.use', 'https://a.com', 'always', NOW, {log: false});
+      setGrant(s, 'atlas', 'send', '', 'deny', NOW, {log: false});
       const ask = createAsk(s, {botId: 'atlas', runId: 'r1', chatKey: 'atlas', action: 'delete', target: 'x', detail: 'delete it', unattended: true, now: NOW, makeId: mk});
       s.activity.push({id: 'act-1', at: NOW, botId: 'atlas', kind: 'perm', text: 'Atlas may browse a.com', threadId: 'atlas', undoUntil: null});
       return ask;
@@ -315,7 +315,7 @@ test('backup: the new tables travel, restore, and a grant for a missing bot is i
   const t = await sandbox();
   try {
     await t.store.update(s => {
-      setGrant(s, 'atlas', 'post', '', 'always', NOW);
+      setGrant(s, 'atlas', 'post', '', 'always', NOW, {log: false});
       createAsk(s, {botId: 'atlas', runId: null, chatKey: 'atlas', action: 'send', target: 'x', now: NOW, makeId: mk});
       s.activity.push({id: 'act-1', at: NOW, botId: 'atlas', kind: 'bots', text: 'Atlas was created', threadId: null, undoUntil: null});
     });
