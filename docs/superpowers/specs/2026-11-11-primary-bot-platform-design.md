@@ -76,7 +76,7 @@ This section wins over anything below about threads, routing or help between bot
   - each bot replies to Atlas in the thread;
   - Atlas reports the final output to the owner.
   - Follow-up messages in a thread go to Atlas again. The owner does not pick bots in a thread (no @ there); Atlas does.
-- **What the chat shows.** Every handoff is a visible pair of lines, "Atlas to Planner: …" and "Planner to Atlas: …". The lead's own reply comes last, naming whose replies it used. Permission asks appear at the step where the bot needs them.
+- **What the chat shows** (mock v40). While work is under way, the handoffs do not stack up. One status line keeps updating in place, showing the face of whoever is active: "Atlas is working out who does what", "Asking Mailroom: …", "Mailroom is on it", "Mailroom: Two. Northwind wants…", "Planner needs your OK", "Atlas is putting it together". When the work ends, that line folds into one summary, "Atlas worked with Mailroom and Planner", with the faces overlapped. Tapping it opens the full list of handoffs in order. The lead's reply comes after it and names whose replies it used. Permission asks appear as their own card when a bot needs one.
 - **Lists stay separate.** The Threads section lists only threads, never bot chats. Bot rows preview only their own chat. Back from a bot chat goes to Bots; back from a thread goes to Threads. The thread header says "Atlas runs this thread". A bot chat's header says "One continuous chat", "Hands work to its team" or "Hands work to any bot".
 - **Cost.** Routing is still one planning call by the lead (from names and jobs), not a broadcast. Bots outside the plan never see the message.
 
