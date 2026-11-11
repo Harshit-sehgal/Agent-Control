@@ -122,7 +122,7 @@ test('the envelope tells only a permitted bot about the browser tool', () => {
   const group = {id: 'g', name: 'G', bots: [browserBot(), {id: 'plain', name: 'Plain', instructions: 'x', type: 'custom'}]};
   const run = createRun({group, message: '@Web @Plain go', makeId: () => 'r'});
   assert.match(createEnvelope({run, bot: group.bots[0]}).tools.browser, /browser/);
-  assert.equal(createEnvelope({run, bot: group.bots[1]}).tools, undefined);
+  assert.equal(createEnvelope({run, bot: group.bots[1]}).tools.browser, undefined);
   assert.match(browserResultText({botName: 'Web', url: 'https://example.com'}, {title: 'Example', finalUrl: 'https://example.com/', actions: [{op: 'read', ok: true, text: 'Hello'}]}), /Browser result for Web: Example · https:\/\/example\.com\/\n\nHello/);
 });
 

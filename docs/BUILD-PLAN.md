@@ -153,7 +153,8 @@ work should be added as a fresh section.
 - [x] `bot.ask` permission on any bot; envelope and system prompt describe the block only to bots holding it
 - [x] Fenced `ask` blocks validated (`shared/bot-link.js`): one per reply, JSON only, capped question length
 - [x] The teammate answers as itself on its own model and rulebook, with no tools; the asker gets one more turn with the answer marked as untrusted text
-- [x] One round deep: the teammate's reply is never parsed for another ask; refused, missing or failed asks never lose the asker's reply
+- [x] Refused, missing or failed asks never lose the asker's reply
+- [x] (Phase 2) Any bot asks any bot, no grant needed (`bot.ask` is basic kit); the asked bot may ask on. Checkpoints, not walls: 6 bots deep, 12 messages per pair, 60 per task, or one question three times with no new answer pauses the run (`awaiting_limit`) with Keep going / Keep going, don't ask again / Stop (`shared/ask-limits.js`)
 - [x] Started/answered/refused lines in the chat, and asks kept on the run record
 - [x] A control block in a teammate's answer is stripped before the asker sees it; hand-offs switched off for the group refuse the ask without costing the reply
 - [x] Tests (`tests/bot-link.test.js`); check, test and build:pages green

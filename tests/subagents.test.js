@@ -133,7 +133,8 @@ test('the envelope describes the tool only to a bot that holds it', () => {
   assert.match(withTool.tools.subagent, /spawn/);
   assert.equal(withTool.tools.browser, undefined);
   assert.ok(withTool.restrictions.some(line => /sub-agent is help with thinking/.test(line)));
-  assert.equal(without.tools, undefined);
+  assert.equal(without.tools.subagent, undefined);
+  assert.ok(without.tools.ask, 'the ask tool is basic kit, so every bot is told about it');
   assert.equal(without.restrictions.some(line => /sub-agent/.test(line)), false);
 });
 

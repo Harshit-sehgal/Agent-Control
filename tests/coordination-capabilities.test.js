@@ -73,8 +73,10 @@ test('a group step runs one peer-ask round and records it on the run', async () 
     const state = store.read();
     const run = state.groupRuns.find(r => r.id === 'run-ask');
     assert.equal(run.status, 'completed');
-    assert.equal(run.trace.length, 1);
-    assert.equal(run.trace[0].output, 'The final post, with Source X.');
+    const steps = run.trace.filter(step => !step.kind);
+    assert.equal(steps.length, 1, 'the ask and its answer are trace entries, not steps');
+    assert.deepEqual(run.trace.filter(step => step.kind).map(step => step.kind), ['ask', 'peer']);
+    assert.equal(steps[0].output, 'The final post, with Source X.');
     assert.equal(run.peerAsks.length, 1);
     assert.equal(run.peerAsks[0].botId, 'writer');
     assert.equal(run.peerAsks[0].output, 'Source X supports the claim.');

@@ -8,10 +8,11 @@ import {botSettings, threadContext} from '../shared/bot-settings.js';
 import {createThread, titleFrom} from '../shared/threads.js';
 import {executeCustomBot} from './ai.js';
 import {resolveConfig} from './ai-providers.js';
-import {queueGroupRun, resumeGroupRun, resumeBrowserRun, decidePlan, cancelRun, coordinationState, summonableGuests} from './coordination.js';
+import {queueGroupRun, resumeGroupRun, resumeBrowserRun, decidePlan, cancelRun, coordinationState} from './coordination.js';
 import {recordBrowserRequests, denyBrowserRequest, BROWSER_PERMISSION, BROWSER_TOOL_HINT} from '../shared/bot-browser.js';
 import {SUBAGENT_PERMISSION, SUBAGENT_TOOL_HINT} from '../shared/subagents.js';
-import {BOT_ASK_PERMISSION, BOT_ASK_TOOL_HINT} from '../shared/bot-link.js';
+import {BOT_ASK_TOOL_HINT, companyList} from '../shared/bot-link.js';
+import {companyBots} from '../shared/company.js';
 import {BOT_CREATE_PERMISSION, BOT_CREATE_TOOL_HINT} from '../shared/bot-create.js';
 import {memoryBlock} from '../shared/memory.js';
 import {runBotTurn} from './bot-turn.js';
@@ -71,18 +72,20 @@ async function runOneBotInner(store, {botId, input, page = '', browserDepth = 0}
   if (!botSettings(bot).enabled) fail(`${bot.name} is switched off. Turn it on in its profile.`, 409);
   if (!input) fail('Provide task input.');
   const group = state.groups.find(g => g.bots.some(x => x.id === bot.id));
-  const roster = [...(group?.bots || []), ...summonableGuests(state.groups, group?.id || '')];
+  // Any bot may ask any bot, so the roster is the whole company.
+  const roster = companyBots(state);
   const grants = Array.isArray(bot.permissions) ? bot.permissions : [];
   const tools = {
     ...(grants.includes(BROWSER_PERMISSION) ? {browser: BROWSER_TOOL_HINT} : {}),
     ...(grants.includes(SUBAGENT_PERMISSION) ? {subagent: SUBAGENT_TOOL_HINT} : {}),
-    ...(grants.includes(BOT_ASK_PERMISSION) ? {ask: BOT_ASK_TOOL_HINT} : {}),
+    ...(botSettings(bot).canHandoff ? {ask: BOT_ASK_TOOL_HINT} : {}),
     ...(grants.includes(BOT_CREATE_PERMISSION) ? {createBot: BOT_CREATE_TOOL_HINT} : {}),
   };
   const config = resolveConfig(store, bot.id);
   const memory = memoryFor(store, {bot, config, chatKey: bot.id});
   const notes = memoryBlock(memory);
-  const envelope = {message: input, thread: threadContext(state.chats?.[bot.id], botSettings(bot).contextMessages), ...(notes ? {memory: notes} : {}), ...(Object.keys(tools).length ? {tools} : {})};
+  const everyone = botSettings(bot).canHandoff ? companyList(roster, bot.id) : [];
+  const envelope = {message: input, thread: threadContext(state.chats?.[bot.id], botSettings(bot).contextMessages), ...(everyone.length ? {company: everyone} : {}), ...(notes ? {memory: notes} : {}), ...(Object.keys(tools).length ? {tools} : {})};
   // The same guard a group step carries: a recap and a rulebook are notes the
   // model reads, never a second set of instructions.
   const restrictions = [
@@ -173,8 +176,13 @@ export function groupRoutes(router) {
     if (!run || run.groupId !== c.params.group) fail('Run not found.', 404);
     return run;
   };
-  // Approve the next handoff of a run paused at a human checkpoint.
-  router.add('POST', '/api/groups/:group/runs/:run/continue', 'member', async c => { ownRun(c); return reply(202, await resumeGroupRun(c.store, c.params.run)); });
+  // Approve the next handoff of a run paused at a human checkpoint, or answer a
+  // bot-to-bot limit: {choice: 'more' | 'unlimited' | 'stop'}.
+  router.add('POST', '/api/groups/:group/runs/:run/continue', 'member', async c => {
+    ownRun(c);
+    const b = await c.body().catch(() => ({}));
+    return reply(202, await resumeGroupRun(c.store, c.params.run, undefined, {choice: typeof b?.choice === 'string' ? b.choice : undefined}));
+  });
   // Stop a run: a start, a step in flight, or a pause. The flip is read between
   // steps, so it stops the next handoff rather than a model call already sent.
   router.add('POST', '/api/groups/:group/runs/:run/cancel', 'member', async c => { ownRun(c); return reply(202, await cancelRun(c.store, c.params.run, {actor: c.actor.email})); });

@@ -7,7 +7,8 @@
 import {randomUUID} from 'node:crypto';
 import {createRun,createEnvelope,runNote,planHandoffs,handoffTargets,instructLead,wakeBots,assessTask,summonableGuests,mayHandoff,chatKeyFor,chatIsBusy,rosterFor,previousFor,enlist,MAX_HANDOFFS,INTERRUPT_STATUSES as INTERRUPT} from '../shared/coordination.js';
 import {isThread,noteMember} from '../shared/threads.js';
-import {isLead} from '../shared/company.js';
+import {isLead,companyBots} from '../shared/company.js';
+import {extendLimits} from '../shared/ask-limits.js';
 import {parseOffJob,offJobMessage} from '../shared/off-job.js';
 import {STOPPABLE_STATUSES} from '../shared/run-state.js';
 import {botSettings,groupSettings,threadContext,MAX_STEPS_LIMIT} from '../shared/bot-settings.js';
@@ -208,7 +209,11 @@ async function runGroupInner(store,id,executor){
     const before=store.read().groupRuns.find(x=>x.id===id);
     const start=before?.checkpoint?.nextStep||0;
     let previous=before?.checkpoint?.previous||null;
-    await store.update(s=>{coordinationState(s);const r=s.groupRuns.find(x=>x.id===id);if(!r||!['queued','running','awaiting_checkpoint'].includes(r.status))throw new Error('Run is not runnable');r.status='running';r.startedAt=r.startedAt||stamp();r.checkpoint=null;});
+    // A run that stopped at an ask limit carries the bots still waiting on an
+    // answer; the first step picks the conversation up from there.
+    const resume=before?.checkpoint?.resume||null;
+    const stopNow=Boolean(before?.checkpoint?.stop);
+    await store.update(s=>{coordinationState(s);const r=s.groupRuns.find(x=>x.id===id);if(!r||!['queued','running','awaiting_checkpoint','awaiting_limit'].includes(r.status))throw new Error('Run is not runnable');r.status='running';r.startedAt=r.startedAt||stamp();r.checkpoint=null;delete r.limit;});
     // The recipient list is read live each step: a bot's reply may append to it.
     // A bot created during this run is not a recipient of it: it has no settings
     // a person has checked yet, and handing it work the same minute it exists is
@@ -233,6 +238,10 @@ async function runGroupInner(store,id,executor){
       const bot=resolveBot(current,g,r,r.recipients[i]);
       r.currentStep=i;
       const roster=[...g.bots,...summonableGuests(current.groups,g.id)];
+      // Any bot may ask any bot, so asking reaches the whole company, not the roster.
+      const everyone=companyBots(current);
+      const resumed=i===start?resume:null;
+      const stopped=stopNow&&Boolean(resumed);
       // A lead is told about its team and a plain bot about the group. A lead's
       // closing step reports what the team said and hands nothing out.
       const lead=isLead(current,bot.id);
@@ -243,14 +252,39 @@ async function runGroupInner(store,id,executor){
       // This bot's own model, so its rulebook and the chat recap are the right ones.
       const config=resolveConfig(store,bot.id);
       const memory=memoryFor(store,{bot,config,chatKey:r.chatKey});
-      const envelope=createEnvelope({run:r,bot,previous,thread,team:closing?[]:rosterFor(current,bot,roster,{thread:isThread(g)}),memory,lead,closing});
+      const envelope=createEnvelope({run:r,bot,previous,thread,team:closing?[]:rosterFor(current,bot,roster,{thread:isThread(g)}),company:everyone,memory,lead,closing});
       // Each bot runs on its own chosen model/provider, else the workspace
       // default. The turn itself is the one sequence every caller runs: a
       // sub-agent round, then a peer ask, then a new-bot block. A bot that
       // already spawned a helper in this run gets one more turn; that second
       // reply is its output. `runBotTurn` owns the order (see src/bot-turn.js).
       const home=current.groups.find(x=>(x.bots||[]).some(b=>b.id===bot.id));
-      const reply=await runBotTurn(store,{bot,envelope,executor,config,peers:roster,configFor:peerId=>resolveConfig(store,peerId),memoryForPeer:(mate,mateConfig)=>memoryFor(store,{bot:mate,config:mateConfig,chatKey:r.chatKey}),handoffAllowed:mayHandoff(r,bot)&&!closing,spawnRounds:(r.subagents||[]).some(spawn=>spawn.botId===bot.id)?MAX_SUBAGENT_DEPTH:0,askRounds:(r.peerAsks||[]).some(ask=>ask.botId===bot.id&&!ask.error)?1:0,groupId:home?.id??null,runId:id,makeId:randomUUID,now:stamp});
+      // The run's ask tally: each ask is written to the run as it happens, so the
+      // thread shows it in flight, and a checkpoint can stop the step and keep it.
+      const budget={asks:r.asks?structuredClone(r.asks):undefined,limitBase:r.limitBase,unlimitedAsks:r.unlimitedAsks};
+      const onEvent=event=>store.update(s=>{
+        const live=s.groupRuns.find(x=>x.id===id);
+        if(!live||live.status!=='running')throw new Error('Run no longer active');
+        live.asks=structuredClone(budget.asks);
+        live.trace.push(event.type==='ask'
+          ?{botId:event.from,kind:'ask',to:event.to,task:event.task,at:stamp()}
+          :{botId:event.from,kind:'peer',to:event.to,output:event.output||'',...(event.error?{error:event.error}:{}),at:stamp()});
+        if(live.trace.length>400)live.trace=live.trace.slice(-400);
+      });
+      const reply=await runBotTurn(store,{bot,envelope,executor,config,peers:everyone,configFor:peerId=>resolveConfig(store,peerId),memoryForPeer:(mate,mateConfig)=>memoryFor(store,{bot:mate,config:mateConfig,chatKey:r.chatKey}),handoffAllowed:mayHandoff(r,bot)&&!closing,spawnRounds:(r.subagents||[]).some(spawn=>spawn.botId===bot.id)?MAX_SUBAGENT_DEPTH:0,budget,onEvent,resume:resumed,stop:stopped,groupId:home?.id??null,runId:id,makeId:randomUUID,now:stamp});
+      if(reply.limit){
+        // A checkpoint, not a failure: what was said stays said, the bots still
+        // waiting on an answer are kept, and the owner picks what happens next.
+        await store.update(s=>{coordinationState(s);const live=s.groupRuns.find(x=>x.id===id);if(!live||live.status!=='running')throw new Error('Run no longer active');
+          for(const line of reply.lines)say(s,live,{...line,runId:id});
+          live.asks=structuredClone(budget.asks);
+          live.status='awaiting_limit';
+          live.limit={kind:reply.limit.kind,at:stamp()};
+          live.checkpoint={nextStep:i,previous,resume:{frames:reply.frames,spawns:reply.spawns},at:stamp()};
+          say(s,live,runNote(live));
+          activity(s,'group-run',`Paused at a bot-to-bot limit (${reply.limit.kind})`,{runId:id});});
+        return;
+      }
       for(const record of reply.created||[])fledglings.add(record.id);
       const output=reply.output;
       if(typeof output!=='string'||!output.trim())throw new Error('Bot returned empty output.');
@@ -291,7 +325,7 @@ async function runGroupInner(store,id,executor){
         // reply and an out-of-job reply hand nothing out.
         const reach=host?[...host.bots.filter(b=>!fledglings.has(b.id)),...summonableGuests(s.groups,host.id)]:[];
         const leads=isLead(s,bot.id);
-        const added=host&&!closing&&!off?handoffTargets({run:live,roster:rosterFor(s,bot,reach,{thread:isThread(host)}),fromBot:bot,output:previous.output,home:leads||isThread(host)?null:host.bots,reserve:leads&&live.closeAt==null?1:0}):[];
+        const added=host&&!closing&&!stopped&&!off?handoffTargets({run:live,roster:rosterFor(s,bot,reach,{thread:isThread(host)}),fromBot:bot,output:previous.output,home:leads||isThread(host)?null:host.bots,reserve:leads&&live.closeAt==null?1:0}):[];
         enlist(live,{fromId:bot.id,added,output:previous.output,lead:leads});
         if(isThread(host))for(const id of added)noteMember(host,id);
         const guests=added.filter(x=>!host.bots.some(b=>b.id===x));
@@ -308,7 +342,7 @@ async function runGroupInner(store,id,executor){
         say(s,live,{...said,mode:'ai'});
         for(const line of browsed.lines)say(s,live,line);
         if(reply.spawns.length)live.subagents=[...(live.subagents||[]),...reply.spawns.map(spawn=>({...spawn,botId:bot.id,at:stamp()}))].slice(-6);
-        if(reply.asks.length)live.peerAsks=[...(live.peerAsks||[]),...reply.asks.map(ask=>({...ask,botId:bot.id,at:stamp()}))].slice(-6);
+        if(reply.asks.length)live.peerAsks=[...(live.peerAsks||[]),...reply.asks.map(ask=>({botId:bot.id,...ask,at:stamp()}))].slice(-6);
         if(browsed.records.length){
           live.status='awaiting_browser';
           live.browserPage=null;
@@ -329,6 +363,8 @@ async function runGroupInner(store,id,executor){
       if(holdBrowser)return;
       // Human checkpoint: pause before the next handoff until a person approves,
       // so a multi-step run never advances unattended when enabled.
+      // Stop ends the task: the asking bot has reported, so nothing else is woken.
+      if(stopped)break;
       if(r.checkpointsEnabled&&toBotId){
         await store.update(s=>{const live=s.groupRuns.find(x=>x.id===id);live.status='awaiting_checkpoint';live.checkpoint={nextStep:i+1,previous,at:stamp()};say(s,live,runNote(live));activity(s,'group-run',`Paused for a checkpoint after step ${i+1}`,{runId:id});});
         return;
@@ -449,10 +485,19 @@ export async function decidePlan(store,id,{approve}){
   if(result.start)startRun(store,id);
   return {runId:result.runId,status:store.read().groupRuns.find(r=>r.id===id)?.status||result.status};
 }
-export async function resumeGroupRun(store,id,executor=executeCustomBot){
+export async function resumeGroupRun(store,id,executor=executeCustomBot,{choice}={}){
   const r=store.read().groupRuns.find(x=>x.id===id);
   if(!r)throw Object.assign(new Error('Run not found.'),{status:404});
-  if(r.status!=='awaiting_checkpoint')throw Object.assign(new Error('This run is not waiting for a checkpoint.'),{status:409});
+  if(r.status==='awaiting_limit'){
+    // Keep going (another round of the same size), Keep going without more
+    // checkpoints for this task, or Stop: the asking bot reports what it has.
+    if(!['more','unlimited','stop'].includes(choice))throw Object.assign(new Error('Choose more, unlimited or stop.'),{status:400});
+    await store.update(s=>{const live=s.groupRuns.find(x=>x.id===id);if(!live||live.status!=='awaiting_limit')throw Object.assign(new Error('This run is not waiting at a limit.'),{status:409});
+      if(choice==='more')extendLimits(live,live.limit?.kind);
+      else if(choice==='unlimited')live.unlimitedAsks=true;
+      else live.checkpoint={...live.checkpoint,stop:true};
+      activity(s,'group-run',`Bot-to-bot limit answered: ${choice}`,{runId:id});});
+  }else if(r.status!=='awaiting_checkpoint')throw Object.assign(new Error('This run is not waiting for a checkpoint.'),{status:409});
   await runGroup(store,id,executor);
   return {runId:id,status:store.read().groupRuns.find(x=>x.id===id)?.status||'running'};
 }

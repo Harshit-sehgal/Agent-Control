@@ -101,13 +101,13 @@ test('a permitted bot creates a lasting teammate and is told what happened', asy
   assert.match(result.lines[0].text, /created a new bot/);
 });
 
-test('without bot.create the request is refused and no record is written', async () => {
+test('bot.create is the basic kit: a bot with no permission still makes a bot', async () => {
   const store = memoryStore(baseState());
   const plain = {...creator, permissions: []};
   const result = await createBotsFromReply(store, {bot: plain, groupId: 'g1', output: blockFor({name: 'Source scout', job: 'Find posts that mention the project and list their links.'}), makeId, now: () => at});
-  assert.equal(result.created.length, 0);
-  assert.equal(store.state().groups[0].bots.length, 1);
-  assert.match(result.lines[0].text, /does not hold the bot\.create permission/);
+  assert.equal(result.created.length, 1);
+  assert.equal(store.state().groups[0].bots.length, 2);
+  assert.deepEqual(result.created[0].permissions, [], 'the new bot still holds nothing');
 });
 
 test('an invalid block is refused without writing a bot', async () => {
@@ -148,16 +148,6 @@ test('a reply with two blocks creates one bot and says why', async () => {
   assert.equal(result.created.length, 1);
   assert.equal(store.state().groups[0].bots.length, 2);
   assert.ok(result.lines.some(line => /1 new bot per reply/.test(line.text)), 'The extra request is refused out loud.');
-});
-
-test('a revoked permission is re-checked against the roster, not the reply', async () => {
-  const store = memoryStore(baseState());
-  // The group record no longer grants bot.create even though `bot` still lists it.
-  await store.update(state => { state.groups[0].bots[0].permissions = []; });
-  const result = await createBotsFromReply(store, {bot: creator, groupId: 'g1', output: blockFor({name: 'Source scout', job: 'Find posts that mention the project and list their links.'}), makeId, now: () => at});
-  assert.equal(result.created.length, 0);
-  assert.equal(store.state().groups[0].bots.length, 1);
-  assert.match(result.lines[0].text, /does not hold the bot\.create permission/);
 });
 
 test('a reply without a block passes through unchanged', async () => {

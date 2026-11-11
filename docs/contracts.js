@@ -14,8 +14,8 @@
  *
  * Pure functions over bot records, like the other shared modules.
  */
-import {validHttpUrl} from './core.js?v=789bbe7f4c';
-import {fail} from './errors.js?v=789bbe7f4c';
+import {validHttpUrl} from './core.js?v=06c463a82b';
+import {fail} from './errors.js?v=06c463a82b';
 
 export const CONTRACT_VERSION = 1;
 
@@ -32,6 +32,11 @@ export const FIELD_TYPES = ['text', 'number', 'boolean', 'string_list', 'url'];
  * teammate, and `bot.create` lets it add a permissionless bot to its group;
  * see bot-link.js and bot-create.js. */
 export const ACTIONS = ['schedule.set', 'agent.dispatch', 'chat.send', 'browser.use', 'subagent.spawn', 'bot.ask', 'bot.create'];
+
+/** The basic kit: what every bot may do without being granted it. Asking a bot,
+ * making a bot and setting a schedule never ask the owner; the limits on them
+ * are checkpoints (`shared/ask-limits.js`) and the runaway guard. */
+export const BASIC_KIT = ['bot.ask', 'bot.create', 'schedule.set'];
 
 export {fail};
 
@@ -96,8 +101,9 @@ export function normalizeBot(bot) {
 }
 
 export function canBot(bot, action) {
-  if (!ACTIONS.includes(action) || !bot || !Array.isArray(bot.permissions)) return false;
-  return bot.permissions.includes(action);
+  if (!ACTIONS.includes(action) || !bot) return false;
+  if (BASIC_KIT.includes(action)) return true;
+  return Array.isArray(bot.permissions) && bot.permissions.includes(action);
 }
 
 /** Validate a bot step's output against its contract. Returns the parsed

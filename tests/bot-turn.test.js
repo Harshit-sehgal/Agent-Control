@@ -109,12 +109,12 @@ test('the output always survives a refused block, so a person is never left with
   const turn = await runBotTurn(plainStore(state), {
     bot: plain,
     envelope: {task: 'Say something.'},
-    executor: async () => `An answer.\n${block('create-bot', {name: 'Nope', job: 'No permission.'})}`,
+    executor: async () => `An answer.\n${block('create-bot', {name: 'Nope', job: 'Too short.'})}`,
     config: {},
     peers: [plain, researcher],
     groupId: 'g1',
   });
   assert.equal(turn.output, 'An answer.');
   assert.equal(turn.created.length, 0);
-  assert.match(turn.lines.map(l => l.text).join(' '), /does not hold the bot\.create permission/);
+  assert.match(turn.lines.map(l => l.text).join(' '), /the request was refused/);
 });

@@ -135,37 +135,47 @@ test('a group with handoffs switched off refuses the ask and still gets a reply'
   assert.equal(calls, 1, 'The peer is never called.');
 });
 
-test('a bot without bot.ask cannot message a teammate', async () => {
+test('bot.ask is the basic kit: a bot with no permission may still message a bot', async () => {
   const plain = {...asker, permissions: []};
-  const result = await askPeerRound({bot: plain, first: askBlock('Help?'), executor: async () => 'unused', peers: [plain, peer], makeId, now: () => at});
-  assert.equal(result.asks.length, 0);
-  assert.equal(result.lines.length, 1);
-  assert.match(result.lines[0].text, /does not hold the bot\.ask permission/);
-  assert.doesNotMatch(result.output, /```ask/);
+  const result = await askPeerRound({bot: plain, first: askBlock('Help?'), executor: async b => (b.id === 'researcher' ? 'Here.' : 'Thanks.'), peers: [plain, peer], makeId, now: () => at});
+  assert.equal(result.asks.length, 1);
+  assert.equal(result.output, 'Thanks.');
 });
 
-test('the exchange is one round deep, and a second ask is stripped', async () => {
-  let calls = 0;
-  const executor = async bot => {
-    calls++;
-    return bot.id === 'researcher' ? 'Answer.' : `Final.\n${askBlock('Again?')}`;
+test('a bot may ask again after an answer, and each answer reaches it as the newest', async () => {
+  const seen = [];
+  let turns = 0;
+  const executor = async (bot, input) => {
+    if (bot.id === 'researcher') return `Answer ${JSON.parse(input).task}.`;
+    seen.push(JSON.parse(input));
+    return ++turns === 1 ? `More.\n${askBlock('Second?')}` : 'Done.';
   };
-  const result = await askPeerRound({bot: asker, first: askBlock('Question?'), executor, peers: [peer], makeId, now: () => at});
-  assert.equal(calls, 2);
-  assert.equal(result.output, 'Final.');
-  assert.ok(result.lines.some(line => /one bot-to-bot exchange per reply is the limit/.test(line.text)));
-  const refused = await askPeerRound({bot: asker, first: askBlock('Question?'), executor, peers: [peer], rounds: 1, makeId, now: () => at});
-  assert.equal(refused.asks.length, 0);
-  assert.match(refused.lines[0].text, /one bot-to-bot exchange is the limit/);
-  assert.equal(calls, 3, 'A spent round costs no peer call; only the asker turns again.');
-  assert.equal(refused.output, 'Final.', 'The block was the whole reply, so the bot still had to write one.');
+  const result = await askPeerRound({bot: asker, first: askBlock('First?'), executor, peers: [asker, peer], makeId, now: () => at});
+  assert.equal(result.output, 'Done.');
+  assert.equal(result.asks.length, 2);
+  assert.equal(seen[1].peerAnswer.output, 'Answer Second?.');
+  assert.equal(seen[1].earlierAnswers[0].output, 'Answer First?.', 'what it was told before stays in view');
+});
+
+test('without a budget a reached limit is refused; with one it pauses and keeps the frames', async () => {
+  const executor = async bot => (bot.id === 'researcher' ? 'Answer.' : askBlock(`Question ${Math.random()}`));
+  const refused = await askPeerRound({bot: asker, first: askBlock('Q0?'), executor, peers: [asker, peer], makeId, now: () => at});
+  assert.equal(refused.asks.length, 12, 'twelve messages between two bots, then the ask is refused');
+  assert.ok(refused.lines.some(line => /limit on bot-to-bot messages/.test(line.text)));
+  const budget = {};
+  const paused = await askPeerRound({bot: asker, first: askBlock('Q0?'), executor, peers: [asker, peer], budget, makeId, now: () => at});
+  assert.equal(paused.limit.kind, 'pair');
+  assert.equal(paused.output, null);
+  assert.equal(paused.frames.length, 1);
+  assert.equal(paused.frames[0].botId, 'writer');
+  assert.equal(budget.asks.total, 12);
 });
 
 test('unknown and disabled teammates are refused, and the asker still gets a turn', async () => {
   let calls = 0;
   const executor = async () => { calls++; return 'Answer written on my own.'; };
   const unknown = await askPeerRound({bot: asker, first: askBlock('Question?'), executor, peers: [asker], makeId, now: () => at});
-  assert.match(unknown.lines[0].text, /no teammate named/);
+  assert.match(unknown.lines[0].text, /no bot named/);
   assert.equal(unknown.output, 'Answer written on my own.', 'A refused ask must not leave the step with no reply.');
   const disabled = {...peer, settings: {enabled: false}};
   const off = await askPeerRound({bot: asker, first: askBlock('Question?'), executor, peers: [asker, disabled], makeId, now: () => at});

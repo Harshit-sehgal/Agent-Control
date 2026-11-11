@@ -17,7 +17,7 @@ export const ASSETS = [
   'transport.js', 'local-api.js', 'app.js',
   'ui-kit.js', 'ui-model.js', 'ui-face.js', 'ui-company.js', 'ui-store.js', 'ui-dialogs.js', 'ui-chat.js', 'ui-views.js', 'ui-panel.js', 'ui-sheets.js', 'ui-admin.js', 'ui-actions.js', 'ui-takeover.js', 'ui-fx.js', 'ui-push.js', 'sw.js',
   // Browser-safe logic shared with the server.
-  'core.js', 'errors.js', 'workflow.js', 'tasks.js', 'contracts.js', 'bot-settings.js', 'company.js', 'threads.js', 'off-job.js', 'bot-browser.js', 'bot-create.js', 'bot-link.js', 'reply-blocks.js', 'subagents.js', 'retention.js', 'memory.js', 'run-state.js',
+  'core.js', 'errors.js', 'workflow.js', 'tasks.js', 'contracts.js', 'bot-settings.js', 'company.js', 'threads.js', 'off-job.js', 'bot-browser.js', 'bot-create.js', 'bot-link.js', 'ask-limits.js', 'reply-blocks.js', 'subagents.js', 'retention.js', 'memory.js', 'run-state.js',
   'coordination.js', 'chats.js', 'group-simulator.js', 'locks.js', 'ai-presets.js', 'run-follow.js',
   // Static pages and install assets.
   'manifest.webmanifest', 'icon-192.png', 'icon-512.png',

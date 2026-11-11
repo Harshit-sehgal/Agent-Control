@@ -3,11 +3,11 @@
  * model is configured and in the deterministic simulator otherwise. A custom bot
  * runs its own instructions on the server; everything else answers from the
  * offline command set. Nothing here can publish. */
-import {planHandoffs, leadShouldRunGroup, summonableGuests} from './coordination.js?v=789bbe7f4c';
-import {pollRun} from './run-follow.js?v=789bbe7f4c';
-import {botSettings, groupSettings} from './bot-settings.js?v=789bbe7f4c';
-import {store, api, sync, conversation, appendMessage, setTyping, isStaticDemo, teamKey, groups} from './ui-store.js?v=789bbe7f4c';
-import {toast} from './ui-dialogs.js?v=789bbe7f4c';
+import {planHandoffs, leadShouldRunGroup, summonableGuests} from './coordination.js?v=06c463a82b';
+import {pollRun} from './run-follow.js?v=06c463a82b';
+import {botSettings, groupSettings} from './bot-settings.js?v=06c463a82b';
+import {store, api, sync, conversation, appendMessage, setTyping, isStaticDemo, teamKey, groups} from './ui-store.js?v=06c463a82b';
+import {toast} from './ui-dialogs.js?v=06c463a82b';
 
 /** In-flight sends per conversation, so two overlapping sends keep the typing
  * indicator up until the last one finishes instead of the first clearing it. */
