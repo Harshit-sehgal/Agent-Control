@@ -17,22 +17,24 @@
  *   ui-settings     Settings, the Company chart and Activity
  *   ui-profile-model pure view models behind those screens
  *   ui-computer     pure rules of a bot's Computer view   ui-computer-view  that view, the profile row and the site chip
+ *   ui-connect      Settings → Connectors   ui-connect-model  the pure rules for it, the subscription rows and the connector chat lines
  *   ui-sheets       sign-in and password sheets   ui-admin   admin pages
  *   ui-dialogs      toast, sheet, confirm/ask      ui-actions action/form tables
  *   ui-fx           confetti, the send arrow and the bots' ambient life
  */
-import {companyRoute} from './ui-company.js?v=697db3ab25';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=697db3ab25';
-import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=697db3ab25';
-import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, renderPause, closeSearch, homeView} from './ui-shell.js?v=697db3ab25';
-import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=697db3ab25';
-import {profileViews, wirePages} from './ui-profile.js?v=697db3ab25';
-import {wireGestures, gesturesBusy} from './ui-gestures.js?v=697db3ab25';
-import {settingsViews} from './ui-settings.js?v=697db3ab25';
-import {showLogin, hideLogin} from './ui-sheets.js?v=697db3ab25';
-import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=697db3ab25';
-import {bringBotsToLife} from './ui-fx.js?v=697db3ab25';
-import {wireComputer} from './ui-computer-view.js?v=697db3ab25';
+import {companyRoute} from './ui-company.js?v=588d41953d';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=588d41953d';
+import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=588d41953d';
+import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, renderPause, closeSearch, homeView} from './ui-shell.js?v=588d41953d';
+import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=588d41953d';
+import {profileViews, wirePages} from './ui-profile.js?v=588d41953d';
+import {wireGestures, gesturesBusy} from './ui-gestures.js?v=588d41953d';
+import {settingsViews} from './ui-settings.js?v=588d41953d';
+import {showLogin, hideLogin} from './ui-sheets.js?v=588d41953d';
+import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=588d41953d';
+import {bringBotsToLife} from './ui-fx.js?v=588d41953d';
+import {wireComputer} from './ui-computer-view.js?v=588d41953d';
+import {googleReturn, withoutGoogleParams} from './ui-connect-model.js?v=588d41953d';
 
 const el = id => document.getElementById(id);
 const hashRoute = () => normalizeRoute(companyRoute(location.hash, store.state));
@@ -179,11 +181,22 @@ async function boot() {
     // A laptop opens on the primary bot's chat; a phone opens on the home.
     const primary = (groups().find(g => g.id === 'home')?.bots || []).find(b => b.settings?.lead === true);
     if (isDesk() && store.route.home && !location.hash && primary) go({bot: primary.id}, {replace: true}); else changed('route');
+    finishGoogleSignIn();
   } catch (e) {
     if (e.status === 401) return showLogin(e.message);
     el('main').innerHTML = `<section class="home"><h1>Could not start</h1><p></p><p>${isStaticDemo() ? 'Enable browser local storage and reload. If the page was cached from an older deploy, hard-refresh once.' : 'Check that the Node server is running and reload.'}</p></section>`;
     el('main').querySelector('p').textContent = e.message;
   }
+}
+/** Google sent the owner back to `/?google=connected` or `?google=error&reason=...`: say how it went, take the
+ * parameters out of the address so a reload does not say it again, and open Settings → Connectors. Only after the
+ * app is signed in and painted, so a sign-in screen in between keeps the parameters for the next boot. */
+function finishGoogleSignIn() {
+  const result = googleReturn(location.search);
+  if (!result) return;
+  history.replaceState(history.state, '', `${location.pathname}${withoutGoogleParams(location.search)}${location.hash}`);
+  toast(result.text, !result.ok);
+  go({settings: 'conn'});
 }
 /** Leave nothing of the signed-out workspace in the DOM behind the sign-in. */
 function lockScreen(message) {

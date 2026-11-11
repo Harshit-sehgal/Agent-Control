@@ -7,6 +7,9 @@ import {store, api, sync} from './ui-store.js';
 import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js';
 import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js';
 import {pushStatus, enablePush, disablePush} from './ui-push.js';
+import {connectorsPanel, loadConnectors, connectActions, connectForms} from './ui-connect.js';
+import {cliDraft, agentCliRows, subscriptionLine, SIGN_IN_HINT} from './ui-connect-model.js';
+import {LOCAL_CLI_ENGINES, LOCAL_CLI_KIND} from './ai-presets.js';
 
 /** Title + one-line description per page, used by the host for the page header. */
 export const ADMIN_PAGES = {
@@ -29,6 +32,10 @@ export const ADMIN_PAGES = {
   data: {
     title: 'Data and security',
     sub: 'Credential vault, retention policy and workspace backups.',
+  },
+  connectors: {
+    title: 'Connectors',
+    sub: 'Google and MCP servers your bots may use, with your say-so.',
   },
   ai: {
     title: 'AI and models',
@@ -375,6 +382,29 @@ function editProviderSheet(provider) {
   </form>`, {title: `Edit ${provider.label}`, sub: provider.host});
 }
 
+const withCode = text => esc(text).replace(/`([^`]+)`/g, '<code>$1</code>');
+/** Use the Claude or ChatGPT plan you already pay for: no key, the model runs in the CLI on a paired computer. */
+function subscriptionBoxes(agents) {
+  const engines = LOCAL_CLI_ENGINES.map(e => `<option value="${esc(e.id)}">${esc(e.label)}</option>`).join('');
+  const form = `<form id="cli-provider-form" autocomplete="off">
+    ${field('Name', textInput('label', {maxlength: 80, placeholder: 'My Claude'}))}
+    ${field('Which one', `<select class="input" name="engine">${engines}</select>`)}
+    ${field('Model (optional)', textInput('model', {maxlength: 80, placeholder: 'the CLI\'s own default', autocomplete: 'off', spellcheck: 'false'}), 'Leave empty to use whatever the CLI picks.')}
+    ${btn('Add subscription', null, {kind: 'primary', type: 'submit'})}
+  </form>`;
+  const rows = agentCliRows(agents).map(a => {
+    const chips = a.engines.map(e => tag(`${e.name} · ${e.word}`, e.tone)).join('');
+    return actionRow(`${esc(a.name)} ${a.online ? '' : tag('not running now', 'warn')}`, withCode(a.hint), chips);
+  }).join('');
+  const hinted = agentCliRows(agents).some(a => a.hint);
+  const status = rows || empty('No paired agent yet', 'Pair a computer under Local agents, then sign in to claude or codex on it.');
+  return note('Use the Claude or ChatGPT plan you already have. No key is stored here: the model runs through the command-line tool on a paired computer that is signed in to your account.')
+    + box(form, 'Add a subscription')
+    + box(status, 'Sign-in on your paired agents')
+    // The hint sits under each signed-out machine; with none signed out it is still the next step, so say it once here.
+    + (hinted ? '' : note(withCode(SIGN_IN_HINT)));
+}
+
 function aiPanel(res) {
   // Keep every listing this response carried, so switching the default provider
   // repaints the picker and the edit sheet from memory, without a round trip.
@@ -384,16 +414,23 @@ function aiPanel(res) {
     ? providers.map(p => {
       // N is what can answer a chat; the rest of the account's catalogue is a
       // quiet count beside it, so a long model list is visibly read in full.
+      const isDefault = p.isDefault || p.id === res.defaultProviderId;
+      const makeDefault = isDefault ? '' : btn('Make default', 'ai-default-provider', {id: p.id, small: true});
+      // A subscription has no key and no catalogue: it is checked by what its agent says about the CLI's sign-in.
+      if (p.kind === LOCAL_CLI_KIND) {
+        return actionRow(`${esc(p.label)} ${isDefault ? tag('default', 'good') : ''}`, esc(subscriptionLine(p, res.agents)),
+          btn('Check sign-in', 'ai-check-cli', {id: p.id, small: true}) + makeDefault + btn('Delete', 'ai-delete-provider', {kind: 'danger', id: p.id, small: true}));
+      }
       const chat = chatCount(p), listed = listedCount(p);
       const extra = listed > chat ? ` (+${listed - chat} listed)` : '';
       const version = needsApiVersion(p.protocol) && p.apiVersion ? ` · api-version ${esc(p.apiVersion)}` : '';
       return actionRow(
-        `${esc(p.label)} ${p.isDefault || p.id === res.defaultProviderId ? tag('default', 'good') : ''}`,
+        `${esc(p.label)} ${isDefault ? tag('default', 'good') : ''}`,
         `${esc(p.host)} · ${esc(protocolName(p.protocol))} · ${chat} model(s)${extra}${p.modelsTruncated ? ' · list capped' : ''}${version}${p.modelsError ? ` ${tag(p.modelsError, 'warn')}` : ''}`,
         btn('Test', 'ai-test-provider', {id: p.id, small: true})
           + btn('Refresh models', 'ai-load-models', {id: p.id, small: true})
           + btn('Edit', 'ai-edit-provider', {id: p.id, small: true})
-          + (p.id === res.defaultProviderId ? '' : btn('Make default', 'ai-default-provider', {id: p.id, small: true}))
+          + makeDefault
           + btn('Delete', 'ai-delete-provider', {kind: 'danger', id: p.id, small: true}),
       );
     }).join('')
@@ -409,6 +446,7 @@ function aiPanel(res) {
     ${btn('Save provider', null, {kind: 'primary', type: 'submit'})}
   </form>`;
   const options = providers.map(p => `<option value="${esc(p.id)}" ${p.id === res.defaultProviderId ? 'selected' : ''}>${esc(p.label)}</option>`).join('');
+  const subscription = subscriptionBoxes(res.agents);
   const picked = providers.find(p => p.id === res.defaultProviderId) || providers[0];
   const defaults = providers.length ? `<form id="ai-default-form">
     ${field('Default provider', `<select class="input" name="providerId" data-action="ai-default-provider-pick">${options}</select>`)}
@@ -418,19 +456,25 @@ function aiPanel(res) {
   </form>` : '';
   return note('Bring your own key. Five wire protocols work: OpenAI chat completions, OpenAI responses, Anthropic Messages for Claude, Google Gemini, and Azure OpenAI (which needs your resource endpoint and an API version). The model list comes from the provider with your saved key, so the picker shows models that key can actually use. Keys are stored encrypted and never shown again - only the provider name, host, model list and the NAMES of any custom headers are visible. Local servers (Ollama, LM Studio, vLLM, Jan) accept any string as the key.')
     + box(rows, `Providers, ${providers.length}`)
-    + box(add, 'Add a provider')
+    + subscription
+    + box(add, 'Add an API provider')
     + (defaults ? box(defaults, 'Default for this workspace') : '');
 }
 
 /** Fetches what the page needs and returns its body HTML (no page header). Throws on API error. */
 export async function adminPage(kind) {
+  if (kind === 'connectors') return connectorsPanel(await loadConnectors());
   if (kind === 'ai') {
     const res = await api('/api/ai');
+    // The browser-only demo has no providers to manage and says so.
+    if (res?.demo) return note('Models and keys need the Node server. The browser-only demo answers with built-in replies and has no model to connect.');
     // Admin-only detail (endpoints, cached model ids, catalogue errors). The demo
     // shim has no such route, so a failure just falls back to the summary.
     const full = await api('/api/ai/providers').catch(() => null);
-    if (full?.providers?.length) { full.providers.forEach(rememberListing); return aiPanel({...res, providers: full.providers}); }
-    return aiPanel(res);
+    // Which paired computers have `claude` and `codex` signed in. A failure only hides that part.
+    const agents = (await api('/api/agents').catch(() => null))?.agents || [];
+    if (full?.providers?.length) { full.providers.forEach(rememberListing); return aiPanel({...res, providers: full.providers, agents}); }
+    return aiPanel({...res, agents});
   }
   if (kind === 'team') {
     const [users, sessions] = await Promise.all([api('/api/users'), api('/api/sessions')]);
@@ -468,6 +512,7 @@ function enterWorkspace() {
 
 /** data-action handlers: (button, ctx) => Promise. ctx = {reload: () => Promise} re-renders the current admin page. */
 export const adminActions = {
+  ...connectActions,
   'notifications-read-all': async (button, ctx) => {
     const snap = await api('/api/notifications');
     const ids = (snap.notifications || []).filter(n => n.status !== 'read').map(n => n.id);
@@ -563,6 +608,11 @@ export const adminActions = {
     await api(`/api/ai/providers/${button.dataset.id}`, 'DELETE');
     toast('Provider removed.');
     await sync(); await ctx.reload();
+  },
+  // A subscription is checked by the sign-in its agent last reported; this never sends a prompt.
+  'ai-check-cli': async button => {
+    const res = await api(`/api/ai/providers/${button.dataset.id}/test`, 'POST', {});
+    toast(res.message || (res.ok ? 'Signed in.' : 'Not signed in.'), !res.ok);
   },
   'ai-default-provider': async (button, ctx) => {
     await api('/api/ai', 'PATCH', {providerId: button.dataset.id});
@@ -665,6 +715,7 @@ export const adminActions = {
 
 /** form submit handlers keyed by form id: (form, values, ctx). `values` = Object.fromEntries(new FormData(form)). */
 export const adminForms = {
+  ...connectForms,
   'workspace-form': async (form, values) => {
     const created = await api('/api/workspaces', 'POST', {name: values.name});
     await api('/api/workspaces/switch', 'POST', {id: created.id});
@@ -681,6 +732,14 @@ export const adminForms = {
     lastPairing = await api('/api/agents/pair', 'POST', {label: values.label, permissions});
     await ctx.reload();
     toast('Pairing code created. It is shown once.');
+  },
+  'cli-provider-form': async (form, values, ctx) => {
+    const draft = cliDraft(values);
+    if (!draft.ok) throw new Error(draft.error);
+    await api('/api/ai/providers', 'POST', draft.body);
+    form.reset();
+    toast('Subscription added. Check its sign-in below.');
+    await sync(); await ctx.reload();
   },
   'ai-provider-form': async (form, values, ctx) => {
     const parsed = parseHeaders(values.headers), problem = headerProblem(parsed.invalid);

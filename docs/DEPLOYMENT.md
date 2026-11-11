@@ -84,7 +84,8 @@ ordinary individual use.
    `claude` or `codex`; an optional `model`, which must be a plain name that
    cannot read as a flag; no key). Then point a bot at it with
    `PATCH /api/ai/bots/:bot` `{"providerId": "…"}`, or make it the workspace
-   default. The Settings page for this arrives with the UI work.
+   default. In the app this is Settings → Models and keys → Add a subscription, which
+   also shows whether `claude` and `codex` are signed in on each paired machine.
 
 How a turn works: the bot's model call becomes a `model.run` task, the agent runs
 the CLI with the prompt on **stdin** (never on the command line, so it cannot

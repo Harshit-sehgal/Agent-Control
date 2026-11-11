@@ -7,23 +7,23 @@
  * team, agents, data) load the existing admin forms from ui-admin.js into the body.
  *
  * The lists behind it are pure and tested in ui-profile-model.js. */
-import {face} from './ui-face.js?v=697db3ab25';
-import {botStatus} from './ui-company.js?v=697db3ab25';
-import {primaryOf} from './company.js?v=697db3ab25';
-import {esc, icon, btn, empty, note, roundBtn, switchBtn} from './ui-kit.js?v=697db3ab25';
-import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, loadLocal, applyTheme, themeChoice, THEMES} from './ui-store.js?v=697db3ab25';
-import {isDesk, initials, pageFrame, HIDDEN_KEY} from './ui-shell.js?v=697db3ab25';
-import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=697db3ab25';
-import {faceOf, activityBlocks, grantsHtml, grantNote} from './ui-profile.js?v=697db3ab25';
-import {allGrantRows} from './ui-asks.js?v=697db3ab25';
+import {face} from './ui-face.js?v=588d41953d';
+import {botStatus} from './ui-company.js?v=588d41953d';
+import {primaryOf} from './company.js?v=588d41953d';
+import {esc, icon, btn, empty, note, roundBtn, switchBtn} from './ui-kit.js?v=588d41953d';
+import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, loadLocal, applyTheme, themeChoice, THEMES} from './ui-store.js?v=588d41953d';
+import {isDesk, initials, pageFrame, HIDDEN_KEY} from './ui-shell.js?v=588d41953d';
+import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=588d41953d';
+import {faceOf, activityBlocks, grantsHtml, grantNote} from './ui-profile.js?v=588d41953d';
+import {allGrantRows} from './ui-asks.js?v=588d41953d';
 import {
   ACTIVITY_FILTERS, activityUrl, companyTree, weekUsage, settingsSections, resolveSection,
-} from './ui-profile-model.js?v=697db3ab25';
-import {COLORS} from './ui-face.js?v=697db3ab25';
+} from './ui-profile-model.js?v=588d41953d';
+import {COLORS} from './ui-face.js?v=588d41953d';
 
 const el = id => document.getElementById(id);
 const ICONS = {general: 'gear', look: 'half', models: 'key', conn: 'plug', perm: 'shield', usage: 'chart', computer: 'monitor'};
-const ADMIN_OF = {models: 'ai', notifications: 'notifications', workspaces: 'workspaces', team: 'team', agents: 'agents', data: 'data'};
+const ADMIN_OF = {models: 'ai', conn: 'connectors', notifications: 'notifications', workspaces: 'workspaces', team: 'team', agents: 'agents', data: 'data'};
 const ownerName = () => store.state?.me?.name || String(store.state?.me?.email || '').split('@')[0] || 'You';
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const paused = () => Boolean(store.state?.guard?.paused);
@@ -31,7 +31,12 @@ const canPause = () => isAdmin() || isStaticDemo();
 const hiddenCount = () => { const list = loadLocal(HIDDEN_KEY, []); return Array.isArray(list) ? list.filter(id => findBot(id)).length : 0; };
 
 /** Which admin page (if any) a section loads from the server. */
-const adminKeyOf = key => (ADMIN_OF[key] && (key === 'notifications' || key === 'workspaces' || isAdmin()) && !isStaticDemo() ? ADMIN_OF[key] : null);
+const adminKeyOf = key => {
+  if (!ADMIN_OF[key]) return null;
+  // Models and Connectors also open in the demo, where the page itself says it needs the server (the way the demo treats its one owner).
+  if (key === 'models' || key === 'conn') return isAdmin() || isStaticDemo() ? ADMIN_OF[key] : null;
+  return (key === 'notifications' || key === 'workspaces' || isAdmin()) && !isStaticDemo() ? ADMIN_OF[key] : null;
+};
 
 /* ---------- rows and cards ---------- */
 
@@ -73,10 +78,10 @@ function look() {
 const adminHost = key => `<div id="admin-panel" class="st-admin" data-page="${ADMIN_OF[key]}">${note('Loading…')}</div>`;
 function models() {
   if (adminKeyOf('models')) return adminHost('models');
-  return card(srow('Your own keys', '', isStaticDemo() ? 'The demo answers with built-in replies. Models and keys need the Node server.' : 'Only the owner or an admin can add model keys.'));
+  return card(srow('Your own keys', '', 'Only the owner or an admin can add model keys.'));
 }
 
-const conn = () => card(srow('Google', '<span class="pv">Coming in a later phase</span>', 'Gmail, Drive and Calendar') + srow('MCP servers', '<span class="pv">Coming in a later phase</span>', 'GitHub, Notion and more'), 'Connectors');
+const conn = () => (adminKeyOf('conn') ? adminHost('conn') : card(srow('Connectors', '', 'Only the owner or an admin can add Google or an MCP server.')));
 
 function perm() {
   return `<p class="st-note">What each bot may do beyond chatting and handing work on. When a bot needs something that leaves the app it asks you; Always allow and Deny are kept here, per bot.</p><div data-grants="all">${grantsHtml()}</div>${grantNote('st-note')}`;

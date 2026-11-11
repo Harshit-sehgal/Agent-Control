@@ -145,3 +145,37 @@ test('the ask lines in the primary\'s chat read the same way', () => {
   const out = build([askLine('ask-a1', 2, {text: 'Needs you: Planner wants to open example.com.'})], [], 'atlas');
   assert.deepEqual(kinds(out), ['day', 'ask']);
 });
+
+/* ---------- connector and model-limit lines ---------- */
+
+const withState = (messages, extra = {}, runs = []) => {
+  const state = {...stateOf(runs, messages), connectors: [{id: 'google', kind: 'google', name: 'Google', account: 'me@example.org'}], ai: {providers: [{id: 'p2', label: 'OpenAI'}], bots: {}}, ...extra};
+  return feed({items: timeline({conv: {id: KEY}, state, messages: {[KEY]: messages}}), state, key: KEY, now: Date.parse(at(10))});
+};
+
+test('connector lines are entries of their own, with the account they used', () => {
+  const out = withState([msg('q', 'user', 1), msg('c1', 'system', 2, {kind: 'connector', connectorId: 'google', text: 'Atlas used Google: gmail.search.'}), msg('c2', 'system', 3, {kind: 'connector-error', text: 'Atlas could not use Notes: add.'})]);
+  assert.deepEqual(kinds(out), ['day', 'me', 'connector', 'connector']);
+  assert.equal(out[2].line.account, 'me@example.org');
+  assert.equal(out[2].line.tone, 'ok');
+  assert.equal(out[3].line.tone, 'error');
+});
+
+test('a held send stays open for Undo inside its window, and the feed takes the clock it is given', () => {
+  const sending = msg('c1', 'system', 2, {kind: 'connector', connectorId: 'google', text: 'Atlas is sending an email.', activityId: 'act-1', undoUntil: at(30)});
+  assert.equal(withState([sending])[1].line.undo.open, true);
+  const state = {...stateOf([], [sending]), connectors: []};
+  const late = feed({items: timeline({conv: {id: KEY}, state, messages: {[KEY]: [sending]}}), state, key: KEY, now: Date.parse(at(31))});
+  assert.equal(late[1].line.undo.open, false);
+  const undone = withState([sending, msg('send-act-1', 'system', 5, {kind: 'connector', text: 'You undid it.'})]);
+  assert.equal(undone[1].line.undo.open, false);
+});
+
+test('a model-limit line is its own entry even though it names a run, and it does not take the run\'s note', () => {
+  const failed = run({id: 'r9', status: 'failed', recipients: ['atlas'], trace: []});
+  const out = withState([msg('q', 'user', 1), msg('n', 'system', 2, {runId: 'r9', text: 'It failed.'}), msg('r9-model-limit', 'system', 3, {kind: 'model-limit', runId: 'r9', botId: 'atlas', switchTo: 'p2', text: 'Atlas hit its limit.'})], {}, [failed]);
+  assert.deepEqual(kinds(out), ['day', 'me', 'note', 'model-limit']);
+  assert.equal(out[2].run?.id, 'r9', 'the failure note keeps its Retry');
+  assert.deepEqual(out[3].line.switchTo, {id: 'p2', label: 'OpenAI'});
+  assert.equal(out[3].line.open, true);
+});

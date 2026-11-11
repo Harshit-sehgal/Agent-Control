@@ -161,6 +161,22 @@ function guardEntry({message: m, open}) {
   return open ? `<div class="cv-card flat"><p>${esc(m.text)}</p>${guardButtons()}</div>` : `<div class="cv-note"><span>${esc(m.text)}</span></div>`;
 }
 
+/** What a connector read or did, and on which account. A send held for Undo is a card with the button while its window
+ * runs; after that, or once undone, it is one muted line like the rest. */
+function connectorEntry({message: m, line}) {
+  const acct = line.account ? `<em class="cn-acct">${esc(line.account)}</em>` : '';
+  if (line.undo?.open && canWrite()) {
+    return `<div class="cv-card flat cv-held" data-m="${esc(m.id)}"><p>${esc(line.text)}</p>${acct ? `<small>On ${acct}</small>` : ''}<div class="acts">${btn('Undo', 'undo-send', {id: line.undo.activityId, kind: 'primary', small: true})}</div></div>`;
+  }
+  return `<div class="cv-note cv-conn${line.tone === 'error' ? ' bad' : ''}" data-m="${esc(m.id)}"><span>${icon('plug', 13)}${esc(line.text)}</span>${acct}</div>`;
+}
+
+/** A usage limit: the server's sentence and, until the bot already uses it, a button to the provider it named. */
+function modelLimitEntry({message: m, line}) {
+  if (!line.open || !canWrite()) return `<div class="cv-note cv-conn" data-m="${esc(m.id)}"><span>${icon('chip', 13)}${esc(line.text)}</span></div>`;
+  return `<div class="cv-card flat" data-m="${esc(m.id)}"><p>${esc(line.text)}</p><div class="acts">${btn(`Switch to ${line.switchTo.label}`, 'switch-model', {id: line.botId, kind: 'primary', small: true, data: {provider: line.switchTo.id, name: line.switchTo.label}})}</div></div>`;
+}
+
 function offjobEntry({message: m, open}, conv) {
   const bot = findBot(m.botId || m.senderId), name = bot?.name || m.senderName || conv.name;
   const choices = open && canWrite() ? `<div class="cv-card"><p>This is not ${esc(name)}'s job. What should happen to it?</p><div class="acts">${OFFJOB_CHOICES.map(c => btn(c.label, `offjob-${c.id}`, {kind: c.id === 'anyway' ? 'primary' : 'quiet', data: {message: m.id}})).join('')}</div></div>` : '';
@@ -185,6 +201,8 @@ function entryHtml(entry, conv) {
     case 'pill': return pillEntry(entry, conv);
     case 'limit': return limitEntry(entry, conv);
     case 'guard': return guardEntry(entry);
+    case 'connector': return connectorEntry(entry);
+    case 'model-limit': return modelLimitEntry(entry);
     default: return '';
   }
 }
@@ -236,6 +254,15 @@ function moments(entries) {
   born.fresh = true;
 }
 
+/** A held send's Undo button must go when its window ends even if nothing else repaints the chat. */
+let undoTimer = null;
+function watchUndo(entries) {
+  clearTimeout(undoTimer);
+  const ends = entries.filter(e => e.kind === 'connector' && e.line.undo?.open).map(e => e.line.undo.until);
+  if (!ends.length) return;
+  undoTimer = setTimeout(renderConversation, Math.min(Math.max(Math.min(...ends) - Date.now(), 0) + 60, 60000));
+}
+
 /** Refresh the open chat's status line and log without touching the composer. */
 export function renderConversation() {
   const conv = conversation(), log = el('cv-log'); if (!conv || !log) return;
@@ -244,8 +271,9 @@ export function renderConversation() {
   const who = document.querySelector('.cv-who');
   if (who && conv.bot && who.dataset.state !== awake(conv.bot.id)) { who.dataset.state = awake(conv.bot.id); who.innerHTML = botFace(conv.bot, conv.name, 36, {state: who.dataset.state}); }
   if (born.conv !== conv.id) { born.conv = conv.id; born.seen = new Set(); born.fresh = false; }
-  const entries = feed({items: timeline({conv, state: store.state, messages: store.messages}), state: store.state, key: conv.id});
+  const entries = feed({items: timeline({conv, state: store.state, messages: store.messages}), state: store.state, key: conv.id, now: Date.now()});
   announce(conv, entries);
+  watchUndo(entries);
   const asker = askerOf(conv), live = entries.some(e => e.kind === 'pill' && !e.pill.done) || entries.some(e => e.kind === 'limit');
   const chip = store.typing.has(conv.id) && !live ? siteChip({botId: asker?.id}) : null;
   const working = store.typing.has(conv.id) && !live
@@ -315,6 +343,17 @@ export const conversationActions = {
   'offjob-new-bot': b => go({newBot: true, job: offjobOf(b).request}),
   'limit-choice': async b => { await answerLimit(b.dataset.group, b.dataset.run, b.dataset.choice); if (b.dataset.choice === 'stop') toast('Stopped. The bot reports what it has.'); },
   'quick-thread': b => startThread(b.dataset.text),
+  // A send held for Undo: the server cancels it while its window is open (409 once it has gone out, which the toast says).
+  'undo-send': async b => {
+    try { await api(`/api/activity/${encodeURIComponent(b.dataset.id)}/undo`, 'POST', {}); toast('Undone. The email was not sent.'); }
+    finally { await sync(); }
+  },
+  // The bot that hit a usage limit moves to the provider the server named; '' clears the model that would not fit it.
+  'switch-model': async b => {
+    await api(`/api/ai/bots/${encodeURIComponent(b.dataset.id)}`, 'PATCH', {providerId: b.dataset.provider, model: ''});
+    toast(`Switched to ${b.dataset.name}.`);
+    await sync();
+  },
   // Keep going or Stop after the runaway guard paused what bots started: one switch for all of it.
   'guard-resume': async () => { await api('/api/guard', 'POST', {paused: false}); await sync(); toast('Bots are running again.'); },
   'guard-stop': async () => { await api('/api/guard', 'POST', {paused: false, stop: true}); await sync(); toast('Stopped what bots had started.'); },

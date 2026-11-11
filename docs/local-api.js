@@ -4,22 +4,22 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {initialState, cleanText} from './core.js?v=697db3ab25';
-import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=697db3ab25';
-import {RETENTION_DEFAULTS} from './retention.js?v=697db3ab25';
-import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=697db3ab25';
-import {addChatMessages, clearChat} from './chats.js?v=697db3ab25';
-import {publicMemory, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=697db3ab25';
-import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=697db3ab25';
-import {createThread, titleFrom} from './threads.js?v=697db3ab25';
-import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=697db3ab25';
-import {simulateGroup} from './group-simulator.js?v=697db3ab25';
-import {BUSY_STATUSES} from './run-state.js?v=697db3ab25';
-import {botSettings} from './bot-settings.js?v=697db3ab25';
-import {denyBrowserRequest} from './bot-browser.js?v=697db3ab25';
-import {answerAsk, expireAsks, orphanAsks, setGrant} from './asks.js?v=697db3ab25';
-import {activityPage} from './activity-log.js?v=697db3ab25';
-import {withLocalLock} from './locks.js?v=697db3ab25';
+import {initialState, cleanText} from './core.js?v=588d41953d';
+import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=588d41953d';
+import {RETENTION_DEFAULTS} from './retention.js?v=588d41953d';
+import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=588d41953d';
+import {addChatMessages, clearChat} from './chats.js?v=588d41953d';
+import {publicMemory, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=588d41953d';
+import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=588d41953d';
+import {createThread, titleFrom} from './threads.js?v=588d41953d';
+import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=588d41953d';
+import {simulateGroup} from './group-simulator.js?v=588d41953d';
+import {BUSY_STATUSES} from './run-state.js?v=588d41953d';
+import {botSettings} from './bot-settings.js?v=588d41953d';
+import {denyBrowserRequest} from './bot-browser.js?v=588d41953d';
+import {answerAsk, expireAsks, orphanAsks, setGrant} from './asks.js?v=588d41953d';
+import {activityPage} from './activity-log.js?v=588d41953d';
+import {withLocalLock} from './locks.js?v=588d41953d';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
@@ -244,6 +244,11 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
   if (live === '/api/browser-live' && method === 'GET') return [];
   if ((m = live.match(/^\/api\/browser-live\/([a-z0-9-]+)$/)) && method === 'GET') return {botId: m[1], agent: false, demo: true, seq: 0, changed: false, state: 'idle', url: null, title: null, site: null};
   if (/^\/api\/browser-live\/[a-z0-9-]+\/(takeover|handback|input)$/.test(live) && method === 'POST') throw Object.assign(new Error('The demo has no browser to take over. Run the full app with the local agent to use one.'), {status: 409});
+
+  // The demo has no connectors, no model provider and no paired agent: Settings reads `demo` and says it needs the server.
+  if (live === '/api/connectors' && method === 'GET') return {connectors: [], google: null, demo: true};
+  if (live === '/api/ai' && method === 'GET') return {providers: [], defaultProviderId: null, defaultModel: null, bots: {}, demo: true};
+  if (live === '/api/agents' && method === 'GET') return {agents: [], actions: [], demo: true};
 
   // A thread: a new chat run by the primary bot, started in one call like the server's.
   if (path === '/api/threads' && method === 'POST') {

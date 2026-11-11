@@ -276,3 +276,57 @@ button.rw:active{background:var(--sunk)}
 .pc-trail li span{min-width:0;overflow-wrap:anywhere}
 .pc-trail small{margin-left:auto;max-width:45%;color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media(pointer:coarse){.pc-key{min-height:44px}.pc-go{height:36px}.pc-url{height:36px}}
+
+/* ---------- Connectors, and the connector lines in a chat ---------- */
+.cn-panel{display:flex;flex-direction:column;gap:22px}
+.cn-card{display:flex;flex-direction:column;gap:12px}
+.cn-card .form,.cn-add{padding:0}
+.cn-head{display:flex;align-items:center;gap:12px}
+.cn-head .w{flex:1;min-width:0;font-size:16px;overflow-wrap:anywhere}
+.cn-head .w b{display:block;font-weight:600}
+.cn-head .w small{display:block;font-size:13px;color:var(--muted);margin-top:2px;line-height:1.4}
+.cn-ico{flex:none;display:grid;place-items:center;width:36px;height:36px;border-radius:50%;background:var(--sunk);color:var(--soft)}
+.cn-acts{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.cn-acts .btn{text-decoration:none}
+.cn-msg{margin:0;padding:9px 12px;border-radius:12px;background:var(--bad-bg);color:var(--bad);font-size:13px;overflow-wrap:anywhere}
+.cn-testing{margin:0;font-size:12.5px;line-height:1.45;color:var(--muted)}
+.cn-list{padding:0 18px}
+.st-dlg .cn-list{padding:0 16px}
+.cn-list .cn-mcp{padding:16px 0}
+.cn-list .cn-mcp+.cn-mcp{border-top:1px solid var(--line)}
+.cn-tools summary{display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:13px;color:var(--muted);list-style:none;border-radius:8px;padding:2px 0}
+.cn-tools summary::-webkit-details-marker{display:none}
+.cn-tools summary svg{transition:rotate .2s var(--ease)}
+.cn-tools[open] summary svg{rotate:90deg}
+.cn-tools summary:hover{color:var(--fg)}
+.cn-tools ul{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}
+.cn-tools li{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline;font-size:13px}
+.cn-tools li small{flex-basis:100%;color:var(--muted);font-size:12.5px;line-height:1.35}
+.cn-tools code,.cn-copy code{font:500 12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.cn-setup{display:flex;flex-direction:column;gap:14px}
+.cn-steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:13.5px;line-height:1.45;color:var(--soft)}
+.cn-steps li::marker{color:var(--muted);font-variant-numeric:tabular-nums}
+.cn-redirect{display:flex;flex-direction:column;gap:6px}
+.cn-copy{display:flex;align-items:center;gap:8px}
+.cn-copy code{flex:1;min-width:0;padding:10px 12px;border-radius:12px;background:var(--sunk);overflow-wrap:anywhere}
+.cn-copy .btn{flex:none}
+.cn-fold[hidden]{display:none}
+.cn-fold{padding-top:2px;border-top:1px solid var(--line);margin-top:2px}
+.cn-fold .cn-setup{padding-top:14px}
+.cn-via{border:0;margin:0;padding:0;min-width:0;display:flex;flex-direction:column;gap:6px}
+.cn-via legend{padding:0;margin-bottom:6px}
+.cn-via .st-seg{align-self:flex-start}
+.cn-via .st-seg label{position:relative;cursor:pointer;padding:6px 14px;border-radius:8px;font-size:13.5px;color:var(--muted);transition:background-color .15s,color .15s}
+.cn-via .st-seg input{position:absolute;opacity:0;inset:0;margin:0;cursor:pointer}
+.cn-via .st-seg label:has(input:checked){background:var(--raise);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.1)}
+:root[data-theme="cocoa"] .cn-via .st-seg label:has(input:checked){background:var(--control)}
+.cn-via .st-seg label:has(input:focus-visible){outline:2px solid var(--wait);outline-offset:2px}
+.cn-add:has(input[value="agent"]:checked) .cn-if-http,.cn-add:not(:has(input[value="agent"]:checked)) .cn-if-agent{display:none}
+.cn-if-http,.cn-if-agent{display:flex;flex-direction:column;gap:14px}
+.cn-acct{font-style:normal;padding:1px 8px;border-radius:99px;background:color-mix(in srgb,var(--fg) 8%,transparent);color:var(--soft)}
+.cv-conn svg{display:inline-block;vertical-align:-2px;margin-right:6px;color:var(--muted)}
+.cv-conn.bad{background:var(--bad-bg);color:var(--bad)}
+.cv-conn.bad svg{color:var(--bad)}
+.cv-conn>span{min-width:0;overflow-wrap:anywhere}
+.cv-held .acts{margin-top:2px}
+@media(pointer:coarse){.cn-acts .btn.small{min-height:44px}.cn-copy .btn{min-height:44px}.cn-via .st-seg label{padding:10px 16px}}

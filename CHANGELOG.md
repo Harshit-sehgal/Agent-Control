@@ -33,6 +33,17 @@ browser tasks, and accounts, workspaces and backup.
   thread.
 
 ### Added
+- **Connectors and subscriptions in Settings.** Settings → Connectors lists, adds,
+  refreshes and deletes MCP servers (a web address with optional headers, or the
+  name of a server on your agent), runs the Google setup form with its steps,
+  redirect address and Testing note, and shows the connected account or
+  Reconnect; `?google=connected|error` after sign-in becomes a toast. Settings →
+  Models and keys adds a subscription (no key field) and shows each paired
+  agent's `claude` and `codex` sign-in. In a chat, a connector line names the
+  account, a send held for Undo carries an Undo button until its window ends, and
+  a usage limit offers Switch to the provider the server named. The Pages demo
+  says these need the server. A confirm sheet opened from Settings now sits above
+  the Settings dialog instead of behind it.
 - **Connectors (backend).** Bots reach Gmail, Drive and MCP servers through
   connectors, and every use is an ask. A hand-written MCP client speaks
   streamable HTTP from the server and stdio through the paired agent (the new

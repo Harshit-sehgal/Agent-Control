@@ -9,6 +9,7 @@
  * cards that wait on the owner. The handoffs live behind the pill, not in the log. */
 import {handoffs, progressPill} from './ui-company.js';
 import {isRunNote, runBelongsToChat} from './ui-model.js';
+import {connectorLine, modelLimitLine} from './ui-connect-model.js';
 
 const isActive = status => status === 'queued' || status === 'running';
 const isAwaiting = status => String(status || '').startsWith('awaiting');
@@ -30,8 +31,9 @@ function pillEntry(run, state) {
 }
 
 /** `items` is `timeline()`'s output for the chat; `key` is the chat key (a bot id,
- * or `team-<threadId>`). Entries: day, me, bot, offjob, note, browser, ask, guard, pill, limit. */
-export function feed({items = [], state, key}) {
+ * or `team-<threadId>`). `now` is the clock a held send's Undo window is read against. Entries: day, me, bot, offjob,
+ * note, browser, ask, guard, pill, limit, connector, model-limit. */
+export function feed({items = [], state, key, now = Date.now()}) {
   const runs = runsOfChat(state, key), byId = new Map(runs.map(run => [run.id, run]));
   const lastLine = new Map(), lastNote = new Map();
   items.forEach((item, index) => {
@@ -60,6 +62,9 @@ export function feed({items = [], state, key}) {
       if (m.kind === 'ask') return out.push({kind: 'ask', message: m});
       // The paused run's own card says this, so its note line would say it twice.
       if (m.kind === 'limit') return;
+      // What a connector read or did (and a send held for Undo), and the line a usage limit leaves with its Switch button.
+      if (m.kind === 'connector' || m.kind === 'connector-error') return out.push({kind: 'connector', message: m, line: connectorLine(m, {state, items, now})});
+      if (m.kind === 'model-limit') return out.push({kind: 'model-limit', message: m, line: modelLimitLine(m, {state})});
       if (m.kind === 'guard') return out.push({kind: 'guard', message: m, open: m.id === lastGuard && Boolean(state?.guard?.paused)});
       if (!isRunNote(m)) return out.push({kind: 'note', message: m, run: null});
       if (run?.status === 'completed' && m.id === `${run.id}-completed`) return;

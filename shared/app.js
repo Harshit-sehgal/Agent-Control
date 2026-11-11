@@ -17,6 +17,7 @@
  *   ui-settings     Settings, the Company chart and Activity
  *   ui-profile-model pure view models behind those screens
  *   ui-computer     pure rules of a bot's Computer view   ui-computer-view  that view, the profile row and the site chip
+ *   ui-connect      Settings → Connectors   ui-connect-model  the pure rules for it, the subscription rows and the connector chat lines
  *   ui-sheets       sign-in and password sheets   ui-admin   admin pages
  *   ui-dialogs      toast, sheet, confirm/ask      ui-actions action/form tables
  *   ui-fx           confetti, the send arrow and the bots' ambient life
@@ -33,6 +34,7 @@ import {showLogin, hideLogin} from './ui-sheets.js';
 import {actions, forms, onControlChange, onControlInput} from './ui-actions.js';
 import {bringBotsToLife} from './ui-fx.js';
 import {wireComputer} from './ui-computer-view.js';
+import {googleReturn, withoutGoogleParams} from './ui-connect-model.js';
 
 const el = id => document.getElementById(id);
 const hashRoute = () => normalizeRoute(companyRoute(location.hash, store.state));
@@ -179,11 +181,22 @@ async function boot() {
     // A laptop opens on the primary bot's chat; a phone opens on the home.
     const primary = (groups().find(g => g.id === 'home')?.bots || []).find(b => b.settings?.lead === true);
     if (isDesk() && store.route.home && !location.hash && primary) go({bot: primary.id}, {replace: true}); else changed('route');
+    finishGoogleSignIn();
   } catch (e) {
     if (e.status === 401) return showLogin(e.message);
     el('main').innerHTML = `<section class="home"><h1>Could not start</h1><p></p><p>${isStaticDemo() ? 'Enable browser local storage and reload. If the page was cached from an older deploy, hard-refresh once.' : 'Check that the Node server is running and reload.'}</p></section>`;
     el('main').querySelector('p').textContent = e.message;
   }
+}
+/** Google sent the owner back to `/?google=connected` or `?google=error&reason=...`: say how it went, take the
+ * parameters out of the address so a reload does not say it again, and open Settings → Connectors. Only after the
+ * app is signed in and painted, so a sign-in screen in between keeps the parameters for the next boot. */
+function finishGoogleSignIn() {
+  const result = googleReturn(location.search);
+  if (!result) return;
+  history.replaceState(history.state, '', `${location.pathname}${withoutGoogleParams(location.search)}${location.hash}`);
+  toast(result.text, !result.ok);
+  go({settings: 'conn'});
 }
 /** Leave nothing of the signed-out workspace in the DOM behind the sign-in. */
 function lockScreen(message) {
