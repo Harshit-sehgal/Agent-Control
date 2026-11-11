@@ -91,7 +91,7 @@ export function subagentBot(parent, request) {
     instructions: subagentInstructions(parent),
     permissions: [],
     // A helper is asked for a short answer, so it never burns a long reply budget.
-    settings: {replyLength: 'short', contextMessages: 0},
+    settings: {replyLength: 'short'},
     contract: {version: 1, inputs: ['objective'], output: {kind: 'text', fields: []}},
   };
 }

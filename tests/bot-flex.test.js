@@ -226,7 +226,6 @@ test('runGroup grows the run when a bot hands off, and a summoned guest answers 
   const host=team('host',['a','b']),other=team('other',['expert']);
   await store.update(s=>{s.groups=[host,other];coordinationState(s);
     s.chats={'team-host':[{id:'m0',role:'user',text:'old question',at:new Date().toISOString()},{id:'m1',role:'user',text:'newer question',at:new Date().toISOString()}]};
-    s.groups[0].bots[0].settings={contextMessages:1};
     s.groupRuns.push(createRun({group:s.groups[0],message:'@a start',guests:summonableGuests(s.groups,'host'),makeId:()=> 'run-g',chatKey:'team-host'}));});
   const seen=[];
   await runGroup(store,'run-g',async(b,input)=>{const e=JSON.parse(input);seen.push(e);return b.id==='a'?'Over to @expert for a check':'Checked.';});
@@ -234,7 +233,7 @@ test('runGroup grows the run when a bot hands off, and a summoned guest answers 
   assert.equal(run.status,'completed',run.error);
   assert.deepEqual(run.recipients,['a','expert']);
   assert.deepEqual(run.guestIds,['expert']);
-  assert.deepEqual(seen[0].thread.map(m=>m.text),['newer question'],'contextMessages bounds the thread.');
+  assert.deepEqual(seen[0].thread.map(m=>m.text),['old question','newer question'],'context is automatic: the whole short thread is read.');
   assert.ok(seen[0].team.some(m=>m.name==='Expert'));
   assert.equal(run.trace[0].toBotId,'expert');
   const said=s.chats['team-host'].filter(m=>m.role==='bot');
@@ -478,8 +477,8 @@ test('a count setting refuses a boolean or an array, whatever Number() makes of 
   const state = {groups: [{id: 'g', name: 'G', bots: [{id: 'b', name: 'Bot', instructions: 'Act as a bot', settings: {}}]}], events: []};
   // `Number(true)` is 1 and `Number([3])` is 3, so these reached the stored
   // settings as counts: a body with `maxSteps: true` became a one-step run.
-  for (const bad of [true, false, [3], [], null]) {
-    assert.throws(() => wf.updateBot(state, 'g', 'b', {settings: {contextMessages: bad}}), error => error.status === 400 && /whole number/.test(error.message), JSON.stringify(bad));
+  for (const bad of [true, false, [3], []]) {
+    assert.throws(() => wf.updateBot(state, 'g', 'b', {settings: {order: bad}}), error => error.status === 400 && /whole number/.test(error.message), JSON.stringify(bad));
   }
-  assert.equal(wf.updateBot(state, 'g', 'b', {settings: {contextMessages: '4'}}).settings.contextMessages, 4, 'a numeric string is still a count');
+  assert.equal(wf.updateBot(state, 'g', 'b', {settings: {order: '4'}}).settings.order, 4, 'a numeric string is still a count');
 });

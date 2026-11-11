@@ -86,7 +86,8 @@ async function runOneBotInner(store, {botId, input, page = '', browserDepth = 0}
   const memory = memoryFor(store, {bot, config, chatKey: bot.id});
   const notes = memoryBlock(memory);
   const everyone = botSettings(bot).canHandoff ? companyList(roster, bot.id) : [];
-  const envelope = {message: input, thread: threadContext(state.chats?.[bot.id], botSettings(bot).contextMessages), ...(everyone.length ? {company: everyone} : {}), ...(notes ? {memory: notes} : {}), ...(Object.keys(tools).length ? {tools} : {})};
+  // Context is automatic: the newest lines that fit; the recap in `memory` covers the rest.
+  const envelope = {message: input, thread: threadContext(state.chats?.[bot.id]), ...(everyone.length ? {company: everyone} : {}), ...(notes ? {memory: notes} : {}), ...(Object.keys(tools).length ? {tools} : {})};
   // The same guard a group step carries: a recap and a rulebook are notes the
   // model reads, never a second set of instructions.
   const restrictions = [

@@ -78,7 +78,7 @@ export async function simulateGroup({group, message, directBotId=null, guests=[]
       const lead=isLead(world,bot.id), closing=run.closeAt===i;
       const handed=previousFor(run,i,[...world.groups.flatMap(g=>g.bots||[]),...roster]);
       if(handed)previous=handed;
-      const envelope=createEnvelope({run,bot,previous,team:closing?[]:rosterFor(world,bot,roster,{thread:isThread(group)}),thread:threadContext(state?.chats?.[run.chatKey],botSettings(bot).contextMessages),lead,closing});
+      const envelope=createEnvelope({run,bot,previous,team:closing?[]:rosterFor(world,bot,roster,{thread:isThread(group)}),thread:threadContext(state?.chats?.[run.chatKey]),lead,closing});
       const output=`${bot.name} received the task and ${previous?`a handoff from ${roster.find(b=>b.id===previous.botId)?.name||previous.botId}`:'its initial instructions'}. This Pages demo cannot run its custom AI instructions.\nTask: ${envelope.objective.slice(0,220)}\n${previous?`Previous handoff: ${previous.output.slice(0,220)}`:''}`;
       previous={botId:bot.id,output};
       const added=closing?[]:handoffTargets({run,roster:rosterFor(world,bot,roster,{thread:isThread(group)}),fromBot:bot,output,home:lead||isThread(group)?null:group.bots,reserve:lead&&run.closeAt==null?1:0});

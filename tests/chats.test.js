@@ -236,7 +236,7 @@ test('a browser cannot post a nameless teammate line, and its notices say where 
   // `threadContext` is what a bot reads back: notices are dropped there, so no
   // browser-written text can arrive as instruction, and the nameless line reads
   // as the user's.
-  assert.deepEqual(threadContext(s.chats['team-home'], 10).map(l => l.from), ['user', 'Reviewer']);
+  assert.deepEqual(threadContext(s.chats['team-home']).map(l => l.from), ['user', 'Reviewer']);
   // A server-written notice is believed.
   addChatMessages(s, 'team-home', [{id: 's2', role: 'system', text: 'Ranker has not finished.'}], {trusted: true});
   assert.equal(s.chats['team-home'][3].role, 'system');

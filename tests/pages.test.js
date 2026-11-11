@@ -196,3 +196,18 @@ test('Pause all works in the demo: the same route and flag as the server',async(
   const off=await request('/api/guard','POST',{paused:false});
   assert.deepEqual([off.guard.paused,off.resumed,off.cancelled],[false,0,0]);
 });
+
+test('the demo keeps memory per bot with a company notebook, over the same routes as the server',async()=>{
+  const {request}=setup();
+  const added=await request('/api/memory/rules','POST',{bot:'atlas',text:'Always keep replies short.'});
+  const id=added.rules[0].id;
+  await request('/api/memory/rules','POST',{bot:'company',text:'The company is called Northwind.'});
+  const view=await request('/api/memory?bot=atlas');
+  assert.deepEqual(view.bot.rules.map(rule=>rule.text),['Always keep replies short.']);
+  assert.deepEqual(view.company.rules.map(rule=>rule.text),['The company is called Northwind.']);
+  const edited=await request(`/api/memory/rules/${id}?bot=atlas`,'PATCH',{text:'Keep replies to one line.'});
+  assert.equal(edited.rule.text,'Keep replies to one line.');
+  assert.deepEqual(await request(`/api/memory/rules/${id}?bot=atlas`,'DELETE'),{ok:true,removed:1});
+  await assert.rejects(request('/api/memory/rules','POST',{text:'Whose rule?'}),error=>error.status===400);
+  assert.equal((await request('/api/memory?bot=atlas')).bot.rules.length,0);
+});

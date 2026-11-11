@@ -70,10 +70,10 @@ test('a member can add, delete and forget memory over HTTP', async () => {
 test('bad memory requests fail with a status the server can send', async () => {
   const store = memoryStore(), router = routes();
   const add = router.find('POST', '/api/memory/rules').route.handler;
-  await assert.rejects(() => add(context(store, {body: {text: 'Always cite a source.'}})), error => error.status === 400 && /Which model/.test(error.message));
+  await assert.rejects(() => add(context(store, {body: {text: 'Always cite a source.'}})), error => error.status === 400 && /Which bot/.test(error.message));
   await assert.rejects(() => add(context(store, {body: {model: 'env:m', text: 'x'}})), error => error.status === 400 && /at least 4 characters/.test(error.message));
   const remove = router.find('DELETE', '/api/memory/rules/missing').route.handler;
-  await assert.rejects(() => remove(context(store, {url: '/api/memory/rules/missing', params: {id: 'missing'}})), error => error.status === 400);
+  await assert.rejects(() => remove(context(store, {url: '/api/memory/rules/missing', params: {id: 'missing'}})), error => error.status === 404, 'with no book named the rule is looked for in every book');
   await assert.rejects(() => remove(context(store, {url: '/api/memory/rules/missing?model=env%3Am', params: {id: 'missing'}})), error => error.status === 404);
   const forget = router.find('POST', '/api/memory/forget').route.handler;
   await assert.rejects(() => forget(context(store, {body: {}})), error => error.status === 400);

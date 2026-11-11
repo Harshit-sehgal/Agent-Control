@@ -9,7 +9,7 @@ import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGrou
 import {RETENTION_DEFAULTS} from './retention.js';
 import {enqueueTask, retryTask, cancelTask} from './tasks.js';
 import {addChatMessages, clearChat} from './chats.js';
-import {publicMemory, addRules, removeRule, forgetChat, forgetRulebook} from './memory.js';
+import {publicMemory, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js';
 import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js';
 import {createThread, titleFrom} from './threads.js';
 import {pauseAll, resumeGuard} from './runaway.js';
@@ -258,20 +258,27 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
   // Durable memory: the rulebook and chat recap are part of local state, so a
   // person can delete a rule here too. A model-written pass needs the Node build.
   if (path === '/api/retention' && method === 'PATCH') { updateRetention(state, body); save(state); return {...RETENTION_DEFAULTS, ...state.settings.retention}; }
-  if (path === '/api/memory' && method === 'GET') return publicMemory(state);
+  // A book is named by `bot` (an id, or `company`) or, for an older client, `model`.
+  const memoryPath = path.split('?')[0], memoryQuery = new URLSearchParams(path.split('?')[1] || '');
+  const bookOf = from => { const bot = from?.bot || memoryQuery.get('bot'), model = from?.model || memoryQuery.get('model'); return bot ? (bot === COMPANY_KEY ? COMPANY_KEY : botKey(bot)) : model || null; };
+  if (memoryPath === '/api/memory' && method === 'GET') { const bot = memoryQuery.get('bot'); return publicMemory(state, {bot: bot && bot !== COMPANY_KEY ? bot : null}); }
   if (path === '/api/memory/rules' && method === 'POST') {
-    if (!body.model) throw new Error('Which model should keep this rule?');
-    const r = addRules(state, body.model, [body.text], {source: 'user', label: body.label});
+    const book = bookOf(body);
+    if (!book) throw Object.assign(new Error('Which bot should keep this rule?'), {status: 400});
+    const r = addRules(state, book, [body.text], {source: 'user', label: body.label});
     save(state);
-    return {ok: true, model: body.model, rules: r.book.rules.map(rule => ({id: rule.id, text: rule.text, source: rule.source}))};
+    return {ok: true, model: book, rules: r.book.rules.map(rule => ({id: rule.id, text: rule.text, source: rule.source}))};
   }
-  const memoryPath = path.split('?')[0];
+  if ((m = memoryPath.match(/^\/api\/memory\/rules\/([a-z0-9-]+)$/)) && method === 'PATCH') {
+    const rule = editRule(state, bookOf(body) || bookKeyOfRule(state, m[1]) || '', m[1], body.text);
+    if (!rule) throw Object.assign(new Error('That bot already keeps that line.'), {status: 409});
+    save(state); return {ok: true, rule: {id: rule.id, text: rule.text, source: rule.source}};
+  }
   if ((m = memoryPath.match(/^\/api\/memory\/rules\/([a-z0-9-]+)$/)) && method === 'DELETE') {
-    const model = new URLSearchParams(path.split('?')[1] || '').get('model') || '';
-    const r = removeRule(state, model, m[1]); save(state); return r;
+    const r = removeRule(state, bookOf(null) || bookKeyOfRule(state, m[1]) || '', m[1]); save(state); return r;
   }
   if (path === '/api/memory/forget' && method === 'POST') {
-    if (body.model) forgetRulebook(state, body.model);
+    if (bookOf(body)) forgetRulebook(state, bookOf(body));
     if (body.chat) forgetChat(state, body.chat);
     save(state);
     return {ok: true, model: body.model || null, chat: body.chat || null};

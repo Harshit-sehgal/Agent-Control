@@ -270,10 +270,12 @@ async function runGroupInner(store,id,executor){
       const closing=r.closeAt===i;
       const handed=previousFor(r,i,current.groups.flatMap(x=>x.bots||[]));
       if(handed)previous=handed;
-      const thread=threadContext(current.chats?.[r.chatKey],botSettings(bot).contextMessages);
-      // This bot's own model, so its rulebook and the chat recap are the right ones.
+      // This bot's own provider and its own rulebook, plus the company notebook.
       const config=resolveConfig(store,bot.id);
       const memory=memoryFor(store,{bot,config,chatKey:r.chatKey});
+      // Context is automatic: the newest lines that fit; the stored recap, which is
+      // in the memory block, stands in for whatever had to be cut.
+      const thread=threadContext(current.chats?.[r.chatKey]);
       const envelope=createEnvelope({run:r,bot,previous,thread,team:closing?[]:rosterFor(current,bot,roster,{thread:isThread(g)}),company:everyone,memory,lead,closing});
       // Each bot runs on its own chosen model/provider, else the workspace
       // default. The turn itself is the one sequence every caller runs: a

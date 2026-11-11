@@ -33,14 +33,15 @@ async function withStore(bodyCb, {group, message, runId, directBotId = null}) {
   }
 }
 
-test('a group step gets the model rulebook and leaves a chat recap behind', async () => {
+test('a group step gets its own bot\'s rulebook and leaves a chat recap behind', async () => {
   const group = {id: 'g', name: 'G', bots: [bot('a', 'Alpha'), bot('b', 'Beta'), bot('c', 'Gamma')]};
   await withStore(async store => {
     await runGroup(store, 'run-mem', async bot => `Answer from ${bot.name}`);
     let state = store.read();
-    const book = state.memory.rulebooks['env:test-model'];
-    assert.ok(book, 'The model book must be created for the run.');
-    assert.equal(book.turns, 3, 'Every step counts against the model book.');
+    const book = state.memory.rulebooks['bot:a'];
+    assert.ok(book, 'Each bot gets a book of its own for the run.');
+    assert.deepEqual(['a', 'b', 'c'].map(id => state.memory.rulebooks[`bot:${id}`].turns), [1, 1, 1], 'A step counts against its own bot\'s book.');
+    assert.equal(Object.keys(state.memory.rulebooks).some(key => key.startsWith('env:')), false, 'No book is shared through the model any more.');
     assert.deepEqual(book.pending, ['Always keep replies short.'], 'The durable user sentence is queued once.');
     assert.match(state.memory.chats['team-g'].summary, /Always keep replies short/);
 

@@ -19,7 +19,12 @@ export const ROUTING_MODES = ['pipeline', 'mentions', 'everyone'];
 export const COORDINATION_MODES = ['direct', 'tracked'];
 /** The hard ceiling on bot steps in one run, whatever a group sets. */
 export const MAX_STEPS_LIMIT = 12;
+/** The most recent lines a bot may read, before the character budget cuts further.
+ * Context is automatic: there is no per-bot setting for it. */
 export const MAX_CONTEXT_MESSAGES = 30;
+/** Settings that used to exist. A stored value is ignored on read and dropped on
+ * the next save, and sending one is not an error, so an older client still works. */
+const LEGACY_SETTINGS = ['contextMessages'];
 
 export const BOT_DEFAULTS = Object.freeze({
   enabled: true,
@@ -28,8 +33,6 @@ export const BOT_DEFAULTS = Object.freeze({
   replyLength: 'medium',
   /** Extra tone guidance appended to the bot's job. */
   style: '',
-  /** How many recent messages of the conversation the bot sees. */
-  contextMessages: 10,
   /** Keep durable memory for this bot's model: a per-model rulebook and a
    * rolling recap of the conversation, both stored in the workspace. */
   memory: true,
@@ -86,7 +89,9 @@ const flag = (value, label) => {
 
 /** The effective settings of a bot: its stored values over the defaults. */
 export function botSettings(bot) {
-  return {...BOT_DEFAULTS, ...(isObject(bot?.settings) ? bot.settings : {})};
+  const settings = {...BOT_DEFAULTS, ...(isObject(bot?.settings) ? bot.settings : {})};
+  for (const key of LEGACY_SETTINGS) delete settings[key];
+  return settings;
 }
 
 /** Validate a partial settings change and merge it over `current`. Only keys
@@ -95,7 +100,8 @@ export function validateBotSettings(body, current = {}) {
   if (body === undefined || body === null) return {...BOT_DEFAULTS, ...current};
   if (!isObject(body)) fail('Bot settings must be an object.');
   const next = {...BOT_DEFAULTS, ...(isObject(current) ? current : {})};
-  for (const key of Object.keys(body)) if (!Object.hasOwn(BOT_DEFAULTS, key)) fail(`Unknown bot setting "${String(key).slice(0, 40)}".`);
+  for (const key of Object.keys(body)) if (!Object.hasOwn(BOT_DEFAULTS, key) && !LEGACY_SETTINGS.includes(key)) fail(`Unknown bot setting "${String(key).slice(0, 40)}".`);
+  for (const key of LEGACY_SETTINGS) delete next[key];
   if (body.enabled !== undefined) next.enabled = flag(body.enabled, 'Enabled');
   if (body.temperature !== undefined) {
     if (body.temperature === null || body.temperature === '') next.temperature = null;
@@ -113,7 +119,6 @@ export function validateBotSettings(body, current = {}) {
     if (typeof body.style !== 'string') fail('Style must be text.');
     next.style = cleanText(body.style, 600);
   }
-  if (body.contextMessages !== undefined) next.contextMessages = integer(body.contextMessages, 0, MAX_CONTEXT_MESSAGES, 'Context messages');
   if (body.memory !== undefined) next.memory = flag(body.memory, 'Memory');
   if (body.summonable !== undefined) next.summonable = flag(body.summonable, 'Summonable');
   if (body.canHandoff !== undefined) next.canHandoff = flag(body.canHandoff, 'Can hand off');
@@ -200,13 +205,13 @@ export function prunePipeline(group) {
   return group;
 }
 
-/** Recent conversation lines a bot may read, oldest first, bounded in count
- * and size. Each line is labelled with who said it; the caller marks the whole
- * block as untrusted task data. */
-export function threadContext(messages, count, maxChars = 3600) {
-  const n = Math.max(0, Math.min(MAX_CONTEXT_MESSAGES, Number(count) || 0));
-  if (!n || !Array.isArray(messages)) return [];
-  const lines = messages.filter(m => m && m.text && ['user', 'bot'].includes(m.role)).slice(-n)
+/** Recent conversation lines a bot may read, oldest first, with no setting to
+ * tune: the newest that fit in `maxChars`. What was cut is the stored recap of the
+ * conversation, which rides in the bot's memory block. Each line is labelled with
+ * who said it; the caller marks the whole block as untrusted task data. */
+export function threadContext(messages, maxChars = 3600) {
+  if (!Array.isArray(messages)) return [];
+  const lines = messages.filter(m => m && m.text && ['user', 'bot'].includes(m.role)).slice(-MAX_CONTEXT_MESSAGES)
     .map(m => ({from: m.role === 'user' ? 'user' : (m.senderName || m.senderId || 'bot'), text: String(m.text).slice(0, 800)}));
   let total = 0;
   const kept = [];

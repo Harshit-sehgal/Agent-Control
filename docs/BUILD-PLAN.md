@@ -148,6 +148,7 @@ work should be added as a fresh section.
 - [x] A durable sentence must address the bot, not merely contain a modal, so "we must ship today" is not kept as a rule
 - [x] UI: bot profile memory section with rule add/delete, chat forget, and an explicit "update rulebook" action (`/api/memory`)
 - [x] Tests (`tests/memory.test.js`, `tests/memory-routes.test.js`); check, test and build:pages green
+- [x] (Phase 2) Memory is per bot: each bot keeps its own rulebook (`bot:<id>`) and every bot reads one company notebook it cannot write (`company`); the owner adds, edits (`PATCH /api/memory/rules/:id`) and deletes lines from a bot's profile (`GET /api/memory?bot=<id>`); a model's old book is copied into each bot that used it, once (`migrateModelBooks`); context needs no setting (the newest lines that fit, the recap for the rest) and `contextMessages` is gone
 
 ## Phase U — bots that ask each other
 - [x] `bot.ask` permission on any bot; envelope and system prompt describe the block only to bots holding it
@@ -167,6 +168,7 @@ work should be added as a fresh section.
 - [x] Refused, duplicate and over-limit requests say why in the chat and write nothing
 - [x] `bot.create` is re-checked against the roster inside the write, so a permission revoked while the reply was written still refuses; schema v10 keeps `origin` and `created_by` across a restart
 - [x] Tests (`tests/bot-create.test.js`); check, test and build:pages green
+- [x] (Phase 2) Any bot may make a bot with no grant (`bot.create` is basic kit): one sentence is the job and the name is optional; it reports to its creator (a lead) or the creator's manager; no 40-bot cap (500 safety cap); more than about 50 creations or 300 bot-started runs in five minutes pauses everything bots start, and the owner chooses Keep going or Stop (`shared/runaway.js`, `POST /api/guard`)
 
 ## Phase W — a provider client that survives real gateways
 - [x] A gateway that answers `text/event-stream` without being asked is folded back into a reply for every protocol, and an error delivered as a stream keeps the provider's own words

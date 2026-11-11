@@ -20,6 +20,7 @@ import * as wf from '../shared/workflow.js';
 import * as agent from './agent.js';
 import {startRetention} from './scheduler.js';
 import {markInterrupted} from './coordination.js';
+import {migrateModelBooks} from './memory.js';
 import {createQueue,recoverQueue} from './queue.js';
 import {taskHandlers,createNotifier} from './handlers.js';
 import {fail,send,cookie,checkOrigin,rawBody,safeJson,SECURITY} from './http.js';
@@ -65,6 +66,7 @@ export function createWorkspaceStarter({auth, push}) {
     const ready = (async () => {
       await ws.update(s => { wf.migrate(s); });
       await markInterrupted(ws);
+      await migrateModelBooks(ws);
       await recoverQueue(ws);
     })();
     // Tasks orphaned by a disconnected agent are re-armed at boot rather

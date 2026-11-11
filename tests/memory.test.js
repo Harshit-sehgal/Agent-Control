@@ -349,11 +349,11 @@ test('a bot with memory off neither reads nor writes it', async () => {
   assert.deepEqual(store.state().memory.chats, {});
 
   const on = memoryFor(store, {bot: {id: 'writer'}, config, chatKey: 'writer'});
-  assert.equal(on.key, 'env:model-a');
-  assert.equal(on.label, 'model-a');
+  assert.equal(on.key, 'bot:writer', 'the book is the bot\'s own');
+  assert.equal(on.label, 'model-a', 'a bot with no name is labelled by its model');
   assert.deepEqual(on.rules, []);
   await rememberTurn(store, {bot: {id: 'writer'}, config, chatKey: 'writer', userText: 'Always keep replies short.', botText: 'Okay.', now: at});
-  const book = store.state().memory.rulebooks['env:model-a'];
+  const book = store.state().memory.rulebooks['bot:writer'];
   assert.equal(book.turns, 1);
   assert.deepEqual(book.pending, ['Always keep replies short.']);
   assert.match(store.state().memory.chats.writer.summary, /replies short/);
