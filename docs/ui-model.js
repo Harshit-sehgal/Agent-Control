@@ -2,10 +2,11 @@
  * a pane shows: the chat list, a thread's timeline, the "needs you" count and
  * the hash route. No DOM and no globals, so the product rules here are unit
  * tested directly (tests/ui-model.test.js). */
-import {botSettings} from './bot-settings.js?v=843eeac55a';
-import {STOPPABLE_STATUSES} from './run-state.js?v=843eeac55a';
-import {INPUTS} from './contracts.js?v=843eeac55a';
-import {primaryOf} from './company.js?v=843eeac55a';
+import {botSettings} from './bot-settings.js?v=32183ec508';
+import {STOPPABLE_STATUSES} from './run-state.js?v=32183ec508';
+import {INPUTS} from './contracts.js?v=32183ec508';
+import {primaryOf} from './company.js?v=32183ec508';
+import {plain} from './ui-kit.js?v=32183ec508';
 
 /** The contract inputs a profile save sends. A bot whose stored inputs were
  * all removed ones (X-engage) loads with none, and must still save. */
@@ -139,7 +140,7 @@ export const totalWaitingOnYou = ({plans = 0, pauses = 0, pages = 0, asks = 0} =
 function preview(history, {isTeam, fallback}) {
   const last = history[history.length - 1];
   if (!last) return {text: fallback, sender: ''};
-  const text = String(last.text || '').replace(/\s+/g, ' ').slice(0, 120);
+  const text = plain(last.text).slice(0, 120);
   if (last.role === 'user') return {text, sender: 'You'};
   if (last.role === 'bot' && isTeam) return {text, sender: last.senderName || ''};
   return {text, sender: ''};

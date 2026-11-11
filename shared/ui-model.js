@@ -6,6 +6,7 @@ import {botSettings} from './bot-settings.js';
 import {STOPPABLE_STATUSES} from './run-state.js';
 import {INPUTS} from './contracts.js';
 import {primaryOf} from './company.js';
+import {plain} from './ui-kit.js';
 
 /** The contract inputs a profile save sends. A bot whose stored inputs were
  * all removed ones (X-engage) loads with none, and must still save. */
@@ -139,7 +140,7 @@ export const totalWaitingOnYou = ({plans = 0, pauses = 0, pages = 0, asks = 0} =
 function preview(history, {isTeam, fallback}) {
   const last = history[history.length - 1];
   if (!last) return {text: fallback, sender: ''};
-  const text = String(last.text || '').replace(/\s+/g, ' ').slice(0, 120);
+  const text = plain(last.text).slice(0, 120);
   if (last.role === 'user') return {text, sender: 'You'};
   if (last.role === 'bot' && isTeam) return {text, sender: last.senderName || ''};
   return {text, sender: ''};

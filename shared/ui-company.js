@@ -11,6 +11,7 @@
  * two entries, {botId: asker, kind: 'ask', to, task} and then
  * {botId: asked, kind: 'peer', to: asker, output}. */
 import {face} from './ui-face.js';
+import {plain} from './ui-kit.js';
 import {waitingOnYou, totalWaitingOnYou} from './ui-model.js';
 
 const teamKey = id => `team-${id}`;
@@ -21,7 +22,7 @@ const primaryOf = bots => bots.find(b => settingsOf(b).lead === true);
 const managerOf = (bot, bots) => settingsOf(bot).lead !== true && bots.some(b => b !== bot && settingsOf(b).reportsTo === bot.id);
 const isAwaiting = status => String(status || '').startsWith('awaiting');
 const isActive = status => status === 'queued' || status === 'running';
-const oneLine = (text, max) => String(text ?? '').replace(/\s+/g, ' ').slice(0, max);
+const oneLine = (text, max) => plain(text).slice(0, max);
 const time = value => { const t = Date.parse(value || ''); return Number.isFinite(t) ? t : 0; };
 const sameDay = (a, b) => new Date(a).toDateString() === new Date(b).toDateString();
 

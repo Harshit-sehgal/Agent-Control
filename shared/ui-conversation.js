@@ -17,7 +17,7 @@ import {hasJob} from './ui-profile-model.js';
 import {feed} from './ui-feed.js';
 import {askCard} from './ui-asks.js';
 import {face, botColor} from './ui-face.js';
-import {esc, icon, btn, dayLabel, tag} from './ui-kit.js';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js';
 import {store, conversation, findBot, groups, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync} from './ui-store.js';
 import {runAnyway, startThread, answerLimit} from './ui-chat.js';
 import {toast} from './ui-dialogs.js';
@@ -135,7 +135,7 @@ const pillSeen = new Map();
 function pillEntry({run, pill, handoffs}, conv) {
   const bots = company(), nameOf = id => bots.find(b => b.id === id)?.name || 'A bot';
   if (pill.done) {
-    const log = handoffs.map(h => `<li><span class="who"><b>${esc(nameOf(h.from))}</b><span>to ${esc(nameOf(h.to))}</span></span><p>${esc(h.text)}</p></li>`).join('');
+    const log = handoffs.map(h => `<li><span class="who"><b>${esc(nameOf(h.from))}</b><span>to ${esc(nameOf(h.to))}</span></span><div class="md">${md(h.text)}</div></li>`).join('');
     return `<details class="cv-prog cv-done" data-pid="${esc(run.id)}"${openRuns.has(run.id) ? ' open' : ''}><summary><span>${esc(pill.text)}</span>${icon('chevron', 13)}</summary><ol class="cv-plog">${log}</ol></details>`;
   }
   const bot = bots.find(b => b.id === pill.botId) || askerOf(conv), waiting = String(run.status).startsWith('awaiting');
@@ -188,7 +188,7 @@ function offjobEntry({message: m, open}, conv) {
 function botEntry(m, conv) {
   const bot = m.senderId ? findBot(m.senderId) : conv.bot, name = bot?.name || m.senderName || conv.name;
   const job = conv.isTeam && bot ? `<small>${esc(jobOf(bot))}</small>` : '';
-  return `<div class="cv-bot" data-m="${esc(m.id)}" style="--t:${tintOf(bot, name)}">${botFace(bot, name, 36)}<div class="cv-body"><div class="cv-name">${esc(name)}${job}</div><p>${esc(m.text)}</p></div></div>`;
+  return `<div class="cv-bot" data-m="${esc(m.id)}" style="--t:${tintOf(bot, name)}">${botFace(bot, name, 36)}<div class="cv-body"><div class="cv-name">${esc(name)}${job}</div><div class="md">${md(m.text)}</div></div></div>`;
 }
 
 function entryHtml(entry, conv) {
@@ -231,7 +231,7 @@ function announce(conv, entries) {
   const last = [...entries].reverse().find(e => e.kind === 'bot' || e.kind === 'offjob')?.message, node = el('announce');
   if (!last || !node) return;
   const key = `${conv.id}:${last.id}`, first = spoken === null || !spoken.startsWith(`${conv.id}:`);
-  if (key !== spoken && !first) node.textContent = `${last.senderName || conv.name}: ${String(last.text).slice(0, 300)}`;
+  if (key !== spoken && !first) node.textContent = `${last.senderName || conv.name}: ${plain(last.text).slice(0, 300)}`;
   spoken = key;
 }
 

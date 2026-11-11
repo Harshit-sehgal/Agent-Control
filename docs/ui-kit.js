@@ -4,6 +4,48 @@
 
 export const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 
+/* Markdown, the small part models write: **bold**, *italic*, `code`, [links](https://…),
+ * bullet and numbered lists, # headings. Everything is escaped first, so the only
+ * tags in the result are the ones made here. */
+const LIST = /^\s*(?:[-*•]|(\d+)[.)])\s+(.*)$/;
+const HEAD = /^\s*#{1,6}\s+(.*)$/;
+const UNESC = s => s.replace(/&amp;/g, '&');
+function inline(text) {
+  const codes = [];
+  let s = esc(text).replace(/`([^`\n]+)`/g, (_, c) => `\u0000${codes.push(c) - 1}\u0000`);
+  s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => `<a href="${esc(UNESC(url))}" target="_blank" rel="noopener noreferrer">${label}</a>`)
+    .replace(/\*\*(?=\S)(.+?)(?<=\S)\*\*|__(?=\S)(.+?)(?<=\S)__/g, (_, a, b) => `<strong>${a ?? b}</strong>`)
+    .replace(/(^|[^\w*])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?!\w)|(^|[^\w])_(?=\S)(.+?)(?<=\S)_(?!\w)/g, (_, p1, a, p2, b) => `${p1 ?? p2}<em>${a ?? b}</em>`);
+  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[i]}</code>`);
+}
+export function md(text) {
+  const out = [];
+  let para = [], list = null;
+  const flush = () => {
+    if (para.length) out.push(`<p>${para.map(inline).join('<br>')}</p>`);
+    if (list) out.push(`<${list.tag}>${list.items.map(i => `<li>${inline(i)}</li>`).join('')}</${list.tag}>`);
+    para = []; list = null;
+  };
+  for (const line of String(text ?? '').split('\n')) {
+    const item = LIST.exec(line), head = HEAD.exec(line);
+    if (!line.trim()) flush();
+    else if (head) { flush(); out.push(`<p class="md-h">${inline(head[1])}</p>`); }
+    else if (item) {
+      const tag = item[1] ? 'ol' : 'ul';
+      if (para.length || (list && list.tag !== tag)) flush();
+      (list ||= {tag, items: []}).items.push(item[2]);
+    } else if (list && /^\s{2,}\S/.test(line)) list.items[list.items.length - 1] += ` ${line.trim()}`;
+    else { if (list) flush(); para.push(line); }
+  }
+  flush();
+  return out.join('');
+}
+/** The same text with its markdown markers dropped, on one line, for previews. */
+export const plain = text => String(text ?? '')
+  .replace(/`([^`\n]+)`/g, '$1').replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, '$1')
+  .replace(/\*\*(.+?)\*\*|__(.+?)__/g, (_, a, b) => a ?? b).replace(/(^|[^\w*])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?!\w)/g, '$1$2')
+  .replace(/^\s*(?:#{1,6}|[-*•]|\d+[.)])\s+/gm, '').replace(/\s+/g, ' ').trim();
+
 const ICONS = {
   back: '<path d="m15 18-6-6 6-6"/>',
   chevron: '<path d="m9 18 6-6-6-6"/>',

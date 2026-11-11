@@ -138,7 +138,7 @@ async def first_run(page, base):
     await expect(page.locator('#cv-line')).to_have_text('Hands work to any bot')
     await expect(page.locator('#sidebar .pin')).to_have_count(1)
     await expect(page.locator('#sidebar .pin')).to_contain_text('Atlas')
-    await expect(page.locator('#sidebar .rail-status')).to_contain_text('Atlas on watch')
+    await expect(page.locator('#sidebar .rail-status')).to_have_count(0)
     await expect(page.locator('#sidebar .rail-demo')).to_contain_text('Browser-only')
     names = await page.locator('#sidebar .crow b').all_inner_texts()
     assert names == ['Researcher', 'Writer', 'Reviewer'], names

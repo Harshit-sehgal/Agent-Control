@@ -5,11 +5,11 @@
  * Home is the Chats layout only. On a phone it is two sections, Bots and Threads,
  * switched by swiping; on a laptop the sidebar holds both and the chat opens on the
  * right. The lists come from ui-company.js (pure); this file is markup and events. */
-import {botRows, threadRows} from './ui-company.js?v=843eeac55a';
-import {face} from './ui-face.js?v=843eeac55a';
-import {esc, icon, stamp} from './ui-kit.js?v=843eeac55a';
-import {pauseBanner} from './ui-asks.js?v=843eeac55a';
-import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, isStaticDemo} from './ui-store.js?v=843eeac55a';
+import {botRows, threadRows} from './ui-company.js?v=32183ec508';
+import {face} from './ui-face.js?v=32183ec508';
+import {esc, icon, stamp} from './ui-kit.js?v=32183ec508';
+import {pauseBanner} from './ui-asks.js?v=32183ec508';
+import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, isStaticDemo} from './ui-store.js?v=32183ec508';
 
 const el = id => document.getElementById(id);
 const DESK = '(min-width:1024px)';
@@ -127,9 +127,7 @@ export function renderRail() {
   // Hidden on a phone: leave it empty rather than draw every face twice.
   if (!isDesk()) { body.innerHTML = ''; return; }
   const query = store.listQuery.trim(), rows = chatRows(query);
-  const status = rows.filter(r => r.status === 'working').length, hasRows = rows.length;
-  const primary = chatRows().find(r => r.isPrimary)?.name || 'Atlas';
-  const line = store.state?.guard?.paused ? 'Paused · nothing is running' : status ? `${status} working · others asleep` : `${primary} on watch · others asleep`;
+  const hasRows = rows.length;
   const pinned = rows.filter(r => r.pinned), rest = rows.filter(r => !r.pinned), threads = threadGroups(query, {headings: false});
   const demo = isStaticDemo() ? '<p class="rail-demo">Browser-only demo · data stays in this browser</p>' : '';
   // Bots | Threads at the top picks the list, as the phone's sections do. A search looks through both.
@@ -144,7 +142,7 @@ export function renderRail() {
   }
   if (!query && store.section === 'threads') {
     body.innerHTML = threadGroups() || '<p class="hv-empty"><strong>No threads yet</strong>Start one with the New thread button.</p>';
-  } else body.innerHTML = `${query ? '' : `<div class="rail-status"><i aria-hidden="true"></i>${esc(line)}</div>${demo}`}
+  } else body.innerHTML = `${query ? '' : demo}
     ${pinned.length ? `<div class="shelf">${pinned.map(r => pinnedRow(r, 72)).join('')}</div>` : ''}
     <div class="crows">${rest.map(botRow).join('')}</div>${query ? '' : hiddenLink()}
     ${query && threads ? `<div class="rail-h">Threads</div>${threads}` : ''}

@@ -7,21 +7,21 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=843eeac55a';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=843eeac55a';
-import {requestOfMessage} from './bot-browser.js?v=843eeac55a';
-import {validHttpUrl} from './core.js?v=843eeac55a';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=843eeac55a';
-import {botStatus, botIsManager, chatStatus, jobOf} from './ui-company.js?v=843eeac55a';
-import {hasJob} from './ui-profile-model.js?v=843eeac55a';
-import {feed} from './ui-feed.js?v=843eeac55a';
-import {askCard} from './ui-asks.js?v=843eeac55a';
-import {face, botColor} from './ui-face.js?v=843eeac55a';
-import {esc, icon, btn, dayLabel, tag} from './ui-kit.js?v=843eeac55a';
-import {store, conversation, findBot, groups, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync} from './ui-store.js?v=843eeac55a';
-import {runAnyway, startThread, answerLimit} from './ui-chat.js?v=843eeac55a';
-import {toast} from './ui-dialogs.js?v=843eeac55a';
-import {siteChip} from './ui-computer-view.js?v=843eeac55a';
+import {OFFJOB_CHOICES} from './off-job.js?v=32183ec508';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=32183ec508';
+import {requestOfMessage} from './bot-browser.js?v=32183ec508';
+import {validHttpUrl} from './core.js?v=32183ec508';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=32183ec508';
+import {botStatus, botIsManager, chatStatus, jobOf} from './ui-company.js?v=32183ec508';
+import {hasJob} from './ui-profile-model.js?v=32183ec508';
+import {feed} from './ui-feed.js?v=32183ec508';
+import {askCard} from './ui-asks.js?v=32183ec508';
+import {face, botColor} from './ui-face.js?v=32183ec508';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=32183ec508';
+import {store, conversation, findBot, groups, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync} from './ui-store.js?v=32183ec508';
+import {runAnyway, startThread, answerLimit} from './ui-chat.js?v=32183ec508';
+import {toast} from './ui-dialogs.js?v=32183ec508';
+import {siteChip} from './ui-computer-view.js?v=32183ec508';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -135,7 +135,7 @@ const pillSeen = new Map();
 function pillEntry({run, pill, handoffs}, conv) {
   const bots = company(), nameOf = id => bots.find(b => b.id === id)?.name || 'A bot';
   if (pill.done) {
-    const log = handoffs.map(h => `<li><span class="who"><b>${esc(nameOf(h.from))}</b><span>to ${esc(nameOf(h.to))}</span></span><p>${esc(h.text)}</p></li>`).join('');
+    const log = handoffs.map(h => `<li><span class="who"><b>${esc(nameOf(h.from))}</b><span>to ${esc(nameOf(h.to))}</span></span><div class="md">${md(h.text)}</div></li>`).join('');
     return `<details class="cv-prog cv-done" data-pid="${esc(run.id)}"${openRuns.has(run.id) ? ' open' : ''}><summary><span>${esc(pill.text)}</span>${icon('chevron', 13)}</summary><ol class="cv-plog">${log}</ol></details>`;
   }
   const bot = bots.find(b => b.id === pill.botId) || askerOf(conv), waiting = String(run.status).startsWith('awaiting');
@@ -188,7 +188,7 @@ function offjobEntry({message: m, open}, conv) {
 function botEntry(m, conv) {
   const bot = m.senderId ? findBot(m.senderId) : conv.bot, name = bot?.name || m.senderName || conv.name;
   const job = conv.isTeam && bot ? `<small>${esc(jobOf(bot))}</small>` : '';
-  return `<div class="cv-bot" data-m="${esc(m.id)}" style="--t:${tintOf(bot, name)}">${botFace(bot, name, 36)}<div class="cv-body"><div class="cv-name">${esc(name)}${job}</div><p>${esc(m.text)}</p></div></div>`;
+  return `<div class="cv-bot" data-m="${esc(m.id)}" style="--t:${tintOf(bot, name)}">${botFace(bot, name, 36)}<div class="cv-body"><div class="cv-name">${esc(name)}${job}</div><div class="md">${md(m.text)}</div></div></div>`;
 }
 
 function entryHtml(entry, conv) {
@@ -231,7 +231,7 @@ function announce(conv, entries) {
   const last = [...entries].reverse().find(e => e.kind === 'bot' || e.kind === 'offjob')?.message, node = el('announce');
   if (!last || !node) return;
   const key = `${conv.id}:${last.id}`, first = spoken === null || !spoken.startsWith(`${conv.id}:`);
-  if (key !== spoken && !first) node.textContent = `${last.senderName || conv.name}: ${String(last.text).slice(0, 300)}`;
+  if (key !== spoken && !first) node.textContent = `${last.senderName || conv.name}: ${plain(last.text).slice(0, 300)}`;
   spoken = key;
 }
 
