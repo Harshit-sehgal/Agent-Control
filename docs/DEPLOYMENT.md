@@ -60,6 +60,26 @@ Local-agent knobs (`AGENT_BROWSER`, allowlist, profile, path) are read by
 `node agent/agent.mjs`, not this process. They are listed in `.env.example`
 and [`AGENT-PROTOCOL.md`](AGENT-PROTOCOL.md).
 
+### The local agent starts with the server
+
+A bot reaches a browser, your `claude` and `codex` sign-in and stdio MCP servers
+through a local agent. When the server listens on this computer only (`HOST`
+`127.0.0.1`, `localhost` or `::1`, the default), it does that step for you: on
+the first start it pairs "This computer" with every agent permission, keeps the
+secret in `local-agent.json` beside the database (mode 0600), and runs
+`agent/agent.mjs run` as a child process. The child gets the shared browser
+(`AGENT_BROWSER=1`) and any public site (`AGENT_BROWSER_ALLOWLIST=*`) unless you
+set either yourself. Every page still waits for your ask card, and the agent
+still refuses private and local addresses. It restarts after a crash, stops with
+the server, and stops by itself if the server is killed.
+
+- `LOCAL_AGENT=0` never starts it; `LOCAL_AGENT=1` starts it on a server that
+  listens on other interfaces too.
+- Revoking "This computer" in Settings → Local agents is respected: it is not
+  paired again on the next start. Delete `local-agent.json` to pair it afresh.
+- A server on a shared machine or in a container does not start one unasked;
+  pair a device there as below.
+
 ### Use your Claude / ChatGPT subscription
 
 A bot can run on your own Claude or ChatGPT plan instead of an API key. This
@@ -75,10 +95,13 @@ ordinary individual use.
 1. On the machine that will run the bots, install the CLI and sign in once in a
    terminal: run `claude` (Claude Code) or `codex login` (Codex CLI) and finish
    the sign-in.
-2. Pair a local agent on that machine (`node agent/agent.mjs pair`, with a
-   pairing code from the agents list) and leave `node agent/agent.mjs run` going.
-   A new pairing asks for the `model.run` permission by default; an agent paired
-   earlier needs it added (`PATCH /api/agents/:id`).
+2. Run the server on that machine (`npm start`). A server listening on this
+   computer pairs it as "This computer" and runs the agent itself (see
+   [The local agent starts with the server](#the-local-agent-starts-with-the-server)).
+   For another machine, pair an agent there (`node agent/agent.mjs pair`, with a
+   pairing code from Settings → Local agents) and leave `node agent/agent.mjs run`
+   going. A new pairing asks for the `model.run` permission by default; an agent
+   paired earlier needs it added (`PATCH /api/agents/:id`).
 3. Add a subscription provider: `POST /api/ai/providers` with
    `{"kind": "local-cli", "engine": "claude", "label": "My Claude"}` (engine
    `claude` or `codex`; an optional `model`, which must be a plain name that
@@ -105,9 +128,9 @@ What to expect:
   a model call), and cached for ten minutes. `GET /api/agents` returns it as
   `cli: {claude, codex}` with `signed-in`, `signed-out`, `missing` or `unknown`,
   and **Test** on a subscription provider reads it instead of sending a message.
-- **No agent, or it is not running:** the run fails with "Pair a local agent and
-  run `claude` on that machine to sign in." (or a note that the agent is not
-  running or may not run models). Nothing is queued.
+- **No agent, or it is not running:** the run fails with "No computer is
+  connected to run `claude`…" (or a note that the agent is offline or may not run
+  models). Nothing is queued.
 - **Usage limit:** the run fails with a clear message and the chat gets a card
   offering to switch that bot to another connected model, through
   `PATCH /api/ai/bots/:bot`. There is no silent fallback and no retry; a retry
@@ -380,7 +403,7 @@ Deleting a workspace deletes its file.
 ## Push notifications
 Browsers only allow push on a secure origin, so it works over HTTPS or on
 `localhost`, not over plain HTTP on a LAN address. Each person turns it on per
-device under **You → Notifications**. On an iPhone or iPad the app has to be
+device under **Settings → Notifications**. On an iPhone or iPad the app has to be
 added to the Home Screen first. The key pair that identifies this installation
 to push services is created on first use and stored encrypted with the vault
 key; if the vault key changes, devices have to subscribe again.

@@ -223,7 +223,7 @@ function extract(config,data){
   }
   // The token limit already bounds the call. Slicing here cut a fence that
   // models put last, so the orchestrator never paused for the page.
-  if(/```(?:browser|spawn|ask|create-bot|connector)\b/i.test(text))return text;
+  if(/```(?:browser|spawn|ask|create-bot|connector|setup)\b/i.test(text))return text;
   return text.slice(0,3000);
 }
 /** Strip leaked chain-of-thought so a draft is the answer, not the scratchpad.
@@ -236,7 +236,7 @@ function extract(config,data){
 function sanitize(text){
   const raw=String(text);
   const fences=[];
-  const withoutFences=raw.replace(/```(?:browser|spawn|ask|create-bot|connector)[ \t]*\r?\n[\s\S]*?(?:```|$)/gi,block=>{fences.push(block);return '';});
+  const withoutFences=raw.replace(/```(?:browser|spawn|ask|create-bot|connector|setup)[ \t]*\r?\n[\s\S]*?(?:```|$)/gi,block=>{fences.push(block);return '';});
   const stripPaired=s=>s.replace(/<(think|thinking|reasoning)>[\s\S]*?<\/\1>/gi,'');
   // Remove tool fences before reasoning cleanup, then put them back. A
   // reasoning tag may wrap the fence, and either a paired or unclosed tag must
@@ -320,9 +320,9 @@ async function callModel({instructions,input,maxTokens,config,temperature=null})
     return config.run({engine:config.engine,model:config.model||'',instructions,input});
   }
   const cfg=wireConfig(config||envConfig());
-  if(!configReady(cfg))throw upstream('No AI provider is configured. Add one under You → AI and models.',422);
+  if(!configReady(cfg))throw upstream('No AI provider is configured. Connect one in Settings → Models and keys.',422);
   const protocol=protocolOf(cfg);
-  if(needsConcreteModel(protocol)&&(!cfg.model||cfg.model==='auto'))throw upstream('This provider needs a concrete model id. Pick one under You → AI and models.',422);
+  if(needsConcreteModel(protocol)&&(!cfg.model||cfg.model==='auto'))throw upstream('This provider needs a concrete model id. Pick one in Settings → Models and keys.',422);
   // Not `permanent`: the queue reads that flag as "never retry", and this is the
   // one error that heals itself a moment later.
   if(activeCalls>=maxCalls())throw upstream('The AI provider is busy with other requests. Try again in a moment.',429);
@@ -562,7 +562,7 @@ function boundBotInput(input, max=MAX_BOT_INPUT){
   return out.length>max?out.slice(0,max):out;
 }
 export async function executeCustomBot(bot,input,config) {
-  if(!configReady(config||envConfig())) throw Object.assign(new Error('No AI provider is configured. Add one under You → AI and models (bring your own key).'),{status:422});
+  if(!configReady(config||envConfig())) throw Object.assign(new Error('No AI provider is configured. Connect one in Settings → Models and keys.'),{status:422});
   const settings=botSettings(bot);
   const grants=Array.isArray(bot.permissions)?bot.permissions:[];
   // Neither tool acts on its own: the browser block becomes a request a person

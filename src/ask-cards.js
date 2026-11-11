@@ -14,10 +14,14 @@ export const askLineId = ask => `ask-${ask.id}`.slice(0, 64);
 /** Write the ask's card into its own chat and, if that is not the primary's chat, a "Needs you" line
  * into the primary's. Both carry `askId`; the card reads the ask's status from `state.asks`, so
  * answering never rewrites a line. A chat that is gone is skipped: the ask still shows in Needs you. */
+// The ask is made while the reply is read, a moment before that reply is stamped, and the chat is read in
+// time order: the card takes the later of the two so it sits under the reply that asked.
+const postedAt = made => new Date(Math.max(Date.parse(made) || 0, Date.now())).toISOString();
+
 export function addAskCards(state, ask, bot) {
   const name = bot?.name || 'A bot';
   const text = askText(ask, name);
-  const card = {id: askLineId(ask), role: 'system', kind: 'ask', askId: ask.id, ...(ask.runId ? {runId: ask.runId} : {}), at: ask.createdAt};
+  const card = {id: askLineId(ask), role: 'system', kind: 'ask', askId: ask.id, ...(ask.runId ? {runId: ask.runId} : {}), at: postedAt(ask.createdAt)};
   const targets = [];
   if (ask.chatKey) targets.push([ask.chatKey, text]);
   const primary = primaryOf(state);

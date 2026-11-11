@@ -373,6 +373,16 @@ export function listAgents(store, workspaceId) {
   }));
 }
 
+/** The devices a bot may be told about: name, whether it is running, what it may do, and its CLI sign-in.
+ * No id, secret or task detail. */
+export function agentsBrief(store) {
+  if (typeof store?.all !== 'function') return [];
+  return store.all('SELECT * FROM agents WHERE revoked_at IS NULL ORDER BY last_seen_at DESC').map(a => ({
+    name: a.name, online: Boolean(a.last_seen_at && Date.parse(a.last_seen_at) > Date.now() - 180000),
+    permissions: (() => { try { return JSON.parse(a.permissions || '[]'); } catch { return []; } })(), cli: readAgentCli(store, a.id),
+  }));
+}
+
 export function revokeAgent(store, agentId) {
   const agent = store.get('SELECT * FROM agents WHERE id=?', agentId);
   if (!agent) fail('Agent not found.', 404);

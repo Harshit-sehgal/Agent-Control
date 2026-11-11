@@ -151,9 +151,9 @@ test('with no usable agent the call fails fast and says what to do; nothing is q
     assert.equal(none.store.all('SELECT id FROM agent_tasks').length, 0);
     none.store.run('UPDATE agents SET permissions=? WHERE id=?', '["mcp.call"]', none.agentId);
     none.store.run('UPDATE agents SET last_seen_at=? WHERE id=?', new Date(Date.now() - 3600000).toISOString(), none.agentId);
-    await assert.rejects(mcpList({transport: 'stdio', store: none.store, server: 'files'}), /agent is not running/);
+    await assert.rejects(mcpList({transport: 'stdio', store: none.store, server: 'files'}), /agent is offline/);
     none.store.run('UPDATE agents SET revoked_at=? WHERE id=?', new Date().toISOString(), none.agentId);
-    await assert.rejects(mcpList({transport: 'stdio', store: none.store, server: 'files'}), /Pair a local agent/);
+    await assert.rejects(mcpList({transport: 'stdio', store: none.store, server: 'files'}), /No computer is connected/);
   } finally { await none.store.close(); await fs.rm(none.dir, {recursive: true, force: true}); }
 });
 

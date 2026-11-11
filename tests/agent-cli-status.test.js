@@ -153,7 +153,7 @@ test('a subscription provider is tested by the sign-in status, never by a messag
     const p = await ai.addProvider(store, 'default', {kind: 'local-cli', engine: 'claude', label: 'My Claude'});
     const none = await ai.testProvider(store, p.id);
     assert.deepEqual([none.ok, none.status], [false, 'no-agent']);
-    assert.match(none.message, /Pair a local agent and run `claude`/);
+    assert.match(none.message, /No computer is connected to run `claude`/);
     const {code} = agent.createPairing(store, 'default', {});
     const {agentId} = agent.redeemPairing(store, {code, name: 'Laptop', permissions: ['model.run']});
     agent.touchAgent(store, agentId);

@@ -146,12 +146,12 @@ test('no agent paired: the run fails with the sentence that says what to do', as
   await ai.setBotModel(store, ids.scholar, {providerId: provider.id});
   const run = await ask(store, {message: 'hello', to: ids.scholar, executor: executeCustomBot});
   assert.equal(run.status, 'failed');
-  assert.equal(run.error, 'Pair a local agent and run `claude` on that machine to sign in.');
+  assert.match(run.error, /No computer is connected to run `claude`.*Settings → Local agents.*run `claude` there once to sign in/);
   assert.deepEqual(store.all('SELECT id FROM agent_tasks'), [], 'nothing was queued');
   // The same for codex, in its own words.
   await ai.updateProvider(store, 'default', provider.id, {engine: 'codex'});
   const again = await ask(store, {message: 'hello again', to: ids.scholar, executor: executeCustomBot});
-  assert.match(again.error, /Pair a local agent and run `codex` on that machine/);
+  assert.match(again.error, /No computer is connected to run `codex`/);
 });
 
 test('an agent that may not run models, or is not running, is named as such, and nothing is queued', async t => {
@@ -174,7 +174,7 @@ test('a revoked agent is not used', async t => {
   agent.revokeAgent(store, agentId);
   const run = await ask(store, {message: 'hello', to: ids.scholar, executor: executeCustomBot});
   assert.equal(run.status, 'failed');
-  assert.match(run.error, /Pair a local agent/);
+  assert.match(run.error, /No computer is connected/);
 });
 
 test('timeout: the wait ends, the task is cancelled so a late agent does not spend the plan, and the run fails', async t => {

@@ -10,6 +10,7 @@
 import {handoffs, progressPill} from './ui-company.js';
 import {isRunNote, runBelongsToChat} from './ui-model.js';
 import {connectorLine, modelLimitLine} from './ui-connect-model.js';
+import {setupCardOf, setupDone} from './setup.js';
 
 const isActive = status => status === 'queued' || status === 'running';
 const isAwaiting = status => String(status || '').startsWith('awaiting');
@@ -32,7 +33,7 @@ function pillEntry(run, state) {
 
 /** `items` is `timeline()`'s output for the chat; `key` is the chat key (a bot id,
  * or `team-<threadId>`). `now` is the clock a held send's Undo window is read against. Entries: day, me, bot, offjob,
- * note, browser, ask, guard, pill, limit, connector, model-limit. */
+ * note, browser, ask, guard, pill, limit, connector, model-limit, setup, no-model. */
 export function feed({items = [], state, key, now = Date.now()}) {
   const runs = runsOfChat(state, key), byId = new Map(runs.map(run => [run.id, run]));
   const lastLine = new Map(), lastNote = new Map();
@@ -66,6 +67,10 @@ export function feed({items = [], state, key, now = Date.now()}) {
       if (m.kind === 'limit') return;
       // What a connector read or did (and a send held for Undo), and the line a usage limit leaves with its Switch button.
       if (m.kind === 'connector' || m.kind === 'connector-error') return out.push({kind: 'connector', message: m, line: connectorLine(m, {state, items, now})});
+      // A bot's proposed settings change, with its Apply button; only a server-written line carries one.
+      if (m.kind === 'setup') { const card = m.origin === 'browser' ? null : setupCardOf(m); return out.push({kind: 'setup', message: m, card, done: setupDone(state, card)}); }
+      // Only opens a Settings page, so a line the browser wrote may carry it.
+      if (m.kind === 'no-model') return out.push({kind: 'no-model', message: m});
       if (m.kind === 'model-limit') return out.push({kind: 'model-limit', message: m, line: modelLimitLine(m, {state})});
       if (m.kind === 'guard') return out.push({kind: 'guard', message: m, open: m.id === lastGuard && Boolean(state?.guard?.paused)});
       if (!isRunNote(m)) return out.push({kind: 'note', message: m, run: null});

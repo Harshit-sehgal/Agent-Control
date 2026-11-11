@@ -26,7 +26,7 @@ test('custom bots run through the Node provider only on the server build',()=>{
   assert.match(app,/export const isLive = \(\) => !isStaticDemo\(\) && Boolean\(store\.state\?\.aiEnabled\)/);
   // Built-in bots use the same provider. A missing key is an error, not the demo.
   assert.match(app,/Answers come from your AI provider/);
-  assert.match(app,/this chat cannot answer/);
+  assert.match(app,/Connect a model first, in Settings → Models and keys/);
   // A retry watches a queued run the same way as the first send.
   assert.match(app,/if \(await watchQueuedRun\(b\.dataset\.id, key, run\)\) return/);
   // The watch loop now lives in shared/run-follow.js over injected pieces, and

@@ -65,7 +65,7 @@ export const stripAskBlocks = output => String(output ?? '').replace(ASK_FENCE()
  * a prompt should still not carry. */
 export const stripControlBlocks = output => String(output ?? '')
   .replace(controlFence(), '')
-  .replace(/```(?:ask|spawn|create-bot|browser|not-my-job)[\s\S]*?```/gi, '')
+  .replace(/```(?:ask|spawn|create-bot|browser|not-my-job|connector|setup)[\s\S]*?```/gi, '')
   .replace(/\n{3,}/g, '\n\n').trim();
 
 /** Find the teammate a block names. An exact id wins, then a case-insensitive

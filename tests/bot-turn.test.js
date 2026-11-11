@@ -118,3 +118,14 @@ test('the output always survives a refused block, so a person is never left with
   assert.equal(turn.created.length, 0);
   assert.match(turn.lines.map(l => l.text).join(' '), /the request was refused/);
 });
+
+test('a setup card is a follow-up: it comes after the reply, not before it', async () => {
+  const state = {events: [], groups: [{id: 'g1', name: 'Team', bots: [writer, researcher]}], ai: {providers: [{id: 'p1', label: 'My Claude', kind: 'local-cli', engine: 'claude'}]}};
+  const turn = await runBotTurn(plainStore(state), {
+    bot: writer, envelope: {task: 'Put Researcher on haiku.'}, config: {}, peers: [writer, researcher], groupId: 'g1',
+    executor: async () => `Done.\n${block('setup', {action: 'model', bot: 'Researcher', provider: 'My Claude', model: 'haiku'})}`,
+  });
+  assert.equal(turn.output, 'Done.');
+  assert.deepEqual(turn.lines, [], 'nothing happened before the reply');
+  assert.deepEqual(turn.after.map(l => l.kind), ['setup']);
+});

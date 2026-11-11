@@ -7,11 +7,11 @@
  *
  * Messages are display records only. Nothing here runs a bot or publishes.
  */
-import {cleanText} from './core.js?v=7fd06eb511';
-import {fail} from './errors.js?v=7fd06eb511';
-import {summonableGuests, BUSY_STATUSES} from './coordination.js?v=7fd06eb511';
-import {denyBrowserRequest} from './bot-browser.js?v=7fd06eb511';
-import {orphanAsks} from './asks.js?v=7fd06eb511';
+import {cleanText} from './core.js?v=028bca98b3';
+import {fail} from './errors.js?v=028bca98b3';
+import {summonableGuests, BUSY_STATUSES} from './coordination.js?v=028bca98b3';
+import {denyBrowserRequest} from './bot-browser.js?v=028bca98b3';
+import {orphanAsks} from './asks.js?v=028bca98b3';
 
 export const MAX_CHAT_MESSAGES = 300;
 const MAX_TEXT = 8000;
@@ -43,6 +43,8 @@ function untrusted(state, key, message) {
   delete message.askId;
   // A model-limit card offers a switch the server worked out; a browser cannot offer one.
   delete message.switchTo;
+  // So is a setup card: a browser cannot put an Apply button in a chat.
+  delete message.setup;
   // A connector line may carry an Undo for a held send; only the server writes one.
   delete message.activityId; delete message.undoUntil;
   if (message.role !== 'user') message.origin = 'browser';
@@ -75,6 +77,9 @@ function entry(raw, makeId, now) {
   for (const key of LABELS) { const value = cleanText(raw[key], 120); if (value) out[key] = value; }
   const request = cleanText(raw.request, 4000);
   if (request) out.request = request;
+  // A setup card's change, as JSON (shared/setup.js reads it back and refuses anything malformed).
+  const setup = typeof raw.setup === 'string' ? raw.setup.slice(0, 4000) : '';
+  if (setup) out.setup = setup;
   return out;
 }
 

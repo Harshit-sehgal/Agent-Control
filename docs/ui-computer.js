@@ -8,7 +8,7 @@
  * The numbers match agent/live-input.mjs, which is the one place the device checks an
  * event: a point is clamped to the page, text is at most 2000 characters and a wheel
  * turn at most 5000 pixels, so nothing built here can be refused for its size. */
-import {hostOf} from './bot-browser.js?v=7fd06eb511';
+import {hostOf} from './bot-browser.js?v=028bca98b3';
 
 /** The page the owner sees, in CSS pixels. A frame carries its own size; this is the fallback. */
 export const PAGE = {w: 1280, h: 800};
@@ -138,7 +138,7 @@ export function mergeView(prev, reply) {
 export function veilFor({name = 'The bot', view = {}, denied = false, state = view.state} = {}) {
   if (view.demo) return {kind: 'demo', title: 'The demo has no browser', text: 'In the full app a bot opens pages in one shared browser on the computer that runs the local agent, and you watch them here and can take over.'};
   if (denied) return {kind: 'viewer', title: 'Members only', text: 'Only members can watch a bot\'s browser, because it can show anything the owner is signed in to.'};
-  if (view.agent === false) return {kind: 'offline', title: 'No device is running the shared browser', text: `Start the local agent with AGENT_BROWSER=1 set, and ${name}'s tab shows up here.`, code: 'AGENT_BROWSER=1 node agent/agent.mjs run'};
+  if (view.agent === false) return {kind: 'offline', title: 'No device is running the shared browser', text: `A server on your own computer starts it by itself, so restarting the server brings it back. On another machine, start the agent with AGENT_BROWSER=1 set, and ${name}'s tab shows up here.`, code: 'AGENT_BROWSER=1 node agent/agent.mjs run'};
   if (view.image) return {kind: ''};
   if (state === 'driving') return {kind: 'empty', title: 'Opening the tab', text: 'The first picture is on its way.'};
   if (state === 'browsing') return {kind: 'empty', title: `Watching ${name}`, text: 'The first picture is on its way.'};

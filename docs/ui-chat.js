@@ -4,10 +4,10 @@
  * the bot as `directBotId`, a thread posts to its own group and Atlas answers.
  * The server orchestrator runs them when a model is configured and the offline
  * simulator does otherwise; the UI cannot tell which. Nothing here can publish. */
-import {pollRun, runWithTyping} from './run-follow.js?v=7fd06eb511';
-import {botSettings} from './bot-settings.js?v=7fd06eb511';
-import {store, api, sync, go, conversation, appendMessage, setTyping, teamKey} from './ui-store.js?v=7fd06eb511';
-import {toast} from './ui-dialogs.js?v=7fd06eb511';
+import {pollRun, runWithTyping} from './run-follow.js?v=028bca98b3';
+import {botSettings} from './bot-settings.js?v=028bca98b3';
+import {store, api, sync, go, conversation, appendMessage, setTyping, teamKey} from './ui-store.js?v=028bca98b3';
+import {toast} from './ui-dialogs.js?v=028bca98b3';
 
 /** In-flight sends per conversation, so two overlapping sends keep the typing
  * indicator up until the last one finishes instead of the first clearing it. */
@@ -111,8 +111,8 @@ export async function sendChat(id, text) {
   catch (error) {
     // The server's busy refusal is matched by its own retry logic, so it is reworded here, not there.
     const said = error?.message || String(error);
-    const text = /already active/i.test(said) ? 'Still working on your last message. Send this again once it is done.' : `That did not go through: ${said}`;
-    appendMessage(id, {role: 'system', text});
+    if (/No AI provider is configured/i.test(said)) appendMessage(id, {role: 'system', kind: 'no-model', text: `${conv.name} needs a model before it can answer. Connect one in Settings → Models and keys. A Claude or ChatGPT sign-in on this computer needs no key.`});
+    else appendMessage(id, {role: 'system', text: /already active/i.test(said) ? 'Still working on your last message. Send this again once it is done.' : `That did not go through: ${said}`});
   }
   finally {
     const left = (inFlight.get(id) || 1) - 1;

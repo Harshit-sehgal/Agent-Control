@@ -7,21 +7,23 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=7fd06eb511';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=7fd06eb511';
-import {requestOfMessage} from './bot-browser.js?v=7fd06eb511';
-import {validHttpUrl} from './core.js?v=7fd06eb511';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=7fd06eb511';
-import {botStatus, botIsManager, chatStatus, jobOf} from './ui-company.js?v=7fd06eb511';
-import {hasJob} from './ui-profile-model.js?v=7fd06eb511';
-import {feed} from './ui-feed.js?v=7fd06eb511';
-import {askCard} from './ui-asks.js?v=7fd06eb511';
-import {face, botColor} from './ui-face.js?v=7fd06eb511';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=7fd06eb511';
-import {store, conversation, findBot, groups, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync} from './ui-store.js?v=7fd06eb511';
-import {runAnyway, startThread, answerLimit} from './ui-chat.js?v=7fd06eb511';
-import {toast} from './ui-dialogs.js?v=7fd06eb511';
-import {siteChip} from './ui-computer-view.js?v=7fd06eb511';
+import {OFFJOB_CHOICES} from './off-job.js?v=028bca98b3';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=028bca98b3';
+import {requestOfMessage} from './bot-browser.js?v=028bca98b3';
+import {validHttpUrl} from './core.js?v=028bca98b3';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=028bca98b3';
+import {botStatus, botIsManager, chatStatus, jobOf} from './ui-company.js?v=028bca98b3';
+import {isPrimary} from './company.js?v=028bca98b3';
+import {hasJob} from './ui-profile-model.js?v=028bca98b3';
+import {feed} from './ui-feed.js?v=028bca98b3';
+import {setupCardOf, setupButton} from './setup.js?v=028bca98b3';
+import {askCard} from './ui-asks.js?v=028bca98b3';
+import {face, botColor} from './ui-face.js?v=028bca98b3';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=028bca98b3';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync} from './ui-store.js?v=028bca98b3';
+import {runAnyway, startThread, answerLimit} from './ui-chat.js?v=028bca98b3';
+import {toast} from './ui-dialogs.js?v=028bca98b3';
+import {siteChip} from './ui-computer-view.js?v=028bca98b3';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -126,7 +128,16 @@ function noteEntry(entry, conv) {
     flags.retry && btn('Retry', 'retry-run', {...group, data: {run: run.id, message: run.input || '', ...retryTarget(conv.group, run)}}),
     flags.stop && btn('Stop', 'cancel-run', {...group, data: {run: run.id}}),
   ] : [];
+  if (m.kind === 'browser-result') return readEntry(m);
   return `<div class="cv-note"><span>${esc(m.text)}</span>${parts.filter(Boolean).join('')}</div>`;
+}
+
+// A page a bot read: the bot answers from it next, so the chat shows what was read and folds the page text away.
+function readEntry(m) {
+  const at = String(m.text || '').indexOf('\n\n');
+  const head = (at < 0 ? m.text : m.text.slice(0, at)).replace(/^Browser result for (.+?): /, '$1 read ');
+  const body = at < 0 ? '' : m.text.slice(at + 2).trim();
+  return `<div class="cv-note cv-conn cv-read"><span>${icon('check', 13)}${esc(head)}</span>${body ? `<details><summary>Show what it read</summary><p>${esc(body)}</p></details>` : ''}</div>`;
 }
 
 /** The pill: live while work is under way, then quiet, opening the handoffs. */
@@ -179,6 +190,18 @@ function modelLimitEntry({message: m, line}) {
   return `<div class="cv-card flat" data-m="${esc(m.id)}"><p>${esc(line.text)}</p><div class="acts">${btn(`Switch to ${line.switchTo.label}`, 'switch-model', {id: line.botId, kind: 'primary', small: true, data: {provider: line.switchTo.id, name: line.switchTo.label}})}</div></div>`;
 }
 
+/** A change a bot proposed: one tap applies it with the owner's own session. Once in place it is a done line. */
+function setupEntry({message: m, card, done}) {
+  if (!card || !canWrite()) return `<div class="cv-note" data-m="${esc(m.id)}"><span>${esc(m.text)}</span></div>`;
+  if (done) return `<div class="cv-note cv-conn" data-m="${esc(m.id)}"><span>${icon('check', 13)}${esc(m.text)} · done</span></div>`;
+  return `<div class="cv-card flat" data-m="${esc(m.id)}"><p>${esc(m.text)}</p><div class="acts">${btn(setupButton(card), 'apply-setup', {kind: 'primary', small: true, data: {message: m.id}})}</div></div>`;
+}
+
+function noModelEntry({message: m}) {
+  const open = canWrite() ? `<div class="acts">${btn('Open Models and keys', 'open-models', {kind: 'primary', small: true})}</div>` : '';
+  return `<div class="cv-card flat" data-m="${esc(m.id)}"><p>${esc(m.text)}</p>${open}</div>`;
+}
+
 function offjobEntry({message: m, open}, conv) {
   const bot = findBot(m.botId || m.senderId), name = bot?.name || m.senderName || conv.name;
   const choices = open && canWrite() ? `<div class="cv-card"><p>This is not ${esc(name)}'s job. What should happen to it?</p><div class="acts">${OFFJOB_CHOICES.map(c => btn(c.label, `offjob-${c.id}`, {kind: c.id === 'anyway' ? 'primary' : 'quiet', data: {message: m.id}})).join('')}</div></div>` : '';
@@ -205,17 +228,21 @@ function entryHtml(entry, conv) {
     case 'guard': return guardEntry(entry);
     case 'connector': return connectorEntry(entry);
     case 'model-limit': return modelLimitEntry(entry);
+    case 'setup': return setupEntry(entry);
+    case 'no-model': return noModelEntry(entry);
     default: return '';
   }
 }
 
 function welcome(conv) {
   const bot = conv.bot, server = !isStaticDemo();
-  const about = conv.isTeam ? 'Atlas plans it and hands each part to the bot whose job it is.' : (hasJob(bot) ? bot.instructions : 'New, no job yet. Tell it what it should do.');
+  const about = conv.isTeam ? 'Atlas plans it and hands each part to the bot whose job it is.'
+    : bot && isPrimary(store.state, bot.id) ? 'Your primary bot. Ask it anything: it answers, hands work to the bot whose job it is, and sets the app up for you.'
+    : (hasJob(bot) ? bot.instructions : 'New, no job yet. Tell it what it should do.');
   const mode = isLive() ? 'Answers come from your AI provider. If a call fails, the chat says why.'
-    : server ? 'No AI provider is configured. Add one under Settings, Models and keys. Until then this chat cannot answer.'
+    : server ? 'Connect a model first, in Settings → Models and keys. A Claude or ChatGPT sign-in on this computer needs no key.'
       : 'This is an offline demo: replies are built in, not from a live AI model.';
-  return `<div class="cv-empty"><button type="button" class="hello" data-action="hop" aria-label="Say hi to ${esc(conv.name)}">${bot ? botFace(bot, bot.name, 84, {state: awake(bot.id)}) : ''}</button><h2>${esc(conv.name)}</h2><p>${esc(about)}</p><p class="sub">${esc(mode)}</p></div>`;
+  return `<div class="cv-empty"><button type="button" class="hello" data-action="hop" aria-label="Say hi to ${esc(conv.name)}">${bot ? botFace(bot, bot.name, 84, {state: awake(bot.id)}) : ''}</button><h2>${esc(conv.name)}</h2><p>${esc(about)}</p><p class="sub">${esc(mode)}</p>${!isLive() && server && canWrite() ? btn('Open Models and keys', 'open-models', {kind: 'primary', small: true}) : ''}</div>`;
 }
 
 /* ---------- painting ---------- */
@@ -354,6 +381,22 @@ export const conversationActions = {
     finally { await sync(); }
   },
   // The bot that hit a usage limit moves to the provider the server named; '' clears the model that would not fit it.
+  // Apply what a bot proposed, through the same routes the settings pages use.
+  'open-models': () => go({settings: 'models'}),
+  'apply-setup': async b => {
+    const message = Object.values(store.state?.chats || {}).flat().find(x => x?.id === b.dataset.message);
+    const card = message && message.origin !== 'browser' ? setupCardOf(message) : null;
+    if (!card) throw new Error('That suggestion is no longer here.');
+    if (card.action === 'open') return go({settings: card.section});
+    if (card.action === 'job') {
+      const group = groupOfBot(card.botId);
+      if (!group) throw new Error('That bot is no longer in the company.');
+      await api(`/api/groups/${group.id}/bots/${card.botId}`, 'PATCH', {instructions: card.job});
+    } else if (card.botId) await api(`/api/ai/bots/${encodeURIComponent(card.botId)}`, 'PATCH', {providerId: card.providerId, model: card.model || ''});
+    else await api('/api/ai', 'PATCH', {providerId: card.providerId, model: card.model || ''});
+    await sync();
+    toast('Done.');
+  },
   'switch-model': async b => {
     await api(`/api/ai/bots/${encodeURIComponent(b.dataset.id)}`, 'PATCH', {providerId: b.dataset.provider, model: ''});
     toast(`Switched to ${b.dataset.name}.`);

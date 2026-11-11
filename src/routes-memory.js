@@ -81,7 +81,7 @@ export function memoryRoutes(router) {
   router.add('POST', '/api/memory/consolidate', 'member', async c => {
     const b = await c.body();
     const config = resolveConfig(c.store, cleanText(b.botId, 80) || null);
-    if (!config) fail('No AI provider is configured. Add one under You → AI and models.', 422);
+    if (!config) fail('No AI provider is configured. Connect one in Settings → Models and keys.', 422);
     // A bot's own book when a bot is named; the model's book for an older client.
     const botId = cleanText(b.botId, 80);
     const key = botId ? botKey(botId) : modelKey(config);

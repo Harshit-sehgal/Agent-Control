@@ -22,6 +22,7 @@ import {randomUUID} from 'node:crypto';
 import {replyWithSubagents} from './subagents.js';
 import {askPeerRound} from './bot-link.js';
 import {createBotsFromReply} from './bot-create.js';
+import {setupCardsFromReply} from './setup-cards.js';
 
 const stamp = () => new Date().toISOString();
 
@@ -52,9 +53,13 @@ export async function runBotTurn(store, {
   const made = groupId
     ? await createBotsFromReply(store, {bot, groupId, output: peer.output, runId, makeId, now})
     : {text: peer.output, created: [], lines: []};
+  // Last, a proposed settings change becomes a card the owner taps; it changes nothing by itself.
+  const setup = setupCardsFromReply(store, {bot, output: made.text, makeId, now});
   return {
-    output: made.text,
+    output: setup.text,
     lines: [...sub.lines, ...peer.lines, ...made.lines],
+    // What the reply proposes reads after it, like a page the reply asked for.
+    after: setup.lines,
     spawns: sub.spawns,
     asks: peer.asks,
     created: made.created,

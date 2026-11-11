@@ -133,6 +133,8 @@ def start_server(tmp, stub):
         'AI_TIMEOUT_MS': '15000',
         # A real operator's .env must never leak into the test.
         'AGENT_SKIP_DOTENV': '1',
+        # The smoke pairs its own agent; the server's own one would answer first.
+        'LOCAL_AGENT': '0',
     }
     log = open(tmp / 'server.log', 'w')
     proc = subprocess.Popen(

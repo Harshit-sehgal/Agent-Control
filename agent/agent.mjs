@@ -217,6 +217,13 @@ async function run() {
   };
   process.on('SIGINT', () => stop('SIGINT'));
   process.on('SIGTERM', () => stop('SIGTERM'));
+  // Started by the server (src/local-agent.js): when that server is gone, even killed without a drain,
+  // this agent stops too instead of polling a port nobody answers.
+  const parent = Number(process.env.AGENT_PARENT_PID);
+  if (Number.isInteger(parent) && parent > 1) {
+    const watch = setInterval(() => { try { process.kill(parent, 0); } catch { clearInterval(watch); stop('server gone'); } }, 5000);
+    watch.unref();
+  }
 
   const cliStatus = cliStatusReporter();
   // The owner's live view of the shared browser: only on a device that runs the

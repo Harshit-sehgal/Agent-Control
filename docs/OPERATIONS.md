@@ -103,7 +103,7 @@ Covered by `tests/persistence-api.test.js` (checksum tampering, force-restore). 
 
 **Provider keys after a restore.** A backup excludes the credential vault and
 the `kv` document that holds AI providers, so a restored instance has none: add
-each provider and key again under **You → AI and models**. To rotate a key
+each provider and key again under **Settings → Models and keys**. To rotate a key
 without a restore, edit the same provider there and paste the new value — a
 blank key field keeps the stored one, and a new key, endpoint, header set or
 API version re-reads that provider's model catalogue. A wrong or expired key is

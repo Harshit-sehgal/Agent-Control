@@ -162,11 +162,11 @@ const problem = (message, status, code) => Object.assign(new Error(message), {st
 /** The agent to use: paired, not revoked, allowed to run MCP servers and seen lately. */
 function pickAgent(store, nowMs = Date.now()) {
   const rows = store.all('SELECT * FROM agents WHERE revoked_at IS NULL ORDER BY last_seen_at DESC');
-  if (!rows.length) throw problem('Pair a local agent to use an MCP server that runs on your computer.', 422, 'no-agent');
+  if (!rows.length) throw problem('No computer is connected for an MCP server that runs on your computer. A server started on your own computer connects it by itself; otherwise pair one in Settings → Local agents.', 422, 'no-agent');
   const may = rows.filter(row => { try { return JSON.parse(row.permissions || '[]').includes('mcp.call'); } catch { return false; } });
   if (!may.length) throw problem('Your paired agent is not allowed to run MCP servers. Allow mcp.call for it, then try again.', 422, 'no-permission');
   const live = may.find(row => row.last_seen_at && Date.parse(row.last_seen_at) > nowMs - ONLINE_MS);
-  if (!live) throw problem('Your paired agent is not running. Start it on that machine (`node agent/agent.mjs run`), then try again.', 422, 'agent-offline');
+  if (!live) throw problem('Your computer\'s agent is offline. A server on your own computer restarts it within a few seconds; on another machine, start it there (`node agent/agent.mjs run`), then try again.', 422, 'agent-offline');
   return live;
 }
 

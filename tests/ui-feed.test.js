@@ -179,3 +179,9 @@ test('a model-limit line is its own entry even though it names a run, and it doe
   assert.deepEqual(out[3].line.switchTo, {id: 'p2', label: 'OpenAI'});
   assert.equal(out[3].line.open, true);
 });
+
+test('a "needs a model" line, even one the browser wrote, becomes a card that opens Models and keys', () => {
+  const out = build([msg('q', 'user', 1), msg('n', 'system', 2, {kind: 'no-model', origin: 'browser'})]);
+  assert.deepEqual(kinds(out), ['day', 'me', 'no-model']);
+  assert.equal(out[2].message.id, 'n');
+});

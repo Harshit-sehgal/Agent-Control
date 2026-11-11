@@ -31,11 +31,11 @@ const problem = (message, status, code, extra = {}) => Object.assign(new Error(m
  * Throws the sentence that says what to do when there is none. */
 function pickAgent(store, spec, nowMs = Date.now()) {
   const rows = store.all('SELECT * FROM agents WHERE revoked_at IS NULL ORDER BY last_seen_at DESC');
-  if (!rows.length) throw problem(`Pair a local agent and run \`${spec.binary}\` on that machine to sign in.`, 422, 'no-agent');
+  if (!rows.length) throw problem(`No computer is connected to run \`${spec.binary}\`. A server started on your own computer connects it by itself; otherwise pair one in Settings → Local agents. Then run \`${spec.binary}\` there once to sign in.`, 422, 'no-agent');
   const may = rows.filter(row => { try { return JSON.parse(row.permissions || '[]').includes('model.run'); } catch { return false; } });
   if (!may.length) throw problem('Your paired agent is not allowed to run models. Allow model.run for it under Settings, then try again.', 422, 'no-permission');
   const live = may.find(row => row.last_seen_at && Date.parse(row.last_seen_at) > nowMs - ONLINE_MS);
-  if (!live) throw problem('Your paired agent is not running. Start it on that machine (`node agent/agent.mjs run`), then try again.', 422, 'agent-offline');
+  if (!live) throw problem('Your computer\'s agent is offline. A server on your own computer restarts it within a few seconds; on another machine, start it there (`node agent/agent.mjs run`), then try again.', 422, 'agent-offline');
   return live;
 }
 

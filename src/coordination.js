@@ -7,7 +7,7 @@
 import {randomUUID} from 'node:crypto';
 import {createRun,createEnvelope,declinedOf,runNote,planHandoffs,handoffTargets,instructLead,wakeBots,assessTask,summonableGuests,mayHandoff,chatKeyFor,chatIsBusy,rosterFor,previousFor,enlist,MAX_HANDOFFS,INTERRUPT_STATUSES as INTERRUPT} from '../shared/coordination.js';
 import {isThread,noteMember} from '../shared/threads.js';
-import {isLead,companyBots} from '../shared/company.js';
+import {isLead,isPrimary,companyBots} from '../shared/company.js';
 import {extendLimits, ASK_CEILING} from '../shared/ask-limits.js';
 import {noteBotWork,paused as botsPaused,resumeGuard} from '../shared/runaway.js';
 import {parseOffJob,offJobMessage} from '../shared/off-job.js';
@@ -28,7 +28,8 @@ import {executeCustomBot} from './ai.js';
 import {resolveConfig,aiAvailable} from './ai-providers.js';
 import {modelLimitLine} from './cli-model.js';
 import {activity} from '../shared/core.js';
-import {failAgentTasks} from './agent.js';
+import {failAgentTasks,agentsBrief} from './agent.js';
+import {workspaceBrief} from '../shared/setup.js';
 const running=new Set();
 const clean=v=>String(v??'').slice(0,4000);
 const stamp=()=>new Date().toISOString();
@@ -113,7 +114,7 @@ export async function queueGroupRun(store,{groupId,message,directBotId=null,chec
   if(taskId){const prior=snapshot.groupRuns?.find(r=>r.taskId===taskId);if(prior)return {runId:prior.id,status:prior.status,deduped:true};}
   if(chatIsBusy(snapshot.groupRuns,probe,chatKeyFor(probe,{chatKey,directBotId})))throw Object.assign(new Error('A group run is already active. Wait or retry later.'),{status:409});
   try{planHandoffs(probe,clean(message),{directBotId,guests:summonableGuests(snapshot.groups,groupId,{includeOff:true})});}catch(e){if(e.status)throw e;}
-  if(!aiAvailable(store))throw Object.assign(new Error('No AI provider is configured. Add one under You → AI and models, or set AI_API_KEY on the server. GitHub Pages runs a labeled simulation.'),{status:422});
+  if(!aiAvailable(store))throw Object.assign(new Error('No AI provider is configured. Connect one in Settings → Models and keys.'),{status:422});
   const id=await store.update(s=>{
     coordinationState(s);
     const group=s.groups.find(g=>g.id===groupId);
@@ -288,7 +289,9 @@ async function runGroupInner(store,id,executor){
       // Context is automatic: the newest lines that fit; the stored recap, which is
       // in the memory block, stands in for whatever had to be cut.
       const thread=threadContext(current.chats?.[r.chatKey]);
-      const envelope=createEnvelope({run:r,bot,previous,thread,team:closing?[]:rosterFor(current,bot,roster,{thread:isThread(g)}),company:everyone,memory,lead,closing,connectors:closing||declinedTurn?[]:envelopeConnectors(current)});
+      const envelope=createEnvelope({run:r,bot,previous,thread,team:closing?[]:rosterFor(current,bot,roster,{thread:isThread(g)}),company:everyone,memory,lead,closing,connectors:closing||declinedTurn?[]:envelopeConnectors(current),
+        // The primary bot knows the workspace, so the owner can ask it about the app instead of learning the settings.
+        workspace:isPrimary(current,bot.id)&&!closing?workspaceBrief(current,{agents:agentsBrief(store),connectors:envelopeConnectors(current)}):null});
       // Each bot runs on its own chosen model/provider, else the workspace
       // default. The turn itself is the one sequence every caller runs: a
       // sub-agent round, then a peer ask, then a new-bot block. A bot that
@@ -384,6 +387,7 @@ async function runGroupInner(store,id,executor){
         // reads in the order the work happened.
         for(const line of reply.lines)say(s,live,{...line,runId:id});
         say(s,live,{...said,mode:'ai'});
+        for(const line of reply.after||[])say(s,live,{...line,runId:id});
         for(const line of browsed.lines)say(s,live,line);
         for(const line of conn.lines)say(s,live,line);
         for(const a of browsed.asks)addAskCards(s,a,bot);

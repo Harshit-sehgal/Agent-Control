@@ -127,7 +127,7 @@ test('Gemini refuses the "auto" model before a request is sent, naming the fix',
   try{
     await assert.rejects(
       () => executeCustomBot({instructions:'Draft it'},'go',config(port,{protocol:'gemini',model:'auto'})),
-      e => e.status===422 && /concrete model/i.test(e.message) && /AI and models/.test(e.message),
+      e => e.status===422 && /concrete model/i.test(e.message) && /Models and keys/.test(e.message),
     );
   }finally{close();}
   assert.deepEqual(requests,[],'a guaranteed 400 is not worth a round trip');
