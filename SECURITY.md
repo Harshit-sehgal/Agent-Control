@@ -18,7 +18,7 @@ description of what is and is not defended.
 ## Connected accounts
 This product does not OAuth into X or any other platform.
 
-- **X.** Posts enter through paste or the Chrome capture extension (`POST /api/capture`). That token cannot approve, edit, or mark posted. Drafts never publish; the person copies the text and clicks Post on X, then taps **I posted it**. A bot may read an X page only through opt-in `browser.use` on a paired local agent; click and type on X are refused, and the agent blocks write requests to X and Twitter hosts.
+- **X.** There is no X integration and no X credential. A bot may read an X page only through opt-in `browser.use` on a paired local agent; click and type on X are refused, the agent blocks write requests to X and Twitter hosts, and the final Post click is always human.
 - **AI providers.** Optional bring-your-own key. Keys stay on the server. Provider output is untrusted data.
 - **Web Push.** A browser subscription on a secure origin, not a social login.
 - **Email.** The notification channel can submit over SMTP directly (`SMTP_HOST`, with `STARTTLS` required by default) or POST JSON to an `EMAIL_RELAY_URL` gateway. Neither reads a mailbox: there is no IMAP and no inbound mail. Credentials and the relay token are only ever sent to a verified TLS peer.

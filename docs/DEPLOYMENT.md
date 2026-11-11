@@ -151,7 +151,7 @@ reason; one that passes the header through untouched is not.
   alongside the export. Protect the JSON file like the database.
 - Retention has three knobs (`events` 90 days, `doneTasks` 30, `runs` 30) and
   prunes only exhaust: events, finished tasks, runs and settled group runs —
-  never drafts, candidates, evidence, memory or notifications. The notification
+  never memory or notifications. The notification
   feed is capped separately at 200 in-app entries, oldest dropped first.
   `GET /api/retention/preview` shows what a prune would remove before you run it.
 

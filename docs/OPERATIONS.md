@@ -95,11 +95,11 @@ curl -fsS -X POST http://127.0.0.1:4174/api/admin/restore \
 A restore replaces the `users` table, so **everyone signs in again**; the
 credentials vault is re-entered by hand.
 
-**Last drill (automated, 2026-10-13):** seeded 3 candidates + 1 draft + a
-credential + a provider → export (21 tables, checksummed) → restore into a
-fresh instance → **3 candidates + 1 draft restored**, credentials/providers
-`0/0` (excluded by design), and a **tampered document refused** (checksum).
-Covered by `tests/persistence-api.test.js` (checksum tampering, force-restore).
+**Last drill (automated, 2026-10-13):** seeded records + a credential + a
+provider → export (checksummed) → restore into a fresh instance → **the
+records restored**, credentials/providers `0/0` (excluded by design), and a
+**tampered document refused** (checksum).
+Covered by `tests/persistence-api.test.js` (checksum tampering, force-restore). Backups made before the X-engage removal (schema v10 and earlier) still restore.
 
 **Provider keys after a restore.** A backup excludes the credential vault and
 the `kv` document that holds AI providers, so a restored instance has none: add
@@ -126,7 +126,7 @@ for (let i = 0; i < 12; i++)                       // 12 x 25 = 300 reads
 ```
 
 **Observed (2026-10-13):** 300 read requests across `/api/state`, `/api/ai`,
-`/api/notifications` → **300× `200`** (≈0.2–0.7s), then 60 reminder writes →
+`/api/notifications` → **300× `200`** (≈0.2–0.7s), then 60 writes →
 **60× `201`**, **no 5xx**, container RSS ~60 MiB. The store serializes through one
 SQLite connection per workspace; model calls are bounded by `AI_MAX_CONCURRENCY`
 (default 4) and refused with `429` above it rather than queued without bound.

@@ -1,5 +1,41 @@
 # Changelog
 
+## Unreleased — personal bot platform
+
+X-engage is gone. The app is now a local-first personal bot platform: one owner,
+a primary bot named Atlas in a Home group, other bots in groups, group runs with
+handoffs, bring-your-own-key AI providers, memory, a paired local agent for
+browser tasks, and accounts, workspaces and backup.
+
+### Removed
+- **The X-engage workflow.** Capturing X posts as candidates, AI-drafted
+  replies, source evidence, approve/schedule/post-ready drafts, reminders, the
+  voice and timing settings, and the demo sample posts are removed, along with
+  the code and tests behind them.
+- **The Chrome capture extension and the capture token.** `extension/`,
+  `POST /api/capture` and the **Copy capture token** action are gone.
+- **X home-feed reading.** A bot can no longer file a read-only home-timeline
+  request. Reading a page is the opt-in `browser.use` request only.
+- **The X surfaces in the interface and in the Pages demo.** The draft cards,
+  Posts found, Reminders and Voice and timing sections, and the X routes in
+  the browser-local engine are removed; the Pages demo answers the same
+  group-chat and run routes the server does.
+- **The X routes and tick on the server.** The draft routes, the scheduler's
+  draft release and `makeDraft` are removed.
+- **The X database tables.** Schema v11 drops them. A backup made before this
+  change (schema v10 and earlier) still restores.
+
+### Changed
+- **A new workspace starts with Atlas.** The first sign-in seeds a primary bot,
+  Atlas, in a Home group, in place of the X-engage group and its example bots.
+- **The package description** is now "Local-first personal bot platform with
+  human-approved actions".
+
+### Kept
+- **The posting guard.** A bot may read an X page through an approved
+  `browser.use` request, but click and type on X are refused and the final Post
+  click is always human.
+
 ## Unreleased
 
 The JSON store is gone, one list decides what ships, and the app opens without

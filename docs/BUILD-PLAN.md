@@ -26,9 +26,9 @@ work should be added as a fresh section.
 - [x] `shared/tasks.js` transition rules (pure, replaces reminder events)
 - [x] `src/queue.js` worker: idempotency keys, leases, backoff, crash recovery
 - [x] One heartbeat renews every task in a claimed batch, so a slow handler cannot let a waiting task's lease expire and be executed twice
-- [x] `schedules` → tasks migration; scheduler keeps draft release + task dispatch
+- [x] `schedules` → tasks migration; scheduler keeps draft release + task dispatch (the draft release and the reminder tasks were removed in Phase Z; task dispatch stays)
 
-## Phase D — source evidence model
+## Phase D — source evidence model (removed in Phase Z)
 - [x] `shared/evidence.js`: link, claim, confidence, verification status, reuse
 - [x] Evidence attached to drafts; Researcher describes supplied evidence (it does not emit evidence rows from model output)
 - [x] UI: add/review evidence on draft cards
@@ -187,7 +187,7 @@ work should be added as a fresh section.
 - [x] Docs: `.env.example`, `docs/DEPLOYMENT.md`, `docs/ROADMAP.md`, `SECURITY.md`
 - [x] Tests (`tests/smtp.test.js` against a scripted loopback server, plus the relay/SMTP precedence case in `tests/notifications.test.js`); check and test green
 
-## Phase Y — the moves an approval queue was missing
+## Phase Y — the moves an approval queue was missing (removed in Phase Z)
 - [x] **Approve at a time you pick**: `PATCH/POST /api/drafts/:id/approve {dueAt}` pins the exact instant (a minute to 7 days out, refused otherwise and the draft stays pending), through the same `scheduleApprovalAt` the delay window now uses, so the frozen text and revision are identical either way
 - [x] `Schedule…` on a pending draft card opens the one field that matters, in local time; the server only ever sees an ISO instant
 - [x] **Restore a skipped draft** (`POST /api/drafts/:id/restore`, `restore-draft`): a confirmed skip is reversible, because the captured post and its evidence were never touched
@@ -197,7 +197,14 @@ work should be added as a fresh section.
 - [x] Tests: `tests/workflow.test.js` (pinned approval, its three refusals, restore, posted link), `tests/ui-model.test.js` (`threadParts`, threaded length line), `tests/usability.test.js` (the posted question records a link); check and test green
 
 ## Phase Z — primary bot platform (design: `docs/superpowers/specs/2026-11-11-primary-bot-platform-design.md`)
-- [ ] Remove X-engage and its example bots
+- [x] Remove X-engage and its example bots
+  - [x] Capture extension and capture token removed
+  - [x] Draft, post, evidence, reminder and voice UI removed
+  - [x] X home-feed reading removed
+  - [x] Pages engine without X routes
+  - [x] Server X routes, the draft tick and `makeDraft` removed
+  - [x] X domain code removed; a new Atlas seed replaces the example bots
+  - [x] X database tables dropped in schema v11; old backups still restore
 - [ ] One primary bot at first sign-in; bots can exist without a group; any bot creates bots
 - [ ] One Ask card (Decline / Allow / Always allow for this bot) replaces per-bot permission toggles
 - [ ] Bots on the owner's Claude and ChatGPT subscriptions through the local agent
