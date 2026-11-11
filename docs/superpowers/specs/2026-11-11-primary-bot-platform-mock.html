@@ -282,6 +282,19 @@ button.tog:hover{background:var(--sunk);color:var(--fg)}
 .seat{flex:0 1 calc(50% - 3px)}
 .desk{min-height:0}
 @media (max-width:640px){.orb .nm2{font-size:11px}.orbit .face.l{--s:48px}.orbit .face.xl{--s:64px}}
+.pf{position:relative;display:inline-grid;flex:none}
+.star{position:absolute;right:-3px;bottom:-3px;width:calc(var(--sz,22px));height:var(--sz,22px);border-radius:50%;background:#f5a524;box-shadow:0 0 0 3px var(--bg);display:grid;place-items:center;pointer-events:none}
+.star svg{width:62%;height:62%;fill:#fff}
+.pf:has(.face.xl) .star{--sz:28px;right:0;bottom:0}.pf:has(.face.l) .star{--sz:22px}.pf:has(.face.m) .star{--sz:17px;right:-4px;bottom:-4px}
+.desk .pf .star,.raise .pf .star{box-shadow:0 0 0 3px var(--raise)}
+.shelf{display:flex;justify-content:safe center;gap:clamp(14px,4vw,34px);overflow-x:auto;padding:10px 8px 6px;margin:-6px 0 0;scrollbar-width:none;border-radius:22px;transition:background .2s,box-shadow .2s}
+.shelf::-webkit-scrollbar{display:none}
+.shelf.drop-on{background:color-mix(in srgb,var(--mint) 10%,transparent);box-shadow:inset 0 0 0 2px var(--mint)!important}
+.pin2{display:flex;flex-direction:column;align-items:center;gap:9px;flex:none;width:104px;padding:6px 0;border-radius:var(--r)}
+.pin2 b{font-size:14.5px;font-weight:500;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pin2 small{font-size:12px;color:var(--muted);margin-top:-6px}.pin2 small.wt{color:var(--violet)}
+.unpinning{opacity:.55}
+@media (max-width:640px){.pin2{width:88px}.pin2 .face.xl{--s:76px}}
 /* new bot */
 .hire .fl{display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:var(--muted);border:0;padding:0;margin:0}
 .hire .fl legend{padding:0;margin-bottom:6px}
@@ -550,11 +563,12 @@ const isMgr=b=>b.id!=='atlas'&&(b.role==='Manager'||BOTS.some(x=>x.boss===b.id))
 const roleOf=b=>b.id==='atlas'?'Primary':isMgr(b)?'Manager':'Bot';
 const chain=id=>{const o=[];let b=by(id);while(b){o.unshift(b);b=b.boss&&by(b.boss)}return o};
 const LAY=(()=>{try{return JSON.parse(localStorage.getItem('home-layout')||'{}')}catch(e){return{}}})();
-const S={home:LAY.def||'desks',def:LAY.def||'desks',order:LAY.order||{},pins:Object.assign({desks:[],chats:['atlas'],tree:[],seats:[]},LAY.pins||{}),hidden:LAY.hidden||[],chatF:'all',open:{atlas:true},view:'bots',threads:[],cur:null,left:false,panel:null,tab:'overview',busy:new Set(),paused:false,filter:'outside',actAll:null,palIdx:0,palBots:false,preview:null,recent:['mail','sch','plan'],
+const S={home:LAY.def||'desks',def:LAY.def||'desks',order:LAY.order||{},pins:(p=>(p.bots=p.bots||[...new Set([...(p.chats||[]),...(p.seats||[]),...(p.tree||[])])].filter(x=>x!=='atlas'),p))(Object.assign({desks:[]},LAY.pins||{})),hidden:LAY.hidden||[],chatF:'all',open:{atlas:true},view:'bots',threads:[],cur:null,left:false,panel:null,tab:'overview',busy:new Set(),paused:false,filter:'outside',actAll:null,palIdx:0,palBots:false,preview:null,recent:['mail','sch','plan'],
   col:(()=>{try{return JSON.parse(localStorage.getItem('drawer-col')||'{}')}catch(e){return{}}})(),
   grants:{mail:{'Gmail: send email':'always','Gmail: read':'always'},plan:{'Google Calendar: edit':'ask'},ledger:{'Pay or spend money':'ask'}},activity:[]};
 const faceState=b=>S.busy.has(b.id)?'read':(b.id==='atlas'?'':'sleep');
-const face=(b,size='',st)=>`<span class="face ${size} ${b.id==='atlas'?'primary':isMgr(b)?'mgr':''} ${st===undefined?faceState(b):st}" style="--t:${b.tint};--d:${(b.name.length%5)*.9}s" aria-hidden="true"><span class="eyes"><i></i><i></i></span><b></b></span>`;
+const face=(b,size='',st)=>b.id==='atlas'&&size&&size!=='s'?`<span class="pf">${face0(b,size,st)}<span class="star" title="Primary"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.8l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z"/></svg></span></span>`:face0(b,size,st);
+const face0=(b,size='',st)=>`<span class="face ${size} ${b.id==='atlas'?'primary':isMgr(b)?'mgr':''} ${st===undefined?faceState(b):st}" style="--t:${b.tint};--d:${(b.name.length%5)*.9}s" aria-hidden="true"><span class="eyes"><i></i><i></i></span><b></b></span>`;
 const asks={};const $=id=>document.getElementById(id);
 const pending=()=>S.threads.flatMap(t=>t.items.filter(i=>i.k==='ask'&&!i.done).map(i=>({...i,thread:t.id})));
 const stateOf=b=>pending().some(a=>a.bot===b.id)?'waiting':S.busy.has(b.id)?'working':b.id==='atlas'?'awake':'asleep';
@@ -598,22 +612,23 @@ const gripBtn=b=>'';
 const gripBtnOld=b=>`<button class="grip" data-grip aria-label="Move ${b.name}: drag, or use the arrow keys" title="Drag to move">${GRIP}</button>`;
 const arrange=(kind,key,list)=>{const o=S.order[key];const l=o?[...list].sort((x,y)=>{const i=o.indexOf(x.id),j=o.indexOf(y.id);return (i<0?999:i)-(j<0?999:j)}):list;return kind?[...l.filter(b=>isPin(kind,b.id)),...l.filter(b=>!isPin(kind,b.id))]:l};
 const saveLayout=()=>{try{localStorage.setItem('home-layout',JSON.stringify({order:S.order,pins:S.pins,def:S.def,hidden:S.hidden}))}catch(e){}};
+function shelf(){const pins=arrange(null,'shelf',BOTS.filter(b=>b.id!=='atlas'&&isPin('bots',b.id)&&vis(b))),a=by('atlas');
+  const one=(b,sid)=>{const st=stateOf(b);return `<button class="pin2" data-dm="${b.id}"${sid?` data-sid="${b.id}"`:''}>${face(b,'xl',st==='waiting'?'wait':undefined)}<b>${b.name}</b>${st==='working'||st==='waiting'?`<small class="${st==='waiting'?'wt':''}">${st==='waiting'?'waiting on you':'working'}</small>`:''}</button>`};
+  return `<div class="shelf" data-sortkey="shelf" aria-label="Pinned bots">${one(a,false)}${pins.map(b=>one(b,true)).join('')}</div>`}
 function treeHome(){
-  const row=(b,k,open,flat)=>{const st=stateOf(b);return `<div class="brow">${!flat&&k.length?`<button class="tog" data-tog="${b.id}" aria-expanded="${open}" aria-label="${b.name}'s team">${IC.chev}</button>`:'<span class="tog"></span>'}<button class="bmain" data-dm="${b.id}" aria-label="Message ${b.name}">${face(b,b.id==='atlas'&&!flat?'m':'',st==='waiting'?'wait':undefined)}<span class="w"><b>${b.name}</b><small>${esc(roleOf(b)==='Bot'?short(b):`${roleOf(b)} · ${kidsOf(b.id).length} ${kidsOf(b.id).length===1?'report':'reports'}`)}</small></span>${st==='working'?'<span class="st">working</span>':st==='waiting'?'<span class="st wait">waiting on you</span>':''}</button><button class="prof" data-bot="${b.id}">Profile</button>${pinBtn('tree',b)}</div>`};
+  const row=(b,k,open,flat)=>{const st=stateOf(b);return `<div class="brow">${!flat&&k.length?`<button class="tog" data-tog="${b.id}" aria-expanded="${open}" aria-label="${b.name}'s team">${IC.chev}</button>`:'<span class="tog"></span>'}<button class="bmain" data-dm="${b.id}" aria-label="Message ${b.name}">${face(b,b.id==='atlas'&&!flat?'m':'',st==='waiting'?'wait':undefined)}<span class="w"><b>${b.name}</b><small>${esc(roleOf(b)==='Bot'?short(b):`${roleOf(b)} · ${kidsOf(b.id).length} ${kidsOf(b.id).length===1?'report':'reports'}`)}</small></span>${st==='working'?'<span class="st">working</span>':st==='waiting'?'<span class="st wait">waiting on you</span>':''}</button><button class="prof" data-bot="${b.id}">Profile</button>${b.id==='atlas'?'':pinMark('bots',b.id)}</div>`};
   const node=(b,i)=>{const k=arrange(null,'tree:'+b.id,kidsOf(b.id)),open=!!S.open[b.id];
     return `<li class="${open?'open':''}" style="--i:${i}" data-sid="${b.id}">${row(b,k,open,false)}${k.length||isMgr(b)||b.id==='atlas'?`<div class="kids" ${open?'':'inert'}><ul data-sortkey="tree:${b.id}">${k.map(node).join('')}</ul></div>`:''}</li>`};
-  const pins=arrange(null,'pinned',BOTS.filter(b=>isPin('tree',b.id)));
-  return `${pins.length?`<section><h3 class="sect">Pinned</h3><ul class="btree flat" data-sortkey="pinned">${pins.map(b=>`<li data-sid="${b.id}">${row(b,[],false,true)}</li>`).join('')}</ul></section>`:''}
-    <section>${pins.length?'<h3 class="sect">Everyone</h3>':''}<ul class="btree">${node(by('atlas'),0)}</ul></section>`;
+  return `${shelf()}<section><ul class="btree">${node(by('atlas'),0)}</ul></section>`;
 }
 function chatsHome(){
   const p=pending(),f=S.chatF||'all',mgrs=BOTS.filter(b=>b.boss==='atlas'&&isMgr(b));
   let list=S.order.chats?BOTS:[by('atlas'),...BOTS.filter(b=>b.id!=='atlas').sort((x,y)=>((lastT(y)||{}).at||0)-((lastT(x)||{}).at||0))];
-  list=arrange('chats','chats',list);
+  list=arrange(null,'chats',list).filter(b=>b.id!=='atlas'&&!isPin('bots',b.id));
   list=list.filter(vis);if(f!=='all')list=list.filter(b=>b.id===f||b.boss===f);
-  return `<div class="cfilt">${[['all','All'],...mgrs.map(m=>[m.id,m.name.replace(' lead','')])].map(([k,l])=>`<button class="chip ${f===k?'on':''}" data-cf="${k}">${l}</button>`).join('')}</div>
+  return `${shelf()}<div class="cfilt">${[['all','All'],...mgrs.map(m=>[m.id,m.name.replace(' lead','')])].map(([k,l])=>`<button class="chip ${f===k?'on':''}" data-cf="${k}">${l}</button>`).join('')}</div>
   <div class="chats" data-sortkey="chats">${list.map(b=>{const st=stateOf(b),t=lastT(b),ask=p.find(x=>x.bot===b.id);
-    return `<div class="chat ${isPin('chats',b.id)?'pinned':''}" data-sid="${b.id}"><button class="chatmain" data-dm="${b.id}">${face(b,'m',st==='waiting'?'wait':undefined)}<span class="w"><span class="top"><b>${b.name}</b><time>${t&&t.at?ago(t.at):''}</time></span><span class="prev">${st==='working'?'<span class="typing">working<span class="dots"><i></i><i></i><i></i></span></span>':ask?`<span class="wt">Wants to ${esc(ask.action)}</span>`:esc(preview(t)||short(b))}</span></span>${ask?'<span class="badge">1</span>':''}</button>${pinBtn('chats',b)}${f==='all'?gripBtn(b):''}</div>`}).join('')}</div>`;
+    return `<div class="chat" data-sid="${b.id}"><button class="chatmain" data-dm="${b.id}">${face(b,'m',st==='waiting'?'wait':undefined)}<span class="w"><span class="top"><b>${b.name}</b><time>${t&&t.at?ago(t.at):''}</time></span><span class="prev">${st==='working'?'<span class="typing">working<span class="dots"><i></i><i></i><i></i></span></span>':ask?`<span class="wt">Wants to ${esc(ask.action)}</span>`:esc(preview(t)||short(b))}</span></span>${ask?'<span class="badge">1</span>':''}</button></div>`}).join('')}</div>`;
 }
 function orbitHome(){
   const P={},L=[],tops=kidsOf('atlas');P.atlas=[50,50];
@@ -626,9 +641,9 @@ function orbitHome(){
 function desksHome(){
   const a=by('atlas'),tops=kidsOf('atlas'),solo=tops.filter(b=>!isMgr(b));
   const groups=arrange('desks','desks',[...tops.filter(isMgr).map(m=>({id:m.id,name:m.name,m,kids:kidsOf(m.id),tint:m.tint})),...(solo.length?[{id:'solo',name:'Solo desk',kids:solo,tint:'#a9a7b3'}]:[])]);
-  const seat=c=>{const st=stateOf(c);return `<button class="seat" data-dm="${c.id}" data-sid="${c.id}">${pinMark('seats',c.id)}${face(c,'l',st==='waiting'?'wait':undefined)}<b>${c.name}</b><small>${st==='working'?'working':st==='waiting'?'waiting on you':esc(short(c))}</small></button>`};
-  return `<button class="head" data-dm="atlas">${face(a,'xl')}<b>Atlas</b><small>Primary · ${stateOf(a)==='awake'?'on watch':stateOf(a)}</small></button>
-  <div class="desks" data-sortkey="desks">${groups.map((g,n)=>`<section class="desk ${isPin('desks',g.id)?'pinned':''}" data-sid="${g.id}" style="--t:${g.tint};--i:${n}"><div class="dbar">${g.m?`<button class="dhead" data-dm="${g.m.id}">${face(g.m,'m')}<span><b>${g.m.name}</b><small>Manager · ${g.kids.length} ${g.kids.length===1?'report':'reports'}</small></span></button>`:`<div class="dhead"><span class="solo-ic">${face(a,'s','')}</span><span><b>Solo</b><small>Report to Atlas directly · ${g.kids.length} ${g.kids.length===1?'bot':'bots'}</small></span></div>`}${pinBtn('desks',g)}${gripBtn(g)}</div><div class="seats" data-sortkey="team:${g.id}">${arrange('seats','team:'+g.id,g.kids).map(seat).join('')}</div></section>`).join('')}</div>`;
+  const seat=c=>{const st=stateOf(c);return `<button class="seat" data-dm="${c.id}" data-sid="${c.id}">${pinMark('bots',c.id)}${face(c,'l',st==='waiting'?'wait':undefined)}<b>${c.name}</b><small>${st==='working'?'working':st==='waiting'?'waiting on you':esc(short(c))}</small></button>`};
+  return `${shelf()}
+  <div class="desks" data-sortkey="desks">${groups.map((g,n)=>`<section class="desk ${isPin('desks',g.id)?'pinned':''}" data-sid="${g.id}" style="--t:${g.tint};--i:${n}"><div class="dbar">${g.m?`<button class="dhead" data-dm="${g.m.id}">${face(g.m,'m')}<span><b>${g.m.name}</b><small>Manager · ${g.kids.length} ${g.kids.length===1?'report':'reports'}</small></span></button>`:`<div class="dhead"><span class="solo-ic">${face(a,'s','')}</span><span><b>Solo</b><small>Report to Atlas directly · ${g.kids.length} ${g.kids.length===1?'bot':'bots'}</small></span></div>`}${pinBtn('desks',g)}${gripBtn(g)}</div><div class="seats" data-sortkey="team:${g.id}">${arrange(null,'team:'+g.id,g.kids).map(seat).join('')}</div></section>`).join('')}</div>`;
 }
 function botsView(){
   const v=S.home,d=new Date(),h=d.getHours(),part=h<12?'morning':h<17?'afternoon':'evening';
@@ -637,7 +652,7 @@ function botsView(){
   return `<div class="view"><div class="home h-${v}">
     <header class="hh"><div><div class="when">${d.toLocaleDateString(undefined,{weekday:'long'})} ${part}${S.paused?' · <button class="link" data-pause>paused, resume</button>':''}</div><h1>${v==='chats'?'Chats':'Your bots'}</h1></div>
       <div class="hv"><div class="seg" role="tablist" aria-label="Home view">${[['desks','Desks'],['tree','List'],['chats','Chats'],['orbit','Orbit']].map(([k,l])=>`<button class="${v===k?'on':''}" data-home-v="${k}" role="tab" aria-selected="${v===k}">${l}</button>`).join('')}</div><div class="dfl">${v===S.def?'Your default view':`<button class="link" data-defv="${v}">Make this my default</button>`}</div></div></header>
-    ${v==='orbit'?'':`<p class="hint">${matchMedia('(hover:none)').matches?'Touch and hold a bot to move it. Hold still for options.':'Right-click a bot for options. Double-click and hold to drag it, even onto another team.'}</p>`}
+    ${v==='orbit'?'':`<p class="hint">${matchMedia('(hover:none)').matches?'Touch and hold a bot to move it; drag it up to pin it. Hold still for options.':'Right-click a bot for options. Drag it onto another team, or up top to pin it.'}</p>`}
     ${body}${S.hidden.length?`<button class="link unhide" data-unhide>Show ${S.hidden.length} hidden</button>`:''}${v==='chats'?'':lately}
   </div></div>`;
 }
@@ -942,14 +957,14 @@ document.addEventListener('keydown',e=>{
 let drag=null,G=null,lastDown=null,suppressClick=false,pendingOpen=null,lastType='mouse';
 const EASE_GLIDE='cubic-bezier(.2,.9,.25,1)';
 const famOf=k=>(k||'').split(':')[0];
-const pinKind=k=>({desks:'desks',team:'seats',chats:'chats',tree:'tree',pinned:'tree'})[famOf(k)];
+const pinKind=k=>({desks:'desks',team:'bots',chats:'bots',tree:'bots',shelf:'bots'})[famOf(k)];
 const bossOfKey=k=>{const id=k.split(':')[1];return id==='solo'||id==='atlas'?null:id};
 const homeItem=t=>{if(!t.closest||!t.closest('#root .home'))return null;if(t.closest('.tog,.seg,.cfilt,.hv,.prof,.recent,.unhide,.head'))return null;const it=t.closest('[data-sid]');return it&&it.parentElement?.dataset.sortkey?it:null};
 function flip(boxes,fn){const els=[...new Set(boxes)].flatMap(b=>[...b.children]).filter(x=>x!==drag?.item&&x.dataset.sid),r0=new Map(els.map(x=>[x,x.getBoundingClientRect()]));
   els.forEach(x=>x.getAnimations().forEach(an=>an.cancel()));fn();
   els.forEach(x=>{const a=r0.get(x),b=x.getBoundingClientRect(),dx=a.left-b.left,dy=a.top-b.top;if(Math.abs(dx)+Math.abs(dy)>.5)x.animate([{transform:`translate(${dx}px,${dy}px)`},{transform:'none'}],{duration:340,easing:EASE_GLIDE})})}
 function saveOrder(box,item){const key=box.dataset.sortkey,kind=pinKind(key);
-  if(item&&(kind==='desks'||kind==='chats'||kind==='seats')){const pinned=x=>x&&x.dataset.pin==='1',was=isPin(kind,item.dataset.sid),now=pinned(item.nextElementSibling)||(was&&pinned(item.previousElementSibling));
+  if(item&&kind==='desks'){const pinned=x=>x&&x.dataset.pin==='1',was=isPin(kind,item.dataset.sid),now=pinned(item.nextElementSibling)||(was&&pinned(item.previousElementSibling));
     if(now!==was){const arr=S.pins[kind],id=item.dataset.sid;now?arr.push(id):arr.splice(arr.indexOf(id),1)}}
   S.order[key]=[...box.children].map(x=>x.dataset.sid).filter(Boolean);saveLayout()}
 function markPins(){document.querySelectorAll('#root [data-sortkey]>[data-sid]').forEach(x=>{const k=pinKind(x.parentElement.dataset.sortkey);x.dataset.pin=k&&isPin(k,x.dataset.sid)?'1':'0'})}
@@ -963,21 +978,26 @@ function dragFrame(){const d=drag;if(!d)return;
   d.rot+=(Math.max(-3.5,Math.min(3.5,(d.x-d.px)*.35))-d.rot)*.2;d.px=d.x;
   const v=document.querySelector('#root .view');if(v){const vr=v.getBoundingClientRect();if(d.y<vr.top+70)v.scrollTop-=10;else if(d.y>vr.bottom-90)v.scrollTop+=10}
   if(Date.now()>d.lock){const it=d.item;it.style.transform='';
-    if(d.cross){const t=dropTarget(d);document.querySelectorAll('.drop-on').forEach(x=>{if(x!==t?.host)x.classList.remove('drop-on')});
+    const sh=document.querySelector('#root .shelf');if(sh){const r=sh.getBoundingClientRect();
+      if(d.box0===sh){d.unpin=d.y>r.bottom+40;it.classList.toggle('unpinning',d.unpin)}
+      else{d.toShelf=!!d.pinable&&d.y>=r.top&&d.y<=r.bottom+12;sh.classList.toggle('drop-on',d.toShelf)}}
+    if(d.cross&&!d.toShelf){const t=dropTarget(d);document.querySelectorAll('.drop-on').forEach(x=>{if(x!==t?.host)x.classList.remove('drop-on')});
       if(t){if(t.box!==d.box0||t.box!==d.box)t.host.classList.toggle('drop-on',t.box!==d.box0);
         if(t.box!==d.box){t.open&&t.open();const after=[...t.box.children].find(x=>x!==it&&x.dataset.sid&&(r=>d.y<r.top+r.height/2)(x.getBoundingClientRect()));
           d.lock=Date.now()+160;flip([d.box,t.box],()=>t.box.insertBefore(it,after||null));d.box=t.box}}}
-    if(Date.now()>d.lock){const kids=[...d.box.children],ii=kids.indexOf(it),ir=it.getBoundingClientRect();
+    if(Date.now()>d.lock&&!d.toShelf&&!d.unpin){const kids=[...d.box.children],ii=kids.indexOf(it),ir=it.getBoundingClientRect();
       const t=kids.find(x=>{if(x===it||!x.dataset.sid)return false;const r=x.getBoundingClientRect();return d.x>=r.left&&d.x<=r.right&&d.y>=r.top&&d.y<=r.bottom});
       if(t){const r=t.getBoundingClientRect(),ti=kids.indexOf(t),row=Math.abs(r.top-ir.top)<12,mid=row?(r.left+r.width/2):(r.top+r.height/2),pos=row?d.x:d.y;
         if(ti<ii?pos<mid:pos>mid){d.lock=Date.now()+120;flip([d.box],()=>d.box.insertBefore(it,ti<ii?t:t.nextSibling))}}}}
   place();requestAnimationFrame(dragFrame)}
 function startDrag(item,x0,y0,x,y){closeMenu();markPins();item.getAnimations().forEach(an=>an.cancel());const r=item.getBoundingClientRect(),box=item.parentElement,key=box.dataset.sortkey,b=by(item.dataset.sid);
-  drag={item,box,box0:box,gx:x0-r.left,gy:y0-r.top,x,y,px:x,tx:0,ty:0,rot:0,lock:0,cross:(famOf(key)==='team'||famOf(key)==='tree')&&!!b&&roleOf(b)==='Bot'};
+  drag={item,box,box0:box,gx:x0-r.left,gy:y0-r.top,x,y,px:x,tx:0,ty:0,rot:0,lock:0,cross:(famOf(key)==='team'||famOf(key)==='tree')&&!!b&&roleOf(b)==='Bot',pinable:!!b&&b.id!=='atlas'&&!isPin('bots',b.id)};
   item.style.transition='box-shadow .25s ease-out';item.classList.add('dragging');document.body.classList.add('sorting');requestAnimationFrame(dragFrame)}
 function endDrag(){const d=drag;drag=null;const it=d.item;document.querySelectorAll('.drop-on').forEach(x=>x.classList.remove('drop-on'));
   it.style.transition='transform .45s cubic-bezier(.3,1.35,.5,1),box-shadow .35s ease-out';it.style.transform='';it.classList.remove('dragging');
-  document.body.classList.remove('sorting');setTimeout(()=>{it.style.transition=''},480);saveOrder(d.box,it);
+  document.body.classList.remove('sorting');setTimeout(()=>{it.style.transition=''},480);it.classList.remove('unpinning');
+  if(d.toShelf||d.unpin){const id=it.dataset.sid,arr=S.pins.bots;d.toShelf?arr.includes(id)||arr.push(id):arr.splice(arr.indexOf(id),1);saveLayout();setTimeout(renderMain,d.toShelf?260:0);return}
+  saveOrder(d.box,it);
   if(d.box!==d.box0){saveOrder(d.box0);const b=by(it.dataset.sid),nb=bossOfKey(d.box.dataset.sortkey);b.boss=nb;if(nb)S.open[nb]=true;log('atlas','bots',`moved ${b.name} ${nb?'under '+by(nb).name:'to Solo'}`);setTimeout(renderMain,520)}}
 document.addEventListener('input',e=>{if(e.target.id==='thQ'){$('thList').innerHTML=threadList(e.target.value);return}const f=e.target.closest?.('[data-hire]');if(!f)return;const nm=f.nm.value.trim()||'New bot',c=f.querySelector('[name=tint]:checked')?.value;$('hirePrev').innerHTML=`${face({id:'_',name:nm,role:'Bot',tint:c},'s','')}<span><b>${esc(nm)}</b><small>${f.boss.value?'Reports to '+esc(by(f.boss.value).name):'Reports to Atlas'}</small></span>`});
 document.addEventListener('pointerdown',e=>{lastType=e.pointerType||'mouse';if(e.button>0)return;
@@ -990,7 +1010,8 @@ document.addEventListener('pointerdown',e=>{lastType=e.pointerType||'mouse';if(e
   const arm=held=>{if(!G)return;G.armed=!G.noDrag;G.held=held;item.classList.add('lifted');if(held)navigator.vibrate?.(12)};
   if(lastType!=='mouse')G.timer=setTimeout(()=>arm(true),420);else if(dbl)arm(false);else G.timer=setTimeout(()=>arm(false),550)});
 document.addEventListener('pointermove',e=>{if(drag){drag.x=e.clientX;drag.y=e.clientY;return}if(!G)return;G.x=e.clientX;G.y=e.clientY;const m=Math.hypot(G.x-G.x0,G.y-G.y0);
-  if(!G.armed){if(m>(G.type==='mouse'?5:9)){clearTimeout(G.timer);G.item.classList.remove('lifted');G=null}return}
+  if(!G.armed){if(G.type==='mouse'&&!G.noDrag&&m>6){clearTimeout(G.timer);const g=G;G=null;suppressClick=true;startDrag(g.item,g.x0,g.y0,g.x,g.y);return}
+    if(m>(G.type==='mouse'?5:9)){clearTimeout(G.timer);G.item.classList.remove('lifted');G=null}return}
   if(m>4){const g=G;G=null;g.item.classList.remove('lifted');suppressClick=true;startDrag(g.item,g.x0,g.y0,g.x,g.y)}});
 const releaseG=menu=>{if(drag){endDrag();suppressClick=true;setTimeout(()=>suppressClick=false,400);return}if(!G)return;clearTimeout(G.timer);const g=G;G=null;g.item.classList.remove('lifted');
   if(g.held||g.armed){suppressClick=true;setTimeout(()=>suppressClick=false,400)}if(menu&&g.held)openMenu(g.item,g.x,g.y,true)};
@@ -1006,7 +1027,7 @@ function openMenu(item,x,y,touch){const key=item.parentElement.dataset.sortkey,k
   const leads=b&&roleOf(b)==='Bot'?[...BOTS.filter(x=>isMgr(x)&&x.id!==b.boss&&vis(x)).map(x=>[x.id,x.name,x]),...(b.boss?[['','Solo (report to Atlas)',null]]:[])]:[];
   m.innerHTML=`<div class="cm-h">${b?face(b,'',''):face(by('atlas'),'s','')}<span><b>${b?b.name:'Solo desk'}</b><small>${b?roleOf(b)+(b.boss?' · '+by(b.boss).name:''):'Bots that report to Atlas'}</small></span></div>
     ${b?`<button role="menuitem" data-cm="msg">Message ${esc(b.name)}</button><button role="menuitem" data-cm="prof">Profile</button>`:''}
-    ${kind?`<button role="menuitem" data-cm="pin">${pinned?'Unpin':kind==='desks'?'Pin desk to top':'Pin to top'}</button>`:''}
+    ${kind&&sid!=='atlas'?`<button role="menuitem" data-cm="pin">${pinned?'Unpin':kind==='desks'?'Pin desk to top':'Pin to the top row'}</button>`:''}
     ${leads.length?`<button role="menuitem" data-cm="moveopen" aria-expanded="false">Move to…</button><div class="cm-move" hidden>${leads.map(([id,n,x])=>`<button role="menuitem" data-cm-move="${id}">${x?face(x,'s',''):face(by('atlas'),'s','')}${esc(n)}</button>`).join('')}</div>`:''}
     ${b&&b.id!=='atlas'?`<hr><button role="menuitem" data-cm="hide">Hide</button><button role="menuitem" class="danger" data-cm="del">Delete…</button>`:''}`;
   m.classList.toggle('sheet',!!touch);m.classList.add('show');$('cmScrim').classList.toggle('show',!!touch);
