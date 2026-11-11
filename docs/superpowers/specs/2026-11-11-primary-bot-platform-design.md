@@ -62,16 +62,32 @@ Why now: the owner will only deploy and use the app daily once this structure ex
 - **Runaway guard:** no cap on bot count, but if bot creation forms a loop or exceeds about 20 bots in a few minutes, all bot activity pauses and the primary asks the owner to continue.
 - **X-engage and its five example bots are removed entirely.**
 
+## Bots and threads are two different things (owner, 2026-11-11, mock v39)
+
+This section wins over anything below about threads, routing or help between bots.
+
+- **Bots: one continuous chat per bot**, like Grok's bots. The owner talks to any bot directly in its own chat, and that chat never splits into threads.
+  - A plain bot answers itself.
+  - A lead (a manager, or Atlas) can also be asked to get something done. It hands each part to the bot on its team whose job it is, those bots reply to the lead inside the same chat, and the lead gives the owner the result there.
+  - Atlas's team is every bot; a manager's team is everything below it in the chart.
+  - If no one on the team does the work, the lead offers to hire a bot for it. A manager hires under itself, or points the owner to Atlas.
+- **Threads: a new chat every time, always run by Atlas.** Starting a thread never opens or reuses a bot's chat. Atlas is the orchestrator:
+  - it decides which bots do which parts and hands each part out in the thread;
+  - each bot replies to Atlas in the thread;
+  - Atlas reports the final output to the owner.
+  - Follow-up messages in a thread go to Atlas again. The owner does not pick bots in a thread (no @ there); Atlas does.
+- **What the chat shows.** Every handoff is a visible pair of lines, "Atlas to Planner: …" and "Planner to Atlas: …". The lead's own reply comes last, naming whose replies it used. Permission asks appear at the step where the bot needs them.
+- **Lists stay separate.** The Threads section lists only threads, never bot chats. Bot rows preview only their own chat. Back from a bot chat goes to Bots; back from a thread goes to Threads. The thread header says "Atlas runs this thread". A bot chat's header says "One continuous chat", "Hands work to its team" or "Hands work to any bot".
+- **Cost.** Routing is still one planning call by the lead (from names and jobs), not a broadcast. Bots outside the plan never see the message.
+
 ## Company model and threads (owner revision, 2026-11-11)
 
 This revision replaces groups. Where it conflicts with anything below, this section wins.
 
 - **Org chart, like a company.** Every bot has at most one manager (`reportsTo`, a bot id or none). A manager is an ordinary bot that has reports. The primary bot sits at the top. Managers can report to the primary or to other managers, to any depth. A bot may have no manager at all. It must stay a tree: one manager per bot, no cycles.
-- **Threads, Slack-style, with no assignee.** The owner starts a thread without picking a bot. The bot whose job matches picks it up, answers in the thread, and every other bot stays quiet. The owner can still message a bot directly.
 - **Routing is one cheap step, never a broadcast.** Bots do not each read the message and decide whether to react: that would cost one model call per bot per message. One routing call, made by the primary from every bot's name and job (memory excluded), picks the owner. When the match is clear it goes straight to the owning bot; managers are consulted only when the primary can't tell which of their reports owns it. Quiet bots never see the message. Owner's framing: the primary stays awake and every other bot sleeps until work is routed to it; the chart and chat list show sleeping, working and waiting-on-you states.
-- **The route is shown.** The thread shows a one-line path ("Atlas → Ops lead → Mailroom") and a "N bots stayed quiet" note the owner can open to see why each one skipped. One click ("wrong bot? hand to…") reassigns the thread, and the correction goes into the primary's memory.
+- **Threads and help between bots** now follow "Bots and threads are two different things" above.
 - **No bot owns it:** the primary says so and offers to handle it once or create a bot for it, under whichever manager fits.
-- **Help between bots.** The owning bot messages other bots directly, gets the answer, and replies to the owner in the thread. Each bot-to-bot message shows in the thread as one line, "Scholar messaged Quill". Tapping that line (it is a message, not a button) shows exactly what was sent. Replies show the same way.
 - **Managers' powers** within their own team (everything below them in the chart): create, edit, pause and reassign bots, and settle who owns a task. The primary has these powers over the whole company, plus everything listed under primary-only powers.
 - **Context is automatic.** There is no per-bot context setting. Each turn the app assembles the bot's job, its memory, the thread so far and teammates' replies. The bot can ask for more (older thread messages, more memory) through a tool. When a thread nears the model's limit, older parts are summarised. `contextMessages` and similar settings are removed.
 - **Memory per bot.** Each bot has its own private memory: what it learned about the owner and its job. The owner can see, edit and delete every line from the bot's profile. There is also one shared company notebook every bot can read. Build on the existing durable memory (`shared/memory.js`, Phase T); do not add a second memory system.
