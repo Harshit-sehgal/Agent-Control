@@ -45,6 +45,8 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
       - run: pip install playwright
-      - run: python -m playwright install --with-deps chromium
+      # The runner image already has Chromium's system libraries. When its apt mirror
+      # cannot be resolved, apt retries for minutes; fall back to the browser alone.
+      - run: timeout 240 python -m playwright install --with-deps chromium || python -m playwright install chromium
       - name: Live end-to-end (real server, stub model, real browser)
         run: python tests/live_smoke.py
