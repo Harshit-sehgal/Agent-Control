@@ -40,7 +40,7 @@ function referenced(text, url) {
     }
   } else if (/\.m?js$/i.test(new URL(url).pathname)) {
     // `from '…'` covers named, default and re-exported modules; a side-effect
-    // import (`import './x.js?v=88aa35d78f'`) has no from-clause and needs its own pattern.
+    // import (`import './x.js?v=9489b66344'`) has no from-clause and needs its own pattern.
     for (const [, spec] of text.matchAll(/\bfrom\s*["']([^"']+)["']/g)) push(spec);
     for (const [, spec] of text.matchAll(/\bimport\s*["']([^"']+)["']/g)) push(spec);
   }

@@ -160,3 +160,29 @@ export function presetById(id) {
   const key = String(id || '').trim().toLowerCase();
   return PROVIDER_PRESETS.find(p => p.id === key) || null;
 }
+
+/** A model that runs on the owner's own subscription instead of an API key.
+ *
+ * The paired local agent spawns the unmodified `claude` or `codex` CLI, which the
+ * owner signed in to in their own terminal. A provider of this kind holds no key,
+ * no endpoint and no vault row: it names an engine and, optionally, a model.
+ * `signIn` is the sentence shown when that CLI is not signed in on the machine. */
+export const LOCAL_CLI_KIND = 'local-cli';
+export const LOCAL_CLI_ENGINES = [
+  {id: 'claude', label: 'Claude (your subscription)', binary: 'claude', signIn: 'Run `claude` and sign in on that machine.'},
+  {id: 'codex', label: 'ChatGPT (your subscription)', binary: 'codex', signIn: 'Run `codex login` and sign in on that machine.'},
+];
+export const LOCAL_CLI_ENGINE_IDS = LOCAL_CLI_ENGINES.map(e => e.id);
+
+/** @returns the engine record for an id, or null. */
+export const cliEngineById = id => LOCAL_CLI_ENGINES.find(e => e.id === String(id ?? '').trim().toLowerCase()) || null;
+
+/** A CLI model id: empty (the CLI's own default) or a plain name. It must not
+ * begin with `-`, because it travels as the value after `--model` and a value
+ * that looks like a flag could be read as one. `[` `]` allow ids like `opus[1m]`.
+ * @returns {string|null} the cleaned id, '' for none, or null when it is refused. */
+export function cleanCliModel(value) {
+  const text = String(value ?? '').trim();
+  if (!text) return '';
+  return /^[A-Za-z0-9][A-Za-z0-9._:/[\]-]{0,79}$/.test(text) ? text : null;
+}

@@ -52,7 +52,7 @@ const wireConfig=config=>{
   return {...config,protocol,baseUrl:normaliseBaseUrl(config?.baseUrl,protocol)};
 };
 /** True when any usable provider exists: the environment or a saved BYOK one. */
-export const configReady=config=>Boolean(config&&config.apiKey&&config.baseUrl&&config.model);
+export const configReady=config=>Boolean(config&&(config.kind==='local-cli'?config.engine:config.apiKey&&config.baseUrl&&config.model));
 
 const ANTHROPIC_VERSION='2023-06-01';
 /** Auth differs per protocol: Anthropic wants x-api-key plus a version header,
@@ -312,6 +312,13 @@ const providerHost=config=>{try{return new URL(config.baseUrl).host;}catch{retur
 const maxCalls=()=>{const n=Number(process.env.AI_MAX_CONCURRENCY);return Number.isInteger(n)&&n>=1?n:4;};
 let activeCalls=0;
 async function callModel({instructions,input,maxTokens,config,temperature=null}){
+  // A subscription model is not a fetch: the paired local agent runs the owner's
+  // own CLI. `config.run` is how the server reaches that agent; a config without
+  // one (the Pages demo, a test) has nowhere to run.
+  if(config?.kind==='local-cli'){
+    if(typeof config.run!=='function')throw upstream('This model runs on a paired local agent and is not available here.',422);
+    return config.run({engine:config.engine,model:config.model||'',instructions,input});
+  }
   const cfg=wireConfig(config||envConfig());
   if(!configReady(cfg))throw upstream('No AI provider is configured. Add one under You → AI and models.',422);
   const protocol=protocolOf(cfg);

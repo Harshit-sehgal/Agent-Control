@@ -10,7 +10,7 @@
 import * as credentials from './credentials.js';
 import {fail} from '../shared/errors.js';
 import {envConfig,discoverModels,protocolOf,configReady,complete} from './ai.js';
-import {normaliseProtocol,inferProtocol,presetById,protocolById} from '../shared/ai-presets.js';
+import {normaliseProtocol,inferProtocol,presetById,protocolById,LOCAL_CLI_KIND,LOCAL_CLI_ENGINES,cliEngineById,cleanCliModel} from '../shared/ai-presets.js';
 import {uuid} from '../shared/core.js';
 
 const clean=(v,n)=>String(v??'').trim().slice(0,n);
@@ -85,14 +85,27 @@ export function aiState(state){
 }
 /** A saved provider may predate `protocol` (it carried the old `style`
  * shorthand), so resolve it the same way the call path does. */
-const protocolOfProvider=p=>protocolOf({protocol:p?.protocol,style:p?.style,baseUrl:p?.baseUrl});
+const isCli=p=>p?.kind===LOCAL_CLI_KIND;
+const protocolOfProvider=p=>isCli(p)?LOCAL_CLI_KIND:protocolOf({protocol:p?.protocol,style:p?.style,baseUrl:p?.baseUrl});
+/** The engine a subscription provider runs: `claude` or `codex`, nothing else. */
+function cleanEngine(value){
+  const engine=cliEngineById(value);
+  if(!engine)fail(`Pick the engine for this subscription: ${LOCAL_CLI_ENGINES.map(e=>e.id).join(' or ')}.`);
+  return engine.id;
+}
+/** A subscription provider's model: empty, or a plain name that cannot read as a flag. */
+function cleanModel(value){
+  const model=cleanCliModel(value);
+  if(model===null)fail('That model name is not valid. Use letters, digits and . _ : / - only, starting with a letter or digit, up to 80 characters.');
+  return model;
+}
 const modelCount=p=>Array.isArray(p?.models)?p.models.length:0;
 // The base URL may contain a secret path segment. The browser only needs the
 // host for display, so never return the full URL in public provider metadata.
 // A viewer gets the model ids because the per-bot model picker is a member
 // control and an empty datalist is a broken one. Ids and labels are not secrets;
 // the endpoint path, the catalogue error and the header NAMES stay admin-only.
-const publicProvider=p=>({id:p.id,label:p.label,protocol:protocolOfProvider(p),host:hostOf(p.baseUrl),modelCount:modelCount(p),chatModels:capList(p.chatModels||p.models,300),labels:labelsOf(p),createdAt:p.createdAt,createdBy:p.createdBy||null});
+const publicProvider=p=>({id:p.id,label:p.label,kind:isCli(p)?LOCAL_CLI_KIND:'api',...(isCli(p)?{engine:p.engine,model:p.model||''}:{}),protocol:protocolOfProvider(p),host:hostOf(p.baseUrl),modelCount:modelCount(p),chatModels:capList(p.chatModels||p.models,300),labels:labelsOf(p),createdAt:p.createdAt,createdBy:p.createdBy||null});
 /** The settings page gets the full picture: the endpoint, both model lists, the
  * friendly labels, the Azure version and the header NAMES. Values stay in the
  * vault, so even this listing cannot leak one. */
@@ -122,7 +135,18 @@ export function listProviders(state){
  * The key is used immediately to read the provider's own model catalogue, so
  * the picker reflects that key's plan instead of a hard-coded list. A failed
  * catalogue is recorded, not fatal: the provider still saves. */
-export async function addProvider(store,workspaceId,{label,baseUrl,apiKey,style,protocol,preset,apiVersion,headers,createdBy}={}){
+export async function addProvider(store,workspaceId,{kind,engine,model,label,baseUrl,apiKey,style,protocol,preset,apiVersion,headers,createdBy}={}){
+  if(kind!==undefined&&kind!==null&&kind!==''&&kind!=='api'&&kind!==LOCAL_CLI_KIND)fail(`Unknown provider kind. Expected api or ${LOCAL_CLI_KIND}.`);
+  if(kind===LOCAL_CLI_KIND){
+    // A subscription provider is a name, an engine and an optional model. Nothing
+    // that could hold a secret is accepted, so there is no vault row to leak.
+    const name=clean(label,80);
+    if(!name)fail('Give the provider a name (e.g. My Claude).');
+    if(String(apiKey??'').trim()||baseUrl||headers)fail('A subscription holds no key and no endpoint. Sign in to the CLI on the paired machine instead.');
+    const provider={id:uuid(),kind:LOCAL_CLI_KIND,label:name,engine:cleanEngine(engine),model:cleanModel(model),createdBy:createdBy||null,createdAt:new Date().toISOString()};
+    await store.update(s=>{const ai=aiState(s);ai.providers.unshift(provider);if(!ai.defaultProviderId)ai.defaultProviderId=provider.id;});
+    return listingOf(store,provider.id);
+  }
   const name=clean(label,80);const url=clean(baseUrl,300).replace(/\/+$/,'');const key=String(apiKey||'').trim();
   const chosen=normaliseProtocol(protocol)||normaliseProtocol(style)||normaliseProtocol(presetById(preset)?.protocol)||inferProtocol(url);
   if(!name)fail('Give the provider a name (e.g. OpenAI, Groq, my router).');
@@ -159,9 +183,18 @@ const listingOf=(store,id)=>getProvider(store,id)||{id};
 
 /** Change a saved provider, optionally rotating its key, and re-read the
  * catalogue: the models that key can use change with the key or the endpoint. */
-export async function updateProvider(store,workspaceId,id,{label,baseUrl,apiKey,protocol,style,preset,apiVersion,headers}={}){
+export async function updateProvider(store,workspaceId,id,{label,engine,model,baseUrl,apiKey,protocol,style,preset,apiVersion,headers}={}){
   const current=store.read().ai?.providers?.find(p=>p.id===id);
   if(!current)fail('Provider not found.',404);
+  if(isCli(current)){
+    if(String(apiKey??'').trim()||baseUrl||headers)fail('A subscription holds no key and no endpoint. Sign in to the CLI on the paired machine instead.');
+    const name=label===undefined?current.label:clean(label,80);
+    if(!name)fail('Give the provider a name (e.g. My Claude).');
+    const nextEngine=engine===undefined?current.engine:cleanEngine(engine);
+    const nextModel=model===undefined?(current.model||''):cleanModel(model);
+    await store.update(s=>{const p=aiState(s).providers.find(x=>x.id===id);if(!p)return;p.label=name;p.engine=nextEngine;p.model=nextModel;});
+    return {...listingOf(store,id),endpointChanged:false};
+  }
   const name=label===undefined?current.label:clean(label,80);
   const url=baseUrl===undefined?current.baseUrl:clean(baseUrl,300).replace(/\/+$/,'');
   // `style` is the pre-protocol field; still honoured so an older client edits.
@@ -212,6 +245,9 @@ export async function refreshModels(store,providerId){
   const provider=store.read().ai?.providers?.find(p=>p.id===providerId);
   if(!provider)fail('Provider not found.',404);
   const at=new Date().toISOString();
+  // Listing a subscription's models would need a model call, which spends the
+  // owner's plan. The model is typed by hand, or left to the CLI's default.
+  if(isCli(provider))return {models:[],chatModels:[],allModels:[],labels:{},protocol:LOCAL_CLI_KIND,at,truncated:false};
   try{
     const found=await discoverModels(providerConfig(store,provider));
     // Keep the split the caller returned: `models`/`chatModels` are the
@@ -276,6 +312,12 @@ export function resolveConfig(store,botId){
   const pinned=override?.providerId&&ai.providers.some(p=>p.id===override.providerId)?override.providerId:null;
   const providerId=pinned||ai.defaultProviderId;
   const provider=ai.providers.find(p=>p.id===providerId);
+  if(provider&&isCli(provider)){
+    // The workspace default model is an API model id; a CLI would only reject it.
+    // A bot override that could read as a flag is dropped rather than passed on.
+    const model=cleanCliModel(override?.model)||provider.model||'';
+    return {kind:LOCAL_CLI_KIND,engine:provider.engine,model,source:LOCAL_CLI_KIND,label:provider.label,providerId:provider.id,models:[]};
+  }
   if(provider){
     const config=providerConfig(store,provider);
     const chosen=override?.model||ai.defaultModel||'auto';
@@ -293,6 +335,9 @@ export function resolveConfig(store,botId){
 export async function testProvider(store,providerId,{model}={}){
   const provider=store.read().ai?.providers?.find(p=>p.id===providerId);
   if(!provider)fail('Provider not found.',404);
+  // A test message would spend the owner's subscription. A subscription is
+  // checked by the sign-in status its paired agent reports, never by a prompt.
+  if(isCli(provider))fail('A subscription is not tested with a message. Its sign-in status comes from the paired agent.',400);
   const config=providerConfig(store,provider);
   // Test the first model the key actually lists before falling back to "auto":
   // "auto" only means something to OpenAI-style servers, and a test that reports
