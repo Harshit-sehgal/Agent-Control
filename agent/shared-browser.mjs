@@ -8,6 +8,12 @@
  *
  * - One bot drives at a time. A task that finds the browser busy waits its turn,
  *   in the order it asked, and never touches another bot's tab.
+ * - The owner can take the browser (`takeover`) and hand it back (`handback`).
+ *   While they hold it no bot starts a task. A task already running finishes the
+ *   step it is in, runs no further step (the page is no longer the one its steps
+ *   were planned for), waits for the hand back and then answers with the page as
+ *   the owner left it. The owner's input waits for that step too, so an action
+ *   is never applied twice or cut in half.
  * - Each bot has its own tab (`botId` -> tab). A tab the browser no longer has
  *   is dropped and replaced; after a restart there are no tab ids at all, so no
  *   stale one can be used.
@@ -40,13 +46,17 @@ export const ANONYMOUS_BOT = 'shared';
 /** The cast the owner watches: small and cheap, since a person is looking at it. */
 const SCREENCAST = {format: 'jpeg', quality: 60, maxWidth: VIEWPORT.width, maxHeight: VIEWPORT.height, everyNthFrame: 2};
 
-export function createSharedBrowser({start = startBrowserSession, allow = [], profile, settleMs, timeoutMs} = {}) {
+export function createSharedBrowser({start = startBrowserSession, allow = [], profile, settleMs, timeoutMs, idleMs = Number(process.env.AGENT_TAKEOVER_IDLE_MS) || 15 * 60000} = {}) {
   const allowed = () => (typeof allow === 'function' ? allow() : allow);
   let session = null, starting = null;
   const tabs = new Map();      // botId -> {tab, url, title}
   const queue = [];            // tickets, first come first served
   const waits = new Set();     // {predicate, resolve}
   let holder = null;           // the bot whose task has the browser
+  let driving = null;          // the bot whose tab the owner holds
+  let epoch = 0;               // bumps whenever the owner takes the browser
+  let parked = false;          // the running task is waiting at a step for the hand back
+  let idleTimer = null;
   let watched = null;          // the tab being cast: {botId, tab, live, off}
   let frameSink = null;
 
@@ -91,11 +101,12 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
   async function acquire(botId) {
     const ticket = {botId};
     queue.push(ticket);
-    await until(() => queue[0] === ticket && holder === null);
+    // Bots wait for the owner as well as for each other.
+    await until(() => queue[0] === ticket && holder === null && driving === null);
     queue.shift();
     holder = botId;
   }
-  const release = () => { holder = null; notify(); };
+  const release = () => { holder = null; parked = false; notify(); };
 
   /** Run one page read or action list on this bot's tab. A browser that died
    * under it is noticed by `ensure` on the next task. */
@@ -108,8 +119,45 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
       const live = await ensure();
       const tab = await tabFor(live, id);
       const remember = ({url: at, title}) => { const entry = tabs.get(id); if (entry) { entry.url = at || entry.url; entry.title = title ?? entry.title; } };
-      return await live.capture(url, {allow: allowed(), steps, tab, timeoutMs, settleMs, onPage: remember});
+      // Asked before each step. False once the owner has taken the browser since
+      // this task began; if they still hold it, wait here for the hand back.
+      const startEpoch = epoch;
+      const gate = async () => {
+        if (driving) { parked = true; notify(); try { await until(() => driving === null); } finally { parked = false; } return false; }
+        return epoch === startEpoch;
+      };
+      return await live.capture(url, {allow: allowed(), steps, tab, timeoutMs, settleMs, onPage: remember, gate});
     } finally { release(); }
+  }
+
+  const armIdle = () => {
+    clearTimeout(idleTimer);
+    // A takeover forgotten for this long ends by itself, so the parked run is not stuck for good.
+    idleTimer = setTimeout(() => { if (driving) { driving = null; notify(); } }, idleMs);
+    idleTimer.unref?.();
+  };
+  const conflict = message => Object.assign(new Error(message), {status: 409});
+
+  /** The owner takes this bot's tab (opening it if the bot never had one). The
+   * bot's running task, if any, is not interrupted mid-step: see the header. */
+  async function takeover(botId) {
+    if (driving && driving !== botId) throw conflict('You are already driving another bot\'s tab. Hand it back first.');
+    const first = !driving;
+    if (first) { driving = botId; epoch++; notify(); }
+    armIdle();
+    try { await tabFor(await ensure(), botId); }
+    catch (error) {
+      // A browser that will not start must not leave the owner "holding" nothing.
+      if (first) { driving = null; clearTimeout(idleTimer); notify(); }
+      throw error;
+    }
+  }
+  /** The owner is done: bots may go on. Handing back what you do not hold does nothing. */
+  async function handback(botId) {
+    if (driving !== botId) return;
+    driving = null;
+    clearTimeout(idleTimer);
+    notify();
   }
 
   /** Frames of the watched tab, newest first wins at the receiver: `fn({botId, image, w, h, at})`. */
@@ -153,8 +201,12 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
    * the allowlist like every page the browser opens. */
   async function applyInput(botId, event) {
     const ev = cleanInput(event);
+    if (driving !== botId) throw conflict('You are not driving that bot\'s tab. Take it over first.');
+    // The bot's step in flight finishes first, or the owner's click would land in the middle of it.
+    await until(() => holder === null || parked || driving !== botId);
     const entry = tabs.get(botId);
-    if (!entry || !session) throw new Error('That bot has no tab open.');
+    if (driving !== botId || !entry || !session) throw conflict('You are not driving that bot\'s tab. Take it over first.');
+    armIdle();
     const {sessionId} = entry.tab, send = (method, params) => session.cdp.send(method, params, sessionId);
     if (ev.type === 'click') {
       await send('Input.dispatchMouseEvent', {type: 'mouseMoved', x: ev.x, y: ev.y});
@@ -188,9 +240,10 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
   }
 
   /** What the device knows about each tab: for the status it reports. */
-  const status = () => [...tabs].map(([botId, {url, title}]) => ({botId, state: holder === botId ? 'browsing' : 'idle', url, title}));
+  const status = () => [...tabs].map(([botId, {url, title}]) => ({botId, state: driving === botId ? 'driving' : holder === botId ? 'browsing' : 'idle', url, title}));
 
   async function close() {
+    clearTimeout(idleTimer);
     const live = session;
     session = null;
     watched = null;
@@ -198,7 +251,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     if (live) await live.close().catch(() => {});
   }
 
-  return {run, status, close, onFrame, watch, unwatch, applyInput, refresh};
+  return {run, status, close, onFrame, watch, unwatch, applyInput, refresh, takeover, handback, owner: () => driving};
 }
 
 /** One `browser.capture` or `browser.action` task, with the rules every browser

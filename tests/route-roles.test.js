@@ -106,6 +106,9 @@ const LEAST_ROLE = {
   // A frame is a picture of whatever the shared browser is signed in to: a viewer never gets one, and input is a member's.
   'GET /api/browser-live/:botId': 'member',
   'POST /api/browser-live/:botId/input': 'member',
+  'GET /api/browser-live': 'member',
+  'POST /api/browser-live/:botId/takeover': 'member',
+  'POST /api/browser-live/:botId/handback': 'member',
   'GET /api/users': 'admin',
   'POST /api/users': 'admin',
   'PATCH /api/users/:id': 'admin',

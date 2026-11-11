@@ -100,6 +100,7 @@ test('owner input reaches the bot\'s tab as real input events, and is bounded ag
   t.after(() => sb.close());
   await sb.run('bot-a', {url: 'https://docs.example.com/'});
   const sessionId = [...fake().targets.values()][0].sessionId;
+  await sb.takeover('bot-a');
   await sb.applyInput('bot-a', {type: 'click', x: 100, y: 200});
   await sb.applyInput('bot-a', {type: 'type', text: 'hi there'});
   await sb.applyInput('bot-a', {type: 'key', key: 'Enter'});
@@ -118,7 +119,7 @@ test('owner input reaches the bot\'s tab as real input events, and is bounded ag
   assert.equal(sent[6].params.deltaY, 300);
   assert.equal(sent.every(e => e.sessionId === sessionId), true, 'every event went to that bot\'s tab');
   await assert.rejects(sb.applyInput('bot-a', {type: 'eval'}), /input event is one of/);
-  await assert.rejects(sb.applyInput('nobody', {type: 'key', key: 'Enter'}), /no tab/);
+  await assert.rejects(sb.applyInput('nobody', {type: 'key', key: 'Enter'}), /not driving/);
   // Navigation is held to the allowlist, like everything the browser opens.
   await sb.applyInput('bot-a', {type: 'navigate', url: 'https://docs.example.com/next'});
   assert.equal(fake().called('Page.navigate').at(-1).params.url, 'https://docs.example.com/next');
@@ -148,7 +149,7 @@ function channelRig(t, {poll = [], frame = () => ({ok: true, watch: 'bot-a'})} =
 }
 
 test('the live channel starts watching when the server says so, applies input in order, and reports tabs', async t => {
-  const {channel, sb, fake, sent} = channelRig(t, {poll: [{commands: [], watch: null}, {commands: [{type: 'input', botId: 'bot-a', event: {type: 'key', key: 'Tab'}}, {type: 'input', botId: 'bot-a', event: {type: 'type', text: 'x'}}], watch: 'bot-a'}]});
+  const {channel, sb, fake, sent} = channelRig(t, {poll: [{commands: [], watch: null}, {commands: [{type: 'takeover', botId: 'bot-a'}, {type: 'input', botId: 'bot-a', event: {type: 'key', key: 'Tab'}}, {type: 'input', botId: 'bot-a', event: {type: 'type', text: 'x'}}], watch: 'bot-a'}]});
   await sb.run('bot-a', {url: 'https://docs.example.com/'});
   channel.start();
   await sleep(60);

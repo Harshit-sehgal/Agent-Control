@@ -13,7 +13,7 @@
  * Nothing here keeps a frame: a frame is in memory from Chrome to the request. */
 export function createLiveChannel({call, shared, frameGapMs = 100, retryMs = 2000, maxRetryMs = 30000, log = console} = {}) {
   const abort = new AbortController();
-  let stopped = false, cast = null, latest = null, posting = false, lastPost = 0, timer = null, loop = Promise.resolve();
+  let failed = null, stopped = false, cast = null, latest = null, posting = false, lastPost = 0, timer = null, loop = Promise.resolve();
 
   /** Cast what the server says is watched, and nothing else. */
   async function apply(next) {
@@ -42,6 +42,9 @@ export function createLiveChannel({call, shared, frameGapMs = 100, retryMs = 200
 
   async function handle(command) {
     if (command?.type === 'input') await shared.applyInput(command.botId, command.event).catch(error => log.error(`agent: input refused (${error.message}).`));
+    else if (command?.type === 'takeover') {
+      await shared.takeover(command.botId).catch(error => { failed = {botId: command.botId, message: String(error.message).slice(0, 200)}; log.error(`agent: takeover failed (${error.message}).`); });
+    } else if (command?.type === 'handback') await shared.handback(command.botId);
   }
 
   const pause = ms => new Promise(resolve => { const t = setTimeout(resolve, ms); abort.signal.addEventListener('abort', () => { clearTimeout(t); resolve(); }, {once: true}); });
@@ -52,7 +55,10 @@ export function createLiveChannel({call, shared, frameGapMs = 100, retryMs = 200
       try {
         await shared.refresh();
         const tabs = shared.status().map(({botId, url, title}) => ({botId, url, title}));
-        const reply = await call('/api/agent/live', {tabs}, {timeoutMs: 30000, signal: abort.signal});
+        // Who the owner holds, and a takeover that could not start, so the server's picture follows the device's.
+        const report = {tabs, owner: shared.owner(), ...(failed ? {failed} : {})};
+        failed = null;
+        const reply = await call('/api/agent/live', report, {timeoutMs: 30000, signal: abort.signal});
         delay = retryMs;
         for (const command of reply?.commands || []) await handle(command);
         await apply(reply?.watch);

@@ -42,6 +42,12 @@ test('a real agent opens its live line, serves the owner a status, and stops pro
     // Input while the owner is not driving is refused, over the real server too.
     assert.equal((await send('POST', `/api/browser-live/${bot}/input`, {type: 'click', x: 1, y: 2}, owner)).status, 409);
     assert.equal((await send('GET', `/api/browser-live/${bot}`)).status, 401);
+    // The owner takes over, but the device has no browser: the owner is told why, and holds nothing.
+    assert.deepEqual((await send('POST', `/api/browser-live/${bot}/takeover`, undefined, owner)).body, {botId: bot, state: 'driving'});
+    const failed = await until(async () => { const v = (await send('GET', `/api/browser-live/${bot}`, undefined, owner)).body; return v?.notice ? v : null; }, 'the takeover failure');
+    assert.match(failed.notice, /could not be started/);
+    const listed = (await send('GET', '/api/browser-live', undefined, owner)).body.find(e => e.botId === bot);
+    assert.deepEqual([listed.state, listed.live], ['idle', true]);
     // Stop: the long poll is aborted, so the agent is gone in moments.
     const exited = new Promise(resolve => worker.once('exit', resolve));
     const started = Date.now();

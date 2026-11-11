@@ -10,7 +10,7 @@
  * `src/browser-live.js` keeps what these routes carry, in memory only. */
 import {companyBots} from '../shared/company.js';
 import * as agent from './agent.js';
-import {browserLive as hub} from './browser-live.js';
+import {browserLive as hub, liveStates} from './browser-live.js';
 import {DEFAULT_WORKSPACE} from './auth.js';
 import {fail, safeJson} from './http.js';
 
@@ -39,13 +39,30 @@ export function liveRoutes(router, {workspaces}) {
     if (!companyBots(c.store.read()).some(bot => bot.id === c.params.botId)) fail('That bot does not exist.', 404);
     return c.params.botId;
   };
+  /** One bot's entry in the list, as it is now. */
+  const entryOf = (c, botId) => liveStates(c.store.read(), {hub, ws: c.actor.workspaceId}).find(e => e.botId === botId);
+
+  router.add('GET', '/api/browser-live', 'member', c => liveStates(c.store.read(), {hub, ws: c.actor.workspaceId}));
   router.add('GET', '/api/browser-live/:botId', 'member', c => {
     const after = Number(new URL(c.req.url, 'http://local').searchParams.get('after'));
-    return hub.view(c.actor.workspaceId, botOf(c), {after: Number.isFinite(after) ? after : undefined});
+    const botId = botOf(c), {state, url, title, site} = entryOf(c, botId);
+    return {...hub.view(c.actor.workspaceId, botId, {after: Number.isFinite(after) ? after : undefined}), state, url, title, site};
   });
   router.add('POST', '/api/browser-live/:botId/input', 'member', async c => {
     const botId = botOf(c);
     hub.input(c.actor.workspaceId, botId, await c.body());
     return {ok: true};
+  });
+  // The owner takes the bot's tab: its run (if any) parks, no bot starts anything, and input is accepted.
+  router.add('POST', '/api/browser-live/:botId/takeover', 'member', c => {
+    const botId = botOf(c);
+    hub.takeover(c.actor.workspaceId, botId);
+    return {botId, state: entryOf(c, botId).state};
+  });
+  // The owner is done: the parked run goes on, and bots may use the browser again.
+  router.add('POST', '/api/browser-live/:botId/handback', 'member', c => {
+    const botId = botOf(c);
+    hub.handback(c.actor.workspaceId, botId);
+    return {botId, state: entryOf(c, botId).state};
   });
 }

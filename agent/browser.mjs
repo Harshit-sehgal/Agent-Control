@@ -267,12 +267,21 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
    * With `tab` (from `newTab`) it uses that page in the default context instead,
    * the one the kept profile belongs to, and leaves it open afterwards: the
    * shared browser's way. `onPage({url, title})` hears each page the tab shows.
-   * `settleMs` is how long scripts get to render after a load. */
-  async function capture(url, {allow, steps = [], timeoutMs = 20000, tab = null, onPage = null, settleMs = 600} = {}) {
+   * `settleMs` is how long scripts get to render after a load.
+   *
+   * `gate`, when given, is asked before each step. It resolves true to go on, or
+   * false once the owner has taken the browser: the step in flight when they
+   * did has finished (a click is never cut in half or applied twice), every
+   * remaining step is reported as not run instead of being applied to a page
+   * someone else changed, and the result says `tookOver`. The gate may wait, so
+   * the load deadline is paused for as long as it does. */
+  async function capture(url, {allow, steps = [], timeoutMs = 20000, tab = null, onPage = null, settleMs = 600, gate = null} = {}) {
     if (!hostAllowed(url, allow)) throw new Error(`Refusing to open ${url}: its host is not in AGENT_BROWSER_ALLOWLIST.`);
     const blockedBefore = refused.length, blocked = [];
-    let deadlineTimer = null, contextId = null, targetId = tab ? tab.targetId : null;
-    const deadline = new Promise((_, reject) => { deadlineTimer = setTimeout(() => reject(new Error(`The page did not finish loading within ${timeoutMs / 1000}s.`)), timeoutMs); deadlineTimer.unref(); });
+    let deadlineTimer = null, contextId = null, targetId = tab ? tab.targetId : null, left = timeoutMs, armedAt = 0, fail;
+    const arm = () => { armedAt = Date.now(); deadlineTimer = setTimeout(() => fail(new Error(`The page did not finish loading within ${timeoutMs / 1000}s.`)), Math.max(1, left)); deadlineTimer.unref(); };
+    const disarm = () => { clearTimeout(deadlineTimer); left -= Date.now() - armedAt; };
+    const deadline = new Promise((_, reject) => { fail = reject; arm(); });
     // The tab's own guard answers its paused requests; this capture only listens to what it blocks.
     if (tab) tab.sink = blocked;
     try {
@@ -324,7 +333,13 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
             const {result} = await cdp.send('Runtime.evaluate', {expression: 'location.href', returnByValue: true}, sessionId);
             return typeof result?.value === 'string' ? result.value : '';
           };
+          let taken = false;
           for (const step of steps.slice(0, MAX_ACTIONS)) {
+            if (gate && !taken) {
+              disarm();
+              try { taken = !(await gate()); } finally { arm(); }
+            }
+            if (taken) { actions.push({op: String(step?.op || 'unknown'), ok: false, reason: 'You took over the browser, so this step was not run.'}); continue; }
             if (step?.op === 'click' || step?.op === 'type') {
               // The planned URL can be a trailing-dot spelling of X, or the page
               // can land there by redirect after validation only saw another host.
@@ -362,6 +377,7 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
             blockedRequests: blocked.length + (refused.length - blockedBefore),
             engine: 'browser', capturedAt: new Date().toISOString(),
             ...(steps.length ? {actions} : {}),
+            ...(taken ? {tookOver: true} : {}),
           };
         } finally { offPaused(); }
       })()]);
