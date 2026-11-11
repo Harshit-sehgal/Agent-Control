@@ -15,7 +15,6 @@
  * one).
  */
 import * as tasks from '../shared/tasks.js';
-import {activity} from '../shared/core.js';
 
 export function createQueue(store, handlers = {}, {intervalMs = 2000, workerId, leaseMs = 60000, batch = 5, onFail = null} = {}) {
   const id = workerId || `worker-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
@@ -216,15 +215,4 @@ export function recoverQueue(store) {
     const {recovered} = tasks.recoverStalledTasks(s);
     return recovered;
   });
-}
-
-/** Default handlers the server composes over. `reminder` needs no imports of
- * server modules; the server adds candidate/group/agent handlers itself. */
-export function defaultHandlers(store, notify = null) {
-  return {
-    reminder: task => store.update(s => {
-      activity(s, 'reminder', task.payload.label, {taskId: task.id});
-      if (notify) notify({kind: 'reminder', title: task.payload.label, body: 'A scheduled reminder fired.', taskId: task.id});
-    }),
-  };
 }

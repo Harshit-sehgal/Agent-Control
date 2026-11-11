@@ -16,9 +16,9 @@ async function sandbox() {
 test('a fresh database seeds the built-in workspace and persists updates across restarts', async () => {
   const {db} = await sandbox();
   const first = await new SqliteStore(db, path.join(path.dirname(db), "state.json")).init();
-  const group = first.read().groups.find(g => g.id === 'x-engage');
-  assert.ok(group, 'The built-in X-engage group must exist on first boot.');
-  assert.equal(group.bots.length, 6);
+  const group = first.read().groups.find(g => g.id === 'home');
+  assert.ok(group, 'The built-in Home group must exist on first boot.');
+  assert.deepEqual(group.bots.map(b => b.id), ['atlas']);
   await first.update(s => { s.candidates.push({id: 'c1', url: 'https://example.com/a', text: 'A candidate long enough', author: 'T', topic: 'AI', status: 'new', createdAt: new Date().toISOString()}); });
   const reopened = await new SqliteStore(db, path.join(path.dirname(db), "state.json")).init();
   assert.equal(reopened.read().candidates.length, 1);
@@ -99,7 +99,7 @@ test('every workflow record survives a restart with the same shape, and writes k
     s.runs.push({id: 'r1', botId: 'writer', botName: 'Writer', input: 'in', output: 'out', at});
     s.groupRuns.push({id: 'g1', groupId: 'x-engage', input: 'hi', recipients: ['scout', 'writer'], mode: 'pipeline', status: 'awaiting_checkpoint', currentStep: 1, createdAt: at, startedAt: at, trace: [{botId: 'scout', output: 'o', toBotId: 'writer', at}], lastOutput: null, checkpointsEnabled: true, checkpoint: {nextStep: 1, previous: {botId: 'scout', output: 'o'}, at}});
     s.groupMessages['x-engage'] = [{id: 'm1', runId: 'g1', role: 'bot', senderId: 'scout', senderName: 'Scout', toBotId: 'writer', text: 'o', at}];
-    s.tasks.push({id: 't1', kind: 'reminder', title: 'Check drafts', payload: {label: 'Check drafts', kind: 'interval', intervalMinutes: 60}, status: 'queued', runAt: at, intervalMinutes: 60, idempotencyKey: null, attempts: 0, maxAttempts: 5, leaseOwner: null, leaseUntil: null, lastError: null, result: null, createdBy: null, createdAt: at, updatedAt: at, completedAt: null});
+    s.tasks.push({id: 't1', kind: 'bot-task', title: 'Check in', payload: {groupId: 'home', message: 'Check in', kind: 'interval', intervalMinutes: 60}, status: 'queued', runAt: at, intervalMinutes: 60, idempotencyKey: null, attempts: 0, maxAttempts: 5, leaseOwner: null, leaseUntil: null, lastError: null, result: null, createdBy: null, createdAt: at, updatedAt: at, completedAt: null});
     s.chats = {writer: [{id: 'k1', role: 'user', text: 'make it shorter', at}, {id: 'k2', role: 'bot', text: 'Done.', at, mode: 'ai'}]};
   });
   const before = first.read();
@@ -147,15 +147,15 @@ test('a bot keeps how it came to exist, and an older database gains the columns'
   const {dir, db, legacy} = await sandbox();
   const first = await new SqliteStore(db, legacy).init();
   await first.update(s => {
-    const group = s.groups.find(g => g.id === 'x-engage');
-    group.bots.push({id: 'made', name: 'Source scout', instructions: 'Find posts.', type: 'custom', permissions: [],
-      origin: 'bot', createdBy: {botId: 'scout', botName: 'Scout', runId: 'r1', at}, createdAt: at});
+    const group = s.groups.find(g => g.id === 'home');
+    group.bots.push({id: 'made', name: 'Helper', instructions: 'Find posts.', type: 'custom', permissions: [],
+      origin: 'bot', createdBy: {botId: 'atlas', botName: 'Atlas', runId: 'r1', at}, createdAt: at});
   });
   first.db.close();
   const reopened = await new SqliteStore(db, legacy).init();
-  const made = reopened.read().groups.find(g => g.id === 'x-engage').bots.find(b => b.id === 'made');
+  const made = reopened.read().groups.find(g => g.id === 'home').bots.find(b => b.id === 'made');
   assert.equal(made.origin, 'bot');
-  assert.deepEqual(made.createdBy, {botId: 'scout', botName: 'Scout', runId: 'r1', at});
+  assert.deepEqual(made.createdBy, {botId: 'atlas', botName: 'Atlas', runId: 'r1', at});
 
   // A database written before v10 has neither column: the migration must add
   // them without dropping the bots already in it.
@@ -164,7 +164,7 @@ test('a bot keeps how it came to exist, and an older database gains the columns'
   reopened.run('UPDATE schema_meta SET version=? WHERE id=1', 9);
   reopened.db.close();
   const upgraded = await new SqliteStore(db, legacy).init();
-  assert.ok(upgraded.read().groups.find(g => g.id === 'x-engage').bots.some(b => b.id === 'made'), 'The bot must survive the migration.');
+  assert.ok(upgraded.read().groups.find(g => g.id === 'home').bots.some(b => b.id === 'made'), 'The bot must survive the migration.');
   assert.equal(upgraded.get('SELECT version FROM schema_meta WHERE id=1').version, SCHEMA_DB_VERSION);
   await fs.rm(dir, {recursive: true, force: true});
 });

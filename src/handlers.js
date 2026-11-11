@@ -10,7 +10,6 @@ import * as tasks from '../shared/tasks.js';
 import * as notifications from './notifications.js';
 import * as agent from './agent.js';
 import {queueGroupRun, runBotTask} from './coordination.js';
-import {defaultHandlers} from './queue.js';
 
 /** Notifications enqueue themselves as queue tasks and reach a device through
  * the push subscriptions of the people they are for. Returns the `notify(event)`
@@ -51,13 +50,9 @@ function permissionsOf(row) {
 }
 
 /** Task kinds map to handlers here rather than inside the queue module, so the
- * worker stays independent of the server surface it drives. `notify` defaults
- * to this workspace's fan-out, so a caller that only needs the map does not have
- * to build one. */
-export function taskHandlers({ws, workspaceId, auth, push, notify}) {
-  const fanOut = notify ?? createNotifier({ws, workspaceId, auth, push});
+ * worker stays independent of the server surface it drives. */
+export function taskHandlers({ws, push}) {
   return {
-    ...defaultHandlers(ws, fanOut),
     'group-run': async task => {
       // `taskId` makes the run idempotent: a crash between queueing the run and
       // recording the completion used to queue a second run on recovery.

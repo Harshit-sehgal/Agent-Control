@@ -64,18 +64,18 @@ test('bot profile edits persist to the store and survive a restart', {timeout:25
     };
     const login=await send('POST','/api/login',{password:'test-password-1234'});
     const cookie=login.cookie.split(';')[0];
-    const patched=await send('PATCH','/api/groups/x-engage/bots/writer',{name:'Senior Writer',instructions:'Draft concise replies in the user voice.'},cookie);
+    const patched=await send('PATCH','/api/groups/home/bots/atlas',{name:'Senior Atlas',instructions:'Draft concise replies in the user voice.'},cookie);
     assert.equal(patched.status,200);
-    assert.equal(patched.body.name,'Senior Writer');
+    assert.equal(patched.body.name,'Senior Atlas');
     assert.equal(patched.body.instructions,'Draft concise replies in the user voice.');
     // The change must be in persisted state, not just the response.
     const state=(await send('GET','/api/state',undefined,cookie)).body;
-    const writer=state.groups[0].bots.find(b=>b.id==='writer');
-    assert.equal(writer.name,'Senior Writer');
-    assert.equal((await send('PATCH','/api/groups/x-engage/bots/missing',{name:'x',instructions:'y'},cookie)).status,404);
-    assert.equal((await send('PATCH','/api/groups/missing/bots/writer',{name:'x',instructions:'y'},cookie)).status,404);
-    assert.equal((await send('PATCH','/api/groups/x-engage/bots/writer',{name:'',instructions:'y'},cookie)).status,400);
-    assert.equal((await send('PATCH','/api/groups/x-engage/bots/writer',{name:'x',instructions:'y'})).status,401);
+    const atlas=state.groups[0].bots.find(b=>b.id==='atlas');
+    assert.equal(atlas.name,'Senior Atlas');
+    assert.equal((await send('PATCH','/api/groups/home/bots/missing',{name:'x',instructions:'y'},cookie)).status,404);
+    assert.equal((await send('PATCH','/api/groups/missing/bots/atlas',{name:'x',instructions:'y'},cookie)).status,404);
+    assert.equal((await send('PATCH','/api/groups/home/bots/atlas',{name:'',instructions:'y'},cookie)).status,400);
+    assert.equal((await send('PATCH','/api/groups/home/bots/atlas',{name:'x',instructions:'y'})).status,401);
   }finally{await t.stop();}
 });
 test('behind a trusted proxy the rate limit keys on the forwarded client address', {timeout:30000}, async () => {

@@ -66,66 +66,27 @@ export function summonableGuests(groups, hostGroupId, {includeOff = false} = {})
     .filter(b => { const s = botSettings(b); return s.summonable && (includeOff || s.enabled); });
 }
 
-const NEED = [
-  {types: ['source'], words: ['feed', 'scroll', 'capture', 'collect']},
-  {types: ['scoring'], words: ['rank', 'score', 'worth']},
-  {types: ['context'], words: ['research', 'evidence', 'claim', 'verify']},
-  {types: ['writing', 'review'], words: ['draft', 'reply', 'replies', 'write', 'writing', 'suggest', 'tweet', 'respond', 'response']},
-  {types: ['review'], words: ['review', 'flag']},
-];
-const hasWord = (text, word) => new RegExp(`\\b${word}\\b`, 'i').test(text);
-const REFUSAL = /cannot draft|no post|nothing to draft|no draft/i;
-
-/** Which bots a tracked request needs, in pipeline order, and what finished means.
- * The primary bot is the coordinator, so it is not one of the workers. A message
- * that names no job stays with the primary bot; the group chat still runs the pipeline. */
-export function planTracked(group, message) {
-  const text = String(message ?? ''), bots = group?.bots || [];
-  const lead = bots.find(b => botSettings(b).lead);
-  const settings = groupSettings(group);
-  const order = Array.isArray(settings.pipeline) ? settings.pipeline : bots.map(b => b.id);
-  const wanted = new Set();
-  let feed = false;
-  for (const rule of NEED) {
-    if (!rule.words.some(word => hasWord(text, word))) continue;
-    if (rule.types.includes('source')) feed = true;
-    for (const bot of bots) if (rule.types.includes(bot.type) && bot.id !== lead?.id) wanted.add(bot.id);
-  }
-  if (feed) for (const bot of bots) if (bot.type === 'scoring' && bot.id !== lead?.id) wanted.add(bot.id);
-  const botIds = order.filter(id => wanted.has(id));
-  const draftBotId = botIds.find(id => bots.find(b => b.id === id)?.type === 'writing') || null;
-  const names = botIds.map(id => bots.find(b => b.id === id)?.name || id);
-  return {
-    botIds, matched: botIds.length > 0, draftBotId, wantsDraft: Boolean(draftBotId),
-    summary: names.length ? `${lead?.name || 'The primary bot'} will ask ${names.join(', ')}.` : 'No other bot can take this.',
-    doneWhen: draftBotId ? 'A reply draft is waiting on you.' : 'Each chosen bot has answered.',
-  };
+/** Which bots a tracked request needs, and what finished means. The keyword
+ * rules that picked bots by their X-engage type are gone; until the primary
+ * bot's routing call (Phase 2) replaces this, a tracked request names no
+ * workers and stays with the primary bot, which can still hand off. */
+export function planTracked(group) {
+  const lead = (group?.bots || []).find(b => botSettings(b).lead);
+  return {botIds: [], matched: false, summary: `${lead?.name || 'The primary bot'} will answer.`, doneWhen: 'Each chosen bot has answered.'};
 }
 
 /** Whether a tracked run met its outcome. One missing owner may be asked again;
  * `retried` on the task means that chance is spent. */
-export function assessTask(run, {drafts = []} = {}) {
+export function assessTask(run) {
   const task = run?.task;
   if (!task) return {done: true, retryBotId: null, note: ''};
-  const said = id => {
-    const steps = (run.trace || []).filter(step => step.botId === id && step.output);
-    return steps.length ? String(steps[steps.length - 1].output).trim() : '';
-  };
+  const said = id => (run.trace || []).some(step => step.botId === id && String(step.output || '').trim());
   const silent = (task.botIds || []).filter(id => !said(id));
-  const fresh = (drafts || []).some(d => d.runId === run.id && ['pending', 'scheduled', 'ready'].includes(d.status));
-  const draftText = said(task.draftBotId);
-  const draftOk = !task.wantsDraft || fresh || (draftText.length >= 40 && !REFUSAL.test(draftText));
-  const waiting = (drafts || []).filter(d => d.status === 'pending').length;
-  if (draftOk && !silent.length) {
-    const note = task.wantsDraft
-      ? (waiting ? `Done. ${waiting} draft${waiting === 1 ? '' : 's'} waiting on you. You post them.` : 'Done. The reply is in the chat. You still post it.')
-      : 'Done. Each chosen bot has answered.';
-    return {done: true, retryBotId: null, note};
-  }
+  if (!silent.length) return {done: true, retryBotId: null, note: 'Done. Each chosen bot has answered.'};
   // One more ask, and only while the run still has a step left. The cap is a
   // hard ceiling, so a full run closes with the missing outcome instead.
   const room = (run.recipients || []).length < Math.min(run.maxSteps ?? MAX_HANDOFFS, MAX_STEPS_LIMIT);
-  const retryBotId = task.retried || !room ? null : ((task.wantsDraft && !draftOk && task.draftBotId) || silent[0] || null);
+  const retryBotId = task.retried || !room ? null : silent[0];
   return {done: false, retryBotId, note: `Not finished. ${task.doneWhen}`};
 }
 
@@ -226,7 +187,7 @@ export function createRun({group, message, directBotId=null, now=new Date().toIS
     guestIds:recipients.filter(id=>!group.bots.some(b=>b.id===id)),
     maxSteps:cap, botHandoffs:settings.botHandoffs!==false,
     mode, status: task?.confirm ? 'awaiting_plan' : 'queued', currentStep:0, createdAt:now,
-    task: task?.botIds?.length ? {objective: safe(message), botIds: recipients, doneWhen: task.doneWhen, summary: task.summary, wantsDraft: Boolean(task.wantsDraft), draftBotId: task.draftBotId || null, retried: false, woke: recipients.filter(id => { const bot = group.bots.find(b => b.id === id); return bot && !enabled(bot); })} : null,
+    task: task?.botIds?.length ? {objective: safe(message), botIds: recipients, doneWhen: task.doneWhen, summary: task.summary, retried: false, woke: recipients.filter(id => { const bot = group.bots.find(b => b.id === id); return bot && !enabled(bot); })} : null,
     trace:[], lastOutput:null,
     // A checkpointed run pauses between steps until a human approves each
     // handoff, so no multi-step work advances unattended when enabled.
@@ -239,7 +200,7 @@ export function createRun({group, message, directBotId=null, now=new Date().toIS
  * that both report the same outcome store it once. */
 export function runNote(run){
   const text={
-    completed: run.task?.closing || `Done in ${(run.trace||[]).length} step(s). Anything to post still needs your approval.`,
+    completed: run.task?.closing || `Done in ${(run.trace||[]).length} step(s).`,
     awaiting_checkpoint:`Paused after step ${run.currentStep}. Approve the next step to continue.`,
     awaiting_browser:'Waiting for the page to come back.',
     failed:`The run failed: ${run.error||'unknown error'}`,

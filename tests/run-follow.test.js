@@ -43,7 +43,7 @@ test('the loop appends only this run\'s new lines and stops on a terminal status
   ], {messages: [{id: 'seen', role: 'bot', runId: 'r1'}]});
   const last = await h.run();
   assert.deepEqual(h.appended.map(m => m.id), ['m1', 'r1-completed'], 'a seen line, a user line and another run are left alone');
-  assert.equal(h.appended[1].text, 'Done in 2 step(s). Anything to post still needs your approval.');
+  assert.equal(h.appended[1].text, 'Done in 2 step(s).');
   assert.equal(h.appended[1].role, 'system');
   assert.equal(last.status, 'completed');
   assert.deepEqual(h.waits, [RUN_POLL_MS], 'one look was enough');

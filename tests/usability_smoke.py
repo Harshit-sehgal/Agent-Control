@@ -7,7 +7,7 @@ from a local http.server on a free port and opens every scenario in a fresh
 browser context so localStorage always starts empty.
 
 Run: python3 tests/usability_smoke.py   (screenshots of failures land in a temp dir)
-No network, no credentials, nothing is ever posted to X.
+No network and no credentials.
 """
 import asyncio
 import http.server
@@ -25,8 +25,15 @@ from playwright.async_api import async_playwright, expect
 ROOT = Path(__file__).resolve().parents[1]
 DESKTOP = {'width': 1360, 'height': 860}
 PHONE = {'width': 390, 'height': 844}
-TEAM = 'team-x-engage'
-BOT_IDS = ['scout', 'ranker', 'researcher', 'writer', 'reviewer', 'handoff']
+TEAM = 'team-home'
+PRIMARY = 'atlas'
+# The starting workspace is one group (Home) with one bot (Atlas). Scenarios that
+# need a team create the extra bots through the app's own API first.
+EXTRA_BOTS = {
+    'Researcher': 'Find and summarise what the user asks about.',
+    'Writer': 'Write clear, concise drafts from what the others found.',
+    'Reviewer': 'Check the draft for unsupported claims.',
+}
 expect.set_options(timeout=6000)
 
 
@@ -93,9 +100,23 @@ class Harness:
             await context.close()
 
 
-async def open_app(page, base, hash_=''):
+async def open_app(page, base, hash_='', bots=None):
+    """Open the app; with `bots` ({name: instructions}) first add them to Home through the
+    app's own local API, reload so the UI reads them, and return {name: bot id}."""
     await page.goto(f'{base}/index.html{hash_}')
     await page.locator('.chat-row').first.wait_for()
+    if not bots:
+        return {}
+    ids = await page.evaluate('''async bots => {
+        const made = {};
+        for (const [name, instructions] of Object.entries(bots)) {
+            made[name] = (await window.AGENT_API('/api/groups/home/bots', 'POST', {name, instructions})).id;
+        }
+        return made;
+    }''', bots)
+    await page.reload()
+    await page.locator('.chat-row').first.wait_for()
+    return ids
 
 
 async def overflow(page):
@@ -140,7 +161,7 @@ async def create_bot_from_template(page, base):
     form = page.locator('#new-bot-form')
     await expect(form).to_be_visible()
     await expect(form.locator('input[name=name]')).to_be_focused()
-    await expect(form.locator('select[name=group]')).to_have_value('x-engage')
+    await expect(form.locator('select[name=group]')).to_have_value('home')
     # A template fills both fields; the user then renames it.
     await page.get_by_label('Bot template').select_option('writer')
     await expect(form.locator('input[name=name]')).to_have_value('Writer')
@@ -194,8 +215,8 @@ async def create_group(page, base):
 
 
 async def edit_profile_persists(page, base):
-    await open_app(page, base)
-    await page.locator('.chat-row[data-id="writer"]').click()
+    writer = (await open_app(page, base, bots=EXTRA_BOTS))['Writer']
+    await page.locator(f'.chat-row[data-id="{writer}"]').click()
     await page.locator('.thread-title').click()
     await expect(page.locator('#inspector .hero h2')).to_have_text('Writer')
     await page.locator('#inspector [data-action="open-section"][data-section="edit"]').click()
@@ -207,11 +228,11 @@ async def edit_profile_persists(page, base):
     await expect(page.locator('#toast')).to_contain_text('Profile saved')
     await expect(page.locator('.thread-title strong')).to_have_text('Lead Writer')
     await expect(page.locator('#inspector')).to_contain_text('Draft concise replies, then hand to Reviewer.')
-    await expect(page.locator('.chat-row[data-id="writer"] .chat-row-name')).to_have_text('Lead Writer')
+    await expect(page.locator(f'.chat-row[data-id="{writer}"] .chat-row-name')).to_have_text('Lead Writer')
 
     async def profile_is_in_store():
         stored = await page.evaluate("() => JSON.parse(localStorage.getItem('agent-control-ghpages-v1'))")
-        bot = next(b for g in stored['groups'] for b in g['bots'] if b['id'] == 'writer')
+        bot = next(b for g in stored['groups'] for b in g['bots'] if b['id'] == writer)
         assert bot['name'] == 'Lead Writer' and bot['instructions'].startswith('Draft concise replies'), bot
         # The cosmetic record must not mirror name/instructions, or it would shadow the store.
         profiles = await page.evaluate("() => JSON.parse(localStorage.getItem('agent-control-bot-profiles-v2') || '{}')")
@@ -219,7 +240,7 @@ async def edit_profile_persists(page, base):
     await profile_is_in_store()
     # Same context, real reload: the edit is still there.
     await page.reload()
-    await expect(page.locator('.chat-row[data-id="writer"] .chat-row-name')).to_have_text('Lead Writer')
+    await expect(page.locator(f'.chat-row[data-id="{writer}"] .chat-row-name')).to_have_text('Lead Writer')
     await expect(page.locator('.thread-title strong')).to_have_text('Lead Writer')
     await expect(page.locator('#inspector')).to_contain_text('Draft concise replies, then hand to Reviewer.')
     await profile_is_in_store()
@@ -232,38 +253,42 @@ async def edit_profile_persists(page, base):
 
 
 async def pin_bot(page, base):
-    await open_app(page, base)
-    await page.locator('.chat-row[data-id="reviewer"]').click()
+    reviewer = (await open_app(page, base, bots=EXTRA_BOTS))['Reviewer']
+    natural = await page.locator('.chat-row').evaluate_all('rows => rows.map(r => r.dataset.id)')
+    assert natural[0] == TEAM and reviewer in natural, natural
+    await page.locator(f'.chat-row[data-id="{reviewer}"]').click()
     await page.locator('.thread-title').click()
     await page.locator('#inspector [data-action="pin-bot"]').click()
     await expect(page.locator('#toast')).to_contain_text('Pinned to the top')
     await expect(page.locator('#inspector [data-action="pin-bot"]')).to_contain_text('Unpin from top')
     ids = await page.locator('.chat-row').evaluate_all('rows => rows.map(r => r.dataset.id)')
-    assert ids[0] == 'reviewer', ids
-    await expect(page.locator('.chat-row[data-id="reviewer"] svg').first).to_be_visible()
+    assert ids[0] == reviewer, ids
+    await expect(page.locator(f'.chat-row[data-id="{reviewer}"] svg').first).to_be_visible()
     # Pins are remembered.
     await page.reload()
     await page.locator('.chat-row').first.wait_for()
     first = await page.locator('.chat-row').first.get_attribute('data-id')
-    assert first == 'reviewer', first
+    assert first == reviewer, first
     # Unpin puts it back in its natural place.
     await page.locator('#inspector [data-action="pin-bot"]').click()
     await expect(page.locator('#toast')).to_contain_text('Unpinned')
     ids = await page.locator('.chat-row').evaluate_all('rows => rows.map(r => r.dataset.id)')
-    assert ids == [TEAM] + BOT_IDS, ids
+    assert ids == natural, ids
 
 
 async def duplicate_bot(page, base):
-    await open_app(page, base, '#chat/scout/info')
+    await open_app(page, base, f'#chat/{PRIMARY}/info')
     await page.locator('#inspector [data-action="duplicate-bot"]').click()
-    await expect(page.locator('.thread-title strong')).to_have_text('Scout copy')
-    await expect(page.locator('#chat-space .welcome')).to_contain_text('home-feed page they approved')
-    await expect(page.locator('.chat-row', has_text='Scout copy')).to_have_count(1)
+    await expect(page.locator('.thread-title strong')).to_have_text('Atlas copy')
+    await expect(page.locator('#chat-space .welcome')).to_contain_text('hand each piece of work to the bot whose job it is')
+    await expect(page.locator('.chat-row', has_text='Atlas copy')).to_have_count(1)
+    # The copy is not a second primary bot.
+    await expect(page.locator('#chat-space .welcome')).not_to_contain_text('This is the primary bot')
 
 
 async def clear_conversation(page, base):
     await open_app(page, base)
-    await page.locator('.chat-row[data-id="scout"]').click()
+    await page.locator(f'.chat-row[data-id="{PRIMARY}"]').click()
     await page.locator('.thread-title').click()
     # Empty: nothing to clear, and no sheet.
     await page.locator('#inspector [data-action="clear-chat"]').click()
@@ -288,7 +313,7 @@ async def clear_conversation(page, base):
     await expect(page.locator('#toast')).to_contain_text('Conversation cleared')
     await expect(page.locator('.msg.me')).to_have_count(0)
     await expect(page.locator('#chat-space .welcome')).to_be_visible()
-    await expect(page.locator('.chat-row[data-id="scout"] .chat-row-preview')).to_contain_text('home-feed page')
+    await expect(page.locator(f'.chat-row[data-id="{PRIMARY}"] .chat-row-preview')).to_contain_text('You are Atlas')
     # Clearing is local to that conversation and survives a reload.
     await page.reload()
     await expect(page.locator('.msg.me')).to_have_count(0)
@@ -299,7 +324,7 @@ async def clear_conversation(page, base):
 
 
 async def runs_log(page, base):
-    await open_app(page, base)
+    await open_app(page, base, bots=EXTRA_BOTS)
     await page.locator(f'.chat-row[data-id="{TEAM}"]').click()
     await page.locator('#chat-form textarea').fill('Research the launch plan')
     await page.locator('#chat-form textarea').press('Enter')
@@ -308,6 +333,9 @@ async def runs_log(page, base):
     card = page.locator('#inspector .run-card')
     await expect(card).to_have_count(1)
     await expect(card).to_contain_text('Research the launch plan')
+    # The trace names every bot that took a turn, in order.
+    await expect(card).to_contain_text('Atlas')
+    await expect(card).to_contain_text('Researcher')
 
 
 async def sheet_keyboard(page, base):
@@ -360,7 +388,7 @@ async def sheet_keyboard(page, base):
 
 
 async def group_settings_and_behaviour(page, base):
-    await open_app(page, base, f'#chat/{TEAM}/info/group-settings')
+    writer = (await open_app(page, base, f'#chat/{TEAM}/info/group-settings', bots=EXTRA_BOTS))['Writer']
     form = page.locator('#group-settings-form')
     await expect(form.locator('input[name=routing]')).to_have_count(3)
     rows = form.locator('#pipeline-rows .pipe-row')
@@ -371,7 +399,7 @@ async def group_settings_and_behaviour(page, base):
     await expect(rows.first.get_by_role('button', name=re.compile('up', re.I))).to_be_disabled()
     await expect(page.locator('#inspector [data-action="delete-group"]')).to_have_count(1)  # the demo may delete any group
     # The bot profile carries the Behaviour fields.
-    await open_app(page, base, '#chat/writer/info/edit')
+    await open_app(page, base, f'#chat/{writer}/info/edit')
     edit = page.locator('#edit-bot-form')
     for name in ['enabled', 'replyLength', 'temperature', 'style', 'contextMessages', 'summonable', 'canHandoff']:
         await expect(edit.locator(f'[name={name}]')).to_have_count(1)
@@ -384,26 +412,26 @@ async def group_settings_and_behaviour(page, base):
     await expect(box).to_have_value('ask @Writer ')
 
 
-async def tracked_plan_can_start(page, base):
-    """Show-the-plan-first used to stop with no Start button on the demo."""
-    await open_app(page, base, '#chat/team-x-engage/info/group-settings')
+async def tracked_settings_persist(page, base):
+    """Primary-bot tracking and show-the-plan-first save and survive a reload.
+
+    The Start/Cancel plan card is not driven here: until the primary bot's routing
+    call lands, `planTracked` names no workers, so no demo message produces a plan.
+    """
+    await open_app(page, base, f'#chat/{TEAM}/info/group-settings', bots=EXTRA_BOTS)
     form = page.locator('#group-settings-form')
+    await form.locator('input[name=coordination][value=tracked]').check()
     await form.locator('input[name=confirmPlan]').check()
     await form.locator('button[type=submit]').click()
     await expect(page.locator('#toast')).to_contain_text('Group settings saved')
-    await open_app(page, base, '#chat/handoff')
+    await page.reload()
+    await expect(form.locator('input[name=coordination][value=tracked]')).to_be_checked()
+    await expect(form.locator('input[name=confirmPlan]')).to_be_checked()
+    # A plain message to the primary bot still gets an answer.
+    await open_app(page, base, f'#chat/{PRIMARY}')
     box = page.locator('#chat-form textarea')
     await box.fill('draft a reply')
     await box.press('Enter')
-    start = page.locator('#chat-space [data-action="approve-plan"]')
-    cancel = page.locator('#chat-space [data-action="cancel-plan"]')
-    await expect(start).to_be_visible()
-    await cancel.click()
-    await expect(page.locator('#chat-space')).to_contain_text('Plan cancelled')
-    await expect(start).to_have_count(0)
-    await box.fill('draft a reply')
-    await box.press('Enter')
-    await start.click()
     await expect(page.locator('#chat-space .msg.them').first).to_be_visible(timeout=15000)
 
 
@@ -442,7 +470,7 @@ async def main():
             await h.scenario('runs log shows the handoff trace', runs_log)
             await h.scenario('keyboard: Tab trapped in sheets and palette, Esc restores focus', sheet_keyboard)
             await h.scenario('group settings reorder, behaviour fields, @mention help', group_settings_and_behaviour)
-            await h.scenario('tracked plan can be started or cancelled', tracked_plan_can_start)
+            await h.scenario('group settings: tracked mode and plan-first persist', tracked_settings_persist)
             await h.scenario('phone: create a bot from the + button', phone_create_bot, PHONE)
             await browser.close()
             server.shutdown()

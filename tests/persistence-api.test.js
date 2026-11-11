@@ -46,18 +46,19 @@ test('groups, bots, tasks and conversations survive a restart and stay editable'
     const group = (await t.send('POST', '/api/groups', {name: 'Persisted group', description: 'Kept across restarts'}, cookie)).body;
     const bot = (await t.send('POST', `/api/groups/${group.id}/bots`, {name: 'Keeper', instructions: 'Remember things.'}, cookie)).body;
     assert.ok(bot.id);
-    const reminder = {kind: 'reminder', payload: {kind: 'interval', label: 'Check bots', intervalMinutes: 60}};
-    assert.equal((await t.send('POST', '/api/tasks', reminder, cookie)).status, 201);
-    assert.equal((await t.send('POST', '/api/chats/writer/messages', {id: 'k1', role: 'user', text: 'make it shorter'}, cookie)).status, 200);
+    const scheduled = {kind: 'bot-task', payload: {groupId: group.id, message: 'Check in on the bots', kind: 'interval', intervalMinutes: 60}};
+    assert.equal((await t.send('POST', '/api/tasks', scheduled, cookie)).status, 201);
+    assert.equal((await t.send('POST', '/api/chats/atlas/messages', {id: 'k1', role: 'user', text: 'make it shorter'}, cookie)).status, 200);
     const before = (await t.send('GET', '/api/state', undefined, cookie)).body;
 
     await t.stop(); await t.start(); cookie = await t.login();
     const after = (await t.send('GET', '/api/state', undefined, cookie)).body;
     // The store stamps `created_at` on a group row as it is written; the live cache has not seen it yet.
     const bare = groups => groups.map(({created_at: _stamp, ...g}) => g);
-    assert.deepEqual(bare(after.groups), bare(before.groups), 'A group and its bots must read back exactly as they were stored.');
-    assert.equal(after.tasks.filter(x => x.kind === 'reminder').length, 1, 'A reminder must survive a restart.');
-    assert.deepEqual(after.chats.writer.map(m => m.text), ['make it shorter']);
+    assert.deepEqual(bare(after.groups), bare(before.groups), 'Every group and its bots must read back exactly as they were stored.');
+    assert.deepEqual(after.groups.find(g => g.id === 'home').bots.map(b => b.id), ['atlas']);
+    assert.equal(after.tasks.filter(x => x.kind === 'bot-task').length, 1, 'A scheduled task must survive a restart.');
+    assert.deepEqual(after.chats.atlas.map(m => m.text), ['make it shorter']);
     // The first write after a restart used to fail on every installation that held stored rows.
     const edited = await t.send('PATCH', `/api/groups/${group.id}/bots/${bot.id}`, {instructions: 'Edited after the restart.'}, cookie);
     assert.equal(edited.status, 200, JSON.stringify(edited.body));
@@ -71,24 +72,24 @@ test('conversation history is validated, deduplicated, role-gated and clearable'
   try {
     await t.start();
     const cookie = await t.login();
-    assert.equal((await t.send('POST', '/api/chats/writer/messages', {role: 'user', text: 'hi'})).status, 401);
+    assert.equal((await t.send('POST', '/api/chats/atlas/messages', {role: 'user', text: 'hi'})).status, 401);
     assert.equal((await t.send('POST', '/api/chats/nobody/messages', {role: 'user', text: 'hi'}, cookie)).status, 404);
-    assert.equal((await t.send('POST', '/api/chats/writer/messages', {role: 'root', text: 'hi'}, cookie)).status, 400);
-    const batch = {messages: [{id: 'a', role: 'user', text: 'one'}, {id: 'b', role: 'bot', text: 'two', senderName: 'Writer'}]};
-    assert.deepEqual((await t.send('POST', '/api/chats/team-x-engage/messages', batch, cookie)).body, {ok: true, added: 2});
-    assert.deepEqual((await t.send('POST', '/api/chats/team-x-engage/messages', batch, cookie)).body, {ok: true, added: 0});
-    assert.equal((await t.send('GET', '/api/state', undefined, cookie)).body.chats['team-x-engage'].length, 2);
+    assert.equal((await t.send('POST', '/api/chats/atlas/messages', {role: 'root', text: 'hi'}, cookie)).status, 400);
+    const batch = {messages: [{id: 'a', role: 'user', text: 'one'}, {id: 'b', role: 'bot', text: 'two', senderName: 'Atlas'}]};
+    assert.deepEqual((await t.send('POST', '/api/chats/team-home/messages', batch, cookie)).body, {ok: true, added: 2});
+    assert.deepEqual((await t.send('POST', '/api/chats/team-home/messages', batch, cookie)).body, {ok: true, added: 0});
+    assert.equal((await t.send('GET', '/api/state', undefined, cookie)).body.chats['team-home'].length, 2);
 
     // A viewer can read the workspace but cannot write or clear history.
     const email = 'viewer@example.com', password = 'viewer-password-1234';
     assert.equal((await t.send('POST', '/api/users', {email, password, role: 'viewer'}, cookie)).status, 201);
     const viewer = (await t.send('POST', '/api/login', {email, password})).cookie.split(';')[0];
-    assert.equal((await t.send('GET', '/api/state', undefined, viewer)).body.chats['team-x-engage'].length, 2);
-    assert.equal((await t.send('POST', '/api/chats/team-x-engage/messages', {role: 'user', text: 'hi'}, viewer)).status, 403);
-    assert.equal((await t.send('DELETE', '/api/chats/team-x-engage', undefined, viewer)).status, 403);
+    assert.equal((await t.send('GET', '/api/state', undefined, viewer)).body.chats['team-home'].length, 2);
+    assert.equal((await t.send('POST', '/api/chats/team-home/messages', {role: 'user', text: 'hi'}, viewer)).status, 403);
+    assert.equal((await t.send('DELETE', '/api/chats/team-home', undefined, viewer)).status, 403);
 
-    assert.deepEqual((await t.send('DELETE', '/api/chats/team-x-engage', undefined, cookie)).body, {ok: true, removed: 2});
-    assert.equal((await t.send('GET', '/api/state', undefined, cookie)).body.chats['team-x-engage'], undefined);
+    assert.deepEqual((await t.send('DELETE', '/api/chats/team-home', undefined, cookie)).body, {ok: true, removed: 2});
+    assert.equal((await t.send('GET', '/api/state', undefined, cookie)).body.chats['team-home'], undefined);
   } finally { await t.remove(); }
 });
 

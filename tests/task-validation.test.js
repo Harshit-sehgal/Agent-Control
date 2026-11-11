@@ -1,17 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {buildPayload, retryDelay, migrateSchedules, enqueueTask, completeTask, failTask, claimTasks} from '../shared/tasks.js';
+import {buildPayload, retryDelay, enqueueTask, completeTask, failTask, claimTasks} from '../shared/tasks.js';
 import {initialState} from '../shared/core.js';
 
 test('a task kind rejects requests missing the field it actually needs', () => {
   // Object defaults (`params: {}`) used to satisfy the old "some value" check,
   // so a job with no action reached the worker and burned its retries.
   assert.throws(() => buildPayload('agent-job', {params: {}}), /action/i);
-  assert.throws(() => buildPayload('candidate-draft', {}), /candidate/i);
   assert.throws(() => buildPayload('group-run', {groupId: 'g1'}), /group and a message/i);
   assert.equal(buildPayload('agent-job', {action: 'http.check', params: {url: 'https://x'}}).action, 'http.check');
-  assert.equal(buildPayload('candidate-draft', {candidateId: 'c1'}).candidateId, 'c1');
-  assert.equal(buildPayload('reminder', {kind: 'interval', label: 'L', intervalMinutes: 30}).label, 'L');
+  assert.equal(buildPayload('bot-task', {groupId: 'g1', message: 'Check', kind: 'interval', intervalMinutes: 30}).intervalMinutes, 30);
 });
 
 test('retry backoff is 1s, 2s, 4s for the first three failures', () => {
@@ -24,41 +22,10 @@ test('retry backoff is 1s, 2s, 4s for the first three failures', () => {
   assert.equal(retryDelay(30, base) - base, 300000);
 });
 
-test('migrating schedules counts only the reminders it actually creates', () => {
-  const state = initialState();
-  state.schedules = [{id: 's1', label: 'Check', kind: 'interval', intervalMinutes: 60, enabled: true}];
-  assert.deepEqual(migrateSchedules(state), {migrated: 1});
-  assert.equal(state.tasks.filter(t => t.idempotencyKey === 'schedule:s1').length, 1);
-
-  // A second pass over the same schedule creates nothing and reports nothing.
-  state.schedules = [{id: 's1', label: 'Check', kind: 'interval', intervalMinutes: 60, enabled: true}];
-  assert.deepEqual(migrateSchedules(state), {migrated: 0});
-  assert.equal(state.tasks.length, 1);
-});
-
-test('a migrated interval keeps a future fire time and an overdue one stays due', () => {
-  const state = initialState();
-  const future = new Date(Date.now() + 3_600_000).toISOString();
-  const past = new Date(Date.now() - 3_600_000).toISOString();
-  state.schedules = [
-    {id: 'later', label: 'Later', kind: 'interval', intervalMinutes: 60, nextAt: future, enabled: true},
-    {id: 'overdue', label: 'Overdue', kind: 'interval', intervalMinutes: 15, nextAt: past, enabled: true},
-  ];
-  migrateSchedules(state);
-  const later = state.tasks.find(t => t.payload.label === 'Later');
-  const overdue = state.tasks.find(t => t.payload.label === 'Overdue');
-  assert.equal(later.status, 'queued');
-  assert.equal(Date.parse(later.runAt), Date.parse(future));
-  assert.equal(later.intervalMinutes, 60);
-  assert.equal(overdue.status, 'queued');
-  assert.equal(overdue.intervalMinutes, 15);
-  assert.ok(Date.parse(overdue.runAt) <= Date.now());
-});
-
 test('completing or failing a cancelled task does not requeue it', () => {
   const state = initialState();
   state.tasks = [];
-  const task = enqueueTask(state, {kind: 'bot-task', payload: {groupId: 'x-engage', botId: 'handoff', message: 'hi', kind: 'interval', intervalMinutes: 30}}).task;
+  const task = enqueueTask(state, {kind: 'bot-task', payload: {groupId: 'home', botId: 'atlas', message: 'hi', kind: 'interval', intervalMinutes: 30}}).task;
   task.status = 'cancelled';
   const runAt = task.runAt;
   assert.equal(completeTask(state, task.id, {ok: true}).status, 'cancelled');

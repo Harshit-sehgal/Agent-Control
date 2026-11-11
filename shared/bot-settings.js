@@ -19,7 +19,6 @@ export const COORDINATION_MODES = ['direct', 'tracked'];
 /** The hard ceiling on bot steps in one run, whatever a group sets. */
 export const MAX_STEPS_LIMIT = 12;
 export const MAX_CONTEXT_MESSAGES = 30;
-export const X_ENGAGE_PIPELINE = ['scout', 'ranker', 'researcher', 'writer', 'reviewer'];
 
 export const BOT_DEFAULTS = Object.freeze({
   enabled: true,
@@ -122,15 +121,10 @@ export function validateBotSettings(body, current = {}) {
 /** The output budget a bot's reply length allows. */
 export const maxTokensFor = bot => REPLY_LENGTHS[botSettings(bot).replyLength] || REPLY_LENGTHS.medium;
 
-/** The effective settings of a group, with the X-engage default pipeline. */
+/** The effective settings of a group: its stored values over the defaults. */
 export function groupSettings(group) {
   const stored = isObject(group?.settings) ? group.settings : {};
-  const merged = {...GROUP_DEFAULTS, ...stored};
-  if (stored.pipeline === undefined && group?.id === 'x-engage') merged.pipeline = [...X_ENGAGE_PIPELINE];
-  // X-engage is the group this product is for: one bot keeps it on track
-  // until the user switches the setting to direct.
-  if (stored.coordination === undefined && group?.id === 'x-engage') merged.coordination = 'tracked';
-  return merged;
+  return {...GROUP_DEFAULTS, ...stored};
 }
 
 /** Validate a partial group settings change against the group's roster. */
@@ -138,12 +132,6 @@ export function validateGroupSettings(group, body, current = {}) {
   if (body === undefined || body === null) return {...GROUP_DEFAULTS, ...current};
   if (!isObject(body)) fail('Group settings must be an object.');
   const next = {...GROUP_DEFAULTS, ...(isObject(current) ? current : {})};
-  // X-engage stays tracked until someone chooses otherwise. A partial save
-  // must not write the direct default over that implicit choice.
-  if (group?.id === 'x-engage' && !(isObject(current) && current.coordination !== undefined) && body.coordination === undefined) next.coordination = 'tracked';
-  // Same for the pipeline: GROUP_DEFAULTS.pipeline is null ("every bot").
-  // Writing that on a partial save would put Handoff in the X-engage line.
-  if (group?.id === 'x-engage' && !(isObject(current) && current.pipeline !== undefined) && body.pipeline === undefined) delete next.pipeline;
   for (const key of Object.keys(body)) if (!Object.hasOwn(GROUP_DEFAULTS, key)) fail(`Unknown group setting "${String(key).slice(0, 40)}".`);
   if (body.routing !== undefined) {
     if (!ROUTING_MODES.includes(body.routing)) fail(`Routing must be one of: ${ROUTING_MODES.join(', ')}.`);

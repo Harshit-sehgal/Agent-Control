@@ -150,7 +150,7 @@ test('a workspace runs end to end over HTTP: invite, build a group and bot, queu
     assert.equal((await call('DELETE', `/api/groups/${team.body.id}`, undefined, sam)).status, 403, 'removing a group is for an admin');
 
     // A task can be cancelled by the member, never by the viewer.
-    const spare = await call('POST', '/api/tasks', {kind: 'reminder', payload: {kind: 'once', label: 'A reminder nobody needs', nextAt: new Date(Date.now() + 86400000).toISOString()}}, sam);
+    const spare = await call('POST', '/api/tasks', {kind: 'bot-task', payload: {kind: 'once', groupId: team.body.id, message: 'A task nobody needs', nextAt: new Date(Date.now() + 86400000).toISOString()}}, sam);
     assert.equal(spare.status, 201, JSON.stringify(spare.body));
     assert.equal((await call('DELETE', `/api/tasks/${spare.body.id}`, undefined, vic)).status, 403, 'a viewer may not cancel a task');
     assert.equal((await call('DELETE', `/api/tasks/${spare.body.id}`, undefined, sam)).status, 200);

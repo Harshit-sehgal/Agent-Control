@@ -9,7 +9,7 @@ session. This script starts `src/server.js` exactly as an operator would, points
 it at a fake OpenAI-compatible endpoint, and drives the real UI in a browser.
 
 Run: python3 tests/live_smoke.py          (add --keep to leave the server up)
-No network, no credentials, nothing is sent to X. The model is a local stub.
+No network and no credentials. The model is a local stub.
 """
 import json
 import os
@@ -171,9 +171,9 @@ def run(base, stub, errors, bad):
         sign_in(page, base)
         phase['signed_in'] = True
 
-        # The first-run workspace seeds the X-engage team; if that ever stops
-        # happening, a brand new install opens on an empty screen.
-        team = page.locator('.chat-row[data-id="team-x-engage"]')
+        # The first-run workspace seeds the Home group with its primary bot Atlas;
+        # if that ever stops happening, a brand new install opens on an empty screen.
+        team = page.locator('.chat-row[data-id="team-home"]')
         expect(team).to_have_count(1)
         team.click()
 
@@ -196,8 +196,8 @@ def run(base, stub, errors, bad):
         assert messages and any('local models and cost' in json.dumps(m) for m in messages), \
             'the user message never reached the model'
 
-        # One message runs the group chain (scout -> ranker -> ... -> reviewer),
-        # so several calls are expected. Identical bodies would mean the app
+        # One message runs the group's bots in turn (just Atlas on a fresh install,
+        # more once bots are added), so one or more calls are expected. Identical bodies would mean the app
         # retried the same request instead of advancing, which looks like work
         # in the run log and costs money.
         bodies = [json.dumps(r['body'], sort_keys=True) for r in stub.requests]

@@ -9,7 +9,6 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {SqliteStore} from '../src/sqlite-store.js';
-import * as wf from '../shared/workflow.js';
 
 const temp = () => fs.mkdtemp(path.join(os.tmpdir(), 'store-guards-'));
 const openAt = async dir => new SqliteStore(path.join(dir, 'state.db'), path.join(dir, 'state.json')).init();
@@ -110,9 +109,8 @@ test('a candidate whose draft failed is released even when the workflow transiti
   const dir = await temp();
   try {
     const store = await openAt(dir);
-    const added = await store.update(s => wf.addCandidate(s, {url: 'https://x.com/test/status/9', text: 'A post about queues and retries.', author: 'Tester', topic: 'AI'}));
-    const id = added.candidate.id;
-    await store.update(s => wf.beginProcessing(s, id));
+    const id = 'c9';
+    await store.update(s => { s.candidates.push({id, url: 'https://x.com/test/status/9', text: 'A post about queues and retries.', author: 'Tester', topic: 'AI', status: 'processing', createdAt: new Date().toISOString()}); });
 
     assert.equal(store.failCandidate(id), true);
     const row = store.get('SELECT status, doc FROM candidates WHERE id=?', id);
@@ -129,10 +127,6 @@ test('a candidate whose draft failed is released even when the workflow transiti
     assert.equal(store.read().candidates.find(c => c.id === id).status, 'error', 'the document cache agrees with the row');
     // A candidate deleted mid-draft is not an error for the fallback.
     assert.equal(store.failCandidate('gone'), false);
-    // The workflow transition itself throws for that case, which is exactly why
-    // the draft-failure path needs a fallback that cannot 404 over the real error.
-    assert.throws(() => wf.failProcessing(store.read(), 'gone', 'provider timed out'), error => error.status === 404 && /Candidate not found/.test(error.message));
-    await assert.rejects(store.update(s => wf.failProcessing(s, 'gone', 'provider timed out')), error => error.status === 404);
     await store.close();
   } finally { await fs.rm(dir, {recursive: true, force: true}); }
 });

@@ -39,8 +39,8 @@ const bot = (id, {type = 'context', settings = {}} = {}) => ({
   id, name: id[0].toUpperCase() + id.slice(1), type, instructions: `Act as ${id}`, settings,
 });
 const group = (id, bots, settings = {}) => ({id, name: id, bots, settings});
-/** The browser-local document the simulator reads (candidates/drafts/settings). */
-const demoState = (extra = {}) => ({settings: {topics: []}, candidates: [], drafts: [], chats: {}, ...extra});
+/** The browser-local document the simulator reads. */
+const demoState = (extra = {}) => ({chats: {}, ...extra});
 
 const noApi = async () => { throw new Error('the simulator must not reach the API in this case'); };
 
@@ -159,7 +159,7 @@ test('a default pipeline runs the same ordered roster on both engines', async t 
     currentStep: 3,
     pausedAt: null,
     error: null,
-    outcomes: [{kind: 'completed', text: 'Done in 3 step(s). Anything to post still needs your approval.'}],
+    outcomes: [{kind: 'completed', text: 'Done in 3 step(s).'}],
   };
   assert.deepEqual(decisions(demo.run, demo.conversation), expected);
   assert.deepEqual(serverDecisions(server.store, server.runId), expected);
@@ -181,7 +181,7 @@ test('an explicit @mention narrows both engines to that one bot', async t => {
     currentStep: 1,
     pausedAt: null,
     error: null,
-    outcomes: [{kind: 'completed', text: 'Done in 1 step(s). Anything to post still needs your approval.'}],
+    outcomes: [{kind: 'completed', text: 'Done in 1 step(s).'}],
   };
   assert.deepEqual(decisions(demo.run, demo.conversation), expected);
   assert.deepEqual(serverDecisions(server.store, server.runId), expected);
@@ -209,7 +209,7 @@ test('a summonable guest from another group is on both rosters', async t => {
     currentStep: 1,
     pausedAt: null,
     error: null,
-    outcomes: [{kind: 'completed', text: 'Done in 1 step(s). Anything to post still needs your approval.'}],
+    outcomes: [{kind: 'completed', text: 'Done in 1 step(s).'}],
   };
   assert.deepEqual(decisions(demo.run, demo.conversation), expected);
   assert.deepEqual(serverDecisions(server.store, server.runId), expected);
@@ -308,7 +308,7 @@ test('a checkpoint pauses both engines after the same step and resumes the same 
     outcomes: [
       {kind: 'paused', text: 'Paused after step 1. Approve the next step to continue.'},
       {kind: 'paused', text: 'Paused after step 2. Approve the next step to continue.'},
-      {kind: 'completed', text: 'Done in 3 step(s). Anything to post still needs your approval.'},
+      {kind: 'completed', text: 'Done in 3 step(s).'},
     ],
   };
   assert.deepEqual(decisions(demo.run, conversation), completed);
@@ -326,10 +326,10 @@ test('a step that throws is not retried, and the server records the failure', as
   const executor = async () => {
     serverCalls++;
     if (serverCalls === 1) throw new Error('Model unavailable');
-    return 'A drafted reply, long enough to count, citing https://x.com/ada/status/1';
+    return 'A reply that would have been fine.';
   };
 
-  const server = await serverEngine(t, {groups, groupId: 'fail', message: '@Writer draft a reply', executor});
+  const server = await serverEngine(t, {groups, groupId: 'fail', message: '@Writer write a reply', executor});
   assert.equal(serverCalls, 1, 'the server retried a thrown step');
 
   const expected = {

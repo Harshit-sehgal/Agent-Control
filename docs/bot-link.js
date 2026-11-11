@@ -15,7 +15,7 @@
  * This module is pure: parse, validate, resolve a name, build prompts. The
  * orchestrator runs the round (`src/bot-link.js`).
  */
-import {cleanText} from './core.js?v=9d469de614';
+import {cleanText} from './core.js?v=98402d35f0';
 
 export const BOT_ASK_PERMISSION = 'bot.ask';
 export const MAX_ASKS_PER_REPLY = 1;
@@ -25,8 +25,8 @@ export const MAX_ASK_DEPTH = 1;
 /** Every control block in a bot reply, and the one grammar that reads them,
  * live in `shared/reply-blocks.js`. Re-exported here because this module was
  * their first home and callers still reach for them through it. */
-import {controlFence} from './reply-blocks.js?v=9d469de614';
-export {CONTROL_FENCES, controlFence} from './reply-blocks.js?v=9d469de614';
+import {controlFence} from './reply-blocks.js?v=98402d35f0';
+export {CONTROL_FENCES, controlFence} from './reply-blocks.js?v=98402d35f0';
 const ASK_FENCE = () => controlFence('ask');
 const normalize = value => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 

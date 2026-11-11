@@ -76,9 +76,9 @@ test('a delivery task cannot be smuggled through the generic queue by whitespace
   assert.equal(store.read().tasks.filter(task => /notification/i.test(task.kind)).length, 0);
 
   // An ordinary kind is still accepted through the same route.
-  const ok = await call(store, {method: 'POST', path: '/api/tasks', body: {kind: 'reminder', payload: {label: 'Ping me', kind: 'interval', intervalMinutes: 5}}});
+  const ok = await call(store, {method: 'POST', path: '/api/tasks', body: {kind: 'bot-task', payload: {groupId: 'home', botId: 'atlas', message: 'Ping me', label: 'Ping me', kind: 'interval', intervalMinutes: 5}}});
   assert.equal(ok.status, 201, JSON.stringify(ok.body));
-  assert.equal(ok.body.kind, 'reminder');
+  assert.equal(ok.body.kind, 'bot-task');
 });
 
 test('a run is only reachable under the group it belongs to', async t => {

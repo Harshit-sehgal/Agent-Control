@@ -8,7 +8,9 @@ import {createRun,planHandoffs,createEnvelope,assertValidHandoff,runNote,MAX_HAN
 import {simulateGroup} from '../shared/group-simulator.js';
 import {SqliteStore} from '../src/sqlite-store.js';
 import {coordinationState,runGroup,markInterrupted} from '../src/coordination.js';
-const group={id:'x-engage',name:'X-engage',bots:['scout','ranker','researcher','writer','reviewer','handoff'].map(id=>({id,name:id[0].toUpperCase()+id.slice(1),instructions:`Act as ${id}`,type:({scout:'source',ranker:'scoring',researcher:'context',writer:'writing',reviewer:'review',handoff:'manual'})[id]}))};
+const group={id:'home',name:'Home',bots:['scout','ranker','researcher','writer','reviewer','handoff'].map(id=>({id,name:id[0].toUpperCase()+id.slice(1),instructions:`Act as ${id}`,type:'custom'}))};
+// An explicit pipeline stands in for the retired seed: five bots run in order, the sixth is a manual stop.
+group.settings={pipeline:['scout','ranker','researcher','writer','reviewer']};
 
 test('Grok-like group chat supports targeted mentions and bounded default pipeline',()=>{
   assert.deepEqual(planHandoffs(group,'Please coordinate these bots').recipients,['scout','ranker','researcher','writer','reviewer']);
@@ -48,10 +50,10 @@ test('server-side agent execution persists messages and real previous outputs',a
     const contexts=[];
     await runGroup(store,'run-1',async(bot,input)=>{const e=JSON.parse(input);contexts.push(e);return `Response from ${bot.name}`;});
     const s=store.read();const run=s.groupRuns[0];
-    assert.equal(run.status,'completed');assert.equal(s.groupMessages['x-engage'].length,5);
+    assert.equal(run.status,'completed');assert.equal(s.groupMessages['home'].length,5);
     assert.equal(contexts[1].previous.output,'Response from Scout');
-    assert.equal(s.groupMessages['x-engage'][0].toBotId,'ranker');
-    assert.equal(s.groupMessages['x-engage'][4].toBotId,null);
+    assert.equal(s.groupMessages['home'][0].toBotId,'ranker');
+    assert.equal(s.groupMessages['home'][4].toBotId,null);
     const persisted=await new SqliteStore(path.join(dir,'state.db'),path.join(dir,'state.json')).init();
     assert.equal(persisted.read().groupRuns[0].status,'completed');
     await persisted.update(s=>{s.groupRuns[0].status='running';});
@@ -63,7 +65,7 @@ test('a checkpointed run pauses between steps and resumes on human approval',asy
   const dir=await mkdtemp(path.join(tmpdir(),'ac-coord-cp-'));
   try{
     const store=await new SqliteStore(path.join(dir,'state.db'),path.join(dir,'state.json')).init();
-    const three={id:'x-engage',name:'X-engage',bots:group.bots.slice(0,3)};
+    const three={id:'home',name:'Home',bots:group.bots.slice(0,3)};
     await store.update(s=>{s.groups=[three];coordinationState(s);s.groupRuns.push(createRun({group:three,message:'Coordinate',makeId:()=> 'run-cp',checkpoints:true}));});
     const {resumeGroupRun}=await import('../src/coordination.js');
     await runGroup(store,'run-cp',async bot=>`Response from ${bot.name}`);
@@ -94,7 +96,7 @@ test('orchestrator records execution failure and never publishes',async()=>{
     await store.update(s=>{s.groups=[group];coordinationState(s);s.groupRuns.push(createRun({group,message:'Coordinate',makeId:()=> 'run-2'}));});
     await runGroup(store,'run-2',async()=>{throw Error('Model unavailable');});
     const s=store.read();assert.equal(s.groupRuns[0].status,'failed');assert.match(s.groupRuns[0].error,/Model unavailable/);
-    assert.equal(s.drafts.length,0);assert.equal(s.groupMessages['x-engage']?.length||0,0);
+    assert.equal(s.groupMessages['home']?.length||0,0);
   }finally{await rm(dir,{recursive:true,force:true});}
 });
 test('queuing a run reports a missing group before complaining about the AI key',async()=>{
@@ -120,7 +122,7 @@ test('a run writes its messages and outcome into the conversation it was started
     await runGroup(store,'run-chat',async bot=>`Response from ${bot.name}`);
     let chat=store.read().chats.writer;
     assert.deepEqual(chat.map(m=>m.role),['bot','system'],'The first step and the pause must be in the conversation without any browser open.');
-    assert.equal(chat[0].id,store.read().groupMessages['x-engage'][0].id,'The conversation reuses the run-log id, so a client that mirrors it adds no duplicate.');
+    assert.equal(chat[0].id,store.read().groupMessages['home'][0].id,'The conversation reuses the run-log id, so a client that mirrors it adds no duplicate.');
     assert.equal(chat[0].senderName,'Scout');assert.equal(chat[0].runId,'run-chat');
     assert.deepEqual(chat[1],{...chat[1],...runNote(store.read().groupRuns[0])});
     assert.match(chat[1].text,/Paused after step 1/);
@@ -131,17 +133,17 @@ test('a run writes its messages and outcome into the conversation it was started
     // A failure and a restart are reported there too.
     await store.update(s=>{s.groupRuns.unshift(createRun({group,message:'again',makeId:()=> 'run-fail'}));});
     await runGroup(store,'run-fail',async()=>{throw Error('Model unavailable');});
-    assert.match(store.read().chats['team-x-engage'].at(-1).text,/The run failed: Model unavailable/);
+    assert.match(store.read().chats['team-home'].at(-1).text,/The run failed: Model unavailable/);
     await store.update(s=>{s.groupRuns.unshift({...createRun({group,message:'later',makeId:()=> 'run-cut'}),status:'running'});});
     await markInterrupted(store);
-    assert.match(store.read().chats['team-x-engage'].at(-1).text,/Server restarted before the run completed/);
+    assert.match(store.read().chats['team-home'].at(-1).text,/Server restarted before the run completed/);
   }finally{await rm(dir,{recursive:true,force:true});}
 });
 
 test('a run can only be attached to a conversation inside its own group',()=>{
-  assert.equal(createRun({group,message:'hi',makeId:()=> 'r'}).chatKey,'team-x-engage');
-  assert.equal(createRun({group,message:'hi',makeId:()=> 'r',chatKey:'team-x-engage'}).chatKey,'team-x-engage');
-  assert.equal(createRun({group,message:'hi',makeId:()=> 'r',chatKey:'someone-else'}).chatKey,'team-x-engage');
-  assert.equal(createRun({group,message:'hi',makeId:()=> 'r',chatKey:'team-other'}).chatKey,'team-x-engage');
+  assert.equal(createRun({group,message:'hi',makeId:()=> 'r'}).chatKey,'team-home');
+  assert.equal(createRun({group,message:'hi',makeId:()=> 'r',chatKey:'team-home'}).chatKey,'team-home');
+  assert.equal(createRun({group,message:'hi',makeId:()=> 'r',chatKey:'someone-else'}).chatKey,'team-home');
+  assert.equal(createRun({group,message:'hi',makeId:()=> 'r',chatKey:'team-other'}).chatKey,'team-home');
   assert.equal(createRun({group,message:'hi',makeId:()=> 'r',directBotId:'writer'}).chatKey,'writer');
 });

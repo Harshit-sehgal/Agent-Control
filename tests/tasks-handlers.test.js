@@ -8,23 +8,23 @@ import {SqliteStore} from '../src/sqlite-store.js';
 import {taskHandlers} from '../src/handlers.js';
 
 const stamp = () => new Date().toISOString();
-const emptyState = () => ({tasks: [], events: [], groups: []});
+const emptyState = () => ({tasks: [], events: [], groups: [{id: 'home', name: 'Home', bots: [{id: 'atlas', name: 'Atlas'}]}]});
 
-test('a rejected reminder names the schedule kinds it accepts', () => {
+test('a rejected scheduled task names the schedule kinds it accepts', () => {
   // "Choose a schedule kind" told a person what was wrong but not what to pick.
-  assert.throws(() => buildPayload('reminder', {kind: 'weekly', label: 'Standup'}),
+  assert.throws(() => buildPayload('bot-task', {groupId: 'home', message: 'Standup', kind: 'weekly'}),
     error => error.status === 400 && /once or interval/.test(error.message));
-  assert.throws(() => buildPayload('reminder', {kind: 'once', label: 'Standup'}),
+  assert.throws(() => buildPayload('bot-task', {groupId: 'home', message: 'Standup', kind: 'once'}),
     error => error.status === 400 && /future date/.test(error.message));
-  const once = buildPayload('reminder', {kind: 'once', label: 'Standup', nextAt: new Date(Date.now() + 60000).toISOString()});
+  const once = buildPayload('bot-task', {groupId: 'home', message: 'Standup', kind: 'once', nextAt: new Date(Date.now() + 60000).toISOString()});
   assert.equal(once.kind, 'once');
 });
 
 test('a cancelled task cannot be retried, and a retry keeps runAt and nextAt in step', () => {
   const state = emptyState();
   const future = new Date(Date.now() + 3600000).toISOString();
-  const {task} = enqueueTask(state, {kind: 'reminder', payload: {label: 'Standup', kind: 'once', nextAt: future}});
-  assert.equal(task.runAt, future, 'A one-off reminder fires when it was set to.');
+  const {task} = enqueueTask(state, {kind: 'bot-task', payload: {groupId: 'home', message: 'Standup', kind: 'once', nextAt: future}});
+  assert.equal(task.runAt, future, 'A one-off scheduled task fires when it was set to.');
   // Only a failed task is retryable: a cancelled one is a decision, not a fault.
   assert.throws(() => retryTask(state, task.id), error => error.status === 409 && /Only a failed task/.test(error.message));
   state.tasks[0].status = 'failed';
@@ -111,3 +111,9 @@ test('a job aimed at a missing agent is a 404, not a job for whoever is left', a
   } finally { await rm(dir, {recursive: true, force: true}); }
 });
 
+
+test('reminder and candidate-draft are no longer task kinds', () => {
+  for (const kind of ['reminder', 'candidate-draft']) {
+    assert.throws(() => enqueueTask(emptyState(), {kind, payload: {label: 'x', kind: 'interval', intervalMinutes: 5, candidateId: 'c1'}, title: 'x'}), /Unknown task kind/, kind);
+  }
+});

@@ -7,7 +7,7 @@ from a local http.server on a free port and opens every scenario in a fresh
 browser context so localStorage always starts empty.
 
 Run: python3 tests/polish_smoke.py   (screenshots of failures land in a temp dir)
-No network, no credentials, nothing is ever posted to X.
+No network and no credentials.
 """
 import asyncio
 import http.server
@@ -24,8 +24,15 @@ from playwright.async_api import async_playwright, expect
 ROOT = Path(__file__).resolve().parents[1]
 DESKTOP = {'width': 1360, 'height': 860}
 PHONE = {'width': 390, 'height': 844}
-TEAM = 'team-x-engage'
-BOT_IDS = ['scout', 'ranker', 'researcher', 'writer', 'reviewer', 'handoff']
+TEAM = 'team-home'
+PRIMARY = 'atlas'
+# The starting workspace is one group (Home) with one bot (Atlas). Scenarios that
+# need a team create the extra bots through the app's own API first.
+EXTRA_BOTS = {
+    'Researcher': 'Find and summarise what the user asks about.',
+    'Writer': 'Write clear, concise drafts from what the others found.',
+    'Reviewer': 'Check the draft for unsupported claims.',
+}
 expect.set_options(timeout=6000)
 
 
@@ -92,9 +99,23 @@ class Harness:
             await context.close()
 
 
-async def open_app(page, base, hash_=''):
+async def open_app(page, base, hash_='', bots=None):
+    """Open the app; with `bots` ({name: instructions}) first add them to Home through the
+    app's own local API, reload so the UI reads them, and return {name: bot id}."""
     await page.goto(f'{base}/index.html{hash_}')
     await page.locator('.chat-row').first.wait_for()
+    if not bots:
+        return {}
+    ids = await page.evaluate('''async bots => {
+        const made = {};
+        for (const [name, instructions] of Object.entries(bots)) {
+            made[name] = (await window.AGENT_API('/api/groups/home/bots', 'POST', {name, instructions})).id;
+        }
+        return made;
+    }''', bots)
+    await page.reload()
+    await page.locator('.chat-row').first.wait_for()
+    return ids
 
 
 async def overflow(page):
@@ -109,9 +130,9 @@ async def hash_(page):
 
 async def first_run(page, base):
     await open_app(page, base)
-    # Seed: the group plus its six bots, in natural order, no unread work yet.
+    # Seed: the Home group plus its primary bot, in natural order, no unread work yet.
     ids = await page.locator('.chat-row').evaluate_all('rows => rows.map(r => r.dataset.id)')
-    assert ids == [TEAM] + BOT_IDS, ids
+    assert ids == [TEAM, PRIMARY], ids
     await expect(page.locator('#sidebar .list-head h1')).to_have_text('Chats')
     await expect(page.locator('#sidebar .backend')).to_contain_text('Browser-only')
     await expect(page.locator('.chat-row .badge')).to_have_count(0)
@@ -121,25 +142,26 @@ async def first_run(page, base):
     await page.locator('[data-action="list-filter"][data-filter="groups"]').click()
     await expect(page.locator('.chat-row')).to_have_count(1)
     await page.locator('[data-action="list-filter"][data-filter="bots"]').click()
-    await expect(page.locator('.chat-row')).to_have_count(6)
+    await expect(page.locator('.chat-row')).to_have_count(1)
+    await expect(page.locator('.chat-row')).to_have_attribute('data-id', PRIMARY)
     await page.locator('[data-action="list-filter"][data-filter="needs"]').click()
     await expect(page.locator('#chat-list .empty')).to_contain_text('Nothing is waiting on you')
     await page.locator('[data-action="list-filter"][data-filter="all"]').click()
     # Search narrows by name and says so when nothing matches.
-    await page.locator('#chat-search').fill('writ')
+    await page.locator('#chat-search').fill('atl')
     await expect(page.locator('.chat-row')).to_have_count(1)
-    await expect(page.locator('.chat-row')).to_have_attribute('data-id', 'writer')
+    await expect(page.locator('.chat-row')).to_have_attribute('data-id', PRIMARY)
     await page.locator('#chat-search').fill('zzzz-nothing')
     await expect(page.locator('#chat-list .empty')).to_contain_text('No chats match')
     await page.locator('#chat-search').fill('')
-    await expect(page.locator('.chat-row')).to_have_count(7)
+    await expect(page.locator('.chat-row')).to_have_count(2)
 
 
 async def group_chat_flow(page, base):
-    await open_app(page, base)
+    await open_app(page, base, bots=EXTRA_BOTS)
     await page.locator(f'.chat-row[data-id="{TEAM}"]').click()
-    await expect(page.locator('.thread-title strong')).to_have_text('X-engage')
-    await expect(page.locator('.thread-title')).to_contain_text('Scout, Ranker')
+    await expect(page.locator('.thread-title strong')).to_have_text('Home')
+    await expect(page.locator('.thread-title')).to_contain_text('Atlas, Researcher')
     await expect(page.locator('.needs-pill')).to_have_count(0)
     chips = await page.locator('[data-action="quick-chat"]').all_inner_texts()
     assert chips == ['What can you do?', 'Create a bot named Researcher'], chips
@@ -157,8 +179,8 @@ async def group_chat_flow(page, base):
     await expect(page.locator('#chat-space .event').last).to_contain_text('Done in', timeout=10000)
     assert await box.input_value() == ''
     senders = set(await page.locator('#chat-space .sender').all_inner_texts())
-    assert senders == {'Scout', 'Ranker', 'Researcher', 'Writer', 'Reviewer'}  # the X pipeline; Handoff is mention-only, senders
-    assert await page.locator('#chat-space .handoff').count() == 4  # each bot but the last names who is next
+    assert senders == {'Atlas', 'Researcher', 'Writer', 'Reviewer'}, senders
+    assert await page.locator('#chat-space .handoff').count() == 3  # each bot but the last names who is next
     await expect(page.locator('#chat-space .event').first).to_contain_text('Simulated, no live AI')
     # The conversation (and the list preview) survive a reload.
     await page.reload()  # the hash keeps us in the same chat
@@ -167,20 +189,20 @@ async def group_chat_flow(page, base):
 
 async def direct_bot_chat(page, base):
     await open_app(page, base)
-    await page.locator('.chat-row[data-id="scout"]').click()
-    await expect(page.locator('.thread-title strong')).to_have_text('Scout')
-    await expect(page.locator('.thread-title')).to_contain_text('X-engage')
-    await expect(page.locator('#chat-space .welcome')).to_contain_text('Offline demo')
+    await page.locator(f'.chat-row[data-id="{PRIMARY}"]').click()
+    await expect(page.locator('.thread-title strong')).to_have_text('Atlas')
+    await expect(page.locator('.thread-title')).to_contain_text('Home')
+    await expect(page.locator('#chat-space .welcome')).to_contain_text('This is the primary bot')
     await page.locator('[data-action="quick-chat"]', has_text='What can you do?').click()
     await expect(page.locator('.msg.them .text').last).to_contain_text('My job')
-    await expect(page.locator('.chat-row[data-id="scout"] .chat-row-preview')).to_contain_text('My job')
+    await expect(page.locator(f'.chat-row[data-id="{PRIMARY}"] .chat-row-preview')).to_contain_text('My job')
     # A chat with activity floats above idle ones.
     first = await page.locator('.chat-row').first.get_attribute('data-id')
-    assert first == 'scout', first
+    assert first == PRIMARY, first
 
 
 async def quick_navigation(page, base):
-    await open_app(page, base)
+    ids = await open_app(page, base, bots=EXTRA_BOTS)
     command = page.locator('#command')
     await expect(command).to_be_hidden()
     await page.locator('#chat-search').focus()
@@ -196,17 +218,18 @@ async def quick_navigation(page, base):
     await page.keyboard.press('Enter')
     await expect(command).to_be_hidden()
     await expect(page.locator('.thread-title strong')).to_have_text('Reviewer')
-    assert await hash_(page) == '#chat/reviewer', await hash_(page)
+    assert await hash_(page) == f"#chat/{ids['Reviewer']}", await hash_(page)
     # Arrow keys move the selection; a result can also be clicked.
     await page.keyboard.press('Control+k')
-    await page.locator('#command-input').fill('x-engage')
-    await expect(page.locator('#command-results .command-item.selected')).to_contain_text('X-engage')
+    await page.locator('#command-input').fill('home')
+    # 'Chats' (hint Home) is the first match; the group and its info sections follow.
+    await expect(page.locator('#command-results .command-item.selected')).to_contain_text('Chats')
     assert await page.locator('#command-results .command-item').count() >= 5  # the group plus its info sections
     await page.keyboard.press('ArrowDown')
     assert await page.locator('#command-results .command-item.selected').get_attribute('data-index') == '1'
     await page.keyboard.press('ArrowUp')
-    await page.locator('#command-results .command-item').first.click()
-    await expect(page.locator('.thread-title strong')).to_have_text('X-engage')
+    await page.locator('#command-results .command-item', has_text='Group chat').click()
+    await expect(page.locator('.thread-title strong')).to_have_text('Home')
     # No match says so, and Enter then does nothing.
     await page.keyboard.press('Control+k')
     await page.locator('#command-input').fill('qqqqq')
@@ -244,12 +267,12 @@ async def history_routes(page, base):
     await page.go_back()
     assert await hash_(page) == f'#chat/{TEAM}'
     await expect(page.locator('#inspector .pane-head h2')).to_have_count(0)
-    await expect(page.locator('.thread-title strong')).to_have_text('X-engage')
+    await expect(page.locator('.thread-title strong')).to_have_text('Home')
     await page.go_back()
     assert await hash_(page) in ('', '#chats')  # first entry was the bare URL
     await expect(page.locator('#main h1')).to_have_text('What should your bots work on?')
     await page.go_forward()
-    await expect(page.locator('.thread-title strong')).to_have_text('X-engage')
+    await expect(page.locator('.thread-title strong')).to_have_text('Home')
     await page.go_forward()
     await page.go_forward()
     assert await hash_(page) == f'#chat/{TEAM}/info/runs'
@@ -259,7 +282,7 @@ async def history_routes(page, base):
     await page.keyboard.press('Escape')
     assert await hash_(page) == f'#chat/{TEAM}'
     # Deep links work cold, in a fresh load, and unknown targets fall back to the list.
-    await page.goto(f'{base}/index.html#chat/writer/info/edit')
+    await page.goto(f'{base}/index.html#chat/atlas/info/edit')
     await expect(page.locator('#edit-bot-form')).to_be_visible()
     await page.goto(f'{base}/index.html#you/about')
     await page.reload()
@@ -310,7 +333,7 @@ async def phone_flow(page, base):
     await expect(body).to_have_attribute('data-pane', 'list')
     await expect(page.locator('#sidebar')).to_be_visible()
     # Hardware back does the same walk.
-    await page.locator('.chat-row[data-id="writer"]').click()
+    await page.locator('.chat-row[data-id="atlas"]').click()
     await expect(body).to_have_attribute('data-pane', 'main')
     await page.go_back()
     await expect(body).to_have_attribute('data-pane', 'list')
@@ -329,7 +352,7 @@ async def no_overflow(page, base):
     """No horizontal scroll at the extremes, on every kind of screen."""
     routes = ['#chats', f'#chat/{TEAM}', f'#chat/{TEAM}/info', f'#chat/{TEAM}/info/runs',
               f'#chat/{TEAM}/info/group-settings', f'#chat/{TEAM}/info/tasks',
-              '#chat/writer', '#chat/writer/info', '#chat/writer/info/edit', '#you', '#you/about']
+              '#chat/atlas', '#chat/atlas/info', '#chat/atlas/info/edit', '#you', '#you/about']
     for width in (390, 1360):
         await page.set_viewport_size({'width': width, 'height': 860})
         for route in routes:
@@ -340,7 +363,7 @@ async def no_overflow(page, base):
             extra = await overflow(page)
             assert extra <= 0, f'{route} at {width}px overflows by {extra}px'
         # A long message must wrap instead of widening the page.
-        await page.goto(f'{base}/index.html#chat/scout')
+        await page.goto(f'{base}/index.html#chat/atlas')
         await page.reload()
         long_word = 'x' * 400
         sent = await page.locator('.msg.me').count()

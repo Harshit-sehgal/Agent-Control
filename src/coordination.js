@@ -18,7 +18,6 @@ import {memoryFor,rememberTurn,maybeConsolidate} from './memory.js';
 import {executeCustomBot} from './ai.js';
 import {resolveConfig,aiAvailable} from './ai-providers.js';
 import {activity} from '../shared/core.js';
-import {attachRunDraft} from '../shared/workflow.js';
 import {failAgentTasks} from './agent.js';
 const running=new Set();
 const clean=v=>String(v??'').slice(0,4000);
@@ -217,7 +216,7 @@ async function runGroupInner(store,id,executor){
       const current=store.read();const r=current.groupRuns.find(x=>x.id===id);
       if(!r||r.status!=='running')throw new Error('Run no longer active');
       if(i>=r.recipients.length){
-        const gap=assessTask(r,{drafts:current.drafts||[]});
+        const gap=assessTask(r);
         if(gap.retryBotId){
           await store.update(s=>{const live=s.groupRuns.find(x=>x.id===id);if(!live)return;live.task={...live.task,retried:true};live.recipients.push(gap.retryBotId);
             const name=s.groups.find(g=>g.id===live.groupId)?.bots.find(b=>b.id===gap.retryBotId)?.name||'That bot';
@@ -271,11 +270,6 @@ async function runGroupInner(store,id,executor){
         // Text around the browser fences is the browser helper's view of the
         // reply; with nothing to browse, the approved value is the output.
         previous.output=(browsed.records.length?browsed.text:gated).slice(0,3600);
-        const actor=host?.bots.find(b=>b.id===bot.id)||bot;
-        const sources=[live.input,...live.trace.map(step=>step.output),previous.output].filter(Boolean).join('\n');
-        // A refused browser-only reply has no answer to draft. The browser
-        // helper supplies a placeholder for display; do not count it as work.
-        if(!browsed.records.length&&(stripped.trim()||!asked.length))attachRunDraft(s,{bot:actor,output:previous.output,sources,runId:id});
         if(botSettings(bot).browserApproval==='auto')auto=browsed.records;
         const added=host?handoffTargets({run:live,roster:[...host.bots.filter(b=>!fledglings.has(b.id)),...summonableGuests(s.groups,host.id)],fromBot:bot,output:previous.output,home:host.bots}):[];
         live.recipients.push(...added);
@@ -320,7 +314,7 @@ async function runGroupInner(store,id,executor){
       }
       i++;
     }
-    await store.update(s=>{const r=s.groupRuns.find(x=>x.id===id);if(r.task)r.task.closing=assessTask(r,{drafts:s.drafts||[]}).note;endRun(r,'completed');r.lastOutput=previous?.output??null;say(s,r,runNote(r));activity(s,'group-run','Completed bot coordination run',{runId:id});});
+    await store.update(s=>{const r=s.groupRuns.find(x=>x.id===id);if(r.task)r.task.closing=assessTask(r).note;endRun(r,'completed');r.lastOutput=previous?.output??null;say(s,r,runNote(r));activity(s,'group-run','Completed bot coordination run',{runId:id});});
   // Only a run that was actually executing may be marked failed. A restart marks
   // live runs `interrupted`; overwriting that with `failed` would report a crash
   // the operator never saw as a model error and hide the explicit retry advice.

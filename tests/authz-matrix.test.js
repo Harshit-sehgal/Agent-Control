@@ -73,12 +73,12 @@ test('the authorization matrix gates every write by role and origin', {timeout: 
     assert.equal((await call('POST', '/api/groups', {cookie: viewer, body: group})).status, 403);
     assert.equal((await call('POST', '/api/retention/prune', {cookie: viewer, body: {}})).status, 403);
     assert.equal((await call('POST', '/api/users', {cookie: viewer, body: {email: 'v@x.test', password: 'long-enough-pass', role: 'member'}})).status, 403);
-    assert.equal((await call('POST', '/api/groups/x-engage/chat', {cookie: viewer, body: {message: 'hi'}})).status, 403);
+    assert.equal((await call('POST', '/api/groups/home/chat', {cookie: viewer, body: {message: 'hi'}})).status, 403);
     assert.equal((await call('POST', '/api/notifications/read', {cookie: viewer, body: {ids: []}})).status, 200);
 
     // Member: may write content, may not touch admin surfaces.
     assert.equal((await call('POST', '/api/groups', {cookie: member, body: group})).status, 201);
-    const memberChat = await call('POST', '/api/groups/x-engage/chat', {cookie: member, body: {message: 'please look this over'}});
+    const memberChat = await call('POST', '/api/groups/home/chat', {cookie: member, body: {message: 'please look this over'}});
     assert.notEqual(memberChat.status, 403);
     assert.ok([202, 422].includes(memberChat.status), `member group chat got ${memberChat.status}`);
     assert.equal((await call('POST', '/api/retention/prune', {cookie: member, body: {}})).status, 403);

@@ -9,11 +9,10 @@ import {loadMasterKey} from '../src/vault.js';
 import * as credentials from '../src/credentials.js';
 import * as backup from '../src/backup.js';
 import {normalizeRetention,pruneState} from '../shared/retention.js';
-import {updateSettings} from '../shared/workflow.js';
-import {migrate} from '../shared/workflow.js';
+import {updateRetention, migrate} from '../shared/workflow.js';
 
 const store = () => {
-  const s = {settings: {topics: ['AI'], style: '', opinions: '', minDelay: 0, maxDelay: 0}, candidates: [], drafts: [], evidence: [], events: [], groups: []};
+  const s = {settings: {}, events: [], groups: []};
   migrate(s);
   return s;
 };
@@ -31,8 +30,8 @@ test('retention validation bounds the window and prune only removes exhaust', ()
     {id: 'e2', at: new Date(now - 10 * 86400000).toISOString(), type: 'x', message: 'recent', meta: {}},
   ];
   s.tasks = [
-    {id: 't1', kind: 'reminder', title: 'done long ago', status: 'done', completedAt: new Date(now - 400 * 86400000).toISOString(), payload: {}},
-    {id: 't2', kind: 'reminder', title: 'still queued', status: 'queued', payload: {}},
+    {id: 't1', kind: 'bot-task', title: 'done long ago', status: 'done', completedAt: new Date(now - 400 * 86400000).toISOString(), payload: {}},
+    {id: 't2', kind: 'bot-task', title: 'still queued', status: 'queued', payload: {}},
   ];
   s.runs = [
     {id: 'r1', botId: 'b', botName: 'B', input: 'i', output: 'o', at: new Date(now - 400 * 86400000).toISOString()},
@@ -53,9 +52,10 @@ test('retention validation bounds the window and prune only removes exhaust', ()
 
 test('retention is a workspace setting, validated through the settings route', () => {
   const s = store();
-  updateSettings(s, {retention: {events: 7, doneTasks: 3}});
+  updateRetention(s, {events: 7, doneTasks: 3});
   assert.deepEqual(s.settings.retention, {events: 7, doneTasks: 3, runs: 30});
-  assert.throws(() => updateSettings(s, {retention: {events: 5000}}), /0–1825 days/);
+  assert.throws(() => updateRetention(s, {events: 5000}), /0–1825 days/);
+  assert.deepEqual(s.settings.retention, {events: 7, doneTasks: 3, runs: 30}, 'a refused policy keeps the one in force');
 });
 
 async function harness() {
@@ -123,12 +123,13 @@ test('credentials are encrypted at rest, listed without values, and revealed by 
 test('backup export/import round-trips data and never carries credentials or sessions', async () => {
   const {dir, store} = await harness();
   await store.update(s => {
-    s.candidates.push({id: 'c1', url: 'https://x.com/a/status/1', author: 'A', topic: 'AI', text: 'A candidate long enough to matter.', status: 'new', createdAt: new Date().toISOString()});
+    s.groups.push({id: 'g-backup', name: 'Backed up', description: 'Round trip', bots: [{id: 'b-backup', name: 'Keeper', instructions: 'Hold on to this through a restore.'}]});
+    s.events.unshift({id: 'e-backup', at: new Date().toISOString(), type: 'group', message: 'Created group Backed up.', meta: {}});
   });
   credentials.addCredential(store, 'default', {name: 'api', value: 'secret-sauce'});
   const backupDoc = backup.exportBackup(store);
   assert.equal(backupDoc.backupVersion, backup.BACKUP_VERSION);
-  assert.ok(backupDoc.tables.candidates.some(c => c.id === 'c1'));
+  assert.ok(backupDoc.tables.groups.some(g => g.id === 'g-backup'));
   assert.ok(!('credentials' in backupDoc.tables), 'Credentials must never be exported.');
   assert.ok(!('sessions' in backupDoc.tables), 'Live sessions must never be exported.');
   assert.ok(backupDoc.excluded.includes('credentials'));
@@ -140,7 +141,7 @@ test('backup export/import round-trips data and never carries credentials or ses
   store2.vaultKey = loadMasterKey(dataFile2).key;
   const result = backup.importBackup(store2, JSON.parse(JSON.stringify(backupDoc)));
   assert.ok(result.restored > 0);
-  assert.equal(store2.get('SELECT count(*) AS n FROM candidates').n, 1);
+  assert.equal(store2.get('SELECT count(*) AS n FROM groups WHERE id=?', 'g-backup').n, 1);
   assert.equal(store2.get('SELECT count(*) AS n FROM credentials').n, 0, 'Credentials were not part of the backup.');
 
   // Restore refuses to clobber an existing installation without force.
@@ -150,11 +151,11 @@ test('backup export/import round-trips data and never carries credentials or ses
 
   // Validation rejects truncation and tampering before anything is written.
   const tampered = JSON.parse(JSON.stringify(backupDoc));
-  tampered.tables.candidates.push({id: 'evil', url: 'https://evil.example', author: 'E', topic: '', text: 'x', status: 'new', created_at: new Date().toISOString()});
+  tampered.tables.groups.push({id: 'evil', name: 'Evil', description: ''});
   assert.throws(() => backup.importBackup(store2, tampered, {force: true}), /checksum/);
   const missing = JSON.parse(JSON.stringify(backupDoc));
-  delete missing.tables.drafts;
-  assert.throws(() => backup.validateBackup(missing), /missing the "drafts" table/);
+  delete missing.tables.events;
+  assert.throws(() => backup.validateBackup(missing), /missing the "events" table/);
   assert.throws(() => backup.validateBackup({backupVersion: 99, tables: {}}), /Unsupported backup version/);
   await fs.rm(dir, {recursive: true, force: true});
   await fs.rm(dir2, {recursive: true, force: true});
@@ -216,7 +217,7 @@ test('restoring a backup interrupts in-flight runs that would otherwise wedge th
   const {dir, store} = await harness();
   await store.update(s => {
     s.groupRuns.push({
-      id: 'r-wait', groupId: 'x-engage', input: 'hi', recipients: ['handoff'],
+      id: 'r-wait', groupId: 'home', input: 'hi', recipients: ['atlas'],
       mode: 'pipeline', status: 'awaiting_browser', currentStep: 0,
       createdAt: new Date().toISOString(), trace: [], lastOutput: null, error: null,
     });
@@ -236,10 +237,10 @@ test('restoring a backup keeps a shown plan and a checkpoint, and drops live bro
   const {dir, store} = await harness();
   await store.update(s => {
     s.groupRuns.push(
-      {id: 'r-plan', groupId: 'x-engage', input: 'hi', recipients: ['handoff'], mode: 'pipeline', status: 'awaiting_plan', currentStep: 0, createdAt: new Date().toISOString(), trace: [], lastOutput: null, error: null},
-      {id: 'r-pause', groupId: 'x-engage', input: 'hi', recipients: ['handoff'], mode: 'pipeline', status: 'awaiting_checkpoint', currentStep: 1, createdAt: new Date().toISOString(), trace: [], lastOutput: null, error: null},
+      {id: 'r-plan', groupId: 'home', input: 'hi', recipients: ['atlas'], mode: 'pipeline', status: 'awaiting_plan', currentStep: 0, createdAt: new Date().toISOString(), trace: [], lastOutput: null, error: null},
+      {id: 'r-pause', groupId: 'home', input: 'hi', recipients: ['atlas'], mode: 'pipeline', status: 'awaiting_checkpoint', currentStep: 1, createdAt: new Date().toISOString(), trace: [], lastOutput: null, error: null},
     );
-    s.browserRequests = [{id: 'ghost', status: 'pending', chatKey: 'writer'}];
+    s.browserRequests = [{id: 'ghost', status: 'pending', chatKey: 'atlas'}];
   });
   const backupDoc = backup.exportBackup(store);
   const dir2 = await fs.mkdtemp(path.join(os.tmpdir(), 'secrets-restore-plan-'));

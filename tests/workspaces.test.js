@@ -56,7 +56,7 @@ test('a second workspace has its own data and members', {timeout: 40000}, async 
     assert.deepEqual(named(second, 'Group one'), []);
     assert.equal(second.workspaces.find(w => w.current).name, 'Client work');
     assert.equal((await addGroup(t, 'Group two', owner)).status, 201);
-    assert.equal((await t.send('POST', '/api/chats/writer/messages', {id: 'm1', role: 'user', text: 'only in client work'}, owner)).status, 200);
+    assert.equal((await t.send('POST', '/api/chats/atlas/messages', {id: 'm1', role: 'user', text: 'only in client work'}, owner)).status, 200);
 
     {
       const here = (await t.send('GET', '/api/state', undefined, owner)).body;
@@ -83,7 +83,7 @@ test('a second workspace has its own data and members', {timeout: 40000}, async 
     const back = (await t.send('GET', '/api/state', undefined, owner)).body;
     assert.deepEqual(named(back, 'Group one'), ['Group one']);
     assert.deepEqual(named(back, 'Group two'), []);
-    assert.equal(back.chats.writer, undefined);
+    assert.equal(back.chats.atlas, undefined);
     assert.deepEqual((await t.send('GET', '/api/users', undefined, owner)).body.users.map(u => u.email), ['owner@localhost']);
     // An account that belongs elsewhere cannot be changed from this workspace.
     const guestId = (await t.send('GET', '/api/users', undefined, guest)).body.users.find(u => u.email === 'guest@example.com').id;
@@ -100,7 +100,7 @@ test('a second workspace has its own data and members', {timeout: 40000}, async 
     const reread = (await t.send('GET', '/api/state', undefined, again)).body;
     assert.deepEqual(named(reread, 'Group two'), ['Group two']);
     assert.deepEqual(named(reread, 'Group one'), []);
-    assert.deepEqual(reread.chats.writer.map(m => m.text), ['only in client work']);
+    assert.deepEqual(reread.chats.atlas.map(m => m.text), ['only in client work']);
 
     // Deleting needs the typed name, removes the file and ends the guest's access.
     const guestAgain = await t.login('guest@example.com', 'guest-password-1');

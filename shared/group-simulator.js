@@ -83,7 +83,7 @@ export async function simulateGroup({group, message, directBotId=null, guests=[]
         return run;
       }
       if(i>=run.recipients.length){
-        const gap=assessTask(run,{drafts:state.drafts||[]});
+        const gap=assessTask(run);
         if(gap.retryBotId){
           run.task={...run.task,retried:true};
           run.recipients.push(gap.retryBotId);
@@ -94,7 +94,7 @@ export async function simulateGroup({group, message, directBotId=null, guests=[]
     }
     if(shouldStop()){run.status='cancelled';return run;}
     run.status='completed';run.checkpoint=null;run.currentStep=run.recipients.length;run.lastOutput=previous?.output||null;
-    if(run.task)run.task.closing=assessTask(run,{drafts:state.drafts||[]}).note;
+    if(run.task)run.task.closing=assessTask(run).note;
     const note=runNote(run);
     emit({id:note.id,role:'system',text:note.text,runId:run.id,at:new Date().toISOString()});
     return run;

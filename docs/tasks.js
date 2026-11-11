@@ -6,7 +6,7 @@
  * These transitions are pure and mirror `workflow.js`: the Node worker and the
  * browser-local demo both run them, so the two backends cannot drift.
  */
-import {activity, cleanText} from './core.js?v=9d469de614';
+import {activity, cleanText} from './core.js?v=98402d35f0';
 
 export const MAX_ATTEMPTS_DEFAULT = 5;
 
@@ -37,15 +37,6 @@ function clearRetryAnchor(task) {
 /** Payload validators per kind. Unknown kinds are refused, so a stale UI or a
  * crafted request cannot enqueue a kind the worker does not know how to run. */
 const PAYLOAD_KINDS = {
-  reminder: body => {
-    // Name the schedule kinds: a rejected reminder used to say only that a
-    // "valid schedule kind" was required without saying which ones are.
-    if (!['once', 'interval'].includes(body.kind)) throw fail(`A valid schedule kind is required: ${SCHEDULE_KINDS.join(' or ')}.`, 400);
-    const kind = body.kind;
-    const label = cleanText(body.label, 200);
-    if (!label) throw fail('A reminder needs a label.', 400);
-    return {label, ...timing(body)};
-  },
   'bot-task': body => {
     const groupId = cleanText(body.groupId, 64);
     if (!groupId) fail('A scheduled bot task needs a group.');
@@ -57,7 +48,6 @@ const PAYLOAD_KINDS = {
     if (!['once', 'interval'].includes(body.kind)) fail('Choose once or interval.');
     return {groupId, botId, message, label: cleanText(body.label, 200) || message.slice(0, 60), ...timing(body)};
   },
-  'candidate-draft': body => ({candidateId: cleanText(body.candidateId, 64), direction: cleanText(body.direction, 500)}),
   'group-run': body => ({groupId: cleanText(body.groupId, 64), message: cleanText(body.message, 4000), directBotId: cleanText(body.directBotId, 64) || null}),
   'agent-job': body => ({action: cleanText(body.action, 64), params: body.params && typeof body.params === 'object' ? body.params : {}, agentId: cleanText(body.agentId, 64) || null}),
   notification: body => ({
@@ -73,7 +63,7 @@ export function fail(message, status = 400) {
   throw Object.assign(new Error(message), {status});
 }
 
-/** The schedule part shared by reminders and scheduled bot tasks. */
+/** The schedule part of a scheduled bot task. */
 function timing(body) {
   if (body.kind === 'once') {
     const when = Date.parse(body.nextAt);
@@ -84,10 +74,6 @@ function timing(body) {
   if (!Number.isInteger(intervalMinutes) || intervalMinutes < 1 || intervalMinutes > 10080) fail('Interval must be 1\u201310080 minutes.');
   return {kind: 'interval', intervalMinutes};
 }
-const SCHEDULED = ['reminder', 'bot-task'];
-/** The kinds a one-off or repeating schedule may name, in the order the error
- * message lists them. */
-const SCHEDULE_KINDS = ['once', 'interval'];
 
 export const taskKinds = () => Object.keys(PAYLOAD_KINDS);
 
@@ -96,7 +82,6 @@ export const taskKinds = () => Object.keys(PAYLOAD_KINDS);
  * no action reached the worker and burned its retries; each kind now names the
  * scalar it needs. */
 const REQUIRED_FIELDS = {
-  'candidate-draft': payload => payload.candidateId || fail('A draft task needs a candidate id.'),
   'group-run': payload => (payload.groupId && payload.message) || fail('A group run needs a group and a message.'),
   'agent-job': payload => payload.action || fail('An agent job needs an action.'),
 };
@@ -181,8 +166,6 @@ export function enqueueTask(state, body = {}) {
 }
 
 const taskTitle = (kind, payload) => ({
-  reminder: payload.label || 'Reminder',
-  'candidate-draft': `Draft reply for ${payload.candidateId || 'candidate'}`,
   'group-run': `Group run: ${String(payload.message || '').slice(0, 80)}`,
   'agent-job': `Agent job: ${payload.action || 'unspecified'}`,
   'bot-task': `Scheduled: ${payload.label}`,
@@ -329,8 +312,8 @@ export function retryTask(state, id) {
   task.result = null;
   task.updatedAt = new Date().toISOString();
   clearRetryAnchor(task);
-  // A reminder carries its next fire in the payload too, and a stale `nextAt`
-  // would make the retried run report itself as overdue on the way in.
+  // A scheduled task carries its next fire in the payload too, and a stale
+  // `nextAt` would make the retried run report itself as overdue on the way in.
   if (task.payload && typeof task.payload === 'object' && task.payload.nextAt) task.payload = {...task.payload, nextAt: task.runAt};
   activity(state, 'task', `Requeued task: ${task.title}`, {taskId: task.id});
   return task;
@@ -344,74 +327,12 @@ export function cancelTask(state, id) {
   // The key stays on the row on purpose. The store's unique index is what makes
   // a duplicate submission impossible, and `enqueueTask` re-opens a cancelled
   // row that still holds the key instead of inserting a second one. Dropping
-  // the key here would let a replayed legacy schedule (`schedule:<id>`, see
-  // migrateSchedules) resurrect work a person cancelled.
+  // the key here would let a replayed submission resurrect work a person
+  // cancelled.
   clearRetryAnchor(task);
   task.updatedAt = new Date().toISOString();
   activity(state, 'task', `Cancelled task: ${task.title}`, {taskId: task.id});
   return task;
-}
-
-/** Convert passive legacy reminder schedules into runnable tasks. Idempotent:
- * once migrated, `state.schedules` is empty and never repopulated. Legacy rows
- * are shaped by hand rather than through `enqueueTask`'s validators, because a
- * disabled one-off whose date has passed is legitimate stored data that the
- * strict validator would rightly refuse for new input. */
-export function migrateSchedules(state) {
-  state.tasks ??= [];
-  if (!Array.isArray(state.schedules) || !state.schedules.length) { state.schedules = []; return {migrated: 0}; }
-  let migrated = 0;
-  const stamp = () => new Date().toISOString();
-  for (const item of state.schedules) {
-    const idempotencyKey = `schedule:${item.id}`;
-    const kind = item.kind === 'once' ? 'once' : 'interval';
-    const label = cleanText(item.label, 200) || 'Reminder';
-    const past = Date.parse(item.nextAt);
-    const intervalMinutes = Number.isInteger(item.intervalMinutes) && item.intervalMinutes >= 1 && item.intervalMinutes <= 10080 ? item.intervalMinutes : null;
-    const onceAt = Number.isFinite(past) && past > Date.now() + 1000 ? new Date(past).toISOString() : new Date(Date.now() + 60000).toISOString();
-    // A future interval keeps its next fire. Starting it at `now` would run
-    // a reminder that was not due yet. An overdue one is due immediately.
-    const runAt = kind === 'once' ? onceAt : (Number.isFinite(past) && past > Date.now() ? new Date(past).toISOString() : stamp());
-    const existing = state.tasks.find(t => t.idempotencyKey === idempotencyKey);
-    if (existing) {
-      // Already converted on an earlier run, and do not count it as a new
-      // conversion in the report. A cancelled one stays cancelled: the person
-      // who cancelled it meant it, and re-creating a reminder they removed is
-      // worse than a stale legacy row. A failed one only spent a retry budget,
-      // and the legacy schedule is the record that says it should still fire,
-      // so re-arm the row it already owns — a second row under the same key is
-      // forbidden by the store's unique index.
-      if (existing.status !== 'failed') continue;
-      existing.status = 'queued';
-      existing.runAt = runAt;
-      existing.attempts = 0;
-      existing.lastError = null;
-      existing.completedAt = null;
-      existing.updatedAt = stamp();
-      clearRetryAnchor(existing);
-      migrated++;
-      continue;
-    }
-    const task = {
-      id: crypto.randomUUID(), kind: 'reminder', title: label,
-      payload: kind === 'once' ? {label, kind, nextAt: onceAt} : {label, kind, intervalMinutes: intervalMinutes ?? 60},
-      status: 'queued',
-      runAt,
-      intervalMinutes: kind === 'interval' ? (intervalMinutes ?? 60) : null,
-      idempotencyKey, attempts: 0, maxAttempts: 5, leaseOwner: null, leaseUntil: null,
-      lastError: null, result: null, createdBy: null, createdAt: stamp(), updatedAt: stamp(), completedAt: null,
-    };
-    // A disabled row, or a one-off whose time already passed, must not fire late.
-    if (item.enabled === false || (kind === 'once' && Number.isFinite(past) && past <= Date.now())) {
-      task.status = 'done';
-      task.completedAt = stamp();
-    }
-    state.tasks.unshift(task);
-    migrated++;
-  }
-  state.schedules = [];
-  if (migrated) activity(state, 'migration', `Converted ${migrated} reminder(s) into structured tasks.`);
-  return {migrated};
 }
 
 /** Tasks whose lease has expired (a crashed worker) are visible as interrupted

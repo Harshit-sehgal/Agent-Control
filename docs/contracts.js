@@ -14,14 +14,14 @@
  *
  * Pure functions over bot records, like the other shared modules.
  */
-import {validHttpUrl} from './core.js?v=9d469de614';
-import {fail} from './errors.js?v=9d469de614';
+import {validHttpUrl} from './core.js?v=98402d35f0';
+import {fail} from './errors.js?v=98402d35f0';
 
 export const CONTRACT_VERSION = 1;
 
-export const INPUTS = ['objective', 'previous_output', 'evidence', 'source_post', 'settings', 'identity'];
+export const INPUTS = ['objective', 'previous_output', 'settings', 'identity'];
 export const OUTPUT_KINDS = ['text', 'structured'];
-export const FIELD_TYPES = ['text', 'number', 'boolean', 'string_list', 'evidence_list', 'url'];
+export const FIELD_TYPES = ['text', 'number', 'boolean', 'string_list', 'url'];
 
 /** Actions a bot may be granted. Deliberately absent: publish/post anything
  * externally. If it is not in this list, no profile can ever enable it.
@@ -31,7 +31,7 @@ export const FIELD_TYPES = ['text', 'number', 'boolean', 'string_list', 'evidenc
  * that helper has no tools at all. `bot.ask` lets a bot put one question to a
  * teammate, and `bot.create` lets it add a permissionless bot to its group;
  * see bot-link.js and bot-create.js. */
-export const ACTIONS = ['evidence.add', 'draft.create', 'schedule.set', 'agent.dispatch', 'chat.send', 'browser.use', 'subagent.spawn', 'bot.ask', 'bot.create'];
+export const ACTIONS = ['schedule.set', 'agent.dispatch', 'chat.send', 'browser.use', 'subagent.spawn', 'bot.ask', 'bot.create'];
 
 export {fail};
 
@@ -39,11 +39,8 @@ export function defaultContract() {
   return {version: CONTRACT_VERSION, inputs: [...INPUTS], output: {kind: 'text', fields: []}};
 }
 
-/** Role defaults. Built-in bots keep behaving exactly as before; custom bots
- * start with no permissions and must be granted actions explicitly. */
-export function defaultPermissions(type) {
-  if (type === 'writing') return ['draft.create'];
-  if (type === 'review') return ['evidence.add'];
+/** Every bot starts with no permissions; actions are granted explicitly. */
+export function defaultPermissions() {
   return [];
 }
 
@@ -89,7 +86,11 @@ export function validatePermissions(list) {
 export function normalizeBot(bot) {
   if (!bot || typeof bot !== 'object') fail('Bot record is invalid.', 500);
   bot.contract ??= defaultContract();
-  if (!Array.isArray(bot.permissions)) bot.permissions = defaultPermissions(bot.type);
+  // A contract saved before X-engage was removed may name its inputs or an
+  // evidence-list field. Drop and widen them, or the bot could never be saved.
+  if (Array.isArray(bot.contract.inputs)) bot.contract.inputs = bot.contract.inputs.filter(input => INPUTS.includes(input));
+  for (const field of bot.contract.output?.fields || []) if (field?.type === 'evidence_list') field.type = 'string_list';
+  if (!Array.isArray(bot.permissions)) bot.permissions = defaultPermissions();
   else bot.permissions = [...new Set(bot.permissions.filter(action => ACTIONS.includes(action)))];
   return bot;
 }
@@ -111,19 +112,8 @@ function matchesType(value, type) {
     case 'boolean': return typeof value === 'boolean';
     case 'url': return typeof value === 'string' && validHttpUrl(value) !== null;
     case 'string_list': return Array.isArray(value) && value.every(v => typeof v === 'string');
-    // An evidence reference is a link or a structured item ({link, claim, …}).
-    case 'evidence_list': return Array.isArray(value) && value.every(evidenceItem);
     default: return false;
   }
-}
-
-function evidenceItem(value) {
-  if (typeof value === 'string') return validHttpUrl(value) !== null;
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const claim = typeof value.claim === 'string' && value.claim.trim();
-  const link = value.link === undefined || value.link === null || value.link === '' ? null : value.link;
-  if (link !== null && (typeof link !== 'string' || validHttpUrl(link) === null)) return false;
-  return Boolean(claim || link);
 }
 
 export function assertContractOutput(bot, output) {
