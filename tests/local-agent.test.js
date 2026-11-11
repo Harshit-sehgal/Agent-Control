@@ -82,6 +82,7 @@ test('it runs agent.mjs with a browser and any public site, restarts after a cra
   assert.equal(env.AGENT_CONFIG, handle.configPath);
   assert.equal(env.AGENT_BROWSER, '1');
   assert.equal(env.AGENT_PARENT_PID, String(process.pid), 'the agent stops by itself when the server is gone');
+  assert.equal(env.AGENT_POLL_MS, '2000', 'on loopback an Allow is picked up in seconds, not after a 15s poll');
   assert.equal(env.AGENT_BROWSER_ALLOWLIST, '*', 'every page still waits for the owner\'s ask; the egress guard still refuses private addresses');
   spawned[0].child.emit('exit', 1, null);
   await new Promise(resolve => setTimeout(resolve, 30));
@@ -96,8 +97,38 @@ test('an operator\'s own browser settings win over the defaults', async () => {
   const {store, dataFile} = await harness();
   const spawned = [];
   const spawn = (cmd, args, opts) => { spawned.push(opts.env); return new FakeChild(); };
-  const handle = startLocalAgent(store, {dataFile, server: 'http://127.0.0.1:4173', env: {AGENT_BROWSER: '0', AGENT_BROWSER_ALLOWLIST: 'docs.example.com'}, spawn, log: () => {}});
+  const handle = startLocalAgent(store, {dataFile, server: 'http://127.0.0.1:4173', env: {AGENT_BROWSER: '0', AGENT_BROWSER_ALLOWLIST: 'docs.example.com', AGENT_POLL_MS: '9000'}, spawn, log: () => {}});
   assert.equal(spawned[0].AGENT_BROWSER, '0');
   assert.equal(spawned[0].AGENT_BROWSER_ALLOWLIST, 'docs.example.com');
+  assert.equal(spawned[0].AGENT_POLL_MS, '9000');
   await handle.stop();
+});
+
+test('the owner adds a stdio MCP server to this computer from the app: it lands in the 0600 config and the agent restarts', async () => {
+  const {addLocalMcpServer, removeLocalMcpServer, localMcpServers} = await import('../src/local-agent.js');
+  const {store, dataFile} = await harness();
+  const spawned = [];
+  const spawn = () => { const child = new FakeChild(); spawned.push(child); return child; };
+  const handle = startLocalAgent(store, {dataFile, server: 'http://127.0.0.1:4173', env: {}, spawn, log: () => {}, restartMs: 5});
+  const names = addLocalMcpServer({dataFile, name: 'notes', command: 'npx -y "@scope/files server" /home/me/notes'});
+  assert.deepEqual(names, ['notes']);
+  const config = JSON.parse(await fs.readFile(handle.configPath, 'utf8'));
+  assert.deepEqual(config.mcpServers.notes, {command: 'npx', args: ['-y', '@scope/files server', '/home/me/notes']});
+  assert.ok(config.secret, 'the pairing is kept');
+  assert.equal((await fs.stat(handle.configPath)).mode & 0o777, 0o600);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(spawned[0].killed, true, 'the running agent is stopped so it reads the new server');
+  assert.equal(spawned.length, 2, 'and started again');
+  assert.deepEqual(localMcpServers({dataFile}), ['notes']);
+  assert.deepEqual(removeLocalMcpServer({dataFile, name: 'notes'}), []);
+  assert.throws(() => addLocalMcpServer({dataFile, name: '../x', command: 'ls'}), /letters, digits/);
+  assert.throws(() => addLocalMcpServer({dataFile, name: 'x', command: '  '}), /command/i);
+  assert.throws(() => addLocalMcpServer({dataFile, name: 'x', command: 'a\nb'}), /one line/);
+  await handle.stop();
+});
+
+test('with no agent on this computer there is nothing to add a server to', async () => {
+  const {addLocalMcpServer} = await import('../src/local-agent.js');
+  const {dataFile} = await harness();
+  assert.throws(() => addLocalMcpServer({dataFile, name: 'notes', command: 'ls'}), /not running on this computer/);
 });

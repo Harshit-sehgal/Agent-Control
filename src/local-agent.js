@@ -12,7 +12,7 @@
  * not paired again behind their back.
  *
  * The child gets the shared browser (`AGENT_BROWSER=1`) and any public site (`AGENT_BROWSER_ALLOWLIST=*`)
- * unless the operator set either. That allowlist adds nothing on a device the server itself starts, and
+ * unless the operator set either, and polls every 2s (`AGENT_POLL_MS`) so an Allow is picked up at once. That allowlist adds nothing on a device the server itself starts, and
  * every page still waits for the owner's ask, while the agent's egress guard still refuses private and
  * local addresses. */
 import fs from 'node:fs';
@@ -33,6 +33,9 @@ export function localAgentWanted(env = process.env) {
   if (flag === '1') return true;
   return LOOPBACK.has(String(env.HOST || '127.0.0.1').trim().toLowerCase());
 }
+
+/** The agent this server started, if any: the stdio MCP routes restart it after a config change. */
+let running = null;
 
 const configPathFor = dataFile => path.join(path.dirname(path.resolve(dataFile)), 'local-agent.json');
 function readConfig(file) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } }
@@ -66,8 +69,8 @@ export function startLocalAgent(store, {dataFile, server, env = process.env, spa
   try { paired = ensureLocalAgent(store, {dataFile, server}); }
   catch (error) { log.warn?.(`local agent: could not pair this computer: ${error.message}`); return null; }
   if (!paired) { log.log?.('Local agent: revoked in Settings, so not started. Pair a device under Settings → Local agents to use a browser.'); return null; }
-  const childEnv = {...env, AGENT_CONFIG: paired.configPath, AGENT_PARENT_PID: String(process.pid), AGENT_BROWSER: env.AGENT_BROWSER ?? '1', AGENT_BROWSER_ALLOWLIST: env.AGENT_BROWSER_ALLOWLIST || '*'};
-  let child = null, stopped = false, timer = null, wait = restartMs;
+  const childEnv = {...env, AGENT_CONFIG: paired.configPath, AGENT_PARENT_PID: String(process.pid), AGENT_BROWSER: env.AGENT_BROWSER ?? '1', AGENT_BROWSER_ALLOWLIST: env.AGENT_BROWSER_ALLOWLIST || '*', AGENT_POLL_MS: env.AGENT_POLL_MS || '2000'};
+  let child = null, stopped = false, timer = null, wait = restartMs, asked = false;
   const relay = (stream, write) => stream?.on?.('data', chunk => { for (const line of String(chunk).split('\n')) if (line.trim()) write(`[agent] ${line}`); });
   const launch = () => {
     timer = null;
@@ -81,20 +84,73 @@ export function startLocalAgent(store, {dataFile, server, env = process.env, spa
       child = null;
       if (stopped) return;
       // A run that lasted a while resets the back-off; one that dies at once waits longer each time, up to a minute.
+      if (asked) { asked = false; timer = setTimeout(launch, 0); return; }
       wait = Date.now() - started > 60_000 ? restartMs : Math.min(wait * 2, 60_000);
       log.warn?.(`local agent: stopped (${code ?? 'signal'}); starting it again in ${Math.round(wait / 1000) || 1}s.`);
       timer = setTimeout(launch, wait);
     });
   };
   launch();
-  return {
+  const handle = {
     ...paired,
+    dataFile,
+    /** Stop the child so it starts again and reads its config afresh. */
+    restart() { if (!child) return; asked = true; child.kill('SIGTERM'); },
     async stop() {
       stopped = true;
+      if (running === handle) running = null;
       if (timer) clearTimeout(timer);
-      const running = child;
-      if (!running) return;
-      await new Promise(resolve => { running.once?.('exit', resolve); running.kill('SIGTERM'); setTimeout(resolve, 3000).unref?.(); });
+      const live = child;
+      if (!live) return;
+      await new Promise(resolve => { live.once?.('exit', resolve); live.kill('SIGTERM'); setTimeout(resolve, 3000).unref?.(); });
     },
   };
+  running = handle;
+  return handle;
+}
+
+/* ---------- stdio MCP servers on this computer ----------
+ * A stdio MCP server's command lives only in the agent config of the machine that runs it
+ * (agent/mcp-stdio.mjs). On this computer the server writes that config, so the owner adds the command in
+ * Settings → Connectors instead of editing a file they never made. Only the owner may (the route checks):
+ * it runs a program on this computer. The command is split into words and started without a shell. */
+const SERVER_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
+
+function localConfig(dataFile) {
+  const file = configPathFor(dataFile), config = readConfig(file);
+  if (!config?.secret) throw Object.assign(new Error('The local agent is not running on this computer, so there is nowhere to add the server. Pair a device in Settings → Local agents and add it to that device\'s config.'), {status: 409});
+  return {file, config};
+}
+
+/** Words of a command line: quotes group, nothing is expanded. */
+export function commandWords(line) {
+  return [...String(line).matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)].map(m => m[1] ?? m[2] ?? m[3]);
+}
+
+/** The data file of the agent this server runs, or null: what the routes pass to the functions below. */
+export const runningAgentDataFile = () => running?.dataFile ?? null;
+
+export const localMcpServers = ({dataFile}) => Object.keys(localConfig(dataFile).config.mcpServers || {}).sort();
+
+/** Add or replace a server; the running agent restarts to read it. Returns the server names. */
+export function addLocalMcpServer({dataFile, name, command}) {
+  const label = String(name ?? '').trim(), line = String(command ?? '');
+  if (!SERVER_NAME.test(label)) throw Object.assign(new Error('Name the server with lowercase letters, digits and dashes (up to 40), like files.'), {status: 400});
+  if (/[\r\n]/.test(line)) throw Object.assign(new Error('Give the command on one line.'), {status: 400});
+  const words = commandWords(line.trim());
+  if (!words.length || line.length > 1000) throw Object.assign(new Error('Give the command that starts the server, like npx -y some-mcp-server.'), {status: 400});
+  const {file, config} = localConfig(dataFile);
+  const [cmd, ...args] = words;
+  writeConfig(file, {...config, mcpServers: {...(config.mcpServers || {}), [label]: {command: cmd, args}}});
+  if (running?.configPath === file) running.restart();
+  return localMcpServers({dataFile});
+}
+
+export function removeLocalMcpServer({dataFile, name}) {
+  const {file, config} = localConfig(dataFile);
+  const servers = {...(config.mcpServers || {})};
+  delete servers[String(name ?? '')];
+  writeConfig(file, {...config, mcpServers: servers});
+  if (running?.configPath === file) running.restart();
+  return localMcpServers({dataFile});
 }

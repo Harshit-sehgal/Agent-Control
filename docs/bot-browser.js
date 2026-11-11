@@ -20,10 +20,10 @@
  * Posting stays human: interaction (click, type) is refused on X and Twitter
  * hosts, so no bot can press Post there. Reading those pages is allowed.
  */
-import {cleanText, validHttpUrl} from './core.js?v=028bca98b3';
-import {fail} from './errors.js?v=028bca98b3';
-import {decide, createAsk, scopeOf} from './asks.js?v=028bca98b3';
-import {controlFence} from './reply-blocks.js?v=028bca98b3';
+import {cleanText, validHttpUrl} from './core.js?v=91b9e97fa2';
+import {fail} from './errors.js?v=91b9e97fa2';
+import {decide, createAsk, scopeOf} from './asks.js?v=91b9e97fa2';
+import {controlFence} from './reply-blocks.js?v=91b9e97fa2';
 
 export const BROWSER_PERMISSION = 'browser.use';
 export const MAX_REQUESTS_PER_REPLY = 2;

@@ -133,7 +133,7 @@ async function runOneBotInner(store, {botId, input, page = '', browserDepth = 0}
     s.runs.unshift(run); s.runs = s.runs.slice(0, 100);
     // The bot itself may be gone (removed mid-turn). The run record still
     // belongs in history; only the chat append is skipped.
-    try { chats.addChatMessages(s, bot.id, [...lines, {id: run.id, role: 'bot', text: output, mode: 'ai', at: run.at}, ...(turn.after || []), ...browsed.lines], {trusted: true}); } catch { /* Conversation removed. */ }
+    try { chats.addChatMessages(s, bot.id, [...lines, {id: run.id, role: 'bot', text: output, mode: 'ai', at: run.at}, ...(turn.after || []).map(line => ({...line, at: new Date().toISOString()})), ...browsed.lines], {trusted: true}); } catch { /* Conversation removed. */ }
     for (const ask of browsed.asks) addAskCards(s, ask, bot);
     activity(s, 'run', `Completed ${bot.name} task.`, {runId: run.id}); return run;
   });

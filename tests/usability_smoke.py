@@ -1478,7 +1478,7 @@ async def connectors_add_and_delete_mcp(page, base):
     await expect(page.locator('#toast')).to_contain_text('Notes is ready')
     assert len(server.sent('POST', '/api/connectors/notes/refresh')) == 1
     # A server that runs on the agent is only a name: no address, no headers.
-    await form.locator('label', has_text='On my agent').click()
+    await form.locator('label', has_text='On my computer').click()
     await expect(form.locator('input[name="url"]')).to_be_hidden()
     await expect(form.locator('input[name="agentServer"]')).to_be_visible()
     await form.locator('input[name="name"]').fill('Files')

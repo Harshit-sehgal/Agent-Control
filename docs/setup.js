@@ -20,9 +20,10 @@
  *   or reach a route the owner could not.
  *
  * Pure and browser-safe: the server reads replies with it and the UI paints the card from it. */
-import {cleanText} from './core.js?v=028bca98b3';
-import {controlFence} from './reply-blocks.js?v=028bca98b3';
-import {companyBots, primaryOf} from './company.js?v=028bca98b3';
+import {cleanText} from './core.js?v=91b9e97fa2';
+import {controlFence} from './reply-blocks.js?v=91b9e97fa2';
+import {companyBots, primaryOf} from './company.js?v=91b9e97fa2';
+import {GRANT_LABELS, askText, pendingAsks} from './asks.js?v=91b9e97fa2';
 
 export const SETUP_ACTIONS = ['model', 'job', 'open'];
 /** Settings pages a bot may point to, by the word it uses, and the section key and title the app uses. */
@@ -166,18 +167,27 @@ export function workspaceBrief(state, {agents = [], connectors = []} = {}) {
   const computer = live.length
     ? live.map(a => `${a.name}: online${(a.permissions || []).includes('browser.action') ? ', opens web pages' : ''}${a.cli ? `, claude ${CLI_WORDS[a.cli.claude] || 'unknown'}, codex ${CLI_WORDS[a.cli.codex] || 'unknown'}` : ''}`).join('; ')
     : agents.length ? 'paired but not running right now' : 'no computer connected';
+  const named = id => companyBots(state).find(b => b.id === id)?.name;
+  const rules = (state?.grants || []).filter(g => named(g.botId)).slice(0, 20)
+    .map(g => `${named(g.botId)}: ${GRANT_LABELS[g.choice] || g.choice} ${g.action} ${g.scope}`);
+  const waiting = pendingAsks(state || {}).slice(0, 10).map(a => askText(a, named(a.botId) || 'A bot'));
+  const threads = (state?.groups || []).filter(g => g?.settings?.kind === 'thread').slice(-10).map(g => g.name);
   return {
     you: primaryOf(state) ? `You are ${primaryOf(state).name}, the primary bot. You know how this app works and you set it up for the owner, so they never have to learn the settings.` : undefined,
     models: models.length ? models : 'none connected yet',
     defaultModel: ai.defaultProviderId ? `${label(ai.defaultProviderId) || 'unknown'}${ai.defaultModel ? ` · ${ai.defaultModel}` : ''}` : 'none',
     bots,
     computer,
+    // Saved answers, what waits on the owner and the open threads: what Atlas needs to say where things stand.
+    rules: rules.length ? rules : 'none',
+    waitingOnOwner: waiting.length ? waiting : 'nothing',
+    threads: threads.length ? threads : 'none',
     connectors: connectors.length ? connectors.map(c => `${c.name}${c.status && c.status !== 'ready' ? ` (${c.status})` : ''}`) : 'none',
     facts: [
       'A bot opens a web page by asking with the browser block; the owner answers Decline, Allow or Always allow. Saved answers are in Settings → Permissions.',
       'This computer runs the browser and the claude and codex sign-in by itself; there is nothing to pair on it.',
       'Models and keys are added only by the owner, in Settings → Models and keys. Never ask for a key in chat; use the setup block to open that page.',
-      'Gmail, Google Drive and MCP servers are connected in Settings → Connectors.',
+      'Gmail, Google Drive and MCP servers are connected in Settings → Connectors. An MCP server that runs on this computer is added there under On my computer, with the command that starts it; the owner types it, never you.',
       'When a run fails because a model is down or out of quota, propose another connected model with the setup block.',
     ],
   };

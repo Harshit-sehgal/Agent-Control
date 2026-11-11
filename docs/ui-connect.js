@@ -7,10 +7,10 @@
  *
  * Secrets: the Google client secret and an MCP address or header are typed here and sent once. The server never
  * answers with one, so nothing on this page can show or log one. */
-import {esc, icon, btn, note, tag, field, textInput} from './ui-kit.js?v=028bca98b3';
-import {api, sync} from './ui-store.js?v=028bca98b3';
-import {toast, confirmSheet} from './ui-dialogs.js?v=028bca98b3';
-import {mcpRows, googleCard, mcpDraft, statusOf} from './ui-connect-model.js?v=028bca98b3';
+import {esc, icon, btn, note, tag, field, textInput} from './ui-kit.js?v=91b9e97fa2';
+import {api, sync} from './ui-store.js?v=91b9e97fa2';
+import {toast, confirmSheet} from './ui-dialogs.js?v=91b9e97fa2';
+import {mcpRows, googleCard, mcpDraft, statusOf} from './ui-connect-model.js?v=91b9e97fa2';
 
 const GOOGLE_START = '/api/connectors/google/start';
 
@@ -82,14 +82,15 @@ const addForm = () => `<section class="st-g"><h4 class="st-h">Add an MCP server<
   <fieldset class="cn-via"><legend class="field-label">Where it runs</legend>
     <div class="st-seg" role="radiogroup" aria-label="Where it runs">
       <label><input type="radio" name="via" value="http" checked><span>Web address</span></label>
-      <label><input type="radio" name="via" value="agent"><span>On my agent</span></label>
+      <label><input type="radio" name="via" value="agent"><span>On my computer</span></label>
     </div></fieldset>
   <div class="cn-if-http">
     ${field('Address', textInput('url', {placeholder: 'https://notes.example.org/mcp', autocomplete: 'off', spellcheck: 'false', inputmode: 'url'}), 'Saved encrypted. Only the host is shown afterwards.')}
     ${field('Headers, one per line (optional)', '<textarea class="input" name="headers" rows="2" placeholder="Authorization: Bearer ..." autocomplete="off" spellcheck="false"></textarea>', 'Stored encrypted, never shown again.')}
   </div>
   <div class="cn-if-agent">
-    ${field('Server name on your agent', textInput('agentServer', {placeholder: 'files', autocomplete: 'off', spellcheck: 'false', maxlength: 40}), 'A server your paired agent already runs on its own machine. The command stays there; only the name travels.')}
+    ${field('Command that starts it on this computer', textInput('command', {placeholder: 'npx -y @modelcontextprotocol/server-filesystem ~/notes', autocomplete: 'off', spellcheck: 'false', maxlength: 1000}), 'Runs on the computer this app runs on, without a shell. Only the owner can add one.')}
+    ${field('Or the name it already has on a paired device', textInput('agentServer', {placeholder: 'files', autocomplete: 'off', spellcheck: 'false', maxlength: 40}), 'For a server set up in that device\'s own agent config. Only the name travels.')}
   </div>
   <div class="cn-acts">${btn('Add server', null, {kind: 'primary', type: 'submit'})}</div>
   <p class="cn-testing">The server is reached first, so a typo saves nothing. Adding one on your agent can take up to a minute.</p>
@@ -142,6 +143,7 @@ export const connectForms = {
     const submit = form.querySelector('[type=submit] span'), label = submit?.textContent;
     if (submit) submit.textContent = 'Reaching it…';
     try {
+      if (draft.local) await api('/api/agents/local/mcp', 'POST', draft.local);
       const made = await api('/api/connectors', 'POST', draft.body);
       form.reset();
       const n = (made?.actions || []).length;

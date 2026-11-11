@@ -12,6 +12,7 @@ import {resumeBrowserRun} from './coordination.js';
 import {DEFAULT_WORKSPACE, ROLES, clearCookie} from './auth.js';
 import {fail} from './http.js';
 import {reply} from './router.js';
+import {runningAgentDataFile, localMcpServers, addLocalMcpServer, removeLocalMcpServer} from './local-agent.js';
 
 /** The rows a removed account owns in the *workspace* database, cleared in or
  * before the caller's own transaction. The account itself lives in the primary
@@ -119,6 +120,26 @@ export function accountRoutes(router, {auth, workspaces}) {
     });
     await c.store.update(s => activity(s, 'agent', 'Updated local agent permissions.', {agentId: id}));
     return result;
+  });
+  // stdio MCP servers on the agent this server runs on its own computer. Adding one runs a program here,
+  // so only an owner of the first workspace (whose agent it is) may, and the command never reaches the database.
+  const thisComputer = c => {
+    if (c.actor.workspaceId !== DEFAULT_WORKSPACE) fail('This computer belongs to the first workspace.', 403);
+    const dataFile = runningAgentDataFile();
+    if (!dataFile) fail('The local agent is not running on this computer. Pair a device in Settings → Local agents and add the server to its config.', 409);
+    return dataFile;
+  };
+  router.add('GET', '/api/agents/local/mcp', 'owner', c => ({servers: localMcpServers({dataFile: thisComputer(c)})}));
+  router.add('POST', '/api/agents/local/mcp', 'owner', async c => {
+    const b = await c.body();
+    const servers = addLocalMcpServer({dataFile: thisComputer(c), name: b?.name, command: b?.command});
+    await c.store.update(s => activity(s, 'agent', `Added the MCP server "${cleanText(b?.name, 40)}" to this computer.`));
+    return reply(201, {servers});
+  });
+  router.add('DELETE', '/api/agents/local/mcp/:name', 'owner', async c => {
+    const servers = removeLocalMcpServer({dataFile: thisComputer(c), name: c.params.name});
+    await c.store.update(s => activity(s, 'agent', `Removed the MCP server "${cleanText(c.params.name, 40)}" from this computer.`));
+    return {servers};
   });
   router.add('DELETE', '/api/agents/:id', 'admin', async c => {
     const browserTasks = c.store.all(

@@ -91,3 +91,20 @@ test('the primary bot is told the models, each bot\'s model, this computer and h
   assert.ok(!JSON.stringify(brief).includes('secret'), 'no key or secret field is ever copied');
   assert.equal(workspaceBrief({}, {}).computer, 'no computer connected');
 });
+
+test('the brief also carries the saved rules, what waits on the owner and the open threads', () => {
+  const withMore = {
+    ...state,
+    groups: [...state.groups, {id: 'th1', name: 'Sam reply', bots: [], settings: {kind: 'thread'}}],
+    grants: [{botId: 'rep', action: 'browser.use', scope: 'https://example.org', choice: 'always'}, {botId: 'gone', action: 'browser.use', scope: 'x', choice: 'deny'}],
+    asks: [{id: 'a', botId: 'atlas', status: 'pending', action: 'browser.use', target: 'example.com'}, {id: 'b', status: 'answered'}],
+  };
+  const brief = workspaceBrief(withMore, {});
+  assert.deepEqual(brief.rules, ['Replier: Always allow browser.use https://example.org']);
+  assert.deepEqual(brief.waitingOnOwner, ['Atlas wants to open example.com.']);
+  assert.deepEqual(brief.threads, ['Sam reply']);
+  assert.ok(brief.facts.some(f => /MCP server.*On my computer/.test(f)));
+  const empty = workspaceBrief({}, {});
+  assert.equal(empty.rules, 'none');
+  assert.equal(empty.waitingOnOwner, 'nothing');
+});

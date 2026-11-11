@@ -387,7 +387,8 @@ async function runGroupInner(store,id,executor){
         // reads in the order the work happened.
         for(const line of reply.lines)say(s,live,{...line,runId:id});
         say(s,live,{...said,mode:'ai'});
-        for(const line of reply.after||[])say(s,live,{...line,runId:id});
+        // Stamped now: a card made during the turn would otherwise sort above the reply it follows.
+        for(const line of reply.after||[])say(s,live,{...line,runId:id,at:stamp()});
         for(const line of browsed.lines)say(s,live,line);
         for(const line of conn.lines)say(s,live,line);
         for(const a of browsed.asks)addAskCards(s,a,bot);

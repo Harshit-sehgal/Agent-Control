@@ -69,7 +69,8 @@ the first start it pairs "This computer" with every agent permission, keeps the
 secret in `local-agent.json` beside the database (mode 0600), and runs
 `agent/agent.mjs run` as a child process. The child gets the shared browser
 (`AGENT_BROWSER=1`) and any public site (`AGENT_BROWSER_ALLOWLIST=*`) unless you
-set either yourself. Every page still waits for your ask card, and the agent
+set either yourself, and polls every 2 seconds (`AGENT_POLL_MS`) so an Allow is
+picked up at once. Every page still waits for your ask card, and the agent
 still refuses private and local addresses. It restarts after a crash, stops with
 the server, and stops by itself if the server is killed.
 
@@ -77,6 +78,11 @@ the server, and stops by itself if the server is killed.
   listens on other interfaces too.
 - Revoking "This computer" in Settings → Local agents is respected: it is not
   paired again on the next start. Delete `local-agent.json` to pair it afresh.
+- A stdio MCP server on this computer is added in the app: Settings →
+  Connectors → On my computer, with the command that starts it (split into
+  words and run without a shell). The server writes it to `local-agent.json`
+  and restarts the agent; the command never enters the database. Only an
+  owner of the first workspace may add one (`POST /api/agents/local/mcp`).
 - A server on a shared machine or in a container does not start one unasked;
   pair a device there as below.
 

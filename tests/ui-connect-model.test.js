@@ -275,3 +275,13 @@ test('a computer says Idle, or what is waiting', () => {
   assert.equal(agentWorkLine({queued: 2, running: 0, failed: 1}), '2 queued · 1 failed');
   assert.equal(agentWorkLine({queued: -3, running: 'x', failed: 0}), 'Idle');
 });
+
+test('a command for this computer starts the server there first, under a name made from the connector\'s', async () => {
+  const {mcpDraft} = await import('../shared/ui-connect-model.js');
+  const made = mcpDraft({name: 'My Notes', via: 'agent', command: 'npx -y notes-mcp ~/notes'});
+  assert.deepEqual(made, {ok: true, body: {kind: 'mcp', name: 'My Notes', agentServer: 'my-notes'}, local: {name: 'my-notes', command: 'npx -y notes-mcp ~/notes'}});
+  // A named server the agent already runs needs no command; a name given with a command is used as is.
+  assert.equal(mcpDraft({name: 'Files', via: 'agent', agentServer: 'files'}).local, undefined);
+  assert.equal(mcpDraft({name: 'Files', via: 'agent', agentServer: 'fs', command: 'fs-mcp'}).local.name, 'fs');
+  assert.match(mcpDraft({name: 'Files', via: 'agent', agentServer: 'Big_Name', command: 'x'}).error, /lowercase/);
+});

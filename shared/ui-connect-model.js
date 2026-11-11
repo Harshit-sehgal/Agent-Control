@@ -99,8 +99,16 @@ export function mcpDraft(values = {}) {
   if (!name) return {ok: false, error: 'Give the server a name.'};
   if (name.length > 60) return {ok: false, error: 'Keep the name to 60 characters.'};
   if (values.via === 'agent') {
-    const agentServer = String(values.agentServer ?? '').trim();
-    if (!agentServer) return {ok: false, error: 'Type the name the server has on your agent.'};
+    const command = String(values.command ?? '').trim();
+    // With a command, the server is started on this computer first (POST /api/agents/local/mcp), under a name
+    // made from the connector's when none is typed.
+    const typed = String(values.agentServer ?? '').trim();
+    const agentServer = typed || (command ? name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) : '');
+    if (!agentServer) return {ok: false, error: 'Type the name the server has on your agent, or the command that starts it on this computer.'};
+    if (command) {
+      if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(agentServer)) return {ok: false, error: 'On this computer the server name uses lowercase letters, digits and dashes only.'};
+      return {ok: true, body: {kind: 'mcp', name, agentServer}, local: {name: agentServer, command}};
+    }
     if (!/^[A-Za-z0-9._-]{1,40}$/.test(agentServer)) return {ok: false, error: 'The agent server name uses letters, digits and . _ - only.'};
     return {ok: true, body: {kind: 'mcp', name, agentServer}};
   }

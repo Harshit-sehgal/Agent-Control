@@ -98,6 +98,10 @@ const PUBLIC_WITH_PARAM = [];
 
 /** Least role for the routes where "who may do this" is the whole point. */
 const LEAST_ROLE = {
+  // Adding a stdio MCP server runs a program on the server's own computer: the owner's call alone.
+  'GET /api/agents/local/mcp': 'owner',
+  'POST /api/agents/local/mcp': 'owner',
+  'DELETE /api/agents/local/mcp/:name': 'owner',
   'POST /api/retention/prune': 'admin',
   'PATCH /api/retention': 'admin',
   // Asks and grants are the owner's call: a member or viewer cannot answer a bot's ask or widen what it may do.
