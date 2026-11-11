@@ -41,7 +41,7 @@ import {reportResult, skipExpired} from './report-result.mjs';
 import {hostAllowed, hostOf, parseAllowlist} from '../shared/bot-browser.js';
 import {resolvePublicAddress, pinnedRequest} from './net-guard.mjs';
 import {findBrowser} from './browser.mjs';
-import {readableHtml} from './page-fetch.mjs';
+import {readableHtml, turnedAway, PLAIN_AGENT} from './page-fetch.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG = process.env.AGENT_CONFIG ? path.resolve(process.env.AGENT_CONFIG) : path.join(HERE, 'agent.config.json');
@@ -171,16 +171,17 @@ async function execute(task, config) {
       throw new Error(`Refusing to read ${hostOf(target) || target}: it is not in AGENT_BROWSER_ALLOWLIST. Only explicitly allowed pages are read.`);
     }
     // A real browser when this computer has one. Without Chrome, Chromium or Edge the page is still read, by a plain fetch.
-    if (process.env.AGENT_BROWSER === '1' && findBrowser()) return runBrowserTask(task, {shared: shared(), allow});
-    // The fetch fallback must not become a second way onto the local network: it
-    // is vetted like http.check and pinned to the vetted address, and redirects
-    // are reported rather than followed.
-    const {address} = await resolvePublicAddress(target);
-    const res = await pinnedRequest(target, {address, timeoutMs: 15000, maxBytes: 2_000_000});
-    const page = readableHtml(res.body, target);
-    const moved = res.status >= 300 && res.status < 400 && res.headers?.location;
-    return {url: target, finalUrl: target, httpStatus: res.status, title: page.title, excerpt: page.text.slice(0, 600), text: moved ? `This page moved to ${new URL(res.headers.location, target).href}. Open that address instead.` : page.text,
-      links: page.links, elements: [], elementCount: 0, engine: 'fetch', capturedAt: new Date().toISOString()};
+    if (process.env.AGENT_BROWSER === '1' && findBrowser()) {
+      const seen = await runBrowserTask(task, {shared: shared(), allow});
+      // A site that turns the headless browser away (Wikimedia's "Too many requests") is read once more by a
+      // plain request that names itself; a plain read only reads, so a page with steps keeps the browser's answer.
+      if (!task.payload?.steps?.length && turnedAway(seen)) {
+        const plain = await readPlain(target).catch(() => null);
+        if (plain?.text && !turnedAway(plain)) return {...plain, readBy: 'plain'};
+      }
+      return seen;
+    }
+    return readPlain(target);
   }
   if (task.kind === 'browser.action') return runBrowserTask(task, {shared: shared(), allow: parseAllowlist(process.env.AGENT_BROWSER_ALLOWLIST)});
   if (task.kind === 'model.run') {
@@ -192,6 +193,17 @@ async function execute(task, config) {
   // A stdio MCP server named in this machine's config (`mcpServers`); the task never carries a command.
   if (task.kind === 'mcp.call') return runMcpTask(task.payload, config.mcpServers);
   throw new Error(`Unknown task kind "${task.kind}".`);
+}
+
+/** Read a page without a browser: vetted like http.check and pinned to the vetted address (so it is never a way
+ * onto the local network), redirects reported rather than followed, and named honestly (PLAIN_AGENT). */
+async function readPlain(target) {
+  const {address} = await resolvePublicAddress(target);
+  const res = await pinnedRequest(target, {address, timeoutMs: 15000, maxBytes: 2_000_000, headers: {'user-agent': PLAIN_AGENT, accept: 'text/html,*/*;q=0.8'}});
+  const page = readableHtml(res.body, target);
+  const moved = res.status >= 300 && res.status < 400 && res.headers?.location;
+  return {url: target, finalUrl: target, httpStatus: res.status, title: page.title, excerpt: page.text.slice(0, 600), text: moved ? `This page moved to ${new URL(res.headers.location, target).href}. Open that address instead.` : page.text,
+    links: page.links, elements: [], elementCount: 0, engine: 'fetch', capturedAt: new Date().toISOString()};
 }
 
 let stopping = false;

@@ -22,7 +22,9 @@ const words = html => decode(html.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ')
 export function readableHtml(html, url) {
   const source = String(html || '');
   const title = words(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(source)?.[1] || '') || null;
-  const clean = source.replace(/<(script|style|noscript|svg|template)\b[\s\S]*?<\/\1>/gi, ' ').replace(/<!--[\s\S]*?-->/g, ' ');
+  // Menus, headers, footers and sidebars are not the page's words; leaving them out keeps the text budget for the article.
+  const clean = source.replace(/<(script|style|noscript|svg|template|nav|header|footer|aside)\b[\s\S]*?<\/\1>/gi, ' ').replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<(div|ul)\b[^>]*\b(?:role="navigation"|class="[^"]*\b(?:vector-menu|interlanguage|navbox|mw-jump-link)\b[^"]*")[^>]*>[\s\S]*?<\/\1>/gi, ' ');
   const main = /<(main|article)\b[^>]*>([\s\S]*?)<\/\1>/i.exec(clean)?.[2];
   const body = /<body\b[^>]*>([\s\S]*?)(?:<\/body>|$)/i.exec(clean)?.[1] ?? clean;
   const chosen = main && words(main).length > 400 ? main : body;
@@ -39,4 +41,17 @@ export function readableHtml(html, url) {
     if (links.length >= MAX_LINKS) break;
   }
   return {title, text, links};
+}
+
+/** How a plain read names itself. Sites that turn automated browsers away
+ * (Wikimedia among them) ask automated clients to say what they are. */
+export const PLAIN_AGENT = 'AgentControl/1.0 (personal assistant reading a page for its owner; local-first)';
+
+/** A page that is the site turning this browser away, not the page asked for. */
+const AWAY_TITLE = /^(?:wikimedia error|access denied|403\b|forbidden|too many requests|429\b|request blocked|you have been blocked)/i;
+const AWAY_TEXT = /^(?:error\s+)?(?:429\s+)?too many requests\b/i;
+export function turnedAway(page) {
+  if (!page) return false;
+  const title = String(page.title || '').trim(), text = String(page.text || '').trim();
+  return AWAY_TITLE.test(title) || (!title && AWAY_TEXT.test(text)) || (/error$/i.test(title) && AWAY_TEXT.test(text));
 }

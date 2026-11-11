@@ -14,10 +14,26 @@ test('a fetched page becomes title, text and links, without scripts or styles', 
   assert.equal(page.title, 'Acme & Co careers');
   assert.match(page.text, /Open roles Frontend intern, stipend ₹30,000 a month\./);
   assert.doesNotMatch(page.text, /secret|color:red/);
+  assert.doesNotMatch(page.text, /Home/, 'menus are left out');
   assert.deepEqual(page.links, [{text: 'Apply for Frontend intern', url: 'https://acme.example/jobs/1'}, {text: 'Partner site link', url: 'https://other.example/x'}]);
 });
 
 test('the text is capped like the browser\'s', () => {
   const big = readableHtml(`<p>${'word '.repeat(30000)}</p>`, 'https://a.example/');
   assert.ok(big.text.length <= 60000);
+});
+
+test('a page that turned the browser away is recognised, a normal page is not', async () => {
+  const {turnedAway} = await import('../agent/page-fetch.mjs');
+  assert.ok(turnedAway({title: 'Wikimedia Error', text: 'Error Too many requests. Please email noc@wikimedia.org'}));
+  assert.ok(turnedAway({title: 'Access Denied', text: "You don't have permission to access this page."}));
+  assert.ok(turnedAway({title: null, text: '429 Too Many Requests'}));
+  assert.ok(!turnedAway({title: 'Large language model - Wikipedia', text: 'A large language model is ... too many requests to count'}));
+  assert.ok(!turnedAway(null));
+});
+
+test('the plain read names itself honestly', async () => {
+  const {PLAIN_AGENT} = await import('../agent/page-fetch.mjs');
+  assert.match(PLAIN_AGENT, /^AgentControl\/\d/);
+  assert.doesNotMatch(PLAIN_AGENT, /Mozilla|Chrome|Safari/);
 });
