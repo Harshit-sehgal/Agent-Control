@@ -39,8 +39,8 @@ test('the Models page shows each computer\'s sign-in once, on Local agents, and 
 
 test('Add a model is one card, and the default and subscription model fields are one picker', () => {
   assert.match(js, /aria-label="What to add"/);
-  assert.equal((js.match(/const modelPicker =/g) || []).length, 1);
-  assert.equal((js.match(/modelPicker\(/g) || []).length, 2, 'the subscription form and the default form both use it');
+  assert.equal((js.match(/modelSelect\(modelChoices\(/g) || []).length, 2, 'the subscription form and the default form both use the one dropdown');
+  assert.doesNotMatch(js, /btn\('Load models'/, 'the list loads by itself; Refresh models stays under the dots');
   assert.doesNotMatch(js, /field\('Default provider'|ai-default-provider-pick/, 'the default provider is chosen with Make default on its row');
 });
 

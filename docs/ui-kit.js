@@ -133,6 +133,9 @@ export const textInput = (name, {type = 'text', value = '', ...rest} = {}) => {
   const extra = Object.entries(rest).map(([k, v]) => (v === true ? ` ${k}` : ` ${k}="${esc(v)}"`)).join('');
   return `<input class="input" name="${esc(name)}" type="${esc(type)}" value="${esc(value)}"${extra}>`;
 };
+/** A model dropdown from `modelChoices` rows, and the box Other… opens (hidden and disabled until then, so it
+ * never posts by accident). The change handler `model-pick` shows it. */
+export const modelSelect = (rows, {label = 'Model'} = {}) => `<select class="input" name="model" data-action="model-pick" aria-label="${esc(label)}">${rows.map(r => `<option value="${esc(r.value)}"${r.selected ? ' selected' : ''}>${esc(r.label)}</option>`).join('')}</select><input class="input model-other" name="modelOther" type="text" placeholder="Type a model id" maxlength="120" autocomplete="off" spellcheck="false" aria-label="Model id" hidden disabled>`;
 export const field = (label, control, help = '') => `<label class="field"><span class="field-label">${esc(label)}</span>${control}${help ? `<small class="field-help">${esc(help)}</small>` : ''}</label>`;
 export const note = (text, tone = '') => `<p class="note ${tone}">${text}</p>`;
 export const empty = (title, text = '') => `<div class="empty"><strong>${esc(title)}</strong>${text ? `<span>${esc(text)}</span>` : ''}</div>`;

@@ -1406,7 +1406,8 @@ class Server:
             return await reply(self.provider_listing(made), 201)
         m = re.match(r'^/api/ai/providers/([a-z0-9-]+)/models$', path)
         if m and method == 'POST':
-            models = next(p for p in self.providers if p['id'] == m.group(1)).get('chatModels', [])
+            found = next(p for p in self.providers if p['id'] == m.group(1))
+            models = found.get('catalogue', found.get('chatModels', []))
             return await reply({'models': models, 'chatModels': models, 'allModels': models, 'labels': {}})
         m = re.match(r'^/api/ai/providers/([a-z0-9-]+)(/test)?$', path)
         if m and m.group(2):
@@ -1588,7 +1589,10 @@ async def subscription_provider_and_cli_status(page, base):
     await expect(body.locator('.st-note').first).to_have_text('Bring your own key, or use the Claude or ChatGPT plan you already pay for. Keys are stored encrypted and never shown again.')
     # There is no key field for a subscription, and the engine is a pill, not a select.
     form = page.locator('#cli-provider-form')
-    assert await form.locator('input[type="password"], input[name="apiKey"], input[name="baseUrl"], select').count() == 0
+    assert await form.locator('input[type="password"], input[name="apiKey"], input[name="baseUrl"]').count() == 0
+    # The model is a dropdown of the names the claude command knows, with Other… for anything else.
+    assert await form.locator('select[name="model"] option').evaluate_all('o => o.map(x => x.value)') == ['', 'opus', 'sonnet', 'haiku', '__other']
+    await expect(form.locator('input[name="modelOther"]')).to_be_hidden()
     await expect(form.locator('input[name="engine"][value="claude"]')).to_be_checked()
     await form.locator('input[name="label"]').fill('My Claude')
     await form.get_by_role('button', name='Add subscription').click()
@@ -1606,11 +1610,15 @@ async def subscription_provider_and_cli_status(page, base):
     # A model name rides along for the second engine; a bad one is refused before it leaves.
     await form.locator('input[name="label"]').fill('My ChatGPT')
     await form.locator('label', has_text='ChatGPT').click()
-    await form.locator('input[name="model"]').fill('--bad')
+    # ChatGPT's names follow the engine: Default and Other… only.
+    assert await form.locator('select[name="model"] option').evaluate_all('o => o.map(x => x.value)') == ['', '__other']
+    await form.locator('select[name="model"]').select_option('__other')
+    await expect(form.locator('input[name="modelOther"]')).to_be_visible()
+    await form.locator('input[name="modelOther"]').fill('--bad')
     await form.get_by_role('button', name='Add subscription').click()
     await expect(page.locator('#toast')).to_contain_text('model name is not valid')
     assert len(server.sent('POST', '/api/ai/providers')) == 1
-    await form.locator('input[name="model"]').fill('gpt-5')
+    await form.locator('input[name="modelOther"]').fill('gpt-5')
     await form.get_by_role('button', name='Add subscription').click()
     await expect(body.locator('.cn-mcp', has_text='My ChatGPT')).to_contain_text('ChatGPT subscription · gpt-5 · signed out on Laptop')
     assert 'apiKey' not in json.dumps(server.calls)
@@ -1647,11 +1655,10 @@ async def models_api_provider_menu_and_one_model_picker(page, base):
     # One model picker: the default form lists this provider's models in a datalist, and the subscription form has the same field.
     default = page.locator('#ai-default-form')
     await expect(default.locator('input[name="providerId"]')).to_have_value('p-9')
-    assert await default.locator('select').count() == 0, 'the default provider is chosen with Make default, not a second picker'
-    assert await page.locator('#ai-models option').evaluate_all('o => o.map(x => x.value)') == ['llama-3.3-70b', 'mixtral']
-    assert await default.locator('input[name="model"]').get_attribute('list') == 'ai-models'
-    assert await page.locator('#cli-provider-form input[name="model"]').get_attribute('list') == 'ai-cli-models'
-    await default.locator('input[name="model"]').fill('mixtral')
+    assert await default.locator('select[name="providerId"]').count() == 0, 'the default provider is chosen with Make default, not a second picker'
+    assert await default.locator('select[name="model"] option').evaluate_all('o => o.map(x => x.value)') == ['', 'llama-3.3-70b', 'mixtral', '__other']
+    await expect(default.get_by_role('button', name='Load models')).to_have_count(0)
+    await default.locator('select[name="model"]').select_option('mixtral')
     await default.get_by_role('button', name='Save').click()
     await expect(page.locator('#toast')).to_contain_text('Default model saved')
     assert server.sent('PATCH', '/api/ai') == [{'providerId': 'p-9', 'model': 'mixtral'}]
@@ -1668,6 +1675,25 @@ async def models_api_provider_menu_and_one_model_picker(page, base):
     await api_form.locator('summary').click()
     await expect(api_form.locator('select[name="protocol"]')).to_be_visible()
     await expect(api_form.locator('textarea[name="headers"]')).to_be_visible()
+
+
+async def model_list_loads_by_itself(page, base):
+    # A key provider the page has never read: its list arrives without a button, once.
+    groq = {'id': 'p-7', 'label': 'Groq', 'kind': 'api', 'engine': None, 'model': None, 'protocol': 'openai-chat', 'host': 'api.groq.com', 'modelCount': 0, 'catalogue': ['llama-3.3-70b', 'qwen-3']}
+    server = await install(page, providers=[groq], default_provider='p-7')
+    await open_app(page, base)
+    await open_settings(page, 'models')
+    picker = page.locator('#ai-default-form select[name="model"]')
+    await expect(picker.locator('option')).to_have_count(4)
+    assert await picker.locator('option').evaluate_all('o => o.map(x => x.value)') == ['', 'llama-3.3-70b', 'qwen-3', '__other']
+    assert len(server.sent('POST', '/api/ai/providers/p-7/models')) == 1
+    await expect(page.locator('#toast')).not_to_contain_text('model(s) available')
+    # Other… opens a box for any id, and that id is what is saved.
+    await picker.select_option('__other')
+    await page.locator('#ai-default-form input[name="modelOther"]').fill('llama-4-scout')
+    await page.locator('#ai-default-form').get_by_role('button', name='Save').click()
+    await expect(page.locator('#toast')).to_contain_text('Default model saved')
+    assert server.sent('PATCH', '/api/ai') == [{'providerId': 'p-7', 'model': 'llama-4-scout'}]
 
 
 async def phone_models_page_fits(page, base):
@@ -2110,6 +2136,7 @@ async def main():
             await h.scenario('connectors: ?google=connected toasts once, strips the address and opens Connectors; an error says why', google_return_toast_and_clean_address)
             await h.scenario('models: a subscription is a name and an engine with no key field, and its row says where it is signed in', subscription_provider_and_cli_status)
             await h.scenario('models: Add a model is one card with a choice, the dots hold Edit, Refresh and Delete, one model picker', models_api_provider_menu_and_one_model_picker)
+            await h.scenario('models: a provider\'s list loads by itself into the dropdown, and Other… takes any id', model_list_loads_by_itself)
             await h.scenario('agents: one page with each computer online or not, claude and codex sign-in, a switch per permission, Revoke asks first', agents_page_status_signin_and_switches)
             await h.scenario('agents: the pairing form is switches, the code shows once with the command to run', agents_page_pairing_form_and_code)
             await h.scenario('team: roles are pills, the owner has none, sessions are not on this page', team_roles_are_pills_and_sessions_are_not_here)

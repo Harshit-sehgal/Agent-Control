@@ -5,13 +5,13 @@
  *
  * The look is Settings and Connectors: a titled card (`.st-g`, `.cd`), rows with a switch or a small
  * button on the right, a segmented pill for a choice of few, and one primary action per card. */
-import {esc, icon, btn, field, note, empty, tag, fullDate, textInput, switchBtn} from './ui-kit.js';
+import {esc, icon, btn, field, note, empty, tag, fullDate, textInput, switchBtn, modelSelect} from './ui-kit.js';
 import {store, api, sync, isAdmin, isStaticDemo} from './ui-store.js';
 import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js';
 import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js';
 import {pushStatus, enablePush, disablePush} from './ui-push.js';
 import {connectorsPanel, loadConnectors, connectActions, connectForms} from './ui-connect.js';
-import {cliDraft, agentCliRows, agentPermissionRows, agentWorkLine, subscriptionLine, SIGN_IN_HINT} from './ui-connect-model.js';
+import {cliDraft, modelChoices, chosenModel, OTHER_MODEL, agentCliRows, agentPermissionRows, agentWorkLine, subscriptionLine, SIGN_IN_HINT} from './ui-connect-model.js';
 import {LOCAL_CLI_ENGINES, LOCAL_CLI_KIND} from './ai-presets.js';
 
 /** The pages Settings can load into its body. Only the keys are read (is this a page?). */
@@ -40,7 +40,7 @@ const panel = (...parts) => `<div class="ad-panel">${parts.filter(Boolean).join(
 /** A choice of few that acts at once (a role): the pills of Settings. */
 const seg = (label, items, action, data = {}) => `<span class="st-seg" role="group" aria-label="${esc(label)}">${items.map(([value, text, on]) => `<button type="button" data-action="${esc(action)}"${dataAttrs({...data, value})} aria-pressed="${on ? 'true' : 'false'}">${esc(text)}</button>`).join('')}</span>`;
 /** A choice of few inside a form: the same pills over radio buttons, so the form reads its value. */
-const radioSeg = (legend, name, options, checked) => `<fieldset class="cn-via"><legend class="field-label">${esc(legend)}</legend><div class="st-seg" role="radiogroup" aria-label="${esc(legend)}">${options.map(([value, text]) => `<label><input type="radio" name="${esc(name)}" value="${esc(value)}"${value === checked ? ' checked' : ''}><span>${esc(text)}</span></label>`).join('')}</div></fieldset>`;
+const radioSeg = (legend, name, options, checked, action = '') => `<fieldset class="cn-via"><legend class="field-label">${esc(legend)}</legend><div class="st-seg" role="radiogroup" aria-label="${esc(legend)}">${options.map(([value, text]) => `<label><input type="radio" name="${esc(name)}" value="${esc(value)}"${action ? ` data-action="${esc(action)}"` : ''}${value === checked ? ' checked' : ''}><span>${esc(text)}</span></label>`).join('')}</div></fieldset>`;
 const kebab = (action, label, data) => `<button type="button" class="rbtn small ad-more" data-action="${esc(action)}"${dataAttrs(data)} aria-haspopup="dialog" aria-label="${esc(label)}">${icon('dots', 18)}</button>`;
 const withCode = text => esc(text).replace(/`([^`]+)`/g, '<code>$1</code>');
 
@@ -227,10 +227,6 @@ function backupPanel() {
     + hint('A backup holds this workspace\'s data only; credentials and sessions never travel. Restoring replaces the workspace, so it asks first.');
 }
 
-/** Model ids offered by a picker. Bounded so a provider with a huge catalogue
- * (OpenRouter) does not bloat the page, and matched to the server's own cap so a
- * model the API sent is never silently unpickable. */
-const MODEL_LIMIT = 300;
 /** The row still reports the size of the whole catalogue, so the page keeps more
  * ids than it offers. The server sends at most 300 per provider. */
 const MODEL_CACHE = 300;
@@ -303,20 +299,6 @@ const presetLabel = preset => (preset.needsEndpoint ? `${preset.label} (enter yo
 const ENDPOINT_HINTS = {azure: 'https://NAME.openai.azure.com', custom: 'https://your-gateway.example/v1'};
 const BASE_PLACEHOLDER = 'https://api.openai.com/v1';
 const presetSelect = () => `<select class="input" name="preset" data-action="ai-preset"><option value="">Choose a provider…</option>${PROVIDER_PRESETS.map(p => `<option value="${esc(p.id)}">${esc(presetLabel(p))}</option>`).join('')}</select>`;
-/** A picker of model ids. The value stays the id so free text still works, and
- * `labels[id]` is what the list shows when the provider names its models. */
-const modelOptions = (models, labels = {}) => idList(models).slice(0, MODEL_LIMIT).map(id => {
-  const shown = String(labelMap(labels)[id] ?? '').trim();
-  return shown && shown !== id
-    ? `<option value="${esc(id)}" label="${esc(shown)}">${esc(shown)}</option>`
-    : `<option value="${esc(id)}"></option>`;
-}).join('');
-/** The datalist for a provider's chat-capable models, labelled when the provider
- * names them. The AI page and the per-bot override both offer this list. */
-export const providerModelOptions = p => {
-  const view = providerView(p || {});
-  return modelOptions(view.chatModels || [], view.labels);
-};
 /** Azure wants its api-version in the query string. The field is in both forms but
  * hidden (and disabled, so it never posts) unless the protocol needs it, so the
  * form does not grow for everyone else. */
@@ -380,16 +362,31 @@ function editProviderSheet(provider) {
   </form>`, {title: `Edit ${provider.label}`, sub: provider.host});
 }
 
-/** One model picker for the whole page: a field that lists the models it knows and still takes any id. */
-const modelPicker = (name, {value = '', placeholder = '', options = '', list = 'ai-models'} = {}) =>
-  `${textInput(name, {value, placeholder, list, autocomplete: 'off', spellcheck: 'false', maxlength: 120})}<datalist id="${esc(list)}">${options}</datalist>`;
+/** What "no model" means in each dropdown: a subscription leaves it to its command, a key to the provider. */
+const CLI_DEFAULT = 'Default (the CLI picks)', API_DEFAULT = 'The provider\'s default';
+const defaultLabelFor = provider => (provider?.kind === LOCAL_CLI_KIND ? CLI_DEFAULT : API_DEFAULT);
+/** Put new rows in a dropdown already on the page, keeping what was picked when it is still there. */
+export function refillModelSelect(select, rows) {
+  if (!select) return;
+  const keep = select.value;
+  select.innerHTML = rows.map(r => `<option value="${esc(r.value)}"${r.selected ? ' selected' : ''}>${esc(r.label)}</option>`).join('');
+  if (keep && keep !== OTHER_MODEL && rows.some(r => r.value === keep)) select.value = keep;
+  showOtherBox(select);
+}
+/** Other… opens a box for any id; any other row closes it. */
+function showOtherBox(select) {
+  const box = select?.parentElement?.querySelector('.model-other'); if (!box) return;
+  const open = select.value === OTHER_MODEL;
+  box.hidden = !open; box.disabled = !open;
+  if (open) box.focus();
+}
 
 const ENGINE_CHOICES = LOCAL_CLI_ENGINES.map(e => [e.id, e.label.replace(/ \(.*\)$/, '')]);
 /** Use the Claude or ChatGPT plan you already pay for: no key, the model runs in the CLI on a paired computer. */
 const subscriptionForm = () => `<form id="cli-provider-form" class="ad-form" autocomplete="off"${addKind === 'sub' ? '' : ' hidden'}>
-    ${radioSeg('Which one', 'engine', ENGINE_CHOICES, 'claude')}
+    ${radioSeg('Which one', 'engine', ENGINE_CHOICES, 'claude', 'cli-engine')}
     ${field('Name', textInput('label', {maxlength: 80, placeholder: 'My Claude'}), 'Optional.')}
-    ${field('Model', modelPicker('model', {placeholder: 'the CLI\'s own default', list: 'ai-cli-models'}), 'Optional. Leave empty to use whatever the CLI picks.')}
+    ${field('Model', modelSelect(modelChoices({provider: {kind: LOCAL_CLI_KIND, engine: 'claude'}, defaultLabel: CLI_DEFAULT})), 'Pick one, or Other… to type a name.')}
     <div class="cn-acts">${btn('Add subscription', null, {kind: 'primary', type: 'submit'})}</div>
     <p class="cn-testing">No key is stored. The model runs through the command-line tool on a paired computer that is signed in to your account.</p>
   </form>`;
@@ -434,8 +431,8 @@ function aiPanel(res) {
   const modelLabel = picked ? `Default model for ${picked.label}` : '';
   const defaults = picked ? `<form id="ai-default-form" class="ad-form">
     <input type="hidden" name="providerId" value="${esc(picked.id)}">
-    ${field(modelLabel, modelPicker('model', {value: res.defaultModel || '', placeholder: 'auto, gpt-4o-mini, llama-3.3-70b', options: providerModelOptions(picked)}), 'Pick one from the list, or type an id the provider accepts. Bots without a model of their own use it.')}
-    <div class="cn-acts">${btn('Save', null, {kind: 'primary', type: 'submit'})}${picked.kind === LOCAL_CLI_KIND ? '' : btn('Load models', 'ai-load-models', {small: true})}</div>
+    ${field(modelLabel, modelSelect(modelChoices({provider: picked, current: res.defaultModel || '', defaultLabel: defaultLabelFor(picked)})), 'Bots without a model of their own use it.')}
+    <div class="cn-acts">${btn('Save', null, {kind: 'primary', type: 'submit'})}</div>
   </form>` : '';
   const choose = `<div class="st-seg" role="group" aria-label="What to add">${[['sub', 'Subscription'], ['api', 'API key']].map(([key, text]) => `<button type="button" data-action="ai-add-kind" data-kind="${key}" aria-pressed="${key === addKind}">${text}</button>`).join('')}</div>`;
   const link = !isStaticDemo() && isAdmin()
@@ -450,6 +447,19 @@ function aiPanel(res) {
   );
 }
 
+/** Refill the Default model dropdown when the provider it is for has a fresh list. */
+function fillDefaultPicker(id) {
+  const form = document.getElementById('ai-default-form');
+  if (!form || form.elements.namedItem('providerId')?.value !== id) return;
+  const provider = providerView({...(listings.get(id) || {}), id, kind: 'api'});
+  refillModelSelect(form.elements.namedItem('model'), modelChoices({provider, current: form.elements.namedItem('model').value, defaultLabel: API_DEFAULT}));
+}
+/** A key provider whose list the page has never seen reads it by itself once the page is up: no button to press. */
+function autoLoadModels(provider) {
+  if (!provider || provider.kind === LOCAL_CLI_KIND || provider.chatModels?.length) return;
+  setTimeout(() => adminActions['ai-load-models']({dataset: {id: provider.id}, closest: () => null}, {reload: async () => {}}, {quiet: true}).catch(() => {}), 0);
+}
+
 /** Fetches what the page needs and returns its body HTML (no page header). Throws on API error. */
 export async function adminPage(kind) {
   if (kind === 'connectors') return connectorsPanel(await loadConnectors());
@@ -462,8 +472,11 @@ export async function adminPage(kind) {
     const full = await api('/api/ai/providers').catch(() => null);
     // Which paired computers have `claude` and `codex` signed in. A failure only hides that part.
     const agents = (await api('/api/agents').catch(() => null))?.agents || [];
-    if (full?.providers?.length) { full.providers.forEach(rememberListing); return aiPanel({...res, providers: full.providers, agents}); }
-    return aiPanel({...res, agents});
+    const view = full?.providers?.length ? {...res, providers: full.providers, agents} : {...res, agents};
+    if (full?.providers?.length) full.providers.forEach(rememberListing);
+    const providers = (view.providers || []).map(providerView);
+    autoLoadModels(providers.find(p => p.id === view.defaultProviderId) || providers[0]);
+    return aiPanel(view);
   }
   if (kind === 'team') return teamPanel(await api('/api/users'));
   if (kind === 'data') {
@@ -648,7 +661,7 @@ export const adminActions = {
       button.disabled = false;
     }
   },
-  'ai-load-models': async (button, ctx) => {
+  'ai-load-models': async (button, ctx, {quiet = false} = {}) => {
     // A row button names its own provider; the default form uses its select.
     const form = button.closest('form'), id = button.dataset.id || form?.querySelector('[name=providerId]')?.value;
     if (!id) { toast('Add a provider first.'); return; }
@@ -659,7 +672,7 @@ export const adminActions = {
       // The server keeps the failure on the provider, so show it where the row is.
       const message = String(error.message || 'Could not read the model list.');
       rememberListing({id, modelsError: message});
-      toast(message, true);
+      if (!quiet) toast(message, true);
       if (button.dataset.id) await ctx.reload();
       return;
     }
@@ -667,9 +680,8 @@ export const adminActions = {
     // one sends a single list, which the row still keeps in full.
     const models = (res.chatModels?.length ? res.chatModels : res.models) || [];
     rememberListing({id, models: res.models, chatModels: res.chatModels, allModels: res.allModels, labels: res.labels, protocol: res.protocol, modelsError: ''});
-    const list = form?.querySelector('#ai-models') || document.getElementById('ai-models');
-    if (list) list.innerHTML = modelOptions(models, res.labels || listings.get(id)?.labels || {});
-    toast(models.length ? `${models.length} model(s) available — pick one above.` : 'The provider returned no model list.');
+    fillDefaultPicker(id);
+    if (!quiet) toast(models.length ? `${models.length} model(s) available — pick one above.` : 'The provider returned no model list.');
     if (button.dataset.id) await ctx.reload();
   },
   'reveal-credential': async button => {
@@ -742,7 +754,7 @@ export const adminForms = {
     toast('Pairing code created. It is shown once.');
   },
   'cli-provider-form': async (form, values, ctx) => {
-    const draft = cliDraft(values);
+    const draft = cliDraft({...values, model: chosenModel(values)});
     if (!draft.ok) throw new Error(draft.error);
     await api('/api/ai/providers', 'POST', draft.body);
     form.reset();
@@ -793,7 +805,7 @@ export const adminForms = {
     await sync(); await ctx.reload();
   },
   'ai-default-form': async (form, values, ctx) => {
-    await api('/api/ai', 'PATCH', {providerId: values.providerId, model: values.model || ''});
+    await api('/api/ai', 'PATCH', {providerId: values.providerId, model: chosenModel(values)});
     toast('Default model saved.');
     await sync(); await ctx.reload();
   },
@@ -835,6 +847,9 @@ export const adminChanges = {
   // Azure is the only protocol that needs the query-string version, so the field
   // appears and disappears with the selection, without a server round trip.
   'ai-protocol': control => syncApiVersionField(control.form, control.value),
+  'model-pick': control => showOtherBox(control),
+  // A subscription's model names follow the engine picked above them.
+  'cli-engine': control => refillModelSelect(control.form?.elements.namedItem('model'), modelChoices({provider: {kind: LOCAL_CLI_KIND, engine: control.value}, defaultLabel: CLI_DEFAULT})),
   'notif-webhook-pick': async control => {
     await api('/api/notification-prefs', 'PATCH', {webhookCredentialId: control.value});
     toast('Webhook address changed.');

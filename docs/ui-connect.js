@@ -7,10 +7,10 @@
  *
  * Secrets: the Google client secret and an MCP address or header are typed here and sent once. The server never
  * answers with one, so nothing on this page can show or log one. */
-import {esc, icon, btn, note, tag, field, textInput} from './ui-kit.js?v=cdaeca7680';
-import {api, sync} from './ui-store.js?v=cdaeca7680';
-import {toast, confirmSheet} from './ui-dialogs.js?v=cdaeca7680';
-import {mcpRows, googleCard, mcpDraft, statusOf} from './ui-connect-model.js?v=cdaeca7680';
+import {esc, icon, btn, note, tag, field, textInput} from './ui-kit.js?v=7fd06eb511';
+import {api, sync} from './ui-store.js?v=7fd06eb511';
+import {toast, confirmSheet} from './ui-dialogs.js?v=7fd06eb511';
+import {mcpRows, googleCard, mcpDraft, statusOf} from './ui-connect-model.js?v=7fd06eb511';
 
 const GOOGLE_START = '/api/connectors/google/start';
 

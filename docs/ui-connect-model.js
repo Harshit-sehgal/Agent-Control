@@ -5,7 +5,7 @@
  *
  * Nothing here ever sees a key: a subscription has none, an MCP address is typed once and sent, and the
  * server never answers with it. */
-import {cleanCliModel, cliEngineById, LOCAL_CLI_KIND, LOCAL_CLI_ENGINES} from './ai-presets.js?v=cdaeca7680';
+import {cleanCliModel, cliEngineById, LOCAL_CLI_KIND, LOCAL_CLI_ENGINES} from './ai-presets.js?v=7fd06eb511';
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
@@ -122,6 +122,32 @@ export function cliDraft(values = {}) {
   const label = String(values.label ?? '').trim() || DEFAULT_NAME[engine.id];
   return {ok: true, body: {kind: LOCAL_CLI_KIND, label: label.slice(0, 80), engine: engine.id, model}};
 }
+
+/* ---------- the model dropdown ---------- */
+
+/** The value of the last row, which opens a box for any id. */
+export const OTHER_MODEL = '__other';
+/** The names the `claude` command takes for its current models. Codex lists none here: its names change
+ * often, so Default and Other… cover it. */
+export const CLI_MODEL_CHOICES = {claude: [['opus', 'Opus'], ['sonnet', 'Sonnet'], ['haiku', 'Haiku']], codex: []};
+
+/** The rows of a model dropdown: Default, then what the provider offers (a subscription's known names, or an
+ * API provider's chat models by their label), then Other…. A saved id the list lacks stays in, picked, so
+ * opening the page never changes the model behind your back.
+ * @returns {{value: string, label: string, selected: boolean}[]} */
+export function modelChoices({provider = null, current = '', defaultLabel = 'Default'} = {}) {
+  const labels = provider?.labels && typeof provider.labels === 'object' ? provider.labels : {};
+  const known = provider?.kind === LOCAL_CLI_KIND
+    ? CLI_MODEL_CHOICES[provider.engine] || []
+    : (Array.isArray(provider?.chatModels) ? provider.chatModels : []).filter(id => typeof id === 'string' && id).map(id => [id, String(labels[id] || '').trim() || id]);
+  const rows = [['', defaultLabel], ...known];
+  const now = String(current ?? '').trim();
+  if (now && !rows.some(([value]) => value === now)) rows.splice(1, 0, [now, `${now} (current)`]);
+  return [...rows.map(([value, label]) => ({value, label, selected: value === now})), {value: OTHER_MODEL, label: 'Other…', selected: false}];
+}
+
+/** The model a form posts: the picked row, or what was typed after Other…. */
+export const chosenModel = values => String((values?.model === OTHER_MODEL ? values.modelOther : values?.model) ?? '').trim();
 
 /* ---------- the CLI sign-in of each paired agent ---------- */
 

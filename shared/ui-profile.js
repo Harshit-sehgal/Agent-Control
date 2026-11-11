@@ -8,7 +8,8 @@
 import {SHAPES, COLORS, face} from './ui-face.js';
 import {botStatus, botIsManager} from './ui-company.js';
 import {primaryOf} from './company.js';
-import {esc, icon, field, textInput, clock, roundBtn} from './ui-kit.js';
+import {esc, icon, field, textInput, clock, roundBtn, modelSelect} from './ui-kit.js';
+import {modelChoices, chosenModel} from './ui-connect-model.js';
 import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js';
 import {GRANT_LABELS} from './asks.js';
 import {grantRows, allGrantRows, grantUrl} from './ui-asks.js';
@@ -217,13 +218,43 @@ export function grantsHtml(botId = null) {
 /** The note under the list of rules (shown once, in Settings). */
 export const grantNote = (cls = 'st-note') => `<p class="${cls}">${canGrant() ? 'Payments are asked every time. They never get Always allow.' : 'Only the owner or an admin can change these. Payments are asked every time.'}</p>`;
 
+/** The provider a bot's model choice is for: its own, or the workspace default when it has none. */
+const providerFor = (ai, providerId) => (ai.providers || []).find(p => p.id === (providerId || ai.defaultProviderId)) || null;
+const botModelRows = (ai, providerId, current) => {
+  const provider = providerFor(ai, providerId);
+  const fallback = providerId ? (provider?.kind === 'local-cli' ? 'Default (the CLI picks)' : 'The provider\'s default') : 'Workspace default model';
+  return modelChoices({provider, current, defaultLabel: fallback});
+};
+
 function modelPage(bot) {
   const ai = store.state?.ai || {}, own = ai.bots?.[bot.id] || {}, providers = ai.providers || [];
   const options = [['', 'Workspace default'], ...providers.map(p => [p.id, p.label || p.id])].map(([v, l]) => `<option value="${esc(v)}"${v === (own.providerId || '') ? ' selected' : ''}>${esc(l)}</option>`).join('');
   const picker = !isStaticDemo() && canWrite() && (providers.length || store.state?.aiEnabled)
-    ? `<form id="bot-model-form" class="pr-form" data-bot="${esc(bot.id)}" autocomplete="off">${field('Model provider', `<select class="input" name="providerId">${options}</select>`)}${field('Model', textInput('model', {value: own.model || '', placeholder: 'Leave empty for the default', maxlength: 120}))}<button type="submit" class="btn primary wide">Save model</button></form>` : '';
+    ? `<form id="bot-model-form" class="pr-form" data-bot="${esc(bot.id)}" autocomplete="off">${field('Model provider', `<select class="input" name="providerId" data-action="bot-model-provider">${options}</select>`)}${field('Model', modelSelect(botModelRows(ai, own.providerId, own.model || '')))}<button type="submit" class="btn primary wide">Save model</button></form>` : '';
+  if (picker) setTimeout(() => loadBotModels(own.providerId || ai.defaultProviderId), 0);
   return picker || '<p class="pr-note">Add a model provider under Settings, then pick one here.</p>';
 }
+/** A key provider whose list is empty reads it by itself (an admin only: the route needs one), then the dropdown
+ * fills in. No button to press. */
+async function loadBotModels(providerId) {
+  const provider = providerFor(store.state?.ai || {}, providerId);
+  if (!provider || provider.kind === 'local-cli' || provider.chatModels?.length || !isAdmin()) return;
+  try { await api(`/api/ai/providers/${provider.id}/models`, 'POST', {}); await sync(); } catch { return; }
+  refillBotModels();
+}
+function refillBotModels() {
+  const form = el('bot-model-form'); if (!form) return;
+  const select = form.elements.namedItem('model'), keep = select.value;
+  const rows = botModelRows(store.state?.ai || {}, form.elements.namedItem('providerId').value, '');
+  select.innerHTML = rows.map(r => `<option value="${esc(r.value)}">${esc(r.label)}</option>`).join('');
+  if (rows.some(r => r.value === keep)) select.value = keep;
+  const box = form.querySelector('.model-other'); if (box) { box.hidden = select.value !== '__other'; box.disabled = box.hidden; }
+}
+/** `change` handlers for the profile pages, keyed by data-action. */
+export const profileChanges = {
+  // Another provider has other models: the list follows the provider, then loads by itself if it has none yet.
+  'bot-model-provider': control => { refillBotModels(); return loadBotModels(control.value || store.state?.ai?.defaultProviderId); },
+};
 
 const computerPage = bot => computerView(bot, {faceOf: state => faceOf(bot, 22, {state, motion: state !== 'awake'})});
 
@@ -411,8 +442,8 @@ export const profileForms = {
     toast('Remembered.');
   },
   'bot-model-form': async (form, f) => {
-    await api(`/api/ai/bots/${form.dataset.bot}`, 'PATCH', {providerId: f.providerId || null, model: f.model || ''});
-    await sync(); toast('Model saved.');
+    await api(`/api/ai/bots/${form.dataset.bot}`, 'PATCH', {providerId: f.providerId || null, model: chosenModel(f)});
+    await sync(); refillBotModels(); toast('Model saved.');
   },
 };
 
