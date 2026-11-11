@@ -186,3 +186,33 @@ test('a bot stuck on pages it already has gets one last turn to answer, and the 
   assert.match(seen, /Flipkart: 19,989/);
   assert.equal(opened.length, 1);
 });
+
+test('a reply that only promises to open a page, with no browser block, is asked once to send it', async t => {
+  fakeBrowser(t, async request => ({title: 'Booking', finalUrl: request.url, text: 'Table for 2 at 8 PM: Book now'}));
+  const {store, ids} = await company(t);
+  let turns = 0, nudge = '';
+  const ai = model({Mailroom: e => {
+    turns += 1;
+    if (turns === 1) return "I'll open the booking page for Lazeez Affaire and check tonight's 8 PM table for 2.";
+    if (turns === 2) { nudge = e.note || ''; return fence('https://book.example/lazeez'); }
+    return 'The 8 PM table for 2 is open; the next step is the Book now button.';
+  }});
+  wire(ai.executor);
+  const run = await ask(store, {message: 'book a table', to: ids.mail, executor: ai.executor});
+  await until(() => ended(store, run.id), 'the run');
+  assert.match(nudge, /no browser block/i);
+  assert.equal(opened.length, 1);
+  assert.match(runOf(store, run.id).lastOutput, /8 PM table for 2 is open/);
+});
+
+test('a bot that keeps promising without a block is asked only once, then its reply stands', async t => {
+  fakeBrowser(t, async () => ({title: 'x', text: 'x'}));
+  const {store, ids} = await company(t);
+  let turns = 0;
+  const ai = model({Mailroom: () => { turns += 1; return "I'll check that page for you."; }});
+  wire(ai.executor);
+  const run = await ask(store, {message: 'check it', to: ids.mail, executor: ai.executor});
+  await until(() => ended(store, run.id), 'the run');
+  assert.equal(runOf(store, run.id).status, 'completed');
+  assert.equal(turns, 2);
+});

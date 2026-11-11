@@ -41,7 +41,7 @@ import {reportResult, skipExpired} from './report-result.mjs';
 import {hostAllowed, hostOf, parseAllowlist} from '../shared/bot-browser.js';
 import {resolvePublicAddress, pinnedRequest} from './net-guard.mjs';
 import {findBrowser} from './browser.mjs';
-import {readableHtml, turnedAway, PLAIN_AGENT} from './page-fetch.mjs';
+import {readableHtml, turnedAway, preferRead, PLAIN_AGENT} from './page-fetch.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG = process.env.AGENT_CONFIG ? path.resolve(process.env.AGENT_CONFIG) : path.join(HERE, 'agent.config.json');
@@ -175,9 +175,10 @@ async function execute(task, config) {
       const seen = await runBrowserTask(task, {shared: shared(), allow});
       // A site that turns the headless browser away (Wikimedia's "Too many requests") is read once more by a
       // plain request that names itself; a plain read only reads, so a page with steps keeps the browser's answer.
-      if (!task.payload?.steps?.length && turnedAway(seen)) {
+      // A page that came back nearly empty (drawn by scripts the browser did not finish) is read plainly too.
+      if (!task.payload?.steps?.length && (turnedAway(seen) || String(seen?.text || '').trim().length < 300)) {
         const plain = await readPlain(target).catch(() => null);
-        if (plain?.text && !turnedAway(plain)) return {...plain, readBy: 'plain'};
+        if (plain?.text && (turnedAway(seen) ? !turnedAway(plain) : preferRead(seen, plain) === plain)) return {...plain, readBy: 'plain'};
       }
       return seen;
     }

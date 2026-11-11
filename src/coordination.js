@@ -6,7 +6,7 @@
  */
 import {scheduleRunEnded} from '../shared/schedules.js';
 import {randomUUID} from 'node:crypto';
-import {createRun,createEnvelope,declinedOf,runNote,planHandoffs,handoffTargets,instructLead,wakeBots,assessTask,summonableGuests,mayHandoff,chatKeyFor,chatIsBusy,rosterFor,previousFor,enlist,MAX_HANDOFFS,INTERRUPT_STATUSES as INTERRUPT} from '../shared/coordination.js';
+import {createRun,createEnvelope,declinedOf,runNote,planHandoffs,handoffTargets,instructLead,wakeBots,assessTask,summonableGuests,mayHandoff,chatKeyFor,chatIsBusy,rosterFor,previousFor,enlist,promisesAction,PROMISE_NOTE,MAX_HANDOFFS,INTERRUPT_STATUSES as INTERRUPT} from '../shared/coordination.js';
 import {isThread,noteMember} from '../shared/threads.js';
 import {isLead,companyBots} from '../shared/company.js';
 import {extendLimits, ASK_CEILING} from '../shared/ask-limits.js';
@@ -480,6 +480,12 @@ async function runGroupInner(store,id,executor){
           live.checkpoint={nextStep:i,afterStep:i+1,previous,at:stamp()};
           if(conn.asks.length){live.status='awaiting_ask';live.askIds=conn.asks.map(a=>a.id);}
           else live.status='queued';
+          holdBrowser=true;
+        } else if(!toBotId&&!off&&!stopped&&!declinedTurn&&!live.lastCall&&!live.promiseNudged&&!reply.spawns.length&&!reply.asks.length&&promisesAction(previous.output)){
+          // "I'll open the booking page" with no block opens nothing; the bot is asked once to do what it said.
+          live.promiseNudged=true;live.browserNote=PROMISE_NOTE;
+          live.checkpoint={nextStep:i,afterStep:i+1,previous,at:stamp()};
+          live.status='queued';
           holdBrowser=true;
         } else {
           // Extra turn consumed the page; later bots do not see it as `page`.

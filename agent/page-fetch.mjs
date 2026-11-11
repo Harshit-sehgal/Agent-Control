@@ -76,3 +76,11 @@ export function turnedAway(page) {
   const title = String(page.title || '').trim(), text = String(page.text || '').trim();
   return AWAY_TITLE.test(title) || (!title && AWAY_TEXT.test(text)) || (/error$/i.test(title) && AWAY_TEXT.test(text));
 }
+
+/** The read to keep: the browser's, unless it came back nearly empty (a page drawn by scripts it did not
+ * finish, such as YouTube's results) and a plain read found more words without being turned away. */
+export function preferRead(seen, plain) {
+  const length = page => String(page?.text || '').trim().length;
+  if (length(seen) >= 300 || !plain || turnedAway(plain) || length(plain) <= length(seen) * 2) return seen;
+  return plain;
+}

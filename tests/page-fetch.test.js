@@ -46,3 +46,14 @@ test('a YouTube results page read without a browser lists its videos', () => {
   assert.match(page.text, /Study beats · Chill Hop/);
   assert.deepEqual(page.links[0], {text: 'Lo-fi Music for Calm & Relax', url: 'https://www.youtube.com/watch?v=Gvx-DAzR-4k'});
 });
+
+test('a browser read that came back nearly empty gives way to a plain read with the words', async () => {
+  const {preferRead} = await import('../agent/page-fetch.mjs');
+  const shell = {title: null, text: 'Guide Search', links: []};
+  const plain = {title: 'YouTube results', text: '1. Transformers explained · 3Blue1Brown · 2M views '.repeat(10), links: [{text: 'Transformers explained', url: 'https://www.youtube.com/watch?v=x'}]};
+  assert.equal(preferRead(shell, plain), plain);
+  const full = {title: 'Article', text: 'word '.repeat(200), links: []};
+  assert.equal(preferRead(full, plain), full);
+  assert.equal(preferRead(shell, null), shell);
+  assert.equal(preferRead(shell, {title: 'Access Denied', text: 'You do not have permission. '.repeat(20)}), shell);
+});

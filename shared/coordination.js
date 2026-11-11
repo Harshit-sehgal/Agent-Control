@@ -439,3 +439,13 @@ export function assertValidHandoff(group,fromBotId,toBotId){
   if(fromBotId===toBotId)throw fail('A bot cannot hand off a task to itself.', 400);
   return true;
 }
+
+/** A reply that only says what the bot is about to do ("I'll open the booking page…") with nothing done:
+ * no question for the owner, and short. Small models write this and forget the block that does it. */
+const PROMISE_LEAD = /^(?:ok(?:ay)?[,.]?\s+|sure[,.]?\s+)?(?:i['’]ll|i will|i['’]m going to|i am going to|let me|i['’]m (?:checking|opening|looking|searching)|checking|opening|looking up|searching)\b/i;
+export function promisesAction(text) {
+  const body = String(text || '').trim();
+  return body.length > 0 && body.length <= 700 && !body.includes('?') && !/@\w/.test(body) && PROMISE_LEAD.test(body);
+}
+/** What the bot is told when it promised to act and sent nothing to do it. */
+export const PROMISE_NOTE = 'Your last reply said what you would do next, but it held no browser block, so nothing was opened. Do it now: send the browser block (with steps when you need to click or type), or answer the owner with what you already have.';

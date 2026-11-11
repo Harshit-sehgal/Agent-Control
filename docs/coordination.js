@@ -2,19 +2,19 @@
  * LLM output may only extend a run's recipients through `handoffTargets`, which
  * revalidates every target against this policy and the step cap.
  */
-import {SETUP_TOOL_HINT} from './setup.js?v=d4eeafd4c0';
-import {botSettings,groupSettings,pipelineOf,MAX_STEPS_LIMIT} from './bot-settings.js?v=d4eeafd4c0';
-import {BROWSER_TOOL_HINT,MAX_PAGE_CHARS} from './bot-browser.js?v=d4eeafd4c0';
-import {CONNECTOR_TOOL_HINT} from './connectors.js?v=d4eeafd4c0';
-import {SUBAGENT_PERMISSION,SUBAGENT_TOOL_HINT} from './subagents.js?v=d4eeafd4c0';
-import {BOT_ASK_TOOL_HINT,companyList} from './bot-link.js?v=d4eeafd4c0';
-import {limitText} from './ask-limits.js?v=d4eeafd4c0';
-import {BOT_CREATE_TOOL_HINT,MAX_BOTS_PER_GROUP} from './bot-create.js?v=d4eeafd4c0';
-import {memoryBlock} from './memory.js?v=d4eeafd4c0';
-import {isThread} from './threads.js?v=d4eeafd4c0';
-import {BUSY_STATUSES as BUSY} from './run-state.js?v=d4eeafd4c0';
-import {companyBots,PRIMARY_GROUP,isLead,teamOf} from './company.js?v=d4eeafd4c0';
-import {OFFJOB_RULE,OFFJOB_ANYWAY,basicAsk} from './off-job.js?v=d4eeafd4c0';
+import {SETUP_TOOL_HINT} from './setup.js?v=25bfe97b8d';
+import {botSettings,groupSettings,pipelineOf,MAX_STEPS_LIMIT} from './bot-settings.js?v=25bfe97b8d';
+import {BROWSER_TOOL_HINT,MAX_PAGE_CHARS} from './bot-browser.js?v=25bfe97b8d';
+import {CONNECTOR_TOOL_HINT} from './connectors.js?v=25bfe97b8d';
+import {SUBAGENT_PERMISSION,SUBAGENT_TOOL_HINT} from './subagents.js?v=25bfe97b8d';
+import {BOT_ASK_TOOL_HINT,companyList} from './bot-link.js?v=25bfe97b8d';
+import {limitText} from './ask-limits.js?v=25bfe97b8d';
+import {BOT_CREATE_TOOL_HINT,MAX_BOTS_PER_GROUP} from './bot-create.js?v=25bfe97b8d';
+import {memoryBlock} from './memory.js?v=25bfe97b8d';
+import {isThread} from './threads.js?v=25bfe97b8d';
+import {BUSY_STATUSES as BUSY} from './run-state.js?v=25bfe97b8d';
+import {companyBots,PRIMARY_GROUP,isLead,teamOf} from './company.js?v=25bfe97b8d';
+import {OFFJOB_RULE,OFFJOB_ANYWAY,basicAsk} from './off-job.js?v=25bfe97b8d';
 
 /** The default step count of a run: no limit of its own, only the backstop. A group may set fewer. */
 export const MAX_HANDOFFS = MAX_STEPS_LIMIT;
@@ -24,7 +24,7 @@ export {MAX_PAGE_CHARS};
 /** Which run statuses are busy or interruptible is decided once in
  * `shared/run-state.js`; re-exported here because callers have reached for them
  * through the coordination module since they were declared here. */
-export {BUSY_STATUSES, INTERRUPT_STATUSES} from './run-state.js?v=d4eeafd4c0';
+export {BUSY_STATUSES, INTERRUPT_STATUSES} from './run-state.js?v=25bfe97b8d';
 const normalize = value => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 const safe = value => String(value ?? '').slice(0, MAX_CONTEXT_CHARS);
 const fail = (message, status) => Object.assign(new Error(message), {status});
@@ -439,3 +439,13 @@ export function assertValidHandoff(group,fromBotId,toBotId){
   if(fromBotId===toBotId)throw fail('A bot cannot hand off a task to itself.', 400);
   return true;
 }
+
+/** A reply that only says what the bot is about to do ("I'll open the booking page…") with nothing done:
+ * no question for the owner, and short. Small models write this and forget the block that does it. */
+const PROMISE_LEAD = /^(?:ok(?:ay)?[,.]?\s+|sure[,.]?\s+)?(?:i['’]ll|i will|i['’]m going to|i am going to|let me|i['’]m (?:checking|opening|looking|searching)|checking|opening|looking up|searching)\b/i;
+export function promisesAction(text) {
+  const body = String(text || '').trim();
+  return body.length > 0 && body.length <= 700 && !body.includes('?') && !/@\w/.test(body) && PROMISE_LEAD.test(body);
+}
+/** What the bot is told when it promised to act and sent nothing to do it. */
+export const PROMISE_NOTE = 'Your last reply said what you would do next, but it held no browser block, so nothing was opened. Do it now: send the browser block (with steps when you need to click or type), or answer the owner with what you already have.';
