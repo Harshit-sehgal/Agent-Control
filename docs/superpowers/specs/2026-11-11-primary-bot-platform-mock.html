@@ -85,15 +85,20 @@ kbd{font-family:var(--body);font-size:11px;color:var(--muted);border:1px solid v
 .fab:hover{transform:translateY(-2px)}
 .fab-bot{top:calc(16px + env(safe-area-inset-top,0px));right:max(18px,env(safe-area-inset-right,0px));width:46px;height:46px;justify-content:center}
 .fab-bot svg{width:20px;height:20px}
-.fab-me{top:calc(16px + env(safe-area-inset-top,0px));left:max(18px,env(safe-area-inset-left,0px));width:46px;height:46px;justify-content:center;padding:0}
+.fab-bot,.fab-new{box-shadow:inset 0 0 0 1px var(--line)}
+.fab-me{box-shadow:none;background:none}
+.fab-me{top:calc(16px + env(safe-area-inset-top,0px));left:max(18px,env(safe-area-inset-left,0px));width:46px;height:46px;justify-content:center;padding:0;gap:0}
+.fab-me .ini{width:46px;height:46px;flex:none}
 .ini{width:100%;height:100%;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:15px;letter-spacing:.02em;color:color-mix(in srgb,var(--fg) 82%,transparent);background:color-mix(in srgb,var(--fg) 12%,var(--raise));box-shadow:none}
 .fab-me .badge,.fab-new .badge{position:absolute;top:-3px;right:-3px}
-.bbar{position:fixed;z-index:20;left:50%;translate:-50% 0;bottom:calc(16px + env(safe-area-inset-bottom,0px));width:min(720px,calc(100% - 32px));display:flex;gap:10px;align-items:center}
+.bbar{position:fixed;z-index:20;left:max(16px,calc(50% - 360px));right:max(16px,calc(50% - 360px));bottom:calc(14px + env(safe-area-inset-bottom,0px));display:flex;gap:10px;align-items:center;min-width:0}
+.bbar::before{content:'';position:absolute;z-index:-1;left:-16px;right:-16px;top:-30px;bottom:calc(-14px - env(safe-area-inset-bottom,0px));background:linear-gradient(to bottom,transparent,var(--bg) 45%);pointer-events:none}
+.is-desk .bbar::before{display:none}
 .bbar .fab{position:relative}
 .fab-new{width:52px;height:52px;flex:none;justify-content:center;padding:0}
 .fab-new .i{width:21px;height:21px}
-.spill{flex:1;height:52px;display:flex;align-items:center;gap:10px;padding:0 18px;border-radius:99px;background:var(--raise);box-shadow:var(--float),inset 0 0 0 1px var(--line);cursor:text;transition:box-shadow .2s}
-.spill:focus-within{box-shadow:var(--float),inset 0 0 0 1.5px var(--violet)}
+.spill{flex:1;min-width:0;height:52px;display:flex;align-items:center;gap:10px;padding:0 18px;border-radius:99px;background:var(--raise);box-shadow:inset 0 0 0 1px var(--line);cursor:text;transition:box-shadow .2s}
+.spill:focus-within{box-shadow:inset 0 0 0 1.5px var(--violet)}
 .spill .i{width:20px;height:20px;color:var(--muted)}
 .spill input{flex:1;min-width:0;border:0;background:none;outline:none;font-size:16px;color:var(--fg)}
 .spill input::-webkit-search-cancel-button{display:none}
@@ -311,6 +316,7 @@ button.tog:hover{background:var(--sunk);color:var(--fg)}
 .snav button{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;font-size:13.5px;color:var(--soft);text-align:left}
 .snav button:hover{background:var(--sunk);color:var(--fg)}.snav button.on{background:var(--raise);color:var(--fg)}
 .snav .i{width:17px;height:17px}
+.snhr{border:0;border-top:1px solid var(--line);margin:8px 4px;width:auto}
 .sbody{overflow:auto;padding:18px 28px 32px;display:flex;flex-direction:column;gap:22px}
 .shead{display:flex;align-items:center;gap:8px;position:sticky;top:-18px;background:var(--bg);padding:6px 0;z-index:1}
 .shead h2{flex:1;margin:0;font-size:18px;font-weight:600}
@@ -831,7 +837,7 @@ function sideHTML(){const pins=arrange(null,'shelf',BOTS.filter(b=>isPin('bots',
   <div class="sfind" ${S.sideQ?'':'hidden'}><input id="sideq" type="search" placeholder="Search bots and threads" aria-label="Search bots and threads" autocomplete="off" value="${esc(S.sideQ||'')}"></div>
   ${pins.length?'':'<div class="sshelf empty" data-sortkey="shelf"><span>Drop to pin</span></div>'}${pins.length?`<div class="sshelf" data-sortkey="shelf">${pins.map(b=>`<button class="spin${cur===b.id?' on':''}" data-dm="${b.id}" data-sid="${b.id}">${face(b,'l',stateOf(b)==='waiting'?'wait':undefined)}<span>${esc(b.name)}</span></button>`).join('')}</div>`:''}
   <div class="slist" id="sidelist" data-sortkey="side">${sideList(S.sideQ)}</div>
-  <div class="sfoot"><button class="sme" data-me aria-label="Your account and settings"><span class="ini av sm">${initials(ME.name)}</span><span class="w">${esc(ME.name)}</span>${pending().length?`<span class="badge">${pending().length}</span>`:''}</button><button class="sib" data-new aria-label="New thread" title="New thread"><svg class="i" viewBox="0 0 24 24"><path d="M6 3.5h9.5A2.5 2.5 0 0 1 18 6v12.5a2 2 0 0 1-2 2H6z"/><path d="M6 3.5v17M9.5 8h5M9.5 11.5h3"/><path d="m20.5 9.5-6.2 6.2-2.3.6.6-2.3 6.2-6.2a1.2 1.2 0 0 1 1.7 1.7z"/></svg>${w?`<span class="badge">${w}</span>`:''}</button></div>`}
+  <div class="sfoot"><button class="sme" data-me aria-label="Your account and settings"><span class="ini av sm">${initials(ME.name)}</span><span class="w">${esc(ME.name)}</span></button><button class="sib" data-new aria-label="New thread" title="New thread"><svg class="i" viewBox="0 0 24 24"><path d="M6 3.5h9.5A2.5 2.5 0 0 1 18 6v12.5a2 2 0 0 1-2 2H6z"/><path d="M6 3.5v17M9.5 8h5M9.5 11.5h3"/><path d="m20.5 9.5-6.2 6.2-2.3.6.6-2.3 6.2-6.2a1.2 1.2 0 0 1 1.7 1.7z"/></svg>${w?`<span class="badge">${w}</span>`:''}</button></div>`}
 function renderMain(){
   const app=$('app');app.classList.toggle('has-composer',S.view!=='bots');
   const main=S.view==='bots'&&DESK.matches?`<div class="pick"><p>Select a chat</p><button class="link" data-new>or start a new thread</button></div>`:S.view==='bots'?botsView():S.view==='new'?newView():threadView(),wide=DESK.matches;app.classList.toggle('is-desk',wide);
@@ -839,7 +845,7 @@ function renderMain(){
   if(S.view==='thread'){const sc=$('scroll');sc.scrollTop=sc.scrollHeight}
   if(S.view==='new'){const i=$('root').querySelector('input');i&&i.focus({preventScroll:true})}
   closeSearch();$('meIni').textContent=initials(ME.name);packDesks();const thr=$('thrBadge');if(thr){const w=new Set(pending().map(x=>x.thread)).size;thr.innerHTML=w?`<span class="badge">${w}</span>`:''}
-  const p=pending().length;$('setBadge').innerHTML=p?`<span class="badge">${p}</span>`:'';
+  $('setBadge').innerHTML='';
 }
 
 /* ---------- drawer (left) and panel (right) ---------- */
@@ -893,10 +899,11 @@ function phoneSettings(){
   <section><h4>Bots</h4><div class="pcard">
     <div class="prow"><span class="w">Bots running<small>${S.paused?'Everything is paused':'Switch off to pause every bot at once'}</small></span><button class="switch mini" role="switch" aria-checked="${!S.paused}" data-pause aria-label="Bots running"><span class="knob" aria-hidden="true"></span></button></div>
     ${pr('perm','Permissions',`${rules} ${rules===1?'rule':'rules'} · paying always asks`)}${pr('computer','Computer','Where your bots run','This laptop')}</div></section>
+  <section><h4>Go to</h4><div class="pcard"><button class="prow" data-gopanel="activity"><span class="w">Activity<small>What your bots did outside the app</small></span>${IC.chev}</button><button class="prow" data-gopanel="company"><span class="w">Company<small>Who reports to whom</small></span>${IC.chev}</button></div></section>
   <section><h4>App</h4><div class="pcard">${pr('look','Appearance',`${hv} home · ${th===''?'follows system':th==='light'?'light':'dark'}`)}</div></section></nav>`}
 function settingsHTML(){const k=S.set,phone=matchMedia('(max-width:640px)').matches,showNav=!phone||!k,showBody=!phone||!!k,cur=k||'general';
   if(phone&&!k)return phoneSettings();
-  return `${showNav?`<nav class="snav" aria-label="Settings sections">${phone?`<div class="shead"><h2>Settings</h2><button class="x" data-setclose aria-label="Close">${IC.x}</button></div>`:''}${SECTS.map(([v,l])=>`<button class="${!phone&&cur===v?'on':''}" data-set="${v}" ${!phone&&cur===v?'aria-current="page"':''}>${SETI[v]}<span>${l}</span>${phone?IC.chev:''}</button>`).join('')}</nav>`:''}
+  return `${showNav?`<nav class="snav" aria-label="Settings sections">${phone?`<div class="shead"><h2>Settings</h2><button class="x" data-setclose aria-label="Close">${IC.x}</button></div>`:''}${SECTS.map(([v,l])=>`<button class="${!phone&&cur===v?'on':''}" data-set="${v}" ${!phone&&cur===v?'aria-current="page"':''}>${SETI[v]}<span>${l}</span>${phone?IC.chev:''}</button>`).join('')}${phone?'':`<hr class="snhr"><button data-gopanel="activity"><svg class="i" viewBox="0 0 24 24"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg><span>Activity</span></button><button data-gopanel="company"><svg class="i" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="9" r="2.6"/><path d="M15.5 14.2A5 5 0 0 1 21 19"/></svg><span>Company</span></button>`}</nav>`:''}
   ${showBody?`<div class="sbody"><div class="shead">${phone?`<button class="x" data-setback aria-label="Back to settings">${IC.back}</button>`:''}<h2>${SECTS.find(x=>x[0]===cur)[1]}</h2>${phone?'':''}<button class="x" data-setclose aria-label="Close">${IC.x}</button></div>${settingsBody(cur)}</div>`:''}`}
 function openSettings(k){S.set=k||(matchMedia('(max-width:640px)').matches?null:'general');S.left=false;S.panel=null;renderOver();$('setdlg').innerHTML=settingsHTML();$('setwrap').hidden=false;if(!matchMedia('(max-width:640px)').matches)setTimeout(()=>$('setdlg').querySelector('.on')?.focus({preventScroll:true}),50)}
 function closeSettings(){$('setwrap').hidden=true;S.set=null}
@@ -1065,14 +1072,15 @@ document.addEventListener('click',e=>{
   if(d.sec){S.col[d.sec]=!S.col[d.sec];try{localStorage.setItem('drawer-col',JSON.stringify(S.col))}catch(e){}renderOver();return}
   if(d.pal!==undefined){const it=palItems($('palIn').value)[+d.pal];closePal();it&&it.go();return}
   if(d.sidesearch!==undefined){const f=document.querySelector('.sfind');f.hidden=!f.hidden;if(!f.hidden)$('sideq').focus();else{S.sideQ='';$('sidelist').innerHTML=sideList('')}return}
-  if(d.me!==undefined){S.left=!S.left;S.panel=null;renderOver();return}
+  if(d.me!==undefined){S.left=false;S.panel=null;renderOver();openSettings();return}
+  if(d.gopanel){closeSettings();S.panel=d.gopanel;S.left=false;renderOver();return}
   if(d.pmore){e.stopPropagation();const box=document.createElement('div'),it=document.createElement('div');box.dataset.sortkey='side';it.dataset.sid=d.pmore;box.appendChild(it);const r=el.getBoundingClientRect();openMenu(it,r.right-8,r.bottom+6,matchMedia('(max-width:640px)').matches);$('cmenu').querySelector('[data-cm=prof]')?.remove();return}
   if(d.bnote){S.mute.has(d.bnote)?S.mute.delete(d.bnote):S.mute.add(d.bnote);renderOver();return}
   if(d.pback){e.stopPropagation();if(S.view==='thread'){S.panel=null;renderOver()}else openDM(d.pback);return}
   if(d.bot){e.stopPropagation();S.panel=d.bot;S.tab='overview';S.left=false;renderOver();return}
   if(el.id==='fabBot'||d.newbot!==undefined){S.panel='hire';S.left=false;renderOver();setTimeout(()=>{const f=$('panel').querySelector('[data-hire]');f?.nm.focus();f?.dispatchEvent(new Event('input',{bubbles:true}))},300)}
   else if(d.threads!==undefined){S.panel='threads';S.left=false;renderOver();setTimeout(()=>$('thQ')?.focus(),250)}
-  else if(el.id==='fabSet'){S.left=!S.left;S.panel=null;renderOver()}
+  else if(el.id==='fabSet'){S.left=false;S.panel=null;renderOver();openSettings()}
   else if(el.id==='fabNew'||d.new!==undefined){go('new')}
   else if(d.home!==undefined){go('bots')}
   else if(d.closeall!==undefined){S.left=false;S.panel=null;renderOver()}
