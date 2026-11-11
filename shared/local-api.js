@@ -12,6 +12,7 @@ import {addChatMessages, clearChat} from './chats.js';
 import {publicMemory, addRules, removeRule, forgetChat, forgetRulebook} from './memory.js';
 import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js';
 import {createThread, titleFrom} from './threads.js';
+import {pauseAll, resumeGuard} from './runaway.js';
 import {simulateGroup} from './group-simulator.js';
 import {BUSY_STATUSES} from './run-state.js';
 import {botSettings} from './bot-settings.js';
@@ -199,6 +200,16 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
     addChatMessages(state, `team-${thread.id}`, [{role: 'user', text: message}], {trusted: true});
     const run = await localRun(state, thread.id, {message});
     save(state); return {thread, run};
+  }
+  // Pause all bots and Keep going, like the server's /api/guard. Stop also cancels
+  // whatever the guard parked, though the demo's offline engine parks nothing yet.
+  if (path === '/api/guard' && method === 'POST') {
+    if (typeof body.paused !== 'boolean') throw Object.assign(new Error('Say whether bots are paused: {"paused": true} or {"paused": false}.'), {status: 400});
+    if (body.paused) { pauseAll(state); save(state); return {guard: state.guard, resumed: 0, cancelled: 0}; }
+    resumeGuard(state);
+    const parked = state.groupRuns.filter(r => r.status === 'awaiting_limit' && r.limit?.kind === 'guard');
+    if (body.stop === true) for (const run of parked) { run.status = 'cancelled'; run.completedAt = now(); run.checkpoint = null; }
+    save(state); return {guard: state.guard, resumed: 0, cancelled: body.stop === true ? parked.length : 0};
   }
   if (path === '/api/groups' && method === 'POST') { const g = addGroup(state, body); save(state); return g; }
   if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/bots$/)) && method === 'POST') { const b = addBot(state, m[1], body); save(state); return b; }

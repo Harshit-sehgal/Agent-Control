@@ -5,18 +5,19 @@
  * They throw errors carrying an HTTP `status` so the same rules apply to the
  * Node HTTP routes and to any browser-local transport.
  */
-import {activity,cleanText} from './core.js?v=06c463a82b';
-import {fail} from './errors.js?v=06c463a82b';
-import {cancelTask} from './tasks.js?v=06c463a82b';
-import {normalizeRetention} from './retention.js?v=06c463a82b';
-import * as contracts from './contracts.js?v=06c463a82b';
-import {pruneChats, releaseChatWork} from './chats.js?v=06c463a82b';
-import {denyBrowserRequest} from './bot-browser.js?v=06c463a82b';
-import {BUSY_STATUSES} from './coordination.js?v=06c463a82b';
-import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=06c463a82b';
-import {memoryState} from './memory.js?v=06c463a82b';
-import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=06c463a82b';
-import {assertManager, releaseReports, PRIMARY_GROUP} from './company.js?v=06c463a82b';
+import {activity,cleanText} from './core.js?v=5be2ff3602';
+import {fail} from './errors.js?v=5be2ff3602';
+import {cancelTask} from './tasks.js?v=5be2ff3602';
+import {normalizeRetention} from './retention.js?v=5be2ff3602';
+import * as contracts from './contracts.js?v=5be2ff3602';
+import {pruneChats, releaseChatWork} from './chats.js?v=5be2ff3602';
+import {denyBrowserRequest} from './bot-browser.js?v=5be2ff3602';
+import {BUSY_STATUSES} from './coordination.js?v=5be2ff3602';
+import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=5be2ff3602';
+import {memoryState} from './memory.js?v=5be2ff3602';
+import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=5be2ff3602';
+import {freshGuard} from './runaway.js?v=5be2ff3602';
+import {assertManager, releaseReports, PRIMARY_GROUP} from './company.js?v=5be2ff3602';
 
 export const SCHEMA_VERSION = 3;
 
@@ -32,6 +33,8 @@ export function migrate(state) {
   state.groups ??= [];
   state.groupMessages ??= {};
   state.groupRuns ??= [];
+  // The runaway guard's window and pause flag (shared/runaway.js).
+  if (!state.guard || typeof state.guard !== 'object') state.guard = freshGuard();
   // X home-feed reading is gone. A run parked on it can never resume, and it
   // would hold its group busy, so it loads as cancelled.
   for (const run of [...state.runs, ...state.groupRuns]) {

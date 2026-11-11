@@ -32,8 +32,9 @@ const stamp = () => new Date().toISOString();
  * here); with one, a reached limit comes back as `{limit, frames}` for the
  * caller to pause on, and without one it is refused like any other ask.
  * `onEvent({type:'ask'|'answer', ...})` lets the caller record each message as
- * it happens. `stop` with `resume` ends it: the asking bot reports what it has. */
-export async function askPeerRound({bot, envelope = {}, first, executor, config, peers = [], configFor = () => null, memoryForPeer = null, handoffAllowed = true, budget = null, resume = null, stop = false, onEvent = null, makeId = randomUUID, now = stamp}) {
+ * it happens. `gate()` says whether bots are paused (`{limit:{kind:'guard'}}`).
+ * `stop` with `resume` ends it: the asking bot reports what it has. */
+export async function askPeerRound({bot, envelope = {}, first, executor, config, peers = [], configFor = () => null, memoryForPeer = null, handoffAllowed = true, budget = null, resume = null, stop = false, onEvent = null, gate = null, makeId = randomUUID, now = stamp}) {
   const lines = [], asks = [];
   const roster = (peers || []).filter(Boolean);
   const tally = budget || {};
@@ -80,6 +81,9 @@ export async function askPeerRound({bot, envelope = {}, first, executor, config,
         else if (frames.some(f => f.botId === named.id)) reason = `${named.name} is already waiting on this answer, so it cannot be asked now.`;
         else if (!botSettings(named).enabled) reason = `${named.name} is switched off. Turn it on in its profile to let it answer.`;
         else {
+          // The runaway guard: a bot waking a bot is bot-initiated work, refused while
+          // bots are paused. Checked before the ask is counted, so a resume counts it once.
+          if (budget && gate && await gate()) return {output: null, limit: {kind: 'guard'}, frames, lines, asks};
           const verdict = tallyAsk(tally, {from: me.id, to: named.id, task: request.task, depth: frames.length + 1});
           if (verdict.ok) peer = named;
           else if (budget) return {output: null, limit: {kind: verdict.limit}, frames, lines, asks};

@@ -185,3 +185,14 @@ test('Pages saves a retention policy the same way the server does',async()=>{
   assert.deepEqual([saved.events,saved.doneTasks,saved.runs],[30,7,14]);
   assert.equal((await request('/api/state')).settings.retention.events,30);
 });
+
+test('Pause all works in the demo: the same route and flag as the server',async()=>{
+  const {request}=setup();
+  assert.equal((await request('/api/state')).guard.paused,false,'a fresh demo is not paused and says so');
+  const on=await request('/api/guard','POST',{paused:true});
+  assert.equal(on.guard.paused,true);
+  assert.equal((await request('/api/state')).guard.paused,true,'the state carries the flag for the sidebar');
+  await assert.rejects(request('/api/guard','POST',{}),error=>error.status===400);
+  const off=await request('/api/guard','POST',{paused:false});
+  assert.deepEqual([off.guard.paused,off.resumed,off.cancelled],[false,0,0]);
+});

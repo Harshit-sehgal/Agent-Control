@@ -1,17 +1,20 @@
 /** Bots that create other bots.
  *
- * A bot holding the `bot.create` permission may add one teammate to its own
- * group by putting a fenced block in its reply:
+ * Any bot may add a bot to the company by putting a fenced block in its reply
+ * (`bot.create` is part of the basic kit, so it needs no grant). The job is one
+ * sentence; the name is optional and comes from the sentence when it is left out:
  *
  *     ```create-bot
  *     {"name": "Source scout", "job": "Find posts that mention the project and list their links."}
  *     ```
  *
  * The new bot is a normal, lasting record: it appears in the roster and the
- * chat list, keeps its own chat, and can be edited or removed by a person.
- * The creator cannot grant it a permission, a contract field, a model or a
- * different type. That is what stops a model from minting itself more power;
- * a person still grants any capability in the bot profile.
+ * chat list, keeps its own chat, and can be edited or removed by a person. It
+ * reports to its creator when the creator leads a team, else to the creator's
+ * manager. The creator cannot grant it a permission, a contract field, a model
+ * or a different type. That is what stops a model from minting itself more
+ * power; a person still grants any capability in the bot profile. The runaway
+ * guard (`shared/runaway.js`) is what bounds how many a model can make.
  *
  * This module is pure. `src/bot-create.js` applies it inside the run.
  */
@@ -22,8 +25,9 @@ import {controlFence} from './reply-blocks.js';
 
 export const BOT_CREATE_PERMISSION = 'bot.create';
 export const MAX_NEW_BOTS_PER_REPLY = 1;
-/** A group that reaches this size refuses new bots, created by a person or a model. */
-export const MAX_BOTS_PER_GROUP = 40;
+/** A hard safety cap on one group's bots, whoever creates them. The company has
+ * no working limit of its own: the runaway guard paces what models create. */
+export const MAX_BOTS_PER_GROUP = 500;
 export const MAX_BOT_NAME = 60;
 export const MAX_BOT_JOB = 3000;
 export const MIN_BOT_JOB = 20;
@@ -35,14 +39,56 @@ export const BOT_REPLY_LENGTHS = ['short', 'medium', 'long'];
 const BLOCK = () => controlFence('create-bot');
 const MAX_BLOCKS_READ = 5;
 
+const WORDS = s => String(s ?? '').replace(/[^\p{L}\p{N}'’\s-]/gu, ' ').split(/\s+/).filter(Boolean);
+const LEAD_IN = new Set('please can could you i want need would like make create build add hire set up me us a an the my our your new bot helper agent assistant that which who to for someone somebody'.split(' '));
+const VERBS = new Set('watch watches find finds read reads write writes track tracks check checks draft drafts plan plans book books monitor monitors summarise summarize summarises summarizes look looks keep keeps help helps handle handles answer answers send sends collect collects review reviews research researches manage manages organise organize organises organizes take takes scan scans triage triages'.split(' '));
+const STOP = new Set('and or that which who to for from on in of by with when whenever every each so then at'.split(' '));
+const title = word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+
+/** A bot's name from the sentence that is its job: the first noun phrase after
+ * the opening verb ("Watches my inbox and drafts replies" is "Inbox"), else
+ * "Helper N". `taken` is the names already in the company; a name that is taken
+ * gets a number. */
+export function nameFromSentence(sentence, taken = []) {
+  const words = WORDS(sentence);
+  const used = new Set(taken.map(n => String(n).trim().toLowerCase()));
+  let i = 0;
+  const skip = set => { while (i < words.length && set.has(words[i].toLowerCase())) i++; };
+  skip(LEAD_IN);
+  if (i < words.length && VERBS.has(words[i].toLowerCase())) i++;
+  skip(LEAD_IN);
+  const picked = [];
+  while (i < words.length && picked.length < 2 && !STOP.has(words[i].toLowerCase())) picked.push(words[i++]);
+  let name = picked.map(title).join(' ').slice(0, MAX_BOT_NAME);
+  if (name.length < 2) {
+    let n = 1;
+    while (used.has(`helper ${n}`)) n++;
+    return `Helper ${n}`;
+  }
+  const base = name;
+  for (let n = 2; used.has(name.toLowerCase()); n++) name = `${base} ${n}`;
+  return name;
+}
+
+/** The first colour index in `0..count-1` that no bot in `bots` is drawn in. A
+ * bot with no colour of its own is drawn by its position. When every colour is
+ * taken the new bot's own position picks one. */
+export function firstUnusedTint(bots, count) {
+  const used = new Set((bots || []).map((b, i) => (Number.isInteger(b?.settings?.tint) ? b.settings.tint : i) % count));
+  for (let n = 0; n < count; n++) if (!used.has(n)) return n;
+  return (bots || []).length % count;
+}
+
 export function validateCreateBotRequest(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) fail('A new-bot request must be an object.');
-  const name = cleanText(body.name, MAX_BOT_NAME);
+  const given = cleanText(body.name, MAX_BOT_NAME);
   const job = cleanText(body.job ?? body.instructions ?? body.task, MAX_BOT_JOB);
-  if (name.length < 2) fail('A new bot needs a name of at least 2 characters.');
   if (job.length < MIN_BOT_JOB) fail(`A new bot needs a job of at least ${MIN_BOT_JOB} characters.`);
+  // The name is optional: one sentence is enough to make a bot.
+  const name = given || nameFromSentence(job);
+  if (name.length < 2) fail('A new bot needs a name of at least 2 characters.');
   const replyLength = BOT_REPLY_LENGTHS.includes(body.replyLength) ? body.replyLength : 'medium';
-  return {name, job, replyLength, style: cleanText(body.style, 300)};
+  return {name, job, replyLength, style: cleanText(body.style, 300), ...(given ? {} : {derived: true})};
 }
 
 export function parseCreateBotRequests(output) {
@@ -68,7 +114,7 @@ export const stripCreateBotBlocks = output => String(output ?? '').replace(BLOCK
 
 /** The lasting bot record the block becomes. No permissions, always custom:
  * the model cannot widen what the new bot may do. */
-export function buildCreatedBot(request, {bot, runId = null, now = new Date().toISOString(), makeId = () => crypto.randomUUID()} = {}) {
+export function buildCreatedBot(request, {bot, runId = null, now = new Date().toISOString(), makeId = () => crypto.randomUUID(), reportsTo = null, tint = null} = {}) {
   if (!request || !request.name || !request.job) fail('A new bot needs a name and a job.');
   return {
     id: cleanText(makeId(), 64),
@@ -81,6 +127,8 @@ export function buildCreatedBot(request, {bot, runId = null, now = new Date().to
       enabled: true,
       replyLength: BOT_REPLY_LENGTHS.includes(request.replyLength) ? request.replyLength : 'medium',
       ...(request.style ? {style: cleanText(request.style, 300)} : {}),
+      reportsTo,
+      ...(Number.isInteger(tint) ? {tint} : {}),
     },
     origin: 'bot',
     createdBy: {
@@ -96,5 +144,5 @@ export function buildCreatedBot(request, {bot, runId = null, now = new Date().to
 export const botCreatedText = (creator, created, groupName) => `${creator?.name || 'A bot'} created a new bot for this work: ${created.name} in ${groupName || 'this group'}. It has no permissions; review its job in its profile and grant anything it needs.`;
 export const botCreateRefusedText = (bot, reason) => `${bot?.name || 'The bot'} tried to create a new bot, but ${reason}`;
 
-/** What a bot is told about the tool when it holds the permission. */
-export const BOT_CREATE_TOOL_HINT = 'You can add one new bot to your own group when a task needs help that lasts beyond this reply. Put one block in your reply with the name and the job filled in, like ```create-bot\n{"name":"Source scout","job":"Find posts that mention the project and list their links."}\n``` — write your own name and job, do not copy this example. The new bot gets no permissions; a person reviews it. One bot per reply.';
+/** What every bot is told about the tool. */
+export const BOT_CREATE_TOOL_HINT = 'You can add one new bot to the company when a task needs help that lasts beyond this reply. Put one block in your reply with its job in one sentence (the name is optional), like ```create-bot\n{"name":"Source scout","job":"Find posts that mention the project and list their links."}\n``` — write your own, do not copy this example. It reports to you if you lead a team, else to your manager. The new bot gets no permissions; a person reviews it. One bot per reply.';

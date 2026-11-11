@@ -42,12 +42,12 @@ const stamp = () => new Date().toISOString();
 export async function runBotTurn(store, {
   bot, envelope, executor, config,
   peers = [], configFor = () => null, memoryForPeer = null, handoffAllowed = true,
-  spawnRounds = 0, groupId = null, runId = null, budget = null, resume = null, stop = false, onEvent = null,
+  spawnRounds = 0, groupId = null, runId = null, budget = null, resume = null, stop = false, onEvent = null, gate = null,
   makeId = randomUUID, now = stamp,
 }) {
   const sub = resume ? {output: null, lines: [], spawns: resume.spawns || []}
     : await replyWithSubagents({bot, envelope, executor, config, rounds: spawnRounds, makeId, now});
-  const peer = await askPeerRound({bot, envelope, first: sub.output, executor, config, peers, configFor, memoryForPeer, handoffAllowed, budget, resume, stop, onEvent, makeId, now});
+  const peer = await askPeerRound({bot, envelope, first: sub.output, executor, config, peers, configFor, memoryForPeer, handoffAllowed, budget, resume, stop, onEvent, gate, makeId, now});
   if (peer.limit) return {limit: peer.limit, frames: peer.frames, lines: [...sub.lines, ...peer.lines], spawns: sub.spawns, asks: peer.asks, created: []};
   const made = groupId
     ? await createBotsFromReply(store, {bot, groupId, output: peer.output, runId, makeId, now})

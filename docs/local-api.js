@@ -4,19 +4,20 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {initialState, cleanText} from './core.js?v=06c463a82b';
-import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=06c463a82b';
-import {RETENTION_DEFAULTS} from './retention.js?v=06c463a82b';
-import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=06c463a82b';
-import {addChatMessages, clearChat} from './chats.js?v=06c463a82b';
-import {publicMemory, addRules, removeRule, forgetChat, forgetRulebook} from './memory.js?v=06c463a82b';
-import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=06c463a82b';
-import {createThread, titleFrom} from './threads.js?v=06c463a82b';
-import {simulateGroup} from './group-simulator.js?v=06c463a82b';
-import {BUSY_STATUSES} from './run-state.js?v=06c463a82b';
-import {botSettings} from './bot-settings.js?v=06c463a82b';
-import {denyBrowserRequest} from './bot-browser.js?v=06c463a82b';
-import {withLocalLock} from './locks.js?v=06c463a82b';
+import {initialState, cleanText} from './core.js?v=5be2ff3602';
+import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=5be2ff3602';
+import {RETENTION_DEFAULTS} from './retention.js?v=5be2ff3602';
+import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=5be2ff3602';
+import {addChatMessages, clearChat} from './chats.js?v=5be2ff3602';
+import {publicMemory, addRules, removeRule, forgetChat, forgetRulebook} from './memory.js?v=5be2ff3602';
+import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=5be2ff3602';
+import {createThread, titleFrom} from './threads.js?v=5be2ff3602';
+import {pauseAll, resumeGuard} from './runaway.js?v=5be2ff3602';
+import {simulateGroup} from './group-simulator.js?v=5be2ff3602';
+import {BUSY_STATUSES} from './run-state.js?v=5be2ff3602';
+import {botSettings} from './bot-settings.js?v=5be2ff3602';
+import {denyBrowserRequest} from './bot-browser.js?v=5be2ff3602';
+import {withLocalLock} from './locks.js?v=5be2ff3602';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
@@ -199,6 +200,16 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
     addChatMessages(state, `team-${thread.id}`, [{role: 'user', text: message}], {trusted: true});
     const run = await localRun(state, thread.id, {message});
     save(state); return {thread, run};
+  }
+  // Pause all bots and Keep going, like the server's /api/guard. Stop also cancels
+  // whatever the guard parked, though the demo's offline engine parks nothing yet.
+  if (path === '/api/guard' && method === 'POST') {
+    if (typeof body.paused !== 'boolean') throw Object.assign(new Error('Say whether bots are paused: {"paused": true} or {"paused": false}.'), {status: 400});
+    if (body.paused) { pauseAll(state); save(state); return {guard: state.guard, resumed: 0, cancelled: 0}; }
+    resumeGuard(state);
+    const parked = state.groupRuns.filter(r => r.status === 'awaiting_limit' && r.limit?.kind === 'guard');
+    if (body.stop === true) for (const run of parked) { run.status = 'cancelled'; run.completedAt = now(); run.checkpoint = null; }
+    save(state); return {guard: state.guard, resumed: 0, cancelled: body.stop === true ? parked.length : 0};
   }
   if (path === '/api/groups' && method === 'POST') { const g = addGroup(state, body); save(state); return g; }
   if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/bots$/)) && method === 'POST') { const b = addBot(state, m[1], body); save(state); return b; }

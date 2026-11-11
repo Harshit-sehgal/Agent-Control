@@ -465,10 +465,10 @@ test('group and bot edit routes enforce roles over HTTP',{timeout:40000},async()
 });
 
 test('a person cannot grow a group past the bot limit or reuse a name',()=>{
-  const many=Array.from({length:40},(_,i)=>bot(`b${i}`));
+  const many=Array.from({length:500},(_,i)=>bot(`b${i}`));
   const s=wf.migrate({groups:[team('g',['a','b']),team('full',many)]});
   assert.throws(()=>wf.addBot(s,'g',{name:'A',instructions:'Do what A does, please.'}),/already in this group/);
-  assert.throws(()=>wf.addBot(s,'full',{name:'One more',instructions:'Do one more thing.',}),/already has 40 bots/);
+  assert.throws(()=>wf.addBot(s,'full',{name:'One more',instructions:'Do one more thing.',}),/already has 500 bots/);
   assert.equal(s.groups[0].bots.length,2);
   const added=wf.addBot(s,'g',{name:'C',instructions:'Do c'});
   assert.equal(added.name,'C');

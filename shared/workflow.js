@@ -16,6 +16,7 @@ import {BUSY_STATUSES} from './coordination.js';
 import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js';
 import {memoryState} from './memory.js';
 import {MAX_BOTS_PER_GROUP} from './bot-create.js';
+import {freshGuard} from './runaway.js';
 import {assertManager, releaseReports, PRIMARY_GROUP} from './company.js';
 
 export const SCHEMA_VERSION = 3;
@@ -32,6 +33,8 @@ export function migrate(state) {
   state.groups ??= [];
   state.groupMessages ??= {};
   state.groupRuns ??= [];
+  // The runaway guard's window and pause flag (shared/runaway.js).
+  if (!state.guard || typeof state.guard !== 'object') state.guard = freshGuard();
   // X home-feed reading is gone. A run parked on it can never resume, and it
   // would hold its group busy, so it loads as cancelled.
   for (const run of [...state.runs, ...state.groupRuns]) {

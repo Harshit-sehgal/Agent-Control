@@ -8,12 +8,13 @@ import {botSettings, threadContext} from '../shared/bot-settings.js';
 import {createThread, titleFrom} from '../shared/threads.js';
 import {executeCustomBot} from './ai.js';
 import {resolveConfig} from './ai-providers.js';
-import {queueGroupRun, resumeGroupRun, resumeBrowserRun, decidePlan, cancelRun, coordinationState} from './coordination.js';
+import {pauseAll} from '../shared/runaway.js';
+import {queueGroupRun, resumeGuardedRuns, resumeGroupRun, resumeBrowserRun, decidePlan, cancelRun, coordinationState} from './coordination.js';
 import {recordBrowserRequests, denyBrowserRequest, BROWSER_PERMISSION, BROWSER_TOOL_HINT} from '../shared/bot-browser.js';
 import {SUBAGENT_PERMISSION, SUBAGENT_TOOL_HINT} from '../shared/subagents.js';
 import {BOT_ASK_TOOL_HINT, companyList} from '../shared/bot-link.js';
 import {companyBots} from '../shared/company.js';
-import {BOT_CREATE_PERMISSION, BOT_CREATE_TOOL_HINT} from '../shared/bot-create.js';
+import {BOT_CREATE_TOOL_HINT} from '../shared/bot-create.js';
 import {memoryBlock} from '../shared/memory.js';
 import {runBotTurn} from './bot-turn.js';
 import {memoryFor, rememberTurn, maybeConsolidate} from './memory.js';
@@ -79,7 +80,7 @@ async function runOneBotInner(store, {botId, input, page = '', browserDepth = 0}
     ...(grants.includes(BROWSER_PERMISSION) ? {browser: BROWSER_TOOL_HINT} : {}),
     ...(grants.includes(SUBAGENT_PERMISSION) ? {subagent: SUBAGENT_TOOL_HINT} : {}),
     ...(botSettings(bot).canHandoff ? {ask: BOT_ASK_TOOL_HINT} : {}),
-    ...(grants.includes(BOT_CREATE_PERMISSION) ? {createBot: BOT_CREATE_TOOL_HINT} : {}),
+    ...(group ? {createBot: BOT_CREATE_TOOL_HINT} : {}),
   };
   const config = resolveConfig(store, bot.id);
   const memory = memoryFor(store, {bot, config, chatKey: bot.id});
@@ -153,6 +154,18 @@ export function groupRoutes(router) {
     });
     try { return reply(201, {thread, run: await queueGroupRun(c.store, {groupId: thread.id, message})}); }
     catch (error) { await c.store.update(s => wf.removeGroup(s, thread.id)); throw error; }
+  });
+
+  // Pause all bots, or Keep going / Stop after the runaway guard (or Pause all)
+  // paused what bots started. {paused: true} pauses; {paused: false} resumes what
+  // was parked; {paused: false, stop: true} cancels it instead. Owner-initiated
+  // chats work either way.
+  router.add('POST', '/api/guard', 'admin', async c => {
+    const b = await c.body();
+    if (typeof b?.paused !== 'boolean') fail('Say whether bots are paused: {"paused": true} or {"paused": false}.');
+    if (b.paused) { await c.store.update(s => pauseAll(s)); return {guard: c.store.read().guard, resumed: 0, cancelled: 0}; }
+    const result = await resumeGuardedRuns(c.store, {stop: b.stop === true});
+    return {guard: c.store.read().guard, resumed: result.resumed.length, cancelled: result.cancelled.length};
   });
 
   // Durable text-only bot coordination. Humans approve every external action separately.

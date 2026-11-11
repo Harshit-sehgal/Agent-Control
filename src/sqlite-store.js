@@ -19,6 +19,7 @@ import {initialState} from '../shared/core.js';
 import crypto from 'node:crypto';
 import {sqlite} from './sqlite.js';
 import * as wf from '../shared/workflow.js';
+import {freshGuard} from '../shared/runaway.js';
 
 const now = () => new Date().toISOString();
 
@@ -482,6 +483,8 @@ export class SqliteStore {
       groupMessages: {}, groupRuns: [], chats: {},
       ai: (() => { try { return JSON.parse(this.kvGet('ai') || '{}'); } catch { return {}; } })(),
       browserRequests: (() => { try { return JSON.parse(this.kvGet('browser_requests') || '[]'); } catch { return []; } })(),
+      // The runaway guard keeps its pause across a restart, so Pause all holds.
+      guard: (() => { try { return {...freshGuard(), ...JSON.parse(this.kvGet('guard') || '{}')}; } catch { return freshGuard(); } })(),
       memory: readMemory(kind => this.db.prepare('SELECT key, doc FROM memory WHERE kind=? ORDER BY rowid').all(kind)),
     };
     const cfg = this.db.prepare('SELECT * FROM settings WHERE id=1').get();
@@ -558,6 +561,7 @@ export class SqliteStore {
       this.kvSet('created_at', state.createdAt || now());
       this.kvSet('ai', JSON.stringify(state.ai || {}));
       this.kvSet('browser_requests', JSON.stringify(state.browserRequests || []));
+      this.kvSet('guard', JSON.stringify(state.guard || freshGuard()));
       this.stmt('INSERT INTO settings (id,retention) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET retention=excluded.retention')
         .run(state.settings?.retention ? JSON.stringify(state.settings.retention) : null);
     });

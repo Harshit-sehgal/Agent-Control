@@ -1,18 +1,18 @@
 /** What the UI can do, as three lookup tables keyed by `data-action`, form id and
  * control id. app.js owns the DOM events and dispatches here; handlers throw on
  * failure and the dispatcher turns that into one toast. */
-import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns} from './ui-store.js?v=06c463a82b';
-import {botSettings, groupSettings} from './bot-settings.js?v=06c463a82b';
-import {completeMention, moveRow, pipelineValue, editableInputs} from './ui-model.js?v=06c463a82b';
-import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=06c463a82b';
-import {sendChat, streamGroupRun, watchQueuedRun} from './ui-chat.js?v=06c463a82b';
-import {runWithTyping} from './run-follow.js?v=06c463a82b';
-import {confetti, whoosh, react, poke} from './ui-fx.js?v=06c463a82b';
-import {renderList, renderMentions} from './ui-views.js?v=06c463a82b';
-import {reloadAdminPage, pipelineList} from './ui-panel.js?v=06c463a82b';
-import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, botTaskSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=06c463a82b';
-import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=06c463a82b';
-import {takeoverActions, takeoverForms} from './ui-takeover.js?v=06c463a82b';
+import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns} from './ui-store.js?v=5be2ff3602';
+import {botSettings, groupSettings} from './bot-settings.js?v=5be2ff3602';
+import {completeMention, moveRow, pipelineValue, editableInputs} from './ui-model.js?v=5be2ff3602';
+import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=5be2ff3602';
+import {sendChat, streamGroupRun, watchQueuedRun} from './ui-chat.js?v=5be2ff3602';
+import {runWithTyping} from './run-follow.js?v=5be2ff3602';
+import {confetti, whoosh, react, poke} from './ui-fx.js?v=5be2ff3602';
+import {renderList, renderMentions} from './ui-views.js?v=5be2ff3602';
+import {reloadAdminPage, pipelineList} from './ui-panel.js?v=5be2ff3602';
+import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, botTaskSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=5be2ff3602';
+import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=5be2ff3602';
+import {takeoverActions, takeoverForms} from './ui-takeover.js?v=5be2ff3602';
 
 const adminCtx = {reload: reloadAdminPage};
 const chatId = () => store.route.chat;

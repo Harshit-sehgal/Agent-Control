@@ -9,6 +9,7 @@ import {createRun,createEnvelope,runNote,planHandoffs,handoffTargets,instructLea
 import {isThread,noteMember} from '../shared/threads.js';
 import {isLead,companyBots} from '../shared/company.js';
 import {extendLimits} from '../shared/ask-limits.js';
+import {noteBotWork,paused as botsPaused,resumeGuard} from '../shared/runaway.js';
 import {parseOffJob,offJobMessage} from '../shared/off-job.js';
 import {STOPPABLE_STATUSES} from '../shared/run-state.js';
 import {botSettings,groupSettings,threadContext,MAX_STEPS_LIMIT} from '../shared/bot-settings.js';
@@ -49,6 +50,15 @@ function endRun(run,status,{error=null}={}){
   run.checkpoint=null;
   if(error!==null)run.error=error;
   return run;
+}
+/** Park a run at a step boundary because bots are paused. The run keeps its place:
+ * Keep going starts it again at `nextStep`; Stop cancels it. */
+function parkForGuard(s,live,{nextStep,previous}){
+  live.status='awaiting_limit';
+  live.limit={kind:'guard',at:stamp()};
+  live.checkpoint={nextStep,previous,at:stamp()};
+  say(s,live,runNote(live));
+  activity(s,'group-run','Waiting: bots are paused',{runId:live.id});
 }
 /** Deny the pages a run still has open and return the device tasks those pages
  * had already been sent as. A run that stops, or that a restart cuts, must not
@@ -161,6 +171,9 @@ export async function runBotTask(store,task,{queue=queueGroupRun,available=aiAva
   if(bot&&!botSettings(bot).enabled){await note(`Scheduled task "${label}" skipped: ${bot.name} is switched off.`);return {skipped:'disabled'};}
   if(!available(store)){await note(`Scheduled task "${label}" skipped: no AI provider is configured.`);return {skipped:'no-ai'};}
   if(chatIsBusy(s.groupRuns,group,chatKey))throw Object.assign(new Error('A group run is already active. Wait or retry later.'),{status:409});
+  // A timer is bot-initiated work: it counts against the runaway guard and is
+  // skipped, with a line in its chat, while bots are paused.
+  if(await store.update(st=>noteBotWork(st,'run').paused)){await note(`Scheduled task "${label}" skipped: bots are paused.`);return {skipped:'paused'};}
   // Queue first. A 409 or a validation error must not leave a "Scheduled task"
   // line for a run that never started; the queue retries those.
   const result=await queue(store,{groupId,message,directBotId:botId,chatKey,confirmPlan:false});
@@ -184,7 +197,7 @@ export function runGroup(store,id,executor=executeCustomBot){
  * a restore, and `queued` is a busy status: the group would answer 409 to every
  * later message with no Start button to press and no way out until a restart. */
 function startRun(store,id,executor){
-  void runGroup(store,id,executor).catch(error=>{
+  return runGroup(store,id,executor).catch(error=>{
     console.error('Group execution:',error.message);
     return failRunStart(store,id,error);
   });
@@ -235,6 +248,15 @@ async function runGroupInner(store,id,executor){
       }
       const g=current.groups.find(x=>x.id===r.groupId);
       if(!g)throw new Error('Bot or group was removed during execution.');
+      // The runaway guard. The first step is the owner's own message; every step
+      // after it is a bot handing work to a bot, and waits while bots are paused.
+      if(i>0&&await store.update(s=>{
+        const live=s.groupRuns.find(x=>x.id===id);
+        if(!live||live.status!=='running')throw new Error('Run no longer active');
+        if(!noteBotWork(s,'run').paused)return false;
+        parkForGuard(s,live,{nextStep:i,previous});
+        return true;
+      }))return;
       const bot=resolveBot(current,g,r,r.recipients[i]);
       r.currentStep=i;
       const roster=[...g.bots,...summonableGuests(current.groups,g.id)];
@@ -271,7 +293,8 @@ async function runGroupInner(store,id,executor){
           :{botId:event.from,kind:'peer',to:event.to,output:event.output||'',...(event.error?{error:event.error}:{}),at:stamp()});
         if(live.trace.length>400)live.trace=live.trace.slice(-400);
       });
-      const reply=await runBotTurn(store,{bot,envelope,executor,config,peers:everyone,configFor:peerId=>resolveConfig(store,peerId),memoryForPeer:(mate,mateConfig)=>memoryFor(store,{bot:mate,config:mateConfig,chatKey:r.chatKey}),handoffAllowed:mayHandoff(r,bot)&&!closing,spawnRounds:(r.subagents||[]).some(spawn=>spawn.botId===bot.id)?MAX_SUBAGENT_DEPTH:0,budget,onEvent,resume:resumed,stop:stopped,groupId:home?.id??null,runId:id,makeId:randomUUID,now:stamp});
+      const gate=()=>store.update(s=>noteBotWork(s,'run').paused);
+      const reply=await runBotTurn(store,{bot,envelope,executor,config,peers:everyone,configFor:peerId=>resolveConfig(store,peerId),memoryForPeer:(mate,mateConfig)=>memoryFor(store,{bot:mate,config:mateConfig,chatKey:r.chatKey}),handoffAllowed:mayHandoff(r,bot)&&!closing,spawnRounds:(r.subagents||[]).some(spawn=>spawn.botId===bot.id)?MAX_SUBAGENT_DEPTH:0,budget,onEvent,gate,resume:resumed,stop:stopped,groupId:home?.id??null,runId:id,makeId:randomUUID,now:stamp});
       if(reply.limit){
         // A checkpoint, not a failure: what was said stays said, the bots still
         // waiting on an answer are kept, and the owner picks what happens next.
@@ -450,7 +473,7 @@ export async function resumeBrowserRun(store,request,{ok,text='',executor}={}){
  * already said is removed - the thread would lose the reasoning that led here -
  * and the note says what happened so the thread does not just go quiet.
  */
-export async function cancelRun(store,id,{actor=null}={}){
+export async function cancelRun(store,id,{actor=null,note=null}={}){
   const result=await store.update(s=>{
     const r=s.groupRuns?.find(x=>x.id===id);
     if(!r)throw Object.assign(new Error('Run not found.'),{status:404});
@@ -461,7 +484,7 @@ export async function cancelRun(store,id,{actor=null}={}){
     // device would open it after the person pressed Stop, and the approval card
     // would enqueue work for a run that no longer exists.
     const taskIds=denyRunPages(s,id,'The run was stopped before this page was opened.');
-    say(s,r,{id:randomUUID(),role:'system',text:midStep?'Stopped. The reply being written when you stopped it was discarded; nothing after it runs.':'Stopped before it started. Nothing ran.',runId:id,at:stamp()});
+    say(s,r,{id:randomUUID(),role:'system',text:note||(midStep?'Stopped. The reply being written when you stopped it was discarded; nothing after it runs.':'Stopped before it started. Nothing ran.'),runId:id,at:stamp()});
     activity(s,'group-run','Stopped a bot coordination run',{runId:id,by:actor});
     return {runId:id,status:'cancelled',taskIds};
   });
@@ -485,6 +508,22 @@ export async function decidePlan(store,id,{approve}){
   if(result.start)startRun(store,id);
   return {runId:result.runId,status:store.read().groupRuns.find(r=>r.id===id)?.status||result.status};
 }
+/** Keep going (or Stop) for everything the runaway guard parked. Clears the pause
+ * and starts a new window; each parked run starts again where it waited, or, with
+ * `stop`, is cancelled. The resumed runs go on in the background; `done` settles
+ * when they have. */
+export async function resumeGuardedRuns(store,{stop=false,executor=executeCustomBot}={}){
+  const ids=await store.update(s=>{
+    coordinationState(s);
+    resumeGuard(s);
+    return s.groupRuns.filter(r=>r.status==='awaiting_limit'&&r.limit?.kind==='guard').map(r=>r.id);
+  });
+  if(stop){
+    for(const id of ids)await cancelRun(store,id,{note:'Stopped. Bots were paused and nothing else ran.'});
+    return {resumed:[],cancelled:ids,done:Promise.resolve()};
+  }
+  return {resumed:ids,cancelled:[],done:Promise.all(ids.map(id=>startRun(store,id,executor)))};
+}
 export async function resumeGroupRun(store,id,executor=executeCustomBot,{choice}={}){
   const r=store.read().groupRuns.find(x=>x.id===id);
   if(!r)throw Object.assign(new Error('Run not found.'),{status:404});
@@ -492,6 +531,14 @@ export async function resumeGroupRun(store,id,executor=executeCustomBot,{choice}
     // Keep going (another round of the same size), Keep going without more
     // checkpoints for this task, or Stop: the asking bot reports what it has.
     if(!['more','unlimited','stop'].includes(choice))throw Object.assign(new Error('Choose more, unlimited or stop.'),{status:400});
+    // A run parked by the runaway guard waits on the guard, not on a tally:
+    // it goes on once bots are resumed, or it is stopped.
+    if(r.limit?.kind==='guard'){
+      if(choice==='stop')return cancelRun(store,id,{note:'Stopped. Bots were paused and nothing else ran.'});
+      if(botsPaused(store.read()))throw Object.assign(new Error('Bots are paused. Resume them first.'),{status:409});
+      await runGroup(store,id,executor);
+      return {runId:id,status:store.read().groupRuns.find(x=>x.id===id)?.status||'running'};
+    }
     await store.update(s=>{const live=s.groupRuns.find(x=>x.id===id);if(!live||live.status!=='awaiting_limit')throw Object.assign(new Error('This run is not waiting at a limit.'),{status:409});
       if(choice==='more')extendLimits(live,live.limit?.kind);
       else if(choice==='unlimited')live.unlimitedAsks=true;
