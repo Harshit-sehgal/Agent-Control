@@ -279,6 +279,14 @@ Phases 4, 5 and 6 are independent of each other once 3 lands.
 - **Primary routing failure:** if the primary's model is unavailable, the group message gets a card asking the owner which bot should take it.
 - **No token streaming for `local-cli` bots in v1.** The thread shows "working…" until the result returns.
 
+### Second builder check (2026-11-11, after mock v46; my calls, owner may override)
+
+- **Which text wins.** The mock at v46 is the UI spec. Where prose in this doc disagrees with it, the newest mock version wins, and the mock beats prose. So: Settings is one page opened from the HS avatar (no drawer); Activity and Company live inside Settings; each bot has a `shape` field; the bot profile is a card of rows (Memory, Activity, Permissions, Model, Computer, Team), not tabs; there is no Lately list on phone and no threads button in chat headers; threads are found through search and the Threads section.
+- **Threads in the data model.** Users never make groups. A thread is a chat owned by Atlas, and Atlas adds whichever bots each run needs. To keep the refactor small, a thread reuses today's group record and routes (`/api/groups/:group/chat`, `runs/:run/…`) with `owner: primary` and a member list that grows as Atlas hands work out. Each bot chat is a one-bot record flagged `dm`. Renaming the routes is optional and can come later.
+- **The job is the `contract` field.** The first message in a new bot's chat is saved as its job, and telling the bot a new job in chat updates the field. Memory holds facts, not the job. The routing call reads names and jobs, so it sees the job.
+- **The look is what the mock shows.** It uses the dark grey `#1a1a1d` ground and the clean off-white light theme, and follows the system setting. Faces are three-quarter, turned right and looking up, with soft shading, catch-lights and the v45 animations. The three-look comparison is closed. Night desk's glowing tints and Ink & paper's flat faces are dropped.
+- **Phone is in scope for Phase 2.** The phone screens are detailed through v32 to v46. Phase 2 may land as several green commits (shell and navigation, bot chats and threads, profile and settings, home layouts) instead of one.
+
 ## Owner answers (2026-11-11)
 
 1. **Always allow is offered for every action except payments.** Send, post, delete, connector writes and browser submits all get Decline / Allow / Always allow. Anything that pays or spends money (checkout, card or wallet forms, purchase buttons, the `spend` action) only offers Decline / Allow, every time. The risk classifier above still runs: it decides which card appears, and an Always allow grant for a risky action still stays per bot, per action, per origin or account.
@@ -291,6 +299,16 @@ Phases 4, 5 and 6 are independent of each other once 3 lands.
    - data moves with the existing backup/restore; document the move in `docs/DEPLOYMENT.md`;
    - on the VM, subscription CLIs, the shared browser profile and stdio MCP servers live wherever the local agent runs: the laptop (then they pause when it sleeps) or an agent on the VM too (owner signs in to `claude` and `codex` there once).
    - Tracked as the last item of Phase Z in `docs/BUILD-PLAN.md`.
+
+## Owner answers after the second builder check (2026-11-11)
+
+4. **One person only.** The owner is the only user, so the build adds no multi-member features. Every ask, Always allow, subscription bot and browser sign-in belongs to the owner. The existing account, sign-in and workspace code stays, used by one owner. The "Who answers" call above shrinks to "the owner answers". Member and viewer roles get no new UI, and nothing new is built for them.
+5. **Out-of-job requests in a bot's own chat.** The bot does not quietly do another bot's job, and it does not quietly refuse. It replies that this is not its job and offers three choices, as buttons:
+   - **Do it anyway:** the bot does it this once.
+   - **Ask Atlas:** the request goes to the primary, which hands it to the right bot or offers to hire one.
+   - **Make a new bot:** opens the New bot page with the request as the new bot's job.
+   The owner picks each time. Leads (Atlas and managers) still hand work to their team without asking. The bot decides "not my job" from its own job (`contract`) only, so it needs no list of other bots.
+6. **Home is the Chats layout only.** The owner uses Chats, the list of bot chats with the latest message. Desks, List and Orbit are dropped, along with the layout picker and their drag rules. Pinning works in Chats as the mock shows. This overrides the "newest mock wins" rule wherever the mock still defaults to another layout.
 
 ## Left to the builder
 
