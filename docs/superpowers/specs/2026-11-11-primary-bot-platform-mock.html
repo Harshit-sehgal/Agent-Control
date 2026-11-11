@@ -183,6 +183,22 @@ kbd{font-family:var(--body);font-size:11px;color:var(--muted);border:1px solid v
 @keyframes zz{0%,45%{opacity:0;transform:translate(0,3px)}65%{opacity:.75}100%{opacity:0;transform:translate(4px,-7px)}}
 .face:not(.sleep):not(.read):not(.wait) .eyes{animation:glance 9s ease-in-out infinite;animation-delay:var(--d,0s)}
 @keyframes glance{0%,40%,100%{transform:none}46%,57%{transform:translateX(calc(var(--s) * -.06))}63%,72%{transform:translateX(calc(var(--s) * .05))}}
+/* more life (mock v45): awake bots hum along, workers murmur and nod, happy bots hop with ^ ^ eyes */
+.face:not(.sleep):not(.wait):not(.read){animation:sway 7s ease-in-out infinite;animation-delay:var(--d,0s)}
+@keyframes sway{0%,100%{rotate:0deg}30%{rotate:-3deg}70%{rotate:2.5deg}}
+.face.read{animation:nod 1.8s ease-in-out infinite;animation-delay:var(--d,0s)}
+@keyframes nod{0%,100%{translate:0 0}50%{translate:0 calc(var(--s) * .035)}}
+.face.read b{animation:murmur .45s ease-in-out infinite alternate}
+@keyframes murmur{from{scale:1 .55}to{scale:1 1.2}}
+.face.dbl i{animation-name:blink2;animation-duration:6.5s}
+@keyframes blink2{0%,90%,96%,100%{transform:scaleY(1)}91.5%,94.5%{transform:scaleY(.1)}93%{transform:scaleY(1)}}
+.face.joy{animation:hop .62s cubic-bezier(.34,1.4,.64,1)}
+@keyframes hop{0%{translate:0 0;scale:1}30%{translate:0 calc(var(--s) * -.16);scale:.95 1.06}62%{translate:0 0;scale:1.07 .93}100%{translate:0 0;scale:1}}
+.face.joy i{animation:none;background:transparent;height:8%;margin-top:4%;border:calc(var(--s) * .04 + .5px) solid #1b1a18;border-bottom:0;border-radius:99px 99px 0 0}
+.face.joy i::after{display:none}
+.face.joy b{width:17%;height:8%;border-radius:0 0 99px 99px;opacity:.7;animation:none}
+.prog.live .face:not(.wait){animation:hop .5s cubic-bezier(.34,1.4,.64,1)}
+.bhero .face,.mkprev .face{cursor:pointer}
 /* point at a sleeping bot and it peeks; any face gives a tiny boop */
 :is(.bmain,.seat,.chatmain,.dhead,.orb,.head):hover .face.sleep i{height:19%;top:19%;opacity:1}
 :is(.bmain,.seat,.chatmain,.dhead,.orb,.head):hover .face.sleep b{opacity:.5}
@@ -753,7 +769,7 @@ const S={mute:new Set(),home:LAY.def||'tree',def:LAY.def||'tree',order:LAY.order
 const faceState=b=>S.busy.has(b.id)?'read':(b.id==='atlas'?'':'sleep');
 const face=(b,size='',st)=>b.id==='atlas'&&size&&size!=='s'?`<span class="pf">${face0(b,size,st)}<span class="star" title="Primary"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.8l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z"/></svg></span></span>`:face0(b,size,st);
 const SHAPES=[['soft','Rounded square'],['round','Circle'],['hex','Hexagon'],['pebble','Pebble'],['drop','Drop'],['shield','Shield'],['arch','Arch'],['egg','Egg'],['blob','Blob'],['bean','Bean']];
-const face0=(b,size='',st)=>`<span class="face ${size} ${b.shape?'sh-'+b.shape:b.id==='atlas'?'primary':isMgr(b)?'mgr':''} ${st===undefined?faceState(b):st}" style="--t:${b.tint};--d:${(b.name.length%5)*.9}s" aria-hidden="true"><span class="eyes"><i></i><i></i></span><b></b></span>`;
+const face0=(b,size='',st)=>`<span class="face ${size} ${b.shape?'sh-'+b.shape:b.id==='atlas'?'primary':isMgr(b)?'mgr':''} ${st===undefined?faceState(b):st}${b.name.length%2?' dbl':''}" style="--t:${b.tint};--d:${(b.name.length%5)*.9}s" aria-hidden="true"><span class="eyes"><i></i><i></i></span><b></b></span>`;
 const asks={};const $=id=>document.getElementById(id);
 const pending=()=>S.threads.flatMap(t=>t.items.filter(i=>i.k==='ask'&&!i.done).map(i=>({...i,thread:t.id})));
 const stateOf=b=>pending().some(a=>a.bot===b.id)?'waiting':S.busy.has(b.id)?'working':b.id==='atlas'?'awake':'asleep';
@@ -873,7 +889,7 @@ function itemHTML(it,t){
     case 'work':return it.wait?`<div class="working">${face(b,'','wait')}<span>${b.name} is waiting on you<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></span></div>`:`<div class="working">${face(b,'','read')}<span>${b.name} is working${it.note?' · '+esc(it.note):''}</span></div>`;
     case 'hop':{const f=by(it.from),to=by(it.to);return `<details class="hop fadein"><summary>${face(f,'s','')}<span><b>${f.name}</b> messaged <b>${to.name}</b></span></summary><div class="said">${esc(it.text)}</div></details>`}
     case 'ask':return it.done?`<div class="settled">${esc(it.done)}</div>`:`<div class="ask fadein"><p><b>${b.name}</b> wants to ${esc(it.action)}.</p><div class="acts"><button class="btn primary" data-ans="always" data-ask="${it.id}">Always allow</button><button class="btn" data-ans="once" data-ask="${it.id}">Allow once</button><button class="btn" data-ans="no" data-ask="${it.id}">Decline</button></div></div>`;
-    case 'reply':return `<div class="bot fadein" style="--t:${b.tint};--tc:color-mix(in srgb,${b.tint} 45%,var(--fg))">${face(b,'','')}<div class="body"><div class="name">${b.name}<span>${esc(short(b))}</span></div><p>${esc(it.text)}</p>${it.create?`<div class="picker"><button class="chip" data-hire-from="${t.id}">Hire a bot for bookings</button><button class="chip">Handle it once</button></div>`:''}</div></div>`;
+    case 'reply':{const j=!it.seen;it.seen=1;return `<div class="bot fadein" style="--t:${b.tint};--tc:color-mix(in srgb,${b.tint} 45%,var(--fg))">${face(b,'',j?'joy':'')}<div class="body"><div class="name">${b.name}<span>${esc(short(b))}</span></div><p>${esc(it.text)}</p>${it.create?`<div class="picker"><button class="chip" data-hire-from="${t.id}">Hire a bot for bookings</button><button class="chip">Handle it once</button></div>`:''}</div></div>`}
     case 'mem':return `<div class="mem fadein">${IC.check}${b.name} will remember: ${esc(it.text)}</div>`;
     case 'note':return `<div class="settled">${esc(it.text)}</div>`;
   }
@@ -1071,6 +1087,10 @@ function ease(el){if(el&&!matchMedia('(prefers-reduced-motion: reduce)').matches
 /* ---------- the run ---------- */
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 const up=()=>{renderMain();renderOver()};
+// A happy hop: ^ ^ eyes for a moment. Tapping a big face does it too.
+function joy(f){if(!f)return;f.classList.remove('joy');void f.offsetWidth;f.classList.add('joy');clearTimeout(f._j);f._j=setTimeout(()=>f.classList.remove('joy'),900)}
+{const rm=renderMain;renderMain=function(){rm();document.querySelectorAll('#root .face.joy').forEach(f=>{f._j=setTimeout(()=>f.classList.remove('joy'),900)})}}
+document.addEventListener('click',e=>{const f=e.target.closest?.('.bhero .face,.mkprev .face');if(f)joy(f)});
 // Who a lead can hand work to: Atlas reaches every bot, a manager reaches its own team.
 const TEAM=lead=>{if(lead==='atlas')return BOTS.filter(b=>b.id!=='atlas'&&vis(b));const out=[],walk=id=>BOTS.filter(b=>b.boss===id&&vis(b)).forEach(b=>{out.push(b);walk(b.id)});walk(lead);return out};
 function planFor(text,lead){const team=TEAM(lead).map(b=>b.id),s=SCRIPTS.find(x=>x.match(text));
@@ -1130,7 +1150,7 @@ async function send(text){
 }
 function openDM(id){let t=S.threads.find(x=>x.dm===id);const b=by(id);
   if(!t){t={id:'dm'+id,at:Date.now(),title:b.name,owner:id,dm:id,items:[{k:'note',text:id==='atlas'?'Your chat with Atlas. Ask for anything; Atlas hands it to the right bot, or hires one.':isMgr(b)?`Your chat with ${b.name}. Ask it directly, or ask it to get something done; it hands the work to its team.`:`Your chat with ${b.name}. One continuous chat; ${b.name} remembers what you tell it here.`}]};S.threads.unshift(t)}
-  S.recent=[id,...S.recent.filter(x=>x!==id)];go('thread',t.id)}
+  S.recent=[id,...S.recent.filter(x=>x!==id)];go('thread',t.id);joy(document.querySelector('.tface .face'))}
 
 /* ---------- palette ---------- */
 function palItems(q){
