@@ -1174,5 +1174,5 @@ S.threads.push({id:'seed',at:now-3*H,title:'Reply to the Northwind email',owner:
   {k:'hop',from:'mail',to:'plan',text:'Northwind confirmed Wednesday. Can you hold 11:00?'},
   {k:'reply',bot:'mail',text:'Sent: "Wednesday works. 11:00?" Planner is holding the slot.',ctx:'2 memories'}]});
 document.querySelectorAll('.looks button').forEach(b=>b.classList.toggle('on',b.dataset.look===$('app').dataset.look));
-render();
+if(DESK.matches)openDM('atlas');else render();
 </script>
