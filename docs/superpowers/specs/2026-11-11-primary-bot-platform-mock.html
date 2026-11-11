@@ -247,7 +247,7 @@ button.tog:hover{background:var(--sunk);color:var(--fg)}
 .chats{display:flex;flex-direction:column}
 .chat{display:flex;align-items:center;gap:14px;padding:12px 10px;border-radius:var(--r);text-align:left;width:100%;position:relative}
 .chat:hover{background:var(--sunk)}
-.chat+.chat::before{content:'';position:absolute;top:0;left:68px;right:10px;border-top:1px solid var(--line)}
+.chat:hover{background:color-mix(in srgb,var(--raise) 55%,transparent)}
 .chat:hover::before,.chat:hover+.chat::before{opacity:0}
 .chat .w{flex:1;min-width:0}
 .chat .top{display:flex;align-items:center;gap:6px}
@@ -426,7 +426,7 @@ body.sorting,body.sorting *{cursor:grabbing!important;user-select:none;-webkit-u
 .chat{gap:2px;padding:0 6px 0 0}
 .chatmain{flex:1;min-width:0;display:flex;align-items:center;gap:14px;padding:12px 10px;text-align:left}
 .recent h3{font-size:13px;font-weight:600;color:var(--soft);margin:0 0 6px}
-.trow{display:flex;gap:12px;align-items:center;width:100%;padding:10px 4px;border-top:1px solid var(--line);text-align:left}
+.trow{display:flex;gap:12px;align-items:center;width:100%;padding:10px 8px;border-radius:12px;text-align:left}
 .trow:first-of-type{border-top:0}
 .trow .w{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .trow small{color:var(--muted)}
