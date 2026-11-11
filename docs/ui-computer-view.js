@@ -13,16 +13,16 @@
  * Polling is what makes the device cast: the server tells the agent to stream a tab only
  * while somebody is looking, so the loop stops when the page is hidden or the view closes.
  * Input goes out in order, one request at a time, with typed letters joined. */
-import {esc, icon} from './ui-kit.js?v=9b57bd5b4d';
-import {botColor} from './ui-face.js?v=9b57bd5b4d';
-import {store, api, findBot, canWrite, isAdmin, isStaticDemo, changed, onChange, go} from './ui-store.js?v=9b57bd5b4d';
+import {esc, icon} from './ui-kit.js?v=f4b2b474ab';
+import {botColor} from './ui-face.js?v=f4b2b474ab';
+import {store, api, findBot, canWrite, isAdmin, isStaticDemo, changed, onChange, go} from './ui-store.js?v=f4b2b474ab';
 /** Driving the tab (Take over, Hand back, input) is an admin's, the role those routes need; the demo is its one owner. */
 const canDrive = () => isStaticDemo() || isAdmin();
-import {toast} from './ui-dialogs.js?v=9b57bd5b4d';
+import {toast} from './ui-dialogs.js?v=f4b2b474ab';
 import {
   PAGE, KEY_CHIPS, clickInput, wheelInput, keyInput, coalesce, navigateAddress, rowLabel, statusOf, stateLine, mergeView, veilFor, frameDelay, listDelay, wantsList,
   chipFor, pagesRows,
-} from './ui-computer.js?v=9b57bd5b4d';
+} from './ui-computer.js?v=f4b2b474ab';
 
 const el = id => document.getElementById(id);
 const raw = (path, method = 'GET', body) => window.AGENT_API(path, method, body);   // no progress bar: these run all the time

@@ -1312,6 +1312,7 @@ GOOGLE_STEPS = [
     'Copy the Client ID and Client secret, paste them here and save, then choose Connect Google.',
 ]
 REDIRECT = 'http://127.0.0.1:8787/api/connectors/google/callback'
+AGENT_ACTIONS = ['http.check', 'browser.capture', 'browser.action', 'model.run', 'mcp.call']
 TOOLS = [{'name': 'search_notes', 'write': False, 'description': 'Find notes'}, {'name': 'add_note', 'write': True, 'description': 'Add a note'}]
 
 
@@ -1328,7 +1329,7 @@ class Server:
         self.connectors = []
         self.google = {'configured': False, 'connected': False, 'status': 'none', 'account': None, 'redirectUri': REDIRECT, 'scopes': [], 'steps': GOOGLE_STEPS,
                        'testingNote': 'While the consent screen is in Testing, Google ends the sign-in after 7 days and this page shows Reconnect Google.'}
-        self.providers, self.default_provider = [], None
+        self.providers, self.default_provider, self.default_model = [], None, None
         self.agents = [
             {'id': 'a1', 'name': 'Laptop', 'status': 'online', 'permissions': ['model.run'], 'lastSeenAt': '2026-11-11T10:00:00Z', 'tasks': {'queued': 0, 'running': 0, 'failed': 0},
              'cli': {'claude': 'signed-in', 'codex': 'signed-out', 'checkedAt': '2026-11-11T10:00:00Z'}},
@@ -1343,7 +1344,8 @@ class Server:
         return [body for m, p, body in self.calls if m == method and p == path]
 
     def provider_listing(self, p):
-        return {**p, 'baseUrl': '', 'models': [], 'allModels': [], 'chatModels': [], 'labels': {}, 'apiVersion': None, 'hasHeaders': [], 'modelsAt': None, 'modelsError': None, 'modelsTruncated': False, 'keyOptional': False}
+        models = p.get('chatModels', [])
+        return {**p, 'baseUrl': '', 'models': models, 'allModels': models, 'chatModels': models, 'labels': {}, 'apiVersion': None, 'hasHeaders': [], 'modelsAt': None, 'modelsError': None, 'modelsTruncated': False, 'keyOptional': False}
 
     async def handle(self, route):
         request = route.request
@@ -1377,18 +1379,35 @@ class Server:
                 self.google.update(configured=False, connected=False, status='none', account=None)
             return await reply({'ok': True})
         if path == '/api/agents':
-            return await reply({'agents': self.agents, 'actions': ['browser', 'model.run']})
+            return await reply({'agents': self.agents, 'actions': AGENT_ACTIONS})
+        if path == '/api/agents/pair' and method == 'POST':
+            return await reply({'code': 'ABCD-1234', 'expiresAt': '2026-11-11T10:10:00Z', 'ttlSeconds': 600, 'permissions': body.get('permissions', [])}, 201)
+        m = re.match(r'^/api/agents/([a-z0-9-]+)$', path)
+        if m and method == 'PATCH':
+            next(a for a in self.agents if a['id'] == m.group(1)).update(permissions=body['permissions'])
+            return await reply({'ok': True})
+        if m and method == 'DELETE':
+            next(a for a in self.agents if a['id'] == m.group(1)).update(status='revoked', cli=None)
+            return await reply({'ok': True})
+        if path == '/api/ai' and method == 'PATCH':
+            self.default_provider = body.get('providerId', self.default_provider)
+            self.default_model = body.get('model', self.default_model)
+            return await reply({'ok': True})
         if path == '/api/ai':
             return await reply({'providers': [{k: v for k, v in p.items() if k in ('id', 'label', 'kind', 'engine', 'model', 'protocol', 'host', 'modelCount')} for p in self.providers],
-                                'defaultProviderId': self.default_provider, 'defaultModel': None, 'bots': {}})
+                                'defaultProviderId': self.default_provider, 'defaultModel': self.default_model, 'bots': {}})
         if path == '/api/ai/providers' and method == 'GET':
-            return await reply({'providers': [self.provider_listing(p) for p in self.providers], 'defaultProviderId': self.default_provider, 'defaultModel': None, 'bots': {}})
+            return await reply({'providers': [self.provider_listing(p) for p in self.providers], 'defaultProviderId': self.default_provider, 'defaultModel': self.default_model, 'bots': {}})
         if path == '/api/ai/providers' and method == 'POST':
             assert 'apiKey' not in body and 'baseUrl' not in body, 'a subscription holds no key'
             made = {'id': f'p-{len(self.providers) + 1}', 'label': body['label'], 'kind': 'local-cli', 'engine': body['engine'], 'model': body['model'], 'protocol': 'local-cli', 'host': None, 'modelCount': 0}
             self.providers.insert(0, made)
             self.default_provider = self.default_provider or made['id']
             return await reply(self.provider_listing(made), 201)
+        m = re.match(r'^/api/ai/providers/([a-z0-9-]+)/models$', path)
+        if m and method == 'POST':
+            models = next(p for p in self.providers if p['id'] == m.group(1)).get('chatModels', [])
+            return await reply({'models': models, 'chatModels': models, 'allModels': models, 'labels': {}})
         m = re.match(r'^/api/ai/providers/([a-z0-9-]+)(/test)?$', path)
         if m and m.group(2):
             return await reply({'ok': True, 'status': 'signed-in', 'agent': 'Laptop', 'message': 'Claude is signed in on Laptop.', 'engine': 'claude', 'model': None})
@@ -1560,23 +1579,25 @@ async def subscription_provider_and_cli_status(page, base):
     await open_app(page, base)
     await open_settings(page, 'models')
     body = page.locator('#main .st-dlg .st-body')
-    # Each paired agent says whether claude and codex are signed in there.
-    laptop = body.locator('.row', has_text='Laptop')
-    await expect(laptop).to_contain_text('Claude · Signed in')
-    await expect(laptop).to_contain_text('ChatGPT · Signed out')
-    await expect(laptop).to_contain_text('in a terminal on that machine to sign in')
-    desk = body.locator('.row', has_text='Desk PC')
-    await expect(desk).to_contain_text('Claude · Not installed')
-    await expect(desk).to_contain_text('not running now')
-    # There is no key field for a subscription.
+    # Nothing saved yet: one line says so, and "Add a model" is one card with a choice of two.
+    await expect(body).to_contain_text('No model yet')
+    choose = body.locator('[aria-label="What to add"] button')
+    await expect(choose).to_have_text(['Subscription', 'API key'])
+    await expect(choose.first).to_have_attribute('aria-pressed', 'true')
+    # The five-protocol paragraph is one line now.
+    await expect(body.locator('.st-note').first).to_have_text('Bring your own key, or use the Claude or ChatGPT plan you already pay for. Keys are stored encrypted and never shown again.')
+    # There is no key field for a subscription, and the engine is a pill, not a select.
     form = page.locator('#cli-provider-form')
-    assert await form.locator('input[type="password"], input[name="apiKey"], input[name="baseUrl"]').count() == 0
+    assert await form.locator('input[type="password"], input[name="apiKey"], input[name="baseUrl"], select').count() == 0
+    await expect(form.locator('input[name="engine"][value="claude"]')).to_be_checked()
     await form.locator('input[name="label"]').fill('My Claude')
-    await form.locator('select[name="engine"]').select_option('claude')
     await form.get_by_role('button', name='Add subscription').click()
-    row = body.locator('.row', has_text='My Claude')
+    row = body.locator('.cn-mcp', has_text='My Claude')
+    # The row says where it is signed in, in one line. The sign-in of each computer lives on Local agents, not here.
     await expect(row).to_contain_text('Claude subscription · default model · signed in on Laptop')
     await expect(row.locator('.tag')).to_have_text('default')
+    await expect(body.locator('.row')).to_have_count(0)
+    await expect(body).not_to_contain_text('Sign-in on your paired agents')
     assert server.sent('POST', '/api/ai/providers') == [{'kind': 'local-cli', 'label': 'My Claude', 'engine': 'claude', 'model': ''}]
     # Check sign-in never sends a prompt: it reads the agent's report.
     await row.get_by_role('button', name='Check sign-in').click()
@@ -1584,19 +1605,344 @@ async def subscription_provider_and_cli_status(page, base):
     assert len(server.sent('POST', '/api/ai/providers/p-1/test')) == 1
     # A model name rides along for the second engine; a bad one is refused before it leaves.
     await form.locator('input[name="label"]').fill('My ChatGPT')
-    await form.locator('select[name="engine"]').select_option('codex')
+    await form.locator('label', has_text='ChatGPT').click()
     await form.locator('input[name="model"]').fill('--bad')
     await form.get_by_role('button', name='Add subscription').click()
     await expect(page.locator('#toast')).to_contain_text('model name is not valid')
     assert len(server.sent('POST', '/api/ai/providers')) == 1
     await form.locator('input[name="model"]').fill('gpt-5')
     await form.get_by_role('button', name='Add subscription').click()
-    await expect(body.locator('.row', has_text='My ChatGPT')).to_contain_text('ChatGPT subscription · gpt-5 · signed out on Laptop')
+    await expect(body.locator('.cn-mcp', has_text='My ChatGPT')).to_contain_text('ChatGPT subscription · gpt-5 · signed out on Laptop')
     assert 'apiKey' not in json.dumps(server.calls)
-    # Delete asks first.
-    await row.get_by_role('button', name='Delete').click()
+    # Only Check sign-in and Make default are in sight; Delete is under the dots, and asks first.
+    await expect(row.get_by_role('button', name='Delete')).to_have_count(0)
+    await row.get_by_label('More for My Claude').click()
+    await expect(page.locator('#modal .rw')).to_have_text(['DeleteRemoves this subscription'])
+    await page.locator('#modal .rw', has_text='Delete').click()
     await page.locator('#modal').get_by_role('button', name='Delete').click()
-    await expect(body.locator('.row', has_text='My Claude')).to_have_count(0)
+    await expect(body.locator('.cn-mcp', has_text='My Claude')).to_have_count(0)
+
+
+async def models_api_provider_menu_and_one_model_picker(page, base):
+    gpt = {'id': 'p-9', 'label': 'Groq', 'kind': 'api', 'engine': None, 'model': None, 'protocol': 'openai-chat', 'host': 'api.groq.com', 'modelCount': 2, 'chatModels': ['llama-3.3-70b', 'mixtral']}
+    claude = {'id': 'p-8', 'label': 'My Claude', 'kind': 'local-cli', 'engine': 'claude', 'model': '', 'protocol': 'local-cli', 'host': None, 'modelCount': 0}
+    server = await install(page, providers=[gpt, claude], default_provider='p-9')
+    await open_app(page, base)
+    await open_settings(page, 'models')
+    body = page.locator('#main .st-dlg .st-body')
+    row = body.locator('.cn-mcp', has_text='Groq')
+    # Test and Make default stay in sight (the default one has no Make default); the other three actions are under the dots.
+    await expect(row.get_by_role('button', name='Test')).to_be_visible()
+    await expect(row.get_by_role('button', name='Make default')).to_have_count(0)
+    for name in ('Refresh models', 'Edit', 'Delete'):
+        await expect(row.get_by_role('button', name=name, exact=True)).to_have_count(0)
+    await expect(body.locator('.cn-mcp', has_text='My Claude').get_by_role('button', name='Make default')).to_be_visible()
+    await row.get_by_label('More for Groq').click()
+    await expect(page.locator('#modal .rw')).to_have_count(3)
+    await expect(page.locator('#modal .rw').nth(0)).to_contain_text('Refresh models')
+    await page.locator('#modal .rw', has_text='Refresh models').click()
+    await expect(page.locator('#modal')).to_be_hidden()
+    await expect(page.locator('#toast')).to_contain_text('2 model(s) available')
+    assert len(server.sent('POST', '/api/ai/providers/p-9/models')) == 1
+    # One model picker: the default form lists this provider's models in a datalist, and the subscription form has the same field.
+    default = page.locator('#ai-default-form')
+    await expect(default.locator('input[name="providerId"]')).to_have_value('p-9')
+    assert await default.locator('select').count() == 0, 'the default provider is chosen with Make default, not a second picker'
+    assert await page.locator('#ai-models option').evaluate_all('o => o.map(x => x.value)') == ['llama-3.3-70b', 'mixtral']
+    assert await default.locator('input[name="model"]').get_attribute('list') == 'ai-models'
+    assert await page.locator('#cli-provider-form input[name="model"]').get_attribute('list') == 'ai-cli-models'
+    await default.locator('input[name="model"]').fill('mixtral')
+    await default.get_by_role('button', name='Save').click()
+    await expect(page.locator('#toast')).to_contain_text('Default model saved')
+    assert server.sent('PATCH', '/api/ai') == [{'providerId': 'p-9', 'model': 'mixtral'}]
+    # Make default moves the default provider, and the picker follows it.
+    await body.locator('.cn-mcp', has_text='My Claude').get_by_role('button', name='Make default').click()
+    await expect(default.locator('input[name="providerId"]')).to_have_value('p-8')
+    await expect(page.locator('#ai-default-form .field-label')).to_have_text('Default model for My Claude')
+    # "API key" swaps the form: the preset, the address and the key, with protocol and headers folded away.
+    await body.locator('[data-action="ai-add-kind"][data-kind="api"]').click()
+    await expect(page.locator('#cli-provider-form')).to_be_hidden()
+    api_form = page.locator('#ai-provider-form')
+    await expect(api_form).to_be_visible()
+    await expect(api_form.locator('select[name="protocol"]')).to_be_hidden()
+    await api_form.locator('summary').click()
+    await expect(api_form.locator('select[name="protocol"]')).to_be_visible()
+    await expect(api_form.locator('textarea[name="headers"]')).to_be_visible()
+
+
+async def phone_models_page_fits(page, base):
+    gpt = {'id': 'p-9', 'label': 'Groq', 'kind': 'api', 'engine': None, 'model': None, 'protocol': 'openai-chat', 'host': 'api.groq.com', 'modelCount': 2, 'chatModels': ['llama-3.3-70b']}
+    await install(page, providers=[gpt], default_provider='p-9')
+    await open_app(page, base)
+    await page.locator('.ch-me').click()
+    await page.locator('#main .st-phone .rw', has_text='Models and keys').click()
+    await expect(page.locator('#main .cn-mcp')).to_have_count(1)
+    await expect(page.locator('#main .cn-mcp [data-action="ai-more"]')).to_be_visible()
+    assert await overflow(page) <= 0, 'Models and keys overflows the phone'
+
+
+# ---------------------------------------------------------------- the admin pages: Local agents, Team, Notifications, Data
+# They only exist on a server build (Settings hides them in the static demo), so each is mounted into a panel the way
+# Settings mounts it, and the app's own delegated handlers drive it. Every call goes to the stand-in server below.
+
+class AdminServer(Server):
+    def __init__(self, **kw):
+        self.users = [{'id': 'u0', 'email': 'owner@localhost', 'role': 'owner', 'disabled': False, 'createdAt': '2026-11-01T10:00:00Z'},
+                      {'id': 'u1', 'email': 'sam@example.org', 'role': 'member', 'disabled': False, 'createdAt': '2026-11-02T10:00:00Z'}]
+        self.credentials = [{'id': 'c1', 'name': 'ntfy topic', 'kind': 'webhook', 'createdBy': 'owner@localhost', 'createdAt': '2026-11-03T10:00:00Z', 'expiresAt': None, 'expired': False},
+                            {'id': 'c2', 'name': 'AI key · Groq', 'kind': 'ai_provider', 'createdBy': 'owner@localhost', 'createdAt': '2026-11-03T10:00:00Z', 'expiresAt': None, 'expired': False}]
+        self.prefs = {'inApp': True, 'webhook': False, 'webhookCredentialId': None, 'email': False, 'emailAddress': '', 'emailReady': False}
+        self.notifications = [{'id': 'n1', 'title': 'A task failed', 'body': 'Backup check', 'channel': 'in_app', 'status': 'delivered', 'created_at': '2026-11-11T09:00:00Z'}]
+        self.preview = {'events': 0, 'doneTasks': 4, 'runs': 1, 'dryRun': True}
+        super().__init__(**kw)
+
+    async def handle(self, route):
+        request = route.request
+        path = re.sub(r'^https?://[^/]+', '', request.url).split('?')[0]
+        method = request.method
+        body = json.loads(request.post_data) if request.post_data else None
+        admin = path in ('/api/users', '/api/notifications', '/api/notifications/read', '/api/notification-prefs', '/api/push', '/api/credentials', '/api/retention/preview', '/api/retention/prune', '/api/admin/restore', '/api/sessions') \
+            or re.match(r'^/api/(users|credentials)/[a-z0-9-]+(/reveal)?$', path)
+        if not admin:
+            return await super().handle(route)
+        if method != 'GET':
+            self.calls.append((method, path, body))
+        else:
+            self.calls.append((method, path, None))
+
+        async def reply(data, status=200):
+            await route.fulfill(status=status, content_type='application/json', body=json.dumps(data))
+        if path == '/api/users' and method == 'GET':
+            return await reply({'users': self.users, 'roles': ['owner', 'admin', 'member', 'viewer']})
+        m = re.match(r'^/api/users/([a-z0-9-]+)$', path)
+        if m and method == 'PATCH':
+            next(u for u in self.users if u['id'] == m.group(1)).update(body)
+            return await reply({'ok': True})
+        if path == '/api/notifications':
+            return await reply({'notifications': self.notifications, 'unread': 1})
+        if path == '/api/notification-prefs':
+            if method == 'PATCH':
+                self.prefs.update(body)
+            return await reply(self.prefs)
+        if path == '/api/push':
+            return await reply({'publicKey': 'AAAA', 'endpoints': []})
+        if path == '/api/credentials':
+            return await reply({'credentials': self.credentials})
+        m = re.match(r'^/api/credentials/([a-z0-9-]+)/reveal$', path)
+        if m:
+            return await reply({'id': m.group(1), 'name': 'ntfy topic', 'kind': 'webhook', 'value': 'https://ntfy.example/topic'})
+        if path == '/api/retention/preview':
+            return await reply({'policy': {'events': 90, 'doneTasks': 30, 'runs': 30}, 'preview': self.preview})
+        if path == '/api/retention/prune':
+            return await reply({'events': 0, 'doneTasks': 4, 'runs': 1})
+        if path == '/api/admin/restore':
+            return await reply({'restored': 12})
+        return await reply({'error': 'unexpected'}, 404)
+
+
+ADMIN_PREFIXES = ['/api/connectors', '/api/ai', '/api/agents', '/api/activity/', '/api/users', '/api/notification', '/api/push', '/api/credentials', '/api/retention/', '/api/admin/restore', '/api/sessions']
+
+
+async def install_admin(page, **kw):
+    server = AdminServer(**kw)
+    await page.add_init_script(via_fetch(ADMIN_PREFIXES))
+    for pattern in ('connectors', 'ai', 'agents', 'activity/', 'users', 'notification', 'push', 'credentials', 'retention/', 'admin/restore', 'sessions'):
+        await page.route(f'**/api/{pattern}**', server.handle)
+    return server
+
+
+async def mount_admin(page, kind, role='owner'):
+    """Mount an admin page into a panel the way Settings does, as the signed-in owner, and wait for it to paint."""
+    await page.evaluate("""async ([kind, role]) => {
+        // The build stamps every import with the bundle version; the same stamp reaches the app's own module instances.
+        const v = new URL(document.querySelector('script[src*="app.js"]').src).search;
+        const {store} = await import('./ui-store.js' + v);
+        store.state.me = {...(store.state.me || {}), email: 'owner@localhost', role};
+        document.querySelector('#admin-panel')?.remove();
+        const host = document.createElement('div');
+        host.id = 'admin-panel'; host.className = 'st-body'; host.dataset.page = kind;
+        host.style.cssText = 'position:fixed;inset:0;z-index:30;overflow:auto;padding:20px;background:var(--bg)';
+        document.body.append(host);
+        const {reloadAdminPage} = await import('./ui-settings.js' + v);
+        await reloadAdminPage();
+    }""", [kind, role])
+    await page.locator('#admin-panel .ad-panel').wait_for()
+    return page.locator('#admin-panel')
+
+
+async def agents_page_status_signin_and_switches(page, base):
+    server = await install_admin(page)
+    await open_app(page, base)
+    panel = await mount_admin(page, 'agents')
+    # One page: each computer says it is online or not, whether claude and codex are signed in there, and what it may do.
+    laptop = panel.locator('.st-g', has=page.locator('.st-h', has_text='Laptop'))
+    await expect(laptop.locator('.st-h ~ .tag, .ad-hd .tag')).to_have_text('Online')
+    await expect(laptop.locator('.rw', has_text=re.compile(r'^Claude'))).to_contain_text('Signed in')
+    chatgpt = laptop.locator('.rw', has_text=re.compile(r'^ChatGPT'))
+    await expect(chatgpt).to_contain_text('Signed out')
+    await expect(chatgpt).to_contain_text('in a terminal on that machine to sign in')
+    desk = panel.locator('.st-g', has=page.locator('.st-h', has_text='Desk PC'))
+    await expect(desk.locator('.rw', has_text=re.compile(r'^Claude'))).to_contain_text('Not installed')
+    await expect(desk.locator('.ad-hd .tag')).to_have_text('Not running now')
+    # What a computer may do is a switch per action, each with a plain name and its id.
+    switches = laptop.locator('[data-action="toggle-agent-permission"]')
+    await expect(switches).to_have_count(5)
+    await expect(laptop.locator('.rw', has_text='Run your Claude or ChatGPT plan')).to_contain_text('model.run')
+    model_run = laptop.locator('[data-permission="model.run"]')
+    await expect(model_run).to_have_attribute('aria-checked', 'true')
+    await expect(laptop.locator('[data-permission="browser.action"]')).to_have_attribute('aria-checked', 'false')
+    assert await panel.locator('input[type="checkbox"]').count() == 0, 'a native checkbox is left on the page'
+    # A switch saves the whole new list and moves only once the server took it.
+    await laptop.locator('[data-permission="browser.capture"]').click()
+    await expect(laptop.locator('[data-permission="browser.capture"]')).to_have_attribute('aria-checked', 'true')
+    assert server.sent('PATCH', '/api/agents/a1') == [{'permissions': ['browser.capture', 'model.run']}]
+    await model_run.click()
+    await expect(model_run).to_have_attribute('aria-checked', 'false')
+    assert server.sent('PATCH', '/api/agents/a1')[-1] == {'permissions': ['browser.capture']}
+    # Revoke asks first, and says what it does.
+    await laptop.get_by_role('button', name='Revoke').click()
+    await expect(page.locator('#modal')).to_contain_text('Revoke this local agent?')
+    await page.locator('#modal').get_by_role('button', name='Cancel').click()
+    assert server.sent('DELETE', '/api/agents/a1') == []
+    await laptop.get_by_role('button', name='Revoke').click()
+    await page.locator('#modal').get_by_role('button', name='Revoke').click()
+    await expect(panel.locator('.st-g', has=page.locator('.st-h', has_text='Laptop')).locator('.ad-hd .tag')).to_have_text('revoked')
+    assert server.sent('DELETE', '/api/agents/a1') == [{}]
+    # No X-era line is left on this page.
+    await expect(panel).not_to_contain_text('can never publish')
+
+
+async def agents_page_pairing_form_and_code(page, base):
+    server = await install_admin(page, agents=[])
+    await open_app(page, base)
+    panel = await mount_admin(page, 'agents')
+    await expect(panel).to_contain_text('No computer is paired yet')
+    form = panel.locator('#pairing-form')
+    await expect(form.locator('[data-permission]')).to_have_count(5)
+    await expect(form.locator('[data-permission][aria-checked="true"]')).to_have_count(5)
+    await form.locator('input[name="label"]').fill('Studio')
+    await form.locator('[data-permission="browser.action"]').click()
+    await expect(form.locator('[data-permission="browser.action"]')).to_have_attribute('aria-checked', 'false')
+    await form.get_by_role('button', name='Create pairing code').click()
+    # The scope the admin chose goes out; the code shows once, with the command to run on the computer and a Copy button.
+    assert server.sent('POST', '/api/agents/pair') == [{'label': 'Studio', 'permissions': ['http.check', 'browser.capture', 'model.run', 'mcp.call']}]
+    code = panel.locator('.st-g', has=page.locator('.st-h', has_text='Pairing code'))
+    await expect(code.locator('.code')).to_have_text('ABCD-1234')
+    await expect(code.locator('.cn-copy code')).to_contain_text('node agent/agent.mjs pair --server')
+    await expect(code.locator('.cn-copy code')).to_contain_text('--code ABCD-1234')
+    await expect(code.get_by_role('button', name='Copy')).to_be_visible()
+
+
+async def team_roles_are_pills_and_sessions_are_not_here(page, base):
+    server = await install_admin(page)
+    await open_app(page, base)
+    panel = await mount_admin(page, 'team')
+    sam = panel.locator('.cn-mcp', has_text='sam@example.org')
+    assert await panel.locator('select').count() == 0, 'a native select is left on the page'
+    await expect(sam.locator('.st-seg button')).to_have_text(['Viewer', 'Member', 'Admin'])
+    await expect(sam.locator('.st-seg [aria-pressed="true"]')).to_have_text('Member')
+    # The owner has no role to change, no Disable and no Remove.
+    owner = panel.locator('.cn-mcp', has_text='owner@localhost')
+    await expect(owner.locator('.tag')).to_have_text(['owner', 'you'])
+    assert await owner.locator('button').count() == 0
+    await sam.locator('.st-seg button', has_text='Viewer').click()
+    await expect(page.locator('#toast')).to_contain_text('Role updated')
+    assert server.sent('PATCH', '/api/users/u1') == [{'role': 'viewer'}]
+    await expect(sam.locator('.st-seg [aria-pressed="true"]')).to_have_text('Viewer')
+    # Disable and Remove still ask first.
+    await sam.get_by_role('button', name='Remove').click()
+    await expect(page.locator('#modal')).to_contain_text('Remove this user from the workspace?')
+    await page.locator('#modal').get_by_role('button', name='Cancel').click()
+    # Sessions moved to Settings > General > Account: not here, and not even asked for.
+    await expect(panel).not_to_contain_text('Your sessions')
+    await expect(panel).not_to_contain_text('Sign out everywhere')
+    assert not [c for c in server.calls if c[1].startswith('/api/sessions')]
+    # The invite form takes its role from the same pills.
+    invite = panel.locator('#create-user-form')
+    await expect(invite.locator('input[name="role"][value="member"]')).to_be_checked()
+    await expect(invite.get_by_label('Temporary password (min 8 chars)')).to_be_visible()
+
+
+async def notifications_are_switches_and_unwired_channels_are_hidden(page, base):
+    server = await install_admin(page)
+    await open_app(page, base)
+    panel = await mount_admin(page, 'notifications')
+    assert await panel.locator('input[type="checkbox"]').count() == 0, 'a native checkbox is left on the page'
+    await expect(panel.locator('.rw', has_text='A task failed')).to_contain_text('Backup check')
+    channels = panel.locator('.st-g', has=page.locator('.st-h', has_text='Tell me by'))
+    await expect(channels.locator('[role="switch"]').first).to_have_attribute('aria-checked', 'true')
+    await channels.locator('[data-pref="inApp"]').click()
+    await expect(channels.locator('[data-pref="inApp"]')).to_have_attribute('aria-checked', 'false')
+    assert server.sent('PATCH', '/api/notification-prefs') == [{'inApp': False}]
+    # A webhook is offered because a webhook address is saved; the text box for a credential id is gone.
+    await expect(channels.locator('.rw', has_text='Webhook')).to_be_visible()
+    await expect(panel).not_to_contain_text('Webhook credential id')
+    assert await panel.locator('input[name="webhookCredentialId"]').count() == 0
+    await expect(channels.locator('select[name="webhookCredentialId"]')).to_have_value('c1')
+    await channels.locator('[data-pref="webhook"]').click()
+    await expect(channels.locator('[data-pref="webhook"]')).to_have_attribute('aria-checked', 'true')
+    assert server.sent('PATCH', '/api/notification-prefs')[-1] == {'webhook': True, 'webhookCredentialId': 'c1'}
+    # Email needs a mailbox or relay on the server; without one it is not offered.
+    await expect(channels.locator('[data-pref="email"]')).to_have_count(0)
+    await expect(panel).not_to_contain_text('EMAIL_RELAY_URL')
+    # With one, it is a switch and an address.
+    server.prefs['emailReady'] = True
+    panel = await mount_admin(page, 'notifications')
+    channels = panel.locator('.st-g', has=page.locator('.st-h', has_text='Tell me by'))
+    await expect(channels.locator('[data-pref="email"]')).to_be_visible()
+    await channels.locator('#notif-email-form input[name="emailAddress"]').fill('me@example.org')
+    await channels.locator('#notif-email-form').get_by_role('button', name='Save').click()
+    assert server.sent('PATCH', '/api/notification-prefs')[-1] == {'emailAddress': 'me@example.org'}
+    await channels.locator('[data-pref="email"]').click()
+    await expect(channels.locator('[data-pref="email"]')).to_have_attribute('aria-checked', 'true')
+    assert server.sent('PATCH', '/api/notification-prefs')[-1] == {'email': True, 'emailAddress': 'me@example.org'}
+
+
+async def notifications_hide_webhook_without_a_saved_address(page, base):
+    server = await install_admin(page)
+    server.credentials = [c for c in server.credentials if c['kind'] != 'webhook']
+    await open_app(page, base)
+    panel = await mount_admin(page, 'notifications')
+    await expect(panel.locator('[data-pref="inApp"]')).to_be_visible()
+    await expect(panel.locator('[data-pref="webhook"]')).to_have_count(0)
+    await expect(panel.locator('[data-pref="email"]')).to_have_count(0)
+
+
+async def data_cards_keep_reveal_prune_and_restore_confirms(page, base):
+    server = await install_admin(page)
+    await open_app(page, base)
+    panel = await mount_admin(page, 'data')
+    ntfy = panel.locator('.cn-mcp', has_text='ntfy topic')
+    # Reveal is admin-only and audited by the server; a secret the app keeps for itself has no Reveal to press.
+    await expect(ntfy.get_by_role('button', name='Reveal')).to_be_visible()
+    groq = panel.locator('.cn-mcp', has_text='AI key · Groq')
+    await expect(groq.get_by_role('button', name='Reveal')).to_have_count(0)
+    await expect(groq.locator('.tag')).to_have_text('Model key')
+    await ntfy.get_by_role('button', name='Reveal').click()
+    await expect(page.locator('#modal textarea')).to_have_value('https://ntfy.example/topic')
+    await page.locator('#modal').get_by_role('button', name='Done').click()
+    # Retention reads in words, and Prune asks first.
+    await expect(panel.locator('.rw', has_text=re.compile(r'^Finished tasks')).first).to_contain_text('30 days')
+    await expect(panel.locator('.rw', has_text='Would be removed now')).to_contain_text('Finished tasks 4')
+    await panel.get_by_role('button', name='Prune now').click()
+    await expect(page.locator('#modal')).to_contain_text('Prune exhaust older than the retention policy?')
+    await page.locator('#modal').get_by_role('button', name='Cancel').click()
+    assert server.sent('POST', '/api/retention/prune') == []
+    await panel.get_by_role('button', name='Prune now').click()
+    await page.locator('#modal').get_by_role('button', name='Prune').click()
+    await expect(page.locator('#toast')).to_contain_text('Pruned 0 event(s), 4 task(s), 1 run(s).')
+    assert len(server.sent('POST', '/api/retention/prune')) == 1
+    # Restore is for the owner, folded away, and asks before it replaces the workspace.
+    await panel.locator('.ad-restore summary').click()
+    await panel.locator('#restore-doc').fill('{"workspace": "x"}')
+    await panel.get_by_role('button', name='Restore from pasted document').click()
+    await expect(page.locator('#modal')).to_contain_text('Replace this workspace with the pasted backup?')
+    await page.locator('#modal').get_by_role('button', name='Cancel').click()
+    assert server.sent('POST', '/api/admin/restore') == []
+    # Not the owner: no backup, only a line saying so.
+    panel = await mount_admin(page, 'data', role='admin')
+    await expect(panel.locator('#restore-doc')).to_have_count(0)
+    await expect(panel).to_contain_text('Backup and restore are available to the workspace owner.')
 
 
 async def demo_says_connectors_and_models_need_the_server(page, base):
@@ -1710,7 +2056,6 @@ async def phone_connectors_and_models_fit(page, base):
     await page.locator('#main [data-action="settings-back"]').click()
     await page.locator('#main .st-phone .rw', has_text='Models and keys').click()
     await expect(page.locator('#cli-provider-form')).to_be_visible()
-    await expect(page.locator('#main .row', has_text='Laptop')).to_be_visible()
     assert await overflow(page) <= 0, 'Models and keys overflows the phone'
     await page.goto(f'{base}/index.html#bot/{writer}')
     await page.evaluate(f"""localStorage.setItem({KEY!r}, JSON.stringify((s => {{ const at = new Date().toISOString();
@@ -1763,12 +2108,20 @@ async def main():
             await h.scenario('connectors: add an MCP server over HTTP and on the agent, refresh its tools, delete asks first, no secret is painted', connectors_add_and_delete_mcp)
             await h.scenario('connectors: the Google setup form, a plain Connect Google link, connected and reconnect states', google_setup_form_connect_and_reconnect)
             await h.scenario('connectors: ?google=connected toasts once, strips the address and opens Connectors; an error says why', google_return_toast_and_clean_address)
-            await h.scenario('models: a subscription is a name and an engine with no key field, and each agent shows its CLI sign-in', subscription_provider_and_cli_status)
+            await h.scenario('models: a subscription is a name and an engine with no key field, and its row says where it is signed in', subscription_provider_and_cli_status)
+            await h.scenario('models: Add a model is one card with a choice, the dots hold Edit, Refresh and Delete, one model picker', models_api_provider_menu_and_one_model_picker)
+            await h.scenario('agents: one page with each computer online or not, claude and codex sign-in, a switch per permission, Revoke asks first', agents_page_status_signin_and_switches)
+            await h.scenario('agents: the pairing form is switches, the code shows once with the command to run', agents_page_pairing_form_and_code)
+            await h.scenario('team: roles are pills, the owner has none, sessions are not on this page', team_roles_are_pills_and_sessions_are_not_here)
+            await h.scenario('notifications: switches that save at once; webhook and email show only when they can deliver', notifications_are_switches_and_unwired_channels_are_hidden)
+            await h.scenario('notifications: no webhook switch without a saved address, no email without a mailbox', notifications_hide_webhook_without_a_saved_address)
+            await h.scenario('data: Reveal not offered for app-kept secrets, Prune and Restore ask first, backup is owner only', data_cards_keep_reveal_prune_and_restore_confirms)
             await h.scenario('demo: Connectors and Models and keys say they need the server', demo_says_connectors_and_models_need_the_server)
             await h.scenario('chat: connector lines name the account, a held send has Undo, then collapses to a muted line', chat_connector_lines_and_undo)
             await h.scenario('chat: the Undo button goes when its window ends, and a late Undo says it already went out', chat_held_send_closes_by_itself_and_late_undo_says_so)
             await h.scenario('chat: a usage limit offers Switch to the provider named, then settles', chat_model_limit_switch)
             await h.scenario('phone: Connectors, Models and keys and a held send fit and are usable', phone_connectors_and_models_fit, PHONE)
+            await h.scenario('phone: Models and keys, with its dots, fits', phone_models_page_fits, PHONE)
             await browser.close()
             server.shutdown()
         failed = [name for name, error in h.results if error]

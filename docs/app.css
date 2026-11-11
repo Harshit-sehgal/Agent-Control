@@ -200,6 +200,30 @@ select.input{appearance:none;padding-right:34px;background-image:linear-gradient
 /* The in-flight bar is a moving gradient, and frozen mid-slide it is a static
      stripe that says nothing. A solid bar carries the same "working" cue. */
 .progress{animation:none;background:var(--brand)}}
+/* ---------- admin pages in Settings: Models, Notifications, Local agents, Team, Data ----------
+ * Cards of rows like Connectors. The card (.cd), the row (.rw), the switch, the pills (.st-seg) and the
+ * Connectors card (.cn-*) are in profile.css; these are only the parts they do not have. */
+.ad-panel{display:flex;flex-direction:column;gap:22px}
+.ad-hd{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 9px;min-height:36px}
+.ad-hd .st-h{margin:0 0 0 18px}
+.st-dlg .ad-hd .st-h{margin:0 0 0 4px}
+.ad-form{display:flex;flex-direction:column;gap:14px;min-width:0}
+.ad-form>.st-seg{align-self:flex-start}
+.ad-fold{padding-top:12px}
+.ad-restore .ad-form{margin-top:10px}
+.ad-pad{padding:16px 18px}
+.st-dlg .ad-pad{padding:14px 0}
+.ad-lbl{padding:12px 18px 2px;font-size:12.5px;font-weight:500;color:var(--muted)}
+.st-dlg .ad-lbl{padding:12px 0 2px}
+.ad-foot{display:flex;flex-wrap:wrap;gap:8px;padding:14px 18px 16px;border-top:1px solid var(--line)}
+.st-dlg .ad-foot{padding:14px 0 12px}
+.cn-acts .ad-more{margin-left:auto}
+.ad-sel{width:auto;max-width:60%;min-height:40px;padding:8px 32px 8px 12px;font-size:14px}
+.ad-addr{gap:8px}
+.ad-addr .input{flex:1;min-width:0;min-height:40px;font-size:14px}
+.rw small code{font:500 12px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.cd.pad>.code{margin:0 0 10px}
+.rw .tag+.tag{margin-left:6px}
 /* ---------- coarse pointer: last, because it overrides desktop sizes ----------
  * Every rule below replaces a smaller desktop size declared earlier in this
  * file. It has to stay at the very end: at equal specificity a 44px target
@@ -212,5 +236,7 @@ select.input{appearance:none;padding-right:34px;background-image:linear-gradient
 .contract-fieldset .check-row{min-height:44px;padding:9px 0}
 /* Same defect one row type over: the Admin notification-channel toggles live in
      a .box>form row with no coarse size at all, so they measured ~28px. */
-.box>form .check-row{min-height:44px;padding:9px 0}}
-
+.box>form .check-row{min-height:44px;padding:9px 0}
+.rbtn.ad-more{width:44px;height:44px}
+.ad-panel .st-seg button{min-height:40px}
+.ad-addr .btn{min-height:44px}}

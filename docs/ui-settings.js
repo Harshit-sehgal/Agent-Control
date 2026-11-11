@@ -7,19 +7,19 @@
  * team, agents, data) load the existing admin forms from ui-admin.js into the body.
  *
  * The lists behind it are pure and tested in ui-profile-model.js. */
-import {face} from './ui-face.js?v=9b57bd5b4d';
-import {botStatus} from './ui-company.js?v=9b57bd5b4d';
-import {esc, icon, btn, empty, note, roundBtn, switchBtn, fullDate} from './ui-kit.js?v=9b57bd5b4d';
-import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, applyTheme, themeChoice, THEMES} from './ui-store.js?v=9b57bd5b4d';
-import {isDesk, initials} from './ui-shell.js?v=9b57bd5b4d';
-import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=9b57bd5b4d';
-import {faceOf, headBar, activityBlocks, grantsHtml, grantNote} from './ui-profile.js?v=9b57bd5b4d';
-import {allGrantRows} from './ui-asks.js?v=9b57bd5b4d';
-import {toast, confirmSheet} from './ui-dialogs.js?v=9b57bd5b4d';
+import {face} from './ui-face.js?v=f4b2b474ab';
+import {botStatus} from './ui-company.js?v=f4b2b474ab';
+import {esc, icon, btn, empty, note, roundBtn, switchBtn, fullDate} from './ui-kit.js?v=f4b2b474ab';
+import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, applyTheme, themeChoice, THEMES} from './ui-store.js?v=f4b2b474ab';
+import {isDesk, initials} from './ui-shell.js?v=f4b2b474ab';
+import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=f4b2b474ab';
+import {faceOf, headBar, activityBlocks, grantsHtml, grantNote} from './ui-profile.js?v=f4b2b474ab';
+import {allGrantRows} from './ui-asks.js?v=f4b2b474ab';
+import {toast, confirmSheet} from './ui-dialogs.js?v=f4b2b474ab';
 import {
   ACTIVITY_FILTERS, activityUrl, companyTree, weekUsage, settingsSections, resolveSection, sectionArg,
-} from './ui-profile-model.js?v=9b57bd5b4d';
-import {COLORS} from './ui-face.js?v=9b57bd5b4d';
+} from './ui-profile-model.js?v=f4b2b474ab';
+import {COLORS} from './ui-face.js?v=f4b2b474ab';
 
 const el = id => document.getElementById(id);
 const ICONS = {general: 'gear', look: 'half', models: 'key', conn: 'plug', perm: 'shield', usage: 'chart'};

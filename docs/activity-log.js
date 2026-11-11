@@ -15,8 +15,8 @@
  * for a held send. Entries are only ever added: the cap and retention remove old
  * ones, and no route edits one. Pure and browser-safe, like the other shared modules.
  */
-import {fail} from './errors.js?v=9b57bd5b4d';
-import {cleanText} from './core.js?v=9b57bd5b4d';
+import {fail} from './errors.js?v=f4b2b474ab';
+import {cleanText} from './core.js?v=f4b2b474ab';
 
 export const ACTIVITY_KINDS = ['outside', 'perm', 'bots'];
 export const ACTIVITY_FILTERS = [...ACTIVITY_KINDS, 'all'];

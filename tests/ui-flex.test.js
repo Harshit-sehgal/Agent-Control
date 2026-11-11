@@ -43,6 +43,7 @@ test('the UI wires bot pages and guest mentions to the engine contract', () => {
   assert.match(js, /threadLineActions\(/);
   assert.doesNotMatch(js, /grant \|\| plan/);
   assert.match(js, /flags\.plan && btn\('Start', 'approve-plan'/);
-  assert.match(js, /title: 'AI and models'/);
+  // Settings loads an admin page by key only; the per-page title and sub-line were never shown and are gone.
+  assert.match(js, /ADMIN_PAGES = \{[^}]*\bai: true/);
 });
 

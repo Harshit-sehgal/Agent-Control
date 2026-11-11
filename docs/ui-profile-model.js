@@ -5,12 +5,12 @@
  *
  * A bot's manager is settings.reportsTo (company.js); "manager" is simply a bot
  * with reports, so any bot can become one by receiving a report. */
-import {companyBots, primaryOf, managerOf, reportsOf, teamOf} from './company.js?v=9b57bd5b4d';
-import {firstUnusedTint} from './bot-create.js?v=9b57bd5b4d';
-import {TINT_COUNT, dayLabel} from './ui-kit.js?v=9b57bd5b4d';
-import {jobOf} from './ui-company.js?v=9b57bd5b4d';
-import {ACTIVITY_CHIPS} from './activity-log.js?v=9b57bd5b4d';
-import {grantRows} from './ui-asks.js?v=9b57bd5b4d';
+import {companyBots, primaryOf, managerOf, reportsOf, teamOf} from './company.js?v=f4b2b474ab';
+import {firstUnusedTint} from './bot-create.js?v=f4b2b474ab';
+import {TINT_COUNT, dayLabel} from './ui-kit.js?v=f4b2b474ab';
+import {jobOf} from './ui-company.js?v=f4b2b474ab';
+import {ACTIVITY_CHIPS} from './activity-log.js?v=f4b2b474ab';
+import {grantRows} from './ui-asks.js?v=f4b2b474ab';
 
 /** What a bot made without a job holds until the owner's first chat message
  * replaces it (the profile, the list and the chat all treat it as "no job yet"). */

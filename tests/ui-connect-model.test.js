@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   googleReturn, withoutGoogleParams, statusOf, mcpRows, googleCard, mcpDraft, cliDraft, agentCliRows, subscriptionLine, SIGN_IN_HINT,
-  connectorLine, modelLimitLine,
+  connectorLine, modelLimitLine, agentPermissionRows, agentWorkLine,
 } from '../shared/ui-connect-model.js';
 
 /* ---------- the redirect back from Google ---------- */
@@ -79,6 +79,14 @@ test('mcpRows tolerates a missing list', () => {
 /* ---------- the Google card ---------- */
 
 const setup = (extra = {}) => ({configured: false, connected: false, status: 'none', account: null, redirectUri: 'https://app.example/api/connectors/google/callback', scopes: [], steps: ['one', 'two'], testingNote: 'Testing ends in 7 days.', ...extra});
+
+test('a setup step that quotes the redirect address points at its box, so the address is printed once', () => {
+  const uri = 'https://app.example/api/connectors/google/callback';
+  const card = googleCard(setup({steps: [`Under Authorized redirect URIs add exactly: ${uri}`, 'Save.']}));
+  assert.deepEqual(card.steps, ['Under Authorized redirect URIs add exactly: the address shown below', 'Save.']);
+  assert.equal(card.redirectUri, uri);
+  assert.deepEqual(googleCard(setup({redirectUri: '', steps: ['one']})).steps, ['one']);
+});
 
 test('Google not set up shows the steps, the redirect address and the testing note, and no sign-in link', () => {
   const card = googleCard(setup());
@@ -247,4 +255,23 @@ test('a subscription is judged by the agents that are running: an offline machin
   assert.match(subscriptionLine(provider, [asleep, online]), /signed out on Laptop/);
   // With none running, what the sleeping one last said is all there is.
   assert.match(subscriptionLine(provider, [asleep]), /signed in on Old/);
+});
+
+/* ---------- a paired computer on the Local agents page ---------- */
+
+test('each action the server offers is a switch with a plain name, on only when granted', () => {
+  const rows = agentPermissionRows(['http.check', 'model.run', 'odd.kind'], ['model.run']);
+  assert.deepEqual(rows.map(r => [r.id, r.on]), [['http.check', false], ['model.run', true], ['odd.kind', false]]);
+  assert.equal(rows[1].label, 'Run your Claude or ChatGPT plan');
+  // An action this page has no words for still shows, under its own id, rather than vanishing.
+  assert.equal(rows[2].label, 'odd.kind');
+  assert.deepEqual(agentPermissionRows(undefined, undefined), []);
+  assert.equal(agentPermissionRows(['model.run'], null)[0].on, false);
+});
+
+test('a computer says Idle, or what is waiting', () => {
+  assert.equal(agentWorkLine({queued: 0, running: 0, failed: 0}), 'Idle');
+  assert.equal(agentWorkLine(undefined), 'Idle');
+  assert.equal(agentWorkLine({queued: 2, running: 0, failed: 1}), '2 queued · 1 failed');
+  assert.equal(agentWorkLine({queued: -3, running: 'x', failed: 0}), 'Idle');
 });

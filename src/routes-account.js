@@ -166,7 +166,7 @@ export function accountRoutes(router, {auth, workspaces}) {
     const list = Array.isArray(b?.ids) ? b.ids : [b?.ids];
     return notifications.markRead(c.store, c.actor.userId, list.filter(id => typeof id === 'string' && id.trim()).slice(0, 200));
   });
-  router.add('GET', '/api/notification-prefs', 'viewer', c => notifications.getPreferences(c.store, c.actor.userId));
+  router.add('GET', '/api/notification-prefs', 'viewer', c => ({...notifications.getPreferences(c.store, c.actor.userId), emailReady: notifications.emailReady()}));
   router.add('PATCH', '/api/notification-prefs', 'member', async c => { const b = await c.body(); return notifications.updatePreferences(c.store, c.actor.userId, b); });
 
   // Backup: export and restore. Credentials, agent secrets and password hashes

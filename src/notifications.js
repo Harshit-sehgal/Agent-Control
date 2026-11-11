@@ -70,6 +70,10 @@ export function getPreferences(store, userId) {
   };
 }
 
+/** Whether an email notice can leave this server at all: a mailbox (SMTP_HOST) or an HTTP relay is set. The page shows the
+ * email channel only when this is true, so a switch never promises mail that cannot be sent. */
+export const emailReady = () => Boolean(smtpConfig() || process.env.EMAIL_RELAY_URL);
+
 export function updatePreferences(store, userId, body) {
   const current = getPreferences(store, userId);
   const next = {

@@ -47,12 +47,18 @@ test('the Node build exposes a notifications feed and preferences',()=>{
   assert.match(js,/function notificationsPanel\(/);
   // The feed is a Settings page reached from General, not offered on the static demo
   // (no server to hold notifications).
-  assert.match(js,/notif-prefs-form/);
+  // Each channel is a switch that saves at once (a native checkbox and a Save button used to carry all three), and the
+  // webhook and email channels show only when something can deliver them.
+  assert.match(js,/data-action="notif-pref" data-pref="inApp"/);
+  assert.match(js,/'notif-pref': async/);
+  assert.doesNotMatch(js,/type="checkbox"/);
+  assert.match(js,/emailReady \|\| prefs\.email/);
+  assert.match(js,/hooks\.length \|\| prefs\.webhook/);
   assert.match(js,/if \(!demo\) extra\.push\(\['notifications', 'Notifications'\], \['workspaces', 'Workspaces'\]\)/);
 });
 test('the Node build exposes Data & security admin surfaces',()=>{
   assert.match(js,/function credentialsPanel\(/);
-  assert.match(js,/data: \{\s*title: 'Data and security'/);
+  assert.match(js,/ADMIN_PAGES = \{[^}]*\bdata: true/);
   assert.match(js,/credential-form/);
   assert.match(js,/'backup-export'/);
   assert.match(js,/'prune-retention'/);
@@ -96,7 +102,9 @@ test('the shell is integrated: one search, animated routes, one progress bar',()
   assert.match(js,/id="rail-q"/);
   assert.match(js,/id="sq"/);
   assert.match(js,/ev\.key\.toLowerCase\(\) === 'k'/);
-  assert.match(js,/title: 'AI and models'/);
+  // Settings loads an admin page by key only: the per-page title and sub-line were never shown, so they are gone.
+  assert.match(js,/ADMIN_PAGES = \{[^}]*\bai: true/);
+  assert.doesNotMatch(js,/sub: 'Reminders, failed tasks, revoked agents/);
   assert.match(js,/lastView/);
   assert.match(js,/classList\.add\('view-enter'\)/);
   assert.match(js,/function setBusy\(/);

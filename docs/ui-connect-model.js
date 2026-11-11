@@ -5,7 +5,7 @@
  *
  * Nothing here ever sees a key: a subscription has none, an MCP address is typed once and sent, and the
  * server never answers with it. */
-import {cleanCliModel, cliEngineById, LOCAL_CLI_KIND, LOCAL_CLI_ENGINES} from './ai-presets.js?v=9b57bd5b4d';
+import {cleanCliModel, cliEngineById, LOCAL_CLI_KIND, LOCAL_CLI_ENGINES} from './ai-presets.js?v=f4b2b474ab';
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
@@ -68,7 +68,8 @@ export function googleCard(google) {
   return {
     state,
     account: google.account || '',
-    steps: Array.isArray(google.steps) ? google.steps : [],
+    // The address has a box of its own with a Copy button, so a step that quotes it points at that box instead of printing it twice.
+    steps: (Array.isArray(google.steps) ? google.steps : []).map(step => (google.redirectUri ? String(step).split(google.redirectUri).join('the address shown below') : step)),
     redirectUri: google.redirectUri || '',
     testingNote: google.testingNote || '',
     // Connect Google is a link to the server's start route; it needs a saved client first.
@@ -138,6 +139,32 @@ export function agentCliRows(agents) {
     });
     return {id: a.id, name: a.name, online: a.status === 'online', engines, hint: engines.some(e => e.status === 'signed-out') ? SIGN_IN_HINT : ''};
   });
+}
+
+/* ---------- what a paired computer may do, and how busy it is ---------- */
+
+const ACTION_COPY = {
+  'http.check': ['Check web addresses', 'Fetches an address to see whether it answers'],
+  'browser.capture': ['Read web pages', 'Opens a page and reads it, without clicking'],
+  'browser.action': ['Click and type on pages', 'Acts on a page; bots still ask you first'],
+  'model.run': ['Run your Claude or ChatGPT plan', 'Through claude or codex on this computer'],
+  'mcp.call': ['Use its MCP servers', 'Tools of servers that run on this computer'],
+};
+
+/** The permission switches of one computer: every action the server offers, with a plain name, and whether it is granted. */
+export function agentPermissionRows(actions, granted) {
+  const on = new Set(Array.isArray(granted) ? granted : []);
+  return (Array.isArray(actions) ? actions : []).map(id => {
+    const [label, note] = ACTION_COPY[id] || [id, ''];
+    return {id, label, note, on: on.has(id)};
+  });
+}
+
+/** What a computer has in its queue, in a few words: "Idle" or "2 queued · 1 failed". */
+export function agentWorkLine(tasks) {
+  const n = key => Math.max(0, Number(tasks?.[key]) || 0);
+  const parts = [[n('queued'), 'queued'], [n('running'), 'running'], [n('failed'), 'failed']].filter(([count]) => count).map(([count, word]) => `${count} ${word}`);
+  return parts.length ? parts.join(' · ') : 'Idle';
 }
 
 /** The sub-line of a subscription provider: its engine, its model, and where it is signed in. One signed-in machine is enough. */
