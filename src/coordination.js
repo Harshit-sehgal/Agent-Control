@@ -107,11 +107,13 @@ export async function markInterrupted(store){
 }
 /** Rounds with nothing new (FAIL_STREAK in a row) first earn the bot one last turn with browsing closed: it
  * answers the owner from what the run read. True when that last turn was already given, so the run stops. */
-const LAST_CALL='Stop opening pages: this run has already read everything it can use. Do not ask for any page. Answer the owner now with what you found, and say in one line what is still missing.';
-function lastCallOrStop(live){
+const LAST_CALL='Stop opening pages: do not ask for any page. The pages this run read are in this message. Answer the owner now with what they say, and say in one line what is still missing.';
+function lastCallOrStop(live,state){
   if(live.failStreak<FAIL_STREAK)return false;
   if(live.lastCall)return true;
-  live.lastCall=true;live.browserDepth=1e6;live.browserPage=null;live.connectorPage=null;live.browserNote=LAST_CALL;
+  // The pages this run read, newest last: the bot answers from them, so they ride along (the input bound cuts them to fit).
+  const read=(state?.browserRequests||[]).filter(r=>r.runId===live.id&&r.status==='done'&&r.result?.page).slice(-6).map(r=>r.result.page);
+  live.lastCall=true;live.browserDepth=1e6;live.browserPage=read.length?read.join('\n\n---\n\n'):null;live.connectorPage=null;live.browserNote=LAST_CALL;
   return false;
 }
 /** Pages one message may open before the bot is told to answer with what it has. */
@@ -445,7 +447,7 @@ async function runGroupInner(store,id,executor){
           // Pages the run already read: the same bot takes the step again with them. Asking only for those, round
           // after round (FAIL_STREAK), is no progress and stops the run.
           live.failStreak=(Number(live.failStreak)||0)+1;
-          if(lastCallOrStop(live)){stuckStop=`${bot.name} kept asking for pages it already had, so the task stopped. Ask again with more detail, or name a different site.`;return;}
+          if(lastCallOrStop(live,s)){stuckStop=`${bot.name} kept asking for pages it already had, so the task stopped. Ask again with more detail, or name a different site.`;return;}
           if(!live.lastCall||live.failStreak<FAIL_STREAK){
             live.browserPage=browsed.again.join('\n\n---\n\n');live.connectorPage=null;
             live.browserNote='You asked again for a page you already have, so here it is again. Do not ask for it again: open a different page from its Links list, or answer the owner now with what you found.';
@@ -455,11 +457,11 @@ async function runGroupInner(store,id,executor){
           holdBrowser=true;
         } else if(stuck){
           live.failStreak=(Number(live.failStreak)||0)+1;
-          if(lastCallOrStop(live)){stuckStop=`${bot.name} kept asking for pages it already had, so the task stopped. Ask again with more detail, or name a different site.`;return;}
+          if(lastCallOrStop(live,s)){stuckStop=`${bot.name} kept asking for pages it already had, so the task stopped. Ask again with more detail, or name a different site.`;return;}
           if(!live.lastCall||live.failStreak<FAIL_STREAK)live.browserNote=browsed.limited?'You have used every round of pages for this message. Do not ask for more pages: answer the owner now with what you found, and say what is still missing.'
             :browsed.refused?.length?`${browsed.refused.join(' and ')} turned this browser away twice, so ${browsed.refused.length>1?'they are':'it is'} not opened again. Use other sites, or answer the owner now with what you found.`
             :'You asked again for pages you already read (a page can redirect to one you have). Do not ask for them again: open different pages, or answer the owner now with what you found.';
-          live.browserPage=null;live.connectorPage=null;
+          if(!live.lastCall||live.failStreak<FAIL_STREAK){live.browserPage=null;live.connectorPage=null;}
           live.checkpoint={nextStep:i,afterStep:i+1,previous,at:stamp()};
           live.status='queued';
           holdBrowser=true;

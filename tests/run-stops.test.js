@@ -173,7 +173,8 @@ test('a bot stuck on pages it already has gets one last turn to answer, and the 
   fakeBrowser(t, async request => ({title: 'Page', finalUrl: request.url, text: 'Flipkart: 19,989'}));
   const {store, ids} = await company(t);
   let told = '';
-  const ai = model({Mailroom: e => { if (/Stop opening pages/.test(e.note || '')) { told = e.note; return 'Lowest price: 19,989 on Flipkart.'; } return fence('https://jobs.example/same'); }});
+  let seen = '';
+  const ai = model({Mailroom: e => { if (/Stop opening pages/.test(e.note || '')) { told = e.note; seen = e.page || ''; return 'Lowest price: 19,989 on Flipkart.'; } return fence('https://jobs.example/same'); }});
   wire(ai.executor);
   const run = await ask(store, {message: 'find the price', to: ids.mail, executor: ai.executor});
   await until(() => ended(store, run.id), 'the run');
@@ -181,5 +182,7 @@ test('a bot stuck on pages it already has gets one last turn to answer, and the 
   assert.equal(done.status, 'completed');
   assert.match(done.lastOutput, /19,989/);
   assert.match(told, /answer the owner now/i);
+  // The last turn carries what the run read, so the bot can answer from it.
+  assert.match(seen, /Flipkart: 19,989/);
   assert.equal(opened.length, 1);
 });
