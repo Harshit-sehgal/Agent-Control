@@ -10,7 +10,7 @@
 import * as credentials from './credentials.js';
 import {fail} from '../shared/errors.js';
 import {envConfig,discoverModels,protocolOf,configReady,complete} from './ai.js';
-import {normaliseProtocol,inferProtocol,presetById,protocolById,LOCAL_CLI_KIND,LOCAL_CLI_ENGINES,cliEngineById,cleanCliModel} from '../shared/ai-presets.js';
+import {normaliseProtocol,inferProtocol,presetById,protocolById,LOCAL_CLI_KIND,LOCAL_CLI_ENGINES,cliEngineById,cleanCliModel,cleanEffort,EFFORT_IDS} from '../shared/ai-presets.js';
 import {uuid} from '../shared/core.js';
 import {cliRunner,cliSignIn} from './cli-model.js';
 
@@ -116,20 +116,20 @@ function publicBots(bots){
   if(!bots||typeof bots!=='object')return out;
   for(const [id,override] of Object.entries(bots)){
     if(!override||typeof override!=='object'||Array.isArray(override))continue;
-    const providerId=override.providerId||null,model=override.model||null;
-    if(providerId||model)out[id]={providerId,model};
+    const providerId=override.providerId||null,model=override.model||null,effort=override.effort||null;
+    if(providerId||model||effort)out[id]={providerId,model,...(effort?{effort}:{})};
   }
   return out;
 }
 /** Provider metadata safe to send to the browser. No key, no vault id. */
 export function publicAi(state){
   const ai=aiState(state);
-  return {providers:ai.providers.map(publicProvider),defaultProviderId:ai.defaultProviderId,defaultModel:ai.defaultModel||null,bots:publicBots(ai.bots)};
+  return {providers:ai.providers.map(publicProvider),defaultProviderId:ai.defaultProviderId,defaultModel:ai.defaultModel||null,defaultEffort:ai.defaultEffort||null,bots:publicBots(ai.bots)};
 }
 
 export function listProviders(state){
   const ai=aiState(state);
-  return {providers:ai.providers.map(providerListing),defaultProviderId:ai.defaultProviderId,defaultModel:ai.defaultModel||null};
+  return {providers:ai.providers.map(providerListing),defaultProviderId:ai.defaultProviderId,defaultModel:ai.defaultModel||null,defaultEffort:ai.defaultEffort||null};
 }
 
 /** Add a BYOK provider. The key is written to the vault, never to the state.
@@ -172,7 +172,7 @@ export async function addProvider(store,workspaceId,{kind,engine,model,label,bas
  * gateway. */
 export function listProviderListings(store){
   const ai=aiState(store.read());
-  return {providers:ai.providers.map(p=>({...providerListing(p),models:(Array.isArray(p.models)?p.models:[]).slice(0,300)})),defaultProviderId:ai.defaultProviderId||null,defaultModel:ai.defaultModel||null,bots:ai.bots||{}};
+  return {providers:ai.providers.map(p=>({...providerListing(p),models:(Array.isArray(p.models)?p.models:[]).slice(0,300)})),defaultProviderId:ai.defaultProviderId||null,defaultModel:ai.defaultModel||null,defaultEffort:ai.defaultEffort||null,bots:ai.bots||{}};
 }
 
 /** One provider as the admin page sees it, or null. */
@@ -313,20 +313,25 @@ export function resolveConfig(store,botId){
   const pinned=override?.providerId&&ai.providers.some(p=>p.id===override.providerId)?override.providerId:null;
   const providerId=pinned||ai.defaultProviderId;
   const provider=ai.providers.find(p=>p.id===providerId);
+  // How hard to think: the bot's own pick, else the workspace's. Empty sends nothing.
+  const effort=cleanEffort(override?.effort)||cleanEffort(ai.defaultEffort)||'';
+  const withEffort=config=>effort?{...config,effort}:config;
   if(provider&&isCli(provider)){
     // The workspace default model is an API model id; a CLI would only reject it.
     // A bot override that could read as a flag is dropped rather than passed on.
     const model=cleanCliModel(override?.model)||provider.model||'';
-    return {kind:LOCAL_CLI_KIND,engine:provider.engine,model,source:LOCAL_CLI_KIND,label:provider.label,providerId:provider.id,models:[],run:cliRunner(store,{botId,provider})};
+    return withEffort({kind:LOCAL_CLI_KIND,engine:provider.engine,model,source:LOCAL_CLI_KIND,label:provider.label,providerId:provider.id,models:[],run:cliRunner(store,{botId,provider})});
   }
   if(provider){
     const config=providerConfig(store,provider);
-    const chosen=override?.model||ai.defaultModel||'auto';
+    // The workspace default model belongs to the workspace default provider; a bot
+    // pinned to another provider without a model gets that provider's own default.
+    const chosen=override?.model||(pinned&&pinned!==ai.defaultProviderId?'':ai.defaultModel)||'auto';
     const chatModels=Array.isArray(provider.chatModels)?provider.chatModels:config.models;
-    return {...config,model:concreteModel(config.protocol,chosen,chatModels,config.models)};
+    return withEffort({...config,model:concreteModel(config.protocol,chosen,chatModels,config.models)});
   }
   const env=envConfig();
-  if(configReady(env))return {...env,model:override?.model||ai.defaultModel||env.model};
+  if(configReady(env))return withEffort({...env,model:override?.model||ai.defaultModel||env.model});
   return null;
 }
 
@@ -360,21 +365,30 @@ export async function testProvider(store,providerId,{model}={}){
   }
 }
 
+/** A level from the picker or a card, or a 400 that names the three. */
+function effortOrFail(value){
+  const level=cleanEffort(value);
+  if(level===null)fail(`Unknown effort level. Use ${EFFORT_IDS.join(', ')}, or leave it empty for the model's own default.`);
+  return level;
+}
 export async function setDefaults(store,body={}){
   // Only the two knobs this route owns. A typo (`temprature`) used to save
   // nothing and report success, which reads like the setting applied.
-  const {providerId,model,...unknown}=body&&typeof body==='object'&&!Array.isArray(body)?body:{};
+  const {providerId,model,effort,...unknown}=body&&typeof body==='object'&&!Array.isArray(body)?body:{};
+  const level=effort===undefined?undefined:effortOrFail(effort);
   const stray=Object.keys(unknown);
   if(stray.length)fail(`Unknown AI setting${stray.length>1?'s':''}: ${stray.slice(0,4).join(', ')}.`,400);
   await store.update(s=>{const ai=aiState(s);
     if(providerId!==undefined){if(providerId&&!ai.providers.some(p=>p.id===providerId))throw fail('Provider not found.',404);ai.defaultProviderId=providerId||null;}
     if(model!==undefined)ai.defaultModel=clean(model,120)||null;
+    if(level!==undefined)ai.defaultEffort=level||null;
   });
   return listProviders(store.read());
 }
 
-export async function setBotModel(store,botId,{providerId,model}={}){
+export async function setBotModel(store,botId,{providerId,model,effort}={}){
   if(!botId)fail('Missing bot id.');
+  const level=effort===undefined?undefined:effortOrFail(effort);
   // The override is keyed by bot id, so a typo or a stale id must be rejected
   // instead of writing an override nothing will ever read.
   const existing=store.read();
@@ -382,10 +396,11 @@ export async function setBotModel(store,botId,{providerId,model}={}){
   await store.update(s=>{const ai=aiState(s);const next={...(ai.bots[botId]||{})};
     if(providerId!==undefined){if(providerId&&!ai.providers.some(p=>p.id===providerId))throw fail('Provider not found.',404);next.providerId=providerId||null;}
     if(model!==undefined)next.model=clean(model,120);
-    if(!next.providerId&&!next.model)delete ai.bots[botId];else ai.bots[botId]=next;
+    if(level!==undefined){if(level)next.effort=level;else delete next.effort;}
+    if(!next.providerId&&!next.model&&!next.effort)delete ai.bots[botId];else ai.bots[botId]=next;
   });
   const stored=store.read().ai.bots[botId]||null;
-  return {botId,model:stored?.model||null,providerId:stored?.providerId||null};
+  return {botId,model:stored?.model||null,providerId:stored?.providerId||null,effort:stored?.effort||null};
 }
 
 export async function modelsForProvider(store,providerId){

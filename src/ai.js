@@ -1,7 +1,7 @@
 import {cleanText} from '../shared/core.js';
 import {botSettings,maxTokensFor} from '../shared/bot-settings.js';
 import {SUBAGENT_PERMISSION} from '../shared/subagents.js';
-import {normaliseProtocol,inferProtocol,normaliseBaseUrl,isChatModel,DEFAULT_PROTOCOL} from '../shared/ai-presets.js';
+import {normaliseProtocol,inferProtocol,normaliseBaseUrl,isChatModel,DEFAULT_PROTOCOL,cleanEffort} from '../shared/ai-presets.js';
 
 // Provider-agnostic, bring-your-own-key model client. A call can run against an
 // explicitly resolved config (a workspace's saved provider + chosen model) and
@@ -78,7 +78,30 @@ const apiVersionOf=config=>String(config?.apiVersion||'2024-10-21').trim()||'202
 /** Protocols with no "you choose" mode: the model id is part of the URL or the
  * body, so "auto" would be a guaranteed 400. Say so instead. */
 const needsConcreteModel=protocol=>protocol==='anthropic'||protocol==='gemini'||protocol==='azure-openai';
+/** The effort, spelled the way each wire wants it. Anthropic's Messages API
+ * takes `output_config.effort`, the Responses API `reasoning.effort`, Gemini a
+ * `thinkingConfig.thinkingLevel`, and chat completions (Azure too) a top-level
+ * `reasoning_effort`. Nothing is sent without a level. */
+function withEffort(protocol,body,effort){
+  if(!effort)return body;
+  if(protocol==='anthropic')return {...body,output_config:{effort}};
+  if(protocol==='openai-responses')return {...body,reasoning:{effort}};
+  if(protocol==='gemini')return {...body,generationConfig:{...body.generationConfig,thinkingConfig:{thinkingLevel:effort}}};
+  return {...body,reasoning_effort:effort};
+}
+/** The same body with no effort in it, for the one retry a provider's 400 asks for. */
+function withoutEffort(body){
+  const next={...body};
+  delete next.output_config;delete next.reasoning;delete next.reasoning_effort;
+  if(next.generationConfig?.thinkingConfig){next.generationConfig={...next.generationConfig};delete next.generationConfig.thinkingConfig;}
+  return next;
+}
+const EFFORT_WORDS=/effort|reasoning|output_config|thinking/i;
 function requestFor(config,{instructions,input,maxTokens,temperature=null}){
+  const built=bodyFor(config,{instructions,input,maxTokens,temperature});
+  return {...built,body:withEffort(built.protocol,built.body,cleanEffort(config.effort)||'')};
+}
+function bodyFor(config,{instructions,input,maxTokens,temperature=null}){
   const protocol=protocolOf(config);
   const tuning=temperature===null||temperature===undefined?{}:{temperature};
   const headers=headersFor(config,protocol);
@@ -317,7 +340,7 @@ async function callModel({instructions,input,maxTokens,config,temperature=null})
   // one (the Pages demo, a test) has nowhere to run.
   if(config?.kind==='local-cli'){
     if(typeof config.run!=='function')throw upstream('This model runs on a paired local agent and is not available here.',422);
-    return config.run({engine:config.engine,model:config.model||'',instructions,input});
+    return config.run({engine:config.engine,model:config.model||'',effort:cleanEffort(config.effort)||'',instructions,input});
   }
   const cfg=wireConfig(config||envConfig());
   if(!configReady(cfg))throw upstream('No AI provider is configured. Connect one in Settings → Models and keys.',422);
@@ -353,6 +376,14 @@ async function callModel({instructions,input,maxTokens,config,temperature=null})
       return {res,data};
     };
     let out=await send(request.body);
+    // A model that predates effort (or a gateway that does not pass it on)
+    // answers 400 and names it. Ask once more without it: the owner picked how
+    // hard to think, not whether to get an answer at all.
+    const sentEffort=JSON.stringify(withoutEffort(request.body))!==JSON.stringify(request.body);
+    if(out.res.status===400&&sentEffort&&EFFORT_WORDS.test(providerSaid(out.data))){
+      request.body=withoutEffort(request.body);
+      out=await send(request.body);
+    }
     // Newer OpenAI reasoning models reject `max_tokens`, and some reject any
     // temperature but the default, with a 400 that names the parameter. Retry
     // once with what they asked for instead of failing a turn over a spelling.

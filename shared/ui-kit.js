@@ -136,6 +136,16 @@ export const textInput = (name, {type = 'text', value = '', ...rest} = {}) => {
 /** A model dropdown from `modelChoices` rows, and the box Other… opens (hidden and disabled until then, so it
  * never posts by accident). The change handler `model-pick` shows it. */
 export const modelSelect = (rows, {label = 'Model'} = {}) => `<select class="input" name="model" data-action="model-pick" aria-label="${esc(label)}">${rows.map(r => `<option value="${esc(r.value)}"${r.selected ? ' selected' : ''}>${esc(r.label)}</option>`).join('')}</select><input class="input model-other" name="modelOther" type="text" placeholder="Type a model id" maxlength="120" autocomplete="off" spellcheck="false" aria-label="Model id" hidden disabled>`;
+/** One model dropdown for every connected provider, from `botModelChoices`: the workspace default, then an
+ * optgroup per provider. Its "Another … model…" rows open the same typed-id box as `modelSelect`. */
+export const groupedModelSelect = ({top, groups}, {label = 'Model'} = {}) => {
+  const option = r => `<option value="${esc(r.value)}"${r.selected ? ' selected' : ''}>${esc(r.label)}</option>`;
+  return `<select class="input" name="model" data-action="model-pick" aria-label="${esc(label)}">${option(top)}${groups.map(g => `<optgroup label="${esc(g.label)}">${g.rows.map(option).join('')}</optgroup>`).join('')}</select><input class="input model-other" name="modelOther" type="text" placeholder="Type the model id, e.g. gpt-5-mini" maxlength="120" autocomplete="off" spellcheck="false" aria-label="Model id" hidden disabled>`;
+};
+/** How hard the model thinks: four pills (Default, Low, Medium, High) from `effortChoices`, native radios so the
+ * keyboard works, each with its hint as a tooltip and one line of help under them. */
+export const effortPicker = (rows, {help = 'Higher effort thinks longer: better on hard work, slower and costs more. Models that do not support it ignore it.'} = {}) =>
+  `<fieldset class="cn-via ef-pick"><legend class="field-label">Effort</legend><div class="st-seg" role="radiogroup" aria-label="Effort">${rows.map(r => `<label title="${esc(r.hint)}"><input type="radio" name="effort" value="${esc(r.value)}"${r.selected ? ' checked' : ''}><span>${esc(r.label)}</span></label>`).join('')}</div><small class="field-help">${esc(help)}</small></fieldset>`;
 export const field = (label, control, help = '') => `<label class="field"><span class="field-label">${esc(label)}</span>${control}${help ? `<small class="field-help">${esc(help)}</small>` : ''}</label>`;
 export const note = (text, tone = '') => `<p class="note ${tone}">${text}</p>`;
 export const empty = (title, text = '') => `<div class="empty"><strong>${esc(title)}</strong>${text ? `<span>${esc(text)}</span>` : ''}</div>`;

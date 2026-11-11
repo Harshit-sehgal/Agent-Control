@@ -53,7 +53,7 @@ Settings are validated by one shared module (`shared/bot-settings.js`), so the s
 
 ## AI: bring your own key (BYOK) and model selection
 
-Bots run on **your own** models. Open **Settings → Models and keys** (admin) and add a provider. A provider is a name, an endpoint, an API key and one of five wire protocols, so Claude, Gemini and Azure are first-class instead of "an OpenAI URL":
+Bots run on **your own** models. Open **Settings → Models and keys** (admin) and add a provider. A bot's **Model** page (or the model chip in its chat header) is one list of every connected provider's models, with "Another … model…" to type any model id, and an **Effort** choice (Default, Low, Medium, High) for how hard it thinks; the workspace default has the same choice, and you can just tell a bot "make Replier think harder". A provider is a name, an endpoint, an API key and one of five wire protocols, so Claude, Gemini and Azure are first-class instead of "an OpenAI URL":
 
 | protocol | it calls | auth header | when you need it |
 |---|---|---|---|

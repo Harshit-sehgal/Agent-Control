@@ -23,12 +23,13 @@
  *   make itself the primary bot, save a rule without the owner's tap, or reach a route the owner could not.
  *
  * Pure and browser-safe: the server reads replies with it and the UI paints the card from it. */
-import {cleanText} from './core.js?v=7ad447f2c5';
-import {controlFence} from './reply-blocks.js?v=7ad447f2c5';
-import {companyBots, primaryOf} from './company.js?v=7ad447f2c5';
-import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js?v=7ad447f2c5';
-import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=7ad447f2c5';
-import {grantWhat} from './ui-asks.js?v=7ad447f2c5';
+import {cleanText} from './core.js?v=ded1274e22';
+import {cleanEffort} from './ai-presets.js?v=ded1274e22';
+import {controlFence} from './reply-blocks.js?v=ded1274e22';
+import {companyBots, primaryOf} from './company.js?v=ded1274e22';
+import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js?v=ded1274e22';
+import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=ded1274e22';
+import {grantWhat} from './ui-asks.js?v=ded1274e22';
 
 export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'open'];
 /** The bot settings a bot may propose. Not the primary role, the browser approval mode, or layout (pins, order). */
@@ -47,7 +48,7 @@ export const SETUP_PAGES = {
 const MIN_JOB = 20, MAX_JOB = 3000, MAX_BLOCKS = 3;
 
 export const SETUP_TOOL_HINT = 'To change a setting for the owner, put one fenced block named setup in your reply, holding JSON. '
-  + '{"action":"model","bot":"<bot name, or leave out for everyone\'s default>","provider":"<a model name from workspace.models>","model":"<one of its models, or leave out for its default>"} sets a model. '
+  + '{"action":"model","bot":"<bot name, or leave out for everyone\'s default>","provider":"<a model name from workspace.models>","model":"<one of its models, or leave out for its default>","effort":"<low|medium|high|default, optional>"} sets a model and how hard it thinks (effort alone, with no provider, changes only the effort: high for hard or careful work, low for quick replies). '
   + '{"action":"job","bot":"<bot name>","job":"<the new job, one or two sentences>"} rewrites a bot\'s job. '
   + '{"action":"rename","bot":"<bot name>","name":"<new name>"} renames a bot. '
   + '{"action":"settings","bot":"<bot name>","settings":{"replyLength":"short|medium|long","style":"<tone>","memory":true|false,"canHandoff":true|false,"summonable":true|false,"enabled":true|false,"temperature":0-2,"reportsTo":"<manager bot name, or none>"}} changes how a bot works; give only what changes. '
@@ -69,7 +70,7 @@ export function parseSetupRequests(output) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) { found.push({ok: false, error: 'the setup block was not an object.'}); continue; }
     const action = lower(body.action);
     if (!SETUP_ACTIONS.includes(action)) { found.push({ok: false, error: `"${cleanText(body.action, 40) || 'nothing'}" is not something setup can do. Use ${SETUP_ACTIONS.join(', ')}.`}); continue; }
-    found.push({ok: true, request: {action, bot: cleanText(body.bot, 60), provider: cleanText(body.provider, 80), model: cleanText(body.model, 120), job: cleanText(body.job, MAX_JOB + 1), page: lower(body.page), name: cleanText(body.name, 81), team: cleanText(body.team, 80), settings: body.settings && typeof body.settings === 'object' && !Array.isArray(body.settings) ? body.settings : null, do: lower(body.do), site: cleanText(body.site, 300), choice: lower(body.choice)}});
+    found.push({ok: true, request: {action, bot: cleanText(body.bot, 60), provider: cleanText(body.provider, 80), model: cleanText(body.model, 120), job: cleanText(body.job, MAX_JOB + 1), page: lower(body.page), name: cleanText(body.name, 81), team: cleanText(body.team, 80), settings: body.settings && typeof body.settings === 'object' && !Array.isArray(body.settings) ? body.settings : null, do: lower(body.do), site: cleanText(body.site, 300), choice: lower(body.choice), ...(body.effort !== undefined && body.effort !== null ? {effort: lower(body.effort)} : {})}});
   }
   return found;
 }
@@ -136,13 +137,23 @@ export function resolveSetup(state, request, {speaker = null} = {}) {
   }
   const bot = request.bot ? botNamed(state, request.bot, speaker) : null;
   if (request.bot && !bot) return {ok: false, error: `there is no bot called "${request.bot}".`};
+  // How hard it thinks rides on the model action, alone or with a model.
+  const wantsEffort = request.effort !== undefined;
+  const effort = wantsEffort ? (['default', 'none', 'auto', 'normal'].includes(request.effort) ? '' : cleanEffort(request.effort)) : undefined;
+  if (effort === null) return {ok: false, error: `"${request.effort}" is not an effort level. Use low, medium or high, or "default" for the model's own.`};
+  const effortWords = effort ? `${effort} effort` : "the model's own default";
+  if (wantsEffort && !request.provider && !request.model) {
+    return {ok: true, card: {action: 'model', ...(bot ? {botId: bot.id} : {}), effort,
+      text: bot ? `${bot.name} thinks with ${effortWords}` : `Everyone's effort: ${effortWords}`}};
+  }
   const provider = providerNamed(providers, request.provider) || (!request.provider && request.model ? providers.find(p => p.id === (state?.ai?.bots?.[bot?.id]?.providerId || state?.ai?.defaultProviderId)) : null);
   if (!provider) return {ok: false, error: providers.length ? `no model is called "${request.provider || 'blank'}". Connected: ${providers.map(p => p.label).join(', ')}.` : 'no model is connected yet. Point the owner to Settings → Models and keys.'};
   const model = modelFor(provider, request.model);
   if (!model.ok) return {ok: false, error: model.error};
   const what = `${provider.label}${model.model ? ` · ${model.model}` : ''}`;
-  return {ok: true, card: {action: 'model', ...(bot ? {botId: bot.id} : {}), providerId: provider.id, model: model.model,
-    text: bot ? `${bot.name} uses ${what}` : `Everyone's default model: ${what}`}};
+  const also = wantsEffort ? `, ${effortWords}` : '';
+  return {ok: true, card: {action: 'model', ...(bot ? {botId: bot.id} : {}), providerId: provider.id, model: model.model, ...(wantsEffort ? {effort} : {}),
+    text: bot ? `${bot.name} uses ${what}${also}` : `Everyone's default model: ${what}${also}`}};
 }
 
 function renameCard(state, bot, wanted) {
@@ -230,7 +241,7 @@ export function setupCardOf(message) {
   if (card.action === 'settings') return typeof card.botId === 'string' && card.settings && typeof card.settings === 'object' && Object.keys(card.settings).length && Object.keys(card.settings).every(k => BOT_SETTABLE.includes(k)) ? card : null;
   if (card.action === 'team') return typeof card.groupId === 'string' && card.settings && typeof card.settings === 'object' && Object.keys(card.settings).length && Object.keys(card.settings).every(k => TEAM_SETTABLE.includes(k)) ? card : null;
   if (card.action === 'rule') return typeof card.botId === 'string' && ASK_ACTIONS.includes(card.act) && GRANT_CHOICES.includes(card.choice) && typeof card.scope === 'string' ? card : null;
-  return typeof card.providerId === 'string' ? card : null;
+  return typeof card.providerId === 'string' || (typeof card.effort === 'string' && cleanEffort(card.effort) !== null) ? card : null;
 }
 /** Is the change already in place? Then the card is a done line with no button. An open card never is. */
 export function setupDone(state, card) {
@@ -242,8 +253,10 @@ export function setupDone(state, card) {
   if (card.action === 'settings') { const now = botSettings(bot || {}); return Boolean(bot) && Object.entries(card.settings).every(([k, v]) => (now[k] ?? null) === v); }
   if (card.action === 'rule') { const g = (state?.grants || []).find(x => x.botId === card.botId && x.action === card.act && (x.scope || '') === card.scope); return (g?.choice || 'ask') === card.choice; }
   const ai = state?.ai || {};
-  if (card.botId) { const own = ai.bots?.[card.botId] || {}; return own.providerId === card.providerId && (own.model || '') === (card.model || ''); }
-  return ai.defaultProviderId === card.providerId && (ai.defaultModel || '') === (card.model || '');
+  const own = card.botId ? ai.bots?.[card.botId] || {} : {providerId: ai.defaultProviderId, model: ai.defaultModel, effort: ai.defaultEffort};
+  const sameModel = card.providerId === undefined || (own.providerId === card.providerId && (own.model || '') === (card.model || ''));
+  const sameEffort = card.effort === undefined || (own.effort || '') === card.effort;
+  return sameModel && sameEffort;
 }
 /** The button on a setup card. */
 export const setupButton = card => (card.action === 'open' ? `Open ${card.text.replace(/^Settings → /, '')}` : 'Apply');
@@ -272,7 +285,7 @@ export function workspaceBrief(state, {agents = [], connectors = [], speaker = n
   }));
   const bots = companyBots(state).map(b => {
     const own = ai.bots?.[b.id] || {};
-    const model = own.providerId ? `${label(own.providerId) || 'a removed model'}${own.model ? ` · ${own.model}` : ''}` : 'the default';
+    const model = (own.providerId ? `${label(own.providerId) || 'a removed model'}${own.model ? ` · ${own.model}` : ''}` : 'the default') + (own.effort ? ` · ${own.effort} effort` : '');
     // Only what differs from a new bot, in the words a card uses; "off" stays its own flag.
     const set = botSettings(b), words = botWords(state);
     const changed = BOT_SETTABLE.filter(k => k !== 'enabled' && (set[k] ?? null) !== (BOT_DEFAULTS[k] ?? null)).map(k => words[k](set[k]));
@@ -295,7 +308,7 @@ export function workspaceBrief(state, {agents = [], connectors = [], speaker = n
   return {
     you: youLine(primaryOf(state), speaker),
     models: models.length ? models : 'none connected yet',
-    defaultModel: ai.defaultProviderId ? `${label(ai.defaultProviderId) || 'unknown'}${ai.defaultModel ? ` · ${ai.defaultModel}` : ''}` : 'none',
+    defaultModel: ai.defaultProviderId ? `${label(ai.defaultProviderId) || 'unknown'}${ai.defaultModel ? ` · ${ai.defaultModel}` : ''}${ai.defaultEffort ? ` · ${ai.defaultEffort} effort` : ''}` : 'none',
     bots,
     teams,
     computer,

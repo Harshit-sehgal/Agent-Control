@@ -5,13 +5,13 @@
  *
  * The look is Settings and Connectors: a titled card (`.st-g`, `.cd`), rows with a switch or a small
  * button on the right, a segmented pill for a choice of few, and one primary action per card. */
-import {esc, icon, btn, field, note, empty, tag, fullDate, textInput, switchBtn, modelSelect} from './ui-kit.js';
+import {esc, icon, btn, field, note, empty, tag, fullDate, textInput, switchBtn, modelSelect, effortPicker} from './ui-kit.js';
 import {store, api, sync, isAdmin, isStaticDemo} from './ui-store.js';
 import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js';
 import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js';
 import {pushStatus, enablePush, disablePush} from './ui-push.js';
 import {connectorsPanel, loadConnectors, connectActions, connectForms} from './ui-connect.js';
-import {cliDraft, modelChoices, chosenModel, OTHER_MODEL, agentCliRows, agentPermissionRows, agentWorkLine, subscriptionLine, SIGN_IN_HINT} from './ui-connect-model.js';
+import {cliDraft, modelChoices, chosenModel, effortChoices, OTHER_MODEL, agentCliRows, agentPermissionRows, agentWorkLine, subscriptionLine, SIGN_IN_HINT} from './ui-connect-model.js';
 import {LOCAL_CLI_ENGINES, LOCAL_CLI_KIND} from './ai-presets.js';
 
 /** The pages Settings can load into its body. Only the keys are read (is this a page?). */
@@ -376,7 +376,8 @@ export function refillModelSelect(select, rows) {
 /** Other… opens a box for any id; any other row closes it. */
 function showOtherBox(select) {
   const box = select?.parentElement?.querySelector('.model-other'); if (!box) return;
-  const open = select.value === OTHER_MODEL;
+  // A grouped picker's typed-id rows are `<provider>|__other`.
+  const open = select.value === OTHER_MODEL || select.value.endsWith(`|${OTHER_MODEL}`);
   box.hidden = !open; box.disabled = !open;
   if (open) box.focus();
 }
@@ -432,6 +433,7 @@ function aiPanel(res) {
   const defaults = picked ? `<form id="ai-default-form" class="ad-form">
     <input type="hidden" name="providerId" value="${esc(picked.id)}">
     ${field(modelLabel, modelSelect(modelChoices({provider: picked, current: res.defaultModel || '', defaultLabel: defaultLabelFor(picked)})), 'Bots without a model of their own use it.')}
+    ${effortPicker(effortChoices(res.defaultEffort || ''), {help: 'How hard every bot thinks unless it has its own setting. Higher is better on hard work, slower and costs more.'})}
     <div class="cn-acts">${btn('Save', null, {kind: 'primary', type: 'submit'})}</div>
   </form>` : '';
   const choose = `<div class="st-seg" role="group" aria-label="What to add">${[['sub', 'Subscription'], ['api', 'API key']].map(([key, text]) => `<button type="button" data-action="ai-add-kind" data-kind="${key}" aria-pressed="${key === addKind}">${text}</button>`).join('')}</div>`;
@@ -805,7 +807,7 @@ export const adminForms = {
     await sync(); await ctx.reload();
   },
   'ai-default-form': async (form, values, ctx) => {
-    await api('/api/ai', 'PATCH', {providerId: values.providerId, model: chosenModel(values)});
+    await api('/api/ai', 'PATCH', {providerId: values.providerId, model: chosenModel(values), effort: values.effort || ''});
     toast('Default model saved.');
     await sync(); await ctx.reload();
   },

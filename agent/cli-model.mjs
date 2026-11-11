@@ -26,7 +26,7 @@ import {spawn} from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {cliEngineById, cleanCliModel} from '../shared/ai-presets.js';
+import {cliEngineById, cleanCliModel, cleanEffort} from '../shared/ai-presets.js';
 
 export const MAX_STDOUT_BYTES = 8 * 1024 * 1024;
 /** The most reply a result carries, in UTF-8 bytes once JSON-escaped: the server reads a device's
@@ -78,11 +78,13 @@ const SYSTEM_TEXT = 'You are answering as a text-only model. You have no tools: 
 /** The program and argument list for one run. `dir` is the empty scratch directory. */
 const CODEX_FEATURES_OFF = ['shell_tool', 'unified_exec', 'shell_snapshot', 'browser_use', 'browser_use_external', 'browser_use_full_cdp_access', 'in_app_browser', 'computer_use', 'apps'];
 
-export function buildCommand(engine, {model = '', dir}) {
+export function buildCommand(engine, {model = '', effort = '', dir}) {
   const spec = cliEngineById(engine);
   if (!spec) throw new CliModelError('bad-request', 'Unknown engine. Use claude or codex.');
   const chosen = cleanCliModel(model);
   if (chosen === null) throw new CliModelError('bad-request', 'That model name is not valid for a CLI.');
+  const level = cleanEffort(effort);
+  if (level === null) throw new CliModelError('bad-request', 'That effort level is not valid. Use low, medium or high.');
   if (spec.id === 'claude') {
     return {command: 'claude', spec, args: [
       '-p', '--output-format', 'stream-json', '--verbose',
@@ -90,6 +92,7 @@ export function buildCommand(engine, {model = '', dir}) {
       '--safe-mode', '--strict-mcp-config', '--permission-prompts', 'none', '--no-session-persistence',
       '--system-prompt', SYSTEM_TEXT,
       ...(chosen ? ['--model', chosen] : []),
+      ...(level ? ['--effort', level] : []),
     ]};
   }
   return {command: 'codex', spec, args: [
@@ -100,6 +103,8 @@ export function buildCommand(engine, {model = '', dir}) {
     // files, so none of them may be reachable from a bot's prompt.
     ...CODEX_FEATURES_OFF.flatMap(f => ['-c', `features.${f}=false`]),
     ...(chosen ? ['-m', chosen] : []),
+    // codex reads a -c value as TOML; the quotes keep it a string.
+    ...(level ? ['-c', `model_reasoning_effort="${level}"`] : []),
     '-',
   ]};
 }
@@ -157,14 +162,22 @@ export function kill(child) {
   catch { try { child.kill('SIGKILL'); } catch { /* Already gone. */ } }
 }
 
-/** Run one prompt through a CLI and return `{text, engine, model, ms}`, or throw a CliModelError. */
-export async function runCliModel({engine, model = '', instructions = '', input = '', timeoutMs = DEFAULT_TIMEOUT_MS, maxBytes = MAX_STDOUT_BYTES, env = process.env} = {}) {
+/** Run one prompt through a CLI and return `{text, engine, model, ms}`, or throw a CliModelError.
+ * An older CLI that does not know the effort flag fails naming it; that run is
+ * made once more without the effort rather than failing the bot's turn. */
+export async function runCliModel(options = {}) {
+  try { return await runCliOnce(options); } catch (error) {
+    if (options.effort && error instanceof CliModelError && error.code === 'cli-failed' && /effort/i.test(`${error.message} ${error.detail || ''}`)) return runCliOnce({...options, effort: ''});
+    throw error;
+  }
+}
+async function runCliOnce({engine, model = '', effort = '', instructions = '', input = '', timeoutMs = DEFAULT_TIMEOUT_MS, maxBytes = MAX_STDOUT_BYTES, env = process.env} = {}) {
   const prompt = promptText({instructions, input});
   if (!prompt.trim()) throw new CliModelError('bad-request', 'There is nothing to send to the model.');
   if (prompt.length > MAX_PROMPT_CHARS) throw new CliModelError('bad-request', 'The prompt is too long to send to a CLI.');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-cli-'));
   try {
-    const {command, args, spec} = buildCommand(engine, {model, dir});
+    const {command, args, spec} = buildCommand(engine, {model, effort, dir});
     const started = Date.now();
     return await new Promise((resolve, reject) => {
       const child = spawn(command, args, {cwd: dir, env: cliEnv(env), stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32'});
@@ -213,7 +226,7 @@ export async function runModelTask(payload, {env = process.env} = {}) {
     if (p.instructions !== undefined && typeof p.instructions !== 'string') throw new CliModelError('bad-request', 'Instructions must be text.');
     const asked = Number(p.timeoutMs);
     const timeoutMs = Number.isFinite(asked) && asked > 0 ? Math.min(MAX_TIMEOUT_MS, Math.max(MIN_TIMEOUT_MS, asked)) : DEFAULT_TIMEOUT_MS;
-    const done = await runCliModel({engine: cliEngineById(p.engine).id, model: p.model || '', instructions: p.instructions || '', input: p.input, timeoutMs, env});
+    const done = await runCliModel({engine: cliEngineById(p.engine).id, model: p.model || '', effort: p.effort || '', instructions: p.instructions || '', input: p.input, timeoutMs, env});
     return {ok: true, ...done};
   } catch (error) {
     if (error instanceof CliModelError) return {ok: false, code: error.code, message: error.message, detail: error.detail};

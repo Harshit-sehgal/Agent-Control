@@ -61,7 +61,7 @@ export function cliSignIn(store, engine, nowMs = Date.now()) {
 }
 
 /** Run one prompt on the paired agent and return the reply text. */
-export async function runOnAgent(store, {engine, model = '', instructions = '', input, label = '', waitMs = cliWaitMs(), pollMs = 250, botId = null, providerId = null}) {
+export async function runOnAgent(store, {engine, model = '', effort = '', instructions = '', input, label = '', waitMs = cliWaitMs(), pollMs = 250, botId = null, providerId = null}) {
   const spec = cliEngineById(engine);
   if (!spec) throw problem('Unknown engine. Use claude or codex.', 400, 'bad-request');
   const meta = {engine: spec.id, botId, providerId};
@@ -71,7 +71,7 @@ export async function runOnAgent(store, {engine, model = '', instructions = '', 
   const timeoutMs = Math.max(5000, waitMs - 45000);
   // `notAfter` is when this side stops waiting: a device that picks the task up later skips it instead of spending the plan.
   const deadline = Date.now() + waitMs;
-  const {task} = enqueueAgentTask(store, device.id, {kind: 'model.run', payload: {engine: spec.id, model, instructions, input, timeoutMs, notAfter: deadline}, createdBy: botId ? `bot:${botId}` : 'bot'});
+  const {task} = enqueueAgentTask(store, device.id, {kind: 'model.run', payload: {engine: spec.id, model, ...(effort ? {effort} : {}), instructions, input, timeoutMs, notAfter: deadline}, createdBy: botId ? `bot:${botId}` : 'bot'});
   for (;;) {
     const row = store.get('SELECT status,result,error FROM agent_tasks WHERE id=?', task.id);
     if (!row) throw problem('The model task disappeared before it finished.', 502, 'agent-failed', meta);
@@ -101,7 +101,7 @@ function readResult(raw, spec, meta) {
 
 /** The `run` a local-cli config carries: one model call through the paired agent. */
 export function cliRunner(store, {botId = null, provider}) {
-  return ({engine, model, instructions, input}) => runOnAgent(store, {engine, model, instructions, input, label: provider.label, botId, providerId: provider.id});
+  return ({engine, model, effort, instructions, input}) => runOnAgent(store, {engine, model, effort, instructions, input, label: provider.label, botId, providerId: provider.id});
 }
 
 /** The chat line for a hit usage limit, or null for any other error. It carries

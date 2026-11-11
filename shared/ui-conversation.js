@@ -14,7 +14,7 @@ import {validHttpUrl} from './core.js';
 import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js';
 import {botStatus, botIsManager, chatStatus, jobOf} from './ui-company.js';
 import {isPrimary} from './company.js';
-import {hasJob} from './ui-profile-model.js';
+import {hasJob, modelChip} from './ui-profile-model.js';
 import {feed} from './ui-feed.js';
 import {setupCardOf, setupButton} from './setup.js';
 import {askCard} from './ui-asks.js';
@@ -59,6 +59,7 @@ export function conversationShell(conv) {
       <button type="button" class="rbtn" data-action="back-to-list" aria-label="Back to ${label}">${icon('back', 20)}</button>
       ${who}
       <div class="cv-title"><h1>${esc(conv.name)}</h1><span id="cv-line"></span></div>
+      ${bot ? `<span id="cv-model">${modelChipHtml(bot)}</span>` : ''}
     </header>
     <div class="cv-scroll" id="cv-scroll"><div class="cv-col" id="cv-log" role="log" aria-live="off" aria-label="Conversation"></div></div>
     <form id="chat-form" class="cv-composer" autocomplete="off"><div class="cv-box">
@@ -67,6 +68,12 @@ export function conversationShell(conv) {
     </div></form>
   </section>`;
   lastHtml = null; born.conv = null; pillSeen.clear();
+}
+
+/** Which model a bot chat runs on, one tap from its Model page. Nothing in the static demo or with no model. */
+function modelChipHtml(bot) {
+  const chip = !isStaticDemo() && canWrite() ? modelChip(store.state, bot.id) : null;
+  return chip ? `<button type="button" class="cv-model" data-action="profile-sub" data-id="${esc(bot.id)}" data-sub="model" title="${esc(chip.title)}" aria-label="${esc(chip.title)}">${icon('chip', 13)}<span>${esc(chip.text)}</span></button>` : '';
 }
 
 /** The line under the title: what the chat is doing right now, else what it is. */
@@ -301,6 +308,9 @@ export function renderConversation() {
   const conv = conversation(), log = el('cv-log'); if (!conv || !log) return;
   const line = statusLine(conv), node = el('cv-line');
   if (node) { node.textContent = line.text; node.classList.toggle('wt', line.waiting); }
+  // A setup card applied in this chat can change the model; keep the chip honest.
+  const modelNode = el('cv-model');
+  if (modelNode && conv.bot) { const html = modelChipHtml(conv.bot); if (modelNode.innerHTML !== html) modelNode.innerHTML = html; }
   const who = document.querySelector('.cv-who');
   if (who && conv.bot && who.dataset.state !== awake(conv.bot.id)) { who.dataset.state = awake(conv.bot.id); who.innerHTML = botFace(conv.bot, conv.name, 36, {state: who.dataset.state}); }
   if (born.conv !== conv.id) { born.conv = conv.id; born.seen = new Set(); born.fresh = false; }
@@ -415,8 +425,11 @@ export const conversationActions = {
       if (!group) throw new Error('That bot is no longer in the company.');
       const body = card.action === 'job' ? {instructions: card.job} : card.action === 'rename' ? {name: card.name} : {settings: card.settings};
       await api(`/api/groups/${group.id}/bots/${card.botId}`, 'PATCH', body);
-    } else if (card.botId) await api(`/api/ai/bots/${encodeURIComponent(card.botId)}`, 'PATCH', {providerId: card.providerId, model: card.model || ''});
-    else await api('/api/ai', 'PATCH', {providerId: card.providerId, model: card.model || ''});
+    } else {
+      // A model card may carry a model, an effort, or both; send only what it changes.
+      const body = {...(card.providerId !== undefined ? {providerId: card.providerId, model: card.model || ''} : {}), ...(card.effort !== undefined ? {effort: card.effort} : {})};
+      await api(card.botId ? `/api/ai/bots/${encodeURIComponent(card.botId)}` : '/api/ai', 'PATCH', body);
+    }
     await sync();
     toast('Done.');
   },

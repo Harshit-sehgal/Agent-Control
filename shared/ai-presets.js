@@ -186,3 +186,27 @@ export function cleanCliModel(value) {
   if (!text) return '';
   return /^[A-Za-z0-9][A-Za-z0-9._:/[\]-]{0,79}$/.test(text) ? text : null;
 }
+
+/** How hard a model thinks before it answers. One setting for every wire: each
+ * protocol and CLI spells it its own way (src/ai.js, agent/cli-model.mjs), and a
+ * provider that does not know it is asked again without it. Empty means "send
+ * nothing", so the provider's own default applies. */
+export const EFFORT_LEVELS = [
+  {id: 'low', label: 'Low', hint: 'Fastest and cheapest. Good for short replies.'},
+  {id: 'medium', label: 'Medium', hint: 'A balance of speed and care.'},
+  {id: 'high', label: 'High', hint: 'Thinks longest. Best for hard or careful work.'},
+];
+export const EFFORT_IDS = EFFORT_LEVELS.map(l => l.id);
+export const EFFORT_DEFAULT_LABEL = "Default (the model's own)";
+
+/** @returns {string|null} a level id, '' for none, or null when it is refused. */
+export function cleanEffort(value) {
+  const text = String(value ?? '').trim().toLowerCase();
+  if (!text) return '';
+  return EFFORT_IDS.includes(text) ? text : null;
+}
+/** The words for a level, for pickers, cards and the brief. */
+export function effortLabel(value) {
+  const level = EFFORT_LEVELS.find(l => l.id === cleanEffort(value));
+  return level ? `${level.label} effort` : EFFORT_DEFAULT_LABEL;
+}

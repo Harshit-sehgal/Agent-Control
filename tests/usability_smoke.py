@@ -1661,11 +1661,11 @@ async def models_api_provider_menu_and_one_model_picker(page, base):
     await default.locator('select[name="model"]').select_option('mixtral')
     await default.get_by_role('button', name='Save').click()
     await expect(page.locator('#toast')).to_contain_text('Default model saved')
-    assert server.sent('PATCH', '/api/ai') == [{'providerId': 'p-9', 'model': 'mixtral'}]
+    assert server.sent('PATCH', '/api/ai') == [{'providerId': 'p-9', 'model': 'mixtral', 'effort': ''}]
     # Make default moves the default provider, and the picker follows it.
     await body.locator('.cn-mcp', has_text='My Claude').get_by_role('button', name='Make default').click()
     await expect(default.locator('input[name="providerId"]')).to_have_value('p-8')
-    await expect(page.locator('#ai-default-form .field-label')).to_have_text('Default model for My Claude')
+    await expect(page.locator('#ai-default-form .field .field-label')).to_have_text('Default model for My Claude')
     # "API key" swaps the form: the preset, the address and the key, with protocol and headers folded away.
     await body.locator('[data-action="ai-add-kind"][data-kind="api"]').click()
     await expect(page.locator('#cli-provider-form')).to_be_hidden()
@@ -1693,7 +1693,7 @@ async def model_list_loads_by_itself(page, base):
     await page.locator('#ai-default-form input[name="modelOther"]').fill('llama-4-scout')
     await page.locator('#ai-default-form').get_by_role('button', name='Save').click()
     await expect(page.locator('#toast')).to_contain_text('Default model saved')
-    assert server.sent('PATCH', '/api/ai') == [{'providerId': 'p-7', 'model': 'llama-4-scout'}]
+    assert server.sent('PATCH', '/api/ai') == [{'providerId': 'p-7', 'model': 'llama-4-scout', 'effort': ''}]
 
 
 async def phone_models_page_fits(page, base):

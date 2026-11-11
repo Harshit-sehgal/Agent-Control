@@ -1,7 +1,7 @@
 /** The setup block: a bot proposes a change, the owner taps Apply. And what the primary bot knows. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {parseSetupRequests, stripSetupBlocks, resolveSetup, modelFor, setupCardOf, setupButton, workspaceBrief} from '../shared/setup.js';
+import {parseSetupRequests, stripSetupBlocks, resolveSetup, modelFor, setupCardOf, setupButton, workspaceBrief, setupDone} from '../shared/setup.js';
 import {CONTROL_FENCES} from '../shared/reply-blocks.js';
 
 const state = {
@@ -173,4 +173,32 @@ test('the brief says how each bot is set and how each team runs, so a bot knows 
   assert.equal(rep.settings, 'short replies, no memory, reports to Atlas');
   assert.equal(brief.bots.find(b => b.name === 'Atlas').settings, undefined, 'defaults are not listed');
   assert.deepEqual(brief.teams, [{name: 'Home', bots: 2, runs: 'asks the owner before each step, at most 4 steps'}]);
+});
+
+test('a bot can set how hard another bot (or everyone) thinks, alone or with a model', () => {
+  const [only] = parseSetupRequests(block({action: 'model', bot: 'Replier', effort: 'High'}));
+  const r = resolveSetup(state, only.request);
+  assert.equal(r.ok, true, r.error);
+  assert.deepEqual({...r.card, text: undefined}, {action: 'model', botId: 'rep', effort: 'high', text: undefined});
+  assert.equal(r.card.text, 'Replier thinks with high effort');
+  assert.equal(setupDone(state, r.card), false);
+  assert.equal(setupDone({...state, ai: {...state.ai, bots: {rep: {providerId: 'p1', model: 'haiku-5.5', effort: 'high'}}}}, r.card), true);
+  assert.ok(setupCardOf({setup: JSON.stringify(r.card)}), 'an effort-only card is a valid card');
+
+  const both = resolveSetup(state, parseSetupRequests(block({action: 'model', bot: 'Replier', provider: 'Groq', model: 'qwen/qwen3-32b', effort: 'low'}))[0].request);
+  assert.equal(both.card.effort, 'low');
+  assert.equal(both.card.text, 'Replier uses Groq · qwen/qwen3-32b, low effort');
+
+  const everyone = resolveSetup(state, parseSetupRequests(block({action: 'model', effort: 'default'}))[0].request);
+  assert.deepEqual([everyone.card.effort, everyone.card.text], ['', "Everyone's effort: the model's own default"]);
+
+  const bad = resolveSetup(state, parseSetupRequests(block({action: 'model', bot: 'Replier', effort: 'ludicrous'}))[0].request);
+  assert.equal(bad.ok, false);
+  assert.match(bad.error, /low, medium or high/);
+});
+
+test('the brief says each bot\'s effort and the workspace default', () => {
+  const brief = workspaceBrief({...state, ai: {...state.ai, defaultEffort: 'medium', bots: {rep: {providerId: 'p1', model: 'haiku-5.5', effort: 'high'}}}});
+  assert.equal(brief.bots.find(b => b.name === 'Replier').model, 'My Claude · haiku-5.5 · high effort');
+  assert.equal(brief.defaultModel, 'Groq · llama-3.3-70b-versatile · medium effort');
 });

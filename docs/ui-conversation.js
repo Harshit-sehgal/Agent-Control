@@ -7,24 +7,24 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=7ad447f2c5';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=7ad447f2c5';
-import {requestOfMessage} from './bot-browser.js?v=7ad447f2c5';
-import {validHttpUrl} from './core.js?v=7ad447f2c5';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=7ad447f2c5';
-import {botStatus, botIsManager, chatStatus, jobOf} from './ui-company.js?v=7ad447f2c5';
-import {isPrimary} from './company.js?v=7ad447f2c5';
-import {hasJob} from './ui-profile-model.js?v=7ad447f2c5';
-import {feed} from './ui-feed.js?v=7ad447f2c5';
-import {setupCardOf, setupButton} from './setup.js?v=7ad447f2c5';
-import {askCard} from './ui-asks.js?v=7ad447f2c5';
-import {face, botColor} from './ui-face.js?v=7ad447f2c5';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=7ad447f2c5';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync} from './ui-store.js?v=7ad447f2c5';
-import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=7ad447f2c5';
-import {toast} from './ui-dialogs.js?v=7ad447f2c5';
-import {siteChip} from './ui-computer-view.js?v=7ad447f2c5';
-import {cliChoice} from './ui-connect-model.js?v=7ad447f2c5';
+import {OFFJOB_CHOICES} from './off-job.js?v=ded1274e22';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=ded1274e22';
+import {requestOfMessage} from './bot-browser.js?v=ded1274e22';
+import {validHttpUrl} from './core.js?v=ded1274e22';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=ded1274e22';
+import {botStatus, botIsManager, chatStatus, jobOf} from './ui-company.js?v=ded1274e22';
+import {isPrimary} from './company.js?v=ded1274e22';
+import {hasJob, modelChip} from './ui-profile-model.js?v=ded1274e22';
+import {feed} from './ui-feed.js?v=ded1274e22';
+import {setupCardOf, setupButton} from './setup.js?v=ded1274e22';
+import {askCard} from './ui-asks.js?v=ded1274e22';
+import {face, botColor} from './ui-face.js?v=ded1274e22';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=ded1274e22';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync} from './ui-store.js?v=ded1274e22';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=ded1274e22';
+import {toast} from './ui-dialogs.js?v=ded1274e22';
+import {siteChip} from './ui-computer-view.js?v=ded1274e22';
+import {cliChoice} from './ui-connect-model.js?v=ded1274e22';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -59,6 +59,7 @@ export function conversationShell(conv) {
       <button type="button" class="rbtn" data-action="back-to-list" aria-label="Back to ${label}">${icon('back', 20)}</button>
       ${who}
       <div class="cv-title"><h1>${esc(conv.name)}</h1><span id="cv-line"></span></div>
+      ${bot ? `<span id="cv-model">${modelChipHtml(bot)}</span>` : ''}
     </header>
     <div class="cv-scroll" id="cv-scroll"><div class="cv-col" id="cv-log" role="log" aria-live="off" aria-label="Conversation"></div></div>
     <form id="chat-form" class="cv-composer" autocomplete="off"><div class="cv-box">
@@ -67,6 +68,12 @@ export function conversationShell(conv) {
     </div></form>
   </section>`;
   lastHtml = null; born.conv = null; pillSeen.clear();
+}
+
+/** Which model a bot chat runs on, one tap from its Model page. Nothing in the static demo or with no model. */
+function modelChipHtml(bot) {
+  const chip = !isStaticDemo() && canWrite() ? modelChip(store.state, bot.id) : null;
+  return chip ? `<button type="button" class="cv-model" data-action="profile-sub" data-id="${esc(bot.id)}" data-sub="model" title="${esc(chip.title)}" aria-label="${esc(chip.title)}">${icon('chip', 13)}<span>${esc(chip.text)}</span></button>` : '';
 }
 
 /** The line under the title: what the chat is doing right now, else what it is. */
@@ -301,6 +308,9 @@ export function renderConversation() {
   const conv = conversation(), log = el('cv-log'); if (!conv || !log) return;
   const line = statusLine(conv), node = el('cv-line');
   if (node) { node.textContent = line.text; node.classList.toggle('wt', line.waiting); }
+  // A setup card applied in this chat can change the model; keep the chip honest.
+  const modelNode = el('cv-model');
+  if (modelNode && conv.bot) { const html = modelChipHtml(conv.bot); if (modelNode.innerHTML !== html) modelNode.innerHTML = html; }
   const who = document.querySelector('.cv-who');
   if (who && conv.bot && who.dataset.state !== awake(conv.bot.id)) { who.dataset.state = awake(conv.bot.id); who.innerHTML = botFace(conv.bot, conv.name, 36, {state: who.dataset.state}); }
   if (born.conv !== conv.id) { born.conv = conv.id; born.seen = new Set(); born.fresh = false; }
@@ -415,8 +425,11 @@ export const conversationActions = {
       if (!group) throw new Error('That bot is no longer in the company.');
       const body = card.action === 'job' ? {instructions: card.job} : card.action === 'rename' ? {name: card.name} : {settings: card.settings};
       await api(`/api/groups/${group.id}/bots/${card.botId}`, 'PATCH', body);
-    } else if (card.botId) await api(`/api/ai/bots/${encodeURIComponent(card.botId)}`, 'PATCH', {providerId: card.providerId, model: card.model || ''});
-    else await api('/api/ai', 'PATCH', {providerId: card.providerId, model: card.model || ''});
+    } else {
+      // A model card may carry a model, an effort, or both; send only what it changes.
+      const body = {...(card.providerId !== undefined ? {providerId: card.providerId, model: card.model || ''} : {}), ...(card.effort !== undefined ? {effort: card.effort} : {})};
+      await api(card.botId ? `/api/ai/bots/${encodeURIComponent(card.botId)}` : '/api/ai', 'PATCH', body);
+    }
     await sync();
     toast('Done.');
   },

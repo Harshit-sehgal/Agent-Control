@@ -11,6 +11,7 @@ import {TINT_COUNT, dayLabel} from './ui-kit.js';
 import {jobOf} from './ui-company.js';
 import {ACTIVITY_CHIPS} from './activity-log.js';
 import {grantRows} from './ui-asks.js';
+import {cleanEffort, effortLabel, EFFORT_LEVELS} from './ai-presets.js';
 
 /** What a bot made without a job holds until the owner's first chat message
  * replaces it (the profile, the list and the chat all treat it as "no job yet"). */
@@ -96,9 +97,24 @@ export const memoryNotes = (state, botId) => (bookOf(state, botId)?.rules || [])
 export function modelLine(state, botId) {
   const ai = state?.ai || {}, own = ai.bots?.[botId] || {};
   const provider = (ai.providers || []).find(p => p.id === (own.providerId || ai.defaultProviderId));
-  const model = own.model || ai.defaultModel || (provider ? 'auto' : state?.aiModel || '');
-  if (provider) return `${provider.label || 'Saved provider'} · ${model}`;
+  const cliDefault = provider?.kind === 'local-cli' ? provider.model || 'default model' : 'auto';
+  const model = own.model || (own.providerId && own.providerId !== ai.defaultProviderId ? '' : ai.defaultModel) || (provider ? cliDefault : state?.aiModel || '');
+  const level = cleanEffort(own.effort) || cleanEffort(ai.defaultEffort);
+  const effort = level ? ` · ${effortLabel(level)}` : '';
+  if (provider) return `${provider.label || 'Saved provider'} · ${model}${effort}`;
   return model || 'Built-in demo';
+}
+
+/** The chip in a bot chat's header: the model in a word or two (the model id, or the provider when it runs on
+ * its default) and the effort when one is set. It opens the bot's Model page. Null with no saved provider. */
+export function modelChip(state, botId) {
+  const ai = state?.ai || {}, own = ai.bots?.[botId] || {};
+  const provider = (ai.providers || []).find(p => p.id === (own.providerId || ai.defaultProviderId));
+  if (!provider) return null;
+  const line = modelLine(state, botId), parts = line.split(' · ');
+  const model = parts[1] && !['default model', 'auto'].includes(parts[1]) ? parts[1] : provider.label || 'Model';
+  const level = EFFORT_LEVELS.find(l => l.id === (cleanEffort(own.effort) || cleanEffort(ai.defaultEffort)));
+  return {text: level ? `${model} · ${level.label}` : model, title: `Model: ${line}. Change it`};
 }
 
 /** `activityCount` is the log's own total for this bot (GET /api/activity), which is not in the snapshot. */

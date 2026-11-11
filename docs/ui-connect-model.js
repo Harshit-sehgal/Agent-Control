@@ -5,7 +5,7 @@
  *
  * Nothing here ever sees a key: a subscription has none, an MCP address is typed once and sent, and the
  * server never answers with it. */
-import {cleanCliModel, cliEngineById, LOCAL_CLI_KIND, LOCAL_CLI_ENGINES} from './ai-presets.js?v=7ad447f2c5';
+import {cleanCliModel, cliEngineById, LOCAL_CLI_KIND, LOCAL_CLI_ENGINES, EFFORT_LEVELS, cleanEffort} from './ai-presets.js?v=ded1274e22';
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
@@ -156,6 +156,47 @@ export function modelChoices({provider = null, current = '', defaultLabel = 'Def
 
 /** The model a form posts: the picked row, or what was typed after Other…. */
 export const chosenModel = values => String((values?.model === OTHER_MODEL ? values.modelOther : values?.model) ?? '').trim();
+
+/** A bot's model picker as one list: "Workspace default" on top, then a group per connected provider with
+ * its own default, its models, and "Another <provider> model…" to type any id. Each row's value is
+ * `providerId|model`, so one select answers both questions the old two dropdowns asked.
+ * @returns {{top: {value: string, label: string, selected: boolean}, groups: {label: string, rows: {value: string, label: string, selected: boolean}[]}[]}} */
+export function botModelChoices(ai = {}, own = {}) {
+  const providers = Array.isArray(ai?.providers) ? ai.providers : [];
+  const fallback = providers.find(p => p.id === ai?.defaultProviderId) || null;
+  // An override with a model but no provider runs on the workspace default's provider.
+  const pinned = own?.providerId || (own?.model ? fallback?.id : '') || '';
+  const now = String(own?.model ?? '').trim();
+  const defaultModel = fallback ? (ai.defaultModel || (fallback.kind === LOCAL_CLI_KIND ? fallback.model || 'default model' : 'default model')) : '';
+  const top = {value: '', label: fallback ? `Workspace default · ${fallback.label} · ${defaultModel}` : 'Workspace default', selected: !pinned};
+  // The workspace default's provider comes first: it is the one most bots run on.
+  const ordered = fallback ? [fallback, ...providers.filter(p => p !== fallback)] : providers;
+  const groups = ordered.map(p => {
+    const mine = p.id === pinned;
+    const rows = modelChoices({provider: p, current: mine ? now : '', defaultLabel: `${p.label} · its default`});
+    return {label: p.label || p.id, rows: rows.map(r => ({
+      value: `${p.id}|${r.value}`,
+      label: r.value === OTHER_MODEL ? `Another ${p.label} model…` : r.label,
+      selected: mine && r.value !== OTHER_MODEL && r.value === now,
+    }))};
+  });
+  return {top, groups};
+}
+
+/** What the grouped picker posts: `{providerId, model}`, with the typed id after "Another…". */
+export function pickedModel(values) {
+  const raw = String(values?.model ?? '');
+  if (!raw.includes('|')) return {providerId: null, model: ''};
+  const at = raw.indexOf('|'), providerId = raw.slice(0, at) || null, model = raw.slice(at + 1);
+  return {providerId, model: String(model === OTHER_MODEL ? values?.modelOther ?? '' : model).trim()};
+}
+
+/** The effort choices as radio rows: Default (send nothing), then the three levels. */
+export function effortChoices(current = '') {
+  const now = cleanEffort(current) || '';
+  return [{value: '', label: 'Default', hint: "The model decides."}, ...EFFORT_LEVELS.map(l => ({value: l.id, label: l.label, hint: l.hint}))]
+    .map(r => ({...r, selected: r.value === now}));
+}
 
 /* ---------- the CLI sign-in of each paired agent ---------- */
 
