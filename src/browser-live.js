@@ -87,7 +87,6 @@ export function createLiveHub({now = Date.now, waitMs = LIVE_WAIT_MS} = {}) {
     }
     return new Promise(resolve => {
       const timer = setTimeout(() => deliver(sp), hub.waitMs);
-      timer.unref?.();
       sp.parked = {resolve, timer};
     });
   }
