@@ -5,18 +5,18 @@
  * They throw errors carrying an HTTP `status` so the same rules apply to the
  * Node HTTP routes and to any browser-local transport.
  */
-import {activity,cleanText} from './core.js?v=c2620e6bed';
-import {fail} from './errors.js?v=c2620e6bed';
-import {cancelTask} from './tasks.js?v=c2620e6bed';
-import {normalizeRetention} from './retention.js?v=c2620e6bed';
-import * as contracts from './contracts.js?v=c2620e6bed';
-import {pruneChats, releaseChatWork} from './chats.js?v=c2620e6bed';
-import {denyBrowserRequest} from './bot-browser.js?v=c2620e6bed';
-import {BUSY_STATUSES} from './coordination.js?v=c2620e6bed';
-import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=c2620e6bed';
-import {memoryState} from './memory.js?v=c2620e6bed';
-import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=c2620e6bed';
-import {assertManager, releaseReports, PRIMARY_GROUP} from './company.js?v=c2620e6bed';
+import {activity,cleanText} from './core.js?v=789bbe7f4c';
+import {fail} from './errors.js?v=789bbe7f4c';
+import {cancelTask} from './tasks.js?v=789bbe7f4c';
+import {normalizeRetention} from './retention.js?v=789bbe7f4c';
+import * as contracts from './contracts.js?v=789bbe7f4c';
+import {pruneChats, releaseChatWork} from './chats.js?v=789bbe7f4c';
+import {denyBrowserRequest} from './bot-browser.js?v=789bbe7f4c';
+import {BUSY_STATUSES} from './coordination.js?v=789bbe7f4c';
+import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=789bbe7f4c';
+import {memoryState} from './memory.js?v=789bbe7f4c';
+import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=789bbe7f4c';
+import {assertManager, releaseReports, PRIMARY_GROUP} from './company.js?v=789bbe7f4c';
 
 export const SCHEMA_VERSION = 3;
 

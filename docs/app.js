@@ -11,14 +11,14 @@
  *   ui-dialogs  toast, sheet, confirm/ask   ui-actions action/form tables
  *   ui-fx       confetti, the send arrow, and when the bots react
  */
-import {parseRoute} from './ui-model.js?v=c2620e6bed';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, isAdmin, canWrite, applyTheme, watchSystemTheme, retireSession, sessionEpoch} from './ui-store.js?v=c2620e6bed';
-import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=c2620e6bed';
-import {listShell, renderList, threadShell, renderThread, homeView, renderMentions} from './ui-views.js?v=c2620e6bed';
-import {renderInfo, renderPage} from './ui-panel.js?v=c2620e6bed';
-import {showLogin, hideLogin, openCommandPalette, closeCommandPalette, paletteOpen, updateCommandResults, chooseCommand, moveCommand} from './ui-sheets.js?v=c2620e6bed';
-import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=c2620e6bed';
-import {bringBotsToLife} from './ui-fx.js?v=c2620e6bed';
+import {parseRoute} from './ui-model.js?v=789bbe7f4c';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, isAdmin, canWrite, applyTheme, watchSystemTheme, retireSession, sessionEpoch} from './ui-store.js?v=789bbe7f4c';
+import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=789bbe7f4c';
+import {listShell, renderList, threadShell, renderThread, homeView, renderMentions} from './ui-views.js?v=789bbe7f4c';
+import {renderInfo, renderPage} from './ui-panel.js?v=789bbe7f4c';
+import {showLogin, hideLogin, openCommandPalette, closeCommandPalette, paletteOpen, updateCommandResults, chooseCommand, moveCommand} from './ui-sheets.js?v=789bbe7f4c';
+import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=789bbe7f4c';
+import {bringBotsToLife} from './ui-fx.js?v=789bbe7f4c';
 
 const el = id => document.getElementById(id);
 const hashRoute = () => parseRoute(location.hash, store.state, {server: !isStaticDemo(), admin: isAdmin(), write: canWrite()});
