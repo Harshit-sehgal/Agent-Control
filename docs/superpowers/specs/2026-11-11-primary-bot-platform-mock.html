@@ -302,6 +302,38 @@ button.tog:hover{background:var(--sunk);color:var(--fg)}
 .pin2 small{font-size:12px;color:var(--muted);margin-top:-6px}.pin2 small.wt{color:var(--violet)}
 .unpinning{opacity:.55}
 @media (max-width:640px){.pin2{width:88px}.pin2 .face.xl{--s:76px}}
+/* settings page */
+.setwrap{position:fixed;inset:0;z-index:55;background:rgba(0,0,0,.55);display:grid;place-items:center;padding:24px;animation:fadeonly .18s ease-out}
+.setwrap[hidden]{display:none}
+.setdlg{width:min(940px,100%);height:min(720px,100%);background:var(--bg);border-radius:18px;box-shadow:0 30px 80px -20px rgba(0,0,0,.6),0 0 0 1px var(--line);display:grid;grid-template-columns:220px 1fr;overflow:hidden;animation:menuin .2s ease-out}
+.snav{display:flex;flex-direction:column;gap:2px;padding:14px 10px;border-right:1px solid var(--line);overflow:auto}
+.snav button{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;font-size:13.5px;color:var(--soft);text-align:left}
+.snav button:hover{background:var(--sunk);color:var(--fg)}.snav button.on{background:var(--raise);color:var(--fg)}
+.snav .i{width:17px;height:17px}
+.sbody{overflow:auto;padding:18px 28px 32px;display:flex;flex-direction:column;gap:22px}
+.shead{display:flex;align-items:center;gap:8px;position:sticky;top:-18px;background:var(--bg);padding:6px 0;z-index:1}
+.shead h2{flex:1;margin:0;font-size:18px;font-weight:600}
+.sgrp h4{font-size:12.5px;font-weight:500;color:var(--muted);margin:0 0 8px 4px}
+.scard{background:var(--raise);border-radius:14px;padding:4px 16px;box-shadow:inset 0 0 0 1px var(--line)}
+.scard.pad{padding:16px}
+.srow{display:flex;align-items:center;gap:12px;min-height:52px;padding:8px 0;border-top:1px solid var(--line);font-size:14px}
+.srow:first-child{border-top:0}
+.srow .w{flex:1;min-width:0}.srow small{display:block;color:var(--muted);font-size:12.5px;margin-top:2px}
+.srow.acct{min-height:76px}
+.ini.av{width:44px;height:44px;flex:none;display:grid;place-items:center;border-radius:50%;font-size:15px}
+.switch.mini{width:auto;padding:0;background:none}
+.setline .i{width:17px;height:17px;color:var(--soft)}
+@media (max-width:640px){
+  .setwrap{padding:0;place-items:stretch}
+  .setdlg{width:100%;height:100%;border-radius:0;grid-template-columns:1fr;animation:sheetin .28s var(--ease)}
+  .snav{border-right:0;padding:calc(12px + env(safe-area-inset-top,0px)) 16px 24px;gap:0}
+  .snav .shead{top:0;margin-bottom:8px}
+  .snav button{padding:15px 6px;font-size:15.5px;border-radius:0;border-top:1px solid var(--line)}
+  .snav button span{flex:1}.snav button .i:last-child{width:16px;height:16px;color:var(--muted)}
+  .sbody{padding:calc(12px + env(safe-area-inset-top,0px)) 16px 32px}
+  .shead{top:calc(-12px - env(safe-area-inset-top,0px))}
+  .srow.acct{flex-wrap:wrap;padding:14px 0}.srow.acct .w{flex:1 1 calc(100% - 60px)}.srow.acct .btn{flex:1}
+}
 /* new bot */
 .hire .fl{display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:var(--muted);border:0;padding:0;margin:0}
 .hire .fl legend{padding:0;margin-bottom:6px}
@@ -543,6 +575,7 @@ select.sel{border:0;border-radius:8px;background:var(--sunk);padding:5px 8px;fon
   <div class="confirm" id="confirm" role="alertdialog" aria-modal="true" aria-labelledby="cfH"><div class="card3"><h3 id="cfH"></h3><p id="cfP"></p><div class="acts" style="justify-content:flex-end"><button class="btn" data-del-no>Cancel</button><button class="btn danger" data-del-yes>Delete</button></div></div></div>
   <aside class="drawer" id="drawer" aria-label="Menu" aria-hidden="true"></aside>
   <aside class="panel" id="panel" aria-label="Details" aria-hidden="true"></aside>
+  <div class="setwrap" id="setwrap" hidden><div class="setdlg" id="setdlg" role="dialog" aria-modal="true" aria-label="Settings"></div></div>
   <div class="pal" id="pal" role="dialog" aria-label="Jump to"><div class="card2"><input id="palIn" autocomplete="off" aria-label="Search"><ul id="palList"></ul></div></div>
 </div>
 
@@ -731,24 +764,52 @@ function acts(list,showName=true){
 }
 const secH=(k,label,count,badge)=>`<button class="sec-h" data-sec="${k}" aria-expanded="${!S.col[k]}">${IC.chev}<span>${label}</span>${badge?`<span class="badge" style="margin-left:auto">${count}</span>`:`<span class="cnt">${S.col[k]?count:''}</span>`}</button>`;
 const USE=[{f:'sch',n:'Scholar',p:26},{f:'plan',n:'Planner',p:8},{f:'mail',n:'Mailroom',p:5},{n:'Others',p:3,c:'var(--line2)'}];
+function usageHTML(){return `<div class="group use"><h4>This week · resets Monday</h4>
+      <div class="big">42%<small>of Claude Max</small></div>
+      <div class="stack" role="img" aria-label="Scholar 26%, Planner 8%, Mailroom 5%, others 3% of the weekly limit">${USE.map(u=>`<span style="width:${u.p}%;background:${u.c||by(u.f).tint}"></span>`).join('')}</div>
+      <div class="whoused">${USE.map(u=>`<span>${u.f?face(by(u.f),'s',''):'<i class="sw"></i>'}${u.n} <em>${u.p}%</em></span>`).join('')}</div>
+      <p class="sub" style="margin-top:12px">OpenAI key: $3.10 of your $20 cap. Example numbers.</p></div>`}
+const SETI={
+ general:'<svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
+ look:'<svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg>',
+ models:'<svg class="i" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 8.7-8.7M17 6l2.5 2.5M14.5 8.5 17 11"/></svg>',
+ conn:'<svg class="i" viewBox="0 0 24 24"><path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0zM12 16v5"/></svg>',
+ perm:'<svg class="i" viewBox="0 0 24 24"><path d="M12 3 4.5 6v5.5c0 4.4 3.1 8.3 7.5 9.5 4.4-1.2 7.5-5.1 7.5-9.5V6z"/></svg>',
+ usage:'<svg class="i" viewBox="0 0 24 24"><path d="M5 20V12M10 20V6M15 20v-9M20 20V4"/></svg>',
+ computer:'<svg class="i" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>'};
+const SECTS=[['general','General'],['look','Appearance'],['models','Models and keys'],['conn','Connectors'],['perm','Permissions'],['usage','Usage'],['computer','Computer']];
+const card=(rows,h)=>`<section class="sgrp">${h?`<h4>${h}</h4>`:''}<div class="scard">${rows}</div></section>`;
+const srow=(l,r,sub)=>`<div class="srow"><span class="w">${l}${sub?`<small>${sub}</small>`:''}</span>${r}</div>`;
+function settingsBody(k){const look=$('app').dataset.look,th=document.documentElement.getAttribute('data-theme')||'';
+  if(k==='general')return card(`<div class="srow acct"><span class="ini av">${initials(ME.name)}</span><span class="w">${ME.name}<small>Signed in with Google</small></span><button class="btn">Add account</button><button class="btn">Sign out</button></div>`,'Account')
+    +card(srow('Bots running',`<button class="switch mini" role="switch" aria-checked="${!S.paused}" data-pause aria-label="Bots running"><span class="knob" aria-hidden="true"></span></button>`,S.paused?'Everything is paused':'Switch off to pause every bot at once')+srow('Primary bot','<span class="sub">Atlas</span>','Routes new threads and adds bots'),'Bots');
+  if(k==='look')return card(srow('Home view',`<select class="sel" data-home-sel aria-label="Home view">${[['desks','Desks'],['tree','List'],['chats','Chats'],['orbit','Orbit']].map(([v,l])=>`<option value="${v}" ${S.def===v?'selected':''}>${l}</option>`).join('')}</select>`,'How your bots are laid out on the home page')
+    +srow('Theme',`<select class="sel" data-theme-sel aria-label="Theme"><option value="" ${th===''?'selected':''}>Follow system</option><option value="light" ${th==='light'?'selected':''}>Light</option><option value="dark" ${th==='dark'?'selected':''}>Dark</option></select>`)
+    +srow('Look',`<select class="sel" data-look-sel aria-label="Look"><option value="soft" ${look==='soft'?'selected':''}>Soft studio</option><option value="ink" ${look==='ink'?'selected':''}>Ink &amp; paper</option><option value="night" ${look==='night'?'selected':''}>Night desk</option></select>`,'Night desk is always dark'));
+  if(k==='models')return card(srow('Claude Max','<span class="ok">Signed in</span>','Runs on your laptop')+srow('ChatGPT Plus','<span class="todo">Run <code>codex</code> to sign in</span>','Runs on your laptop'),'Subscriptions')
+    +card(srow('OpenAI','<span class="ok">Saved</span>')+srow('Gemini','<button class="btn">Add key</button>')+srow('Default model for new bots','<select class="sel" aria-label="Default model"><option>Claude (subscription)</option><option>ChatGPT (subscription)</option><option>OpenAI key</option></select>'),'API keys');
+  if(k==='conn')return card(srow('Google','<span class="ok">Connected</span>','Gmail, Drive, Calendar')+srow('MCP servers','<button class="btn">Add server</button>','GitHub, Notion'),'Connected');
+  if(k==='perm'){const rows=Object.entries(S.grants).filter(([id])=>by(id)).flatMap(([id,g])=>Object.entries(g).map(([sc,v])=>`<div class="srow">${face(by(id),'s','')}<span class="w">${esc(sc)}<small>${by(id).name}</small></span><select class="sel" data-perm="${id}" data-scope="${esc(sc)}" aria-label="${esc(sc)}">${PERM_OPTS(sc).map(([o,l])=>`<option value="${o}" ${v===o?'selected':''}>${l}</option>`).join('')}</select></div>`)).join('');
+    return `<p class="sub">Bots ask the first time they need something. What you answered is here. Paying or spending money never gets Always allow.</p>`+card(rows||'<div class="srow"><span class="w sub">Nothing granted yet.</span></div>','Granted')}
+  if(k==='usage')return `<div class="scard pad">${usageHTML()}</div>`;
+  if(k==='computer')return card(srow('Server','<span class="ok">This laptop</span>','Bots run while it is awake')+srow('Move to Oracle VM','<span class="sub">Planned</span>','Keeps bots running when the laptop sleeps')+srow('Shared browser','<span class="sub">Asleep</span>','Bots use it with your permission; you can take over'),'Where bots run')}
+function settingsHTML(){const k=S.set,phone=matchMedia('(max-width:640px)').matches,showNav=!phone||!k,showBody=!phone||!!k,cur=k||'general';
+  return `${showNav?`<nav class="snav" aria-label="Settings sections">${phone?`<div class="shead"><h2>Settings</h2><button class="x" data-setclose aria-label="Close">${IC.x}</button></div>`:''}${SECTS.map(([v,l])=>`<button class="${!phone&&cur===v?'on':''}" data-set="${v}" ${!phone&&cur===v?'aria-current="page"':''}>${SETI[v]}<span>${l}</span>${phone?IC.chev:''}</button>`).join('')}</nav>`:''}
+  ${showBody?`<div class="sbody"><div class="shead">${phone?`<button class="x" data-setback aria-label="Back to settings">${IC.back}</button>`:''}<h2>${SECTS.find(x=>x[0]===cur)[1]}</h2>${phone?'':''}<button class="x" data-setclose aria-label="Close">${IC.x}</button></div>${settingsBody(cur)}</div>`:''}`}
+function openSettings(k){S.set=k||(matchMedia('(max-width:640px)').matches?null:'general');S.left=false;S.panel=null;renderOver();$('setdlg').innerHTML=settingsHTML();$('setwrap').hidden=false;if(!matchMedia('(max-width:640px)').matches)setTimeout(()=>$('setdlg').querySelector('.on')?.focus({preventScroll:true}),50)}
+function closeSettings(){$('setwrap').hidden=true;S.set=null}
+function redrawSettings(){if(!$('setwrap').hidden)$('setdlg').innerHTML=settingsHTML()}
 function drawerHTML(){
   const p=pending(),look={soft:'Soft studio',ink:'Ink & paper',night:'Night desk'}[$('app').dataset.look];
-  return `<div class="ph"><div class="you"><span class="face m" style="--t:#8fe0bf"><span class="eyes"><i></i><i></i></span><b></b></span><div><b>You</b><div class="sub">Owner of ${BOTS.length} bots</div></div></div><button class="x" data-closeall aria-label="Close">${IC.x}</button></div><div class="pb">
+  return `<div class="ph"><div class="you"><span class="ini av">${initials(ME.name)}</span><div><b>${ME.name}</b><div class="sub">Owner of ${BOTS.length} bots</div></div></div><button class="x" data-closeall aria-label="Close">${IC.x}</button></div><div class="pb">
     <button class="switch" role="switch" aria-checked="${!S.paused}" data-pause><span class="w">${S.paused?'Everything is paused':'Bots are running'}<small>${S.paused?'Nothing runs until you switch this back on':'Switch off to pause every bot at once'}</small></span><span class="knob" aria-hidden="true"></span></button>
     ${p.length?`<div class="group"><h4>Needs you</h4>${p.map(a=>`<button class="line" data-open="${a.thread}">${face(by(a.bot),'s','wait')}<span class="w">${by(a.bot).name} wants to ${esc(a.action)}</span></button>`).join('')}</div>`:''}
     <div class="group navl"><h4>Go to</h4>
       <button class="line" data-panel="activity"><span class="w">Activity</span><span class="sub">What left the app</span></button>
       <button class="line" data-panel="company"><span class="w">Company</span><span class="sub">Who reports to whom</span></button>
       <button class="line" data-palette><span class="w">Jump to…</span><kbd>⌘K</kbd></button></div>
-    <div class="group navl"><h4>Settings</h4>
-      <button class="line" data-panel="settings" data-sect="models"><span class="w">Models and keys</span><span class="ok">Claude signed in</span></button>
-      <button class="line" data-panel="settings" data-sect="conn"><span class="w">Connectors</span><span class="ok">Google</span></button>
-      <button class="line" data-panel="settings" data-sect="look"><span class="w">Appearance</span><span class="sub">${look}</span></button></div>
-    <div class="group use"><h4>This week · resets Monday</h4>
-      <div class="big">42%<small>of Claude Max</small></div>
-      <div class="stack" role="img" aria-label="Scholar 26%, Planner 8%, Mailroom 5%, others 3% of the weekly limit">${USE.map(u=>`<span style="width:${u.p}%;background:${u.c||by(u.f).tint}"></span>`).join('')}</div>
-      <div class="whoused">${USE.map(u=>`<span>${u.f?face(by(u.f),'s',''):'<i class="sw"></i>'}${u.n} <em>${u.p}%</em></span>`).join('')}</div>
-      <p class="sub" style="margin-top:12px">OpenAI key: $3.10 of your $20 cap. Example numbers.</p></div>
+    <div class="group navl"><button class="line setline" data-settings>${SETI.general}<span class="w">Settings</span><span class="sub">Account, models, connectors, looks</span></button></div>
+    ${usageHTML()}
     <p class="foot">Server: this laptop. Moving it to your Oracle VM is on the plan.</p>
   </div>`;
 }
@@ -775,22 +836,6 @@ function panelHTML(){
   } else if(S.panel==='activity'){
     head='<h3>Activity</h3>';const f=S.filter,list=S.activity.filter(a=>f==='all'||a.kind===f);
     body=`<div class="seg" role="tablist">${[['outside','Left the app'],['perm','Permissions'],['bots','Bots'],['all','All']].map(([k,l])=>`<button class="${f===k?'on':''}" data-filter="${k}" role="tab" aria-selected="${f===k}">${l}</button>`).join('')}</div><div>${acts(list)}</div>`;
-  } else if(S.panel==='settings'){
-    head='<h3>Settings</h3>';const look=$('app').dataset.look,th=document.documentElement.getAttribute('data-theme')||'';
-    body=`<div class="group" id="sect-models"><h4>Subscriptions</h4>
-      <div class="line"><span class="w">Claude Max<small>Runs on your laptop</small></span><span class="ok">Signed in</span></div>
-      <div class="line"><span class="w">ChatGPT Plus<small>Runs on your laptop</small></span><span class="todo">Run <code>codex</code> to sign in</span></div></div>
-    <div class="group"><h4>API keys</h4>
-      <div class="line"><span class="w">OpenAI</span><span class="ok">Saved</span></div>
-      <div class="line"><span class="w">Gemini</span><button class="btn">Add key</button></div>
-      <div class="line"><span class="w">Default model for new bots</span><select class="sel" aria-label="Default model"><option>Claude (subscription)</option><option>ChatGPT (subscription)</option><option>OpenAI key</option></select></div></div>
-    <div class="group" id="sect-conn"><h4>Connectors</h4>
-      <div class="line"><span class="w">Google<small>Gmail, Drive, Calendar</small></span><span class="ok">Connected</span></div>
-      <div class="line"><span class="w">MCP servers<small>GitHub, Notion</small></span><button class="btn">Add server</button></div></div>
-    <div class="group" id="sect-look"><h4>Appearance</h4>
-      <div class="line"><span class="w">Home view<small>How your bots are laid out on the home page</small></span><select class="sel" data-home-sel aria-label="Home view">${[['desks','Desks'],['tree','List'],['chats','Chats'],['orbit','Orbit']].map(([k,l])=>`<option value="${k}" ${S.def===k?'selected':''}>${l}</option>`).join('')}</select></div>
-      <div class="line"><span class="w">Look</span><select class="sel" data-look-sel aria-label="Look"><option value="soft" ${look==='soft'?'selected':''}>Soft studio</option><option value="ink" ${look==='ink'?'selected':''}>Ink &amp; paper</option><option value="night" ${look==='night'?'selected':''}>Night desk</option></select></div>
-      <div class="line"><span class="w">Light or dark<small>Night desk is always dark</small></span><select class="sel" data-theme-sel aria-label="Light or dark"><option value="" ${th===''?'selected':''}>Follow system</option><option value="light" ${th==='light'?'selected':''}>Light</option><option value="dark" ${th==='dark'?'selected':''}>Dark</option></select></div></div>`;
   } else {
     const b=by(S.panel),reports=BOTS.filter(x=>x.boss===b.id),g=S.grants[b.id]||{},mine=S.activity.filter(a=>a.bot===b.id);
     head=`<button class="x" data-panel="company" aria-label="Company">${IC.back}</button><h3>${b.name}</h3>`;
@@ -815,7 +860,7 @@ function renderOver(){
   if(S.left)$('drawer').innerHTML=drawerHTML();
   if(S.panel)$('panel').innerHTML=panelHTML();
 }
-function render(){renderMain();renderOver()}
+function render(){renderMain();renderOver();redrawSettings()}
 function go(view,id){$('sq').value='';$('sq').blur();S.view=view;if(view==='thread')S.cur=id;else S.cur=null;S.left=false;S.panel=null;render()}
 
 /* ---------- the run ---------- */
@@ -869,7 +914,7 @@ function palItems(q){
   const all=[...S.threads.map(t=>({label:t.title,hint:'Thread',go:()=>go('thread',t.id)})),
     ...BOTS.map(b=>({label:b.name,hint:'Message · '+(roleOf(b)==='Bot'?short(b):roleOf(b)),face:b,bot:true,go:()=>openDM(b.id)})),
     {label:'Bots',hint:'Page',go:()=>go('bots')},{label:'New thread',hint:'Page',go:()=>go('new')},{label:'Activity',hint:'Page',go:()=>{S.panel='activity';renderOver()}},
-    {label:'Company',hint:'Page',go:()=>{S.panel='company';renderOver()}},{label:'Settings',hint:'Page',go:()=>{S.panel='settings';renderOver()}}];
+    {label:'Company',hint:'Page',go:()=>{S.panel='company';renderOver()}},{label:'Settings',hint:'Page',go:()=>openSettings()}];
   const pool=S.palBots?all.filter(i=>i.bot):all;q=q.toLowerCase().trim();return q?pool.filter(i=>(i.label+' '+i.hint).toLowerCase().includes(q)):pool}
 function renderPal(){const it=palItems($('palIn').value);S.palIdx=Math.min(S.palIdx,Math.max(it.length-1,0));
   $('palList').innerHTML=it.map((i,n)=>`<li><button class="${n===S.palIdx?'hl':''}" data-pal="${n}">${i.face?face(i.face,'s',''):''}<span>${esc(i.label)}</span><small>${esc(i.hint)}</small></button></li>`).join('')||'<li class="sub" style="padding:10px">No matches.</li>'}
@@ -909,6 +954,10 @@ document.addEventListener('click',e=>{
   else if(el.id==='fabNew'||d.new!==undefined){go('new')}
   else if(d.home!==undefined){go('bots')}
   else if(d.closeall!==undefined){S.left=false;S.panel=null;renderOver()}
+  else if(d.settings!==undefined){openSettings(d.settings||undefined)}
+  else if(d.set){S.set=d.set;redrawSettings();$('setdlg').querySelector('.sbody')?.scrollTo(0,0)}
+  else if(d.setback!==undefined){S.set=null;redrawSettings()}
+  else if(d.setclose!==undefined){closeSettings()}
   else if(d.panel){S.panel=d.panel;S.left=false;if(by(d.panel))S.tab='overview';renderOver();if(d.sect)setTimeout(()=>$('sect-'+d.sect)?.scrollIntoView({block:'start'}),80)}
   else if(d.palette!==undefined){S.left=false;renderOver();openPal()}
   else if(d.open){go('thread',d.open)}
@@ -958,7 +1007,7 @@ document.addEventListener('change',e=>{const s=e.target;
 });
 document.addEventListener('keydown',e=>{
   if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();$('pal').classList.contains('show')?closePal():openPal()}
-  else if(e.key==='Escape'){if($('pal').classList.contains('show'))closePal();else if(S.panel||S.left){S.panel=null;S.left=false;renderOver()}}
+  else if(e.key==='Escape'){if(!$('setwrap').hidden)closeSettings();else if($('pal').classList.contains('show'))closePal();else if(S.panel||S.left){S.panel=null;S.left=false;renderOver()}}
 });
 /* Gestures on the home views. Phone: touch and hold a bot; move to drag it, or let go without moving for its menu.
    Laptop: double-click and hold to drag (a plain long press works too); right-click for the menu.
@@ -1044,6 +1093,7 @@ function openMenu(item,x,y,touch){const key=item.parentElement.dataset.sortkey,k
   m.querySelector('button')?.focus({preventScroll:true})}
 function closeMenu(){$('cmenu').classList.remove('show');$('cmScrim').classList.remove('show')}
 $('cmScrim').addEventListener('click',closeMenu);
+$('setwrap').addEventListener('click',e=>{if(e.target.id==='setwrap')closeSettings()});
 $('sq').addEventListener('focus',openSearch);
 document.addEventListener('pointerdown',e=>{if(!$('sres').hidden&&!e.target.closest('#bbar'))closeSearch()},true);
 $('sq').addEventListener('keydown',e=>{if(e.key==='Escape'){closeSearch();e.target.blur()}else if(e.key==='Enter'){const f=$('sres').querySelector('button');if(f){e.preventDefault();f.click()}}});
