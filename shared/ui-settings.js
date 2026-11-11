@@ -9,26 +9,25 @@
  * The lists behind it are pure and tested in ui-profile-model.js. */
 import {face} from './ui-face.js';
 import {botStatus} from './ui-company.js';
-import {primaryOf} from './company.js';
-import {esc, icon, btn, empty, note, roundBtn, switchBtn} from './ui-kit.js';
-import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, loadLocal, applyTheme, themeChoice, THEMES} from './ui-store.js';
-import {isDesk, initials, pageFrame, HIDDEN_KEY} from './ui-shell.js';
+import {esc, icon, btn, empty, note, roundBtn, switchBtn, fullDate} from './ui-kit.js';
+import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, applyTheme, themeChoice, THEMES} from './ui-store.js';
+import {isDesk, initials} from './ui-shell.js';
 import {ADMIN_PAGES, adminPage} from './ui-admin.js';
-import {faceOf, activityBlocks, grantsHtml, grantNote} from './ui-profile.js';
+import {faceOf, headBar, activityBlocks, grantsHtml, grantNote} from './ui-profile.js';
 import {allGrantRows} from './ui-asks.js';
+import {toast, confirmSheet} from './ui-dialogs.js';
 import {
-  ACTIVITY_FILTERS, activityUrl, companyTree, weekUsage, settingsSections, resolveSection,
+  ACTIVITY_FILTERS, activityUrl, companyTree, weekUsage, settingsSections, resolveSection, sectionArg,
 } from './ui-profile-model.js';
 import {COLORS} from './ui-face.js';
 
 const el = id => document.getElementById(id);
-const ICONS = {general: 'gear', look: 'half', models: 'key', conn: 'plug', perm: 'shield', usage: 'chart', computer: 'monitor'};
+const ICONS = {general: 'gear', look: 'half', models: 'key', conn: 'plug', perm: 'shield', usage: 'chart'};
 const ADMIN_OF = {models: 'ai', conn: 'connectors', notifications: 'notifications', workspaces: 'workspaces', team: 'team', agents: 'agents', data: 'data'};
 const ownerName = () => store.state?.me?.name || String(store.state?.me?.email || '').split('@')[0] || 'You';
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const paused = () => Boolean(store.state?.guard?.paused);
 const canPause = () => isAdmin() || isStaticDemo();
-const hiddenCount = () => { const list = loadLocal(HIDDEN_KEY, []); return Array.isArray(list) ? list.filter(id => findBot(id)).length : 0; };
 
 /** Which admin page (if any) a section loads from the server. */
 const adminKeyOf = key => {
@@ -43,7 +42,6 @@ const adminKeyOf = key => {
 const card = (rows, label = '') => `<section class="st-g">${label ? `<h4 class="st-h">${esc(label)}</h4>` : ''}<div class="cd">${rows}</div></section>`;
 const srow = (label, right = '', sub = '') => `<div class="rw"><span class="w">${label}${sub ? `<small>${sub}</small>` : ''}</span>${right}</div>`;
 const link = (section, label, sub = '', value = '') => `<button type="button" class="rw" data-action="settings-open" data-section="${section}"><span class="w">${esc(label)}${sub ? `<small>${esc(sub)}</small>` : ''}</span>${value ? `<span class="pv">${esc(value)}</span>` : ''}${icon('chevron', 18)}</button>`;
-const goRow = (action, label, sub) => `<button type="button" class="rw" data-action="${action}"><span class="w">${esc(label)}<small>${esc(sub)}</small></span>${icon('chevron', 18)}</button>`;
 
 const pauseRow = () => {
   const on = !paused(), disabled = canPause() ? '' : ' disabled';
@@ -52,19 +50,34 @@ const pauseRow = () => {
 
 function account() {
   const demo = isStaticDemo(), me = store.state?.me || {};
-  const who = demo ? 'Browser-only demo · data stays in this browser' : `Signed in as ${me.role || 'member'}`;
+  const who = demo ? '' : `<small>Signed in as ${esc(me.role || 'member')}</small>`;
   const actions = demo ? '' : `<div class="st-acts">${btn('Change password', 'change-password', {small: true})}${btn('Sign out', 'logout', {small: true})}</div>`;
-  return `<div class="rw acct"><span class="ini av" aria-hidden="true">${esc(initials())}</span><span class="w">${esc(demo ? 'This browser' : ownerName())}<small>${esc(who)}</small></span></div>${actions}`;
+  return `<div class="rw acct"><span class="ini av" aria-hidden="true">${esc(initials())}</span><span class="w">${esc(demo ? 'This browser' : ownerName())}${who}</span></div>${actions}`;
+}
+
+/* ---------- your sessions (a live server only) ---------- */
+
+const sessionRows = list => {
+  if (!list.length) return '<div class="rw"><span class="w st-quiet">No active sessions.</span></div>';
+  const rows = list.map(x => `<div class="rw"><span class="w">${x.current ? 'This device' : 'Another device'}<small>${esc(x.ip || 'unknown ip')} · expires ${esc(fullDate(x.expiresAt))}</small></span>${x.current ? '<span class="pv">Current</span>' : btn('Revoke', 'account-revoke', {kind: 'danger', id: x.id, small: true})}</div>`).join('');
+  return rows + (list.length > 1 ? `<button type="button" class="rw" data-action="account-revoke-all"><span class="w">Sign out everywhere<small>Ends every session except this one</small></span></button>` : '');
+};
+/** Fill (or refill) the sessions card of General. */
+async function loadSessions() {
+  const box = el('acct-sessions'); if (!box) return;
+  try {
+    const {sessions = []} = await api('/api/sessions');
+    if (el('acct-sessions') === box) box.innerHTML = sessionRows(sessions);
+  } catch (error) { if (el('acct-sessions') === box) box.innerHTML = `<div class="rw"><span class="w st-quiet">${esc(error.message || 'Could not load sessions.')}</span></div>`; }
 }
 
 /* ---------- the sections ---------- */
 
 function general(sections) {
-  const primary = primaryOf(store.state), hidden = hiddenCount();
   const more = sections.filter(s => s.extra).map(s => link(s.key, s.label)).join('');
-  return card(account(), 'Account')
-    + card(pauseRow() + srow('Primary bot', `<span class="pv">${esc(primary?.name || 'Atlas')}</span>`, 'Routes new threads and adds bots')
-      + (hidden ? `<div class="rw"><span class="w">Hidden bots<small>${plural(hidden, 'bot')} out of your list</small></span><button type="button" class="btn small" data-action="show-hidden">Show</button></div>` : ''), 'Bots')
+  const sessions = isStaticDemo() ? '' : `<section class="st-g"><h4 class="st-h">Your sessions</h4><div class="cd" id="acct-sessions"><div class="rw"><span class="w st-quiet">Loading…</span></div></div></section>`;
+  return card(account(), 'Account') + sessions
+    + card(pauseRow(), 'Bots')
     + card(more, 'More')
     + (isStaticDemo() ? '' : card(`<button type="button" class="rw bad" data-action="delete-account"><span class="w">Delete my account</span></button>`));
 }
@@ -83,26 +96,21 @@ function models() {
 
 const conn = () => (adminKeyOf('conn') ? adminHost('conn') : card(srow('Connectors', '', 'Only the owner or an admin can add Google or an MCP server.')));
 
-function perm() {
-  return `<p class="st-note">What each bot may do beyond chatting and handing work on. When a bot needs something that leaves the app it asks you; Always allow and Deny are kept here, per bot.</p><div data-grants="all">${grantsHtml()}</div>${grantNote('st-note')}`;
+/** Every bot's rules, or (from a profile) one bot's, with a chip that clears the filter. This is the only place rules are listed and revoked. */
+function perm(arg) {
+  const bot = arg ? findBot(arg) : null;
+  const chip = bot ? `<div class="st-chip">${faceOf(bot, 22, {state: 'asleep', motion: false})}<span>Showing <b>${esc(bot.name)}</b></span><button type="button" class="link" data-action="perm-all">Show all</button></div>` : '';
+  return `<p class="st-note">What each bot may do beyond chatting and handing work on. Anything that leaves the app asks you first.</p>${chip}<div data-grants="${bot ? esc(bot.id) : 'all'}">${grantsHtml(bot?.id || null)}</div>${grantNote('st-note')}`;
 }
 
 function usage() {
   const {total, rows} = weekUsage(store.state);
-  if (!total) return `<section class="st-g"><h4 class="st-h">This week</h4><div class="cd pad"><p class="st-quiet">No bot has done any work this week.</p></div></section><p class="st-note">Subscription limits show here once a subscription is connected.</p>`;
+  if (!total) return `<section class="st-g"><h4 class="st-h">This week</h4><div class="cd pad"><p class="st-quiet">No bot has done any work this week.</p></div></section>`;
   const bar = rows.map(r => { const bot = findBot(r.botId), i = Math.max(0, (store.state.groups.find(g => g.id === 'home')?.bots || []).indexOf(bot)); const tint = Number.isInteger(bot?.settings?.tint) ? bot.settings.tint : i; return `<span style="width:${r.pct}%;background:${COLORS[Math.abs(tint) % COLORS.length]}"></span>`; }).join('');
   const who = rows.map(r => { const bot = findBot(r.botId); return `<span>${bot ? faceOf(bot, 20, {state: 'asleep', motion: false}) : ''}${esc(r.name)} <em>${r.pct}%</em></span>`; }).join('');
   return `<section class="st-g"><h4 class="st-h">This week</h4><div class="cd pad"><div class="st-big">${total}<small>bot ${total === 1 ? 'turn' : 'turns'}</small></div>
     <div class="st-stack" role="img" aria-label="${esc(rows.map(r => `${r.name} ${r.pct}%`).join(', '))} of this week's work">${bar}</div><div class="whoused">${who}</div></div></section>
-    <p class="st-note">Counted from your runs. Subscription limits show here once a subscription is connected.</p>`;
-}
-
-function computer() {
-  const demo = isStaticDemo();
-  return card(srow('Server', `<span class="pv">${demo ? 'This browser' : 'This server'}</span>`, demo ? 'The demo runs in this page and stops when you close it.' : 'Bots run while it is awake.')
-    + srow('Move to the Oracle VM', '<span class="pv">Planned</span>', 'Keeps bots running when the laptop sleeps')
-    + srow('Shared browser', '', 'Bots use it only with your permission, and you can take over.')
-    + (!demo && isAdmin() ? link('agents', 'Local agents', 'Devices that run work for your bots') : ''), 'Where bots run');
+    <p class="st-note">Each bot's turns in the runs of the last seven days.</p>`;
 }
 
 function about() {
@@ -114,14 +122,13 @@ function about() {
   return `<p class="st-note">${esc(text)}</p>` + card(fact('Storage', demo ? 'This browser' : 'Node server') + fact('Real AI', demo || !ai ? 'Not connected' : (model ? `Connected · ${esc(model)}` : 'Connected')) + fact('Sync across devices', demo ? 'Not available' : 'Yes, through the server'));
 }
 
-function body(key, sections) {
+function body(key, sections, arg = '') {
   if (key === 'general') return general(sections);
   if (key === 'look') return look();
   if (key === 'models') return models();
   if (key === 'conn') return conn();
-  if (key === 'perm') return perm();
+  if (key === 'perm') return perm(arg);
   if (key === 'usage') return usage();
-  if (key === 'computer') return computer();
   if (key === 'about') return about();
   return adminKeyOf(key) ? adminHost(key) : general(sections);
 }
@@ -131,7 +138,7 @@ const titleOf = (key, sections) => sections.find(s => s.key === key)?.label || '
 
 const CLOSE = roundBtn('x', 'Close settings', 'settings-close');
 
-function dialog(sections, key) {
+function dialog(sections, key, arg) {
   const main = sections.filter(s => !s.extra), extra = sections.find(s => s.key === key)?.extra;
   const nav = main.map(s => { const on = s.key === (extra ? 'general' : key); return `<button type="button" class="${on ? 'on' : ''}" data-action="settings-open" data-section="${s.key}"${on ? ' aria-current="page" autofocus' : ''}>${icon(ICONS[s.key], 17)}<span>${esc(s.label)}</span></button>`; }).join('');
   const lead = extra ? `<button type="button" class="rbtn" data-action="settings-open" data-section="general" aria-label="Back to General">${icon('back', 20)}</button>` : '';
@@ -140,37 +147,37 @@ function dialog(sections, key) {
       <nav class="st-nav" aria-label="Settings sections">${nav}<hr>
         <button type="button" data-action="go-activity">${icon('pulse', 17)}<span>Activity</span></button>
         <button type="button" data-action="go-company">${icon('people', 17)}<span>Company</span></button></nav>
-      <div class="st-main"><header class="st-head">${lead}<h2>${esc(titleOf(key, sections))}</h2>${CLOSE}</header><div class="st-body">${body(key, sections)}</div></div>
+      <div class="st-main"><header class="st-head">${lead}<h2>${esc(titleOf(key, sections))}</h2>${CLOSE}</header><div class="st-body">${body(key, sections, arg)}</div></div>
     </div></div>`;
 }
 
+/** The phone's Settings is the list of sections and nothing else: each shows its one value, and the account, the
+ * pause switch and the rest of the pages (Team, Notifications, About...) are behind General. */
 function phoneCards(sections) {
-  const {total} = weekUsage(store.state), rules = allGrantRows(store.state).length;
-  const more = sections.filter(s => s.extra).map(s => link(s.key, s.label)).join('');
-  const mode = themeChoice();
-  return `<section class="pg st-phone"><header class="pr-bar">${roundBtn('x', 'Close settings', 'settings-close', {cls: 'big'})}</header>
-    <div class="pg-body st-cards">
-      <div class="cd"><button type="button" class="rw acct" data-action="settings-open" data-section="general"><span class="ini av" aria-hidden="true">${esc(initials())}</span><span class="w">${esc(isStaticDemo() ? 'This browser' : ownerName())}<small>${isStaticDemo() ? 'Browser-only demo' : `Signed in as ${esc(store.state?.me?.role || 'member')}`}</small></span>${icon('chevron', 18)}</button>
-        ${link('usage', 'Usage', '', total ? plural(total, 'turn') : '')}${link('models', 'Models and keys', 'Providers, keys and the default model')}</div>
-      <div class="cd">${link('conn', 'Connect apps', 'Google, MCP servers')}</div>
-      <section><h4 class="st-h">Bots</h4><div class="cd">${pauseRow()}${link('perm', 'Permissions', rules ? `${plural(rules, 'rule')} · paying always asks` : 'None yet · paying always asks')}${link('computer', 'Computer', 'Where your bots run', isStaticDemo() ? 'This browser' : 'This server')}</div></section>
-      <section><h4 class="st-h">Go to</h4><div class="cd">${goRow('go-activity', 'Activity', 'What your bots did outside the app')}${goRow('go-company', 'Company', 'Who reports to whom')}</div></section>
-      <section><h4 class="st-h">App</h4><div class="cd">${link('look', 'Appearance', mode === 'system' ? 'Follows the system' : mode === 'cream' ? 'Light' : 'Dark')}</div></section>
-      ${more ? `<section><h4 class="st-h">More</h4><div class="cd">${more}</div></section>` : ''}
+  const {total} = weekUsage(store.state), rules = allGrantRows(store.state).length, mode = themeChoice();
+  const sub = {general: 'Account, pause, more', models: 'Providers, keys and the default model', conn: 'Google, MCP servers'};
+  const value = {usage: total ? plural(total, 'turn') : '', perm: rules ? plural(rules, 'rule') : '', look: mode === 'system' ? 'System' : mode === 'cream' ? 'Light' : 'Dark'};
+  const row = s => `<button type="button" class="rw" data-action="settings-open" data-section="${s.key}"><span class="rw-i">${icon(ICONS[s.key], 22)}</span><span class="w">${esc(s.label)}${sub[s.key] ? `<small>${esc(sub[s.key])}</small>` : ''}</span>${value[s.key] ? `<span class="pv">${esc(value[s.key])}</span>` : ''}${icon('chevron', 18)}</button>`;
+  const jump = (action, name, glyph) => `<button type="button" class="rw" data-action="${action}"><span class="rw-i">${icon(glyph, 22)}</span><span class="w">${name}</span>${icon('chevron', 18)}</button>`;
+  return `<section class="pg pr st-phone">${headBar('Settings', roundBtn('x', 'Close settings', 'settings-close'))}
+    <div class="pg-body pr-body st-cards">
+      <div class="cd">${sections.filter(s => !s.extra).map(row).join('')}</div>
+      <div class="cd">${jump('go-activity', 'Activity', 'pulse')}${jump('go-company', 'Company', 'people')}</div>
     </div></section>`;
 }
 
-function phoneSection(sections, key) {
-  return `<section class="pg st-phone"><header class="pr-bar pr-subbar"><button type="button" class="rbtn" data-action="settings-back" aria-label="Back to Settings">${icon('back', 20)}</button><h1>${esc(titleOf(key, sections))}</h1><span class="rbtn ghost" aria-hidden="true"></span></header>
-    <div class="pg-body st-cards st-section">${body(key, sections)}</div></section>`;
+function phoneSection(sections, key, arg) {
+  return `<section class="pg pr st-phone">${headBar(titleOf(key, sections), `<button type="button" class="rbtn" data-action="settings-back" aria-label="Back to Settings">${icon('back', 20)}</button>`)}
+    <div class="pg-body pr-body st-cards st-section">${body(key, sections, arg)}</div></section>`;
 }
 
 const sectionsNow = () => settingsSections({admin: isAdmin(), demo: isStaticDemo()});
 export function settingsView(route) {
-  const sections = sectionsNow(), key = resolveSection(route.settings, sections);
+  const sections = sectionsNow(), key = resolveSection(route.settings, sections), arg = sectionArg(route.settings);
   if (adminKeyOf(key)) setTimeout(reloadAdminPage, 0);
-  if (isDesk()) return dialog(sections, key);
-  return route.settings ? phoneSection(sections, key) : phoneCards(sections);
+  if (key === 'general' && !isStaticDemo()) setTimeout(loadSessions, 0);
+  if (isDesk()) return dialog(sections, key, arg);
+  return route.settings ? phoneSection(sections, key, arg) : phoneCards(sections);
 }
 
 /* ---------- the admin pages inside Settings ---------- */
@@ -203,6 +210,9 @@ export async function reloadAdminPage() {
 
 /* ---------- Company ---------- */
 
+/** Company and Activity sit in the same frame as a bot's pages: a centred title under a round back button. */
+const page = (title, inner) => `<section class="pg pr">${headBar(title, roundBtn('back', 'Back', 'back-to-list', {}))}<div class="pg-body pr-body">${inner}</div></section>`;
+
 const STATUS_WORD = {working: 'working', waiting: 'waiting'};
 function treeNode(n, counter) {
   const bot = findBot(n.id), status = botStatus(store.state, n.id), i = counter.n++;
@@ -216,7 +226,7 @@ export function companyView() {
   const sample = (name, settings, opts) => face({name, settings}, {size: 20, state: 'awake', motion: false, ...opts});
   const legend = `<div class="co-legend"><span>${sample('P', {lead: true}, {primary: true})}Primary</span><span>${sample('M', {}, {manager: true})}Manager</span><span>${sample('B', {})}Bot</span></div>`;
   const list = tree ? `<ul class="co-tree">${treeNode(tree, {n: 0})}</ul>` : '<p class="st-quiet">No bots yet.</p>';
-  return pageFrame({title: 'Company', body: `${legend}${list}`, backLabel: 'Back'});
+  return page('Company', `${legend}${list}`);
 }
 
 /* ---------- Activity ---------- */
@@ -238,7 +248,7 @@ export function activityView() {
   ay.filter = 'outside'; ay.items = []; ay.next = null;
   setTimeout(() => loadActivity(), 0);
   const chips = ACTIVITY_FILTERS.map(([key, label]) => `<button type="button" role="tab" data-action="activity-filter" data-filter="${key}" aria-selected="${key === ay.filter}">${esc(label)}</button>`).join('');
-  return pageFrame({title: 'Activity', body: `<div class="st-seg ay-chips" role="tablist" aria-label="Show">${chips}</div><div id="ay-list" class="pr-stack"><p class="st-quiet">Loading…</p></div>`, backLabel: 'Back'});
+  return page('Activity', `<div class="st-seg ay-chips" role="tablist" aria-label="Show">${chips}</div><div id="ay-list" class="pr-stack"><p class="st-quiet">Loading…</p></div>`);
 }
 
 /* ---------- what the buttons do ---------- */
@@ -262,6 +272,19 @@ export const settingsActions = {
     await sync();
     document.querySelectorAll('[data-pause]').forEach(x => x.setAttribute('aria-checked', String(!paused())));
     document.querySelectorAll('[data-pause-sub]').forEach(x => { x.textContent = paused() ? 'Everything is paused' : 'Switch off to pause every bot at once'; });
+  },
+  // The filter chip on Permissions: back to every bot's rules, in place of the filtered page.
+  'perm-all': () => go({settings: 'perm'}, {replace: true}),
+  'account-revoke': async b => {
+    await api(`/api/sessions/${encodeURIComponent(b.dataset.id)}`, 'DELETE', {});
+    toast('Session revoked.');
+    await loadSessions();
+  },
+  'account-revoke-all': async () => {
+    if (!await confirmSheet('Sign out every other session?', {confirm: 'Sign out', danger: true})) return;
+    await api('/api/sessions/revoke-all', 'POST', {});
+    toast('Other sessions signed out.');
+    await loadSessions();
   },
   'go-activity': () => go({activity: true}),
   'go-company': () => go({company: true}),

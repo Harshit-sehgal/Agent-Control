@@ -102,7 +102,7 @@ export function modelLine(state, botId) {
 }
 
 /** `activityCount` is the log's own total for this bot (GET /api/activity), which is not in the snapshot. */
-export function profileRows(state, botId, {activityCount = 0} = {}) {
+export function profileRows(state, botId, {activityCount = 0, canPickModel = true} = {}) {
   const bot = botOf(state, botId);
   if (!bot) return [];
   const notes = memoryNotes(state, botId).length, acts = Number(activityCount) || 0;
@@ -111,7 +111,8 @@ export function profileRows(state, botId, {activityCount = 0} = {}) {
     {key: 'memory', label: 'Memory', value: notes ? plural(notes, 'note') : 'Empty'},
     {key: 'activity', label: 'Activity', value: acts ? String(acts) : ''},
     {key: 'permissions', label: 'Permissions', value: rules ? plural(rules, 'rule') : 'None'},
-    {key: 'model', label: 'Model', value: modelLine(state, botId)},
+    // With nothing to pick (the demo has no model) the row is only a value, not a door to an empty page.
+    {key: 'model', label: 'Model', value: modelLine(state, botId), ...(canPickModel ? {} : {plain: true})},
   ];
   if (primaryOf(state)?.id !== botId) rows.push({key: 'computer', label: 'Computer', value: 'Idle'});
   if (team) rows.push({key: 'team', label: 'Team', value: plural(team, 'bot')});
@@ -226,9 +227,9 @@ export function weekUsage(state, now = Date.now()) {
   return {total, rows};
 }
 
-const SECTIONS = [['general', 'General'], ['look', 'Appearance'], ['models', 'Models and keys'], ['conn', 'Connectors'], ['perm', 'Permissions'], ['usage', 'Usage'], ['computer', 'Computer']];
-/** The seven sections, then the pages a live server adds (reached from General and
- * Computer): notifications and workspaces for anyone, team, agents and data for an admin, About always. */
+const SECTIONS = [['general', 'General'], ['look', 'Appearance'], ['models', 'Models and keys'], ['conn', 'Connectors'], ['perm', 'Permissions'], ['usage', 'Usage']];
+/** The six sections, then the pages a live server adds (reached from General):
+ * notifications and workspaces for anyone, team, agents and data for an admin, About always. */
 export function settingsSections({admin = false, demo = true} = {}) {
   const extra = [];
   if (!demo) extra.push(['notifications', 'Notifications'], ['workspaces', 'Workspaces']);
@@ -237,8 +238,13 @@ export function settingsSections({admin = false, demo = true} = {}) {
   return [...SECTIONS.map(([key, label]) => ({key, label})), ...extra.map(([key, label]) => ({key, label, extra: true}))];
 }
 const ALIASES = {ai: 'models', you: 'general', '': 'general'};
+/** A section name may carry one argument after its first slash: `perm/<bot id>` is
+ * Permissions for that bot. */
+const splitSection = name => { const text = String(name ?? ''), at = text.indexOf('/'); return at < 0 ? [text, ''] : [text.slice(0, at), text.slice(at + 1)]; };
 /** The section a route names, or General when it is unknown or not allowed here. */
 export function resolveSection(name, sections) {
-  const key = ALIASES[name] ?? name;
+  const head = splitSection(name)[0], key = ALIASES[head] ?? head;
   return sections.some(s => s.key === key) ? key : 'general';
 }
+/** The argument after the slash in a section name ('' when there is none). */
+export const sectionArg = name => splitSection(name)[1];

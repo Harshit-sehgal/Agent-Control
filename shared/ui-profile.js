@@ -8,7 +8,7 @@
 import {SHAPES, COLORS, face} from './ui-face.js';
 import {botStatus, botIsManager} from './ui-company.js';
 import {primaryOf} from './company.js';
-import {esc, icon, field, textInput, clock, roundBtn, switchBtn} from './ui-kit.js';
+import {esc, icon, field, textInput, clock, roundBtn} from './ui-kit.js';
 import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js';
 import {GRANT_LABELS} from './asks.js';
 import {grantRows, allGrantRows, grantUrl} from './ui-asks.js';
@@ -18,11 +18,10 @@ import {sendChat} from './ui-chat.js';
 import {computerPage as computerView, computerLabel, keysOwned} from './ui-computer-view.js';
 import {
   MAX_NAME, hasJob, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, lookOf, newBotDefaults,
-  newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, directReports, closeTarget,
+  newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, closeTarget,
 } from './ui-profile-model.js';
 
 const el = id => document.getElementById(id);
-const MUTED_KEY = 'ac-muted';
 const SHAPE_LABELS = {rounded: 'Rounded square', circle: 'Circle', hexagon: 'Hexagon', pebble: 'Pebble', drop: 'Drop', shield: 'Shield', arch: 'Arch', egg: 'Egg', blob: 'Blob', bean: 'Bean'};
 
 /* ---------- small helpers ---------- */
@@ -53,7 +52,7 @@ export function togglePin(id) {
 }
 /** Forget a bot that is gone from the per-person lists. */
 function forget(id) {
-  for (const key of [PINS_KEY, HIDDEN_KEY, MUTED_KEY, ORDER_KEY]) { const list = loadLocal(key, null); if (Array.isArray(list) && list.includes(id)) saveLocal(key, list.filter(x => x !== id)); }
+  for (const key of [PINS_KEY, HIDDEN_KEY, ORDER_KEY]) { const list = loadLocal(key, null); if (Array.isArray(list) && list.includes(id)) saveLocal(key, list.filter(x => x !== id)); }
 }
 
 /** Where a profile was opened from: Back goes to that thread, else to the bot's chat. */
@@ -112,11 +111,12 @@ export function openBotMenu(botId, {opener = null, x = null, y = null, touch = n
 
 const MORE = svg('<circle cx="5.5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="18.5" cy="12" r="1.4" fill="currentColor"/>', 20);
 const ROW_ICONS = {memory: 'note', activity: 'pulse', permissions: 'shield', model: 'chip', computer: 'monitor', team: 'people'};
-const SUB_TITLES = {memory: 'Memory', activity: 'Activity', permissions: 'Permissions', model: 'Model', computer: 'Computer', team: 'Team', edit: 'Edit'};
+const SUB_TITLES = {memory: 'Memory', activity: 'Activity', model: 'Model', computer: 'Computer', edit: 'Edit'};
 
 const bar = (left, right = '') => `<header class="pr-bar">${left}<span class="pr-grow"></span>${right}</header>`;
-const subBar = (bot, title) => `<header class="pr-bar pr-subbar">${roundBtn('back', `Back to ${bot.name}`, 'profile-up', {id: bot.id})}<h1>${esc(title)}</h1><span class="rbtn ghost" aria-hidden="true"></span></header>`;
-const mutedBots = () => savedList(MUTED_KEY);
+/** The header every inner page shares: a round back button, a centred title. */
+export const headBar = (title, back) => `<header class="pr-bar pr-subbar">${back}<h1>${esc(title)}</h1><span class="rbtn ghost" aria-hidden="true"></span></header>`;
+const subBar = (bot, title) => headBar(title, roundBtn('back', `Back to ${bot.name}`, 'profile-up', {id: bot.id}));
 
 function hero(bot) {
   const state = store.state, job = hasJob(bot) ? esc(bot.instructions) : `No job yet. Tell ${esc(bot.name)} what to do in its chat.`;
@@ -127,19 +127,22 @@ function hero(bot) {
   </div>`;
 }
 
+/** Permissions and Team have no page here: their one home is Settings > Permissions (filtered to this bot) and the Company chart. */
+const ROW_ACTION = {permissions: 'profile-perm', team: 'go-company'};
 function profileMain(bot) {
   // The log is not in the snapshot, so the Activity count is filled in after the page paints.
   const value = r => (r.key === 'activity' ? `<span class="pv" data-activity-count="${esc(bot.id)}"></span>`
     : r.key === 'computer' ? `<span class="pv" data-computer-row="${esc(bot.id)}">${esc(computerLabel(bot.id))}</span>`
       : r.value ? `<span class="pv">${esc(r.value)}</span>` : '');
-  const rows = profileRows(store.state, bot.id).map(r => `<button type="button" class="rw" data-action="profile-sub" data-id="${esc(bot.id)}" data-sub="${r.key}"><span class="rw-i">${icon(ROW_ICONS[r.key], 22)}</span><span class="w">${esc(r.label)}</span>${value(r)}${icon('chevron', 18)}</button>`).join('');
-  const on = !mutedBots().includes(bot.id);
+  const rows = profileRows(store.state, bot.id, {canPickModel: !isStaticDemo() && canWrite()}).map(r => {
+    const inner = `<span class="rw-i">${icon(ROW_ICONS[r.key], 22)}</span><span class="w">${esc(r.label)}</span>${value(r)}`;
+    return r.plain ? `<div class="rw">${inner}</div>`
+      : `<button type="button" class="rw" data-action="${ROW_ACTION[r.key] || 'profile-sub'}" data-id="${esc(bot.id)}" data-sub="${r.key}">${inner}${icon('chevron', 18)}</button>`;
+  }).join('');
   return `${bar(roundBtn('back', `Back to ${bot.name}'s chat`, 'profile-back', {id: bot.id}), `<button type="button" class="rbtn" data-action="bot-menu" data-id="${esc(bot.id)}" aria-haspopup="menu" aria-label="More for ${esc(bot.name)}">${MORE}</button>`)}
     <div class="pg-body pr-body">
       ${hero(bot)}
       <div class="cd">${rows}</div>
-      <div><div class="cd"><div class="rw"><span class="w">Notifications</span>${switchBtn(on, `Notifications for ${bot.name}`, ` data-action="profile-notify" data-id="${esc(bot.id)}"`)}</div></div>
-      <p class="pr-note">Get notified when ${esc(bot.name)} finishes or is waiting for you.</p></div>
     </div>`;
 }
 
@@ -200,41 +203,31 @@ function grantRow(r) {
   const sub = r.legacy ? `<small>Set before asks existed. ${r.choice === 'always' ? 'It ran without asking.' : 'It asks each time.'}</small>` : '';
   return `<div class="gr${r.legacy ? ' legacy' : ''}"><div class="gr-top"><span class="w">${esc(r.label)}${sub}</span>${r.legacy ? seg : ''}</div>${r.legacy ? '' : seg}</div>`;
 }
-/** One bot's rules as a card, or every bot's in a card each (Settings). The node is repainted in place when a choice is made. */
+/** One bot's rules as a card, or every bot's in a card each. Lives in Settings > Permissions only. The node is repainted in place when a choice is made. */
 export function grantsHtml(botId = null) {
   if (botId) {
     const rows = grantRows(store.state, botId), name = findBot(botId)?.name || 'This bot';
     return rows.length ? `<div class="cd">${rows.map(grantRow).join('')}</div>`
-      : `<p class="pr-note">No rules yet. When ${esc(name)} needs something that leaves the app, it asks you first. Always allow and Deny choices are listed here.</p>`;
+      : `<p class="st-note">No rules for ${esc(name)} yet. One appears here when you pick Always allow or Deny on its ask.</p>`;
   }
   const rows = allGrantRows(store.state);
-  if (!rows.length) return '<div class="cd"><div class="rw"><span class="w st-quiet">No bot has a rule yet. When one needs something that leaves the app it asks you first, and the answers you keep are listed here.</span></div></div>';
+  if (!rows.length) return '<div class="cd"><div class="rw"><span class="w st-quiet">No rules yet. One appears here when you pick Always allow or Deny on a bot\'s ask.</span></div></div>';
   const by = new Map();
   for (const r of rows) by.set(r.botId, [...(by.get(r.botId) || []), r]);
   return [...by].map(([id, list]) => `<section class="st-g"><h4 class="st-h">${esc(list[0].botName)}</h4><div class="cd">${list.map(grantRow).join('')}</div></section>`).join('');
 }
-/** The note under every list of rules. */
-export const grantNote = (cls = 'pr-note') => `<p class="${cls}">${canGrant() ? 'Payments are asked every time. They never get Always allow.' : 'Only the owner or an admin can change these. Payments are asked every time.'}</p>`;
-
-function permissionsPage(bot) {
-  return `<div data-grants="${esc(bot.id)}">${grantsHtml(bot.id)}</div>${grantNote()}`;
-}
+/** The note under the list of rules (shown once, in Settings). */
+export const grantNote = (cls = 'st-note') => `<p class="${cls}">${canGrant() ? 'Payments are asked every time. They never get Always allow.' : 'Only the owner or an admin can change these. Payments are asked every time.'}</p>`;
 
 function modelPage(bot) {
   const ai = store.state?.ai || {}, own = ai.bots?.[bot.id] || {}, providers = ai.providers || [];
   const options = [['', 'Workspace default'], ...providers.map(p => [p.id, p.label || p.id])].map(([v, l]) => `<option value="${esc(v)}"${v === (own.providerId || '') ? ' selected' : ''}>${esc(l)}</option>`).join('');
   const picker = !isStaticDemo() && canWrite() && (providers.length || store.state?.aiEnabled)
     ? `<form id="bot-model-form" class="pr-form" data-bot="${esc(bot.id)}" autocomplete="off">${field('Model provider', `<select class="input" name="providerId">${options}</select>`)}${field('Model', textInput('model', {value: own.model || '', placeholder: 'Leave empty for the default', maxlength: 120}))}<button type="submit" class="btn primary wide">Save model</button></form>` : '';
-  return `<div class="cd"><div class="rw"><span class="w">Context<small>Picks what it needs from memory and the thread</small></span><span class="pv">Automatic</span></div></div>
-    ${picker || `<p class="pr-note">${isStaticDemo() ? 'This demo answers with built-in replies, so there is no model to pick. Models need the Node server.' : 'Add a model provider under Settings, then pick one here.'}</p>`}`;
+  return picker || '<p class="pr-note">Add a model provider under Settings, then pick one here.</p>';
 }
 
 const computerPage = bot => computerView(bot, {faceOf: state => faceOf(bot, 22, {state, motion: state !== 'awake'})});
-
-function teamPage(bot) {
-  const reports = directReports(store.state, bot.id);
-  return `<div class="cd">${reports.map(b => `<button type="button" class="rw" data-action="open-bot" data-id="${esc(b.id)}">${faceOf(b, 40)}<span class="w">${esc(b.name)}<small>${esc(hasJob(b) ? b.instructions.split(/[.:]/)[0] : 'No job yet')}</small></span>${icon('chevron', 18)}</button>`).join('')}</div>`;
-}
 
 /* ----- shape and colour: shared by Edit and New bot ----- */
 
@@ -266,19 +259,33 @@ function managerSelect(botId, current) {
   return `<select class="input" name="reportsTo"><option value="">None, reports to ${esc(primary)}</option>${group('Managers', 'manager')}${group('Other bots', 'bot')}</select>`;
 }
 
-function editPage(bot) {
-  const look = lookOf(store.state, bot.id), isPrimary = primaryOf(store.state)?.id === bot.id;
-  return `<form id="edit-bot-form" class="pr-form" data-bot="${esc(bot.id)}" data-was="${esc(JSON.stringify(look))}" autocomplete="off">
-    <div class="lk-preview">${face({...bot, settings: {...(bot.settings || {}), shape: look.shape, tint: look.tint}}, {size: 84, state: 'awake', primary: isPrimary})}</div>
-    ${field('Name', textInput('name', {value: bot.name, maxlength: MAX_NAME, required: true}))}
-    ${isPrimary ? '' : field('Manager', managerSelect(bot.id, look.reportsTo))}
+/** The one form behind Edit and New bot: a preview face, a big name, the shape and colour
+ * pickers, a manager row, a note and one pill button. Edit passes the bot's own values and
+ * data-was (what Save compares against); New passes empty ones and Create stays off until
+ * there is a name. */
+function botForm({id, attrs = '', bot = null, look, primary = false, note, extra = '', submit, off = false}) {
+  const write = canWrite();
+  const preview = face({...(bot || {name: 'x'}), settings: {...(bot?.settings || {}), shape: look.shape, tint: look.tint}}, {size: 84, state: 'awake', primary});
+  const name = `<input class="nb-name" name="name" required maxlength="${MAX_NAME}" aria-label="Bot name" autocomplete="off"${bot ? ` value="${esc(bot.name)}"` : ' placeholder="Name your bot" autofocus'}${write ? '' : ' disabled'}>`;
+  const boss = primary ? '' : `<label class="nb-boss"><span>Manager</span>${managerSelect(bot?.id ?? null, look.reportsTo || '')}</label>`;
+  return `<form id="${id}" class="pg-body nb-body" ${attrs} autocomplete="off">
+    <div class="lk-preview">${preview}</div>
+    ${name}
     ${lookPicker(look)}
-    <p class="pr-note">To change what ${esc(bot.name)} does, tell it in its chat.</p>
-    <button type="submit" class="btn primary wide big">Save</button>
+    ${boss}
+    <p class="pr-note nb-note">${note}</p>
+    ${extra}
+    <button type="submit" class="nb-go"${off ? ' disabled' : ''}>${submit}</button>
   </form>`;
 }
 
-const SUBS = {memory: memoryPage, activity: activityPage, permissions: permissionsPage, model: modelPage, computer: computerPage, team: teamPage, edit: editPage};
+function editPage(bot) {
+  const look = lookOf(store.state, bot.id), primary = primaryOf(store.state)?.id === bot.id;
+  return botForm({id: 'edit-bot-form', attrs: `data-bot="${esc(bot.id)}" data-was="${esc(JSON.stringify(look))}"`, bot, look, primary,
+    note: `To change what ${esc(bot.name)} does, tell it in its chat.`, submit: 'Save'});
+}
+
+const SUBS = {memory: memoryPage, activity: activityPage, model: modelPage, computer: computerPage, edit: editPage};
 
 export function profileView(route) {
   const bot = findBot(route.profile);
@@ -286,24 +293,19 @@ export function profileView(route) {
   const page = SUBS[route.sub];
   // Atlas has no Computer row, so a typed #profile/atlas/computer lands on its profile.
   if (!page || (route.sub === 'edit' && !canWrite()) || (route.sub === 'computer' && primaryOf(store.state)?.id === bot.id)) { setTimeout(() => fillActivityCount(bot.id), 0); return `<section class="pg pr" data-bot="${esc(bot.id)}">${profileMain(bot)}</section>`; }
-  return `<section class="pg pr" data-bot="${esc(bot.id)}">${subBar(bot, SUB_TITLES[route.sub])}<div class="pg-body pr-body">${page(bot)}</div></section>`;
+  // The Edit form is its own page body (the New bot page's shape); the other pages sit in the plain one.
+  const body = route.sub === 'edit' ? page(bot) : `<div class="pg-body pr-body">${page(bot)}</div>`;
+  return `<section class="pg pr" data-bot="${esc(bot.id)}">${subBar(bot, SUB_TITLES[route.sub])}${body}</section>`;
 }
 
 /* ---------- the New bot page ---------- */
 
 export function newBotView(route) {
-  const defaults = newBotDefaults(store.state), write = canWrite();
-  const job = String(route.job || '').trim();
-  return `<section class="pg nb"><header class="pr-bar">${roundBtn('back', 'Close', 'back-to-list', {})}<h1 class="nb-title">New bot</h1></header>
-    <form id="new-bot-form" class="pg-body nb-body" autocomplete="off">
-      <div class="lk-preview">${face({name: 'x', settings: {shape: defaults.shape, tint: defaults.tint}}, {size: 84, state: 'awake'})}</div>
-      <input class="nb-name" name="name" required maxlength="${MAX_NAME}" placeholder="Name your bot" aria-label="Bot name" autocomplete="off" autofocus${write ? '' : ' disabled'}>
-      ${lookPicker(defaults)}
-      <label class="nb-boss"><span>Manager</span>${managerSelect(null, '')}</label>
-      <p class="pr-note nb-note">You set its job in the chat.</p>
-      ${job ? `<p class="nb-job"><b>First job</b>${esc(job)}</p><input type="hidden" name="job" value="${esc(job)}">` : ''}
-      <button type="submit" class="nb-go" disabled>Create</button>
-    </form></section>`;
+  const defaults = newBotDefaults(store.state), job = String(route.job || '').trim();
+  return `<section class="pg pr">${headBar('New bot', roundBtn('back', 'Close', 'back-to-list', {}))}${botForm({
+    id: 'new-bot-form', look: {...defaults, reportsTo: ''}, note: 'You set its job in the chat.', submit: 'Create', off: true,
+    extra: job ? `<p class="nb-job"><b>First job</b>${esc(job)}</p><input type="hidden" name="job" value="${esc(job)}">` : '',
+  })}</section>`;
 }
 /** Create stays off until the bot has a name. */
 export function nameTyped(control) {
@@ -351,11 +353,8 @@ export const profileActions = {
   'profile-up': b => go({profile: b.dataset.id}, {replace: true}),
   'profile-sub': b => go({profile: b.dataset.id, sub: b.dataset.sub}),
   'bot-menu': b => (botMenuOpen() ? closeBotMenu() : openBotMenu(b.dataset.id, {opener: b})),
-  'profile-notify': b => {
-    const id = b.dataset.id, muted = mutedBots(), on = muted.includes(id);
-    saveLocal(MUTED_KEY, on ? muted.filter(x => x !== id) : [...muted, id]);
-    b.setAttribute('aria-checked', String(on));
-  },
+  // The rules are listed once, in Settings > Permissions; a profile opens that list for this bot.
+  'profile-perm': b => go({settings: `perm/${b.dataset.id}`}),
   'profile-activity-all': b => { showAll = showAll === b.dataset.id ? null : b.dataset.id; return loadBotActivity(b.dataset.id); },
   'memory-forget': async b => {
     await api(`/api/memory/rules/${encodeURIComponent(b.dataset.rule)}?bot=${encodeURIComponent(b.dataset.id)}`, 'DELETE');

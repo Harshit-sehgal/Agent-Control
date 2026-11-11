@@ -27,7 +27,7 @@ const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
  * unchanged, so an href always goes through validHttpUrl. */
 const safeHref = value => validHttpUrl(value) || '#';
-const NEW_THREAD_CHIPS = ['What can you do?', 'Create a bot that checks my drafts'];
+const NEW_THREAD_CHIPS = ['What can you do?', 'Make a bot that sums up my inbox each morning'];
 
 /* ---------- faces and names ---------- */
 
@@ -144,23 +144,23 @@ function pillEntry({run, pill, handoffs}, conv) {
   return `<div class="cv-prog"><div class="cv-live" data-run="${esc(run.id)}">${botFace(bot, nameOf(pill.botId), 22, {state: waiting ? 'waiting' : 'working'})}<span class="cv-cur" data-text="${esc(text)}">${esc(text)}</span>${chip?.html || ''}</div></div>`;
 }
 
-/** What the runaway guard asks: Keep going or Stop, for everything bots started. */
-const guardButtons = () => canWrite() ? `<div class="acts">${btn('Keep going', 'guard-resume', {kind: 'primary'})}${btn('Stop', 'guard-stop')}</div>` : '';
+/** What the runaway guard asks, in one card wherever it is shown: Keep going or Stop, for everything bots started. */
+const guardCard = text => `<div class="cv-card flat"><p>${esc(text)}</p>${canWrite() ? `<div class="acts">${btn('Keep going', 'guard-resume', {kind: 'primary'})}${btn('Stop', 'guard-stop')}</div>` : ''}</div>`;
 
 /** The card a paused run leaves: what happened in one sentence, then the choices.
  * A limit on bot-to-bot asks offers its three (answered on the run); the runaway
- * guard offers two (answered for every run the guard parked). */
+ * guard's is the guard card (answered for every run the guard parked). */
 function limitEntry({run}, conv) {
-  const bot = askerOf(conv), name = bot?.name || 'A bot', guard = run.limit?.kind === 'guard';
+  const bot = askerOf(conv), name = bot?.name || 'A bot';
+  const wait = `<div class="cv-wait">${botFace(bot, name, 30, {state: 'waiting'})}<span>${esc(name)} is waiting on you<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></span></div>`;
+  if (run.limit?.kind === 'guard') return wait + guardCard('Bots are paused. This task goes on when you resume them.');
   const choice = ({choice: id, label}) => btn(label, 'limit-choice', {kind: id === 'more' ? 'primary' : 'quiet', data: {choice: id, group: run.groupId || conv.group.id, run: run.id}});
-  const acts = guard ? guardButtons() : canWrite() ? `<div class="acts">${LIMIT_CHOICES.map(choice).join('')}</div>` : '';
-  const text = guard ? 'Bots are paused. This task goes on when you resume them.' : limitText(run);
-  return `<div class="cv-wait">${botFace(bot, name, 30, {state: 'waiting'})}<span>${esc(name)} is waiting on you<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></span></div><div class="cv-card"><p>${esc(text)}</p>${acts}</div>`;
+  return `${wait}<div class="cv-card"><p>${esc(limitText(run))}</p>${canWrite() ? `<div class="acts">${LIMIT_CHOICES.map(choice).join('')}</div>` : ''}</div>`;
 }
 
 /** The primary's own line when the guard paused everything. Once answered it is a quiet note. */
 function guardEntry({message: m, open}) {
-  return open ? `<div class="cv-card flat"><p>${esc(m.text)}</p>${guardButtons()}</div>` : `<div class="cv-note"><span>${esc(m.text)}</span></div>`;
+  return open ? guardCard(m.text) : `<div class="cv-note"><span>${esc(m.text)}</span></div>`;
 }
 
 /** What a connector read or did, and on which account. A send held for Undo is a card with the button while its window
@@ -280,7 +280,10 @@ export function renderConversation() {
   const chip = store.typing.has(conv.id) && !live ? siteChip({botId: asker?.id}) : null;
   const working = store.typing.has(conv.id) && !live
     ? `<div class="cv-working">${botFace(asker, asker?.name || conv.name, 30, {state: 'working'})}<span>${chip?.driving ? 'You are driving' : `${esc(asker?.name || conv.name)} is working`}</span>${chip?.html || ''}</div>` : '';
-  const html = (entries.length ? entries.map(e => entryHtml(e, conv)).join('') : welcome(conv)) + working;
+  // The primary's own guard line already asks Keep going or Stop: a parked run's copy of that card would ask it twice.
+  const guardOpen = entries.some(e => e.kind === 'guard' && e.open);
+  const shown = guardOpen ? entries.filter(e => !(e.kind === 'limit' && e.run.limit?.kind === 'guard')) : entries;
+  const html = (shown.length ? shown.map(e => entryHtml(e, conv)).join('') : welcome(conv)) + working;
   if (html === lastHtml) return;
   lastHtml = html;
   const scroller = el('cv-scroll'), pinned = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80, opened = log.dataset.conv !== conv.id;

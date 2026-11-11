@@ -291,7 +291,9 @@ async def you_pages(page, base):
     await page.locator('#sidebar .rail-me').click()
     assert await hash_(page) == '#settings'
     await expect(page.locator('#main .st-head h2')).to_have_text('General')
-    await expect(page.locator('#main')).to_contain_text('Browser-only demo')
+    # The demo note lives in the sidebar (and About), not on the account card.
+    await expect(page.locator('#sidebar')).to_contain_text('Browser-only demo')
+    await expect(page.locator('#main .st-dlg')).not_to_contain_text('Browser-only demo')
     await page.locator('#main [data-action="settings-open"][data-section="about"]').click()
     assert await hash_(page) == '#settings/about', await hash_(page)
     await expect(page.locator('#main .st-head h2')).to_have_text('About this build')

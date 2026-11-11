@@ -293,8 +293,6 @@
 .nv-chips button:active{scale:.97}
 /* a page opened from the shell: round back button and a title, then the page's own body */
 .pg{flex:1;min-height:0;display:flex;flex-direction:column;overflow:auto}
-.pg-head{display:flex;align-items:center;gap:12px;padding:calc(14px + var(--pad-t)) max(16px,env(safe-area-inset-right,0px)) 8px max(16px,env(safe-area-inset-left,0px))}
-.pg-head h1{flex:1;margin:0;font-family:var(--display);font-size:20px;font-weight:650;letter-spacing:-.02em}
 .pg-body{width:100%;max-width:560px;margin:0 auto;padding:12px max(16px,env(safe-area-inset-right,0px)) 40px max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:14px}
 .pg-body p{margin:0;color:var(--muted)}
 

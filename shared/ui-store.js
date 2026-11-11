@@ -1,8 +1,8 @@
 /** Single source of UI state: the server snapshot, the route, the conversations
  * it carries and cosmetic preferences. Views read from `store` and never
  * keep their own copies, so one `sync()` + one render keeps every pane current. */
-import {routeHash, tintOf} from './ui-model.js';
-import {companyRoute, companyHash} from './ui-company.js';
+import {tintOf} from './ui-model.js';
+import {companyHash} from './ui-company.js';
 import {createOutbox} from './chats.js';
 
 // Where an earlier build kept conversations; read once by importLocalChats().
@@ -37,8 +37,6 @@ export const store = {
   listQuery: '',
   /** Conversation ids with a reply in flight; drives the typing indicator. */
   typing: new Set(),
-  /** The group settings pipeline being reordered: {groupId, rows}, unsaved. */
-  pipelineDraft: null,
 };
 // `profiles` is cosmetic UI state only (tint, pin). An earlier build also wrote
 // name/instructions here, which would shadow the server's values forever.
@@ -209,22 +207,21 @@ export function back(fallback = {}) { if (depth > 0) history.back(); else go(fal
  * (`team-<threadId>`). Null for every other screen. */
 export const chatKeyOf = route => route?.bot || (route?.thread ? teamKey(route.thread) : null);
 
-// Settings pages the old "You" renderer still paints, until ui-settings.js takes them over.
-const LEGACY_PAGES = ['you', 'about', 'notifications', 'workspaces', 'ai', 'team', 'agents', 'data'];
-/** A route with something to show. Anything empty or unknown is home; a settings
- * route that names one of the old pages carries `page` for the old renderer. */
+/** A route with something to show. Anything empty or unknown is home. A profile's
+ * Permissions and Team pages no longer exist (one home each: Settings > Permissions
+ * filtered to the bot, and the Company chart), so an old link to one lands there. */
 export function normalizeRoute(route) {
   const r = route && typeof route === 'object' ? route : {};
-  if (typeof r.settings === 'string') { const page = r.settings || 'you'; return LEGACY_PAGES.includes(page) ? {...r, page} : r; }
+  if (r.profile && r.sub === 'permissions') return {settings: `perm/${r.profile}`};
+  if (r.profile && r.sub === 'team') return {company: true};
+  if (typeof r.settings === 'string') return r;
   return ['bot', 'thread', 'profile', 'newBot', 'newThread', 'company', 'activity'].some(key => r[key]) ? r : {home: true};
 }
 
 /** Navigate. Every pane repaints from `store.route`, and the hash keeps
- * browser Back/Forward and reload working. Callers pass a company route; the
- * pre-company {chat, page, info} shape still maps to the nearest new screen. */
+ * browser Back/Forward and reload working. */
 export function go(route = {}, {replace = false} = {}) {
-  const legacy = ['chat', 'page', 'info'].some(key => key in route) || !Object.keys(route).length;
-  store.route = normalizeRoute(legacy ? companyRoute(routeHash({chat: route.chat ?? null, page: route.page ?? null, info: route.info ?? null}), store.state) : route);
+  store.route = normalizeRoute(route);
   const hash = `#${companyHash(store.route)}`;
   if (location.hash !== hash) {
     depth = replace ? depth : depth + 1;

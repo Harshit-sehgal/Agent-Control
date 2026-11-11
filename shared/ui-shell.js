@@ -1,6 +1,6 @@
 /** The frame around every screen: the desktop sidebar, the phone chrome (avatar,
  * Bots | Threads indicator, +, search and New thread), the phone home, search and
- * its shortcuts, and the page frame the other screens sit in.
+ * its shortcuts.
  *
  * Home is the Chats layout only. On a phone it is two sections, Bots and Threads,
  * switched by swiping; on a laptop the sidebar holds both and the chat opens on the
@@ -259,14 +259,6 @@ export function wireShell() {
     if (dx < 0 && store.section === 'bots') switchSection('threads', 1);
     else if (dx > 0 && store.section === 'threads') switchSection('bots', -1);
   });
-}
-
-/* ---------- the page frame ---------- */
-
-/** A page opened from the shell: a round back button, a title, then `body`. The
- * profile, settings, new bot, company and activity screens sit in this. */
-export function pageFrame({title, body = '', back = 'back-to-list', backId = '', backLabel = 'Back'}) {
-  return `<section class="pg"><header class="pg-head"><button type="button" class="rbtn" data-action="${esc(back)}"${backId ? ` data-id="${esc(backId)}"` : ''} aria-label="${esc(backLabel)}">${icon('back', 20)}</button><h1>${esc(title)}</h1></header><div class="pg-body">${body}</div></section>`;
 }
 
 export const shellActions = {

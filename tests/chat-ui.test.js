@@ -10,7 +10,7 @@ const css=await readFile(new URL('../shared/app.css',import.meta.url),'utf8');
 test('Pages build has safe relative assets, modal and accessible chat structure',()=>{
   assert.match(html,/\.\/app\.js/);assert.match(html,/\.\/app\.css/);assert.match(html,/\.\/local-api\.js/);
   assert.match(html,/Data is saved only in this browser/);assert.match(html,/id="chrome"/);assert.match(html,/\.\/shell\.css/);
-  assert.match(app,/id="chat-form"/);assert.match(app,/id="new-bot-form"/);
+  assert.match(app,/id="chat-form"/);assert.match(app,/id: 'new-bot-form'/);
   assert.match(css,/@media\(max-width:850px\)/);
 });
 test('custom bots run through the Node provider only on the server build',()=>{

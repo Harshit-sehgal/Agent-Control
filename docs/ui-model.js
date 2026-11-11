@@ -1,16 +1,11 @@
 /** View models for the chat UI. Pure functions from the stored snapshot to what
- * a pane shows: the chat list, a thread's timeline, the "needs you" count and
- * the hash route. No DOM and no globals, so the product rules here are unit
+ * a pane shows: the chat list, a thread's timeline and the "needs you" count.
+ * (The hash route lives in ui-company.js.) No DOM and no globals, so the product rules here are unit
  * tested directly (tests/ui-model.test.js). */
-import {botSettings} from './bot-settings.js?v=a818ff62f8';
-import {STOPPABLE_STATUSES} from './run-state.js?v=a818ff62f8';
-import {INPUTS} from './contracts.js?v=a818ff62f8';
-import {primaryOf} from './company.js?v=a818ff62f8';
-import {plain} from './ui-kit.js?v=a818ff62f8';
-
-/** The contract inputs a profile save sends. A bot whose stored inputs were
- * all removed ones (X-engage) loads with none, and must still save. */
-export const editableInputs = bot => bot?.contract?.inputs?.length ? [...bot.contract.inputs] : [...INPUTS];
+import {botSettings} from './bot-settings.js?v=9b57bd5b4d';
+import {STOPPABLE_STATUSES} from './run-state.js?v=9b57bd5b4d';
+import {primaryOf} from './company.js?v=9b57bd5b4d';
+import {plain} from './ui-kit.js?v=9b57bd5b4d';
 
 const teamKey = groupId => `team-${groupId}`;
 const time = value => { const t = Date.parse(value || ''); return Number.isFinite(t) ? t : 0; };
@@ -208,89 +203,4 @@ export function tintOf(bot, index = 0, profiles = {}) {
   const synced = bot?.settings?.tint;
   if (Number.isInteger(synced)) return synced;
   return profiles[bot?.id]?.avatarIndex ?? Math.max(0, index);
-}
-
-/** Names to offer while the last word being typed starts with '@'. `roster`
- * is [{id, name}]; a team chat also offers @everyone. */
-export function mentionSuggestions(roster, text, {team = false, limit = 6} = {}) {
-  const word = /(?:^|\s)@([^\s@]*)$/.exec(String(text ?? ''));
-  if (!word) return [];
-  const q = word[1].toLowerCase(), seen = new Set(), out = [];
-  const pool = [...(team ? [{id: 'everyone', name: 'everyone'}] : []), ...(roster || [])];
-  for (const bot of pool) {
-    const name = String(bot?.name || '').trim(), key = name.toLowerCase();
-    if (!name || seen.has(key)) continue;
-    if (!key.startsWith(q) && !String(bot.id || '').toLowerCase().startsWith(q)) continue;
-    seen.add(key); out.push({id: bot.id, name});
-    if (out.length >= limit) break;
-  }
-  return out;
-}
-/** Replace the '@word' being typed at the end of `text` with the full name. */
-export const completeMention = (text, name) => String(text ?? '').replace(/@[^\s@]*$/, `@${name} `);
-
-/** Scheduled bot prompts for one chat: the group chat (botId null) or a bot. */
-export function chatTasks(tasks, groupId, botId = null) {
-  return (tasks || []).filter(t => t?.kind === 'bot-task' && t.status !== 'cancelled'
-    && t.payload?.groupId === groupId && (t.payload?.botId ?? null) === (botId ?? null));
-}
-
-/** The pipeline editor's rows: the saved order first, then bots left out. */
-export function pipelineRows(group, pipeline = null) {
-  const bots = group?.bots || [], ids = bots.map(b => b.id);
-  const order = Array.isArray(pipeline) ? pipeline.filter(id => ids.includes(id)) : ids;
-  return [...order, ...ids.filter(id => !order.includes(id))].map(id => ({id, included: order.includes(id)}));
-}
-/** Move row `index` one place up (-1) or down (+1); out of range is a no-op. */
-export function moveRow(rows, index, delta) {
-  const next = [...rows], to = index + delta;
-  if (index < 0 || index >= next.length || to < 0 || to >= next.length) return next;
-  [next[index], next[to]] = [next[to], next[index]];
-  return next;
-}
-/** What to save: the included ids in order, or null when that is simply every
- * bot in roster order (so bots added later join the pipeline too). */
-export function pipelineValue(rows, group) {
-  const ids = (group?.bots || []).map(b => b.id), picked = rows.filter(r => r.included).map(r => r.id);
-  return picked.length === ids.length && picked.every((id, i) => id === ids[i]) ? null : picked;
-}
-
-const GROUP_SECTIONS = ['home', 'runs', 'group-settings', 'tasks'];
-// `memory` is here because the bot panel links to it ("Memory and rules"):
-// without it the route parser fell back to home, so the row and the URL
-// disagreed and a reload dropped the person out of the page they were on.
-const BOT_SECTIONS = ['home', 'edit', 'memory', 'tasks'];
-const PAGES = ['you', 'about', 'notifications', 'workspaces', 'ai', 'team', 'agents', 'data'];
-const SERVER_PAGES = ['notifications', 'workspaces'];
-const ADMIN_PAGES = ['ai', 'team', 'agents', 'data'];
-
-/** Hash → route. Unknown or forbidden targets fall back to the chat list, and
- * the pre-chat routes (#inbox, #group/<id>/<tab>) keep working as redirects. */
-export function parseRoute(hash, state, {server = false, admin = false, write = true} = {}) {
-  const none = {chat: null, page: null, info: null};
-  const parts = String(hash || '').replace(/^#/, '').split('/').map(p => { try { return decodeURIComponent(p); } catch { return p; } });
-  const groups = state?.groups || [];
-  const chatExists = id => groups.some(g => teamKey(g.id) === id || g.bots.some(b => b.id === id));
-  const section = (id, name) => (id.startsWith('team-') ? GROUP_SECTIONS : BOT_SECTIONS).includes(name) ? name : 'home';
-  const [head, a, b, c] = parts;
-  if (head === 'chat' && a && chatExists(a)) {
-    let info = b === 'info' ? section(a, c || 'home') : null;
-    if (info === 'edit' && !write) info = 'home';
-    return {...none, chat: a, info};
-  }
-  // The pre-chat #group/<id> route opens that group's chat.
-  if (head === 'group' && groups.some(g => g.id === a)) return {...none, chat: teamKey(a), info: 'home'};
-  const page = head === 'you' ? (a || 'you') : head;
-  if (PAGES.includes(page)) {
-    if (ADMIN_PAGES.includes(page) && !admin) return none;
-    if (SERVER_PAGES.includes(page) && !server) return none;
-    return {...none, page};
-  }
-  return none;
-}
-export function routeHash(route) {
-  if (route.page) return route.page === 'you' ? 'you' : `you/${route.page}`;
-  if (!route.chat) return 'chats';
-  const base = `chat/${encodeURIComponent(route.chat)}`;
-  return route.info ? `${base}/info${route.info === 'home' ? '' : `/${route.info}`}` : base;
 }

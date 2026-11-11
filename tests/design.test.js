@@ -71,7 +71,6 @@ test('headers step down out of the notch and the status bar', () => {
   assert.match(html, /viewport-fit=cover/);
   assert.match(shell, /--pad-t:env\(safe-area-inset-top,0px\)/);
   assert.match(shell, /\.cv-head\{[^}]*padding:calc\(12px \+ var\(--pad-t\)\)/);
-  assert.match(shell, /\.pg-head\{[^}]*padding:calc\(14px \+ var\(--pad-t\)\)/);
   assert.match(profile, /\.pr-bar\{[^}]*padding:calc\(14px \+ var\(--pad-t\)\)/);
 });
 

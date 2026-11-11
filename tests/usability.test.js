@@ -15,7 +15,10 @@ test('the New bot page asks for a name, and focus styles are present',()=>{
  // A bot is made from a name, a shape, a colour and an optional manager; its job is set in its chat.
  assert.match(js,/placeholder="Name your bot"/);
  assert.match(js,/You set its job in the chat\./);
- assert.match(js,/<button type="submit" class="nb-go" disabled>Create<\/button>/);
+ // Edit and New bot are one form (botForm); Create starts off and Save does not.
+ assert.match(js,/<button type="submit" class="nb-go"\$\{off \? ' disabled' : ''\}>\$\{submit\}<\/button>/);
+ assert.match(js,/submit: 'Create', off: true/);
+ assert.match(js,/submit: 'Save'\}/);
  assert.match(css,/focus-visible/);
 });
 test('deleting a bot and other sensitive changes require confirmation',()=>{
@@ -74,7 +77,7 @@ test('destructive admin actions ask first and say what they do',()=>{
     assert.match(js,new RegExp(`confirmSheet\\('${message}`),`${message} must be confirmed`);
 });
 test('the bot profile edits name, manager, shape and colour, and edits its permission rules in place',()=>{
-  assert.match(js,/id="edit-bot-form"/);
+  assert.match(js,/id: 'edit-bot-form'/);
   assert.match(js,/name="reportsTo"/);
   assert.match(js,/name="shape" value=/);
   assert.match(js,/name="tint" value=/);

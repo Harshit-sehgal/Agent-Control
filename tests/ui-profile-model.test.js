@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   NO_JOB, hasJob, lookOf, resolveSection, roleOf, teamLine, moveTargets, menuItems, deleteCopy, profileRows, profileBackRoute, closeTarget, memoryNotes, modelLine,
-  newBotDefaults, newBotPayload, canCreate, editChanges, ACTIVITY_FILTERS, activityUrl, activityTarget, activityDays, companyTree, weekUsage, settingsSections,
+  newBotDefaults, newBotPayload, canCreate, editChanges, ACTIVITY_FILTERS, activityUrl, activityTarget, activityDays, companyTree, weekUsage, settingsSections, sectionArg,
 } from '../shared/ui-profile-model.js';
 
 const bot = (id, name, settings = {}, instructions = 'Does its work.', extra = {}) => ({id, name, instructions, settings, ...extra});
@@ -98,6 +98,15 @@ test('the profile card lists Memory, Activity, Permissions, Model, Computer and,
   assert.deepEqual(profileRows(s, 'ops').map(r => r.key), ['memory', 'activity', 'permissions', 'model', 'computer', 'team']);
   assert.deepEqual(profileRows(s, 'mail').map(r => r.key), ['memory', 'activity', 'permissions', 'model', 'computer']);
   assert.deepEqual(profileRows(s, 'atlas').map(r => r.key), ['memory', 'activity', 'permissions', 'model', 'team'], 'Atlas has no Computer row');
+});
+
+test('the Model row is plain text when there is nothing to pick (the demo, a viewer)', () => {
+  const s = stateOf();
+  assert.equal(profileRows(s, 'mail').find(r => r.key === 'model').plain, undefined, 'a picker is the default');
+  const row = profileRows(s, 'mail', {canPickModel: false}).find(r => r.key === 'model');
+  assert.equal(row.plain, true);
+  assert.equal(row.value, 'Built-in demo');
+  assert.equal(profileRows(s, 'mail', {canPickModel: false}).filter(r => r.plain).length, 1, 'no other row is plain');
 });
 
 test('row values count notes, rules and reports, and the computer is Idle', () => {
@@ -238,13 +247,14 @@ test('the Permissions row counts the rules a bot has: its grants and the page pe
   assert.equal(row('plan'), 'None');
 });
 
-test('settings sections: seven for everyone, the admin ones only for an admin of a live server', () => {
+test('settings sections: six for everyone, the admin ones only for an admin of a live server', () => {
   const keys = list => list.map(s => s.key);
-  assert.deepEqual(keys(settingsSections({admin: false, demo: true})), ['general', 'look', 'models', 'conn', 'perm', 'usage', 'computer', 'about']);
+  assert.deepEqual(keys(settingsSections({admin: false, demo: true})), ['general', 'look', 'models', 'conn', 'perm', 'usage', 'about']);
   const live = keys(settingsSections({admin: true, demo: false}));
   assert.ok(['team', 'agents', 'data', 'notifications', 'workspaces'].every(k => live.includes(k)));
   assert.ok(!keys(settingsSections({admin: false, demo: false})).includes('team'));
-  assert.deepEqual(keys(settingsSections({admin: false, demo: false})).slice(0, 7), ['general', 'look', 'models', 'conn', 'perm', 'usage', 'computer']);
+  assert.deepEqual(keys(settingsSections({admin: false, demo: false})).slice(0, 6), ['general', 'look', 'models', 'conn', 'perm', 'usage']);
+  assert.ok(!keys(settingsSections({admin: true, demo: false})).includes('computer'), 'Local agents is reached from General; there is no Computer section');
 });
 
 test('an old page name maps to its section, and an unknown or disallowed one to General', () => {
@@ -254,6 +264,17 @@ test('an old page name maps to its section, and an unknown or disallowed one to 
   assert.equal(resolveSection('perm', demo), 'perm');
   assert.equal(resolveSection('team', demo), 'general', 'team is admin-only and the demo has no accounts');
   assert.equal(resolveSection('nope', demo), 'general');
+  assert.equal(resolveSection('computer', demo), 'general', 'the Computer section is gone');
+});
+
+test('Permissions can be opened for one bot: perm/<bot id> is the Permissions section with that bot as its argument', () => {
+  const demo = settingsSections({admin: false, demo: true});
+  assert.equal(resolveSection('perm/mail', demo), 'perm');
+  assert.equal(sectionArg('perm/mail'), 'mail');
+  assert.equal(sectionArg('perm'), '');
+  assert.equal(sectionArg('perm/odd%20id/x'), 'odd%20id/x', 'only the first slash splits');
+  assert.equal(sectionArg(undefined), '');
+  assert.equal(resolveSection('usage/mail', demo), 'usage', 'an argument on another section is ignored, not an error');
 });
 
 test('the Edit page starts from what the bot looks like now, role defaults filled in', () => {

@@ -1,15 +1,6 @@
 /** Findings from the Phase 1 whole-branch review, each pinned by a test. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {editableInputs} from '../shared/ui-model.js';
-import {validateContract, normalizeBot} from '../shared/contracts.js';
-
-test('an old bot whose inputs were all X inputs can be saved from its profile', () => {
-  const bot = normalizeBot({id: 'b', name: 'Old', instructions: 'Old job.', contract: {version: 1, inputs: ['source_post', 'evidence'], output: {kind: 'text', fields: []}}});
-  const inputs = editableInputs(bot);
-  assert.doesNotThrow(() => validateContract({version: 1, inputs, output: {kind: 'text', fields: []}}));
-  assert.ok(!inputs.includes('evidence') && !inputs.includes('source_post'));
-});
 
 test('an X feed page request left from before the upgrade is denied, not left waiting', async () => {
   const {migrate} = await import('../shared/workflow.js');

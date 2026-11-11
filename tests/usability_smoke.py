@@ -255,6 +255,11 @@ async def delete_bot_reports_go_solo(page, base):
     await page.goto(f'{base}/index.html#profile/{researcher}')
     await page.reload()
     await expect(page.locator('#main .rw', has_text='Team')).to_contain_text('2 bots')
+    # Team and the demo's Model value have no page of their own: Team is the Company chart, Model is plain text.
+    await expect(page.locator('#main .rw', has_text='Model')).not_to_have_attribute('data-action', re.compile('.'))
+    await page.locator('#main .rw', has_text='Team').click()
+    assert await hash_(page) == '#company', await hash_(page)
+    await page.go_back()
     await page.locator('#main [data-action="bot-menu"]').click()
     await page.locator('#cmenu [data-action="menu-delete"]').click()
     sheet = page.locator('#modal .sheet')
@@ -304,7 +309,7 @@ async def settings_from_avatar_and_esc(page, base):
     assert await hash_(page) == '#settings', await hash_(page)
     dialog = page.locator('#main .st-dlg')
     await expect(dialog).to_be_visible()
-    await expect(dialog.locator('.st-nav button')).to_have_text(['General', 'Appearance', 'Models and keys', 'Connectors', 'Permissions', 'Usage', 'Computer', 'Activity', 'Company'])
+    await expect(dialog.locator('.st-nav button')).to_have_text(['General', 'Appearance', 'Models and keys', 'Connectors', 'Permissions', 'Usage', 'Activity', 'Company'])
     # The Bots running switch is the pause switch, and it works in place.
     switch = dialog.locator('[data-pause]')
     await expect(switch).to_have_attribute('aria-checked', 'true')
@@ -365,14 +370,16 @@ async def phone_settings_cards(page, base):
     await page.locator('.ch-me').click()
     cards = page.locator('#main .st-phone')
     await expect(cards).to_be_visible()
-    await expect(cards.locator('.rw', has_text='Bots running')).to_be_visible()
+    # The phone root is the list of sections: the pause switch is behind General, once.
+    await expect(cards.locator('.rw', has_text='Bots running')).to_have_count(0)
+    await expect(cards.locator('.rw', has_text='General')).to_be_visible()
     await expect(cards.locator('.rw', has_text='Activity')).to_be_visible()
     assert await overflow(page) <= 0
     # A row opens its section; Back returns to the cards; Esc closes the page.
     await cards.locator('.rw', has_text='Permissions').click()
     await expect(page.locator('#main .pr-subbar h1')).to_have_text('Permissions')
     await page.locator('#main [data-action="settings-back"]').click()
-    await expect(page.locator('#main .st-phone .pr-subbar')).to_have_count(0)
+    await expect(page.locator('#main .st-phone h1')).to_have_text('Settings')
     await page.keyboard.press('Escape')
     await expect(page.locator('body')).to_have_attribute('data-view', 'home')
     # The phone profile menu is a sheet from the bottom.
@@ -796,6 +803,9 @@ async def permissions_edit_in_place_and_deny(page, base):
     await page.reload()
     await expect(page.locator('#main .rw', has_text='Permissions').locator('.pv')).to_have_text('3 rules')
     await page.locator('#main .rw', has_text='Permissions').click()
+    # The rules are listed once, in Settings, filtered to this bot; the chip says so and clears the filter.
+    assert await hash_(page) == f'#settings/perm%2F{r}', await hash_(page)
+    await expect(page.locator('#main .st-chip')).to_contain_text('Showing Researcher')
     rows = page.locator('#main .gr')
     await expect(rows).to_have_count(3)
     assert [t.split('\n')[0] for t in await rows.all_inner_texts()] == ['Open example.com', 'Send on mail.example.com', 'Spend money']
@@ -813,9 +823,10 @@ async def permissions_edit_in_place_and_deny(page, base):
     await expect(page.locator('#main .gr').nth(2).locator('button[aria-pressed="true"]')).to_have_text('Deny')
     refused = await page.evaluate('''botId => window.AGENT_API('/api/grants', 'POST', {botId, action: 'spend', choice: 'always'}).then(() => 'accepted', e => e.message)''', r)
     assert refused != 'accepted', refused
-    # Settings lists the rules of every bot, one card each, and edits them in place.
-    await page.goto(f'{base}/index.html#settings/perm')
-    await page.reload()
+    # Show all clears the filter: every bot's rules, one card each, edited in place.
+    await page.locator('#main .st-chip').get_by_role('button', name='Show all').click()
+    assert await hash_(page) == '#settings/perm', await hash_(page)
+    await expect(page.locator('#main .st-chip')).to_have_count(0)
     dlg = page.locator('.st-dlg')
     await expect(dlg.locator('.st-h', has_text='Researcher')).to_be_visible()
     await expect(dlg.locator('.st-h', has_text='Writer')).to_be_visible()
@@ -1691,7 +1702,7 @@ async def phone_connectors_and_models_fit(page, base):
     await install(page, connectors=[connector('Notes')])
     writer = (await open_app(page, base, bots={'Writer': EXTRA_BOTS['Writer']}))['Writer']
     await page.locator('.ch-me').click()
-    await page.locator('#main .st-phone .rw', has_text='Connect apps').click()
+    await page.locator('#main .st-phone .rw', has_text='Connectors').click()
     await expect(page.locator('#main .pr-subbar h1')).to_have_text('Connectors')
     await expect(page.locator('#main .cn-mcp')).to_have_count(1)
     await expect(page.locator('#connector-add-form')).to_be_visible()

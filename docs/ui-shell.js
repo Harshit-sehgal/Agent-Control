@@ -1,15 +1,15 @@
 /** The frame around every screen: the desktop sidebar, the phone chrome (avatar,
  * Bots | Threads indicator, +, search and New thread), the phone home, search and
- * its shortcuts, and the page frame the other screens sit in.
+ * its shortcuts.
  *
  * Home is the Chats layout only. On a phone it is two sections, Bots and Threads,
  * switched by swiping; on a laptop the sidebar holds both and the chat opens on the
  * right. The lists come from ui-company.js (pure); this file is markup and events. */
-import {botRows, threadRows} from './ui-company.js?v=a818ff62f8';
-import {face} from './ui-face.js?v=a818ff62f8';
-import {esc, icon, stamp} from './ui-kit.js?v=a818ff62f8';
-import {pauseBanner} from './ui-asks.js?v=a818ff62f8';
-import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, isStaticDemo} from './ui-store.js?v=a818ff62f8';
+import {botRows, threadRows} from './ui-company.js?v=9b57bd5b4d';
+import {face} from './ui-face.js?v=9b57bd5b4d';
+import {esc, icon, stamp} from './ui-kit.js?v=9b57bd5b4d';
+import {pauseBanner} from './ui-asks.js?v=9b57bd5b4d';
+import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, isStaticDemo} from './ui-store.js?v=9b57bd5b4d';
 
 const el = id => document.getElementById(id);
 const DESK = '(min-width:1024px)';
@@ -259,14 +259,6 @@ export function wireShell() {
     if (dx < 0 && store.section === 'bots') switchSection('threads', 1);
     else if (dx > 0 && store.section === 'threads') switchSection('bots', -1);
   });
-}
-
-/* ---------- the page frame ---------- */
-
-/** A page opened from the shell: a round back button, a title, then `body`. The
- * profile, settings, new bot, company and activity screens sit in this. */
-export function pageFrame({title, body = '', back = 'back-to-list', backId = '', backLabel = 'Back'}) {
-  return `<section class="pg"><header class="pg-head"><button type="button" class="rbtn" data-action="${esc(back)}"${backId ? ` data-id="${esc(backId)}"` : ''} aria-label="${esc(backLabel)}">${icon('back', 20)}</button><h1>${esc(title)}</h1></header><div class="pg-body">${body}</div></section>`;
 }
 
 export const shellActions = {
