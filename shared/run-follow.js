@@ -20,7 +20,7 @@ import {runNote} from './coordination.js';
 
 /** The statuses that end a watch: the run stopped for a person, or it is done.
  * A run in any other state is still working, so the loop keeps looking. */
-export const RUN_TERMINAL = ['completed', 'failed', 'interrupted', 'awaiting_checkpoint', 'awaiting_limit', 'awaiting_plan', 'awaiting_browser', 'cancelled'];
+export const RUN_TERMINAL = ['completed', 'failed', 'interrupted', 'awaiting_checkpoint', 'awaiting_limit', 'awaiting_plan', 'awaiting_browser', 'awaiting_ask', 'cancelled'];
 
 /** How long to wait between looks at a run's log. Free-tier routing can take
  * minutes per bot, so the poll is unhurried; the run keeps executing regardless. */

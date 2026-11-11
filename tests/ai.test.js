@@ -171,7 +171,7 @@ test('a reply that is only a spawn fence keeps its fences, and the tool is descr
   const plain=await stub({status:200,json:{choices:[{message:{content:'ok'}}]}});
   try{
     await withEnv({AI_BASE_URL:`http://127.0.0.1:${plain.port}/v1`,AI_API_KEY:'k',AI_API_STYLE:'chat',AI_MODEL:'m'},()=>executeCustomBot({instructions:'Draft it'},'go'));
-    assert.match(plain.requests[0].body.messages[0].content,/cannot run tools, except asking another bot/);
+    assert.match(plain.requests[0].body.messages[0].content,/cannot run tools, except asking for a web page.* or asking another bot/);
     assert.doesNotMatch(plain.requests[0].body.messages[0].content,/spawn block/);
   }finally{plain.close();}
 });

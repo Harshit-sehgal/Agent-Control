@@ -9,6 +9,10 @@
  * list of which of the words count as busy, interruptible or stoppable, so the
  * three could disagree about what "busy" meant after any change.
  *
+ * `awaiting_ask` is a run parked on the owner's answer to an ask (a page, a
+ * send, a post...). It holds nothing, is busy and stoppable, and survives a
+ * restart: the ask is stored, and the answer goes on from there.
+ *
  * The categories are declared here once. Everything else derives from them.
  * Pure and dependency-free, like the other shared modules: the browser and the
  * server both import it.
@@ -17,7 +21,7 @@
 /** A run that still holds work: about to start, between steps, or waiting on a
  * person. A second run waits while one of these is open — Start or Continue is
  * the way through, not another message. */
-export const BUSY_STATUSES = ['running', 'queued', 'awaiting_browser', 'awaiting_plan', 'awaiting_checkpoint', 'awaiting_limit'];
+export const BUSY_STATUSES = ['running', 'queued', 'awaiting_browser', 'awaiting_ask', 'awaiting_plan', 'awaiting_checkpoint', 'awaiting_limit'];
 
 /** A run a person may still stop. It is the same set as `BUSY_STATUSES` today,
  * but kept under its own name because "blocks a new run" and "can be stopped"

@@ -125,13 +125,13 @@ test('a helper cannot spawn another helper: its reply is never parsed', async ()
   assert.equal(reply.spawns.length, 1);
 });
 
-test('the envelope describes the tool only to a bot that holds it', () => {
+test('the envelope describes the sub-agent tool only to a bot that holds it', () => {
   const group = {id: 'g', name: 'G', bots: [bot('a', {permissions: [SUBAGENT_PERMISSION]}), bot('b')]};
   const run = createRun({group, message: 'go', makeId: () => 'r'});
   const withTool = createEnvelope({run, bot: group.bots[0]});
   const without = createEnvelope({run, bot: group.bots[1], previous: null});
   assert.match(withTool.tools.subagent, /spawn/);
-  assert.equal(withTool.tools.browser, undefined);
+  assert.match(withTool.tools.browser, /browser/, 'every bot may ask for a page: the owner answers');
   assert.ok(withTool.restrictions.some(line => /sub-agent is help with thinking/.test(line)));
   assert.equal(without.tools.subagent, undefined);
   assert.ok(without.tools.ask, 'the ask tool is basic kit, so every bot is told about it');

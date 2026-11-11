@@ -17,7 +17,7 @@ import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-s
 import {memoryState} from './memory.js';
 import {MAX_BOTS_PER_GROUP} from './bot-create.js';
 import {freshGuard} from './runaway.js';
-import {sweepGrants, forgetBotAsks} from './asks.js';
+import {sweepGrants, forgetBotAsks, lapseOrphans} from './asks.js';
 import {assertManager, releaseReports, PRIMARY_GROUP} from './company.js';
 
 export const SCHEMA_VERSION = 3;
@@ -41,6 +41,7 @@ export function migrate(state) {
   if (!Array.isArray(state.asks)) state.asks = [];
   if (!Array.isArray(state.activity)) state.activity = [];
   sweepGrants(state);
+  lapseOrphans(state);
   // X home-feed reading is gone. A run parked on it can never resume, and it
   // would hold its group busy, so it loads as cancelled.
   for (const run of [...state.runs, ...state.groupRuns]) {

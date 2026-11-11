@@ -8,19 +8,22 @@
  *     {"url": "https://example.com/docs", "steps": [{"op": "read", "selector": "main"}]}
  *     ```
  *
- * The engine turns each block into a request record. A person approves it in
- * the chat (the default), or it runs at once when the bot's `browserApproval`
- * is `auto`. It then runs in a headless browser — the server's own, or a paired
- * local agent's — inside that runtime's allowlist and egress proxy. This module
- * only parses and bounds the request; it never runs anything.
+ * The engine turns each block into a request record. Any bot may ask for a page:
+ * if the owner has not said Always allow for this bot at this site, an ask card
+ * waits for Decline, Allow or Always allow (`shared/asks.js`); a Deny the owner
+ * set refuses it. The request then runs in a headless browser — the server's own,
+ * or a paired local agent's — inside that runtime's allowlist and egress proxy.
+ * The app, never the bot, decides which card a request earns: a click on a Send,
+ * Post, Delete or Pay control is asked about as that, not as a page read. This
+ * module only parses, classifies and bounds the request; it never runs anything.
  *
  * Posting stays human: interaction (click, type) is refused on X and Twitter
  * hosts, so no bot can press Post there. Reading those pages is allowed.
  */
-import {cleanText, validHttpUrl} from './core.js?v=ad1526a936';
-import {fail} from './errors.js?v=ad1526a936';
-import {canBot} from './contracts.js?v=ad1526a936';
-import {controlFence} from './reply-blocks.js?v=ad1526a936';
+import {cleanText, validHttpUrl} from './core.js?v=fbba8d53f7';
+import {fail} from './errors.js?v=fbba8d53f7';
+import {decide, createAsk, scopeOf} from './asks.js?v=fbba8d53f7';
+import {controlFence} from './reply-blocks.js?v=fbba8d53f7';
 
 export const BROWSER_PERMISSION = 'browser.use';
 export const MAX_REQUESTS_PER_REPLY = 2;
@@ -161,6 +164,52 @@ export function browserResultText(request, result) {
 
 /** How many browse-then-continue rounds one conversation turn may chain. */
 export const MAX_BROWSER_DEPTH = 3;
+/** The words that make a click or a typed field something the owner is asked about, riskiest first.
+ * The app classifies, never the bot: a step names a control by index or selector, and the label comes
+ * from the page result the bot was last shown. */
+const RISKS = [
+  ['spend', /\b(pay|payment|buy|purchase|checkout|check out|place (?:your |the )?order|subscribe|donate|card number|cvc|cvv)\b/i],
+  ['delete', /\b(delete|remove|erase|destroy)\b/i],
+  ['post', /\b(post|publish|tweet)\b/i],
+  ['send', /\b(send|submit|confirm)\b/i],
+];
+const CHECKOUT_PATH = /\/(checkout|payment|billing)(\/|$)/i;
+
+/** `{index → label}` for the controls of the page this bot last read in this chat ("[3] button Send"). */
+export function controlLabels(state, botId, chatKey) {
+  const last = (state?.browserRequests || []).find(r => r.botId === botId && r.chatKey === chatKey && r.status === 'done' && r.result?.page);
+  const labels = new Map();
+  for (const match of String(last?.result?.page || '').matchAll(/\[(\d+)\] (\S+) ([^·\n]*)/g)) labels.set(Number(match[1]), match[3].trim());
+  return labels;
+}
+
+/** Everything one request needs the owner's say on, riskiest first, the page itself last: a send, a
+ * post, a delete or a payment where a step's control says so, and `browser.use` for each origin it
+ * reaches. [{action, target, detail}]. */
+export function browserNeeds(request, controls = new Map()) {
+  const host = hostOf(request.url) || request.url;
+  const needs = [], seen = new Set();
+  for (const step of request.steps || []) {
+    if (!INTERACTIVE.includes(step.op)) continue;
+    const named = (step.index ? controls.get(step.index) : '') || step.selector || '';
+    for (const [action, pattern] of RISKS) {
+      if (!named || !pattern.test(named) || seen.has(action)) continue;
+      seen.add(action);
+      needs.push({action, target: request.url, detail: `${step.op === 'type' ? 'type into' : 'click'} "${named.slice(0, 60)}" on ${host}`});
+    }
+  }
+  const pages = [request.url, ...(request.steps || []).filter(s => s.op === 'navigate').map(s => s.url)];
+  if (!seen.has('spend') && pages.some(u => { try { return CHECKOUT_PATH.test(new URL(u).pathname); } catch { return false; } })) {
+    needs.push({action: 'spend', target: request.url, detail: `open a checkout page on ${host}`});
+  }
+  needs.sort((a, b) => RISKS.findIndex(r => r[0] === a.action) - RISKS.findIndex(r => r[0] === b.action));
+  const origins = new Map();
+  for (const u of pages) { const origin = scopeOf({action: 'browser.use', target: u}); if (origin && !origins.has(origin)) origins.set(origin, u); }
+  let first = true;
+  for (const [, u] of origins) { needs.push({action: 'browser.use', target: u, detail: first ? describe(request) : `open ${hostOf(u)}`}); first = false; }
+  return needs;
+}
+
 const describe = request => `${request.steps.length ? `use ${hostOf(request.url)} (${request.steps.length} step${request.steps.length === 1 ? '' : 's'})` : `read ${hostOf(request.url)}`}`;
 export const browserMessageId = id => `browser-${id}`.slice(0, 64);
 export const requestOfMessage = (state, messageId) => (state?.browserRequests || []).find(r => browserMessageId(r.id) === messageId) || null;
@@ -178,24 +227,33 @@ const samePage = (a, b) => {
   } catch { return false; }
 };
 
-export function recordBrowserRequests(state, {bot, groupId, chatKey, output, depth = 0, skipUrls = [], runId = null, makeId = () => crypto.randomUUID(), now = new Date().toISOString()}) {
+export function recordBrowserRequests(state, {bot, groupId, chatKey, output, depth = 0, skipUrls = [], runId = null, unattended = false, closed = false, makeId = () => crypto.randomUUID(), now = new Date().toISOString()}) {
   depth = Math.max(0, Math.min(MAX_BROWSER_DEPTH, Number(depth) || 0));
-  const found = parseBrowserRequests(output), text = stripBrowserBlocks(output), lines = [], records = [];
-  if (!found.length) return {text: String(output ?? ''), records, lines};
+  const found = parseBrowserRequests(output), text = stripBrowserBlocks(output), lines = [], records = [], asks = [];
+  if (!found.length) return {text: String(output ?? ''), records, lines, asks};
   const say = line => lines.push({id: makeId(), role: 'system', text: line, at: now});
-  if (!canBot(bot, BROWSER_PERMISSION)) say(`${bot.name} asked for a web page but does not hold the ${BROWSER_PERMISSION} permission. Grant it in the bot profile to allow this.`);
-  else if (depth >= MAX_BROWSER_DEPTH) say(`${bot.name} asked for another web page, but ${MAX_BROWSER_DEPTH} browsing rounds in a row is the limit. Ask again to continue.`);
+  // A bot never answers "I don't have permission": a page it has no grant for is an ask, and the owner
+  // says Allow, Always allow or Decline. A Deny the owner set is the one thing that refuses outright.
+  if (depth >= MAX_BROWSER_DEPTH) say(`${bot.name} asked for another web page, but ${MAX_BROWSER_DEPTH} browsing rounds in a row is the limit. Ask again to continue.`);
+  else if (closed) say(`${bot.name} asked for another web page, but you had just declined, so nothing was opened.`);
   else for (const item of found) {
     if (!item.ok) { say(`${bot.name} asked for a web page, but the request was refused: ${item.error}`); continue; }
     if (skipUrls.some(url => samePage(url, item.request.url))) { say(`${bot.name} already has that page, so it was not opened again.`); continue; }
+    const decision = decide(state, bot, browserNeeds(item.request, controlLabels(state, bot.id, chatKey)));
+    if (decision.verdict === 'deny') { say(`${bot.name} asked to ${describe(item.request)}. ${decision.message}`); continue; }
     const record = {id: makeId(), botId: bot.id, botName: bot.name, groupId, chatKey, ...(runId ? {runId} : {}), ...item.request, depth, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: now, updatedAt: now};
     records.push(record);
-    lines.push({id: browserMessageId(record.id), role: 'system', kind: 'browser', text: `${bot.name} wants to ${describe(record)}.`, at: now});
+    if (decision.verdict === 'ask') {
+      const {need} = decision;
+      const asked = createAsk(state, {botId: bot.id, runId, chatKey, action: need.action, target: need.target, detail: need.detail, unattended, requestId: record.id, implies: decision.implies, now, makeId});
+      record.askId = asked.id;
+      asks.push(asked);
+    } else lines.push({id: browserMessageId(record.id), role: 'system', kind: 'browser', text: `${bot.name} wants to ${describe(record)}.`, at: now});
   }
   state.browserRequests ??= [];
   state.browserRequests.unshift(...records);
   pruneBrowserRequests(state);
-  return {text: text || `${bot.name} asked to open a web page.`, records, lines};
+  return {text: text || `${bot.name} asked to open a web page.`, records, lines, asks};
 }
 
 /** A person turns down a request that is still waiting, including one already

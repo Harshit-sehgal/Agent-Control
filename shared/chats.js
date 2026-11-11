@@ -11,12 +11,13 @@ import {cleanText} from './core.js';
 import {fail} from './errors.js';
 import {summonableGuests, BUSY_STATUSES} from './coordination.js';
 import {denyBrowserRequest} from './bot-browser.js';
+import {orphanAsks} from './asks.js';
 
 export const MAX_CHAT_MESSAGES = 300;
 const MAX_TEXT = 8000;
 const ROLES = ['user', 'bot', 'system'];
 /** Optional short fields a message may carry; anything else is dropped. */
-const LABELS = ['senderId', 'senderName', 'toBotId', 'runId', 'mode', 'kind', 'botId'];
+const LABELS = ['senderId', 'senderName', 'toBotId', 'runId', 'mode', 'kind', 'botId', 'askId'];
 
 const chatKeys = state => new Set((state.groups || []).flatMap(g => [`team-${g.id}`, ...(g.bots || []).map(b => b.id)]));
 const groupOf = (state, key) => (state.groups || []).find(g => `team-${g.id}` === key || (g.bots || []).some(b => b.id === key));
@@ -38,6 +39,8 @@ function untrusted(state, key, message) {
   delete message.mode; delete message.senderId; delete message.senderName; delete message.toBotId;
   // An out-of-job refusal carries the owner's request for its buttons; only the server writes one.
   delete message.request; delete message.botId;
+  // An ask card is written by the server for an ask it created; a browser cannot forge one.
+  delete message.askId;
   if (message.role !== 'user') message.origin = 'browser';
   return message;
 }
@@ -145,6 +148,7 @@ export function releaseChatWork(state, key) {
     run.status = 'cancelled';
     run.error = 'Chat cleared.';
     run.updatedAt = now;
+    orphanAsks(state, ask => ask.runId === run.id, now);
   }
 }
 

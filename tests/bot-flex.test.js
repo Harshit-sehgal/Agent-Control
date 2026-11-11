@@ -365,7 +365,7 @@ test('runBotTask posts into the chat and queues a run, or explains why it skippe
   assert.match(store.read().chats.a.at(-1).text,/skipped: no AI provider is configured/);
   assert.deepEqual(await runBotTask(store,task({}),{queue,available:()=>true}),{runId:'r1',status:'queued'});
   assert.equal(store.read().chats['team-g'].at(-1).text,'Scheduled task: Report');
-  assert.deepEqual(calls,[{groupId:'g',message:'Report',directBotId:null,chatKey:'team-g',confirmPlan:false}]);
+  assert.deepEqual(calls,[{groupId:'g',message:'Report',directBotId:null,chatKey:'team-g',confirmPlan:false,unattended:true}]);
   const posted=store.read().chats['team-g'].filter(m=>m.text==='Scheduled task: Report').length;
   await assert.rejects(runBotTask(store,task({}),{queue:async()=>{throw Object.assign(new Error('A group run is already active.'),{status:409});},available:()=>true}),status(409));
   assert.equal(store.read().chats['team-g'].filter(m=>m.text==='Scheduled task: Report').length,posted,'A failed queue must not post another Scheduled task line.');

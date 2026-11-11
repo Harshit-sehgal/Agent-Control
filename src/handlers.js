@@ -56,7 +56,7 @@ export function taskHandlers({ws, push}) {
     'group-run': async task => {
       // `taskId` makes the run idempotent: a crash between queueing the run and
       // recording the completion used to queue a second run on recovery.
-      await queueGroupRun(ws, {groupId: task.payload.groupId, message: task.payload.message, directBotId: task.payload.directBotId, taskId: task.id});
+      await queueGroupRun(ws, {groupId: task.payload.groupId, message: task.payload.message, directBotId: task.payload.directBotId, taskId: task.id, unattended: true});
     },
     'bot-task': async task => runBotTask(ws, task),
     'agent-job': async task => {

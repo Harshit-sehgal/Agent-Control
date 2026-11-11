@@ -20,6 +20,7 @@ import * as wf from '../shared/workflow.js';
 import * as agent from './agent.js';
 import {startRetention} from './scheduler.js';
 import {markInterrupted} from './coordination.js';
+import {startAskExpiry} from './ask-runs.js';
 import {migrateModelBooks} from './memory.js';
 import {createQueue,recoverQueue} from './queue.js';
 import {taskHandlers,createNotifier} from './handlers.js';
@@ -76,11 +77,13 @@ export function createWorkspaceStarter({auth, push}) {
     // Notifications enqueue themselves as queue tasks and fan out to the member's
     // devices; the queue handler map lives in src/handlers.js.
     const notify = createNotifier({ws, workspaceId, auth, push});
+    // A new ask pushes through the same notifier (src/ask-cards.js reads it off the store).
+    ws.notify = notify;
     const queue = createQueue(ws, taskHandlers({ws, workspaceId, auth, push, notify}), {onFail: (task, error) => task.payload?.channel === 'push' ? null : Promise.resolve(notify({title: 'A background task failed', body: `${task.title}: ${error.message}`, kind: 'task-failure', meta: {taskId: task.id}}))});
     // Nothing runs until recovery has finished, so a stalled task is re-armed
     // before the first sweep can see it.
     let stops = [], stopped = false;
-    ready.then(() => { if (!stopped) stops = [startRetention(ws), startAgentRetention(ws), queue.start()]; }).catch(error => console.error(`Workspace ${workspaceId} failed to start:`, error.message));
+    ready.then(() => { if (!stopped) stops = [startRetention(ws), startAgentRetention(ws), startAskExpiry(ws), queue.start()]; }).catch(error => console.error(`Workspace ${workspaceId} failed to start:`, error.message));
     const stop = async () => { stopped = true; await ready.catch(() => {}); for (const s of stops) await s(); };
     stop.ready = ready;
     return stop;

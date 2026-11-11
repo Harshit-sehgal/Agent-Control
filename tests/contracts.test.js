@@ -126,7 +126,7 @@ test('a structured bot may attach a browser block; the fence is stripped before 
     const store = await new SqliteStore(path.join(dir, 'state.db'), path.join(dir, 'state.json')).init();
     const bot = {
       id: 'curator', name: 'Curator', instructions: 'Collect claims.', type: 'custom',
-      permissions: ['browser.use'],
+      permissions: ['browser.use'], settings: {browserApproval: 'auto'},
       contract: contracts.validateContract({inputs: ['objective'], output: {kind: 'structured', fields: [{name: 'verdict', type: 'text', required: true}]}}),
     };
     await store.update(s => {

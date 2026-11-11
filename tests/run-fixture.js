@@ -47,12 +47,13 @@ export function model(script = {}) {
 }
 
 /** Start a run the way a chat message does, run it to the end, return the run. */
-export async function ask(store, {message, to = 'atlas', chatKey = to, executor, anyway = false, group = 'home'}) {
+export async function ask(store, {message, to = 'atlas', chatKey = to, executor, anyway = false, group = 'home', extra = {}}) {
   let id;
   await store.update(s => {
     const host = s.groups.find(g => g.id === group);
     const guests = summonableGuests(s.groups, group, {includeOff: true});
     const run = createRun({group: host, message, directBotId: to, chatKey, guests, makeId: randomUUID, anyway});
+    Object.assign(run, extra);
     s.groupRuns.unshift(run); id = run.id;
   });
   await runGroup(store, id, executor);

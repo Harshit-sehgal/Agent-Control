@@ -19,8 +19,8 @@
  * Pure and browser-safe, like the other shared modules: the server and the
  * Pages demo share every rule here.
  */
-import {fail} from './errors.js?v=ad1526a936';
-import {cleanText} from './core.js?v=ad1526a936';
+import {fail} from './errors.js?v=fbba8d53f7';
+import {cleanText} from './core.js?v=fbba8d53f7';
 
 /** What every bot may do without a grant. */
 export const BASIC_KIT = ['bot.ask', 'bot.create', 'schedule.set'];
@@ -191,6 +191,14 @@ export function orphanAsks(state, match, now = iso()) {
   for (const ask of state.asks || []) {
     if (ask.status === 'pending' && !ask.expiresAt && match(ask)) ask.expiresAt = new Date(Date.parse(now) + ASK_EXPIRY_MS).toISOString();
   }
+}
+
+/** An ask whose run is no longer parked on it (stopped, deleted, cut by a restore) cannot resume anything:
+ * give it the 24 hours every orphan gets. Run on every load, so a restored backup cannot leave an ask in
+ * Needs you for ever. */
+export function lapseOrphans(state, now = iso()) {
+  const parkedIds = new Set((state.groupRuns || []).filter(r => r.status === 'awaiting_ask').map(r => r.id));
+  orphanAsks(state, ask => ask.runId && !parkedIds.has(ask.runId), now);
 }
 
 /** Every ask still waiting on the owner, newest first: the "Needs you" list. */

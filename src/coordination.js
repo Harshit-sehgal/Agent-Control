@@ -5,7 +5,7 @@
  * no tools at all (see src/subagents.js).
  */
 import {randomUUID} from 'node:crypto';
-import {createRun,createEnvelope,runNote,planHandoffs,handoffTargets,instructLead,wakeBots,assessTask,summonableGuests,mayHandoff,chatKeyFor,chatIsBusy,rosterFor,previousFor,enlist,MAX_HANDOFFS,INTERRUPT_STATUSES as INTERRUPT} from '../shared/coordination.js';
+import {createRun,createEnvelope,declinedOf,runNote,planHandoffs,handoffTargets,instructLead,wakeBots,assessTask,summonableGuests,mayHandoff,chatKeyFor,chatIsBusy,rosterFor,previousFor,enlist,MAX_HANDOFFS,INTERRUPT_STATUSES as INTERRUPT} from '../shared/coordination.js';
 import {isThread,noteMember} from '../shared/threads.js';
 import {isLead,companyBots} from '../shared/company.js';
 import {extendLimits} from '../shared/ask-limits.js';
@@ -16,8 +16,10 @@ import {botSettings,groupSettings,threadContext,MAX_STEPS_LIMIT} from '../shared
 import {addChatMessages} from '../shared/chats.js';
 import {assertContractOutput} from '../shared/contracts.js';
 import {recordBrowserRequests,stripBrowserBlocks,parseBrowserRequests,MAX_BROWSER_DEPTH} from '../shared/bot-browser.js';
+import {orphanAsks} from '../shared/asks.js';
+import {addAskCards,notifyAsks} from './ask-cards.js';
 import {MAX_SUBAGENT_DEPTH} from '../shared/subagents.js';
-import {autoDispatch} from './bot-browser.js';
+import {autoDispatch,dispatchBrowserRequest,finishBrowserRequest} from './bot-browser.js';
 import {runBotTurn} from './bot-turn.js';
 import {memoryFor,rememberTurn,maybeConsolidate} from './memory.js';
 import {executeCustomBot} from './ai.js';
@@ -95,7 +97,7 @@ export async function markInterrupted(store){
   try{await failAgentTasks(store, [...taskIds], 'The server restarted before this group run completed.');}
   catch(error){console.error('Agent task cleanup after a restart:', error.message);}
 }
-export async function queueGroupRun(store,{groupId,message,directBotId=null,checkpoints=false,chatKey=null,browserDepth=0,confirmPlan,taskId=null,anyway=false}={}){
+export async function queueGroupRun(store,{groupId,message,directBotId=null,checkpoints=false,chatKey=null,browserDepth=0,confirmPlan,taskId=null,anyway=false,unattended=false}={}){
   // Validate the request against the store first so a missing group reports 404
   // and a busy group reports 409, instead of the AI-key check shadowing them
   // with a misleading 422 on an instance that simply has no key yet.
@@ -125,6 +127,8 @@ export async function queueGroupRun(store,{groupId,message,directBotId=null,chec
     const task=instructed.task?{...instructed.task,confirm}:null;
     const run=createRun({group,message:messageText,directBotId:instructed.directBotId,makeId:randomUUID,checkpoints:Boolean(checkpoints),chatKey,guests,task,anyway:anyway===true});
     if(taskId)run.taskId=taskId;
+    // Nobody typed in this run (a timer started it): an ask it makes lapses after 24 hours.
+    if(unattended)run.unattended=true;
     if(run.status!=='awaiting_plan')wakeBots(group,run.task?.woke);
     if(run.task)say(s,run,{id:randomUUID(),role:'system',text:`${run.task.summary} ${run.task.doneWhen}${run.status==='awaiting_plan'?' Start it when you are ready.':''}`,runId:run.id,at:stamp()});
     if(run.recipients.length>Math.min(run.maxSteps??MAX_HANDOFFS,MAX_STEPS_LIMIT))throw Object.assign(new Error('Run too long.'),{status:400});
@@ -176,7 +180,7 @@ export async function runBotTask(store,task,{queue=queueGroupRun,available=aiAva
   if(await store.update(st=>noteBotWork(st,'run').paused)){await note(`Scheduled task "${label}" skipped: bots are paused.`);return {skipped:'paused'};}
   // Queue first. A 409 or a validation error must not leave a "Scheduled task"
   // line for a run that never started; the queue retries those.
-  const result=await queue(store,{groupId,message,directBotId:botId,chatKey,confirmPlan:false});
+  const result=await queue(store,{groupId,message,directBotId:botId,chatKey,confirmPlan:false,unattended:true});
   // The run is queued and durable; the line in the conversation is not. A failed
   // note used to reject the handler, which the queue retried - and the retry
   // queued the same message again, so one reminder cost two model runs. Only a
@@ -268,6 +272,8 @@ async function runGroupInner(store,id,executor){
       // closing step reports what the team said and hands nothing out.
       const lead=isLead(current,bot.id);
       const closing=r.closeAt===i;
+      // The owner said no to a page this bot asked for: this turn is its one closing turn.
+      const declinedTurn=Boolean(declinedOf(r));
       const handed=previousFor(r,i,current.groups.flatMap(x=>x.bots||[]));
       if(handed)previous=handed;
       // This bot's own provider and its own rulebook, plus the company notebook.
@@ -296,7 +302,7 @@ async function runGroupInner(store,id,executor){
         if(live.trace.length>400)live.trace=live.trace.slice(-400);
       });
       const gate=()=>store.update(s=>noteBotWork(s,'run').paused);
-      const reply=await runBotTurn(store,{bot,envelope,executor,config,peers:everyone,configFor:peerId=>resolveConfig(store,peerId),memoryForPeer:(mate,mateConfig)=>memoryFor(store,{bot:mate,config:mateConfig,chatKey:r.chatKey}),handoffAllowed:mayHandoff(r,bot)&&!closing,spawnRounds:(r.subagents||[]).some(spawn=>spawn.botId===bot.id)?MAX_SUBAGENT_DEPTH:0,budget,onEvent,gate,resume:resumed,stop:stopped,groupId:home?.id??null,runId:id,makeId:randomUUID,now:stamp});
+      const reply=await runBotTurn(store,{bot,envelope,executor,config,peers:everyone,configFor:peerId=>resolveConfig(store,peerId),memoryForPeer:(mate,mateConfig)=>memoryFor(store,{bot:mate,config:mateConfig,chatKey:r.chatKey}),handoffAllowed:mayHandoff(r,bot)&&!closing&&!declinedTurn,spawnRounds:(r.subagents||[]).some(spawn=>spawn.botId===bot.id)?MAX_SUBAGENT_DEPTH:0,budget,onEvent,gate,resume:resumed,stop:stopped,groupId:home?.id??null,runId:id,makeId:randomUUID,now:stamp});
       if(reply.limit){
         // A checkpoint, not a failure: what was said stays said, the bots still
         // waiting on an answer are kept, and the owner picks what happens next.
@@ -334,23 +340,27 @@ async function runGroupInner(store,id,executor){
       // neither keeps the fences the model happened to wrap around them.
       const gated=typeof validated==='string'?validated:JSON.stringify(validated);
       previous={botId:bot.id,output:gated.slice(0,3600)};
-      let toBotId=null,auto=[],holdBrowser=false;
+      let toBotId=null,auto=[],holdBrowser=false,newAsks=[];
       await store.update(s=>{coordinationState(s);const live=s.groupRuns.find(x=>x.id===id);if(!live||live.status!=='running')throw new Error('Run no longer active');
         const host=s.groups.find(x=>x.id===live.groupId);
         // File fences from the full reply, then hand the next bot the text around them.
         const priorUrls=Array.isArray(live.browserUrls)?live.browserUrls:String(live.browserUrl||'').split(' | ').filter(Boolean);
         const skip=priorUrls;
-        const browsed=recordBrowserRequests(s,{bot,groupId:live.groupId,chatKey:live.chatKey||`team-${live.groupId}`,output:body,depth:live.browserDepth||0,makeId:randomUUID,skipUrls:skip,runId:id});
+        const browsed=recordBrowserRequests(s,{bot,groupId:live.groupId,chatKey:live.chatKey||`team-${live.groupId}`,output:body,depth:live.browserDepth||0,makeId:randomUUID,skipUrls:skip,runId:id,unattended:Boolean(live.unattended),closed:declinedTurn});
+        newAsks=browsed.asks;
         // Text around the browser fences is the browser helper's view of the
         // reply; with nothing to browse, the approved value is the output.
         previous.output=(browsed.records.length?browsed.text:gated).slice(0,3600);
-        if(botSettings(bot).browserApproval==='auto')auto=browsed.records;
+        // A page the owner is already fine with goes out at once. When any page in the reply needs an
+        // answer the whole reply waits for it, so the pages come back together.
+        if(!browsed.asks.length)auto=browsed.records;
+        if(declinedTurn)delete live.declined;
         // A lead hands work to its team only and keeps a step back for its closing
         // reply; a plain bot hands to the group (in a thread, to no one). A closing
         // reply and an out-of-job reply hand nothing out.
         const reach=host?[...host.bots.filter(b=>!fledglings.has(b.id)),...summonableGuests(s.groups,host.id)]:[];
         const leads=isLead(s,bot.id);
-        const added=host&&!closing&&!stopped&&!off?handoffTargets({run:live,roster:rosterFor(s,bot,reach,{thread:isThread(host)}),fromBot:bot,output:previous.output,home:leads||isThread(host)?null:host.bots,reserve:leads&&live.closeAt==null?1:0}):[];
+        const added=host&&!closing&&!stopped&&!off&&!declinedTurn?handoffTargets({run:live,roster:rosterFor(s,bot,reach,{thread:isThread(host)}),fromBot:bot,output:previous.output,home:leads||isThread(host)?null:host.bots,reserve:leads&&live.closeAt==null?1:0}):[];
         enlist(live,{fromId:bot.id,added,output:previous.output,lead:leads});
         if(isThread(host))for(const id of added)noteMember(host,id);
         const guests=added.filter(x=>!host.bots.some(b=>b.id===x));
@@ -366,10 +376,13 @@ async function runGroupInner(store,id,executor){
         for(const line of reply.lines)say(s,live,{...line,runId:id});
         say(s,live,{...said,mode:'ai'});
         for(const line of browsed.lines)say(s,live,line);
+        for(const a of browsed.asks)addAskCards(s,a,bot);
         if(reply.spawns.length)live.subagents=[...(live.subagents||[]),...reply.spawns.map(spawn=>({...spawn,botId:bot.id,at:stamp()}))].slice(-6);
         if(reply.asks.length)live.peerAsks=[...(live.peerAsks||[]),...reply.asks.map(ask=>({botId:bot.id,...ask,at:stamp()}))].slice(-6);
         if(browsed.records.length){
-          live.status='awaiting_browser';
+          // Parked on the owner (an ask) or on the page coming back. Either way it holds nothing.
+          live.status=browsed.asks.length?'awaiting_ask':'awaiting_browser';
+          if(browsed.asks.length)live.askIds=browsed.asks.map(a=>a.id);
           live.browserPage=null;
           live.checkpoint={nextStep:i,afterStep:i+1,previous,at:stamp()};
           holdBrowser=true;
@@ -378,6 +391,7 @@ async function runGroupInner(store,id,executor){
           live.browserPage=null;
         }
       });
+      if(newAsks.length)notifyAsks(store,newAsks,bot.name);
       if(auto.length)await autoDispatch(store,auto);
       // Keep what this model learned. The reply is already stored, so a memory
       // failure is logged and never turns a finished step into a failed run.
@@ -462,6 +476,41 @@ export async function resumeBrowserRun(store,request,{ok,text='',executor}={}){
   if(start)startRun(store,id,executor);
   return true;
 }
+/** The last ask a run was parked on has been answered (or has lapsed). A page the owner allowed goes
+ * out now, all of them together; if nothing is left to open, the same bot takes one closing turn
+ * and is told what was declined. Does nothing for a run that is no longer waiting (stopped, deleted),
+ * which is how an answer that comes too late is recorded without resuming anything. */
+export async function resumeAfterAsks(store,runId,{executor,runtime,actor=null}={}){
+  const plan=await store.update(s=>{
+    const live=s.groupRuns?.find(r=>r.id===runId);
+    if(!live||live.status!=='awaiting_ask')return null;
+    const mine=(s.asks||[]).filter(a=>(live.askIds||[]).includes(a.id));
+    if(mine.some(a=>a.status==='pending'))return null;
+    const declined=mine.filter(a=>a.status==='declined').map(a=>a.expired?`${a.detail||a.action} (no answer in 24 hours)`:(a.detail||a.action));
+    if(declined.length)live.declined=declined;
+    live.askIds=[];
+    // A page the owner turned down will never come back, so it must not hold the others up: it counts
+    // as handled, the same as a denied page in `resumeBrowserRun`.
+    const handled=new Set(live.browserConsumed||[]);
+    for(const r of s.browserRequests||[])if(r.runId===runId&&r.status==='denied')handled.add(r.id);
+    live.browserConsumed=[...handled];
+    const go=(s.browserRequests||[]).filter(r=>r.runId===runId&&r.status==='pending').map(r=>r.id);
+    if(go.length){live.status='awaiting_browser';return {dispatch:go};}
+    live.status='queued';
+    return {start:true};
+  });
+  if(!plan)return false;
+  if(plan.start){startRun(store,runId,executor);return true;}
+  for(const requestId of plan.dispatch){
+    // No browser to open it with: report it the way a failed page is reported, so the run goes on.
+    try{await dispatchBrowserRequest(store,requestId,{actor:actor||'owner',...(runtime?{runtime}:{})});}
+    catch(error){
+      const request=store.read().browserRequests.find(r=>r.id===requestId);
+      if(request)await finishBrowserRequest(store,request,{ok:false,error:error.message});
+    }
+  }
+  return true;
+}
 /** A run a person can stop: it is queued or working, or it is waiting on a
  * person. The set is declared with the other run-status categories in
  * `shared/run-state.js`. */
@@ -486,6 +535,8 @@ export async function cancelRun(store,id,{actor=null,note=null}={}){
     // device would open it after the person pressed Stop, and the approval card
     // would enqueue work for a run that no longer exists.
     const taskIds=denyRunPages(s,id,'The run was stopped before this page was opened.');
+    // Its asks stay answerable for a day (the owner's choice may still be worth keeping), then lapse.
+    orphanAsks(s,a=>a.runId===id);
     say(s,r,{id:randomUUID(),role:'system',text:note||(midStep?'Stopped. The reply being written when you stopped it was discarded; nothing after it runs.':'Stopped before it started. Nothing ran.'),runId:id,at:stamp()});
     activity(s,'group-run','Stopped a bot coordination run',{runId:id,by:actor});
     return {runId:id,status:'cancelled',taskIds};

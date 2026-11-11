@@ -1,6 +1,5 @@
 import {cleanText} from '../shared/core.js';
 import {botSettings,maxTokensFor} from '../shared/bot-settings.js';
-import {BROWSER_PERMISSION} from '../shared/bot-browser.js';
 import {SUBAGENT_PERMISSION} from '../shared/subagents.js';
 import {normaliseProtocol,inferProtocol,normaliseBaseUrl,isChatModel,DEFAULT_PROTOCOL} from '../shared/ai-presets.js';
 
@@ -561,7 +560,8 @@ export async function executeCustomBot(bot,input,config) {
   // Neither tool acts on its own: the browser block becomes a request a person
   // approves, the spawn block becomes one extra model call with no tools.
   const allowed=[
-    ...(grants.includes(BROWSER_PERMISSION)?['asking for a web page with the browser block described under tools in the task']:[]),
+    // Any bot may ask for a page: the owner answers, so there is no permission to hold first.
+    'asking for a web page with the browser block described under tools in the task',
     ...(grants.includes(SUBAGENT_PERMISSION)?['handing one small job to a helper model with the spawn block described under tools in the task']:[]),
     // Asking a bot is part of every bot's basic kit.
     'asking another bot a direct question with the ask block described under tools in the task',

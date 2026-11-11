@@ -193,6 +193,14 @@ export function orphanAsks(state, match, now = iso()) {
   }
 }
 
+/** An ask whose run is no longer parked on it (stopped, deleted, cut by a restore) cannot resume anything:
+ * give it the 24 hours every orphan gets. Run on every load, so a restored backup cannot leave an ask in
+ * Needs you for ever. */
+export function lapseOrphans(state, now = iso()) {
+  const parkedIds = new Set((state.groupRuns || []).filter(r => r.status === 'awaiting_ask').map(r => r.id));
+  orphanAsks(state, ask => ask.runId && !parkedIds.has(ask.runId), now);
+}
+
 /** Every ask still waiting on the owner, newest first: the "Needs you" list. */
 export const pendingAsks = state => (state.asks || []).filter(a => a.status === 'pending').reverse();
 

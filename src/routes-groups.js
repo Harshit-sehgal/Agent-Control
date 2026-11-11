@@ -10,7 +10,10 @@ import {executeCustomBot} from './ai.js';
 import {resolveConfig} from './ai-providers.js';
 import {pauseAll} from '../shared/runaway.js';
 import {queueGroupRun, resumeGuardedRuns, resumeGroupRun, resumeBrowserRun, decidePlan, cancelRun, coordinationState} from './coordination.js';
-import {recordBrowserRequests, denyBrowserRequest, BROWSER_PERMISSION, BROWSER_TOOL_HINT} from '../shared/bot-browser.js';
+import {recordBrowserRequests, denyBrowserRequest, BROWSER_TOOL_HINT} from '../shared/bot-browser.js';
+import {setGrant} from '../shared/asks.js';
+import {addAskCards, notifyAsks} from './ask-cards.js';
+import {answerAskFlow} from './ask-runs.js';
 import {SUBAGENT_PERMISSION, SUBAGENT_TOOL_HINT} from '../shared/subagents.js';
 import {BOT_ASK_TOOL_HINT, companyList} from '../shared/bot-link.js';
 import {companyBots} from '../shared/company.js';
@@ -77,7 +80,8 @@ async function runOneBotInner(store, {botId, input, page = '', browserDepth = 0}
   const roster = companyBots(state);
   const grants = Array.isArray(bot.permissions) ? bot.permissions : [];
   const tools = {
-    ...(grants.includes(BROWSER_PERMISSION) ? {browser: BROWSER_TOOL_HINT} : {}),
+    // Any bot may ask for a page; the owner answers.
+    browser: BROWSER_TOOL_HINT,
     ...(grants.includes(SUBAGENT_PERMISSION) ? {subagent: SUBAGENT_TOOL_HINT} : {}),
     ...(botSettings(bot).canHandoff ? {ask: BOT_ASK_TOOL_HINT} : {}),
     ...(group ? {createBot: BOT_CREATE_TOOL_HINT} : {}),
@@ -108,19 +112,22 @@ async function runOneBotInner(store, {botId, input, page = '', browserDepth = 0}
   const raw = turn.output;
   const lines = turn.lines;
   const groupId = group?.id;
-  let records = [];
+  let records = [], asked = [];
   const run = await store.update(s => {
     const browsed = recordBrowserRequests(s, {bot, groupId, chatKey: bot.id, output: raw, depth: browserDepth});
-    records = browsed.records;
+    records = browsed.records; asked = browsed.asks;
     const output = browsed.text;
     const run = {id: uuid(), botId: bot.id, botName: bot.name, input, output, at: new Date().toISOString()};
     s.runs.unshift(run); s.runs = s.runs.slice(0, 100);
     // The bot itself may be gone (removed mid-turn). The run record still
     // belongs in history; only the chat append is skipped.
     try { chats.addChatMessages(s, bot.id, [...lines, {id: run.id, role: 'bot', text: output, mode: 'ai', at: run.at}, ...browsed.lines], {trusted: true}); } catch { /* Conversation removed. */ }
+    for (const ask of browsed.asks) addAskCards(s, ask, bot);
     activity(s, 'run', `Completed ${bot.name} task.`, {runId: run.id}); return run;
   });
-  if (records.length && botSettings(bot).browserApproval === 'auto') await autoDispatch(store, records);
+  notifyAsks(store, asked, bot.name);
+  // A page the owner is already fine with goes out at once; the rest wait on their ask.
+  await autoDispatch(store, records.filter(r => !r.askId));
   // A direct bot chat keeps the same memory a group step does: the recap of
   // this conversation, and the rulebook for this bot's model.
   if (memory) try {
@@ -211,11 +218,38 @@ export function groupRoutes(router) {
     return reply(201, await runOneBot(c.store, {botId: b.botId, input: cleanText(b.input, 4000), browserDepth: Number(b.browserDepth) || 0}));
   });
 
-  // A bot's request to open a page: a person approves or declines it.
-  router.add('POST', '/api/browser-requests/:id/approve', 'member', async c => dispatchBrowserRequest(c.store, c.params.id, {actor: c.actor.email}));
-  router.add('POST', '/api/browser-requests/:id/deny', 'member', async c => {
+  // The owner answers an ask: {answer: 'decline' | 'allow' | 'always'}. Always allow stores the grant for
+  // this bot (never for a payment: 400). Allow and Always allow let the run go on; Decline gives the bot
+  // one closing turn. An answer after the run was stopped is recorded and resumes nothing.
+  router.add('POST', '/api/asks/:id', 'admin', async c => {
+    const b = await c.body();
+    return answerAskFlow(c.store, c.params.id, b?.answer, {actor: c.actor.email});
+  });
+  // What the owner said Always allow / Ask each time / Deny to, per bot, action and origin or account:
+  // {botId, action, scope?, choice}. A payment can only be Ask each time or Deny.
+  router.add('POST', '/api/grants', 'admin', async c => {
+    const b = await c.body();
+    return c.store.update(s => setGrant(s, String(b?.botId ?? ''), String(b?.action ?? ''), b?.scope ?? '', b?.choice));
+  });
+
+  // A bot's request to open a page used to be approved here. It is an ask now, so these two are thin
+  // aliases for one phase: approve is Allow, deny is Decline. A request with no ask (made before asks
+  // existed) still goes the old way. Both need the owner or an admin, like the asks.
+  router.add('POST', '/api/browser-requests/:id/approve', 'admin', async c => {
+    const request = (c.store.read().browserRequests || []).find(r => r.id === c.params.id);
+    if (request?.askId) {
+      await answerAskFlow(c.store, request.askId, 'allow', {actor: c.actor.email});
+      return c.store.read().browserRequests.find(r => r.id === c.params.id);
+    }
+    return dispatchBrowserRequest(c.store, c.params.id, {actor: c.actor.email});
+  });
+  router.add('POST', '/api/browser-requests/:id/deny', 'admin', async c => {
     const current = (c.store.read().browserRequests || []).find(r => r.id === c.params.id);
     if (!current) fail('Browser request not found.', 404);
+    if (current.askId && current.status === 'pending') {
+      await answerAskFlow(c.store, current.askId, 'decline', {actor: c.actor.email});
+      return c.store.read().browserRequests.find(r => r.id === c.params.id);
+    }
     if (current.status === 'dispatched') cancelQueuedBrowserTasks(c.store, current.agentTaskIds);
     const request = await c.store.update(s => denyBrowserRequest(s, c.params.id));
     if (request?.runId) await resumeBrowserRun(c.store, request, {ok: false});

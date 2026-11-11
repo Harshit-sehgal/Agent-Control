@@ -95,6 +95,12 @@ const PUBLIC_WITH_PARAM = [];
 const LEAST_ROLE = {
   'POST /api/retention/prune': 'admin',
   'PATCH /api/retention': 'admin',
+  // Asks and grants are the owner's call: a member or viewer cannot answer a bot's ask or widen what it may do.
+  // The old browser-request routes answer the same ask, so they take the same role.
+  'POST /api/asks/:id': 'admin',
+  'POST /api/grants': 'admin',
+  'POST /api/browser-requests/:id/approve': 'admin',
+  'POST /api/browser-requests/:id/deny': 'admin',
   'GET /api/users': 'admin',
   'POST /api/users': 'admin',
   'PATCH /api/users/:id': 'admin',

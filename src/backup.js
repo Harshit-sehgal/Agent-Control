@@ -71,11 +71,14 @@ function interruptRestoredRun(row) {
   // sync before deciding whether the restored run is still live.
   const status = typeof doc?.status === 'string' ? doc.status : row.status;
   const next = {...row, status};
-  if (!INTERRUPT_STATUSES.includes(status)) {
+  // A run parked on an ask has lost the page request that went with it (browser requests live in kv, which
+  // backups exclude), so it cannot resume: it is cut like a run waiting on a page. Its ask stays on file and
+  // can still be answered; the answer is recorded and resumes nothing.
+  if (!INTERRUPT_STATUSES.includes(status) && status !== 'awaiting_ask') {
     if (doc && typeof row.doc === 'string') next.doc = JSON.stringify({...doc, status});
     return next;
   }
-  const page = status === 'awaiting_browser';
+  const page = status === 'awaiting_browser' || status === 'awaiting_ask';
   const error = page ? 'Restored from backup while waiting for a page. Ask again.' : 'Restored from backup before the run completed. Retry explicitly.';
   next.status = 'interrupted';
   next.error = error;

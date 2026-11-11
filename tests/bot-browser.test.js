@@ -8,6 +8,7 @@ import {SqliteStore} from '../src/sqlite-store.js';
 import * as wf from '../shared/workflow.js';
 import {createRun, createEnvelope} from '../shared/coordination.js';
 import {coordinationState, runGroup, resumeBrowserRun} from '../src/coordination.js';
+import {answerAskFlow} from '../src/ask-runs.js';
 import {dispatchBrowserRequest, onAgentTaskResult, autoDispatch, continueBrowserWork, setBrowserResultHooks, beginTakeover, handBackTakeover} from '../src/bot-browser.js';
 import {refusePostingAction} from '../agent/browser.mjs';
 import {parseBrowserRequests, validateBrowserRequest, recordBrowserRequests, stripBrowserBlocks, denyBrowserRequest, browserResultText, capturePageText, requestOfMessage, pruneBrowserRequests, MAX_BROWSER_REQUESTS, MAX_BROWSER_DEPTH, MAX_ELEMENT_INDEX, BROWSER_PERMISSION} from '../shared/bot-browser.js';
@@ -16,7 +17,10 @@ import {validateBotSettings} from '../shared/bot-settings.js';
 import {ACTIONS} from '../shared/contracts.js';
 
 const block = body => `Let me look.\n\`\`\`browser\n${JSON.stringify(body)}\n\`\`\`\nBack soon.`;
-const browserBot = (extra = {}) => ({id: 'web', name: 'Web', instructions: 'Look things up.', type: 'custom', permissions: [BROWSER_PERMISSION], ...extra});
+// These tests are about how a page travels (request, device, result, resume). A bot already holding the
+// permission with "run without asking" goes straight to that; a bot that has to ask the owner first is
+// covered by tests/ask-runs.test.js.
+const browserBot = (extra = {}) => ({id: 'web', name: 'Web', instructions: 'Look things up.', type: 'custom', permissions: [BROWSER_PERMISSION], settings: {browserApproval: 'auto'}, ...extra});
 const status = code => error => error.status === code;
 
 test('browser blocks are parsed, bounded and kept away from posting on X', () => {
@@ -86,20 +90,26 @@ test('a trailing dot is still X or Twitter, so click and type stay refused', () 
   assert.equal(refusePostingAction('scroll', 'https://twitter.com.'), '');
 });
 
-test('a reply becomes request cards only for a bot holding browser.use, within the depth limit', () => {
+test('a reply becomes a request card for a bot already cleared, an ask for one that is not, and nothing for a Deny, within the depth limit', () => {
   const state = wf.migrate({candidates: [], groups: []});
   const out = recordBrowserRequests(state, {bot: browserBot(), groupId: 'g', chatKey: 'web', output: block({url: 'https://example.com'}), makeId: (() => { let n = 0; return () => `id-${++n}`; })()});
   assert.equal(out.text, 'Let me look.\n\nBack soon.');
   assert.equal(out.records.length, 1); assert.equal(state.browserRequests[0].status, 'pending');
   assert.equal(out.lines[0].kind, 'browser'); assert.equal(requestOfMessage(state, out.lines[0].id).id, out.records[0].id);
-  const none = recordBrowserRequests(state, {bot: browserBot({permissions: []}), groupId: 'g', chatKey: 'web', output: block({url: 'https://example.com'})});
-  assert.equal(none.records.length, 0); assert.match(none.lines[0].text, /does not hold the browser\.use permission/);
-  // The permission gate asks the same question every other control block does
-  // (`canBot`), not a `.includes` on whatever the field happens to be: a
-  // malformed record whose permissions is a bare string is refused, where a
-  // string's own `.includes` would have matched the permission name.
+  // A bot with no permission never hears "I don't have permission": it asks, and the owner answers.
+  const none = recordBrowserRequests(state, {bot: browserBot({permissions: [], settings: {}}), groupId: 'g', chatKey: 'web', output: block({url: 'https://example.com'})});
+  assert.equal(none.records.length, 1); assert.equal(none.asks.length, 1); assert.equal(none.asks[0].action, 'browser.use');
+  assert.equal(none.records[0].askId, none.asks[0].id); assert.deepEqual(none.lines, [], 'the ask is the card');
+  // The permission list is read the way every other control block reads it: a malformed record whose
+  // permissions is a bare string is not "Always allow" (a string's own `.includes` would have matched).
   const malformed = recordBrowserRequests(state, {bot: browserBot({permissions: BROWSER_PERMISSION}), groupId: 'g', chatKey: 'web', output: block({url: 'https://example.com'})});
-  assert.equal(malformed.records.length, 0); assert.match(malformed.lines[0].text, /does not hold the browser\.use permission/);
+  assert.equal(malformed.asks.length, 1);
+  // An owner's Deny refuses outright, and says where to change it.
+  state.grants = [{botId: 'web', action: 'browser.use', scope: 'https://denied.example.com', choice: 'deny', at: new Date().toISOString()}];
+  state.groups = [{id: 'g', name: 'G', bots: [browserBot()]}];
+  const denied = recordBrowserRequests(state, {bot: browserBot(), groupId: 'g', chatKey: 'web', output: block({url: 'https://denied.example.com/x'})});
+  assert.equal(denied.records.length, 0); assert.match(denied.lines[0].text, /profile → Permissions/);
+  state.grants = [];
   const deep = recordBrowserRequests(state, {bot: browserBot(), groupId: 'g', chatKey: 'web', output: block({url: 'https://example.com'}), depth: MAX_BROWSER_DEPTH});
   assert.equal(deep.records.length, 0); assert.match(deep.lines[0].text, /limit/);
   const refused = recordBrowserRequests(state, {bot: browserBot(), groupId: 'g', chatKey: 'web', output: block({url: 'https://x.com', steps: [{op: 'click', selector: 'button'}]})});
@@ -118,11 +128,11 @@ test('a reply becomes request cards only for a bot holding browser.use, within t
   assert.throws(() => validateBotSettings({browserApproval: 'always'}), /Browser approval/);
 });
 
-test('the envelope tells only a permitted bot about the browser tool', () => {
+test('the envelope tells every bot about the browser tool, because asking the owner is how a bot gets a page', () => {
   const group = {id: 'g', name: 'G', bots: [browserBot(), {id: 'plain', name: 'Plain', instructions: 'x', type: 'custom'}]};
   const run = createRun({group, message: '@Web @Plain go', makeId: () => 'r'});
   assert.match(createEnvelope({run, bot: group.bots[0]}).tools.browser, /browser/);
-  assert.equal(createEnvelope({run, bot: group.bots[1]}).tools.browser, undefined);
+  assert.match(createEnvelope({run, bot: group.bots[1]}).tools.browser, /browser/);
   assert.match(browserResultText({botName: 'Web', url: 'https://example.com'}, {title: 'Example', finalUrl: 'https://example.com/', actions: [{op: 'read', ok: true, text: 'Hello'}]}), /Browser result for Web: Example · https:\/\/example\.com\/\n\nHello/);
 });
 
@@ -137,19 +147,22 @@ async function harness() {
 test('a bot browses through the paired local agent and continues from the result', async () => {
   const {dir, store} = await harness();
   try {
-    await store.update(s => { wf.migrate(s); coordinationState(s); s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot()]}]; s.groupRuns.push(createRun({group: s.groups[0], message: 'Find the docs', makeId: () => 'run-1', chatKey: 'web'})); });
+    // This bot has no grant, so its page waits for the owner's answer (an ask) before it reaches the device.
+    await store.update(s => { wf.migrate(s); coordinationState(s); s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot({permissions: [], settings: {}})]}]; s.groupRuns.push(createRun({group: s.groups[0], message: 'Find the docs', makeId: () => 'run-1', chatKey: 'web'})); });
     await runGroup(store, 'run-1', async () => block({url: 'https://example.com/docs', steps: [{op: 'read', selector: 'main'}]}));
     let s = store.read();
     const request = s.browserRequests[0];
     assert.equal(request.status, 'pending', 'Ask is the default: nothing reaches the device unapproved.');
-    assert.deepEqual(s.chats.web.map(m => m.kind || m.role), ['bot', 'browser']);
+    assert.equal(s.groupRuns[0].status, 'awaiting_ask');
+    assert.deepEqual(s.chats.web.map(m => m.kind || m.role), ['bot', 'ask']);
     assert.equal(s.chats.web[0].text, 'Let me look.\n\nBack soon.', 'The chat shows the reply without the raw block.');
     await assert.rejects(dispatchBrowserRequest(store, request.id), error => error.status === 409 && /No paired local agent holds the browser\.action/.test(error.message));
     assert.equal(store.read().browserRequests[0].status, 'pending', 'Without an agent the request stays pending.');
 
     const {code} = agent.createPairing(store, 'default', {});
     const device = agent.redeemPairing(store, {code, name: 'Laptop', permissions: ['browser.action']});
-    const sent = await dispatchBrowserRequest(store, request.id, {actor: 'owner@localhost'});
+    await answerAskFlow(store, request.askId, 'allow', {actor: 'owner@localhost'});
+    const sent = store.read().browserRequests[0];
     assert.equal(sent.status, 'dispatched'); assert.equal(sent.approvedBy, 'owner@localhost');
     await assert.rejects(dispatchBrowserRequest(store, request.id), status(409), 'A request is sent once.');
     const [task] = agent.claimAgentTasks(store, device.agentId);

@@ -4,20 +4,21 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {initialState, cleanText} from './core.js?v=ad1526a936';
-import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=ad1526a936';
-import {RETENTION_DEFAULTS} from './retention.js?v=ad1526a936';
-import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=ad1526a936';
-import {addChatMessages, clearChat} from './chats.js?v=ad1526a936';
-import {publicMemory, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=ad1526a936';
-import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=ad1526a936';
-import {createThread, titleFrom} from './threads.js?v=ad1526a936';
-import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=ad1526a936';
-import {simulateGroup} from './group-simulator.js?v=ad1526a936';
-import {BUSY_STATUSES} from './run-state.js?v=ad1526a936';
-import {botSettings} from './bot-settings.js?v=ad1526a936';
-import {denyBrowserRequest} from './bot-browser.js?v=ad1526a936';
-import {withLocalLock} from './locks.js?v=ad1526a936';
+import {initialState, cleanText} from './core.js?v=fbba8d53f7';
+import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=fbba8d53f7';
+import {RETENTION_DEFAULTS} from './retention.js?v=fbba8d53f7';
+import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=fbba8d53f7';
+import {addChatMessages, clearChat} from './chats.js?v=fbba8d53f7';
+import {publicMemory, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=fbba8d53f7';
+import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=fbba8d53f7';
+import {createThread, titleFrom} from './threads.js?v=fbba8d53f7';
+import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=fbba8d53f7';
+import {simulateGroup} from './group-simulator.js?v=fbba8d53f7';
+import {BUSY_STATUSES} from './run-state.js?v=fbba8d53f7';
+import {botSettings} from './bot-settings.js?v=fbba8d53f7';
+import {denyBrowserRequest} from './bot-browser.js?v=fbba8d53f7';
+import {answerAsk, expireAsks, orphanAsks, setGrant} from './asks.js?v=fbba8d53f7';
+import {withLocalLock} from './locks.js?v=fbba8d53f7';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
@@ -118,7 +119,30 @@ function cancelRunsForChat(state, key, reason) {
   for (const run of state.groupRuns) {
     if (!BUSY_STATUSES.includes(run.status) || (run.chatKey || `team-${run.groupId}`) !== key) continue;
     run.status = 'cancelled'; run.completedAt = now(); run.checkpoint = null; run.error = reason;
+    orphanAsks(state, ask => ask.runId === run.id);
   }
+}
+
+/** A run parked on an ask whose answer has come (or lapsed). The offline engine cannot open a page or
+ * take a model turn, so the run ends here instead of resuming: a decline says what was declined, and an
+ * allow says the demo cannot do it. The answer and any grant are recorded either way, like the server's. */
+function settleParkedRun(state, runId, ask) {
+  const run = state.groupRuns.find(r => r.id === runId);
+  if (!run || run.status !== 'awaiting_ask') return;
+  run.status = 'cancelled'; run.completedAt = now(); run.checkpoint = null; run.askIds = [];
+  storeRunLines(state, run, [{id: crypto.randomUUID(), role: 'system', text: ask.status === 'declined'
+    ? `The owner declined: ${ask.detail || ask.action}.`
+    : 'This offline demo cannot open pages, so the run stopped here.'}]);
+}
+
+/** One answer to an ask, the same rules and the same reply shape as the server's `POST /api/asks/:id`. */
+function answerAskLocal(state, askId, answer) {
+  const out = answerAsk(state, askId, answer);
+  // A page the owner turned down is never opened.
+  const request = (state.browserRequests || []).find(r => r.id === out.ask.requestId);
+  if (answer === 'decline' && request?.status === 'pending') denyBrowserRequest(state, request.id);
+  if (out.resumeRunId) settleParkedRun(state, out.resumeRunId, out.ask);
+  return {ask: out.ask, resumed: Boolean(out.resumeRunId)};
 }
 
 /** One offline coordination run, behind the routes the Node orchestrator serves.
@@ -198,6 +222,12 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
   try {
     if (dueDepth === 1) await due(state);
   } finally { dueDepth--; }
+  // An ask from an unattended run lapses after 24 hours, as on the server; nothing else runs a timer here.
+  const lapsed = expireAsks(state);
+  if (lapsed.expired.length) {
+    for (const runId of lapsed.resumeRunIds) settleParkedRun(state, runId, lapsed.expired.find(a => a.runId === runId));
+    save(state);
+  }
   if (path === '/api/state' && method === 'GET') return {...state, aiEnabled: false, serverTime: now()};
 
   let m;
@@ -267,9 +297,17 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
     }
     save(state); return {runId: run.id, status: run.status};
   }
+  // The owner answers an ask, and sets what a bot may do without asking.
+  if ((m = path.match(/^\/api\/asks\/([a-z0-9-]+)$/)) && method === 'POST') { const r = answerAskLocal(state, m[1], body?.answer); save(state); return r; }
+  if (path === '/api/grants' && method === 'POST') { const g = setGrant(state, String(body?.botId ?? ''), String(body?.action ?? ''), body?.scope ?? '', body?.choice); save(state); return g; }
   if (path === '/api/bots/run') throw new Error('Running AI bots requires the separate Node backend, not GitHub Pages.');
-  if ((m = path.match(/^\/api\/browser-requests\/([a-z0-9-]+)\/approve$/)) && method === 'POST') throw Object.assign(new Error('Browser requests run on your own device through a paired local agent, which needs the Node build. This demo cannot open pages.'), {status: 409});
-  if ((m = path.match(/^\/api\/browser-requests\/([a-z0-9-]+)\/deny$/)) && method === 'POST') { const r = denyBrowserRequest(state, m[1]); save(state); return r; }
+  // The old approve and deny routes answer the request's ask (Allow, Decline) for one phase; a request with no ask cannot be opened here.
+  if ((m = path.match(/^\/api\/browser-requests\/([a-z0-9-]+)\/(approve|deny)$/)) && method === 'POST') {
+    const request = (state.browserRequests || []).find(r => r.id === m[1]);
+    if (request?.askId) { answerAskLocal(state, request.askId, m[2] === 'approve' ? 'allow' : 'decline'); save(state); return (state.browserRequests || []).find(r => r.id === m[1]); }
+    if (m[2] === 'approve') throw Object.assign(new Error('Browser requests run on your own device through a paired local agent, which needs the Node build. This demo cannot open pages.'), {status: 409});
+    const r = denyBrowserRequest(state, m[1]); save(state); return r;
+  }
   // Structured task endpoints, identical to the Node server's queue surface.
   if (path === '/api/tasks' && method === 'POST') {
     // Delivery tasks are created by the server from a user's own preferences.
