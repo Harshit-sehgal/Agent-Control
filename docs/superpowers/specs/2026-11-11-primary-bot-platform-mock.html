@@ -88,12 +88,28 @@ kbd{font-family:var(--body);font-size:11px;color:var(--muted);border:1px solid v
 .dock{position:fixed;z-index:20;left:max(18px,env(safe-area-inset-left,0px));bottom:calc(18px + env(safe-area-inset-bottom,0px));display:flex;gap:10px;align-items:center;transition:bottom .35s var(--ease)}
 .has-composer .dock{bottom:calc(104px + env(safe-area-inset-bottom,0px))}
 .dock .fab{position:static}
-.fab-set{width:46px;height:46px;justify-content:center;position:relative}
+.fab-set{height:46px;padding:0 16px 0 6px;position:relative;font-weight:600}
+.me-dot{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:color-mix(in srgb,var(--mint) 22%,var(--sunk));color:var(--fg)}
+.me-dot .i{width:17px;height:17px;stroke-width:1.9}
+.fab-set:hover .me-dot{background:color-mix(in srgb,var(--mint) 34%,var(--sunk))}
 .fab-set .badge{position:absolute;top:-3px;right:-3px}
+.fab-thr{height:46px;padding:0 16px 0 13px;font-weight:600;position:relative}.fab-thr .badge{position:absolute;top:-3px;right:-3px}
+.thsearch{width:100%;border:0;border-radius:var(--r-s);background:var(--sunk);padding:10px 12px;font-size:14px;color:var(--fg);outline:none}
+.thsearch:focus{box-shadow:0 0 0 2px var(--violet)}
+.thg h4{margin:16px 0 4px}
+.th{display:flex;gap:11px;align-items:center;width:100%;padding:10px 8px;border-radius:var(--r-s);text-align:left}
+.th:hover,.th:focus-visible{background:var(--sunk);outline:none}.th.cur{background:color-mix(in srgb,var(--mint) 14%,transparent)}
+.th .w{flex:1;min-width:0}.th b{display:block;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.th small{display:block;color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.th time{font-size:12px;color:var(--muted);flex:none;align-self:flex-start;margin-top:2px}
+.th .wt{color:var(--violet);font-weight:600}
 .fab-new{height:46px;padding:0 18px 0 14px;font-weight:600;background:var(--fg);color:var(--bg);right:max(18px,env(safe-area-inset-right,0px));bottom:calc(18px + env(safe-area-inset-bottom,0px))}
 .has-composer .fab-new{bottom:calc(104px + env(safe-area-inset-bottom,0px))}
 .looks{position:fixed;z-index:20;bottom:calc(18px + env(safe-area-inset-bottom,0px));left:50%;translate:-50% 0;display:flex;gap:2px;background:var(--raise);box-shadow:var(--float);border-radius:99px;padding:4px;font-size:12.5px}
 .has-composer .looks{display:none}
+.has-composer .dock,.has-composer .fab-new,.has-composer .fab-bot{display:none}
+.thead .thbtn{flex:none;width:38px;height:38px;border-radius:50%;display:grid;place-items:center;color:var(--soft);position:relative}
+.thead .thbtn:hover{background:var(--sunk);color:var(--fg)}.thead .thbtn .badge{position:absolute;top:-2px;right:-2px}
 .looks span{padding:6px 8px 6px 12px;color:var(--muted)}
 .looks button{padding:6px 12px;border-radius:99px;color:var(--soft)}
 .looks button.on{background:var(--fg);color:var(--bg)}
@@ -252,7 +268,8 @@ button.tog:hover{background:var(--sunk);color:var(--fg)}
 .h-desks .head{align-self:center;display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px 18px;border-radius:var(--r)}
 .h-desks .head b{font-family:var(--display);font-size:20px;font-weight:650}
 .h-desks .head small,.seat small,.dhead small{color:var(--muted);font-size:12.5px}
-.desks{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px;align-items:start;margin-top:-12px}
+.desks{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));grid-auto-rows:4px;column-gap:16px;row-gap:0;align-items:start;margin-top:-12px}
+.desks>.desk{margin-bottom:16px}
 .desk{background:color-mix(in srgb,var(--t) 13%,var(--raise));border-radius:calc(var(--r) + 4px);padding:14px;display:flex;flex-direction:column;gap:12px;animation:pop .6s var(--ease) both;animation-delay:calc(var(--i) * 80ms)}
 .dhead{display:flex;gap:12px;align-items:center;text-align:left;padding:4px;border-radius:12px}
 .dhead b{display:block;font-weight:600;font-size:15px}
@@ -263,8 +280,51 @@ button.tog:hover{background:var(--sunk);color:var(--fg)}
 .seat small{line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:15ch}
 .solo-ic{width:44px;height:44px;flex:none;display:grid;place-items:center;border-radius:14px;background:color-mix(in srgb,var(--t) 22%,transparent)}
 .seat{flex:0 1 calc(50% - 3px)}
-.desk{min-height:220px}
+.desk{min-height:0}
 @media (max-width:640px){.orb .nm2{font-size:11px}.orbit .face.l{--s:48px}.orbit .face.xl{--s:64px}}
+/* new bot */
+.hire .fl{display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:var(--muted);border:0;padding:0;margin:0}
+.hire .fl legend{padding:0;margin-bottom:6px}
+.hire .fl input,.hire .fl select{color:var(--fg);font-size:14px}
+.swatches{display:flex;gap:8px;flex-wrap:wrap}
+.swc{position:relative;cursor:pointer}.swc input{position:absolute;opacity:0;inset:0;margin:0;cursor:pointer}
+.swc span{display:block;width:30px;height:30px;border-radius:50%;background:var(--c);box-shadow:inset 0 -2px 0 rgba(0,0,0,.1);transition:transform .2s cubic-bezier(.34,1.56,.64,1)}
+.swc input:checked+span{box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--c);transform:scale(1.06)}
+.swc input:focus-visible+span{outline:2px solid var(--violet);outline-offset:4px}
+.hire-prev{display:flex;gap:10px;align-items:center;padding:10px;border-radius:var(--r-s);background:var(--sunk);min-height:56px}
+.hire-prev:empty{display:none}.hire-prev b{display:block;font-size:14px}.hire-prev small{color:var(--muted);font-size:12px}
+/* hold to move, menus */
+[data-sortkey]>[data-sid]{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+.lifted{position:relative;z-index:5;scale:1.04;box-shadow:var(--float);border-radius:var(--r);transition:scale .28s cubic-bezier(.34,1.56,.64,1),box-shadow .25s}
+.hint{font-size:12.5px;color:var(--muted);margin:-18px 0 0}
+.pinmark{color:var(--violet);display:inline-flex;flex:none}.pinmark .i{width:14px;height:14px}.pinmark path{fill:currentColor}
+.seat{position:relative}.seat .pinmark{position:absolute;top:8px;right:8px}
+.chat .top .pinmark{margin-left:2px}
+.unhide{align-self:flex-start;font-size:13px;margin-top:-16px}
+.drop-on{box-shadow:0 0 0 2px var(--mint)!important}
+.btree .brow.drop-on{background:var(--mint-soft);border-radius:var(--r-s);box-shadow:none!important}
+.cm-scrim{position:fixed;inset:0;z-index:49;background:rgba(0,0,0,.4);display:none}
+.cm-scrim.show{display:block;animation:fadeonly .2s ease-out}
+.cmenu{position:fixed;z-index:50;min-width:230px;max-width:290px;background:var(--raise);border-radius:14px;box-shadow:0 18px 44px -12px rgba(0,0,0,.55),0 0 0 1px var(--line);padding:6px;display:none;transform-origin:top left}
+.cmenu.show{display:block;animation:menuin .16s ease-out}
+.cmenu.sheet{left:8px;right:8px;top:auto;bottom:calc(8px + env(safe-area-inset-bottom,0px));max-width:none;border-radius:20px;padding:8px;animation:sheetin .32s var(--ease)}
+@keyframes menuin{from{opacity:0;scale:.96}}
+@keyframes sheetin{from{translate:0 105%}}
+@keyframes fadeonly{from{opacity:0}}
+.cm-h{display:flex;gap:10px;align-items:center;padding:8px 10px 10px;border-bottom:1px solid var(--line);margin-bottom:4px}
+.cm-h b{display:block;font-size:14px}.cm-h small{display:block;color:var(--muted);font-size:12px}
+.cmenu button{display:flex;align-items:center;gap:10px;width:100%;padding:9px 10px;border-radius:9px;font-size:13.5px;text-align:left}
+.cmenu.sheet button{padding:13px 12px;font-size:15px}
+.cmenu button:hover,.cmenu button:focus-visible{background:var(--sunk);outline:none}
+.cmenu .danger{color:#ef5f62}
+.cm-move{padding-left:14px}
+.cmenu hr{border:0;border-top:1px solid var(--line);margin:4px 0}
+.confirm{position:fixed;inset:0;z-index:60;display:none;place-items:center;background:rgba(0,0,0,.5);padding:16px}
+.confirm.show{display:grid;animation:fadeonly .18s ease-out}
+.confirm .card3{background:var(--raise);border-radius:18px;padding:20px;max-width:390px;width:100%;box-shadow:var(--shadow);animation:menuin .2s ease-out}
+.confirm h3{margin:0 0 6px;font-family:var(--display);font-size:18px}
+.confirm p{margin:0 0 16px;color:var(--soft)}
+.btn.danger{background:#e5484d;color:#fff}
 /* pin and move */
 .hv{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
 .dfl{font-size:12px;color:var(--muted)}
@@ -437,6 +497,8 @@ select.sel{border:0;border-radius:8px;background:var(--sunk);padding:5px 8px;fon
 @keyframes fade{from{opacity:.001;translate:0 8px}}
 
 @media (max-width:640px){
+  .fab-set .lbl{display:none}.fab-set{width:46px;padding:0;justify-content:center}
+  .fab-thr .lbl{display:none}.fab-thr{width:46px;padding:0;justify-content:center}
   .card{flex-basis:168px;min-height:184px}
   .atlas{padding:16px;gap:14px}
   .hop,.ask,.settled,.mem{margin-left:0}
@@ -454,10 +516,14 @@ select.sel{border:0;border-radius:8px;background:var(--sunk);padding:5px 8px;fon
   <div id="root" style="height:100%"></div>
   <button class="fab fab-bot" id="fabBot" aria-label="New bot" title="New bot"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
   <div class="dock">
-    <button class="fab fab-set" id="fabSet" aria-label="Settings and more" title="Settings and more"><svg class="i" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg><span id="setBadge"></span></button>
+    <button class="fab fab-set" id="fabSet" aria-label="You: settings and more" title="You: settings and more"><span class="me-dot"><svg class="i" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></span><span class="lbl">You</span><span id="setBadge"></span></button>
+    <button class="fab fab-thr" id="fabThr" aria-label="Your threads" title="Your threads (T)"><svg class="i" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-5A8 8 0 1 1 21 12z"/><path d="M8.5 10h7M8.5 13.5h4.5"/></svg><span class="lbl">Threads</span><span id="thrBadge"></span></button>
   </div>
   <button class="fab fab-new" id="fabNew" aria-label="New thread"><svg class="i" viewBox="0 0 24 24"><path d="M6 3.5h9.5A2.5 2.5 0 0 1 18 6v12.5a2 2 0 0 1-2 2H6z"/><path d="M6 3.5v17M9.5 8h5M9.5 11.5h3"/><path d="m20.5 9.5-6.2 6.2-2.3.6.6-2.3 6.2-6.2a1.2 1.2 0 0 1 1.7 1.7z"/></svg><span class="lbl">New thread</span></button>
   <div class="scrim" id="scrim"></div>
+  <div class="cm-scrim" id="cmScrim"></div>
+  <div class="cmenu" id="cmenu" role="menu" aria-label="Bot options"></div>
+  <div class="confirm" id="confirm" role="alertdialog" aria-modal="true" aria-labelledby="cfH"><div class="card3"><h3 id="cfH"></h3><p id="cfP"></p><div class="acts" style="justify-content:flex-end"><button class="btn" data-del-no>Cancel</button><button class="btn danger" data-del-yes>Delete</button></div></div></div>
   <aside class="drawer" id="drawer" aria-label="Menu" aria-hidden="true"></aside>
   <aside class="panel" id="panel" aria-label="Details" aria-hidden="true"></aside>
   <div class="pal" id="pal" role="dialog" aria-label="Jump to"><div class="card2"><input id="palIn" autocomplete="off" aria-label="Search"><ul id="palList"></ul></div></div>
@@ -476,14 +542,15 @@ const BOTS=[
  {id:'quill',name:'Quill',role:'Bot',boss:'rl',tint:'#f0d978',job:'Writes drafts, summaries and posts.',kw:['write','draft','summary','summarize','summarise','post','blog'],mem:['Your voice: plain, no emoji, short sentences']},
  {id:'ledger',name:'Ledger',role:'Bot',boss:null,tint:'#d9bf9c',job:'Tracks spending and receipts.',kw:['spend','spent','receipt','expense','money','budget','invoice','food'],mem:['Monthly budget: 40,000 (example)']},
 ];
-const by=id=>BOTS.find(b=>b.id===id);
+const GONE=[];const by=id=>BOTS.find(b=>b.id===id)||GONE.find(b=>b.id===id);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const short=b=>b.job.split(/[.:]/)[0];
+const TINTS=['#9ee0e6','#c6b7f7','#f7b8a8','#b5e3a1','#f5d38a','#f2a7c8','#a9c8f5','#d9c7a8'];
+const short=b=>b.job?b.job.split(/[.:]/)[0]:'New, no job yet';
 const isMgr=b=>b.id!=='atlas'&&(b.role==='Manager'||BOTS.some(x=>x.boss===b.id));
 const roleOf=b=>b.id==='atlas'?'Primary':isMgr(b)?'Manager':'Bot';
 const chain=id=>{const o=[];let b=by(id);while(b){o.unshift(b);b=b.boss&&by(b.boss)}return o};
 const LAY=(()=>{try{return JSON.parse(localStorage.getItem('home-layout')||'{}')}catch(e){return{}}})();
-const S={home:LAY.def||'desks',def:LAY.def||'desks',order:LAY.order||{},pins:LAY.pins||{desks:[],chats:['atlas'],tree:[]},chatF:'all',open:{atlas:true},view:'bots',threads:[],cur:null,left:false,panel:null,tab:'overview',busy:new Set(),paused:false,filter:'outside',actAll:null,palIdx:0,palBots:false,preview:null,recent:['mail','sch','plan'],
+const S={home:LAY.def||'desks',def:LAY.def||'desks',order:LAY.order||{},pins:Object.assign({desks:[],chats:['atlas'],tree:[],seats:[]},LAY.pins||{}),hidden:LAY.hidden||[],chatF:'all',open:{atlas:true},view:'bots',threads:[],cur:null,left:false,panel:null,tab:'overview',busy:new Set(),paused:false,filter:'outside',actAll:null,palIdx:0,palBots:false,preview:null,recent:['mail','sch','plan'],
   col:(()=>{try{return JSON.parse(localStorage.getItem('drawer-col')||'{}')}catch(e){return{}}})(),
   grants:{mail:{'Gmail: send email':'always','Gmail: read':'always'},plan:{'Google Calendar: edit':'ask'},ledger:{'Pay or spend money':'ask'}},activity:[]};
 const faceState=b=>S.busy.has(b.id)?'read':(b.id==='atlas'?'':'sleep');
@@ -515,7 +582,8 @@ function routeFor(t){const s=SCRIPTS.find(x=>x.match(t));if(s)return s;const g=g
   return{owner:g,helpers:[],reply:'This is my job, so I took it. Here is what I found.',learn:[g,'You asked: '+t.slice(0,44)]}}
 
 /* ---------- views ---------- */
-const kidsOf=id=>id==='atlas'?BOTS.filter(b=>b.id!=='atlas'&&(b.boss==='atlas'||!b.boss)):BOTS.filter(b=>b.boss===id);
+const vis=b=>!S.hidden.includes(b.id);
+const kidsOf=id=>(id==='atlas'?BOTS.filter(b=>b.id!=='atlas'&&(b.boss==='atlas'||!b.boss)):BOTS.filter(b=>b.boss===id)).filter(vis);
 const ago=ts=>{const m=Math.round((Date.now()-ts)/6e4);return m<1?'now':m<60?m+' min':m<1440?Math.round(m/60)+' h':Math.round(m/1440)+' d'};
 const lastT=b=>S.threads.filter(t=>t.owner===b.id).sort((x,y)=>(y.at||0)-(x.at||0))[0];
 const preview=t=>{if(!t)return '';const it=[...t.items].reverse().find(i=>i.k==='reply'||i.k==='me');return it?(it.k==='me'?'You: ':'')+it.text:''};
@@ -523,14 +591,17 @@ const PIN='<svg class="i" viewBox="0 0 24 24" style="width:13px;height:13px"><pa
 const GRIP='<svg class="i" viewBox="0 0 24 24"><g fill="currentColor" stroke="none"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></g></svg>';
 const PINI='<svg class="i" viewBox="0 0 24 24"><path d="M12 17v5M9 3h6l-1 6 3 4H7l3-4z"/></svg>';
 const isPin=(k,id)=>S.pins[k].includes(id);
-const pinBtn=(k,b)=>{const on=isPin(k,b.id);return `<button class="pinb ${on?'on':''}" data-pin="${k}:${b.id}" aria-pressed="${on}" aria-label="${on?'Unpin':'Pin'} ${b.name}" title="${on?'Unpin':'Pin to top'}">${PINI}</button>`};
-const gripBtn=b=>`<button class="grip" data-grip aria-label="Move ${b.name}: drag, or use the arrow keys" title="Drag to move">${GRIP}</button>`;
+const pinMark=(k,id)=>isPin(k,id)?`<span class="pinmark" title="Pinned" aria-label="Pinned">${PINI}</span>`:'';
+const pinBtnOld=(k,b)=>{const on=isPin(k,b.id);return `<button class="pinb ${on?'on':''}" data-pin="${k}:${b.id}" aria-pressed="${on}" aria-label="${on?'Unpin':'Pin'} ${b.name}" title="${on?'Unpin':'Pin to top'}">${PINI}</button>`};
+const pinBtn=(k,b)=>pinMark(k,b.id);
+const gripBtn=b=>'';
+const gripBtnOld=b=>`<button class="grip" data-grip aria-label="Move ${b.name}: drag, or use the arrow keys" title="Drag to move">${GRIP}</button>`;
 const arrange=(kind,key,list)=>{const o=S.order[key];const l=o?[...list].sort((x,y)=>{const i=o.indexOf(x.id),j=o.indexOf(y.id);return (i<0?999:i)-(j<0?999:j)}):list;return kind?[...l.filter(b=>isPin(kind,b.id)),...l.filter(b=>!isPin(kind,b.id))]:l};
-const saveLayout=()=>{try{localStorage.setItem('home-layout',JSON.stringify({order:S.order,pins:S.pins,def:S.def}))}catch(e){}};
+const saveLayout=()=>{try{localStorage.setItem('home-layout',JSON.stringify({order:S.order,pins:S.pins,def:S.def,hidden:S.hidden}))}catch(e){}};
 function treeHome(){
-  const row=(b,k,open,flat)=>{const st=stateOf(b);return `<div class="brow">${!flat&&k.length?`<button class="tog" data-tog="${b.id}" aria-expanded="${open}" aria-label="${b.name}'s team">${IC.chev}</button>`:'<span class="tog"></span>'}<button class="bmain" data-dm="${b.id}" aria-label="Message ${b.name}">${face(b,b.id==='atlas'&&!flat?'m':'',st==='waiting'?'wait':undefined)}<span class="w"><b>${b.name}</b><small>${esc(roleOf(b)==='Bot'?short(b):`${roleOf(b)} · ${kidsOf(b.id).length} ${kidsOf(b.id).length===1?'report':'reports'}`)}</small></span>${st==='working'?'<span class="st">working</span>':st==='waiting'?'<span class="st wait">waiting on you</span>':''}</button><button class="prof" data-bot="${b.id}">Profile</button>${pinBtn('tree',b)}${b.id==='atlas'&&!flat?'<span class="grip-sp"></span>':gripBtn(b)}</div>`};
+  const row=(b,k,open,flat)=>{const st=stateOf(b);return `<div class="brow">${!flat&&k.length?`<button class="tog" data-tog="${b.id}" aria-expanded="${open}" aria-label="${b.name}'s team">${IC.chev}</button>`:'<span class="tog"></span>'}<button class="bmain" data-dm="${b.id}" aria-label="Message ${b.name}">${face(b,b.id==='atlas'&&!flat?'m':'',st==='waiting'?'wait':undefined)}<span class="w"><b>${b.name}</b><small>${esc(roleOf(b)==='Bot'?short(b):`${roleOf(b)} · ${kidsOf(b.id).length} ${kidsOf(b.id).length===1?'report':'reports'}`)}</small></span>${st==='working'?'<span class="st">working</span>':st==='waiting'?'<span class="st wait">waiting on you</span>':''}</button><button class="prof" data-bot="${b.id}">Profile</button>${pinBtn('tree',b)}</div>`};
   const node=(b,i)=>{const k=arrange(null,'tree:'+b.id,kidsOf(b.id)),open=!!S.open[b.id];
-    return `<li class="${open?'open':''}" style="--i:${i}" data-sid="${b.id}">${row(b,k,open,false)}${k.length?`<div class="kids" ${open?'':'inert'}><ul data-sortkey="tree:${b.id}">${k.map(node).join('')}</ul></div>`:''}</li>`};
+    return `<li class="${open?'open':''}" style="--i:${i}" data-sid="${b.id}">${row(b,k,open,false)}${k.length||isMgr(b)||b.id==='atlas'?`<div class="kids" ${open?'':'inert'}><ul data-sortkey="tree:${b.id}">${k.map(node).join('')}</ul></div>`:''}</li>`};
   const pins=arrange(null,'pinned',BOTS.filter(b=>isPin('tree',b.id)));
   return `${pins.length?`<section><h3 class="sect">Pinned</h3><ul class="btree flat" data-sortkey="pinned">${pins.map(b=>`<li data-sid="${b.id}">${row(b,[],false,true)}</li>`).join('')}</ul></section>`:''}
     <section>${pins.length?'<h3 class="sect">Everyone</h3>':''}<ul class="btree">${node(by('atlas'),0)}</ul></section>`;
@@ -539,7 +610,7 @@ function chatsHome(){
   const p=pending(),f=S.chatF||'all',mgrs=BOTS.filter(b=>b.boss==='atlas'&&isMgr(b));
   let list=S.order.chats?BOTS:[by('atlas'),...BOTS.filter(b=>b.id!=='atlas').sort((x,y)=>((lastT(y)||{}).at||0)-((lastT(x)||{}).at||0))];
   list=arrange('chats','chats',list);
-  if(f!=='all')list=list.filter(b=>b.id===f||b.boss===f);
+  list=list.filter(vis);if(f!=='all')list=list.filter(b=>b.id===f||b.boss===f);
   return `<div class="cfilt">${[['all','All'],...mgrs.map(m=>[m.id,m.name.replace(' lead','')])].map(([k,l])=>`<button class="chip ${f===k?'on':''}" data-cf="${k}">${l}</button>`).join('')}</div>
   <div class="chats" data-sortkey="chats">${list.map(b=>{const st=stateOf(b),t=lastT(b),ask=p.find(x=>x.bot===b.id);
     return `<div class="chat ${isPin('chats',b.id)?'pinned':''}" data-sid="${b.id}"><button class="chatmain" data-dm="${b.id}">${face(b,'m',st==='waiting'?'wait':undefined)}<span class="w"><span class="top"><b>${b.name}</b><time>${t&&t.at?ago(t.at):''}</time></span><span class="prev">${st==='working'?'<span class="typing">working<span class="dots"><i></i><i></i><i></i></span></span>':ask?`<span class="wt">Wants to ${esc(ask.action)}</span>`:esc(preview(t)||short(b))}</span></span>${ask?'<span class="badge">1</span>':''}</button>${pinBtn('chats',b)}${f==='all'?gripBtn(b):''}</div>`}).join('')}</div>`;
@@ -555,9 +626,9 @@ function orbitHome(){
 function desksHome(){
   const a=by('atlas'),tops=kidsOf('atlas'),solo=tops.filter(b=>!isMgr(b));
   const groups=arrange('desks','desks',[...tops.filter(isMgr).map(m=>({id:m.id,name:m.name,m,kids:kidsOf(m.id),tint:m.tint})),...(solo.length?[{id:'solo',name:'Solo desk',kids:solo,tint:'#a9a7b3'}]:[])]);
-  const seat=c=>{const st=stateOf(c);return `<button class="seat" data-dm="${c.id}">${face(c,'l',st==='waiting'?'wait':undefined)}<b>${c.name}</b><small>${st==='working'?'working':st==='waiting'?'waiting on you':esc(short(c))}</small></button>`};
+  const seat=c=>{const st=stateOf(c);return `<button class="seat" data-dm="${c.id}" data-sid="${c.id}">${pinMark('seats',c.id)}${face(c,'l',st==='waiting'?'wait':undefined)}<b>${c.name}</b><small>${st==='working'?'working':st==='waiting'?'waiting on you':esc(short(c))}</small></button>`};
   return `<button class="head" data-dm="atlas">${face(a,'xl')}<b>Atlas</b><small>Primary · ${stateOf(a)==='awake'?'on watch':stateOf(a)}</small></button>
-  <div class="desks" data-sortkey="desks">${groups.map((g,n)=>`<section class="desk ${isPin('desks',g.id)?'pinned':''}" data-sid="${g.id}" style="--t:${g.tint};--i:${n}"><div class="dbar">${g.m?`<button class="dhead" data-dm="${g.m.id}">${face(g.m,'m')}<span><b>${g.m.name}</b><small>Manager · ${g.kids.length} ${g.kids.length===1?'report':'reports'}</small></span></button>`:`<div class="dhead"><span class="solo-ic">${face(a,'s','')}</span><span><b>Solo</b><small>Report to Atlas directly · ${g.kids.length} ${g.kids.length===1?'bot':'bots'}</small></span></div>`}${pinBtn('desks',g)}${gripBtn(g)}</div><div class="seats">${g.kids.map(seat).join('')}</div></section>`).join('')}</div>`;
+  <div class="desks" data-sortkey="desks">${groups.map((g,n)=>`<section class="desk ${isPin('desks',g.id)?'pinned':''}" data-sid="${g.id}" style="--t:${g.tint};--i:${n}"><div class="dbar">${g.m?`<button class="dhead" data-dm="${g.m.id}">${face(g.m,'m')}<span><b>${g.m.name}</b><small>Manager · ${g.kids.length} ${g.kids.length===1?'report':'reports'}</small></span></button>`:`<div class="dhead"><span class="solo-ic">${face(a,'s','')}</span><span><b>Solo</b><small>Report to Atlas directly · ${g.kids.length} ${g.kids.length===1?'bot':'bots'}</small></span></div>`}${pinBtn('desks',g)}${gripBtn(g)}</div><div class="seats" data-sortkey="team:${g.id}">${arrange('seats','team:'+g.id,g.kids).map(seat).join('')}</div></section>`).join('')}</div>`;
 }
 function botsView(){
   const v=S.home,d=new Date(),h=d.getHours(),part=h<12?'morning':h<17?'afternoon':'evening';
@@ -566,7 +637,8 @@ function botsView(){
   return `<div class="view"><div class="home h-${v}">
     <header class="hh"><div><div class="when">${d.toLocaleDateString(undefined,{weekday:'long'})} ${part}${S.paused?' · <button class="link" data-pause>paused, resume</button>':''}</div><h1>${v==='chats'?'Chats':'Your bots'}</h1></div>
       <div class="hv"><div class="seg" role="tablist" aria-label="Home view">${[['desks','Desks'],['tree','List'],['chats','Chats'],['orbit','Orbit']].map(([k,l])=>`<button class="${v===k?'on':''}" data-home-v="${k}" role="tab" aria-selected="${v===k}">${l}</button>`).join('')}</div><div class="dfl">${v===S.def?'Your default view':`<button class="link" data-defv="${v}">Make this my default</button>`}</div></div></header>
-    ${body}${v==='chats'?'':lately}
+    ${v==='orbit'?'':`<p class="hint">${matchMedia('(hover:none)').matches?'Touch and hold a bot to move it. Hold still for options.':'Right-click a bot for options. Double-click and hold to drag it, even onto another team.'}</p>`}
+    ${body}${S.hidden.length?`<button class="link unhide" data-unhide>Show ${S.hidden.length} hidden</button>`:''}${v==='chats'?'':lately}
   </div></div>`;
 }
 function composer(){
@@ -576,7 +648,7 @@ function composer(){
 }
 function newView(){
   const line=BOTS.filter(b=>roleOf(b)==='Bot'||b.id==='atlas');
-  return `<div class="tv"><div class="view" style="padding-bottom:20px"><div class="thead"><button class="back" data-home>${IC.back}Bots</button><div class="grow"></div></div>
+  return `<div class="tv"><div class="view" style="padding-bottom:20px"><div class="thead"><button class="back" data-home>${IC.back}Bots</button><div class="grow"></div><button class="thbtn" data-threads aria-label="Your threads" title="Your threads (T)"><svg class="i" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-5A8 8 0 1 1 21 12z"/><path d="M8.5 10h7M8.5 13.5h4.5"/></svg>${(n=>n?`<span class="badge">${n}</span>`:'')(new Set(pending().map(x=>x.thread)).size)}</button></div>
     <div class="newv"><div class="lineup" id="lineup">${line.map(b=>`<div class="who ${S.preview===b.id?'on':''}" data-w="${b.id}">${face(b,b.id==='atlas'?'l':'m',S.preview===b.id?'wake':b.id==='atlas'?'':'sleep')}<span>${b.name}</span></div>`).join('')}</div>
     <h2>What should the company get done?</h2><p class="preview" id="preview">Atlas is listening. The bot whose job it is will wake up.</p>
     <div class="boxwrap"><div class="mention" id="mention" hidden></div><form data-form class="box"><input name="q" placeholder="Ask for anything. Type @ to pick a bot." autocomplete="off" aria-label="Message" data-preview><button class="send" aria-label="Send">${IC.send}</button></form></div>
@@ -602,15 +674,24 @@ function itemHTML(it,t){
 function threadView(){
   const t=S.threads.find(x=>x.id===S.cur),o=t.owner&&by(t.owner);
   const live=pending().some(a=>a.thread===t.id)?'Waiting on you':t.running?`${[...S.busy].map(id=>by(id).name).join(' and ')||'Atlas'} working`:o?(t.dm?`Direct with ${o.name}`:`${o.name} owns this`):'Routing…';
-  return `<div class="tv" style="--owner:${o?o.tint:'transparent'};position:relative"><div class="wash"></div><div class="view" id="scroll" style="padding-bottom:20px"><div class="thead"><button class="back" data-home>${IC.back}Bots</button>${o?`<button data-bot="${o.id}" title="${o.name}'s profile" aria-label="${o.name}'s profile">${face(o,'m')}</button>`:''}<div class="grow"><h1>${esc(t.title)}</h1><span class="live">${live}</span></div></div>
+  return `<div class="tv" style="--owner:${o?o.tint:'transparent'};position:relative"><div class="wash"></div><div class="view" id="scroll" style="padding-bottom:20px"><div class="thead"><button class="back" data-home>${IC.back}Bots</button>${o?`<button data-bot="${o.id}" title="${o.name}'s profile" aria-label="${o.name}'s profile">${face(o,'m')}</button>`:''}<div class="grow"><h1>${esc(t.title)}</h1><span class="live">${live}</span></div><button class="thbtn" data-threads aria-label="Your threads" title="Your threads (T)"><svg class="i" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-5A8 8 0 1 1 21 12z"/><path d="M8.5 10h7M8.5 13.5h4.5"/></svg>${(n=>n?`<span class="badge">${n}</span>`:'')(new Set(pending().map(x=>x.thread)).size)}</button></div>
     ${S.paused?`<div class="col" style="margin-bottom:10px"><div class="need"><span class="w">All bots are paused. Nothing runs until you resume.</span><button class="go" data-pause>Resume</button></div></div>`:''}
     <div class="col" role="log" aria-live="polite">${t.items.map(i=>itemHTML(i,t)).join('')}</div></div>${composer()}</div>`;
 }
+const deskRO=new ResizeObserver(es=>es.forEach(e=>{const d=e.target;d.style.gridRowEnd='span '+Math.ceil((d.offsetHeight+16)/4)}));
+function packDesks(){deskRO.disconnect();document.querySelectorAll('.desks>.desk').forEach(d=>deskRO.observe(d))}
+function threadList(q){q=q.trim().toLowerCase();const wait=new Set(pending().map(x=>x.thread)),day=new Date().setHours(0,0,0,0);
+  const ts=t=>Math.max(t.at||0,...t.items.map(i=>i.at||0));
+  const list=S.threads.filter(t=>!q||(t.title+' '+preview(t)+' '+(t.owner?by(t.owner).name:'')).toLowerCase().includes(q)).sort((a,b)=>ts(b)-ts(a));
+  const row=t=>{const o=t.owner&&by(t.owner),w=wait.has(t.id);return `<button class="th${S.view==='thread'&&S.cur===t.id?' cur':''}" data-open="${t.id}">${o?face(o,'s',w?'wait':''):face(by('atlas'),'s','')}<span class="w"><b>${esc(t.title)}</b><small>${w?'<span class="wt">Waiting on you · </span>':''}${esc(preview(t)||'No replies yet')}</small></span><time>${t.at?ago(ts(t)):''}</time></button>`};
+  const g=[['Waiting on you',list.filter(t=>wait.has(t.id))],['Today',list.filter(t=>!wait.has(t.id)&&ts(t)>=day)],['Earlier',list.filter(t=>!wait.has(t.id)&&ts(t)<day)]].filter(x=>x[1].length);
+  return g.map(([h,l])=>`<div class="thg"><h4>${h}</h4>${l.map(row).join('')}</div>`).join('')||`<p class="sub">${q?'No thread matches that.':'No threads yet. Start one with New thread.'}</p>`}
 function renderMain(){
   const app=$('app');app.classList.toggle('has-composer',S.view!=='bots');
   $('root').innerHTML=S.view==='bots'?botsView():S.view==='new'?newView():threadView();
   if(S.view==='thread'){const sc=$('scroll');sc.scrollTop=sc.scrollHeight}
   if(S.view==='new'){const i=$('root').querySelector('input');i&&i.focus({preventScroll:true})}
+  packDesks();const thr=$('thrBadge');if(thr){const w=new Set(pending().map(x=>x.thread)).size;thr.innerHTML=w?`<span class="badge">${w}</span>`:''}
   const p=pending().length;$('setBadge').innerHTML=p?`<span class="badge">${p}</span>`:'';
 }
 
@@ -657,7 +738,15 @@ function panelHTML(){
       <div class="group"><h4>No manager</h4><ul class="tree">${BOTS.filter(b=>!b.boss&&b.id!=='atlas').map(node).join('')}</ul></div>`;
   } else if(S.panel==='hire'){
     head='<h3>New bot</h3>';
-    body=`<p class="sub">Say what it is for. Atlas writes its name, job and instructions; you can change them after.</p><form class="hire" data-hire><input name="what" placeholder="A bot that watches my inbox for invoices" aria-label="What is this bot for"><div class="r"><select class="sel" name="boss" aria-label="Manager"><option value="">No manager</option>${BOTS.filter(b=>b.id==='atlas'||isMgr(b)).map(b=>`<option value="${b.id}">Reports to ${b.name}</option>`).join('')}</select><button class="btn primary">Hire</button></div></form>`;
+    const used=new Set(BOTS.map(x=>x.tint)),tc=TINTS.find(c=>!used.has(c))||TINTS[0];
+    body=`<p class="sub">Give it a name. You tell it what to do in its chat, and you can change that any time.</p><form class="hire" data-hire>
+      <label class="fl">Name<input name="nm" required maxlength="24" placeholder="Scout" aria-label="Bot name" autocomplete="off"></label>
+      <label class="fl">Manager<select class="sel" name="boss"><option value="">None, reports to Atlas</option>${BOTS.filter(isMgr).filter(vis).map(b=>`<option value="${b.id}">${b.name}</option>`).join('')}</select></label>
+      <fieldset class="fl"><legend>Colour</legend><div class="swatches">${TINTS.map(c=>`<label class="swc" style="--c:${c}"><input type="radio" name="tint" value="${c}"${c===tc?' checked':''} aria-label="Colour ${c}"><span></span></label>`).join('')}</div></fieldset>
+      <div class="hire-prev" id="hirePrev"></div>
+      <button class="btn primary">Create and open chat</button></form>`;
+  } else if(S.panel==='threads'){
+    head='<h3>Your threads</h3>';body=`<input class="thsearch" id="thQ" type="search" placeholder="Search threads" aria-label="Search threads" autocomplete="off"><div id="thList">${threadList('')}</div>`;
   } else if(S.panel==='activity'){
     head='<h3>Activity</h3>';const f=S.filter,list=S.activity.filter(a=>f==='all'||a.kind===f);
     body=`<div class="seg" role="tablist">${[['outside','Left the app'],['perm','Permissions'],['bots','Bots'],['all','All']].map(([k,l])=>`<button class="${f===k?'on':''}" data-filter="${k}" role="tab" aria-selected="${f===k}">${l}</button>`).join('')}</div><div>${acts(list)}</div>`;
@@ -714,6 +803,11 @@ async function send(text){
   if(!t){t={id:'t'+Date.now(),at:Date.now(),title:text.replace(/^@\S+\s*/,'').slice(0,42)||text,owner:null,items:[]};S.threads.unshift(t)}
   S.view='thread';S.cur=t.id;S.preview=null;t.running=true;t.items.push({k:'me',text});render();
   await wait(450);
+  if(t.dm&&!by(t.dm).job){const b=by(t.dm),work={k:'work',bot:b.id};S.busy.add(b.id);t.items.push(work);up();await wait(900);
+    t.items.splice(t.items.indexOf(work),1);S.busy.delete(b.id);t.running=false;
+    b.job=text.replace(/^./,c=>c.toUpperCase()).replace(/\.?$/,'.');b.kw=text.toLowerCase().split(/\W+/).filter(w=>w.length>3);
+    t.items.push({k:'reply',bot:b.id,text:`Got it, that's my job now. New threads about this come to me, and you can change it here whenever you like.`});
+    t.items.push({k:'mem',bot:b.id,text:'Job: '+b.job});log(b.id,'bots','took the job: '+b.job,t.id);up();return}
   const forced=mb?.id||t.dm||(!isNew&&t.owner);
   const r=forced?(SCRIPTS.find(x=>x.owner===forced&&x.match(text))||{owner:forced,helpers:[],reply:`${by(forced).name} here. Done, and here is what I did.`,learn:roleOf(by(forced))==='Bot'?[forced,'You asked: '+text.replace(/^@\S+\s*/,'').slice(0,40)]:null}):routeFor(text);
   const owner=by(r.owner);if(!t.dm)t.owner=owner.id;S.recent=[owner.id,...S.recent.filter(x=>x!==owner.id)];
@@ -771,6 +865,11 @@ document.addEventListener('click',e=>{
   const el=e.target.closest('button,[role=button]');if(!el)return;const d=el.dataset;
   if(el.closest('.looks')&&d.look){setLook(d.look);return}
   if(d.grip!==undefined)return;
+  if(d.cm){cmAction(d.cm);return}
+  if(d.cmMove!==undefined){moveBot(S.cm.bot,d.cmMove||null);closeMenu();return}
+  if(d.delYes!==undefined){doDelete();return}
+  if(d.delNo!==undefined){$('confirm').classList.remove('show');return}
+  if(d.unhide!==undefined){S.hidden=[];saveLayout();renderMain();return}
   if(d.homeV){S.home=d.homeV;renderMain();return}
   if(d.defv){S.def=d.defv;saveLayout();renderMain();return}
   if(d.pin){const [k,id]=d.pin.split(':'),arr=S.pins[k],i=arr.indexOf(id);i<0?arr.push(id):arr.splice(i,1);saveLayout();renderMain();return}
@@ -779,7 +878,9 @@ document.addEventListener('click',e=>{
   if(d.sec){S.col[d.sec]=!S.col[d.sec];try{localStorage.setItem('drawer-col',JSON.stringify(S.col))}catch(e){}renderOver();return}
   if(d.pal!==undefined){const it=palItems($('palIn').value)[+d.pal];closePal();it&&it.go();return}
   if(d.bot){e.stopPropagation();S.panel=d.bot;S.tab='overview';S.left=false;renderOver();return}
-  if(el.id==='fabBot'){S.panel='hire';S.left=false;renderOver();setTimeout(()=>$('panel').querySelector('[name=what]')?.focus(),300)}
+  if(el.id==='fabBot'){S.panel='hire';S.left=false;renderOver();setTimeout(()=>{const f=$('panel').querySelector('[data-hire]');f?.nm.focus();f?.dispatchEvent(new Event('input',{bubbles:true}))},300)}
+  else if(d.threads!==undefined){S.panel='threads';S.left=false;renderOver();setTimeout(()=>$('thQ')?.focus(),250)}
+  else if(el.id==='fabThr'){S.panel=S.panel==='threads'?null:'threads';S.left=false;renderOver();setTimeout(()=>$('thQ')?.focus(),250)}
   else if(el.id==='fabSet'){S.left=!S.left;S.panel=null;renderOver()}
   else if(el.id==='fabNew'||d.new!==undefined){go('new')}
   else if(d.home!==undefined){go('bots')}
@@ -805,9 +906,10 @@ document.addEventListener('click',e=>{
 document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[role=button][data-bot]')){e.preventDefault();e.target.click()}});
 document.addEventListener('submit',e=>{e.preventDefault();const f=e.target;
   if(f.dataset.form!==undefined){const v=f.q.value.trim();if(v){f.q.value='';send(v)}}
-  else if(f.dataset.hire!==undefined){const what=f.what.value.trim();if(!what)return;const names=['Scout','Pilot','Keeper','Tally','Echo'];const tints=['#9ee0e6','#c6b7f7','#f7b8a8','#b5e3a1'];
-    const nb={id:'b'+Date.now(),name:names[BOTS.length%names.length],role:'Bot',boss:f.boss.value||null,tint:tints[BOTS.length%tints.length],job:what.replace(/^./,c=>c.toUpperCase()).replace(/\.?$/,'.'),kw:what.toLowerCase().split(/\W+/).filter(w=>w.length>3),mem:['Hired by you']};
-    BOTS.push(nb);log('atlas','bots',`hired ${nb.name}${nb.boss?' under '+by(nb.boss).name:', with no manager'}`);S.panel=nb.id;S.tab='overview';render()}
+  else if(f.dataset.hire!==undefined){const nm=f.nm.value.trim().replace(/^./,c=>c.toUpperCase());if(!nm)return;
+    const nb={id:'b'+Date.now(),name:nm,role:'Bot',boss:f.boss.value||null,tint:f.querySelector('[name=tint]:checked')?.value||TINTS[0],job:'',kw:[],mem:[]};
+    BOTS.push(nb);log('atlas','bots',`added ${nb.name}${nb.boss?' under '+by(nb.boss).name:', reporting to Atlas'}`);S.panel=null;
+    openDM(nb.id);const t=S.threads.find(x=>x.dm===nb.id);t.items.push({k:'reply',bot:nb.id,text:`Hi, I'm ${nb.name}. What should I do? Tell me my job here and I'll stick to it.`});render();setTimeout(()=>document.querySelector('#root textarea, #root input[name=q]')?.focus(),200)}
   else if(f.dataset.addmem){const b=by(f.dataset.addmem),v=f.m.value.trim();if(v){b.mem.push(v);b.fresh=b.mem.length-1;renderOver()}}
 });
 let pv=0;
@@ -834,42 +936,107 @@ document.addEventListener('keydown',e=>{
   if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();$('pal').classList.contains('show')?closePal():openPal()}
   else if(e.key==='Escape'){if($('pal').classList.contains('show'))closePal();else if(S.panel||S.left){S.panel=null;S.left=false;renderOver()}}
 });
-/* drag to move: the item rides under the pointer with a little tilt, neighbours glide aside (FLIP),
-   and on release it springs into its slot. Arrow keys on the handle move it one place. */
-let drag=null;
+/* Gestures on the home views. Phone: touch and hold a bot; move to drag it, or let go without moving for its menu.
+   Laptop: double-click and hold to drag (a plain long press works too); right-click for the menu.
+   A dragged bot can land in another team (Desks, List); desks and chats reorder. Alt+arrows and the menu key work from the keyboard. */
+let drag=null,G=null,lastDown=null,suppressClick=false,pendingOpen=null,lastType='mouse';
 const EASE_GLIDE='cubic-bezier(.2,.9,.25,1)';
-function flip(box,fn){const els=[...box.children].filter(x=>x!==drag?.item&&x.dataset.sid),r0=new Map(els.map(x=>[x,x.getBoundingClientRect()]));
+const famOf=k=>(k||'').split(':')[0];
+const pinKind=k=>({desks:'desks',team:'seats',chats:'chats',tree:'tree',pinned:'tree'})[famOf(k)];
+const bossOfKey=k=>{const id=k.split(':')[1];return id==='solo'||id==='atlas'?null:id};
+const homeItem=t=>{if(!t.closest||!t.closest('#root .home'))return null;if(t.closest('.tog,.seg,.cfilt,.hv,.prof,.recent,.unhide,.head'))return null;const it=t.closest('[data-sid]');return it&&it.parentElement?.dataset.sortkey?it:null};
+function flip(boxes,fn){const els=[...new Set(boxes)].flatMap(b=>[...b.children]).filter(x=>x!==drag?.item&&x.dataset.sid),r0=new Map(els.map(x=>[x,x.getBoundingClientRect()]));
   els.forEach(x=>x.getAnimations().forEach(an=>an.cancel()));fn();
   els.forEach(x=>{const a=r0.get(x),b=x.getBoundingClientRect(),dx=a.left-b.left,dy=a.top-b.top;if(Math.abs(dx)+Math.abs(dy)>.5)x.animate([{transform:`translate(${dx}px,${dy}px)`},{transform:'none'}],{duration:340,easing:EASE_GLIDE})})}
-function saveOrder(box,item){const key=box.dataset.sortkey;
-  if(item&&(key==='desks'||key==='chats')){const pinned=x=>x&&x.classList.contains('pinned'),was=pinned(item),now=pinned(item.nextElementSibling)||(was&&pinned(item.previousElementSibling));
-    if(now!==was){const arr=S.pins[key],id=item.dataset.sid;now?arr.push(id):arr.splice(arr.indexOf(id),1);item.classList.toggle('pinned',now);
-      const pb=item.querySelector('.pinb');if(pb){pb.classList.toggle('on',now);pb.setAttribute('aria-pressed',String(now));pb.title=now?'Unpin':'Pin to top'}}}
+function saveOrder(box,item){const key=box.dataset.sortkey,kind=pinKind(key);
+  if(item&&(kind==='desks'||kind==='chats'||kind==='seats')){const pinned=x=>x&&x.dataset.pin==='1',was=isPin(kind,item.dataset.sid),now=pinned(item.nextElementSibling)||(was&&pinned(item.previousElementSibling));
+    if(now!==was){const arr=S.pins[kind],id=item.dataset.sid;now?arr.push(id):arr.splice(arr.indexOf(id),1)}}
   S.order[key]=[...box.children].map(x=>x.dataset.sid).filter(Boolean);saveLayout()}
-function place(){const d=drag,it=d.item;it.style.transform='';const r=it.getBoundingClientRect();   // where its slot is right now
-  d.tx=d.x-d.gx-r.left;d.ty=d.y-d.gy-r.top;it.style.transform=`translate(${d.tx}px,${d.ty}px) rotate(${d.rot.toFixed(2)}deg) scale(1.03)`}
+function markPins(){document.querySelectorAll('#root [data-sortkey]>[data-sid]').forEach(x=>{const k=pinKind(x.parentElement.dataset.sortkey);x.dataset.pin=k&&isPin(k,x.dataset.sid)?'1':'0'})}
+function dropTarget(d){const it=d.item,inside=r=>d.x>=r.left&&d.x<=r.right&&d.y>=r.top&&d.y<=r.bottom;
+  if(famOf(d.box0.dataset.sortkey)==='team'){const desk=[...document.querySelectorAll('.desks>.desk')].find(x=>inside(x.getBoundingClientRect()));return desk?{box:desk.querySelector('.seats'),host:desk}:null}
+  const lis=[...document.querySelectorAll('.btree:not(.flat) li[data-sid]')].filter(li=>li!==it&&!it.contains(li)&&li.querySelector(':scope>.kids>ul')&&inside(li.getBoundingClientRect()));
+  if(!lis.length)return null;const li=lis.sort((p,q)=>{const a=p.getBoundingClientRect(),b=q.getBoundingClientRect();return a.width*a.height-b.width*b.height})[0];
+  return {box:li.querySelector(':scope>.kids>ul'),host:li.querySelector(':scope>.brow'),open:()=>{if(!li.classList.contains('open')){li.classList.add('open');S.open[li.dataset.sid]=true;li.querySelector(':scope>.kids').inert=false;li.querySelector(':scope>.brow .tog')?.setAttribute('aria-expanded','true')}}}}
+function place(){const d=drag,it=d.item;it.style.transform='';const r=it.getBoundingClientRect();d.tx=d.x-d.gx-r.left;d.ty=d.y-d.gy-r.top;it.style.transform=`translate(${d.tx}px,${d.ty}px) rotate(${d.rot.toFixed(2)}deg) scale(1.04)`}
 function dragFrame(){const d=drag;if(!d)return;
-  d.rot+=(Math.max(-3.5,Math.min(3.5,(d.x-d.px)*.35))-d.rot)*.2;d.px=d.x;   // tilt follows sideways speed, eased
+  d.rot+=(Math.max(-3.5,Math.min(3.5,(d.x-d.px)*.35))-d.rot)*.2;d.px=d.x;
   const v=document.querySelector('#root .view');if(v){const vr=v.getBoundingClientRect();if(d.y<vr.top+70)v.scrollTop-=10;else if(d.y>vr.bottom-90)v.scrollTop+=10}
-  if(Date.now()>d.lock){const it=d.item,kids=[...d.box.children],ii=kids.indexOf(it),ir=(it.style.transform='',it.getBoundingClientRect());
-    const t=kids.find(x=>{if(x===it||!x.dataset.sid)return false;const r=x.getBoundingClientRect();return d.x>=r.left&&d.x<=r.right&&d.y>=r.top&&d.y<=r.bottom});
-    if(t){const r=t.getBoundingClientRect(),ti=kids.indexOf(t),row=Math.abs(r.top-ir.top)<12,mid=row?(r.left+r.width/2):(r.top+r.height/2),pos=row?d.x:d.y;
-      if(ti<ii?pos<mid:pos>mid){d.lock=Date.now()+120;flip(d.box,()=>d.box.insertBefore(it,ti<ii?t:t.nextSibling))}}}
+  if(Date.now()>d.lock){const it=d.item;it.style.transform='';
+    if(d.cross){const t=dropTarget(d);document.querySelectorAll('.drop-on').forEach(x=>{if(x!==t?.host)x.classList.remove('drop-on')});
+      if(t){if(t.box!==d.box0||t.box!==d.box)t.host.classList.toggle('drop-on',t.box!==d.box0);
+        if(t.box!==d.box){t.open&&t.open();const after=[...t.box.children].find(x=>x!==it&&x.dataset.sid&&(r=>d.y<r.top+r.height/2)(x.getBoundingClientRect()));
+          d.lock=Date.now()+160;flip([d.box,t.box],()=>t.box.insertBefore(it,after||null));d.box=t.box}}}
+    if(Date.now()>d.lock){const kids=[...d.box.children],ii=kids.indexOf(it),ir=it.getBoundingClientRect();
+      const t=kids.find(x=>{if(x===it||!x.dataset.sid)return false;const r=x.getBoundingClientRect();return d.x>=r.left&&d.x<=r.right&&d.y>=r.top&&d.y<=r.bottom});
+      if(t){const r=t.getBoundingClientRect(),ti=kids.indexOf(t),row=Math.abs(r.top-ir.top)<12,mid=row?(r.left+r.width/2):(r.top+r.height/2),pos=row?d.x:d.y;
+        if(ti<ii?pos<mid:pos>mid){d.lock=Date.now()+120;flip([d.box],()=>d.box.insertBefore(it,ti<ii?t:t.nextSibling))}}}}
   place();requestAnimationFrame(dragFrame)}
-document.addEventListener('pointerdown',e=>{const g=e.target.closest('[data-grip]');if(!g||e.button>0)return;const item=g.closest('[data-sid]');if(!item)return;
-  e.preventDefault();g.setPointerCapture(e.pointerId);item.getAnimations().forEach(an=>an.cancel());
-  const r=item.getBoundingClientRect();drag={item,box:item.parentElement,gx:e.clientX-r.left,gy:e.clientY-r.top,x:e.clientX,y:e.clientY,px:e.clientX,tx:0,ty:0,rot:0,lock:0};
-  item.style.transition='box-shadow .25s ease-out';item.classList.add('dragging');document.body.classList.add('sorting');requestAnimationFrame(dragFrame)});
-document.addEventListener('pointermove',e=>{if(drag){drag.x=e.clientX;drag.y=e.clientY}});
-const endDrag=()=>{if(!drag)return;const d=drag;drag=null;const it=d.item;
+function startDrag(item,x0,y0,x,y){closeMenu();markPins();item.getAnimations().forEach(an=>an.cancel());const r=item.getBoundingClientRect(),box=item.parentElement,key=box.dataset.sortkey,b=by(item.dataset.sid);
+  drag={item,box,box0:box,gx:x0-r.left,gy:y0-r.top,x,y,px:x,tx:0,ty:0,rot:0,lock:0,cross:(famOf(key)==='team'||famOf(key)==='tree')&&!!b&&roleOf(b)==='Bot'};
+  item.style.transition='box-shadow .25s ease-out';item.classList.add('dragging');document.body.classList.add('sorting');requestAnimationFrame(dragFrame)}
+function endDrag(){const d=drag;drag=null;const it=d.item;document.querySelectorAll('.drop-on').forEach(x=>x.classList.remove('drop-on'));
   it.style.transition='transform .45s cubic-bezier(.3,1.35,.5,1),box-shadow .35s ease-out';it.style.transform='';it.classList.remove('dragging');
-  document.body.classList.remove('sorting');setTimeout(()=>{it.style.transition=''},480);saveOrder(d.box,it)};
-document.addEventListener('pointerup',endDrag);document.addEventListener('pointercancel',endDrag);
-document.addEventListener('keydown',e=>{const g=e.target.closest?.('[data-grip]');if(!g)return;const item=g.closest('[data-sid]'),box=item.parentElement;
-  const back=e.key==='ArrowUp'||e.key==='ArrowLeft',fwd=e.key==='ArrowDown'||e.key==='ArrowRight';if(!back&&!fwd)return;e.preventDefault();
-  const sib=back?item.previousElementSibling:item.nextElementSibling;if(!sib||!sib.dataset.sid)return;
-  const r0=item.getBoundingClientRect();flip(box,()=>box.insertBefore(item,back?sib:sib.nextSibling));const r1=item.getBoundingClientRect();
-  item.animate([{transform:`translate(${r0.left-r1.left}px,${r0.top-r1.top}px)`},{transform:'none'}],{duration:300,easing:EASE_GLIDE});saveOrder(box,item);g.focus()});
+  document.body.classList.remove('sorting');setTimeout(()=>{it.style.transition=''},480);saveOrder(d.box,it);
+  if(d.box!==d.box0){saveOrder(d.box0);const b=by(it.dataset.sid),nb=bossOfKey(d.box.dataset.sortkey);b.boss=nb;if(nb)S.open[nb]=true;log('atlas','bots',`moved ${b.name} ${nb?'under '+by(nb).name:'to Solo'}`);setTimeout(renderMain,520)}}
+document.addEventListener('input',e=>{if(e.target.id==='thQ'){$('thList').innerHTML=threadList(e.target.value);return}const f=e.target.closest?.('[data-hire]');if(!f)return;const nm=f.nm.value.trim()||'New bot',c=f.querySelector('[name=tint]:checked')?.value;$('hirePrev').innerHTML=`${face({id:'_',name:nm,role:'Bot',tint:c},'s','')}<span><b>${esc(nm)}</b><small>${f.boss.value?'Reports to '+esc(by(f.boss.value).name):'Reports to Atlas'}</small></span>`});
+document.addEventListener('pointerdown',e=>{lastType=e.pointerType||'mouse';if(e.button>0)return;
+  if($('cmenu').classList.contains('show')&&!e.target.closest('#cmenu')){closeMenu();return}
+  const item=homeItem(e.target);if(!item)return;
+  const now=Date.now(),dbl=lastType==='mouse'&&lastDown&&lastDown.item===item&&now-lastDown.t<340;lastDown={item,t:now};
+  if(dbl&&pendingOpen){clearTimeout(pendingOpen);pendingOpen=null}
+  const noDrag=famOf(item.parentElement.dataset.sortkey)==='chats'&&S.chatF!=='all';
+  G={item,x0:e.clientX,y0:e.clientY,x:e.clientX,y:e.clientY,type:lastType,armed:false,held:false,noDrag,timer:0};
+  const arm=held=>{if(!G)return;G.armed=!G.noDrag;G.held=held;item.classList.add('lifted');if(held)navigator.vibrate?.(12)};
+  if(lastType!=='mouse')G.timer=setTimeout(()=>arm(true),420);else if(dbl)arm(false);else G.timer=setTimeout(()=>arm(false),550)});
+document.addEventListener('pointermove',e=>{if(drag){drag.x=e.clientX;drag.y=e.clientY;return}if(!G)return;G.x=e.clientX;G.y=e.clientY;const m=Math.hypot(G.x-G.x0,G.y-G.y0);
+  if(!G.armed){if(m>(G.type==='mouse'?5:9)){clearTimeout(G.timer);G.item.classList.remove('lifted');G=null}return}
+  if(m>4){const g=G;G=null;g.item.classList.remove('lifted');suppressClick=true;startDrag(g.item,g.x0,g.y0,g.x,g.y)}});
+const releaseG=menu=>{if(drag){endDrag();suppressClick=true;setTimeout(()=>suppressClick=false,400);return}if(!G)return;clearTimeout(G.timer);const g=G;G=null;g.item.classList.remove('lifted');
+  if(g.held||g.armed){suppressClick=true;setTimeout(()=>suppressClick=false,400)}if(menu&&g.held)openMenu(g.item,g.x,g.y,true)};
+document.addEventListener('pointerup',()=>releaseG(true));document.addEventListener('pointercancel',()=>releaseG(false));
+document.addEventListener('touchmove',e=>{if(drag||G?.held)e.preventDefault()},{passive:false});
+document.addEventListener('click',e=>{if(suppressClick){suppressClick=false;e.preventDefault();e.stopPropagation();return}
+  const item=homeItem(e.target),dm=e.target.closest('[data-dm]');
+  if(item&&dm&&lastType==='mouse'){e.stopPropagation();if(e.detail>1)return;clearTimeout(pendingOpen);pendingOpen=setTimeout(()=>{pendingOpen=null;openDM(dm.dataset.dm)},240)}},true);
+document.addEventListener('contextmenu',e=>{const item=homeItem(e.target);if(!item)return;e.preventDefault();if(lastType==='mouse')openMenu(item,e.clientX,e.clientY,false)});
+/* the menu */
+function openMenu(item,x,y,touch){const key=item.parentElement.dataset.sortkey,kind=pinKind(key),sid=item.dataset.sid,b=sid==='solo'?null:by(sid),m=$('cmenu');
+  S.cm={sid,key,kind,bot:b&&b.id};const pinned=kind&&isPin(kind,sid);
+  const leads=b&&roleOf(b)==='Bot'?[...BOTS.filter(x=>isMgr(x)&&x.id!==b.boss&&vis(x)).map(x=>[x.id,x.name,x]),...(b.boss?[['','Solo (report to Atlas)',null]]:[])]:[];
+  m.innerHTML=`<div class="cm-h">${b?face(b,'',''):face(by('atlas'),'s','')}<span><b>${b?b.name:'Solo desk'}</b><small>${b?roleOf(b)+(b.boss?' · '+by(b.boss).name:''):'Bots that report to Atlas'}</small></span></div>
+    ${b?`<button role="menuitem" data-cm="msg">Message ${esc(b.name)}</button><button role="menuitem" data-cm="prof">Profile</button>`:''}
+    ${kind?`<button role="menuitem" data-cm="pin">${pinned?'Unpin':kind==='desks'?'Pin desk to top':'Pin to top'}</button>`:''}
+    ${leads.length?`<button role="menuitem" data-cm="moveopen" aria-expanded="false">Move to…</button><div class="cm-move" hidden>${leads.map(([id,n,x])=>`<button role="menuitem" data-cm-move="${id}">${x?face(x,'s',''):face(by('atlas'),'s','')}${esc(n)}</button>`).join('')}</div>`:''}
+    ${b&&b.id!=='atlas'?`<hr><button role="menuitem" data-cm="hide">Hide</button><button role="menuitem" class="danger" data-cm="del">Delete…</button>`:''}`;
+  m.classList.toggle('sheet',!!touch);m.classList.add('show');$('cmScrim').classList.toggle('show',!!touch);
+  if(!touch){const w=m.offsetWidth,h=m.offsetHeight;m.style.left=Math.max(8,Math.min(x,innerWidth-w-8))+'px';m.style.top=Math.max(8,Math.min(y,innerHeight-h-8))+'px'}else{m.style.left='';m.style.top=''}
+  m.querySelector('button')?.focus({preventScroll:true})}
+function closeMenu(){$('cmenu').classList.remove('show');$('cmScrim').classList.remove('show')}
+$('cmScrim').addEventListener('click',closeMenu);
+function moveBot(id,nb){const b=by(id);if(!b||b.boss===nb)return;b.boss=nb;log('atlas','bots',`moved ${b.name} ${nb?'under '+by(nb).name:'to Solo'}`);if(nb){S.open[nb]=true}renderMain()}
+function cmAction(a){const c=S.cm,b=c.bot&&by(c.bot);
+  if(a==='moveopen'){const box=$('cmenu').querySelector('.cm-move'),btn=$('cmenu').querySelector('[data-cm="moveopen"]');box.hidden=!box.hidden;btn.setAttribute('aria-expanded',String(!box.hidden));if(!box.hidden)box.querySelector('button')?.focus();return}
+  closeMenu();
+  if(a==='msg')openDM(b.id);
+  else if(a==='prof'){S.panel=b.id;S.tab='overview';renderOver()}
+  else if(a==='pin'){const arr=S.pins[c.kind],i=arr.indexOf(c.sid);i<0?arr.push(c.sid):arr.splice(i,1);saveLayout();renderMain()}
+  else if(a==='hide'){S.hidden.push(b.id);saveLayout();renderMain()}
+  else if(a==='del'){const reps=BOTS.filter(x=>x.boss===b.id).length;$('cfH').textContent=`Delete ${b.name}?`;$('cfP').textContent=`${b.name}'s job, memory and permissions go with it, and this can't be undone.${reps?` Its ${reps} ${reps===1?'report moves':'reports move'} to the Solo desk.`:''} Its threads stay.`;$('confirm').classList.add('show');$('confirm').querySelector('[data-del-no]').focus()}}
+function doDelete(){const b=by(S.cm.bot);$('confirm').classList.remove('show');if(!b||b.id==='atlas')return;
+  BOTS.splice(BOTS.indexOf(b),1);GONE.push(b);BOTS.forEach(x=>{if(x.boss===b.id)x.boss=null});Object.values(S.pins).forEach(arr=>{const i=arr.indexOf(b.id);if(i>=0)arr.splice(i,1)});
+  saveLayout();log('atlas','bots',`removed ${b.name}`);renderMain()}
+document.addEventListener('keydown',e=>{
+  if(e.key==='t'&&!e.metaKey&&!e.ctrlKey&&!e.altKey&&!/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName||'')){e.preventDefault();S.panel=S.panel==='threads'?null:'threads';S.left=false;renderOver();setTimeout(()=>$('thQ')?.focus(),250);return}
+  const m=$('cmenu');if(m.classList.contains('show')){const btns=[...m.querySelectorAll('button')].filter(x=>x.offsetParent);const i=btns.indexOf(document.activeElement);
+    if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeMenu()}else if(e.key==='ArrowDown'){e.preventDefault();btns[(i+1)%btns.length]?.focus()}else if(e.key==='ArrowUp'){e.preventDefault();btns[(i-1+btns.length)%btns.length]?.focus()}return}
+  if($('confirm').classList.contains('show')&&e.key==='Escape'){$('confirm').classList.remove('show');return}
+  const item=e.target.closest?.('#root .home [data-sid]');if(!item||!item.parentElement.dataset.sortkey)return;
+  if(e.key==='ContextMenu'||(e.shiftKey&&e.key==='F10')){e.preventDefault();const r=item.getBoundingClientRect();openMenu(item,r.left+24,r.top+24,false);return}
+  const back=e.altKey&&(e.key==='ArrowUp'||e.key==='ArrowLeft'),fwd=e.altKey&&(e.key==='ArrowDown'||e.key==='ArrowRight');if(!back&&!fwd)return;e.preventDefault();
+  const box=item.parentElement,sib=back?item.previousElementSibling:item.nextElementSibling;if(!sib||!sib.dataset.sid)return;markPins();
+  const r0=item.getBoundingClientRect();flip([box],()=>box.insertBefore(item,back?sib:sib.nextSibling));const r1=item.getBoundingClientRect();
+  item.animate([{transform:`translate(${r0.left-r1.left}px,${r0.top-r1.top}px)`},{transform:'none'}],{duration:300,easing:EASE_GLIDE});saveOrder(box,item);e.target.focus()},true);
 /* eyes follow the pointer, gently */
 let raf=0;document.addEventListener('pointermove',e=>{if(raf)return;raf=requestAnimationFrame(()=>{raf=0;const x=(e.clientX/innerWidth-.5)*2,y=(e.clientY/innerHeight-.5)*2;document.documentElement.style.setProperty('--lx',x.toFixed(2));document.documentElement.style.setProperty('--ly',y.toFixed(2))})});
 

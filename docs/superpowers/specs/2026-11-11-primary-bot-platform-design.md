@@ -90,7 +90,12 @@ This revision replaces groups. Where it conflicts with anything below, this sect
 Layout (owner's design, 2026-11-11):
 - **Home has four views** (mock v17): Desks, List, Chats and Orbit. A switch at the top right flips between them. **Desks is the default** (owner, 2026-11-11). Each person picks their own default with "Make this my default" under the switch, or with Settings → Appearance → Home view.
 - **Pin and move** (owner, 2026-11-11), in Desks, Chats and List:
-  - Each desk, chat row and list row has a pin and a drag handle (six dots), shown on hover and always shown on touch screens. The handle also moves the item with the arrow keys.
+  - **Gestures** (owner, 2026-11-11, mock v20). There are no pin or drag buttons; the whole bot is the handle. A small violet pin marks pinned items.
+    - Phone: touch and hold a bot anywhere. It lifts with a short buzz. Move your finger to drag it; let go without moving to open its options sheet from the bottom.
+    - Laptop: double-click and hold to drag (a long press works too). A single click still opens the chat. Right-click opens the options menu.
+    - Keyboard: the menu key or Shift+F10 opens the menu, Alt+arrows move the focused item, Esc closes.
+  - **Options menu**: Message, Profile, Pin/Unpin, Move to… (each manager, or Solo), Hide and Delete…. Atlas cannot be hidden or deleted. Delete asks first and says what goes (job, memory, permissions), that it can't be undone, and where its reports go (Solo); its threads stay. Hidden bots come back from a "Show N hidden" link under the home view.
+  - **Move to another team by drag**: in Desks, drop a bot on another desk; in List, drop it on a manager's row (the team opens). The target is outlined in mint, and the bot's manager changes on drop. Managers with no reports still accept drops.
   - Pinned items stay on top. Dropping an item among the pinned ones pins it, and dragging a pinned one below them unpins it.
   - **Drag motion** (owner asked for smooth, 2026-11-11):
     - The item lifts with a deep shadow, grows 3% and rides under the pointer from the exact spot it was grabbed.
@@ -100,13 +105,17 @@ Layout (owner's design, 2026-11-11):
     - On release it springs into its slot with a slight overshoot.
     - The page scrolls on its own near the top and bottom edges.
     - Arrow-key moves glide the same way.
-  - Desks: whole desks move. Bots with no manager sit together at one **Solo** desk ("Report to Atlas directly"), so every desk has the same shape: a header, a dashed rule and seats. Desks share a minimum height, and seat descriptions stop at two lines. Chats: Atlas is pinned by default, and moving is off while a team filter is on. List: pinned bots appear in a Pinned group above the tree, and rows move within their own team.
+  - Desks: whole desks move. Bots with no manager sit together at one **Solo** desk ("Report to Atlas directly"), so every desk has the same shape: a header, a dashed rule and seats. Desks pack like a masonry wall: a short desk lets the next one move up into the gap (owner, 2026-11-11), and seat descriptions stop at two lines. Seats also move within and between desks. Chats: Atlas is pinned by default, and moving is off while a team filter is on. List: pinned bots appear in a Pinned group above the tree, and rows move within their own team.
   - The order, the pins and the default view are saved per person.
   - **List:** the dropdown tree. Atlas is at the top, managers fall open under it and teams under them, with the fall-and-rise animation. Only "working" or "waiting on you" shows as a word.
   - **Chats:** WhatsApp-style rows sorted by latest activity, with Atlas pinned. Each row shows the face, name, last message and time. A working bot shows "working…" with moving dots; a waiting bot shows its ask in violet and a badge. Filter chips are All and one per manager's team.
   - **Orbit:** Atlas sits in the centre, managers on an inner ring, their bots on an outer ring, joined by faint dashed lines. A line turns mint and flows while that bot works. Faces float gently and pop in on load.
   - **Desks:** Atlas at the head, then one tinted table per manager with their bots seated as large faces with names. Bots with no manager get their own small table.
   - Lately (the five latest threads) sits under List, Orbit and Desks; Chats already is that.
+- **New bot** (owner, 2026-11-11): the form asks only for a name, an optional manager and a colour (eight tints, the first unused one picked), with a live preview of the face. "Create and open chat" opens the bot's own chat, where it asks what it should do. Your first message there becomes its job (saved to its memory); you change the job the same way later.
+- **Your threads** (owner, 2026-11-11): a Threads button beside You at the bottom left, a threads icon in every chat header, and the T key open a searchable list grouped Waiting on you, Today and Earlier, with face, title, last message and time.
+- **Chat screens stay clean** (owner, 2026-11-11): in a thread and on the new-thread page the floating buttons (You, Threads, New thread, New bot) are hidden; the header's Back and threads icon cover navigation.
+- **The settings button is "You"** (owner, 2026-11-11): a pill with a sliders icon on a mint disc and the word You (icon only on phones), replacing the bare gear.
 - **Settings opens a drawer from the left:**
   - the owner and how many bots they have
   - a power switch, "Bots are running", which is Pause all; switched off it reads "Everything is paused"
