@@ -1,3 +1,4 @@
+<meta charset="utf-8">
 <title>Bot Company Demo</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -161,7 +162,7 @@ button.tog:hover{background:var(--sunk);color:var(--fg)}
 .nm:hover{text-decoration-color:var(--fg)}
 .nm.w{color:var(--violet);text-decoration-color:currentColor}
 .roll .quiet{color:var(--muted)}
-.lbl{font-size:13px;font-weight:600;color:var(--soft);margin:0 0 8px}
+.sect{font-size:13px;font-weight:600;color:var(--soft);margin:0 0 8px}
 .brow .st{font-size:12.5px;color:var(--mint);white-space:nowrap;margin-left:auto;padding-left:8px}
 .brow .st.wait{color:var(--violet)}
 .prof{font-size:12.5px;color:var(--muted);padding:6px 8px;border-radius:8px;opacity:0;transition:opacity .2s}
@@ -188,11 +189,61 @@ button.tog:hover{background:var(--sunk);color:var(--fg)}
 .whoused em{font-style:normal;color:var(--muted);font-variant-numeric:tabular-nums}
 .sw{width:12px;height:12px;border-radius:4px;background:var(--line2);display:inline-block}
 .navl .line .w{font-size:14px;color:var(--fg)}
-.foot{font-size:12px;color:var(--muted);margin:auto 0 0}
+.foot{font-size:12px;color:var(--muted);margin:0}
+.use{margin-top:auto;padding-top:18px;border-top:1px solid var(--line)}
 /* faces: cheeks and a catch-light */
-.face::before{content:'';position:absolute;left:14%;right:14%;top:58%;height:14%;background:radial-gradient(circle at 10% 50%,rgba(255,110,120,.32) 0 34%,transparent 36%),radial-gradient(circle at 90% 50%,rgba(255,110,120,.32) 0 34%,transparent 36%);pointer-events:none}
+.face::before,.face::after{content:'';position:absolute;top:60%;width:16%;height:9%;border-radius:50%;background:rgba(255,105,120,.28);filter:blur(.6px);pointer-events:none}
+.face::before{left:15%}.face::after{right:15%}
 .face i::after{content:'';position:absolute;top:16%;left:18%;width:38%;height:26%;border-radius:50%;background:#fff;opacity:.85}
 .face.sleep i::after{display:none}
+/* home ideas */
+.hh{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;padding-right:56px}
+.hh h1{font-family:var(--display);font-weight:650;font-size:30px;letter-spacing:-.025em;margin:2px 0 0}
+.app[data-look="ink"] .hh h1{font-weight:500}
+.home{gap:32px}
+.chip.on{background:var(--fg);color:var(--bg);box-shadow:none}
+.cfilt{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:-18px}
+.chats{display:flex;flex-direction:column}
+.chat{display:flex;align-items:center;gap:14px;padding:12px 10px;border-radius:var(--r);text-align:left;width:100%;position:relative}
+.chat:hover{background:var(--sunk)}
+.chat+.chat::before{content:'';position:absolute;top:0;left:68px;right:10px;border-top:1px solid var(--line)}
+.chat:hover::before,.chat:hover+.chat::before{opacity:0}
+.chat .w{flex:1;min-width:0}
+.chat .top{display:flex;align-items:center;gap:6px}
+.chat .top b{font-size:15px;font-weight:600}
+.chat .pin{color:var(--muted);display:inline-flex}
+.chat time{margin-left:auto;font-size:12px;color:var(--muted)}
+.chat .prev{display:block;color:var(--muted);font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+.typing{color:var(--mint);font-style:italic}
+.typing .dots i{background:var(--mint)}
+.wt{color:var(--violet)}
+.orbit{position:relative;width:min(100%,640px);aspect-ratio:1;margin:-10px auto 0}
+.wires{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.wires line{stroke:var(--line2);stroke-width:1.2;vector-effect:non-scaling-stroke;stroke-dasharray:3 5}
+.wires line.live{stroke:var(--mint);stroke-dasharray:6 6;animation:flow 1s linear infinite}
+@keyframes flow{to{stroke-dashoffset:-12}}
+.orb{position:absolute;translate:-50% -50%;display:flex;flex-direction:column;align-items:center;gap:6px;border-radius:14px;padding:6px;animation:pop .7s var(--ease) both;animation-delay:calc(var(--i) * 55ms)}
+.orb:hover .face{transform:translateY(-3px) scale(1.06)}
+.orb .fl{display:block;animation:float 6s ease-in-out infinite;animation-delay:calc(var(--i) * -.8s)}
+.orb .nm2{font-size:12.5px;font-weight:600;white-space:nowrap;background:color-mix(in srgb,var(--bg) 80%,transparent);padding:0 6px;border-radius:6px}
+.orb .st{font-size:11.5px;color:var(--mint);margin-top:-4px}
+.orb .st.wait{color:var(--violet)}
+.orb.asleep{opacity:.82}
+@keyframes pop{from{opacity:0;scale:.5}}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+.h-desks .head{align-self:center;display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px 18px;border-radius:var(--r)}
+.h-desks .head b{font-family:var(--display);font-size:20px;font-weight:650}
+.h-desks .head small,.seat small,.dhead small{color:var(--muted);font-size:12.5px}
+.desks{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px;margin-top:-12px}
+.desk{background:color-mix(in srgb,var(--t) 13%,var(--raise));border-radius:calc(var(--r) + 4px);padding:14px;display:flex;flex-direction:column;gap:12px;animation:pop .6s var(--ease) both;animation-delay:calc(var(--i) * 80ms)}
+.dhead{display:flex;gap:12px;align-items:center;text-align:left;padding:4px;border-radius:12px}
+.dhead b{display:block;font-weight:600;font-size:15px}
+.seats{display:flex;gap:6px;flex-wrap:wrap;padding-top:12px;border-top:1px dashed color-mix(in srgb,var(--t) 50%,var(--line2))}
+.seat{flex:1 1 96px;display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 6px;border-radius:14px;text-align:center}
+.seat:hover,.dhead:hover,.h-desks .head:hover{background:color-mix(in srgb,var(--fg) 5%,transparent)}
+.seat b{font-size:13.5px;font-weight:600;margin-top:4px}
+.seat small{line-height:1.35}
+@media (max-width:640px){.orb .nm2{font-size:11px}.orbit .face.l{--s:48px}.orbit .face.xl{--s:64px}}
 .recent h3{font-size:13px;font-weight:600;color:var(--soft);margin:0 0 6px}
 .trow{display:flex;gap:12px;align-items:center;width:100%;padding:10px 4px;border-top:1px solid var(--line);text-align:left}
 .trow:first-of-type{border-top:0}
@@ -361,7 +412,7 @@ select.sel{border:0;border-radius:8px;background:var(--sunk);padding:5px 8px;fon
   <div id="root" style="height:100%"></div>
   <button class="fab fab-bot" id="fabBot" aria-label="New bot" title="New bot"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
   <div class="dock">
-    <button class="fab fab-set" id="fabSet" aria-label="Settings and more" title="Settings and more"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M4 7.4l2.1 1.2M17.9 15.4l2.1 1.2M4 16.6l2.1-1.2M17.9 8.6 20 7.4"/></svg><span id="setBadge"></span></button>
+    <button class="fab fab-set" id="fabSet" aria-label="Settings and more" title="Settings and more"><svg class="i" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg><span id="setBadge"></span></button>
   </div>
   <button class="fab fab-new" id="fabNew" aria-label="New thread"><svg class="i" viewBox="0 0 24 24"><path d="M6 3.5h9.5A2.5 2.5 0 0 1 18 6v12.5a2 2 0 0 1-2 2H6z"/><path d="M6 3.5v17M9.5 8h5M9.5 11.5h3"/><path d="m20.5 9.5-6.2 6.2-2.3.6.6-2.3 6.2-6.2a1.2 1.2 0 0 1 1.7 1.7z"/></svg><span class="lbl">New thread</span></button>
   <div class="scrim" id="scrim"></div>
@@ -388,7 +439,7 @@ const short=b=>b.job.split(/[.:]/)[0];
 const isMgr=b=>b.id!=='atlas'&&(b.role==='Manager'||BOTS.some(x=>x.boss===b.id));
 const roleOf=b=>b.id==='atlas'?'Primary':isMgr(b)?'Manager':'Bot';
 const chain=id=>{const o=[];let b=by(id);while(b){o.unshift(b);b=b.boss&&by(b.boss)}return o};
-const S={open:{atlas:true},view:'bots',threads:[],cur:null,left:false,panel:null,tab:'overview',busy:new Set(),paused:false,filter:'outside',actAll:null,palIdx:0,palBots:false,preview:null,recent:['mail','sch','plan'],
+const S={home:(()=>{try{return localStorage.getItem('home-v')||'chats'}catch(e){return 'chats'}})(),chatF:'all',open:{atlas:true},view:'bots',threads:[],cur:null,left:false,panel:null,tab:'overview',busy:new Set(),paused:false,filter:'outside',actAll:null,palIdx:0,palBots:false,preview:null,recent:['mail','sch','plan'],
   col:(()=>{try{return JSON.parse(localStorage.getItem('drawer-col')||'{}')}catch(e){return{}}})(),
   grants:{mail:{'Gmail: send email':'always','Gmail: read':'always'},plan:{'Google Calendar: edit':'ask'},ledger:{'Pay or spend money':'ask'}},activity:[]};
 const faceState=b=>S.busy.has(b.id)?'read':(b.id==='atlas'?'':'sleep');
@@ -420,29 +471,45 @@ function routeFor(t){const s=SCRIPTS.find(x=>x.match(t));if(s)return s;const g=g
   return{owner:g,helpers:[],reply:'This is my job, so I took it. Here is what I found.',learn:[g,'You asked: '+t.slice(0,44)]}}
 
 /* ---------- views ---------- */
-function botsView(){
-  const p=pending();
-  const kidsOf=id=>id==='atlas'?BOTS.filter(b=>b.id!=='atlas'&&(b.boss==='atlas'||!b.boss)):BOTS.filter(b=>b.boss===id);
+const kidsOf=id=>id==='atlas'?BOTS.filter(b=>b.id!=='atlas'&&(b.boss==='atlas'||!b.boss)):BOTS.filter(b=>b.boss===id);
+const ago=ts=>{const m=Math.round((Date.now()-ts)/6e4);return m<1?'now':m<60?m+' min':m<1440?Math.round(m/60)+' h':Math.round(m/1440)+' d'};
+const lastT=b=>S.threads.filter(t=>t.owner===b.id).sort((x,y)=>(y.at||0)-(x.at||0))[0];
+const preview=t=>{if(!t)return '';const it=[...t.items].reverse().find(i=>i.k==='reply'||i.k==='me');return it?(it.k==='me'?'You: ':'')+it.text:''};
+const PIN='<svg class="i" viewBox="0 0 24 24" style="width:13px;height:13px"><path d="M12 17v5M9 3h6l-1 6 3 4H7l3-4z"/></svg>';
+function treeHome(){
   const node=(b,i)=>{const k=kidsOf(b.id),open=!!S.open[b.id],st=stateOf(b);
     return `<li class="${open?'open':''}" style="--i:${i}"><div class="brow">${k.length?`<button class="tog" data-tog="${b.id}" aria-expanded="${open}" aria-label="${b.name}'s team">${IC.chev}</button>`:'<span class="tog"></span>'}<button class="bmain" data-dm="${b.id}" aria-label="Message ${b.name}">${face(b,b.id==='atlas'?'m':'',st==='waiting'?'wait':undefined)}<span class="w"><b>${b.name}</b><small>${esc(roleOf(b)==='Bot'?short(b):`${roleOf(b)} · ${k.length} ${k.length===1?'report':'reports'}`)}</small></span>${st==='working'?'<span class="st">working</span>':st==='waiting'?'<span class="st wait">waiting on you</span>':''}</button><button class="prof" data-bot="${b.id}">Profile</button></div>${k.length?`<div class="kids" ${open?'':'inert'}><ul>${k.map(node).join('')}</ul></div>`:''}</li>`};
-  const nm=id=>{const b=by(id);return `<button class="nm" data-dm="${id}" style="--t:${b.tint}">${esc(b.name)}</button>`};
-  const list=a=>a.length<2?a.join(''):a.slice(0,-1).join(', ')+' and '+a[a.length-1];
-  const waitB=[...new Set(p.map(x=>x.bot))],busy=[...S.busy].filter(id=>!waitB.includes(id));
-  let s='';
-  if(S.paused)s=`Everything is paused. <button class="nm" data-pause style="--t:var(--violet)">Resume</button>`;
-  else{
-    if(!busy.includes('atlas')&&!waitB.includes('atlas'))s+=`${nm('atlas')} is on watch. `;
-    if(busy.length)s+=`${list(busy.map(nm))} ${busy.length>1?'are':'is'} working. `;
-    if(waitB.length)s+=`${list(waitB.map(id=>`<button class="nm w" data-open="${p.find(x=>x.bot===id).thread}">${esc(by(id).name)}</button>`))} ${waitB.length>1?'are':'is'} waiting on you. `;
-    const rest=BOTS.filter(b=>b.id!=='atlas'&&!busy.includes(b.id)&&!waitB.includes(b.id)).length;
-    if(rest)s+=`<span class="quiet">${rest===BOTS.length-1?'Everyone else':`The other ${rest}`} ${rest===1?'is':'are'} asleep.</span>`;
-  }
-  const d=new Date(),h=d.getHours(),part=h<12?'morning':h<17?'afternoon':'evening';
-  const ago=ts=>{const m=Math.round((Date.now()-ts)/6e4);return m<1?'just now':m<60?m+' min ago':m<1440?Math.round(m/60)+' h ago':Math.round(m/1440)+' d ago'};
-  return `<div class="view"><div class="home">
-    <header><div class="when">${d.toLocaleDateString(undefined,{weekday:'long'})} ${part}</div><p class="roll" aria-live="polite">${s}</p></header>
-    <section><h3 class="lbl">The team</h3><ul class="btree">${node(by('atlas'),0)}</ul></section>
-    <section class="recent"><h3 class="lbl">Lately</h3>${S.threads.slice(0,5).map(t=>{const o=t.owner&&by(t.owner);return `<button class="trow" data-open="${t.id}">${o?face(o,'s',''):''}<span class="w">${esc(t.title)}</span><small>${o?o.name:''}${t.at?' · '+ago(t.at):''}</small></button>`}).join('')||'<p class="sub">Nothing yet. Start a thread from the bottom right.</p>'}</section>
+  return `<ul class="btree">${node(by('atlas'),0)}</ul>`;
+}
+function chatsHome(){
+  const p=pending(),f=S.chatF||'all',mgrs=BOTS.filter(b=>b.boss==='atlas'&&isMgr(b));
+  let list=[by('atlas'),...BOTS.filter(b=>b.id!=='atlas').sort((x,y)=>((lastT(y)||{}).at||0)-((lastT(x)||{}).at||0))];
+  if(f!=='all')list=list.filter(b=>b.id===f||b.boss===f);
+  return `<div class="cfilt">${[['all','All'],...mgrs.map(m=>[m.id,m.name.replace(' lead','')])].map(([k,l])=>`<button class="chip ${f===k?'on':''}" data-cf="${k}">${l}</button>`).join('')}</div>
+  <div class="chats">${list.map(b=>{const st=stateOf(b),t=lastT(b),ask=p.find(x=>x.bot===b.id);
+    return `<button class="chat" data-dm="${b.id}">${face(b,'m',st==='waiting'?'wait':undefined)}<span class="w"><span class="top"><b>${b.name}</b>${b.id==='atlas'?`<span class="pin">${PIN}</span>`:''}<time>${t&&t.at?ago(t.at):''}</time></span><span class="prev">${st==='working'?'<span class="typing">working<span class="dots"><i></i><i></i><i></i></span></span>':ask?`<span class="wt">Wants to ${esc(ask.action)}</span>`:esc(preview(t)||short(b))}</span></span>${ask?'<span class="badge">1</span>':''}</button>`}).join('')}</div>`;
+}
+function orbitHome(){
+  const P={},L=[],tops=kidsOf('atlas');P.atlas=[50,50];
+  tops.forEach((m,i)=>{const a=(-90+i*360/tops.length)*Math.PI/180;P[m.id]=[50+27*Math.cos(a),50+27*Math.sin(a)];L.push(['atlas',m.id]);
+    const k=kidsOf(m.id);k.forEach((c,j)=>{const b2=a+(j-(k.length-1)/2)*.62;P[c.id]=[50+43*Math.cos(b2),50+43*Math.sin(b2)];L.push([m.id,c.id])})});
+  const ids=Object.keys(P);
+  return `<div class="orbit"><svg class="wires" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${L.map(([x,y])=>`<line x1="${P[x][0]}" y1="${P[x][1]}" x2="${P[y][0]}" y2="${P[y][1]}" class="${S.busy.has(y)?'live':''}"/>`).join('')}</svg>
+    ${ids.map((id,n)=>{const b=by(id),st=stateOf(b);return `<button class="orb ${st}" data-dm="${id}" style="left:${P[id][0]}%;top:${P[id][1]}%;--i:${n}" aria-label="Message ${b.name}"><span class="fl">${face(b,id==='atlas'?'xl':isMgr(b)?'l':'m',st==='waiting'?'wait':undefined)}</span><span class="nm2">${b.name}</span>${st==='working'||st==='waiting'?`<span class="st ${st==='waiting'?'wait':''}">${st==='waiting'?'waiting on you':'working'}</span>`:''}</button>`}).join('')}</div>`;
+}
+function desksHome(){
+  const a=by('atlas'),tops=kidsOf('atlas');
+  return `<button class="head" data-dm="atlas">${face(a,'xl')}<b>Atlas</b><small>Primary · ${stateOf(a)==='awake'?'on watch':stateOf(a)}</small></button>
+  <div class="desks">${tops.map((m,n)=>{const k=kidsOf(m.id);return `<section class="desk" style="--t:${m.tint};--i:${n}"><button class="dhead" data-dm="${m.id}">${face(m,'m')}<span><b>${m.name}</b><small>${isMgr(m)?`Manager · ${k.length} ${k.length===1?'report':'reports'}`:esc(short(m))}</small></span></button>${k.length?`<div class="seats">${k.map(c=>{const st=stateOf(c);return `<button class="seat" data-dm="${c.id}">${face(c,'l',st==='waiting'?'wait':undefined)}<b>${c.name}</b><small>${st==='working'?'working':st==='waiting'?'waiting on you':esc(short(c))}</small></button>`}).join('')}</div>`:''}</section>`}).join('')}</div>`;
+}
+function botsView(){
+  const v=S.home,d=new Date(),h=d.getHours(),part=h<12?'morning':h<17?'afternoon':'evening';
+  const body=v==='chats'?chatsHome():v==='orbit'?orbitHome():v==='desks'?desksHome():treeHome();
+  const lately=`<section class="recent"><h3 class="sect">Lately</h3>${S.threads.slice(0,5).map(t=>{const o=t.owner&&by(t.owner);return `<button class="trow" data-open="${t.id}">${o?face(o,'s',''):''}<span class="w">${esc(t.title)}</span><small>${o?o.name:''}${t.at?' · '+ago(t.at):''}</small></button>`}).join('')||'<p class="sub">Nothing yet.</p>'}</section>`;
+  return `<div class="view"><div class="home h-${v}">
+    <header class="hh"><div><div class="when">${d.toLocaleDateString(undefined,{weekday:'long'})} ${part}${S.paused?' · <button class="link" data-pause>paused, resume</button>':''}</div><h1>${v==='chats'?'Chats':'Your bots'}</h1></div>
+      <div class="seg" role="tablist" aria-label="Home idea">${[['tree','List'],['chats','Chats'],['orbit','Orbit'],['desks','Desks']].map(([k,l])=>`<button class="${v===k?'on':''}" data-home-v="${k}" role="tab" aria-selected="${v===k}">${l}</button>`).join('')}</div></header>
+    ${body}${v==='chats'?'':lately}
   </div></div>`;
 }
 function composer(){
@@ -506,11 +573,6 @@ function drawerHTML(){
   return `<div class="ph"><div class="you"><span class="face m" style="--t:#8fe0bf"><span class="eyes"><i></i><i></i></span><b></b></span><div><b>You</b><div class="sub">Owner of ${BOTS.length} bots</div></div></div><button class="x" data-closeall aria-label="Close">${IC.x}</button></div><div class="pb">
     <button class="switch" role="switch" aria-checked="${!S.paused}" data-pause><span class="w">${S.paused?'Everything is paused':'Bots are running'}<small>${S.paused?'Nothing runs until you switch this back on':'Switch off to pause every bot at once'}</small></span><span class="knob" aria-hidden="true"></span></button>
     ${p.length?`<div class="group"><h4>Needs you</h4>${p.map(a=>`<button class="line" data-open="${a.thread}">${face(by(a.bot),'s','wait')}<span class="w">${by(a.bot).name} wants to ${esc(a.action)}</span></button>`).join('')}</div>`:''}
-    <div class="group use"><h4>This week · resets Monday</h4>
-      <div class="big">42%<small>of Claude Max</small></div>
-      <div class="stack" role="img" aria-label="Scholar 26%, Planner 8%, Mailroom 5%, others 3% of the weekly limit">${USE.map(u=>`<span style="width:${u.p}%;background:${u.c||by(u.f).tint}"></span>`).join('')}</div>
-      <div class="whoused">${USE.map(u=>`<span>${u.f?face(by(u.f),'s',''):'<i class="sw"></i>'}${u.n} <em>${u.p}%</em></span>`).join('')}</div>
-      <p class="sub" style="margin-top:12px">OpenAI key: $3.10 of your $20 cap. Example numbers.</p></div>
     <div class="group navl"><h4>Go to</h4>
       <button class="line" data-panel="activity"><span class="w">Activity</span><span class="sub">What left the app</span></button>
       <button class="line" data-panel="company"><span class="w">Company</span><span class="sub">Who reports to whom</span></button>
@@ -519,6 +581,11 @@ function drawerHTML(){
       <button class="line" data-panel="settings" data-sect="models"><span class="w">Models and keys</span><span class="ok">Claude signed in</span></button>
       <button class="line" data-panel="settings" data-sect="conn"><span class="w">Connectors</span><span class="ok">Google</span></button>
       <button class="line" data-panel="settings" data-sect="look"><span class="w">Appearance</span><span class="sub">${look}</span></button></div>
+    <div class="group use"><h4>This week · resets Monday</h4>
+      <div class="big">42%<small>of Claude Max</small></div>
+      <div class="stack" role="img" aria-label="Scholar 26%, Planner 8%, Mailroom 5%, others 3% of the weekly limit">${USE.map(u=>`<span style="width:${u.p}%;background:${u.c||by(u.f).tint}"></span>`).join('')}</div>
+      <div class="whoused">${USE.map(u=>`<span>${u.f?face(by(u.f),'s',''):'<i class="sw"></i>'}${u.n} <em>${u.p}%</em></span>`).join('')}</div>
+      <p class="sub" style="margin-top:12px">OpenAI key: $3.10 of your $20 cap. Example numbers.</p></div>
     <p class="foot">Server: this laptop. Moving it to your Oracle VM is on the plan.</p>
   </div>`;
 }
@@ -645,6 +712,8 @@ document.addEventListener('click',e=>{
   if(e.target.id==='scrim'){S.left=false;S.panel=null;renderOver();return}
   const el=e.target.closest('button,[role=button]');if(!el)return;const d=el.dataset;
   if(el.closest('.looks')&&d.look){setLook(d.look);return}
+  if(d.homeV){S.home=d.homeV;try{localStorage.setItem('home-v',d.homeV)}catch(e){}renderMain();return}
+  if(d.cf){S.chatF=d.cf;renderMain();return}
   if(d.tog){const li=el.closest('li'),open=!S.open[d.tog];S.open[d.tog]=open;li.classList.toggle('open',open);el.setAttribute('aria-expanded',String(open));const k=li.querySelector(':scope>.kids');if(k)k.inert=!open;return}
   if(d.sec){S.col[d.sec]=!S.col[d.sec];try{localStorage.setItem('drawer-col',JSON.stringify(S.col))}catch(e){}renderOver();return}
   if(d.pal!==undefined){const it=palItems($('palIn').value)[+d.pal];closePal();it&&it.go();return}
