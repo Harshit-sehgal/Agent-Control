@@ -54,7 +54,7 @@ kbd{font-family:var(--body);font-size:11px;color:var(--muted);border:1px solid v
 
 /* faces: characters with role shapes */
 .face{--t:#ccc;--s:28px;width:var(--s);height:var(--s);flex:none;position:relative;display:inline-block;border-radius:30%;
-  background:linear-gradient(180deg,color-mix(in srgb,var(--t) 90%,#fff),var(--t));box-shadow:inset 0 calc(var(--s) * -.07) 0 rgba(0,0,0,.09);transition:transform .35s var(--ease)}
+  background:linear-gradient(180deg,color-mix(in srgb,var(--t) 90%,#fff),var(--t));box-shadow:inset 0 calc(var(--s) * -.07) 0 rgba(0,0,0,.09),inset calc(var(--s) * .07) 0 calc(var(--s) * .06) rgba(0,0,0,.07);transition:transform .35s var(--ease)}
 .app[data-look="ink"] .face{background:color-mix(in srgb,var(--t) 78%,var(--raise))}
 .face.primary{border-radius:50%}
 .face.mgr{border-radius:0;clip-path:polygon(25% 3%,75% 3%,99% 50%,75% 97%,25% 97%,1% 50%)}
@@ -70,17 +70,17 @@ kbd{font-family:var(--body);font-size:11px;color:var(--muted);border:1px solid v
 .face.sh-bean{border-radius:46% 54% 40% 60%/60% 40% 60% 40%}
 .face .eyes{position:absolute;inset:0;translate:calc(var(--lx,0) * var(--s) * .05) calc(var(--ly,0) * var(--s) * .04);transition:translate .25s var(--ease)}
 .face i{position:absolute;top:38%;width:12%;height:21%;background:#1b1a18;border-radius:99px;animation:blink 5s infinite;animation-delay:var(--d,0s)}
-.face i:first-child{left:29%}.face i:last-child{right:29%}
-.face b{position:absolute;left:41%;width:18%;bottom:24%;height:6%;border-radius:99px;background:#1b1a18;opacity:.5;transition:all .3s var(--ease)}
+.face i:first-child{left:19%;width:10%;height:19.5%;top:39%}.face i:last-child{right:37%}
+.face b{position:absolute;left:34%;width:16%;bottom:24%;height:6%;border-radius:99px;background:#1b1a18;opacity:.5;transition:all .3s var(--ease)}
 .face.read i{animation:read 1.1s ease-in-out infinite alternate}
-.face.read b{height:9%;width:12%;left:44%;border-radius:50%}
+.face.read b{height:9%;width:11%;left:37%;border-radius:50%}
 .face.sleep i{height:5%;top:50%;animation:none;opacity:.6}
 .face.sleep b{opacity:0}
 .face.wake{transform:translateY(-6px) scale(1.08)}
-.face.wake b{height:10%;width:20%;left:40%;border-radius:0 0 99px 99px;opacity:.7}
+.face.wake b{height:10%;width:18%;left:33%;border-radius:0 0 99px 99px;opacity:.7}
 .face.wait{animation:bob 2.4s ease-in-out infinite}
 .face.wait .eyes{translate:calc(var(--s) * .07) calc(var(--s) * .07)}
-.face.wait b{width:11%;left:44.5%;height:11%;border-radius:50%;opacity:.6}
+.face.wait b{width:10%;left:37%;height:11%;border-radius:50%;opacity:.6}
 .dots{display:inline-flex;gap:3px;margin-left:6px;vertical-align:middle}
 .dots i{width:4px;height:4px;border-radius:50%;background:var(--violet);animation:dot 1.4s ease-in-out infinite}
 .dots i:nth-child(2){animation-delay:.2s}.dots i:nth-child(3){animation-delay:.4s}
@@ -250,7 +250,7 @@ button.tog:hover{background:var(--sunk);color:var(--fg)}
 .use{margin-top:auto;padding-top:18px;border-top:1px solid var(--line)}
 /* faces: cheeks and a catch-light */
 .face::before,.face::after{content:'';position:absolute;top:60%;width:16%;height:9%;border-radius:50%;background:rgba(255,105,120,.2);filter:blur(.6px);pointer-events:none}
-.face::before{left:15%}.face::after{right:15%}
+.face::before{left:6%;width:11%}.face::after{right:23%}
 .face i::after{content:'';position:absolute;top:16%;left:20%;width:30%;height:20%;border-radius:50%;background:#fff;opacity:.7}
 .face.sleep i::after{display:none}
 /* home ideas */
@@ -418,6 +418,10 @@ button.prow:active{background:var(--sunk)}
 .h-threads .tlist{display:flex;flex-direction:column}
 .h-threads .thg h4:first-child{margin-top:0}
 .h-threads .th{padding:12px 8px}.h-threads .th .face.s{--s:36px}.h-threads .th b{font-size:15px}.h-threads .th small{font-size:13px}
+/* smoother feel */
+.chip,.th,.prow,.trow,.chatmain,.bmain,.rb,.pillbtn,.send,.btn{transition:background-color .18s ease,color .18s ease,box-shadow .18s ease,transform .15s ease}
+.rb:active,.pillbtn:active,.mkgo:not(:disabled):active,.send:active,.btn:active,.chip:active{transform:scale(.96)}
+.panel,.drawer{transition-timing-function:cubic-bezier(.2,.8,.2,1)}
 /* desktop split: bots on the left, the chat on the right */
 .is-desk .fab-me,.is-desk .bbar,.is-desk .fab-bot{display:none!important}
 .split{display:grid;grid-template-columns:292px 1fr;height:100%}
@@ -1061,7 +1065,8 @@ function renderOver(){
   if(S.panel)$('panel').innerHTML=panelHTML();
 }
 function render(){renderMain();renderOver();redrawSettings()}
-function go(view,id){$('sq').value='';$('sq').blur();S.view=view;if(view==='thread')S.cur=id;else S.cur=null;S.left=false;S.panel=null;render()}
+function go(view,id){$('sq').value='';$('sq').blur();const same=S.view===view&&S.cur===(view==='thread'?id:null);S.view=view;if(view==='thread')S.cur=id;else S.cur=null;S.left=false;S.panel=null;render();if(!same)ease($('root').querySelector(DESK.matches?'.mainp':'.view, .tv'))}
+function ease(el){if(el&&!matchMedia('(prefers-reduced-motion: reduce)').matches)el.animate([{opacity:0,transform:'translateY(6px)'},{opacity:1,transform:'none'}],{duration:240,easing:'cubic-bezier(.2,.8,.2,1)'})}
 
 /* ---------- the run ---------- */
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
