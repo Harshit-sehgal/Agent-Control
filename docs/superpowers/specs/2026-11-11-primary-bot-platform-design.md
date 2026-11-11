@@ -92,8 +92,15 @@ Layout (owner's design, 2026-11-11):
 - **Pin and move** (owner, 2026-11-11), in Desks, Chats and List:
   - Each desk, chat row and list row has a pin and a drag handle (six dots), shown on hover and always shown on touch screens. The handle also moves the item with the arrow keys.
   - Pinned items stay on top. Dropping an item among the pinned ones pins it, and dragging a pinned one below them unpins it.
-  - While an item is dragged it lifts with a shadow, and its neighbours glide out of the way.
-  - Desks: whole desks move. Chats: Atlas is pinned by default, and moving is off while a team filter is on. List: pinned bots appear in a Pinned group above the tree, and rows move within their own team.
+  - **Drag motion** (owner asked for smooth, 2026-11-11):
+    - The item lifts with a deep shadow, grows 3% and rides under the pointer from the exact spot it was grabbed.
+    - It tilts a few degrees with sideways speed, eased so it sways, not snaps.
+    - Neighbours glide out of the way. Interrupted glides continue from where they are, so nothing jumps.
+    - An item only swaps once the pointer crosses the middle of its neighbour.
+    - On release it springs into its slot with a slight overshoot.
+    - The page scrolls on its own near the top and bottom edges.
+    - Arrow-key moves glide the same way.
+  - Desks: whole desks move. Bots with no manager sit together at one **Solo** desk ("Report to Atlas directly"), so every desk has the same shape: a header, a dashed rule and seats. Desks share a minimum height, and seat descriptions stop at two lines. Chats: Atlas is pinned by default, and moving is off while a team filter is on. List: pinned bots appear in a Pinned group above the tree, and rows move within their own team.
   - The order, the pins and the default view are saved per person.
   - **List:** the dropdown tree. Atlas is at the top, managers fall open under it and teams under them, with the fall-and-rise animation. Only "working" or "waiting on you" shows as a word.
   - **Chats:** WhatsApp-style rows sorted by latest activity, with Atlas pinned. Each row shows the face, name, last message and time. A working bot shows "working…" with moving dots; a waiting bot shows its ask in violet and a badge. Filter chips are All and one per manager's team.

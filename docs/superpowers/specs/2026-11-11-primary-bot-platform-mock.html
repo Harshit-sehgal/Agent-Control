@@ -260,7 +260,10 @@ button.tog:hover{background:var(--sunk);color:var(--fg)}
 .seat{flex:1 1 96px;display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 6px;border-radius:14px;text-align:center}
 .seat:hover,.dhead:hover,.h-desks .head:hover{background:color-mix(in srgb,var(--fg) 5%,transparent)}
 .seat b{font-size:13.5px;font-weight:600;margin-top:4px}
-.seat small{line-height:1.35}
+.seat small{line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:15ch}
+.solo-ic{width:44px;height:44px;flex:none;display:grid;place-items:center;border-radius:14px;background:color-mix(in srgb,var(--t) 22%,transparent)}
+.seat{flex:0 1 calc(50% - 3px)}
+.desk{min-height:220px}
 @media (max-width:640px){.orb .nm2{font-size:11px}.orbit .face.l{--s:48px}.orbit .face.xl{--s:64px}}
 /* pin and move */
 .hv{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
@@ -274,7 +277,8 @@ button.tog:hover{background:var(--sunk);color:var(--fg)}
 @media (hover:none){.grip,.pinb{opacity:1}}
 .pinb.on{color:var(--violet)}
 .pinb.on path{fill:currentColor}
-.dragging{position:relative;z-index:5;box-shadow:var(--float);border-radius:var(--r);background:var(--raise);scale:1.015}
+.dragging{position:relative;z-index:20;box-shadow:0 26px 50px -14px rgba(0,0,0,.5),0 4px 12px -4px rgba(0,0,0,.25);border-radius:var(--r);background:var(--raise);will-change:transform}
+body.sorting .open>.kids>ul{overflow:visible}
 .desk.dragging{background:color-mix(in srgb,var(--t) 13%,var(--raise))}
 body.sorting,body.sorting *{cursor:grabbing!important;user-select:none;-webkit-user-select:none}
 .dbar{display:flex;align-items:center;gap:2px}
@@ -549,9 +553,11 @@ function orbitHome(){
     ${ids.map((id,n)=>{const b=by(id),st=stateOf(b);return `<button class="orb ${st}" data-dm="${id}" style="left:${P[id][0]}%;top:${P[id][1]}%;--i:${n}" aria-label="Message ${b.name}"><span class="fl">${face(b,id==='atlas'?'xl':isMgr(b)?'l':'m',st==='waiting'?'wait':undefined)}</span><span class="nm2">${b.name}</span>${st==='working'||st==='waiting'?`<span class="st ${st==='waiting'?'wait':''}">${st==='waiting'?'waiting on you':'working'}</span>`:''}</button>`}).join('')}</div>`;
 }
 function desksHome(){
-  const a=by('atlas'),tops=arrange('desks','desks',kidsOf('atlas'));
+  const a=by('atlas'),tops=kidsOf('atlas'),solo=tops.filter(b=>!isMgr(b));
+  const groups=arrange('desks','desks',[...tops.filter(isMgr).map(m=>({id:m.id,name:m.name,m,kids:kidsOf(m.id),tint:m.tint})),...(solo.length?[{id:'solo',name:'Solo desk',kids:solo,tint:'#a9a7b3'}]:[])]);
+  const seat=c=>{const st=stateOf(c);return `<button class="seat" data-dm="${c.id}">${face(c,'l',st==='waiting'?'wait':undefined)}<b>${c.name}</b><small>${st==='working'?'working':st==='waiting'?'waiting on you':esc(short(c))}</small></button>`};
   return `<button class="head" data-dm="atlas">${face(a,'xl')}<b>Atlas</b><small>Primary · ${stateOf(a)==='awake'?'on watch':stateOf(a)}</small></button>
-  <div class="desks" data-sortkey="desks">${tops.map((m,n)=>{const k=kidsOf(m.id);return `<section class="desk ${isPin('desks',m.id)?'pinned':''}" data-sid="${m.id}" style="--t:${m.tint};--i:${n}"><div class="dbar"><button class="dhead" data-dm="${m.id}">${face(m,'m')}<span><b>${m.name}</b><small>${isMgr(m)?`Manager · ${k.length} ${k.length===1?'report':'reports'}`:esc(short(m))}</small></span></button>${pinBtn('desks',m)}${gripBtn(m)}</div>${k.length?`<div class="seats">${k.map(c=>{const st=stateOf(c);return `<button class="seat" data-dm="${c.id}">${face(c,'l',st==='waiting'?'wait':undefined)}<b>${c.name}</b><small>${st==='working'?'working':st==='waiting'?'waiting on you':esc(short(c))}</small></button>`}).join('')}</div>`:''}</section>`}).join('')}</div>`;
+  <div class="desks" data-sortkey="desks">${groups.map((g,n)=>`<section class="desk ${isPin('desks',g.id)?'pinned':''}" data-sid="${g.id}" style="--t:${g.tint};--i:${n}"><div class="dbar">${g.m?`<button class="dhead" data-dm="${g.m.id}">${face(g.m,'m')}<span><b>${g.m.name}</b><small>Manager · ${g.kids.length} ${g.kids.length===1?'report':'reports'}</small></span></button>`:`<div class="dhead"><span class="solo-ic">${face(a,'s','')}</span><span><b>Solo</b><small>Report to Atlas directly · ${g.kids.length} ${g.kids.length===1?'bot':'bots'}</small></span></div>`}${pinBtn('desks',g)}${gripBtn(g)}</div><div class="seats">${g.kids.map(seat).join('')}</div></section>`).join('')}</div>`;
 }
 function botsView(){
   const v=S.home,d=new Date(),h=d.getHours(),part=h<12?'morning':h<17?'afternoon':'evening';
@@ -828,25 +834,42 @@ document.addEventListener('keydown',e=>{
   if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();$('pal').classList.contains('show')?closePal():openPal()}
   else if(e.key==='Escape'){if($('pal').classList.contains('show'))closePal();else if(S.panel||S.left){S.panel=null;S.left=false;renderOver()}}
 });
-/* drag to move: pointer or arrow keys; neighbours glide (FLIP) */
+/* drag to move: the item rides under the pointer with a little tilt, neighbours glide aside (FLIP),
+   and on release it springs into its slot. Arrow keys on the handle move it one place. */
 let drag=null;
-function flip(box,fn){const els=[...box.children],r0=new Map(els.map(x=>[x,x.getBoundingClientRect()]));fn();
-  els.forEach(x=>{if(x===drag?.item)return;const a=r0.get(x),b=x.getBoundingClientRect(),dx=a.left-b.left,dy=a.top-b.top;if(dx||dy)x.animate([{transform:`translate(${dx}px,${dy}px)`},{transform:'none'}],{duration:260,easing:'cubic-bezier(.16,1,.3,1)'})})}
+const EASE_GLIDE='cubic-bezier(.2,.9,.25,1)';
+function flip(box,fn){const els=[...box.children].filter(x=>x!==drag?.item&&x.dataset.sid),r0=new Map(els.map(x=>[x,x.getBoundingClientRect()]));
+  els.forEach(x=>x.getAnimations().forEach(an=>an.cancel()));fn();
+  els.forEach(x=>{const a=r0.get(x),b=x.getBoundingClientRect(),dx=a.left-b.left,dy=a.top-b.top;if(Math.abs(dx)+Math.abs(dy)>.5)x.animate([{transform:`translate(${dx}px,${dy}px)`},{transform:'none'}],{duration:340,easing:EASE_GLIDE})})}
 function saveOrder(box,item){const key=box.dataset.sortkey;
   if(item&&(key==='desks'||key==='chats')){const pinned=x=>x&&x.classList.contains('pinned'),was=pinned(item),now=pinned(item.nextElementSibling)||(was&&pinned(item.previousElementSibling));
     if(now!==was){const arr=S.pins[key],id=item.dataset.sid;now?arr.push(id):arr.splice(arr.indexOf(id),1);item.classList.toggle('pinned',now);
       const pb=item.querySelector('.pinb');if(pb){pb.classList.toggle('on',now);pb.setAttribute('aria-pressed',String(now));pb.title=now?'Unpin':'Pin to top'}}}
   S.order[key]=[...box.children].map(x=>x.dataset.sid).filter(Boolean);saveLayout()}
-document.addEventListener('pointerdown',e=>{const g=e.target.closest('[data-grip]');if(!g)return;const item=g.closest('[data-sid]');if(!item)return;
-  e.preventDefault();g.setPointerCapture(e.pointerId);drag={item,box:item.parentElement,lock:0};item.classList.add('dragging');document.body.classList.add('sorting')});
-document.addEventListener('pointermove',e=>{if(!drag||Date.now()<drag.lock)return;const {item,box}=drag;
-  const t=[...box.children].find(x=>x!==item&&x.dataset.sid&&(r=>e.clientX>=r.left&&e.clientX<=r.right&&e.clientY>=r.top&&e.clientY<=r.bottom)(x.getBoundingClientRect()));if(!t)return;
-  const kids=[...box.children],ti=kids.indexOf(t),ii=kids.indexOf(item);drag.lock=Date.now()+180;flip(box,()=>box.insertBefore(item,ti<ii?t:t.nextSibling))});
-const endDrag=()=>{if(!drag)return;drag.item.classList.remove('dragging');document.body.classList.remove('sorting');saveOrder(drag.box,drag.item);drag=null};
+function place(){const d=drag,it=d.item;it.style.transform='';const r=it.getBoundingClientRect();   // where its slot is right now
+  d.tx=d.x-d.gx-r.left;d.ty=d.y-d.gy-r.top;it.style.transform=`translate(${d.tx}px,${d.ty}px) rotate(${d.rot.toFixed(2)}deg) scale(1.03)`}
+function dragFrame(){const d=drag;if(!d)return;
+  d.rot+=(Math.max(-3.5,Math.min(3.5,(d.x-d.px)*.35))-d.rot)*.2;d.px=d.x;   // tilt follows sideways speed, eased
+  const v=document.querySelector('#root .view');if(v){const vr=v.getBoundingClientRect();if(d.y<vr.top+70)v.scrollTop-=10;else if(d.y>vr.bottom-90)v.scrollTop+=10}
+  if(Date.now()>d.lock){const it=d.item,kids=[...d.box.children],ii=kids.indexOf(it),ir=(it.style.transform='',it.getBoundingClientRect());
+    const t=kids.find(x=>{if(x===it||!x.dataset.sid)return false;const r=x.getBoundingClientRect();return d.x>=r.left&&d.x<=r.right&&d.y>=r.top&&d.y<=r.bottom});
+    if(t){const r=t.getBoundingClientRect(),ti=kids.indexOf(t),row=Math.abs(r.top-ir.top)<12,mid=row?(r.left+r.width/2):(r.top+r.height/2),pos=row?d.x:d.y;
+      if(ti<ii?pos<mid:pos>mid){d.lock=Date.now()+120;flip(d.box,()=>d.box.insertBefore(it,ti<ii?t:t.nextSibling))}}}
+  place();requestAnimationFrame(dragFrame)}
+document.addEventListener('pointerdown',e=>{const g=e.target.closest('[data-grip]');if(!g||e.button>0)return;const item=g.closest('[data-sid]');if(!item)return;
+  e.preventDefault();g.setPointerCapture(e.pointerId);item.getAnimations().forEach(an=>an.cancel());
+  const r=item.getBoundingClientRect();drag={item,box:item.parentElement,gx:e.clientX-r.left,gy:e.clientY-r.top,x:e.clientX,y:e.clientY,px:e.clientX,tx:0,ty:0,rot:0,lock:0};
+  item.style.transition='box-shadow .25s ease-out';item.classList.add('dragging');document.body.classList.add('sorting');requestAnimationFrame(dragFrame)});
+document.addEventListener('pointermove',e=>{if(drag){drag.x=e.clientX;drag.y=e.clientY}});
+const endDrag=()=>{if(!drag)return;const d=drag;drag=null;const it=d.item;
+  it.style.transition='transform .45s cubic-bezier(.3,1.35,.5,1),box-shadow .35s ease-out';it.style.transform='';it.classList.remove('dragging');
+  document.body.classList.remove('sorting');setTimeout(()=>{it.style.transition=''},480);saveOrder(d.box,it)};
 document.addEventListener('pointerup',endDrag);document.addEventListener('pointercancel',endDrag);
 document.addEventListener('keydown',e=>{const g=e.target.closest?.('[data-grip]');if(!g)return;const item=g.closest('[data-sid]'),box=item.parentElement;
   const back=e.key==='ArrowUp'||e.key==='ArrowLeft',fwd=e.key==='ArrowDown'||e.key==='ArrowRight';if(!back&&!fwd)return;e.preventDefault();
-  const sib=back?item.previousElementSibling:item.nextElementSibling;if(!sib||!sib.dataset.sid)return;flip(box,()=>box.insertBefore(item,back?sib:sib.nextSibling));saveOrder(box,item);g.focus()});
+  const sib=back?item.previousElementSibling:item.nextElementSibling;if(!sib||!sib.dataset.sid)return;
+  const r0=item.getBoundingClientRect();flip(box,()=>box.insertBefore(item,back?sib:sib.nextSibling));const r1=item.getBoundingClientRect();
+  item.animate([{transform:`translate(${r0.left-r1.left}px,${r0.top-r1.top}px)`},{transform:'none'}],{duration:300,easing:EASE_GLIDE});saveOrder(box,item);g.focus()});
 /* eyes follow the pointer, gently */
 let raf=0;document.addEventListener('pointermove',e=>{if(raf)return;raf=requestAnimationFrame(()=>{raf=0;const x=(e.clientX/innerWidth-.5)*2,y=(e.clientY/innerHeight-.5)*2;document.documentElement.style.setProperty('--lx',x.toFixed(2));document.documentElement.style.setProperty('--ly',y.toFixed(2))})});
 
