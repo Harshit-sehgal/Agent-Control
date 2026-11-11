@@ -243,6 +243,8 @@
 .cv-card .btn{min-height:40px;border-radius:var(--r-s);background:var(--sunk);font-size:14px}
 .cv-card .btn.primary{background:var(--wait);color:var(--on-wait)}
 .cv-card a{color:var(--text);overflow-wrap:anywhere}
+.cv-ask-body summary{cursor:pointer;display:flex;align-items:center;gap:6px;font-size:14px;color:var(--muted)}
+.cv-ask-body pre{margin:8px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:14px;max-height:320px;overflow:auto}
 .cv-card small{color:var(--muted)}
 .cv-wait{display:flex;gap:10px;align-items:center;color:var(--muted);font-size:13px;margin-bottom:-8px}
 .cv-steps{margin:0;padding-left:18px;overflow-wrap:anywhere;font-size:13px;color:var(--soft)}

@@ -8,8 +8,9 @@
  * credential is a vault id on the server's copy of the record (`credentialId`,
  * `clientCredentialId`, `tokenCredentialId`), and `publicConnector` leaves those out.
  *
- * Asking is by action: `connector.<id>.read` or `connector.<id>.write` (`shared/asks.js`),
- * scoped to the account, so Always allow for one Google account is not Always allow for another.
+ * Asking is by action: `connector.<id>.read` for every read, `connector.<id>.write.<tool>` for each write tool
+ * (`shared/asks.js`), scoped to the account, so Always allow for one Google account is not Always allow for
+ * another, and Always allow on a draft is not Always allow on a send.
  *
  * Pure and browser-safe, like the other shared modules.
  */
@@ -25,8 +26,28 @@ export const MAX_CONNECTORS = 20;
 export const GOOGLE_ID = 'google';
 const RESERVED_IDS = [GOOGLE_ID, 'setup', 'start', 'callback'];
 
-/** `connector.<id>.read` or `.write`, the action an ask and a grant are about. */
-export const connectorAction = (connector, write) => `connector.${connector.id}.${write ? 'write' : 'read'}`;
+/** `connector.<id>.read` or `connector.<id>.write.<tool>`, the action an ask and a grant are about. */
+export const connectorAction = (connector, write, tool) => `connector.${connector.id}.${write ? `write.${tool}` : 'read'}`;
+
+/** The arguments as one canonical string: object keys sorted at every depth, so the same call always reads the same. */
+const canonical = value => (Array.isArray(value) ? `[${value.map(canonical).join(',')}]`
+  : value && typeof value === 'object' ? `{${Object.keys(value).sort().map(k => `${JSON.stringify(k)}:${canonical(value[k])}`).join(',')}}`
+  : JSON.stringify(value ?? null));
+/** A short fingerprint of a call's arguments (cyrb53 over the canonical string). An ask carries the one it showed, and
+ * the call is refused at execution if its arguments no longer match. It catches arguments that changed between the
+ * card and the call; it is not a signature (whoever can write the state can write both). */
+export function argsHash(args) {
+  const text = canonical(args ?? {});
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(14, '0');
+}
 
 /** A route-safe id from a name: lower case letters and digits joined by single hyphens. */
 export function slugOf(name) {
@@ -99,13 +120,16 @@ export function parseConnectorCalls(output) {
 /** The reply as the chat shows it: the blocks are removed. */
 export const stripConnectorBlocks = output => String(output ?? '').replace(BLOCK(), '').replace(/\n{3,}/g, '\n\n').trim();
 
-/** What a call needs the owner's say on: `connector.<id>.read` or `.write`, for the connector's account, decided
- * by the connector's own description of the tool. Null when the connector has no such tool. */
+/** What a call needs the owner's say on: `connector.<id>.read` or `.write.<tool>`, for the connector's account, decided
+ * by the connector's own description of the tool. A mail carries its whole `body` for the card. Null when the connector
+ * has no such tool. */
 export function connectorNeeds(connector, tool, args = {}) {
   const action = actionOf(connector, tool);
   if (!action) return null;
-  return [{action: connectorAction(connector, action.write), target: String(connector.account || connector.name || connector.id), detail: describeCall(connector, tool, args)}];
+  const mail = connector.kind === 'google' && MAIL_TOOLS.includes(tool) && typeof args?.body === 'string' && args.body ? {body: args.body} : {};
+  return [{action: connectorAction(connector, action.write, tool), target: String(connector.account || connector.name || connector.id), detail: describeCall(connector, tool, args), ...mail}];
 }
+const MAIL_TOOLS = ['gmail.send', 'gmail.draft'];
 const oneLine = (value, max) => {
   const text = (typeof value === 'string' ? value : value === undefined || value === null ? '' : JSON.stringify(value)).replace(/[\u0000-\u001f\u007f\s]+/g, ' ').trim();
   return text.length > max ? `${text.slice(0, max)}…` : text;
@@ -116,15 +140,23 @@ export function argsPreview(args) {
   const parts = Object.entries(args && typeof args === 'object' && !Array.isArray(args) ? args : {}).slice(0, 4).map(([key, value]) => `${cleanText(key, 30)}: ${oneLine(value, 50)}`);
   return parts.length ? ` (${parts.join(', ')})` : '';
 }
-const recipients = value => (Array.isArray(value) ? value : [value]).map(v => oneLine(v, 80)).filter(Boolean).join(', ');
+const domainOf = address => String(address ?? '').trim().toLowerCase().split('@')[1] || '';
+/** Every recipient, none cut (the send refuses more than 10 and anything that is not a bare address), each one whose
+ * domain is not the connected account's marked "(outside your domain)". */
+const recipients = (value, home) => (Array.isArray(value) ? value : [value]).map(v => oneLine(v, 320)).filter(Boolean)
+  .map(v => (home && domainOf(v) !== home ? `${v} (outside your domain)` : v)).join(', ');
 /** One plain sentence end for the ask card: "use Notes: add_note (text: Buy milk)", or for Google what the mail or search is:
- * `send an email to bob@example.org: "Lunch" (See you at noon.)`. The owner reads this before saying yes. */
+ * `send an email to bob@example.org, cc eve@other.example (outside your domain): "Lunch" (See you at noon.)`. The owner
+ * reads this before saying yes; the whole body rides on the ask apart (`connectorNeeds`). */
 export function describeCall(connector, tool, args = {}) {
   const a = args && typeof args === 'object' ? args : {};
   if (connector.kind === 'google') {
-    const mail = verb => `${verb} to ${recipients(a.to) || '(no recipient)'}: "${oneLine(a.subject, 80)}"${a.body ? ` (${oneLine(a.body, 120)})` : ''}`;
-    if (tool === 'gmail.send') return cleanText(mail('send an email'), 280);
-    if (tool === 'gmail.draft') return cleanText(mail('save a draft email'), 280);
+    const home = domainOf(connector.account);
+    // No bcc: the server builds the message from to and cc alone, so a bcc a bot wrote is never sent.
+    const cc = recipients(a.cc, home);
+    const mail = verb => `${verb} to ${recipients(a.to, home) || '(no recipient)'}${cc ? `, cc ${cc}` : ''}: "${oneLine(a.subject, 80)}"${a.body ? ` (${oneLine(a.body, 120)})` : ''}`;
+    if (tool === 'gmail.send') return cleanText(mail('send an email'), 4000);
+    if (tool === 'gmail.draft') return cleanText(mail('save a draft email'), 4000);
     if (tool === 'gmail.search') return cleanText(`search Gmail for "${oneLine(a.query, 100)}"`, 280);
     if (tool === 'gmail.read') return 'read an email in Gmail';
     if (tool === 'drive.search') return cleanText(`search Drive for "${oneLine(a.query, 100)}"`, 280);
@@ -177,7 +209,7 @@ export function recordConnectorCalls(state, {bot, run, chatKey, output, unattend
     const call = {id: makeId(), connectorId: connector.id, connectorName: connector.name, tool, args, write: actionOf(connector, tool).write, botId: bot.id, botName: bot.name, status: 'go', chatKey};
     if (decision.verdict === 'ask') {
       const {need} = decision;
-      const asked = createAsk(state, {botId: bot.id, runId: run.id, chatKey, action: need.action, target: need.target, detail: need.detail, unattended, requestId: call.id, implies: decision.implies, now, makeId});
+      const asked = createAsk(state, {botId: bot.id, runId: run.id, chatKey, action: need.action, target: need.target, detail: need.detail, body: need.body, argsHash: argsHash(args), unattended, requestId: call.id, implies: decision.implies, now, makeId});
       Object.assign(call, {status: 'pending', askId: asked.id});
       asks.push(asked);
     }

@@ -20,10 +20,10 @@
  * Posting stays human: interaction (click, type) is refused on X and Twitter
  * hosts, so no bot can press Post there. Reading those pages is allowed.
  */
-import {cleanText, validHttpUrl} from './core.js?v=b4d3410ab6';
-import {fail} from './errors.js?v=b4d3410ab6';
-import {decide, createAsk, scopeOf} from './asks.js?v=b4d3410ab6';
-import {controlFence} from './reply-blocks.js?v=b4d3410ab6';
+import {cleanText, validHttpUrl} from './core.js?v=1549188fc1';
+import {fail} from './errors.js?v=1549188fc1';
+import {decide, createAsk, scopeOf} from './asks.js?v=1549188fc1';
+import {controlFence} from './reply-blocks.js?v=1549188fc1';
 
 export const BROWSER_PERMISSION = 'browser.use';
 export const MAX_REQUESTS_PER_REPLY = 2;
@@ -174,7 +174,8 @@ export const RISKS = [
   ['post', /\b(post|publish|tweet)\b/i],
   ['send', /\b(send|submit|confirm)\b/i],
 ];
-const CHECKOUT_PATH = /\/(checkout|payment|billing)(\/|$)/i;
+/** A checkout, payment or billing page: opening one is a payment, and the device refuses a click on one unless a payment was approved. */
+export const CHECKOUT_PATH = /\/(checkout|payment|billing)(\/|$)/i;
 
 /** The risk classes a control's label names, riskiest first: ['spend'], ['send'], [] ... */
 export const riskOf = label => RISKS.filter(([, pattern]) => pattern.test(String(label ?? ''))).map(([action]) => action);

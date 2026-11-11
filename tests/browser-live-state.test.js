@@ -119,7 +119,7 @@ async function harness() {
   await store.update(s => { wf.migrate(s); s.groups = [{id: 'lab', name: 'Lab', bots: [bot('web', 'Web'), bot('mail', 'Mail')]}]; });
   const {code} = agent.createPairing(store, 'default', {});
   const device = agent.redeemPairing(store, {code, name: 'Laptop', permissions: ['browser.capture', 'browser.action']});
-  const roles = {member: 'member', viewer: 'viewer'};
+  const roles = {owner: 'owner', member: 'member', viewer: 'viewer'};
   const app = createApp({store, auth: {session: cookie => (roles[cookie] ? {email: `${cookie}@x.test`, role: roles[cookie], workspaceId: 'default'} : null)}, workspaces: {get: () => store, holding: () => store}, push: {}, version: 't'});
   const send = async (method, url, {cookie, body, signed = false} = {}) => {
     const text = body === undefined ? '' : JSON.stringify(body);
@@ -139,16 +139,16 @@ test('over HTTP: takeover needs a live device, then input flows to it in order, 
   browserLive.close();
   browserLive.waitMs = 20;
   t.after(() => browserLive.close());
-  const input = body => send('POST', '/api/browser-live/web/input', {cookie: 'member', body});
+  const input = body => send('POST', '/api/browser-live/web/input', {cookie: 'owner', body});
   // No device is polling: there is nothing to take over, and the state does not change.
-  const refused = await send('POST', '/api/browser-live/web/takeover', {cookie: 'member'});
+  const refused = await send('POST', '/api/browser-live/web/takeover', {cookie: 'owner'});
   assert.equal(refused.status, 409);
   assert.match(refused.body.error, /not running the shared browser/);
   assert.equal((await send('GET', '/api/browser-live', {cookie: 'member'})).body.find(e => e.botId === 'web').state, 'idle');
   assert.equal((await input({type: 'click', x: 1, y: 1})).status, 409, 'input while the owner is not driving is refused');
   // The device polls; the takeover goes through.
   await send('POST', '/api/agent/live', {body: {tabs: [{botId: 'web', url: 'https://docs.example.com/', title: 'Docs'}]}, signed: true});
-  const taken = await send('POST', '/api/browser-live/web/takeover', {cookie: 'member'});
+  const taken = await send('POST', '/api/browser-live/web/takeover', {cookie: 'owner'});
   assert.deepEqual([taken.status, taken.body.state], [200, 'driving']);
   // The frame poll carries the same line the list does, so the view needs one request, not two.
   const viewed = (await send('GET', '/api/browser-live/web', {cookie: 'member'})).body;
@@ -160,17 +160,17 @@ test('over HTTP: takeover needs a live device, then input flows to it in order, 
   assert.equal((await input({type: 'click', x: 10, y: 20})).status, 200);
   assert.equal((await input({type: 'type', text: 'abc'})).status, 200);
   assert.equal((await input({type: 'eval'})).status, 400);
-  assert.equal((await send('POST', '/api/browser-live/mail/input', {cookie: 'member', body: {type: 'click', x: 1, y: 1}})).status, 409, 'driving one bot does not let you drive another');
+  assert.equal((await send('POST', '/api/browser-live/mail/input', {cookie: 'owner', body: {type: 'click', x: 1, y: 1}})).status, 409, 'driving one bot does not let you drive another');
   const poll = await send('POST', '/api/agent/live', {body: {tabs: [], owner: 'web'}, signed: true});
   assert.deepEqual(poll.body.commands.map(c => c.type), ['takeover', 'input', 'input']);
   // Hand back.
-  const back = await send('POST', '/api/browser-live/web/handback', {cookie: 'member'});
+  const back = await send('POST', '/api/browser-live/web/handback', {cookie: 'owner'});
   assert.deepEqual([back.status, back.body.state], [200, 'idle']);
   assert.equal((await input({type: 'click', x: 1, y: 1})).status, 409);
   assert.deepEqual((await send('POST', '/api/agent/live', {body: {tabs: [], owner: null}, signed: true})).body.commands.map(c => c.type), ['handback']);
 });
 
-test('over HTTP: takeover, hand back and the list need a signed-in member, and the bot must exist', async t => {
+test('over HTTP: the list needs a signed-in member, takeover and hand back an admin, and the bot must exist', async t => {
   const {dir, send} = await harness();
   t.after(() => fs.rm(dir, {recursive: true, force: true}));
   browserLive.close();
@@ -181,7 +181,9 @@ test('over HTTP: takeover, hand back and the list need a signed-in member, and t
     assert.equal((await send(method, url)).status, 401, `${method} ${url} anonymous`);
     assert.equal((await send(method, url, {cookie: 'viewer'})).status, 403, `${method} ${url} viewer`);
   }
-  assert.equal((await send('POST', '/api/browser-live/nobody/takeover', {cookie: 'member'})).status, 404);
+  // Driving the owner's signed-in browser is an admin's (Phases 5-6 review, I4).
+  for (const url of ['/api/browser-live/web/takeover', '/api/browser-live/web/handback', '/api/browser-live/web/input']) assert.equal((await send('POST', url, {cookie: 'member', body: {type: 'click', x: 1, y: 1}})).status, 403, `${url} member`);
+  assert.equal((await send('POST', '/api/browser-live/nobody/takeover', {cookie: 'owner'})).status, 404);
   assert.equal(browserLive.isDriving(WS, 'web'), false, 'none of that took anything over');
 });
 

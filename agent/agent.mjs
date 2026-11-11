@@ -37,7 +37,7 @@ import {createLiveChannel} from './live-channel.mjs';
 import {runModelTask} from './cli-model.mjs';
 import {cliStatusReporter} from './cli-status.mjs';
 import {runMcpTask} from './mcp-stdio.mjs';
-import {reportResult} from './report-result.mjs';
+import {reportResult, skipExpired} from './report-result.mjs';
 import {hostAllowed, hostOf, parseAllowlist} from '../shared/bot-browser.js';
 import {resolvePublicAddress, pinnedRequest} from './net-guard.mjs';
 
@@ -263,6 +263,7 @@ async function run() {
    * the task was claimed with so the server can tell this run's outcome from a
    * later attempt's if the lease lapsed meanwhile. */
   const runTask = async task => {
+    if (await skipExpired(call, config, task)) return;
     console.log(`agent: running ${task.kind} ${task.id}`);
     try {
       const result = await execute(task, config);

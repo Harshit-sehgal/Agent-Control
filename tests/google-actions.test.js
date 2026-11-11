@@ -138,13 +138,13 @@ test('a refusal from Google is reported with its reason; the token goes only to 
 
 test('an ask for a Google action says what it would do, with the recipient, the subject and the start of the body', () => {
   const google = {id: 'google', kind: 'google', name: 'Google', account: 'owner@example.test', actions: GOOGLE_ACTIONS};
-  assert.equal(describeCall(google, 'gmail.send', {to: 'bob@example.org', subject: 'Lunch', body: 'See you at noon.'}), 'send an email to bob@example.org: "Lunch" (See you at noon.)');
-  assert.equal(describeCall(google, 'gmail.draft', {to: ['a@example.org', 'b@example.org'], subject: 'Hi', body: 'x'.repeat(300)}).startsWith('save a draft email to a@example.org, b@example.org: "Hi" (xxx'), true);
+  assert.equal(describeCall(google, 'gmail.send', {to: 'bob@example.org', subject: 'Lunch', body: 'See you at noon.'}), 'send an email to bob@example.org (outside your domain): "Lunch" (See you at noon.)');
+  assert.equal(describeCall(google, 'gmail.draft', {to: ['a@example.org', 'b@example.org'], subject: 'Hi', body: 'x'.repeat(300)}).startsWith('save a draft email to a@example.org (outside your domain), b@example.org (outside your domain): "Hi" (xxx'), true);
   assert.ok(describeCall(google, 'gmail.send', {to: 'a@b.co', subject: 's'.repeat(300), body: 'b'.repeat(900)}).length <= 280);
   assert.equal(describeCall(google, 'gmail.search', {query: 'rent'}), 'search Gmail for "rent"');
   assert.equal(describeCall(google, 'gmail.read', {id: 'abc'}), 'read an email in Gmail');
   assert.equal(describeCall(google, 'drive.search', {query: 'lease'}), 'search Drive for "lease"');
   assert.equal(describeCall(google, 'drive.read', {id: 'abc'}), 'read a file in Drive');
-  assert.deepEqual(connectorNeeds(google, 'gmail.send', {to: 'a@b.co', subject: 's', body: 'b'}).map(n => [n.action, n.target]), [['connector.google.write', 'owner@example.test']]);
+  assert.deepEqual(connectorNeeds(google, 'gmail.send', {to: 'a@b.co', subject: 's', body: 'b'}).map(n => [n.action, n.target]), [['connector.google.write.gmail.send', 'owner@example.test']]);
   assert.equal(connectorNeeds(google, 'gmail.search', {query: 'x'})[0].action, 'connector.google.read');
 });

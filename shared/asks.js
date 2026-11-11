@@ -7,7 +7,7 @@
  * account (a connector). Bots never inherit their creator's grants.
  *
  * Two lists live in the workspace state:
- *   state.asks   [{id, botId, runId, chatKey, action, target, detail, grantScope,
+ *   state.asks   [{id, botId, runId, chatKey, action, target, detail, body?, argsHash?, grantScope,
  *                  status 'pending'|'allowed'|'declined', scope 'once'|'always'|null,
  *                  createdAt, answeredAt?, expiresAt?, expired?, requestId?, implies?}]
  *   state.grants [{botId, action, scope, choice 'always'|'ask'|'deny', at}]
@@ -25,11 +25,17 @@ import {logActivity} from './activity-log.js';
 
 /** What every bot may do without a grant. */
 export const BASIC_KIT = ['bot.ask', 'bot.create', 'schedule.set'];
-/** The actions that ask. Connector actions are `connector.<name>.read|write`. */
+/** The actions that ask. Connector actions are `connector.<name>.read` and `connector.<name>.write.<tool>`; a bare
+ * `connector.<name>.write` is the connector-wide grant from before writes were per tool (only its Deny still counts). */
 export const ASK_ACTIONS = ['browser.use', 'send', 'post', 'delete', 'spend'];
-const CONNECTOR = /^connector\.([a-z0-9_-]+)\.(read|write)$/;
+const CONNECTOR = /^connector\.([a-z0-9_-]+)\.(read|write)(?:\.([A-Za-z0-9_.:-]{1,128}))?$/;
+const valid = match => Boolean(match) && !(match[2] === 'read' && match[3]);
+const connectorOf = action => { const match = CONNECTOR.exec(String(action ?? '')); return valid(match) ? match : null; };
+const isConnector = action => Boolean(connectorOf(action));
+/** The connector-wide write grant a per-tool write falls under. */
+const umbrellaOf = action => { const match = connectorOf(action); return match?.[3] ? `connector.${match[1]}.write` : null; };
 
-export const isAskAction = action => ASK_ACTIONS.includes(action) || CONNECTOR.test(String(action ?? ''));
+export const isAskAction = action => ASK_ACTIONS.includes(action) || isConnector(action);
 export const isBasicKit = action => BASIC_KIT.includes(action);
 
 export const ASK_ANSWERS = ['decline', 'allow', 'always'];
@@ -61,7 +67,7 @@ export function scopeOf({action, target} = {}) {
       return /^https?:$/.test(url.protocol) ? url.origin.toLowerCase() : '';
     } catch { return ''; }
   }
-  if (CONNECTOR.test(String(action ?? ''))) return cleanText(String(target ?? ''), 200).toLowerCase();
+  if (isConnector(action)) return cleanText(String(target ?? ''), 200).toLowerCase();
   return '';
 }
 
@@ -70,8 +76,8 @@ const botNameOf = (state, id) => (state.groups || []).flatMap(g => g.bots || [])
 function verbOf(action, scope) {
   if (action === 'browser.use') return `open ${scope.replace(/^https?:\/\//, '')}`;
   if (action === 'spend') return 'spend money';
-  const connector = CONNECTOR.exec(action);
-  if (connector) return `${connector[2]} ${connector[1]}${scope ? ` (${scope})` : ''}`;
+  const connector = connectorOf(action);
+  if (connector) return `${connector[2]} ${connector[1]}${connector[3] ? ` with ${connector[3]}` : ''}${scope ? ` (${scope})` : ''}`;
   return scope ? `${action} on ${scope.replace(/^https?:\/\//, '')}` : action;
 }
 /** The log's sentence for a grant change. */
@@ -101,9 +107,9 @@ export function setGrant(state, botId, action, scope, choice, now = iso(), {log 
   if (!GRANT_CHOICES.includes(choice)) fail('Choose always, ask or deny.');
   if (action === 'spend' && choice === 'always') fail('A payment is asked every time. Choose Ask each time or Deny.');
   if (!botIds(state).has(botId)) fail('Bot not found.', 404);
-  const where = PER_ORIGIN.includes(action) || CONNECTOR.test(action) ? scopeOf({action, target: scope}) : '';
+  const where = PER_ORIGIN.includes(action) || isConnector(action) ? scopeOf({action, target: scope}) : '';
   if (PER_ORIGIN.includes(action) && !where) fail(`A ${SITE_WORD[action]} grant is for one site. Say which.`);
-  if (CONNECTOR.test(action) && !where) fail('A connector grant is for one account. Say which.');
+  if (isConnector(action) && !where) fail('A connector grant is for one account. Say which.');
   state.grants ??= [];
   const found = state.grants.find(g => sameGrant(g, botId, action, where));
   if (found) Object.assign(found, {choice, at: now});
@@ -122,7 +128,9 @@ export function verdict(state, bot, action, target = '') {
   if (!isAskAction(action)) return {verdict: 'deny', scope: '', message: `${bot?.name || 'This bot'} cannot do that.`};
   // `target` may be the page URL or the origin itself; a connector's is its account.
   const scope = scopeOf({action, target});
-  const choice = grantFor(state, bot?.id, action, scope);
+  const umbrella = umbrellaOf(action);
+  // A Deny on the connector-wide write (from before writes were per tool) still covers every write tool.
+  const choice = umbrella && grantFor(state, bot?.id, umbrella, scope) === 'deny' ? 'deny' : grantFor(state, bot?.id, action, scope);
   if (choice === 'always') return {verdict: 'allow', scope};
   if (choice === 'deny') {
     const name = bot?.name || 'this bot';
@@ -148,12 +156,15 @@ export function decide(state, bot, needs) {
 }
 
 /** Create a pending ask. An ask from an unattended run (nobody typed in it) lapses after 24 hours. */
-export function createAsk(state, {botId, runId = null, chatKey = null, action, target = '', detail = '', unattended = false, requestId = null, implies = [], now = iso(), makeId = () => crypto.randomUUID()} = {}) {
+export function createAsk(state, {botId, runId = null, chatKey = null, action, target = '', detail = '', body = '', argsHash = '', unattended = false, requestId = null, implies = [], now = iso(), makeId = () => crypto.randomUUID()} = {}) {
   if (!isAskAction(action)) fail(`"${String(action ?? '').slice(0, 60)}" is not something a bot asks about.`);
   if (!botId) fail('An ask needs the bot that is asking.');
   const ask = {
     id: makeId(), botId, runId, chatKey, action,
-    target: cleanText(String(target ?? ''), 2000), detail: cleanText(String(detail ?? ''), 300),
+    target: cleanText(String(target ?? ''), 2000), detail: cleanText(String(detail ?? ''), 4000),
+    // The whole text a write would carry (an email body), for the card to show in full; and the fingerprint of the arguments shown.
+    ...(typeof body === 'string' && body ? {body: body.slice(0, 20000)} : {}),
+    ...(typeof argsHash === 'string' && argsHash ? {argsHash: argsHash.slice(0, 64)} : {}),
     grantScope: scopeOf({action, target}), status: 'pending', scope: null, createdAt: now,
     ...(unattended ? {expiresAt: new Date(Date.parse(now) + ASK_EXPIRY_MS).toISOString()} : {}),
     ...(requestId ? {requestId} : {}),
@@ -228,9 +239,13 @@ export const pendingAsks = state => (state.asks || []).filter(a => a.status === 
 
 /** Drop grants that cannot be honoured: a bot that is gone, an action nobody asks about, a choice
  * that is not one, a payment set to Always, a per-site grant with no site (a Send, Post or Delete
- * grant stored before those were per site). Idempotent; run on every load and restore. */
+ * grant stored before those were per site). A connector-wide write Always allow (from before writes
+ * were per tool) becomes Ask each time. Idempotent; run on every load and restore. */
 export function sweepGrants(state) {
   const ids = botIds(state);
+  for (const g of Array.isArray(state.grants) ? state.grants : []) {
+    if (g && g.choice === 'always' && /^connector\.[a-z0-9_-]+\.write$/.test(String(g.action))) g.choice = 'ask';
+  }
   state.grants = (Array.isArray(state.grants) ? state.grants : []).filter(g => g && typeof g === 'object'
     && ids.has(g.botId) && isAskAction(g.action) && typeof g.scope === 'string'
     && GRANT_CHOICES.includes(g.choice) && !(g.action === 'spend' && g.choice === 'always')

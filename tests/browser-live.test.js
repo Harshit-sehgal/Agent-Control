@@ -182,7 +182,7 @@ async function harness() {
   return {dir, store, send, signed};
 }
 
-test('over HTTP: frames and input need a signed-in member, and a frame never reaches an anonymous caller', async t => {
+test('over HTTP: frames need a signed-in member, input an admin, and a frame never reaches an anonymous caller', async t => {
   const {dir, send, signed} = await harness();
   t.after(() => fs.rm(dir, {recursive: true, force: true}));
   browserLive.waitMs = 30;
@@ -203,8 +203,9 @@ test('over HTTP: frames and input need a signed-in member, and a frame never rea
   assert.equal(member.body.image, `data:image/jpeg;base64,${big}`);
   assert.equal((await send('GET', '/api/browser-live/nobody', {cookie: 'member'})).status, 404);
 
-  // Owner input while the owner is not driving: 409. Not signed in: 401.
-  assert.equal((await send('POST', '/api/browser-live/web/input', {cookie: 'member', body: click})).status, 409);
+  // Owner input while the owner is not driving: 409. A member: 403 (driving is an admin's). Not signed in: 401.
+  assert.equal((await send('POST', '/api/browser-live/web/input', {cookie: 'owner', body: click})).status, 409);
+  assert.equal((await send('POST', '/api/browser-live/web/input', {cookie: 'member', body: click})).status, 403);
   assert.equal((await send('POST', '/api/browser-live/web/input', {body: click})).status, 401);
   assert.equal((await send('POST', '/api/browser-live/web/input', {cookie: 'viewer', body: click})).status, 403);
 });

@@ -6,6 +6,8 @@
  *   HMAC signature, like every other agent route;
  * - the owner (`/api/browser-live/...`) needs a signed-in member. A frame is a
  *   picture of whatever the browser is signed in to, so a viewer cannot have one.
+ *   Driving it (take over, hand back, input) is an admin's: the tab is the owner's
+ *   signed-in browser, and a click there needs no ask.
  *
  * `src/browser-live.js` keeps what these routes carry, in memory only. */
 import {companyBots} from '../shared/company.js';
@@ -48,19 +50,19 @@ export function liveRoutes(router, {workspaces}) {
     const botId = botOf(c), {state, url, title, site} = entryOf(c, botId);
     return {...hub.view(c.actor.workspaceId, botId, {after: Number.isFinite(after) ? after : undefined}), state, url, title, site};
   });
-  router.add('POST', '/api/browser-live/:botId/input', 'member', async c => {
+  router.add('POST', '/api/browser-live/:botId/input', 'admin', async c => {
     const botId = botOf(c);
     hub.input(c.actor.workspaceId, botId, await c.body());
     return {ok: true};
   });
   // The owner takes the bot's tab: its run (if any) parks, no bot starts anything, and input is accepted.
-  router.add('POST', '/api/browser-live/:botId/takeover', 'member', c => {
+  router.add('POST', '/api/browser-live/:botId/takeover', 'admin', c => {
     const botId = botOf(c);
     hub.takeover(c.actor.workspaceId, botId);
     return {botId, state: entryOf(c, botId).state};
   });
   // The owner is done: the parked run goes on, and bots may use the browser again.
-  router.add('POST', '/api/browser-live/:botId/handback', 'member', c => {
+  router.add('POST', '/api/browser-live/:botId/handback', 'admin', c => {
     const botId = botOf(c);
     hub.handback(c.actor.workspaceId, botId);
     return {botId, state: entryOf(c, botId).state};

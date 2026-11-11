@@ -174,7 +174,8 @@ export const RISKS = [
   ['post', /\b(post|publish|tweet)\b/i],
   ['send', /\b(send|submit|confirm)\b/i],
 ];
-const CHECKOUT_PATH = /\/(checkout|payment|billing)(\/|$)/i;
+/** A checkout, payment or billing page: opening one is a payment, and the device refuses a click on one unless a payment was approved. */
+export const CHECKOUT_PATH = /\/(checkout|payment|billing)(\/|$)/i;
 
 /** The risk classes a control's label names, riskiest first: ['spend'], ['send'], [] ... */
 export const riskOf = label => RISKS.filter(([, pattern]) => pattern.test(String(label ?? ''))).map(([action]) => action);

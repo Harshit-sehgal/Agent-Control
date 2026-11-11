@@ -15,7 +15,9 @@
  * Input goes out in order, one request at a time, with typed letters joined. */
 import {esc, icon} from './ui-kit.js';
 import {botColor} from './ui-face.js';
-import {store, api, findBot, canWrite, changed, onChange, go} from './ui-store.js';
+import {store, api, findBot, canWrite, isAdmin, isStaticDemo, changed, onChange, go} from './ui-store.js';
+/** Driving the tab (Take over, Hand back, input) is an admin's, the role those routes need; the demo is its one owner. */
+const canDrive = () => isStaticDemo() || isAdmin();
 import {toast} from './ui-dialogs.js';
 import {
   PAGE, KEY_CHIPS, clickInput, wheelInput, keyInput, coalesce, navigateAddress, rowLabel, statusOf, stateLine, mergeView, veilFor, frameDelay, listDelay, wantsList,
@@ -93,7 +95,7 @@ const entryOf = botId => list.items.find(e => e.botId === botId);
 
 /** The page for `#profile/<id>/computer`. `faceOf(state)` draws the bot's face for the line under the page. */
 export function computerPage(bot, {faceOf}) {
-  const write = canWrite();
+  const write = canDrive();
   setTimeout(() => mount(bot.id, faceOf), 0);
   const keys = KEY_CHIPS.map(c => `<button type="button" class="pc-key" data-action="computer-key" data-id="${esc(bot.id)}" data-text="${esc(c.key)}" aria-label="${esc(c.aria)}">${esc(c.label)}</button>`).join('');
   return `<div class="pc" id="pc" data-bot="${esc(bot.id)}" data-state="idle" style="--t:${esc(botColor(bot))}">
@@ -251,7 +253,7 @@ function wireStage(s) {
   s.stage.addEventListener('click', ev => {
     if (stateOf(s) !== 'driving') {
       // Clicking a picture that does not answer is a question: say what to press, but not on every click.
-      if (s.view.image && Date.now() - s.lastHint > 4000 && canWrite()) { s.lastHint = Date.now(); toast('Press Take over to click and type in this page.'); }
+      if (s.view.image && Date.now() - s.lastHint > 4000 && canDrive()) { s.lastHint = Date.now(); toast('Press Take over to click and type in this page.'); }
       return;
     }
     s.stage.focus({preventScroll: true});

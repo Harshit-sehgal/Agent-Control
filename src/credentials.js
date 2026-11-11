@@ -43,11 +43,16 @@ export function listCredentials(store, workspaceId) {
     }));
 }
 
+/** Secrets the app keeps for its own use: a connector's sign-in or server address and an AI provider's key or headers.
+ * They are used, never shown, so the reveal route refuses them. */
+export const UNREVEALABLE_KINDS = ['google_client', 'google_token', 'connector_mcp', 'ai_provider', 'ai_headers'];
+
 /** Decrypt for use. Restricted to admins by the route; the caller records the
  * access in the activity log. */
 export function revealCredential(store, workspaceId, id) {
   const row = store.get('SELECT * FROM credentials WHERE id=? AND workspace_id=?', id, workspaceId);
   if (!row) fail('Credential not found.', 404);
+  if (UNREVEALABLE_KINDS.includes(row.kind)) fail('This secret belongs to a connector or an AI provider and cannot be revealed: the app uses it but never shows it. Replace it from Settings if it changed.', 403);
   if (row.expires_at && Date.parse(row.expires_at) < Date.now()) fail('This credential has expired and was not decrypted.', 410);
   let value;
   try { value = decryptJson(store.vaultKey, {ciphertext: row.ciphertext, iv: row.iv, tag: row.tag}).value; }

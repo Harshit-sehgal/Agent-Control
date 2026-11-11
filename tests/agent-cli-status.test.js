@@ -1,4 +1,5 @@
 import test from 'node:test';
+import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -255,12 +256,17 @@ let s = ''; process.stdin.on('data', c => s += c); process.stdin.on('end', () =>
     // The first beat has nothing yet; a later one carries the real answer.
     const listed = await until(async () => { const a = (await send('GET', '/api/agents', undefined, owner)).body.agents[0]; return a?.cli?.claude === 'signed-in' && a.cli.codex === 'signed-in' ? a : null; }, 'a signed-in report');
     assert.ok(listed.permissions.includes('model.run'));
-    // And a model.run goes through the whole path: server queue, agent, fake CLI, result.
-    const queued = await send('POST', `/api/agents/${listed.id}/tasks`, {kind: 'model.run', payload: {engine: 'codex', instructions: 'Be brief.', input: 'hello from the server', timeoutMs: 20000}}, owner);
-    assert.equal(queued.status, 201);
+    // And a model.run goes through the whole path: server queue, agent, fake CLI, result. Only the server's own code
+    // queues a model.run (the generic task route refuses it), so the test writes the queued row the way enqueueAgentTask does.
+    const refused = await send('POST', `/api/agents/${listed.id}/tasks`, {kind: 'model.run', payload: {engine: 'codex', input: 'hello'}}, owner);
+    assert.equal(refused.status, 400);
+    const taskId = crypto.randomUUID(), at = new Date().toISOString();
+    { const db = new DatabaseSync(path.join(dir, 'state.db'));
+      try { db.prepare("INSERT INTO agent_tasks (id,agent_id,kind,payload,status,attempts,max_attempts,idempotency_key,created_by,created_at,updated_at) VALUES (?,?,'model.run',?,'queued',0,1,NULL,'test',?,?)")
+        .run(taskId, listed.id, JSON.stringify({engine: 'codex', model: '', instructions: 'Be brief.', input: 'hello from the server', timeoutMs: 20000, notAfter: Date.now() + 60000}), at, at); } finally { db.close(); } }
     const row = await until(() => {
       const db = new DatabaseSync(path.join(dir, 'state.db'), {readOnly: true});
-      try { const r = db.prepare('SELECT status,result FROM agent_tasks WHERE id=?').get(queued.body.id); return r?.status === 'done' || r?.status === 'failed' ? r : null; } finally { db.close(); }
+      try { const r = db.prepare('SELECT status,result FROM agent_tasks WHERE id=?').get(taskId); return r?.status === 'done' || r?.status === 'failed' ? r : null; } finally { db.close(); }
     }, 'the task result');
     assert.equal(row.status, 'done');
     const result = JSON.parse(row.result);

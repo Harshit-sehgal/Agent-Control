@@ -54,7 +54,7 @@ test('the strip path removes connector blocks and nothing else', () => {
 test('a call is classified by the connector, never by the bot: a read, a write, or unknown', () => {
   const read = connectorNeeds(notes, 'search_notes', {query: 'rent'});
   assert.deepEqual(read, [{action: 'connector.notes.read', target: 'mcp.example.com', detail: 'use Notes: search_notes (query: rent)'}]);
-  assert.equal(connectorNeeds(notes, 'add_note', {})[0].action, 'connector.notes.write');
+  assert.equal(connectorNeeds(notes, 'add_note', {})[0].action, 'connector.notes.write.add_note');
   assert.equal(connectorNeeds(notes, 'not_a_tool', {}), null);
   // A bot cannot say a write is a read: there is no field for it in the block.
   assert.equal(parseConnectorCalls(block({use: 'notes', tool: 'add_note', write: false, readOnly: true}))[0].call.write, undefined);
@@ -89,7 +89,7 @@ test('with no grant a connector action asks, reads and writes separately; Always
   assert.equal(verdict(state, bot, 'connector.notes.read', 'mcp.example.com').verdict, 'ask');
   setGrant(state, 'b1', 'connector.notes.read', 'mcp.example.com', 'always', undefined, {log: false});
   assert.equal(verdict(state, bot, 'connector.notes.read', 'mcp.example.com').verdict, 'allow');
-  assert.equal(verdict(state, bot, 'connector.notes.write', 'mcp.example.com').verdict, 'ask');
+  assert.equal(verdict(state, bot, 'connector.notes.write.add_note', 'mcp.example.com').verdict, 'ask');
   assert.equal(verdict(state, bot, 'connector.notes.read', 'other.example.com').verdict, 'ask', 'per account');
 });
 

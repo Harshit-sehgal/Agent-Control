@@ -106,12 +106,12 @@ const LEAST_ROLE = {
   'POST /api/grants': 'admin',
   'POST /api/browser-requests/:id/approve': 'admin',
   'POST /api/browser-requests/:id/deny': 'admin',
-  // A frame is a picture of whatever the shared browser is signed in to: a viewer never gets one, and input is a member's.
+  // A frame is a picture of whatever the shared browser is signed in to: a viewer never gets one. Driving it (take over, hand back, input) is an admin's.
   'GET /api/browser-live/:botId': 'member',
-  'POST /api/browser-live/:botId/input': 'member',
+  'POST /api/browser-live/:botId/input': 'admin',
   'GET /api/browser-live': 'member',
-  'POST /api/browser-live/:botId/takeover': 'member',
-  'POST /api/browser-live/:botId/handback': 'member',
+  'POST /api/browser-live/:botId/takeover': 'admin',
+  'POST /api/browser-live/:botId/handback': 'admin',
   'GET /api/users': 'admin',
   'POST /api/users': 'admin',
   'PATCH /api/users/:id': 'admin',

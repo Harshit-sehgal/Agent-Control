@@ -32,6 +32,9 @@ function clearWorkspaceAccount(store, {userId, email}) {
   'The device belonged to an account that was removed.', stamp, stamp, email);
 }
 
+/** Task kinds only the server's own code may queue. */
+const SERVER_ONLY_KINDS = ['mcp.call', 'model.run'];
+
 export function accountRoutes(router, {auth, workspaces}) {
   // The signed-in user's own account and sessions.
   router.add('GET', '/api/me', 'viewer', c => ({email: c.actor.email, role: c.actor.role}));
@@ -88,6 +91,9 @@ export function accountRoutes(router, {auth, workspaces}) {
   });
   router.add('POST', '/api/agents/:id/tasks', 'member', async c => {
     const b = await c.body(), kind = String(b.kind || '');
+    // A connector call and a model run are the server's own work: they carry what an ask cleared and spend the
+    // owner's plan, so only the server's code queues them (src/mcp-client.js, src/cli-model.js), never this route.
+    if (SERVER_ONLY_KINDS.includes(kind)) fail(`${kind} tasks are queued only by the server itself, never through this route.`, 400);
     // `enqueueAgentTask` validates a browser payload itself (MAX_STEPS, a public
     // http(s) url, and never a click or type on X), so the scheduler's own path
     // cannot skip the rule this route used to be the only one to apply.

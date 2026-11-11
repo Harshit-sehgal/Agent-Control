@@ -23,12 +23,14 @@ export function askCard(state, line) {
   const botName = bot?.name || 'A bot', copy = /^Needs you: /.test(line?.text || '');
   if (!ask || ask.status !== 'pending') {
     const said = ask ? answeredText(ask) : 'Answered';
-    return {open: false, botId: ask?.botId || null, botName, text: copy && ask ? `${said} (${botName})` : said, choices: [], note: '', target: ''};
+    return {open: false, botId: ask?.botId || null, botName, text: copy && ask ? `${said} (${botName})` : said, choices: [], note: '', target: '', body: ''};
   }
   return {
     open: true, ask, askId: ask.id, botId: ask.botId, botName, text: line.text,
     choices: askChoices(ask.action).map(id => ({id, label: ASK_ANSWER_LABELS[id], primary: id === 'allow'})),
     target: ask.action === 'browser.use' ? ask.target || '' : '',
+    // The whole text a write would carry (an email body): the card shows all of it, folded.
+    body: typeof ask.body === 'string' ? ask.body : '',
     note: ask.action === 'spend' ? 'Payments are asked every time.' : '',
   };
 }
@@ -41,8 +43,8 @@ export function grantWhat(action, scope = '') {
   if (action === 'browser.use') return scope ? `Open ${host(scope)}` : 'Open web pages';
   const plain = {send: 'Send', post: 'Post', delete: 'Delete', spend: 'Spend money'}[action];
   if (plain) return scope && action !== 'spend' ? `${plain} on ${host(scope)}` : plain;
-  const match = /^connector\.([a-z0-9_-]+)\.(read|write)$/.exec(String(action));
-  if (match) return `${match[2] === 'read' ? 'Read' : 'Change'} ${match[1]}${scope ? ` (${scope})` : ''}`;
+  const match = /^connector\.([a-z0-9_-]+)\.(read|write)(?:\.([A-Za-z0-9_.:-]{1,128}))?$/.exec(String(action));
+  if (match) return `${match[2] === 'read' ? 'Read' : 'Change'} ${match[1]}${match[3] ? `: ${match[3]}` : ''}${scope ? ` (${scope})` : ''}`;
   return String(action);
 }
 export const scopeOfAction = (action, target) => scopeOf({action, target});

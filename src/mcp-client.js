@@ -175,8 +175,9 @@ async function viaAgent(target, {op, tool, args}, {timeoutMs = AGENT_WAIT_MS, po
   const device = pickAgent(target.store);
   // The agent stops its server before this side stops waiting, leaving room for pickup and the report back.
   const agentMs = Math.max(2000, Math.min(60000, timeoutMs - 45000));
-  const {task} = enqueueAgentTask(target.store, device.id, {kind: 'mcp.call', payload: {server: target.server, op, ...(op === 'call' ? {tool, args} : {}), timeoutMs: agentMs}, createdBy: 'connector'});
+  // `notAfter` is when this side stops waiting: a device that picks the task up later skips it instead of running a call nobody will read.
   const deadline = Date.now() + timeoutMs;
+  const {task} = enqueueAgentTask(target.store, device.id, {kind: 'mcp.call', payload: {server: target.server, op, ...(op === 'call' ? {tool, args} : {}), timeoutMs: agentMs, notAfter: deadline}, createdBy: 'connector'});
   for (;;) {
     const row = target.store.get('SELECT status,result,error FROM agent_tasks WHERE id=?', task.id);
     if (!row) throw problem('The MCP task disappeared before it finished.', 502, 'agent-failed');

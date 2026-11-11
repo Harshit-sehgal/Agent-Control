@@ -60,7 +60,7 @@ export function validateModelRun(payload) {
     if (!Number.isFinite(timeoutMs)) fail('The timeout must be a number of milliseconds.', 400);
     timeoutMs = Math.min(600000, Math.max(5000, Math.round(timeoutMs)));
   }
-  return {engine: engine.id, model, instructions: p.instructions || '', input: p.input, timeoutMs};
+  return {engine: engine.id, model, instructions: p.instructions || '', input: p.input, timeoutMs, ...deadlineOf(p)};
 }
 
 /** The canonical `mcp.call` payload: the NAME of an MCP server configured on the agent's own machine, an
@@ -84,8 +84,11 @@ export function validateMcpCall(payload) {
     if (!Number.isFinite(timeoutMs)) fail('The timeout must be a number of milliseconds.', 400);
     timeoutMs = Math.min(120000, Math.max(2000, Math.round(timeoutMs)));
   }
-  return {...out, timeoutMs};
+  return {...out, timeoutMs, ...deadlineOf(p)};
 }
+
+/** `notAfter`: the epoch ms after which the server has stopped waiting for this task, so the device skips it. */
+const deadlineOf = p => (Number.isFinite(p.notAfter) && p.notAfter > 0 ? {notAfter: Math.round(p.notAfter)} : {});
 
 const now = () => new Date().toISOString();
 

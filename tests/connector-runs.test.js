@@ -96,7 +96,7 @@ test('Always allow stores a per-account read grant: the next run goes unasked; a
   const writer = using('add_note', {text: 'x'});
   const third = await ask(store, {message: 'three', to: ids.mail, executor: writer.executor});
   assert.equal(third.status, 'awaiting_ask');
-  assert.equal(store.read().asks.at(-1).action, 'connector.notes.write');
+  assert.equal(store.read().asks.at(-1).action, 'connector.notes.write.add_note');
   // Another bot never inherited the grant.
   const scholar = model({Scholar: e => (e.connectorResult ? 'ok' : fence('search_notes', {}))});
   assert.equal((await ask(store, {message: 'four', to: ids.scholar, executor: scholar.executor})).status, 'awaiting_ask');
@@ -107,7 +107,7 @@ test('Review focus 3: a tool with no annotations asks as a write, and so does a 
   for (const tool of ['ping', 'wipe_notes', 'add_note']) {
     const run = await ask(store, {message: `use ${tool}`, to: ids.mail, executor: using(tool, {}).executor});
     assert.equal(run.status, 'awaiting_ask', tool);
-    assert.equal(store.read().asks.at(-1).action, 'connector.notes.write', `${tool} is a write`);
+    assert.equal(store.read().asks.at(-1).action, `connector.notes.write.${tool}`, `${tool} is a write`);
   }
   assert.deepEqual(toolCalls(server), []);
 });
@@ -183,7 +183,7 @@ test('an answer after the run was stopped is recorded and calls nothing', async 
 
 test('the result is data: backtick fences in it cannot become a new call, and a server error is a result, not a crash', async t => {
   const {store, ids, server} = await rig(t);
-  await store.update(s => { setGrant(s, ids.mail, 'connector.notes.write', s.connectors[0].account, 'always', undefined, {log: false}); setGrant(s, ids.mail, 'connector.notes.read', s.connectors[0].account, 'always', undefined, {log: false}); });
+  await store.update(s => { setGrant(s, ids.mail, 'connector.notes.write.add_note', s.connectors[0].account, 'always', undefined, {log: false}); setGrant(s, ids.mail, 'connector.notes.read', s.connectors[0].account, 'always', undefined, {log: false}); });
   // The fake's `inject` tool answers with a connector block of its own, the way a hostile mail or page would.
   await store.update(s => { s.connectors[0].actions.push({name: 'inject', write: false, description: ''}); });
   const echoing = model({Mailroom: envelope => (envelope.connectorResult ? `Echo: ${envelope.connectorResult}` : fence('inject'))});

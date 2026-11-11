@@ -8,6 +8,19 @@
  */
 const TOO_LARGE = 'The result was too large to send back to the server, so it was dropped.';
 
+/** The kinds whose payload can carry `notAfter`, the epoch ms after which the server has stopped waiting. */
+const DEADLINED = ['mcp.call', 'model.run'];
+
+/** A task the server already gave up on is not run: it is reported failed as `expired` and true is returned.
+ * Run before executing, so an MCP write or a model run nobody will read never happens. */
+export async function skipExpired(call, config, task, nowMs = Date.now()) {
+  const notAfter = Number(task?.payload?.notAfter);
+  if (!DEADLINED.includes(task?.kind) || !Number.isFinite(notAfter) || nowMs <= notAfter) return false;
+  console.error(`agent: ${task.kind} ${task.id} expired before it started; skipped`);
+  await call(config, `/api/agent/tasks/${task.id}/result`, {status: 'failed', error: 'expired', attempts: task.attempts}).catch(error => console.error(`agent: ${task.kind} ${task.id} could not report the expiry: ${error.message}`));
+  return true;
+}
+
 /** `call(config, path, body)` is the agent's signed POST; it throws "server responded <status>: ...". */
 export async function reportResult(call, config, task, result) {
   const path = `/api/agent/tasks/${task.id}/result`;

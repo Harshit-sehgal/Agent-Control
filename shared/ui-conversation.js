@@ -110,7 +110,9 @@ function askEntry({message: m}, conv) {
   const choose = ({id, label, primary}) => btn(label, 'ask-answer', {id: card.askId, small: true, kind: primary ? 'primary' : 'quiet', data: {choice: id}});
   const acts = canWrite() ? `<div class="acts">${card.choices.map(choose).join('')}</div>` : '<small>Only a member can answer.</small>';
   const target = card.target ? `<a href="${esc(safeHref(card.target))}" target="_blank" rel="noopener noreferrer">${esc(card.target)}</a>` : '';
-  return `<div class="cv-wait">${botFace(bot, name, 36, {state: 'waiting'})}<span>${esc(name)} is waiting on you<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></span></div><div class="cv-card" data-ask="${esc(m.askId)}"><p>${esc(m.text)}</p>${target}${card.note ? `<small>${esc(card.note)}</small>` : ''}${acts}</div>`;
+  // The whole message a send or draft would carry, folded under the sentence so the owner can read every word before saying yes.
+  const body = card.body ? `<details class="cv-ask-body"><summary>Full message${icon('chevron', 13)}</summary><pre>${esc(card.body)}</pre></details>` : '';
+  return `<div class="cv-wait">${botFace(bot, name, 36, {state: 'waiting'})}<span>${esc(name)} is waiting on you<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></span></div><div class="cv-card" data-ask="${esc(m.askId)}"><p>${esc(m.text)}</p>${target}${body}${card.note ? `<small>${esc(card.note)}</small>` : ''}${acts}</div>`;
 }
 
 /** A system line. The newest note of a run also carries what the run offers. */

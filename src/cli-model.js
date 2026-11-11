@@ -69,8 +69,9 @@ export async function runOnAgent(store, {engine, model = '', instructions = '', 
   // The agent stops its CLI before the server stops waiting, leaving room for the
   // agent's own pickup delay and the report back.
   const timeoutMs = Math.max(5000, waitMs - 45000);
-  const {task} = enqueueAgentTask(store, device.id, {kind: 'model.run', payload: {engine: spec.id, model, instructions, input, timeoutMs}, createdBy: botId ? `bot:${botId}` : 'bot'});
+  // `notAfter` is when this side stops waiting: a device that picks the task up later skips it instead of spending the plan.
   const deadline = Date.now() + waitMs;
+  const {task} = enqueueAgentTask(store, device.id, {kind: 'model.run', payload: {engine: spec.id, model, instructions, input, timeoutMs, notAfter: deadline}, createdBy: botId ? `bot:${botId}` : 'bot'});
   for (;;) {
     const row = store.get('SELECT status,result,error FROM agent_tasks WHERE id=?', task.id);
     if (!row) throw problem('The model task disappeared before it finished.', 502, 'agent-failed', meta);

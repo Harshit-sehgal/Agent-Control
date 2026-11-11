@@ -27,7 +27,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import {isPrivateAddress} from './net-guard.mjs';
-import {hostAllowed, isPostingHost, RISKS} from '../shared/bot-browser.js';
+import {hostAllowed, isPostingHost, RISKS, CHECKOUT_PATH} from '../shared/bot-browser.js';
 
 // The allowlist rule lives with the rest of the browser-block rules in
 // `shared/bot-browser.js`, so the server runtime and this device read the same
@@ -80,22 +80,33 @@ const SNAPSHOT = `(function(){var els=${PICKABLE};els.forEach(function(e,i){e.se
  * selector when the model prefers one. */
 const targetOf = step => step.index ? jsLiteral(`[data-agent-index="${Math.round(step.index)}"]`) : jsLiteral(step.selector);
 const RISK_WORDS = {spend: 'a payment', delete: 'a delete', post: 'a post', send: 'a send'};
+/** What a click lands on: `el.click()` bubbles, so a click on an icon inside Pay now is a click on Pay now. */
+const CONTROL = 'button,a[href],input,[role=button],[role=link],summary,label,[onclick]';
 /** In the page, at the moment of a bot's click or typed field: read the control's visible text, value,
- * aria-label and placeholder, and refuse it when they name a risky class the owner did not approve
- * (`approved`, from the server; the model cannot set it). The check and the click are one evaluation,
- * so the page cannot swap the label in between. `approved` null is a person's own click: no check. */
-function riskGuard(approved, verb) {
+ * aria-label, placeholder, title and alt, from the node itself and from the control it sits in (and, for a
+ * click, from the submit control of its form), and refuse it when they name a risky class the owner did not
+ * approve (`approved`, from the server; the model cannot set it). A click on a checkout page is a payment
+ * unless one was approved. The check and the click are one evaluation, so the page cannot swap the label in
+ * between. `approved` null is a person's own click: no check. */
+function riskGuard(approved, verb, click = false) {
   if (approved === null) return '';
   const open = RISKS.filter(([action]) => !approved.includes(action)).map(([action, pattern]) => [action, pattern.source, pattern.flags, RISK_WORDS[action]]);
   if (!open.length) return '';
-  return `const label=[el.innerText,el.value,el.getAttribute('aria-label'),el.getAttribute('placeholder')].filter(t=>typeof t==='string'&&t.trim()).join(' ').replace(/\\s+/g,' ').trim().slice(0,120);`
-    + `const risky=${JSON.stringify(open)}.find(r=>new RegExp(r[1],r[2]).test(label));`
-    + `if(risky)return{ok:false,risk:risky[0],reason:'This control says "'+label.slice(0,60)+'", which is '+risky[3]+' nobody approved, so it was not ${verb}.'+(risky[0]==='spend'?' A payment needs the owner to answer a payment ask.':'')};`;
+  const checkout = click && open.some(([action]) => action === 'spend')
+    ? `if(new RegExp(${jsLiteral(CHECKOUT_PATH.source)},${jsLiteral(CHECKOUT_PATH.flags)}).test(location.pathname))return{ok:false,risk:'spend',reason:'This is a checkout page and nobody approved a payment, so it was not ${verb}. A payment needs the owner to answer a payment ask.'};`
+    : '';
+  return `const ctl=el.closest(${jsLiteral(CONTROL)})||el;`
+    + (click ? `const form=ctl.form||ctl.closest('form');const sub=form&&form.querySelector('button[type=submit],button:not([type]),input[type=submit],input[type=image]');` : 'const sub=null;')
+    + `const words=n=>n?[n.innerText,n.value,n.getAttribute('aria-label'),n.getAttribute('placeholder'),n.getAttribute('title'),n.getAttribute('alt')]:[];`
+    + `const full=[...words(el),...(ctl!==el?words(ctl):[]),...(sub&&sub!==ctl&&sub!==el?words(sub):[])].filter(t=>typeof t==='string'&&t.trim()).join(' ').replace(/\\s+/g,' ').trim().slice(0,2000);const label=full.slice(0,120);`
+    + `const risky=${JSON.stringify(open)}.find(r=>new RegExp(r[1],r[2]).test(full));`
+    + `if(risky)return{ok:false,risk:risky[0],reason:'This control says "'+label.slice(0,60)+'", which is '+risky[3]+' nobody approved, so it was not ${verb}.'+(risky[0]==='spend'?' A payment needs the owner to answer a payment ask.':'')};`
+    + checkout;
 }
 function actionExpression(step, approved = null) {
   const sel = targetOf(step);
   switch (step.op) {
-    case 'click': return `(()=>{const blocked=()=>${postingPage};if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};${riskGuard(approved, 'clicked')}el.scrollIntoView();if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};el.click();return{ok:true};})()`;
+    case 'click': return `(()=>{const blocked=()=>${postingPage};if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};${riskGuard(approved, 'clicked', true)}el.scrollIntoView();if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};el.click();return{ok:true};})()`;
     case 'type': return `(()=>{const blocked=()=>${postingPage};if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};${riskGuard(approved, 'typed into')}const v=${jsLiteral(step.text)};if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};if('value' in el){el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}else{el.textContent=v;}return{ok:true};})()`;
     case 'waitFor': return `new Promise(res=>{const sel=${sel};const end=Date.now()+${Number(step.timeoutMs) > 0 ? Math.min(Number(step.timeoutMs), 15000) : 5000};const tick=()=>{if(document.querySelector(sel))return res({ok:true});if(Date.now()>end)return res({ok:false,reason:'timed out'});setTimeout(tick,100);};tick();})`;
     case 'read': return `(()=>{const el=document.querySelector(${sel});return{ok:Boolean(el),text:el?String(el.textContent).slice(0,4000):null};})()`;

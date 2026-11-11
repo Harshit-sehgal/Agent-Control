@@ -58,8 +58,8 @@ test('a send asks as a write, apart from reading; Allow once sends at once and l
   const ai = model({Mailroom: e => (e.connectorResult ? `Done: ${e.connectorResult}` : fence('gmail.send', MAIL))});
   const run = await ask(w.store, {message: 'Email Bob', to: w.ids.mail, executor: ai.executor});
   const [card] = w.store.read().asks;
-  assert.equal(card.action, 'connector.google.write');
-  assert.match(card.detail, /^send an email to bob@example\.org: "Lunch" \(See you at noon\.\)$/);
+  assert.equal(card.action, 'connector.google.write.gmail.send');
+  assert.match(card.detail, /^send an email to bob@example\.org \(outside your domain\): "Lunch" \(See you at noon\.\)$/);
   assert.deepEqual(w.google.state.sent, []);
   await answerAskFlow(w.store, card.id, 'allow', {actor: 'o', executor: ai.executor});
   await until(() => runOf(w.store, run.id).status === 'completed', 'the run');
@@ -74,7 +74,7 @@ test('a send asks as a write, apart from reading; Allow once sends at once and l
 
 test('an Always-allowed send is held, logged with an Undo window, and goes out when the window ends', async t => {
   const w = await world(t);
-  await grant(w, 'connector.google.write', w.ids.mail);
+  await grant(w, 'connector.google.write.gmail.send', w.ids.mail);
   const ai = model({Mailroom: e => (e.connectorResult ? `Report: ${e.connectorResult}` : fence('gmail.send', MAIL))});
   const run = await ask(w.store, {message: 'Email Bob', to: w.ids.mail, executor: ai.executor});
   await until(() => runOf(w.store, run.id).status === 'completed', 'the run');
@@ -95,7 +95,7 @@ test('an Always-allowed send is held, logged with an Undo window, and goes out w
 
 test('Undo inside the window cancels the send: nothing reaches Google, the log and the chat say so', async t => {
   const w = await world(t);
-  await grant(w, 'connector.google.write', w.ids.mail);
+  await grant(w, 'connector.google.write.gmail.send', w.ids.mail);
   HOLD.ms = 1500;
   const ai = model({Mailroom: e => (e.connectorResult ? 'ok' : fence('gmail.send', MAIL))});
   const run = await ask(w.store, {message: 'Email Bob', to: w.ids.mail, executor: ai.executor});
@@ -115,7 +115,7 @@ test('Undo inside the window cancels the send: nothing reaches Google, the log a
 
 test('Undo after the window is too late; a server restart during the window sends nothing and says so', async t => {
   const w = await world(t);
-  await grant(w, 'connector.google.write', w.ids.mail);
+  await grant(w, 'connector.google.write.gmail.send', w.ids.mail);
   const ai = model({Mailroom: e => (e.connectorResult ? 'ok' : fence('gmail.send', MAIL))});
   const run = await ask(w.store, {message: 'Email Bob', to: w.ids.mail, executor: ai.executor});
   await until(() => w.google.state.sent.length === 1, 'the send');

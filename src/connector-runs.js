@@ -11,6 +11,7 @@ import {cleanText} from '../shared/core.js';
 import {logActivity} from '../shared/activity-log.js';
 import {useConnector} from './connector-use.js';
 import {holdSend} from './held-sends.js';
+import {argsHash} from '../shared/connectors.js';
 
 /** Total a run keeps of what its connectors answered. */
 const MAX_PAGE_CHARS = 5000;
@@ -28,20 +29,35 @@ const missing = (connector, call) => (!connector
   ? `${call.connectorName} was removed, so nothing was done.`
   : (connector.status || 'ready') === 'reconnect' ? `${connector.name} needs to be reconnected (Settings → Connectors), so nothing was done.` : '');
 
-/** Make every cleared call of this run. Returns false when the run was stopped meanwhile (its results are dropped),
- * true otherwise. `say(state, run, line)` writes a line into the run's conversation. */
+/** A call its ask did not show: the arguments changed after the owner was asked. */
+const changed = (state, call) => {
+  const ask = call.askId ? (state.asks || []).find(a => a.id === call.askId) : null;
+  return ask?.argsHash && ask.argsHash !== argsHash(call.args) ? 'The request changed after you were asked, so nothing was done.' : '';
+};
+const UNKNOWN = 'The app stopped while this was running, so it may or may not have happened. It was not tried again; check before asking for it again.';
+
+/** Make every cleared call of this run. Each one is claimed (`running`) in its own store update before it is made,
+ * then marked `done` or `failed`; a call still `running` when this starts was cut by a crash or restart, so it becomes
+ * `unknown`, is never made again, and the bot is told it may or may not have happened. Returns false when the run was
+ * stopped meanwhile (its results are dropped), true otherwise. `say(state, run, line)` writes a line into the run's conversation. */
 export async function runConnectorCalls(store, runId, {say, now = () => new Date().toISOString()}) {
   const first = store.read().groupRuns.find(r => r.id === runId);
+  const cut = (first?.connectorCalls || []).filter(c => c.status === 'running');
   const ready = (first?.connectorCalls || []).filter(c => c.status === 'go');
-  if (!ready.length) return true;
-  const results = [];
+  if (!ready.length && !cut.length) return true;
+  const results = cut.map(call => ({call, outcome: {ok: false, unknown: true, text: UNKNOWN}}));
   for (const call of ready) {
     const state = store.read();
     if (state.groupRuns.find(r => r.id === runId)?.status !== 'running') return false;
     const connector = (state.connectors || []).find(c => c.id === call.connectorId) || null;
     let outcome;
-    const blocked = missing(connector, call);
+    const blocked = missing(connector, call) || changed(state, call);
     if (blocked) outcome = {ok: false, text: blocked};
+    else if (!await store.update(s => {
+      const stored = (s.groupRuns || []).find(r => r.id === runId && r.status === 'running')?.connectorCalls?.find(c => c.id === call.id && c.status === 'go');
+      if (stored) stored.status = 'running';
+      return Boolean(stored);
+    })) return false;
     else {
       try { outcome = call.hold ? await holdSend(store, connector, call) : await useConnector(store, connector, call.tool, call.args); }
       catch (error) { outcome = {ok: false, text: cleanText(error?.message, 300) || 'The connector failed.'}; }
@@ -54,14 +70,14 @@ export async function runConnectorCalls(store, runId, {say, now = () => new Date
     let page = live.connectorPage || '';
     for (const {call, outcome} of results) {
       const stored = (live.connectorCalls || []).find(c => c.id === call.id);
-      if (stored) { stored.status = outcome.ok ? 'done' : 'failed'; delete stored.args; }
+      if (stored) { stored.status = outcome.unknown ? 'unknown' : outcome.ok ? 'done' : 'failed'; delete stored.args; }
       const body = defang(outcome.text);
-      page += `${page ? '\n\n---\n\n' : ''}Result of ${call.connectorName} · ${call.tool}${outcome.ok ? '' : ' (it reported an error)'}:\n${body}`;
+      page += `${page ? '\n\n---\n\n' : ''}Result of ${call.connectorName} · ${call.tool}${outcome.ok ? '' : outcome.unknown ? ' (unknown)' : ' (it reported an error)'}:\n${body}`;
       // A write that went out is something that left the app. A held send already logged itself, with its Undo window.
       if (outcome.ok && call.write && !outcome.activityId) logActivity(s, {botId: call.botId, kind: 'outside', text: outsideText(call), threadId: call.chatKey});
       say(s, live, {
         id: `connector-${call.id}`.slice(0, 64), role: 'system', kind: outcome.ok ? 'connector' : 'connector-error', connectorId: call.connectorId, at: now(),
-        text: outcome.activityId ? `${call.botName} is sending an email to ${toLine(call.args)}. You can undo it until it goes out.` : outcome.ok ? `${call.botName} used ${call.connectorName}: ${call.tool}.` : `${call.botName} could not use ${call.connectorName}: ${call.tool}. ${cleanText(body, 200)}`,
+        text: outcome.activityId ? `${call.botName} is sending an email to ${toLine(call.args)}. You can undo it until it goes out.` : outcome.ok ? `${call.botName} used ${call.connectorName}: ${call.tool}.` : outcome.unknown ? `${call.botName}'s ${call.connectorName}: ${call.tool} ${UNKNOWN.charAt(0).toLowerCase()}${UNKNOWN.slice(1)}` : `${call.botName} could not use ${call.connectorName}: ${call.tool}. ${cleanText(body, 200)}`,
         ...(outcome.activityId ? {activityId: outcome.activityId, undoUntil: outcome.undoUntil} : {}),
       });
     }

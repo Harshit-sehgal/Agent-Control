@@ -7,21 +7,21 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=b4d3410ab6';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=b4d3410ab6';
-import {requestOfMessage} from './bot-browser.js?v=b4d3410ab6';
-import {validHttpUrl} from './core.js?v=b4d3410ab6';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=b4d3410ab6';
-import {botStatus, botIsManager, chatStatus, jobOf} from './ui-company.js?v=b4d3410ab6';
-import {hasJob} from './ui-profile-model.js?v=b4d3410ab6';
-import {feed} from './ui-feed.js?v=b4d3410ab6';
-import {askCard} from './ui-asks.js?v=b4d3410ab6';
-import {face, botColor} from './ui-face.js?v=b4d3410ab6';
-import {esc, icon, btn, dayLabel, tag} from './ui-kit.js?v=b4d3410ab6';
-import {store, conversation, findBot, groups, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync} from './ui-store.js?v=b4d3410ab6';
-import {runAnyway, startThread, answerLimit} from './ui-chat.js?v=b4d3410ab6';
-import {toast} from './ui-dialogs.js?v=b4d3410ab6';
-import {siteChip} from './ui-computer-view.js?v=b4d3410ab6';
+import {OFFJOB_CHOICES} from './off-job.js?v=1549188fc1';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=1549188fc1';
+import {requestOfMessage} from './bot-browser.js?v=1549188fc1';
+import {validHttpUrl} from './core.js?v=1549188fc1';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=1549188fc1';
+import {botStatus, botIsManager, chatStatus, jobOf} from './ui-company.js?v=1549188fc1';
+import {hasJob} from './ui-profile-model.js?v=1549188fc1';
+import {feed} from './ui-feed.js?v=1549188fc1';
+import {askCard} from './ui-asks.js?v=1549188fc1';
+import {face, botColor} from './ui-face.js?v=1549188fc1';
+import {esc, icon, btn, dayLabel, tag} from './ui-kit.js?v=1549188fc1';
+import {store, conversation, findBot, groups, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync} from './ui-store.js?v=1549188fc1';
+import {runAnyway, startThread, answerLimit} from './ui-chat.js?v=1549188fc1';
+import {toast} from './ui-dialogs.js?v=1549188fc1';
+import {siteChip} from './ui-computer-view.js?v=1549188fc1';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -110,7 +110,9 @@ function askEntry({message: m}, conv) {
   const choose = ({id, label, primary}) => btn(label, 'ask-answer', {id: card.askId, small: true, kind: primary ? 'primary' : 'quiet', data: {choice: id}});
   const acts = canWrite() ? `<div class="acts">${card.choices.map(choose).join('')}</div>` : '<small>Only a member can answer.</small>';
   const target = card.target ? `<a href="${esc(safeHref(card.target))}" target="_blank" rel="noopener noreferrer">${esc(card.target)}</a>` : '';
-  return `<div class="cv-wait">${botFace(bot, name, 36, {state: 'waiting'})}<span>${esc(name)} is waiting on you<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></span></div><div class="cv-card" data-ask="${esc(m.askId)}"><p>${esc(m.text)}</p>${target}${card.note ? `<small>${esc(card.note)}</small>` : ''}${acts}</div>`;
+  // The whole message a send or draft would carry, folded under the sentence so the owner can read every word before saying yes.
+  const body = card.body ? `<details class="cv-ask-body"><summary>Full message${icon('chevron', 13)}</summary><pre>${esc(card.body)}</pre></details>` : '';
+  return `<div class="cv-wait">${botFace(bot, name, 36, {state: 'waiting'})}<span>${esc(name)} is waiting on you<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></span></div><div class="cv-card" data-ask="${esc(m.askId)}"><p>${esc(m.text)}</p>${target}${body}${card.note ? `<small>${esc(card.note)}</small>` : ''}${acts}</div>`;
 }
 
 /** A system line. The newest note of a run also carries what the run offers. */
