@@ -345,6 +345,10 @@ button.tog:hover{background:var(--sunk);color:var(--fg)}
 .sfind input{width:100%;border:0;border-radius:99px;background:var(--raise);padding:9px 14px;font-size:13.5px;color:var(--fg);outline:none;margin-bottom:8px}
 .sfind input:focus{box-shadow:0 0 0 1.5px var(--violet)}
 .sshelf{display:flex;justify-content:center;flex-wrap:wrap;gap:6px 18px;padding:6px 4px 18px}
+.sshelf.empty{min-height:64px;align-items:center;border:1.5px dashed var(--line2);border-radius:16px;margin:4px 6px 14px;color:var(--muted);font-size:12.5px}
+body.sorting .slist{overflow:visible}
+.side .srw.drop-on,.side .spin.drop-on{background:color-mix(in srgb,var(--mint) 16%,transparent);box-shadow:inset 0 0 0 1.5px var(--mint)!important}
+.side .dragging{background:var(--raise)}
 .pick{height:100%;display:grid;place-content:center;justify-items:center;gap:6px;color:var(--muted);font-size:15px}.pick p{margin:0}.pick .link{font-size:13px}
 .spin{display:flex;flex-direction:column;align-items:center;gap:8px;width:104px;padding:6px 0;border-radius:var(--r);font-size:12.5px;color:var(--soft)}
 .spin .face.l{--s:72px}.spin:hover,.spin.on{color:var(--fg)}.spin.on{background:var(--raise)}
@@ -775,15 +779,15 @@ function closeSearch(){$('sres').hidden=true}
 const DESK=matchMedia('(min-width:1024px)');
 const curBot=()=>{if(S.view!=='thread')return null;const t=S.threads.find(x=>x.id===S.cur);return t&&(t.dm||t.owner)};
 function sideList(q){q=(q||'').trim().toLowerCase();const cur=curBot(),p=pending();
-  let list=BOTS.filter(vis).filter(b=>!isPin('bots',b.id)).sort((x,y)=>((lastT(y)||{}).at||0)-((lastT(x)||{}).at||0));
+  let list=arrange(null,'side',BOTS.filter(vis).filter(b=>!isPin('bots',b.id)));
   if(q)list=BOTS.filter(vis).filter(b=>(b.name+' '+b.job).toLowerCase().includes(q));
-  const rows=list.map(b=>{const st=stateOf(b),t=lastT(b),ask=p.find(x=>x.bot===b.id);return `<button class="srw${cur===b.id?' on':''}" data-dm="${b.id}">${face(b,'m',st==='waiting'?'wait':undefined)}<span class="w"><b>${esc(b.name)}</b><small>${st==='working'?'working…':ask?`<span class="wt">Wants to ${esc(ask.action)}</span>`:esc(preview(t)||short(b))}</small></span>${ask?'<span class="badge">1</span>':''}</button>`}).join('');
+  const rows=list.map(b=>{const st=stateOf(b),t=lastT(b),ask=p.find(x=>x.bot===b.id);return `<button class="srw${cur===b.id?' on':''}" data-dm="${b.id}"${q?'':` data-sid="${b.id}"`}>${face(b,'m',st==='waiting'?'wait':undefined)}<span class="w"><b>${esc(b.name)}</b><small>${st==='working'?'working…':ask?`<span class="wt">Wants to ${esc(ask.action)}</span>`:esc(preview(t)||short(b))}</small></span>${ask?'<span class="badge">1</span>':''}</button>`}).join('');
   return rows+(q?threadList(q).replace(/No thread matches that\./,''):'')||'<p class="sub" style="padding:8px">No bot matches that.</p>'}
 function sideHTML(){const pins=arrange(null,'shelf',BOTS.filter(b=>isPin('bots',b.id)&&vis(b))),cur=curBot(),w=new Set(pending().map(x=>x.thread)).size;
   return `<div class="stop"><button class="sib" data-sidesearch aria-label="Search bots and threads" title="Search">${'<svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>'}</button><button class="sib" data-newbot aria-label="New bot" title="New bot"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button></div>
   <div class="sfind" ${S.sideQ?'':'hidden'}><input id="sideq" type="search" placeholder="Search bots and threads" aria-label="Search bots and threads" autocomplete="off" value="${esc(S.sideQ||'')}"></div>
-  ${pins.length?`<div class="sshelf">${pins.map(b=>`<button class="spin${cur===b.id?' on':''}" data-dm="${b.id}">${face(b,'l',stateOf(b)==='waiting'?'wait':undefined)}<span>${esc(b.name)}</span></button>`).join('')}</div>`:''}
-  <div class="slist" id="sidelist">${sideList(S.sideQ)}</div>
+  ${pins.length?'':'<div class="sshelf empty" data-sortkey="shelf"><span>Drag a bot here to pin it</span></div>'}${pins.length?`<div class="sshelf" data-sortkey="shelf">${pins.map(b=>`<button class="spin${cur===b.id?' on':''}" data-dm="${b.id}" data-sid="${b.id}">${face(b,'l',stateOf(b)==='waiting'?'wait':undefined)}<span>${esc(b.name)}</span></button>`).join('')}</div>`:''}
+  <div class="slist" id="sidelist" data-sortkey="side">${sideList(S.sideQ)}</div>
   <div class="sfoot"><button class="sme" data-me aria-label="Your account and settings"><span class="ini av sm">${initials(ME.name)}</span><span class="w">${esc(ME.name)}</span>${pending().length?`<span class="badge">${pending().length}</span>`:''}</button><button class="sib" data-new aria-label="New thread" title="New thread"><svg class="i" viewBox="0 0 24 24"><path d="M6 3.5h9.5A2.5 2.5 0 0 1 18 6v12.5a2 2 0 0 1-2 2H6z"/><path d="M6 3.5v17M9.5 8h5M9.5 11.5h3"/><path d="m20.5 9.5-6.2 6.2-2.3.6.6-2.3 6.2-6.2a1.2 1.2 0 0 1 1.7 1.7z"/></svg>${w?`<span class="badge">${w}</span>`:''}</button></div>`}
 function renderMain(){
   const app=$('app');app.classList.toggle('has-composer',S.view!=='bots');
@@ -1059,9 +1063,9 @@ document.addEventListener('keydown',e=>{
 let drag=null,G=null,lastDown=null,suppressClick=false,pendingOpen=null,lastType='mouse';
 const EASE_GLIDE='cubic-bezier(.2,.9,.25,1)';
 const famOf=k=>(k||'').split(':')[0];
-const pinKind=k=>({desks:'desks',team:'bots',chats:'bots',tree:'bots',shelf:'bots'})[famOf(k)];
+const pinKind=k=>({desks:'desks',team:'bots',chats:'bots',tree:'bots',shelf:'bots',side:'bots'})[famOf(k)];
 const bossOfKey=k=>{const id=k.split(':')[1];return id==='solo'||id==='atlas'?null:id};
-const homeItem=t=>{if(!t.closest||!t.closest('#root .home'))return null;if(t.closest('.tog,.seg,.cfilt,.hv,.prof,.recent,.unhide,.head'))return null;const it=t.closest('[data-sid]');return it&&it.parentElement?.dataset.sortkey?it:null};
+const homeItem=t=>{if(!t.closest||!t.closest('#root .home,#root .side'))return null;if(t.closest('.tog,.seg,.cfilt,.hv,.prof,.recent,.unhide,.head'))return null;const it=t.closest('[data-sid]');return it&&it.parentElement?.dataset.sortkey?it:null};
 function flip(boxes,fn){const els=[...new Set(boxes)].flatMap(b=>[...b.children]).filter(x=>x!==drag?.item&&x.dataset.sid),r0=new Map(els.map(x=>[x,x.getBoundingClientRect()]));
   els.forEach(x=>x.getAnimations().forEach(an=>an.cancel()));fn();
   els.forEach(x=>{const a=r0.get(x),b=x.getBoundingClientRect(),dx=a.left-b.left,dy=a.top-b.top;if(Math.abs(dx)+Math.abs(dy)>.5)x.animate([{transform:`translate(${dx}px,${dy}px)`},{transform:'none'}],{duration:340,easing:EASE_GLIDE})})}
@@ -1080,24 +1084,27 @@ function dragFrame(){const d=drag;if(!d)return;
   d.rot+=(Math.max(-3.5,Math.min(3.5,(d.x-d.px)*.35))-d.rot)*.2;d.px=d.x;
   const v=document.querySelector('#root .view');if(v){const vr=v.getBoundingClientRect();if(d.y<vr.top+70)v.scrollTop-=10;else if(d.y>vr.bottom-90)v.scrollTop+=10}
   if(Date.now()>d.lock){const it=d.item;it.style.transform='';
-    const sh=document.querySelector('#root .shelf');if(sh){const r=sh.getBoundingClientRect();
+    if(d.lead){const hit=[...document.querySelectorAll('#root .side .slist [data-sid]')].find(x=>{if(x===it)return false;const b=by(x.dataset.sid),r=x.getBoundingClientRect();return b&&(isMgr(b)||b.id==='atlas')&&b.id!==by(it.dataset.sid).boss&&!(b.id==='atlas'&&!by(it.dataset.sid).boss)&&d.x>=r.left&&d.x<=r.right&&d.y>=r.top+r.height*.28&&d.y<=r.bottom-r.height*.28});
+      document.querySelectorAll('.side .drop-on').forEach(x=>{if(x!==hit)x.classList.remove('drop-on')});d.toLead=hit?hit.dataset.sid:null;if(hit)hit.classList.add('drop-on')}
+    const sh=d.toLead?null:document.querySelector('#root .shelf,#root .sshelf');if(sh){const r=sh.getBoundingClientRect();
       if(d.box0===sh){d.unpin=d.y>r.bottom+40;it.classList.toggle('unpinning',d.unpin)}
-      else{d.toShelf=!!d.pinable&&d.y>=r.top&&d.y<=r.bottom+12;sh.classList.toggle('drop-on',d.toShelf)}}
+      else{d.toShelf=!!d.pinable&&d.y>=r.top&&d.y<=r.bottom+(sh.classList.contains('sshelf')?-6:12);sh.classList.toggle('drop-on',d.toShelf)}}
     if(d.cross&&!d.toShelf){const t=dropTarget(d);document.querySelectorAll('.drop-on').forEach(x=>{if(x!==t?.host)x.classList.remove('drop-on')});
       if(t){if(t.box!==d.box0||t.box!==d.box)t.host.classList.toggle('drop-on',t.box!==d.box0);
         if(t.box!==d.box){t.open&&t.open();const after=[...t.box.children].find(x=>x!==it&&x.dataset.sid&&(r=>d.y<r.top+r.height/2)(x.getBoundingClientRect()));
           d.lock=Date.now()+160;flip([d.box,t.box],()=>t.box.insertBefore(it,after||null));d.box=t.box}}}
-    if(Date.now()>d.lock&&!d.toShelf&&!d.unpin){const kids=[...d.box.children],ii=kids.indexOf(it),ir=it.getBoundingClientRect();
+    if(Date.now()>d.lock&&!d.toShelf&&!d.unpin&&!d.toLead){const kids=[...d.box.children],ii=kids.indexOf(it),ir=it.getBoundingClientRect();
       const t=kids.find(x=>{if(x===it||!x.dataset.sid)return false;const r=x.getBoundingClientRect();return d.x>=r.left&&d.x<=r.right&&d.y>=r.top&&d.y<=r.bottom});
       if(t){const r=t.getBoundingClientRect(),ti=kids.indexOf(t),row=Math.abs(r.top-ir.top)<12,mid=row?(r.left+r.width/2):(r.top+r.height/2),pos=row?d.x:d.y;
         if(ti<ii?pos<mid:pos>mid){d.lock=Date.now()+120;flip([d.box],()=>d.box.insertBefore(it,ti<ii?t:t.nextSibling))}}}}
   place();requestAnimationFrame(dragFrame)}
 function startDrag(item,x0,y0,x,y){closeMenu();markPins();item.getAnimations().forEach(an=>an.cancel());const r=item.getBoundingClientRect(),box=item.parentElement,key=box.dataset.sortkey,b=by(item.dataset.sid);
-  drag={item,box,box0:box,gx:x0-r.left,gy:y0-r.top,x,y,px:x,tx:0,ty:0,rot:0,lock:0,cross:(famOf(key)==='team'||famOf(key)==='tree')&&!!b&&roleOf(b)==='Bot',pinable:!!b&&!isPin('bots',b.id)};
+  drag={item,box,box0:box,gx:x0-r.left,gy:y0-r.top,x,y,px:x,tx:0,ty:0,rot:0,lock:0,cross:(famOf(key)==='team'||famOf(key)==='tree')&&!!b&&roleOf(b)==='Bot',pinable:!!b&&!isPin('bots',b.id),lead:famOf(key)==='side'&&!!b&&roleOf(b)==='Bot'};
   item.style.transition='box-shadow .25s ease-out';item.classList.add('dragging');document.body.classList.add('sorting');requestAnimationFrame(dragFrame)}
 function endDrag(){const d=drag;drag=null;const it=d.item;document.querySelectorAll('.drop-on').forEach(x=>x.classList.remove('drop-on'));
   it.style.transition='transform .45s cubic-bezier(.3,1.35,.5,1),box-shadow .35s ease-out';it.style.transform='';it.classList.remove('dragging');
   document.body.classList.remove('sorting');setTimeout(()=>{it.style.transition=''},480);it.classList.remove('unpinning');
+  if(d.toLead){const id=it.dataset.sid,nb=d.toLead==='atlas'?null:d.toLead;setTimeout(()=>moveBot(id,nb),260);return}
   if(d.toShelf||d.unpin){const id=it.dataset.sid,arr=S.pins.bots;d.toShelf?arr.includes(id)||arr.push(id):arr.splice(arr.indexOf(id),1);saveLayout();setTimeout(renderMain,d.toShelf?260:0);return}
   saveOrder(d.box,it);
   if(d.box!==d.box0){saveOrder(d.box0);const b=by(it.dataset.sid),nb=bossOfKey(d.box.dataset.sortkey);b.boss=nb;if(nb)S.open[nb]=true;log('atlas','bots',`moved ${b.name} ${nb?'under '+by(nb).name:'to Solo'}`);setTimeout(renderMain,520)}}
