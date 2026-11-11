@@ -348,9 +348,14 @@ test('bot-task payloads validate, check their target, and an interval re-arms',(
   assert.equal(once.payload.label,'Summarise the day');assert.equal(once.title,'Scheduled: Summarise the day');
   const every=enqueueTask(s,{kind:'bot-task',payload:{groupId:'g',botId:null,message:'Check in',label:'Standup',kind:'interval',intervalMinutes:30}}).task;
   assert.equal(every.intervalMinutes,30);assert.equal(every.payload.botId,null);
-  const now=Date.now()+1000;
+  const planned=Date.parse(every.runAt),now=Date.now()+1000;
   claimTasks(s,{workerId:'w',now});completeTask(s,every.id,null,now);
-  assert.equal(every.status,'queued');assert.equal(Date.parse(every.runAt),now+30*60000);
+  // The next run counts from the planned time, not the finish, so a daily 08:00 stays at 08:00.
+  assert.equal(every.status,'queued');assert.equal(Date.parse(every.runAt),planned+30*60000);
+  // A run that finished after missing windows skips to the next window ahead, not into the past.
+  const late=Date.parse(every.runAt)+95*60000;
+  claimTasks(s,{workerId:'w',now:late});completeTask(s,every.id,null,late);
+  assert.equal(Date.parse(every.runAt),planned+5*30*60000);
 });
 
 test('runBotTask posts into the chat and queues a run, or explains why it skipped',async()=>tempStore(async store=>{

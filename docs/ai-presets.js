@@ -210,3 +210,29 @@ export function effortLabel(value) {
   const level = EFFORT_LEVELS.find(l => l.id === cleanEffort(value));
   return level ? `${level.label} effort` : EFFORT_DEFAULT_LABEL;
 }
+
+/** The models a subscription on this computer can run, as [id, label]. The `claude` command takes the
+ * shorthands (always that family's newest) and every full id; the list is Anthropic's current and still
+ * served models (Nov 2026). Codex's names are the ones a ChatGPT sign-in offers (mid-2026); its list
+ * changes often, so the picker's Other… row still takes any id. */
+export const CLI_MODELS = {
+  claude: [
+    ['opus', 'Opus · the newest Opus'],
+    ['sonnet', 'Sonnet · the newest Sonnet'],
+    ['haiku', 'Haiku · the newest Haiku'],
+    ...[
+      ['fable', '5.2'], ['fable', '5.1'], ['fable', '5'],
+      ['opus', '5.5'], ['opus', '5'], ['opus', '4.8'], ['opus', '4.7'], ['opus', '4.6'], ['opus', '4.5'],
+      ['sonnet', '5.5'], ['sonnet', '5'], ['sonnet', '4.6'], ['sonnet', '4.5'],
+      ['haiku', '5.5'], ['haiku', '4.5'],
+    ].map(([family, version]) => {
+      const id = `claude-${family}-${version.replace('.', '-')}`;
+      return [id, `Claude ${family[0].toUpperCase()}${family.slice(1)} ${version} · ${id}`];
+    }),
+  ],
+  codex: [
+    ['gpt-5.5', 'GPT-5.5 · gpt-5.5'],
+    ['gpt-5.4', 'GPT-5.4 · gpt-5.4'],
+    ['gpt-5.3-codex', 'GPT-5.3-Codex · gpt-5.3-codex'],
+  ],
+};

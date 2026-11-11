@@ -6,7 +6,7 @@
  * These transitions are pure and mirror `workflow.js`: the Node worker and the
  * browser-local demo both run them, so the two backends cannot drift.
  */
-import {activity, cleanText} from './core.js?v=ded1274e22';
+import {activity, cleanText} from './core.js?v=697f915fc5';
 
 export const MAX_ATTEMPTS_DEFAULT = 5;
 
@@ -46,7 +46,9 @@ const PAYLOAD_KINDS = {
     if (!message) fail('A scheduled bot task needs a message.');
     if (message.length > 2000) fail('The message must be 2000 characters or fewer.');
     if (!['once', 'interval'].includes(body.kind)) fail('Choose once or interval.');
-    return {groupId, botId, message, label: cleanText(body.label, 200) || message.slice(0, 60), ...timing(body)};
+    // A time of day ("08:00") is kept only for the words the owner reads; the clock is `nextAt`.
+    const at = /^\d{2}:\d{2}$/.test(String(body.at || '')) ? body.at : null;
+    return {groupId, botId, message, label: cleanText(body.label, 200) || message.slice(0, 60), ...timing(body), ...(at ? {at} : {})};
   },
   'group-run': body => ({groupId: cleanText(body.groupId, 64), message: cleanText(body.message, 4000), directBotId: cleanText(body.directBotId, 64) || null}),
   'agent-job': body => ({action: cleanText(body.action, 64), params: body.params && typeof body.params === 'object' ? body.params : {}, agentId: cleanText(body.agentId, 64) || null}),
@@ -72,7 +74,11 @@ function timing(body) {
   }
   const intervalMinutes = Number(body.intervalMinutes);
   if (!Number.isInteger(intervalMinutes) || intervalMinutes < 1 || intervalMinutes > 10080) fail('Interval must be 1\u201310080 minutes.');
-  return {kind: 'interval', intervalMinutes};
+  // An interval may name its first run ("every day at 08:00" starts at the next 08:00); without one it starts now.
+  if (body.nextAt === undefined || body.nextAt === null || body.nextAt === '') return {kind: 'interval', intervalMinutes};
+  const first = Date.parse(body.nextAt);
+  if (!Number.isFinite(first) || first < Date.now() - 60000 || first > Date.now() + 8 * 86400000) fail('The first run must be within the next week.');
+  return {kind: 'interval', intervalMinutes, nextAt: new Date(first).toISOString()};
 }
 
 export const taskKinds = () => Object.keys(PAYLOAD_KINDS);
@@ -212,7 +218,12 @@ export function completeTask(state, id, result = null, now = Date.now()) {
   // A recurring task re-arms itself for the next window instead of finishing.
   if (task.intervalMinutes) {
     task.status = 'queued';
-    task.runAt = new Date(now + task.intervalMinutes * 60000).toISOString();
+    // From the planned time, not the finish: "every day at 08:00" stays at 08:00 instead of
+    // drifting by however long each run took. A run that missed windows skips to the next one ahead.
+    const step = task.intervalMinutes * 60000, planned = Date.parse(task.runAt);
+    let next = Number.isFinite(planned) && planned <= now ? planned + step : now + step;
+    if (next <= now) next += Math.ceil((now - next + 1) / step) * step;
+    task.runAt = new Date(next).toISOString();
     task.completedAt = null;
     task.attempts = 0;
   }
@@ -279,7 +290,11 @@ export function failTask(state, id, message, now = Date.now(), {conflict = false
       clearRetryAnchor(task);
       task.status = 'queued';
       task.lastError = error;
-      task.runAt = new Date(now + task.intervalMinutes * 60000).toISOString();
+      // From the planned time, not the finish, as in completeTask.
+      const step = task.intervalMinutes * 60000, planned = Date.parse(task.runAt);
+      let next = Number.isFinite(planned) && planned <= now ? planned + step : now + step;
+      if (next <= now) next += Math.ceil((now - next + 1) / step) * step;
+      task.runAt = new Date(next).toISOString();
       task.completedAt = null;
       task.attempts = 0;
       activity(state, 'task-retry', `Task missed its window and will run again at its next one: ${task.title}`, {taskId: task.id});

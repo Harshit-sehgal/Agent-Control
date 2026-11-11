@@ -32,6 +32,16 @@ export function offlineSetup(request, bots = [], self = null) {
   if (/\b(ask|check with) me (before|between) (each|every)\b|\bapprove (each|every) step\b/i.test(text)) return fence({action: 'team', settings: {checkpoints: true}});
   if (/\b(stop asking|don'?t ask me)\b[^.?!]*\bstep/i.test(text)) return fence({action: 'team', settings: {checkpoints: false}});
   const who = named?.name || (self && /\b(you|your|yourself)\b/i.test(text) ? 'me' : '');
+  // "every morning at 8, sum up my inbox": a timer for the named bot, or for this one.
+  const often = text.match(/\b(?:every|each)\s+(morning|day|evening|night|hour|week)\b/i);
+  if (often && !HIRE.test(text) && (who || self)) {
+    const at = text.match(/\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i);
+    let hour = at ? Number(at[1]) % 12 + (/pm/i.test(at[3] || '') ? 12 : 0) : null;
+    if (at && !at[3] && Number(at[1]) > 12) hour = Number(at[1]);
+    if (at && !at[3] && /evening|night/i.test(often[1]) && hour < 12) hour += 12;
+    const what = text.replace(often[0], '').replace(at?.[0] || '', '').replace(/^[\s,:;-]+/, '').replace(named ? new RegExp(`^${named.name}\\b[\\s,:;-]*`, 'i') : /$^/, '').replace(/^[\s,:;-]*(please\s+)?(can you\s+|could you\s+)?/i, '').replace(/[.!?]+$/, '').replace(/[\s,]*\bplease$/i, '').replace(/[\s,]+$/, '');
+    if (what.length >= 3) return fence({action: 'schedule', bot: who || 'me', do: what.charAt(0).toUpperCase() + what.slice(1), every: /hour/i.test(often[1]) ? 'hour' : /week/i.test(often[1]) ? 'week' : 'day', ...(hour !== null && hour < 24 ? {at: `${String(hour).padStart(2, '0')}:${at[2] || '00'}`} : {})});
+  }
   if (!who) return '';
   if (/\b(switch|turn)\b[^.?!]*\boff\b|\bdisable\b/i.test(text)) return fence({action: 'settings', bot: who, settings: {enabled: false}});
   if (/\b(switch|turn)\b[^.?!]*\bon\b|\benable\b/i.test(text)) return fence({action: 'settings', bot: who, settings: {enabled: true}});

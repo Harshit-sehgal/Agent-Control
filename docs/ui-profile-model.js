@@ -5,13 +5,14 @@
  *
  * A bot's manager is settings.reportsTo (company.js); "manager" is simply a bot
  * with reports, so any bot can become one by receiving a report. */
-import {companyBots, primaryOf, managerOf, reportsOf, teamOf} from './company.js?v=ded1274e22';
-import {firstUnusedTint} from './bot-create.js?v=ded1274e22';
-import {TINT_COUNT, dayLabel} from './ui-kit.js?v=ded1274e22';
-import {jobOf} from './ui-company.js?v=ded1274e22';
-import {ACTIVITY_CHIPS} from './activity-log.js?v=ded1274e22';
-import {grantRows} from './ui-asks.js?v=ded1274e22';
-import {cleanEffort, effortLabel, EFFORT_LEVELS} from './ai-presets.js?v=ded1274e22';
+import {companyBots, primaryOf, managerOf, reportsOf, teamOf} from './company.js?v=697f915fc5';
+import {firstUnusedTint} from './bot-create.js?v=697f915fc5';
+import {TINT_COUNT, dayLabel} from './ui-kit.js?v=697f915fc5';
+import {jobOf} from './ui-company.js?v=697f915fc5';
+import {ACTIVITY_CHIPS} from './activity-log.js?v=697f915fc5';
+import {grantRows} from './ui-asks.js?v=697f915fc5';
+import {cleanEffort, effortLabel, EFFORT_LEVELS} from './ai-presets.js?v=697f915fc5';
+import {scheduleRows} from './schedules.js?v=697f915fc5';
 
 /** What a bot made without a job holds until the owner's first chat message
  * replaces it (the profile, the list and the chat all treat it as "no job yet"). */
@@ -122,10 +123,12 @@ export function profileRows(state, botId, {activityCount = 0, canPickModel = tru
   const bot = botOf(state, botId);
   if (!bot) return [];
   const notes = memoryNotes(state, botId).length, acts = Number(activityCount) || 0;
-  const rules = grantRows(state, botId).length, team = directReports(state, botId).length;
+  const rules = grantRows(state, botId).length, team = directReports(state, botId).length, timers = scheduleRows(state, botId);
   const rows = [
     {key: 'memory', label: 'Memory', value: notes ? plural(notes, 'note') : 'Empty'},
     {key: 'activity', label: 'Activity', value: acts ? String(acts) : ''},
+    // One schedule reads its when ("every day at 08:00"); more read as a count.
+    {key: 'schedule', label: 'Schedule', value: timers.length === 1 ? timers[0].when : timers.length ? plural(timers.length, 'task') : 'None'},
     {key: 'permissions', label: 'Permissions', value: rules ? plural(rules, 'rule') : 'None'},
     // With nothing to pick (the demo has no model) the row is only a value, not a door to an empty page.
     {key: 'model', label: 'Model', value: modelLine(state, botId), ...(canPickModel ? {} : {plain: true})},

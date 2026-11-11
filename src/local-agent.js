@@ -15,6 +15,7 @@
  * unless the operator set either, and polls every 2s (`AGENT_POLL_MS`) so an Allow is picked up at once. That allowlist adds nothing on a device the server itself starts, and
  * every page still waits for the owner's ask, while the agent's egress guard still refuses private and
  * local addresses. */
+import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -133,15 +134,23 @@ export const runningAgentDataFile = () => running?.dataFile ?? null;
 export const localMcpServers = ({dataFile}) => Object.keys(localConfig(dataFile).config.mcpServers || {}).sort();
 
 /** Add or replace a server; the running agent restarts to read it. Returns the server names. */
-export function addLocalMcpServer({dataFile, name, command}) {
+export function addLocalMcpServer({dataFile, name, command, env}) {
   const label = String(name ?? '').trim(), line = String(command ?? '');
+  // An app's token (from the Connect apps catalogue) rides as env, kept only in this 0600 config.
+  const vars = env && typeof env === 'object' ? Object.entries(env) : [];
+  for (const [key, value] of vars) {
+    if (!/^[A-Z_][A-Z0-9_]{0,63}$/.test(key)) throw Object.assign(new Error(`"${String(key).slice(0, 40)}" is not an environment variable name.`), {status: 400});
+    if (typeof value !== 'string' || /[\r\n]/.test(value) || value.length > 4000) throw Object.assign(new Error(`Give ${key} on one line.`), {status: 400});
+  }
   if (!SERVER_NAME.test(label)) throw Object.assign(new Error('Name the server with lowercase letters, digits and dashes (up to 40), like files.'), {status: 400});
   if (/[\r\n]/.test(line)) throw Object.assign(new Error('Give the command on one line.'), {status: 400});
   const words = commandWords(line.trim());
   if (!words.length || line.length > 1000) throw Object.assign(new Error('Give the command that starts the server, like npx -y some-mcp-server.'), {status: 400});
   const {file, config} = localConfig(dataFile);
-  const [cmd, ...args] = words;
-  writeConfig(file, {...config, mcpServers: {...(config.mcpServers || {}), [label]: {command: cmd, args}}});
+  // No shell runs it, so a folder typed as ~/notes is made this user's home here.
+  const [cmd, ...args] = words.map(w => (w === '~' || w.startsWith('~/') ? os.homedir() + w.slice(1) : w));
+  const entry = {command: cmd, args, ...(vars.length ? {env: Object.fromEntries(vars)} : {})};
+  writeConfig(file, {...config, mcpServers: {...(config.mcpServers || {}), [label]: entry}});
   if (running?.configPath === file) running.restart();
   return localMcpServers({dataFile});
 }

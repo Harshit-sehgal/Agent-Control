@@ -168,7 +168,7 @@ export function chatStatus(state, botId) {
   return 'One continuous chat';
 }
 
-const SUBS = ['memory', 'activity', 'permissions', 'model', 'computer', 'team', 'edit'];
+const SUBS = ['memory', 'activity', 'schedule', 'permissions', 'model', 'computer', 'team', 'edit'];
 const OLD_INFO = {edit: 'edit', memory: 'memory', tasks: 'activity'};
 const OLD_PAGES = ['ai', 'team', 'agents', 'data', 'notifications', 'workspaces', 'about'];
 const decode = part => { try { return decodeURIComponent(part); } catch { return part; } };

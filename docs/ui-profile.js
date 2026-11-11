@@ -5,22 +5,23 @@
  *
  * Pages repaint only when the route changes, so each in-place change (a switch, a
  * forgotten note, a picked colour) updates its own node instead. */
-import {SHAPES, COLORS, face} from './ui-face.js?v=ded1274e22';
-import {botStatus, botIsManager} from './ui-company.js?v=ded1274e22';
-import {primaryOf} from './company.js?v=ded1274e22';
-import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker} from './ui-kit.js?v=ded1274e22';
-import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js?v=ded1274e22';
-import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=ded1274e22';
-import {GRANT_LABELS} from './asks.js?v=ded1274e22';
-import {grantRows, allGrantRows, grantUrl} from './ui-asks.js?v=ded1274e22';
-import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=ded1274e22';
-import {toast, confirmSheet} from './ui-dialogs.js?v=ded1274e22';
-import {sendChat} from './ui-chat.js?v=ded1274e22';
-import {computerPage as computerView, computerLabel, keysOwned} from './ui-computer-view.js?v=ded1274e22';
+import {SHAPES, COLORS, face} from './ui-face.js?v=697f915fc5';
+import {botStatus, botIsManager} from './ui-company.js?v=697f915fc5';
+import {primaryOf} from './company.js?v=697f915fc5';
+import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker} from './ui-kit.js?v=697f915fc5';
+import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js?v=697f915fc5';
+import {scheduleRows, scheduleTaskBody} from './schedules.js?v=697f915fc5';
+import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=697f915fc5';
+import {GRANT_LABELS} from './asks.js?v=697f915fc5';
+import {grantRows, allGrantRows, grantUrl} from './ui-asks.js?v=697f915fc5';
+import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=697f915fc5';
+import {toast, confirmSheet} from './ui-dialogs.js?v=697f915fc5';
+import {sendChat} from './ui-chat.js?v=697f915fc5';
+import {computerPage as computerView, computerLabel, keysOwned} from './ui-computer-view.js?v=697f915fc5';
 import {
   MAX_NAME, hasJob, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, lookOf, newBotDefaults,
   newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, closeTarget,
-} from './ui-profile-model.js?v=ded1274e22';
+} from './ui-profile-model.js?v=697f915fc5';
 
 const el = id => document.getElementById(id);
 const SHAPE_LABELS = {rounded: 'Rounded square', circle: 'Circle', hexagon: 'Hexagon', pebble: 'Pebble', drop: 'Drop', shield: 'Shield', arch: 'Arch', egg: 'Egg', blob: 'Blob', bean: 'Bean'};
@@ -112,7 +113,7 @@ export function openBotMenu(botId, {opener = null, x = null, y = null, touch = n
 
 const MORE = svg('<circle cx="5.5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="18.5" cy="12" r="1.4" fill="currentColor"/>', 20);
 const ROW_ICONS = {memory: 'note', activity: 'pulse', permissions: 'shield', model: 'chip', computer: 'monitor', team: 'people'};
-const SUB_TITLES = {memory: 'Memory', activity: 'Activity', model: 'Model', computer: 'Computer', edit: 'Edit'};
+const SUB_TITLES = {memory: 'Memory', activity: 'Activity', schedule: 'Schedule', model: 'Model', computer: 'Computer', edit: 'Edit'};
 
 const bar = (left, right = '') => `<header class="pr-bar">${left}<span class="pr-grow"></span>${right}</header>`;
 /** The header every inner page shares: a round back button, a centred title. */
@@ -153,6 +154,22 @@ function memoryList(bot) {
   const notes = memoryNotes(store.state, bot.id), write = canWrite();
   if (!notes.length) return `<p class="pr-note">Nothing yet. Tell ${esc(bot.name)} to remember something, or add a note below.</p>`;
   return `<div class="cd">${notes.map(n => `<div class="rw memo"><span class="w">${esc(n.text)}</span>${write ? `<button type="button" class="memo-x" data-action="memory-forget" data-id="${esc(bot.id)}" data-rule="${esc(n.id)}" aria-label="Forget this note">Forget</button>` : ''}</div>`).join('')}</div>`;
+}
+/** A bot's timers: each one says what and when, with Stop; below, one line to add another. The bot sets these
+ * from chat too ("every morning at 8, sum up my inbox"), so the form is the fallback, not the way in. */
+function scheduleList(bot) {
+  const rows = scheduleRows(store.state, bot.id), write = canWrite();
+  if (!rows.length) return `<p class="pr-note">Nothing on a timer. Tell ${esc(bot.name)} something like “every morning at 8, sum up my inbox”, or add one below.</p>`;
+  const next = at => { const d = new Date(at); return Number.isNaN(d.getTime()) ? '' : ` · next ${d.toLocaleString([], {weekday: 'short', hour: '2-digit', minute: '2-digit'})}`; };
+  return `<div class="cd">${rows.map(r => `<div class="rw memo"><span class="w">${esc(r.what)}<small>${esc(r.when)}${esc(next(r.nextAt))}</small></span>${write ? `<button type="button" class="memo-x" data-action="schedule-stop" data-id="${esc(bot.id)}" data-task="${esc(r.id)}" aria-label="Stop this schedule">Stop</button>` : ''}</div>`).join('')}</div>`;
+}
+const SCHEDULE_EVERY = [['1440', 'Every day'], ['60', 'Every hour'], ['10080', 'Every week'], ['', 'Once']];
+function schedulePage(bot) {
+  const write = canWrite();
+  const often = `<select class="input" name="every" aria-label="How often">${SCHEDULE_EVERY.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>`;
+  return `<p class="pr-note">${esc(bot.name)} runs each one in its own chat, and the answer waits for you there.</p>
+    <div id="pr-schedule">${scheduleList(bot)}</div>
+    ${write ? `<form id="schedule-form" class="pr-form" data-bot="${esc(bot.id)}" autocomplete="off">${field('What to do', `<input class="input" name="message" minlength="3" maxlength="2000" placeholder="Sum up my unread email in five lines" required>`)}<div class="sc-when">${field('How often', often)}${field('At', '<input class="input" name="at" type="time" value="08:00">')}</div><button type="submit" class="btn primary wide">Add to schedule</button></form>` : ''}`;
 }
 function memoryPage(bot) {
   const write = canWrite();
@@ -238,6 +255,7 @@ async function loadBotModels() {
   await sync();
   refillBotModels();
 }
+function refillSchedule(botId) { const box = el('pr-schedule'), bot = findBot(botId); if (box && bot) box.innerHTML = scheduleList(bot); }
 function refillBotModels() {
   const form = el('bot-model-form'); if (!form) return;
   const select = form.elements.namedItem('model'), keep = select.value;
@@ -311,7 +329,7 @@ function editPage(bot) {
     note: `To change what ${esc(bot.name)} does, tell it in its chat.`, submit: 'Save'});
 }
 
-const SUBS = {memory: memoryPage, activity: activityPage, model: modelPage, computer: computerPage, edit: editPage};
+const SUBS = {memory: memoryPage, activity: activityPage, schedule: schedulePage, model: modelPage, computer: computerPage, edit: editPage};
 
 export function profileView(route) {
   const bot = findBot(route.profile);
@@ -378,6 +396,7 @@ export const profileActions = {
   'profile-back': b => go(profileBackRoute(b.dataset.id, fromThread), {replace: true}),
   'profile-up': b => go({profile: b.dataset.id}, {replace: true}),
   'profile-sub': b => go({profile: b.dataset.id, sub: b.dataset.sub}),
+  'schedule-stop': async b => { await api(`/api/tasks/${encodeURIComponent(b.dataset.task)}`, 'DELETE'); await sync(); refillSchedule(b.dataset.id); toast('Stopped.'); },
   'bot-menu': b => (botMenuOpen() ? closeBotMenu() : openBotMenu(b.dataset.id, {opener: b})),
   // The rules are listed once, in Settings > Permissions; a profile opens that list for this bot.
   'profile-perm': b => go({settings: `perm/${b.dataset.id}`}),
@@ -437,6 +456,13 @@ export const profileForms = {
     await sync(); form.reset();
     const node = el('pr-memory'), bot = findBot(id); if (node && bot) node.innerHTML = memoryList(bot);
     toast('Remembered.');
+  },
+  'schedule-form': async (form, f) => {
+    const every = Number(f.every) || undefined, group = groupOfBot(form.dataset.bot);
+    if (!group) throw new Error('That bot is no longer in the company.');
+    if (!every && !f.at) throw new Error('Pick a time for a one-off.');
+    await api('/api/tasks', 'POST', scheduleTaskBody({botId: form.dataset.bot, groupId: group.id, message: String(f.message || '').trim(), every, at: f.at || ''}));
+    await sync(); form.reset(); refillSchedule(form.dataset.bot); toast('Added to the schedule.');
   },
   'bot-model-form': async (form, f) => {
     await api(`/api/ai/bots/${form.dataset.bot}`, 'PATCH', {...pickedModel(f), effort: f.effort || ''});

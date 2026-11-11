@@ -127,6 +127,21 @@ test('the owner adds a stdio MCP server to this computer from the app: it lands 
   await handle.stop();
 });
 
+test('an app from the catalogue brings its token as env, and a ~ path means this user\'s home', async () => {
+  const {addLocalMcpServer} = await import('../src/local-agent.js');
+  const os = await import('node:os');
+  const {store, dataFile} = await harness();
+  const handle = startLocalAgent(store, {dataFile, server: 'http://127.0.0.1:4173', env: {}, spawn: () => new FakeChild(), log: () => {}, restartMs: 5});
+  addLocalMcpServer({dataFile, name: 'notion', command: 'npx -y @notionhq/notion-mcp-server', env: {NOTION_TOKEN: 'ntn_x'}});
+  addLocalMcpServer({dataFile, name: 'files', command: 'npx -y @modelcontextprotocol/server-filesystem ~/notes'});
+  const config = JSON.parse(await fs.readFile(handle.configPath, 'utf8'));
+  assert.deepEqual(config.mcpServers.notion, {command: 'npx', args: ['-y', '@notionhq/notion-mcp-server'], env: {NOTION_TOKEN: 'ntn_x'}});
+  assert.equal(config.mcpServers.files.args.at(-1), `${os.homedir()}/notes`);
+  assert.throws(() => addLocalMcpServer({dataFile, name: 'x', command: 'ls', env: {'bad key': 'v'}}), /variable name/);
+  assert.throws(() => addLocalMcpServer({dataFile, name: 'x', command: 'ls', env: {TOKEN: 'a\nb'}}), /one line/);
+  await handle.stop();
+});
+
 test('with no agent on this computer there is nothing to add a server to', async () => {
   const {addLocalMcpServer} = await import('../src/local-agent.js');
   const {dataFile} = await harness();

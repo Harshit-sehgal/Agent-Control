@@ -1,13 +1,15 @@
 /** The model dropdown: a list to pick from, filled from what the provider offers, with Other… for any id. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {CLI_MODELS} from '../shared/ai-presets.js';
 import {modelChoices, chosenModel, OTHER_MODEL} from '../shared/ui-connect-model.js';
 
 const values = rows => rows.map(r => r.value);
 
+const CLAUDE = CLI_MODELS.claude.map(([id]) => id);
 test('a Claude subscription offers the names the claude command knows', () => {
   const rows = modelChoices({provider: {kind: 'local-cli', engine: 'claude'}, defaultLabel: 'Default'});
-  assert.deepEqual(values(rows), ['', 'opus', 'sonnet', 'haiku', OTHER_MODEL]);
+  assert.deepEqual(values(rows), ['', ...CLAUDE, OTHER_MODEL]);
   assert.equal(rows[0].selected, true);
   assert.equal(rows.at(-1).label, 'Other…');
 });
@@ -21,14 +23,14 @@ test('an API provider offers its own chat models, by label when it names them', 
 
 test('a saved id the list does not have stays picked and says it is the current one', () => {
   const rows = modelChoices({provider: {kind: 'local-cli', engine: 'claude'}, current: 'haiku-5.5'});
-  assert.deepEqual(values(rows), ['', 'haiku-5.5', 'opus', 'sonnet', 'haiku', OTHER_MODEL]);
+  assert.deepEqual(values(rows), ['', 'haiku-5.5', ...CLAUDE, OTHER_MODEL]);
   assert.equal(rows[1].label, 'haiku-5.5 (current)');
   assert.equal(rows[1].selected, true);
 });
 
 test('no provider or no catalogue still gives Default and Other…', () => {
   assert.deepEqual(values(modelChoices()), ['', OTHER_MODEL]);
-  assert.deepEqual(values(modelChoices({provider: {kind: 'local-cli', engine: 'codex'}})), ['', OTHER_MODEL]);
+  assert.deepEqual(values(modelChoices({provider: {kind: 'local-cli', engine: 'codex'}})), ['', ...CLI_MODELS.codex.map(([id]) => id), OTHER_MODEL]);
 });
 
 test('the posted model is the picked one, or the typed id after Other…', () => {
@@ -59,7 +61,7 @@ test('a bot picks any model from one list, grouped by provider, with the workspa
   assert.deepEqual(values(groups[0].rows), ['p1|', 'p1|llama-3.3-70b', 'p1|mixtral', `p1|${OTHER_MODEL}`]);
   assert.equal(groups[0].rows[2].label, 'Mixtral 8x7B');
   assert.equal(groups[0].rows.at(-1).label, 'Another Groq model…');
-  assert.deepEqual(values(groups[1].rows), ['p2|', 'p2|opus', 'p2|sonnet', 'p2|haiku', `p2|${OTHER_MODEL}`]);
+  assert.deepEqual(values(groups[1].rows), ['p2|', ...CLAUDE.map(id => `p2|${id}`), `p2|${OTHER_MODEL}`]);
   assert.equal(groups[1].rows[0].label, 'My Claude · its default');
 });
 

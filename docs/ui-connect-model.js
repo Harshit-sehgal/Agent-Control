@@ -5,7 +5,7 @@
  *
  * Nothing here ever sees a key: a subscription has none, an MCP address is typed once and sent, and the
  * server never answers with it. */
-import {cleanCliModel, cliEngineById, LOCAL_CLI_KIND, LOCAL_CLI_ENGINES, EFFORT_LEVELS, cleanEffort} from './ai-presets.js?v=ded1274e22';
+import {cleanCliModel, cliEngineById, LOCAL_CLI_KIND, LOCAL_CLI_ENGINES, EFFORT_LEVELS, cleanEffort, CLI_MODELS} from './ai-presets.js?v=697f915fc5';
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
@@ -135,9 +135,8 @@ export function cliDraft(values = {}) {
 
 /** The value of the last row, which opens a box for any id. */
 export const OTHER_MODEL = '__other';
-/** The names the `claude` command takes for its current models. Codex lists none here: its names change
- * often, so Default and Other… cover it. */
-export const CLI_MODEL_CHOICES = {claude: [['opus', 'Opus'], ['sonnet', 'Sonnet'], ['haiku', 'Haiku']], codex: []};
+/** Every model a subscription can run, shorthands first, then each by its full name (shared/ai-presets.js). */
+export const CLI_MODEL_CHOICES = CLI_MODELS;
 
 /** The rows of a model dropdown: Default, then what the provider offers (a subscription's known names, or an
  * API provider's chat models by their label), then Other…. A saved id the list lacks stays in, picked, so

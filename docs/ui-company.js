@@ -10,9 +10,9 @@
  * A run's trace holds one entry per step: {botId, output}. A bot-to-bot ask is
  * two entries, {botId: asker, kind: 'ask', to, task} and then
  * {botId: asked, kind: 'peer', to: asker, output}. */
-import {face} from './ui-face.js?v=ded1274e22';
-import {plain} from './ui-kit.js?v=ded1274e22';
-import {waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=ded1274e22';
+import {face} from './ui-face.js?v=697f915fc5';
+import {plain} from './ui-kit.js?v=697f915fc5';
+import {waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=697f915fc5';
 
 const teamKey = id => `team-${id}`;
 const settingsOf = bot => bot?.settings || {};
@@ -168,7 +168,7 @@ export function chatStatus(state, botId) {
   return 'One continuous chat';
 }
 
-const SUBS = ['memory', 'activity', 'permissions', 'model', 'computer', 'team', 'edit'];
+const SUBS = ['memory', 'activity', 'schedule', 'permissions', 'model', 'computer', 'team', 'edit'];
 const OLD_INFO = {edit: 'edit', memory: 'memory', tasks: 'activity'};
 const OLD_PAGES = ['ai', 'team', 'agents', 'data', 'notifications', 'workspaces', 'about'];
 const decode = part => { try { return decodeURIComponent(part); } catch { return part; } };

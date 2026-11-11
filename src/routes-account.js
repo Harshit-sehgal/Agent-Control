@@ -132,7 +132,7 @@ export function accountRoutes(router, {auth, workspaces}) {
   router.add('GET', '/api/agents/local/mcp', 'owner', c => ({servers: localMcpServers({dataFile: thisComputer(c)})}));
   router.add('POST', '/api/agents/local/mcp', 'owner', async c => {
     const b = await c.body();
-    const servers = addLocalMcpServer({dataFile: thisComputer(c), name: b?.name, command: b?.command});
+    const servers = addLocalMcpServer({dataFile: thisComputer(c), name: b?.name, command: b?.command, env: b?.env});
     await c.store.update(s => activity(s, 'agent', `Added the MCP server "${cleanText(b?.name, 40)}" to this computer.`));
     return reply(201, {servers});
   });

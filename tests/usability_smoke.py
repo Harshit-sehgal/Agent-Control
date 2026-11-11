@@ -1591,7 +1591,7 @@ async def subscription_provider_and_cli_status(page, base):
     form = page.locator('#cli-provider-form')
     assert await form.locator('input[type="password"], input[name="apiKey"], input[name="baseUrl"]').count() == 0
     # The model is a dropdown of the names the claude command knows, with Other… for anything else.
-    assert await form.locator('select[name="model"] option').evaluate_all('o => o.map(x => x.value)') == ['', 'opus', 'sonnet', 'haiku', '__other']
+    assert (await form.locator('select[name="model"] option').evaluate_all('o => o.map(x => x.value)'))[:4] == ['', 'opus', 'sonnet', 'haiku'] and 'claude-haiku-5-5' in await form.locator('select[name="model"] option').evaluate_all('o => o.map(x => x.value)')
     await expect(form.locator('input[name="modelOther"]')).to_be_hidden()
     await expect(form.locator('input[name="engine"][value="claude"]')).to_be_checked()
     await form.locator('input[name="label"]').fill('My Claude')
@@ -1610,8 +1610,8 @@ async def subscription_provider_and_cli_status(page, base):
     # A model name rides along for the second engine; a bad one is refused before it leaves.
     await form.locator('input[name="label"]').fill('My ChatGPT')
     await form.locator('label', has_text='ChatGPT').click()
-    # ChatGPT's names follow the engine: Default and Other… only.
-    assert await form.locator('select[name="model"] option').evaluate_all('o => o.map(x => x.value)') == ['', '__other']
+    # ChatGPT's names follow the engine: its own models by name, then Other….
+    assert await form.locator('select[name="model"] option').evaluate_all('o => o.map(x => x.value)') == ['', 'gpt-5.5', 'gpt-5.4', 'gpt-5.3-codex', '__other']
     await form.locator('select[name="model"]').select_option('__other')
     await expect(form.locator('input[name="modelOther"]')).to_be_visible()
     await form.locator('input[name="modelOther"]').fill('--bad')

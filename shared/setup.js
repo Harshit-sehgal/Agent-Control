@@ -24,14 +24,15 @@
  *
  * Pure and browser-safe: the server reads replies with it and the UI paints the card from it. */
 import {cleanText} from './core.js';
-import {cleanEffort} from './ai-presets.js';
+import {cleanEffort, CLI_MODELS} from './ai-presets.js';
+import {everyMinutes, cleanAt, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js';
 import {controlFence} from './reply-blocks.js';
 import {companyBots, primaryOf} from './company.js';
 import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js';
 import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js';
 import {grantWhat} from './ui-asks.js';
 
-export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'open'];
+export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'schedule', 'open'];
 /** The bot settings a bot may propose. Not the primary role, the browser approval mode, or layout (pins, order). */
 export const BOT_SETTABLE = ['replyLength', 'style', 'memory', 'canHandoff', 'summonable', 'enabled', 'temperature', 'reportsTo'];
 /** The team (group) settings a bot may propose: approve between steps, the step limit, hand-offs between its bots. */
@@ -54,6 +55,7 @@ export const SETUP_TOOL_HINT = 'To change a setting for the owner, put one fence
   + '{"action":"settings","bot":"<bot name>","settings":{"replyLength":"short|medium|long","style":"<tone>","memory":true|false,"canHandoff":true|false,"summonable":true|false,"enabled":true|false,"temperature":0-2,"reportsTo":"<manager bot name, or none>"}} changes how a bot works; give only what changes. '
   + '{"action":"team","team":"<team name, or leave out for your own team>","settings":{"checkpoints":true|false,"maxSteps":1-12,"botHandoffs":true|false}} changes how a team runs: checkpoints asks the owner before each step. '
   + '{"action":"rule","bot":"<bot name>","do":"open|send|post|delete|spend","site":"<site, e.g. github.com>","choice":"always|ask|deny"} saves what that bot may do without asking (a payment is never always). '
+  + '{"action":"schedule","bot":"<bot name, or me>","do":"<the message that bot gets each time>","every":"day|hour|week|<minutes>","at":"<HH:MM, optional>"} puts work on a timer: the bot runs it in its own chat and the owner reads the result there. Give only "at" for a one-off later today or tomorrow. Add "stop":true with a few words of its message in "do" to stop one; workspace.schedules lists them. When the owner asks for something regular (every morning, each Monday), propose a schedule instead of telling them to come back. '
   + '{"action":"open","page":"models|connectors|permissions|agents|usage"} shows the owner a Settings page, for things only they can do, such as pasting a key. '
   + 'Nothing changes until the owner taps Apply on the card, so say in your reply what you proposed and why. Never ask for a key or password in chat.';
 
@@ -70,7 +72,7 @@ export function parseSetupRequests(output) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) { found.push({ok: false, error: 'the setup block was not an object.'}); continue; }
     const action = lower(body.action);
     if (!SETUP_ACTIONS.includes(action)) { found.push({ok: false, error: `"${cleanText(body.action, 40) || 'nothing'}" is not something setup can do. Use ${SETUP_ACTIONS.join(', ')}.`}); continue; }
-    found.push({ok: true, request: {action, bot: cleanText(body.bot, 60), provider: cleanText(body.provider, 80), model: cleanText(body.model, 120), job: cleanText(body.job, MAX_JOB + 1), page: lower(body.page), name: cleanText(body.name, 81), team: cleanText(body.team, 80), settings: body.settings && typeof body.settings === 'object' && !Array.isArray(body.settings) ? body.settings : null, do: lower(body.do), site: cleanText(body.site, 300), choice: lower(body.choice), ...(body.effort !== undefined && body.effort !== null ? {effort: lower(body.effort)} : {})}});
+    found.push({ok: true, request: {action, bot: cleanText(body.bot, 60), provider: cleanText(body.provider, 80), model: cleanText(body.model, 120), job: cleanText(body.job, MAX_JOB + 1), page: lower(body.page), name: cleanText(body.name, 81), team: cleanText(body.team, 80), settings: body.settings && typeof body.settings === 'object' && !Array.isArray(body.settings) ? body.settings : null, do: lower(body.do), site: cleanText(body.site, 300), choice: lower(body.choice), what: cleanText(body.do, 2000), every: body.every ?? null, at: cleanText(body.at, 8), stop: body.stop === true, ...(body.effort !== undefined && body.effort !== null ? {effort: lower(body.effort)} : {})}});
   }
   return found;
 }
@@ -93,15 +95,24 @@ function providerNamed(providers, name) {
     || providers.find(p => lower(p.host) === want || lower(p.label).includes(want))
     || null;
 }
-/** The model id a provider takes for what the bot wrote. A Claude subscription takes opus, sonnet or haiku,
- * so "haiku-5.5" or "Claude Haiku" is haiku. A key provider's id is matched against its own list. */
+/** The model id a provider takes for what the bot wrote. A Claude subscription takes a shorthand for a
+ * family alone ("Sonnet" is sonnet) and the full id for a version ("haiku 5.5" is claude-haiku-5-5).
+ * A key provider's id is matched against its own list. */
 export function modelFor(provider, wanted) {
   const want = String(wanted ?? '').trim();
   if (!want) return {ok: true, model: ''};
   if (provider.kind === 'local-cli') {
+    const known = (CLI_MODELS[provider.engine] || []).map(([id]) => id);
+    if (known.includes(lower(want))) return {ok: true, model: lower(want)};
     if (provider.engine === 'claude') {
-      const family = ['opus', 'sonnet', 'haiku'].find(f => lower(want).includes(f));
-      if (family && !/^claude-[a-z]+-\d/.test(lower(want))) return {ok: true, model: family};
+      const m = /(fable|opus|sonnet|haiku)(?:[\s._-]*(\d+)(?:[._-](\d+))?)?/.exec(lower(want));
+      if (m && !m[2]) return {ok: true, model: m[1]};
+      if (m) {
+        const id = `claude-${m[1]}-${m[2]}${m[3] ? `-${m[3]}` : ''}`;
+        if (known.includes(id)) return {ok: true, model: id};
+        const same = known.filter(k => k.startsWith(`claude-${m[1]}-`));
+        return {ok: false, error: `${provider.label || 'The Claude subscription'} has no Claude ${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] ? `.${m[3]}` : ''}. It offers ${same.join(', ')}.`};
+      }
     }
     return /^[A-Za-z0-9][A-Za-z0-9._:/[\]-]{0,79}$/.test(want) ? {ok: true, model: want} : {ok: false, error: `"${want}" is not a model name.`};
   }
@@ -128,6 +139,7 @@ export function resolveSetup(state, request, {speaker = null} = {}) {
     return {ok: true, card: {action: 'job', botId: bot.id, job, text: `New job for ${bot.name}: “${job.length > 240 ? `${job.slice(0, 240)}…` : job}”`}};
   }
   if (request.action === 'team') return teamCard(state, request, speaker);
+  if (request.action === 'schedule') return scheduleCard(state, request, speaker);
   if (request.action === 'rename' || request.action === 'settings' || request.action === 'rule') {
     const bot = botNamed(state, request.bot, speaker);
     if (!bot) return {ok: false, error: `there is no bot called "${request.bot || 'blank'}".`};
@@ -240,13 +252,40 @@ export function setupCardOf(message) {
   if (card.action === 'rename') return typeof card.botId === 'string' && typeof card.name === 'string' ? card : null;
   if (card.action === 'settings') return typeof card.botId === 'string' && card.settings && typeof card.settings === 'object' && Object.keys(card.settings).length && Object.keys(card.settings).every(k => BOT_SETTABLE.includes(k)) ? card : null;
   if (card.action === 'team') return typeof card.groupId === 'string' && card.settings && typeof card.settings === 'object' && Object.keys(card.settings).length && Object.keys(card.settings).every(k => TEAM_SETTABLE.includes(k)) ? card : null;
+  if (card.action === 'schedule') return typeof card.botId === 'string' && (card.stop ? typeof card.taskId === 'string' : typeof card.groupId === 'string' && typeof card.message === 'string' && (Number.isInteger(card.every) || Boolean(cleanAt(card.at)))) ? card : null;
   if (card.action === 'rule') return typeof card.botId === 'string' && ASK_ACTIONS.includes(card.act) && GRANT_CHOICES.includes(card.choice) && typeof card.scope === 'string' ? card : null;
   return typeof card.providerId === 'string' || (typeof card.effort === 'string' && cleanEffort(card.effort) !== null) ? card : null;
 }
 /** Is the change already in place? Then the card is a done line with no button. An open card never is. */
+/** Work on a timer: a recurring or one-off task for a bot (its message is run in that bot's chat), or
+ * stopping one of its schedules, found by words from its message. */
+function scheduleCard(state, request, speaker) {
+  const bot = botNamed(state, request.bot, speaker);
+  if (!bot) return {ok: false, error: `there is no bot called "${request.bot || 'blank'}".`};
+  const what = String(request.what || '').trim();
+  if (request.stop) {
+    const words = lower(what), mine = scheduleRows(state, bot.id);
+    const hits = words ? mine.filter(r => lower(r.what).includes(words)) : mine;
+    if (!mine.length) return {ok: false, error: `${bot.name} has no schedule to stop.`};
+    if (hits.length !== 1) return {ok: false, error: `say which schedule to stop with a few of its words in "do". ${bot.name} has: ${mine.map(r => `"${r.what}" ${r.when}`).join('; ')}.`};
+    return {ok: true, card: {action: 'schedule', stop: true, taskId: hits[0].id, botId: bot.id, text: `Stop ${bot.name}: “${hits[0].what}” ${hits[0].when}`}};
+  }
+  if (what.length < 3) return {ok: false, error: 'say what to do in "do", as the message the bot will get each time.'};
+  const every = everyMinutes(request.every), at = cleanAt(request.at);
+  if (every === null) return {ok: false, error: `"${request.every}" is not how often. Use day, hour, week, or a number of minutes (at least ${MIN_EVERY} minutes, at most ${MAX_EVERY}).`};
+  if (every === undefined && !at) return {ok: false, error: 'say how often in "every" (day, hour, week or minutes) or when in "at" (HH:MM), or both.'};
+  if (request.at && !at) return {ok: false, error: `"${request.at}" is not a time of day. Use HH:MM, such as 08:00.`};
+  const group = (state?.groups || []).find(g => (g.bots || []).some(b => b.id === bot.id));
+  if (!group) return {ok: false, error: `${bot.name} is not in a team.`};
+  return {ok: true, card: {action: 'schedule', botId: bot.id, groupId: group.id, message: what, ...(every ? {every} : {}), ...(at ? {at} : {}), text: `${bot.name}: “${what}” ${whenWords({every, at})}`}};
+}
 export function setupDone(state, card) {
   if (!card || card.action === 'open') return false;
   if (card.action === 'job') return companyBots(state).find(b => b.id === card.botId)?.instructions === card.job;
+  if (card.action === 'schedule') {
+    const rows = scheduleRows(state, card.botId);
+    return card.stop ? !rows.some(r => r.id === card.taskId) : rows.some(r => r.what === card.message);
+  }
   if (card.action === 'team') { const group = (state?.groups || []).find(g => g.id === card.groupId); const now = groupSettings(group || {}); return Boolean(group) && Object.entries(card.settings).every(([k, v]) => now[k] === v); }
   const bot = companyBots(state).find(b => b.id === card.botId);
   if (card.action === 'rename') return bot?.name === card.name;
@@ -281,7 +320,7 @@ export function workspaceBrief(state, {agents = [], connectors = [], speaker = n
     name: p.label,
     kind: p.kind === 'local-cli' ? `${p.engine === 'codex' ? 'ChatGPT' : 'Claude'} subscription, runs on this computer` : 'API key',
     ...(p.id === ai.defaultProviderId ? {default: true} : {}),
-    models: p.kind === 'local-cli' ? (p.engine === 'claude' ? ['opus', 'sonnet', 'haiku'] : []) : (p.chatModels || p.models || []).slice(0, 12),
+    models: p.kind === 'local-cli' ? (CLI_MODELS[p.engine] || []).map(([id]) => id) : (p.chatModels || p.models || []).slice(0, 12),
   }));
   const bots = companyBots(state).map(b => {
     const own = ai.bots?.[b.id] || {};
@@ -305,6 +344,7 @@ export function workspaceBrief(state, {agents = [], connectors = [], speaker = n
     .map(g => `${named(g.botId)}: ${GRANT_LABELS[g.choice] || g.choice} ${g.action} ${g.scope}`);
   const waiting = pendingAsks(state || {}).slice(0, 10).map(a => askText(a, named(a.botId) || 'A bot'));
   const threads = (state?.groups || []).filter(g => g?.settings?.kind === 'thread').slice(-10).map(g => g.name);
+  const schedules = scheduleRows(state).filter(r => named(r.botId)).slice(0, 20).map(r => `${named(r.botId)}: "${r.what}" ${r.when}`);
   return {
     you: youLine(primaryOf(state), speaker),
     models: models.length ? models : 'none connected yet',
@@ -316,6 +356,7 @@ export function workspaceBrief(state, {agents = [], connectors = [], speaker = n
     rules: rules.length ? rules : 'none',
     waitingOnOwner: waiting.length ? waiting : 'nothing',
     threads: threads.length ? threads : 'none',
+    schedules: schedules.length ? schedules : 'none',
     connectors: connectors.length ? connectors.map(c => `${c.name}${c.status && c.status !== 'ready' ? ` (${c.status})` : ''}`) : 'none',
     facts: [
       'A bot opens a web page by asking with the browser block; the owner answers Decline, Allow or Always allow. Saved answers are in Settings → Permissions.',

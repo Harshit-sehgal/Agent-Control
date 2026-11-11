@@ -15,6 +15,7 @@ import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYo
 import {botStatus, botIsManager, chatStatus, jobOf} from './ui-company.js';
 import {isPrimary} from './company.js';
 import {hasJob, modelChip} from './ui-profile-model.js';
+import {scheduleTaskBody} from './schedules.js';
 import {feed} from './ui-feed.js';
 import {setupCardOf, setupButton} from './setup.js';
 import {askCard} from './ui-asks.js';
@@ -419,6 +420,7 @@ export const conversationActions = {
     if (!card) throw new Error('That suggestion is no longer here.');
     if (card.action === 'open') return go({settings: card.section});
     if (card.action === 'team') await api(`/api/groups/${encodeURIComponent(card.groupId)}`, 'PATCH', {settings: card.settings});
+    else if (card.action === 'schedule') await (card.stop ? api(`/api/tasks/${encodeURIComponent(card.taskId)}`, 'DELETE') : api('/api/tasks', 'POST', scheduleTaskBody(card)));
     else if (card.action === 'rule') await api('/api/grants', 'POST', {botId: card.botId, action: card.act, ...(card.scope ? {scope: card.scope} : {}), choice: card.choice});
     else if (['job', 'rename', 'settings'].includes(card.action)) {
       const group = groupOfBot(card.botId);

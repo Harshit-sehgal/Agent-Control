@@ -1,5 +1,6 @@
 /** The setup block: a bot proposes a change, the owner taps Apply. And what the primary bot knows. */
 import test from 'node:test';
+import {CLI_MODELS} from '../shared/ai-presets.js';
 import assert from 'node:assert/strict';
 import {parseSetupRequests, stripSetupBlocks, resolveSetup, modelFor, setupCardOf, setupButton, workspaceBrief, setupDone} from '../shared/setup.js';
 import {CONTROL_FENCES} from '../shared/reply-blocks.js';
@@ -29,7 +30,7 @@ test('a model change names the bot and the model the owner will see, in the prov
   const [{request}] = parseSetupRequests(block({action: 'model', bot: 'replier', provider: 'Claude', model: 'Claude Haiku 5.5'}));
   const out = resolveSetup(state, request);
   assert.equal(out.ok, true);
-  assert.deepEqual(out.card, {action: 'model', botId: 'rep', providerId: 'p1', model: 'haiku', text: 'Replier uses My Claude · haiku'});
+  assert.deepEqual(out.card, {action: 'model', botId: 'rep', providerId: 'p1', model: 'claude-haiku-5-5', text: 'Replier uses My Claude · claude-haiku-5-5'});
   // Left out, the bot is everyone's default; a key provider's id is matched against its list.
   const def = resolveSetup(state, {action: 'model', provider: 'groq', model: 'qwen3-32b'});
   assert.deepEqual(def.card, {action: 'model', providerId: 'p2', model: 'qwen/qwen3-32b', text: "Everyone's default model: Groq · qwen/qwen3-32b"});
@@ -81,7 +82,8 @@ test('a card is done once the change is what the app already has', async () => {
 test('the primary bot is told the models, each bot\'s model, this computer and how the app works', () => {
   const brief = workspaceBrief(state, {agents: [{name: 'This computer', online: true, permissions: ['browser.action', 'model.run'], cli: {claude: 'signed-in', codex: 'missing'}}], connectors: [{name: 'Gmail', status: 'ready'}]});
   assert.match(brief.you, /You are Atlas, the primary bot/);
-  assert.deepEqual(brief.models[0], {name: 'My Claude', kind: 'Claude subscription, runs on this computer', models: ['opus', 'sonnet', 'haiku']});
+  assert.deepEqual(brief.models[0], {name: 'My Claude', kind: 'Claude subscription, runs on this computer', models: CLI_MODELS.claude.map(([id]) => id)});
+  assert.ok(brief.models[0].models.includes('claude-haiku-5-5'), 'the brief names each version');
   assert.equal(brief.models[1].default, true);
   assert.equal(brief.defaultModel, 'Groq · llama-3.3-70b-versatile');
   assert.deepEqual(brief.bots.map(b => [b.name, b.model]), [['Atlas', 'the default'], ['Replier', 'My Claude · haiku-5.5']]);

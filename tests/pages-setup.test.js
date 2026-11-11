@@ -65,3 +65,20 @@ test('"ask me before each step" in the demo is a team card for Atlas\'s team', a
   const [card] = cards(await say(state, 'please ask me before each step'));
   assert.deepEqual(card, {action: 'team', groupId: 'home', settings: {checkpoints: true}, text: 'Home: asks you before each step'});
 });
+
+test('"every morning at 8" in the demo is a schedule card, and Apply queues it through the demo\'s routes', async () => {
+  const state = world();
+  const [card] = cards(await say(state, 'Replier, every morning at 8 sum up my inbox'));
+  assert.equal(card?.action, 'schedule');
+  assert.deepEqual([card.message, card.every, card.at], ['Sum up my inbox', 1440, '08:00']);
+  const {scheduleTaskBody, scheduleRows} = await import('../shared/schedules.js');
+  await import('../shared/local-api.js');
+  const api = globalThis.window.AGENT_LOCAL_API;
+  const before = (await api('/api/state')).groups[0].bots.find(b => b.id !== 'atlas'); // renamed Mailer by the test above
+  const task = await api('/api/tasks', 'POST', scheduleTaskBody({...card, botId: before.id, groupId: 'home'}));
+  assert.equal(task.payload.at, '08:00');
+  const after = await api('/api/state');
+  assert.deepEqual(scheduleRows(after, before.id).map(r => r.when), ['every day at 08:00']);
+  await api(`/api/tasks/${task.id}`, 'DELETE');
+  assert.equal(scheduleRows(await api('/api/state'), before.id).length, 0, 'Stop takes it off');
+});

@@ -95,14 +95,17 @@ test('delete says what goes, that it cannot be undone, where reports go and that
 
 test('the profile card lists Memory, Activity, Permissions, Model, Computer and, for a manager, Team', () => {
   const s = stateOf();
-  assert.deepEqual(profileRows(s, 'ops').map(r => r.key), ['memory', 'activity', 'permissions', 'model', 'computer', 'team']);
-  assert.deepEqual(profileRows(s, 'mail').map(r => r.key), ['memory', 'activity', 'permissions', 'model', 'computer']);
-  assert.deepEqual(profileRows(s, 'atlas').map(r => r.key), ['memory', 'activity', 'permissions', 'model', 'team'], 'Atlas has no Computer row');
+  assert.deepEqual(profileRows(s, 'ops').map(r => r.key), ['memory', 'activity', 'schedule', 'permissions', 'model', 'computer', 'team']);
+  assert.deepEqual(profileRows(s, 'mail').map(r => r.key), ['memory', 'activity', 'schedule', 'permissions', 'model', 'computer']);
+  assert.deepEqual(profileRows(s, 'atlas').map(r => r.key), ['memory', 'activity', 'schedule', 'permissions', 'model', 'team'], 'Atlas has no Computer row');
 });
 
 test('the Model row is plain text when there is nothing to pick (the demo, a viewer)', () => {
   const s = stateOf();
   assert.equal(profileRows(s, 'mail').find(r => r.key === 'model').plain, undefined, 'a picker is the default');
+  assert.equal(profileRows(s, 'mail').find(r => r.key === 'schedule').value, 'None');
+  assert.equal(profileRows({...s, tasks: [{kind: 'bot-task', status: 'queued', payload: {botId: 'mail', message: 'x', kind: 'interval', intervalMinutes: 60}}]}, 'mail').find(r => r.key === 'schedule').value, 'every hour');
+  assert.equal(profileRows({...s, tasks: [1, 2].map(i => ({id: `t${i}`, kind: 'bot-task', status: 'queued', payload: {botId: 'mail', message: `x${i}`, kind: 'once'}}))}, 'mail').find(r => r.key === 'schedule').value, '2 tasks');
   const row = profileRows(s, 'mail', {canPickModel: false}).find(r => r.key === 'model');
   assert.equal(row.plain, true);
   assert.equal(row.value, 'Built-in demo');
