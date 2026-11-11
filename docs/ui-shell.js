@@ -5,11 +5,11 @@
  * Home is the Chats layout only. On a phone it is two sections, Bots and Threads,
  * switched by swiping; on a laptop the sidebar holds both and the chat opens on the
  * right. The lists come from ui-company.js (pure); this file is markup and events. */
-import {botRows, threadRows} from './ui-company.js?v=fce098c91c';
-import {face} from './ui-face.js?v=fce098c91c';
-import {esc, icon, stamp} from './ui-kit.js?v=fce098c91c';
-import {pauseBanner} from './ui-asks.js?v=fce098c91c';
-import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, isStaticDemo} from './ui-store.js?v=fce098c91c';
+import {botRows, threadRows} from './ui-company.js?v=843eeac55a';
+import {face} from './ui-face.js?v=843eeac55a';
+import {esc, icon, stamp} from './ui-kit.js?v=843eeac55a';
+import {pauseBanner} from './ui-asks.js?v=843eeac55a';
+import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, isStaticDemo} from './ui-store.js?v=843eeac55a';
 
 const el = id => document.getElementById(id);
 const DESK = '(min-width:1024px)';
@@ -107,6 +107,7 @@ export function switchSection(next, dir = 0) {
 /** Painted once at boot: search, + New bot, the list body and the owner row. */
 export function mountRail() {
   el('sidebar').innerHTML = `
+    <div class="rail-seg" id="rail-seg" role="tablist" aria-label="Show bots or threads" data-on="bots"><span class="thumb" aria-hidden="true"></span>${SECTIONS.map(s => `<button type="button" role="tab" data-action="rail-section" data-section="${s}">${s === 'bots' ? 'Bots' : 'Threads'}</button>`).join('')}</div>
     <div class="rail-top">
       <label class="rail-find">${icon('search', 17)}<input id="rail-q" type="search" placeholder="Search bots and threads" aria-label="Search bots and threads" autocomplete="off"></label>
       ${canWrite() ? `<button type="button" class="rail-btn" data-action="new-bot" aria-label="New bot" title="New bot">${icon('plus', 18)}</button>` : ''}
@@ -120,6 +121,7 @@ export function mountRail() {
 
 /** Refill the sidebar list from the snapshot. Typing in the search box is never
  * disturbed: only #rail-body is replaced. */
+let lastRailRoute = '';
 export function renderRail() {
   const body = el('rail-body'); if (!body || !store.state) return;
   // Hidden on a phone: leave it empty rather than draw every face twice.
@@ -130,10 +132,22 @@ export function renderRail() {
   const line = store.state?.guard?.paused ? 'Paused · nothing is running' : status ? `${status} working · others asleep` : `${primary} on watch · others asleep`;
   const pinned = rows.filter(r => r.pinned), rest = rows.filter(r => !r.pinned), threads = threadGroups(query, {headings: false});
   const demo = isStaticDemo() ? '<p class="rail-demo">Browser-only demo · data stays in this browser</p>' : '';
-  body.innerHTML = `${query ? '' : `<div class="rail-status"><i aria-hidden="true"></i>${esc(line)}</div>${demo}`}
+  // Bots | Threads at the top picks the list, as the phone's sections do. A search looks through both.
+  // Opening a thread or a bot turns the switch to its side, so the open chat is in the list.
+  const routeKey = store.route?.thread ? `t:${store.route.thread}` : store.route?.bot ? `b:${store.route.bot}` : '';
+  if (routeKey && routeKey !== lastRailRoute) store.section = routeKey[0] === 't' ? 'threads' : 'bots';
+  lastRailRoute = routeKey;
+  const seg = el('rail-seg');
+  if (seg) {
+    seg.dataset.on = store.section;
+    seg.querySelectorAll('[role="tab"]').forEach(tab => tab.setAttribute('aria-selected', String(tab.dataset.section === store.section)));
+  }
+  if (!query && store.section === 'threads') {
+    body.innerHTML = threadGroups() || '<p class="hv-empty"><strong>No threads yet</strong>Start one with the New thread button.</p>';
+  } else body.innerHTML = `${query ? '' : `<div class="rail-status"><i aria-hidden="true"></i>${esc(line)}</div>${demo}`}
     ${pinned.length ? `<div class="shelf">${pinned.map(r => pinnedRow(r, 72)).join('')}</div>` : ''}
     <div class="crows">${rest.map(botRow).join('')}</div>${query ? '' : hiddenLink()}
-    ${threads ? `<div class="rail-h">Threads</div>${threads}` : ''}
+    ${query && threads ? `<div class="rail-h">Threads</div>${threads}` : ''}
     ${query && !hasRows && !threads ? '<p class="hv-empty"><strong>No match</strong>No bot or thread has that.</p>' : ''}`;
   el('rail-ini').textContent = initials(); el('rail-name').textContent = ownerName();
   const waiting = waitingThreads(); el('rail-badge').innerHTML = waiting ? `<span class="badge" aria-label="${waiting} waiting on you">${waiting}</span>` : '';
@@ -264,5 +278,6 @@ export const shellActions = {
   'new-bot': () => go({newBot: true}),
   'new-thread': () => go({newThread: true}),
   'back-to-list': () => back({home: true}),
+  'rail-section': b => { if (SECTIONS.includes(b.dataset.section)) { store.section = b.dataset.section; renderRail(); } },
 };
 

@@ -157,6 +157,14 @@
 /* ---------- desktop sidebar ---------- */
 .rail{flex-direction:column;min-height:0;background:color-mix(in srgb,var(--sunk) 70%,var(--bg));border-right:1px solid var(--line);padding:12px 10px 10px}
 .rail-top{display:flex;align-items:center;gap:8px;padding:2px 2px 8px}
+.rail-seg{position:relative;align-self:center;display:grid;grid-template-columns:1fr 1fr;padding:3px;margin:0 0 10px;border-radius:99px;background:var(--raise);box-shadow:var(--ring);font-size:13px;font-weight:600;user-select:none}
+.rail-seg button{position:relative;z-index:1;padding:6px 16px;border-radius:99px;color:var(--muted);transition:color .25s}
+.rail-seg button:hover{color:var(--soft)}
+.rail-seg button:focus-visible{outline:2px solid var(--wait);outline-offset:1px}
+.rail-seg .thumb{position:absolute;top:3px;bottom:3px;left:3px;width:calc(50% - 3px);border-radius:99px;background:color-mix(in srgb,var(--fg) 13%,var(--raise));transition:transform .3s cubic-bezier(.2,.8,.2,1)}
+.rail-seg[data-on="threads"] .thumb{transform:translateX(100%)}
+.rail-seg[data-on="bots"] button[data-section="bots"],.rail-seg[data-on="threads"] button[data-section="threads"]{color:var(--fg)}
+@media (prefers-reduced-motion:reduce){.rail-seg .thumb,.rail-seg button{transition:none}}
 .rail-find{flex:1;min-width:0;display:flex;align-items:center;gap:8px;height:38px;padding:0 14px;border-radius:99px;background:var(--raise);color:var(--muted);box-shadow:var(--ring);transition:box-shadow .2s}
 .rail-find:focus-within{box-shadow:inset 0 0 0 1.5px var(--wait)}
 .rail-find svg{width:17px;height:17px;flex:none}

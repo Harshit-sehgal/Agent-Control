@@ -214,6 +214,12 @@ async def thread_run(page, base):
     await followup.press('Enter')
     await expect(page.locator('.cv-me')).to_have_count(2)
     await expect(page.locator('.cv-bot .cv-name').last).to_contain_text('Atlas', timeout=10000)
+    # An open thread turns the sidebar's switch to Threads; Bots brings the bot rows back.
+    await expect(page.locator('#rail-seg')).to_have_attribute('data-on', 'threads')
+    await expect(page.locator('#sidebar .crow')).to_have_count(0)
+    await page.locator('#rail-seg [data-section="bots"]').click()
+    await expect(page.locator('#rail-seg [data-section="bots"]')).to_have_attribute('aria-selected', 'true')
+    await expect(page.locator('#sidebar .trow')).to_have_count(0)
     # Back on the home, the thread stays out of the bot rows.
     await page.locator(f'#sidebar .crow[data-id="{ids["Writer"]}"]').click()
     await expect(page.locator('#cv-log .cv-me')).to_have_count(0)
