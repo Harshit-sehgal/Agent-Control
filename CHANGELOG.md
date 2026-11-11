@@ -24,6 +24,28 @@ browser tasks, and accounts, workspaces and backup.
   draft release and `makeDraft` are removed.
 - **The X database tables.** Schema v11 drops them. A backup made before this
   change (schema v10 and earlier) still restores.
+- **The old chat list, chat info panel, You pages and group-settings UI**
+  (`shared/ui-panel.js`, the new-bot and new-group sheets, the pipeline editor
+  and the runs panel). Their work moved to the profile, Settings and the
+  thread.
+
+### Added
+- **A company of bots, in a new chats shell.** The three-pane messenger is
+  replaced by a sidebar of bots on a laptop and a two-section home (Bots and
+  Threads) on a phone. Each bot has a chat, a profile (job, memory, activity,
+  permissions, model, team), an Edit page and a New bot page; threads are
+  chats Atlas runs with whichever bots the work needs, with one live progress
+  pill and a card that opens the handoffs. Settings is one page opened from the
+  round avatar, with Company and Activity inside it. Faces are small
+  characters that blink, sleep, read, wait and hop.
+- **Pin and reorder by gesture.** Press and move (or long press) a bot to drag
+  it, right-click or the menu key for its options, touch and hold on a phone,
+  Alt+arrows from the keyboard. Drop on the pinned row to pin, drag a pinned
+  face out to unpin, drop on a manager to move the bot to its team, drop among
+  its team to reorder. The bot lifts, neighbours glide out of the way, it
+  springs into its slot, and none of it moves under reduced motion. Pins and
+  order are saved per person in the browser (`shared/ui-gestures.js`,
+  `shared/ui-reorder.js`).
 
 ### Changed
 - **A new workspace starts with Atlas.** The first sign-in seeds a primary bot,

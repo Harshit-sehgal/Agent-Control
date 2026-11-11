@@ -5,18 +5,18 @@
  *
  * Pages repaint only when the route changes, so each in-place change (a switch, a
  * forgotten note, a picked colour) updates its own node instead. */
-import {SHAPES, COLORS, face} from './ui-face.js?v=09349b7571';
-import {botStatus, botIsManager} from './ui-company.js?v=09349b7571';
-import {primaryOf} from './company.js?v=09349b7571';
-import {esc, icon, field, textInput, clock, roundBtn, switchBtn} from './ui-kit.js?v=09349b7571';
-import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=09349b7571';
-import {PINS_KEY, HIDDEN_KEY} from './ui-shell.js?v=09349b7571';
-import {toast, confirmSheet} from './ui-dialogs.js?v=09349b7571';
-import {sendChat} from './ui-chat.js?v=09349b7571';
+import {SHAPES, COLORS, face} from './ui-face.js?v=b2a252f47f';
+import {botStatus, botIsManager} from './ui-company.js?v=b2a252f47f';
+import {primaryOf} from './company.js?v=b2a252f47f';
+import {esc, icon, field, textInput, clock, roundBtn, switchBtn} from './ui-kit.js?v=b2a252f47f';
+import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=b2a252f47f';
+import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=b2a252f47f';
+import {toast, confirmSheet} from './ui-dialogs.js?v=b2a252f47f';
+import {sendChat} from './ui-chat.js?v=b2a252f47f';
 import {
   MAX_NAME, hasJob, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, lookOf, newBotDefaults,
   newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, directReports, permissionLabel, closeTarget,
-} from './ui-profile-model.js?v=09349b7571';
+} from './ui-profile-model.js?v=b2a252f47f';
 
 const el = id => document.getElementById(id);
 const MUTED_KEY = 'ac-muted';
@@ -50,7 +50,7 @@ export function togglePin(id) {
 }
 /** Forget a bot that is gone from the per-person lists. */
 function forget(id) {
-  for (const key of [PINS_KEY, HIDDEN_KEY, MUTED_KEY]) { const list = loadLocal(key, null); if (Array.isArray(list) && list.includes(id)) saveLocal(key, list.filter(x => x !== id)); }
+  for (const key of [PINS_KEY, HIDDEN_KEY, MUTED_KEY, ORDER_KEY]) { const list = loadLocal(key, null); if (Array.isArray(list) && list.includes(id)) saveLocal(key, list.filter(x => x !== id)); }
 }
 
 /** Where a profile was opened from: Back goes to that thread, else to the bot's chat. */
@@ -310,7 +310,7 @@ async function removeBot(id) {
   if (route.bot === id || route.profile === id) go({home: true}, {replace: true}); else if (route.company) repaint();
   toast(`${bot.name} deleted.`);
 }
-async function moveBot(id, to) {
+export async function moveBot(id, to) {
   await patchBot(id, {settings: {reportsTo: to || null}});
   await sync();
   toast(to ? `${botName(id)} now reports to ${botName(to)}.` : `${botName(id)} reports to ${primaryOf(store.state)?.name || 'Atlas'} directly.`);

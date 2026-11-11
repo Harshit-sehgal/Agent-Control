@@ -272,6 +272,27 @@
 .pg-body{width:100%;max-width:560px;margin:0 auto;padding:12px max(16px,env(safe-area-inset-right,0px)) 40px max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:14px}
 .pg-body p{margin:0;color:var(--muted)}
 
+/* ---------- pin and reorder: the whole bot is the handle (ui-gestures.js) ---------- */
+.crow,.pin{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+.shelf{position:relative}
+.shelf::before,.crow::before{content:'';position:absolute;inset:0;border-radius:var(--r);box-shadow:inset 0 0 0 2px var(--good);opacity:0;pointer-events:none;transition:opacity .16s}
+.shelf.drop-on::before,.crow.drop-on::before{opacity:1}
+/* the copy that rides under the pointer: fixed, so no scroll area clips it. Its shadow is a layer whose opacity fades in. */
+.gest-ghost{position:fixed!important;z-index:70;margin:0!important;pointer-events:none;will-change:transform;background:var(--raise);border-radius:var(--r)}
+.gest-ghost::before{display:none}
+.gest-ghost::after{content:'';position:absolute;inset:0;border-radius:inherit;box-shadow:var(--lift),0 26px 44px -18px rgba(0,0,0,.45);opacity:0;transition:opacity .2s;pointer-events:none;z-index:-1}
+.gest-ghost.lift::after{opacity:1}
+/* the slot it came from: an empty seat while it is away */
+.gest-hole{background:color-mix(in srgb,var(--fg) 7%,transparent)!important;border-radius:var(--r)}
+.gest-hole>*{opacity:0}
+.gest-hole.gest-out{background:transparent!important}
+.gest-away{display:none!important}
+.gest-wait{opacity:0}
+.gest-armed{scale:1.04!important;transition:scale .18s var(--ease)}
+.pin-zone{display:grid;place-items:center;min-height:84px;margin:6px 4px 14px;border:2px dashed var(--line2);border-radius:var(--r);color:var(--muted);font-size:13px;animation:menuin .18s ease-out}
+.pin-zone.drop-on{border-color:var(--good);color:var(--fg)}
+.pin-zone::before{display:none}
+
 @media(max-width:520px){
   .cv-me{max-width:88%}
   .cv-card{margin-left:0}

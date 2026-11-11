@@ -10,7 +10,7 @@ import {botStatus, botIsManager} from './ui-company.js';
 import {primaryOf} from './company.js';
 import {esc, icon, field, textInput, clock, roundBtn, switchBtn} from './ui-kit.js';
 import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isStaticDemo, loadLocal, saveLocal} from './ui-store.js';
-import {PINS_KEY, HIDDEN_KEY} from './ui-shell.js';
+import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js';
 import {toast, confirmSheet} from './ui-dialogs.js';
 import {sendChat} from './ui-chat.js';
 import {
@@ -50,7 +50,7 @@ export function togglePin(id) {
 }
 /** Forget a bot that is gone from the per-person lists. */
 function forget(id) {
-  for (const key of [PINS_KEY, HIDDEN_KEY, MUTED_KEY]) { const list = loadLocal(key, null); if (Array.isArray(list) && list.includes(id)) saveLocal(key, list.filter(x => x !== id)); }
+  for (const key of [PINS_KEY, HIDDEN_KEY, MUTED_KEY, ORDER_KEY]) { const list = loadLocal(key, null); if (Array.isArray(list) && list.includes(id)) saveLocal(key, list.filter(x => x !== id)); }
 }
 
 /** Where a profile was opened from: Back goes to that thread, else to the bot's chat. */
@@ -310,7 +310,7 @@ async function removeBot(id) {
   if (route.bot === id || route.profile === id) go({home: true}, {replace: true}); else if (route.company) repaint();
   toast(`${bot.name} deleted.`);
 }
-async function moveBot(id, to) {
+export async function moveBot(id, to) {
   await patchBot(id, {settings: {reportsTo: to || null}});
   await sync();
   toast(to ? `${botName(id)} now reports to ${botName(to)}.` : `${botName(id)} reports to ${primaryOf(store.state)?.name || 'Atlas'} directly.`);

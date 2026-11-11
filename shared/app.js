@@ -12,6 +12,8 @@
  *   ui-shell        sidebar, phone chrome and home, search, the page frame
  *   ui-conversation a bot chat or a thread: header, feed, cards, composer
  *   ui-profile      a bot's profile, Edit, the New bot page and the bot options menu
+ *   ui-gestures     pin and reorder: drag, long press, right-click, Alt+arrows
+ *   ui-reorder      pure rules behind those gestures
  *   ui-settings     Settings, the Company chart and Activity
  *   ui-profile-model pure view models behind those screens
  *   ui-sheets       sign-in and password sheets   ui-admin   admin pages
@@ -24,6 +26,7 @@ import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './u
 import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, closeSearch, homeView} from './ui-shell.js';
 import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js';
 import {profileViews, wirePages} from './ui-profile.js';
+import {wireGestures, gesturesBusy} from './ui-gestures.js';
 import {settingsViews} from './ui-settings.js';
 import {showLogin, hideLogin} from './ui-sheets.js';
 import {actions, forms, onControlChange, onControlInput} from './ui-actions.js';
@@ -147,6 +150,8 @@ onChange(scope => {
   if (!store.state) return;
   scheduleSync();
   if (scope === 'route') return renderRoute();
+  // A bot is lifted: the list under it stays put until it lands, which repaints.
+  if (gesturesBusy()) return;
   keepFocus(() => {
     renderRail(); renderChrome();
     if (scope === 'list') return refreshHome();
@@ -272,7 +277,7 @@ window.addEventListener('popstate', event => { syncDepth(event); if (!store.stat
 window.addEventListener('resize', () => { if (store.state && isDesk() !== lastDesk) changed('route'); });
 // `toggle` does not bubble, so listen in the capture phase to remember which handoff cards are open.
 document.addEventListener('toggle', trackOpen, true);
-wireShell(); wirePages();
+wireShell(); wirePages(); wireGestures();
 
 applyTheme(); watchSystemTheme(); bringBotsToLife(); registerWorker();
 boot();

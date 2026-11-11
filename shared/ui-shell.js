@@ -34,12 +34,15 @@ const bots = () => groups().find(g => g.id === 'home')?.bots || [];
 /** The bots in the pinned row. Atlas starts pinned for everyone; a person's own
  * pins and order, once they make any, are saved under this key (see ui-gestures). */
 export const PINS_KEY = 'ac-pins';
+/** The order the person arranged their list in (ids, a bot's place among the bots on its team); see ui-gestures. */
+export const ORDER_KEY = 'ac-order';
 /** Bots the person hid from their list (the profile menu's Hide); a link under the list brings them back. */
 export const HIDDEN_KEY = 'ac-hidden';
 const hiddenBots = () => { const list = loadLocal(HIDDEN_KEY, []); return Array.isArray(list) ? list.filter(id => bots().some(b => b.id === id && b.settings?.lead !== true)) : []; };
 function chatRows(query = '') {
   const saved = loadLocal(PINS_KEY, null), primary = bots().find(b => b.settings?.lead === true);
-  return botRows(store.state, {query, pins: Array.isArray(saved) ? saved : primary ? [primary.id] : [], hidden: hiddenBots()});
+  const order = loadLocal(ORDER_KEY, []);
+  return botRows(store.state, {query, pins: Array.isArray(saved) ? saved : primary ? [primary.id] : [], order: Array.isArray(order) ? order : [], hidden: hiddenBots()});
 }
 const hiddenLink = () => { const n = hiddenBots().length; return n ? `<button type="button" class="link hv-hidden" data-action="show-hidden">Show ${n} hidden</button>` : ''; };
 const bigFace = (row, size) => { const bot = findBot(row.id); return bot ? face(bot, {size, state: row.status, primary: row.isPrimary, manager: row.isManager, index: bots().indexOf(bot)}) : ''; };
@@ -48,7 +51,7 @@ function botRow(row) {
   const current = store.route.bot === row.id;
   const prev = row.status === 'working' ? '<span class="crow-prev live">working<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></span>'
     : row.needs ? '<span class="crow-prev wt">Waiting on you</span>' : `<span class="crow-prev">${esc(row.preview || row.job)}</span>`;
-  return `<button type="button" class="crow${current ? ' on' : ''}" data-action="open-bot" data-id="${esc(row.id)}"${current ? ' aria-current="page"' : ''}>${row.face}<span class="crow-w"><span class="crow-top"><b>${esc(row.name)}</b><time>${esc(stamp(row.at))}</time></span>${prev}</span>${row.needs ? `<span class="badge" aria-label="${row.needs} waiting on you">${row.needs}</span>` : ''}</button>`;
+  return `<button type="button" class="crow${current ? ' on' : ''}" data-action="open-bot" data-id="${esc(row.id)}" data-team="${esc(row.team ?? '')}"${row.isManager ? ' data-manager="true"' : ''}${current ? ' aria-current="page"' : ''}>${row.face}<span class="crow-w"><span class="crow-top"><b>${esc(row.name)}</b><time>${esc(stamp(row.at))}</time></span>${prev}</span>${row.needs ? `<span class="badge" aria-label="${row.needs} waiting on you">${row.needs}</span>` : ''}</button>`;
 }
 function pinnedRow(row, size) {
   const current = store.route.bot === row.id;
@@ -221,7 +224,8 @@ export function wireShell() {
   main.addEventListener('pointerdown', ev => { start = store.route.home && !isDesk() && !ev.target.closest('.shelf') ? {x: ev.clientX, y: ev.clientY} : null; });
   main.addEventListener('pointercancel', () => { start = null; });
   main.addEventListener('pointerup', ev => {
-    if (!start) return;
+    // A bot being dragged sideways is not a swipe between Bots and Threads.
+    if (!start || document.body.dataset.dragging) { start = null; return; }
     const dx = ev.clientX - start.x, dy = ev.clientY - start.y; start = null;
     if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
     if (dx < 0 && store.section === 'bots') switchSection('threads', 1);

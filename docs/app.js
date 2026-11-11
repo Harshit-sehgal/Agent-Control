@@ -12,22 +12,25 @@
  *   ui-shell        sidebar, phone chrome and home, search, the page frame
  *   ui-conversation a bot chat or a thread: header, feed, cards, composer
  *   ui-profile      a bot's profile, Edit, the New bot page and the bot options menu
+ *   ui-gestures     pin and reorder: drag, long press, right-click, Alt+arrows
+ *   ui-reorder      pure rules behind those gestures
  *   ui-settings     Settings, the Company chart and Activity
  *   ui-profile-model pure view models behind those screens
  *   ui-sheets       sign-in and password sheets   ui-admin   admin pages
  *   ui-dialogs      toast, sheet, confirm/ask      ui-actions action/form tables
  *   ui-fx           confetti, the send arrow and the bots' ambient life
  */
-import {companyRoute} from './ui-company.js?v=09349b7571';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=09349b7571';
-import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=09349b7571';
-import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, closeSearch, homeView} from './ui-shell.js?v=09349b7571';
-import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=09349b7571';
-import {profileViews, wirePages} from './ui-profile.js?v=09349b7571';
-import {settingsViews} from './ui-settings.js?v=09349b7571';
-import {showLogin, hideLogin} from './ui-sheets.js?v=09349b7571';
-import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=09349b7571';
-import {bringBotsToLife} from './ui-fx.js?v=09349b7571';
+import {companyRoute} from './ui-company.js?v=b2a252f47f';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=b2a252f47f';
+import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=b2a252f47f';
+import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, closeSearch, homeView} from './ui-shell.js?v=b2a252f47f';
+import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=b2a252f47f';
+import {profileViews, wirePages} from './ui-profile.js?v=b2a252f47f';
+import {wireGestures, gesturesBusy} from './ui-gestures.js?v=b2a252f47f';
+import {settingsViews} from './ui-settings.js?v=b2a252f47f';
+import {showLogin, hideLogin} from './ui-sheets.js?v=b2a252f47f';
+import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=b2a252f47f';
+import {bringBotsToLife} from './ui-fx.js?v=b2a252f47f';
 
 const el = id => document.getElementById(id);
 const hashRoute = () => normalizeRoute(companyRoute(location.hash, store.state));
@@ -147,6 +150,8 @@ onChange(scope => {
   if (!store.state) return;
   scheduleSync();
   if (scope === 'route') return renderRoute();
+  // A bot is lifted: the list under it stays put until it lands, which repaints.
+  if (gesturesBusy()) return;
   keepFocus(() => {
     renderRail(); renderChrome();
     if (scope === 'list') return refreshHome();
@@ -272,7 +277,7 @@ window.addEventListener('popstate', event => { syncDepth(event); if (!store.stat
 window.addEventListener('resize', () => { if (store.state && isDesk() !== lastDesk) changed('route'); });
 // `toggle` does not bubble, so listen in the capture phase to remember which handoff cards are open.
 document.addEventListener('toggle', trackOpen, true);
-wireShell(); wirePages();
+wireShell(); wirePages(); wireGestures();
 
 applyTheme(); watchSystemTheme(); bringBotsToLife(); registerWorker();
 boot();

@@ -11,6 +11,7 @@ No network and no credentials.
 """
 import asyncio
 import http.server
+import os
 import re
 import shutil
 import subprocess
@@ -70,6 +71,9 @@ class Harness:
         self.results = []
 
     async def scenario(self, name, fn, viewport=DESKTOP):
+        # SMOKE_ONLY=<text> runs just the scenarios whose name contains it (a shortcut while developing).
+        if os.environ.get('SMOKE_ONLY') and os.environ['SMOKE_ONLY'] not in name:
+            return
         context = await self.browser.new_context(viewport=viewport)
         page = await context.new_page()
         page.set_default_timeout(6000)
@@ -510,6 +514,195 @@ async def phone_search_and_escape(page, base):
     await expect(page.locator('#ch-res')).to_be_hidden()
 
 
+# ---------------------------------------------------------------- pin and reorder
+
+async def row_names(page, root='#sidebar'):
+    return await page.locator(f'{root} .crow').evaluate_all('els => els.map(e => e.querySelector("b").textContent)')
+
+
+async def pin_names(page, root='#sidebar'):
+    return await page.locator(f'{root} .pin').evaluate_all('els => els.map(e => e.querySelector("span").textContent)')
+
+
+async def poll_equal(page, read, want, timeout=4000):
+    """Wait until `read()` (an async function of nothing) returns `want`; the lists settle after a spring."""
+    for _ in range(timeout // 50):
+        if await read() == want:
+            return
+        await page.wait_for_timeout(50)
+    assert await read() == want, (await read(), want)
+
+
+async def drag(page, source, target, to_y=None, to_x=None, steps=14):
+    """Press on `source` and move to the middle of `target` (or to a point) in small steps. The button stays down."""
+    a = await source.bounding_box()
+    await page.mouse.move(a['x'] + a['width'] / 2, a['y'] + a['height'] / 2)
+    await page.mouse.down()
+    if target is None:
+        x, y = (a['x'] + a['width'] / 2 if to_x is None else to_x), to_y
+    else:
+        b = await target.bounding_box()
+        x, y = (b['x'] + b['width'] / 2 if to_x is None else to_x), (b['y'] + b['height'] / 2 if to_y is None else to_y)
+    await page.mouse.move(x, y, steps=steps)
+    return x, y
+
+
+async def pin_by_menu_and_move_by_keyboard(page, base):
+    await open_app(page, base, bots=EXTRA_BOTS)
+    await expect(page.locator('#sidebar .crow')).to_have_count(3)
+    assert await row_names(page) == ['Researcher', 'Writer', 'Reviewer'], await row_names(page)
+    # Right-click opens the options menu at the pointer; Pin puts the bot in the pinned row.
+    await page.locator('#sidebar .crow', has_text='Writer').click(button='right')
+    await expect(page.locator('#cmenu')).to_be_visible()
+    assert 'Pin' in await page.locator('#cmenu [role=menuitem]').all_inner_texts()
+    await page.locator('#cmenu [data-action="menu-pin"]').click()
+    await expect(page.locator('#sidebar .pin', has_text='Writer')).to_have_count(1)
+    assert await pin_names(page) == ['Atlas', 'Writer'], await pin_names(page)
+    assert await row_names(page) == ['Researcher', 'Reviewer'], await row_names(page)
+    # The menu key and Shift+F10 open it from the keyboard; Esc closes it and gives focus back.
+    row = page.locator('#sidebar .crow', has_text='Researcher')
+    await row.focus()
+    await page.keyboard.press('ContextMenu')
+    await expect(page.locator('#cmenu')).to_be_visible()
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#cmenu')).to_have_count(0)
+    await expect(row).to_be_focused()
+    await page.keyboard.press('Shift+F10')
+    await expect(page.locator('#cmenu')).to_be_visible()
+    await page.keyboard.press('Escape')
+    # Alt+ArrowDown moves the focused row down one place and keeps focus on it. It does not go Back.
+    await page.keyboard.press('Alt+ArrowDown')
+    await poll_equal(page, lambda: row_names(page), ['Reviewer', 'Researcher'])
+    await expect(page.locator('#sidebar .crow', has_text='Researcher')).to_be_focused()
+    assert await hash_(page) == '#bot/atlas', await hash_(page)
+    # Alt+Left on a pinned face moves it left.
+    await page.locator('#sidebar .pin', has_text='Writer').focus()
+    await page.keyboard.press('Alt+ArrowLeft')
+    await poll_equal(page, lambda: pin_names(page), ['Writer', 'Atlas'])
+    # Saved per person under one key each, and still there after a reload.
+    saved = await page.evaluate('() => [localStorage.getItem("ac-pins"), localStorage.getItem("ac-order")]')
+    assert saved[0] and saved[1], saved
+    await page.reload()
+    await expect(page.locator('#sidebar .crow').first).to_be_visible()
+    assert await pin_names(page) == ['Writer', 'Atlas'], await pin_names(page)
+    assert await row_names(page) == ['Reviewer', 'Researcher'], await row_names(page)
+    # Alt+ArrowDown on a pinned face unpins it, and Alt+ArrowUp on the first row pins it.
+    await page.locator('#sidebar .pin', has_text='Writer').focus()
+    await page.keyboard.press('Alt+ArrowDown')
+    await poll_equal(page, lambda: pin_names(page), ['Atlas'])
+    assert 'Writer' in await row_names(page)
+    first = await row_names(page)
+    await page.locator('#sidebar .crow', has_text=first[0]).focus()
+    await page.keyboard.press('Alt+ArrowUp')
+    await poll_equal(page, lambda: pin_names(page), ['Atlas', first[0]])
+
+
+async def drag_to_pin_reorder_and_unpin(page, base):
+    await open_app(page, base, bots=EXTRA_BOTS)
+    await expect(page.locator('#sidebar .crow')).to_have_count(3)
+    # A press and a move drags the whole row: it rides under the pointer and leaves an empty slot.
+    shelf = page.locator('#sidebar .shelf')
+    edge = (await shelf.bounding_box())
+    x, y = await drag(page, page.locator('#sidebar .crow', has_text='Reviewer'), shelf, to_x=edge['x'] + edge['width'] - 20)
+    await expect(page.locator('#sidebar .gest-ghost')).to_have_count(1)
+    await expect(page.locator('#sidebar .gest-hole')).to_have_count(1)
+    await expect(shelf).to_have_class(re.compile('drop-on'))
+    ghost = await page.locator('#sidebar .gest-ghost').bounding_box()
+    assert abs((ghost['x'] + ghost['width'] / 2) - x) < 90 and abs((ghost['y'] + ghost['height'] / 2) - y) < 90, (ghost, x, y)
+    await page.mouse.up()
+    await expect(page.locator('#sidebar .gest-ghost')).to_have_count(0)
+    # Dropping on the pinned row pins it; the click that ends a drag does not open its chat.
+    assert await pin_names(page) == ['Atlas', 'Reviewer'], await pin_names(page)
+    assert await hash_(page) == '#bot/atlas', await hash_(page)
+    # Drag a pinned face past its neighbour to reorder, then out of the row to unpin.
+    faces = page.locator('#sidebar .pin')
+    first = await faces.nth(0).bounding_box()
+    await drag(page, faces.nth(1), None, to_y=first['y'] + first['height'] / 2, to_x=first['x'] + 6)
+    await page.mouse.up()
+    await poll_equal(page, lambda: pin_names(page), ['Reviewer', 'Atlas'])
+    await drag(page, page.locator('#sidebar .pin', has_text='Reviewer'), page.locator('#sidebar .crow', has_text='Writer'))
+    await expect(page.locator('#sidebar .gest-out')).to_have_count(1)
+    await page.mouse.up()
+    await poll_equal(page, lambda: pin_names(page), ['Atlas'])
+    assert 'Reviewer' in await row_names(page)
+    # Drag a row to the top of the list: it swaps once the pointer is past the middle of its neighbour.
+    top = await page.locator('#sidebar .crow').first.bounding_box()
+    last = await row_names(page)
+    await drag(page, page.locator('#sidebar .crow', has_text=last[-1]), None, to_y=top['y'] + 18)
+    await page.mouse.up()
+    await poll_equal(page, lambda: row_names(page), [last[-1], *last[:-1]])
+    # A plain click still opens the chat.
+    await page.locator('#sidebar .crow', has_text='Researcher').click()
+    await expect(page.locator('#main h1')).to_have_text('Researcher')
+    # Esc cancels a drag: nothing changes and the row is back.
+    before = await row_names(page)
+    await drag(page, page.locator('#sidebar .crow', has_text='Reviewer'), page.locator('#sidebar .shelf'))
+    await page.keyboard.press('Escape')
+    await page.mouse.up()
+    await expect(page.locator('#sidebar .gest-ghost')).to_have_count(0)
+    assert await pin_names(page) == ['Atlas'] and await row_names(page) == before
+
+
+async def drag_onto_a_manager_moves_it_to_the_team(page, base):
+    ids = await open_app(page, base, bots=EXTRA_BOTS)
+    # Reviewer reports to Writer, so Writer is a manager and Researcher is dropped on its row.
+    await page.evaluate("async ids => { await window.AGENT_API(`/api/groups/home/bots/${ids.Reviewer}`, 'PATCH', {settings: {reportsTo: ids.Writer}}); }", ids)
+    await page.reload()
+    await expect(page.locator('#sidebar .crow')).to_have_count(3)
+    manager = page.locator('#sidebar .crow', has_text='Writer')
+    await expect(manager).to_have_attribute('data-manager', 'true')
+    assert await row_names(page) == ['Researcher', 'Writer', 'Reviewer'], await row_names(page)
+    await drag(page, page.locator('#sidebar .crow', has_text='Researcher'), manager)
+    await expect(manager).to_have_class(re.compile('drop-on'))
+    await page.mouse.up()
+    await expect(page.locator('#toast')).to_contain_text('Researcher now reports to Writer')
+    assert company_bot(await api_state(page), 'Researcher')['settings']['reportsTo'] == ids['Writer']
+    # A manager moves with its reports: Alt+ArrowDown on Writer has no team-mate to pass, so nothing changes.
+    await manager.focus()
+    await page.keyboard.press('Alt+ArrowDown')
+    assert (await row_names(page))[0] == 'Writer', await row_names(page)
+
+
+async def phone_long_press_menu_and_drag(page, base):
+    await open_app(page, base, bots=EXTRA_BOTS)
+    await expect(page.locator('#main .crow')).to_have_count(3)
+    cdp = await page.context.new_cdp_session(page)
+
+    async def touch(kind, x, y):
+        await cdp.send('Input.dispatchTouchEvent', {'type': kind, 'touchPoints': [] if kind == 'touchEnd' else [{'x': x, 'y': y, 'id': 1}]})
+    box = await page.locator('#main .crow', has_text='Writer').bounding_box()
+    cx, cy = box['x'] + box['width'] / 2, box['y'] + box['height'] / 2
+    # Touch and hold, then let go without moving: the options sheet comes up from the bottom.
+    await touch('touchStart', cx, cy)
+    await page.wait_for_timeout(700)
+    await expect(page.locator('#main .crow.gest-armed')).to_have_count(1)
+    await touch('touchEnd', cx, cy)
+    await expect(page.locator('#cmenu.sheet')).to_be_visible()
+    assert await hash_(page) in ('', '#chats'), await hash_(page)
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#cmenu')).to_have_count(0)
+    # A swipe with no hold scrolls the page and lifts nothing.
+    await touch('touchStart', cx, cy)
+    await touch('touchMove', cx, cy - 40)
+    await touch('touchEnd', cx, cy - 40)
+    await page.wait_for_timeout(500)
+    await expect(page.locator('#main .gest-ghost')).to_have_count(0)
+    # Touch and hold, then move: it lifts and follows the finger; dropping on the pinned row pins it.
+    shelf = await page.locator('#main .shelf').bounding_box()
+    goal = shelf['y'] + shelf['height'] / 2
+    await touch('touchStart', cx, cy)
+    await page.wait_for_timeout(700)
+    right = shelf['x'] + shelf['width'] - 24
+    for step in range(1, 13):
+        await touch('touchMove', cx + (right - cx) * step / 12, cy + (goal - cy) * step / 12)
+        await page.wait_for_timeout(16)
+    await expect(page.locator('#main .gest-ghost')).to_have_count(1)
+    await expect(page.locator('#main .shelf')).to_have_class(re.compile('drop-on'))
+    await touch('touchEnd', right, goal)
+    await poll_equal(page, lambda: pin_names(page, '#main'), ['Atlas', 'Writer'])
+    assert await hash_(page) in ('', '#chats'), await hash_(page)
+
+
 async def main():
     shots = Path(tempfile.mkdtemp(prefix='usability-smoke-shots-'))
     site_dir = Path(tempfile.mkdtemp(prefix='usability-smoke-site-'))
@@ -524,6 +717,9 @@ async def main():
             await h.scenario('bot: edit renames it and a menu move puts it under a manager', edit_rename_and_move)
             await h.scenario('bot: delete asks first, and its reports go Solo', delete_bot_reports_go_solo)
             await h.scenario('bot: Atlas has no Delete or Hide; pin from the menu', atlas_has_no_delete)
+            await h.scenario('pin: the menu pins, the menu key opens it, Alt+arrows reorder and it is saved', pin_by_menu_and_move_by_keyboard)
+            await h.scenario('pin: drag a row to the pinned row, reorder faces, drag one out, reorder rows, Esc cancels', drag_to_pin_reorder_and_unpin)
+            await h.scenario('pin: dropping on a manager moves the bot to its team', drag_onto_a_manager_moves_it_to_the_team)
             await h.scenario('settings: opens from the avatar, Bots running pauses, Esc closes', settings_from_avatar_and_esc)
             await h.scenario('activity: four chips, bots made are logged, a profile counts its own', activity_page_and_counts)
             await h.scenario('out-of-job reply: three buttons, each does its thing', out_of_job_card)
@@ -533,13 +729,14 @@ async def main():
             await h.scenario('phone: create a bot from the + button', phone_create_bot, PHONE)
             await h.scenario('phone: bottom search opens on focus and closes on Esc or a tap', phone_search_and_escape, PHONE)
             await h.scenario('phone: Settings cards, a section, Back, Esc, and the menu sheet', phone_settings_cards, PHONE)
+            await h.scenario('phone: long press opens the options sheet; hold and drag pins', phone_long_press_menu_and_drag, PHONE)
             await browser.close()
             server.shutdown()
         failed = [name for name, error in h.results if error]
         if failed:
             print(f'USABILITY SMOKE FAIL: {len(failed)} of {len(h.results)} scenarios: {failed}')
             return 1
-        print(f'USABILITY SMOKE PASS: {len(h.results)} scenarios; new bot, edit and move, delete, Atlas, settings, out-of-job card, checkpoint card, faces, keyboard, phone, no console errors')
+        print(f'USABILITY SMOKE PASS: {len(h.results)} scenarios; new bot, edit and move, delete, Atlas, pin and reorder, settings, out-of-job card, checkpoint card, faces, keyboard, phone, no console errors')
         return 0
     finally:
         shutil.rmtree(site_dir, ignore_errors=True)

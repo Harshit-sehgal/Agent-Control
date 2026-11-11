@@ -94,7 +94,7 @@ export function botRows(state, {query = '', order = [], pins, hidden = []} = {})
         face: face(bot, {size: 40, state: status, primary: isPrimary, manager: isManager, index: bots.indexOf(bot)}),
         status, ...lastLine(state?.chats?.[bot.id]),
         needs: totalWaitingOnYou(waitingOnYou(state, bot.id)),
-        pinned: pinned.includes(bot.id), isPrimary, isManager,
+        pinned: pinned.includes(bot.id), isPrimary, isManager, team: isPrimary ? null : parentOf(bot) ?? null,
       };
     })
     .filter(row => !q || `${row.name} ${row.job}`.toLowerCase().includes(q));

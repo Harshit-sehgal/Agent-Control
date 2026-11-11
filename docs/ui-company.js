@@ -10,8 +10,8 @@
  * A run's trace holds one entry per step: {botId, output}. A bot-to-bot ask is
  * two entries, {botId: asker, kind: 'ask', to, task} and then
  * {botId: asked, kind: 'peer', to: asker, output}. */
-import {face} from './ui-face.js?v=09349b7571';
-import {waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=09349b7571';
+import {face} from './ui-face.js?v=b2a252f47f';
+import {waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=b2a252f47f';
 
 const teamKey = id => `team-${id}`;
 const settingsOf = bot => bot?.settings || {};
@@ -94,7 +94,7 @@ export function botRows(state, {query = '', order = [], pins, hidden = []} = {})
         face: face(bot, {size: 40, state: status, primary: isPrimary, manager: isManager, index: bots.indexOf(bot)}),
         status, ...lastLine(state?.chats?.[bot.id]),
         needs: totalWaitingOnYou(waitingOnYou(state, bot.id)),
-        pinned: pinned.includes(bot.id), isPrimary, isManager,
+        pinned: pinned.includes(bot.id), isPrimary, isManager, team: isPrimary ? null : parentOf(bot) ?? null,
       };
     })
     .filter(row => !q || `${row.name} ${row.job}`.toLowerCase().includes(q));

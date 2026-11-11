@@ -1,8 +1,8 @@
 /** The two full-screen layers a signed-in person can still raise: sign-in (when the
  * session ends) and the change-password sheet. Everything else that used to be a
  * sheet here (new bot, new group, attach, scheduled task) is a page now (ui-profile.js). */
-import {esc, btn, field} from './ui-kit.js?v=09349b7571';
-import {openSheet} from './ui-dialogs.js?v=09349b7571';
+import {esc, btn, field} from './ui-kit.js?v=b2a252f47f';
+import {openSheet} from './ui-dialogs.js?v=b2a252f47f';
 
 const el = id => document.getElementById(id);
 

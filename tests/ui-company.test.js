@@ -101,6 +101,11 @@ test('the saved order wins among siblings', () => {
   assert.deepEqual(rows.slice(1).map(r => r.id), ['ledger', 'ops', 'plan', 'mail']);
 });
 
+test('every row says which bot it reports to, so a block of rows can move together', () => {
+  const rows = botRows(stateOf(), {pins: []});
+  assert.deepEqual(rows.map(r => [r.id, r.team]), [['atlas', null], ['ops', 'atlas'], ['mail', 'ops'], ['plan', 'ops'], ['ledger', 'atlas']]);
+});
+
 test('activity never reorders the sidebar', () => {
   const quiet = botRows(stateOf(), {pins: []}).map(r => r.id);
   const chats = {ledger: [{id: 'm', role: 'user', text: 'hi', at: '2026-11-11T09:00:00Z'}]};
