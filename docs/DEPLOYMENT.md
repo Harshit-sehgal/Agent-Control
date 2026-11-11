@@ -154,6 +154,48 @@ apply. Building without that argument keeps the image small, and requests then
 fall back to a paired local agent — with neither, the chat says which one is
 missing.
 
+### One browser for all your bots (sign in once)
+
+On the device that runs `node agent/agent.mjs run`, set `AGENT_BROWSER=1` (and
+`AGENT_BROWSER_ALLOWLIST`, as above) and every bot's browser work shares **one
+Chrome with one saved profile**. Sign in to a site there once and the sign-in is
+there for every bot. Each bot has its own tab, one bot drives at a time and the
+others wait their turn in order; a bot never touches another bot's tab.
+
+- **Where it lives:** `browser-profile/` next to the agent's `agent.config.json`
+  (or the directory in `AGENT_BROWSER_PROFILE`), created with mode `0700`. It
+  holds your cookies. Nothing in this app reads, uploads, logs or backs it up
+  (`npm run backup` and the vault never see it); keep it out of your own backups
+  and do not share it.
+- **Sign in once:** open the bot's **Computer** view and press **Take over**
+  (`POST /api/browser-live/:botId/takeover`; the view itself comes with the UI
+  work). You see the page live, click and type, and open an address from the
+  address box; a site must be in `AGENT_BROWSER_ALLOWLIST` for the browser to
+  load it, so list the sign-in host too (for Google, `accounts.google.com`).
+  Press **Hand back** when you are through.
+- **While you drive:** no bot starts anything. A bot already mid-task finishes
+  the step it is on, runs no further step, waits for the hand back and then
+  answers with the page as you left it. A takeover you forget ends by itself
+  after `AGENT_TAKEOVER_IDLE_MS` (15 minutes without input). Other jobs on that
+  device, such as a subscription model run, wait behind a parked browser task.
+- **Wipe it:** stop the agent, delete the `browser-profile` directory, start the
+  agent. Every bot is signed out and the next sign-in starts fresh. To sign out
+  of one site, take over and use that site's own sign-out.
+- **Live view:** frames are a screencast of the one tab you are watching, sent
+  by the agent (about ten a second at most) and kept by the server in memory
+  only while your page is polling; they are never stored, and a read-only
+  viewer account cannot watch. If the agent has no Chrome the takeover fails and
+  says so.
+- **One agent per profile:** Chrome allows one process per profile directory, so
+  two agents on one machine need two `AGENT_BROWSER_PROFILE` directories.
+- **Moving to a VM:** the profile belongs where the agent runs. If the server
+  moves to a VM and the agent stays on your laptop, the browser stays on the
+  laptop (and sleeps with it); run an agent on the VM too and sign in once there.
+
+Reading and clicking are asked about as before: a bot asks the first time it
+uses a site, and a click on a Send, Post, Delete or Pay control gets its own
+ask. Posting on X stays refused for bots.
+
 `preflight()` refuses to boot on an invalid `PUBLIC_ORIGIN` and warns when HSTS
 is on without HTTPS, when no `DASHBOARD_PASSWORD` is set, or when the server is
 bound off-loopback without HTTPS. The store refuses to open a database written

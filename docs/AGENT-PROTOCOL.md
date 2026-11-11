@@ -41,9 +41,45 @@ Verification (`verifyAgentRequest`):
   The body may carry `cli: {claude, codex}`, each `signed-in`, `signed-out`,
   `missing` or `unknown`, taken from the CLIs' own status commands; the server
   keeps only those four words and shows them in `GET /api/agents`.
+- `POST /api/agent/live` `{tabs:[{botId,url,title}], owner, failed?}` → a long
+  poll (held up to 20 s) that answers `{commands, watch}`: `watch` is the bot
+  whose tab the owner is looking at (or null), `commands` are `takeover`,
+  `handback` and `input` for the device to apply, in order. `owner` says which
+  bot's tab the owner holds on the device; `failed` reports a takeover that
+  could not start. Only a device with `AGENT_BROWSER=1` and a browser permission
+  opens this line.
+- `POST /api/agent/frames` `{botId, image, w, h}` → one JPEG frame (base64) of
+  the watched tab; answers `{watch}`. The server keeps only the newest, in
+  memory, while someone is watching.
 - `POST /api/agent/tasks/:id/result` `{status, result, error}` → records a
   result. Completing an already-completed task is rejected (409); a `failed`
   result re-queues while attempts remain, then fails permanently.
+
+## 3b. The shared browser (owner side)
+The owner's page, signed in as a member or above (a read-only viewer gets no
+frame), uses these; `src/browser-live.js` keeps what they carry in memory:
+
+- `GET /api/browser-live` → `[{botId, state: idle|browsing|driving, url, title,
+  site, pages: [{url, title, at}], runId, requestId, live}]`. `pages` are this
+  run's, or the last run's when idle. `site` is the host of the page now while
+  the bot is browsing or driven, else null.
+- `GET /api/browser-live/:botId?after=<seq>` → the same line plus the newest
+  frame: `{seq, changed, w, h, at, image, agent, notice?, state, url, title,
+  site}`. `image` is a `data:image/jpeg;base64,…` URL and is present only when
+  `seq` moved past `after`. Polling is what tells the device to cast that tab.
+- `POST /api/browser-live/:botId/takeover` and `/handback` → `{botId, state}`.
+  Takeover is 409 when no device is running the shared browser.
+- `POST /api/browser-live/:botId/input` `{type: click|key|type|scroll|navigate,
+  …}` → 409 unless the owner is driving that bot, 400 for a malformed event, 429
+  when 100 are already queued. The page is 1280×800; `click {x, y, double?}`,
+  `scroll {x?, y?, dx?, dy}`, `type {text}` (≤ 2000), `key {key}` (Enter, Tab,
+  Backspace, Delete, Escape, arrows, Home, End, PageUp, PageDown),
+  `navigate {url}` (held to the allowlist).
+
+While the owner drives, bots wait. A running task finishes the step it is in,
+runs no later step (the page is no longer the one the steps were planned for),
+waits for the hand back and answers with the page as the owner left it and
+`tookOver: true`. An idle takeover ends after `AGENT_TAKEOVER_IDLE_MS`.
 
 ## 4. Task leases & recovery
 - `claimAgentTasks` leases a due task (`status='running'`, `lease_until`).
@@ -65,10 +101,13 @@ installed there (`AGENT_BROWSER_PATH` names one explicitly;
 `AGENT_BROWSER_ARGS` adds flags such as `--no-sandbox` for containers) and
 returns the title, the visible text and a numbered list of the controls on the
 page (see the index steps below), so pages that need JavaScript can be read.
-That browser starts with an empty profile that is deleted afterwards, so it is
-signed in to nothing, unless `AGENT_BROWSER_PROFILE` points at a directory to
-keep. A page, a frame or a redirect outside the allowlist is
-blocked, and so is any request the page makes to a private or local address.
+That browser is **one Chrome kept between tasks on one saved profile**
+(`browser-profile/` next to the agent's config, mode 0700, or the directory in
+`AGENT_BROWSER_PROFILE`), shared by every bot: a sign-in made in it is there for
+all of them. Each bot has its own tab (the task's `botId`; a task with none uses
+one shared tab), and one bot drives at a time. See "The shared browser" below. A
+page, a frame or a redirect outside the allowlist is blocked, and so is any
+request the page makes to a private or local address.
 
 `AGENT_BROWSER_ALLOWLIST` is read by the device and by the server the same way:
 one host name per entry, compared on the host, so a trailing dot or a `:port`
@@ -122,10 +161,10 @@ Boundaries — the same as a read, plus interaction:
   `AGENT_BROWSER_ALLOWLIST`, including after a redirect;
 - the browser reaches the network only through the agent's proxy, which refuses
   private/local addresses, so a step cannot pivot to your LAN;
-- actions run in a **fresh, empty profile** that is deleted afterwards, so the
-  agent is never signed in to anything; authenticated flows would need an
-  explicit, opt-in persistent profile (`AGENT_BROWSER_PROFILE`) and are not on
-  by default;
+- the real browser runs on a **persistent profile shared by every bot**, so
+  what the owner signed in to is available to all of them. That is the design
+  (see "The shared browser"); the allowlist and the egress proxy still decide
+  where it may go;
 - interaction requires the real browser (`AGENT_BROWSER=1`); the fetch fallback
   is read-only;
 - a task reaches the device only through a human decision. Either a person
