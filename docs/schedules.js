@@ -35,6 +35,15 @@ export function cleanDay(value) {
   return text.length >= 3 ? DAYS.find(day => day.startsWith(text) || text === day) || '' : '';
 }
 
+/** The Schedule form's "How often" choices; "week:<day>" is weekly on that day. */
+export const SCHEDULE_OFTEN = [['1440', 'Every day'], ['60', 'Every hour'], ...DAYS.slice(1).concat(DAYS[0]).map(day => [`week:${day}`, `Every ${day[0].toUpperCase()}${day.slice(1)}`]), ['', 'Once']];
+/** A "How often" choice as {every, on}. */
+export function scheduleChoice(value) {
+  const text = String(value ?? '');
+  if (text.startsWith('week:')) return {every: 10080, on: cleanDay(text.slice(5))};
+  return {every: Number(text) || undefined, on: ''};
+}
+
 /** The next moment the local clock reads `at` (today if still ahead, else tomorrow), or null. With `on`, the next
  * such moment on that day of the week. */
 export function nextAtFor(at, now = new Date(), on = '') {

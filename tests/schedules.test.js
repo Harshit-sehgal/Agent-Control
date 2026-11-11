@@ -185,3 +185,11 @@ test('the stored schedule keeps its day, so its words stay "every Monday"', () =
   enqueueTask(s, body);
   assert.equal(scheduleRows(s)[0].when, 'every Monday at 10:00');
 });
+
+test('the Schedule form offers each weekday, and a weekday choice is a weekly schedule on that day', async () => {
+  const {SCHEDULE_OFTEN, scheduleChoice} = await import('../shared/schedules.js');
+  assert.ok(SCHEDULE_OFTEN.some(([, label]) => label === 'Every Monday'));
+  assert.deepEqual(scheduleChoice('week:monday'), {every: 10080, on: 'monday'});
+  assert.deepEqual(scheduleChoice('1440'), {every: 1440, on: ''});
+  assert.deepEqual(scheduleChoice(''), {every: undefined, on: ''});
+});

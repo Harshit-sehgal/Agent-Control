@@ -37,3 +37,12 @@ test('the plain read names itself honestly', async () => {
   assert.match(PLAIN_AGENT, /^AgentControl\/\d/);
   assert.doesNotMatch(PLAIN_AGENT, /Mozilla|Chrome|Safari/);
 });
+
+test('a YouTube results page read without a browser lists its videos', () => {
+  const video = (id, title, channel, views, length) => `"videoRenderer":{"videoId":"${id}","title":{"runs":[{"text":"${title}"}]},"longBylineText":{"runs":[{"text":"${channel}"}]},"publishedTimeText":{"simpleText":"2 yr ago"},"lengthText":{"simpleText":"${length}"},"viewCountText":{"simpleText":"${views}"}}`;
+  const html = `<html><head><title>lofi music - YouTube</title></head><body><script>var ytInitialData = {"contents":[{${video('Gvx-DAzR-4k', 'Lo-fi Music for Calm \\u0026 Relax', 'KATCH Music Cafe', '2,203,450 views', '2:02:59')}},{${video('abc123', 'Study beats', 'Chill Hop', '10K views', '1:00:00')}}]};</script></body></html>`;
+  const page = readableHtml(html, 'https://www.youtube.com/results?search_query=lofi+music');
+  assert.match(page.text, /Lo-fi Music for Calm & Relax · KATCH Music Cafe · 2,203,450 views · 2:02:59/);
+  assert.match(page.text, /Study beats · Chill Hop/);
+  assert.deepEqual(page.links[0], {text: 'Lo-fi Music for Calm & Relax', url: 'https://www.youtube.com/watch?v=Gvx-DAzR-4k'});
+});

@@ -25,7 +25,7 @@ import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, 
 import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js';
 import {toast} from './ui-dialogs.js';
 import {siteChip} from './ui-computer-view.js';
-import {cliChoice} from './ui-connect-model.js';
+import {cliChoice, googleCard} from './ui-connect-model.js';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -419,6 +419,14 @@ export const conversationActions = {
     const message = Object.values(store.state?.chats || {}).flat().find(x => x?.id === b.dataset.message);
     const card = message && message.origin !== 'browser' ? setupCardOf(message) : null;
     if (!card) throw new Error('That suggestion is no longer here.');
+    if (card.app === 'google') {
+      // With a Google client saved, the tap is the sign-in itself; without one, the Connectors page shows the one-time setup.
+      const google = !isStaticDemo() ? googleCard((await api('/api/connectors').catch(() => null))?.google) : null;
+      if (google?.connectLabel) return void window.location.assign('/api/connectors/google/start');
+      if (google?.state === 'connected') return toast('Google is already connected.');
+      go({settings: 'conn'});
+      return toast('Google needs a one-time client first. Paste it below, then Connect.');
+    }
     if (card.action === 'open') return go({settings: card.section});
     if (card.action === 'team') await api(`/api/groups/${encodeURIComponent(card.groupId)}`, 'PATCH', {settings: card.settings});
     else if (card.action === 'schedule') await (card.stop ? api(`/api/tasks/${encodeURIComponent(card.taskId)}`, 'DELETE') : api('/api/tasks', 'POST', scheduleTaskBody(card)));

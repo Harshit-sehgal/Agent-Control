@@ -42,10 +42,11 @@ const PER_SITE = ['browser.use', 'send', 'post', 'delete'];
 /** Settings pages a bot may point to, by the word it uses, and the section key and title the app uses. */
 export const SETUP_PAGES = {
   models: ['models', 'Models and keys'], keys: ['models', 'Models and keys'],
-  connectors: ['conn', 'Connectors'], gmail: ['conn', 'Connectors'], drive: ['conn', 'Connectors'], mcp: ['conn', 'Connectors'],
+  connectors: ['conn', 'Connectors'], gmail: ['conn', 'Connectors'], drive: ['conn', 'Connectors'], google: ['conn', 'Connectors'], mcp: ['conn', 'Connectors'],
   permissions: ['perm', 'Permissions'], agents: ['agents', 'Local agents'], computer: ['agents', 'Local agents'],
   usage: ['usage', 'Usage'], appearance: ['look', 'Appearance'], general: ['general', 'General'],
 };
+const GOOGLE_PAGES = ['gmail', 'drive', 'google'];
 const MIN_JOB = 20, MAX_JOB = 3000, MAX_BLOCKS = 3;
 
 export const SETUP_TOOL_HINT = 'To change a setting for the owner, put one fenced block named setup in your reply, holding JSON. '
@@ -57,7 +58,7 @@ export const SETUP_TOOL_HINT = 'To change a setting for the owner, put one fence
   + '{"action":"rule","bot":"<bot name>","do":"open|send|post|delete|spend","site":"<site, e.g. github.com>","choice":"always|ask|deny"} saves what that bot may do without asking (a payment is never always). '
   + '{"action":"schedule","bot":"<bot name, or me>","do":"<the message that bot gets each time>","every":"day|hour|week|<minutes>","at":"<HH:MM, optional>","on":"<monday..sunday, optional: a weekly schedule on that day>"} puts work on a timer: the bot runs it in its own chat and the owner reads the result there. Give only "at" for a one-off later today or tomorrow. Add "stop":true with a few words of its message in "do" to stop one; workspace.schedules lists them. When the owner asks for something regular (every morning, each Monday), propose a schedule instead of telling them to come back. '
   + '{"action":"remove","bot":"<bot name>"} removes a bot the owner no longer wants, with its chat and schedules (never Atlas). '
-  + '{"action":"open","page":"models|connectors|permissions|agents|usage"} shows the owner a Settings page, for things only they can do, such as pasting a key. '
+  + '{"action":"open","page":"models|connectors|gmail|permissions|agents|usage"} shows the owner a Settings page, for things only they can do, such as pasting a key; "gmail" (or "drive") is a button that starts the Google sign-in itself, so use it whenever the owner wants email or Drive connected. '
   + 'Nothing changes until the owner taps Apply on the card, so say in your reply what you proposed and why. Never ask for a key or password in chat.';
 
 const lower = value => String(value ?? '').trim().toLowerCase();
@@ -130,6 +131,8 @@ export function resolveSetup(state, request, {speaker = null} = {}) {
   if (request.action === 'open') {
     const page = SETUP_PAGES[request.page];
     if (!page) return {ok: false, error: `there is no "${request.page || 'blank'}" page to open. Use models, connectors, permissions, agents or usage.`};
+    // Gmail and Drive are one Google sign-in, so the card goes straight to it.
+    if (GOOGLE_PAGES.includes(request.page)) return {ok: true, card: {action: 'open', section: 'conn', app: 'google', text: 'Connect Google (Gmail and Drive)'}};
     return {ok: true, card: {action: 'open', section: page[0], text: `Settings → ${page[1]}`}};
   }
   if (request.action === 'job') {
@@ -311,7 +314,7 @@ export function setupDone(state, card) {
   return sameModel && sameEffort;
 }
 /** The button on a setup card. */
-export const setupButton = card => (card.action === 'open' ? `Open ${card.text.replace(/^Settings → /, '')}` : card.action === 'remove' ? 'Remove' : 'Apply');
+export const setupButton = card => (card.app === 'google' ? 'Connect Google' : card.action === 'open' ? `Open ${card.text.replace(/^Settings → /, '')}` : card.action === 'remove' ? 'Remove' : 'Apply');
 
 /* ---------- what every bot knows ---------- */
 
@@ -376,7 +379,7 @@ export function workspaceBrief(state, {agents = [], connectors = [], speaker = n
       'A bot opens a web page by asking with the browser block; the owner answers Decline, Allow or Always allow. Saved answers are in Settings → Permissions.',
       'This computer runs the browser and the claude and codex sign-in by itself; there is nothing to pair on it.',
       'Models and keys are added only by the owner, in Settings → Models and keys. Never ask for a key in chat; use the setup block to open that page.',
-      'Gmail, Google Drive and MCP servers are connected in Settings → Connectors. An MCP server that runs on this computer is added there under On my computer, with the command that starts it; the owner types it, never you.',
+      'To connect Gmail or Google Drive, send the setup block {"action":"open","page":"gmail"}: its button starts the Google sign-in. MCP servers are connected in Settings → Connectors. An MCP server that runs on this computer is added there under On my computer, with the command that starts it; the owner types it, never you.',
       'When a run fails because a model is down or out of quota, propose another connected model with the setup block.',
     ],
   };

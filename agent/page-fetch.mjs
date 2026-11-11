@@ -18,10 +18,31 @@ const decode = text => String(text).replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (wh
 });
 const words = html => decode(html.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
 
+/** A JSON string's text: its \u escapes and \" read back, then any HTML entities. */
+const jsonText = text => { try { return decode(JSON.parse(`"${text}"`)); } catch { return decode(text); } };
+/** YouTube draws its results from data in a script, so the page's words are empty without a browser.
+ * The videos are read from that data: title, channel, views and length, each with its watch link. */
+function youtubeVideos(source) {
+  const parts = source.split('"videoRenderer":{"videoId":"').slice(1);
+  const field = (part, name, inner) => new RegExp(`"${name}":\\{${inner}"((?:[^"\\\\]|\\\\.)*)"`).exec(part)?.[1];
+  return parts.slice(0, MAX_LINKS).map(part => {
+    const id = /^[\w-]{6,20}/.exec(part)?.[0];
+    const title = field(part, 'title', '"runs":\\[\\{"text":');
+    if (!id || !title) return null;
+    const bits = [field(part, 'longBylineText', '"runs":\\[\\{"text":'), field(part, 'viewCountText', '"simpleText":'), field(part, 'lengthText', '"simpleText":'), field(part, 'publishedTimeText', '"simpleText":')].filter(Boolean).map(jsonText);
+    return {title: jsonText(title), url: `https://www.youtube.com/watch?v=${id}`, line: [jsonText(title), ...bits].join(' · ')};
+  }).filter(Boolean);
+}
+
 /** `html` from `url` as {title, text, links}. The main article when the page marks one, else the body. */
 export function readableHtml(html, url) {
   const source = String(html || '');
   const title = words(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(source)?.[1] || '') || null;
+  let host = ''; try { host = new URL(url).hostname; } catch {}
+  if (/(^|\.)youtube\.com$/.test(host)) {
+    const videos = youtubeVideos(source);
+    if (videos.length) return {title: title || 'YouTube results', text: videos.map((v, i) => `${i + 1}. ${v.line}`).join('\n').slice(0, MAX_TEXT), links: videos.map(v => ({text: v.title.slice(0, 100), url: v.url}))};
+  }
   // Menus, headers, footers and sidebars are not the page's words; leaving them out keeps the text budget for the article.
   const clean = source.replace(/<(script|style|noscript|svg|template|nav|header|footer|aside)\b[\s\S]*?<\/\1>/gi, ' ').replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/<(div|ul)\b[^>]*\b(?:role="navigation"|class="[^"]*\b(?:vector-menu|interlanguage|navbox|mw-jump-link)\b[^"]*")[^>]*>[\s\S]*?<\/\1>/gi, ' ');

@@ -10,7 +10,7 @@ import {botStatus, botIsManager} from './ui-company.js';
 import {primaryOf} from './company.js';
 import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker} from './ui-kit.js';
 import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js';
-import {scheduleRows, scheduleTaskBody} from './schedules.js';
+import {scheduleRows, scheduleTaskBody, SCHEDULE_OFTEN, scheduleChoice} from './schedules.js';
 import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js';
 import {GRANT_LABELS} from './asks.js';
 import {grantRows, allGrantRows, grantUrl} from './ui-asks.js';
@@ -163,10 +163,9 @@ function scheduleList(bot) {
   const next = at => { const d = new Date(at); return Number.isNaN(d.getTime()) ? '' : ` · next ${d.toLocaleString([], {weekday: 'short', hour: '2-digit', minute: '2-digit'})}`; };
   return `<div class="cd">${rows.map(r => `<div class="rw memo"><span class="w">${esc(r.what)}<small>${esc(r.when)}${esc(next(r.nextAt))}</small></span>${write ? `<button type="button" class="memo-x" data-action="schedule-stop" data-id="${esc(bot.id)}" data-task="${esc(r.id)}" aria-label="Stop this schedule">Stop</button>` : ''}</div>`).join('')}</div>`;
 }
-const SCHEDULE_EVERY = [['1440', 'Every day'], ['60', 'Every hour'], ['10080', 'Every week'], ['', 'Once']];
 function schedulePage(bot) {
   const write = canWrite();
-  const often = `<select class="input" name="every" aria-label="How often">${SCHEDULE_EVERY.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>`;
+  const often = `<select class="input" name="every" aria-label="How often">${SCHEDULE_OFTEN.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>`;
   return `<p class="pr-note">${esc(bot.name)} runs each one in its own chat, and the answer waits for you there.</p>
     <div id="pr-schedule">${scheduleList(bot)}</div>
     ${write ? `<form id="schedule-form" class="pr-form" data-bot="${esc(bot.id)}" autocomplete="off">${field('What to do', `<input class="input" name="message" minlength="3" maxlength="2000" placeholder="Sum up my unread email in five lines" required>`)}<div class="sc-when">${field('How often', often)}${field('At', '<input class="input" name="at" type="time" value="08:00">')}</div><button type="submit" class="btn primary wide">Add to schedule</button></form>` : ''}`;
@@ -457,10 +456,10 @@ export const profileForms = {
     toast('Remembered.');
   },
   'schedule-form': async (form, f) => {
-    const every = Number(f.every) || undefined, group = groupOfBot(form.dataset.bot);
+    const {every, on} = scheduleChoice(f.every), group = groupOfBot(form.dataset.bot);
     if (!group) throw new Error('That bot is no longer in the company.');
     if (!every && !f.at) throw new Error('Pick a time for a one-off.');
-    await api('/api/tasks', 'POST', scheduleTaskBody({botId: form.dataset.bot, groupId: group.id, message: String(f.message || '').trim(), every, at: f.at || ''}));
+    await api('/api/tasks', 'POST', scheduleTaskBody({botId: form.dataset.bot, groupId: group.id, message: String(f.message || '').trim(), every, on, at: f.at || ''}));
     await sync(); form.reset(); refillSchedule(form.dataset.bot); toast('Added to the schedule.');
   },
   'bot-model-form': async (form, f) => {
