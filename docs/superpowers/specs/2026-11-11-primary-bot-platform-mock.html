@@ -345,6 +345,8 @@ button.tog:hover{background:var(--sunk);color:var(--fg)}
 .sfind input{width:100%;border:0;border-radius:99px;background:var(--raise);padding:9px 14px;font-size:13.5px;color:var(--fg);outline:none;margin-bottom:8px}
 .sfind input:focus{box-shadow:0 0 0 1.5px var(--violet)}
 .sshelf{display:flex;justify-content:center;flex-wrap:wrap;gap:6px 18px;padding:6px 4px 18px}
+.sshelf.empty{display:none}
+body.sorting .sshelf.empty{display:flex}
 .sshelf.empty{min-height:64px;align-items:center;border:1.5px dashed var(--line2);border-radius:16px;margin:4px 6px 14px;color:var(--muted);font-size:12.5px}
 body.sorting .slist{overflow:visible}
 .side .srw.drop-on,.side .spin.drop-on{background:color-mix(in srgb,var(--mint) 16%,transparent);box-shadow:inset 0 0 0 1.5px var(--mint)!important}
@@ -786,7 +788,7 @@ function sideList(q){q=(q||'').trim().toLowerCase();const cur=curBot(),p=pending
 function sideHTML(){const pins=arrange(null,'shelf',BOTS.filter(b=>isPin('bots',b.id)&&vis(b))),cur=curBot(),w=new Set(pending().map(x=>x.thread)).size;
   return `<div class="stop"><button class="sib" data-sidesearch aria-label="Search bots and threads" title="Search">${'<svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>'}</button><button class="sib" data-newbot aria-label="New bot" title="New bot"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button></div>
   <div class="sfind" ${S.sideQ?'':'hidden'}><input id="sideq" type="search" placeholder="Search bots and threads" aria-label="Search bots and threads" autocomplete="off" value="${esc(S.sideQ||'')}"></div>
-  ${pins.length?'':'<div class="sshelf empty" data-sortkey="shelf"><span>Drag a bot here to pin it</span></div>'}${pins.length?`<div class="sshelf" data-sortkey="shelf">${pins.map(b=>`<button class="spin${cur===b.id?' on':''}" data-dm="${b.id}" data-sid="${b.id}">${face(b,'l',stateOf(b)==='waiting'?'wait':undefined)}<span>${esc(b.name)}</span></button>`).join('')}</div>`:''}
+  ${pins.length?'':'<div class="sshelf empty" data-sortkey="shelf"><span>Drop to pin</span></div>'}${pins.length?`<div class="sshelf" data-sortkey="shelf">${pins.map(b=>`<button class="spin${cur===b.id?' on':''}" data-dm="${b.id}" data-sid="${b.id}">${face(b,'l',stateOf(b)==='waiting'?'wait':undefined)}<span>${esc(b.name)}</span></button>`).join('')}</div>`:''}
   <div class="slist" id="sidelist" data-sortkey="side">${sideList(S.sideQ)}</div>
   <div class="sfoot"><button class="sme" data-me aria-label="Your account and settings"><span class="ini av sm">${initials(ME.name)}</span><span class="w">${esc(ME.name)}</span>${pending().length?`<span class="badge">${pending().length}</span>`:''}</button><button class="sib" data-new aria-label="New thread" title="New thread"><svg class="i" viewBox="0 0 24 24"><path d="M6 3.5h9.5A2.5 2.5 0 0 1 18 6v12.5a2 2 0 0 1-2 2H6z"/><path d="M6 3.5v17M9.5 8h5M9.5 11.5h3"/><path d="m20.5 9.5-6.2 6.2-2.3.6.6-2.3 6.2-6.2a1.2 1.2 0 0 1 1.7 1.7z"/></svg>${w?`<span class="badge">${w}</span>`:''}</button></div>`}
 function renderMain(){
