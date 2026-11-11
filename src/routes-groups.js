@@ -5,6 +5,7 @@ import {activity, cleanText, uuid} from '../shared/core.js';
 import * as wf from '../shared/workflow.js';
 import * as chats from '../shared/chats.js';
 import {botSettings, threadContext} from '../shared/bot-settings.js';
+import {createThread, titleFrom} from '../shared/threads.js';
 import {executeCustomBot} from './ai.js';
 import {resolveConfig} from './ai-providers.js';
 import {queueGroupRun, resumeGroupRun, resumeBrowserRun, decidePlan, cancelRun, coordinationState, summonableGuests} from './coordination.js';
@@ -133,6 +134,23 @@ export function groupRoutes(router) {
   router.add('DELETE', '/api/groups/:group/bots/:bot', 'member', c => failDeniedAgentTasks(c.store, s => wf.removeBot(s, c.params.group, c.params.bot)));
   router.add('PATCH', '/api/groups/:group', 'member', async c => { const b = await c.body(); return c.store.update(s => wf.updateGroup(s, c.params.group, b)); });
   router.add('DELETE', '/api/groups/:group', 'admin', c => failDeniedAgentTasks(c.store, s => wf.removeGroup(s, c.params.group)));
+
+  // A thread is a new chat run by the primary bot. The owner's first line goes
+  // into it here, so one call is the whole start; a refused run (no AI key, say)
+  // takes the empty thread back out instead of leaving it in the list.
+  router.add('POST', '/api/threads', 'member', async c => {
+    const b = await c.body();
+    const message = cleanText(b?.message, 4000);
+    if (!message) fail('Say what the thread is about.');
+    const thread = await c.store.update(s => {
+      const made = createThread(s, {title: titleFrom(message)});
+      s.groups.push(made);
+      chats.addChatMessages(s, `team-${made.id}`, [{role: 'user', text: message}], {trusted: true});
+      return made;
+    });
+    try { return reply(201, {thread, run: await queueGroupRun(c.store, {groupId: thread.id, message})}); }
+    catch (error) { await c.store.update(s => wf.removeGroup(s, thread.id)); throw error; }
+  });
 
   // Durable text-only bot coordination. Humans approve every external action separately.
   router.add('GET', '/api/groups/:group/chat', 'viewer', c => {

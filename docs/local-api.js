@@ -4,17 +4,18 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {initialState} from './core.js?v=f034a84dca';
-import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup} from './workflow.js?v=f034a84dca';
-import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=f034a84dca';
-import {addChatMessages, clearChat} from './chats.js?v=f034a84dca';
-import {publicMemory, addRules, removeRule, forgetChat, forgetRulebook} from './memory.js?v=f034a84dca';
-import {summonableGuests} from './coordination.js?v=f034a84dca';
-import {simulateGroup} from './group-simulator.js?v=f034a84dca';
-import {BUSY_STATUSES} from './run-state.js?v=f034a84dca';
-import {botSettings} from './bot-settings.js?v=f034a84dca';
-import {denyBrowserRequest} from './bot-browser.js?v=f034a84dca';
-import {withLocalLock} from './locks.js?v=f034a84dca';
+import {initialState, cleanText} from './core.js?v=e7680a40cb';
+import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup} from './workflow.js?v=e7680a40cb';
+import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=e7680a40cb';
+import {addChatMessages, clearChat} from './chats.js?v=e7680a40cb';
+import {publicMemory, addRules, removeRule, forgetChat, forgetRulebook} from './memory.js?v=e7680a40cb';
+import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=e7680a40cb';
+import {createThread, titleFrom} from './threads.js?v=e7680a40cb';
+import {simulateGroup} from './group-simulator.js?v=e7680a40cb';
+import {BUSY_STATUSES} from './run-state.js?v=e7680a40cb';
+import {botSettings} from './bot-settings.js?v=e7680a40cb';
+import {denyBrowserRequest} from './bot-browser.js?v=e7680a40cb';
+import {withLocalLock} from './locks.js?v=e7680a40cb';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
@@ -50,7 +51,7 @@ async function runBotTask(state, t) {
   }
   // A busy group is a delay, not a skipped task: refuse before writing the
   // "Scheduled task" line, so a wait does not read as work that happened.
-  if (state.groupRuns.some(r => r.groupId === groupId && BUSY_STATUSES.includes(r.status))) {
+  if (chatIsBusy(state.groupRuns, group, chatKey)) {
     throw Object.assign(new Error('A group run is already active. Wait or retry later.'), {status: 409});
   }
   addChatMessages(state, chatKey, [{role: 'system', text: `Scheduled task: ${message}`}], {trusted: true});
@@ -130,9 +131,10 @@ async function localRun(state, groupId, {message = '', directBotId = null, check
     return {runId, status: 'cancelled'};
   }
   if (resume && prior.status !== 'awaiting_checkpoint') throw Object.assign(new Error('Only a run paused at a checkpoint can be continued.'), {status: 409});
-  // One live run per group. Any other busy run blocks the start; a Start or
-  // Continue of a run that is itself busy is the way through, same as the server.
-  if (state.groupRuns.some(r => r.groupId === groupId && BUSY_STATUSES.includes(r.status) && r.id !== runId)) {
+  // One live run per chat (per group, for every group but the company). Any other
+  // busy run blocks the start; a Start or Continue of a run that is itself busy
+  // is the way through, same as the server.
+  if (chatIsBusy(state.groupRuns.filter(r => r.id !== runId), group, chatKeyFor(group, {chatKey: chatKey || prior?.chatKey || null, directBotId}))) {
     throw Object.assign(new Error('A group run is already active. Wait or retry later.'), {status: 409});
   }
   const guests = summonableGuests(state.groups, groupId, {includeOff: true});
@@ -187,6 +189,16 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
   if (path === '/api/state' && method === 'GET') return {...state, aiEnabled: false, serverTime: now()};
 
   let m;
+  // A thread: a new chat run by the primary bot, started in one call like the server's.
+  if (path === '/api/threads' && method === 'POST') {
+    const message = cleanText(body.message, 4000);
+    if (!message) throw Object.assign(new Error('Say what the thread is about.'), {status: 400});
+    const thread = createThread(state, {title: titleFrom(message)});
+    state.groups.push(thread);
+    addChatMessages(state, `team-${thread.id}`, [{role: 'user', text: message}], {trusted: true});
+    const run = await localRun(state, thread.id, {message});
+    save(state); return {thread, run};
+  }
   if (path === '/api/groups' && method === 'POST') { const g = addGroup(state, body); save(state); return g; }
   if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/bots$/)) && method === 'POST') { const b = addBot(state, m[1], body); save(state); return b; }
   // Keep lasting bot profile edits in the store so they survive a reload, exactly

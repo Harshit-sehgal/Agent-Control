@@ -2,13 +2,13 @@
  * Both are thin renderers over ui-model.js. The list shell and the composer are
  * painted once and then only their contents change, so a background refresh can
  * never wipe what the user is typing. */
-import {summonableGuests} from './coordination.js?v=f034a84dca';
-import {botSettings, groupSettings} from './bot-settings.js?v=f034a84dca';
-import {requestOfMessage} from './bot-browser.js?v=f034a84dca';
-import {validHttpUrl} from './core.js?v=f034a84dca';
-import {chatRows, timeline, waitingOnYou, mentionSuggestions, retryTarget, threadLineActions, isRunNote} from './ui-model.js?v=f034a84dca';
-import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=f034a84dca';
-import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, botTint, recentRuns} from './ui-store.js?v=f034a84dca';
+import {summonableGuests} from './coordination.js?v=e7680a40cb';
+import {botSettings, groupSettings} from './bot-settings.js?v=e7680a40cb';
+import {requestOfMessage} from './bot-browser.js?v=e7680a40cb';
+import {validHttpUrl} from './core.js?v=e7680a40cb';
+import {chatRows, timeline, waitingOnYou, mentionSuggestions, retryTarget, threadLineActions, isRunNote} from './ui-model.js?v=e7680a40cb';
+import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=e7680a40cb';
+import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, botTint, recentRuns} from './ui-store.js?v=e7680a40cb';
 
 const el = id => document.getElementById(id);
 /** Starter prompts under an empty composer. */

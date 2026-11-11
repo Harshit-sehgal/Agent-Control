@@ -2,6 +2,7 @@
 import {createRun,createEnvelope,handoffTargets,instructLead,wakeBots,assessTask,runNote} from './coordination.js';
 import {botSettings,groupSettings,threadContext} from './bot-settings.js';
 import {normalizeBot} from './contracts.js';
+import {isThread,noteMember} from './threads.js';
 
 export async function simulateGroup({group, message, directBotId=null, guests=[], state, api, makeId, emit, chatKey=null, started=false, resume=null, shouldStop=()=>false}) {
   let run, previous, i;
@@ -40,7 +41,9 @@ export async function simulateGroup({group, message, directBotId=null, guests=[]
   // name rather than silently re-routed). A run outlives that snapshot, so a
   // guest switched off in the meantime must drop out here exactly like the
   // server's per-step resolveBot refuses it.
-  const roster=[...group.bots,...(guests||[]).filter(g=>botSettings(g).summonable&&botSettings(g).enabled!==false&&!group.bots.some(b=>b.id===g.id))];
+  // A thread's guests are the whole company, so a bot's own sharing flag does not apply.
+  const open=b=>isThread(group)||botSettings(b).summonable;
+  const roster=[...group.bots,...(guests||[]).filter(g=>open(g)&&botSettings(g).enabled!==false&&!group.bots.some(b=>b.id===g.id))];
   // A guest lives in another group and can be switched off, un-shared or removed
   // between two steps. When the caller's state carries the groups, read the
   // guest's current record and treat "no longer summonable" as gone — the server
@@ -55,7 +58,7 @@ export async function simulateGroup({group, message, directBotId=null, guests=[]
       const id=run.recipients[i];
       const isGuest=!group.bots.some(b=>b.id===id);
       const live=isGuest&&liveGroups?liveGroups.flatMap(g=>g.bots||[]).find(b=>b.id===id):null;
-      const gone=isGuest&&liveGroups&&!(live&&botSettings(live).summonable&&botSettings(live).enabled);
+      const gone=isGuest&&liveGroups&&!(live&&open(live)&&botSettings(live).enabled);
       const target=gone?null:(live||roster.find(b=>b.id===id));
       if(!target){
         const named=[...group.bots,...(guests||[])].find(b=>b.id===id);
@@ -69,7 +72,9 @@ export async function simulateGroup({group, message, directBotId=null, guests=[]
       const envelope=createEnvelope({run,bot,previous,team:roster,thread:threadContext(state?.chats?.[run.chatKey],botSettings(bot).contextMessages)});
       const output=`${bot.name} received the task and ${previous?`a handoff from ${roster.find(b=>b.id===previous.botId)?.name||previous.botId}`:'its initial instructions'}. This Pages demo cannot run its custom AI instructions.\nTask: ${envelope.objective.slice(0,220)}\n${previous?`Previous handoff: ${previous.output.slice(0,220)}`:''}`;
       previous={botId:bot.id,output};
-      run.recipients.push(...handoffTargets({run,roster,fromBot:bot,output,home:group.bots}));
+      const added=handoffTargets({run,roster,fromBot:bot,output,home:isThread(group)?null:group.bots});
+      run.recipients.push(...added);
+      if(isThread(group))for(const id2 of added)noteMember(group,id2);
       const recipient=roster.find(b=>b.id===run.recipients[i+1]);
       run.trace.push({botId:bot.id,output,at:new Date().toISOString(),toBotId:recipient?.id||null});
       emit({id:makeId(),role:'bot',senderId:bot.id,senderName:bot.name,toBotId:recipient?.id||null,text:output,runId:run.id,kind:'handoff',at:new Date().toISOString()});

@@ -2,12 +2,15 @@
  * LLM output may only extend a run's recipients through `handoffTargets`, which
  * revalidates every target against this policy and the step cap.
  */
-import {botSettings,groupSettings,pipelineOf,MAX_STEPS_LIMIT} from './bot-settings.js?v=f034a84dca';
-import {BROWSER_PERMISSION,BROWSER_TOOL_HINT} from './bot-browser.js?v=f034a84dca';
-import {SUBAGENT_PERMISSION,SUBAGENT_TOOL_HINT} from './subagents.js?v=f034a84dca';
-import {BOT_ASK_PERMISSION,BOT_ASK_TOOL_HINT} from './bot-link.js?v=f034a84dca';
-import {BOT_CREATE_PERMISSION,BOT_CREATE_TOOL_HINT} from './bot-create.js?v=f034a84dca';
-import {memoryBlock} from './memory.js?v=f034a84dca';
+import {botSettings,groupSettings,pipelineOf,MAX_STEPS_LIMIT} from './bot-settings.js?v=e7680a40cb';
+import {BROWSER_PERMISSION,BROWSER_TOOL_HINT} from './bot-browser.js?v=e7680a40cb';
+import {SUBAGENT_PERMISSION,SUBAGENT_TOOL_HINT} from './subagents.js?v=e7680a40cb';
+import {BOT_ASK_PERMISSION,BOT_ASK_TOOL_HINT} from './bot-link.js?v=e7680a40cb';
+import {BOT_CREATE_PERMISSION,BOT_CREATE_TOOL_HINT} from './bot-create.js?v=e7680a40cb';
+import {memoryBlock} from './memory.js?v=e7680a40cb';
+import {isThread} from './threads.js?v=e7680a40cb';
+import {BUSY_STATUSES as BUSY} from './run-state.js?v=e7680a40cb';
+import {companyBots,PRIMARY_GROUP} from './company.js?v=e7680a40cb';
 
 /** The default step count of a run; a group may set its own up to MAX_STEPS_LIMIT. */
 export const MAX_HANDOFFS = 6;
@@ -15,7 +18,7 @@ export const MAX_CONTEXT_CHARS = 3600;
 /** Which run statuses are busy or interruptible is decided once in
  * `shared/run-state.js`; re-exported here because callers have reached for them
  * through the coordination module since they were declared here. */
-export {BUSY_STATUSES, INTERRUPT_STATUSES} from './run-state.js?v=f034a84dca';
+export {BUSY_STATUSES, INTERRUPT_STATUSES} from './run-state.js?v=e7680a40cb';
 const normalize = value => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 const safe = value => String(value ?? '').slice(0, MAX_CONTEXT_CHARS);
 const fail = (message, status) => Object.assign(new Error(message), {status});
@@ -26,6 +29,9 @@ export function assertGroup(group) {
   // These are what the person asked for, not what the server broke: they carry a
   // status so the route answers 400/404 instead of masking them as a 500.
   if (!group || !Array.isArray(group.bots)) throw fail('Bot group was not found.', 404);
+  // A thread has no bots of its own: the primary bot runs it and the bots it
+  // hands work to join as guests.
+  if (isThread(group)) return group;
   if (!group.bots.length) throw fail('Add a bot to this group first.', 400);
   if (group.bots.length > 100) throw fail('Group exceeds supported size.', 400);
   const ids = group.bots.map(b => b.id);
@@ -62,6 +68,9 @@ export function mentionedBots(roster, text) {
  * Planning passes `includeOff` so a mention of a switched-off guest is refused
  * by name instead of silently falling through to the default route. */
 export function summonableGuests(groups, hostGroupId, {includeOff = false} = {}) {
+  // A thread is run by the primary bot, which may hand work to any company bot,
+  // so its guests are the whole company, whatever each bot's own sharing flag says.
+  if (isThread((groups || []).find(g => g.id === hostGroupId))) return companyBots({groups}).filter(b => includeOff || enabled(b));
   return (groups || []).filter(g => g.id !== hostGroupId).flatMap(g => g.bots || [])
     .filter(b => { const s = botSettings(b); return s.summonable && (includeOff || s.enabled); });
 }
@@ -149,6 +158,14 @@ export function planHandoffs(group, message, {directBotId = null, guests = []} =
   assertGroup(group);
   const text = String(message ?? '').trim();
   if (!text || text.length > 4000) throw fail('Message must contain 1–4000 characters.', 400);
+  // A thread is always run by its primary bot. The owner does not pick bots in
+  // a thread, so an @mention or a direct recipient is ignored here.
+  if (isThread(group)) {
+    const owner = (guests || []).find(b => b.id === group.settings.ownerId);
+    if (!owner) throw fail('The bot that runs this thread is no longer in the company.', 409);
+    if (!enabled(owner)) throw fail(`${owner.name} is switched off. Turn it on in its profile.`, 409);
+    return {recipients: [owner.id], mode: 'thread'};
+  }
   const roster = group.bots, settings = groupSettings(group);
   const cap = Math.min(settings.maxSteps, MAX_STEPS_LIMIT);
   const direct = directBotId ? roster.find(b => b.id === directBotId) : null;
@@ -173,16 +190,30 @@ export function planHandoffs(group, message, {directBotId = null, guests = []} =
   return {recipients: plan.recipients.slice(0, cap), mode: plan.mode};
 }
 
+/** The conversation a request reports into: where it was started, as long as
+ * that is this group's chat or one of its bots (never another group's). A
+ * thread is its own chat and never a bot's. */
+export function chatKeyFor(group, {chatKey=null, directBotId=null}={}) {
+  const team=`team-${group.id}`;
+  if(isThread(group))return team;
+  return [team,...group.bots.map(b=>b.id)].includes(chatKey)?chatKey:(directBotId||team);
+}
+
+/** Whether a run already holds this request's chat. Most groups keep one live
+ * run at a time. The company group holds a chat per bot, so a run in one bot's
+ * chat does not block another's; a thread is its own group, so it keeps one. */
+export function chatIsBusy(runs, group, key) {
+  return (runs||[]).some(r=>r.groupId===group.id&&BUSY.includes(r.status)&&(group.id!==PRIMARY_GROUP||(r.chatKey||`team-${r.groupId}`)===key));
+}
+
 export function createRun({group, message, directBotId=null, now=new Date().toISOString(), makeId, checkpoints=false, chatKey=null, guests=[], task=null}) {
+  if(isThread(group))directBotId=null;
   const settings=groupSettings(group);
   const cap=Math.min(settings.maxSteps, MAX_STEPS_LIMIT);
   const planned=task?.botIds?.length ? {recipients: task.botIds.slice(0, cap), mode: 'tracked'} : null;
   const {recipients,mode}=planned || planHandoffs(group,message,{directBotId,guests});
-  // The conversation the run reports into: where it was started, as long as
-  // that is this group's chat or one of its bots. Never another group's.
-  const team=`team-${group.id}`, own=[team,...group.bots.map(b=>b.id)];
   return {
-    chatKey: own.includes(chatKey) ? chatKey : (directBotId || team),
+    chatKey: chatKeyFor(group,{chatKey,directBotId}),
     id:makeId(), groupId:group.id, input:safe(message), recipients,
     guestIds:recipients.filter(id=>!group.bots.some(b=>b.id===id)),
     maxSteps:cap, botHandoffs:settings.botHandoffs!==false,

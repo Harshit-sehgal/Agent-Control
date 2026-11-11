@@ -109,7 +109,7 @@ test('a due scheduled Pages task waits while a plan is already on screen',async(
   const store=makeStorage();
   const {request}=setup(store);
   const base=await request('/api/state');
-  store.map.set('agent-control-ghpages-v1',JSON.stringify({...base,groupRuns:[{id:'plan-1',groupId:'home',status:'awaiting_plan',createdAt:new Date().toISOString()}]}));
+  store.map.set('agent-control-ghpages-v1',JSON.stringify({...base,groupRuns:[{id:'plan-1',groupId:'home',chatKey:'atlas',status:'awaiting_plan',createdAt:new Date().toISOString()}]}));
   const task=await request('/api/tasks','POST',{kind:'bot-task',payload:{groupId:'home',botId:'atlas',message:'draft a reply',label:'Draft check',kind:'once',nextAt:new Date(Date.now()+3600000).toISOString()}});
   const saved=JSON.parse(store.map.get('agent-control-ghpages-v1'));
   saved.tasks.find(t=>t.id===task.id).runAt=new Date(Date.now()-1000).toISOString();

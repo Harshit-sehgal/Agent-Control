@@ -5,7 +5,8 @@
  * no tools at all (see src/subagents.js).
  */
 import {randomUUID} from 'node:crypto';
-import {createRun,createEnvelope,runNote,planHandoffs,handoffTargets,instructLead,wakeBots,assessTask,summonableGuests,mayHandoff,MAX_HANDOFFS,BUSY_STATUSES as BUSY,INTERRUPT_STATUSES as INTERRUPT} from '../shared/coordination.js';
+import {createRun,createEnvelope,runNote,planHandoffs,handoffTargets,instructLead,wakeBots,assessTask,summonableGuests,mayHandoff,chatKeyFor,chatIsBusy,MAX_HANDOFFS,INTERRUPT_STATUSES as INTERRUPT} from '../shared/coordination.js';
+import {isThread,noteMember} from '../shared/threads.js';
 import {STOPPABLE_STATUSES} from '../shared/run-state.js';
 import {botSettings,groupSettings,threadContext,MAX_STEPS_LIMIT} from '../shared/bot-settings.js';
 import {addChatMessages} from '../shared/chats.js';
@@ -92,7 +93,7 @@ export async function queueGroupRun(store,{groupId,message,directBotId=null,chec
   // completion re-arms the task, and the retry used to queue the same message a
   // second time - a duplicate line in the chat and a second paid run.
   if(taskId){const prior=snapshot.groupRuns?.find(r=>r.taskId===taskId);if(prior)return {runId:prior.id,status:prior.status,deduped:true};}
-  if(snapshot.groupRuns?.filter(r=>r.groupId===groupId&&BUSY.includes(r.status)).length>=1)throw Object.assign(new Error('A group run is already active. Wait or retry later.'),{status:409});
+  if(chatIsBusy(snapshot.groupRuns,probe,chatKeyFor(probe,{chatKey,directBotId})))throw Object.assign(new Error('A group run is already active. Wait or retry later.'),{status:409});
   try{planHandoffs(probe,clean(message),{directBotId,guests:summonableGuests(snapshot.groups,groupId,{includeOff:true})});}catch(e){if(e.status)throw e;}
   if(!aiAvailable(store))throw Object.assign(new Error('No AI provider is configured. Add one under You → AI and models, or set AI_API_KEY on the server. GitHub Pages runs a labeled simulation.'),{status:422});
   const id=await store.update(s=>{
@@ -100,7 +101,7 @@ export async function queueGroupRun(store,{groupId,message,directBotId=null,chec
     const group=s.groups.find(g=>g.id===groupId);
     if(!group)throw Object.assign(new Error('Group not found'),{status:404});
     if(taskId){const prior=s.groupRuns.find(r=>r.taskId===taskId);if(prior)return prior.id;}
-    if(s.groupRuns.filter(r=>r.groupId===groupId&&BUSY.includes(r.status)).length>=1)throw Object.assign(new Error('A group run is already active. Wait or retry later.'),{status:409});
+    if(chatIsBusy(s.groupRuns,group,chatKeyFor(group,{chatKey,directBotId})))throw Object.assign(new Error('A group run is already active. Wait or retry later.'),{status:409});
     const messageText=clean(message);
     const guests=summonableGuests(s.groups,groupId,{includeOff:true});
     const instructed=instructLead(group,messageText,directBotId,guests);
@@ -156,7 +157,7 @@ export async function runBotTask(store,task,{queue=queueGroupRun,available=aiAva
   const note=text=>store.update(st=>{addChatMessages(st,chatKey,[{role:'system',text}],{trusted:true});});
   if(bot&&!botSettings(bot).enabled){await note(`Scheduled task "${label}" skipped: ${bot.name} is switched off.`);return {skipped:'disabled'};}
   if(!available(store)){await note(`Scheduled task "${label}" skipped: no AI provider is configured.`);return {skipped:'no-ai'};}
-  if(s.groupRuns?.some(r=>r.groupId===groupId&&BUSY.includes(r.status)))throw Object.assign(new Error('A group run is already active. Wait or retry later.'),{status:409});
+  if(chatIsBusy(s.groupRuns,group,chatKey))throw Object.assign(new Error('A group run is already active. Wait or retry later.'),{status:409});
   // Queue first. A 409 or a validation error must not leave a "Scheduled task"
   // line for a run that never started; the queue retries those.
   const result=await queue(store,{groupId,message,directBotId:botId,chatKey,confirmPlan:false});
@@ -271,8 +272,9 @@ async function runGroupInner(store,id,executor){
         // reply; with nothing to browse, the approved value is the output.
         previous.output=(browsed.records.length?browsed.text:gated).slice(0,3600);
         if(botSettings(bot).browserApproval==='auto')auto=browsed.records;
-        const added=host?handoffTargets({run:live,roster:[...host.bots.filter(b=>!fledglings.has(b.id)),...summonableGuests(s.groups,host.id)],fromBot:bot,output:previous.output,home:host.bots}):[];
+        const added=host?handoffTargets({run:live,roster:[...host.bots.filter(b=>!fledglings.has(b.id)),...summonableGuests(s.groups,host.id)],fromBot:bot,output:previous.output,home:isThread(host)?null:host.bots}):[];
         live.recipients.push(...added);
+        if(isThread(host))for(const id of added)noteMember(host,id);
         const guests=added.filter(x=>!host.bots.some(b=>b.id===x));
         if(guests.length)live.guestIds=[...(live.guestIds||[]),...guests];
         toBotId=live.recipients[i+1]??null;
