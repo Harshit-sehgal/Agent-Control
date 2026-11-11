@@ -202,7 +202,6 @@ button.rw:active{background:var(--sunk)}
 .gr+.gr::before{content:'';position:absolute;left:18px;right:0;top:0;border-top:1px solid var(--line)}
 .gr-top{display:flex;align-items:center;gap:12px}
 .gr-top .w{flex:1;min-width:0;font-size:16px;overflow-wrap:anywhere}
-.gr-top small{display:block;font-size:13px;color:var(--muted);margin-top:3px;line-height:1.35}
 .gr-seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:2px;padding:3px;border-radius:12px;background:var(--sunk)}
 .gr-seg button{min-height:40px;padding:0 4px;border-radius:9px;font-size:13px;white-space:nowrap;color:var(--muted);transition:background-color .15s,color .15s,scale .15s}
 .gr-seg button:active{scale:.97}

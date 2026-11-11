@@ -5,21 +5,21 @@
  *
  * Pages repaint only when the route changes, so each in-place change (a switch, a
  * forgotten note, a picked colour) updates its own node instead. */
-import {SHAPES, COLORS, face} from './ui-face.js?v=f4b2b474ab';
-import {botStatus, botIsManager} from './ui-company.js?v=f4b2b474ab';
-import {primaryOf} from './company.js?v=f4b2b474ab';
-import {esc, icon, field, textInput, clock, roundBtn} from './ui-kit.js?v=f4b2b474ab';
-import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=f4b2b474ab';
-import {GRANT_LABELS} from './asks.js?v=f4b2b474ab';
-import {grantRows, allGrantRows, grantUrl} from './ui-asks.js?v=f4b2b474ab';
-import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=f4b2b474ab';
-import {toast, confirmSheet} from './ui-dialogs.js?v=f4b2b474ab';
-import {sendChat} from './ui-chat.js?v=f4b2b474ab';
-import {computerPage as computerView, computerLabel, keysOwned} from './ui-computer-view.js?v=f4b2b474ab';
+import {SHAPES, COLORS, face} from './ui-face.js?v=a7167143ee';
+import {botStatus, botIsManager} from './ui-company.js?v=a7167143ee';
+import {primaryOf} from './company.js?v=a7167143ee';
+import {esc, icon, field, textInput, clock, roundBtn} from './ui-kit.js?v=a7167143ee';
+import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=a7167143ee';
+import {GRANT_LABELS} from './asks.js?v=a7167143ee';
+import {grantRows, allGrantRows, grantUrl} from './ui-asks.js?v=a7167143ee';
+import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=a7167143ee';
+import {toast, confirmSheet} from './ui-dialogs.js?v=a7167143ee';
+import {sendChat} from './ui-chat.js?v=a7167143ee';
+import {computerPage as computerView, computerLabel, keysOwned} from './ui-computer-view.js?v=a7167143ee';
 import {
   MAX_NAME, hasJob, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, lookOf, newBotDefaults,
   newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, closeTarget,
-} from './ui-profile-model.js?v=f4b2b474ab';
+} from './ui-profile-model.js?v=a7167143ee';
 
 const el = id => document.getElementById(id);
 const SHAPE_LABELS = {rounded: 'Rounded square', circle: 'Circle', hexagon: 'Hexagon', pebble: 'Pebble', drop: 'Drop', shield: 'Shield', arch: 'Arch', egg: 'Egg', blob: 'Blob', bean: 'Bean'};
@@ -198,10 +198,8 @@ const activityPage = bot => { setTimeout(() => loadBotActivity(bot.id), 0); retu
 const canGrant = () => isAdmin() || isStaticDemo();
 function grantRow(r) {
   const off = canGrant() ? '' : ' disabled';
-  const seg = r.legacy ? `<span class="pv">${esc(GRANT_LABELS[r.choice])}</span>`
-    : `<div class="gr-seg" role="group" aria-label="${esc(`${r.label} for ${r.botName}`)}">${r.choices.map(c => `<button type="button" data-action="set-grant" data-id="${esc(r.botId)}" data-text="${esc(`${r.action} ${r.scope}`)}" data-act="${esc(r.action)}" data-scope="${esc(r.scope)}" data-choice="${c.id}" aria-pressed="${c.on}"${off}>${esc(c.label)}</button>`).join('')}</div>`;
-  const sub = r.legacy ? `<small>Set before asks existed. ${r.choice === 'always' ? 'It ran without asking.' : 'It asks each time.'}</small>` : '';
-  return `<div class="gr${r.legacy ? ' legacy' : ''}"><div class="gr-top"><span class="w">${esc(r.label)}${sub}</span>${r.legacy ? seg : ''}</div>${r.legacy ? '' : seg}</div>`;
+  const seg = `<div class="gr-seg" role="group" aria-label="${esc(`${r.label} for ${r.botName}`)}">${r.choices.map(c => `<button type="button" data-action="set-grant" data-id="${esc(r.botId)}" data-text="${esc(`${r.action} ${r.scope}`)}" data-act="${esc(r.action)}" data-scope="${esc(r.scope)}" data-choice="${c.id}" aria-pressed="${c.on}"${off}>${esc(c.label)}</button>`).join('')}</div>`;
+  return `<div class="gr"><div class="gr-top"><span class="w">${esc(r.label)}</span></div>${seg}</div>`;
 }
 /** One bot's rules as a card, or every bot's in a card each. Lives in Settings > Permissions only. The node is repainted in place when a choice is made. */
 export function grantsHtml(botId = null) {

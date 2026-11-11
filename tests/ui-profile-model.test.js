@@ -116,7 +116,7 @@ test('row values count notes, rules and reports, and the computer is Idle', () =
   const row = key => profileRows(s, 'mail', {activityCount: 1}).find(r => r.key === key).value;
   assert.equal(row('memory'), '2 notes');
   assert.equal(row('activity'), '1');
-  assert.equal(row('permissions'), '1 rule', 'Mailroom holds one rule that asks: the page permission it was given before asks existed (bot.ask never asks)');
+  assert.equal(row('permissions'), 'None', 'a permission held before asks existed is not a rule; only grants count');
   assert.equal(row('computer'), 'Idle');
   assert.equal(profileRows(s, 'ops').find(r => r.key === 'team').value, '2 bots');
   assert.equal(profileRows(s, 'solo').find(r => r.key === 'memory').value, 'Empty');
@@ -238,12 +238,12 @@ test('a reporting cycle cannot hang the chart', () => {
 
 // ---- settings ----
 
-test('the Permissions row counts the rules a bot has: its grants and the page permission it held before asks', () => {
+test('the Permissions row counts the rules a bot has: its grants only', () => {
   const grants = [{botId: 'solo', action: 'send', scope: '', choice: 'always'}, {botId: 'solo', action: 'spend', scope: '', choice: 'deny'}, {botId: 'mail', action: 'post', scope: '', choice: 'ask'}];
   const s = stateOf([atlas, ops, mail, plan, solo], {grants});
   const row = id => profileRows(s, id).find(r => r.key === 'permissions').value;
   assert.equal(row('solo'), '2 rules');
-  assert.equal(row('mail'), '2 rules');
+  assert.equal(row('mail'), '1 rule', 'its post grant; the page permission it held before asks is not counted');
   assert.equal(row('plan'), 'None');
 });
 

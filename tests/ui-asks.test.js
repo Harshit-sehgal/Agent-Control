@@ -78,24 +78,17 @@ test('spend never offers Always allow, even if a stored grant says so', () => {
 test('grants of a bot that is gone, or of another bot, are not listed', () => {
   const s = stateOf({grants: [grant({botId: 'ghost'}), grant({botId: 'quill', action: 'post'})]});
   assert.deepEqual(grantRows(s, 'mail'), []);
-  assert.deepEqual(allGrantRows(s).map(r => `${r.botId}:${r.label}`), ['quill:Post', 'quill:Open web pages'], 'Quill\'s own post rule, then the page permission it was given before asks existed');
+  assert.deepEqual(allGrantRows(s).map(r => `${r.botId}:${r.label}`), ['quill:Post'], 'only Quill\'s own post rule');
 });
 
-test('a permission set before asks existed shows as read-only, and is Ask each time even when it ran without asking', () => {
-  const s = stateOf();
-  const old = grantRows(s, 'quill');
-  assert.deepEqual(old.map(r => [r.label, r.legacy, r.choices]), [['Open web pages', true, []]], 'only actions that ask are listed');
-  assert.equal(old[0].choice, 'ask');
-  quill.settings.browserApproval = 'auto';
-  assert.equal(grantRows(s, 'quill')[0].choice, 'ask', 'a member setting is not an admin grant (review I3)');
-  delete quill.settings.browserApproval;
-  // an explicit grant for the same action replaces the old row
-  assert.deepEqual(grantRows(stateOf({grants: [grant({botId: 'quill', action: 'browser.use', scope: 'https://a.com', choice: 'ask'})]}), 'quill').map(r => r.legacy), [false]);
+test('a permission a bot held before asks existed is not a rule: only grants are listed', () => {
+  assert.deepEqual(grantRows(stateOf(), 'quill'), [], 'bot.permissions is never shown, read-only or otherwise');
+  assert.deepEqual(grantRows(stateOf({grants: [grant({botId: 'quill', action: 'browser.use', scope: 'https://a.com', choice: 'ask'})]}), 'quill').map(r => r.label), ['Open a.com']);
 });
 
 test('every grant across bots comes in roster order', () => {
-  const rows = allGrantRows(stateOf({grants: [grant({botId: 'quill', action: 'post'}), grant()]}));
-  assert.deepEqual(rows.map(r => `${r.botId}:${r.label}`), ['mail:Send', 'quill:Post', 'quill:Open web pages']);
+  const rows = allGrantRows(stateOf({grants: [grant({botId: 'quill', action: 'post'}), grant({botId: 'quill', action: 'browser.use'}), grant()]}));
+  assert.deepEqual(rows.map(r => `${r.botId}:${r.label}`), ['mail:Send', 'quill:Open web pages', 'quill:Post']);
 });
 
 test('the words of an action: a site, a connector account, and the plain ones', () => {

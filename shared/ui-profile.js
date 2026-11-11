@@ -198,10 +198,8 @@ const activityPage = bot => { setTimeout(() => loadBotActivity(bot.id), 0); retu
 const canGrant = () => isAdmin() || isStaticDemo();
 function grantRow(r) {
   const off = canGrant() ? '' : ' disabled';
-  const seg = r.legacy ? `<span class="pv">${esc(GRANT_LABELS[r.choice])}</span>`
-    : `<div class="gr-seg" role="group" aria-label="${esc(`${r.label} for ${r.botName}`)}">${r.choices.map(c => `<button type="button" data-action="set-grant" data-id="${esc(r.botId)}" data-text="${esc(`${r.action} ${r.scope}`)}" data-act="${esc(r.action)}" data-scope="${esc(r.scope)}" data-choice="${c.id}" aria-pressed="${c.on}"${off}>${esc(c.label)}</button>`).join('')}</div>`;
-  const sub = r.legacy ? `<small>Set before asks existed. ${r.choice === 'always' ? 'It ran without asking.' : 'It asks each time.'}</small>` : '';
-  return `<div class="gr${r.legacy ? ' legacy' : ''}"><div class="gr-top"><span class="w">${esc(r.label)}${sub}</span>${r.legacy ? seg : ''}</div>${r.legacy ? '' : seg}</div>`;
+  const seg = `<div class="gr-seg" role="group" aria-label="${esc(`${r.label} for ${r.botName}`)}">${r.choices.map(c => `<button type="button" data-action="set-grant" data-id="${esc(r.botId)}" data-text="${esc(`${r.action} ${r.scope}`)}" data-act="${esc(r.action)}" data-scope="${esc(r.scope)}" data-choice="${c.id}" aria-pressed="${c.on}"${off}>${esc(c.label)}</button>`).join('')}</div>`;
+  return `<div class="gr"><div class="gr-top"><span class="w">${esc(r.label)}</span></div>${seg}</div>`;
 }
 /** One bot's rules as a card, or every bot's in a card each. Lives in Settings > Permissions only. The node is repainted in place when a choice is made. */
 export function grantsHtml(botId = null) {

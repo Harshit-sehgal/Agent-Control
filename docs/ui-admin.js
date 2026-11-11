@@ -5,14 +5,14 @@
  *
  * The look is Settings and Connectors: a titled card (`.st-g`, `.cd`), rows with a switch or a small
  * button on the right, a segmented pill for a choice of few, and one primary action per card. */
-import {esc, icon, btn, field, note, empty, tag, fullDate, textInput, switchBtn} from './ui-kit.js?v=f4b2b474ab';
-import {store, api, sync, isAdmin, isStaticDemo} from './ui-store.js?v=f4b2b474ab';
-import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=f4b2b474ab';
-import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js?v=f4b2b474ab';
-import {pushStatus, enablePush, disablePush} from './ui-push.js?v=f4b2b474ab';
-import {connectorsPanel, loadConnectors, connectActions, connectForms} from './ui-connect.js?v=f4b2b474ab';
-import {cliDraft, agentCliRows, agentPermissionRows, agentWorkLine, subscriptionLine, SIGN_IN_HINT} from './ui-connect-model.js?v=f4b2b474ab';
-import {LOCAL_CLI_ENGINES, LOCAL_CLI_KIND} from './ai-presets.js?v=f4b2b474ab';
+import {esc, icon, btn, field, note, empty, tag, fullDate, textInput, switchBtn} from './ui-kit.js?v=a7167143ee';
+import {store, api, sync, isAdmin, isStaticDemo} from './ui-store.js?v=a7167143ee';
+import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=a7167143ee';
+import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js?v=a7167143ee';
+import {pushStatus, enablePush, disablePush} from './ui-push.js?v=a7167143ee';
+import {connectorsPanel, loadConnectors, connectActions, connectForms} from './ui-connect.js?v=a7167143ee';
+import {cliDraft, agentCliRows, agentPermissionRows, agentWorkLine, subscriptionLine, SIGN_IN_HINT} from './ui-connect-model.js?v=a7167143ee';
+import {LOCAL_CLI_ENGINES, LOCAL_CLI_KIND} from './ai-presets.js?v=a7167143ee';
 
 /** The pages Settings can load into its body. Only the keys are read (is this a page?). */
 export const ADMIN_PAGES = {notifications: true, workspaces: true, team: true, agents: true, data: true, connectors: true, ai: true};

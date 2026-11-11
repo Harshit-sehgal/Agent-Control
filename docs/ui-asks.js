@@ -7,7 +7,7 @@
  * An ask is a line in a chat (`{kind: 'ask', askId, text}`) whose status lives in
  * `state.asks`, so answering never rewrites a line. A grant is `{botId, action,
  * scope, choice}` in `state.grants`. */
-import {ASK_ANSWER_LABELS, GRANT_LABELS, ASK_ACTIONS, askChoices, acrossSites, grantChoices, answeredText, grantFor, isAskAction, scopeOf} from './asks.js?v=f4b2b474ab';
+import {ASK_ANSWER_LABELS, GRANT_LABELS, ASK_ACTIONS, askChoices, acrossSites, grantChoices, answeredText, grantFor, isAskAction, scopeOf} from './asks.js?v=a7167143ee';
 
 export const PAUSE_TEXT = 'All bots are paused. Nothing runs until you resume.';
 /** The banner while everything bots start is paused; `resume` says whether this person may lift it. */
@@ -51,22 +51,18 @@ export const scopeOfAction = (action, target) => scopeOf({action, target});
 
 const rank = action => { const i = ASK_ACTIONS.indexOf(action); return i < 0 ? ASK_ACTIONS.length : i; };
 
-/** One bot's rules. Each row carries the choices it may be set to (spend has no Always allow) and which one is
- * on. A permission the bot held before asks existed, with no grant of its own, is listed read-only as Ask each
- * time: only an explicit grant allows (see verdict in shared/asks.js). */
+/** One bot's rules: its explicit grants only (see verdict in shared/asks.js). Each row carries the choices it
+ * may be set to (spend has no Always allow) and which one is on. */
 export function grantRows(state, botId) {
   const bot = roster(state).find(b => b.id === botId);
   if (!bot) return [];
-  const row = (action, scope, choice, legacy) => ({
-    botId, botName: bot.name, action, scope, choice, legacy, label: grantWhat(action, scope),
-    choices: legacy ? [] : grantChoices(action).map(id => ({id, label: GRANT_LABELS[id], on: id === choice})),
+  const row = (action, scope, choice) => ({
+    botId, botName: bot.name, action, scope, choice, label: grantWhat(action, scope),
+    choices: grantChoices(action).map(id => ({id, label: GRANT_LABELS[id], on: id === choice})),
   });
-  const explicit = (state.grants || []).filter(g => g?.botId === botId && isAskAction(g.action))
-    .map(g => row(g.action, g.scope || '', grantFor(state, botId, g.action, g.scope || '') || 'ask', false))
+  return (state.grants || []).filter(g => g?.botId === botId && isAskAction(g.action))
+    .map(g => row(g.action, g.scope || '', grantFor(state, botId, g.action, g.scope || '') || 'ask'))
     .sort((a, b) => rank(a.action) - rank(b.action) || a.action.localeCompare(b.action) || a.scope.localeCompare(b.scope));
-  const old = (bot.permissions || []).filter(a => isAskAction(a) && !explicit.some(r => r.action === a))
-    .map(a => row(a, '', 'ask', true));
-  return [...explicit, ...old];
 }
 /** Every rule of every bot, in roster order. */
 export const allGrantRows = state => roster(state).flatMap(b => grantRows(state, b.id));
