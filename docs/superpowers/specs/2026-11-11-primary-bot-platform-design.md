@@ -112,7 +112,14 @@ Layout (owner's design, 2026-11-11):
 - **Details slide over from the right**: Company, Activity, Settings, New bot and every bot profile. Esc, the close button or a click outside closes them.
 
 Characters and looks:
-- **Faces are characters** (soft round blush cheeks and a catch-light in each eye).
+- **Dark grey by default** (owner, 2026-11-11). The app opens on neutral dark grey (`#1a1a1d`), not near-black. Light and Follow system are choices under Settings → Appearance, and the choice is remembered.
+- **Faces are simple and natural, never glowing** (owner, 2026-11-11). Each face is a soft fill of its tint with a faint shade at the bottom, soft round blush and a small catch-light in each eye. On dark grey the tints are slightly muted so they don't glow.
+- **Cute, calm animations** (owner, 2026-11-11):
+  - Sleeping bots breathe slowly and drift a small "z".
+  - Awake faces glance left and right now and then.
+  - Point at a sleeping bot and it peeks with its eyes open. Any face gives a tiny squash on hover, and pressed rows and buttons shrink slightly.
+  - All motion stops under reduced motion.
+- **Faces are characters.**
   - Each face has a tint gradient, eyes that blink and gently follow the pointer, and a small mouth.
   - States: asleep (closed eyes), awake, reading (working), waiting and wake (lifts up).
   - **Role shapes:** a circle for the primary, a rounded hexagon for managers, a rounded square for bots. There are no per-bot shapes.

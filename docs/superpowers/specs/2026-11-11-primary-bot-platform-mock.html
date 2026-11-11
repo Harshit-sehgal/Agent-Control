@@ -33,7 +33,7 @@
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .app[data-look="ink"]{--bg:#191815;--raise:#211f1b;--sunk:#1c1b18;--line:#2f2c26;--line2:#3d3a32;--fg:#efebe2;--soft:#cdc7ba;--muted:#a19a8c;--mint:#5cc99c;--mint-soft:#1d332a;--violet:#a892ff;--violet-soft:#29243d;--shadow:0 1px 0 var(--line2),0 14px 34px -14px rgba(0,0,0,.7);--float:0 10px 26px -8px rgba(0,0,0,.7)}}
 :root[data-theme="dark"] .app[data-look="ink"]{--bg:#191815;--raise:#211f1b;--sunk:#1c1b18;--line:#2f2c26;--line2:#3d3a32;--fg:#efebe2;--soft:#cdc7ba;--muted:#a19a8c;--mint:#5cc99c;--mint-soft:#1d332a;--violet:#a892ff;--violet-soft:#29243d;--shadow:0 1px 0 var(--line2),0 14px 34px -14px rgba(0,0,0,.7);--float:0 10px 26px -8px rgba(0,0,0,.7)}
 /* Night desk: dark first, tints glow */
-.app[data-look="night"]{--bg:#121216;--raise:#1b1b21;--sunk:#16161b;--line:#26262e;--line2:#33333d;--fg:#f1f0f5;--soft:#c9c7d2;--muted:#9a98a6;--mint:#5be0b0;--mint-soft:#163328;--violet:#b29bff;--violet-soft:#272042;--shadow:0 18px 50px -14px rgba(0,0,0,.8);--float:0 12px 34px -8px rgba(0,0,0,.85);--faceGlow:1;color-scheme:dark}
+.app[data-look="night"]{--bg:#121216;--raise:#1b1b21;--sunk:#16161b;--line:#26262e;--line2:#33333d;--fg:#f1f0f5;--soft:#c9c7d2;--muted:#9a98a6;--mint:#5be0b0;--mint-soft:#163328;--violet:#b29bff;--violet-soft:#272042;--shadow:0 18px 50px -14px rgba(0,0,0,.8);--float:0 12px 34px -8px rgba(0,0,0,.85);color-scheme:dark}
 
 html,body{height:100%}
 body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
@@ -54,8 +54,7 @@ kbd{font-family:var(--body);font-size:11px;color:var(--muted);border:1px solid v
 
 /* faces: characters with role shapes */
 .face{--t:#ccc;--s:28px;width:var(--s);height:var(--s);flex:none;position:relative;display:inline-block;border-radius:30%;
-  background:radial-gradient(130% 120% at 28% 22%,color-mix(in srgb,var(--t) calc(40% + 30% * (1 - var(--faceShine))),#fff) 0%,color-mix(in srgb,var(--t) 88%,var(--raise)) 58%,color-mix(in srgb,var(--t) 70%,#000) 140%);
-  box-shadow:0 0 calc(var(--s) * .55 * var(--faceGlow)) calc(var(--s) * -.08 * var(--faceGlow)) color-mix(in srgb,var(--t) 70%,transparent);transition:transform .35s var(--ease),filter .35s var(--ease)}
+  background:linear-gradient(180deg,color-mix(in srgb,var(--t) 90%,#fff),var(--t));box-shadow:inset 0 calc(var(--s) * -.07) 0 rgba(0,0,0,.09);transition:transform .35s var(--ease)}
 .app[data-look="ink"] .face{background:color-mix(in srgb,var(--t) 78%,var(--raise))}
 .face.primary{border-radius:50%}
 .face.mgr{border-radius:0;clip-path:polygon(25% 3%,75% 3%,99% 50%,75% 97%,25% 97%,1% 50%)}
@@ -135,6 +134,25 @@ kbd{font-family:var(--body);font-size:11px;color:var(--muted);border:1px solid v
 .pill{font-size:11.5px;padding:2px 8px;border-radius:99px;background:var(--sunk);color:var(--muted)}
 .pill.working{background:var(--mint-soft);color:var(--mint)}
 .pill.waiting{background:var(--violet-soft);color:var(--violet)}
+/* faces sit quietly on dark grey: slightly muted, never glowing */
+:root[data-theme="dark"] .face,.app[data-look="night"] .face{filter:saturate(.88) brightness(.9)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .face{filter:saturate(.88) brightness(.9)}}
+/* idle life: sleepers breathe and drift a "z", awake faces glance around now and then */
+.face.sleep{animation:breathe 4.6s ease-in-out infinite;animation-delay:var(--d,0s)}
+@keyframes breathe{0%,100%{scale:1 1}50%{scale:1.035 .965}}
+.face.sleep .eyes::after{content:'z';position:absolute;right:2%;top:-14%;font:700 calc(var(--s) * .3)/1 var(--body);color:var(--muted);opacity:0;animation:zz 4.6s ease-in-out infinite;animation-delay:var(--d,0s)}
+.face.s .eyes::after,.face.mgr .eyes::after{display:none}
+@keyframes zz{0%,45%{opacity:0;transform:translate(0,3px)}65%{opacity:.75}100%{opacity:0;transform:translate(4px,-7px)}}
+.face:not(.sleep):not(.read):not(.wait) .eyes{animation:glance 9s ease-in-out infinite;animation-delay:var(--d,0s)}
+@keyframes glance{0%,40%,100%{transform:none}46%,57%{transform:translateX(calc(var(--s) * -.06))}63%,72%{transform:translateX(calc(var(--s) * .05))}}
+/* point at a sleeping bot and it peeks; any face gives a tiny boop */
+:is(.bmain,.seat,.chatmain,.dhead,.orb,.head):hover .face.sleep i{height:21%;top:38%;opacity:1}
+:is(.bmain,.seat,.chatmain,.dhead,.orb,.head):hover .face.sleep b{opacity:.5}
+:is(.bmain,.seat,.chatmain,.dhead,.orb,.head):hover .face.sleep .eyes::after{display:none}
+:is(.bmain,.seat,.chatmain,.dhead,.orb,.head):hover .face{animation:boop .45s cubic-bezier(.34,1.56,.64,1)}
+@keyframes boop{0%{scale:1}35%{scale:1.06 .94}100%{scale:1}}
+:is(.bmain,.seat,.chatmain,.dhead,.btn,.chip){transition:scale .15s ease-out}
+:is(.bmain,.seat,.chatmain,.dhead,.btn,.chip):active{scale:.97}
 /* bot tree: managers drop down from the primary */
 .btree,.btree ul{list-style:none;margin:0;padding:0}
 .btree ul{margin-left:22px;padding-left:12px;border-left:1px solid var(--line)}
@@ -192,9 +210,9 @@ button.tog:hover{background:var(--sunk);color:var(--fg)}
 .foot{font-size:12px;color:var(--muted);margin:0}
 .use{margin-top:auto;padding-top:18px;border-top:1px solid var(--line)}
 /* faces: cheeks and a catch-light */
-.face::before,.face::after{content:'';position:absolute;top:60%;width:16%;height:9%;border-radius:50%;background:rgba(255,105,120,.28);filter:blur(.6px);pointer-events:none}
+.face::before,.face::after{content:'';position:absolute;top:60%;width:16%;height:9%;border-radius:50%;background:rgba(255,105,120,.2);filter:blur(.6px);pointer-events:none}
 .face::before{left:15%}.face::after{right:15%}
-.face i::after{content:'';position:absolute;top:16%;left:18%;width:38%;height:26%;border-radius:50%;background:#fff;opacity:.85}
+.face i::after{content:'';position:absolute;top:16%;left:20%;width:30%;height:20%;border-radius:50%;background:#fff;opacity:.7}
 .face.sleep i::after{display:none}
 /* home ideas */
 .hh{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;padding-right:56px}
@@ -442,6 +460,7 @@ select.sel{border:0;border-radius:8px;background:var(--sunk);padding:5px 8px;fon
 </div>
 
 <script>
+(()=>{let th=null;try{th=localStorage.getItem('theme')}catch(e){}if(th===null||th)document.documentElement.setAttribute('data-theme',th||'dark')})();
 const IC={send:'<svg class="i" viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></svg>',x:'<svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>',back:'<svg class="i" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>',info:'<svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h.01"/></svg>',chev:'<svg class="i chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>',check:'<svg class="i" viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg>',arrow:'<svg class="i" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M5 12h13M13 6l6 6-6 6"/></svg>'};
 const BOTS=[
  {id:'atlas',name:'Atlas',role:'Primary',boss:null,tint:'#b9a6f5',job:'Runs the company. Routes new threads, settles who owns what, hires bots.',kw:[],mem:['You like short answers first, detail after']},
@@ -803,7 +822,7 @@ document.addEventListener('change',e=>{const s=e.target;
   else if(s.dataset.boss){const b=by(s.dataset.boss);b.boss=s.value||null;log('atlas','bots',`moved ${b.name} ${b.boss?'under '+by(b.boss).name:'to no manager'}`);render()}
   else if(s.dataset.homeSel!==undefined){S.def=s.value;S.home=s.value;saveLayout();renderMain()}
   else if(s.dataset.lookSel!==undefined){setLook(s.value)}
-  else if(s.dataset.themeSel!==undefined){s.value?document.documentElement.setAttribute('data-theme',s.value):document.documentElement.removeAttribute('data-theme')}
+  else if(s.dataset.themeSel!==undefined){s.value?document.documentElement.setAttribute('data-theme',s.value):document.documentElement.removeAttribute('data-theme');try{localStorage.setItem('theme',s.value)}catch(e){}}
 });
 document.addEventListener('keydown',e=>{
   if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();$('pal').classList.contains('show')?closePal():openPal()}
