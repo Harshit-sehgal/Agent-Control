@@ -63,7 +63,8 @@ def serve(directory):
 def known_noise(msg):
     """The meta CSP cannot carry frame-ancestors (the server header does), and no favicon is shipped."""
     url = (msg.location or {}).get('url', '')
-    return 'frame-ancestors' in msg.text or 'favicon' in url
+    # A takeover with no device running answers 409 on purpose; the browser logs every failed fetch.
+    return 'frame-ancestors' in msg.text or 'favicon' in url or '409 (Conflict)' in msg.text
 
 
 class Harness:
@@ -896,6 +897,388 @@ async def phone_ask_card_permissions_and_pause(page, base):
     await expect(banner).to_be_hidden()
 
 
+# ---------------------------------------------------------------- the Computer view
+
+def page_picture(hot=0, w=1280, h=800):
+    """A 1280x800 stand-in for a mail page, as a PNG data URL (the real device sends JPEG): a header band
+    and five rows, one of them highlighted. Built per band, so it takes milliseconds."""
+    import base64
+    import struct
+    import zlib
+
+    def band(segments, fill):
+        row = bytearray(bytes(fill) * w)
+        for x0, x1, colour in segments:
+            row[x0 * 3:x1 * 3] = bytes(colour) * (x1 - x0)
+        return b'\x00' + bytes(row)
+
+    paper, line, ink, mint = (251, 250, 248), (236, 234, 228), (200, 198, 192), (190, 232, 214)
+    plain = band([], paper)
+    head = band([], (34, 38, 43))
+    tops = [120 + 110 * i for i in range(5)]
+    bars = []
+    for i in range(5):
+        fill = mint if i == hot else paper
+        long_row = band([(60, 100, (106, 75, 214)), (130, 130 + 360 - i * 30, ink), (130, 130 + 640 - i * 60, line)], fill)
+        short_row = band([(130, 130 + 520 - i * 40, ink)], fill)
+        bars.append((long_row, short_row))
+    raw = bytearray()
+    for y in range(h):
+        if y < 80:
+            raw += head
+            continue
+        for i, top in enumerate(tops):
+            if top <= y < top + 90:
+                raw += bars[i][0] if (y - top) % 44 < 22 else bars[i][1]
+                break
+        else:
+            raw += plain
+
+    def chunk(kind, data):
+        return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff)
+    png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(bytes(raw), 6)) + chunk(b'IEND', b'')
+    return 'data:image/png;base64,' + base64.b64encode(png).decode()
+
+
+async def eventually(check, timeout=6.0):
+    """Wait until `check()` (a plain value or an awaitable) is true. Python's expect has no poll."""
+    end = asyncio.get_event_loop().time() + timeout
+    while True:
+        value = check()
+        if hasattr(value, '__await__'):
+            value = await value
+        if value:
+            return
+        assert asyncio.get_event_loop().time() < end, 'the condition never held'
+        await asyncio.sleep(0.05)
+
+
+class Live:
+    """A stand-in for the device and the routes /api/browser-live*, answered through page.route.
+    The page's own transport is pointed at fetch for those paths (see route_live)."""
+
+    def __init__(self, bot, **kw):
+        self.bot, self.agent, self.state, self.seq, self.hot = bot, True, 'browsing', 1, 0
+        self.url, self.title, self.notice = 'https://mail.google.com/mail/u/0/#inbox', 'Inbox', None
+        self.pages = [
+            {'url': 'https://mail.google.com/mail/u/0/#inbox', 'title': 'Inbox', 'at': '2026-11-11T10:00:00.000Z'},
+            {'url': 'https://mail.google.com/mail/u/0/#inbox/northwind', 'title': 'Northwind: a time next week?', 'at': '2026-11-11T10:01:00.000Z'},
+            {'url': 'https://calendar.google.com/calendar/r/week', 'title': None, 'at': '2026-11-11T10:02:00.000Z'},
+        ]
+        self.posts, self.frame_polls, self.list_polls = [], 0, 0
+        self.__dict__.update(kw)
+
+    def entry(self):
+        site = None if self.state == 'idle' else re.sub(r'^https?://([^/]+).*$', r'\1', self.url or '') or None
+        return {'botId': self.bot, 'state': self.state, 'url': self.url, 'title': self.title, 'site': site, 'pages': self.pages,
+                'runId': None, 'requestId': None, 'live': self.agent}
+
+    def inputs(self):
+        return [body for path, body in self.posts if path.endswith('/input')]
+
+    async def handle(self, route):
+        request = route.request
+        path = re.sub(r'^https?://[^/]+', '', request.url).split('?')[0]
+        method, body = request.method, (json.loads(request.post_data) if request.post_data else None)
+
+        async def reply(data, status=200):
+            await route.fulfill(status=status, content_type='application/json', body=json.dumps(data))
+        if path == '/api/browser-live' and method == 'GET':
+            self.list_polls += 1
+            return await reply([self.entry()])
+        if path == f'/api/browser-live/{self.bot}' and method == 'GET':
+            self.frame_polls += 1
+            after = int(re.search(r'after=(\d+)', request.url).group(1)) if 'after=' in request.url else 0
+            out = {'botId': self.bot, 'agent': self.agent, 'seq': self.seq if self.agent else 0, 'changed': self.agent and after != self.seq,
+                   'state': self.state, 'url': self.url, 'title': self.title, 'site': self.entry()['site']}
+            if self.agent:
+                out.update(w=1280, h=800, at=1)
+                if out['changed']:
+                    out['image'] = page_picture(self.hot)
+            if self.notice:
+                out['notice'] = self.notice
+            return await reply(out)
+        self.posts.append((path, body))
+        if path == f'/api/browser-live/{self.bot}/takeover':
+            if not self.agent:
+                return await reply({'error': 'The local agent is not running the shared browser right now, so there is nothing to take over. Start it with AGENT_BROWSER=1 and try again.'}, 409)
+            self.state = 'driving'
+            return await reply({'botId': self.bot, 'state': 'driving'})
+        if path == f'/api/browser-live/{self.bot}/handback':
+            self.state = 'browsing'
+            return await reply({'botId': self.bot, 'state': 'browsing'})
+        if path == f'/api/browser-live/{self.bot}/input':
+            if self.state != 'driving':
+                return await reply({'error': 'Take over the browser before you click or type in it.'}, 409)
+            return await reply({'ok': True})
+        return await reply({'error': 'unexpected'}, 404)
+
+
+VIA_FETCH = """(() => {
+    let real;
+    const viaFetch = (path, method, body) => {
+        const verb = method || 'GET', options = {method: verb, headers: {'Content-Type': 'application/json'}};
+        if (body !== undefined && verb !== 'GET') options.body = JSON.stringify(body);
+        return fetch(path, options).then(async r => {
+            const data = await r.json().catch(() => ({}));
+            if (!r.ok) throw Object.assign(new Error(data.error || 'HTTP ' + r.status), {status: r.status});
+            return data;
+        });
+    };
+    Object.defineProperty(window, 'AGENT_API', {configurable: true,
+        get: () => (path, method, body) => String(path).startsWith('/api/browser-live') ? viaFetch(path, method, body) : real(path, method, body),
+        set: v => { real = v; }});
+})()"""
+
+
+async def route_live(page, live):
+    """Answer /api/browser-live* from `live`. The static build's transport is the browser-local one, so
+    those paths are pointed at fetch (which page.route answers) before any page script runs; every other
+    path still goes to the demo."""
+    await page.add_init_script(VIA_FETCH)
+    await page.route('**/api/browser-live**', live.handle)
+
+
+async def open_computer(page, base, name='Writer', **kw):
+    """The company with one extra bot and the stub installed. Returns the stub and the bot's id."""
+    live = Live(None, **kw)
+    await route_live(page, live)
+    ids = await open_app(page, base, bots={name: EXTRA_BOTS[name]})
+    live.bot = ids[name]
+    return live, ids[name]
+
+
+async def goto_profile(page, bot, sub=''):
+    await page.locator(f'#sidebar .crow[data-id="{bot}"]').click()
+    await page.locator('#main .cv-who').click()
+    await expect(page.locator('#main .pr-hero')).to_be_visible()
+    if sub:
+        await page.locator('#main .rw', has_text='Computer').click()
+        assert await hash_(page) == f'#profile/{bot}/{sub}', await hash_(page)
+
+
+async def computer_row_frame_and_pages(page, base):
+    live, bot = await open_computer(page, base)
+    await goto_profile(page, bot)
+    # The row reads the list: Browsing, from the stub (it said Idle before the first poll).
+    row = page.locator('#main .rw', has_text='Computer')
+    await expect(row.locator('[data-computer-row]')).to_have_text('Browsing')
+    await row.click()
+    assert await hash_(page) == f'#profile/{bot}/computer', await hash_(page)
+    await expect(page.locator('#main .pr-subbar h1')).to_have_text('Computer')
+    # A frame arrives, with the address and the line under it.
+    img = page.locator('#main .pc-img')
+    await expect(img).to_be_visible()
+    assert (await img.get_attribute('src')).startswith('data:image/png;base64,')
+    assert await img.evaluate('i => i.naturalWidth') == 1280
+    await expect(page.locator('#main .pc-url')).to_have_value('https://mail.google.com/mail/u/0/#inbox')
+    await expect(page.locator('#main .pc-url')).to_have_js_property('readOnly', True)
+    await expect(page.locator('#main .pc-line')).to_have_text('Writer is on Inbox')
+    await expect(page.locator('#main .pc-dot')).to_have_class(re.compile('live'))
+    # This run's pages: a title, else the host, with the host beside it.
+    await expect(page.locator('#main .pc-h')).to_have_text('This run')
+    await expect(page.locator('#main .pc-trail li')).to_have_count(3)
+    await expect(page.locator('#main .pc-trail li').nth(1)).to_contain_text('Northwind: a time next week?')
+    await expect(page.locator('#main .pc-trail li').nth(2)).to_have_text('calendar.google.com')
+    await expect(page.locator('#main [data-action="computer-takeover"]')).to_have_text('Take over')
+    await expect(page.locator('#main')).to_contain_text('Sending, posting, deleting and paying still ask you first.')
+    # The poll asks for what is new: a second frame replaces the picture.
+    first = await img.get_attribute('src')
+    live.seq, live.hot = 2, 3
+    await eventually(lambda: img.evaluate('(i, f) => i.getAttribute("src") !== f', first))
+    # Idle dims the picture and the line says when it was last used; the pages become the last run's.
+    live.state = 'idle'
+    await expect(page.locator('#main .pc-line')).to_contain_text('Idle · last used')
+    await expect(page.locator('#main .pc-h')).to_have_text('Last run')
+    await expect(page.locator('#main .pc-screen')).to_have_class(re.compile('idle'))
+    # Leaving the view stops the poll: the device only casts while somebody looks.
+    await page.locator('#main [data-action="profile-up"]').click()
+    await page.wait_for_timeout(500)
+    seen = live.frame_polls
+    await page.wait_for_timeout(1200)
+    assert live.frame_polls == seen, (seen, live.frame_polls)
+    await expect(page.locator('#main .rw', has_text='Computer').locator('[data-computer-row]')).to_have_text('Idle', timeout=8000)
+
+
+async def computer_take_over_drives_the_page(page, base):
+    live, bot = await open_computer(page, base)
+    await goto_profile(page, bot, 'computer')
+    await expect(page.locator('#main .pc-img')).to_be_visible()
+    stage = page.locator('#main .pc-screen')
+    # Before Take over a click on the picture does nothing but say what to press.
+    await page.locator('#main .pc-img').click()
+    await expect(page.locator('#toast')).to_contain_text('Press Take over')
+    assert live.inputs() == []
+    await page.locator('#main [data-action="computer-takeover"]').click()
+    await expect(page.locator('#main [data-action="computer-handback"]')).to_have_text('Hand back')
+    assert any(path.endswith('/takeover') for path, _ in live.posts)
+    await expect(page.locator('#main .pc-line')).to_have_text('You have the browser')
+    await expect(page.locator('#main .pc-dot')).to_have_class(re.compile('you'))
+    await expect(stage).to_be_focused()
+    # A click goes in 1280x800 page pixels: the middle of the picture is (640, 400).
+    box = await page.locator('#main .pc-img').bounding_box()
+    await page.mouse.click(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2)
+    await eventually(lambda: len([e for e in live.inputs() if e['type'] == 'click']) == 1)
+    click = [e for e in live.inputs() if e['type'] == 'click'][0]
+    assert abs(click['x'] - 640) <= 2 and abs(click['y'] - 400) <= 2, click
+    await page.mouse.click(box['x'] + 1, box['y'] + 1)
+    await eventually(lambda: len([e for e in live.inputs() if e['type'] == 'click']) == 2)
+    corner = [e for e in live.inputs() if e['type'] == 'click'][1]
+    assert corner['x'] <= 4 and corner['y'] <= 4, corner
+    # Keys: letters are typed (joined), named keys are pressed, and Esc goes to the page, not out of the view.
+    await page.keyboard.type('hi there')
+    await page.keyboard.press('Enter')
+    await page.keyboard.press('Escape')
+    await eventually(lambda: [e for e in live.inputs() if e['type'] in ('type', 'key')][-1:] == [{'type': 'key', 'key': 'Escape'}])
+    typed = ''.join(e['text'] for e in live.inputs() if e['type'] == 'type')
+    assert typed == 'hi there', typed
+    assert {'type': 'key', 'key': 'Enter'} in live.inputs()
+    assert await hash_(page) == f'#profile/{bot}/computer', await hash_(page)
+    # '/' and 't' are the app's search shortcuts everywhere else; here they are typed into the page.
+    await page.keyboard.type('t/')
+    await eventually(lambda: ''.join(e['text'] for e in live.inputs() if e['type'] == 'type') == 'hi theret/')
+    assert not await page.evaluate("!!document.activeElement.closest('#sidebar, #chrome')")
+    # The wheel scrolls the page, and the page itself stays put.
+    await page.mouse.move(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2)
+    await page.mouse.wheel(0, 100)
+    await eventually(lambda: any(e['type'] == 'scroll' for e in live.inputs()))
+    scroll = [e for e in live.inputs() if e['type'] == 'scroll'][0]
+    assert scroll['dy'] > 100 and abs(scroll['x'] - 640) <= 2, scroll
+    # The address field takes a URL; Go (or Enter) sends it.
+    url = page.locator('#main .pc-url')
+    await expect(url).to_have_js_property('readOnly', False)
+    await url.fill('example.com')
+    await page.locator('#main .pc-go').click()
+    await eventually(lambda: [e for e in live.inputs() if e['type'] == 'navigate'] == [{'type': 'navigate', 'url': 'https://example.com/'}])
+    # After Go the keys go back to the page; an address that is not a web address is refused in a toast.
+    await expect(stage).to_be_focused()
+    await url.fill('two words')
+    await url.press('Enter')
+    await expect(page.locator('#toast')).to_contain_text('Type a web address')
+    # Phones have no keyboard on the picture: a field and key buttons send the same events.
+    await page.locator('#main .pc-type input').fill('abc')
+    await page.locator('#main .pc-type button').click()
+    await page.locator('#main .pc-key[data-text="Tab"]').click()
+    await eventually(lambda: {'type': 'key', 'key': 'Tab'} in live.inputs())
+    assert ''.join(e['text'] for e in live.inputs() if e['type'] == 'type').endswith('abc')
+
+
+async def computer_hand_back(page, base):
+    live, bot = await open_computer(page, base)
+    await goto_profile(page, bot, 'computer')
+    await page.locator('#main [data-action="computer-takeover"]').click()
+    await expect(page.locator('#main .pc-tools')).to_be_visible()
+    await page.locator('#main [data-action="computer-handback"]').click()
+    await expect(page.locator('#main [data-action="computer-takeover"]')).to_have_text('Take over')
+    assert live.posts[-1][0].endswith('/handback')
+    await expect(page.locator('#toast')).to_contain_text('Writer has the browser back')
+    await expect(page.locator('#main .pc-tools')).to_be_hidden()
+    await expect(page.locator('#main .pc-line')).to_have_text('Writer is on Inbox')
+    await expect(page.locator('#main .pc-url')).to_have_js_property('readOnly', True)
+    # Nothing is sent once the bot has it: a click on the picture sends no input.
+    before = len(live.inputs())
+    await page.locator('#main .pc-img').click()
+    assert len(live.inputs()) == before
+    # Esc is the app's again: it leaves the view for the profile, where the row says Browsing.
+    await page.locator('#main .pc-screen').evaluate('n => n.blur()')
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#main .pr-hero')).to_be_visible()
+    await expect(page.locator('#main .rw', has_text='Computer').locator('[data-computer-row]')).to_have_text('Browsing')
+
+
+async def computer_no_device_empty_state(page, base):
+    live, bot = await open_computer(page, base, agent=False, state='idle', pages=[])
+    await goto_profile(page, bot, 'computer')
+    veil = page.locator('#main .pc-veil')
+    await expect(veil).to_be_visible()
+    await expect(veil).to_contain_text('No device is running the shared browser')
+    await expect(veil).to_contain_text('AGENT_BROWSER=1')
+    await expect(veil.locator('code')).to_have_text('AGENT_BROWSER=1 node agent/agent.mjs run')
+    await expect(page.locator('#main .pc-img')).to_be_hidden()
+    await expect(page.locator('#main .pc-line')).to_have_text('No browser running')
+    # Take over says why it cannot.
+    await page.locator('#main [data-action="computer-takeover"]').click()
+    await expect(page.locator('#toast')).to_contain_text('Start it with AGENT_BROWSER=1')
+    await expect(page.locator('#main [data-action="computer-takeover"]')).to_be_visible()
+    # A notice from the device is shown as it came, and once the agent starts the poll finds it.
+    live.notice = 'The takeover could not start: no Chrome found.'
+    await expect(page.locator('#main .pc-notice')).to_have_text('The takeover could not start: no Chrome found.', timeout=8000)
+    live.notice, live.agent, live.state = None, True, 'browsing'
+    await expect(page.locator('#main .pc-img')).to_be_visible(timeout=8000)
+    await expect(veil).to_be_hidden()
+    await expect(page.locator('#main .pc-notice')).to_be_hidden()
+
+
+async def computer_demo_has_no_browser(page, base):
+    ids = await open_app(page, base, bots={'Writer': EXTRA_BOTS['Writer']})
+    await page.goto(f'{base}/index.html#profile/{ids["Writer"]}/computer')
+    await page.reload()
+    await expect(page.locator('#main .pr-subbar h1')).to_have_text('Computer')
+    veil = page.locator('#main .pc-veil')
+    await expect(veil).to_contain_text('The demo has no browser')
+    await expect(veil).to_contain_text('local agent')
+    await expect(page.locator('#main .pc-line')).to_have_text('No browser in the demo')
+    await expect(page.locator('#main [data-action="computer-takeover"]')).to_be_hidden()
+    await expect(page.locator('#main .pc-img')).to_be_hidden()
+    # Atlas has no Computer row, and no page behind it.
+    await page.goto(f'{base}/index.html#profile/{PRIMARY}')
+    await page.reload()
+    await expect(page.locator('#main .pr-hero h1')).to_have_text('Atlas')
+    await expect(page.locator('#main .rw', has_text='Computer')).to_have_count(0)
+    await page.goto(f'{base}/index.html#profile/{PRIMARY}/computer')
+    await page.reload()
+    await expect(page.locator('#main .pr-hero h1')).to_have_text('Atlas')
+
+
+async def computer_site_chip_on_the_pill(page, base):
+    live, bot = await open_computer(page, base)
+    await patch_state(page, f'''
+        const at = new Date().toISOString();
+        s.chats[{bot!r}] = [{{id: 'c1', role: 'user', text: 'Check my mail', at}}];
+        s.groupRuns.unshift({{id: 'run-web', groupId: 'home', chatKey: {bot!r}, status: 'running', recipients: [{bot!r}], currentStep: 0, trace: [], createdAt: at}});
+        s.browserRequests = [{{id: 'br9', botId: {bot!r}, botName: 'Writer', groupId: 'home', runId: 'run-web', chatKey: {bot!r}, status: 'dispatched', url: 'https://mail.google.com/mail/u/0/#inbox', steps: [], createdAt: at, updatedAt: at}}];''')
+    await page.goto(f'{base}/index.html#bot/{bot}')
+    await page.reload()
+    chip = page.locator('#cv-log .cv-live .pchip')
+    await expect(chip).to_be_visible()
+    await expect(chip).to_have_text('mail.google.com')
+    await expect(chip).to_have_attribute('aria-label', "Watch Writer's browser, on mail.google.com")
+    # It opens that bot's live view.
+    await chip.click()
+    assert await hash_(page) == f'#profile/{bot}/computer', await hash_(page)
+    await expect(page.locator('#main .pc-img')).to_be_visible()
+    # While you hold the browser the line says so, and the chip stays.
+    await page.locator('#main [data-action="computer-takeover"]').click()
+    await page.go_back()
+    await expect(page.locator('#cv-log .cv-live .cv-cur')).to_have_text('You are driving')
+    await expect(page.locator('#cv-log .cv-live .pchip')).to_have_text('mail.google.com')
+    # A finished request has no chip.
+    await patch_state(page, "s.browserRequests.forEach(r => { r.status = 'done'; });")
+    await expect(page.locator('#cv-log .pchip')).to_have_count(0)
+
+
+async def phone_computer_view(page, base):
+    live, bot = await open_computer(page, base)
+    await page.goto(f'{base}/index.html#profile/{bot}/computer')
+    await page.reload()
+    await expect(page.locator('#main .pc-img')).to_be_visible()
+    box = await page.locator('#main .pc-win').bounding_box()
+    assert box['x'] >= 0 and box['x'] + box['width'] <= 390, box
+    assert await overflow(page) <= 0, await overflow(page)
+    take = await page.locator('#main [data-action="computer-takeover"]').bounding_box()
+    assert take['height'] >= 36, take
+    await page.locator('#main [data-action="computer-takeover"]').click()
+    await expect(page.locator('#main .pc-tools')).to_be_visible()
+    assert await overflow(page) <= 0, await overflow(page)
+    for key in await page.locator('#main .pc-key').all():
+        k = await key.bounding_box()
+        assert k['height'] >= 40 and k['x'] >= 0 and k['x'] + k['width'] <= 390, k
+    # A tap on the picture is a click on the page.
+    img = await page.locator('#main .pc-img').bounding_box()
+    await page.mouse.click(img['x'] + img['width'] / 2, img['y'] + img['height'] / 2)
+    await eventually(lambda: len([e for e in live.inputs() if e['type'] == 'click']) == 1)
+
+
 async def main():
     shots = Path(tempfile.mkdtemp(prefix='usability-smoke-shots-'))
     site_dir = Path(tempfile.mkdtemp(prefix='usability-smoke-site-'))
@@ -927,13 +1310,20 @@ async def main():
             await h.scenario('phone: Settings cards, a section, Back, Esc, and the menu sheet', phone_settings_cards, PHONE)
             await h.scenario('phone: ask card, permissions and the pause banner', phone_ask_card_permissions_and_pause, PHONE)
             await h.scenario('phone: long press opens the options sheet; hold and drag pins', phone_long_press_menu_and_drag, PHONE)
+            await h.scenario('computer: the row says Browsing, the view shows a frame and the pages of the run', computer_row_frame_and_pages)
+            await h.scenario('computer: Take over sends clicks, keys, the wheel and an address to the page', computer_take_over_drives_the_page)
+            await h.scenario('computer: Hand back returns the browser to the bot', computer_hand_back)
+            await h.scenario('computer: no device shows how to start the local agent, and notices', computer_no_device_empty_state)
+            await h.scenario('computer: the demo has no browser, and Atlas has no Computer row', computer_demo_has_no_browser)
+            await h.scenario('computer: the pill carries the site chip, opens the view and says You are driving', computer_site_chip_on_the_pill)
+            await h.scenario('phone: the Computer view fits and its controls are thumb-sized', phone_computer_view, PHONE)
             await browser.close()
             server.shutdown()
         failed = [name for name, error in h.results if error]
         if failed:
             print(f'USABILITY SMOKE FAIL: {len(failed)} of {len(h.results)} scenarios: {failed}')
             return 1
-        print(f'USABILITY SMOKE PASS: {len(h.results)} scenarios; new bot, edit and move, delete, Atlas, pin and reorder, ask cards, permissions, pause banner, settings, out-of-job card, checkpoint card, faces, keyboard, phone, no console errors')
+        print(f'USABILITY SMOKE PASS: {len(h.results)} scenarios; new bot, edit and move, delete, Atlas, pin and reorder, ask cards, permissions, pause banner, settings, out-of-job card, checkpoint card, faces, keyboard, phone, Computer view (row, frame, takeover input, hand back, no device, demo, site chip), no console errors')
         return 0
     finally:
         shutil.rmtree(site_dir, ignore_errors=True)

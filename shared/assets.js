@@ -15,7 +15,7 @@ export const ASSETS = [
   'index.html', 'app.css', 'shell.css', 'profile.css',
   // The UI modules the entry points import.
   'transport.js', 'local-api.js', 'app.js',
-  'ui-kit.js', 'ui-model.js', 'ui-face.js', 'ui-company.js', 'ui-feed.js', 'ui-store.js', 'ui-dialogs.js', 'ui-chat.js', 'ui-shell.js', 'ui-conversation.js', 'ui-profile-model.js', 'ui-profile.js', 'ui-reorder.js', 'ui-gestures.js', 'ui-asks.js', 'ui-settings.js', 'ui-sheets.js', 'ui-admin.js', 'ui-actions.js', 'ui-takeover.js', 'ui-fx.js', 'ui-push.js', 'sw.js',
+  'ui-kit.js', 'ui-model.js', 'ui-face.js', 'ui-company.js', 'ui-feed.js', 'ui-store.js', 'ui-dialogs.js', 'ui-chat.js', 'ui-shell.js', 'ui-conversation.js', 'ui-profile-model.js', 'ui-profile.js', 'ui-reorder.js', 'ui-gestures.js', 'ui-asks.js', 'ui-settings.js', 'ui-sheets.js', 'ui-admin.js', 'ui-actions.js', 'ui-takeover.js', 'ui-computer.js', 'ui-computer-view.js', 'ui-fx.js', 'ui-push.js', 'sw.js',
   // Browser-safe logic shared with the server.
   'core.js', 'errors.js', 'workflow.js', 'tasks.js', 'contracts.js', 'bot-settings.js', 'company.js', 'threads.js', 'off-job.js', 'bot-browser.js', 'bot-create.js', 'hire.js', 'offline-bots.js', 'bot-link.js', 'ask-limits.js', 'asks.js', 'activity-log.js', 'runaway.js', 'reply-blocks.js', 'subagents.js', 'retention.js', 'memory.js', 'run-state.js',
   // Connectors: the shape, the `connector` block and the envelope list. Imported by coordination.js, so the demo needs it.

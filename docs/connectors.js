@@ -13,9 +13,9 @@
  *
  * Pure and browser-safe, like the other shared modules.
  */
-import {cleanText} from './core.js?v=8bbac178a9';
-import {controlFence} from './reply-blocks.js?v=8bbac178a9';
-import {decide, createAsk} from './asks.js?v=8bbac178a9';
+import {cleanText} from './core.js?v=697db3ab25';
+import {controlFence} from './reply-blocks.js?v=697db3ab25';
+import {decide, createAsk} from './asks.js?v=697db3ab25';
 
 export const CONNECTOR_KINDS = ['google', 'mcp'];
 /** `ready` works; `setup` is Google with a client saved and no sign-in yet; `reconnect` is a sign-in that

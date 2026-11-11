@@ -239,6 +239,12 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
   }
 
   let m;
+  // The demo has no browser to watch: the Computer view reads this and says so, the way it would say "no device" on a server.
+  const live = path.split('?')[0];
+  if (live === '/api/browser-live' && method === 'GET') return [];
+  if ((m = live.match(/^\/api\/browser-live\/([a-z0-9-]+)$/)) && method === 'GET') return {botId: m[1], agent: false, demo: true, seq: 0, changed: false, state: 'idle', url: null, title: null, site: null};
+  if (/^\/api\/browser-live\/[a-z0-9-]+\/(takeover|handback|input)$/.test(live) && method === 'POST') throw Object.assign(new Error('The demo has no browser to take over. Run the full app with the local agent to use one.'), {status: 409});
+
   // A thread: a new chat run by the primary bot, started in one call like the server's.
   if (path === '/api/threads' && method === 'POST') {
     const message = cleanText(body.message, 4000);

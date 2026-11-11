@@ -16,6 +16,7 @@
  *   ui-reorder      pure rules behind those gestures
  *   ui-settings     Settings, the Company chart and Activity
  *   ui-profile-model pure view models behind those screens
+ *   ui-computer     pure rules of a bot's Computer view   ui-computer-view  that view, the profile row and the site chip
  *   ui-sheets       sign-in and password sheets   ui-admin   admin pages
  *   ui-dialogs      toast, sheet, confirm/ask      ui-actions action/form tables
  *   ui-fx           confetti, the send arrow and the bots' ambient life
@@ -31,6 +32,7 @@ import {settingsViews} from './ui-settings.js';
 import {showLogin, hideLogin} from './ui-sheets.js';
 import {actions, forms, onControlChange, onControlInput} from './ui-actions.js';
 import {bringBotsToLife} from './ui-fx.js';
+import {wireComputer} from './ui-computer-view.js';
 
 const el = id => document.getElementById(id);
 const hashRoute = () => normalizeRoute(companyRoute(location.hash, store.state));
@@ -280,7 +282,7 @@ window.addEventListener('popstate', event => { syncDepth(event); if (!store.stat
 window.addEventListener('resize', () => { if (store.state && isDesk() !== lastDesk) changed('route'); });
 // `toggle` does not bubble, so listen in the capture phase to remember which handoff cards are open.
 document.addEventListener('toggle', trackOpen, true);
-wireShell(); wirePages(); wireGestures();
+wireShell(); wirePages(); wireGestures(); wireComputer();
 
 applyTheme(); watchSystemTheme(); bringBotsToLife(); registerWorker();
 boot();

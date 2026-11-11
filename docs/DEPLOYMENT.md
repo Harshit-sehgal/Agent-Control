@@ -239,10 +239,10 @@ others wait their turn in order; a bot never touches another bot's tab.
   holds your cookies. Nothing in this app reads, uploads, logs or backs it up
   (`npm run backup` and the vault never see it); keep it out of your own backups
   and do not share it.
-- **Sign in once:** open the bot's **Computer** view and press **Take over**
-  (`POST /api/browser-live/:botId/takeover`; the view itself comes with the UI
-  work). You see the page live, click and type, and open an address from the
-  address box; a site must be in `AGENT_BROWSER_ALLOWLIST` for the browser to
+- **Sign in once:** open the bot's profile, then **Computer**, and press **Take
+  over** (`POST /api/browser-live/:botId/takeover`). You see the page live,
+  click and type (or use the type box and key buttons on a phone), and open an
+  address from the address box; a site must be in `AGENT_BROWSER_ALLOWLIST` for the browser to
   load it, so list the sign-in host too (for Google, `accounts.google.com`).
   Press **Hand back** when you are through.
 - **While you drive:** no bot starts anything. A bot already mid-task finishes

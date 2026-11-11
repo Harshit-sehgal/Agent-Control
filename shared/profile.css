@@ -219,3 +219,60 @@ button.rw:active{background:var(--sunk)}
 .st-dlg .gr-top .w{font-size:14px}
 .st-dlg .gr-seg button{min-height:34px}
 @media(pointer:coarse){.gr-seg button{min-height:44px}}
+
+/* ---------- a bot's Computer view (mock v46): the shared browser's tab, live ----------
+ * A window (address bar, the page, a line saying what the bot is doing), then the
+ * buttons and the pages of the run. The picture is whatever the device sends, so it
+ * stays the page's own colours in both themes; only the frame around it follows the
+ * theme. Mint marks a bot browsing, violet marks you driving. Only transform and
+ * opacity animate, and shell.css stops them under prefers-reduced-motion. */
+.pc{display:flex;flex-direction:column;gap:12px}
+.pc-win{border-radius:20px;overflow:hidden;background:var(--raise);box-shadow:var(--ring)}
+.pc-bar{display:flex;align-items:center;gap:8px;padding:9px 12px 9px 14px;border-bottom:1px solid var(--line)}
+.pc-dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none;transition:background-color .2s}
+.pc-dot.live{background:var(--brand);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 25%,transparent)}
+.pc-dot.you{background:var(--wait);box-shadow:0 0 0 3px color-mix(in srgb,var(--wait) 25%,transparent)}
+.pc-url{flex:1;min-width:0;height:32px;padding:0 12px;border:0;outline:0;border-radius:99px;background:var(--sunk);color:var(--soft);font-size:13px;text-overflow:ellipsis}
+.pc-url:not([readonly]){color:var(--fg);box-shadow:inset 0 0 0 1.5px var(--wait)}
+.pc-url:focus-visible{box-shadow:0 0 0 2px var(--wait)}
+.pc-go{flex:none;height:32px;padding:0 14px;border-radius:99px;background:var(--wait);color:var(--on-wait);font-size:13px;font-weight:600}
+.pc-go[hidden]{display:none}
+.pc-notice{padding:9px 16px;font-size:13px;color:var(--soft);background:var(--wait-bg);border-bottom:1px solid var(--line)}
+.pc-notice[hidden]{display:none}
+.pc-screen{position:relative;width:100%;background:color-mix(in srgb,var(--raise) 70%,var(--bg));overflow:hidden;outline:0;transition:opacity .3s}
+.pc-screen.idle{opacity:.6}
+.pc-screen.drive{cursor:crosshair;box-shadow:inset 0 0 0 2px var(--wait)}
+.pc-screen:focus-visible{box-shadow:inset 0 0 0 3px var(--wait)}
+.pc-img{display:block;width:100%;height:100%;object-fit:fill;user-select:none;-webkit-user-drag:none}
+.pc-img[hidden]{display:none}
+.pc-veil{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:20px;text-align:center;font-size:13.5px;line-height:1.45;color:var(--soft)}
+.pc-veil[hidden]{display:none}
+.pc-veil strong{font-size:15px;font-weight:650;color:var(--fg)}
+.pc-veil span{max-width:38ch}
+.pc-veil code{margin-top:4px;padding:5px 10px;border-radius:9px;background:var(--sunk);color:var(--fg);font-size:12.5px;user-select:all;overflow-wrap:anywhere}
+.pc-tap{position:absolute;width:22px;height:22px;margin:-11px 0 0 -11px;border-radius:50%;border:2px solid var(--wait);pointer-events:none;animation:pctap .5s cubic-bezier(.23,1,.32,1) forwards}
+@keyframes pctap{from{opacity:1;scale:.4}to{opacity:0;scale:1.7}}
+.pc-now{display:flex;align-items:center;gap:10px;min-height:48px;padding:10px 14px;border-top:1px solid var(--line);font-size:14px;color:var(--fg)}
+.pc-face{display:grid;flex:none}
+.pc-line{min-width:0;overflow-wrap:anywhere}
+.pc-line.enter{animation:curin .3s ease-out}
+.pc-act{display:flex;justify-content:center}
+.pc-act .pill-btn{margin-top:0}
+.pc-act .pill-btn[hidden]{display:none}
+.pc[data-state="driving"] .pc-act .pill-btn{background:var(--wait-bg);color:var(--wait)}
+.pc-tools{display:flex;flex-direction:column;gap:10px}
+.pc-tools[hidden]{display:none}
+.pc-type{display:flex;gap:8px}
+.pc-type .input{flex:1;min-width:0}
+.pc-keys{display:flex;flex-wrap:wrap;gap:8px}
+.pc-key{min-height:40px;padding:0 14px;border-radius:99px;background:var(--raise);box-shadow:var(--ring);font-size:13.5px;transition:background-color .15s,scale .12s}
+.pc-key:hover{background:color-mix(in srgb,var(--fg) 6%,var(--raise))}
+.pc-key:active{scale:.96}
+.pg-body .pc .pr-note{margin:0 4px}
+.pc-h{margin:12px 4px 8px;font-size:13px;font-weight:600;color:var(--muted)}
+.pc-trail{list-style:none;margin:0;padding:0}
+.pc-trail li{display:flex;gap:12px;align-items:baseline;padding:12px 18px;font-size:14.5px}
+.pc-trail li+li{border-top:1px solid var(--line)}
+.pc-trail li span{min-width:0;overflow-wrap:anywhere}
+.pc-trail small{margin-left:auto;max-width:45%;color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(pointer:coarse){.pc-key{min-height:44px}.pc-go{height:36px}.pc-url{height:36px}}

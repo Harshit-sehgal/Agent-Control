@@ -7,20 +7,21 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=8bbac178a9';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=8bbac178a9';
-import {requestOfMessage} from './bot-browser.js?v=8bbac178a9';
-import {validHttpUrl} from './core.js?v=8bbac178a9';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=8bbac178a9';
-import {botStatus, botIsManager, chatStatus, jobOf} from './ui-company.js?v=8bbac178a9';
-import {hasJob} from './ui-profile-model.js?v=8bbac178a9';
-import {feed} from './ui-feed.js?v=8bbac178a9';
-import {askCard} from './ui-asks.js?v=8bbac178a9';
-import {face, botColor} from './ui-face.js?v=8bbac178a9';
-import {esc, icon, btn, dayLabel, tag} from './ui-kit.js?v=8bbac178a9';
-import {store, conversation, findBot, groups, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync} from './ui-store.js?v=8bbac178a9';
-import {runAnyway, startThread, answerLimit} from './ui-chat.js?v=8bbac178a9';
-import {toast} from './ui-dialogs.js?v=8bbac178a9';
+import {OFFJOB_CHOICES} from './off-job.js?v=697db3ab25';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=697db3ab25';
+import {requestOfMessage} from './bot-browser.js?v=697db3ab25';
+import {validHttpUrl} from './core.js?v=697db3ab25';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=697db3ab25';
+import {botStatus, botIsManager, chatStatus, jobOf} from './ui-company.js?v=697db3ab25';
+import {hasJob} from './ui-profile-model.js?v=697db3ab25';
+import {feed} from './ui-feed.js?v=697db3ab25';
+import {askCard} from './ui-asks.js?v=697db3ab25';
+import {face, botColor} from './ui-face.js?v=697db3ab25';
+import {esc, icon, btn, dayLabel, tag} from './ui-kit.js?v=697db3ab25';
+import {store, conversation, findBot, groups, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync} from './ui-store.js?v=697db3ab25';
+import {runAnyway, startThread, answerLimit} from './ui-chat.js?v=697db3ab25';
+import {toast} from './ui-dialogs.js?v=697db3ab25';
+import {siteChip} from './ui-computer-view.js?v=697db3ab25';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -136,7 +137,9 @@ function pillEntry({run, pill, handoffs}, conv) {
     return `<details class="cv-prog cv-done" data-pid="${esc(run.id)}"${openRuns.has(run.id) ? ' open' : ''}><summary><span>${esc(pill.text)}</span>${icon('chevron', 13)}</summary><ol class="cv-plog">${log}</ol></details>`;
   }
   const bot = bots.find(b => b.id === pill.botId) || askerOf(conv), waiting = String(run.status).startsWith('awaiting');
-  return `<div class="cv-prog"><div class="cv-live" data-run="${esc(run.id)}">${botFace(bot, nameOf(pill.botId), 22, {state: waiting ? 'waiting' : 'working'})}<span class="cv-cur" data-text="${esc(pill.text)}">${esc(pill.text)}</span></div></div>`;
+  // While a bot browses the pill carries the site, which opens the live view; while you hold the browser it says so.
+  const chip = siteChip({runId: run.id, botId: pill.botId}), text = chip?.driving ? 'You are driving' : pill.text;
+  return `<div class="cv-prog"><div class="cv-live" data-run="${esc(run.id)}">${botFace(bot, nameOf(pill.botId), 22, {state: waiting ? 'waiting' : 'working'})}<span class="cv-cur" data-text="${esc(text)}">${esc(text)}</span>${chip?.html || ''}</div></div>`;
 }
 
 /** What the runaway guard asks: Keep going or Stop, for everything bots started. */
@@ -244,8 +247,9 @@ export function renderConversation() {
   const entries = feed({items: timeline({conv, state: store.state, messages: store.messages}), state: store.state, key: conv.id});
   announce(conv, entries);
   const asker = askerOf(conv), live = entries.some(e => e.kind === 'pill' && !e.pill.done) || entries.some(e => e.kind === 'limit');
+  const chip = store.typing.has(conv.id) && !live ? siteChip({botId: asker?.id}) : null;
   const working = store.typing.has(conv.id) && !live
-    ? `<div class="cv-working">${botFace(asker, asker?.name || conv.name, 30, {state: 'working'})}<span>${esc(asker?.name || conv.name)} is working</span></div>` : '';
+    ? `<div class="cv-working">${botFace(asker, asker?.name || conv.name, 30, {state: 'working'})}<span>${chip?.driving ? 'You are driving' : `${esc(asker?.name || conv.name)} is working`}</span>${chip?.html || ''}</div>` : '';
   const html = (entries.length ? entries.map(e => entryHtml(e, conv)).join('') : welcome(conv)) + working;
   if (html === lastHtml) return;
   lastHtml = html;

@@ -15,6 +15,7 @@ import {grantRows, allGrantRows, grantUrl} from './ui-asks.js';
 import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js';
 import {toast, confirmSheet} from './ui-dialogs.js';
 import {sendChat} from './ui-chat.js';
+import {computerPage as computerView, computerLabel, keysOwned} from './ui-computer-view.js';
 import {
   MAX_NAME, hasJob, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, lookOf, newBotDefaults,
   newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, directReports, closeTarget,
@@ -128,7 +129,9 @@ function hero(bot) {
 
 function profileMain(bot) {
   // The log is not in the snapshot, so the Activity count is filled in after the page paints.
-  const value = r => (r.key === 'activity' ? `<span class="pv" data-activity-count="${esc(bot.id)}"></span>` : r.value ? `<span class="pv">${esc(r.value)}</span>` : '');
+  const value = r => (r.key === 'activity' ? `<span class="pv" data-activity-count="${esc(bot.id)}"></span>`
+    : r.key === 'computer' ? `<span class="pv" data-computer-row="${esc(bot.id)}">${esc(computerLabel(bot.id))}</span>`
+      : r.value ? `<span class="pv">${esc(r.value)}</span>` : '');
   const rows = profileRows(store.state, bot.id).map(r => `<button type="button" class="rw" data-action="profile-sub" data-id="${esc(bot.id)}" data-sub="${r.key}"><span class="rw-i">${icon(ROW_ICONS[r.key], 22)}</span><span class="w">${esc(r.label)}</span>${value(r)}${icon('chevron', 18)}</button>`).join('');
   const on = !mutedBots().includes(bot.id);
   return `${bar(roundBtn('back', `Back to ${bot.name}'s chat`, 'profile-back', {id: bot.id}), `<button type="button" class="rbtn" data-action="bot-menu" data-id="${esc(bot.id)}" aria-haspopup="menu" aria-label="More for ${esc(bot.name)}">${MORE}</button>`)}
@@ -226,8 +229,7 @@ function modelPage(bot) {
     ${picker || `<p class="pr-note">${isStaticDemo() ? 'This demo answers with built-in replies, so there is no model to pick. Models need the Node server.' : 'Add a model provider under Settings, then pick one here.'}</p>`}`;
 }
 
-const computerPage = bot => `<div class="cd"><div class="rw"><span class="w">Shared browser<small>Bots use it only with your permission, and you can take over.</small></span><span class="pv">Idle</span></div></div>
-  <p class="pr-note">When ${esc(bot.name)} opens a page, you can watch it here. Nothing is running now.</p>`;
+const computerPage = bot => computerView(bot, {faceOf: state => faceOf(bot, 22, {state, motion: state !== 'awake'})});
 
 function teamPage(bot) {
   const reports = directReports(store.state, bot.id);
@@ -282,7 +284,8 @@ export function profileView(route) {
   const bot = findBot(route.profile);
   if (!bot) return `<section class="pg pr">${bar(roundBtn('back', 'Back', 'back-to-list', {}))}<div class="pg-body pr-body"><p class="pr-note">That bot is no longer here.</p></div></section>`;
   const page = SUBS[route.sub];
-  if (!page || (route.sub === 'edit' && !canWrite())) { setTimeout(() => fillActivityCount(bot.id), 0); return `<section class="pg pr" data-bot="${esc(bot.id)}">${profileMain(bot)}</section>`; }
+  // Atlas has no Computer row, so a typed #profile/atlas/computer lands on its profile.
+  if (!page || (route.sub === 'edit' && !canWrite()) || (route.sub === 'computer' && primaryOf(store.state)?.id === bot.id)) { setTimeout(() => fillActivityCount(bot.id), 0); return `<section class="pg pr" data-bot="${esc(bot.id)}">${profileMain(bot)}</section>`; }
   return `<section class="pg pr" data-bot="${esc(bot.id)}">${subBar(bot, SUB_TITLES[route.sub])}<div class="pg-body pr-body">${page(bot)}</div></section>`;
 }
 
@@ -445,6 +448,8 @@ export function wirePages() {
       if (first && ((ev.shiftKey && (at === first || !dlg.contains(at))) || (!ev.shiftKey && (at === last || !dlg.contains(at))))) { ev.preventDefault(); (ev.shiftKey ? last : first).focus(); }
       return;
     }
+    // While you drive a bot's tab, Esc is the page's key.
+    if (keysOwned(ev.target)) return;
     if (ev.key !== 'Escape' || ev.defaultPrevented || !store.state || document.getElementById('modal')?.classList.contains('hidden') === false) return;
     const route = store.route;
     if (!(route.profile || route.newBot || route.company || route.activity || typeof route.settings === 'string')) return;
