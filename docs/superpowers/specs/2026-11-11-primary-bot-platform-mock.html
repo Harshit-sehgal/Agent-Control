@@ -86,7 +86,7 @@ kbd{font-family:var(--body);font-size:11px;color:var(--muted);border:1px solid v
 .fab-bot{top:calc(16px + env(safe-area-inset-top,0px));right:max(18px,env(safe-area-inset-right,0px));width:46px;height:46px;justify-content:center}
 .fab-bot svg{width:20px;height:20px}
 .fab-me{top:calc(16px + env(safe-area-inset-top,0px));left:max(18px,env(safe-area-inset-left,0px));width:46px;height:46px;justify-content:center;padding:0}
-.ini{width:100%;height:100%;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:15px;letter-spacing:.02em;color:color-mix(in srgb,var(--fg) 82%,transparent);background:linear-gradient(180deg,color-mix(in srgb,var(--fg) 14%,var(--raise)),var(--raise));box-shadow:inset 0 0 0 1px var(--line)}
+.ini{width:100%;height:100%;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:15px;letter-spacing:.02em;color:color-mix(in srgb,var(--fg) 82%,transparent);background:color-mix(in srgb,var(--fg) 12%,var(--raise));box-shadow:none}
 .fab-me .badge,.fab-new .badge{position:absolute;top:-3px;right:-3px}
 .bbar{position:fixed;z-index:20;left:50%;translate:-50% 0;bottom:calc(16px + env(safe-area-inset-bottom,0px));width:min(720px,calc(100% - 32px));display:flex;gap:10px;align-items:center}
 .bbar .fab{position:relative}
@@ -211,6 +211,7 @@ button.tog:hover{background:var(--sunk);color:var(--fg)}
 .brow:hover .prof,.prof:focus-visible{opacity:1}
 @media (hover:none){.prof{opacity:1}}
 .btree>li>.brow .bmain b{font-family:var(--display);font-size:20px;letter-spacing:-.015em}
+.btree.top>li>.brow .bmain b{font-size:17px}
 /* drawer */
 .ph .you{flex:1}
 .switch{display:flex;align-items:center;gap:12px;width:100%;padding:12px 14px;border-radius:var(--r);background:var(--sunk);text-align:left;font-weight:500}
@@ -334,6 +335,28 @@ button.tog:hover{background:var(--sunk);color:var(--fg)}
   .shead{top:calc(-12px - env(safe-area-inset-top,0px))}
   .srow.acct{flex-wrap:wrap;padding:14px 0}.srow.acct .w{flex:1 1 calc(100% - 60px)}.srow.acct .btn{flex:1}
 }
+/* phone settings: Grok-style grouped cards */
+.pset{overflow:auto;padding:calc(14px + env(safe-area-inset-top,0px)) 16px 40px;display:flex;flex-direction:column;gap:26px}
+.pset>*{flex:none}
+.pset .xbig{width:48px;height:48px;border-radius:50%;display:grid;place-items:center;background:var(--raise);box-shadow:inset 0 0 0 1px var(--line);color:var(--fg);margin-bottom:6px}
+.pset .xbig .i{width:22px;height:22px}
+.pset h4{font-size:13.5px;font-weight:500;color:var(--muted);margin:0 0 9px 18px}
+.pcard{background:var(--raise);border-radius:22px;box-shadow:inset 0 0 0 1px var(--line);overflow:hidden}
+.prow{display:flex;align-items:center;gap:14px;width:100%;min-height:62px;padding:15px 18px;text-align:left;font-size:16.5px;color:var(--fg);position:relative;transition:background .15s}
+.prow+.prow::before{content:'';position:absolute;left:18px;right:0;top:0;border-top:1px solid var(--line)}
+button.prow:active{background:var(--sunk)}
+.prow .w{flex:1;min-width:0}.prow small{display:block;font-size:13.5px;color:var(--muted);margin-top:3px;line-height:1.35}
+.prow .pv{color:var(--muted);font-size:15.5px;white-space:nowrap}
+.prow>.chev{width:18px;height:18px;color:var(--muted);flex:none}
+.prow .ini.av{width:54px;height:54px;font-size:18px}
+.prow.acct{padding:18px}
+@media (max-width:640px){.sbody .scard{border-radius:22px;padding:4px 18px}.sbody .srow{font-size:15.5px;min-height:60px}.sbody .shead .x{width:42px;height:42px;border-radius:50%;background:var(--raise);box-shadow:inset 0 0 0 1px var(--line)}
+  .home .hh,.hint{display:none}.home{padding-top:72px}
+  .prof{display:none}
+  .fab-me{box-shadow:none;background:none}
+  .newv .lineup{flex-wrap:nowrap;justify-content:flex-start;overflow-x:auto;scrollbar-width:none;margin:0;padding:4px 2px;min-height:0;gap:12px}
+  .newv .lineup .who{flex:none}
+  .has-composer .thead{padding-right:0}}
 /* desktop split: bots on the left, the chat on the right */
 .is-desk .fab-me,.is-desk .bbar,.is-desk .fab-bot{display:none!important}
 .split{display:grid;grid-template-columns:292px 1fr;height:100%}
@@ -690,6 +713,7 @@ function treeHome(){
   const row=(b,k,open,flat)=>{const st=stateOf(b);return `<div class="brow">${!flat&&k.length?`<button class="tog" data-tog="${b.id}" aria-expanded="${open}" aria-label="${b.name}'s team">${IC.chev}</button>`:'<span class="tog"></span>'}<button class="bmain" data-dm="${b.id}" aria-label="Message ${b.name}">${face(b,b.id==='atlas'&&!flat?'m':'',st==='waiting'?'wait':undefined)}<span class="w"><b>${b.name}</b><small>${esc(roleOf(b)==='Bot'?short(b):`${roleOf(b)} · ${kidsOf(b.id).length} ${kidsOf(b.id).length===1?'report':'reports'}`)}</small></span>${st==='working'?'<span class="st">working</span>':st==='waiting'?'<span class="st wait">waiting on you</span>':''}</button><button class="prof" data-bot="${b.id}">Profile</button>${pinMark('bots',b.id)}</div>`};
   const node=(b,i)=>{const k=arrange(null,'tree:'+b.id,kidsOf(b.id)),open=!!S.open[b.id];
     return `<li class="${open?'open':''}" style="--i:${i}" data-sid="${b.id}">${row(b,k,open,false)}${k.length||isMgr(b)||b.id==='atlas'?`<div class="kids" ${open?'':'inert'}><ul data-sortkey="tree:${b.id}">${k.map(node).join('')}</ul></div>`:''}</li>`};
+  if(isPin('bots','atlas'))return `${shelf()}<section><ul class="btree top" data-sortkey="tree:atlas">${arrange(null,'tree:atlas',kidsOf('atlas')).map(node).join('')}</ul></section>`;
   return `${shelf()}<section><ul class="btree">${node(by('atlas'),0)}</ul></section>`;
 }
 function chatsHome(){
@@ -737,7 +761,7 @@ function newView(){
   return `<div class="tv"><div class="view" style="padding-bottom:20px"><div class="thead"><button class="back" data-home>${IC.back}Bots</button><div class="grow"></div><button class="thbtn" data-threads aria-label="Your threads" title="Your threads (T)"><svg class="i" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-5A8 8 0 1 1 21 12z"/><path d="M8.5 10h7M8.5 13.5h4.5"/></svg>${(n=>n?`<span class="badge">${n}</span>`:'')(new Set(pending().map(x=>x.thread)).size)}</button></div>
     <div class="newv"><div class="lineup" id="lineup">${line.map(b=>`<div class="who ${S.preview===b.id?'on':''}" data-w="${b.id}">${face(b,b.id==='atlas'?'l':'m',S.preview===b.id?'wake':b.id==='atlas'?'':'sleep')}<span>${b.name}</span></div>`).join('')}</div>
     <h2>What should the company get done?</h2><p class="preview" id="preview">Atlas is listening. The bot whose job it is will wake up.</p>
-    <div class="boxwrap"><div class="mention" id="mention" hidden></div><form data-form class="box"><input name="q" placeholder="Ask for anything. Type @ to pick a bot." autocomplete="off" aria-label="Message" data-preview><button class="send" aria-label="Send">${IC.send}</button></form></div>
+    <div class="boxwrap"><div class="mention" id="mention" hidden></div><form data-form class="box"><input name="q" placeholder="Ask anything. @ picks a bot." autocomplete="off" aria-label="Message" data-preview><button class="send" aria-label="Send">${IC.send}</button></form></div>
     <div class="chips">
       <button class="chip" data-try="Find recent papers on small language models and write me a short summary">Find papers and summarise them</button>
       <button class="chip" data-try="Plan my week around any client emails in my inbox">Plan my week from my inbox</button>
@@ -841,7 +865,20 @@ function settingsBody(k){const look=$('app').dataset.look,th=document.documentEl
     return `<p class="sub">Bots ask the first time they need something. What you answered is here. Paying or spending money never gets Always allow.</p>`+card(rows||'<div class="srow"><span class="w sub">Nothing granted yet.</span></div>','Granted')}
   if(k==='usage')return `<div class="scard pad">${usageHTML()}</div>`;
   if(k==='computer')return card(srow('Server','<span class="ok">This laptop</span>','Bots run while it is awake')+srow('Move to Oracle VM','<span class="sub">Planned</span>','Keeps bots running when the laptop sleeps')+srow('Shared browser','<span class="sub">Asleep</span>','Bots use it with your permission; you can take over'),'Where bots run')}
+function phoneSettings(){
+  const pr=(set,l,sub,v)=>`<button class="prow" data-set="${set}"><span class="w">${l}${sub?`<small>${sub}</small>`:''}</span>${v?`<span class="pv">${v}</span>`:''}${IC.chev}</button>`;
+  const rules=Object.values(S.grants).reduce((n,g)=>n+Object.keys(g).length,0),th=document.documentElement.getAttribute('data-theme')||'';
+  const hv={desks:'Desks',tree:'List',chats:'Chats',orbit:'Orbit'}[S.def]||'List';
+  return `<nav class="pset" aria-label="Settings"><button class="xbig" data-setclose aria-label="Close settings">${IC.x}</button>
+  <div class="pcard"><button class="prow acct" data-set="general"><span class="ini av">${initials(ME.name)}</span><span class="w">${esc(ME.name)}<small>Signed in with Google</small></span>${IC.chev}</button>
+    ${pr('usage','Usage','','42%')}${pr('models','Models and keys','Claude Max, ChatGPT Plus, OpenAI key')}</div>
+  <div class="pcard">${pr('conn','Connect apps','Google, MCP servers')}</div>
+  <section><h4>Bots</h4><div class="pcard">
+    <div class="prow"><span class="w">Bots running<small>${S.paused?'Everything is paused':'Switch off to pause every bot at once'}</small></span><button class="switch mini" role="switch" aria-checked="${!S.paused}" data-pause aria-label="Bots running"><span class="knob" aria-hidden="true"></span></button></div>
+    ${pr('perm','Permissions',`${rules} ${rules===1?'rule':'rules'} · paying always asks`)}${pr('computer','Computer','Where your bots run','This laptop')}</div></section>
+  <section><h4>App</h4><div class="pcard">${pr('look','Appearance',`${hv} home · ${th===''?'follows system':th==='light'?'light':'dark'}`)}</div></section></nav>`}
 function settingsHTML(){const k=S.set,phone=matchMedia('(max-width:640px)').matches,showNav=!phone||!k,showBody=!phone||!!k,cur=k||'general';
+  if(phone&&!k)return phoneSettings();
   return `${showNav?`<nav class="snav" aria-label="Settings sections">${phone?`<div class="shead"><h2>Settings</h2><button class="x" data-setclose aria-label="Close">${IC.x}</button></div>`:''}${SECTS.map(([v,l])=>`<button class="${!phone&&cur===v?'on':''}" data-set="${v}" ${!phone&&cur===v?'aria-current="page"':''}>${SETI[v]}<span>${l}</span>${phone?IC.chev:''}</button>`).join('')}</nav>`:''}
   ${showBody?`<div class="sbody"><div class="shead">${phone?`<button class="x" data-setback aria-label="Back to settings">${IC.back}</button>`:''}<h2>${SECTS.find(x=>x[0]===cur)[1]}</h2>${phone?'':''}<button class="x" data-setclose aria-label="Close">${IC.x}</button></div>${settingsBody(cur)}</div>`:''}`}
 function openSettings(k){S.set=k||(matchMedia('(max-width:640px)').matches?null:'general');S.left=false;S.panel=null;renderOver();$('setdlg').innerHTML=settingsHTML();$('setwrap').hidden=false;if(!matchMedia('(max-width:640px)').matches)setTimeout(()=>$('setdlg').querySelector('.on')?.focus({preventScroll:true}),50)}
@@ -1024,7 +1061,7 @@ document.addEventListener('click',e=>{
   else if(d.pick){const i=$('root').querySelector('input[name=q]');i.value=i.value.replace(/@\w*$/,'@'+by(d.pick).name+' ');$('mention').hidden=true;i.focus();i.dispatchEvent(new Event('input',{bubbles:true}))}
   else if(d.hireFrom){const t=S.threads.find(x=>x.id===d.hireFrom);const nb={id:'b'+Date.now(),name:'Concierge',role:'Bot',boss:'ops',tint:'#e7b3f0',job:'Books tables, tickets and travel.',kw:['book','table','ticket','travel'],mem:['Hired by Atlas from your thread']};BOTS.push(nb);t.owner=nb.id;
     t.items.push({k:'note',text:'Atlas hired Concierge, reporting to Ops lead.'});t.items.push({k:'reply',bot:nb.id,text:'Hi, bookings are mine now. Which restaurant, and what time on Friday?'});log('atlas','bots','hired Concierge under Ops lead',t.id);render()}
-  else if(d.pause!==undefined){S.paused=!S.paused;log('atlas','bots',S.paused?'was told to pause all bots':'was told to resume all bots');render()}
+  else if(d.pause!==undefined){S.paused=!S.paused;log('atlas','bots',S.paused?'was told to pause all bots':'was told to resume all bots');render();redrawSettings()}
 });
 document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[role=button][data-bot]')){e.preventDefault();e.target.click()}});
 document.addEventListener('submit',e=>{e.preventDefault();const f=e.target;
