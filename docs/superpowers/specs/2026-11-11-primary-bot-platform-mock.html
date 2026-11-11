@@ -59,6 +59,12 @@ kbd{font-family:var(--body);font-size:11px;color:var(--muted);border:1px solid v
 .row .k{margin-left:auto}
 .new{color:var(--fg);font-weight:500}
 .label{font-size:11.5px;color:var(--muted);font-weight:500;padding:14px 8px 4px}
+.sec-h{display:flex;align-items:center;gap:4px;width:100%;text-align:left;border-radius:7px;padding:12px 6px 4px 4px}
+.sec-h:hover{color:var(--fg)}
+.sec-h .chev{width:13px;height:13px;transform:rotate(90deg);transition:transform .25s var(--ease)}
+.sec-h[aria-expanded="false"] .chev{transform:none}
+.sec-h .badge{margin-left:auto}
+.sec-h .cnt{margin-left:auto;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
 .badge{background:var(--violet);color:#fff;border-radius:99px;font-size:11px;font-weight:600;padding:0 6px;line-height:18px}
 .state{width:7px;height:7px;border-radius:50%;flex:none}
 .state.working{background:var(--mint);animation:pulse 1.4s var(--ease) infinite}
@@ -243,10 +249,10 @@ select.sel{border:1px solid var(--line2);border-radius:8px;background:var(--rais
     <button class="row" data-go="palette"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg><span class="t">Jump to…</span><kbd class="k">⌘K</kbd></button>
     <button class="row" data-panel="activity"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg><span class="t">Activity</span></button>
     <button class="row" data-panel="company"><svg class="i" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="5" rx="1.5"/><rect x="3" y="16" width="6" height="5" rx="1.5"/><rect x="15" y="16" width="6" height="5" rx="1.5"/><path d="M12 8v4M6 16v-2h12v2"/></svg><span class="t">Company</span></button>
-    <div class="label">Bots</div>
+    <button class="label sec-h" data-sec="bots" aria-expanded="true" aria-controls="strip"><svg class="i chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg><span>Bots</span><span class="cnt" id="cnt-bots"></span></button>
     <div class="strip" id="strip"></div>
     <div id="needs"></div>
-    <div class="label">Threads</div>
+    <button class="label sec-h" data-sec="threads" aria-expanded="true" aria-controls="threads"><svg class="i chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg><span>Threads</span><span class="cnt" id="cnt-threads"></span></button>
     <div id="threads"></div>
     <div class="foot"><button class="row" data-panel="settings"><span class="face s you"><i></i><i></i></span><span class="t">You</span><svg class="i" viewBox="0 0 24 24" aria-label="Settings"><circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M4.2 7.5l2 1.2M17.8 15.3l2 1.2M4.2 16.5l2-1.2M17.8 8.7l2-1.2"/></svg></button></div>
   </aside>
@@ -272,7 +278,7 @@ const by=id=>BOTS.find(b=>b.id===id);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const short=b=>b.job.split(/[.:]/)[0];
 const chain=id=>{const o=[];let b=by(id);while(b){o.unshift(b);b=b.boss&&by(b.boss)}return o};
-const S={threads:[],cur:null,panel:null,tab:'overview',busy:new Set(),paused:false,filter:'outside',actAll:null,palIdx:0,hire:false,palBots:false,recent:['mail','sch','plan'],
+const S={threads:[],cur:null,panel:null,tab:'overview',busy:new Set(),paused:false,filter:'outside',actAll:null,palIdx:0,hire:false,palBots:false,col:(()=>{try{return JSON.parse(localStorage.getItem('sidebar-col')||'{}')}catch(e){return {}}})(),recent:['mail','sch','plan'],
   grants:{mail:{'Gmail: send email':'always','Gmail: read':'always'},plan:{'Google Calendar: edit':'ask'},ledger:{'Pay or spend money':'ask'}},activity:[]};
 const faceState=b=>S.busy.has(b.id)?'read':(b.id==='atlas'?'':'sleep');
 const face=(b,size='',st='')=>`<span class="face ${size} ${b.role!=='Bot'?'m':''} ${st}" style="--t:${b.tint};--d:${(b.name.length%5)*.8}s" aria-hidden="true"><i></i><i></i></span>`;
@@ -310,12 +316,15 @@ function routeFor(t){
 /* ---------- sidebar ---------- */
 function renderSide(){
   const p=pending();
-  $('needs').innerHTML=p.length?`<div class="label">Needs you</div>`+p.map(a=>`<button class="row" data-open="${a.thread}">${face(by(a.bot),'s')}<span class="t">${by(a.bot).name}: ${esc(a.short)}</span><span class="badge">1</span></button>`).join(''):'';
+  $('needs').innerHTML=p.length?`<button class="label sec-h" data-sec="needs" aria-expanded="${!S.col.needs}" aria-controls="needsList"><svg class="i chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg><span>Needs you</span><span class="badge">${p.length}</span></button><div id="needsList" ${S.col.needs?'hidden':''}>`+p.map(a=>`<button class="row" data-open="${a.thread}">${face(by(a.bot),'s')}<span class="t">${by(a.bot).name}: ${esc(a.short)}</span></button>`).join('')+'</div>':'';
   $('threads').innerHTML=S.threads.map(t=>{const o=t.owner&&by(t.owner);const st=p.some(a=>a.thread===t.id)?'waiting':(t.running?'working':'');
     return `<button class="row ${S.cur===t.id?'on':''}" data-open="${t.id}">${o?face(o,'s'):'<span class="face s" style="--t:var(--line2)"><i></i><i></i></span>'}<span class="t">${esc(t.title)}</span>${st?`<span class="state ${st}" title="${st==='waiting'?'Waiting on you':'Working'}"></span>`:''}</button>`}).join('');
   const order=[...S.recent,...BOTS.map(b=>b.id).filter(id=>!S.recent.includes(id))].map(by).filter(Boolean);
   const shown=order.slice(0,5);
   $('strip').innerHTML=shown.map(b=>{const st=S.busy.has(b.id)?'working':(b.id==='atlas'?'':'');return `<button class="row ${S.threads.find(t=>t.id===S.cur)?.dm===b.id?'on':''}" data-dm="${b.id}" title="Message ${b.name}">${face(b,'s',faceState(b))}<span class="t">${b.name}<span class="job"> · ${esc(b.role==='Bot'?short(b):b.role)}</span></span>${st?'<span class="state working" title="Working"></span>':''}</button>`}).join('')+`<button class="row" data-allbots><span class="face s" style="--t:var(--line2)"><i></i><i></i></span><span class="t" style="color:var(--muted)">All ${order.length} bots…</span></button>`;
+  $('strip').hidden=!!S.col.bots;$('threads').hidden=!!S.col.threads;
+  $('cnt-bots').textContent=S.col.bots?BOTS.length:'';$('cnt-threads').textContent=S.col.threads?S.threads.length:'';
+  document.querySelectorAll('.sec-h').forEach(h=>h.setAttribute('aria-expanded',String(!S.col[h.dataset.sec])));
   document.querySelectorAll('.side [data-panel]').forEach(b=>b.classList.toggle('on',S.panel===b.dataset.panel));
   document.querySelector('.side [data-go="home"]').classList.toggle('on',!S.cur);
   $('pause').classList.toggle('paused',S.paused);
@@ -500,6 +509,7 @@ document.addEventListener('click',e=>{
   if(e.target.id==='pal'){closePal();return}
   if(e.target.id==='scrim'){S.panel=null;$('app').classList.remove('navopen');render();return}
   const el=e.target.closest('button');if(!el)return;const d=el.dataset,app=$('app');
+  if(d.sec){S.col[d.sec]=!S.col[d.sec];try{localStorage.setItem('sidebar-col',JSON.stringify(S.col))}catch(e){}renderSide();return}
   if(d.pal!==undefined){const it=palItems($('palIn').value)[+d.pal];closePal();it&&it.go();return}
   if(d.go==='home'){S.cur=null;app.classList.remove('navopen');render()}
   else if(d.go==='palette'){app.classList.remove('navopen');openPal()}

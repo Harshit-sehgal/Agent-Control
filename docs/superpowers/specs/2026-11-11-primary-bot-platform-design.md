@@ -103,6 +103,7 @@ This revision replaces groups. Where it conflicts with anything below, this sect
   - *Replies stay with the owner*: a follow-up in an existing thread goes to the bot that owns it, with no re-routing, unless it @mentions someone else.
   - The owner's face in the thread header opens that bot's profile; the faces on the home screen open direct threads; "Message <bot>" on a profile opens its direct thread.
 - The sidebar label is **Bots**, above Needs you.
+- **Every sidebar section folds.** Bots, Needs you and Threads each have a header with a chevron that collapses or expands the section. A collapsed section shows its count in the header (Needs you keeps its violet badge, so a waiting ask is never hidden). Which sections are folded is remembered per device. Fixed rows (New thread, Jump to…, Activity, Company, Settings) do not fold.
 - **Bot profile has three tabs:** Overview (job; model, manager, automatic context, team; permissions with Always allow / Ask each time / Deny), Memory (lines with Forget, plus "Tell <bot> something to remember"), Activity (local to the bot).
 - **Hiring** happens inline at the bottom of Company: "What is this bot for?" plus a manager picker. Moving a bot is a Manager picker on its profile.
 - Phones: the sidebar slides in from the left via the menu button; panels fill the screen.
