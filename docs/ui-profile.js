@@ -5,21 +5,21 @@
  *
  * Pages repaint only when the route changes, so each in-place change (a switch, a
  * forgotten note, a picked colour) updates its own node instead. */
-import {SHAPES, COLORS, face} from './ui-face.js?v=32183ec508';
-import {botStatus, botIsManager} from './ui-company.js?v=32183ec508';
-import {primaryOf} from './company.js?v=32183ec508';
-import {esc, icon, field, textInput, clock, roundBtn, switchBtn} from './ui-kit.js?v=32183ec508';
-import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=32183ec508';
-import {GRANT_LABELS} from './asks.js?v=32183ec508';
-import {grantRows, allGrantRows, grantUrl} from './ui-asks.js?v=32183ec508';
-import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=32183ec508';
-import {toast, confirmSheet} from './ui-dialogs.js?v=32183ec508';
-import {sendChat} from './ui-chat.js?v=32183ec508';
-import {computerPage as computerView, computerLabel, keysOwned} from './ui-computer-view.js?v=32183ec508';
+import {SHAPES, COLORS, face} from './ui-face.js?v=a818ff62f8';
+import {botStatus, botIsManager} from './ui-company.js?v=a818ff62f8';
+import {primaryOf} from './company.js?v=a818ff62f8';
+import {esc, icon, field, textInput, clock, roundBtn, switchBtn} from './ui-kit.js?v=a818ff62f8';
+import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=a818ff62f8';
+import {GRANT_LABELS} from './asks.js?v=a818ff62f8';
+import {grantRows, allGrantRows, grantUrl} from './ui-asks.js?v=a818ff62f8';
+import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=a818ff62f8';
+import {toast, confirmSheet} from './ui-dialogs.js?v=a818ff62f8';
+import {sendChat} from './ui-chat.js?v=a818ff62f8';
+import {computerPage as computerView, computerLabel, keysOwned} from './ui-computer-view.js?v=a818ff62f8';
 import {
   MAX_NAME, hasJob, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, lookOf, newBotDefaults,
   newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, directReports, closeTarget,
-} from './ui-profile-model.js?v=32183ec508';
+} from './ui-profile-model.js?v=a818ff62f8';
 
 const el = id => document.getElementById(id);
 const MUTED_KEY = 'ac-muted';

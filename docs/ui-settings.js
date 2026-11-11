@@ -7,19 +7,19 @@
  * team, agents, data) load the existing admin forms from ui-admin.js into the body.
  *
  * The lists behind it are pure and tested in ui-profile-model.js. */
-import {face} from './ui-face.js?v=32183ec508';
-import {botStatus} from './ui-company.js?v=32183ec508';
-import {primaryOf} from './company.js?v=32183ec508';
-import {esc, icon, btn, empty, note, roundBtn, switchBtn} from './ui-kit.js?v=32183ec508';
-import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, loadLocal, applyTheme, themeChoice, THEMES} from './ui-store.js?v=32183ec508';
-import {isDesk, initials, pageFrame, HIDDEN_KEY} from './ui-shell.js?v=32183ec508';
-import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=32183ec508';
-import {faceOf, activityBlocks, grantsHtml, grantNote} from './ui-profile.js?v=32183ec508';
-import {allGrantRows} from './ui-asks.js?v=32183ec508';
+import {face} from './ui-face.js?v=a818ff62f8';
+import {botStatus} from './ui-company.js?v=a818ff62f8';
+import {primaryOf} from './company.js?v=a818ff62f8';
+import {esc, icon, btn, empty, note, roundBtn, switchBtn} from './ui-kit.js?v=a818ff62f8';
+import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, loadLocal, applyTheme, themeChoice, THEMES} from './ui-store.js?v=a818ff62f8';
+import {isDesk, initials, pageFrame, HIDDEN_KEY} from './ui-shell.js?v=a818ff62f8';
+import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=a818ff62f8';
+import {faceOf, activityBlocks, grantsHtml, grantNote} from './ui-profile.js?v=a818ff62f8';
+import {allGrantRows} from './ui-asks.js?v=a818ff62f8';
 import {
   ACTIVITY_FILTERS, activityUrl, companyTree, weekUsage, settingsSections, resolveSection,
-} from './ui-profile-model.js?v=32183ec508';
-import {COLORS} from './ui-face.js?v=32183ec508';
+} from './ui-profile-model.js?v=a818ff62f8';
+import {COLORS} from './ui-face.js?v=a818ff62f8';
 
 const el = id => document.getElementById(id);
 const ICONS = {general: 'gear', look: 'half', models: 'key', conn: 'plug', perm: 'shield', usage: 'chart', computer: 'monitor'};

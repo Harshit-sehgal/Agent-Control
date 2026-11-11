@@ -9,7 +9,7 @@
  * Two lists live in the workspace state:
  *   state.asks   [{id, botId, runId, chatKey, action, target, detail, body?, argsHash?, grantScope,
  *                  status 'pending'|'allowed'|'declined', scope 'once'|'always'|null,
- *                  createdAt, answeredAt?, expiresAt?, expired?, requestId?, implies?}]
+ *                  createdAt, answeredAt?, expiresAt?, expired?, requestId?, implies?, covers?}]
  *   state.grants [{botId, action, scope, choice 'always'|'ask'|'deny', at}]
  *
  * The basic kit (ask a bot, make a bot, set a schedule) is never asked about;
@@ -43,8 +43,11 @@ export const GRANT_CHOICES = ['always', 'ask', 'deny'];
 /** The words on the ask card's buttons and the grant picker, verbatim. */
 export const ASK_ANSWER_LABELS = {decline: 'Decline', allow: 'Allow', always: 'Always allow for this bot'};
 export const GRANT_LABELS = {always: 'Always allow', ask: 'Ask each time', deny: 'Deny'};
-/** A payment is only ever Decline or Allow, and a grant for it is Ask each time or Deny. */
-export const askChoices = action => (action === 'spend' ? ['decline', 'allow'] : [...ASK_ANSWERS]);
+/** A payment is only ever Decline or Allow, and a grant for it is Ask each time or Deny. So is an ask that
+ * covers more than one site: a grant is for one site, so no single Always allow can mean what it shows. */
+export const askChoices = (action, {acrossSites = false} = {}) => (action === 'spend' || acrossSites ? ['decline', 'allow'] : [...ASK_ANSWERS]);
+/** Does this ask cover more than one site? `covers` is every (action, scope) pair one ask stands for. */
+export const acrossSites = ask => new Set([ask?.grantScope, ...(ask?.covers || []).map(c => c?.scope)].filter(Boolean)).size > 1;
 export const grantChoices = action => (action === 'spend' ? ['ask', 'deny'] : [...GRANT_CHOICES]);
 
 export const ASK_EXPIRY_MS = 24 * 3600000;
@@ -151,12 +154,13 @@ export function decide(state, bot, needs) {
     else if (v.verdict === 'ask') rest.push({...need, scope: v.scope});
   }
   if (!ask) return {verdict: 'allow'};
-  // Always allow on the riskiest ask also covers the rest of what the same request needs on that site.
-  return {verdict: 'ask', need: ask, implies: rest.filter(n => n.action !== 'spend' && n.scope === ask.scope).map(n => ({action: n.action, scope: n.scope}))};
+  // `asked`: everything one ask must stand for, riskiest first. Always allow on the riskiest ask also
+  // covers the rest of what the same request needs on that site.
+  return {verdict: 'ask', need: ask, asked: [ask, ...rest], implies: rest.filter(n => n.action !== 'spend' && n.scope === ask.scope).map(n => ({action: n.action, scope: n.scope}))};
 }
 
 /** Create a pending ask. An ask from an unattended run (nobody typed in it) lapses after 24 hours. */
-export function createAsk(state, {botId, runId = null, chatKey = null, action, target = '', detail = '', body = '', argsHash = '', unattended = false, requestId = null, implies = [], now = iso(), makeId = () => crypto.randomUUID()} = {}) {
+export function createAsk(state, {botId, runId = null, chatKey = null, action, target = '', detail = '', body = '', argsHash = '', unattended = false, requestId = null, implies = [], covers = [], now = iso(), makeId = () => crypto.randomUUID()} = {}) {
   if (!isAskAction(action)) fail(`"${String(action ?? '').slice(0, 60)}" is not something a bot asks about.`);
   if (!botId) fail('An ask needs the bot that is asking.');
   const ask = {
@@ -169,6 +173,7 @@ export function createAsk(state, {botId, runId = null, chatKey = null, action, t
     ...(unattended ? {expiresAt: new Date(Date.parse(now) + ASK_EXPIRY_MS).toISOString()} : {}),
     ...(requestId ? {requestId} : {}),
     ...(implies.length ? {implies} : {}),
+    ...(covers.length > 1 ? {covers: covers.map(c => ({action: c.action, scope: c.scope || ''}))} : {}),
   };
   state.asks ??= [];
   state.asks.push(ask);
@@ -192,6 +197,7 @@ export function answerAsk(state, askId, answer, now = iso()) {
   const ask = (state.asks || []).find(a => a.id === askId);
   if (!ask) fail('Ask not found.', 404);
   if (answer === 'always' && ask.action === 'spend') fail('A payment is asked every time. Choose Allow or Decline.');
+  if (answer === 'always' && acrossSites(ask)) fail('This ask covers more than one site, and a grant is for one. Choose Allow or Decline.');
   if (ask.status !== 'pending') fail('This ask was already answered.', 409);
   ask.status = answer === 'decline' ? 'declined' : 'allowed';
   ask.scope = answer === 'always' ? 'always' : answer === 'allow' ? 'once' : null;

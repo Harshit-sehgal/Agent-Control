@@ -231,6 +231,23 @@ export function browserNeeds(request, controls = new Map()) {
   return needs;
 }
 
+/** What one ask says when it stands for several pairs: every action and every site Allow approves, as
+ * "send on a.example and b.example; open c.example". Opening a site is implied by acting on it, so a page is
+ * named only when nothing else on that site is. One pair keeps its own detail. */
+export function askedDetail(asked) {
+  const sitesOf = action => [...new Set(asked.filter(n => n.action === action).map(n => hostOf(n.target)).filter(Boolean))];
+  const acted = new Set(asked.filter(n => n.action !== BROWSER_PERMISSION).map(n => hostOf(n.target)));
+  let pairs = 0;
+  const named = [...new Set(asked.map(n => n.action))].map(action => {
+    const sites = action === BROWSER_PERMISSION ? sitesOf(action).filter(h => !acted.has(h)) : sitesOf(action);
+    pairs += sites.length;
+    if (!sites.length) return '';
+    const where = sites.join(' and ');
+    return action === BROWSER_PERMISSION ? `open ${where}` : action === 'spend' ? `pay on ${where}` : `${action} on ${where}`;
+  }).filter(Boolean);
+  return pairs > 1 ? named.join('; ') : asked[0].detail;
+}
+
 const describe = request => `${request.steps.length ? `use ${hostOf(request.url)} (${request.steps.length} step${request.steps.length === 1 ? '' : 's'})` : `read ${hostOf(request.url)}`}`;
 export const browserMessageId = id => `browser-${id}`.slice(0, 64);
 export const requestOfMessage = (state, messageId) => (state?.browserRequests || []).find(r => browserMessageId(r.id) === messageId) || null;
@@ -272,7 +289,9 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
     records.push(record);
     if (decision.verdict === 'ask') {
       const {need} = decision;
-      const asked = createAsk(state, {botId: bot.id, runId, chatKey, action: need.action, target: need.target, detail: need.detail, unattended, requestId: record.id, implies: decision.implies, now, makeId});
+      // One ask stands for every pair still needing the owner's say, and names each of them: Allow approves
+      // exactly `approved`, and an ask across sites gets no Always allow (asks.js).
+      const asked = createAsk(state, {botId: bot.id, runId, chatKey, action: need.action, target: need.target, detail: askedDetail(decision.asked), unattended, requestId: record.id, implies: decision.implies, covers: decision.asked, now, makeId});
       record.askId = asked.id;
       asks.push(asked);
     } else lines.push({id: browserMessageId(record.id), role: 'system', kind: 'browser', text: `${bot.name} wants to ${describe(record)}.`, at: now});
