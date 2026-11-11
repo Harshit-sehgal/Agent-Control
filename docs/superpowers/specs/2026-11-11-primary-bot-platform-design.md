@@ -87,7 +87,11 @@ This section wins over anything below about threads, routing or help between bot
   - Each bot's prompt lists every bot's name and job, so it knows whom to ask. It sends the message with the `bot.ask` action, which is part of the basic kit and never asks the owner. Model text adds the recipient only through `handoffTargets`.
   - The asked bot wakes, answers within its own job, and goes back to sleep. The asking bot stays responsible for the task and gives the final answer. Asking another bot is getting help; it is not handing your job away.
   - It shows where the work happens, in the same live progress pill and handoff card ("Mailroom asks Scholar: …", "Scholar to Mailroom: …"). It does not show in the asked bot's own chat. The asked bot's Activity lists it.
-  - Limits (my call): a bot-to-bot chain is at most 3 hops deep, and the same pair talks at most 3 times per task. Every message counts toward the runaway guard. A cycle (A asks B, and B asks A about the same thing) stops, and the asking bot tells the owner.
+  - Limits (owner asked to relax them, 2026-11-11). They are checkpoints, not walls. When one is reached, the bots pause and a card asks the owner **Keep going** (another round of the same size) or **Stop**. Nothing is lost.
+    - A bot-to-bot chain can go 6 bots deep.
+    - The same two bots can exchange 12 messages per task.
+    - One task can use 60 bot-to-bot messages in total.
+    - A loop gets a checkpoint only when the same question goes around three times with no new answer. Bots asking each other back and forth with progress is fine.
   - Cost: one model call for the asked bot per message, never a broadcast.
 
 ## Company model and threads (owner revision, 2026-11-11)
@@ -257,7 +261,7 @@ Threads:
 
 0. **Commit or branch the current uncommitted work** on `main` (40 files) before anything else. Owner's call how.
 1. **Remove X-engage.** Delete the footprint mapped below, delete/rewrite its tests, update README, AGENTS.md, COORDINATION.md, BUILD-PLAN. About 1,600-1,900 source lines.
-2. **Primary bot, company model and threads.** Seed one primary; top-level bots with `reportsTo`; groups replaced by threads with no assignee; one-call routing with the visible route and quiet note; bot-to-bot messages between any two bots, across teams (`bot.ask`, hop and pair limits); manager and primary powers; unlimited creation from a sentence; runaway guard; automatic context; per-bot memory on the existing memory module; company chart view; Settings view; new Pages simulator. The approved clickable mock (`2026-11-11-primary-bot-platform-mock.html`, next to this file; throwaway code, scripted replies) is the UX reference.
+2. **Primary bot, company model and threads.** Seed one primary; top-level bots with `reportsTo`; groups replaced by threads with no assignee; one-call routing with the visible route and quiet note; bot-to-bot messages between any two bots, across teams (`bot.ask`, with Keep going checkpoints); manager and primary powers; unlimited creation from a sentence; runaway guard; automatic context; per-bot memory on the existing memory module; company chart view; Settings view; new Pages simulator. The approved clickable mock (`2026-11-11-primary-bot-platform-mock.html`, next to this file; throwaway code, scripted replies) is the UX reference.
 3. **Ask mechanism.** Ask records, card, grants with Always allow / Ask each time / Deny per bot (in the bot profile and Settings), `awaiting_ask`; activity log and Pause all; remove permission checkboxes and `browserApproval`.
 4. **Subscription models.** `local-cli` provider, `model.run` agent task, sign-in status, limit-hit card.
 5. **Shared browser and takeover in agent mode.**
@@ -280,7 +284,7 @@ Phases 4, 5 and 6 are independent of each other once 3 lands.
 - **The app classifies risk, never the bot.** Browser actions are structured (`navigate`, `read`, `click`, `type`, `submit`). Always asks: any form submit, any non-GET request the action triggers, any click on an element whose text or role matches send / post / publish / delete / remove / pay / buy / confirm / submit, and any `navigate` whose URL carries data from a connector or another page in its query string. Connector write actions are declared by the connector, not the bot.
 - **Grant scope:** per bot, per action, per origin for `browser.use`, per account for connectors. Bots never inherit their creator's grants. "Who is allowed what" lists grants in that shape.
 - **Who answers:** asks, "Needs you" and primary-only powers belong to workspace `owner` and `admin` roles. One primary per workspace. Multi-member support stays; `member` and `viewer` cannot answer asks or bind subscription bots.
-- **Runaway guard is a general limiter:** a per-workspace counter of bot-initiated runs and bot creations (handoffs, scheduled runs, creations all count). Over about 20 creations or 60 bot-initiated runs in 5 minutes, or a handoff cycle seen 3 times, all bot-initiated work pauses and the primary asks the owner. Owner-initiated chats keep working. The existing per-run step cap stays.
+- **Runaway guard is a general limiter:** a per-workspace counter of bot-initiated runs and bot creations (handoffs, scheduled runs, creations all count). Over about 50 creations or 300 bot-initiated runs in 5 minutes, or a loop that repeats the same question three times with no new answer, all bot-initiated work pauses and the primary asks the owner **Keep going** or **Stop** (relaxed by the owner, 2026-11-11). Owner-initiated chats keep working. The existing per-run step cap stays.
 - **Pending asks hold nothing.** A bot releases the browser before it asks. Asks push a notification. Asks from unattended runs expire after 24 hours as declined.
 - **Primary routing failure:** if the primary's model is unavailable, the group message gets a card asking the owner which bot should take it.
 - **No token streaming for `local-cli` bots in v1.** The thread shows "working…" until the result returns.
