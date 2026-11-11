@@ -1,0 +1,145 @@
+/** The live view of the shared browser, between the device and the owner.
+ *
+ * Everything here is memory. A frame, a tab's address and title, a queued input
+ * event: none of it is written to the database, a file or a log, and all of it
+ * goes when the viewer, the device or the process does. The owner's browser asks
+ * for a frame (`view`); that is what tells the device to start casting that
+ * bot's tab (`watch` in its reply). The device sends the newest frame
+ * (`putFrame`), and a long poll (`agentSync`) brings the owner's input and
+ * takeover back to it.
+ *
+ * One hub holds one space per workspace, so a device never sees another
+ * workspace's commands and an owner never sees another workspace's frames.
+ */
+import {fail} from '../shared/errors.js';
+import {cleanInput} from '../agent/live-input.mjs';
+
+export const LIVE_WAIT_MS = 20000;
+/** A viewer that has not asked for a frame for this long is gone. */
+const VIEW_TTL_MS = 6000;
+/** A device that has not polled for this long is not there. */
+const AGENT_FRESH_MS = 45000;
+/** The device is given this long to report a takeover before its silence counts. */
+const DRIVE_GRACE_MS = 10000;
+export const MAX_QUEUED = 100;
+const MAX_IMAGE = 700000;
+const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
+const text = (value, max) => (typeof value === 'string' ? value.slice(0, max) : null);
+
+export function createLiveHub({now = Date.now, waitMs = LIVE_WAIT_MS} = {}) {
+  const spaces = new Map();
+  const hub = {waitMs};
+
+  const space = id => {
+    let sp = spaces.get(id);
+    if (!sp) {
+      sp = {agentId: null, polledAt: 0, parked: null, sentWatch: null, commands: [], frame: null, seq: 0, viewers: new Map(), driving: new Map(), tabs: new Map()};
+      spaces.set(id, sp);
+    }
+    return sp;
+  };
+  /** The bot whose tab somebody looked at most recently, if that was lately. */
+  const watchOf = sp => {
+    let best = null, at = -Infinity;
+    for (const [botId, seen] of sp.viewers) {
+      if (now() - seen > VIEW_TTL_MS) sp.viewers.delete(botId);
+      else if (seen >= at) { best = botId; at = seen; }
+    }
+    if (sp.frame && sp.frame.botId !== best) sp.frame = null;
+    return best;
+  };
+  const alive = sp => Boolean(sp.parked) || now() - sp.polledAt <= AGENT_FRESH_MS;
+
+  function deliver(sp) {
+    const parked = sp.parked;
+    if (!parked) return;
+    sp.parked = null;
+    clearTimeout(parked.timer);
+    const watch = watchOf(sp);
+    sp.sentWatch = watch;
+    parked.resolve({commands: sp.commands.splice(0), watch});
+  }
+  /** Something the device should hear now: answer its parked poll. */
+  const wake = sp => deliver(sp);
+
+  /** The device's long poll. It reports where its tabs are and who the owner is
+   * driving; the answer is what to do and which bot's tab to cast. */
+  function agentSync(workspaceId, agentId, report = {}) {
+    const sp = space(workspaceId);
+    sp.agentId = agentId;
+    sp.polledAt = now();
+    sp.tabs = new Map((Array.isArray(report?.tabs) ? report.tabs : []).slice(0, 50).filter(t => typeof t?.botId === 'string').map(t => [t.botId.slice(0, 64), {url: text(t.url, 2000), title: text(t.title, 300)}]));
+    // The device is the authority on whether the owner holds a tab, once it has had time to hear about it.
+    for (const [botId, since] of sp.driving) if (report?.owner !== botId && now() - since > DRIVE_GRACE_MS) sp.driving.delete(botId);
+    deliver(sp);
+    if (sp.commands.length || watchOf(sp) !== sp.sentWatch) {
+      const watch = watchOf(sp);
+      sp.sentWatch = watch;
+      return Promise.resolve({commands: sp.commands.splice(0), watch});
+    }
+    return new Promise(resolve => {
+      const timer = setTimeout(() => deliver(sp), hub.waitMs);
+      timer.unref?.();
+      sp.parked = {resolve, timer};
+    });
+  }
+
+  /** The newest frame of the watched tab. Anything else is dropped. */
+  function putFrame(workspaceId, agentId, {botId, image, w, h} = {}) {
+    const sp = space(workspaceId);
+    if (typeof image !== 'string' || !image) fail('A frame needs an image.', 400);
+    if (image.length > MAX_IMAGE) fail('That frame is too large.', 413);
+    if (!BASE64.test(image)) fail('A frame must be base64.', 400);
+    const watch = watchOf(sp);
+    if (watch && botId === watch) sp.frame = {botId, image, w: Number(w) || 1280, h: Number(h) || 800, at: now(), seq: ++sp.seq};
+    return {watch: watchOf(sp)};
+  }
+
+  /** The owner's page asks for a bot's frame. Asking is what makes the device cast it. */
+  function view(workspaceId, botId, {after} = {}) {
+    const sp = space(workspaceId);
+    sp.viewers.set(botId, now());
+    if (watchOf(sp) !== sp.sentWatch) wake(sp);
+    const frame = sp.frame?.botId === botId ? sp.frame : null;
+    const out = {botId, agent: alive(sp), seq: frame ? frame.seq : 0, changed: Boolean(frame) && frame.seq !== Number(after)};
+    if (frame) Object.assign(out, {w: frame.w, h: frame.h, at: frame.at});
+    if (out.changed) out.image = `data:image/jpeg;base64,${frame.image}`;
+    return out;
+  }
+
+  const command = (sp, entry) => {
+    if (sp.commands.length >= MAX_QUEUED) fail('Too much input is waiting for the browser. Try again in a moment.', 429);
+    sp.commands.push(entry);
+    wake(sp);
+  };
+
+  function takeover(workspaceId, botId) {
+    const sp = space(workspaceId);
+    if (!alive(sp)) fail('The local agent is not running the shared browser right now, so there is nothing to take over. Start it with AGENT_BROWSER=1 and try again.', 409);
+    sp.driving.set(botId, now());
+    command(sp, {type: 'takeover', botId});
+  }
+  function handback(workspaceId, botId) {
+    const sp = space(workspaceId);
+    sp.driving.delete(botId);
+    sp.commands.push({type: 'handback', botId});
+    wake(sp);
+  }
+  function input(workspaceId, botId, event) {
+    const sp = space(workspaceId);
+    if (!sp.driving.has(botId)) fail('Take over the browser before you click or type in it.', 409);
+    command(sp, {type: 'input', botId, event: cleanInput(event)});
+  }
+
+  return Object.assign(hub, {
+    agentSync, putFrame, view, takeover, handback, input,
+    isDriving: (workspaceId, botId) => space(workspaceId).driving.has(botId),
+    agentLive: workspaceId => alive(space(workspaceId)),
+    tab: (workspaceId, botId) => space(workspaceId).tabs.get(botId) || null,
+    /** Release every parked poll and forget everything: shutdown, and tests. */
+    close() { for (const sp of spaces.values()) { deliver(sp); sp.frame = null; sp.viewers.clear(); sp.commands.length = 0; sp.driving.clear(); } spaces.clear(); },
+  });
+}
+
+/** The process's one hub. */
+export const browserLive = createLiveHub();

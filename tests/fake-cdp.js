@@ -54,6 +54,7 @@ export function fakeCdp({pages = {}} = {}) {
         return {frameId: 'F'};
       }
       case 'Runtime.evaluate': return evaluate(params.expression, sessionId);
+      case 'Page.captureScreenshot': return {data: 'c2VlZA=='};
       case 'Input.dispatchMouseEvent': case 'Input.dispatchKeyEvent': case 'Input.insertText': input.push({method, params, sessionId}); return {};
       default: return {};
     }

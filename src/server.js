@@ -13,6 +13,7 @@ import {Auth} from './auth.js';
 import {openWorkspaces} from './workspaces.js';
 import {createPush} from './push.js';
 import {browserRuntime} from './browser-runtime.js';
+import {browserLive} from './browser-live.js';
 import * as agent from './agent.js';
 import {createApp,createWorkspaceStarter} from './app.js';
 
@@ -82,7 +83,7 @@ server.listen(PORT,HOST,()=>{
 });
 // A server-side browser is a child process: leave it behind and a container
 // restart keeps an orphan holding memory. Closing it is part of the drain.
-const drain=()=>Promise.allSettled([workspaces.stop(),browserRuntime.close()]).finally(()=>server.close(()=>process.exit(0)));
+const drain=()=>Promise.allSettled([workspaces.stop(),browserRuntime.close(),Promise.resolve(browserLive.close())]).finally(()=>server.close(()=>process.exit(0)));
 process.on('SIGINT',()=>{void drain();});
 // A container stops the process with SIGTERM, so it needs the same drain as
 // Ctrl-C instead of being killed with requests and leases still open.

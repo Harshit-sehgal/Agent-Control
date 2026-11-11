@@ -48,6 +48,7 @@ import {pushRoutes} from '../src/routes-push.js';
 import {aiRoutes} from '../src/routes-ai.js';
 import {memoryRoutes} from '../src/routes-memory.js';
 import {connectorRoutes} from '../src/routes-connectors.js';
+import {liveRoutes} from '../src/routes-live.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -55,7 +56,7 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const MODULES = [
   ['publicRoutes', publicRoutes], ['workflowRoutes', workflowRoutes], ['groupRoutes', groupRoutes],
   ['accountRoutes', accountRoutes], ['workspaceRoutes', workspaceRoutes], ['pushRoutes', pushRoutes],
-  ['aiRoutes', aiRoutes], ['memoryRoutes', memoryRoutes], ['connectorRoutes', connectorRoutes],
+  ['aiRoutes', aiRoutes], ['memoryRoutes', memoryRoutes], ['connectorRoutes', connectorRoutes], ['liveRoutes', liveRoutes],
 ];
 
 /** Registration must not need a live server. Anything a module reads from the
@@ -102,6 +103,9 @@ const LEAST_ROLE = {
   'POST /api/grants': 'admin',
   'POST /api/browser-requests/:id/approve': 'admin',
   'POST /api/browser-requests/:id/deny': 'admin',
+  // A frame is a picture of whatever the shared browser is signed in to: a viewer never gets one, and input is a member's.
+  'GET /api/browser-live/:botId': 'member',
+  'POST /api/browser-live/:botId/input': 'member',
   'GET /api/users': 'admin',
   'POST /api/users': 'admin',
   'PATCH /api/users/:id': 'admin',

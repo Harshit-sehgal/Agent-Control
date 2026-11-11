@@ -33,6 +33,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import crypto from 'node:crypto';
 import {createSharedBrowser, browserProfileDir, runBrowserTask} from './shared-browser.mjs';
+import {createLiveChannel} from './live-channel.mjs';
 import {runModelTask} from './cli-model.mjs';
 import {cliStatusReporter} from './cli-status.mjs';
 import {runMcpTask} from './mcp-stdio.mjs';
@@ -77,14 +78,17 @@ function sign(secret, {method, requestPath, timestamp, body}) {
 /** One outbound POST. Redirects are not followed: a 307 from the control plane
  * would otherwise deliver the body (a pairing code, or a signed poll) to
  * whatever host the Location names, including a metadata address. */
-async function post(url, {headers, body, timeoutMs = TIMEOUT_MS} = {}) {
+async function post(url, {headers, body, timeoutMs = TIMEOUT_MS, signal} = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  // A caller's own signal (the live view stopping) ends the request too.
+  signal?.addEventListener('abort', () => controller.abort(), {once: true});
   try {
     const res = await fetch(url, {method: 'POST', headers, body, signal: controller.signal, redirect: 'manual'});
     if (res.status >= 300 && res.status < 400) throw new Error(`Refusing to follow a redirect (${res.status}) from ${new URL(url).host}.`);
     return res;
   } catch (e) {
+    if (e.name === 'AbortError' && signal?.aborted) throw e;
     if (e.name === 'AbortError') throw new Error(`request to ${new URL(url).host} timed out after ${timeoutMs / 1000}s`);
     throw e;
   } finally { clearTimeout(timer); }
@@ -92,12 +96,12 @@ async function post(url, {headers, body, timeoutMs = TIMEOUT_MS} = {}) {
 
 /** Outbound-only signed request. Returns parsed JSON or throws with the
  * server's message; never retries silently on 4xx. */
-async function call(config, requestPath, body = null) {
+async function call(config, requestPath, body = null, {timeoutMs, signal} = {}) {
   const url = new URL(config.server.replace(/\/+$/, '') + requestPath);
   const raw = body === null ? '' : JSON.stringify(body);
   const timestamp = Date.now();
   const headers = {'Content-Type': 'application/json', 'X-Agent-Id': config.agentId, 'X-Agent-Ts': String(timestamp), 'X-Agent-Sig': sign(config.secret, {method: 'POST', requestPath, timestamp, body: raw})};
-  const res = await post(url, {headers, body: body === null ? undefined : raw});
+  const res = await post(url, {headers, body: body === null ? undefined : raw, ...(timeoutMs ? {timeoutMs} : {}), signal});
   const text = await res.text();
   let value = null;
   try { value = text ? JSON.parse(text) : null; } catch {}
@@ -214,6 +218,15 @@ async function run() {
   process.on('SIGTERM', () => stop('SIGTERM'));
 
   const cliStatus = cliStatusReporter();
+  // The owner's live view of the shared browser: only on a device that runs the
+  // real browser and may use it. Started once, the first time that is true.
+  let live = null;
+  const startLive = () => {
+    if (live || process.env.AGENT_BROWSER !== '1' || !['browser.capture', 'browser.action'].some(kind => (config.permissions || []).includes(kind))) return;
+    live = createLiveChannel({call: (requestPath, body, options) => call(config, requestPath, body, options), shared: shared()});
+    live.start();
+  };
+  startLive();
   // Tasks handed over by a heartbeat that arrived while a task was executing.
   const inbox = new Map();
   let busy = false;
@@ -228,7 +241,7 @@ async function run() {
     const cli = (config.permissions || []).includes('model.run') ? cliStatus.snapshot() : undefined;
     const beat = await call(config, '/api/agent/heartbeat', {version: '1', os: process.platform, node: process.version, beat: ++beatSeq, at: Date.now(), ...(cli ? {cli} : {})});
     config.lastSeenAt = new Date().toISOString();
-    if (Array.isArray(beat.agent?.permissions)) config.permissions = beat.agent.permissions;
+    if (Array.isArray(beat.agent?.permissions)) { config.permissions = beat.agent.permissions; startLive(); }
     for (const task of beat.tasks || []) if (task && task.id && !inbox.has(task.id)) inbox.set(task.id, task);
   };
 
@@ -301,7 +314,7 @@ async function run() {
       if (stopping) break;
       await sleep(wait);
     }
-  } finally { clearInterval(keepalive); await sharedBrowser?.close(); console.log('agent: stopped.'); }
+  } finally { clearInterval(keepalive); await live?.stop(); await sharedBrowser?.close(); console.log('agent: stopped.'); }
 }
 
 function status() {

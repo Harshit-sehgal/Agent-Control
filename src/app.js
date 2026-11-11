@@ -35,6 +35,7 @@ import {pushRoutes} from './routes-push.js';
 import {aiRoutes} from './routes-ai.js';
 import {memoryRoutes} from './routes-memory.js';
 import {connectorRoutes} from './routes-connectors.js';
+import {liveRoutes} from './routes-live.js';
 
 const PUBLIC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'shared');
 
@@ -114,6 +115,7 @@ export function createApp({store, auth, workspaces, push, version}) {
   aiRoutes(router, app);
   memoryRoutes(router);
   connectorRoutes(router);
+  liveRoutes(router, app);
 
   async function api(req, res, u) {
     const found = router.find(req.method, u.pathname), access = found?.route.access;
@@ -142,7 +144,7 @@ export function createApp({store, auth, workspaces, push, version}) {
     if (actor && !scope) fail('This workspace is no longer available. Sign in again.', 401);
     let raw, parsed;
     const context = {req, path: u.pathname, params: found.params, actor, store: scope,
-      raw: async () => raw ??= await rawBody(req),
+      raw: async limit => raw ??= await rawBody(req, limit),
       // An optional limit lets a route that legitimately carries a large document
       // (a backup restore) ask for more than the 128 KB default.
       body: async (limit = 128 * 1024) => parsed ??= safeJson(await rawBody(req, limit))};

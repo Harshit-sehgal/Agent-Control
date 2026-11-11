@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {startBrowserSession, ACTION_OPS, MAX_ACTIONS} from './browser.mjs';
 import {hostAllowed, hostOf} from '../shared/bot-browser.js';
+import {cleanInput, KEYS, VIEWPORT} from './live-input.mjs';
 
 /** Where the profile lives: `AGENT_BROWSER_PROFILE`, else next to the agent's config. */
 export function browserProfileDir(env = process.env, configPath) {
@@ -36,6 +37,9 @@ export function ensureProfileDir(dir) {
 /** A task that names no bot (a request made by hand) shares this tab. */
 export const ANONYMOUS_BOT = 'shared';
 
+/** The cast the owner watches: small and cheap, since a person is looking at it. */
+const SCREENCAST = {format: 'jpeg', quality: 60, maxWidth: VIEWPORT.width, maxHeight: VIEWPORT.height, everyNthFrame: 2};
+
 export function createSharedBrowser({start = startBrowserSession, allow = [], profile, settleMs, timeoutMs} = {}) {
   const allowed = () => (typeof allow === 'function' ? allow() : allow);
   let session = null, starting = null;
@@ -43,6 +47,8 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
   const queue = [];            // tickets, first come first served
   const waits = new Set();     // {predicate, resolve}
   let holder = null;           // the bot whose task has the browser
+  let watched = null;          // the tab being cast: {botId, tab, live, off}
+  let frameSink = null;
 
   const notify = () => { for (const wait of [...waits]) if (wait.predicate()) { waits.delete(wait); wait.resolve(); } };
   const until = predicate => (predicate() ? Promise.resolve() : new Promise(resolve => { waits.add({predicate, resolve}); }));
@@ -63,6 +69,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
   function forget() {
     const dropped = session;
     session = null;
+    watched = null;
     tabs.clear();
     if (dropped) void dropped.close().catch(() => {});
   }
@@ -105,17 +112,93 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     } finally { release(); }
   }
 
+  /** Frames of the watched tab, newest first wins at the receiver: `fn({botId, image, w, h, at})`. */
+  const onFrame = fn => { frameSink = fn; };
+
+  async function unwatch() {
+    const was = watched;
+    watched = null;
+    if (!was) return;
+    was.off();
+    await was.live.cdp.send('Page.stopScreencast', {}, was.tab.sessionId).catch(() => {});
+  }
+
+  /** Cast one bot's tab, and only that one: Chrome pays for every frame it
+   * encodes, so a tab nobody looks at is never cast. A bot with no tab has
+   * nothing to show yet (false). Asking again for the same tab changes nothing. */
+  async function watch(botId) {
+    const entry = tabs.get(botId);
+    if (!entry || !session) { await unwatch(); return false; }
+    if (watched?.botId === botId && watched.tab === entry.tab) return true;
+    await unwatch();
+    const live = session, tab = entry.tab;
+    const off = live.cdp.on('Page.screencastFrame', (params, raw) => {
+      if (params.sessionId !== tab.sessionId) return;
+      // Chrome sends no further frame until the last one is acked, with its own id.
+      live.cdp.send('Page.screencastFrameAck', {sessionId: raw.sessionId}, tab.sessionId).catch(() => {});
+      frameSink?.({botId, image: params.data, w: Number(params.metadata?.deviceWidth) || tab.viewport.width, h: Number(params.metadata?.deviceHeight) || tab.viewport.height, at: Date.now()});
+    });
+    watched = {botId, tab, live, off};
+    try {
+      await live.cdp.send('Page.startScreencast', SCREENCAST, tab.sessionId);
+      // A page that never repaints sends no frame, and the viewer would stare at nothing.
+      const {data} = await live.cdp.send('Page.captureScreenshot', {format: 'jpeg', quality: SCREENCAST.quality}, tab.sessionId);
+      if (data && watched?.tab === tab) frameSink?.({botId, image: data, w: tab.viewport.width, h: tab.viewport.height, at: Date.now()});
+    } catch { await unwatch(); return false; }
+    return true;
+  }
+
+  /** One owner event, applied to the bot's tab as real input. The device
+   * bounds it again here (the server already did), and a navigation is held to
+   * the allowlist like every page the browser opens. */
+  async function applyInput(botId, event) {
+    const ev = cleanInput(event);
+    const entry = tabs.get(botId);
+    if (!entry || !session) throw new Error('That bot has no tab open.');
+    const {sessionId} = entry.tab, send = (method, params) => session.cdp.send(method, params, sessionId);
+    if (ev.type === 'click') {
+      await send('Input.dispatchMouseEvent', {type: 'mouseMoved', x: ev.x, y: ev.y});
+      for (let count = 1; count <= (ev.double ? 2 : 1); count++) {
+        await send('Input.dispatchMouseEvent', {type: 'mousePressed', x: ev.x, y: ev.y, button: 'left', clickCount: count});
+        await send('Input.dispatchMouseEvent', {type: 'mouseReleased', x: ev.x, y: ev.y, button: 'left', clickCount: count});
+      }
+    } else if (ev.type === 'scroll') {
+      await send('Input.dispatchMouseEvent', {type: 'mouseWheel', x: ev.x, y: ev.y, deltaX: ev.dx, deltaY: ev.dy});
+    } else if (ev.type === 'type') {
+      await send('Input.insertText', {text: ev.text});
+    } else if (ev.type === 'key') {
+      const key = KEYS[ev.key], base = {key: ev.key, code: key.code, windowsVirtualKeyCode: key.vk, nativeVirtualKeyCode: key.vk};
+      await send('Input.dispatchKeyEvent', {type: 'keyDown', ...base, ...(key.text ? {text: key.text} : {})});
+      await send('Input.dispatchKeyEvent', {type: 'keyUp', ...base});
+    } else if (ev.type === 'navigate') {
+      if (!hostAllowed(ev.url, allowed())) throw new Error('That host is not in AGENT_BROWSER_ALLOWLIST.');
+      await send('Page.navigate', {url: ev.url});
+    }
+  }
+
+  /** Where each tab is now, from the browser itself (a click may have navigated). */
+  async function refresh() {
+    if (!session || !tabs.size) return;
+    const targets = await session.liveTargets().catch(() => null);
+    if (!targets) return;
+    for (const entry of tabs.values()) {
+      const target = targets.find(t => t.targetId === entry.tab.targetId);
+      if (target) { entry.url = target.url; entry.title = target.title || entry.title; }
+    }
+  }
+
   /** What the device knows about each tab: for the status it reports. */
   const status = () => [...tabs].map(([botId, {url, title}]) => ({botId, state: holder === botId ? 'browsing' : 'idle', url, title}));
 
   async function close() {
     const live = session;
     session = null;
+    watched = null;
     tabs.clear();
     if (live) await live.close().catch(() => {});
   }
 
-  return {run, status, close};
+  return {run, status, close, onFrame, watch, unwatch, applyInput, refresh};
 }
 
 /** One `browser.capture` or `browser.action` task, with the rules every browser
