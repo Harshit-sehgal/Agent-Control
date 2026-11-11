@@ -10,9 +10,9 @@
  * A run's trace holds one entry per step: {botId, output}. A bot-to-bot ask is
  * two entries, {botId: asker, kind: 'ask', to, task} and then
  * {botId: asked, kind: 'peer', to: asker, output}. */
-import {face} from './ui-face.js?v=7f0bbfbfb6';
-import {plain} from './ui-kit.js?v=7f0bbfbfb6';
-import {waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=7f0bbfbfb6';
+import {face} from './ui-face.js?v=d07529700a';
+import {plain} from './ui-kit.js?v=d07529700a';
+import {waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=d07529700a';
 
 const teamKey = id => `team-${id}`;
 const settingsOf = bot => bot?.settings || {};
@@ -72,6 +72,18 @@ function lastLine(history) {
   return {preview: last.role === 'user' ? `You: ${text}` : text, at: last.at || '', answeredAt: last.role === 'bot' && answer ? answer.at || '' : ''};
 }
 
+/** When the newest run in a chat failed and no bot has spoken since, the row
+ * says so with the reason, instead of still showing the person's own last line.
+ * A run the person stopped is not flagged: they know. */
+const STOPPED = new Set(['failed', 'interrupted']);
+const ended = r => time(r.completedAt || r.updatedAt || r.createdAt);
+function stoppedLine(runs, mine, line) {
+  const last = runs.filter(mine).reduce((a, r) => (a && ended(a) >= ended(r) ? a : r), null);
+  if (!last || !STOPPED.has(last.status)) return line;
+  if (line.answeredAt && time(line.answeredAt) > ended(last)) return line;
+  return {...line, stopped: true, preview: oneLine(last.error || 'This stopped before it finished.', 120)};
+}
+
 const unreadOf = (line, seenAt) => Boolean(line.answeredAt) && !(seenAt && time(seenAt) >= time(line.answeredAt));
 
 /** The sidebar. Pinned bots first, then the company tree (Atlas, then each
@@ -98,7 +110,7 @@ export function botRows(state, {query = '', order = [], pins, hidden = [], seen 
       return {
         id: bot.id, name: bot.name, job: jobOf(bot),
         face: face(bot, {size: 40, state: status, primary: isPrimary, manager: isManager, index: bots.indexOf(bot)}),
-        status, ...(line => ({...line, unread: unreadOf(line, seen?.[bot.id])}))(lastLine(state?.chats?.[bot.id])),
+        status, ...(line => ({...line, unread: unreadOf(line, seen?.[bot.id])}))(stoppedLine(runs, r => r.chatKey === bot.id, {stopped: false, ...lastLine(state?.chats?.[bot.id])})),
         needs: totalWaitingOnYou(waitingOnYou(state, bot.id)),
         pinned: pinned.includes(bot.id), isPrimary, isManager, team: isPrimary ? null : parentOf(bot) ?? null,
       };
@@ -110,7 +122,7 @@ export function botRows(state, {query = '', order = [], pins, hidden = [], seen 
 export function threadRows(state, {now = Date.now(), seen = {}} = {}) {
   const bots = botsOf(state), primary = primaryOf(bots), runs = state?.groupRuns || [];
   const rows = threadsOf(state).map(group => {
-    const key = teamKey(group.id), line = lastLine(state?.chats?.[key]);
+    const key = teamKey(group.id), line = stoppedLine(runs, r => r.groupId === group.id, {stopped: false, ...lastLine(state?.chats?.[key])});
     const needs = totalWaitingOnYou(waitingOnYou(state, key));
     const waiting = needs > 0 || runs.some(r => r.groupId === group.id && isAwaiting(r.status));
     // A thread at work says what it is doing, under the face of the bot doing it (Atlas, or the bot it asked).
@@ -122,7 +134,7 @@ export function threadRows(state, {now = Date.now(), seen = {}} = {}) {
       faceBot: who?.id || null,
       face: who ? face(who, {size: 36, state: waiting ? 'waiting' : pill ? 'working' : 'awake', primary: who === primary, index: bots.indexOf(who)}) : '',
       preview: line.preview, at: line.at || group.createdAt || '', needs, waiting,
-      working: Boolean(pill), activity: pill?.text || '', unread: !pill && unreadOf(line, seen?.[key]),
+      working: Boolean(pill), activity: pill?.text || '', unread: !pill && unreadOf(line, seen?.[key]), stopped: !pill && !waiting && line.stopped,
     };
   }).sort((a, b) => time(b.at) - time(a.at));
   return {

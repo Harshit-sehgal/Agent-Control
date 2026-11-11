@@ -89,6 +89,7 @@
 .link:hover{color:var(--fg);text-decoration-color:currentColor}
 .sub{color:var(--muted);font-size:13px}
 .wt{color:var(--wait)}
+.wt.stop{color:var(--bad)}
 
 /* ---------- phone chrome: avatar, Bots | Threads, +, search and New thread ---------- */
 .chrome{position:fixed;inset:0;z-index:20;pointer-events:none}

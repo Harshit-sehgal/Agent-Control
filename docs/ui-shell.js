@@ -5,11 +5,11 @@
  * Home is the Chats layout only. On a phone it is two sections, Bots and Threads,
  * switched by swiping; on a laptop the sidebar holds both and the chat opens on the
  * right. The lists come from ui-company.js (pure); this file is markup and events. */
-import {botRows, threadRows} from './ui-company.js?v=7f0bbfbfb6';
-import {face} from './ui-face.js?v=7f0bbfbfb6';
-import {esc, icon, stamp} from './ui-kit.js?v=7f0bbfbfb6';
-import {pauseBanner} from './ui-asks.js?v=7f0bbfbfb6';
-import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, isStaticDemo, seenChats} from './ui-store.js?v=7f0bbfbfb6';
+import {botRows, threadRows} from './ui-company.js?v=d07529700a';
+import {face} from './ui-face.js?v=d07529700a';
+import {esc, icon, stamp} from './ui-kit.js?v=d07529700a';
+import {pauseBanner} from './ui-asks.js?v=d07529700a';
+import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, isStaticDemo, seenChats} from './ui-store.js?v=d07529700a';
 
 const el = id => document.getElementById(id);
 const DESK = '(min-width:1024px)';
@@ -51,7 +51,8 @@ const bigFace = (row, size) => { const bot = findBot(row.id); return bot ? face(
 function botRow(row) {
   const current = store.route.bot === row.id;
   const prev = row.status === 'working' ? '<span class="crow-prev live">working<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></span>'
-    : row.needs ? '<span class="crow-prev wt">Waiting on you</span>' : `<span class="crow-prev">${esc(row.preview || row.job)}</span>`;
+    : row.needs ? '<span class="crow-prev wt">Waiting on you</span>'
+    : `<span class="crow-prev">${row.stopped ? '<span class="wt stop">Stopped · </span>' : ''}${esc(row.preview || row.job)}</span>`;
   return `<button type="button" class="crow${current ? ' on' : ''}${row.unread && !current && !row.needs ? ' new' : ''}" data-action="open-bot" data-id="${esc(row.id)}" data-team="${esc(row.team ?? '')}"${row.isManager ? ' data-manager="true"' : ''}${current ? ' aria-current="page"' : ''}>${row.face}<span class="crow-w"><span class="crow-top"><b>${esc(row.name)}</b><time>${esc(stamp(row.at))}</time></span>${prev}</span>${row.needs ? `<span class="badge" aria-label="${row.needs} waiting on you">${row.needs}</span>` : row.unread && !current ? UNREAD : ''}</button>`;
 }
 function pinnedRow(row, size) {
@@ -64,7 +65,7 @@ function threadRow(row) {
   const current = store.route.thread === row.id, unread = row.unread && !current;
   // At work: what it is doing now, the way the open thread's live line says it. Waiting: that it needs you.
   const line = row.working ? `<small class="live">${esc(row.activity)}<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></small>`
-    : `<small>${row.waiting ? '<span class="wt">Waiting on you · </span>' : ''}${esc(row.preview || 'No replies yet')}</small>`;
+    : `<small>${row.waiting ? '<span class="wt">Waiting on you · </span>' : row.stopped ? '<span class="wt stop">Stopped · </span>' : ''}${esc(row.preview || 'No replies yet')}</small>`;
   return `<button type="button" class="trow${current ? ' on' : ''}${unread ? ' new' : ''}" data-action="open-thread" data-id="${esc(row.id)}"${current ? ' aria-current="page"' : ''}>${row.face}<span class="trow-w"><b>${esc(row.title)}</b>${line}</span><span class="trow-end"><time>${esc(stamp(row.at))}</time>${unread ? UNREAD : ''}</span></button>`;
 }
 const GROUPS = [['waiting', 'Waiting on you'], ['today', 'Today'], ['earlier', 'Earlier']];

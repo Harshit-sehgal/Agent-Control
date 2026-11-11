@@ -7,25 +7,25 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=7f0bbfbfb6';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=7f0bbfbfb6';
-import {requestOfMessage} from './bot-browser.js?v=7f0bbfbfb6';
-import {validHttpUrl} from './core.js?v=7f0bbfbfb6';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=7f0bbfbfb6';
-import {botStatus, botIsManager, chatStatus} from './ui-company.js?v=7f0bbfbfb6';
-import {isPrimary} from './company.js?v=7f0bbfbfb6';
-import {hasJob, modelChip} from './ui-profile-model.js?v=7f0bbfbfb6';
-import {scheduleTaskBody} from './schedules.js?v=7f0bbfbfb6';
-import {feed} from './ui-feed.js?v=7f0bbfbfb6';
-import {setupCardOf, setupButton} from './setup.js?v=7f0bbfbfb6';
-import {askCard} from './ui-asks.js?v=7f0bbfbfb6';
-import {face, botColor} from './ui-face.js?v=7f0bbfbfb6';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=7f0bbfbfb6';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=7f0bbfbfb6';
-import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=7f0bbfbfb6';
-import {toast} from './ui-dialogs.js?v=7f0bbfbfb6';
-import {siteChip} from './ui-computer-view.js?v=7f0bbfbfb6';
-import {cliChoice} from './ui-connect-model.js?v=7f0bbfbfb6';
+import {OFFJOB_CHOICES} from './off-job.js?v=d07529700a';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=d07529700a';
+import {requestOfMessage} from './bot-browser.js?v=d07529700a';
+import {validHttpUrl} from './core.js?v=d07529700a';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=d07529700a';
+import {botStatus, botIsManager, chatStatus} from './ui-company.js?v=d07529700a';
+import {isPrimary} from './company.js?v=d07529700a';
+import {hasJob, modelChip} from './ui-profile-model.js?v=d07529700a';
+import {scheduleTaskBody} from './schedules.js?v=d07529700a';
+import {feed} from './ui-feed.js?v=d07529700a';
+import {setupCardOf, setupButton} from './setup.js?v=d07529700a';
+import {askCard} from './ui-asks.js?v=d07529700a';
+import {face, botColor} from './ui-face.js?v=d07529700a';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=d07529700a';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=d07529700a';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=d07529700a';
+import {toast} from './ui-dialogs.js?v=d07529700a';
+import {siteChip} from './ui-computer-view.js?v=d07529700a';
+import {cliChoice} from './ui-connect-model.js?v=d07529700a';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it

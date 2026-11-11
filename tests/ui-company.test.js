@@ -462,3 +462,30 @@ test('a thread or bot with an answer newer than when the person last opened it i
   assert.equal(rowOf(botRows(bots), 'mail').unread, true);
   assert.equal(rowOf(botRows(bots, {seen: {mail: '2026-11-11T09:00:00Z'}}), 'mail').unread, false);
 });
+
+test('a thread whose run stopped says so, with the reason, until a bot answers again', () => {
+  const failed = run({id: 'r5', groupId: 't1', chatKey: 'team-t1', status: 'failed', error: 'Atlas kept asking for pages it already had, so the task stopped.', recipients: ['atlas'], createdAt: local(11, 12, 1), completedAt: local(11, 12, 5)});
+  const row = threadRows(threadState({groupRuns: [failed]}), {now: NOW}).today.find(r => r.id === 't1');
+  assert.equal(row.stopped, true);
+  assert.equal(row.preview, 'Atlas kept asking for pages it already had, so the task stopped.');
+  const s = threadState({groupRuns: [failed]});
+  s.chats['team-t1'].push({id: 'z', role: 'bot', text: 'Here it is.', senderId: 'atlas', at: local(11, 13)});
+  const again = threadRows(s, {now: NOW}).today.find(r => r.id === 't1');
+  assert.equal(again.stopped, false);
+  assert.equal(again.preview, 'Here it is.');
+});
+
+test('a run the person stopped is not flagged', () => {
+  const cancelled = run({id: 'r6', groupId: 't1', chatKey: 'team-t1', status: 'cancelled', error: 'Stopped.', recipients: ['atlas'], createdAt: local(11, 12, 1), completedAt: local(11, 12, 5)});
+  const row = threadRows(threadState({groupRuns: [cancelled]}), {now: NOW}).today.find(r => r.id === 't1');
+  assert.equal(row.stopped, false);
+  assert.equal(row.preview, 'You: Reply to Northwind');
+});
+
+test('a bot chat whose last run stopped says so on its row', () => {
+  const failed = run({id: 'r7', chatKey: 'mail', status: 'failed', error: 'The model did not answer.', createdAt: '2026-11-11T10:00:00Z', completedAt: '2026-11-11T10:01:00Z'});
+  const s = stateOf({groups: [company([atlas, mail])], chats: {mail: [{id: 'u', role: 'user', text: 'Check mail', at: '2026-11-11T09:59:00Z'}]}, groupRuns: [failed]});
+  const row = rowOf(botRows(s), 'mail');
+  assert.equal(row.stopped, true);
+  assert.equal(row.preview, 'The model did not answer.');
+});
