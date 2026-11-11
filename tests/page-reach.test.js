@@ -119,3 +119,8 @@ test('every bot is told to answer as an outcome and to read enough, then answer'
   assert.match(rules, /do not narrate/i);
   assert.match(rules, /open the results/i);
 });
+
+test('a bot finishes what it can do now instead of offering it ("Want me to open the articles?")', () => {
+  const env = envelopeOf({run: {id: 'r', input: 'Summarize the top 3 stories on Hacker News', recipients: ['a'], trace: []}, bot: {id: 'a', name: 'A', instructions: 'x'}});
+  assert.match(env.restrictions.join('\n'), /do not offer to do what you can do now/i);
+});
