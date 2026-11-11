@@ -2,7 +2,7 @@
  *
  * This used to be a list of 66 `node --check …` calls chained with `&&` in
  * package.json. A new module shipped unchecked unless someone remembered to add
- * it, and `agent/`, `extension/popup.js` and `scripts/` were easy to forget.
+ * it, and `agent/` and `scripts/` were easy to forget.
  * Walking the roots instead means whatever is on disk is checked.
  *
  * `tests/check-coverage.test.js` imports ROOTS and sourceFiles() and compares
@@ -20,7 +20,7 @@ const run = promisify(execFile);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /** Every root that holds JavaScript we ship or run. */
-export const ROOTS = ['src', 'shared', 'agent', 'extension', 'scripts'];
+export const ROOTS = ['src', 'shared', 'agent', 'scripts'];
 export const EXTENSIONS = ['.js', '.mjs'];
 
 async function walk(dir, prefix) {

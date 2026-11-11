@@ -34,7 +34,7 @@ async function installation() {
 }
 const post = n => ({url: `https://x.com/test/status/${n}`, text: `Post number ${n} about queues and retries.`, author: 'Tester', topic: 'AI'});
 
-test('a second workspace has its own data, tokens and members', {timeout: 40000}, async () => {
+test('a second workspace has its own data and members', {timeout: 40000}, async () => {
   const t = await installation();
   try {
     await t.start();
@@ -53,21 +53,17 @@ test('a second workspace has its own data, tokens and members', {timeout: 40000}
     const second = (await t.send('GET', '/api/state', undefined, owner)).body;
     assert.equal(second.candidates.length, 0);
     assert.equal(second.workspaces.find(w => w.current).name, 'Client work');
-    assert.notEqual(second.captureToken, first.captureToken, 'Each workspace has its own capture token.');
     assert.equal((await t.send('POST', '/api/candidates', post(2), owner)).status, 201);
     assert.equal((await t.send('POST', '/api/chats/writer/messages', {id: 'm1', role: 'user', text: 'only in client work'}, owner)).status, 200);
 
-    // The extension token decides which workspace a captured post lands in.
-    assert.equal((await t.send('POST', '/api/capture', post(3), null, {'X-Capture-Token': second.captureToken})).status, 201);
-    assert.equal((await t.send('POST', '/api/capture', post(4), null, {'X-Capture-Token': 'nope'})).status, 401);
-    assert.equal((await t.send('GET', '/api/state', undefined, owner)).body.candidates.length, 2);
+    assert.equal((await t.send('GET', '/api/state', undefined, owner)).body.candidates.length, 1);
 
     // A member invited here cannot see, or switch to, the first workspace.
     assert.equal((await t.send('POST', '/api/users', {email: 'guest@example.com', password: 'guest-password-1', role: 'admin'}, owner)).status, 201);
     const guest = await t.login('guest@example.com', 'guest-password-1');
     const guestState = (await t.send('GET', '/api/state', undefined, guest)).body;
     assert.deepEqual(guestState.workspaces.map(w => w.name), ['Client work']);
-    assert.equal(guestState.candidates.length, 2);
+    assert.equal(guestState.candidates.length, 1);
     assert.equal(guestState.canCreateWorkspace, false);
     assert.equal((await t.send('POST', '/api/workspaces/switch', {id: 'default'}, guest)).status, 404);
     assert.equal((await t.send('POST', '/api/workspaces', {name: 'Mine'}, guest)).status, 403);
@@ -93,7 +89,7 @@ test('a second workspace has its own data, tokens and members', {timeout: 40000}
     assert.equal((await t.send('GET', '/api/state', undefined, again)).body.candidates.length, 1);
     await t.send('POST', '/api/workspaces/switch', {id: created.body.id}, again);
     const reread = (await t.send('GET', '/api/state', undefined, again)).body;
-    assert.equal(reread.candidates.length, 2);
+    assert.equal(reread.candidates.length, 1);
     assert.deepEqual(reread.chats.writer.map(m => m.text), ['only in client work']);
 
     // Deleting needs the typed name, removes the file and ends the guest's access.

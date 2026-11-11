@@ -4,7 +4,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {candidateInput,scoreCandidate,delayWindow,scheduleApproval,markDue,initialState,validHttpUrl,templateDraft,DEMO_SAMPLES} from '../shared/core.js';
 
-test('initial state has X-engage group with expected bots',()=>{const s=initialState();assert.equal(s.groups[0].id,'x-engage');assert.equal(s.groups[0].bots.length,6);assert.ok(s.captureToken.length>25);});
+test('initial state has X-engage group with expected bots',()=>{const s=initialState();assert.equal(s.groups[0].id,'x-engage');assert.equal(s.groups[0].bots.length,6);});
 test('score ranks matching technical conversation higher',()=>{
   const a=scoreCandidate({text:'How can a new robotics model perform more reliably? Which benchmarks count?',topic:'robotics'},['robotics']);
   const b=scoreCandidate({text:'Today I went to the store to buy bread.',topic:'other'},['robotics']);

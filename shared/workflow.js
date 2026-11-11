@@ -490,21 +490,6 @@ const scheduleView = task => ({
   enabled: task.status === 'queued' || task.status === 'running',
 });
 
-/** Replace the capture token.
- *
- * The token is a long-lived secret: any browser holding it can capture into this
- * workspace. Until this existed the only way to retire a leaked one was to wipe
- * the workspace, so a laptop sold, a token pasted into the wrong extension, or a
- * shared bookmark cost the whole document. Captures look the token up against
- * the workspace's current value, so the old one stops working the moment this
- * lands, and the extension needs the new one pasted in.
- */
-export function rotateCaptureToken(state) {
-  state.captureToken = crypto.randomUUID().replaceAll('-', '');
-  activity(state, 'settings', 'Replaced the capture token.');
-  return {captureToken: state.captureToken};
-}
-
 /** Remove a captured post and the work nobody committed to.
  *
  * Drafts that are still `pending` or were `rejected` are work in progress, so

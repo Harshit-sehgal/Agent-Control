@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import {migrate,updateSettings,addCandidate,seedDemo,beginProcessing,finishProcessing,failProcessing,editDraft,draftAction,addGroup,addBot,updateBot,updateGroup,removeBot,removeGroup,recoverInterrupted,addSchedule,removeSchedule,resetDemo,removeCandidate,rotateCaptureToken,findDraft,findCandidate,attachRunDraft,SCHEMA_VERSION} from '../shared/workflow.js';
+import {migrate,updateSettings,addCandidate,seedDemo,beginProcessing,finishProcessing,failProcessing,editDraft,draftAction,addGroup,addBot,updateBot,updateGroup,removeBot,removeGroup,recoverInterrupted,addSchedule,removeSchedule,resetDemo,removeCandidate,findDraft,findCandidate,attachRunDraft,SCHEMA_VERSION} from '../shared/workflow.js';
 import {enqueueTask, completeTask, failTask} from '../shared/tasks.js';
 import {initialState, minuteCeil} from '../shared/core.js';
 import {createRouter} from '../src/router.js';
@@ -411,21 +411,6 @@ test('removing a captured post takes its uncommitted work and refuses a committe
   assert.throws(() => removeCandidate(s, kept.id), /scheduled draft/);
   assert.equal(s.candidates.length, 1);
   assert.throws(() => removeCandidate(s, 'missing'), /Candidate not found/);
-});
-
-test('the capture token can be replaced without wiping the workspace', () => {
-  const s = store();
-  const before = s.captureToken;
-  assert.ok(before, 'a workspace starts with a token');
-  const {captureToken} = rotateCaptureToken(s);
-  assert.notEqual(captureToken, before);
-  assert.equal(s.captureToken, captureToken);
-  assert.match(captureToken, /^[a-z0-9]{32}$/, 'the shape the extension and the capture route expect');
-  // Replacing a credential is an event somebody should be able to find later.
-  assert.ok(s.events.some(e => /capture token/i.test(e.message)));
-  // Nothing else moves: the posts, drafts and bots are the workspace, and the
-  // point of this is that a lost token is not a lost workspace.
-  assert.equal(s.candidates.length, store().candidates.length);
 });
 
 test('a post with a draft waiting on a person is not processed into a second one', () => {

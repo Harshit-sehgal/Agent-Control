@@ -48,7 +48,7 @@ export function delayWindow(min,max,random=()=>Math.random()) {
   return msMin+Math.floor(random()*(msMax-msMin+1));
 }
 export function initialState() {
-  return {version:1, createdAt:new Date().toISOString(), settings:{topics:['AI','machine learning','robotics','technology'],style:'Short, casual, direct. Simple words. No em dashes. Do not invent my opinions.',opinions:'',minDelay:2,maxDelay:10},captureToken:crypto.randomUUID().replaceAll('-',''),groups:[{id:'x-engage',name:'X-engage',description:'User-assisted social research and drafting',bots:[
+  return {version:1, createdAt:new Date().toISOString(), settings:{topics:['AI','machine learning','robotics','technology'],style:'Short, casual, direct. Simple words. No em dashes. Do not invent my opinions.',opinions:'',minDelay:2,maxDelay:10},groups:[{id:'x-engage',name:'X-engage',description:'User-assisted social research and drafting',bots:[
     {id:'scout',name:'Scout',instructions:'Collect posts from context the user supplied, or from a home-feed page they approved. Do not invent posts.',type:'source'},
     {id:'ranker',name:'Ranker',instructions:'Score post relevance and discussion value.',type:'scoring'},
     {id:'researcher',name:'Researcher',instructions:'Only describe evidence supplied; do not fabricate verification.',type:'context'},

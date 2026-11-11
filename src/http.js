@@ -27,13 +27,11 @@ export function timingEqual(a, b) {
   return crypto.timingSafeEqual(h1, h2);
 }
 
-/** Reject a browser write that comes from another origin. The capture route is
- * exempt: the extension calls it cross-origin and proves itself with a token. */
+/** Reject a browser write that comes from another origin. */
 export function checkOrigin(req) {
-  if (req.url?.split('?')[0] === '/api/capture') return;
   if (!['POST', 'PATCH', 'DELETE', 'PUT'].includes(req.method)) return;
   const origin = req.headers.origin;
-  if (!origin) return; // Nonbrowser clients still require authenticated session/capture token.
+  if (!origin) return; // Nonbrowser clients still require an authenticated session.
   const possible = [`http://${req.headers.host}`, `https://${req.headers.host}`, process.env.PUBLIC_ORIGIN].filter(Boolean);
   if (!possible.includes(origin)) fail('Cross-origin request rejected.', 403);
 }

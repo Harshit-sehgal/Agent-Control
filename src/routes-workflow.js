@@ -17,8 +17,6 @@ const retentionSettings = s => ({...RETENTION_DEFAULTS, ...(s.settings?.retentio
 export function workflowRoutes(router, {auth, processCandidate}) {
   router.add('GET', '/api/state', 'viewer', c => {
     const s = c.store.read(), me = c.actor, live = aiAvailable(c.store);
-    // The capture token lets its holder add posts, which a viewer may not do.
-    if (!allows(me.role, 'member')) delete s.captureToken;
     // The stored provider row holds the vault id and may carry a key inside a
     // pasted base URL. The snapshot the browser receives is metadata only.
     s.ai = publicAi(s);
@@ -33,9 +31,6 @@ export function workflowRoutes(router, {auth, processCandidate}) {
   router.add('POST', '/api/demo/seed', 'member', c => c.store.update(s=>wf.seedDemo(s,DEMO_SAMPLES)));
   router.add('POST', '/api/reset-demo', 'member', c => c.store.update(s => wf.resetDemo(s)));
 
-  // The capture token is a credential every paired browser holds, so replacing it
-  // is an admin action, not a writer's convenience.
-  router.add('POST', '/api/capture-token', 'admin', c => c.store.update(s => wf.rotateCaptureToken(s)));
   router.add('POST', '/api/candidates', 'member', async c => {
     const b = await c.body();
     // Report duplicates the same way /api/capture does, so the UI can tell the

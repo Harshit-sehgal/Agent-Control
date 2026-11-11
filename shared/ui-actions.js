@@ -122,11 +122,6 @@ export const actions = {
     setProfile(copy.id, {avatarIndex: store.profiles[id]?.avatarIndex ?? 0});
     await sync(); go({chat: copy.id}); toast('Bot duplicated. Its chat starts empty.');
   },
-  'copy-capture-token': () => copyText(store.state.captureToken || '', 'Capture token copied'),
-  'rotate-capture-token': async () => {
-    if (!await confirmSheet('Replace the capture token?', {confirm: 'Replace', danger: true, detail: 'The token in every browser extension stops working until the new one is pasted in. Captured posts already here are not affected.'})) return;
-    await api('/api/capture-token', 'POST', {}); toast('New capture token created. Paste it into the extension.'); await sync();
-  },
   'copy-bot-instructions': b => copyText(findBot(b.dataset.id).instructions || '', 'Instructions copied'),
 
   // memory: per-model rulebook and per-chat recap

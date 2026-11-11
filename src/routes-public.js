@@ -1,7 +1,7 @@
 /** Routes that work without a browser session: health, sign-in and password
- * reset, the extension's capture endpoint, and the local-agent protocol. Each
+ * reset, and the local-agent protocol. Each
  * one authenticates in its own way, or is safe to answer to anyone. */
-import {activity, candidateInput} from '../shared/core.js';
+import {activity} from '../shared/core.js';
 import * as wf from '../shared/workflow.js';
 import * as agent from './agent.js';
 import {onAgentTaskResult, continueBrowserWork, setBrowserResultHooks} from './bot-browser.js';
@@ -129,21 +129,6 @@ export function publicRoutes(router, {auth, workspaces, version}) {
     const b = await c.body();
     auth.consumePasswordReset(b.token, b.password);
     return {ok: true};
-  });
-
-  // A separate token limits the extension to adding a candidate and nothing else.
-  router.add('POST', '/api/capture', 'public', async c => {
-    const token = c.req.headers['x-capture-token'];
-    // Read the token without copying the whole workspace: this runs before
-    // the caller has proved anything.
-    const store = token ? workspaces.byCaptureToken(token) : null;
-    if (!store) fail('Invalid extension token.', 401);
-    const body = candidateInput(await c.body());
-    const add = async () => {
-      const result = await store.update(s => wf.addCandidate(s, body));
-      return reply(result.duplicate ? 200 : 201, result);
-    };
-    return store.trackWork ? store.trackWork(add) : add();
   });
 
   // Local-agent protocol. Pairing redeems a one-time code; the other routes

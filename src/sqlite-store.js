@@ -15,7 +15,7 @@
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {initialState, uuid} from '../shared/core.js';
+import {initialState} from '../shared/core.js';
 import crypto from 'node:crypto';
 import {sqlite} from './sqlite.js';
 import * as wf from '../shared/workflow.js';
@@ -526,7 +526,6 @@ export class SqliteStore {
       version: 2,
       createdAt: this.kvGet('created_at') || now(),
       settings: {topics: [], style: '', opinions: '', minDelay: 2, maxDelay: 10},
-      captureToken: this.kvGet('capture_token'),
       groups: [], candidates: [], drafts: [], runs: [], tasks: [], events: [],
       groupMessages: {}, groupRuns: [], chats: {},
       ai: (() => { try { return JSON.parse(this.kvGet('ai') || '{}'); } catch { return {}; } })(),
@@ -543,7 +542,6 @@ export class SqliteStore {
         try { s.settings.retention = JSON.parse(cfg.retention); } catch { /* ignore */ }
       }
     }
-    if (!s.captureToken) { s.captureToken = uuid().replaceAll('-', ''); this.kvSet('capture_token', s.captureToken); }
     for (const g of this.db.prepare('SELECT * FROM groups ORDER BY rowid').all()) {
       g.bots = this.db.prepare('SELECT * FROM bots WHERE group_id=? ORDER BY rowid').all(g.id).map(b => ({
         id: b.id, name: b.name, instructions: b.instructions, type: b.type,
@@ -617,7 +615,6 @@ export class SqliteStore {
         for (const row of upserts) upsert.run(...row.params);
       }
       this.kvSet('created_at', state.createdAt || now());
-      this.kvSet('capture_token', state.captureToken);
       this.kvSet('ai', JSON.stringify(state.ai || {}));
       this.kvSet('browser_requests', JSON.stringify(state.browserRequests || []));
       this.stmt('INSERT INTO settings (id,topics,style,opinions,min_delay,max_delay,retention) VALUES (1,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET topics=excluded.topics, style=excluded.style, opinions=excluded.opinions, min_delay=excluded.min_delay, max_delay=excluded.max_delay, retention=excluded.retention')
@@ -649,7 +646,6 @@ export class SqliteStore {
   /** Wait for queued writes, then release the file. Used when a workspace is deleted. */
   async close() { await this.serial; this.stmts.clear(); this.written.clear(); this.db.close(); }
   read() { return structuredClone(this.cache); }
-  captureToken() { return this.cache.captureToken; }
   async persist(state = this.cache) { this.writeCollections(state); this.cache = state; }
   /** Queue one read-copy-write of the whole document behind every write already
    * waiting. Every change to the cache has to pass through here: a mutation made

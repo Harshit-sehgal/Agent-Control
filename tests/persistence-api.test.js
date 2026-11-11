@@ -99,8 +99,6 @@ test('a viewer never receives the capture token, and backups are for the owner o
       return (await t.send('POST', '/api/login', {email, password: 'some-password-1234'})).cookie.split(';')[0];
     };
     const viewer = await make('viewer@example.com', 'viewer'), admin = await make('admin@example.com', 'admin');
-    assert.equal(typeof (await t.send('GET', '/api/state', undefined, owner)).body.captureToken, 'string');
-    assert.equal((await t.send('GET', '/api/state', undefined, viewer)).body.captureToken, undefined);
     // A backup carries no usable password and a restore rewrites roles: not for admins.
     assert.equal((await t.send('GET', '/api/admin/backup', undefined, admin)).status, 403);
     assert.equal((await t.send('POST', '/api/admin/restore', {force: true}, admin)).status, 403);

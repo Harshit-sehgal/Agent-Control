@@ -1,18 +1,18 @@
 /** What the UI can do, as three lookup tables keyed by `data-action`, form id and
  * control id. app.js owns the DOM events and dispatches here; handlers throw on
  * failure and the dispatcher turns that into one toast. */
-import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, setPref, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns} from './ui-store.js?v=3b5334879a';
-import {botSettings, groupSettings} from './bot-settings.js?v=3b5334879a';
-import {completeMention, moveRow, pipelineValue, draftLength, lengthLabel, threadPosts} from './ui-model.js?v=3b5334879a';
-import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=3b5334879a';
-import {sendChat, streamGroupRun, watchQueuedRun} from './ui-chat.js?v=3b5334879a';
-import {runWithTyping} from './run-follow.js?v=3b5334879a';
-import {confetti, whoosh, react, poke} from './ui-fx.js?v=3b5334879a';
-import {renderList, renderMentions} from './ui-views.js?v=3b5334879a';
-import {refreshLists, reloadAdminPage, pipelineList} from './ui-panel.js?v=3b5334879a';
-import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, botTaskSheet, scheduleDraftSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=3b5334879a';
-import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=3b5334879a';
-import {takeoverActions, takeoverForms} from './ui-takeover.js?v=3b5334879a';
+import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, setPref, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns} from './ui-store.js?v=58435bfdb8';
+import {botSettings, groupSettings} from './bot-settings.js?v=58435bfdb8';
+import {completeMention, moveRow, pipelineValue, draftLength, lengthLabel, threadPosts} from './ui-model.js?v=58435bfdb8';
+import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=58435bfdb8';
+import {sendChat, streamGroupRun, watchQueuedRun} from './ui-chat.js?v=58435bfdb8';
+import {runWithTyping} from './run-follow.js?v=58435bfdb8';
+import {confetti, whoosh, react, poke} from './ui-fx.js?v=58435bfdb8';
+import {renderList, renderMentions} from './ui-views.js?v=58435bfdb8';
+import {refreshLists, reloadAdminPage, pipelineList} from './ui-panel.js?v=58435bfdb8';
+import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, sharePostSheet, reminderSheet, botTaskSheet, scheduleDraftSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=58435bfdb8';
+import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=58435bfdb8';
+import {takeoverActions, takeoverForms} from './ui-takeover.js?v=58435bfdb8';
 
 const adminCtx = {reload: reloadAdminPage};
 const chatId = () => store.route.chat;
@@ -121,11 +121,6 @@ export const actions = {
     if (base.contract || base.permissions) await api(`/api/groups/${group.id}/bots/${copy.id}`, 'PATCH', {contract: base.contract, permissions: base.permissions || []});
     setProfile(copy.id, {avatarIndex: store.profiles[id]?.avatarIndex ?? 0});
     await sync(); go({chat: copy.id}); toast('Bot duplicated. Its chat starts empty.');
-  },
-  'copy-capture-token': () => copyText(store.state.captureToken || '', 'Capture token copied'),
-  'rotate-capture-token': async () => {
-    if (!await confirmSheet('Replace the capture token?', {confirm: 'Replace', danger: true, detail: 'The token in every browser extension stops working until the new one is pasted in. Captured posts already here are not affected.'})) return;
-    await api('/api/capture-token', 'POST', {}); toast('New capture token created. Paste it into the extension.'); await sync();
   },
   'copy-bot-instructions': b => copyText(findBot(b.dataset.id).instructions || '', 'Instructions copied'),
 

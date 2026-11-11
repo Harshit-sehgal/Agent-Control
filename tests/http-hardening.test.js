@@ -141,37 +141,6 @@ test('one authenticated request cannot reach a prototype key, a phantom setting,
     assert.match(String(badRole.body?.error || ''), /Unknown role/);
     assert.equal((await send('GET', '/api/users', undefined, cookie)).body.users.length, users.length, 'no account was created');
 
-    // 5. Material marked "do not reuse" blocks approval instead of being ignored.
-    const captured = await send('POST', '/api/capture', {
-      url: 'https://x.com/test/status/9001',
-      text: 'How can robotics models become more reliable in practice?',
-      author: 'Tester', topic: 'robotics',
-    }, undefined, {'X-Capture-Token': state.captureToken, Origin: 'chrome-extension://example'});
-    assert.equal(captured.status, 201);
-    const processed = await send('POST', `/api/candidates/${captured.body.candidate.id}/process`, {}, cookie);
-    assert.equal(processed.status, 201);
-    const draftId = processed.body.id;
-    const added = await send('POST', `/api/drafts/${draftId}/evidence`, {
-      kind: 'claim', claim: 'A source that must not be reused.', confidence: 0.6, reuse: 'none',
-    }, cookie);
-    assert.equal(added.status, 201);
-    assert.equal(added.body.verification, 'unverified', 'new evidence starts unverified');
-    const blocked = await send('POST', `/api/drafts/${draftId}/approve`, {minDelay: 0, maxDelay: 0}, cookie);
-    assert.equal(blocked.status, 409);
-    assert.match(String(blocked.body?.error || ''), /do not reuse/i);
-    // Changing the policy to something usable unblocks the same draft.
-    const id = added.body.id;
-    const fixed = await send('PATCH', `/api/evidence/${id}`, {reuse: 'internal'}, cookie);
-    if (fixed.status !== 200) {
-      // No PATCH route for evidence: drop and re-add under a usable policy.
-      assert.equal((await send('DELETE', `/api/evidence/${id}`, undefined, cookie)).status, 200);
-      const readded = await send('POST', `/api/drafts/${draftId}/evidence`, {
-        kind: 'claim', claim: 'A source that may be used internally.', confidence: 0.6, reuse: 'internal',
-      }, cookie);
-      assert.equal(readded.status, 201);
-    }
-    const allowed = await send('POST', `/api/drafts/${draftId}/approve`, {minDelay: 0, maxDelay: 0}, cookie);
-    assert.equal(allowed.status, 200, `approval should succeed once the reuse policy allows it: ${JSON.stringify(allowed.body)}`);
   } finally {
     await t.stop();
   }

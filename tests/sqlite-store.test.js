@@ -19,11 +19,9 @@ test('a fresh database seeds the built-in workspace and persists updates across 
   const group = first.read().groups.find(g => g.id === 'x-engage');
   assert.ok(group, 'The built-in X-engage group must exist on first boot.');
   assert.equal(group.bots.length, 6);
-  const token = first.read().captureToken;
   await first.update(s => { s.candidates.push({id: 'c1', url: 'https://example.com/a', text: 'A candidate long enough', author: 'T', topic: 'AI', status: 'new', createdAt: new Date().toISOString()}); });
   const reopened = await new SqliteStore(db, path.join(path.dirname(db), "state.json")).init();
   assert.equal(reopened.read().candidates.length, 1);
-  assert.equal(reopened.read().captureToken, token, 'The capture token must be stable across restarts.');
   // Migration must be idempotent on an existing database.
   await reopened.migrate();
   assert.equal(reopened.get('SELECT version FROM schema_meta WHERE id=1').version, SCHEMA_DB_VERSION);
@@ -44,12 +42,11 @@ test('a newer legacy JSON export is imported, and an older one is ignored', asyn
   const {dir, db, legacy} = await sandbox();
   const fresh = await new SqliteStore(db, legacy).init();
   assert.equal(fresh.read().candidates.length, 0);
-  const backup = {version: 2, settings: {topics: ['AI'], style: '', opinions: '', minDelay: 0, maxDelay: 1}, captureToken: 'legacy-token',
+  const backup = {version: 2, settings: {topics: ['AI'], style: '', opinions: '', minDelay: 0, maxDelay: 1},
     groups: [{id: 'g1', name: 'Legacy', bots: []}], candidates: [{id: 'c1', url: 'https://example.com/a', author: 'A', topic: 'AI', text: 'hello world this is text', status: 'new'}], drafts: [], runs: [], events: []};
   await fs.writeFile(legacy, JSON.stringify(backup));
   const imported = await new SqliteStore(db, legacy).init();
   assert.equal(imported.read().candidates.length, 1, 'The newer legacy document must be imported.');
-  assert.equal(imported.read().captureToken, 'legacy-token');
   assert.equal(imported.read().groups[0].id, 'g1');
   // Restarting again without touching the file must not re-import or duplicate.
   const again = await new SqliteStore(db, legacy).init();

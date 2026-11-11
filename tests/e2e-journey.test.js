@@ -131,21 +131,20 @@ test('a workspace runs end to end over HTTP: invite, capture, draft, evidence, a
     const bot = await call('POST', `/api/groups/${group.id}/bots`, {name: 'Sam assistant', instructions: 'Draft a careful reply.', type: 'writing'}, sam);
     assert.equal(bot.status, 201, JSON.stringify(bot.body));
 
-    // A post the extension captured arrives with its token, not a session.
-    const captured = await call('POST', '/api/capture', {
+    const captured = await call('POST', '/api/candidates', {
       url: 'https://x.com/lab/status/4242',
       text: 'What is the smallest useful step toward a reliable robotics benchmark?',
       author: 'Lab', topic: 'robotics',
-    }, undefined, {'X-Capture-Token': state.captureToken, Origin: 'chrome-extension://e2e'});
+    }, sam);
     assert.equal(captured.status, 201, JSON.stringify(captured.body));
-    const candidateId = captured.body.candidate.id;
+    const candidateId = captured.body.id;
 
-    // The same capture twice is the same candidate, not a second one.
-    const again = await call('POST', '/api/capture', {
+    // The same post twice is the same candidate, not a second one.
+    const again = await call('POST', '/api/candidates', {
       url: 'https://x.com/lab/status/4242',
       text: 'What is the smallest useful step toward a reliable robotics benchmark?',
       author: 'Lab', topic: 'robotics',
-    }, undefined, {'X-Capture-Token': state.captureToken, Origin: 'chrome-extension://e2e'});
+    }, sam);
     assert.equal(again.status, 200, 'a duplicate capture is recognised');
     assert.equal(again.body.duplicate, true);
 
@@ -201,11 +200,11 @@ test('a workspace runs end to end over HTTP: invite, capture, draft, evidence, a
     assert.equal(real.mode, undefined, 'a browser write is never model output');
 
     // ---- A capture nobody committed to can be removed ----------------------
-    const spare = await call('POST', '/api/capture', {
+    const spare = await call('POST', '/api/candidates', {
       url: 'https://x.com/lab/status/9999', text: 'A post that turned out to be noise, captured by mistake.',
-    }, undefined, {'X-Capture-Token': state.captureToken, Origin: 'chrome-extension://e2e'});
+    }, sam);
     assert.equal(spare.status, 201, JSON.stringify(spare.body));
-    const spareId = spare.body.candidate.id;
+    const spareId = spare.body.id;
     assert.equal((await call('DELETE', `/api/candidates/${spareId}`, {}, vic)).status, 403, 'a viewer may not remove a capture');
     assert.equal((await call('DELETE', `/api/candidates/${spareId}`, {}, sam)).status, 200);
     assert.ok(!(await call('GET', '/api/state', undefined, sam)).body.candidates.some(c => c.id === spareId), 'the capture is gone');
@@ -216,15 +215,6 @@ test('a workspace runs end to end over HTTP: invite, capture, draft, evidence, a
     assert.match(String(pinned.body?.error || ''), /posted draft/);
     // Removing it twice is a 404, not a silent success.
     assert.equal((await call('DELETE', `/api/candidates/${spareId}`, {}, sam)).status, 404);
-
-    // ---- Replacing the capture token retires the old one -------------------
-    const capture = token => call('POST', '/api/capture', {url: 'https://x.com/lab/status/5150', text: 'A post captured to try a token.'}, undefined, {'X-Capture-Token': token, Origin: 'chrome-extension://e2e'});
-    assert.equal((await call('POST', '/api/capture-token', {}, sam)).status, 403, 'a member cannot replace a workspace credential');
-    const rotated = await call('POST', '/api/capture-token', {}, owner);
-    assert.equal(rotated.status, 200, JSON.stringify(rotated.body));
-    assert.notEqual(rotated.body.captureToken, state.captureToken);
-    assert.equal((await capture(state.captureToken)).status, 401, 'the retired token stops capturing');
-    assert.equal((await capture(rotated.body.captureToken)).status, 201, 'and the new one works');
 
     // ---- The workspace can be moved, but it carries no secrets -------------
     const backup = await call('GET', '/api/admin/backup', undefined, owner);

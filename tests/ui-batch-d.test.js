@@ -162,14 +162,6 @@ test('a landing chip asks the group it belongs to', () => {
   assert.match(views, /data-action="home-ask" data-id="\$\{esc\(group\?\.id \|\| ''\)\}"/);
 });
 
-test('a control is offered to the role the route behind it accepts', () => {
-  // Replacing the capture token is admin-only at the route, and `canWrite()`
-  // includes members: a member saw the row, confirmed a consequence ("every
-  // browser needs the new one") that would not happen, and got a 403.
-  assert.match(panel, /isAdmin\(\) \? row\(\{title: 'Replace capture token'/);
-  assert.doesNotMatch(panel, /canWrite\(\) \? row\(\{title: 'Replace capture token'/);
-});
-
 test('long titles wrap instead of overflowing, and dead hover rules stay deleted', () => {
   assert.match(css, /\.hero h2\{margin-top:8px;font-size:22px;font-weight:700;overflow-wrap:anywhere\}/);
   assert.match(css, /\.row-title\{font-size:15px;overflow-wrap:anywhere\}/);

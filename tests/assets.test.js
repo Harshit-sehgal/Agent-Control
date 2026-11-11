@@ -140,7 +140,7 @@ test('the served list names real files, exactly once',async()=>{
 
 test('styles, install assets and the page itself are in the one list',async()=>{
   const listed=new Set(ASSETS);
-  for(const name of ['index.html','app.css','manifest.webmanifest','icon-192.png','icon-512.png','demo-feed.html']){
+  for(const name of ['index.html','app.css','manifest.webmanifest','icon-192.png','icon-512.png']){
     assert.ok(listed.has(name),`${name} is missing from shared/assets.js`);
   }
   // The list is consumed by a Node build script and by the server, never by the

@@ -20,5 +20,5 @@ export const ASSETS = [
   'core.js', 'errors.js', 'workflow.js', 'tasks.js', 'evidence.js', 'contracts.js', 'bot-settings.js', 'bot-browser.js', 'bot-create.js', 'bot-link.js', 'reply-blocks.js', 'subagents.js', 'retention.js', 'memory.js', 'run-state.js',
   'coordination.js', 'chats.js', 'group-simulator.js', 'chat-engine.js', 'usability.js', 'locks.js', 'ai-presets.js', 'run-follow.js',
   // Static pages and install assets.
-  'demo-feed.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png',
+  'manifest.webmanifest', 'icon-192.png', 'icon-512.png',
 ];

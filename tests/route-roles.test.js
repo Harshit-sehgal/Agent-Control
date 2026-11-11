@@ -84,7 +84,6 @@ const PUBLIC_ROUTES = [
   'POST /api/logout',
   'POST /api/auth/forgot',
   'POST /api/auth/reset',
-  'POST /api/capture',
 ];
 
 /** A public route with an id segment would be an unauthenticated lookup by id.
