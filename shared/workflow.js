@@ -16,6 +16,7 @@ import {BUSY_STATUSES} from './coordination.js';
 import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js';
 import {memoryState} from './memory.js';
 import {MAX_BOTS_PER_GROUP} from './bot-create.js';
+import {assertManager, releaseReports, PRIMARY_GROUP} from './company.js';
 
 export const SCHEMA_VERSION = 3;
 
@@ -102,6 +103,7 @@ export function addBot(state, groupId, body) {
     permissions: contracts.validatePermissions(body.permissions),
   });
   if (body.settings !== undefined) bot.settings = validateBotSettings(body.settings);
+  if (bot.settings?.reportsTo) assertManager(state, bot.id, bot.settings.reportsTo);
   g.bots.push(bot);
   if (bot.settings?.lead) for (const other of g.bots) if (other !== bot && other.settings?.lead) other.settings = {...other.settings, lead: false};
   activity(state, 'bot', `Created bot ${name}.`);
@@ -126,6 +128,7 @@ export function updateBot(state, groupId, botId, body) {
   // land on the wrong teammate.
   if (g.bots.some(other => other !== bot && other.name.trim().toLowerCase() === name.toLowerCase())) fail(`A bot named ${name} is already in this group.`, 409);
   const settings = body.settings === undefined ? undefined : validateBotSettings(body.settings, bot.settings);
+  if (settings && settings.reportsTo !== (bot.settings?.reportsTo ?? null)) assertManager(state, bot.id, settings.reportsTo);
   if (body.contract !== undefined) bot.contract = contracts.validateContract(body.contract);
   if (body.permissions !== undefined) bot.permissions = contracts.validatePermissions(body.permissions);
   bot.name = name;
@@ -196,6 +199,7 @@ export function removeBot(state, groupId, botId) {
   if (pipeline.includes(botId) && pipeline.every(id => id === botId)) {
     fail(`${bot.name} is the only bot in this group's pipeline. Add another bot to the pipeline, or clear it, before removing ${bot.name}.`, 409);
   }
+  releaseReports(state, botId);
   g.bots = g.bots.filter(x => x.id !== botId);
   prunePipeline(g);
   forgetBot(state, botId);
@@ -206,6 +210,8 @@ export function removeBot(state, groupId, botId) {
 
 export function removeGroup(state, groupId) {
   const g = findGroup(state, groupId);
+  if (g.id === PRIMARY_GROUP) fail('The company holds every bot and cannot be deleted. Delete bots one at a time.', 409);
+  for (const b of g.bots) releaseReports(state, b.id);
   state.groups = state.groups.filter(x => x.id !== groupId);
   for (const b of g.bots) forgetBot(state, b.id);
   if (state.chats) delete state.chats[`team-${groupId}`];

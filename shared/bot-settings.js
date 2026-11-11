@@ -10,6 +10,7 @@
 import {cleanText} from './core.js';
 import {fail} from './errors.js';
 import {TINT_COUNT} from './ui-kit.js';
+import {SHAPES} from './company.js';
 
 export const REPLY_LENGTHS = {short: 500, medium: 1500, long: 3000};
 export const ROUTING_MODES = ['pipeline', 'mentions', 'everyone'];
@@ -44,6 +45,13 @@ export const BOT_DEFAULTS = Object.freeze({
   /** ask: each browser request waits for a person. auto: it goes to the local
    * agent at once, still inside that device's allowlist and permissions. */
   browserApproval: 'ask',
+  /** The manager's bot id, or null for Solo. The chart rules are in company.js. */
+  reportsTo: null,
+  /** One of company.js SHAPES, or null for the role default. */
+  shape: null,
+  /** Pinned to the top of the chat list, and its place in the saved order. */
+  pinned: false,
+  order: null,
 });
 export const BROWSER_APPROVALS = ['ask', 'auto'];
 
@@ -114,6 +122,16 @@ export function validateBotSettings(body, current = {}) {
     if (!BROWSER_APPROVALS.includes(body.browserApproval)) fail(`Browser approval must be one of: ${BROWSER_APPROVALS.join(', ')}.`);
     next.browserApproval = body.browserApproval;
   }
+  if (body.reportsTo !== undefined) {
+    if (body.reportsTo !== null && body.reportsTo !== '' && typeof body.reportsTo !== 'string') fail('A manager must be a bot id, or empty for Solo.');
+    next.reportsTo = body.reportsTo ? cleanText(body.reportsTo, 80) : null;
+  }
+  if (body.shape !== undefined) {
+    if (body.shape !== null && !SHAPES.includes(body.shape)) fail(`Shape must be one of: ${SHAPES.join(', ')}.`);
+    next.shape = body.shape;
+  }
+  if (body.pinned !== undefined) next.pinned = flag(body.pinned, 'Pinned');
+  if (body.order !== undefined) next.order = body.order === null ? null : integer(body.order, 0, 100000, 'Order');
   if (body.tint !== undefined) next.tint = body.tint === null ? null : integer(body.tint, 0, TINT_COUNT - 1, 'Colour');
   return next;
 }
