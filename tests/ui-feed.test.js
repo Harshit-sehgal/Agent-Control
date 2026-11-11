@@ -12,7 +12,7 @@ const msg = (id, role, n, extra = {}) => ({id, role, at: at(n), text: id, ...ext
 const run = (extra = {}) => ({id: 'r1', groupId: 'th-1', status: 'completed', recipients: ['atlas', 'plan', 'atlas'], currentStep: 3, createdAt: at(1), trace: [
   {botId: 'atlas', output: '@Planner plan it'}, {botId: 'plan', output: 'Wednesday is free.'}, {botId: 'atlas', output: 'Done: Wednesday.'},
 ], ...extra});
-const stateOf = (runs = [], messages = []) => ({groups: [{id: 'home', bots: [atlas, plan], settings: {}}, {id: 'th-1', bots: [], settings: {kind: 'thread'}}], groupRuns: runs, chats: {[KEY]: messages}, browserRequests: []});
+const stateOf = (runs = [], messages = []) => ({groups: [{id: 'home', bots: [atlas, plan], settings: {}}, {id: 'th-1', bots: [], settings: {kind: 'thread'}}], groupRuns: runs, chats: {[KEY]: messages}, browserRequests: [], asks: [{id: 'a1', botId: 'plan', status: 'pending', action: 'browser.use'}]});
 const build = (messages, runs = [], key = KEY) => {
   const state = stateOf(runs, messages);
   return feed({items: timeline({conv: {id: key}, state, messages: {[key]: messages}}), state, key});
@@ -133,7 +133,7 @@ test('the runaway guard line asks Keep going or Stop only while bots are still p
 
 const askLine = (id, n, extra = {}) => msg(id, 'system', n, {kind: 'ask', askId: id.replace('ask-', ''), ...extra});
 
-test('an ask line becomes an ask entry that carries its line, and an answered one stays where it was', () => {
+test('an ask line becomes an ask entry that carries its line while it waits', () => {
   const out = build([msg('q', 'user', 1), askLine('ask-a1', 2), msg('later', 'bot', 3, {senderId: 'atlas'})]);
   assert.deepEqual(kinds(out), ['day', 'me', 'ask', 'bot']);
   assert.equal(out[2].message.askId, 'a1');

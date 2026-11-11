@@ -148,6 +148,12 @@ export function continueBrowserWork(store, spec, {runBot, runGroup}) {
   return runGroup(store, spec);
 }
 
+/** Which page this is, so a bot (or a teammate handed it later) knows it already read that address. */
+const pageHeading = (request, result) => {
+  const url = cleanText(result?.finalUrl || result?.url || request.url, 500), title = cleanText(result?.title, 200);
+  return `Page: ${url}${title ? `\nTitle: ${title}` : ''}${request.find ? `\nPassages holding: ${request.find}` : ''}\n\n`;
+};
+
 /** A browser request finished, here or on a device. Record the result, post the
  * chat line, and give the page back to the bot that asked for it. */
 export async function finishBrowserRequest(store, request, {ok, result = null, error = null}, hooks = resultHooks) {
@@ -155,7 +161,7 @@ export async function finishBrowserRequest(store, request, {ok, result = null, e
   // The owner took the browser while it ran: the steps after that point were not run, and what comes
   // back is the page as they left it. The chat and the bot are each told so.
   const tookOver = ok && result?.tookOver === true;
-  const captured = ok ? `${tookOver ? 'The owner took over the browser while this ran, so the steps after that point were not run. This is the page as they left it.\n\n' : ''}${capturePageText(result)}` : '';
+  const captured = ok ? `${tookOver ? 'The owner took over the browser while this ran, so the steps after that point were not run. This is the page as they left it.\n\n' : ''}${pageHeading(request, result)}${capturePageText(result, 12000, request.find || '')}` : '';
   const text = ok ? `${browserResultText(request, result)}${tookOver ? '\n\nYou took over the browser, so the steps after that point were not run. This is the page as you left it.' : ''}` : `${request.botName}'s browser request failed: ${cleanText(error, 300) || 'the browser reported a failure.'}`;
   const done = await store.update(s => {
     const live = (s.browserRequests || []).find(r => r.id === request.id);
@@ -227,7 +233,7 @@ export async function handBackTakeover(store, sessionId, {runtime = browserRunti
   const text = String(page?.text || '');
   const result = {
     url, finalUrl: url, title: page?.title || null,
-    excerpt: text.slice(0, 600), text: text.slice(0, 4000),
+    excerpt: text.slice(0, 600), text: text.slice(0, 60000),
     elements: Array.isArray(page?.elements) ? page.elements : [],
     elementCount: Number(page?.elementCount) || 0,
     blockedRequests: Number(page?.blockedRequests) || 0,

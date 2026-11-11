@@ -27,7 +27,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import {isPrivateAddress} from './net-guard.mjs';
-import {hostAllowed, isPostingHost, RISKS, CHECKOUT_PATH} from '../shared/bot-browser.js';
+import {hostAllowed, isPostingHost, RISKS, CHECKOUT_PATH, botCheck, searchAlternates} from '../shared/bot-browser.js';
 
 // The allowlist rule lives with the rest of the browser-block rules in
 // `shared/bot-browser.js`, so the server runtime and this device read the same
@@ -75,6 +75,10 @@ const PICKABLE = `(function(){var sel='a[href],button,input,textarea,select,[rol
  * without inventing a CSS selector, which is what makes an agent's second step
  * reliable on a page it has never seen; the attributes make the step cheap.
  * Both lists come from the same `PICKABLE` expression in the same page load. */
+/** A page's words for the bot: the main article when the page marks one (menus and sidebars left out), else the whole body. */
+// The page's links with their addresses: text alone drops where a search result leads.
+const LINKS = '(function(){var m=document.querySelector(\'main, article, [role=main], #content, #b_results, #links\')||document.body;if(!m)return [];var seen={},out=[];m.querySelectorAll(\'a[href]\').forEach(function(a){var t=(a.innerText||\'\').replace(/\\s+/g,\' \').trim();var h=a.href;if(out.length>=40||t.length<4||!/^https?:/.test(h)||seen[h])return;seen[h]=1;out.push({text:t.slice(0,100),url:h.slice(0,300)});});return out;})()';
+const MAIN_TEXT = '(function(){var b=document.body;if(!b)return "";var m=document.querySelector(\'main, article, [role=main], #content\');var t=m?m.innerText:"";return (t&&t.length>400?t:b.innerText).slice(0,60000);})()';
 const SNAPSHOT = `(function(){var els=${PICKABLE};els.forEach(function(e,i){e.setAttribute('data-agent-index',String(i+1));});return {count:els.length,elements:els.slice(0,${MAX_ELEMENTS}).map(function(e,i){var t=(e.innerText||e.value||e.getAttribute('aria-label')||e.getAttribute('placeholder')||e.name||'');return {index:i+1,tag:e.tagName.toLowerCase(),text:String(t).replace(/\\s+/g,' ').trim().slice(0,80)};})};})()`;
 /** A step targets an element by the index from the last snapshot, or by a CSS
  * selector when the model prefers one. */
@@ -302,7 +306,7 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
    * remaining step is reported as not run instead of being applied to a page
    * someone else changed, and the result says `tookOver`. The gate may wait, so
    * the load deadline is paused for as long as it does. */
-  async function capture(url, {allow, steps = [], approved = [], timeoutMs = 20000, tab = null, onPage = null, settleMs = 600, gate = null} = {}) {
+  async function capture(url, {allow, steps = [], approved = [], timeoutMs = 60000, tab = null, onPage = null, settleMs = 600, gate = null} = {}) {
     if (!hostAllowed(url, allow)) throw new Error(`Refusing to open ${url}: its host is not in AGENT_BROWSER_ALLOWLIST.`);
     const blockedBefore = refused.length, blocked = [];
     let deadlineTimer = null, contextId = null, targetId = tab ? tab.targetId : null, left = timeoutMs, armedAt = 0, fail;
@@ -388,15 +392,30 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
             const {result} = await cdp.send('Runtime.evaluate', {expression, awaitPromise: true, returnByValue: true}, sessionId);
             actions.push({op: step.op, ...(result?.value && typeof result.value === 'object' ? result.value : {ok: false})});
           }
-          const {result} = await cdp.send('Runtime.evaluate', {returnByValue: true, expression: `JSON.stringify({url: location.href, title: document.title, text: (document.body ? document.body.innerText : "").slice(0, 20000), snapshot: ${SNAPSHOT}})`}, sessionId);
-          const page = JSON.parse(result.value);
+          const look = async () => JSON.parse((await cdp.send('Runtime.evaluate', {returnByValue: true, expression: `JSON.stringify({url: location.href, title: document.title, text: ${MAIN_TEXT}, links: ${LINKS}, snapshot: ${SNAPSHOT}})`}, sessionId)).result.value);
+          let page = await look();
+          // A "checking your browser" wall often clears itself in a few seconds; wait for it rather than hand the bot the wall.
+          for (let i = 0; i < 8 && botCheck(page.title, page.text); i++) { await new Promise(resolve => setTimeout(resolve, 1000)); page = await look(); }
+          // A search engine that still shows a human check: the same search on another engine. Nobody solves the check.
+          if (!steps.length && botCheck(page.title, page.text)) for (const other of searchAlternates(page.url || url)) {
+            if (!hostAllowed(other, allow)) continue;
+            const next = new Promise(resolve => { const off = pageOn('Page.loadEventFired', () => { off(); resolve(); }); });
+            const nav = await cdp.send('Page.navigate', {url: other}, sessionId);
+            if (nav.errorText) continue;
+            await next; await new Promise(resolve => setTimeout(resolve, settleMs));
+            page = await look();
+            onPage?.({url: page.url, title: page.title || null});
+            if (!botCheck(page.title, page.text)) break;
+          }
           onPage?.({url: page.url, title: page.title || null});
           if (!hostAllowed(page.url, allow)) throw new Error(`The page ended up on ${new URL(page.url).host}, which is not in AGENT_BROWSER_ALLOWLIST.`);
           const text = page.text.replace(/\s+/g, ' ').trim();
           const snapshot = page.snapshot && typeof page.snapshot === 'object' ? page.snapshot : {count: 0, elements: []};
           return {
             url, finalUrl: page.url, title: page.title || null,
-            excerpt: text.slice(0, 600), text: text.slice(0, 4000),
+            excerpt: text.slice(0, 600), text: text.slice(0, 60000),
+            links: Array.isArray(page.links) ? page.links : [],
+            ...(botCheck(page.title, text) ? {botCheck: true} : {}),
             // What the model can act on next: a short, numbered list of the
             // controls a person would see, not the raw HTML.
             elements: Array.isArray(snapshot.elements) ? snapshot.elements : [],
@@ -456,7 +475,7 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
    * navigation must be on the allowlist, the egress proxy still refuses private
    * and local addresses, and click and type on X and Twitter is still refused.
    * Signing in is the point; publishing from here is not. */
-  async function open(url, {allow, timeoutMs = 25000} = {}) {
+  async function open(url, {allow, timeoutMs = 60000} = {}) {
     if (!hostAllowed(url, allow)) throw new Error(`Refusing to open ${url}: its host is not in AGENT_BROWSER_ALLOWLIST.`);
     const blockedBefore = refused.length, blocked = [];
     const {browserContextId: contextId} = await cdp.send('Target.createBrowserContext');
@@ -478,12 +497,12 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
       const evaluate = expression => cdp.send('Runtime.evaluate', {expression, returnByValue: true, awaitPromise: true}, sessionId);
 
       async function read() {
-        const {result} = await evaluate(`JSON.stringify({url: location.href, title: document.title, ready: document.readyState, text: (document.body ? document.body.innerText : "").slice(0, 20000), snapshot: ${SNAPSHOT}})`);
+        const {result} = await evaluate(`JSON.stringify({url: location.href, title: document.title, ready: document.readyState, text: ${MAIN_TEXT}, snapshot: ${SNAPSHOT}})`);
         const page = JSON.parse(result.value);
         const snap = page.snapshot && typeof page.snapshot === 'object' ? page.snapshot : {count: 0, elements: []};
         return {
           url: page.url, title: page.title || null,
-          text: String(page.text || '').replace(/\s+/g, ' ').trim().slice(0, 4000),
+          text: String(page.text || '').replace(/\s+/g, ' ').trim().slice(0, 60000),
           elements: Array.isArray(snap.elements) ? snap.elements : [], elementCount: Number(snap.count) || 0,
           blockedRequests: blocked.length + (refused.length - blockedBefore),
         };

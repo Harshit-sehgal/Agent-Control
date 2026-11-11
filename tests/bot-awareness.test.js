@@ -10,7 +10,7 @@ import {createEnvelope} from '../shared/coordination.js';
 test('the browser hint says any public site works and how to search, and nothing about an allowlist', () => {
   assert.doesNotMatch(BROWSER_TOOL_HINT, /allowlist/i);
   assert.match(BROWSER_TOOL_HINT, /Any public site works, including X and YouTube/);
-  assert.match(BROWSER_TOOL_HINT, /https:\/\/html\.duckduckgo\.com\/html\/\?q=/);
+  assert.match(BROWSER_TOOL_HINT, /https:\/\/www\.bing\.com\/search\?q=/);
   assert.match(BROWSER_TOOL_HINT, /never click or type on X/);
   assert.match(BROWSER_TOOL_HINT, /several blocks in one reply/);
 });

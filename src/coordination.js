@@ -17,7 +17,7 @@ import {botSettings,groupSettings,threadContext,MAX_STEPS_LIMIT} from '../shared
 import {stepsCap,limitsOf,FAIL_STREAK} from '../shared/limits.js';
 import {addChatMessages} from '../shared/chats.js';
 import {assertContractOutput} from '../shared/contracts.js';
-import {recordBrowserRequests,stripBrowserBlocks,parseBrowserRequests,MAX_BROWSER_DEPTH} from '../shared/bot-browser.js';
+import {recordBrowserRequests,stripBrowserBlocks,isSearchPage,parseBrowserRequests,MAX_BROWSER_DEPTH} from '../shared/bot-browser.js';
 import {orphanAsks} from '../shared/asks.js';
 import {addAskCards,notifyAsks} from './ask-cards.js';
 import {MAX_SUBAGENT_DEPTH} from '../shared/subagents.js';
@@ -368,7 +368,9 @@ async function runGroupInner(store,id,executor){
         newAsks=[...browsed.asks,...conn.asks];
         // Text around the browser fences is the browser helper's view of the
         // reply; with nothing to browse, the approved value is the output.
-        previous.output=((browsed.records.length?browsed.text:gated).trim()?(browsed.records.length?browsed.text:gated):conn.text).slice(0,3600);
+        // A reply that held a browser block (opened, refused or a repeat) is shown without it: a block is never chat text.
+        const browsedAny=browsed.records.length||browsed.lines.length;
+        previous.output=((browsedAny?browsed.text:gated).trim()?(browsedAny?browsed.text:gated):stripBrowserBlocks(conn.text)).slice(0,3600);
         // A page the owner is already fine with goes out at once. When any page in the reply needs an
         // answer the whole reply waits for it, so the pages come back together.
         if(!browsed.asks.length)auto=browsed.records;
@@ -404,8 +406,23 @@ async function runGroupInner(store,id,executor){
         // Nothing new to fetch: the rounds ran out, or every page asked for is one it already read. The bot gets a
         // turn to answer from what it has; doing it again and again (FAIL_STREAK rounds) stops the run.
         delete live.browserNote;
+        // Searching again and again without opening a result is no progress: after three rounds the bot is told so.
+        if(browsed.records.length){
+          live.searchStreak=browsed.records.every(r=>isSearchPage(r.url))?(Number(live.searchStreak)||0)+1:0;
+          if(live.searchStreak>=3)live.browserNote=`You have searched ${live.searchStreak} times in a row. Do not search again: open the result pages that fit from the Links list, or answer the owner now with what you found.`;
+        }
         const stuck=!browsed.records.length&&!conn.calls.length&&!declinedTurn&&!stopped&&!off&&(browsed.limited||browsed.repeated>0);
-        if(stuck){
+        const reread=!stuck&&!browsed.records.length&&!conn.calls.length&&!declinedTurn&&!stopped&&!off&&browsed.again?.length>0;
+        if(reread){
+          // Pages the run already read: the same bot takes the step again with them. Asking only for those, round
+          // after round (FAIL_STREAK), is no progress and stops the run.
+          live.failStreak=(Number(live.failStreak)||0)+1;
+          if(live.failStreak>=FAIL_STREAK){stuckStop=`${bot.name} kept asking for pages it already had, so the task stopped. Ask again with more detail, or name a different site.`;return;}
+          live.browserPage=browsed.again.join('\n\n---\n\n');live.connectorPage=null;
+          live.checkpoint={nextStep:i,afterStep:i+1,previous,at:stamp()};
+          live.status='queued';
+          holdBrowser=true;
+        } else if(stuck){
           live.failStreak=(Number(live.failStreak)||0)+1;
           if(live.failStreak>=FAIL_STREAK){stuckStop=`${bot.name} kept asking for pages it already had, so the task stopped. Ask again with more detail, or name a different site.`;return;}
           live.browserNote=browsed.limited?'You have used every round of pages for this message. Do not ask for more pages: answer the owner now with what you found, and say what is still missing.'

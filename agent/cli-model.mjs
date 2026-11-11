@@ -73,7 +73,10 @@ export class CliModelError extends Error {
   }
 }
 
-const SYSTEM_TEXT = 'You are answering as a text-only model. You have no tools: do not run commands, read or write files, or browse. Reply with text only, following the instructions in the message.';
+// The CLI's own tools stay off (no shell, no files, no browser of its own). The app around it does the work: a block the
+// message describes (```browser, ```connector, ```create-bot and the rest) is run by the app, and the result comes back
+// in the next message. Saying "you cannot browse" here made bots refuse the very pages the app would have opened.
+const SYSTEM_TEXT = 'You are a bot inside an app that does things for you. Use none of your own tools: do not run commands or read or write files. Instead, when the message describes a block (such as a ```browser block to open a web page), write that block in your reply: the app runs it and sends you the result. So you can read web pages, use connected apps and remember things through the app. Reply with text and those blocks only, following the instructions in the message.';
 
 /** The program and argument list for one run. `dir` is the empty scratch directory. */
 const CODEX_FEATURES_OFF = ['shell_tool', 'unified_exec', 'shell_snapshot', 'browser_use', 'browser_use_external', 'browser_use_full_cdp_access', 'in_app_browser', 'computer_use', 'apps'];

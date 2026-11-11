@@ -19,13 +19,14 @@ test('a pending ask is an open card: its sentence, the asking bot, and the three
   assert.equal(card.botId, 'mail');
   assert.equal(card.botName, 'Mailroom');
   assert.equal(card.text, 'Mailroom wants to send an email to Northwind.');
-  assert.deepEqual(card.choices.map(c => [c.id, c.label]), [['decline', 'Decline'], ['allow', 'Allow'], ['always', 'Always allow for this bot']]);
-  assert.deepEqual(card.choices.map(c => c.primary), [false, true, false], 'Allow is the one raised button');
+  assert.deepEqual(card.choices.map(c => [c.id, c.label]), [['always', 'Always allow'], ['allow', 'Allow once'], ['decline', 'Decline']]);
+  assert.deepEqual(card.choices.map(c => c.primary), [true, false, false], 'Always allow is the one raised button');
 });
 
 test('a payment asks only Decline or Allow, and says it asks every time', () => {
   const card = askCard(stateOf({asks: [ask({action: 'spend', detail: 'pay £40 at Northwind'})]}), line());
-  assert.deepEqual(card.choices.map(c => c.id), ['decline', 'allow']);
+  assert.deepEqual(card.choices.map(c => c.id), ['allow', 'decline']);
+  assert.equal(card.choices[0].primary, true);
   assert.match(card.note, /payment/i);
   assert.equal(askCard(stateOf({asks: [ask()]}), line()).note, '');
 });

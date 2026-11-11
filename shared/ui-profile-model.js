@@ -133,7 +133,7 @@ export function profileRows(state, botId, {activityCount = 0, canPickModel = tru
     // With nothing to pick (the demo has no model) the row is only a value, not a door to an empty page.
     {key: 'model', label: 'Model', value: modelLine(state, botId), ...(canPickModel ? {} : {plain: true})},
   ];
-  if (primaryOf(state)?.id !== botId) rows.push({key: 'computer', label: 'Computer', value: 'Idle'});
+  rows.push({key: 'computer', label: 'Computer', value: 'Idle'});
   if (team) rows.push({key: 'team', label: 'Team', value: plural(team, 'bot')});
   return rows;
 }

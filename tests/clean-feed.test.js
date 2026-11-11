@@ -73,7 +73,7 @@ test('the cards that need the owner and the lines that matter stay', () => {
     sys('g1', 5, {kind: 'guard', text: 'Bots are paused.'}),
     msg('o1', 'bot', 6, {senderId: 'scout', kind: 'offjob', botId: 'scout', request: 'Book a table'}),
     sys('rf-failed', 7, {runId: 'rf', text: 'The run failed: no key'}),
-  ], [failed]);
+  ], [failed], {asks: [{id: 'a1', botId: 'scout', status: 'pending', action: 'browser.use'}]});
   assert.deepEqual(kinds(out), ['me', 'ask', 'setup', 'model-limit', 'no-model', 'connector', 'connector', 'note', 'guard', 'offjob', 'note']);
   assert.equal(out.at(-1).run?.id, 'rf', 'the failure note keeps its run, so it can offer Retry');
 });
@@ -125,7 +125,15 @@ test('a run that failed after its hops keeps the failure visible under one muted
 
 test('a run waiting on an ask keeps its card and still folds its hops into one line', () => {
   const waiting = hopRun({status: 'awaiting_ask', currentStep: 2, trace: hopsTrace.slice(0, 2), askIds: ['a1']});
-  const out = build([...hopLines.slice(0, 3), sys('ask-a1', 4, {kind: 'ask', askId: 'a1', runId: 'r1'})], [waiting]);
+  const out = build([...hopLines.slice(0, 3), sys('ask-a1', 4, {kind: 'ask', askId: 'a1', runId: 'r1'})], [waiting], {asks: [{id: 'a1', botId: 'scout', status: 'pending', action: 'send'}]});
   assert.deepEqual(kinds(out), ['me', 'pill', 'ask']);
   assert.equal(out[2].pill.text, 'Scout messaged Ranker');
+});
+
+test('an ask card leaves the chat once it is answered, whatever the answer', () => {
+  const line = sys('ask-a1', 2, {kind: 'ask', askId: 'a1', text: 'Scout wants to send an email.'});
+  const asks = status => ({asks: [{id: 'a1', botId: 'scout', status, action: 'send'}]});
+  assert.deepEqual(kinds(build([msg('q', 'user', 1), line], [], asks('pending'))), ['me', 'ask']);
+  for (const status of ['allowed', 'declined']) assert.deepEqual(kinds(build([msg('q', 'user', 1), line], [], asks(status))), ['me'], status);
+  assert.deepEqual(kinds(build([msg('q', 'user', 1), line])), ['me'], 'an ask the state no longer holds is gone too');
 });

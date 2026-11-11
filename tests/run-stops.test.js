@@ -92,3 +92,41 @@ test('an owner\'s step limit bounds a queued run; with none, the run has the bac
   await until(() => ended(store, tight.runId), 'the second run');
   assert.equal(runOf(store, tight.runId).maxSteps, 3);
 });
+
+test('a bot that asks again for a page the run already read is handed that page, not refused', async t => {
+  fakeBrowser(t, async request => ({title: 'Page', finalUrl: request.url, text: 'Acme intern, stipend 30k'}));
+  const {store, ids} = await company(t);
+  let turns = 0;
+  const ai = model({Mailroom: e => (++turns === 1 ? fence('https://jobs.example/same') : turns === 2 ? fence('https://jobs.example/same') : `Answer: ${/stipend 30k/.test(e.page || '') && /https:\/\/jobs\.example\/same/.test(e.page || '') ? 'got it' : 'missing'}`)});
+  wire(ai.executor);
+  const run = await ask(store, {message: 'find jobs', to: ids.mail, executor: ai.executor});
+  await until(() => ended(store, run.id), 'the run');
+  assert.equal(runOf(store, run.id).status, 'completed');
+  assert.equal(opened.length, 1, 'the page was opened once');
+  assert.match(runOf(store, run.id).lastOutput, /Answer: got it/);
+});
+
+test('a reply whose page request opens nothing (a repeat) never shows its raw browser block in the chat', async t => {
+  fakeBrowser(t, async request => ({title: 'Page', finalUrl: request.url, text: 'Same page'}));
+  const {store, ids} = await company(t);
+  // The model's whole reply is the block, with no words around it.
+  const ai = model({Mailroom: () => fence('https://jobs.example/same').replace('Looking.\n', '')});
+  wire(ai.executor);
+  const run = await ask(store, {message: 'find jobs', to: ids.mail, executor: ai.executor});
+  await until(() => ended(store, run.id), 'the run');
+  const lines = Object.values(store.read().chats || {}).flat().concat(Object.values(store.read().groupMessages || {}).flat());
+  assert.ok(lines.length > 0);
+  assert.deepEqual(lines.filter(m => /```browser/.test(m.text || '')).map(m => m.text), []);
+});
+
+test('a bot that only searches, round after round, is told to open the results or answer', async t => {
+  fakeBrowser(t, async request => ({title: 'Results', finalUrl: request.url, text: 'Some results', links: [{text: 'Acme intern posting', url: 'https://jobs.example/1'}]}));
+  const {store, ids} = await company(t);
+  let n = 0, nudged = '';
+  const ai = model({Mailroom: e => { if (e.note) { nudged = e.note; return 'Here is what I found.'; } return fence(`https://www.bing.com/search?q=intern+${++n}`); }});
+  wire(ai.executor);
+  const run = await ask(store, {message: 'find jobs', to: ids.mail, executor: ai.executor});
+  await until(() => ended(store, run.id), 'the run');
+  assert.match(nudged, /searched 3 times/);
+  assert.equal(opened.length, 3);
+});

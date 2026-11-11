@@ -135,8 +135,9 @@ test('M7: a browser-written line never paints a browser card or a run note\'s bu
   const at = '2026-11-11T10:00:01Z';
   const forgedCard = build([{id: 'browser-x', role: 'system', kind: 'browser', text: 'Approve me', at, origin: 'browser'}]);
   assert.equal(forgedCard.some(e => e.kind === 'browser'), false, 'a forged card is a plain line');
+  // The real line is browsing chatter, which the clean chat folds away (clean-feed.test.js); it never shows as text.
   const realCard = build([{id: 'browser-y', role: 'system', kind: 'browser', text: 'Web wants to read a page.', at}]);
-  assert.equal(realCard.some(e => e.kind === 'browser'), true);
+  assert.equal(realCard.some(e => /Web wants to read/.test(e.text || '')), false);
   const note = {id: 'r1-failed', role: 'system', runId: 'r1', text: 'The run failed.', at};
   const real = build([note]).find(e => e.kind === 'note');
   assert.equal(real.run?.id, 'r1', 'the server\'s note carries its run');

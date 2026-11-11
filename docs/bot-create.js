@@ -18,10 +18,10 @@
  *
  * This module is pure. `src/bot-create.js` applies it inside the run.
  */
-import {cleanText} from './core.js?v=bc2b55c498';
-import {fail} from './errors.js?v=bc2b55c498';
-import {defaultContract} from './contracts.js?v=bc2b55c498';
-import {controlFence} from './reply-blocks.js?v=bc2b55c498';
+import {cleanText} from './core.js?v=d3782feff1';
+import {fail} from './errors.js?v=d3782feff1';
+import {defaultContract} from './contracts.js?v=d3782feff1';
+import {controlFence} from './reply-blocks.js?v=d3782feff1';
 
 export const BOT_CREATE_PERMISSION = 'bot.create';
 /** A lead can staff a job in one reply ("make five bots, one per site"); the runaway guard paces the rest. */
@@ -142,7 +142,7 @@ export function buildCreatedBot(request, {bot, runId = null, now = new Date().to
   };
 }
 
-export const botCreatedText = (creator, created, groupName) => `${creator?.name || 'A bot'} created a new bot for this work: ${created.name} in ${groupName || 'this group'}. It can browse and read connected apps like every bot; sending, posting, deleting and paying still ask you.`;
+export const botCreatedText = (creator, created, groupName) => `${creator?.name || 'A bot'} created a new bot for this work: ${created.name} in ${groupName || 'this group'}.`;
 export const botCreateRefusedText = (bot, reason) => `${bot?.name || 'The bot'} tried to create a new bot, but ${reason}`;
 
 /** What every bot is told about the tool. */

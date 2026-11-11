@@ -27,7 +27,8 @@ export function askCard(state, line) {
   }
   return {
     open: true, ask, askId: ask.id, botId: ask.botId, botName, text: line.text,
-    choices: askChoices(ask.action, {acrossSites: acrossSites(ask)}).map(id => ({id, label: ASK_ANSWER_LABELS[id], primary: id === 'allow'})),
+    // Strongest yes first: Always allow (or Allow, where Always is not offered), then Allow once, then Decline.
+    choices: (() => { const ids = askChoices(ask.action, {acrossSites: acrossSites(ask)}); const order = ['always', 'allow', 'decline'].filter(id => ids.includes(id)); return order.map((id, i) => ({id, label: ids.includes('always') || id !== 'allow' ? ASK_ANSWER_LABELS[id] : 'Allow', primary: i === 0})); })(),
     target: ask.action === 'browser.use' ? ask.target || '' : '',
     // The whole text a write would carry (an email body): the card shows all of it, folded.
     body: typeof ask.body === 'string' ? ask.body : '',

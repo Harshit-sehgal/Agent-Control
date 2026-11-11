@@ -209,3 +209,9 @@ test('when a takeover cannot start, the next poll names the bot and the reason',
   assert.match(sent[1].failed.message, /No Chrome/);
   assert.equal(sent[2].failed, undefined, 'reported once');
 });
+
+test('by default a takeover has no clock: the person keeps the browser until they hand back', async () => {
+  const src = await import('node:fs/promises').then(fs => fs.readFile(new URL('../agent/shared-browser.mjs', import.meta.url), 'utf8'));
+  assert.match(src, /AGENT_TAKEOVER_IDLE_MS\) \|\| 0\}/);
+  assert.match(src, /if \(!idleMs\) return;/);
+});

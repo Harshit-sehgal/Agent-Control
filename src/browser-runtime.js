@@ -56,13 +56,15 @@ export const MAX_LIVE = 1;
  * the state machine without a browser. */
 export function createBrowserRuntime({env = process.env, start = startBrowserSession, find = findBrowser} = {}) {
   const mode = runtimeMode(env);
-  const timeoutMs = on(env.BROWSER_TIMEOUT_MS, 25000);
-  const idleMs = on(env.BROWSER_IDLE_MS, 120000);
-  // A takeover holds a signed-in context open, so it is closed on its own clock:
-  // after this long without a look, and outright after the hard cap even if the
-  // person is still there. A forgotten tab must not keep a session alive.
-  const liveIdleMs = on(env.BROWSER_LIVE_MS, 600000);
-  const liveMaxMs = on(env.BROWSER_LIVE_MAX_MS, 1800000);
+  // How long one page may take to load. A page that never loads has to end as a failure; this is not a
+  // limit on how long a bot or a person uses the browser.
+  const timeoutMs = on(env.BROWSER_TIMEOUT_MS, 60000);
+  // An idle bot browser is closed after this long and started again on the next page (sign-ins live in the profile).
+  const idleMs = on(env.BROWSER_IDLE_MS, 30 * 60000);
+  // A takeover has no clock by default: it stays open until the person hands back. An install that wants one
+  // sets BROWSER_LIVE_MS (closed after this long without a look) or BROWSER_LIVE_MAX_MS (closed outright).
+  const liveIdleMs = on(env.BROWSER_LIVE_MS, 0);
+  const liveMaxMs = on(env.BROWSER_LIVE_MAX_MS, Infinity);
   let session = null, starting = null, idle = null;
   let tail = Promise.resolve();
   let closed = false;
@@ -154,6 +156,7 @@ export function createBrowserRuntime({env = process.env, start = startBrowserSes
   /** A takeover counts as activity: its idle clock restarts on every look. */
   function touch(entry) {
     clearTimeout(entry.timer);
+    if (!liveIdleMs) return;
     entry.timer = setTimeout(() => { void endLive(entry.id).catch(() => {}); }, liveIdleMs);
     entry.timer.unref?.();
   }
@@ -233,6 +236,8 @@ export function createBrowserRuntime({env = process.env, start = startBrowserSes
     mode, allowed, available, run,
     beginLive, liveView, liveAct, endLive,
     liveIds: () => [...lives.keys()],
+    /** Whether a takeover is on a clock (an idle timer or a hard cap); none by default. */
+    liveTimed: id => Boolean(lives.get(String(id))?.timer) || Number.isFinite(liveMaxMs),
     liveList: () => [...lives.values()].map(entry => ({id: entry.id, requestId: entry.requestId, openedBy: entry.openedBy, url: entry.url, createdAt: entry.createdAt})),
     close: async () => {
       closed = true;

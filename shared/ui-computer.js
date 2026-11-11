@@ -180,3 +180,22 @@ export const pagesRows = pages => (pages || []).filter(p => p && p.url).map(p =>
   const host = hostOf(p.url);
   return {text: p.title || host || p.url, host, url: p.url, at: p.at};
 });
+
+/* ---------- the full-screen view ---------- */
+
+/** The part of `box` a picture of `size` fills when it is fitted whole and centred (object-fit: contain).
+ * A click is mapped through this, not through the element's box, so the bars beside the picture are not page. */
+export function containRect(box, size = PAGE) {
+  if (!box || !(box.width > 0) || !(box.height > 0) || !(size?.w > 0) || !(size?.h > 0)) return null;
+  const scale = Math.min(box.width / size.w, box.height / size.h);
+  const width = Math.round(size.w * scale), height = Math.round(size.h * scale);
+  return {left: Math.round(box.left + (box.width - width) / 2), top: Math.round(box.top + (box.height - height) / 2), width, height};
+}
+
+/** The one pill on the full-screen view: who holds the browser, and the switch that changes it.
+ * `unavailable` is the words for a view with nothing to drive (the demo, no device, a viewer). */
+export function controlPill({name = 'The bot', state = 'idle', unavailable = ''} = {}) {
+  if (unavailable) return {who: unavailable, action: '', label: ''};
+  if (state === 'driving') return {who: 'You are in control', action: 'back', label: 'Hand back control'};
+  return {who: `${name} is in control`, action: 'take', label: 'Take control'};
+}

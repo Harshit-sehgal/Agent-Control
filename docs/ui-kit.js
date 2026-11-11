@@ -76,6 +76,7 @@ const ICONS = {
   key: '<circle cx="8" cy="15" r="4"/><path d="m10.800 12.200 8.700-8.700M17 6l2.500 2.500M14.500 8.500 17 11"/>',
   plug: '<path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0zM12 16v5"/>',
   chart: '<path d="M5 20V12M10 20V6M15 20v-9M20 20V4"/>',
+  keyboard: '<rect x="2.500" y="6" width="19" height="12" rx="2.500"/><path d="M6.500 10h.01M10 10h.01M14 10h.01M17.500 10h.01M8 14h8"/>',
   spark: '<path d="m12 3 1.600 6.400L20 11l-6.400 1.600L12 19l-1.600-6.400L4 11l6.400-1.600z"/>',
 };
 export const icon = (name, size = 20) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ICONS.spark}</svg>`;

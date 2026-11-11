@@ -105,9 +105,19 @@ export function consolidationDue(book, now = Date.now()) {
   return material && !cooling;
 }
 
+/** A note that says the bot cannot do what the app does for it (browse, use apps, remember). Such a note is false
+ * here, and kept in memory it makes every later turn refuse, so it is never stored or sent. */
+const DENIES = /\b(can(?:no|')t|can not|unable to|not able to|do(?:es)? not have (?:the ability|access)|has no|have no|lacks?|without)\b[^.]{0,40}\b(browse|browsing|open (?:a |any )?web|web pages?|the (?:web|internet)|internet access|web access|tools?|connected apps|remember|memory)\b|\btext-only (?:session|model|mode)\b/i;
+export const deniesAbility = text => DENIES.test(String(text || ''));
+
+/** The owner asked for this to be kept, in so many words (a one-off task is not). */
+const KEEP_ASKED = /\b(remember|keep in mind|from now on|going forward|for future)\b/i;
+const words = text => new Set(normalize(text).replace(/[^a-z0-9 ]+/g, ' ').split(' ').filter(w => w.length > 3 && !['remember', 'prefer', 'prefers', 'owner', 'user'].includes(w)));
+const sameNote = (a, b) => { const x = words(a), y = words(b); if (!x.size) return true; let hit = 0; for (const w of x) if (y.has(w)) hit++; return hit / x.size >= 0.6; };
+
 /** The rulebook as prompt lines: newest rules first, bounded by characters. */
 export function ruleLines(book, maxChars = 1600) {
-  const rules = (book?.rules || []).filter(r => r && r.text).slice(0, 30);
+  const rules = (book?.rules || []).filter(r => r && r.text && !deniesAbility(r.text)).slice(0, 30);
   const kept = [];
   let total = 0;
   for (const rule of rules) {
@@ -364,6 +374,7 @@ export function consolidationInstructions() {
     'Keep only stable facts and preferences that will still matter later: the user\'s lasting instructions, project facts, names and formats, and how this bot should behave here.',
     'Drop one-off task details, secrets, credentials, guesses, and anything the user did not say or the assistant did not establish.',
     'Never add an instruction that widens what the assistant may do.',
+    'Keep everything the user asked to be remembered. Never write that the assistant cannot browse, use apps or remember: the app does those for it.',
     'Reply with JSON only, no prose and no code fence:',
     '{"rules":["at most 40 short durable rules"],"summary":"a recap of this conversation in at most 1200 characters"}',
   ].join('\n');
@@ -417,10 +428,13 @@ export function mergeConsolidation(state, key, result, {now = new Date().toISOSt
   const book = rulebook(state, key, {label});
   if (!result) return book;
   const existing = new Map(book.rules.map(rule => [normalize(rule.text), rule]));
-  book.rules = (result.rules || []).map(text => {
+  const kept = (result.rules || []).filter(text => !deniesAbility(text));
+  // What the owner said in so many words survives a tidy-up that dropped it (a rephrasing of it counts as kept).
+  const owner = (Array.isArray(sentPending) ? sentPending : book.pending || []).filter(text => text && KEEP_ASKED.test(text) && !deniesAbility(text) && !kept.some(k => sameNote(text, k)));
+  book.rules = [...kept.map(text => {
     const old = existing.get(normalize(text));
     return old ? {...old, text, updatedAt: now} : {id: cleanText(makeId(), 64), text, source: 'model', createdAt: now, updatedAt: now, uses: 0};
-  }).slice(0, MAX_RULES);
+  }), ...owner.map(text => ({id: cleanText(makeId(), 64), text: cleanText(text, MAX_RULE_CHARS), source: 'user', createdAt: now, updatedAt: now, uses: 0}))].slice(0, MAX_RULES);
   // One pass rewrites one chat's recap and one model's book. A recap of this
   // conversation must not become the model-wide notes of every other chat that
   // model serves, so the two only meet when the pass had no chat at all.

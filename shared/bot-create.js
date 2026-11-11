@@ -142,7 +142,7 @@ export function buildCreatedBot(request, {bot, runId = null, now = new Date().to
   };
 }
 
-export const botCreatedText = (creator, created, groupName) => `${creator?.name || 'A bot'} created a new bot for this work: ${created.name} in ${groupName || 'this group'}. It can browse and read connected apps like every bot; sending, posting, deleting and paying still ask you.`;
+export const botCreatedText = (creator, created, groupName) => `${creator?.name || 'A bot'} created a new bot for this work: ${created.name} in ${groupName || 'this group'}.`;
 export const botCreateRefusedText = (bot, reason) => `${bot?.name || 'The bot'} tried to create a new bot, but ${reason}`;
 
 /** What every bot is told about the tool. */

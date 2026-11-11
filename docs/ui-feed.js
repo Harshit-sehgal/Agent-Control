@@ -9,11 +9,11 @@
  * Atlas") and opens the hops, the cards that wait on the owner, and a failure that
  * ended a run. What a bot read, which connector it used, and the lines a page or
  * connector call left on the way are stored but not shown (tests/clean-feed.test.js). */
-import {handoffs, hopLine, progressPill} from './ui-company.js?v=bc2b55c498';
-import {isRunNote, runBelongsToChat} from './ui-model.js?v=bc2b55c498';
-import {connectorLine, modelLimitLine} from './ui-connect-model.js?v=bc2b55c498';
-import {setupCardOf, setupDone} from './setup.js?v=bc2b55c498';
-import {requestOfMessage} from './bot-browser.js?v=bc2b55c498';
+import {handoffs, hopLine, progressPill} from './ui-company.js?v=d3782feff1';
+import {isRunNote, runBelongsToChat} from './ui-model.js?v=d3782feff1';
+import {connectorLine, modelLimitLine} from './ui-connect-model.js?v=d3782feff1';
+import {setupCardOf, setupDone} from './setup.js?v=d3782feff1';
+import {requestOfMessage} from './bot-browser.js?v=d3782feff1';
 
 const isActive = status => status === 'queued' || status === 'running';
 const isAwaiting = status => String(status || '').startsWith('awaiting');
@@ -36,6 +36,8 @@ const DONE_NOTE = /^Done in \d+ step\(s\)\.$/;
 /** True for a stored line the chat does not show. */
 function quiet(m, run, state) {
   if (m.role !== 'system') return false;
+  // An ask is a card only while it waits; once answered (or gone) it leaves the chat, and the work goes on.
+  if (m.kind === 'ask') return (state?.asks || []).find(a => a.id === m.askId)?.status !== 'pending';
   // A page request is only a card while it waits on a person; a bot-to-bot message lives behind the run's line.
   if (m.kind === 'browser') return requestOfMessage(state, m.id)?.status !== 'pending';
   if (m.kind === 'browser-result' || m.kind === 'peer') return true;

@@ -46,7 +46,7 @@ export const ANONYMOUS_BOT = 'shared';
 /** The cast the owner watches: small and cheap, since a person is looking at it. */
 const SCREENCAST = {format: 'jpeg', quality: 60, maxWidth: VIEWPORT.width, maxHeight: VIEWPORT.height, everyNthFrame: 2};
 
-export function createSharedBrowser({start = startBrowserSession, allow = [], profile, settleMs, timeoutMs, idleMs = Number(process.env.AGENT_TAKEOVER_IDLE_MS) || 15 * 60000} = {}) {
+export function createSharedBrowser({start = startBrowserSession, allow = [], profile, settleMs, timeoutMs, idleMs = Number(process.env.AGENT_TAKEOVER_IDLE_MS) || 0} = {}) {
   const allowed = () => (typeof allow === 'function' ? allow() : allow);
   let session = null, starting = null;
   const tabs = new Map();      // botId -> {tab, url, title}
@@ -132,7 +132,8 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
 
   const armIdle = () => {
     clearTimeout(idleTimer);
-    // A takeover forgotten for this long ends by itself, so the parked run is not stuck for good.
+    // No clock by default: the person holds the browser until they hand back. AGENT_TAKEOVER_IDLE_MS opts into one.
+    if (!idleMs) return;
     idleTimer = setTimeout(() => { if (driving) { driving = null; notify(); } }, idleMs);
     idleTimer.unref?.();
   };

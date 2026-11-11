@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   PAGE, KEY_CHIPS, pagePoint, clickInput, wheelInput, keyInput, coalesce, navigateAddress, rowLabel, stateLine, mergeView, frameDelay, listDelay,
-  statusOf, chipFor, pagesRows, noteFor, wantsList, veilFor,
+  statusOf, chipFor, pagesRows, noteFor, wantsList, veilFor, containRect, controlPill,
 } from '../shared/ui-computer.js';
 import {cleanInput} from '../agent/live-input.mjs';
 
@@ -317,4 +317,24 @@ test('before the first frame the placeholder follows the state', () => {
 test('the demo flag survives a merge', () => {
   assert.equal(mergeView(fresh, {agent: false, demo: true}).demo, true);
   assert.equal(mergeView(fresh, {agent: true}).demo, false);
+});
+
+/* ---------- the full-screen view ---------- */
+
+test('a picture letterboxed in a full-screen box is mapped through the part that is drawn', () => {
+  // A 1280x800 page in a tall phone box: drawn full width, centred, 250 tall.
+  const box = {left: 0, top: 0, width: 400, height: 800};
+  const drawn = containRect(box, {w: 1280, h: 800});
+  assert.deepEqual(drawn, {left: 0, top: 275, width: 400, height: 250});
+  assert.deepEqual(clickInput(drawn, {x: 200, y: 400}), {type: 'click', x: 640, y: 400});
+  // A wide laptop box: drawn full height, centred.
+  assert.deepEqual(containRect({left: 10, top: 0, width: 2000, height: 800}, {w: 1280, h: 800}), {left: 370, top: 0, width: 1280, height: 800});
+  assert.equal(containRect({left: 0, top: 0, width: 0, height: 0}, {w: 1280, h: 800}), null);
+});
+
+test('the control pill says who is in control and offers the one switch', () => {
+  assert.deepEqual(controlPill({name: 'Scout', state: 'browsing'}), {who: 'Scout is in control', action: 'take', label: 'Take control'});
+  assert.deepEqual(controlPill({name: 'Scout', state: 'idle'}), {who: 'Scout is in control', action: 'take', label: 'Take control'});
+  assert.deepEqual(controlPill({name: 'Scout', state: 'driving'}), {who: 'You are in control', action: 'back', label: 'Hand back control'});
+  assert.deepEqual(controlPill({name: 'Scout', state: 'idle', unavailable: 'No browser running'}), {who: 'No browser running', action: '', label: ''});
 });

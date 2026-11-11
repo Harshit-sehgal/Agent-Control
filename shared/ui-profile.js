@@ -335,8 +335,7 @@ export function profileView(route) {
   const bot = findBot(route.profile);
   if (!bot) return `<section class="pg pr">${bar(roundBtn('back', 'Back', 'back-to-list', {}))}<div class="pg-body pr-body"><p class="pr-note">That bot is no longer here.</p></div></section>`;
   const page = SUBS[route.sub];
-  // Atlas has no Computer row, so a typed #profile/atlas/computer lands on its profile.
-  if (!page || (route.sub === 'edit' && !canWrite()) || (route.sub === 'computer' && primaryOf(store.state)?.id === bot.id)) { setTimeout(() => fillActivityCount(bot.id), 0); return `<section class="pg pr" data-bot="${esc(bot.id)}">${profileMain(bot)}</section>`; }
+  if (!page || (route.sub === 'edit' && !canWrite())) { setTimeout(() => fillActivityCount(bot.id), 0); return `<section class="pg pr" data-bot="${esc(bot.id)}">${profileMain(bot)}</section>`; }
   // The Edit form is its own page body (the New bot page's shape); the other pages sit in the plain one.
   const body = route.sub === 'edit' ? page(bot) : `<div class="pg-body pr-body">${page(bot)}</div>`;
   return `<section class="pg pr" data-bot="${esc(bot.id)}">${subBar(bot, SUB_TITLES[route.sub])}${body}</section>`;

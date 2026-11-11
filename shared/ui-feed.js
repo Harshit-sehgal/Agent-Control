@@ -36,6 +36,8 @@ const DONE_NOTE = /^Done in \d+ step\(s\)\.$/;
 /** True for a stored line the chat does not show. */
 function quiet(m, run, state) {
   if (m.role !== 'system') return false;
+  // An ask is a card only while it waits; once answered (or gone) it leaves the chat, and the work goes on.
+  if (m.kind === 'ask') return (state?.asks || []).find(a => a.id === m.askId)?.status !== 'pending';
   // A page request is only a card while it waits on a person; a bot-to-bot message lives behind the run's line.
   if (m.kind === 'browser') return requestOfMessage(state, m.id)?.status !== 'pending';
   if (m.kind === 'browser-result' || m.kind === 'peer') return true;

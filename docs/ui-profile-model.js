@@ -5,14 +5,14 @@
  *
  * A bot's manager is settings.reportsTo (company.js); "manager" is simply a bot
  * with reports, so any bot can become one by receiving a report. */
-import {companyBots, primaryOf, managerOf, reportsOf, teamOf} from './company.js?v=bc2b55c498';
-import {firstUnusedTint} from './bot-create.js?v=bc2b55c498';
-import {TINT_COUNT, dayLabel} from './ui-kit.js?v=bc2b55c498';
-import {jobOf} from './ui-company.js?v=bc2b55c498';
-import {ACTIVITY_CHIPS} from './activity-log.js?v=bc2b55c498';
-import {grantRows} from './ui-asks.js?v=bc2b55c498';
-import {cleanEffort, effortLabel, EFFORT_LEVELS} from './ai-presets.js?v=bc2b55c498';
-import {scheduleRows} from './schedules.js?v=bc2b55c498';
+import {companyBots, primaryOf, managerOf, reportsOf, teamOf} from './company.js?v=d3782feff1';
+import {firstUnusedTint} from './bot-create.js?v=d3782feff1';
+import {TINT_COUNT, dayLabel} from './ui-kit.js?v=d3782feff1';
+import {jobOf} from './ui-company.js?v=d3782feff1';
+import {ACTIVITY_CHIPS} from './activity-log.js?v=d3782feff1';
+import {grantRows} from './ui-asks.js?v=d3782feff1';
+import {cleanEffort, effortLabel, EFFORT_LEVELS} from './ai-presets.js?v=d3782feff1';
+import {scheduleRows} from './schedules.js?v=d3782feff1';
 
 /** What a bot made without a job holds until the owner's first chat message
  * replaces it (the profile, the list and the chat all treat it as "no job yet"). */
@@ -133,7 +133,7 @@ export function profileRows(state, botId, {activityCount = 0, canPickModel = tru
     // With nothing to pick (the demo has no model) the row is only a value, not a door to an empty page.
     {key: 'model', label: 'Model', value: modelLine(state, botId), ...(canPickModel ? {} : {plain: true})},
   ];
-  if (primaryOf(state)?.id !== botId) rows.push({key: 'computer', label: 'Computer', value: 'Idle'});
+  rows.push({key: 'computer', label: 'Computer', value: 'Idle'});
   if (team) rows.push({key: 'team', label: 'Team', value: plural(team, 'bot')});
   return rows;
 }

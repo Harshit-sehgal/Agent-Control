@@ -77,6 +77,57 @@ export const hostAllowed = (url, allow = []) => {
 
 export const isPostingHost = url => { const host = hostOf(url); return POSTING_HOSTS.some(h => host === h || host.endsWith(`.${h}`)); };
 
+/** A page that is a "prove you are human" wall, not the page asked for. */
+const CHECK_WORDS = /(just a moment|performing security verification|verify(ing)? you are (a )?human|verifying you're not a bot|complete the following challenge|unusual traffic from your computer|are you a robot|press (and|&) hold|sending automated queries|access temporarily suspended|checking your browser|attention required)/i;
+export function botCheck(title, text) {
+  const t = String(text || '');
+  return CHECK_WORDS.test(String(title || '')) || (t.length < 3000 && CHECK_WORDS.test(t));
+}
+
+/** The search engines a bot may land on, and the same search on the others, in the order to try them. */
+const SEARCHES = [
+  {host: /(^|\.)bing\.com$/, url: q => `https://www.bing.com/search?q=${q}`, param: 'q'},
+  {host: /(^|\.)search\.yahoo\.com$/, url: q => `https://search.yahoo.com/search?p=${q}`, param: 'p'},
+  {host: /(^|\.)duckduckgo\.com$/, url: q => `https://html.duckduckgo.com/html/?q=${q}`, param: 'q'},
+  {host: /(^|\.)google\.[a-z.]+$/, url: q => `https://www.google.com/search?q=${q}`, param: 'q'},
+  {host: /(^|\.)search\.brave\.com$/, url: q => `https://search.brave.com/search?q=${q}`, param: 'q'},
+  {host: /(^|\.)startpage\.com$/, url: q => `https://www.startpage.com/do/search?q=${q}`, param: 'q'},
+];
+/** A search engine's results page, as opposed to a page a result leads to. */
+export function isSearchPage(url) {
+  let parsed; try { parsed = new URL(url); } catch { return false; }
+  const engine = SEARCHES.find(e => e.host.test(parsed.hostname));
+  return Boolean(engine && parsed.searchParams.get(engine.param));
+}
+
+export function searchAlternates(url) {
+  let parsed; try { parsed = new URL(url); } catch { return []; }
+  const from = SEARCHES.find(e => e.host.test(parsed.hostname));
+  const words = from && parsed.searchParams.get(from.param);
+  if (!words) return [];
+  const q = encodeURIComponent(words).replace(/%20/g, '+');
+  return SEARCHES.slice(0, 2).filter(e => e !== from).map(e => e.url(q));
+}
+
+/** The passages of a long page that hold the words, each with some text around it. */
+export function findPassages(text, find, {around = 300, most = 8} = {}) {
+  const page = String(text || ''), words = String(find || '').toLowerCase().split(/\s+/).filter(w => w.length > 1);
+  if (!page || !words.length) return '';
+  const lower = page.toLowerCase(), spans = [];
+  // A passage holding every word first; then ones holding the first word.
+  for (const need of [words, words.slice(0, 1)]) {
+    let at = lower.indexOf(need[0]);
+    while (at >= 0 && spans.length < most) {
+      const start = Math.max(0, at - around), end = Math.min(page.length, at + around);
+      const piece = lower.slice(start, end);
+      if (need.every(w => piece.includes(w)) && !spans.some(([a, b]) => start < b && end > a)) spans.push([start, end]);
+      at = lower.indexOf(need[0], at + need[0].length);
+    }
+    if (spans.length) break;
+  }
+  return spans.sort((a, b) => a[0] - b[0]).map(([a, b]) => `…${page.slice(a, b).trim()}…`).join('\n\n');
+}
+
 /** Validate one request body into the agent task it becomes. A step targets an
  * element by `index` from the result's numbered list, or by `selector` when a
  * page is stable enough to name it. An index is what lets a second request act
@@ -113,7 +164,8 @@ export function validateBrowserRequest(body) {
   const pages = [url, ...steps.filter(s => s.op === 'navigate').map(s => s.url)];
   if (interactive && pages.some(isPostingHost)) fail('Bots may read X and Twitter pages but never click or type there. Posting stays yours.', 403);
   // No steps is a plain page read, which also works without the real browser.
-  return {kind: steps.length ? 'browser.action' : 'browser.capture', url, steps};
+  const find = cleanText(body.find, 200);
+  return {kind: steps.length ? 'browser.action' : 'browser.capture', url, steps, ...(find ? {find} : {})};
 }
 
 /** Every browser block in a reply, validated. An invalid block is reported,
@@ -137,7 +189,7 @@ export function parseBrowserRequests(output) {
 export const stripBrowserBlocks = output => String(output ?? '').replace(BLOCK(), '').replace(/\n{3,}/g, '\n\n').trim();
 
 /** What a bot is told about the tool when it holds the permission. */
-export const BROWSER_TOOL_HINT = 'You can read or use a web page through a headless browser. Put one block per page in your reply, e.g. ```browser\n{"url":"https://example.com"}\n``` That returns the page text and a numbered list of controls. To act, name a control by its number in the same block: {"url":"https://example.com","steps":[{"op":"click","index":3}]} then read the result. Ops: navigate, click, type, waitFor, read, scroll. A CSS selector also works instead of an index. Scroll only moves the page. Any public site works, including X and YouTube pages (read them; you can never click or type on X or Twitter). To find something you have no link for, search first: open https://html.duckduckgo.com/html/?q=your+search+words and then open the results that fit. Do not ask the owner for a link you can find this way, and do not answer from memory when the question is about now. You may put several blocks in one reply to read pages side by side, and ask for more pages after you read those. The result comes back in the chat.';
+export const BROWSER_TOOL_HINT = 'You can read or use a web page through a headless browser. Put one block per page in your reply, e.g. ```browser\n{"url":"https://example.com"}\n``` That returns the page text and a numbered list of controls. To act, name a control by its number in the same block: {"url":"https://example.com","steps":[{"op":"click","index":3}]} then read the result. Ops: navigate, click, type, waitFor, read, scroll. A CSS selector also works instead of an index. Scroll only moves the page. Any public site works, including X and YouTube pages (read them; you can never click or type on X or Twitter). To find something you have no link for, search first: open https://www.bing.com/search?q=your+search+words and then open the results that fit. A long page is cut short; to reach a part further down, ask for it with "find": {"url":"https://example.com","find":"words on that part"} returns the passages that hold them. If a site shows a human check, do not try to solve it: read another site. Do not ask the owner for a link you can find this way, and do not answer from memory when the question is about now. You may put several blocks in one reply to read pages side by side, and ask for more pages after you read those. The result comes back in the chat.';
 
 /** The numbered controls a snapshot returned, in one line. The model acts on
  * these; a page of raw HTML is not something it can click. */
@@ -148,12 +200,20 @@ const controlLine = elements => (Array.isArray(elements) ? elements : [])
   .join(' · ');
 
 /** Page text the next bot turn can draft from. The chat line uses a shorter cap. */
-export function capturePageText(result, limit = 3600) {
+export function capturePageText(result, limit = 12000, find = '') {
   const r = result && typeof result === 'object' ? result : {};
   const reads = Array.isArray(r.actions) ? r.actions.filter(a => a && typeof a.text === 'string').map(a => a.text) : [];
   const controls = controlLine(r.elements);
-  const body = reads.join('\n') || r.text || r.excerpt || '';
-  return cleanText([body, controls ? `Controls: ${controls}` : ''].filter(Boolean).join('\n\n'), limit);
+  let body = reads.join('\n') || r.text || r.excerpt || '';
+  // `find`: the bot asked for the parts of a long page that hold some words, so it can reach past the first screenful.
+  if (find) body = findPassages(body, find) || `"${find}" is not on this page. The page starts: ${String(body).slice(0, 1500)}`;
+  if (r.botCheck) body = `This site showed a human check to the browser. Do not try to solve it: read another site or search for the page elsewhere.\n\n${body}`;
+  // Where the page's links go, so a bot can open a search result (page text alone drops the addresses).
+  const links = (Array.isArray(r.links) ? r.links : []).filter(l => l && String(l.text || '').trim().length >= 4 && /^https?:\/\//.test(String(l.url || '')))
+    .slice(0, 30).map(l => `${cleanText(l.text, 100)} → ${String(l.url).slice(0, 300)}`).join('\n');
+  // The links go before the page text is cut, so a long page still shows them.
+  const tail = [links ? `Links:\n${links}` : '', controls ? `Controls: ${controls}` : ''].filter(Boolean).join('\n\n');
+  return cleanText([tail ? String(body).slice(0, Math.max(1000, limit - tail.length - 4)) : body, tail].filter(Boolean).join('\n\n'), limit);
 }
 
 /** A short chat line summarising an agent's result. */
@@ -271,13 +331,14 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
   depth = Math.max(0, Math.min(MAX_BROWSER_DEPTH, Number(depth) || 0));
   const rounds = roundsCap(state), perReply = pagesCap(state);
   const all = parseBrowserRequests(output), text = stripBrowserBlocks(output), lines = [], records = [], asks = [];
-  if (!all.length) return {text: String(output ?? ''), records, lines, asks, limited: false, repeated: 0};
+  if (!all.length) return {text: String(output ?? ''), records, lines, asks, limited: false, repeated: 0, again: []};
   const found = all.slice(0, perReply);
   const say = line => lines.push({id: makeId(), role: 'system', text: line, at: now});
   // `limited`: the rounds ran out, so the caller gives the bot a closing turn instead of more pages.
   // `repeated`: pages it asked for again that it already has, which is no progress.
   const limited = depth >= rounds;
   let repeated = 0;
+  const again = [];
   // A bot never answers "I don't have permission": a page it has no grant for is an ask, and the owner
   // says Allow, Always allow or Decline. A Deny the owner set is the one thing that refuses outright.
   if (limited) say(`${bot.name} asked for another web page, but ${rounds} browsing rounds in a row is the most ${rounds < BACKSTOP.rounds ? 'your limit in Settings allows' : 'one message may take'}.`);
@@ -287,7 +348,15 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
   const readPrivate = Boolean(runId && (state.groupRuns || []).find(r => r.id === runId)?.connectorPage);
   if (!limited && !closed) for (const item of found) {
     if (!item.ok) { say(`${bot.name} asked for a web page, but the request was refused: ${item.error}`); continue; }
-    if (skipUrls.some(url => samePage(url, item.request.url))) { repeated++; say(`${bot.name} already has that page, so it was not opened again.`); continue; }
+    // A plain re-read of a page it has is no progress; finding words on it, or acting on it, is.
+    if (!item.request.find && !item.request.steps.length && skipUrls.some(url => samePage(url, item.request.url))) {
+      // The run read it already (perhaps for another bot): hand that page back instead of opening it again.
+      const had = (state.browserRequests || []).find(r => r.status === 'done' && r.result?.page && !r.find && (runId ? r.runId === runId : r.chatKey === chatKey)
+        && [r.url, r.result.finalUrl].some(u => u && samePage(u, item.request.url)));
+      if (had) again.push(had.result.page); else repeated++;
+      say(`${bot.name} already has that page, so it was not opened again.`);
+      continue;
+    }
     const needs = browserNeeds(item.request, controlLabels(state, bot.id, chatKey));
     const decision = decide(state, bot, needs, {readPrivate});
     if (decision.verdict === 'deny') { say(`${bot.name} asked to ${describe(item.request)}. ${decision.message}`); continue; }
@@ -310,7 +379,7 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
   state.browserRequests ??= [];
   state.browserRequests.unshift(...records);
   pruneBrowserRequests(state);
-  return {text: text || `${bot.name} asked to open a web page.`, records, lines, asks, limited, repeated};
+  return {text: text || `${bot.name} asked to open a web page.`, records, lines, asks, limited, repeated, again};
 }
 
 /** A person turns down a request that is still waiting, including one already

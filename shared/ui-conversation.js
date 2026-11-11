@@ -112,7 +112,7 @@ function browserEntry(m, conv) {
 }
 
 /** An ask: a bot needs the owner's yes before it goes on. Open, it keeps the asking bot's waiting face above one
- * sentence and its buttons (Decline, Allow, Always allow for this bot; a payment has no Always). Answered, it
+ * sentence and its buttons (Always allow, Allow once, Decline; a payment has no Always). Answered, it leaves the chat;
  * collapses to one muted line. Its status is read from state.asks, so the line itself never changes. */
 function askEntry({message: m}, conv) {
   const card = askCard(store.state, m);

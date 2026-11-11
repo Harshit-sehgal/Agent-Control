@@ -236,3 +236,12 @@ test('codex: every tool that runs commands, drives a browser or the computer is 
   for (const feature of ['shell_tool', 'unified_exec', 'shell_snapshot', 'browser_use', 'browser_use_external', 'browser_use_full_cdp_access', 'in_app_browser', 'computer_use', 'apps'])
     assert.ok(off.includes(`features.${feature}=false`), `${feature} must be off`);
 });
+
+test('a CLI model is told the app runs its browser blocks, never that it cannot browse', async () => {
+  const {buildCommand} = await import('../agent/cli-model.mjs');
+  const {args} = buildCommand('claude', {dir: '/tmp/x'});
+  const system = args[args.indexOf('--system-prompt') + 1];
+  assert.doesNotMatch(system, /\bor browse\b|cannot browse|no browsing/i);
+  assert.match(system, /blocks?/i);
+  assert.match(system, /do not run commands/i);
+});

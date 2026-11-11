@@ -15,13 +15,13 @@
  * Input goes out in order, one request at a time, with typed letters joined. */
 import {esc, icon} from './ui-kit.js';
 import {botColor} from './ui-face.js';
-import {store, api, findBot, canWrite, isAdmin, isStaticDemo, changed, onChange, go} from './ui-store.js';
+import {store, api, findBot, canWrite, isAdmin, isStaticDemo, changed, onChange, go, back} from './ui-store.js';
 /** Driving the tab (Take over, Hand back, input) is an admin's, the role those routes need; the demo is its one owner. */
 const canDrive = () => isStaticDemo() || isAdmin();
 import {toast} from './ui-dialogs.js';
 import {
   PAGE, KEY_CHIPS, clickInput, wheelInput, keyInput, coalesce, navigateAddress, rowLabel, statusOf, stateLine, mergeView, veilFor, frameDelay, listDelay, wantsList,
-  chipFor, pagesRows,
+  chipFor, containRect, controlPill,
 } from './ui-computer.js';
 
 const el = id => document.getElementById(id);
@@ -93,33 +93,38 @@ const INIT = {agent: true, demo: false, seq: 0, image: '', w: PAGE.w, h: PAGE.h,
 const alive = s => session === s && s.root.isConnected;
 const entryOf = botId => list.items.find(e => e.botId === botId);
 
-/** The page for `#profile/<id>/computer`. `faceOf(state)` draws the bot's face for the line under the page. */
+/** The page for `#profile/<id>/computer`: the bot's tab on the whole screen, and one pill that says who is in
+ * control with the switch that changes it. While you drive, the pill also opens a small tray (an address, a box
+ * to type into, the keys a phone has no keyboard for). `faceOf(state)` draws the bot's face in the pill. */
 export function computerPage(bot, {faceOf}) {
   const write = canDrive();
   setTimeout(() => mount(bot.id, faceOf), 0);
   const keys = KEY_CHIPS.map(c => `<button type="button" class="pc-key" data-action="computer-key" data-id="${esc(bot.id)}" data-text="${esc(c.key)}" aria-label="${esc(c.aria)}">${esc(c.label)}</button>`).join('');
-  return `<div class="pc" id="pc" data-bot="${esc(bot.id)}" data-state="idle" style="--t:${esc(botColor(bot))}">
-    <div class="pc-win">
+  const tray = write ? `<div class="pc-tray" data-pc="tools" hidden>
       <form class="pc-bar" id="computer-go" data-bot="${esc(bot.id)}" autocomplete="off">
         <span class="pc-dot" data-pc="dot"></span>
         <input class="pc-url" name="url" data-pc="url" readonly tabindex="-1" aria-label="Address" placeholder="about:blank" maxlength="2000" spellcheck="false" autocapitalize="off" inputmode="url">
         <button type="submit" class="pc-go" data-pc="go" hidden>Go</button>
       </form>
-      <div class="pc-notice" data-pc="notice" role="status" hidden></div>
-      <div class="pc-screen" data-pc="stage" style="aspect-ratio:${PAGE.w}/${PAGE.h}" role="group" aria-label="${esc(bot.name)}'s browser tab">
-        <img class="pc-img" data-pc="img" alt="Live picture of ${esc(bot.name)}'s browser tab" draggable="false" hidden>
-        <div class="pc-veil" data-pc="veil"></div>
-      </div>
-      <div class="pc-now" role="status" aria-live="polite"><span class="pc-face" data-pc="face"></span><span class="pc-line" data-pc="line">Idle</span></div>
-    </div>
-    ${write ? `<div class="pc-act"><button type="button" class="pill-btn" data-pc="hold" data-action="computer-takeover" autofocus data-id="${esc(bot.id)}">Take over</button></div>
-    <div class="pc-tools" data-pc="tools" hidden>
       <form class="pc-type" id="computer-type" data-bot="${esc(bot.id)}" autocomplete="off"><input class="input" name="text" maxlength="2000" placeholder="Type into the page" aria-label="Type into the page"><button type="submit" class="btn">Type</button></form>
       <div class="pc-keys" role="group" aria-label="Keys">${keys}</div>
-      <p class="pr-note">Click the page, then type or scroll. Tab moves on to the next control here, and the Tab button sends it to the page.</p>
-    </div>` : ''}
-    <p class="pr-note">Sending, posting, deleting and paying still ask you first.</p>
-    <div class="pc-pages" data-pc="pages"></div>
+    </div>` : '<span hidden><span data-pc="dot"></span><input data-pc="url"><button data-pc="go"></button></span>';
+  return `<div class="pc" id="pc" data-bot="${esc(bot.id)}" data-state="idle" role="dialog" aria-modal="true" aria-label="${esc(bot.name)}'s computer" style="--t:${esc(botColor(bot))}">
+    <div class="pc-screen" data-pc="stage" role="group" aria-label="${esc(bot.name)}'s browser tab">
+      <img class="pc-img" data-pc="img" alt="Live picture of ${esc(bot.name)}'s browser tab" draggable="false" hidden>
+      <div class="pc-veil" data-pc="veil"></div>
+    </div>
+    <div class="pc-notice" data-pc="notice" role="status" hidden></div>
+    <div class="pc-dock">
+      ${tray}
+      <div class="pc-pill" role="toolbar" aria-label="Who is in control">
+        <span class="pc-face" data-pc="face"></span>
+        <span class="pc-who" role="status" aria-live="polite"><b data-pc="who">${esc(bot.name)} is in control</b><small class="pc-line" data-pc="line">Idle</small></span>
+        ${write ? `<button type="button" class="pc-kb" data-pc="kb" data-action="computer-tray" data-id="${esc(bot.id)}" aria-label="Keyboard and address" aria-expanded="false" hidden>${icon('keyboard', 16)}</button>
+        <button type="button" class="pc-hold" data-pc="hold" data-action="computer-takeover" autofocus data-id="${esc(bot.id)}">Take control</button>` : ''}
+        <button type="button" class="pc-x" data-action="computer-close" data-id="${esc(bot.id)}" aria-label="Close ${esc(bot.name)}'s computer">${icon('x', 16)}</button>
+      </div>
+    </div>
   </div>`;
 }
 
@@ -130,8 +135,12 @@ function mount(botId, faceOf) {
   const q = name => root.querySelector(`[data-pc="${name}"]`);
   const s = session = {
     botId, root, faceOf, view: {...INIT}, failures: 0, timer: null, denied: false, queue: [], flush: null, sending: false, lastHint: 0, shown: -1, faceState: '',
-    stage: q('stage'), img: q('img'), veil: q('veil'), url: q('url'), go: q('go'), dot: q('dot'), notice: q('notice'), line: q('line'), face: q('face'), hold: q('hold'), tools: q('tools'), pages: q('pages'),
+    stage: q('stage'), img: q('img'), veil: q('veil'), url: q('url'), go: q('go'), dot: q('dot'), notice: q('notice'), line: q('line'), who: q('who'), face: q('face'), hold: q('hold'), tools: q('tools'), kb: q('kb'),
   };
+  // Esc leaves the view, unless the owner is driving: then it belongs to the page.
+  s.onKey = ev => { if (ev.key === 'Escape' && alive(s) && stateOf(s) !== 'driving' && !ev.defaultPrevented) { ev.preventDefault(); close(s.botId); } };
+  document.addEventListener('keydown', s.onKey);
+  document.documentElement.classList.add('pc-open');
   if (!canWrite()) s.denied = true;
   wireStage(s);
   paintSession();
@@ -141,6 +150,8 @@ function mount(botId, faceOf) {
 
 function end(s) {
   clearTimeout(s.timer); clearTimeout(s.flush);
+  if (s.onKey) document.removeEventListener('keydown', s.onKey);
+  document.documentElement.classList.remove('pc-open');
   s.timer = s.flush = null;
   if (session === s) session = null;
 }
@@ -184,8 +195,7 @@ function paintSession() {
   if (s.view.image && !veil.kind) {
     if (s.shown !== s.view.seq || !s.img.src) { s.img.src = s.view.image; s.shown = s.view.seq; }
     s.img.hidden = false;
-    s.stage.style.aspectRatio = `${s.view.w}/${s.view.h}`;
-  } else { s.img.hidden = true; s.img.removeAttribute('src'); s.shown = -1; }
+    } else { s.img.hidden = true; s.img.removeAttribute('src'); s.shown = -1; }
   s.veil.hidden = !veil.kind;
   s.veil.innerHTML = veil.kind ? `<strong>${esc(veil.title)}</strong><span>${esc(veil.text)}</span>${veil.code ? `<code>${esc(veil.code)}</code>` : ''}` : '';
   s.veil.dataset.kind = veil.kind;
@@ -196,26 +206,24 @@ function paintSession() {
   s.stage.setAttribute('aria-label', driving ? `${name}'s browser tab. You are driving: keys you press go to the page.` : `${name}'s browser tab`);
   // A notice from the device, as it came.
   s.notice.hidden = !s.view.notice; s.notice.textContent = s.view.notice;
-  // What the bot is doing.
-  const unavailable = s.view.demo || s.denied || s.view.agent === false;
-  const line = unavailable ? (s.view.demo ? 'No browser in the demo' : s.denied ? 'Members only' : 'No browser running') : stateLine({name, state, title: s.view.title || '', site: s.view.site || entry.site || '', pages: entry.pages});
-  if (s.line.textContent !== line) { s.line.textContent = line; s.line.classList.remove('enter'); void s.line.offsetWidth; s.line.classList.add('enter'); }
+  // The pill: who is in control, what the bot is doing, and the one switch.
+  const unavailable = s.view.demo ? 'No browser in the demo' : s.denied ? 'Members only' : s.view.agent === false ? 'No browser running' : '';
+  const pill = controlPill({name, state, unavailable});
+  if (s.who.textContent !== pill.who) { s.who.textContent = pill.who; s.who.classList.remove('enter'); void s.who.offsetWidth; s.who.classList.add('enter'); }
+  // Under who: the page it is on (the pill already says whose), or how long it has been idle.
+  const onPage = s.view.title || s.view.site || entry.site || '';
+  const line = unavailable ? '' : state === 'idle' ? stateLine({name, state, pages: entry.pages}) : onPage || (driving ? 'Click the page to use it' : 'Opening a page');
+  if (s.line.textContent !== line) s.line.textContent = line;
+  s.line.hidden = !line;
   const faceState = driving ? 'waiting' : state === 'browsing' ? 'working' : 'awake';
   if (s.faceState !== faceState && bot) { s.faceState = faceState; s.face.innerHTML = s.faceOf(faceState); }
-  // The buttons.
   if (s.hold) {
-    s.hold.hidden = s.view.demo || s.denied;
-    s.hold.textContent = driving ? 'Hand back' : 'Take over';
-    s.hold.dataset.action = driving ? 'computer-handback' : 'computer-takeover';
-    s.tools.hidden = !driving;
+    s.hold.hidden = !pill.action;
+    s.hold.textContent = pill.label;
+    s.hold.dataset.action = pill.action === 'back' ? 'computer-handback' : 'computer-takeover';
+    s.kb.hidden = !driving;
+    if (!driving) { s.tools.hidden = true; s.kb.setAttribute('aria-expanded', 'false'); }
   }
-  paintPages(s, entry, state);
-}
-
-function paintPages(s, entry, state) {
-  const rows = pagesRows(entry.pages);
-  const html = rows.length ? `<h2 class="pc-h">${state === 'idle' ? 'Last run' : 'This run'}</h2><div class="cd"><ul class="pc-trail">${rows.map(r => `<li><span>${esc(r.text)}</span>${r.host && r.host !== r.text ? `<small>${esc(r.host)}</small>` : ''}</li>`).join('')}</ul></div>` : '';
-  if (s.pagesHtml !== html) { s.pagesHtml = html; s.pages.innerHTML = html; }
 }
 
 /* ---------- the owner's input ---------- */
@@ -239,7 +247,8 @@ async function flush(s) {
   } finally { s.sending = false; if (s.queue.length && alive(s)) s.flush = setTimeout(() => flush(s), 30); }
 }
 
-const rectOf = s => s.img.getBoundingClientRect();
+/** The part of the picture element the page is drawn in (it is fitted whole, with bars beside it). */
+const rectOf = s => containRect(s.img.getBoundingClientRect(), sizeOf(s));
 const sizeOf = s => ({w: s.view.w, h: s.view.h});
 
 function tap(s, ev) {
@@ -253,7 +262,7 @@ function wireStage(s) {
   s.stage.addEventListener('click', ev => {
     if (stateOf(s) !== 'driving') {
       // Clicking a picture that does not answer is a question: say what to press, but not on every click.
-      if (s.view.image && Date.now() - s.lastHint > 4000 && canDrive()) { s.lastHint = Date.now(); toast('Press Take over to click and type in this page.'); }
+      if (s.view.image && Date.now() - s.lastHint > 4000 && canDrive()) { s.lastHint = Date.now(); toast('Press Take control to click and type in this page.'); }
       return;
     }
     s.stage.focus({preventScroll: true});
@@ -279,6 +288,11 @@ function wireStage(s) {
 /* ---------- what the buttons do ---------- */
 
 const botName = id => findBot(id)?.name || 'The bot';
+/** Leave the full-screen view. Closing while you drive hands the browser back, so no run is left waiting on you. */
+async function close(botId) {
+  if (session?.botId === botId && stateOf(session) === 'driving') await hold(botId, 'handback').catch(() => {});
+  back();
+}
 async function hold(botId, action) {
   const reply = await api(`/api/browser-live/${encodeURIComponent(botId)}/${action}`, 'POST', {});
   const state = reply?.state || (action === 'takeover' ? 'driving' : 'idle');
@@ -293,11 +307,18 @@ export const computerActions = {
     await hold(b.dataset.id, 'takeover');
     // Keys go to the page from here: put focus where they are caught.
     if (session?.botId === b.dataset.id) session.stage.focus({preventScroll: true});
-    toast(`You are driving ${botName(b.dataset.id)}'s browser.`);
+    toast(`You are in control of ${botName(b.dataset.id)}'s browser.`);
   },
   'computer-handback': async b => {
     await hold(b.dataset.id, 'handback');
     toast(`${botName(b.dataset.id)} has the browser back.`);
+  },
+  'computer-close': b => close(b.dataset.id),
+  'computer-tray': b => {
+    if (session?.botId !== b.dataset.id) return;
+    const open = session.tools.hidden;
+    session.tools.hidden = !open; b.setAttribute('aria-expanded', String(open));
+    if (open) session.tools.querySelector('#computer-type .input')?.focus({preventScroll: true});
   },
   'computer-key': b => { if (session?.botId === b.dataset.id) push(session, {type: 'key', key: b.dataset.text}); },
 };

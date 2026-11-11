@@ -46,7 +46,7 @@ test('an ask across sites offers Decline and Allow only, never Always allow', ()
   const s = state();
   const {asks: [card]} = record(s);
   const view = askCard(s, {askId: card.id, text: 'Shopper wants to send.'});
-  assert.deepEqual(view.choices.map(c => c.id), ['decline', 'allow']);
+  assert.deepEqual(view.choices.map(c => c.id), ['allow', 'decline']);
 });
 
 test('Always allow on an ask across sites is refused with a 400 and stores no grant', async () => {
@@ -65,7 +65,7 @@ test('one site, two actions: the ask names both and still offers Always allow fo
   const {asks: [card], records: [request]} = record(s, {url: `${A}/inbox`, steps: [{op: 'click', selector: '#delete'}, {op: 'click', selector: '#send'}]});
   assert.match(card.detail, /delete/);
   assert.match(card.detail, /send/);
-  assert.deepEqual(askCard(s, {askId: card.id, text: ''}).choices.map(c => c.id), ['decline', 'allow', 'always']);
+  assert.deepEqual(askCard(s, {askId: card.id, text: ''}).choices.map(c => c.id), ['always', 'allow', 'decline']);
   answerAsk(s, card.id, 'always', NOW);
   assert.deepEqual(request.approved, [`delete@${A}`, `send@${A}`]);
   assert.deepEqual(s.grants.filter(g => g.choice === 'always' && g.action !== 'browser.use').map(g => `${g.action}@${g.scope}`).sort(), [`delete@${A}`, `send@${A}`]);
@@ -77,5 +77,5 @@ test('a page on a second site is named too: Send on b.example after opening a.ex
   const {asks: [card]} = record(s, {url: `${A}/start`, steps: [{op: 'navigate', url: `${B}/inbox`}, {op: 'click', selector: '#send'}]});
   assert.match(card.detail, /a\.example/, 'opening a.example is part of what Allow approves');
   assert.match(card.detail, /b\.example/);
-  assert.deepEqual(askCard(s, {askId: card.id, text: ''}).choices.map(c => c.id), ['decline', 'allow']);
+  assert.deepEqual(askCard(s, {askId: card.id, text: ''}).choices.map(c => c.id), ['allow', 'decline']);
 });

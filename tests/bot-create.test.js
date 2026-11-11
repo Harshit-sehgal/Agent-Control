@@ -75,7 +75,8 @@ test('a built bot is always custom, unprivileged and owned by its creator', () =
   assert.deepEqual(record.createdBy, {botId: 'writer', botName: 'Writer', runId: 'run-1', at});
   assert.equal(record.origin, 'bot');
   assert.throws(() => buildCreatedBot({name: 'Only a name'}), /name and a job/);
-  assert.match(botCreatedText(creator, record, 'Research team'), /browse and read connected apps like every bot; sending, posting, deleting and paying still ask you/);
+  // One short line: what bots may do is the same for every bot, so the chat does not repeat it.
+  assert.equal(botCreatedText(creator, record, 'Research team'), `${creator.name} created a new bot for this work: ${record.name} in Research team.`);
 });
 
 test('a permitted bot creates a lasting teammate and is told what happened', async () => {

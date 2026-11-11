@@ -230,8 +230,8 @@ picks whose:
 | `BROWSER_RUNTIME` | `auto` (default), `server` or `agent`. `auto` uses this server when it has an allowlist and a browser, and a paired local agent otherwise |
 | `AGENT_BROWSER_ALLOWLIST` | the hosts a bot may open, read by both runtimes; `*` means any public host (the egress proxy still refuses private and local addresses) |
 | `AGENT_BROWSER_PATH` | the browser binary; else the first Chrome, Chromium or Edge found on `PATH` |
-| `BROWSER_TIMEOUT_MS` / `BROWSER_IDLE_MS` | the per-request budget (25s) and how long an idle browser is kept (120s) |
-| `BROWSER_LIVE_MS` / `BROWSER_LIVE_MAX_MS` | how long a person may hold a page they took over: idle limit (10 min) and hard cap (30 min) |
+| `BROWSER_TIMEOUT_MS` / `BROWSER_IDLE_MS` | how long one page may take to load (60s) and how long an idle browser is kept (30 min; sign-ins live in the profile) |
+| `BROWSER_LIVE_MS` / `BROWSER_LIVE_MAX_MS` | optional clocks on a takeover (idle, and outright); unset by default, so a person holds the page until they hand back |
 | `BROWSER_NO_SANDBOX` | `1` in a container, where Chrome's own sandbox cannot start. The allowlist, the egress proxy and the fresh context per page still apply |
 
 The server browser is one child process: started with the first request, closed
@@ -277,8 +277,8 @@ others wait their turn in order; a bot never touches another bot's tab.
   Press **Hand back** when you are through.
 - **While you drive:** no bot starts anything. A bot already mid-task finishes
   the step it is on, runs no further step, waits for the hand back and then
-  answers with the page as you left it. A takeover you forget ends by itself
-  after `AGENT_TAKEOVER_IDLE_MS` (15 minutes without input). Other jobs on that
+  answers with the page as you left it. A takeover has no clock: you hold the
+  browser until you hand back (set `AGENT_TAKEOVER_IDLE_MS` to end a forgotten one). Other jobs on that
   device, such as a subscription model run, wait behind a parked browser task.
 - **Wipe it:** stop the agent, delete the `browser-profile` directory, start the
   agent. Every bot is signed out and the next sign-in starts fresh. To sign out

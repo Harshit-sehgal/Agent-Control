@@ -79,7 +79,7 @@ frame), uses these; `src/browser-live.js` keeps what they carry in memory:
 While the owner drives, bots wait. A running task finishes the step it is in,
 runs no later step (the page is no longer the one the steps were planned for),
 waits for the hand back and answers with the page as the owner left it and
-`tookOver: true`. An idle takeover ends after `AGENT_TAKEOVER_IDLE_MS`.
+`tookOver: true`. A takeover has no clock unless `AGENT_TAKEOVER_IDLE_MS` is set.
 
 ## 4. Task leases & recovery
 - `claimAgentTasks` leases a due task (`status='running'`, `lease_until`).
@@ -215,8 +215,8 @@ what makes that true. The request card carries a **Take over** action
   request with it, so the bot continues from the page now that the sign-in is
   done. Closing without handing back discards it and the request stays waiting;
 - the kept context exists only for that takeover and is disposed when it ends,
-  so nothing the next capture sees is signed in. A takeover ends itself after
-  `BROWSER_LIVE_MS` with no action, and outright after `BROWSER_LIVE_MAX_MS`;
+  so nothing the next capture sees is signed in. A takeover has no clock unless
+  `BROWSER_LIVE_MS` (no action) or `BROWSER_LIVE_MAX_MS` (outright) is set;
 - while a person holds the page, the runtime refuses both a second takeover and
   a bot's own browser run, so one Chromium serves one page at a time.
 

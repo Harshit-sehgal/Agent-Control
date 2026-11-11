@@ -279,3 +279,13 @@ test('the runtime reads a real page through a real browser', {skip: !findBrowser
     server.close();
   }
 });
+
+test('by default a takeover has no clock: it stays open until the person hands back', async () => {
+  const {runtime} = harness({});
+  const live = await runtime.beginLive({url: 'https://example.com/a'});
+  const entry = runtime.liveIds();
+  assert.equal(entry.length, 1);
+  assert.equal(runtime.liveTimed?.(live.id), false, 'no idle timer and no hard cap unless BROWSER_LIVE_MS or BROWSER_LIVE_MAX_MS is set');
+  await runtime.endLive(live.id);
+  await runtime.close();
+});

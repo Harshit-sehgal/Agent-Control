@@ -97,7 +97,7 @@ test('the profile card lists Memory, Activity, Permissions, Model, Computer and,
   const s = stateOf();
   assert.deepEqual(profileRows(s, 'ops').map(r => r.key), ['memory', 'activity', 'schedule', 'permissions', 'model', 'computer', 'team']);
   assert.deepEqual(profileRows(s, 'mail').map(r => r.key), ['memory', 'activity', 'schedule', 'permissions', 'model', 'computer']);
-  assert.deepEqual(profileRows(s, 'atlas').map(r => r.key), ['memory', 'activity', 'schedule', 'permissions', 'model', 'team'], 'Atlas has no Computer row');
+  assert.deepEqual(profileRows(s, 'atlas').map(r => r.key), ['memory', 'activity', 'schedule', 'permissions', 'model', 'computer', 'team'], 'Atlas browses like every bot, so it has a Computer too');
 });
 
 test('the Model row is plain text when there is nothing to pick (the demo, a viewer)', () => {

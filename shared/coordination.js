@@ -19,6 +19,8 @@ import {OFFJOB_RULE,OFFJOB_ANYWAY,basicAsk} from './off-job.js';
 /** The default step count of a run: no limit of its own, only the backstop. A group may set fewer. */
 export const MAX_HANDOFFS = MAX_STEPS_LIMIT;
 export const MAX_CONTEXT_CHARS = 3600;
+/** The pages a bot asked for, handed back whole: long enough for a real article, a few of them side by side. */
+export const MAX_PAGE_CHARS = 24000;
 /** Which run statuses are busy or interruptible is decided once in
  * `shared/run-state.js`; re-exported here because callers have reached for them
  * through the coordination module since they were declared here. */
@@ -366,7 +368,7 @@ export function createEnvelope({run,bot,previous=null,thread=[],team=[],company=
     contract:bot.contract||undefined,
     permissions:Array.isArray(bot.permissions)?bot.permissions:[],
     previous:previous?{from:previous.botId,output:safe(previous.output)}:null,
-    ...(run.browserPage ? {page: safe(run.browserPage)} : {}),
+    ...(run.browserPage ? {page: String(run.browserPage).slice(0, MAX_PAGE_CHARS)} : {}),
     ...(connectors.length?{connectors}:{}),
     ...(run.connectorPage ? {connectorResult: safe(run.connectorPage)} : {}),
     ...(declinedOf(run) ? {declined: declinedOf(run)} : {}),

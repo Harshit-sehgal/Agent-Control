@@ -5,23 +5,23 @@
  *
  * Pages repaint only when the route changes, so each in-place change (a switch, a
  * forgotten note, a picked colour) updates its own node instead. */
-import {SHAPES, COLORS, face} from './ui-face.js?v=bc2b55c498';
-import {botStatus, botIsManager} from './ui-company.js?v=bc2b55c498';
-import {primaryOf} from './company.js?v=bc2b55c498';
-import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker} from './ui-kit.js?v=bc2b55c498';
-import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js?v=bc2b55c498';
-import {scheduleRows, scheduleTaskBody} from './schedules.js?v=bc2b55c498';
-import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=bc2b55c498';
-import {GRANT_LABELS} from './asks.js?v=bc2b55c498';
-import {grantRows, allGrantRows, grantUrl} from './ui-asks.js?v=bc2b55c498';
-import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=bc2b55c498';
-import {toast, confirmSheet} from './ui-dialogs.js?v=bc2b55c498';
-import {sendChat} from './ui-chat.js?v=bc2b55c498';
-import {computerPage as computerView, computerLabel, keysOwned} from './ui-computer-view.js?v=bc2b55c498';
+import {SHAPES, COLORS, face} from './ui-face.js?v=d3782feff1';
+import {botStatus, botIsManager} from './ui-company.js?v=d3782feff1';
+import {primaryOf} from './company.js?v=d3782feff1';
+import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker} from './ui-kit.js?v=d3782feff1';
+import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js?v=d3782feff1';
+import {scheduleRows, scheduleTaskBody} from './schedules.js?v=d3782feff1';
+import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=d3782feff1';
+import {GRANT_LABELS} from './asks.js?v=d3782feff1';
+import {grantRows, allGrantRows, grantUrl} from './ui-asks.js?v=d3782feff1';
+import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=d3782feff1';
+import {toast, confirmSheet} from './ui-dialogs.js?v=d3782feff1';
+import {sendChat} from './ui-chat.js?v=d3782feff1';
+import {computerPage as computerView, computerLabel, keysOwned} from './ui-computer-view.js?v=d3782feff1';
 import {
   MAX_NAME, hasJob, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, lookOf, newBotDefaults,
   newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, closeTarget,
-} from './ui-profile-model.js?v=bc2b55c498';
+} from './ui-profile-model.js?v=d3782feff1';
 
 const el = id => document.getElementById(id);
 const SHAPE_LABELS = {rounded: 'Rounded square', circle: 'Circle', hexagon: 'Hexagon', pebble: 'Pebble', drop: 'Drop', shield: 'Shield', arch: 'Arch', egg: 'Egg', blob: 'Blob', bean: 'Bean'};
@@ -335,8 +335,7 @@ export function profileView(route) {
   const bot = findBot(route.profile);
   if (!bot) return `<section class="pg pr">${bar(roundBtn('back', 'Back', 'back-to-list', {}))}<div class="pg-body pr-body"><p class="pr-note">That bot is no longer here.</p></div></section>`;
   const page = SUBS[route.sub];
-  // Atlas has no Computer row, so a typed #profile/atlas/computer lands on its profile.
-  if (!page || (route.sub === 'edit' && !canWrite()) || (route.sub === 'computer' && primaryOf(store.state)?.id === bot.id)) { setTimeout(() => fillActivityCount(bot.id), 0); return `<section class="pg pr" data-bot="${esc(bot.id)}">${profileMain(bot)}</section>`; }
+  if (!page || (route.sub === 'edit' && !canWrite())) { setTimeout(() => fillActivityCount(bot.id), 0); return `<section class="pg pr" data-bot="${esc(bot.id)}">${profileMain(bot)}</section>`; }
   // The Edit form is its own page body (the New bot page's shape); the other pages sit in the plain one.
   const body = route.sub === 'edit' ? page(bot) : `<div class="pg-body pr-body">${page(bot)}</div>`;
   return `<section class="pg pr" data-bot="${esc(bot.id)}">${subBar(bot, SUB_TITLES[route.sub])}${body}</section>`;

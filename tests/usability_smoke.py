@@ -754,40 +754,36 @@ async def ask_cards_answer_and_collapse(page, base):
     # One sentence, the three buttons in the owner's words, and the asking bot's face waiting above the card.
     first = page.locator('#cv-log .cv-card[data-ask="a1"]')
     await expect(first.locator('p')).to_have_text('Researcher wants to send an email to Northwind.')
-    assert await first.locator('.btn').all_inner_texts() == ['Decline', 'Allow', 'Always allow for this bot']
+    assert await first.locator('.btn').all_inner_texts() == ['Always allow', 'Allow once', 'Decline']
     await expect(page.locator('#cv-log .cv-wait .face--waiting').first).to_be_visible()
     await expect(page.locator('#cv-log .cv-wait').first).to_contain_text('Researcher is waiting on you')
     # A payment is only ever Decline or Allow, and says so.
     spend = page.locator('#cv-log .cv-card[data-ask="a2"]')
-    assert await spend.locator('.btn').all_inner_texts() == ['Decline', 'Allow']
+    assert await spend.locator('.btn').all_inner_texts() == ['Allow', 'Decline']
     await expect(spend).to_contain_text('Payments are asked every time.')
     await expect(page.locator('#cv-line')).to_have_text('Waiting on you')
-    # Allow once: the card collapses to one muted line and the count drops.
-    await first.get_by_role('button', name='Allow', exact=True).click()
-    await expect(page.locator('#cv-log .cv-asked[data-ask="a1"]')).to_have_text('You allowed it once')
-    await expect(page.locator('#cv-log .cv-card[data-ask="a1"]')).to_have_count(0)
+    # Allow once: the card leaves the chat and the count drops.
+    await first.get_by_role('button', name='Allow once', exact=True).click()
+    await expect(page.locator('#cv-log [data-ask="a1"]')).to_have_count(0)
     await expect(row.locator('.badge')).to_have_text('2')
     state = await api_state(page)
     mine = {a['id']: a for a in state['asks']}
     assert mine['a1']['status'] == 'allowed' and mine['a1']['scope'] == 'once', mine['a1']
     assert not [g for g in state.get('grants', []) if g['action'] == 'send'], 'Allow once stores no grant'
-    # Always allow: its own collapsed line, and the grant is kept for this bot.
-    await page.locator('#cv-log .cv-card[data-ask="a3"]').get_by_role('button', name='Always allow for this bot').click()
-    await expect(page.locator('#cv-log .cv-asked[data-ask="a3"]')).to_have_text('You always allow it for this bot')
+    # Always allow: the card leaves too, and the grant is kept for this bot.
+    await page.locator('#cv-log .cv-card[data-ask="a3"]').get_by_role('button', name='Always allow', exact=True).click()
+    await expect(page.locator('#cv-log [data-ask="a3"]')).to_have_count(0)
     grants = [(g['botId'], g['action'], g['choice']) for g in (await api_state(page))['grants']]
     assert (ids['Researcher'], 'post', 'always') in grants, grants
     # Decline.
     await spend.get_by_role('button', name='Decline').click()
-    await expect(page.locator('#cv-log .cv-asked[data-ask="a2"]')).to_have_text('You declined it')
-    # Nothing is left to ask: no card, no badge, no second ask.
-    await expect(page.locator('#cv-log .cv-card[data-ask]')).to_have_count(0)
+    # Nothing is left: no card, no line about it, no badge, no second ask.
+    await expect(page.locator('#cv-log [data-ask]')).to_have_count(0)
     await expect(row.locator('.badge')).to_have_count(0)
     await expect(page.locator('#cv-line')).not_to_have_text('Waiting on you')
-    # Atlas's copy of each card collapsed the same way, and says whose it was.
+    # Atlas's copy of each card is gone as well.
     await page.locator('#sidebar .pin', has_text='Atlas').click()
-    await expect(page.locator('#cv-log .cv-asked')).to_have_count(3)
-    texts = await page.locator('#cv-log .cv-asked').all_inner_texts()
-    assert 'You allowed it once (Researcher)' in texts and 'You always allow it for this bot (Researcher)' in texts, texts
+    await expect(page.locator('#cv-log [data-ask]')).to_have_count(0)
     # The Always allow is a rule on the profile.
     await page.goto(f'{base}/index.html#profile/{ids["Researcher"]}/permissions')
     await page.reload()
@@ -881,8 +877,8 @@ async def phone_ask_card_permissions_and_pause(page, base):
     for i in range(3):
         box = await buttons.nth(i).bounding_box()
         assert box['height'] >= 40 and box['x'] >= 0 and box['x'] + box['width'] <= 390, box
-    await page.locator('#cv-log .cv-card[data-ask="a1"]').get_by_role('button', name='Always allow for this bot').click()
-    await expect(page.locator('#cv-log .cv-asked[data-ask="a1"]')).to_have_text('You always allow it for this bot')
+    await page.locator('#cv-log .cv-card[data-ask="a1"]').get_by_role('button', name='Always allow', exact=True).click()
+    await expect(page.locator('#cv-log [data-ask="a1"]')).to_have_count(0)
     # Permissions on a phone: full-width choices a thumb can hit.
     await page.goto(f'{base}/index.html#profile/{ids["Researcher"]}/permissions')
     await page.reload()
@@ -1085,15 +1081,15 @@ async def computer_row_frame_and_pages(page, base):
     assert await img.evaluate('i => i.naturalWidth') == 1280
     await expect(page.locator('#main .pc-url')).to_have_value('https://mail.google.com/mail/u/0/#inbox')
     await expect(page.locator('#main .pc-url')).to_have_js_property('readOnly', True)
-    await expect(page.locator('#main .pc-line')).to_have_text('Writer is on Inbox')
+    # The whole screen is the tab; one pill says who is in control, the page it is on, and the one switch.
+    await page.wait_for_timeout(400)   # the view's opening animation
+    pc = await page.locator('#main .pc').bounding_box()
+    assert pc['x'] == 0 and pc['y'] == 0 and pc['width'] == page.viewport_size['width'] and pc['height'] == page.viewport_size['height'], pc
+    await expect(page.locator('#main .pc-who b')).to_have_text('Writer is in control')
+    await expect(page.locator('#main .pc-line')).to_have_text('Inbox')
     await expect(page.locator('#main .pc-dot')).to_have_class(re.compile('live'))
-    # This run's pages: a title, else the host, with the host beside it.
-    await expect(page.locator('#main .pc-h')).to_have_text('This run')
-    await expect(page.locator('#main .pc-trail li')).to_have_count(3)
-    await expect(page.locator('#main .pc-trail li').nth(1)).to_contain_text('Northwind: a time next week?')
-    await expect(page.locator('#main .pc-trail li').nth(2)).to_have_text('calendar.google.com')
-    await expect(page.locator('#main [data-action="computer-takeover"]')).to_have_text('Take over')
-    await expect(page.locator('#main')).to_contain_text('Sending, posting, deleting and paying still ask you first.')
+    await expect(page.locator('#main [data-action="computer-takeover"]')).to_have_text('Take control')
+    await expect(page.locator('#main .pc-pill button:visible')).to_have_count(2)
     # The poll asks for what is new: a second frame replaces the picture.
     first = await img.get_attribute('src')
     live.seq, live.hot = 2, 3
@@ -1101,10 +1097,9 @@ async def computer_row_frame_and_pages(page, base):
     # Idle dims the picture and the line says when it was last used; the pages become the last run's.
     live.state = 'idle'
     await expect(page.locator('#main .pc-line')).to_contain_text('Idle · last used')
-    await expect(page.locator('#main .pc-h')).to_have_text('Last run')
     await expect(page.locator('#main .pc-screen')).to_have_class(re.compile('idle'))
-    # Leaving the view stops the poll: the device only casts while somebody looks.
-    await page.locator('#main [data-action="profile-up"]').click()
+    # Leaving the view (its close button) stops the poll: the device only casts while somebody looks.
+    await page.locator('#main [data-action="computer-close"]').click()
     await page.wait_for_timeout(500)
     seen = live.frame_polls
     await page.wait_for_timeout(1200)
@@ -1119,12 +1114,12 @@ async def computer_take_over_drives_the_page(page, base):
     stage = page.locator('#main .pc-screen')
     # Before Take over a click on the picture does nothing but say what to press.
     await page.locator('#main .pc-img').click()
-    await expect(page.locator('#toast')).to_contain_text('Press Take over')
+    await expect(page.locator('#toast')).to_contain_text('Press Take control')
     assert live.inputs() == []
     await page.locator('#main [data-action="computer-takeover"]').click()
-    await expect(page.locator('#main [data-action="computer-handback"]')).to_have_text('Hand back')
+    await expect(page.locator('#main [data-action="computer-handback"]')).to_have_text('Hand back control')
     assert any(path.endswith('/takeover') for path, _ in live.posts)
-    await expect(page.locator('#main .pc-line')).to_have_text('You have the browser')
+    await expect(page.locator('#main .pc-who b')).to_have_text('You are in control')
     await expect(page.locator('#main .pc-dot')).to_have_class(re.compile('you'))
     await expect(stage).to_be_focused()
     # A click goes in 1280x800 page pixels: the middle of the picture is (640, 400).
@@ -1155,8 +1150,10 @@ async def computer_take_over_drives_the_page(page, base):
     await page.mouse.wheel(0, 100)
     await eventually(lambda: any(e['type'] == 'scroll' for e in live.inputs()))
     scroll = [e for e in live.inputs() if e['type'] == 'scroll'][0]
-    assert scroll['dy'] > 100 and abs(scroll['x'] - 640) <= 2, scroll
-    # The address field takes a URL; Go (or Enter) sends it.
+    # The picture fills the screen, so a turn is scaled by page pixels per displayed pixel.
+    assert scroll['dy'] > 50 and abs(scroll['x'] - 640) <= 2, scroll
+    # The keyboard button opens the tray: the address field takes a URL; Go (or Enter) sends it.
+    await page.locator('#main [data-action="computer-tray"]').click()
     url = page.locator('#main .pc-url')
     await expect(url).to_have_js_property('readOnly', False)
     await url.fill('example.com')
@@ -1179,13 +1176,15 @@ async def computer_hand_back(page, base):
     live, bot = await open_computer(page, base)
     await goto_profile(page, bot, 'computer')
     await page.locator('#main [data-action="computer-takeover"]').click()
-    await expect(page.locator('#main .pc-tools')).to_be_visible()
+    await page.locator('#main [data-action="computer-tray"]').click()
+    await expect(page.locator('#main .pc-tray')).to_be_visible()
     await page.locator('#main [data-action="computer-handback"]').click()
-    await expect(page.locator('#main [data-action="computer-takeover"]')).to_have_text('Take over')
+    await expect(page.locator('#main [data-action="computer-takeover"]')).to_have_text('Take control')
     assert live.posts[-1][0].endswith('/handback')
     await expect(page.locator('#toast')).to_contain_text('Writer has the browser back')
-    await expect(page.locator('#main .pc-tools')).to_be_hidden()
-    await expect(page.locator('#main .pc-line')).to_have_text('Writer is on Inbox')
+    await expect(page.locator('#main .pc-tray')).to_be_hidden()
+    await expect(page.locator('#main .pc-who b')).to_have_text('Writer is in control')
+    await expect(page.locator('#main .pc-line')).to_have_text('Inbox')
     await expect(page.locator('#main .pc-url')).to_have_js_property('readOnly', True)
     # Nothing is sent once the bot has it: a click on the picture sends no input.
     before = len(live.inputs())
@@ -1207,11 +1206,9 @@ async def computer_no_device_empty_state(page, base):
     await expect(veil).to_contain_text('AGENT_BROWSER=1')
     await expect(veil.locator('code')).to_have_text('AGENT_BROWSER=1 node agent/agent.mjs run')
     await expect(page.locator('#main .pc-img')).to_be_hidden()
-    await expect(page.locator('#main .pc-line')).to_have_text('No browser running')
-    # Take over says why it cannot.
-    await page.locator('#main [data-action="computer-takeover"]').click()
-    await expect(page.locator('#toast')).to_contain_text('Start it with AGENT_BROWSER=1')
-    await expect(page.locator('#main [data-action="computer-takeover"]')).to_be_visible()
+    await expect(page.locator('#main .pc-who b')).to_have_text('No browser running')
+    # Nothing to take control of until a device runs the browser.
+    await expect(page.locator('#main [data-action="computer-takeover"]')).to_be_hidden()
     # A notice from the device is shown as it came, and once the agent starts the poll finds it.
     live.notice = 'The takeover could not start: no Chrome found.'
     await expect(page.locator('#main .pc-notice')).to_have_text('The takeover could not start: no Chrome found.', timeout=8000)
@@ -1229,18 +1226,17 @@ async def computer_demo_has_no_browser(page, base):
     veil = page.locator('#main .pc-veil')
     await expect(veil).to_contain_text('The demo has no browser')
     await expect(veil).to_contain_text('local agent')
-    await expect(page.locator('#main .pc-line')).to_have_text('No browser in the demo')
+    await expect(page.locator('#main .pc-who b')).to_have_text('No browser in the demo')
     await expect(page.locator('#main [data-action="computer-takeover"]')).to_be_hidden()
     await expect(page.locator('#main .pc-img')).to_be_hidden()
-    # Atlas has no Computer row, and no page behind it.
+    # Atlas browses like every bot, so it has a Computer row and the page behind it.
     await page.goto(f'{base}/index.html#profile/{PRIMARY}')
     await page.reload()
     await expect(page.locator('#main .pr-hero h1')).to_have_text('Atlas')
-    await expect(page.locator('#main .rw', has_text='Computer')).to_have_count(0)
+    await expect(page.locator('#main .rw', has_text='Computer')).to_have_count(1)
     await page.goto(f'{base}/index.html#profile/{PRIMARY}/computer')
     await page.reload()
-    await expect(page.locator('#main .pr-hero h1')).to_have_text('Atlas')
-
+    await expect(page.locator('#main .pc-who b')).to_have_text('No browser in the demo')
 
 async def computer_site_chip_on_the_pill(page, base):
     live, bot = await open_computer(page, base)
@@ -1324,13 +1320,18 @@ async def phone_computer_view(page, base):
     await page.goto(f'{base}/index.html#profile/{bot}/computer')
     await page.reload()
     await expect(page.locator('#main .pc-img')).to_be_visible()
-    box = await page.locator('#main .pc-win').bounding_box()
-    assert box['x'] >= 0 and box['x'] + box['width'] <= 390, box
+    # The tab takes the whole phone screen; the pill fits inside it with thumb-sized controls.
+    await page.wait_for_timeout(400)   # the view's opening animation
+    box = await page.locator('#main .pc').bounding_box()
+    assert box['x'] == 0 and box['width'] == 390, box
+    pill = await page.locator('#main .pc-pill').bounding_box()
+    assert pill['x'] >= 0 and pill['x'] + pill['width'] <= 390, pill
     assert await overflow(page) <= 0, await overflow(page)
     take = await page.locator('#main [data-action="computer-takeover"]').bounding_box()
     assert take['height'] >= 36, take
     await page.locator('#main [data-action="computer-takeover"]').click()
-    await expect(page.locator('#main .pc-tools')).to_be_visible()
+    await page.locator('#main [data-action="computer-tray"]').click()
+    await expect(page.locator('#main .pc-tray')).to_be_visible()
     assert await overflow(page) <= 0, await overflow(page)
     for key in await page.locator('#main .pc-key').all():
         k = await key.bounding_box()
@@ -2200,7 +2201,7 @@ async def main():
             await h.scenario('computer: Take over sends clicks, keys, the wheel and an address to the page', computer_take_over_drives_the_page)
             await h.scenario('computer: Hand back returns the browser to the bot', computer_hand_back)
             await h.scenario('computer: no device shows how to start the local agent, and notices', computer_no_device_empty_state)
-            await h.scenario('computer: the demo has no browser, and Atlas has no Computer row', computer_demo_has_no_browser)
+            await h.scenario('computer: the demo has no browser, and Atlas has a Computer too', computer_demo_has_no_browser)
             await h.scenario('computer: the pill carries the site chip, opens the view and says You are driving', computer_site_chip_on_the_pill)
             await h.scenario('phone: the Computer view fits and its controls are thumb-sized', phone_computer_view, PHONE)
             await h.scenario('connectors: add an MCP server over HTTP and on the agent, refresh its tools, delete asks first, no secret is painted', connectors_add_and_delete_mcp)
