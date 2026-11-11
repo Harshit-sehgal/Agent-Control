@@ -13,7 +13,7 @@ import {browserRuntime} from './browser-runtime.js';
 import {fail} from '../shared/errors.js';
 import {addChatMessages} from '../shared/chats.js';
 import {activity, cleanText} from '../shared/core.js';
-import {browserResultText, capturePageText, feedPageText, MAX_BROWSER_DEPTH} from '../shared/bot-browser.js';
+import {browserResultText, capturePageText, MAX_BROWSER_DEPTH} from '../shared/bot-browser.js';
 
 const stamp = () => new Date().toISOString();
 const say = (s, key, text) => { try { addChatMessages(s, key, [{role: 'system', kind: 'browser-result', text}], {trusted: true}); } catch { /* Conversation removed. */ } };
@@ -137,7 +137,7 @@ export function continueBrowserWork(store, spec, {runBot, runGroup}) {
 /** A browser request finished, here or on a device. Record the result, post the
  * chat line, and give the page back to the bot that asked for it. */
 export async function finishBrowserRequest(store, request, {ok, result = null, error = null}, hooks = resultHooks) {
-  const {continueRun, resumeFeed, resumeBrowser} = hooks || {};
+  const {continueRun, resumeBrowser} = hooks || {};
   const captured = ok ? capturePageText(result) : '';
   const text = ok ? browserResultText(request, result) : `${request.botName}'s browser request failed: ${cleanText(error, 300) || 'the browser reported a failure.'}`;
   const done = await store.update(s => {
@@ -150,21 +150,6 @@ export async function finishBrowserRequest(store, request, {ok, result = null, e
   });
   // The continued turn is one round deeper; recordBrowserRequests refuses to
   // open another page once a chain reaches MAX_BROWSER_DEPTH.
-  // A home-feed read belongs to the run that asked for it. The other bots
-  // start only when the page comes back; a failure stops that run.
-  if (done?.purpose === 'feed') {
-    const page = feedPageText(result);
-    if (!resumeFeed) {
-      await store.update(s => say(s, done.chatKey, 'The feed result came back, but this run could not be resumed. Nothing else ran.'));
-      return done;
-    }
-    // `ok` is whether the browser finished. An empty page is still a finished
-    // read: the resume path then says to sign in, instead of claiming the
-    // feed was never opened.
-    try { await resumeFeed(store, done, {ok, text: page}); }
-    catch (error) { await store.update(s => say(s, done.chatKey, `The feed result could not continue the run: ${error.message}`)); }
-    return done;
-  }
   if (done?.runId) {
     if (!resumeBrowser) {
       await store.update(s => say(s, done.chatKey, 'The page came back, but this run could not be resumed.'));

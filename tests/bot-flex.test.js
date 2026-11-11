@@ -14,7 +14,7 @@ import {simulateGroup} from '../shared/group-simulator.js';
 import * as wf from '../shared/workflow.js';
 import {enqueueTask,claimTasks,completeTask,buildPayload} from '../shared/tasks.js';
 import {SqliteStore} from '../src/sqlite-store.js';
-import {coordinationState,runGroup,runBotTask,queueGroupRun,decidePlan,resumeFeedRun,markInterrupted} from '../src/coordination.js';
+import {coordinationState,runGroup,runBotTask,queueGroupRun,decidePlan,markInterrupted} from '../src/coordination.js';
 import {executeCustomBot} from '../src/ai.js';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
@@ -65,9 +65,6 @@ test('a tracked primary bot plans only the bots the request needs and can wait f
   assert.equal(run.mode,'tracked');
   assert.equal(run.chatKey,'handoff');
   assert.equal(run.task.doneWhen,'A reply draft is waiting on you.');
-  assert.equal(run.task.needsFeed,true);
-  assert.equal(run.task.feedBotId,'scout');
-  assert.equal(planTracked(xe,'draft a reply').needsFeed,false);
   assert.equal(run.status,'queued');
   const waiting=createRun({group:xe,message:'draft a reply',makeId:()=>'p',task:{...planTracked(xe,'draft a reply'),confirm:true}});
   assert.equal(waiting.status,'awaiting_plan');
@@ -80,10 +77,7 @@ test('a tracked primary bot plans only the bots the request needs and can wait f
   assert.equal(leadShouldRunGroup(xe,'suggest a tweet','handoff'),true);
   const scoutLead = team('g', [bot('scout', {type: 'source', settings: {lead: true}}), bot('writer', {type: 'writing'})], {settings: {coordination: 'tracked'}});
   const asLead = planTracked(scoutLead, 'scroll my feed and draft a reply');
-  assert.equal(asLead.needsFeed, true);
-  assert.equal(asLead.feedBotId, 'scout');
-  assert.deepEqual(asLead.botIds, ['scout', 'writer']);
-  assert.equal(leadShouldRunGroup(scoutLead, 'scroll my feed', 'scout'), true);
+  assert.deepEqual(asLead.botIds, ['writer'], 'The primary bot is not handed its own work.');
   assert.equal(leadShouldRunGroup(xe,'@writer only you','handoff'),false);
   assert.ok(planTracked(xe,'suggest a tweet').botIds.includes('writer'));
   const named=team('x-engage',[bot('handoff',{settings:{lead:true}}),bot('writer',{type:'writing',settings:{enabled:false}})]);
@@ -95,45 +89,6 @@ test('a tracked primary bot plans only the bots the request needs and can wait f
   assert.equal(state.groups[0].bots.find(b=>b.id==='b').settings.lead,true);
 });
 
-test('a tracked feed read waits for a scroll of the home feed and drafts only from that page',async()=>tempStore(async store=>{
-  const scout=bot('scout',{type:'source',permissions:['browser.use']});
-  const writer=bot('writer',{type:'writing'});
-  const g=team('g',[scout,writer],{settings:{coordination:'tracked'}});
-  const task=planTracked(g,'scroll my feed and draft a reply');
-  await store.update(s=>{s.groups=[g];coordinationState(s);s.groupRuns.push(createRun({group:g,message:'scroll my feed and draft a reply',makeId:()=>'feed-1',chatKey:'team-g',task}));});
-  let calls=0;
-  await runGroup(store,'feed-1',async()=>{calls++;return 'should not run yet';});
-  assert.equal(calls,0);
-  const waiting=store.read();
-  assert.equal(waiting.groupRuns[0].status,'awaiting_feed');
-  const request=waiting.browserRequests[0];
-  assert.equal(request.url,'https://x.com/home');
-  assert.deepEqual(request.steps.map(step=>step.op),['scroll','read']);
-  assert.equal(request.purpose,'feed');
-  const seen=[];
-  const page='Ada posted about rockets and the next launch window. Replying to Ada: the pad timeline slipped by a day.';
-  await resumeFeedRun(store,request,{ok:true,text:'The page returned no text.',executor:async()=>{throw new Error('drafted from an empty feed');}});
-  assert.equal(store.read().groupRuns[0].status,'failed');
-  await store.update(s=>{const live=s.groupRuns.find(r=>r.id==='feed-1');live.status='awaiting_feed';});
-  await resumeFeedRun(store,request,{ok:true,text:page,executor:async(b,raw)=>{seen.push(JSON.parse(raw));calls++;return b.id==='writer'?'Here is a reply you can edit before you post it yourself today.':'Ranked the rockets post.';}});
-  for(let i=0;i<40&&store.read().groupRuns[0].status!=='completed';i++)await new Promise(r=>setTimeout(r,20));
-  assert.equal(store.read().groupRuns[0].status,'completed');
-  assert.ok(seen.some(envelope=>envelope.page?.includes('rockets')));
-  assert.ok(calls>0);
-  const blocked=bot('scout',{type:'source'});
-  const quiet=team('g',[blocked,writer],{settings:{coordination:'tracked'}});
-  await store.update(s=>{s.groups=[quiet];s.groupRuns.push(createRun({group:quiet,message:'scroll my feed and draft a reply',makeId:()=>'feed-2',chatKey:'team-g',task:planTracked(quiet,'scroll my feed and draft a reply')}));});
-  let refused=0;
-  await runGroup(store,'feed-2',async()=>{refused++;return 'no';});
-  assert.equal(refused,0);
-  assert.equal(store.read().groupRuns.find(r=>r.id==='feed-2').status,'failed');
-  assert.match(store.read().chats['team-g'].map(m=>m.text).join('\n'),/browser\.use/);
-  const denied=store.read().browserRequests.find(r=>r.runId==='feed-1');
-  await store.update(s=>{const live=s.groupRuns.find(r=>r.id==='feed-1');live.status='awaiting_feed';});
-  assert.equal(await resumeFeedRun(store,denied,{ok:false,executor:async()=>{throw new Error('drafted after a refusal');}}),true);
-  assert.equal(store.read().groupRuns.find(r=>r.id==='feed-1').status,'failed');
-}));
-
 test('a scheduled task runs when the group would otherwise wait for Start',async()=>tempStore(async store=>{
   const g=team('g',[bot('scout',{type:'source',permissions:['browser.use']}),bot('writer',{type:'writing'}),bot('handoff',{type:'manual',settings:{lead:true}})],{settings:{coordination:'tracked',confirmPlan:true}});
   await store.update(s=>{s.groups=[g];s.ai={providers:[{id:'p'}],defaultProviderId:'p'};});
@@ -141,7 +96,7 @@ test('a scheduled task runs when the group would otherwise wait for Start',async
   assert.equal(typed.status,'awaiting_plan');
   await decidePlan(store,typed.runId,{approve:false});
   const scheduled=await runBotTask(store,{id:'t',payload:{groupId:'g',botId:'handoff',message:'scroll my feed and draft a reply',label:'Feed check',kind:'once'}},{available:()=>true});
-  assert.equal(scheduled.status,'awaiting_feed');
+  assert.notEqual(scheduled.status,'awaiting_plan');
   assert.equal(store.read().groupRuns.filter(r=>r.status==='awaiting_plan').length,0);
 }));
 
@@ -183,26 +138,6 @@ test('the Pages simulator pauses at a checkpoint and continues from that step', 
   assert.equal(second.checkpoint.nextStep, 2);
 });
 
-test('the pages demo says it cannot open the feed and still drafts from a captured post',async()=>{
-  const g=team('x-engage',[bot('scout',{type:'source'}),bot('writer',{type:'writing'}),bot('handoff',{type:'manual',settings:{lead:true}})],{settings:{coordination:'tracked'}});
-  const out=[];
-  const run=await simulateGroup({group:g,message:'scroll my feed and draft a reply',directBotId:'handoff',state:{settings:{topics:[]},candidates:[{id:'c',author:'Ada',text:'Rockets are go this week and the window is open for a launch.',url:'https://x.com/a/status/1'}],drafts:[]},api:async()=>({id:'d',candidateId:'c',status:'pending',text:'A reply'}),makeId:()=>Math.random().toString(16).slice(2),emit:m=>out.push(m)});
-  assert.match(out.map(m=>m.text).join('\n'),/cannot open your X home feed/);
-  assert.equal(run.status,'completed');
-  assert.ok(run.trace.some(step=>step.botId==='writer'));
-});
-
-test('a restart releases a feed read that was still out',async()=>tempStore(async store=>{
-  await store.update(s=>{coordinationState(s);s.groups=[team('g',['a'])];// A persisted run carries the columns the schema requires (NOT NULL input,
-  // recipients, mode); only its transient fields are partial here.
-  s.groupRuns.push({id:'feed-cut',groupId:'g',chatKey:'team-g',input:'read the feed',recipients:['a'],mode:'lead',status:'awaiting_feed',task:{needsFeed:true}});s.browserRequests=[{id:'fr',runId:'feed-cut',purpose:'feed',status:'pending'}];});
-  await markInterrupted(store);
-  const run=store.read().groupRuns[0];
-  assert.equal(run.status,'interrupted');
-  assert.match(run.error,/waiting for the home feed/);
-  assert.equal(store.read().browserRequests[0].status,'denied');
-}));
-
 test('a restart leaves a shown plan and a checkpoint in place',async()=>tempStore(async store=>{
   assert.ok(BUSY_STATUSES.includes('awaiting_plan'));
   assert.ok(BUSY_STATUSES.includes('awaiting_checkpoint'));
@@ -224,30 +159,6 @@ test('a restart leaves a shown plan and a checkpoint in place',async()=>tempStor
   assert.equal(runs.live,'interrupted');
 }));
 
-test('queueing a feed read waits for approval before any bot runs',async()=>tempStore(async store=>{
-  const g=team('g',[bot('scout',{type:'source',permissions:['browser.use']}),bot('writer',{type:'writing'}),bot('handoff',{type:'manual',settings:{lead:true}})],{settings:{coordination:'tracked'}});
-  await store.update(s=>{s.groups=[g];s.ai={providers:[{id:'p'}],defaultProviderId:'p'};});
-  const queued=await queueGroupRun(store,{groupId:'g',message:'scroll my feed and draft a reply',directBotId:'handoff',chatKey:'handoff'});
-  assert.equal(queued.status,'awaiting_feed');
-  assert.equal(store.read().browserRequests[0].purpose,'feed');
-  assert.equal(store.read().groupRuns[0].trace?.length||0,0);
-}));
-
-test('starting a shown feed plan files the read before any bot runs',async()=>tempStore(async store=>{
-  const g=team('g',[bot('scout',{type:'source',permissions:['browser.use'],...off}),bot('writer',{type:'writing',...off}),bot('handoff',{type:'manual',settings:{lead:true}})],{settings:{coordination:'tracked',confirmPlan:true}});
-  await store.update(s=>{s.groups=[g];s.ai={providers:[{id:'p'}],defaultProviderId:'p'};});
-  const waiting=await queueGroupRun(store,{groupId:'g',message:'scroll my feed and draft a reply',directBotId:'handoff',chatKey:'handoff'});
-  assert.equal(waiting.status,'awaiting_plan');
-  assert.equal(store.read().groups[0].bots.find(b=>b.id==='scout').settings.enabled,false);
-  assert.equal((store.read().browserRequests||[]).length,0);
-  const started=await decidePlan(store,waiting.runId,{approve:true});
-  assert.equal(started.status,'awaiting_feed');
-  assert.equal(store.read().groups[0].bots.find(b=>b.id==='scout').settings.enabled,true);
-  assert.equal(store.read().groups[0].bots.find(b=>b.id==='writer').settings.enabled,true);
-  assert.equal(store.read().browserRequests[0].purpose,'feed');
-  assert.equal(store.read().groupRuns[0].trace?.length||0,0);
-}));
-
 test('a shown plan does not switch bots on, and it blocks a second run until cancelled',async()=>tempStore(async store=>{
   const g=team('g',[bot('writer',{type:'writing',...off}),bot('handoff',{type:'manual',settings:{lead:true}})],{settings:{coordination:'tracked',confirmPlan:true}});
   await store.update(s=>{s.groups=[g];s.ai={providers:[{id:'p'}],defaultProviderId:'p'};});
@@ -261,7 +172,7 @@ test('a shown plan does not switch bots on, and it blocks a second run until can
   assert.equal(again.status,'awaiting_plan');
   await decidePlan(store,again.runId,{approve:true});
   assert.equal(store.read().groups[0].bots.find(b=>b.id==='writer').settings.enabled,true);
-  const stop=['completed','failed','cancelled','awaiting_feed','awaiting_browser','awaiting_checkpoint'];
+  const stop=['completed','failed','cancelled','awaiting_browser','awaiting_checkpoint'];
   for(let i=0;i<50&&!stop.includes(store.read().groupRuns.find(r=>r.id===again.runId)?.status);i++)await new Promise(r=>setTimeout(r,20));
 }));
 
@@ -276,7 +187,7 @@ test('a plan that is shown first can be cancelled before any bot runs',async()=>
   assert.match(store.read().chats['team-g'].at(-1).text,/Plan cancelled/);
   await store.update(s=>{s.groupRuns.push(createRun({group:g,message:'draft a reply',makeId:()=>'plan-2',chatKey:'team-g',task}));});
   await decidePlan(store,'plan-2',{approve:true});
-  const done=['completed','failed','cancelled','awaiting_feed','awaiting_browser','awaiting_checkpoint'];
+  const done=['completed','failed','cancelled','awaiting_browser','awaiting_checkpoint'];
   for(let i=0;i<50&&!done.includes(store.read().groupRuns.find(r=>r.id==='plan-2')?.status);i++)await new Promise(r=>setTimeout(r,20));
   assert.notEqual(store.read().groupRuns.find(r=>r.id==='plan-2').status,'awaiting_plan');
 }));

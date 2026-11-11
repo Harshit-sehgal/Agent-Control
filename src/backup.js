@@ -57,7 +57,7 @@ const REDACTED_PASSWORD_HASH = 'redacted';
 // belongs in the vault, not here.
 
 /** Browser-request cards live in kv, which backups exclude. A restored
- * awaiting_feed/browser run would 409 the group with no card to finish it. */
+ * awaiting_browser run would 409 the group with no card to finish it. */
 function interruptRestoredRun(row) {
   if (!row || typeof row !== 'object') return row;
   let doc = null;
@@ -71,8 +71,8 @@ function interruptRestoredRun(row) {
     if (doc && typeof row.doc === 'string') next.doc = JSON.stringify({...doc, status});
     return next;
   }
-  const feed = status === 'awaiting_feed', page = status === 'awaiting_browser';
-  const error = feed ? 'Restored from backup while waiting for the home feed. Ask again.' : page ? 'Restored from backup while waiting for a page. Ask again.' : 'Restored from backup before the run completed. Retry explicitly.';
+  const page = status === 'awaiting_browser';
+  const error = page ? 'Restored from backup while waiting for a page. Ask again.' : 'Restored from backup before the run completed. Retry explicitly.';
   next.status = 'interrupted';
   next.error = error;
   if (doc && typeof row.doc === 'string') next.doc = JSON.stringify({...doc, status: 'interrupted', error});

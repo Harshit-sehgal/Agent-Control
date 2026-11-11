@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {needsYou, chatRows, timeline, parseRoute, routeHash, feedPauseAction, retryTarget, threadLineActions, runButtons, waitingOnYou, totalWaitingOnYou, isRunNote, runBelongsToChat, FEED_WAIT, FEED_OPEN} from '../shared/ui-model.js';
+import {needsYou, chatRows, timeline, parseRoute, routeHash, retryTarget, threadLineActions, runButtons, waitingOnYou, totalWaitingOnYou, isRunNote, runBelongsToChat} from '../shared/ui-model.js';
 
 // ---- fixtures -------------------------------------------------------------------------
 
@@ -37,23 +37,21 @@ test('needsYou counts paused runs and handles empty input', () => {
 
 // ---- waitingOnYou ---------------------------------------------------------------------
 
-test('waitingOnYou answers once per chat: plans, pauses, pending pages and stuck feeds', () => {
+test('waitingOnYou answers once per chat: plans, pauses and pending pages', () => {
   const s = state({
     groupRuns: [
       {id: 'p1', groupId: X, chatKey: 'team-x-engage', status: 'awaiting_plan'},
       {id: 'c1', groupId: X, chatKey: 'team-x-engage', status: 'awaiting_checkpoint'},
-      {id: 'f1', groupId: X, chatKey: 'team-x-engage', status: 'awaiting_feed'},
       {id: 'other', groupId: 'research', chatKey: 'team-research', status: 'awaiting_plan'},
     ],
     browserRequests: [
       {id: 'b1', status: 'pending', chatKey: 'team-x-engage'},
-      {id: 'f1r', purpose: 'feed', status: 'dispatched', chatKey: 'team-x-engage', runId: 'f1'},
     ],
   });
-  assert.deepEqual(waitingOnYou(s, 'team-x-engage'), {plans: 1, pauses: 1, pages: 1, feeds: 1});
-  assert.equal(totalWaitingOnYou(waitingOnYou(s, 'team-x-engage')), 4);
+  assert.deepEqual(waitingOnYou(s, 'team-x-engage'), {plans: 1, pauses: 1, pages: 1});
+  assert.equal(totalWaitingOnYou(waitingOnYou(s, 'team-x-engage')), 3);
   // Another chat gets its own answer; a plan there is not the X group's.
-  assert.deepEqual(waitingOnYou(s, 'team-research'), {plans: 1, pauses: 0, pages: 0, feeds: 0});
+  assert.deepEqual(waitingOnYou(s, 'team-research'), {plans: 1, pauses: 0, pages: 0});
 });
 
 test('waitingOnYou reads the runs a caller merged in, so a demo plan still counts', () => {
@@ -160,17 +158,16 @@ test('a plan and a pending page on the same chat both count', () => {
   assert.equal(row.text, 'Wants to open a page');
 });
 
-test('a feed-permission failure keeps Grant and Retry, and the demo still shows a plan', () => {
-  assert.deepEqual(threadLineActions({kind: 'feed-permission', senderId: 'scout', status: 'failed', live: true, note: true, latest: true}), {grant: true, plan: false, checkpoint: false, stop: false, retry: true});
-  assert.equal(threadLineActions({kind: 'feed-permission', senderId: 'scout', status: 'failed', live: false, note: true, latest: true}).grant, true);
-  assert.deepEqual(threadLineActions({status: 'awaiting_plan', live: false, note: true, latest: true}), {grant: false, plan: true, checkpoint: false, stop: false, retry: false});
-  assert.deepEqual(threadLineActions({status: 'awaiting_checkpoint', live: false, note: true, latest: true}), {grant: false, plan: false, checkpoint: true, stop: false, retry: false});
-  assert.deepEqual(threadLineActions({status: 'awaiting_checkpoint', live: true, note: true, latest: true}), {grant: false, plan: false, checkpoint: true, stop: true, retry: false});
-  assert.deepEqual(threadLineActions({status: 'failed', live: true, note: true, latest: false}), {grant: false, plan: false, checkpoint: false, stop: false, retry: false});
+test('a failed run offers Retry, and the demo still shows a plan', () => {
+  assert.deepEqual(threadLineActions({status: 'failed', live: true, note: true, latest: true}), {plan: false, checkpoint: false, stop: false, retry: true});
+  assert.deepEqual(threadLineActions({status: 'awaiting_plan', live: false, note: true, latest: true}), {plan: true, checkpoint: false, stop: false, retry: false});
+  assert.deepEqual(threadLineActions({status: 'awaiting_checkpoint', live: false, note: true, latest: true}), {plan: false, checkpoint: true, stop: false, retry: false});
+  assert.deepEqual(threadLineActions({status: 'awaiting_checkpoint', live: true, note: true, latest: true}), {plan: false, checkpoint: true, stop: true, retry: false});
+  assert.deepEqual(threadLineActions({status: 'failed', live: true, note: true, latest: false}), {plan: false, checkpoint: false, stop: false, retry: false});
   // Stop is the opposite of Retry: a run that can still work offers Stop, and a
   // run that ended offers Retry. The plan note has its own Cancel next to Start,
   // so it is not offered a second button that stops the same run.
-  assert.deepEqual(threadLineActions({status: 'running', live: true, note: true, latest: true}), {grant: false, plan: false, checkpoint: false, stop: true, retry: false});
+  assert.deepEqual(threadLineActions({status: 'running', live: true, note: true, latest: true}), {plan: false, checkpoint: false, stop: true, retry: false});
   assert.equal(threadLineActions({status: 'awaiting_plan', live: true, note: true, latest: true}).stop, false);
   assert.equal(threadLineActions({status: 'completed', live: true, note: true, latest: true}).stop, false);
   assert.equal(isRunNote({role: 'system', runId: 'r', kind: 'browser'}), false);
@@ -202,29 +199,6 @@ test('retry of a tracked run names the primary bot and the conversation it start
   assert.deepEqual(retryTarget(group, {mode: 'tracked', chatKey: 'handoff', recipients: ['writer']}), {direct: 'handoff', chat: 'handoff'});
   assert.deepEqual(retryTarget(group, {mode: 'direct', chatKey: 'writer', recipients: ['writer']}), {direct: 'writer', chat: 'writer'});
   assert.deepEqual(retryTarget(group, {mode: 'pipeline', chatKey: 'team-g', recipients: ['writer']}), {direct: '', chat: 'team-g'});
-});
-
-test('a feed pause keeps watching once the read is sent, and waits once it is still on the person', () => {
-  assert.deepEqual(feedPauseAction(null), {action: 'lookAgain', text: ''});
-  assert.deepEqual(feedPauseAction({status: 'pending'}), {action: 'lookAgain', text: ''});
-  assert.deepEqual(feedPauseAction({status: 'pending'}, {graceUsed: true}), {action: 'wait', text: FEED_WAIT});
-  assert.deepEqual(feedPauseAction({status: 'dispatched'}, {graceUsed: true}), {action: 'follow', text: FEED_OPEN});
-  assert.deepEqual(feedPauseAction({status: 'failed'}), {action: 'follow', text: ''});
-});
-
-test('a dispatched feed read that still holds the group shows on that chat', () => {
-  const s = state({
-    groupRuns: [{id: 'run-1', groupId: 'research', chatKey: 'team-research', status: 'awaiting_feed'}],
-    browserRequests: [{id: 'f', purpose: 'feed', status: 'dispatched', chatKey: 'team-research', runId: 'run-1'}],
-  });
-  const row = chatRows({state: s, filter: 'needs'}).find(r => r.id === 'team-research');
-  assert.equal(row.needs, 1);
-  assert.equal(row.text, 'A feed read is still open');
-  const done = state({
-    groupRuns: [{id: 'run-1', groupId: 'research', chatKey: 'team-research', status: 'failed'}],
-    browserRequests: [{id: 'f', purpose: 'feed', status: 'dispatched', chatKey: 'team-research', runId: 'run-1'}],
-  });
-  assert.equal(chatRows({state: done}).find(r => r.id === 'team-research').needs, 0);
 });
 
 test('chatRows filters "groups" and "bots" split team chats from bot chats', () => {

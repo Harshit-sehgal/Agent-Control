@@ -25,7 +25,7 @@ const hashRoute = () => parseRoute(location.hash, store.state, {server: !isStati
 /** True while the user is typing inside `node`, so a repaint must not replace it. */
 const typingIn = node => { const a = document.activeElement; return Boolean(a && node?.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)); };
 let lastView = '', syncTimer = null, syncDue = 0, refreshing = false;
-const LIVE_RUN = new Set(['running', 'queued', 'awaiting_feed', 'awaiting_browser']);
+const LIVE_RUN = new Set(['running', 'queued', 'awaiting_browser']);
 /** Refresh failures already shown. A dashboard stuck on a stale snapshot must
  * say so, but a poll every few seconds must not repeat the same toast. */
 const syncFailures = new Set();

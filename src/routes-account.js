@@ -8,7 +8,7 @@ import * as backup from './backup.js';
 import * as notifications from './notifications.js';
 import {deleteProvider} from './ai-providers.js';
 import {onAgentTaskResult} from './bot-browser.js';
-import {resumeFeedRun, resumeBrowserRun} from './coordination.js';
+import {resumeBrowserRun} from './coordination.js';
 import {DEFAULT_WORKSPACE, ROLES, clearCookie} from './auth.js';
 import {fail} from './http.js';
 import {reply} from './router.js';
@@ -122,7 +122,7 @@ export function accountRoutes(router, {auth, workspaces}) {
     const result = agent.revokeAgent(c.store, c.params.id);
     await c.store.update(s => activity(s, 'agent', 'Revoked a local agent. Its in-flight tasks were failed, not dropped silently.', {agentId: c.params.id}));
     for (const id of browserTasks) {
-      try { await onAgentTaskResult(c.store, id, {resumeFeed: resumeFeedRun, resumeBrowser: resumeBrowserRun}); }
+      try { await onAgentTaskResult(c.store, id, {resumeBrowser: resumeBrowserRun}); }
       catch (error) { console.error('Browser revocation:', error.message); }
     }
     return result;

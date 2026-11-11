@@ -4,23 +4,23 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {scoreCandidate, templateDraft, cleanText, initialState, markDue, activity, DEMO_SAMPLES} from './core.js?v=2d8fb27009';
+import {scoreCandidate, templateDraft, cleanText, initialState, markDue, activity, DEMO_SAMPLES} from './core.js?v=71dfceda40';
 import {
   migrate, seedDemo, updateSettings, addCandidate, beginProcessing,
   finishProcessing, editDraft, findDraft, rewriteDraft, draftAction, addGroup,
   addBot, updateBot, updateGroup, removeBot, removeGroup, addSchedule, removeSchedule, resetDemo,
   removeCandidate,
-} from './workflow.js?v=2d8fb27009';
-import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=2d8fb27009';
-import {addEvidence, verifyEvidence, dropEvidence} from './evidence.js?v=2d8fb27009';
-import {addChatMessages, clearChat} from './chats.js?v=2d8fb27009';
-import {publicMemory, addRules, removeRule, forgetChat, forgetRulebook} from './memory.js?v=2d8fb27009';
-import {summonableGuests} from './coordination.js?v=2d8fb27009';
-import {simulateGroup} from './group-simulator.js?v=2d8fb27009';
-import {BUSY_STATUSES} from './run-state.js?v=2d8fb27009';
-import {botSettings} from './bot-settings.js?v=2d8fb27009';
-import {denyBrowserRequest} from './bot-browser.js?v=2d8fb27009';
-import {withLocalLock} from './locks.js?v=2d8fb27009';
+} from './workflow.js?v=71dfceda40';
+import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=71dfceda40';
+import {addEvidence, verifyEvidence, dropEvidence} from './evidence.js?v=71dfceda40';
+import {addChatMessages, clearChat} from './chats.js?v=71dfceda40';
+import {publicMemory, addRules, removeRule, forgetChat, forgetRulebook} from './memory.js?v=71dfceda40';
+import {summonableGuests} from './coordination.js?v=71dfceda40';
+import {simulateGroup} from './group-simulator.js?v=71dfceda40';
+import {BUSY_STATUSES} from './run-state.js?v=71dfceda40';
+import {botSettings} from './bot-settings.js?v=71dfceda40';
+import {denyBrowserRequest} from './bot-browser.js?v=71dfceda40';
+import {withLocalLock} from './locks.js?v=71dfceda40';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();

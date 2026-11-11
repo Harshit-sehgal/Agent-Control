@@ -7,7 +7,7 @@ import * as chats from '../shared/chats.js';
 import {botSettings, threadContext} from '../shared/bot-settings.js';
 import {executeCustomBot} from './ai.js';
 import {resolveConfig} from './ai-providers.js';
-import {queueGroupRun, resumeGroupRun, resumeFeedRun, resumeBrowserRun, decidePlan, cancelRun, coordinationState, summonableGuests} from './coordination.js';
+import {queueGroupRun, resumeGroupRun, resumeBrowserRun, decidePlan, cancelRun, coordinationState, summonableGuests} from './coordination.js';
 import {recordBrowserRequests, denyBrowserRequest, BROWSER_PERMISSION, BROWSER_TOOL_HINT} from '../shared/bot-browser.js';
 import {SUBAGENT_PERMISSION, SUBAGENT_TOOL_HINT} from '../shared/subagents.js';
 import {BOT_ASK_PERMISSION, BOT_ASK_TOOL_HINT} from '../shared/bot-link.js';
@@ -178,8 +178,7 @@ export function groupRoutes(router) {
     if (!current) fail('Browser request not found.', 404);
     if (current.status === 'dispatched') cancelQueuedBrowserTasks(c.store, current.agentTaskIds);
     const request = await c.store.update(s => denyBrowserRequest(s, c.params.id));
-    if (request?.purpose === 'feed') await resumeFeedRun(c.store, request, {ok: false});
-    else if (request?.runId) await resumeBrowserRun(c.store, request, {ok: false});
+    if (request?.runId) await resumeBrowserRun(c.store, request, {ok: false});
     return request;
   });
 

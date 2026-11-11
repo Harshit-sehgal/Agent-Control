@@ -5,7 +5,7 @@ import {activity} from '../shared/core.js';
 import * as wf from '../shared/workflow.js';
 import * as agent from './agent.js';
 import {onAgentTaskResult, continueBrowserWork, setBrowserResultHooks} from './bot-browser.js';
-import {queueGroupRun, resumeFeedRun, resumeBrowserRun} from './coordination.js';
+import {queueGroupRun, resumeBrowserRun} from './coordination.js';
 import {runOneBot} from './routes-groups.js';
 import {sessionCookie, clearCookie, DEFAULT_WORKSPACE, resolveAccount} from './auth.js';
 import {sha256} from './vault.js';
@@ -18,7 +18,6 @@ import {reply} from './router.js';
 // instead of imported there (that would be a cycle).
 setBrowserResultHooks({
   continueRun: (store, spec) => continueBrowserWork(store, spec, {runBot: runOneBot, runGroup: queueGroupRun}),
-  resumeFeed: resumeFeedRun,
   resumeBrowser: resumeBrowserRun,
 });
 
@@ -164,7 +163,7 @@ export function publicRoutes(router, {auth, workspaces, version}) {
       ).map(task => task.id);
       const recovered = agent.recoverAgentTasks(store, nowMs);
       for (const id of staleBrowserTasks) {
-        try { await onAgentTaskResult(store, id, {resumeFeed: resumeFeedRun, resumeBrowser: resumeBrowserRun}); }
+        try { await onAgentTaskResult(store, id, {resumeBrowser: resumeBrowserRun}); }
         catch (error) { console.error('Browser recovery:', error.message); }
       }
       const tasks = agent.claimAgentTasks(store, device.id).map(t => ({id: t.id, kind: t.kind, payload: JSON.parse(t.payload), attempts: t.attempts}));
@@ -185,7 +184,7 @@ export function publicRoutes(router, {auth, workspaces, version}) {
       await store.update(s => activity(s, 'agent', `Agent task ${c.params.id} reported ${b.status}.`, {taskId: c.params.id}));
       // A bot's browser request reports back into its chat. The agent's result is
       // already recorded, so a failure here must not fail the agent's request.
-      try { await onAgentTaskResult(store, c.params.id, {continueRun: (s, spec) => continueBrowserWork(s, spec, {runBot: runOneBot, runGroup: queueGroupRun}), resumeFeed: resumeFeedRun, resumeBrowser: resumeBrowserRun}); }
+      try { await onAgentTaskResult(store, c.params.id, {continueRun: (s, spec) => continueBrowserWork(s, spec, {runBot: runOneBot, runGroup: queueGroupRun}), resumeBrowser: resumeBrowserRun}); }
       catch (error) { console.error('Browser result:', error.message); }
       return result;
     };

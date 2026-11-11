@@ -1,9 +1,9 @@
 /** The sheets a conversation can raise (new chat, new bot, a scheduled task),
  * plus the two full-screen layers: quick navigation and sign-in. */
-import {esc, icon, btn, row, field, note} from './ui-kit.js?v=2d8fb27009';
-import {groups, conversation, isStaticDemo, isAdmin, teamKey, go} from './ui-store.js?v=2d8fb27009';
-import {openSheet, closeSheet, captureFocus, restoreFocus, focusOrigin} from './ui-dialogs.js?v=2d8fb27009';
-import {tintPicker} from './ui-panel.js?v=2d8fb27009';
+import {esc, icon, btn, row, field, note} from './ui-kit.js?v=71dfceda40';
+import {groups, conversation, isStaticDemo, isAdmin, teamKey, go} from './ui-store.js?v=71dfceda40';
+import {openSheet, closeSheet, captureFocus, restoreFocus, focusOrigin} from './ui-dialogs.js?v=71dfceda40';
+import {tintPicker} from './ui-panel.js?v=71dfceda40';
 
 const el = id => document.getElementById(id);
 

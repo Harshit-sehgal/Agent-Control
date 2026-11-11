@@ -27,24 +27,12 @@ export function pendingBrowser(state, chatKey) {
   return (state?.browserRequests || []).filter(r => r.status === 'pending' && r.chatKey === chatKey).length;
 }
 
-export const FEED_WAIT = 'Waiting on you to approve a read of your X home feed. Nothing else runs until you do.';
-export const FEED_OPEN = 'Opening your X home feed. The other bots start when that page comes back.';
-
 /** Who a Retry should talk to, and which conversation it reports into.
  * A tracked run must name the primary bot again, or the retry becomes the whole pipeline. */
 export function retryTarget(group, run) {
   const lead = (group?.bots || []).find(b => botSettings(b).lead);
   const direct = run?.mode === 'tracked' ? (lead?.id || '') : run?.mode === 'direct' ? (run.recipients?.[0] || '') : '';
   return {direct, chat: run?.chatKey || ''};
-}
-
-/** What an open tab should do when a run is sitting on a home-feed read.
- * `follow` keeps watching. `wait` stops on the Approve card.
- * `lookAgain` is one more look: Start can return before the read is sent. */
-export function feedPauseAction(request, {graceUsed = false} = {}) {
-  if (request && request.status !== 'pending') return {action: 'follow', text: request.status === 'dispatched' ? FEED_OPEN : ''};
-  if (!graceUsed) return {action: 'lookAgain', text: ''};
-  return {action: 'wait', text: FEED_WAIT};
 }
 
 // System lines with a kind of their own paint a card, not a run note.
@@ -80,15 +68,13 @@ export function runButtons({status, live = false} = {}) {
   };
 }
 
-/** Buttons one system line may show at once. They stack. A missing feed
- * permission is also a failed run, so Grant must not hide Retry. Plans and
+/** Buttons one system line may show at once. They stack. Plans and
  * checkpoints also show on the static demo; Stop and Retry act on the newest
  * note of the newest run, and Retry needs the Node build. */
-export function threadLineActions({kind, senderId, status, live = false, note = false, latest = false} = {}) {
+export function threadLineActions({status, live = false, note = false, latest = false} = {}) {
   const newest = Boolean(note && live && latest);
   const buttons = runButtons({status, live: newest});
   return {
-    grant: Boolean(kind === 'feed-permission' && senderId),
     // A plan and a checkpoint are answered on any build: the run stopped for a
     // person, and the demo pauses too.
     plan: Boolean(note && buttons.plan),
@@ -116,34 +102,24 @@ function mergedRuns(state, localRuns) {
   return runs;
 }
 
-/** A home-feed read already sent to the device, while its run is still waiting.
- * The person can decline it. Until they do, that group cannot start another run. */
-export function stuckFeedReads(state, chatKey) {
-  const waiting = new Set((state?.groupRuns || []).filter(r => r.status === 'awaiting_feed' && r.chatKey === chatKey).map(r => r.id));
-  if (!waiting.size) return 0;
-  return (state?.browserRequests || []).filter(r => r.purpose === 'feed' && r.status === 'dispatched' && r.chatKey === chatKey && waiting.has(r.runId)).length;
-}
-
 /** Everything in one chat that is blocked on the human: runs paused at a plan or a checkpoint, browser
- * pages still waiting on approval, and a feed read the device has not answered.
+ * and pages still waiting on approval.
  * The chat list, the chat header and the info panel all read this one answer, so
  * the three cannot disagree about what needs a person.
  *
  * `runs` lets a caller pass the runs it merged against its own local copy (the
  * Pages demo keeps a run in localStorage); by default the state's own list. */
 export function waitingOnYou(state, chatKey, runs = state?.groupRuns || []) {
-  const view = {...(state || {}), groupRuns: runs};
   return {
     plans: runs.filter(r => r.status === 'awaiting_plan' && runBelongsToChat(r, chatKey)).length,
     pauses: runs.filter(r => r.status === 'awaiting_checkpoint' && runBelongsToChat(r, chatKey)).length,
-    pages: pendingBrowser(view, chatKey),
-    feeds: stuckFeedReads(view, chatKey),
+    pages: pendingBrowser(state, chatKey),
   };
 }
 
 /** How many things one chat's `waitingOnYou` answer adds up to: the badge the
  * chat list and the "needs you" filter count. */
-export const totalWaitingOnYou = ({plans = 0, pauses = 0, pages = 0, feeds = 0} = {}) => plans + pauses + pages + feeds;
+export const totalWaitingOnYou = ({plans = 0, pauses = 0, pages = 0} = {}) => plans + pauses + pages;
 
 function preview(history, {isTeam, fallback}) {
   const last = history[history.length - 1];
@@ -168,7 +144,7 @@ export function chatRows({state, messages = {}, profiles = {}, typing = new Set(
     rows.push({
       id: teamId, isTeam: true, name: group.name, members, needs, pinned: false, typing: typing.has(teamId),
       at: teamHistory[teamHistory.length - 1]?.at || '',
-      ...(team.pages ? {text: team.pages === 1 ? 'Wants to open a page' : `${team.pages} pages waiting on you`, sender: ''} : team.feeds ? {text: 'A feed read is still open', sender: ''} : preview(teamHistory, {isTeam: true, fallback: needs ? `${needs} waiting on you` : (group.description || 'Message the whole team')})),
+      ...(team.pages ? {text: team.pages === 1 ? 'Wants to open a page' : `${team.pages} pages waiting on you`, sender: ''} : preview(teamHistory, {isTeam: true, fallback: needs ? `${needs} waiting on you` : (group.description || 'Message the whole team')})),
     });
     for (const bot of group.bots) {
       const history = messages[bot.id] || [], mine = waitingOnYou(view, bot.id);
@@ -176,7 +152,7 @@ export function chatRows({state, messages = {}, profiles = {}, typing = new Set(
         id: bot.id, isTeam: false, name: bot.name, tint: tint(bot), needs: totalWaitingOnYou(mine), groupName: group.name,
         pinned: Boolean(profiles[bot.id]?.pinned), typing: typing.has(bot.id),
         at: history[history.length - 1]?.at || '',
-        ...(mine.pages ? {text: mine.pages === 1 ? 'Wants to open a page' : `${mine.pages} pages waiting on you`, sender: ''} : mine.feeds ? {text: 'A feed read is still open', sender: ''} : preview(history, {isTeam: false, fallback: bot.instructions || 'Say what you need'})),
+        ...(mine.pages ? {text: mine.pages === 1 ? 'Wants to open a page' : `${mine.pages} pages waiting on you`, sender: ''} : preview(history, {isTeam: false, fallback: bot.instructions || 'Say what you need'})),
       });
     }
   }

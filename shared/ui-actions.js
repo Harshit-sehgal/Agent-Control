@@ -45,12 +45,6 @@ export const actions = {
   'back-to-list': () => back({}),
   // The same arrow opens the panel from the thread and steps back from a section.
   'open-info': () => store.route.info && store.route.info !== 'home' ? back({chat: chatId(), info: 'home'}) : go({chat: chatId(), info: 'home'}),
-  'grant-browser': async b => {
-    const bot = findBot(b.dataset.id);
-    await patchBot(bot.id, {permissions: [...new Set([...(bot.permissions || []), 'browser.use'])]});
-    await sync();
-    toast(`${bot.name} can request pages now.`);
-  },
   'close-info': () => back({chat: chatId()}),
   'open-section': b => { if (b.dataset.section === 'group-settings') store.pipelineDraft = null; go({chat: chatId(), info: b.dataset.section}); },
   'open-page': b => go({page: b.dataset.page}),
@@ -184,10 +178,7 @@ export const actions = {
     const key = run?.chatKey || chatId() || teamKey(b.dataset.id);
     await runWithTyping({key, setTyping, sync,
       send: async () => { await api(`/api/groups/${b.dataset.id}/runs/${b.dataset.run}/plan`, 'POST', {approve: true}); await sync(); },
-      follow: () => {
-        const request = (store.state.browserRequests || []).find(r => r.runId === b.dataset.run && r.purpose === 'feed');
-        return streamGroupRun(b.dataset.id, key, b.dataset.run, {ignore: request?.status === 'dispatched' ? ['awaiting_feed'] : []});
-      }});
+      follow: () => streamGroupRun(b.dataset.id, key, b.dataset.run)});
   },
   'cancel-run': async b => {
     await api(`/api/groups/${b.dataset.id}/runs/${b.dataset.run}/cancel`, 'POST', {}); toast('Run stopped.'); await sync();
@@ -202,8 +193,7 @@ export const actions = {
     const request = (store.state.browserRequests || []).find(r => r.id === b.dataset.id);
     if (!request?.runId || !request.groupId) return;
     const key = request.chatKey || teamKey(request.groupId);
-    const pause = request.purpose === 'feed' ? 'awaiting_feed' : 'awaiting_browser';
-    await runWithTyping({key, setTyping, sync, follow: () => streamGroupRun(request.groupId, key, request.runId, {ignore: [pause]})});
+    await runWithTyping({key, setTyping, sync, follow: () => streamGroupRun(request.groupId, key, request.runId, {ignore: ['awaiting_browser']})});
   },
   'deny-browser': async b => {
     await api(`/api/browser-requests/${b.dataset.id}/deny`, 'POST', {});

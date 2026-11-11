@@ -26,13 +26,12 @@ test('custom bots run through the Node provider only on the server build',()=>{
   // Built-in bots use the same provider. A missing key is an error, not the demo.
   assert.match(app,/This bot answers with your AI provider/);
   assert.match(app,/will not answer with the demo/);
-  // Retry of a feed read must wait or keep watching, the same as the first send.
+  // A retry watches a queued run the same way as the first send.
   assert.match(app,/if \(await watchQueuedRun\(b\.dataset\.id, key, run\)\) return/);
   // The watch loop now lives in shared/run-follow.js over injected pieces, and
   // tests/run-follow.test.js drives it with fake snapshots instead of matching
   // its text; this only checks that the chat module still hands it the run.
   assert.match(app,/await pollRun\(\{/);
-  assert.match(app,/await streamGroupRun\(groupId, key, run\.runId\);\n    return true;/);
   assert.match(app,/const key = run\?\.chatKey \|\| chatId\(\) \|\| teamKey\(b\.dataset\.id\)/);
   // A run decision goes to its route in both builds: continue, plan, cancel.
   assert.match(app,/runs\/\$\{b\.dataset\.run\}\/continue`, 'POST'/);
@@ -43,7 +42,7 @@ test('custom bots run through the Node provider only on the server build',()=>{
   assert.match(app,/runButtons\(\{status, live\}\)/);
   assert.match(app,/flags\.checkpoint \? btn\('Approve next step', 'continue-run'/);
   // The chat header and the info panel read the same "waiting on you" answer.
-  assert.match(app,/const \{plans, pauses, pages, feeds\} = waitingOnYou\(store\.state, conv\.id, held\)/);
+  assert.match(app,/const \{plans, pauses, pages\} = waitingOnYou\(store\.state, conv\.id, held\)/);
   assert.match(app,/const waiting = waitingOnYou\(state, conv\.id, runs\)/);
   assert.match(app,/paused \? `\$\{paused\} paused`/);
   assert.match(app,/Waiting on a page/);
@@ -59,10 +58,6 @@ test('custom bots run through the Node provider only on the server build',()=>{
   assert.match(app,/'toggle-user-disabled'/);
   assert.match(app,/Temporary password \(min 8 chars\)/);
   assert.match(app,/EMAIL_RELAY_URL/);
-  // The "is this pause still this run?" check moved into the watch loop
-  // (shared/run-follow.js, behaviour-tested); the retry path still decides
-  // wait vs follow the same way here.
-  assert.match(app,/feedPauseAction\(request, \{graceUsed: true\}\)/);
   assert.match(app,/request.status === 'dispatched' \? `<div class="card-actions">\$\{decline\}/);
   assert.match(app,/<form id="login-form"[\s\S]*?name="email"/);
   assert.match(app,/id="password-form"/);
@@ -70,8 +65,6 @@ test('custom bots run through the Node provider only on the server build',()=>{
   assert.match(app,/'deny-browser': async b => \{[\s\S]*?streamGroupRun\(request\.groupId/);
   assert.match(app,/'retry-bot-task'/);
   assert.match(app,/\['failed', 'interrupted', 'awaiting_plan', 'awaiting_checkpoint', 'completed', 'cancelled'\]\.includes\(run\?\.status\)/);
-  assert.match(app,/Grant browser access/);
-  assert.match(app,/'grant-browser': async b => \{[\s\S]*?patchBot\([\s\S]*?browser\.use/);
   // When a provider is connected, the actual model id is surfaced if known.
   assert.match(app,/Connected · \$\{esc\(model\)\}/);
   assert.match(app,/state\?\.aiModel/);

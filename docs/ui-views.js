@@ -2,13 +2,13 @@
  * Both are thin renderers over ui-model.js. The list shell and the composer are
  * painted once and then only their contents change, so a background refresh can
  * never wipe what the user is typing. */
-import {summonableGuests} from './coordination.js?v=2d8fb27009';
-import {botSettings, groupSettings} from './bot-settings.js?v=2d8fb27009';
-import {requestOfMessage} from './bot-browser.js?v=2d8fb27009';
-import {validHttpUrl} from './core.js?v=2d8fb27009';
-import {chatRows, timeline, waitingOnYou, mentionSuggestions, retryTarget, threadLineActions, isRunNote} from './ui-model.js?v=2d8fb27009';
-import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=2d8fb27009';
-import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, botTint, recentRuns} from './ui-store.js?v=2d8fb27009';
+import {summonableGuests} from './coordination.js?v=71dfceda40';
+import {botSettings, groupSettings} from './bot-settings.js?v=71dfceda40';
+import {requestOfMessage} from './bot-browser.js?v=71dfceda40';
+import {validHttpUrl} from './core.js?v=71dfceda40';
+import {chatRows, timeline, waitingOnYou, mentionSuggestions, retryTarget, threadLineActions, isRunNote} from './ui-model.js?v=71dfceda40';
+import {esc, icon, avatar, groupAvatar, tintClass, clock, stamp, dayLabel, btn, iconBtn, tag, mascot} from './ui-kit.js?v=71dfceda40';
+import {store, conversation, groups, groupOfBot, findBot, isStaticDemo, isLive, canWrite, botTint, recentRuns} from './ui-store.js?v=71dfceda40';
 
 const el = id => document.getElementById(id);
 /** Starter prompts under an empty composer. */
@@ -110,15 +110,14 @@ function messageHtml(item, conv, latestRunNote) {
     const runs = recentRuns(conv.group.id), live = !isStaticDemo();
     const noted = Boolean(m.runId && latestRunNote.get(m.runId) === m.id && (m.origin !== 'browser' || isStaticDemo()));
     const run = noted ? runs.find(r => r.id === m.runId) : null;
-    const flags = threadLineActions({kind: m.kind, senderId: m.senderId, status: run?.status, live, note: Boolean(run), latest: Boolean(run) && runs[0]?.id === run.id});
+    const flags = threadLineActions({status: run?.status, live, note: Boolean(run), latest: Boolean(run) && runs[0]?.id === run.id});
     const write = canWrite();
-    const grant = write && flags.grant ? btn('Grant browser access', 'grant-browser', {id: m.senderId, small: true, kind: 'primary'}) : '';
     const plan = write && flags.plan ? `${btn('Start', 'approve-plan', {id: conv.group.id, small: true, kind: 'primary', data: {run: run.id}})}${btn('Cancel', 'cancel-plan', {id: conv.group.id, small: true, data: {run: run.id}})}` : '';
     const checkpoint = write && flags.checkpoint ? btn('Approve next step', 'continue-run', {id: conv.group.id, small: true, kind: 'primary', data: {run: run.id}}) : '';
     // Retry only the latest run: once a newer one exists, the old failure is history.
     const retry = write && flags.retry ? btn('Retry', 'retry-run', {id: conv.group.id, small: true, data: {run: run.id, message: run.input || '', ...retryTarget(conv.group, run)}}) : '';
     const stop = write && flags.stop ? btn('Stop', 'cancel-run', {id: conv.group.id, small: true, data: {run: run.id}}) : '';
-    return `<div class="event"><span>${esc(m.text)}</span>${grant}${plan}${checkpoint}${retry}${stop}</div>`;
+    return `<div class="event"><span>${esc(m.text)}</span>${plan}${checkpoint}${retry}${stop}</div>`;
   }
   if (m.role === 'user') return `<div class="msg me${item.lead ? ' lead' : ''}"><div class="bubble"><span class="text">${esc(m.text)}</span><time>${esc(clock(m.at))}</time></div></div>`;
   const sender = m.senderId ? findBot(m.senderId) : null, guest = Boolean(sender) && !conv.group.bots.some(b => b.id === m.senderId);
@@ -151,7 +150,7 @@ function threadHead(conv) {
   // The counts a header pill can show all come from one answer in the view
   // model, so the header, the chat list and the info panel cannot disagree.
   const held = recentRuns(conv.group.id);
-  const {plans, pauses, pages, feeds} = waitingOnYou(store.state, conv.id, held);
+  const {plans, pauses, pages} = waitingOnYou(store.state, conv.id, held);
   const face = conv.isTeam ? groupAvatar(conv.group.bots.map(b => ({name: b.name, tint: botTint(conv.group, b.id)})), 42) : avatar(conv.name, conv.tint, 42);
   const sub = store.typing.has(conv.id) ? 'typing…' : conv.isTeam ? (conv.group.bots.map(b => b.name).join(', ') || 'No bots yet') : conv.group.name;
   const pagePill = pages === 1 ? 'Wants to open a page' : `${pages} pages waiting on you`;
@@ -159,7 +158,7 @@ function threadHead(conv) {
   const pausePill = pauses === 1 ? 'Approve the next step' : `${pauses} steps waiting`;
   return `${iconBtn('back', 'Back to chats', 'back-to-list', {cls: 'back'})}
     <button type="button" class="thread-title" data-action="open-info" aria-expanded="${Boolean(store.route.info)}" aria-controls="inspector" aria-label="${esc(conv.name)}, open details">${face}<span class="thread-title-text"><strong>${esc(conv.name)}</strong><span>${esc(sub)}</span></span></button>
-    ${pages ? `<span class="needs-pill">${pagePill}</span>` : feeds ? `<span class="needs-pill">Feed read still open</span>` : ''}${plans ? `<button type="button" class="needs-pill" data-action="open-section" data-section="runs">${planPill}</button>` : ''}${pauses ? `<button type="button" class="needs-pill" data-action="open-section" data-section="runs">${pausePill}</button>` : ''}`;
+    ${pages ? `<span class="needs-pill">${pagePill}</span>` : ''}${plans ? `<button type="button" class="needs-pill" data-action="open-section" data-section="runs">${planPill}</button>` : ''}${pauses ? `<button type="button" class="needs-pill" data-action="open-section" data-section="runs">${pausePill}</button>` : ''}`;
 }
 
 function suggestions(conv) {

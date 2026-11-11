@@ -56,6 +56,13 @@ export function migrate(state) {
   state.groups ??= [];
   state.groupMessages ??= {};
   state.groupRuns ??= [];
+  // X home-feed reading is gone. A run parked on it can never resume, and it
+  // would hold its group busy, so it loads as cancelled.
+  for (const run of [...state.runs, ...state.groupRuns]) {
+    if (run?.status !== 'awaiting_feed') continue;
+    run.status = 'cancelled';
+    run.error = 'X feed reading was removed';
+  }
   if (!Array.isArray(state.browserRequests)) state.browserRequests = [];
   // Bring-your-own-key AI providers and the workspace/bot model choices.
   state.ai ??= {};
@@ -380,7 +387,7 @@ function forgetBot(state, botId) {
   }
   for (const run of state.groupRuns || []) {
     if (!BUSY_STATUSES.includes(run.status)) continue;
-    const waiting = ['awaiting_feed', 'awaiting_browser'].includes(run.status)
+    const waiting = run.status === 'awaiting_browser'
       && (state.browserRequests || []).some(r => r.runId === run.id && r.botId === botId && r.status === 'denied');
     const referencesBot = (run.recipients || []).includes(botId) || (run.guestIds || []).includes(botId)
       || (run.trace || []).some(step => step.botId === botId || step.toBotId === botId);

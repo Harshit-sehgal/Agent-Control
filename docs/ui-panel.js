@@ -1,14 +1,14 @@
 /** Everything that used to be a dashboard tab now hangs off a conversation:
  * the info panel of the open chat (runs, scheduled tasks, settings, the
  * bot's profile) and the "You" pages (account, admin, about). */
-import {ACTIONS, OUTPUT_KINDS} from './contracts.js?v=2d8fb27009';
-import {BOT_DEFAULTS, MAX_CONTEXT_MESSAGES, MAX_STEPS_LIMIT, botSettings, groupSettings, pipelineOf} from './bot-settings.js?v=2d8fb27009';
-import {modelKey} from './memory.js?v=2d8fb27009';
-import {chatTasks, pipelineRows, retryTarget, runButtons, waitingOnYou} from './ui-model.js?v=2d8fb27009';
-import {esc, icon, avatar, groupAvatar, tintClass, TINT_COUNT, btn, iconBtn, row, box, field, note, empty, tag, pageHead, fullDate} from './ui-kit.js?v=2d8fb27009';
-import {store, conversation, isStaticDemo, isAdmin, canWrite, botTint, recentRuns, THEMES, themeChoice} from './ui-store.js?v=2d8fb27009';
-import {validHttpUrl} from './core.js?v=2d8fb27009';
-import {ADMIN_PAGES, adminPage, providerModelOptions} from './ui-admin.js?v=2d8fb27009';
+import {ACTIONS, OUTPUT_KINDS} from './contracts.js?v=71dfceda40';
+import {BOT_DEFAULTS, MAX_CONTEXT_MESSAGES, MAX_STEPS_LIMIT, botSettings, groupSettings, pipelineOf} from './bot-settings.js?v=71dfceda40';
+import {modelKey} from './memory.js?v=71dfceda40';
+import {chatTasks, pipelineRows, retryTarget, runButtons, waitingOnYou} from './ui-model.js?v=71dfceda40';
+import {esc, icon, avatar, groupAvatar, tintClass, TINT_COUNT, btn, iconBtn, row, box, field, note, empty, tag, pageHead, fullDate} from './ui-kit.js?v=71dfceda40';
+import {store, conversation, isStaticDemo, isAdmin, canWrite, botTint, recentRuns, THEMES, themeChoice} from './ui-store.js?v=71dfceda40';
+import {validHttpUrl} from './core.js?v=71dfceda40';
+import {ADMIN_PAGES, adminPage, providerModelOptions} from './ui-admin.js?v=71dfceda40';
 
 const el = id => document.getElementById(id);
 const options = (pairs, current) => pairs.map(([value, label]) => `<option value="${esc(value)}"${value === current ? ' selected' : ''}>${esc(label)}</option>`).join('');
@@ -34,9 +34,9 @@ const offTag = bot => botSettings(bot).enabled ? (botSettings(bot).lead ? tag('P
 function groupHome(conv) {
   const {group} = conv, {state} = store, runs = recentRuns(group.id);
   // One answer from the view model, the same the chat list and thread header
-  // read: paused runs, plans, pending pages and stuck feed reads.
+  // read: paused runs, plans and pending pages.
   const waiting = waitingOnYou(state, conv.id, runs);
-  const paused = waiting.pauses, plans = waiting.plans, pages = waiting.pages + waiting.feeds;
+  const paused = waiting.pauses, plans = waiting.plans, pages = waiting.pages;
   const runRight = paused ? `${paused} paused` : plans ? (plans === 1 ? 'A plan is waiting' : `${plans} plans waiting`) : pages ? 'Waiting on a page' : (runs.length ? `Last ${fullDate(runs[0].createdAt)}` : 'None yet');
   const scheduled = chatTasks(state.tasks, group.id, null).length;
   const members = group.bots.map(b => ({name: b.name, tint: botTint(group, b.id)}));
@@ -108,7 +108,7 @@ function tasksSection(conv) {
     ${note(isStaticDemo() ? 'This demo runs tasks only while the page is open.' : 'Tasks run with retries while the Node server is up.')}`;
 }
 
-const RUN_TONE = {completed: 'good', failed: 'bad', interrupted: 'bad', running: 'warn', queued: 'warn', awaiting_checkpoint: 'warn', awaiting_plan: 'warn', awaiting_feed: 'warn', awaiting_browser: 'warn'};
+const RUN_TONE = {completed: 'good', failed: 'bad', interrupted: 'bad', running: 'warn', queued: 'warn', awaiting_checkpoint: 'warn', awaiting_plan: 'warn', awaiting_browser: 'warn'};
 function runCard(group, run) {
   const name = id => group.bots.find(b => b.id === id)?.name || id, steps = run.recipients || [], live = !isStaticDemo(), status = String(run.status || 'unknown');
   // One rule for a run's buttons, shared with the thread's run note: a plan's

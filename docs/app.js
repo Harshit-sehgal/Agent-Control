@@ -11,21 +11,21 @@
  *   ui-dialogs  toast, sheet, confirm/ask   ui-actions action/form tables
  *   ui-fx       confetti, the send arrow, and when the bots react
  */
-import {parseRoute} from './ui-model.js?v=2d8fb27009';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, isAdmin, canWrite, applyTheme, watchSystemTheme, retireSession, sessionEpoch} from './ui-store.js?v=2d8fb27009';
-import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=2d8fb27009';
-import {listShell, renderList, threadShell, renderThread, homeView, renderMentions} from './ui-views.js?v=2d8fb27009';
-import {renderInfo, renderPage} from './ui-panel.js?v=2d8fb27009';
-import {showLogin, hideLogin, openCommandPalette, closeCommandPalette, paletteOpen, updateCommandResults, chooseCommand, moveCommand} from './ui-sheets.js?v=2d8fb27009';
-import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=2d8fb27009';
-import {bringBotsToLife} from './ui-fx.js?v=2d8fb27009';
+import {parseRoute} from './ui-model.js?v=71dfceda40';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, isAdmin, canWrite, applyTheme, watchSystemTheme, retireSession, sessionEpoch} from './ui-store.js?v=71dfceda40';
+import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=71dfceda40';
+import {listShell, renderList, threadShell, renderThread, homeView, renderMentions} from './ui-views.js?v=71dfceda40';
+import {renderInfo, renderPage} from './ui-panel.js?v=71dfceda40';
+import {showLogin, hideLogin, openCommandPalette, closeCommandPalette, paletteOpen, updateCommandResults, chooseCommand, moveCommand} from './ui-sheets.js?v=71dfceda40';
+import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=71dfceda40';
+import {bringBotsToLife} from './ui-fx.js?v=71dfceda40';
 
 const el = id => document.getElementById(id);
 const hashRoute = () => parseRoute(location.hash, store.state, {server: !isStaticDemo(), admin: isAdmin(), write: canWrite()});
 /** True while the user is typing inside `node`, so a repaint must not replace it. */
 const typingIn = node => { const a = document.activeElement; return Boolean(a && node?.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)); };
 let lastView = '', syncTimer = null, syncDue = 0, refreshing = false;
-const LIVE_RUN = new Set(['running', 'queued', 'awaiting_feed', 'awaiting_browser']);
+const LIVE_RUN = new Set(['running', 'queued', 'awaiting_browser']);
 /** Refresh failures already shown. A dashboard stuck on a stale snapshot must
  * say so, but a poll every few seconds must not repeat the same toast. */
 const syncFailures = new Set();

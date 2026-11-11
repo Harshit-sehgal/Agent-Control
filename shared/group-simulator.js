@@ -32,7 +32,6 @@ export async function simulateGroup({group, message, directBotId=null, guests=[]
     if(run.status==='awaiting_plan')return run;
     wakeBots(group,run.task?.woke);
     for (const id of run.task?.woke || []) { try { await api(`/api/groups/${group.id}/bots/${id}`,'PATCH',{settings:{enabled:true}}); } catch { /* The in-memory bot is already on. */ } }
-    if(run.task?.needsFeed)emit({id:makeId(),role:'system',text:'This copy cannot open your X home feed. It will use a post you already captured. On the app, the source bot asks to scroll and read the feed first. You still post.',runId:run.id,at:new Date().toISOString()});
     run.status='running'; previous=null; i=0;
     emit({id:makeId(),role:'system',text:`Passing this through ${run.recipients.length} bot(s). Simulated, no live AI.`,runId:run.id,at:new Date().toISOString()});
   }

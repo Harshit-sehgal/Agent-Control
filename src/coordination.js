@@ -10,7 +10,7 @@ import {STOPPABLE_STATUSES} from '../shared/run-state.js';
 import {botSettings,groupSettings,threadContext,MAX_STEPS_LIMIT} from '../shared/bot-settings.js';
 import {addChatMessages} from '../shared/chats.js';
 import {assertContractOutput} from '../shared/contracts.js';
-import {recordBrowserRequests,queueFeedRead,stripBrowserBlocks,parseBrowserRequests,HOME_FEED_URL,MAX_BROWSER_DEPTH} from '../shared/bot-browser.js';
+import {recordBrowserRequests,stripBrowserBlocks,parseBrowserRequests,MAX_BROWSER_DEPTH} from '../shared/bot-browser.js';
 import {MAX_SUBAGENT_DEPTH} from '../shared/subagents.js';
 import {autoDispatch} from './bot-browser.js';
 import {runBotTurn} from './bot-turn.js';
@@ -68,10 +68,10 @@ export async function markInterrupted(store){
     coordinationState(s);
     for(const r of s.groupRuns){
       if(!INTERRUPT.includes(r.status))continue;
-      const feed=r.status==='awaiting_feed', page=r.status==='awaiting_browser';
-      const reason=feed?'Server restarted while waiting for the home feed. Ask again.':page?'Server restarted while waiting for a page. Ask again.':'Server restarted before the run completed. Retry explicitly to avoid duplicate model calls.';
+      const page=r.status==='awaiting_browser';
+      const reason=page?'Server restarted while waiting for a page. Ask again.':'Server restarted before the run completed. Retry explicitly to avoid duplicate model calls.';
       endRun(r,'interrupted',{error:reason});
-      if(feed||page)for(const id of denyRunPages(s,r.id))taskIds.add(id);
+      if(page)for(const id of denyRunPages(s,r.id))taskIds.add(id);
       say(s,r,runNote(r));
     }
   });
@@ -126,11 +126,9 @@ export async function queueGroupRun(store,{groupId,message,directBotId=null,chec
     activity(s,'group-run',`Queued ${group.name} coordination run`,{runId:run.id});return run.id;
   });
   let status=store.read().groupRuns.find(r=>r.id===id)?.status||'queued';
-  // A plan the user asked to see first waits. A feed read files its page request
-  // before any bot runs, so the reply can say it is waiting. Everything else starts now.
+  // A plan the user asked to see first waits. Everything else starts now.
   if(status==='queued'){
-    const held=await holdForFeed(store,id);
-    if(!held)startRun(store,id);
+    startRun(store,id);
     status=store.read().groupRuns.find(r=>r.id===id)?.status||status;
   }
   return {runId:id,status};
@@ -209,7 +207,6 @@ async function runGroupInner(store,id,executor){
     const start=before?.checkpoint?.nextStep||0;
     let previous=before?.checkpoint?.previous||null;
     await store.update(s=>{coordinationState(s);const r=s.groupRuns.find(x=>x.id===id);if(!r||!['queued','running','awaiting_checkpoint'].includes(r.status))throw new Error('Run is not runnable');r.status='running';r.startedAt=r.startedAt||stamp();r.checkpoint=null;});
-    if(await holdForFeed(store,id))return;
     // The recipient list is read live each step: a bot's reply may append to it.
     // A bot created during this run is not a recipient of it: it has no settings
     // a person has checked yet, and handing it work the same minute it exists is
@@ -269,7 +266,7 @@ async function runGroupInner(store,id,executor){
         const host=s.groups.find(x=>x.id===live.groupId);
         // File fences from the full reply, then hand the next bot the text around them.
         const priorUrls=Array.isArray(live.browserUrls)?live.browserUrls:String(live.browserUrl||'').split(' | ').filter(Boolean);
-        const skip=[...(live.task?.feedText?[HOME_FEED_URL]:[]),...priorUrls];
+        const skip=priorUrls;
         const browsed=recordBrowserRequests(s,{bot,groupId:live.groupId,chatKey:live.chatKey||`team-${live.groupId}`,output,depth:live.browserDepth||0,makeId:randomUUID,skipUrls:skip,runId:id});
         // Text around the browser fences is the browser helper's view of the
         // reply; with nothing to browse, the approved value is the output.
@@ -303,8 +300,7 @@ async function runGroupInner(store,id,executor){
           live.checkpoint={nextStep:i,afterStep:i+1,previous,at:stamp()};
           holdBrowser=true;
         } else {
-          // Extra turn consumed the page. Later bots must see the home feed,
-          // not this article, as `page`.
+          // Extra turn consumed the page; later bots do not see it as `page`.
           live.browserPage=null;
         }
       });
@@ -337,49 +333,6 @@ async function runGroupInner(store,id,executor){
     if(store.read().groupRuns?.some(r=>r.id===id&&r.status==='queued'))queueMicrotask(()=>startRun(store,id,executor));
   }
 }
-/** A tracked feed read pauses before any bot runs. The source bot's request
- * must come back as page text; a missing permission or a later denial stops
- * the run instead of drafting as if the feed had been read. */
-async function holdForFeed(store,id){
-  const filed=await store.update(s=>{
-    const live=s.groupRuns.find(x=>x.id===id);
-    // A bot or group can be removed between the run starting and this
-    // transaction. Never let feed setup revive a run that was cancelled.
-    if(!live||!['queued','running'].includes(live.status))return {held:true,auto:[]};
-    if(!live?.task?.needsFeed||live.task.feedText)return null;
-    if(live.status==='awaiting_feed'||live.task.feedRequestId)return {held:true,auto:[]};
-    const group=s.groups.find(g=>g.id===live.groupId);
-    const bot=group?.bots.find(b=>b.id===live.task.feedBotId);
-    const now=stamp();
-    if(!bot){endRun(live,'failed',{error:'No bot can read the feed.'});say(s,live,runNote(live));return {held:true,auto:[]};}
-    const result=queueFeedRead(s,{bot,groupId:live.groupId,chatKey:live.chatKey||`team-${live.groupId}`,runId:id,makeId:randomUUID,now});
-    say(s,live,result.line);
-    if(!result.record){endRun(live,'failed',{error:result.line?.text||'The feed was not opened, so nothing else ran.'});return {held:true,auto:[]};}
-    live.task={...live.task,feedRequestId:result.record.id};
-    live.status='awaiting_feed';
-    return {held:true,auto:botSettings(bot).browserApproval==='auto'?[result.record]:[]};
-  });
-  if(!filed)return false;
-  if(filed.auto?.length)await autoDispatch(store,filed.auto);
-  return true;
-}
-/** The home-feed page came back, or it did not. Only a run still waiting on
- * that page moves. A denial or a failure does not start the other bots. */
-export async function resumeFeedRun(store,request,{ok,text='',executor}={}){
-  const id=request?.runId;
-  if(!id)return false;
-  const cur=store.read().groupRuns?.find(r=>r.id===id);
-  if(!cur||cur.status!=='awaiting_feed')return false;
-  const page=clean(text).trim();
-  if(!ok||page.length<80){
-    const error=!ok?'The feed was not opened, so nothing else ran.':'The home feed came back without posts. Sign in once in the browser profile, allow x.com on the device, and ask again. Nothing else ran.';
-    await store.update(s=>{const live=s.groupRuns.find(r=>r.id===id);if(!live||live.status!=='awaiting_feed')return;endRun(live,'failed',{error});say(s,live,runNote(live));});
-    return true;
-  }
-  await store.update(s=>{const live=s.groupRuns.find(r=>r.id===id);if(!live||live.status!=='awaiting_feed')return;live.task={...live.task,feedText:page};live.status='queued';});
-  startRun(store,id,executor);
-  return true;
-}
 /** A page the run asked for mid-step. Success gives that same bot another
  * turn with the page. Failure or a denial skips that extra turn and continues. */
 export async function resumeBrowserRun(store,request,{ok,text='',executor}={}){
@@ -408,8 +361,8 @@ export async function resumeBrowserRun(store,request,{ok,text='',executor}={}){
     // Two fences in one reply are two requests. Stay paused until the last
     // one comes back, so the second page is not dropped on the floor.
     // A request not consumed into this run yet is still outstanding, even if
-    // its status flip already committed (feed reads are the other run path).
-    const left=(s.browserRequests||[]).some(r=>r.runId===id&&r.purpose!=='feed'&&!consumed.has(r.id));
+    // its status flip already committed.
+    const left=(s.browserRequests||[]).some(r=>r.runId===id&&!consumed.has(r.id));
     if(left)return false;
     // A duplicate delivery after the first one already resumed has nothing to do.
     if(live.status!=='awaiting_browser')return false;
@@ -478,10 +431,7 @@ export async function decidePlan(store,id,{approve}){
     r.status='queued';say(s,r,{id:randomUUID(),role:'system',text:'Starting.',runId:id,at:stamp()});
     return {runId:id,status:'queued',start:true};
   });
-  if(result.start){
-    const held=await holdForFeed(store,id);
-    if(!held)startRun(store,id);
-  }
+  if(result.start)startRun(store,id);
   return {runId:result.runId,status:store.read().groupRuns.find(r=>r.id===id)?.status||result.status};
 }
 export async function resumeGroupRun(store,id,executor=executeCustomBot){

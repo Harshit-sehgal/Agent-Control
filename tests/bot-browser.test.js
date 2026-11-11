@@ -7,10 +7,10 @@ import * as agent from '../src/agent.js';
 import {SqliteStore} from '../src/sqlite-store.js';
 import * as wf from '../shared/workflow.js';
 import {createRun, createEnvelope} from '../shared/coordination.js';
-import {coordinationState, runGroup, resumeFeedRun, resumeBrowserRun} from '../src/coordination.js';
+import {coordinationState, runGroup, resumeBrowserRun} from '../src/coordination.js';
 import {dispatchBrowserRequest, onAgentTaskResult, autoDispatch, continueBrowserWork, setBrowserResultHooks, beginTakeover, handBackTakeover} from '../src/bot-browser.js';
 import {refusePostingAction} from '../agent/browser.mjs';
-import {parseBrowserRequests, validateBrowserRequest, recordBrowserRequests, stripBrowserBlocks, denyBrowserRequest, browserResultText, capturePageText, feedPageText, requestOfMessage, queueFeedRead, pruneBrowserRequests, MAX_BROWSER_REQUESTS, MAX_BROWSER_DEPTH, MAX_ELEMENT_INDEX, BROWSER_PERMISSION} from '../shared/bot-browser.js';
+import {parseBrowserRequests, validateBrowserRequest, recordBrowserRequests, stripBrowserBlocks, denyBrowserRequest, browserResultText, capturePageText, requestOfMessage, pruneBrowserRequests, MAX_BROWSER_REQUESTS, MAX_BROWSER_DEPTH, MAX_ELEMENT_INDEX, BROWSER_PERMISSION} from '../shared/bot-browser.js';
 import {addChatMessages} from '../shared/chats.js';
 import {validateBotSettings} from '../shared/bot-settings.js';
 import {ACTIONS} from '../shared/contracts.js';
@@ -29,10 +29,6 @@ test('browser blocks are parsed, bounded and kept away from posting on X', () =>
   assert.equal(validateBrowserRequest({url: 'https://x.com/someone/status/1', steps: [{op: 'read', selector: 'article'}]}).kind, 'browser.action', 'Reading X is allowed.');
   const scrolled = validateBrowserRequest({url: 'https://x.com/home', steps: [{op: 'scroll', times: 9}]});
   assert.equal(scrolled.steps[0].times, 4, 'A scroll only moves the page, and only a few times.');
-  assert.equal(feedPageText({text: 'Sign in to X to see what is happening. Happening now. Join today and follow what you care about. This wall is long enough to pass a short-page check.'}), '');
-  assert.equal(feedPageText({title: 'X', text: 'Happening now. Join today. Sign in and see what people are talking about around the world this hour.'}), '');
-  assert.ok(feedPageText({text: 'Ada posted about rockets and the next launch window. Replying to Ada: the pad timeline slipped by a day.'}).includes('rockets'));
-  assert.ok(feedPageText({actions: [{text: 'Ada posted about rockets and the next launch window. Replying to Ada: the pad timeline slipped by a day.'}]}).includes('rockets'));
   assert.equal(scrolled.kind, 'browser.action');
   assert.throws(() => validateBrowserRequest({url: 'file:///etc/passwd'}), /public http/);
   assert.throws(() => validateBrowserRequest({url: 'https://example.com', steps: Array(26).fill({op: 'read', selector: 'p'})}), /at most 25/);
@@ -90,19 +86,6 @@ test('a trailing dot is still X or Twitter, so click and type stay refused', () 
   assert.equal(refusePostingAction('scroll', 'https://twitter.com.'), '');
 });
 
-test('a missing feed permission keeps the bot id so the chat can open its profile', () => {
-  const state = wf.migrate({candidates: [], groups: [{id: 'g', name: 'G', bots: [browserBot({permissions: []})]}]});
-  const bot = state.groups.flatMap(g => g.bots).find(b => b.id === 'web');
-  const {record, line} = queueFeedRead(state, {bot, groupId: 'g', chatKey: 'team-g', runId: 'r'});
-  assert.equal(record, null);
-  assert.equal(line.kind, 'feed-permission');
-  assert.equal(line.senderId, 'web');
-  addChatMessages(state, 'team-g', [line], {trusted: true});
-  const saved = state.chats['team-g'].at(-1);
-  assert.equal(saved.kind, 'feed-permission');
-  assert.equal(saved.senderId, 'web');
-});
-
 test('a reply becomes request cards only for a bot holding browser.use, within the depth limit', () => {
   const state = wf.migrate({candidates: [], groups: []});
   const out = recordBrowserRequests(state, {bot: browserBot(), groupId: 'g', chatKey: 'web', output: block({url: 'https://example.com'}), makeId: (() => { let n = 0; return () => `id-${++n}`; })()});
@@ -127,8 +110,6 @@ test('a reply becomes request cards only for a bot holding browser.use, within t
   assert.match(again.lines[0].text, /already has that page/);
   assert.equal(denyBrowserRequest(state, out.records[0].id).status, 'denied');
   assert.throws(() => denyBrowserRequest(state, out.records[0].id), status(409));
-  state.browserRequests.unshift({id: 'feed-go', purpose: 'feed', runId: 'r-feed', status: 'dispatched'});
-  assert.equal(denyBrowserRequest(state, 'feed-go').status, 'denied', 'A home-feed read already sent can still be cancelled.');
   state.browserRequests.unshift({id: 'page-go', runId: 'r-page', status: 'dispatched'});
   assert.equal(denyBrowserRequest(state, 'page-go').status, 'denied', 'A dispatched page that is holding a run can still be cancelled.');
   state.browserRequests.unshift({id: 'other-go', status: 'dispatched'});
@@ -193,111 +174,6 @@ test('a bot browses through the paired local agent and continues from the result
     assert.equal(s.groupRuns[0].status, 'completed');
     assert.match(s.groupRuns[0].trace.at(-1).output, /Used the docs/);
     assert.equal(await onAgentTaskResult(store, task.id, {continueRun: async () => continued.push('again')}), null, 'A result is applied once.');
-  } finally { await fs.rm(dir, {recursive: true, force: true}); }
-});
-
-test('a home-feed result is not handed back as a second run', async () => {
-  const {dir, store} = await harness();
-  try {
-    await store.update(s => { wf.migrate(s); s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot({id: 'scout', name: 'Scout', type: 'source'})]}]; });
-    const {code} = agent.createPairing(store, 'default', {});
-    const device = agent.redeemPairing(store, {code, name: 'Laptop', permissions: ['browser.capture']});
-    const now = new Date().toISOString();
-    await store.update(s => { s.browserRequests = [{id: 'fr', botId: 'scout', botName: 'Scout', groupId: 'lab', chatKey: 'scout', runId: 'run-f', purpose: 'feed', url: 'https://x.com/home', steps: [], kind: 'browser.capture', depth: 0, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: now, updatedAt: now}]; });
-    await dispatchBrowserRequest(store, 'fr');
-    const [task] = agent.claimAgentTasks(store, device.agentId);
-    agent.completeAgentTask(store, device.agentId, task.id, {status: 'done', result: {title: 'X', text: 'Happening now. Join today. Sign in and see what people are talking about around the world this hour.'}});
-    const continued = [];
-    await onAgentTaskResult(store, task.id, {continueRun: async () => { continued.push(true); }});
-    assert.equal(continued.length, 0);
-    assert.match(store.read().chats.scout.at(-1).text, /could not be resumed/);
-  } finally { await fs.rm(dir, {recursive: true, force: true}); }
-});
-
-test('a signed-out home feed stops the run and says to sign in', async () => {
-  const {dir, store} = await harness();
-  try {
-    await store.update(s => {
-      wf.migrate(s); coordinationState(s);
-      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot({id: 'scout', name: 'Scout', type: 'source'})]}];
-      s.groupRuns.push({id: 'run-f', groupId: 'lab', chatKey: 'scout', status: 'awaiting_feed', input: 'scroll my feed', recipients: ['scout'], mode: 'tracked', task: {needsFeed: true}, trace: [], createdAt: new Date().toISOString()});
-    });
-    const {code} = agent.createPairing(store, 'default', {});
-    const device = agent.redeemPairing(store, {code, name: 'Laptop', permissions: ['browser.capture']});
-    const now = new Date().toISOString();
-    await store.update(s => { s.browserRequests = [{id: 'fr', botId: 'scout', botName: 'Scout', groupId: 'lab', chatKey: 'scout', runId: 'run-f', purpose: 'feed', url: 'https://x.com/home', steps: [], kind: 'browser.capture', depth: 0, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: now, updatedAt: now}]; });
-    await dispatchBrowserRequest(store, 'fr');
-    const [task] = agent.claimAgentTasks(store, device.agentId);
-    agent.completeAgentTask(store, device.agentId, task.id, {status: 'done', result: {title: 'X', text: 'Happening now. Join today. Sign in and see what people are talking about around the world this hour.'}});
-    const continued = [];
-    await onAgentTaskResult(store, task.id, {continueRun: async () => { continued.push(true); }, resumeFeed: resumeFeedRun});
-    assert.equal(continued.length, 0);
-    const run = store.read().groupRuns.find(r => r.id === 'run-f');
-    assert.equal(run.status, 'failed');
-    assert.match(run.error, /Sign in/);
-  } finally { await fs.rm(dir, {recursive: true, force: true}); }
-});
-
-test('a feed denied while it is being sent stays denied, and its result does not start other bots', async () => {
-  const {dir, store} = await harness();
-  try {
-    const now = new Date().toISOString();
-    await store.update(s => {
-      wf.migrate(s);
-      s.groups = [{id: 'lab', name: 'Lab', bots: [browserBot({id: 'scout', name: 'Scout', type: 'source'})]}];
-      s.browserRequests = [{id: 'fr', botId: 'scout', botName: 'Scout', groupId: 'lab', chatKey: 'scout', runId: 'run-f', purpose: 'feed', url: 'https://x.com/home', steps: [], kind: 'browser.capture', depth: 0, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: now, updatedAt: now}];
-    });
-    const {code} = agent.createPairing(store, 'default', {});
-    const device = agent.redeemPairing(store, {code, name: 'Laptop', permissions: ['browser.capture']});
-    const orig = store.update.bind(store);
-    let flip = true;
-    store.update = async fn => {
-      if (flip) {
-        flip = false;
-        await orig(s => {
-          const req = s.browserRequests.find(r => r.id === 'fr');
-          if (req && req.status === 'pending') req.status = 'denied';
-        });
-      }
-      return orig(fn);
-    };
-    await assert.rejects(dispatchBrowserRequest(store, 'fr'), status(409));
-    assert.equal(store.read().browserRequests.find(r => r.id === 'fr').status, 'denied');
-    assert.equal(agent.claimAgentTasks(store, device.agentId).length, 0, 'A denial that wins before the claim does not leave a page for the agent to open.');
-    store.update = orig;
-    const mid = new Date().toISOString();
-    await store.update(s => { s.browserRequests.unshift({id: 'fr-mid', botId: 'scout', botName: 'Scout', groupId: 'lab', chatKey: 'scout', runId: 'run-f', purpose: 'feed', url: 'https://x.com/home', steps: [], kind: 'browser.capture', depth: 0, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: mid, updatedAt: mid}); });
-    let claimed = false;
-    store.update = async fn => {
-      const result = await orig(fn);
-      if (!claimed) {
-        const req = store.read().browserRequests.find(r => r.id === 'fr-mid');
-        if (req?.status === 'dispatched' && !(req.agentTaskIds || []).length) {
-          claimed = true;
-          await orig(s => {
-            const live = s.browserRequests.find(r => r.id === 'fr-mid');
-            if (live && live.status === 'dispatched') live.status = 'denied';
-          });
-        }
-      }
-      return result;
-    };
-    await assert.rejects(dispatchBrowserRequest(store, 'fr-mid'), status(409));
-    assert.equal(store.read().browserRequests.find(r => r.id === 'fr-mid').status, 'denied');
-    assert.equal(agent.claimAgentTasks(store, device.agentId).length, 0, 'A denial after the claim, before the task is queued, does not leave a page for the agent to open.');
-    store.update = orig;
-    const page = 'Ada posted about rockets and the next launch window. Replying to Ada: the pad timeline slipped by a day.';
-    const started = [];
-    const hooks = {continueRun: async () => { started.push('continue'); }, resumeFeed: async () => { started.push('resume'); }};
-    const later = new Date().toISOString();
-    await store.update(s => { s.browserRequests.unshift({id: 'fr2', botId: 'scout', botName: 'Scout', groupId: 'lab', chatKey: 'scout', runId: 'run-f', purpose: 'feed', url: 'https://x.com/home', steps: [], kind: 'browser.capture', depth: 0, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: later, updatedAt: later}); });
-    await dispatchBrowserRequest(store, 'fr2');
-    assert.equal((await store.update(s => denyBrowserRequest(s, 'fr2'))).status, 'denied');
-    const [linked] = agent.claimAgentTasks(store, device.agentId);
-    agent.completeAgentTask(store, device.agentId, linked.id, {status: 'done', result: {title: 'X', text: page}});
-    await onAgentTaskResult(store, linked.id, hooks);
-    assert.deepEqual(started, [], 'A page that arrives after the feed was denied does not start the other bots.');
-    assert.equal(store.read().browserRequests.find(r => r.id === 'fr2').status, 'denied');
   } finally { await fs.rm(dir, {recursive: true, force: true}); }
 });
 
@@ -748,4 +624,11 @@ test('a document write that fails after the task row was inserted fails the task
     assert.equal(sent.status, 'dispatched');
     assert.equal(agent.claimAgentTasks(store, device.agentId).length, 1, 'approving again works, because the dead task is out of the way');
   } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});
+
+test('click and type on x.com are still refused', () => {
+  for (const url of ['https://x.com/home', 'https://x.com./home']) {
+    assert.throws(() => validateBrowserRequest({url, steps: [{op: 'click', index: 1}]}), status(403), url);
+    assert.throws(() => validateBrowserRequest({url, steps: [{op: 'type', index: 1, text: 'hi'}]}), status(403), url);
+  }
 });

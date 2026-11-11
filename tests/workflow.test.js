@@ -444,3 +444,15 @@ test('a demo reset takes the demo evidence with it', () => {
   resetDemo(s);
   assert.equal(s.evidence.length, 0, 'nothing is left pointing at a candidate that is gone');
 });
+
+test('a run parked on the X feed loads as cancelled', () => {
+  const s = migrate({groupRuns: [{id: 'r1', status: 'awaiting_feed'}, {id: 'r2', status: 'completed'}], runs: [{id: 'b1', status: 'awaiting_feed'}]});
+  for (const run of [s.groupRuns[0], s.runs[0]]) {
+    assert.equal(run.status, 'cancelled');
+    assert.equal(run.error, 'X feed reading was removed');
+  }
+  assert.equal(s.groupRuns[1].status, 'completed');
+  const again = migrate(structuredClone(s));
+  assert.deepEqual(again.groupRuns, s.groupRuns);
+  assert.deepEqual(again.runs, s.runs);
+});

@@ -3,12 +3,11 @@
  * model is configured and in the deterministic simulator otherwise. A custom bot
  * runs its own instructions on the server; everything else answers from the
  * offline command set. Nothing here can publish. */
-import {planHandoffs, leadShouldRunGroup, summonableGuests} from './coordination.js?v=2d8fb27009';
-import {feedPauseAction} from './ui-model.js?v=2d8fb27009';
-import {pollRun} from './run-follow.js?v=2d8fb27009';
-import {botSettings, groupSettings} from './bot-settings.js?v=2d8fb27009';
-import {store, api, sync, conversation, appendMessage, setTyping, isStaticDemo, teamKey, groups} from './ui-store.js?v=2d8fb27009';
-import {toast} from './ui-dialogs.js?v=2d8fb27009';
+import {planHandoffs, leadShouldRunGroup, summonableGuests} from './coordination.js?v=71dfceda40';
+import {pollRun} from './run-follow.js?v=71dfceda40';
+import {botSettings, groupSettings} from './bot-settings.js?v=71dfceda40';
+import {store, api, sync, conversation, appendMessage, setTyping, isStaticDemo, teamKey, groups} from './ui-store.js?v=71dfceda40';
+import {toast} from './ui-dialogs.js?v=71dfceda40';
 
 /** In-flight sends per conversation, so two overlapping sends keep the typing
  * indicator up until the last one finishes instead of the first clearing it. */
@@ -21,11 +20,6 @@ const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 /** Stream a server-coordinated group run into the conversation until it finishes
  * or pauses at a human checkpoint. The loop itself is `pollRun` in
  * `shared/run-follow.js`; this is the store-and-transport adapter around it. */
-function sayOnce(key, text) {
-  if (!text || (store.messages[key] || []).some(m => m.text === text)) return;
-  appendMessage(key, {role: 'system', text});
-}
-
 export async function streamGroupRun(groupId, key = teamKey(groupId), runId = null, {ignore = []} = {}) {
   if (!runId) return;
   await pollRun({
@@ -36,7 +30,6 @@ export async function streamGroupRun(groupId, key = teamKey(groupId), runId = nu
     messages: () => store.messages[key] || [],
     requests: () => store.state.browserRequests || [],
     onLine: m => appendMessage(key, {id: m.id, role: m.role, senderId: m.senderId, senderName: m.senderName, toBotId: m.toBotId, text: m.text, at: m.at, mode: 'ai', kind: m.kind, runId: m.runId}),
-    onSay: text => sayOnce(key, text),
     onNote: note => appendMessage(key, note),
     onStall: () => toast('Still trying to reach the run log. The run keeps going on the server.'),
   });
@@ -51,24 +44,11 @@ export async function watchQueuedRun(groupId, key, run) {
   }
   if (run?.status === 'awaiting_browser') {
     await sync().catch(() => {});
-    const open = (store.state.browserRequests || []).find(r => r.runId === run.runId && r.status === 'dispatched' && r.purpose !== 'feed');
+    const open = (store.state.browserRequests || []).find(r => r.runId === run.runId && r.status === 'dispatched');
     if (open) await streamGroupRun(groupId, key, run.runId, {ignore: ['awaiting_browser']});
     return true;
   }
-  if (run?.status !== 'awaiting_feed') return false;
-  try { await sync(); }
-  catch (error) {
-    if (error?.status === 401) throw error;
-    // The server already paused on the feed. Keep following the run log so a
-    // missed snapshot cannot drop the Approve card or the lines after it.
-    await streamGroupRun(groupId, key, run.runId);
-    return true;
-  }
-  const request = (store.state.browserRequests || []).find(r => r.runId === run.runId && r.purpose === 'feed');
-  const choice = feedPauseAction(request, {graceUsed: true});
-  sayOnce(key, choice.text);
-  if (choice.action === 'follow') await streamGroupRun(groupId, key, run.runId, {ignore: ['awaiting_feed']});
-  return true;
+  return false;
 }
 
 async function runOnServer(group, message, directBotId, key) {

@@ -34,9 +34,9 @@ const offTag = bot => botSettings(bot).enabled ? (botSettings(bot).lead ? tag('P
 function groupHome(conv) {
   const {group} = conv, {state} = store, runs = recentRuns(group.id);
   // One answer from the view model, the same the chat list and thread header
-  // read: paused runs, plans, pending pages and stuck feed reads.
+  // read: paused runs, plans and pending pages.
   const waiting = waitingOnYou(state, conv.id, runs);
-  const paused = waiting.pauses, plans = waiting.plans, pages = waiting.pages + waiting.feeds;
+  const paused = waiting.pauses, plans = waiting.plans, pages = waiting.pages;
   const runRight = paused ? `${paused} paused` : plans ? (plans === 1 ? 'A plan is waiting' : `${plans} plans waiting`) : pages ? 'Waiting on a page' : (runs.length ? `Last ${fullDate(runs[0].createdAt)}` : 'None yet');
   const scheduled = chatTasks(state.tasks, group.id, null).length;
   const members = group.bots.map(b => ({name: b.name, tint: botTint(group, b.id)}));
@@ -108,7 +108,7 @@ function tasksSection(conv) {
     ${note(isStaticDemo() ? 'This demo runs tasks only while the page is open.' : 'Tasks run with retries while the Node server is up.')}`;
 }
 
-const RUN_TONE = {completed: 'good', failed: 'bad', interrupted: 'bad', running: 'warn', queued: 'warn', awaiting_checkpoint: 'warn', awaiting_plan: 'warn', awaiting_feed: 'warn', awaiting_browser: 'warn'};
+const RUN_TONE = {completed: 'good', failed: 'bad', interrupted: 'bad', running: 'warn', queued: 'warn', awaiting_checkpoint: 'warn', awaiting_plan: 'warn', awaiting_browser: 'warn'};
 function runCard(group, run) {
   const name = id => group.bots.find(b => b.id === id)?.name || id, steps = run.recipients || [], live = !isStaticDemo(), status = String(run.status || 'unknown');
   // One rule for a run's buttons, shared with the thread's run note: a plan's

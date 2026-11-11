@@ -17,7 +17,7 @@
 /** A run that still holds work: about to start, between steps, or waiting on a
  * person. A second run waits while one of these is open — Start or Continue is
  * the way through, not another message. */
-export const BUSY_STATUSES = ['running', 'queued', 'awaiting_feed', 'awaiting_browser', 'awaiting_plan', 'awaiting_checkpoint'];
+export const BUSY_STATUSES = ['running', 'queued', 'awaiting_browser', 'awaiting_plan', 'awaiting_checkpoint'];
 
 /** A run a person may still stop. It is the same set as `BUSY_STATUSES` today,
  * but kept under its own name because "blocks a new run" and "can be stopped"
@@ -27,4 +27,4 @@ export const STOPPABLE_STATUSES = [...BUSY_STATUSES];
 
 /** A restart cuts only a run that was still calling a model or waiting on a
  * page. A shown plan and a checkpoint stay, so Start and Continue still work. */
-export const INTERRUPT_STATUSES = ['running', 'queued', 'awaiting_feed', 'awaiting_browser'];
+export const INTERRUPT_STATUSES = ['running', 'queued', 'awaiting_browser'];

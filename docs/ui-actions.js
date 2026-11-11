@@ -1,18 +1,18 @@
 /** What the UI can do, as three lookup tables keyed by `data-action`, form id and
  * control id. app.js owns the DOM events and dispatches here; handlers throw on
  * failure and the dispatcher turns that into one toast. */
-import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns} from './ui-store.js?v=2d8fb27009';
-import {botSettings, groupSettings} from './bot-settings.js?v=2d8fb27009';
-import {completeMention, moveRow, pipelineValue} from './ui-model.js?v=2d8fb27009';
-import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=2d8fb27009';
-import {sendChat, streamGroupRun, watchQueuedRun} from './ui-chat.js?v=2d8fb27009';
-import {runWithTyping} from './run-follow.js?v=2d8fb27009';
-import {confetti, whoosh, react, poke} from './ui-fx.js?v=2d8fb27009';
-import {renderList, renderMentions} from './ui-views.js?v=2d8fb27009';
-import {reloadAdminPage, pipelineList} from './ui-panel.js?v=2d8fb27009';
-import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, botTaskSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=2d8fb27009';
-import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=2d8fb27009';
-import {takeoverActions, takeoverForms} from './ui-takeover.js?v=2d8fb27009';
+import {store, api, sync, changed, go, back, setTyping, applyTheme, conversation, findGroup, groupOfBot, teamKey, groups, setProfile, clearMessages, isStaticDemo, isAdmin, canWrite, recentRuns} from './ui-store.js?v=71dfceda40';
+import {botSettings, groupSettings} from './bot-settings.js?v=71dfceda40';
+import {completeMention, moveRow, pipelineValue} from './ui-model.js?v=71dfceda40';
+import {toast, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=71dfceda40';
+import {sendChat, streamGroupRun, watchQueuedRun} from './ui-chat.js?v=71dfceda40';
+import {runWithTyping} from './run-follow.js?v=71dfceda40';
+import {confetti, whoosh, react, poke} from './ui-fx.js?v=71dfceda40';
+import {renderList, renderMentions} from './ui-views.js?v=71dfceda40';
+import {reloadAdminPage, pipelineList} from './ui-panel.js?v=71dfceda40';
+import {BOT_TEMPLATES, pickedTint, pickTint, newChatSheet, newBotSheet, newGroupSheet, attachSheet, botTaskSheet, toggleReminderFields, openCommandPalette, closeCommandPalette, chooseCommand, changePasswordSheet} from './ui-sheets.js?v=71dfceda40';
+import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=71dfceda40';
+import {takeoverActions, takeoverForms} from './ui-takeover.js?v=71dfceda40';
 
 const adminCtx = {reload: reloadAdminPage};
 const chatId = () => store.route.chat;
@@ -45,12 +45,6 @@ export const actions = {
   'back-to-list': () => back({}),
   // The same arrow opens the panel from the thread and steps back from a section.
   'open-info': () => store.route.info && store.route.info !== 'home' ? back({chat: chatId(), info: 'home'}) : go({chat: chatId(), info: 'home'}),
-  'grant-browser': async b => {
-    const bot = findBot(b.dataset.id);
-    await patchBot(bot.id, {permissions: [...new Set([...(bot.permissions || []), 'browser.use'])]});
-    await sync();
-    toast(`${bot.name} can request pages now.`);
-  },
   'close-info': () => back({chat: chatId()}),
   'open-section': b => { if (b.dataset.section === 'group-settings') store.pipelineDraft = null; go({chat: chatId(), info: b.dataset.section}); },
   'open-page': b => go({page: b.dataset.page}),
@@ -184,10 +178,7 @@ export const actions = {
     const key = run?.chatKey || chatId() || teamKey(b.dataset.id);
     await runWithTyping({key, setTyping, sync,
       send: async () => { await api(`/api/groups/${b.dataset.id}/runs/${b.dataset.run}/plan`, 'POST', {approve: true}); await sync(); },
-      follow: () => {
-        const request = (store.state.browserRequests || []).find(r => r.runId === b.dataset.run && r.purpose === 'feed');
-        return streamGroupRun(b.dataset.id, key, b.dataset.run, {ignore: request?.status === 'dispatched' ? ['awaiting_feed'] : []});
-      }});
+      follow: () => streamGroupRun(b.dataset.id, key, b.dataset.run)});
   },
   'cancel-run': async b => {
     await api(`/api/groups/${b.dataset.id}/runs/${b.dataset.run}/cancel`, 'POST', {}); toast('Run stopped.'); await sync();
@@ -202,8 +193,7 @@ export const actions = {
     const request = (store.state.browserRequests || []).find(r => r.id === b.dataset.id);
     if (!request?.runId || !request.groupId) return;
     const key = request.chatKey || teamKey(request.groupId);
-    const pause = request.purpose === 'feed' ? 'awaiting_feed' : 'awaiting_browser';
-    await runWithTyping({key, setTyping, sync, follow: () => streamGroupRun(request.groupId, key, request.runId, {ignore: [pause]})});
+    await runWithTyping({key, setTyping, sync, follow: () => streamGroupRun(request.groupId, key, request.runId, {ignore: ['awaiting_browser']})});
   },
   'deny-browser': async b => {
     await api(`/api/browser-requests/${b.dataset.id}/deny`, 'POST', {});

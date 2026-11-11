@@ -29,7 +29,6 @@ export const MAX_STEPS = 25;
 export const MAX_ELEMENT_INDEX = 500;
 export const MAX_BROWSER_REQUESTS = 200;
 export const STEP_OPS = ['navigate', 'click', 'type', 'waitFor', 'read', 'scroll'];
-export const HOME_FEED_URL = 'https://x.com/home';
 const INTERACTIVE = ['click', 'type'];
 const POSTING_HOSTS = ['x.com', 'twitter.com'];
 // One fence grammar shared with every other control block (see bot-link.js):
@@ -197,38 +196,6 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
   state.browserRequests.unshift(...records);
   pruneBrowserRequests(state);
   return {text: text || `${bot.name} asked to open a web page.`, records, lines};
-}
-
-/** Page text worth drafting from. A short capture, or a signed-out X wall, is empty.
- * The wall often says "Happening now" and "Sign in" without the phrase "Sign in to X". */
-export function feedPageText(result) {
-  const reads = Array.isArray(result?.actions) ? result.actions.filter(a => a && typeof a.text === 'string').map(a => a.text) : [];
-  const page = String(reads.join(' ') || result?.text || '').replace(/\s+/g, ' ').trim();
-  if (page.length < 80) return '';
-  const seen = `${result?.title || ''} ${page}`;
-  const wall = /\b(happening now|join today|sign in|log in|sign up|create your account)\b/i.test(seen);
-  const posts = (page.match(/\b(reposted|replying to)\b/gi) || []).length;
-  if (wall && posts === 0) return '';
-  return page.slice(0, 3600);
-}
-
-/** The read-only home-feed request a tracked run files before any bot drafts.
- * Scroll moves the page. There is no click and no type. */
-export function homeFeedRequest() {
-  return validateBrowserRequest({url: HOME_FEED_URL, steps: [{op: 'scroll', times: 3}, {op: 'read', selector: 'main'}]});
-}
-
-/** File that request for the source bot, or a line saying why it cannot.
- * The record carries `runId` so the result resumes that run and a denial stops it. */
-export function queueFeedRead(state, {bot, groupId, chatKey, runId, makeId = () => crypto.randomUUID(), now = new Date().toISOString()}) {
-  if (!canBot(bot, BROWSER_PERMISSION)) {
-    return {record: null, line: {id: makeId(), role: 'system', kind: 'feed-permission', senderId: bot.id, runId, text: `${bot.name} would open your X home feed, but it does not hold the ${BROWSER_PERMISSION} permission. Grant it in the bot profile. Nothing else ran.`, at: now}};
-  }
-  const record = {id: makeId(), botId: bot.id, botName: bot.name, groupId, chatKey, runId, purpose: 'feed', ...homeFeedRequest(), depth: 0, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: now, updatedAt: now};
-  state.browserRequests ??= [];
-  state.browserRequests.unshift(record);
-  pruneBrowserRequests(state);
-  return {record, line: {id: browserMessageId(record.id), role: 'system', kind: 'browser', runId, text: `${bot.name} wants to scroll and read your X home feed. It does not click or type. You still post.`, at: now}};
 }
 
 /** A person turns down a request that is still waiting, including one already
