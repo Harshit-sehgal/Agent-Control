@@ -31,7 +31,8 @@ test('migrate leaves an old workspace\'s settings alone and invents none of the 
 
 test('migrate does not add the X-engage lead or any candidate, draft or schedule collection', () => {
   const s = migrate({version: 1});
-  assert.deepEqual(s.groups, [], 'no group is seeded into a state that had none');
+  // The one thing a state with no groups gains is the company's primary (review I4).
+  assert.deepEqual(s.groups.map(g => [g.id, g.bots.map(b => [b.name, b.settings.lead])]), [['home', [['Atlas', true]]]], 'only the home primary is seeded');
   for (const key of ['candidates', 'drafts', 'evidence', 'schedules']) assert.equal(s[key], undefined, key);
 });
 
@@ -90,9 +91,9 @@ test('an old workspace keeps its X-engage group as an ordinary group it can dele
     ]}],
   });
   assert.ok(s.groups.some(g => g.id === 'x-engage'), 'migrate keeps the group');
-  assert.ok(!s.groups.some(g => g.id === 'home'), 'and does not seed another one');
+  assert.deepEqual(s.groups.map(g => g.id), ['x-engage', 'home'], 'no X-engage lead: the company gets its own primary home (review I4)');
   assert.deepEqual(removeGroup(s, 'x-engage'), {ok: true});
-  assert.equal(s.groups.length, 0);
+  assert.deepEqual(s.groups.map(g => g.id), ['home']);
   assert.throws(() => removeGroup(s, 'x-engage'), {status: 404});
 });
 

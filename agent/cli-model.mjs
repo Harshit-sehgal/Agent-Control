@@ -29,7 +29,25 @@ import path from 'node:path';
 import {cliEngineById, cleanCliModel} from '../shared/ai-presets.js';
 
 export const MAX_STDOUT_BYTES = 8 * 1024 * 1024;
-export const MAX_TEXT_CHARS = 100000;
+/** The most reply a result carries, in UTF-8 bytes once JSON-escaped: the server reads a device's
+ * result with a 64 KB body limit (src/app.js), and the rest of the result needs room too. */
+export const MAX_REPLY_BYTES = 48 * 1024;
+const CUT_NOTE = '\n\n(cut: the reply was longer than 48 KB, so the rest was not sent)';
+const jsonBytes = text => Buffer.byteLength(JSON.stringify(text), 'utf8');
+
+/** The reply, or as much of it as fits in MAX_REPLY_BYTES with a note saying it was cut. Never splits
+ * a character. */
+export function capReplyText(text, max = MAX_REPLY_BYTES) {
+  if (jsonBytes(text) <= max) return text;
+  let low = 0, high = text.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (jsonBytes(text.slice(0, mid) + CUT_NOTE) <= max) low = mid; else high = mid - 1;
+  }
+  // A high surrogate at the end would be half a character.
+  const end = low > 0 && /[\uD800-\uDBFF]/.test(text[low - 1]) ? low - 1 : low;
+  return text.slice(0, end) + CUT_NOTE;
+}
 const MAX_PROMPT_CHARS = 200000;
 const MAX_STDERR = 16 * 1024;
 export const DEFAULT_TIMEOUT_MS = 180000;
@@ -173,7 +191,7 @@ export async function runCliModel({engine, model = '', instructions = '', input 
         const raw = Buffer.concat(out).toString('utf8');
         const read = spec.id === 'claude' ? readClaude(raw) : readCodex(raw);
         const text = read.text.trim();
-        if (code === 0 && !read.error && text) return done(null, {text: text.slice(0, MAX_TEXT_CHARS), engine: spec.id, model: cleanCliModel(model) || null, ms: Date.now() - started});
+        if (code === 0 && !read.error && text) return done(null, {text: capReplyText(text), engine: spec.id, model: cleanCliModel(model) || null, ms: Date.now() - started});
         const said = [read.error, err].filter(Boolean).join('\n');
         if (code === 0 && !said.trim()) return done(new CliModelError('empty-reply', `The ${spec.binary} command finished without an answer.`));
         done(classify(said, spec));

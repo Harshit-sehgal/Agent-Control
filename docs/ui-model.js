@@ -2,10 +2,10 @@
  * a pane shows: the chat list, a thread's timeline, the "needs you" count and
  * the hash route. No DOM and no globals, so the product rules here are unit
  * tested directly (tests/ui-model.test.js). */
-import {botSettings} from './bot-settings.js?v=fcc80b2016';
-import {STOPPABLE_STATUSES} from './run-state.js?v=fcc80b2016';
-import {INPUTS} from './contracts.js?v=fcc80b2016';
-import {primaryOf} from './company.js?v=fcc80b2016';
+import {botSettings} from './bot-settings.js?v=b4d3410ab6';
+import {STOPPABLE_STATUSES} from './run-state.js?v=b4d3410ab6';
+import {INPUTS} from './contracts.js?v=b4d3410ab6';
+import {primaryOf} from './company.js?v=b4d3410ab6';
 
 /** The contract inputs a profile save sends. A bot whose stored inputs were
  * all removed ones (X-engage) loads with none, and must still save. */

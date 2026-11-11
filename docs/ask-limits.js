@@ -7,12 +7,17 @@
  *
  * The tally lives on the run: `run.asks = {total, pairs, depth, seen}`. A round
  * is measured from `run.limitBase`, which Keep going moves up to the counts at
- * the pause. `run.unlimitedAsks` skips every checkpoint here; the runaway guard
- * (`shared/runaway.js`) is the one limit that still applies.
+ * the pause. `run.unlimitedAsks` skips the depth, pair and total checkpoints. Two
+ * rules stay on under it: the loop rule (the same question getting the same
+ * answer), and ASK_CEILING, a hard per-task count nothing lifts. The runaway
+ * guard (`shared/runaway.js`) applies as well.
  *
  * Pure and browser-safe.
  */
 export const ASK_LIMITS = {depth: 6, pair: 12, total: 60, repeats: 3};
+/** Bot-to-bot messages one task may send in all. Not a checkpoint: Keep going and
+ * "don't ask again" do not lift it, so the only way on is Stop (src/coordination.js). */
+export const ASK_CEILING = 600;
 
 /** The three buttons on the checkpoint card, in order. */
 export const LIMIT_CHOICES = [
@@ -36,8 +41,9 @@ export function tallyAsk(run, {from, to, task, depth = 2}) {
   const base = run.limitBase || {};
   const pair = pairKey(from, to), key = questionKey({from, to, task});
   const entry = asks.seen[key];
+  if (asks.total >= ASK_CEILING) return {ok: false, limit: 'ceiling'};
+  if (entry && entry.count >= ASK_LIMITS.repeats - 1 && entry.same >= ASK_LIMITS.repeats - 1) return {ok: false, limit: 'loop'};
   if (!run.unlimitedAsks) {
-    if (entry && entry.count >= ASK_LIMITS.repeats - 1 && entry.same >= ASK_LIMITS.repeats - 1) return {ok: false, limit: 'loop'};
     if (depth > ASK_LIMITS.depth + (base.depth || 0)) return {ok: false, limit: 'depth'};
     if ((asks.pairs[pair] || 0) - (base.pairs?.[pair] || 0) >= ASK_LIMITS.pair) return {ok: false, limit: 'pair'};
     if (asks.total - (base.total || 0) >= ASK_LIMITS.total) return {ok: false, limit: 'total'};

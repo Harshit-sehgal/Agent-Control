@@ -37,6 +37,7 @@ import {createLiveChannel} from './live-channel.mjs';
 import {runModelTask} from './cli-model.mjs';
 import {cliStatusReporter} from './cli-status.mjs';
 import {runMcpTask} from './mcp-stdio.mjs';
+import {reportResult} from './report-result.mjs';
 import {hostAllowed, hostOf, parseAllowlist} from '../shared/bot-browser.js';
 import {resolvePublicAddress, pinnedRequest} from './net-guard.mjs';
 
@@ -267,14 +268,8 @@ async function run() {
       const result = await execute(task, config);
       // A model run that found the CLI signed out or missing: look again soon, the owner is about to fix it.
       if (task.kind === 'model.run' && result?.ok === false && ['not-signed-in', 'cli-missing'].includes(result.code)) cliStatus.invalidate();
-      // Reporting is separate from executing: a refused report (409, a superseded
-      // attempt) is not a local failure and must not be re-reported as one.
-      try {
-        await call(config, `/api/agent/tasks/${task.id}/result`, {status: 'done', result, attempts: task.attempts});
-        console.log(`agent: ${task.kind} ${task.id} done`);
-      } catch (error) {
-        console.error(`agent: ${task.kind} ${task.id} result was refused: ${error.message}`);
-      }
+      // Reporting is separate from executing (see report-result.mjs).
+      await reportResult(call, config, task, result);
     } catch (e) {
       console.error(`agent: ${task.kind} ${task.id} failed: ${e.message}`);
       await call(config, `/api/agent/tasks/${task.id}/result`, {status: 'failed', error: e.message, attempts: task.attempts}).catch(() => {});

@@ -55,7 +55,7 @@ test('a newer legacy JSON export is imported, and an older one is ignored', asyn
   // Restarting again without touching the file must not re-import or duplicate.
   const again = await new SqliteStore(db, legacy).init();
   assert.equal(again.read().runs.length, 1);
-  assert.equal(again.read().groups.length, 1);
+  assert.equal(again.read().groups.length, imported.read().groups.length, 'nothing is duplicated (the seeded home primary included)');
   await fs.rm(dir, {recursive: true, force: true});
 });
 

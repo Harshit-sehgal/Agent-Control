@@ -5,21 +5,21 @@
  * They throw errors carrying an HTTP `status` so the same rules apply to the
  * Node HTTP routes and to any browser-local transport.
  */
-import {activity,cleanText} from './core.js?v=fcc80b2016';
-import {fail} from './errors.js?v=fcc80b2016';
-import {cancelTask} from './tasks.js?v=fcc80b2016';
-import {normalizeRetention} from './retention.js?v=fcc80b2016';
-import * as contracts from './contracts.js?v=fcc80b2016';
-import {pruneChats, releaseChatWork} from './chats.js?v=fcc80b2016';
-import {denyBrowserRequest} from './bot-browser.js?v=fcc80b2016';
-import {BUSY_STATUSES} from './coordination.js?v=fcc80b2016';
-import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=fcc80b2016';
-import {memoryState} from './memory.js?v=fcc80b2016';
-import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=fcc80b2016';
-import {freshGuard} from './runaway.js?v=fcc80b2016';
-import {sweepGrants, forgetBotAsks, lapseOrphans} from './asks.js?v=fcc80b2016';
-import {assertManager, releaseReports, companyBots, PRIMARY_GROUP} from './company.js?v=fcc80b2016';
-import {logActivity} from './activity-log.js?v=fcc80b2016';
+import {activity,cleanText,initialState} from './core.js?v=b4d3410ab6';
+import {fail} from './errors.js?v=b4d3410ab6';
+import {cancelTask} from './tasks.js?v=b4d3410ab6';
+import {normalizeRetention} from './retention.js?v=b4d3410ab6';
+import * as contracts from './contracts.js?v=b4d3410ab6';
+import {pruneChats, releaseChatWork} from './chats.js?v=b4d3410ab6';
+import {denyBrowserRequest} from './bot-browser.js?v=b4d3410ab6';
+import {BUSY_STATUSES} from './coordination.js?v=b4d3410ab6';
+import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=b4d3410ab6';
+import {memoryState} from './memory.js?v=b4d3410ab6';
+import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=b4d3410ab6';
+import {freshGuard} from './runaway.js?v=b4d3410ab6';
+import {sweepGrants, forgetBotAsks, lapseOrphans} from './asks.js?v=b4d3410ab6';
+import {assertManager, releaseReports, companyBots, PRIMARY_GROUP, primaryOf, isPrimary} from './company.js?v=b4d3410ab6';
+import {logActivity} from './activity-log.js?v=b4d3410ab6';
 
 export const SCHEMA_VERSION = 3;
 
@@ -33,6 +33,7 @@ export function migrate(state) {
   state.tasks ??= [];
   state.events ??= [];
   state.groups ??= [];
+  seedPrimary(state);
   state.groupMessages ??= {};
   state.groupRuns ??= [];
   // The runaway guard's window and pause flag (shared/runaway.js).
@@ -88,6 +89,31 @@ export function migrate(state) {
   return state;
 }
 
+/** The company always has a primary bot: a load that finds none (an older state, or a doctored
+ * backup) makes the first home bot the primary, or brings Atlas back to an empty or missing home. */
+function seedPrimary(state) {
+  if (!Array.isArray(state.groups)) return;
+  if (primaryOf(state)) return;
+  let home = state.groups.find(g => g?.id === PRIMARY_GROUP);
+  if (!home) state.groups.push(home = {id: PRIMARY_GROUP, name: 'Home', description: 'Your bots', bots: []});
+  home.bots = Array.isArray(home.bots) ? home.bots : [];
+  if (!home.bots.length) {
+    const atlas = structuredClone(initialState().groups[0].bots[0]);
+    if (companyBots(state).some(b => b.id === atlas.id)) atlas.id = crypto.randomUUID();
+    home.bots.push(atlas);
+  }
+  const first = home.bots[0];
+  first.settings = {...(first.settings || {}), lead: true, reportsTo: null};
+}
+
+/** A bot that is lead of its group is the only one; in the home group that makes it the primary, which
+ * reports to no one. */
+function takeLead(g, bot) {
+  if (!bot.settings?.lead) return;
+  if (g.id === PRIMARY_GROUP) bot.settings = {...bot.settings, reportsTo: null};
+  for (const other of g.bots) if (other !== bot && other.settings?.lead) other.settings = {...other.settings, lead: false};
+}
+
 /** The only workspace setting left is the retention policy. */
 export function updateRetention(state, retention) {
   state.settings.retention = normalizeRetention(retention);
@@ -122,7 +148,7 @@ export function addBot(state, groupId, body) {
   if (body.settings !== undefined) bot.settings = validateBotSettings(body.settings);
   if (bot.settings?.reportsTo) assertManager(state, bot.id, bot.settings.reportsTo);
   g.bots.push(bot);
-  if (bot.settings?.lead) for (const other of g.bots) if (other !== bot && other.settings?.lead) other.settings = {...other.settings, lead: false};
+  takeLead(g, bot);
   activity(state, 'bot', `Created bot ${name}.`);
   logActivity(state, {botId: bot.id, kind: 'bots', text: `${name} was created.`});
   return bot;
@@ -146,6 +172,9 @@ export function updateBot(state, groupId, botId, body) {
   // land on the wrong teammate.
   if (g.bots.some(other => other !== bot && other.name.trim().toLowerCase() === name.toLowerCase())) fail(`A bot named ${name} is already in this group.`, 409);
   const settings = body.settings === undefined ? undefined : validateBotSettings(body.settings, bot.settings);
+  // The primary stops being primary only when another bot takes the role (a PATCH on that bot); turning
+  // it off here would leave the company with none, and then the old primary could be deleted.
+  if (settings && !settings.lead && isPrimary(state, bot.id)) fail(`${bot.name} is the primary bot. Make another bot the primary instead.`, 409);
   if (settings && settings.reportsTo !== (bot.settings?.reportsTo ?? null)) assertManager(state, bot.id, settings.reportsTo);
   if (body.contract !== undefined) bot.contract = contracts.validateContract(body.contract);
   if (body.permissions !== undefined) bot.permissions = contracts.validatePermissions(body.permissions);
@@ -159,7 +188,7 @@ export function updateBot(state, groupId, botId, body) {
     logActivity(state, {botId: bot.id, kind: 'bots', text: boss ? `${name} now reports to ${boss}.` : `${name} now works on its own.`});
   }
   if (settings && (settings.enabled !== false) !== wasOn) logActivity(state, {botId: bot.id, kind: 'bots', text: `${name} was ${wasOn ? 'paused' : 'resumed'}.`});
-  if (bot.settings?.lead) for (const other of g.bots) if (other !== bot && other.settings?.lead) other.settings = {...other.settings, lead: false};
+  takeLead(g, bot);
   activity(state, 'bot', `Updated bot ${name}.`);
   return bot;
 }

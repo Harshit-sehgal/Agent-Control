@@ -40,7 +40,8 @@ export function feed({items = [], state, key, now = Date.now()}) {
     const m = item.message;
     if (item.kind !== 'message' || !m?.runId) return;
     if (m.role === 'bot') lastLine.set(m.runId, index);
-    if (isRunNote(m)) lastNote.set(m.runId, m.id);
+    // A browser-written line (`origin: 'browser'`, shared/chats.js) carries no run's buttons, so it is never the note.
+    if (isRunNote(m) && m.origin !== 'browser') lastNote.set(m.runId, m.id);
   });
   // The runaway guard speaks once in Atlas's chat; only its newest line still asks.
   const lastGuard = items.map(item => item.message).filter(m => m?.kind === 'guard').at(-1)?.id;
@@ -57,7 +58,8 @@ export function feed({items = [], state, key, now = Date.now()}) {
     }
     if (m.role === 'user') return out.push({kind: 'me', message: m});
     if (m.role === 'system') {
-      if (m.kind === 'browser') return out.push({kind: 'browser', message: m});
+      // Only a line the server (or the Pages engine) wrote paints a card; a browser-written one is a plain note.
+      if (m.kind === 'browser' && m.origin !== 'browser') return out.push({kind: 'browser', message: m});
       // The card reads its status from state.asks, so it needs no pill: it carries the asking bot's waiting face.
       if (m.kind === 'ask') return out.push({kind: 'ask', message: m});
       // The paused run's own card says this, so its note line would say it twice.

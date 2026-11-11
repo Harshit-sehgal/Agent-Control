@@ -328,10 +328,10 @@ test('bots and groups are edited, removed and cleaned up through the workflow',(
   const teamTask=enqueueTask(s,{kind:'bot-task',payload:{groupId:'g',message:'weekly',kind:'interval',intervalMinutes:60}}).task;
   s.ai.bots.b={model:'m'};
   assert.deepEqual(wf.removeGroup(s,'g'),{ok:true});
-  assert.equal(s.groups.length,1);assert.equal(s.chats['team-g'],undefined);assert.equal(s.ai.bots.b,undefined);
+  assert.deepEqual(s.groups.map(g=>g.id),['keep','home'],'the seeded home primary stays');assert.equal(s.chats['team-g'],undefined);assert.equal(s.ai.bots.b,undefined);
   assert.equal(teamTask.status,'cancelled');
   s.groups.push(team('h',['z'],{settings:{pipeline:['z','gone']}}));
-  wf.migrate(s);assert.deepEqual(s.groups[1].settings.pipeline,['z']);
+  wf.migrate(s);assert.deepEqual(s.groups.find(g=>g.id==='h').settings.pipeline,['z']);
 });
 
 test('bot-task payloads validate, check their target, and an interval re-arms',()=>{

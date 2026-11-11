@@ -192,7 +192,9 @@ test('an enormous reply is trimmed, not failed', async t => {
   t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
   fs.writeFileSync(path.join(dir, 'claude'), `#!${process.execPath}\nprocess.stdin.resume();process.stdin.on('end',()=>{console.log(JSON.stringify({type:'result',is_error:false,result:'y'.repeat(500000)}));});\n`, {mode: 0o755});
   const out = await runCliModel({engine: 'claude', input: 'x', env: {PATH: `${dir}${path.delimiter}${path.dirname(process.execPath)}`}});
-  assert.ok(out.text.length <= 100000 && out.text.length > 90000);
+  // Cut to what the result route takes (48 KB, review I5), and it says so.
+  assert.ok(Buffer.byteLength(JSON.stringify(out.text)) <= 48 * 1024 && out.text.length > 40000);
+  assert.match(out.text, /\(cut: /);
 });
 
 test('runModelTask never throws: a bad request and a failure come back as a structured answer', async t => {

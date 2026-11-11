@@ -8,7 +8,7 @@ import {randomUUID} from 'node:crypto';
 import {createRun,createEnvelope,declinedOf,runNote,planHandoffs,handoffTargets,instructLead,wakeBots,assessTask,summonableGuests,mayHandoff,chatKeyFor,chatIsBusy,rosterFor,previousFor,enlist,MAX_HANDOFFS,INTERRUPT_STATUSES as INTERRUPT} from '../shared/coordination.js';
 import {isThread,noteMember} from '../shared/threads.js';
 import {isLead,companyBots} from '../shared/company.js';
-import {extendLimits} from '../shared/ask-limits.js';
+import {extendLimits, ASK_CEILING} from '../shared/ask-limits.js';
 import {noteBotWork,paused as botsPaused,resumeGuard} from '../shared/runaway.js';
 import {parseOffJob,offJobMessage} from '../shared/off-job.js';
 import {STOPPABLE_STATUSES} from '../shared/run-state.js';
@@ -618,6 +618,8 @@ export async function resumeGroupRun(store,id,executor=executeCustomBot,{choice}
       await runGroup(store,id,executor);
       return {runId:id,status:store.read().groupRuns.find(x=>x.id===id)?.status||'running'};
     }
+    // The ceiling is not a checkpoint: nothing lifts it, so Stop is the only answer.
+    if(r.limit?.kind==='ceiling'&&choice!=='stop')throw Object.assign(new Error(`This task has sent ${ASK_CEILING} bot-to-bot messages, the most one task may. Stop it, then start a new one.`),{status:409});
     await store.update(s=>{const live=s.groupRuns.find(x=>x.id===id);if(!live||live.status!=='awaiting_limit')throw Object.assign(new Error('This run is not waiting at a limit.'),{status:409});
       if(choice==='more')extendLimits(live,live.limit?.kind);
       else if(choice==='unlimited')live.unlimitedAsks=true;
