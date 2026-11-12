@@ -285,19 +285,24 @@ export function groupRoutes(router) {
   // answer a challenge the browser cannot. The page is kept open between these
   // calls, and handed back (or closed) to finish. The allowlist and the egress
   // proxy still decide where the page may go.
-  router.add('GET', '/api/browser-sessions', 'member', () => ({sessions: browserRuntime.liveList()}));
-  router.add('POST', '/api/browser-sessions', 'member', async c => {
+  // A takeover belongs to the workspace that opened it: another workspace sees
+  // no list entry and gets "not found" for its id. Opening, typing into, handing
+  // back and closing the page act in a signed-in browser, so they need admin.
+  const scope = c => ({workspaceId: c.actor.workspaceId});
+  router.add('GET', '/api/browser-sessions', 'member', c => ({sessions: browserRuntime.liveList(scope(c))}));
+  router.add('POST', '/api/browser-sessions', 'admin', async c => {
     const b = await c.body();
-    return reply(201, await beginTakeover(c.store, String(b?.requestId || ''), {actor: c.actor.email}));
+    return reply(201, await beginTakeover(c.store, String(b?.requestId || ''), {actor: c.actor.email, workspaceId: c.actor.workspaceId}));
   });
-  router.add('GET', '/api/browser-sessions/:session', 'member', c => browserRuntime.liveView(c.params.session));
-  router.add('POST', '/api/browser-sessions/:session/act', 'member', async c => {
+  router.add('GET', '/api/browser-sessions/:session', 'member', c => browserRuntime.liveView(c.params.session, scope(c)));
+  router.add('POST', '/api/browser-sessions/:session/act', 'admin', async c => {
+    browserRuntime.assertLive(c.params.session, c.actor.workspaceId);
     const b = await c.body();
-    return browserRuntime.liveAct(c.params.session, {op: b?.op, index: b?.index, selector: b?.selector, text: b?.text, url: b?.url});
+    return browserRuntime.liveAct(c.params.session, {op: b?.op, index: b?.index, selector: b?.selector, text: b?.text, url: b?.url}, scope(c));
   });
-  router.add('POST', '/api/browser-sessions/:session/handback', 'member', c => handBackTakeover(c.store, c.params.session));
-  router.add('DELETE', '/api/browser-sessions/:session', 'member', async c => {
-    const {requestId, page} = await browserRuntime.endLive(c.params.session);
+  router.add('POST', '/api/browser-sessions/:session/handback', 'admin', c => handBackTakeover(c.store, c.params.session, scope(c)));
+  router.add('DELETE', '/api/browser-sessions/:session', 'admin', async c => {
+    const {requestId, page} = await browserRuntime.endLive(c.params.session, scope(c));
     return {closed: true, requestId: requestId || null, url: page?.url || null};
   });
 

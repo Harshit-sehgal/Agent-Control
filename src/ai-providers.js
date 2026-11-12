@@ -13,10 +13,12 @@ import {envConfig,discoverModels,protocolOf,configReady,complete} from './ai.js'
 import {normaliseProtocol,inferProtocol,presetById,protocolById,LOCAL_CLI_KIND,LOCAL_CLI_ENGINES,cliEngineById,cleanCliModel,cleanEffort,EFFORT_IDS} from '../shared/ai-presets.js';
 import {uuid} from '../shared/core.js';
 import {cliRunner,cliSignIn} from './cli-model.js';
+import {assertLocalOrPublic} from './reach-guard.js';
 
 const clean=(v,n)=>String(v??'').trim().slice(0,n);
 const validBase=u=>{try{const x=new URL(u);return (x.protocol==='http:'||x.protocol==='https:')&&!x.username&&!x.password&&!x.search&&!x.hash;}catch{return false;}};
 const hostOf=u=>{try{return new URL(u).host;}catch{return '';}};
+const originOf=u=>{try{return new URL(u).origin;}catch{return '';}};
 /** Admin listings keep the endpoint path, but strip userinfo, query and hash. */
 function safeBase(u){try{const x=new URL(String(u||''));x.username='';x.password='';x.search='';x.hash='';return x.href.replace(/\/+$/,'');}catch{return '';}}
 
@@ -154,6 +156,7 @@ export async function addProvider(store,workspaceId,{kind,engine,model,label,bas
   if(!validBase(url))fail('Base URL must be an absolute http(s) URL without a username, password, query, or hash.');
   if(!key)fail('Paste the API key for this provider.');
   if(!protocolById(chosen))fail('Unknown API protocol.');
+  await assertLocalOrPublic(url,{what:'A provider'});
   // Validate the headers before anything is written, so a rejected set cannot
   // leave an orphan key credential behind.
   const extra=cleanHeaders(headers)||{};
@@ -204,9 +207,15 @@ export async function updateProvider(store,workspaceId,id,{label,engine,model,ba
   if(!name)fail('Give the provider a name (e.g. OpenAI, Groq, my router).');
   if(!validBase(url))fail('Base URL must be an absolute http(s) URL without a username, password, query, or hash.');
   if(!protocolById(chosen))fail('Unknown API protocol.');
+  // A key and its headers were pasted for one host. Pointing the provider at
+  // another origin must not hand them to it: the move needs the new host's key
+  // in the same request, and headers not resent with the move are dropped.
+  const moved=originOf(url)!==originOf(current.baseUrl);
+  if(url!==current.baseUrl)await assertLocalOrPublic(url,{what:'A provider'});
+  if(moved&&current.credentialId&&!key)fail('This provider now points at a different host. Paste the API key for that host too; the saved key is never sent to a new host.',400);
   // `headers === undefined` keeps what is saved (a blank key keeps the key, so a
   // blank header set keeps the headers); `{}` clears them.
-  const extra=cleanHeaders(headers);
+  const extra=moved&&headers===undefined?{}:cleanHeaders(headers);
   const nextVersion=apiVersion===undefined?(current.apiVersion||null):cleanApiVersion(apiVersion);
   const versionChanged=nextVersion!==(current.apiVersion||null);
   const changedKey=Boolean(key);

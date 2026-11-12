@@ -74,7 +74,7 @@ export function getPreferences(store, userId) {
  * email channel only when this is true, so a switch never promises mail that cannot be sent. */
 export const emailReady = () => Boolean(smtpConfig() || process.env.EMAIL_RELAY_URL);
 
-export function updatePreferences(store, userId, body) {
+export function updatePreferences(store, userId, body, {email = null} = {}) {
   const current = getPreferences(store, userId);
   const next = {
     inApp: body.inApp === undefined ? current.inApp : Boolean(body.inApp),
@@ -91,7 +91,11 @@ export function updatePreferences(store, userId, body) {
   if (next.webhook && !next.webhookCredentialId) fail('Webhook notifications need a stored credential holding the webhook URL.', 400);
   if (next.email && !isEmailAddress(next.emailAddress)) fail('Email notifications need a valid email address.', 400);
   if (next.webhookCredentialId) {
-    const credential = store.get('SELECT id FROM credentials WHERE id=?', next.webhookCredentialId);
+    // Only a webhook credential this user stored: any other vault row would be
+    // decrypted and posted to as if it were a URL, so another person's secret
+    // (or an API key) could be sent off by choosing its id. Matched on the user
+    // id or the email the credentials route records as its creator.
+    const credential = store.get("SELECT id FROM credentials WHERE id=? AND kind='webhook' AND created_by IN (?,?)", next.webhookCredentialId, String(userId ?? ''), String(email ?? userId ?? ''));
     if (!credential) fail('The selected webhook credential was not found.', 404);
   }
   store.run(`INSERT INTO notification_prefs (user_id,in_app,webhook,webhook_url,email,email_address,updated_at)

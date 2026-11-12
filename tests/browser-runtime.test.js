@@ -249,6 +249,24 @@ test('every takeover is closed when the runtime drains', async () => {
   await assert.rejects(runtime.beginLive({url: 'https://example.com/a'}), error => error.status === 503);
 });
 
+test('a takeover belongs to the workspace that opened it', async () => {
+  const {runtime} = harness({BROWSER_LIVE_MS: '5000'});
+  const live = await runtime.beginLive({url: 'https://example.com/a', requestId: 'req-a', openedBy: 'ada@a', workspaceId: 'ws-a'});
+  assert.match(live.id, /^takeover-[0-9a-f-]{36}$/, 'The id is unguessable, not a counter.');
+  assert.deepEqual(runtime.liveList({workspaceId: 'ws-b'}), [], 'Another workspace does not see the takeover.');
+  assert.deepEqual(runtime.liveList({workspaceId: 'ws-a'}).map(entry => entry.id), [live.id]);
+  // Another workspace cannot look at, act on or end it, and learns only "not found".
+  assert.throws(() => runtime.assertLive(live.id, 'ws-b'), error => error.status === 404);
+  await assert.rejects(runtime.liveView(live.id, {workspaceId: 'ws-b'}), error => error.status === 404);
+  await assert.rejects(runtime.liveAct(live.id, {op: 'click', index: 1}, {workspaceId: 'ws-b'}), error => error.status === 404);
+  await assert.rejects(runtime.endLive(live.id, {workspaceId: 'ws-b'}), error => error.status === 404);
+  assert.equal(runtime.liveIds().length, 1, 'A refused end leaves the takeover open.');
+  runtime.assertLive(live.id, 'ws-a');
+  assert.equal((await runtime.liveView(live.id, {workspaceId: 'ws-a'})).title, 'Takeover');
+  assert.equal((await runtime.endLive(live.id, {workspaceId: 'ws-a'})).requestId, 'req-a');
+  await runtime.close();
+});
+
 test('the runtime reads a real page through a real browser', {skip: !findBrowser() && 'no browser installed', timeout: 60000}, async () => {
   const server = http.createServer((req, res) => {
     res.writeHead(200, {'Content-Type': 'text/html'});

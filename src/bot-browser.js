@@ -214,22 +214,22 @@ export async function finishBrowserRequest(store, request, {ok, result = null, e
  * while the person is holding it, and the request can be taken over again. The
  * bot is resumed when the person hands the page back, with the page as they
  * left it. */
-export async function beginTakeover(store, requestId, {actor = null, runtime = browserRuntime} = {}) {
+export async function beginTakeover(store, requestId, {actor = null, workspaceId = null, runtime = browserRuntime} = {}) {
   const request = (store.read().browserRequests || []).find(r => r.id === requestId);
   if (!request) fail('Browser request not found.', 404);
   if (['done', 'failed', 'denied'].includes(request.status)) fail('That browser request has already finished.', 409);
   if (runtime.mode === 'agent' || !runtime.available()) fail(`No browser is available on this server to take over. ${runtime.mode === 'agent'
     ? 'This install only runs browser requests on a paired device (BROWSER_RUNTIME=agent).'
     : 'Set AGENT_BROWSER_ALLOWLIST (a host list, or * for any public site) and install Chrome, or point AGENT_BROWSER_PATH at one.'}`, 409);
-  const view = await runtime.beginLive({url: request.url, requestId: request.id, openedBy: actor});
+  const view = await runtime.beginLive({url: request.url, requestId: request.id, openedBy: actor, workspaceId});
   return {...view, requestId: request.id};
 }
 
 /** The person is done: hand the page they reached back to the bot that asked.
  * The context is disposed either way — a takeover is not a session the next
  * capture inherits. */
-export async function handBackTakeover(store, sessionId, {runtime = browserRuntime} = {}) {
-  const {requestId, page} = await runtime.endLive(sessionId);
+export async function handBackTakeover(store, sessionId, {workspaceId, runtime = browserRuntime} = {}) {
+  const {requestId, page} = await runtime.endLive(sessionId, {workspaceId});
   if (!requestId) return {handedBack: false, reason: 'That takeover was not opened for a bot request.', page};
   const request = (store.read().browserRequests || []).find(r => r.id === requestId);
   if (!request || ['done', 'failed', 'denied'].includes(request.status)) return {handedBack: false, reason: 'That browser request has already finished.', page};

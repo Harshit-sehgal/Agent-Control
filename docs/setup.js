@@ -26,17 +26,17 @@
  *   make itself the primary bot, save a rule without the owner's tap, or reach a route the owner could not.
  *
  * Pure and browser-safe: the server reads replies with it and the UI paints the card from it. */
-import {cleanText, validHttpUrl} from './core.js?v=e04ba9a3fc';
-import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=e04ba9a3fc';
-import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=e04ba9a3fc';
-import {controlFence} from './reply-blocks.js?v=e04ba9a3fc';
-import {companyBots, primaryOf} from './company.js?v=e04ba9a3fc';
-import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js?v=e04ba9a3fc';
-import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=e04ba9a3fc';
-import {grantWhat, payAlwaysText} from './ui-asks.js?v=e04ba9a3fc';
-import {COLOR_NAMES} from './ui-kit.js?v=e04ba9a3fc';
-import {SHAPES} from './company.js?v=e04ba9a3fc';
-import {limitsOf, BACKSTOP} from './limits.js?v=e04ba9a3fc';
+import {cleanText, validHttpUrl} from './core.js?v=85901eebcd';
+import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=85901eebcd';
+import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=85901eebcd';
+import {controlFence} from './reply-blocks.js?v=85901eebcd';
+import {companyBots, primaryOf} from './company.js?v=85901eebcd';
+import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js?v=85901eebcd';
+import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=85901eebcd';
+import {grantWhat, payAlwaysText} from './ui-asks.js?v=85901eebcd';
+import {COLOR_NAMES} from './ui-kit.js?v=85901eebcd';
+import {SHAPES} from './company.js?v=85901eebcd';
+import {limitsOf, BACKSTOP} from './limits.js?v=85901eebcd';
 
 export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'schedule', 'remove', 'open', 'signin', 'pause', 'limits', 'basics', 'forget', 'disconnect', 'thread'];
 /** The bot settings a bot may propose. Not the primary role, the browser approval mode, or layout (pins, order). */
