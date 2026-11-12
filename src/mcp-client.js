@@ -15,7 +15,7 @@
  */
 import {fail} from '../shared/errors.js';
 import {enqueueAgentTask, failAgentTasks} from './agent.js';
-import {assertLocalOrPublic} from './reach-guard.js';
+import {assertLocalOrPublic, guardedFetch} from './reach-guard.js';
 import {PROTOCOL_VERSION, MAX_TOOLS, MAX_RESULT_CHARS, initializeRequest, initializedNotification, toolsListRequest, toolsCallRequest, rpcResult, cleanTools, readTools, resultText} from '../shared/mcp-protocol.js';
 
 export const MCP_TIMEOUT_MS = 30000;
@@ -95,7 +95,7 @@ async function httpSession(target, work, {timeoutMs = MCP_TIMEOUT_MS, maxBytes =
   let version = null, sessionId = null, nextId = 1;
   const send = async message => {
     // The protocol's own headers come last, so a custom header cannot change what is being said.
-    const res = await fetch(url, {
+    const res = await guardedFetch(url, {
       method: 'POST', redirect: 'manual', signal: controller.signal, body: JSON.stringify(message),
       headers: {...custom, 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...(version ? {'mcp-protocol-version': version} : {}), ...(sessionId ? {'mcp-session-id': sessionId} : {})},
     });
@@ -130,7 +130,7 @@ async function httpSession(target, work, {timeoutMs = MCP_TIMEOUT_MS, maxBytes =
     fail(`Could not reach the MCP server: ${redact(error.cause?.code || error.cause?.message || error.message)}`, 502);
   } finally {
     clearTimeout(timer);
-    if (sessionId && !controller.signal.aborted) fetch(url, {method: 'DELETE', redirect: 'manual', signal: AbortSignal.timeout(2000), headers: {...custom, 'mcp-session-id': sessionId, ...(version ? {'mcp-protocol-version': version} : {})}}).then(r => r.body?.cancel(), () => {});
+    if (sessionId && !controller.signal.aborted) guardedFetch(url, {method: 'DELETE', redirect: 'manual', signal: AbortSignal.timeout(2000), headers: {...custom, 'mcp-session-id': sessionId, ...(version ? {'mcp-protocol-version': version} : {})}}).then(r => r.body?.cancel(), () => {});
   }
 }
 

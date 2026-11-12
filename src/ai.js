@@ -5,6 +5,7 @@ import {normaliseProtocol,inferProtocol,normaliseBaseUrl,isChatModel,DEFAULT_PRO
 import {imageNote} from '../shared/attachments.js';
 import {turnFiles} from './attachments.js';
 import {noteUsage} from './usage.js';
+import {guardedFetch} from './reach-guard.js';
 
 // Provider-agnostic, bring-your-own-key model client. A call can run against an
 // explicitly resolved config (a workspace's saved provider + chosen model) and
@@ -484,6 +485,9 @@ export function retryWaitMs(error,now=Date.now()){
   // A provider that asks for longer than a turn should wait has said "not now"; the run reports that instead.
   return ms>RETRY_MAX_MS?null:Math.max(0,Math.round(ms));
 }
+/** The fetch for this provider: a saved one was typed in Settings, so it is checked and pinned to the address
+ * that passed (src/reach-guard.js); the environment's own AI_BASE_URL is the operator's and goes as it is. */
+const reachFor=cfg=>cfg.source==='env'?fetch:(url,init)=>guardedFetch(url,init,{what:'A provider'});
 async function callProvider({instructions,input,maxTokens,config,temperature=null,images=[]}){
   const cfg=wireConfig(config||envConfig());
   if(!configReady(cfg))throw upstream('No AI provider is configured. Connect one in Settings → Models and keys.',422);
@@ -507,7 +511,7 @@ async function callProvider({instructions,input,maxTokens,config,temperature=nul
     /** One POST, tolerant about how the answer arrives: JSON normally, SSE when
      * a gateway streams anyway. */
     const send=async body=>{
-      const res=await fetch(request.url,{method:'POST',headers:request.headers,body:JSON.stringify(body),signal:controller.signal,redirect:'manual'});
+      const res=await reachFor(cfg)(request.url,{method:'POST',headers:request.headers,body:JSON.stringify(body),signal:controller.signal,redirect:'manual'});
       if(res.status>=300&&res.status<400)throw upstream(`AI provider redirected (${res.status}). Refusing to follow.`);
       const type=String(res.headers.get('content-type')||'');
       if(type.includes('text/event-stream')){
@@ -659,7 +663,7 @@ export async function discoverModels(config){
   // The native Ollama endpoint has no auth of its own, so the key is only sent
   // where the protocol put it.
   const get=async(url,withAuth=true)=>{
-    const res=await fetch(url,{headers:withAuth?headersFor(cfg,protocol):{},signal:controller.signal,redirect:'manual'});
+    const res=await reachFor(cfg)(url,{headers:withAuth?headersFor(cfg,protocol):{},signal:controller.signal,redirect:'manual'});
     if(res.status>=300&&res.status<400)throw upstream(`AI provider redirected (${res.status}). Refusing to follow.`);
     const data=await res.json().catch(()=>({}));
     return {ok:res.ok,status:res.status,data};
