@@ -42,7 +42,10 @@ anything only the owner may do.
 Each needs the owner's own account or details, which a bot must not supply.
 
 - **Signing in** to Gmail, Reddit, LinkedIn or a shop: one tap on the Sign in card, then the owner signs in.
-  Reading a site while signed in has not been run yet, because that sign-in is the owner's.
+  The hand-over itself was run: the owner's tap took the shared browser, a session cookie was set on
+  httpbin.org as a sign-in would set one, control was handed back, and Atlas then read that session's cookie
+  back exactly. So a bot reads whatever the owner is signed in to there. A real Gmail or Reddit sign-in has
+  not been made, because it is the owner's.
 - **A real booking or order:** the bot clicks through to the form and asks for the name and phone, and the
   submit is an ask card. A live booking has not been made, because it needs the owner's details.
 - **Google's own API sign-in** (for sending through Gmail's API rather than the browser): the owner's Google
