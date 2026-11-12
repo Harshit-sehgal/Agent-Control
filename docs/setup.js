@@ -23,14 +23,14 @@
  *   make itself the primary bot, save a rule without the owner's tap, or reach a route the owner could not.
  *
  * Pure and browser-safe: the server reads replies with it and the UI paints the card from it. */
-import {cleanText, validHttpUrl} from './core.js?v=64ddf06799';
-import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=64ddf06799';
-import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=64ddf06799';
-import {controlFence} from './reply-blocks.js?v=64ddf06799';
-import {companyBots, primaryOf} from './company.js?v=64ddf06799';
-import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js?v=64ddf06799';
-import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=64ddf06799';
-import {grantWhat} from './ui-asks.js?v=64ddf06799';
+import {cleanText, validHttpUrl} from './core.js?v=a641a0ae3b';
+import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=a641a0ae3b';
+import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=a641a0ae3b';
+import {controlFence} from './reply-blocks.js?v=a641a0ae3b';
+import {companyBots, primaryOf} from './company.js?v=a641a0ae3b';
+import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js?v=a641a0ae3b';
+import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=a641a0ae3b';
+import {grantWhat} from './ui-asks.js?v=a641a0ae3b';
 
 export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'schedule', 'remove', 'open', 'signin'];
 /** The bot settings a bot may propose. Not the primary role, the browser approval mode, or layout (pins, order). */
@@ -43,7 +43,7 @@ const PER_SITE = ['browser.use', 'send', 'post', 'delete'];
 export const SETUP_PAGES = {
   models: ['models', 'Models and keys'], keys: ['models', 'Models and keys'],
   connectors: ['conn', 'Connectors'], gmail: ['conn', 'Connectors'], drive: ['conn', 'Connectors'], google: ['conn', 'Connectors'], mcp: ['conn', 'Connectors'],
-  permissions: ['perm', 'Permissions'], agents: ['agents', 'Local agents'], computer: ['agents', 'Local agents'],
+  permissions: ['perm', 'Permissions'], devices: ['agents', 'Local agents'], agents: ['agents', 'Local agents'], computer: ['agents', 'Local agents'],
   usage: ['usage', 'Usage'], appearance: ['look', 'Appearance'], general: ['general', 'General'],
 };
 const GOOGLE_PAGES = ['gmail', 'drive', 'google'];
@@ -66,7 +66,7 @@ export const SETUP_TOOL_HINT = 'To change a setting for the owner, put one fence
   + '{"action":"rule","bot":"<bot name>","do":"open|send|post|delete|spend","site":"<site, e.g. github.com>","choice":"always|ask|deny"} saves what that bot may do without asking (a payment is never always). '
   + '{"action":"schedule","bot":"<bot name, or me>","do":"<the message that bot gets each time>","every":"day|hour|week|<minutes>","at":"<HH:MM, optional>","on":"<monday..sunday, optional: a weekly schedule on that day>"} puts work on a timer: the bot runs it in its own chat and the owner reads the result there. Give only "at" for a one-off later today or tomorrow. Add "stop":true with a few words of its message in "do" to stop one; workspace.schedules lists them. When the owner asks for something regular (every morning, each Monday), propose a schedule instead of telling them to come back. '
   + '{"action":"remove","bot":"<bot name>"} removes a bot the owner no longer wants, with its chat and schedules (never Atlas). '
-  + '{"action":"signin","site":"reddit.com"} gives the owner a button that opens the browser on this computer at that site, in their hands, to sign in once; use it when a site blocks you or needs the owner signed in (Reddit, LinkedIn, a shop or bank login), instead of only saying it is blocked. Never ask for a password in chat. {"action":"open","page":"models|connectors|gmail|permissions|agents|usage"} shows the owner a Settings page, for things only they can do, such as pasting a key; "gmail" (or "drive") is a button that connects it, so use it whenever the owner wants email or Drive connected. '
+  + '{"action":"signin","site":"reddit.com"} gives the owner a button that opens the browser on this computer at that site, in their hands, to sign in once; use it when a site blocks you or needs the owner signed in (Reddit, LinkedIn, a shop or bank login), instead of only saying it is blocked. Never ask for a password in chat. {"action":"open","page":"models|connectors|gmail|permissions|devices|usage"} shows the owner a Settings page, for things only they can do, such as pasting a key or pairing a computer ("devices" is the computers that run the browser, not bots). Every change to a bot (its job, name, settings, model, rules, schedules, removing it) is one of the blocks above, never a page to open; "gmail" (or "drive") is a button that connects it, so use it whenever the owner wants email or Drive connected. '
   + 'Nothing changes until the owner taps Apply on the card, so say in your reply what you proposed and why. Never ask for a key or password in chat.';
 
 const lower = value => String(value ?? '').trim().toLowerCase();
@@ -137,8 +137,9 @@ export function modelFor(provider, wanted) {
 export function resolveSetup(state, request, {speaker = null} = {}) {
   const providers = state?.ai?.providers || [];
   if (request.action === 'open') {
+    if (['bots', 'bot', 'team', 'teams', 'company'].includes(request.page)) return {ok: false, error: 'bots are changed with a card, not a page: send {"action":"remove","bot":"<name>"} to remove one, or the job, rename, settings, model, rule or schedule block.'};
     const page = SETUP_PAGES[request.page];
-    if (!page) return {ok: false, error: `there is no "${request.page || 'blank'}" page to open. Use models, connectors, permissions, agents or usage.`};
+    if (!page) return {ok: false, error: `there is no "${request.page || 'blank'}" page to open. Use models, connectors, permissions, devices or usage.`};
     // Gmail and Drive are one Google sign-in, so the card goes straight to it.
     // With no Google client of their own saved, the owner signs in to Gmail or Drive once in the shared browser
     // instead, and the bots read it there; nothing in Google Cloud to set up. A saved client keeps the real sign-in.

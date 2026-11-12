@@ -7,20 +7,20 @@
  * team, agents, data) load the existing admin forms from ui-admin.js into the body.
  *
  * The lists behind it are pure and tested in ui-profile-model.js. */
-import {face} from './ui-face.js?v=64ddf06799';
-import {botStatus} from './ui-company.js?v=64ddf06799';
-import {esc, icon, btn, empty, note, roundBtn, switchBtn, fullDate} from './ui-kit.js?v=64ddf06799';
-import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, applyTheme, themeChoice, THEMES} from './ui-store.js?v=64ddf06799';
-import {isDesk, initials} from './ui-shell.js?v=64ddf06799';
-import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=64ddf06799';
-import {faceOf, headBar, activityBlocks, grantsHtml, grantNote} from './ui-profile.js?v=64ddf06799';
-import {allGrantRows} from './ui-asks.js?v=64ddf06799';
-import {toast, confirmSheet} from './ui-dialogs.js?v=64ddf06799';
+import {face} from './ui-face.js?v=a641a0ae3b';
+import {botStatus} from './ui-company.js?v=a641a0ae3b';
+import {esc, icon, btn, empty, note, roundBtn, switchBtn, fullDate} from './ui-kit.js?v=a641a0ae3b';
+import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, applyTheme, themeChoice, THEMES} from './ui-store.js?v=a641a0ae3b';
+import {isDesk, initials} from './ui-shell.js?v=a641a0ae3b';
+import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=a641a0ae3b';
+import {faceOf, headBar, activityBlocks, grantsHtml, grantNote} from './ui-profile.js?v=a641a0ae3b';
+import {allGrantRows} from './ui-asks.js?v=a641a0ae3b';
+import {toast, confirmSheet} from './ui-dialogs.js?v=a641a0ae3b';
 import {
   ACTIVITY_FILTERS, activityUrl, companyTree, weekUsage, settingsSections, resolveSection, sectionArg,
-} from './ui-profile-model.js?v=64ddf06799';
-import {COLORS} from './ui-face.js?v=64ddf06799';
-import {limitsOf, limitWords, FAIL_STREAK} from './limits.js?v=64ddf06799';
+} from './ui-profile-model.js?v=a641a0ae3b';
+import {COLORS} from './ui-face.js?v=a641a0ae3b';
+import {limitsOf, limitWords, FAIL_STREAK} from './limits.js?v=a641a0ae3b';
 
 const el = id => document.getElementById(id);
 const ICONS = {general: 'gear', look: 'half', models: 'key', conn: 'plug', perm: 'shield', usage: 'chart'};
