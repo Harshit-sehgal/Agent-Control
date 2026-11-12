@@ -67,7 +67,9 @@ test('the briefing does not report its own earlier runs as work done', () => {
 
 test('one tap makes a daily schedule for the primary bot at the chosen time, once per workspace', () => {
   const s = state();
-  const body = briefingTaskBody(s, {at: '07:30'}, NOW);
+  // The queue checks the first run against the real clock, so the bodies are built from it too (not NOW).
+  const now = new Date();
+  const body = briefingTaskBody(s, {at: '07:30'}, now);
   assert.equal(body.kind, 'bot-task');
   assert.equal(body.idempotencyKey, BRIEFING_KEY);
   assert.deepEqual({botId: body.payload.botId, groupId: body.payload.groupId, every: body.payload.intervalMinutes, at: body.payload.at, brief: body.payload.brief, label: body.payload.label},
@@ -75,8 +77,8 @@ test('one tap makes a daily schedule for the primary bot at the chosen time, onc
   const {task} = enqueueTask(s, body);
   assert.equal(task.payload.brief, 'daily', 'the queue keeps the briefing mark');
   assert.equal(briefingSchedule(s)?.id, task.id);
-  assert.equal(enqueueTask(s, briefingTaskBody(s, {at: '09:00'}, NOW)).duplicate, true);
-  assert.throws(() => briefingTaskBody(s, {at: 'soon'}, NOW), /time/);
+  assert.equal(enqueueTask(s, briefingTaskBody(s, {at: '09:00'}, now)).duplicate, true);
+  assert.throws(() => briefingTaskBody(s, {at: 'soon'}, now), /time/);
 });
 
 test('the queue drops a briefing mark it does not know', () => {
