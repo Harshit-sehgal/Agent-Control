@@ -10,7 +10,6 @@ import {createRun, createEnvelope} from '../shared/coordination.js';
 import {coordinationState, runGroup, resumeBrowserRun} from '../src/coordination.js';
 import {answerAskFlow} from '../src/ask-runs.js';
 import {dispatchBrowserRequest, onAgentTaskResult, autoDispatch, continueBrowserWork, setBrowserResultHooks, beginTakeover, handBackTakeover} from '../src/bot-browser.js';
-import {refusePostingAction} from '../agent/browser.mjs';
 import {parseBrowserRequests, validateBrowserRequest, recordBrowserRequests, stripBrowserBlocks, denyBrowserRequest, browserResultText, capturePageText, requestOfMessage, pruneBrowserRequests, MAX_BROWSER_REQUESTS, MAX_BROWSER_DEPTH, MAX_ELEMENT_INDEX, BROWSER_PERMISSION} from '../shared/bot-browser.js';
 import {addChatMessages} from '../shared/chats.js';
 import {validateBotSettings} from '../shared/bot-settings.js';
@@ -29,8 +28,9 @@ test('browser blocks are parsed, bounded and kept away from posting on X', () =>
   assert.deepEqual(validateBrowserRequest({url: 'https://example.com/a'}), {kind: 'browser.capture', url: 'https://example.com/a', steps: []});
   const act = validateBrowserRequest({url: 'https://example.com', steps: [{op: 'type', selector: '#q', text: 'hi'}, {op: 'click', selector: '#go'}, {op: 'read', selector: 'main'}]});
   assert.equal(act.kind, 'browser.action'); assert.equal(act.steps.length, 3);
-  assert.throws(() => validateBrowserRequest({url: 'https://x.com/home', steps: [{op: 'click', selector: '[data-testid=tweetButton]'}]}), status(403));
-  assert.throws(() => validateBrowserRequest({url: 'https://example.com', steps: [{op: 'navigate', url: 'https://mobile.twitter.com'}, {op: 'type', selector: 'textarea', text: 'x'}]}), status(403), 'A navigate onto X before interacting is refused too.');
+  // X is a site like any other: clicks and typing are allowed, and a Post asks (see owner-choices.test.js).
+  assert.equal(validateBrowserRequest({url: 'https://x.com/home', steps: [{op: 'click', selector: '[data-testid=tweetButton]'}]}).kind, 'browser.action');
+  assert.equal(validateBrowserRequest({url: 'https://example.com', steps: [{op: 'navigate', url: 'https://mobile.twitter.com'}, {op: 'type', selector: 'textarea', text: 'x'}]}).steps.length, 2);
   assert.equal(validateBrowserRequest({url: 'https://x.com/someone/status/1', steps: [{op: 'read', selector: 'article'}]}).kind, 'browser.action', 'Reading X is allowed.');
   const scrolled = validateBrowserRequest({url: 'https://x.com/home', steps: [{op: 'scroll', times: 9}]});
   assert.equal(scrolled.steps[0].times, 4, 'A scroll only moves the page, and only a few times.');
@@ -61,8 +61,8 @@ test('a step can name an element by its index from the last result', () => {
   for (const bad of [0, -1, 2.5, MAX_ELEMENT_INDEX + 1, 'three']) {
     assert.throws(() => validateBrowserRequest({url: 'https://example.com', steps: [at('click', bad)]}), /index from the last result/, String(bad));
   }
-  // An index is a click like any other, so X refuses it too.
-  assert.throws(() => validateBrowserRequest({url: 'https://x.com/home', steps: [at('click', 2)]}), status(403));
+  // An index is a click like any other, on X too.
+  assert.equal(validateBrowserRequest({url: 'https://x.com/home', steps: [at('click', 2)]}).steps[0].index, 2);
   // The index survives validation; it is what the device (or the server) uses.
   assert.equal(validateBrowserRequest({url: 'https://example.com', steps: [at('click', 3)]}).steps[0].index, 3);
 });
@@ -75,22 +75,13 @@ test('the numbered controls a result returned are what the next turn acts on', (
   assert.equal(capturePageText({actions: [{text: 'Read text'}], elements: [{index: 1, tag: 'a', text: 'Link'}]}), 'Read text\n\nControls: [1] a Link');
 });
 
-test('a trailing dot is still X or Twitter, so click and type stay refused', () => {
+test('a trailing dot is the same site, so a grant for it holds and validation reads it plainly', () => {
   const click = selector => [{op: 'click', selector}];
-  for (const url of ['https://x.com./home', 'https://x.com%2e/home', 'https://x.com%2e%2e/home', 'https://twitter.com.', 'https://www.x.com.', 'https://mobile.twitter.com%2e/', 'https://x.com%E3%80%82/home', 'https://twitter.com%EF%BC%8E/']) {
-    assert.throws(() => validateBrowserRequest({url, steps: click('[data-testid=tweetButton]')}), status(403), url);
+  for (const url of ['https://x.com./home', 'https://twitter.com.', 'https://www.x.com.']) {
+    assert.equal(validateBrowserRequest({url, steps: click('[data-testid=tweetButton]')}).kind, 'browser.action', url);
   }
-  assert.throws(() => validateBrowserRequest({url: 'https://example.com', steps: [{op: 'navigate', url: 'https://twitter.com%2e/compose'}, {op: 'type', selector: 'textarea', text: 'hi'}]}), status(403));
-  const read = validateBrowserRequest({url: 'https://x.com./home', steps: [{op: 'scroll', times: 2}, {op: 'read', selector: 'main'}]});
-  assert.equal(read.kind, 'browser.action', 'Reading the dotted host is still allowed.');
-  assert.equal(validateBrowserRequest({url: 'https://example.com.', steps: click('#go')}).steps[0].op, 'click', 'A trailing dot on some other host is not X.');
+  assert.equal(validateBrowserRequest({url: 'https://example.com.', steps: click('#go')}).steps[0].op, 'click');
   assert.equal(validateBrowserRequest({url: 'https://notx.com/home', steps: click('a')}).url, 'https://notx.com/home');
-  assert.match(refusePostingAction('click', 'https://x.com/home'), /never click or type/);
-  assert.match(refusePostingAction('type', 'https://x.com./compose'), /never click or type/);
-  assert.match(refusePostingAction('click', 'https://mobile.twitter.com/'), /never click or type/);
-  assert.equal(refusePostingAction('click', 'https://example.com/'), '');
-  assert.equal(refusePostingAction('read', 'https://x.com/home'), '');
-  assert.equal(refusePostingAction('scroll', 'https://twitter.com.'), '');
 });
 
 test('a reply becomes a request card for a bot already cleared, an ask for one that is not, and nothing for a Deny, within the depth limit', () => {
@@ -115,8 +106,8 @@ test('a reply becomes a request card for a bot already cleared, an ask for one t
   state.grants = [];
   const deep = recordBrowserRequests(state, {bot: browserBot(), groupId: 'g', chatKey: 'web', output: block({url: 'https://example.com'}), depth: MAX_BROWSER_DEPTH});
   assert.equal(deep.records.length, 0); assert.match(deep.lines[0].text, /browsing rounds in a row/);
-  const refused = recordBrowserRequests(state, {bot: browserBot(), groupId: 'g', chatKey: 'web', output: block({url: 'https://x.com', steps: [{op: 'click', selector: 'button'}]})});
-  assert.match(refused.lines[0].text, /refused: .*Posting stays yours/);
+  const refused = recordBrowserRequests(state, {bot: browserBot(), groupId: 'g', chatKey: 'web', output: block({url: 'file:///etc/passwd'})});
+  assert.match(refused.lines[0].text, /refused/);
   assert.equal(recordBrowserRequests(state, {bot: browserBot(), groupId: 'g', chatKey: 'web', output: 'plain reply'}).text, 'plain reply');
   const again = recordBrowserRequests(state, {bot: browserBot(), groupId: 'g', chatKey: 'web', output: block({url: 'https://x.com/home/'}), skipUrls: ['https://x.com/home']});
   assert.equal(again.records.length, 0);
@@ -642,9 +633,9 @@ test('a document write that fails after the task row was inserted fails the task
   } finally { await fs.rm(dir, {recursive: true, force: true}); }
 });
 
-test('click and type on x.com are still refused', () => {
+test('click and type on x.com are allowed', () => {
   for (const url of ['https://x.com/home', 'https://x.com./home']) {
-    assert.throws(() => validateBrowserRequest({url, steps: [{op: 'click', index: 1}]}), status(403), url);
-    assert.throws(() => validateBrowserRequest({url, steps: [{op: 'type', index: 1, text: 'hi'}]}), status(403), url);
+    assert.equal(validateBrowserRequest({url, steps: [{op: 'click', index: 1}]}).kind, 'browser.action', url);
+    assert.equal(validateBrowserRequest({url, steps: [{op: 'type', index: 1, text: 'hi'}]}).kind, 'browser.action', url);
   }
 });

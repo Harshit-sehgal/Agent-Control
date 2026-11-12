@@ -24,9 +24,8 @@
  * on this device (see agent/browser.mjs), in one browser that every bot shares
  * and that keeps its sign-ins in `browser-profile` next to this config
  * (agent/shared-browser.mjs): each bot has its own tab, one bot drives at a
- * time. "browser.action" may click, type, scroll and read there, except on X
- * and Twitter, where click and type stay refused. Posting is never this
- * process's job.
+ * time. "browser.action" may click, type, scroll and read there; a click on a
+ * Send, Post, Delete or Pay control runs only when the owner allowed it.
  */
 import fs from 'node:fs';
 import path from 'node:path';

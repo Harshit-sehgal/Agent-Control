@@ -23,7 +23,7 @@ import {face, botColor, botAccent, accentStyle} from './ui-face.js';
 import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js';
 import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js';
 import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js';
-import {toast} from './ui-dialogs.js';
+import {toast, confirmSheet} from './ui-dialogs.js';
 import {siteChip, thumbSlot} from './ui-computer-view.js';
 import {cliChoice, googleCard} from './ui-connect-model.js';
 
@@ -117,8 +117,8 @@ function browserEntry(m, conv) {
 }
 
 /** An ask: a bot needs the owner's yes before it goes on. Open, it keeps the asking bot's waiting face above one
- * question ("Let Atlas open example.com?") and its buttons (Allow once, Always allow, Don't allow; a payment has no
- * Always). Only a button answers it: Escape or leaving the chat decides nothing. Answered, it leaves the chat;
+ * question ("Let Atlas open example.com?") and its buttons (Allow once, Always allow, Don't allow; Always allow on a
+ * payment is confirmed first). Only a button answers it: Escape or leaving the chat decides nothing. Answered, it leaves the chat;
  * collapses to one muted line. Its status is read from state.asks, so the line itself never changes. */
 function askEntry({message: m}, conv) {
   const card = askCard(store.state, m);
@@ -387,6 +387,9 @@ const hop = node => { const f = node?.querySelector('.face'); if (f) { f.classLi
 /** The owner's answer to an ask card. The run that was parked on it carries on from the server, so the poll
  * (and the pill) follow it from here. */
 async function answerAsk(id, answer) {
+  // Always allow on a payment lets the bot pay on that site without asking again: confirm it first.
+  const card = askCard(store.state, {askId: id});
+  if (answer === 'always' && card.confirmAlways && !(await confirmSheet('Always allow payments here?', {confirm: 'Always allow', danger: true, detail: card.confirmAlways}))) return;
   const {ask} = await api(`/api/asks/${encodeURIComponent(id)}`, 'POST', {answer});
   await sync();
   toast(answer === 'decline' ? 'Not allowed.' : answer === 'always' ? `${findBot(ask?.botId)?.name || 'The bot'} may always do this.` : 'Allowed once.');

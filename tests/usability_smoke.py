@@ -781,6 +781,7 @@ ASKS = [
     ['a1', 'send', 'https://mail.example.com/compose', 'send an email to Northwind'],
     ['a2', 'spend', '', 'pay £40 to Northwind Printing'],
     ['a3', 'post', 'https://social.example.com/new', 'post the draft to the company page'],
+    ['a4', 'spend', 'https://shop.example.com/checkout', 'pay £12 at shop.example.com'],
 ]
 
 
@@ -806,13 +807,13 @@ async def seed_asks(page, bot_id, asks=ASKS, name='Researcher'):
 async def ask_cards_answer_and_collapse(page, base):
     ids = await open_app(page, base, bots={'Researcher': EXTRA_BOTS['Researcher']})
     await seed_asks(page, ids['Researcher'])
-    # Three things wait on the owner: the bot's row and Atlas's face both carry the count.
+    # Four things wait on the owner: the bot's row and Atlas's face both carry the count.
     row = page.locator('#sidebar .crow', has_text='Researcher')
-    await expect(row.locator('.badge')).to_have_text('3')
-    await expect(page.locator('#sidebar .pin', has_text='Atlas').locator('.badge')).to_have_text('3')
+    await expect(row.locator('.badge')).to_have_text('4')
+    await expect(page.locator('#sidebar .pin', has_text='Atlas').locator('.badge')).to_have_text('4')
     await row.click()
     cards = page.locator('#cv-log .cv-card[data-ask]')
-    await expect(cards).to_have_count(3)
+    await expect(cards).to_have_count(4)
     # A question, the three choices in the owner's words, and the asking bot's face waiting above the card.
     first = page.locator('#cv-log .cv-card[data-ask="a1"]')
     await expect(first.locator('p')).to_have_text('Let Researcher send an email to Northwind?')
@@ -825,7 +826,18 @@ async def ask_cards_answer_and_collapse(page, base):
     await page.keyboard.press('Escape')
     await expect(first).to_be_visible()
     assert all(a['status'] == 'pending' for a in (await api_state(page))['asks']), 'Escape answered an ask'
-    # A payment is only ever Allow once or Don't allow, and says so.
+    # A payment on a site may be set to Always allow, behind a confirmation; Cancel changes nothing.
+    shop = page.locator('#cv-log .cv-card[data-ask="a4"]')
+    assert await shop.locator('.btn').all_inner_texts() == ['Allow once', 'Always allow', "Don't allow"]
+    await shop.get_by_role('button', name='Always allow', exact=True).click()
+    await expect(page.locator('#modal .sheet')).to_contain_text('without asking you')
+    await page.locator('#modal .sheet').get_by_role('button', name='Cancel').click()
+    assert {a['id']: a['status'] for a in (await api_state(page))['asks']}['a4'] == 'pending', 'Cancel answered the payment'
+    await shop.get_by_role('button', name='Always allow', exact=True).click()
+    await page.locator('#modal .sheet').get_by_role('button', name='Always allow').click()
+    await expect(page.locator('#cv-log [data-ask="a4"]')).to_have_count(0)
+    assert any(g['action'] == 'spend' and g['scope'] == 'https://shop.example.com' and g['choice'] == 'always' for g in (await api_state(page))['grants'])
+    # A payment with no site is only ever Allow once or Don't allow, and says so.
     spend = page.locator('#cv-log .cv-card[data-ask="a2"]')
     assert await spend.locator('.btn').all_inner_texts() == ['Allow once', "Don't allow"]
     await expect(spend).to_contain_text('Payments are asked every time.')
@@ -873,8 +885,8 @@ async def permissions_edit_in_place_and_deny(page, base):
     await expect(page.locator('#main .st-chip')).to_contain_text('Showing Researcher')
     rows = page.locator('#main .gr')
     await expect(rows).to_have_count(3)
-    assert [t.split('\n')[0] for t in await rows.all_inner_texts()] == ['Open example.com', 'Send on mail.example.com', 'Spend money']
-    # Every rule has the three choices; a payment never has Always allow.
+    assert [t.split('\n')[0] for t in await rows.all_inner_texts()] == ['Open example.com', 'Send on mail.example.com', 'Spend money anywhere']
+    # Every rule has the three choices; a payment rule for every site has no Always allow.
     assert await rows.nth(0).locator('button').all_inner_texts() == ['Always allow', 'Ask each time', 'Deny']
     assert await rows.nth(2).locator('button').all_inner_texts() == ['Ask each time', 'Deny']
     await expect(rows.nth(0).locator('button[aria-pressed="true"]')).to_have_text('Always allow')
@@ -883,7 +895,7 @@ async def permissions_edit_in_place_and_deny(page, base):
     await expect(page.locator('#main .gr').nth(0).locator('button[aria-pressed="true"]')).to_have_text('Deny')
     await expect(page.locator('#toast')).to_contain_text('Researcher: deny.')
     assert [g for g in (await api_state(page))['grants'] if g['action'] == 'browser.use'][0]['choice'] == 'deny'
-    # A payment can be set to Deny but never to Always allow: there is no button, and the server refuses it too.
+    # A payment rule for every site can be Deny but not Always allow: there is no button, and the server refuses it too.
     await page.locator('#main .gr').nth(2).get_by_role('button', name='Deny').click()
     await expect(page.locator('#main .gr').nth(2).locator('button[aria-pressed="true"]')).to_have_text('Deny')
     refused = await page.evaluate('''botId => window.AGENT_API('/api/grants', 'POST', {botId, action: 'spend', choice: 'always'}).then(() => 'accepted', e => e.message)''', r)
@@ -2461,7 +2473,7 @@ async def main():
             await h.scenario('pin: drag a row to the pinned row, reorder faces, drag one out, reorder rows, Esc cancels', drag_to_pin_reorder_and_unpin)
             await h.scenario('pin: dropping on a manager moves the bot to its team', drag_onto_a_manager_moves_it_to_the_team)
             await h.scenario('asks: the question, Allow once, Always allow, Don\'t allow, Escape decides nothing, and what is left', ask_cards_answer_and_collapse)
-            await h.scenario('permissions: edit a rule in place, Deny shows, payments never Always allow, the activity chips', permissions_edit_in_place_and_deny)
+            await h.scenario('permissions: edit a rule in place, Deny shows, an every-site payment rule has no Always allow, the activity chips', permissions_edit_in_place_and_deny)
             await h.scenario('pause: the banner says so on every screen and Resume lifts it', pause_banner_and_resume)
             await h.scenario('settings: opens from the avatar, Bots running pauses, Esc closes', settings_from_avatar_and_esc)
             await h.scenario('activity: four chips, bots made are logged, a profile counts its own', activity_page_and_counts)

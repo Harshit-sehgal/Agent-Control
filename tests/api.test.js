@@ -125,10 +125,9 @@ test('a browser task is validated before it is queued', {timeout:25000}, async()
     const tooMany=await queue('browser.action',{url:'https://example.com',steps:Array.from({length:26},()=>({op:'read',selector:'main'}))});
     assert.equal(tooMany.status,400);
     assert.match(tooMany.body.error,/at most 25 steps/);
-    // Clicking or typing on X stays impossible from this route too.
+    // Clicking on X is allowed like any other site; this route only checks the shape.
     const xClick=await queue('browser.action',{url:'https://x.com/home',steps:[{op:'click',selector:'article'}]});
-    assert.equal(xClick.status,403);
-    assert.match(xClick.body.error,/never click or type there/);
+    assert.notEqual(xClick.status,403);
     // A url that is not http(s) is refused, and the payload is normalized.
     assert.equal((await queue('browser.capture',{url:'javascript:alert(1)'})).status,400);
     // The kind has to match what the payload describes.

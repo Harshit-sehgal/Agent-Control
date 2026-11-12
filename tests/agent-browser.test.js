@@ -38,8 +38,8 @@ test('a page must be on the allowlist, and only http(s) is loaded', () => {
   assert.equal(requestVerdict({url: 'https://cdn.example.net/a.js', isDocument: false}, {allow}).allow, true);
   for (const url of ['file:///etc/passwd', 'chrome://settings', 'ftp://example.com/x']) assert.equal(requestVerdict({url, isDocument: true}, {allow}).allow, false, url);
   assert.equal(requestVerdict({url: 'data:image/png;base64,AAAA', isDocument: false}, {allow}).allow, true);
-  // A WebSocket tunnel hides inside GET: posting hosts refuse it too.
-  assert.equal(requestVerdict({url: 'https://x.com/stream', isDocument: false, method: 'GET', resourceType: 'WebSocket'}, {allow: ['x.com', 'docs.example.com']}).allow, false);
+  // X is a site like any other once it is allowed: its live updates load.
+  assert.equal(requestVerdict({url: 'https://x.com/stream', isDocument: false, method: 'GET', resourceType: 'WebSocket'}, {allow: ['x.com', 'docs.example.com']}).allow, true);
   assert.equal(requestVerdict({url: 'https://example.com/stream', isDocument: false, method: 'GET', resourceType: 'WebSocket'}, {allow: ['example.com']}).allow, true);
 });
 

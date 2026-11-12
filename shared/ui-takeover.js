@@ -51,7 +51,7 @@ function render() {
     ${btn('Hand back to the bot', 'takeover-handback', {kind: 'primary', wide: true})}
     ${btn('Close without handing back', 'takeover-close', {kind: 'quiet', small: true})}
   </div>`;
-  openSheet(`${page}${go}${controls}${type}${actions}<p class="note">Signing in is saved only for this takeover and thrown away when it ends. X refuses click and type, and the final Post stays yours.</p>`,
+  openSheet(`${page}${go}${controls}${type}${actions}<p class="note">Signing in is saved only for this takeover and thrown away when it ends.</p>`,
     {title: 'Take over the page', sub: 'Sign in or answer the challenge, then hand the page back to the bot.', onDismiss: releaseOnDismiss});
 }
 

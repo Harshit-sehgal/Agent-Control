@@ -7,25 +7,25 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=e4e0fdac0c';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=e4e0fdac0c';
-import {requestOfMessage} from './bot-browser.js?v=e4e0fdac0c';
-import {validHttpUrl} from './core.js?v=e4e0fdac0c';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=e4e0fdac0c';
-import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=e4e0fdac0c';
-import {isPrimary} from './company.js?v=e4e0fdac0c';
-import {hasJob, modelChip} from './ui-profile-model.js?v=e4e0fdac0c';
-import {scheduleTaskBody} from './schedules.js?v=e4e0fdac0c';
-import {feed} from './ui-feed.js?v=e4e0fdac0c';
-import {setupCardOf, setupButton} from './setup.js?v=e4e0fdac0c';
-import {askCard} from './ui-asks.js?v=e4e0fdac0c';
-import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=e4e0fdac0c';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=e4e0fdac0c';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=e4e0fdac0c';
-import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=e4e0fdac0c';
-import {toast} from './ui-dialogs.js?v=e4e0fdac0c';
-import {siteChip, thumbSlot} from './ui-computer-view.js?v=e4e0fdac0c';
-import {cliChoice, googleCard} from './ui-connect-model.js?v=e4e0fdac0c';
+import {OFFJOB_CHOICES} from './off-job.js?v=7cc80de302';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=7cc80de302';
+import {requestOfMessage} from './bot-browser.js?v=7cc80de302';
+import {validHttpUrl} from './core.js?v=7cc80de302';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=7cc80de302';
+import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=7cc80de302';
+import {isPrimary} from './company.js?v=7cc80de302';
+import {hasJob, modelChip} from './ui-profile-model.js?v=7cc80de302';
+import {scheduleTaskBody} from './schedules.js?v=7cc80de302';
+import {feed} from './ui-feed.js?v=7cc80de302';
+import {setupCardOf, setupButton} from './setup.js?v=7cc80de302';
+import {askCard} from './ui-asks.js?v=7cc80de302';
+import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=7cc80de302';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=7cc80de302';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=7cc80de302';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=7cc80de302';
+import {toast, confirmSheet} from './ui-dialogs.js?v=7cc80de302';
+import {siteChip, thumbSlot} from './ui-computer-view.js?v=7cc80de302';
+import {cliChoice, googleCard} from './ui-connect-model.js?v=7cc80de302';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -117,8 +117,8 @@ function browserEntry(m, conv) {
 }
 
 /** An ask: a bot needs the owner's yes before it goes on. Open, it keeps the asking bot's waiting face above one
- * question ("Let Atlas open example.com?") and its buttons (Allow once, Always allow, Don't allow; a payment has no
- * Always). Only a button answers it: Escape or leaving the chat decides nothing. Answered, it leaves the chat;
+ * question ("Let Atlas open example.com?") and its buttons (Allow once, Always allow, Don't allow; Always allow on a
+ * payment is confirmed first). Only a button answers it: Escape or leaving the chat decides nothing. Answered, it leaves the chat;
  * collapses to one muted line. Its status is read from state.asks, so the line itself never changes. */
 function askEntry({message: m}, conv) {
   const card = askCard(store.state, m);
@@ -387,6 +387,9 @@ const hop = node => { const f = node?.querySelector('.face'); if (f) { f.classLi
 /** The owner's answer to an ask card. The run that was parked on it carries on from the server, so the poll
  * (and the pill) follow it from here. */
 async function answerAsk(id, answer) {
+  // Always allow on a payment lets the bot pay on that site without asking again: confirm it first.
+  const card = askCard(store.state, {askId: id});
+  if (answer === 'always' && card.confirmAlways && !(await confirmSheet('Always allow payments here?', {confirm: 'Always allow', danger: true, detail: card.confirmAlways}))) return;
   const {ask} = await api(`/api/asks/${encodeURIComponent(id)}`, 'POST', {answer});
   await sync();
   toast(answer === 'decline' ? 'Not allowed.' : answer === 'always' ? `${findBot(ask?.botId)?.name || 'The bot'} may always do this.` : 'Allowed once.');

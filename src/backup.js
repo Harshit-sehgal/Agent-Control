@@ -201,7 +201,7 @@ export function validateBackup(document, {primaryWorkspace = false} = {}) {
   // A grant for a bot that is not in the document is fine: it is ignored when the workspace loads.
   for (const row of document.tables.grants || []) {
     if (!row || typeof row.bot_id !== 'string' || !GRANT_CHOICES.includes(row.choice) || !isAskAction(row.action)) fail('Backup holds a grant that is not valid.');
-    if (row.action === 'spend' && row.choice === 'always') fail('Backup holds Always allow for a payment (spend). Payments are asked every time, so it is refused.');
+    if (row.action === 'spend' && row.choice === 'always' && !row.scope) fail('Backup holds Always allow for a payment (spend) with no site. A payment Always allow is for one site, so it is refused.');
   }
   for (const row of document.tables.activity || []) {
     if (!row || !['outside', 'perm', 'bots'].includes(row.kind) || typeof row.text !== 'string') fail(`Backup row ${row?.id ?? '?'} in activity is not valid.`);

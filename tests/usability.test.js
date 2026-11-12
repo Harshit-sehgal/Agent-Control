@@ -91,7 +91,7 @@ test('the bot profile edits name, manager, shape and colour, and edits its permi
   assert.match(js,/To change what \$\{esc\(bot\.name\)\} does, tell it in its chat\./);
   // Rules are edited in place with the three choices; paying never gets Always allow.
   assert.match(js,/data-action="set-grant"/);
-  assert.match(js,/Payments are asked every time\. They never get Always allow\./);
+  assert.match(js,/Payments ask every time unless you set Always allow for a site\./);
 });
 test('the shell is integrated: one search, animated routes, one progress bar',()=>{
   assert.match(html,/id="progress"/);

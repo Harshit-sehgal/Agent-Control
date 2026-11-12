@@ -36,7 +36,8 @@ function seed(state) {
   const ids = n => `ask-${n}`;
   const make = (n, extra) => createAsk(state, {botId: 'atlas', chatKey: 'atlas', makeId: () => ids(n), now: NOW, ...extra});
   make(1, {action: 'browser.use', target: 'https://docs.example.com/x', detail: 'read docs.example.com', runId: 'run-1'});
-  make(2, {action: 'spend', target: 'https://shop.example.com/checkout', detail: 'pay', runId: null});
+  // A payment with no site to remember: Always allow is refused by both engines.
+  make(2, {action: 'spend', target: '', detail: 'pay', runId: null});
   make(3, {action: 'send', target: 'https://x.example/', detail: 'send it', runId: null});
   make(4, {action: 'post', target: 'x', detail: 'post it', runId: 'run-gone'});
   make(5, {action: 'delete', target: 'x', detail: 'delete it', runId: null, unattended: true, now: old});

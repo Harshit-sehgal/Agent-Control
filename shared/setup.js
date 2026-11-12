@@ -16,7 +16,7 @@
  *   `model` (a bot's model, or the default when `bot` is left out), `job` (a bot's job sentence), `rename`,
  *   `settings` (reply length, style, memory, hand-offs, @mentions, on or off, temperature, manager), `team`
  *   (a team's "Approve between steps", step limit and hand-offs between its bots), `rule`
- *   (Always allow / Ask each time / Deny for a bot, an action and a site; a payment is never Always),
+ *   (Always allow / Ask each time / Deny for a bot, an action and a site; a payment Always allow names its site),
  *   `schedule`, `remove`, `signin`, `pause` (every bot), `limits` (pages, rounds, team steps per message),
  *   `basics` (ask before every page and app read), `forget` (a bot's memory notes), `disconnect` (a connector),
  *   `thread` (rename or delete one), or `open` (a Settings page: models, connectors, permissions, devices, usage).
@@ -71,7 +71,7 @@ export const SETUP_TOOL_HINT = 'To change a setting for the owner, put one fence
   + '{"action":"rename","bot":"<bot name>","name":"<new name>"} renames a bot. '
   + `{"action":"settings","bot":"<bot name>","settings":{"replyLength":"short|medium|long","style":"<tone>","memory":true|false,"canHandoff":true|false,"summonable":true|false,"enabled":true|false,"temperature":0-2,"reportsTo":"<manager bot name, or none>","colour":"<${COLOR_NAMES.join('|')}>","shape":"<${SHAPES.join('|')}>"}} changes how a bot works or looks; give only what changes. `
   + '{"action":"team","team":"<team name, or leave out for your own team>","settings":{"checkpoints":true|false,"maxSteps":1-30,"botHandoffs":true|false}} changes how a team runs: checkpoints asks the owner before each step. '
-  + '{"action":"rule","bot":"<bot name>","do":"open|send|post|delete|spend","site":"<site, e.g. github.com>","choice":"always|ask|deny"} saves what that bot may do without asking (a payment is never always). '
+  + '{"action":"rule","bot":"<bot name>","do":"open|send|post|delete|spend","site":"<site, e.g. github.com>","choice":"always|ask|deny"} saves what that bot may do without asking (a payment Always allow needs its site). '
   + '{"action":"schedule","bot":"<bot name, or me>","do":"<the message that bot gets each time>","every":"day|hour|week|<minutes>","at":"<HH:MM, optional>","on":"<monday..sunday, optional: a weekly schedule on that day>"} puts work on a timer: the bot runs it in its own chat and the owner reads the result there. Give only "at" for a one-off later today or tomorrow. Add "stop":true with a few words of its message in "do" to stop one; workspace.schedules lists them. When the owner asks for something regular (every morning, each Monday), propose a schedule instead of telling them to come back. '
   + '{"action":"pause"} pauses every bot at once (the owner resumes them). '
   + `{"action":"limits","pages":1-${BACKSTOP.pages},"rounds":1-${BACKSTOP.rounds},"steps":1-${BACKSTOP.steps}} caps how far one message may go (pages per reply, rounds of pages in a row, team steps); "none" removes a cap; give only what changes. The owner saying "bots should open at most 3 pages per reply" or "no more than 10 steps" is this block ({"action":"limits","pages":3}), never a note about your own reply. `
@@ -316,9 +316,9 @@ function ruleCard(bot, request) {
   if (!act) return {ok: false, error: `a rule is for open, send, post, delete or spend, not "${request.do || 'blank'}".`};
   const choice = request.choice === 'allow' ? 'always' : request.choice;
   if (!GRANT_CHOICES.includes(choice)) return {ok: false, error: 'a rule is always, ask or deny.'};
-  if (!grantChoices(act).includes(choice)) return {ok: false, error: 'a payment is asked every time, so it can only be ask or deny.'};
   let scope = '';
-  if (PER_SITE.includes(act)) {
+  if (act === 'spend' && choice === 'always' && !String(request.site || '').trim()) return {ok: false, error: 'a payment Always allow is for one site; name it, like shop.example.com.'};
+  if (PER_SITE.includes(act) || (act === 'spend' && String(request.site || '').trim())) {
     const site = String(request.site || '').trim();
     scope = scopeOf({action: act, target: /^https?:\/\//i.test(site) ? site : `https://${site}`});
     if (!site || !scope) return {ok: false, error: 'name the site the rule is for, like github.com.'};

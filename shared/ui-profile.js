@@ -233,7 +233,7 @@ export function grantsHtml(botId = null) {
   return [...by].map(([id, list]) => `<section class="st-g"><h4 class="st-h">${esc(list[0].botName)}</h4><div class="cd">${list.map(grantRow).join('')}</div></section>`).join('');
 }
 /** The note under the list of rules (shown once, in Settings). */
-export const grantNote = (cls = 'st-note') => `<p class="${cls}">${canGrant() ? 'Payments are asked every time. They never get Always allow.' : 'Only the owner or an admin can change these. Payments are asked every time.'}</p>`;
+export const grantNote = (cls = 'st-note') => `<p class="${cls}">${canGrant() ? 'Payments ask every time unless you set Always allow for a site.' : 'Only the owner or an admin can change these.'}</p>`;
 
 /** A bot's Model page: one list of every model it can run on (grouped by provider, the workspace default
  * first, "Another … model…" to type any id) and how hard it thinks. One Save. */
@@ -408,6 +408,8 @@ export const profileActions = {
   },
   'set-grant': async b => {
     const {id: botId, act: action, choice} = b.dataset, scope = b.dataset.scope || '';
+    // Always allow on a payment lets this bot pay on that site without asking: confirm it first.
+    if (action === 'spend' && choice === 'always' && !(await confirmSheet('Always allow payments here?', {confirm: 'Always allow', danger: true, detail: `${botName(botId)} will pay${scope ? ` on ${scope.replace(/^https?:\/\//, '')}` : ''} without asking you.`}))) return;
     const {url, body} = grantUrl({botId, action, scope}, choice);
     await api(url, 'POST', body);
     await sync();

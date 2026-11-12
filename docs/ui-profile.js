@@ -5,23 +5,23 @@
  *
  * Pages repaint only when the route changes, so each in-place change (a switch, a
  * forgotten note, a picked colour) updates its own node instead. */
-import {SHAPES, COLORS, face} from './ui-face.js?v=e4e0fdac0c';
-import {botStatus, botIsManager} from './ui-company.js?v=e4e0fdac0c';
-import {primaryOf} from './company.js?v=e4e0fdac0c';
-import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker, COLOR_NAMES} from './ui-kit.js?v=e4e0fdac0c';
-import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js?v=e4e0fdac0c';
-import {scheduleRows, scheduleTaskBody, SCHEDULE_OFTEN, scheduleChoice} from './schedules.js?v=e4e0fdac0c';
-import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=e4e0fdac0c';
-import {GRANT_LABELS} from './asks.js?v=e4e0fdac0c';
-import {grantRows, allGrantRows, grantUrl} from './ui-asks.js?v=e4e0fdac0c';
-import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=e4e0fdac0c';
-import {toast, confirmSheet} from './ui-dialogs.js?v=e4e0fdac0c';
-import {sendChat} from './ui-chat.js?v=e4e0fdac0c';
-import {computerPage as computerView, computerLabel, keysOwned, thumbSlot} from './ui-computer-view.js?v=e4e0fdac0c';
+import {SHAPES, COLORS, face} from './ui-face.js?v=7cc80de302';
+import {botStatus, botIsManager} from './ui-company.js?v=7cc80de302';
+import {primaryOf} from './company.js?v=7cc80de302';
+import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker, COLOR_NAMES} from './ui-kit.js?v=7cc80de302';
+import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js?v=7cc80de302';
+import {scheduleRows, scheduleTaskBody, SCHEDULE_OFTEN, scheduleChoice} from './schedules.js?v=7cc80de302';
+import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=7cc80de302';
+import {GRANT_LABELS} from './asks.js?v=7cc80de302';
+import {grantRows, allGrantRows, grantUrl} from './ui-asks.js?v=7cc80de302';
+import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=7cc80de302';
+import {toast, confirmSheet} from './ui-dialogs.js?v=7cc80de302';
+import {sendChat} from './ui-chat.js?v=7cc80de302';
+import {computerPage as computerView, computerLabel, keysOwned, thumbSlot} from './ui-computer-view.js?v=7cc80de302';
 import {
   MAX_NAME, hasJob, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, lookOf, newBotDefaults,
   newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, closeTarget,
-} from './ui-profile-model.js?v=e4e0fdac0c';
+} from './ui-profile-model.js?v=7cc80de302';
 
 const el = id => document.getElementById(id);
 const SHAPE_LABELS = {rounded: 'Rounded square', circle: 'Circle', hexagon: 'Hexagon', pebble: 'Pebble', drop: 'Drop', shield: 'Shield', arch: 'Arch', egg: 'Egg', blob: 'Blob', bean: 'Bean'};
@@ -233,7 +233,7 @@ export function grantsHtml(botId = null) {
   return [...by].map(([id, list]) => `<section class="st-g"><h4 class="st-h">${esc(list[0].botName)}</h4><div class="cd">${list.map(grantRow).join('')}</div></section>`).join('');
 }
 /** The note under the list of rules (shown once, in Settings). */
-export const grantNote = (cls = 'st-note') => `<p class="${cls}">${canGrant() ? 'Payments are asked every time. They never get Always allow.' : 'Only the owner or an admin can change these. Payments are asked every time.'}</p>`;
+export const grantNote = (cls = 'st-note') => `<p class="${cls}">${canGrant() ? 'Payments ask every time unless you set Always allow for a site.' : 'Only the owner or an admin can change these.'}</p>`;
 
 /** A bot's Model page: one list of every model it can run on (grouped by provider, the workspace default
  * first, "Another … model…" to type any id) and how hard it thinks. One Save. */
@@ -408,6 +408,8 @@ export const profileActions = {
   },
   'set-grant': async b => {
     const {id: botId, act: action, choice} = b.dataset, scope = b.dataset.scope || '';
+    // Always allow on a payment lets this bot pay on that site without asking: confirm it first.
+    if (action === 'spend' && choice === 'always' && !(await confirmSheet('Always allow payments here?', {confirm: 'Always allow', danger: true, detail: `${botName(botId)} will pay${scope ? ` on ${scope.replace(/^https?:\/\//, '')}` : ''} without asking you.`}))) return;
     const {url, body} = grantUrl({botId, action, scope}, choice);
     await api(url, 'POST', body);
     await sync();

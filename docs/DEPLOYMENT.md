@@ -296,7 +296,7 @@ others wait their turn in order; a bot never touches another bot's tab.
 
 Reading and clicking are asked about as before: a bot asks the first time it
 uses a site, and a click on a Send, Post, Delete or Pay control gets its own
-ask. Posting on X stays refused for bots.
+ask. X is no exception: a Post there asks unless you set Always allow.
 
 `preflight()` refuses to boot on an invalid `PUBLIC_ORIGIN` and warns when HSTS
 is on without HTTPS, when no `DASHBOARD_PASSWORD` is set, or when the server is

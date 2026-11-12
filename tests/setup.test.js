@@ -128,7 +128,8 @@ test('rename, settings and rule cards: what Settings can change, a bot proposes'
 
   const rule = resolveSetup(state, {action: 'rule', bot: 'Replier', do: 'open', site: 'docs.example.org/path', choice: 'always'});
   assert.deepEqual(rule.card, {action: 'rule', botId: 'rep', act: 'browser.use', scope: 'https://docs.example.org', choice: 'always', text: 'Replier: Always allow · Open docs.example.org'});
-  assert.match(resolveSetup(state, {action: 'rule', bot: 'Replier', do: 'spend', choice: 'always'}).error, /payment is asked every time/);
+  assert.match(resolveSetup(state, {action: 'rule', bot: 'Replier', do: 'spend', choice: 'always'}).error, /payment Always allow is for one site/);
+  assert.equal(resolveSetup(state, {action: 'rule', bot: 'Replier', do: 'pay', site: 'shop.example.com', choice: 'always'}).card.scope, 'https://shop.example.com');
   assert.match(resolveSetup(state, {action: 'rule', bot: 'Replier', do: 'open', site: 'x', choice: 'maybe'}).error, /always, ask or deny/);
   const ruled = {...state, grants: [{botId: 'rep', action: 'browser.use', scope: 'https://docs.example.org', choice: 'always'}]};
   assert.equal(setupDone(ruled, rule.card), true);

@@ -7,7 +7,7 @@ import {BROWSER_TOOL_HINT} from '../shared/bot-browser.js';
 
 test('the browser hint tells a bot to book, apply or fill forms itself, up to the owner\'s approval', () => {
   assert.match(BROWSER_TOOL_HINT, /book, apply, order or fill/);
-  assert.match(BROWSER_TOOL_HINT, /asks the owner before anything is sent, booked or paid/);
+  assert.match(BROWSER_TOOL_HINT, /asks the owner before anything is sent, posted, booked or paid unless they set it to Always allow/);
   assert.match(BROWSER_TOOL_HINT, /never say you cannot/i);
 });
 

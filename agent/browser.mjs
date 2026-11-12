@@ -27,7 +27,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import {isPrivateAddress} from './net-guard.mjs';
-import {hostAllowed, isPostingHost, RISKS, CHECKOUT_PATH, botCheck, searchAlternates} from '../shared/bot-browser.js';
+import {hostAllowed, RISKS, CHECKOUT_PATH, botCheck, searchAlternates} from '../shared/bot-browser.js';
 
 // The allowlist rule lives with the rest of the browser-block rules in
 // `shared/bot-browser.js`, so the server runtime and this device read the same
@@ -65,8 +65,6 @@ export const MAX_ACTIONS = 25;
  * would only pad the chat record. */
 export const MAX_ELEMENTS = 60;
 const jsLiteral = value => JSON.stringify(String(value ?? ''));
-const postingPage = `(()=>{try{const host=new URL(location.href).hostname.toLowerCase().replace(/\\.+$/,'');return host==='x.com'||host.endsWith('.x.com')||host==='twitter.com'||host.endsWith('.twitter.com');}catch{return false;}})()`;
-const postingRefusal = `Bots may read X and Twitter pages but never click or type there.`;
 /** The elements a person could interact with, filtered the way a person sees
  * them: not disabled, with a real box on the page. Shared by the snapshot and
  * by every index-based step, so "index 3" means the same element in both. */
@@ -113,8 +111,8 @@ function riskGuard(approved, verb, click = false) {
 function actionExpression(step, approved = null) {
   const sel = targetOf(step);
   switch (step.op) {
-    case 'click': return `(()=>{const blocked=()=>${postingPage};if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};${riskGuard(approved, 'clicked', true)}el.scrollIntoView();if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};const a=el.closest('a[target]');if(a)a.removeAttribute('target');el.click();return{ok:true};})()`;
-    case 'type': return `(()=>{const blocked=()=>${postingPage};if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};${riskGuard(approved, 'typed into')}const v=${jsLiteral(step.text)};if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};if('value' in el){el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}else{el.textContent=v;}return{ok:true};})()`;
+    case 'click': return `(()=>{const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};${riskGuard(approved, 'clicked', true)}el.scrollIntoView();const a=el.closest('a[target]');if(a)a.removeAttribute('target');el.click();return{ok:true};})()`;
+    case 'type': return `(()=>{const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};${riskGuard(approved, 'typed into')}const v=${jsLiteral(step.text)};if('value' in el){el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}else{el.textContent=v;}return{ok:true};})()`;
     case 'waitFor': return `new Promise(res=>{const sel=${sel};const end=Date.now()+${Number(step.timeoutMs) > 0 ? Math.min(Number(step.timeoutMs), 15000) : 5000};const tick=()=>{if(document.querySelector(sel))return res({ok:true});if(Date.now()>end)return res({ok:false,reason:'timed out'});setTimeout(tick,100);};tick();})`;
     case 'read': return `(()=>{const el=document.querySelector(${sel});return{ok:Boolean(el),text:el?String(el.textContent).slice(0,4000):null};})()`;
     case 'snapshot': return SNAPSHOT;
@@ -126,25 +124,13 @@ function actionExpression(step, approved = null) {
   }
 }
 
-/** Why this step must not run on `pageUrl`, or '' when it may.
- * Click and type stay refused on X and Twitter even after a redirect or a
- * trailing-dot host. Reading and scrolling those pages is allowed. */
-export function refusePostingAction(op, pageUrl) {
-  return (op === 'click' || op === 'type') && isPostingHost(pageUrl) ? 'Bots may read X and Twitter pages but never click or type there.' : '';
-}
-
 /** Decide one request the page being read wants to make. The page itself
  * (and any frame in it) must be on the allowlist; where a request may connect
  * to is the proxy's decision. */
-export function requestVerdict({url, isDocument, method = 'GET', resourceType}, {allow}) {
+export function requestVerdict({url, isDocument}, {allow}) {
   if (/^(data|blob|about):/i.test(url)) return {allow: true};
   if (!/^https?:/i.test(url)) return {allow: false, reason: 'Only http(s) is loaded.'};
   if (isDocument && !hostAllowed(url, allow)) return {allow: false, reason: `${new URL(url).host} is not in AGENT_BROWSER_ALLOWLIST.`};
-  // A WebSocket upgrade rides in as a GET, so check it by resource type
-  // before the writable-method check would let it through.
-  if (isPostingHost(url) && (resourceType === 'WebSocket' || !['GET', 'HEAD', 'OPTIONS'].includes(String(method).toUpperCase()))) {
-    return {allow: false, reason: 'Writes to X and Twitter are not allowed.'};
-  }
   return {allow: true};
 }
 
@@ -358,8 +344,6 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
           // Optional interaction steps (a `browser.action` task). Each is bounded and
           // still gated by the allowlist + proxy; a `navigate` is checked here too.
           const actions = [];
-          const plannedPages = [url, ...steps.filter(step => step?.op === 'navigate').map(step => step.url)];
-          const touchesPosting = plannedPages.some(page => isPostingHost(page));
           const currentUrl = async () => {
             const {result} = await cdp.send('Runtime.evaluate', {expression: 'location.href', returnByValue: true}, sessionId);
             return typeof result?.value === 'string' ? result.value : '';
@@ -371,12 +355,6 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
               try { taken = !(await gate()); } finally { arm(); }
             }
             if (taken) { actions.push({op: String(step?.op || 'unknown'), ok: false, reason: 'You took over the browser, so this step was not run.'}); continue; }
-            if (step?.op === 'click' || step?.op === 'type') {
-              // The planned URL can be a trailing-dot spelling of X, or the page
-              // can land there by redirect after validation only saw another host.
-              const reason = refusePostingAction(step.op, await currentUrl()) || (touchesPosting ? 'Bots may read X and Twitter pages but never click or type there.' : '');
-              if (reason) { actions.push({op: step.op, ok: false, reason}); continue; }
-            }
             if (step?.op === 'navigate') {
               const target = String(step.url || '');
               if (!hostAllowed(target, allow)) { actions.push({op: 'navigate', ok: false, reason: 'host not in AGENT_BROWSER_ALLOWLIST'}); continue; }
@@ -579,8 +557,6 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
             return {ok: !nav.errorText && !refusal, reason: nav.errorText || refusal ? `The page was not opened. ${refusal || nav.errorText}` : '', ...page};
           }
           const here = await read().catch(() => ({url: ''}));
-          const refusal = refusePostingAction(op, here.url);
-          if (refusal) return {ok: false, reason: refusal, ...here};
           const expression = actionExpression(step || {});
           if (!expression) return {ok: false, reason: 'That action is not supported.', ...here};
           const {result} = await evaluate(expression).catch(error => ({result: {value: {ok: false, reason: error.message}}}));

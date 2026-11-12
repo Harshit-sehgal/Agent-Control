@@ -3,7 +3,7 @@
  *  - the basic kit is never asked about; every other action asks until the
  *    owner says Always allow, and a Deny stops the bot (no retry loop);
  *  - a grant belongs to one bot, one action and one origin or account;
- *  - `spend` is answered Allow or Decline every time, even through a crafted
+ *  - `spend` asks every time unless the owner sets Always allow for one site; with no site, even a crafted
  *    request or a doctored backup;
  *  - an ask answered after its run is gone is recorded and resumes nothing.
  */
@@ -71,7 +71,7 @@ test('a grant is per bot, per action and per origin, and nobody inherits', () =>
 
 test('setGrant refuses what cannot be a grant', () => {
   const s = state();
-  assert.throws(() => setGrant(s, 'b', 'spend', '', 'always'), e => e.status === 400 && /every time/i.test(e.message), 'payments never become Always allow');
+  assert.throws(() => setGrant(s, 'b', 'spend', '', 'always'), e => e.status === 400 && /one site/i.test(e.message), 'a payment Always allow names its site');
   assert.throws(() => setGrant(s, 'b', 'publish.post', '', 'always'), e => e.status === 400);
   assert.throws(() => setGrant(s, 'b', 'bot.ask', '', 'deny'), e => e.status === 400, 'the basic kit has no grants');
   assert.throws(() => setGrant(s, 'b', 'send', '', 'sometimes'), e => e.status === 400);
@@ -179,15 +179,15 @@ test('Always allow stores the grant for this bot, this action and this origin; D
   assert.equal(grantFor(s, 'b', 'send', ''), null);
 });
 
-test('Review focus 2: Always allow for spend through a crafted request is refused with a 400', () => {
+test('Review focus 2: Always allow for a payment with no site, through a crafted request, is refused with a 400', () => {
   const s = state();
-  const ask = createAsk(s, {botId: 'b', runId: null, chatKey: 'b', action: 'spend', target: 'https://shop.com/checkout', detail: 'pay', now: NOW, makeId: mk});
+  const ask = createAsk(s, {botId: 'b', runId: null, chatKey: 'b', action: 'spend', target: 'not a site', detail: 'pay', now: NOW, makeId: mk});
   assert.throws(() => answerAsk(s, ask.id, 'always', NOW), e => e.status === 400);
   assert.equal(s.asks.find(a => a.id === ask.id).status, 'pending', 'the refused answer changed nothing');
   assert.deepEqual(s.grants, []);
-  assert.deepEqual(askChoices('spend'), ['decline', 'allow']);
+  assert.deepEqual(askChoices('spend', {site: false}), ['decline', 'allow']);
   assert.deepEqual(askChoices('send'), ['decline', 'allow', 'always']);
-  assert.deepEqual(grantChoices('spend'), ['ask', 'deny']);
+  assert.deepEqual(grantChoices('spend'), ['always', 'ask', 'deny']);
   assert.deepEqual(grantChoices('browser.use'), ['always', 'ask', 'deny']);
   assert.equal(answerAsk(s, ask.id, 'allow', NOW).ask.status, 'allowed');
   assert.deepEqual(s.grants, [], 'and an allowed payment leaves no grant behind');

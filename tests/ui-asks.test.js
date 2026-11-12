@@ -34,7 +34,7 @@ test('the card asks a question the owner answers: "Let Mailroom send an email to
   assert.equal(askCard(stateOf({asks: [ask()]}), line({text: 'Needs you: Mailroom wants to send an email to Northwind.'})).question, 'Let Mailroom send an email to Northwind?');
 });
 
-test('a payment asks only Allow once or Don\'t allow, and says it asks every time', () => {
+test('a payment with no site asks only Allow once or Don\'t allow, and says it asks every time', () => {
   const card = askCard(stateOf({asks: [ask({action: 'spend', detail: 'pay £40 at Northwind'})]}), line());
   assert.deepEqual(card.choices.map(c => [c.id, c.label]), [['allow', 'Allow once'], ['decline', "Don't allow"]]);
   assert.equal(card.choices[0].primary, true);
@@ -80,11 +80,13 @@ test('a bot\'s grants list what it may do, each with the three choices and the c
   assert.equal(rows[0].botName, 'Mailroom');
 });
 
-test('spend never offers Always allow, even if a stored grant says so', () => {
+test('a payment rule offers every choice, and a stored every-site Always allow reads as Ask each time', () => {
   const rows = grantRows(stateOf({grants: [grant({action: 'spend', choice: 'deny'})]}), 'mail');
-  assert.deepEqual(rows[0].choices.map(c => c.id), ['ask', 'deny']);
-  const doctored = grantRows(stateOf({grants: [grant({action: 'spend', choice: 'always'})]}), 'mail');
-  assert.equal(doctored[0].choice, 'ask', 'a stored Always allow for a payment reads as Ask each time');
+  assert.deepEqual(rows[0].choices.map(c => c.id), ['ask', 'deny'], 'a rule for every site has no Always allow');
+  const site = grantRows(stateOf({grants: [grant({action: 'spend', scope: 'https://shop.example', choice: 'ask'})]}), 'mail');
+  assert.deepEqual(site[0].choices.map(c => c.id), ['always', 'ask', 'deny']);
+  const doctored = grantRows(stateOf({grants: [grant({action: 'spend', scope: '', choice: 'always'})]}), 'mail');
+  assert.equal(doctored[0].choice, 'ask', 'a stored Always allow for a payment with no site reads as Ask each time');
 });
 
 test('grants of a bot that is gone, or of another bot, are not listed', () => {
@@ -109,7 +111,8 @@ test('the words of an action: a site, a connector account, and the plain ones', 
   assert.equal(grantWhat('send', ''), 'Send');
   assert.equal(grantWhat('post', ''), 'Post');
   assert.equal(grantWhat('delete', ''), 'Delete');
-  assert.equal(grantWhat('spend', ''), 'Spend money');
+  assert.equal(grantWhat('spend', ''), 'Spend money anywhere');
+  assert.equal(grantWhat('spend', 'https://shop.example'), 'Spend money on shop.example');
   // A send, post or delete rule is for one site, and says which (review I2).
   assert.equal(grantWhat('send', 'https://mail.example.com'), 'Send on mail.example.com');
   assert.equal(grantWhat('delete', 'https://files.example.com'), 'Delete on files.example.com');
@@ -120,7 +123,8 @@ test('the words of an action: a site, a connector account, and the plain ones', 
 test('a choice is sent as the grant the server stores', () => {
   const [row] = grantRows(stateOf({grants: [grant({action: 'browser.use', scope: 'https://example.com'})]}), 'mail');
   assert.deepEqual(grantUrl(row, 'deny'), {url: '/api/grants', body: {botId: 'mail', action: 'browser.use', scope: 'https://example.com', choice: 'deny'}});
-  assert.equal(scopeOfAction('spend', 'https://x'), '', 'only a site or an account is a scope');
+  assert.equal(scopeOfAction('spend', 'https://x/pay'), 'https://x', 'a payment is scoped to its site');
+  assert.equal(scopeOfAction('bot.ask', 'https://x'), '', 'only a site or an account is a scope');
 });
 
 // ---- pause ----

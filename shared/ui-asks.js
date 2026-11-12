@@ -31,13 +31,15 @@ export function askCard(state, line) {
   return {
     open: true, ask, askId: ask.id, botId: ask.botId, botName, text: line.text,
     question: askQuestion(ask, botName),
-    // Allow once (the raised one), Always allow where it is offered (never for a payment), and Don't allow: the
-    // owner picks one. Nothing answers for them: closing or Escape leaves the card waiting.
-    choices: (() => { const ids = askChoices(ask.action, {acrossSites: acrossSites(ask)}); return ['allow', 'always', 'decline'].filter(id => ids.includes(id)).map((id, i) => ({id, label: ASK_ANSWER_LABELS[id], primary: i === 0})); })(),
+    // Allow once (the raised one), Always allow where it is offered, and Don't allow: the owner picks one.
+    // Nothing answers for them: closing or Escape leaves the card waiting.
+    choices: (() => { const ids = askChoices(ask.action, {acrossSites: acrossSites(ask), site: Boolean(ask.grantScope)}); return ['allow', 'always', 'decline'].filter(id => ids.includes(id)).map((id, i) => ({id, label: ASK_ANSWER_LABELS[id], primary: i === 0})); })(),
     target: ask.action === 'browser.use' ? ask.target || '' : '',
     // The whole text a write would carry (an email body): the card shows all of it, folded.
     body: typeof ask.body === 'string' ? ask.body : '',
-    note: ask.action === 'spend' ? 'Payments are asked every time.' : '',
+    note: ask.action === 'spend' ? (ask.grantScope ? 'Payments ask every time unless you choose Always allow for this site.' : 'Payments are asked every time.') : '',
+    // Always allow on a payment lets this bot pay on this site without asking, so the card confirms it first.
+    ...(ask.action === 'spend' && ask.grantScope ? {confirmAlways: `${botName} will pay on ${host(ask.grantScope)} without asking you. You can change this on ${botName}'s profile → Permissions.`} : {}),
   };
 }
 
@@ -48,7 +50,7 @@ const host = scope => { try { return new URL(scope).host; } catch { return Strin
 export function grantWhat(action, scope = '') {
   if (action === 'browser.use') return scope ? `Open ${host(scope)}` : 'Open web pages';
   const plain = {send: 'Send', post: 'Post', delete: 'Delete', spend: 'Spend money'}[action];
-  if (plain) return scope && action !== 'spend' ? `${plain} on ${host(scope)}` : plain;
+  if (plain) return scope ? `${plain} on ${host(scope)}` : action === 'spend' ? 'Spend money anywhere' : plain;
   const match = /^connector\.([a-z0-9_-]+)\.(read|write)(?:\.([A-Za-z0-9_.:-]{1,128}))?$/.exec(String(action));
   if (match) return `${match[2] === 'read' ? 'Read' : 'Change'} ${match[1]}${match[3] ? `: ${match[3]}` : ''}${scope ? ` (${scope})` : ''}`;
   return String(action);
@@ -58,13 +60,13 @@ export const scopeOfAction = (action, target) => scopeOf({action, target});
 const rank = action => { const i = ASK_ACTIONS.indexOf(action); return i < 0 ? ASK_ACTIONS.length : i; };
 
 /** One bot's rules: its explicit grants only (see verdict in shared/asks.js). Each row carries the choices it
- * may be set to (spend has no Always allow) and which one is on. */
+ * may be set to and which one is on. */
 export function grantRows(state, botId) {
   const bot = roster(state).find(b => b.id === botId);
   if (!bot) return [];
   const row = (action, scope, choice) => ({
     botId, botName: bot.name, action, scope, choice, label: grantWhat(action, scope),
-    choices: grantChoices(action).map(id => ({id, label: GRANT_LABELS[id], on: id === choice})),
+    choices: grantChoices(action, {site: Boolean(scope)}).map(id => ({id, label: GRANT_LABELS[id], on: id === choice})),
   });
   return (state.grants || []).filter(g => g?.botId === botId && isAskAction(g.action))
     .map(g => row(g.action, g.scope || '', grantFor(state, botId, g.action, g.scope || '') || 'ask'))

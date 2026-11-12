@@ -121,7 +121,7 @@ work should be added as a fresh section.
 
 ## Phase R — local browser control for bots
 - [x] `browser.use` permission on any bot; envelope and system prompt describe the browser block only to bots holding it
-- [x] Fenced `browser` blocks validated (`shared/bot-browser.js`): public http(s) only, 25 steps, 2 per reply, 3 round trips per turn, no click/type on X
+- [x] Fenced `browser` blocks validated (`shared/bot-browser.js`): public http(s) only, 25 steps, 2 per reply, 3 round trips per turn (click/type on X allowed since 2026-11-12; a Post asks)
 - [x] Approve/Decline card in the chat; per-bot "Browser requests" setting (ask, or run without asking)
 - [x] Dispatch to a paired local agent with the needed permission; result posted in the chat and the bot continues (`src/bot-browser.js`)
 - [x] Steps may name a control by the index in the last result, so a bot can act on a page it has only read once (`agent/browser.mjs`)

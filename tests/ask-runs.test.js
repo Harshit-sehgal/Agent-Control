@@ -281,9 +281,10 @@ test('a request that classifies as a send, post, delete or payment asks about th
   assert.equal(pay.status, 'awaiting_ask');
   const spend = store.read().asks.find(a => a.botId === ids.scholar);
   assert.equal(spend.action, 'spend');
-  // A payment can only be allowed once, never always: the route says so.
-  await assert.rejects(answerAskFlow(store, spend.id, 'always', {actor: 'owner@example.test'}), e => e.status === 400);
-  assert.equal(store.read().asks.find(a => a.id === spend.id).status, 'pending');
+  // The owner may set Always allow on a payment for that one site: the route stores it for the shop only.
+  await answerAskFlow(store, spend.id, 'always', {actor: 'owner@example.test', executor: model().executor});
+  assert.equal(grantFor(store.read(), ids.scholar, 'spend', 'https://shop.example.com'), 'always');
+  assert.equal(grantFor(store.read(), ids.scholar, 'spend', 'https://bank.example.com'), null);
   // Always allow on the send also covers reading that site, so the bot is not asked twice for one request.
   const send = store.read().asks.find(a => a.action === 'send');
   await answerAskFlow(store, send.id, 'always', {actor: 'owner@example.test', executor: model().executor});

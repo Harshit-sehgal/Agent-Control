@@ -14,8 +14,9 @@
  *
  * The basic kit (ask a bot, make a bot, set a schedule) is never asked about;
  * its limits are checkpoints and the runaway guard. Basic access (open a web page, read a connected app) is
- * allowed until the owner sets Ask each time or Deny for that site or account. Payments (`spend`) are
- * asked every time: no answer path and no stored grant can make them automatic.
+ * allowed until the owner sets Ask each time or Deny for that site or account. Payments (`spend`) ask
+ * every time unless the owner sets Always allow for one bot on one site; a payment Deny with no site
+ * covers every site.
  *
  * Pure and browser-safe, like the other shared modules: the server and the
  * Pages demo share every rule here.
@@ -48,12 +49,13 @@ export const GRANT_CHOICES = ['always', 'ask', 'deny'];
 /** The words on the ask card's buttons and the grant picker, verbatim. */
 export const ASK_ANSWER_LABELS = {decline: "Don't allow", allow: 'Allow once', always: 'Always allow'};
 export const GRANT_LABELS = {always: 'Always allow', ask: 'Ask each time', deny: 'Deny'};
-/** A payment is only ever Decline or Allow, and a grant for it is Ask each time or Deny. So is an ask that
- * covers more than one site: a grant is for one site, so no single Always allow can mean what it shows. */
-export const askChoices = (action, {acrossSites = false} = {}) => (action === 'spend' || acrossSites ? ['decline', 'allow'] : [...ASK_ANSWERS]);
+/** An ask that covers more than one site is only Decline or Allow: a grant is for one site, so no single
+ * Always allow can mean what it shows. A payment with no site has no Always allow either. */
+export const askChoices = (action, {acrossSites = false, site = true} = {}) => (acrossSites || (action === 'spend' && !site) ? ['decline', 'allow'] : [...ASK_ANSWERS]);
 /** Does this ask cover more than one site? `covers` is every (action, scope) pair one ask stands for. */
 export const acrossSites = ask => new Set([ask?.grantScope, ...(ask?.covers || []).map(c => c?.scope)].filter(Boolean)).size > 1;
-export const grantChoices = action => (action === 'spend' ? ['ask', 'deny'] : [...GRANT_CHOICES]);
+/** A payment rule with no site is Ask each time or Deny: an Always allow is for one site. */
+export const grantChoices = (action, {site = true} = {}) => (action === 'spend' && !site ? ['ask', 'deny'] : [...GRANT_CHOICES]);
 
 export const ASK_EXPIRY_MS = 24 * 3600000;
 /** Settled asks kept in state; a pending one is never dropped. */
@@ -64,17 +66,14 @@ const botIds = state => new Set((state.groups || []).flatMap(g => (g.bots || [])
 
 /** The actions whose grant is for one site: a page, and a Send, Post or Delete click on it. */
 const PER_ORIGIN = ['browser.use', 'send', 'post', 'delete'];
-const SITE_WORD = {'browser.use': 'browser', send: 'send', post: 'post', delete: 'delete'};
+const SITE_WORD = {'browser.use': 'browser', send: 'send', post: 'post', delete: 'delete', spend: 'payment Always allow'};
+/** A payment's grant is for one site, or (Ask each time or Deny only) for every site. */
+const originOf = target => { try { const url = new URL(String(target ?? '')); return /^https?:$/.test(url.protocol) ? url.origin.toLowerCase() : ''; } catch { return ''; } };
 
 /** Where a grant applies: the origin for a browser page or a click on one, the account for a connector,
  * nothing else (a payment is asked every time, so its Deny is the only grant it has). */
 export function scopeOf({action, target} = {}) {
-  if (PER_ORIGIN.includes(action)) {
-    try {
-      const url = new URL(String(target ?? ''));
-      return /^https?:$/.test(url.protocol) ? url.origin.toLowerCase() : '';
-    } catch { return ''; }
-  }
+  if (PER_ORIGIN.includes(action) || action === 'spend') return originOf(target);
   if (isConnector(action)) return cleanText(String(target ?? ''), 200).toLowerCase();
   return '';
 }
@@ -83,7 +82,7 @@ const botNameOf = (state, id) => (state.groups || []).flatMap(g => g.bots || [])
 /** What a grant lets a bot do, as the end of a sentence. */
 function verbOf(action, scope) {
   if (action === 'browser.use') return `open ${scope.replace(/^https?:\/\//, '')}`;
-  if (action === 'spend') return 'spend money';
+  if (action === 'spend') return scope ? `pay on ${scope.replace(/^https?:\/\//, '')}` : 'spend money';
   const connector = connectorOf(action);
   if (connector) return `${connector[2]} ${connector[1]}${connector[3] ? ` with ${connector[3]}` : ''}${scope ? ` (${scope})` : ''}`;
   return scope ? `${action} on ${scope.replace(/^https?:\/\//, '')}` : action;
@@ -97,26 +96,25 @@ const grantSentence = (name, action, scope, choice) => {
 const sameGrant = (g, botId, action, scope) => g?.botId === botId && g.action === action && g.scope === scope;
 
 /** What the owner has said about this bot doing this: 'always', 'ask', 'deny', or null for nothing yet.
- * A stored 'always' for a payment is refused here too (a doctored backup could carry one). */
+ * A payment Always allow with no site is refused here too (a doctored backup could carry one). */
 export function grantFor(state, botId, action, scope = '') {
   if (!botIds(state).has(botId)) return null;
   const grant = (state.grants || []).find(g => sameGrant(g, botId, action, scope || ''));
   if (!grant || !GRANT_CHOICES.includes(grant.choice)) return null;
-  if (action === 'spend' && grant.choice === 'always') return 'ask';
+  if (action === 'spend' && grant.choice === 'always' && !grant.scope) return 'ask';
   return grant.choice;
 }
 
 export const grantsOf = (state, botId) => (state.grants || []).filter(g => g?.botId === botId);
 
-/** Set one grant, replacing the same key. Refuses Always allow for a payment, an action that is not
- * asked about, a browser grant with no site and a connector grant with no account. */
+/** Set one grant, replacing the same key. Refuses a payment Always allow with no site, an action that is
+ * not asked about, a browser grant with no site and a connector grant with no account. */
 export function setGrant(state, botId, action, scope, choice, now = iso(), {log = true, threadId = null} = {}) {
   if (!isAskAction(action)) fail(`"${String(action ?? '').slice(0, 60)}" is not something a bot asks about.`);
   if (!GRANT_CHOICES.includes(choice)) fail('Choose always, ask or deny.');
-  if (action === 'spend' && choice === 'always') fail('A payment is asked every time. Choose Ask each time or Deny.');
   if (!botIds(state).has(botId)) fail('Bot not found.', 404);
-  const where = PER_ORIGIN.includes(action) || isConnector(action) ? scopeOf({action, target: scope}) : '';
-  if (PER_ORIGIN.includes(action) && !where) fail(`A ${SITE_WORD[action]} grant is for one site. Say which.`);
+  const where = PER_ORIGIN.includes(action) || isConnector(action) || action === 'spend' ? scopeOf({action, target: scope}) : '';
+  if ((PER_ORIGIN.includes(action) || (action === 'spend' && choice === 'always')) && !where) fail(`A ${SITE_WORD[action]} grant is for one site. Say which.`);
   if (isConnector(action) && !where) fail('A connector grant is for one account. Say which.');
   state.grants ??= [];
   const found = state.grants.find(g => sameGrant(g, botId, action, where));
@@ -147,7 +145,9 @@ export function verdict(state, bot, action, target = '', {readPrivate = false} =
   const scope = scopeOf({action, target});
   const umbrella = umbrellaOf(action);
   // A Deny on the connector-wide write (from before writes were per tool) still covers every write tool.
-  const choice = umbrella && grantFor(state, bot?.id, umbrella, scope) === 'deny' ? 'deny' : grantFor(state, bot?.id, action, scope);
+  // A payment Deny with no site covers every site; otherwise the site's own grant, then the every-site one.
+  const everywhere = action === 'spend' && scope ? grantFor(state, bot?.id, action, '') : null;
+  const choice = (umbrella && grantFor(state, bot?.id, umbrella, scope) === 'deny') || everywhere === 'deny' ? 'deny' : grantFor(state, bot?.id, action, scope) ?? everywhere;
   if (choice === 'always') return {verdict: 'allow', scope};
   if (choice === 'deny') {
     const name = bot?.name || 'this bot';
@@ -174,7 +174,7 @@ export function decide(state, bot, needs, guard = {}) {
   if (!ask) return {verdict: 'allow'};
   // `asked`: everything one ask must stand for, riskiest first. Always allow on the riskiest ask also
   // covers the rest of what the same request needs on that site.
-  return {verdict: 'ask', need: ask, asked: [ask, ...rest], implies: rest.filter(n => n.action !== 'spend' && n.scope === ask.scope).map(n => ({action: n.action, scope: n.scope}))};
+  return {verdict: 'ask', need: ask, asked: [ask, ...rest], implies: rest.filter(n => n.scope === ask.scope).map(n => ({action: n.action, scope: n.scope}))};
 }
 
 /** Create a pending ask. An ask from an unattended run (nobody typed in it) lapses after 24 hours. */
@@ -214,7 +214,7 @@ export function answerAsk(state, askId, answer, now = iso()) {
   if (!ASK_ANSWERS.includes(answer)) fail('Answer decline, allow or always.');
   const ask = (state.asks || []).find(a => a.id === askId);
   if (!ask) fail('Ask not found.', 404);
-  if (answer === 'always' && ask.action === 'spend') fail('A payment is asked every time. Choose Allow or Decline.');
+  if (answer === 'always' && ask.action === 'spend' && !ask.grantScope) fail('This payment has no site to remember. Choose Allow or Decline.');
   if (answer === 'always' && acrossSites(ask)) fail('This ask covers more than one site, and a grant is for one. Choose Allow or Decline.');
   if (ask.status !== 'pending') fail('This ask was already answered.', 409);
   ask.status = answer === 'decline' ? 'declined' : 'allowed';
@@ -224,7 +224,7 @@ export function answerAsk(state, askId, answer, now = iso()) {
   if (answer === 'always' && botIds(state).has(ask.botId)) {
     // One entry for the answer, in the chat it was asked in; what the same request also covered is not a second event.
     setGrant(state, ask.botId, ask.action, ask.grantScope, 'always', now, {threadId: ask.chatKey});
-    for (const extra of ask.implies || []) if (extra.action !== 'spend' && extra.scope === ask.grantScope) setGrant(state, ask.botId, extra.action, extra.scope, 'always', now, {log: false});
+    for (const extra of ask.implies || []) if (extra.scope === ask.grantScope) setGrant(state, ask.botId, extra.action, extra.scope, 'always', now, {log: false});
   }
   const run = parked(state, ask.runId);
   return {ask, resumeRunId: run && !holds(state, ask) ? run.id : null};
@@ -262,7 +262,7 @@ export function lapseOrphans(state, now = iso()) {
 export const pendingAsks = state => (state.asks || []).filter(a => a.status === 'pending').reverse();
 
 /** Drop grants that cannot be honoured: a bot that is gone, an action nobody asks about, a choice
- * that is not one, a payment set to Always, a per-site grant with no site (a Send, Post or Delete
+ * that is not one, a payment set to Always with no site, a per-site grant with no site (a Send, Post or Delete
  * grant stored before those were per site). A connector-wide write Always allow (from before writes
  * were per tool) becomes Ask each time. Idempotent; run on every load and restore. */
 export function sweepGrants(state) {
@@ -272,7 +272,7 @@ export function sweepGrants(state) {
   }
   state.grants = (Array.isArray(state.grants) ? state.grants : []).filter(g => g && typeof g === 'object'
     && ids.has(g.botId) && isAskAction(g.action) && typeof g.scope === 'string'
-    && GRANT_CHOICES.includes(g.choice) && !(g.action === 'spend' && g.choice === 'always')
+    && GRANT_CHOICES.includes(g.choice) && !(g.action === 'spend' && g.choice === 'always' && !g.scope)
     && !(PER_ORIGIN.includes(g.action) && !g.scope));
   return state;
 }

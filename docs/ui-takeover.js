@@ -9,9 +9,9 @@
  * It is a screenshot remote control, not a live stream: one JPEG per call. The
  * server enforces the same allowlist and the same X refusal as any other page,
  * so this is a way to sign in, never a way around the rules. */
-import {esc, btn} from './ui-kit.js?v=e4e0fdac0c';
-import {api, sync, isStaticDemo} from './ui-store.js?v=e4e0fdac0c';
-import {openSheet, closeSheet, sheetOpen, toast} from './ui-dialogs.js?v=e4e0fdac0c';
+import {esc, btn} from './ui-kit.js?v=7cc80de302';
+import {api, sync, isStaticDemo} from './ui-store.js?v=7cc80de302';
+import {openSheet, closeSheet, sheetOpen, toast} from './ui-dialogs.js?v=7cc80de302';
 
 /** The open takeover: its session id on the server, the request it belongs to,
  * the last page the server sent, and the control the person is typing into. */
@@ -51,7 +51,7 @@ function render() {
     ${btn('Hand back to the bot', 'takeover-handback', {kind: 'primary', wide: true})}
     ${btn('Close without handing back', 'takeover-close', {kind: 'quiet', small: true})}
   </div>`;
-  openSheet(`${page}${go}${controls}${type}${actions}<p class="note">Signing in is saved only for this takeover and thrown away when it ends. X refuses click and type, and the final Post stays yours.</p>`,
+  openSheet(`${page}${go}${controls}${type}${actions}<p class="note">Signing in is saved only for this takeover and thrown away when it ends.</p>`,
     {title: 'Take over the page', sub: 'Sign in or answer the challenge, then hand the page back to the bot.', onDismiss: releaseOnDismiss});
 }
 

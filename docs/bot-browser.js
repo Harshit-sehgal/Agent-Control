@@ -17,15 +17,15 @@
  * Post, Delete or Pay control is asked about as that, not as a page read. This
  * module only parses, classifies and bounds the request; it never runs anything.
  *
- * Posting stays human: interaction (click, type) is refused on X and Twitter
- * hosts, so no bot can press Post there. Reading those pages is allowed.
+ * X and Twitter work like any other site: a bot may read, click and type there, and a click on Post asks
+ * unless the owner set Always allow for posting on that site.
  */
-import {cleanText, validHttpUrl} from './core.js?v=e4e0fdac0c';
-import {fail} from './errors.js?v=e4e0fdac0c';
-import {decide, createAsk, scopeOf} from './asks.js?v=e4e0fdac0c';
-import {controlFence} from './reply-blocks.js?v=e4e0fdac0c';
-import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=e4e0fdac0c';
-import {appForHost} from './app-catalog.js?v=e4e0fdac0c';
+import {cleanText, validHttpUrl} from './core.js?v=7cc80de302';
+import {fail} from './errors.js?v=7cc80de302';
+import {decide, createAsk, scopeOf} from './asks.js?v=7cc80de302';
+import {controlFence} from './reply-blocks.js?v=7cc80de302';
+import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=7cc80de302';
+import {appForHost} from './app-catalog.js?v=7cc80de302';
 
 /** The most page text one model turn carries (the pages of a round together). */
 export const MAX_PAGE_CHARS = 24000;
@@ -39,13 +39,11 @@ export const MAX_ELEMENT_INDEX = 500;
 export const MAX_BROWSER_REQUESTS = 200;
 export const STEP_OPS = ['navigate', 'click', 'type', 'waitFor', 'read', 'scroll'];
 const INTERACTIVE = ['click', 'type'];
-const POSTING_HOSTS = ['x.com', 'twitter.com'];
 // One fence grammar shared with every other control block (see bot-link.js):
 // the last block in a reply may be unclosed, and the strip path removes it.
 const BLOCK = () => controlFence('browser');
 
-// `x.com.` and `x.com%2e` are x.com. Leaving the trailing dot on treated that
-// spelling as a different site, so a click or type there was allowed.
+// `x.com.` and `x.com%2e` are x.com: the trailing dot is dropped, so a grant for a site holds for every spelling of it.
 /** Sites that hold the owner's own mail and files once they are signed in: reading them is reading private data. */
 export const PRIVATE_HOSTS = /^(?:mail|drive|docs|calendar|contacts|photos)\.google\.com$|^outlook\.(?:live|office|office365)\.com$|^(?:www\.)?dropbox\.com$|^mail\.yahoo\.com$|^(?:www\.)?icloud\.com$/;
 export const hostOf = url => { try { return new URL(url).hostname.toLowerCase().replace(/\.+$/, ''); } catch { return ''; } };
@@ -67,7 +65,7 @@ export const parseAllowlist = value => String(value ?? '').split(',').map(normal
 /** The one entry that means "any public host", instead of naming them all.
  * It is spelled like a host so the same parser and the same comparison apply,
  * and it is still only a host rule: the egress proxy refuses private and local
- * addresses whatever this says, and X keeps its click/type refusal. */
+ * addresses whatever this says. */
 export const ALLOW_ALL = '*';
 
 /** May `url` be opened? Matching is on the host, so the same page is allowed
@@ -81,7 +79,6 @@ export const hostAllowed = (url, allow = []) => {
   return entries.includes(ALLOW_ALL) || entries.includes(host);
 };
 
-export const isPostingHost = url => { const host = hostOf(url); return POSTING_HOSTS.some(h => host === h || host.endsWith(`.${h}`)); };
 
 /** A page that is a "prove you are human" wall, not the page asked for. */
 const CHECK_WORDS = /(just a moment|performing security verification|verify(ing)? you are (a )?human|verifying you're not a bot|complete the following challenge|unusual traffic from your computer|are you a robot|press (and|&) hold|sending automated queries|access temporarily suspended|checking your browser|attention required)/i;
@@ -191,9 +188,6 @@ export function validateBrowserRequest(body) {
     if (step.op === 'waitFor' && Number.isFinite(Number(step.timeoutMs))) out.timeoutMs = Math.min(15000, Math.max(0, Number(step.timeoutMs)));
     return out;
   });
-  const interactive = steps.some(s => INTERACTIVE.includes(s.op));
-  const pages = [url, ...steps.filter(s => s.op === 'navigate').map(s => s.url)];
-  if (interactive && pages.some(isPostingHost)) fail('Bots may read X and Twitter pages but never click or type there. Posting stays yours.', 403);
   // No steps is a plain page read, which also works without the real browser.
   const find = cleanText(body.find, 200);
   return {kind: steps.length ? 'browser.action' : 'browser.capture', url, steps, ...(find ? {find} : {})};
@@ -220,7 +214,7 @@ export function parseBrowserRequests(output) {
 export const stripBrowserBlocks = output => String(output ?? '').replace(BLOCK(), '').replace(/\n{3,}/g, '\n\n').trim();
 
 /** What a bot is told about the tool when it holds the permission. */
-export const BROWSER_TOOL_HINT = 'You can read or use a web page through a headless browser. Put one block per page in your reply, e.g. ```browser\n{"url":"https://example.com"}\n``` That returns the page text and a numbered list of controls. To act, name a control by its number in the same block: {"url":"https://example.com","steps":[{"op":"click","index":3}]} then read the result. Ops: navigate, click, type, waitFor, read, scroll. A CSS selector also works instead of an index. Scroll only moves the page. Any public site works, including X and YouTube pages (read them; you can never click or type on X or Twitter). To find something you have no link for, search first: open https://www.bing.com/search?q=your+search+words and then open the results that fit. A long page is cut short; to reach a part further down, ask for it with "find": {"url":"https://example.com","find":"words on that part"} returns the passages that hold them. To book, apply, order or fill a form for the owner, do it yourself with steps, all the way to the last button: the app asks the owner before anything is sent, booked or paid, so never say you cannot do it. Ask the owner only for details you cannot find, such as their phone number. If a site shows a human check, do not try to solve it: read another site. Do not ask the owner for a link you can find this way, and do not answer from memory when the question is about now. You may put several blocks in one reply to read pages side by side, and ask for more pages after you read those. The result comes back in the chat.';
+export const BROWSER_TOOL_HINT = 'You can read or use a web page through a headless browser. Put one block per page in your reply, e.g. ```browser\n{"url":"https://example.com"}\n``` That returns the page text and a numbered list of controls. To act, name a control by its number in the same block: {"url":"https://example.com","steps":[{"op":"click","index":3}]} then read the result. Ops: navigate, click, type, waitFor, read, scroll. A CSS selector also works instead of an index. Scroll only moves the page. Any public site works, including X and YouTube. To find something you have no link for, search first: open https://www.bing.com/search?q=your+search+words and then open the results that fit. A long page is cut short; to reach a part further down, ask for it with "find": {"url":"https://example.com","find":"words on that part"} returns the passages that hold them. To book, apply, order or fill a form for the owner, do it yourself with steps, all the way to the last button: the app asks the owner before anything is sent, posted, booked or paid unless they set it to Always allow, so never say you cannot do it. Ask the owner only for details you cannot find, such as their phone number. If a site shows a human check, do not try to solve it: read another site. Do not ask the owner for a link you can find this way, and do not answer from memory when the question is about now. You may put several blocks in one reply to read pages side by side, and ask for more pages after you read those. The result comes back in the chat.';
 
 /** The numbered controls a snapshot returned, in one line. The model acts on
  * these; a page of raw HTML is not something it can click. */
