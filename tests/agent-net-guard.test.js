@@ -71,3 +71,21 @@ test('a pinned request connects to the vetted address and reports redirects', as
     assert.equal(away.status, 302);
   } finally { server.close(); }
 });
+
+test('a page sent compressed is read as text, whatever encoding the site chose', async () => {
+  const zlib = await import('node:zlib');
+  const {pinnedRequest: pinned} = await import('../agent/net-guard.mjs');
+  const html = '<title>iPhone 16 (128 GB) – ₹69,900</title><p>Apple iPhone 16</p>';
+  const server = (await import('node:http')).createServer((req, res) => {
+    const enc = req.url.slice(1);
+    const body = enc === 'gzip' ? zlib.gzipSync(html) : enc === 'br' ? zlib.brotliCompressSync(html) : enc === 'deflate' ? zlib.deflateSync(html) : Buffer.from(html);
+    res.writeHead(200, {'content-type': 'text/html; charset=utf-8', ...(enc === 'plain' ? {} : {'content-encoding': enc})}).end(body);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    for (const enc of ['gzip', 'br', 'deflate', 'plain']) {
+      const res = await pinned(`http://127.0.0.1:${server.address().port}/${enc}`, {address: '127.0.0.1'});
+      assert.equal(res.body, html, enc);
+    }
+  } finally { server.close(); }
+});

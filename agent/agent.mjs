@@ -200,7 +200,7 @@ async function execute(task, config) {
  * onto the local network), redirects reported rather than followed, and named honestly (PLAIN_AGENT). */
 async function readPlain(target) {
   const {address} = await resolvePublicAddress(target);
-  const res = await pinnedRequest(target, {address, timeoutMs: 15000, maxBytes: 2_000_000, headers: {'user-agent': PLAIN_AGENT, accept: 'text/html,*/*;q=0.8'}});
+  const res = await pinnedRequest(target, {address, timeoutMs: 15000, maxBytes: 2_000_000, headers: {'user-agent': PLAIN_AGENT, accept: 'text/html,*/*;q=0.8', 'accept-encoding': 'gzip, deflate, br'}});
   const page = readableHtml(res.body, target);
   const moved = res.status >= 300 && res.status < 400 && res.headers?.location;
   return {url: target, finalUrl: target, httpStatus: res.status, title: page.title, excerpt: page.text.slice(0, 600), text: moved ? `This page moved to ${new URL(res.headers.location, target).href}. Open that address instead.` : page.text,
