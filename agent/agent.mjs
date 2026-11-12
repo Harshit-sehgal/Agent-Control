@@ -246,7 +246,9 @@ async function run() {
   let live = null;
   const startLive = () => {
     if (live || process.env.AGENT_BROWSER !== '1' || !['browser.capture', 'browser.action'].some(kind => (config.permissions || []).includes(kind))) return;
-    live = createLiveChannel({call: (requestPath, body, options) => call(config, requestPath, body, options), shared: shared()});
+    // A task queued on the server answers the live poll at once; ending the sleep
+    // between heartbeats picks it up now instead of up to a poll interval later.
+    live = createLiveChannel({call: (requestPath, body, options) => call(config, requestPath, body, options), shared: shared(), onTasks: () => wake?.()});
     live.start();
   };
   startLive();

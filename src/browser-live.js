@@ -35,7 +35,7 @@ export function createLiveHub({now = Date.now, waitMs = LIVE_WAIT_MS} = {}) {
   const space = id => {
     let sp = spaces.get(id);
     if (!sp) {
-      sp = {agentId: null, polledAt: 0, parked: null, sentWatch: null, commands: [], frame: null, seq: 0, viewers: new Map(), driving: new Map(), tabs: new Map(), notices: new Map()};
+      sp = {agentId: null, polledAt: 0, parked: null, sentWatch: null, commands: [], frame: null, seq: 0, viewers: new Map(), driving: new Map(), tabs: new Map(), notices: new Map(), tasks: false};
       spaces.set(id, sp);
     }
     return sp;
@@ -57,9 +57,16 @@ export function createLiveHub({now = Date.now, waitMs = LIVE_WAIT_MS} = {}) {
     if (!parked) return;
     sp.parked = null;
     clearTimeout(parked.timer);
+    parked.resolve(answer(sp));
+  }
+  /** What the device hears: the owner's commands, the tab to cast, and
+   * `tasks: true` when work was queued for it since its last answer. */
+  function answer(sp) {
     const watch = watchOf(sp);
     sp.sentWatch = watch;
-    parked.resolve({commands: sp.commands.splice(0), watch});
+    const out = {commands: sp.commands.splice(0), watch};
+    if (sp.tasks) { sp.tasks = false; out.tasks = true; }
+    return out;
   }
   /** Something the device should hear now: answer its parked poll. */
   const wake = sp => deliver(sp);
@@ -80,11 +87,7 @@ export function createLiveHub({now = Date.now, waitMs = LIVE_WAIT_MS} = {}) {
     // The device is the authority on whether the owner holds a tab, once it has had time to hear about it.
     for (const [botId, since] of sp.driving) if (report?.owner !== botId && now() - since > DRIVE_GRACE_MS) sp.driving.delete(botId);
     deliver(sp);
-    if (sp.commands.length || watchOf(sp) !== sp.sentWatch) {
-      const watch = watchOf(sp);
-      sp.sentWatch = watch;
-      return Promise.resolve({commands: sp.commands.splice(0), watch});
-    }
+    if (sp.commands.length || sp.tasks || watchOf(sp) !== sp.sentWatch) return Promise.resolve(answer(sp));
     return new Promise(resolve => {
       const timer = setTimeout(() => deliver(sp), hub.waitMs);
       sp.parked = {resolve, timer};
@@ -141,8 +144,18 @@ export function createLiveHub({now = Date.now, waitMs = LIVE_WAIT_MS} = {}) {
     command(sp, {type: 'input', botId, event: cleanInput(event)});
   }
 
+  /** A task was queued for this workspace's device: answer its parked poll so
+   * it heartbeats now instead of at the end of its poll interval. A device that
+   * is not on the live line hears it at its next heartbeat, as before. */
+  function taskQueued(workspaceId, agentId) {
+    const sp = spaces.get(workspaceId);
+    if (!sp || (agentId && sp.agentId && sp.agentId !== agentId)) return;
+    sp.tasks = true;
+    wake(sp);
+  }
+
   return Object.assign(hub, {
-    agentSync, putFrame, view, takeover, handback, input,
+    agentSync, putFrame, view, takeover, handback, input, taskQueued,
     isDriving: (workspaceId, botId) => space(workspaceId).driving.has(botId),
     agentLive: workspaceId => alive(space(workspaceId)),
     /** Where the device last said this bot's tab was, while the device is still there. */

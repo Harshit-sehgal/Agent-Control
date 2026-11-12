@@ -11,7 +11,7 @@
  *   dropped, never queued. The reply says whether anyone still watches.
  *
  * Nothing here keeps a frame: a frame is in memory from Chrome to the request. */
-export function createLiveChannel({call, shared, frameGapMs = 100, retryMs = 2000, maxRetryMs = 30000, log = console} = {}) {
+export function createLiveChannel({call, shared, frameGapMs = 100, retryMs = 2000, maxRetryMs = 30000, log = console, onTasks = null} = {}) {
   const abort = new AbortController();
   let failed = null, stopped = false, cast = null, latest = null, posting = false, lastPost = 0, timer = null, loop = Promise.resolve();
 
@@ -60,6 +60,8 @@ export function createLiveChannel({call, shared, frameGapMs = 100, retryMs = 200
         failed = null;
         const reply = await call('/api/agent/live', report, {timeoutMs: 30000, signal: abort.signal});
         delay = retryMs;
+        // Work was queued for this device: heartbeat now rather than at the next interval.
+        if (reply?.tasks && onTasks) { try { onTasks(); } catch { /* Only a hint. */ } }
         for (const command of reply?.commands || []) await handle(command);
         await apply(reply?.watch);
       } catch (error) {

@@ -15,6 +15,7 @@
  * one).
  */
 import * as tasks from '../shared/tasks.js';
+import {peek} from './sqlite-store.js';
 
 export function createQueue(store, handlers = {}, {intervalMs = 2000, workerId, leaseMs = 60000, batch = 5, onFail = null} = {}) {
   const id = workerId || `worker-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
@@ -49,7 +50,7 @@ export function createQueue(store, handlers = {}, {intervalMs = 2000, workerId, 
         const until = Date.parse(task.leaseUntil || 0);
         return Number.isFinite(until) && until > now;
       };
-      const list = store.read().tasks || [];
+      const list = peek(store).tasks || [];
       const stalled = list.some(t => t.status === 'running' && !leaseHeld(t));
       const due = list.some(t => t.status === 'queued' && Date.parse(t.runAt) <= now && !leaseHeld(t));
       if (!stalled && !due) return;

@@ -149,6 +149,39 @@ test('closing the hub releases a parked poll', async () => {
   assert.deepEqual(await parked, {commands: [], watch: null});
 });
 
+test('a task queued for the device answers its parked poll at once, says so once, and touches no other workspace', async () => {
+  const {hub} = rig({waitMs: 200});
+  hub.taskQueued(WS, 'dev-1');
+  assert.deepEqual(await live(hub), {commands: [], watch: null}, 'a device that never polled hears nothing early');
+  const parked = live(hub);
+  const other = hub.agentSync('other', 'dev-2', {tabs: []});
+  const started = Date.now();
+  hub.taskQueued(WS, 'dev-1');
+  assert.deepEqual(await parked, {commands: [], watch: null, tasks: true});
+  assert.ok(Date.now() - started < 100, 'it did not wait out the poll');
+  hub.taskQueued(WS, 'someone-else');
+  assert.deepEqual(await live(hub), {commands: [], watch: null}, 'the flag is said once, and only for this device');
+  assert.deepEqual(await other, {commands: [], watch: null});
+  hub.close();
+});
+
+test('queuing an agent task tells the live hook which workspace and device', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'browser-live-wake-'));
+  const store = await new SqliteStore(path.join(dir, 'state.db'), path.join(dir, 'state.json')).init();
+  const heard = [];
+  try {
+    agent.attachVault(store, path.join(dir, 'state.json'));
+    const {code} = agent.createPairing(store, 'default', {});
+    const device = agent.redeemPairing(store, {code, name: 'Laptop', permissions: ['http.check']});
+    agent.onAgentTaskQueued((ws, id) => heard.push([ws, id]));
+    agent.enqueueAgentTask(store, device.agentId, {kind: 'http.check', payload: {url: 'https://example.com/'}});
+    assert.deepEqual(heard, [['default', device.agentId]]);
+  } finally {
+    agent.onAgentTaskQueued((ws, id) => browserLive.taskQueued(ws, id));
+    await store.close(); await fs.rm(dir, {recursive: true, force: true});
+  }
+});
+
 /* The same, over HTTP, through the real dispatcher. */
 
 async function harness() {

@@ -22,19 +22,19 @@
  *   ui-dialogs      toast, sheet, confirm/ask      ui-actions action/form tables
  *   ui-fx           confetti, the send arrow and the bots' ambient life
  */
-import {companyRoute} from './ui-company.js?v=eab83021bd';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=eab83021bd';
-import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=eab83021bd';
-import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, renderPause, closeSearch, homeView} from './ui-shell.js?v=eab83021bd';
-import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=eab83021bd';
-import {profileViews, wirePages} from './ui-profile.js?v=eab83021bd';
-import {wireGestures, gesturesBusy} from './ui-gestures.js?v=eab83021bd';
-import {settingsViews} from './ui-settings.js?v=eab83021bd';
-import {showLogin, hideLogin} from './ui-sheets.js?v=eab83021bd';
-import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=eab83021bd';
-import {bringBotsToLife} from './ui-fx.js?v=eab83021bd';
-import {wireComputer} from './ui-computer-view.js?v=eab83021bd';
-import {googleReturn, withoutGoogleParams} from './ui-connect-model.js?v=eab83021bd';
+import {companyRoute} from './ui-company.js?v=fed80c15e0';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=fed80c15e0';
+import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=fed80c15e0';
+import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, renderPause, closeSearch, homeView} from './ui-shell.js?v=fed80c15e0';
+import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=fed80c15e0';
+import {profileViews, wirePages} from './ui-profile.js?v=fed80c15e0';
+import {wireGestures, gesturesBusy} from './ui-gestures.js?v=fed80c15e0';
+import {settingsViews} from './ui-settings.js?v=fed80c15e0';
+import {showLogin, hideLogin} from './ui-sheets.js?v=fed80c15e0';
+import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=fed80c15e0';
+import {bringBotsToLife} from './ui-fx.js?v=fed80c15e0';
+import {wireComputer} from './ui-computer-view.js?v=fed80c15e0';
+import {googleReturn, withoutGoogleParams} from './ui-connect-model.js?v=fed80c15e0';
 
 const el = id => document.getElementById(id);
 const hashRoute = () => normalizeRoute(companyRoute(location.hash, store.state));
@@ -118,9 +118,17 @@ function workspaceBusy() {
   if ((state.tasks || []).some(t => t.status === 'queued' && t.kind === 'bot-task' && dueWithin(t.runAt))) return true;
   return false;
 }
-function scheduleSync() {
+/** A hidden tab does not poll: the loop parks itself and the tab looks once
+ * as soon as it is shown again. */
+let hiddenPark = false;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || !hiddenPark || !store.state) return;
+  hiddenPark = false;
+  scheduleSync(0);
+});
+function scheduleSync(soon = null) {
   if (!store.state || refreshing) return;
-  const wait = workspaceBusy() ? 3000 : 30000;
+  const wait = soon ?? (workspaceBusy() ? 3000 : 30000);
   const due = Date.now() + wait;
   if (syncTimer && syncDue <= due) return;
   // Browsers keep one timer list, so this also clears the timeout below.
@@ -129,8 +137,9 @@ function scheduleSync() {
   syncTimer = setTimeout(async () => {
     const ticket = sessionEpoch();
     syncTimer = null;
+    if (document.hidden) { hiddenPark = true; return; }
     refreshing = true;
-    try { await sync(); syncFailures.clear(); }
+    try { await sync('all', {quiet: true}); syncFailures.clear(); }
     catch (e) {
       if (ticket === sessionEpoch() && e?.status === 401) { lockScreen('Your session expired. Sign in again.'); return; }
       if (ticket !== sessionEpoch()) return;

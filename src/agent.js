@@ -25,6 +25,11 @@ import {validateBrowserRequest} from '../shared/bot-browser.js';
 import {cliEngineById,cleanCliModel,LOCAL_CLI_ENGINE_IDS} from '../shared/ai-presets.js';
 import {encryptJson,decryptJson,sha256,loadMasterKey} from './vault.js';
 
+/** Told when a task is queued for a device (src/server.js points it at the live
+ * hub). A no-op by default, so this module needs nothing else to be loaded. */
+let taskWake = () => {};
+export function onAgentTaskQueued(fn) { taskWake = typeof fn === 'function' ? fn : () => {}; }
+
 export const AGENT_ACTIONS = ['http.check', 'browser.capture', 'browser.action', 'model.run', 'mcp.call'];
 const PAIRING_TTL_MS = 10 * 60000;
 const CLOCK_SKEW_MS = 5 * 60000;
@@ -222,6 +227,8 @@ export function enqueueAgentTask(store, agentId, {kind, payload = {}, idempotenc
   };
   store.run('INSERT INTO agent_tasks (id,agent_id,kind,payload,status,attempts,max_attempts,idempotency_key,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
     task.id, task.agent_id, task.kind, task.payload, task.status, task.attempts, task.max_attempts, task.idempotency_key, task.created_by, task.created_at, now());
+  // A device parked on the live line is told at once, so it does not wait out its poll interval.
+  try { taskWake(agent.workspace_id, agentId); } catch { /* A wake is only a hint. */ }
   return {task, duplicate: false};
 }
 

@@ -128,7 +128,7 @@ test('owner input reaches the bot\'s tab as real input events, and is bounded ag
 });
 
 /** A channel over a scripted server: `replies` is what each poll or frame post gets back. */
-function channelRig(t, {poll = [], frame = () => ({ok: true, watch: 'bot-a'})} = {}) {
+function channelRig(t, {poll = [], frame = () => ({ok: true, watch: 'bot-a'}), onTasks = null} = {}) {
   const {sb, fake} = rig();
   const sent = [];
   let polls = 0;
@@ -143,10 +143,18 @@ function channelRig(t, {poll = [], frame = () => ({ok: true, watch: 'bot-a'})} =
     }
     throw new Error(`unexpected ${path}`);
   };
-  const channel = createLiveChannel({call, shared: sb, frameGapMs: 40, retryMs: 5, log: {error() {}}});
+  const channel = createLiveChannel({call, shared: sb, frameGapMs: 40, retryMs: 5, log: {error() {}}, onTasks});
   t.after(async () => { await channel.stop(); await sb.close(); });
   return {channel, sb, fake, sent};
 }
+
+test('a live answer that says tasks are waiting wakes the heartbeat once', async t => {
+  let woken = 0;
+  const {channel} = channelRig(t, {poll: [{commands: [], watch: null}, {commands: [], watch: null, tasks: true}], onTasks: () => { woken++; }});
+  channel.start();
+  await sleep(40);
+  assert.equal(woken, 1);
+});
 
 test('the live channel starts watching when the server says so, applies input in order, and reports tabs', async t => {
   const {channel, sb, fake, sent} = channelRig(t, {poll: [{commands: [], watch: null}, {commands: [{type: 'takeover', botId: 'bot-a'}, {type: 'input', botId: 'bot-a', event: {type: 'key', key: 'Tab'}}, {type: 'input', botId: 'bot-a', event: {type: 'type', text: 'x'}}], watch: 'bot-a'}]});

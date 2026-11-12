@@ -53,14 +53,9 @@ export async function runWithTyping({key, setTyping, sync, send = null, follow, 
 export async function pollRun({runId = null, groupId = null, ignore = [], maxPolls = 200, wait, sync = null, readLog, messages, requests, onLine, onNote = null, onStall = null}) {
   const seen = new Set(messages().map(m => m.id));
   const skip = new Set(ignore);
-  let last = null, failures = 0, ended = false;
+  let last = null, failures = 0, ended = false, seenStatus;
   for (let i = 0; i < maxPolls; ) {
     await wait(RUN_POLL_MS);
-    // The run log is not the conversation: browser cards and their Approve
-    // buttons live on the workspace snapshot, so refresh that before the next
-    // lines. A failed refresh still leaves the run log to follow.
-    if (sync) await sync();
-    for (const m of messages()) seen.add(m.id);
     let snap;
     try { snap = await readLog(); failures = 0; }
     catch {
@@ -69,6 +64,16 @@ export async function pollRun({runId = null, groupId = null, ignore = [], maxPol
       if (++failures === 4 && onStall) onStall();
       i++; continue;
     }
+    // The run log is not the conversation: browser cards and their Approve
+    // buttons live on the workspace snapshot, so refresh that before the new
+    // lines when the run moved to another status (a card is filed with one).
+    // Between changes the workspace poll keeps it current; refreshing here on
+    // every look as well fetched the whole workspace twice per beat. A failed
+    // refresh still leaves the run log to follow.
+    const status = (snap.runs || []).find(r => runId ? r.id === runId : r.groupId === groupId)?.status ?? null;
+    if (sync && status !== seenStatus) await sync();
+    seenStatus = status;
+    for (const m of messages()) seen.add(m.id);
     for (const m of snap.messages || []) {
       // The endpoint returns the whole group's history; keep only this run's.
       if (seen.has(m.id) || m.role === 'user' || (runId && m.runId !== runId)) continue;

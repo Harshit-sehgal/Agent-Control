@@ -287,6 +287,9 @@ export function importBackup(store, document, {force = false, primaryWorkspace =
   // what deletes a restored row the loaded workspace chose to ignore (a grant for a bot that is gone).
   store.written?.clear?.();
   if (store.cache && typeof store.readCollections === 'function') store.cache = wf.migrate(store.readCollections());
+  // The rows were written behind the store's back, so what it remembers having
+  // written no longer describes the file.
+  store.forgetWrites?.();
   return {restored: [...EXPORT_TABLES, ...OPTIONAL_TABLES].reduce((n, name) => n + (tables[name]?.length || 0), 0)};
 }
 
