@@ -128,3 +128,31 @@ test('a setup card is a follow-up: it comes after the reply, not before it', asy
   assert.deepEqual(turn.lines, [], 'nothing happened before the reply');
   assert.deepEqual(turn.after.map(l => l.kind), ['setup']);
 });
+
+test('a setup block that cannot be used goes back to the bot once, so it fixes it or says so', async () => {
+  const atlas = {id: 'atlas', name: 'Atlas', type: 'custom', instructions: 'Run things', settings: {lead: true}, permissions: []};
+  const state = {events: [], groups: [{id: 'home', name: 'Home', bots: [atlas]}]};
+  const prompts = [];
+  const executor = async (who, prompt) => {
+    const turn = JSON.parse(prompt);
+    prompts.push(turn);
+    if (!turn.setupProblem) return `I proposed it.\n${block('setup', {action: 'basics', ask: 'always'})}`;
+    return `Every bot will ask you first once you tap Apply.\n${block('setup', {action: 'basics', ask: true})}`;
+  };
+  const turn = await runBotTurn(plainStore(state), {bot: atlas, envelope: {task: 'Ask me before any site.'}, executor, config: {}, peers: [atlas], groupId: 'home'});
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[1].setupProblem, /"ask": true/);
+  assert.equal(turn.output, 'Every bot will ask you first once you tap Apply.');
+  assert.equal(turn.after.length, 1);
+  assert.equal(JSON.parse(turn.after[0].setup).ask, true);
+});
+
+test('a setup block still wrong after the second try is reported, and the bot is not asked a third time', async () => {
+  const atlas = {id: 'atlas', name: 'Atlas', type: 'custom', instructions: 'Run things', settings: {lead: true}, permissions: []};
+  const state = {events: [], groups: [{id: 'home', name: 'Home', bots: [atlas]}]};
+  let calls = 0;
+  const executor = async () => { calls++; return `Done.\n${block('setup', {action: 'remove', bot: 'Nobody'})}`; };
+  const turn = await runBotTurn(plainStore(state), {bot: atlas, envelope: {task: 'Remove Nobody.'}, executor, config: {}, peers: [atlas], groupId: 'home'});
+  assert.equal(calls, 2);
+  assert.match(turn.after[0].text, /could not set that up/);
+});

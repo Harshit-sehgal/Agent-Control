@@ -8,7 +8,7 @@
 import {SHAPES, COLORS, face} from './ui-face.js';
 import {botStatus, botIsManager} from './ui-company.js';
 import {primaryOf} from './company.js';
-import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker} from './ui-kit.js';
+import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker, COLOR_NAMES} from './ui-kit.js';
 import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js';
 import {scheduleRows, scheduleTaskBody, SCHEDULE_OFTEN, scheduleChoice} from './schedules.js';
 import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js';
@@ -278,7 +278,7 @@ const stand = (shape, tint, name = 'x') => ({id: '_pick', name, settings: {shape
 /** The shape grid and the colour dots. The inputs are native radios, so the keyboard works. */
 export function lookPicker({shape, tint}) {
   const shapes = SHAPES.map(s => `<label class="lk-shape" title="${SHAPE_LABELS[s]}"><input type="radio" name="shape" value="${s}"${s === shape ? ' checked' : ''} aria-label="${SHAPE_LABELS[s]}"><span>${face(stand(s, tint), {size: 32, state: 'awake', motion: false})}</span></label>`).join('');
-  const dots = COLORS.map((c, i) => `<label class="lk-dot" style="--c:${c}"><input type="radio" name="tint" value="${i}"${i === tint ? ' checked' : ''} aria-label="Colour ${i + 1}"><span></span></label>`).join('');
+  const dots = COLORS.map((c, i) => `<label class="lk-dot" style="--c:${c}"><input type="radio" name="tint" value="${i}"${i === tint ? ' checked' : ''} aria-label="${COLOR_NAMES[i] ? COLOR_NAMES[i][0].toUpperCase() + COLOR_NAMES[i].slice(1) : `Colour ${i + 1}`}"><span></span></label>`).join('');
   return `<fieldset class="lk"><legend class="sr-only">Shape</legend><div class="lk-shapes">${shapes}</div></fieldset><fieldset class="lk"><legend class="sr-only">Colour</legend><div class="lk-dots">${dots}</div></fieldset>`;
 }
 const previewFace = (form, base = {}) => {

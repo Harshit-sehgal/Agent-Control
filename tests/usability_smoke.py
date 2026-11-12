@@ -501,6 +501,45 @@ async def first_reply_is_announced(page, base):
     await expect(announce).to_have_text(re.compile(r'^Atlas: .+'))
 
 
+async def setup_cards_apply_the_new_changes(page, base):
+    """A bot's card changes what the owner could change by hand: a colour and shape, run limits,
+    asking before pages, forgetting, a thread's title, and pausing everyone. Each Apply lands, then reads Done."""
+    ids = await open_app(page, base, '#bot/atlas', bots=EXTRA_BOTS)
+    thread = await page.evaluate("async () => (await window.AGENT_API('/api/threads', 'POST', {message: 'Plan a Goa trip'})).thread?.id")
+    assert thread, 'the demo made a thread'
+    await page.evaluate("id => window.AGENT_API('/api/memory/rules', 'POST', {bot: id, text: 'The owner likes short drafts.'})", ids['Writer'])
+    cards = [
+        {'action': 'settings', 'botId': ids['Writer'], 'settings': {'tint': 6, 'shape': 'egg'}, 'text': 'Writer: blue colour, egg shape'},
+        {'action': 'limits', 'limits': {'pages': 3}, 'text': 'Limits: pages per reply 3'},
+        {'action': 'basics', 'ask': True, 'text': 'Every bot asks you before it opens a web page'},
+        {'action': 'forget', 'botId': ids['Writer'], 'text': 'Forget what Writer has learned (its job stays)'},
+        {'action': 'thread', 'groupId': thread, 'name': 'Goa in March', 'text': 'Rename the thread to Goa in March'},
+        {'action': 'pause', 'text': 'Pause every bot until you resume them'},
+    ]
+    script = ('const c = ' + json.dumps(cards) + ';'
+              ' s.chats = s.chats || {}; s.chats.atlas = s.chats.atlas || [];'
+              " c.forEach((card, i) => s.chats.atlas.push({id: 'setup-' + i, role: 'system', kind: 'setup', botId: 'atlas',"
+              " setup: JSON.stringify(card), text: 'Atlas suggests: ' + card.text, at: new Date(Date.now() - 1000 + i).toISOString()}));")
+    await patch_state(page, script)
+    for i, label in enumerate(['Apply', 'Apply', 'Apply', 'Forget', 'Apply', 'Pause']):
+        card = page.locator(f'#main .cv-card[data-m="setup-{i}"]')
+        await expect(card.get_by_role('button', name=label)).to_be_visible()
+        await card.get_by_role('button', name=label).click()
+        await expect(page.locator('#toast')).to_contain_text('Done')
+        await expect(page.locator(f'#main [data-m="setup-{i}"] button')).to_have_count(0)
+    state = await api_state(page)
+    writer = company_bot(state, 'Writer')
+    assert writer['settings'].get('tint') == 6 and writer['settings'].get('shape') == 'egg', writer['settings']
+    assert state['limits']['pages'] == 3, state.get('limits')
+    assert state.get('askBasics') is True
+    assert next(g for g in state['groups'] if g['id'] == thread)['name'] == 'Goa in March'
+    assert state['guard']['paused'] is True
+    assert not state.get('memory', {}).get('rulebooks', {}).get(f"bot:{ids['Writer']}", {}).get('rules'), 'the Writer forgot'
+    # The colour picker names its colours, so a screen reader hears "Blue", not "Colour 7".
+    await page.goto(f"{base}/index.html#profile/{ids['Writer']}/edit")
+    await expect(page.locator('input[name="tint"][aria-label="Blue"]')).to_be_checked()
+
+
 async def keyboard_and_escape(page, base):
     await open_app(page, base, bots=EXTRA_BOTS)
     # Everything is reachable by keyboard: Tab walks the sidebar, Enter opens a bot.
@@ -2208,6 +2247,7 @@ async def main():
             await h.scenario('checkpoint card and page ask: the waiting face sits above', checkpoint_and_ask_cards)
             await h.scenario('faces: hello hop, one hop per first reply, awake and asleep', faces_come_alive)
             await h.scenario('keyboard: Tab, Enter, Ctrl+K and Esc in the sidebar', keyboard_and_escape)
+            await h.scenario('setup cards: colour, limits, asking first, forget, a thread title and pause apply from chat', setup_cards_apply_the_new_changes)
             await h.scenario('screen reader: the first reply in a new chat is announced, and the next', first_reply_is_announced)
             await h.scenario('phone: create a bot from the + button', phone_create_bot, PHONE)
             await h.scenario('phone: bottom search opens on focus and closes on Esc or a tap', phone_search_and_escape, PHONE)

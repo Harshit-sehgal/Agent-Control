@@ -7,25 +7,25 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=27d187d55e';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=27d187d55e';
-import {requestOfMessage} from './bot-browser.js?v=27d187d55e';
-import {validHttpUrl} from './core.js?v=27d187d55e';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=27d187d55e';
-import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=27d187d55e';
-import {isPrimary} from './company.js?v=27d187d55e';
-import {hasJob, modelChip} from './ui-profile-model.js?v=27d187d55e';
-import {scheduleTaskBody} from './schedules.js?v=27d187d55e';
-import {feed} from './ui-feed.js?v=27d187d55e';
-import {setupCardOf, setupButton} from './setup.js?v=27d187d55e';
-import {askCard} from './ui-asks.js?v=27d187d55e';
-import {face, botColor} from './ui-face.js?v=27d187d55e';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=27d187d55e';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=27d187d55e';
-import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=27d187d55e';
-import {toast} from './ui-dialogs.js?v=27d187d55e';
-import {siteChip} from './ui-computer-view.js?v=27d187d55e';
-import {cliChoice, googleCard} from './ui-connect-model.js?v=27d187d55e';
+import {OFFJOB_CHOICES} from './off-job.js?v=c2744e0498';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=c2744e0498';
+import {requestOfMessage} from './bot-browser.js?v=c2744e0498';
+import {validHttpUrl} from './core.js?v=c2744e0498';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=c2744e0498';
+import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=c2744e0498';
+import {isPrimary} from './company.js?v=c2744e0498';
+import {hasJob, modelChip} from './ui-profile-model.js?v=c2744e0498';
+import {scheduleTaskBody} from './schedules.js?v=c2744e0498';
+import {feed} from './ui-feed.js?v=c2744e0498';
+import {setupCardOf, setupButton} from './setup.js?v=c2744e0498';
+import {askCard} from './ui-asks.js?v=c2744e0498';
+import {face, botColor} from './ui-face.js?v=c2744e0498';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=c2744e0498';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=c2744e0498';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=c2744e0498';
+import {toast} from './ui-dialogs.js?v=c2744e0498';
+import {siteChip} from './ui-computer-view.js?v=c2744e0498';
+import {cliChoice, googleCard} from './ui-connect-model.js?v=c2744e0498';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -438,6 +438,16 @@ export const conversationActions = {
       return toast('You are in control. Sign in, then tap Hand back control.');
     }
     if (card.action === 'team') await api(`/api/groups/${encodeURIComponent(card.groupId)}`, 'PATCH', {settings: card.settings});
+    else if (card.action === 'pause') await api('/api/guard', 'POST', {paused: true});
+    else if (card.action === 'limits') await api('/api/limits', 'POST', card.limits);
+    else if (card.action === 'basics') await api('/api/permissions/basics', 'POST', {ask: card.ask});
+    else if (card.action === 'forget') await api('/api/memory/forget', 'POST', {bot: card.botId});
+    else if (card.action === 'disconnect') await api(`/api/connectors/${encodeURIComponent(card.connectorId)}`, 'DELETE');
+    else if (card.action === 'thread') {
+      // Deleting the thread you are reading leaves it first, so the page does not paint a chat that is gone.
+      if (card.remove && conversation()?.group?.id === card.groupId) go({home: true}, {replace: true});
+      await (card.remove ? api(`/api/groups/${encodeURIComponent(card.groupId)}`, 'DELETE') : api(`/api/groups/${encodeURIComponent(card.groupId)}`, 'PATCH', {name: card.name}));
+    }
     else if (card.action === 'schedule') await (card.stop ? api(`/api/tasks/${encodeURIComponent(card.taskId)}`, 'DELETE') : api('/api/tasks', 'POST', scheduleTaskBody(card)));
     else if (card.action === 'remove') {
       const group = groupOfBot(card.botId);

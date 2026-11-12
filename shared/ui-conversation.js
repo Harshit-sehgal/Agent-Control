@@ -438,6 +438,16 @@ export const conversationActions = {
       return toast('You are in control. Sign in, then tap Hand back control.');
     }
     if (card.action === 'team') await api(`/api/groups/${encodeURIComponent(card.groupId)}`, 'PATCH', {settings: card.settings});
+    else if (card.action === 'pause') await api('/api/guard', 'POST', {paused: true});
+    else if (card.action === 'limits') await api('/api/limits', 'POST', card.limits);
+    else if (card.action === 'basics') await api('/api/permissions/basics', 'POST', {ask: card.ask});
+    else if (card.action === 'forget') await api('/api/memory/forget', 'POST', {bot: card.botId});
+    else if (card.action === 'disconnect') await api(`/api/connectors/${encodeURIComponent(card.connectorId)}`, 'DELETE');
+    else if (card.action === 'thread') {
+      // Deleting the thread you are reading leaves it first, so the page does not paint a chat that is gone.
+      if (card.remove && conversation()?.group?.id === card.groupId) go({home: true}, {replace: true});
+      await (card.remove ? api(`/api/groups/${encodeURIComponent(card.groupId)}`, 'DELETE') : api(`/api/groups/${encodeURIComponent(card.groupId)}`, 'PATCH', {name: card.name}));
+    }
     else if (card.action === 'schedule') await (card.stop ? api(`/api/tasks/${encodeURIComponent(card.taskId)}`, 'DELETE') : api('/api/tasks', 'POST', scheduleTaskBody(card)));
     else if (card.action === 'remove') {
       const group = groupOfBot(card.botId);

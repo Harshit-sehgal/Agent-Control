@@ -83,6 +83,8 @@ export const icon = (name, size = 20) => `<svg width="${size}" height="${size}" 
 
 /** How many colours a bot can be (settings.tint indexes ui-face COLORS, which has this many). */
 export const TINT_COUNT = 10;
+/** What each colour is called, in tint order: for the picker's labels and for a bot asked to "make it blue". */
+export const COLOR_NAMES = ['aqua', 'lavender', 'coral', 'green', 'honey', 'pink', 'blue', 'sand', 'peach', 'grey'];
 
 const dayStart = date => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 export const clock = value => {

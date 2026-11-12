@@ -5,23 +5,23 @@
  *
  * Pages repaint only when the route changes, so each in-place change (a switch, a
  * forgotten note, a picked colour) updates its own node instead. */
-import {SHAPES, COLORS, face} from './ui-face.js?v=27d187d55e';
-import {botStatus, botIsManager} from './ui-company.js?v=27d187d55e';
-import {primaryOf} from './company.js?v=27d187d55e';
-import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker} from './ui-kit.js?v=27d187d55e';
-import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js?v=27d187d55e';
-import {scheduleRows, scheduleTaskBody, SCHEDULE_OFTEN, scheduleChoice} from './schedules.js?v=27d187d55e';
-import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=27d187d55e';
-import {GRANT_LABELS} from './asks.js?v=27d187d55e';
-import {grantRows, allGrantRows, grantUrl} from './ui-asks.js?v=27d187d55e';
-import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=27d187d55e';
-import {toast, confirmSheet} from './ui-dialogs.js?v=27d187d55e';
-import {sendChat} from './ui-chat.js?v=27d187d55e';
-import {computerPage as computerView, computerLabel, keysOwned} from './ui-computer-view.js?v=27d187d55e';
+import {SHAPES, COLORS, face} from './ui-face.js?v=c2744e0498';
+import {botStatus, botIsManager} from './ui-company.js?v=c2744e0498';
+import {primaryOf} from './company.js?v=c2744e0498';
+import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker, COLOR_NAMES} from './ui-kit.js?v=c2744e0498';
+import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js?v=c2744e0498';
+import {scheduleRows, scheduleTaskBody, SCHEDULE_OFTEN, scheduleChoice} from './schedules.js?v=c2744e0498';
+import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=c2744e0498';
+import {GRANT_LABELS} from './asks.js?v=c2744e0498';
+import {grantRows, allGrantRows, grantUrl} from './ui-asks.js?v=c2744e0498';
+import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=c2744e0498';
+import {toast, confirmSheet} from './ui-dialogs.js?v=c2744e0498';
+import {sendChat} from './ui-chat.js?v=c2744e0498';
+import {computerPage as computerView, computerLabel, keysOwned} from './ui-computer-view.js?v=c2744e0498';
 import {
   MAX_NAME, hasJob, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, lookOf, newBotDefaults,
   newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, closeTarget,
-} from './ui-profile-model.js?v=27d187d55e';
+} from './ui-profile-model.js?v=c2744e0498';
 
 const el = id => document.getElementById(id);
 const SHAPE_LABELS = {rounded: 'Rounded square', circle: 'Circle', hexagon: 'Hexagon', pebble: 'Pebble', drop: 'Drop', shield: 'Shield', arch: 'Arch', egg: 'Egg', blob: 'Blob', bean: 'Bean'};
@@ -278,7 +278,7 @@ const stand = (shape, tint, name = 'x') => ({id: '_pick', name, settings: {shape
 /** The shape grid and the colour dots. The inputs are native radios, so the keyboard works. */
 export function lookPicker({shape, tint}) {
   const shapes = SHAPES.map(s => `<label class="lk-shape" title="${SHAPE_LABELS[s]}"><input type="radio" name="shape" value="${s}"${s === shape ? ' checked' : ''} aria-label="${SHAPE_LABELS[s]}"><span>${face(stand(s, tint), {size: 32, state: 'awake', motion: false})}</span></label>`).join('');
-  const dots = COLORS.map((c, i) => `<label class="lk-dot" style="--c:${c}"><input type="radio" name="tint" value="${i}"${i === tint ? ' checked' : ''} aria-label="Colour ${i + 1}"><span></span></label>`).join('');
+  const dots = COLORS.map((c, i) => `<label class="lk-dot" style="--c:${c}"><input type="radio" name="tint" value="${i}"${i === tint ? ' checked' : ''} aria-label="${COLOR_NAMES[i] ? COLOR_NAMES[i][0].toUpperCase() + COLOR_NAMES[i].slice(1) : `Colour ${i + 1}`}"><span></span></label>`).join('');
   return `<fieldset class="lk"><legend class="sr-only">Shape</legend><div class="lk-shapes">${shapes}</div></fieldset><fieldset class="lk"><legend class="sr-only">Colour</legend><div class="lk-dots">${dots}</div></fieldset>`;
 }
 const previewFace = (form, base = {}) => {

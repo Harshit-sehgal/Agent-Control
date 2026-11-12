@@ -24,6 +24,7 @@ import {askPeerRound} from './bot-link.js';
 import {createBotsFromReply} from './bot-create.js';
 import {parseCreateBotRequests, stripCreateBotBlocks, botCreateRefusedText} from '../shared/bot-create.js';
 import {setupCardsFromReply} from './setup-cards.js';
+import {stripSetupBlocks as setupFreeText} from '../shared/setup.js';
 
 const stamp = () => new Date().toISOString();
 
@@ -58,7 +59,16 @@ export async function runBotTurn(store, {
       ? {text: stripCreateBotBlocks(peer.output) || `${bot.name} tried to create a bot.`, created: [], lines: [{id: makeId(), role: 'system', kind: 'bot-created', text: botCreateRefusedText(bot, 'a bot made in this run cannot make bots of its own yet. Ask again in a new message.'), at: now()}]}
       : {text: peer.output, created: [], lines: []};
   // Last, a proposed settings change becomes a card the owner taps; it changes nothing by itself.
-  const setup = setupCardsFromReply(store, {bot, output: made.text, makeId, now});
+  let setup = setupCardsFromReply(store, {bot, output: made.text, makeId, now});
+  // A block that could not be used goes back to the bot once with the reason, so it sends a corrected block
+  // or tells the owner plainly that nothing was set up, instead of saying it proposed a change that has no card.
+  const problems = setup.lines.filter(line => !line.setup).map(line => line.text);
+  if (problems.length && executor) {
+    const again = String(await executor(bot, JSON.stringify({...envelope,
+      setupProblem: `${problems.join(' ')} Reply again to the owner: send a corrected setup block if you can, or say plainly that it was not set up and why. Do not say you proposed something that has no card.`,
+      yourLastReply: setupFreeText(made.text)}), config) ?? '');
+    if (again.trim()) setup = setupCardsFromReply(store, {bot, output: again, makeId, now});
+  }
   return {
     output: setup.text,
     lines: [...sub.lines, ...peer.lines, ...made.lines],

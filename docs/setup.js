@@ -16,25 +16,33 @@
  *   `model` (a bot's model, or the default when `bot` is left out), `job` (a bot's job sentence), `rename`,
  *   `settings` (reply length, style, memory, hand-offs, @mentions, on or off, temperature, manager), `team`
  *   (a team's "Approve between steps", step limit and hand-offs between its bots), `rule`
- *   (Always allow / Ask each time / Deny for a bot, an action and a site; a payment is never Always), or
- *   `open` (a Settings page: models, connectors, permissions, agents, usage). The block never changes
+ *   (Always allow / Ask each time / Deny for a bot, an action and a site; a payment is never Always),
+ *   `schedule`, `remove`, `signin`, `pause` (every bot), `limits` (pages, rounds, team steps per message),
+ *   `basics` (ask before every page and app read), `forget` (a bot's memory notes), `disconnect` (a connector),
+ *   `thread` (rename or delete one), or `open` (a Settings page: models, connectors, permissions, devices, usage).
+ *   A bot's colour is named (COLOR_NAMES), never a palette number. The block never changes
  *   anything: it becomes a card in the chat with one button, and the owner's tap calls the same route
  *   the settings page calls, with the owner's own session. A model cannot add a key, type a command,
  *   make itself the primary bot, save a rule without the owner's tap, or reach a route the owner could not.
  *
  * Pure and browser-safe: the server reads replies with it and the UI paints the card from it. */
-import {cleanText, validHttpUrl} from './core.js?v=27d187d55e';
-import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=27d187d55e';
-import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=27d187d55e';
-import {controlFence} from './reply-blocks.js?v=27d187d55e';
-import {companyBots, primaryOf} from './company.js?v=27d187d55e';
-import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js?v=27d187d55e';
-import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=27d187d55e';
-import {grantWhat} from './ui-asks.js?v=27d187d55e';
+import {cleanText, validHttpUrl} from './core.js?v=c2744e0498';
+import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=c2744e0498';
+import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=c2744e0498';
+import {controlFence} from './reply-blocks.js?v=c2744e0498';
+import {companyBots, primaryOf} from './company.js?v=c2744e0498';
+import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js?v=c2744e0498';
+import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=c2744e0498';
+import {grantWhat} from './ui-asks.js?v=c2744e0498';
+import {COLOR_NAMES} from './ui-kit.js?v=c2744e0498';
+import {SHAPES} from './company.js?v=c2744e0498';
+import {limitsOf, BACKSTOP} from './limits.js?v=c2744e0498';
 
-export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'schedule', 'remove', 'open', 'signin'];
+export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'schedule', 'remove', 'open', 'signin', 'pause', 'limits', 'basics', 'forget', 'disconnect', 'thread'];
 /** The bot settings a bot may propose. Not the primary role, the browser approval mode, or layout (pins, order). */
-export const BOT_SETTABLE = ['replyLength', 'style', 'memory', 'canHandoff', 'summonable', 'enabled', 'temperature', 'reportsTo'];
+export const BOT_SETTABLE = ['replyLength', 'style', 'memory', 'canHandoff', 'summonable', 'enabled', 'temperature', 'reportsTo', 'tint', 'shape'];
+const LIMIT_KEYS = ['pages', 'rounds', 'steps'];
+const LIMIT_WORDS = {pages: 'pages per reply', rounds: 'rounds of pages in a row', steps: 'team steps per message'};
 /** The team (group) settings a bot may propose: approve between steps, the step limit, hand-offs between its bots. */
 export const TEAM_SETTABLE = ['checkpoints', 'maxSteps', 'botHandoffs'];
 const RULE_WORDS = {open: 'browser.use', browse: 'browser.use', browser: 'browser.use', 'browser.use': 'browser.use', web: 'browser.use', send: 'send', email: 'send', post: 'post', delete: 'delete', spend: 'spend', pay: 'spend', payment: 'spend', buy: 'spend'};
@@ -55,16 +63,22 @@ function signinUrl(value) {
   const host = new URL(url).hostname;
   return host.includes('.') && !/^[\d.]+$/.test(host) && !host.includes(':') && !/(^|\.)(localhost|local|internal)$/i.test(host) ? url : null;
 }
-const MIN_JOB = 20, MAX_JOB = 3000, MAX_BLOCKS = 3;
+const MIN_JOB = 20, MAX_JOB = 3000, MAX_BLOCKS = 8;
 
 export const SETUP_TOOL_HINT = 'To change a setting for the owner, put one fenced block named setup in your reply, holding JSON. '
   + '{"action":"model","bot":"<bot name, or leave out for everyone\'s default>","provider":"<a model name from workspace.models>","model":"<one of its models, or leave out for its default>","effort":"<low|medium|high|default, optional>"} sets a model and how hard it thinks (effort alone, with no provider, changes only the effort: high for hard or careful work, low for quick replies). '
   + '{"action":"job","bot":"<bot name>","job":"<the new job, one or two sentences>"} rewrites a bot\'s job. '
   + '{"action":"rename","bot":"<bot name>","name":"<new name>"} renames a bot. '
-  + '{"action":"settings","bot":"<bot name>","settings":{"replyLength":"short|medium|long","style":"<tone>","memory":true|false,"canHandoff":true|false,"summonable":true|false,"enabled":true|false,"temperature":0-2,"reportsTo":"<manager bot name, or none>"}} changes how a bot works; give only what changes. '
+  + `{"action":"settings","bot":"<bot name>","settings":{"replyLength":"short|medium|long","style":"<tone>","memory":true|false,"canHandoff":true|false,"summonable":true|false,"enabled":true|false,"temperature":0-2,"reportsTo":"<manager bot name, or none>","colour":"<${COLOR_NAMES.join('|')}>","shape":"<${SHAPES.join('|')}>"}} changes how a bot works or looks; give only what changes. `
   + '{"action":"team","team":"<team name, or leave out for your own team>","settings":{"checkpoints":true|false,"maxSteps":1-30,"botHandoffs":true|false}} changes how a team runs: checkpoints asks the owner before each step. '
   + '{"action":"rule","bot":"<bot name>","do":"open|send|post|delete|spend","site":"<site, e.g. github.com>","choice":"always|ask|deny"} saves what that bot may do without asking (a payment is never always). '
   + '{"action":"schedule","bot":"<bot name, or me>","do":"<the message that bot gets each time>","every":"day|hour|week|<minutes>","at":"<HH:MM, optional>","on":"<monday..sunday, optional: a weekly schedule on that day>"} puts work on a timer: the bot runs it in its own chat and the owner reads the result there. Give only "at" for a one-off later today or tomorrow. Add "stop":true with a few words of its message in "do" to stop one; workspace.schedules lists them. When the owner asks for something regular (every morning, each Monday), propose a schedule instead of telling them to come back. '
+  + '{"action":"pause"} pauses every bot at once (the owner resumes them). '
+  + `{"action":"limits","pages":1-${BACKSTOP.pages},"rounds":1-${BACKSTOP.rounds},"steps":1-${BACKSTOP.steps}} caps how far one message may go (pages per reply, rounds of pages in a row, team steps); "none" removes a cap; give only what changes. The owner saying "bots should open at most 3 pages per reply" or "no more than 10 steps" is this block ({"action":"limits","pages":3}), never a note about your own reply. `
+  + '{"action":"basics","ask":true|false} true makes every bot ask before opening any web page or reading a connected app; false lets them browse and read without asking. '
+  + '{"action":"forget","bot":"<bot name>"} clears what that bot has learned (its memory notes), not its job. '
+  + '{"action":"disconnect","connector":"<connector name>"} removes a connected service. '
+  + '{"action":"thread","thread":"<words from its title>","name":"<new title>"} renames a thread; with "remove":true instead of a name it deletes the thread. '
   + '{"action":"remove","bot":"<bot name>"} removes a bot the owner no longer wants, with its chat and schedules (never Atlas). '
   + '{"action":"signin","site":"reddit.com"} gives the owner a button that opens the browser on this computer at that site, in their hands, to sign in once; use it when a site blocks you or needs the owner signed in (Reddit, LinkedIn, a shop or bank login), instead of only saying it is blocked. Never ask for a password in chat. {"action":"open","page":"models|connectors|gmail|permissions|devices|usage"} shows the owner a Settings page, for things only they can do, such as pasting a key or pairing a computer ("devices" is the computers that run the browser, not bots). Every change to a bot (its job, name, settings, model, rules, schedules, removing it) is one of the blocks above, never a page to open; "gmail" (or "drive") is a button that connects it, so use it whenever the owner wants email or Drive connected. '
   + 'Nothing changes until the owner taps Apply on the card, so say in your reply what you proposed and why. Never ask for a key or password in chat.';
@@ -76,13 +90,19 @@ const ENGINE_WORDS = {claude: 'claude', anthropic: 'claude', chatgpt: 'codex', c
 export function parseSetupRequests(output) {
   const found = [];
   for (const match of String(output ?? '').matchAll(controlFence('setup'))) {
-    if (found.length >= MAX_BLOCKS) break;
+    if (found.length >= MAX_BLOCKS) { found.push({ok: false, error: `a reply may carry at most ${MAX_BLOCKS} setup blocks, so the rest were not offered. Offer them in your next reply.`}); break; }
     let body;
     try { body = JSON.parse(match[1].trim()); } catch { found.push({ok: false, error: 'the setup block was not valid JSON.'}); continue; }
     if (!body || typeof body !== 'object' || Array.isArray(body)) { found.push({ok: false, error: 'the setup block was not an object.'}); continue; }
     const action = lower(body.action);
     if (!SETUP_ACTIONS.includes(action)) { found.push({ok: false, error: `"${cleanText(body.action, 40) || 'nothing'}" is not something setup can do. Use ${SETUP_ACTIONS.join(', ')}.`}); continue; }
-    found.push({ok: true, request: {action, bot: cleanText(body.bot, 60), provider: cleanText(body.provider, 80), model: cleanText(body.model, 120), job: cleanText(body.job, MAX_JOB + 1), page: lower(body.page), name: cleanText(body.name, 81), team: cleanText(body.team, 80), settings: body.settings && typeof body.settings === 'object' && !Array.isArray(body.settings) ? body.settings : null, do: lower(body.do), site: cleanText(body.site, 300), choice: lower(body.choice), what: cleanText(body.do, 2000), every: body.every ?? null, at: cleanText(body.at, 8), on: cleanText(body.on, 12), stop: body.stop === true, ...(body.effort !== undefined && body.effort !== null ? {effort: lower(body.effort)} : {})}});
+    found.push({ok: true, request: {action, bot: cleanText(body.bot, 60), provider: cleanText(body.provider, 80), model: cleanText(body.model, 120), job: cleanText(body.job, MAX_JOB + 1), page: lower(body.page), name: cleanText(body.name, 81), team: cleanText(body.team, 80), settings: body.settings && typeof body.settings === 'object' && !Array.isArray(body.settings) ? body.settings : null, do: lower(body.do), site: cleanText(body.site, 300), choice: lower(body.choice), what: cleanText(body.do, 2000), every: body.every ?? null, at: cleanText(body.at, 8), on: cleanText(body.on, 12), stop: body.stop === true,
+      // The newer cards: asking first, run limits, a connector, a thread.
+      ...(body.ask !== undefined ? {ask: typeof body.ask === 'boolean' ? body.ask : lower(body.ask)} : {}),
+      ...Object.fromEntries(LIMIT_KEYS.filter(k => body[k] !== undefined).map(k => [k, typeof body[k] === 'number' ? body[k] : lower(body[k])])),
+      ...(body.connector !== undefined ? {connector: cleanText(body.connector, 80)} : {}),
+      ...(body.thread !== undefined ? {thread: cleanText(body.thread, 160)} : {}), remove: body.remove === true,
+      ...(body.effort !== undefined && body.effort !== null ? {effort: lower(body.effort)} : {})}});
   }
   return found;
 }
@@ -173,6 +193,26 @@ export function resolveSetup(state, request, {speaker = null} = {}) {
     return {ok: true, card: {action: 'remove', botId: bot.id, text: `Remove ${bot.name}, with its chat and schedules`}};
   }
   if (request.action === 'team') return teamCard(state, request, speaker);
+  if (request.action === 'pause') return {ok: true, card: {action: 'pause', text: 'Pause every bot until you resume them'}};
+  if (request.action === 'limits') return limitsCard(state, request);
+  if (request.action === 'basics') {
+    const yes = {true: true, yes: true, on: true, false: false, no: false, off: false}[lower(request.ask)];
+    if (typeof request.ask !== 'boolean' && yes === undefined) return {ok: false, error: 'say "ask": true to ask before every page and app read, or false to browse and read without asking.'};
+    request = {...request, ask: typeof request.ask === 'boolean' ? request.ask : yes};
+    return {ok: true, card: {action: 'basics', ask: request.ask, text: request.ask ? 'Every bot asks you before it opens a web page or reads a connected app' : 'Bots open web pages and read connected apps without asking; sending, posting, deleting and paying still ask'}};
+  }
+  if (request.action === 'forget') {
+    const bot = botNamed(state, request.bot, speaker);
+    if (!bot) return {ok: false, error: `there is no bot called "${request.bot || 'blank'}".`};
+    return {ok: true, card: {action: 'forget', botId: bot.id, text: `Forget what ${bot.name} has learned (its job stays)`}};
+  }
+  if (request.action === 'disconnect') {
+    const list = (state?.connectors || []).filter(c => c?.id), want = lower(request.connector || request.name);
+    const hit = want && (list.find(c => lower(c.id) === want) || list.find(c => lower(c.name) === want) || list.find(c => lower(c.name).includes(want)));
+    if (!hit) return {ok: false, error: list.length ? `there is no connector called "${cleanText(request.connector, 60) || 'blank'}". Connected: ${list.map(c => c.name || c.id).join(', ')}.` : 'nothing is connected.'};
+    return {ok: true, card: {action: 'disconnect', connectorId: hit.id, text: `Remove the ${hit.name || hit.id} connector`}};
+  }
+  if (request.action === 'thread') return threadCard(state, request);
   if (request.action === 'schedule') return scheduleCard(state, request, speaker);
   if (request.action === 'rename' || request.action === 'settings' || request.action === 'rule') {
     const bot = botNamed(state, request.bot, speaker);
@@ -213,7 +253,16 @@ function renameCard(state, bot, wanted) {
 function settingsCard(state, bot, wanted, speaker) {
   const picked = {};
   for (const key of BOT_SETTABLE) if (wanted && Object.hasOwn(wanted, key)) picked[key] = wanted[key];
-  if (!Object.keys(picked).length) return {ok: false, error: `nothing to change. A bot may set ${BOT_SETTABLE.join(', ')}.`};
+  // A colour is named ("blue"); the bot never has to know the palette's numbers.
+  const colour = wanted && (wanted.colour ?? wanted.color);
+  if (colour !== undefined) {
+    const at = typeof colour === 'number' ? colour : COLOR_NAMES.indexOf(lower(colour));
+    if (!Number.isInteger(at) || !COLOR_NAMES[at]) return {ok: false, error: `"${cleanText(String(colour), 30)}" is not one of the colours: ${COLOR_NAMES.join(', ')}.`};
+    picked.tint = at;
+  }
+  if (Object.hasOwn(picked, 'shape') && !SHAPES.includes(lower(picked.shape))) return {ok: false, error: `"${cleanText(String(picked.shape), 30)}" is not a shape. Use ${SHAPES.join(', ')}.`};
+  if (Object.hasOwn(picked, 'shape')) picked.shape = lower(picked.shape);
+  if (!Object.keys(picked).length) return {ok: false, error: `nothing to change. A bot may set ${[...BOT_SETTABLE.filter(k => k !== 'tint'), 'colour'].join(', ')}.`};
   if (Object.hasOwn(picked, 'reportsTo')) {
     const word = lower(picked.reportsTo);
     if (!word || ['none', 'nobody', 'solo', 'no one'].includes(word)) picked.reportsTo = null;
@@ -238,6 +287,7 @@ function botWords(state) {
     canHandoff: v => (v ? 'may hand work on' : 'keeps its work'), summonable: v => (v ? 'may be @mentioned anywhere' : 'only in its own group'),
     enabled: v => (v ? 'switched on' : 'switched off'), temperature: v => (v === null ? 'default temperature' : `temperature ${v}`),
     reportsTo: v => (v ? `reports to ${nameOf(v)}` : 'works solo'),
+    tint: v => (v === null ? 'the default colour' : `${COLOR_NAMES[v] || 'a new'} colour`), shape: v => (v ? `${v} shape` : 'the default shape'),
   };
 }
 const TEAM_WORDS = {
@@ -276,6 +326,34 @@ function ruleCard(bot, request) {
   return {ok: true, card: {action: 'rule', botId: bot.id, act, scope, choice, text: `${bot.name}: ${GRANT_LABELS[choice]} · ${grantWhat(act, scope)}`}};
 }
 
+function limitsCard(state, request) {
+  const limits = {};
+  for (const key of LIMIT_KEYS) {
+    if (!Object.hasOwn(request, key)) continue;
+    const value = request[key];
+    if (value === null || ['none', 'no limit', 'off', 'unlimited'].includes(lower(value))) { limits[key] = null; continue; }
+    const n = Number(value);
+    if (!Number.isInteger(n) || n < 1 || n > BACKSTOP[key]) return {ok: false, error: `${LIMIT_WORDS[key]} is a whole number from 1 to ${BACKSTOP[key]}, or "none".`};
+    limits[key] = n;
+  }
+  if (!Object.keys(limits).length) return {ok: false, error: `say which limit to change: ${LIMIT_KEYS.join(', ')}.`};
+  return {ok: true, card: {action: 'limits', limits, text: `Limits: ${Object.entries(limits).map(([k, v]) => `${LIMIT_WORDS[k]} ${v === null ? 'no limit' : v}`).join(', ')}`}};
+}
+
+function threadCard(state, request) {
+  const threads = (state?.groups || []).filter(g => g?.settings?.kind === 'thread'), want = lower(request.thread);
+  // "the Goa trip thread" finds "Plan a 3 day Goa trip": every word that names it is in the title.
+  const words = want.split(/[^\p{L}\p{N}]+/u).filter(w => w && !['the', 'a', 'an', 'my', 'thread', 'about', 'on', 'for', 'chat'].includes(w));
+  const exact = threads.filter(g => lower(g.name) === want);
+  const hits = !want ? [] : exact.length ? exact : threads.filter(g => words.length && words.every(w => lower(g.name).includes(w)));
+  if (hits.length !== 1) return {ok: false, error: threads.length ? `say which thread with words from its title. Threads: ${threads.slice(-10).map(g => `"${g.name}"`).join(', ')}.` : 'there are no threads.'};
+  const thread = hits[0];
+  if (request.remove) return {ok: true, card: {action: 'thread', groupId: thread.id, remove: true, text: `Delete the thread “${thread.name}” and its messages`}};
+  const name = cleanText(request.name, 80);
+  if (!name) return {ok: false, error: 'give the thread a new title in "name", or "remove":true to delete it.'};
+  return {ok: true, card: {action: 'thread', groupId: thread.id, name, text: `Rename the thread “${thread.name}” to “${name}”`}};
+}
+
 /** The card a setup message carries, read back safely. Anything malformed is null, so no button is painted. */
 export function setupCardOf(message) {
   let card;
@@ -287,7 +365,12 @@ export function setupCardOf(message) {
   if (card.action === 'rename') return typeof card.botId === 'string' && typeof card.name === 'string' ? card : null;
   if (card.action === 'settings') return typeof card.botId === 'string' && card.settings && typeof card.settings === 'object' && Object.keys(card.settings).length && Object.keys(card.settings).every(k => BOT_SETTABLE.includes(k)) ? card : null;
   if (card.action === 'team') return typeof card.groupId === 'string' && card.settings && typeof card.settings === 'object' && Object.keys(card.settings).length && Object.keys(card.settings).every(k => TEAM_SETTABLE.includes(k)) ? card : null;
-  if (card.action === 'remove') return typeof card.botId === 'string' ? card : null;
+  if (card.action === 'remove' || card.action === 'forget') return typeof card.botId === 'string' ? card : null;
+  if (card.action === 'pause') return card;
+  if (card.action === 'basics') return typeof card.ask === 'boolean' ? card : null;
+  if (card.action === 'disconnect') return typeof card.connectorId === 'string' ? card : null;
+  if (card.action === 'thread') return typeof card.groupId === 'string' && (card.remove === true || typeof card.name === 'string') ? card : null;
+  if (card.action === 'limits') return card.limits && typeof card.limits === 'object' && Object.keys(card.limits).length && Object.entries(card.limits).every(([k, v]) => LIMIT_KEYS.includes(k) && (v === null || (Number.isInteger(v) && v >= 1 && v <= BACKSTOP[k]))) ? card : null;
   if (card.action === 'schedule') return typeof card.botId === 'string' && (card.stop ? typeof card.taskId === 'string' : typeof card.groupId === 'string' && typeof card.message === 'string' && (Number.isInteger(card.every) || Boolean(cleanAt(card.at)))) ? card : null;
   if (card.action === 'rule') return typeof card.botId === 'string' && ASK_ACTIONS.includes(card.act) && GRANT_CHOICES.includes(card.choice) && typeof card.scope === 'string' ? card : null;
   return typeof card.providerId === 'string' || (typeof card.effort === 'string' && cleanEffort(card.effort) !== null) ? card : null;
@@ -322,6 +405,12 @@ function scheduleCard(state, request, speaker) {
 export function setupDone(state, card) {
   if (!card || card.action === 'open' || card.action === 'signin') return false;
   if (card.action === 'remove') return !companyBots(state).some(b => b.id === card.botId);
+  if (card.action === 'pause') return state?.guard?.paused === true;
+  if (card.action === 'basics') return Boolean(state?.askBasics) === card.ask;
+  if (card.action === 'limits') { const now = limitsOf(state); return Object.entries(card.limits).every(([k, v]) => now[k] === v); }
+  if (card.action === 'forget') return !(state?.memory?.rulebooks?.[`bot:${card.botId}`]?.rules?.length);
+  if (card.action === 'disconnect') return !(state?.connectors || []).some(c => c?.id === card.connectorId);
+  if (card.action === 'thread') { const g = (state?.groups || []).find(x => x.id === card.groupId); return card.remove ? !g : g?.name === card.name; }
   if (card.action === 'job') return companyBots(state).find(b => b.id === card.botId)?.instructions === card.job;
   if (card.action === 'schedule') {
     const rows = scheduleRows(state, card.botId);
@@ -339,7 +428,7 @@ export function setupDone(state, card) {
   return sameModel && sameEffort;
 }
 /** The button on a setup card. */
-export const setupButton = card => (card.action === 'signin' ? 'Sign in' : card.app === 'google' ? 'Connect Google' : card.action === 'open' ? `Open ${card.text.replace(/^Settings → /, '')}` : card.action === 'remove' ? 'Remove' : 'Apply');
+export const setupButton = card => (card.action === 'signin' ? 'Sign in' : card.app === 'google' ? 'Connect Google' : card.action === 'open' ? `Open ${card.text.replace(/^Settings → /, '')}` : card.action === 'remove' || card.action === 'disconnect' ? 'Remove' : card.action === 'forget' ? 'Forget' : card.action === 'thread' && card.remove ? 'Delete' : card.action === 'pause' ? 'Pause' : 'Apply');
 
 /* ---------- what every bot knows ---------- */
 
@@ -363,13 +452,20 @@ export function workspaceBrief(state, {agents = [], connectors = [], speaker = n
     ...(p.id === ai.defaultProviderId ? {default: true} : {}),
     models: p.kind === 'local-cli' ? (CLI_MODELS[p.engine] || []).map(([id]) => id) : (p.chatModels || p.models || []).slice(0, 12),
   }));
-  const bots = companyBots(state).map(b => {
+  const everyBot = companyBots(state);
+  // How each bot looks, in the words a colour or shape card uses, so "make Scout blue" needs no lookup.
+  const lookOf = (b, i) => {
+    const set = b.settings || {}, tint = Number.isInteger(set.tint) ? set.tint : i;
+    const manager = everyBot.some(x => x.settings?.reportsTo === b.id);
+    return `${COLOR_NAMES[Math.abs(tint) % COLOR_NAMES.length]} ${SHAPES.includes(set.shape) ? set.shape : set.lead === true ? 'circle' : manager ? 'hexagon' : 'rounded'}`;
+  };
+  const bots = everyBot.map((b, i) => {
     const own = ai.bots?.[b.id] || {};
     const model = (own.providerId ? `${label(own.providerId) || 'a removed model'}${own.model ? ` · ${own.model}` : ''}` : 'the default') + (own.effort ? ` · ${own.effort} effort` : '');
     // Only what differs from a new bot, in the words a card uses; "off" stays its own flag.
     const set = botSettings(b), words = botWords(state);
-    const changed = BOT_SETTABLE.filter(k => k !== 'enabled' && (set[k] ?? null) !== (BOT_DEFAULTS[k] ?? null)).map(k => words[k](set[k]));
-    return {name: b.name, job: short(b.instructions, 140) || 'no job yet', model, ...(set.enabled === false ? {off: true} : {}), ...(changed.length ? {settings: changed.join(', ')} : {})};
+    const changed = BOT_SETTABLE.filter(k => !['enabled', 'tint', 'shape'].includes(k) && (set[k] ?? null) !== (BOT_DEFAULTS[k] ?? null)).map(k => words[k](set[k]));
+    return {name: b.name, job: short(b.instructions, 140) || 'no job yet', model, look: lookOf(b, i), ...(set.enabled === false ? {off: true} : {}), ...(changed.length ? {settings: changed.join(', ')} : {})};
   });
   const teams = (state?.groups || []).filter(g => g?.settings?.kind !== 'thread').map(g => {
     const set = groupSettings(g);
@@ -394,6 +490,9 @@ export function workspaceBrief(state, {agents = [], connectors = [], speaker = n
     teams,
     computer,
     // Saved answers, what waits on the owner and the open threads: what Atlas needs to say where things stand.
+    ...(state?.guard?.paused ? {paused: true} : {}),
+    running: state?.guard?.paused ? 'every bot is paused; the owner resumes them with Resume on the banner' : 'every bot is running; nothing is paused',
+    limits: (() => { const l = limitsOf(state); return LIMIT_KEYS.map(k => `${l[k] ?? `no limit (at most ${BACKSTOP[k]})`}${k === 'pages' ? ' pages per reply' : k === 'rounds' ? ' rounds of pages' : ' team steps'}`).join(', '); })(),
     basicAccess: state?.askBasics ? 'every bot asks the owner before opening a web page or reading a connected app' : 'every bot opens web pages and reads connected apps without asking; sending, posting, deleting and paying ask',
     rules: rules.length ? rules : 'none',
     waitingOnOwner: waiting.length ? waiting : 'nothing',
@@ -406,6 +505,7 @@ export function workspaceBrief(state, {agents = [], connectors = [], speaker = n
       'Models and keys are added only by the owner, in Settings → Models and keys. Never ask for a key in chat; use the setup block to open that page.',
       'To connect Gmail or Google Drive, send the setup block {"action":"open","page":"gmail"}: its button connects Google, or, when the owner has no Google client saved, has them sign in to Gmail in this computer\'s browser. Once they are signed in, read mail by asking for the page https://mail.google.com/mail/u/0/#inbox (a search is #search/<words>), and Drive at https://drive.google.com/. Sending mail is the owner\'s click on an ask card. MCP servers are connected in Settings → Connectors. An MCP server that runs on this computer is added there under On my computer, with the command that starts it; the owner types it, never you.',
       'When a run fails because a model is down or out of quota, propose another connected model with the setup block.',
+      'A sentence about how bots should work from now on ("bots should open at most 3 pages", "always ask me before any site", "make Scout blue", "stop all bots") is a change to the setup: answer it with the setup block for it, not by redoing earlier work. Read it as about earlier work only when it plainly names that work.',
     ],
   };
 }

@@ -7,8 +7,8 @@ No setup step was done by hand.
 
 ## How it was tested
 
-- **Gates:** `npm run check`, `npm test` (1641 tests), `tests/polish_smoke.py` (10 scenarios) and
-  `tests/usability_smoke.py` (48 scenarios). All green.
+- **Gates:** `npm run check`, `npm test` (1656 tests), `tests/polish_smoke.py` (10 scenarios) and
+  `tests/usability_smoke.py` (49 scenarios). All green.
 - **Real bots:** 72 prompts an owner would type, covering search, prices, news, weather, long pages, YouTube,
   careers pages, schedules, bot changes, team set-up, sign-in sites, Gmail, a test order form, and a live
   restaurant booking site. Every run completed. Each flagged reply was read by hand; the ones that were real
@@ -48,6 +48,44 @@ contrast (WCAG AA), 24px targets, the keyboard focus ring, duplicate ids, landma
 - **Fixed:** a screen reader never heard the first reply in a chat that had no reply yet (only later ones were
   spoken). The first reply is now announced, and a smoke scenario covers it.
 - **Fixed:** "or start a new thread" on the empty laptop panel was a 21px target; it is now 32px.
+
+## Running the app from chat
+
+Everything the owner can change by hand, a bot can now propose from chat, behind a card the owner taps. Bots already
+had cards for:
+
+- jobs, names and settings;
+- models and effort;
+- teams and permission rules;
+- schedules;
+- removing a bot;
+- sign-in.
+
+They now also have cards for:
+
+- a bot's **colour and shape** (colours have names, such as "make it blue");
+- **pausing** every bot;
+- **run limits** (pages per reply, rounds, team steps);
+- **asking before every page** or browsing freely;
+- **forgetting** what a bot learned;
+- **removing a connector**;
+- **renaming or deleting a thread**.
+
+Every bot is also told whether bots are running, the limits, and each bot's look, so "what is my setup?" gets the
+whole picture.
+
+Sixteen plain requests went to a real bot ("make the researcher blue and an egg", "stop all my bots", "cap how many
+pages a bot reads to 2", "delete the Goa thread", "rename the writer, make it short and have it report to the
+researcher"). Each one now produces the right card, or the right "nothing to change". The run found and fixed these:
+
+| Gap | Now |
+|---|---|
+| A card that could not be used sat beside a reply saying the change was proposed | The reason goes back to the bot once; it sends a corrected card or says plainly that nothing was set up |
+| New fields (asking first, limits, threads, connectors) were dropped by the block reader | The reader carries them, and a test reads real reply blocks end to end |
+| "Turn my bots back on" offered cards that changed nothing | A change already in place gets no button; the bot hears it and says so |
+| A fourth change in one reply vanished | A reply carries up to eight; more are reported, never dropped |
+| "Bots should open at most 3 pages" was read as being about the bot's own reply | It is a limits card |
+| The colour picker read "Colour 1" to "Colour 10" to a screen reader | Each colour is read by name |
 
 ## Left to the owner, by design
 
