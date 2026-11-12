@@ -55,7 +55,7 @@ const PER_SITE = ['browser.use', 'send', 'post', 'delete'];
 /** Settings pages a bot may point to, by the word it uses, and the section key and title the app uses. */
 export const SETUP_PAGES = {
   models: ['models', 'Models and keys'], keys: ['models', 'Models and keys'],
-  connectors: ['conn', 'Connectors'], gmail: ['conn', 'Connectors'], drive: ['conn', 'Connectors'], google: ['conn', 'Connectors'], mcp: ['conn', 'Connectors'],
+  connectors: ['conn', 'Connectors'], gmail: ['conn', 'Connectors'], drive: ['conn', 'Connectors'], calendar: ['conn', 'Connectors'], google: ['conn', 'Connectors'], mcp: ['conn', 'Connectors'],
   permissions: ['perm', 'Permissions'], devices: ['agents', 'Local agents'], agents: ['agents', 'Local agents'], computer: ['agents', 'Local agents'],
   usage: ['usage', 'Usage'], appearance: ['look', 'Appearance'], look: ['look', 'Appearance'], theme: ['look', 'Appearance'], general: ['general', 'General'],
   notifications: ['notifications', 'Notifications'], alerts: ['notifications', 'Notifications'], workspaces: ['workspaces', 'Workspaces'], workspace: ['workspaces', 'Workspaces'],
@@ -64,8 +64,10 @@ export const SETUP_PAGES = {
   about: ['about', 'About this build'],
 };
 /** The page words a bot is told, one per page. */
-const PAGE_LIST = 'models, connectors, gmail, permissions, devices, usage, appearance, notifications, workspaces, members, data, about';
-const GOOGLE_PAGES = ['gmail', 'drive', 'google'];
+const PAGE_LIST = 'models, connectors, gmail, drive, calendar, permissions, devices, usage, appearance, notifications, workspaces, members, data, about';
+/** The Google words a bot may use, and the Google MCP app each one connects. */
+const GOOGLE_PAGES = {gmail: 'gmail', google: 'gmail', mail: 'gmail', email: 'gmail', drive: 'google-drive', 'google drive': 'google-drive', docs: 'google-drive', calendar: 'google-calendar', 'google calendar': 'google-calendar'};
+const googleApp = word => (Object.hasOwn(GOOGLE_PAGES, word) ? GOOGLE_PAGES[word] : null);
 /** A public site as an https address ("reddit.com" → https://reddit.com/), or null: never an IP address or a local name. */
 function signinUrl(value) {
   const text = String(value || '').trim();
@@ -94,7 +96,7 @@ export const SETUP_TOOL_HINT = 'To change a setting for the owner, put one fence
   + '{"action":"disconnect","connector":"<connector name>"} removes a connected service. {"action":"reconnect","connector":"<connector name>"} checks a connector that is not ready again, or has the owner sign in to it again. {"action":"connect","app":"<an app such as GitHub, Notion, Slack or Linear>"} connects an app with one tap, as the Connectors page does. '
   + '{"action":"thread","thread":"<words from its title>","name":"<new title>"} renames a thread; with "remove":true instead of a name it deletes the thread. {"action":"thread","new":true,"name":"<title>","message":"<the first message>"} starts a new thread for a separate piece of work. {"action":"memory","rule":"<words from a line the bots keep>","text":"<the new line>"} rewrites one line of the company notebook (add "bot" for that bot\'s own notes); "remove":true deletes it. '
   + '{"action":"remove","bot":"<bot name>"} removes a bot the owner no longer wants, with its chat and schedules (never Atlas). '
-  + '{"action":"signin","site":"reddit.com"} gives the owner a button that opens the browser on this computer at that site, in their hands, to sign in once; use it when a site blocks you or needs the owner signed in (Reddit, LinkedIn, a shop or bank login), instead of only saying it is blocked. Never ask for a password in chat. ' + `{"action":"open","page":"${PAGE_LIST.replace(/, /g, '|')}"}` + ' shows the owner a Settings page, for things only they can do, such as pasting a key or pairing a computer ("devices" is the computers that run the browser, not bots). Every change to a bot (its job, name, settings, model, rules, schedules, removing it) is one of the blocks above, never a page to open; "gmail" (or "drive") is a button that connects it, so use it whenever the owner wants email or Drive connected. '
+  + '{"action":"signin","site":"reddit.com"} gives the owner a button that opens the browser on this computer at that site, in their hands, to sign in once; use it when a site blocks you or needs the owner signed in (Reddit, LinkedIn, a shop or bank login), instead of only saying it is blocked. Never ask for a password in chat. ' + `{"action":"open","page":"${PAGE_LIST.replace(/, /g, '|')}"}` + ' shows the owner a Settings page, for things only they can do, such as pasting a key or pairing a computer ("devices" is the computers that run the browser, not bots). Every change to a bot (its job, name, settings, model, rules, schedules, removing it) is one of the blocks above, never a page to open; "gmail", "drive" or "calendar" is a button that connects that Google app, so use it whenever the owner wants email, Drive or their calendar connected. '
   + 'Nothing changes until the owner taps Apply on the card, so say in your reply what you proposed and why. Never ask for a key or password in chat.';
 
 const short80 = text => { const t = String(text ?? '').replace(/\s+/g, ' ').trim(); return t.length > 80 ? `${t.slice(0, 80)}…` : t; };
@@ -184,16 +186,8 @@ export function resolveSetup(state, request, {speaker = null} = {}) {
     if (['bots', 'bot', 'team', 'teams', 'company'].includes(request.page)) return {ok: false, error: 'bots are changed with a card, not a page: send {"action":"remove","bot":"<name>"} to remove one, or the job, rename, settings, model, rule or schedule block.'};
     const page = SETUP_PAGES[request.page];
     if (!page) return {ok: false, error: `there is no "${request.page || 'blank'}" page to open. Use ${PAGE_LIST}.`};
-    // Gmail and Drive are one Google sign-in, so the card goes straight to it.
-    // With no Google client of their own saved, the owner signs in to Gmail or Drive once in the shared browser
-    // instead, and the bots read it there; nothing in Google Cloud to set up. A saved client keeps the real sign-in.
-    const client = (state?.connectors || []).some(c => c?.kind === 'google' && c.clientCredentialId);
-    const botId = speaker?.id || primaryOf(state)?.id;
-    if (GOOGLE_PAGES.includes(request.page) && !client && botId) {
-      const [url, name] = request.page === 'drive' ? ['https://drive.google.com/', 'Google Drive'] : ['https://mail.google.com/', 'Gmail'];
-      return {ok: true, card: {action: 'signin', botId, url, text: `Sign in to ${name} in this computer's browser. Bots use the same browser, so they can read it once you are signed in; anything they send still asks you first.`}};
-    }
-    if (GOOGLE_PAGES.includes(request.page)) return {ok: true, card: {action: 'open', section: 'conn', app: 'google', text: 'Connect Google (Gmail and Drive)'}};
+    // Gmail, Drive and Calendar are Google's own MCP servers: the card is the Connect button for that app.
+    if (googleApp(request.page)) return connectCard(state, {app: googleApp(request.page)}, speaker);
     return {ok: true, card: {action: 'open', section: page[0], text: `Settings → ${page[1]}`}};
   }
   if (request.action === 'signin') {
@@ -522,12 +516,12 @@ function reconnectCard(state, request) {
   return {ok: true, card: {action: 'reconnect', connectorId: hit.id, ...(app ? {app} : {}), text: app ? `Sign in to ${hit.name} again` : `Check ${hit.name} again and reconnect it`}};
 }
 
-/** Connect an app from the catalogue with the same one tap the Connectors page uses. Google is the Gmail card. */
-function connectCard(state, request, speaker) {
+/** Connect an app from the catalogue with the same one tap the Connectors page uses. "Google" is Gmail. */
+function connectCard(state, request) {
   const want = lower(request.app || request.connector || request.name);
-  const app = APPS.find(a => a.id === want) || APPS.find(a => lower(a.name) === want) || APPS.find(a => lower(a.name.split('·')[0]) === want) || null;
-  if (GOOGLE_PAGES.includes(want) || app?.google) return resolveSetup(state, {action: 'open', page: want === 'drive' ? 'drive' : 'gmail'}, {speaker});
-  if (!app) return {ok: false, error: `"${cleanText(request.app, 40) || 'blank'}" is not in the catalogue. Apps: ${APPS.filter(a => !a.google).map(a => a.name).join(', ')}.`};
+  const id = googleApp(want) || want;
+  const app = APPS.find(a => a.id === id) || APPS.find(a => lower(a.name) === want) || null;
+  if (!app) return {ok: false, error: `"${cleanText(request.app, 40) || 'blank'}" is not in the catalogue. Apps: ${APPS.map(a => a.name).join(', ')}.`};
   return {ok: true, card: {action: 'connect', app: app.id, text: `Connect ${app.name}`}};
 }
 
@@ -688,7 +682,7 @@ export function workspaceBrief(state, {agents = [], connectors = [], speaker = n
       'Opening a web page and reading a connected app need no answer unless basicAccess or a rule says so; sending, posting, deleting and paying ask the owner unless a rule says Always allow. Rules are in Settings → Permissions.',
       live.length ? 'A computer is connected and runs the browser and the claude and codex sign-in; there is nothing to pair.' : 'No computer is connected now, so pages are read without the shared browser. A server started on the owner\'s own computer connects it by itself; otherwise propose the setup block {"action":"open","page":"devices"}.',
       'Models and keys are added only by the owner, in Settings → Models and keys. Never ask for a key in chat; use the setup block to open that page.',
-      'To connect Gmail or Google Drive, send the setup block {"action":"open","page":"gmail"}: its button connects Google, or, when the owner has no Google client saved, has them sign in to Gmail in this computer\'s browser. Once they are signed in, read mail by asking for the page https://mail.google.com/mail/u/0/#inbox (a search is #search/<words>), and Drive at https://drive.google.com/. Sending mail is the owner\'s click on an ask card. MCP servers are connected in Settings → Connectors. An MCP server that runs on this computer is added there under On my computer, with the command that starts it; the owner types it, never you.',
+      'To connect Gmail, Google Drive or Google Calendar, send the setup block {"action":"connect","app":"gmail"} (or "google-drive", "google-calendar"): its button signs the owner in to Google\'s own MCP server, and then you use its tools. Gmail\'s tools write drafts, which the owner sends from Gmail. MCP servers are connected in Settings → Connectors. An MCP server that runs on this computer is added there under On my computer, with the command that starts it; the owner types it, never you.',
       'When a run fails because a model is down or out of quota, propose another connected model with the setup block.',
       'A sentence about how bots should work from now on ("bots should open at most 3 pages", "always ask me before any site", "make Scout blue", "stop all bots") is a change to the setup: answer it with the setup block for it, not by redoing earlier work. Read it as about earlier work only when it plainly names that work.',
     ],

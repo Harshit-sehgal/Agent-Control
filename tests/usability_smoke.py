@@ -1770,6 +1770,7 @@ class Server:
 
     def __init__(self, **kw):
         self.connectors = []
+        self.clients = {'google': False, 'slack': False, 'github': False}
         self.google = {'configured': False, 'connected': False, 'status': 'none', 'account': None, 'redirectUri': REDIRECT, 'scopes': [], 'steps': GOOGLE_STEPS,
                        'testingNote': 'While the consent screen is in Testing, Google ends the sign-in after 7 days and this page shows Reconnect Google.'}
         self.providers, self.default_provider, self.default_model = [], None, None
@@ -1802,7 +1803,7 @@ class Server:
             await route.fulfill(status=status, content_type='application/json', body=json.dumps(data))
         if path == '/api/connectors':
             if method == 'GET':
-                return await reply({'connectors': self.connectors, 'google': self.google})
+                return await reply({'connectors': self.connectors, 'google': self.google, 'clients': self.clients})
             if body.get('kind') == 'site':
                 app, host = body['app'], {'github': 'github.com', 'google': 'mail.google.com'}.get(body['app'], f"{body['app']}.example.com")
                 made = next((c for c in self.connectors if c.get('app') == app), None) or {'id': f'{app}-site', 'kind': 'site', 'app': app,
@@ -1980,107 +1981,73 @@ async def connectors_add_and_delete_mcp(page, base):
 
 
 async def connect_apps_one_tap(page, base):
-    """Connect is one tap, like Gmail: an app with a web sign-in opens it in the shared browser, in the owner's hands."""
+    """Connect is one tap to the app's own MCP sign-in. With no client in the server's .env, GitHub takes its token and
+    Gmail says what is missing; with one, Gmail goes straight to Google's sign-in. No website stands in for a connector."""
     server = Server()
-    live = []
-
-    async def live_handle(route):
-        request = route.request
-        path = re.sub(r'^https?://[^/]+', '', request.url).split('?')[0]
-        if request.method != 'GET':
-            live.append((path, json.loads(request.post_data) if request.post_data else None))
-        data = [] if path == '/api/browser-live' else {'botId': path.split('/')[3] if path.count('/') >= 3 else None, 'agent': False, 'seq': 0, 'changed': False, 'state': 'driving', 'url': None, 'title': None, 'site': None}
-        await route.fulfill(status=200, content_type='application/json', body=json.dumps(data if request.method == 'GET' else {'ok': True, 'state': 'driving'}))
-    await page.add_init_script(via_fetch(['/api/connectors', '/api/ai', '/api/agents', '/api/activity/', '/api/browser-live']))
+    await page.add_init_script(via_fetch(['/api/connectors', '/api/ai', '/api/agents', '/api/activity/']))
     for pattern in ('**/api/connectors**', '**/api/ai**', '**/api/agents**', '**/api/activity/**'):
         await page.route(pattern, server.handle)
-    await page.route('**/api/browser-live**', live_handle)
     await open_app(page, base)
     await open_settings(page, 'conn')
     body = page.locator('#main .st-dlg .st-body')
-    # An app whose own server signs people in (Notion) goes straight to that sign-in, like Connect Google.
+    # An app whose own server signs people in (Notion) goes straight to that sign-in.
     started = []
 
     async def mcp_start(route):
         started.append(route.request.url)
-        await route.fulfill(status=302, headers={'Location': f'{base}/index.html?connect=connected&app=notion#settings/conn'})
+        app = route.request.url.rsplit('=', 1)[1]
+        await route.fulfill(status=302, headers={'Location': f'{base}/index.html?connect=connected&app={app}#settings/conn'})
     await page.route('**/api/connectors/mcp/start**', mcp_start)
     await body.locator('.ca-sec[aria-label="Recommended"] [data-app="notion"] .ca-go').click()
     await expect(page.locator('#toast')).to_contain_text('Notion is connected. Bots use it on your account directly.')
     assert len(started) == 1 and started[0].endswith('/api/connectors/mcp/start?app=notion'), started
     assert '?connect' not in page.url, 'the address is tidied'
-    # An app that does not let an app sign in by itself (GitHub) is signed in to in the shared browser instead.
+    # GitHub with no GitHub client on the server: its token sheet, never a website sign-in.
     await page.evaluate("location.hash = 'settings/conn'")
     await body.locator('#ca-search').fill('github')
     await body.locator('[data-app="github"] .ca-go').click()
-    await expect(page.locator('#toast')).to_contain_text('Sign in to GitHub, then tap Hand back control')
-    assert server.sent('POST', '/api/connectors') == [{'kind': 'site', 'app': 'github'}]
-    await eventually(lambda: [p.rsplit('/', 1)[1] for p, _ in live] == ['takeover', 'input'])
-    assert live[1][1] == {'type': 'navigate', 'url': 'https://github.com/login'}, live
-    await expect(page.locator('#catalog-connect-form')).to_have_count(0)
-    # Back on the page, GitHub is connected, and its row offers to sign in again, add a token or remove it.
-    await page.evaluate("location.hash = 'settings/conn'")
-    await expect(body.locator('.ca-sum')).to_contain_text('1 connected')
-    row = body.locator('.cn-site[data-connector="github-site"]')
-    await expect(row).to_contain_text('Signed in through the browser')
-    await expect(row.get_by_role('button', name='Sign in again')).to_be_visible()
-    await expect(row.get_by_role('button', name='Add a token')).to_be_visible()
-    # With no Google client saved, Connect Google is a sign-in at Gmail too.
-    await body.locator('#ca-search').fill('google')
-    await body.locator('[data-app="google"] .ca-go').click()
-    await expect(page.locator('#toast')).to_contain_text('Sign in to Gmail')
-    assert server.sent('POST', '/api/connectors')[-1] == {'kind': 'site', 'app': 'google'}
-    await eventually(lambda: live[-1][1] == {'type': 'navigate', 'url': 'https://mail.google.com/'})
-
-
-async def google_setup_form_connect_and_reconnect(page, base):
-    server = await install(page)
-    await open_app(page, base)
-    await open_settings(page, 'conn')
-    card = page.locator('[data-connector="google"]')
-    # Not set up: the steps, the address to register, the testing note, and no way to sign in yet.
-    await expect(card.locator('.cn-steps li')).to_have_count(6)
-    await expect(card.locator('.cn-redirect code')).to_have_text(REDIRECT)
-    await expect(card.locator('.cn-testing')).to_contain_text('7 days')
-    await expect(card.get_by_role('link', name='Connect Google')).to_have_count(0)
-    form = card.locator('#google-setup-form')
-    await expect(form.locator('input[name="clientSecret"]')).to_have_attribute('type', 'password')
-    await form.locator('input[name="clientId"]').fill('1234567890-abc.apps.googleusercontent.com')
-    await form.locator('input[name="clientSecret"]').fill('GOCSPX-supersecretvalue')
-    await form.get_by_role('button', name='Save client').click()
-    # Saved: Connect Google is a plain link to the start route, and the secret is gone from the page.
-    link = card.get_by_role('link', name='Connect Google')
-    await expect(link).to_have_attribute('href', '/api/connectors/google/start')
-    assert await link.evaluate('n => n.tagName') == 'A'
-    assert server.sent('POST', '/api/connectors/google/setup') == [{'clientId': '1234567890-abc.apps.googleusercontent.com', 'clientSecret': 'GOCSPX-supersecretvalue'}]
-    assert 'GOCSPX-supersecretvalue' not in await page.content()
-    await expect(card.locator('[data-google-client]')).to_be_hidden()
-    await card.get_by_role('button', name='Change client').click()
-    await expect(card.locator('[data-google-client] input[name="clientId"]')).to_be_visible()
-    # Connected: the account, the tools, and no Connect link.
-    server.google.update(configured=True, connected=True, status='ready', account='me@example.org')
-    server.connectors = [{'id': 'google', 'kind': 'google', 'name': 'Google', 'account': 'me@example.org', 'status': 'ready', 'statusMessage': '', 'transport': None, 'host': None, 'agentServer': None,
-                          'actions': [{'name': 'gmail.search', 'write': False, 'description': 'Search the mailbox.'}, {'name': 'gmail.send', 'write': True, 'description': 'Send an email.'}], 'addedAt': None, 'checkedAt': None}]
+    await expect(page.locator('#catalog-connect-form')).to_be_visible()
+    await page.keyboard.press('Escape')
+    # Gmail with no Google client: one line says who adds what to .env; nothing is sent.
+    await body.locator('#ca-search').fill('gmail')
+    await body.locator('[data-app="gmail"] .ca-go').click()
+    await expect(page.locator('#toast')).to_contain_text('GOOGLE_CLIENT_ID')
+    assert server.sent('POST', '/api/connectors') == [], 'nothing is saved for a website sign-in'
+    assert len(started) == 1
+    # With the Google client in .env, Gmail is one tap to Google's sign-in.
+    server.clients['google'] = True
     await goto_settings_section(page, 'general')
     await goto_settings_section(page, 'conn')
-    await expect(card).to_contain_text('Signed in as me@example.org')
-    await expect(card.locator('.cn-head .tag')).to_have_text('Connected')
-    await expect(card.get_by_role('link', name='Connect Google')).to_have_count(0)
-    await expect(page.locator('.cn-mcp')).to_have_count(0)
-    # Google ended the sign-in: the card says Reconnect and offers it.
-    server.google.update(connected=False, status='reconnect')
+    await body.locator('#ca-search').fill('calendar')
+    await body.locator('[data-app="google-calendar"] .ca-go').click()
+    await expect(page.locator('#toast')).to_contain_text('Google Calendar is connected.')
+    assert started[-1].endswith('/api/connectors/mcp/start?app=google-calendar'), started
+
+
+async def older_google_connection_listed(page, base):
+    """No Google Cloud steps, redirect address or client form; an older Google connection is listed with a way to
+    connect Gmail's MCP server instead, and Remove asks first."""
+    server = await install(page)
+    server.connectors = [{'id': 'google', 'kind': 'google', 'name': 'Google', 'account': 'me@example.org', 'status': 'ready', 'statusMessage': '', 'transport': None, 'host': None, 'agentServer': None, 'actions': [], 'addedAt': None, 'checkedAt': None}]
+    await open_app(page, base)
+    await open_settings(page, 'conn')
+    body = page.locator('#main .st-dlg .st-body')
+    await expect(body.locator('#google-setup-form')).to_have_count(0)
+    await expect(body.locator('.cn-steps')).to_have_count(0)
+    await expect(body.locator('.cn-redirect')).to_have_count(0)
+    row = body.locator('.cn-site[data-connector="google"]')
+    await expect(row).to_contain_text('Older connection')
+    await expect(row.get_by_role('button', name='Connect Gmail')).to_be_visible()
+    await expect(row.get_by_role('link', name='Reconnect Google')).to_have_count(0)
+    # A Google sign-in that ended can be restored with its saved client.
     server.connectors[0].update(status='reconnect')
     await goto_settings_section(page, 'general')
     await goto_settings_section(page, 'conn')
-    await expect(card.locator('.cn-head .tag')).to_have_text('Reconnect')
-    await expect(card.get_by_role('link', name='Reconnect Google')).to_have_attribute('href', '/api/connectors/google/start')
-    await expect(card).to_contain_text('me@example.org')
-    # Disconnect asks first.
-    await card.get_by_role('button', name='Disconnect').click()
+    await expect(row.get_by_role('link', name='Reconnect Google')).to_have_attribute('href', '/api/connectors/google/start')
+    await row.get_by_role('button', name='Remove').click()
     await expect(page.locator('#modal')).to_contain_text('Remove Google?')
     await page.locator('#modal').get_by_role('button', name='Remove').click()
-    await expect(card.locator('.cn-steps li')).to_have_count(6)
-    assert len(server.sent('DELETE', '/api/connectors/google')) == 1
+    await eventually(lambda: len(server.sent('DELETE', '/api/connectors/google')) == 1)
 
 
 async def google_return_toast_and_clean_address(page, base):
@@ -2668,8 +2635,8 @@ async def main():
             await h.scenario('computer: the pill carries the site chip, opens the view and says You are driving', computer_site_chip_on_the_pill)
             await h.scenario('phone: the Computer view fits and its controls are thumb-sized', phone_computer_view, PHONE)
             await h.scenario('connectors: add an MCP server over HTTP and on the agent, refresh its tools, delete asks first, no secret is painted', connectors_add_and_delete_mcp)
-            await h.scenario('connectors: Connect is one tap: the app\'s own sign-in, or the shared browser when it has none', connect_apps_one_tap)
-            await h.scenario('connectors: the Google setup form, a plain Connect Google link, connected and reconnect states', google_setup_form_connect_and_reconnect)
+            await h.scenario('connectors: Connect is one tap to the app\'s own MCP sign-in, a token, or what .env lacks', connect_apps_one_tap)
+            await h.scenario('connectors: no Google Cloud form; an older Google connection offers Gmail\'s MCP server', older_google_connection_listed)
             await h.scenario('connectors: ?google=connected toasts once, strips the address and opens Connectors; an error says why', google_return_toast_and_clean_address)
             await h.scenario('models: a subscription is a name and an engine with no key field, and its row says where it is signed in', subscription_provider_and_cli_status)
             await h.scenario('models: Add a model is one card with a choice, the dots hold Edit, Refresh and Delete, one model picker', models_api_provider_menu_and_one_model_picker)
@@ -2703,7 +2670,7 @@ async def main():
         if failed:
             print(f'USABILITY SMOKE FAIL: {len(failed)} of {len(h.results)} scenarios: {failed}')
             return 1
-        print(f'USABILITY SMOKE PASS: {len(h.results)} scenarios; new bot, edit and move, delete, Atlas, pin and reorder, ask cards, permissions, pause banner, settings, out-of-job card, checkpoint card, faces, keyboard, phone, Computer view (row, frame, takeover input, hand back, no device, demo, site chip), Connectors (MCP add and delete, Google setup, return toast), subscription providers and CLI status, Undo and Switch lines in chat, no console errors')
+        print(f'USABILITY SMOKE PASS: {len(h.results)} scenarios; new bot, edit and move, delete, Atlas, pin and reorder, ask cards, permissions, pause banner, settings, out-of-job card, checkpoint card, faces, keyboard, phone, Computer view (row, frame, takeover input, hand back, no device, demo, site chip), Connectors (MCP add and delete, one-tap sign-in, older Google connection, return toast), subscription providers and CLI status, Undo and Switch lines in chat, no console errors')
         return 0
     finally:
         shutil.rmtree(site_dir, ignore_errors=True)

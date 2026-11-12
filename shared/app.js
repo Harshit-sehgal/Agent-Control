@@ -31,7 +31,7 @@ import {profileViews, wirePages} from './ui-profile.js';
 import {wireGestures, gesturesBusy} from './ui-gestures.js';
 import {settingsViews} from './ui-settings.js';
 import {showLogin, hideLogin} from './ui-sheets.js';
-import {actions, forms, onControlChange, onControlInput} from './ui-actions.js';
+import {actions, forms, onControlChange, onControlInput, modelSearchKey} from './ui-actions.js';
 import {bringBotsToLife} from './ui-fx.js';
 import {wireComputer} from './ui-computer-view.js';
 import {googleReturn, withoutGoogleParams} from './ui-connect-model.js';
@@ -297,6 +297,8 @@ document.body.addEventListener('input', ev => {
   onControlInput(ev.target);
 });
 document.body.addEventListener('keydown', ev => {
+  // A model search bar's own keys first: its Enter must not submit, its Esc clears before a sheet closes.
+  if (modelSearchKey(ev)) return;
   trapTab(ev);
   if (ev.key === 'Escape') { if (sheetOpen()) { ev.preventDefault(); closeSheet(); } return; }
   // Enter sends, Shift+Enter makes a new line.

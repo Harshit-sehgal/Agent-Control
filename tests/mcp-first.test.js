@@ -14,7 +14,7 @@ const notionMcp = {id: 'notion', kind: 'mcp', app: 'notion', name: 'Notion', sta
 test('every app knows the sites that are its own', () => {
   assert.equal(appForHost('www.notion.so')?.id, 'notion');
   assert.equal(appForHost('acme.atlassian.net')?.id, 'atlassian');
-  assert.equal(appForHost('mail.google.com')?.id, 'google');
+  assert.equal(appForHost('mail.google.com')?.id, 'gmail');
   assert.equal(appForHost('x.com'), null);
   assert.equal(appForHost('notnotion.so'), null, 'a look-alike domain is not the app');
 });
@@ -24,8 +24,8 @@ test('apps whose official server signs in by itself connect in one tap, straight
     assert.equal(connectHow(appById(id), {}), 'oauth', id);
     assert.match(appById(id).oauth, /^https:\/\//, id);
   }
-  assert.equal(connectHow(appById('github'), {}), 'site', 'GitHub does not let an app register itself');
-  assert.equal(connectHow(appById('figma'), {}), 'site', 'Figma refuses apps it has not approved');
+  assert.equal(connectHow(appById('github'), {}), 'form', 'GitHub does not let an app register itself: a token, or the server\'s client');
+  assert.equal(connectHow(appById('figma'), {}), 'form', 'Figma refuses apps it has not approved');
   assert.ok(APPS.filter(a => a.oauth).length >= 10);
 });
 
@@ -46,10 +46,13 @@ test('the browser still opens what no connector covers, and an app that is not c
   assert.equal(ask(state([{id: 'notion-site', kind: 'site', app: 'notion', host: 'www.notion.so', status: 'ready'}]), 'https://www.notion.so/x').records.length, 1, 'signed in through the browser is the browser');
 });
 
-test('Gmail in the browser goes back to the bot only when Google is connected through its sign-in', () => {
-  const google = {id: 'google', kind: 'google', name: 'Google', status: 'ready', actions: [{name: 'gmail.search', write: false}]};
-  assert.match(ask(state([google]), 'https://mail.google.com/mail/u/0/#inbox').invalid[0], /"use":"google"/);
-  assert.equal(ask(state([{...google, status: 'setup'}]), 'https://mail.google.com/mail/u/0/').records.length, 1);
+test('Gmail in the browser goes back to the bot only when Gmail is connected', () => {
+  const gmail = {id: 'gmail', kind: 'mcp', app: 'gmail', name: 'Gmail', status: 'ready', actions: [{name: 'search_threads', write: false}]};
+  assert.match(ask(state([gmail]), 'https://mail.google.com/mail/u/0/#inbox').invalid[0], /"use":"gmail"/);
+  assert.equal(ask(state([{...gmail, status: 'reconnect'}]), 'https://mail.google.com/mail/u/0/').records.length, 1);
+  // An older Google connection still covers Gmail and Drive.
+  const old = {id: 'google', kind: 'google', name: 'Google', status: 'ready', actions: [{name: 'gmail.search', write: false}]};
+  assert.match(ask(state([old]), 'https://drive.google.com/drive/my-drive').invalid[0], /"use":"google"/);
 });
 
 test('bots are told connectors come first and the browser is for the rest', () => {

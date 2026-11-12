@@ -11,10 +11,10 @@
  * started the flow by the state nonce and a short-lived Lax cookie (src/google.js).
  */
 import {publicConnectors, GOOGLE_ID} from '../shared/connectors.js';
-import {addMcpConnector, addSiteConnector, refreshConnector, removeConnector, publicBaseUrl} from './connectors.js';
+import {addMcpConnector, refreshConnector, removeConnector, publicBaseUrl} from './connectors.js';
 import {saveGoogleClient, startGoogleSignIn, takeGoogleFlow, finishGoogleSignIn, checkGoogle, googleSetup, resetGoogleTokenCache, GOOGLE_CALLBACK} from './google.js';
 import {cookie} from './http.js';
-import {startMcpSignIn, takeMcpFlow, finishMcpSignIn, reasonOf, MCP_CALLBACK} from './mcp-oauth.js';
+import {startMcpSignIn, takeMcpFlow, finishMcpSignIn, reasonOf, oauthClients, MCP_CALLBACK} from './mcp-oauth.js';
 import {undoHeldSend} from './held-sends.js';
 import {reply} from './router.js';
 
@@ -28,11 +28,11 @@ export function connectorRoutes(router, app = {}) {
   router.add('GET', '/api/connectors', 'viewer', c => ({
     connectors: publicConnectors(c.store.read()),
     google: googleSetup(c.store, c.req),
+    // Which one-tap sign-ins this server has a client for (.env), as true or false.
+    clients: oauthClients(),
   }));
   router.add('POST', '/api/connectors', 'admin', async c => {
     const body = await c.body();
-    // Connect apps, one tap: the app is signed in to in the shared browser, so there is no server or token to save.
-    if (body?.kind === 'site') return reply(201, await addSiteConnector(c.store, body));
     return reply(201, await addMcpConnector(c.store, c.actor.workspaceId, body, {createdBy: c.actor.email}));
   });
   router.add('POST', '/api/connectors/:id/refresh', 'admin', c => (c.params.id === GOOGLE_ID ? checkGoogle(c.store) : refreshConnector(c.store, c.params.id)));

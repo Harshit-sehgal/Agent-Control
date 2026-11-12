@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  googleReturn, withoutGoogleParams, statusOf, mcpRows, googleCard, mcpDraft, cliDraft, agentCliRows, subscriptionLine, SIGN_IN_HINT,
+  googleReturn, withoutGoogleParams, statusOf, mcpRows, mcpDraft, cliDraft, agentCliRows, subscriptionLine, SIGN_IN_HINT,
   connectorLine, modelLimitLine, agentPermissionRows, agentWorkLine,
 } from '../shared/ui-connect-model.js';
 
@@ -74,52 +74,6 @@ test('a server in trouble carries its own words, and Google is not an MCP row', 
 
 test('mcpRows tolerates a missing list', () => {
   assert.deepEqual(mcpRows(undefined), []);
-});
-
-/* ---------- the Google card ---------- */
-
-const setup = (extra = {}) => ({configured: false, connected: false, status: 'none', account: null, redirectUri: 'https://app.example/api/connectors/google/callback', scopes: [], steps: ['one', 'two'], testingNote: 'Testing ends in 7 days.', ...extra});
-
-test('a setup step that quotes the redirect address points at its box, so the address is printed once', () => {
-  const uri = 'https://app.example/api/connectors/google/callback';
-  const card = googleCard(setup({steps: [`Under Authorized redirect URIs add exactly: ${uri}`, 'Save.']}));
-  assert.deepEqual(card.steps, ['Under Authorized redirect URIs add exactly: the address shown below', 'Save.']);
-  assert.equal(card.redirectUri, uri);
-  assert.deepEqual(googleCard(setup({redirectUri: '', steps: ['one']})).steps, ['one']);
-});
-
-test('Google not set up shows the steps, the redirect address and the testing note, and no sign-in link', () => {
-  const card = googleCard(setup());
-  assert.equal(card.state, 'none');
-  assert.deepEqual(card.steps, ['one', 'two']);
-  assert.equal(card.redirectUri, 'https://app.example/api/connectors/google/callback');
-  assert.equal(card.testingNote, 'Testing ends in 7 days.');
-  assert.equal(card.connectLabel, null);
-  assert.equal(card.showForm, true);
-});
-
-test('a saved client offers Connect Google, and the form stays folded away', () => {
-  const card = googleCard(setup({configured: true, status: 'setup'}));
-  assert.equal(card.state, 'ready');
-  assert.equal(card.connectLabel, 'Connect Google');
-  assert.equal(card.showForm, false);
-});
-
-test('connected shows the account and no connect button; reconnect and error offer Reconnect Google', () => {
-  const on = googleCard(setup({configured: true, connected: true, status: 'ready', account: 'me@example.org'}));
-  assert.equal(on.state, 'connected');
-  assert.equal(on.account, 'me@example.org');
-  assert.equal(on.connectLabel, null);
-  const lapsed = googleCard(setup({configured: true, status: 'reconnect', account: 'me@example.org'}));
-  assert.equal(lapsed.state, 'reconnect');
-  assert.equal(lapsed.connectLabel, 'Reconnect Google');
-  assert.equal(lapsed.account, 'me@example.org');
-  assert.equal(googleCard(setup({configured: true, status: 'error'})).connectLabel, 'Reconnect Google');
-});
-
-test('a server without Google info (the demo) is not a card at all', () => {
-  assert.equal(googleCard(null), null);
-  assert.equal(googleCard({demo: true}), null);
 });
 
 /* ---------- the add forms ---------- */

@@ -447,3 +447,13 @@ html.pc-open{overflow:hidden}
 .demo-run{display:inline-flex;align-items:center;margin:4px 0 14px;text-decoration:none}
 .demo-list{list-style:none;margin:0;padding:0}
 .demo-list .rw{min-height:0;cursor:default}
+/* The model picker's search bar: the Connect apps search's look, with the match count at its end. */
+.mdl-find{position:relative;display:flex;align-items:center;margin-bottom:8px}
+.mdl-find[hidden]{display:none}
+.mdl-find>svg{position:absolute;left:14px;color:var(--muted);pointer-events:none;transition:color .15s}
+.mdl-find .input{padding-left:42px;padding-right:92px;background:var(--sunk)}
+.mdl-find .input::placeholder{color:var(--muted)}
+.mdl-find .input::-webkit-search-cancel-button{cursor:pointer;filter:grayscale(1) opacity(.55)}
+.mdl-find:focus-within>svg{color:var(--text)}
+.mdl-count{position:absolute;right:40px;font-size:12.5px;color:var(--muted);pointer-events:none;font-variant-numeric:tabular-nums;white-space:nowrap}
+.mdl-count:empty{display:none}
