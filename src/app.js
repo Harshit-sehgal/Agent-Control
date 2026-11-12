@@ -178,7 +178,8 @@ export function createApp({store, auth, workspaces, push, version}) {
       else fail('Method not allowed.', 405);
     } catch (e) {
       let status = e.status || 500;
-      console.error(status === 500 ? 'Server error: ' + e.message : '');
+      // A 500 is a bug: log all of it. A 4xx is the client's mistake, already answered; nothing to log.
+      if (status >= 500) console.error('Server error:', e?.stack || e?.message || e);
       if (res.headersSent) { res.end(); return; }
       send(res, status, {error: status === 500 ? 'Internal server error' : e.message}, e.allow ? {Allow: e.allow} : undefined);
     }

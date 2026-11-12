@@ -4,10 +4,11 @@
  * the bot as `directBotId`, a thread posts to its own group and Atlas answers.
  * The server orchestrator runs them when a model is configured and the offline
  * simulator does otherwise; the UI cannot tell which. Nothing here can publish. */
-import {pollRun, runWithTyping} from './run-follow.js?v=99c330d626';
-import {botSettings, groupSettings} from './bot-settings.js?v=99c330d626';
-import {store, api, sync, go, conversation, appendMessage, setTyping, teamKey} from './ui-store.js?v=99c330d626';
-import {toast} from './ui-dialogs.js?v=99c330d626';
+import {pollRun, runWithTyping} from './run-follow.js?v=397178f961';
+import {botSettings, groupSettings} from './bot-settings.js?v=397178f961';
+import {store, api, sync, go, conversation, appendMessage, setTyping, teamKey} from './ui-store.js?v=397178f961';
+import {toast} from './ui-dialogs.js?v=397178f961';
+import {isOfflineError, OFFLINE_TEXT} from './ui-model.js?v=397178f961';
 
 /** In-flight sends per conversation, so two overlapping sends keep the typing
  * indicator up until the last one finishes instead of the first clearing it. */
@@ -27,7 +28,7 @@ export async function streamGroupRun(groupId, key = teamKey(groupId), runId = nu
     requests: () => store.state.browserRequests || [],
     onLine: m => appendMessage(key, {id: m.id, role: m.role, senderId: m.senderId, senderName: m.senderName, toBotId: m.toBotId, text: m.text, at: m.at, mode: 'ai', kind: m.kind, runId: m.runId}),
     onNote: note => appendMessage(key, note),
-    onStall: () => toast('Still trying to reach the run log. The run keeps going on the server.'),
+    onStall: ({exhausted = false} = {}) => toast(exhausted ? 'This is taking a while. The run keeps going on the server, and its answer shows here when it is done.' : 'Still trying to reach the run log. The run keeps going on the server.'),
   });
 }
 
@@ -109,11 +110,12 @@ export async function rerun(groupId, {message, direct = '', chat = ''} = {}) {
   return 'ran';
 }
 
-/** Send `text` to a conversation and let the right engine answer. */
-export async function sendChat(id, text) {
+/** Send `text` to a conversation and let the right engine answer. `again`: Retry after a send that never reached
+ * the server, so the message is already in the chat and is not added twice. */
+export async function sendChat(id, text, {again = false} = {}) {
   const conv = conversation(id), message = String(text ?? '').trim();
   if (!conv || !message) return;
-  appendMessage(id, {role: 'user', text: message});
+  if (!again) appendMessage(id, {role: 'user', text: message});
   const count = (inFlight.get(id) || 0) + 1;
   inFlight.set(id, count);
   if (count === 1) setTyping(id, true);
@@ -121,7 +123,9 @@ export async function sendChat(id, text) {
   catch (error) {
     // The server's busy refusal is matched by its own retry logic, so it is reworded here, not there.
     const said = error?.message || String(error);
-    if (/No AI provider is configured/i.test(said)) appendMessage(id, {role: 'system', kind: 'no-model', text: `${conv.name} needs a model before it can answer. Connect one in Settings → Models and keys. A Claude or ChatGPT sign-in on this computer needs no key.`});
+    // Nothing reached the server: say that plainly, with a Retry, instead of quoting a network error.
+    if (isOfflineError(error)) appendMessage(id, {role: 'system', kind: 'offline', text: OFFLINE_TEXT});
+    else if (/No AI provider is configured/i.test(said)) appendMessage(id, {role: 'system', kind: 'no-model', text: `${conv.name} needs a model before it can answer. Connect one in Settings → Models and keys. A Claude or ChatGPT sign-in on this computer needs no key.`});
     else appendMessage(id, {role: 'system', text: /already active/i.test(said) ? 'Still working on your last message. Send this again once it is done.' : `That did not go through: ${said}`});
   }
   finally {

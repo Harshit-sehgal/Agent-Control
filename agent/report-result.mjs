@@ -21,11 +21,31 @@ export async function skipExpired(call, config, task, nowMs = Date.now()) {
   return true;
 }
 
-/** `call(config, path, body)` is the agent's signed POST; it throws "server responded <status>: ...". */
-export async function reportResult(call, config, task, result) {
+/** Waits before each retry of a result POST. */
+export const REPORT_RETRY_MS = [1000, 3000, 9000];
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+/** A server that answered 4xx has decided; a network failure or a 5xx may not have seen the result at all. */
+const transient = error => { const m = /server responded (\d{3})\b/.exec(error?.message || ''); return !m || Number(m[1]) >= 500; };
+
+/** `call` once, and again (up to `waits.length` times) while it fails in a way a moment may fix. */
+async function withRetry(call, config, path, body, waits, sleep) {
+  for (let attempt = 0; ; attempt++) {
+    try { return await call(config, path, body); }
+    catch (error) {
+      if (attempt >= waits.length || !transient(error)) throw error;
+      console.error(`agent: reporting to ${path} failed (${error.message}); trying again`);
+      await sleep(waits[attempt]);
+    }
+  }
+}
+
+/** `call(config, path, body)` is the agent's signed POST; it throws "server responded <status>: ...".
+ * A network failure or a 5xx is tried again a few times: the work is done, and dropping its result would
+ * leave the server waiting out the whole run for it. */
+export async function reportResult(call, config, task, result, {waits = REPORT_RETRY_MS, sleep = pause} = {}) {
   const path = `/api/agent/tasks/${task.id}/result`;
   try {
-    await call(config, path, {status: 'done', result, attempts: task.attempts});
+    await withRetry(call, config, path, {status: 'done', result, attempts: task.attempts}, waits, sleep);
     console.log(`agent: ${task.kind} ${task.id} done`);
   } catch (error) {
     console.error(`agent: ${task.kind} ${task.id} result was refused: ${error.message}`);

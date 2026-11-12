@@ -145,16 +145,19 @@ export async function finishMcpSignIn(store, flow, {code = null, error = null}) 
 const refreshing = new Map();
 /** The headers a call to this server sends: the pasted ones, or a live access token from a sign-in, refreshed from the
  * vaulted refresh token when it is near its end. A refusal marks the connector to sign in again and throws. */
-export async function mcpAuthHeaders(store, connector, secret) {
+/** Mark a signed-in connector to sign in again, and throw the error that says so. */
+export async function askToSignInAgain(store, connector) {
+  await store.update(s => { const c = connectorsOf(s).find(x => x.id === connector.id); if (c) Object.assign(c, {status: 'reconnect', statusMessage: `Sign in to ${connector.name} again.`, checkedAt: now()}); });
+  throw problem(`${connector.name} needs you to sign in again (Settings → Connectors).`, 422, 'reconnect');
+}
+/** `force` renews even a token that has not reached its end: the server refused it already. */
+export async function mcpAuthHeaders(store, connector, secret, {force = false} = {}) {
   const oauth = secret?.oauth;
   if (!oauth) return secret?.headers || {};
-  if (oauth.accessToken && oauth.expiresAt - SKEW_MS > Date.now()) return {Authorization: `Bearer ${oauth.accessToken}`};
+  if (!force && oauth.accessToken && oauth.expiresAt - SKEW_MS > Date.now()) return {Authorization: `Bearer ${oauth.accessToken}`};
   const key = connector.credentialId;
   if (!refreshing.has(key)) refreshing.set(key, (async () => {
-    const again = async () => {
-      await store.update(s => { const c = connectorsOf(s).find(x => x.id === connector.id); if (c) Object.assign(c, {status: 'reconnect', statusMessage: `Sign in to ${connector.name} again.`, checkedAt: now()}); });
-      throw problem(`${connector.name} needs you to sign in again (Settings → Connectors).`, 422, 'reconnect');
-    };
+    const again = () => askToSignInAgain(store, connector);
     if (!oauth.refreshToken) return again();
     const reply = await json(oauth.tokenEndpoint, {method: 'POST', headers: {'content-type': 'application/x-www-form-urlencoded', accept: 'application/json'}, body: tokenBody(oauth, {grant_type: 'refresh_token', refresh_token: oauth.refreshToken})});
     if (reply.status !== 200 || typeof reply.body?.access_token !== 'string') {

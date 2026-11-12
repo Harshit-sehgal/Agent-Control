@@ -2,10 +2,10 @@
  * a pane shows: the chat list, a thread's timeline and the "needs you" count.
  * (The hash route lives in ui-company.js.) No DOM and no globals, so the product rules here are unit
  * tested directly (tests/ui-model.test.js). */
-import {botSettings} from './bot-settings.js?v=99c330d626';
-import {STOPPABLE_STATUSES} from './run-state.js?v=99c330d626';
-import {primaryOf} from './company.js?v=99c330d626';
-import {plain} from './ui-kit.js?v=99c330d626';
+import {botSettings} from './bot-settings.js?v=397178f961';
+import {STOPPABLE_STATUSES} from './run-state.js?v=397178f961';
+import {primaryOf} from './company.js?v=397178f961';
+import {plain} from './ui-kit.js?v=397178f961';
 
 const teamKey = groupId => `team-${groupId}`;
 const time = value => { const t = Date.parse(value || ''); return Number.isFinite(t) ? t : 0; };
@@ -204,4 +204,14 @@ export function tintOf(bot, index = 0, profiles = {}) {
   const synced = bot?.settings?.tint;
   if (Number.isInteger(synced)) return synced;
   return profiles[bot?.id]?.avatarIndex ?? Math.max(0, index);
+}
+
+/** What a chat says when a message could not reach the server at all. */
+export const OFFLINE_TEXT = 'You seem to be offline, so this was not sent.';
+/** A send that never got an answer: the request timed out (shared/transport.js marks that) or the network refused
+ * it (fetch rejects with a TypeError). An answer the server gave, even an error, is not this. */
+export function isOfflineError(error) {
+  if (!error || Number.isFinite(error.status)) return false;
+  if (error.timeout === true || error.name === 'TimeoutError' || error.name === 'AbortError') return true;
+  return error.name === 'TypeError' && /fetch|network|load failed|connection/i.test(String(error.message || ''));
 }

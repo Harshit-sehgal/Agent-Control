@@ -13,7 +13,7 @@ import {CONNECTOR_KINDS, MAX_CONNECTORS, newConnectorId, publicConnector, slugOf
 import {appById} from '../shared/app-catalog.js';
 import {checkMcpUrl, mcpList} from './mcp-client.js';
 import * as credentials from './credentials.js';
-import {mcpAuthHeaders} from './mcp-oauth.js';
+import {mcpAuthHeaders, askToSignInAgain} from './mcp-oauth.js';
 
 const now = () => new Date().toISOString();
 export const connectorsOf = state => (state.connectors ??= []);
@@ -45,12 +45,31 @@ function cleanHeaders(headers) {
 
 /** The target an MCP client reaches: from the vault for an HTTP server, the agent for a stdio one. A server the owner
  * signed in to gets a live access token (renewed when it is near its end). */
+function savedSecret(store, connector) {
+  try { return JSON.parse(credentials.revealValue(store, connector.credentialId)); }
+  catch (error) { fail(error.status === 404 ? 'This connector\'s saved address was deleted. Remove it and add it again.' : 'This connector\'s saved address could not be read.', 502); }
+}
 export async function mcpTarget(store, connector) {
   if (connector.transport === 'stdio') return {transport: 'stdio', store, server: connector.agentServer};
-  let secret;
-  try { secret = JSON.parse(credentials.revealValue(store, connector.credentialId)); }
-  catch (error) { fail(error.status === 404 ? 'This connector\'s saved address was deleted. Remove it and add it again.' : 'This connector\'s saved address could not be read.', 502); }
-  return {transport: 'http', url: secret.url, headers: await mcpAuthHeaders(store, connector, secret)};
+  const secret = savedSecret(store, connector);
+  return {transport: 'http', url: secret.url, headers: await mcpAuthHeaders(store, connector, secret), oauth: Boolean(secret.oauth)};
+}
+
+/** `use(target)` against this connector's server. A signed-in server can refuse a token before its stated end
+ * (revoked, rotated): the token is renewed once and the call made again, and a second refusal asks the owner to
+ * sign in again instead of blaming headers they never typed. */
+export async function withMcp(store, connector, use) {
+  const target = await mcpTarget(store, connector);
+  try { return await use(target); }
+  catch (error) {
+    if (error?.httpStatus !== 401 || !target.oauth) throw error;
+    const headers = await mcpAuthHeaders(store, connector, savedSecret(store, connector), {force: true});
+    try { return await use({...target, headers}); }
+    catch (again) {
+      if (again?.httpStatus !== 401) throw again;
+      return askToSignInAgain(store, connector);
+    }
+  }
 }
 
 /** Add an MCP server. It is reached first, with the pasted secrets in hand; only a server that answers is saved,
@@ -117,12 +136,14 @@ export async function refreshConnector(store, id) {
   if (connector.kind === 'site') return publicConnector(connector);
   if (connector.kind !== 'mcp') fail('Only an MCP server is refreshed here. Google reconnects through its own sign-in.', 400);
   let outcome;
-  try { outcome = {tools: (await mcpList(await mcpTarget(store, connector))).tools}; }
-  catch (error) { outcome = {error: cleanText(error.message, 300) || 'The server could not be reached.'}; }
+  try { outcome = {tools: (await withMcp(store, connector, target => mcpList(target))).tools}; }
+  catch (error) { outcome = {error: cleanText(error.message, 300) || 'The server could not be reached.', reconnect: error.reason === 'reconnect'}; }
   return store.update(s => {
     const live = connectorsOf(s).find(c => c.id === id);
     if (!live) fail('Connector not found.', 404);
-    if (outcome.error) Object.assign(live, {status: 'error', statusMessage: outcome.error, checkedAt: now()});
+    // A sign-in that has to be done again keeps saying that, not a generic error.
+    if (outcome.reconnect) Object.assign(live, {status: 'reconnect', statusMessage: `Sign in to ${live.name} again.`, checkedAt: now()});
+    else if (outcome.error) Object.assign(live, {status: 'error', statusMessage: outcome.error, checkedAt: now()});
     else Object.assign(live, {status: 'ready', statusMessage: '', actions: outcome.tools, checkedAt: now()});
     return publicConnector(live);
   });

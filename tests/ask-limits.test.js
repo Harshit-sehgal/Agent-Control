@@ -127,7 +127,7 @@ test('a chain stops for the owner at 6 bots deep, and Keep going lets it reach t
   assert.match(runNote(paused).text, /Bots have sent 5 messages for this task\./);
   assert.equal(runNote(paused).kind, 'limit');
   assert.equal(store.read().chats[ids.mail].some(m => m.kind === 'limit' && m.runId === paused.id), true, 'the chat carries the card');
-  await resumeGroupRun(store, paused.id, ai.executor, {choice: 'more'});
+  await (await resumeGroupRun(store, paused.id, ai.executor, {choice: 'more'})).done;
   const done = store.read().groupRuns.find(r => r.id === paused.id);
   assert.equal(done.status, 'completed', done.error);
   assert.equal(done.limit, undefined, 'the checkpoint is cleared once it is answered');
@@ -148,11 +148,11 @@ test('two bots pause after 12 messages and keep going for another 12', async t =
   assert.equal(first.limit.kind, 'pair');
   assert.equal(first.asks.total, 12);
   assert.equal(ai.of('Scholar').length, 12);
-  await resumeGroupRun(store, first.id, ai.executor, {choice: 'more'});
+  await (await resumeGroupRun(store, first.id, ai.executor, {choice: 'more'})).done;
   const second = store.read().groupRuns.find(r => r.id === first.id);
   assert.equal(second.status, 'awaiting_limit');
   assert.equal(second.asks.total, 24, 'another round of the same size');
-  await resumeGroupRun(store, first.id, ai.executor, {choice: 'more'});
+  await (await resumeGroupRun(store, first.id, ai.executor, {choice: 'more'})).done;
   const last = store.read().groupRuns.find(r => r.id === first.id);
   assert.equal(last.status, 'completed', last.error);
   assert.equal(last.asks.total, 30);
@@ -163,7 +163,7 @@ test('keep going, don\'t ask again lifts the checkpoints for this task only', as
   const ai = chatty();
   const first = await ask(store, {message: 'Ask a lot', to: ids.mail, executor: ai.executor});
   assert.equal(first.status, 'awaiting_limit');
-  await resumeGroupRun(store, first.id, ai.executor, {choice: 'unlimited'});
+  await (await resumeGroupRun(store, first.id, ai.executor, {choice: 'unlimited'})).done;
   const done = store.read().groupRuns.find(r => r.id === first.id);
   assert.equal(done.status, 'completed', done.error);
   assert.equal(done.unlimitedAsks, true);
@@ -191,10 +191,11 @@ test('stop makes the asking bot report what it has', async t => {
   const paused = await ask(store, {message: 'Ask a lot', to: ids.mail, executor: ai.executor});
   assert.equal(paused.status, 'awaiting_limit');
   const before = ai.of('Mailroom').length;
-  await resumeGroupRun(store, paused.id, (bot, input) => {
+  // The answer comes back at once; `done` settles when the run has gone on (the continue route does not wait).
+  await (await resumeGroupRun(store, paused.id, (bot, input) => {
     if (bot.name === 'Mailroom' && JSON.parse(input).restrictions.some(r => /Stop here and report what you have/.test(r))) return 'Here is what I have so far.';
     return ai.executor(bot, input);
-  }, {choice: 'stop'});
+  }, {choice: 'stop'})).done;
   const done = store.read().groupRuns.find(r => r.id === paused.id);
   assert.equal(done.status, 'completed', done.error);
   assert.equal(ai.of('Scholar').length, 12, 'no more bots are woken');
@@ -230,7 +231,10 @@ test('the continue route takes a choice, and a stop through it ends the task', a
   t.after(() => { process.env = saved; return new Promise(resolve => server.close(resolve)); });
   const result = await post({choice: 'stop'});
   assert.equal(result.status, 202);
-  assert.equal(result.body.status, 'completed');
+  // The route answers before the run goes on (a browser gives up on a request after 20 s); it ends in the background.
+  assert.equal(JSON.parse(JSON.stringify(result.body)).done, undefined, 'the background promise is not in the reply');
+  await result.body.done;
+  assert.equal(store.read().groupRuns.find(r => r.id === paused.id).status, 'completed');
   assert.equal(store.read().groupRuns.find(r => r.id === paused.id).trace.at(-1).output, 'Wrapped up.');
 });
 

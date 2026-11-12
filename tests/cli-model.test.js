@@ -195,7 +195,9 @@ test('exit 0 with no reply, and a plain crash, are named failures rather than em
   const {env} = rig(t);
   await fails(runCliModel({engine: 'claude', input: 'x', env: env({FAKE_MODE: 'missing-reply'})}), 'empty-reply');
   const error = await fails(runCliModel({engine: 'codex', input: 'x', env: env({FAKE_MODE: 'boom'})}), 'cli-failed');
-  assert.match(error.message, /segmentation fault/);
+  // What the CLI printed is kept for the log, never put in the chat line (tests/error-paths.test.js #13).
+  assert.match(error.detail, /segmentation fault/);
+  assert.equal(error.message, 'The codex CLI on this computer failed. Open Settings → Models and keys to check it.');
 });
 
 test('an enormous reply is trimmed, not failed', async t => {

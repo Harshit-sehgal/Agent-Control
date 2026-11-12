@@ -277,7 +277,7 @@ test('a checkpoint pauses both engines after the same step and resumes the same 
   // pause named, and stops again before the last handoff.
   const firstPause = demo.run;
   demo = await demoEngine({groups, groupId: 'cp', message, conversation, resume: firstPause});
-  await resumeGroupRun(server.store, server.runId, executor);
+  await (await resumeGroupRun(server.store, server.runId, executor)).done;
   const pausedTwice = {
     recipients: ['alpha', 'beta', 'gamma'],
     steps: [{botId: 'alpha', toBotId: 'beta'}, {botId: 'beta', toBotId: 'gamma'}],
@@ -296,7 +296,7 @@ test('a checkpoint pauses both engines after the same step and resumes the same 
   // Approve again: the run finishes on both.
   const secondPause = demo.run;
   demo = await demoEngine({groups, groupId: 'cp', message, conversation, resume: secondPause});
-  await resumeGroupRun(server.store, server.runId, executor);
+  await (await resumeGroupRun(server.store, server.runId, executor)).done;
   const completed = {
     recipients: ['alpha', 'beta', 'gamma'],
     steps: [
@@ -366,11 +366,11 @@ test('a resumed run clears the checkpoint it came from on both engines', async t
     demo = await demoEngine({groups, groupId: 'cp', message, conversation, resume: demo.run});
   }
   const server = await serverEngine(t, {groups, groupId: 'cp', message, checkpoints: true, executor});
-  await resumeGroupRun(server.store, server.runId, executor);
+  await (await resumeGroupRun(server.store, server.runId, executor)).done;
   for (;;) {
     const status = server.store.read().groupRuns.find(r => r.id === server.runId).status;
     if (status !== 'awaiting_checkpoint') break;
-    await resumeGroupRun(server.store, server.runId, executor);
+    await (await resumeGroupRun(server.store, server.runId, executor)).done;
   }
 
   assert.equal(demo.run.status, 'completed');

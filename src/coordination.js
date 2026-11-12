@@ -35,6 +35,7 @@ import {activity} from '../shared/core.js';
 import {failAgentTasks,agentsBrief} from './agent.js';
 import {workspaceBrief} from '../shared/setup.js';
 const running=new Set();
+const FAIL_WRITE_RETRY_MS=250;
 const clean=v=>String(v??'').slice(0,4000);
 const stamp=()=>new Date().toISOString();
 export function coordinationState(s){s.groupMessages??={};s.groupRuns??=[];}
@@ -85,6 +86,7 @@ function denyRunPages(state,runId,reason=''){
   }
   return ids;
 }
+export const SERVER_PAGE_RESTARTED='The server restarted while opening the page. Ask again.';
 export async function markInterrupted(store){
   const taskIds = new Set();
   await store.update(s=>{
@@ -96,6 +98,13 @@ export async function markInterrupted(store){
       endRun(r,'interrupted',{error:reason});
       if(page)for(const id of denyRunPages(s,r.id))taskIds.add(id);
       say(s,r,runNote(r));
+    }
+    // A page this server was opening itself has no device task and no deadline: the process that would have
+    // finished it is gone, so it would read "dispatched" forever and hold the chat. Fail it and say so there.
+    for(const request of s.browserRequests||[]){
+      if(request.status!=='dispatched'||request.via!=='server')continue;
+      request.status='failed';request.error=SERVER_PAGE_RESTARTED;request.updatedAt=stamp();
+      say(s,{chatKey:request.chatKey,groupId:request.groupId},{id:randomUUID(),role:'system',kind:'browser-result',text:SERVER_PAGE_RESTARTED,at:stamp()});
     }
   });
   // Cleanup is best effort: the run flips above are already committed, and a
@@ -521,11 +530,20 @@ async function runGroupInner(store,id,executor){
   // the operator never saw as a model error and hide the explicit retry advice.
   }catch(e){
     let scheduled=null,failedNote=null;
-    await store.update(s=>{const r=s.groupRuns?.find(x=>x.id===id);if(r&&r.status==='running'){endRun(r,'failed',{error:clean(e.message)});const note=runNote(r);failedNote=note.text;say(s,r,note);say(s,r,modelLimitLine(s,e,{runId:id}));
+    const markFailed=s=>{scheduled=null;failedNote=null;const r=s.groupRuns?.find(x=>x.id===id);if(r&&r.status==='running'){endRun(r,'failed',{error:clean(e.message)});const note=runNote(r);failedNote=note.text;say(s,r,note);say(s,r,modelLimitLine(s,e,{runId:id}));
       // A timer run fails with nobody watching: count it on its schedule (which stops itself when it keeps
       // failing) and tell the owner, instead of re-arming the same failure every period in silence.
       if(r.scheduleId){scheduled=scheduleRunEnded(s,r.scheduleId,{ok:false,error:{message:clean(e.message),code:e.code}});if(scheduled)say(s,r,{id:`${id}-schedule`.slice(0,64),role:'system',text:scheduled.text,runId:id});}
-      activity(s,'group-error',`Coordination failed: ${clean(e.message)}`,{runId:id});}});
+      activity(s,'group-error',`Coordination failed: ${clean(e.message)}`,{runId:id});}};
+    // A refused write here leaves the run `running` with nothing behind it: the chat is busy until a restart.
+    // One more try after a moment, and a loud line either way.
+    try{await store.update(markFailed);}
+    catch(writeError){
+      console.error(`Run ${id} failed (${clean(e.message)}) and could not be marked failed: ${writeError.message}. Trying once more.`);
+      await new Promise(resolve=>setTimeout(resolve,FAIL_WRITE_RETRY_MS));
+      try{await store.update(markFailed);}
+      catch(again){console.error(`RUN ${id} IS STILL MARKED RUNNING: the write marking it failed was refused twice (${again.message}). A restart marks it interrupted.`);return;}
+    }
     if(scheduled)Promise.resolve().then(()=>store.notify?.({title:scheduled.paused?'A schedule stopped':'A scheduled task failed',body:scheduled.text,kind:'event',meta:{runId:id}})).catch(error=>console.error('Schedule notification:',error.message));
     // Any other run that stopped on an error tells the owner too, so a failure is never found only by looking.
     else if(failedNote)Promise.resolve().then(()=>store.notify?.({title:'A task stopped',body:failedNote,kind:'event',meta:{runId:id}})).catch(error=>console.error('Run notification:',error.message));
@@ -729,17 +747,35 @@ export async function resumeGroupRun(store,id,executor=executeCustomBot,{choice}
     if(r.limit?.kind==='guard'){
       if(choice==='stop')return cancelRun(store,id,{note:'Stopped. Bots were paused and nothing else ran.'});
       if(botsPaused(store.read()))throw Object.assign(new Error('Bots are paused. Resume them first.'),{status:409});
-      await runGroup(store,id,executor);
-      return {runId:id,status:store.read().groupRuns.find(x=>x.id===id)?.status||'running'};
+      return answerThenRun(store,id,executor);
     }
     // The ceiling is not a checkpoint: nothing lifts it, so Stop is the only answer.
     if(r.limit?.kind==='ceiling'&&choice!=='stop')throw Object.assign(new Error(`This task has sent ${ASK_CEILING} bot-to-bot messages, the most one task may. Stop it, then start a new one.`),{status:409});
-    await store.update(s=>{const live=s.groupRuns.find(x=>x.id===id);if(!live||live.status!=='awaiting_limit')throw Object.assign(new Error('This run is not waiting at a limit.'),{status:409});
+    // The answer is written inside the same tracked call as the run, so a refused start (a workspace paused
+    // for a restore) extends nothing, and pressing Keep going again does not extend the limits twice.
+    return answerThenRun(store,id,executor,s=>{const live=s.groupRuns.find(x=>x.id===id);if(!live||live.status!=='awaiting_limit')throw Object.assign(new Error('This run is not waiting at a limit.'),{status:409});
       if(choice==='more')extendLimits(live,live.limit?.kind);
       else if(choice==='unlimited')live.unlimitedAsks=true;
       else live.checkpoint={...live.checkpoint,stop:true};
       activity(s,'group-run',`Bot-to-bot limit answered: ${choice}`,{runId:id});});
   }else if(r.status!=='awaiting_checkpoint')throw Object.assign(new Error('This run is not waiting for a checkpoint.'),{status:409});
-  await runGroup(store,id,executor);
-  return {runId:id,status:store.read().groupRuns.find(x=>x.id===id)?.status||'running'};
+  return answerThenRun(store,id,executor);
+}
+/** Write `answer` (what the person chose at the pause), then go on with the run, as one tracked piece of work in
+ * the background, the way decidePlan starts one. Resolves as soon as the answer is written, so the request answers
+ * at once instead of waiting out every bot; a refused answer or a refused start rejects. `done` (not sent to the
+ * browser) settles when the run has gone as far as it goes. */
+function answerThenRun(store,id,executor,answer=null){
+  let settle;
+  const answered=new Promise((resolve,reject)=>{settle={resolve,reject};});
+  const work=async()=>{
+    try{if(answer)await store.update(answer);}
+    catch(error){settle.reject(error);return;}
+    settle.resolve();
+    await runGroupInner(store,id,executor);
+  };
+  const done=Promise.resolve()
+    .then(()=>typeof store.trackWork==='function'?store.trackWork(work):work())
+    .catch(error=>{settle.reject(error);console.error('Group execution:',error.message);});
+  return answered.then(()=>Object.defineProperty({runId:id,status:store.read().groupRuns.find(x=>x.id===id)?.status||'running'},'done',{value:done}));
 }

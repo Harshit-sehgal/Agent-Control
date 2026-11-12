@@ -44,16 +44,20 @@ export function startFollowUps(store, queue, intervalMs = 1000) {
     busy = true;
     try {
       for (let i = 0; i < 10; i++) {
-        let item = null, rest = [];
-        await store.update(s => {
-          item = nextFollowUp(s);
-          // The messages still waiting behind it follow the run it starts, in order.
-          if (item) { const from = s.groupRuns.find(r => r.followUps && r.followUps.length && r.followUps[0].chatKey === item.chatKey && ENDED.includes(r.status)); if (from) { rest = from.followUps; from.followUps = []; } }
-        });
+        let item = null;
+        await store.update(s => { item = nextFollowUp(s); });
         if (!item) break;
         try {
           const out = await queue(store, {groupId: item.groupId, message: item.message, directBotId: item.directBotId, chatKey: item.chatKey, checkpoints: item.checkpoints});
-          if (rest.length) await store.update(s => { const next = s.groupRuns.find(r => r.id === out.runId); if (next) next.followUps = [...(next.followUps || []), ...rest]; });
+          // The messages still waiting behind it follow the run it starts, in order. They leave the ended run and
+          // join the new one in one write: two writes could clear them and then fail to attach them.
+          await store.update(s => {
+            const next = s.groupRuns.find(r => r.id === out?.runId);
+            const from = s.groupRuns.find(r => r !== next && r.followUps && r.followUps.length && r.followUps[0].chatKey === item.chatKey && ENDED.includes(r.status));
+            if (!next || !from) return;
+            next.followUps = [...(next.followUps || []), ...from.followUps];
+            from.followUps = [];
+          });
         } catch (e) {
           await store.update(s => { const chat = (s.chats ||= {})[item.chatKey] ||= []; chat.push({id: `followup-${Date.now()}`, role: 'system', text: `Your message "${item.message.slice(0, 60)}" could not start: ${e.message}`, at: new Date().toISOString()}); });
         }

@@ -68,7 +68,8 @@ export async function dispatchBrowserRequest(store, id, {actor = null, runtime =
   // The server has the browser: run it in the background, so the approve
   // request returns at once and the chat card fills in when the page is read.
   if (here) {
-    void runHere(store, claimed.id, runtime);
+    // Nothing awaits this, so nothing may escape it: an unhandled rejection ends the whole server.
+    void runHere(store, claimed.id, runtime).catch(error => console.error(`Browser request ${claimed.id} on this server:`, error.message));
     return claimed;
   }
   // `enqueueAgentTask` inserts its own row (auto-commit) from inside this document
@@ -123,7 +124,10 @@ async function runHere(store, id, runtime) {
     const result = await runtime.run({url: request.url, steps: request.steps || [], approved: approvedOf(request)});
     await finishBrowserRequest(store, request, {ok: true, result});
   } catch (error) {
-    await finishBrowserRequest(store, request, {ok: false, error: error.message});
+    // The write recording the page can be the thing that failed (a store refusing writes), so this
+    // second finish is guarded on its own; the request is then failed at the next restart.
+    try { await finishBrowserRequest(store, request, {ok: false, error: error.message}); }
+    catch (finishError) { console.error(`Browser request ${id} could not be finished:`, finishError.message); }
   }
 }
 

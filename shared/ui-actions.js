@@ -73,6 +73,8 @@ export const actions = {
     const key = request.chatKey || teamKey(request.groupId);
     await runWithTyping({key, setTyping, sync, follow: () => streamGroupRun(request.groupId, key, request.runId)});
   },
+  // A message that never reached the server, sent again from its chat.
+  'resend-chat': async b => { const id = chatId(); if (id && b.dataset.text) await sendChat(id, b.dataset.text, {again: true}); },
   'retry-run': async b => {
     const chat = b.dataset.chat || chatId() || teamKey(b.dataset.id);
     if (await rerun(b.dataset.id, {message: b.dataset.message, direct: b.dataset.direct, chat}) === 'ran') toast('Run queued again.');

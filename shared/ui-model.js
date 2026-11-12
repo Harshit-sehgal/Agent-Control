@@ -205,3 +205,13 @@ export function tintOf(bot, index = 0, profiles = {}) {
   if (Number.isInteger(synced)) return synced;
   return profiles[bot?.id]?.avatarIndex ?? Math.max(0, index);
 }
+
+/** What a chat says when a message could not reach the server at all. */
+export const OFFLINE_TEXT = 'You seem to be offline, so this was not sent.';
+/** A send that never got an answer: the request timed out (shared/transport.js marks that) or the network refused
+ * it (fetch rejects with a TypeError). An answer the server gave, even an error, is not this. */
+export function isOfflineError(error) {
+  if (!error || Number.isFinite(error.status)) return false;
+  if (error.timeout === true || error.name === 'TimeoutError' || error.name === 'AbortError') return true;
+  return error.name === 'TypeError' && /fetch|network|load failed|connection/i.test(String(error.message || ''));
+}

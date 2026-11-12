@@ -27,6 +27,16 @@ export const RETRY_WINDOW_MS = 6 * 3600000;
  * object, so this is scheduling metadata a caller cannot set. */
 export const RETRY_STARTED = 'retryStartedAt';
 
+/** How many windows in a row a recurring task has re-armed with an error (in the payload, like the anchor),
+ * and the count at which the owner is told: past that, a schedule failing every window is not a blip. */
+export const MISSED_WINDOWS = 'missedWindows';
+export const NOTIFY_MISSED = 3;
+function clearMissed(task) {
+  if (!task.payload || typeof task.payload !== 'object' || !(MISSED_WINDOWS in task.payload)) return;
+  const {[MISSED_WINDOWS]: _missed, ...rest} = task.payload;
+  task.payload = rest;
+}
+
 /** Drop the anchor once a run succeeds or is re-armed by hand: a stale one
  * would make the next failure look like it was already spent. */
 function clearRetryAnchor(task) {
@@ -218,6 +228,7 @@ export function completeTask(state, id, result = null, now = Date.now()) {
   task.leaseUntil = null;
   task.lastError = null;
   clearRetryAnchor(task);
+  clearMissed(task);
   // A recurring task re-arms itself for the next window instead of finishing.
   if (task.intervalMinutes) {
     task.status = 'queued';
@@ -291,6 +302,7 @@ export function failTask(state, id, message, now = Date.now(), {conflict = false
     // outage — and is retried by hand if it comes back.
     if (task.intervalMinutes && !permanent) {
       clearRetryAnchor(task);
+      task.payload = {...(task.payload || {}), [MISSED_WINDOWS]: (Number(task.payload?.[MISSED_WINDOWS]) || 0) + 1};
       task.status = 'queued';
       task.lastError = error;
       // From the planned time, not the finish, as in completeTask.
@@ -330,6 +342,7 @@ export function retryTask(state, id) {
   task.result = null;
   task.updatedAt = new Date().toISOString();
   clearRetryAnchor(task);
+  clearMissed(task);
   // A scheduled task carries its next fire in the payload too, and a stale
   // `nextAt` would make the retried run report itself as overdue on the way in.
   if (task.payload && typeof task.payload === 'object' && task.payload.nextAt) task.payload = {...task.payload, nextAt: task.runAt};

@@ -9,11 +9,11 @@
  * Atlas") and opens the hops, the cards that wait on the owner, and a failure that
  * ended a run. What a bot read, which connector it used, and the lines a page or
  * connector call left on the way are stored but not shown (tests/clean-feed.test.js). */
-import {handoffs, hopLine, progressPill} from './ui-company.js?v=99c330d626';
-import {isRunNote, runBelongsToChat} from './ui-model.js?v=99c330d626';
-import {connectorLine, modelLimitLine} from './ui-connect-model.js?v=99c330d626';
-import {setupCardOf, setupDone} from './setup.js?v=99c330d626';
-import {requestOfMessage} from './bot-browser.js?v=99c330d626';
+import {handoffs, hopLine, progressPill} from './ui-company.js?v=397178f961';
+import {isRunNote, runBelongsToChat} from './ui-model.js?v=397178f961';
+import {connectorLine, modelLimitLine} from './ui-connect-model.js?v=397178f961';
+import {setupCardOf, setupDone} from './setup.js?v=397178f961';
+import {requestOfMessage} from './bot-browser.js?v=397178f961';
 
 const isActive = status => status === 'queued' || status === 'running';
 const isAwaiting = status => String(status || '').startsWith('awaiting');
@@ -69,7 +69,7 @@ function pillEntry(run, state) {
 
 /** `items` is `timeline()`'s output for the chat; `key` is the chat key (a bot id,
  * or `team-<threadId>`). `now` is the clock a held send's Undo window is read against. Entries: day, me, bot, offjob,
- * note, browser, ask, guard, pill, limit, connector, model-limit, setup, no-model. */
+ * note, browser, ask, guard, pill, limit, connector, model-limit, setup, no-model, offline. */
 export function feed({items = [], state, key, now = Date.now()}) {
   const runs = runsOfChat(state, key), byId = new Map(runs.map(run => [run.id, run]));
   const lastLine = new Map(), lastNote = new Map();
@@ -109,6 +109,12 @@ export function feed({items = [], state, key, now = Date.now()}) {
       if (m.kind === 'setup') { const card = m.origin === 'browser' ? null : setupCardOf(m); return out.push({kind: 'setup', message: m, card, done: setupDone(state, card)}); }
       // Only opens a Settings page, so a line the browser wrote may carry it.
       if (m.kind === 'no-model') return out.push({kind: 'no-model', message: m});
+      // A send that never reached the server: Retry sends the owner's message just before it, until they say more.
+      if (m.kind === 'offline') {
+        const before = items.slice(0, index).reverse().find(earlier => earlier.kind === 'message' && earlier.message?.role === 'user');
+        const later = items.slice(index + 1).some(next => next.kind === 'message' && next.message?.role === 'user');
+        return out.push({kind: 'offline', message: m, retry: !later && before ? before.message.text : ''});
+      }
       if (m.kind === 'model-limit') return out.push({kind: 'model-limit', message: m, line: modelLimitLine(m, {state})});
       if (m.kind === 'guard') return out.push({kind: 'guard', message: m, open: m.id === lastGuard && Boolean(state?.guard?.paused)});
       if (!isRunNote(m)) return out.push({kind: 'note', message: m, run: null});

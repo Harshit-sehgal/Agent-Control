@@ -7,25 +7,25 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=99c330d626';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=99c330d626';
-import {requestOfMessage} from './bot-browser.js?v=99c330d626';
-import {validHttpUrl} from './core.js?v=99c330d626';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=99c330d626';
-import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=99c330d626';
-import {isPrimary} from './company.js?v=99c330d626';
-import {hasJob, modelChip} from './ui-profile-model.js?v=99c330d626';
-import {scheduleTaskBody} from './schedules.js?v=99c330d626';
-import {feed} from './ui-feed.js?v=99c330d626';
-import {setupCardOf, setupButton} from './setup.js?v=99c330d626';
-import {askCard} from './ui-asks.js?v=99c330d626';
-import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=99c330d626';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=99c330d626';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=99c330d626';
-import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=99c330d626';
-import {toast, confirmSheet} from './ui-dialogs.js?v=99c330d626';
-import {siteChip, thumbSlot} from './ui-computer-view.js?v=99c330d626';
-import {cliChoice, googleCard} from './ui-connect-model.js?v=99c330d626';
+import {OFFJOB_CHOICES} from './off-job.js?v=397178f961';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=397178f961';
+import {requestOfMessage} from './bot-browser.js?v=397178f961';
+import {validHttpUrl} from './core.js?v=397178f961';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=397178f961';
+import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=397178f961';
+import {isPrimary} from './company.js?v=397178f961';
+import {hasJob, modelChip} from './ui-profile-model.js?v=397178f961';
+import {scheduleTaskBody} from './schedules.js?v=397178f961';
+import {feed} from './ui-feed.js?v=397178f961';
+import {setupCardOf, setupButton} from './setup.js?v=397178f961';
+import {askCard} from './ui-asks.js?v=397178f961';
+import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=397178f961';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=397178f961';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=397178f961';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=397178f961';
+import {toast, confirmSheet} from './ui-dialogs.js?v=397178f961';
+import {siteChip, thumbSlot} from './ui-computer-view.js?v=397178f961';
+import {cliChoice, googleCard} from './ui-connect-model.js?v=397178f961';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -219,6 +219,11 @@ function noModelEntry({message: m}) {
   return `<div class="cv-card flat" data-m="${esc(m.id)}"><p>${esc(m.text)}</p>${open}</div>`;
 }
 
+function offlineEntry({message: m, retry}) {
+  const again = retry && canWrite() ? `<div class="acts">${btn('Retry', 'resend-chat', {kind: 'primary', small: true, data: {text: retry}})}</div>` : '';
+  return `<div class="cv-card flat" data-m="${esc(m.id)}"><p>${esc(m.text)}</p>${again}</div>`;
+}
+
 function offjobEntry({message: m, open}, conv) {
   const bot = findBot(m.botId || m.senderId), name = bot?.name || m.senderName || conv.name;
   const choices = open && canWrite() ? `<div class="cv-card"><p>This is not ${esc(name)}'s job. What should happen to it?</p><div class="acts">${OFFJOB_CHOICES.map(c => btn(c.label, `offjob-${c.id}`, {kind: c.id === 'anyway' ? 'primary' : 'quiet', data: {message: m.id}})).join('')}</div></div>` : '';
@@ -248,6 +253,7 @@ function entryHtml(entry, conv) {
     case 'model-limit': return modelLimitEntry(entry);
     case 'setup': return setupEntry(entry);
     case 'no-model': return noModelEntry(entry);
+    case 'offline': return offlineEntry(entry);
     default: return '';
   }
 }
