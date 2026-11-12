@@ -9,11 +9,13 @@
  * Atlas") and opens the hops, the cards that wait on the owner, and a failure that
  * ended a run. What a bot read, which connector it used, and the lines a page or
  * connector call left on the way are stored but not shown (tests/clean-feed.test.js). */
-import {handoffs, hopLine, progressPill} from './ui-company.js?v=71b92f8de6';
-import {isRunNote, runBelongsToChat} from './ui-model.js?v=71b92f8de6';
-import {connectorLine, modelLimitLine} from './ui-connect-model.js?v=71b92f8de6';
-import {setupCardOf, setupDone} from './setup.js?v=71b92f8de6';
-import {requestOfMessage} from './bot-browser.js?v=71b92f8de6';
+import {handoffs, hopLine, progressPill} from './ui-company.js?v=789d865101';
+import {isRunNote, runBelongsToChat} from './ui-model.js?v=789d865101';
+import {connectorLine, modelLimitLine} from './ui-connect-model.js?v=789d865101';
+import {setupCardOf, setupDone} from './setup.js?v=789d865101';
+import {requestOfMessage} from './bot-browser.js?v=789d865101';
+import {attachmentRefs, isImage, sizeLabel} from './attachments.js?v=789d865101';
+import {esc, icon} from './ui-kit.js?v=789d865101';
 
 const isActive = status => status === 'queued' || status === 'running';
 const isAwaiting = status => String(status || '').startsWith('awaiting');
@@ -141,4 +143,22 @@ export function feed({items = [], state, key, now = Date.now()}) {
   const paused = runs.filter(run => run.status === 'awaiting_limit').at(-1);
   if (paused) out.push({kind: 'limit', run: paused});
   return out;
+}
+
+/** The files on a message: a thumbnail for each image, a chip for each text
+ * file. `srcOf(ref)` is where the file is read from (the server route, or the
+ * demo's data URL); a file it cannot find shows its name with no link. Every
+ * name is escaped, and only a same-origin path or an image/text data URL is
+ * ever used as a link. */
+const SAFE_SRC = /^(\/api\/attachments\/[a-z0-9-]+|data:(image\/(png|jpeg|webp|gif)|text\/(plain|markdown|csv)|application\/json);base64,[A-Za-z0-9+/=]+)$/;
+export function fileStrip(files, srcOf = () => '') {
+  const refs = attachmentRefs(files);
+  if (!refs.length) return '';
+  const items = refs.map(ref => {
+    const raw = String(srcOf(ref) || ''), src = SAFE_SRC.test(raw) ? raw : '', name = esc(ref.name);
+    if (isImage(ref.type) && src) return `<a class="cv-thumb" href="${esc(src)}" target="_blank" rel="noopener noreferrer" aria-label="Open ${name}"><img src="${esc(src)}" alt="${name}" loading="lazy" decoding="async"></a>`;
+    const label = `${icon(isImage(ref.type) ? 'spark' : 'file', 15)}<span>${name}</span><small>${esc(sizeLabel(ref.size))}</small>`;
+    return src ? `<a class="cv-file" href="${esc(src)}" download="${name}">${label}</a>` : `<span class="cv-file gone" title="This file is no longer kept">${label}</span>`;
+  });
+  return `<div class="cv-files">${items.join('')}</div>`;
 }

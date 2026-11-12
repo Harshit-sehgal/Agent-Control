@@ -6,7 +6,7 @@
  * simulator does otherwise; the UI cannot tell which. Nothing here can publish. */
 import {pollRun, runWithTyping} from './run-follow.js';
 import {botSettings, groupSettings} from './bot-settings.js';
-import {store, api, sync, go, conversation, appendMessage, setTyping, teamKey} from './ui-store.js';
+import {store, api, sync, go, conversation, appendMessage, setTyping, teamKey, flushChats} from './ui-store.js';
 import {toast} from './ui-dialogs.js';
 import {isOfflineError, OFFLINE_TEXT} from './ui-model.js';
 
@@ -112,10 +112,13 @@ export async function rerun(groupId, {message, direct = '', chat = ''} = {}) {
 
 /** Send `text` to a conversation and let the right engine answer. `again`: Retry after a send that never reached
  * the server, so the message is already in the chat and is not added twice. */
-export async function sendChat(id, text, {again = false} = {}) {
-  const conv = conversation(id), message = String(text ?? '').trim();
+export async function sendChat(id, text, {again = false, attachments = []} = {}) {
+  // A message of files alone is named by them, the same way shared/chats.js stores it.
+  const conv = conversation(id), message = String(text ?? '').trim() || attachments.map(a => a.name).join(', ');
   if (!conv || !message) return;
-  if (!again) appendMessage(id, {role: 'user', text: message});
+  if (!again) appendMessage(id, {role: 'user', text: message, ...(attachments.length ? {attachments} : {})});
+  // The bot reads the files from the stored line, so that line must land before the run starts.
+  if (attachments.length) await flushChats().catch(() => {});
   const count = (inFlight.get(id) || 0) + 1;
   inFlight.set(id, count);
   if (count === 1) setTyping(id, true);

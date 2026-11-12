@@ -16,7 +16,8 @@ import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js';
 import {isPrimary} from './company.js';
 import {hasJob, modelChip} from './ui-profile-model.js';
 import {scheduleTaskBody} from './schedules.js';
-import {feed} from './ui-feed.js';
+import {feed, fileStrip} from './ui-feed.js';
+import {attachButton, chipsSlot, wireAttach} from './ui-attach.js';
 import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js';
 import {askCard} from './ui-asks.js';
 import {face, botColor, botAccent, accentStyle} from './ui-face.js';
@@ -67,12 +68,14 @@ export function conversationShell(conv) {
       ${bot ? `${thumbSlot(bot.id)}<span id="cv-model">${modelChipHtml(bot)}</span>` : ''}
     </header>
     <div class="cv-scroll" id="cv-scroll"><div class="cv-col" id="cv-log" role="log" aria-live="off" aria-label="Conversation"></div></div>
-    <form id="chat-form" class="cv-composer" autocomplete="off"><div class="cv-box">
+    <form id="chat-form" class="cv-composer" autocomplete="off">${chipsSlot}<div class="cv-box">
+      ${attachButton(write)}
       <textarea name="message" rows="1" placeholder="${esc(hint)}" aria-label="${esc(hint)}" maxlength="4000" required${write ? '' : ' disabled'}></textarea>
       <button type="submit" class="cv-send" aria-label="Send message"${write ? '' : ' disabled'}>${icon('send', 20)}</button>
     </div></form>
   </section>`;
   lastHtml = null; born.conv = null; pillSeen.clear();
+  wireAttach(el('chat-form'));
 }
 
 /** Which model a bot chat runs on, one tap from its Model page. Nothing in the static demo or with no model. */
@@ -242,10 +245,20 @@ function botEntry(m, conv) {
   return `<div class="cv-bot${own}" data-m="${esc(m.id)}" style="--t:${tintOf(bot, name)}">${botFace(bot, name, 36)}<div class="cv-body"><div class="cv-name">${esc(name)}</div><div class="md">${md(m.text)}</div></div></div>`;
 }
 
+/** Where an attached file is read from: the server route, or the demo's own copy. */
+const fileSrc = ref => isStaticDemo() ? store.state?.attachments?.[ref.id]?.url || '' : `/api/attachments/${ref.id}`;
+/** The owner's line, with its files above the words. A line of files alone is named by them, so the name is not repeated. */
+function meEntry(m) {
+  const files = fileStrip(m.attachments, fileSrc);
+  if (!files) return `<div class="cv-me md">${md(m.text)}</div>`;
+  const named = m.text === (m.attachments || []).map(a => a.name).join(', ');
+  return `<div class="cv-me-files">${files}${named ? '' : `<div class="cv-me md">${md(m.text)}</div>`}</div>`;
+}
+
 function entryHtml(entry, conv) {
   switch (entry.kind) {
     case 'day': return `<div class="cv-day">${esc(dayLabel(entry.at))}</div>`;
-    case 'me': return `<div class="cv-me md">${md(entry.message.text)}</div>`;
+    case 'me': return meEntry(entry.message);
     case 'bot': return botEntry(entry.message, conv);
     case 'offjob': return offjobEntry(entry, conv);
     case 'browser': return browserEntry(entry.message, conv);

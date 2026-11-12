@@ -9,6 +9,7 @@ import {runWithTyping} from './run-follow.js';
 import {whoosh, react} from './ui-fx.js';
 import {shellActions} from './ui-shell.js';
 import {conversationActions, conversationForms} from './ui-conversation.js';
+import {attachBusy, takeAttachments} from './ui-attach.js';
 import {profileActions, profileForms, profileChanges, lookChanged, nameTyped, adoptFirstMessage} from './ui-profile.js';
 import {settingsActions, reloadAdminPage} from './ui-settings.js';
 import {changePasswordSheet} from './ui-sheets.js';
@@ -88,12 +89,15 @@ export const actions = {
 /** Submit handlers by form id. */
 export const forms = {
   'chat-form': async form => {
-    const input = form.elements.namedItem('message'), text = input.value;
+    // A file still on its way would be left behind; Send waits for it instead.
+    if (attachBusy()) { toast('Still attaching. Send again in a moment.'); return; }
+    const input = form.elements.namedItem('message'), text = input.value, attachments = takeAttachments();
+    if (!text.trim() && !attachments.length) return;
     input.value = ''; input.style.height = '';
     whoosh(form.querySelector('.cv-send')); react('nod', 700);
     // The first message to a bot made without a job is its job.
     await adoptFirstMessage(chatId(), text);
-    await sendChat(chatId(), text);
+    await sendChat(chatId(), text, {attachments});
   },
   ...conversationForms,
   ...profileForms,

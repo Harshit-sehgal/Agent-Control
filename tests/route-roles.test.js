@@ -49,6 +49,7 @@ import {aiRoutes} from '../src/routes-ai.js';
 import {memoryRoutes} from '../src/routes-memory.js';
 import {connectorRoutes} from '../src/routes-connectors.js';
 import {liveRoutes} from '../src/routes-live.js';
+import {fileRoutes} from '../src/routes-files.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -56,7 +57,7 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const MODULES = [
   ['publicRoutes', publicRoutes], ['workflowRoutes', workflowRoutes], ['groupRoutes', groupRoutes],
   ['accountRoutes', accountRoutes], ['workspaceRoutes', workspaceRoutes], ['pushRoutes', pushRoutes],
-  ['aiRoutes', aiRoutes], ['memoryRoutes', memoryRoutes], ['connectorRoutes', connectorRoutes], ['liveRoutes', liveRoutes],
+  ['aiRoutes', aiRoutes], ['memoryRoutes', memoryRoutes], ['connectorRoutes', connectorRoutes], ['liveRoutes', liveRoutes], ['fileRoutes', fileRoutes],
 ];
 
 /** Registration must not need a live server. Anything a module reads from the

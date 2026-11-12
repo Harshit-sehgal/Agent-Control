@@ -7,11 +7,12 @@
  *
  * Messages are display records only. Nothing here runs a bot or publishes.
  */
-import {cleanText} from './core.js?v=71b92f8de6';
-import {fail} from './errors.js?v=71b92f8de6';
-import {summonableGuests, BUSY_STATUSES} from './coordination.js?v=71b92f8de6';
-import {denyBrowserRequest} from './bot-browser.js?v=71b92f8de6';
-import {orphanAsks} from './asks.js?v=71b92f8de6';
+import {cleanText} from './core.js?v=789d865101';
+import {fail} from './errors.js?v=789d865101';
+import {summonableGuests, BUSY_STATUSES} from './coordination.js?v=789d865101';
+import {denyBrowserRequest} from './bot-browser.js?v=789d865101';
+import {orphanAsks} from './asks.js?v=789d865101';
+import {attachmentRefs} from './attachments.js?v=789d865101';
 
 export const MAX_CHAT_MESSAGES = 300;
 const MAX_TEXT = 8000;
@@ -71,10 +72,13 @@ function claimedSender(state, key, raw, message) {
 function entry(raw, makeId, now) {
   if (!raw || typeof raw !== 'object') fail('A message must be an object.');
   if (!ROLES.includes(raw.role)) fail('A message needs a role of user, bot or system.');
-  const text = cleanText(raw.text, MAX_TEXT);
+  // Files ride on the owner's own lines only (shared/attachments.js); a message of files alone is named by them.
+  const files = raw.role === 'user' ? attachmentRefs(raw.attachments) : [];
+  const text = cleanText(raw.text, MAX_TEXT) || files.map(f => f.name).join(', ');
   if (!text) fail('A message needs text.');
   const out = {id: cleanText(raw.id, 64) || makeId(), role: raw.role, text, at: Number.isFinite(Date.parse(raw.at)) ? new Date(raw.at).toISOString() : now};
   for (const key of LABELS) { const value = cleanText(raw[key], 120); if (value) out[key] = value; }
+  if (files.length) out.attachments = files;
   const request = cleanText(raw.request, 4000);
   if (request) out.request = request;
   // A setup card's change, as JSON (shared/setup.js reads it back and refuses anything malformed).

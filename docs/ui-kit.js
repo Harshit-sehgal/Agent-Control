@@ -78,6 +78,8 @@ const ICONS = {
   chart: '<path d="M5 20V12M10 20V6M15 20v-9M20 20V4"/>',
   keyboard: '<rect x="2.500" y="6" width="19" height="12" rx="2.500"/><path d="M6.500 10h.01M10 10h.01M14 10h.01M17.500 10h.01M8 14h8"/>',
   spark: '<path d="m12 3 1.600 6.400L20 11l-6.400 1.600L12 19l-1.600-6.400L4 11l6.400-1.600z"/>',
+  clip: '<path d="m20 11.500-8.200 8.200a5 5 0 0 1-7.100-7.100l8.500-8.500a3.300 3.300 0 0 1 4.700 4.700l-8.500 8.500a1.700 1.700 0 0 1-2.400-2.400l7.800-7.800"/>',
+  file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h4"/>',
 };
 export const icon = (name, size = 20) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ICONS.spark}</svg>`;
 

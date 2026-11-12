@@ -7,27 +7,28 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=71b92f8de6';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=71b92f8de6';
-import {requestOfMessage} from './bot-browser.js?v=71b92f8de6';
-import {validHttpUrl} from './core.js?v=71b92f8de6';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=71b92f8de6';
-import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=71b92f8de6';
-import {isPrimary} from './company.js?v=71b92f8de6';
-import {hasJob, modelChip} from './ui-profile-model.js?v=71b92f8de6';
-import {scheduleTaskBody} from './schedules.js?v=71b92f8de6';
-import {feed} from './ui-feed.js?v=71b92f8de6';
-import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js?v=71b92f8de6';
-import {askCard} from './ui-asks.js?v=71b92f8de6';
-import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=71b92f8de6';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=71b92f8de6';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=71b92f8de6';
-import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=71b92f8de6';
-import {toast, confirmSheet} from './ui-dialogs.js?v=71b92f8de6';
-import {siteChip, thumbSlot} from './ui-computer-view.js?v=71b92f8de6';
-import {cliChoice, googleCard} from './ui-connect-model.js?v=71b92f8de6';
-import {connectAppNow} from './ui-connect.js?v=71b92f8de6';
-import {appById} from './app-catalog.js?v=71b92f8de6';
+import {OFFJOB_CHOICES} from './off-job.js?v=789d865101';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=789d865101';
+import {requestOfMessage} from './bot-browser.js?v=789d865101';
+import {validHttpUrl} from './core.js?v=789d865101';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=789d865101';
+import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=789d865101';
+import {isPrimary} from './company.js?v=789d865101';
+import {hasJob, modelChip} from './ui-profile-model.js?v=789d865101';
+import {scheduleTaskBody} from './schedules.js?v=789d865101';
+import {feed, fileStrip} from './ui-feed.js?v=789d865101';
+import {attachButton, chipsSlot, wireAttach} from './ui-attach.js?v=789d865101';
+import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js?v=789d865101';
+import {askCard} from './ui-asks.js?v=789d865101';
+import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=789d865101';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=789d865101';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=789d865101';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=789d865101';
+import {toast, confirmSheet} from './ui-dialogs.js?v=789d865101';
+import {siteChip, thumbSlot} from './ui-computer-view.js?v=789d865101';
+import {cliChoice, googleCard} from './ui-connect-model.js?v=789d865101';
+import {connectAppNow} from './ui-connect.js?v=789d865101';
+import {appById} from './app-catalog.js?v=789d865101';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -67,12 +68,14 @@ export function conversationShell(conv) {
       ${bot ? `${thumbSlot(bot.id)}<span id="cv-model">${modelChipHtml(bot)}</span>` : ''}
     </header>
     <div class="cv-scroll" id="cv-scroll"><div class="cv-col" id="cv-log" role="log" aria-live="off" aria-label="Conversation"></div></div>
-    <form id="chat-form" class="cv-composer" autocomplete="off"><div class="cv-box">
+    <form id="chat-form" class="cv-composer" autocomplete="off">${chipsSlot}<div class="cv-box">
+      ${attachButton(write)}
       <textarea name="message" rows="1" placeholder="${esc(hint)}" aria-label="${esc(hint)}" maxlength="4000" required${write ? '' : ' disabled'}></textarea>
       <button type="submit" class="cv-send" aria-label="Send message"${write ? '' : ' disabled'}>${icon('send', 20)}</button>
     </div></form>
   </section>`;
   lastHtml = null; born.conv = null; pillSeen.clear();
+  wireAttach(el('chat-form'));
 }
 
 /** Which model a bot chat runs on, one tap from its Model page. Nothing in the static demo or with no model. */
@@ -242,10 +245,20 @@ function botEntry(m, conv) {
   return `<div class="cv-bot${own}" data-m="${esc(m.id)}" style="--t:${tintOf(bot, name)}">${botFace(bot, name, 36)}<div class="cv-body"><div class="cv-name">${esc(name)}</div><div class="md">${md(m.text)}</div></div></div>`;
 }
 
+/** Where an attached file is read from: the server route, or the demo's own copy. */
+const fileSrc = ref => isStaticDemo() ? store.state?.attachments?.[ref.id]?.url || '' : `/api/attachments/${ref.id}`;
+/** The owner's line, with its files above the words. A line of files alone is named by them, so the name is not repeated. */
+function meEntry(m) {
+  const files = fileStrip(m.attachments, fileSrc);
+  if (!files) return `<div class="cv-me md">${md(m.text)}</div>`;
+  const named = m.text === (m.attachments || []).map(a => a.name).join(', ');
+  return `<div class="cv-me-files">${files}${named ? '' : `<div class="cv-me md">${md(m.text)}</div>`}</div>`;
+}
+
 function entryHtml(entry, conv) {
   switch (entry.kind) {
     case 'day': return `<div class="cv-day">${esc(dayLabel(entry.at))}</div>`;
-    case 'me': return `<div class="cv-me md">${md(entry.message.text)}</div>`;
+    case 'me': return meEntry(entry.message);
     case 'bot': return botEntry(entry.message, conv);
     case 'offjob': return offjobEntry(entry, conv);
     case 'browser': return browserEntry(entry.message, conv);
