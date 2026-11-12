@@ -222,7 +222,7 @@ export function accountRoutes(router, {auth, workspaces}) {
       // Any workspace it names but did not carry has just been started empty,
       // and a 200 that does not say so reads as "everything came back".
       const missing = created.length ? ` ${created.length === 1 ? 'One workspace it names had' : `${created.length} workspaces it names had`} no data in the file and ${created.length === 1 ? 'was' : 'were'} started empty: ${created.join(', ')}.` : '';
-      await store.update(s => activity(s, 'backup', `Restored a backup into this installation (${result.restored} rows).${missing}`));
+      await store.update(s => activity(s, 'backup', `Restored a backup into this installation (${result.restored} rows).${missing}${result.notes?.length ? ` ${result.notes.join(' ')}` : ''}`));
       // A primary restore deletes every session (see backup.importBackup), so
       // the caller's cookie is dead the moment this returns: say so instead of
       // answering 200 as if they were still signed in.

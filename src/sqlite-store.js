@@ -385,7 +385,7 @@ const MIGRATIONS = [
   }},
   // v9: durable memory gets its own table. A rulebook and a chat recap are
   // variable-size JSON keyed by model or conversation, which suits neither the
-  // typed tables nor kv (kv is excluded from backups on purpose).
+  // typed tables nor kv (most of kv is machine state and stays out of backups).
   {to: 9, up(db) {
     db.exec(`CREATE TABLE IF NOT EXISTS memory (
       kind TEXT NOT NULL, key TEXT NOT NULL, doc TEXT NOT NULL,
