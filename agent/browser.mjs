@@ -28,7 +28,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import {isPrivateAddress} from './net-guard.mjs';
-import {hostAllowed, RISKS, CHECKOUT_PATH, botCheck, searchAlternates} from '../shared/bot-browser.js';
+import {hostAllowed, RISKS, PATH_RISKS, ACTION_KEYS, CHECKOUT_PATH, foldLabel, botCheck, searchAlternates} from '../shared/bot-browser.js';
 
 // The allowlist rule lives with the rest of the browser-block rules in
 // `shared/bot-browser.js`, so the server runtime and this device read the same
@@ -78,7 +78,9 @@ const PICKABLE = `(function(){var sel='a[href],button,input,textarea,select,[rol
 // The page's links with their addresses: text alone drops where a search result leads.
 const LINKS = '(function(){var m=document.querySelector(\'main, article, [role=main], #content, #b_results, #links\')||document.body;if(!m)return [];var seen={},out=[];m.querySelectorAll(\'a[href]\').forEach(function(a){var t=(a.innerText||\'\').replace(/\\s+/g,\' \').trim();var h=a.href;if(out.length>=40||t.length<4||!/^https?:/.test(h)||seen[h])return;seen[h]=1;out.push({text:t.slice(0,100),url:h.slice(0,300)});});return out;})()';
 const MAIN_TEXT = '(function(){var b=document.body;if(!b)return "";var m=document.querySelector(\'main, article, [role=main], #content\');var t=m?m.innerText:"";return (t&&t.length>400?t:b.innerText).slice(0,60000);})()';
-const SNAPSHOT = `(function(){var els=${PICKABLE};els.forEach(function(e,i){e.setAttribute('data-agent-index',String(i+1));});return {count:els.length,elements:els.slice(0,${MAX_ELEMENTS}).map(function(e,i){var t=(e.innerText||e.value||e.getAttribute('aria-label')||e.getAttribute('placeholder')||e.name||'');return {index:i+1,tag:e.tagName.toLowerCase(),text:String(t).replace(/\\s+/g,' ').trim().slice(0,80)};})};})()`;
+/** A control that submits its form: at least a Send, whatever it says. */
+const SUBMIT = 'button[type=submit],button:not([type]),input[type=submit],input[type=image]';
+const SNAPSHOT = `(function(){var els=${PICKABLE};els.forEach(function(e,i){e.setAttribute('data-agent-index',String(i+1));});return {count:els.length,elements:els.slice(0,${MAX_ELEMENTS}).map(function(e,i){var t=(e.innerText||e.value||e.getAttribute('aria-label')||e.getAttribute('placeholder')||e.name||'');var f=e.form||e.closest('form');return {index:i+1,tag:e.tagName.toLowerCase(),text:String(t).replace(/\\s+/g,' ').trim().slice(0,80),submit:Boolean(f)&&e.matches(${jsLiteral(SUBMIT)})};})};})()`;
 /** A step targets an element by the index from the last snapshot, or by a CSS
  * selector when the model prefers one. */
 const targetOf = step => step.index ? jsLiteral(`[data-agent-index="${Math.round(step.index)}"]`) : jsLiteral(step.selector);
@@ -97,16 +99,26 @@ function riskGuard(approved, verb, click = false) {
   // page is on at this click, so a Send approved for one site is refused after a navigate to another.
   const cleared = approved.filter(a => typeof a === 'string' && a.includes('@'));
   const risks = RISKS.map(([action, pattern]) => [action, pattern.source, pattern.flags, RISK_WORDS[action]]);
+  const paths = PATH_RISKS.map(([action, pattern]) => [action, pattern.source, pattern.flags, RISK_WORDS[action]]);
   const checkout = click
     ? `if(open.some(r=>r[0]==='spend')&&new RegExp(${jsLiteral(CHECKOUT_PATH.source)},${jsLiteral(CHECKOUT_PATH.flags)}).test(location.pathname))return{ok:false,risk:'spend',reason:'This is a checkout page and nobody approved a payment, so it was not ${verb}. A payment needs the owner to answer a payment ask.'};`
     : '';
-  return `const ok=${JSON.stringify(cleared)};const open=${JSON.stringify(risks)}.filter(r=>!ok.includes(r[0]+'@'+location.origin));`
+  // The words are folded as the server folds them (shared/bot-browser.js foldLabel), so a look-alike letter, a
+  // zero-width character or a full-width form does not hide a risky label. A link's address is read as a GET
+  // that may act ("/unsubscribe"); a form submit is at least a Send; a control with no words at all is refused
+  // unless something risky was approved on this origin, since nobody can tell what it does.
+  return `const fold=${foldLabel.toString()};const here='@'+location.origin;const ok=${JSON.stringify(cleared)};const open=${JSON.stringify(risks)}.filter(r=>!ok.includes(r[0]+here));`
     + `const ctl=el.closest(${jsLiteral(CONTROL)})||el;`
-    + (click ? `const form=ctl.form||ctl.closest('form');const sub=form&&form.querySelector('button[type=submit],button:not([type]),input[type=submit],input[type=image]');` : 'const sub=null;')
-    + `const words=n=>n?[n.innerText,n.value,n.getAttribute('aria-label'),n.getAttribute('placeholder'),n.getAttribute('title'),n.getAttribute('alt')]:[];`
-    + `const full=[...words(el),...(ctl!==el?words(ctl):[]),...(sub&&sub!==ctl&&sub!==el?words(sub):[])].filter(t=>typeof t==='string'&&t.trim()).join(' ').replace(/\\s+/g,' ').trim().slice(0,2000);const label=full.slice(0,120);`
+    + (click ? `const form=ctl.form||ctl.closest('form');const sub=form&&form.querySelector(${jsLiteral(SUBMIT)});const submits=Boolean(form)&&ctl.matches(${jsLiteral(SUBMIT)});` : 'const sub=null;const submits=false;')
+    + `const words=n=>n?[n.innerText,n.value,n.getAttribute('aria-label'),n.getAttribute('placeholder'),n.getAttribute('title'),n.getAttribute('alt'),n.getAttribute('name')]:[];`
+    + `const full=fold([...words(el),...(ctl!==el?words(ctl):[]),...(sub&&sub!==ctl&&sub!==el?words(sub):[])].filter(t=>typeof t==='string'&&t.trim()).join(' ')).replace(/\\s+/g,' ').trim().slice(0,2000);const label=full.slice(0,120);`
     + `const risky=open.find(r=>new RegExp(r[1],r[2]).test(full));`
     + `if(risky)return{ok:false,risk:risky[0],reason:'This control says "'+label.slice(0,60)+'", which is '+risky[3]+' nobody approved, so it was not ${verb}.'+(risky[0]==='spend'?' A payment needs the owner to answer a payment ask.':'')};`
+    + (click ? `const link=el.closest('a[href]');let path='';if(link){try{const u=new URL(link.href);let p=u.pathname;try{p=decodeURIComponent(p);}catch(e){}const keys=new RegExp(${jsLiteral(ACTION_KEYS.source)},${jsLiteral(ACTION_KEYS.flags)});path=fold([p,...[...u.searchParams].flatMap(([k,v])=>keys.test(k)?[k,v]:[k])].join(' ')).replace(/[/_\\-.+=&?]+/g,' ');}catch(e){}}`
+      + `const acts=path&&${JSON.stringify(paths)}.filter(r=>!ok.includes(r[0]+here)).find(r=>new RegExp(r[1],r[2]).test(path));`
+      + `if(acts)return{ok:false,risk:acts[0],reason:'This link goes to "'+link.getAttribute('href').slice(0,60)+'", which is '+acts[3]+' nobody approved, so it was not ${verb}.'};` : '')
+    + `if(submits&&!['send','post','spend'].some(c=>ok.includes(c+here)))return{ok:false,risk:'send',reason:'This control submits a form, which is a send nobody approved, so it was not ${verb}.'};`
+    + `if(!full&&!ok.some(a=>a.endsWith(here)))return{ok:false,risk:'send',reason:'This control has no words, so nobody can tell what it does, and nothing was approved on this site, so it was not ${verb}.'};`
     + checkout;
 }
 function actionExpression(step, approved = null) {

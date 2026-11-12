@@ -26,17 +26,17 @@
  *   make itself the primary bot, save a rule without the owner's tap, or reach a route the owner could not.
  *
  * Pure and browser-safe: the server reads replies with it and the UI paints the card from it. */
-import {cleanText, validHttpUrl} from './core.js?v=99c330d626';
-import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=99c330d626';
-import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=99c330d626';
-import {controlFence} from './reply-blocks.js?v=99c330d626';
-import {companyBots, primaryOf} from './company.js?v=99c330d626';
-import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js?v=99c330d626';
-import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=99c330d626';
-import {grantWhat} from './ui-asks.js?v=99c330d626';
-import {COLOR_NAMES} from './ui-kit.js?v=99c330d626';
-import {SHAPES} from './company.js?v=99c330d626';
-import {limitsOf, BACKSTOP} from './limits.js?v=99c330d626';
+import {cleanText, validHttpUrl} from './core.js?v=80f77f5682';
+import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=80f77f5682';
+import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=80f77f5682';
+import {controlFence} from './reply-blocks.js?v=80f77f5682';
+import {companyBots, primaryOf} from './company.js?v=80f77f5682';
+import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js?v=80f77f5682';
+import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=80f77f5682';
+import {grantWhat, payAlwaysText} from './ui-asks.js?v=80f77f5682';
+import {COLOR_NAMES} from './ui-kit.js?v=80f77f5682';
+import {SHAPES} from './company.js?v=80f77f5682';
+import {limitsOf, BACKSTOP} from './limits.js?v=80f77f5682';
 
 export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'schedule', 'remove', 'open', 'signin', 'pause', 'limits', 'basics', 'forget', 'disconnect', 'thread'];
 /** The bot settings a bot may propose. Not the primary role, the browser approval mode, or layout (pins, order). */
@@ -184,7 +184,7 @@ export function resolveSetup(state, request, {speaker = null} = {}) {
     if (!bot) return {ok: false, error: `there is no bot called "${request.bot || 'blank'}".`};
     const job = String(request.job || '').trim();
     if (job.length < MIN_JOB || job.length > MAX_JOB) return {ok: false, error: `a job is ${MIN_JOB} to ${MAX_JOB} characters.`};
-    return {ok: true, card: {action: 'job', botId: bot.id, job, text: `New job for ${bot.name}: “${job.length > 240 ? `${job.slice(0, 240)}…` : job}”`}};
+    return {ok: true, card: {action: 'job', botId: bot.id, job, text: `New job for ${bot.name}: “${job.length > JOB_LINE ? `${job.slice(0, JOB_LINE)}…` : job}”`}};
   }
   if (request.action === 'remove') {
     const bot = botNamed(state, request.bot, speaker);
@@ -311,6 +311,9 @@ function teamCard(state, request, speaker) {
   return {ok: true, card: {action: 'team', groupId: group.id, settings, text: `${group.name || 'This team'}: ${Object.entries(settings).map(([k, v]) => TEAM_WORDS[k](v)).join(', ')}`}};
 }
 
+/** How much of a job a job card's line shows; the rest is folded under it (setupDetail). */
+const JOB_LINE = 240;
+
 function ruleCard(bot, request) {
   const act = RULE_WORDS[request.do];
   if (!act) return {ok: false, error: `a rule is for open, send, post, delete or spend, not "${request.do || 'blank'}".`};
@@ -323,7 +326,9 @@ function ruleCard(bot, request) {
     scope = scopeOf({action: act, target: /^https?:\/\//i.test(site) ? site : `https://${site}`});
     if (!site || !scope) return {ok: false, error: 'name the site the rule is for, like github.com.'};
   }
-  return {ok: true, card: {action: 'rule', botId: bot.id, act, scope, choice, text: `${bot.name}: ${GRANT_LABELS[choice]} · ${grantWhat(act, scope)}`}};
+  // Always allow on payments is confirmed before it is applied, with the words the ask card uses (ui-conversation.js).
+  return {ok: true, card: {action: 'rule', botId: bot.id, act, scope, choice, text: `${bot.name}: ${GRANT_LABELS[choice]} · ${grantWhat(act, scope)}`,
+    ...(act === 'spend' && choice === 'always' ? {confirmAlways: payAlwaysText(bot.name, scope)} : {})}};
 }
 
 function limitsCard(state, request) {
@@ -353,6 +358,13 @@ function threadCard(state, request) {
   if (!name) return {ok: false, error: 'give the thread a new title in "name", or "remove":true to delete it.'};
   return {ok: true, card: {action: 'thread', groupId: thread.id, name, text: `Rename the thread “${thread.name}” to “${name}”`}};
 }
+
+/** The whole text a card's line shortens, for the card to show folded: a job longer than its line. Else ''. */
+export const setupDetail = card => (card?.action === 'job' && typeof card.job === 'string' && card.job.length > JOB_LINE ? card.job : '');
+/** The confirmation a card needs before it is applied: an Always allow on payments for a site. Else ''. A card
+ * read back from a message is checked again here, so a rule without the text still confirms. */
+export const setupConfirm = (card, botName = 'This bot') => (card?.action === 'rule' && card.act === 'spend' && card.choice === 'always'
+  ? (typeof card.confirmAlways === 'string' && card.confirmAlways) || payAlwaysText(botName, card.scope) : '');
 
 /** The card a setup message carries, read back safely. Anything malformed is null, so no button is painted. */
 export function setupCardOf(message) {

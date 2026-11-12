@@ -14,10 +14,11 @@
  *
  * Pure and browser-safe, like the other shared modules.
  */
-import {cleanText} from './core.js?v=99c330d626';
-import {controlFence} from './reply-blocks.js?v=99c330d626';
-import {decide, createAsk} from './asks.js?v=99c330d626';
-import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=99c330d626';
+import {cleanText} from './core.js?v=80f77f5682';
+import {controlFence} from './reply-blocks.js?v=80f77f5682';
+import {decide, createAsk} from './asks.js?v=80f77f5682';
+import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=80f77f5682';
+import {runPrivateHosts} from './bot-browser.js?v=80f77f5682';
 
 export const CONNECTOR_KINDS = ['google', 'mcp', 'site'];
 /** `ready` works; `setup` is Google with a client saved and no sign-in yet; `reconnect` is a sign-in that
@@ -213,7 +214,12 @@ export function recordConnectorCalls(state, {bot, run, chatKey, output, unattend
   if (blockedByPage) say(`${bot.name} asked to use a connector and to open a web page in one reply. The page goes first; ask for one kind at a time.`);
   else if (closed) say(`${bot.name} asked to use a connector, but you had just declined, so nothing was used.`);
   else if (depth >= roundsCap(state)) say(`${bot.name} asked to use a connector again, but ${roundsCap(state)} connector rounds in a row is the most ${roundsCap(state) < BACKSTOP.rounds ? 'your limit in Settings allows' : 'one message may take'}.`);
-  else for (const item of found.slice(0, pagesCap(state))) {
+  // A run that has read private data (a connector result, or the owner's mail or files in the browser) carries it:
+  // a read on a connector that did not supply it asks, since a query is enough to carry it there. More reads of
+  // a connector that did supply it (`run.readFrom`, set as results come back) carry nothing anywhere new.
+  const guarded = Boolean(run.readPrivate || run.connectorPage || runPrivateHosts(state, run.id).size);
+  const readFrom = new Set(Array.isArray(run.readFrom) ? run.readFrom : []);
+  if (!blockedByPage && !closed && depth < roundsCap(state)) for (const item of found.slice(0, pagesCap(state))) {
     if (!item.ok) { say(`${bot.name} asked to use a connector, but the request was refused: ${item.error}`); continue; }
     const {use, tool, args} = item.call;
     const connector = findConnector(state, use);
@@ -221,7 +227,7 @@ export function recordConnectorCalls(state, {bot, run, chatKey, output, unattend
     if ((connector.status || 'ready') !== 'ready') { say(`${connector.name} is not ready${connector.statusMessage ? `: ${connector.statusMessage}` : ''} Fix it in Settings → Connectors, then ask again.`); continue; }
     const needs = connectorNeeds(connector, tool, args);
     if (!needs) { say(`${bot.name} asked ${connector.name} for "${tool}", but ${connector.name} has no tool called "${tool}".`); continue; }
-    const decision = decide(state, bot, needs);
+    const decision = decide(state, bot, needs, {readPrivate: guarded && !readFrom.has(connector.id)});
     if (decision.verdict === 'deny') { say(`${bot.name} asked to ${needs[0].detail}. ${decision.message}`); continue; }
     const call = {id: makeId(), connectorId: connector.id, identity: connectorIdentity(connector), connectorName: connector.name, tool, args, write: actionOf(connector, tool).write, botId: bot.id, botName: bot.name, status: 'go', chatKey};
     if (decision.verdict === 'ask') {

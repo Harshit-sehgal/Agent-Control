@@ -7,7 +7,7 @@
  * An ask is a line in a chat (`{kind: 'ask', askId, text}`) whose status lives in
  * `state.asks`, so answering never rewrites a line. A grant is `{botId, action,
  * scope, choice}` in `state.grants`. */
-import {ASK_ANSWER_LABELS, GRANT_LABELS, ASK_ACTIONS, askChoices, acrossSites, grantChoices, answeredText, grantFor, isAskAction, scopeOf} from './asks.js?v=99c330d626';
+import {ASK_ANSWER_LABELS, GRANT_LABELS, ASK_ACTIONS, askChoices, acrossSites, grantChoices, answeredText, grantFor, isAskAction, scopeOf} from './asks.js?v=80f77f5682';
 
 export const PAUSE_TEXT = 'All bots are paused. Nothing runs until you resume.';
 /** The banner while everything bots start is paused; `resume` says whether this person may lift it. */
@@ -39,9 +39,12 @@ export function askCard(state, line) {
     body: typeof ask.body === 'string' ? ask.body : '',
     note: ask.action === 'spend' ? (ask.grantScope ? 'Payments ask every time unless you choose Always allow for this site.' : 'Payments are asked every time.') : '',
     // Always allow on a payment lets this bot pay on this site without asking, so the card confirms it first.
-    ...(ask.action === 'spend' && ask.grantScope ? {confirmAlways: `${botName} will pay on ${host(ask.grantScope)} without asking you. You can change this on ${botName}'s profile → Permissions.`} : {}),
+    ...(ask.action === 'spend' && ask.grantScope ? {confirmAlways: payAlwaysText(botName, ask.grantScope)} : {}),
   };
 }
+
+/** The confirmation an Always allow on payments shows first, on an ask card and on a setup rule card alike. */
+export const payAlwaysText = (botName, scope) => `${botName} will pay on ${host(scope)} without asking you. You can change this on ${botName}'s profile → Permissions.`;
 
 /* ---------- grants ---------- */
 

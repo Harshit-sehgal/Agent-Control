@@ -46,7 +46,9 @@ test('after reading private data, a new site asks; a site it was always allowed 
   const guarded = {readPrivate: true};
   assert.equal(verdict(s, atlas, 'browser.use', 'https://elsewhere.example/?q=x', guarded).verdict, 'ask');
   assert.equal(verdict(s, atlas, 'browser.use', 'https://docs.example/page', guarded).verdict, 'allow');
-  assert.equal(verdict(s, atlas, 'connector.notes.read', 'me@example.com', guarded).verdict, 'allow', 'reading more is fine');
+  // The guard covers connector reads too; the caller drops it for a connector that supplied the data (connectors.js).
+  assert.equal(verdict(s, atlas, 'connector.notes.read', 'me@example.com', guarded).verdict, 'ask', 'a guarded read on another connector asks');
+  assert.equal(verdict(s, atlas, 'connector.notes.read', 'me@example.com', {readPrivate: false}).verdict, 'allow', 'reading more of the same connector is fine');
   assert.equal(decide(s, atlas, [{action: 'browser.use', target: 'https://elsewhere.example/'}], guarded).verdict, 'ask');
   assert.equal(decide(s, atlas, [{action: 'browser.use', target: 'https://elsewhere.example/'}]).verdict, 'allow');
 });

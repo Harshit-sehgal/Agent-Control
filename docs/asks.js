@@ -21,9 +21,9 @@
  * Pure and browser-safe, like the other shared modules: the server and the
  * Pages demo share every rule here.
  */
-import {fail} from './errors.js?v=99c330d626';
-import {cleanText} from './core.js?v=99c330d626';
-import {logActivity} from './activity-log.js?v=99c330d626';
+import {fail} from './errors.js?v=80f77f5682';
+import {cleanText} from './core.js?v=80f77f5682';
+import {logActivity} from './activity-log.js?v=80f77f5682';
 
 /** What every bot may do without a grant. */
 export const BASIC_KIT = ['bot.ask', 'bot.create', 'schedule.set'];
@@ -153,10 +153,11 @@ export function verdict(state, bot, action, target = '', {readPrivate = false} =
     const name = bot?.name || 'this bot';
     return {verdict: 'deny', scope, message: `${name} is set to Deny for this. Change it on ${name}'s profile → Permissions.`};
   }
-  // The basics need no answer. But once this run has read private data from a connector, a page on a site the
-  // bot has no grant for asks: opening an address is enough to carry what was read off to that site.
+  // The basics need no answer. But once this run has read private data, a page on a site the bot has no grant
+  // for, or a read on a connector that did not supply that data, asks: an address or a query is enough to carry
+  // what was read off. The caller says which basics the guard is for (`readPrivate`, per need in `decide`).
   // `askBasics` is the owner's switch to have even these asked (Settings → Permissions).
-  if (choice === null && !state?.askBasics && isBasicAccess(action) && !(readPrivate && action === 'browser.use')) return {verdict: 'allow', scope};
+  if (choice === null && !state?.askBasics && isBasicAccess(action) && !readPrivate) return {verdict: 'allow', scope};
   return {verdict: 'ask', scope};
 }
 
@@ -166,7 +167,8 @@ export function decide(state, bot, needs, guard = {}) {
   let ask = null;
   const rest = [];
   for (const need of needs) {
-    const v = verdict(state, bot, need.action, need.target, guard);
+    // `guard.readPrivate` may be a test of one need: the guard is per page or per connector, not per request.
+    const v = verdict(state, bot, need.action, need.target, typeof guard.readPrivate === 'function' ? {...guard, readPrivate: Boolean(guard.readPrivate(need))} : guard);
     if (v.verdict === 'deny') return {verdict: 'deny', need, message: v.message};
     if (v.verdict === 'ask' && !ask) ask = {...need, scope: v.scope};
     else if (v.verdict === 'ask') rest.push({...need, scope: v.scope});

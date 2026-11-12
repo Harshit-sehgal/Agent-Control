@@ -17,7 +17,7 @@ import {isPrimary} from './company.js';
 import {hasJob, modelChip} from './ui-profile-model.js';
 import {scheduleTaskBody} from './schedules.js';
 import {feed} from './ui-feed.js';
-import {setupCardOf, setupButton} from './setup.js';
+import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js';
 import {askCard} from './ui-asks.js';
 import {face, botColor, botAccent, accentStyle} from './ui-face.js';
 import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js';
@@ -208,7 +208,10 @@ function modelLimitEntry({message: m, line}) {
 function setupEntry({message: m, card, done}) {
   if (!card || !canWrite()) return `<div class="cv-note" data-m="${esc(m.id)}"><span>${esc(m.text)}</span></div>`;
   if (done) return `<div class="cv-note cv-conn" data-m="${esc(m.id)}"><span>${icon('check', 13)}${esc(m.text)} · done</span></div>`;
-  return `<div class="cv-card flat" data-m="${esc(m.id)}"><p>${esc(m.text)}</p><div class="acts">${btn(setupButton(card), 'apply-setup', {kind: 'primary', small: true, data: {message: m.id}})}</div></div>`;
+  // A line that shortens what Apply sets (a long job) shows all of it, folded, like an ask card's Full message.
+  const detail = setupDetail(card);
+  const full = detail ? `<details class="cv-ask-body"><summary>Full job${icon('chevron', 13)}</summary><pre>${esc(detail)}</pre></details>` : '';
+  return `<div class="cv-card flat" data-m="${esc(m.id)}"><p>${esc(m.text)}</p>${full}<div class="acts">${btn(setupButton(card), 'apply-setup', {kind: 'primary', small: true, data: {message: m.id}})}</div></div>`;
 }
 
 function noModelEntry({message: m}) {
@@ -432,6 +435,9 @@ export const conversationActions = {
     const message = Object.values(store.state?.chats || {}).flat().find(x => x?.id === b.dataset.message);
     const card = message && message.origin !== 'browser' ? setupCardOf(message) : null;
     if (!card) throw new Error('That suggestion is no longer here.');
+    // Always allow on payments is confirmed first, with the ask card's own words.
+    const confirm = setupConfirm(card, findBot(card.botId)?.name);
+    if (confirm && !(await confirmSheet('Always allow payments here?', {confirm: 'Always allow', danger: true, detail: confirm}))) return;
     if (card.app === 'google') {
       // With a Google client saved, the tap is the sign-in itself; without one, the Connectors page shows the one-time setup.
       const google = !isStaticDemo() ? googleCard((await api('/api/connectors').catch(() => null))?.google) : null;

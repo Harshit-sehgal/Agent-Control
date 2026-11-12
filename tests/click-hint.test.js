@@ -30,8 +30,9 @@ test('a find that misses points at the control that matches it, with the block t
 test('the label an ask card shows comes from the Controls line, never from the click hint or page text', async () => {
   const {controlLabels} = await import('../shared/bot-browser.js');
   const shown = capturePageText({...page, text: `${page.text} Offer [5] days only`}, undefined, 'Lazeez Affaire Outer Circle book table');
-  const state = {browserRequests: [{botId: 'atlas', chatKey: 'atlas', status: 'done', result: {page: shown}}]};
-  const labels = controlLabels(state, 'atlas', 'atlas');
+  const state = {browserRequests: [{botId: 'atlas', chatKey: 'atlas', status: 'done', url: page.finalUrl, result: {finalUrl: page.finalUrl, page: shown}}]};
+  // Labels are keyed to the page's origin: the request names the address its indices are for.
+  const labels = controlLabels(state, 'atlas', 'atlas', page.finalUrl);
   assert.equal(labels.get(8), 'Lazeez Affaire - Outer Circle');
   assert.equal(labels.get(5), undefined);
 });

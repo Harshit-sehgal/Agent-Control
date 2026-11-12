@@ -39,9 +39,12 @@ export function askCard(state, line) {
     body: typeof ask.body === 'string' ? ask.body : '',
     note: ask.action === 'spend' ? (ask.grantScope ? 'Payments ask every time unless you choose Always allow for this site.' : 'Payments are asked every time.') : '',
     // Always allow on a payment lets this bot pay on this site without asking, so the card confirms it first.
-    ...(ask.action === 'spend' && ask.grantScope ? {confirmAlways: `${botName} will pay on ${host(ask.grantScope)} without asking you. You can change this on ${botName}'s profile → Permissions.`} : {}),
+    ...(ask.action === 'spend' && ask.grantScope ? {confirmAlways: payAlwaysText(botName, ask.grantScope)} : {}),
   };
 }
+
+/** The confirmation an Always allow on payments shows first, on an ask card and on a setup rule card alike. */
+export const payAlwaysText = (botName, scope) => `${botName} will pay on ${host(scope)} without asking you. You can change this on ${botName}'s profile → Permissions.`;
 
 /* ---------- grants ---------- */
 

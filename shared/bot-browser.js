@@ -225,10 +225,15 @@ const controlLine = elements => {
   const first = all.filter(e => e.tag !== 'a' || ACTION_WORDS.test(e.text)).slice(0, 30);
   const shown = new Set(first);
   const rest = all.filter(e => !shown.has(e)).slice(0, Math.max(0, 40 - first.length));
+  // A control's words are the page's: no "·", bracket or line break in them, so they cannot plant an entry
+  // ("Offer · [7] button Search") that controlLabels would read. A form submit says so, which makes it a Send.
+  const words = e => `${String(e.text).replace(/[·[\]\r\n]+/g, ' ').replace(/\s+/g, ' ').trim()}${e.submit ? ' (form submit)' : ''}`;
   return [...first, ...rest].sort((a, b) => a.index - b.index)
-    .map(e => `[${e.index}] ${e.tag || 'element'} ${e.text}`.trim())
+    .map(e => `[${e.index}] ${String(e.tag || 'element').replace(/\s+/g, '') || 'element'} ${words(e)}`.trim())
     .join(' · ');
 };
+/** The prefix of the one line that names a page's controls. */
+const CONTROLS = 'Controls: ';
 
 const wordsOf = text => new Set(String(text || '').toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) || []);
 /** A control that is not a link (a restaurant card, a "Book a table" button) is reached only by a click, and
@@ -281,11 +286,13 @@ export function capturePageText(result, limit = MAX_PAGE_CHARS, find = '') {
   const signin = signinSite(r.finalUrl);
   if (signin) body = `This is a sign-in page: the owner is not signed in to ${signin} in this browser. Never type a password or a code. Send the setup block {"action":"signin","site":"${signin}"} so the owner signs in once, then ask for the page again.\n\n${body}`;
   if (r.botCheck) body = `This site showed a human check to the browser. Do not try to solve it: read another site or search for the page elsewhere.\n\n${body}`;
+  // The page's own text cannot pose as the Controls line, which names what each control is (controlLabels).
+  body = String(body).replace(/^(\s*)Controls:/gim, '$1Controls -');
   // Where the page's links go, so a bot can open a search result (page text alone drops the addresses).
   const links = (Array.isArray(r.links) ? r.links : []).filter(l => l && String(l.text || '').trim().length >= 4 && /^https?:\/\//.test(String(l.url || '')))
-    .slice(0, 30).map(l => `${cleanText(l.text, 100)} → ${String(l.url).slice(0, 300)}`).join('\n');
+    .slice(0, 30).map(l => `${cleanText(String(l.text).replace(/\s+/g, ' '), 100)} → ${String(l.url).replace(/\s+/g, '').slice(0, 300)}`).join('\n');
   // The links go before the page text is cut, so a long page still shows them.
-  const tail = [links ? `Links:\n${links}` : '', controls ? `Controls: ${controls}` : '', click.example].filter(Boolean).join('\n\n');
+  const tail = [links ? `Links:\n${links}` : '', controls ? `${CONTROLS}${controls}` : '', click.example].filter(Boolean).join('\n\n');
   return cleanText([tail ? String(body).slice(0, Math.max(1000, limit - tail.length - 4)) : body, tail].filter(Boolean).join('\n\n'), limit);
 }
 
@@ -304,11 +311,11 @@ export const MAX_BROWSER_DEPTH = BACKSTOP.rounds;
  * from the page result the bot was last shown. A control the bot was not shown a label for is at least
  * a Send. The browser reads the control again when it acts (agent/browser.mjs) with the same words. */
 export const RISKS = [
-  ['spend', /\b(pay|payment|buy|purchase|checkout|check out|place (?:your |the )?order|subscribe|donate|card number|cvc|cvv)\b/i],
-  ['delete', /\b(delete|remove|erase|destroy)\b/i],
-  ['post', /\b(post|publish|tweet)\b/i],
+  ['spend', /\b(pay|payment|pay now|buy|purchase|checkout|check out|place (?:your |the )?order|order now|complete (?:the |your )?(?:booking|purchase|order)|subscribe|donate|card number|cvc|cvv|upgrade|renew|rent now|place (?:a |your )?bid|bid|transfer|withdraw)\b/i],
+  ['delete', /\b(delete|remove|erase|destroy|move to (?:the )?trash|trash|archive|unsubscribe|cancel (?:my |your |the )?(?:subscription|order))\b/i],
+  ['post', /\b(post|publish|tweet|reply|repost|retweet|quote|comment|share)\b/i],
   // Booking, applying and signing up commit the owner as much as a send does.
-  ['send', /\b(send|submit|confirm|reserve|reservation|rsvp|register|sign ?up|apply(?! filters?\b)|book|request booking)\b/i],
+  ['send', /\b(send|submit|confirm|reserve|reservation|rsvp|register|sign ?up|apply(?! filters?\b)|book|booking(?!\.com)|request booking)\b/i],
 ];
 /** A checkout, payment or billing page: opening one is a payment, and the device refuses a click on one unless a payment was approved. */
 export const CHECKOUT_PATH = /\/(checkout|payment|billing)(\/|$)/i;
@@ -316,15 +323,52 @@ export const CHECKOUT_PATH = /\/(checkout|payment|billing)(\/|$)/i;
 /** The risk classes a control's label names, riskiest first: ['spend'], ['send'], [] ... */
 /** The risk classes that mean a click submits something the owner is committed by. */
 const SUBMITS = ['send', 'post', 'spend'];
-export const riskOf = label => RISKS.filter(([, pattern]) => pattern.test(String(label ?? ''))).map(([action]) => action);
+export const riskOf = label => { const text = foldLabel(label); return RISKS.filter(([, pattern]) => pattern.test(text)).map(([action]) => action); };
+
+/** A label as the risk words read it: NFKC (full-width and compatibility forms), no zero-width or bidi marks, and
+ * the Cyrillic and Greek letters that look like Latin ones folded to them, so "\u0405end" reads "Send". Self-contained
+ * (no outside names), because agent/browser.mjs runs this very function in the page at the click. */
+export function foldLabel(text) {
+  const look = {'А': 'A', 'В': 'B', 'Е': 'E', 'К': 'K', 'М': 'M', 'Н': 'H', 'О': 'O', 'Р': 'P', 'С': 'C', 'Т': 'T', 'Х': 'X', 'Ѕ': 'S', 'І': 'I', 'Ј': 'J', 'Ү': 'Y', 'Ԁ': 'd', 'Ԛ': 'Q', 'Ԝ': 'W',
+    'а': 'a', 'в': 'b', 'е': 'e', 'к': 'k', 'м': 'm', 'н': 'h', 'о': 'o', 'р': 'p', 'с': 'c', 'т': 't', 'у': 'y', 'х': 'x', 'ѕ': 's', 'і': 'i', 'ј': 'j', 'ԁ': 'd', 'һ': 'h', 'ӏ': 'l', 'ԛ': 'q', 'ԝ': 'w', 'ү': 'y', 'ɡ': 'g',
+    'Α': 'A', 'Β': 'B', 'Ε': 'E', 'Ζ': 'Z', 'Η': 'H', 'Ι': 'I', 'Κ': 'K', 'Μ': 'M', 'Ν': 'N', 'Ο': 'O', 'Ρ': 'P', 'Τ': 'T', 'Υ': 'Y', 'Χ': 'X',
+    'α': 'a', 'ι': 'i', 'κ': 'k', 'ν': 'v', 'ο': 'o', 'ρ': 'p', 'τ': 't', 'υ': 'u', 'χ': 'x', 'ϲ': 'c', 'ϳ': 'j'};
+  return String(text ?? '').normalize('NFKC').replace(/[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0]/g, '')
+    .replace(/[\u0370-\u03FF\u0400-\u052F\u0250-\u02AF]/g, c => look[c] || c);
+}
+
+/** The risk classes an address names, as a GET that performs an action would ("/unsubscribe", "/cart/add",
+ * "?action=delete"): the path's words, the query's names and the values of action-like keys. The words are the
+ * verbs such links use, narrower than a button's (a blog's "/post/12" or "/archive" is a read). A search's own
+ * words are free text, not an action, so they are not read. */
+export const ACTION_KEYS = /^(?:action|do|cmd|command|op|operation|method|task|mode)$/i;
+export const PATH_RISKS = [
+  ['spend', /\b(pay|pay now|buy|buy now|purchase|checkout)\b/i],
+  ['delete', /\b(delete|remove|destroy|erase|trash|unsubscribe|cancel)\b/i],
+  ['send', /\b(send|submit|confirm|rsvp|subscribe|add to (?:cart|bag|basket)|(?:cart|bag|basket) add|add (?:cart|bag|basket))\b/i],
+];
+export function pathRisks(url) {
+  let u; try { u = new URL(url); } catch { return []; }
+  let path = u.pathname; try { path = decodeURIComponent(path); } catch { /* keep it encoded */ }
+  const words = foldLabel([path, ...[...u.searchParams].flatMap(([key, value]) => (ACTION_KEYS.test(key) ? [key, value] : [key]))].join(' ')).replace(/[/_\-.+=&?]+/g, ' ');
+  return PATH_RISKS.filter(([, pattern]) => pattern.test(words)).map(([action]) => action);
+}
 
 /** `{index → label}` for the controls of the page this bot last read in this chat ("[3] button Send"). */
-export function controlLabels(state, botId, chatKey) {
-  const last = (state?.browserRequests || []).find(r => r.botId === botId && r.chatKey === chatKey && r.status === 'done' && r.result?.page);
+export function controlLabels(state, botId, chatKey, url) {
+  // The page the indices belong to: the latest one this bot read in this chat on the request's own origin.
+  const origin = originOf(url);
+  const last = origin ? (state?.browserRequests || []).find(r => r.botId === botId && r.chatKey === chatKey && r.status === 'done' && r.result?.page
+    && originOf(r.result.finalUrl || r.url) === origin) : null;
   const labels = new Map();
-  // Only the Controls line names controls; page text and the click hint may hold "[5]" too.
-  const line = String(last?.result?.page || '').split('\n').filter(l => l.startsWith('Controls: ')).at(-1) || '';
-  for (const match of line.matchAll(/\[(\d+)\] (\S+) ([^·\n]*)/g)) labels.set(Number(match[1]), match[3].trim());
+  // Only the Controls line names controls, and it is the last one: capturePageText puts it after the page text
+  // and the links, and neutralises any line in them that starts the same way. Each entry is "[N] tag words",
+  // and a control's own words cannot hold "·" or brackets (controlLine), so an entry cannot plant another.
+  const line = String(last?.result?.page || '').split('\n').filter(l => l.startsWith(CONTROLS)).at(-1) || '';
+  for (const entry of line.slice(CONTROLS.length).split(' · ')) {
+    const match = /^\[(\d+)\] (\S+) ([^·[\]]*)$/.exec(entry.trim());
+    if (match) labels.set(Number(match[1]), match[3].trim());
+  }
   return labels;
 }
 
@@ -363,6 +407,11 @@ export function browserNeeds(request, controls = new Map()) {
     try { checkout = CHECKOUT_PATH.test(new URL(u).pathname); } catch { /* Not a URL: validation refused it already. */ }
     if (checkout) add('spend', u, `open a checkout page on ${hostOf(u)}`);
   }
+  // A navigate is a GET, and a GET can perform an action: "/unsubscribe?u=1" unsubscribes as a click would.
+  for (const step of request.steps || []) {
+    if (step.op !== 'navigate') continue;
+    for (const action of pathRisks(step.url)) add(action, step.url, `open ${String(step.url).slice(0, 120)}`);
+  }
   needs.sort((a, b) => RISKS.findIndex(r => r[0] === a.action) - RISKS.findIndex(r => r[0] === b.action));
   const origins = new Map();
   for (const u of pages) { const origin = scopeOf({action: 'browser.use', target: u}); if (origin && !origins.has(origin)) origins.set(origin, u); }
@@ -386,6 +435,20 @@ export function askedDetail(asked) {
     return action === BROWSER_PERMISSION ? `open ${where}` : action === 'spend' ? `pay on ${where}` : `${action} on ${where}`;
   }).filter(Boolean);
   return pairs > 1 ? named.join('; ') : asked[0].detail;
+}
+
+/** Exactly what a request will type and click, one step a line, for the ask card's Full message fold. */
+export function stepsBody(request, controls = new Map()) {
+  let here = request.url;
+  const lines = [];
+  for (const step of request.steps || []) {
+    if (step.op === 'navigate') { here = step.url; lines.push(`open ${step.url}`); continue; }
+    if (!INTERACTIVE.includes(step.op)) continue;
+    const label = step.index ? controls.get(step.index) || '' : '';
+    const named = label ? `"${label}"` : step.selector ? `"${step.selector}"` : `control ${step.index} (no label shown)`;
+    lines.push(step.op === 'type' ? `type into ${named} on ${hostOf(here) || here}:\n${String(step.text ?? '')}` : `click ${named} on ${hostOf(here) || here}`);
+  }
+  return lines.map((line, i) => `${i + 1}. ${line}`).join('\n');
 }
 
 const describe = request => `${request.steps.length ? `use ${hostOf(request.url)} (${request.steps.length} step${request.steps.length === 1 ? '' : 's'})` : `read ${hostOf(request.url)}`}`;
@@ -432,6 +495,15 @@ function connectedVia(state, host) {
   return (state.connectors || []).find(c => c?.status === 'ready' && (app.google ? c.kind === 'google' : c.kind === 'mcp' && c.app === app.id)) || null;
 }
 
+/** The owner's private sites this run has read in the browser: their mail and files, and an app the owner
+ * connected by signing in to it in this browser. */
+export function runPrivateHosts(state, runId) {
+  if (!runId) return new Set();
+  const signedIn = new Set((state.connectors || []).filter(c => c?.kind === 'site' && c.host).map(c => String(c.host).toLowerCase()));
+  return new Set((state.browserRequests || []).filter(r => r.runId === runId && r.status === 'done')
+    .map(r => hostOf(r.result?.finalUrl || r.url)).filter(host => PRIVATE_HOSTS.test(host) || signedIn.has(host)));
+}
+
 export function recordBrowserRequests(state, {bot, groupId, chatKey, output, depth = 0, skipUrls = [], runId = null, unattended = false, closed = false, makeId = () => crypto.randomUUID(), now = new Date().toISOString()}) {
   depth = Math.max(0, Math.min(MAX_BROWSER_DEPTH, Number(depth) || 0));
   const rounds = roundsCap(state), perReply = pagesCap(state);
@@ -455,10 +527,7 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
   // signed-in mail or files read in the browser. A new site then asks (asks.js verdict); the private site itself
   // does not, since reading more of the owner's own inbox carries nothing anywhere new.
   const run = runId ? (state.groupRuns || []).find(r => r.id === runId) : null;
-  // An app the owner connected by signing in to it in this browser is private too, like their mail.
-  const signedIn = new Set((state.connectors || []).filter(c => c?.kind === 'site' && c.host).map(c => String(c.host).toLowerCase()));
-  const privateHosts = new Set((state.browserRequests || []).filter(r => runId && r.runId === runId && r.status === 'done')
-    .map(r => hostOf(r.result?.finalUrl || r.url)).filter(host => PRIVATE_HOSTS.test(host) || signedIn.has(host)));
+  const privateHosts = runPrivateHosts(state, runId);
   const guarded = Boolean(run && (run.connectorPage || run.readPrivate || privateHosts.size));
   if (!limited && !closed) for (const item of found) {
     if (!item.ok) { say(`${bot.name} asked for a web page, but the request was refused: ${item.error}`); invalid.push(item.error); continue; }
@@ -496,7 +565,7 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
       }
       continue;
     }
-    const labels = controlLabels(state, bot.id, chatKey);
+    const labels = controlLabels(state, bot.id, chatKey, item.request.url);
     // A click on a control named for sending, posting or paying submits something. Once one went through in
     // this run on a site, a second is never sent: a booking or an order made twice is worse than once.
     const submits = (item.request.steps || []).some(step => step.op === 'click' && riskOf((step.index && labels.get(step.index)) || step.selector || '').some(a => SUBMITS.includes(a)));
@@ -508,7 +577,9 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
       continue;
     }
     const needs = browserNeeds(item.request, labels);
-    const decision = decide(state, bot, needs, {readPrivate: guarded && !privateHosts.has(hostOf(item.request.url))});
+    // Per page: every site the request reaches that is not one of the run's private hosts asks, including one a
+    // `navigate` step opens after a private first page.
+    const decision = decide(state, bot, needs, {readPrivate: need => guarded && need.action === BROWSER_PERMISSION && !privateHosts.has(hostOf(need.target))});
     if (decision.verdict === 'deny') { say(`${bot.name} asked to ${describe(item.request)}. ${decision.message}`); continue; }
     // `approved`: the risky classes this request is cleared for once it is sent (a grant, or the owner's
     // answer to its ask), each for the origin it runs on ("send@https://b.example"). Written here after the
@@ -521,7 +592,7 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
       const {need} = decision;
       // One ask stands for every pair still needing the owner's say, and names each of them: Allow approves
       // exactly `approved`, and an ask across sites gets no Always allow (asks.js).
-      const asked = createAsk(state, {botId: bot.id, runId, chatKey, action: need.action, target: need.target, detail: askedDetail(decision.asked), unattended, requestId: record.id, implies: decision.implies, covers: decision.asked, now, makeId});
+      const asked = createAsk(state, {botId: bot.id, runId, chatKey, action: need.action, target: need.target, detail: askedDetail(decision.asked), body: stepsBody(item.request, labels), unattended, requestId: record.id, implies: decision.implies, covers: decision.asked, now, makeId});
       record.askId = asked.id;
       asks.push(asked);
     } else lines.push({id: browserMessageId(record.id), role: 'system', kind: 'browser', text: `${bot.name} wants to ${describe(record)}.`, at: now});

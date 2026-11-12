@@ -47,6 +47,8 @@ async function call(url, init = {}) {
   } finally { clearTimeout(timer); }
 }
 const json = async (url, init) => { const r = await call(url, init); return {status: r.status, headers: r.headers, body: parse(r.text)}; };
+/** Two addresses that name the same thing: the same URL, a trailing slash aside. */
+const same = (a, b) => { try { return new URL(String(a)).href.replace(/\/+$/, '') === new URL(String(b)).href.replace(/\/+$/, ''); } catch { return false; } };
 const wellKnown = (base, name) => { const u = new URL(base); const path = u.pathname.replace(/\/+$/, ''); return [`${u.origin}/.well-known/${name}${path === '' ? '' : path}`, `${u.origin}/.well-known/${name}`]; };
 
 /** Where an MCP server signs people in: its authorization server's addresses, and the resource a token is for. */
@@ -59,6 +61,8 @@ export async function discoverMcpAuth(mcpUrl) {
     const r = await json(url).catch(() => null);
     if (r?.status === 200 && r.body && typeof r.body === 'object') { resource = r.body; break; }
   }
+  // RFC 9728 §3.3: the metadata must be for this very server, or a token could be minted for another one.
+  if (resource && !same(resource.resource, mcpUrl)) throw problem('That app\'s server described a different address than the one being connected, so it does not match and was not used.', 502, 'server');
   const issuer = endpoint(resource?.authorization_servers?.[0] || new URL(mcpUrl).origin, 'sign-in');
   let meta = null;
   for (const url of [...wellKnown(issuer, 'oauth-authorization-server'), ...wellKnown(issuer, 'openid-configuration')]) {
@@ -66,6 +70,8 @@ export async function discoverMcpAuth(mcpUrl) {
     if (r?.status === 200 && r.body?.authorization_endpoint && r.body?.token_endpoint) { meta = r.body; break; }
   }
   if (!meta) throw problem('That app\'s server does not say where to sign in.', 502, 'server');
+  // RFC 8414 §3.3: the metadata's issuer must be the authorization server it was fetched for.
+  if (!same(meta.issuer, issuer)) throw problem('That app\'s sign-in server names a different issuer than the one it was asked for, so it does not match and was not used.', 502, 'server');
   if (!meta.registration_endpoint) throw problem('That app does not let an app sign in by itself yet. Connect it with a token instead.', 422, 'no-register');
   return {
     authorizationEndpoint: endpoint(meta.authorization_endpoint, 'sign-in'), tokenEndpoint: endpoint(meta.token_endpoint, 'token'),

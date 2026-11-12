@@ -19,15 +19,15 @@ import {createRouter} from '../src/router.js';
 import {connectorRoutes} from '../src/routes-connectors.js';
 
 /** An app server: MCP at /mcp behind a bearer token, with the OAuth metadata, registration and token endpoints. */
-async function fakeApp({register = true, expiresIn = 3600, refuseRefresh = false} = {}) {
+async function fakeApp({register = true, expiresIn = 3600, refuseRefresh = false, resource = null, issuer = null} = {}) {
   const seen = {registered: [], tokens: [], bearers: []};
   let n = 0, codes = new Map(), live = new Set(), refresh = new Map();
   const server = http.createServer(async (req, res) => {
     const chunks = []; for await (const c of req) chunks.push(c);
     const raw = Buffer.concat(chunks).toString('utf8'), url = new URL(req.url, 'http://x'), base = `http://127.0.0.1:${server.address().port}`;
     const send = (status, body, headers = {}) => { res.writeHead(status, {'content-type': 'application/json', ...headers}); res.end(JSON.stringify(body)); };
-    if (url.pathname === '/.well-known/oauth-protected-resource/mcp') return send(200, {resource: `${base}/mcp`, authorization_servers: [base], scopes_supported: ['read']});
-    if (url.pathname === '/.well-known/oauth-authorization-server') return send(200, {issuer: base, authorization_endpoint: `${base}/authorize`, token_endpoint: `${base}/token`, ...(register ? {registration_endpoint: `${base}/register`} : {}), code_challenge_methods_supported: ['S256']});
+    if (url.pathname === '/.well-known/oauth-protected-resource/mcp') return send(200, {resource: resource || `${base}/mcp`, authorization_servers: [base], scopes_supported: ['read']});
+    if (url.pathname === '/.well-known/oauth-authorization-server') return send(200, {issuer: issuer || base, authorization_endpoint: `${base}/authorize`, token_endpoint: `${base}/token`, ...(register ? {registration_endpoint: `${base}/register`} : {}), code_challenge_methods_supported: ['S256']});
     if (url.pathname === '/register') { const body = JSON.parse(raw); seen.registered.push(body); return send(201, {client_id: 'client-1', redirect_uris: body.redirect_uris}); }
     if (url.pathname === '/token') {
       const form = new URLSearchParams(raw); seen.tokens.push(Object.fromEntries(form));
@@ -148,4 +148,14 @@ test('the routes: start refuses an app with no sign-in back to the page, and a s
   };
   assert.match(await run('/api/connectors/mcp/start?app=github'), /\?connect=error&app=github&reason=server/);
   assert.match(await run('/api/connectors/mcp/callback?state=' + 'a'.repeat(64) + '&code=x'), /\?connect=error&app=&reason=state/);
+});
+
+test('RFC 9728 §3.3: protected-resource metadata for another resource is refused', async t => {
+  const {fake} = await rig(t, {resource: 'https://evil.example/mcp'});
+  await assert.rejects(discoverMcpAuth(fake.app.oauth), /does not match|not the one/);
+});
+
+test('RFC 8414 §3.3: authorization-server metadata naming another issuer is refused', async t => {
+  const {fake} = await rig(t, {issuer: 'https://evil.example'});
+  await assert.rejects(discoverMcpAuth(fake.app.oauth), /does not match|not the one/);
 });

@@ -135,7 +135,9 @@ test('browser.action types, clicks and reads, and refuses off-allowlist navigati
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const host = `127.0.0.1:${server.address().port}`, permit = h => h !== 'localhost';
   try {
-    const page = await captureWithBrowser(`http://${host}/form`, {allow: [host], binary: browser, permit, steps: [
+    // The field has no words, so the server asks about it as a Send and approves it for this origin; unapproved,
+    // the browser refuses a wordless control (owner-boundary.test.js).
+    const page = await captureWithBrowser(`http://${host}/form`, {allow: [host], binary: browser, permit, approved: [`send@http://${host}`], steps: [
       {op: 'type', selector: '#name', text: 'Ada'},
       {op: 'click', selector: '#go'},
       {op: 'read', selector: '#out'},

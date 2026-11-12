@@ -7,25 +7,25 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=99c330d626';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=99c330d626';
-import {requestOfMessage} from './bot-browser.js?v=99c330d626';
-import {validHttpUrl} from './core.js?v=99c330d626';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=99c330d626';
-import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=99c330d626';
-import {isPrimary} from './company.js?v=99c330d626';
-import {hasJob, modelChip} from './ui-profile-model.js?v=99c330d626';
-import {scheduleTaskBody} from './schedules.js?v=99c330d626';
-import {feed} from './ui-feed.js?v=99c330d626';
-import {setupCardOf, setupButton} from './setup.js?v=99c330d626';
-import {askCard} from './ui-asks.js?v=99c330d626';
-import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=99c330d626';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=99c330d626';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=99c330d626';
-import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=99c330d626';
-import {toast, confirmSheet} from './ui-dialogs.js?v=99c330d626';
-import {siteChip, thumbSlot} from './ui-computer-view.js?v=99c330d626';
-import {cliChoice, googleCard} from './ui-connect-model.js?v=99c330d626';
+import {OFFJOB_CHOICES} from './off-job.js?v=80f77f5682';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=80f77f5682';
+import {requestOfMessage} from './bot-browser.js?v=80f77f5682';
+import {validHttpUrl} from './core.js?v=80f77f5682';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=80f77f5682';
+import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=80f77f5682';
+import {isPrimary} from './company.js?v=80f77f5682';
+import {hasJob, modelChip} from './ui-profile-model.js?v=80f77f5682';
+import {scheduleTaskBody} from './schedules.js?v=80f77f5682';
+import {feed} from './ui-feed.js?v=80f77f5682';
+import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js?v=80f77f5682';
+import {askCard} from './ui-asks.js?v=80f77f5682';
+import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=80f77f5682';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=80f77f5682';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=80f77f5682';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=80f77f5682';
+import {toast, confirmSheet} from './ui-dialogs.js?v=80f77f5682';
+import {siteChip, thumbSlot} from './ui-computer-view.js?v=80f77f5682';
+import {cliChoice, googleCard} from './ui-connect-model.js?v=80f77f5682';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -208,7 +208,10 @@ function modelLimitEntry({message: m, line}) {
 function setupEntry({message: m, card, done}) {
   if (!card || !canWrite()) return `<div class="cv-note" data-m="${esc(m.id)}"><span>${esc(m.text)}</span></div>`;
   if (done) return `<div class="cv-note cv-conn" data-m="${esc(m.id)}"><span>${icon('check', 13)}${esc(m.text)} · done</span></div>`;
-  return `<div class="cv-card flat" data-m="${esc(m.id)}"><p>${esc(m.text)}</p><div class="acts">${btn(setupButton(card), 'apply-setup', {kind: 'primary', small: true, data: {message: m.id}})}</div></div>`;
+  // A line that shortens what Apply sets (a long job) shows all of it, folded, like an ask card's Full message.
+  const detail = setupDetail(card);
+  const full = detail ? `<details class="cv-ask-body"><summary>Full job${icon('chevron', 13)}</summary><pre>${esc(detail)}</pre></details>` : '';
+  return `<div class="cv-card flat" data-m="${esc(m.id)}"><p>${esc(m.text)}</p>${full}<div class="acts">${btn(setupButton(card), 'apply-setup', {kind: 'primary', small: true, data: {message: m.id}})}</div></div>`;
 }
 
 function noModelEntry({message: m}) {
@@ -432,6 +435,9 @@ export const conversationActions = {
     const message = Object.values(store.state?.chats || {}).flat().find(x => x?.id === b.dataset.message);
     const card = message && message.origin !== 'browser' ? setupCardOf(message) : null;
     if (!card) throw new Error('That suggestion is no longer here.');
+    // Always allow on payments is confirmed first, with the ask card's own words.
+    const confirm = setupConfirm(card, findBot(card.botId)?.name);
+    if (confirm && !(await confirmSheet('Always allow payments here?', {confirm: 'Always allow', danger: true, detail: confirm}))) return;
     if (card.app === 'google') {
       // With a Google client saved, the tap is the sign-in itself; without one, the Connectors page shows the one-time setup.
       const google = !isStaticDemo() ? googleCard((await api('/api/connectors').catch(() => null))?.google) : null;

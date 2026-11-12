@@ -86,6 +86,8 @@ export async function runConnectorCalls(store, runId, {say, now = () => new Date
     }
     // The run has seen private data now, and keeps that guard after this result is consumed (bot-browser.js).
     live.readPrivate = true;
+    // Which connectors supplied it: more reads of those carry nothing new; a read on any other asks (shared/connectors.js).
+    live.readFrom = [...new Set([...(Array.isArray(live.readFrom) ? live.readFrom : []), ...results.map(({call}) => call.connectorId)])];
     live.connectorPage = page.length > MAX_PAGE_CHARS ? `${page.slice(0, MAX_PAGE_CHARS)}\n[cut]` : page;
     return true;
   });
