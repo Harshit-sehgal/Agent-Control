@@ -39,6 +39,11 @@
     });
   }
 
+  // The last answer per GET path that carried an ETag. The next GET of that
+  // path asks If-None-Match, and a 304 hands back the same object, so a caller
+  // can tell "nothing changed" by identity and skip its repaint.
+  var tagged = {};
+
   function api(path, method, body) {
     // Resolve the browser-local backend lazily: it is a deferred module and
     // may not have attached its global when this classic script first runs.
@@ -50,9 +55,16 @@
     // `AbortSignal.timeout` is missing in some older browsers, so the request
     // still works there; it just cannot give up on its own.
     if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') options.signal = AbortSignal.timeout(TIMEOUT_MS);
+    var known = verb === 'GET' ? tagged[path] : null;
+    if (known) options.headers['If-None-Match'] = known.etag;
     return fetch(path, options).then(function (response) {
+      if (response.status === 304 && known) return known.data;
       return bodyOf(response).then(function (data) {
         if (!response.ok) throw httpError(response, (data && data.error) || ('HTTP ' + response.status));
+        if (verb === 'GET') {
+          var etag = response.headers && typeof response.headers.get === 'function' ? response.headers.get('ETag') : null;
+          if (etag) tagged[path] = {etag: etag, data: data}; else delete tagged[path];
+        }
         return data;
       }, function (error) {
         // A failed request whose body is also unreadable still reports the status,
@@ -67,5 +79,8 @@
     });
   }
 
+  /** Drop every remembered answer (sign-out), so nothing of the old session
+   * stays in memory and the next GET is a full one. */
+  api.forget = function () { tagged = {}; };
   window.AGENT_API = api;
 })();

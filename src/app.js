@@ -12,6 +12,8 @@
  * test can wire fakes into the same function.
  */
 import fs from 'node:fs/promises';
+import crypto from 'node:crypto';
+import zlib from 'node:zlib';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {ASSETS} from '../shared/assets.js';
@@ -27,7 +29,7 @@ import {startBrowserExpiry} from './bot-browser.js';
 import {migrateModelBooks} from './memory.js';
 import {createQueue,recoverQueue} from './queue.js';
 import {taskHandlers,createNotifier} from './handlers.js';
-import {fail,send,cookie,checkOrigin,rawBody,safeJson,SECURITY} from './http.js';
+import {fail,send,cookie,checkOrigin,rawBody,safeJson,SECURITY,acceptsGzip} from './http.js';
 import {createRouter,isReply,allows} from './router.js';
 import {publicRoutes} from './routes-public.js';
 import {workflowRoutes} from './routes-workflow.js';
@@ -100,6 +102,23 @@ const TYPES = {'html': 'text/html; charset=utf-8', 'js': 'text/javascript; chars
 // so a UI module cannot be added to one and forgotten in the other.
 const SERVED = new Set(ASSETS);
 
+/** Served files, read once and kept with their gzip and ETag. A stat per
+ * request (cheap next to a read) notices an edited file, so working on
+ * `shared/` still needs only a reload. */
+const ASSET_CACHE = new Map();
+const COMPRESSIBLE = new Set(['html', 'js', 'css', 'svg', 'webmanifest']);
+async function loadAsset(rel) {
+  const file = path.join(PUBLIC, rel), stat = await fs.stat(file);
+  const stamp = `${stat.size}:${stat.mtimeMs}`, hit = ASSET_CACHE.get(rel);
+  if (hit?.stamp === stamp) return hit;
+  const body = await fs.readFile(file);
+  const etag = `"${crypto.createHash('sha1').update(body).digest('base64url').slice(0, 20)}"`;
+  const gzip = COMPRESSIBLE.has(rel.split('.').pop()) && body.length >= 1024 ? zlib.gzipSync(body, {level: 9}) : null;
+  const asset = {stamp, body, etag, gzip};
+  ASSET_CACHE.set(rel, asset);
+  return asset;
+}
+
 /** Build the route table and the request handler. `store`, `auth`, `workspaces`,
  * `push` and `version` are the live services; a test can pass the same shapes
  * with fakes. Returns the handler plus the pieces it is made of, so a caller can
@@ -160,13 +179,22 @@ export function createApp({store, auth, workspaces, push, version}) {
       : await invoke();
     const {status, body, headers} = isReply(result) ? result : {status: 200, body: result, headers: {}};
     if (req.method === 'HEAD') { res.writeHead(status, {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...SECURITY, ...headers}); return res.end(); }
-    send(res, status, body, headers);
+    return send(res, status, body, headers);
   }
 
   async function serve(req, res, u) {
     let rel = u.pathname === '/' ? 'index.html' : u.pathname.slice(1);
     if (!SERVED.has(rel)) return send(res, 404, {error: 'Not found'});
-    try { const body = await fs.readFile(path.join(PUBLIC, rel)); res.writeHead(200, {'Content-Type': TYPES[rel.split('.').pop()] || 'application/octet-stream', 'Content-Security-Policy': CSP, ...SECURITY, 'Cache-Control': 'no-store'}); res.end(req.method === 'HEAD' ? undefined : body); } catch { return send(res, 404, {error: 'Missing asset'}); }
+    let asset;
+    try { asset = await loadAsset(rel); } catch { return send(res, 404, {error: 'Missing asset'}); }
+    // `no-cache` lets the browser keep a copy but ask before every use, so an
+    // edited file (or a deploy) is picked up at once and an unchanged one costs
+    // a 304. The `?v=` stamp on the Pages build still forces a fresh URL.
+    const head = {'Content-Type': TYPES[rel.split('.').pop()] || 'application/octet-stream', 'Content-Security-Policy': CSP, ...SECURITY, 'Cache-Control': 'no-cache', ETag: asset.etag, ...(asset.gzip ? {Vary: 'Accept-Encoding'} : {})};
+    if (req.headers?.['if-none-match'] === asset.etag) { res.writeHead(304, head); return res.end(); }
+    const packed = asset.gzip && acceptsGzip(req);
+    res.writeHead(200, packed ? {...head, 'Content-Encoding': 'gzip'} : head);
+    res.end(req.method === 'HEAD' ? undefined : packed ? asset.gzip : asset.body);
   }
 
   const handler = async (req, res) => {

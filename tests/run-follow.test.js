@@ -109,3 +109,11 @@ test('typing is turned off even when the send throws', async () => {
   await assert.rejects(runWithTyping({key: 'k', setTyping: (k, on) => log.push(`typing:${on}`), sync: async () => log.push('sync'), send: async () => { throw new Error('boom'); }, follow: async () => log.push('follow')}), /boom/);
   assert.deepEqual(log, ['typing:true', 'typing:false'], 'no follow and no refresh after a failed send');
 });
+
+test('the workspace is refreshed when the run changes status, not on every look', async () => {
+  const running = {runs: [{id: 'r1', status: 'running'}]};
+  const h = harness([running, running, running, {runs: [{id: 'r1', status: 'completed', trace: []}]}]);
+  await h.run();
+  assert.equal(h.waits.length, 4, 'four looks');
+  assert.equal(h.syncs, 2, 'one refresh for "running", one for "completed"');
+});

@@ -101,7 +101,7 @@ const outbox = createOutbox((key, messages) => window.AGENT_API(`/api/chats/${ke
 let epoch = 0, appliedFetch = 0;
 /** Bumped on sign-out. An in-flight snapshot must not restore the workspace. */
 export const sessionEpoch = () => epoch;
-export const retireSession = () => { epoch += 1; };
+export const retireSession = () => { epoch += 1; window.AGENT_API?.forget?.(); };
 /** Fetch the workspace and fold its conversations into what is on screen. */
 export async function loadState() {
   const ticket = epoch;
@@ -111,11 +111,21 @@ export async function loadState() {
   const snap = await api('/api/state');
   if (ticket !== epoch || fetch < appliedFetch) return store.state;
   appliedFetch = fetch;
+  // The transport answers a 304 with the very object it returned last time.
+  lastUnchanged = snap === store.state;
   store.state = snap;
   store.messages = outbox.adopt(store.state.chats || {}, store.messages, fetch);
   return store.state;
 }
-export async function sync(scope = 'all') { await loadState(); changed(scope); return store.state; }
+let lastUnchanged = false;
+/** Refresh and repaint. `quiet` (the background poll) skips the repaint when
+ * the server said nothing changed; every other caller repaints as before. */
+export async function sync(scope = 'all', {quiet = false} = {}) {
+  lastUnchanged = false;
+  await loadState();
+  if (!(quiet && lastUnchanged)) changed(scope);
+  return store.state;
+}
 /** Conversations an earlier build kept in this browser move to the workspace
  * once, so they follow the account. A conversation the workspace already has
  * is left alone. */

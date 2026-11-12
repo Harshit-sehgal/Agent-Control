@@ -118,9 +118,17 @@ function workspaceBusy() {
   if ((state.tasks || []).some(t => t.status === 'queued' && t.kind === 'bot-task' && dueWithin(t.runAt))) return true;
   return false;
 }
-function scheduleSync() {
+/** A hidden tab does not poll: the loop parks itself and the tab looks once
+ * as soon as it is shown again. */
+let hiddenPark = false;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || !hiddenPark || !store.state) return;
+  hiddenPark = false;
+  scheduleSync(0);
+});
+function scheduleSync(soon = null) {
   if (!store.state || refreshing) return;
-  const wait = workspaceBusy() ? 3000 : 30000;
+  const wait = soon ?? (workspaceBusy() ? 3000 : 30000);
   const due = Date.now() + wait;
   if (syncTimer && syncDue <= due) return;
   // Browsers keep one timer list, so this also clears the timeout below.
@@ -129,8 +137,9 @@ function scheduleSync() {
   syncTimer = setTimeout(async () => {
     const ticket = sessionEpoch();
     syncTimer = null;
+    if (document.hidden) { hiddenPark = true; return; }
     refreshing = true;
-    try { await sync(); syncFailures.clear(); }
+    try { await sync('all', {quiet: true}); syncFailures.clear(); }
     catch (e) {
       if (ticket === sessionEpoch() && e?.status === 401) { lockScreen('Your session expired. Sign in again.'); return; }
       if (ticket !== sessionEpoch()) return;

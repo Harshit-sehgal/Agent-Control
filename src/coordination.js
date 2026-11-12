@@ -25,6 +25,7 @@ import {autoDispatch,dispatchBrowserRequest,finishBrowserRequest} from './bot-br
 import {recordConnectorCalls,parseConnectorCalls,stripConnectorBlocks,envelopeConnectors} from '../shared/connectors.js';
 import {runConnectorCalls} from './connector-runs.js';
 import {runBotTurn} from './bot-turn.js';
+import {peek} from './sqlite-store.js';
 import {memoryFor,rememberTurn,maybeConsolidate} from './memory.js';
 import {rememberFromOwner} from '../shared/memory.js';
 import {executeCustomBot} from './ai.js';
@@ -173,11 +174,11 @@ export async function queueGroupRun(store,{groupId,message,directBotId=null,chec
     s.groupMessages[groupId]=s.groupMessages[groupId].slice(-300);
     activity(s,'group-run',`Queued ${group.name} coordination run`,{runId:run.id});return run.id;
   });
-  let status=store.read().groupRuns.find(r=>r.id===id)?.status||'queued';
+  let status=peek(store).groupRuns.find(r=>r.id===id)?.status||'queued';
   // A plan the user asked to see first waits. Everything else starts now.
   if(status==='queued'){
     startRun(store,id);
-    status=store.read().groupRuns.find(r=>r.id===id)?.status||status;
+    status=peek(store).groupRuns.find(r=>r.id===id)?.status||status;
   }
   return {runId:id,status};
 }
@@ -535,7 +536,7 @@ async function runGroupInner(store,id,executor){
     // A fast local agent can return while autoDispatch is still awaited above.
     // Its resume changes the run to queued, but runGroup's in-process lock
     // rejects that early restart. Pick it up once this invocation releases it.
-    if(store.read().groupRuns?.some(r=>r.id===id&&r.status==='queued'))queueMicrotask(()=>startRun(store,id,executor));
+    if(peek(store).groupRuns?.some(r=>r.id===id&&r.status==='queued'))queueMicrotask(()=>startRun(store,id,executor));
   }
 }
 /** A page the run asked for mid-step. Success gives that same bot another
@@ -543,7 +544,7 @@ async function runGroupInner(store,id,executor){
 export async function resumeBrowserRun(store,request,{ok,text='',executor}={}){
   const id=request?.runId;
   if(!id)return false;
-  const cur=store.read().groupRuns?.find(r=>r.id===id);
+  const cur=peek(store).groupRuns?.find(r=>r.id===id);
   if(!cur||cur.status!=='awaiting_browser')return false;
   const page=clean(text).trim();
   let stoppedRun=null;
@@ -699,7 +700,7 @@ export async function decidePlan(store,id,{approve}){
     return {runId:id,status:'queued',start:true};
   });
   if(result.start)startRun(store,id);
-  return {runId:result.runId,status:store.read().groupRuns.find(r=>r.id===id)?.status||result.status};
+  return {runId:result.runId,status:peek(store).groupRuns.find(r=>r.id===id)?.status||result.status};
 }
 /** Keep going (or Stop) for everything the runaway guard parked. Clears the pause
  * and starts a new window; each parked run starts again where it waited, or, with
@@ -730,7 +731,7 @@ export async function resumeGroupRun(store,id,executor=executeCustomBot,{choice}
       if(choice==='stop')return cancelRun(store,id,{note:'Stopped. Bots were paused and nothing else ran.'});
       if(botsPaused(store.read()))throw Object.assign(new Error('Bots are paused. Resume them first.'),{status:409});
       await runGroup(store,id,executor);
-      return {runId:id,status:store.read().groupRuns.find(x=>x.id===id)?.status||'running'};
+      return {runId:id,status:peek(store).groupRuns.find(x=>x.id===id)?.status||'running'};
     }
     // The ceiling is not a checkpoint: nothing lifts it, so Stop is the only answer.
     if(r.limit?.kind==='ceiling'&&choice!=='stop')throw Object.assign(new Error(`This task has sent ${ASK_CEILING} bot-to-bot messages, the most one task may. Stop it, then start a new one.`),{status:409});
@@ -741,5 +742,5 @@ export async function resumeGroupRun(store,id,executor=executeCustomBot,{choice}
       activity(s,'group-run',`Bot-to-bot limit answered: ${choice}`,{runId:id});});
   }else if(r.status!=='awaiting_checkpoint')throw Object.assign(new Error('This run is not waiting for a checkpoint.'),{status:409});
   await runGroup(store,id,executor);
-  return {runId:id,status:store.read().groupRuns.find(x=>x.id===id)?.status||'running'};
+  return {runId:id,status:peek(store).groupRuns.find(x=>x.id===id)?.status||'running'};
 }

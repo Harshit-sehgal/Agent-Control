@@ -20,6 +20,8 @@ import {fail, safeJson} from './http.js';
 const FRAME_BODY_LIMIT = 1024 * 1024;
 
 export function liveRoutes(router, {workspaces}) {
+  // A task queued for a device answers its parked live poll, so it heartbeats at once.
+  agent.onAgentTaskQueued((workspaceId, agentId) => hub.taskQueued(workspaceId, agentId));
   // The workspace a device was paired in, as the other agent routes find it.
   const agentStore = c => workspaces.holding('SELECT 1 AS x FROM agents WHERE id=?', String(c.req.headers['x-agent-id'] || '')) || workspaces.get(DEFAULT_WORKSPACE);
   const device = (c, raw) => agent.verifyAgentRequest(agentStore(c), c.req.headers, 'POST', c.path, raw);

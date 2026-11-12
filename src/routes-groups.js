@@ -28,6 +28,7 @@ import {browserRuntime} from './browser-runtime.js';
 import {failAgentTasks} from './agent.js';
 import {fail} from './http.js';
 import {reply} from './router.js';
+import {peek} from './sqlite-store.js';
 
 /** Deny waiting pages (clear chat, remove bot) then drop the agent jobs those
  * pages had already been sent as, so the device is not still asked to open them. */
@@ -191,7 +192,8 @@ export function groupRoutes(router) {
 
   // Durable text-only bot coordination. Humans approve every external action separately.
   router.add('GET', '/api/groups/:group/chat', 'viewer', c => {
-    const s = c.store.read(); coordinationState(s);
+    // A shallow copy: coordinationState only fills missing top-level keys.
+    const s = {...peek(c.store)}; coordinationState(s);
     // POST answers 404 for an unknown group, so the read must too instead of
     // rendering an empty thread for a group that does not exist.
     if (!s.groups.some(g => g.id === c.params.group)) fail('Group not found.', 404);

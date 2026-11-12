@@ -145,7 +145,7 @@ export const TABLE_SHAPES = [
     })),
   },
   {
-    table: 'chat_messages', pk: ['id'],
+    table: 'chat_messages', pk: ['id'], docColumn: 2,
     columns: ['id', 'chat_key', 'doc', 'at'],
     rows: state => Object.entries(state.chats || {}).flatMap(([chatKey, list]) => (list || []).map(m => ({
       key: `${chatKey}/${m.id}`, pk: [`${chatKey}/${m.id}`],
@@ -203,6 +203,29 @@ export const TABLE_SHAPES = [
 function upsertSql({table, columns, pk}) {
   const updates = columns.filter(column => !pk.includes(column)).map(column => `${column}=excluded.${column}`);
   return `INSERT INTO ${table} (${columns.join(',')}) VALUES (${columns.map(() => '?').join(',')}) ON CONFLICT(${pk.join(',')}) DO UPDATE SET ${updates.join(',')}`;
+}
+/** The same upsert with an explicit rowid. A row prepended to an ordered table
+ * takes a rowid below every stored one, so `ORDER BY rowid` still reads it
+ * first and none of the rows already stored has to be rewritten. */
+function upsertAtSql(shape) {
+  return upsertSql({...shape, columns: ['rowid', ...shape.columns]});
+}
+/** How a new key sequence relates to the stored one. `{prefix, suffix}` when
+ * the rows that stay keep their relative order and every new row sits before
+ * all of them or after all of them: the common cases (`unshift` then a tail
+ * `slice`, a `push`, an edit, a removal). `null` means the order changed some
+ * other way and the table has to be rewritten in document order. */
+export function orderPlan(seq, previous) {
+  const present = new Set(seq), kept = previous.seq.filter(key => present.has(key));
+  let i = 0;
+  while (i < seq.length && !previous.map.has(seq[i])) i++;
+  const prefix = seq.slice(0, i);
+  let k = 0;
+  for (; i < seq.length && k < kept.length; i++, k++) if (seq[i] !== kept[k]) return null;
+  if (k < kept.length) return null;
+  const suffix = seq.slice(i);
+  if (suffix.some(key => previous.map.has(key))) return null;
+  return {prefix, suffix};
 }
 function deleteSql({table, pk}) {
   return `DELETE FROM ${table} WHERE ${pk.map(column => `${column}=?`).join(' AND ')}`;
@@ -425,13 +448,24 @@ export class SqliteStore {
     // the rows that changed; and one prepared statement per piece of SQL.
     this.written = new Map();
     this.stmts = new Map();
+    // The last value written per kv key, so an unchanged JSON blob (the browser
+    // requests, the AI settings, connectors, the guard) is not rewritten on
+    // every update.
+    this.kvWritten = new Map();
+    // Bumped on every committed change to the document. With `epoch` (fresh
+    // per open store) it names one version of the cache, for ETags.
+    this.version = 0;
+    this.epoch = crypto.randomUUID().slice(0, 8);
   }
   async init() {
     await fs.mkdir(path.dirname(this.dbPath), {recursive: true});
     const {DatabaseSync} = await sqlite();
     this.db = new DatabaseSync(this.dbPath);
     try {
-      this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
+      // NORMAL is the WAL setting SQLite recommends: a commit is durable against
+      // an application crash, and only an OS crash or power loss can lose the
+      // last transactions; it skips one fsync per commit.
+      this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
       this.migrate();
       this.cache = await this.loadDocument();
     } catch (e) {
@@ -583,7 +617,12 @@ export class SqliteStore {
     return s;
   }
   writeCollections(state) {
-    const t = this.transaction(() => {
+    // The diff memory describes what is in the file, so a rolled-back write must
+    // not leave it describing rows that were never committed.
+    const savedWritten = new Map(this.written), kvPending = new Map();
+    const kv = (key, value) => { if (this.kvWritten.get(key) !== value) { this.kvSet(key, value); kvPending.set(key, value); } };
+    let t;
+    try { t = this.transaction(() => {
       // Diff each table against the last write: one document update usually
       // touches one row, and rewriting the whole table (all chat messages, all
       // events) for it made every update cost O(rows) forever.
@@ -596,20 +635,26 @@ export class SqliteStore {
         // a captured post) would otherwise read back last after a restart, so
         // a table whose order changed is rewritten in document order. Append
         // and in-place edits, the common case, still write only their own row.
-        const reordered = shape.ordered && (seq.length !== previous.seq.length || seq.some((key, i) => key !== previous.seq[i]));
-        const next = new Map(), upserts = [];
+        const changedOrder = shape.ordered && (seq.length !== previous.seq.length || seq.some((key, i) => key !== previous.seq[i]));
+        // Most order changes are a prepend (`unshift`) or a tail trim. Those keep
+        // the stored rows where they are and give the new rows rowids below them.
+        const plan = changedOrder ? orderPlan(seq, previous) : null;
+        const reordered = changedOrder && !plan;
+        const prepend = new Set(plan?.prefix || []);
+        const next = new Map(), upserts = [], prepends = [];
         for (const row of rows) {
           // The stored document, where the table has one, is already built for
           // the column: reusing it as the change signature costs one compare.
           const sig = shape.docColumn === undefined ? JSON.stringify(row.params) : String(row.params[shape.docColumn]);
           next.set(row.key, {pk: row.pk, sig});
           const was = previous.map.get(row.key);
-          if (reordered || !was || was.sig !== sig) upserts.push(row);
+          if (prepend.has(row.key)) prepends.push(row);
+          else if (reordered || !was || was.sig !== sig) upserts.push(row);
         }
         const deletes = [];
         if (!reordered) for (const [key, was] of previous.map) if (!next.has(key)) deletes.push(was.pk);
         this.written.set(shape.table, {map: next, seq});
-        return {shape, deletes, upserts, reordered};
+        return {shape, deletes, upserts, prepends, reordered};
       });
       // Children first on the way out, parents first on the way in: the one
       // foreign key is bots.group_id -> groups.id, so a removed group must lose
@@ -618,24 +663,37 @@ export class SqliteStore {
         const remove = this.stmt(deleteSql(shape));
         for (const pk of deletes) remove.run(...pk);
       }
-      for (const {shape, upserts, reordered} of work) {
+      for (const {shape, upserts, prepends, reordered} of work) {
         // A rewrite starts from an empty table so every row lands in document
         // order; otherwise only the changed rows are upserted in place.
         if (reordered) this.stmt(`DELETE FROM ${shape.table}`).run();
         const upsert = this.stmt(upsertSql(shape));
         for (const row of upserts) upsert.run(...row.params);
+        if (prepends.length) {
+          // The last new row sits just above the first stored one, so walking
+          // the prefix backwards keeps document order in rowid order.
+          let rowid = Number(this.stmt(`SELECT min(rowid) AS low FROM ${shape.table}`).get()?.low ?? 1);
+          const at = this.stmt(upsertAtSql(shape));
+          for (let i = prepends.length - 1; i >= 0; i--) at.run(--rowid, ...prepends[i].params);
+        }
       }
-      this.kvSet('created_at', state.createdAt || now());
-      this.kvSet('ai', JSON.stringify(state.ai || {}));
-      this.kvSet('browser_requests', JSON.stringify(state.browserRequests || []));
-      this.kvSet('connectors', JSON.stringify(state.connectors || []));
-      this.kvSet('held_sends', JSON.stringify(state.heldSends || []));
-      this.kvSet('guard', JSON.stringify(state.guard || freshGuard()));
-      this.kvSet('ask_basics', state.askBasics ? '1' : '0');
-      this.kvSet('limits', JSON.stringify(state.limits || {}));
-      this.stmt('INSERT INTO settings (id,retention) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET retention=excluded.retention')
-        .run(state.settings?.retention ? JSON.stringify(state.settings.retention) : null);
-    });
+      kv('created_at', state.createdAt || now());
+      kv('ai', JSON.stringify(state.ai || {}));
+      kv('browser_requests', JSON.stringify(state.browserRequests || []));
+      kv('connectors', JSON.stringify(state.connectors || []));
+      kv('held_sends', JSON.stringify(state.heldSends || []));
+      kv('guard', JSON.stringify(state.guard || freshGuard()));
+      kv('ask_basics', state.askBasics ? '1' : '0');
+      kv('limits', JSON.stringify(state.limits || {}));
+      const retention = state.settings?.retention ? JSON.stringify(state.settings.retention) : null;
+      if (this.kvWritten.get('\0settings') !== String(retention)) {
+        this.stmt('INSERT INTO settings (id,retention) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET retention=excluded.retention').run(retention);
+        kvPending.set('\0settings', String(retention));
+      }
+    }); }
+    catch (e) { this.written = savedWritten; throw e; }
+    for (const [key, value] of kvPending) this.kvWritten.set(key, value);
+    this.version++;
     return t;
   }
   /** The keys already in a table, used the first time this process writes it:
@@ -660,8 +718,18 @@ export class SqliteStore {
     return statement;
   }
   /** Wait for queued writes, then release the file. Used when a workspace is deleted. */
-  async close() { await this.serial; this.stmts.clear(); this.written.clear(); this.db.close(); }
+  async close() { await this.serial; this.stmts.clear(); this.written.clear(); this.kvWritten.clear(); this.db.close(); }
   read() { return structuredClone(this.cache); }
+  /** The cached document itself, not a copy. Only for callers that provably do
+   * not mutate it: every update replaces the cache with a new object instead
+   * of changing the old one, so what a caller holds stays a consistent view. */
+  peek() { return this.cache; }
+  /** Rows were written outside `writeCollections` (a restore): forget what the
+   * diff remembers, so the next update compares against the file again, and
+   * give the document a new version. */
+  forgetWrites() { this.written.clear(); this.kvWritten.clear(); this.version++; }
+  /** Names the current document version; changes whenever a write commits. */
+  stateTag() { return `${this.epoch}-${this.version}`; }
   async persist(state = this.cache) { this.writeCollections(state); this.cache = state; }
   /** Queue one read-copy-write of the whole document behind every write already
    * waiting. Every change to the cache has to pass through here: a mutation made
@@ -697,3 +765,7 @@ export function resolveDbPath(dataFile) {
 export async function openStore(dataFile) {
   return new SqliteStore(resolveDbPath(dataFile), dataFile).init();
 }
+
+/** The document for a caller that only reads it: the cache itself where the
+ * store offers one, a copy otherwise (test doubles implement only `read`). */
+export const peek = store => (typeof store.peek === 'function' ? store.peek() : store.read());

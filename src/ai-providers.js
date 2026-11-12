@@ -12,6 +12,7 @@ import {fail} from '../shared/errors.js';
 import {envConfig,discoverModels,protocolOf,configReady,complete} from './ai.js';
 import {normaliseProtocol,inferProtocol,presetById,protocolById,LOCAL_CLI_KIND,LOCAL_CLI_ENGINES,cliEngineById,cleanCliModel,cleanEffort,EFFORT_IDS} from '../shared/ai-presets.js';
 import {uuid} from '../shared/core.js';
+import {peek} from './sqlite-store.js';
 import {cliRunner,cliSignIn} from './cli-model.js';
 
 const clean=(v,n)=>String(v??'').trim().slice(0,n);
@@ -411,5 +412,5 @@ export async function modelsForProvider(store,providerId){
 /** True when the environment or a saved provider can run a model. */
 export function aiAvailable(store){
   if(configReady(envConfig()))return true;
-  return Boolean(store.read().ai?.providers?.length);
+  return Boolean(peek(store).ai?.providers?.length);
 }

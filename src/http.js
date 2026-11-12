@@ -2,6 +2,7 @@
  * helper, JSON responses with the security headers, bounded body readers and
  * the same-origin check. Nothing here knows about routes or the store. */
 import crypto from 'node:crypto';
+import zlib from 'node:zlib';
 import {fail} from '../shared/errors.js';
 
 export {fail};
@@ -14,7 +15,27 @@ const on = value => /^(1|true|on|yes)$/i.test(String(value || '').trim());
 export const HSTS_ENABLED = on(process.env.HSTS) || String(process.env.PUBLIC_ORIGIN || '').startsWith('https://');
 export const SECURITY = {'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer',...(HSTS_ENABLED?{'Strict-Transport-Security':'max-age=31536000; includeSubDomains'}:{})};
 
-export function send(res,status,value,headers={}){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...SECURITY,...headers});res.end(JSON.stringify(value));}
+/** Bodies at least this large are gzipped for a client that accepts it. Below
+ * it the header and the CPU cost more than the bytes saved. */
+export const GZIP_MIN = 8 * 1024;
+export const acceptsGzip = req => /\bgzip\b/i.test(String(req?.headers?.['accept-encoding'] || ''));
+/** A JSON answer. A large body travels gzipped when the request (`res.req`,
+ * which Node sets on every response) accepts it. A 304 has no body at all. */
+export function send(res,status,value,headers={}){
+  const req=res.req,head={'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...SECURITY,...headers};
+  if(status===304){delete head['Content-Type'];res.writeHead(304,head);return res.end();}
+  const body=JSON.stringify(value);
+  if(req&&body.length>=GZIP_MIN&&acceptsGzip(req)){
+    // Compressed on the thread pool: a multi-megabyte snapshot must not hold
+    // the event loop. The returned promise settles once the body is sent.
+    return new Promise(resolve=>zlib.gzip(body,{level:6},(error,packed)=>{
+      if(error){res.writeHead(status,head);res.end(body);}
+      else{res.writeHead(status,{...head,'Content-Encoding':'gzip',Vary:'Accept-Encoding'});res.end(packed);}
+      resolve();
+    }));
+  }
+  res.writeHead(status,head);res.end(body);
+}
 
 export function cookie(req, key) {
   const found = (req.headers.cookie || '').split(';').map(x => x.trim()).find(x => x.startsWith(key + '='));
