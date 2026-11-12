@@ -21,7 +21,7 @@ import {setupCardOf, setupButton} from './setup.js';
 import {askCard} from './ui-asks.js';
 import {face, botColor, botAccent, accentStyle} from './ui-face.js';
 import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen} from './ui-store.js';
 import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js';
 import {toast, confirmSheet} from './ui-dialogs.js';
 import {siteChip, thumbSlot} from './ui-computer-view.js';
@@ -107,8 +107,8 @@ function browserEntry(m, conv) {
   const where = request.status === 'pending' ? '' : ` · ${request.via === 'server' ? 'this server' : 'your device'}`;
   const steps = request.steps?.length ? `<ol class="cv-steps">${request.steps.map(s => `<li>${esc(s.op)} ${esc(s.url || (s.index ? `#${s.index}` : s.selector) || '')}${s.text ? ` · "${esc(String(s.text).slice(0, 60))}"` : ''}</li>`).join('')}</ol>` : '';
   const decline = btn('Decline', 'deny-browser', {id: request.id, small: true});
-  // A page behind a sign-in: the person can drive it. Only the Node build has a server browser.
-  const takeover = !isStaticDemo() && request.status === 'pending' ? btn('Take over', 'takeover-browser', {id: request.id, small: true}) : '';
+  // A page behind a sign-in: an admin can drive it (the routes are admin's). Only the Node build has a server browser.
+  const takeover = isAdmin() && request.status === 'pending' ? btn('Take over', 'takeover-browser', {id: request.id, small: true}) : '';
   const acts = !canWrite() ? '' : request.status === 'pending' ? `<div class="acts">${btn('Approve', 'approve-browser', {id: request.id, small: true, kind: 'primary'})}${takeover}${decline}</div>`
     : request.status === 'dispatched' ? `<div class="acts">${decline}</div>` : '';
   const bot = findBot(request.botId) || askerOf(conv);

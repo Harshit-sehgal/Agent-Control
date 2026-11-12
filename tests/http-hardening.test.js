@@ -216,11 +216,11 @@ test('guesses at the owner account are counted against that account, not just th
     // would spell the same mailbox, is refused by the account bucket.
     const locked = await send('POST', '/api/login', {email: 'OWNER@localhost ', password: 'wrong-password'}, undefined, from('10.2.0.1'));
     assert.equal(locked.status, 429, `the account bucket must have filled: ${JSON.stringify(locked.body)}`);
-    // And the owner cannot sign in either until the window passes: the honest
-    // cost of the bucket, pinned so it stays a deliberate trade instead of a
-    // surprise. A password reset is the way out.
+    // But the owner with the right password still signs in: the account bucket
+    // counts failures and refuses wrong guesses, so a spray cannot be turned
+    // into a lockout of the owner. The per-address buckets still apply.
     const owner = await send('POST', '/api/login', {password: PASSWORD}, undefined, from('10.2.0.2'));
-    assert.equal(owner.status, 429);
+    assert.equal(owner.status, 200);
   } finally {
     await t.stop();
   }

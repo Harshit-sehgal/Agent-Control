@@ -15,6 +15,7 @@
  */
 import {fail} from '../shared/errors.js';
 import {enqueueAgentTask, failAgentTasks} from './agent.js';
+import {assertLocalOrPublic} from './reach-guard.js';
 import {PROTOCOL_VERSION, MAX_TOOLS, MAX_RESULT_CHARS, initializeRequest, initializedNotification, toolsListRequest, toolsCallRequest, rpcResult, cleanTools, readTools, resultText} from '../shared/mcp-protocol.js';
 
 export const MCP_TIMEOUT_MS = 30000;
@@ -85,6 +86,8 @@ async function readStream(res, id, limit) {
 /** One HTTP exchange: `work(request)` may call `request(message)` for each JSON-RPC request it makes. */
 async function httpSession(target, work, {timeoutMs = MCP_TIMEOUT_MS, maxBytes = MCP_MAX_BYTES} = {}) {
   const url = checkMcpUrl(target.url);
+  // Before any header leaves: a typed address must not reach a LAN host or a metadata service.
+  await assertLocalOrPublic(url, {what: 'An HTTP MCP server'});
   const custom = target.headers && typeof target.headers === 'object' ? target.headers : {};
   const redact = redactWith(secretsOf(url, custom));
   const controller = new AbortController();

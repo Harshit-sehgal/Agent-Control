@@ -90,7 +90,7 @@ export function accountRoutes(router, {auth, workspaces}) {
     await c.store.update(s => activity(s, 'agent', 'Created a local-agent pairing code.', {expiresAt: pairing.expiresAt}));
     return reply(201, pairing);
   });
-  router.add('POST', '/api/agents/:id/tasks', 'member', async c => {
+  router.add('POST', '/api/agents/:id/tasks', 'admin', async c => {
     const b = await c.body(), kind = String(b.kind || '');
     // A connector call and a model run are the server's own work: they carry what an ask cleared and spend the
     // owner's plan, so only the server's code queues them (src/mcp-client.js, src/cli-model.js), never this route.
@@ -188,7 +188,7 @@ export function accountRoutes(router, {auth, workspaces}) {
     return notifications.markRead(c.store, c.actor.userId, list.filter(id => typeof id === 'string' && id.trim()).slice(0, 200));
   });
   router.add('GET', '/api/notification-prefs', 'viewer', c => ({...notifications.getPreferences(c.store, c.actor.userId), emailReady: notifications.emailReady()}));
-  router.add('PATCH', '/api/notification-prefs', 'member', async c => { const b = await c.body(); return notifications.updatePreferences(c.store, c.actor.userId, b); });
+  router.add('PATCH', '/api/notification-prefs', 'member', async c => { const b = await c.body(); return notifications.updatePreferences(c.store, c.actor.userId, b, {email: c.actor.email}); });
 
   // Backup: export and restore. Credentials, agent secrets and password hashes
   // never travel. Owner only. Restore replaces the current workspace database,

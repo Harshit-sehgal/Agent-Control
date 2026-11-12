@@ -25,6 +25,7 @@
  * One process is reused and closed after `BROWSER_IDLE_MS` without work, so the
  * launch cost (about a second) is paid once per burst rather than per page.
  */
+import crypto from 'node:crypto';
 import {findBrowser, startBrowserSession} from '../agent/browser.mjs';
 import {parseAllowlist} from '../shared/bot-browser.js';
 
@@ -142,14 +143,16 @@ export function createBrowserRuntime({env = process.env, start = startBrowserSes
    * context open; a second one would fight it for the same process and turn
    * "which page is this" into a guess. */
   const lives = new Map();
-  let liveSeq = 0;
   const noBrowser = () => Object.assign(new Error(mode === 'server'
     ? 'This install runs browser requests on the server, but no browser or allowlist is configured there. Set AGENT_BROWSER_ALLOWLIST (a host list, or * for any public site) and install Chrome, or point AGENT_BROWSER_PATH at one; or switch BROWSER_RUNTIME=agent.'
     : 'No browser is available on this server.'), {status: 503});
 
-  function liveOf(id) {
+  /** A takeover is reached only from the workspace that opened it. A caller
+   * that passes no workspace is the runtime itself (its own idle clock). Another
+   * workspace is told "not found", the same as an id that never existed. */
+  function liveOf(id, workspaceId) {
     const entry = lives.get(String(id));
-    if (!entry) throw Object.assign(new Error('That takeover is no longer open. Open the page again.'), {status: 404});
+    if (!entry || (workspaceId !== undefined && entry.workspaceId !== (workspaceId ?? null))) throw Object.assign(new Error('That takeover is no longer open. Open the page again.'), {status: 404});
     return entry;
   }
 
@@ -163,7 +166,7 @@ export function createBrowserRuntime({env = process.env, start = startBrowserSes
 
   /** Open the page for a person to act on. The page is not disposed until the
    * takeover ends, which is what lets a sign-in survive between calls. */
-  function beginLive({url, requestId = null, openedBy = null}) {
+  function beginLive({url, requestId = null, openedBy = null, workspaceId = null}) {
     if (closed) return Promise.reject(Object.assign(new Error('The browser runtime is shutting down.'), {status: 503}));
     if (!available()) return Promise.reject(noBrowser());
     if (lives.size >= MAX_LIVE) return Promise.reject(Object.assign(new Error('A takeover is already open. Finish or close it first — one page at a time.'), {status: 409}));
@@ -176,7 +179,7 @@ export function createBrowserRuntime({env = process.env, start = startBrowserSes
       clearTimeout(idle);
       idle = null;
       const handle = await live.open(url, {allow: allowed(), timeoutMs});
-      const entry = {id: `takeover-${++liveSeq}`, handle, requestId, openedBy, url: null, createdAt: Date.now(), timer: null};
+      const entry = {id: `takeover-${crypto.randomUUID()}`, handle, requestId, openedBy, workspaceId, url: null, createdAt: Date.now(), timer: null};
       lives.set(entry.id, entry);
       touch(entry);
       const view = await handle.view();
@@ -187,9 +190,9 @@ export function createBrowserRuntime({env = process.env, start = startBrowserSes
     return next;
   }
 
-  function liveView(id) {
+  function liveView(id, {workspaceId} = {}) {
     const next = tail.then(async () => {
-      const entry = liveOf(id);
+      const entry = liveOf(id, workspaceId);
       touch(entry);
       return entry.handle.view();
     });
@@ -198,9 +201,9 @@ export function createBrowserRuntime({env = process.env, start = startBrowserSes
   }
 
   /** One action by the person, then the page as it is now. */
-  function liveAct(id, step) {
+  function liveAct(id, step, {workspaceId} = {}) {
     const next = tail.then(async () => {
-      const entry = liveOf(id);
+      const entry = liveOf(id, workspaceId);
       touch(entry);
       if (Date.now() - entry.createdAt > liveMaxMs) {
         await endLive(entry.id).catch(() => {});
@@ -218,9 +221,8 @@ export function createBrowserRuntime({env = process.env, start = startBrowserSes
 
   /** Close a takeover, returning the page the person left it on and the request
    * it was opened for, so the caller can hand that page back to the bot. */
-  async function endLive(id) {
-    const entry = lives.get(String(id));
-    if (!entry) throw Object.assign(new Error('That takeover is no longer open.'), {status: 404});
+  async function endLive(id, {workspaceId} = {}) {
+    const entry = liveOf(id, workspaceId);
     lives.delete(entry.id);
     clearTimeout(entry.timer);
     const page = await entry.handle.page().catch(() => null);
@@ -238,7 +240,8 @@ export function createBrowserRuntime({env = process.env, start = startBrowserSes
     liveIds: () => [...lives.keys()],
     /** Whether a takeover is on a clock (an idle timer or a hard cap); none by default. */
     liveTimed: id => Boolean(lives.get(String(id))?.timer) || Number.isFinite(liveMaxMs),
-    liveList: () => [...lives.values()].map(entry => ({id: entry.id, requestId: entry.requestId, openedBy: entry.openedBy, url: entry.url, createdAt: entry.createdAt})),
+    assertLive: (id, workspaceId) => { liveOf(id, workspaceId); },
+    liveList: ({workspaceId} = {}) => [...lives.values()].filter(entry => workspaceId === undefined || entry.workspaceId === (workspaceId ?? null)).map(entry => ({id: entry.id, requestId: entry.requestId, openedBy: entry.openedBy, url: entry.url, createdAt: entry.createdAt})),
     close: async () => {
       closed = true;
       // A drain disposes each takeover's context before the process goes away,

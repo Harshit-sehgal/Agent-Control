@@ -25,7 +25,7 @@ knobs.
 | `HSTS` | `1` to send `Strict-Transport-Security` (only behind TLS) |
 | `TLS_CERT` / `TLS_KEY` | optional paths to a certificate and key; both must be set to serve HTTPS in-process |
 | `TRUST_PROXY` | `1` when a reverse proxy sets `X-Forwarded-For` / `X-Forwarded-Proto`. The rate limiter then keys on the rightmost `X-Forwarded-For` hop and the Secure-cookie hint follows `X-Forwarded-Proto` |
-| `RESET_TOKEN_CONSOLE` | `0` on a hosted install so password-reset tokens are not printed to the process log |
+| `RESET_TOKEN_CONSOLE` | Unset: reset tokens are printed to the process log only when `PUBLIC_ORIGIN` is not https and `SMTP_HOST` is unset. `1` forces printing, `0` always silences it |
 | `SMTP_HOST` | the mail server for the email channel. Set, and the app submits over SMTP itself; unset, the channel needs a relay (below) |
 | `SMTP_PORT` | submission port: `587` by default, `465` with `SMTP_SECURE=1` |
 | `SMTP_SECURE` | `1` for TLS from the first byte (port 465). Otherwise the connection starts plaintext and must upgrade with `STARTTLS` |
@@ -428,7 +428,7 @@ unauthenticated, so it is safe for uptime probes.
 - [ ] TLS terminated at a proxy (or `TLS_CERT`/`TLS_KEY` set together); `PUBLIC_ORIGIN=https://…` set.
 - [ ] `HSTS=1` only after HTTPS works.
 - [ ] `TRUST_PROXY=1` only when a trusted proxy sets the forwarded headers.
-- [ ] `RESET_TOKEN_CONSOLE=0` if the process log is not private.
+- [ ] `RESET_TOKEN_CONSOLE=0` if the process log is not private and the install is neither https nor has SMTP (those are silent by default).
 - [ ] `MASTER_KEY` set (managed) or `vault.key` backed up.
 - [ ] Backups scheduled and one restore rehearsed.
 - [ ] Server bound to loopback (`HOST=127.0.0.1`) behind the proxy.

@@ -307,7 +307,11 @@ test('the HTTP protocol pairs, dispatches and collects results end to end', {tim
     const probe = await fetch(task.payload.url);
     assert.equal(probe.status, 200);
     const result = {url: task.payload.url, httpStatus: probe.status, ok: true, latencyMs: Date.now() - started, checkedAt: new Date().toISOString()};
-    const reported = await agentCall(`/api/agent/tasks/${task.id}/result`, {status: 'done', result});
+    // A result carrying an earlier attempt than the one running is fenced off
+    // by the route too, not only by `completeAgentTask` called directly.
+    const stale = await agentCall(`/api/agent/tasks/${task.id}/result`, {status: 'done', result, attempts: task.attempts - 1});
+    assert.equal(stale.status, 409);
+    const reported = await agentCall(`/api/agent/tasks/${task.id}/result`, {status: 'done', result, attempts: task.attempts});
     assert.equal(reported.status, 200);
     // Duplicate delivery of the same result is rejected, never double-applied.
     const again = await agentCall(`/api/agent/tasks/${task.id}/result`, {status: 'done', result});

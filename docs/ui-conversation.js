@@ -7,25 +7,25 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=99c330d626';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=99c330d626';
-import {requestOfMessage} from './bot-browser.js?v=99c330d626';
-import {validHttpUrl} from './core.js?v=99c330d626';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=99c330d626';
-import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=99c330d626';
-import {isPrimary} from './company.js?v=99c330d626';
-import {hasJob, modelChip} from './ui-profile-model.js?v=99c330d626';
-import {scheduleTaskBody} from './schedules.js?v=99c330d626';
-import {feed} from './ui-feed.js?v=99c330d626';
-import {setupCardOf, setupButton} from './setup.js?v=99c330d626';
-import {askCard} from './ui-asks.js?v=99c330d626';
-import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=99c330d626';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=99c330d626';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=99c330d626';
-import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=99c330d626';
-import {toast, confirmSheet} from './ui-dialogs.js?v=99c330d626';
-import {siteChip, thumbSlot} from './ui-computer-view.js?v=99c330d626';
-import {cliChoice, googleCard} from './ui-connect-model.js?v=99c330d626';
+import {OFFJOB_CHOICES} from './off-job.js?v=f3b2fa003c';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=f3b2fa003c';
+import {requestOfMessage} from './bot-browser.js?v=f3b2fa003c';
+import {validHttpUrl} from './core.js?v=f3b2fa003c';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=f3b2fa003c';
+import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=f3b2fa003c';
+import {isPrimary} from './company.js?v=f3b2fa003c';
+import {hasJob, modelChip} from './ui-profile-model.js?v=f3b2fa003c';
+import {scheduleTaskBody} from './schedules.js?v=f3b2fa003c';
+import {feed} from './ui-feed.js?v=f3b2fa003c';
+import {setupCardOf, setupButton} from './setup.js?v=f3b2fa003c';
+import {askCard} from './ui-asks.js?v=f3b2fa003c';
+import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=f3b2fa003c';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=f3b2fa003c';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=f3b2fa003c';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=f3b2fa003c';
+import {toast, confirmSheet} from './ui-dialogs.js?v=f3b2fa003c';
+import {siteChip, thumbSlot} from './ui-computer-view.js?v=f3b2fa003c';
+import {cliChoice, googleCard} from './ui-connect-model.js?v=f3b2fa003c';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -107,8 +107,8 @@ function browserEntry(m, conv) {
   const where = request.status === 'pending' ? '' : ` · ${request.via === 'server' ? 'this server' : 'your device'}`;
   const steps = request.steps?.length ? `<ol class="cv-steps">${request.steps.map(s => `<li>${esc(s.op)} ${esc(s.url || (s.index ? `#${s.index}` : s.selector) || '')}${s.text ? ` · "${esc(String(s.text).slice(0, 60))}"` : ''}</li>`).join('')}</ol>` : '';
   const decline = btn('Decline', 'deny-browser', {id: request.id, small: true});
-  // A page behind a sign-in: the person can drive it. Only the Node build has a server browser.
-  const takeover = !isStaticDemo() && request.status === 'pending' ? btn('Take over', 'takeover-browser', {id: request.id, small: true}) : '';
+  // A page behind a sign-in: an admin can drive it (the routes are admin's). Only the Node build has a server browser.
+  const takeover = isAdmin() && request.status === 'pending' ? btn('Take over', 'takeover-browser', {id: request.id, small: true}) : '';
   const acts = !canWrite() ? '' : request.status === 'pending' ? `<div class="acts">${btn('Approve', 'approve-browser', {id: request.id, small: true, kind: 'primary'})}${takeover}${decline}</div>`
     : request.status === 'dispatched' ? `<div class="acts">${decline}</div>` : '';
   const bot = findBot(request.botId) || askerOf(conv);
