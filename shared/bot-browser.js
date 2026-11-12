@@ -257,6 +257,21 @@ function clickHint(r, find = '') {
 }
 
 /** Page text the next bot turn can draft from. The chat line uses a shorter cap. */
+/** The site to sign in to when `url` is a sign-in page (Google's accounts page for Gmail, a /login path), else null.
+ * A sign-in page that names where it returns to (`continue`, `dest`, `next`, `redirect`) gives that site. */
+const SIGNIN_HOSTS = /^(?:accounts\.google\.com|login\.live\.com|login\.microsoftonline\.com|login\.yahoo\.com|appleid\.apple\.com|idmsa\.apple\.com)$/;
+const SIGNIN_PATH = /^\/(?:[\w-]+\/)*(?:login|log-in|signin|sign-in|sign_in|servicelogin|identifier|uas\/login|ap\/signin)(?:\.\w+)?\/?$/i;
+export function signinSite(url) {
+  let u; try { u = new URL(url); } catch { return null; }
+  if (!SIGNIN_HOSTS.test(u.hostname) && !SIGNIN_PATH.test(u.pathname)) return null;
+  for (const key of ['continue', 'dest', 'next', 'redirect', 'redirect_uri', 'returnTo', 'return_to']) {
+    const back = u.searchParams.get(key);
+    if (!back) continue;
+    try { const b = new URL(back, u); if (/^https?:$/.test(b.protocol) && b.hostname.includes('.')) return b.hostname.toLowerCase(); } catch { /* not an address */ }
+  }
+  return u.hostname.toLowerCase();
+}
+
 export function capturePageText(result, limit = MAX_PAGE_CHARS, find = '') {
   const r = result && typeof result === 'object' ? result : {};
   const reads = Array.isArray(r.actions) ? r.actions.filter(a => a && typeof a.text === 'string').map(a => a.text) : [];
@@ -268,6 +283,8 @@ export function capturePageText(result, limit = MAX_PAGE_CHARS, find = '') {
     const found = findPassages(body, find);
     body = found ? `${click.match ? `${click.match}\n` : ''}${found}` : `"${find}" is not on this page.${click.match ? ` ${click.match}` : ''} The page starts: ${String(body).slice(0, 1500)}`;
   }
+  const signin = signinSite(r.finalUrl);
+  if (signin) body = `This is a sign-in page: the owner is not signed in to ${signin} in this browser. Never type a password or a code. Send the setup block {"action":"signin","site":"${signin}"} so the owner signs in once, then ask for the page again.\n\n${body}`;
   if (r.botCheck) body = `This site showed a human check to the browser. Do not try to solve it: read another site or search for the page elsewhere.\n\n${body}`;
   // Where the page's links go, so a bot can open a search result (page text alone drops the addresses).
   const links = (Array.isArray(r.links) ? r.links : []).filter(l => l && String(l.text || '').trim().length >= 4 && /^https?:\/\//.test(String(l.url || '')))

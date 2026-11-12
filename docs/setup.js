@@ -23,14 +23,14 @@
  *   make itself the primary bot, save a rule without the owner's tap, or reach a route the owner could not.
  *
  * Pure and browser-safe: the server reads replies with it and the UI paints the card from it. */
-import {cleanText, validHttpUrl} from './core.js?v=64ac2a0a37';
-import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=64ac2a0a37';
-import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=64ac2a0a37';
-import {controlFence} from './reply-blocks.js?v=64ac2a0a37';
-import {companyBots, primaryOf} from './company.js?v=64ac2a0a37';
-import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js?v=64ac2a0a37';
-import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=64ac2a0a37';
-import {grantWhat} from './ui-asks.js?v=64ac2a0a37';
+import {cleanText, validHttpUrl} from './core.js?v=64ddf06799';
+import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=64ddf06799';
+import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=64ddf06799';
+import {controlFence} from './reply-blocks.js?v=64ddf06799';
+import {companyBots, primaryOf} from './company.js?v=64ddf06799';
+import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js?v=64ddf06799';
+import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=64ddf06799';
+import {grantWhat} from './ui-asks.js?v=64ddf06799';
 
 export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'schedule', 'remove', 'open', 'signin'];
 /** The bot settings a bot may propose. Not the primary role, the browser approval mode, or layout (pins, order). */
