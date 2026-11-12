@@ -9,6 +9,7 @@ import dns from 'node:dns/promises';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
+import zlib from 'node:zlib';
 
 /** Eight numeric hextets, or null. Leading zeros, `::`, a dotted IPv4 tail and a
  * zone id (`%eth0`) all name the same address as the compressed form, so the
@@ -143,10 +144,20 @@ export function pinnedRequest(url, {address, method = 'GET', headers = {}, body,
         : callback(null, address, family),
       timeout: timeoutMs,
     }, res => {
-      let body = '', size = 0;
-      res.setEncoding('utf8');
-      res.on('data', chunk => { size += chunk.length; if (size > maxBytes) { req.destroy(new Error('Response too large.')); } else body += chunk; });
-      res.on('end', () => resolve({status: res.statusCode, headers: res.headers, body}));
+      const chunks = []; let size = 0;
+      res.on('data', chunk => { size += chunk.length; if (size > maxBytes) { req.destroy(new Error('Response too large.')); } else chunks.push(chunk); });
+      // Some sites compress a page whatever the request asked for; the bytes are decoded before they are text,
+      // and the decoded size is capped too, so a small compressed reply cannot grow without bound.
+      res.on('end', () => {
+        const raw = Buffer.concat(chunks), encoding = String(res.headers['content-encoding'] || '').trim().toLowerCase();
+        const decode = {gzip: zlib.gunzipSync, 'x-gzip': zlib.gunzipSync, deflate: zlib.inflateSync, br: zlib.brotliDecompressSync}[encoding];
+        let bytes = raw;
+        if (decode) try { bytes = decode(raw, {maxOutputLength: maxBytes * 8}); } catch {
+          // "deflate" is sometimes sent without its zlib header.
+          try { bytes = encoding === 'deflate' ? zlib.inflateRawSync(raw, {maxOutputLength: maxBytes * 8}) : raw; } catch { bytes = raw; }
+        }
+        resolve({status: res.statusCode, headers: res.headers, body: bytes.toString('utf8')});
+      });
       res.on('error', reject);
     });
     req.on('timeout', () => req.destroy(new Error(`Request timed out after ${timeoutMs / 1000}s.`)));

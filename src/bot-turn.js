@@ -22,6 +22,10 @@ import {randomUUID} from 'node:crypto';
 import {replyWithSubagents} from './subagents.js';
 import {askPeerRound} from './bot-link.js';
 import {createBotsFromReply} from './bot-create.js';
+import {parseCreateBotRequests, stripCreateBotBlocks, botCreateRefusedText} from '../shared/bot-create.js';
+import {setupCardsFromReply} from './setup-cards.js';
+import {stripSetupBlocks as setupFreeText} from '../shared/setup.js';
+import {readAttachment} from './attachments.js';
 
 const stamp = () => new Date().toISOString();
 
@@ -30,24 +34,50 @@ const stamp = () => new Date().toISOString();
  * `executor(bot, input, config)` is the model call the caller was given (the
  * real one, or a test's fake). `peers`, `configFor` and `memoryForPeer` are the
  * roster a bot may ask and how a teammate's own provider and recap are found.
- * `spawnRounds` and `askRounds` are how many rounds this bot has already spent;
- * both default to 0, which is what a fresh attempt has. `groupId` is where a
+ * `spawnRounds` is how many helper rounds this bot has already spent; it
+ * defaults to 0, which is what a fresh attempt has. `groupId` is where a
  * bot-creating reply adds its bot, or `null` to skip that step.
+ *
+ * `budget` and `onEvent` are the run's ask tally and the way to record each ask
+ * as it happens. When a checkpoint stops the asks, the result is
+ * `{limit, frames, lines, spawns}` and nothing after the ask round runs; pass
+ * `resume: {frames, spawns}` back in to carry on from there.
  */
 export async function runBotTurn(store, {
   bot, envelope, executor, config,
   peers = [], configFor = () => null, memoryForPeer = null, handoffAllowed = true,
-  spawnRounds = 0, askRounds = 0, groupId = null, runId = null,
+  spawnRounds = 0, groupId = null, runId = null, budget = null, resume = null, stop = false, onEvent = null, gate = null,
   makeId = randomUUID, now = stamp,
 }) {
-  const sub = await replyWithSubagents({bot, envelope, executor, config, rounds: spawnRounds, makeId, now});
-  const peer = await askPeerRound({bot, envelope, first: sub.output, executor, config, peers, configFor, memoryForPeer, handoffAllowed, rounds: askRounds, makeId, now});
+  // Every model call of the turn can read the files the owner attached, from this workspace only.
+  const call = executor;
+  if (call) executor = (who, input, cfg) => call(who, input, cfg, {readFile: id => readAttachment(store, id)});
+  const sub = resume ? {output: null, lines: [], spawns: resume.spawns || []}
+    : await replyWithSubagents({bot, envelope, executor, config, rounds: spawnRounds, makeId, now});
+  const peer = await askPeerRound({bot, envelope, first: sub.output, executor, config, peers, configFor, memoryForPeer, handoffAllowed, budget, resume, stop, onEvent, gate, makeId, now});
+  if (peer.limit) return {limit: peer.limit, frames: peer.frames, lines: [...sub.lines, ...peer.lines], spawns: sub.spawns, asks: peer.asks, created: []};
   const made = groupId
     ? await createBotsFromReply(store, {bot, groupId, output: peer.output, runId, makeId, now})
-    : {text: peer.output, created: [], lines: []};
+    : parseCreateBotRequests(peer.output).length
+      // No group to add to (a chat outside every team): the block is dropped, and said so.
+      ? {text: stripCreateBotBlocks(peer.output) || `${bot.name} tried to create a bot.`, created: [], lines: [{id: makeId(), role: 'system', kind: 'bot-created', text: botCreateRefusedText(bot, 'this chat has no team to add it to. Ask Atlas to make the bot instead.'), at: now()}]}
+      : {text: peer.output, created: [], lines: []};
+  // Last, a proposed settings change becomes a card the owner taps; it changes nothing by itself.
+  let setup = setupCardsFromReply(store, {bot, output: made.text, makeId, now});
+  // A block that could not be used goes back to the bot once with the reason, so it sends a corrected block
+  // or tells the owner plainly that nothing was set up, instead of saying it proposed a change that has no card.
+  const problems = setup.lines.filter(line => !line.setup).map(line => line.text);
+  if (problems.length && executor) {
+    const again = String(await executor(bot, JSON.stringify({...envelope,
+      setupProblem: `${problems.join(' ')} Reply again to the owner: send a corrected setup block if you can, or say plainly that it was not set up and why. Do not say you proposed something that has no card.`,
+      yourLastReply: setupFreeText(made.text)}), config) ?? '');
+    if (again.trim()) setup = setupCardsFromReply(store, {bot, output: again, makeId, now});
+  }
   return {
-    output: made.text,
+    output: setup.text,
     lines: [...sub.lines, ...peer.lines, ...made.lines],
+    // What the reply proposes reads after it, like a page the reply asked for.
+    after: setup.lines,
     spawns: sub.spawns,
     asks: peer.asks,
     created: made.created,

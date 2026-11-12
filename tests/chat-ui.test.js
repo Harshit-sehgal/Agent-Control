@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile, readdir} from 'node:fs/promises';
-import {classifyMessage, botSuggestions, statusSummary} from '../shared/chat-engine.js';
 const html=await readFile(new URL('../shared/index.html',import.meta.url),'utf8');
 // The UI is app.js plus the ui-*.js modules; assertions match across all of them.
 const sharedDir=new URL('../shared/',import.meta.url);
@@ -10,50 +9,32 @@ const app=(await Promise.all(uiFiles.map(f=>readFile(new URL(f,sharedDir),'utf8'
 const css=await readFile(new URL('../shared/app.css',import.meta.url),'utf8');
 test('Pages build has safe relative assets, modal and accessible chat structure',()=>{
   assert.match(html,/\.\/app\.js/);assert.match(html,/\.\/app\.css/);assert.match(html,/\.\/local-api\.js/);
-  assert.match(html,/Data is saved only in this browser/);assert.match(html,/id="inspector"/);
-  assert.match(app,/id="chat-form"/);assert.match(app,/id="new-bot-form"/);
-  assert.match(app,/id="candidate-form"/);assert.match(app,/id="new-group-form"/);
-  assert.match(app,/Manual posting handoff|Manual final posting|manual Post click/);
+  assert.match(html,/Data is saved only in this browser/);assert.match(html,/id="chrome"/);assert.match(html,/\.\/shell\.css/);
+  assert.match(app,/id="chat-form"/);assert.match(app,/id: 'new-bot-form'/);
   assert.match(css,/@media\(max-width:850px\)/);
 });
-test('Offline chat command classifier covers common workflows without inventing AI',()=>{
-  assert.equal(classifyMessage('show pending approvals').intent,'approvals');
-  assert.equal(classifyMessage('draft a reply').intent,'draft');
-  assert.equal(classifyMessage('scan candidates').intent,'discover');
-  assert.equal(classifyMessage('show status').intent,'status');
-  assert.equal(classifyMessage('set reminder').intent,'schedules');
-  assert.equal(classifyMessage('create bot named Analyst').name,'Analyst');
-  assert.equal(classifyMessage('').intent,'empty');
-  assert.equal(classifyMessage('Create a new bot').name,null);
-});
-test('Status reflects current draft states',()=>{
-  const summary=statusSummary({candidates:[{},{}],drafts:[{status:'pending'},{status:'ready'},{status:'posted'}]});
-  assert.match(summary,/2 candidates/);assert.match(summary,/1 awaiting approval/);assert.match(summary,/1 ready/);
-});
-test('Specialist suggestions remain relevant',()=>{
-  assert.ok(botSuggestions('Scout').some(x=>/candidate/i.test(x)));
-  assert.ok(botSuggestions('Writer').some(x=>/Draft/i.test(x)));
-});
-
 test('custom bots run through the Node provider only on the server build',()=>{
   // The README promises custom bots run when a key is configured; the UI used
   // to answer every custom bot with the offline command demo instead.
-  // The group-run path is the same on both builds: POST /chat, then follow the
-  // run through its routes. Only a plain 1:1 message still differs by build.
-  assert.match(app,/return runOnServer\(group, message, directBotId, id\)/);
-  assert.match(app,/\/api\/bots\/run', 'POST', \{botId: bot\.id/);
+  // The group-run path is the same on both builds, and now for every chat: a bot
+  // chat posts to the company group with the bot as directBotId, a thread to its
+  // own group, then the run is followed through its routes. There is no separate
+  // 1:1 path any more, so no plain `/api/bots/run` call either.
+  assert.match(app,/return runOnServer\(group, message, isTeam \? null : bot\.id, id\)/);
+  assert.match(app,/\/api\/groups\/\$\{group\.id\}\/chat`, 'POST', \{message, directBotId: directBotId \|\| null, chatKey: key/);
+  assert.doesNotMatch(app,/\/api\/bots\/run', 'POST', \{botId: bot\.id/);
   assert.match(app,/export const isLive = \(\) => !isStaticDemo\(\) && Boolean\(store\.state\?\.aiEnabled\)/);
-  assert.match(app,/\/api\/bots\/run/);
   // Built-in bots use the same provider. A missing key is an error, not the demo.
-  assert.match(app,/This bot answers with your AI provider/);
-  assert.match(app,/will not answer with the demo/);
-  // Retry of a feed read must wait or keep watching, the same as the first send.
-  assert.match(app,/if \(await watchQueuedRun\(b\.dataset\.id, key, run\)\) return/);
+  assert.match(app,/Answers come from your AI provider/);
+  assert.match(app,/Connect a model first, in Settings → Models and keys/);
+  // A retry (and Switch on a model-limit card) asks again through rerun, which
+  // watches a queued run the same way as the first send.
+  assert.match(app,/if \(await watchQueuedRun\(groupId, key, run\)\) return 'queued'/);
+  assert.match(app,/await rerun\(b\.dataset\.id, \{message: b\.dataset\.message, direct: b\.dataset\.direct, chat\}\)/);
   // The watch loop now lives in shared/run-follow.js over injected pieces, and
   // tests/run-follow.test.js drives it with fake snapshots instead of matching
   // its text; this only checks that the chat module still hands it the run.
   assert.match(app,/await pollRun\(\{/);
-  assert.match(app,/await streamGroupRun\(groupId, key, run\.runId\);\n    return true;/);
   assert.match(app,/const key = run\?\.chatKey \|\| chatId\(\) \|\| teamKey\(b\.dataset\.id\)/);
   // A run decision goes to its route in both builds: continue, plan, cancel.
   assert.match(app,/runs\/\$\{b\.dataset\.run\}\/continue`, 'POST'/);
@@ -61,20 +42,10 @@ test('custom bots run through the Node provider only on the server build',()=>{
   assert.match(app,/runs\/\$\{b\.dataset\.run\}\/plan`, 'POST', \{approve: false\}/);
   assert.match(app,/runs\/\$\{b\.dataset\.run\}\/cancel`, 'POST'/);
   assert.match(app,/runWithTyping\(\{key, setTyping, sync, concurrent: true,/);
-  assert.match(app,/runButtons\(\{status, live\}\)/);
-  assert.match(app,/flags\.checkpoint \? btn\('Approve next step', 'continue-run'/);
-  assert.match(app,/drafts \? `<button type="button" class="needs-pill" data-action="open-section" data-section="drafts"/);
-  // The chat header and the info panel read the same "waiting on you" answer.
-  assert.match(app,/const \{drafts, plans, pauses, pages, feeds\} = waitingOnYou\(store\.state, conv\.id, held\)/);
-  assert.match(app,/const waiting = waitingOnYou\(state, conv\.id, runs\)/);
-  assert.match(app,/paused \? `\$\{paused\} paused`/);
-  assert.match(app,/Waiting on a page/);
-  assert.match(app,/An admin sets voice and timing for this workspace/);
-  assert.match(app,/if \(!isAdmin\(\) && !isStaticDemo\(\)\) throw new Error\('An admin sets voice and timing\.'\)/);
+  // The chat header reads the shared "waiting on you" answer.
+  assert.match(app,/const waiting = totalWaitingOnYou\(waitingOnYou\(state, conv\.id\)\) > 0/);
   assert.match(app,/Viewers cannot send messages/);
-  assert.match(app,/A member can change group settings/);
-  assert.match(app,/write \? iconBtn\('plus', 'Share a post'/);
-  assert.match(app,/write && flags\.checkpoint \? btn\('Approve next step'/);
+  assert.match(app,/flags\.checkpoint && btn\('Approve next step', 'continue-run'/);
   assert.match(app,/Viewers can read chats\. A member can send\./);
   // A plan's Start and Cancel are now routed like every other decision, not
   // patched into a browser-side run log.
@@ -84,27 +55,18 @@ test('custom bots run through the Node provider only on the server build',()=>{
   assert.match(app,/'toggle-user-disabled'/);
   assert.match(app,/Temporary password \(min 8 chars\)/);
   assert.match(app,/EMAIL_RELAY_URL/);
-  // The "is this pause still this run?" check moved into the watch loop
-  // (shared/run-follow.js, behaviour-tested); the retry path still decides
-  // wait vs follow the same way here.
-  assert.match(app,/feedPauseAction\(request, \{graceUsed: true\}\)/);
-  assert.match(app,/request.status === 'dispatched' \? `<div class="card-actions">\$\{decline\}/);
+  assert.match(app,/request.status === 'dispatched' \? `<div class="acts">\$\{decline\}/);
   assert.match(app,/<form id="login-form"[\s\S]*?name="email"/);
   assert.match(app,/id="password-form"/);
   assert.match(app,/\/api\/auth\/password/);
   assert.match(app,/'deny-browser': async b => \{[\s\S]*?streamGroupRun\(request\.groupId/);
-  assert.match(app,/'retry-bot-task'/);
-  assert.match(app,/\['failed', 'interrupted', 'awaiting_plan', 'awaiting_checkpoint', 'completed', 'cancelled'\]\.includes\(run\?\.status\)/);
-  assert.match(app,/Grant browser access/);
-  assert.match(app,/'grant-browser': async b => \{[\s\S]*?patchBot\([\s\S]*?browser\.use/);
+  assert.match(app,/\['waiting', 'failed', 'interrupted', 'awaiting_plan', 'awaiting_checkpoint', 'awaiting_limit', 'completed', 'cancelled'\]\.includes\(run\?\.status\)/);
   // When a provider is connected, the actual model id is surfaced if known.
   assert.match(app,/Connected · \$\{esc\(model\)\}/);
   assert.match(app,/state\?\.aiModel/);
   // A run that is still working can be stopped from its card, in the same build
   // that shows the thread's Stop button: the card used to offer nothing at all.
   // Both buttons now come from the one `runButtons` rule in the view model.
-  assert.match(app,/flags\.stop \? btn\('Cancel', 'cancel-run'/);
-  assert.match(app,/flags\.retry \? btn\('Retry', 'retry-run'/);
 });
 test('bot profiles never mirror name/instructions into browser-local UI state',()=>{
   // `profile()` spreads the cosmetic UI record over the bot, so a name/instructions
@@ -117,10 +79,8 @@ test('bot profiles never mirror name/instructions into browser-local UI state',(
   // Nothing may write name/instructions into the local profile record.
   for (const call of app.match(/setProfile\([^;]*\);/g)||[]) assert.doesNotMatch(call,/\b(name|instructions)\b/,`setProfile must stay cosmetic: ${call}`);
   // Saving a profile must round-trip through the API, not only localStorage.
-  assert.match(app,/api\(`\/api\/groups\/\$\{groupOfBot\(b\.id\)\.id\}\/bots\/\$\{b\.id\}`, 'PATCH'/);
+  assert.match(app,/api\(`\/api\/groups\/\$\{group\.id\}\/bots\/\$\{id\}`, 'PATCH', body\)/);
   // A duplicate must take its instructions from the group record, not the mirror.
-  assert.match(app,/instructions: base\.instructions/);
-  assert.match(app,/settings: \{\.\.\.botSettings\(base\), lead: false\}/);
 });
 test('the old browser dialogs are gone: confirmation and prompts are in-app sheets',()=>{
   assert.doesNotMatch(app,/window\.(confirm|prompt|alert)\(/);

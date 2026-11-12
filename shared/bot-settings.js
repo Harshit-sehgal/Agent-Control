@@ -9,17 +9,24 @@
  */
 import {cleanText} from './core.js';
 import {fail} from './errors.js';
+import {BACKSTOP} from './limits.js';
 import {TINT_COUNT} from './ui-kit.js';
+import {SHAPES} from './company.js';
 
 export const REPLY_LENGTHS = {short: 500, medium: 1500, long: 3000};
 export const ROUTING_MODES = ['pipeline', 'mentions', 'everyone'];
 /** direct: you @mention or the pipeline runs. tracked: the primary bot plans
  * the bots a request needs and checks the outcome. */
 export const COORDINATION_MODES = ['direct', 'tracked'];
-/** The hard ceiling on bot steps in one run, whatever a group sets. */
-export const MAX_STEPS_LIMIT = 12;
+/** The hard ceiling on bot steps in one run, whatever a group sets: the backstop (shared/limits.js). A team, or the
+ * owner's workspace limit in Settings → Limits, may set fewer; by default nothing does. */
+export const MAX_STEPS_LIMIT = BACKSTOP.steps;
+/** The most recent lines a bot may read, before the character budget cuts further.
+ * Context is automatic: there is no per-bot setting for it. */
 export const MAX_CONTEXT_MESSAGES = 30;
-export const X_ENGAGE_PIPELINE = ['scout', 'ranker', 'researcher', 'writer', 'reviewer'];
+/** Settings that used to exist. A stored value is ignored on read and dropped on
+ * the next save, and sending one is not an error, so an older client still works. */
+const LEGACY_SETTINGS = ['contextMessages'];
 
 export const BOT_DEFAULTS = Object.freeze({
   enabled: true,
@@ -28,8 +35,6 @@ export const BOT_DEFAULTS = Object.freeze({
   replyLength: 'medium',
   /** Extra tone guidance appended to the bot's job. */
   style: '',
-  /** How many recent messages of the conversation the bot sees. */
-  contextMessages: 10,
   /** Keep durable memory for this bot's model: a per-model rulebook and a
    * rolling recap of the conversation, both stored in the workspace. */
   memory: true,
@@ -45,6 +50,13 @@ export const BOT_DEFAULTS = Object.freeze({
   /** ask: each browser request waits for a person. auto: it goes to the local
    * agent at once, still inside that device's allowlist and permissions. */
   browserApproval: 'ask',
+  /** The manager's bot id, or null for Solo. The chart rules are in company.js. */
+  reportsTo: null,
+  /** One of company.js SHAPES, or null for the role default. */
+  shape: null,
+  /** Pinned to the top of the chat list, and its place in the saved order. */
+  pinned: false,
+  order: null,
 });
 export const BROWSER_APPROVALS = ['ask', 'auto'];
 
@@ -54,7 +66,8 @@ export const GROUP_DEFAULTS = Object.freeze({
   routing: 'pipeline',
   /** Ordered bot ids; null means every bot in the group, in roster order. */
   pipeline: null,
-  maxSteps: 6,
+  /** No limit of its own: the backstop. */
+  maxSteps: BACKSTOP.steps,
   checkpoints: false,
   /** Bots in this group may hand off to each other by @mention. */
   botHandoffs: true,
@@ -79,7 +92,9 @@ const flag = (value, label) => {
 
 /** The effective settings of a bot: its stored values over the defaults. */
 export function botSettings(bot) {
-  return {...BOT_DEFAULTS, ...(isObject(bot?.settings) ? bot.settings : {})};
+  const settings = {...BOT_DEFAULTS, ...(isObject(bot?.settings) ? bot.settings : {})};
+  for (const key of LEGACY_SETTINGS) delete settings[key];
+  return settings;
 }
 
 /** Validate a partial settings change and merge it over `current`. Only keys
@@ -88,7 +103,8 @@ export function validateBotSettings(body, current = {}) {
   if (body === undefined || body === null) return {...BOT_DEFAULTS, ...current};
   if (!isObject(body)) fail('Bot settings must be an object.');
   const next = {...BOT_DEFAULTS, ...(isObject(current) ? current : {})};
-  for (const key of Object.keys(body)) if (!Object.hasOwn(BOT_DEFAULTS, key)) fail(`Unknown bot setting "${String(key).slice(0, 40)}".`);
+  for (const key of Object.keys(body)) if (!Object.hasOwn(BOT_DEFAULTS, key) && !LEGACY_SETTINGS.includes(key)) fail(`Unknown bot setting "${String(key).slice(0, 40)}".`);
+  for (const key of LEGACY_SETTINGS) delete next[key];
   if (body.enabled !== undefined) next.enabled = flag(body.enabled, 'Enabled');
   if (body.temperature !== undefined) {
     if (body.temperature === null || body.temperature === '') next.temperature = null;
@@ -106,7 +122,6 @@ export function validateBotSettings(body, current = {}) {
     if (typeof body.style !== 'string') fail('Style must be text.');
     next.style = cleanText(body.style, 600);
   }
-  if (body.contextMessages !== undefined) next.contextMessages = integer(body.contextMessages, 0, MAX_CONTEXT_MESSAGES, 'Context messages');
   if (body.memory !== undefined) next.memory = flag(body.memory, 'Memory');
   if (body.summonable !== undefined) next.summonable = flag(body.summonable, 'Summonable');
   if (body.canHandoff !== undefined) next.canHandoff = flag(body.canHandoff, 'Can hand off');
@@ -115,6 +130,16 @@ export function validateBotSettings(body, current = {}) {
     if (!BROWSER_APPROVALS.includes(body.browserApproval)) fail(`Browser approval must be one of: ${BROWSER_APPROVALS.join(', ')}.`);
     next.browserApproval = body.browserApproval;
   }
+  if (body.reportsTo !== undefined) {
+    if (body.reportsTo !== null && body.reportsTo !== '' && typeof body.reportsTo !== 'string') fail('A manager must be a bot id, or empty for Solo.');
+    next.reportsTo = body.reportsTo ? cleanText(body.reportsTo, 80) : null;
+  }
+  if (body.shape !== undefined) {
+    if (body.shape !== null && !SHAPES.includes(body.shape)) fail(`Shape must be one of: ${SHAPES.join(', ')}.`);
+    next.shape = body.shape;
+  }
+  if (body.pinned !== undefined) next.pinned = flag(body.pinned, 'Pinned');
+  if (body.order !== undefined) next.order = body.order === null ? null : integer(body.order, 0, 100000, 'Order');
   if (body.tint !== undefined) next.tint = body.tint === null ? null : integer(body.tint, 0, TINT_COUNT - 1, 'Colour');
   return next;
 }
@@ -122,15 +147,10 @@ export function validateBotSettings(body, current = {}) {
 /** The output budget a bot's reply length allows. */
 export const maxTokensFor = bot => REPLY_LENGTHS[botSettings(bot).replyLength] || REPLY_LENGTHS.medium;
 
-/** The effective settings of a group, with the X-engage default pipeline. */
+/** The effective settings of a group: its stored values over the defaults. */
 export function groupSettings(group) {
   const stored = isObject(group?.settings) ? group.settings : {};
-  const merged = {...GROUP_DEFAULTS, ...stored};
-  if (stored.pipeline === undefined && group?.id === 'x-engage') merged.pipeline = [...X_ENGAGE_PIPELINE];
-  // X-engage is the group this product is for: one bot keeps it on track
-  // until the user switches the setting to direct.
-  if (stored.coordination === undefined && group?.id === 'x-engage') merged.coordination = 'tracked';
-  return merged;
+  return {...GROUP_DEFAULTS, ...stored};
 }
 
 /** Validate a partial group settings change against the group's roster. */
@@ -138,12 +158,6 @@ export function validateGroupSettings(group, body, current = {}) {
   if (body === undefined || body === null) return {...GROUP_DEFAULTS, ...current};
   if (!isObject(body)) fail('Group settings must be an object.');
   const next = {...GROUP_DEFAULTS, ...(isObject(current) ? current : {})};
-  // X-engage stays tracked until someone chooses otherwise. A partial save
-  // must not write the direct default over that implicit choice.
-  if (group?.id === 'x-engage' && !(isObject(current) && current.coordination !== undefined) && body.coordination === undefined) next.coordination = 'tracked';
-  // Same for the pipeline: GROUP_DEFAULTS.pipeline is null ("every bot").
-  // Writing that on a partial save would put Handoff in the X-engage line.
-  if (group?.id === 'x-engage' && !(isObject(current) && current.pipeline !== undefined) && body.pipeline === undefined) delete next.pipeline;
   for (const key of Object.keys(body)) if (!Object.hasOwn(GROUP_DEFAULTS, key)) fail(`Unknown group setting "${String(key).slice(0, 40)}".`);
   if (body.routing !== undefined) {
     if (!ROUTING_MODES.includes(body.routing)) fail(`Routing must be one of: ${ROUTING_MODES.join(', ')}.`);
@@ -194,14 +208,15 @@ export function prunePipeline(group) {
   return group;
 }
 
-/** Recent conversation lines a bot may read, oldest first, bounded in count
- * and size. Each line is labelled with who said it; the caller marks the whole
- * block as untrusted task data. */
-export function threadContext(messages, count, maxChars = 3600) {
-  const n = Math.max(0, Math.min(MAX_CONTEXT_MESSAGES, Number(count) || 0));
-  if (!n || !Array.isArray(messages)) return [];
-  const lines = messages.filter(m => m && m.text && ['user', 'bot'].includes(m.role)).slice(-n)
-    .map(m => ({from: m.role === 'user' ? 'user' : (m.senderName || m.senderId || 'bot'), text: String(m.text).slice(0, 800)}));
+/** Recent conversation lines a bot may read, oldest first, with no setting to
+ * tune: the newest that fit in `maxChars`. What was cut is the stored recap of the
+ * conversation, which rides in the bot's memory block. Each line is labelled with
+ * who said it; the caller marks the whole block as untrusted task data. */
+export function threadContext(messages, maxChars = 3600) {
+  if (!Array.isArray(messages)) return [];
+  const lines = messages.filter(m => m && m.text && ['user', 'bot'].includes(m.role)).slice(-MAX_CONTEXT_MESSAGES)
+    // The files on an owner's line travel by reference; src/attachments.js reads them for the model.
+    .map(m => ({from: m.role === 'user' ? 'user' : (m.senderName || m.senderId || 'bot'), text: String(m.text).slice(0, 800), ...(m.role === 'user' && m.attachments?.length ? {files: m.attachments.map(({id, name, type}) => ({id, name, type}))} : {})}));
   let total = 0;
   const kept = [];
   for (let i = lines.length - 1; i >= 0; i--) {

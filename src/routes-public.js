@@ -1,11 +1,11 @@
 /** Routes that work without a browser session: health, sign-in and password
- * reset, the extension's capture endpoint, and the local-agent protocol. Each
+ * reset, and the local-agent protocol. Each
  * one authenticates in its own way, or is safe to answer to anyone. */
-import {activity, candidateInput} from '../shared/core.js';
+import {activity} from '../shared/core.js';
 import * as wf from '../shared/workflow.js';
 import * as agent from './agent.js';
 import {onAgentTaskResult, continueBrowserWork, setBrowserResultHooks} from './bot-browser.js';
-import {queueGroupRun, resumeFeedRun, resumeBrowserRun} from './coordination.js';
+import {queueGroupRun, resumeBrowserRun} from './coordination.js';
 import {runOneBot} from './routes-groups.js';
 import {sessionCookie, clearCookie, DEFAULT_WORKSPACE, resolveAccount} from './auth.js';
 import {sha256} from './vault.js';
@@ -18,7 +18,6 @@ import {reply} from './router.js';
 // instead of imported there (that would be a cycle).
 setBrowserResultHooks({
   continueRun: (store, spec) => continueBrowserWork(store, spec, {runBot: runOneBot, runGroup: queueGroupRun}),
-  resumeFeed: resumeFeedRun,
   resumeBrowser: resumeBrowserRun,
 });
 
@@ -31,22 +30,39 @@ const LOGIN_WINDOW_MS = 900000, LOGIN_ATTEMPTS = 8, LOGIN_ACCOUNT_ATTEMPTS = LOG
 // the app is behind a tunnel. `AUTH_RATE_LIMIT=off` removes the limiter, and
 // nothing else; the default stays on, because this is the only brake on
 // password guessing.
+// Local-first: with no mail transport the console is the only way a reset
+// token reaches the owner, so a plain local install prints it. A hosted install
+// (an https PUBLIC_ORIGIN) or one with SMTP configured keeps tokens out of its
+// logs unless RESET_TOKEN_CONSOLE=1 asks; RESET_TOKEN_CONSOLE=0 always silences it.
+const resetTokenToConsole = (env = process.env) => {
+  const set = String(env.RESET_TOKEN_CONSOLE ?? '').trim();
+  if (set === '0') return false;
+  if (set === '1') return true;
+  return !String(env.PUBLIC_ORIGIN || '').startsWith('https://') && !String(env.SMTP_HOST || '').trim();
+};
 const rateLimitOn = () => String(process.env.AUTH_RATE_LIMIT || '').toLowerCase() !== 'off';
+
+/** A browser result carries a whole page (60,000 characters, often 3 bytes each,
+ * plus links and controls), so the result route reads more than the default 64KB. */
+export const RESULT_BODY_LIMIT = 1024 * 1024;
 
 export function publicRoutes(router, {auth, workspaces, version}) {
   // Failed sign-ins per client IP. A record only matters while its window is
   // open, so lapsed ones are dropped and a long-lived process cannot grow it.
   const attempts = new Map();
   const pruneExpired = () => { const now = Date.now(); for (const [ip, r] of attempts) if (now > r.until) attempts.delete(ip); };
+  const recordOf = key => { pruneExpired(); const record = attempts.get(key) || {count: 0, until: Date.now() + LOGIN_WINDOW_MS}; attempts.set(key, record); return record; };
+  const tooMany = () => fail('Too many attempts. Try again in 15 minutes.', 429);
   /** Count one try from `key` in the current window, or refuse with 429. */
   function attempt(key, limit) {
     if (!rateLimitOn()) return;
-    pruneExpired();
-    const record = attempts.get(key) || {count: 0, until: Date.now() + LOGIN_WINDOW_MS};
-    attempts.set(key, record);
-    if (record.count >= limit) fail('Too many attempts. Try again in 15 minutes.', 429);
+    const record = recordOf(key);
+    if (record.count >= limit) tooMany();
     record.count++;
   }
+  /** Is `key`'s bucket full? Read only; `miss` counts a failure into it. */
+  const full = (key, limit) => rateLimitOn() && recordOf(key).count >= limit;
+  const miss = key => { if (rateLimitOn()) recordOf(key).count++; };
 
   // Behind a reverse proxy the socket address is the proxy, so the limiter (and
   // the session's recorded ip) would collapse every client into one bucket.
@@ -83,13 +99,21 @@ export function publicRoutes(router, {auth, workspaces, version}) {
     // the account the request is *about*, resolved the way `auth.login` resolves
     // it — a body with no email means the owner, and keying on the raw body
     // meant the guesses aimed at that one mailbox were counted per IP only.
+    //
+    // The across-addresses account bucket counts failures only, and a full one
+    // still lets the right password through: otherwise anyone could keep the
+    // owner locked out with 32 wrong guesses per window from rotating
+    // addresses. The per-address buckets above still refuse everything.
     const account = resolveAccount(b.email).slice(0, 200);
-    if (account) {
-      attempt(`login:account:${account}:${ip}`, LOGIN_ATTEMPTS);
-      attempt(`login:account:${account}`, LOGIN_ACCOUNT_ATTEMPTS);
-    }
+    const accountKey = `login:account:${account}`;
+    const accountFull = Boolean(account) && full(accountKey, LOGIN_ACCOUNT_ATTEMPTS);
+    if (account) attempt(`${accountKey}:${ip}`, LOGIN_ATTEMPTS);
     const result = auth.login({email: b.email, password: b.password}, {ip, userAgent: c.req.headers['user-agent']});
-    if (!result.ok) fail(result.error, result.status);
+    if (!result.ok) {
+      if (account) miss(accountKey);
+      if (accountFull) tooMany();
+      fail(result.error, result.status);
+    }
     attempts.delete(`login:${ip}`);
     if (account) {
       attempts.delete(`login:account:${account}:${ip}`);
@@ -117,10 +141,7 @@ export function publicRoutes(router, {auth, workspaces, version}) {
     // not be a way to lock them out of signing in.
     if (email) attempt(`forgot:account:${email}`, LOGIN_ATTEMPTS);
     const token = auth.requestPasswordReset(b.email);
-    // Local-first: the console prints the token because no mail transport is
-    // configured. Set RESET_TOKEN_CONSOLE=0 on a hosted deployment so reset
-    // tokens never reach the logs.
-    if (token && process.env.RESET_TOKEN_CONSOLE !== '0') console.log(`\nPassword reset token for ${String(b.email || '').trim().toLowerCase()} (valid 1 hour, single use):\n  ${token}\n`);
+    if (token && resetTokenToConsole()) console.log(`\nPassword reset token for ${String(b.email || '').trim().toLowerCase()} (valid 1 hour, single use):\n  ${token}\n`);
     return {ok: true};
   });
   router.add('POST', '/api/auth/reset', 'public', async c => {
@@ -129,21 +150,6 @@ export function publicRoutes(router, {auth, workspaces, version}) {
     const b = await c.body();
     auth.consumePasswordReset(b.token, b.password);
     return {ok: true};
-  });
-
-  // A separate token limits the extension to adding a candidate and nothing else.
-  router.add('POST', '/api/capture', 'public', async c => {
-    const token = c.req.headers['x-capture-token'];
-    // Read the token without copying the whole workspace: this runs before
-    // the caller has proved anything.
-    const store = token ? workspaces.byCaptureToken(token) : null;
-    if (!store) fail('Invalid extension token.', 401);
-    const body = candidateInput(await c.body());
-    const add = async () => {
-      const result = await store.update(s => wf.addCandidate(s, body));
-      return reply(result.duplicate ? 200 : 201, result);
-    };
-    return store.trackWork ? store.trackWork(add) : add();
   });
 
   // Local-agent protocol. Pairing redeems a one-time code; the other routes
@@ -168,6 +174,11 @@ export function publicRoutes(router, {auth, workspaces, version}) {
     const heartbeat = async () => {
       const device = agent.verifyAgentRequest(store, c.req.headers, 'POST', c.path, raw);
       agent.touchAgent(store, device.id);
+      // Whether the owner's CLIs are signed in on that machine, as the CLIs' own
+      // status commands said. Four words only; a malformed report changes nothing.
+      let report = null;
+      try { report = JSON.parse(raw || '{}')?.cli; } catch { /* A beat that is not JSON carries no report. */ }
+      agent.recordAgentCli(store, device.id, report);
       const nowMs = Date.now();
       // Renew this device's running leases first: it is heartbeating because it
       // is alive, so a task it is still executing (a slow page, a serial queue)
@@ -179,7 +190,7 @@ export function publicRoutes(router, {auth, workspaces, version}) {
       ).map(task => task.id);
       const recovered = agent.recoverAgentTasks(store, nowMs);
       for (const id of staleBrowserTasks) {
-        try { await onAgentTaskResult(store, id, {resumeFeed: resumeFeedRun, resumeBrowser: resumeBrowserRun}); }
+        try { await onAgentTaskResult(store, id, {resumeBrowser: resumeBrowserRun}); }
         catch (error) { console.error('Browser recovery:', error.message); }
       }
       const tasks = agent.claimAgentTasks(store, device.id).map(t => ({id: t.id, kind: t.kind, payload: JSON.parse(t.payload), attempts: t.attempts}));
@@ -191,16 +202,16 @@ export function publicRoutes(router, {auth, workspaces, version}) {
     return store.trackWork ? store.trackWork(heartbeat) : heartbeat();
   });
   router.add('POST', '/api/agent/tasks/:id/result', 'agent', async c => {
-    const raw = await c.raw(), store = agentStore(c);
+    const raw = await c.raw(RESULT_BODY_LIMIT), store = agentStore(c);
     const report = async () => {
       const device = agent.verifyAgentRequest(store, c.req.headers, 'POST', c.path, raw);
       const b = safeJson(raw);
       if (!b?.status) fail('A result status is required.', 400);
-      const result = agent.completeAgentTask(store, device.id, c.params.id, {status: b.status, result: b.result, error: b.error});
+      const result = agent.completeAgentTask(store, device.id, c.params.id, {status: b.status, result: b.result, error: b.error, attempts: b.attempts});
       await store.update(s => activity(s, 'agent', `Agent task ${c.params.id} reported ${b.status}.`, {taskId: c.params.id}));
       // A bot's browser request reports back into its chat. The agent's result is
       // already recorded, so a failure here must not fail the agent's request.
-      try { await onAgentTaskResult(store, c.params.id, {continueRun: (s, spec) => continueBrowserWork(s, spec, {runBot: runOneBot, runGroup: queueGroupRun}), resumeFeed: resumeFeedRun, resumeBrowser: resumeBrowserRun}); }
+      try { await onAgentTaskResult(store, c.params.id, {continueRun: (s, spec) => continueBrowserWork(s, spec, {runBot: runOneBot, runGroup: queueGroupRun}), resumeBrowser: resumeBrowserRun}); }
       catch (error) { console.error('Browser result:', error.message); }
       return result;
     };

@@ -20,107 +20,57 @@ await import(path.join(root,'shared/local-api.js'));
 
 function makeStorage(){const map=new Map();return {map,getItem:key=>map.get(key)??null,setItem:(key,value)=>map.set(key,String(value))};}
 function setup(target=makeStorage()){storage=target;return {request:globalThis.window.AGENT_LOCAL_API,storage:target};}
+// The starting workspace is one bot, which finishes in a single step. A run that
+// pauses between steps needs a second bot to hand to.
+const addPeer=request=>request('/api/groups/home/bots','POST',{name:'Scout',instructions:'Look things up for the team.'});
 
-const seed=async request=>{await request('/api/demo/seed','POST',{});const s=await request('/api/state');const item=s.candidates.find(x=>x.topic==='AI');return request(`/api/candidates/${item.id}/process`,'POST',{});};
 
 test('demo page uses path-relative assets and clearly discloses browser-local data',()=>{
   assert.match(html,/\.\/app\.css/);assert.match(html,/\.\/app\.js/);assert.match(html,/type="module" src="\.\/local-api\.js"/);assert.match(html,/\.\/transport\.js/);
   assert.match(html,/Data is saved only in this browser/);
   assert.doesNotMatch(html,/<script[^>]+src="\/app\.js/);
 });
-test('candidate process, edit invalidates approval, and manual posting flow persists',async()=>{
-  const store=makeStorage();
-  const {request}=setup(store);
-  let d=await seed(request);assert.equal(d.status,'pending');assert.equal(d.mode,'template');
-  await request('/api/settings','PATCH',{topics:['AI'],style:'short',opinions:'',minDelay:0,maxDelay:0});
-  d=await request(`/api/drafts/${d.id}/approve`,'POST',{});assert.equal(d.status,'scheduled');
-  d=await request(`/api/drafts/${d.id}`,'PATCH',{text:'A revised draft with my opinion.'});assert.equal(d.status,'pending');assert.equal(d.revision,2);assert.equal(d.approvedText,undefined);
-  await assert.rejects(request(`/api/drafts/${d.id}/posted`,'POST',{}),/Only ready/);
-  await request(`/api/drafts/${d.id}/approve`,'POST',{});
-  let s=await request('/api/state');d=s.drafts.find(x=>x.id===d.id);assert.equal(d.status,'ready');
-  d=await request(`/api/drafts/${d.id}/posted`,'POST',{});assert.equal(d.status,'posted');
-  const reopened=setup(store).request;
-  assert.equal((await reopened('/api/state')).drafts[0].status,'posted');
-});
-test('custom groups, bots, local reminders and unsupported AI execution',async()=>{
+test('custom groups, bots and unsupported AI execution',async()=>{
   const {request}=setup();
   const g=await request('/api/groups','POST',{name:'Insights',description:'Research notes'});assert.equal(g.name,'Insights');
   const b=await request(`/api/groups/${g.id}/bots`,'POST',{name:'Summarizer',instructions:'Summarize the input.'});
   assert.equal(b.name,'Summarizer');
   await assert.rejects(request('/api/bots/run','POST',{botId:b.id,input:'hello'}),/Node backend/);
-  const rem=await request('/api/schedules','POST',{label:'Check queue',kind:'interval',intervalMinutes:60});
-  assert.equal(rem.enabled,true);
-  await request(`/api/schedules/${rem.id}`,'DELETE');
-  const tasks=(await request('/api/state')).tasks;
-  assert.equal(tasks.length,1);
-  assert.equal(tasks[0].status,'cancelled','Removing a reminder cancels its structured task record.');
-});
-test('reject invalid input and impossible approval delays',async()=>{
-  const {request}=setup();
-  await assert.rejects(request('/api/candidates','POST',{url:'javascript:alert(1)',text:'an adequately long candidate'}),/valid public http/);
-  await assert.rejects(request('/api/candidates','POST',{url:'https://example.com',text:'short'}),/at least 12/);
-  await assert.rejects(request('/api/settings','PATCH',{topics:['AI'],minDelay:11,maxDelay:3}),/Invalid delay window/);
-});test('Pages resolves due drafts and reminders exactly like the Node scheduler',async()=>{
-  // src/scheduler.js records a `ready` event when a scheduled draft comes due and
-  // a `reminder` event when a schedule fires. The browser-local transport used to
-  // reimplement that logic inline and record neither, so the Pages Activity tab
-  // stayed empty while the Node build logged them.
-  const store=makeStorage();
-  const {request}=setup(store);
-  await request('/api/settings','PATCH',{minDelay:0,maxDelay:0});
-  const d=await seed(request);
-  await request(`/api/drafts/${d.id}/approve`,'POST',{});
-  const created=await request('/api/schedules','POST',{label:'Review the queue',kind:'once',nextAt:new Date(Date.now()+3600000).toISOString()});
-  // Rewrite both into the past, exactly as if the page had been left open.
-  const state=JSON.parse(store.map.get('agent-control-ghpages-v1'));
-  const draft=state.drafts.find(x=>x.id===d.id);
-  draft.dueAt=new Date(Date.now()-1000).toISOString();
-  const reminder=state.tasks.find(x=>x.id===created.id);
-  assert.ok(reminder,'A created reminder must persist as a structured task.');
-  reminder.runAt=new Date(Date.now()-1000).toISOString();
-  store.map.set('agent-control-ghpages-v1',JSON.stringify(state));
-  const after=await request('/api/state');
-  const resolved=after.drafts.find(x=>x.id===d.id);
-  const fired=after.tasks.find(x=>x.id===created.id);
-  assert.equal(resolved.status,'ready');
-  assert.equal(fired.status,'done','A one-off reminder must complete once it fires.');
-  assert.ok(after.events.some(e=>e.type==='ready'),'Pages must record the ready transition in the activity log.');
-  assert.ok(after.events.some(e=>e.type==='reminder'&&e.message==='Review the queue'),'Pages must record fired reminders in the activity log.');
 });
 test('a due scheduled task runs on Pages even when the group shows its plan first',async()=>{
   const store=makeStorage();
   const {request}=setup(store);
-  // Only the plan gate is sent. X-engage must stay tracked; writing the
-  // direct default here would never show a plan.
-  await request('/api/groups/x-engage','PATCH',{settings:{confirmPlan:true}});
-  const task=await request('/api/tasks','POST',{kind:'bot-task',payload:{groupId:'x-engage',botId:'handoff',message:'draft a reply',label:'Draft check',kind:'once',nextAt:new Date(Date.now()+3600000).toISOString()}});
+  // The plan gate only applies to a tracked group; the home group starts direct.
+  await request('/api/groups/home','PATCH',{settings:{confirmPlan:true,coordination:'tracked'}});
+  const task=await request('/api/tasks','POST',{kind:'bot-task',payload:{groupId:'home',botId:'atlas',message:'draft a reply',label:'Draft check',kind:'once',nextAt:new Date(Date.now()+3600000).toISOString()}});
   const saved=JSON.parse(store.map.get('agent-control-ghpages-v1'));
   saved.tasks.find(t=>t.id===task.id).runAt=new Date(Date.now()-1000).toISOString();
   store.map.set('agent-control-ghpages-v1',JSON.stringify(saved));
   const after=await request('/api/state');
-  const text=(after.chats?.handoff||[]).map(m=>m.text).join('\n');
+  const text=(after.chats?.atlas||[]).map(m=>m.text).join('\n');
   assert.match(text,/Scheduled task: draft a reply/);
   assert.match(text,/Passing this through/);
   assert.doesNotMatch(text,/Start it when you are ready/);
-  assert.equal(after.groups.find(g=>g.id==='x-engage').settings.coordination,'tracked');
-  assert.equal(after.groups.find(g=>g.id==='x-engage').settings.confirmPlan,true);
-  assert.ok((after.chats?.handoff||[]).some(m=>m.role==='bot'&&m.senderId),'A scheduled reply keeps the bot that wrote it.');
+  assert.equal(after.groups.find(g=>g.id==='home').settings.coordination,'tracked');
+  assert.equal(after.groups.find(g=>g.id==='home').settings.confirmPlan,true);
+  assert.ok((after.chats?.atlas||[]).some(m=>m.role==='bot'&&m.senderId),'A scheduled reply keeps the bot that wrote it.');
   assert.equal(after.tasks.find(t=>t.id===task.id).status,'done');
   const runs=after.groupRuns||[];
-  assert.ok(runs.some(r=>r.groupId==='x-engage'&&r.status==='completed'),'A scheduled task occupies the group, then frees it.');
-  assert.ok(runs.every(r=>r.groupId!=='x-engage'||!['running','queued','awaiting_plan','awaiting_browser','awaiting_feed','awaiting_checkpoint'].includes(r.status)));
+  assert.ok(runs.some(r=>r.groupId==='home'&&r.status==='completed'),'A scheduled task occupies the group, then frees it.');
+  assert.ok(runs.every(r=>r.groupId!=='home'||!['running','queued','awaiting_plan','awaiting_browser','awaiting_feed','awaiting_checkpoint'].includes(r.status)));
 });
 test('a due scheduled Pages task with checkpoints leaves the group paused',async()=>{
   const store=makeStorage();
   const {request}=setup(store);
-  await request('/api/groups/x-engage','PATCH',{settings:{checkpoints:true,coordination:'direct'}});
-  const task=await request('/api/tasks','POST',{kind:'bot-task',payload:{groupId:'x-engage',botId:null,message:'go',label:'All bots',kind:'once',nextAt:new Date(Date.now()+3600000).toISOString()}});
+  await addPeer(request);
+  await request('/api/groups/home','PATCH',{settings:{checkpoints:true,coordination:'direct'}});
+  const task=await request('/api/tasks','POST',{kind:'bot-task',payload:{groupId:'home',botId:null,message:'go',label:'All bots',kind:'once',nextAt:new Date(Date.now()+3600000).toISOString()}});
   const saved=JSON.parse(store.map.get('agent-control-ghpages-v1'));
   saved.tasks.find(t=>t.id===task.id).runAt=new Date(Date.now()-1000).toISOString();
   store.map.set('agent-control-ghpages-v1',JSON.stringify(saved));
   const after=await request('/api/state');
   const runs=after.groupRuns||[];
-  const paused=runs.find(r=>r.groupId==='x-engage');
+  const paused=runs.find(r=>r.groupId==='home');
   assert.equal(paused?.status,'awaiting_checkpoint');
   assert.equal(paused.checkpointsEnabled,true);
   assert.ok(paused.input);
@@ -130,14 +80,15 @@ test('the Pages engine answers the same run routes the server serves',async()=>{
   const store=makeStorage();
   const {request}=setup(store);
   // Pause the run so there is something a person can still stop.
-  await request('/api/groups/x-engage','PATCH',{settings:{checkpoints:true,coordination:'tracked'}});
-  const run=await request('/api/groups/x-engage/chat','POST',{message:'go',chatKey:'team-x-engage'});
+  await addPeer(request);
+  await request('/api/groups/home','PATCH',{settings:{checkpoints:true,coordination:'tracked'}});
+  const run=await request('/api/groups/home/chat','POST',{message:'go',chatKey:'team-home'});
   assert.ok(run.runId,'POST /chat returns a run id, like the server');
   assert.equal(run.status,'awaiting_checkpoint');
-  const log=await request('/api/groups/x-engage/chat');
+  const log=await request('/api/groups/home/chat');
   assert.ok(Array.isArray(log.messages)&&Array.isArray(log.runs),'GET /chat returns messages and runs');
   assert.ok(log.runs.some(r=>r.id===run.runId),'the run is read back from the workspace snapshot');
-  const cancelled=await request(`/api/groups/x-engage/runs/${run.runId}/cancel`,'POST',{});
+  const cancelled=await request(`/api/groups/home/runs/${run.runId}/cancel`,'POST',{});
   assert.equal(cancelled.status,'cancelled');
   assert.equal((await request('/api/state')).groupRuns.find(r=>r.id===run.runId).status,'cancelled','the cancel is stored, not only returned');
   const local=await readFile(path.join(root,'shared/local-api.js'),'utf8');
@@ -149,8 +100,8 @@ test('clearing a Pages chat cancels the run that was blocking the group',async()
   const store=makeStorage();
   const {request}=setup(store);
   const before=await request('/api/state');
-  store.map.set('agent-control-ghpages-v1',JSON.stringify({...before,groupRuns:[{id:'h',groupId:'x-engage',chatKey:'team-x-engage',status:'awaiting_plan',createdAt:new Date().toISOString()}]}));
-  await request('/api/chats/team-x-engage','DELETE');
+  store.map.set('agent-control-ghpages-v1',JSON.stringify({...before,groupRuns:[{id:'h',groupId:'home',chatKey:'team-home',status:'awaiting_plan',createdAt:new Date().toISOString()}]}));
+  await request('/api/chats/team-home','DELETE');
   const after=await request('/api/state');
   assert.equal(after.groupRuns.find(r=>r.id==='h').status,'cancelled');
 });
@@ -158,8 +109,8 @@ test('a due scheduled Pages task waits while a plan is already on screen',async(
   const store=makeStorage();
   const {request}=setup(store);
   const base=await request('/api/state');
-  store.map.set('agent-control-ghpages-v1',JSON.stringify({...base,groupRuns:[{id:'plan-1',groupId:'x-engage',status:'awaiting_plan',createdAt:new Date().toISOString()}]}));
-  const task=await request('/api/tasks','POST',{kind:'bot-task',payload:{groupId:'x-engage',botId:'handoff',message:'draft a reply',label:'Draft check',kind:'once',nextAt:new Date(Date.now()+3600000).toISOString()}});
+  store.map.set('agent-control-ghpages-v1',JSON.stringify({...base,groupRuns:[{id:'plan-1',groupId:'home',chatKey:'atlas',status:'awaiting_plan',createdAt:new Date().toISOString()}]}));
+  const task=await request('/api/tasks','POST',{kind:'bot-task',payload:{groupId:'home',botId:'atlas',message:'draft a reply',label:'Draft check',kind:'once',nextAt:new Date(Date.now()+3600000).toISOString()}});
   const saved=JSON.parse(store.map.get('agent-control-ghpages-v1'));
   saved.tasks.find(t=>t.id===task.id).runAt=new Date(Date.now()-1000).toISOString();
   store.map.set('agent-control-ghpages-v1',JSON.stringify(saved));
@@ -168,20 +119,20 @@ test('a due scheduled Pages task waits while a plan is already on screen',async(
   assert.equal(row.status,'queued');
   assert.match(row.lastError,/already active/i);
   assert.ok(Date.parse(row.runAt)>Date.now()-2000);
-  assert.doesNotMatch((after.chats?.handoff||[]).map(m=>m.text).join('\n'),/Scheduled task:/);
+  assert.doesNotMatch((after.chats?.atlas||[]).map(m=>m.text).join('\n'),/Scheduled task:/);
 });
 test('Pages due() does not re-enter and double-fire scheduled tasks',async()=>{
   const store=makeStorage();
   const {request}=setup(store);
-  const a=await request('/api/tasks','POST',{kind:'bot-task',payload:{groupId:'x-engage',botId:'handoff',message:'first',label:'A',kind:'once',nextAt:new Date(Date.now()+3600000).toISOString()}});
-  const b=await request('/api/tasks','POST',{kind:'bot-task',payload:{groupId:'x-engage',botId:'handoff',message:'second',label:'B',kind:'once',nextAt:new Date(Date.now()+3600000).toISOString()}});
+  const a=await request('/api/tasks','POST',{kind:'bot-task',payload:{groupId:'home',botId:'atlas',message:'first',label:'A',kind:'once',nextAt:new Date(Date.now()+3600000).toISOString()}});
+  const b=await request('/api/tasks','POST',{kind:'bot-task',payload:{groupId:'home',botId:'atlas',message:'second',label:'B',kind:'once',nextAt:new Date(Date.now()+3600000).toISOString()}});
   const saved=JSON.parse(store.map.get('agent-control-ghpages-v1'));
   for(const id of [a.id,b.id])saved.tasks.find(t=>t.id===id).runAt=new Date(Date.now()-1000).toISOString();
   store.map.set('agent-control-ghpages-v1',JSON.stringify(saved));
   const after=await request('/api/state');
   assert.equal(after.tasks.find(t=>t.id===a.id).status,'done');
   assert.equal(after.tasks.find(t=>t.id===b.id).status,'done');
-  const lines=(after.chats?.handoff||[]).map(m=>m.text);
+  const lines=(after.chats?.atlas||[]).map(m=>m.text);
   assert.equal(lines.filter(t=>t==='Scheduled task: first').length,1);
   assert.equal(lines.filter(t=>t==='Scheduled task: second').length,1);
 });
@@ -191,7 +142,7 @@ test('a scheduled Pages task that cannot run is failed, not stored as done',asyn
   const other=await request('/api/groups','POST',{name:'Other',description:'Guests'});
   const guest=await request(`/api/groups/${other.id}/bots`,'POST',{name:'Expert',instructions:'Help when asked.'});
   await request(`/api/groups/${other.id}/bots/${guest.id}`,'PATCH',{settings:{enabled:false,summonable:true}});
-  const task=await request('/api/tasks','POST',{kind:'bot-task',payload:{groupId:'x-engage',botId:'handoff',message:'@Expert draft a reply',label:'Ask expert',kind:'once',nextAt:new Date(Date.now()+3600000).toISOString()}});
+  const task=await request('/api/tasks','POST',{kind:'bot-task',payload:{groupId:'home',botId:'atlas',message:'@Expert draft a reply',label:'Ask expert',kind:'once',nextAt:new Date(Date.now()+3600000).toISOString()}});
   const saved=JSON.parse(store.map.get('agent-control-ghpages-v1'));
   saved.tasks.find(t=>t.id===task.id).runAt=new Date(Date.now()-1000).toISOString();
   store.map.set('agent-control-ghpages-v1',JSON.stringify(saved));
@@ -199,21 +150,9 @@ test('a scheduled Pages task that cannot run is failed, not stored as done',asyn
   const row=after.tasks.find(t=>t.id===task.id);
   assert.equal(row.status,'failed');
   assert.match(row.lastError,/switched off/i);
-  assert.match((after.chats?.handoff||[]).map(m=>m.text).join('\n'),/did not run/);
+  assert.match((after.chats?.atlas||[]).map(m=>m.text).join('\n'),/did not run/);
 });
 
-test('the Pages demo approves with the delay window the person picked',async()=>{
-  // The Approve button sends {minDelay,maxDelay}; the demo ignored the body and
-  // used the workspace default, so the choice a person made had no effect here
-  // while the Node build honoured it. The default window is 2-10 minutes.
-  const {request}=setup(makeStorage());
-  const d=await seed(request);
-  const before=Date.now();
-  const approved=await request(`/api/drafts/${d.id}/approve`,'POST',{minDelay:45,maxDelay:45});
-  assert.equal(approved.status,'scheduled');
-  const minutes=(Date.parse(approved.dueAt)-before)/60000;
-  assert.ok(minutes>=44&&minutes<=46,`the chosen 45 minute window sets the due time, got ${minutes} minutes`);
-});
 test('the Pages demo refuses a notification task exactly like the Node server',async()=>{
   // src/routes-workflow.js answers 403: a delivery task comes from a person's own
   // notification preferences, never from a request body.
@@ -223,4 +162,162 @@ test('the Pages demo refuses a notification task exactly like the Node server',a
   await assert.rejects(request('/api/tasks','POST',{kind:'notification',payload:{notificationId:'n1'}}),error=>error.status===403&&/server, not by request/.test(error.message));
   const after=await request('/api/state');
   assert.equal(after.tasks.length,0,'A refused delivery task is not stored either.');
+});
+
+test('the Pages backend has no X routes',async()=>{
+  const {request}=setup();
+  for(const [path,method] of [['/api/candidates','POST'],['/api/drafts/x/approve','POST'],['/api/demo/seed','POST'],['/api/schedules','POST'],['/api/settings','PATCH']])
+    await assert.rejects(request(path,method,{}),error=>error.status===404,`${method} ${path}`);
+});
+test('first Pages boot seeds the starting workspace',async()=>{
+  const {request}=setup();
+  const {initialState}=await import(path.join(root,'shared/core.js'));
+  const {migrate}=await import(path.join(root,'shared/workflow.js'));
+  await request('/api/reset-workspace','POST',{});
+  const s=await request('/api/state');
+  // Loading backfills bot contracts, so compare with the seed as it loads.
+  assert.deepEqual(s.groups,migrate(initialState()).groups);
+});
+
+test('Pages saves a retention policy the same way the server does',async()=>{
+  const {request}=setup();
+  const saved=await request('/api/retention','PATCH',{events:30,doneTasks:7,runs:14});
+  assert.deepEqual([saved.events,saved.doneTasks,saved.runs],[30,7,14]);
+  assert.equal((await request('/api/state')).settings.retention.events,30);
+});
+
+test('Pause all works in the demo: the same route and flag as the server',async()=>{
+  const {request}=setup();
+  assert.equal((await request('/api/state')).guard.paused,false,'a fresh demo is not paused and says so');
+  const on=await request('/api/guard','POST',{paused:true});
+  assert.equal(on.guard.paused,true);
+  assert.equal((await request('/api/state')).guard.paused,true,'the state carries the flag for the sidebar');
+  await assert.rejects(request('/api/guard','POST',{}),error=>error.status===400);
+  const off=await request('/api/guard','POST',{paused:false});
+  assert.deepEqual([off.guard.paused,off.resumed,off.cancelled],[false,0,0]);
+});
+
+test('the demo keeps memory per bot with a company notebook, over the same routes as the server',async()=>{
+  const {request}=setup();
+  const added=await request('/api/memory/rules','POST',{bot:'atlas',text:'Always keep replies short.'});
+  const id=added.rules[0].id;
+  await request('/api/memory/rules','POST',{bot:'company',text:'The company is called Northwind.'});
+  const view=await request('/api/memory?bot=atlas');
+  assert.deepEqual(view.bot.rules.map(rule=>rule.text),['Always keep replies short.']);
+  assert.deepEqual(view.company.rules.map(rule=>rule.text),['The company is called Northwind.']);
+  const edited=await request(`/api/memory/rules/${id}?bot=atlas`,'PATCH',{text:'Keep replies to one line.'});
+  assert.equal(edited.rule.text,'Keep replies to one line.');
+  assert.deepEqual(await request(`/api/memory/rules/${id}?bot=atlas`,'DELETE'),{ok:true,removed:1});
+  await assert.rejects(request('/api/memory/rules','POST',{text:'Whose rule?'}),error=>error.status===400);
+  assert.equal((await request('/api/memory?bot=atlas')).bot.rules.length,0);
+});
+
+/* ---- The Pages demo runs the company offline (Phase 2, Task 7) ---- */
+const chatText=state=>key=>(state.chats?.[key]||[]).map(m=>m.text).join('\n');
+const addPlanner=request=>request('/api/groups/home/bots','POST',{name:'Planner',instructions:'Plans the owner\'s week and books appointments.'});
+const botNamed=(state,name)=>state.groups.flatMap(g=>g.bots).find(b=>b.name===name);
+
+test('Pages creates a bot from a sentence',async()=>{
+  const {request}=setup();
+  const sent=await request('/api/groups/home/chat','POST',{message:'Make a bot that watches my inbox and drafts replies',directBotId:'atlas',chatKey:'atlas'});
+  assert.equal(sent.status,'completed');
+  const state=await request('/api/state');
+  const made=botNamed(state,'Inbox Watcher');
+  assert.ok(made,'a bot was made, named from the sentence');
+  assert.equal(made.settings.reportsTo,'atlas','it reports to its creator');
+  assert.deepEqual(made.permissions,[]);
+  assert.equal(made.origin,'bot');
+  const lines=state.chats.atlas;
+  assert.ok(lines.some(m=>m.kind==='bot-created'&&/created a new bot/.test(m.text)&&/Inbox/.test(m.text)),'the chat says so');
+  assert.doesNotMatch(chatText(state)('atlas'),/```create-bot/,'the block does not reach the chat');
+  const again=await request('/api/groups/home/chat','POST',{message:'Make a bot that watches my inbox and drafts replies',directBotId:'atlas',chatKey:'atlas'});
+  assert.equal(again.status,'completed');
+  assert.ok(botNamed(await request('/api/state'),'Inbox Watcher 2'),'a second one with the same job gets a number');
+});
+
+test('Pages Atlas greets, and answers work no bot fits itself, without making a bot',async()=>{
+  const {request}=setup();
+  await request('/api/groups/home/chat','POST',{message:'Hello there',directBotId:'atlas',chatKey:'atlas'});
+  await request('/api/groups/home/chat','POST',{message:'Quarterly tax paperwork due soon',directBotId:'atlas',chatKey:'atlas'});
+  const text=chatText(await request('/api/state'))('atlas');
+  assert.match(text,/Hello! I'm Atlas/);
+  assert.match(text,/I'll take this one myself: quarterly tax paperwork due soon\./);
+  assert.doesNotMatch(text,/created a new bot/);
+  assert.doesNotMatch(text,/make a bot for it/i);
+});
+
+test('Pages threads are run by Atlas, which hands work to the bot whose job it is',async()=>{
+  const {request}=setup();
+  await addPlanner(request);
+  await request('/api/groups/home/bots','POST',{name:'Scholar',instructions:'Checks facts and finds sources.'});
+  const started=await request('/api/threads','POST',{message:'Please book my dentist appointment'});
+  assert.equal(started.run.status,'completed');
+  const state=await request('/api/state');
+  const run=state.groupRuns.find(r=>r.id===started.run.runId);
+  const planner=botNamed(state,'Planner').id;
+  assert.deepEqual(run.recipients,['atlas',planner,'atlas'],'Atlas, the bot that owns the job, then Atlas again to report');
+  assert.equal(run.closeAt,2);
+  assert.deepEqual(state.groups.find(g=>g.id===started.thread.id).settings.members,[planner]);
+  const talk=chatText(state)(`team-${started.thread.id}`);
+  assert.match(talk,/I'll hand this to @Planner/);
+  assert.match(talk,/On it: Please book my dentist appointment/);
+  assert.match(talk,/That is everything back from the team\./);
+  assert.doesNotMatch(talk,/Done:/);
+  assert.equal(botNamed(state,'Scholar')&&run.recipients.includes(botNamed(state,'Scholar').id),false,'a bot whose job does not match is not woken');
+});
+
+test('a Pages bot says it is not its job in its own chat, and does it when told to',async()=>{
+  const {request}=setup();
+  const planner=await addPlanner(request);
+  await request('/api/groups/home/chat','POST',{message:'What is the capital of France',directBotId:planner.id,chatKey:planner.id});
+  let state=await request('/api/state');
+  const refusal=state.chats[planner.id].find(m=>m.kind==='offjob');
+  assert.ok(refusal,'the reply is the same out-of-job message the server writes');
+  assert.equal(refusal.request,'What is the capital of France');
+  assert.equal(refusal.botId,planner.id);
+  await request('/api/groups/home/chat','POST',{message:'What is the capital of France',directBotId:planner.id,chatKey:planner.id,anyway:true});
+  state=await request('/api/state');
+  assert.match(chatText(state)(planner.id),/On it: What is the capital of France/);
+  await request('/api/groups/home/chat','POST',{message:'Please book my dentist appointment',directBotId:planner.id,chatKey:planner.id});
+  state=await request('/api/state');
+  assert.equal(state.chats[planner.id].filter(m=>m.kind==='offjob').length,1,'its own job is not refused');
+});
+
+test('Pause all parks what bots start on Pages, and Keep going finishes it',async()=>{
+  const {request}=setup();
+  const planner=await addPlanner(request);
+  await request('/api/guard','POST',{paused:true});
+  const owner=await request('/api/groups/home/chat','POST',{message:'Hello there',directBotId:'atlas',chatKey:'atlas'});
+  assert.equal(owner.status,'completed','the owner\'s own chat keeps working');
+  const sent=await request('/api/groups/home/chat','POST',{message:'Please book my dentist appointment',directBotId:'atlas',chatKey:'atlas'});
+  assert.equal(sent.status,'awaiting_limit');
+  let state=await request('/api/state');
+  const run=state.groupRuns.find(r=>r.id===sent.runId);
+  assert.equal(run.limit.kind,'guard');
+  assert.ok(state.chats.atlas.some(m=>m.kind==='limit'&&m.runId===run.id));
+  assert.doesNotMatch(chatText(state)('atlas'),/On it: Please book/,'the hand-off has not run');
+  await assert.rejects(request(`/api/groups/home/runs/${run.id}/continue`,'POST',{choice:'more'}),error=>error.status===409,'it will not go on while bots are paused');
+  const resumed=await request('/api/guard','POST',{paused:false});
+  assert.equal(resumed.resumed,1);
+  state=await request('/api/state');
+  assert.equal(state.guard.paused,false);
+  assert.equal(state.groupRuns.find(r=>r.id===sent.runId).status,'completed');
+  assert.match(chatText(state)('atlas'),/On it: Please book my dentist appointment/);
+  await request('/api/guard','POST',{paused:true});
+  const second=await request('/api/groups/home/chat','POST',{message:'Please book my dentist appointment',directBotId:'atlas',chatKey:'atlas'});
+  const stopped=await request(`/api/groups/home/runs/${second.runId}/continue`,'POST',{choice:'stop'});
+  assert.equal(stopped.status,'cancelled');
+});
+
+test('a scheduled Pages task is skipped, with a line in its chat, while bots are paused',async()=>{
+  const store=makeStorage();
+  const {request}=setup(store);
+  await request('/api/guard','POST',{paused:true});
+  const task=await request('/api/tasks','POST',{kind:'bot-task',payload:{groupId:'home',botId:'atlas',message:'weekly check',label:'Weekly',kind:'once',nextAt:new Date(Date.now()+3600000).toISOString()}});
+  const saved=JSON.parse(store.map.get('agent-control-ghpages-v1'));
+  saved.tasks.find(t=>t.id===task.id).runAt=new Date(Date.now()-1000).toISOString();
+  store.map.set('agent-control-ghpages-v1',JSON.stringify(saved));
+  const after=await request('/api/state');
+  assert.match(chatText(after)('atlas'),/Scheduled task "Weekly" skipped: bots are paused/);
+  assert.equal((after.groupRuns||[]).some(r=>r.input==='weekly check'),false);
 });

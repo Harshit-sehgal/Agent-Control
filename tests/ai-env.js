@@ -21,3 +21,7 @@ const PROVIDER_VARS = [
 if (!process.env.PI_KEEP_AI_ENV) {
   for (const name of PROVIDER_VARS) delete process.env[name];
 }
+
+// A spawned test server would otherwise pair "This computer" and run a real agent (src/local-agent.js),
+// which opens a browser and polls in the background. A test that wants it sets LOCAL_AGENT itself.
+if (process.env.LOCAL_AGENT === undefined) process.env.LOCAL_AGENT = '0';

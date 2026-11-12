@@ -13,9 +13,12 @@ import {browserRuntime} from './browser-runtime.js';
 import {fail} from '../shared/errors.js';
 import {addChatMessages} from '../shared/chats.js';
 import {activity, cleanText} from '../shared/core.js';
-import {browserResultText, capturePageText, feedPageText, MAX_BROWSER_DEPTH} from '../shared/bot-browser.js';
+import {browserResultText, capturePageText, hostOf, MAX_BROWSER_DEPTH} from '../shared/bot-browser.js';
+import {logActivity} from '../shared/activity-log.js';
 
 const stamp = () => new Date().toISOString();
+/** The risky classes the owner cleared this request for; none for a request recorded before they were. */
+const approvedOf = request => (Array.isArray(request.approved) ? request.approved.filter(a => typeof a === 'string') : []);
 const say = (s, key, text) => { try { addChatMessages(s, key, [{role: 'system', kind: 'browser-result', text}], {trusted: true}); } catch { /* Conversation removed. */ } };
 
 /** How to hand a finished page back to the conversation. The modules that own
@@ -24,12 +27,20 @@ const say = (s, key, text) => { try { addChatMessages(s, key, [{role: 'system', 
 let resultHooks = {};
 export function setBrowserResultHooks(hooks) { resultHooks = {...resultHooks, ...hooks}; }
 
-/** The most recently seen agent that may run this kind, or null. */
+/** How long a page sent to a device may take before it is failed, so a run never waits on it forever. */
+export const BROWSER_WAIT_MS = 600000;
+const OFFLINE = 'Your computer\'s agent is offline. A server on your own computer restarts it within a few seconds; on another machine, start it there (`node agent/agent.mjs run`), then approve again.';
+/** Seen lately. A device paired a moment ago counts until its first beat lands. */
+const online = (row, nowMs = Date.now()) => Boolean(row?.last_seen_at || row?.paired_at) && Date.parse(row.last_seen_at || row.paired_at) > nowMs - agent.AGENT_ONLINE_MS;
+
+/** The most recently seen online agent that may run this kind; null when none may; throws when the ones that may are offline. */
 function pickAgent(store, kind) {
   if (typeof store.all !== 'function') return null;
-  const row = store.all('SELECT id,permissions FROM agents WHERE revoked_at IS NULL ORDER BY last_seen_at DESC')
-    .find(a => { try { return JSON.parse(a.permissions || '[]').includes(kind); } catch { return false; } });
-  return row?.id || null;
+  const may = store.all('SELECT id,permissions,last_seen_at,paired_at FROM agents WHERE revoked_at IS NULL ORDER BY last_seen_at DESC')
+    .filter(a => { try { return JSON.parse(a.permissions || '[]').includes(kind); } catch { return false; } });
+  const live = may.find(a => online(a));
+  if (may.length && !live) fail(OFFLINE, 409);
+  return live?.id || null;
 }
 
 /** Send a pending request to a local agent, or run it here. A request with no
@@ -41,20 +52,24 @@ export async function dispatchBrowserRequest(store, id, {actor = null, runtime =
   const here = runtime.mode !== 'agent' && runtime.available();
   const agentId = here ? null : pickAgent(store, request.kind);
   if (!here && !agentId) fail(`No paired local agent holds the ${request.kind} permission. ${runtime.mode === 'agent'
-    ? 'This install only runs browser requests on a paired device (BROWSER_RUNTIME=agent). Pair one under You → Local agents and grant it, then approve again.'
-    : 'Pair one under You → Local agents and grant it, or give this server a browser: set AGENT_BROWSER_ALLOWLIST=* for any public site (or name hosts) and install Chrome, or point AGENT_BROWSER_PATH at one. Then approve again.'}`, 409);
+    ? 'This install only runs browser requests on a paired device (BROWSER_RUNTIME=agent). Pair one in Settings → Local agents and grant it, then approve again.'
+    : 'A server started on your own computer connects this computer by itself; restart it, pair one in Settings → Local agents, or give this server a browser: set AGENT_BROWSER_ALLOWLIST=* for any public site (or name hosts) and install Chrome, or point AGENT_BROWSER_PATH at one. Then approve again.'}`, 409);
   // Claim pending before any agent task exists. A denial that commits first
   // stays denied, and the device is never asked to open the page.
   const claimed = await store.update(s => {
     const live = (s.browserRequests || []).find(r => r.id === id);
     if (!live || live.status !== 'pending') fail(live ? 'This browser request is no longer waiting.' : 'Browser request not found.', live ? 409 : 404);
     live.status = 'dispatched'; live.approvedBy = actor || 'auto'; live.via = here ? 'server' : 'agent'; live.updatedAt = stamp();
+    // Sending the page out is the moment it leaves the app. A page nobody opened (declined, stopped) is never logged.
+    const n = (live.steps || []).length;
+    logActivity(s, {botId: live.botId, kind: 'outside', text: `${live.botName} ${n ? 'used' : 'read'} ${hostOf(live.url) || live.url}${n ? ` (${n} step${n === 1 ? '' : 's'})` : ''}.`, threadId: live.chatKey});
     return live;
   });
   // The server has the browser: run it in the background, so the approve
   // request returns at once and the chat card fills in when the page is read.
   if (here) {
-    void runHere(store, claimed.id, runtime);
+    // Nothing awaits this, so nothing may escape it: an unhandled rejection ends the whole server.
+    void runHere(store, claimed.id, runtime).catch(error => console.error(`Browser request ${claimed.id} on this server:`, error.message));
     return claimed;
   }
   // `enqueueAgentTask` inserts its own row (auto-commit) from inside this document
@@ -68,9 +83,9 @@ export async function dispatchBrowserRequest(store, id, {actor = null, runtime =
       const current = (s.browserRequests || []).find(r => r.id === id);
       // A feed can still be denied after the claim and before this enqueue.
       if (!current || current.status !== 'dispatched') fail(current ? 'This browser request is no longer waiting.' : 'Browser request not found.', current ? 409 : 404);
-      const {task} = agent.enqueueAgentTask(store, agentId, {kind: request.kind, payload: {url: request.url, steps: request.steps}, idempotencyKey: `browser:${id}`, createdBy: actor || `bot:${request.botId}`});
+      const {task} = agent.enqueueAgentTask(store, agentId, {kind: request.kind, payload: {url: request.url, steps: request.steps, botId: request.botId}, approved: approvedOf(request), idempotencyKey: `browser:${id}`, createdBy: actor || `bot:${request.botId}`});
       taskId = task.id;
-      current.agentTaskIds = [task.id]; current.updatedAt = stamp();
+      current.agentTaskIds = [task.id]; current.notAfter = Date.now() + BROWSER_WAIT_MS; current.updatedAt = stamp();
       activity(s, 'agent', `Sent ${current.botName}'s browser request to a local agent.`, {requestId: id, taskId: task.id});
       return current;
     });
@@ -106,10 +121,13 @@ async function runHere(store, id, runtime) {
   const request = (store.read().browserRequests || []).find(r => r.id === id);
   if (!request) return;
   try {
-    const result = await runtime.run({url: request.url, steps: request.steps || []});
+    const result = await runtime.run({url: request.url, steps: request.steps || [], approved: approvedOf(request)});
     await finishBrowserRequest(store, request, {ok: true, result});
   } catch (error) {
-    await finishBrowserRequest(store, request, {ok: false, error: error.message});
+    // The write recording the page can be the thing that failed (a store refusing writes), so this
+    // second finish is guarded on its own; the request is then failed at the next restart.
+    try { await finishBrowserRequest(store, request, {ok: false, error: error.message}); }
+    catch (finishError) { console.error(`Browser request ${id} could not be finished:`, finishError.message); }
   }
 }
 
@@ -134,12 +152,21 @@ export function continueBrowserWork(store, spec, {runBot, runGroup}) {
   return runGroup(store, spec);
 }
 
+/** Which page this is, so a bot (or a teammate handed it later) knows it already read that address. */
+const pageHeading = (request, result) => {
+  const url = cleanText(result?.finalUrl || result?.url || request.url, 500), title = cleanText(result?.title, 200);
+  return `Page: ${url}${title ? `\nTitle: ${title}` : ''}${request.find ? `\nPassages holding: ${request.find}` : ''}\n\n`;
+};
+
 /** A browser request finished, here or on a device. Record the result, post the
  * chat line, and give the page back to the bot that asked for it. */
 export async function finishBrowserRequest(store, request, {ok, result = null, error = null}, hooks = resultHooks) {
-  const {continueRun, resumeFeed, resumeBrowser} = hooks || {};
-  const captured = ok ? capturePageText(result) : '';
-  const text = ok ? browserResultText(request, result) : `${request.botName}'s browser request failed: ${cleanText(error, 300) || 'the browser reported a failure.'}`;
+  const {continueRun, resumeBrowser} = hooks || {};
+  // The owner took the browser while it ran: the steps after that point were not run, and what comes
+  // back is the page as they left it. The chat and the bot are each told so.
+  const tookOver = ok && result?.tookOver === true;
+  const captured = ok ? `${tookOver ? 'The owner took over the browser while this ran, so the steps after that point were not run. This is the page as they left it.\n\n' : ''}${pageHeading(request, result)}${capturePageText(result, undefined, request.find || '', request.part || 1)}` : '';
+  const text = ok ? `${browserResultText(request, result)}${tookOver ? '\n\nYou took over the browser, so the steps after that point were not run. This is the page as you left it.' : ''}` : `${request.botName}'s browser request failed: ${cleanText(error, 300) || 'the browser reported a failure.'}`;
   const done = await store.update(s => {
     const live = (s.browserRequests || []).find(r => r.id === request.id);
     if (!live || ['done', 'failed', 'denied'].includes(live.status)) return null;
@@ -150,21 +177,6 @@ export async function finishBrowserRequest(store, request, {ok, result = null, e
   });
   // The continued turn is one round deeper; recordBrowserRequests refuses to
   // open another page once a chain reaches MAX_BROWSER_DEPTH.
-  // A home-feed read belongs to the run that asked for it. The other bots
-  // start only when the page comes back; a failure stops that run.
-  if (done?.purpose === 'feed') {
-    const page = feedPageText(result);
-    if (!resumeFeed) {
-      await store.update(s => say(s, done.chatKey, 'The feed result came back, but this run could not be resumed. Nothing else ran.'));
-      return done;
-    }
-    // `ok` is whether the browser finished. An empty page is still a finished
-    // read: the resume path then says to sign in, instead of claiming the
-    // feed was never opened.
-    try { await resumeFeed(store, done, {ok, text: page}); }
-    catch (error) { await store.update(s => say(s, done.chatKey, `The feed result could not continue the run: ${error.message}`)); }
-    return done;
-  }
   if (done?.runId) {
     if (!resumeBrowser) {
       await store.update(s => say(s, done.chatKey, 'The page came back, but this run could not be resumed.'));
@@ -202,22 +214,22 @@ export async function finishBrowserRequest(store, request, {ok, result = null, e
  * while the person is holding it, and the request can be taken over again. The
  * bot is resumed when the person hands the page back, with the page as they
  * left it. */
-export async function beginTakeover(store, requestId, {actor = null, runtime = browserRuntime} = {}) {
+export async function beginTakeover(store, requestId, {actor = null, workspaceId = null, runtime = browserRuntime} = {}) {
   const request = (store.read().browserRequests || []).find(r => r.id === requestId);
   if (!request) fail('Browser request not found.', 404);
   if (['done', 'failed', 'denied'].includes(request.status)) fail('That browser request has already finished.', 409);
   if (runtime.mode === 'agent' || !runtime.available()) fail(`No browser is available on this server to take over. ${runtime.mode === 'agent'
     ? 'This install only runs browser requests on a paired device (BROWSER_RUNTIME=agent).'
     : 'Set AGENT_BROWSER_ALLOWLIST (a host list, or * for any public site) and install Chrome, or point AGENT_BROWSER_PATH at one.'}`, 409);
-  const view = await runtime.beginLive({url: request.url, requestId: request.id, openedBy: actor});
+  const view = await runtime.beginLive({url: request.url, requestId: request.id, openedBy: actor, workspaceId});
   return {...view, requestId: request.id};
 }
 
 /** The person is done: hand the page they reached back to the bot that asked.
  * The context is disposed either way — a takeover is not a session the next
  * capture inherits. */
-export async function handBackTakeover(store, sessionId, {runtime = browserRuntime} = {}) {
-  const {requestId, page} = await runtime.endLive(sessionId);
+export async function handBackTakeover(store, sessionId, {workspaceId, runtime = browserRuntime} = {}) {
+  const {requestId, page} = await runtime.endLive(sessionId, {workspaceId});
   if (!requestId) return {handedBack: false, reason: 'That takeover was not opened for a bot request.', page};
   const request = (store.read().browserRequests || []).find(r => r.id === requestId);
   if (!request || ['done', 'failed', 'denied'].includes(request.status)) return {handedBack: false, reason: 'That browser request has already finished.', page};
@@ -225,14 +237,53 @@ export async function handBackTakeover(store, sessionId, {runtime = browserRunti
   const text = String(page?.text || '');
   const result = {
     url, finalUrl: url, title: page?.title || null,
-    excerpt: text.slice(0, 600), text: text.slice(0, 4000),
+    excerpt: text.slice(0, 600), text: text.slice(0, 60000),
     elements: Array.isArray(page?.elements) ? page.elements : [],
     elementCount: Number(page?.elementCount) || 0,
     blockedRequests: Number(page?.blockedRequests) || 0,
     engine: 'browser', capturedAt: stamp(),
   };
   const done = await finishBrowserRequest(store, request, {ok: true, result});
+  // The owner signed in and the bot was handed what they reached: that left the app too.
+  await store.update(s => logActivity(s, {botId: request.botId, kind: 'outside', text: `${request.botName} was handed ${hostOf(url) || url} after you signed in.`, threadId: request.chatKey}));
   return {handedBack: true, requestId, request: done, page};
+}
+
+/** Fail every page a device was sent and will not deliver: its computer has stopped being seen, or the
+ * page is past its deadline. The task is failed first, so a device that wakes later is not handed it, and
+ * the request then finishes like any failed page, which lets a run that waited on it carry on. Returns
+ * how many pages were failed. */
+export async function expireBrowserTasks(store, hooks = resultHooks, nowMs = Date.now()) {
+  if (typeof store.get !== 'function') return 0;
+  let expired = 0;
+  for (const request of (store.read().browserRequests || []).filter(r => r.status === 'dispatched' && r.via === 'agent')) {
+    for (const taskId of request.agentTaskIds || []) {
+      const task = store.get('SELECT agent_id,status FROM agent_tasks WHERE id=?', taskId);
+      if (!task || !['queued', 'running'].includes(task.status)) continue;
+      const device = store.get('SELECT last_seen_at,paired_at,revoked_at FROM agents WHERE id=?', task.agent_id);
+      const reason = !online(device, nowMs) ? 'Your computer went offline before it opened the page. Start the app on it again, then ask again.'
+        : Number.isFinite(request.notAfter) && nowMs > request.notAfter ? 'Your computer did not open the page in time.' : null;
+      if (!reason) continue;
+      agent.failAgentTasks(store, [taskId], reason);
+      if (await onAgentTaskResult(store, taskId, hooks)) expired++;
+    }
+  }
+  return expired;
+}
+
+/** Run `expireBrowserTasks` on a short cadence, so a page waits a bounded time even when no device beats. */
+export function startBrowserExpiry(ws, intervalMs = 30000) {
+  let busy = false, stopped = false;
+  const run = async () => {
+    if (busy || stopped) return;
+    busy = true;
+    try { await (ws.trackWork ? ws.trackWork(() => expireBrowserTasks(ws)) : expireBrowserTasks(ws)); }
+    catch (e) { if (e?.status !== 503) console.error('Browser expiry error:', e.message); }
+    finally { busy = false; }
+  };
+  void run();
+  const timer = setInterval(() => void run(), intervalMs); timer.unref();
+  return async () => { stopped = true; clearInterval(timer); if (busy) await new Promise(resolve => setTimeout(resolve, 50)); };
 }
 
 /** An agent reported on a task. A task that will retry changes nothing yet. */

@@ -209,7 +209,7 @@ test('the coordination refusals a person can cause answer 400 or 404, not 500', 
   assert.throws(() => assertGroup(null), error => error.status === 404);
   assert.throws(() => assertGroup({bots: []}), error => error.status === 400 && /Add a bot/.test(error.message));
   assert.throws(() => assertGroup({bots: [{id: 'a'}, {id: 'a'}]}), error => error.status === 400 && /unique/.test(error.message));
-  assert.throws(() => assertGroup({bots: Array.from({length: 101}, (_, i) => ({id: `b${i}`}))}), error => error.status === 400);
+  assert.throws(() => assertGroup({bots: Array.from({length: 501}, (_, i) => ({id: `b${i}`}))}), error => error.status === 400);
   assert.throws(() => planHandoffs({...group(), bots: []}, 'Handle this post'), error => error.status === 400);
   assert.throws(() => planHandoffs(group(), 'x'.repeat(4001)), error => error.status === 400 && /1–4000/.test(error.message));
   assert.throws(() => assertValidHandoff(group(), 'scout', 'scout'), error => error.status === 400 && /itself/.test(error.message));

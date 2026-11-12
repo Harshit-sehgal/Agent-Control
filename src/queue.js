@@ -15,7 +15,7 @@
  * one).
  */
 import * as tasks from '../shared/tasks.js';
-import {activity} from '../shared/core.js';
+import {peek} from './sqlite-store.js';
 
 export function createQueue(store, handlers = {}, {intervalMs = 2000, workerId, leaseMs = 60000, batch = 5, onFail = null} = {}) {
   const id = workerId || `worker-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
@@ -50,7 +50,7 @@ export function createQueue(store, handlers = {}, {intervalMs = 2000, workerId, 
         const until = Date.parse(task.leaseUntil || 0);
         return Number.isFinite(until) && until > now;
       };
-      const list = store.read().tasks || [];
+      const list = peek(store).tasks || [];
       const stalled = list.some(t => t.status === 'running' && !leaseHeld(t));
       const due = list.some(t => t.status === 'queued' && Date.parse(t.runAt) <= now && !leaseHeld(t));
       if (!stalled && !due) return;
@@ -180,8 +180,12 @@ export function createQueue(store, handlers = {}, {intervalMs = 2000, workerId, 
       }
       // Notify only after the retry policy reaches a terminal failure. A
       // transient provider error must not announce failure while requeued.
-      if (transition?.status === 'failed') {
-        try { if (onFail) await onFail(task, e); } catch (notifyError) { console.error('Failure notify error:', notifyError.message); }
+      // A recurring task re-arms instead of failing, so it never reaches that. Once it has re-armed with an
+      // error in NOTIFY_MISSED windows in a row, the owner is told the same way, once for that streak.
+      const missed = transition?.status === 'queued' ? Number(transition.payload?.[tasks.MISSED_WINDOWS]) : 0;
+      const told = missed === tasks.NOTIFY_MISSED ? Object.assign(new Error(`${e?.message || 'It failed.'} It has failed in ${missed} windows in a row and runs again at its next one.`), {cause: e}) : null;
+      if (transition?.status === 'failed' || told) {
+        try { if (onFail) await onFail(task, told || e); } catch (notifyError) { console.error('Failure notify error:', notifyError.message); }
       }
       return;
     }
@@ -216,15 +220,4 @@ export function recoverQueue(store) {
     const {recovered} = tasks.recoverStalledTasks(s);
     return recovered;
   });
-}
-
-/** Default handlers the server composes over. `reminder` needs no imports of
- * server modules; the server adds candidate/group/agent handlers itself. */
-export function defaultHandlers(store, notify = null) {
-  return {
-    reminder: task => store.update(s => {
-      activity(s, 'reminder', task.payload.label, {taskId: task.id});
-      if (notify) notify({kind: 'reminder', title: task.payload.label, body: 'A scheduled reminder fired.', taskId: task.id});
-    }),
-  };
 }

@@ -45,3 +45,8 @@ test('run-state stays pure, so the browser bundle can import it', async () => {
   assert.doesNotMatch(source, /^\s*import\b/m, 'no imports: shared/ modules may not reach Node or the server');
   assert.doesNotMatch(source, /process\.env/, 'no environment reads in a browser-safe module');
 });
+
+test('a run can no longer wait on the X feed', () => {
+  assert.equal(BUSY_STATUSES.includes('awaiting_feed'), false);
+  assert.equal(INTERRUPT_STATUSES.includes('awaiting_feed'), false);
+});

@@ -64,7 +64,7 @@ test('a request carries an abort timeout where the browser has one', async () =>
   assert.equal(calls[0].options.signal.abortedAfter, 20000);
 });
 
-// ---- ui-store: what a chat change resets -------------------------------------
+// ---- browser globals for the modules below -----------------------------------
 
 const META = {agentBackend: 'server'};
 globalThis.localStorage = {getItem: () => null, setItem() {}, removeItem() {}};
@@ -78,31 +78,6 @@ globalThis.location = {hash: ''};
 globalThis.history = {replaceState() {}, pushState() {}};
 globalThis.window = globalThis;
 globalThis.matchMedia = () => ({matches: false, addEventListener() {}});
-
-const {store, go, resetChatState} = await import('../shared/ui-store.js');
-
-test('leaving a chat clears its draft, its open sources and its post search', () => {
-  store.route = {chat: 'team-a', page: null, info: 'home'};
-  store.editDraft = 'd1'; store.editText = 'half written'; store.postQuery = 'launch';
-  store.openEvidence.add('ev1');
-  go({chat: 'team-b'});
-  assert.equal(store.editDraft, null);
-  assert.equal(store.editText, null);
-  assert.equal(store.postQuery, '', 'a Posts search must not follow the reader into another chat');
-  assert.equal(store.openEvidence.size, 0);
-});
-
-test('opening a panel in the same chat keeps the draft and the search', () => {
-  store.route = {chat: 'team-a', page: null, info: null};
-  store.editDraft = 'd1'; store.editText = 'half written'; store.postQuery = 'launch';
-  store.openEvidence.add('ev1');
-  go({chat: 'team-a', info: 'home'});
-  assert.equal(store.editDraft, 'd1');
-  assert.equal(store.editText, 'half written');
-  assert.equal(store.postQuery, 'launch');
-  assert.ok(store.openEvidence.has('ev1'));
-  resetChatState();
-});
 
 // ---- ui-push: a reply without the endpoint list ------------------------------
 
@@ -121,17 +96,20 @@ test('a push status reply with no endpoint list reads as no devices', async () =
 
 // ---- markup, guards and CSS that only a browser would notice -----------------
 
-const [appJs, views, actions, css, indexHtml, panel] = await Promise.all(['app.js', 'ui-views.js', 'ui-actions.js', 'app.css', 'index.html', 'ui-panel.js'].map(shared));
+const [appJs, conversation, actions, css, indexHtml] = await Promise.all(['app.js', 'ui-conversation.js', 'ui-actions.js', 'app.css', 'index.html'].map(shared));
 
-test('the details button announces what it opens', () => {
-  assert.match(views, /class="thread-title" data-action="open-info" aria-expanded="\$\{Boolean\(store\.route\.info\)\}" aria-controls="inspector"/);
-  assert.match(indexHtml, /id="inspector"/, 'aria-controls must name the panel that actually exists');
+test('a chat header names its own back button and the profile it opens', () => {
+  // The shell replaced the details button and the inspector panel: the header's
+  // face opens the bot's profile, and the back button names where it goes.
+  assert.match(conversation, /data-action="open-profile" data-id="\$\{esc\(bot\.id\)\}"[^>]*aria-label="\$\{esc\(bot\.name\)\}'s profile"/);
+  assert.match(conversation, /data-action="back-to-list" aria-label="Back to \$\{label\}"/);
+  assert.doesNotMatch(indexHtml, /id="inspector"/, 'the inspector panel is gone with the old info routes');
 });
 
 test('a chat that no longer exists falls back to the list instead of a blank thread', () => {
-  // renderThread bails out when conversation() is null; without this the main
-  // pane kept the previous chat's markup under a route for a deleted one.
-  assert.match(appJs, /if \(chat && !conversation\(\)\) return go\(\{\}, \{replace: true\}\)/);
+  // renderConversation bails out when conversation() is null; without this the
+  // main pane kept the previous chat's markup under a route for a deleted one.
+  assert.match(appJs, /if \(\(route\.bot \|\| route\.thread\) && !conversation\(\)\) return go\(\{\}, \{replace: true\}\)/);
 });
 
 test('one press of an action sends one request, even across a repaint', () => {
@@ -151,30 +129,18 @@ test('a theme change repaints without losing focus', () => {
   assert.match(appJs, /FOCUS_KEYS = \[[^\]]*'theme'/);
 });
 
-test('a bot removed in another tab says so instead of crashing', () => {
-  assert.match(actions, /if \(!group\) throw new Error\('That bot is no longer in a group\.'\)/);
+test('a bot removed in another tab says so instead of crashing', async () => {
+  assert.match(await shared('ui-profile.js'), /if \(!group\) throw new Error\('That bot is no longer in the company\.'\)/);
 });
 
-test('a landing chip asks the group it belongs to', () => {
-  assert.match(actions, /'home-ask': b => startGroupChat\(b\.dataset\.text, b\.dataset\.id\)/);
-  assert.match(actions, /const group = \(groupId \? findGroup\(groupId\) : null\) \|\| groups\(\)\[0\]/);
-  assert.match(views, /function homePrompts\(group\)/);
-  assert.match(views, /data-action="home-ask" data-id="\$\{esc\(group\?\.id \|\| ''\)\}"/);
+test('a starter chip on the new thread page starts a thread, not a group message', () => {
+  assert.match(conversation, /'quick-thread': b => startThread\(b\.dataset\.text\)/);
+  assert.match(conversation, /data-action="quick-thread" data-text="\$\{esc\(text\)\}"/);
 });
 
-test('a control is offered to the role the route behind it accepts', () => {
-  // Replacing the capture token is admin-only at the route, and `canWrite()`
-  // includes members: a member saw the row, confirmed a consequence ("every
-  // browser needs the new one") that would not happen, and got a 403.
-  assert.match(panel, /isAdmin\(\) \? row\(\{title: 'Replace capture token'/);
-  assert.doesNotMatch(panel, /canWrite\(\) \? row\(\{title: 'Replace capture token'/);
-});
-
-test('long titles wrap instead of overflowing, and dead hover rules stay deleted', () => {
-  assert.match(css, /\.hero h2\{margin-top:8px;font-size:22px;font-weight:700;overflow-wrap:anywhere\}/);
+test('long titles wrap instead of overflowing, and the retired list and thread rules stay deleted', async () => {
+  assert.match(await shared('profile.css'), /\.pr-hero h1\{[^}]*overflow-wrap:anywhere/);
   assert.match(css, /\.row-title\{font-size:15px;overflow-wrap:anywhere\}/);
-  // `.chat-row:hover{background:var(--surface)}` was always overridden by the
-  // `:not(.current)` rule below it, and `.home-mark` had no markup left at all.
-  assert.doesNotMatch(css, /\.chat-row:hover\{/);
-  assert.doesNotMatch(css, /\.home-mark\{/);
+  // The old frame, chat list, thread and avatar rules went with the shell rebuild.
+  assert.doesNotMatch(css, /\.chat-row|\.thread-head|\.pane-|\.avatar|\.hero\b|\.home-mark/);
 });

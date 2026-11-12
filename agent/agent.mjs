@@ -13,20 +13,34 @@
  * a hash of the body, and the server rejects replays and stale clocks.
  *
  * The agent executes only the task kinds its server-side permissions allow.
+ * "model.run" runs the owner's own `claude` or `codex` CLI (agent/cli-model.mjs),
+ * signed in on this machine, so a bot can use their subscription. The app never
+ * sees that login.
+ * "mcp.call" starts a stdio MCP server named in this machine's config (`mcpServers`, see agent/mcp-stdio.mjs)
+ * and lists its tools or calls one. A task names the server; it never carries a command.
  * "browser.capture" reads a page on a host the operator explicitly allowlists
  * (AGENT_BROWSER_ALLOWLIST). By default that is a plain HTTP read. With
  * AGENT_BROWSER=1 the page is opened in the Chrome, Chromium or Edge installed
- * on this device (see agent/browser.mjs). "browser.action" may click, type,
- * scroll and read there, except on X and Twitter, where click and type stay
- * refused. Posting is never this process's job.
+ * on this device (see agent/browser.mjs), in one browser that every bot shares
+ * and that keeps its sign-ins in `browser-profile` next to this config
+ * (agent/shared-browser.mjs): each bot has its own tab, one bot drives at a
+ * time. "browser.action" may click, type, scroll and read there; a click on a
+ * Send, Post, Delete or Pay control runs only when the owner allowed it.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import crypto from 'node:crypto';
-import {captureWithBrowser, ACTION_OPS, MAX_ACTIONS} from './browser.mjs';
+import {createSharedBrowser, browserProfileDir, runBrowserTask} from './shared-browser.mjs';
+import {createLiveChannel} from './live-channel.mjs';
+import {runModelTask} from './cli-model.mjs';
+import {cliStatusReporter} from './cli-status.mjs';
+import {runMcpTask} from './mcp-stdio.mjs';
+import {reportResult, skipExpired} from './report-result.mjs';
 import {hostAllowed, hostOf, parseAllowlist} from '../shared/bot-browser.js';
 import {resolvePublicAddress, pinnedRequest} from './net-guard.mjs';
+import {findBrowser} from './browser.mjs';
+import {readableHtml, turnedAway, preferRead, PLAIN_AGENT} from './page-fetch.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG = process.env.AGENT_CONFIG ? path.resolve(process.env.AGENT_CONFIG) : path.join(HERE, 'agent.config.json');
@@ -34,7 +48,7 @@ const CONFIG = process.env.AGENT_CONFIG ? path.resolve(process.env.AGENT_CONFIG)
 // does not narrow the list, is the only way to receive the admin's full scope:
 // the server intersects the request with the code and treats an empty list as
 // "grant nothing".
-const TASK_KINDS = ['http.check', 'browser.capture', 'browser.action'];
+const TASK_KINDS = ['http.check', 'browser.capture', 'browser.action', 'model.run', 'mcp.call'];
 // `Number('15s')` is NaN, `Number('')` is 0, and `Math.max(2000, NaN)` is NaN,
 // which `setTimeout` turns into a 1 ms loop: an unpaced heartbeat storm. A value
 // that is not a positive number is the default, not a spin.
@@ -66,14 +80,17 @@ function sign(secret, {method, requestPath, timestamp, body}) {
 /** One outbound POST. Redirects are not followed: a 307 from the control plane
  * would otherwise deliver the body (a pairing code, or a signed poll) to
  * whatever host the Location names, including a metadata address. */
-async function post(url, {headers, body, timeoutMs = TIMEOUT_MS} = {}) {
+async function post(url, {headers, body, timeoutMs = TIMEOUT_MS, signal} = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  // A caller's own signal (the live view stopping) ends the request too.
+  signal?.addEventListener('abort', () => controller.abort(), {once: true});
   try {
     const res = await fetch(url, {method: 'POST', headers, body, signal: controller.signal, redirect: 'manual'});
     if (res.status >= 300 && res.status < 400) throw new Error(`Refusing to follow a redirect (${res.status}) from ${new URL(url).host}.`);
     return res;
   } catch (e) {
+    if (e.name === 'AbortError' && signal?.aborted) throw e;
     if (e.name === 'AbortError') throw new Error(`request to ${new URL(url).host} timed out after ${timeoutMs / 1000}s`);
     throw e;
   } finally { clearTimeout(timer); }
@@ -81,12 +98,12 @@ async function post(url, {headers, body, timeoutMs = TIMEOUT_MS} = {}) {
 
 /** Outbound-only signed request. Returns parsed JSON or throws with the
  * server's message; never retries silently on 4xx. */
-async function call(config, requestPath, body = null) {
+async function call(config, requestPath, body = null, {timeoutMs, signal} = {}) {
   const url = new URL(config.server.replace(/\/+$/, '') + requestPath);
   const raw = body === null ? '' : JSON.stringify(body);
   const timestamp = Date.now();
   const headers = {'Content-Type': 'application/json', 'X-Agent-Id': config.agentId, 'X-Agent-Ts': String(timestamp), 'X-Agent-Sig': sign(config.secret, {method: 'POST', requestPath, timestamp, body: raw})};
-  const res = await post(url, {headers, body: body === null ? undefined : raw});
+  const res = await post(url, {headers, body: body === null ? undefined : raw, ...(timeoutMs ? {timeoutMs} : {}), signal});
   const text = await res.text();
   let value = null;
   try { value = text ? JSON.parse(text) : null; } catch {}
@@ -126,6 +143,10 @@ function argValue(argv, flag) {
   return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : null;
 }
 
+/** The browser every bot shares, started on first use and kept between tasks. */
+let sharedBrowser = null;
+const shared = () => sharedBrowser ??= createSharedBrowser({allow: () => parseAllowlist(process.env.AGENT_BROWSER_ALLOWLIST), profile: browserProfileDir(process.env, CONFIG)});
+
 /** Local, permission-gated execution. Returns a JSON-serializable result. */
 async function execute(task, config) {
   if (!(config.permissions || []).includes(task.kind)) {
@@ -148,30 +169,41 @@ async function execute(task, config) {
     if (!hostAllowed(target, allow)) {
       throw new Error(`Refusing to read ${hostOf(target) || target}: it is not in AGENT_BROWSER_ALLOWLIST. Only explicitly allowed pages are read.`);
     }
-    if (process.env.AGENT_BROWSER === '1') return captureWithBrowser(target, {allow});
-    // The fetch fallback must not become a second way onto the local network: it
-    // is vetted like http.check and pinned to the vetted address, and redirects
-    // are reported rather than followed.
-    const {address} = await resolvePublicAddress(target);
-    const res = await pinnedRequest(target, {address, timeoutMs: 15000, maxBytes: 200000});
-    const html = res.body.slice(0, 200000);
-    const title = /<title[^>]*>([^<]*)<\/title>/i.exec(html)?.[1]?.trim() || null;
-    const excerpt = html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 600);
-    return {url: target, httpStatus: res.status, title, excerpt, capturedAt: new Date().toISOString()};
+    // A real browser when this computer has one. Without Chrome, Chromium or Edge the page is still read, by a plain fetch.
+    if (process.env.AGENT_BROWSER === '1' && findBrowser()) {
+      const seen = await runBrowserTask(task, {shared: shared(), allow});
+      // A site that turns the headless browser away (Wikimedia's "Too many requests") is read once more by a
+      // plain request that names itself; a plain read only reads, so a page with steps keeps the browser's answer.
+      // A page that came back nearly empty (drawn by scripts the browser did not finish) is read plainly too.
+      if (!task.payload?.steps?.length && (turnedAway(seen) || String(seen?.text || '').trim().length < 300)) {
+        const plain = await readPlain(target).catch(() => null);
+        if (plain?.text && (turnedAway(seen) ? !turnedAway(plain) : preferRead(seen, plain) === plain)) return {...plain, readBy: 'plain'};
+      }
+      return seen;
+    }
+    return readPlain(target);
   }
-  if (task.kind === 'browser.action') {
-    const target = String(task.payload?.url || '');
-    const allow = parseAllowlist(process.env.AGENT_BROWSER_ALLOWLIST);
-    if (!hostAllowed(target, allow)) throw new Error(`Refusing to act on ${hostOf(target) || target}: it is not in AGENT_BROWSER_ALLOWLIST. Only explicitly allowed pages are driven.`);
-    const steps = Array.isArray(task.payload?.steps) ? task.payload.steps.slice(0, MAX_ACTIONS) : [];
-    if (!steps.length) throw new Error('browser.action needs at least one step.');
-    const bad = steps.find(step => !step || !ACTION_OPS.includes(step.op));
-    if (bad) throw new Error(`Unsupported action "${String(bad?.op)}". Allowed: ${ACTION_OPS.join(', ')}.`);
-    // Interaction needs the real browser; the fetch fallback cannot click or type.
-    if (process.env.AGENT_BROWSER !== '1') throw new Error('browser.action needs a real browser: set AGENT_BROWSER=1 on this device.');
-    return captureWithBrowser(target, {allow, steps});
+  if (task.kind === 'browser.action') return runBrowserTask(task, {shared: shared(), allow: parseAllowlist(process.env.AGENT_BROWSER_ALLOWLIST)});
+  if (task.kind === 'model.run') {
+    // Runs the owner's own signed-in `claude` or `codex` CLI. A failure the CLI
+    // reports (not signed in, a usage limit) is an answer, not an agent error, so
+    // it is reported as a finished task and the server shows it in the chat.
+    return runModelTask(task.payload);
   }
+  // A stdio MCP server named in this machine's config (`mcpServers`); the task never carries a command.
+  if (task.kind === 'mcp.call') return runMcpTask(task.payload, config.mcpServers);
   throw new Error(`Unknown task kind "${task.kind}".`);
+}
+
+/** Read a page without a browser: vetted like http.check and pinned to the vetted address (so it is never a way
+ * onto the local network), redirects reported rather than followed, and named honestly (PLAIN_AGENT). */
+async function readPlain(target) {
+  const {address} = await resolvePublicAddress(target);
+  const res = await pinnedRequest(target, {address, timeoutMs: 15000, maxBytes: 2_000_000, headers: {'user-agent': PLAIN_AGENT, accept: 'text/html,*/*;q=0.8', 'accept-encoding': 'gzip, deflate, br'}});
+  const page = readableHtml(res.body, target);
+  const moved = res.status >= 300 && res.status < 400 && res.headers?.location;
+  return {url: target, finalUrl: target, httpStatus: res.status, title: page.title, excerpt: page.text.slice(0, 600), text: moved ? `This page moved to ${new URL(res.headers.location, target).href}. Open that address instead.` : page.text,
+    links: page.links, elements: [], elementCount: 0, engine: 'fetch', capturedAt: new Date().toISOString()};
 }
 
 let stopping = false;
@@ -200,7 +232,26 @@ async function run() {
   };
   process.on('SIGINT', () => stop('SIGINT'));
   process.on('SIGTERM', () => stop('SIGTERM'));
+  // Started by the server (src/local-agent.js): when that server is gone, even killed without a drain,
+  // this agent stops too instead of polling a port nobody answers.
+  const parent = Number(process.env.AGENT_PARENT_PID);
+  if (Number.isInteger(parent) && parent > 1) {
+    const watch = setInterval(() => { try { process.kill(parent, 0); } catch { clearInterval(watch); stop('server gone'); } }, 5000);
+    watch.unref();
+  }
 
+  const cliStatus = cliStatusReporter();
+  // The owner's live view of the shared browser: only on a device that runs the
+  // real browser and may use it. Started once, the first time that is true.
+  let live = null;
+  const startLive = () => {
+    if (live || process.env.AGENT_BROWSER !== '1' || !['browser.capture', 'browser.action'].some(kind => (config.permissions || []).includes(kind))) return;
+    // A task queued on the server answers the live poll at once; ending the sleep
+    // between heartbeats picks it up now instead of up to a poll interval later.
+    live = createLiveChannel({call: (requestPath, body, options) => call(config, requestPath, body, options), shared: shared(), onTasks: () => wake?.()});
+    live.start();
+  };
+  startLive();
   // Tasks handed over by a heartbeat that arrived while a task was executing.
   const inbox = new Map();
   let busy = false;
@@ -210,9 +261,12 @@ async function run() {
    * the same millisecond would otherwise be identical bytes, which the server
    * rejects as a replayed signature. */
   const heartbeat = async () => {
-    const beat = await call(config, '/api/agent/heartbeat', {version: '1', os: process.platform, node: process.version, beat: ++beatSeq, at: Date.now()});
+    // Whether the owner's CLIs are signed in, from their own status commands (cached
+    // ten minutes, no model call). Only a device allowed to run models looks.
+    const cli = (config.permissions || []).includes('model.run') ? cliStatus.snapshot() : undefined;
+    const beat = await call(config, '/api/agent/heartbeat', {version: '1', os: process.platform, node: process.version, beat: ++beatSeq, at: Date.now(), ...(cli ? {cli} : {})});
     config.lastSeenAt = new Date().toISOString();
-    if (Array.isArray(beat.agent?.permissions)) config.permissions = beat.agent.permissions;
+    if (Array.isArray(beat.agent?.permissions)) { config.permissions = beat.agent.permissions; startLive(); }
     for (const task of beat.tasks || []) if (task && task.id && !inbox.has(task.id)) inbox.set(task.id, task);
   };
 
@@ -233,17 +287,14 @@ async function run() {
    * the task was claimed with so the server can tell this run's outcome from a
    * later attempt's if the lease lapsed meanwhile. */
   const runTask = async task => {
+    if (await skipExpired(call, config, task)) return;
     console.log(`agent: running ${task.kind} ${task.id}`);
     try {
       const result = await execute(task, config);
-      // Reporting is separate from executing: a refused report (409, a superseded
-      // attempt) is not a local failure and must not be re-reported as one.
-      try {
-        await call(config, `/api/agent/tasks/${task.id}/result`, {status: 'done', result, attempts: task.attempts});
-        console.log(`agent: ${task.kind} ${task.id} done`);
-      } catch (error) {
-        console.error(`agent: ${task.kind} ${task.id} result was refused: ${error.message}`);
-      }
+      // A model run that found the CLI signed out or missing: look again soon, the owner is about to fix it.
+      if (task.kind === 'model.run' && result?.ok === false && ['not-signed-in', 'cli-missing'].includes(result.code)) cliStatus.invalidate();
+      // Reporting is separate from executing (see report-result.mjs).
+      await reportResult(call, config, task, result);
     } catch (e) {
       console.error(`agent: ${task.kind} ${task.id} failed: ${e.message}`);
       await call(config, `/api/agent/tasks/${task.id}/result`, {status: 'failed', error: e.message, attempts: task.attempts}).catch(() => {});
@@ -283,7 +334,7 @@ async function run() {
       if (stopping) break;
       await sleep(wait);
     }
-  } finally { clearInterval(keepalive); console.log('agent: stopped.'); }
+  } finally { clearInterval(keepalive); await live?.stop(); await sharedBrowser?.close(); console.log('agent: stopped.'); }
 }
 
 function status() {

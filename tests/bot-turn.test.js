@@ -76,10 +76,9 @@ test('no group means the new-bot block is skipped, not silently applied', async 
   });
   assert.equal(turn.created.length, 0, 'a create-bot block with no group creates nothing');
   assert.equal(state.groups[0].bots.length, 2, 'the workspace is untouched');
-  // With nowhere to put the bot the fence is not read, so it stays as plain
-  // text. That is the pre-existing behaviour of the 1:1 path; this only pins it
-  // so the two callers cannot start disagreeing about it by accident.
-  assert.match(turn.output, /create-bot/);
+  // With nowhere to put the bot the block is dropped and the chat says why, rather than showing the raw fence.
+  assert.equal(turn.output, 'Plain reply.');
+  assert.match(turn.lines.at(-1).text, /no team to add it to/);
 });
 
 test('the round budgets are honoured, so a resumed step does not repeat a block', async () => {
@@ -109,12 +108,51 @@ test('the output always survives a refused block, so a person is never left with
   const turn = await runBotTurn(plainStore(state), {
     bot: plain,
     envelope: {task: 'Say something.'},
-    executor: async () => `An answer.\n${block('create-bot', {name: 'Nope', job: 'No permission.'})}`,
+    executor: async () => `An answer.\n${block('create-bot', {name: 'Nope', job: 'Too short.'})}`,
     config: {},
     peers: [plain, researcher],
     groupId: 'g1',
   });
   assert.equal(turn.output, 'An answer.');
   assert.equal(turn.created.length, 0);
-  assert.match(turn.lines.map(l => l.text).join(' '), /does not hold the bot\.create permission/);
+  assert.match(turn.lines.map(l => l.text).join(' '), /the request was refused/);
+});
+
+test('a setup card is a follow-up: it comes after the reply, not before it', async () => {
+  const state = {events: [], groups: [{id: 'g1', name: 'Team', bots: [writer, researcher]}], ai: {providers: [{id: 'p1', label: 'My Claude', kind: 'local-cli', engine: 'claude'}]}};
+  const turn = await runBotTurn(plainStore(state), {
+    bot: writer, envelope: {task: 'Put Researcher on haiku.'}, config: {}, peers: [writer, researcher], groupId: 'g1',
+    executor: async () => `Done.\n${block('setup', {action: 'model', bot: 'Researcher', provider: 'My Claude', model: 'haiku'})}`,
+  });
+  assert.equal(turn.output, 'Done.');
+  assert.deepEqual(turn.lines, [], 'nothing happened before the reply');
+  assert.deepEqual(turn.after.map(l => l.kind), ['setup']);
+});
+
+test('a setup block that cannot be used goes back to the bot once, so it fixes it or says so', async () => {
+  const atlas = {id: 'atlas', name: 'Atlas', type: 'custom', instructions: 'Run things', settings: {lead: true}, permissions: []};
+  const state = {events: [], groups: [{id: 'home', name: 'Home', bots: [atlas]}]};
+  const prompts = [];
+  const executor = async (who, prompt) => {
+    const turn = JSON.parse(prompt);
+    prompts.push(turn);
+    if (!turn.setupProblem) return `I proposed it.\n${block('setup', {action: 'basics', ask: 'always'})}`;
+    return `Every bot will ask you first once you tap Apply.\n${block('setup', {action: 'basics', ask: true})}`;
+  };
+  const turn = await runBotTurn(plainStore(state), {bot: atlas, envelope: {task: 'Ask me before any site.'}, executor, config: {}, peers: [atlas], groupId: 'home'});
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[1].setupProblem, /"ask": true/);
+  assert.equal(turn.output, 'Every bot will ask you first once you tap Apply.');
+  assert.equal(turn.after.length, 1);
+  assert.equal(JSON.parse(turn.after[0].setup).ask, true);
+});
+
+test('a setup block still wrong after the second try is reported, and the bot is not asked a third time', async () => {
+  const atlas = {id: 'atlas', name: 'Atlas', type: 'custom', instructions: 'Run things', settings: {lead: true}, permissions: []};
+  const state = {events: [], groups: [{id: 'home', name: 'Home', bots: [atlas]}]};
+  let calls = 0;
+  const executor = async () => { calls++; return `Done.\n${block('setup', {action: 'remove', bot: 'Nobody'})}`; };
+  const turn = await runBotTurn(plainStore(state), {bot: atlas, envelope: {task: 'Remove Nobody.'}, executor, config: {}, peers: [atlas], groupId: 'home'});
+  assert.equal(calls, 2);
+  assert.match(turn.after[0].text, /could not set that up/);
 });

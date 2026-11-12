@@ -12,7 +12,6 @@
 import fs from 'node:fs/promises';
 import {SqliteStore} from './sqlite-store.js';
 import {DEFAULT_WORKSPACE} from './auth.js';
-import {timingEqual} from './http.js';
 import {markInterrupted} from './coordination.js';
 
 const ID = /^[a-z0-9-]{1,64}$/;
@@ -120,7 +119,13 @@ export async function openWorkspaces(primary, auth, start) {
     for (const suffix of ['', '-wal', '-shm']) await fs.rm(file + suffix, {force: true});
   }
   await add(DEFAULT_WORKSPACE, primary);
-  for (const id of auth.workspaceIds()) if (id !== DEFAULT_WORKSPACE) await load(id);
+  // One workspace whose database will not open (a damaged file, a full disk) must not keep every other one,
+  // and the server, from starting. It is logged and left closed; its requests answer as a missing workspace.
+  for (const id of auth.workspaceIds()) {
+    if (id === DEFAULT_WORKSPACE) continue;
+    try { await load(id); }
+    catch (error) { console.error(`Workspace ${id} could not be opened and was skipped:`, error.message); }
+  }
 
   return {
     get: id => open.get(id)?.store || null,
@@ -217,13 +222,6 @@ export async function openWorkspaces(primary, auth, start) {
       });
     },
     async stop() { await Promise.all([...open.values()].map(entry => stopEntry(entry))); },
-    /** The workspace a capture token belongs to. Every token is compared, so
-     * the time taken does not say which workspace came close. */
-    byCaptureToken(token) {
-      let found = null;
-      for (const {store} of open.values()) if (timingEqual(token, store.captureToken())) found = store;
-      return found;
-    },
     /** The workspace holding a row, for the agent protocol: a device only
      * knows its own id or pairing code, not which workspace issued it. */
     holding(sql, value) {

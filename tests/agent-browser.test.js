@@ -38,8 +38,8 @@ test('a page must be on the allowlist, and only http(s) is loaded', () => {
   assert.equal(requestVerdict({url: 'https://cdn.example.net/a.js', isDocument: false}, {allow}).allow, true);
   for (const url of ['file:///etc/passwd', 'chrome://settings', 'ftp://example.com/x']) assert.equal(requestVerdict({url, isDocument: true}, {allow}).allow, false, url);
   assert.equal(requestVerdict({url: 'data:image/png;base64,AAAA', isDocument: false}, {allow}).allow, true);
-  // A WebSocket tunnel hides inside GET: posting hosts refuse it too.
-  assert.equal(requestVerdict({url: 'https://x.com/stream', isDocument: false, method: 'GET', resourceType: 'WebSocket'}, {allow: ['x.com', 'docs.example.com']}).allow, false);
+  // X is a site like any other once it is allowed: its live updates load.
+  assert.equal(requestVerdict({url: 'https://x.com/stream', isDocument: false, method: 'GET', resourceType: 'WebSocket'}, {allow: ['x.com', 'docs.example.com']}).allow, true);
   assert.equal(requestVerdict({url: 'https://example.com/stream', isDocument: false, method: 'GET', resourceType: 'WebSocket'}, {allow: ['example.com']}).allow, true);
 });
 
@@ -135,7 +135,9 @@ test('browser.action types, clicks and reads, and refuses off-allowlist navigati
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const host = `127.0.0.1:${server.address().port}`, permit = h => h !== 'localhost';
   try {
-    const page = await captureWithBrowser(`http://${host}/form`, {allow: [host], binary: browser, permit, steps: [
+    // The field has no words, so the server asks about it as a Send and approves it for this origin; unapproved,
+    // the browser refuses a wordless control (owner-boundary.test.js).
+    const page = await captureWithBrowser(`http://${host}/form`, {allow: [host], binary: browser, permit, approved: [`send@http://${host}`], steps: [
       {op: 'type', selector: '#name', text: 'Ada'},
       {op: 'click', selector: '#go'},
       {op: 'read', selector: '#out'},
@@ -224,4 +226,23 @@ test('a session reuses one browser, numbers the controls, and signs nothing in',
     // The allowlist is per request: the previous capture does not authorise this one.
     await assert.rejects(session.capture(`${base}/one`, {allow: ['other.example.com']}), /not in AGENT_BROWSER_ALLOWLIST/);
   } finally { await session.close(); server.close(); }
+});
+
+test('a click that opens a page (after a beat, or in a new tab) is read on that page', {skip: !browser && 'no browser installed', timeout: 60000}, async () => {
+  const server = http.createServer((req, res) => {
+    if (req.url === '/list') return res.writeHead(200, {'Content-Type': 'text/html'}).end(
+      `<title>Outlets</title><a id="card">Lazeez Affaire - Outer Circle</a><a id="tab" href="/tab" target="_blank">Open in a tab</a>` +
+      `<script>document.getElementById('card').addEventListener('click',()=>setTimeout(()=>{location.href='/outlet';},400));</script>`);
+    if (req.url === '/outlet') return res.writeHead(200, {'Content-Type': 'text/html'}).end('<title>Outlet</title><button>Book a table</button>');
+    if (req.url === '/tab') return res.writeHead(200, {'Content-Type': 'text/html'}).end('<title>Tab page</title><p>Opened here</p>');
+    res.writeHead(404).end();
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const host = `127.0.0.1:${server.address().port}`, permit = h => h !== 'localhost';
+  try {
+    const late = await captureWithBrowser(`http://${host}/list`, {allow: [host], binary: browser, permit, steps: [{op: 'click', selector: '#card'}]});
+    assert.equal(late.title, 'Outlet', 'the read waits for the page the click opened');
+    const tab = await captureWithBrowser(`http://${host}/list`, {allow: [host], binary: browser, permit, steps: [{op: 'click', selector: '#tab'}]});
+    assert.equal(tab.title, 'Tab page', 'a link meant for a new tab opens in the bot\'s own tab');
+  } finally { server.close(); }
 });

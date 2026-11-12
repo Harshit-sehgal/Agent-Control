@@ -8,7 +8,7 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const shared = path.join(root, 'shared');
 // The UI is app.js plus every ui-*.js module.
 const uiFiles = ['app.js', ...(await readdir(shared)).filter(f => /^ui-.+\.js$/.test(f)).sort()];
-const [html, css] = await Promise.all(['index.html', 'app.css'].map(f => readFile(path.join(shared, f), 'utf8')));
+const [html, css, shell, profile] = await Promise.all(['index.html', 'app.css', 'shell.css', 'profile.css'].map(f => readFile(path.join(shared, f), 'utf8')));
 const app = (await Promise.all(uiFiles.map(f => readFile(path.join(shared, f), 'utf8')))).join('\n');
 
 test('colour is a themed token system: a light and a dark theme, following the system', () => {
@@ -35,16 +35,17 @@ test('colour is a themed token system: a light and a dark theme, following the s
   assert.doesNotMatch(rest, /#[0-9a-f]{3,8}\b/i, 'use a colour token instead of a hex value');
 });
 
-test('there is exactly one stylesheet and the retired ones are not linked', () => {
-  assert.deepEqual([...html.matchAll(/<link rel="stylesheet" href="([^"]+)"/g)].map(m => m[1]), ['./app.css']);
+test('there are exactly three stylesheets (tokens and forms, the shell, then the profile screens) and the retired ones are not linked', () => {
+  assert.deepEqual([...html.matchAll(/<link rel="stylesheet" href="([^"]+)"/g)].map(m => m[1]), ['./app.css', './shell.css', './profile.css']);
   assert.doesNotMatch(html, /polish\.css|usability\.css/);
 });
 
-test('home starts a group run from a Grok-style intent prompt', () => {
-  assert.match(app, /id="home-prompt"/);
-  assert.match(app, /function startGroupChat\(/);
+test('the new thread page starts a thread run by Atlas from one box', () => {
+  assert.match(app, /id="new-thread-form"/);
+  assert.match(app, /export async function startThread\(/);
   // The submit handler is keyed by the form id in the forms table.
-  assert.match(app, /'home-prompt': \(form, f\) => startGroupChat\(f\.prompt\)/);
+  assert.match(app, /'new-thread-form': \(form, f\) => startThread\(f\.message\)/);
+  assert.match(app, /api\('\/api\/threads', 'POST', \{message[,}]/);
 });
 
 test('navigation marks the current page and dialogs return focus', () => {
@@ -55,28 +56,32 @@ test('navigation marks the current page and dialogs return focus', () => {
 
 /* ---------- phone: the six layout defects the mobile pass fixed ---------- */
 
-test('phone panes use the visible height, not the layout viewport', () => {
-  // .app already used 100dvh. A pane pinned with inset:0 is sized by the layout
-  // viewport, which is taller than the screen while a phone's toolbars are out,
-  // so the composer ended up behind the collapsed toolbar.
-  assert.match(css, /\.pane\{position:fixed;inset:0 0 auto;height:100dvh/);
-  assert.doesNotMatch(css, /\.pane\{position:fixed;inset:0;/, 'no fixed pane may be pinned to the layout viewport');
+test('the shell uses the visible height, not the layout viewport', () => {
+  // A frame sized by the layout viewport is taller than the screen while a phone's
+  // toolbars are out, so the composer ended up behind the collapsed toolbar. The
+  // shell is 100dvh, and the old fixed panes are gone.
+  assert.match(shell, /\.shell\{height:100dvh/);
+  assert.doesNotMatch(css, /\.pane\{/);
 });
 
 test('headers step down out of the notch and the status bar', () => {
   // viewport-fit=cover (index.html) draws the page under both; only the toast
-  // used the top inset, so "Chats" and the thread's back button rendered under
-  // the status bar on a notched phone.
+  // used the top inset, so the back button rendered under the status bar on a
+  // notched phone. Every header takes --pad-t, which is the inset.
   assert.match(html, /viewport-fit=cover/);
-  assert.match(css, /\.list-head\{padding-top:calc\(18px \+ env\(safe-area-inset-top\)\)\}/);
-  assert.match(css, /\.thread-head,\.pane-head\{min-height:calc\(64px \+ env\(safe-area-inset-top\)\);padding-top:calc\(8px \+ env\(safe-area-inset-top\)\)\}/);
+  assert.match(shell, /--pad-t:env\(safe-area-inset-top,0px\)/);
+  assert.match(shell, /\.cv-head\{[^}]*padding:calc\(12px \+ var\(--pad-t\)\)/);
+  assert.match(profile, /\.pr-bar\{[^}]*padding:calc\(14px \+ var\(--pad-t\)\)/);
 });
 
 test('every text field is 16px so iOS does not zoom on focus', () => {
-  // Safari zooms the page for any focused field under 16px, and chat search was
-  // the one field that broke the rule.
-  assert.match(css, /\.search input\{[^}]*font-size:16px/);
-  assert.doesNotMatch(css, /\.search input\{[^}]*font-size:1[0-5]px/);
+  // Safari zooms the page for any focused field under 16px: the phone search, the
+  // composer and the shared .input (every form, the memory box, the name boxes).
+  assert.match(shell, /\.ch-find input\{[^}]*font-size:16px/);
+  assert.match(shell, /\.cv-box textarea\{[^}]*font-size:16px/);
+  assert.match(css, /\.input\{[^}]*font-size:16px/);
+  assert.match(profile, /\.nb-name\{[^}]*font:500 17px/);
+  assert.doesNotMatch(shell + profile, /(?:input|textarea)\{[^}]*font-size:1[0-5]px/);
 });
 
 test('touch targets are 44px on a coarse pointer', () => {
@@ -85,18 +90,16 @@ test('touch targets are 44px on a coarse pointer', () => {
   const block = css.slice(start, start + 500);
   // Desktop has mouse-sized controls; a finger needs the 44px the file already
   // commits to for .btn, .check-row and .chip.
-  for (const rule of [/\.chip\{height:44px/, /\.btn\.small\{min-height:44px\}/, /\.filter\{height:44px/, /\.contract-fieldset \.check-row\{min-height:44px/]) assert.match(block, rule);
+  for (const rule of [/\.btn\.small\{min-height:44px\}/, /\.contract-fieldset \.check-row\{min-height:44px/, /\.box>form \.check-row\{min-height:44px/]) assert.match(block, rule);
 });
 
-test('the phone FAB floats above the footer instead of over it', () => {
-  // It used to be a sibling pinned at bottom:64px, which covered .list-foot as
-  // soon as the two footer lines wrapped. It is now the footer's last child and
-  // is anchored above it, so no footer copy can slide under it at any height.
-  assert.match(css, /\.list-foot\{position:relative/);
-  assert.match(css, /\.fab\{position:absolute;right:18px;bottom:calc\(100% \+ 12px\)/);
-  assert.match(app, /<footer class="list-foot">[\s\S]*?data-action="new-chat"[\s\S]*?<\/footer>/);
-  // The list keeps room so the last chat can scroll clear of the button.
-  assert.match(css, /\.chat-list\{padding-bottom:78px\}/);
+test('the phone bottom bar sits 16px from each edge with a fade behind it, and the chrome hides on desktop', () => {
+  // Pinned with max(16px, ...) so it cannot run off a narrow phone; the fade stops
+  // list rows showing through the search pill.
+  assert.match(shell, /\.ch-bar\{position:absolute;left:max\(16px,calc\(50% - 360px\)\);right:max\(16px,calc\(50% - 360px\)\)/);
+  assert.match(shell, /\.ch-bar::before\{[^}]*linear-gradient\(to bottom,transparent,var\(--bg\) 45%\)/);
+  assert.match(shell, /@media\(min-width:1024px\)\{[\s\S]*?\.chrome\{display:none\}/);
+  assert.match(app, /class="ch-thread" data-action="new-thread" aria-label="New thread"/);
 });
 
 test('the select chevron follows the theme instead of a hard-coded colour', () => {
@@ -107,6 +110,6 @@ test('the select chevron follows the theme instead of a hard-coded colour', () =
   assert.match(css, /select\.input\{appearance:none;padding-right:34px;background-image:linear-gradient\(45deg,transparent 50%,var\(--muted\) 50%\)/);
   // A `background` shorthand on a select would wipe the image back out, which is
   // why the host selectors below set the colour only.
-  assert.match(css, /\.box \.input,\.draft \.input,\.sheet \.input\{background-color:var\(--raised\)\}/);
+  assert.match(css, /\.box \.input,\.sheet \.input\{background-color:var\(--raised\)\}/);
   assert.match(css, /\.sheet \.input\{background-color:var\(--surface\)\}/);
 });

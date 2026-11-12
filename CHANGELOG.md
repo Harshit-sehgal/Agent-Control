@@ -1,5 +1,101 @@
 # Changelog
 
+## Unreleased — personal bot platform
+
+X-engage is gone. The app is now a local-first personal bot platform: one owner,
+a primary bot named Atlas in a Home group, other bots in groups, group runs with
+handoffs, bring-your-own-key AI providers, memory, a paired local agent for
+browser tasks, and accounts, workspaces and backup.
+
+### Removed
+- **The X-engage workflow.** Capturing X posts as candidates, AI-drafted
+  replies, source evidence, approve/schedule/post-ready drafts, reminders, the
+  voice and timing settings, and the demo sample posts are removed, along with
+  the code and tests behind them.
+- **The Chrome capture extension and the capture token.** `extension/`,
+  `POST /api/capture` and the **Copy capture token** action are gone.
+- **X home-feed reading.** A bot can no longer file a read-only home-timeline
+  request. Reading a page is the opt-in `browser.use` request only.
+- **The X surfaces in the interface and in the Pages demo.** The draft cards,
+  Posts found, Reminders and Voice and timing sections, and the X routes in
+  the browser-local engine are removed; the Pages demo answers the same
+  group-chat and run routes the server does.
+- **The X routes and tick on the server.** The draft routes, the scheduler's
+  draft release and `makeDraft` are removed.
+- **The X database tables.** Schema v11 drops them. A backup made before this
+  change (schema v10 and earlier) still restores.
+- **The per-bot permission checkboxes and the "run without asking" choice.**
+  Grants replace them: no screen sets a bot's `permissions` or `browserApproval`
+  any more (an old permission is still honoured and shown read-only).
+- **The old chat list, chat info panel, You pages and group-settings UI**
+  (`shared/ui-panel.js`, the new-bot and new-group sheets, the pipeline editor
+  and the runs panel). Their work moved to the profile, Settings and the
+  thread.
+
+### Added
+- **Connectors and subscriptions in Settings.** Settings → Connectors lists, adds,
+  refreshes and deletes MCP servers (a web address with optional headers, or the
+  name of a server on your agent), runs the Google setup form with its steps,
+  redirect address and Testing note, and shows the connected account or
+  Reconnect; `?google=connected|error` after sign-in becomes a toast. Settings →
+  Models and keys adds a subscription (no key field) and shows each paired
+  agent's `claude` and `codex` sign-in. In a chat, a connector line names the
+  account, a send held for Undo carries an Undo button until its window ends, and
+  a usage limit offers Switch to the provider the server named. The Pages demo
+  says these need the server. A confirm sheet opened from Settings now sits above
+  the Settings dialog instead of behind it.
+- **Connectors (backend).** Bots reach Gmail, Drive and MCP servers through
+  connectors, and every use is an ask. A hand-written MCP client speaks
+  streamable HTTP from the server and stdio through the paired agent (the new
+  `mcp.call` task; the program is named in the agent's own config, never sent by
+  the server). Google sign-in uses OAuth with PKCE on your own Cloud client; the
+  client secret and refresh token are encrypted in the vault and never returned,
+  logged or backed up, and a revoked sign-in shows as reconnect. A bot writes a
+  `connector` block; the connector, not the bot, says whether a tool reads or
+  writes (no annotations means write), the card shows what the call would carry,
+  and the result comes back as untrusted data. A send you have Always-allowed is
+  held 30 seconds with an Undo, and every write that goes out is logged under
+  "Left the app". Routes: `/api/connectors` (list, add, refresh, remove),
+  `/api/connectors/google/setup|start|callback`, `/api/activity/:id/undo`.
+- **A company of bots, in a new chats shell.** The three-pane messenger is
+  replaced by a sidebar of bots on a laptop and a two-section home (Bots and
+  Threads) on a phone. Each bot has a chat, a profile (job, memory, activity,
+  permissions, model, team), an Edit page and a New bot page; threads are
+  chats Atlas runs with whichever bots the work needs, with one live progress
+  pill and a card that opens the handoffs. Settings is one page opened from the
+  round avatar, with Company and Activity inside it. Faces are small
+  characters that blink, sleep, read, wait and hop.
+- **Pin and reorder by gesture.** Press and move (or long press) a bot to drag
+  it, right-click or the menu key for its options, touch and hold on a phone,
+  Alt+arrows from the keyboard. Drop on the pinned row to pin, drag a pinned
+  face out to unpin, drop on a manager to move the bot to its team, drop among
+  its team to reorder. The bot lifts, neighbours glide out of the way, it
+  springs into its slot, and none of it moves under reduced motion. Pins and
+  order are saved per person in the browser (`shared/ui-gestures.js`,
+  `shared/ui-reorder.js`).
+
+- **Ask cards, per-bot permissions and the pause banner.** A bot that needs
+  something asks. The card sits in the chat where it works (and as "Needs you"
+  in Atlas's chat), with the bot's waiting face above one sentence and
+  Decline, Allow and Always allow for this bot; a payment offers only Decline
+  and Allow, and an answered card collapses to one line. The needs-you count
+  includes pending asks. Each bot's rules (Always allow, Ask each time, Deny)
+  are listed on its profile and, for every bot, under Settings → Permissions,
+  and change in place. While Bots running is off, a banner on every screen
+  says "All bots are paused. Nothing runs until you resume." with Resume
+  (`shared/ui-asks.js`).
+
+### Changed
+- **A new workspace starts with Atlas.** The first sign-in seeds a primary bot,
+  Atlas, in a Home group, in place of the X-engage group and its example bots.
+- **The package description** is now "Local-first personal bot platform with
+  human-approved actions".
+
+### Kept
+- **The posting guard.** A bot may read an X page through an approved
+  `browser.use` request, but click and type on X are refused and the final Post
+  click is always human.
+
 ## Unreleased
 
 The JSON store is gone, one list decides what ships, and the app opens without

@@ -13,8 +13,14 @@ import {Auth} from './auth.js';
 import {openWorkspaces} from './workspaces.js';
 import {createPush} from './push.js';
 import {browserRuntime} from './browser-runtime.js';
+import {browserLive} from './browser-live.js';
 import * as agent from './agent.js';
 import {createApp,createWorkspaceStarter} from './app.js';
+import {guardRejections} from './crash-guard.js';
+
+// A background promise that slips its own catch logs here instead of ending the server.
+guardRejections();
+import {localAgentWanted,startLocalAgent} from './local-agent.js';
 
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 // The /api/health version is the package version, not a literal, so a release
@@ -77,12 +83,20 @@ preflight();
 server.listen(PORT,HOST,()=>{
   console.log(`\nAgent Control Prototype: http${server instanceof https.Server?'s':''}://${HOST}:${PORT}`);
   if(!process.env.DASHBOARD_PASSWORD) console.log(`Temporary dashboard password (changes on restart): ${PASSWORD}`);
-  console.log(`AI mode: ${isLive()?`Connected · ${aiModel()} @ ${aiProvider()}`:'No AI_API_KEY in the environment. Add a provider under You → AI and models, or set AI_API_KEY.'}`);
+  console.log(`AI mode: ${isLive()?`Connected · ${aiModel()} @ ${aiProvider()}`:'none in the environment. Connect one in the app under Settings → Models and keys (a claude or codex sign-in on this computer needs no key), or set AI_API_KEY.'}`);
   if(HOST!=='127.0.0.1'&&HOST!=='localhost')console.warn('WARNING: Use HTTPS plus a private network / access proxy for remote access.');
+  // The browser, the claude/codex sign-in and stdio MCP servers need a local agent. On this computer the
+  // server pairs and runs one itself, so there is no pairing code and no second terminal.
+  if(localAgentWanted()){
+    const tls=server instanceof https.Server;
+    localAgent=startLocalAgent(store,{dataFile:STORE_PATH,server:`http${tls?'s':''}://${HOST==='localhost'?'localhost':'127.0.0.1'}:${PORT}`,env:tls?{...process.env,NODE_EXTRA_CA_CERTS:TLS.cert}:process.env});
+    if(localAgent)console.log('Local agent: running on this computer (browser, claude/codex sign-in, MCP). Set LOCAL_AGENT=0 to turn it off.');
+  }
 });
 // A server-side browser is a child process: leave it behind and a container
 // restart keeps an orphan holding memory. Closing it is part of the drain.
-const drain=()=>Promise.allSettled([workspaces.stop(),browserRuntime.close()]).finally(()=>server.close(()=>process.exit(0)));
+let localAgent=null;
+const drain=()=>Promise.allSettled([localAgent?.stop(),workspaces.stop(),browserRuntime.close(),Promise.resolve(browserLive.close())]).finally(()=>server.close(()=>process.exit(0)));
 process.on('SIGINT',()=>{void drain();});
 // A container stops the process with SIGTERM, so it needs the same drain as
 // Ctrl-C instead of being killed with requests and leases still open.

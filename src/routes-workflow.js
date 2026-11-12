@@ -1,86 +1,84 @@
-/** The X-engage workflow over HTTP: the state snapshot, settings, posts,
- * drafts and their evidence, reminders, the task queue and retention. The rules
+/** The workspace over HTTP: the state snapshot, the task queue and retention. The rules
  * live in `shared/`; a route only reads the request and applies one transition. */
-import {DEMO_SAMPLES, cleanText} from '../shared/core.js';
-import * as wf from '../shared/workflow.js';
+import {cleanText} from '../shared/core.js';
 import * as tasks from '../shared/tasks.js';
-import * as evidence from '../shared/evidence.js';
+import * as wf from '../shared/workflow.js';
 import {pruneState, RETENTION_DEFAULTS} from '../shared/retention.js';
 import * as notifications from './notifications.js';
-import {aiModel, makeDraft} from './ai.js';
-import {aiAvailable, resolveConfig, publicAi} from './ai-providers.js';
+import {aiModel} from './ai.js';
+import {aiAvailable, publicAi} from './ai-providers.js';
 import {fail} from './http.js';
+import {activityPage} from '../shared/activity-log.js';
+import {publicConnectors} from '../shared/connectors.js';
 import {reply, allows} from './router.js';
+import {peek} from './sqlite-store.js';
+import {addTemplate, removeTemplate} from '../shared/templates.js';
+import crypto from 'node:crypto';
 
 const retentionSettings = s => ({...RETENTION_DEFAULTS, ...(s.settings?.retention || {})});
 
-export function workflowRoutes(router, {auth, processCandidate}) {
+/** The poll snapshot leaves out what only the server reads. A captured page
+ * (up to tens of KB per browser request) and a run's full step outputs were
+ * sent on every poll; the UI shows a 240-character step line and never the
+ * page. A short excerpt keeps every field present and truthy. */
+const EXCERPT = 200, STEP_TEXT = 600;
+const excerpt = (text, max = EXCERPT) => (typeof text === 'string' && text.length > max ? text.slice(0, max) : text);
+export function slimRequest(r) {
+  if (!r?.result || typeof r.result !== 'object' || typeof r.result.page !== 'string') return r;
+  return {...r, result: {...r.result, page: excerpt(r.result.page)}};
+}
+export function slimRun(r) {
+  if (!r || typeof r !== 'object') return r;
+  const out = {...r};
+  if (Array.isArray(r.trace)) out.trace = r.trace.map(step => (typeof step?.output === 'string' && step.output.length > STEP_TEXT ? {...step, output: step.output.slice(0, STEP_TEXT)} : step));
+  if (typeof r.browserPage === 'string') out.browserPage = excerpt(r.browserPage);
+  if (typeof r.task?.feedText === 'string') out.task = {...r.task, feedText: excerpt(r.task.feedText)};
+  return out;
+}
+const tagHash = value => crypto.createHash('sha1').update(value).digest('base64url').slice(0, 16);
+
+export function workflowRoutes(router, {auth}) {
   router.add('GET', '/api/state', 'viewer', c => {
-    const s = c.store.read(), me = c.actor, live = aiAvailable(c.store);
-    // The capture token lets its holder add posts, which a viewer may not do.
-    if (!allows(me.role, 'member')) delete s.captureToken;
+    // Read-only: the cached document is never mutated here. Every field this
+    // route changes is replaced on a shallow copy.
+    const doc = peek(c.store), me = c.actor, live = aiAvailable(c.store);
+    const s = {...doc};
     // The stored provider row holds the vault id and may carry a key inside a
     // pasted base URL. The snapshot the browser receives is metadata only.
-    s.ai = publicAi(s);
+    // `publicAi` normalises its argument in place, so it gets its own copy.
+    s.ai = publicAi({ai: structuredClone(doc.ai)});
+    // A connector record is metadata (its secrets are vault credentials), but the snapshot gets the public view anyway.
+    s.connectors = publicConnectors({connectors: structuredClone(doc.connectors)});
+    // An email waiting out its Undo window carries its text; the snapshot never does.
+    delete s.heldSends;
+    // The log can be thousands of entries; the snapshot the browser polls leaves it out. GET /api/activity pages it.
+    delete s.activity;
+    s.browserRequests = Array.isArray(doc.browserRequests) ? doc.browserRequests.map(slimRequest) : doc.browserRequests;
+    s.groupRuns = Array.isArray(doc.groupRuns) ? doc.groupRuns.map(slimRun) : doc.groupRuns;
     const hasSavedDefault = s.ai?.providers?.some(provider => provider.id === s.ai.defaultProviderId);
     const model = live ? (s.ai?.defaultModel || (hasSavedDefault ? 'auto' : aiModel())) : null;
-    return {...s, aiEnabled: live, aiModel: model, me: {email: me.email, role: me.role}, workspaces: auth.listWorkspaces(me.userId).map(w => ({...w, current: w.id === me.workspaceId})), canCreateWorkspace: auth.roleOf(me.userId) === 'owner', retention: retentionSettings(s),
-      notifications: notifications.listNotifications(c.store, me.userId, 50), unread: notifications.unreadCount(c.store, me.userId), serverTime: new Date().toISOString()};
+    const extra = {aiEnabled: live, aiModel: model, me: {email: me.email, role: me.role}, workspaces: auth.listWorkspaces(me.userId).map(w => ({...w, current: w.id === me.workspaceId})), canCreateWorkspace: auth.roleOf(me.userId) === 'owner', retention: retentionSettings(s),
+      notifications: notifications.listNotifications(c.store, me.userId, 50), unread: notifications.unreadCount(c.store, me.userId)};
+    const body = {...s, ...extra, serverTime: new Date().toISOString()};
+    // The document version names everything read from the store; the rest of
+    // the answer (who is asking, their workspaces and notifications) is small
+    // and hashed whole. `serverTime` is left out: the UI never reads it. A
+    // caller without a request (a test driving the handler) gets the body.
+    const version = c.req && typeof c.store.stateTag === 'function' ? c.store.stateTag() : null;
+    if (!version) return body;
+    const etag = `W/"${version}-${tagHash(JSON.stringify([me.userId, me.workspaceId, extra]))}"`;
+    if (c.req.headers?.['if-none-match'] === etag) return reply(304, null, {ETag: etag});
+    return reply(200, body, {ETag: etag});
   });
-  router.add('PATCH', '/api/settings', 'admin', async c => { const b = await c.body(); return c.store.update(s => wf.updateSettings(s, b)); });
-
-  // Samples come from the shared core.js constant, exactly like the Pages demo.
-  router.add('POST', '/api/demo/seed', 'member', c => c.store.update(s=>wf.seedDemo(s,DEMO_SAMPLES)));
-  router.add('POST', '/api/reset-demo', 'member', c => c.store.update(s => wf.resetDemo(s)));
-
-  // The capture token is a credential every paired browser holds, so replacing it
-  // is an admin action, not a writer's convenience.
-  router.add('POST', '/api/capture-token', 'admin', c => c.store.update(s => wf.rotateCaptureToken(s)));
-  router.add('POST', '/api/candidates', 'member', async c => {
-    const b = await c.body();
-    // Report duplicates the same way /api/capture does, so the UI can tell the
-    // user the post was already queued instead of pretending it was added. The
-    // flag has to ride along with the candidate or the browser-local transport
-    // and the Node route would answer differently for the same input.
-    const result = await c.store.update(s => wf.addCandidate(s, b));
-    return reply(result.duplicate ? 200 : 201, {...result.candidate, duplicate: result.duplicate});
+  // The activity log, a page at a time: ?filter=outside|perm|bots|all (default all),
+  // ?before=<entry id> for older entries, ?limit= and ?bot=<bot id> for one profile's own section.
+  // Read only: nothing edits or deletes an entry.
+  router.add('GET', '/api/activity', 'viewer', c => {
+    const q = new URL(c.req.url, 'http://local').searchParams;
+    const limit = q.has('limit') ? Number(q.get('limit')) : undefined;
+    if (q.has('limit') && !Number.isFinite(limit)) fail('Limit must be a number.');
+    return activityPage(c.store.read(), {filter: q.get('filter') || undefined, before: q.get('before') || null, limit, botId: q.get('bot') || null});
   });
-  router.add('DELETE', '/api/candidates/:id', 'member', c => c.store.update(s => wf.removeCandidate(s, c.params.id)));
-  router.add('POST', '/api/candidates/:id/process', 'member', async c => {
-    const run = () => processCandidate(c.store, c.params.id);
-    return reply(201, await (c.store.trackWork ? c.store.trackWork(run) : run()));
-  });
-
-  router.add('PATCH', '/api/drafts/:id', 'member', async c => { const b = await c.body(); return c.store.update(s => wf.editDraft(s, c.params.id, b.text)); });
-  for (const action of ['approve', 'reject', 'ready', 'restore', 'posted']) {
-    router.add('POST', `/api/drafts/:id/${action}`, 'member', async c => { const b = await c.body(); return c.store.update(s => wf.draftAction(s, c.params.id, action, b)); });
-  }
-  router.add('POST', '/api/drafts/:id/rewrite', 'member', async c => {
-    const rewrite = async () => {
-      const id = c.params.id, b = await c.body(), existing = c.store.read(), old = wf.findDraft(existing, id), candidate = wf.findCandidate(existing, old.candidateId);
-      if (!['pending', 'scheduled', 'ready'].includes(old.status)) fail('Cannot rewrite this draft.', 409);
-      const out = await makeDraft(candidate, existing.settings, b.direction || '', resolveConfig(c.store, null));
-      return c.store.update(s => {
-        const x = wf.findDraft(s, id); if (x.revision !== old.revision) fail('Draft changed during rewrite. Retry.', 409);
-        // Shared with edit: a new text drops the approval, its schedule, and the
-        // frozen evidence snapshot. Leaving the snapshot would keep the old approval.
-        return wf.rewriteDraft(s, id, out);
-      });
-    };
-    return c.store.trackWork ? c.store.trackWork(rewrite) : rewrite();
-  });
-
-  // Source evidence: what supports a draft, verified by whom.
-  router.add('POST', '/api/drafts/:id/evidence', 'member', async c => {
-    const b = await c.body();
-    return reply(201, await c.store.update(s => evidence.addEvidence(s, {...b, draftId: c.params.id, createdBy: c.actor.email})));
-  });
-  router.add('POST', '/api/evidence/:id/verify', 'member', async c => { const b = await c.body(); return c.store.update(s => evidence.verifyEvidence(s, c.params.id, b.status, {actor: c.actor.email})); });
-  router.add('DELETE', '/api/evidence/:id', 'member', c => c.store.update(s => evidence.dropEvidence(s, c.params.id)));
-
-  router.add('POST', '/api/schedules', 'member', async c => { const b = await c.body(); return reply(201, await c.store.update(s => wf.addSchedule(s, b))); });
-  router.add('DELETE', '/api/schedules/:id', 'member', c => c.store.update(s => wf.removeSchedule(s, c.params.id)));
-
   // Structured task queue: the same records the internal worker executes.
   router.add('POST', '/api/tasks', 'member', async c => {
     const b = await c.body();
@@ -99,10 +97,18 @@ export function workflowRoutes(router, {auth, processCandidate}) {
     const result = await c.store.update(s => tasks.enqueueTask(s, b));
     return reply(result.duplicate ? 200 : 201, result.task);
   });
+  // Saved task templates (shared/templates.js): one list per workspace, read in the snapshot.
+  router.add('POST', '/api/templates', 'member', async c => { const b = await c.body(); return reply(201, await c.store.update(s => addTemplate(s, {title: b.title, text: b.text}))); });
+  router.add('DELETE', '/api/templates/:id', 'member', c => c.store.update(s => removeTemplate(s, c.params.id)));
   router.add('POST', '/api/tasks/:id/retry', 'member', c => c.store.update(s => tasks.retryTask(s, c.params.id)));
   router.add('DELETE', '/api/tasks/:id', 'member', c => c.store.update(s => tasks.cancelTask(s, c.params.id)));
 
   // Retention: preview, then apply the workspace policy.
   router.add('GET', '/api/retention/preview', 'viewer', c => { const state = c.store.read(); return {policy: retentionSettings(state), preview: pruneState(state, {dryRun: true})}; });
   router.add('POST', '/api/retention/prune', 'admin', c => c.store.update(s => pruneState(s)));
+  // The retention policy itself. Only the window sizes change; pruning is the route above.
+  router.add('PATCH', '/api/retention', 'admin', async c => {
+    const body = await c.body();
+    return c.store.update(s => { wf.updateRetention(s, body); return retentionSettings(s); });
+  });
 }

@@ -165,10 +165,10 @@ test('the API enforces the role matrix on every protected route', {timeout: 3000
     const memberCookie = (await send('POST', '/api/login', {email: 'member@example.com', password: 'member-pass-1'})).cookie.split(';')[0];
     // A viewer can read but not write.
     assert.equal((await send('GET', '/api/state', undefined, viewerCookie)).status, 200);
-    assert.equal((await send('POST', '/api/candidates', {url: 'https://x.com/a/status/1', text: 'A candidate long enough to pass validation.', author: 'A'}, viewerCookie)).status, 403);
+    assert.equal((await send('POST', '/api/groups', {name: 'Viewer group'}, viewerCookie)).status, 403);
     assert.equal((await send('GET', '/api/users', undefined, viewerCookie)).status, 403);
     // A member can write but not administer users.
-    const created = await send('POST', '/api/candidates', {url: 'https://x.com/a/status/2', text: 'Another candidate long enough to pass.', author: 'B'}, memberCookie);
+    const created = await send('POST', '/api/groups', {name: 'Member group'}, memberCookie);
     assert.equal(created.status, 201);
     assert.equal((await send('GET', '/api/users', undefined, memberCookie)).status, 403);
     // Sessions can be listed and revoked individually.

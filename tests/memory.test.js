@@ -349,11 +349,11 @@ test('a bot with memory off neither reads nor writes it', async () => {
   assert.deepEqual(store.state().memory.chats, {});
 
   const on = memoryFor(store, {bot: {id: 'writer'}, config, chatKey: 'writer'});
-  assert.equal(on.key, 'env:model-a');
-  assert.equal(on.label, 'model-a');
+  assert.equal(on.key, 'bot:writer', 'the book is the bot\'s own');
+  assert.equal(on.label, 'model-a', 'a bot with no name is labelled by its model');
   assert.deepEqual(on.rules, []);
   await rememberTurn(store, {bot: {id: 'writer'}, config, chatKey: 'writer', userText: 'Always keep replies short.', botText: 'Okay.', now: at});
-  const book = store.state().memory.rulebooks['env:model-a'];
+  const book = store.state().memory.rulebooks['bot:writer'];
   assert.equal(book.turns, 1);
   assert.deepEqual(book.pending, ['Always keep replies short.']);
   assert.match(store.state().memory.chats.writer.summary, /replies short/);
@@ -388,4 +388,14 @@ test('a model key cannot reach a prototype', () => {
   // The chat recap goes through the same key guard.
   assert.throws(() => forgetChat(state, '__proto__'), error => error.status === 400);
   assert.deepEqual(Object.keys(state.memory.forgottenChats), [], 'nothing was recorded for the refused key');
+});
+
+test('the chat recap skips a bot\'s working steps and keeps what it answered', () => {
+  const text = digestConversation([
+    {role: 'user', text: 'Find jobs'},
+    {role: 'bot', senderName: 'Atlas', text: 'Looking it up.', step: true},
+    {role: 'bot', senderName: 'Atlas', text: 'Acme is hiring.'},
+  ]);
+  assert.match(text, /Atlas answered: Acme is hiring\./);
+  assert.doesNotMatch(text, /Looking it up/);
 });

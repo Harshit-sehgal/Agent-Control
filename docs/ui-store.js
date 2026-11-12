@@ -1,9 +1,9 @@
 /** Single source of UI state: the server snapshot, the route, the conversations
  * it carries and cosmetic preferences. Views read from `store` and never
  * keep their own copies, so one `sync()` + one render keeps every pane current. */
-import {normalizeUiPrefs, UI_PREFS_KEY} from './usability.js?v=3b5334879a';
-import {routeHash, tintOf} from './ui-model.js?v=3b5334879a';
-import {createOutbox} from './chats.js?v=3b5334879a';
+import {tintOf} from './ui-model.js?v=a9e6960ec3';
+import {companyHash} from './ui-company.js?v=a9e6960ec3';
+import {createOutbox} from './chats.js?v=a9e6960ec3';
 
 // Where an earlier build kept conversations; read once by importLocalChats().
 const CHAT_KEY = 'agent-control-bot-chats-v2';
@@ -20,28 +20,36 @@ export const THEMES = [
 export function loadLocal(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } }
 /** Returns false when the browser refused the write so callers can warn once. */
 export function saveLocal(key, data) { try { localStorage.setItem(key, JSON.stringify(data)); return true; } catch { return false; } }
+/** When the person last saw each chat (`ac-seen`, per person, never sent): a row with a newer answer is unread. */
+export const SEEN_KEY = 'ac-seen';
+export const seenChats = () => { const map = loadLocal(SEEN_KEY, {}); return map && typeof map === 'object' && !Array.isArray(map) ? map : {}; };
+export function markSeen(key) {
+  if (!key || (typeof document !== 'undefined' && document.hidden)) return;
+  const map = seenChats(), now = new Date().toISOString();
+  map[key] = now;
+  // Keep the newest 300 chats.
+  const keep = Object.entries(map).sort((a, b) => String(b[1]).localeCompare(String(a[1]))).slice(0, 300);
+  saveLocal(SEEN_KEY, Object.fromEntries(keep));
+}
 
 export const store = {
   state: null,
-  /** chat: conversation id (`team-<groupId>` or a bot id). page: a "You" page.
-   * info: null | 'home' | a section name for the open chat's info panel. */
-  route: {chat: null, page: null, info: null},
+  /** The open screen, in the shape ui-company's companyRoute returns: {home},
+   * {bot}, {thread}, {profile, sub}, {settings}, {newBot, job}, {newThread},
+   * {company} or {activity}. The chat it shows is `chatKeyOf(store.route)`. */
+  route: {home: true},
+  /** Which half of the phone home is showing: 'bots' or 'threads'. Opening a chat
+   * leaves it alone, so Back returns to the half the chat was opened from. */
+  section: 'bots',
   /** Conversations by id: the workspace's copy plus anything still being sent. */
   messages: {},
   profiles: loadLocal(META_KEY, {}),
-  prefs: normalizeUiPrefs(loadLocal(UI_PREFS_KEY, {})),
   listFilter: 'all',
   listQuery: '',
-  postQuery: '',
-  editDraft: null,
-  /** Unsaved text of the draft being edited, so a repaint cannot lose it. */
-  editText: null,
-  /** Draft ids whose sources panel is open; survives repaints. */
-  openEvidence: new Set(),
   /** Conversation ids with a reply in flight; drives the typing indicator. */
   typing: new Set(),
-  /** The group settings pipeline being reordered: {groupId, rows}, unsaved. */
-  pipelineDraft: null,
+  /** A message search hit to scroll to once its chat paints: {key, id}, then null. */
+  focusMessage: null,
 };
 // `profiles` is cosmetic UI state only (tint, pin). An earlier build also wrote
 // name/instructions here, which would shadow the server's values forever.
@@ -89,13 +97,15 @@ export const changed = (scope = 'all') => { for (const fn of listeners) fn(scope
 
 // Sent in the background, without the busy bar: a message is on screen already.
 const outbox = createOutbox((key, messages) => window.AGENT_API(`/api/chats/${key}/messages`, 'POST', {messages}));
+/** Wait for the queued chat lines to reach the server. */
+export const flushChats = () => outbox.settle();
 // A group run polls /api/state on its own while the workspace poll does too.
 // Whichever response returns last used to win, so an older snapshot could wipe
 // a browser card or a follow-up line and leave the slow poll in charge.
 let epoch = 0, appliedFetch = 0;
 /** Bumped on sign-out. An in-flight snapshot must not restore the workspace. */
 export const sessionEpoch = () => epoch;
-export const retireSession = () => { epoch += 1; };
+export const retireSession = () => { epoch += 1; window.AGENT_API?.forget?.(); };
 /** Fetch the workspace and fold its conversations into what is on screen. */
 export async function loadState() {
   const ticket = epoch;
@@ -105,11 +115,21 @@ export async function loadState() {
   const snap = await api('/api/state');
   if (ticket !== epoch || fetch < appliedFetch) return store.state;
   appliedFetch = fetch;
+  // The transport answers a 304 with the very object it returned last time.
+  lastUnchanged = snap === store.state;
   store.state = snap;
   store.messages = outbox.adopt(store.state.chats || {}, store.messages, fetch);
   return store.state;
 }
-export async function sync(scope = 'all') { await loadState(); changed(scope); return store.state; }
+let lastUnchanged = false;
+/** Refresh and repaint. `quiet` (the background poll) skips the repaint when
+ * the server said nothing changed; every other caller repaints as before. */
+export async function sync(scope = 'all', {quiet = false} = {}) {
+  lastUnchanged = false;
+  await loadState();
+  if (!(quiet && lastUnchanged)) changed(scope);
+  return store.state;
+}
 /** Conversations an earlier build kept in this browser move to the workspace
  * once, so they follow the account. A conversation the workspace already has
  * is left alone. */
@@ -142,7 +162,6 @@ export const groups = () => store.state?.groups || [];
 export const teamKey = groupId => `team-${groupId}`;
 export const findGroup = id => groups().find(g => g.id === id);
 export const groupOfBot = botId => groups().find(g => g.bots.some(b => b.id === botId));
-export const isXGroup = group => group?.id === 'x-engage';
 export const botTint = (group, botId) => {
   const index = group?.bots.findIndex(b => b.id === botId) ?? 0;
   return tintOf(group?.bots[index] || {id: botId}, index, store.profiles);
@@ -151,7 +170,7 @@ export const botTint = (group, botId) => {
 export const findBot = botId => groupOfBot(botId)?.bots.find(b => b.id === botId) || null;
 
 /** Resolve a conversation id to what the views need, or null if it is gone. */
-export function conversation(id = store.route.chat) {
+export function conversation(id = chatKeyOf(store.route)) {
   if (!id) return null;
   if (id.startsWith('team-')) {
     const group = groups().find(g => teamKey(g.id) === id);
@@ -174,22 +193,10 @@ export async function clearMessages(key) {
   // DELETE also cancels the runs this chat was waiting on, in both backends.
   await outbox.settle();
   await api(`/api/chats/${key}`, 'DELETE');
-  outbox.forget(key); delete store.messages[key]; store.openEvidence.clear(); changed();
+  outbox.forget(key); delete store.messages[key]; changed();
 }
 export function setTyping(key, on) { on ? store.typing.add(key) : store.typing.delete(key); changed('thread'); }
 export function setProfile(botId, patch) { store.profiles[botId] = {...(store.profiles[botId] || {}), ...patch}; saveLocal(META_KEY, store.profiles); }
-// normalizeUiPrefs is a whitelist, so it answers a caller with the default of any
-// key or value it does not know: the control would look stuck and the caller's
-// value would vanish. Both cases are refused out loud instead (the host toasts a
-// thrown error), and the four keys it does answer are the only prefs there are.
-const PREF_KEYS = Object.keys(normalizeUiPrefs());
-export function setPref(key, value) {
-  if (!PREF_KEYS.includes(key)) throw new Error(`Unknown UI preference: ${key}`);
-  const next = normalizeUiPrefs({...store.prefs, [key]: value});
-  if (next[key] !== value) throw new Error(`Unsupported value for ${key}: ${String(value)}`);
-  Object.assign(store.prefs, next);
-  saveLocal(UI_PREFS_KEY, store.prefs);
-}
 /** What the user picked: 'system' (default), 'cream' or 'cocoa'. */
 export const themeChoice = () => { const id = loadLocal(THEME_KEY, 'system'); return THEMES.some(t => t.id === id) ? id : 'system'; };
 const nightQuery = () => matchMedia('(prefers-color-scheme: dark)');
@@ -221,24 +228,26 @@ export const syncDepth = event => { depth = (event && event.state && typeof even
 /** In-app back: pop our own history entry when there is one, else go to `fallback`. */
 export function back(fallback = {}) { if (depth > 0) history.back(); else go(fallback, {replace: true}); }
 
-/** Everything that belongs to one conversation: the draft being edited, the
- * source panels that were open, and the Posts search. Called on every chat
- * change, from go() and from popstate, so Back/Forward cannot carry one chat's
- * editor or search into another. */
-export function resetChatState() {
-  store.editDraft = null;
-  store.editText = null;
-  store.openEvidence.clear();
-  store.postQuery = '';
+/** The chat a route shows: a bot's own chat (key = bot id) or a thread's
+ * (`team-<threadId>`). Null for every other screen. */
+export const chatKeyOf = route => route?.bot || (route?.thread ? teamKey(route.thread) : null);
+
+/** A route with something to show. Anything empty or unknown is home. A profile's
+ * Permissions and Team pages no longer exist (one home each: Settings > Permissions
+ * filtered to the bot, and the Company chart), so an old link to one lands there. */
+export function normalizeRoute(route) {
+  const r = route && typeof route === 'object' ? route : {};
+  if (r.profile && r.sub === 'permissions') return {settings: `perm/${r.profile}`};
+  if (r.profile && r.sub === 'team') return {company: true};
+  if (typeof r.settings === 'string') return r;
+  return ['bot', 'thread', 'profile', 'newBot', 'newThread', 'company', 'activity'].some(key => r[key]) ? r : {home: true};
 }
 
 /** Navigate. Every pane repaints from `store.route`, and the hash keeps
  * browser Back/Forward and reload working. */
-export function go({chat = null, page = null, info = null} = {}, {replace = false} = {}) {
-  // An edit in progress survives opening the info panel, not leaving the chat.
-  if (chat !== store.route.chat) resetChatState();
-  store.route = {chat, page, info};
-  const hash = `#${routeHash(store.route)}`;
+export function go(route = {}, {replace = false} = {}) {
+  store.route = normalizeRoute(route);
+  const hash = `#${companyHash(store.route)}`;
   if (location.hash !== hash) {
     depth = replace ? depth : depth + 1;
     history[replace ? 'replaceState' : 'pushState']({depth}, '', hash);

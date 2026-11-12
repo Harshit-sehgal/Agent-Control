@@ -34,6 +34,8 @@ try {
   if (command === 'export') {
     const document = exportBackup(store);
     const json = JSON.stringify(document, null, 2);
+    const leftOut = document.attachmentsLeftOut.length;
+    if (leftOut) console.error(`${leftOut} attached file${leftOut === 1 ? ' was' : 's were'} left out to keep the backup under its size cap (listed in attachmentsLeftOut).`);
     if (target) {
       fs.writeFileSync(path.resolve(target), json, {mode: 0o600});
       console.log(`Backup written to ${path.resolve(target)} (credentials and sessions excluded).`);
@@ -46,7 +48,7 @@ try {
     // Validate first so a bad file fails before anything is written.
     validateBackup(document);
     const result = importBackup(store, document, {force: flag === '--force'});
-    console.log(`Restored ${result.restored} rows. Sign in again; re-enter any credentials.`);
+    console.log(`Restored ${result.restored} rows. Sign in again; re-enter any credentials.${result.notes?.length ? ` ${result.notes.join(' ')}` : ''}`);
   }
 } finally {
   store.db.close?.();

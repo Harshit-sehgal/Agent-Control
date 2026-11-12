@@ -8,23 +8,23 @@ import {SqliteStore} from '../src/sqlite-store.js';
 import {taskHandlers} from '../src/handlers.js';
 
 const stamp = () => new Date().toISOString();
-const emptyState = () => ({tasks: [], events: [], groups: []});
+const emptyState = () => ({tasks: [], events: [], groups: [{id: 'home', name: 'Home', bots: [{id: 'atlas', name: 'Atlas'}]}]});
 
-test('a rejected reminder names the schedule kinds it accepts', () => {
+test('a rejected scheduled task names the schedule kinds it accepts', () => {
   // "Choose a schedule kind" told a person what was wrong but not what to pick.
-  assert.throws(() => buildPayload('reminder', {kind: 'weekly', label: 'Standup'}),
+  assert.throws(() => buildPayload('bot-task', {groupId: 'home', message: 'Standup', kind: 'weekly'}),
     error => error.status === 400 && /once or interval/.test(error.message));
-  assert.throws(() => buildPayload('reminder', {kind: 'once', label: 'Standup'}),
+  assert.throws(() => buildPayload('bot-task', {groupId: 'home', message: 'Standup', kind: 'once'}),
     error => error.status === 400 && /future date/.test(error.message));
-  const once = buildPayload('reminder', {kind: 'once', label: 'Standup', nextAt: new Date(Date.now() + 60000).toISOString()});
+  const once = buildPayload('bot-task', {groupId: 'home', message: 'Standup', kind: 'once', nextAt: new Date(Date.now() + 60000).toISOString()});
   assert.equal(once.kind, 'once');
 });
 
 test('a cancelled task cannot be retried, and a retry keeps runAt and nextAt in step', () => {
   const state = emptyState();
   const future = new Date(Date.now() + 3600000).toISOString();
-  const {task} = enqueueTask(state, {kind: 'reminder', payload: {label: 'Standup', kind: 'once', nextAt: future}});
-  assert.equal(task.runAt, future, 'A one-off reminder fires when it was set to.');
+  const {task} = enqueueTask(state, {kind: 'bot-task', payload: {groupId: 'home', message: 'Standup', kind: 'once', nextAt: future}});
+  assert.equal(task.runAt, future, 'A one-off scheduled task fires when it was set to.');
   // Only a failed task is retryable: a cancelled one is a decision, not a fault.
   assert.throws(() => retryTask(state, task.id), error => error.status === 409 && /Only a failed task/.test(error.message));
   state.tasks[0].status = 'failed';
@@ -53,10 +53,10 @@ async function agentStore() {
   return {dir, store, add};
 }
 
-function handlers(store, {processCandidate = async () => ({ok: true})} = {}) {
+function handlers(store) {
   return taskHandlers({
     ws: store, workspaceId: 'default', auth: {}, push: {announce() {}, deliver: async () => ({})},
-    notify: () => {}, processCandidate,
+    notify: () => {},
   });
 }
 
@@ -111,17 +111,9 @@ test('a job aimed at a missing agent is a 404, not a job for whoever is left', a
   } finally { await rm(dir, {recursive: true, force: true}); }
 });
 
-test('a draft task for a deleted candidate fails as a 404 before drafting', async () => {
-  const {dir, store} = await agentStore();
-  try {
-    let drafted = 0;
-    const map = handlers(store, {processCandidate: async () => { drafted++; }});
-    await assert.rejects(map['candidate-draft']({id: 'task-5', payload: {candidateId: 'gone', direction: ''}}),
-      error => error.status === 404 && /Candidate not found/.test(error.message));
-    assert.equal(drafted, 0, 'A missing candidate must not reach the provider.');
-    // A candidate that exists still drafts, so the check is not a blanket refusal.
-    store.run("INSERT INTO candidates (id,url,author,text,status,created_at) VALUES ('c1','https://example.com/p','Demo','A post','new',?)", stamp());
-    await map['candidate-draft']({id: 'task-6', payload: {candidateId: 'c1', direction: ''}});
-    assert.equal(drafted, 1);
-  } finally { await rm(dir, {recursive: true, force: true}); }
+
+test('reminder and candidate-draft are no longer task kinds', () => {
+  for (const kind of ['reminder', 'candidate-draft']) {
+    assert.throws(() => enqueueTask(emptyState(), {kind, payload: {label: 'x', kind: 'interval', intervalMinutes: 5, candidateId: 'c1'}, title: 'x'}), /Unknown task kind/, kind);
+  }
 });

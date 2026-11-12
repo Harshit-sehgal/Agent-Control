@@ -11,7 +11,7 @@ import * as wf from '../shared/workflow.js';
 async function harness() {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-queue-'));
   const store = await new SqliteStore(path.join(dir, 'state.db'), path.join(dir, 'state.json')).init();
-  await store.update(s => { wf.migrate(s); wf.recoverInterrupted(s); });
+  await store.update(s => { wf.migrate(s); });
   return {dir, store};
 }
 /** Insert a task record directly. The kind whitelist in `buildPayload` is an
@@ -101,8 +101,9 @@ test('an unknown task kind fails explicitly instead of being marked done', async
 
 test('an idempotency key collapses duplicate submissions into one task', async () => {
   const {store, dir} = await harness();
-  const first = await store.update(s => tasks.enqueueTask(s, {kind: 'candidate-draft', payload: {candidateId: 'c1', direction: ''}, title: 'Once', idempotencyKey: 'click:42'}));
-  const second = await store.update(s => tasks.enqueueTask(s, {kind: 'candidate-draft', payload: {candidateId: 'c1', direction: ''}, title: 'Once', idempotencyKey: 'click:42'}));
+  const spec = {kind: 'group-run', payload: {groupId: 'home', message: 'Coordinate.'}, title: 'Once', idempotencyKey: 'click:42'};
+  const first = await store.update(s => tasks.enqueueTask(s, spec));
+  const second = await store.update(s => tasks.enqueueTask(s, spec));
   assert.equal(first.duplicate, false);
   assert.equal(second.duplicate, true);
   assert.equal(second.task.id, first.task.id);
@@ -214,19 +215,6 @@ test('duplicate work delivery: two workers claiming at once get one task each', 
   assert.notEqual(a[0].id, b[0].id, 'Each worker claims different work; no double delivery.');
   const third = await store.update(s => tasks.claimTasks(s, {workerId: 'w3', now: Date.now(), limit: 5}));
   assert.equal(third.length, 0, 'Nothing is left to claim while both are leased.');
-  await fs.rm(dir, {recursive: true, force: true});
-});
-
-test('reminder tasks fire as activity events, mirroring the old scheduler behavior', async () => {
-  const {store, dir} = await harness();
-  const queue = createQueue(store, {...(await import('../src/queue.js')).defaultHandlers(store)}, {intervalMs: 60000});
-  await store.update(s => tasks.enqueueTask(s, {kind: 'reminder', payload: {label: 'Check the queue', kind: 'interval', intervalMinutes: 30}, title: 'Check the queue'}));
-  await queue.sweep();
-  const state = store.read();
-  const task = state.tasks[0];
-  assert.equal(task.status, 'queued', 'An interval reminder re-arms.');
-  assert.ok(Date.parse(task.runAt) > Date.now() + 29 * 60000);
-  assert.ok(state.events.some(e => e.type === 'reminder' && e.message === 'Check the queue'));
   await fs.rm(dir, {recursive: true, force: true});
 });
 

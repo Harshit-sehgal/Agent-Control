@@ -8,10 +8,11 @@ import * as backup from './backup.js';
 import * as notifications from './notifications.js';
 import {deleteProvider} from './ai-providers.js';
 import {onAgentTaskResult} from './bot-browser.js';
-import {resumeFeedRun, resumeBrowserRun} from './coordination.js';
+import {resumeBrowserRun} from './coordination.js';
 import {DEFAULT_WORKSPACE, ROLES, clearCookie} from './auth.js';
 import {fail} from './http.js';
 import {reply} from './router.js';
+import {runningAgentDataFile, localMcpServers, addLocalMcpServer, removeLocalMcpServer} from './local-agent.js';
 
 /** The rows a removed account owns in the *workspace* database, cleared in or
  * before the caller's own transaction. The account itself lives in the primary
@@ -31,6 +32,9 @@ function clearWorkspaceAccount(store, {userId, email}) {
     WHERE status IN ('queued','running') AND agent_id IN (SELECT id FROM agents WHERE paired_by=?)`,
   'The device belonged to an account that was removed.', stamp, stamp, email);
 }
+
+/** Task kinds only the server's own code may queue. */
+const SERVER_ONLY_KINDS = ['mcp.call', 'model.run'];
 
 export function accountRoutes(router, {auth, workspaces}) {
   // The signed-in user's own account and sessions.
@@ -86,8 +90,11 @@ export function accountRoutes(router, {auth, workspaces}) {
     await c.store.update(s => activity(s, 'agent', 'Created a local-agent pairing code.', {expiresAt: pairing.expiresAt}));
     return reply(201, pairing);
   });
-  router.add('POST', '/api/agents/:id/tasks', 'member', async c => {
+  router.add('POST', '/api/agents/:id/tasks', 'admin', async c => {
     const b = await c.body(), kind = String(b.kind || '');
+    // A connector call and a model run are the server's own work: they carry what an ask cleared and spend the
+    // owner's plan, so only the server's code queues them (src/mcp-client.js, src/cli-model.js), never this route.
+    if (SERVER_ONLY_KINDS.includes(kind)) fail(`${kind} tasks are queued only by the server itself, never through this route.`, 400);
     // `enqueueAgentTask` validates a browser payload itself (MAX_STEPS, a public
     // http(s) url, and never a click or type on X), so the scheduler's own path
     // cannot skip the rule this route used to be the only one to apply.
@@ -114,6 +121,26 @@ export function accountRoutes(router, {auth, workspaces}) {
     await c.store.update(s => activity(s, 'agent', 'Updated local agent permissions.', {agentId: id}));
     return result;
   });
+  // stdio MCP servers on the agent this server runs on its own computer. Adding one runs a program here,
+  // so only an owner of the first workspace (whose agent it is) may, and the command never reaches the database.
+  const thisComputer = c => {
+    if (c.actor.workspaceId !== DEFAULT_WORKSPACE) fail('This computer belongs to the first workspace.', 403);
+    const dataFile = runningAgentDataFile();
+    if (!dataFile) fail('The local agent is not running on this computer. Pair a device in Settings → Local agents and add the server to its config.', 409);
+    return dataFile;
+  };
+  router.add('GET', '/api/agents/local/mcp', 'owner', c => ({servers: localMcpServers({dataFile: thisComputer(c)})}));
+  router.add('POST', '/api/agents/local/mcp', 'owner', async c => {
+    const b = await c.body();
+    const servers = addLocalMcpServer({dataFile: thisComputer(c), name: b?.name, command: b?.command, env: b?.env});
+    await c.store.update(s => activity(s, 'agent', `Added the MCP server "${cleanText(b?.name, 40)}" to this computer.`));
+    return reply(201, {servers});
+  });
+  router.add('DELETE', '/api/agents/local/mcp/:name', 'owner', async c => {
+    const servers = removeLocalMcpServer({dataFile: thisComputer(c), name: c.params.name});
+    await c.store.update(s => activity(s, 'agent', `Removed the MCP server "${cleanText(c.params.name, 40)}" from this computer.`));
+    return {servers};
+  });
   router.add('DELETE', '/api/agents/:id', 'admin', async c => {
     const browserTasks = c.store.all(
       "SELECT id FROM agent_tasks WHERE agent_id=? AND kind IN ('browser.capture','browser.action') AND status IN ('queued','running')",
@@ -122,7 +149,7 @@ export function accountRoutes(router, {auth, workspaces}) {
     const result = agent.revokeAgent(c.store, c.params.id);
     await c.store.update(s => activity(s, 'agent', 'Revoked a local agent. Its in-flight tasks were failed, not dropped silently.', {agentId: c.params.id}));
     for (const id of browserTasks) {
-      try { await onAgentTaskResult(c.store, id, {resumeFeed: resumeFeedRun, resumeBrowser: resumeBrowserRun}); }
+      try { await onAgentTaskResult(c.store, id, {resumeBrowser: resumeBrowserRun}); }
       catch (error) { console.error('Browser revocation:', error.message); }
     }
     return result;
@@ -160,8 +187,8 @@ export function accountRoutes(router, {auth, workspaces}) {
     const list = Array.isArray(b?.ids) ? b.ids : [b?.ids];
     return notifications.markRead(c.store, c.actor.userId, list.filter(id => typeof id === 'string' && id.trim()).slice(0, 200));
   });
-  router.add('GET', '/api/notification-prefs', 'viewer', c => notifications.getPreferences(c.store, c.actor.userId));
-  router.add('PATCH', '/api/notification-prefs', 'member', async c => { const b = await c.body(); return notifications.updatePreferences(c.store, c.actor.userId, b); });
+  router.add('GET', '/api/notification-prefs', 'viewer', c => ({...notifications.getPreferences(c.store, c.actor.userId), emailReady: notifications.emailReady()}));
+  router.add('PATCH', '/api/notification-prefs', 'member', async c => { const b = await c.body(); return notifications.updatePreferences(c.store, c.actor.userId, b, {email: c.actor.email}); });
 
   // Backup: export and restore. Credentials, agent secrets and password hashes
   // never travel. Owner only. Restore replaces the current workspace database,
@@ -195,7 +222,7 @@ export function accountRoutes(router, {auth, workspaces}) {
       // Any workspace it names but did not carry has just been started empty,
       // and a 200 that does not say so reads as "everything came back".
       const missing = created.length ? ` ${created.length === 1 ? 'One workspace it names had' : `${created.length} workspaces it names had`} no data in the file and ${created.length === 1 ? 'was' : 'were'} started empty: ${created.join(', ')}.` : '';
-      await store.update(s => activity(s, 'backup', `Restored a backup into this installation (${result.restored} rows).${missing}`));
+      await store.update(s => activity(s, 'backup', `Restored a backup into this installation (${result.restored} rows).${missing}${result.notes?.length ? ` ${result.notes.join(' ')}` : ''}`));
       // A primary restore deletes every session (see backup.importBackup), so
       // the caller's cookie is dead the moment this returns: say so instead of
       // answering 200 as if they were still signed in.

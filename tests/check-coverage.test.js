@@ -42,7 +42,8 @@ test('npm run check syntax-checks exactly the source files on disk',async()=>{
 
   // The five roots and two extensions are the contract, not whatever the
   // walker happens to use this week.
-  assert.deepEqual([...ROOTS].sort(),['agent','extension','scripts','shared','src']);
+  assert.deepEqual([...ROOTS].sort(),['agent','scripts','shared','src']);
+  assert.equal(ROOTS.includes('extension'),false,'the X capture extension is gone');
   assert.deepEqual([...EXTENSIONS].sort(),['.js','.mjs']);
 
   const found=[];
@@ -70,7 +71,7 @@ test('the walk is stable and ordered',async()=>{
   assert.deepEqual(files,[...files].sort(),'sourceFiles() must be sorted so the count is reproducible');
   assert.ok(files.length>0,'sourceFiles() found nothing');
   for(const file of files){
-    assert.match(file,/^(?:src|shared|agent|extension|scripts)\//,`${file} must be reported root-relative`);
+    assert.match(file,/^(?:src|shared|agent|scripts)\//,`${file} must be reported root-relative`);
   }
 });
 
@@ -78,7 +79,7 @@ test('the roots that used to escape the check are pinned',async()=>{
   // Each of these was missing from the old hand-written list, and every test
   // stayed green while their syntax was unchecked.
   const covered=new Set(await sourceFiles());
-  for(const file of ['agent/agent.mjs','agent/net-guard.mjs','agent/browser.mjs','extension/popup.js','scripts/build-pages.js','scripts/backup.mjs','src/server.js','shared/assets.js']){
+  for(const file of ['agent/agent.mjs','agent/net-guard.mjs','agent/browser.mjs','scripts/build-pages.js','scripts/backup.mjs','src/server.js','shared/assets.js']){
     assert.ok(covered.has(file),`${file} is not syntax-checked`);
   }
 });

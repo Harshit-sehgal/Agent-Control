@@ -35,7 +35,7 @@ test('an update that changes one collection rewrites none of the others', async 
     const before = rows(t.store, 'SELECT rowid, id FROM chat_messages ORDER BY id');
     assert.equal(before.length, 50, 'the fixture is really stored');
 
-    await t.store.update(s => { s.settings.style = 'a style with no rows of its own'; });
+    await t.store.update(s => { s.settings.retention = {events: 30}; });
 
     assert.deepEqual(rows(t.store, 'SELECT rowid, id FROM chat_messages ORDER BY id'), before,
       'a settings write must not delete and re-insert every chat message');
@@ -120,24 +120,24 @@ test('a reopened store reads exactly what the incremental path wrote', async () 
 test('an item prepended to the document is still first after a restart', async () => {
   const t = await sandbox();
   const db = path.join(t.dir, 'state.json');
-  const post = (id, at) => ({id, url: `https://x.com/a/status/${id}`, author: 'a', topic: '', text: id, status: 'new', createdAt: at});
+  const post = (id, at) => ({id, botId: 'atlas', botName: 'Atlas', input: id, output: id, at});
   try {
-    // The app prepends: a new captured post and a new activity event are index
+    // The app prepends: a new run and a new activity event are index
     // 0, and the document's array order is what the API hands the UI.
     await t.store.update(s => {
-      s.candidates.push(post('c1', iso()));
+      s.runs.push(post('c1', iso()));
       s.events.push({id: 'e1', at: iso(), type: 'k', message: 'first', meta: {}});
     });
     await t.store.update(s => {
-      s.candidates.unshift(post('c2', iso()));
+      s.runs.unshift(post('c2', iso()));
       s.events.unshift({id: 'e2', at: iso(), type: 'k', message: 'second', meta: {}});
     });
-    assert.deepEqual(t.store.read().candidates.map(c => c.id), ['c2', 'c1'], 'the live cache is in document order');
+    assert.deepEqual(t.store.read().runs.map(c => c.id), ['c2', 'c1'], 'the live cache is in document order');
     await t.store.close();
 
     const reopened = await openStore(db);
-    assert.deepEqual(reopened.read().candidates.map(c => c.id), ['c2', 'c1'],
-      'a restart must not move the newest post to the end of the list');
+    assert.deepEqual(reopened.read().runs.map(c => c.id), ['c2', 'c1'],
+      'a restart must not move the newest run to the end of the list');
     assert.deepEqual(reopened.read().events.map(e => e.id), ['e2', 'e1']);
     await reopened.close();
   } finally { await fs.rm(t.dir, {recursive: true, force: true}); }

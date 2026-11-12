@@ -1,0 +1,211 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {feed, runsOfChat} from '../shared/ui-feed.js';
+import {timeline} from '../shared/ui-model.js';
+
+const bot = (id, name, settings = {}) => ({id, name, instructions: `${name} does a job.`, settings});
+const atlas = bot('atlas', 'Atlas', {lead: true});
+const plan = bot('plan', 'Planner', {reportsTo: 'atlas'});
+const KEY = 'team-th-1';
+const at = n => `2026-11-11T10:00:${String(n).padStart(2, '0')}Z`;
+const msg = (id, role, n, extra = {}) => ({id, role, at: at(n), text: id, ...extra});
+const run = (extra = {}) => ({id: 'r1', groupId: 'th-1', status: 'completed', recipients: ['atlas', 'plan', 'atlas'], currentStep: 3, createdAt: at(1), trace: [
+  {botId: 'atlas', output: '@Planner plan it'}, {botId: 'plan', output: 'Wednesday is free.'}, {botId: 'atlas', output: 'Done: Wednesday.'},
+], ...extra});
+const stateOf = (runs = [], messages = []) => ({groups: [{id: 'home', bots: [atlas, plan], settings: {}}, {id: 'th-1', bots: [], settings: {kind: 'thread'}}], groupRuns: runs, chats: {[KEY]: messages}, browserRequests: [], asks: [{id: 'a1', botId: 'plan', status: 'pending', action: 'browser.use'}]});
+const build = (messages, runs = [], key = KEY) => {
+  const state = stateOf(runs, messages);
+  return feed({items: timeline({conv: {id: key}, state, messages: {[key]: messages}}), state, key});
+};
+const kinds = entries => entries.map(e => e.kind);
+
+test('owner lines and bot replies become me and bot entries under a day divider', () => {
+  const out = build([msg('q', 'user', 1), msg('a', 'bot', 2, {senderId: 'atlas', senderName: 'Atlas'})]);
+  assert.deepEqual(kinds(out), ['day', 'me', 'bot']);
+  assert.equal(out[2].message.id, 'a');
+});
+
+test('a finished run with handoffs shows one quiet pill before the lead\'s last reply and hides the helpers\' lines', () => {
+  const out = build([
+    msg('q', 'user', 1),
+    msg('h', 'bot', 2, {senderId: 'atlas', runId: 'r1'}),
+    msg('p', 'bot', 3, {senderId: 'plan', runId: 'r1'}),
+    msg('f', 'bot', 4, {senderId: 'atlas', runId: 'r1'}),
+  ], [run()]);
+  assert.deepEqual(kinds(out), ['day', 'me', 'pill', 'bot']);
+  assert.equal(out[2].pill.done, true);
+  assert.equal(out[2].pill.text, 'Planner messaged Atlas');
+  assert.equal(out[2].handoffs.length, 2);
+  assert.equal(out[3].message.id, 'f');
+});
+
+test('a live run shows the progress pill and keeps its lines back until it ends', () => {
+  const live = run({status: 'running', currentStep: 1, trace: [{botId: 'atlas', output: '@Planner plan it'}]});
+  const out = build([msg('q', 'user', 1), msg('h', 'bot', 2, {senderId: 'atlas', runId: 'r1'})], [live]);
+  assert.deepEqual(kinds(out), ['day', 'me', 'pill']);
+  assert.equal(out[2].pill.text, 'Checking with Planner');
+});
+
+test('a live run with no line yet puts its pill last', () => {
+  const out = build([msg('q', 'user', 1)], [run({status: 'running', recipients: ['atlas'], trace: [], currentStep: 0})]);
+  assert.deepEqual(kinds(out), ['day', 'me', 'pill']);
+  assert.equal(out[2].pill.text, 'Thinking it through');
+});
+
+test('a run where one bot did everything leaves its lines alone and adds no pill', () => {
+  const solo = run({recipients: ['atlas'], trace: [{botId: 'atlas', output: 'Hi'}]});
+  const out = build([msg('q', 'user', 1), msg('a', 'bot', 2, {senderId: 'atlas', runId: 'r1'})], [solo]);
+  assert.deepEqual(kinds(out), ['day', 'me', 'bot']);
+});
+
+test('a bot that answered alone in its own chat leaves no "helped" pill', () => {
+  const alone = run({chatKey: 'plan', recipients: ['plan'], trace: [{botId: 'plan', output: 'Hi'}]});
+  const out = build([msg('q', 'user', 1), msg('a', 'bot', 2, {senderId: 'plan', runId: 'r1'})], [alone], 'plan');
+  assert.deepEqual(kinds(out), ['day', 'me', 'bot']);
+});
+
+test('a failed run keeps its lines that went to no bot, and only the newest note of a run carries the run', () => {
+  const failed = run({status: 'failed', error: 'no key'});
+  const out = build([
+    msg('q', 'user', 1),
+    msg('p', 'bot', 2, {senderId: 'plan', runId: 'r1'}),
+    msg('n1', 'system', 3, {runId: 'r1'}),
+    msg('n2', 'system', 4, {runId: 'r1'}),
+  ], [failed]);
+  assert.deepEqual(kinds(out), ['day', 'me', 'pill', 'bot', 'note', 'note']);
+  assert.equal(out[2].pill.done, true, 'its hops fold into one muted line');
+  assert.equal(out[4].run, null);
+  assert.equal(out[5].run.id, 'r1');
+});
+
+test('the "Done in N steps" note of a completed run is dropped: the pill says it', () => {
+  const out = build([msg('q', 'user', 1), msg('d', 'system', 5, {runId: 'r1', id: 'r1-completed'})], [run()]);
+  assert.ok(!kinds(out).includes('note'));
+});
+
+test('a run waiting at a limit ends the feed with the checkpoint card, after the muted line holding its hops', () => {
+  const paused = run({status: 'awaiting_limit', limit: {kind: 'pair', at: 12}});
+  const out = build([msg('q', 'user', 1)], [paused]);
+  assert.deepEqual(kinds(out), ['day', 'me', 'pill', 'limit']);
+  assert.equal(out[2].pill.done, true);
+  assert.equal(out[2].run.id, 'r1');
+});
+
+test('an out-of-job reply keeps its buttons until something is said after it', () => {
+  const offjob = msg('o', 'bot', 2, {senderId: 'plan', kind: 'offjob', request: 'Book a table', botId: 'plan'});
+  assert.equal(build([msg('q', 'user', 1), offjob]).at(-1).open, true);
+  assert.equal(build([msg('q', 'user', 1), offjob, msg('q2', 'user', 3)]).find(e => e.kind === 'offjob').open, false);
+  // "Do it anyway" answers with a plain reply and no new owner line.
+  assert.equal(build([msg('q', 'user', 1), offjob, msg('a', 'bot', 3, {senderId: 'plan'})]).find(e => e.kind === 'offjob').open, false);
+  // A system line (a run note) does not settle it.
+  assert.equal(build([msg('q', 'user', 1), offjob, msg('n', 'system', 3)]).find(e => e.kind === 'offjob').open, true);
+});
+
+test('a browser card keeps its own kind while its request waits on a person', () => {
+  const lines = [msg('browser-br1', 'system', 2, {kind: 'browser'})];
+  const state = {...stateOf([], lines), browserRequests: [{id: 'br1', status: 'pending'}]};
+  assert.ok(kinds(feed({items: timeline({conv: {id: KEY}, state, messages: {[KEY]: lines}}), state, key: KEY})).includes('browser'));
+});
+
+test('runs of other chats are ignored', () => {
+  const other = run({chatKey: 'plan', id: 'r2'});
+  assert.deepEqual(runsOfChat(stateOf([other, run()]), KEY).map(r => r.id), ['r1']);
+  assert.deepEqual(runsOfChat(stateOf([other, run()]), 'plan').map(r => r.id), ['r2']);
+});
+
+test('the "N messages" note a paused run writes is dropped: its card says it', () => {
+  const paused = run({status: 'awaiting_limit', limit: {kind: 'pair', at: 12}, asks: {total: 12}});
+  const out = build([msg('q', 'user', 1), msg('l', 'system', 2, {runId: 'r1', kind: 'limit'})], [paused]);
+  assert.deepEqual(kinds(out), ['day', 'me', 'pill', 'limit']);
+});
+
+test('the runaway guard line asks Keep going or Stop only while bots are still paused, and only its newest line asks', () => {
+  const lines = [msg('q', 'user', 1), msg('g1', 'system', 2, {kind: 'guard'}), msg('g2', 'system', 3, {kind: 'guard'})];
+  const state = {...stateOf([], lines), guard: {paused: true}};
+  const open = feed({items: timeline({conv: {id: KEY}, state, messages: {[KEY]: lines}}), state, key: KEY}).filter(e => e.kind === 'guard');
+  assert.deepEqual(open.map(e => e.open), [false, true]);
+  const resumed = {...state, guard: {paused: false}};
+  const done = feed({items: timeline({conv: {id: KEY}, state: resumed, messages: {[KEY]: lines}}), state: resumed, key: KEY}).filter(e => e.kind === 'guard');
+  assert.deepEqual(done.map(e => e.open), [false, false]);
+});
+
+// ---- asks ----
+
+const askLine = (id, n, extra = {}) => msg(id, 'system', n, {kind: 'ask', askId: id.replace('ask-', ''), ...extra});
+
+test('an ask line becomes an ask entry that carries its line while it waits', () => {
+  const out = build([msg('q', 'user', 1), askLine('ask-a1', 2), msg('later', 'bot', 3, {senderId: 'atlas'})]);
+  assert.deepEqual(kinds(out), ['day', 'me', 'ask', 'bot']);
+  assert.equal(out[2].message.askId, 'a1');
+});
+
+test('a run waiting on an ask shows the card, not a second "needs your OK" pill', () => {
+  const waiting = run({status: 'awaiting_ask', askIds: ['a1'], trace: [{botId: 'plan', output: 'I need a page.'}], recipients: ['plan'], currentStep: 0});
+  const out = build([msg('q', 'user', 1, {runId: 'r1'}), askLine('ask-a1', 2, {runId: 'r1'})], [waiting]);
+  assert.deepEqual(kinds(out), ['day', 'me', 'ask']);
+});
+
+test('the ask lines in the primary\'s chat read the same way', () => {
+  const out = build([askLine('ask-a1', 2, {text: 'Needs you: Planner wants to open example.com.'})], [], 'atlas');
+  assert.deepEqual(kinds(out), ['day', 'ask']);
+});
+
+/* ---------- connector and model-limit lines ---------- */
+
+const withState = (messages, extra = {}, runs = []) => {
+  const state = {...stateOf(runs, messages), connectors: [{id: 'google', kind: 'google', name: 'Google', account: 'me@example.org'}], ai: {providers: [{id: 'p2', label: 'OpenAI'}], bots: {}}, ...extra};
+  return feed({items: timeline({conv: {id: KEY}, state, messages: {[KEY]: messages}}), state, key: KEY, now: Date.parse(at(10))});
+};
+
+test('what a connector read or did is not shown; a held send is, with the account it uses', () => {
+  const out = withState([msg('q', 'user', 1), msg('c1', 'system', 2, {kind: 'connector', connectorId: 'google', text: 'Atlas used Google: gmail.search.'}), msg('c2', 'system', 3, {kind: 'connector-error', text: 'Atlas could not use Notes: add.'})]);
+  assert.deepEqual(kinds(out), ['day', 'me']);
+  const held = withState([msg('c3', 'system', 2, {kind: 'connector', connectorId: 'google', text: 'Atlas is sending an email.', activityId: 'act-1', undoUntil: at(30)})]);
+  assert.equal(held[1].line.account, 'me@example.org');
+  assert.equal(held[1].line.tone, 'ok');
+});
+
+test('a held send stays open for Undo inside its window, and the feed takes the clock it is given', () => {
+  const sending = msg('c1', 'system', 2, {kind: 'connector', connectorId: 'google', text: 'Atlas is sending an email.', activityId: 'act-1', undoUntil: at(30)});
+  assert.equal(withState([sending])[1].line.undo.open, true);
+  const state = {...stateOf([], [sending]), connectors: []};
+  const late = feed({items: timeline({conv: {id: KEY}, state, messages: {[KEY]: [sending]}}), state, key: KEY, now: Date.parse(at(31))});
+  assert.equal(late[1].line.undo.open, false);
+  const undone = withState([sending, msg('send-act-1', 'system', 5, {kind: 'connector', text: 'You undid it.'})]);
+  assert.equal(undone[1].line.undo.open, false);
+});
+
+test('a model-limit line is its own entry even though it names a run, and it does not take the run\'s note', () => {
+  const failed = run({id: 'r9', status: 'failed', recipients: ['atlas'], trace: []});
+  const out = withState([msg('q', 'user', 1), msg('n', 'system', 2, {runId: 'r9', text: 'It failed.'}), msg('r9-model-limit', 'system', 3, {kind: 'model-limit', runId: 'r9', botId: 'atlas', switchTo: 'p2', text: 'Atlas hit its limit.'})], {}, [failed]);
+  assert.deepEqual(kinds(out), ['day', 'me', 'note', 'model-limit']);
+  assert.equal(out[2].run?.id, 'r9', 'the failure note keeps its Retry');
+  assert.deepEqual(out[3].line.switchTo, {id: 'p2', label: 'OpenAI'});
+  assert.equal(out[3].line.open, true);
+});
+
+test('a "needs a model" line, even one the browser wrote, becomes a card that opens Models and keys', () => {
+  const out = build([msg('q', 'user', 1), msg('n', 'system', 2, {kind: 'no-model', origin: 'browser'})]);
+  assert.deepEqual(kinds(out), ['day', 'me', 'no-model']);
+  assert.equal(out[2].message.id, 'n');
+});
+
+test('a bot\'s working step (it only went to fetch pages) stays out of the chat; its answer shows', () => {
+  const out = build([msg('u1', 'user', 1), msg('Looking it up.', 'bot', 2, {senderId: 'atlas', step: true}), msg('Acme is hiring.', 'bot', 3, {senderId: 'atlas'})]);
+  const texts = out.filter(e => e.message).map(e => e.message.text);
+  assert.ok(texts.includes('Acme is hiring.'));
+  assert.ok(!texts.includes('Looking it up.'));
+});
+
+test('a bot made for a run is said before the run\'s line, never after "X messaged Atlas"', () => {
+  const out = build([
+    msg('q', 'user', 1),
+    msg('k', 'system', 2, {kind: 'bot-created', runId: 'r1', text: 'Atlas created a new bot for this work: Planner.'}),
+    msg('h', 'bot', 3, {senderId: 'atlas', runId: 'r1'}),
+    msg('p', 'bot', 4, {senderId: 'plan', runId: 'r1'}),
+    msg('f', 'bot', 5, {senderId: 'atlas', runId: 'r1'}),
+  ], [run()]);
+  assert.deepEqual(kinds(out), ['day', 'me', 'note', 'pill', 'bot']);
+  assert.match(out[2].message.text, /created a new bot/);
+  assert.equal(out[3].pill.text, 'Planner messaged Atlas');
+});

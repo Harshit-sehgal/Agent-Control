@@ -2,8 +2,7 @@
  *
  * `src/server.js` is the only file that opens a port. Everything that has to
  * exist before a request can be answered — the route table, the
- * anonymous-then-role check, the static file server, the candidate-drafting
- * pipeline, and the background services a workspace starts — lives here, so a
+ * anonymous-then-role check, the static file server and the background services a workspace starts — lives here, so a
  * test can build the same dispatcher the running server uses and call it with a
  * fake request, without binding a socket or spawning a process.
  *
@@ -13,19 +12,24 @@
  * test can wire fakes into the same function.
  */
 import fs from 'node:fs/promises';
+import crypto from 'node:crypto';
+import zlib from 'node:zlib';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {ASSETS} from '../shared/assets.js';
-import {scoreCandidate,CSP} from '../shared/core.js';
+import {CSP} from '../shared/core.js';
 import * as wf from '../shared/workflow.js';
 import * as agent from './agent.js';
-import {makeDraft} from './ai.js';
-import {resolveConfig} from './ai-providers.js';
-import {startScheduler,startRetention} from './scheduler.js';
-import {markInterrupted} from './coordination.js';
+import {startRetention} from './scheduler.js';
+import {markInterrupted, queueGroupRun} from './coordination.js';
+import {startFollowUps} from './follow-ups.js';
+import {startAskExpiry} from './ask-runs.js';
+import {startHeldSends} from './held-sends.js';
+import {startBrowserExpiry} from './bot-browser.js';
+import {migrateModelBooks} from './memory.js';
 import {createQueue,recoverQueue} from './queue.js';
 import {taskHandlers,createNotifier} from './handlers.js';
-import {fail,send,cookie,checkOrigin,rawBody,safeJson,SECURITY} from './http.js';
+import {fail,send,cookie,checkOrigin,rawBody,safeJson,SECURITY,acceptsGzip} from './http.js';
 import {createRouter,isReply,allows} from './router.js';
 import {publicRoutes} from './routes-public.js';
 import {workflowRoutes} from './routes-workflow.js';
@@ -35,32 +39,12 @@ import {workspaceRoutes} from './routes-workspaces.js';
 import {pushRoutes} from './routes-push.js';
 import {aiRoutes} from './routes-ai.js';
 import {memoryRoutes} from './routes-memory.js';
+import {connectorRoutes} from './routes-connectors.js';
+import {liveRoutes} from './routes-live.js';
+import {fileRoutes} from './routes-files.js';
+import {pruneAttachments} from './attachments.js';
 
 const PUBLIC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'shared');
-
-/** Score a candidate and produce a draft, releasing the candidate if anything
- * fails so a transient provider error never strands it. Shared by the HTTP route
- * and the queue worker. */
-export async function processCandidate(store, id) {
-  const context = await store.update(s => wf.beginProcessing(s, id));
-  try {
-    const evaluation = scoreCandidate(context.candidate, context.settings.topics);
-    const result = await makeDraft(context.candidate, context.settings, '', resolveConfig(store, null));
-    return await store.update(s => wf.finishProcessing(s, id, evaluation, result));
-  } catch (e) {
-    // The candidate may have been deleted (or the write may have failed) while
-    // the provider was working. Recording the failure must never replace the
-    // real drafting error with the transition's own 404 or leave the row in
-    // `processing`, so the fallback writes the stored document directly.
-    try { await store.update(s => wf.failProcessing(s, id, e.message)); }
-    catch (releaseError) {
-      try { store.failCandidate(id); }
-      catch (resetError) { console.error(`Could not release candidate ${id}:`, resetError.message); }
-      if (releaseError?.status !== 404) console.error(`Could not record the draft failure for ${id}:`, releaseError.message);
-    }
-    throw e;
-  }
-}
 
 /** Agent-protocol retention. Pairing codes and agent tasks are not part of the
  * workflow document, so `pruneState()` never sees them; this is the same daily
@@ -72,8 +56,9 @@ function startAgentRetention(ws, intervalMs = 86400000) {
     if (busy || stopped) return;
     busy = true;
     try {
-      const report = ws.trackWork ? await ws.trackWork(async () => ws.pruneAgentRows()) : ws.pruneAgentRows();
-      if (report.pairingCodes || report.agentTasks) console.log(`Retention pruned ${report.pairingCodes} pairing code(s), ${report.agentTasks} agent task record(s).`);
+      const sweep = () => ({...ws.pruneAgentRows(), files: pruneAttachments(ws)});
+      const report = ws.trackWork ? await ws.trackWork(async () => sweep()) : sweep();
+      if (report.pairingCodes || report.agentTasks || report.files) console.log(`Retention pruned ${report.pairingCodes} pairing code(s), ${report.agentTasks} agent task record(s), ${report.files} unused attachment(s).`);
     } catch (e) { if (e?.status !== 503) console.error('Agent retention error:', e.message); }
     finally { busy = false; }
   };
@@ -90,8 +75,9 @@ function startAgentRetention(ws, intervalMs = 86400000) {
 export function createWorkspaceStarter({auth, push}) {
   return function startWorkspace(ws, workspaceId) {
     const ready = (async () => {
-      await ws.update(s => { wf.migrate(s); wf.recoverInterrupted(s); });
+      await ws.update(s => { wf.migrate(s); });
       await markInterrupted(ws);
+      await migrateModelBooks(ws);
       await recoverQueue(ws);
     })();
     // Tasks orphaned by a disconnected agent are re-armed at boot rather
@@ -101,11 +87,13 @@ export function createWorkspaceStarter({auth, push}) {
     // Notifications enqueue themselves as queue tasks and fan out to the member's
     // devices; the queue handler map lives in src/handlers.js.
     const notify = createNotifier({ws, workspaceId, auth, push});
-    const queue = createQueue(ws, taskHandlers({ws, workspaceId, auth, push, notify, processCandidate}), {onFail: (task, error) => task.payload?.channel === 'push' ? null : Promise.resolve(notify({title: 'A background task failed', body: `${task.title}: ${error.message}`, kind: 'task-failure', meta: {taskId: task.id}}))});
+    // A new ask pushes through the same notifier (src/ask-cards.js reads it off the store).
+    ws.notify = notify;
+    const queue = createQueue(ws, taskHandlers({ws, workspaceId, auth, push, notify}), {onFail: (task, error) => task.payload?.channel === 'push' ? null : Promise.resolve(notify({title: 'A background task failed', body: `${task.title}: ${error.message}`, kind: 'task-failure', meta: {taskId: task.id}}))});
     // Nothing runs until recovery has finished, so a stalled task is re-armed
     // before the first sweep can see it.
     let stops = [], stopped = false;
-    ready.then(() => { if (!stopped) stops = [startScheduler(ws), startRetention(ws), startAgentRetention(ws), queue.start()]; }).catch(error => console.error(`Workspace ${workspaceId} failed to start:`, error.message));
+    ready.then(() => { if (!stopped) stops = [startRetention(ws), startAgentRetention(ws), startAskExpiry(ws), startHeldSends(ws), startBrowserExpiry(ws), startFollowUps(ws, queueGroupRun), queue.start()]; }).catch(error => console.error(`Workspace ${workspaceId} failed to start:`, error.message));
     const stop = async () => { stopped = true; await ready.catch(() => {}); for (const s of stops) await s(); };
     stop.ready = ready;
     return stop;
@@ -117,15 +105,32 @@ const TYPES = {'html': 'text/html; charset=utf-8', 'js': 'text/javascript; chars
 // so a UI module cannot be added to one and forgotten in the other.
 const SERVED = new Set(ASSETS);
 
+/** Served files, read once and kept with their gzip and ETag. A stat per
+ * request (cheap next to a read) notices an edited file, so working on
+ * `shared/` still needs only a reload. */
+const ASSET_CACHE = new Map();
+const COMPRESSIBLE = new Set(['html', 'js', 'css', 'svg', 'webmanifest']);
+async function loadAsset(rel) {
+  const file = path.join(PUBLIC, rel), stat = await fs.stat(file);
+  const stamp = `${stat.size}:${stat.mtimeMs}`, hit = ASSET_CACHE.get(rel);
+  if (hit?.stamp === stamp) return hit;
+  const body = await fs.readFile(file);
+  const etag = `"${crypto.createHash('sha1').update(body).digest('base64url').slice(0, 20)}"`;
+  const gzip = COMPRESSIBLE.has(rel.split('.').pop()) && body.length >= 1024 ? zlib.gzipSync(body, {level: 9}) : null;
+  const asset = {stamp, body, etag, gzip};
+  ASSET_CACHE.set(rel, asset);
+  return asset;
+}
+
 /** Build the route table and the request handler. `store`, `auth`, `workspaces`,
  * `push` and `version` are the live services; a test can pass the same shapes
  * with fakes. Returns the handler plus the pieces it is made of, so a caller can
  * exercise the dispatcher directly. */
-export function createApp({store, auth, workspaces, push, version, process = processCandidate}) {
+export function createApp({store, auth, workspaces, push, version}) {
   // Every API route lives in a route module and is registered with the access it
   // needs (see src/router.js). This function only wires them together.
   const router = createRouter();
-  const app = {store, auth, workspaces, push, processCandidate: process, version};
+  const app = {store, auth, workspaces, push, version};
   publicRoutes(router, app);
   workflowRoutes(router, app);
   groupRoutes(router, app);
@@ -134,6 +139,9 @@ export function createApp({store, auth, workspaces, push, version, process = pro
   pushRoutes(router, app);
   aiRoutes(router, app);
   memoryRoutes(router);
+  connectorRoutes(router, app);
+  liveRoutes(router, app);
+  fileRoutes(router);
 
   async function api(req, res, u) {
     const found = router.find(req.method, u.pathname), access = found?.route.access;
@@ -162,7 +170,7 @@ export function createApp({store, auth, workspaces, push, version, process = pro
     if (actor && !scope) fail('This workspace is no longer available. Sign in again.', 401);
     let raw, parsed;
     const context = {req, path: u.pathname, params: found.params, actor, store: scope,
-      raw: async () => raw ??= await rawBody(req),
+      raw: async limit => raw ??= await rawBody(req, limit),
       // An optional limit lets a route that legitimately carries a large document
       // (a backup restore) ask for more than the 128 KB default.
       body: async (limit = 128 * 1024) => parsed ??= safeJson(await rawBody(req, limit))};
@@ -174,14 +182,25 @@ export function createApp({store, auth, workspaces, push, version, process = pro
       ? await scope.trackWork(invoke)
       : await invoke();
     const {status, body, headers} = isReply(result) ? result : {status: 200, body: result, headers: {}};
+    // A file (an attachment) goes out as its bytes with the headers its route chose.
+    if (Buffer.isBuffer(body)) { res.writeHead(status, {...SECURITY, ...headers}); return res.end(req.method === 'HEAD' ? undefined : body); }
     if (req.method === 'HEAD') { res.writeHead(status, {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...SECURITY, ...headers}); return res.end(); }
-    send(res, status, body, headers);
+    return send(res, status, body, headers);
   }
 
   async function serve(req, res, u) {
     let rel = u.pathname === '/' ? 'index.html' : u.pathname.slice(1);
     if (!SERVED.has(rel)) return send(res, 404, {error: 'Not found'});
-    try { const body = await fs.readFile(path.join(PUBLIC, rel)); res.writeHead(200, {'Content-Type': TYPES[rel.split('.').pop()] || 'application/octet-stream', 'Content-Security-Policy': CSP, ...SECURITY, 'Cache-Control': 'no-store'}); res.end(req.method === 'HEAD' ? undefined : body); } catch { return send(res, 404, {error: 'Missing asset'}); }
+    let asset;
+    try { asset = await loadAsset(rel); } catch { return send(res, 404, {error: 'Missing asset'}); }
+    // `no-cache` lets the browser keep a copy but ask before every use, so an
+    // edited file (or a deploy) is picked up at once and an unchanged one costs
+    // a 304. The `?v=` stamp on the Pages build still forces a fresh URL.
+    const head = {'Content-Type': TYPES[rel.split('.').pop()] || 'application/octet-stream', 'Content-Security-Policy': CSP, ...SECURITY, 'Cache-Control': 'no-cache', ETag: asset.etag, ...(asset.gzip ? {Vary: 'Accept-Encoding'} : {})};
+    if (req.headers?.['if-none-match'] === asset.etag) { res.writeHead(304, head); return res.end(); }
+    const packed = asset.gzip && acceptsGzip(req);
+    res.writeHead(200, packed ? {...head, 'Content-Encoding': 'gzip'} : head);
+    res.end(req.method === 'HEAD' ? undefined : packed ? asset.gzip : asset.body);
   }
 
   const handler = async (req, res) => {
@@ -193,7 +212,8 @@ export function createApp({store, auth, workspaces, push, version, process = pro
       else fail('Method not allowed.', 405);
     } catch (e) {
       let status = e.status || 500;
-      console.error(status === 500 ? 'Server error: ' + e.message : '');
+      // A 500 is a bug: log all of it. A 4xx is the client's mistake, already answered; nothing to log.
+      if (status >= 500) console.error('Server error:', e?.stack || e?.message || e);
       if (res.headersSent) { res.end(); return; }
       send(res, status, {error: status === 500 ? 'Internal server error' : e.message}, e.allow ? {Allow: e.allow} : undefined);
     }

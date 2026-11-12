@@ -10,7 +10,6 @@ import * as tasks from '../shared/tasks.js';
 import * as notifications from './notifications.js';
 import * as agent from './agent.js';
 import {queueGroupRun, runBotTask} from './coordination.js';
-import {defaultHandlers} from './queue.js';
 
 /** Notifications enqueue themselves as queue tasks and reach a device through
  * the push subscriptions of the people they are for. Returns the `notify(event)`
@@ -51,27 +50,13 @@ function permissionsOf(row) {
 }
 
 /** Task kinds map to handlers here rather than inside the queue module, so the
- * worker stays independent of the server surface it drives. `notify` defaults
- * to this workspace's fan-out, so a caller that only needs the map does not have
- * to build one. */
-export function taskHandlers({ws, workspaceId, auth, push, notify, processCandidate}) {
-  const fanOut = notify ?? createNotifier({ws, workspaceId, auth, push});
+ * worker stays independent of the server surface it drives. */
+export function taskHandlers({ws, push}) {
   return {
-    ...defaultHandlers(ws, fanOut),
-    'candidate-draft': async task => {
-      // A deleted candidate is a miss, not a transient error. Say it once, with
-      // the status a person would get from the same request.
-      if (!ws.get('SELECT id FROM candidates WHERE id=?', task.payload.candidateId)) {
-        // `permanent` is what stops the queue retrying: without it a 404 spent the
-        // whole six-hour window before the person heard anything.
-        throw Object.assign(new Error('Candidate not found.'), {status: 404, permanent: true});
-      }
-      return processCandidate(ws, task.payload.candidateId);
-    },
     'group-run': async task => {
       // `taskId` makes the run idempotent: a crash between queueing the run and
       // recording the completion used to queue a second run on recovery.
-      await queueGroupRun(ws, {groupId: task.payload.groupId, message: task.payload.message, directBotId: task.payload.directBotId, taskId: task.id});
+      await queueGroupRun(ws, {groupId: task.payload.groupId, message: task.payload.message, directBotId: task.payload.directBotId, taskId: task.id, unattended: true});
     },
     'bot-task': async task => runBotTask(ws, task),
     'agent-job': async task => {

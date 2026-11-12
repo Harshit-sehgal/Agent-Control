@@ -119,9 +119,8 @@ test('the enqueue itself enforces the browser rule, so no caller can skip it', a
   try {
     const {code} = agent.createPairing(store, 'default', {});
     const {agentId} = agent.redeemPairing(store, {code, name: 'Device', permissions: ['browser.action', 'browser.capture']});
-    // A click on X is refused here, not only at the route: the scheduler reaches
-    // this function directly and used to forward whatever a job carried.
-    assert.throws(() => agent.enqueueAgentTask(store, agentId, {kind: 'browser.action', payload: {url: 'https://x.com/home', steps: [{op: 'click', selector: '[data-testid=tweetButton]'}]}}), /never click or type there/);
+    // The scheduler reaches this function directly, so the request rules are checked here, not only at the route.
+    assert.equal(agent.enqueueAgentTask(store, agentId, {kind: 'browser.action', payload: {url: 'https://x.com/home', steps: [{op: 'click', selector: '[data-testid=tweetButton]'}]}}).task.kind, 'browser.action');
     // The step count and the url scheme are the same rule, checked in one place.
     assert.throws(() => agent.enqueueAgentTask(store, agentId, {kind: 'browser.action', payload: {url: 'https://example.com', steps: Array.from({length: 26}, () => ({op: 'read', selector: 'main'}))}}), /at most/);
     assert.throws(() => agent.enqueueAgentTask(store, agentId, {kind: 'browser.capture', payload: {url: 'file:///etc/passwd'}}), /public http\(s\) url/);
@@ -308,7 +307,11 @@ test('the HTTP protocol pairs, dispatches and collects results end to end', {tim
     const probe = await fetch(task.payload.url);
     assert.equal(probe.status, 200);
     const result = {url: task.payload.url, httpStatus: probe.status, ok: true, latencyMs: Date.now() - started, checkedAt: new Date().toISOString()};
-    const reported = await agentCall(`/api/agent/tasks/${task.id}/result`, {status: 'done', result});
+    // A result carrying an earlier attempt than the one running is fenced off
+    // by the route too, not only by `completeAgentTask` called directly.
+    const stale = await agentCall(`/api/agent/tasks/${task.id}/result`, {status: 'done', result, attempts: task.attempts - 1});
+    assert.equal(stale.status, 409);
+    const reported = await agentCall(`/api/agent/tasks/${task.id}/result`, {status: 'done', result, attempts: task.attempts});
     assert.equal(reported.status, 200);
     // Duplicate delivery of the same result is rejected, never double-applied.
     const again = await agentCall(`/api/agent/tasks/${task.id}/result`, {status: 'done', result});

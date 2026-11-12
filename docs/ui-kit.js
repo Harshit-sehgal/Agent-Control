@@ -4,6 +4,48 @@
 
 export const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 
+/* Markdown, the small part models write: **bold**, *italic*, `code`, [links](https://…),
+ * bullet and numbered lists, # headings. Everything is escaped first, so the only
+ * tags in the result are the ones made here. */
+const LIST = /^\s*(?:[-*•]|(\d+)[.)])\s+(.*)$/;
+const HEAD = /^\s*#{1,6}\s+(.*)$/;
+const UNESC = s => s.replace(/&amp;/g, '&');
+function inline(text) {
+  const codes = [];
+  let s = esc(text).replace(/`([^`\n]+)`/g, (_, c) => `\u0000${codes.push(c) - 1}\u0000`);
+  s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => `<a href="${esc(UNESC(url))}" target="_blank" rel="noopener noreferrer">${label}</a>`)
+    .replace(/\*\*(?=\S)(.+?)(?<=\S)\*\*|__(?=\S)(.+?)(?<=\S)__/g, (_, a, b) => `<strong>${a ?? b}</strong>`)
+    .replace(/(^|[^\w*])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?!\w)|(^|[^\w])_(?=\S)(.+?)(?<=\S)_(?!\w)/g, (_, p1, a, p2, b) => `${p1 ?? p2}<em>${a ?? b}</em>`);
+  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[i]}</code>`);
+}
+export function md(text) {
+  const out = [];
+  let para = [], list = null;
+  const flush = () => {
+    if (para.length) out.push(`<p>${para.map(inline).join('<br>')}</p>`);
+    if (list) out.push(`<${list.tag}>${list.items.map(i => `<li>${inline(i)}</li>`).join('')}</${list.tag}>`);
+    para = []; list = null;
+  };
+  for (const line of String(text ?? '').split('\n')) {
+    const item = LIST.exec(line), head = HEAD.exec(line);
+    if (!line.trim()) flush();
+    else if (head) { flush(); out.push(`<p class="md-h">${inline(head[1])}</p>`); }
+    else if (item) {
+      const tag = item[1] ? 'ol' : 'ul';
+      if (para.length || (list && list.tag !== tag)) flush();
+      (list ||= {tag, items: []}).items.push(item[2]);
+    } else if (list && /^\s{2,}\S/.test(line)) list.items[list.items.length - 1] += ` ${line.trim()}`;
+    else { if (list) flush(); para.push(line); }
+  }
+  flush();
+  return out.join('');
+}
+/** The same text with its markdown markers dropped, on one line, for previews. */
+export const plain = text => String(text ?? '')
+  .replace(/`([^`\n]+)`/g, '$1').replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, '$1')
+  .replace(/\*\*(.+?)\*\*|__(.+?)__/g, (_, a, b) => a ?? b).replace(/(^|[^\w*])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?!\w)/g, '$1$2')
+  .replace(/^\s*(?:#{1,6}|[-*•]|\d+[.)])\s+/gm, '').replace(/\s+/g, ' ').trim();
+
 const ICONS = {
   back: '<path d="m15 18-6-6 6-6"/>',
   chevron: '<path d="m9 18 6-6-6-6"/>',
@@ -24,43 +66,27 @@ const ICONS = {
   bot: '<rect x="4" y="8" width="16" height="12" rx="4"/><path d="M12 8V4M9 14h.01M15 14h.01"/>',
   copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>',
   trash: '<path d="M3 6h18M8 6V4h8v2m3 0-1 15H6L5 6m5 4v7m4-7v7"/>',
+  note: '<path d="M6 3.5h12v17l-6-4-6 4z"/>',
+  pulse: '<path d="M3 12h4l3-7 4 14 3-7h4"/>',
+  shield: '<path d="M12 3 4.500 6v5.500c0 4.400 3.100 8.300 7.500 9.500 4.400-1.200 7.500-5.100 7.500-9.500V6z"/>',
+  chip: '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2.500V6M15 2.500V6M9 18v3.500M15 18v3.500M2.500 9H6M2.500 15H6M18 9h3.500M18 15h3.500"/>',
+  monitor: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2.500v3M12 18.500v3M2.500 12h3M18.500 12h3M5.300 5.300l2.100 2.100M16.600 16.600l2.100 2.100M5.300 18.700l2.100-2.100M16.600 7.400l2.100-2.100"/>',
+  half: '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/>',
+  key: '<circle cx="8" cy="15" r="4"/><path d="m10.800 12.200 8.700-8.700M17 6l2.500 2.500M14.500 8.500 17 11"/>',
+  plug: '<path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0zM12 16v5"/>',
+  chart: '<path d="M5 20V12M10 20V6M15 20v-9M20 20V4"/>',
+  keyboard: '<rect x="2.500" y="6" width="19" height="12" rx="2.500"/><path d="M6.500 10h.01M10 10h.01M14 10h.01M17.500 10h.01M8 14h8"/>',
   spark: '<path d="m12 3 1.600 6.400L20 11l-6.400 1.600L12 19l-1.600-6.400L4 11l6.400-1.600z"/>',
+  clip: '<path d="m20 11.500-8.200 8.200a5 5 0 0 1-7.100-7.100l8.500-8.500a3.300 3.300 0 0 1 4.700 4.700l-8.500 8.500a1.700 1.700 0 0 1-2.400-2.400l7.800-7.800"/>',
+  file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h4"/>',
 };
 export const icon = (name, size = 20) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ICONS.spark}</svg>`;
 
-// Each bot gets one of six tints. The class sets --tile and --tint from the
-// active theme (app.css), so avatars and sender names recolour with it, the way
-// a messenger tells group members apart.
-export const TINT_COUNT = 6;
-export const tintClass = index => `t${Math.abs(Number(index) || 0) % TINT_COUNT}`;
-
-// Every bot is a small character, not a letter in a circle. The face is drawn
-// from the bot's tint index, so the same bot always looks the same: three head
-// tops and three mouths give nine combinations across the six tints. CSS makes
-// it blink and glance (each bot on its own beat) and look up while it thinks.
-const TOPS = [
-  '<path d="M24 11V6" fill="none" stroke="currentColor" stroke-width="2.200" stroke-linecap="round"/><circle cx="24" cy="5" r="2.400"/>',
-  '<path d="M17.500 11 15 6.500M30.500 11 33 6.500" fill="none" stroke="currentColor" stroke-width="2.200" stroke-linecap="round"/><circle cx="14.500" cy="5.500" r="2"/><circle cx="33.500" cy="5.500" r="2"/>',
-  '<path d="M17 10.500 20 6l4 4 4-4 3 4.500" fill="none" stroke="currentColor" stroke-width="2.200" stroke-linecap="round" stroke-linejoin="round"/>',
-];
-const MOUTHS = [
-  '<path d="M19.500 31q4.500 4 9 0" fill="none" stroke="currentColor" stroke-width="2.200" stroke-linecap="round"/>',
-  '<path d="M20 30.500q4 5.500 8 0z"/>',
-  '<ellipse cx="24" cy="32" rx="2.400" ry="2"/>',
-];
-export function avatar(name, index = 0, size = 48) {
-  const i = Math.abs(Number(index) || 0), beat = ((i * 1.7) % 5).toFixed(1);
-  return `<span class="avatar face ${tintClass(i)}" style="width:${size}px;height:${size}px;--beat:-${beat}s" aria-hidden="true"><svg viewBox="0 0 48 48" fill="currentColor"><g class="top">${TOPS[i % 3]}</g><circle class="cheek" cx="11.500" cy="29.500" r="3"/><circle class="cheek" cx="36.500" cy="29.500" r="3"/><g class="look"><g class="eyes"><ellipse class="eye" cx="17.500" cy="23" rx="2.800" ry="3.800"/><ellipse class="eye" cx="30.500" cy="23" rx="2.800" ry="3.800"/></g></g><g class="mouth">${MOUTHS[Math.floor(i / 3) % 3]}</g><text class="zz" x="37" y="12">z</text><text class="zz zz2" x="42" y="6">z</text></svg></span>`;
-}
-/** A group shows its first two members overlapped, like a group chat photo. */
-export function groupAvatar(members, size = 48) {
-  if (members.length < 2) return `<span class="avatar avatar-plain" style="width:${size}px;height:${size}px" aria-hidden="true">${icon('people', Math.round(size * 0.46))}</span>`;
-  const small = Math.round(size * 0.62);
-  return `<span class="avatar-pair" style="width:${size}px;height:${size}px" aria-hidden="true">${members.slice(0, 2).map(m => avatar(m.name, m.tint, small)).join('')}</span>`;
-}
-
-/** The app's mascot: a small bot that blinks. Colours and motion come from CSS. */
-export const mascot = () => `<svg class="mascot face" viewBox="0 0 96 96" aria-hidden="true"><g class="antenna"><path d="M48 22V10" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><circle cx="48" cy="8" r="5" fill="currentColor"/></g><rect x="12" y="22" width="72" height="60" rx="24" fill="currentColor"/><rect class="face" x="22" y="34" width="52" height="36" rx="16"/><g class="look"><g class="eyes"><circle class="eye" cx="38" cy="50" r="5" fill="currentColor"/><circle class="eye" cx="58" cy="50" r="5" fill="currentColor"/></g></g><circle class="cheek" cx="29" cy="59" r="3.500"/><circle class="cheek" cx="67" cy="59" r="3.500"/><path d="M43 60q5 5 10 0" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>`;
+/** How many colours a bot can be (settings.tint indexes ui-face COLORS, which has this many). */
+export const TINT_COUNT = 10;
+/** What each colour is called, in tint order: for the picker's labels and for a bot asked to "make it blue". */
+export const COLOR_NAMES = ['aqua', 'lavender', 'coral', 'green', 'honey', 'pink', 'blue', 'sand', 'peach', 'grey'];
 
 const dayStart = date => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 export const clock = value => {
@@ -112,9 +138,28 @@ export const textInput = (name, {type = 'text', value = '', ...rest} = {}) => {
   const extra = Object.entries(rest).map(([k, v]) => (v === true ? ` ${k}` : ` ${k}="${esc(v)}"`)).join('');
   return `<input class="input" name="${esc(name)}" type="${esc(type)}" value="${esc(value)}"${extra}>`;
 };
+/** A model dropdown from `modelChoices` rows, and the box Other… opens (hidden and disabled until then, so it
+ * never posts by accident). The change handler `model-pick` shows it. */
+export const modelSelect = (rows, {label = 'Model'} = {}) => `<select class="input" name="model" data-action="model-pick" aria-label="${esc(label)}">${rows.map(r => `<option value="${esc(r.value)}"${r.selected ? ' selected' : ''}>${esc(r.label)}</option>`).join('')}</select><input class="input model-other" name="modelOther" type="text" placeholder="Type a model id" maxlength="120" autocomplete="off" spellcheck="false" aria-label="Model id" hidden disabled>`;
+/** One model dropdown for every connected provider, from `botModelChoices`: the workspace default, then an
+ * optgroup per provider. Its "Another … model…" rows open the same typed-id box as `modelSelect`. */
+export const groupedModelSelect = ({top, groups}, {label = 'Model'} = {}) => {
+  const option = r => `<option value="${esc(r.value)}"${r.selected ? ' selected' : ''}>${esc(r.label)}</option>`;
+  return `<select class="input" name="model" data-action="model-pick" aria-label="${esc(label)}">${option(top)}${groups.map(g => `<optgroup label="${esc(g.label)}">${g.rows.map(option).join('')}</optgroup>`).join('')}</select><input class="input model-other" name="modelOther" type="text" placeholder="Type the model id, e.g. gpt-5-mini" maxlength="120" autocomplete="off" spellcheck="false" aria-label="Model id" hidden disabled>`;
+};
+/** How hard the model thinks: four pills (Default, Low, Medium, High) from `effortChoices`, native radios so the
+ * keyboard works, each with its hint as a tooltip and one line of help under them. */
+export const effortPicker = (rows, {help = 'Higher effort thinks longer: better on hard work, slower and costs more. Models that do not support it ignore it.'} = {}) =>
+  `<fieldset class="cn-via ef-pick"><legend class="field-label">Effort</legend><div class="st-seg" role="radiogroup" aria-label="Effort">${rows.map(r => `<label title="${esc(r.hint)}"><input type="radio" name="effort" value="${esc(r.value)}"${r.selected ? ' checked' : ''}><span>${esc(r.label)}</span></label>`).join('')}</div><small class="field-help">${esc(help)}</small></fieldset>`;
 export const field = (label, control, help = '') => `<label class="field"><span class="field-label">${esc(label)}</span>${control}${help ? `<small class="field-help">${esc(help)}</small>` : ''}</label>`;
 export const note = (text, tone = '') => `<p class="note ${tone}">${text}</p>`;
+/** The Pages demo's way out of a page it cannot run: how to start the full app (docs/DEPLOYMENT.md sits next to the demo). */
+export const runFullApp = () => '<a class="btn primary small demo-run" href="DEPLOYMENT.md" target="_blank" rel="noopener noreferrer">Run the full app</a>';
+/** A read-only list for the demo: a name and a line per row, nothing to press. */
+export const demoList = (rows, label) => `<ul class="cd demo-list" aria-label="${esc(label)}">${rows.map(r => `<li class="rw"><span class="w">${esc(r.name)}${r.sub ? `<small>${esc(r.sub)}</small>` : ''}</span>${r.tag ? `<span class="pv">${esc(r.tag)}</span>` : ''}</li>`).join('')}</ul>`;
 export const empty = (title, text = '') => `<div class="empty"><strong>${esc(title)}</strong>${text ? `<span>${esc(text)}</span>` : ''}</div>`;
 export const tag = (text, tone = '') => `<span class="tag ${tone}">${esc(text)}</span>`;
-/** Header for a drill-in page inside a pane. */
-export const pageHead = (title, {sub = '', back = 'back', right = ''} = {}) => `<header class="pane-head">${back ? iconBtn('back', 'Back', back, {cls: 'back'}) : ''}<div class="pane-head-text"><h2 tabindex="-1">${esc(title)}</h2>${sub ? `<p>${esc(sub)}</p>` : ''}</div>${right}</header>`;
+/** A round 44px button with an icon, named for assistive tech. */
+export const roundBtn = (glyph, label, action, {id, cls = ''} = {}) => `<button type="button" class="rbtn${cls ? ` ${cls}` : ''}" data-action="${esc(action)}"${id === undefined ? '' : ` data-id="${esc(id)}"`} aria-label="${esc(label)}">${icon(glyph, 20)}</button>`;
+/** An on/off switch. `extra` is trusted attribute markup the caller has already escaped. */
+export const switchBtn = (checked, label, extra = '') => `<button type="button" role="switch" class="swt" aria-checked="${checked ? 'true' : 'false'}" aria-label="${esc(label)}"${extra}><span class="knob" aria-hidden="true"></span></button>`;

@@ -1,31 +1,47 @@
-/** Agent Control UI entry point. Boots the store, paints the three panes from
+/** Agent Control UI entry point. Boots the store, paints the chats shell from
  * the route, and turns DOM events into the lookups in ui-actions.js.
  *
  * Module map (all browser-safe, all in shared/):
- *   ui-kit      string builders: icons, avatars, rows, time labels
- *   ui-model    pure view models: chat list, timeline, needs-you, routes
- *   ui-store    the one state object, API wrapper, navigation
- *   ui-chat     what happens after send (server run, simulator, commands)
- *   ui-views    chat list + thread          ui-panel   chat info + You pages
- *   ui-sheets   sheets, quick nav, sign-in  ui-admin   admin pages
- *   ui-dialogs  toast, sheet, confirm/ask   ui-actions action/form tables
- *   ui-fx       confetti, the send arrow, and when the bots react
+ *   ui-kit          string builders: icons, rows, buttons, time labels
+ *   ui-model        pure view models: timeline, needs-you, run buttons
+ *   ui-company      pure view models: bot and thread rows, pill, handoffs, routes
+ *   ui-feed         pure: what a conversation shows, in order
+ *   ui-face         a bot's face, as one inline svg
+ *   ui-store        the one state object, API wrapper, navigation
+ *   ui-chat         what happens after send (server run, threads, checkpoints)
+ *   ui-shell        sidebar, phone chrome and home, search, the page frame
+ *   ui-conversation a bot chat or a thread: header, feed, cards, composer
+ *   ui-profile      a bot's profile, Edit, the New bot page and the bot options menu
+ *   ui-gestures     pin and reorder: drag, long press, right-click, Alt+arrows
+ *   ui-reorder      pure rules behind those gestures
+ *   ui-settings     Settings, the Company chart and Activity
+ *   ui-profile-model pure view models behind those screens
+ *   ui-computer     pure rules of a bot's Computer view   ui-computer-view  that view, the profile row and the site chip
+ *   ui-connect      Settings → Connectors   ui-connect-model  the pure rules for it, the subscription rows and the connector chat lines
+ *   ui-sheets       sign-in and password sheets   ui-admin   admin pages
+ *   ui-dialogs      toast, sheet, confirm/ask      ui-actions action/form tables
+ *   ui-fx           confetti, the send arrow and the bots' ambient life
  */
-import {parseRoute} from './ui-model.js?v=3b5334879a';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, isAdmin, canWrite, applyTheme, watchSystemTheme, retireSession, resetChatState, sessionEpoch} from './ui-store.js?v=3b5334879a';
-import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=3b5334879a';
-import {listShell, renderList, threadShell, renderThread, homeView, renderMentions} from './ui-views.js?v=3b5334879a';
-import {renderInfo, refreshLists, renderPage} from './ui-panel.js?v=3b5334879a';
-import {showLogin, hideLogin, openCommandPalette, closeCommandPalette, paletteOpen, updateCommandResults, chooseCommand, moveCommand} from './ui-sheets.js?v=3b5334879a';
-import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=3b5334879a';
-import {bringBotsToLife} from './ui-fx.js?v=3b5334879a';
+import {companyRoute} from './ui-company.js?v=a9e6960ec3';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=a9e6960ec3';
+import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=a9e6960ec3';
+import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, renderPause, closeSearch, homeView, setupCardHtml} from './ui-shell.js?v=a9e6960ec3';
+import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=a9e6960ec3';
+import {profileViews, wirePages} from './ui-profile.js?v=a9e6960ec3';
+import {wireGestures, gesturesBusy} from './ui-gestures.js?v=a9e6960ec3';
+import {settingsViews} from './ui-settings.js?v=a9e6960ec3';
+import {showLogin, hideLogin} from './ui-sheets.js?v=a9e6960ec3';
+import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=a9e6960ec3';
+import {bringBotsToLife} from './ui-fx.js?v=a9e6960ec3';
+import {wireComputer} from './ui-computer-view.js?v=a9e6960ec3';
+import {googleReturn, withoutGoogleParams} from './ui-connect-model.js?v=a9e6960ec3';
 
 const el = id => document.getElementById(id);
-const hashRoute = () => parseRoute(location.hash, store.state, {server: !isStaticDemo(), admin: isAdmin(), write: canWrite()});
-/** True while the user is typing inside `node`, so a repaint must not replace it. */
-const typingIn = node => { const a = document.activeElement; return Boolean(a && node?.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)); };
+const hashRoute = () => normalizeRoute(companyRoute(location.hash, store.state));
 let lastView = '', syncTimer = null, syncDue = 0, refreshing = false;
-const LIVE_RUN = new Set(['running', 'queued', 'awaiting_feed', 'awaiting_browser']);
+// Runs that move on their own, so the poll is quick. awaiting_ask is not here: it waits on the owner's answer (like a
+// checkpoint), and the answer itself is what starts the run again and brings the quick poll back.
+const LIVE_RUN = new Set(['running', 'queued', 'awaiting_browser']);
 /** Refresh failures already shown. A dashboard stuck on a stale snapshot must
  * say so, but a poll every few seconds must not repeat the same toast. */
 const syncFailures = new Set();
@@ -33,43 +49,59 @@ const syncFailures = new Set();
  * the button: most actions repaint and replace the node, so the next press lands
  * on a fresh button and a slow DELETE or approval would be sent twice. */
 const running = new Set();
-const pressKey = button => [button.dataset.action, button.dataset.id, button.dataset.text, button.dataset.section, button.dataset.page, button.dataset.theme].map(part => part ?? '').join('|');
+const pressKey = button => [button.dataset.action, button.dataset.id, button.dataset.text, button.dataset.section, button.dataset.page, button.dataset.theme, button.dataset.message, button.dataset.choice, button.dataset.run].map(part => part ?? '').join('|');
 
 /** A repaint replaces nodes, so remember which control had focus by its stable
  * attributes and give focus back to its replacement. */
 const FOCUS_KEYS = ['action', 'id', 'filter', 'section', 'page', 'status', 'index', 'theme'];
 function keepFocus(paint) {
-  const a = document.activeElement, pane = a?.closest?.('.pane');
+  const a = document.activeElement, pane = a?.closest?.('#sidebar, #main, #chrome');
   const selector = pane && a.dataset?.action ? `#${pane.id} ${a.tagName.toLowerCase()}` + FOCUS_KEYS.filter(k => a.dataset[k] !== undefined).map(k => `[data-${k}="${CSS.escape(a.dataset[k])}"]`).join('') : null;
   paint();
   if (selector && !document.contains(a)) document.querySelector(selector)?.focus({preventScroll: true});
 }
-/** While the info panel covers the thread (narrow screens), keep Tab and
- * assistive tech out of what is underneath. */
-function setInert() {
-  const {info, chat, page} = store.route, phone = matchMedia('(max-width:850px)').matches;
-  el('main').inert = Boolean(info) && matchMedia('(max-width:1180px)').matches;
-  el('sidebar').inert = phone && Boolean(info || chat || page);
-}
+/** One renderer per route key: it gets the route and returns the page's markup. */
+export const PAGE_VIEWS = {...profileViews, ...settingsViews};
+const PAGE_KEYS = ['profile', 'settings', 'newBot', 'company', 'activity'];
+const pageView = route => PAGE_VIEWS[PAGE_KEYS.find(k => (k === 'settings' ? typeof route.settings === 'string' : route[k]))](route);
 
+let lastDesk = null, lastHome = '';
 /** Repaint everything for the current route. One view key drives the
  * transition and focus move, so reopening the same screen never jumps. */
 function renderRoute() {
-  const {chat, page, info} = store.route, main = el('main');
-  if (chat && !conversation()) return go({}, {replace: true});
-  document.body.dataset.pane = info ? 'info' : (chat || page) ? 'main' : 'list';
-  document.body.classList.toggle('has-info', Boolean(info));
-  const view = page ? `page:${page}` : chat ? `chat:${chat}` : 'home';
+  const route = store.route, main = el('main'), desk = isDesk();
+  // A chat that was deleted in another tab falls back home, not to a blank thread.
+  if ((route.bot || route.thread) && !conversation()) return go({}, {replace: true});
+  // A laptop home is never an empty pane: it opens the primary bot's chat (the empty "Select a chat" is for a company with no primary).
+  const primary = route.home && desk ? groups().find(g => g.id === 'home')?.bots?.find(b => b.settings?.lead) : null;
+  if (primary) return go({bot: primary.id}, {replace: true});
+  document.body.dataset.view = route.bot || route.thread ? 'chat' : route.home ? 'home' : 'page';
+  const view = `${JSON.stringify(route)}|${desk}`;
   if (view !== lastView) {
-    if (page) renderPage(); else if (chat) threadShell(conversation()); else main.innerHTML = homeView();
+    lastDesk = desk;
+    if (route.bot || route.thread) conversationShell(conversation());
+    else if (route.newThread) main.innerHTML = newThreadView();
+    else if (route.home) main.innerHTML = desk ? `<div class="rail-none">${setupCardHtml()}<p>Select a chat</p><button type="button" class="link rail-none-go" data-action="new-thread">or start a new thread</button></div>` : homeView();
+    else main.innerHTML = pageView(route);
+    lastHome = main.innerHTML;
     main.classList.remove('view-enter'); void main.offsetWidth; main.classList.add('view-enter');
     // Only pull focus where it will not pop a phone keyboard open.
-    if (matchMedia('(pointer:fine)').matches) (main.querySelector('.composer textarea') || main.querySelector('h2'))?.focus?.({preventScroll: true});
+    if (matchMedia('(pointer:fine)').matches) (main.querySelector('[autofocus]') || main.querySelector('textarea') || main.querySelector('input'))?.focus?.({preventScroll: true});
   }
   lastView = view;
-  setInert();
-  renderList(); renderThread(); renderInfo();
-  if (info) el('inspector').querySelector('.back')?.focus({preventScroll: true});
+  renderRail(); renderChrome(); renderPause(); renderConversation();
+}
+
+/** The phone home follows the snapshot: new replies, a bot waking up. The scroll
+ * position stays where the person left it. */
+function refreshHome() {
+  const main = el('main'); if (!store.route.home || isDesk() || !main) return;
+  const html = homeView();
+  if (html === lastHome) return;
+  const scroll = main.querySelector('.hv')?.scrollTop || 0, shelf = main.querySelector('.shelf')?.scrollLeft || 0;
+  main.innerHTML = html; lastHome = html;
+  const view = main.querySelector('.hv'); if (view) view.scrollTop = scroll;
+  const row = main.querySelector('.shelf'); if (row) row.scrollLeft = shelf;
 }
 
 /** A page request or a live group run finishes outside this tab, and a
@@ -84,13 +116,22 @@ function workspaceBusy() {
   const state = store.state;
   if (!state) return false;
   if ((state.browserRequests || []).some(r => r.status === 'pending' || r.status === 'dispatched')) return true;
-  if ((state.groupRuns || []).some(r => LIVE_RUN.has(r.status))) return true;
-  if ((state.tasks || []).some(t => t.status === 'queued' && (t.kind === 'bot-task' || t.kind === 'reminder') && dueWithin(t.runAt))) return true;
-  return (state.drafts || []).some(d => d.status === 'scheduled' && dueWithin(d.dueAt));
+  // A message waiting for the bot (src/follow-ups.js) starts as soon as the run before it ends.
+  if ((state.groupRuns || []).some(r => LIVE_RUN.has(r.status) || r.followUps?.length)) return true;
+  if ((state.tasks || []).some(t => t.status === 'queued' && t.kind === 'bot-task' && dueWithin(t.runAt))) return true;
+  return false;
 }
-function scheduleSync() {
+/** A hidden tab does not poll: the loop parks itself and the tab looks once
+ * as soon as it is shown again. */
+let hiddenPark = false;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || !hiddenPark || !store.state) return;
+  hiddenPark = false;
+  scheduleSync(0);
+});
+function scheduleSync(soon = null) {
   if (!store.state || refreshing) return;
-  const wait = workspaceBusy() ? 3000 : 30000;
+  const wait = soon ?? (workspaceBusy() ? 3000 : 30000);
   const due = Date.now() + wait;
   if (syncTimer && syncDue <= due) return;
   // Browsers keep one timer list, so this also clears the timeout below.
@@ -99,8 +140,9 @@ function scheduleSync() {
   syncTimer = setTimeout(async () => {
     const ticket = sessionEpoch();
     syncTimer = null;
+    if (document.hidden) { hiddenPark = true; return; }
     refreshing = true;
-    try { await sync(); syncFailures.clear(); }
+    try { await sync('all', {quiet: true}); syncFailures.clear(); }
     catch (e) {
       if (ticket === sessionEpoch() && e?.status === 401) { lockScreen('Your session expired. Sign in again.'); return; }
       if (ticket !== sessionEpoch()) return;
@@ -127,42 +169,57 @@ onChange(scope => {
   if (!store.state) return;
   scheduleSync();
   if (scope === 'route') return renderRoute();
+  // A bot is lifted: the list under it stays put until it lands, which repaints.
+  if (gesturesBusy()) return;
   keepFocus(() => {
-    renderList();
-    if (scope === 'list') return;
-    if (!typingIn(el('chat-space'))) renderThread();
-    // Never repaint the panel under the user's cursor; it catches up on the next change.
-    if (scope === 'all' && !typingIn(el('inspector'))) renderInfo();
+    renderRail(); renderChrome(); renderPause();
+    if (scope === 'list') return refreshHome();
+    renderConversation(); refreshHome();
   });
 });
 
 async function boot() {
   try {
     await loadState();
+    // First visit to the demo: start from the workspace the server seeds. A
+    // browser that already holds groups keeps them.
     if (isStaticDemo() && !localStorage.getItem('ac-v2-welcome')) {
-      await api('/api/demo/seed', 'POST', {}); localStorage.setItem('ac-v2-welcome', '1');
-      await loadState();
+      if (!store.state?.groups?.length) { await api('/api/reset-workspace', 'POST', {}); await loadState(); }
+      localStorage.setItem('ac-v2-welcome', '1');
     }
     await importLocalChats();
-    listShell(); lastView = '';
-    // First paint only: the chat rows arrive one after another.
-    document.body.classList.add('booting'); setTimeout(() => document.body.classList.remove('booting'), 900);
+    mountRail(); mountChrome(); lastView = '';
     clearInterval(syncTimer); syncTimer = null; syncDue = 0;
-    store.route = hashRoute(); changed('route');
+    store.route = hashRoute();
+    // A laptop opens on the primary bot's chat; a phone opens on the home.
+    const primary = (groups().find(g => g.id === 'home')?.bots || []).find(b => b.settings?.lead === true);
+    if (isDesk() && store.route.home && !location.hash && primary) go({bot: primary.id}, {replace: true}); else changed('route');
+    finishGoogleSignIn();
   } catch (e) {
     if (e.status === 401) return showLogin(e.message);
     el('main').innerHTML = `<section class="home"><h1>Could not start</h1><p></p><p>${isStaticDemo() ? 'Enable browser local storage and reload. If the page was cached from an older deploy, hard-refresh once.' : 'Check that the Node server is running and reload.'}</p></section>`;
     el('main').querySelector('p').textContent = e.message;
   }
 }
+/** Google sent the owner back to `/?google=connected` or `?google=error&reason=...`: say how it went, take the
+ * parameters out of the address so a reload does not say it again, and open Settings → Connectors. Only after the
+ * app is signed in and painted, so a sign-in screen in between keeps the parameters for the next boot. */
+function finishGoogleSignIn() {
+  const result = googleReturn(location.search);
+  if (!result) return;
+  history.replaceState(history.state, '', `${location.pathname}${withoutGoogleParams(location.search)}${location.hash}`);
+  toast(result.text, !result.ok);
+  go({settings: 'conn'});
+}
 /** Leave nothing of the signed-out workspace in the DOM behind the sign-in. */
 function lockScreen(message) {
   retireSession();
   refreshing = false;
   clearInterval(syncTimer); syncTimer = null; syncDue = 0;
-  closeSheet(); closeCommandPalette();
+  closeSheet(); closeSearch();
   store.state = null; store.messages = {}; lastView = '';
-  for (const id of ['sidebar', 'main', 'inspector']) el(id).innerHTML = '';
+  for (const id of ['sidebar', 'main', 'chrome']) el(id).innerHTML = '';
+  renderPause();
   showLogin(message);
 }
 actions.logout = async () => {
@@ -224,10 +281,9 @@ document.body.addEventListener('click', ev => {
     button.dataset.busy = '1';
     Promise.resolve().then(() => run(button)).catch(fail).finally(() => { running.delete(key); delete button.dataset.busy; });
   } else if (ev.target.id === 'modal') closeSheet();
-  else if (ev.target.id === 'command') closeCommandPalette();
 });
 document.body.addEventListener('submit', ev => {
-  const form = ev.target, key = forms[form.id] ? form.id : ['.edit-form', '.evidence-form'].find(k => form.classList.contains(k.slice(1)));
+  const form = ev.target, key = forms[form.id] ? form.id : null;
   if (!key) return;
   ev.preventDefault();
   if (form.dataset.busy) return;
@@ -237,33 +293,22 @@ document.body.addEventListener('submit', ev => {
 });
 document.body.addEventListener('change', ev => { Promise.resolve().then(() => onControlChange(ev.target)).catch(fail); });
 document.body.addEventListener('input', ev => {
-  if (ev.target.id === 'command-input') return updateCommandResults(ev.target.value);
-  if (ev.target.matches('.composer textarea')) { if (ev.target.closest('#chat-form')) renderMentions(ev.target.value); return autoGrow(ev.target); }
+  if (ev.target.matches('.cv-box textarea')) return autoGrow(ev.target);
   onControlInput(ev.target);
 });
 document.body.addEventListener('keydown', ev => {
   trapTab(ev);
-  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') { ev.preventDefault(); paletteOpen() ? closeCommandPalette() : openCommandPalette(); return; }
-  if (ev.key === 'Escape') {
-    if (paletteOpen()) { ev.preventDefault(); closeCommandPalette(); }
-    else if (sheetOpen()) { ev.preventDefault(); closeSheet(); }
-    // Escape closes the whole info panel back to the thread, not one section.
-    else if (store.route.info) { ev.preventDefault(); go({chat: store.route.chat}, {replace: true}); }
-    return;
-  }
-  if (ev.target.id === 'command-input') {
-    if (ev.key === 'Enter') { ev.preventDefault(); chooseCommand(Number(el('command-results')?.querySelector('.selected')?.dataset.index ?? 0)); }
-    else if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') { ev.preventDefault(); moveCommand(ev.key === 'ArrowDown' ? 1 : -1); }
-    return;
-  }
+  if (ev.key === 'Escape') { if (sheetOpen()) { ev.preventDefault(); closeSheet(); } return; }
   // Enter sends, Shift+Enter makes a new line.
   // keyCode 229: Safari reports the Enter that commits an IME candidate without isComposing.
-  if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing && ev.keyCode !== 229 && ev.target.matches('.composer textarea')) { ev.preventDefault(); if (ev.target.value.trim()) ev.target.form.requestSubmit(); }
+  if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing && ev.keyCode !== 229 && ev.target.matches('.cv-box textarea')) { ev.preventDefault(); if (ev.target.value.trim()) ev.target.form.requestSubmit(); }
 });
-window.addEventListener('popstate', event => { syncDepth(event); if (!store.state) return; closeSheet(); closeCommandPalette(); const next = hashRoute(); if (next.chat !== store.route.chat) resetChatState(); store.route = next; changed('route'); });
-window.addEventListener('resize', () => { if (store.state) setInert(); });
-// `toggle` does not bubble, so listen in the capture phase to remember open source panels.
-document.addEventListener('toggle', ev => { const id = ev.target.dataset?.evidence; if (!id) return; if (ev.target.open) { store.openEvidence.add(id); if (store.openEvidence.size > 50) store.openEvidence.delete(store.openEvidence.values().next().value); } else store.openEvidence.delete(id); }, true);
+window.addEventListener('popstate', event => { syncDepth(event); if (!store.state) return; closeSheet(); closeSearch(); const next = hashRoute(); store.route = next; changed('route'); });
+// Crossing 1024px swaps the phone layout for the sidebar layout.
+window.addEventListener('resize', () => { if (store.state && isDesk() !== lastDesk) changed('route'); });
+// `toggle` does not bubble, so listen in the capture phase to remember which handoff cards are open.
+document.addEventListener('toggle', trackOpen, true);
+wireShell(); wirePages(); wireGestures(); wireComputer();
 
 applyTheme(); watchSystemTheme(); bringBotsToLife(); registerWorker();
 boot();

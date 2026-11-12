@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {pollRun, runWithTyping, RUN_TERMINAL, RUN_POLL_MS} from '../shared/run-follow.js';
-import {FEED_WAIT, FEED_OPEN} from '../shared/ui-model.js';
 
 // The loop in shared/run-follow.js has no DOM and no store: every dependency is
 // injected, so a fake log replays a run's life exactly. These tests replace the
@@ -29,7 +28,6 @@ function harness(snapshots, {runId = 'r1', groupId = 'g1', ignore = [], requests
       messages: () => stored,
       requests,
       onLine: m => { appended.push(m); stored.push(m); },
-      onSay: text => { appended.push({role: 'system', text}); stored.push({role: 'system', text}); },
       onNote: note => { appended.push(note); stored.push(note); },
       onStall: () => { stalls++; },
     }),
@@ -45,7 +43,7 @@ test('the loop appends only this run\'s new lines and stops on a terminal status
   ], {messages: [{id: 'seen', role: 'bot', runId: 'r1'}]});
   const last = await h.run();
   assert.deepEqual(h.appended.map(m => m.id), ['m1', 'r1-completed'], 'a seen line, a user line and another run are left alone');
-  assert.equal(h.appended[1].text, 'Done in 2 step(s). Anything to post still needs your approval.');
+  assert.equal(h.appended[1].text, 'Done in 2 step(s).');
   assert.equal(h.appended[1].role, 'system');
   assert.equal(last.status, 'completed');
   assert.deepEqual(h.waits, [RUN_POLL_MS], 'one look was enough');
@@ -64,22 +62,6 @@ test('a page that is only pending stops the loop on the person; a dispatched one
   assert.deepEqual(followed.appended.map(m => m.id), ['m2', 'r1-completed'], 'a dispatched page keeps the watch alive');
 });
 
-test('a feed read looks once, then waits on the person and says so exactly once', async () => {
-  const h = harness([{runs: [{id: 'r1', status: 'awaiting_feed'}]}, {runs: [{id: 'r1', status: 'awaiting_feed'}]}]);
-  await h.run();
-  assert.deepEqual(h.appended, [{role: 'system', text: FEED_WAIT}]);
-  assert.equal(h.appended.filter(m => m.text === FEED_WAIT).length, 1);
-});
-
-test('a feed read already sent is watched, and the follow line is said once', async () => {
-  const h = harness([
-    {runs: [{id: 'r1', status: 'awaiting_feed'}]},
-    {messages: [bot('m2', 'r1')], runs: [{id: 'r1', status: 'completed', trace: []}]},
-  ], {requests: () => [{runId: 'r1', status: 'dispatched', purpose: 'feed'}]});
-  await h.run();
-  assert.deepEqual(h.appended.map(m => m.text || m.id), [FEED_OPEN, 'm2', 'Done in 0 step(s). Anything to post still needs your approval.']);
-});
-
 test('a log that cannot be read says so once and keeps trying', async () => {
   const h = harness([new Error('offline'), new Error('offline'), new Error('offline'), new Error('offline'), {runs: [{id: 'r1', status: 'completed', trace: []}]}]);
   const last = await h.run();
@@ -89,7 +71,7 @@ test('a log that cannot be read says so once and keeps trying', async () => {
 });
 
 test('every terminal status ends the watch, and a busy one does not', () => {
-  for (const status of ['completed', 'failed', 'interrupted', 'awaiting_checkpoint', 'awaiting_plan', 'awaiting_feed', 'awaiting_browser', 'cancelled'])
+  for (const status of ['completed', 'failed', 'interrupted', 'awaiting_checkpoint', 'awaiting_limit', 'awaiting_plan', 'awaiting_browser', 'cancelled'])
     assert.ok(RUN_TERMINAL.includes(status), `${status} ends a watch`);
   assert.ok(!RUN_TERMINAL.includes('running') && !RUN_TERMINAL.includes('queued'));
 });
@@ -126,4 +108,12 @@ test('typing is turned off even when the send throws', async () => {
   const log = [];
   await assert.rejects(runWithTyping({key: 'k', setTyping: (k, on) => log.push(`typing:${on}`), sync: async () => log.push('sync'), send: async () => { throw new Error('boom'); }, follow: async () => log.push('follow')}), /boom/);
   assert.deepEqual(log, ['typing:true', 'typing:false'], 'no follow and no refresh after a failed send');
+});
+
+test('the workspace is refreshed when the run changes status, not on every look', async () => {
+  const running = {runs: [{id: 'r1', status: 'running'}]};
+  const h = harness([running, running, running, {runs: [{id: 'r1', status: 'completed', trace: []}]}]);
+  await h.run();
+  assert.equal(h.waits.length, 4, 'four looks');
+  assert.equal(h.syncs, 2, 'one refresh for "running", one for "completed"');
 });

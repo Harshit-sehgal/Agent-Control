@@ -1,0 +1,508 @@
+/* The chats shell, ported from the approved mock (v46). Loaded after app.css, which
+ * keeps the colour tokens and the older page, form and sheet styles: this file
+ * adds the layout, the faces, the phone chrome, the desktop sidebar and the bot
+ * chat and thread views. Every class here is prefixed (ch- phone chrome, hv- phone
+ * home, rail- desktop sidebar, cv- conversation, pg- page frame) so none of them
+ * can collide with an app.css class of the same short name.
+ *
+ * Roles, as in app.css: mint is what you do, violet is "waiting on you", each bot
+ * owns one pastel tint (--t, set inline from its colour). Neutral ground, no tinted
+ * wash, calm chrome. Only transform, opacity, scale, rotate and translate animate,
+ * and everything stops under prefers-reduced-motion. */
+:root{
+  --raise:var(--surface); --sunk:var(--raised); --fg:var(--text);
+  --soft:color-mix(in srgb,var(--text) 78%,var(--bg)); --line2:var(--control);
+  --ring:inset 0 0 0 1px var(--line);
+  --lift:0 14px 40px -14px rgba(40,30,10,.25),0 2px 6px -2px rgba(40,30,10,.08);
+  --r:18px; --r-s:11px; --pad-t:env(safe-area-inset-top,0px); --pad-b:env(safe-area-inset-bottom,0px);
+  --display:ui-rounded,"SF Pro Rounded","Segoe UI Variable Display",system-ui,sans-serif;
+}
+:root[data-theme="cocoa"]{--lift:0 16px 48px -12px rgba(0,0,0,.65),0 2px 8px -2px rgba(0,0,0,.4)}
+::selection{background:var(--wait-bg);color:var(--fg)}
+:focus-visible{outline-color:var(--wait)}
+
+/* ---------- frame: sidebar | stage (desktop), stage alone (phone) ---------- */
+.shell{height:100dvh;display:grid;grid-template-columns:minmax(0,1fr);background:var(--bg)}
+.stage{min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden;position:relative}
+.stage.view-enter{animation:viewin .24s var(--ease)}
+@keyframes viewin{from{opacity:0}}
+.rail{display:none}
+@media(min-width:1024px){
+  .shell{grid-template-columns:292px minmax(0,1fr)}
+  .rail{display:flex}
+  .chrome{display:none}
+}
+
+/* ---------- faces: little characters (the svg itself comes from ui-face.js) ---------- */
+.face{flex:none;display:block;overflow:visible}
+:root[data-theme="cocoa"] .face{filter:saturate(.88) brightness(.9)}
+.face-eye,.face-light,.face-mouth,.face-joy,.face-z{transform-box:fill-box;transform-origin:center}
+.face-eye{animation:blink 5s infinite;animation-delay:var(--d,0s)}
+.face-joy{opacity:0}
+.face-z{font:700 26px var(--font);fill:var(--muted);opacity:0}
+.face--blink2 .face-eye{animation-name:blink2;animation-duration:6.5s}
+.face--awake .face-eyes{animation:glance 9s ease-in-out infinite;animation-delay:var(--d,0s)}
+.face--sway{animation:sway 7s ease-in-out infinite;animation-delay:var(--d,0s)}
+.face--nod{animation:nod 1.8s ease-in-out infinite;animation-delay:var(--d,0s)}
+.face--working .face-mouth{animation:murmur .45s ease-in-out infinite alternate}
+.face--working .face-eyes{animation:read 1.1s ease-in-out infinite alternate}
+.face--waiting{animation:bob 2.4s ease-in-out infinite}
+.face--asleep{animation:breathe 4.6s ease-in-out infinite;animation-delay:var(--d,0s)}
+.face--asleep .face-eye{animation:none}
+.face--asleep .face-z{animation:zz 4.6s ease-in-out infinite;animation-delay:var(--d,0s)}
+.face--hop{animation:hop .62s cubic-bezier(.34,1.4,.64,1)}
+/* ^ ^ eyes while it hops. ui-shell takes the class off at animationend, so with
+   motion off (no animation, no event) the eyes must not change at all. */
+@media(prefers-reduced-motion:no-preference){
+  .face--hop .face-eye,.face--hop .face-light{animation:none;opacity:0}
+  .face--hop .face-joy{opacity:1}
+}
+@keyframes blink{0%,95%,100%{transform:scaleY(1)}97.5%{transform:scaleY(.1)}}
+@keyframes blink2{0%,90%,96%,100%{transform:scaleY(1)}91.5%,94.5%{transform:scaleY(.1)}93%{transform:scaleY(1)}}
+@keyframes glance{0%,40%,100%{translate:0 0}46%,57%{translate:-4px 0}63%,72%{translate:3px 0}}
+@keyframes sway{0%,100%{rotate:0deg}30%{rotate:-3deg}70%{rotate:2.5deg}}
+@keyframes nod{0%,100%{translate:0 0}50%{translate:0 1.5%}}
+@keyframes murmur{from{scale:1 .55}to{scale:1 1.2}}
+@keyframes read{from{translate:-2px 0}to{translate:2px 0}}
+@keyframes bob{0%,100%{translate:0 0;rotate:0deg}30%{translate:0 -3%;rotate:-5deg}60%{translate:0 -1%;rotate:4deg}}
+@keyframes breathe{0%,100%{scale:1 1}50%{scale:1.035 .965}}
+@keyframes zz{0%,45%{opacity:0;translate:0 4px}65%{opacity:.75}100%{opacity:0;translate:6px -8px}}
+@keyframes hop{0%{translate:0 0;scale:1}30%{translate:0 -16%;scale:.95 1.06}62%{translate:0 0;scale:1.07 .93}100%{translate:0 0;scale:1}}
+@keyframes boop{0%{scale:1}35%{scale:1.06 .94}100%{scale:1}}
+@media(hover:hover){
+  .crow:hover .face,.pin:hover .face,.cv-who:hover .face{animation:boop .45s cubic-bezier(.34,1.56,.64,1)}
+  .crow:hover .face--asleep .face-eye{animation:none}
+}
+
+/* ---------- small shared pieces ---------- */
+.rbtn{width:44px;height:44px;flex:none;border-radius:50%;display:grid;place-items:center;background:var(--raise);box-shadow:var(--ring);color:var(--fg);transition:background-color .18s,scale .15s}
+.rbtn:hover{background:color-mix(in srgb,var(--fg) 8%,var(--raise))}
+.rbtn:active,.crow:active,.pin:active,.trow:active,.cv-card .btn:active,.ch-new:active,.ch-thread:active{scale:.97}
+.rbtn svg{width:20px;height:20px}
+.ini{display:grid;place-items:center;border-radius:50%;font-weight:700;font-size:15px;letter-spacing:.02em;color:color-mix(in srgb,var(--fg) 82%,transparent);background:color-mix(in srgb,var(--fg) 12%,var(--raise))}
+.badge{background:var(--wait);color:var(--on-wait)}
+.dots{display:inline-flex;gap:3px;margin-left:6px;vertical-align:middle}
+.dots i{width:4px;height:4px;border-radius:50%;background:var(--wait);animation:dot 1.4s ease-in-out infinite}
+.dots i:nth-child(2){animation-delay:.2s}.dots i:nth-child(3){animation-delay:.4s}
+@keyframes dot{0%,80%,100%{opacity:.25;translate:0 0}40%{opacity:1;translate:0 -3px}}
+.link{color:var(--muted);text-decoration:underline;text-decoration-color:var(--line2);text-underline-offset:3px}
+.link:hover{color:var(--fg);text-decoration-color:currentColor}
+.sub{color:var(--muted);font-size:13px}
+.wt{color:var(--wait)}
+.wt.stop{color:var(--bad)}
+
+/* ---------- phone chrome: avatar, Bots | Threads, +, search and New thread ---------- */
+.chrome{position:fixed;inset:0;z-index:20;pointer-events:none}
+.chrome[hidden]{display:none}
+.chrome>*{pointer-events:auto}
+.ch-me,.ch-new{position:absolute;top:calc(16px + var(--pad-t));width:46px;height:46px;border-radius:50%;display:grid;place-items:center}
+.ch-me{left:max(18px,env(safe-area-inset-left,0px))}
+.ch-me .ini{width:46px;height:46px}
+.ch-new{right:max(18px,env(safe-area-inset-right,0px));background:var(--raise);box-shadow:var(--ring);transition:scale .15s}
+.ch-new svg{width:20px;height:20px}
+.ch-ind{position:absolute;top:calc(22px + var(--pad-t));left:50%;translate:-50% 0;display:grid;grid-template-columns:1fr 1fr;padding:3px;border-radius:99px;background:var(--raise);box-shadow:var(--ring);font-size:13px;font-weight:600;user-select:none}
+.ch-ind button{position:relative;z-index:1;padding:6px 14px;border:0;background:none;font:inherit;text-align:center;color:var(--muted);cursor:pointer;transition:color .25s}
+.ch-ind .thumb{position:absolute;top:3px;bottom:3px;left:3px;width:calc(50% - 3px);border-radius:99px;background:color-mix(in srgb,var(--fg) 13%,var(--raise));transition:transform .3s cubic-bezier(.2,.8,.2,1)}
+.ch-ind[data-on="threads"] .thumb{transform:translateX(100%)}
+.ch-ind[data-on="bots"] button:nth-child(2),.ch-ind[data-on="threads"] button:nth-child(3){color:var(--fg)}
+.ch-ind button:focus-visible{outline:2px solid var(--wait);outline-offset:1px;border-radius:99px}
+.ch-bar{position:absolute;left:max(16px,calc(50% - 360px));right:max(16px,calc(50% - 360px));bottom:calc(14px + var(--pad-b));display:flex;gap:10px;align-items:center;min-width:0}
+.ch-bar::before{content:'';position:absolute;z-index:-1;left:-16px;right:-16px;top:-30px;bottom:calc(-14px - var(--pad-b));background:linear-gradient(to bottom,transparent,var(--bg) 45%);pointer-events:none}
+.ch-thread{position:relative;width:52px;height:52px;flex:none;border-radius:50%;display:grid;place-items:center;background:var(--raise);box-shadow:var(--ring);transition:scale .15s}
+.ch-thread svg{width:21px;height:21px}
+.ch-thread .badge,.rail-new .badge{position:absolute;top:-3px;right:-3px;min-width:20px;height:20px;padding:0 6px;border-radius:10px;font-size:11px;font-weight:700;line-height:20px;text-align:center}
+.ch-find{flex:1;min-width:0;height:52px;display:flex;align-items:center;gap:10px;padding:0 18px;border-radius:99px;background:var(--raise);box-shadow:var(--ring);cursor:text;color:var(--muted);transition:box-shadow .2s}
+.ch-find:focus-within{box-shadow:inset 0 0 0 1.5px var(--wait)}
+.ch-find svg{width:20px;height:20px;flex:none}
+.ch-find input{flex:1;min-width:0;border:0;background:none;outline:none;font-size:16px;color:var(--fg)}
+.ch-find input::placeholder{color:var(--muted)}
+.ch-find input::-webkit-search-cancel-button{display:none}
+.ch-res{position:absolute;left:0;right:0;bottom:62px;max-height:min(60vh,520px);overflow:auto;background:var(--raise);border-radius:20px;box-shadow:0 18px 44px -12px rgba(0,0,0,.55),var(--ring);padding:6px 10px 10px;animation:menuin .16s ease-out;transform-origin:bottom center}
+.ch-res[hidden]{display:none}
+@keyframes menuin{from{opacity:0;scale:.96}}
+.res-bots{display:flex;gap:8px;overflow-x:auto;padding:4px 0 2px;scrollbar-width:none}
+.res-bots button{display:flex;flex-direction:column;align-items:center;gap:6px;width:72px;flex:none;padding:8px 0;border-radius:var(--r-s);font-size:12.5px}
+.res-bots button:hover{background:var(--sunk)}
+.res-bots span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ---------- phone home: pinned row, then bots or threads ---------- */
+.hv{flex:1;min-height:0;overflow:auto;padding:calc(86px + var(--pad-t)) max(16px,env(safe-area-inset-right,0px)) 140px max(16px,env(safe-area-inset-left,0px));scrollbar-width:thin}
+.hv-in{max-width:720px;margin:0 auto}
+.shelf{display:flex;justify-content:safe center;gap:clamp(14px,4vw,34px);overflow-x:auto;padding:10px 8px 14px;scrollbar-width:none}
+.shelf::-webkit-scrollbar{display:none}
+.pin{display:flex;flex-direction:column;align-items:center;gap:9px;flex:none;width:88px;padding:6px 0;border-radius:var(--r);font-size:14px;font-weight:500;position:relative;transition:scale .15s}
+.pin>span{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pin small{font-size:12px;color:var(--muted);margin-top:-6px;font-weight:400}
+.pin .badge{position:absolute;top:2px;right:6px;min-width:18px;height:18px;border-radius:9px;font-size:11px;line-height:18px;text-align:center;padding:0 5px}
+.crows{display:flex;flex-direction:column}
+.crow{display:flex;align-items:center;gap:14px;width:100%;padding:12px 10px;border-radius:var(--r);text-align:left;position:relative;transition:background-color .18s,scale .15s}
+.crow:hover{background:color-mix(in srgb,var(--raise) 55%,transparent)}
+.crow.on{background:var(--raise)}
+.crow-w{flex:1;min-width:0}
+.crow-top{display:flex;align-items:center;gap:6px}
+.crow-top b{font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.crow-top time{margin-left:auto;flex:none;font-size:12px;color:var(--muted)}
+.crow-prev{display:block;color:var(--muted);font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+.crow-prev.live{color:var(--good);font-style:italic}
+.crow .badge{flex:none;min-width:20px;height:20px;padding:0 6px;border-radius:10px;font-size:12px;font-weight:700;line-height:20px;text-align:center}
+.hv-empty{padding:40px 12px;text-align:center;color:var(--muted)}
+.hv-empty strong{display:block;color:var(--fg);font-weight:600;margin-bottom:4px}
+.trow{display:flex;gap:11px;align-items:center;width:100%;padding:12px 8px;border-radius:var(--r-s);text-align:left;transition:background-color .18s,scale .15s}
+.trow:hover,.trow:focus-visible,.trow.on{background:var(--sunk)}
+.trow-w{flex:1;min-width:0}
+.trow b{display:block;font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.trow small{display:block;color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.trow time{font-size:12px;color:var(--muted);flex:none;align-self:flex-start;margin-top:2px}
+.tgrp h4{margin:16px 0 4px;font-size:13px;font-weight:600;color:var(--soft)}
+.tgrp:first-child h4{margin-top:0}
+
+/* ---------- desktop sidebar ---------- */
+.rail{flex-direction:column;min-height:0;background:color-mix(in srgb,var(--sunk) 70%,var(--bg));border-right:1px solid var(--line);padding:12px 10px 10px}
+.rail-top{display:flex;align-items:center;gap:8px;padding:2px 2px 8px}
+.rail-seg{position:relative;align-self:center;display:grid;grid-template-columns:1fr 1fr;padding:3px;margin:0 0 10px;border-radius:99px;background:var(--raise);box-shadow:var(--ring);font-size:13px;font-weight:600;user-select:none}
+.rail-seg button{position:relative;z-index:1;padding:6px 16px;border-radius:99px;color:var(--muted);transition:color .25s}
+.rail-seg button:hover{color:var(--soft)}
+.rail-seg button:focus-visible{outline:2px solid var(--wait);outline-offset:1px}
+.rail-seg .thumb{position:absolute;top:3px;bottom:3px;left:3px;width:calc(50% - 3px);border-radius:99px;background:color-mix(in srgb,var(--fg) 13%,var(--raise));transition:transform .3s cubic-bezier(.2,.8,.2,1)}
+.rail-seg[data-on="threads"] .thumb{transform:translateX(100%)}
+.rail-seg[data-on="bots"] button[data-section="bots"],.rail-seg[data-on="threads"] button[data-section="threads"]{color:var(--fg)}
+@media (prefers-reduced-motion:reduce){.rail-seg .thumb,.rail-seg button{transition:none}}
+.rail-find{flex:1;min-width:0;display:flex;align-items:center;gap:8px;height:38px;padding:0 14px;border-radius:99px;background:var(--raise);color:var(--muted);box-shadow:var(--ring);transition:box-shadow .2s}
+.rail-find:focus-within{box-shadow:inset 0 0 0 1.5px var(--wait)}
+.rail-find svg{width:17px;height:17px;flex:none}
+.rail-find input{flex:1;min-width:0;border:0;outline:0;background:none;font-size:13.5px;color:var(--fg)}
+.rail-find input::-webkit-search-cancel-button{display:none}
+.rail-btn{width:38px;height:38px;flex:none;position:relative;border-radius:50%;display:grid;place-items:center;background:var(--raise);color:var(--soft);transition:background-color .18s,scale .15s}
+.rail-btn:hover{color:var(--fg);background:color-mix(in srgb,var(--fg) 8%,var(--raise))}
+.rail-btn:active{scale:.95}
+.rail-btn svg{width:18px;height:18px}
+.rail-demo{margin:0 6px 10px;font-size:11.5px;color:color-mix(in srgb,var(--text) 72%,var(--bg))}
+.rail .shelf{flex-wrap:wrap;gap:6px 18px;padding:6px 4px 14px}
+.rail .pin{width:104px;font-size:12.5px;color:var(--soft)}
+.rail .pin:hover,.rail .pin.on{color:var(--fg)}
+.rail .pin.on{background:var(--raise)}
+.rail-list{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:2px;scrollbar-width:thin}
+.rail .crow{gap:11px;padding:8px 9px;border-radius:12px}
+.rail .crow-top b{font-weight:500;font-size:14px}
+.rail .crow-prev{font-size:12.5px;margin-top:0}
+.rail .tgrp h4,.rail-h{margin:14px 6px 4px;font-size:12px;font-weight:600;color:var(--muted)}
+.rail .trow{padding:8px 9px;border-radius:12px}
+.rail .trow b{font-weight:500;font-size:14px}
+.rail .trow small{font-size:12.5px}
+.rail-foot{display:flex;align-items:center;gap:8px;padding-top:10px;border-top:1px solid var(--line);margin-top:8px}
+.rail-me{flex:1;min-width:0;display:flex;align-items:center;gap:10px;padding:6px;border-radius:12px;text-align:left;font-size:14px;font-weight:500;transition:background-color .18s}
+.rail-me:hover{background:var(--raise)}
+.rail-me .ini{width:34px;height:34px;font-size:12.5px;flex:none}
+.rail-me span:last-child{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rail-new .badge{top:-3px;right:-3px}
+.rail-none{height:100%;display:grid;place-content:center;justify-items:center;gap:6px;color:var(--muted);font-size:15px}
+.rail-none p{margin:0}
+.rail-none-go{min-height:32px;padding:4px 10px}
+
+/* ---------- conversation: header, feed, composer ---------- */
+.cv{flex:1;min-height:0;display:flex;flex-direction:column}
+.cv-head{flex:none;display:flex;align-items:center;gap:12px;padding:calc(12px + var(--pad-t)) max(16px,env(safe-area-inset-right,0px)) 10px max(16px,env(safe-area-inset-left,0px))}
+.cv-head>.rbtn:first-child{width:40px;height:40px}
+@media(min-width:1024px){.cv-head>.rbtn:first-child{display:none}.cv-head{padding-top:16px}}
+.cv-who{flex:none;display:grid;place-items:center;border-radius:12px}
+.cv-title{flex:1;min-width:0}
+.cv-title h1{font-family:var(--display);font-size:17px;line-height:1.25;font-weight:600;letter-spacing:-.015em;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cv-title span{display:block;font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cv-title span.wt{color:var(--wait)}
+.cv-model{display:inline-flex;align-items:center;gap:6px;max-width:42vw;min-height:32px;padding:0 11px;border-radius:99px;background:var(--sunk);color:var(--muted);font-size:12.5px;font-weight:500;transition:color .15s,background-color .15s}
+.cv-model span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cv-model:hover{color:var(--fg)}
+.cv-model:focus-visible{outline:2px solid var(--wait);outline-offset:2px}
+@media(pointer:coarse){.cv-model{min-height:40px}}
+.cv-scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:6px max(16px,env(safe-area-inset-right,0px)) 20px max(16px,env(safe-area-inset-left,0px))}
+.cv-col{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:20px;min-height:100%;justify-content:flex-end}
+.cv-day{align-self:center;font-size:12px;color:var(--muted);font-weight:600}
+.cv-me{align-self:flex-end;max-width:78%;background:var(--me);color:var(--on-me);border-radius:var(--r) var(--r) 5px var(--r);padding:10px 14px;overflow-wrap:anywhere}
+.cv-me.md{margin-top:0}
+.cv-me.md code{background:color-mix(in srgb,var(--on-me) 12%,transparent)}
+.cv-bot{display:flex;gap:12px;align-items:flex-start}
+.cv-body{flex:0 1 auto;min-width:0;max-width:min(78%,560px);background:color-mix(in srgb,var(--t,#ccc) 14%,var(--raise));border-radius:5px var(--r) var(--r) var(--r);padding:9px 14px 10px;box-shadow:0 1px 2px rgba(0,0,0,.07)}
+.cv-name{font-size:13.5px;font-weight:600;color:color-mix(in srgb,var(--t,#ccc) 45%,var(--fg))}
+.cv-name small{font-weight:400;color:var(--muted);font-size:12.5px;margin-left:6px}
+.cv-body p{margin:3px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;max-width:62ch}
+/* Formatted model text: paragraphs, lists and code from markdown. */
+.md{margin-top:3px;max-width:62ch;overflow-wrap:anywhere;line-height:1.5}
+.md p{margin:0;white-space:normal}
+.md>*+*{margin-top:.6em}
+.md ul,.md ol{margin:.4em 0 0;padding-left:1.25em}
+.md li+li{margin-top:.3em}
+.md li::marker{color:var(--muted)}
+.md strong{font-weight:650}
+.md .md-h{font-weight:650}
+.md code{font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;padding:1px 5px;border-radius:6px;background:color-mix(in srgb,var(--fg) 8%,transparent)}
+.md a{color:inherit;text-decoration:underline;text-underline-offset:2px}
+.cv-note{align-self:center;display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center;text-align:center;font-size:12px;color:var(--muted);background:var(--sunk);border-radius:18px;padding:5px 12px;max-width:90%}
+.cv-working{display:flex;gap:10px;align-items:center;color:var(--muted);font-size:13px}
+/* the one pill that keeps updating, then the quiet one that opens the handoffs */
+.cv-prog{align-self:center;max-width:min(92%,560px);margin:4px 0;font-size:12.5px}
+.cv-live{display:inline-flex;align-items:center;gap:8px;padding:5px 14px 5px 6px;border-radius:99px;background:var(--sunk);color:var(--soft)}
+.cv-cur{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cv-cur.enter{animation:curin .35s ease-out}
+/* The site chip on the pill and the "is working" line: the host a bot is on, opening its live view. */
+.pchip{flex:none;display:inline-flex;align-items:center;gap:5px;margin-left:2px;padding:2px 9px 2px 7px;border-radius:99px;background:var(--raise);color:var(--fg);font-size:12px;box-shadow:var(--ring);white-space:nowrap;max-width:14em;transition:scale .12s}
+.pchip span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.pchip svg{flex:none}
+.pchip:active{scale:.96}
+@media(pointer:coarse){.pchip{min-height:30px;padding:4px 11px 4px 9px}}
+@keyframes curin{from{opacity:0;translate:0 4px}}
+.cv-site{display:inline-flex;align-items:center;gap:5px;margin-left:4px;padding:2px 9px 2px 7px;border-radius:99px;background:var(--raise);color:var(--fg);font-size:12px;box-shadow:var(--ring);white-space:nowrap}
+.cv-done{align-self:center;display:flex;flex-direction:column;align-items:center;max-width:100%;margin:4px 0}
+.cv-done summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:5px 10px 5px 14px;border-radius:99px;background:var(--sunk);color:var(--muted);font-size:12.5px;transition:color .15s}
+.cv-done summary::-webkit-details-marker{display:none}
+.cv-done summary:hover,.cv-done summary:focus-visible{color:var(--fg)}
+.cv-done summary svg{width:13px;height:13px;transition:rotate .2s}
+.cv-done[open]{align-self:stretch}
+.cv-done[open] summary svg{rotate:90deg}
+/* the live line is a disclosure too: the same pill, its face and dots, and a chevron that opens the hops so far */
+.cv-going summary{padding:5px 10px 5px 6px;gap:8px;color:var(--soft);max-width:100%}
+.cv-going .cv-cur{min-width:0}
+.cv-live .dots{margin-left:-2px}
+.cv-live .dots i{background:currentColor;opacity:.55}
+.cv-plog{list-style:none;margin:10px 0 2px;padding:16px 18px;width:100%;border-radius:18px;background:var(--sunk);display:flex;flex-direction:column;gap:16px;text-align:left;animation:curin .25s ease-out}
+.cv-plog .who{display:flex;align-items:baseline;gap:6px;font-size:12px;color:var(--muted)}
+.cv-plog .who b{color:var(--soft);font-weight:600}
+.cv-plog .md{color:var(--fg);font-size:13.5px}
+.cv-plog p{margin:3px 0 0;color:var(--fg);font-size:13.5px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}
+.cv-plog .cv-use{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+/* the cards that wait on you: one sentence, their buttons, nothing else raised */
+.cv-card{margin-left:42px;border-radius:var(--r);background:var(--raise);box-shadow:var(--lift);padding:16px;max-width:520px;display:flex;flex-direction:column;gap:12px}
+.cv-card.flat{margin-left:0;align-self:flex-start;box-shadow:var(--ring)}
+.cv-card p{margin:0;overflow-wrap:anywhere}
+.cv-card .acts{display:flex;gap:8px;flex-wrap:wrap}
+.cv-card .btn{min-height:40px;border-radius:var(--r-s);background:var(--sunk);font-size:14px}
+.cv-card .btn.primary{background:var(--wait);color:var(--on-wait)}
+.cv-card a{color:var(--text);overflow-wrap:anywhere}
+.cv-ask-body summary{cursor:pointer;display:flex;align-items:center;gap:6px;font-size:14px;color:var(--muted)}
+.cv-ask-body pre{margin:8px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:14px;max-height:320px;overflow:auto}
+.cv-card small{color:var(--muted)}
+.cv-wait{display:flex;gap:10px;align-items:center;color:var(--muted);font-size:13px;margin-bottom:-8px}
+.cv-steps{margin:0;padding-left:18px;overflow-wrap:anywhere;font-size:13px;color:var(--soft)}
+.cv-empty{margin:auto;display:flex;flex-direction:column;align-items:center;gap:8px;max-width:400px;padding:24px;text-align:center;color:var(--muted)}
+.cv-empty h2{font-family:var(--display);font-size:22px;letter-spacing:-.02em;color:var(--fg);margin-top:8px}
+.cv-empty button.hello{border-radius:50%}
+.cv-composer{flex:none;padding:8px max(16px,env(safe-area-inset-right,0px)) calc(16px + var(--pad-b)) max(16px,env(safe-area-inset-left,0px))}
+.cv-box{max-width:720px;margin:0 auto;display:flex;align-items:flex-end;gap:8px;background:var(--raise);border-radius:20px;padding:6px 6px 6px 16px;box-shadow:var(--lift)}
+.cv-box:focus-within{box-shadow:var(--lift),0 0 0 2px var(--wait)}
+.cv-box textarea{flex:1;min-width:0;min-height:38px;max-height:180px;border:0;background:none;outline:none;resize:none;padding:8px 0;font-size:16px;line-height:1.35;caret-color:var(--wait);color:var(--fg)}
+.cv-box textarea::placeholder{color:var(--muted)}
+.cv-send{width:38px;height:38px;flex:none;border-radius:var(--r-s);background:var(--fg);color:var(--bg);display:grid;place-items:center;transition:scale .15s}
+.cv-send:active{scale:.94}
+.cv-send:disabled{opacity:.5}
+.cv-send svg{width:20px;height:20px;overflow:hidden}
+.cv-send.sent svg{animation:whoosh .42s var(--ease)}
+/* attachments: the clip in the box, the chips above it, and the files on a sent line */
+.cv-box:has(.cv-attach){padding-left:6px}
+.cv-attach{position:relative;width:38px;height:38px;flex:none;border-radius:var(--r-s);display:grid;place-items:center;color:var(--muted);transition:color .15s,background-color .15s}
+.cv-attach::before{content:'';position:absolute;inset:-3px}
+.cv-attach:hover:not(:disabled){color:var(--fg);background:var(--control)}
+.cv-attach:disabled{opacity:.5}
+.cv-composer.drop .cv-box{box-shadow:var(--lift),0 0 0 2px var(--wait)}
+.cv-chips{max-width:720px;margin:0 auto 8px;display:flex;flex-wrap:wrap;gap:8px}
+.cv-chips[hidden]{display:none}
+.cv-chip{display:inline-flex;align-items:center;gap:8px;max-width:100%;min-height:44px;padding:4px 4px 4px 8px;border-radius:12px;background:var(--raise);box-shadow:var(--ring);font-size:13px}
+.cv-chip img{width:34px;height:34px;border-radius:8px;object-fit:cover}
+.cv-chip-name{min-width:0;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cv-chip small{color:var(--muted)}
+.cv-chip.busy{opacity:.6}
+.cv-chip.failed small{color:var(--bad)}
+.cv-chip-x{width:36px;height:36px;flex:none;border-radius:50%;display:grid;place-items:center;color:var(--muted)}
+.cv-chip-x:hover{color:var(--fg);background:var(--control)}
+.cv-me-files{align-self:flex-end;max-width:78%;display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.cv-me-files .cv-me{max-width:100%}
+.cv-files{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px}
+.cv-thumb{display:block;border-radius:14px;overflow:hidden;box-shadow:var(--ring);background:var(--control)}
+.cv-thumb img{display:block;min-width:56px;min-height:56px;max-width:min(260px,60vw);max-height:220px;width:auto;height:auto;object-fit:cover}
+.cv-file{display:inline-flex;align-items:center;gap:8px;min-height:44px;max-width:100%;padding:6px 12px;border-radius:12px;background:var(--raise);box-shadow:var(--ring);color:var(--fg);text-decoration:none;font-size:14px}
+.cv-file span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cv-file small{color:var(--muted)}
+.cv-file.gone{opacity:.6}
+/* the new thread page */
+.nv{flex:1;min-height:0;display:flex;flex-direction:column;overflow:auto}
+.nv-in{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;padding:16px max(16px,env(safe-area-inset-right,0px)) 14vh max(16px,env(safe-area-inset-left,0px))}
+.nv-line{display:flex;gap:14px;align-items:flex-end;justify-content:center;min-height:110px;max-width:100%;overflow-x:auto;padding:4px 2px;scrollbar-width:none}
+.nv-line div{display:flex;flex-direction:column;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);flex:none}
+.nv-in h2{font-family:var(--display);font-weight:650;font-size:clamp(26px,3.6vw,38px);letter-spacing:-.03em;margin:0;text-align:center;text-wrap:balance}
+.nv-in p{margin:-8px 0 0;font-size:13px;color:var(--muted);text-align:center}
+.nv-in .cv-box{width:100%;max-width:720px}
+.nv-chips{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;max-width:720px}
+.nv-chips button{border-radius:99px;padding:8px 14px;font-size:13px;background:var(--raise);color:var(--soft);box-shadow:inset 0 0 0 1px var(--line2);transition:box-shadow .18s,color .18s,scale .15s}
+.nv-chips button:hover{box-shadow:inset 0 0 0 1px var(--wait);color:var(--fg)}
+.nv-chips button:active{scale:.97}
+/* a page opened from the shell: round back button and a title, then the page's own body */
+.pg{flex:1;min-height:0;display:flex;flex-direction:column;overflow:auto}
+.pg-body{width:100%;max-width:560px;margin:0 auto;padding:12px max(16px,env(safe-area-inset-right,0px)) 40px max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:14px}
+.pg-body p{margin:0;color:var(--muted)}
+
+/* ---------- the pause banner: a bar across the top while every bot is paused ---------- */
+.pause{position:fixed;z-index:50;top:0;left:0;right:0;box-sizing:border-box;height:calc(var(--pause-h) + env(safe-area-inset-top,0px));padding:env(safe-area-inset-top,0px) max(14px,env(safe-area-inset-right,0px)) 0 max(14px,env(safe-area-inset-left,0px));display:flex;align-items:center;gap:10px;background:var(--wait-bg);color:var(--fg);font-size:13.5px;line-height:1.3;box-shadow:0 1px 0 color-mix(in srgb,var(--wait) 28%,transparent);animation:pausein .28s var(--ease)}
+.pause[hidden]{display:none}
+.pause-i{flex:none;display:grid;color:var(--wait)}
+.pause-t{flex:1;min-width:0;text-wrap:balance}
+.pause-go{flex:none;min-height:34px;padding:0 16px;border-radius:99px;background:var(--wait);color:var(--on-wait);font-size:13.5px;font-weight:600;transition:scale .15s}
+.pause-go:active{scale:.96}
+@media(pointer:coarse){.pause-go{min-height:44px}}
+@keyframes pausein{from{translate:0 -100%}}
+body[data-paused]{--pause-h:44px}
+@media(max-width:1023px){body[data-paused]{--pause-h:54px}}
+/* the app sits under the bar; the safe-area inset the bar already covers is not counted twice */
+body[data-paused] .shell{padding-top:calc(var(--pause-h) + env(safe-area-inset-top,0px));box-sizing:border-box}
+body[data-paused] .stage{--pad-t:0px}
+body[data-paused] .chrome{--pad-t:calc(var(--pause-h) + env(safe-area-inset-top,0px))}
+.cv-asked{opacity:.92}
+.cv-card>a{font-size:13px;color:var(--soft)}
+
+/* ---------- pin and reorder: the whole bot is the handle (ui-gestures.js) ---------- */
+.crow,.pin{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+.shelf{position:relative}
+.shelf::before,.crow::before{content:'';position:absolute;inset:0;border-radius:var(--r);box-shadow:inset 0 0 0 2px var(--good);opacity:0;pointer-events:none;transition:opacity .16s}
+.shelf.drop-on::before,.crow.drop-on::before{opacity:1}
+/* the copy that rides under the pointer: fixed, so no scroll area clips it. Its shadow is a layer whose opacity fades in. */
+.gest-ghost{position:fixed!important;z-index:70;margin:0!important;pointer-events:none;will-change:transform;background:var(--raise);border-radius:var(--r)}
+.gest-ghost::before{display:none}
+.gest-ghost::after{content:'';position:absolute;inset:0;border-radius:inherit;box-shadow:var(--lift),0 26px 44px -18px rgba(0,0,0,.45);opacity:0;transition:opacity .2s;pointer-events:none;z-index:-1}
+.gest-ghost.lift::after{opacity:1}
+/* the slot it came from: an empty seat while it is away */
+.gest-hole{background:color-mix(in srgb,var(--fg) 7%,transparent)!important;border-radius:var(--r)}
+.gest-hole>*{opacity:0}
+.gest-hole.gest-out{background:transparent!important}
+.gest-away{display:none!important}
+.gest-wait{opacity:0}
+.gest-armed{scale:1.04!important;transition:scale .18s var(--ease)}
+.pin-zone{display:grid;place-items:center;min-height:84px;margin:6px 4px 14px;border:2px dashed var(--line2);border-radius:var(--r);color:var(--muted);font-size:13px;animation:menuin .18s ease-out}
+.pin-zone.drop-on{border-color:var(--good);color:var(--fg)}
+.pin-zone::before{display:none}
+
+@media(max-width:520px){
+  .cv-me{max-width:88%}
+  .cv-card{margin-left:0}
+}
+@media(pointer:coarse){.cv-card .btn{min-height:44px}.nv-chips button{padding:12px 16px}}
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}
+
+/* Thread rows say what a thread is doing while it works, and mark an answer not yet opened with one dot. */
+.trow small.live{color:var(--good);font-style:italic}
+.trow small.live .dots i{background:currentColor;opacity:.6}
+.trow-end{display:flex;flex-direction:column;align-items:flex-end;gap:7px;flex:none;align-self:flex-start;margin-top:2px}
+.trow-end time{margin-top:0}
+.trow.new b,.crow.new b{font-weight:700}
+.trow.new small{color:var(--text)}
+@media (prefers-reduced-motion:reduce){.trow small.live .dots i{animation:none}}
+
+/* ---------- a bot chat in its bot's accent ----------
+ * ui-conversation sets both themes' values inline (--acc-l, --acc-d and their pairs, from ui-face's ACCENTS);
+ * this picks the theme's. The send button, the bot's name, the composer's focus ring and the live line take it.
+ * A thread has no data-accent and keeps the app's own colours. Every pair passes AA (tests/bot-accent.test.js). */
+.cv[data-accent]{--bot-accent:var(--acc-l);--on-bot-accent:var(--acc-on-l);--bot-ink:var(--acc-ink-l);--bot-accent-soft:color-mix(in srgb,var(--bot-accent) 18%,var(--bg))}
+:root[data-theme="cocoa"] .cv[data-accent]{--bot-accent:var(--acc-d);--on-bot-accent:var(--acc-on-d);--bot-ink:var(--acc-ink-d);--bot-accent-soft:color-mix(in srgb,var(--bot-accent) 16%,var(--bg))}
+@media(prefers-color-scheme:dark){:root:not([data-theme]) .cv[data-accent]{--bot-accent:var(--acc-d);--on-bot-accent:var(--acc-on-d);--bot-ink:var(--acc-ink-d)}}
+.cv[data-accent] .cv-send{background:var(--bot-accent);color:var(--on-bot-accent)}
+.cv[data-accent] .cv-box:focus-within{box-shadow:var(--lift),0 0 0 2px var(--bot-accent)}
+.cv[data-accent] .cv-box textarea{caret-color:var(--bot-ink)}
+.cv[data-accent] :focus-visible{outline-color:var(--bot-accent)}
+.cv[data-accent] .cv-bot.own .cv-name{color:var(--bot-ink)}
+.cv[data-accent] .cv-live{background:var(--bot-accent-soft);color:var(--fg)}
+.cv[data-accent] .cv-live .dots i,.cv[data-accent] .cv-working .dots i{background:var(--bot-ink);opacity:.8}
+.cv[data-accent] .cv-working{color:var(--bot-ink)}
+
+/* ---------- the one mark at a row's face (ui-company rowMark, drawn by ui-shell) ----------
+ * Bottom right of the face (a primary's star sits bottom left): violet when it needs you, a small spinning ring
+ * while it works, a check that pops in and fades when a run has just finished (into the green unread dot, or to
+ * nothing), and the green unread dot. --age is how far through its 4s a repainted check already is. */
+.rface{position:relative;display:inline-flex;flex:none;font-style:normal;--mark-ring:var(--bg)}
+.rail .rface{--mark-ring:color-mix(in srgb,var(--sunk) 70%,var(--bg))}
+.crow.on .rface,.pin.on .rface{--mark-ring:var(--raise)}
+.trow.on .rface,.trow:hover .rface{--mark-ring:var(--sunk)}
+.rmark{display:block;position:absolute;right:-2px;bottom:-2px;width:12px;height:12px;border-radius:50%;box-shadow:0 0 0 2.5px var(--mark-ring);pointer-events:none}
+.pin .rmark{right:2px;bottom:2px;width:16px;height:16px}
+.rmark.needs{background:var(--wait)}
+.rmark.unread{background:var(--good)}
+.rmark.working{width:14px;height:14px;right:-3px;bottom:-3px;background:var(--mark-ring);box-shadow:none}
+.pin .rmark.working{width:18px;height:18px}
+.rmark.working::after{content:'';position:absolute;inset:1.5px;border-radius:50%;border:2px solid color-mix(in srgb,var(--good) 22%,transparent);border-top-color:var(--good);animation:rspin .9s linear infinite}
+.rmark.done{display:grid;place-items:center;width:14px;height:14px;right:-3px;bottom:-3px;background:var(--good);color:var(--good-bg);animation:rdone 4s var(--ease) var(--age,0ms) both}
+.pin .rmark.done{width:18px;height:18px}
+.pin .rmark.done svg{width:10px;height:10px}
+.rmark.late{animation:rlate 4s linear var(--age,0ms) both}
+@keyframes rspin{to{rotate:360deg}}
+@keyframes rdone{0%{opacity:0;scale:.5}6%{opacity:1;scale:1.12}10%{scale:1}68%{opacity:1;scale:1}84%,100%{opacity:0;scale:.7}}
+@keyframes rlate{0%,80%{opacity:0;scale:.6}92%,100%{opacity:1;scale:1}}
+/* Still under reduced motion: the ring is a plain ring, the check stays until the next repaint gives way to the dot. */
+@media(prefers-reduced-motion:reduce){
+  .rmark.working::after{border-color:var(--good)}
+  .rmark.late{display:none}
+  .rmark.done{opacity:1;scale:1}
+}
+
+/* ---------- the small live picture of a bot's screen (ui-computer-view thumbSlot) ----------
+ * In a bot chat's header: a small frame and the site. On its profile: a wider card under the hero. Either way a tap
+ * opens the full Computer view. Hidden while the bot's browser is idle; the dot breathes only while it browses. */
+.lthumb{flex:none;display:inline-flex;align-items:center;gap:8px;padding:3px 10px 3px 3px;border-radius:12px;background:var(--sunk);color:var(--fg);font-size:12.5px;max-width:44vw;box-shadow:var(--ring);transition:scale .15s,background-color .15s;animation:menuin .2s var(--ease)}
+.lthumb:hover{background:var(--control)}
+.lthumb:active{scale:.97}
+.lthumb-pic{flex:none;display:block;width:52px;aspect-ratio:16/10;border-radius:9px;overflow:hidden;background:color-mix(in srgb,var(--t,var(--control)) 30%,var(--raise))}
+.lthumb-pic img{display:block;width:100%;height:100%;object-fit:cover;object-position:top center}
+.lthumb-site{display:inline-flex;align-items:center;gap:6px;min-width:0}
+.lthumb-site span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lthumb-dot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--good)}
+.lthumb[data-state="browsing"] .lthumb-dot{animation:ldot 1.6s ease-in-out infinite}
+.lthumb[data-state="driving"] .lthumb-dot{background:var(--wait)}
+.cv[data-accent] .lthumb-dot{background:var(--bot-accent)}
+@keyframes ldot{50%{opacity:.35}}
+@media(max-width:520px){.cv-head .lthumb-site{display:none}.cv-head .lthumb{padding-right:3px}}
+@media(pointer:coarse){.cv-head .lthumb{min-height:40px}}
+/* On the profile: one compact row as wide as the rows below it, a small picture and the site beside it. */
+.pr-body .lthumb{display:flex;gap:14px;width:100%;max-width:none;padding:8px 16px 8px 8px;border-radius:var(--r);background:var(--raise);font-size:14px}
+.pr-body .lthumb-pic{width:112px;border-radius:10px}
+@media(prefers-reduced-motion:reduce){.lthumb-dot{animation:none}}
+/* The starters under an empty bot chat: the new-thread chips, centred. */
+.cv-starters{justify-content:center;margin-top:10px}
+/* New thread carries its name, so it is never mistaken for New bot (the + beside search). */
+.rail-btn.rail-new{width:auto;padding:0 14px 0 11px;border-radius:99px;display:inline-flex;gap:7px;font-size:13.5px;font-weight:600;color:var(--fg);box-shadow:var(--ring)}
+/* Message search: the matched words in a result line, and the line a result opens, lit once. */
+.mrow small{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.35}
+.mrow small mark{background:var(--wait-bg);color:var(--fg);border-radius:3px;padding:0 1px}
+.cv-hit{border-radius:var(--r-s);box-shadow:0 0 0 2px var(--wait);transition:box-shadow .6s}
+@media(prefers-reduced-motion:reduce){.cv-hit{transition:none}}
+/* Templates: the chips under an empty chat and the new thread box, the composer's button and its sheet. */
+.tp-chips{justify-content:center;margin-top:8px}
+.tp-chips .tp-brief{display:inline-flex;align-items:center;gap:6px;color:var(--wait);box-shadow:inset 0 0 0 1px var(--wait)}
+.cv-tpl{width:38px;height:38px;flex:none;margin-left:-10px;border-radius:var(--r-s);display:grid;place-items:center;color:var(--muted);transition:color .18s,background-color .18s}
+.cv-tpl:hover,.cv-tpl:focus-visible{color:var(--fg);background:var(--sunk)}
+.tp-list{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
+.tp-row{display:flex;gap:8px;align-items:center}
+.tp-row .btn{justify-content:flex-start}
+@media(pointer:coarse){.cv-tpl{width:44px;height:44px}}
+
+/* The first-run checklist (ui-shell setupCardHtml): one quiet card, each step a row that goes where it is done. */
+.su{margin:8px 4px 14px;padding:12px 8px 6px;border-radius:var(--r-box);background:var(--surface);border:1px solid var(--line);text-align:left;color:var(--text)}
+.rail-none .su{width:min(420px,90vw);margin:0 0 18px}
+.su-head{display:flex;align-items:center;gap:8px;padding:0 6px 6px}
+.su-head b{font-size:15px;font-weight:600}
+.su-head span{flex:1;font-size:13px;color:var(--muted)}
+.su-x{display:grid;place-items:center;width:32px;height:32px;border-radius:50%;color:var(--muted)}
+.su-x:hover{background:var(--raised)}
+.su ol{list-style:none;margin:0;padding:0}
+.su-i{width:100%;display:flex;align-items:center;gap:10px;min-height:44px;padding:6px;border-radius:12px;font-size:14px;text-align:left;color:var(--text)}
+.su-i:hover{background:var(--raised)}
+.su-i span{flex:1}
+.su-i.done{color:var(--muted)}
+.su-i.done span{text-decoration:line-through;text-decoration-color:var(--line)}
+.su-c{flex:none;display:grid;place-items:center;width:22px;height:22px;border-radius:50%;border:1.5px solid var(--control-hi)}
+.su-i.done .su-c{border-color:transparent;background:var(--good-bg);color:var(--good)}
+@media(pointer:coarse),(max-width:640px){.su-x{width:44px;height:44px;margin:-6px -6px -6px 0}}
+
+/* How long an Always allow lasts, beside its button on an ask card. */
+.ask-for{min-height:32px;padding:0 8px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--text);font:inherit;font-size:13px}
+@media(pointer:coarse){.ask-for{min-height:44px}}
+
+/* The toast's one action (Undo). */
+.toast:has(.toast-act){pointer-events:none}
+.toast-act{pointer-events:auto;margin-left:10px;padding:2px 4px;font:inherit;font-weight:700;color:inherit;text-decoration:underline;text-underline-offset:3px}
+@media(pointer:coarse){.toast-act{min-height:44px}}

@@ -41,6 +41,18 @@ test('in-app notifications are recorded and bounded; read state is per user', as
   await fs.rm(dir, {recursive: true, force: true});
 });
 
+test('a webhook preference only takes a webhook credential its own user stored', async () => {
+  const {store, dir} = await harness();
+  const mine = credentials.addCredential(store, 'default', {name: 'my hook', kind: 'webhook', value: 'https://hooks.example.com/mine', createdBy: 'ada@example.com'}).id;
+  const theirs = credentials.addCredential(store, 'default', {name: 'their hook', kind: 'webhook', value: 'https://hooks.example.com/theirs', createdBy: 'bob@example.com'}).id;
+  const apiKey = credentials.addCredential(store, 'default', {name: 'a key', kind: 'api_key', value: 'https://hooks.example.com/key', createdBy: 'ada@example.com'}).id;
+  // Another user's webhook, or a credential that is not a webhook at all, reads as not found.
+  assert.throws(() => notifications.updatePreferences(store, 'u-ada', {webhook: true, webhookCredentialId: theirs}, {email: 'ada@example.com'}), e => e.status === 404);
+  assert.throws(() => notifications.updatePreferences(store, 'u-ada', {webhook: true, webhookCredentialId: apiKey}, {email: 'ada@example.com'}), e => e.status === 404);
+  assert.equal(notifications.updatePreferences(store, 'u-ada', {webhook: true, webhookCredentialId: mine}, {email: 'ada@example.com'}).webhookCredentialId, mine);
+  await fs.rm(dir, {recursive: true, force: true});
+});
+
 test('preferences are validated and webhook URLs live in the credential vault', async () => {
   const {store, dir} = await harness();
   const prefs = notifications.updatePreferences(store, 'u1', {inApp: true, webhook: false});

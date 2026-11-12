@@ -24,7 +24,7 @@ import * as wf from '../shared/workflow.js';
 async function harness() {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-queue-recovery-'));
   const store = await new SqliteStore(path.join(dir, 'state.db'), path.join(dir, 'state.json')).init();
-  await store.update(s => { wf.migrate(s); wf.recoverInterrupted(s); });
+  await store.update(s => { wf.migrate(s); });
   return {dir, store};
 }
 
@@ -49,7 +49,7 @@ const ageRetryWindow = (state, id) => {
 
 test('a cancelled idempotency key can be enqueued again without breaking the store', async () => {
   const {store, dir} = await harness();
-  const spec = {kind: 'candidate-draft', payload: {candidateId: 'c1', direction: ''}, title: 'Draft for c1', idempotencyKey: 'webhook:7'};
+  const spec = {kind: 'group-run', payload: {groupId: 'home', message: 'Coordinate.'}, title: 'Group run', idempotencyKey: 'webhook:7'};
   const first = await store.update(s => tasks.enqueueTask(s, spec));
   await store.update(s => tasks.cancelTask(s, first.task.id));
   // Before the fix this inserted a second row with the same key, the unique
@@ -63,30 +63,26 @@ test('a cancelled idempotency key can be enqueued again without breaking the sto
   assert.equal(keyed[0].status, 'queued');
   // And the work actually runs again, which is what the caller asked for.
   const calls = [];
-  const queue = createQueue(store, {'candidate-draft': async task => { calls.push(task.id); return {drafted: true}; }}, {intervalMs: 60000});
+  const queue = createQueue(store, {'group-run': async task => { calls.push(task.id); return {ran: true}; }}, {intervalMs: 60000});
   await queue.sweep();
   assert.deepEqual(calls, [first.task.id]);
   const after = store.read().tasks[0];
   assert.equal(after.status, 'done');
-  assert.deepEqual(after.result, {drafted: true});
+  assert.deepEqual(after.result, {ran: true});
   await fs.rm(dir, {recursive: true, force: true});
 });
 
-test('a cancelled schedule is not resurrected by re-running the legacy migration', async () => {
-  const {store, dir} = await harness();
-  const schedule = {id: 's1', label: 'Check the feed', kind: 'interval', intervalMinutes: 60, enabled: true};
-  await store.update(s => { s.schedules = [schedule]; tasks.migrateSchedules(s); });
-  const migrated = store.read().tasks.find(t => t.idempotencyKey === 'schedule:s1');
-  assert.ok(migrated, 'the legacy row becomes a task');
-  await store.update(s => tasks.cancelTask(s, migrated.id));
-  // A restored legacy JSON can replay the same schedule row. The cancelled
-  // task still holds the key, so the migration leaves it cancelled instead of
-  // creating a second row (which the unique index would refuse) or reviving it.
-  await store.update(s => { s.schedules = [schedule]; tasks.migrateSchedules(s); });
-  const rows = store.read().tasks.filter(t => t.idempotencyKey === 'schedule:s1');
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].status, 'cancelled');
-  await fs.rm(dir, {recursive: true, force: true});
+test('a queued reminder left from before the upgrade loads cancelled', () => {
+  const stamp = new Date().toISOString();
+  const row = (id, kind, status) => ({id, kind, title: kind, payload: {}, status, runAt: stamp, intervalMinutes: null, idempotencyKey: null, attempts: 0, maxAttempts: 5, leaseOwner: null, leaseUntil: null, lastError: null, result: null, createdBy: null, createdAt: stamp, updatedAt: stamp, completedAt: status === 'done' ? stamp : null});
+  const state = {tasks: [row('t1', 'reminder', 'queued'), row('t2', 'candidate-draft', 'running'), row('t3', 'reminder', 'done'), row('t4', 'group-run', 'queued')]};
+  wf.migrate(state);
+  const byId = id => state.tasks.find(t => t.id === id);
+  assert.equal(byId('t1').status, 'cancelled');
+  assert.equal(byId('t2').status, 'cancelled');
+  assert.match(byId('t1').lastError, /removed with X-engage/);
+  assert.equal(byId('t3').status, 'done', 'a finished task is history, not work to cancel');
+  assert.equal(byId('t4').status, 'queued', 'a kind that still exists is left alone');
 });
 
 test('a transient failure keeps retrying past the attempt cap while the retry window is open', async () => {

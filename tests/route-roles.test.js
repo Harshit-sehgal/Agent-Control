@@ -47,6 +47,9 @@ import {workspaceRoutes} from '../src/routes-workspaces.js';
 import {pushRoutes} from '../src/routes-push.js';
 import {aiRoutes} from '../src/routes-ai.js';
 import {memoryRoutes} from '../src/routes-memory.js';
+import {connectorRoutes} from '../src/routes-connectors.js';
+import {liveRoutes} from '../src/routes-live.js';
+import {fileRoutes} from '../src/routes-files.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -54,7 +57,7 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const MODULES = [
   ['publicRoutes', publicRoutes], ['workflowRoutes', workflowRoutes], ['groupRoutes', groupRoutes],
   ['accountRoutes', accountRoutes], ['workspaceRoutes', workspaceRoutes], ['pushRoutes', pushRoutes],
-  ['aiRoutes', aiRoutes], ['memoryRoutes', memoryRoutes],
+  ['aiRoutes', aiRoutes], ['memoryRoutes', memoryRoutes], ['connectorRoutes', connectorRoutes], ['liveRoutes', liveRoutes], ['fileRoutes', fileRoutes],
 ];
 
 /** Registration must not need a live server. Anything a module reads from the
@@ -84,7 +87,10 @@ const PUBLIC_ROUTES = [
   'POST /api/logout',
   'POST /api/auth/forgot',
   'POST /api/auth/reset',
-  'POST /api/capture',
+  // Google sends the owner back here from another site, so no session cookie arrives; the handler
+  // checks a single-use state nonce and a flow cookie (src/google.js). It takes no id.
+  'GET /api/connectors/google/callback',
+  'GET /api/connectors/mcp/callback',
 ];
 
 /** A public route with an id segment would be an unauthenticated lookup by id.
@@ -94,8 +100,24 @@ const PUBLIC_WITH_PARAM = [];
 
 /** Least role for the routes where "who may do this" is the whole point. */
 const LEAST_ROLE = {
-  'PATCH /api/settings': 'admin',
+  // Adding a stdio MCP server runs a program on the server's own computer: the owner's call alone.
+  'GET /api/agents/local/mcp': 'owner',
+  'POST /api/agents/local/mcp': 'owner',
+  'DELETE /api/agents/local/mcp/:name': 'owner',
   'POST /api/retention/prune': 'admin',
+  'PATCH /api/retention': 'admin',
+  // Asks and grants are the owner's call: a member or viewer cannot answer a bot's ask or widen what it may do.
+  // The old browser-request routes answer the same ask, so they take the same role.
+  'POST /api/asks/:id': 'admin',
+  'POST /api/grants': 'admin',
+  'POST /api/browser-requests/:id/approve': 'admin',
+  'POST /api/browser-requests/:id/deny': 'admin',
+  // A frame is a picture of whatever the shared browser is signed in to: a viewer never gets one. Driving it (take over, hand back, input) is an admin's.
+  'GET /api/browser-live/:botId': 'member',
+  'POST /api/browser-live/:botId/input': 'admin',
+  'GET /api/browser-live': 'member',
+  'POST /api/browser-live/:botId/takeover': 'admin',
+  'POST /api/browser-live/:botId/handback': 'admin',
   'GET /api/users': 'admin',
   'POST /api/users': 'admin',
   'PATCH /api/users/:id': 'admin',
@@ -105,6 +127,17 @@ const LEAST_ROLE = {
   'DELETE /api/credentials/:id': 'admin',
   'PATCH /api/agents/:id': 'admin',
   'DELETE /api/agents/:id': 'admin',
+  // A connector is a way out of the app: only an admin adds, refreshes or removes one.
+  'POST /api/connectors': 'admin',
+  // The Google client secret is the owner's to paste.
+  'POST /api/connectors/google/setup': 'owner',
+  'GET /api/connectors/google/start': 'admin',
+  'POST /api/activity/:id/undo': 'admin',
+  'POST /api/connectors/:id/refresh': 'admin',
+  'DELETE /api/connectors/:id': 'admin',
+  // A queued task runs on a paired device with no ask card in between, the same
+  // as an `agent-job` dispatch, which is admin-only.
+  'POST /api/agents/:id/tasks': 'admin',
   'GET /api/admin/backup': 'owner',
   'POST /api/admin/restore': 'owner',
   'PATCH /api/workspaces/current': 'owner',
@@ -158,8 +191,7 @@ test('the public surface is exactly the pinned list', () => {
   const publicRoutesFound = routes.filter(route => route.access === 'public').map(key);
   assert.deepEqual([...publicRoutesFound].sort(), [...PUBLIC_ROUTES].sort(),
     'A route now answers without a session (or one stopped doing so). Review it, then update PUBLIC_ROUTES.');
-  // Password reset and the extension capture endpoint still need a session or a
-  // token; they are public only in the sense that no role is checked.
+  // Password reset still needs a session; it is public only in the sense that no role is checked.
   assert.equal(publicRoutesFound.some(route => route.includes('/api/agent/')), false,
     'agent endpoints must keep the agent access level');
 });
@@ -210,7 +242,7 @@ test("every pattern's matcher resolves back to that same route", () => {
   assert.equal(router.find('GET', '/api/not-a-route'), null, 'an unknown path must not resolve');
 });
 
-test('the live takeover surface is member-level and lives under /api/browser-sessions', () => {
+test('the live takeover surface lives under /api/browser-sessions with the least role each route needs', () => {
   // A person driving the browser is a write, like approving a card, so it needs
   // the writer role. Pinned here so widening it to viewer is a test failure.
   const surface = routes.filter(route => route.pattern.startsWith('/api/browser-sessions')).map(key).sort();
@@ -222,8 +254,13 @@ test('the live takeover surface is member-level and lives under /api/browser-ses
     'POST /api/browser-sessions/:session/act',
     'POST /api/browser-sessions/:session/handback',
   ].sort());
+  // Opening, driving, handing back and closing a takeover act in a signed-in
+  // browser, like dispatching a job to a paired device, so they need admin.
+  // Opening is admin too: a member who could open one but not close it would
+  // hold the browser away from every bot until the idle clock ran out.
+  const ADMIN = new Set(['POST /api/browser-sessions', 'DELETE /api/browser-sessions/:session', 'POST /api/browser-sessions/:session/act', 'POST /api/browser-sessions/:session/handback']);
   for (const route of routes) {
-    if (route.pattern.startsWith('/api/browser-sessions')) assert.equal(route.access, 'member', `${key(route)} must stay at member or above`);
+    if (route.pattern.startsWith('/api/browser-sessions')) assert.equal(route.access, ADMIN.has(key(route)) ? 'admin' : 'member', `${key(route)} has the wrong least role`);
   }
 });
 

@@ -1,20 +1,23 @@
 /** Durable memory for the Node server.
  *
- * Every model turn gets what the workspace remembers (shared/memory.js builds
- * the block), and every turn leaves something behind: durable user sentences
- * become rules at once, the chat recap is rebuilt from stored messages, and on
- * a cadence one extra model call rewrites both into a compact form.
+ * Every bot turn gets what the workspace remembers for that bot: its own
+ * rulebook and the shared company notebook (shared/memory.js builds the block).
+ * Every turn leaves something behind: durable user sentences are noted for the
+ * bot's own book, the chat recap is rebuilt from stored messages, and on a
+ * cadence one extra model call rewrites both into a compact form.
  *
  * Consolidation is best effort. A provider error must never fail the reply the
  * user is waiting for; the deterministic recap and the pending rules survive.
  */
 import {cleanText} from '../shared/core.js';
 import {
-  modelKey, modelLabel, promptMemory, rulebook, noteTurn, noteChat,
+  modelKey, modelLabel, promptMemory, rulebook, noteTurn, noteChat, botKey, COMPANY_KEY, memoryState,
   consolidationInstructions, consolidationInput, parseConsolidation, mergeConsolidation,
   consolidationDue, findRulebook,
 } from '../shared/memory.js';
 import {complete} from './ai.js';
+import {resolveConfig} from './ai-providers.js';
+import {companyBots} from '../shared/company.js';
 import {botSettings} from '../shared/bot-settings.js';
 
 /** Consolidation calls already in flight, per store and model key, so two steps
@@ -38,14 +41,18 @@ export function conversationMessages(state, chatKey) {
   return [...byId.values()].sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')));
 }
 
+/** The book a bot's turns are noted in: its own, by bot id. (With no bot, the
+ * model's, as before bots had their own.) */
+const bookFor = (bot, config) => (bot?.id ? {key: botKey(bot.id), label: cleanText(bot.name, 160) || modelLabel(config)} : {key: modelKey(config), label: modelLabel(config)});
+
 /** The memory block for one bot turn, or null when this bot is set to forget.
- * `config` is resolved by the caller so each bot uses its own model's book. */
+ * `config` says a provider is there to use; it no longer picks the book. */
 export function memoryFor(store, {bot, config, chatKey}) {
   if (!config || (bot && botSettings(bot).memory === false)) return null;
   const state = store.read();
-  const key = modelKey(config);
-  const prompt = promptMemory(state, key, chatKey, {label: modelLabel(config)});
-  return {...prompt, key};
+  const {key, label} = bookFor(bot, config);
+  const prompt = promptMemory(state, key, chatKey, {label});
+  return {...prompt, key, label};
 }
 
 /** Record one exchange. Adds durable candidates to this model's book and
@@ -53,13 +60,13 @@ export function memoryFor(store, {bot, config, chatKey}) {
  * may still be delivering). Returns the book, or null when memory is off. */
 export async function rememberTurn(store, {bot, config, chatKey, userText = '', botText = '', now = new Date().toISOString()}) {
   if (!config || !chatKey || (bot && botSettings(bot).memory === false)) return null;
-  const key = modelKey(config);
+  const {key, label} = bookFor(bot, config);
   return store.update(state => {
     const messages = conversationMessages(state, chatKey);
     const pending = cleanText(userText, 8000);
     const hasUser = pending && messages.some(m => m.role === 'user' && String(m.text || '').trim() === pending.trim());
     const list = hasUser || !pending ? messages : [...messages, {id: `pending-${key}`, role: 'user', text: pending, at: now}];
-    const book = noteTurn(state, key, {userText: pending, botText, now, label: modelLabel(config), chatKey});
+    const book = noteTurn(state, key, {userText: pending, botText, now, label, chatKey});
     const entry = noteChat(state, chatKey, {now, messages: list});
     return {book, chat: entry};
   });
@@ -137,4 +144,24 @@ export async function maybeConsolidate(store, {key, config, chatKey = '', label 
     if (error?.status !== 503) console.error('Memory consolidation failed:', error.message);
     return null;
   }
+}
+
+/** Once, when a workspace first starts after bots got their own memory: copy each
+ * model's old rulebook into every bot that runs on that model. The company
+ * notebook is created at the same time, and its existence is the mark that this
+ * has run, so a bot made later starts empty and a deleted line stays deleted.
+ * A bot that already has a book of its own is left alone. */
+export async function migrateModelBooks(store) {
+  await store.update(state => {
+    const memory = memoryState(state);
+    if (memory.rulebooks[COMPANY_KEY]) return;
+    for (const bot of companyBots(state)) {
+      const from = memory.rulebooks[modelKey(resolveConfig(store, bot.id) || {})];
+      if (!from || memory.rulebooks[botKey(bot.id)]) continue;
+      const copy = structuredClone(from);
+      Object.assign(copy, {model: botKey(bot.id), label: bot.name, turns: 0, consolidatedTurns: 0, consolidatedAt: null});
+      memory.rulebooks[botKey(bot.id)] = copy;
+    }
+    rulebook(state, COMPANY_KEY, {label: 'Company notebook'});
+  });
 }

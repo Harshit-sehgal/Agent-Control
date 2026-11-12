@@ -31,6 +31,10 @@ import {MAX_HANDOFFS, createRun, instructLead, summonableGuests, wakeBots} from 
 import {simulateGroup} from '../shared/group-simulator.js';
 import {SqliteStore} from '../src/sqlite-store.js';
 import {coordinationState, resumeGroupRun, runGroup} from '../src/coordination.js';
+import {createThread} from '../shared/threads.js';
+import {pauseAll} from '../shared/runaway.js';
+import {companyBots} from '../shared/company.js';
+import {company, model, ask} from './run-fixture.js';
 
 /* ------------------------------------------------------------------ fixtures */
 
@@ -39,8 +43,8 @@ const bot = (id, {type = 'context', settings = {}} = {}) => ({
   id, name: id[0].toUpperCase() + id.slice(1), type, instructions: `Act as ${id}`, settings,
 });
 const group = (id, bots, settings = {}) => ({id, name: id, bots, settings});
-/** The browser-local document the simulator reads (candidates/drafts/settings). */
-const demoState = (extra = {}) => ({settings: {topics: []}, candidates: [], drafts: [], chats: {}, ...extra});
+/** The browser-local document the simulator reads. */
+const demoState = (extra = {}) => ({chats: {}, ...extra});
 
 const noApi = async () => { throw new Error('the simulator must not reach the API in this case'); };
 
@@ -159,7 +163,7 @@ test('a default pipeline runs the same ordered roster on both engines', async t 
     currentStep: 3,
     pausedAt: null,
     error: null,
-    outcomes: [{kind: 'completed', text: 'Done in 3 step(s). Anything to post still needs your approval.'}],
+    outcomes: [{kind: 'completed', text: 'Done in 3 step(s).'}],
   };
   assert.deepEqual(decisions(demo.run, demo.conversation), expected);
   assert.deepEqual(serverDecisions(server.store, server.runId), expected);
@@ -181,7 +185,7 @@ test('an explicit @mention narrows both engines to that one bot', async t => {
     currentStep: 1,
     pausedAt: null,
     error: null,
-    outcomes: [{kind: 'completed', text: 'Done in 1 step(s). Anything to post still needs your approval.'}],
+    outcomes: [{kind: 'completed', text: 'Done in 1 step(s).'}],
   };
   assert.deepEqual(decisions(demo.run, demo.conversation), expected);
   assert.deepEqual(serverDecisions(server.store, server.runId), expected);
@@ -209,7 +213,7 @@ test('a summonable guest from another group is on both rosters', async t => {
     currentStep: 1,
     pausedAt: null,
     error: null,
-    outcomes: [{kind: 'completed', text: 'Done in 1 step(s). Anything to post still needs your approval.'}],
+    outcomes: [{kind: 'completed', text: 'Done in 1 step(s).'}],
   };
   assert.deepEqual(decisions(demo.run, demo.conversation), expected);
   assert.deepEqual(serverDecisions(server.store, server.runId), expected);
@@ -219,14 +223,13 @@ test('both engines stop at the handoff maximum and at a smaller group cap', asyn
   // The cap is the product promise that one run cannot fan out forever. A drift
   // here shows up as a Pages run that spends six model calls where the server
   // spends nine, or vice versa.
-  const many = Array.from({length: 9}, (_, i) => bot(`b${i}`));
+  const many = Array.from({length: MAX_HANDOFFS + 3}, (_, i) => bot(`b${i}`));
   const groups = [group('big', many)];
   const demo = await demoEngine({groups, groupId: 'big', message: 'Coordinate'});
   const server = await serverEngine(t, {
     groups, groupId: 'big', message: 'Coordinate', executor: async b => `Report from ${b.name}`,
   });
   const capped = decisions(demo.run, demo.conversation);
-  assert.equal(MAX_HANDOFFS, 6, 'the harness assumes the default cap');
   assert.deepEqual(capped.recipients, many.slice(0, MAX_HANDOFFS).map(b => b.id));
   assert.equal(capped.steps.length, MAX_HANDOFFS, 'it stops at the cap, not at the end of the roster');
   assert.deepEqual(serverDecisions(server.store, server.runId), capped);
@@ -274,7 +277,7 @@ test('a checkpoint pauses both engines after the same step and resumes the same 
   // pause named, and stops again before the last handoff.
   const firstPause = demo.run;
   demo = await demoEngine({groups, groupId: 'cp', message, conversation, resume: firstPause});
-  await resumeGroupRun(server.store, server.runId, executor);
+  await (await resumeGroupRun(server.store, server.runId, executor)).done;
   const pausedTwice = {
     recipients: ['alpha', 'beta', 'gamma'],
     steps: [{botId: 'alpha', toBotId: 'beta'}, {botId: 'beta', toBotId: 'gamma'}],
@@ -293,7 +296,7 @@ test('a checkpoint pauses both engines after the same step and resumes the same 
   // Approve again: the run finishes on both.
   const secondPause = demo.run;
   demo = await demoEngine({groups, groupId: 'cp', message, conversation, resume: secondPause});
-  await resumeGroupRun(server.store, server.runId, executor);
+  await (await resumeGroupRun(server.store, server.runId, executor)).done;
   const completed = {
     recipients: ['alpha', 'beta', 'gamma'],
     steps: [
@@ -308,80 +311,28 @@ test('a checkpoint pauses both engines after the same step and resumes the same 
     outcomes: [
       {kind: 'paused', text: 'Paused after step 1. Approve the next step to continue.'},
       {kind: 'paused', text: 'Paused after step 2. Approve the next step to continue.'},
-      {kind: 'completed', text: 'Done in 3 step(s). Anything to post still needs your approval.'},
+      {kind: 'completed', text: 'Done in 3 step(s).'},
     ],
   };
   assert.deepEqual(decisions(demo.run, conversation), completed);
   assert.deepEqual(serverDecisions(server.store, server.runId), completed);
 });
 
-test('both engines retry a missing outcome once, then close instead of looping', async t => {
-  // The tracked task asked for a draft. A Writer that refuses has produced no
-  // outcome, so the run asks it once more (`assessTask` gives one retry while a
-  // step is left) and then closes with "Not finished". Without this, a refused
-  // handoff either dies silently or retries forever.
-  const groups = [group('tracked', [
-    bot('lead', {type: 'custom', settings: {lead: true}}),
-    bot('writer', {type: 'writing'}),
-  ], {coordination: 'tracked'})];
-  const message = 'draft a reply to that post';
-  const refusal = 'I cannot draft without a post. Share one with the + button.';
-  const state = demoState();
-
-  const demo = await demoEngine({groups, groupId: 'tracked', message, directBotId: 'lead', state});
-  const server = await serverEngine(t, {
-    groups, groupId: 'tracked', message, directBotId: 'lead',
-    // The server writer's reply must be the same refusal, so `assessTask` sees
-    // the same missing outcome as the simulator's canned refusal.
-    executor: async () => refusal,
-  });
-  const expected = {
-    recipients: ['writer', 'writer'],
-    steps: [{botId: 'writer', toBotId: null}, {botId: 'writer', toBotId: null}],
-    status: 'completed',
-    currentStep: 2,
-    pausedAt: null,
-    error: null,
-    outcomes: [
-      {kind: 'retry', text: 'Writer has not finished its part. Asking once more.'},
-      {kind: 'completed', text: 'Not finished. A reply draft is waiting on you.'},
-    ],
-  };
-  assert.deepEqual(decisions(demo.run, demo.conversation), expected);
-  assert.deepEqual(serverDecisions(server.store, server.runId), expected);
-  // A refusal is not a draft on either engine.
-  assert.deepEqual(state.drafts, []);
-  assert.deepEqual(server.store.read().drafts, []);
-});
-
-test('a step that throws is not retried, and both engines record the failure', async t => {
-  // "Fails once then succeeds": neither loop retries a thrown step, so a stub
-  // that would succeed on its second call is called exactly once on both. The
-  // failure must then land somewhere the user can see: both engines mark the run
-  // failed with the error and write a "The run failed: ..." line into the chat.
-  // The simulator used to reject instead (shared/group-simulator.js had no catch
-  // around the api call), so a Pages user was dropped back into a silent chat
-  // with a failed run record and no step trace.
+test('a step that throws is not retried, and the server records the failure', async t => {
+  // "Fails once then succeeds": the loop does not retry a thrown step, so a stub
+  // that would succeed on its second call is called exactly once. The failure
+  // must then land somewhere the user can see: the run is marked failed with the
+  // error and a "The run failed: ..." line goes into the chat. The offline
+  // simulator makes no call that can throw, so only the server is driven here.
   const groups = [group('fail', [bot('writer', {type: 'writing'})])];
-  const state = demoState({
-    candidates: [{id: 'c1', author: 'Ada', text: 'A post about robotics', url: 'https://x.com/ada/status/1', status: 'ready'}],
-  });
-  let demoCalls = 0;
-  const demoApi = async () => {
-    demoCalls++;
-    if (demoCalls === 1) throw new Error('Model unavailable');
-    return {id: 'd1', candidateId: 'c1', status: 'pending', text: 'A drafted reply, long enough to count.'};
-  };
   let serverCalls = 0;
   const executor = async () => {
     serverCalls++;
     if (serverCalls === 1) throw new Error('Model unavailable');
-    return 'A drafted reply, long enough to count, citing https://x.com/ada/status/1';
+    return 'A reply that would have been fine.';
   };
 
-  const demo = await demoEngine({groups, groupId: 'fail', message: '@Writer draft a reply', state, api: demoApi});
-  assert.equal(demoCalls, 1, 'the simulator retried a thrown step');
-  const server = await serverEngine(t, {groups, groupId: 'fail', message: '@Writer draft a reply', executor});
+  const server = await serverEngine(t, {groups, groupId: 'fail', message: '@Writer write a reply', executor});
   assert.equal(serverCalls, 1, 'the server retried a thrown step');
 
   const expected = {
@@ -393,7 +344,6 @@ test('a step that throws is not retried, and both engines record the failure', a
     error: 'Model unavailable',
     outcomes: [{kind: 'failed', text: 'The run failed: Model unavailable'}],
   };
-  assert.deepEqual(decisions(demo.run, demo.conversation), expected);
   assert.deepEqual(serverDecisions(server.store, server.runId), expected);
 });
 
@@ -416,11 +366,11 @@ test('a resumed run clears the checkpoint it came from on both engines', async t
     demo = await demoEngine({groups, groupId: 'cp', message, conversation, resume: demo.run});
   }
   const server = await serverEngine(t, {groups, groupId: 'cp', message, checkpoints: true, executor});
-  await resumeGroupRun(server.store, server.runId, executor);
+  await (await resumeGroupRun(server.store, server.runId, executor)).done;
   for (;;) {
     const status = server.store.read().groupRuns.find(r => r.id === server.runId).status;
     if (status !== 'awaiting_checkpoint') break;
-    await resumeGroupRun(server.store, server.runId, executor);
+    await (await resumeGroupRun(server.store, server.runId, executor)).done;
   }
 
   assert.equal(demo.run.status, 'completed');
@@ -472,4 +422,63 @@ test('a guest switched off after the plan is made is refused by both engines', a
   };
   assert.deepEqual(decisions(demo.run, demo.conversation), expected);
   assert.deepEqual(serverDecisions(server.store, server.runId), expected);
+});
+
+
+/* ---- The company (Phase 2): the Pages demo and the served loop make the same decisions ---- */
+
+/** The Pages world for a fixture company: the served state, copied. */
+const demoWorld = store => structuredClone(store.read());
+
+test('Pages creates a bot from a sentence: the same bot the served loop makes', async t => {
+  const sentence = 'Make a bot that watches my inbox and drafts replies';
+  const {store} = await company(t);
+  const served = await ask(store, {message: sentence, to: 'atlas', executor: model({Atlas: `Hiring.\n\`\`\`create-bot\n${JSON.stringify({job: sentence})}\n\`\`\``}).executor});
+  assert.equal(served.status, 'completed', served.error);
+  const world = demoWorld(store);
+  world.groups[0].bots = world.groups[0].bots.filter(b => b.origin !== 'bot');
+  const emitted = [];
+  let n = 0;
+  const run = await simulateGroup({group: world.groups[0], message: sentence, directBotId: 'atlas', guests: [], state: world, api: async () => {}, makeId: () => `d-${++n}`, emit: e => emitted.push(e), chatKey: 'atlas'});
+  assert.equal(run.status, 'completed');
+  const pick = b => ({name: b.name, job: b.instructions, reportsTo: b.settings.reportsTo, tint: b.settings.tint, permissions: b.permissions, origin: b.origin});
+  assert.deepEqual(pick(companyBots(world).find(b => b.origin === 'bot')), pick(companyBots(store.read()).find(b => b.origin === 'bot')));
+  assert.ok(emitted.some(line => line.kind === 'bot-created'));
+});
+
+test('Pages threads are run by Atlas: the same route and closing step as the served loop', async t => {
+  const {store, ids} = await company(t);
+  const message = 'Please book my dentist appointment';
+  let runId;
+  await store.update(s => {
+    const thread = createThread(s, {title: 'Dentist', makeId: () => 'pt'});
+    s.groups.push(thread);
+    const run = createRun({group: thread, message, guests: summonableGuests(s.groups, thread.id, {includeOff: true}), makeId: () => 'r-pt'});
+    s.groupRuns.unshift(run); runId = run.id;
+  });
+  const ai = model({Atlas: env => (env.previous ? 'All done.' : 'I will hand this to @Planner.'), Planner: 'On it.'});
+  await runGroup(store, runId, ai.executor);
+  const served = store.read().groupRuns.find(r => r.id === runId);
+  const world = demoWorld(store);
+  world.groups = world.groups.filter(g => g.id !== 'th-pt');
+  const thread = createThread(world, {title: 'Dentist', makeId: () => 'pt'});
+  world.groups.push(thread);
+  const local = await simulateGroup({group: thread, message, guests: summonableGuests(world.groups, thread.id, {includeOff: true}), state: world, api: async () => {}, makeId: () => 'r-pt', emit: () => {}});
+  assert.deepEqual(local.recipients, served.recipients);
+  assert.equal(local.closeAt, served.closeAt);
+  assert.deepEqual(local.recipients, [ids.atlas, ids.plan, ids.atlas]);
+  assert.deepEqual(local.trace.map(s => s.botId), served.trace.filter(s => !s.kind).map(s => s.botId));
+});
+
+test('a run parked by Pause all is parked at the same step on both engines', async t => {
+  const {store, ids} = await company(t);
+  await store.update(s => pauseAll(s));
+  const message = 'Please book my dentist appointment';
+  const ai = model({Atlas: env => (env.previous ? 'All done.' : 'I will hand this to @Planner.'), Planner: 'On it.'});
+  const served = await ask(store, {message, to: 'atlas', executor: ai.executor});
+  const world = demoWorld(store);
+  const local = await simulateGroup({group: world.groups[0], message, directBotId: 'atlas', guests: [], state: world, api: async () => {}, makeId: () => 'g-1', emit: () => {}, chatKey: 'atlas'});
+  assert.deepEqual([local.status, local.limit.kind, local.checkpoint.nextStep], [served.status, served.limit.kind, served.checkpoint.nextStep]);
+  assert.deepEqual([local.status, local.limit.kind, local.checkpoint.nextStep], ['awaiting_limit', 'guard', 1]);
+  assert.deepEqual(local.trace.map(s => s.botId), [ids.atlas]);
 });

@@ -15,9 +15,9 @@
  * This module is pure. It parses and bounds the request; `src/subagents.js`
  * runs the round and the orchestrator decides what the answer means.
  */
-import {cleanText} from './core.js?v=3b5334879a';
-import {fail} from './errors.js?v=3b5334879a';
-import {controlFence} from './reply-blocks.js?v=3b5334879a';
+import {cleanText} from './core.js?v=a9e6960ec3';
+import {fail} from './errors.js?v=a9e6960ec3';
+import {controlFence} from './reply-blocks.js?v=a9e6960ec3';
 
 export const SUBAGENT_PERMISSION = 'subagent.spawn';
 /** One helper per reply. Every spawn is a child call plus an extra turn for the
@@ -91,7 +91,7 @@ export function subagentBot(parent, request) {
     instructions: subagentInstructions(parent),
     permissions: [],
     // A helper is asked for a short answer, so it never burns a long reply budget.
-    settings: {replyLength: 'short', contextMessages: 0},
+    settings: {replyLength: 'short'},
     contract: {version: 1, inputs: ['objective'], output: {kind: 'text', fields: []}},
   };
 }

@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import {makeDraft,executeCustomBot,aiEnabled} from '../src/ai.js';
+import {complete,executeCustomBot,aiEnabled} from '../src/ai.js';
 
-const candidate={url:'https://x.com/a/status/1',text:'A post long enough to pass validation about robotics reliability.',author:'Tester',topic:'robotics'};
-const settings={style:'casual and direct',opinions:''};
+// One plain provider call; the tests below vary the wire, not the prompt.
+const ask=()=>complete({instructions:'Answer in one short sentence.',input:'A note about robotics reliability.'});
 
 // A throwaway OpenAI-compatible server that records what it received.
 async function stub(reply){
@@ -20,12 +20,11 @@ async function withEnv(env,fn){
   try{return await fn();}finally{for(const k of keys){if(saved[k]===undefined)delete process.env[k];else process.env[k]=saved[k];}}
 }
 
-test('drafts use the OpenAI-compatible chat shape and parse choices[].message',async()=>{
+test('calls use the OpenAI-compatible chat shape and parse choices[].message',async()=>{
   const {requests,port,close}=await stub({status:200,json:{choices:[{message:{content:'A concise reply.'}}]}});
   try{
-    const out=await withEnv({AI_BASE_URL:`http://127.0.0.1:${port}/v1`,AI_API_KEY:'test-key',AI_API_STYLE:'chat',AI_MODEL:'auto'},()=>makeDraft(candidate,settings));
-    assert.equal(out.mode,'ai');
-    assert.equal(out.text,'A concise reply.');
+    const out=await withEnv({AI_BASE_URL:`http://127.0.0.1:${port}/v1`,AI_API_KEY:'test-key',AI_API_STYLE:'chat',AI_MODEL:'auto'},()=>ask());
+    assert.equal(out,'A concise reply.');
   }finally{close();}
   assert.equal(requests.length,1);
   assert.equal(requests[0].url,'/v1/chat/completions');
@@ -40,8 +39,8 @@ test('drafts use the OpenAI-compatible chat shape and parse choices[].message',a
 test('OpenAI Responses payloads are parsed when AI_API_STYLE=responses',async()=>{
   const {requests,port,close}=await stub({status:200,json:{output:[{content:[{type:'output_text',text:'Resp draft'}]}]}});
   try{
-    const out=await withEnv({AI_BASE_URL:`http://127.0.0.1:${port}/v1`,AI_API_KEY:'sk-test',AI_API_STYLE:'responses',AI_MODEL:'gpt-4.1-mini'},()=>makeDraft(candidate,settings));
-    assert.equal(out.text,'Resp draft');
+    const out=await withEnv({AI_BASE_URL:`http://127.0.0.1:${port}/v1`,AI_API_KEY:'sk-test',AI_API_STYLE:'responses',AI_MODEL:'gpt-4.1-mini'},()=>ask());
+    assert.equal(out,'Resp draft');
   }finally{close();}
   assert.equal(requests[0].url,'/v1/responses');
   assert.ok('instructions' in requests[0].body,'Responses payload keeps the instructions field.');
@@ -51,8 +50,8 @@ test('the wire style is inferred as chat for a non-OpenAI host',async()=>{
   const {requests,port,close}=await stub({status:200,json:{choices:[{message:{content:'ok'}}]}});
   try{
     // No AI_API_STYLE: a loopback base URL must not be treated as OpenAI.
-    const out=await withEnv({AI_BASE_URL:`http://127.0.0.1:${port}/v1`,AI_API_KEY:'k',AI_API_STYLE:'',AI_MODEL:'auto'},()=>makeDraft(candidate,settings));
-    assert.equal(out.text,'ok');
+    const out=await withEnv({AI_BASE_URL:`http://127.0.0.1:${port}/v1`,AI_API_KEY:'k',AI_API_STYLE:'',AI_MODEL:'auto'},()=>ask());
+    assert.equal(out,'ok');
   }finally{close();}
   assert.equal(requests[0].url,'/v1/chat/completions');
 });
@@ -61,31 +60,28 @@ test('provider failures surface the status and message, never a fake success',as
   const {port,close}=await stub({status:429,json:{error:{message:'rate limited'}}});
   try{
     await withEnv({AI_BASE_URL:`http://127.0.0.1:${port}/v1`,AI_API_KEY:'k',AI_API_STYLE:'chat',AI_MODEL:'auto'},async()=>{
-      await assert.rejects(makeDraft(candidate,settings),/429.*rate limited/);
+      await assert.rejects(ask(),/429.*rate limited/);
     });
   }finally{close();}
 });
 
-test('without a provider, drafting falls back to a clearly labeled template',async()=>{
+test('without a provider, a call is refused with a fix instead of a fake answer',async()=>{
   await withEnv({AI_API_KEY:'',OPENAI_API_KEY:'',AI_BASE_URL:'',OPENAI_BASE_URL:''},async()=>{
     assert.equal(aiEnabled(),false);
-    const out=await makeDraft(candidate,settings);
-    assert.equal(out.mode,'template');
-    assert.match(out.note,/no AI key/i);
+    await assert.rejects(ask(),e=>e.status===422&&/No AI provider is configured/.test(e.message));
   });
 });
 
-test('chat content arrays are the reply, and a non-text payload is not a draft',async()=>{
+test('chat content arrays are the reply, and a non-text payload is not an answer',async()=>{
   const parts=await stub({status:200,json:{choices:[{message:{content:[{type:'text',text:'Real reply'}]}}]}});
   try{
-    const out=await withEnv({AI_BASE_URL:`http://127.0.0.1:${parts.port}/v1`,AI_API_KEY:'k',AI_API_STYLE:'chat',AI_MODEL:'auto'},()=>makeDraft(candidate,settings));
-    assert.equal(out.mode,'ai');
-    assert.equal(out.text,'Real reply');
+    const out=await withEnv({AI_BASE_URL:`http://127.0.0.1:${parts.port}/v1`,AI_API_KEY:'k',AI_API_STYLE:'chat',AI_MODEL:'auto'},()=>ask());
+    assert.equal(out,'Real reply');
   }finally{parts.close();}
   const image=await stub({status:200,json:{choices:[{message:{content:[{type:'image'}]}}]}});
   try{
     await withEnv({AI_BASE_URL:`http://127.0.0.1:${image.port}/v1`,AI_API_KEY:'k',AI_API_STYLE:'chat',AI_MODEL:'auto'},async()=>{
-      await assert.rejects(makeDraft(candidate,settings),/empty response/);
+      await assert.rejects(ask(),/empty response/);
     });
   }finally{image.close();}
 });
@@ -94,7 +90,7 @@ test('a provider error that echoes the key does not return the key',async()=>{
   const {port,close}=await stub({status:401,json:{error:{message:'bad key sk-test-secret'}}});
   try{
     await withEnv({AI_BASE_URL:`http://127.0.0.1:${port}/v1`,AI_API_KEY:'sk-test-secret',AI_API_STYLE:'chat',AI_MODEL:'auto'},async()=>{
-      await assert.rejects(makeDraft(candidate,settings),e=>{
+      await assert.rejects(ask(),e=>{
         assert.match(e.message,/401/);
         assert.equal(e.message.includes('sk-test-secret'),false);
         return true;
@@ -113,7 +109,7 @@ test('a long reply still keeps a trailing browser fence instead of slicing it of
   }finally{close();}
 });
 
-test('a reply that is only a browser fence keeps those fences, and a markdown-wrapped draft still loses its wrapper',async()=>{
+test('a reply that is only a browser fence keeps those fences, and a markdown-wrapped reply still loses its wrapper',async()=>{
   const block='```browser\n{"url":"https://example.com/docs"}\n```';
   const page=await stub({status:200,json:{choices:[{message:{content:block}}]}});
   try{
@@ -175,7 +171,8 @@ test('a reply that is only a spawn fence keeps its fences, and the tool is descr
   const plain=await stub({status:200,json:{choices:[{message:{content:'ok'}}]}});
   try{
     await withEnv({AI_BASE_URL:`http://127.0.0.1:${plain.port}/v1`,AI_API_KEY:'k',AI_API_STYLE:'chat',AI_MODEL:'m'},()=>executeCustomBot({instructions:'Draft it'},'go'));
-    assert.match(plain.requests[0].body.messages[0].content,/cannot access websites or run tools/);
+    assert.match(plain.requests[0].body.messages[0].content,/cannot run tools, except asking for a web page.* or asking another bot/);
+    assert.doesNotMatch(plain.requests[0].body.messages[0].content,/spawn block/);
   }finally{plain.close();}
 });
 
@@ -208,7 +205,7 @@ test('a streamed error is redacted before it is shortened, so no key head surviv
   const {port,close}=await rawStub({body:`data: ${JSON.stringify({error:{message:said}})}\n\n`});
   try{
     await assert.rejects(
-      withEnv({AI_BASE_URL:`http://127.0.0.1:${port}/v1`,AI_API_KEY:key,AI_API_STYLE:'chat',AI_MODEL:'auto'},()=>makeDraft(candidate,settings)),
+      withEnv({AI_BASE_URL:`http://127.0.0.1:${port}/v1`,AI_API_KEY:key,AI_API_STYLE:'chat',AI_MODEL:'auto'},()=>ask()),
       error=>{assert.doesNotMatch(error.message,/sk-proj-A1b2/);assert.doesNotMatch(error.message,new RegExp(key.slice(0,16)));return true;},
     );
   }finally{close();}
@@ -218,7 +215,7 @@ test('a stream that stops on length says why instead of reporting an empty answe
   const {port,close}=await rawStub({body:'data: {"choices":[{"delta":{"role":"assistant"},"finish_reason":"length"}]}\n\ndata: [DONE]\n\n'});
   try{
     await assert.rejects(
-      withEnv({AI_BASE_URL:`http://127.0.0.1:${port}/v1`,AI_API_KEY:'k-test-key',AI_API_STYLE:'chat',AI_MODEL:'auto'},()=>makeDraft(candidate,settings)),
+      withEnv({AI_BASE_URL:`http://127.0.0.1:${port}/v1`,AI_API_KEY:'k-test-key',AI_API_STYLE:'chat',AI_MODEL:'auto'},()=>ask()),
       /ran out of output tokens/,
     );
   }finally{close();}
@@ -228,7 +225,7 @@ test('a streamed refusal is reported as a refusal, not as a broken provider',asy
   const {port,close}=await rawStub({body:'data: {"choices":[{"message":{"refusal":"I cannot help with that."}}]}\n\n'});
   try{
     await assert.rejects(
-      withEnv({AI_BASE_URL:`http://127.0.0.1:${port}/v1`,AI_API_KEY:'k-test-key',AI_API_STYLE:'chat',AI_MODEL:'auto'},()=>makeDraft(candidate,settings)),
+      withEnv({AI_BASE_URL:`http://127.0.0.1:${port}/v1`,AI_API_KEY:'k-test-key',AI_API_STYLE:'chat',AI_MODEL:'auto'},()=>ask()),
       /refused the request/,
     );
   }finally{close();}
@@ -238,30 +235,40 @@ test('the reason for an empty answer is named on every protocol, not just chat',
   const responses=await stub({status:200,json:{status:'incomplete',incomplete_details:{reason:'max_output_tokens'},output:[]}});
   try{
     await assert.rejects(
-      withEnv({AI_BASE_URL:`http://127.0.0.1:${responses.port}/v1`,AI_API_KEY:'sk-test',AI_API_STYLE:'responses',AI_MODEL:'gpt-4.1-mini'},()=>makeDraft(candidate,settings)),
+      withEnv({AI_BASE_URL:`http://127.0.0.1:${responses.port}/v1`,AI_API_KEY:'sk-test',AI_API_STYLE:'responses',AI_MODEL:'gpt-4.1-mini'},()=>ask()),
       /ran out of output tokens/,
     );
   }finally{responses.close();}
   const anthropic=await stub({status:200,json:{content:[],stop_reason:'max_tokens'}});
   try{
     await assert.rejects(
-      withEnv({AI_BASE_URL:`http://127.0.0.1:${anthropic.port}/v1`,AI_API_KEY:'sk-ant-test',AI_API_STYLE:'anthropic',AI_MODEL:'claude-3-5-haiku-latest'},()=>makeDraft(candidate,settings)),
+      withEnv({AI_BASE_URL:`http://127.0.0.1:${anthropic.port}/v1`,AI_API_KEY:'sk-ant-test',AI_API_STYLE:'anthropic',AI_MODEL:'claude-3-5-haiku-latest'},()=>ask()),
       /ran out of output tokens/,
     );
   }finally{anthropic.close();}
 });
 
-test('a busy provider is retryable, so a queued run is not failed by a local 429',async()=>{
+test('a call over the app\'s own limit waits for a free slot instead of failing the turn',async()=>{
   const {port,close}=await rawStub({type:'application/json',body:JSON.stringify({choices:[{message:{content:'ok'}}]}),delay:150});
   try{
     await withEnv({AI_BASE_URL:`http://127.0.0.1:${port}/v1`,AI_API_KEY:'k-test-key',AI_API_STYLE:'chat',AI_MODEL:'auto',AI_MAX_CONCURRENCY:'1'},async()=>{
-      const first=makeDraft(candidate,settings);
-      const second=makeDraft(candidate,settings).catch(error=>error);
+      const [a,b]=await Promise.all([ask(),ask()]);
+      assert.deepEqual([a,b],['ok','ok'],'the second call ran once the first was done');
+    });
+  }finally{close();}
+});
+
+test('a call that still finds no free slot is retryable and says it is this app\'s queue',async()=>{
+  const {port,close}=await rawStub({type:'application/json',body:JSON.stringify({choices:[{message:{content:'ok'}}]}),delay:400});
+  try{
+    await withEnv({AI_BASE_URL:`http://127.0.0.1:${port}/v1`,AI_API_KEY:'k-test-key',AI_API_STYLE:'chat',AI_MODEL:'auto',AI_MAX_CONCURRENCY:'1',AI_SLOT_WAIT_MS:'60'},async()=>{
+      const first=ask();
+      const busy=await ask().catch(error=>error);
       await first;
-      const busy=await second;
       assert.equal(busy.status,429);
       assert.equal(busy.permanent,undefined,'the queue must be allowed to retry a busy call');
-      assert.match(busy.message,/busy with other requests/);
+      assert.match(busy.message,/already running 1 model call/);
+      assert.doesNotMatch(busy.message,/provider is busy/);
     });
   }finally{close();}
 });

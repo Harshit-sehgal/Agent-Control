@@ -2,9 +2,9 @@
  *
  * The unit tests call each module directly and the hardening test walks the holes.
  * This one walks the *journey*: an owner invites a colleague and a read-only
- * viewer, the colleague captures a post, gets a draft, backs it with evidence and
- * approves it, and the workspace keeps its promises on the way through — a viewer
- * cannot write, an approval survives into the backup, and no secret leaves in it.
+ * viewer, the colleague builds a group with a bot and queues a task, and the
+ * workspace keeps its promises on the way through — a viewer cannot write, what
+ * the member built survives into the backup, and no secret leaves in it.
  *
  * Every request goes over HTTP through the router, the role check and the body
  * parser, so a rule that only holds inside a module fails here.
@@ -43,8 +43,7 @@ async function launch() {
     env: {
       ...process.env,
       AGENT_SKIP_DOTENV: '1',
-      // Hermetic: no ambient provider, so the template draft path is used and the
-      // journey never spends a token.
+      // Hermetic: no ambient provider, so the journey never spends a token.
       AI_API_KEY: '', OPENAI_API_KEY: '', AI_BASE_URL: '', OPENAI_BASE_URL: '',
       DASHBOARD_PASSWORD: OWNER_PASSWORD, HOST: '127.0.0.1', PORT: String(port),
       DATA_FILE: path.join(dir, 'state.json'),
@@ -89,7 +88,7 @@ async function send(base, method, url, body, cookie, headers = {}) {
 
 const cookieOf = login => String(login.setCookie || '').split(';')[0];
 
-test('a workspace runs end to end over HTTP: invite, capture, draft, evidence, approve, back up', {timeout: 60000}, async () => {
+test('a workspace runs end to end over HTTP: invite, build a group and bot, queue a task, back up', {timeout: 60000}, async () => {
   const t = await launch();
   const call = (method, url, body, cookie, headers) => send(t.base, method, url, body, cookie, headers);
   try {
@@ -118,7 +117,7 @@ test('a workspace runs end to end over HTTP: invite, capture, draft, evidence, a
       ['create a group', 'POST', '/api/groups', {name: 'Viewer group'}],
       ['add a bot', 'POST', `/api/groups/${seen.body.groups[0].id}/bots`, {name: 'Vic bot', instructions: 'x'}],
       ['queue work', 'POST', '/api/tasks', {kind: 'http.check', url: 'https://example.test'}],
-      ['add evidence', 'POST', '/api/drafts/nope/evidence', {claim: 'x'}],
+      ['remove a group', 'DELETE', `/api/groups/${seen.body.groups[0].id}`, undefined],
     ]) {
       const refused = await call(method, url, body, vic);
       assert.equal(refused.status, 403, `a viewer must not ${label} (got ${refused.status})`);
@@ -131,59 +130,30 @@ test('a workspace runs end to end over HTTP: invite, capture, draft, evidence, a
     const bot = await call('POST', `/api/groups/${group.id}/bots`, {name: 'Sam assistant', instructions: 'Draft a careful reply.', type: 'writing'}, sam);
     assert.equal(bot.status, 201, JSON.stringify(bot.body));
 
-    // A post the extension captured arrives with its token, not a session.
-    const captured = await call('POST', '/api/capture', {
-      url: 'https://x.com/lab/status/4242',
-      text: 'What is the smallest useful step toward a reliable robotics benchmark?',
-      author: 'Lab', topic: 'robotics',
-    }, undefined, {'X-Capture-Token': state.captureToken, Origin: 'chrome-extension://e2e'});
-    assert.equal(captured.status, 201, JSON.stringify(captured.body));
-    const candidateId = captured.body.candidate.id;
+    // A member can open a group of their own and put a bot in it.
+    const team = await call('POST', '/api/groups', {name: 'Sam team', description: 'Built over HTTP'}, sam);
+    assert.equal(team.status, 201, JSON.stringify(team.body));
+    const teamBot = await call('POST', `/api/groups/${team.body.id}/bots`, {name: 'Team helper', instructions: 'Answer briefly.'}, sam);
+    assert.equal(teamBot.status, 201, JSON.stringify(teamBot.body));
+    const duplicateBot = await call('POST', `/api/groups/${team.body.id}/bots`, {name: 'team helper', instructions: 'Same name.'}, sam);
+    assert.equal(duplicateBot.status, 409, 'two bots in a group cannot share a name');
 
-    // The same capture twice is the same candidate, not a second one.
-    const again = await call('POST', '/api/capture', {
-      url: 'https://x.com/lab/status/4242',
-      text: 'What is the smallest useful step toward a reliable robotics benchmark?',
-      author: 'Lab', topic: 'robotics',
-    }, undefined, {'X-Capture-Token': state.captureToken, Origin: 'chrome-extension://e2e'});
-    assert.equal(again.status, 200, 'a duplicate capture is recognised');
-    assert.equal(again.body.duplicate, true);
+    // A member queues work; the same idempotency key is the same task, not a second one.
+    const taskBody = {kind: 'bot-task', groupId: team.body.id, botId: teamBot.body.id, message: 'Summarise the week.', intervalMinutes: 60, idempotencyKey: 'e2e-weekly', payload: {kind: 'interval', groupId: team.body.id, botId: teamBot.body.id, message: 'Summarise the week.', intervalMinutes: 60}};
+    const queued = await call('POST', '/api/tasks', taskBody, sam);
+    assert.equal(queued.status, 201, JSON.stringify(queued.body));
+    const again = await call('POST', '/api/tasks', taskBody, sam);
+    assert.equal(again.status, 200, 'a repeated request is recognised');
+    assert.equal(again.body.id, queued.body.id);
+    assert.equal((await call('POST', '/api/tasks', {kind: 'no-such-kind'}, sam)).status, 400, 'an unknown task kind is refused');
+    assert.equal((await call('POST', '/api/tasks', {kind: 'notification'}, sam)).status, 403, 'deliveries are queued by the server, not by request');
+    assert.equal((await call('DELETE', `/api/groups/${team.body.id}`, undefined, sam)).status, 403, 'removing a group is for an admin');
 
-    const processed = await call('POST', `/api/candidates/${candidateId}/process`, {}, sam);
-    assert.equal(processed.status, 201, JSON.stringify(processed.body));
-    const draft = processed.body;
-    assert.equal(draft.status, 'pending');
-    assert.ok(draft.text?.length, 'a draft has text even with no provider configured');
-
-    // Evidence is a person's claim, verified by a person, and it moves the draft.
-    const evidence = await call('POST', `/api/drafts/${draft.id}/evidence`, {
-      kind: 'claim', claim: 'The benchmark measures transfer across embodiments.', confidence: 0.8, reuse: 'quote',
-    }, sam);
-    assert.equal(evidence.status, 201, JSON.stringify(evidence.body));
-    const verified = await call('POST', `/api/evidence/${evidence.body.id}/verify`, {status: 'user_verified'}, sam);
-    assert.equal(verified.status, 200, JSON.stringify(verified.body));
-
-    const approved = await call('POST', `/api/drafts/${draft.id}/approve`, {}, sam);
-    assert.equal(approved.status, 200, JSON.stringify(approved.body));
-    assert.equal(approved.body.status, 'scheduled', 'approval schedules the exact revision');
-    assert.ok(approved.body.approvedAt, 'an approval is stamped');
-    assert.ok(approved.body.dueAt, 'and carries the moment it is due');
-    const frozen = approved.body.approvedEvidence?.map(e => e.id) || [];
-    assert.ok(frozen.includes(evidence.body.id), 'the approval freezes what it was approved on');
-    assert.ok(frozen.length >= 2, 'including the captured source the draft was built from');
-
-    // The human still decides when it goes: released, then posted.
-    const released = await call('POST', `/api/drafts/${draft.id}/ready`, {}, sam);
-    assert.equal(released.status, 200, JSON.stringify(released.body));
-    assert.equal(released.body.status, 'ready');
-    const postedDraft = await call('POST', `/api/drafts/${draft.id}/posted`, {}, sam);
-    assert.equal(postedDraft.status, 200, JSON.stringify(postedDraft.body));
-    assert.equal(postedDraft.body.status, 'posted');
-    assert.ok(postedDraft.body.postedAt);
-
-    // A posted draft is history: editing it is refused, not silently applied.
-    const lateEdit = await call('PATCH', `/api/drafts/${draft.id}`, {text: 'A different claim entirely.'}, sam);
-    assert.equal(lateEdit.status, 409, 'a posted draft cannot be rewritten');
+    // A task can be cancelled by the member, never by the viewer.
+    const spare = await call('POST', '/api/tasks', {kind: 'bot-task', payload: {kind: 'once', groupId: team.body.id, message: 'A task nobody needs', nextAt: new Date(Date.now() + 86400000).toISOString()}}, sam);
+    assert.equal(spare.status, 201, JSON.stringify(spare.body));
+    assert.equal((await call('DELETE', `/api/tasks/${spare.body.id}`, undefined, vic)).status, 403, 'a viewer may not cancel a task');
+    assert.equal((await call('DELETE', `/api/tasks/${spare.body.id}`, undefined, sam)).status, 200);
 
     // ---- The thread keeps its fence over HTTP ------------------------------
     const chatKey = bot.body.id;
@@ -200,32 +170,6 @@ test('a workspace runs end to end over HTTP: invite, capture, draft, evidence, a
     assert.equal(real.role, 'bot'); assert.equal(real.senderId, chatKey);
     assert.equal(real.mode, undefined, 'a browser write is never model output');
 
-    // ---- A capture nobody committed to can be removed ----------------------
-    const spare = await call('POST', '/api/capture', {
-      url: 'https://x.com/lab/status/9999', text: 'A post that turned out to be noise, captured by mistake.',
-    }, undefined, {'X-Capture-Token': state.captureToken, Origin: 'chrome-extension://e2e'});
-    assert.equal(spare.status, 201, JSON.stringify(spare.body));
-    const spareId = spare.body.candidate.id;
-    assert.equal((await call('DELETE', `/api/candidates/${spareId}`, {}, vic)).status, 403, 'a viewer may not remove a capture');
-    assert.equal((await call('DELETE', `/api/candidates/${spareId}`, {}, sam)).status, 200);
-    assert.ok(!(await call('GET', '/api/state', undefined, sam)).body.candidates.some(c => c.id === spareId), 'the capture is gone');
-    // The posted draft pins its own capture: deleting that would withdraw a
-    // person's approval and the record of something that went out.
-    const pinned = await call('DELETE', `/api/candidates/${candidateId}`, {}, sam);
-    assert.equal(pinned.status, 409, JSON.stringify(pinned.body));
-    assert.match(String(pinned.body?.error || ''), /posted draft/);
-    // Removing it twice is a 404, not a silent success.
-    assert.equal((await call('DELETE', `/api/candidates/${spareId}`, {}, sam)).status, 404);
-
-    // ---- Replacing the capture token retires the old one -------------------
-    const capture = token => call('POST', '/api/capture', {url: 'https://x.com/lab/status/5150', text: 'A post captured to try a token.'}, undefined, {'X-Capture-Token': token, Origin: 'chrome-extension://e2e'});
-    assert.equal((await call('POST', '/api/capture-token', {}, sam)).status, 403, 'a member cannot replace a workspace credential');
-    const rotated = await call('POST', '/api/capture-token', {}, owner);
-    assert.equal(rotated.status, 200, JSON.stringify(rotated.body));
-    assert.notEqual(rotated.body.captureToken, state.captureToken);
-    assert.equal((await capture(state.captureToken)).status, 401, 'the retired token stops capturing');
-    assert.equal((await capture(rotated.body.captureToken)).status, 201, 'and the new one works');
-
     // ---- The workspace can be moved, but it carries no secrets -------------
     const backup = await call('GET', '/api/admin/backup', undefined, owner);
     assert.equal(backup.status, 200, JSON.stringify(backup.body).slice(0, 200));
@@ -239,10 +183,10 @@ test('a workspace runs end to end over HTTP: invite, capture, draft, evidence, a
       assert.equal(user.password_hash, 'redacted', 'password hashes are redacted, not exported');
       assert.equal(user.passwordHash, undefined);
     }
-    const drafts = tables.drafts || [];
-    const carried = drafts.find(d => d.id === draft.id);
-    assert.ok(carried, 'the posted draft travels');
-    assert.equal(carried.status, 'posted', 'with the approval it earned and the posting it was');
+    const carried = (tables.groups || []).find(g => g.id === team.body.id);
+    assert.ok(carried, 'the group the member built travels');
+    assert.ok((tables.bots || []).some(b => b.id === teamBot.body.id), 'with its bot');
+    assert.ok((tables.tasks || []).some(t => t.id === queued.body.id), 'and the task that was queued');
     assert.ok(!JSON.stringify(backup.body).includes(MEMBER_PASSWORD), 'no password appears anywhere in the export');
 
     // A viewer cannot take a copy of the workspace, and cannot restore over it.

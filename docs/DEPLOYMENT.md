@@ -25,7 +25,7 @@ knobs.
 | `HSTS` | `1` to send `Strict-Transport-Security` (only behind TLS) |
 | `TLS_CERT` / `TLS_KEY` | optional paths to a certificate and key; both must be set to serve HTTPS in-process |
 | `TRUST_PROXY` | `1` when a reverse proxy sets `X-Forwarded-For` / `X-Forwarded-Proto`. The rate limiter then keys on the rightmost `X-Forwarded-For` hop and the Secure-cookie hint follows `X-Forwarded-Proto` |
-| `RESET_TOKEN_CONSOLE` | `0` on a hosted install so password-reset tokens are not printed to the process log |
+| `RESET_TOKEN_CONSOLE` | Unset: reset tokens are printed to the process log only when `PUBLIC_ORIGIN` is not https and `SMTP_HOST` is unset. `1` forces printing, `0` always silences it |
 | `SMTP_HOST` | the mail server for the email channel. Set, and the app submits over SMTP itself; unset, the channel needs a relay (below) |
 | `SMTP_PORT` | submission port: `587` by default, `465` with `SMTP_SECURE=1` |
 | `SMTP_SECURE` | `1` for TLS from the first byte (port 465). Otherwise the connection starts plaintext and must upgrade with `STARTTLS` |
@@ -60,6 +60,166 @@ Local-agent knobs (`AGENT_BROWSER`, allowlist, profile, path) are read by
 `node agent/agent.mjs`, not this process. They are listed in `.env.example`
 and [`AGENT-PROTOCOL.md`](AGENT-PROTOCOL.md).
 
+### The local agent starts with the server
+
+A bot reaches a browser, your `claude` and `codex` sign-in and stdio MCP servers
+through a local agent. When the server listens on this computer only (`HOST`
+`127.0.0.1`, `localhost` or `::1`, the default), it does that step for you: on
+the first start it pairs "This computer" with every agent permission, keeps the
+secret in `local-agent.json` beside the database (mode 0600), and runs
+`agent/agent.mjs run` as a child process. The child gets the shared browser
+(`AGENT_BROWSER=1`) and any public site (`AGENT_BROWSER_ALLOWLIST=*`) unless you
+set either yourself, and polls every 2 seconds (`AGENT_POLL_MS`) so an Allow is
+picked up at once. Every page still waits for your ask card, and the agent
+still refuses private and local addresses. It restarts after a crash, stops with
+the server, and stops by itself if the server is killed.
+
+- `LOCAL_AGENT=0` never starts it; `LOCAL_AGENT=1` starts it on a server that
+  listens on other interfaces too.
+- Revoking "This computer" in Settings → Local agents is respected: it is not
+  paired again on the next start. Delete `local-agent.json` to pair it afresh.
+- A stdio MCP server on this computer is added in the app: Settings →
+  Connectors → On my computer, with the command that starts it (split into
+  words and run without a shell). The server writes it to `local-agent.json`
+  and restarts the agent; the command never enters the database. Only an
+  owner of the first workspace may add one (`POST /api/agents/local/mcp`).
+- A server on a shared machine or in a container does not start one unasked;
+  pair a device there as below.
+
+### Use your Claude / ChatGPT subscription
+
+A bot can run on your own Claude or ChatGPT plan instead of an API key. This
+works only through the paired local agent, which starts the **unmodified**
+`claude` or `codex` command that you signed in to yourself. The app never sees,
+stores or forwards that login: it holds no key for these providers and keeps no
+token. The providers' terms forbid third-party apps from offering or routing a
+plan login; running their own CLI yourself, on your own machine, is the ordinary
+way to use a plan. So these providers are for the workspace owner only, they are
+not a way to share a plan with other people, and the plan's limits assume
+ordinary individual use.
+
+1. On the machine that will run the bots, install the CLI and sign in once in a
+   terminal: run `claude` (Claude Code) or `codex login` (Codex CLI) and finish
+   the sign-in.
+2. Run the server on that machine (`npm start`). A server listening on this
+   computer pairs it as "This computer" and runs the agent itself (see
+   [The local agent starts with the server](#the-local-agent-starts-with-the-server)).
+   For another machine, pair an agent there (`node agent/agent.mjs pair`, with a
+   pairing code from Settings → Local agents) and leave `node agent/agent.mjs run`
+   going. A new pairing asks for the `model.run` permission by default; an agent
+   paired earlier needs it added (`PATCH /api/agents/:id`).
+3. Add a subscription provider: `POST /api/ai/providers` with
+   `{"kind": "local-cli", "engine": "claude", "label": "My Claude"}` (engine
+   `claude` or `codex`; an optional `model`, which must be a plain name that
+   cannot read as a flag; no key). Then point a bot at it with
+   `PATCH /api/ai/bots/:bot` `{"providerId": "…"}`, or make it the workspace
+   default. In the app this is Settings → Models and keys → Add a subscription, which
+   also shows whether `claude` and `codex` are signed in on each paired machine.
+
+How a turn works: the bot's model call becomes a `model.run` task, the agent runs
+the CLI with the prompt on **stdin** (never on the command line, so it cannot
+appear in `ps`), and the answer comes back to the chat. The thread shows
+"working…" until it returns; there is no token streaming. The CLI runs in an
+empty scratch directory with its own file, shell and web tools switched off
+(`claude --tools ""`, `codex -s read-only`), and the environment's
+`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY` and
+`CODEX_API_KEY` are not passed on, so the plan is what gets used. App actions
+(hand-offs, asks, creating bots, the browser) still travel as text fences, as for
+any bot.
+
+What to expect:
+
+- **Sign-in status** is reported by the agent in its heartbeat, from the CLIs'
+  own status commands (`claude auth status`, `codex login status`; neither makes
+  a model call), and cached for ten minutes. `GET /api/agents` returns it as
+  `cli: {claude, codex}` with `signed-in`, `signed-out`, `missing` or `unknown`,
+  and **Test** on a subscription provider reads it instead of sending a message.
+- **No agent, or it is not running:** the run fails with "No computer is
+  connected to run `claude`…" (or a note that the agent is offline or may not run
+  models). Nothing is queued.
+- **Usage limit:** the run fails with a clear message and the chat gets a card
+  offering to switch that bot to another connected model, through
+  `PATCH /api/ai/bots/:bot`. There is no silent fallback and no retry; a retry
+  would spend the plan twice.
+- **Pickup delay:** the agent polls (`AGENT_POLL_MS`, 15s by default), so a turn
+  can start up to one poll interval late.
+- **Timeouts:** a turn waits `AI_CLI_TIMEOUT_MS` in all (default 300000), and the
+  agent stops its CLI a little before that. A hung CLI is killed with its child
+  processes; more than 8 MB of output is cut off; neither stops the agent.
+- Gemini stays API-key only: Google does not allow its CLI login in other tools.
+
+### Connectors: Gmail, Drive and MCP servers
+
+A connector is a service a bot may use once you have said yes. Every use goes
+through the ask card: the first time a bot uses a connector it asks (Decline,
+Allow, or Always allow for that bot and that account), and anything that changes
+something (a send, a draft, an MCP tool that writes) is a separate, second
+question. A tool nobody described as read-only counts as a write. The card shows
+what the call would carry: the recipient, subject and the start of the body for an
+email, the arguments for an MCP tool. What comes back (a mail, a file, a server's
+answer) reaches the same bot as untrusted data, not as instructions.
+
+Secrets (the Google client secret, the refresh token, an MCP server's address and
+headers) are stored encrypted in the vault and never returned by any route, put in
+the state snapshot, logged or written to a backup. Backups carry no credentials;
+after a restore onto another machine, add the connectors again.
+
+**Google (Gmail and Drive).** You make your own Google Cloud OAuth client; the app
+holds only what you paste.
+
+1. In the [Google Cloud Console](https://console.cloud.google.com) create a project
+   (or pick one) and, under APIs & Services → Library, enable the **Gmail API** and
+   the **Google Drive API**.
+2. Under OAuth consent screen choose **External**, fill in an app name and your
+   email, and add your own Google account under **Test users**.
+3. Under Credentials create an **OAuth client ID** of type **Web application** and
+   add the Authorized redirect URI that `GET /api/connectors` shows in
+   `google.redirectUri`: your `PUBLIC_BASE_URL` plus `/api/connectors/google/callback`.
+4. Paste the Client ID and Client secret: `POST /api/connectors/google/setup`
+   `{"clientId", "clientSecret"}` (owner only). Then open
+   `/api/connectors/google/start` in the browser (**Connect Google**) and approve
+   Gmail and Drive access.
+
+The redirect address comes from `PUBLIC_BASE_URL` (or `PUBLIC_ORIGIN`), else from
+the address the request came to; the code has no host of its own, so moving the
+server to the VM means changing that one setting and the redirect URI in Google
+Cloud. The scopes are `gmail.modify` and `drive.readonly`.
+
+**Testing status and the 7-day refresh.** While the consent screen is in *Testing*,
+Google ends the sign-in after 7 days. The connector then shows **reconnect**
+(`status: "reconnect"`) and bots are not offered it until you choose Connect Google
+again. Publishing the app (*In production*) for your own use removes the limit; you
+do not need Google's verification for an app only you use, but Google shows an
+"unverified app" notice at sign-in.
+
+Gmail and Drive actions: `gmail.search`, `gmail.read`, `drive.search`, `drive.read`
+(reads); `gmail.draft`, `gmail.send` (writes). **Undo:** an email send you have
+Always-allowed is held for 30 seconds, shown in Activity with an Undo
+(`POST /api/activity/:id/undo`), and goes out when the window ends. A send you
+answered Allow on its card goes at once. Every write that goes out is logged as
+having left the app. A server restart during the 30 seconds sends nothing and says so.
+
+**MCP servers.** Any MCP server is a connector; its tools are the connector's
+actions. The client is hand-written (JSON-RPC 2.0, no SDK).
+
+- *Over HTTP (streamable HTTP):* `POST /api/connectors`
+  `{"kind": "mcp", "name": "Notes", "url": "https://…", "headers": {"Authorization": "Bearer …"}}`.
+  The server is reached first (`initialize`, `tools/list`) and only a server that
+  answers is saved. Calls have a 30-second limit, a 1 MiB read cap, no redirects, and
+  a result longer than 12,000 characters is cut. `POST /api/connectors/:id/refresh`
+  lists the tools again; `DELETE /api/connectors/:id` removes it and its secrets.
+- *Over stdio (a program on your machine):* put the command in the **agent's**
+  config, never on the server: in `agent.config.json` add
+  `"mcpServers": {"files": {"command": "npx", "args": ["-y", "…"], "env": {"TOKEN": "…"}, "cwd": "/path"}}`,
+  allow the `mcp.call` permission for that agent, keep `node agent/agent.mjs run`
+  going, then add the connector with `{"kind": "mcp", "name": "Files", "agentServer": "files"}`.
+  A task carries only the server's name; the agent starts the program fresh for each
+  call with a small environment and kills it when it is slow or says too much.
+
+Environment: `PUBLIC_BASE_URL`; `GOOGLE_AUTH_URL`, `GOOGLE_TOKEN_URL` and
+`GOOGLE_API_BASE` (Google's own addresses by default; they exist so tests can use a
+fake).
+
 ### The browser a bot may use
 
 An approved `browser.use` request runs in a headless browser. `BROWSER_RUNTIME`
@@ -70,8 +230,8 @@ picks whose:
 | `BROWSER_RUNTIME` | `auto` (default), `server` or `agent`. `auto` uses this server when it has an allowlist and a browser, and a paired local agent otherwise |
 | `AGENT_BROWSER_ALLOWLIST` | the hosts a bot may open, read by both runtimes; `*` means any public host (the egress proxy still refuses private and local addresses) |
 | `AGENT_BROWSER_PATH` | the browser binary; else the first Chrome, Chromium or Edge found on `PATH` |
-| `BROWSER_TIMEOUT_MS` / `BROWSER_IDLE_MS` | the per-request budget (25s) and how long an idle browser is kept (120s) |
-| `BROWSER_LIVE_MS` / `BROWSER_LIVE_MAX_MS` | how long a person may hold a page they took over: idle limit (10 min) and hard cap (30 min) |
+| `BROWSER_TIMEOUT_MS` / `BROWSER_IDLE_MS` | how long one page may take to load (60s) and how long an idle browser is kept (30 min; sign-ins live in the profile) |
+| `BROWSER_LIVE_MS` / `BROWSER_LIVE_MAX_MS` | optional clocks on a takeover (idle, and outright); unset by default, so a person holds the page until they hand back |
 | `BROWSER_NO_SANDBOX` | `1` in a container, where Chrome's own sandbox cannot start. The allowlist, the egress proxy and the fresh context per page still apply |
 
 The server browser is one child process: started with the first request, closed
@@ -95,6 +255,48 @@ sandbox); the allowlist, the egress proxy and the fresh context per page still
 apply. Building without that argument keeps the image small, and requests then
 fall back to a paired local agent — with neither, the chat says which one is
 missing.
+
+### One browser for all your bots (sign in once)
+
+On the device that runs `node agent/agent.mjs run`, set `AGENT_BROWSER=1` (and
+`AGENT_BROWSER_ALLOWLIST`, as above) and every bot's browser work shares **one
+Chrome with one saved profile**. Sign in to a site there once and the sign-in is
+there for every bot. Each bot has its own tab, one bot drives at a time and the
+others wait their turn in order; a bot never touches another bot's tab.
+
+- **Where it lives:** `browser-profile/` next to the agent's `agent.config.json`
+  (or the directory in `AGENT_BROWSER_PROFILE`), created with mode `0700`. It
+  holds your cookies. Nothing in this app reads, uploads, logs or backs it up
+  (`npm run backup` and the vault never see it); keep it out of your own backups
+  and do not share it.
+- **Sign in once:** open the bot's profile, then **Computer**, and press **Take
+  over** (`POST /api/browser-live/:botId/takeover`). You see the page live,
+  click and type (or use the type box and key buttons on a phone), and open an
+  address from the address box; a site must be in `AGENT_BROWSER_ALLOWLIST` for the browser to
+  load it, so list the sign-in host too (for Google, `accounts.google.com`).
+  Press **Hand back** when you are through.
+- **While you drive:** no bot starts anything. A bot already mid-task finishes
+  the step it is on, runs no further step, waits for the hand back and then
+  answers with the page as you left it. A takeover has no clock: you hold the
+  browser until you hand back (set `AGENT_TAKEOVER_IDLE_MS` to end a forgotten one). Other jobs on that
+  device, such as a subscription model run, wait behind a parked browser task.
+- **Wipe it:** stop the agent, delete the `browser-profile` directory, start the
+  agent. Every bot is signed out and the next sign-in starts fresh. To sign out
+  of one site, take over and use that site's own sign-out.
+- **Live view:** frames are a screencast of the one tab you are watching, sent
+  by the agent (about ten a second at most) and kept by the server in memory
+  only while your page is polling; they are never stored, and a read-only
+  viewer account cannot watch. If the agent has no Chrome the takeover fails and
+  says so.
+- **One agent per profile:** Chrome allows one process per profile directory, so
+  two agents on one machine need two `AGENT_BROWSER_PROFILE` directories.
+- **Moving to a VM:** the profile belongs where the agent runs. If the server
+  moves to a VM and the agent stays on your laptop, the browser stays on the
+  laptop (and sleeps with it); run an agent on the VM too and sign in once there.
+
+Reading and clicking are asked about as before: a bot asks the first time it
+uses a site, and a click on a Send, Post, Delete or Pay control gets its own
+ask. X is no exception: a Post there asks unless you set Always allow.
 
 `preflight()` refuses to boot on an invalid `PUBLIC_ORIGIN` and warns when HSTS
 is on without HTTPS, when no `DASHBOARD_PASSWORD` is set, or when the server is
@@ -151,7 +353,7 @@ reason; one that passes the header through untouched is not.
   alongside the export. Protect the JSON file like the database.
 - Retention has three knobs (`events` 90 days, `doneTasks` 30, `runs` 30) and
   prunes only exhaust: events, finished tasks, runs and settled group runs —
-  never drafts, candidates, evidence, memory or notifications. The notification
+  never memory or notifications. The notification
   feed is capped separately at 200 in-app entries, oldest dropped first.
   `GET /api/retention/preview` shows what a prune would remove before you run it.
 
@@ -207,7 +409,7 @@ Deleting a workspace deletes its file.
 ## Push notifications
 Browsers only allow push on a secure origin, so it works over HTTPS or on
 `localhost`, not over plain HTTP on a LAN address. Each person turns it on per
-device under **You → Notifications**. On an iPhone or iPad the app has to be
+device under **Settings → Notifications**. On an iPhone or iPad the app has to be
 added to the Home Screen first. The key pair that identifies this installation
 to push services is created on first use and stored encrypted with the vault
 key; if the vault key changes, devices have to subscribe again.
@@ -226,7 +428,7 @@ unauthenticated, so it is safe for uptime probes.
 - [ ] TLS terminated at a proxy (or `TLS_CERT`/`TLS_KEY` set together); `PUBLIC_ORIGIN=https://…` set.
 - [ ] `HSTS=1` only after HTTPS works.
 - [ ] `TRUST_PROXY=1` only when a trusted proxy sets the forwarded headers.
-- [ ] `RESET_TOKEN_CONSOLE=0` if the process log is not private.
+- [ ] `RESET_TOKEN_CONSOLE=0` if the process log is not private and the install is neither https nor has SMTP (those are silent by default).
 - [ ] `MASTER_KEY` set (managed) or `vault.key` backed up.
 - [ ] Backups scheduled and one restore rehearsed.
 - [ ] Server bound to loopback (`HOST=127.0.0.1`) behind the proxy.

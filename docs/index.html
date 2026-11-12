@@ -2,7 +2,7 @@
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#fbfaf8"><meta name="color-scheme" content="light dark">
-<meta name="description" content="Agent Control: chat with your bots. They draft, you approve and post.">
+<meta name="description" content="Local-first personal bot platform">
 <meta name="agent-backend" content="static">
 <!-- The Node server's CSP header minus frame-ancestors, which a <meta> CSP cannot
      enforce (browsers ignore it there; the header still sends it, with
@@ -10,20 +10,20 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'">
 <title>Agent Control</title>
 <link rel="manifest" href="./manifest.webmanifest"><link rel="apple-touch-icon" href="./icon-192.png"><link rel="icon" href="./icon-192.png">
-<link rel="stylesheet" href="./app.css?v=3b5334879a">
-</head><body data-pane="list">
+<link rel="stylesheet" href="./app.css?v=a9e6960ec3"><link rel="stylesheet" href="./shell.css?v=a9e6960ec3"><link rel="stylesheet" href="./profile.css?v=a9e6960ec3">
+</head><body data-view="home">
 <div id="progress" class="progress hidden" role="status" aria-live="polite"><span class="sr-only">Loading</span></div>
-<div id="root" class="app">
-  <aside class="pane pane-list" id="sidebar" aria-label="Chats"></aside>
-  <main class="pane pane-main" id="main" tabindex="-1"><div class="splash" role="status" aria-live="polite"><p>Opening your chats…</p></div></main>
-  <aside class="pane pane-info" id="inspector" aria-label="Chat details"></aside>
+<div id="root" class="shell">
+  <aside class="rail" id="sidebar" aria-label="Bots and threads"></aside>
+  <main class="stage" id="main" tabindex="-1"><div class="splash" role="status" aria-live="polite"><p>Opening your chats…</p></div></main>
 </div>
+<div id="pause" class="pause" role="status" hidden></div>
+<div id="chrome" class="chrome" hidden></div>
 <div id="modal" class="modal-layer hidden" role="presentation"></div>
-<div id="command" class="command-layer hidden" role="presentation"></div>
 <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 <div id="announce" class="sr-only" aria-live="polite"></div>
-<script type="module" src="./local-api.js?v=3b5334879a"></script>
-<script defer src="./transport.js?v=3b5334879a"></script>
-<script type="module" src="./app.js?v=3b5334879a"></script>
+<script type="module" src="./local-api.js?v=a9e6960ec3"></script>
+<script defer src="./transport.js?v=a9e6960ec3"></script>
+<script type="module" src="./app.js?v=a9e6960ec3"></script>
 <!-- Data is saved only in this browser. No real AI or remote backend on GitHub Pages. -->
 </body></html>

@@ -33,14 +33,15 @@ async function withStore(bodyCb, {group, message, runId, directBotId = null}) {
   }
 }
 
-test('a group step gets the model rulebook and leaves a chat recap behind', async () => {
+test('a group step gets its own bot\'s rulebook and leaves a chat recap behind', async () => {
   const group = {id: 'g', name: 'G', bots: [bot('a', 'Alpha'), bot('b', 'Beta'), bot('c', 'Gamma')]};
   await withStore(async store => {
     await runGroup(store, 'run-mem', async bot => `Answer from ${bot.name}`);
     let state = store.read();
-    const book = state.memory.rulebooks['env:test-model'];
-    assert.ok(book, 'The model book must be created for the run.');
-    assert.equal(book.turns, 3, 'Every step counts against the model book.');
+    const book = state.memory.rulebooks['bot:a'];
+    assert.ok(book, 'Each bot gets a book of its own for the run.');
+    assert.deepEqual(['a', 'b', 'c'].map(id => state.memory.rulebooks[`bot:${id}`].turns), [1, 1, 1], 'A step counts against its own bot\'s book.');
+    assert.equal(Object.keys(state.memory.rulebooks).some(key => key.startsWith('env:')), false, 'No book is shared through the model any more.');
     assert.deepEqual(book.pending, ['Always keep replies short.'], 'The durable user sentence is queued once.');
     assert.match(state.memory.chats['team-g'].summary, /Always keep replies short/);
 
@@ -73,8 +74,10 @@ test('a group step runs one peer-ask round and records it on the run', async () 
     const state = store.read();
     const run = state.groupRuns.find(r => r.id === 'run-ask');
     assert.equal(run.status, 'completed');
-    assert.equal(run.trace.length, 1);
-    assert.equal(run.trace[0].output, 'The final post, with Source X.');
+    const steps = run.trace.filter(step => !step.kind);
+    assert.equal(steps.length, 1, 'the ask and its answer are trace entries, not steps');
+    assert.deepEqual(run.trace.filter(step => step.kind).map(step => step.kind), ['ask', 'peer']);
+    assert.equal(steps[0].output, 'The final post, with Source X.');
     assert.equal(run.peerAsks.length, 1);
     assert.equal(run.peerAsks[0].botId, 'writer');
     assert.equal(run.peerAsks[0].output, 'Source X supports the claim.');
@@ -111,4 +114,56 @@ test('hand-offs switched off mean no roster and no ask block in the envelope', (
   const off = createEnvelope({run: {...base, botHandoffs: false}, bot: writer, team: [writer, bot('other', 'Other')]});
   assert.equal(off.tools?.ask, undefined, 'A block that would always be refused is not offered.');
   assert.deepEqual(off.team, []);
+});
+
+test('a bot made in this run takes the work it was made for in the same run, and may make bots itself', async () => {
+  const group = {id: 'g', name: 'G', bots: [bot('writer', 'Writer', {settings: {memory: false}})]};
+  const said = [];
+  await withStore(async store => {
+    await runGroup(store, 'run-new', async b => {
+      said.push(b.name);
+      if (b.name === 'Writer') return 'Making a scout.\n```create-bot\n{"name":"Tech scout","job":"Find the tech news of the last day and list the headlines."}\n```\n@Tech scout list today\'s tech headlines for the owner.';
+      return 'Headlines: one, two.\n```create-bot\n{"name":"Grandchild","job":"Another bot made by a bot made a moment ago."}\n```';
+    });
+    const state = store.read();
+    assert.deepEqual(said, ['Writer', 'Tech scout', 'Grandchild'], 'each new bot answered in the run that made it');
+    const names = state.groups.find(g => g.id === 'g').bots.map(b => b.name);
+    assert.deepEqual(names, ['Writer', 'Tech scout', 'Grandchild'], 'a bot made a moment ago may make a bot of its own in that run');
+    assert.equal(state.groupRuns.find(r => r.id === 'run-new').status, 'completed');
+    const chat = state.chats['team-g'].map(m => m.text).join('\n');
+    assert.doesNotMatch(chat, /```create-bot/, 'the block is not shown as text');
+    assert.doesNotMatch(chat, /cannot make bots of its own yet/);
+  }, {group, message: 'Tell me the tech news', runId: 'run-new'});
+});
+
+test('a bot made for the task starts on it in the same run even when the reply forgets to @mention it', async () => {
+  const group = {id: 'g', name: 'G', bots: [bot('writer', 'Writer', {settings: {memory: false}})]};
+  const said = [], seen = {};
+  await withStore(async store => {
+    await runGroup(store, 'run-auto', async (b, input) => {
+      said.push(b.name); seen[b.name] = String(input);
+      if (b.name === 'Writer') return 'I made a scout for this.\n```create-bot\n{"name":"Tech scout","job":"Find the tech news of the last day and list the headlines."}\n```';
+      return 'Headlines: one, two.';
+    });
+    assert.deepEqual(said.slice(0, 2), ['Writer', 'Tech scout'], 'the new bot answered in the run that made it');
+    assert.match(seen['Tech scout'], /Tell me the tech news/, 'it was handed the owner\'s request');
+    assert.equal(store.read().groupRuns.find(r => r.id === 'run-auto').status, 'completed');
+  }, {group, message: 'Tell me the tech news', runId: 'run-auto'});
+});
+
+test('Atlas in its own chat makes a bot and that bot does the work at once, then Atlas reports back', async () => {
+  const group = {id: 'home', name: 'Home', bots: [bot('atlas', 'Atlas', {settings: {lead: true, memory: false}})]};
+  const said = [];
+  await withStore(async store => {
+    await runGroup(store, 'run-atlas', async b => {
+      said.push(b.name);
+      if (b.name === 'Atlas' && said.length === 1) return 'Making a researcher.\n```create-bot\n{"name":"Researcher","job":"Find the latest Node.js LTS version."}\n```\n@Researcher find the latest Node.js LTS version.';
+      if (b.name === 'Researcher') return 'Node.js 24 is the active LTS.';
+      return 'The researcher found it: Node.js 24 is the active LTS.';
+    });
+    assert.deepEqual(said, ['Atlas', 'Researcher', 'Atlas']);
+    const run = store.read().groupRuns.find(r => r.id === 'run-atlas');
+    assert.equal(run.status, 'completed');
+    assert.match(run.lastOutput, /Node\.js 24/);
+  }, {group, message: 'Make a researcher bot and have it find the latest Node LTS', runId: 'run-atlas', directBotId: 'atlas'});
 });

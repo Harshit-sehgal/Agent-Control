@@ -160,7 +160,7 @@ test('pairing asks for the admin scope and neither pairing nor polling follows a
   try {
     const paired = await runAgent(['pair', '--server', base, '--code', 'ABCD234567']);
     assert.equal(paired.code, 0, paired.output);
-    assert.deepEqual(seen[0].body.permissions, ['http.check', 'browser.capture', 'browser.action']);
+    assert.deepEqual(seen[0].body.permissions, ['http.check', 'browser.capture', 'browser.action', 'model.run', 'mcp.call']);
     const redirected = await runAgent(['pair', '--server', base, '--code', 'ABCD234567', '--permissions', 'http.check']);
     assert.equal(redirected.code, 1, redirected.output);
     assert.match(redirected.output, /Refusing to follow a redirect \(307\)/);

@@ -9,29 +9,28 @@ const shared=path.join(root,'shared');
 const uiFiles=['app.js',...(await readdir(shared)).filter(f=>/^ui-.+\.js$/.test(f)).sort()];
 const [html,css]=await Promise.all(['index.html','app.css'].map(f=>readFile(path.join(shared,f),'utf8')));
 const js=(await Promise.all(uiFiles.map(f=>readFile(path.join(shared,f),'utf8')))).join('\n');
-test('Pages uses relative visual assets and an accessible command palette',()=>{
+test('Pages uses relative visual assets and an accessible search with shortcuts',()=>{
   assert.match(html,/href="\.\/app\.css"/);
-  assert.match(html,/id="command"/);
-  assert.match(js,/role="dialog" aria-modal="true" aria-label="Quick navigation"/);
-  assert.match(js,/function openCommandPalette\(/);
-  assert.match(js,/function closeCommandPalette\(/);
-  assert.match(js,/function chooseCommand\(/);
+  assert.match(html,/href="\.\/shell\.css"/);
+  // The quick-navigation palette is gone: search covers it, in the sidebar or the phone's bottom bar.
+  assert.doesNotMatch(html,/id="command"/);
+  assert.match(js,/aria-label="Search bots, threads and messages"/);
+  assert.match(js,/function focusSearch\(/);
   assert.match(js,/ev\.ctrlKey \|\| ev\.metaKey/);
-  assert.match(js,/aria-selected/);
+  assert.match(js,/ev\.key === 't' \|\| ev\.key === 'T' \|\| ev\.key === '\/'/);
 });
 test('hash routes respond to browser Back and Forward',()=>{
   // Navigation goes through go(), which pushes a hash; popstate re-parses it
-  // through parseRoute so Back/Forward and reload land on the same screen.
+  // through companyRoute so Back/Forward and reload land on the same screen.
   assert.match(js,/export function go\(/);
   assert.match(js,/history\[replace \? 'replaceState' : 'pushState'\]/);
   assert.match(js,/addEventListener\('popstate'/);
-  assert.match(js,/parseRoute\(location\.hash/);
+  assert.match(js,/companyRoute\(location\.hash/);
 });
-test('polish preserves truthful Pages limitations and manual publishing',()=>{
+test('polish preserves truthful Pages limitations',()=>{
   assert.match(html,/No real AI or remote backend/);
-  assert.match(js,/Browser-only prototype/);
-  assert.match(js,/final Post click stays with you/i);
-  assert.match(js,/Bots draft\. You post\. Always\./);
+  assert.match(js,/Browser-only demo/);
+  assert.match(js,/This is an offline demo: replies are built in, not from a live AI model\./);
   assert.doesNotMatch(js,/OPENAI_API_KEY\s*=/);
 });
 test('the single stylesheet keeps motion, focus and small-screen rules',()=>{

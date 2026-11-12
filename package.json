@@ -3,7 +3,7 @@
   "version": "0.7.0",
   "private": true,
   "type": "module",
-  "description": "Local-first multi-agent dashboard with human-approved X drafting and browser capture",
+  "description": "Local-first personal bot platform with human-approved actions",
   "engines": {
     "node": ">=22.5"
   },

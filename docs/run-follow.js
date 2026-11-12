@@ -16,12 +16,11 @@
  * Pure and dependency-free like the other shared modules: the browser imports
  * it, and no Node builtin is touched.
  */
-import {runNote} from './coordination.js?v=3b5334879a';
-import {feedPauseAction} from './ui-model.js?v=3b5334879a';
+import {runNote} from './coordination.js?v=a9e6960ec3';
 
 /** The statuses that end a watch: the run stopped for a person, or it is done.
  * A run in any other state is still working, so the loop keeps looking. */
-export const RUN_TERMINAL = ['completed', 'failed', 'interrupted', 'awaiting_checkpoint', 'awaiting_plan', 'awaiting_feed', 'awaiting_browser', 'cancelled'];
+export const RUN_TERMINAL = ['completed', 'failed', 'interrupted', 'awaiting_checkpoint', 'awaiting_limit', 'awaiting_plan', 'awaiting_browser', 'awaiting_ask', 'cancelled'];
 
 /** How long to wait between looks at a run's log. Free-tier routing can take
  * minutes per bot, so the poll is unhurried; the run keeps executing regardless. */
@@ -45,25 +44,18 @@ export async function runWithTyping({key, setTyping, sync, send = null, follow, 
  * Every dependency is injected so the loop has no DOM and no store of its own:
  *   readLog()   -> {messages, runs}: the group's chat snapshot from the server
  *   messages()  -> the lines already stored for this chat, for de-duplication
- *   requests()  -> the workspace's browser requests, for the page/feed pauses
- *   onLine(m)   -> store one server line; onSay(text) -> store one system line
- *   onNote(n)   -> store the run's closing note; onStall() -> one "still trying"
+ *   requests()  -> the workspace's browser requests, for the page pause
+ *   onLine(m)   -> store one server line
+ *   onNote(n)   -> store the run's closing note; onStall() -> one "still trying";
+ *                  onStall({exhausted: true}) once the looks run out with the run still going
  *   wait(ms), sync() -> the beat between looks and the snapshot refresh
  * Returns the last run it saw, so a caller can read the outcome. */
-export async function pollRun({runId = null, groupId = null, ignore = [], maxPolls = 200, wait, sync = null, readLog, messages, requests, onLine, onSay, onNote = null, onStall = null}) {
+export async function pollRun({runId = null, groupId = null, ignore = [], maxPolls = 200, wait, sync = null, readLog, messages, requests, onLine, onNote = null, onStall = null}) {
   const seen = new Set(messages().map(m => m.id));
   const skip = new Set(ignore);
-  // The server writes the same line under the same id, so a pause's sentence is
-  // said once and never repeated on a later look.
-  const say = text => { if (!text || messages().some(m => m.text === text)) return; onSay(text); };
-  let last = null, graceUsed = false, failures = 0;
+  let last = null, failures = 0, ended = false, seenStatus;
   for (let i = 0; i < maxPolls; ) {
     await wait(RUN_POLL_MS);
-    // The run log is not the conversation: browser cards and their Approve
-    // buttons live on the workspace snapshot, so refresh that before the next
-    // lines. A failed refresh still leaves the run log to follow.
-    if (sync) await sync();
-    for (const m of messages()) seen.add(m.id);
     let snap;
     try { snap = await readLog(); failures = 0; }
     catch {
@@ -72,6 +64,16 @@ export async function pollRun({runId = null, groupId = null, ignore = [], maxPol
       if (++failures === 4 && onStall) onStall();
       i++; continue;
     }
+    // The run log is not the conversation: browser cards and their Approve
+    // buttons live on the workspace snapshot, so refresh that before the new
+    // lines when the run moved to another status (a card is filed with one).
+    // Between changes the workspace poll keeps it current; refreshing here on
+    // every look as well fetched the whole workspace twice per beat. A failed
+    // refresh still leaves the run log to follow.
+    const status = (snap.runs || []).find(r => runId ? r.id === runId : r.groupId === groupId)?.status ?? null;
+    if (sync && status !== seenStatus) await sync();
+    seenStatus = status;
+    for (const m of messages()) seen.add(m.id);
     for (const m of snap.messages || []) {
       // The endpoint returns the whole group's history; keep only this run's.
       if (seen.has(m.id) || m.role === 'user' || (runId && m.runId !== runId)) continue;
@@ -79,27 +81,19 @@ export async function pollRun({runId = null, groupId = null, ignore = [], maxPol
       onLine(m);
     }
     last = (snap.runs || []).find(r => runId ? r.id === runId : r.groupId === groupId) || null;
-    // A dispatched feed or page still counts as this run. Do not spend the poll
+    // A dispatched page still counts as this run. Do not spend the poll
     // budget on it; keep watching until the status actually changes.
     const waiting = last && skip.has(last.status);
     if (!last || !RUN_TERMINAL.includes(last.status) || waiting) { if (!waiting) i++; continue; }
     if (last.status === 'awaiting_browser') {
-      const open = requests().find(r => r.runId === last.id && ['pending', 'dispatched'].includes(r.status) && r.purpose !== 'feed');
+      const open = requests().find(r => r.runId === last.id && ['pending', 'dispatched'].includes(r.status));
       if (open?.status === 'dispatched') { skip.add('awaiting_browser'); continue; }
-      break;
     }
-    if (last.status !== 'awaiting_feed') break;
-    // Start answers before the read is filed. Look once more, then either keep
-    // watching a read that was sent or stop on the Approve card. A failed
-    // refresh must not abandon the run log; the lines are still there.
-    if (sync) await sync();
-    const request = requests().find(r => r.runId === last.id && r.purpose === 'feed');
-    const choice = feedPauseAction(request, {graceUsed});
-    if (choice.action === 'follow') { skip.add('awaiting_feed'); say(choice.text); continue; }
-    if (choice.action === 'lookAgain') { graceUsed = true; i++; continue; }
-    say(choice.text);
+    ended = true;
     break;
   }
+  // Out of looks with the run still going: say so, instead of the typing dots just stopping.
+  if (!ended && onStall) onStall({exhausted: true});
   const note = last && runNote(last);
   if (note && onNote && !messages().some(m => m.id === note.id)) onNote(note);
   return last;

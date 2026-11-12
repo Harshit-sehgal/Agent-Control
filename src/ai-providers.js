@@ -10,12 +10,17 @@
 import * as credentials from './credentials.js';
 import {fail} from '../shared/errors.js';
 import {envConfig,discoverModels,protocolOf,configReady,complete} from './ai.js';
-import {normaliseProtocol,inferProtocol,presetById,protocolById} from '../shared/ai-presets.js';
+import {normaliseProtocol,inferProtocol,presetById,protocolById,LOCAL_CLI_KIND,LOCAL_CLI_ENGINES,cliEngineById,cleanCliModel,cleanEffort,EFFORT_IDS} from '../shared/ai-presets.js';
 import {uuid} from '../shared/core.js';
+import {peek} from './sqlite-store.js';
+import {cliRunner,cliSignIn} from './cli-model.js';
+import {assertLocalOrPublic} from './reach-guard.js';
+import {cleanPrices} from '../shared/usage.js';
 
 const clean=(v,n)=>String(v??'').trim().slice(0,n);
 const validBase=u=>{try{const x=new URL(u);return (x.protocol==='http:'||x.protocol==='https:')&&!x.username&&!x.password&&!x.search&&!x.hash;}catch{return false;}};
 const hostOf=u=>{try{return new URL(u).host;}catch{return '';}};
+const originOf=u=>{try{return new URL(u).origin;}catch{return '';}};
 /** Admin listings keep the endpoint path, but strip userinfo, query and hash. */
 function safeBase(u){try{const x=new URL(String(u||''));x.username='';x.password='';x.search='';x.hash='';return x.href.replace(/\/+$/,'');}catch{return '';}}
 
@@ -75,6 +80,10 @@ function readHeaders(store,provider){
 }
 const headerNamesOf=p=>capList(p?.headerNames,MAX_HEADERS).filter(name=>typeof name==='string');
 const labelsOf=p=>p?.labels&&typeof p.labels==='object'&&!Array.isArray(p.labels)?p.labels:{};
+/** The owner's per-model prices (dollars per million tokens), admin listings only. */
+const pricesOf=p=>p?.prices&&typeof p.prices==='object'&&!Array.isArray(p.prices)?p.prices:{};
+/** The fallback model the owner picked, or null. */
+const fallbackOf=ai=>ai?.fallback?.providerId?{providerId:ai.fallback.providerId,model:ai.fallback.model||null}:null;
 
 /** Ensure the AI shape exists on a state document. */
 export function aiState(state){
@@ -85,50 +94,75 @@ export function aiState(state){
 }
 /** A saved provider may predate `protocol` (it carried the old `style`
  * shorthand), so resolve it the same way the call path does. */
-const protocolOfProvider=p=>protocolOf({protocol:p?.protocol,style:p?.style,baseUrl:p?.baseUrl});
+const isCli=p=>p?.kind===LOCAL_CLI_KIND;
+const protocolOfProvider=p=>isCli(p)?LOCAL_CLI_KIND:protocolOf({protocol:p?.protocol,style:p?.style,baseUrl:p?.baseUrl});
+/** The engine a subscription provider runs: `claude` or `codex`, nothing else. */
+function cleanEngine(value){
+  const engine=cliEngineById(value);
+  if(!engine)fail(`Pick the engine for this subscription: ${LOCAL_CLI_ENGINES.map(e=>e.id).join(' or ')}.`);
+  return engine.id;
+}
+/** A subscription provider's model: empty, or a plain name that cannot read as a flag. */
+function cleanModel(value){
+  const model=cleanCliModel(value);
+  if(model===null)fail('That model name is not valid. Use letters, digits and . _ : / - only, starting with a letter or digit, up to 80 characters.');
+  return model;
+}
 const modelCount=p=>Array.isArray(p?.models)?p.models.length:0;
 // The base URL may contain a secret path segment. The browser only needs the
 // host for display, so never return the full URL in public provider metadata.
 // A viewer gets the model ids because the per-bot model picker is a member
 // control and an empty datalist is a broken one. Ids and labels are not secrets;
 // the endpoint path, the catalogue error and the header NAMES stay admin-only.
-const publicProvider=p=>({id:p.id,label:p.label,protocol:protocolOfProvider(p),host:hostOf(p.baseUrl),modelCount:modelCount(p),chatModels:capList(p.chatModels||p.models,300),labels:labelsOf(p),createdAt:p.createdAt,createdBy:p.createdBy||null});
+const publicProvider=p=>({id:p.id,label:p.label,kind:isCli(p)?LOCAL_CLI_KIND:'api',...(isCli(p)?{engine:p.engine,model:p.model||''}:{}),protocol:protocolOfProvider(p),host:hostOf(p.baseUrl),modelCount:modelCount(p),chatModels:capList(p.chatModels||p.models,300),labels:labelsOf(p),createdAt:p.createdAt,createdBy:p.createdBy||null});
 /** The settings page gets the full picture: the endpoint, both model lists, the
  * friendly labels, the Azure version and the header NAMES. Values stay in the
  * vault, so even this listing cannot leak one. */
-const providerListing=p=>({...publicProvider(p),baseUrl:safeBase(p.baseUrl),models:Array.isArray(p.models)?p.models:[],chatModels:capList(p.chatModels||p.models,300),allModels:capList(p.allModels||p.models,2000),labels:labelsOf(p),apiVersion:p.apiVersion||null,hasHeaders:headerNamesOf(p),modelsAt:p.modelsAt||null,modelsError:p.modelsError||null,modelsTruncated:Boolean(p.modelsTruncated),keyOptional:Boolean(p.keyOptional)});
+const providerListing=p=>({...publicProvider(p),baseUrl:safeBase(p.baseUrl),models:Array.isArray(p.models)?p.models:[],chatModels:capList(p.chatModels||p.models,300),allModels:capList(p.allModels||p.models,2000),labels:labelsOf(p),apiVersion:p.apiVersion||null,hasHeaders:headerNamesOf(p),modelsAt:p.modelsAt||null,modelsError:p.modelsError||null,modelsTruncated:Boolean(p.modelsTruncated),keyOptional:Boolean(p.keyOptional),prices:pricesOf(p)});
 function publicBots(bots){
   const out={};
   if(!bots||typeof bots!=='object')return out;
   for(const [id,override] of Object.entries(bots)){
     if(!override||typeof override!=='object'||Array.isArray(override))continue;
-    const providerId=override.providerId||null,model=override.model||null;
-    if(providerId||model)out[id]={providerId,model};
+    const providerId=override.providerId||null,model=override.model||null,effort=override.effort||null;
+    if(providerId||model||effort)out[id]={providerId,model,...(effort?{effort}:{})};
   }
   return out;
 }
 /** Provider metadata safe to send to the browser. No key, no vault id. */
 export function publicAi(state){
   const ai=aiState(state);
-  return {providers:ai.providers.map(publicProvider),defaultProviderId:ai.defaultProviderId,defaultModel:ai.defaultModel||null,bots:publicBots(ai.bots)};
+  return {providers:ai.providers.map(publicProvider),defaultProviderId:ai.defaultProviderId,defaultModel:ai.defaultModel||null,defaultEffort:ai.defaultEffort||null,fallback:fallbackOf(ai),bots:publicBots(ai.bots)};
 }
 
 export function listProviders(state){
   const ai=aiState(state);
-  return {providers:ai.providers.map(providerListing),defaultProviderId:ai.defaultProviderId,defaultModel:ai.defaultModel||null};
+  return {providers:ai.providers.map(providerListing),defaultProviderId:ai.defaultProviderId,defaultModel:ai.defaultModel||null,defaultEffort:ai.defaultEffort||null,fallback:fallbackOf(ai)};
 }
 
 /** Add a BYOK provider. The key is written to the vault, never to the state.
  * The key is used immediately to read the provider's own model catalogue, so
  * the picker reflects that key's plan instead of a hard-coded list. A failed
  * catalogue is recorded, not fatal: the provider still saves. */
-export async function addProvider(store,workspaceId,{label,baseUrl,apiKey,style,protocol,preset,apiVersion,headers,createdBy}={}){
+export async function addProvider(store,workspaceId,{kind,engine,model,label,baseUrl,apiKey,style,protocol,preset,apiVersion,headers,createdBy}={}){
+  if(kind!==undefined&&kind!==null&&kind!==''&&kind!=='api'&&kind!==LOCAL_CLI_KIND)fail(`Unknown provider kind. Expected api or ${LOCAL_CLI_KIND}.`);
+  if(kind===LOCAL_CLI_KIND){
+    // A subscription provider is a name, an engine and an optional model. Nothing
+    // that could hold a secret is accepted, so there is no vault row to leak.
+    const name=clean(label,80);
+    if(!name)fail('Give the provider a name (e.g. My Claude).');
+    if(String(apiKey??'').trim()||baseUrl||headers)fail('A subscription holds no key and no endpoint. Sign in to the CLI on the paired machine instead.');
+    const provider={id:uuid(),kind:LOCAL_CLI_KIND,label:name,engine:cleanEngine(engine),model:cleanModel(model),createdBy:createdBy||null,createdAt:new Date().toISOString()};
+    await store.update(s=>{const ai=aiState(s);ai.providers.unshift(provider);if(!ai.defaultProviderId)ai.defaultProviderId=provider.id;});
+    return listingOf(store,provider.id);
+  }
   const name=clean(label,80);const url=clean(baseUrl,300).replace(/\/+$/,'');const key=String(apiKey||'').trim();
   const chosen=normaliseProtocol(protocol)||normaliseProtocol(style)||normaliseProtocol(presetById(preset)?.protocol)||inferProtocol(url);
   if(!name)fail('Give the provider a name (e.g. OpenAI, Groq, my router).');
   if(!validBase(url))fail('Base URL must be an absolute http(s) URL without a username, password, query, or hash.');
   if(!key)fail('Paste the API key for this provider.');
   if(!protocolById(chosen))fail('Unknown API protocol.');
+  await assertLocalOrPublic(url,{what:'A provider'});
   // Validate the headers before anything is written, so a rejected set cannot
   // leave an orphan key credential behind.
   const extra=cleanHeaders(headers)||{};
@@ -147,7 +181,7 @@ export async function addProvider(store,workspaceId,{label,baseUrl,apiKey,style,
  * gateway. */
 export function listProviderListings(store){
   const ai=aiState(store.read());
-  return {providers:ai.providers.map(p=>({...providerListing(p),models:(Array.isArray(p.models)?p.models:[]).slice(0,300)})),defaultProviderId:ai.defaultProviderId||null,defaultModel:ai.defaultModel||null,bots:ai.bots||{}};
+  return {providers:ai.providers.map(p=>({...providerListing(p),models:(Array.isArray(p.models)?p.models:[]).slice(0,300)})),defaultProviderId:ai.defaultProviderId||null,defaultModel:ai.defaultModel||null,defaultEffort:ai.defaultEffort||null,fallback:fallbackOf(ai),bots:ai.bots||{}};
 }
 
 /** One provider as the admin page sees it, or null. */
@@ -159,9 +193,21 @@ const listingOf=(store,id)=>getProvider(store,id)||{id};
 
 /** Change a saved provider, optionally rotating its key, and re-read the
  * catalogue: the models that key can use change with the key or the endpoint. */
-export async function updateProvider(store,workspaceId,id,{label,baseUrl,apiKey,protocol,style,preset,apiVersion,headers}={}){
+export async function updateProvider(store,workspaceId,id,{label,engine,model,baseUrl,apiKey,protocol,style,preset,apiVersion,headers,prices}={}){
   const current=store.read().ai?.providers?.find(p=>p.id===id);
   if(!current)fail('Provider not found.',404);
+  // A price is the owner's own number for working out cost; it changes nothing about how the provider is called.
+  let nextPrices;
+  try{nextPrices=cleanPrices(prices);}catch(error){fail(error.message);}
+  if(isCli(current)){
+    if(String(apiKey??'').trim()||baseUrl||headers)fail('A subscription holds no key and no endpoint. Sign in to the CLI on the paired machine instead.');
+    const name=label===undefined?current.label:clean(label,80);
+    if(!name)fail('Give the provider a name (e.g. My Claude).');
+    const nextEngine=engine===undefined?current.engine:cleanEngine(engine);
+    const nextModel=model===undefined?(current.model||''):cleanModel(model);
+    await store.update(s=>{const p=aiState(s).providers.find(x=>x.id===id);if(!p)return;p.label=name;p.engine=nextEngine;p.model=nextModel;});
+    return {...listingOf(store,id),endpointChanged:false};
+  }
   const name=label===undefined?current.label:clean(label,80);
   const url=baseUrl===undefined?current.baseUrl:clean(baseUrl,300).replace(/\/+$/,'');
   // `style` is the pre-protocol field; still honoured so an older client edits.
@@ -170,9 +216,15 @@ export async function updateProvider(store,workspaceId,id,{label,baseUrl,apiKey,
   if(!name)fail('Give the provider a name (e.g. OpenAI, Groq, my router).');
   if(!validBase(url))fail('Base URL must be an absolute http(s) URL without a username, password, query, or hash.');
   if(!protocolById(chosen))fail('Unknown API protocol.');
+  // A key and its headers were pasted for one host. Pointing the provider at
+  // another origin must not hand them to it: the move needs the new host's key
+  // in the same request, and headers not resent with the move are dropped.
+  const moved=originOf(url)!==originOf(current.baseUrl);
+  if(url!==current.baseUrl)await assertLocalOrPublic(url,{what:'A provider'});
+  if(moved&&current.credentialId&&!key)fail('This provider now points at a different host. Paste the API key for that host too; the saved key is never sent to a new host.',400);
   // `headers === undefined` keeps what is saved (a blank key keeps the key, so a
   // blank header set keeps the headers); `{}` clears them.
-  const extra=cleanHeaders(headers);
+  const extra=moved&&headers===undefined?{}:cleanHeaders(headers);
   const nextVersion=apiVersion===undefined?(current.apiVersion||null):cleanApiVersion(apiVersion);
   const versionChanged=nextVersion!==(current.apiVersion||null);
   const changedKey=Boolean(key);
@@ -202,6 +254,7 @@ export async function updateProvider(store,workspaceId,id,{label,baseUrl,apiKey,
     p.apiVersion=nextVersion;p.headersCredentialId=headersCredentialId;p.headerNames=headerNames;
     if(preset!==undefined)p.keyOptional=Boolean(presetById(preset)?.keyOptional);
     if(endpointChanged){p.models=[];p.chatModels=[];p.allModels=[];p.labels={};p.modelsAt=null;p.modelsError=null;}
+    if(nextPrices!==undefined)p.prices=nextPrices;
   });
   return {...listingOf(store,id),endpointChanged};
 }
@@ -212,6 +265,9 @@ export async function refreshModels(store,providerId){
   const provider=store.read().ai?.providers?.find(p=>p.id===providerId);
   if(!provider)fail('Provider not found.',404);
   const at=new Date().toISOString();
+  // Listing a subscription's models would need a model call, which spends the
+  // owner's plan. The model is typed by hand, or left to the CLI's default.
+  if(isCli(provider))return {models:[],chatModels:[],allModels:[],labels:{},protocol:LOCAL_CLI_KIND,at,truncated:false};
   try{
     const found=await discoverModels(providerConfig(store,provider));
     // Keep the split the caller returned: `models`/`chatModels` are the
@@ -241,10 +297,12 @@ export async function deleteProvider(store,workspaceId,id){
     try{credentials.deleteCredential(store,workspaceId,credentialId);}catch(error){if(error.status!==404)throw error;}
   }
   await store.update(s=>{const ai=aiState(s);ai.providers=ai.providers.filter(p=>p.id!==id);if(ai.defaultProviderId===id)ai.defaultProviderId=ai.providers[0]?.id||null;
+    if(ai.fallback?.providerId===id)ai.fallback=null;
     for(const [botId,override] of Object.entries(ai.bots)){
       if(override?.providerId!==id)continue;
-      const model=override.model||null;
-      if(!model)delete ai.bots[botId];else ai.bots[botId]={providerId:null,model};
+      // Its model id belonged to the provider that is gone; sent to another one it is a 404. Effort stays.
+      const effort=cleanEffort(override.effort);
+      if(!effort)delete ai.bots[botId];else ai.bots[botId]={providerId:null,model:null,effort};
     }
   });
   return {ok:true};
@@ -265,6 +323,27 @@ function concreteModel(protocol,model,chatModels,allModels){
   return model||'auto';
 }
 
+/** The config of the owner's fallback model (Settings → Models), or null. Built like any other provider's, with
+ * the same effort; src/ai.js uses it for one call when the bot's own model could not answer. */
+function fallbackConfig(store,botId,ai,effort){
+  const pick=fallbackOf(ai);
+  const provider=pick&&ai.providers.find(p=>p.id===pick.providerId);
+  if(!provider)return null;
+  const level=effort?{effort}:{};
+  if(isCli(provider))return {kind:LOCAL_CLI_KIND,engine:provider.engine,model:cleanCliModel(pick.model)||provider.model||'',source:LOCAL_CLI_KIND,label:provider.label,providerId:provider.id,models:[],run:cliRunner(store,{botId,provider}),...level};
+  // A key deleted from the vault by hand leaves no fallback, never a failed turn.
+  try{
+    const config=providerConfig(store,provider);
+    const chatModels=Array.isArray(provider.chatModels)?provider.chatModels:config.models;
+    return {...config,model:concreteModel(config.protocol,pick.model||'auto',chatModels,config.models),...level};
+  }catch{return null;}
+}
+/** A config with the fallback attached, unless the fallback is the very model the config already runs. */
+function withFallback(store,botId,ai,config){
+  const spare=fallbackConfig(store,botId,ai,config.effort||'');
+  if(!spare||(spare.providerId===config.providerId&&(spare.model||'')===(config.model||'')))return config;
+  return {...config,fallback:spare};
+}
 /** The config a bot should run on: its own override, else the workspace default,
  * else the environment. `null` when nothing is configured. */
 export function resolveConfig(store,botId){
@@ -276,14 +355,25 @@ export function resolveConfig(store,botId){
   const pinned=override?.providerId&&ai.providers.some(p=>p.id===override.providerId)?override.providerId:null;
   const providerId=pinned||ai.defaultProviderId;
   const provider=ai.providers.find(p=>p.id===providerId);
+  // How hard to think: the bot's own pick, else the workspace's. Empty sends nothing.
+  const effort=cleanEffort(override?.effort)||cleanEffort(ai.defaultEffort)||'';
+  const withEffort=config=>withFallback(store,botId,ai,effort?{...config,effort}:config);
+  if(provider&&isCli(provider)){
+    // The workspace default model is an API model id; a CLI would only reject it.
+    // A bot override that could read as a flag is dropped rather than passed on.
+    const model=cleanCliModel(override?.model)||provider.model||'';
+    return withEffort({kind:LOCAL_CLI_KIND,engine:provider.engine,model,source:LOCAL_CLI_KIND,label:provider.label,providerId:provider.id,models:[],run:cliRunner(store,{botId,provider})});
+  }
   if(provider){
     const config=providerConfig(store,provider);
-    const chosen=override?.model||ai.defaultModel||'auto';
+    // The workspace default model belongs to the workspace default provider; a bot
+    // pinned to another provider without a model gets that provider's own default.
+    const chosen=override?.model||(pinned&&pinned!==ai.defaultProviderId?'':ai.defaultModel)||'auto';
     const chatModels=Array.isArray(provider.chatModels)?provider.chatModels:config.models;
-    return {...config,model:concreteModel(config.protocol,chosen,chatModels,config.models)};
+    return withEffort({...config,model:concreteModel(config.protocol,chosen,chatModels,config.models)});
   }
   const env=envConfig();
-  if(configReady(env))return {...env,model:override?.model||ai.defaultModel||env.model};
+  if(configReady(env))return withEffort({...env,model:override?.model||ai.defaultModel||env.model});
   return null;
 }
 
@@ -293,6 +383,9 @@ export function resolveConfig(store,botId){
 export async function testProvider(store,providerId,{model}={}){
   const provider=store.read().ai?.providers?.find(p=>p.id===providerId);
   if(!provider)fail('Provider not found.',404);
+  // A test message would spend the owner's subscription. A subscription is
+  // checked by the sign-in status its paired agent reports, never by a prompt.
+  if(isCli(provider))return {...cliSignIn(store,provider.engine),engine:provider.engine,model:provider.model||null};
   const config=providerConfig(store,provider);
   // Test the first model the key actually lists before falling back to "auto":
   // "auto" only means something to OpenAI-style servers, and a test that reports
@@ -314,21 +407,35 @@ export async function testProvider(store,providerId,{model}={}){
   }
 }
 
+/** A level from the picker or a card, or a 400 that names the three. */
+function effortOrFail(value){
+  const level=cleanEffort(value);
+  if(level===null)fail(`Unknown effort level. Use ${EFFORT_IDS.join(', ')}, or leave it empty for the model's own default.`);
+  return level;
+}
 export async function setDefaults(store,body={}){
   // Only the two knobs this route owns. A typo (`temprature`) used to save
   // nothing and report success, which reads like the setting applied.
-  const {providerId,model,...unknown}=body&&typeof body==='object'&&!Array.isArray(body)?body:{};
+  const {providerId,model,effort,fallback,...unknown}=body&&typeof body==='object'&&!Array.isArray(body)?body:{};
+  if(fallback!==undefined&&fallback!==null&&(typeof fallback!=='object'||Array.isArray(fallback)))fail('A fallback is {providerId, model}, or null for none.');
+  const level=effort===undefined?undefined:effortOrFail(effort);
   const stray=Object.keys(unknown);
   if(stray.length)fail(`Unknown AI setting${stray.length>1?'s':''}: ${stray.slice(0,4).join(', ')}.`,400);
   await store.update(s=>{const ai=aiState(s);
     if(providerId!==undefined){if(providerId&&!ai.providers.some(p=>p.id===providerId))throw fail('Provider not found.',404);ai.defaultProviderId=providerId||null;}
     if(model!==undefined)ai.defaultModel=clean(model,120)||null;
+    if(level!==undefined)ai.defaultEffort=level||null;
+    if(fallback!==undefined){
+      if(fallback?.providerId&&!ai.providers.some(p=>p.id===fallback.providerId))throw fail('Provider not found.',404);
+      ai.fallback=fallback?.providerId?{providerId:fallback.providerId,model:clean(fallback.model,120)||null}:null;
+    }
   });
   return listProviders(store.read());
 }
 
-export async function setBotModel(store,botId,{providerId,model}={}){
+export async function setBotModel(store,botId,{providerId,model,effort}={}){
   if(!botId)fail('Missing bot id.');
+  const level=effort===undefined?undefined:effortOrFail(effort);
   // The override is keyed by bot id, so a typo or a stale id must be rejected
   // instead of writing an override nothing will ever read.
   const existing=store.read();
@@ -336,10 +443,11 @@ export async function setBotModel(store,botId,{providerId,model}={}){
   await store.update(s=>{const ai=aiState(s);const next={...(ai.bots[botId]||{})};
     if(providerId!==undefined){if(providerId&&!ai.providers.some(p=>p.id===providerId))throw fail('Provider not found.',404);next.providerId=providerId||null;}
     if(model!==undefined)next.model=clean(model,120);
-    if(!next.providerId&&!next.model)delete ai.bots[botId];else ai.bots[botId]=next;
+    if(level!==undefined){if(level)next.effort=level;else delete next.effort;}
+    if(!next.providerId&&!next.model&&!next.effort)delete ai.bots[botId];else ai.bots[botId]=next;
   });
   const stored=store.read().ai.bots[botId]||null;
-  return {botId,model:stored?.model||null,providerId:stored?.providerId||null};
+  return {botId,model:stored?.model||null,providerId:stored?.providerId||null,effort:stored?.effort||null};
 }
 
 export async function modelsForProvider(store,providerId){
@@ -349,5 +457,5 @@ export async function modelsForProvider(store,providerId){
 /** True when the environment or a saved provider can run a model. */
 export function aiAvailable(store){
   if(configReady(envConfig()))return true;
-  return Boolean(store.read().ai?.providers?.length);
+  return Boolean(peek(store).ai?.providers?.length);
 }

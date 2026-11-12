@@ -24,7 +24,6 @@ async function harness(){
     ws:store, workspaceId:'default',
     auth:null, push:null,                       // only reached by the notification handler
     notify:()=>{},                              // no notification fan-out in these cases
-    processCandidate:async()=>{},               // only reached by candidate-draft
   });
   return {dir,store,handlers,dispatch:task=>handlers['agent-job'](task)};
 }
@@ -131,14 +130,9 @@ test('a miss that cannot fix itself is permanent, so the queue stops now instead
   const {store,handlers,dir}=await harness();
   try{
     // Without `permanent`, `failTask` kept each of these on the backoff ladder for
-    // the whole RETRY_WINDOW_MS: a deleted candidate and a device that was never
+    // the whole RETRY_WINDOW_MS: a device that was never
     // paired both read as a provider hiccup, and the person heard about it hours
     // later - long after they had moved on.
-    await assert.rejects(handlers['candidate-draft']({id:'t1',payload:{candidateId:'gone'}}),error=>{
-      assert.equal(error.status,404);
-      assert.equal(error.permanent,true);
-      return true;
-    });
     await assert.rejects(handlers['agent-job']({id:'t2',payload:{action:'http.check',agentId:'nobody'}}),error=>{
       assert.equal(error.status,404);
       assert.equal(error.permanent,true);

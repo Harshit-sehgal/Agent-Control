@@ -38,17 +38,6 @@ test('the coarse-pointer block overrides every check-row it is meant to fix', ()
   }
 });
 
-test('pills and the evidence summary take a finger-sized target on a coarse pointer', () => {
-  const block = css.slice(css.indexOf('@media (pointer:coarse)'));
-  assert.match(block, /\.needs-pill\{height:44px;border-radius:22px\}/);
-  assert.match(block, /\.evidence-panel summary\{min-height:44px\}/);
-});
-
-test('a narrow phone header drops the status-only pills, not the actionable one', () => {
-  // The one that does something is a button with data-action; the rest are spans.
-  assert.match(css, /@media\(max-width:520px\)\{[\s\S]{0,120}\.thread-head \.needs-pill:not\(\[data-action\]\)\{display:none\}/);
-});
-
 /* ---------- live regions ---------- */
 
 test('a toast is shown before it is written, so the live region hears it', () => {
@@ -86,13 +75,12 @@ test('a danger confirm opens with focus on Cancel, not on the destructive button
   assert.match(confirm, /kind: danger \? 'danger' : 'primary'/, 'the confirm button keeps its kind');
 });
 
-test('Ctrl+K from inside a sheet returns focus to where the sheet was opened', () => {
-  const palette = body(sheets, 'export function openCommandPalette(');
-  const adopted = palette.indexOf('focusOrigin()');
-  const closed = palette.indexOf('closeSheet()');
-  assert.ok(adopted >= 0 && closed >= 0, 'the palette must read the origin and close the sheet');
-  // closeSheet() restores and clears the origin, so it has to be read first.
-  assert.ok(adopted < closed, 'the origin must be captured before closing the sheet');
-  assert.match(palette, /captureFocus\(origin/);
-  assert.match(dialogs, /export const focusOrigin/, 'ui-dialogs must expose the stored origin');
+test('a sheet hands focus back to the control that opened it', () => {
+  // The quick-navigation palette is gone (search replaced it), so the rule now
+  // rests on the sheet alone: openSheet remembers the opener, closeSheet returns to it.
+  const open = body(dialogs, 'export function openSheet(');
+  const close = body(dialogs, 'export function closeSheet(');
+  assert.match(open, /if \(!sheetOpen\(\)\) captureFocus\(\)/);
+  assert.match(close, /restoreFocus\(\)/);
+  assert.match(dialogs, /export const focusOrigin/);
 });

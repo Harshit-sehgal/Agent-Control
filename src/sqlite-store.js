@@ -15,17 +15,18 @@
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {initialState, uuid} from '../shared/core.js';
+import {initialState} from '../shared/core.js';
 import crypto from 'node:crypto';
 import {sqlite} from './sqlite.js';
 import * as wf from '../shared/workflow.js';
+import {freshGuard} from '../shared/runaway.js';
 
 const now = () => new Date().toISOString();
 
 /** v1 ships the full target schema: the workflow document plus the surfaces
  * the roadmap adds (task queue, agents, vault, notifications, users). Adding a
  * table here is idempotent; later phases add numbered migrations for changes. */
-const DOC_TABLES = ['candidates', 'drafts', 'runs', 'group_runs', 'group_messages'];
+const DOC_TABLES = ['runs', 'group_runs', 'group_messages'];
 const camel = key => key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 /** One stored row as the workflow document it came from. Rows written before
  * v3 have no `doc`, so those are rebuilt from their columns: camelCase keys,
@@ -59,8 +60,6 @@ export function readMemory(rows) {
 
 export function readDocuments(rows) {
   const s = {};
-  s.candidates = rows('candidates').map(c => c.doc ? fromRow(c) : {...fromRow(c, {json: ['score']}), demo: Boolean(c.demo)});
-  s.drafts = rows('drafts').map(d => fromRow(d));
   s.runs = rows('runs').map(r => fromRow(r));
   s.groupRuns = rows('group_runs').map(r => fromRow(r, {json: ['recipients', 'trace', 'checkpoint']}));
   s.groupMessages = {};
@@ -68,6 +67,15 @@ export function readDocuments(rows) {
   s.chats = {};
   for (const m of rows('chat_messages')) (s.chats[m.chat_key] ??= []).push(JSON.parse(m.doc));
   return s;
+}
+
+/** Rebuild the asks, grants and activity log from rows. Same reader for a live database and a backup file. */
+export function readAsks(rows) {
+  return {
+    asks: rows('asks').map(r => fromRow(r)),
+    grants: rows('grants').map(g => ({botId: g.bot_id, action: g.action, scope: g.scope ?? '', choice: g.choice, at: g.at, ...(g.until ? {until: g.until} : {})})),
+    activity: rows('activity').map(a => ({id: a.id, at: a.at, botId: a.bot_id ?? null, kind: a.kind, text: a.text, threadId: a.thread_id ?? null, undoUntil: a.undo_until ?? null})),
+  };
 }
 
 const json = value => (value ? JSON.stringify(value) : null);
@@ -95,30 +103,6 @@ export const TABLE_SHAPES = [
       key: b.id, pk: [b.id],
       params: [b.id, g.id, b.name, b.instructions || '', b.type || 'custom', json(b.contract), json(b.permissions), b.createdAt || now(), json(b.settings), b.origin ?? null, json(b.createdBy)],
     }))),
-  },
-  {
-    table: 'candidates', pk: ['id'], ordered: true, docColumn: 9,
-    columns: ['id', 'url', 'author', 'topic', 'text', 'status', 'score', 'demo', 'created_at', 'doc'],
-    rows: state => (state.candidates || []).map(c => ({
-      key: c.id, pk: [c.id],
-      params: [c.id, c.url, c.author, c.topic || '', c.text, c.status, c.score ? JSON.stringify(c.score) : null, c.demo ? 1 : 0, c.createdAt || now(), JSON.stringify(c)],
-    })),
-  },
-  {
-    table: 'drafts', pk: ['id'], ordered: true, docColumn: 17,
-    columns: ['id', 'candidate_id', 'author', 'url', 'source_text', 'text', 'revision', 'status', 'score', 'mode', 'note', 'approved_text', 'approved_revision', 'approved_at', 'due_at', 'posted_at', 'created_at', 'doc'],
-    rows: state => (state.drafts || []).map(d => ({
-      key: d.id, pk: [d.id],
-      params: [d.id, d.candidateId, d.author, d.url, d.sourceText || '', d.text, d.revision, d.status, d.score ?? null, d.mode || null, d.note || null, d.approvedText ?? null, d.approvedRevision ?? null, d.approvedAt ?? null, d.dueAt ?? null, d.postedAt ?? null, d.createdAt || now(), JSON.stringify(d)],
-    })),
-  },
-  {
-    table: 'evidence', pk: ['id'], ordered: true,
-    columns: ['id', 'draft_id', 'candidate_id', 'kind', 'link', 'claim', 'confidence', 'verification', 'reuse', 'note', 'created_by', 'created_at'],
-    rows: state => (state.evidence || []).map(e => ({
-      key: e.id, pk: [e.id],
-      params: [e.id, e.draftId ?? null, e.candidateId ?? null, e.kind, e.link ?? null, e.claim, e.confidence, e.verification, e.reuse, e.note ?? null, e.createdBy ?? null, e.createdAt || now()],
-    })),
   },
   {
     table: 'runs', pk: ['id'], ordered: true, docColumn: 6,
@@ -161,7 +145,7 @@ export const TABLE_SHAPES = [
     })),
   },
   {
-    table: 'chat_messages', pk: ['id'],
+    table: 'chat_messages', pk: ['id'], docColumn: 2,
     columns: ['id', 'chat_key', 'doc', 'at'],
     rows: state => Object.entries(state.chats || {}).flatMap(([chatKey, list]) => (list || []).map(m => ({
       key: `${chatKey}/${m.id}`, pk: [`${chatKey}/${m.id}`],
@@ -182,6 +166,35 @@ export const TABLE_SHAPES = [
       });
     },
   },
+  // Asks waiting on (or answered by) the owner. The whole record is the document;
+  // the columns are for queries and backups.
+  {
+    table: 'asks', pk: ['id'], docColumn: 11,
+    columns: ['id', 'bot_id', 'run_id', 'chat_key', 'action', 'target', 'detail', 'status', 'scope', 'created_at', 'answered_at', 'doc'],
+    rows: state => (state.asks || []).map(a => ({
+      key: a.id, pk: [a.id],
+      params: [a.id, a.botId, a.runId ?? null, a.chatKey ?? null, a.action, a.target ?? '', a.detail ?? '', a.status, a.scope ?? null, a.createdAt || now(), a.answeredAt ?? null, JSON.stringify(a)],
+    })),
+  },
+  // What the owner said Always allow / Ask each time / Deny to: one row per bot, action and origin or account.
+  {
+    table: 'grants', pk: ['bot_id', 'action', 'scope'],
+    columns: ['bot_id', 'action', 'scope', 'choice', 'at', 'until'],
+    rows: state => (state.grants || []).map(g => ({
+      key: `${g.botId}/${g.action}/${g.scope}`, pk: [g.botId, g.action, g.scope],
+      params: [g.botId, g.action, g.scope, g.choice, g.at || now(), g.until ?? null],
+    })),
+  },
+  // Everything that left the app, every permission change and every bot made, moved, paused or deleted.
+  // Append-only: a row is written once and only retention removes it.
+  {
+    table: 'activity', pk: ['id'],
+    columns: ['id', 'at', 'bot_id', 'kind', 'text', 'thread_id', 'undo_until'],
+    rows: state => (state.activity || []).map(a => ({
+      key: a.id, pk: [a.id],
+      params: [a.id, a.at || now(), a.botId ?? null, a.kind, a.text, a.threadId ?? null, a.undoUntil ?? null],
+    })),
+  },
 ];
 
 /** The statement that writes one row of a shape: an upsert, so a row that did
@@ -190,6 +203,29 @@ export const TABLE_SHAPES = [
 function upsertSql({table, columns, pk}) {
   const updates = columns.filter(column => !pk.includes(column)).map(column => `${column}=excluded.${column}`);
   return `INSERT INTO ${table} (${columns.join(',')}) VALUES (${columns.map(() => '?').join(',')}) ON CONFLICT(${pk.join(',')}) DO UPDATE SET ${updates.join(',')}`;
+}
+/** The same upsert with an explicit rowid. A row prepended to an ordered table
+ * takes a rowid below every stored one, so `ORDER BY rowid` still reads it
+ * first and none of the rows already stored has to be rewritten. */
+function upsertAtSql(shape) {
+  return upsertSql({...shape, columns: ['rowid', ...shape.columns]});
+}
+/** How a new key sequence relates to the stored one. `{prefix, suffix}` when
+ * the rows that stay keep their relative order and every new row sits before
+ * all of them or after all of them: the common cases (`unshift` then a tail
+ * `slice`, a `push`, an edit, a removal). `null` means the order changed some
+ * other way and the table has to be rewritten in document order. */
+export function orderPlan(seq, previous) {
+  const present = new Set(seq), kept = previous.seq.filter(key => present.has(key));
+  let i = 0;
+  while (i < seq.length && !previous.map.has(seq[i])) i++;
+  const prefix = seq.slice(0, i);
+  let k = 0;
+  for (; i < seq.length && k < kept.length; i++, k++) if (seq[i] !== kept[k]) return null;
+  if (k < kept.length) return null;
+  const suffix = seq.slice(i);
+  if (suffix.some(key => previous.map.has(key))) return null;
+  return {prefix, suffix};
 }
 function deleteSql({table, pk}) {
   return `DELETE FROM ${table} WHERE ${pk.map(column => `${column}=?`).join(' AND ')}`;
@@ -310,7 +346,8 @@ const MIGRATIONS = [
   // snake_case, which broke the next write. Conversations move to the server
   // here too, so they follow the account instead of one browser.
   {to: 3, up(db) {
-    for (const table of DOC_TABLES) db.exec(`ALTER TABLE ${table} ADD COLUMN doc TEXT`);
+    // The tables that existed at v3; candidates and drafts were dropped at v11.
+    for (const table of ['candidates', 'drafts', 'runs', 'group_runs', 'group_messages']) db.exec(`ALTER TABLE ${table} ADD COLUMN doc TEXT`);
     db.exec('CREATE TABLE IF NOT EXISTS chat_messages (id TEXT PRIMARY KEY, chat_key TEXT NOT NULL, doc TEXT NOT NULL, at TEXT NOT NULL)');
   }},
   // v4: session ids were stored as issued, so the database file (or the
@@ -348,7 +385,7 @@ const MIGRATIONS = [
   }},
   // v9: durable memory gets its own table. A rulebook and a chat recap are
   // variable-size JSON keyed by model or conversation, which suits neither the
-  // typed tables nor kv (kv is excluded from backups on purpose).
+  // typed tables nor kv (most of kv is machine state and stays out of backups).
   {to: 9, up(db) {
     db.exec(`CREATE TABLE IF NOT EXISTS memory (
       kind TEXT NOT NULL, key TEXT NOT NULL, doc TEXT NOT NULL,
@@ -363,6 +400,51 @@ const MIGRATIONS = [
     const columns = db.prepare('PRAGMA table_info(bots)').all().map(c => c.name);
     if (!columns.includes('origin')) db.exec('ALTER TABLE bots ADD COLUMN origin TEXT');
     if (!columns.includes('created_by')) db.exec('ALTER TABLE bots ADD COLUMN created_by TEXT');
+  }},
+  // v11: X-engage is gone. Its tables, its settings columns and the capture
+  // token go with it, and a queued reminder or drafting task, which no handler
+  // can run any more, is cancelled rather than left to fail on every sweep.
+  {to: 11, up(db) {
+    db.exec('DROP TABLE IF EXISTS candidates; DROP TABLE IF EXISTS drafts; DROP TABLE IF EXISTS evidence;');
+    const columns = db.prepare('PRAGMA table_info(settings)').all().map(c => c.name);
+    for (const column of ['topics', 'style', 'opinions', 'min_delay', 'max_delay']) {
+      if (columns.includes(column)) db.exec(`ALTER TABLE settings DROP COLUMN ${column}`);
+    }
+    db.prepare("DELETE FROM kv WHERE key='capture_token'").run();
+    db.prepare("UPDATE tasks SET status='cancelled', last_error='This task kind was removed with X-engage' WHERE kind IN ('reminder','candidate-draft') AND status NOT IN ('done','failed','cancelled')").run();
+  }},
+  // v12: the ask mechanism. An ask waits on the owner; a grant is what an answer of
+  // Always allow (or a later Ask each time / Deny) left behind, one per bot, action
+  // and origin or account; the activity log is the append-only record of what left
+  // the app and what changed. A grant has no foreign key to bots on purpose: a
+  // restore can carry one for a bot that is gone, and it is ignored, not an error.
+  {to: 12, up(db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS asks (
+        id TEXT PRIMARY KEY, bot_id TEXT NOT NULL, run_id TEXT, chat_key TEXT,
+        action TEXT NOT NULL, target TEXT NOT NULL DEFAULT '', detail TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL, scope TEXT, created_at TEXT NOT NULL, answered_at TEXT, doc TEXT);
+      CREATE TABLE IF NOT EXISTS grants (
+        bot_id TEXT NOT NULL, action TEXT NOT NULL, scope TEXT NOT NULL DEFAULT '',
+        choice TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (bot_id, action, scope));
+      CREATE TABLE IF NOT EXISTS activity (
+        id TEXT PRIMARY KEY, at TEXT NOT NULL, bot_id TEXT, kind TEXT NOT NULL,
+        text TEXT NOT NULL, thread_id TEXT, undo_until TEXT);
+      CREATE INDEX IF NOT EXISTS activity_at ON activity(at);
+    `);
+  }},
+  // v13: files the owner attaches to a message (src/attachments.js). The bytes
+  // live here, in the workspace's own database, so a file can only be read by a
+  // session of this workspace and goes with the workspace when it is deleted.
+  {to: 13, up(db) {
+    db.exec(`CREATE TABLE IF NOT EXISTS attachments (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, size INTEGER NOT NULL,
+      data BLOB NOT NULL, created_by TEXT, created_at TEXT NOT NULL)`);
+  }},
+  // v14: an Always allow may end (`until`, an ISO time); past it the grant asks again and is swept on load.
+  {to: 14, up(db) {
+    const columns = db.prepare('PRAGMA table_info(grants)').all().map(c => c.name);
+    if (!columns.includes('until')) db.exec('ALTER TABLE grants ADD COLUMN until TEXT');
   }}];
 /** Current schema version, derived from the migration list so it cannot drift.
  * Tests and operators read it. */
@@ -379,13 +461,24 @@ export class SqliteStore {
     // the rows that changed; and one prepared statement per piece of SQL.
     this.written = new Map();
     this.stmts = new Map();
+    // The last value written per kv key, so an unchanged JSON blob (the browser
+    // requests, the AI settings, connectors, the guard) is not rewritten on
+    // every update.
+    this.kvWritten = new Map();
+    // Bumped on every committed change to the document. With `epoch` (fresh
+    // per open store) it names one version of the cache, for ETags.
+    this.version = 0;
+    this.epoch = crypto.randomUUID().slice(0, 8);
   }
   async init() {
     await fs.mkdir(path.dirname(this.dbPath), {recursive: true});
     const {DatabaseSync} = await sqlite();
     this.db = new DatabaseSync(this.dbPath);
     try {
-      this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
+      // NORMAL is the WAL setting SQLite recommends: a commit is durable against
+      // an application crash, and only an OS crash or power loss can lose the
+      // last transactions; it skips one fsync per commit.
+      this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
       this.migrate();
       this.cache = await this.loadDocument();
     } catch (e) {
@@ -445,41 +538,6 @@ export class SqliteStore {
       .run(new Date(now - taskMs).toISOString());
     return {pairingCodes: Number(pairing.changes || 0), agentTasks: Number(tasks.changes || 0)};
   }
-  /** Release a candidate whose draft failed when the normal transition cannot
-   * run (the row was deleted while the provider was working, so the workflow
-   * helper would throw its own 404). The stored document is authoritative for
-   * reads, so both it and the typed column are updated. Returns false when the
-   * row is gone, which is not an error. */
-  failCandidate(id) {
-    const row = this.db.prepare('SELECT doc FROM candidates WHERE id=?').get(id);
-    if (!row) return false;
-    let doc = null;
-    try { doc = row.doc ? JSON.parse(row.doc) : null; } catch { doc = null; }
-    if (doc) {
-      doc.status = 'error';
-      this.db.prepare('UPDATE candidates SET status=?, doc=? WHERE id=?').run('error', JSON.stringify(doc), id);
-    } else {
-      this.db.prepare('UPDATE candidates SET status=? WHERE id=?').run('error', id);
-    }
-    // The SQL above releases the row for whoever reads it now, but `candidates`
-    // is also rewritten wholesale from `this.cache` on every later update. A
-    // cache still holding `processing` would put the row back there on the next
-    // unrelated write, where it 409s on re-process forever and no retry task
-    // exists. So the document is released in the cache too: immediately (this
-    // caller is not awaited) and again inside the serial queue, because an
-    // update already in flight will finish by installing its own older clone.
-    const release = state => {
-      const candidate = state.candidates.find(c => c.id === id);
-      if (candidate) candidate.status = 'error';
-    };
-    release(this.cache);
-    // Nothing can be reported back to this caller (it does not await), and the
-    // synchronous release above already stands, so a failed queue write is only
-    // logged rather than left as an unhandled rejection.
-    this.enqueue(state => { release(state); }).catch(error => console.error(`Could not release candidate ${id} in the document cache:`, error.message));
-    return true;
-  }
-
   /** Rebuild the workflow document from SQL and fold in a newer legacy JSON
    * export when one exists (operator restore, or the old dev data dir). */
   async loadDocument() {
@@ -512,7 +570,7 @@ export class SqliteStore {
       this.kvSet('legacy_imported_mtime', this.kvGet('legacy_pending_mtime'));
     }
     // A brand-new database (or an imported document with an empty roster) still
-    // needs the built-in X-engage group, exactly like the old first-run path.
+    // needs the built-in Home group and its primary bot.
     if (!state.groups.length) {
       const seed = initialState();
       state.groups = seed.groups;
@@ -525,25 +583,33 @@ export class SqliteStore {
     const s = {
       version: 2,
       createdAt: this.kvGet('created_at') || now(),
-      settings: {topics: [], style: '', opinions: '', minDelay: 2, maxDelay: 10},
-      captureToken: this.kvGet('capture_token'),
-      groups: [], candidates: [], drafts: [], runs: [], tasks: [], events: [],
+      settings: {},
+      groups: [], runs: [], tasks: [], events: [],
       groupMessages: {}, groupRuns: [], chats: {},
       ai: (() => { try { return JSON.parse(this.kvGet('ai') || '{}'); } catch { return {}; } })(),
       browserRequests: (() => { try { return JSON.parse(this.kvGet('browser_requests') || '[]'); } catch { return []; } })(),
+      // Connectors hold no secret (those are vault credentials); like the provider list they stay out of backups.
+      connectors: (() => { try { return JSON.parse(this.kvGet('connectors') || '[]'); } catch { return []; } })(),
+      // Emails waiting out their Undo window (a few seconds of content); never in a backup or the snapshot.
+      heldSends: (() => { try { return JSON.parse(this.kvGet('held_sends') || '[]'); } catch { return []; } })(),
+      // The runaway guard keeps its pause across a restart, so Pause all holds.
+      guard: (() => { try { return {...freshGuard(), ...JSON.parse(this.kvGet('guard') || '{}')}; } catch { return freshGuard(); } })(),
+      // The owner's switch to ask before a bot opens a page or reads a connected app (shared/asks.js).
+      askBasics: this.kvGet('ask_basics') === '1',
+      // The owner's Hands-off switch (shared/presets.js): sends, posts and connector writes with no rule go unasked.
+      handsOff: this.kvGet('hands_off') === '1',
+      // The owner's limits on how far bots go per message (shared/limits.js); empty is no limit.
+      limits: (() => { try { return JSON.parse(this.kvGet('limits') || '{}'); } catch { return {}; } })(),
+      // The owner's saved task templates (shared/templates.js).
+      templates: (() => { try { return JSON.parse(this.kvGet('templates') || '[]'); } catch { return []; } })(),
+      // Tokens (and cost, where the owner set a price) per bot per day, bounded by shared/usage.js.
+      usage: (() => { try { return JSON.parse(this.kvGet('usage') || '{"days":{}}'); } catch { return {days: {}}; } })(),
       memory: readMemory(kind => this.db.prepare('SELECT key, doc FROM memory WHERE kind=? ORDER BY rowid').all(kind)),
     };
     const cfg = this.db.prepare('SELECT * FROM settings WHERE id=1').get();
-    if (cfg) {
-      s.settings = {
-        topics: JSON.parse(cfg.topics), style: cfg.style, opinions: cfg.opinions,
-        minDelay: cfg.min_delay, maxDelay: cfg.max_delay,
-      };
-      if (cfg.retention) {
-        try { s.settings.retention = JSON.parse(cfg.retention); } catch { /* ignore */ }
-      }
+    if (cfg?.retention) {
+      try { s.settings.retention = JSON.parse(cfg.retention); } catch { /* ignore */ }
     }
-    if (!s.captureToken) { s.captureToken = uuid().replaceAll('-', ''); this.kvSet('capture_token', s.captureToken); }
     for (const g of this.db.prepare('SELECT * FROM groups ORDER BY rowid').all()) {
       g.bots = this.db.prepare('SELECT * FROM bots WHERE group_id=? ORDER BY rowid').all(g.id).map(b => ({
         id: b.id, name: b.name, instructions: b.instructions, type: b.type,
@@ -558,12 +624,8 @@ export class SqliteStore {
       s.groups.push(g);
     }
     Object.assign(s, readDocuments(table => this.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()));
-    s.evidence = this.db.prepare('SELECT * FROM evidence').all().map(e => ({
-      id: e.id, kind: e.kind, link: e.link, claim: e.claim, confidence: e.confidence,
-      verification: e.verification, reuse: e.reuse, note: e.note,
-      draftId: e.draft_id, candidateId: e.candidate_id, createdBy: e.created_by, createdAt: e.created_at,
-    }));
     s.events = this.db.prepare('SELECT * FROM events').all().map(e => ({...e, meta: JSON.parse(e.meta)}));
+    Object.assign(s, readAsks(table => this.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()));
     s.tasks = this.db.prepare('SELECT * FROM tasks ORDER BY rowid').all().map(t => ({
       id: t.id, kind: t.kind, title: t.title, payload: JSON.parse(t.payload), status: t.status,
       runAt: t.run_at, intervalMinutes: t.interval_minutes, idempotencyKey: t.idempotency_key,
@@ -574,7 +636,12 @@ export class SqliteStore {
     return s;
   }
   writeCollections(state) {
-    const t = this.transaction(() => {
+    // The diff memory describes what is in the file, so a rolled-back write must
+    // not leave it describing rows that were never committed.
+    const savedWritten = new Map(this.written), kvPending = new Map();
+    const kv = (key, value) => { if (this.kvWritten.get(key) !== value) { this.kvSet(key, value); kvPending.set(key, value); } };
+    let t;
+    try { t = this.transaction(() => {
       // Diff each table against the last write: one document update usually
       // touches one row, and rewriting the whole table (all chat messages, all
       // events) for it made every update cost O(rows) forever.
@@ -587,20 +654,26 @@ export class SqliteStore {
         // a captured post) would otherwise read back last after a restart, so
         // a table whose order changed is rewritten in document order. Append
         // and in-place edits, the common case, still write only their own row.
-        const reordered = shape.ordered && (seq.length !== previous.seq.length || seq.some((key, i) => key !== previous.seq[i]));
-        const next = new Map(), upserts = [];
+        const changedOrder = shape.ordered && (seq.length !== previous.seq.length || seq.some((key, i) => key !== previous.seq[i]));
+        // Most order changes are a prepend (`unshift`) or a tail trim. Those keep
+        // the stored rows where they are and give the new rows rowids below them.
+        const plan = changedOrder ? orderPlan(seq, previous) : null;
+        const reordered = changedOrder && !plan;
+        const prepend = new Set(plan?.prefix || []);
+        const next = new Map(), upserts = [], prepends = [];
         for (const row of rows) {
           // The stored document, where the table has one, is already built for
           // the column: reusing it as the change signature costs one compare.
           const sig = shape.docColumn === undefined ? JSON.stringify(row.params) : String(row.params[shape.docColumn]);
           next.set(row.key, {pk: row.pk, sig});
           const was = previous.map.get(row.key);
-          if (reordered || !was || was.sig !== sig) upserts.push(row);
+          if (prepend.has(row.key)) prepends.push(row);
+          else if (reordered || !was || was.sig !== sig) upserts.push(row);
         }
         const deletes = [];
         if (!reordered) for (const [key, was] of previous.map) if (!next.has(key)) deletes.push(was.pk);
         this.written.set(shape.table, {map: next, seq});
-        return {shape, deletes, upserts, reordered};
+        return {shape, deletes, upserts, prepends, reordered};
       });
       // Children first on the way out, parents first on the way in: the one
       // foreign key is bots.group_id -> groups.id, so a removed group must lose
@@ -609,20 +682,40 @@ export class SqliteStore {
         const remove = this.stmt(deleteSql(shape));
         for (const pk of deletes) remove.run(...pk);
       }
-      for (const {shape, upserts, reordered} of work) {
+      for (const {shape, upserts, prepends, reordered} of work) {
         // A rewrite starts from an empty table so every row lands in document
         // order; otherwise only the changed rows are upserted in place.
         if (reordered) this.stmt(`DELETE FROM ${shape.table}`).run();
         const upsert = this.stmt(upsertSql(shape));
         for (const row of upserts) upsert.run(...row.params);
+        if (prepends.length) {
+          // The last new row sits just above the first stored one, so walking
+          // the prefix backwards keeps document order in rowid order.
+          let rowid = Number(this.stmt(`SELECT min(rowid) AS low FROM ${shape.table}`).get()?.low ?? 1);
+          const at = this.stmt(upsertAtSql(shape));
+          for (let i = prepends.length - 1; i >= 0; i--) at.run(--rowid, ...prepends[i].params);
+        }
       }
-      this.kvSet('created_at', state.createdAt || now());
-      this.kvSet('capture_token', state.captureToken);
-      this.kvSet('ai', JSON.stringify(state.ai || {}));
-      this.kvSet('browser_requests', JSON.stringify(state.browserRequests || []));
-      this.stmt('INSERT INTO settings (id,topics,style,opinions,min_delay,max_delay,retention) VALUES (1,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET topics=excluded.topics, style=excluded.style, opinions=excluded.opinions, min_delay=excluded.min_delay, max_delay=excluded.max_delay, retention=excluded.retention')
-        .run(JSON.stringify(state.settings.topics), state.settings.style, state.settings.opinions, state.settings.minDelay, state.settings.maxDelay, state.settings.retention ? JSON.stringify(state.settings.retention) : null);
-    });
+      kv('created_at', state.createdAt || now());
+      kv('ai', JSON.stringify(state.ai || {}));
+      kv('browser_requests', JSON.stringify(state.browserRequests || []));
+      kv('connectors', JSON.stringify(state.connectors || []));
+      kv('held_sends', JSON.stringify(state.heldSends || []));
+      kv('guard', JSON.stringify(state.guard || freshGuard()));
+      kv('ask_basics', state.askBasics ? '1' : '0');
+      kv('hands_off', state.handsOff === true ? '1' : '0');
+      kv('limits', JSON.stringify(state.limits || {}));
+      kv('templates', JSON.stringify(state.templates || []));
+      kv('usage', JSON.stringify(state.usage || {days: {}}));
+      const retention = state.settings?.retention ? JSON.stringify(state.settings.retention) : null;
+      if (this.kvWritten.get('\0settings') !== String(retention)) {
+        this.stmt('INSERT INTO settings (id,retention) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET retention=excluded.retention').run(retention);
+        kvPending.set('\0settings', String(retention));
+      }
+    }); }
+    catch (e) { this.written = savedWritten; throw e; }
+    for (const [key, value] of kvPending) this.kvWritten.set(key, value);
+    this.version++;
     return t;
   }
   /** The keys already in a table, used the first time this process writes it:
@@ -647,9 +740,18 @@ export class SqliteStore {
     return statement;
   }
   /** Wait for queued writes, then release the file. Used when a workspace is deleted. */
-  async close() { await this.serial; this.stmts.clear(); this.written.clear(); this.db.close(); }
+  async close() { await this.serial; this.stmts.clear(); this.written.clear(); this.kvWritten.clear(); this.db.close(); }
   read() { return structuredClone(this.cache); }
-  captureToken() { return this.cache.captureToken; }
+  /** The cached document itself, not a copy. Only for callers that provably do
+   * not mutate it: every update replaces the cache with a new object instead
+   * of changing the old one, so what a caller holds stays a consistent view. */
+  peek() { return this.cache; }
+  /** Rows were written outside `writeCollections` (a restore): forget what the
+   * diff remembers, so the next update compares against the file again, and
+   * give the document a new version. */
+  forgetWrites() { this.written.clear(); this.kvWritten.clear(); this.version++; }
+  /** Names the current document version; changes whenever a write commits. */
+  stateTag() { return `${this.epoch}-${this.version}`; }
   async persist(state = this.cache) { this.writeCollections(state); this.cache = state; }
   /** Queue one read-copy-write of the whole document behind every write already
    * waiting. Every change to the cache has to pass through here: a mutation made
@@ -685,3 +787,7 @@ export function resolveDbPath(dataFile) {
 export async function openStore(dataFile) {
   return new SqliteStore(resolveDbPath(dataFile), dataFile).init();
 }
+
+/** The document for a caller that only reads it: the cache itself where the
+ * store offers one, a copy otherwise (test doubles implement only `read`). */
+export const peek = store => (typeof store.peek === 'function' ? store.peek() : store.read());

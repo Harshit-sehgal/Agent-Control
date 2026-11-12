@@ -95,15 +95,31 @@ curl -fsS -X POST http://127.0.0.1:4174/api/admin/restore \
 A restore replaces the `users` table, so **everyone signs in again**; the
 credentials vault is re-entered by hand.
 
-**Last drill (automated, 2026-10-13):** seeded 3 candidates + 1 draft + a
-credential + a provider → export (21 tables, checksummed) → restore into a
-fresh instance → **3 candidates + 1 draft restored**, credentials/providers
-`0/0` (excluded by design), and a **tampered document refused** (checksum).
-Covered by `tests/persistence-api.test.js` (checksum tampering, force-restore).
+**What a backup carries.** Besides the tables, a backup holds the files attached
+to messages (`tables.attachments`, base64) and the owner's settings kept in kv
+(`tables.owner_settings`: saved templates, token usage, limits, **Browse and read
+without asking** and Hands-off). Files go newest first up to 16 MB in all, so the
+document stays under the restore route's 32 MB body limit; any file past that is
+listed in the backup's `attachmentsLeftOut` and named in the restore result and
+the activity log, and shows as missing in its chat. A restore checks every file
+as an upload is checked (a generated id, at most 10 MB, a type read from the
+bytes that matches what the row says) and every setting through the same rules
+its Settings route uses; a backup that fails either is refused before anything
+is written. Grants keep their end time, and one that has ended is dropped. A
+backup written before files and settings travelled still restores and leaves
+the live files and settings as they were. Still **not** carried: credentials,
+sessions, pairing codes, model providers (they point at vault credentials),
+connectors, held sends, pending page requests and the runaway guard.
+
+**Last drill (automated, 2026-10-13):** seeded records + a credential + a
+provider → export (checksummed) → restore into a fresh instance → **the
+records restored**, credentials/providers `0/0` (excluded by design), and a
+**tampered document refused** (checksum).
+Covered by `tests/persistence-api.test.js` (checksum tampering, force-restore). Backups made before the X-engage removal (schema v10 and earlier) still restore.
 
 **Provider keys after a restore.** A backup excludes the credential vault and
 the `kv` document that holds AI providers, so a restored instance has none: add
-each provider and key again under **You → AI and models**. To rotate a key
+each provider and key again under **Settings → Models and keys**. To rotate a key
 without a restore, edit the same provider there and paste the new value — a
 blank key field keeps the stored one, and a new key, endpoint, header set or
 API version re-reads that provider's model catalogue. A wrong or expired key is
@@ -126,7 +142,7 @@ for (let i = 0; i < 12; i++)                       // 12 x 25 = 300 reads
 ```
 
 **Observed (2026-10-13):** 300 read requests across `/api/state`, `/api/ai`,
-`/api/notifications` → **300× `200`** (≈0.2–0.7s), then 60 reminder writes →
+`/api/notifications` → **300× `200`** (≈0.2–0.7s), then 60 writes →
 **60× `201`**, **no 5xx**, container RSS ~60 MiB. The store serializes through one
 SQLite connection per workspace; model calls are bounded by `AI_MAX_CONCURRENCY`
 (default 4) and refused with `429` above it rather than queued without bound.

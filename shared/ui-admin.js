@@ -1,51 +1,71 @@
-/** Admin pages: notifications, team and access, local agents, data and security.
- * `adminPage(kind)` fetches and returns the body HTML; the handler tables are
- * wired by the host's delegated click, submit and change listeners. Handlers do
- * not catch errors, the host toasts them. */
-import {esc, btn, row, box, field, note, empty, tag, fullDate, textInput} from './ui-kit.js';
-import {store, api, sync} from './ui-store.js';
+/** Admin pages inside Settings: Models and keys, Connectors, Notifications, Workspaces, Team and access,
+ * Local agents, and Data and security. `adminPage(kind)` fetches and returns the body HTML; the handler
+ * tables are wired by the host's delegated click, submit and change listeners. Handlers do not catch
+ * errors, the host toasts them.
+ *
+ * The look is Settings and Connectors: a titled card (`.st-g`, `.cd`), rows with a switch or a small
+ * button on the right, a segmented pill for a choice of few, and one primary action per card. */
+import {esc, icon, btn, field, note, empty, tag, fullDate, textInput, switchBtn, modelSelect, effortPicker, runFullApp, demoList} from './ui-kit.js';
+import {store, api, sync, isAdmin, isStaticDemo} from './ui-store.js';
 import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js';
 import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js';
 import {pushStatus, enablePush, disablePush} from './ui-push.js';
+import {connectorsPanel, loadConnectors, connectActions, connectForms} from './ui-connect.js';
+import {cliDraft, modelChoices, chosenModel, effortChoices, OTHER_MODEL, agentCliRows, agentPermissionRows, agentWorkLine, subscriptionLine, SIGN_IN_HINT} from './ui-connect-model.js';
+import {LOCAL_CLI_ENGINES, LOCAL_CLI_KIND} from './ai-presets.js';
+import {parsePrices, pricesText} from './usage.js';
 
-/** Title + one-line description per page, used by the host for the page header. */
-export const ADMIN_PAGES = {
-  notifications: {
-    title: 'Notifications',
-    sub: 'Reminders, failed tasks, revoked agents and approvals blocked by disputed evidence.',
-  },
-  workspaces: {
-    title: 'Workspaces',
-    sub: 'Each workspace has its own bots, posts, drafts, chats and members.',
-  },
-  team: {
-    title: 'Team and access',
-    sub: 'Accounts and active sessions for this workspace.',
-  },
-  agents: {
-    title: 'Local agents',
-    sub: 'Device processes that run permission-scoped work outbound.',
-  },
-  data: {
-    title: 'Data and security',
-    sub: 'Credential vault, retention policy and workspace backups.',
-  },
-  ai: {
-    title: 'AI and models',
-    sub: 'Bring your own key: add providers, choose the default model, and override it per bot.',
-  },
-};
+/** The pages Settings can load into its body. Only the keys are read (is this a page?). */
+export const ADMIN_PAGES = {notifications: true, workspaces: true, team: true, agents: true, data: true, connectors: true, ai: true};
 
 /** The pairing code is shown once, so it lives only in memory until the page is left. */
 let lastPairing = null;
+/** Which "Add a model" form is open: the choice survives the repaint that follows adding one. */
+let addKind = 'sub';
 
-const actionRow = (title, sub, buttons) => `<div class="row"><span class="row-main"><span class="row-title">${title}</span>${sub ? `<span class="row-sub">${sub}</span>` : ''}</span><span class="row-actions">${buttons}</span></div>`;
+/* ---------- the pieces every page is made of ---------- */
+
+const dataAttrs = data => Object.entries(data || {}).map(([k, v]) => ` data-${k}="${esc(v)}"`).join('');
+const cap = text => String(text).charAt(0).toUpperCase() + String(text).slice(1);
+/** A titled card. `aside` sits opposite the title (a status tag or one small button). */
+const group = (label, inner, {pad = false, aside = '', cls = ''} = {}) => `<section class="st-g">${label ? (aside ? `<div class="ad-hd"><h4 class="st-h">${esc(label)}</h4>${aside}</div>` : `<h4 class="st-h">${esc(label)}</h4>`) : ''}<div class="cd${pad ? ' pad' : ''}${cls ? ` ${cls}` : ''}">${inner}</div></section>`;
+/** A row: title (markup the caller has escaped), a quiet line under it, and whatever sits on the right. */
+const line = (title, sub = '', right = '', cls = '') => `<div class="rw${cls ? ` ${cls}` : ''}"><span class="w">${title}${sub ? `<small>${sub}</small>` : ''}</span>${right}</div>`;
+const switchRow = (title, sub, on, label, attrs, extra = '') => `<div class="rw"><span class="w">${esc(title)}${sub ? `<small>${sub}</small>` : ''}</span>${extra}${switchBtn(on, label, attrs)}</div>`;
+/** A card in a list, headed the way a Connectors card is: a round icon, a name, a line, a tag. */
+const entry = (glyph, title, sub, aside, body = '') => `<div class="cn-card cn-mcp"><div class="cn-head"><span class="cn-ico" aria-hidden="true">${icon(glyph, 18)}</span><span class="w"><b>${title}</b>${sub ? `<small>${sub}</small>` : ''}</span>${aside}</div>${body}</div>`;
+const acts = html => `<div class="cn-acts">${html}</div>`;
+const quiet = text => `<div class="cd pad"><p class="st-quiet">${esc(text)}</p></div>`;
+const hint = html => `<p class="st-note">${html}</p>`;
+const panel = (...parts) => `<div class="ad-panel">${parts.filter(Boolean).join('')}</div>`;
+/** A choice of few that acts at once (a role): the pills of Settings. */
+const seg = (label, items, action, data = {}) => `<span class="st-seg" role="group" aria-label="${esc(label)}">${items.map(([value, text, on]) => `<button type="button" data-action="${esc(action)}"${dataAttrs({...data, value})} aria-pressed="${on ? 'true' : 'false'}">${esc(text)}</button>`).join('')}</span>`;
+/** A choice of few inside a form: the same pills over radio buttons, so the form reads its value. */
+const radioSeg = (legend, name, options, checked, action = '') => `<fieldset class="cn-via"><legend class="field-label">${esc(legend)}</legend><div class="st-seg" role="radiogroup" aria-label="${esc(legend)}">${options.map(([value, text]) => `<label><input type="radio" name="${esc(name)}" value="${esc(value)}"${action ? ` data-action="${esc(action)}"` : ''}${value === checked ? ' checked' : ''}><span>${esc(text)}</span></label>`).join('')}</div></fieldset>`;
+const kebab = (action, label, data) => `<button type="button" class="rbtn small ad-more" data-action="${esc(action)}"${dataAttrs(data)} aria-haspopup="dialog" aria-label="${esc(label)}">${icon('dots', 18)}</button>`;
+const withCode = text => esc(text).replace(/`([^`]+)`/g, '<code>$1</code>');
+
+/* ---------- Workspaces ---------- */
+
+function workspacesPanel(res) {
+  const list = res.workspaces || [], current = list.find(w => w.current);
+  const rows = list.map(w => line(esc(w.name), `You are ${esc(w.role)}`, w.current ? tag('current', 'good') : btn('Switch', 'workspace-switch', {id: w.id, small: true}))).join('');
+  const create = res.canCreate
+    ? `<form id="workspace-form">${group('New workspace', `<div class="ad-form">${field('Name', textInput('name', {required: true, maxlength: 60, placeholder: 'Client work'}))}<div class="cn-acts">${btn('Create workspace', null, {kind: 'primary', type: 'submit'})}</div></div>`, {pad: true})}</form>`
+    : hint('Only an owner of the first workspace can create workspaces.');
+  const manage = current?.role === 'owner'
+    ? `<form id="workspace-rename-form">${group('This workspace', `<div class="ad-form">${field('Name', `<input class="input" name="name" type="text" value="${esc(current.name)}" required maxlength="60">`)}<div class="cn-acts">${btn('Rename', null, {kind: 'primary', type: 'submit'})}${current.id === 'default' ? '' : btn('Delete this workspace', 'workspace-delete', {kind: 'danger', small: true, data: {name: current.name}})}</div></div>`, {pad: true})}</form>`
+    : '';
+  return panel(group(`Your workspaces, ${list.length}`, rows), create, manage, hint('Switching changes what this browser shows. People are added to one workspace at a time, under Team and access.'));
+}
+
+/* ---------- Notifications ---------- */
 
 const PUSH_HELP = {
   insecure: 'Push needs a secure address. Open this app over https, or on localhost.',
   unsupported: 'This browser cannot receive push here. On an iPhone or iPad, add this app to the Home Screen first, then open it from there.',
   blocked: 'Notifications are blocked for this site. Allow them in the browser settings, then reload.',
-  off: 'Get reminders, failed tasks and alerts on this device, even when the app is closed.',
+  off: 'Reminders, failed tasks and alerts on this device, even when the app is closed.',
   on: 'This device gets reminders, failed tasks and alerts, even when the app is closed.',
 };
 /** The host of a push endpoint, and nothing else: the path is a capability URL,
@@ -54,178 +74,160 @@ function endpointHost(endpoint) {
   try { return new URL(endpoint).host; } catch { return 'a device this browser cannot read'; }
 }
 
-function deviceList(push) {
+function devicesCard(push) {
   const endpoints = Array.isArray(push.endpoints) ? push.endpoints : [];
   if (endpoints.length < 1) return '';
-  const rows = endpoints.map(endpoint => actionRow(
+  const rows = endpoints.map(endpoint => line(
     `${esc(endpointHost(endpoint))}${endpoint === push.mine ? ` ${tag('this device', 'good')}` : ''}`,
     endpoint === push.mine ? 'Signed in here.' : 'Signed in somewhere else.',
     btn('Remove', 'push-remove', {small: true, kind: 'danger', data: {endpoint}}),
   )).join('');
-  return box(rows, `Devices, ${endpoints.length}`);
+  return group(`Devices, ${endpoints.length}`, rows, {aside: push.state === 'on' ? btn('Send a test', 'push-test', {small: true}) : ''});
 }
 
-function pushPanel(push) {
-  const buttons = push.state === 'on' ? btn('Send a test', 'push-test', {small: true}) + btn('Turn off', 'push-off', {small: true})
-    : push.state === 'off' ? btn('Turn on', 'push-on', {kind: 'primary', small: true}) : '';
+/** The ways to hear about things. Webhook and email show only when they can really deliver: a webhook needs a
+ * stored webhook address to send to, and email needs the server to have a mailbox or relay (`emailReady`). One that
+ * is already switched on stays visible so it can be switched off. */
+function channelsCard(prefs, push, credentials, emailReady) {
+  const hooks = credentials.filter(c => c.kind === 'webhook' && !c.expired);
   const others = push.devices - (push.state === 'on' ? 1 : 0);
-  return box(actionRow(`Push on this device ${tag(push.state === 'on' ? 'on' : 'off', push.state === 'on' ? 'good' : '')}`,
-    esc(PUSH_HELP[push.state] || 'Push status is unavailable in this browser.') + (others > 0 ? ` ${others} other device${others === 1 ? '' : 's'} of yours ${others === 1 ? 'is' : 'are'} subscribed.` : ''), buttons), 'Push')
-    + deviceList(push);
+  const pushable = push.state === 'on' || push.state === 'off';
+  const pushSub = `${esc(PUSH_HELP[push.state] || 'Push status is unavailable in this browser.')}${others > 0 ? ` ${others} other device${others === 1 ? '' : 's'} of yours ${others === 1 ? 'is' : 'are'} subscribed.` : ''}`;
+  let rows = switchRow('In the app', 'Listed under Recent on this page.', prefs.inApp, 'In the app', ' data-action="notif-pref" data-pref="inApp"')
+    + switchRow('Push on this device', pushSub, push.state === 'on', 'Push on this device', ` data-action="push-toggle"${pushable ? '' : ' disabled'}`);
+  if (hooks.length || prefs.webhook) {
+    const picked = prefs.webhookCredentialId || hooks[0]?.id || '';
+    const choices = hooks.map(c => `<option value="${esc(c.id)}"${c.id === picked ? ' selected' : ''}>${esc(c.name)}</option>`).join('');
+    rows += switchRow('Webhook', 'Posts each notice to a web address you saved under Data and security.', prefs.webhook, 'Webhook', ' data-action="notif-pref" data-pref="webhook"')
+      + (hooks.length ? line('Send to', '', `<select class="input ad-sel" name="webhookCredentialId" data-action="notif-webhook-pick" aria-label="Webhook address">${choices}</select>`) : '');
+  }
+  if (emailReady || prefs.email) {
+    rows += switchRow('Email', emailReady ? 'Sends each notice to the address below.' : 'Nothing is sent: this server has no mailbox or relay (SMTP_HOST or EMAIL_RELAY_URL). Switch it off, or set one.', prefs.email, 'Email', ' data-action="notif-pref" data-pref="email"')
+      + `<form id="notif-email-form" class="rw ad-addr">${textInput('emailAddress', {type: 'email', value: prefs.emailAddress || '', placeholder: 'you@example.com', 'aria-label': 'Email address', autocomplete: 'email'})}${btn('Save', null, {small: true, type: 'submit'})}</form>`;
+  }
+  return group('Tell me by', rows);
 }
 
-function workspacesPanel(res) {
-  const list = res.workspaces || [], current = list.find(w => w.current);
-  const rows = list.map(w => actionRow(`${esc(w.name)}${w.current ? ` ${tag('current', 'good')}` : ''}`, `You are ${esc(w.role)}`,
-    w.current ? '' : btn('Switch', 'workspace-switch', {id: w.id, small: true}))).join('');
-  const create = res.canCreate ? box(`<form id="workspace-form">${field('Name', textInput('name', {required: true, maxlength: 60, placeholder: 'Client work'}))}${btn('Create workspace', null, {kind: 'primary', type: 'submit'})}</form>`, 'New workspace')
-    : note('Only an owner of the first workspace can create workspaces.');
-  const manage = current?.role === 'owner' ? box(`<form id="workspace-rename-form">${field('Name of this workspace', `<input class="input" name="name" type="text" value="${esc(current.name)}" required maxlength="60">`)}${btn('Rename', null, {type: 'submit'})}</form>`
-    + (current.id === 'default' ? '' : `<p>${btn('Delete this workspace', 'workspace-delete', {kind: 'danger', small: true, data: {name: current.name}})}</p>`), 'This workspace') : '';
-  return box(rows, `Your workspaces, ${list.length}`) + create + manage
-    + note('Switching changes what this browser shows. People are invited to one workspace at a time, under Team and access.');
-}
-
-function notificationsPanel(list, prefs, push) {
+function notificationsPanel({list, prefs, push, credentials, emailReady}) {
   const unread = list.filter(n => n.status !== 'read');
-  const items = list.length
-    ? list.map(n => actionRow(
+  const shown = list.slice(0, 25);
+  const items = shown.length
+    ? shown.map(n => line(
       `${esc(n.title)}${n.status === 'read' ? '' : ` ${tag('new', 'good')}`}`,
-      `${esc(n.body || '')} · ${esc(n.channel || 'in_app')} · ${esc(fullDate(n.created_at))}`,
+      `${n.body ? `${esc(n.body)} · ` : ''}${n.channel && n.channel !== 'in_app' ? `${esc(n.channel)} · ` : ''}${esc(fullDate(n.created_at))}`,
       n.status === 'read' ? '' : btn('Mark read', 'notification-read', {id: n.id, small: true}),
-    )).join('')
-    : empty('No notifications yet', 'Reminders and alerts will show up here.');
-  const readAll = unread.length ? `<p>${btn('Mark all read', 'notifications-read-all', {small: true})}</p>` : '';
-  const form = `<form id="notif-prefs-form">
-    <label class="check-row"><input type="checkbox" name="inApp" ${prefs.inApp ? 'checked' : ''}><span>In-app (always recorded)</span></label>
-    <label class="check-row"><input type="checkbox" name="webhook" ${prefs.webhook ? 'checked' : ''}><span>Webhook</span></label>
-    ${field('Webhook credential id (from the vault)', textInput('webhookCredentialId', {value: prefs.webhookCredentialId || '', placeholder: 'uuid of a stored webhook credential'}))}
-    <label class="check-row"><input type="checkbox" name="email" ${prefs.email ? 'checked' : ''}><span>Email (needs EMAIL_RELAY_URL on the server)</span></label>
-    ${field('Email address', textInput('emailAddress', {type: 'email', value: prefs.emailAddress || ''}))}
-    ${btn('Save preferences', null, {kind: 'primary', type: 'submit'})}
-  </form>`;
-  return `${readAll}${box(items, `Recent, ${unread.length} unread`)}${pushPanel(push)}${box(form, 'Delivery channels')}`;
+    )).join('') + (list.length > shown.length ? `<div class="ad-lbl">${list.length - shown.length} older are kept</div>` : '')
+    : '';
+  const recent = shown.length
+    ? group(unread.length ? `Recent, ${unread.length} new` : 'Recent', items, {aside: unread.length ? btn('Mark all read', 'notifications-read-all', {small: true}) : ''})
+    : group('Recent', empty('No notifications yet', 'Reminders and alerts will show up here.'));
+  return panel(recent, channelsCard(prefs, push, credentials, emailReady), devicesCard(push));
 }
 
-function teamPanel(usersRes, sessionsRes) {
+/* ---------- Team and access ---------- */
+
+function teamPanel(usersRes) {
   const users = usersRes.users || [];
-  const sessions = sessionsRes.sessions || [];
-  const roles = usersRes.roles || [];
+  // Least to most trusted, whatever order the server lists them in; a role this page has not heard of goes last.
+  const offered = (usersRes.roles || []).filter(r => r !== 'owner');
+  const choices = [...['viewer', 'member', 'admin'].filter(r => offered.includes(r)), ...offered.filter(r => !['viewer', 'member', 'admin'].includes(r))];
   const me = store.state?.me?.email;
   const members = users.map(user => {
     const isMe = me === user.email;
-    const choices = roles.filter(r => r !== 'owner');
-    const select = user.role === 'owner' ? '<span>owner</span>' : `<select class="input" data-action="set-role" data-id="${esc(user.id)}" aria-label="Role for ${esc(user.email)}">${choices.map(r => `<option value="${esc(r)}" ${r === user.role ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>`;
-    const disable = isMe ? '' : btn(user.disabled ? 'Enable' : 'Disable', 'toggle-user-disabled', {id: user.id, small: true, data: {disable: user.disabled ? '0' : '1'}});
-    const remove = isMe ? '' : btn('Remove', 'remove-user', {kind: 'danger', id: user.id, small: true});
-    return actionRow(
-      `${esc(user.email)}${user.disabled ? ` ${tag('disabled', 'bad')}` : ''}${isMe ? ` ${tag('you', 'good')}` : ''}`,
-      `Joined ${esc(fullDate(user.createdAt))}`,
-      select + disable + remove,
-    );
-  }).join('');
-  const invite = `<form id="create-user-form">
-    <div class="form-grid">
-      ${field('Email', textInput('email', {type: 'email', required: true}))}
-      ${field('Role', '<select class="input" name="role"><option value="viewer">viewer</option><option value="member" selected>member</option><option value="admin">admin</option></select>')}
-    </div>
-    ${field('Temporary password (min 8 chars)', textInput('password', {type: 'password', minlength: 8, required: true}))}
-    <p class="field-help">Someone who already has an account keeps their own password and is added to this workspace.</p>
-    ${btn('Create user', null, {kind: 'primary', type: 'submit'})}
+    const owner = user.role === 'owner';
+    const role = owner ? '' : seg(`Role for ${user.email}`, choices.map(r => [r, cap(r), r === user.role]), 'set-role', {id: user.id});
+    const disable = isMe || owner ? '' : btn(user.disabled ? 'Enable' : 'Disable', 'toggle-user-disabled', {id: user.id, small: true, data: {disable: user.disabled ? '0' : '1'}});
+    const remove = isMe || owner ? '' : btn('Remove', 'remove-user', {kind: 'danger', id: user.id, small: true});
+    const tags = `${owner ? tag('owner') : ''}${user.disabled ? tag('disabled', 'bad') : ''}${isMe ? tag('you', 'good') : ''}`;
+    return entry('people', esc(user.email), `Joined ${esc(fullDate(user.createdAt))}`, tags, role + disable + remove ? acts(role + disable + remove) : '');
+  });
+  const invite = `<form id="create-user-form" class="ad-form">
+    <div class="form-grid">${field('Email', textInput('email', {type: 'email', required: true}))}${field('Temporary password (min 8 chars)', textInput('password', {type: 'password', minlength: 8, required: true}))}</div>
+    ${radioSeg('Role', 'role', [['viewer', 'Viewer'], ['member', 'Member'], ['admin', 'Admin']], 'member')}
+    <p class="cn-testing">Someone who already has an account keeps their own password and is added to this workspace.</p>
+    <div class="cn-acts">${btn('Create user', null, {kind: 'primary', type: 'submit'})}</div>
   </form>`;
-  const sessionRows = sessions.map(session => actionRow(
-    `${session.current ? 'This device' : 'Another device'}${session.current ? ` ${tag('current', 'good')}` : ''}`,
-    `${esc(session.ip || 'unknown ip')} · expires ${esc(fullDate(session.expiresAt))}`,
-    session.current ? '' : btn('Revoke', 'revoke-session', {kind: 'danger', id: session.id, small: true}),
-  )).join('');
-  return `<p>${btn('Sign out everywhere', 'revoke-sessions', {small: true})}</p>`
-    + box(members, `Members, ${users.length}`)
-    + box(invite, 'Invite a user')
-    + box(sessionRows || empty('No active sessions'), `Your sessions, ${sessions.length}`);
+  return panel(group(`Members, ${users.length}`, members.join(''), {cls: 'cn-list'}), group('Add a person', invite, {pad: true}));
+}
+
+/* ---------- Local agents ---------- */
+
+const tone = status => (status === 'online' ? 'good' : status === 'revoked' ? 'bad' : 'warn');
+const STATUS_WORD = {online: 'Online', stale: 'Not running now', paired: 'Not started yet', revoked: 'Revoked'};
+
+/** One paired computer: its state, whether claude and codex are signed in there, what it may do, and Revoke. */
+function agentCard(agent, actions) {
+  if (agent.status === 'revoked') return group(agent.name, line('Revoked', 'It can no longer take work.'), {aside: tag('revoked', 'bad')});
+  const cli = agentCliRows([agent])[0];
+  const signIn = cli.engines.map(e => line(esc(e.name), e.status === 'signed-out' ? withCode(SIGN_IN_HINT) : '', tag(e.word, e.tone))).join('');
+  const perms = agentPermissionRows(actions, agent.permissions || []).map(p => switchRow(p.label, `${esc(p.note)}${p.note ? ' · ' : ''}<code>${esc(p.id)}</code>`, p.on, p.label, ` data-action="toggle-agent-permission" data-id="${esc(agent.id)}" data-permission="${esc(p.id)}"`)).join('');
+  const seen = agent.lastSeenAt ? `Last seen ${esc(fullDate(agent.lastSeenAt))}` : 'Not seen yet';
+  const rows = line(seen, '', `<span class="pv">${esc(agentWorkLine(agent.tasks))}</span>`)
+    + signIn + `<div class="ad-lbl">Allowed to</div>${perms}`
+    + `<button type="button" class="rw bad" data-action="revoke-agent" data-id="${esc(agent.id)}"><span class="w">Revoke<small>Stops it taking work. Anything it is doing fails.</small></span></button>`;
+  return group(agent.name, rows, {aside: tag(STATUS_WORD[agent.status] || agent.status, tone(agent.status))});
+}
+
+function pairingCard(pairing) {
+  if (!pairing) return '';
+  const command = `node agent/agent.mjs pair --server ${location.origin} --code ${pairing.code}`;
+  return group('Pairing code', `<span class="code">${esc(pairing.code)}</span>
+    <p class="cn-testing">Shown once, and it ends ${esc(fullDate(pairing.expiresAt))}. On the computer, from this app's folder, run:</p>
+    <div class="cn-copy"><code>${esc(command)}</code>${btn('Copy', 'connector-copy', {small: true, glyph: 'copy', data: {text: command}})}</div>`, {pad: true});
+}
+
+function pairForm(actions) {
+  // The admin chooses the scope when issuing the code; the device cannot widen it.
+  const perms = agentPermissionRows(actions, actions).map(p => switchRow(p.label, `${esc(p.note)}${p.note ? ' · ' : ''}<code>${esc(p.id)}</code>`, true, p.label, ` data-action="ad-flip" data-permission="${esc(p.id)}"`)).join('');
+  return `<form id="pairing-form">${group('Pair a computer', `<div class="ad-pad">${field('Name', textInput('label', {placeholder: 'Laptop', maxlength: 120}))}</div><div class="ad-lbl">It may</div>${perms}<div class="ad-foot">${btn('Create pairing code', null, {kind: 'primary', type: 'submit'})}</div>`)}</form>`;
 }
 
 function agentsPanel(res, pairing) {
-  const agents = res.agents || [];
-  const actions = res.actions || [];
-  const code = pairing
-    ? note(`<strong>Pairing code</strong> (shown once, expires ${esc(fullDate(pairing.expiresAt))})<br><span class="code">${esc(pairing.code)}</span>`)
-    : '';
-  const tone = status => (status === 'online' ? 'good' : status === 'revoked' ? 'bad' : 'warn');
-  const rows = agents.length
-    ? agents.map(agent => {
-      const granted = agent.permissions || [];
-      const tasks = agent.tasks || {};
-      const toggles = actions.map(p => btn(p, 'toggle-agent-permission', {
-        kind: granted.includes(p) ? 'primary' : 'quiet',
-        id: agent.id,
-        small: true,
-        data: {permission: p, on: granted.includes(p) ? 'true' : 'false'},
-      })).join('');
-      return actionRow(
-        `${esc(agent.name)} ${tag(agent.status, tone(agent.status))}`,
-        `${granted.map(esc).join(', ') || 'no permissions'} · queued ${esc(tasks.queued ?? 0)} · running ${esc(tasks.running ?? 0)} · failed ${esc(tasks.failed ?? 0)}${agent.lastSeenAt ? ` · seen ${esc(fullDate(agent.lastSeenAt))}` : ''}`,
-        toggles + btn('Revoke', 'revoke-agent', {kind: 'danger', id: agent.id, small: true}),
-      );
-    }).join('')
-    : empty('No local agents', 'Create a pairing code, then pair a device.');
-  // The admin chooses the scope when issuing the code; the device cannot widen it.
-  const perms = actions.map(p => `<label class="check-row"><input type="checkbox" name="permissions" value="${esc(p)}" checked><span>${esc(p)}</span></label>`).join('');
-  const form = `<form id="pairing-form">
-    ${field('Device name', textInput('label', {placeholder: 'Laptop', maxlength: 120}))}
-    <fieldset class="contract-fieldset"><legend>Permissions</legend>${perms}<p class="field-help">The device can only ever be granted a subset of these.</p></fieldset>
-    ${btn('Create pairing code', null, {kind: 'primary', type: 'submit'})}
-  </form>`;
-  return form + code
-    + box(rows, `Paired agents, ${agents.length}`)
-    + note('A local agent runs only the task kinds it has been granted and can never publish.');
+  const agents = res.agents || [], actions = res.actions || [];
+  const cards = agents.length
+    ? agents.map(a => agentCard(a, actions)).join('')
+    : quiet('No computer is paired yet. Pair one below to use your own Claude or ChatGPT plan, give bots a browser, or reach an MCP server that runs on your machine.');
+  return panel(pairingCard(pairing), cards, pairForm(actions), hint('A computer runs only what you allow here. Revoke it any time.'));
 }
 
+/* ---------- Data and security ---------- */
+
+/** Secrets the app keeps for itself (a model's key, a connector's sign-in): it uses them and never shows them, so the
+ * server refuses to reveal them and there is no Reveal to press. They are managed under Models and keys and Connectors. */
+const KIND_WORDS = {api_key: 'API key', webhook: 'Webhook', token: 'Token', other: 'Other'};
+const APP_KEPT = {google_client: 'Google client', google_token: 'Google sign-in', connector_mcp: 'MCP server', ai_provider: 'Model key', ai_headers: 'Model headers'};
 function credentialsPanel(list) {
-  const rows = list.length
-    ? list.map(c => actionRow(
-      `${esc(c.name)} ${tag(c.kind)}`,
-      `Added ${esc(fullDate(c.createdAt))}${c.expiresAt ? ` · expires ${esc(fullDate(c.expiresAt))}` : ''}${c.createdBy ? ` · by ${esc(c.createdBy)}` : ''}`,
-      btn('Reveal', 'reveal-credential', {id: c.id, small: true}) + btn('Delete', 'delete-credential', {kind: 'danger', id: c.id, small: true}),
-    )).join('')
-    : empty('No credentials stored');
-  const kinds = ['api_key', 'webhook', 'token', 'other'].map(k => `<option value="${k}">${k}</option>`).join('');
-  const form = `<form id="credential-form">
-    <div class="form-grid">
-      ${field('Name', textInput('name', {required: true, maxlength: 120}))}
-      ${field('Kind', `<select class="input" name="kind">${kinds}</select>`)}
-    </div>
-    ${field('Secret value', '<textarea class="input" name="value" rows="2" required></textarea>')}
-    ${btn('Store credential', null, {kind: 'primary', type: 'submit'})}
+  const rows = list.map(c => entry('key', esc(c.name), `Added ${esc(fullDate(c.createdAt))}${c.expiresAt ? ` · expires ${esc(fullDate(c.expiresAt))}` : ''}${c.createdBy ? ` · by ${esc(c.createdBy)}` : ''}`, tag(APP_KEPT[c.kind] || KIND_WORDS[c.kind] || c.kind),
+    acts((APP_KEPT[c.kind] ? '' : btn('Reveal', 'reveal-credential', {id: c.id, small: true})) + btn('Delete', 'delete-credential', {kind: 'danger', id: c.id, small: true}))));
+  const form = `<form id="credential-form" class="ad-form">
+    ${field('Name', textInput('name', {required: true, maxlength: 120}))}
+    ${radioSeg('Kind', 'kind', [['api_key', 'API key'], ['webhook', 'Webhook'], ['token', 'Token'], ['other', 'Other']], 'api_key')}
+    ${field('Secret value', '<textarea class="input" name="value" rows="2" required autocomplete="off" spellcheck="false"></textarea>')}
+    <div class="cn-acts">${btn('Store credential', null, {kind: 'primary', type: 'submit'})}</div>
   </form>`;
-  return note('Stored encrypted (AES-256-GCM). Values are never listed; reveal is admin-only and written to the audit log.')
-    + box(rows, `Credentials, ${list.length}`)
-    + box(form, 'Add credential');
+  return hint('Stored encrypted (AES-256-GCM). Values are never listed; revealing one is admin-only and written to the audit log.')
+    + (rows.length ? group(`Credentials, ${list.length}`, rows.join(''), {cls: 'cn-list'}) : group('Credentials', empty('No credentials stored')))
+    + group('Add a credential', form, {pad: true});
 }
 
+const RETENTION_LABELS = {events: 'Activity log', doneTasks: 'Finished tasks', runs: 'Run history'};
 function retentionPanel(policy, preview) {
-  const pol = policy || {};
-  const pv = preview || {};
-  const rows = Object.entries(pol).map(([k, v]) => row({title: esc(k), right: `${esc(String(v))} day(s)`})).join('');
-  const counts = Object.entries(pv).filter(([k, v]) => typeof v === 'number' && k !== 'dryRun');
-  const would = counts.length
-    ? row({title: 'Would prune now', right: counts.map(([k, v]) => `${esc(k)} ${esc(String(v))}`).join(' · ')})
-    : '';
-  const inner = `${rows}${would}<p>${btn('Prune now', 'prune-retention', {kind: 'danger', small: true})}</p>`;
-  return note('Pruning removes only exhaust (events, finished tasks, sent notifications, runs), never drafts, candidates or evidence.')
-    + box(inner, 'Retention');
+  const rows = Object.entries(policy || {}).map(([k, v]) => line(esc(RETENTION_LABELS[k] || k), '', `<span class="pv">${esc(String(v))} days</span>`)).join('');
+  const counts = Object.entries(preview || {}).filter(([k, v]) => typeof v === 'number' && k !== 'dryRun');
+  const total = counts.reduce((sum, [, v]) => sum + v, 0);
+  const would = line(total ? 'Would be removed now' : 'Nothing to remove now', total ? esc(counts.filter(([, v]) => v).map(([k, v]) => `${RETENTION_LABELS[k] || k} ${v}`).join(' · ')) : '');
+  return group('Retention', `${rows}${would}<div class="ad-foot">${btn('Prune now', 'prune-retention', {kind: 'danger', small: true})}</div>`)
+    + hint('Pruning removes only old exhaust: events, finished tasks and runs. Bots, chats and memory are never touched.');
 }
 
 function backupPanel() {
-  const inner = `<textarea class="input" id="restore-doc" rows="3" placeholder="Paste a backup document here to restore" aria-label="Backup document"></textarea>
-    <p>${btn('Download backup', 'backup-export', {kind: 'primary'})} ${btn('Restore from pasted document', 'backup-restore', {kind: 'danger'})}</p>`;
-  return note('Export contains workspace data only; credentials and sessions never travel. Restoring replaces the workspace, so it asks for confirmation.')
-    + box(inner, 'Backup and restore');
+  const restore = `<details class="cn-tools ad-restore"><summary>Restore from a backup${icon('chevron', 13)}</summary>
+    <div class="ad-form"><textarea class="input" id="restore-doc" rows="3" placeholder="Paste a backup document here" aria-label="Backup document" autocomplete="off" spellcheck="false"></textarea>
+    <div class="cn-acts">${btn('Restore from pasted document', 'backup-restore', {kind: 'danger', small: true})}</div></div></details>`;
+  return group('Backup and restore', `<div class="ad-form"><div class="cn-acts">${btn('Download backup', 'backup-export', {kind: 'primary'})}</div>${restore}</div>`, {pad: true})
+    + hint('A backup holds this workspace\'s data only; credentials and sessions never travel. Restoring replaces the workspace, so it asks first.');
 }
 
-/** Model ids offered by a picker. Bounded so a provider with a huge catalogue
- * (OpenRouter) does not bloat the page, and matched to the server's own cap so a
- * model the API sent is never silently unpickable. */
-const MODEL_LIMIT = 300;
 /** The row still reports the size of the whole catalogue, so the page keeps more
  * ids than it offers. The server sends at most 300 per provider. */
 const MODEL_CACHE = 300;
@@ -298,20 +300,6 @@ const presetLabel = preset => (preset.needsEndpoint ? `${preset.label} (enter yo
 const ENDPOINT_HINTS = {azure: 'https://NAME.openai.azure.com', custom: 'https://your-gateway.example/v1'};
 const BASE_PLACEHOLDER = 'https://api.openai.com/v1';
 const presetSelect = () => `<select class="input" name="preset" data-action="ai-preset"><option value="">Choose a provider…</option>${PROVIDER_PRESETS.map(p => `<option value="${esc(p.id)}">${esc(presetLabel(p))}</option>`).join('')}</select>`;
-/** A picker of model ids. The value stays the id so free text still works, and
- * `labels[id]` is what the list shows when the provider names its models. */
-const modelOptions = (models, labels = {}) => idList(models).slice(0, MODEL_LIMIT).map(id => {
-  const shown = String(labelMap(labels)[id] ?? '').trim();
-  return shown && shown !== id
-    ? `<option value="${esc(id)}" label="${esc(shown)}">${esc(shown)}</option>`
-    : `<option value="${esc(id)}"></option>`;
-}).join('');
-/** The datalist for a provider's chat-capable models, labelled when the provider
- * names them. The AI page and the per-bot override both offer this list. */
-export const providerModelOptions = p => {
-  const view = providerView(p || {});
-  return modelOptions(view.chatModels || [], view.labels);
-};
 /** Azure wants its api-version in the query string. The field is in both forms but
  * hidden (and disabled, so it never posts) unless the protocol needs it, so the
  * form does not grow for everyone else. */
@@ -370,9 +358,72 @@ function editProviderSheet(provider) {
     ${field('New API key (leave blank to keep the saved one)', textInput('apiKey', {type: 'password', autocomplete: 'off'}))}
     ${headersField('')}
     ${headerNote}
+    ${provider.prices ? `<input type="hidden" name="pricesKnown" value="1">${field('Prices (optional)', `<textarea class="input" name="prices" rows="3" placeholder="gpt-4.1: 2 / 8&#10;claude-sonnet-5-5: 2 / 10 / 0.1" autocomplete="off" spellcheck="false">${esc(pricesText(provider.prices))}</textarea>`, 'One model per line: input / output dollars per million tokens, and optionally the cached-input price. Usage shows a cost only for these models; the rest show tokens.')}` : ''}
     ${note('Changing the endpoint or the key re-reads the model list with the saved key.')}
     <div class="sheet-actions">${btn('Save provider', null, {kind: 'primary', type: 'submit', wide: true})}${btn('Cancel', 'close-sheet', {wide: true})}</div>
   </form>`, {title: `Edit ${provider.label}`, sub: provider.host});
+}
+
+/** What "no model" means in each dropdown: a subscription leaves it to its command, a key to the provider. */
+const CLI_DEFAULT = 'Default (the CLI picks)', API_DEFAULT = 'The provider\'s default';
+const defaultLabelFor = provider => (provider?.kind === LOCAL_CLI_KIND ? CLI_DEFAULT : API_DEFAULT);
+/** Put new rows in a dropdown already on the page, keeping what was picked when it is still there. */
+export function refillModelSelect(select, rows) {
+  if (!select) return;
+  const keep = select.value;
+  select.innerHTML = rows.map(r => `<option value="${esc(r.value)}"${r.selected ? ' selected' : ''}>${esc(r.label)}</option>`).join('');
+  if (keep && keep !== OTHER_MODEL && rows.some(r => r.value === keep)) select.value = keep;
+  showOtherBox(select);
+}
+/** Other… opens a box for any id; any other row closes it. */
+function showOtherBox(select) {
+  const box = select?.parentElement?.querySelector('.model-other'); if (!box) return;
+  // A grouped picker's typed-id rows are `<provider>|__other`.
+  const open = select.value === OTHER_MODEL || select.value.endsWith(`|${OTHER_MODEL}`);
+  box.hidden = !open; box.disabled = !open;
+  if (open) box.focus();
+}
+
+const ENGINE_CHOICES = LOCAL_CLI_ENGINES.map(e => [e.id, e.label.replace(/ \(.*\)$/, '')]);
+/** Use the Claude or ChatGPT plan you already pay for: no key, the model runs in the CLI on a paired computer. */
+const subscriptionForm = () => `<form id="cli-provider-form" class="ad-form" autocomplete="off"${addKind === 'sub' ? '' : ' hidden'}>
+    ${radioSeg('Which one', 'engine', ENGINE_CHOICES, 'claude', 'cli-engine')}
+    ${field('Name', textInput('label', {maxlength: 80, placeholder: 'My Claude'}), 'Optional.')}
+    ${field('Model', modelSelect(modelChoices({provider: {kind: LOCAL_CLI_KIND, engine: 'claude'}, defaultLabel: CLI_DEFAULT})), 'Pick one, or Other… to type a name.')}
+    <div class="cn-acts">${btn('Add subscription', null, {kind: 'primary', type: 'submit'})}</div>
+    <p class="cn-testing">No key is stored. The model runs through the command-line tool on a paired computer that is signed in to your account.</p>
+  </form>`;
+
+const apiForm = () => `<form id="ai-provider-form" class="ad-form"${addKind === 'api' ? '' : ' hidden'}>
+    ${field('Provider', presetSelect(), 'Fills in the name and address. Azure and a custom gateway ask you to type the endpoint.')}
+    ${field('Name', textInput('label', {required: true, maxlength: 80, placeholder: 'OpenAI, Groq, my router'}))}
+    ${field('Base URL', textInput('baseUrl', {required: true, placeholder: BASE_PLACEHOLDER, autocomplete: 'off'}))}
+    ${apiVersionField('', false)}
+    ${field('API key', textInput('apiKey', {type: 'password', required: true, autocomplete: 'off'}), 'Stored encrypted and never shown again. A local server such as Ollama accepts any text.')}
+    <details class="cn-tools"><summary>More options${icon('chevron', 13)}</summary><div class="ad-form ad-fold">
+      ${field('Protocol', protocolSelect(''), 'Auto-detect reads the address. Chat completions is what almost every other provider accepts.')}
+      ${headersField('')}
+    </div></details>
+    <div class="cn-acts">${btn('Save provider', null, {kind: 'primary', type: 'submit'})}</div>
+  </form>`;
+
+/** One saved provider. Test and Make default stay in sight; the rest is under the dots. */
+function providerEntry(p, res, agents) {
+  const isDefault = p.isDefault || p.id === res.defaultProviderId;
+  const makeDefault = isDefault ? '' : btn('Make default', 'ai-default-provider', {id: p.id, small: true});
+  const subscription = p.kind === LOCAL_CLI_KIND;
+  const more = kebab('ai-more', `More for ${p.label}`, {id: p.id, name: p.label, kind: subscription ? 'sub' : 'api', host: p.host || ''});
+  const star = isDefault ? tag('default', 'good') : '';
+  // A subscription has no key and no catalogue: it is checked by what its agent says about the CLI's sign-in.
+  if (subscription) return entry('chip', esc(p.label), esc(subscriptionLine(p, agents)), star, acts(btn('Check sign-in', 'ai-check-cli', {id: p.id, small: true}) + makeDefault + more));
+  // N is what can answer a chat; the rest of the account's catalogue is a quiet count beside it.
+  const chat = chatCount(p), listed = listedCount(p);
+  const extra = listed > chat ? ` (+${listed - chat} listed)` : '';
+  const version = needsApiVersion(p.protocol) && p.apiVersion ? ` · api-version ${esc(p.apiVersion)}` : '';
+  const problem = p.modelsError ? `<p class="cn-msg">${esc(p.modelsError)}</p>` : '';
+  const priced = Object.keys(p.prices || {}).length;
+  return entry('key', esc(p.label), `${esc(p.host)} · ${esc(protocolName(p.protocol))} · ${chat} model(s)${extra}${p.modelsTruncated ? ' · list capped' : ''}${version}${priced ? ` · prices for ${priced}` : ''}`, star,
+    problem + acts(btn('Test', 'ai-test-provider', {id: p.id, small: true}) + makeDefault + more));
 }
 
 function aiPanel(res) {
@@ -380,75 +431,85 @@ function aiPanel(res) {
   // repaints the picker and the edit sheet from memory, without a round trip.
   for (const p of res.providers || []) if (!listings.has(p.id) && Array.isArray(p.chatModels || p.models)) rememberListing(p);
   const providers = (res.providers || []).map(providerView);
-  const rows = providers.length
-    ? providers.map(p => {
-      // N is what can answer a chat; the rest of the account's catalogue is a
-      // quiet count beside it, so a long model list is visibly read in full.
-      const chat = chatCount(p), listed = listedCount(p);
-      const extra = listed > chat ? ` (+${listed - chat} listed)` : '';
-      const version = needsApiVersion(p.protocol) && p.apiVersion ? ` · api-version ${esc(p.apiVersion)}` : '';
-      return actionRow(
-        `${esc(p.label)} ${p.isDefault || p.id === res.defaultProviderId ? tag('default', 'good') : ''}`,
-        `${esc(p.host)} · ${esc(protocolName(p.protocol))} · ${chat} model(s)${extra}${p.modelsTruncated ? ' · list capped' : ''}${version}${p.modelsError ? ` ${tag(p.modelsError, 'warn')}` : ''}`,
-        btn('Test', 'ai-test-provider', {id: p.id, small: true})
-          + btn('Refresh models', 'ai-load-models', {id: p.id, small: true})
-          + btn('Edit', 'ai-edit-provider', {id: p.id, small: true})
-          + (p.id === res.defaultProviderId ? '' : btn('Make default', 'ai-default-provider', {id: p.id, small: true}))
-          + btn('Delete', 'ai-delete-provider', {kind: 'danger', id: p.id, small: true}),
-      );
-    }).join('')
-    : empty('No providers yet');
-  const add = `<form id="ai-provider-form">
-    ${field('Provider preset', presetSelect(), 'Fills the name, endpoint and protocol below. Azure and a custom gateway ask you to type the endpoint.')}
-    ${field('Name', textInput('label', {required: true, maxlength: 80, placeholder: 'OpenAI, Groq, my router'}))}
-    ${field('Base URL', textInput('baseUrl', {required: true, placeholder: BASE_PLACEHOLDER, autocomplete: 'off'}))}
-    ${field('Protocol', protocolSelect(''), 'The body shape this endpoint speaks. Auto-detect reads the host; chat completions is what almost every other provider accepts.')}
-    ${apiVersionField('', false)}
-    ${field('API key', textInput('apiKey', {type: 'password', required: true, autocomplete: 'off'}))}
-    ${headersField('')}
-    ${btn('Save provider', null, {kind: 'primary', type: 'submit'})}
-  </form>`;
-  const options = providers.map(p => `<option value="${esc(p.id)}" ${p.id === res.defaultProviderId ? 'selected' : ''}>${esc(p.label)}</option>`).join('');
   const picked = providers.find(p => p.id === res.defaultProviderId) || providers[0];
-  const defaults = providers.length ? `<form id="ai-default-form">
-    ${field('Default provider', `<select class="input" name="providerId" data-action="ai-default-provider-pick">${options}</select>`)}
-    ${field('Default model', textInput('model', {value: res.defaultModel || '', placeholder: 'auto, gpt-4o-mini, llama-3.3-70b', list: 'ai-models', autocomplete: 'off'}), 'Pick one from the list, or type an id the provider accepts.')}
-    <datalist id="ai-models">${providerModelOptions(picked)}</datalist>
-    <p>${btn('Load models', 'ai-load-models', {small: true})} ${btn('Save', null, {kind: 'primary', type: 'submit'})}</p>
+  const modelLabel = picked ? `Default model for ${picked.label}` : '';
+  const defaults = picked ? `<form id="ai-default-form" class="ad-form">
+    <input type="hidden" name="providerId" value="${esc(picked.id)}">
+    ${field(modelLabel, modelSelect(modelChoices({provider: picked, current: res.defaultModel || '', defaultLabel: defaultLabelFor(picked)})), 'Bots without a model of their own use it.')}
+    ${effortPicker(effortChoices(res.defaultEffort || ''), {help: 'How hard every bot thinks unless it has its own setting. Higher is better on hard work, slower and costs more.'})}
+    <div class="cn-acts">${btn('Save', null, {kind: 'primary', type: 'submit'})}</div>
   </form>` : '';
-  return note('Bring your own key. Five wire protocols work: OpenAI chat completions, OpenAI responses, Anthropic Messages for Claude, Google Gemini, and Azure OpenAI (which needs your resource endpoint and an API version). The model list comes from the provider with your saved key, so the picker shows models that key can actually use. Keys are stored encrypted and never shown again - only the provider name, host, model list and the NAMES of any custom headers are visible. Local servers (Ollama, LM Studio, vLLM, Jan) accept any string as the key.')
-    + box(rows, `Providers, ${providers.length}`)
-    + box(add, 'Add a provider')
-    + (defaults ? box(defaults, 'Default for this workspace') : '');
+  const choose = `<div class="st-seg" role="group" aria-label="What to add">${[['sub', 'Subscription'], ['api', 'API key']].map(([key, text]) => `<button type="button" data-action="ai-add-kind" data-kind="${key}" aria-pressed="${key === addKind}">${text}</button>`).join('')}</div>`;
+  const link = !isStaticDemo() && isAdmin()
+    ? group('', `<button type="button" class="rw" data-action="settings-open" data-section="agents"><span class="w">Sign-in on your computers<small>Whether claude and codex are signed in is under Local agents.</small></span>${icon('chevron', 18)}</button>`)
+    : '';
+  return panel(
+    hint('Bring your own key, or use the Claude or ChatGPT plan you already pay for. Keys are stored encrypted and never shown again.'),
+    providers.length ? group('Models', providers.map(p => providerEntry(p, res, res.agents)).join(''), {cls: 'cn-list'}) : quiet('No model yet. Add one below.'),
+    defaults && group('Default model', defaults, {pad: true}),
+    providers.length ? group('If a model fails', fallbackForm(res, providers), {pad: true}) : '',
+    group('Add a model', `<div class="ad-form">${choose}${subscriptionForm()}${apiForm()}</div>`, {pad: true}),
+    link,
+  );
+}
+
+/** The model a turn goes to once when a bot's own model cannot answer: any saved provider's model, or none. */
+function fallbackForm(res, providers) {
+  const now = res.fallback?.providerId ? `${res.fallback.providerId}|${res.fallback.model || ''}` : '';
+  const rows = providers.flatMap(p => (p.kind === LOCAL_CLI_KIND
+    ? [{value: `${p.id}|${p.model || ''}`, label: `${p.label} · ${p.model || 'its default model'}`}]
+    : (p.chatModels || p.models || []).slice(0, 300).map(m => ({value: `${p.id}|${m}`, label: `${p.label} · ${p.labels?.[m] || m}`}))));
+  if (now && !rows.some(r => r.value === now)) rows.unshift({value: now, label: `${providers.find(p => p.id === res.fallback.providerId)?.label || 'Saved'} · ${res.fallback.model || 'its default model'}`});
+  const options = [{value: '', label: 'None'}, ...rows].map(r => `<option value="${esc(r.value)}"${r.value === now ? ' selected' : ''}>${esc(r.label)}</option>`).join('');
+  return `<form id="ai-fallback-form" class="ad-form">
+    ${field('Fallback model', `<select class="input" name="fallback">${options}</select>`, 'When a bot\'s model is busy, down, times out or is signed out, that turn is answered once by this model. A refused request is not sent elsewhere.')}
+    <div class="cn-acts">${btn('Save', null, {kind: 'primary', type: 'submit'})}</div>
+  </form>`;
+}
+
+/** Refill the Default model dropdown when the provider it is for has a fresh list. */
+function fillDefaultPicker(id) {
+  const form = document.getElementById('ai-default-form');
+  if (!form || form.elements.namedItem('providerId')?.value !== id) return;
+  const provider = providerView({...(listings.get(id) || {}), id, kind: 'api'});
+  refillModelSelect(form.elements.namedItem('model'), modelChoices({provider, current: form.elements.namedItem('model').value, defaultLabel: API_DEFAULT}));
+}
+/** A key provider whose list the page has never seen reads it by itself once the page is up: no button to press. */
+function autoLoadModels(provider) {
+  if (!provider || provider.kind === LOCAL_CLI_KIND || provider.chatModels?.length) return;
+  setTimeout(() => adminActions['ai-load-models']({dataset: {id: provider.id}, closest: () => null}, {reload: async () => {}}, {quiet: true}).catch(() => {}), 0);
 }
 
 /** Fetches what the page needs and returns its body HTML (no page header). Throws on API error. */
 export async function adminPage(kind) {
+  if (kind === 'connectors') return connectorsPanel(await loadConnectors());
   if (kind === 'ai') {
     const res = await api('/api/ai');
+    // The browser-only demo has no providers to manage and says so.
+    if (res?.demo) return `${note('Models and keys need the Node server. The browser-only demo answers with built-in replies, so there is no key to add here. The full app speaks to every provider below.')}${runFullApp()}${demoList(PROVIDER_PRESETS.map(p => ({name: p.label, sub: p.note || ''})), 'Providers the full app supports')}`;
     // Admin-only detail (endpoints, cached model ids, catalogue errors). The demo
     // shim has no such route, so a failure just falls back to the summary.
     const full = await api('/api/ai/providers').catch(() => null);
-    if (full?.providers?.length) { full.providers.forEach(rememberListing); return aiPanel({...res, providers: full.providers}); }
-    return aiPanel(res);
+    // Which paired computers have `claude` and `codex` signed in. A failure only hides that part.
+    const agents = (await api('/api/agents').catch(() => null))?.agents || [];
+    const view = full?.providers?.length ? {...res, providers: full.providers, agents} : {...res, agents};
+    if (full?.providers?.length) full.providers.forEach(rememberListing);
+    const providers = (view.providers || []).map(providerView);
+    autoLoadModels(providers.find(p => p.id === view.defaultProviderId) || providers[0]);
+    return aiPanel(view);
   }
-  if (kind === 'team') {
-    const [users, sessions] = await Promise.all([api('/api/users'), api('/api/sessions')]);
-    return teamPanel(users, sessions);
-  }
+  if (kind === 'team') return teamPanel(await api('/api/users'));
   if (kind === 'data') {
     const [creds, retention] = await Promise.all([api('/api/credentials'), api('/api/retention/preview')]);
-    return credentialsPanel(creds.credentials || []) + retentionPanel(retention.policy, retention.preview)
+    return panel(credentialsPanel(creds.credentials || []), retentionPanel(retention.policy, retention.preview),
       // A backup carries every account's password hash, so only the owner gets it.
-      + (store.state?.me?.role === 'owner' ? backupPanel() : note('Backup and restore are available to the workspace owner.'));
+      store.state?.me?.role === 'owner' ? backupPanel() : hint('Backup and restore are available to the workspace owner.'));
   }
   if (kind === 'notifications') {
-    const [list, prefs, push] = await Promise.all([api('/api/notifications'), api('/api/notification-prefs'), pushStatus()]);
-    return notificationsPanel(list.notifications || [], prefs, push);
+    const [list, prefs, push, creds] = await Promise.all([api('/api/notifications'), api('/api/notification-prefs'), pushStatus(), api('/api/credentials').catch(() => null)]);
+    return notificationsPanel({list: list.notifications || [], prefs, push, credentials: creds?.credentials || [], emailReady: Boolean(prefs.emailReady)});
   }
-  if (kind === 'workspaces') {
-    return workspacesPanel(await api('/api/workspaces'));
-  }
+  if (kind === 'workspaces') return workspacesPanel(await api('/api/workspaces'));
   if (kind === 'agents') {
     const res = await api('/api/agents');
     // Shown once: hand the code to this render and forget it.
@@ -458,7 +519,6 @@ export async function adminPage(kind) {
   }
   throw new Error(`Unknown admin page: ${kind}`);
 }
-
 /** Everything on screen belongs to the workspace that was just left, so the
  * app starts again from the chat list instead of patching each piece. */
 function enterWorkspace() {
@@ -468,6 +528,7 @@ function enterWorkspace() {
 
 /** data-action handlers: (button, ctx) => Promise. ctx = {reload: () => Promise} re-renders the current admin page. */
 export const adminActions = {
+  ...connectActions,
   'notifications-read-all': async (button, ctx) => {
     const snap = await api('/api/notifications');
     const ids = (snap.notifications || []).filter(n => n.status !== 'read').map(n => n.id);
@@ -480,16 +541,23 @@ export const adminActions = {
     await sync();
     await ctx.reload();
   },
-  'push-on': async (button, ctx) => {
-    await enablePush();
-    toast('Push is on for this device.');
+  // A channel switch saves at once; the switch only moves when the server took it.
+  'notif-pref': async button => {
+    const key = button.dataset.pref, on = button.getAttribute('aria-checked') !== 'true', body = {[key]: on};
+    const card = button.closest('.cd');
+    if (key === 'webhook') body.webhookCredentialId = card?.querySelector('[name=webhookCredentialId]')?.value || undefined;
+    if (key === 'email' && on) body.emailAddress = card?.querySelector('[name=emailAddress]')?.value.trim() || undefined;
+    await api('/api/notification-prefs', 'PATCH', body);
+    button.setAttribute('aria-checked', String(on));
+  },
+  'push-toggle': async (button, ctx) => {
+    const on = button.getAttribute('aria-checked') === 'true';
+    if (on) await disablePush(); else await enablePush();
+    toast(on ? 'Push is off for this device.' : 'Push is on for this device.');
     await ctx.reload();
   },
-  'push-off': async (button, ctx) => {
-    await disablePush();
-    toast('Push is off for this device.');
-    await ctx.reload();
-  },
+  // A switch in a form that is not saved yet (which permissions a new pairing code carries).
+  'ad-flip': button => button.setAttribute('aria-checked', String(button.getAttribute('aria-checked') !== 'true')),
   'push-remove': async (button, ctx) => {
     // A stale device cannot be reached to unsubscribe itself, so this is the
     // only way to stop sending to it. The current device is allowed too: it is
@@ -511,21 +579,10 @@ export const adminActions = {
   },
   'workspace-delete': async button => {
     const name = button.dataset.name;
-    const typed = await askSheet(`Delete "${name}"?`, {sub: 'Its bots, posts, drafts and chats are removed for everyone and cannot be recovered. Type the workspace name to confirm.', submit: 'Delete workspace'});
+    const typed = await askSheet(`Delete "${name}"?`, {sub: 'Its bots, chats and members are removed for everyone and cannot be recovered. Type the workspace name to confirm.', submit: 'Delete workspace'});
     if (typed === null) return;
     await api('/api/workspaces/current', 'DELETE', {confirm: typed});
     enterWorkspace();
-  },
-  'revoke-sessions': async (button, ctx) => {
-    if (!await confirmSheet('Sign out every other session?', {confirm: 'Sign out', danger: true})) return;
-    await api('/api/sessions/revoke-all', 'POST', {});
-    toast('Other sessions signed out.');
-    await ctx.reload();
-  },
-  'revoke-session': async (button, ctx) => {
-    await api(`/api/sessions/${button.dataset.id}`, 'DELETE', {});
-    toast('Session revoked.');
-    await ctx.reload();
   },
   'remove-user': async (button, ctx) => {
     if (!await confirmSheet('Remove this user from the workspace?', {confirm: 'Remove', danger: true})) return;
@@ -546,23 +603,57 @@ export const adminActions = {
     toast('Agent revoked.');
     await ctx.reload();
   },
-  'toggle-agent-permission': async (button, ctx) => {
-    const id = button.dataset.id;
-    const permission = button.dataset.permission;
-    const turnOn = button.dataset.on !== 'true';
+  // The new list is read off the agent's switches, with this one flipped; the switch moves once the server took it.
+  'toggle-agent-permission': async button => {
+    const id = button.dataset.id, permission = button.dataset.permission;
+    const turnOn = button.getAttribute('aria-checked') !== 'true';
     const siblings = document.querySelectorAll(`[data-action="toggle-agent-permission"][data-id="${CSS.escape(id)}"]`);
     const next = [...siblings]
-      .filter(b => (b.dataset.permission === permission ? turnOn : b.dataset.on === 'true'))
+      .filter(b => (b.dataset.permission === permission ? turnOn : b.getAttribute('aria-checked') === 'true'))
       .map(b => b.dataset.permission);
     await api(`/api/agents/${id}`, 'PATCH', {permissions: next});
-    toast('Permissions updated.');
+    button.setAttribute('aria-checked', String(turnOn));
+  },
+  'set-role': async (button, ctx) => {
+    try {
+      await api(`/api/users/${button.dataset.id}`, 'PATCH', {role: button.dataset.value});
+    } catch (error) {
+      // Put the pills back to the server's value before the host reports the error.
+      await ctx.reload();
+      throw error;
+    }
+    toast('Role updated.');
     await ctx.reload();
   },
+  // Which "Add a model" form is open.
+  'ai-add-kind': button => {
+    addKind = button.dataset.kind;
+    const card = button.closest('.cd');
+    card.querySelectorAll('[data-action="ai-add-kind"]').forEach(b => b.setAttribute('aria-pressed', String(b === button)));
+    card.querySelector('#cli-provider-form').hidden = addKind !== 'sub';
+    card.querySelector('#ai-provider-form').hidden = addKind !== 'api';
+  },
+  // The rest of a provider's actions, under its dots: a sheet, as the bot options are on a phone.
+  'ai-more': button => {
+    const {id, name, kind, host} = button.dataset;
+    const item = (action, title, sub, cls = '') => `<button type="button" class="rw${cls}" data-action="${action}" data-id="${esc(id)}"><span class="w">${esc(title)}<small>${esc(sub)}</small></span></button>`;
+    const rows = (kind === 'api' ? item('ai-menu-refresh', 'Refresh models', 'Read the model list again with the saved key') + item('ai-menu-edit', 'Edit', 'Rename it, change the address or replace the key') : '')
+      + item('ai-menu-delete', 'Delete', kind === 'api' ? 'Removes the provider and its saved key' : 'Removes this subscription', ' bad');
+    openSheet(`<div class="cd">${rows}</div>`, {title: name, sub: host});
+  },
+  'ai-menu-refresh': (button, ctx) => { closeSheet(); return adminActions['ai-load-models'](button, ctx); },
+  'ai-menu-edit': (button, ctx) => { closeSheet(); return adminActions['ai-edit-provider'](button, ctx); },
+  'ai-menu-delete': (button, ctx) => { closeSheet(); return adminActions['ai-delete-provider'](button, ctx); },
   'ai-delete-provider': async (button, ctx) => {
     if (!await confirmSheet('Remove this provider? Its saved key is deleted too.', {confirm: 'Delete', danger: true})) return;
     await api(`/api/ai/providers/${button.dataset.id}`, 'DELETE');
     toast('Provider removed.');
     await sync(); await ctx.reload();
+  },
+  // A subscription is checked by the sign-in its agent last reported; this never sends a prompt.
+  'ai-check-cli': async button => {
+    const res = await api(`/api/ai/providers/${button.dataset.id}/test`, 'POST', {});
+    toast(res.message || (res.ok ? 'Signed in.' : 'Not signed in.'), !res.ok);
   },
   'ai-default-provider': async (button, ctx) => {
     await api('/api/ai', 'PATCH', {providerId: button.dataset.id});
@@ -571,7 +662,8 @@ export const adminActions = {
   },
   'ai-edit-provider': async button => {
     // Read the listing again: the panel may be older than another admin's change.
-    const providers = (await api('/api/ai')).providers || [];
+    // The admin listing carries the prices; the summary is the fallback when it cannot be read.
+    const providers = ((await api('/api/ai/providers').catch(() => null)) || await api('/api/ai')).providers || [];
     const provider = providers.find(p => p.id === button.dataset.id);
     if (!provider) throw new Error('Provider not found.');
     editProviderSheet(provider);
@@ -590,7 +682,7 @@ export const adminActions = {
       button.disabled = false;
     }
   },
-  'ai-load-models': async (button, ctx) => {
+  'ai-load-models': async (button, ctx, {quiet = false} = {}) => {
     // A row button names its own provider; the default form uses its select.
     const form = button.closest('form'), id = button.dataset.id || form?.querySelector('[name=providerId]')?.value;
     if (!id) { toast('Add a provider first.'); return; }
@@ -601,7 +693,7 @@ export const adminActions = {
       // The server keeps the failure on the provider, so show it where the row is.
       const message = String(error.message || 'Could not read the model list.');
       rememberListing({id, modelsError: message});
-      toast(message, true);
+      if (!quiet) toast(message, true);
       if (button.dataset.id) await ctx.reload();
       return;
     }
@@ -609,9 +701,8 @@ export const adminActions = {
     // one sends a single list, which the row still keeps in full.
     const models = (res.chatModels?.length ? res.chatModels : res.models) || [];
     rememberListing({id, models: res.models, chatModels: res.chatModels, allModels: res.allModels, labels: res.labels, protocol: res.protocol, modelsError: ''});
-    const list = form?.querySelector('#ai-models') || document.getElementById('ai-models');
-    if (list) list.innerHTML = modelOptions(models, res.labels || listings.get(id)?.labels || {});
-    toast(models.length ? `${models.length} model(s) available — pick one above.` : 'The provider returned no model list.');
+    fillDefaultPicker(id);
+    if (!quiet) toast(models.length ? `${models.length} model(s) available — pick one above.` : 'The provider returned no model list.');
     if (button.dataset.id) await ctx.reload();
   },
   'reveal-credential': async button => {
@@ -628,7 +719,7 @@ export const adminActions = {
     const ok = await confirmSheet('Prune exhaust older than the retention policy?', {
       confirm: 'Prune',
       danger: true,
-      detail: 'Drafts, candidates and evidence are never touched.',
+      detail: 'Bots, chats and memory are never touched.',
     });
     if (!ok) return;
     const res = await api('/api/retention/prune', 'POST', {});
@@ -657,7 +748,7 @@ export const adminActions = {
     if (!await confirmSheet('Replace this workspace with the pasted backup?', {confirm: 'Restore', danger: true})) return;
     // The server validates the request body itself as the backup document.
     const res = await api('/api/admin/restore', 'POST', {...doc, force: true});
-    toast(`Restored ${res.restored} row(s).`);
+    toast(`Restored ${res.restored} rows.`);
     await sync();
     await ctx.reload();
   },
@@ -665,6 +756,7 @@ export const adminActions = {
 
 /** form submit handlers keyed by form id: (form, values, ctx). `values` = Object.fromEntries(new FormData(form)). */
 export const adminForms = {
+  ...connectForms,
   'workspace-form': async (form, values) => {
     const created = await api('/api/workspaces', 'POST', {name: values.name});
     await api('/api/workspaces/switch', 'POST', {id: created.id});
@@ -677,10 +769,18 @@ export const adminForms = {
     await ctx.reload();
   },
   'pairing-form': async (form, values, ctx) => {
-    const permissions = [...form.querySelectorAll('input[name="permissions"]:checked')].map(x => x.value);
+    const permissions = [...form.querySelectorAll('[data-permission][aria-checked="true"]')].map(x => x.dataset.permission);
     lastPairing = await api('/api/agents/pair', 'POST', {label: values.label, permissions});
     await ctx.reload();
     toast('Pairing code created. It is shown once.');
+  },
+  'cli-provider-form': async (form, values, ctx) => {
+    const draft = cliDraft({...values, model: chosenModel(values)});
+    if (!draft.ok) throw new Error(draft.error);
+    await api('/api/ai/providers', 'POST', draft.body);
+    form.reset();
+    toast('Subscription added. Check its sign-in below.');
+    await sync(); await ctx.reload();
   },
   'ai-provider-form': async (form, values, ctx) => {
     const parsed = parseHeaders(values.headers), problem = headerProblem(parsed.invalid);
@@ -719,14 +819,26 @@ export const adminForms = {
       if (problem) throw new Error(problem);
       body.headers = parsed.headers;
     }
+    // Prices travel only when the sheet showed the saved ones, so an empty box clears them and nothing else does.
+    if (values.pricesKnown) {
+      const typed = parsePrices(values.prices);
+      if (typed.invalid.length) throw new Error(`Write each price as model: input / output, for example gpt-4.1: 2 / 8. Could not read: ${typed.invalid.slice(0, 3).join('; ')}`);
+      body.prices = typed.prices;
+    }
     const p = await api(`/api/ai/providers/${values.id}`, 'PATCH', body);
     rememberListing(p);
     closeSheet();
     toast(modelsToast(p, 'updated'));
     await sync(); await ctx.reload();
   },
+  'ai-fallback-form': async (form, values, ctx) => {
+    const value = String(values.fallback || ''), at = value.indexOf('|');
+    await api('/api/ai', 'PATCH', {fallback: value ? {providerId: value.slice(0, at), model: value.slice(at + 1)} : null});
+    toast(value ? 'Fallback model saved.' : 'No fallback model.');
+    await sync(); await ctx.reload();
+  },
   'ai-default-form': async (form, values, ctx) => {
-    await api('/api/ai', 'PATCH', {providerId: values.providerId, model: values.model || ''});
+    await api('/api/ai', 'PATCH', {providerId: values.providerId, model: chosenModel(values), effort: values.effort || ''});
     toast('Default model saved.');
     await sync(); await ctx.reload();
   },
@@ -742,17 +854,9 @@ export const adminForms = {
     toast(`Stored credential "${res.name}".`);
     await ctx.reload();
   },
-  'notif-prefs-form': async (form, values, ctx) => {
-    const checked = name => form.querySelector(`[name="${name}"]`)?.checked;
-    await api('/api/notification-prefs', 'PATCH', {
-      inApp: checked('inApp'),
-      webhook: checked('webhook'),
-      webhookCredentialId: values.webhookCredentialId || null,
-      email: checked('email'),
-      emailAddress: values.emailAddress || '',
-    });
-    toast('Notification preferences saved.');
-    await ctx.reload();
+  'notif-email-form': async (form, values) => {
+    await api('/api/notification-prefs', 'PATCH', {emailAddress: (values.emailAddress || '').trim()});
+    toast('Email address saved.');
   },
 };
 
@@ -776,19 +880,11 @@ export const adminChanges = {
   // Azure is the only protocol that needs the query-string version, so the field
   // appears and disappears with the selection, without a server round trip.
   'ai-protocol': control => syncApiVersionField(control.form, control.value),
-  'ai-default-provider-pick': control => {
-    const list = control.form?.querySelector('#ai-models');
-    if (list) list.innerHTML = providerModelOptions({id: control.value});
-  },
-  'set-role': async (control, ctx) => {
-    try {
-      await api(`/api/users/${control.dataset.id}`, 'PATCH', {role: control.value});
-    } catch (error) {
-      // Put the select back to the server's value before the host reports the error.
-      await ctx.reload();
-      throw error;
-    }
-    toast('Role updated.');
-    await ctx.reload();
+  'model-pick': control => showOtherBox(control),
+  // A subscription's model names follow the engine picked above them.
+  'cli-engine': control => refillModelSelect(control.form?.elements.namedItem('model'), modelChoices({provider: {kind: LOCAL_CLI_KIND, engine: control.value}, defaultLabel: CLI_DEFAULT})),
+  'notif-webhook-pick': async control => {
+    await api('/api/notification-prefs', 'PATCH', {webhookCredentialId: control.value});
+    toast('Webhook address changed.');
   },
 };

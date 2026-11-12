@@ -116,12 +116,15 @@ test('a bot pinned to a deleted provider uses the workspace default', async () =
     const gone = await ai.addProvider(store, 'default', {label: 'Old', baseUrl: 'https://old.example/v1', apiKey: 'old-key'});
     const kept = await ai.addProvider(store, 'default', {label: 'Kept', baseUrl: 'https://kept.example/v1', apiKey: 'kept-key'});
     await ai.setDefaults(store, {providerId: kept.id, model: 'kept-model'});
-    await ai.setBotModel(store, 'writer', {providerId: gone.id, model: 'old-model'});
+    await ai.setBotModel(store, 'writer', {providerId: gone.id, model: 'old-model', effort: 'high'});
     await ai.deleteProvider(store, 'default', gone.id);
     const cfg = ai.resolveConfig(store, 'writer');
     assert.equal(cfg.apiKey, 'kept-key');
     assert.equal(cfg.baseUrl, 'https://kept.example/v1');
-    assert.equal(cfg.model, 'old-model');
+    // The old model id belonged to the provider that is gone: another provider would answer 404.
+    assert.equal(cfg.model, 'kept-model');
+    assert.equal(cfg.effort, 'high', 'how hard it thinks is the bot\'s own and stays');
+    assert.deepEqual(store.read().ai.bots.writer, {providerId: null, model: null, effort: 'high'});
   });
 });
 
@@ -154,7 +157,7 @@ test('a key hidden in a provider URL is refused and never returned', async () =>
     assert.equal(listed.providers[0].baseUrl, 'https://evil.example/v1');
     assert.equal('credentialId' in listed.providers[0], false);
     const router = createRouter();
-    workflowRoutes(router, {auth: {listWorkspaces: () => [], roleOf: () => 'owner'}, processCandidate: async () => {}} );
+    workflowRoutes(router, {auth: {listWorkspaces: () => [], roleOf: () => 'owner'}} );
     const body = await router.find('GET', '/api/state').route.handler({
       store, actor: {email: 'a@b.c', role: 'owner', userId: 'u1', workspaceId: 'default'},
     });
@@ -239,6 +242,53 @@ test('rotating a key replaces the vault secret in place and drops the stale cata
     assert.equal(credentials.revealValue(store, credentialId).includes('old-key'), false, 'the old key no longer decrypts');
     assert.deepEqual(updated.models, [], 'the stale catalogue is cleared until the route re-reads it');
     assert.equal(ai.resolveConfig(store, null).apiKey, 'new-key');
+  });
+});
+
+test('moving a provider to another host needs a fresh key and never carries the old key or headers there', async () => {
+  await withStore(async store => {
+    const p = await ai.addProvider(store, 'default', {label: 'Gateway', baseUrl: 'https://gw.example/v1', apiKey: 'gw-key', headers: {'X-Lane': '1'}});
+    const saved = () => store.read().ai.providers.find(x => x.id === p.id);
+    // A new path on the same origin is not a move: the key stays.
+    await ai.updateProvider(store, 'default', p.id, {baseUrl: 'https://gw.example/v2'});
+    assert.equal(ai.providerConfig(store, saved()).apiKey, 'gw-key');
+    // A new host without a new key is refused, and nothing changes.
+    await assert.rejects(() => ai.updateProvider(store, 'default', p.id, {baseUrl: 'https://elsewhere.example/v1'}), e => e.status === 400 && /key/i.test(e.message));
+    await assert.rejects(() => ai.updateProvider(store, 'default', p.id, {baseUrl: 'http://gw.example/v2'}), e => e.status === 400, 'a scheme change is a new origin too');
+    assert.equal(saved().baseUrl, 'https://gw.example/v2');
+    assert.equal(ai.providerConfig(store, saved()).apiKey, 'gw-key');
+    // With a new key the move lands, and the old headers stay behind.
+    const headerId = saved().headersCredentialId;
+    const moved = await ai.updateProvider(store, 'default', p.id, {baseUrl: 'https://elsewhere.example/v1', apiKey: 'new-host-key'});
+    assert.equal(moved.baseUrl, 'https://elsewhere.example/v1');
+    assert.equal(ai.providerConfig(store, saved()).apiKey, 'new-host-key');
+    assert.deepEqual(moved.hasHeaders, [], 'headers meant for the old host are not sent to the new one');
+    assert.equal(saved().headersCredentialId, null);
+    assert.throws(() => credentials.revealValue(store, headerId), e => e.status === 404);
+    // Headers sent with the move are the new host's, and are kept.
+    const back = await ai.updateProvider(store, 'default', p.id, {baseUrl: 'https://gw.example/v1', apiKey: 'gw-key-2', headers: {'X-New': '1'}});
+    assert.deepEqual(back.hasHeaders, ['X-New']);
+  });
+});
+
+test('a provider may point at this machine but not at a private network or a metadata address', async () => {
+  await withStore(async store => {
+    const before = process.env.AGENT_ALLOW_PRIVATE;
+    delete process.env.AGENT_ALLOW_PRIVATE;
+    try {
+      for (const baseUrl of ['http://169.254.169.254/v1', 'http://10.0.0.5:11434/v1', 'http://192.168.1.20/v1', 'http://[::ffff:a9fe:a9fe]/v1', 'http://[fd00::1]/v1', 'http://0.0.0.0:1234/v1']) {
+        await assert.rejects(() => ai.addProvider(store, 'default', {label: 'Inner', baseUrl, apiKey: 'k'}), e => e.status === 400 && /private|local network/i.test(e.message), baseUrl);
+      }
+      assert.equal(credentials.listCredentials(store, 'default').length, 0, 'a refused address stores no key');
+      // Loopback is a local model server (Ollama, LM Studio): allowed.
+      const local = await ai.addProvider(store, 'default', {label: 'Ollama', baseUrl: 'http://127.0.0.1:9/v1', apiKey: 'any'});
+      await assert.rejects(() => ai.updateProvider(store, 'default', local.id, {baseUrl: 'http://10.1.2.3/v1', apiKey: 'k2'}), e => e.status === 400);
+      // The operator's own switch, the one the device guard uses, lets a LAN server in.
+      process.env.AGENT_ALLOW_PRIVATE = '1';
+      await ai.addProvider(store, 'default', {label: 'LAN', baseUrl: 'http://192.168.1.20:11434/v1', apiKey: 'k'});
+    } finally {
+      if (before === undefined) delete process.env.AGENT_ALLOW_PRIVATE; else process.env.AGENT_ALLOW_PRIVATE = before;
+    }
   });
 });
 

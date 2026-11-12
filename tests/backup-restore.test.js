@@ -108,7 +108,7 @@ test('a backup whose JSON column cannot be parsed is refused before anything is 
     await store.update(s => {
       wf.migrate(s);
       s.events.unshift({id: 'e-kept', type: 'task', message: 'Kept', meta: {note: 'fine'}, createdAt: new Date().toISOString()});
-      s.candidates.unshift({id: 'c-kept', url: 'https://x.com/a/status/1', author: '@a', text: 'Original post', status: 'new', createdAt: new Date().toISOString()});
+      s.runs.unshift({id: 'r-kept', botId: 'atlas', botName: 'Atlas', input: 'in', output: 'Original run', at: new Date().toISOString()});
     });
     const document = JSON.parse(JSON.stringify(backup.exportBackup(store)));
     // `validateBackup` parsed a fixed list of JSON columns; `events.meta` was not
@@ -126,7 +126,7 @@ test('a backup whose JSON column cannot be parsed is refused before anything is 
     // Something of its own already in the target, so "the document survived" is
     // observable: a committed-then-thrown import would have written the backup
     // rows and, after the cache rebuild failed, left the target's document empty.
-    await restored.update(s => s.candidates.unshift({id: 'c-target', url: 'https://x.com/b/status/2', author: '@b', text: 'Target post', status: 'new', createdAt: new Date().toISOString()}));
+    await restored.update(s => s.runs.unshift({id: 'r-target', botId: 'atlas', botName: 'Atlas', input: 'in', output: 'Target run', at: new Date().toISOString()}));
     await assert.rejects(
       async () => backup.importBackup(restored, document, {force: true, primaryWorkspace: true}),
       error => /events.*meta|JSON/i.test(String(error.message)));
@@ -134,11 +134,33 @@ test('a backup whose JSON column cannot be parsed is refused before anything is 
     // Nothing was written: the live document still holds the row the broken backup
     // would have replaced it with.
     await restored.update(s => s);
-    assert.ok(restored.read().candidates.some(c => c.id === 'c-target'), 'a refused import must not leave an empty document behind');
-    assert.ok(!restored.read().candidates.some(c => c.id === 'c-kept'), 'and must not have written the backup either');
-    assert.ok(store.read().candidates.some(c => c.id === 'c-kept'), 'the source installation is untouched');
+    assert.ok(restored.read().runs.some(r => r.id === 'r-target'), 'a refused import must not leave an empty document behind');
+    assert.ok(!restored.read().runs.some(r => r.id === 'r-kept'), 'and must not have written the backup either');
+    assert.ok(store.read().runs.some(r => r.id === 'r-kept'), 'the source installation is untouched');
     await store.close?.(); await restored.close?.();
   } finally {
     await fs.rm(dir, {recursive: true, force: true});
   }
+});
+
+test('a backup from before X was removed still restores', async () => {
+  const dir = await temp();
+  try {
+    const store = await new SqliteStore(path.join(dir, 'state.db'), path.join(dir, 'state.json')).init();
+    store.run('INSERT INTO workspaces (id,name,created_at) VALUES (?,?,?)', DEFAULT_WORKSPACE, 'Main', new Date().toISOString());
+    const document = JSON.parse(JSON.stringify(backup.exportBackup(store)));
+    // An older file lists the X tables, with rows, and settings with X columns.
+    document.tables.candidates = [{id: 'c1', url: 'https://x.com/a/status/1', author: 'A', topic: '', text: 'A captured post', status: 'new', score: null, demo: 0, created_at: '2026-01-01T00:00:00.000Z', doc: null}];
+    document.tables.drafts = [{id: 'd1', candidate_id: 'c1', text: 'Draft', status: 'pending', created_at: '2026-01-01T00:00:00.000Z', doc: null}];
+    document.tables.evidence = [{id: 'e1', draft_id: 'd1', claim: 'claim', link: 'https://example.com', created_at: '2026-01-01T00:00:00.000Z'}];
+    document.tables.settings = [{id: 1, topics: '["AI"]', style: 's', opinions: '', min_delay: 2, max_delay: 10, retention: null}];
+    document.checksum = (await import('node:crypto')).createHash('sha256').update(JSON.stringify(document.tables)).digest('hex');
+    assert.ok(backup.validateBackup(document));
+    const restored = await new SqliteStore(path.join(dir, 'restored.db'), path.join(dir, 'restored.json')).init();
+    backup.importBackup(restored, document, {force: true, primaryWorkspace: true});
+    assert.deepEqual(restored.read().groups.map(g => g.id), store.read().groups.map(g => g.id), 'the other tables come back');
+    assert.equal('candidates' in restored.read(), false, 'the X rows are ignored');
+    await store.close();
+    await restored.close();
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
 });

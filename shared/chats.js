@@ -11,12 +11,14 @@ import {cleanText} from './core.js';
 import {fail} from './errors.js';
 import {summonableGuests, BUSY_STATUSES} from './coordination.js';
 import {denyBrowserRequest} from './bot-browser.js';
+import {orphanAsks} from './asks.js';
+import {attachmentRefs} from './attachments.js';
 
 export const MAX_CHAT_MESSAGES = 300;
 const MAX_TEXT = 8000;
 const ROLES = ['user', 'bot', 'system'];
 /** Optional short fields a message may carry; anything else is dropped. */
-const LABELS = ['senderId', 'senderName', 'toBotId', 'runId', 'mode', 'kind'];
+const LABELS = ['senderId', 'senderName', 'toBotId', 'runId', 'mode', 'kind', 'botId', 'askId', 'switchTo', 'connectorId', 'activityId', 'undoUntil'];
 
 const chatKeys = state => new Set((state.groups || []).flatMap(g => [`team-${g.id}`, ...(g.bots || []).map(b => b.id)]));
 const groupOf = (state, key) => (state.groups || []).find(g => `team-${g.id}` === key || (g.bots || []).some(b => b.id === key));
@@ -36,6 +38,16 @@ const groupOf = (state, key) => (state.groups || []).find(g => `team-${g.id}` ==
  * Only the server, writing a run it executed itself, is `trusted`. */
 function untrusted(state, key, message) {
   delete message.mode; delete message.senderId; delete message.senderName; delete message.toBotId;
+  // An out-of-job refusal carries the owner's request for its buttons; only the server writes one.
+  delete message.request; delete message.botId;
+  // An ask card is written by the server for an ask it created; a browser cannot forge one.
+  delete message.askId;
+  // A model-limit card offers a switch the server worked out; a browser cannot offer one.
+  delete message.switchTo;
+  // So is a setup card: a browser cannot put an Apply button in a chat.
+  delete message.setup;
+  // A connector line may carry an Undo for a held send; only the server writes one.
+  delete message.activityId; delete message.undoUntil;
   if (message.role !== 'user') message.origin = 'browser';
   return message;
 }
@@ -60,10 +72,22 @@ function claimedSender(state, key, raw, message) {
 function entry(raw, makeId, now) {
   if (!raw || typeof raw !== 'object') fail('A message must be an object.');
   if (!ROLES.includes(raw.role)) fail('A message needs a role of user, bot or system.');
-  const text = cleanText(raw.text, MAX_TEXT);
+  // Files ride on the owner's own lines only (shared/attachments.js); a message of files alone is named by them.
+  const files = raw.role === 'user' ? attachmentRefs(raw.attachments) : [];
+  const text = cleanText(raw.text, MAX_TEXT) || files.map(f => f.name).join(', ');
   if (!text) fail('A message needs text.');
   const out = {id: cleanText(raw.id, 64) || makeId(), role: raw.role, text, at: Number.isFinite(Date.parse(raw.at)) ? new Date(raw.at).toISOString() : now};
   for (const key of LABELS) { const value = cleanText(raw[key], 120); if (value) out[key] = value; }
+  if (files.length) out.attachments = files;
+  const request = cleanText(raw.request, 4000);
+  if (request) out.request = request;
+  // A setup card's change, as JSON (shared/setup.js reads it back and refuses anything malformed).
+  const setup = typeof raw.setup === 'string' ? raw.setup.slice(0, 4000) : '';
+  if (setup) out.setup = setup;
+  // A bot's working step (it went to fetch pages or call apps): kept for the record, left out of the chat.
+  if (raw.step === true && raw.role === 'bot') out.step = true;
+  // The owner paused every bot by hand (not the runaway guard): its card offers Resume.
+  if (raw.manual === true && raw.role === 'system' && out.kind === 'guard') out.manual = true;
   return out;
 }
 
@@ -141,6 +165,7 @@ export function releaseChatWork(state, key) {
     run.status = 'cancelled';
     run.error = 'Chat cleared.';
     run.updatedAt = now;
+    orphanAsks(state, ask => ask.runId === run.id, now);
   }
 }
 

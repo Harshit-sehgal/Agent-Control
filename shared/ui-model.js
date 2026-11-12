@@ -1,104 +1,41 @@
 /** View models for the chat UI. Pure functions from the stored snapshot to what
- * a pane shows: the chat list, a thread's timeline, the "needs you" count and
- * the hash route. No DOM and no globals, so the product rules here are unit
+ * a pane shows: the chat list, a thread's timeline and the "needs you" count.
+ * (The hash route lives in ui-company.js.) No DOM and no globals, so the product rules here are unit
  * tested directly (tests/ui-model.test.js). */
-import {fullDate} from './ui-kit.js';
 import {botSettings} from './bot-settings.js';
 import {STOPPABLE_STATUSES} from './run-state.js';
+import {primaryOf} from './company.js';
+import {plain} from './ui-kit.js';
 
-export const ACTIVE_DRAFTS = ['pending', 'scheduled', 'ready'];
-const X_GROUP = 'x-engage';
 const teamKey = groupId => `team-${groupId}`;
 const time = value => { const t = Date.parse(value || ''); return Number.isFinite(t) ? t : 0; };
-
-/** X's standard post limit, in characters. This is a warning, never a rule: a
- * premium account posts far longer, the number is per-account, and the final
- * click is the human's either way. */
-export const POST_LIMIT = 280;
-/** How long a draft is, counted the way a reader counts it (one emoji is one
- * character, not two halves). A link is not shortened here, so a post with a URL
- * may fit X even when this says it is over. */
-export function draftLength(text) {
-  const count = [...String(text ?? '')].length;
-  return {count, limit: POST_LIMIT, over: count > POST_LIMIT, left: Math.max(0, POST_LIMIT - count)};
-}
-/** The same text, cut into posts a thread can carry: whole words where it can,
- * mid-word only for a single word longer than the limit (a URL, a hash). Nothing
- * is dropped, so the parts joined with a space are the draft that was approved. */
-export function threadParts(text, limit = POST_LIMIT, reserved = 0) {
-  const source = String(text ?? '').trim();
-  if (!source) return [];
-  const budget = Math.max(1, limit - reserved);
-  const words = source.split(/\s+/), parts = [];
-  let part = '';
-  for (const word of words) {
-    if (!part) { part = word; }
-    else if ([...`${part} ${word}`].length <= budget) { part = `${part} ${word}`; }
-    else { parts.push(part); part = word; }
-    // A word longer than a post has to be broken somewhere; half a link is at
-    // least readable, and refusing to split would leave an unpostable draft.
-    while ([...part].length > budget) {
-      const chars = [...part];
-      parts.push(chars.slice(0, budget).join(''));
-      part = chars.slice(budget).join('');
-    }
-  }
-  if (part) parts.push(part);
-  return parts;
-}
-/** The posts a thread actually becomes: each part numbered, and the numbering
- * counted against the limit, because that is what X counts. Six characters of
- * reserve covers "99/99 " - more parts than a draft can hold. */
-export function threadPosts(text, limit = POST_LIMIT) {
-  const parts = threadParts(text, limit, 6);
-  return parts.map((part, i) => `${i + 1}/${parts.length} ${part}`);
-}
-/** The one line the editor shows beside the text, and the same line a card
- * carries when it is not being edited. A draft that is over the limit says how
- * many posts it needs, because "post it yourself" is not advice for 900
- * characters. */
-export function lengthLabel(text) {
-  const {count, over} = draftLength(text);
-  if (!over) return `${count} of ${POST_LIMIT} · ${POST_LIMIT - count} left`;
-  const posts = threadPosts(text).length;
-  return `${count} characters · ${count - POST_LIMIT} over X's ${POST_LIMIT} · ${posts} posts if threaded`;
-}
-
-/** Where a draft is in the human-approval lifecycle, and the one line that says so. */
-export function draftStage(draft) {
-  switch (draft.status) {
-    case 'pending': return {tone: 'wait', line: 'Waiting on you. Nothing posts by itself.'};
-    case 'scheduled': return {tone: 'ok', line: `Approved. Ready ${draft.dueAt ? fullDate(draft.dueAt) : 'soon'}.`};
-    case 'ready': return {tone: 'ok', line: 'Ready. Post it on X yourself.'};
-    case 'posted': return {tone: 'done', line: 'Posted by you.'};
-    case 'rejected': return {tone: 'off', line: 'Skipped.'};
-    default: return {tone: 'off', line: String(draft.status || 'Draft')};
-  }
-}
 
 /** A run with no chatKey is the group chat. Otherwise it is the conversation it started in. */
 export function runBelongsToChat(run, chatKey) {
   return run?.chatKey ? run.chatKey === chatKey : chatKey === teamKey(run?.groupId);
 }
 
-/** How many things in a group are blocked on the human: drafts to decide,
- * drafts ready to post, and runs paused at a checkpoint. Plans, page
+/** How many things in a group are blocked on the human: runs paused at a
+ * checkpoint. Plans, page
  * requests and 1:1 checkpoints are per chat, so the chat list adds those on
  * the row that holds them. */
 export function needsYou(state, group) {
   if (!state || !group) return 0;
-  const drafts = group.id === X_GROUP ? (state.drafts || []).filter(d => d.status === 'pending' || d.status === 'ready').length : 0;
-  const paused = (state.groupRuns || []).filter(r => r.groupId === group.id && r.status === 'awaiting_checkpoint').length;
-  return drafts + paused;
+  return (state.groupRuns || []).filter(r => r.groupId === group.id && r.status === 'awaiting_checkpoint').length;
 }
 
-/** Pending browser requests in one chat. Dispatched and finished ones are the device's, not the person's. */
+/** Pending browser requests in one chat that no ask covers (one made before asks existed). Dispatched and
+ * finished ones are the device's, not the person's; a request with an ask is counted as that ask. */
 export function pendingBrowser(state, chatKey) {
-  return (state?.browserRequests || []).filter(r => r.status === 'pending' && r.chatKey === chatKey).length;
+  return (state?.browserRequests || []).filter(r => r.status === 'pending' && !r.askId && r.chatKey === chatKey).length;
 }
 
-export const FEED_WAIT = 'Waiting on you to approve a read of your X home feed. Nothing else runs until you do.';
-export const FEED_OPEN = 'Opening your X home feed. The other bots start when that page comes back.';
+/** Asks waiting on the owner in one chat: the ones in it, and, in the primary's chat, every other one too
+ * (its "Needs you" list holds a copy of each). */
+export function pendingAsksIn(state, chatKey) {
+  const pending = (state?.asks || []).filter(a => a?.status === 'pending');
+  return pending.filter(a => a.chatKey === chatKey || (primaryOf(state)?.id === chatKey)).length;
+}
 
 /** Who a Retry should talk to, and which conversation it reports into.
  * A tracked run must name the primary bot again, or the retry becomes the whole pipeline. */
@@ -108,17 +45,8 @@ export function retryTarget(group, run) {
   return {direct, chat: run?.chatKey || ''};
 }
 
-/** What an open tab should do when a run is sitting on a home-feed read.
- * `follow` keeps watching. `wait` stops on the Approve card.
- * `lookAgain` is one more look: Start can return before the read is sent. */
-export function feedPauseAction(request, {graceUsed = false} = {}) {
-  if (request && request.status !== 'pending') return {action: 'follow', text: request.status === 'dispatched' ? FEED_OPEN : ''};
-  if (!graceUsed) return {action: 'lookAgain', text: ''};
-  return {action: 'wait', text: FEED_WAIT};
-}
-
 // System lines with a kind of their own paint a card, not a run note.
-const RUN_LESS_KINDS = new Set(['browser', 'subagent', 'peer', 'bot-created']);
+const RUN_LESS_KINDS = new Set(['browser', 'subagent', 'peer', 'bot-created', 'limit', 'guard', 'model-limit']);
 
 /** A system line that may carry Start, Retry or Approve. A browser card or a
  * sub-agent line has its own presentation and returns before those, so it must
@@ -150,15 +78,13 @@ export function runButtons({status, live = false} = {}) {
   };
 }
 
-/** Buttons one system line may show at once. They stack. A missing feed
- * permission is also a failed run, so Grant must not hide Retry. Plans and
+/** Buttons one system line may show at once. They stack. Plans and
  * checkpoints also show on the static demo; Stop and Retry act on the newest
  * note of the newest run, and Retry needs the Node build. */
-export function threadLineActions({kind, senderId, status, live = false, note = false, latest = false} = {}) {
+export function threadLineActions({status, live = false, note = false, latest = false} = {}) {
   const newest = Boolean(note && live && latest);
   const buttons = runButtons({status, live: newest});
   return {
-    grant: Boolean(kind === 'feed-permission' && senderId),
     // A plan and a checkpoint are answered on any build: the run stopped for a
     // person, and the demo pauses too.
     plan: Boolean(note && buttons.plan),
@@ -186,41 +112,31 @@ function mergedRuns(state, localRuns) {
   return runs;
 }
 
-/** A home-feed read already sent to the device, while its run is still waiting.
- * The person can decline it. Until they do, that group cannot start another run. */
-export function stuckFeedReads(state, chatKey) {
-  const waiting = new Set((state?.groupRuns || []).filter(r => r.status === 'awaiting_feed' && r.chatKey === chatKey).map(r => r.id));
-  if (!waiting.size) return 0;
-  return (state?.browserRequests || []).filter(r => r.purpose === 'feed' && r.status === 'dispatched' && r.chatKey === chatKey && waiting.has(r.runId)).length;
-}
-
-/** Everything in one chat that is blocked on the human: drafts to decide (the
- * X-engage group chat only), runs paused at a plan or a checkpoint, browser
- * pages still waiting on approval, and a feed read the device has not answered.
+/** Everything in one chat that is blocked on the human: runs paused at a plan or a checkpoint, browser
+ * and pages still waiting on approval.
  * The chat list, the chat header and the info panel all read this one answer, so
  * the three cannot disagree about what needs a person.
  *
  * `runs` lets a caller pass the runs it merged against its own local copy (the
  * Pages demo keeps a run in localStorage); by default the state's own list. */
 export function waitingOnYou(state, chatKey, runs = state?.groupRuns || []) {
-  const view = {...(state || {}), groupRuns: runs};
   return {
-    drafts: chatKey === teamKey(X_GROUP) ? (view.drafts || []).filter(d => d.status === 'pending' || d.status === 'ready').length : 0,
     plans: runs.filter(r => r.status === 'awaiting_plan' && runBelongsToChat(r, chatKey)).length,
     pauses: runs.filter(r => r.status === 'awaiting_checkpoint' && runBelongsToChat(r, chatKey)).length,
-    pages: pendingBrowser(view, chatKey),
-    feeds: stuckFeedReads(view, chatKey),
+    pages: pendingBrowser(state, chatKey),
+    asks: pendingAsksIn(state, chatKey),
   };
 }
 
 /** How many things one chat's `waitingOnYou` answer adds up to: the badge the
  * chat list and the "needs you" filter count. */
-export const totalWaitingOnYou = ({drafts = 0, plans = 0, pauses = 0, pages = 0, feeds = 0} = {}) => drafts + plans + pauses + pages + feeds;
+export const totalWaitingOnYou = ({plans = 0, pauses = 0, pages = 0, asks = 0} = {}) => plans + pauses + pages + asks;
 
 function preview(history, {isTeam, fallback}) {
-  const last = history[history.length - 1];
+  // A bot's working step (it went to fetch pages) is not what the chat says; the answer after it is.
+  const last = history.filter(m => !m.step).at(-1);
   if (!last) return {text: fallback, sender: ''};
-  const text = String(last.text || '').replace(/\s+/g, ' ').slice(0, 120);
+  const text = plain(last.text).slice(0, 120);
   if (last.role === 'user') return {text, sender: 'You'};
   if (last.role === 'bot' && isTeam) return {text, sender: last.senderName || ''};
   return {text, sender: ''};
@@ -240,7 +156,7 @@ export function chatRows({state, messages = {}, profiles = {}, typing = new Set(
     rows.push({
       id: teamId, isTeam: true, name: group.name, members, needs, pinned: false, typing: typing.has(teamId),
       at: teamHistory[teamHistory.length - 1]?.at || '',
-      ...(team.pages ? {text: team.pages === 1 ? 'Wants to open a page' : `${team.pages} pages waiting on you`, sender: ''} : team.feeds ? {text: 'A feed read is still open', sender: ''} : preview(teamHistory, {isTeam: true, fallback: needs ? `${needs} waiting on you` : (group.description || 'Message the whole team')})),
+      ...(team.pages ? {text: team.pages === 1 ? 'Wants to open a page' : `${team.pages} pages waiting on you`, sender: ''} : preview(teamHistory, {isTeam: true, fallback: needs ? `${needs} waiting on you` : (group.description || 'Message the whole team')})),
     });
     for (const bot of group.bots) {
       const history = messages[bot.id] || [], mine = waitingOnYou(view, bot.id);
@@ -248,7 +164,7 @@ export function chatRows({state, messages = {}, profiles = {}, typing = new Set(
         id: bot.id, isTeam: false, name: bot.name, tint: tint(bot), needs: totalWaitingOnYou(mine), groupName: group.name,
         pinned: Boolean(profiles[bot.id]?.pinned), typing: typing.has(bot.id),
         at: history[history.length - 1]?.at || '',
-        ...(mine.pages ? {text: mine.pages === 1 ? 'Wants to open a page' : `${mine.pages} pages waiting on you`, sender: ''} : mine.feeds ? {text: 'A feed read is still open', sender: ''} : preview(history, {isTeam: false, fallback: bot.instructions || 'Say what you need'})),
+        ...(mine.pages ? {text: mine.pages === 1 ? 'Wants to open a page' : `${mine.pages} pages waiting on you`, sender: ''} : preview(history, {isTeam: false, fallback: bot.instructions || 'Say what you need'})),
       });
     }
   }
@@ -264,20 +180,11 @@ export function chatRows({state, messages = {}, profiles = {}, typing = new Set(
     .map(x => x.row);
 }
 
-const MAX_POSTS = 20;
-/** A thread is the saved messages plus, in the X group, the posts and drafts
- * themselves as messages, so a decision is answered where it was asked. */
+/** A thread is the saved messages, in time order. */
 export function timeline({conv, state, messages = {}}) {
   const items = (messages[conv.id] || []).map(message => ({kind: 'message', at: message.at, message}));
-  if (conv.isTeam && conv.group.id === X_GROUP) {
-    const drafts = state?.drafts || [];
-    for (const draft of drafts) items.push({kind: 'draft', at: draft.createdAt, draft});
-    const posts = [...(state?.candidates || [])].sort((a, b) => time(b.createdAt) - time(a.createdAt)).slice(0, MAX_POSTS);
-    for (const post of posts) items.push({kind: 'post', at: post.createdAt, post, drafted: drafts.some(d => d.candidateId === post.id)});
-  }
-  const rank = {post: 0, draft: 1, message: 2};
   const sorted = items.map((item, order) => ({item, order}))
-    .sort((a, b) => time(a.item.at) - time(b.item.at) || rank[a.item.kind] - rank[b.item.kind] || a.order - b.order)
+    .sort((a, b) => time(a.item.at) - time(b.item.at) || a.order - b.order)
     .map(x => x.item);
   const out = [];
   let day = null, lastSender = null;
@@ -299,91 +206,12 @@ export function tintOf(bot, index = 0, profiles = {}) {
   return profiles[bot?.id]?.avatarIndex ?? Math.max(0, index);
 }
 
-/** Names to offer while the last word being typed starts with '@'. `roster`
- * is [{id, name}]; a team chat also offers @everyone. */
-export function mentionSuggestions(roster, text, {team = false, limit = 6} = {}) {
-  const word = /(?:^|\s)@([^\s@]*)$/.exec(String(text ?? ''));
-  if (!word) return [];
-  const q = word[1].toLowerCase(), seen = new Set(), out = [];
-  const pool = [...(team ? [{id: 'everyone', name: 'everyone'}] : []), ...(roster || [])];
-  for (const bot of pool) {
-    const name = String(bot?.name || '').trim(), key = name.toLowerCase();
-    if (!name || seen.has(key)) continue;
-    if (!key.startsWith(q) && !String(bot.id || '').toLowerCase().startsWith(q)) continue;
-    seen.add(key); out.push({id: bot.id, name});
-    if (out.length >= limit) break;
-  }
-  return out;
-}
-/** Replace the '@word' being typed at the end of `text` with the full name. */
-export const completeMention = (text, name) => String(text ?? '').replace(/@[^\s@]*$/, `@${name} `);
-
-/** Scheduled bot prompts for one chat: the group chat (botId null) or a bot. */
-export function chatTasks(tasks, groupId, botId = null) {
-  return (tasks || []).filter(t => t?.kind === 'bot-task' && t.status !== 'cancelled'
-    && t.payload?.groupId === groupId && (t.payload?.botId ?? null) === (botId ?? null));
-}
-
-/** The pipeline editor's rows: the saved order first, then bots left out. */
-export function pipelineRows(group, pipeline = null) {
-  const bots = group?.bots || [], ids = bots.map(b => b.id);
-  const order = Array.isArray(pipeline) ? pipeline.filter(id => ids.includes(id)) : ids;
-  return [...order, ...ids.filter(id => !order.includes(id))].map(id => ({id, included: order.includes(id)}));
-}
-/** Move row `index` one place up (-1) or down (+1); out of range is a no-op. */
-export function moveRow(rows, index, delta) {
-  const next = [...rows], to = index + delta;
-  if (index < 0 || index >= next.length || to < 0 || to >= next.length) return next;
-  [next[index], next[to]] = [next[to], next[index]];
-  return next;
-}
-/** What to save: the included ids in order, or null when that is simply every
- * bot in roster order (so bots added later join the pipeline too). */
-export function pipelineValue(rows, group) {
-  const ids = (group?.bots || []).map(b => b.id), picked = rows.filter(r => r.included).map(r => r.id);
-  return picked.length === ids.length && picked.every((id, i) => id === ids[i]) ? null : picked;
-}
-
-const GROUP_SECTIONS = ['home', 'drafts', 'posts', 'reminders', 'runs', 'voice', 'group-settings', 'tasks'];
-// `memory` is here because the bot panel links to it ("Memory and rules"):
-// without it the route parser fell back to home, so the row and the URL
-// disagreed and a reload dropped the person out of the page they were on.
-const BOT_SECTIONS = ['home', 'edit', 'memory', 'tasks'];
-const LEGACY_TABS = {overview: 'home', discovery: 'posts', approvals: 'drafts', schedules: 'reminders', activity: 'runs', settings: 'voice'};
-const PAGES = ['you', 'about', 'notifications', 'workspaces', 'ai', 'team', 'agents', 'data'];
-const SERVER_PAGES = ['notifications', 'workspaces'];
-const ADMIN_PAGES = ['ai', 'team', 'agents', 'data'];
-
-/** Hash → route. Unknown or forbidden targets fall back to the chat list, and
- * the pre-chat routes (#inbox, #group/<id>/<tab>) keep working as redirects. */
-export function parseRoute(hash, state, {server = false, admin = false, write = true} = {}) {
-  const none = {chat: null, page: null, info: null};
-  const parts = String(hash || '').replace(/^#/, '').split('/').map(p => { try { return decodeURIComponent(p); } catch { return p; } });
-  const groups = state?.groups || [];
-  const chatExists = id => groups.some(g => teamKey(g.id) === id || g.bots.some(b => b.id === id));
-  const section = (id, name) => (id.startsWith('team-') ? GROUP_SECTIONS : BOT_SECTIONS).includes(name) ? name : 'home';
-  const [head, a, b, c] = parts;
-  if (head === 'chat' && a && chatExists(a)) {
-    let info = b === 'info' ? section(a, c || 'home') : null;
-    if (info === 'edit' && !write) info = 'home';
-    return {...none, chat: a, info};
-  }
-  // Legacy #group/<id>/<tab> redirects only apply to the X-engage workspace:
-  // its tab names map to its info sections. Any other group falls back to its
-  // own home, so its panel never shows the X group's drafts or posts.
-  if (head === 'group' && groups.some(g => g.id === a)) return {...none, chat: teamKey(a), info: (a === X_GROUP && Object.hasOwn(LEGACY_TABS, b)) ? LEGACY_TABS[b] : 'home'};
-  if (head === 'inbox' && chatExists(teamKey(X_GROUP))) return {...none, chat: teamKey(X_GROUP), info: 'drafts'};
-  const page = head === 'you' ? (a || 'you') : head;
-  if (PAGES.includes(page)) {
-    if (ADMIN_PAGES.includes(page) && !admin) return none;
-    if (SERVER_PAGES.includes(page) && !server) return none;
-    return {...none, page};
-  }
-  return none;
-}
-export function routeHash(route) {
-  if (route.page) return route.page === 'you' ? 'you' : `you/${route.page}`;
-  if (!route.chat) return 'chats';
-  const base = `chat/${encodeURIComponent(route.chat)}`;
-  return route.info ? `${base}/info${route.info === 'home' ? '' : `/${route.info}`}` : base;
+/** What a chat says when a message could not reach the server at all. */
+export const OFFLINE_TEXT = 'You seem to be offline, so this was not sent.';
+/** A send that never got an answer: the request timed out (shared/transport.js marks that) or the network refused
+ * it (fetch rejects with a TypeError). An answer the server gave, even an error, is not this. */
+export function isOfflineError(error) {
+  if (!error || Number.isFinite(error.status)) return false;
+  if (error.timeout === true || error.name === 'TimeoutError' || error.name === 'AbortError') return true;
+  return error.name === 'TypeError' && /fetch|network|load failed|connection/i.test(String(error.message || ''));
 }

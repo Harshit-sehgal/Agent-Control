@@ -9,7 +9,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {enqueueTask, failTask, attemptSpent, RETRY_WINDOW_MS, RETRY_STARTED} from '../shared/tasks.js';
-import {addSchedule} from '../shared/workflow.js';
 
 /** A non-recurring task mid-run, so `failTask`'s spent branch lands on `failed`
  * (no interval re-arm to confuse the comparison) and nothing else moves. */
@@ -59,8 +58,8 @@ test('past the window the count and a conflict both count as spent', () => {
 
 test('a recurring task that spent its budget re-arms instead of failing, and the rule still says spent', () => {
   const state = {tasks: [], events: [], groups: []};
-  const view = addSchedule(state, {label: 'Hourly sweep', kind: 'interval', intervalMinutes: 60});
-  const task = state.tasks.find(t => t.id === view.id);
+  state.groups = [{id: 'g', name: 'G', bots: []}];
+  const {task} = enqueueTask(state, {kind: 'bot-task', payload: {groupId: 'g', message: 'Hourly sweep', kind: 'interval', intervalMinutes: 60}});
   assert.equal(task.intervalMinutes, 60);
   task.status = 'running';
   task.attempts = task.maxAttempts;

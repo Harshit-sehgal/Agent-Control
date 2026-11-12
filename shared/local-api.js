@@ -4,23 +4,27 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {scoreCandidate, templateDraft, cleanText, initialState, markDue, activity, DEMO_SAMPLES} from './core.js';
-import {
-  migrate, seedDemo, updateSettings, addCandidate, beginProcessing,
-  finishProcessing, editDraft, findDraft, rewriteDraft, draftAction, addGroup,
-  addBot, updateBot, updateGroup, removeBot, removeGroup, addSchedule, removeSchedule, resetDemo,
-  removeCandidate,
-} from './workflow.js';
+import {briefingMessage} from './briefing.js';
+import {addTemplate, removeTemplate} from './templates.js';
+import {initialState, cleanText} from './core.js';
+import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js';
+import {RETENTION_DEFAULTS} from './retention.js';
 import {enqueueTask, retryTask, cancelTask} from './tasks.js';
-import {addEvidence, verifyEvidence, dropEvidence} from './evidence.js';
 import {addChatMessages, clearChat} from './chats.js';
-import {publicMemory, addRules, removeRule, forgetChat, forgetRulebook} from './memory.js';
-import {summonableGuests} from './coordination.js';
+import {publicMemory, rememberFromOwner, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js';
+import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js';
+import {createThread, titleFrom} from './threads.js';
+import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js';
 import {simulateGroup} from './group-simulator.js';
 import {BUSY_STATUSES} from './run-state.js';
 import {botSettings} from './bot-settings.js';
 import {denyBrowserRequest} from './bot-browser.js';
+import {answerAsk, expireAsks, orphanAsks, setGrant, setAskBasics, restorePermissions} from './asks.js';
+import {applyPreset} from './presets.js';
+import {setLimits} from './limits.js';
+import {activityPage} from './activity-log.js';
 import {withLocalLock} from './locks.js';
+import {base64Bytes, sniffType, cleanFileName, DEMO_MAX_FILE_BYTES, DEMO_MAX_STORED, MAX_FILE_BYTES} from './attachments.js';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
@@ -34,7 +38,7 @@ async function read() {
       // Always migrate: a stored version equal to SCHEMA_VERSION can still be
       // missing a field added later in the same version, and a legacy shape must
       // gain every collection the UI indexes into.
-      if (state && typeof state === 'object' && Array.isArray(state.candidates)) return migrate(state);
+      if (state && typeof state === 'object' && Array.isArray(state.groups)) return migrate(state);
     }
   } catch { throw new Error('Browser storage is unavailable. Enable local storage to use this demo.'); }
   return migrate(initialState());
@@ -43,18 +47,6 @@ function save(state) {
   try { localStorage.setItem(KEY, JSON.stringify(state)); }
   catch { throw new Error('Unable to save browser-local data. Check available storage and private browsing settings.'); }
 }
-const find = (items, key) => items.find(x => x.id === key) || (() => { throw new Error('Item not found.'); })();
-
-/** Advance the local clock so scheduled drafts and due tasks resolve.
- * This mirrors the Node `src/scheduler.js` (drafts) and `src/queue.js`
- * (reminder tasks) with the same `markDue`/`activity` primitives, so a
- * transition logged by the Node backend is logged identically here. */
-function processLocal(state, id) {
-  const ctx = beginProcessing(state, id);
-  const result = {text: templateDraft(ctx.candidate, ctx.settings), mode: 'template', note: 'Static template only; not real AI, research or verified fact-checking.'};
-  return finishProcessing(state, id, scoreCandidate(ctx.candidate, ctx.settings.topics), result);
-}
-
 /** A due scheduled bot task runs through the same offline engine as a chat, so
  * both store the run, its lines and its record in the same places. */
 async function runBotTask(state, t) {
@@ -68,13 +60,20 @@ async function runBotTask(state, t) {
   }
   // A busy group is a delay, not a skipped task: refuse before writing the
   // "Scheduled task" line, so a wait does not read as work that happened.
-  if (state.groupRuns.some(r => r.groupId === groupId && BUSY_STATUSES.includes(r.status))) {
+  if (chatIsBusy(state.groupRuns, group, chatKey)) {
     throw Object.assign(new Error('A group run is already active. Wait or retry later.'), {status: 409});
+  }
+  // A timer is bot-initiated work: counted against the runaway guard, and skipped while bots are paused.
+  if (noteBotWork(state, 'run').paused) {
+    addChatMessages(state, chatKey, [{role: 'system', text: `Scheduled task "${label}" skipped: bots are paused.`}], {trusted: true});
+    return;
   }
   addChatMessages(state, chatKey, [{role: 'system', text: `Scheduled task: ${message}`}], {trusted: true});
   try {
     // `started` skips the plan gate. Scheduling the task was the approval.
-    await localRun(state, groupId, {message, directBotId: botId, chatKey, started: true});
+    // The daily briefing is given the workspace's facts as they are now, as on the server.
+    const said = t.payload.brief === 'daily' ? briefingMessage(message, state) : message;
+    await localRun(state, groupId, {message: said, directBotId: botId, chatKey, started: true});
   } catch (error) {
     addChatMessages(state, chatKey, [{role: 'system', text: `Scheduled task "${label}" did not run: ${error.message}`}], {trusted: true});
     throw error;
@@ -95,7 +94,6 @@ function idFactory(preferred) {
 function runApi(state) {
   return async (url, method = 'POST', body = {}) => {
     let m;
-    if ((m = url.match(/^\/api\/candidates\/([a-z0-9-]+)\/process$/)) && method === 'POST') return processLocal(state, m[1]);
     if ((m = url.match(/^\/api\/groups\/([a-z0-9-]+)\/bots\/([a-z0-9-]+)$/)) && method === 'PATCH') return updateBot(state, m[1], m[2], body);
     throw new Error(`Not available to a browser-local run: ${method} ${url}`);
   };
@@ -108,7 +106,10 @@ function storeRunLines(state, run, entries) {
   const key = run.chatKey || `team-${run.groupId}`;
   const log = (state.groupMessages[run.groupId] ??= []);
   for (const entry of entries) {
-    const line = {id: entry.id || crypto.randomUUID(), runId: run.id, role: entry.role, senderId: entry.senderId, senderName: entry.senderName, toBotId: entry.toBotId, text: entry.text, at: entry.at || now()};
+    const line = {id: entry.id || crypto.randomUUID(), runId: run.id, role: entry.role, senderId: entry.senderId, senderName: entry.senderName, toBotId: entry.toBotId, text: entry.text, at: entry.at || now(),
+      // The cards a conversation draws (out of job, a hire, a limit, a setup change) carry their kind;
+      // a plain reply's `handoff` kind is only the run log's.
+      ...(entry.kind && entry.kind !== 'handoff' ? {kind: entry.kind} : {}), ...(entry.request ? {request: entry.request} : {}), ...(entry.botId ? {botId: entry.botId} : {}), ...(entry.mode ? {mode: entry.mode} : {}), ...(entry.setup ? {setup: entry.setup} : {}), ...(entry.askId ? {askId: entry.askId} : {})};
     if (line.role === 'bot') log.push({...line, kind: entry.kind});
     try { addChatMessages(state, key, [line], {trusted: true}); } catch { /* The conversation was removed mid-run. */ }
   }
@@ -126,7 +127,35 @@ function cancelRunsForChat(state, key, reason) {
   for (const run of state.groupRuns) {
     if (!BUSY_STATUSES.includes(run.status) || (run.chatKey || `team-${run.groupId}`) !== key) continue;
     run.status = 'cancelled'; run.completedAt = now(); run.checkpoint = null; run.error = reason;
+    orphanAsks(state, ask => ask.runId === run.id);
   }
+}
+
+/** A run parked on an ask whose answer has come (or lapsed). The offline engine cannot open a page or
+ * take a model turn, so the run ends here instead of resuming: a decline says what was declined, and an
+ * allow says the demo cannot do it. The answer and any grant are recorded either way, like the server's. */
+const DEMO_ALLOWED = {
+  send: 'Allowed. This demo has no mail account, so nothing was sent; in the full app it goes out now.',
+  post: 'Allowed. This demo has no browser, so nothing was posted; in the full app it is posted now.',
+  spend: 'Allowed. This demo cannot pay, so no money moved; in the full app the payment goes ahead now.',
+};
+function settleParkedRun(state, runId, ask) {
+  const run = state.groupRuns.find(r => r.id === runId);
+  if (!run || run.status !== 'awaiting_ask') return;
+  run.status = 'cancelled'; run.completedAt = now(); run.checkpoint = null; run.askIds = [];
+  storeRunLines(state, run, [{id: crypto.randomUUID(), role: 'system', text: ask.status === 'declined'
+    ? `The owner declined: ${ask.detail || ask.action}.`
+    : DEMO_ALLOWED[ask.action] || 'This offline demo cannot open pages, so the run stopped here.'}]);
+}
+
+/** One answer to an ask, the same rules and the same reply shape as the server's `POST /api/asks/:id`. */
+function answerAskLocal(state, askId, answer, until = null) {
+  const out = answerAsk(state, askId, answer, undefined, {until});
+  // A page the owner turned down is never opened.
+  const request = (state.browserRequests || []).find(r => r.id === out.ask.requestId);
+  if (answer === 'decline' && request?.status === 'pending') denyBrowserRequest(state, request.id);
+  if (out.resumeRunId) settleParkedRun(state, out.resumeRunId, out.ask);
+  return {ask: out.ask, resumed: Boolean(out.resumeRunId), ...(out.undo ? {undo: out.undo} : {})};
 }
 
 /** One offline coordination run, behind the routes the Node orchestrator serves.
@@ -137,7 +166,7 @@ function cancelRunsForChat(state, key, reason) {
  * `POST/GET /api/groups/:group/chat` and the `runs/:run/*` routes — the same
  * paths the server answers — so nothing above the transport asks which backend
  * it is talking to. */
-async function localRun(state, groupId, {message = '', directBotId = null, checkpoints = false, chatKey = null, runId = null, resume = false, started = false, approve = null} = {}) {
+async function localRun(state, groupId, {message = '', directBotId = null, checkpoints = false, chatKey = null, runId = null, resume = false, started = false, approve = null, anyway = false} = {}) {
   const group = state.groups.find(g => g.id === groupId);
   if (!group) throw Object.assign(new Error('Group not found.'), {status: 404});
   const prior = runId ? state.groupRuns.find(r => r.id === runId) : null;
@@ -148,25 +177,23 @@ async function localRun(state, groupId, {message = '', directBotId = null, check
     storeRunLines(state, prior, [{id: crypto.randomUUID(), role: 'system', text: 'Plan cancelled. Nothing ran.'}]);
     return {runId, status: 'cancelled'};
   }
-  if (resume && prior.status !== 'awaiting_checkpoint') throw Object.assign(new Error('Only a run paused at a checkpoint can be continued.'), {status: 409});
-  // One live run per group. Any other busy run blocks the start; a Start or
-  // Continue of a run that is itself busy is the way through, same as the server.
-  if (state.groupRuns.some(r => r.groupId === groupId && BUSY_STATUSES.includes(r.status) && r.id !== runId)) {
+  if (resume && prior.status !== 'awaiting_checkpoint' && prior.status !== 'awaiting_limit') throw Object.assign(new Error('Only a run paused at a checkpoint can be continued.'), {status: 409});
+  // A run parked by the runaway guard goes on once bots are resumed, not before.
+  if (resume && prior.status === 'awaiting_limit' && botsPaused(state)) throw Object.assign(new Error('Bots are paused. Resume them first.'), {status: 409});
+  // One live run per chat (per group, for every group but the company). Any other
+  // busy run blocks the start; a Start or Continue of a run that is itself busy
+  // is the way through, same as the server.
+  if (chatIsBusy(state.groupRuns.filter(r => r.id !== runId), group, chatKeyFor(group, {chatKey: chatKey || prior?.chatKey || null, directBotId}))) {
     throw Object.assign(new Error('A group run is already active. Wait or retry later.'), {status: 409});
   }
   const guests = summonableGuests(state.groups, groupId, {includeOff: true});
   const entries = [];
-  // The simulator reads `state.drafts` to pick a post that still needs a draft;
-  // it also pushes the draft it creates. Pass it a copy of the draft list so
-  // that push lands on the copy, while `runApi` still writes the real one —
-  // otherwise one Writer step files the same draft twice.
-  const scratch = {...state, drafts: [...(state.drafts || [])]};
   const run = await simulateGroup({
-    group, message: resume ? prior.input : message, directBotId, guests, state: scratch, api: runApi(state),
+    group, message: resume ? prior.input : message, directBotId, guests, state, api: runApi(state),
     makeId: idFactory(runId), emit: e => entries.push(e),
     chatKey: chatKey || prior?.chatKey || null,
     started: started || resume, resume: resume ? prior : null,
-    checkpoints,
+    checkpoints, anyway,
   });
   upsertRun(state, run);
   storeRunLines(state, run, entries);
@@ -176,23 +203,6 @@ async function localRun(state, groupId, {message = '', directBotId = null, check
 async function due(state) {
   const time = Date.now();
   let changed = false;
-  for (const d of state.drafts) {
-    if (markDue(d, time)) { changed = true; activity(state, 'ready', `Draft for ${d.author} is ready for manual posting.`, {draftId: d.id}); }
-  }
-  // Reminder tasks fire here exactly like the server's queue worker: a one-off
-  // completes, an interval re-arms for the next window.
-  for (const t of state.tasks) {
-    if (t.kind !== 'reminder' || t.status !== 'queued') continue;
-    if (!(Date.parse(t.runAt) <= time)) continue;
-    activity(state, 'reminder', t.payload.label, {taskId: t.id});
-    changed = true;
-    if (t.payload.kind === 'once') {
-      t.status = 'done';
-      t.completedAt = new Date(time).toISOString();
-    } else {
-      t.runAt = new Date(time + t.intervalMinutes * 60000).toISOString();
-    }
-  }
   for (const t of state.tasks) {
     if (t.kind !== 'bot-task' || t.status !== 'queued' || !(Date.parse(t.runAt) <= time)) continue;
     changed = true;
@@ -214,6 +224,19 @@ async function due(state) {
   }
   if (changed) save(state);
 }
+/** The demo's copy of an attached file: the same type check as the server, a
+ * smaller cap, and only the newest few kept, as data URLs in the snapshot. */
+function attachLocal(state, body) {
+  const bytes = base64Bytes(body?.data), name = cleanFileName(body?.name);
+  if (!bytes?.length) throw Object.assign(new Error('That file is empty.'), {status: 400});
+  if (bytes.length > DEMO_MAX_FILE_BYTES) throw Object.assign(new Error(`The demo keeps files up to 512 KB. The Node build takes up to ${MAX_FILE_BYTES / 1048576} MB.`), {status: 413});
+  const type = sniffType(bytes, name);
+  if (!type) throw Object.assign(new Error('Attach an image (PNG, JPEG, WebP or GIF) or a text file (.txt, .md, .csv, .json).'), {status: 415});
+  const ref = {id: crypto.randomUUID(), name, type, size: bytes.length};
+  state.attachments = Object.fromEntries([...Object.entries(state.attachments || {}), [ref.id, {...ref, url: `data:${type};base64,${String(body.data).replace(/^data:[^,]*,/, '')}`}]].slice(-DEMO_MAX_STORED));
+  return ref;
+}
+
 async function localApi(path, method = 'GET', body = {}) {
   return withLocalLock('state', () => localApiUnlocked(path, method, body));
 }
@@ -225,32 +248,56 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
   try {
     if (dueDepth === 1) await due(state);
   } finally { dueDepth--; }
-  if (path === '/api/state' && method === 'GET') return {...state, aiEnabled: false, serverTime: now()};
-
-  if (path === '/api/demo/seed' && method === 'POST') { const r = seedDemo(state, DEMO_SAMPLES); save(state); return r; }
-  if (path === '/api/settings' && method === 'PATCH') { const r = updateSettings(state, body); save(state); return r; }
-  if (path === '/api/candidates' && method === 'POST') { const r = addCandidate(state, body); save(state); return {...r.candidate, duplicate: r.duplicate}; }
+  // An ask from an unattended run lapses after 24 hours, as on the server; nothing else runs a timer here.
+  const lapsed = expireAsks(state);
+  if (lapsed.expired.length) {
+    for (const runId of lapsed.resumeRunIds) settleParkedRun(state, runId, lapsed.expired.find(a => a.runId === runId));
+    save(state);
+  }
+  // The log is paged through /api/activity, not carried in the snapshot (same as the server).
+  if (path === '/api/state' && method === 'GET') { const {activity: _log, ...snapshot} = state; return {...snapshot, aiEnabled: false, serverTime: now()}; }
+  if (path.split('?')[0] === '/api/activity' && method === 'GET') {
+    const q = new URLSearchParams(path.split('?')[1] || '');
+    const limit = q.has('limit') ? Number(q.get('limit')) : undefined;
+    if (q.has('limit') && !Number.isFinite(limit)) throw Object.assign(new Error('Limit must be a number.'), {status: 400});
+    return activityPage(state, {filter: q.get('filter') || undefined, before: q.get('before') || null, limit, botId: q.get('bot') || null});
+  }
 
   let m;
-  if ((m = path.match(/^\/api\/candidates\/([a-z0-9-]+)$/)) && method === 'DELETE') { const r = removeCandidate(state, m[1]); save(state); return r; }
-  if ((m = path.match(/^\/api\/candidates\/([a-z0-9-]+)\/process$/)) && method === 'POST') {
-    const draft = processLocal(state, m[1]);
-    save(state);
-    return draft;
+  // The demo has no browser to watch: the Computer view reads this and says so, the way it would say "no device" on a server.
+  const live = path.split('?')[0];
+  if (live === '/api/browser-live' && method === 'GET') return [];
+  if ((m = live.match(/^\/api\/browser-live\/([a-z0-9-]+)$/)) && method === 'GET') return {botId: m[1], agent: false, demo: true, seq: 0, changed: false, state: 'idle', url: null, title: null, site: null};
+  if (/^\/api\/browser-live\/[a-z0-9-]+\/(takeover|handback|input)$/.test(live) && method === 'POST') throw Object.assign(new Error('The demo has no browser to take over. Run the full app with the local agent to use one.'), {status: 409});
+
+  // The demo has no connectors, no model provider and no paired agent: Settings reads `demo` and says it needs the server.
+  if (live === '/api/connectors' && method === 'GET') return {connectors: [], google: null, demo: true};
+  if (live === '/api/ai' && method === 'GET') return {providers: [], defaultProviderId: null, defaultModel: null, bots: {}, demo: true};
+  if (live === '/api/agents' && method === 'GET') return {agents: [], actions: [], demo: true};
+
+  // A thread: a new chat run by the primary bot, started in one call like the server's.
+  if (path === '/api/threads' && method === 'POST') {
+    const message = cleanText(body.message, 4000);
+    if (!message) throw Object.assign(new Error('Say what the thread is about.'), {status: 400});
+    const thread = createThread(state, {title: cleanText(body.title, 80) || titleFrom(message)});
+    state.groups.push(thread);
+    addChatMessages(state, `team-${thread.id}`, [{role: 'user', text: message}], {trusted: true});
+    const run = await localRun(state, thread.id, {message});
+    save(state); return {thread, run};
   }
-  if ((m = path.match(/^\/api\/drafts\/([a-z0-9-]+)$/)) && method === 'PATCH') { const d = editDraft(state, m[1], body.text); save(state); return d; }
-  if ((m = path.match(/^\/api\/drafts\/([a-z0-9-]+)\/(approve|reject|ready|restore|posted|rewrite)$/)) && method === 'POST') {
-    const draft = findDraft(state, m[1]);
-    let result;
-    if (m[2] === 'rewrite') {
-      const candidate = find(state.candidates, draft.candidateId);
-      const direction = cleanText(body?.direction, 240);
-      result = rewriteDraft(state, m[1], {text: templateDraft(candidate, state.settings, direction), mode: 'template', note: direction ? 'Template draft. The requested direction is recorded but was not applied by an AI model.' : 'Template draft. Rewrite instructions have not been processed by an AI model.'});
-    } else {
-      result = draftAction(state, m[1], m[2], body);
+  // Pause all bots and Keep going, like the server's /api/guard. Stop also cancels
+  // whatever the guard parked, though the demo's offline engine parks nothing yet.
+  if (path === '/api/guard' && method === 'POST') {
+    if (typeof body.paused !== 'boolean') throw Object.assign(new Error('Say whether bots are paused: {"paused": true} or {"paused": false}.'), {status: 400});
+    if (body.paused) { pauseAll(state); save(state); return {guard: state.guard, resumed: 0, cancelled: 0}; }
+    resumeGuard(state);
+    const parked = state.groupRuns.filter(r => r.status === 'awaiting_limit' && r.limit?.kind === 'guard');
+    // Keep going starts each parked run again where it waited; Stop cancels it.
+    for (const run of parked) {
+      if (body.stop === true) { run.status = 'cancelled'; run.completedAt = now(); run.checkpoint = null; storeRunLines(state, run, [{id: crypto.randomUUID(), role: 'system', text: 'Stopped. Bots were paused and nothing else ran.'}]); }
+      else await localRun(state, run.groupId, {runId: run.id, resume: true});
     }
-    save(state);
-    return result;
+    save(state); return {guard: state.guard, resumed: body.stop === true ? 0 : parked.length, cancelled: body.stop === true ? parked.length : 0};
   }
   if (path === '/api/groups' && method === 'POST') { const g = addGroup(state, body); save(state); return g; }
   if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/bots$/)) && method === 'POST') { const b = addBot(state, m[1], body); save(state); return b; }
@@ -267,10 +314,25 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
     return {messages: (state.groupMessages[m[1]] || []).slice(-300), runs: state.groupRuns.filter(r => r.groupId === m[1]).slice(0, 50)};
   }
   if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/chat$/)) && method === 'POST') {
-    const r = await localRun(state, m[1], {message: body.message, directBotId: body.directBotId || null, checkpoints: body.checkpoints === true, chatKey: typeof body.chatKey === 'string' ? body.chatKey : null});
+    const r = await localRun(state, m[1], {message: body.message, directBotId: body.directBotId || null, checkpoints: body.checkpoints === true, chatKey: typeof body.chatKey === 'string' ? body.chatKey : null, anyway: body.anyway === true});
+    // What the owner asked every bot to remember is kept, as on the server.
+    rememberFromOwner(state, body.message);
     save(state); return r;
   }
-  if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/runs\/([a-z0-9-]+)\/continue$/)) && method === 'POST') { const r = await localRun(state, m[1], {runId: m[2], resume: true}); save(state); return r; }
+  if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/runs\/([a-z0-9-]+)\/continue$/)) && method === 'POST') {
+    // A run parked at a limit asks which way to go: more and unlimited carry on (when
+    // bots are not paused), stop ends the task.
+    const parked = state.groupRuns.find(r => r.id === m[2] && r.groupId === m[1]);
+    if (parked?.status === 'awaiting_limit') {
+      if (!['more', 'unlimited', 'stop'].includes(body?.choice)) throw Object.assign(new Error('Choose more, unlimited or stop.'), {status: 400});
+      if (body.choice === 'stop') {
+        parked.status = 'cancelled'; parked.completedAt = now(); parked.checkpoint = null; delete parked.limit;
+        storeRunLines(state, parked, [{id: crypto.randomUUID(), role: 'system', text: 'Stopped. Bots were paused and nothing else ran.'}]);
+        save(state); return {runId: parked.id, status: 'cancelled'};
+      }
+    }
+    const r = await localRun(state, m[1], {runId: m[2], resume: true}); save(state); return r;
+  }
   if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/runs\/([a-z0-9-]+)\/plan$/)) && method === 'POST') { const r = await localRun(state, m[1], {runId: m[2], started: body?.approve !== false, approve: body?.approve}); save(state); return r; }
   if ((m = path.match(/^\/api\/groups\/([a-z0-9-]+)\/runs\/([a-z0-9-]+)\/cancel$/)) && method === 'POST') {
     const run = state.groupRuns.find(r => r.id === m[2] && r.groupId === m[1]);
@@ -281,11 +343,24 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
     }
     save(state); return {runId: run.id, status: run.status};
   }
+  // The owner answers an ask, and sets what a bot may do without asking.
+  if ((m = path.match(/^\/api\/asks\/([a-z0-9-]+)$/)) && method === 'POST') { const r = answerAskLocal(state, m[1], body?.answer, body?.until ?? null); save(state); return r; }
+  if (path === '/api/permissions/basics' && method === 'POST') { const r = setAskBasics(state, body?.ask); save(state); return r; }
+  if (path === '/api/permissions/preset' && method === 'POST') { const r = applyPreset(state, body?.preset); save(state); return r; }
+  if (path === '/api/permissions/restore' && method === 'POST') { const r = restorePermissions(state, body); save(state); return r; }
+  if (path === '/api/limits' && method === 'POST') { const r = setLimits(state, body); save(state); return r; }
+  if (path === '/api/grants' && method === 'POST') { const g = setGrant(state, String(body?.botId ?? ''), String(body?.action ?? ''), body?.scope ?? '', body?.choice, undefined, {until: body?.until ?? null}); save(state); return g; }
   if (path === '/api/bots/run') throw new Error('Running AI bots requires the separate Node backend, not GitHub Pages.');
-  if ((m = path.match(/^\/api\/browser-requests\/([a-z0-9-]+)\/approve$/)) && method === 'POST') throw Object.assign(new Error('Browser requests run on your own device through a paired local agent, which needs the Node build. This demo cannot open pages.'), {status: 409});
-  if ((m = path.match(/^\/api\/browser-requests\/([a-z0-9-]+)\/deny$/)) && method === 'POST') { const r = denyBrowserRequest(state, m[1]); save(state); return r; }
-  if (path === '/api/schedules' && method === 'POST') { const s = addSchedule(state, body); save(state); return s; }
-  if ((m = path.match(/^\/api\/schedules\/([a-z0-9-]+)$/)) && method === 'DELETE') { const r = removeSchedule(state, m[1]); save(state); return r; }
+  // The old approve and deny routes answer the request's ask (Allow, Decline) for one phase; a request with no ask cannot be opened here.
+  if ((m = path.match(/^\/api\/browser-requests\/([a-z0-9-]+)\/(approve|deny)$/)) && method === 'POST') {
+    const request = (state.browserRequests || []).find(r => r.id === m[1]);
+    if (request?.askId) { answerAskLocal(state, request.askId, m[2] === 'approve' ? 'allow' : 'decline'); save(state); return (state.browserRequests || []).find(r => r.id === m[1]); }
+    if (m[2] === 'approve') throw Object.assign(new Error('Browser requests run on your own device through a paired local agent, which needs the Node build. This demo cannot open pages.'), {status: 409});
+    const r = denyBrowserRequest(state, m[1]); save(state); return r;
+  }
+  // Saved task templates, as on the server (shared/templates.js).
+  if (path === '/api/templates' && method === 'POST') { const r = addTemplate(state, {title: body.title, text: body.text}); save(state); return r; }
+  if ((m = path.match(/^\/api\/templates\/([a-z0-9-]+)$/)) && method === 'DELETE') { const r = removeTemplate(state, m[1]); save(state); return r; }
   // Structured task endpoints, identical to the Node server's queue surface.
   if (path === '/api/tasks' && method === 'POST') {
     // Delivery tasks are created by the server from a user's own preferences.
@@ -295,35 +370,42 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
   }
   if ((m = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/retry$/)) && method === 'POST') { const r = retryTask(state, m[1]); save(state); return r; }
   if ((m = path.match(/^\/api\/tasks\/([a-f0-9-]+)$/)) && method === 'DELETE') { const r = cancelTask(state, m[1]); save(state); return r; }
-  if ((m = path.match(/^\/api\/drafts\/([a-f0-9-]+)\/evidence$/)) && method === 'POST') { const e = addEvidence(state, {...body, draftId: m[1]}); save(state); return e; }
-  if ((m = path.match(/^\/api\/evidence\/([a-f0-9-]+)\/verify$/)) && method === 'POST') { const e = verifyEvidence(state, m[1], body.status); save(state); return e; }
-  if ((m = path.match(/^\/api\/evidence\/([a-f0-9-]+)$/)) && method === 'DELETE') { const r = dropEvidence(state, m[1]); save(state); return r; }
   // Conversation history, stored with the rest of the browser-local state.
+  if (path === '/api/attachments' && method === 'POST') { const r = attachLocal(state, body); save(state); return r; }
   if ((m = path.match(/^\/api\/chats\/([a-z0-9-]+)\/messages$/)) && method === 'POST') { const r = addChatMessages(state, m[1], Array.isArray(body.messages) ? body.messages : [body]); save(state); return r; }
   if ((m = path.match(/^\/api\/chats\/([a-z0-9-]+)$/)) && method === 'DELETE') { const r = clearChat(state, m[1]); cancelRunsForChat(state, m[1], 'Chat cleared.'); save(state); return r; }
   // Durable memory: the rulebook and chat recap are part of local state, so a
   // person can delete a rule here too. A model-written pass needs the Node build.
-  if (path === '/api/memory' && method === 'GET') return publicMemory(state);
+  if (path === '/api/retention' && method === 'PATCH') { updateRetention(state, body); save(state); return {...RETENTION_DEFAULTS, ...state.settings.retention}; }
+  // A book is named by `bot` (an id, or `company`) or, for an older client, `model`.
+  const memoryPath = path.split('?')[0], memoryQuery = new URLSearchParams(path.split('?')[1] || '');
+  const bookOf = from => { const bot = from?.bot || memoryQuery.get('bot'), model = from?.model || memoryQuery.get('model'); return bot ? (bot === COMPANY_KEY ? COMPANY_KEY : botKey(bot)) : model || null; };
+  if (memoryPath === '/api/memory' && method === 'GET') { const bot = memoryQuery.get('bot'); return publicMemory(state, {bot: bot && bot !== COMPANY_KEY ? bot : null}); }
   if (path === '/api/memory/rules' && method === 'POST') {
-    if (!body.model) throw new Error('Which model should keep this rule?');
-    const r = addRules(state, body.model, [body.text], {source: 'user', label: body.label});
+    const book = bookOf(body);
+    if (!book) throw Object.assign(new Error('Which bot should keep this rule?'), {status: 400});
+    const r = addRules(state, book, [body.text], {source: 'user', label: body.label});
     save(state);
-    return {ok: true, model: body.model, rules: r.book.rules.map(rule => ({id: rule.id, text: rule.text, source: rule.source}))};
+    return {ok: true, model: book, rules: r.book.rules.map(rule => ({id: rule.id, text: rule.text, source: rule.source}))};
   }
-  const memoryPath = path.split('?')[0];
+  if ((m = memoryPath.match(/^\/api\/memory\/rules\/([a-z0-9-]+)$/)) && method === 'PATCH') {
+    const rule = editRule(state, bookOf(body) || bookKeyOfRule(state, m[1]) || '', m[1], body.text);
+    if (!rule) throw Object.assign(new Error('That bot already keeps that line.'), {status: 409});
+    save(state); return {ok: true, rule: {id: rule.id, text: rule.text, source: rule.source}};
+  }
   if ((m = memoryPath.match(/^\/api\/memory\/rules\/([a-z0-9-]+)$/)) && method === 'DELETE') {
-    const model = new URLSearchParams(path.split('?')[1] || '').get('model') || '';
-    const r = removeRule(state, model, m[1]); save(state); return r;
+    const r = removeRule(state, bookOf(null) || bookKeyOfRule(state, m[1]) || '', m[1]); save(state); return r;
   }
   if (path === '/api/memory/forget' && method === 'POST') {
-    if (body.model) forgetRulebook(state, body.model);
+    if (bookOf(body)) forgetRulebook(state, bookOf(body));
     if (body.chat) forgetChat(state, body.chat);
     save(state);
     return {ok: true, model: body.model || null, chat: body.chat || null};
   }
   if (path === '/api/memory/consolidate' && method === 'POST') throw Object.assign(new Error('Updating memory needs the Node build and an AI provider. Rules you add by hand still work here.'), {status: 409});
-  if (path === '/api/reset-demo' && method === 'POST') { const r = resetDemo(state); save(state); return r; }
-  throw new Error(`Not available in the browser-local demo: ${method} ${path}`);
+  // First boot of the demo: start from the same workspace the server seeds.
+  if (path === '/api/reset-workspace' && method === 'POST') { const fresh = migrate(initialState()); save(fresh); return {state: fresh}; }
+  throw Object.assign(new Error(`Not available in the browser-local demo: ${method} ${path}`), {status: 404});
 }
 
 window.AGENT_LOCAL_API = localApi;

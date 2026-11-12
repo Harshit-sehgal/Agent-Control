@@ -22,18 +22,100 @@ import crypto from 'node:crypto';
 import {fail} from '../shared/errors.js';
 import {cleanText} from '../shared/core.js';
 import {validateBrowserRequest} from '../shared/bot-browser.js';
+import {cliEngineById,cleanCliModel,cleanEffort,LOCAL_CLI_ENGINE_IDS} from '../shared/ai-presets.js';
+import {base64Bytes,sniffType,isImage,MAX_FILES,MODEL_IMAGE_BYTES,MODEL_IMAGES_TOTAL} from '../shared/attachments.js';
 import {encryptJson,decryptJson,sha256,loadMasterKey} from './vault.js';
 
-export const AGENT_ACTIONS = ['http.check', 'browser.capture', 'browser.action'];
+/** Told when a task is queued for a device (src/server.js points it at the live
+ * hub). A no-op by default, so this module needs nothing else to be loaded. */
+let taskWake = () => {};
+export function onAgentTaskQueued(fn) { taskWake = typeof fn === 'function' ? fn : () => {}; }
+
+export const AGENT_ACTIONS = ['http.check', 'browser.capture', 'browser.action', 'model.run', 'mcp.call'];
 const PAIRING_TTL_MS = 10 * 60000;
 const CLOCK_SKEW_MS = 5 * 60000;
 // How long a claimed task stays leased to the device. It is also how recently a
 // device must have been seen for it to count as alive in recovery below.
 const DEFAULT_LEASE_MS = 120000;
+/** How recently a device must have been seen to count as online: the agent list, and every picker that hands it work. */
+export const AGENT_ONLINE_MS = 180000;
 // A task kind is its own permission: 'browser.action' exists beside
 // 'browser.capture' because acting on a page is a deliberate grant, not a read.
 // AGENT_ACTIONS is the list; a separate kind table only ever repeated it.
 const signatureNonces = new Map(); // agentId -> Set of recently used signatures
+
+/** Kinds that are never run a second time. A browser action may already have
+ * clicked; a model run has already spent the owner's subscription. */
+const ONCE_ONLY = ['browser.action', 'model.run', 'mcp.call'];
+export const MODEL_RUN_TIMEOUT_MS = 180000;
+
+/** The canonical `model.run` payload: an engine, an optional model that cannot
+ * read as a flag, the bot's instructions and input as bounded text, and a
+ * timeout. Anything else the caller sent is dropped. */
+export function validateModelRun(payload) {
+  const p = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
+  const engine = cliEngineById(p.engine);
+  if (!engine) fail(`A model.run task needs an engine: ${LOCAL_CLI_ENGINE_IDS.join(' or ')}.`, 400);
+  const model = cleanCliModel(p.model);
+  if (model === null) fail('That model name is not valid for a CLI.', 400);
+  if (typeof p.input !== 'string' || !p.input.trim()) fail('A model.run task needs input text.', 400);
+  if (p.input.length > 100000) fail('A model.run input is too long (100000 characters at most).', 400);
+  if (p.instructions !== undefined && typeof p.instructions !== 'string') fail('Instructions must be text.', 400);
+  if ((p.instructions || '').length > 30000) fail('A model.run instruction is too long (30000 characters at most).', 400);
+  let timeoutMs = MODEL_RUN_TIMEOUT_MS;
+  if (p.timeoutMs !== undefined) {
+    timeoutMs = Number(p.timeoutMs);
+    if (!Number.isFinite(timeoutMs)) fail('The timeout must be a number of milliseconds.', 400);
+    timeoutMs = Math.min(600000, Math.max(5000, Math.round(timeoutMs)));
+  }
+  const effort = cleanEffort(p.effort);
+  if (effort === null) fail('That effort level is not valid. Use low, medium or high.', 400);
+  const images = modelRunImages(p.images);
+  return {engine: engine.id, model, ...(effort ? {effort} : {}), instructions: p.instructions || '', input: p.input, ...(images.length ? {images} : {}), timeoutMs, ...deadlineOf(p)};
+}
+
+/** The images a model.run hands the CLI: each one typed from its own bytes, within the model request limits. */
+function modelRunImages(list) {
+  if (list === undefined || list === null) return [];
+  if (!Array.isArray(list) || list.length > MAX_FILES) fail(`A model.run takes up to ${MAX_FILES} images in a list.`, 400);
+  let total = 0;
+  return list.map(image => {
+    const bytes = base64Bytes(image?.data);
+    if (!bytes?.length || bytes.length > MODEL_IMAGE_BYTES) fail('Each model.run image must be base64, and 5 MB or smaller.', 400);
+    const type = sniffType(bytes);
+    if (!isImage(type) || type !== image.type) fail('A model.run image must be a PNG, JPEG, WebP or GIF whose type matches its bytes.', 400);
+    total += bytes.length;
+    if (total > MODEL_IMAGES_TOTAL) fail('A model.run carries at most 15 MB of images.', 400);
+    return {type, data: image.data};
+  });
+}
+
+/** The canonical `mcp.call` payload: the NAME of an MCP server configured on the agent's own machine, an
+ * operation and, for a call, a tool and its arguments. There is no command and no environment here: what runs
+ * is decided by the agent's config alone. Anything else the caller sent is dropped. */
+export function validateMcpCall(payload) {
+  const p = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
+  if (typeof p.server !== 'string' || !/^[A-Za-z0-9._-]{1,40}$/.test(p.server)) fail('An mcp.call task needs the name of a server configured on the agent (letters, digits . _ - only).', 400);
+  if (p.op !== 'list' && p.op !== 'call') fail('An mcp.call task is a list or a call.', 400);
+  const out = {server: p.server, op: p.op};
+  if (p.op === 'call') {
+    if (typeof p.tool !== 'string' || !/^[A-Za-z0-9_.:-]{1,128}$/.test(p.tool)) fail('A call needs a tool name.', 400);
+    const args = p.args === undefined ? {} : p.args;
+    if (!args || typeof args !== 'object' || Array.isArray(args)) fail('Tool arguments must be an object.', 400);
+    if (JSON.stringify(args).length > 100000) fail('The tool arguments are too long (100000 characters at most).', 400);
+    Object.assign(out, {tool: p.tool, args});
+  }
+  let timeoutMs = 30000;
+  if (p.timeoutMs !== undefined) {
+    timeoutMs = Number(p.timeoutMs);
+    if (!Number.isFinite(timeoutMs)) fail('The timeout must be a number of milliseconds.', 400);
+    timeoutMs = Math.min(120000, Math.max(2000, Math.round(timeoutMs)));
+  }
+  return {...out, timeoutMs, ...deadlineOf(p)};
+}
+
+/** `notAfter`: the epoch ms after which the server has stopped waiting for this task, so the device skips it. */
+const deadlineOf = p => (Number.isFinite(p.notAfter) && p.notAfter > 0 ? {notAfter: Math.round(p.notAfter)} : {});
 
 const now = () => new Date().toISOString();
 
@@ -126,7 +208,7 @@ export const agentTaskKinds = () => [...AGENT_ACTIONS];
 
 /** Enqueue work for a paired agent. Idempotency is per-agent so a repeated
  * request (double-clicked button, retried polling) cannot run a job twice. */
-export function enqueueAgentTask(store, agentId, {kind, payload = {}, idempotencyKey, createdBy, permission}) {
+export function enqueueAgentTask(store, agentId, {kind, payload = {}, idempotencyKey, createdBy, permission, approved = []}) {
   if (!AGENT_ACTIONS.includes(kind)) fail(`Unknown agent task kind. Expected one of: ${agentTaskKinds().join(', ')}.`);
   // Every enqueue goes through here — the pairing route, the queue scheduler and
   // the bot's own request — so the browser rules are enforced once, at the choke
@@ -134,8 +216,17 @@ export function enqueueAgentTask(store, agentId, {kind, payload = {}, idempotenc
   if (kind.startsWith('browser.')) {
     const request = validateBrowserRequest(payload);
     if (request.kind !== kind) fail(`A ${kind} task does not match the payload: it describes a ${request.kind}.`, 400);
-    payload = {url: request.url, steps: request.steps};
+    // `botId` picks the bot's own tab in the device's shared browser. It is only a label for
+    // that tab, so it is bounded text or nothing.
+    const botId = typeof payload?.botId === 'string' ? cleanText(payload.botId, 64) : '';
+    // `approved` (the risky classes the owner cleared) is an argument, never read from the payload:
+    // only the bot-browser dispatch passes it, so no route, schedule or model text can widen it. Absent
+    // means none: the device refuses every risky control.
+    const cleared = (Array.isArray(approved) ? approved : []).filter(a => typeof a === 'string').slice(0, 8);
+    payload = {url: request.url, steps: request.steps, ...(botId ? {botId} : {}), ...(cleared.length ? {approved: cleared} : {})};
   }
+  if (kind === 'model.run') payload = validateModelRun(payload);
+  if (kind === 'mcp.call') payload = validateMcpCall(payload);
   const agent = store.get('SELECT * FROM agents WHERE id=?', agentId);
   if (!agent) fail('Agent not found.', 404);
   if (agent.revoked_at) fail('This agent has been revoked.', 409);
@@ -152,10 +243,12 @@ export function enqueueAgentTask(store, agentId, {kind, payload = {}, idempotenc
   const id = crypto.randomUUID();
   const task = {
     id, agent_id: agentId, kind, payload: JSON.stringify(payload || {}), status: 'queued',
-    attempts: 0, max_attempts: kind === 'browser.action' ? 1 : 3, idempotency_key: idempotencyKey || null, created_by: createdBy || null, created_at: now(),
+    attempts: 0, max_attempts: ONCE_ONLY.includes(kind) ? 1 : 3, idempotency_key: idempotencyKey || null, created_by: createdBy || null, created_at: now(),
   };
   store.run('INSERT INTO agent_tasks (id,agent_id,kind,payload,status,attempts,max_attempts,idempotency_key,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
     task.id, task.agent_id, task.kind, task.payload, task.status, task.attempts, task.max_attempts, task.idempotency_key, task.created_by, task.created_at, now());
+  // A device parked on the live line is told at once, so it does not wait out its poll interval.
+  try { taskWake(agent.workspace_id, agentId); } catch { /* A wake is only a hint. */ }
   return {task, duplicate: false};
 }
 
@@ -225,7 +318,7 @@ export function completeAgentTask(store, agentId, taskId, {status, result, error
 }
 
 /** Tasks orphaned by a disconnected agent: expired leases return to queued,
- * except browser actions which fail instead (never retried). Returns how many
+ * except browser actions and model runs, which fail instead (never retried). Returns how many
  * stale tasks were settled.
  *
  * A lapsed lease is only evidence of a disconnect when the device has also
@@ -243,9 +336,9 @@ export function recoverAgentTasks(store, nowMs = Date.now(), {aliveMs = DEFAULT_
   for (const row of stale) {
     if (agentSeenSince(store, row.agent_id, aliveSince)) continue;
     rearmed++;
-    if (row.kind === 'browser.action') {
+    if (ONCE_ONLY.includes(row.kind)) {
       store.run(`UPDATE agent_tasks SET status='failed', lease_until=NULL, error=?, updated_at=?, completed_at=? WHERE id=?`,
-        'The agent disconnected before completing. Browser actions are not retried.', now(), now(), row.id);
+        `The agent disconnected before completing. ${row.kind === 'model.run' ? 'Model runs' : row.kind === 'mcp.call' ? 'Connector calls' : 'Browser actions'} are not retried.`, now(), now(), row.id);
       continue;
     }
     store.run(`UPDATE agent_tasks SET status='queued', lease_until=NULL, error=?, updated_at=? WHERE id=?`,
@@ -279,14 +372,43 @@ export function renewAgentTaskLeases(store, agentId, {leaseMs = DEFAULT_LEASE_MS
   return Number(result.changes || 0);
 }
 
+/** What the device reports about its CLIs. Only these four words are kept; any
+ * other value, and anything that is not an object, is ignored or `unknown`. The
+ * report lives in kv (never in a backup): it describes a machine, not the data. */
+export const CLI_STATES = ['signed-in', 'signed-out', 'missing', 'unknown'];
+export function recordAgentCli(store, agentId, report) {
+  if (!report || typeof report !== 'object' || Array.isArray(report) || typeof store.kvSet !== 'function') return;
+  const word = value => (CLI_STATES.includes(value) ? value : 'unknown');
+  store.kvSet(`agent_cli:${agentId}`, JSON.stringify({claude: word(report.claude), codex: word(report.codex), checkedAt: now()}));
+}
+export function readAgentCli(store, agentId) {
+  try {
+    const raw = typeof store.kvGet === 'function' ? store.kvGet(`agent_cli:${agentId}`) : null;
+    const value = raw ? JSON.parse(raw) : null;
+    return value ? {claude: value.claude, codex: value.codex, checkedAt: value.checkedAt} : null;
+  } catch { return null; }
+}
+
 export function listAgents(store, workspaceId) {
   const agents = store.all('SELECT * FROM agents WHERE workspace_id=? ORDER BY paired_at DESC', workspaceId);
   return agents.map(a => ({
-    id: a.id, name: a.name, status: a.revoked_at ? 'revoked' : (a.last_seen_at && Date.parse(a.last_seen_at) > Date.now() - 180000 ? 'online' : (a.last_seen_at ? 'stale' : 'paired')),
+    id: a.id, name: a.name, status: a.revoked_at ? 'revoked' : (a.last_seen_at && Date.parse(a.last_seen_at) > Date.now() - AGENT_ONLINE_MS ? 'online' : (a.last_seen_at ? 'stale' : 'paired')),
     permissions: JSON.parse(a.permissions || '[]'), pairedAt: a.paired_at, lastSeenAt: a.last_seen_at,
+    // Whether `claude` and `codex` are signed in on that machine, as the device last said.
+    cli: a.revoked_at ? null : readAgentCli(store, a.id),
     tasks: {queued: store.get("SELECT count(*) AS n FROM agent_tasks WHERE agent_id=? AND status='queued'", a.id).n,
       running: store.get("SELECT count(*) AS n FROM agent_tasks WHERE agent_id=? AND status='running'", a.id).n,
       failed: store.get("SELECT count(*) AS n FROM agent_tasks WHERE agent_id=? AND status='failed'", a.id).n},
+  }));
+}
+
+/** The devices a bot may be told about: name, whether it is running, what it may do, and its CLI sign-in.
+ * No id, secret or task detail. */
+export function agentsBrief(store) {
+  if (typeof store?.all !== 'function') return [];
+  return store.all('SELECT * FROM agents WHERE revoked_at IS NULL ORDER BY last_seen_at DESC').map(a => ({
+    name: a.name, online: Boolean(a.last_seen_at && Date.parse(a.last_seen_at) > Date.now() - AGENT_ONLINE_MS),
+    permissions: (() => { try { return JSON.parse(a.permissions || '[]'); } catch { return []; } })(), cli: readAgentCli(store, a.id),
   }));
 }
 

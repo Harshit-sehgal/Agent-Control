@@ -61,40 +61,43 @@ test('the authorization matrix gates every write by role and origin', {timeout: 
     const member = await login('member@a.test', 'long-enough-pass');
     const viewer = await login('viewer@a.test', 'long-enough-pass');
 
-    const settings = {topics: ['AI'], style: 'x', opinions: '', minDelay: 0, maxDelay: 1};
-    const candidate = {url: 'https://x.com/a/status/1', text: 'A candidate long enough to pass validation.', author: 'Tester', topic: 'AI'};
+    const group = {name: 'Matrix group'};
 
     // Anonymous: nothing works, not even reads.
-    for (const [m, u, body] of [['POST', '/api/candidates', candidate], ['PATCH', '/api/settings', settings], ['GET', '/api/state', undefined], ['GET', '/api/users', undefined], ['GET', '/api/agents', undefined]]) {
+    for (const [m, u, body] of [['POST', '/api/groups', group], ['POST', '/api/retention/prune', {}], ['GET', '/api/state', undefined], ['GET', '/api/users', undefined], ['GET', '/api/agents', undefined]]) {
       assert.equal((await call(m, u, {body})).status, 401, `anonymous ${m} ${u} must be 401`);
     }
 
     // Viewer: can read (and mark their own notifications), cannot mutate workspace content.
     assert.equal((await call('GET', '/api/state', {cookie: viewer})).status, 200);
-    assert.equal((await call('POST', '/api/candidates', {cookie: viewer, body: candidate})).status, 403);
-    assert.equal((await call('PATCH', '/api/settings', {cookie: viewer, body: settings})).status, 403);
+    assert.equal((await call('POST', '/api/groups', {cookie: viewer, body: group})).status, 403);
+    assert.equal((await call('POST', '/api/retention/prune', {cookie: viewer, body: {}})).status, 403);
     assert.equal((await call('POST', '/api/users', {cookie: viewer, body: {email: 'v@x.test', password: 'long-enough-pass', role: 'member'}})).status, 403);
-    assert.equal((await call('POST', '/api/groups/x-engage/chat', {cookie: viewer, body: {message: 'hi'}})).status, 403);
+    assert.equal((await call('POST', '/api/groups/home/chat', {cookie: viewer, body: {message: 'hi'}})).status, 403);
     assert.equal((await call('POST', '/api/notifications/read', {cookie: viewer, body: {ids: []}})).status, 200);
 
     // Member: may write content, may not touch admin surfaces.
-    assert.equal((await call('POST', '/api/candidates', {cookie: member, body: candidate})).status, 201);
-    const memberChat = await call('POST', '/api/groups/x-engage/chat', {cookie: member, body: {message: 'please look this over'}});
+    assert.equal((await call('POST', '/api/groups', {cookie: member, body: group})).status, 201);
+    const memberChat = await call('POST', '/api/groups/home/chat', {cookie: member, body: {message: 'please look this over'}});
     assert.notEqual(memberChat.status, 403);
     assert.ok([202, 422].includes(memberChat.status), `member group chat got ${memberChat.status}`);
-    assert.equal((await call('PATCH', '/api/settings', {cookie: member, body: settings})).status, 403);
+    assert.equal((await call('POST', '/api/retention/prune', {cookie: member, body: {}})).status, 403);
+    assert.equal((await call('PATCH', '/api/retention', {cookie: member, body: {events: 30}})).status, 403);
     assert.equal((await call('POST', '/api/users', {cookie: member, body: {email: 'm@x.test', password: 'long-enough-pass', role: 'member'}})).status, 403);
 
     // Admin: admin surfaces allowed.
-    assert.equal((await call('PATCH', '/api/settings', {cookie: admin, body: settings})).status, 200);
+    assert.equal((await call('POST', '/api/retention/prune', {cookie: admin, body: {}})).status, 200);
+    const policy = await call('PATCH', '/api/retention', {cookie: admin, body: {events: 30, doneTasks: 7, runs: 14}});
+    assert.equal(policy.status, 200);
+    assert.equal(policy.body.events, 30, 'retention can be configured again after X-engage took its settings route');
     assert.equal((await call('GET', '/api/users', {cookie: admin})).status, 200);
     // But an admin cannot mint an equal-or-higher role.
     assert.equal((await call('POST', '/api/users', {cookie: admin, body: {email: 'o@x.test', password: 'long-enough-pass', role: 'owner'}})).status, 403);
 
     // Cross-origin writes are refused even with a valid session (CSRF defence).
-    assert.equal((await call('POST', '/api/candidates', {cookie: admin, body: candidate, headers: {Origin: 'https://evil.example'}})).status, 403);
+    assert.equal((await call('POST', '/api/groups', {cookie: admin, body: {name: 'Evil group'}, headers: {Origin: 'https://evil.example'}})).status, 403);
     // The same-origin write still succeeds.
-    assert.equal((await call('POST', '/api/candidates', {cookie: admin, body: {url: 'https://x.com/a/status/2', text: 'Another candidate long enough.', author: 'Tester'}, headers: {Origin: t.base}})).status, 201);
+    assert.equal((await call('POST', '/api/groups', {cookie: admin, body: {name: 'Same-origin group'}, headers: {Origin: t.base}})).status, 201);
   } finally {
     await t.stop();
   }
