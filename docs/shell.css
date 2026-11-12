@@ -294,6 +294,32 @@
 .cv-send:disabled{opacity:.5}
 .cv-send svg{width:20px;height:20px;overflow:hidden}
 .cv-send.sent svg{animation:whoosh .42s var(--ease)}
+/* attachments: the clip in the box, the chips above it, and the files on a sent line */
+.cv-box:has(.cv-attach){padding-left:6px}
+.cv-attach{position:relative;width:38px;height:38px;flex:none;border-radius:var(--r-s);display:grid;place-items:center;color:var(--muted);transition:color .15s,background-color .15s}
+.cv-attach::before{content:'';position:absolute;inset:-3px}
+.cv-attach:hover:not(:disabled){color:var(--fg);background:var(--control)}
+.cv-attach:disabled{opacity:.5}
+.cv-composer.drop .cv-box{box-shadow:var(--lift),0 0 0 2px var(--wait)}
+.cv-chips{max-width:720px;margin:0 auto 8px;display:flex;flex-wrap:wrap;gap:8px}
+.cv-chips[hidden]{display:none}
+.cv-chip{display:inline-flex;align-items:center;gap:8px;max-width:100%;min-height:44px;padding:4px 4px 4px 8px;border-radius:12px;background:var(--raise);box-shadow:var(--ring);font-size:13px}
+.cv-chip img{width:34px;height:34px;border-radius:8px;object-fit:cover}
+.cv-chip-name{min-width:0;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cv-chip small{color:var(--muted)}
+.cv-chip.busy{opacity:.6}
+.cv-chip.failed small{color:var(--bad)}
+.cv-chip-x{width:36px;height:36px;flex:none;border-radius:50%;display:grid;place-items:center;color:var(--muted)}
+.cv-chip-x:hover{color:var(--fg);background:var(--control)}
+.cv-me-files{align-self:flex-end;max-width:78%;display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.cv-me-files .cv-me{max-width:100%}
+.cv-files{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px}
+.cv-thumb{display:block;border-radius:14px;overflow:hidden;box-shadow:var(--ring);background:var(--control)}
+.cv-thumb img{display:block;min-width:56px;min-height:56px;max-width:min(260px,60vw);max-height:220px;width:auto;height:auto;object-fit:cover}
+.cv-file{display:inline-flex;align-items:center;gap:8px;min-height:44px;max-width:100%;padding:6px 12px;border-radius:12px;background:var(--raise);box-shadow:var(--ring);color:var(--fg);text-decoration:none;font-size:14px}
+.cv-file span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cv-file small{color:var(--muted)}
+.cv-file.gone{opacity:.6}
 /* the new thread page */
 .nv{flex:1;min-height:0;display:flex;flex-direction:column;overflow:auto}
 .nv-in{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;padding:16px max(16px,env(safe-area-inset-right,0px)) 14vh max(16px,env(safe-area-inset-left,0px))}

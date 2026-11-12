@@ -44,7 +44,9 @@ const RETIRED_TABLES = ['candidates', 'drafts', 'evidence'];
 // Never exported, by design: credential ciphertext cannot be decrypted under a
 // different key, pairing codes are single-use, and a live session id is a
 // credential an attacker holding a backup must not obtain.
-const EXCLUDED_TABLES = ['credentials', 'pairing_codes', 'sessions', 'kv', 'schema_meta'];
+// Attachments are raw file bytes: a JSON backup would carry them as base64 and
+// grow by megabytes per image, so a restored chat shows its files as missing.
+const EXCLUDED_TABLES = ['credentials', 'pairing_codes', 'sessions', 'kv', 'schema_meta', 'attachments'];
 // Not a device credential. agents.secret_hash cannot be SQL NULL (the column
 // is NOT NULL), and a backup must still restore the agent row.
 const REDACTED_AGENT_HASH = 'redacted';

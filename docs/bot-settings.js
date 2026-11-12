@@ -7,11 +7,11 @@
  * off, but never grant an action (that is `contracts.js` permissions) or lift
  * the hard step cap.
  */
-import {cleanText} from './core.js?v=71b92f8de6';
-import {fail} from './errors.js?v=71b92f8de6';
-import {BACKSTOP} from './limits.js?v=71b92f8de6';
-import {TINT_COUNT} from './ui-kit.js?v=71b92f8de6';
-import {SHAPES} from './company.js?v=71b92f8de6';
+import {cleanText} from './core.js?v=789d865101';
+import {fail} from './errors.js?v=789d865101';
+import {BACKSTOP} from './limits.js?v=789d865101';
+import {TINT_COUNT} from './ui-kit.js?v=789d865101';
+import {SHAPES} from './company.js?v=789d865101';
 
 export const REPLY_LENGTHS = {short: 500, medium: 1500, long: 3000};
 export const ROUTING_MODES = ['pipeline', 'mentions', 'everyone'];
@@ -215,7 +215,8 @@ export function prunePipeline(group) {
 export function threadContext(messages, maxChars = 3600) {
   if (!Array.isArray(messages)) return [];
   const lines = messages.filter(m => m && m.text && ['user', 'bot'].includes(m.role)).slice(-MAX_CONTEXT_MESSAGES)
-    .map(m => ({from: m.role === 'user' ? 'user' : (m.senderName || m.senderId || 'bot'), text: String(m.text).slice(0, 800)}));
+    // The files on an owner's line travel by reference; src/attachments.js reads them for the model.
+    .map(m => ({from: m.role === 'user' ? 'user' : (m.senderName || m.senderId || 'bot'), text: String(m.text).slice(0, 800), ...(m.role === 'user' && m.attachments?.length ? {files: m.attachments.map(({id, name, type}) => ({id, name, type}))} : {})}));
   let total = 0;
   const kept = [];
   for (let i = lines.length - 1; i >= 0; i--) {

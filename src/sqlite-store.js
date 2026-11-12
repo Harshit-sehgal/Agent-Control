@@ -432,6 +432,14 @@ const MIGRATIONS = [
         text TEXT NOT NULL, thread_id TEXT, undo_until TEXT);
       CREATE INDEX IF NOT EXISTS activity_at ON activity(at);
     `);
+  }},
+  // v13: files the owner attaches to a message (src/attachments.js). The bytes
+  // live here, in the workspace's own database, so a file can only be read by a
+  // session of this workspace and goes with the workspace when it is deleted.
+  {to: 13, up(db) {
+    db.exec(`CREATE TABLE IF NOT EXISTS attachments (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, size INTEGER NOT NULL,
+      data BLOB NOT NULL, created_by TEXT, created_at TEXT NOT NULL)`);
   }}];
 /** Current schema version, derived from the migration list so it cannot drift.
  * Tests and operators read it. */

@@ -25,6 +25,7 @@ import {createBotsFromReply} from './bot-create.js';
 import {parseCreateBotRequests, stripCreateBotBlocks, botCreateRefusedText} from '../shared/bot-create.js';
 import {setupCardsFromReply} from './setup-cards.js';
 import {stripSetupBlocks as setupFreeText} from '../shared/setup.js';
+import {readAttachment} from './attachments.js';
 
 const stamp = () => new Date().toISOString();
 
@@ -48,6 +49,9 @@ export async function runBotTurn(store, {
   spawnRounds = 0, groupId = null, runId = null, budget = null, resume = null, stop = false, onEvent = null, gate = null,
   makeId = randomUUID, now = stamp,
 }) {
+  // Every model call of the turn can read the files the owner attached, from this workspace only.
+  const call = executor;
+  if (call) executor = (who, input, cfg) => call(who, input, cfg, {readFile: id => readAttachment(store, id)});
   const sub = resume ? {output: null, lines: [], spawns: resume.spawns || []}
     : await replyWithSubagents({bot, envelope, executor, config, rounds: spawnRounds, makeId, now});
   const peer = await askPeerRound({bot, envelope, first: sub.output, executor, config, peers, configFor, memoryForPeer, handoffAllowed, budget, resume, stop, onEvent, gate, makeId, now});

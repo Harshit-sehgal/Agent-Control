@@ -215,7 +215,8 @@ export function prunePipeline(group) {
 export function threadContext(messages, maxChars = 3600) {
   if (!Array.isArray(messages)) return [];
   const lines = messages.filter(m => m && m.text && ['user', 'bot'].includes(m.role)).slice(-MAX_CONTEXT_MESSAGES)
-    .map(m => ({from: m.role === 'user' ? 'user' : (m.senderName || m.senderId || 'bot'), text: String(m.text).slice(0, 800)}));
+    // The files on an owner's line travel by reference; src/attachments.js reads them for the model.
+    .map(m => ({from: m.role === 'user' ? 'user' : (m.senderName || m.senderId || 'bot'), text: String(m.text).slice(0, 800), ...(m.role === 'user' && m.attachments?.length ? {files: m.attachments.map(({id, name, type}) => ({id, name, type}))} : {})}));
   let total = 0;
   const kept = [];
   for (let i = lines.length - 1; i >= 0; i--) {

@@ -1,9 +1,9 @@
 /** Single source of UI state: the server snapshot, the route, the conversations
  * it carries and cosmetic preferences. Views read from `store` and never
  * keep their own copies, so one `sync()` + one render keeps every pane current. */
-import {tintOf} from './ui-model.js?v=71b92f8de6';
-import {companyHash} from './ui-company.js?v=71b92f8de6';
-import {createOutbox} from './chats.js?v=71b92f8de6';
+import {tintOf} from './ui-model.js?v=789d865101';
+import {companyHash} from './ui-company.js?v=789d865101';
+import {createOutbox} from './chats.js?v=789d865101';
 
 // Where an earlier build kept conversations; read once by importLocalChats().
 const CHAT_KEY = 'agent-control-bot-chats-v2';
@@ -95,6 +95,8 @@ export const changed = (scope = 'all') => { for (const fn of listeners) fn(scope
 
 // Sent in the background, without the busy bar: a message is on screen already.
 const outbox = createOutbox((key, messages) => window.AGENT_API(`/api/chats/${key}/messages`, 'POST', {messages}));
+/** Wait for the queued chat lines to reach the server. */
+export const flushChats = () => outbox.settle();
 // A group run polls /api/state on its own while the workspace poll does too.
 // Whichever response returns last used to win, so an older snapshot could wipe
 // a browser card or a follow-up line and leave the slow poll in charge.

@@ -4,23 +4,24 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {initialState, cleanText} from './core.js?v=71b92f8de6';
-import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=71b92f8de6';
-import {RETENTION_DEFAULTS} from './retention.js?v=71b92f8de6';
-import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=71b92f8de6';
-import {addChatMessages, clearChat} from './chats.js?v=71b92f8de6';
-import {publicMemory, rememberFromOwner, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=71b92f8de6';
-import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=71b92f8de6';
-import {createThread, titleFrom} from './threads.js?v=71b92f8de6';
-import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=71b92f8de6';
-import {simulateGroup} from './group-simulator.js?v=71b92f8de6';
-import {BUSY_STATUSES} from './run-state.js?v=71b92f8de6';
-import {botSettings} from './bot-settings.js?v=71b92f8de6';
-import {denyBrowserRequest} from './bot-browser.js?v=71b92f8de6';
-import {answerAsk, expireAsks, orphanAsks, setGrant, setAskBasics} from './asks.js?v=71b92f8de6';
-import {setLimits} from './limits.js?v=71b92f8de6';
-import {activityPage} from './activity-log.js?v=71b92f8de6';
-import {withLocalLock} from './locks.js?v=71b92f8de6';
+import {initialState, cleanText} from './core.js?v=789d865101';
+import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=789d865101';
+import {RETENTION_DEFAULTS} from './retention.js?v=789d865101';
+import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=789d865101';
+import {addChatMessages, clearChat} from './chats.js?v=789d865101';
+import {publicMemory, rememberFromOwner, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=789d865101';
+import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=789d865101';
+import {createThread, titleFrom} from './threads.js?v=789d865101';
+import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=789d865101';
+import {simulateGroup} from './group-simulator.js?v=789d865101';
+import {BUSY_STATUSES} from './run-state.js?v=789d865101';
+import {botSettings} from './bot-settings.js?v=789d865101';
+import {denyBrowserRequest} from './bot-browser.js?v=789d865101';
+import {answerAsk, expireAsks, orphanAsks, setGrant, setAskBasics} from './asks.js?v=789d865101';
+import {setLimits} from './limits.js?v=789d865101';
+import {activityPage} from './activity-log.js?v=789d865101';
+import {withLocalLock} from './locks.js?v=789d865101';
+import {base64Bytes, sniffType, cleanFileName, DEMO_MAX_FILE_BYTES, DEMO_MAX_STORED} from './attachments.js?v=789d865101';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
@@ -218,6 +219,19 @@ async function due(state) {
   }
   if (changed) save(state);
 }
+/** The demo's copy of an attached file: the same type check as the server, a
+ * smaller cap, and only the newest few kept, as data URLs in the snapshot. */
+function attachLocal(state, body) {
+  const bytes = base64Bytes(body?.data), name = cleanFileName(body?.name);
+  if (!bytes?.length) throw Object.assign(new Error('That file is empty.'), {status: 400});
+  if (bytes.length > DEMO_MAX_FILE_BYTES) throw Object.assign(new Error('The demo keeps files up to 512 KB. The Node build takes up to 5 MB.'), {status: 413});
+  const type = sniffType(bytes, name);
+  if (!type) throw Object.assign(new Error('Attach an image (PNG, JPEG, WebP or GIF) or a text file (.txt, .md, .csv, .json).'), {status: 415});
+  const ref = {id: crypto.randomUUID(), name, type, size: bytes.length};
+  state.attachments = Object.fromEntries([...Object.entries(state.attachments || {}), [ref.id, {...ref, url: `data:${type};base64,${String(body.data).replace(/^data:[^,]*,/, '')}`}]].slice(-DEMO_MAX_STORED));
+  return ref;
+}
+
 async function localApi(path, method = 'GET', body = {}) {
   return withLocalLock('state', () => localApiUnlocked(path, method, body));
 }
@@ -347,6 +361,7 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
   if ((m = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/retry$/)) && method === 'POST') { const r = retryTask(state, m[1]); save(state); return r; }
   if ((m = path.match(/^\/api\/tasks\/([a-f0-9-]+)$/)) && method === 'DELETE') { const r = cancelTask(state, m[1]); save(state); return r; }
   // Conversation history, stored with the rest of the browser-local state.
+  if (path === '/api/attachments' && method === 'POST') { const r = attachLocal(state, body); save(state); return r; }
   if ((m = path.match(/^\/api\/chats\/([a-z0-9-]+)\/messages$/)) && method === 'POST') { const r = addChatMessages(state, m[1], Array.isArray(body.messages) ? body.messages : [body]); save(state); return r; }
   if ((m = path.match(/^\/api\/chats\/([a-z0-9-]+)$/)) && method === 'DELETE') { const r = clearChat(state, m[1]); cancelRunsForChat(state, m[1], 'Chat cleared.'); save(state); return r; }
   // Durable memory: the rulebook and chat recap are part of local state, so a

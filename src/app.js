@@ -41,6 +41,8 @@ import {aiRoutes} from './routes-ai.js';
 import {memoryRoutes} from './routes-memory.js';
 import {connectorRoutes} from './routes-connectors.js';
 import {liveRoutes} from './routes-live.js';
+import {fileRoutes} from './routes-files.js';
+import {pruneAttachments} from './attachments.js';
 
 const PUBLIC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'shared');
 
@@ -54,8 +56,9 @@ function startAgentRetention(ws, intervalMs = 86400000) {
     if (busy || stopped) return;
     busy = true;
     try {
-      const report = ws.trackWork ? await ws.trackWork(async () => ws.pruneAgentRows()) : ws.pruneAgentRows();
-      if (report.pairingCodes || report.agentTasks) console.log(`Retention pruned ${report.pairingCodes} pairing code(s), ${report.agentTasks} agent task record(s).`);
+      const sweep = () => ({...ws.pruneAgentRows(), files: pruneAttachments(ws)});
+      const report = ws.trackWork ? await ws.trackWork(async () => sweep()) : sweep();
+      if (report.pairingCodes || report.agentTasks || report.files) console.log(`Retention pruned ${report.pairingCodes} pairing code(s), ${report.agentTasks} agent task record(s), ${report.files} unused attachment(s).`);
     } catch (e) { if (e?.status !== 503) console.error('Agent retention error:', e.message); }
     finally { busy = false; }
   };
@@ -138,6 +141,7 @@ export function createApp({store, auth, workspaces, push, version}) {
   memoryRoutes(router);
   connectorRoutes(router, app);
   liveRoutes(router, app);
+  fileRoutes(router);
 
   async function api(req, res, u) {
     const found = router.find(req.method, u.pathname), access = found?.route.access;
@@ -178,6 +182,8 @@ export function createApp({store, auth, workspaces, push, version}) {
       ? await scope.trackWork(invoke)
       : await invoke();
     const {status, body, headers} = isReply(result) ? result : {status: 200, body: result, headers: {}};
+    // A file (an attachment) goes out as its bytes with the headers its route chose.
+    if (Buffer.isBuffer(body)) { res.writeHead(status, {...SECURITY, ...headers}); return res.end(req.method === 'HEAD' ? undefined : body); }
     if (req.method === 'HEAD') { res.writeHead(status, {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...SECURITY, ...headers}); return res.end(); }
     return send(res, status, body, headers);
   }

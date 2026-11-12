@@ -95,6 +95,8 @@ export const changed = (scope = 'all') => { for (const fn of listeners) fn(scope
 
 // Sent in the background, without the busy bar: a message is on screen already.
 const outbox = createOutbox((key, messages) => window.AGENT_API(`/api/chats/${key}/messages`, 'POST', {messages}));
+/** Wait for the queued chat lines to reach the server. */
+export const flushChats = () => outbox.settle();
 // A group run polls /api/state on its own while the workspace poll does too.
 // Whichever response returns last used to win, so an older snapshot could wipe
 // a browser card or a follow-up line and leave the slow poll in charge.
