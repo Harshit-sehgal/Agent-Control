@@ -3,10 +3,10 @@
  * picked (`POST /api/attachments`, or the demo's own copy in shared/local-api.js),
  * so Send only carries the references. A removed chip's upload is left for the
  * server's daily sweep. What may be attached is shared/attachments.js. */
-import {ACCEPT, MAX_FILES, MAX_FILE_BYTES, DEMO_MAX_FILE_BYTES, pickProblem, isImage, sizeLabel} from './attachments.js?v=09588be5e2';
-import {esc, icon} from './ui-kit.js?v=09588be5e2';
-import {api, isStaticDemo} from './ui-store.js?v=09588be5e2';
-import {toast} from './ui-dialogs.js?v=09588be5e2';
+import {ACCEPT, MAX_FILES, MAX_FILE_BYTES, DEMO_MAX_FILE_BYTES, pickProblem, isImage, sizeLabel} from './attachments.js?v=d6e4136826';
+import {esc, icon} from './ui-kit.js?v=d6e4136826';
+import {api, isStaticDemo} from './ui-store.js?v=d6e4136826';
+import {toast} from './ui-dialogs.js?v=d6e4136826';
 
 /** {key, name, type, size, preview, ref, failed} per picked file, for the open chat. */
 let picked = [];

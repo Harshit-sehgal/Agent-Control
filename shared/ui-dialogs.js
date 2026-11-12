@@ -6,7 +6,8 @@ import {esc, btn, iconBtn} from './ui-kit.js';
 const el = id => document.getElementById(id);
 let toastTimer = null, lastFocus = null, settle = null, dismiss = null;
 
-export function toast(message, error = false) {
+/** `action` ({label, run}) adds one button (Undo) and keeps the toast up longer; a tap runs it once and hides the toast. */
+export function toast(message, error = false, action = null) {
   const node = el('toast'); if (!node) return;
   // #toast is the one node for success and failure alike, and index.html ships it
   // as role=status/polite. A failed destructive action must not queue politely
@@ -21,7 +22,16 @@ export function toast(message, error = false) {
   // channel failure is reported on.
   node.classList.remove('hidden');
   node.textContent = message; node.classList.toggle('error', Boolean(error));
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => node.classList.add('hidden'), 3800);
+  if (action?.label && typeof action.run === 'function') {
+    const button = document.createElement('button');
+    button.type = 'button'; button.className = 'toast-act'; button.textContent = action.label;
+    button.addEventListener('click', () => {
+      node.classList.add('hidden');
+      Promise.resolve().then(action.run).catch(e => toast(e?.message || 'That did not work.', true));
+    }, {once: true});
+    node.append(' ', button);
+  }
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => node.classList.add('hidden'), action ? 8000 : 3800);
 }
 
 // Dialogs declare aria-modal, so they must hand focus back to the control that

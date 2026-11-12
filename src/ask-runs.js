@@ -25,9 +25,9 @@ async function open(store, requestId, {actor, runtime}) {
 
 /** Record the owner's answer to one ask, then do what it means. Throws 400 for an answer that is not
  * one (or Always allow for a payment), 404 for an ask that does not exist, 409 for one already answered. */
-export async function answerAskFlow(store, askId, answer, {actor = null, runtime, executor} = {}) {
+export async function answerAskFlow(store, askId, answer, {actor = null, runtime, executor, until = null} = {}) {
   const out = await store.update(s => {
-    const result = answerAsk(s, askId, answer);
+    const result = answerAsk(s, askId, answer, undefined, {until});
     const request = (s.browserRequests || []).find(r => r.id === result.ask.requestId) || null;
     // Declined: the page it wanted is never opened.
     if (answer === 'decline' && request?.status === 'pending') denyBrowserRequest(s, request.id);
@@ -38,7 +38,8 @@ export async function answerAskFlow(store, askId, answer, {actor = null, runtime
   if (out.resumeRunId) resumed = await resumeAfterAsks(store, out.resumeRunId, {executor, runtime, actor});
   // A conversation with no run to park (a 1:1 chat): the answer itself is the approval.
   else if (!ask.runId && answer !== 'decline' && out.requestId) { await open(store, out.requestId, {actor, runtime}); resumed = true; }
-  return {ask, resumed};
+  // `undo`: the rules an Always allow replaced, for the owner's Undo (POST /api/permissions/restore).
+  return {ask, resumed, ...(out.undo ? {undo: out.undo} : {})};
 }
 
 /** Decline every ask whose 24 hours are up, release the pages it held, and let its run take its

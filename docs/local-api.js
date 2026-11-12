@@ -4,26 +4,27 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {briefingMessage} from './briefing.js?v=09588be5e2';
-import {addTemplate, removeTemplate} from './templates.js?v=09588be5e2';
-import {initialState, cleanText} from './core.js?v=09588be5e2';
-import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=09588be5e2';
-import {RETENTION_DEFAULTS} from './retention.js?v=09588be5e2';
-import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=09588be5e2';
-import {addChatMessages, clearChat} from './chats.js?v=09588be5e2';
-import {publicMemory, rememberFromOwner, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=09588be5e2';
-import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=09588be5e2';
-import {createThread, titleFrom} from './threads.js?v=09588be5e2';
-import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=09588be5e2';
-import {simulateGroup} from './group-simulator.js?v=09588be5e2';
-import {BUSY_STATUSES} from './run-state.js?v=09588be5e2';
-import {botSettings} from './bot-settings.js?v=09588be5e2';
-import {denyBrowserRequest} from './bot-browser.js?v=09588be5e2';
-import {answerAsk, expireAsks, orphanAsks, setGrant, setAskBasics} from './asks.js?v=09588be5e2';
-import {setLimits} from './limits.js?v=09588be5e2';
-import {activityPage} from './activity-log.js?v=09588be5e2';
-import {withLocalLock} from './locks.js?v=09588be5e2';
-import {base64Bytes, sniffType, cleanFileName, DEMO_MAX_FILE_BYTES, DEMO_MAX_STORED} from './attachments.js?v=09588be5e2';
+import {briefingMessage} from './briefing.js?v=d6e4136826';
+import {addTemplate, removeTemplate} from './templates.js?v=d6e4136826';
+import {initialState, cleanText} from './core.js?v=d6e4136826';
+import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=d6e4136826';
+import {RETENTION_DEFAULTS} from './retention.js?v=d6e4136826';
+import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=d6e4136826';
+import {addChatMessages, clearChat} from './chats.js?v=d6e4136826';
+import {publicMemory, rememberFromOwner, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=d6e4136826';
+import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=d6e4136826';
+import {createThread, titleFrom} from './threads.js?v=d6e4136826';
+import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=d6e4136826';
+import {simulateGroup} from './group-simulator.js?v=d6e4136826';
+import {BUSY_STATUSES} from './run-state.js?v=d6e4136826';
+import {botSettings} from './bot-settings.js?v=d6e4136826';
+import {denyBrowserRequest} from './bot-browser.js?v=d6e4136826';
+import {answerAsk, expireAsks, orphanAsks, setGrant, setAskBasics, restorePermissions} from './asks.js?v=d6e4136826';
+import {applyPreset} from './presets.js?v=d6e4136826';
+import {setLimits} from './limits.js?v=d6e4136826';
+import {activityPage} from './activity-log.js?v=d6e4136826';
+import {withLocalLock} from './locks.js?v=d6e4136826';
+import {base64Bytes, sniffType, cleanFileName, DEMO_MAX_FILE_BYTES, DEMO_MAX_STORED} from './attachments.js?v=d6e4136826';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
@@ -148,13 +149,13 @@ function settleParkedRun(state, runId, ask) {
 }
 
 /** One answer to an ask, the same rules and the same reply shape as the server's `POST /api/asks/:id`. */
-function answerAskLocal(state, askId, answer) {
-  const out = answerAsk(state, askId, answer);
+function answerAskLocal(state, askId, answer, until = null) {
+  const out = answerAsk(state, askId, answer, undefined, {until});
   // A page the owner turned down is never opened.
   const request = (state.browserRequests || []).find(r => r.id === out.ask.requestId);
   if (answer === 'decline' && request?.status === 'pending') denyBrowserRequest(state, request.id);
   if (out.resumeRunId) settleParkedRun(state, out.resumeRunId, out.ask);
-  return {ask: out.ask, resumed: Boolean(out.resumeRunId)};
+  return {ask: out.ask, resumed: Boolean(out.resumeRunId), ...(out.undo ? {undo: out.undo} : {})};
 }
 
 /** One offline coordination run, behind the routes the Node orchestrator serves.
@@ -343,10 +344,12 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
     save(state); return {runId: run.id, status: run.status};
   }
   // The owner answers an ask, and sets what a bot may do without asking.
-  if ((m = path.match(/^\/api\/asks\/([a-z0-9-]+)$/)) && method === 'POST') { const r = answerAskLocal(state, m[1], body?.answer); save(state); return r; }
+  if ((m = path.match(/^\/api\/asks\/([a-z0-9-]+)$/)) && method === 'POST') { const r = answerAskLocal(state, m[1], body?.answer, body?.until ?? null); save(state); return r; }
   if (path === '/api/permissions/basics' && method === 'POST') { const r = setAskBasics(state, body?.ask); save(state); return r; }
+  if (path === '/api/permissions/preset' && method === 'POST') { const r = applyPreset(state, body?.preset); save(state); return r; }
+  if (path === '/api/permissions/restore' && method === 'POST') { const r = restorePermissions(state, body); save(state); return r; }
   if (path === '/api/limits' && method === 'POST') { const r = setLimits(state, body); save(state); return r; }
-  if (path === '/api/grants' && method === 'POST') { const g = setGrant(state, String(body?.botId ?? ''), String(body?.action ?? ''), body?.scope ?? '', body?.choice); save(state); return g; }
+  if (path === '/api/grants' && method === 'POST') { const g = setGrant(state, String(body?.botId ?? ''), String(body?.action ?? ''), body?.scope ?? '', body?.choice, undefined, {until: body?.until ?? null}); save(state); return g; }
   if (path === '/api/bots/run') throw new Error('Running AI bots requires the separate Node backend, not GitHub Pages.');
   // The old approve and deny routes answer the request's ask (Allow, Decline) for one phase; a request with no ask cannot be opened here.
   if ((m = path.match(/^\/api\/browser-requests\/([a-z0-9-]+)\/(approve|deny)$/)) && method === 'POST') {

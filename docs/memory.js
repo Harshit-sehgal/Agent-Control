@@ -17,7 +17,7 @@
  * survives even with no AI provider. `mergeConsolidation` applies the result of
  * one model-written consolidation pass. Both are pure and bounded.
  */
-import {cleanText} from './core.js?v=09588be5e2';
+import {cleanText} from './core.js?v=d6e4136826';
 
 export const MEMORY_VERSION = 1;
 export const MAX_RULES = 50;

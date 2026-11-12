@@ -7,7 +7,8 @@
  * An ask is a line in a chat (`{kind: 'ask', askId, text}`) whose status lives in
  * `state.asks`, so answering never rewrites a line. A grant is `{botId, action,
  * scope, choice}` in `state.grants`. */
-import {ASK_ANSWER_LABELS, GRANT_LABELS, ASK_ACTIONS, askChoices, acrossSites, grantChoices, answeredText, grantFor, isAskAction, scopeOf} from './asks.js';
+import {ASK_ANSWER_LABELS, GRANT_LABELS, ASK_ACTIONS, askChoices, acrossSites, grantChoices, answeredText, grantFor, isAskAction, scopeOf, grantEnded} from './asks.js';
+import {limitsOf, FAIL_STREAK} from './limits.js';
 
 export const PAUSE_TEXT = 'All bots are paused. Nothing runs until you resume.';
 /** The banner while everything bots start is paused; `resume` says whether this person may lift it. */
@@ -67,14 +68,39 @@ const rank = action => { const i = ASK_ACTIONS.indexOf(action); return i < 0 ? A
 export function grantRows(state, botId) {
   const bot = roster(state).find(b => b.id === botId);
   if (!bot) return [];
-  const row = (action, scope, choice) => ({
-    botId, botName: bot.name, action, scope, choice, label: grantWhat(action, scope),
+  const row = (action, scope, choice, until) => ({
+    botId, botName: bot.name, action, scope, choice, label: grantWhat(action, scope), until: choice === 'always' ? until || null : null,
     choices: grantChoices(action, {site: Boolean(scope)}).map(id => ({id, label: GRANT_LABELS[id], on: id === choice})),
   });
-  return (state.grants || []).filter(g => g?.botId === botId && isAskAction(g.action))
-    .map(g => row(g.action, g.scope || '', grantFor(state, botId, g.action, g.scope || '') || 'ask'))
+  // An Always allow whose end has passed is no rule any more (asks.js), so it is no row either.
+  return (state.grants || []).filter(g => g?.botId === botId && isAskAction(g.action) && !grantEnded(g))
+    .map(g => row(g.action, g.scope || '', grantFor(state, botId, g.action, g.scope || '') || 'ask', g.until))
     .sort((a, b) => rank(a.action) - rank(b.action) || a.action.localeCompare(b.action) || a.scope.localeCompare(b.scope));
 }
+/** One bot's permissions in plain words, for the top of its Permissions page: what it may do without asking,
+ * what asks, what it may not do, and the limits on every run. Each entry of `free`, `asks` and `denied` is
+ * {text, until?}; `limits` is sentences. Derived from the same rules `verdict` reads (BASIC_KIT, basic access,
+ * `askBasics`, Hands-off, this bot's grants) and from shared/limits.js. Null for a bot that is not there. */
+export function permissionSummary(state, botId) {
+  const rows = grantRows(state, botId);
+  if (!roster(state).some(b => b.id === botId)) return null;
+  const ask = Boolean(state?.askBasics), hands = state?.handsOff === true;
+  const of = choice => rows.filter(r => r.choice === choice).map(r => ({text: r.label, ...(r.until ? {until: r.until} : {})}));
+  const basics = {text: 'Open web pages and read connected apps'};
+  const free = [{text: 'Chat, hand work to its team, make bots and set schedules'}, ...(ask ? [] : [basics]),
+    ...(hands ? [{text: 'Send, post and change connected apps on any site'}] : []), ...of('always')];
+  const asks = [...(ask ? [basics] : []), ...(hands ? [] : [{text: 'Send, post or change a connected app'}]),
+    {text: 'Delete anything'}, {text: 'Pay for anything, every time'}, ...of('ask')];
+  const l = limitsOf(state), limits = [];
+  if (l.pages) limits.push(`At most ${l.pages} pages at once.`);
+  if (l.rounds) limits.push(`At most ${l.rounds} look-ups before answering.`);
+  if (l.steps) limits.push(`At most ${l.steps} bot hand-offs per message.`);
+  if (l.askCheckpoints) limits.push('Long tasks between bots pause and ask you.');
+  if (!limits.length) limits.push(`No limits on pages, look-ups or hand-offs. A run stops after ${FAIL_STREAK} failed rounds in a row.`);
+  if (state?.guard?.paused) limits.unshift('All bots are paused right now.');
+  return {free, asks, denied: of('deny'), limits};
+}
+
 /** Every rule of every bot, in roster order. */
 export const allGrantRows = state => roster(state).flatMap(b => grantRows(state, b.id));
 

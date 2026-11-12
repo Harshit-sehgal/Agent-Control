@@ -7,29 +7,31 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=09588be5e2';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=09588be5e2';
-import {requestOfMessage} from './bot-browser.js?v=09588be5e2';
-import {validHttpUrl} from './core.js?v=09588be5e2';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=09588be5e2';
-import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=09588be5e2';
-import {isPrimary} from './company.js?v=09588be5e2';
-import {hasJob, modelChip} from './ui-profile-model.js?v=09588be5e2';
-import {scheduleTaskBody} from './schedules.js?v=09588be5e2';
-import {feed, fileStrip} from './ui-feed.js?v=09588be5e2';
-import {attachButton, chipsSlot, wireAttach} from './ui-attach.js?v=09588be5e2';
-import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js?v=09588be5e2';
-import {askCard} from './ui-asks.js?v=09588be5e2';
-import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=09588be5e2';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=09588be5e2';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=09588be5e2';
-import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=09588be5e2';
-import {toast, confirmSheet} from './ui-dialogs.js?v=09588be5e2';
-import {siteChip, thumbSlot} from './ui-computer-view.js?v=09588be5e2';
-import {cliChoice, googleCard} from './ui-connect-model.js?v=09588be5e2';
-import {connectAppNow} from './ui-connect.js?v=09588be5e2';
-import {appById} from './app-catalog.js?v=09588be5e2';
-import {templateChipsHtml, templateButton} from './ui-templates.js?v=09588be5e2';
+import {OFFJOB_CHOICES} from './off-job.js?v=d6e4136826';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=d6e4136826';
+import {requestOfMessage} from './bot-browser.js?v=d6e4136826';
+import {validHttpUrl} from './core.js?v=d6e4136826';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=d6e4136826';
+import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=d6e4136826';
+import {isPrimary} from './company.js?v=d6e4136826';
+import {hasJob, modelChip} from './ui-profile-model.js?v=d6e4136826';
+import {scheduleTaskBody} from './schedules.js?v=d6e4136826';
+import {feed, fileStrip} from './ui-feed.js?v=d6e4136826';
+import {attachButton, chipsSlot, wireAttach} from './ui-attach.js?v=d6e4136826';
+import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js?v=d6e4136826';
+import {askCard} from './ui-asks.js?v=d6e4136826';
+import {UNTIL_CHOICES, untilFor} from './asks.js?v=d6e4136826';
+import {undoToast} from './ui-settings.js?v=d6e4136826';
+import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=d6e4136826';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=d6e4136826';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=d6e4136826';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=d6e4136826';
+import {toast, confirmSheet} from './ui-dialogs.js?v=d6e4136826';
+import {siteChip, thumbSlot} from './ui-computer-view.js?v=d6e4136826';
+import {cliChoice, googleCard} from './ui-connect-model.js?v=d6e4136826';
+import {connectAppNow} from './ui-connect.js?v=d6e4136826';
+import {appById} from './app-catalog.js?v=d6e4136826';
+import {templateChipsHtml, templateButton} from './ui-templates.js?v=d6e4136826';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -131,7 +133,9 @@ function askEntry({message: m}, conv) {
   if (!card.open) return `<div class="cv-note cv-asked" data-ask="${esc(m.askId)}"><span>${esc(card.text)}</span></div>`;
   const bot = findBot(card.botId) || askerOf(conv), name = card.botName;
   const choose = ({id, label, primary}) => btn(label, 'ask-answer', {id: card.askId, small: true, kind: primary ? 'primary' : 'quiet', data: {choice: id}});
-  const acts = canWrite() ? `<div class="acts">${card.choices.map(choose).join('')}</div>` : '<small>Only a member can answer.</small>';
+  // How long an Always allow lasts: no end by default, or an hour, or the rest of today (asks.js untilFor).
+  const lasts = card.choices.some(c => c.id === 'always') ? `<select class="ask-for" data-for="${esc(card.askId)}" aria-label="How long Always allow lasts">${UNTIL_CHOICES.map(([id, label]) => `<option value="${id}">${esc(label)}</option>`).join('')}</select>` : '';
+  const acts = canWrite() ? `<div class="acts">${card.choices.map(choose).join('')}${lasts}</div>` : '<small>Only a member can answer.</small>';
   const target = card.target ? `<a href="${esc(safeHref(card.target))}" target="_blank" rel="noopener noreferrer">${esc(card.target)}</a>` : '';
   // The whole message a send or draft would carry, folded under the sentence so the owner can read every word before saying yes.
   const body = card.body ? `<details class="cv-ask-body"><summary>Full message${icon('chevron', 13)}</summary><pre>${esc(card.body)}</pre></details>` : '';
@@ -434,9 +438,13 @@ async function answerAsk(id, answer) {
   // Always allow on a payment lets the bot pay on that site without asking again: confirm it first.
   const card = askCard(store.state, {askId: id});
   if (answer === 'always' && card.confirmAlways && !(await confirmSheet('Always allow payments here?', {confirm: 'Always allow', danger: true, detail: card.confirmAlways}))) return;
-  const {ask} = await api(`/api/asks/${encodeURIComponent(id)}`, 'POST', {answer});
+  const lasts = answer === 'always' ? [...document.querySelectorAll('.ask-for')].find(x => x.dataset.for === id)?.value || 'always' : 'always';
+  const until = untilFor(lasts);
+  const {ask, undo} = await api(`/api/asks/${encodeURIComponent(id)}`, 'POST', {answer, ...(until ? {until} : {})});
   await sync();
-  toast(answer === 'decline' ? 'Not allowed.' : answer === 'always' ? `${findBot(ask?.botId)?.name || 'The bot'} may always do this.` : 'Allowed once.');
+  if (answer !== 'always') { toast(answer === 'decline' ? 'Not allowed.' : 'Allowed once.'); return; }
+  const name = findBot(ask?.botId)?.name || 'The bot';
+  undoToast(lasts === '1h' ? `${name} may do this for the next hour.` : lasts === 'today' ? `${name} may do this until the end of today.` : `${name} may always do this.`, undo);
 }
 
 export const conversationActions = {

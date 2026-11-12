@@ -25,7 +25,7 @@
 import {companyRoute} from './ui-company.js';
 import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js';
 import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js';
-import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, renderPause, closeSearch, homeView} from './ui-shell.js';
+import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, renderPause, closeSearch, homeView, setupCardHtml} from './ui-shell.js';
 import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js';
 import {profileViews, wirePages} from './ui-profile.js';
 import {wireGestures, gesturesBusy} from './ui-gestures.js';
@@ -81,7 +81,7 @@ function renderRoute() {
     lastDesk = desk;
     if (route.bot || route.thread) conversationShell(conversation());
     else if (route.newThread) main.innerHTML = newThreadView();
-    else if (route.home) main.innerHTML = desk ? `<div class="rail-none"><p>Select a chat</p><button type="button" class="link rail-none-go" data-action="new-thread">or start a new thread</button></div>` : homeView();
+    else if (route.home) main.innerHTML = desk ? `<div class="rail-none">${setupCardHtml()}<p>Select a chat</p><button type="button" class="link rail-none-go" data-action="new-thread">or start a new thread</button></div>` : homeView();
     else main.innerHTML = pageView(route);
     lastHome = main.innerHTML;
     main.classList.remove('view-enter'); void main.offsetWidth; main.classList.add('view-enter');

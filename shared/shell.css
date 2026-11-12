@@ -477,3 +477,30 @@ body[data-paused] .chrome{--pad-t:calc(var(--pause-h) + env(safe-area-inset-top,
 .tp-row{display:flex;gap:8px;align-items:center}
 .tp-row .btn{justify-content:flex-start}
 @media(pointer:coarse){.cv-tpl{width:44px;height:44px}}
+
+/* The first-run checklist (ui-shell setupCardHtml): one quiet card, each step a row that goes where it is done. */
+.su{margin:8px 4px 14px;padding:12px 8px 6px;border-radius:var(--r-box);background:var(--surface);border:1px solid var(--line);text-align:left;color:var(--text)}
+.rail-none .su{width:min(420px,90vw);margin:0 0 18px}
+.su-head{display:flex;align-items:center;gap:8px;padding:0 6px 6px}
+.su-head b{font-size:15px;font-weight:600}
+.su-head span{flex:1;font-size:13px;color:var(--muted)}
+.su-x{display:grid;place-items:center;width:32px;height:32px;border-radius:50%;color:var(--muted)}
+.su-x:hover{background:var(--raised)}
+.su ol{list-style:none;margin:0;padding:0}
+.su-i{width:100%;display:flex;align-items:center;gap:10px;min-height:44px;padding:6px;border-radius:12px;font-size:14px;text-align:left;color:var(--text)}
+.su-i:hover{background:var(--raised)}
+.su-i span{flex:1}
+.su-i.done{color:var(--muted)}
+.su-i.done span{text-decoration:line-through;text-decoration-color:var(--line)}
+.su-c{flex:none;display:grid;place-items:center;width:22px;height:22px;border-radius:50%;border:1.5px solid var(--control-hi)}
+.su-i.done .su-c{border-color:transparent;background:var(--good-bg);color:var(--good)}
+@media(pointer:coarse){.su-x{width:44px;height:44px}}
+
+/* How long an Always allow lasts, beside its button on an ask card. */
+.ask-for{min-height:32px;padding:0 8px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--text);font:inherit;font-size:13px}
+@media(pointer:coarse){.ask-for{min-height:44px}}
+
+/* The toast's one action (Undo). */
+.toast:has(.toast-act){pointer-events:none}
+.toast-act{pointer-events:auto;margin-left:10px;padding:2px 4px;font:inherit;font-weight:700;color:inherit;text-decoration:underline;text-underline-offset:3px}
+@media(pointer:coarse){.toast-act{min-height:44px}}
