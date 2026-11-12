@@ -8,8 +8,8 @@
  *
  * `state.limits = {pages, rounds, steps, askCheckpoints}`. Pure and browser-safe.
  */
-import {fail} from './errors.js?v=85901eebcd';
-import {logActivity} from './activity-log.js?v=85901eebcd';
+import {fail} from './errors.js?v=eab83021bd';
+import {logActivity} from './activity-log.js?v=eab83021bd';
 
 export const BACKSTOP = {pages: 8, rounds: 25, steps: 30};
 export const FAIL_STREAK = 3;
@@ -31,6 +31,21 @@ export const roundsCap = cap('rounds');
 export const stepsCap = cap('steps');
 
 export const limitWords = value => (value == null ? 'No limit' : String(value));
+
+/** What a bot is told about this message's budget, so it plans its pages and hand-offs instead of running into a
+ * limit: pages one reply may ask for, rounds of pages and of connector calls used against the cap, team steps used
+ * against the run's own step limit, and the pages this run has opened. */
+export function runBudget(state, run = {}) {
+  const rounds = roundsCap(state), used = value => Math.min(rounds, Math.max(0, Number(value) || 0));
+  return {
+    pagesPerReply: pagesCap(state),
+    pageRounds: {used: used(run.browserDepth), of: rounds},
+    connectorRounds: {used: used(run.connectorDepth), of: rounds},
+    steps: {used: Math.max(0, Number(run.currentStep) || 0), of: Math.min(Number(run.maxSteps) || stepsCap(state), stepsCap(state))},
+    pagesOpened: (state?.browserRequests || []).filter(r => run.id && r.runId === run.id).length,
+    note: 'Plan the work to finish inside this budget: ask for the pages you need together, and answer the owner before the rounds or steps run out.',
+  };
+}
 
 /** Change some limits: a number from 1 to the backstop, or null for no limit; askCheckpoints true or false. */
 export function setLimits(state, body = {}) {

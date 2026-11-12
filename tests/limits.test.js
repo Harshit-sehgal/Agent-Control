@@ -38,3 +38,28 @@ test('limit words for Settings', () => {
   assert.equal(limitWords(null), 'No limit');
   assert.equal(limitWords(3), '3');
 });
+
+test('a bot is told its budget for this message: pages per reply, rounds and steps used against the limits', async () => {
+  const {runBudget} = await import('../shared/limits.js');
+  const s = {limits: {pages: 3, rounds: 4}, browserRequests: [{runId: 'r1'}, {runId: 'r1'}, {runId: 'other'}]};
+  const budget = runBudget(s, {id: 'r1', browserDepth: 2, connectorDepth: 1, currentStep: 1, maxSteps: 5});
+  assert.equal(budget.pagesPerReply, 3);
+  assert.deepEqual(budget.pageRounds, {used: 2, of: 4});
+  assert.deepEqual(budget.connectorRounds, {used: 1, of: 4});
+  assert.deepEqual(budget.steps, {used: 1, of: 5});
+  assert.equal(budget.pagesOpened, 2);
+  assert.match(budget.note, /plan/i);
+  // The last-call marker never reads as more rounds than the limit.
+  assert.equal(runBudget({}, {id: 'x', browserDepth: 1e6}).pageRounds.used, BACKSTOP.rounds);
+});
+
+test('the envelope each bot gets carries that budget', async t => {
+  const {company, model, ask} = await import('./run-fixture.js');
+  const {store, ids} = await company(t);
+  const ai = model({Scholar: 'Done.'});
+  await ask(store, {message: 'Summarise the paper', to: ids.scholar, executor: ai.executor});
+  const [envelope] = ai.of('Scholar');
+  assert.equal(envelope.budget.steps.used, 0);
+  assert.ok(envelope.budget.steps.of >= 1);
+  assert.equal(envelope.budget.pagesPerReply, BACKSTOP.pages);
+});

@@ -262,3 +262,16 @@ test('a thread that makes a bot for a job is named by the job, not the hiring', 
   assert.equal(titleFrom('Make a bot'), 'Make a bot');
   assert.equal(titleFrom('Make a writer bot and a researcher bot'), 'Make a writer bot');
 });
+
+test('a thread a bot proposed keeps the title it named, on both builds', async t => {
+  const model = await provider(['On it.']);
+  t.after(model.close);
+  const store = await workspace(t);
+  const body = {message: 'Find three freelance designers in Pune.', title: 'Hire a designer'};
+  const {thread} = (await router().find('POST', '/api/threads').route.handler({store, params: {}, body: async () => body, actor: {email: 'owner@example.test'}})).body;
+  assert.equal(thread.name, 'Hire a designer');
+  const map = new Map();
+  storage = {map, getItem: key => map.get(key) ?? null, setItem: (key, value) => map.set(key, String(value))};
+  const local = await globalThis.window.AGENT_LOCAL_API('/api/threads', 'POST', body);
+  assert.equal(local.thread.name, 'Hire a designer');
+});

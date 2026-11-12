@@ -22,7 +22,7 @@
  */
 import {cleanText, validHttpUrl} from './core.js';
 import {fail} from './errors.js';
-import {decide, createAsk, scopeOf} from './asks.js';
+import {decide, createAsk, scopeOf, declinedNeed} from './asks.js';
 import {controlFence} from './reply-blocks.js';
 import {BACKSTOP, pagesCap, roundsCap} from './limits.js';
 import {appForHost} from './app-catalog.js';
@@ -504,7 +504,7 @@ export function runPrivateHosts(state, runId) {
     .map(r => hostOf(r.result?.finalUrl || r.url)).filter(host => PRIVATE_HOSTS.test(host) || signedIn.has(host)));
 }
 
-export function recordBrowserRequests(state, {bot, groupId, chatKey, output, depth = 0, skipUrls = [], runId = null, unattended = false, closed = false, makeId = () => crypto.randomUUID(), now = new Date().toISOString()}) {
+export function recordBrowserRequests(state, {bot, groupId, chatKey, output, depth = 0, skipUrls = [], runId = null, unattended = false, closed = false, declined = [], makeId = () => crypto.randomUUID(), now = new Date().toISOString()}) {
   depth = Math.max(0, Math.min(MAX_BROWSER_DEPTH, Number(depth) || 0));
   const rounds = roundsCap(state), perReply = pagesCap(state);
   const all = parseBrowserRequests(output), text = stripBrowserBlocks(output), lines = [], records = [], asks = [];
@@ -577,6 +577,9 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
       continue;
     }
     const needs = browserNeeds(item.request, labels);
+    // What the owner declined in this task stays declined; another site, or reading where a send was declined, goes on.
+    const no = declinedNeed(declined, needs);
+    if (no) { say(`${bot.name} asked to ${describe(item.request)}, but you declined that in this task, so it was not asked again.`); invalid.push(`the owner declined ${no.action === 'browser.use' ? 'opening' : no.action} ${hostOf(no.target)} in this task; do not ask for it again.`); continue; }
     // Per page: every site the request reaches that is not one of the run's private hosts asks, including one a
     // `navigate` step opens after a private first page.
     const decision = decide(state, bot, needs, {readPrivate: need => guarded && need.action === BROWSER_PERMISSION && !privateHosts.has(hostOf(need.target))});

@@ -5,14 +5,14 @@
  *
  * The look is Settings and Connectors: a titled card (`.st-g`, `.cd`), rows with a switch or a small
  * button on the right, a segmented pill for a choice of few, and one primary action per card. */
-import {esc, icon, btn, field, note, empty, tag, fullDate, textInput, switchBtn, modelSelect, effortPicker} from './ui-kit.js?v=85901eebcd';
-import {store, api, sync, isAdmin, isStaticDemo} from './ui-store.js?v=85901eebcd';
-import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=85901eebcd';
-import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js?v=85901eebcd';
-import {pushStatus, enablePush, disablePush} from './ui-push.js?v=85901eebcd';
-import {connectorsPanel, loadConnectors, connectActions, connectForms} from './ui-connect.js?v=85901eebcd';
-import {cliDraft, modelChoices, chosenModel, effortChoices, OTHER_MODEL, agentCliRows, agentPermissionRows, agentWorkLine, subscriptionLine, SIGN_IN_HINT} from './ui-connect-model.js?v=85901eebcd';
-import {LOCAL_CLI_ENGINES, LOCAL_CLI_KIND} from './ai-presets.js?v=85901eebcd';
+import {esc, icon, btn, field, note, empty, tag, fullDate, textInput, switchBtn, modelSelect, effortPicker} from './ui-kit.js?v=eab83021bd';
+import {store, api, sync, isAdmin, isStaticDemo} from './ui-store.js?v=eab83021bd';
+import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=eab83021bd';
+import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js?v=eab83021bd';
+import {pushStatus, enablePush, disablePush} from './ui-push.js?v=eab83021bd';
+import {connectorsPanel, loadConnectors, connectActions, connectForms} from './ui-connect.js?v=eab83021bd';
+import {cliDraft, modelChoices, chosenModel, effortChoices, OTHER_MODEL, agentCliRows, agentPermissionRows, agentWorkLine, subscriptionLine, SIGN_IN_HINT} from './ui-connect-model.js?v=eab83021bd';
+import {LOCAL_CLI_ENGINES, LOCAL_CLI_KIND} from './ai-presets.js?v=eab83021bd';
 
 /** The pages Settings can load into its body. Only the keys are read (is this a page?). */
 export const ADMIN_PAGES = {notifications: true, workspaces: true, team: true, agents: true, data: true, connectors: true, ai: true};

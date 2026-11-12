@@ -7,12 +7,12 @@
  *
  * Secrets: the Google client secret and an MCP address or header are typed here and sent once. The server never
  * answers with one, so nothing on this page can show or log one. */
-import {esc, icon, btn, note, tag, field, textInput} from './ui-kit.js?v=85901eebcd';
-import {api, sync, store, go} from './ui-store.js?v=85901eebcd';
-import {primaryOf} from './company.js?v=85901eebcd';
-import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=85901eebcd';
-import {mcpRows, googleCard, mcpDraft, statusOf} from './ui-connect-model.js?v=85901eebcd';
-import {catalogView, appById, appInputs, connectRequest, connectHow} from './app-catalog.js?v=85901eebcd';
+import {esc, icon, btn, note, tag, field, textInput} from './ui-kit.js?v=eab83021bd';
+import {api, sync, store, go} from './ui-store.js?v=eab83021bd';
+import {primaryOf} from './company.js?v=eab83021bd';
+import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=eab83021bd';
+import {mcpRows, googleCard, mcpDraft, statusOf} from './ui-connect-model.js?v=eab83021bd';
+import {catalogView, appById, appInputs, connectRequest, connectHow} from './app-catalog.js?v=eab83021bd';
 
 const GOOGLE_START = '/api/connectors/google/start';
 
@@ -215,6 +215,20 @@ export function connectorsPanel(res) {
 /** Fetch what the section shows. */
 export const loadConnectors = () => api('/api/connectors');
 
+/** One tap on Connect for a catalogue app, from the Connectors page or a bot's setup card. True when it connected
+ * here; false when the tap moved on to a sign-in page or the token sheet. `busy` runs just before a direct connect. */
+export async function connectAppNow(app, {busy = () => {}} = {}) {
+  const how = connectHow(app, {googleClient: Boolean(lastRes?.google?.configured)});
+  if (how === 'google') { window.location.assign(GOOGLE_START); return false; }
+  // The app's own server signs the owner in, like Google: bots then work on the account directly, with its tools.
+  if (how === 'oauth') { window.location.assign(`/api/connectors/mcp/start?app=${encodeURIComponent(app.id)}`); return false; }
+  if (how === 'gmail' || how === 'site') { await signIn(app); return false; }
+  if (how === 'form') { connectSheet(app); return false; }
+  busy();
+  await connectApp(app, Object.fromEntries(appInputs(app).filter(i => i.default).map(i => [i.key, i.default])));
+  return true;
+}
+
 /* ---------- what the buttons do ---------- */
 
 export const connectActions = {
@@ -227,15 +241,9 @@ export const connectActions = {
   'catalog-connect': async (button, ctx) => {
     const app = appById(button.dataset.id);
     if (!app) return;
-    const how = connectHow(app, {googleClient: Boolean(lastRes?.google?.configured)});
-    if (how === 'google') return void window.location.assign(GOOGLE_START);
-    // The app's own server signs the owner in, like Google: bots then work on the account directly, with its tools.
-    if (how === 'oauth') return void window.location.assign(`/api/connectors/mcp/start?app=${encodeURIComponent(app.id)}`);
-    if (how === 'gmail' || how === 'site') return signIn(app);
-    if (how === 'form') return connectSheet(app);
     const label = button.querySelector('span');
-    button.disabled = true; if (label) label.textContent = 'Connecting…';
-    try { await connectApp(app, Object.fromEntries(appInputs(app).filter(i => i.default).map(i => [i.key, i.default]))); }
+    const busy = () => { button.disabled = true; if (label) label.textContent = 'Connecting…'; };
+    try { if (!(await connectAppNow(app, {busy}))) return; }
     catch (error) { button.disabled = false; if (label) label.textContent = 'Connect'; throw error; }
     await sync(); await ctx.reload();
   },

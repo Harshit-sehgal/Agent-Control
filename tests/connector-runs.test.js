@@ -116,7 +116,8 @@ test('Review focus 3: a tool with no annotations asks as a write, and so does a 
 
 test('Decline never reaches the server; the bot gets one closing turn that says what was declined', async t => {
   const {store, ids, server} = await rig(t);
-  const ai = model({Mailroom: envelope => (envelope.declined ? `${fence('search_notes')}\nI could not look. ${envelope.declined}` : fence('add_note', {text: 'x'}))});
+  // The closing reply asks for the declined tool again: it stays declined for this task.
+  const ai = model({Mailroom: envelope => (envelope.declined ? `${fence('add_note', {text: 'y'})}\nI could not look. ${envelope.declined}` : fence('add_note', {text: 'x'}))});
   const run = await ask(store, {message: 'Save a note', to: ids.mail, executor: ai.executor});
   await answerAskFlow(store, store.read().asks[0].id, 'decline', {...OWNER, executor: ai.executor});
   await until(() => runOf(store, run.id).status === 'completed', 'the closing turn');
@@ -125,6 +126,20 @@ test('Decline never reaches the server; the bot gets one closing turn that says 
   assert.match(ai.of('Mailroom')[1].declined, /The owner declined: use Notes: add_note \(text: x\)/);
   assert.equal(store.read().asks.length, 1, 'the closing reply could not start another ask');
   assert.equal(ai.of('Mailroom')[1].connectorResult, undefined);
+});
+
+test('after a decline only that tool stays blocked: the bot still sees its connectors and may use another tool', async t => {
+  const {store, ids, server, notes} = await rig(t);
+  await store.update(s => { setGrant(s, ids.mail, 'connector.notes.read', notes.account, 'always', undefined, {log: false}); });
+  const ai = model({Mailroom: envelope => (envelope.connectorResult ? `Found: ${envelope.connectorResult}` : envelope.declined ? `${fence('search_notes', {query: 'rent'})}\nLooking instead.` : fence('add_note', {text: 'x'}))});
+  const run = await ask(store, {message: 'Save a note', to: ids.mail, executor: ai.executor});
+  await answerAskFlow(store, store.read().asks[0].id, 'decline', {...OWNER, executor: ai.executor});
+  await until(() => runOf(store, run.id).status === 'completed', 'the run');
+  const turns = ai.of('Mailroom');
+  assert.ok(turns[1].connectors?.length, 'the turn after a decline still lists the connectors');
+  assert.match(turns[1].declined, /add_note/, 'and says what was declined');
+  assert.deepEqual(toolCalls(server).map(c => c.message.params.name), ['search_notes'], 'the other tool ran; the declined one never did');
+  assert.match(turns[2].connectorResult, /search_notes/);
 });
 
 test('a Deny grant refuses without asking or calling, says where to change it, and never loops', async t => {

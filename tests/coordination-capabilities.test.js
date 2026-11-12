@@ -116,7 +116,7 @@ test('hand-offs switched off mean no roster and no ask block in the envelope', (
   assert.deepEqual(off.team, []);
 });
 
-test('a bot made in this run takes the work it was made for in the same run, and cannot make bots itself', async () => {
+test('a bot made in this run takes the work it was made for in the same run, and may make bots itself', async () => {
   const group = {id: 'g', name: 'G', bots: [bot('writer', 'Writer', {settings: {memory: false}})]};
   const said = [];
   await withStore(async store => {
@@ -126,13 +126,13 @@ test('a bot made in this run takes the work it was made for in the same run, and
       return 'Headlines: one, two.\n```create-bot\n{"name":"Grandchild","job":"Another bot made by a bot made a moment ago."}\n```';
     });
     const state = store.read();
-    assert.deepEqual(said, ['Writer', 'Tech scout'], 'the new bot answered in the run that made it');
+    assert.deepEqual(said, ['Writer', 'Tech scout', 'Grandchild'], 'each new bot answered in the run that made it');
     const names = state.groups.find(g => g.id === 'g').bots.map(b => b.name);
-    assert.deepEqual(names, ['Writer', 'Tech scout'], 'a bot made a moment ago makes no bots of its own in that run');
+    assert.deepEqual(names, ['Writer', 'Tech scout', 'Grandchild'], 'a bot made a moment ago may make a bot of its own in that run');
     assert.equal(state.groupRuns.find(r => r.id === 'run-new').status, 'completed');
     const chat = state.chats['team-g'].map(m => m.text).join('\n');
-    assert.doesNotMatch(chat, /```create-bot/, 'the refused block is not shown as text');
-    assert.match(chat, /cannot make bots of its own yet/);
+    assert.doesNotMatch(chat, /```create-bot/, 'the block is not shown as text');
+    assert.doesNotMatch(chat, /cannot make bots of its own yet/);
   }, {group, message: 'Tell me the tech news', runId: 'run-new'});
 });
 

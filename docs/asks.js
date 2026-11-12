@@ -21,9 +21,9 @@
  * Pure and browser-safe, like the other shared modules: the server and the
  * Pages demo share every rule here.
  */
-import {fail} from './errors.js?v=85901eebcd';
-import {cleanText} from './core.js?v=85901eebcd';
-import {logActivity} from './activity-log.js?v=85901eebcd';
+import {fail} from './errors.js?v=eab83021bd';
+import {cleanText} from './core.js?v=eab83021bd';
+import {logActivity} from './activity-log.js?v=eab83021bd';
 
 /** What every bot may do without a grant. */
 export const BASIC_KIT = ['bot.ask', 'bot.create', 'schedule.set'];
@@ -160,6 +160,11 @@ export function verdict(state, bot, action, target = '', {readPrivate = false} =
   if (choice === null && !state?.askBasics && isBasicAccess(action) && !readPrivate) return {verdict: 'allow', scope};
   return {verdict: 'ask', scope};
 }
+
+/** The need the owner already declined in this task, or null. `declined` is the run's [{action, scope}]: only that
+ * action on that site or account stays closed; everything else asks or goes as usual. */
+export const declinedNeed = (declined, needs) => (Array.isArray(declined) && declined.length
+  ? needs.find(n => declined.some(d => d?.action === n.action && (d.scope || '') === scopeOf(n))) || null : null);
 
 /** One action after another, riskiest first: any Deny stops it, otherwise the first one that is not
  * yet Always allow is what the owner is asked about. `needs` is [{action, target, detail}]. */

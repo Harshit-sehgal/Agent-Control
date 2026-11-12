@@ -1,21 +1,21 @@
 /** What the UI can do, as three lookup tables keyed by `data-action`, form id and
  * control id. app.js owns the DOM events and dispatches here; handlers throw on
  * failure and the dispatcher turns that into one toast. */
-import {store, api, sync, setTyping, conversation, findGroup, teamKey, recentRuns, chatKeyOf} from './ui-store.js?v=85901eebcd';
-import {groupSettings} from './bot-settings.js?v=85901eebcd';
-import {toast, closeSheet} from './ui-dialogs.js?v=85901eebcd';
-import {sendChat, streamGroupRun, rerun} from './ui-chat.js?v=85901eebcd';
-import {runWithTyping} from './run-follow.js?v=85901eebcd';
-import {whoosh, react} from './ui-fx.js?v=85901eebcd';
-import {shellActions} from './ui-shell.js?v=85901eebcd';
-import {conversationActions, conversationForms} from './ui-conversation.js?v=85901eebcd';
-import {profileActions, profileForms, profileChanges, lookChanged, nameTyped, adoptFirstMessage} from './ui-profile.js?v=85901eebcd';
-import {settingsActions, reloadAdminPage} from './ui-settings.js?v=85901eebcd';
-import {changePasswordSheet} from './ui-sheets.js?v=85901eebcd';
-import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=85901eebcd';
-import {takeoverActions, takeoverForms} from './ui-takeover.js?v=85901eebcd';
-import {computerActions, computerForms} from './ui-computer-view.js?v=85901eebcd';
-import {catalogSearch} from './ui-connect.js?v=85901eebcd';
+import {store, api, sync, setTyping, conversation, findGroup, teamKey, recentRuns, chatKeyOf} from './ui-store.js?v=eab83021bd';
+import {groupSettings} from './bot-settings.js?v=eab83021bd';
+import {toast, closeSheet} from './ui-dialogs.js?v=eab83021bd';
+import {sendChat, streamGroupRun, rerun} from './ui-chat.js?v=eab83021bd';
+import {runWithTyping} from './run-follow.js?v=eab83021bd';
+import {whoosh, react} from './ui-fx.js?v=eab83021bd';
+import {shellActions} from './ui-shell.js?v=eab83021bd';
+import {conversationActions, conversationForms} from './ui-conversation.js?v=eab83021bd';
+import {profileActions, profileForms, profileChanges, lookChanged, nameTyped, adoptFirstMessage} from './ui-profile.js?v=eab83021bd';
+import {settingsActions, reloadAdminPage} from './ui-settings.js?v=eab83021bd';
+import {changePasswordSheet} from './ui-sheets.js?v=eab83021bd';
+import {adminActions, adminForms, adminChanges} from './ui-admin.js?v=eab83021bd';
+import {takeoverActions, takeoverForms} from './ui-takeover.js?v=eab83021bd';
+import {computerActions, computerForms} from './ui-computer-view.js?v=eab83021bd';
+import {catalogSearch} from './ui-connect.js?v=eab83021bd';
 
 const adminCtx = {reload: reloadAdminPage};
 const chatId = () => chatKeyOf(store.route);

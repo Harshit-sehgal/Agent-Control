@@ -76,9 +76,9 @@ export async function runAnyway(botId, request) {
 
 /** A new thread, run by Atlas. The server writes the owner's first line itself, so
  * it is not posted again: refresh, open the thread, then follow Atlas's run. */
-export async function startThread(text) {
+export async function startThread(text, {title = ''} = {}) {
   const message = String(text ?? '').trim(); if (!message) return null;
-  const {thread, run} = await api('/api/threads', 'POST', {message});
+  const {thread, run} = await api('/api/threads', 'POST', {message, ...(title ? {title} : {})});
   const key = teamKey(thread.id);
   await sync().catch(() => {});
   // Leaving the new-thread page, so Back does not return to an empty box.

@@ -161,6 +161,11 @@ export function verdict(state, bot, action, target = '', {readPrivate = false} =
   return {verdict: 'ask', scope};
 }
 
+/** The need the owner already declined in this task, or null. `declined` is the run's [{action, scope}]: only that
+ * action on that site or account stays closed; everything else asks or goes as usual. */
+export const declinedNeed = (declined, needs) => (Array.isArray(declined) && declined.length
+  ? needs.find(n => declined.some(d => d?.action === n.action && (d.scope || '') === scopeOf(n))) || null : null);
+
 /** One action after another, riskiest first: any Deny stops it, otherwise the first one that is not
  * yet Always allow is what the owner is asked about. `needs` is [{action, target, detail}]. */
 export function decide(state, bot, needs, guard = {}) {

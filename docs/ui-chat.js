@@ -4,11 +4,11 @@
  * the bot as `directBotId`, a thread posts to its own group and Atlas answers.
  * The server orchestrator runs them when a model is configured and the offline
  * simulator does otherwise; the UI cannot tell which. Nothing here can publish. */
-import {pollRun, runWithTyping} from './run-follow.js?v=85901eebcd';
-import {botSettings, groupSettings} from './bot-settings.js?v=85901eebcd';
-import {store, api, sync, go, conversation, appendMessage, setTyping, teamKey} from './ui-store.js?v=85901eebcd';
-import {toast} from './ui-dialogs.js?v=85901eebcd';
-import {isOfflineError, OFFLINE_TEXT} from './ui-model.js?v=85901eebcd';
+import {pollRun, runWithTyping} from './run-follow.js?v=eab83021bd';
+import {botSettings, groupSettings} from './bot-settings.js?v=eab83021bd';
+import {store, api, sync, go, conversation, appendMessage, setTyping, teamKey} from './ui-store.js?v=eab83021bd';
+import {toast} from './ui-dialogs.js?v=eab83021bd';
+import {isOfflineError, OFFLINE_TEXT} from './ui-model.js?v=eab83021bd';
 
 /** In-flight sends per conversation, so two overlapping sends keep the typing
  * indicator up until the last one finishes instead of the first clearing it. */
@@ -76,9 +76,9 @@ export async function runAnyway(botId, request) {
 
 /** A new thread, run by Atlas. The server writes the owner's first line itself, so
  * it is not posted again: refresh, open the thread, then follow Atlas's run. */
-export async function startThread(text) {
+export async function startThread(text, {title = ''} = {}) {
   const message = String(text ?? '').trim(); if (!message) return null;
-  const {thread, run} = await api('/api/threads', 'POST', {message});
+  const {thread, run} = await api('/api/threads', 'POST', {message, ...(title ? {title} : {})});
   const key = teamKey(thread.id);
   await sync().catch(() => {});
   // Leaving the new-thread page, so Back does not return to an empty box.

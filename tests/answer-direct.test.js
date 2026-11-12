@@ -40,6 +40,15 @@ test('real work for another job still gets the not-my-job rule, which now says w
   assert.match(rules, /quick and general/);
 });
 
+test('off-job work is not a dead end: the bot does it when it can, else names the bot for it or offers a create-bot block', async () => {
+  const {OFFJOB_RULE} = await import('../shared/off-job.js');
+  assert.match(OFFJOB_RULE, /do it yourself/i);
+  assert.match(OFFJOB_RULE, /company/, 'it looks for the bot whose job fits among the company');
+  assert.match(OFFJOB_RULE, /create-bot block/);
+  assert.match(OFFJOB_RULE, /same reply/);
+  assert.match(OFFJOB_RULE, /only when/i, 'the not-my-job block is the last resort');
+});
+
 import {offlineReply} from '../shared/offline-bots.js';
 test('the built-in replies answer basics too, and a plain bot says what it does', () => {
   const bot = {id: 's', name: 'Scholar', instructions: 'Finds and summarises research papers.'};
