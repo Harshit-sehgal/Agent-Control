@@ -527,7 +527,8 @@ const samePage = (a, b) => {
 function connectedVia(state, host) {
   const app = appForHost(host);
   if (!app) return null;
-  return (state.connectors || []).find(c => c?.status === 'ready' && (app.google ? c.kind === 'google' : c.kind === 'mcp' && c.app === app.id)) || null;
+  // An older Google connection (its own API, not MCP) still covers Gmail and Drive.
+  return (state.connectors || []).find(c => c?.status === 'ready' && ((c.kind === 'mcp' && c.app === app.id) || (c.kind === 'google' && ['gmail', 'google-drive'].includes(app.id)))) || null;
 }
 
 /** The owner's private sites this run has read in the browser: their mail and files, and an app the owner

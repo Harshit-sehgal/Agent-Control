@@ -66,15 +66,6 @@ export function newConnectorId(state, name, kind = 'mcp') {
   return id;
 }
 
-/** An app the owner signed in to in the shared browser (Connect apps, one tap). It has no tools and no secret: bots
- * open its pages with the browser block, as the owner, and what they read there is private to the run. */
-export function siteConnector(state, app, {now = new Date().toISOString()} = {}) {
-  if (!app?.site) throw Object.assign(new Error(`${app?.name || 'That app'} has no web sign-in to open. Connect it with its token.`), {status: 400});
-  const page = new URL(app.site), name = app.google ? 'Gmail' : app.name;
-  return {id: newConnectorId(state, name, 'site'), kind: 'site', app: app.id, name, host: page.host.toLowerCase(),
-    url: `${page.origin}/`, status: 'ready', statusMessage: '', actions: [], addedAt: now, checkedAt: now};
-}
-
 /** The connector a bot means by `use`: its id, or its name in any case. Null when none or when the name is not one. */
 export function findConnector(state, use) {
   if (typeof use !== 'string') return null;

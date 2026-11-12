@@ -1,20 +1,17 @@
-/** Settings → Connectors: the Connect apps catalogue (app-catalog.js), Google, and the MCP servers a bot may use. Markup and the buttons; the rules
- * (what a row says, what a form sends, what Google's redirect back means) are pure and tested in
- * ui-connect-model.js.
+/** Settings → Connectors: the Connect apps catalogue (app-catalog.js) and the MCP servers a bot may use. Markup and the
+ * buttons; the rules (what a row says, what a form sends, what a sign-in's redirect back means) are pure and tested in
+ * ui-connect-model.js. Every app is a real MCP server; Gmail, Drive and Calendar are Google's own.
  *
  * The panel is one of the admin pages (`adminPage('connectors')`), so it loads, and reloads after a change, into
  * the Settings body the same way. A handler does not catch errors: the host toasts them.
  *
- * Secrets: the Google client secret and an MCP address or header are typed here and sent once. The server never
+ * Secrets: an MCP address or header is typed here and sent once; sign-in clients live in the server's .env. The server never
  * answers with one, so nothing on this page can show or log one. */
 import {esc, icon, btn, note, tag, field, textInput, runFullApp, demoList} from './ui-kit.js';
-import {api, sync, store, go} from './ui-store.js';
-import {primaryOf} from './company.js';
+import {api, sync} from './ui-store.js';
 import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js';
-import {mcpRows, googleCard, mcpDraft, statusOf} from './ui-connect-model.js';
-import {catalogView, appById, appInputs, connectRequest, connectHow, APPS} from './app-catalog.js';
-
-const GOOGLE_START = '/api/connectors/google/start';
+import {mcpRows, mcpDraft, statusOf} from './ui-connect-model.js';
+import {catalogView, appById, appInputs, connectRequest, connectHow, clientSetupLine, APPS} from './app-catalog.js';
 
 const tools = (connector, label) => {
   const list = Array.isArray(connector?.actions) ? connector.actions : [];
@@ -26,46 +23,6 @@ const tools = (connector, label) => {
 /** A line of what a card is, with its status tag. */
 const head = (title, sub, status) => `<div class="cn-head"><span class="cn-ico" aria-hidden="true">${icon('plug', 18)}</span><span class="w"><b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span>${status ? tag(status.label, status.tone) : ''}</div>`;
 
-/* ---------- Google ---------- */
-
-function googleSetupForm(card) {
-  const steps = card.steps.map(s => `<li>${esc(s)}</li>`).join('');
-  const copy = card.redirectUri ? `<div class="cn-copy"><code aria-label="Redirect address">${esc(card.redirectUri)}</code>${btn('Copy', 'connector-copy', {small: true, glyph: 'copy', data: {text: card.redirectUri}})}</div>` : '';
-  return `<div class="cn-setup">
-    <ol class="cn-steps">${steps}</ol>
-    ${copy ? `<div class="cn-redirect"><span class="field-label">Redirect address to add in Google Cloud</span>${copy}</div>` : ''}
-    <form id="google-setup-form" class="form" autocomplete="off">
-      ${field('Client ID', textInput('clientId', {required: true, placeholder: '1234-abc.apps.googleusercontent.com', autocomplete: 'off', spellcheck: 'false', maxlength: 200}))}
-      ${field('Client secret', textInput('clientSecret', {type: 'password', required: true, autocomplete: 'off', maxlength: 200}), 'Stored encrypted. It is never shown again.')}
-      <div class="cn-acts">${btn('Save client', null, {kind: 'primary', type: 'submit'})}</div>
-    </form>
-    ${card.testingNote ? `<p class="cn-testing">${esc(card.testingNote)}</p>` : ''}
-  </div>`;
-}
-
-const STATE_LINES = {
-  none: ['Not set up', null, 'Gmail and Drive, with your own Google Cloud client'],
-  ready: ['Not signed in', {label: 'Not signed in', tone: 'warn'}, 'Your client is saved. Sign in to finish.'],
-  connected: ['Connected', {label: 'Connected', tone: 'good'}, ''],
-  reconnect: ['Reconnect', {label: 'Reconnect', tone: 'warn'}, 'Google ended the sign-in. Reconnect to let bots use Gmail and Drive again.'],
-  error: ['Problem', {label: 'Problem', tone: 'bad'}, ''],
-};
-
-function googlePanel(google, connector) {
-  const card = googleCard(google);
-  if (!card) return '';
-  const [, status, line] = STATE_LINES[card.state];
-  const who = card.account ? `Signed in as ${card.account}` : '';
-  const sub = card.state === 'connected' ? who : (card.state === 'reconnect' && who ? `${who}. ${line}` : line);
-  const message = card.state === 'error' && connector?.statusMessage ? `<p class="cn-msg">${esc(connector.statusMessage)}</p>` : '';
-  const connect = card.connectLabel ? `<a class="btn primary" href="${GOOGLE_START}" data-google-connect>${icon('arrow', 17)}<span>${esc(card.connectLabel)}</span></a>` : '';
-  const manage = card.state === 'none' ? '' : `${card.state === 'connected' ? btn('Check', 'connector-refresh', {small: true, id: 'google'}) : ''}${btn('Change client', 'google-change-client', {small: true})}${btn('Disconnect', 'connector-delete', {kind: 'danger', small: true, id: 'google', data: {name: 'Google'}})}`;
-  const acts = connect || manage ? `<div class="cn-acts">${connect}${manage}</div>` : '';
-  const body = card.state === 'none' ? googleSetupForm(card) : `<div class="cn-fold" hidden data-google-client>${googleSetupForm(card)}</div>`;
-  const hint = card.state === 'connected' ? '<p class="cn-testing">Bots ask you before they use it. Your rules are under Permissions.</p>' : '';
-  return `<section class="st-g" data-connector="google"><h4 class="st-h">Google</h4><div class="cd pad cn-card">${head('Google', sub, status)}${message}${acts}${card.state === 'connected' ? tools(connector, `${(connector?.actions || []).length} tools`) : ''}${hint}${body}</div></section>`;
-}
-
 /* ---------- MCP servers ---------- */
 
 function mcpPanel(connectors) {
@@ -75,10 +32,13 @@ function mcpPanel(connectors) {
     return `<div class="cn-card cn-mcp" data-connector="${esc(r.id)}">${head(name, `${where} · ${detail}`, status)}${msg}${tools(raw, 'Tools')}
       <div class="cn-acts">${appById(raw?.app)?.oauth ? btn(r.status.label === 'Ready' ? 'Sign in again' : 'Sign in', 'catalog-oauth', {small: true, id: raw.app, kind: r.status.label === 'Ready' ? 'quiet' : 'primary'}) : ''}${btn('Refresh tools', 'connector-refresh', {small: true, id: r.id})}${btn('Delete', 'connector-delete', {kind: 'danger', small: true, id: r.id, data: {name: r.name}})}</div></div>`;
   });
-  for (const c of connectors.filter(c => c?.kind === 'site')) {
-    const {name, host} = c, app = appById(c.app), token = app && !app.google && appInputs(app).length ? btn('Add a token', 'catalog-token', {small: true, id: app.id}) : '';
-    rows.unshift(`<div class="cn-card cn-site" data-connector="${esc(c.id)}">${head(name, `Signed in through the browser · ${host}`, statusOf('ready'))}
-      <div class="cn-acts">${btn('Sign in again', 'catalog-signin', {small: true, id: c.app})}${token}${btn('Remove', 'connector-delete', {kind: 'danger', small: true, id: c.id, data: {name}})}</div></div>`);
+  // Older connections from before every app was an MCP server: a website signed in to in the browser, and Google
+  // through its own API. They keep working until removed; Connect gives the app's real MCP server.
+  for (const c of connectors.filter(c => c?.kind === 'site' || c?.kind === 'google')) {
+    const name = c.kind === 'google' ? 'Google' : c.name, app = c.kind === 'google' ? appById('gmail') : appById(c.app);
+    const upgrade = app ? btn(`Connect ${app.name}`, 'catalog-connect-row', {small: true, id: app.id, kind: 'primary'}) : '';
+    rows.push(`<div class="cn-card cn-site" data-connector="${esc(c.id)}">${head(name, `Older connection · ${c.kind === 'google' ? 'Google\'s API' : `through the browser · ${c.host || ''}`}`, statusOf(c.status || 'ready'))}
+      <div class="cn-acts">${upgrade}${btn('Remove', 'connector-delete', {kind: 'danger', small: true, id: c.id, data: {name}})}</div></div>`);
   }
   const list = rows.length ? `<div class="cd cn-list">${rows.join('')}</div>` : '<div class="cd pad"><p class="st-quiet">No servers yet. Connect an app above and bots can use its tools, with your say-so.</p></div>';
   return `<section class="st-g" id="cn-connected"><h4 class="st-h">Connected</h4>${list}</section>`;
@@ -192,24 +152,12 @@ async function connectApp(app, values) {
   return made;
 }
 
-/** One tap on an app with a web sign-in: remember it, then hand the owner the shared browser on its sign-in page.
- * Bots then open its pages as the owner, through the browser block; nothing is typed for them. */
-async function signIn(app) {
-  const bot = primaryOf(store.state);
-  if (!bot) throw new Error('Add a bot first. It opens the sign-in page for you.');
-  await api('/api/connectors', 'POST', {kind: 'site', app: app.id});
-  go({profile: bot.id, sub: 'computer'});
-  await api(`/api/browser-live/${encodeURIComponent(bot.id)}/takeover`, 'POST', {});
-  await api(`/api/browser-live/${encodeURIComponent(bot.id)}/input`, 'POST', {type: 'navigate', url: app.site});
-  toast(`You are in control. Sign in to ${app.google ? 'Gmail' : app.name}, then tap Hand back control.`);
-}
-
-/** The Connectors section: Google, the servers, the form. `res` is `GET /api/connectors`. */
+/** The Connectors section: the catalogue, the servers, the form. `res` is `GET /api/connectors`. */
 export function connectorsPanel(res) {
-  if (res?.demo) return `${note('Connectors need the Node server. The browser-only demo has no Gmail, Drive or MCP servers to connect; the full app connects every app below.')}${runFullApp()}${demoList(APPS.map(a => ({name: a.name, sub: a.blurb || '', tag: a.category})), 'Apps the full app connects')}`;
+  if (res?.demo) return `${note('Connectors need the Node server. The browser-only demo has no MCP servers to connect; the full app connects every app below.')}${runFullApp()}${demoList(APPS.map(a => ({name: a.name, sub: a.blurb || '', tag: a.category})), 'Apps the full app connects')}`;
   const connectors = Array.isArray(res?.connectors) ? res.connectors : [];
   lastRes = res;
-  return `<div class="cn-panel">${catalogPanel(res)}${googlePanel(res?.google, connectors.find(c => c.id === 'google'))}${mcpPanel(connectors)}${addForm()}</div>`;
+  return `<div class="cn-panel">${catalogPanel(res)}${mcpPanel(connectors)}${addForm()}</div>`;
 }
 
 /** Fetch what the section shows. */
@@ -218,11 +166,12 @@ export const loadConnectors = () => api('/api/connectors');
 /** One tap on Connect for a catalogue app, from the Connectors page or a bot's setup card. True when it connected
  * here; false when the tap moved on to a sign-in page or the token sheet. `busy` runs just before a direct connect. */
 export async function connectAppNow(app, {busy = () => {}} = {}) {
-  const how = connectHow(app, {googleClient: Boolean(lastRes?.google?.configured)});
-  if (how === 'google') { window.location.assign(GOOGLE_START); return false; }
-  // The app's own server signs the owner in, like Google: bots then work on the account directly, with its tools.
+  // From a chat's setup card this page may not have loaded yet, so which sign-in clients the server has is asked for.
+  const res = lastRes || await loadConnectors().catch(() => null);
+  const how = connectHow(app, {clients: res?.clients});
+  // The app's own server signs the owner in: bots then work on the account directly, with its tools.
   if (how === 'oauth') { window.location.assign(`/api/connectors/mcp/start?app=${encodeURIComponent(app.id)}`); return false; }
-  if (how === 'gmail' || how === 'site') { await signIn(app); return false; }
+  if (how === 'setup') { toast(clientSetupLine(app), true); return false; }
   if (how === 'form') { connectSheet(app); return false; }
   busy();
   await connectApp(app, Object.fromEntries(appInputs(app).filter(i => i.default).map(i => [i.key, i.default])));
@@ -248,7 +197,7 @@ export const connectActions = {
     await sync(); await ctx.reload();
   },
   'catalog-oauth': button => { const app = appById(button.dataset.id); if (app?.oauth) window.location.assign(`/api/connectors/mcp/start?app=${encodeURIComponent(app.id)}`); },
-  'catalog-signin': async button => { const app = appById(button.dataset.id); if (app) await signIn(app); },
+  'catalog-connect-row': async (button, ctx) => { const app = appById(button.dataset.id); if (app && await connectAppNow(app)) { await sync(); await ctx.reload(); } },
   'catalog-token': button => { const app = appById(button.dataset.id); if (app) connectSheet(app); },
   'connector-refresh': async (button, ctx) => {
     const id = button.dataset.id;
@@ -264,16 +213,6 @@ export const connectActions = {
     await api(`/api/connectors/${encodeURIComponent(button.dataset.id)}`, 'DELETE');
     toast(`${name} removed.`);
     await sync(); await ctx.reload();
-  },
-  'google-change-client': button => {
-    const fold = button.closest('.cn-card')?.querySelector('[data-google-client]');
-    if (!fold) return;
-    fold.hidden = !fold.hidden;
-    if (!fold.hidden) fold.querySelector('input')?.focus({preventScroll: false});
-  },
-  'connector-copy': async button => {
-    try { await navigator.clipboard.writeText(button.dataset.text || ''); toast('Copied.'); }
-    catch { toast('Select the address and copy it by hand.', true); }
   },
 };
 
@@ -300,12 +239,6 @@ export const connectForms = {
       const n = (made?.actions || []).length;
       toast(`${made?.name || 'Server'} added${n ? ` with ${n} tool${n === 1 ? '' : 's'}` : ''}.`);
     } finally { if (submit) submit.textContent = label; }
-    await sync(); await ctx.reload();
-  },
-  'google-setup-form': async (form, values, ctx) => {
-    await api('/api/connectors/google/setup', 'POST', {clientId: values.clientId, clientSecret: values.clientSecret});
-    form.reset();
-    toast('Client saved. Now choose Connect Google.');
     await sync(); await ctx.reload();
   },
 };

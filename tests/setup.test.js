@@ -255,7 +255,7 @@ test('a connector that needs it can be reconnected, and a catalogue app connecte
   assert.equal(setupDone(wide, add), false);
   assert.match(resolveSetup(wide, {action: 'connect', app: 'Myspace'}).error, /not in the catalogue/);
   assert.equal(setupCardOf({setup: JSON.stringify({action: 'connect', app: 'nope'})}), null);
-  assert.equal(ok({action: 'connect', app: 'gmail'}).app, undefined, 'Google is the Gmail card, not a catalogue connect');
+  assert.equal(ok({action: 'connect', app: 'gmail'}).app, 'gmail', 'Gmail is Google\'s own MCP server in the catalogue');
 });
 
 test('a company memory line can be rewritten or deleted by its words', () => {

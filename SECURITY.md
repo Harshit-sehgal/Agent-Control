@@ -72,8 +72,7 @@ Routes and their least role are in `src/routes-*.js` (registered through
   devices, users, retention and stored credentials (a reveal is logged).
 - **Owner** alone applies the Careful / Balanced / Hands-off presets and their
   undo (`POST /api/permissions/preset`, `/restore`), takes a backup and
-  restores one (`GET /api/admin/backup`, `POST /api/admin/restore`), sets up
-  the Google client, manages the agent's own MCP servers, and renames or deletes
+  restores one (`GET /api/admin/backup`, `POST /api/admin/restore`), manages the agent's own MCP servers, and renames or deletes
   the workspace.
 
 Because a member's run reads what the workspace is connected to, give member

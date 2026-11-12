@@ -5,6 +5,11 @@
  * This app registers itself there (RFC 7591, a public client with no secret), sends the owner to sign in with PKCE
  * (S256) and the `resource` the token is for (RFC 8707), and trades the code for tokens on the way back.
  *
+ * An app whose server does not let apps register (Google, Slack, GitHub) names a `client` instead: the one OAuth client
+ * the person running this server made once with that vendor, read from .env (`GOOGLE_CLIENT_ID` and
+ * `GOOGLE_CLIENT_SECRET`, and the SLACK_ and GITHUB_ pairs). Its secret is read from .env on every use and never
+ * copied into the vault, so rotating it there is enough. No one types a client into the app.
+ *
  * Only an app in the catalogue with an `oauth` address can start this, so every address it reaches comes from that
  * server's own metadata and must be https. The tokens live in the vault with the address, as one credential, like a
  * pasted header; the connector record holds no secret. `mcpAuthHeaders` hands a live access token to each call and
@@ -26,6 +31,22 @@ const now = () => new Date().toISOString();
 const b64url = bytes => Buffer.from(bytes).toString('base64url');
 const parse = text => { try { return JSON.parse(text); } catch { return null; } };
 const problem = (message, status, reason) => Object.assign(new Error(message), {status, reason});
+
+/** The sign-in clients this server can have, by the name a catalogue app gives as `client`. Google is sent no `resource`
+ * (its tokens are not bound to one) and is asked for offline access, which is the only way it gives a refresh token. */
+const CLIENTS = {
+  google: {env: 'GOOGLE', resource: false, params: {access_type: 'offline', prompt: 'consent'}},
+  slack: {env: 'SLACK'},
+  github: {env: 'GITHUB'},
+};
+/** The client from .env, or null when its ID is not set. */
+export function envClient(name) {
+  const spec = Object.hasOwn(CLIENTS, name) ? CLIENTS[name] : null;
+  const clientId = spec ? String(process.env[`${spec.env}_CLIENT_ID`] || '').trim() : '';
+  return clientId ? {...spec, name, clientId, clientSecret: String(process.env[`${spec.env}_CLIENT_SECRET`] || '').trim() || null} : null;
+}
+/** Which clients this server has, as true or false: what Connectors shows, never a value. */
+export const oauthClients = () => Object.fromEntries(Object.keys(CLIENTS).map(name => [name, Boolean(envClient(name))]));
 
 /** An address from a server's metadata: https only (plain http on this computer only in tests). */
 function endpoint(value, what) {
@@ -53,10 +74,16 @@ async function call(url, init = {}) {
 const json = async (url, init) => { const r = await call(url, init); return {status: r.status, headers: r.headers, body: parse(r.text)}; };
 /** Two addresses that name the same thing: the same URL, a trailing slash aside. */
 const same = (a, b) => { try { return new URL(String(a)).href.replace(/\/+$/, '') === new URL(String(b)).href.replace(/\/+$/, ''); } catch { return false; } };
+/** A protected resource that covers this server: the server itself, or a path above it on the same origin (Slack names
+ * its whole origin). Another origin never does. */
+const covers = (resource, mcpUrl) => {
+  if (same(resource, mcpUrl)) return true;
+  try { const r = new URL(String(resource)), m = new URL(mcpUrl); const path = r.pathname.replace(/\/+$/, ''); return r.origin === m.origin && !r.search && (m.pathname === path || m.pathname.startsWith(`${path}/`)); } catch { return false; }
+};
 const wellKnown = (base, name) => { const u = new URL(base); const path = u.pathname.replace(/\/+$/, ''); return [`${u.origin}/.well-known/${name}${path === '' ? '' : path}`, `${u.origin}/.well-known/${name}`]; };
 
 /** Where an MCP server signs people in: its authorization server's addresses, and the resource a token is for. */
-export async function discoverMcpAuth(mcpUrl) {
+export async function discoverMcpAuth(mcpUrl, {client = null} = {}) {
   const probe = await call(mcpUrl, {method: 'POST', headers: {'content-type': 'application/json', accept: 'application/json, text/event-stream'},
     body: JSON.stringify({jsonrpc: '2.0', id: 1, method: 'initialize', params: {protocolVersion: '2025-06-18', capabilities: {}, clientInfo: {name: 'Agent Control', version: '1'}}})});
   const named = /resource_metadata="([^"]+)"/.exec(probe.headers?.get('www-authenticate') || '')?.[1];
@@ -66,7 +93,7 @@ export async function discoverMcpAuth(mcpUrl) {
     if (r?.status === 200 && r.body && typeof r.body === 'object') { resource = r.body; break; }
   }
   // RFC 9728 §3.3: the metadata must be for this very server, or a token could be minted for another one.
-  if (resource && !same(resource.resource, mcpUrl)) throw problem('That app\'s server described a different address than the one being connected, so it does not match and was not used.', 502, 'server');
+  if (resource && !covers(resource.resource, mcpUrl)) throw problem('That app\'s server described a different address than the one being connected, so it does not match and was not used.', 502, 'server');
   const issuer = endpoint(resource?.authorization_servers?.[0] || new URL(mcpUrl).origin, 'sign-in');
   let meta = null;
   for (const url of [...wellKnown(issuer, 'oauth-authorization-server'), ...wellKnown(issuer, 'openid-configuration')]) {
@@ -76,10 +103,10 @@ export async function discoverMcpAuth(mcpUrl) {
   if (!meta) throw problem('That app\'s server does not say where to sign in.', 502, 'server');
   // RFC 8414 §3.3: the metadata's issuer must be the authorization server it was fetched for.
   if (!same(meta.issuer, issuer)) throw problem('That app\'s sign-in server names a different issuer than the one it was asked for, so it does not match and was not used.', 502, 'server');
-  if (!meta.registration_endpoint) throw problem('That app does not let an app sign in by itself yet. Connect it with a token instead.', 422, 'no-register');
+  if (!meta.registration_endpoint && !client) throw problem('That app does not let an app sign in by itself yet. Connect it with a token instead.', 422, 'no-register');
   return {
     authorizationEndpoint: endpoint(meta.authorization_endpoint, 'sign-in'), tokenEndpoint: endpoint(meta.token_endpoint, 'token'),
-    registrationEndpoint: endpoint(meta.registration_endpoint, 'registration'),
+    registrationEndpoint: meta.registration_endpoint ? endpoint(meta.registration_endpoint, 'registration') : null,
     resource: typeof resource?.resource === 'string' && resource.resource ? resource.resource : mcpUrl,
     scope: Array.isArray(resource?.scopes_supported) ? resource.scopes_supported.filter(s => typeof s === 'string').join(' ') : '',
   };
@@ -91,21 +118,31 @@ export async function discoverMcpAuth(mcpUrl) {
 export async function startMcpSignIn(workspaceId, base, appId, {app = appById(appId)} = {}) {
   if (!app?.oauth) fail('That app does not sign in by itself. Connect it with a token instead.', 400);
   const redirectUri = `${base}${MCP_CALLBACK}`;
-  const auth = await discoverMcpAuth(app.oauth);
-  const reg = await json(auth.registrationEndpoint, {method: 'POST', headers: {'content-type': 'application/json', accept: 'application/json'},
-    body: JSON.stringify({client_name: 'Agent Control', redirect_uris: [redirectUri], grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], token_endpoint_auth_method: 'none'})});
-  const clientId = reg.body?.client_id;
-  if (![200, 201].includes(reg.status) || typeof clientId !== 'string' || !clientId) throw problem(`${app.name} did not let this app register for sign-in.`, 502, 'register');
-  const clientSecret = typeof reg.body.client_secret === 'string' ? reg.body.client_secret : null;
+  const client = app.client ? envClient(app.client) : null;
+  if (app.client && !client) { const env = CLIENTS[app.client]?.env || 'ITS'; throw problem(`${app.name} signs in with this server's own sign-in client. Whoever runs the server sets ${env}_CLIENT_ID and ${env}_CLIENT_SECRET in .env once (docs/DEPLOYMENT.md).`, 422, 'no-client'); }
+  const auth = await discoverMcpAuth(app.oauth, {client});
+  if (client && client.resource === false) auth.resource = null;
+  const {clientId, clientSecret} = client || await register(app, auth, redirectUri);
   const verifier = b64url(crypto.randomBytes(48)), state = crypto.randomBytes(32).toString('hex');
   const cutoff = Date.now() - FLOW_TTL_MS;
   for (const [key, flow] of flows) if (flow.createdAt < cutoff) flows.delete(key);
   while (flows.size >= MAX_FLOWS) flows.delete(flows.keys().next().value);
-  flows.set(state, {workspaceId, app: {id: app.id, name: app.name, oauth: app.oauth}, verifier, redirectUri, clientId, clientSecret, ...auth, createdAt: Date.now()});
+  // A .env client's secret stays out of the flow too: it is read again when the code is traded.
+  flows.set(state, {workspaceId, app: {id: app.id, name: app.name, oauth: app.oauth}, verifier, redirectUri, clientId, clientSecret: client ? null : clientSecret, client: client?.name || null, ...auth, createdAt: Date.now()});
   const url = new URL(auth.authorizationEndpoint);
-  const params = {response_type: 'code', client_id: clientId, redirect_uri: redirectUri, state, code_challenge: b64url(crypto.createHash('sha256').update(verifier).digest()), code_challenge_method: 'S256', resource: auth.resource, ...(auth.scope ? {scope: auth.scope} : {})};
+  const scope = Array.isArray(app.scopes) && app.scopes.length ? app.scopes.join(' ') : auth.scope;
+  const params = {response_type: 'code', client_id: clientId, redirect_uri: redirectUri, state, code_challenge: b64url(crypto.createHash('sha256').update(verifier).digest()), code_challenge_method: 'S256', ...(auth.resource ? {resource: auth.resource} : {}), ...(scope ? {scope} : {}), ...client?.params};
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
   return {url: url.toString(), state};
+}
+
+/** Register this app with a server that allows it (RFC 7591): a public client, no secret unless the server gives one. */
+async function register(app, auth, redirectUri) {
+  const reg = await json(auth.registrationEndpoint, {method: 'POST', headers: {'content-type': 'application/json', accept: 'application/json'},
+    body: JSON.stringify({client_name: 'Agent Control', redirect_uris: [redirectUri], grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], token_endpoint_auth_method: 'none'})});
+  const clientId = reg.body?.client_id;
+  if (![200, 201].includes(reg.status) || typeof clientId !== 'string' || !clientId) throw problem(`${app.name} did not let this app register for sign-in.`, 502, 'register');
+  return {clientId, clientSecret: typeof reg.body.client_secret === 'string' ? reg.body.client_secret : null};
 }
 
 /** The flow a callback belongs to, or null: a known, young state that the flow cookie carries too. Used once. */
@@ -118,11 +155,18 @@ export function takeMcpFlow(state, cookieValue) {
   return Date.now() - flow.createdAt > FLOW_TTL_MS ? null : flow;
 }
 
-const tokenBody = (flow, extra) => new URLSearchParams({...extra, client_id: flow.clientId, ...(flow.clientSecret ? {client_secret: flow.clientSecret} : {}), resource: flow.resource}).toString();
-const tokensFrom = (body, old = {}) => ({
-  accessToken: body.access_token, refreshToken: typeof body.refresh_token === 'string' && body.refresh_token ? body.refresh_token : old.refreshToken || null,
-  expiresAt: Date.now() + (Number(body.expires_in) > 0 ? Number(body.expires_in) * 1000 : 3600 * 1000),
-});
+/** A token request's form. A .env client's secret is read from .env now; a server that gave its own keeps that one. */
+const tokenBody = (flow, extra) => {
+  const secret = flow.client ? envClient(flow.client)?.clientSecret : flow.clientSecret;
+  return new URLSearchParams({...extra, client_id: flow.clientId, ...(secret ? {client_secret: secret} : {}), ...(flow.resource ? {resource: flow.resource} : {})}).toString();
+};
+/** Tokens from a token reply. One with no stated end and no refresh token (a GitHub OAuth app's) lasts until it is
+ * refused: `expiresAt` null. Otherwise an unstated end is taken as an hour. */
+const tokensFrom = (body, old = {}) => {
+  const refreshToken = typeof body.refresh_token === 'string' && body.refresh_token ? body.refresh_token : old.refreshToken || null;
+  const seconds = Number(body.expires_in);
+  return {accessToken: body.access_token, refreshToken, expiresAt: seconds > 0 ? Date.now() + seconds * 1000 : refreshToken ? Date.now() + 3600 * 1000 : null};
+};
 
 /** The callback: trade the code for tokens, list the server's tools with them, and save the connector (or sign an
  * existing one in again). Returns `{name}`, or `{reason}` (a short code, never the server's own words). */
@@ -133,7 +177,7 @@ export async function finishMcpSignIn(store, flow, {code = null, error = null}) 
   try { reply = await json(flow.tokenEndpoint, {method: 'POST', headers: {'content-type': 'application/x-www-form-urlencoded', accept: 'application/json'}, body: tokenBody(flow, {grant_type: 'authorization_code', code, redirect_uri: flow.redirectUri, code_verifier: flow.verifier})}); }
   catch { return {reason: 'server'}; }
   if (reply.status !== 200 || typeof reply.body?.access_token !== 'string' || !reply.body.access_token) return {reason: reply.body?.error === 'invalid_grant' ? 'code' : 'server'};
-  const oauth = {tokenEndpoint: flow.tokenEndpoint, clientId: flow.clientId, clientSecret: flow.clientSecret, resource: flow.resource, ...tokensFrom(reply.body)};
+  const oauth = {tokenEndpoint: flow.tokenEndpoint, clientId: flow.clientId, clientSecret: flow.clientSecret, client: flow.client || null, resource: flow.resource, ...tokensFrom(reply.body)};
   let tools;
   try { ({tools} = await mcpList({transport: 'http', url: flow.app.oauth, headers: {Authorization: `Bearer ${oauth.accessToken}`}})); }
   catch { return {reason: 'server'}; }
@@ -164,7 +208,7 @@ export async function askToSignInAgain(store, connector) {
 export async function mcpAuthHeaders(store, connector, secret, {force = false} = {}) {
   const oauth = secret?.oauth;
   if (!oauth) return secret?.headers || {};
-  if (!force && oauth.accessToken && oauth.expiresAt - SKEW_MS > Date.now()) return {Authorization: `Bearer ${oauth.accessToken}`};
+  if (!force && oauth.accessToken && (oauth.expiresAt === null || oauth.expiresAt - SKEW_MS > Date.now())) return {Authorization: `Bearer ${oauth.accessToken}`};
   const key = connector.credentialId;
   if (!refreshing.has(key)) refreshing.set(key, (async () => {
     const again = () => askToSignInAgain(store, connector);
@@ -183,5 +227,5 @@ export async function mcpAuthHeaders(store, connector, secret, {force = false} =
 }
 
 /** The reason codes a callback may carry back to the page, for a one-line message there. */
-export const MCP_REASONS = ['state', 'denied', 'code', 'server', 'register', 'no-register', 'setup'];
+export const MCP_REASONS = ['state', 'denied', 'code', 'server', 'register', 'no-register', 'no-client', 'setup'];
 export const reasonOf = error => (MCP_REASONS.includes(error?.reason) ? error.reason : 'server');

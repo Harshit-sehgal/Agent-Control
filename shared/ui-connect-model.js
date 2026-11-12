@@ -30,6 +30,7 @@ const CONNECT_REASONS = {
   code: 'The app did not send back a sign-in code. Try Connect again.',
   register: 'The app did not let this app sign in. Try again, or connect it with a token.',
   'no-register': 'That app does not let an app sign in by itself yet. Connect it with a token instead.',
+  'no-client': 'This server has no sign-in client for it yet. Whoever runs the server adds one to .env once (docs/DEPLOYMENT.md).',
   setup: 'This workspace is not open any more. Sign in to the app again.',
   server: 'The app\'s server could not finish the sign-in. Try again in a moment.',
 };
@@ -61,7 +62,7 @@ const STATUSES = {ready: ['Ready', 'good'], setup: ['Not signed in', 'warn'], re
 /** A connector's status as a label and a tone for the tag. Unknown reads as Ready, like the server's default. */
 export const statusOf = status => { const [label, tone] = STATUSES[status] || STATUSES.ready; return {label, tone}; };
 
-/** The MCP servers as rows. Google has a card of its own. */
+/** The MCP servers as rows. */
 export function mcpRows(connectors) {
   return (Array.isArray(connectors) ? connectors : []).filter(c => c?.kind === 'mcp').map(c => {
     const actions = Array.isArray(c.actions) ? c.actions : [], writes = actions.filter(a => a.write).length;
@@ -76,23 +77,6 @@ export function mcpRows(connectors) {
   });
 }
 
-/** The Google card from `google` in `GET /api/connectors`. Null when the server gave none (the demo). */
-export function googleCard(google) {
-  if (!google || typeof google !== 'object' || !('configured' in google)) return null;
-  const status = google.status || 'none';
-  const state = google.connected ? 'connected' : !google.configured ? 'none' : status === 'reconnect' || status === 'error' ? status : 'ready';
-  return {
-    state,
-    account: google.account || '',
-    // The address has a box of its own with a Copy button, so a step that quotes it points at that box instead of printing it twice.
-    steps: (Array.isArray(google.steps) ? google.steps : []).map(step => (google.redirectUri ? String(step).split(google.redirectUri).join('the address shown below') : step)),
-    redirectUri: google.redirectUri || '',
-    testingNote: google.testingNote || '',
-    // Connect Google is a link to the server's start route; it needs a saved client first.
-    connectLabel: state === 'ready' ? 'Connect Google' : state === 'reconnect' || state === 'error' ? 'Reconnect Google' : null,
-    showForm: state === 'none',
-  };
-}
 
 /* ---------- the add forms ---------- */
 
