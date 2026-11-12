@@ -162,7 +162,7 @@ function scheduleList(bot) {
   const rows = scheduleRows(store.state, bot.id), write = canWrite();
   if (!rows.length) return `<p class="pr-note">Nothing on a timer. Tell ${esc(bot.name)} something like “every morning at 8, sum up my inbox”, or add one below.</p>`;
   const next = at => { const d = new Date(at); return Number.isNaN(d.getTime()) ? '' : ` · next ${d.toLocaleString([], {weekday: 'short', hour: '2-digit', minute: '2-digit'})}`; };
-  return `<div class="cd">${rows.map(r => `<div class="rw memo"><span class="w">${esc(r.what)}<small>${esc(r.when)}${esc(next(r.nextAt))}</small></span>${write ? `<button type="button" class="memo-x" data-action="schedule-stop" data-id="${esc(bot.id)}" data-task="${esc(r.id)}" aria-label="Stop this schedule">Stop</button>` : ''}</div>`).join('')}</div>`;
+  return `<div class="cd">${rows.map(r => `<div class="rw memo"><span class="w">${esc(r.what)}<small>${esc(r.when)}${esc(next(r.nextAt))}</small>${r.lastError ? `<small class="sc-err">Last try failed: ${esc(r.lastError)}</small>` : ''}</span>${write ? `<button type="button" class="memo-x" data-action="schedule-stop" data-id="${esc(bot.id)}" data-task="${esc(r.id)}" aria-label="Stop this schedule">Stop</button>` : ''}</div>`).join('')}</div>`;
 }
 function schedulePage(bot) {
   const write = canWrite();

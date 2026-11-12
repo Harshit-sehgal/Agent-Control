@@ -74,15 +74,18 @@ test('a checkpointed run pauses between steps and resumes on human approval',asy
     assert.equal(run.trace.length,1,'Only the first step runs before the gate.');
     assert.equal(run.checkpoint.nextStep,1);
     const responder=async bot=>`Response from ${bot.name}`;
+    // Continue answers once the approval is written and the run goes on in the background (`done`), so the
+    // reply carries the status stored at that moment, never a status the run was not in.
     const first=await resumeGroupRun(store,'run-cp',responder);
+    assert.ok(['awaiting_checkpoint','running'].includes(first.status),first.status);
+    await first.done;
     run=store.read().groupRuns[0];
     assert.equal(run.status,'awaiting_checkpoint','It pauses again before the last handoff.');
-    assert.equal(first.status,run.status,'The continue route reports the pause, not a fake running.');
     assert.equal(run.trace.length,2);
     const last=await resumeGroupRun(store,'run-cp',responder);
+    await last.done;
     run=store.read().groupRuns[0];
     assert.equal(run.status,'completed');
-    assert.equal(last.status,run.status);
     assert.equal(run.trace.length,3);
     assert.equal(run.checkpoint,null);
     // A run that is not paused cannot be resumed.

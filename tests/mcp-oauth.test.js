@@ -14,6 +14,7 @@ import * as agent from '../src/agent.js';
 import {revealValue} from '../src/credentials.js';
 import {startMcpSignIn, takeMcpFlow, finishMcpSignIn, discoverMcpAuth} from '../src/mcp-oauth.js';
 import {mcpTarget, refreshConnector} from '../src/connectors.js';
+import {useConnector} from '../src/connector-use.js';
 import {publicConnectors} from '../shared/connectors.js';
 import {createRouter} from '../src/router.js';
 import {connectorRoutes} from '../src/routes-connectors.js';
@@ -22,6 +23,8 @@ import {connectorRoutes} from '../src/routes-connectors.js';
 async function fakeApp({register = true, expiresIn = 3600, refuseRefresh = false, resource = null, issuer = null} = {}) {
   const seen = {registered: [], tokens: [], bearers: []};
   let n = 0, codes = new Map(), live = new Set(), refresh = new Map();
+  // `revoke()` ends every live token before its stated end; `refuseAll` refuses even a fresh one.
+  const control = {refuseAll: false, revoke: () => live.clear()};
   const server = http.createServer(async (req, res) => {
     const chunks = []; for await (const c of req) chunks.push(c);
     const raw = Buffer.concat(chunks).toString('utf8'), url = new URL(req.url, 'http://x'), base = `http://127.0.0.1:${server.address().port}`;
@@ -41,7 +44,7 @@ async function fakeApp({register = true, expiresIn = 3600, refuseRefresh = false
     if (url.pathname === '/mcp') {
       const bearer = (req.headers.authorization || '').replace(/^Bearer /, '');
       seen.bearers.push(bearer);
-      if (!live.has(bearer)) return send(401, {error: 'unauthorized'}, {'www-authenticate': `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource/mcp"`});
+      if (!live.has(bearer) || control.refuseAll) return send(401, {error: 'unauthorized'}, {'www-authenticate': `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource/mcp"`});
       const msg = JSON.parse(raw);
       if (msg.id === undefined) { res.writeHead(202); return res.end(); }
       if (msg.method === 'initialize') return send(200, {jsonrpc: '2.0', id: msg.id, result: {protocolVersion: '2025-06-18', capabilities: {tools: {}}, serverInfo: {name: 'fake', version: '1'}}});
@@ -54,7 +57,7 @@ async function fakeApp({register = true, expiresIn = 3600, refuseRefresh = false
   const base = `http://127.0.0.1:${server.address().port}`;
   // What the owner does on the app's sign-in page: approve, and the browser comes back with a code.
   const approve = signInUrl => { const u = new URL(signInUrl); const code = `code-${codes.size + 1}`; codes.set(code, u.searchParams.get('code_challenge')); return {code, state: u.searchParams.get('state')}; };
-  return {base, seen, approve, close: () => server.close(), app: {id: 'notion', name: 'Notion', oauth: `${base}/mcp`}};
+  return {base, seen, approve, control, close: () => server.close(), app: {id: 'notion', name: 'Notion', oauth: `${base}/mcp`}};
 }
 
 async function rig(t, opts) {
@@ -124,6 +127,29 @@ test('a refused renewal marks the app to sign in again', async t => {
   const [c] = store.read().connectors;
   await assert.rejects(mcpTarget(store, c), /sign in again/);
   assert.equal(store.read().connectors[0].status, 'reconnect');
+});
+
+test('a token the app refuses before its end is renewed once and the call goes through', async t => {
+  const {store, fake} = await rig(t);
+  await signIn(store, fake);
+  const [c] = store.read().connectors;
+  fake.control.revoke();
+  assert.deepEqual(await useConnector(store, c, 'search_pages', {}), {ok: true, text: 'ok'});
+  assert.equal(fake.seen.tokens.at(-1).grant_type, 'refresh_token', 'renewed after the 401, not before');
+  assert.equal(JSON.parse(revealValue(store, c.credentialId)).oauth.accessToken, 'AT-2');
+  assert.equal(store.read().connectors[0].status, 'ready');
+});
+
+test('a second refusal after renewing asks the owner to sign in again, not to check headers', async t => {
+  const {store, fake} = await rig(t);
+  await signIn(store, fake);
+  const [c] = store.read().connectors;
+  fake.control.refuseAll = true;
+  await assert.rejects(useConnector(store, c, 'search_pages', {}), error => error.reason === 'reconnect' && /sign in again/.test(error.message) && !/headers/.test(error.message));
+  assert.deepEqual([store.read().connectors[0].status, store.read().connectors[0].statusMessage], ['reconnect', 'Sign in to Notion again.']);
+  // Refreshing the connector from Settings keeps saying so.
+  const checked = await refreshConnector(store, c.id);
+  assert.equal(checked.status, 'reconnect');
 });
 
 test('an app that will not let this app register says so, and a wrong code saves nothing', async t => {

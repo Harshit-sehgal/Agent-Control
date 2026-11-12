@@ -72,10 +72,11 @@ export function whenWords({every, at, on} = {}) {
 const live = t => t?.kind === 'bot-task' && ['queued', 'running'].includes(t.status);
 const timingOf = t => ({every: t.payload?.kind === 'interval' ? Number(t.payload.intervalMinutes) || Number(t.intervalMinutes) : undefined, at: t.payload?.at || '', on: t.payload?.on || ''});
 
-/** A bot's live schedules (or every bot's, with no id), newest first: id, botId, what, when, next run. */
+/** A bot's live schedules (or every bot's, with no id), newest first: id, botId, what, when, next run, and why the
+ * last try failed (null once one succeeds), so a schedule that keeps failing says so on its card. */
 export function scheduleRows(state, botId = null) {
   return (state?.tasks || []).filter(t => live(t) && (!botId || t.payload?.botId === botId))
-    .map(t => ({id: t.id, botId: t.payload?.botId || null, what: String(t.payload?.message || ''), when: whenWords(timingOf(t)), nextAt: t.runAt || null}));
+    .map(t => ({id: t.id, botId: t.payload?.botId || null, what: String(t.payload?.message || ''), when: whenWords(timingOf(t)), nextAt: t.runAt || null, lastError: t.lastError ? String(t.lastError).slice(0, 300) : null}));
 }
 
 /** The `POST /api/tasks` body for a schedule card or the Schedule form, with the first run at the next local

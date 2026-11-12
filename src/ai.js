@@ -357,6 +357,33 @@ async function callModel({instructions,input,maxTokens,config,temperature=null})
     if(typeof config.run!=='function')throw upstream('This model runs on a paired local agent and is not available here.',422);
     return config.run({engine:config.engine,model:config.model||'',effort:cleanEffort(config.effort)||'',instructions,input});
   }
+  const call={instructions,input,maxTokens,config,temperature};
+  // One busy or flaky answer (429, a gateway 502/503/504, a timeout) used to fail the whole run. It gets one more
+  // try after the wait the provider asked for; a refusal (400, 401, 403) is an answer and is never sent again.
+  try{return await callProvider(call);}
+  catch(e){
+    const wait=retryWaitMs(e);
+    if(wait===null)throw e;
+    await new Promise(resolve=>setTimeout(resolve,wait));
+    return callProvider(call);
+  }
+}
+const RETRY_STATUSES=new Set([429,502,503,504]);
+const RETRY_MAX_MS=10000;
+const retryDefaultMs=()=>{const n=Number(process.env.AI_RETRY_MS);return Number.isFinite(n)&&n>=0?Math.min(n,RETRY_MAX_MS):2000;};
+/** How long to wait before the one retry of a provider call, or null when it is not retried: the provider's
+ * Retry-After (seconds or a date), when it is no more than 10 s, else a short default. */
+export function retryWaitMs(error,now=Date.now()){
+  if(error?.timedOut)return retryDefaultMs();
+  if(!RETRY_STATUSES.has(error?.providerStatus))return null;
+  const said=String(error.retryAfter??'').trim();
+  if(!said)return retryDefaultMs();
+  const ms=/^\d+(\.\d+)?$/.test(said)?Number(said)*1000:Date.parse(said)-now;
+  if(!Number.isFinite(ms))return retryDefaultMs();
+  // A provider that asks for longer than a turn should wait has said "not now"; the run reports that instead.
+  return ms>RETRY_MAX_MS?null:Math.max(0,Math.round(ms));
+}
+async function callProvider({instructions,input,maxTokens,config,temperature=null}){
   const cfg=wireConfig(config||envConfig());
   if(!configReady(cfg))throw upstream('No AI provider is configured. Connect one in Settings → Models and keys.',422);
   const protocol=protocolOf(cfg);
@@ -369,7 +396,7 @@ async function callModel({instructions,input,maxTokens,config,temperature=null})
   while(activeCalls>=maxCalls()&&Date.now()<waitUntil)await new Promise(resolve=>setTimeout(resolve,50));
   if(activeCalls>=maxCalls())throw upstream(`This app is already running ${maxCalls()} model call${maxCalls()===1?'':'s'} at once. Try again in a moment.`,429);
   activeCalls++;
-  const timeoutError=()=>upstream(`AI provider timed out after ${Math.round(timeoutMs()/1000)}s.`,504);
+  const timeoutError=()=>Object.assign(upstream(`AI provider timed out after ${Math.round(timeoutMs()/1000)}s.`,504),{timedOut:true});
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs());
   try{
     const request=requestFor(cfg,{instructions,input,maxTokens,temperature});
@@ -435,7 +462,7 @@ async function callModel({instructions,input,maxTokens,config,temperature=null})
     }
     if(!out.res.ok){
       const said=providerSaid(out.data);
-      throw Object.assign(upstream(`AI provider returned ${out.res.status}: ${errorText(out.data,out.res.status,cfg,statusHint(out.res.status,protocol,said))}`),{code:errorKind(out.res.status,said),providerId:cfg.providerId||null,model:cfg.model||null});
+      throw Object.assign(upstream(`AI provider returned ${out.res.status}: ${errorText(out.data,out.res.status,cfg,statusHint(out.res.status,protocol,said))}`),{code:errorKind(out.res.status,said),providerId:cfg.providerId||null,model:cfg.model||null,providerStatus:out.res.status,retryAfter:out.res.headers?.get?.('retry-after')||null});
     }
     return extract(cfg,out.data||{});
   }catch(e){

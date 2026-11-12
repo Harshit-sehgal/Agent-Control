@@ -119,7 +119,13 @@ export async function openWorkspaces(primary, auth, start) {
     for (const suffix of ['', '-wal', '-shm']) await fs.rm(file + suffix, {force: true});
   }
   await add(DEFAULT_WORKSPACE, primary);
-  for (const id of auth.workspaceIds()) if (id !== DEFAULT_WORKSPACE) await load(id);
+  // One workspace whose database will not open (a damaged file, a full disk) must not keep every other one,
+  // and the server, from starting. It is logged and left closed; its requests answer as a missing workspace.
+  for (const id of auth.workspaceIds()) {
+    if (id === DEFAULT_WORKSPACE) continue;
+    try { await load(id); }
+    catch (error) { console.error(`Workspace ${id} could not be opened and was skipped:`, error.message); }
+  }
 
   return {
     get: id => open.get(id)?.store || null,

@@ -16,6 +16,10 @@ import {browserRuntime} from './browser-runtime.js';
 import {browserLive} from './browser-live.js';
 import * as agent from './agent.js';
 import {createApp,createWorkspaceStarter} from './app.js';
+import {guardRejections} from './crash-guard.js';
+
+// A background promise that slips its own catch logs here instead of ending the server.
+guardRejections();
 import {localAgentWanted,startLocalAgent} from './local-agent.js';
 
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');

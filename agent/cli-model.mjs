@@ -159,7 +159,9 @@ function classify(said, spec, model = '') {
   if (NO_MODEL.test(said)) return new CliModelError('model-not-found', `${spec.label.replace(/ \(.*/, '')} does not offer ${model || 'that model'}. Pick another model on the bot's profile.`, detail);
   if (LIMIT.test(said)) return new CliModelError('usage-limit', `${spec.label.replace(/ \(.*/, '')} subscription has reached its usage limit.`, detail);
   if (SIGNED_OUT.test(said)) return new CliModelError('not-signed-in', `${spec.label.replace(/ \(.*/, '')} is not signed in on this machine. ${spec.signIn}`, detail);
-  return new CliModelError('cli-failed', `The ${spec.binary} command failed${detail ? `: ${detail}` : '.'}`, detail);
+  // What the CLI printed stays in `detail` (the agent log, the effort retry): it can carry paths, account names
+  // or a token in an error, and the chat line is read by everyone in the workspace.
+  return new CliModelError('cli-failed', `The ${spec.binary} CLI on this computer failed. Open Settings → Models and keys to check it.`, detail);
 }
 
 /** Kill the process group, so a CLI's own children go too. */

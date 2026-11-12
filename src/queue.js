@@ -179,8 +179,12 @@ export function createQueue(store, handlers = {}, {intervalMs = 2000, workerId, 
       }
       // Notify only after the retry policy reaches a terminal failure. A
       // transient provider error must not announce failure while requeued.
-      if (transition?.status === 'failed') {
-        try { if (onFail) await onFail(task, e); } catch (notifyError) { console.error('Failure notify error:', notifyError.message); }
+      // A recurring task re-arms instead of failing, so it never reaches that. Once it has re-armed with an
+      // error in NOTIFY_MISSED windows in a row, the owner is told the same way, once for that streak.
+      const missed = transition?.status === 'queued' ? Number(transition.payload?.[tasks.MISSED_WINDOWS]) : 0;
+      const told = missed === tasks.NOTIFY_MISSED ? Object.assign(new Error(`${e?.message || 'It failed.'} It has failed in ${missed} windows in a row and runs again at its next one.`), {cause: e}) : null;
+      if (transition?.status === 'failed' || told) {
+        try { if (onFail) await onFail(task, told || e); } catch (notifyError) { console.error('Failure notify error:', notifyError.message); }
       }
       return;
     }

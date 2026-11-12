@@ -46,13 +46,14 @@ export async function runWithTyping({key, setTyping, sync, send = null, follow, 
  *   messages()  -> the lines already stored for this chat, for de-duplication
  *   requests()  -> the workspace's browser requests, for the page pause
  *   onLine(m)   -> store one server line
- *   onNote(n)   -> store the run's closing note; onStall() -> one "still trying"
+ *   onNote(n)   -> store the run's closing note; onStall() -> one "still trying";
+ *                  onStall({exhausted: true}) once the looks run out with the run still going
  *   wait(ms), sync() -> the beat between looks and the snapshot refresh
  * Returns the last run it saw, so a caller can read the outcome. */
 export async function pollRun({runId = null, groupId = null, ignore = [], maxPolls = 200, wait, sync = null, readLog, messages, requests, onLine, onNote = null, onStall = null}) {
   const seen = new Set(messages().map(m => m.id));
   const skip = new Set(ignore);
-  let last = null, failures = 0;
+  let last = null, failures = 0, ended = false;
   for (let i = 0; i < maxPolls; ) {
     await wait(RUN_POLL_MS);
     // The run log is not the conversation: browser cards and their Approve
@@ -83,8 +84,11 @@ export async function pollRun({runId = null, groupId = null, ignore = [], maxPol
       const open = requests().find(r => r.runId === last.id && ['pending', 'dispatched'].includes(r.status));
       if (open?.status === 'dispatched') { skip.add('awaiting_browser'); continue; }
     }
+    ended = true;
     break;
   }
+  // Out of looks with the run still going: say so, instead of the typing dots just stopping.
+  if (!ended && onStall) onStall({exhausted: true});
   const note = last && runNote(last);
   if (note && onNote && !messages().some(m => m.id === note.id)) onNote(note);
   return last;

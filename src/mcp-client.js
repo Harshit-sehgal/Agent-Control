@@ -97,7 +97,8 @@ async function httpSession(target, work, {timeoutMs = MCP_TIMEOUT_MS, maxBytes =
       headers: {...custom, 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...(version ? {'mcp-protocol-version': version} : {}), ...(sessionId ? {'mcp-session-id': sessionId} : {})},
     });
     if (res.status >= 300 && res.status < 400) { res.body?.cancel().catch(() => {}); fail(`The MCP server redirected the request (${res.status}). Redirects are not followed; use the final address.`, 502); }
-    if (res.status === 401 || res.status === 403) { res.body?.cancel().catch(() => {}); fail(`The MCP server refused the credentials (${res.status}). Check the headers you gave it.`, 502); }
+    // `httpStatus` lets a signed-in connector renew its token and try once more (withMcp in src/connectors.js).
+    if (res.status === 401 || res.status === 403) { res.body?.cancel().catch(() => {}); throw Object.assign(new Error(`The MCP server refused the credentials (${res.status}). Check the headers you gave it.`), {status: 502, httpStatus: res.status}); }
     if (!res.ok) {
       const body = await readText(res, 2000).catch(() => '');
       fail(`The MCP server answered ${res.status}${body ? `: ${body.replace(/\s+/g, ' ').trim().slice(0, 200)}` : '.'}`, 502);
