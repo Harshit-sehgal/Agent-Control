@@ -398,7 +398,7 @@ export function sameSearch(a, b) {
 }
 
 /** Page titles that mean the site turned this browser away. */
-const REFUSED = /^(?:access denied|403\b|forbidden|request blocked|you have been blocked|attention required|just a moment)/i;
+const REFUSED = /^(?:access denied|403\b|forbidden|request blocked|you have been blocked|you['’]ve been blocked|attention required|just a moment)/i;
 
 const samePage = (a, b) => {
   if (sameSearch(a, b)) return true;
@@ -423,7 +423,7 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
   let repeated = 0;
   const again = [], refused = [], invalid = [], resent = [];
   const refusals = host => (state.browserRequests || []).filter(r => (runId ? r.runId === runId : r.chatKey === chatKey)
-    && hostOf(r.result?.finalUrl || r.url) === host && (REFUSED.test(String(r.result?.title || '').trim()) || r.result?.botCheck)).length;
+    && hostOf(r.result?.finalUrl || r.url) === host && (REFUSED.test(String(r.result?.title || '').trim()) || REFUSED.test(String(r.result?.text || '').trim()) || r.result?.botCheck)).length;
   // A bot never answers "I don't have permission": a page it has no grant for is an ask, and the owner
   // says Allow, Always allow or Decline. A Deny the owner set is the one thing that refuses outright.
   if (limited) say(`${bot.name} asked for another web page, but ${rounds} browsing rounds in a row is the most ${rounds < BACKSTOP.rounds ? 'your limit in Settings allows' : 'one message may take'}.`);
@@ -448,6 +448,13 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
       if (!refused.includes(host)) refused.push(host);
       repeated++;
       say(`${host} refused this browser twice, so it was not opened again.`);
+      // The owner may get in where a bot cannot: once per task, a card opens the shared browser there for them to sign in.
+      const live = runId && (state.groupRuns || []).find(r => r.id === runId);
+      if (live && !(live.signinOffered || []).includes(host)) {
+        live.signinOffered = [...(live.signinOffered || []), host];
+        const card = {action: 'signin', botId: bot.id, url: `https://${host}/`, text: `Sign in to ${host.replace(/^www\./, '')} in the browser on this computer. ${host.replace(/^www\./, '')} turned the bots away; once you are signed in, they use the same browser and can read it.`};
+        lines.push({id: makeId(), role: 'system', kind: 'setup', botId: bot.id, setup: JSON.stringify(card), text: `${bot.name} suggests: ${card.text}`, at: now});
+      }
       continue;
     }
     const labels = controlLabels(state, bot.id, chatKey);

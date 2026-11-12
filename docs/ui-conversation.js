@@ -7,25 +7,25 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=ba73aa7e98';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=ba73aa7e98';
-import {requestOfMessage} from './bot-browser.js?v=ba73aa7e98';
-import {validHttpUrl} from './core.js?v=ba73aa7e98';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=ba73aa7e98';
-import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=ba73aa7e98';
-import {isPrimary} from './company.js?v=ba73aa7e98';
-import {hasJob, modelChip} from './ui-profile-model.js?v=ba73aa7e98';
-import {scheduleTaskBody} from './schedules.js?v=ba73aa7e98';
-import {feed} from './ui-feed.js?v=ba73aa7e98';
-import {setupCardOf, setupButton} from './setup.js?v=ba73aa7e98';
-import {askCard} from './ui-asks.js?v=ba73aa7e98';
-import {face, botColor} from './ui-face.js?v=ba73aa7e98';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=ba73aa7e98';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=ba73aa7e98';
-import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=ba73aa7e98';
-import {toast} from './ui-dialogs.js?v=ba73aa7e98';
-import {siteChip} from './ui-computer-view.js?v=ba73aa7e98';
-import {cliChoice, googleCard} from './ui-connect-model.js?v=ba73aa7e98';
+import {OFFJOB_CHOICES} from './off-job.js?v=3a79d2c16f';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=3a79d2c16f';
+import {requestOfMessage} from './bot-browser.js?v=3a79d2c16f';
+import {validHttpUrl} from './core.js?v=3a79d2c16f';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=3a79d2c16f';
+import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=3a79d2c16f';
+import {isPrimary} from './company.js?v=3a79d2c16f';
+import {hasJob, modelChip} from './ui-profile-model.js?v=3a79d2c16f';
+import {scheduleTaskBody} from './schedules.js?v=3a79d2c16f';
+import {feed} from './ui-feed.js?v=3a79d2c16f';
+import {setupCardOf, setupButton} from './setup.js?v=3a79d2c16f';
+import {askCard} from './ui-asks.js?v=3a79d2c16f';
+import {face, botColor} from './ui-face.js?v=3a79d2c16f';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=3a79d2c16f';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=3a79d2c16f';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=3a79d2c16f';
+import {toast} from './ui-dialogs.js?v=3a79d2c16f';
+import {siteChip} from './ui-computer-view.js?v=3a79d2c16f';
+import {cliChoice, googleCard} from './ui-connect-model.js?v=3a79d2c16f';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -428,6 +428,14 @@ export const conversationActions = {
       return toast('Google needs a one-time client first. Paste it below, then Connect.');
     }
     if (card.action === 'open') return go({settings: card.section});
+    if (card.action === 'signin') {
+      // The owner signs in by hand in the shared browser: take the bot's tab, send it to the site, show it.
+      if (isStaticDemo()) return toast('Signing in needs the app running on your computer.');
+      go({profile: card.botId, sub: 'computer'});
+      await api(`/api/browser-live/${encodeURIComponent(card.botId)}/takeover`, 'POST', {});
+      await api(`/api/browser-live/${encodeURIComponent(card.botId)}/input`, 'POST', {type: 'navigate', url: card.url});
+      return toast('You are in control. Sign in, then tap Hand back control.');
+    }
     if (card.action === 'team') await api(`/api/groups/${encodeURIComponent(card.groupId)}`, 'PATCH', {settings: card.settings});
     else if (card.action === 'schedule') await (card.stop ? api(`/api/tasks/${encodeURIComponent(card.taskId)}`, 'DELETE') : api('/api/tasks', 'POST', scheduleTaskBody(card)));
     else if (card.action === 'remove') {

@@ -428,6 +428,14 @@ export const conversationActions = {
       return toast('Google needs a one-time client first. Paste it below, then Connect.');
     }
     if (card.action === 'open') return go({settings: card.section});
+    if (card.action === 'signin') {
+      // The owner signs in by hand in the shared browser: take the bot's tab, send it to the site, show it.
+      if (isStaticDemo()) return toast('Signing in needs the app running on your computer.');
+      go({profile: card.botId, sub: 'computer'});
+      await api(`/api/browser-live/${encodeURIComponent(card.botId)}/takeover`, 'POST', {});
+      await api(`/api/browser-live/${encodeURIComponent(card.botId)}/input`, 'POST', {type: 'navigate', url: card.url});
+      return toast('You are in control. Sign in, then tap Hand back control.');
+    }
     if (card.action === 'team') await api(`/api/groups/${encodeURIComponent(card.groupId)}`, 'PATCH', {settings: card.settings});
     else if (card.action === 'schedule') await (card.stop ? api(`/api/tasks/${encodeURIComponent(card.taskId)}`, 'DELETE') : api('/api/tasks', 'POST', scheduleTaskBody(card)));
     else if (card.action === 'remove') {

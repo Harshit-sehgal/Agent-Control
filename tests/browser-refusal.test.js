@@ -34,3 +34,17 @@ test('a form already submitted in this run is not submitted again; the bot gets 
   // Filling the form again without submitting is still fine.
   assert.equal(record(s, {url: submit.url, steps: [{op: 'type', selector: 'input[name=custname]', text: 'x'}]}).records.length, 1);
 });
+
+test('a site that blocks the browser twice is not opened again, and the owner gets a Sign in card for it, once', () => {
+  const s = state();
+  s.groupRuns = [{id: 'r1', status: 'running'}];
+  const blocked = {status: 'done', runId: 'r1', chatKey: 'atlas', botId: 'atlas', url: 'https://old.reddit.com/r/developersIndia/search', result: {title: null, page: 'x', text: "You've been blocked by network security. If you think you've been blocked by mistake, file a ticket."}};
+  s.browserRequests.push({...blocked, id: 'a'}, {...blocked, id: 'b'});
+  const out = record(s, {url: 'https://old.reddit.com/r/developersIndia/top'});
+  assert.equal(out.records.length, 0, 'not opened a third time');
+  const card = out.lines.find(l => l.kind === 'setup');
+  assert.ok(card, out.lines.map(l => l.text).join('\n'));
+  assert.deepEqual(JSON.parse(card.setup), {action: 'signin', botId: 'atlas', url: 'https://old.reddit.com/', text: JSON.parse(card.setup).text});
+  assert.match(JSON.parse(card.setup).text, /Sign in to old\.reddit\.com/);
+  assert.equal(record(s, {url: 'https://old.reddit.com/r/x'}).lines.filter(l => l.kind === 'setup').length, 0, 'offered once per task');
+});

@@ -13,11 +13,16 @@ export function setupCardsFromReply(store, {bot, output, makeId = randomUUID, no
   const found = parseSetupRequests(output);
   if (!found.length) return {text: String(output ?? ''), lines: []};
   const state = store.read();
+  // A card already offered in the last ten minutes is not offered again: the owner has one button for it.
+  const since = Date.now() - 10 * 60000;
+  const offered = new Set(Object.values(state.chats || {}).flat().filter(m => m?.kind === 'setup' && m.setup && Date.parse(m.at || 0) >= since).map(m => m.setup));
   const lines = found.map(item => {
     const out = item.ok ? resolveSetup(state, item.request, {speaker: bot}) : item;
+    if (out.ok && offered.has(JSON.stringify(out.card))) return null;
+    if (out.ok) offered.add(JSON.stringify(out.card));
     return out.ok
       ? {id: makeId(), role: 'system', kind: 'setup', botId: bot.id, setup: JSON.stringify(out.card), text: `${bot.name} suggests: ${out.card.text}`, at: now()}
       : {id: makeId(), role: 'system', kind: 'setup', botId: bot.id, text: `${bot.name} could not set that up: ${out.error}`, at: now()};
-  });
+  }).filter(Boolean);
   return {text: stripSetupBlocks(output) || `${bot.name} suggested a change.`, lines};
 }

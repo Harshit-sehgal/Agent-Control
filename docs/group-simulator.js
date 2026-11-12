@@ -2,17 +2,17 @@
  * The bots answer with canned replies (shared/offline-bots.js), and everything a
  * reply asks for goes through the rules the served loop uses: hand-offs, hires,
  * the out-of-job refusal, checkpoints and the runaway guard. */
-import {createRun,createEnvelope,handoffTargets,instructLead,wakeBots,assessTask,runNote,rosterFor,previousFor,enlist} from './coordination.js?v=ba73aa7e98';
-import {offlineReply} from './offline-bots.js?v=ba73aa7e98';
-import {parseOffJob,offJobMessage} from './off-job.js?v=ba73aa7e98';
-import {parseCreateBotRequests,stripCreateBotBlocks,botCreatedText,botCreateRefusedText} from './bot-create.js?v=ba73aa7e98';
-import {addCreatedBot} from './hire.js?v=ba73aa7e98';
-import {parseSetupRequests,stripSetupBlocks,resolveSetup} from './setup.js?v=ba73aa7e98';
-import {noteBotWork} from './runaway.js?v=ba73aa7e98';
-import {isLead} from './company.js?v=ba73aa7e98';
-import {botSettings,groupSettings,threadContext} from './bot-settings.js?v=ba73aa7e98';
-import {normalizeBot} from './contracts.js?v=ba73aa7e98';
-import {isThread,noteMember} from './threads.js?v=ba73aa7e98';
+import {createRun,createEnvelope,handoffTargets,instructLead,wakeBots,assessTask,runNote,rosterFor,previousFor,enlist} from './coordination.js?v=3a79d2c16f';
+import {offlineReply} from './offline-bots.js?v=3a79d2c16f';
+import {parseOffJob,offJobMessage} from './off-job.js?v=3a79d2c16f';
+import {parseCreateBotRequests,stripCreateBotBlocks,botCreatedText,botCreateRefusedText} from './bot-create.js?v=3a79d2c16f';
+import {addCreatedBot} from './hire.js?v=3a79d2c16f';
+import {parseSetupRequests,stripSetupBlocks,resolveSetup} from './setup.js?v=3a79d2c16f';
+import {noteBotWork} from './runaway.js?v=3a79d2c16f';
+import {isLead} from './company.js?v=3a79d2c16f';
+import {botSettings,groupSettings,threadContext} from './bot-settings.js?v=3a79d2c16f';
+import {normalizeBot} from './contracts.js?v=3a79d2c16f';
+import {isThread,noteMember} from './threads.js?v=3a79d2c16f';
 
 export async function simulateGroup({group, message, directBotId=null, guests=[], state, api, makeId, emit, chatKey=null, started=false, resume=null, shouldStop=()=>false, anyway=false}) {
   let run, previous, i;

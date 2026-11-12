@@ -23,16 +23,16 @@
  *   make itself the primary bot, save a rule without the owner's tap, or reach a route the owner could not.
  *
  * Pure and browser-safe: the server reads replies with it and the UI paints the card from it. */
-import {cleanText} from './core.js?v=ba73aa7e98';
-import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=ba73aa7e98';
-import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=ba73aa7e98';
-import {controlFence} from './reply-blocks.js?v=ba73aa7e98';
-import {companyBots, primaryOf} from './company.js?v=ba73aa7e98';
-import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js?v=ba73aa7e98';
-import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=ba73aa7e98';
-import {grantWhat} from './ui-asks.js?v=ba73aa7e98';
+import {cleanText, validHttpUrl} from './core.js?v=3a79d2c16f';
+import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=3a79d2c16f';
+import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=3a79d2c16f';
+import {controlFence} from './reply-blocks.js?v=3a79d2c16f';
+import {companyBots, primaryOf} from './company.js?v=3a79d2c16f';
+import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js?v=3a79d2c16f';
+import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=3a79d2c16f';
+import {grantWhat} from './ui-asks.js?v=3a79d2c16f';
 
-export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'schedule', 'remove', 'open'];
+export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'schedule', 'remove', 'open', 'signin'];
 /** The bot settings a bot may propose. Not the primary role, the browser approval mode, or layout (pins, order). */
 export const BOT_SETTABLE = ['replyLength', 'style', 'memory', 'canHandoff', 'summonable', 'enabled', 'temperature', 'reportsTo'];
 /** The team (group) settings a bot may propose: approve between steps, the step limit, hand-offs between its bots. */
@@ -47,6 +47,14 @@ export const SETUP_PAGES = {
   usage: ['usage', 'Usage'], appearance: ['look', 'Appearance'], general: ['general', 'General'],
 };
 const GOOGLE_PAGES = ['gmail', 'drive', 'google'];
+/** A public site as an https address ("reddit.com" → https://reddit.com/), or null: never an IP address or a local name. */
+function signinUrl(value) {
+  const text = String(value || '').trim();
+  const url = validHttpUrl(/^https?:\/\//i.test(text) ? text : `https://${text}`);
+  if (!url) return null;
+  const host = new URL(url).hostname;
+  return host.includes('.') && !/^[\d.]+$/.test(host) && !host.includes(':') && !/(^|\.)(localhost|local|internal)$/i.test(host) ? url : null;
+}
 const MIN_JOB = 20, MAX_JOB = 3000, MAX_BLOCKS = 3;
 
 export const SETUP_TOOL_HINT = 'To change a setting for the owner, put one fenced block named setup in your reply, holding JSON. '
@@ -58,7 +66,7 @@ export const SETUP_TOOL_HINT = 'To change a setting for the owner, put one fence
   + '{"action":"rule","bot":"<bot name>","do":"open|send|post|delete|spend","site":"<site, e.g. github.com>","choice":"always|ask|deny"} saves what that bot may do without asking (a payment is never always). '
   + '{"action":"schedule","bot":"<bot name, or me>","do":"<the message that bot gets each time>","every":"day|hour|week|<minutes>","at":"<HH:MM, optional>","on":"<monday..sunday, optional: a weekly schedule on that day>"} puts work on a timer: the bot runs it in its own chat and the owner reads the result there. Give only "at" for a one-off later today or tomorrow. Add "stop":true with a few words of its message in "do" to stop one; workspace.schedules lists them. When the owner asks for something regular (every morning, each Monday), propose a schedule instead of telling them to come back. '
   + '{"action":"remove","bot":"<bot name>"} removes a bot the owner no longer wants, with its chat and schedules (never Atlas). '
-  + '{"action":"open","page":"models|connectors|gmail|permissions|agents|usage"} shows the owner a Settings page, for things only they can do, such as pasting a key; "gmail" (or "drive") is a button that starts the Google sign-in itself, so use it whenever the owner wants email or Drive connected. '
+  + '{"action":"signin","site":"reddit.com"} gives the owner a button that opens the browser on this computer at that site, in their hands,, to sign in once; use it when a site blocks you or needs the owner signed in (Reddit, LinkedIn, a shop or bank login), instead of only saying it is blocked. Never ask for a password in chat. {"action":"open","page":"models|connectors|gmail|permissions|agents|usage"} shows the owner a Settings page, for things only they can do, such as pasting a key; "gmail" (or "drive") is a button that starts the Google sign-in itself, so use it whenever the owner wants email or Drive connected. '
   + 'Nothing changes until the owner taps Apply on the card, so say in your reply what you proposed and why. Never ask for a key or password in chat.';
 
 const lower = value => String(value ?? '').trim().toLowerCase();
@@ -134,6 +142,13 @@ export function resolveSetup(state, request, {speaker = null} = {}) {
     // Gmail and Drive are one Google sign-in, so the card goes straight to it.
     if (GOOGLE_PAGES.includes(request.page)) return {ok: true, card: {action: 'open', section: 'conn', app: 'google', text: 'Connect Google (Gmail and Drive)'}};
     return {ok: true, card: {action: 'open', section: page[0], text: `Settings → ${page[1]}`}};
+  }
+  if (request.action === 'signin') {
+    const url = signinUrl(request.site || request.url);
+    if (!url) return {ok: false, error: `"${request.site || request.url || 'blank'}" is not a public site to sign in to. Name it like reddit.com.`};
+    const botId = speaker?.id || primaryOf(state)?.id;
+    if (!botId) return {ok: false, error: 'there is no bot whose browser to open.'};
+    return {ok: true, card: {action: 'signin', botId, url, text: `Sign in to ${new URL(url).hostname.replace(/^www\./, '')} in this computer's browser. Bots use the same browser, so they can read it once you are signed in.`}};
   }
   if (request.action === 'job') {
     const bot = botNamed(state, request.bot, speaker);
@@ -258,6 +273,7 @@ export function setupCardOf(message) {
   try { card = typeof message?.setup === 'string' ? JSON.parse(message.setup) : message?.setup; } catch { return null; }
   if (!card || typeof card !== 'object' || !SETUP_ACTIONS.includes(card.action)) return null;
   if (card.action === 'open') return Object.values(SETUP_PAGES).some(([key]) => key === card.section) ? card : null;
+  if (card.action === 'signin') return typeof card.botId === 'string' && signinUrl(card.url) === card.url && typeof card.text === 'string' ? card : null;
   if (card.action === 'job') return typeof card.botId === 'string' && typeof card.job === 'string' ? card : null;
   if (card.action === 'rename') return typeof card.botId === 'string' && typeof card.name === 'string' ? card : null;
   if (card.action === 'settings') return typeof card.botId === 'string' && card.settings && typeof card.settings === 'object' && Object.keys(card.settings).length && Object.keys(card.settings).every(k => BOT_SETTABLE.includes(k)) ? card : null;
@@ -295,7 +311,7 @@ function scheduleCard(state, request, speaker) {
   return {ok: true, card: {action: 'schedule', botId: bot.id, groupId: group.id, message: what, ...(every ? {every} : {}), ...(at ? {at} : {}), ...(on ? {on} : {}), text: `${bot.name}: “${what}” ${whenWords({every, at, on})}`}};
 }
 export function setupDone(state, card) {
-  if (!card || card.action === 'open') return false;
+  if (!card || card.action === 'open' || card.action === 'signin') return false;
   if (card.action === 'remove') return !companyBots(state).some(b => b.id === card.botId);
   if (card.action === 'job') return companyBots(state).find(b => b.id === card.botId)?.instructions === card.job;
   if (card.action === 'schedule') {
@@ -314,7 +330,7 @@ export function setupDone(state, card) {
   return sameModel && sameEffort;
 }
 /** The button on a setup card. */
-export const setupButton = card => (card.app === 'google' ? 'Connect Google' : card.action === 'open' ? `Open ${card.text.replace(/^Settings → /, '')}` : card.action === 'remove' ? 'Remove' : 'Apply');
+export const setupButton = card => (card.action === 'signin' ? 'Sign in' : card.app === 'google' ? 'Connect Google' : card.action === 'open' ? `Open ${card.text.replace(/^Settings → /, '')}` : card.action === 'remove' ? 'Remove' : 'Apply');
 
 /* ---------- what every bot knows ---------- */
 
