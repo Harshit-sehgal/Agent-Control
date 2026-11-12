@@ -22,7 +22,8 @@ import crypto from 'node:crypto';
 import {fail} from '../shared/errors.js';
 import {cleanText} from '../shared/core.js';
 import {validateBrowserRequest} from '../shared/bot-browser.js';
-import {cliEngineById,cleanCliModel,LOCAL_CLI_ENGINE_IDS} from '../shared/ai-presets.js';
+import {cliEngineById,cleanCliModel,cleanEffort,LOCAL_CLI_ENGINE_IDS} from '../shared/ai-presets.js';
+import {base64Bytes,sniffType,isImage,MAX_FILES,MODEL_IMAGE_BYTES,MODEL_IMAGES_TOTAL} from '../shared/attachments.js';
 import {encryptJson,decryptJson,sha256,loadMasterKey} from './vault.js';
 
 /** Told when a task is queued for a device (src/server.js points it at the live
@@ -67,7 +68,26 @@ export function validateModelRun(payload) {
     if (!Number.isFinite(timeoutMs)) fail('The timeout must be a number of milliseconds.', 400);
     timeoutMs = Math.min(600000, Math.max(5000, Math.round(timeoutMs)));
   }
-  return {engine: engine.id, model, instructions: p.instructions || '', input: p.input, timeoutMs, ...deadlineOf(p)};
+  const effort = cleanEffort(p.effort);
+  if (effort === null) fail('That effort level is not valid. Use low, medium or high.', 400);
+  const images = modelRunImages(p.images);
+  return {engine: engine.id, model, ...(effort ? {effort} : {}), instructions: p.instructions || '', input: p.input, ...(images.length ? {images} : {}), timeoutMs, ...deadlineOf(p)};
+}
+
+/** The images a model.run hands the CLI: each one typed from its own bytes, within the model request limits. */
+function modelRunImages(list) {
+  if (list === undefined || list === null) return [];
+  if (!Array.isArray(list) || list.length > MAX_FILES) fail(`A model.run takes up to ${MAX_FILES} images in a list.`, 400);
+  let total = 0;
+  return list.map(image => {
+    const bytes = base64Bytes(image?.data);
+    if (!bytes?.length || bytes.length > MODEL_IMAGE_BYTES) fail('Each model.run image must be base64, and 5 MB or smaller.', 400);
+    const type = sniffType(bytes);
+    if (!isImage(type) || type !== image.type) fail('A model.run image must be a PNG, JPEG, WebP or GIF whose type matches its bytes.', 400);
+    total += bytes.length;
+    if (total > MODEL_IMAGES_TOTAL) fail('A model.run carries at most 15 MB of images.', 400);
+    return {type, data: image.data};
+  });
 }
 
 /** The canonical `mcp.call` payload: the NAME of an MCP server configured on the agent's own machine, an

@@ -26,21 +26,21 @@
  *   make itself the primary bot, save a rule without the owner's tap, or reach a route the owner could not.
  *
  * Pure and browser-safe: the server reads replies with it and the UI paints the card from it. */
-import {cleanText, validHttpUrl} from './core.js?v=380b6c0594';
-import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=380b6c0594';
-import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=380b6c0594';
-import {controlFence} from './reply-blocks.js?v=380b6c0594';
-import {companyBots, primaryOf} from './company.js?v=380b6c0594';
-import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices, isAskAction} from './asks.js?v=380b6c0594';
-import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=380b6c0594';
-import {grantWhat, payAlwaysText} from './ui-asks.js?v=380b6c0594';
-import {COLOR_NAMES} from './ui-kit.js?v=380b6c0594';
-import {SHAPES} from './company.js?v=380b6c0594';
-import {limitsOf, BACKSTOP} from './limits.js?v=380b6c0594';
-import {APPS, appById} from './app-catalog.js?v=380b6c0594';
-import {PRESETS, presetOf} from './presets.js?v=380b6c0594';
-import {briefingSchedule} from './briefing.js?v=380b6c0594';
-import {monthByBot, short as shortCount} from './usage.js?v=380b6c0594';
+import {cleanText, validHttpUrl} from './core.js?v=5b55ac7864';
+import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=5b55ac7864';
+import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=5b55ac7864';
+import {controlFence} from './reply-blocks.js?v=5b55ac7864';
+import {companyBots, primaryOf} from './company.js?v=5b55ac7864';
+import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices, isAskAction} from './asks.js?v=5b55ac7864';
+import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=5b55ac7864';
+import {grantWhat, payAlwaysText} from './ui-asks.js?v=5b55ac7864';
+import {COLOR_NAMES} from './ui-kit.js?v=5b55ac7864';
+import {SHAPES} from './company.js?v=5b55ac7864';
+import {limitsOf, BACKSTOP} from './limits.js?v=5b55ac7864';
+import {APPS, appById} from './app-catalog.js?v=5b55ac7864';
+import {PRESETS, presetOf} from './presets.js?v=5b55ac7864';
+import {briefingSchedule} from './briefing.js?v=5b55ac7864';
+import {monthByBot, tokensOf, short as shortCount} from './usage.js?v=5b55ac7864';
 
 export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'schedule', 'remove', 'open', 'signin', 'pause', 'limits', 'basics', 'forget', 'disconnect', 'thread', 'reconnect', 'connect', 'memory', 'template', 'preset', 'briefing'];
 /** The bot settings a bot may propose. Not the primary role, the browser approval mode, or layout (pins, order). */
@@ -98,6 +98,8 @@ export const SETUP_TOOL_HINT = 'To change a setting for the owner, put one fence
 
 const short80 = text => { const t = String(text ?? '').replace(/\s+/g, ' ').trim(); return t.length > 80 ? `${t.slice(0, 80)}…` : t; };
 const lower = value => String(value ?? '').trim().toLowerCase();
+/** The HH:MM a briefing task runs at. */
+const briefingAt = (state, id) => (state?.tasks || []).find(t => t?.id === id)?.payload?.at || '';
 const has = value => value !== undefined && value !== null && value !== '';
 const ENGINE_WORDS = {claude: 'claude', anthropic: 'claude', chatgpt: 'codex', codex: 'codex', openai: 'codex'};
 
@@ -224,7 +226,7 @@ export function resolveSetup(state, request, {speaker = null} = {}) {
   }
   if (request.action === 'template') {
     const list = Array.isArray(state?.templates) ? state.templates : [];
-    if (has(request.remove)) {
+    if (typeof request.remove === 'string' && request.remove.trim()) {
       const want = lower(request.remove);
       const hit = list.find(t => lower(t.title) === want) || list.find(t => lower(t.title).includes(want) || lower(t.text).includes(want));
       if (!hit) return {ok: false, error: `there is no saved template called "${request.remove}". ${list.length ? `The saved ones are: ${list.map(t => t.title).join(', ')}.` : 'None are saved yet.'}`};
@@ -249,7 +251,8 @@ export function resolveSetup(state, request, {speaker = null} = {}) {
     }
     const at = cleanAt(has(request.at) ? request.at : '08:00');
     if (!at) return {ok: false, error: `"${request.at}" is not a time of day. Use HH:MM, such as 08:00.`};
-    if (on) return {ok: false, error: `the daily briefing is already on (${on.when}). To change its time, turn it off first, then on at the new time.`};
+    if (on && briefingAt(state, on.id) === at) return {ok: false, error: `the daily briefing is already on at ${at}.`};
+    if (on) return {ok: true, card: {action: 'briefing', at, replaces: on.id, text: `Move the daily briefing to ${at} every day (it is ${on.when} now)`}};
     return {ok: true, card: {action: 'briefing', at, text: `Turn on the daily briefing every day at ${at}`}};
   }
   if (request.action === 'forget') {
@@ -447,7 +450,7 @@ export function setupCardOf(message) {
   if (card.action === 'pause') return card;
   if (card.action === 'template') return card.remove === true ? (typeof card.templateId === 'string' ? card : null) : typeof card.title === 'string' && typeof card.templateText === 'string' && card.templateText.trim() ? card : null;
   if (card.action === 'preset') return PRESETS.some(p => p.id === card.preset) ? card : null;
-  if (card.action === 'briefing') return card.stop === true ? (typeof card.taskId === 'string' ? card : null) : typeof card.at === 'string' && cleanAt(card.at) === card.at ? card : null;
+  if (card.action === 'briefing') return card.stop === true ? (typeof card.taskId === 'string' ? card : null) : typeof card.at === 'string' && cleanAt(card.at) === card.at && (card.replaces === undefined || typeof card.replaces === 'string') ? card : null;
   if (card.action === 'basics') return typeof card.ask === 'boolean' ? card : null;
   if (card.action === 'disconnect') return typeof card.connectorId === 'string' ? card : null;
   if (card.action === 'thread') return card.create === true ? (typeof card.message === 'string' && card.message.trim() ? card : null) : typeof card.groupId === 'string' && (card.remove === true || typeof card.name === 'string') ? card : null;
@@ -570,7 +573,7 @@ export function setupDone(state, card) {
   if (card.action === 'basics') return Boolean(state?.askBasics) === card.ask;
   if (card.action === 'template') { const list = state?.templates || []; return card.remove ? !list.some(t => t.id === card.templateId) : list.some(t => t.text === card.templateText); }
   if (card.action === 'preset') return presetOf(state) === card.preset;
-  if (card.action === 'briefing') { const on = briefingSchedule(state); return card.stop ? !on : Boolean(on); }
+  if (card.action === 'briefing') { const on = briefingSchedule(state); return card.stop ? !on : Boolean(on) && (!card.replaces || briefingAt(state, on.id) === card.at); }
   if (card.action === 'limits') { const now = limitsOf(state); return Object.entries(card.limits).every(([k, v]) => now[k] === v); }
   if (card.action === 'forget') return !(state?.memory?.rulebooks?.[`bot:${card.botId}`]?.rules?.length);
   if (card.action === 'disconnect') return !(state?.connectors || []).some(c => c?.id === card.connectorId);
@@ -597,7 +600,7 @@ export function setupDone(state, card) {
   return sameModel && sameEffort;
 }
 /** The button on a setup card. */
-export const setupButton = card => (card.action === 'template' ? (card.remove ? 'Delete' : 'Save template') : card.action === 'preset' ? 'Switch' : card.action === 'briefing' ? (card.stop ? 'Stop briefing' : 'Turn on') : (card.action === 'reconnect' ? (card.app ? 'Sign in again' : 'Reconnect') : card.action === 'connect' ? 'Connect' : card.action === 'memory' && card.remove ? 'Delete' : card.action === 'thread' && card.create ? 'Start' : card.action === 'signin' ? 'Sign in' : card.app === 'google' ? 'Connect Google' : card.action === 'open' ? `Open ${card.text.replace(/^Settings → /, '')}` : card.action === 'remove' || card.action === 'disconnect' ? 'Remove' : card.action === 'forget' ? 'Forget' : card.action === 'thread' && card.remove ? 'Delete' : card.action === 'pause' ? 'Pause' : 'Apply'));
+export const setupButton = card => (card.action === 'template' ? (card.remove ? 'Delete' : 'Save template') : card.action === 'preset' ? 'Switch' : card.action === 'briefing' ? (card.stop ? 'Stop briefing' : card.replaces ? 'Move' : 'Turn on') : (card.action === 'reconnect' ? (card.app ? 'Sign in again' : 'Reconnect') : card.action === 'connect' ? 'Connect' : card.action === 'memory' && card.remove ? 'Delete' : card.action === 'thread' && card.create ? 'Start' : card.action === 'signin' ? 'Sign in' : card.app === 'google' ? 'Connect Google' : card.action === 'open' ? `Open ${card.text.replace(/^Settings → /, '')}` : card.action === 'remove' || card.action === 'disconnect' ? 'Remove' : card.action === 'forget' ? 'Forget' : card.action === 'thread' && card.remove ? 'Delete' : card.action === 'pause' ? 'Pause' : 'Apply'));
 
 /* ---------- what every bot knows ---------- */
 
@@ -673,7 +676,10 @@ export function workspaceBrief(state, {agents = [], connectors = [], speaker = n
     fallbackModel: ai.fallback?.providerId ? `${label(ai.fallback.providerId) || 'a removed model'}${ai.fallback.model ? ` · ${ai.fallback.model}` : ''} answers when a bot's model is down, busy or out of credit` : 'none',
     usageThisMonth: (() => {
       const m = monthByBot(state, new Map(companyBots(state).map(b => [b.id, b.name])));
-      return {total: m.total.tokens ? `${shortCount(m.total.tokens)} tokens in ${m.total.calls} model calls` : 'nothing used yet', byBot: m.rows.slice(0, 12).map(r => `${r.name}: ${shortCount(r.tokens)} tokens`), where: 'Settings → Usage shows it by bot and day, and the cost for models the owner priced'};
+      const day = Object.values(state?.usage?.days?.[new Date().toISOString().slice(0, 10)] || {});
+      const tokens = day.reduce((n, u) => n + tokensOf(u), 0), calls = day.reduce((n, u) => n + (Number(u?.calls) || 0), 0);
+      const today = tokens ? `${shortCount(tokens)} tokens in ${calls} model calls today (the day in UTC)` : 'nothing used today (the day in UTC)';
+      return {today, total: m.total.tokens ? `${shortCount(m.total.tokens)} tokens in ${m.total.calls} model calls` : 'nothing used yet', byBot: m.rows.slice(0, 12).map(r => `${r.name}: ${shortCount(r.tokens)} tokens`), where: 'Settings → Usage shows it by bot and day, and the cost for models the owner priced'};
     })(),
     connectors: connectors.length ? connectors.map(c => `${c.name}${c.status && c.status !== 'ready' ? ` (${c.status})` : ''}`) : 'none',
     facts: [

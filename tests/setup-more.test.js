@@ -75,3 +75,33 @@ test('the new cards have their own button words', async () => {
   assert.equal(setupButton(card(s, {action: 'preset', preset: 'careful'})), 'Switch');
   assert.equal(setupButton(card(s, {action: 'briefing', at: '08:00'})), 'Turn on');
 });
+
+test('the brief also tells a bot what was used today (UTC), so "how many tokens today" has an answer', () => {
+  const s = state();
+  const today = new Date().toISOString().slice(0, 10);
+  s.usage.days[today] = {atlas: {input: 900, output: 100, calls: 3}};
+  const brief = workspaceBrief(s);
+  assert.match(brief.usageThisMonth.today, /1\.0k tokens in 3 model calls/);
+  assert.match(brief.usageThisMonth.today, /UTC/);
+  assert.match(workspaceBrief(state()).usageThisMonth.today, /nothing/);
+});
+
+test('a template card with "remove": false saves the template (seen from haiku)', () => {
+  const add = card(state(), {action: 'template', title: 'Top 5 HN', text: 'Summarise the top 5 Hacker News stories', remove: false});
+  assert.equal(add.remove, undefined);
+  assert.equal(add.templateText, 'Summarise the top 5 Hacker News stories');
+});
+
+test('a briefing card moves a briefing that is already on to a new time, in one tap (seen from haiku)', async () => {
+  const {setupButton} = await import('../shared/setup.js');
+  const s = state();
+  s.tasks.push({id: 'b1', kind: 'bot-task', status: 'queued', idempotencyKey: BRIEFING_KEY, payload: {botId: 'atlas', groupId: 'home', message: 'Daily briefing', brief: 'daily', kind: 'interval', intervalMinutes: 1440, at: '19:36'}});
+  const move = card(s, {action: 'briefing', at: '8:00'});
+  assert.equal(move.replaces, 'b1');
+  assert.equal(move.at, '08:00');
+  assert.match(move.text, /Move the daily briefing to 08:00/);
+  assert.equal(setupButton(move), 'Move');
+  assert.ok(setupCardOf({setup: move}));
+  assert.equal(setupDone(s, move), false, 'still at 19:36');
+  assert.equal(resolveSetup(s, {action: 'briefing', at: '19:36'}).ok, false, 'already at that time');
+});

@@ -566,7 +566,11 @@ export const conversationActions = {
       await sync();
       return void undoToast(`${card.text.match(/^Switch to ([^:]+)/)?.[1] || 'The preset'} is on.`, out?.undo);
     }
-    else if (card.action === 'briefing') await (card.stop ? api(`/api/tasks/${encodeURIComponent(card.taskId)}`, 'DELETE') : api('/api/tasks', 'POST', briefingTaskBody(store.state, {at: card.at})));
+    else if (card.action === 'briefing') {
+      // Moving it is stop then start, so there is never two briefings.
+      if (card.replaces) await api(`/api/tasks/${encodeURIComponent(card.replaces)}`, 'DELETE');
+      await (card.stop ? api(`/api/tasks/${encodeURIComponent(card.taskId)}`, 'DELETE') : api('/api/tasks', 'POST', briefingTaskBody(store.state, {at: card.at})));
+    }
     else if (card.action === 'rule') await api('/api/grants', 'POST', {botId: card.botId, action: card.act, ...(card.scope ? {scope: card.scope} : {}), choice: card.choice});
     else if (['job', 'rename', 'settings'].includes(card.action)) {
       const group = groupOfBot(card.botId);
