@@ -7,33 +7,33 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=e7ef376d24';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=e7ef376d24';
-import {requestOfMessage} from './bot-browser.js?v=e7ef376d24';
-import {validHttpUrl} from './core.js?v=e7ef376d24';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=e7ef376d24';
-import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=e7ef376d24';
-import {isPrimary} from './company.js?v=e7ef376d24';
-import {hasJob, modelChip} from './ui-profile-model.js?v=e7ef376d24';
-import {scheduleTaskBody} from './schedules.js?v=e7ef376d24';
-import {briefingTaskBody} from './briefing.js?v=e7ef376d24';
-import {feed, fileStrip} from './ui-feed.js?v=e7ef376d24';
-import {attachButton, chipsSlot, wireAttach} from './ui-attach.js?v=e7ef376d24';
-import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js?v=e7ef376d24';
-import {askCard} from './ui-asks.js?v=e7ef376d24';
-import {UNTIL_CHOICES, untilFor} from './asks.js?v=e7ef376d24';
-import {undoToast} from './ui-settings.js?v=e7ef376d24';
-import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=e7ef376d24';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=e7ef376d24';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=e7ef376d24';
-import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=e7ef376d24';
-import {toast, confirmSheet} from './ui-dialogs.js?v=e7ef376d24';
-import {siteChip, thumbSlot} from './ui-computer-view.js?v=e7ef376d24';
-import {cliChoice, googleCard} from './ui-connect-model.js?v=e7ef376d24';
-import {connectAppNow} from './ui-connect.js?v=e7ef376d24';
-import {appById} from './app-catalog.js?v=e7ef376d24';
-import {templateChipsHtml, templateButton} from './ui-templates.js?v=e7ef376d24';
-import {usageWords} from './usage.js?v=e7ef376d24';
+import {OFFJOB_CHOICES} from './off-job.js?v=380b6c0594';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=380b6c0594';
+import {requestOfMessage} from './bot-browser.js?v=380b6c0594';
+import {validHttpUrl} from './core.js?v=380b6c0594';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=380b6c0594';
+import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=380b6c0594';
+import {isPrimary} from './company.js?v=380b6c0594';
+import {hasJob, modelChip} from './ui-profile-model.js?v=380b6c0594';
+import {scheduleTaskBody} from './schedules.js?v=380b6c0594';
+import {briefingTaskBody} from './briefing.js?v=380b6c0594';
+import {feed, fileStrip} from './ui-feed.js?v=380b6c0594';
+import {attachButton, chipsSlot, wireAttach} from './ui-attach.js?v=380b6c0594';
+import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js?v=380b6c0594';
+import {askCard} from './ui-asks.js?v=380b6c0594';
+import {UNTIL_CHOICES, untilFor} from './asks.js?v=380b6c0594';
+import {undoToast} from './ui-settings.js?v=380b6c0594';
+import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=380b6c0594';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=380b6c0594';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=380b6c0594';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=380b6c0594';
+import {toast, confirmSheet} from './ui-dialogs.js?v=380b6c0594';
+import {siteChip, thumbSlot} from './ui-computer-view.js?v=380b6c0594';
+import {cliChoice, googleCard} from './ui-connect-model.js?v=380b6c0594';
+import {connectAppNow} from './ui-connect.js?v=380b6c0594';
+import {appById} from './app-catalog.js?v=380b6c0594';
+import {templateChipsHtml, templateButton} from './ui-templates.js?v=380b6c0594';
+import {usageWords} from './usage.js?v=380b6c0594';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -130,13 +130,18 @@ function browserEntry(m, conv) {
  * question ("Let Atlas open example.com?") and its buttons (Allow once, Always allow, Don't allow; Always allow on a
  * payment is confirmed first). Only a button answers it: Escape or leaving the chat decides nothing. Answered, it leaves the chat;
  * collapses to one muted line. Its status is read from state.asks, so the line itself never changes. */
+/** How long the owner chose for an open card's Always allow, by ask id, so a repaint (the poll) keeps it. In memory
+ * only: a reload starts again at Always. Forgotten once the ask is answered. */
+const lastsPicked = new Map();
 function askEntry({message: m}, conv) {
   const card = askCard(store.state, m);
+  if (!card.open) lastsPicked.delete(m.askId);
   if (!card.open) return `<div class="cv-note cv-asked" data-ask="${esc(m.askId)}"><span>${esc(card.text)}</span></div>`;
   const bot = findBot(card.botId) || askerOf(conv), name = card.botName;
   const choose = ({id, label, primary}) => btn(label, 'ask-answer', {id: card.askId, small: true, kind: primary ? 'primary' : 'quiet', data: {choice: id}});
   // How long an Always allow lasts: no end by default, or an hour, or the rest of today (asks.js untilFor).
-  const lasts = card.choices.some(c => c.id === 'always') ? `<select class="ask-for" data-for="${esc(card.askId)}" aria-label="How long Always allow lasts">${UNTIL_CHOICES.map(([id, label]) => `<option value="${id}">${esc(label)}</option>`).join('')}</select>` : '';
+  const picked = lastsPicked.get(card.askId) || 'always';
+  const lasts = card.choices.some(c => c.id === 'always') ? `<select class="ask-for" data-action="ask-for" data-for="${esc(card.askId)}" aria-label="How long Always allow lasts">${UNTIL_CHOICES.map(([id, label]) => `<option value="${id}"${id === picked ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select>` : '';
   const acts = canWrite() ? `<div class="acts">${card.choices.map(choose).join('')}${lasts}</div>` : '<small>Only a member can answer.</small>';
   const target = card.target ? `<a href="${esc(safeHref(card.target))}" target="_blank" rel="noopener noreferrer">${esc(card.target)}</a>` : '';
   // The whole message a send or draft would carry, folded under the sentence so the owner can read every word before saying yes.
@@ -442,14 +447,20 @@ async function answerAsk(id, answer) {
   // Always allow on a payment lets the bot pay on that site without asking again: confirm it first.
   const card = askCard(store.state, {askId: id});
   if (answer === 'always' && card.confirmAlways && !(await confirmSheet('Always allow payments here?', {confirm: 'Always allow', danger: true, detail: card.confirmAlways}))) return;
-  const lasts = answer === 'always' ? [...document.querySelectorAll('.ask-for')].find(x => x.dataset.for === id)?.value || 'always' : 'always';
+  const lasts = answer === 'always' ? lastsPicked.get(id) || 'always' : 'always';
   const until = untilFor(lasts);
   const {ask, undo} = await api(`/api/asks/${encodeURIComponent(id)}`, 'POST', {answer, ...(until ? {until} : {})});
+  lastsPicked.delete(id);
   await sync();
   if (answer !== 'always') { toast(answer === 'decline' ? 'Not allowed.' : 'Allowed once.'); return; }
   const name = findBot(ask?.botId)?.name || 'The bot';
   undoToast(lasts === '1h' ? `${name} may do this for the next hour.` : lasts === 'today' ? `${name} may do this until the end of today.` : `${name} may always do this.`, undo);
 }
+
+/** `change` events: the ask card's "how long" select, remembered until the card is answered. */
+export const conversationChanges = {
+  'ask-for': control => { lastsPicked.set(control.dataset.for, control.value); },
+};
 
 export const conversationActions = {
   'ask-answer': b => answerAsk(b.dataset.id, b.dataset.choice),

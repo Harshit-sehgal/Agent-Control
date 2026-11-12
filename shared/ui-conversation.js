@@ -130,13 +130,18 @@ function browserEntry(m, conv) {
  * question ("Let Atlas open example.com?") and its buttons (Allow once, Always allow, Don't allow; Always allow on a
  * payment is confirmed first). Only a button answers it: Escape or leaving the chat decides nothing. Answered, it leaves the chat;
  * collapses to one muted line. Its status is read from state.asks, so the line itself never changes. */
+/** How long the owner chose for an open card's Always allow, by ask id, so a repaint (the poll) keeps it. In memory
+ * only: a reload starts again at Always. Forgotten once the ask is answered. */
+const lastsPicked = new Map();
 function askEntry({message: m}, conv) {
   const card = askCard(store.state, m);
+  if (!card.open) lastsPicked.delete(m.askId);
   if (!card.open) return `<div class="cv-note cv-asked" data-ask="${esc(m.askId)}"><span>${esc(card.text)}</span></div>`;
   const bot = findBot(card.botId) || askerOf(conv), name = card.botName;
   const choose = ({id, label, primary}) => btn(label, 'ask-answer', {id: card.askId, small: true, kind: primary ? 'primary' : 'quiet', data: {choice: id}});
   // How long an Always allow lasts: no end by default, or an hour, or the rest of today (asks.js untilFor).
-  const lasts = card.choices.some(c => c.id === 'always') ? `<select class="ask-for" data-for="${esc(card.askId)}" aria-label="How long Always allow lasts">${UNTIL_CHOICES.map(([id, label]) => `<option value="${id}">${esc(label)}</option>`).join('')}</select>` : '';
+  const picked = lastsPicked.get(card.askId) || 'always';
+  const lasts = card.choices.some(c => c.id === 'always') ? `<select class="ask-for" data-action="ask-for" data-for="${esc(card.askId)}" aria-label="How long Always allow lasts">${UNTIL_CHOICES.map(([id, label]) => `<option value="${id}"${id === picked ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select>` : '';
   const acts = canWrite() ? `<div class="acts">${card.choices.map(choose).join('')}${lasts}</div>` : '<small>Only a member can answer.</small>';
   const target = card.target ? `<a href="${esc(safeHref(card.target))}" target="_blank" rel="noopener noreferrer">${esc(card.target)}</a>` : '';
   // The whole message a send or draft would carry, folded under the sentence so the owner can read every word before saying yes.
@@ -442,14 +447,20 @@ async function answerAsk(id, answer) {
   // Always allow on a payment lets the bot pay on that site without asking again: confirm it first.
   const card = askCard(store.state, {askId: id});
   if (answer === 'always' && card.confirmAlways && !(await confirmSheet('Always allow payments here?', {confirm: 'Always allow', danger: true, detail: card.confirmAlways}))) return;
-  const lasts = answer === 'always' ? [...document.querySelectorAll('.ask-for')].find(x => x.dataset.for === id)?.value || 'always' : 'always';
+  const lasts = answer === 'always' ? lastsPicked.get(id) || 'always' : 'always';
   const until = untilFor(lasts);
   const {ask, undo} = await api(`/api/asks/${encodeURIComponent(id)}`, 'POST', {answer, ...(until ? {until} : {})});
+  lastsPicked.delete(id);
   await sync();
   if (answer !== 'always') { toast(answer === 'decline' ? 'Not allowed.' : 'Allowed once.'); return; }
   const name = findBot(ask?.botId)?.name || 'The bot';
   undoToast(lasts === '1h' ? `${name} may do this for the next hour.` : lasts === 'today' ? `${name} may do this until the end of today.` : `${name} may always do this.`, undo);
 }
+
+/** `change` events: the ask card's "how long" select, remembered until the card is answered. */
+export const conversationChanges = {
+  'ask-for': control => { lastsPicked.set(control.dataset.for, control.value); },
+};
 
 export const conversationActions = {
   'ask-answer': b => answerAsk(b.dataset.id, b.dataset.choice),

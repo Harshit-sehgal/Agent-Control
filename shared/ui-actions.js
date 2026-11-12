@@ -8,10 +8,10 @@ import {sendChat, streamGroupRun, rerun} from './ui-chat.js';
 import {runWithTyping} from './run-follow.js';
 import {whoosh, react} from './ui-fx.js';
 import {shellActions} from './ui-shell.js';
-import {conversationActions, conversationForms} from './ui-conversation.js';
+import {conversationActions, conversationForms, conversationChanges} from './ui-conversation.js';
 import {attachBusy, takeAttachments} from './ui-attach.js';
 import {profileActions, profileForms, profileChanges, lookChanged, nameTyped, adoptFirstMessage} from './ui-profile.js';
-import {settingsActions, reloadAdminPage} from './ui-settings.js';
+import {settingsActions, settingsChanges, reloadAdminPage} from './ui-settings.js';
 import {changePasswordSheet} from './ui-sheets.js';
 import {adminActions, adminForms, adminChanges} from './ui-admin.js';
 import {takeoverActions, takeoverForms} from './ui-takeover.js';
@@ -117,7 +117,7 @@ export const forms = {
 /** `change` events: the shape and colour pickers, then the admin tables. */
 export function onControlChange(control) {
   if (lookChanged(control)) return;
-  const run = profileChanges[control.dataset.action];
+  const run = profileChanges[control.dataset.action] || settingsChanges[control.dataset.action] || conversationChanges[control.dataset.action];
   if (run) return run(control);
   const admin = adminChanges[control.dataset.action];
   if (admin) return admin(control, adminCtx);

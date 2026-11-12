@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile, readdir} from 'node:fs/promises';
-import {askCard, grantRows, allGrantRows, grantWhat, pauseBanner, PAUSE_TEXT, grantUrl, scopeOfAction} from '../shared/ui-asks.js';
+import {askCard, grantRows, allGrantRows, grantWhat, pauseBanner, PAUSE_TEXT, grantUrl, scopeOfAction, untilOptions} from '../shared/ui-asks.js';
 
 const bot = (id, name, settings = {}, extra = {}) => ({id, name, instructions: `${name} does a job.`, settings, ...extra});
 const atlas = bot('atlas', 'Atlas', {lead: true});
@@ -147,4 +147,25 @@ test('no screen sets a bot\'s permissions or its browser approval: grants replac
     assert.doesNotMatch(src, /name="browserApproval"|browserApproval:|browserApproval ?=[^=]|data-action="[^"]*approval/, `${file} still sets browserApproval`);
     assert.doesNotMatch(src, /name="permissions"[^>]*data-bot|data-action="toggle-bot-permission"/, `${file} still draws a per-bot permission switch`);
   }
+});
+
+// ---- a rule's end ----
+
+test('an Always allow row offers the ask card\'s ends; with an end set, that end is the one shown', () => {
+  const [plain] = grantRows(stateOf({grants: [grant({action: 'browser.use', scope: 'https://example.com', choice: 'always'})]}), 'mail');
+  assert.deepEqual(untilOptions(plain), [{id: 'always', label: 'Always', on: true}, {id: '1h', label: 'For 1 hour', on: false}, {id: 'today', label: 'For today', on: false}]);
+  const until = new Date(Date.now() + 3600000).toISOString();
+  const [ends] = grantRows(stateOf({grants: [grant({action: 'browser.use', scope: 'https://example.com', choice: 'always', until})]}), 'mail');
+  const options = untilOptions(ends);
+  assert.deepEqual(options.map(o => [o.id, o.on]), [['', true], ['always', false], ['1h', false], ['today', false]]);
+  assert.equal(options[0].until, until, 'the current end, for the markup to say "Until …"');
+  const [asks] = grantRows(stateOf({grants: [grant({action: 'browser.use', scope: 'https://example.com', choice: 'ask'})]}), 'mail');
+  assert.deepEqual(untilOptions(asks), [], 'only an Always allow ends');
+});
+
+test('changing a rule\'s end is the same grant request, with or without `until`', () => {
+  const [row] = grantRows(stateOf({grants: [grant({action: 'browser.use', scope: 'https://example.com', choice: 'always'})]}), 'mail');
+  const until = '2026-11-12T23:59:59.999Z';
+  assert.deepEqual(grantUrl(row, 'always', until), {url: '/api/grants', body: {botId: 'mail', action: 'browser.use', scope: 'https://example.com', choice: 'always', until}});
+  assert.equal(grantUrl(row, 'always', null).body.until, undefined, 'no end: the route clears the old one');
 });

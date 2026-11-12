@@ -13,8 +13,9 @@ import {esc, icon, btn, empty, note, roundBtn, switchBtn, fullDate} from './ui-k
 import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, applyTheme, themeChoice, THEMES, saveLocal} from './ui-store.js';
 import {isDesk, initials, setupCardHtml, PERM_SEEN} from './ui-shell.js';
 import {ADMIN_PAGES, adminPage} from './ui-admin.js';
-import {faceOf, headBar, activityBlocks, grantsHtml, grantNote} from './ui-profile.js';
-import {allGrantRows, permissionSummary} from './ui-asks.js';
+import {faceOf, headBar, activityBlocks} from './ui-profile.js';
+import {grantRows, allGrantRows, grantUrl, untilOptions, permissionSummary} from './ui-asks.js';
+import {GRANT_LABELS, untilFor} from './asks.js';
 import {PRESETS, presetOf, applyPreset} from './presets.js';
 import {toast, confirmSheet} from './ui-dialogs.js';
 import {
@@ -142,7 +143,54 @@ function presetCard() {
   return card(`<div class="rw st-pre"><span class="w">Safety preset<small>${esc(owner ? sub : `${sub} Only the owner changes the preset.`)}</small></span><span class="st-seg" role="group" aria-label="Safety preset">${seg}</span></div>`);
 }
 
-/** Repaint what a preset or its Undo changes, in place. */
+/* ----- the rules: what each bot may do, and the answers you gave ----- */
+
+/** Only an admin (or the one person of the demo) changes a rule. */
+const canGrant = () => isAdmin() || isStaticDemo();
+const ruleData = r => `data-id="${esc(r.botId)}" data-act="${esc(r.action)}" data-scope="${esc(r.scope)}"`;
+/** How long an Always allow lasts, beside its name: the ask card's ends, or the end it already has. */
+function untilSelect(r, off) {
+  const options = untilOptions(r);
+  if (!options.length) return '';
+  const opts = options.map(o => `<option value="${o.id}"${o.on ? ' selected' : ''}>${esc(o.until ? `Until ${fullDate(o.until)}` : o.label)}</option>`).join('');
+  return `<select class="gr-until" data-action="grant-until" ${ruleData(r)} aria-label="${esc(`How long ${r.label} lasts for ${r.botName}`)}"${off}>${opts}</select>`;
+}
+function grantRow(r) {
+  const off = canGrant() ? '' : ' disabled';
+  const seg = `<div class="gr-seg" role="group" aria-label="${esc(`${r.label} for ${r.botName}`)}">${r.choices.map(c => `<button type="button" data-action="set-grant" ${ruleData(r)} data-text="${esc(`${r.action} ${r.scope}`)}" data-choice="${c.id}" aria-pressed="${c.on}"${off}>${esc(c.label)}</button>`).join('')}</div>`;
+  // An Always allow's select says when it ends ("Until …"); after that the row is gone and the bot asks again.
+  return `<div class="gr"><div class="gr-top"><span class="w">${esc(r.label)}</span>${untilSelect(r, off)}</div>${seg}</div>`;
+}
+/** One bot's rules as a card, or every bot's in a card each. This is the only place rules are listed; refreshPerm repaints it in place. */
+function grantsHtml(botId = null) {
+  if (botId) {
+    const rows = grantRows(store.state, botId), name = findBot(botId)?.name || 'This bot';
+    return rows.length ? `<div class="cd">${rows.map(grantRow).join('')}</div>`
+      : `<p class="st-note">No rules for ${esc(name)} yet. One appears here when you pick Always allow on its ask, or set one with Ask each time or Don't allow.</p>`;
+  }
+  const rows = allGrantRows(store.state);
+  if (!rows.length) return '<div class="cd"><div class="rw"><span class="w st-quiet">No rules yet. One appears here when you pick Always allow on a bot\'s ask.</span></div></div>';
+  const by = new Map();
+  for (const r of rows) by.set(r.botId, [...(by.get(r.botId) || []), r]);
+  return [...by].map(([, list]) => `<section class="st-g"><h4 class="st-h">${esc(list[0].botName)}</h4><div class="cd">${list.map(grantRow).join('')}</div></section>`).join('');
+}
+/** The note under the list of rules. */
+const grantNote = (cls = 'st-note') => `<p class="${cls}">${canGrant() ? 'Payments ask every time unless you set Always allow for a site.' : 'Only the owner or an admin can change these.'}</p>`;
+const ruleBotName = id => findBot(id)?.name || 'The bot';
+
+/** One rule changed (a choice, or an Always allow's end): send it, then repaint everything it shows in, and put the
+ * keyboard focus back on the same control in the new copy. */
+async function saveRule({botId, action, scope}, choice, until, focusSel) {
+  const {url, body} = grantUrl({botId, action, scope}, choice, until);
+  await api(url, 'POST', body);
+  await sync();
+  refreshPerm();
+  const same = [['id', botId], ['act', action], ['scope', scope]].map(([k, v]) => `[data-${k}="${CSS.escape(v)}"]`).join('');
+  document.querySelector(`[data-grants] ${focusSel}${same}`)?.focus({preventScroll: true});
+}
+
+/** Repaint what a rule, a switch, a preset or its Undo changes, in place: the preset pressed (or Custom), the
+ * switches, the rules and the per-bot summary. Every permission change ends here, so none of them goes stale. */
 function refreshPerm() {
   const ask = Boolean(store.state?.askBasics);
   document.querySelectorAll('[data-presets]').forEach(x => { x.innerHTML = presetCard(); });
@@ -364,10 +412,14 @@ export const settingsActions = {
     if (!canPause()) throw new Error('Only the owner can change this.');
     await api('/api/permissions/basics', 'POST', {ask: !store.state?.askBasics});
     await sync();
-    const ask = Boolean(store.state?.askBasics);
-    document.querySelectorAll('[data-basics]').forEach(x => x.setAttribute('aria-checked', String(!ask)));
-    document.querySelectorAll('[data-basics-sub]').forEach(x => { x.textContent = basicsWords(ask); });
-    document.querySelectorAll('[data-presets]').forEach(x => { x.innerHTML = presetCard(); });
+    refreshPerm();
+  },
+  'set-grant': async b => {
+    const {id: botId, act: action, choice} = b.dataset, scope = b.dataset.scope || '';
+    // Always allow on a payment lets this bot pay on that site without asking: confirm it first.
+    if (action === 'spend' && choice === 'always' && !(await confirmSheet('Always allow payments here?', {confirm: 'Always allow', danger: true, detail: `${ruleBotName(botId)} will pay${scope ? ` on ${scope.replace(/^https?:\/\//, '')}` : ''} without asking you.`}))) return;
+    await saveRule({botId, action, scope}, choice, null, `button[data-choice="${choice}"]`);
+    toast(`${ruleBotName(botId)}: ${GRANT_LABELS[choice]}.`);
   },
   'settings-limit': async b => {
     if (!canPause()) throw new Error('Only the owner can change this.');
@@ -389,7 +441,7 @@ export const settingsActions = {
     const preset = PRESETS.find(p => p.id === b.dataset.preset);
     const {changes} = applyPreset(structuredClone(store.state), preset.id);
     if (!changes.length) { toast(`${preset.name} is already on.`); return; }
-    if (!await confirmSheet(`Switch to ${preset.name}?`, {confirm: `Use ${preset.name}`, detail: changes.join(' ')})) return;
+    if (!await confirmSheet(`Switch to ${preset.name}?`, {confirm: `Use ${preset.name}`, detail: changes.join('\n')})) return;
     const out = await api('/api/permissions/preset', 'POST', {preset: preset.id});
     await sync();
     refreshPerm();
@@ -416,5 +468,14 @@ export const settingsActions = {
     return loadActivity();
   },
   'activity-more': () => loadActivity(true),
+};
+/** `change` events: an Always allow rule's end (Always, For 1 hour, For today), through the same grants route. */
+export const settingsChanges = {
+  'grant-until': async control => {
+    const {id: botId, act: action} = control.dataset, scope = control.dataset.scope || '', lasts = control.value;
+    if (!lasts) return; // the end it already has
+    await saveRule({botId, action, scope}, 'always', untilFor(lasts), 'select');
+    toast(lasts === '1h' ? `${ruleBotName(botId)} may do this for the next hour.` : lasts === 'today' ? `${ruleBotName(botId)} may do this until the end of today.` : `${ruleBotName(botId)} may always do this.`);
+  },
 };
 export const settingsViews = {settings: settingsView, company: companyView, activity: activityView};
