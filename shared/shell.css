@@ -345,6 +345,7 @@
 .pause-t{flex:1;min-width:0;text-wrap:balance}
 .pause-go{flex:none;min-height:34px;padding:0 16px;border-radius:99px;background:var(--wait);color:var(--on-wait);font-size:13.5px;font-weight:600;transition:scale .15s}
 .pause-go:active{scale:.96}
+@media(pointer:coarse){.pause-go{min-height:44px}}
 @keyframes pausein{from{translate:0 -100%}}
 body[data-paused]{--pause-h:44px}
 @media(max-width:1023px){body[data-paused]{--pause-h:54px}}

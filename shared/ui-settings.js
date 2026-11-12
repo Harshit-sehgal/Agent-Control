@@ -401,7 +401,7 @@ export const settingsActions = {
     document.querySelectorAll('[data-action="settings-theme"]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
   },
   'settings-pause': async b => {
-    if (!canPause()) throw new Error('Only the owner can pause the bots.');
+    if (!canPause()) throw new Error('Only an admin or the owner can pause the bots.');
     const next = !paused();
     await api('/api/guard', 'POST', {paused: next});
     await sync();
@@ -409,7 +409,7 @@ export const settingsActions = {
     document.querySelectorAll('[data-pause-sub]').forEach(x => { x.textContent = paused() ? 'Everything is paused' : 'Switch off to pause every bot at once'; });
   },
   'settings-basics': async () => {
-    if (!canPause()) throw new Error('Only the owner can change this.');
+    if (!canPause()) throw new Error('Only an admin or the owner can change this.');
     await api('/api/permissions/basics', 'POST', {ask: !store.state?.askBasics});
     await sync();
     refreshPerm();
@@ -422,14 +422,14 @@ export const settingsActions = {
     toast(`${ruleBotName(botId)}: ${GRANT_LABELS[choice]}.`);
   },
   'settings-limit': async b => {
-    if (!canPause()) throw new Error('Only the owner can change this.');
+    if (!canPause()) throw new Error('Only an admin or the owner can change this.');
     const key = b.dataset.key, value = b.dataset.value === '' ? null : Number(b.dataset.value);
     await api('/api/limits', 'POST', {[key]: value});
     await sync();
     document.querySelectorAll(`[data-action="settings-limit"][data-key="${key}"]`).forEach(x => x.setAttribute('aria-pressed', String(x === b)));
   },
   'settings-limit-check': async () => {
-    if (!canPause()) throw new Error('Only the owner can change this.');
+    if (!canPause()) throw new Error('Only an admin or the owner can change this.');
     await api('/api/limits', 'POST', {askCheckpoints: !limitsOf(store.state).askCheckpoints});
     await sync();
     const on = limitsOf(store.state).askCheckpoints;
@@ -474,6 +474,8 @@ export const settingsChanges = {
   'grant-until': async control => {
     const {id: botId, act: action} = control.dataset, scope = control.dataset.scope || '', lasts = control.value;
     if (!lasts) return; // the end it already has
+    // Making a payment rule last for good is the same choice as Always allow on a payment: confirm it first.
+    if (action === 'spend' && lasts === 'always' && !(await confirmSheet('Always allow payments here?', {confirm: 'Always allow', danger: true, detail: `${ruleBotName(botId)} will pay${scope ? ` on ${scope.replace(/^https?:\/\//, '')}` : ''} without asking you, with no end.`}))) return void refreshPerm();
     await saveRule({botId, action, scope}, 'always', untilFor(lasts), 'select');
     toast(lasts === '1h' ? `${ruleBotName(botId)} may do this for the next hour.` : lasts === 'today' ? `${ruleBotName(botId)} may do this until the end of today.` : `${ruleBotName(botId)} may always do this.`);
   },

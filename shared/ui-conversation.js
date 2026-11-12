@@ -142,7 +142,8 @@ function askEntry({message: m}, conv) {
   // How long an Always allow lasts: no end by default, or an hour, or the rest of today (asks.js untilFor).
   const picked = lastsPicked.get(card.askId) || 'always';
   const lasts = card.choices.some(c => c.id === 'always') ? `<select class="ask-for" data-action="ask-for" data-for="${esc(card.askId)}" aria-label="How long Always allow lasts">${UNTIL_CHOICES.map(([id, label]) => `<option value="${id}"${id === picked ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select>` : '';
-  const acts = canWrite() ? `<div class="acts">${card.choices.map(choose).join('')}${lasts}</div>` : '<small>Only a member can answer.</small>';
+  // Answering an ask is an admin's (POST /api/asks/:id), so a member sees who can, not buttons that would refuse.
+  const acts = isAdmin() || isStaticDemo() ? `<div class="acts">${card.choices.map(choose).join('')}${lasts}</div>` : '<small>Only an admin or the owner can answer.</small>';
   const target = card.target ? `<a href="${esc(safeHref(card.target))}" target="_blank" rel="noopener noreferrer">${esc(card.target)}</a>` : '';
   // The whole message a send or draft would carry, folded under the sentence so the owner can read every word before saying yes.
   const body = card.body ? `<details class="cv-ask-body"><summary>Full message${icon('chevron', 13)}</summary><pre>${esc(card.body)}</pre></details>` : '';

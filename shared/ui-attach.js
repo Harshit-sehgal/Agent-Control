@@ -3,7 +3,7 @@
  * picked (`POST /api/attachments`, or the demo's own copy in shared/local-api.js),
  * so Send only carries the references. A removed chip's upload is left for the
  * server's daily sweep. What may be attached is shared/attachments.js. */
-import {ACCEPT, MAX_FILES, MAX_FILE_BYTES, DEMO_MAX_FILE_BYTES, pickProblem, isImage, sizeLabel} from './attachments.js';
+import {ACCEPT, MAX_FILES, MAX_FILE_BYTES, DEMO_MAX_FILE_BYTES, MODEL_IMAGE_BYTES, pickProblem, isImage, sizeLabel, shrinkTarget, shrunkName} from './attachments.js';
 import {esc, icon} from './ui-kit.js';
 import {api, isStaticDemo} from './ui-store.js';
 import {toast} from './ui-dialogs.js';
@@ -22,6 +22,24 @@ const readUrl = file => new Promise((resolve, reject) => {
   reader.readAsDataURL(file);
 });
 
+/** A still photo too big for one model request, redrawn as a smaller JPEG so the bot can see it; any other file,
+ * or one the browser cannot redraw, as it is (the server then names it to the model instead). */
+async function fitForModel(file) {
+  if (!shrinkTarget({type: file.type, size: file.size, width: 1, height: 1})) return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const {width, height} = shrinkTarget({type: file.type, size: file.size, width: bitmap.width, height: bitmap.height});
+    const canvas = Object.assign(document.createElement('canvas'), {width, height});
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, width, height);
+    bitmap.close?.();
+    for (const quality of [0.85, 0.7, 0.55]) {
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+      if (blob && blob.size <= MODEL_IMAGE_BYTES) return new File([blob], shrunkName(file.name), {type: 'image/jpeg'});
+    }
+  } catch { /* the original goes up as it is */ }
+  return file;
+}
+
 function paint() {
   const box = document.getElementById('cv-chips');
   if (!box) return;
@@ -39,13 +57,15 @@ function paint() {
 async function add(files) {
   const max = isStaticDemo() ? DEMO_MAX_FILE_BYTES : MAX_FILE_BYTES;
   for (const file of files) {
-    const problem = pickProblem({size: file.size, count: picked.length, max});
+    // A big photo is shrunk first, so one over the upload limit can still go as its smaller copy.
+    const sent = picked.length < MAX_FILES ? await fitForModel(file) : file;
+    const problem = pickProblem({size: sent.size, count: picked.length, max});
     if (problem) { toast(problem, true); if (picked.length >= MAX_FILES) break; continue; }
-    const entry = {key: crypto.randomUUID(), name: file.name || 'pasted image', type: file.type, size: file.size, preview: '', ref: null, failed: false};
+    const entry = {key: crypto.randomUUID(), name: sent.name || 'pasted image', type: sent.type, size: sent.size, preview: '', ref: null, failed: false};
     picked.push(entry); paint();
     try {
-      const data = await readUrl(file);
-      if (isImage(file.type)) entry.preview = data;
+      const data = await readUrl(sent);
+      if (isImage(sent.type)) entry.preview = data;
       entry.ref = await api('/api/attachments', 'POST', {name: entry.name, data: data.replace(/^data:[^,]*,/, '')});
       entry.type = entry.ref.type;
     } catch (error) {

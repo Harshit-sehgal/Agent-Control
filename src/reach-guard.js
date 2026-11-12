@@ -62,7 +62,8 @@ export async function guardedFetch(url, init = {}, {what = 'That address', looku
     if (!addresses?.length) throw fetchFailed(Object.assign(new Error(`${host} did not resolve.`), {code: 'ENOTFOUND'}));
   }
   if (!allowPrivate && refused(addresses.map(a => a.address))) refuse(host, what);
-  const {address} = addresses[0], family = net.isIP(address) || 4;
+  // Every checked address, in the resolver's order: the socket tries each in turn (as fetch does), and no other.
+  const checked = addresses.map(a => ({address: a.address, family: net.isIP(a.address) || 4}));
 
   const headers = Object.fromEntries(new Headers(init.headers || {}));
   let body = init.body ?? null;
@@ -75,8 +76,9 @@ export async function guardedFetch(url, init = {}, {what = 'That address', looku
       protocol: parsed.protocol, hostname: host, port: parsed.port || undefined,
       path: `${parsed.pathname}${parsed.search}`, method: init.method || 'GET', headers,
       ...(net.isIP(host) ? {} : {servername: host}),
-      // The resolver is never asked again: every lookup is answered with the checked address.
-      lookup: (_name, options, callback) => options?.all ? callback(null, [{address, family}]) : callback(null, address, family),
+      // The resolver is never asked again: every lookup is answered with the checked addresses.
+      lookup: (_name, options, callback) => options?.all ? callback(null, checked) : callback(null, checked[0].address, checked[0].family),
+      autoSelectFamily: checked.length > 1,
       signal,
     }, res => {
       const out = new Headers();

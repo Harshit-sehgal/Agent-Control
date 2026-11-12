@@ -7,24 +7,24 @@
  * team, agents, data) load the existing admin forms from ui-admin.js into the body.
  *
  * The lists behind it are pure and tested in ui-profile-model.js. */
-import {face} from './ui-face.js?v=969de23b28';
-import {botStatus} from './ui-company.js?v=969de23b28';
-import {esc, icon, btn, empty, note, roundBtn, switchBtn, fullDate} from './ui-kit.js?v=969de23b28';
-import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, applyTheme, themeChoice, THEMES, saveLocal} from './ui-store.js?v=969de23b28';
-import {isDesk, initials, setupCardHtml, PERM_SEEN} from './ui-shell.js?v=969de23b28';
-import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=969de23b28';
-import {faceOf, headBar, activityBlocks} from './ui-profile.js?v=969de23b28';
-import {grantRows, allGrantRows, grantUrl, untilOptions, permissionSummary} from './ui-asks.js?v=969de23b28';
-import {GRANT_LABELS, untilFor} from './asks.js?v=969de23b28';
-import {PRESETS, presetOf, applyPreset} from './presets.js?v=969de23b28';
-import {toast, confirmSheet} from './ui-dialogs.js?v=969de23b28';
+import {face} from './ui-face.js?v=a9e6960ec3';
+import {botStatus} from './ui-company.js?v=a9e6960ec3';
+import {esc, icon, btn, empty, note, roundBtn, switchBtn, fullDate} from './ui-kit.js?v=a9e6960ec3';
+import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, applyTheme, themeChoice, THEMES, saveLocal} from './ui-store.js?v=a9e6960ec3';
+import {isDesk, initials, setupCardHtml, PERM_SEEN} from './ui-shell.js?v=a9e6960ec3';
+import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=a9e6960ec3';
+import {faceOf, headBar, activityBlocks} from './ui-profile.js?v=a9e6960ec3';
+import {grantRows, allGrantRows, grantUrl, untilOptions, permissionSummary} from './ui-asks.js?v=a9e6960ec3';
+import {GRANT_LABELS, untilFor} from './asks.js?v=a9e6960ec3';
+import {PRESETS, presetOf, applyPreset} from './presets.js?v=a9e6960ec3';
+import {toast, confirmSheet} from './ui-dialogs.js?v=a9e6960ec3';
 import {
   ACTIVITY_FILTERS, activityUrl, companyTree, weekUsage, settingsSections, resolveSection, sectionArg,
-} from './ui-profile-model.js?v=969de23b28';
-import {COLORS} from './ui-face.js?v=969de23b28';
-import {limitsOf, limitWords, FAIL_STREAK} from './limits.js?v=969de23b28';
-import {monthByBot, usageWords} from './usage.js?v=969de23b28';
-import {companyBots} from './company.js?v=969de23b28';
+} from './ui-profile-model.js?v=a9e6960ec3';
+import {COLORS} from './ui-face.js?v=a9e6960ec3';
+import {limitsOf, limitWords, FAIL_STREAK} from './limits.js?v=a9e6960ec3';
+import {monthByBot, usageWords} from './usage.js?v=a9e6960ec3';
+import {companyBots} from './company.js?v=a9e6960ec3';
 
 const el = id => document.getElementById(id);
 const ICONS = {general: 'gear', look: 'half', models: 'key', conn: 'plug', perm: 'shield', usage: 'chart'};
@@ -401,7 +401,7 @@ export const settingsActions = {
     document.querySelectorAll('[data-action="settings-theme"]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
   },
   'settings-pause': async b => {
-    if (!canPause()) throw new Error('Only the owner can pause the bots.');
+    if (!canPause()) throw new Error('Only an admin or the owner can pause the bots.');
     const next = !paused();
     await api('/api/guard', 'POST', {paused: next});
     await sync();
@@ -409,7 +409,7 @@ export const settingsActions = {
     document.querySelectorAll('[data-pause-sub]').forEach(x => { x.textContent = paused() ? 'Everything is paused' : 'Switch off to pause every bot at once'; });
   },
   'settings-basics': async () => {
-    if (!canPause()) throw new Error('Only the owner can change this.');
+    if (!canPause()) throw new Error('Only an admin or the owner can change this.');
     await api('/api/permissions/basics', 'POST', {ask: !store.state?.askBasics});
     await sync();
     refreshPerm();
@@ -422,14 +422,14 @@ export const settingsActions = {
     toast(`${ruleBotName(botId)}: ${GRANT_LABELS[choice]}.`);
   },
   'settings-limit': async b => {
-    if (!canPause()) throw new Error('Only the owner can change this.');
+    if (!canPause()) throw new Error('Only an admin or the owner can change this.');
     const key = b.dataset.key, value = b.dataset.value === '' ? null : Number(b.dataset.value);
     await api('/api/limits', 'POST', {[key]: value});
     await sync();
     document.querySelectorAll(`[data-action="settings-limit"][data-key="${key}"]`).forEach(x => x.setAttribute('aria-pressed', String(x === b)));
   },
   'settings-limit-check': async () => {
-    if (!canPause()) throw new Error('Only the owner can change this.');
+    if (!canPause()) throw new Error('Only an admin or the owner can change this.');
     await api('/api/limits', 'POST', {askCheckpoints: !limitsOf(store.state).askCheckpoints});
     await sync();
     const on = limitsOf(store.state).askCheckpoints;
@@ -474,6 +474,8 @@ export const settingsChanges = {
   'grant-until': async control => {
     const {id: botId, act: action} = control.dataset, scope = control.dataset.scope || '', lasts = control.value;
     if (!lasts) return; // the end it already has
+    // Making a payment rule last for good is the same choice as Always allow on a payment: confirm it first.
+    if (action === 'spend' && lasts === 'always' && !(await confirmSheet('Always allow payments here?', {confirm: 'Always allow', danger: true, detail: `${ruleBotName(botId)} will pay${scope ? ` on ${scope.replace(/^https?:\/\//, '')}` : ''} without asking you, with no end.`}))) return void refreshPerm();
     await saveRule({botId, action, scope}, 'always', untilFor(lasts), 'select');
     toast(lasts === '1h' ? `${ruleBotName(botId)} may do this for the next hour.` : lasts === 'today' ? `${ruleBotName(botId)} may do this until the end of today.` : `${ruleBotName(botId)} may always do this.`);
   },

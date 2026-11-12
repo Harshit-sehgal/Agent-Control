@@ -102,3 +102,19 @@ export function fencedFile(name, text, max = MAX_TEXT_CHARS) {
 
 /** The note a model gets when it cannot see the images the owner attached. */
 export const imageNote = count => `[The owner attached ${count === 1 ? 'an image' : `${count} images`} to this message, but this model cannot see images. Say so if the image matters to the answer.]`;
+
+/** The longest side, in pixels, of the copy the composer sends for a photo too big for one model request. */
+export const SHRINK_SIDE = 2560;
+/** The largest photo the composer will redraw (50 MB). */
+export const SHRINK_MAX_INPUT = 50 * 1024 * 1024;
+/** The size `{width, height}` a still image over MODEL_IMAGE_BYTES is redrawn at before it is uploaded (as a JPEG),
+ * or null to send the file as it is. A GIF is kept whole, since it may be animated. Pure. */
+export function shrinkTarget({type, size, width, height} = {}) {
+  // Past SHRINK_MAX_INPUT the browser is not asked to decode it (a phone could run out of memory); it is refused as too big.
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(type) || !(size > MODEL_IMAGE_BYTES) || size > SHRINK_MAX_INPUT) return null;
+  const w = Math.max(1, Math.round(width) || 0), h = Math.max(1, Math.round(height) || 0);
+  const scale = Math.min(1, SHRINK_SIDE / Math.max(w, h));
+  return {width: Math.max(1, Math.round(w * scale)), height: Math.max(1, Math.round(h * scale))};
+}
+/** The shrunk copy's file name: the original's, ending in .jpg. */
+export const shrunkName = name => `${String(name || 'image').replace(/\.[a-z0-9]{1,5}$/i, '')}.jpg`;

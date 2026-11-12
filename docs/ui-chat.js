@@ -4,11 +4,11 @@
  * the bot as `directBotId`, a thread posts to its own group and Atlas answers.
  * The server orchestrator runs them when a model is configured and the offline
  * simulator does otherwise; the UI cannot tell which. Nothing here can publish. */
-import {pollRun, runWithTyping} from './run-follow.js?v=969de23b28';
-import {botSettings, groupSettings} from './bot-settings.js?v=969de23b28';
-import {store, api, sync, go, conversation, appendMessage, setTyping, teamKey, flushChats} from './ui-store.js?v=969de23b28';
-import {toast} from './ui-dialogs.js?v=969de23b28';
-import {isOfflineError, OFFLINE_TEXT} from './ui-model.js?v=969de23b28';
+import {pollRun, runWithTyping} from './run-follow.js?v=a9e6960ec3';
+import {botSettings, groupSettings} from './bot-settings.js?v=a9e6960ec3';
+import {store, api, sync, go, conversation, appendMessage, setTyping, teamKey, flushChats} from './ui-store.js?v=a9e6960ec3';
+import {toast} from './ui-dialogs.js?v=a9e6960ec3';
+import {isOfflineError, OFFLINE_TEXT} from './ui-model.js?v=a9e6960ec3';
 
 /** In-flight sends per conversation, so two overlapping sends keep the typing
  * indicator up until the last one finishes instead of the first clearing it. */
