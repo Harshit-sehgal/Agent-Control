@@ -12,6 +12,7 @@ import {activityPage} from '../shared/activity-log.js';
 import {publicConnectors} from '../shared/connectors.js';
 import {reply, allows} from './router.js';
 import {peek} from './sqlite-store.js';
+import {addTemplate, removeTemplate} from '../shared/templates.js';
 import crypto from 'node:crypto';
 
 const retentionSettings = s => ({...RETENTION_DEFAULTS, ...(s.settings?.retention || {})});
@@ -96,6 +97,9 @@ export function workflowRoutes(router, {auth}) {
     const result = await c.store.update(s => tasks.enqueueTask(s, b));
     return reply(result.duplicate ? 200 : 201, result.task);
   });
+  // Saved task templates (shared/templates.js): one list per workspace, read in the snapshot.
+  router.add('POST', '/api/templates', 'member', async c => { const b = await c.body(); return reply(201, await c.store.update(s => addTemplate(s, {title: b.title, text: b.text}))); });
+  router.add('DELETE', '/api/templates/:id', 'member', c => c.store.update(s => removeTemplate(s, c.params.id)));
   router.add('POST', '/api/tasks/:id/retry', 'member', c => c.store.update(s => tasks.retryTask(s, c.params.id)));
   router.add('DELETE', '/api/tasks/:id', 'member', c => c.store.update(s => tasks.cancelTask(s, c.params.id)));
 

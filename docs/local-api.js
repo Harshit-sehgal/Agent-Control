@@ -4,23 +4,25 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {initialState, cleanText} from './core.js?v=71b92f8de6';
-import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=71b92f8de6';
-import {RETENTION_DEFAULTS} from './retention.js?v=71b92f8de6';
-import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=71b92f8de6';
-import {addChatMessages, clearChat} from './chats.js?v=71b92f8de6';
-import {publicMemory, rememberFromOwner, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=71b92f8de6';
-import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=71b92f8de6';
-import {createThread, titleFrom} from './threads.js?v=71b92f8de6';
-import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=71b92f8de6';
-import {simulateGroup} from './group-simulator.js?v=71b92f8de6';
-import {BUSY_STATUSES} from './run-state.js?v=71b92f8de6';
-import {botSettings} from './bot-settings.js?v=71b92f8de6';
-import {denyBrowserRequest} from './bot-browser.js?v=71b92f8de6';
-import {answerAsk, expireAsks, orphanAsks, setGrant, setAskBasics} from './asks.js?v=71b92f8de6';
-import {setLimits} from './limits.js?v=71b92f8de6';
-import {activityPage} from './activity-log.js?v=71b92f8de6';
-import {withLocalLock} from './locks.js?v=71b92f8de6';
+import {briefingMessage} from './briefing.js?v=4c9d292766';
+import {addTemplate, removeTemplate} from './templates.js?v=4c9d292766';
+import {initialState, cleanText} from './core.js?v=4c9d292766';
+import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=4c9d292766';
+import {RETENTION_DEFAULTS} from './retention.js?v=4c9d292766';
+import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=4c9d292766';
+import {addChatMessages, clearChat} from './chats.js?v=4c9d292766';
+import {publicMemory, rememberFromOwner, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=4c9d292766';
+import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=4c9d292766';
+import {createThread, titleFrom} from './threads.js?v=4c9d292766';
+import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=4c9d292766';
+import {simulateGroup} from './group-simulator.js?v=4c9d292766';
+import {BUSY_STATUSES} from './run-state.js?v=4c9d292766';
+import {botSettings} from './bot-settings.js?v=4c9d292766';
+import {denyBrowserRequest} from './bot-browser.js?v=4c9d292766';
+import {answerAsk, expireAsks, orphanAsks, setGrant, setAskBasics} from './asks.js?v=4c9d292766';
+import {setLimits} from './limits.js?v=4c9d292766';
+import {activityPage} from './activity-log.js?v=4c9d292766';
+import {withLocalLock} from './locks.js?v=4c9d292766';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
@@ -67,7 +69,9 @@ async function runBotTask(state, t) {
   addChatMessages(state, chatKey, [{role: 'system', text: `Scheduled task: ${message}`}], {trusted: true});
   try {
     // `started` skips the plan gate. Scheduling the task was the approval.
-    await localRun(state, groupId, {message, directBotId: botId, chatKey, started: true});
+    // The daily briefing is given the workspace's facts as they are now, as on the server.
+    const said = t.payload.brief === 'daily' ? briefingMessage(message, state) : message;
+    await localRun(state, groupId, {message: said, directBotId: botId, chatKey, started: true});
   } catch (error) {
     addChatMessages(state, chatKey, [{role: 'system', text: `Scheduled task "${label}" did not run: ${error.message}`}], {trusted: true});
     throw error;
@@ -337,6 +341,9 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
     if (m[2] === 'approve') throw Object.assign(new Error('Browser requests run on your own device through a paired local agent, which needs the Node build. This demo cannot open pages.'), {status: 409});
     const r = denyBrowserRequest(state, m[1]); save(state); return r;
   }
+  // Saved task templates, as on the server (shared/templates.js).
+  if (path === '/api/templates' && method === 'POST') { const r = addTemplate(state, {title: body.title, text: body.text}); save(state); return r; }
+  if ((m = path.match(/^\/api\/templates\/([a-z0-9-]+)$/)) && method === 'DELETE') { const r = removeTemplate(state, m[1]); save(state); return r; }
   // Structured task endpoints, identical to the Node server's queue surface.
   if (path === '/api/tasks' && method === 'POST') {
     // Delivery tasks are created by the server from a user's own preferences.

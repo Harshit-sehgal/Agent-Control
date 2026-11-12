@@ -5,11 +5,12 @@
  * Home is the Chats layout only. On a phone it is two sections, Bots and Threads,
  * switched by swiping; on a laptop the sidebar holds both and the chat opens on the
  * right. The lists come from ui-company.js (pure); this file is markup and events. */
-import {botRows, threadRows} from './ui-company.js?v=71b92f8de6';
-import {face} from './ui-face.js?v=71b92f8de6';
-import {esc, icon, stamp} from './ui-kit.js?v=71b92f8de6';
-import {pauseBanner} from './ui-asks.js?v=71b92f8de6';
-import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, isStaticDemo, seenChats} from './ui-store.js?v=71b92f8de6';
+import {botRows, threadRows} from './ui-company.js?v=4c9d292766';
+import {face} from './ui-face.js?v=4c9d292766';
+import {esc, icon, stamp} from './ui-kit.js?v=4c9d292766';
+import {pauseBanner} from './ui-asks.js?v=4c9d292766';
+import {searchMessages, snippetHtml} from './message-search.js?v=4c9d292766';
+import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, isStaticDemo, seenChats} from './ui-store.js?v=4c9d292766';
 
 const el = id => document.getElementById(id);
 const DESK = '(min-width:1024px)';
@@ -99,6 +100,18 @@ function threadGroups(query = '', {headings = true} = {}) {
 }
 const waitingThreads = () => threadRows(store.state).waiting.length;
 
+/** What was said that matches: one row per message, with the chat's name, the line with the words marked and when.
+ * A tap opens the chat at that message. */
+function messageRows(query = '') {
+  const q = query.trim(); if (!q) return '';
+  const primary = bots().find(b => b.settings?.lead === true);
+  return searchMessages(store.state, q, {limit: 30}).map(hit => {
+    const who = hit.kind === 'bot' ? findBot(hit.id) : primary;
+    const faceHtml = who ? face(who, {size: 36, state: 'awake', primary: who === primary, index: Math.max(0, bots().indexOf(who))}) : '';
+    return `<button type="button" class="trow mrow" data-action="open-message" data-kind="${hit.kind}" data-id="${esc(hit.id)}" data-m="${esc(hit.messageId)}"><i class="rface">${faceHtml}</i><span class="trow-w"><b>${esc(hit.name)}</b><small>${hit.role === 'user' ? 'You: ' : ''}${snippetHtml(hit.text, q)}</small></span><span class="trow-end"><time>${esc(stamp(hit.at))}</time></span></button>`;
+  }).join('');
+}
+
 /* ---------- phone home ---------- */
 
 /** The phone home for the current section: Bots (pinned row, then the chat rows)
@@ -133,7 +146,7 @@ export function mountRail() {
   el('sidebar').innerHTML = `
     <div class="rail-seg" id="rail-seg" role="tablist" aria-label="Show bots or threads" data-on="bots"><span class="thumb" aria-hidden="true"></span>${SECTIONS.map(s => `<button type="button" role="tab" data-action="rail-section" data-section="${s}">${s === 'bots' ? 'Bots' : 'Threads'}</button>`).join('')}</div>
     <div class="rail-top">
-      <label class="rail-find">${icon('search', 17)}<input id="rail-q" type="search" placeholder="Search bots and threads" aria-label="Search bots and threads" autocomplete="off"></label>
+      <label class="rail-find">${icon('search', 17)}<input id="rail-q" type="search" placeholder="Search everything" aria-label="Search bots, threads and messages" autocomplete="off"></label>
       ${canWrite() ? `<button type="button" class="rail-btn" data-action="new-bot" aria-label="New bot" title="New bot: add a bot to your company">${icon('plus', 18)}</button>` : ''}
     </div>
     <div class="rail-list" id="rail-body"></div>
@@ -152,7 +165,7 @@ export function renderRail() {
   if (!isDesk()) { body.innerHTML = ''; return; }
   const query = store.listQuery.trim(), rows = chatRows(query);
   const hasRows = rows.length;
-  const pinned = rows.filter(r => r.pinned), rest = rows.filter(r => !r.pinned), threads = threadGroups(query, {headings: false});
+  const pinned = rows.filter(r => r.pinned), rest = rows.filter(r => !r.pinned), threads = threadGroups(query, {headings: false}), said = messageRows(query);
   const demo = isStaticDemo() ? '<p class="rail-demo">Browser-only demo · data stays in this browser</p>' : '';
   // Bots | Threads at the top picks the list, as the phone's sections do. A search looks through both.
   // Opening a thread or a bot turns the switch to its side, so the open chat is in the list.
@@ -170,7 +183,8 @@ export function renderRail() {
     ${pinned.length ? `<div class="shelf">${pinned.map(r => pinnedRow(r, 72)).join('')}</div>` : ''}
     <div class="crows">${rest.map(botRow).join('')}</div>${query ? '' : hiddenLink()}
     ${query && threads ? `<div class="rail-h">Threads</div>${threads}` : ''}
-    ${query && !hasRows && !threads ? '<p class="hv-empty"><strong>No match</strong>No bot or thread has that.</p>' : ''}`;
+    ${query && said ? `<div class="rail-h">Messages</div>${said}` : ''}
+    ${query && !hasRows && !threads && !said ? '<p class="hv-empty"><strong>No match</strong>No bot, thread or message has that.</p>' : ''}`;
   el('rail-ini').textContent = initials(); el('rail-name').textContent = ownerName();
   const waiting = waitingThreads(); el('rail-badge').innerHTML = waiting ? `<span class="badge" aria-label="${waiting} waiting on you">${waiting}</span>` : '';
 }
@@ -187,7 +201,7 @@ export function mountChrome() {
     <div class="ch-bar">
       <div class="ch-res" id="ch-res" hidden></div>
       ${write ? `<button type="button" class="ch-thread" data-action="new-thread" aria-label="New thread" title="New thread">${newThreadIcon(21)}<span id="ch-badge"></span></button>` : ''}
-      <label class="ch-find">${icon('search', 20)}<input id="sq" type="search" placeholder="Search" aria-label="Search bots and threads" autocomplete="off"></label>
+      <label class="ch-find">${icon('search', 20)}<input id="sq" type="search" placeholder="Search" aria-label="Search bots, threads and messages" autocomplete="off"></label>
     </div>`;
 }
 
@@ -227,8 +241,9 @@ export function renderPause() {
 export function searchHtml(query = '') {
   const q = query.trim(), matched = q ? chatRows(q) : [];
   const found = matched.length ? `<div class="tgrp"><h4>Bots</h4><div class="res-bots">${matched.map(r => `<button type="button" data-action="open-bot" data-id="${esc(r.id)}">${bigFace(r, 44)}<span>${esc(r.name)}</span></button>`).join('')}</div></div>` : '';
-  const threads = threadGroups(q);
-  return found + threads || '<p class="hv-empty"><strong>No match</strong>No bot or thread has that.</p>';
+  const threads = threadGroups(q), said = messageRows(q);
+  const messages = said ? `<div class="tgrp"><h4>Messages</h4>${said}</div>` : '';
+  return found + threads + messages || '<p class="hv-empty"><strong>No match</strong>No bot, thread or message has that.</p>';
 }
 export function openSearch() {
   const box = el('ch-res'), input = el('sq'); if (!box || !input) return;
@@ -288,6 +303,13 @@ export function wireShell() {
 export const shellActions = {
   'open-bot': b => go({bot: b.dataset.id}),
   'open-thread': b => go({thread: b.dataset.id}),
+  // A message search hit: open its chat, and the conversation scrolls to that line once it paints.
+  'open-message': b => {
+    const route = b.dataset.kind === 'thread' ? {thread: b.dataset.id} : {bot: b.dataset.id};
+    store.focusMessage = {key: b.dataset.kind === 'thread' ? `team-${b.dataset.id}` : b.dataset.id, id: b.dataset.m};
+    closeSearch();
+    go(route);
+  },
   'open-settings': () => go({settings: ''}),
   'new-bot': () => go({newBot: true}),
   'new-thread': () => go({newThread: true}),

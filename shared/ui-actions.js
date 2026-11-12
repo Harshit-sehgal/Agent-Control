@@ -16,6 +16,7 @@ import {adminActions, adminForms, adminChanges} from './ui-admin.js';
 import {takeoverActions, takeoverForms} from './ui-takeover.js';
 import {computerActions, computerForms} from './ui-computer-view.js';
 import {catalogSearch} from './ui-connect.js';
+import {templateActions, templateForms} from './ui-templates.js';
 
 const adminCtx = {reload: reloadAdminPage};
 const chatId = () => chatKeyOf(store.route);
@@ -83,6 +84,7 @@ export const actions = {
   ...Object.fromEntries(Object.entries(adminActions).map(([name, run]) => [name, b => run(b, adminCtx)])),
   ...takeoverActions,
   ...computerActions,
+  ...templateActions,
 };
 
 /** Submit handlers by form id. */
@@ -105,6 +107,7 @@ export const forms = {
   ...Object.fromEntries(Object.entries(adminForms).map(([id, run]) => [id, (form, f) => run(form, f, adminCtx)])),
   ...takeoverForms,
   ...computerForms,
+  ...templateForms,
 };
 
 /** `change` events: the shape and colour pickers, then the admin tables. */
