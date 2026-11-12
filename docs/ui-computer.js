@@ -8,7 +8,7 @@
  * The numbers match agent/live-input.mjs, which is the one place the device checks an
  * event: a point is clamped to the page, text is at most 2000 characters and a wheel
  * turn at most 5000 pixels, so nothing built here can be refused for its size. */
-import {hostOf} from './bot-browser.js?v=cbbedc32a9';
+import {hostOf} from './bot-browser.js?v=e4e0fdac0c';
 
 /** The page the owner sees, in CSS pixels. A frame carries its own size; this is the fallback. */
 export const PAGE = {w: 1280, h: 800};
@@ -199,3 +199,19 @@ export function controlPill({name = 'The bot', state = 'idle', unavailable = ''}
   if (state === 'driving') return {who: 'You are in control', action: 'back', label: 'Hand back control'};
   return {who: `${name} is in control`, action: 'take', label: 'Take control'};
 }
+
+/* ---------- the small live picture on a profile and a chat header ---------- */
+
+/** What the thumbnail shows, or null for none: only while the bot's browser is in use (browsing, or the owner
+ * driving), never in the demo or with no device. `state` and `site` are the list's; `view` is the last frame reply
+ * (mergeView), fresher than the list when there is one. `label` is the button's words. */
+export function thumbFor({state = 'idle', site = '', view = null, demo = false, name = 'the bot'} = {}) {
+  if (demo || view?.demo || view?.agent === false) return null;
+  const now = view && STATES.includes(view.state) ? view.state : state;
+  if (now !== 'browsing' && now !== 'driving') return null;
+  const where = view?.site || site || '';
+  const label = now === 'driving' ? `You are driving ${name}'s browser${where ? `, on ${where}` : ''}` : `Watch ${name}${where ? ` on ${where}` : ''}`;
+  return {state: now, site: where, image: view?.image || '', label};
+}
+/** Milliseconds until the thumbnail looks again, or null to stop: gently, only while it is on screen and active. */
+export const thumbDelay = ({visible, active, failures = 0}) => (!visible || !active ? null : Math.min(15000, 2500 * 2 ** failures));

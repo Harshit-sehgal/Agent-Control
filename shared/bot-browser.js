@@ -25,6 +25,7 @@ import {fail} from './errors.js';
 import {decide, createAsk, scopeOf} from './asks.js';
 import {controlFence} from './reply-blocks.js';
 import {BACKSTOP, pagesCap, roundsCap} from './limits.js';
+import {appForHost} from './app-catalog.js';
 
 /** The most page text one model turn carries (the pages of a round together). */
 export const MAX_PAGE_CHARS = 24000;
@@ -429,6 +430,14 @@ const samePage = (a, b) => {
   } catch { return false; }
 };
 
+/** The connector that does an app's work directly (its MCP server, or Google's API), when this host is that app's own
+ * site and the connector is working. A sign-in through the browser is the browser, so it is not one. */
+function connectedVia(state, host) {
+  const app = appForHost(host);
+  if (!app) return null;
+  return (state.connectors || []).find(c => c?.status === 'ready' && (app.google ? c.kind === 'google' : c.kind === 'mcp' && c.app === app.id)) || null;
+}
+
 export function recordBrowserRequests(state, {bot, groupId, chatKey, output, depth = 0, skipUrls = [], runId = null, unattended = false, closed = false, makeId = () => crypto.randomUUID(), now = new Date().toISOString()}) {
   depth = Math.max(0, Math.min(MAX_BROWSER_DEPTH, Number(depth) || 0));
   const rounds = roundsCap(state), perReply = pagesCap(state);
@@ -470,6 +479,16 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
     }
     // A site that refused this browser twice in the run (Access Denied, a block page) will refuse it again.
     const host = hostOf(item.request.url);
+    // A connected app is used through its own tools, as the owner: its site goes back to the bot once per task. Asked
+    // again (its tools could not do this), the page opens. What no connector covers, like X, is the browser's.
+    const via = connectedVia(state, host);
+    if (via && run && !(run.connectorFirst || []).includes(host)) {
+      run.connectorFirst = [...(run.connectorFirst || []), host];
+      const why = `${via.name} is connected, so use its tools instead of the browser: a connector block with "use":"${via.id}" and one of its tools. Open this page only if none of its tools can do it.`;
+      say(`${bot.name} reached for ${host.replace(/^www\./, '')} in the browser; ${via.name} is connected, so it uses its tools first.`);
+      invalid.push(why);
+      continue;
+    }
     if (!item.request.steps.length && refusals(host) >= 2) {
       if (!refused.includes(host)) refused.push(host);
       repeated++;

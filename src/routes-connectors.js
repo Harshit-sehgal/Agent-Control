@@ -14,11 +14,14 @@ import {publicConnectors, GOOGLE_ID} from '../shared/connectors.js';
 import {addMcpConnector, addSiteConnector, refreshConnector, removeConnector, publicBaseUrl} from './connectors.js';
 import {saveGoogleClient, startGoogleSignIn, takeGoogleFlow, finishGoogleSignIn, checkGoogle, googleSetup, resetGoogleTokenCache, GOOGLE_CALLBACK} from './google.js';
 import {cookie} from './http.js';
+import {startMcpSignIn, takeMcpFlow, finishMcpSignIn, reasonOf, MCP_CALLBACK} from './mcp-oauth.js';
 import {undoHeldSend} from './held-sends.js';
 import {reply} from './router.js';
 
 export {GOOGLE_CALLBACK};
 const FLOW_COOKIE = 'google_state';
+const MCP_COOKIE = 'mcp_state';
+const mcpCookie = (value, {secure, maxAge}) => `${MCP_COOKIE}=${value}; HttpOnly; SameSite=Lax; Path=/api/connectors/mcp; Max-Age=${maxAge}${secure ? '; Secure' : ''}`;
 const flowCookie = (value, {secure, maxAge}) => `${FLOW_COOKIE}=${value}; HttpOnly; SameSite=Lax; Path=/api/connectors/google; Max-Age=${maxAge}${secure ? '; Secure' : ''}`;
 
 export function connectorRoutes(router, app = {}) {
@@ -51,6 +54,29 @@ export function connectorRoutes(router, app = {}) {
   router.add('GET', '/api/connectors/google/start', 'admin', c => {
     const {url, state} = startGoogleSignIn(c.store, c.actor.workspaceId, c.req);
     return reply(302, {ok: true}, {Location: url, 'Set-Cookie': flowCookie(state, {secure: publicBaseUrl(c.req).startsWith('https:'), maxAge: 600})});
+  });
+  // An app's official MCP server, signed in to directly (src/mcp-oauth.js). The browser navigates here, so a failure
+  // comes back as an address the page reads (`?connect=error&reason=...`), never as JSON on a blank page.
+  router.add('GET', '/api/connectors/mcp/start', 'admin', async c => {
+    const base = publicBaseUrl(c.req), app = new URL(c.req.url, 'http://start').searchParams.get('app') || '';
+    try {
+      const {url, state} = await startMcpSignIn(c.actor.workspaceId, base, app);
+      return reply(302, {ok: true}, {Location: url, 'Set-Cookie': mcpCookie(state, {secure: base.startsWith('https:'), maxAge: 600})});
+    } catch (error) {
+      return reply(302, {ok: false}, {Location: `${base}/?connect=error&app=${encodeURIComponent(app.slice(0, 40))}&reason=${reasonOf(error)}`});
+    }
+  });
+  router.add('GET', MCP_CALLBACK, 'public', async c => {
+    const q = new URL(c.req.url, 'http://callback').searchParams;
+    const flow = takeMcpFlow(q.get('state') || '', cookie(c.req, MCP_COOKIE));
+    const base = flow ? new URL(flow.redirectUri).origin : publicBaseUrl(c.req);
+    const back = (reason, app) => reply(302, {ok: !reason}, {Location: `${base}/?connect=${reason ? 'error' : 'connected'}&app=${encodeURIComponent(app || '')}${reason ? `&reason=${reason}` : ''}`, 'Set-Cookie': mcpCookie('', {secure: base.startsWith('https:'), maxAge: 0})});
+    if (!flow) return back('state');
+    const store = app.workspaces?.get(flow.workspaceId);
+    if (!store) return back('setup', flow.app.id);
+    const run = () => finishMcpSignIn(store, flow, {code: q.get('code'), error: q.get('error')});
+    const result = await (store.trackWork ? store.trackWork(run) : run());
+    return back(result.reason || null, flow.app.id);
   });
   router.add('GET', GOOGLE_CALLBACK, 'public', async c => {
     const q = new URL(c.req.url, 'http://callback').searchParams;

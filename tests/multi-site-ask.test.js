@@ -65,7 +65,7 @@ test('one site, two actions: the ask names both and still offers Always allow fo
   const {asks: [card], records: [request]} = record(s, {url: `${A}/inbox`, steps: [{op: 'click', selector: '#delete'}, {op: 'click', selector: '#send'}]});
   assert.match(card.detail, /delete/);
   assert.match(card.detail, /send/);
-  assert.deepEqual(askCard(s, {askId: card.id, text: ''}).choices.map(c => c.id), ['always', 'allow', 'decline']);
+  assert.deepEqual(askCard(s, {askId: card.id, text: ''}).choices.map(c => c.id), ['allow', 'always', 'decline']);
   answerAsk(s, card.id, 'always', NOW);
   assert.deepEqual(request.approved, [`delete@${A}`, `send@${A}`]);
   assert.deepEqual(s.grants.filter(g => g.choice === 'always' && g.action !== 'browser.use').map(g => `${g.action}@${g.scope}`).sort(), [`delete@${A}`, `send@${A}`]);

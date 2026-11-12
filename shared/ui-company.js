@@ -84,6 +84,31 @@ function stoppedLine(runs, mine, line) {
   return {...line, stopped: true, preview: oneLine(last.error || 'This stopped before it finished.', 120)};
 }
 
+/* ---------- the one mark at a row's face ---------- */
+
+/** How long a finished run's check stays on its row before it gives way (to the unread dot, or to nothing). */
+export const DONE_MS = 4000;
+const MARK_LABELS = {needs: 'Needs you', working: 'Working', done: 'Just finished', unread: 'Unread'};
+/** The one mark a row shows at its face, strongest first: needs you, working, just finished, unread.
+ * `done` is the finished run's age in ms (or null); `then` says what the check fades into. */
+export function rowMark({needs = false, working = false, done = null, unread = false} = {}) {
+  if (needs) return {kind: 'needs', label: MARK_LABELS.needs};
+  if (working) return {kind: 'working', label: MARK_LABELS.working};
+  if (Number.isFinite(done)) return {kind: 'done', label: MARK_LABELS.done, age: done, then: unread ? 'unread' : ''};
+  if (unread) return {kind: 'unread', label: MARK_LABELS.unread};
+  return {kind: '', label: ''};
+}
+/** The age of the newest run in a chat when it completed within DONE_MS, else null. */
+function justDone(runs, mine, now) {
+  const last = runs.filter(mine).reduce((a, r) => (a && ended(a) >= ended(r) ? a : r), null);
+  if (!last || last.status !== 'completed') return null;
+  const age = now - ended(last);
+  return age >= 0 && age <= DONE_MS ? age : null;
+}
+/** A run parked on the owner: an ask, a plan, a checkpoint, a limit. A page request already on its way is the bot reading, not the owner's turn. */
+const parkedOnOwner = (run, state) => isAwaiting(run.status)
+  && !(run.status === 'awaiting_browser' && !(state?.browserRequests || []).some(r => r.runId === run.id && r.status === 'pending'));
+
 const unreadOf = (line, seenAt) => Boolean(line.answeredAt) && !(seenAt && time(seenAt) >= time(line.answeredAt));
 
 /** The sidebar. Pinned bots first, then the company tree (Atlas, then each
@@ -91,7 +116,7 @@ const unreadOf = (line, seenAt) => Boolean(line.answeredAt) && !(seenAt && time(
  * saved one, so activity never reorders it. A pinned Atlas is not repeated, so
  * the list then starts with Atlas's reports. Atlas cannot be hidden. `pins`
  * defaults to the bots whose settings.pinned is set. */
-export function botRows(state, {query = '', order = [], pins, hidden = [], seen = {}} = {}) {
+export function botRows(state, {query = '', order = [], pins, hidden = [], seen = {}, now = Date.now()} = {}) {
   const bots = botsOf(state), primary = primaryOf(bots), ids = new Set(bots.map(b => b.id));
   const pinned = (Array.isArray(pins) ? pins : bots.filter(b => settingsOf(b).pinned).map(b => b.id)).filter(id => ids.has(id));
   const rank = bot => { const i = order.indexOf(bot.id); return i < 0 ? order.length : i; };
@@ -107,11 +132,14 @@ export function botRows(state, {query = '', order = [], pins, hidden = [], seen 
     .filter(bot => bot === primary || !hidden.includes(bot.id))
     .map(bot => {
       const isPrimary = bot === primary, isManager = managerOf(bot, bots), status = statusOf(bot, runs, primary);
+      const mine = r => r.chatKey === bot.id, line = stoppedLine(runs, mine, {stopped: false, ...lastLine(state?.chats?.[bot.id])});
+      const unread = unreadOf(line, seen?.[bot.id]), needs = totalWaitingOnYou(waitingOnYou(state, bot.id));
+      const parked = runs.some(r => parkedOnOwner(r, state) && turn(r, primary).botId === bot.id);
       return {
         id: bot.id, name: bot.name, job: jobOf(bot),
         face: face(bot, {size: 40, state: status, primary: isPrimary, manager: isManager, index: bots.indexOf(bot)}),
-        status, ...(line => ({...line, unread: unreadOf(line, seen?.[bot.id])}))(stoppedLine(runs, r => r.chatKey === bot.id, {stopped: false, ...lastLine(state?.chats?.[bot.id])})),
-        needs: totalWaitingOnYou(waitingOnYou(state, bot.id)),
+        status, ...line, unread, needs,
+        mark: rowMark({needs: needs > 0 || parked, working: status !== 'asleep' && status !== 'awake', done: justDone(runs, mine, now), unread}),
         pinned: pinned.includes(bot.id), isPrimary, isManager, team: isPrimary ? null : parentOf(bot) ?? null,
       };
     })
@@ -135,6 +163,10 @@ export function threadRows(state, {now = Date.now(), seen = {}} = {}) {
       face: who ? face(who, {size: 36, state: waiting ? 'waiting' : pill ? 'working' : 'awake', primary: who === primary, index: bots.indexOf(who)}) : '',
       preview: line.preview, at: line.at || group.createdAt || '', needs, waiting,
       working: Boolean(pill), activity: pill?.text || '', unread: !pill && unreadOf(line, seen?.[key]), stopped: !pill && !waiting && line.stopped,
+      mark: rowMark({
+        needs: needs > 0 || runs.some(r => r.groupId === group.id && parkedOnOwner(r, state)),
+        working: waiting || Boolean(pill), done: justDone(runs, r => r.groupId === group.id, now), unread: !pill && unreadOf(line, seen?.[key]),
+      }),
     };
   }).sort((a, b) => time(b.at) - time(a.at));
   return {

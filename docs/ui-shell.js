@@ -5,11 +5,11 @@
  * Home is the Chats layout only. On a phone it is two sections, Bots and Threads,
  * switched by swiping; on a laptop the sidebar holds both and the chat opens on the
  * right. The lists come from ui-company.js (pure); this file is markup and events. */
-import {botRows, threadRows} from './ui-company.js?v=cbbedc32a9';
-import {face} from './ui-face.js?v=cbbedc32a9';
-import {esc, icon, stamp} from './ui-kit.js?v=cbbedc32a9';
-import {pauseBanner} from './ui-asks.js?v=cbbedc32a9';
-import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, isStaticDemo, seenChats} from './ui-store.js?v=cbbedc32a9';
+import {botRows, threadRows} from './ui-company.js?v=e4e0fdac0c';
+import {face} from './ui-face.js?v=e4e0fdac0c';
+import {esc, icon, stamp} from './ui-kit.js?v=e4e0fdac0c';
+import {pauseBanner} from './ui-asks.js?v=e4e0fdac0c';
+import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, isStaticDemo, seenChats} from './ui-store.js?v=e4e0fdac0c';
 
 const el = id => document.getElementById(id);
 const DESK = '(min-width:1024px)';
@@ -53,20 +53,39 @@ function botRow(row) {
   const prev = row.status === 'working' ? '<span class="crow-prev live">working<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></span>'
     : row.needs ? '<span class="crow-prev wt">Waiting on you</span>'
     : `<span class="crow-prev">${row.stopped ? '<span class="wt stop">Stopped · </span>' : ''}${esc(row.preview || row.job)}</span>`;
-  return `<button type="button" class="crow${current ? ' on' : ''}${row.unread && !current && !row.needs ? ' new' : ''}" data-action="open-bot" data-id="${esc(row.id)}" data-team="${esc(row.team ?? '')}"${row.isManager ? ' data-manager="true"' : ''}${current ? ' aria-current="page"' : ''}>${row.face}<span class="crow-w"><span class="crow-top"><b>${esc(row.name)}</b><time>${esc(stamp(row.at))}</time></span>${prev}</span>${row.needs ? `<span class="badge" aria-label="${row.needs} waiting on you">${row.needs}</span>` : row.unread && !current ? UNREAD : ''}</button>`;
+  const mark = shownMark(row.mark, current);
+  return `<button type="button" class="crow${current ? ' on' : ''}${row.unread && !current && !row.needs ? ' new' : ''}" data-action="open-bot" data-id="${esc(row.id)}" data-team="${esc(row.team ?? '')}"${row.isManager ? ' data-manager="true"' : ''}${current ? ' aria-current="page"' : ''}>${withMark(row.face, mark)}<span class="crow-w"><span class="crow-top"><b>${esc(row.name)}</b><time>${esc(stamp(row.at))}</time></span>${prev}</span>${row.needs ? `<span class="badge" aria-hidden="true">${row.needs}</span>` : ''}${markText(mark, row.needs)}</button>`;
 }
 function pinnedRow(row, size) {
-  const current = store.route.bot === row.id;
-  return `<button type="button" class="pin${current ? ' on' : ''}" data-action="open-bot" data-id="${esc(row.id)}"${current ? ' aria-current="page"' : ''}>${bigFace(row, size)}<span>${esc(row.name)}</span>${row.needs ? `<span class="badge" aria-label="${row.needs} waiting on you">${row.needs}</span>` : ''}</button>`;
+  const current = store.route.bot === row.id, mark = shownMark(row.mark, current);
+  return `<button type="button" class="pin${current ? ' on' : ''}" data-action="open-bot" data-id="${esc(row.id)}"${current ? ' aria-current="page"' : ''}>${withMark(bigFace(row, size), mark)}<span>${esc(row.name)}</span>${row.needs ? `<span class="badge" aria-hidden="true">${row.needs}</span>` : ''}${markText(mark, row.needs)}</button>`;
 }
-// An answer the person has not opened yet: one dot, like a chat app's unread mark.
-const UNREAD = '<span class="unread" aria-label="Unread"></span>';
+/* The one mark at a row's face (ui-company's rowMark): a violet dot when it needs you, a small spinning ring while it
+ * works, a check that fades when a run has just finished, and the green unread dot. The open chat drops its unread. */
+const CHECK = '<svg viewBox="0 0 12 12" width="8" height="8" aria-hidden="true"><path d="M2.6 6.3 5 8.6l4.4-5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const shownMark = (mark, current) => {
+  if (!mark || !current) return mark || {kind: ''};
+  if (mark.kind === 'unread') return {kind: '', label: ''};
+  return mark.kind === 'done' ? {...mark, then: ''} : mark;
+};
+// <i>, not <span>: a row's first span is its name (the pinned row's label styles and its tests read it).
+function withMark(faceHtml, mark) {
+  const kind = mark?.kind;
+  if (!kind) return `<i class="rface">${faceHtml}</i>`;
+  // A check already some way through its fade carries on from there: a repaint never restarts it.
+  const age = kind === 'done' ? ` style="--age:-${Math.max(0, Math.round(mark.age || 0))}ms"` : '';
+  const dot = kind === 'done' ? `<i class="rmark done"${age} aria-hidden="true">${CHECK}</i>${mark.then === 'unread' ? `<i class="rmark unread late"${age} aria-hidden="true"></i>` : ''}`
+    : `<i class="rmark ${kind}" aria-hidden="true"></i>`;
+  return `<i class="rface" data-mark="${kind}">${faceHtml}${dot}</i>`;
+}
+// What the mark means, in words a screen reader reads with the row; with a count when something waits on you.
+const markText = (mark, needs = 0) => (mark?.label ? `<span class="sr-only">, ${mark.kind === 'needs' && needs ? `${needs} waiting on you` : esc(mark.label)}</span>` : '');
 function threadRow(row) {
-  const current = store.route.thread === row.id, unread = row.unread && !current;
+  const current = store.route.thread === row.id, unread = row.unread && !current, mark = shownMark(row.mark, current);
   // At work: what it is doing now, the way the open thread's live line says it. Waiting: that it needs you.
   const line = row.working ? `<small class="live">${esc(row.activity)}<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></small>`
     : `<small>${row.waiting ? '<span class="wt">Waiting on you · </span>' : row.stopped ? '<span class="wt stop">Stopped · </span>' : ''}${esc(row.preview || 'No replies yet')}</small>`;
-  return `<button type="button" class="trow${current ? ' on' : ''}${unread ? ' new' : ''}" data-action="open-thread" data-id="${esc(row.id)}"${current ? ' aria-current="page"' : ''}>${row.face}<span class="trow-w"><b>${esc(row.title)}</b>${line}</span><span class="trow-end"><time>${esc(stamp(row.at))}</time>${unread ? UNREAD : ''}</span></button>`;
+  return `<button type="button" class="trow${current ? ' on' : ''}${unread ? ' new' : ''}" data-action="open-thread" data-id="${esc(row.id)}"${current ? ' aria-current="page"' : ''}>${withMark(row.face, mark)}<span class="trow-w"><b>${esc(row.title)}</b>${line}</span><span class="trow-end"><time>${esc(stamp(row.at))}</time></span>${markText(mark, row.needs)}</button>`;
 }
 const GROUPS = [['waiting', 'Waiting on you'], ['today', 'Today'], ['earlier', 'Earlier']];
 /** Threads matching `query`, under Waiting on you, Today and Earlier headings, or

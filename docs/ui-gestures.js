@@ -16,11 +16,11 @@
  * itself near its edges. Reduced motion keeps the drag and drops every flourish.
  *
  * Pins and order are per person, saved through saveLocal (try/catch inside). */
-import {primaryOf} from './company.js?v=cbbedc32a9';
-import {store, changed, onChange, loadLocal, saveLocal, findBot, canWrite} from './ui-store.js?v=cbbedc32a9';
-import {PINS_KEY, ORDER_KEY} from './ui-shell.js?v=cbbedc32a9';
-import {openBotMenu, closeBotMenu, botMenuOpen, moveBot} from './ui-profile.js?v=cbbedc32a9';
-import {pinned, withPin, withoutPin, pinSlot, slotAmong, mergeOrder, unitOf, stepUnit, stepPin, hitZone} from './ui-reorder.js?v=cbbedc32a9';
+import {primaryOf} from './company.js?v=e4e0fdac0c';
+import {store, changed, onChange, loadLocal, saveLocal, findBot, canWrite} from './ui-store.js?v=e4e0fdac0c';
+import {PINS_KEY, ORDER_KEY} from './ui-shell.js?v=e4e0fdac0c';
+import {openBotMenu, closeBotMenu, botMenuOpen, moveBot} from './ui-profile.js?v=e4e0fdac0c';
+import {pinned, withPin, withoutPin, pinSlot, slotAmong, mergeOrder, unitOf, stepUnit, stepPin, hitZone} from './ui-reorder.js?v=e4e0fdac0c';
 
 const ITEM = '.crow[data-action="open-bot"], .pin[data-action="open-bot"]';
 const SURFACE = '#sidebar .rail-list, #main .hv[data-section="bots"]';

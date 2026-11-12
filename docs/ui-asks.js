@@ -7,13 +7,16 @@
  * An ask is a line in a chat (`{kind: 'ask', askId, text}`) whose status lives in
  * `state.asks`, so answering never rewrites a line. A grant is `{botId, action,
  * scope, choice}` in `state.grants`. */
-import {ASK_ANSWER_LABELS, GRANT_LABELS, ASK_ACTIONS, askChoices, acrossSites, grantChoices, answeredText, grantFor, isAskAction, scopeOf} from './asks.js?v=cbbedc32a9';
+import {ASK_ANSWER_LABELS, GRANT_LABELS, ASK_ACTIONS, askChoices, acrossSites, grantChoices, answeredText, grantFor, isAskAction, scopeOf} from './asks.js?v=e4e0fdac0c';
 
 export const PAUSE_TEXT = 'All bots are paused. Nothing runs until you resume.';
 /** The banner while everything bots start is paused; `resume` says whether this person may lift it. */
 export const pauseBanner = (state, {canResume = false} = {}) => (state?.guard?.paused ? {text: PAUSE_TEXT, resume: Boolean(canResume)} : null);
 
 const roster = state => (state?.groups || []).find(g => g.id === 'home')?.bots || [];
+
+/** The card's question: "Let Atlas open example.com?". Plain text: the caller escapes it. */
+export const askQuestion = (ask, botName = 'A bot') => `Let ${botName} ${String(ask?.detail || (ask?.action === 'browser.use' ? `open ${ask?.target || 'a web page'}` : `do this: ${ask?.action}`)).replace(/[.?!\s]+$/, '')}?`;
 
 /** What one ask line shows. Open: the asking bot's waiting face, one sentence, the buttons.
  * Answered (or an ask the state no longer holds): one muted line. The primary's "Needs you"
@@ -27,8 +30,10 @@ export function askCard(state, line) {
   }
   return {
     open: true, ask, askId: ask.id, botId: ask.botId, botName, text: line.text,
-    // Strongest yes first: Always allow (or Allow, where Always is not offered), then Allow once, then Decline.
-    choices: (() => { const ids = askChoices(ask.action, {acrossSites: acrossSites(ask)}); const order = ['always', 'allow', 'decline'].filter(id => ids.includes(id)); return order.map((id, i) => ({id, label: ids.includes('always') || id !== 'allow' ? ASK_ANSWER_LABELS[id] : 'Allow', primary: i === 0})); })(),
+    question: askQuestion(ask, botName),
+    // Allow once (the raised one), Always allow where it is offered (never for a payment), and Don't allow: the
+    // owner picks one. Nothing answers for them: closing or Escape leaves the card waiting.
+    choices: (() => { const ids = askChoices(ask.action, {acrossSites: acrossSites(ask)}); return ['allow', 'always', 'decline'].filter(id => ids.includes(id)).map((id, i) => ({id, label: ASK_ANSWER_LABELS[id], primary: i === 0})); })(),
     target: ask.action === 'browser.use' ? ask.target || '' : '',
     // The whole text a write would carry (an email body): the card shows all of it, folded.
     body: typeof ask.body === 'string' ? ask.body : '',

@@ -101,6 +101,22 @@ researcher"). Each one now produces the right card, or the right "nothing to cha
 - Pages read on a signed-in app are private to the run: the run asks before it opens a site it has no
   Always allow for, so what it read cannot leave in an address.
 
+## Apps used directly on the owner's account
+
+- **Connect signs in to the app's own MCP server** for Notion, Linear, Atlassian, Sentry, Cloudflare, Supabase,
+  Stripe, Zapier, Todoist and Airtable, the way Connect Google works: no token to paste. The app registers itself
+  with that server, the owner signs in on the app's own page, and the bots then use its tools on the owner's account.
+  The tokens are kept encrypted in the vault and renewed before they run out; a renewal the app refuses shows
+  "Sign in again". Checked against each real server: every one of the ten registered this app and showed its
+  sign-in page. No account was signed in to, because that is the owner's step.
+- **GitHub, Slack, Figma, Asana and HubSpot** do not let an app register itself, so Connect signs in to them in the
+  shared browser, with Add a token to switch them to their MCP server. Gmail through Google's API needs the one-time
+  Google client; until then Connect signs in to Gmail in the shared browser.
+- **Tools first, the browser for the rest.** Bots are told a connected app works on the owner's account directly.
+  A bot that opens a connected app's own site (Notion pages with Notion connected, Gmail with Google connected) is
+  sent back once per task to use its tools; asked again, the page opens. Sites with no connector, like X, open in
+  the shared browser, signed in as the owner.
+
 ## Left to the owner, by design
 
 Each needs the owner's own account or details, which a bot must not supply.

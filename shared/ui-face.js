@@ -98,3 +98,26 @@ export function botColor(bot, index = 0) {
   const tint = Number.isInteger(bot?.settings?.tint) ? bot.settings.tint : Math.max(0, Math.trunc(Number(index)) || 0);
   return COLORS[Math.abs(tint) % COLORS.length];
 }
+
+/** Each tint's accent for that bot's chat, in tint order: `accent` fills the send button and draws the focus ring and
+ * the live line, `on` is what sits on it, `ink` writes the bot's name on its bubbles. Light is a mid tone of the face's
+ * hue; dark is the face's own pastel. Every pair passes WCAG AA (tests/bot-accent.test.js). */
+export const ACCENTS = [
+  {light: {accent: '#389ca6', on: '#0d2426', ink: '#2c7a81'}, dark: {accent: '#9ee0e6', on: '#102b2e', ink: '#8ddbe2'}},
+  {light: {accent: '#967fe1', on: '#130d26', ink: '#5630cf'}, dark: {accent: '#c6b7f7', on: '#160f2e', ink: '#af9bed'}},
+  {light: {accent: '#d87258', on: '#26120d', ink: '#bc492c'}, dark: {accent: '#f7b8a8', on: '#2e150f', ink: '#ea9a86'}},
+  {light: {accent: '#599e3b', on: '#15250e', ink: '#467c2e'}, dark: {accent: '#b5e3a1', on: '#192d11', ink: '#a8de91'}},
+  {light: {accent: '#b2862a', on: '#261e0d', ink: '#8c6a21'}, dark: {accent: '#f5d38a', on: '#2e240f', ink: '#eaca86'}},
+  {light: {accent: '#da699b', on: '#260d18', ink: '#c53071'}, dark: {accent: '#f2a7c8', on: '#2e0f1d', ink: '#ea88b3'}},
+  {light: {accent: '#5e90d9', on: '#0d1726', ink: '#2f6cc6'}, dark: {accent: '#a9c8f5', on: '#0f1c2e', ink: '#86aeea'}},
+  {light: {accent: '#aa8a53', on: '#221c11', ink: '#846b40'}, dark: {accent: '#d9c7a8', on: '#292114', ink: '#d4bf9c'}},
+  {light: {accent: '#cf7a33', on: '#26180d', ink: '#a15e26'}, dark: {accent: '#f6c49a', on: '#2e1d0f', ink: '#eab386'}},
+  {light: {accent: '#918ba2', on: '#18171c', ink: '#716b85'}, dark: {accent: '#c9c7cf', on: '#1d1b22', ink: '#b5b2bd'}},
+];
+/** The accent a bot's chat is drawn in: its saved tint, else its place, as `face` and `botColor` choose. */
+export function botAccent(bot, index = 0) {
+  const tint = Number.isInteger(bot?.settings?.tint) ? bot.settings.tint : Math.max(0, Math.trunc(Number(index)) || 0);
+  return ACCENTS[Math.abs(tint) % ACCENTS.length];
+}
+/** The inline style a bot chat carries: both themes' values, so a theme switch needs no repaint (shell.css picks). */
+export const accentStyle = a => (a ? `--acc-l:${a.light.accent};--acc-on-l:${a.light.on};--acc-ink-l:${a.light.ink};--acc-d:${a.dark.accent};--acc-on-d:${a.dark.on};--acc-ink-d:${a.dark.ink}` : '');

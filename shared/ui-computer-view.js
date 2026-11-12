@@ -21,7 +21,7 @@ const canDrive = () => isStaticDemo() || isAdmin();
 import {toast} from './ui-dialogs.js';
 import {
   PAGE, KEY_CHIPS, clickInput, wheelInput, keyInput, coalesce, navigateAddress, rowLabel, statusOf, stateLine, mergeView, veilFor, frameDelay, listDelay, wantsList,
-  chipFor, containRect, controlPill,
+  chipFor, containRect, controlPill, thumbFor, thumbDelay,
 } from './ui-computer.js';
 
 const el = id => document.getElementById(id);
@@ -339,12 +339,82 @@ export const computerForms = {
   },
 };
 
+/* ---------- the small live picture on a profile and a bot chat's header ---------- */
+
+/** The slot a profile or a bot chat's header carries: hidden until the bot's browser is in use, then the latest frame
+ * and the site, and a tap opens the full Computer view. None for a viewer (no frames). It never shows in the static
+ * demo: the demo's API lists no browser and its frame reply says `demo` (local-api.js), which thumbFor turns into none. */
+export function thumbSlot(botId) {
+  if (!canWrite()) return '';
+  return `<button type="button" class="lthumb" data-thumb="${esc(botId)}" data-action="open-computer" data-id="${esc(botId)}" hidden><span class="lthumb-pic"><img data-lt="img" alt="" draggable="false" hidden></span><span class="lthumb-site"><i class="lthumb-dot" aria-hidden="true"></i><span data-lt="site"></span></span></button>`;
+}
+
+// One thumbnail is on screen at a time. `gen` moves on whenever it changes, so a reply for an old one is dropped.
+const thumb = {node: null, botId: '', view: null, listState: '', timer: null, busy: false, failures: 0, denied: false, gen: 0};
+const thumbNow = () => {
+  const e = entryOf(thumb.botId) || {};
+  return thumb.denied ? null : thumbFor({state: e.state || 'idle', site: e.site || '', view: thumb.view, name: findBot(thumb.botId)?.name || 'the bot'});
+};
+function stopThumb() {
+  clearTimeout(thumb.timer);
+  Object.assign(thumb, {node: null, timer: null, busy: false, failures: 0, gen: thumb.gen + 1});
+}
+function paintThumb() {
+  const node = thumb.node; if (!node?.isConnected) return;
+  const t = thumbNow();
+  node.hidden = !t;
+  if (!t) return;
+  if (node.getAttribute('aria-label') !== t.label) { node.setAttribute('aria-label', t.label); node.title = t.label; }
+  node.dataset.state = t.state;
+  const img = node.querySelector('[data-lt="img"]'), site = node.querySelector('[data-lt="site"]');
+  if (t.image && img.getAttribute('src') !== t.image) img.src = t.image;
+  img.hidden = !t.image;
+  const words = t.site || (t.state === 'driving' ? 'You are driving' : 'Browsing');
+  if (site.textContent !== words) site.textContent = words;
+}
+async function tickThumb(gen) {
+  if (gen !== thumb.gen) return;
+  thumb.timer = null;
+  if (!thumb.node?.isConnected) return stopThumb();
+  if (document.hidden || !thumbNow()) return;   // the visibility listener and the next change start it again
+  thumb.busy = true;
+  try {
+    const reply = await raw(`/api/browser-live/${encodeURIComponent(thumb.botId)}?after=${thumb.view?.seq || 0}`);
+    if (gen !== thumb.gen) return;
+    thumb.view = mergeView(thumb.view, reply); thumb.failures = 0;
+  } catch (error) {
+    if (gen !== thumb.gen) return;
+    if (error?.status === 401 || error?.status === 403) thumb.denied = true;
+    thumb.failures += 1;
+  } finally { if (gen === thumb.gen) thumb.busy = false; }
+  paintThumb();
+  const wait = thumbDelay({visible: !document.hidden, active: Boolean(thumbNow()), failures: thumb.failures});
+  if (wait != null && thumb.node?.isConnected) thumb.timer = setTimeout(() => tickThumb(gen), wait);
+}
+/** Find the slot on screen and keep its picture going while the bot is active; stop when it leaves the screen. */
+function syncThumb() {
+  const node = document.querySelector('[data-thumb]');
+  if (!node) { if (thumb.node) stopThumb(); return; }
+  if (node !== thumb.node) {
+    const same = thumb.botId === node.dataset.thumb;
+    stopThumb();
+    Object.assign(thumb, {node, botId: node.dataset.thumb, ...(same ? {} : {view: null, listState: '', denied: false})});
+  }
+  // The list moved on (the bot started, stopped or was handed back): it says more than an old frame reply.
+  const listState = entryOf(thumb.botId)?.state || 'idle';
+  if (listState !== thumb.listState) { thumb.listState = listState; thumb.view = null; }
+  paintThumb();
+  if (!thumb.timer && !thumb.busy && thumbNow()) { const gen = thumb.gen; thumb.timer = setTimeout(() => tickThumb(gen), 0); }
+}
+
 /** Called once from app.js: the list poll follows what is on screen, and both polls pause with the tab. */
 export function wireComputer() {
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
     kickList();
     if (session && alive(session) && !session.timer && !session.denied && !session.view.demo) tick(session);
+    syncThumb();
   });
-  onChange(() => kickList());
+  // After the screen for the change is painted, so a new profile or chat header has its slot in place.
+  onChange(() => { kickList(); setTimeout(syncThumb, 0); });
 }

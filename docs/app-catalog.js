@@ -84,6 +84,30 @@ const SITES = {
 };
 for (const app of APPS) if (SITES[app.id]) app.site = SITES[app.id];
 
+// The app's official MCP server, where it lets an app register itself and sign the owner in (checked against each
+// server's own sign-in metadata, November 2026). Connect then signs in straight to the account, like Gmail; the
+// bots use its tools as the owner. GitHub, Slack, Figma, Asana and HubSpot do not allow that yet, so they keep a token.
+const OAUTH = {
+  notion: 'https://mcp.notion.com/mcp', linear: 'https://mcp.linear.app/mcp', atlassian: 'https://mcp.atlassian.com/v1/mcp',
+  sentry: 'https://mcp.sentry.dev/mcp', cloudflare: 'https://mcp.cloudflare.com/mcp',
+  supabase: 'https://mcp.supabase.com/mcp', stripe: 'https://mcp.stripe.com', zapier: 'https://mcp.zapier.com/api/v1/connect',
+  todoist: 'https://ai.todoist.net/mcp', airtable: 'https://mcp.airtable.com/mcp',
+};
+for (const app of APPS) if (OAUTH[app.id]) app.oauth = OAUTH[app.id];
+
+// The sites that are the app's own: a page there is the app, so a bot with the app connected uses its tools instead.
+const DOMAINS = {
+  notion: ['notion.so', 'notion.com'], github: ['github.com'], slack: ['slack.com'], linear: ['linear.app'], atlassian: ['atlassian.net', 'atlassian.com'],
+  todoist: ['todoist.com'], figma: ['figma.com'], sentry: ['sentry.io'], cloudflare: ['dash.cloudflare.com'], supabase: ['supabase.com'],
+  airtable: ['airtable.com'], stripe: ['dashboard.stripe.com'], zapier: ['zapier.com'], google: ['mail.google.com', 'drive.google.com', 'docs.google.com'],
+};
+/** The app a web host belongs to, or null. A subdomain counts (acme.atlassian.net); a look-alike does not. */
+export function appForHost(host) {
+  const h = String(host || '').toLowerCase().replace(/\.$/, '');
+  for (const [id, domains] of Object.entries(DOMAINS)) if (domains.some(d => h === d || h.endsWith(`.${d}`))) return APPS.find(a => a.id === id) || null;
+  return null;
+}
+
 const BY_ID = new Map(APPS.map(a => [a.id, a]));
 /** The app with this id, or null. */
 export const appById = id => BY_ID.get(id) || null;
@@ -97,6 +121,7 @@ export const appInputs = app => app?.run?.inputs || app?.web?.inputs || [];
 export function connectHow(app, {googleClient = false} = {}) {
   if (!app) return 'form';
   if (app.google) return googleClient ? 'google' : 'gmail';
+  if (app.oauth) return 'oauth';
   if (appInputs(app).every(i => i.optional || i.default)) return 'now';
   return app.site ? 'site' : 'form';
 }
@@ -117,7 +142,7 @@ const hostOf = url => { try { return new URL(url).host.toLowerCase(); } catch { 
 
 /** Whether an app is already among the connectors: by its server name on this computer, or by its web host. */
 function isConnected(app, connectors, google) {
-  if (connectors.some(c => c?.kind === 'site' && c.app === app.id)) return true;
+  if (connectors.some(c => (c?.kind === 'site' || c?.kind === 'mcp') && c.app === app.id)) return true;
   if (app.google) return Boolean(google?.connected);
   const host = app.web ? hostOf(app.web.url) : '';
   return connectors.some(c => c?.kind === 'mcp' && ((app.run && c.agentServer === app.id) || (host && String(c.host || '').toLowerCase() === host)));

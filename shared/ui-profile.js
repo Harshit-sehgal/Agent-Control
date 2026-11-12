@@ -17,7 +17,7 @@ import {grantRows, allGrantRows, grantUrl} from './ui-asks.js';
 import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js';
 import {toast, confirmSheet} from './ui-dialogs.js';
 import {sendChat} from './ui-chat.js';
-import {computerPage as computerView, computerLabel, keysOwned} from './ui-computer-view.js';
+import {computerPage as computerView, computerLabel, keysOwned, thumbSlot} from './ui-computer-view.js';
 import {
   MAX_NAME, hasJob, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, lookOf, newBotDefaults,
   newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, closeTarget,
@@ -144,6 +144,7 @@ function profileMain(bot) {
   return `${bar(roundBtn('back', `Back to ${bot.name}'s chat`, 'profile-back', {id: bot.id}), `<button type="button" class="rbtn" data-action="bot-menu" data-id="${esc(bot.id)}" aria-haspopup="menu" aria-label="More for ${esc(bot.name)}">${MORE}</button>`)}
     <div class="pg-body pr-body">
       ${hero(bot)}
+      ${thumbSlot(bot.id)}
       <div class="cd">${rows}</div>
     </div>`;
 }

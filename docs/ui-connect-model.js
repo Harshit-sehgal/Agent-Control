@@ -5,7 +5,8 @@
  *
  * Nothing here ever sees a key: a subscription has none, an MCP address is typed once and sent, and the
  * server never answers with it. */
-import {cleanCliModel, cliEngineById, LOCAL_CLI_KIND, LOCAL_CLI_ENGINES, EFFORT_LEVELS, cleanEffort, CLI_MODELS} from './ai-presets.js?v=cbbedc32a9';
+import {cleanCliModel, cliEngineById, LOCAL_CLI_KIND, LOCAL_CLI_ENGINES, EFFORT_LEVELS, cleanEffort, CLI_MODELS} from './ai-presets.js?v=e4e0fdac0c';
+import {appById} from './app-catalog.js?v=e4e0fdac0c';
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
@@ -23,8 +24,23 @@ const GOOGLE_REASONS = {
 /** What the address says about a Google sign-in that just finished (`?google=connected` or
  * `?google=error&reason=<code>`), as a sentence for a toast. Null when it says nothing. The reason is looked up,
  * never echoed. */
+const CONNECT_REASONS = {
+  state: 'That sign-in link was not started here, or it ran out. Choose Connect again.',
+  denied: 'The sign-in was cancelled, so nothing was connected.',
+  code: 'The app did not send back a sign-in code. Try Connect again.',
+  register: 'The app did not let this app sign in. Try again, or connect it with a token.',
+  'no-register': 'That app does not let an app sign in by itself yet. Connect it with a token instead.',
+  setup: 'This workspace is not open any more. Sign in to the app again.',
+  server: 'The app\'s server could not finish the sign-in. Try again in a moment.',
+};
+const appName = id => appById(String(id || ''))?.name || 'The app';
+
 export function googleReturn(search) {
   const q = new URLSearchParams(String(search ?? ''));
+  // An app's own MCP server signed in to directly: `?connect=connected&app=notion` or `?connect=error&app=...&reason=...`.
+  const connect = q.get('connect'), name = appName(q.get('app'));
+  if (connect === 'connected') return {ok: true, text: `${name} is connected. Bots use it on your account directly.`};
+  if (connect === 'error') return {ok: false, text: `${name}: ${CONNECT_REASONS[q.get('reason')] || CONNECT_REASONS.server}`};
   const result = q.get('google');
   if (result === 'connected') return {ok: true, text: 'Google is connected.'};
   if (result === 'error') return {ok: false, text: GOOGLE_REASONS[q.get('reason')] || 'Google could not be connected. Try again.'};
@@ -34,7 +50,7 @@ export function googleReturn(search) {
 /** The query string without the two Google parameters (`''` when nothing else is left). */
 export function withoutGoogleParams(search) {
   const q = new URLSearchParams(String(search ?? ''));
-  q.delete('google'); q.delete('reason');
+  q.delete('google'); q.delete('reason'); q.delete('connect'); q.delete('app');
   const rest = q.toString();
   return rest ? `?${rest}` : '';
 }

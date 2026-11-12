@@ -7,12 +7,12 @@
  *
  * Secrets: the Google client secret and an MCP address or header are typed here and sent once. The server never
  * answers with one, so nothing on this page can show or log one. */
-import {esc, icon, btn, note, tag, field, textInput} from './ui-kit.js?v=cbbedc32a9';
-import {api, sync, store, go} from './ui-store.js?v=cbbedc32a9';
-import {primaryOf} from './company.js?v=cbbedc32a9';
-import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=cbbedc32a9';
-import {mcpRows, googleCard, mcpDraft, statusOf} from './ui-connect-model.js?v=cbbedc32a9';
-import {catalogView, appById, appInputs, connectRequest, connectHow} from './app-catalog.js?v=cbbedc32a9';
+import {esc, icon, btn, note, tag, field, textInput} from './ui-kit.js?v=e4e0fdac0c';
+import {api, sync, store, go} from './ui-store.js?v=e4e0fdac0c';
+import {primaryOf} from './company.js?v=e4e0fdac0c';
+import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=e4e0fdac0c';
+import {mcpRows, googleCard, mcpDraft, statusOf} from './ui-connect-model.js?v=e4e0fdac0c';
+import {catalogView, appById, appInputs, connectRequest, connectHow} from './app-catalog.js?v=e4e0fdac0c';
 
 const GOOGLE_START = '/api/connectors/google/start';
 
@@ -73,7 +73,7 @@ function mcpPanel(connectors) {
     const raw = connectors.find(c => c.id === r.id), {name, where, detail, status} = r;
     const msg = r.message ? `<p class="cn-msg">${esc(r.message)}</p>` : '';
     return `<div class="cn-card cn-mcp" data-connector="${esc(r.id)}">${head(name, `${where} · ${detail}`, status)}${msg}${tools(raw, 'Tools')}
-      <div class="cn-acts">${btn('Refresh tools', 'connector-refresh', {small: true, id: r.id})}${btn('Delete', 'connector-delete', {kind: 'danger', small: true, id: r.id, data: {name: r.name}})}</div></div>`;
+      <div class="cn-acts">${appById(raw?.app)?.oauth ? btn(r.status.label === 'Ready' ? 'Sign in again' : 'Sign in', 'catalog-oauth', {small: true, id: raw.app, kind: r.status.label === 'Ready' ? 'quiet' : 'primary'}) : ''}${btn('Refresh tools', 'connector-refresh', {small: true, id: r.id})}${btn('Delete', 'connector-delete', {kind: 'danger', small: true, id: r.id, data: {name: r.name}})}</div></div>`;
   });
   for (const c of connectors.filter(c => c?.kind === 'site')) {
     const {name, host} = c, app = appById(c.app), token = app && !app.google && appInputs(app).length ? btn('Add a token', 'catalog-token', {small: true, id: app.id}) : '';
@@ -229,6 +229,8 @@ export const connectActions = {
     if (!app) return;
     const how = connectHow(app, {googleClient: Boolean(lastRes?.google?.configured)});
     if (how === 'google') return void window.location.assign(GOOGLE_START);
+    // The app's own server signs the owner in, like Google: bots then work on the account directly, with its tools.
+    if (how === 'oauth') return void window.location.assign(`/api/connectors/mcp/start?app=${encodeURIComponent(app.id)}`);
     if (how === 'gmail' || how === 'site') return signIn(app);
     if (how === 'form') return connectSheet(app);
     const label = button.querySelector('span');
@@ -237,6 +239,7 @@ export const connectActions = {
     catch (error) { button.disabled = false; if (label) label.textContent = 'Connect'; throw error; }
     await sync(); await ctx.reload();
   },
+  'catalog-oauth': button => { const app = appById(button.dataset.id); if (app?.oauth) window.location.assign(`/api/connectors/mcp/start?app=${encodeURIComponent(app.id)}`); },
   'catalog-signin': async button => { const app = appById(button.dataset.id); if (app) await signIn(app); },
   'catalog-token': button => { const app = appById(button.dataset.id); if (app) connectSheet(app); },
   'connector-refresh': async (button, ctx) => {

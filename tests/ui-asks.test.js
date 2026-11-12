@@ -19,13 +19,24 @@ test('a pending ask is an open card: its sentence, the asking bot, and the three
   assert.equal(card.botId, 'mail');
   assert.equal(card.botName, 'Mailroom');
   assert.equal(card.text, 'Mailroom wants to send an email to Northwind.');
-  assert.deepEqual(card.choices.map(c => [c.id, c.label]), [['always', 'Always allow'], ['allow', 'Allow once'], ['decline', 'Decline']]);
-  assert.deepEqual(card.choices.map(c => c.primary), [true, false, false], 'Always allow is the one raised button');
+  assert.deepEqual(card.choices.map(c => [c.id, c.label]), [['allow', 'Allow once'], ['always', 'Always allow'], ['decline', "Don't allow"]]);
+  assert.deepEqual(card.choices.map(c => c.primary), [true, false, false], 'Allow once is the one raised button');
 });
 
-test('a payment asks only Decline or Allow, and says it asks every time', () => {
+test('the card asks a question the owner answers: "Let Mailroom send an email to Northwind?"', () => {
+  assert.equal(askCard(stateOf({asks: [ask()]}), line()).question, 'Let Mailroom send an email to Northwind?');
+  const page = askCard(stateOf({asks: [ask({action: 'browser.use', target: 'https://example.com/a', detail: 'open example.com'})]}), line());
+  assert.equal(page.question, 'Let Mailroom open example.com?');
+  // No detail: the page it wants, else the action, still as a question.
+  assert.equal(askCard(stateOf({asks: [ask({action: 'browser.use', target: 'https://example.com/a', detail: ''})]}), line()).question, 'Let Mailroom open https://example.com/a?');
+  assert.equal(askCard(stateOf({asks: [ask({detail: ''})]}), line()).question, 'Let Mailroom do this: send?');
+  // The copy in the primary's chat asks the same question about the asking bot.
+  assert.equal(askCard(stateOf({asks: [ask()]}), line({text: 'Needs you: Mailroom wants to send an email to Northwind.'})).question, 'Let Mailroom send an email to Northwind?');
+});
+
+test('a payment asks only Allow once or Don\'t allow, and says it asks every time', () => {
   const card = askCard(stateOf({asks: [ask({action: 'spend', detail: 'pay £40 at Northwind'})]}), line());
-  assert.deepEqual(card.choices.map(c => c.id), ['allow', 'decline']);
+  assert.deepEqual(card.choices.map(c => [c.id, c.label]), [['allow', 'Allow once'], ['decline', "Don't allow"]]);
   assert.equal(card.choices[0].primary, true);
   assert.match(card.note, /payment/i);
   assert.equal(askCard(stateOf({asks: [ask()]}), line()).note, '');

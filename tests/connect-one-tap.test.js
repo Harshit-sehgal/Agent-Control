@@ -10,7 +10,8 @@ test('every app says how one tap connects it', () => {
   const how = id => connectHow(appById(id), {});
   assert.equal(how('time'), 'now', 'nothing to fill in');
   assert.equal(how('filesystem'), 'now', 'its one field has a default');
-  for (const id of ['notion', 'github', 'slack', 'linear', 'figma', 'airtable', 'stripe']) assert.equal(how(id), 'site', id);
+  for (const id of ['github', 'slack', 'figma']) assert.equal(how(id), 'site', id);
+  for (const id of ['notion', 'linear', 'airtable', 'stripe']) assert.equal(how(id), 'oauth', id);
   assert.equal(how('git'), 'form', 'a repo folder has no sensible default');
   assert.equal(how('obsidian'), 'form', 'a vault on this computer has no web sign-in');
   assert.equal(connectHow(appById('google'), {}), 'gmail', 'no Google client: sign in to Gmail in the shared browser');

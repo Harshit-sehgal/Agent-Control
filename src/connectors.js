@@ -13,6 +13,7 @@ import {CONNECTOR_KINDS, MAX_CONNECTORS, newConnectorId, publicConnector, slugOf
 import {appById} from '../shared/app-catalog.js';
 import {checkMcpUrl, mcpList} from './mcp-client.js';
 import * as credentials from './credentials.js';
+import {mcpAuthHeaders} from './mcp-oauth.js';
 
 const now = () => new Date().toISOString();
 export const connectorsOf = state => (state.connectors ??= []);
@@ -42,13 +43,14 @@ function cleanHeaders(headers) {
   return out;
 }
 
-/** The target an MCP client reaches: from the vault for an HTTP server, the agent for a stdio one. */
-export function mcpTarget(store, connector) {
+/** The target an MCP client reaches: from the vault for an HTTP server, the agent for a stdio one. A server the owner
+ * signed in to gets a live access token (renewed when it is near its end). */
+export async function mcpTarget(store, connector) {
   if (connector.transport === 'stdio') return {transport: 'stdio', store, server: connector.agentServer};
   let secret;
   try { secret = JSON.parse(credentials.revealValue(store, connector.credentialId)); }
   catch (error) { fail(error.status === 404 ? 'This connector\'s saved address was deleted. Remove it and add it again.' : 'This connector\'s saved address could not be read.', 502); }
-  return {transport: 'http', url: secret.url, headers: secret.headers || {}};
+  return {transport: 'http', url: secret.url, headers: await mcpAuthHeaders(store, connector, secret)};
 }
 
 /** Add an MCP server. It is reached first, with the pasted secrets in hand; only a server that answers is saved,
@@ -115,7 +117,7 @@ export async function refreshConnector(store, id) {
   if (connector.kind === 'site') return publicConnector(connector);
   if (connector.kind !== 'mcp') fail('Only an MCP server is refreshed here. Google reconnects through its own sign-in.', 400);
   let outcome;
-  try { outcome = {tools: (await mcpList(mcpTarget(store, connector))).tools}; }
+  try { outcome = {tools: (await mcpList(await mcpTarget(store, connector))).tools}; }
   catch (error) { outcome = {error: cleanText(error.message, 300) || 'The server could not be reached.'}; }
   return store.update(s => {
     const live = connectorsOf(s).find(c => c.id === id);

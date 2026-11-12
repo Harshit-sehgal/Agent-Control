@@ -363,7 +363,73 @@ body[data-paused] .chrome{--pad-t:calc(var(--pause-h) + env(safe-area-inset-top,
 .trow small.live .dots i{background:currentColor;opacity:.6}
 .trow-end{display:flex;flex-direction:column;align-items:flex-end;gap:7px;flex:none;align-self:flex-start;margin-top:2px}
 .trow-end time{margin-top:0}
-.unread{display:block;width:9px;height:9px;border-radius:50%;background:var(--good);flex:none}
 .trow.new b,.crow.new b{font-weight:700}
 .trow.new small{color:var(--text)}
 @media (prefers-reduced-motion:reduce){.trow small.live .dots i{animation:none}}
+
+/* ---------- a bot chat in its bot's accent ----------
+ * ui-conversation sets both themes' values inline (--acc-l, --acc-d and their pairs, from ui-face's ACCENTS);
+ * this picks the theme's. The send button, the bot's name, the composer's focus ring and the live line take it.
+ * A thread has no data-accent and keeps the app's own colours. Every pair passes AA (tests/bot-accent.test.js). */
+.cv[data-accent]{--bot-accent:var(--acc-l);--on-bot-accent:var(--acc-on-l);--bot-ink:var(--acc-ink-l);--bot-accent-soft:color-mix(in srgb,var(--bot-accent) 18%,var(--bg))}
+:root[data-theme="cocoa"] .cv[data-accent]{--bot-accent:var(--acc-d);--on-bot-accent:var(--acc-on-d);--bot-ink:var(--acc-ink-d);--bot-accent-soft:color-mix(in srgb,var(--bot-accent) 16%,var(--bg))}
+@media(prefers-color-scheme:dark){:root:not([data-theme]) .cv[data-accent]{--bot-accent:var(--acc-d);--on-bot-accent:var(--acc-on-d);--bot-ink:var(--acc-ink-d)}}
+.cv[data-accent] .cv-send{background:var(--bot-accent);color:var(--on-bot-accent)}
+.cv[data-accent] .cv-box:focus-within{box-shadow:var(--lift),0 0 0 2px var(--bot-accent)}
+.cv[data-accent] .cv-box textarea{caret-color:var(--bot-ink)}
+.cv[data-accent] :focus-visible{outline-color:var(--bot-accent)}
+.cv[data-accent] .cv-bot.own .cv-name{color:var(--bot-ink)}
+.cv[data-accent] .cv-live{background:var(--bot-accent-soft);color:var(--fg)}
+.cv[data-accent] .cv-live .dots i,.cv[data-accent] .cv-working .dots i{background:var(--bot-ink);opacity:.8}
+.cv[data-accent] .cv-working{color:var(--bot-ink)}
+
+/* ---------- the one mark at a row's face (ui-company rowMark, drawn by ui-shell) ----------
+ * Bottom right of the face (a primary's star sits bottom left): violet when it needs you, a small spinning ring
+ * while it works, a check that pops in and fades when a run has just finished (into the green unread dot, or to
+ * nothing), and the green unread dot. --age is how far through its 4s a repainted check already is. */
+.rface{position:relative;display:inline-flex;flex:none;font-style:normal;--mark-ring:var(--bg)}
+.rail .rface{--mark-ring:color-mix(in srgb,var(--sunk) 70%,var(--bg))}
+.crow.on .rface,.pin.on .rface{--mark-ring:var(--raise)}
+.trow.on .rface,.trow:hover .rface{--mark-ring:var(--sunk)}
+.rmark{display:block;position:absolute;right:-2px;bottom:-2px;width:12px;height:12px;border-radius:50%;box-shadow:0 0 0 2.5px var(--mark-ring);pointer-events:none}
+.pin .rmark{right:2px;bottom:2px;width:16px;height:16px}
+.rmark.needs{background:var(--wait)}
+.rmark.unread{background:var(--good)}
+.rmark.working{width:14px;height:14px;right:-3px;bottom:-3px;background:var(--mark-ring);box-shadow:none}
+.pin .rmark.working{width:18px;height:18px}
+.rmark.working::after{content:'';position:absolute;inset:1.5px;border-radius:50%;border:2px solid color-mix(in srgb,var(--good) 22%,transparent);border-top-color:var(--good);animation:rspin .9s linear infinite}
+.rmark.done{display:grid;place-items:center;width:14px;height:14px;right:-3px;bottom:-3px;background:var(--good);color:var(--good-bg);animation:rdone 4s var(--ease) var(--age,0ms) both}
+.pin .rmark.done{width:18px;height:18px}
+.pin .rmark.done svg{width:10px;height:10px}
+.rmark.late{animation:rlate 4s linear var(--age,0ms) both}
+@keyframes rspin{to{rotate:360deg}}
+@keyframes rdone{0%{opacity:0;scale:.5}6%{opacity:1;scale:1.12}10%{scale:1}68%{opacity:1;scale:1}84%,100%{opacity:0;scale:.7}}
+@keyframes rlate{0%,80%{opacity:0;scale:.6}92%,100%{opacity:1;scale:1}}
+/* Still under reduced motion: the ring is a plain ring, the check stays until the next repaint gives way to the dot. */
+@media(prefers-reduced-motion:reduce){
+  .rmark.working::after{border-color:var(--good)}
+  .rmark.late{display:none}
+  .rmark.done{opacity:1;scale:1}
+}
+
+/* ---------- the small live picture of a bot's screen (ui-computer-view thumbSlot) ----------
+ * In a bot chat's header: a small frame and the site. On its profile: a wider card under the hero. Either way a tap
+ * opens the full Computer view. Hidden while the bot's browser is idle; the dot breathes only while it browses. */
+.lthumb{flex:none;display:inline-flex;align-items:center;gap:8px;padding:3px 10px 3px 3px;border-radius:12px;background:var(--sunk);color:var(--fg);font-size:12.5px;max-width:44vw;box-shadow:var(--ring);transition:scale .15s,background-color .15s;animation:menuin .2s var(--ease)}
+.lthumb:hover{background:var(--control)}
+.lthumb:active{scale:.97}
+.lthumb-pic{flex:none;display:block;width:52px;aspect-ratio:16/10;border-radius:9px;overflow:hidden;background:color-mix(in srgb,var(--t,var(--control)) 30%,var(--raise))}
+.lthumb-pic img{display:block;width:100%;height:100%;object-fit:cover;object-position:top center}
+.lthumb-site{display:inline-flex;align-items:center;gap:6px;min-width:0}
+.lthumb-site span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lthumb-dot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--good)}
+.lthumb[data-state="browsing"] .lthumb-dot{animation:ldot 1.6s ease-in-out infinite}
+.lthumb[data-state="driving"] .lthumb-dot{background:var(--wait)}
+.cv[data-accent] .lthumb-dot{background:var(--bot-accent)}
+@keyframes ldot{50%{opacity:.35}}
+@media(max-width:520px){.cv-head .lthumb-site{display:none}.cv-head .lthumb{padding-right:3px}}
+@media(pointer:coarse){.cv-head .lthumb{min-height:40px}}
+/* On the profile: one compact row as wide as the rows below it, a small picture and the site beside it. */
+.pr-body .lthumb{display:flex;gap:14px;width:100%;max-width:none;padding:8px 16px 8px 8px;border-radius:var(--r);background:var(--raise);font-size:14px}
+.pr-body .lthumb-pic{width:112px;border-radius:10px}
+@media(prefers-reduced-motion:reduce){.lthumb-dot{animation:none}}

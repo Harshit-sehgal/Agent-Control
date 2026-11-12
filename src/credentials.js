@@ -82,6 +82,13 @@ export function replaceCredential(store, workspaceId, id, value) {
   return { ok: true, id };
 }
 
+/** Replace a credential's secret by id for internal use, like `revealValue`: a renewed sign-in token. */
+export function replaceValue(store, id, value) {
+  const row = store.get('SELECT workspace_id FROM credentials WHERE id=?', id);
+  if (!row) fail('Credential not found.', 404);
+  return replaceCredential(store, row.workspace_id, id, value);
+}
+
 export function deleteCredential(store, workspaceId, id) {
   // One transaction, because the two statements are one decision: a crash
   // between them leaves the preference pointing at a row that no longer exists,

@@ -89,6 +89,7 @@ const PUBLIC_ROUTES = [
   // Google sends the owner back here from another site, so no session cookie arrives; the handler
   // checks a single-use state nonce and a flow cookie (src/google.js). It takes no id.
   'GET /api/connectors/google/callback',
+  'GET /api/connectors/mcp/callback',
 ];
 
 /** A public route with an id segment would be an unauthenticated lookup by id.

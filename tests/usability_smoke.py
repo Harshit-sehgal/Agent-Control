@@ -813,15 +813,21 @@ async def ask_cards_answer_and_collapse(page, base):
     await row.click()
     cards = page.locator('#cv-log .cv-card[data-ask]')
     await expect(cards).to_have_count(3)
-    # One sentence, the three buttons in the owner's words, and the asking bot's face waiting above the card.
+    # A question, the three choices in the owner's words, and the asking bot's face waiting above the card.
     first = page.locator('#cv-log .cv-card[data-ask="a1"]')
-    await expect(first.locator('p')).to_have_text('Researcher wants to send an email to Northwind.')
-    assert await first.locator('.btn').all_inner_texts() == ['Always allow', 'Allow once', 'Decline']
+    await expect(first.locator('p')).to_have_text('Let Researcher send an email to Northwind?')
+    assert await first.locator('.btn').all_inner_texts() == ['Allow once', 'Always allow', "Don't allow"]
+    await expect(first.locator('.btn.primary')).to_have_text('Allow once')
     await expect(page.locator('#cv-log .cv-wait .face--waiting').first).to_be_visible()
     await expect(page.locator('#cv-log .cv-wait').first).to_contain_text('Researcher is waiting on you')
-    # A payment is only ever Decline or Allow, and says so.
+    # Escape decides nothing: with focus on a choice, the card still waits for a button.
+    await first.get_by_role('button', name="Don't allow").focus()
+    await page.keyboard.press('Escape')
+    await expect(first).to_be_visible()
+    assert all(a['status'] == 'pending' for a in (await api_state(page))['asks']), 'Escape answered an ask'
+    # A payment is only ever Allow once or Don't allow, and says so.
     spend = page.locator('#cv-log .cv-card[data-ask="a2"]')
-    assert await spend.locator('.btn').all_inner_texts() == ['Allow', 'Decline']
+    assert await spend.locator('.btn').all_inner_texts() == ['Allow once', "Don't allow"]
     await expect(spend).to_contain_text('Payments are asked every time.')
     await expect(page.locator('#cv-line')).to_have_text('Waiting on you')
     # Allow once: the card leaves the chat and the count drops.
@@ -837,8 +843,9 @@ async def ask_cards_answer_and_collapse(page, base):
     await expect(page.locator('#cv-log [data-ask="a3"]')).to_have_count(0)
     grants = [(g['botId'], g['action'], g['choice']) for g in (await api_state(page))['grants']]
     assert (ids['Researcher'], 'post', 'always') in grants, grants
-    # Decline.
-    await spend.get_by_role('button', name='Decline').click()
+    # Don't allow.
+    await spend.get_by_role('button', name="Don't allow").click()
+    assert {a['id']: a['status'] for a in (await api_state(page))['asks']}['a2'] == 'declined'
     # Nothing is left: no card, no line about it, no badge, no second ask.
     await expect(page.locator('#cv-log [data-ask]')).to_have_count(0)
     await expect(row.locator('.badge')).to_have_count(0)
@@ -1327,6 +1334,151 @@ async def computer_site_chip_on_the_pill(page, base):
     await expect(page.locator('#cv-log .pchip')).to_have_count(0)
 
 
+async def row_marks_one_at_the_face(page, base):
+    """Each row carries one mark at its face: needs you, working, a check that fades into the unread dot, unread."""
+    ids = await open_app(page, base, bots=EXTRA_BOTS)
+    r, w, v = ids['Researcher'], ids['Writer'], ids['Reviewer']
+    await seed_asks(page, r, asks=ASKS[:1])
+    await patch_state(page, f'''
+        const at = new Date().toISOString(), just = new Date(Date.now() - 200).toISOString();
+        s.chats[{w!r}] = [{{id: 'u1', role: 'user', text: 'Draft it', at}}];
+        s.groupRuns.unshift({{id: 'run-w', groupId: 'home', chatKey: {w!r}, status: 'running', recipients: [{w!r}], currentStep: 0, trace: [], createdAt: at, startedAt: at}});
+        s.chats[{v!r}] = [{{id: 'u2', role: 'user', text: 'Check it', at: just}}, {{id: 'b2', role: 'bot', senderId: {v!r}, senderName: 'Reviewer', text: 'Two claims need a source.', at: just}}];
+        s.groupRuns.unshift({{id: 'run-v', groupId: 'home', chatKey: {v!r}, status: 'completed', recipients: [{v!r}], currentStep: 1, trace: [], createdAt: just, completedAt: just}});''')
+    row = lambda bot: page.locator(f'#sidebar .crow[data-id="{bot}"]')
+    await expect(row(r).locator('.rface')).to_have_attribute('data-mark', 'needs')
+    await expect(row(r).locator('.sr-only')).to_have_text(', 1 waiting on you')
+    await expect(row(w).locator('.rface')).to_have_attribute('data-mark', 'working')
+    await expect(row(w).locator('.rmark.working')).to_be_visible()
+    await expect(row(w).locator('.sr-only')).to_have_text(', Working')
+    # Just finished: a check that gives way to the unread dot by itself.
+    await expect(row(v).locator('.rface')).to_have_attribute('data-mark', 'done')
+    await expect(row(v).locator('.sr-only')).to_have_text(', Just finished')
+    await expect(row(v).locator('.rmark.done')).to_have_count(1)
+    await expect(row(v).locator('.rmark.late')).to_have_count(1)
+    # One mark at a time: no row carries two that show at once.
+    for bot in (r, w):
+        assert await row(bot).locator('.rmark').count() == 1
+    await expect(row(v).locator('.rface')).to_have_attribute('data-mark', 'unread', timeout=9000)
+    await expect(row(v).locator('.rmark.unread')).to_be_visible()
+    await expect(row(v).locator('.sr-only')).to_have_text(', Unread')
+    # Needs you and unread are different colours.
+    colour = lambda bot, cls: row(bot).locator(f'.rmark.{cls}').evaluate('n => getComputedStyle(n).backgroundColor')
+    assert await colour(r, 'needs') != await colour(v, 'unread')
+    # Opening a chat clears its unread mark there.
+    await row(v).click()
+    await expect(row(v).locator('.rmark')).to_have_count(0)
+    # Under reduced motion the working ring stands still.
+    spin = lambda: row(w).locator('.rmark.working').evaluate('n => getComputedStyle(n, "::after").animationName')
+    assert await spin() == 'rspin', await spin()
+    await page.emulate_media(reduced_motion='reduce')
+    assert await spin() == 'none', await spin()
+
+
+ACCENT_OF = """async bot => {
+    const {botAccent} = await import('./ui-face.js');
+    const s = await window.AGENT_API('/api/state'), bots = s.groups.find(g => g.id === 'home').bots;
+    return botAccent(bots.find(b => b.id === bot), bots.findIndex(b => b.id === bot));
+}"""
+RGB = "c => { const n = parseInt(c.slice(1), 16); return `rgb(${n >> 16}, ${(n >> 8) & 255}, ${n & 255})`; }"
+
+
+async def chat_takes_the_bots_accent(page, base):
+    """A bot chat is drawn in that bot's accent, in light and dark; a thread keeps the app's own."""
+    ids = await open_app(page, base, bots={'Writer': EXTRA_BOTS['Writer']})
+    w = ids['Writer']
+    await page.locator(f'#sidebar .crow[data-id="{w}"]').click()
+    accent = await page.evaluate(ACCENT_OF, w)
+    rgb = lambda hex_: page.evaluate(f'({RGB})({json.dumps(hex_)})')
+    send = page.locator('#main .cv-send')
+    await expect(page.locator('#main .cv')).to_have_attribute('data-accent', w)
+    assert await send.evaluate('n => getComputedStyle(n).backgroundColor') == await rgb(accent['light']['accent'])
+    assert await send.evaluate('n => getComputedStyle(n).color') == await rgb(accent['light']['on'])
+    # The composer's focus ring is the accent too.
+    await page.locator('#chat-form textarea').focus()
+    assert (await rgb(accent['light']['accent'])) in await page.locator('#main .cv-box').evaluate('n => getComputedStyle(n).boxShadow')
+    # The bot's own name on its replies.
+    await page.locator('#chat-form textarea').fill('hello')
+    await page.locator('#chat-form textarea').press('Enter')
+    name = page.locator('#cv-log .cv-bot.own .cv-name').last
+    await expect(name).to_be_visible(timeout=10000)
+    assert await name.evaluate('n => getComputedStyle(n).color') == await rgb(accent['light']['ink'])
+    # Dark: the same roles in the face's own pastel.
+    await page.evaluate("document.documentElement.dataset.theme = 'cocoa'")
+    assert await send.evaluate('n => getComputedStyle(n).backgroundColor') == await rgb(accent['dark']['accent'])
+    assert await name.evaluate('n => getComputedStyle(n).color') == await rgb(accent['dark']['ink'])
+    await page.evaluate("document.documentElement.dataset.theme = 'cream'")
+    # Another bot, another accent.
+    await page.locator('#sidebar .pin', has_text='Atlas').click()
+    atlas = await page.evaluate(ACCENT_OF, PRIMARY)
+    assert atlas['light']['accent'] != accent['light']['accent']
+    assert await send.evaluate('n => getComputedStyle(n).backgroundColor') == await rgb(atlas['light']['accent'])
+    # A thread has no bot accent: its send button is the app's own.
+    await patch_state(page, "s.groups.push({id: 'tq', name: 'Quarterly plan', bots: [], createdAt: new Date().toISOString(), settings: {kind: 'thread', ownerId: 'atlas', members: ['atlas']}});")
+    await page.goto(f'{base}/index.html#thread/tq')
+    await page.reload()
+    await expect(page.locator('#main .cv')).to_be_visible()
+    assert await page.locator('#main .cv').get_attribute('data-accent') is None
+    fg = await page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--text').trim()")
+    assert await page.locator('#main .cv-send').evaluate('n => getComputedStyle(n).backgroundColor') == await rgb(fg)
+
+
+async def live_thumbnail_on_profile_and_chat(page, base):
+    """While a bot browses, its profile and chat header show the latest frame and the site; a tap opens the Computer."""
+    live, bot = await open_computer(page, base)
+    await goto_profile(page, bot)
+    thumb = page.locator('#main .pr-body .lthumb')
+    await expect(thumb).to_be_visible(timeout=8000)
+    await expect(thumb.locator('[data-lt="site"]')).to_have_text('mail.google.com')
+    await expect(thumb).to_have_attribute('aria-label', 'Watch Writer on mail.google.com')
+    await expect(thumb.locator('img')).to_be_visible()
+    assert (await thumb.locator('img').get_attribute('src')).startswith('data:image/png;base64,')
+    # Gently: a few seconds between looks, and it asks only for what is new.
+    seen = live.frame_polls
+    await page.wait_for_timeout(1200)
+    assert live.frame_polls - seen <= 1, (seen, live.frame_polls)
+    # A tap opens the full Computer view, which still works.
+    await thumb.click()
+    assert await hash_(page) == f'#profile/{bot}/computer', await hash_(page)
+    await expect(page.locator('#main .pc-img')).to_be_visible()
+    await page.locator('#main [data-action="computer-close"]').click()
+    # Idle: the thumbnail goes and the polling stops.
+    live.state = 'idle'
+    await expect(page.locator('#main .pr-body .lthumb')).to_be_hidden(timeout=9000)
+    seen = live.frame_polls
+    await page.wait_for_timeout(3000)
+    assert live.frame_polls == seen, (seen, live.frame_polls)
+    # In the chat header while it browses for a run.
+    live.state = 'browsing'
+    await patch_state(page, f'''
+        const at = new Date().toISOString();
+        s.groupRuns.unshift({{id: 'run-web', groupId: 'home', chatKey: {bot!r}, status: 'running', recipients: [{bot!r}], currentStep: 0, trace: [], createdAt: at}});
+        s.browserRequests = [{{id: 'br9', botId: {bot!r}, botName: 'Writer', groupId: 'home', runId: 'run-web', chatKey: {bot!r}, status: 'dispatched', url: 'https://mail.google.com/mail/u/0/#inbox', steps: [], createdAt: at, updatedAt: at}}];''')
+    await page.goto(f'{base}/index.html#bot/{bot}')
+    head = page.locator('#main .cv-head .lthumb')
+    await expect(head).to_be_visible(timeout=8000)
+    await expect(head.locator('img')).to_be_visible()
+    await head.click()
+    assert await hash_(page) == f'#profile/{bot}/computer', await hash_(page)
+    # Leaving the chat stops it looking.
+    await page.goto(f'{base}/index.html#chats')
+    await page.wait_for_timeout(600)
+    seen = live.frame_polls
+    await page.wait_for_timeout(3000)
+    assert live.frame_polls == seen, (seen, live.frame_polls)
+
+
+async def demo_has_no_live_thumbnail(page, base):
+    ids = await open_app(page, base, bots={'Writer': EXTRA_BOTS['Writer']})
+    await page.goto(f'{base}/index.html#profile/{ids["Writer"]}')
+    await page.reload()
+    await expect(page.locator('#main .pr-hero')).to_be_visible()
+    await page.wait_for_timeout(800)
+    await expect(page.locator('#main .lthumb')).to_be_hidden()
+    await page.goto(f'{base}/index.html#bot/{ids["Writer"]}')
+    await expect(page.locator('#main .cv-head .lthumb')).to_be_hidden()
+
+
 async def chat_hops_fold_into_one_line(page, base):
     """A run's bot-to-bot messages are one line that updates and opens; browsing and connector use are not shown."""
     ids = await open_app(page, base, bots=EXTRA_BOTS)
@@ -1474,9 +1626,9 @@ class Server:
             if method == 'GET':
                 return await reply({'connectors': self.connectors, 'google': self.google})
             if body.get('kind') == 'site':
-                app, host = body['app'], {'notion': 'www.notion.so', 'google': 'mail.google.com'}.get(body['app'], f"{body['app']}.example.com")
+                app, host = body['app'], {'github': 'github.com', 'google': 'mail.google.com'}.get(body['app'], f"{body['app']}.example.com")
                 made = next((c for c in self.connectors if c.get('app') == app), None) or {'id': f'{app}-site', 'kind': 'site', 'app': app,
-                        'name': 'Gmail' if app == 'google' else app.title(), 'host': host, 'url': f'https://{host}/', 'status': 'ready', 'statusMessage': '', 'actions': []}
+                        'name': 'Gmail' if app == 'google' else {'github': 'GitHub'}.get(app, app.title()), 'host': host, 'url': f'https://{host}/', 'status': 'ready', 'statusMessage': '', 'actions': []}
                 if made not in self.connectors:
                     self.connectors.append(made)
                 return await reply(made, 201)
@@ -1668,18 +1820,33 @@ async def connect_apps_one_tap(page, base):
     await open_app(page, base)
     await open_settings(page, 'conn')
     body = page.locator('#main .st-dlg .st-body')
+    # An app whose own server signs people in (Notion) goes straight to that sign-in, like Connect Google.
+    started = []
+
+    async def mcp_start(route):
+        started.append(route.request.url)
+        await route.fulfill(status=302, headers={'Location': f'{base}/index.html?connect=connected&app=notion#settings/conn'})
+    await page.route('**/api/connectors/mcp/start**', mcp_start)
     await body.locator('.ca-sec[aria-label="Recommended"] [data-app="notion"] .ca-go').click()
-    await expect(page.locator('#toast')).to_contain_text('Sign in to Notion, then tap Hand back control')
-    assert server.sent('POST', '/api/connectors') == [{'kind': 'site', 'app': 'notion'}]
+    await expect(page.locator('#toast')).to_contain_text('Notion is connected. Bots use it on your account directly.')
+    assert len(started) == 1 and started[0].endswith('/api/connectors/mcp/start?app=notion'), started
+    assert '?connect' not in page.url, 'the address is tidied'
+    # An app that does not let an app sign in by itself (GitHub) is signed in to in the shared browser instead.
+    await page.evaluate("location.hash = 'settings/conn'")
+    await body.locator('#ca-search').fill('github')
+    await body.locator('[data-app="github"] .ca-go').click()
+    await expect(page.locator('#toast')).to_contain_text('Sign in to GitHub, then tap Hand back control')
+    assert server.sent('POST', '/api/connectors') == [{'kind': 'site', 'app': 'github'}]
     await eventually(lambda: [p.rsplit('/', 1)[1] for p, _ in live] == ['takeover', 'input'])
-    assert live[1][1] == {'type': 'navigate', 'url': 'https://www.notion.so/login'}, live
+    assert live[1][1] == {'type': 'navigate', 'url': 'https://github.com/login'}, live
     await expect(page.locator('#catalog-connect-form')).to_have_count(0)
-    # Back on the page, Notion is connected, and its row offers to sign in again or remove it.
+    # Back on the page, GitHub is connected, and its row offers to sign in again, add a token or remove it.
     await page.evaluate("location.hash = 'settings/conn'")
     await expect(body.locator('.ca-sum')).to_contain_text('1 connected')
-    row = body.locator('.cn-site[data-connector="notion-site"]')
+    row = body.locator('.cn-site[data-connector="github-site"]')
     await expect(row).to_contain_text('Signed in through the browser')
     await expect(row.get_by_role('button', name='Sign in again')).to_be_visible()
+    await expect(row.get_by_role('button', name='Add a token')).to_be_visible()
     # With no Google client saved, Connect Google is a sign-in at Gmail too.
     await body.locator('#ca-search').fill('google')
     await body.locator('[data-app="google"] .ca-go').click()
@@ -2293,7 +2460,7 @@ async def main():
             await h.scenario('pin: the menu pins, the menu key opens it, Alt+arrows reorder and it is saved', pin_by_menu_and_move_by_keyboard)
             await h.scenario('pin: drag a row to the pinned row, reorder faces, drag one out, reorder rows, Esc cancels', drag_to_pin_reorder_and_unpin)
             await h.scenario('pin: dropping on a manager moves the bot to its team', drag_onto_a_manager_moves_it_to_the_team)
-            await h.scenario('asks: the card, Allow once, Always allow, Decline, and what is left', ask_cards_answer_and_collapse)
+            await h.scenario('asks: the question, Allow once, Always allow, Don\'t allow, Escape decides nothing, and what is left', ask_cards_answer_and_collapse)
             await h.scenario('permissions: edit a rule in place, Deny shows, payments never Always allow, the activity chips', permissions_edit_in_place_and_deny)
             await h.scenario('pause: the banner says so on every screen and Resume lifts it', pause_banner_and_resume)
             await h.scenario('settings: opens from the avatar, Bots running pauses, Esc closes', settings_from_avatar_and_esc)
@@ -2317,7 +2484,7 @@ async def main():
             await h.scenario('computer: the pill carries the site chip, opens the view and says You are driving', computer_site_chip_on_the_pill)
             await h.scenario('phone: the Computer view fits and its controls are thumb-sized', phone_computer_view, PHONE)
             await h.scenario('connectors: add an MCP server over HTTP and on the agent, refresh its tools, delete asks first, no secret is painted', connectors_add_and_delete_mcp)
-            await h.scenario('connectors: Connect is one tap, signing in to the app in the shared browser', connect_apps_one_tap)
+            await h.scenario('connectors: Connect is one tap: the app\'s own sign-in, or the shared browser when it has none', connect_apps_one_tap)
             await h.scenario('connectors: the Google setup form, a plain Connect Google link, connected and reconnect states', google_setup_form_connect_and_reconnect)
             await h.scenario('connectors: ?google=connected toasts once, strips the address and opens Connectors; an error says why', google_return_toast_and_clean_address)
             await h.scenario('models: a subscription is a name and an engine with no key field, and its row says where it is signed in', subscription_provider_and_cli_status)
@@ -2334,6 +2501,10 @@ async def main():
             await h.scenario('chat: the Undo button goes when its window ends, and a late Undo says it already went out', chat_held_send_closes_by_itself_and_late_undo_says_so)
             await h.scenario('chat: a usage limit offers Switch to the provider named, then settles', chat_model_limit_switch)
             await h.scenario('chat: a run\'s hops fold into one line that updates and opens, at phone width', chat_hops_fold_into_one_line, {'width': 375, 'height': 812})
+            await h.scenario('rows: one mark at the face, needs you, working, a check that fades into unread, still under reduced motion', row_marks_one_at_the_face)
+            await h.scenario('accent: a bot chat takes its bot\'s accent in light and dark; a thread keeps the app\'s', chat_takes_the_bots_accent)
+            await h.scenario('live thumbnail: the profile and the chat header show the latest frame while it browses, and stop when idle', live_thumbnail_on_profile_and_chat)
+            await h.scenario('live thumbnail: none in the demo', demo_has_no_live_thumbnail)
             await h.scenario('phone: Connectors, Models and keys and a held send fit and are usable', phone_connectors_and_models_fit, PHONE)
             await h.scenario('phone: Models and keys, with its dots, fits', phone_models_page_fits, PHONE)
             await browser.close()

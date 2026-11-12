@@ -19,12 +19,12 @@ import {scheduleTaskBody} from './schedules.js';
 import {feed} from './ui-feed.js';
 import {setupCardOf, setupButton} from './setup.js';
 import {askCard} from './ui-asks.js';
-import {face, botColor} from './ui-face.js';
+import {face, botColor, botAccent, accentStyle} from './ui-face.js';
 import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js';
 import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js';
 import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js';
 import {toast} from './ui-dialogs.js';
-import {siteChip} from './ui-computer-view.js';
+import {siteChip, thumbSlot} from './ui-computer-view.js';
 import {cliChoice, googleCard} from './ui-connect-model.js';
 
 const el = id => document.getElementById(id);
@@ -55,12 +55,14 @@ export function conversationShell(conv) {
   const label = store.section === 'threads' ? 'Threads' : 'Bots';
   const who = bot ? `<button type="button" class="cv-who" data-action="open-profile" data-id="${esc(bot.id)}" data-state="${awake(bot.id)}" aria-label="${esc(bot.name)}'s profile">${botFace(bot, bot.name, 36, {state: awake(bot.id), hop: true})}</button>` : '';
   const hint = write ? (thread ? 'Reply to Atlas' : `Message ${conv.name}`) : 'Viewers cannot send messages';
-  el('main').innerHTML = `<section class="cv" aria-label="${esc(conv.name)}">
+  // A bot chat is drawn in that bot's accent (send, its name, the focus ring, the live line); a thread keeps the app's.
+  const accent = bot ? ` data-accent="${esc(bot.id)}" style="${esc(accentStyle(botAccent(bot, Math.max(0, company().indexOf(bot)))))}"` : '';
+  el('main').innerHTML = `<section class="cv"${accent} aria-label="${esc(conv.name)}">
     <header class="cv-head">
       <button type="button" class="rbtn" data-action="back-to-list" aria-label="Back to ${label}">${icon('back', 20)}</button>
       ${who}
       <div class="cv-title"><h1>${esc(conv.name)}</h1><span id="cv-line"></span></div>
-      ${bot ? `<span id="cv-model">${modelChipHtml(bot)}</span>` : ''}
+      ${bot ? `${thumbSlot(bot.id)}<span id="cv-model">${modelChipHtml(bot)}</span>` : ''}
     </header>
     <div class="cv-scroll" id="cv-scroll"><div class="cv-col" id="cv-log" role="log" aria-live="off" aria-label="Conversation"></div></div>
     <form id="chat-form" class="cv-composer" autocomplete="off"><div class="cv-box">
@@ -115,7 +117,8 @@ function browserEntry(m, conv) {
 }
 
 /** An ask: a bot needs the owner's yes before it goes on. Open, it keeps the asking bot's waiting face above one
- * sentence and its buttons (Always allow, Allow once, Decline; a payment has no Always). Answered, it leaves the chat;
+ * question ("Let Atlas open example.com?") and its buttons (Allow once, Always allow, Don't allow; a payment has no
+ * Always). Only a button answers it: Escape or leaving the chat decides nothing. Answered, it leaves the chat;
  * collapses to one muted line. Its status is read from state.asks, so the line itself never changes. */
 function askEntry({message: m}, conv) {
   const card = askCard(store.state, m);
@@ -126,7 +129,7 @@ function askEntry({message: m}, conv) {
   const target = card.target ? `<a href="${esc(safeHref(card.target))}" target="_blank" rel="noopener noreferrer">${esc(card.target)}</a>` : '';
   // The whole message a send or draft would carry, folded under the sentence so the owner can read every word before saying yes.
   const body = card.body ? `<details class="cv-ask-body"><summary>Full message${icon('chevron', 13)}</summary><pre>${esc(card.body)}</pre></details>` : '';
-  return `<div class="cv-wait">${botFace(bot, name, 36, {state: 'waiting'})}<span>${esc(name)} is waiting on you<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></span></div><div class="cv-card" data-ask="${esc(m.askId)}"><p>${esc(m.text)}</p>${target}${body}${card.note ? `<small>${esc(card.note)}</small>` : ''}${acts}</div>`;
+  return `<div class="cv-wait">${botFace(bot, name, 36, {state: 'waiting'})}<span>${esc(name)} is waiting on you<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></span></div><div class="cv-card cv-ask" data-ask="${esc(m.askId)}" role="group" aria-label="${esc(card.question)}"><p>${esc(card.question)}</p>${target}${body}${card.note ? `<small>${esc(card.note)}</small>` : ''}${acts}</div>`;
 }
 
 /** A system line. The newest note of a run also carries what the run offers. */
@@ -225,7 +228,8 @@ function offjobEntry({message: m, open}, conv) {
 function botEntry(m, conv) {
   const bot = m.senderId ? findBot(m.senderId) : conv.bot, name = bot?.name || m.senderName || conv.name;
   // The name says who is talking in a thread; its job is on its profile, not on every reply.
-  return `<div class="cv-bot" data-m="${esc(m.id)}" style="--t:${tintOf(bot, name)}">${botFace(bot, name, 36)}<div class="cv-body"><div class="cv-name">${esc(name)}</div><div class="md">${md(m.text)}</div></div></div>`;
+  const own = !conv.isTeam && bot && bot === conv.bot ? ' own' : '';
+  return `<div class="cv-bot${own}" data-m="${esc(m.id)}" style="--t:${tintOf(bot, name)}">${botFace(bot, name, 36)}<div class="cv-body"><div class="cv-name">${esc(name)}</div><div class="md">${md(m.text)}</div></div></div>`;
 }
 
 function entryHtml(entry, conv) {
@@ -316,6 +320,9 @@ export function renderConversation() {
   // A setup card applied in this chat can change the model; keep the chip honest.
   const modelNode = el('cv-model');
   if (modelNode && conv.bot) { const html = modelChipHtml(conv.bot); if (modelNode.innerHTML !== html) modelNode.innerHTML = html; }
+  // A bot recoloured from its chat ("make it blue") takes its new accent at once.
+  const section = document.querySelector('.cv[data-accent]');
+  if (section && conv.bot) { const style = accentStyle(botAccent(conv.bot, Math.max(0, company().indexOf(conv.bot)))); if (section.getAttribute('style') !== style) section.setAttribute('style', style); }
   const who = document.querySelector('.cv-who');
   if (who && conv.bot && who.dataset.state !== awake(conv.bot.id)) { who.dataset.state = awake(conv.bot.id); who.innerHTML = botFace(conv.bot, conv.name, 36, {state: who.dataset.state}); }
   if (born.conv !== conv.id) { born.conv = conv.id; born.seen = new Set(); born.fresh = false; }
@@ -382,7 +389,7 @@ const hop = node => { const f = node?.querySelector('.face'); if (f) { f.classLi
 async function answerAsk(id, answer) {
   const {ask} = await api(`/api/asks/${encodeURIComponent(id)}`, 'POST', {answer});
   await sync();
-  toast(answer === 'decline' ? 'Declined.' : answer === 'always' ? `${findBot(ask?.botId)?.name || 'The bot'} may always do this.` : 'Allowed once.');
+  toast(answer === 'decline' ? 'Not allowed.' : answer === 'always' ? `${findBot(ask?.botId)?.name || 'The bot'} may always do this.` : 'Allowed once.');
 }
 
 export const conversationActions = {

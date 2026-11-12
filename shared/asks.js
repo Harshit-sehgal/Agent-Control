@@ -46,7 +46,7 @@ export const isBasicAccess = action => action === 'browser.use' || connectorOf(a
 export const ASK_ANSWERS = ['decline', 'allow', 'always'];
 export const GRANT_CHOICES = ['always', 'ask', 'deny'];
 /** The words on the ask card's buttons and the grant picker, verbatim. */
-export const ASK_ANSWER_LABELS = {decline: 'Decline', allow: 'Allow once', always: 'Always allow'};
+export const ASK_ANSWER_LABELS = {decline: "Don't allow", allow: 'Allow once', always: 'Always allow'};
 export const GRANT_LABELS = {always: 'Always allow', ask: 'Ask each time', deny: 'Deny'};
 /** A payment is only ever Decline or Allow, and a grant for it is Ask each time or Deny. So is an ask that
  * covers more than one site: a grant is for one site, so no single Always allow can mean what it shows. */
