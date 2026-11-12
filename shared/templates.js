@@ -31,7 +31,7 @@ export function templateChips(state) {
 }
 
 /** The first few words of a message, as a chip's title. */
-function titleOf(text) {
+export function titleOf(text) {
   const flat = text.replace(/\s+/g, ' ').trim();
   if (flat.length <= TITLE) return flat;
   const cut = flat.slice(0, TITLE), space = cut.lastIndexOf(' ');

@@ -7,33 +7,33 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=5b55ac7864';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=5b55ac7864';
-import {requestOfMessage} from './bot-browser.js?v=5b55ac7864';
-import {validHttpUrl} from './core.js?v=5b55ac7864';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=5b55ac7864';
-import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=5b55ac7864';
-import {isPrimary} from './company.js?v=5b55ac7864';
-import {hasJob, modelChip} from './ui-profile-model.js?v=5b55ac7864';
-import {scheduleTaskBody} from './schedules.js?v=5b55ac7864';
-import {briefingTaskBody} from './briefing.js?v=5b55ac7864';
-import {feed, fileStrip} from './ui-feed.js?v=5b55ac7864';
-import {attachButton, chipsSlot, wireAttach} from './ui-attach.js?v=5b55ac7864';
-import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js?v=5b55ac7864';
-import {askCard} from './ui-asks.js?v=5b55ac7864';
-import {UNTIL_CHOICES, untilFor} from './asks.js?v=5b55ac7864';
-import {undoToast} from './ui-settings.js?v=5b55ac7864';
-import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=5b55ac7864';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=5b55ac7864';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=5b55ac7864';
-import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=5b55ac7864';
-import {toast, confirmSheet} from './ui-dialogs.js?v=5b55ac7864';
-import {siteChip, thumbSlot} from './ui-computer-view.js?v=5b55ac7864';
-import {cliChoice, googleCard} from './ui-connect-model.js?v=5b55ac7864';
-import {connectAppNow} from './ui-connect.js?v=5b55ac7864';
-import {appById} from './app-catalog.js?v=5b55ac7864';
-import {templateChipsHtml, templateButton} from './ui-templates.js?v=5b55ac7864';
-import {usageWords} from './usage.js?v=5b55ac7864';
+import {OFFJOB_CHOICES} from './off-job.js?v=969de23b28';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=969de23b28';
+import {requestOfMessage} from './bot-browser.js?v=969de23b28';
+import {validHttpUrl} from './core.js?v=969de23b28';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=969de23b28';
+import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=969de23b28';
+import {isPrimary} from './company.js?v=969de23b28';
+import {hasJob, modelChip} from './ui-profile-model.js?v=969de23b28';
+import {scheduleTaskBody} from './schedules.js?v=969de23b28';
+import {briefingTaskBody} from './briefing.js?v=969de23b28';
+import {feed, fileStrip} from './ui-feed.js?v=969de23b28';
+import {attachButton, chipsSlot, wireAttach} from './ui-attach.js?v=969de23b28';
+import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js?v=969de23b28';
+import {askCard} from './ui-asks.js?v=969de23b28';
+import {UNTIL_CHOICES, untilFor} from './asks.js?v=969de23b28';
+import {undoToast} from './ui-settings.js?v=969de23b28';
+import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=969de23b28';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=969de23b28';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=969de23b28';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=969de23b28';
+import {toast, confirmSheet} from './ui-dialogs.js?v=969de23b28';
+import {siteChip, thumbSlot} from './ui-computer-view.js?v=969de23b28';
+import {cliChoice, googleCard} from './ui-connect-model.js?v=969de23b28';
+import {connectAppNow} from './ui-connect.js?v=969de23b28';
+import {appById} from './app-catalog.js?v=969de23b28';
+import {templateChipsHtml, templateButton} from './ui-templates.js?v=969de23b28';
+import {usageWords} from './usage.js?v=969de23b28';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it

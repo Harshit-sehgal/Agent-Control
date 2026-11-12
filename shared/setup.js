@@ -39,6 +39,7 @@ import {SHAPES} from './company.js';
 import {limitsOf, BACKSTOP} from './limits.js';
 import {APPS, appById} from './app-catalog.js';
 import {PRESETS, presetOf} from './presets.js';
+import {titleOf as templateTitle} from './templates.js';
 import {briefingSchedule} from './briefing.js';
 import {monthByBot, tokensOf, short as shortCount} from './usage.js';
 
@@ -234,7 +235,8 @@ export function resolveSetup(state, request, {speaker = null} = {}) {
     }
     const text = String(request.text ?? '').trim();
     if (text.length < 3 || text.length > 4000) return {ok: false, error: 'a template is a message of 3 to 4000 characters, in "text".'};
-    const title = String(request.title ?? '').trim().slice(0, 40) || text.slice(0, 40);
+    // The title the saved template will carry (the server shortens it the same way), so the card shows what is saved.
+    const title = templateTitle(String(request.title ?? '').trim() || text);
     return {ok: true, card: {action: 'template', title, templateText: text, text: `Save the template “${title}”: ${text.length > JOB_LINE ? `${text.slice(0, JOB_LINE)}…` : text}`}};
   }
   if (request.action === 'preset') {

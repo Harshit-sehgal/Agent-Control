@@ -105,3 +105,10 @@ test('a briefing card moves a briefing that is already on to a new time, in one 
   assert.equal(setupDone(s, move), false, 'still at 19:36');
   assert.equal(resolveSetup(s, {action: 'briefing', at: '19:36'}).ok, false, 'already at that time');
 });
+
+test('a template card shows the title the saved template will carry', () => {
+  const c = card(state(), {action: 'template', text: 'Summarise the top 5 Hacker News stories'});
+  const long = card(state(), {action: 'template', text: 'Every Monday, list the five biggest AI research papers of last week with links'});
+  assert.ok(long.title.length <= 41 && long.title.endsWith('…'), long.title);
+  assert.match(c.text, new RegExp(`“${c.title}”`));
+});

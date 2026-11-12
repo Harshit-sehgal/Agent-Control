@@ -3,8 +3,8 @@
  * owner to edit before sending (`fill`) or turns on the daily briefing (`briefing`, shared/briefing.js).
  * Browser-safe and Node-tested (tests/templates.test.js); the add and remove rules are shared by the server and
  * the Pages demo. */
-import {fail} from './errors.js?v=5b55ac7864';
-import {briefingSchedule} from './briefing.js?v=5b55ac7864';
+import {fail} from './errors.js?v=969de23b28';
+import {briefingSchedule} from './briefing.js?v=969de23b28';
 
 export const MAX_TEMPLATES = 30;
 const MAX_TEXT = 4000, TITLE = 40;
@@ -31,7 +31,7 @@ export function templateChips(state) {
 }
 
 /** The first few words of a message, as a chip's title. */
-function titleOf(text) {
+export function titleOf(text) {
   const flat = text.replace(/\s+/g, ' ').trim();
   if (flat.length <= TITLE) return flat;
   const cut = flat.slice(0, TITLE), space = cut.lastIndexOf(' ');

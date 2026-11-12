@@ -7,8 +7,8 @@ No setup step was done by hand.
 
 ## How it was tested
 
-- **Gates:** `npm run check`, `npm test` (1787 tests), `tests/polish_smoke.py` (10 scenarios) and
-  `tests/usability_smoke.py` (58 scenarios). All green.
+- **Gates:** `npm run check`, `npm test` (1910 tests), `tests/polish_smoke.py` (10 scenarios) and
+  `tests/usability_smoke.py` (60 scenarios). All green.
 - **Real bots:** 108 prompts an owner would type, covering search, prices, news, weather, long pages, YouTube,
   careers pages, schedules, bot changes, team set-up, sign-in sites, Gmail, a test order form, a live
   restaurant booking site, and (new) the date and its own budget, a declined post next to a second job, paying
@@ -124,6 +124,32 @@ researcher"). Each one now produces the right card, or the right "nothing to cha
   A bot that opens a connected app's own site (Notion pages with Notion connected, Gmail with Google connected) is
   sent back once per task to use its tools; asked again, the page opens. Sites with no connector, like X, open in
   the shared browser, signed in as the owner.
+
+## Files, presets, briefing, usage and the fallback (Phase 9 pass)
+
+A second real-model pass on the same scratch workspace, haiku through the owner's `claude` sign-in, ran the
+Phase 9 features: 11 prompts, then the four that showed a gap again after each fix.
+
+- **An attached invoice image is read.** With a subscription CLI the bot first said it could not see the
+  image. The agent's runner was ready for images, but the server's `model.run` payload check rebuilt the
+  payload without them (and without the effort). Both now reach the paired computer: claude gets image blocks
+  over `--input-format stream-json`, codex gets `-i` files. Asked again, the bot gave the invoice number and the
+  total. An image too big for one request is named to the bot instead of sent, so the turn still answers.
+- **A CSV is totalled correctly**, by category and in all.
+- **Careful asks before a page; the 1-hour Always allow saves an end; the next page in that hour does not ask.**
+- **Hands-off fills and submits a test form** (httpbin's echo form, test data) with no ask, and says what the
+  server echoed. Payments and deletes still ask under Hands-off.
+- **The fallback model answers** when the bot's own model is busy (a stub that always answers 503). The chat
+  line reads "…'s model (busy-model) couldn't answer (the provider is having trouble), so the fallback model
+  haiku answered instead."
+- **Bots can set up what Phase 9 added.** Asked to save a template, Atlas proposed a note; asked for the
+  briefing, a plain schedule; asked for today's tokens, it said it could not see them. A bot can now propose a
+  template (save or delete), a safety preset (with Undo) and the real daily briefing (on, off, or moved to a new
+  time in one tap), and its brief names the templates, the preset, the briefing, the fallback model, and the
+  tokens used this month and today (UTC). A template card sent with `"remove": false` now saves instead of
+  failing. Asked again, each answer was right and came with a card.
+- **The scheduled briefing ran** with the real facts it is handed (what is waiting on the owner, the day's
+  schedules), and every run recorded its tokens.
 
 ## Left to the owner, by design
 

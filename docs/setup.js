@@ -26,21 +26,22 @@
  *   make itself the primary bot, save a rule without the owner's tap, or reach a route the owner could not.
  *
  * Pure and browser-safe: the server reads replies with it and the UI paints the card from it. */
-import {cleanText, validHttpUrl} from './core.js?v=5b55ac7864';
-import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=5b55ac7864';
-import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=5b55ac7864';
-import {controlFence} from './reply-blocks.js?v=5b55ac7864';
-import {companyBots, primaryOf} from './company.js?v=5b55ac7864';
-import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices, isAskAction} from './asks.js?v=5b55ac7864';
-import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=5b55ac7864';
-import {grantWhat, payAlwaysText} from './ui-asks.js?v=5b55ac7864';
-import {COLOR_NAMES} from './ui-kit.js?v=5b55ac7864';
-import {SHAPES} from './company.js?v=5b55ac7864';
-import {limitsOf, BACKSTOP} from './limits.js?v=5b55ac7864';
-import {APPS, appById} from './app-catalog.js?v=5b55ac7864';
-import {PRESETS, presetOf} from './presets.js?v=5b55ac7864';
-import {briefingSchedule} from './briefing.js?v=5b55ac7864';
-import {monthByBot, tokensOf, short as shortCount} from './usage.js?v=5b55ac7864';
+import {cleanText, validHttpUrl} from './core.js?v=969de23b28';
+import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=969de23b28';
+import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=969de23b28';
+import {controlFence} from './reply-blocks.js?v=969de23b28';
+import {companyBots, primaryOf} from './company.js?v=969de23b28';
+import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices, isAskAction} from './asks.js?v=969de23b28';
+import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=969de23b28';
+import {grantWhat, payAlwaysText} from './ui-asks.js?v=969de23b28';
+import {COLOR_NAMES} from './ui-kit.js?v=969de23b28';
+import {SHAPES} from './company.js?v=969de23b28';
+import {limitsOf, BACKSTOP} from './limits.js?v=969de23b28';
+import {APPS, appById} from './app-catalog.js?v=969de23b28';
+import {PRESETS, presetOf} from './presets.js?v=969de23b28';
+import {titleOf as templateTitle} from './templates.js?v=969de23b28';
+import {briefingSchedule} from './briefing.js?v=969de23b28';
+import {monthByBot, tokensOf, short as shortCount} from './usage.js?v=969de23b28';
 
 export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'schedule', 'remove', 'open', 'signin', 'pause', 'limits', 'basics', 'forget', 'disconnect', 'thread', 'reconnect', 'connect', 'memory', 'template', 'preset', 'briefing'];
 /** The bot settings a bot may propose. Not the primary role, the browser approval mode, or layout (pins, order). */
@@ -234,7 +235,8 @@ export function resolveSetup(state, request, {speaker = null} = {}) {
     }
     const text = String(request.text ?? '').trim();
     if (text.length < 3 || text.length > 4000) return {ok: false, error: 'a template is a message of 3 to 4000 characters, in "text".'};
-    const title = String(request.title ?? '').trim().slice(0, 40) || text.slice(0, 40);
+    // The title the saved template will carry (the server shortens it the same way), so the card shows what is saved.
+    const title = templateTitle(String(request.title ?? '').trim() || text);
     return {ok: true, card: {action: 'template', title, templateText: text, text: `Save the template “${title}”: ${text.length > JOB_LINE ? `${text.slice(0, JOB_LINE)}…` : text}`}};
   }
   if (request.action === 'preset') {
