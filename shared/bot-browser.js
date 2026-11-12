@@ -179,7 +179,8 @@ export function validateBrowserRequest(body) {
       const index = Number(step.index);
       if (Number.isInteger(index) && index >= 1 && index <= MAX_ELEMENT_INDEX) out.index = index;
       else {
-        out.selector = cleanText(step.selector, 300);
+        // A read with nothing named reads the whole page.
+        out.selector = cleanText(step.selector, 300) || (step.op === 'read' ? 'body' : '');
         if (!out.selector) fail(`A ${step.op} step needs an index from the last result, or a CSS selector.`);
       }
     }
@@ -299,6 +300,8 @@ export const RISKS = [
 export const CHECKOUT_PATH = /\/(checkout|payment|billing)(\/|$)/i;
 
 /** The risk classes a control's label names, riskiest first: ['spend'], ['send'], [] ... */
+/** The risk classes that mean a click submits something the owner is committed by. */
+const SUBMITS = ['send', 'post', 'spend'];
 export const riskOf = label => RISKS.filter(([, pattern]) => pattern.test(String(label ?? ''))).map(([action]) => action);
 
 /** `{index → label}` for the controls of the page this bot last read in this chat ("[3] button Send"). */
@@ -418,7 +421,7 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
   // `repeated`: pages it asked for again that it already has, which is no progress.
   const limited = depth >= rounds;
   let repeated = 0;
-  const again = [], refused = [];
+  const again = [], refused = [], invalid = [], resent = [];
   const refusals = host => (state.browserRequests || []).filter(r => (runId ? r.runId === runId : r.chatKey === chatKey)
     && hostOf(r.result?.finalUrl || r.url) === host && (REFUSED.test(String(r.result?.title || '').trim()) || r.result?.botCheck)).length;
   // A bot never answers "I don't have permission": a page it has no grant for is an ask, and the owner
@@ -429,7 +432,7 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
   // A run that has already read a connector carries private data: a new site asks (asks.js verdict).
   const readPrivate = Boolean(runId && (state.groupRuns || []).find(r => r.id === runId)?.connectorPage);
   if (!limited && !closed) for (const item of found) {
-    if (!item.ok) { say(`${bot.name} asked for a web page, but the request was refused: ${item.error}`); continue; }
+    if (!item.ok) { say(`${bot.name} asked for a web page, but the request was refused: ${item.error}`); invalid.push(item.error); continue; }
     // A plain re-read of a page it has is no progress; finding words on it, or acting on it, is.
     if (!item.request.find && !item.request.steps.length && skipUrls.some(url => samePage(url, item.request.url))) {
       // The run read it already (perhaps for another bot): hand that page back instead of opening it again.
@@ -447,7 +450,18 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
       say(`${host} refused this browser twice, so it was not opened again.`);
       continue;
     }
-    const needs = browserNeeds(item.request, controlLabels(state, bot.id, chatKey));
+    const labels = controlLabels(state, bot.id, chatKey);
+    // A click on a control named for sending, posting or paying submits something. Once one went through in
+    // this run on a site, a second is never sent: a booking or an order made twice is worse than once.
+    const submits = (item.request.steps || []).some(step => step.op === 'click' && riskOf((step.index && labels.get(step.index)) || step.selector || '').some(a => SUBMITS.includes(a)));
+    const sentBefore = submits && runId && (state.browserRequests || []).find(r => r.runId === runId && r.submits && r.status === 'done' && originOf(r.url) === originOf(item.request.url));
+    if (sentBefore) {
+      say(`${bot.name} asked to submit on ${hostOf(item.request.url)} again, but it was already submitted in this task, so it was not sent twice.`);
+      resent.push(item.request.url);
+      if (sentBefore.result?.page) again.push(sentBefore.result.page);
+      continue;
+    }
+    const needs = browserNeeds(item.request, labels);
     const decision = decide(state, bot, needs, {readPrivate});
     if (decision.verdict === 'deny') { say(`${bot.name} asked to ${describe(item.request)}. ${decision.message}`); continue; }
     // `approved`: the risky classes this request is cleared for once it is sent (a grant, or the owner's
@@ -455,7 +469,7 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
     // validated request, so a reply cannot set it; the browser refuses any other risky control it meets,
     // and one approved for another origin (agent/browser.mjs).
     const approved = needs.filter(n => n.action !== BROWSER_PERMISSION).map(n => approvedFor(n.action, n.target));
-    const record = {id: makeId(), botId: bot.id, botName: bot.name, groupId, chatKey, ...(runId ? {runId} : {}), ...item.request, approved, depth, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: now, updatedAt: now};
+    const record = {id: makeId(), botId: bot.id, botName: bot.name, groupId, chatKey, ...(runId ? {runId} : {}), ...item.request, approved, ...(submits ? {submits: true} : {}), depth, status: 'pending', agentTaskIds: [], result: null, error: null, createdAt: now, updatedAt: now};
     records.push(record);
     if (decision.verdict === 'ask') {
       const {need} = decision;
@@ -469,7 +483,7 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
   state.browserRequests ??= [];
   state.browserRequests.unshift(...records);
   pruneBrowserRequests(state);
-  return {text: text || `${bot.name} asked to open a web page.`, records, lines, asks, limited, repeated, again, refused};
+  return {text: text || `${bot.name} asked to open a web page.`, records, lines, asks, limited, repeated, again, refused, invalid, resent};
 }
 
 /** A person turns down a request that is still waiting, including one already

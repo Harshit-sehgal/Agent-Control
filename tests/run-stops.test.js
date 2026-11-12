@@ -9,6 +9,7 @@ import {BACKSTOP} from '../shared/limits.js';
 import {setBrowserResultHooks} from '../src/bot-browser.js';
 import {browserRuntime} from '../src/browser-runtime.js';
 import {company, model, ask} from './run-fixture.js';
+import {setGrant, scopeOf} from '../shared/asks.js';
 
 const fence = url => `Looking.\n\`\`\`browser\n${JSON.stringify({url})}\n\`\`\``;
 const until = async (check, note) => {
@@ -215,4 +216,41 @@ test('a bot that keeps promising without a block is asked only once, then its re
   await until(() => ended(store, run.id), 'the run');
   assert.equal(runOf(store, run.id).status, 'completed');
   assert.equal(turns, 2);
+});
+
+test('a browser block the app refuses is handed back with the reason, and the bot sends a fixed one', async t => {
+  fakeBrowser(t, async request => ({title: 'Order', finalUrl: request.url, text: 'Order received'}));
+  const {store, ids} = await company(t);
+  let turns = 0, note = '';
+  const ai = model({Mailroom: e => {
+    turns += 1;
+    if (turns === 1) return '```browser\n{"url":"https://forms.example/order","steps":[{"op":"click"}]}\n```';
+    if (turns === 2) { note = e.note || ''; return fence('https://forms.example/order'); }
+    return 'The order form is open.';
+  }});
+  wire(ai.executor);
+  const run = await ask(store, {message: 'order it', to: ids.mail, executor: ai.executor});
+  await until(() => ended(store, run.id), 'the run');
+  assert.match(note, /refused/i);
+  assert.match(note, /needs an index/);
+  assert.match(runOf(store, run.id).lastOutput, /order form is open/);
+});
+
+test('a bot that submits a form a second time is told it already went through, and the device runs it once', async t => {
+  fakeBrowser(t, async request => ({title: 'Order received', finalUrl: 'https://forms.example/done', text: 'Order received for Test Owner'}));
+  const {store, ids} = await company(t);
+  await store.update(s => { setGrant(s, ids.mail, 'send', scopeOf({action: 'send', target: 'https://forms.example/order'}), 'always'); });
+  const submit = '```browser\n{"url":"https://forms.example/order","steps":[{"op":"click","selector":"button[type=submit]"}]}\n```';
+  let turns = 0, note = '';
+  const ai = model({Mailroom: e => {
+    turns += 1;
+    if (turns <= 2) return submit;
+    note = e.note || '';
+    return 'Your order was received.';
+  }});
+  wire(ai.executor);
+  const run = await ask(store, {message: 'order it', to: ids.mail, executor: ai.executor});
+  await until(() => ended(store, run.id), 'the run');
+  assert.equal(opened.length, 1, 'the form was submitted once');
+  assert.match(note, /already submitted/i);
 });
