@@ -31,7 +31,7 @@ export function workflowRoutes(router, {auth}) {
     return {...s, aiEnabled: live, aiModel: model, me: {email: me.email, role: me.role}, workspaces: auth.listWorkspaces(me.userId).map(w => ({...w, current: w.id === me.workspaceId})), canCreateWorkspace: auth.roleOf(me.userId) === 'owner', retention: retentionSettings(s),
       notifications: notifications.listNotifications(c.store, me.userId, 50), unread: notifications.unreadCount(c.store, me.userId), serverTime: new Date().toISOString()};
   });
-  // The activity log, a page at a time: ?filter=outside|perm|bots|all (default outside, "Left the app"),
+  // The activity log, a page at a time: ?filter=outside|perm|bots|all (default all),
   // ?before=<entry id> for older entries, ?limit= and ?bot=<bot id> for one profile's own section.
   // Read only: nothing edits or deletes an entry.
   router.add('GET', '/api/activity', 'viewer', c => {

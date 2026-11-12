@@ -7,20 +7,20 @@
  * team, agents, data) load the existing admin forms from ui-admin.js into the body.
  *
  * The lists behind it are pure and tested in ui-profile-model.js. */
-import {face} from './ui-face.js?v=99c330d626';
-import {botStatus} from './ui-company.js?v=99c330d626';
-import {esc, icon, btn, empty, note, roundBtn, switchBtn, fullDate} from './ui-kit.js?v=99c330d626';
-import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, applyTheme, themeChoice, THEMES} from './ui-store.js?v=99c330d626';
-import {isDesk, initials} from './ui-shell.js?v=99c330d626';
-import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=99c330d626';
-import {faceOf, headBar, activityBlocks, grantsHtml, grantNote} from './ui-profile.js?v=99c330d626';
-import {allGrantRows} from './ui-asks.js?v=99c330d626';
-import {toast, confirmSheet} from './ui-dialogs.js?v=99c330d626';
+import {face} from './ui-face.js?v=ffa2a21520';
+import {botStatus} from './ui-company.js?v=ffa2a21520';
+import {esc, icon, btn, empty, note, roundBtn, switchBtn, fullDate} from './ui-kit.js?v=ffa2a21520';
+import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, applyTheme, themeChoice, THEMES} from './ui-store.js?v=ffa2a21520';
+import {isDesk, initials} from './ui-shell.js?v=ffa2a21520';
+import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=ffa2a21520';
+import {faceOf, headBar, activityBlocks, grantsHtml, grantNote} from './ui-profile.js?v=ffa2a21520';
+import {allGrantRows} from './ui-asks.js?v=ffa2a21520';
+import {toast, confirmSheet} from './ui-dialogs.js?v=ffa2a21520';
 import {
   ACTIVITY_FILTERS, activityUrl, companyTree, weekUsage, settingsSections, resolveSection, sectionArg,
-} from './ui-profile-model.js?v=99c330d626';
-import {COLORS} from './ui-face.js?v=99c330d626';
-import {limitsOf, limitWords, FAIL_STREAK} from './limits.js?v=99c330d626';
+} from './ui-profile-model.js?v=ffa2a21520';
+import {COLORS} from './ui-face.js?v=ffa2a21520';
+import {limitsOf, limitWords, FAIL_STREAK} from './limits.js?v=ffa2a21520';
 
 const el = id => document.getElementById(id);
 const ICONS = {general: 'gear', look: 'half', models: 'key', conn: 'plug', perm: 'shield', usage: 'chart'};
@@ -45,15 +45,16 @@ const srow = (label, right = '', sub = '') => `<div class="rw"><span class="w">$
 const link = (section, label, sub = '', value = '') => `<button type="button" class="rw" data-action="settings-open" data-section="${section}"><span class="w">${esc(label)}${sub ? `<small>${esc(sub)}</small>` : ''}</span>${value ? `<span class="pv">${esc(value)}</span>` : ''}${icon('chevron', 18)}</button>`;
 
 const pauseRow = () => {
-  const on = !paused(), disabled = canPause() ? '' : ' disabled';
-  return `<div class="rw"><span class="w">Bots running<small data-pause-sub>${on ? 'Switch off to pause every bot at once' : 'Everything is paused'}</small></span>${switchBtn(on, 'Bots running', ` data-action="settings-pause" data-pause${disabled}`)}</div>`;
+  const on = !paused();
+  return switchRow('Bots running', on ? 'Switch off to pause every bot at once' : 'Everything is paused', on, 'settings-pause', 'data-pause', canPause(), ' data-pause-sub');
 };
 
 function account() {
   const demo = isStaticDemo(), me = store.state?.me || {};
   const who = demo ? '' : `<small>Signed in as ${esc(me.role || 'member')}</small>`;
   const actions = demo ? '' : `<div class="st-acts">${btn('Change password', 'change-password', {small: true})}${btn('Sign out', 'logout', {small: true})}</div>`;
-  return `<div class="rw acct"><span class="ini av" aria-hidden="true">${esc(initials())}</span><span class="w">${esc(demo ? 'This browser' : ownerName())}${who}</span></div>${actions}`;
+  const where = demo ? '<small>Your bots and chats are kept in this browser only</small>' : '';
+  return `<div class="rw acct"><span class="ini av" aria-hidden="true">${esc(initials())}</span><span class="w">${esc(demo ? 'This browser' : ownerName())}${who}${where}</span></div>${actions}`;
 }
 
 /* ---------- your sessions (a live server only) ---------- */
@@ -77,7 +78,8 @@ async function loadSessions() {
 function general(sections) {
   const more = sections.filter(s => s.extra).map(s => link(s.key, s.label)).join('');
   const sessions = isStaticDemo() ? '' : `<section class="st-g"><h4 class="st-h">Your sessions</h4><div class="cd" id="acct-sessions"><div class="rw"><span class="w st-quiet">Loading…</span></div></div></section>`;
-  return card(account(), 'Account') + sessions
+  // The account is a fact, not a door: it sits flat on the page so it does not read as a row to tap.
+  return `<section class="st-g"><h4 class="st-h">Account</h4><div class="acct-flat">${account()}</div></section>` + sessions
     + card(pauseRow(), 'Bots')
     + card(more, 'More')
     + (isStaticDemo() ? '' : card(`<button type="button" class="rw bad" data-action="delete-account"><span class="w">Delete my account</span></button>`));
@@ -97,31 +99,39 @@ function models() {
 
 const conn = () => (adminKeyOf('conn') ? adminHost('conn') : card(srow('Connectors', '', 'Only the owner or an admin can add Google or an MCP server.')));
 
-/** Every bot's rules, or (from a profile) one bot's, with a chip that clears the filter. This is the only place rules are listed and revoked. */
+/** A row whose switch is the whole row: a tap anywhere on it flips the switch (the switch keeps the keyboard focus). */
+const switchRow = (label, sub, on, action, attr, owner, subAttr = '') => `<div class="rw sw-row"${owner ? ` data-action="${action}"` : ''}><span class="w">${esc(label)}<small${subAttr}>${esc(sub)}</small></span>${switchBtn(on, label, ` data-action="${action}" ${attr}${owner ? '' : ' disabled'}`)}</div>`;
+
+/** From a profile: that bot's rules first, then one link to what applies to every bot. With no bot: Pause all at the
+ * top, the switches and limits for every bot, then every bot's rules. This is the only place rules are listed and revoked. */
 function perm(arg) {
   const bot = arg ? findBot(arg) : null;
-  const chip = bot ? `<div class="st-chip">${faceOf(bot, 22, {state: 'asleep', motion: false})}<span>Showing <b>${esc(bot.name)}</b></span><button type="button" class="link" data-action="perm-all">Show all</button></div>` : '';
+  if (bot) {
+    const chip = `<div class="st-chip">${faceOf(bot, 22, {state: 'asleep', motion: false})}<span>Showing <b>${esc(bot.name)}</b></span><button type="button" class="link" data-action="perm-all">Show all</button></div>`;
+    const all = card(`<button type="button" class="rw" data-action="perm-all"><span class="w">Limits for all bots<small>Browsing, limits and Pause all apply to every bot</small></span>${icon('chevron', 18)}</button>`);
+    return `${chip}<div data-grants="${esc(bot.id)}">${grantsHtml(bot.id)}</div>${grantNote('st-note')}${all}`;
+  }
   const ask = Boolean(store.state?.askBasics), owner = canPause();
-  const basics = card(`<div class="rw"><span class="w">Browse and read without asking<small data-basics-sub>${basicsWords(ask)}</small></span>${switchBtn(!ask, 'Browse and read without asking', ` data-action="settings-basics" data-basics${owner ? '' : ' disabled'}`)}</div>`);
-  return `<p class="st-note">Every bot can chat, hand work to its team, make bots and set schedules. Sending, posting, deleting and paying ask you first; you can Always allow a bot per site.</p>${basics}${limitsCard(owner)}${chip}<div data-grants="${bot ? esc(bot.id) : 'all'}">${grantsHtml(bot?.id || null)}</div>${grantNote('st-note')}`;
+  const basics = card(switchRow('Browse and read without asking', basicsWords(ask), !ask, 'settings-basics', 'data-basics', owner, ' data-basics-sub'));
+  return `${card(pauseRow())}<p class="st-note">Every bot can chat, hand work to its team, make bots and set schedules. Sending, posting, deleting and paying ask you first; you can Always allow a bot per site.</p>${basics}${limitsCard(owner)}<div data-grants="all">${grantsHtml(null)}</div>${grantNote('st-note')}`;
 }
 
 // How far bots go on one message. Empty is no limit: only the safety stop (BACKSTOP) and the stop after repeated
-// failures apply. The owner picks a smaller number here when they want one.
+// failures apply. The owner picks a smaller number here when they want one; each row says why they might.
 const LIMIT_ROWS = [
-  ['pages', 'Pages per reply', 'How many pages or app reads a bot opens at once', [1, 3, 5]],
-  ['rounds', 'Browsing rounds', 'How many times in a row a bot reads more before it answers', [2, 5, 10]],
-  ['steps', 'Bots per task', 'How many bot turns one message can take across a team', [3, 6, 12]],
+  ['pages', 'Pages opened at once', 'Pages or app reads a bot opens side by side. Set one to keep a bot from fanning out across many sites.', [1, 3, 5]],
+  ['rounds', 'Look-ups before answering', 'Times in a row a bot reads more before it replies. Set one for quicker, cheaper answers.', [2, 5, 10]],
+  ['steps', 'Bot hand-offs per message', 'Bot turns one message can take across a team. Set one to stop bots passing work around for long.', [3, 6, 12]],
 ];
 function limitsCard(owner) {
   const now = limitsOf(store.state);
   const seg = (key, values) => [null, ...values].map(v => `<button type="button" data-action="settings-limit" data-key="${key}" data-value="${v ?? ''}" aria-pressed="${now[key] === v}"${owner ? '' : ' disabled'}>${esc(limitWords(v))}</button>`).join('');
-  const rows = LIMIT_ROWS.map(([key, label, sub, values]) => srow(label, `<span class="st-seg" role="group" aria-label="${esc(label)}">${seg(key, values)}</span>`, sub)).join('');
-  const check = `<div class="rw"><span class="w">Check in on long tasks<small>Pause and ask you when bots message each other a lot on one task</small></span>${switchBtn(now.askCheckpoints, 'Check in on long tasks', ` data-action="settings-limit-check" data-limit-check${owner ? '' : ' disabled'}`)}</div>`;
-  return card(rows + check, 'Limits') + `<p class="st-note">No limit is the default. A bot that fails ${FAIL_STREAK} times in a row stops and tells you.</p>`;
+  const rows = LIMIT_ROWS.map(([key, label, sub, values]) => `<div class="rw st-lim">${`<span class="w">${esc(label)}<small>${esc(sub)}</small></span>`}<span class="st-seg" role="group" aria-label="${esc(label)}">${seg(key, values)}</span></div>`).join('');
+  const check = switchRow('Check in on long tasks', 'Pause and ask you when bots message each other a lot on one task', now.askCheckpoints, 'settings-limit-check', 'data-limit-check', owner);
+  return card(rows + check, 'Limits for all bots') + `<p class="st-note">No limit is the default. A bot that fails ${FAIL_STREAK} times in a row stops and tells you.</p>`;
 }
 
-const basicsWords = ask => (ask ? 'Bots ask you before opening a web page or reading a connected app' : 'Bots open web pages and read connected apps on their own; a site you set to Ask or Deny still asks or refuses');
+const basicsWords = ask => (ask ? 'Bots ask you before opening a web page or reading a connected app' : "Bots open web pages and read connected apps on their own; a site you set to Ask each time or Don't allow still asks or refuses");
 
 function usage() {
   const {total, rows} = weekUsage(store.state);
@@ -251,8 +261,8 @@ export function companyView() {
 
 /* ---------- Activity ---------- */
 
-const ay = {filter: 'outside', items: [], next: null, seq: 0};
-const EMPTY = {outside: 'Nothing has left the app yet.', perm: 'No permission changes yet.', bots: 'No bots were made, moved or paused yet.', all: 'Nothing yet.'};
+const ay = {filter: 'all', items: [], next: null, seq: 0};
+const EMPTY = {outside: 'Nothing has been sent outside yet.', perm: 'No permission changes yet.', bots: 'No bots were made, moved or paused yet.', all: 'Nothing yet.'};
 const activityBody = () => (ay.items.length ? `${activityBlocks(ay.items)}${ay.next ? '<button type="button" class="link ay-more" data-action="activity-more">Show more</button>' : ''}` : `<p class="st-quiet">${EMPTY[ay.filter]}</p>`);
 /** Fetch a page of the log (the first one for this chip, or the next older one) and repaint the list. */
 async function loadActivity(more = false) {
@@ -265,7 +275,7 @@ async function loadActivity(more = false) {
   const list = el('ay-list'); if (list) list.innerHTML = activityBody();
 }
 export function activityView() {
-  ay.filter = 'outside'; ay.items = []; ay.next = null;
+  ay.filter = 'all'; ay.items = []; ay.next = null;
   setTimeout(() => loadActivity(), 0);
   const chips = ACTIVITY_FILTERS.map(([key, label]) => `<button type="button" role="tab" data-action="activity-filter" data-filter="${key}" aria-selected="${key === ay.filter}">${esc(label)}</button>`).join('');
   return page('Activity', `<div class="st-seg ay-chips" role="tablist" aria-label="Show">${chips}</div><div id="ay-list" class="pr-stack"><p class="st-quiet">Loading…</p></div>`);

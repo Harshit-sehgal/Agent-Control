@@ -66,7 +66,7 @@ export const actions = {
   },
   'deny-browser': async b => {
     await api(`/api/browser-requests/${b.dataset.id}/deny`, 'POST', {});
-    toast('Declined.');
+    toast('Not allowed.');
     await sync();
     const request = (store.state.browserRequests || []).find(r => r.id === b.dataset.id);
     if (!request?.runId || !request.groupId) return;

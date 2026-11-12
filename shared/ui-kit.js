@@ -151,6 +151,10 @@ export const effortPicker = (rows, {help = 'Higher effort thinks longer: better 
   `<fieldset class="cn-via ef-pick"><legend class="field-label">Effort</legend><div class="st-seg" role="radiogroup" aria-label="Effort">${rows.map(r => `<label title="${esc(r.hint)}"><input type="radio" name="effort" value="${esc(r.value)}"${r.selected ? ' checked' : ''}><span>${esc(r.label)}</span></label>`).join('')}</div><small class="field-help">${esc(help)}</small></fieldset>`;
 export const field = (label, control, help = '') => `<label class="field"><span class="field-label">${esc(label)}</span>${control}${help ? `<small class="field-help">${esc(help)}</small>` : ''}</label>`;
 export const note = (text, tone = '') => `<p class="note ${tone}">${text}</p>`;
+/** The Pages demo's way out of a page it cannot run: how to start the full app (docs/DEPLOYMENT.md sits next to the demo). */
+export const runFullApp = () => '<a class="btn primary small demo-run" href="DEPLOYMENT.md" target="_blank" rel="noopener noreferrer">Run the full app</a>';
+/** A read-only list for the demo: a name and a line per row, nothing to press. */
+export const demoList = (rows, label) => `<ul class="cd demo-list" aria-label="${esc(label)}">${rows.map(r => `<li class="rw"><span class="w">${esc(r.name)}${r.sub ? `<small>${esc(r.sub)}</small>` : ''}</span>${r.tag ? `<span class="pv">${esc(r.tag)}</span>` : ''}</li>`).join('')}</ul>`;
 export const empty = (title, text = '') => `<div class="empty"><strong>${esc(title)}</strong>${text ? `<span>${esc(text)}</span>` : ''}</div>`;
 export const tag = (text, tone = '') => `<span class="tag ${tone}">${esc(text)}</span>`;
 /** A round 44px button with an icon, named for assistive tech. */

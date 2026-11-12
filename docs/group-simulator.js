@@ -2,17 +2,18 @@
  * The bots answer with canned replies (shared/offline-bots.js), and everything a
  * reply asks for goes through the rules the served loop uses: hand-offs, hires,
  * the out-of-job refusal, checkpoints and the runaway guard. */
-import {createRun,createEnvelope,handoffTargets,instructLead,wakeBots,assessTask,runNote,rosterFor,previousFor,enlist} from './coordination.js?v=99c330d626';
-import {offlineReply} from './offline-bots.js?v=99c330d626';
-import {parseOffJob,offJobMessage} from './off-job.js?v=99c330d626';
-import {parseCreateBotRequests,stripCreateBotBlocks,botCreatedText,botCreateRefusedText} from './bot-create.js?v=99c330d626';
-import {addCreatedBot} from './hire.js?v=99c330d626';
-import {parseSetupRequests,stripSetupBlocks,resolveSetup} from './setup.js?v=99c330d626';
-import {noteBotWork} from './runaway.js?v=99c330d626';
-import {isLead} from './company.js?v=99c330d626';
-import {botSettings,groupSettings,threadContext} from './bot-settings.js?v=99c330d626';
-import {normalizeBot} from './contracts.js?v=99c330d626';
-import {isThread,noteMember} from './threads.js?v=99c330d626';
+import {createRun,createEnvelope,handoffTargets,instructLead,wakeBots,assessTask,runNote,rosterFor,previousFor,enlist} from './coordination.js?v=ffa2a21520';
+import {offlineReply,outsideAsk} from './offline-bots.js?v=ffa2a21520';
+import {createAsk,askText} from './asks.js?v=ffa2a21520';
+import {parseOffJob,offJobMessage} from './off-job.js?v=ffa2a21520';
+import {parseCreateBotRequests,stripCreateBotBlocks,botCreatedText,botCreateRefusedText} from './bot-create.js?v=ffa2a21520';
+import {addCreatedBot} from './hire.js?v=ffa2a21520';
+import {parseSetupRequests,stripSetupBlocks,resolveSetup} from './setup.js?v=ffa2a21520';
+import {noteBotWork} from './runaway.js?v=ffa2a21520';
+import {isLead} from './company.js?v=ffa2a21520';
+import {botSettings,groupSettings,threadContext} from './bot-settings.js?v=ffa2a21520';
+import {normalizeBot} from './contracts.js?v=ffa2a21520';
+import {isThread,noteMember} from './threads.js?v=ffa2a21520';
 
 export async function simulateGroup({group, message, directBotId=null, guests=[], state, api, makeId, emit, chatKey=null, started=false, resume=null, shouldStop=()=>false, anyway=false}) {
   let run, previous, i;
@@ -98,6 +99,18 @@ export async function simulateGroup({group, message, directBotId=null, guests=[]
       const lead=isLead(world,bot.id), closing=run.closeAt===i;
       const handed=previousFor(run,i,[...world.groups.flatMap(g=>g.bots||[]),...roster]);
       if(handed)previous=handed;
+      // A send, a post or a payment never happens here and is never "done": the first bot shows the ask card
+      // the served app shows (Allow once / Always allow / Don't allow) and the run waits on the owner.
+      const need=i===0&&!closing&&Array.isArray(state?.groups)?outsideAsk(run.input):null;
+      if(need){
+        const at=new Date().toISOString();
+        emit({id:makeId(),role:'bot',senderId:bot.id,senderName:bot.name,toBotId:null,text:need.said,runId:run.id,kind:'handoff',at});
+        const ask=createAsk(state,{botId:bot.id,runId:run.id,chatKey:run.chatKey||`team-${group.id}`,action:need.action,target:need.target,detail:need.detail,body:need.body,now:at});
+        emit({id:`ask-${ask.id}`.slice(0,64),role:'system',kind:'ask',askId:ask.id,text:askText(ask,bot.name),runId:run.id,at});
+        run.trace.push({botId:bot.id,output:need.said,at,toBotId:null});
+        run.status='awaiting_ask';run.askIds=[ask.id];run.currentStep=i+1;
+        return run;
+      }
       const team=closing?[]:rosterFor(world,bot,roster,{thread:isThread(group)});
       const envelope=createEnvelope({run,bot,previous,team,thread:threadContext(state?.chats?.[run.chatKey]),lead,closing});
       const own=!lead&&run.chatKey===bot.id;

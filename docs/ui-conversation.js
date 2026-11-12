@@ -7,25 +7,25 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=99c330d626';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=99c330d626';
-import {requestOfMessage} from './bot-browser.js?v=99c330d626';
-import {validHttpUrl} from './core.js?v=99c330d626';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=99c330d626';
-import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=99c330d626';
-import {isPrimary} from './company.js?v=99c330d626';
-import {hasJob, modelChip} from './ui-profile-model.js?v=99c330d626';
-import {scheduleTaskBody} from './schedules.js?v=99c330d626';
-import {feed} from './ui-feed.js?v=99c330d626';
-import {setupCardOf, setupButton} from './setup.js?v=99c330d626';
-import {askCard} from './ui-asks.js?v=99c330d626';
-import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=99c330d626';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=99c330d626';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=99c330d626';
-import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=99c330d626';
-import {toast, confirmSheet} from './ui-dialogs.js?v=99c330d626';
-import {siteChip, thumbSlot} from './ui-computer-view.js?v=99c330d626';
-import {cliChoice, googleCard} from './ui-connect-model.js?v=99c330d626';
+import {OFFJOB_CHOICES} from './off-job.js?v=ffa2a21520';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=ffa2a21520';
+import {requestOfMessage} from './bot-browser.js?v=ffa2a21520';
+import {validHttpUrl} from './core.js?v=ffa2a21520';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=ffa2a21520';
+import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=ffa2a21520';
+import {isPrimary} from './company.js?v=ffa2a21520';
+import {hasJob, modelChip} from './ui-profile-model.js?v=ffa2a21520';
+import {scheduleTaskBody} from './schedules.js?v=ffa2a21520';
+import {feed} from './ui-feed.js?v=ffa2a21520';
+import {setupCardOf, setupButton} from './setup.js?v=ffa2a21520';
+import {askCard} from './ui-asks.js?v=ffa2a21520';
+import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=ffa2a21520';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=ffa2a21520';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=ffa2a21520';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=ffa2a21520';
+import {toast, confirmSheet} from './ui-dialogs.js?v=ffa2a21520';
+import {siteChip, thumbSlot} from './ui-computer-view.js?v=ffa2a21520';
+import {cliChoice, googleCard} from './ui-connect-model.js?v=ffa2a21520';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -97,7 +97,7 @@ function statusLine(conv) {
 
 /* ---------- entries ---------- */
 
-const BROWSER_STATUS = {pending: ['Waiting on you', 'warn'], dispatched: ['Running', 'warn'], done: ['Done', 'good'], failed: ['Failed', 'bad'], denied: ['Declined', '']};
+const BROWSER_STATUS = {pending: ['Waiting on you', 'warn'], dispatched: ['Running', 'warn'], done: ['Done', 'good'], failed: ['Failed', 'bad'], denied: ['Not allowed', '']};
 /** A bot's request to open a page. It says where it runs (this server or a paired
  * device), so "nothing happened" has an obvious cause. */
 function browserEntry(m, conv) {
@@ -106,10 +106,10 @@ function browserEntry(m, conv) {
   const [label, tone] = BROWSER_STATUS[request.status] || [request.status, ''];
   const where = request.status === 'pending' ? '' : ` · ${request.via === 'server' ? 'this server' : 'your device'}`;
   const steps = request.steps?.length ? `<ol class="cv-steps">${request.steps.map(s => `<li>${esc(s.op)} ${esc(s.url || (s.index ? `#${s.index}` : s.selector) || '')}${s.text ? ` · "${esc(String(s.text).slice(0, 60))}"` : ''}</li>`).join('')}</ol>` : '';
-  const decline = btn('Decline', 'deny-browser', {id: request.id, small: true});
+  const decline = btn("Don't allow", 'deny-browser', {id: request.id, small: true});
   // A page behind a sign-in: the person can drive it. Only the Node build has a server browser.
   const takeover = !isStaticDemo() && request.status === 'pending' ? btn('Take over', 'takeover-browser', {id: request.id, small: true}) : '';
-  const acts = !canWrite() ? '' : request.status === 'pending' ? `<div class="acts">${btn('Approve', 'approve-browser', {id: request.id, small: true, kind: 'primary'})}${takeover}${decline}</div>`
+  const acts = !canWrite() ? '' : request.status === 'pending' ? `<div class="acts">${btn('Allow once', 'approve-browser', {id: request.id, small: true, kind: 'primary'})}${takeover}${decline}</div>`
     : request.status === 'dispatched' ? `<div class="acts">${decline}</div>` : '';
   const bot = findBot(request.botId) || askerOf(conv);
   const waiting = request.status === 'pending' ? `<div class="cv-wait">${botFace(bot, request.botName || 'A bot', 30, {state: 'waiting'})}<span>${esc(request.botName || bot?.name || 'A bot')} is waiting on you<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></span></div>` : '';
@@ -260,7 +260,9 @@ function welcome(conv) {
   const mode = isLive() ? 'Answers come from your AI provider. If a call fails, the chat says why.'
     : server ? 'Connect a model first, in Settings → Models and keys. A Claude or ChatGPT sign-in on this computer needs no key.'
       : 'This is an offline demo: replies are built in, not from a live AI model.';
-  return `<div class="cv-empty"><button type="button" class="hello" data-action="hop" aria-label="Say hi to ${esc(conv.name)}">${bot ? botFace(bot, bot.name, 84, {state: awake(bot.id)}) : ''}</button><h2>${esc(conv.name)}</h2><p>${esc(about)}</p><p class="sub">${esc(mode)}</p>${!isLive() && server && canWrite() ? btn('Open Models and keys', 'open-models', {kind: 'primary', small: true}) : ''}</div>`;
+  // A bot chat starts with the same starters as a new thread; a tap sends it to this bot.
+  const chips = bot && canWrite() ? `<div class="nv-chips cv-starters">${NEW_THREAD_CHIPS.map(text => `<button type="button" data-action="quick-chat" data-text="${esc(text)}">${esc(text)}</button>`).join('')}</div>` : '';
+  return `<div class="cv-empty"><button type="button" class="hello" data-action="hop" aria-label="Say hi to ${esc(conv.name)}">${bot ? botFace(bot, bot.name, 84, {state: awake(bot.id)}) : ''}</button><h2>${esc(conv.name)}</h2><p>${esc(about)}</p><p class="sub">${esc(mode)}</p>${!isLive() && server && canWrite() ? btn('Open Models and keys', 'open-models', {kind: 'primary', small: true}) : ''}${chips}</div>`;
 }
 
 /* ---------- painting ---------- */
@@ -404,6 +406,8 @@ export const conversationActions = {
   'offjob-new-bot': b => go({newBot: true, job: offjobOf(b).request}),
   'limit-choice': async b => { await answerLimit(b.dataset.group, b.dataset.run, b.dataset.choice); if (b.dataset.choice === 'stop') toast('Stopped. The bot reports what it has.'); },
   'quick-thread': b => startThread(b.dataset.text),
+  // A starter in a bot chat: the composer sends it, exactly as if it were typed.
+  'quick-chat': b => { const form = el('chat-form'), box = form?.elements.message; if (!box) return; box.value = b.dataset.text; form.requestSubmit(); },
   // A send held for Undo: the server cancels it while its window is open (409 once it has gone out, which the toast says).
   'undo-send': async b => {
     try { await api(`/api/activity/${encodeURIComponent(b.dataset.id)}/undo`, 'POST', {}); toast('Undone. The email was not sent.'); }

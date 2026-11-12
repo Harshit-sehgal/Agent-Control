@@ -269,8 +269,8 @@ async def delete_bot_reports_go_solo(page, base):
     await expect(sheet).to_contain_text('Its threads stay.')
     await sheet.get_by_role('button', name='Delete', exact=True).click()
     await expect(page.locator('#toast')).to_contain_text('Researcher deleted')
-    # The profile closes, and the bot leaves the list; its reports stay, and are Solo.
-    assert await hash_(page) == '#chats', await hash_(page)
+    # The profile closes; a laptop home opens the primary's chat. The bot leaves the list; its reports stay, and are Solo.
+    assert await hash_(page) == f'#bot/{PRIMARY}', await hash_(page)
     await expect(page.locator('#sidebar .crow', has_text='Researcher')).to_have_count(0)
     await expect(page.locator('#sidebar .crow', has_text='Writer')).to_have_count(1)
     state = await api_state(page)
@@ -341,20 +341,21 @@ async def settings_from_avatar_and_esc(page, base):
 async def activity_page_and_counts(page, base):
     ids = await open_app(page, base, bots=EXTRA_BOTS)
     writer = ids['Writer']
-    # Settings links to Activity and Company; the chips are Left the app, Permissions, Bots, All.
+    # Settings links to Activity and Company; the chips are All (the default), Sent outside, Permissions, Bots.
     await page.locator('#sidebar .rail-me').click()
     await page.locator('#main .st-nav [data-action="go-activity"]').click()
     assert await hash_(page) == '#activity', await hash_(page)
     chips = page.locator('#main .ay-chips button')
-    await expect(chips).to_have_text(['Left the app', 'Permissions', 'Bots', 'All'])
+    await expect(chips).to_have_text(['All', 'Sent outside', 'Permissions', 'Bots'])
     await expect(chips.first).to_have_attribute('aria-selected', 'true')
-    await expect(page.locator('#ay-list')).to_contain_text('Nothing has left the app yet.')
+    await chips.nth(1).click()
+    await expect(page.locator('#ay-list')).to_contain_text('Nothing has been sent outside yet.')
     # Making bots is logged under Bots, one plain sentence with the bot's name and a time.
-    await chips.nth(2).click()
-    await expect(chips.nth(2)).to_have_attribute('aria-selected', 'true')
+    await chips.nth(3).click()
+    await expect(chips.nth(3)).to_have_attribute('aria-selected', 'true')
     await expect(page.locator('#ay-list .ay-row', has_text='Writer')).to_have_count(1)
     await expect(page.locator('#ay-list .ay-day').first).to_have_text('Today')
-    await chips.nth(3).click()
+    await chips.nth(0).click()
     assert await page.locator('#ay-list .ay-row').count() >= 3
     # A profile shows its own count, and its Activity page lists only what names it.
     await page.goto(f'{base}/index.html#profile/{writer}')
@@ -464,7 +465,7 @@ async def checkpoint_and_ask_cards(page, base):
         s.browserRequests = [{{id: 'br1', botId: {writer!r}, botName: 'Writer', groupId: 'home', chatKey: {writer!r}, status: 'pending', url: 'https://example.com/', steps: [{{op: 'navigate', url: 'https://example.com/'}}], createdAt: at, updatedAt: at}}];
         s.chats[{writer!r}].push({{id: 'browser-br1', role: 'system', kind: 'browser', text: 'Writer wants to open a page.', at}});''')
     await expect(page.locator('.cv-wait svg.face--waiting')).to_be_visible()
-    await expect(page.locator('.cv-card .btn')).to_have_text(['Approve', 'Decline'])
+    await expect(page.locator('.cv-card .btn')).to_have_text(['Allow once', "Don't allow"])
     await expect(page.locator('.cv-card a')).to_have_attribute('rel', 'noopener noreferrer')
 
 
@@ -483,6 +484,90 @@ async def faces_come_alive(page, base):
     # Sleepers breathe, the primary is awake and sways.
     await expect(page.locator('#sidebar .crow .face--asleep')).to_have_count(3)
     await expect(page.locator('#sidebar .pin .face--sway')).to_have_count(1)
+
+
+async def demo_send_shows_an_ask_card(page, base):
+    """In the demo a send is never "Done": the bot's chat shows the same ask card the served app shows."""
+    await open_app(page, base, '#bot/atlas')
+    # The empty chat offers the new-thread starters, and a tap sends one here.
+    starters = page.locator('#cv-log .cv-starters button')
+    await expect(starters).to_have_text(['What can you do?', 'Make a bot that sums up my inbox each morning'])
+    await page.locator('#chat-form textarea').fill('Send an email to bob@example.com saying hi')
+    await page.locator('#chat-form textarea').press('Enter')
+    card = page.locator('#cv-log .cv-ask')
+    await expect(card).to_be_visible(timeout=10000)
+    await expect(card.locator('p').first).to_have_text('Let Atlas send an email to bob@example.com?')
+    await expect(card.locator('.btn')).to_have_text(['Allow once', 'Always allow', "Don't allow"])
+    await expect(card.locator('.cv-ask-body pre')).to_have_text('hi')
+    await expect(page.locator('#cv-log')).not_to_contain_text('Done')
+    await card.get_by_role('button', name="Don't allow").click()
+    await expect(page.locator('#cv-log .cv-ask')).to_have_count(0)
+    await expect(page.locator('#cv-log')).to_contain_text('The owner declined: send an email to bob@example.com.')
+
+
+async def per_bot_permissions_and_global_limits(page, base):
+    """From a profile, Permissions shows only that bot's rules, then one link to what applies to every bot."""
+    ids = await open_app(page, base, bots={'Researcher': EXTRA_BOTS['Researcher']})
+    r = ids['Researcher']
+    await page.goto(f'{base}/index.html#settings/perm%2F{r}')
+    await page.reload()
+    body = page.locator('#main .st-body')
+    await expect(body.locator('.st-chip')).to_contain_text('Showing Researcher')
+    await expect(body.locator('[data-action="settings-limit"]')).to_have_count(0)
+    await expect(body.locator('[data-basics]')).to_have_count(0)
+    await body.get_by_role('button', name='Limits for all bots').click()
+    assert await hash_(page) == '#settings/perm', await hash_(page)
+    # Every bot's view: Pause all first, then the limits in plain words.
+    await expect(body.locator('.rw').first).to_contain_text('Bots running')
+    await expect(body.locator('.st-h', has_text='Limits for all bots')).to_be_visible()
+    for label in ['Pages opened at once', 'Look-ups before answering', 'Bot hand-offs per message']:
+        await expect(body.locator('.st-lim', has_text=label)).to_have_count(1)
+    # A switch row flips when its text is tapped, not only the switch.
+    switch = body.locator('[data-basics]')
+    await expect(switch).to_have_attribute('aria-checked', 'true')
+    await body.locator('.sw-row', has_text='Browse and read without asking').locator('.w').click()
+    await expect(switch).to_have_attribute('aria-checked', 'false')
+
+
+async def phone_targets_and_stacked_segments(page, base):
+    """On a phone every small control is 44px tall and a segmented control sits under its label."""
+    await open_app(page, base)
+    for sel in ['#chrome .ch-ind button']:
+        box = await page.locator(sel).first.bounding_box()
+        assert box['height'] >= 44, (sel, box)
+    await page.goto(f'{base}/index.html#settings/perm')
+    await page.reload()
+    row = page.locator('#main .st-lim').first
+    label, seg = await row.locator('.w').bounding_box(), await row.locator('.st-seg').bounding_box()
+    assert seg['y'] >= label['y'] + label['height'] - 1, (label, seg)
+    for b in await row.locator('.st-seg button').all():
+        assert (await b.bounding_box())['height'] >= 44
+    await page.goto(f'{base}/index.html#bot/atlas')
+    await page.reload()
+    assert (await page.locator('#chat-form .cv-send').bounding_box())['height'] >= 44
+    assert await overflow(page) <= 0
+
+
+async def profile_role_line_and_instructions(page, base):
+    """The profile header shows one line of the job; View instructions shows all of it, and Save edits it."""
+    await open_app(page, base, '#profile/atlas')
+    await expect(page.locator('#main .pr-role')).to_have_text('Answer the owner, and hand each piece of work to the bot whose job it is')
+    await page.locator('#main .pr-view').click()
+    box = page.locator('#modal textarea[name=instructions]')
+    await expect(box).to_have_value(re.compile(r'^You are Atlas, the primary bot\.'))
+    await box.fill('Keeps the week planned. Books what needs booking.')
+    await page.locator('#modal button[type=submit]').click()
+    await expect(page.locator('#modal')).to_be_hidden()
+    await expect(page.locator('#main .pr-role')).to_have_text('Keeps the week planned')
+    state = await api_state(page)
+    assert state['groups'][0]['bots'][0]['instructions'] == 'Keeps the week planned. Books what needs booking.'
+    # New bot: the manager defaults to the primary, and Create says what it needs.
+    await page.goto(f'{base}/index.html#new-bot')
+    await page.reload()
+    await expect(page.locator('#new-bot-form select[name=reportsTo] option').first).to_have_text('Atlas (default)')
+    await expect(page.locator('#new-bot-form .nb-hint')).to_have_text('Name it to create')
+    await page.locator('#new-bot-form input[name=name]').fill('Scout')
+    await expect(page.locator('#new-bot-form .nb-hint')).to_be_hidden()
 
 
 async def first_reply_is_announced(page, base):
@@ -887,17 +972,17 @@ async def permissions_edit_in_place_and_deny(page, base):
     await expect(rows).to_have_count(3)
     assert [t.split('\n')[0] for t in await rows.all_inner_texts()] == ['Open example.com', 'Send on mail.example.com', 'Spend money anywhere']
     # Every rule has the three choices; a payment rule for every site has no Always allow.
-    assert await rows.nth(0).locator('button').all_inner_texts() == ['Always allow', 'Ask each time', 'Deny']
-    assert await rows.nth(2).locator('button').all_inner_texts() == ['Ask each time', 'Deny']
+    assert await rows.nth(0).locator('button').all_inner_texts() == ['Always allow', 'Ask each time', "Don't allow"]
+    assert await rows.nth(2).locator('button').all_inner_texts() == ['Ask each time', "Don't allow"]
     await expect(rows.nth(0).locator('button[aria-pressed="true"]')).to_have_text('Always allow')
     # Edited in place: Deny, and the profile shows it at once.
-    await rows.nth(0).get_by_role('button', name='Deny').click()
-    await expect(page.locator('#main .gr').nth(0).locator('button[aria-pressed="true"]')).to_have_text('Deny')
-    await expect(page.locator('#toast')).to_contain_text('Researcher: deny.')
+    await rows.nth(0).get_by_role('button', name="Don't allow").click()
+    await expect(page.locator('#main .gr').nth(0).locator('button[aria-pressed="true"]')).to_have_text("Don't allow")
+    await expect(page.locator('#toast')).to_contain_text("Researcher: Don't allow.")
     assert [g for g in (await api_state(page))['grants'] if g['action'] == 'browser.use'][0]['choice'] == 'deny'
     # A payment rule for every site can be Deny but not Always allow: there is no button, and the server refuses it too.
-    await page.locator('#main .gr').nth(2).get_by_role('button', name='Deny').click()
-    await expect(page.locator('#main .gr').nth(2).locator('button[aria-pressed="true"]')).to_have_text('Deny')
+    await page.locator('#main .gr').nth(2).get_by_role('button', name="Don't allow").click()
+    await expect(page.locator('#main .gr').nth(2).locator('button[aria-pressed="true"]')).to_have_text("Don't allow")
     refused = await page.evaluate('''botId => window.AGENT_API('/api/grants', 'POST', {botId, action: 'spend', choice: 'always'}).then(() => 'accepted', e => e.message)''', r)
     assert refused != 'accepted', refused
     # Show all clears the filter: every bot's rules, one card each, edited in place.
@@ -910,14 +995,14 @@ async def permissions_edit_in_place_and_deny(page, base):
     await expect(dlg.locator('.gr')).to_have_count(4)
     await dlg.locator('.gr', has_text='Post').get_by_role('button', name='Always allow').click()
     await expect(dlg.locator('.gr', has_text='Post').locator('button[aria-pressed="true"]')).to_have_text('Always allow')
-    # The log keeps the changes under Permissions; Left the app does not show them.
+    # The log keeps the changes under Permissions; Sent outside does not show them.
     await page.goto(f'{base}/index.html#activity')
     await page.reload()
     chips = page.locator('#main .ay-chips button')
-    await expect(chips).to_have_text(['Left the app', 'Permissions', 'Bots', 'All'])
-    await chips.nth(1).click()
+    await expect(chips).to_have_text(['All', 'Sent outside', 'Permissions', 'Bots'])
+    await chips.nth(2).click()
     await expect(page.locator('#ay-list .ay-row', has_text='not allowed to open example.com')).to_have_count(1)
-    await chips.nth(0).click()
+    await chips.nth(1).click()
     await expect(page.locator('#ay-list .ay-row')).to_have_count(0)
 
 
@@ -968,8 +1053,8 @@ async def phone_ask_card_permissions_and_pause(page, base):
     for i in range(3):
         box = await row.locator('button').nth(i).bounding_box()
         assert box['height'] >= 40 and box['x'] + box['width'] <= 390, box
-    await row.get_by_role('button', name='Deny').click()
-    await expect(page.locator('#main .gr').first.locator('button[aria-pressed="true"]')).to_have_text('Deny')
+    await row.get_by_role('button', name="Don't allow").click()
+    await expect(page.locator('#main .gr').first.locator('button[aria-pressed="true"]')).to_have_text("Don't allow")
     assert await overflow(page) <= 0
     # The pause banner sits above the phone chrome, and Resume is a thumb-sized button.
     await page.evaluate('() => window.AGENT_API("/api/guard", "POST", {paused: true})')
@@ -2335,8 +2420,14 @@ async def demo_says_connectors_and_models_need_the_server(page, base):
     await open_app(page, base)
     await open_settings(page, 'conn')
     await expect(page.locator('#main .st-body')).to_contain_text('Connectors need the Node server')
+    # Not a dead end: the app catalogue is shown read-only, with the way to run the full app.
+    await expect(page.locator('#main .st-body .demo-list li', has_text='Notion')).to_have_count(1)
+    await expect(page.locator('#main .st-body a.demo-run')).to_have_attribute('href', 'DEPLOYMENT.md')
+    await expect(page.locator('#main .st-body .demo-list button')).to_have_count(0)
     await goto_settings_section(page, 'models')
     await expect(page.locator('#main .st-body')).to_contain_text('Models and keys need the Node server')
+    await expect(page.locator('#main .st-body .demo-list li', has_text='Anthropic (Claude)')).to_have_count(1)
+    await expect(page.locator('#main .st-body a.demo-run')).to_have_text('Run the full app')
     await expect(page.locator('#cli-provider-form')).to_have_count(0)
 
 
@@ -2509,6 +2600,10 @@ async def main():
             await h.scenario('notifications: no webhook switch without a saved address, no email without a mailbox', notifications_hide_webhook_without_a_saved_address)
             await h.scenario('data: Reveal not offered for app-kept secrets, Prune and Restore ask first, backup is owner only', data_cards_keep_reveal_prune_and_restore_confirms)
             await h.scenario('demo: Connectors and Models and keys say they need the server', demo_says_connectors_and_models_need_the_server)
+            await h.scenario('demo: a send shows the ask card, never Done; an empty chat offers starters', demo_send_shows_an_ask_card)
+            await h.scenario('permissions: a profile shows its bot\'s rules first, then Limits for all bots; rows flip their switch', per_bot_permissions_and_global_limits)
+            await h.scenario('phone: 44px targets and segments under their labels', phone_targets_and_stacked_segments, {'width': 375, 'height': 812})
+            await h.scenario('profile: one line of the job, View instructions edits it; New bot manager default and Create hint', profile_role_line_and_instructions)
             await h.scenario('chat: connector use is hidden, a held send has Undo and names the account, then collapses to a muted line', chat_connector_lines_and_undo)
             await h.scenario('chat: the Undo button goes when its window ends, and a late Undo says it already went out', chat_held_send_closes_by_itself_and_late_undo_says_so)
             await h.scenario('chat: a usage limit offers Switch to the provider named, then settles', chat_model_limit_switch)

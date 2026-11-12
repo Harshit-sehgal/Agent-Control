@@ -15,17 +15,17 @@
  * for a held send. Entries are only ever added: the cap and retention remove old
  * ones, and no route edits one. Pure and browser-safe, like the other shared modules.
  */
-import {fail} from './errors.js?v=99c330d626';
-import {cleanText} from './core.js?v=99c330d626';
+import {fail} from './errors.js?v=ffa2a21520';
+import {cleanText} from './core.js?v=ffa2a21520';
 
 export const ACTIVITY_KINDS = ['outside', 'perm', 'bots'];
 export const ACTIVITY_FILTERS = [...ACTIVITY_KINDS, 'all'];
-/** The four filter chips, default first, in the words the screen shows. */
+/** The four filter chips, default (All) first, in the words the screen shows. */
 export const ACTIVITY_CHIPS = [
-  {filter: 'outside', label: 'Left the app'},
+  {filter: 'all', label: 'All'},
+  {filter: 'outside', label: 'Sent outside'},
   {filter: 'perm', label: 'Permissions'},
   {filter: 'bots', label: 'Bots'},
-  {filter: 'all', label: 'All'},
 ];
 /** The newest entries kept in a workspace; retention removes older ones by age too. */
 export const MAX_ACTIVITY = 5000;
@@ -46,11 +46,11 @@ export function logActivity(state, {botId = null, kind, text, threadId = null, u
   return entry;
 }
 
-/** A page of the log, newest first. `filter` is a chip (default: what left the app), `before` is the id of
+/** A page of the log, newest first. `filter` is a chip (default: All), `before` is the id of
  * the last entry already shown (the next page is older than it), `botId` limits it to one bot's profile.
  * `next` is the cursor for the page after this one, or null at the end; `total` is how many entries the
  * filter matches, for "Show all N". */
-export function activityPage(state, {filter = 'outside', before = null, limit = DEFAULT_PAGE, botId = null} = {}) {
+export function activityPage(state, {filter = 'all', before = null, limit = DEFAULT_PAGE, botId = null} = {}) {
   if (!ACTIVITY_FILTERS.includes(filter)) fail(`Filter must be one of: ${ACTIVITY_FILTERS.join(', ')}.`);
   const wanted = Math.floor(Number(limit));
   const size = Number.isFinite(wanted) ? Math.max(1, Math.min(MAX_PAGE, wanted)) : DEFAULT_PAGE;

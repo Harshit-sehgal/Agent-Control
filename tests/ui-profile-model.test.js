@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  NO_JOB, hasJob, lookOf, resolveSection, roleOf, teamLine, moveTargets, menuItems, deleteCopy, profileRows, profileBackRoute, closeTarget, memoryNotes, modelLine,
+  NO_JOB, hasJob, roleLine, lookOf, resolveSection, roleOf, teamLine, moveTargets, menuItems, deleteCopy, profileRows, profileBackRoute, closeTarget, memoryNotes, modelLine,
   newBotDefaults, newBotPayload, canCreate, editChanges, ACTIVITY_FILTERS, activityUrl, activityTarget, activityDays, companyTree, weekUsage, settingsSections, sectionArg,
 } from '../shared/ui-profile-model.js';
 
@@ -192,13 +192,13 @@ test('Edit only sends what changed, so a shape left alone stays the role default
 // ---- activity ----
 
 const NOW = Date.parse('2026-11-11T15:00:00Z');
-test('the four filters are Left the app, Permissions, Bots and All, in that order', () => {
-  assert.deepEqual(ACTIVITY_FILTERS.map(f => f[0]), ['outside', 'perm', 'bots', 'all']);
-  assert.deepEqual(ACTIVITY_FILTERS.map(f => f[1]), ['Left the app', 'Permissions', 'Bots', 'All']);
+test('the four filters are All, Sent outside, Permissions and Bots, in that order', () => {
+  assert.deepEqual(ACTIVITY_FILTERS.map(f => f[0]), ['all', 'outside', 'perm', 'bots']);
+  assert.deepEqual(ACTIVITY_FILTERS.map(f => f[1]), ['All', 'Sent outside', 'Permissions', 'Bots']);
 });
 
 test('the activity request names the chip, the page size, the bot and the cursor', () => {
-  assert.equal(activityUrl(), '/api/activity?filter=outside&limit=50');
+  assert.equal(activityUrl(), '/api/activity?filter=all&limit=50');
   assert.equal(activityUrl({filter: 'all', botId: 'mail', limit: 5}), '/api/activity?filter=all&limit=5&bot=mail');
   assert.equal(activityUrl({filter: 'bots', before: 'a b'}), '/api/activity?filter=bots&limit=50&before=a%20b');
 });
@@ -300,4 +300,13 @@ test('week usage counts each bot turns in the last seven days, biggest first', (
   assert.equal(usage.total, 4);
   assert.deepEqual(usage.rows.map(r => [r.botId, r.count, r.pct]), [['mail', 2, 50], ['atlas', 1, 25], ['plan', 1, 25]]);
   assert.deepEqual(weekUsage(stateOf(), now), {total: 0, rows: []});
+});
+
+test('the profile header shows the job as one line, never the raw prompt', () => {
+  assert.equal(roleLine({name: 'Atlas', instructions: 'You are Atlas, the primary bot. Answer the owner, and hand each piece of work to the bot whose job it is.'}),
+    'Answer the owner, and hand each piece of work to the bot whose job it is', 'the lead-in naming the bot is skipped');
+  assert.equal(roleLine({name: 'Mail', instructions: 'Watches my inbox. Drafts replies.'}), 'Watches my inbox');
+  const long = roleLine({name: 'Mail', instructions: 'Watches my inbox and drafts replies to the people who write to me, every morning before nine, and flags anything urgent.'});
+  assert.ok(long.length <= 91 && long.endsWith('…') && !/\s…$/.test(long), long);
+  assert.equal(roleLine({name: 'New', instructions: NO_JOB}), '');
 });

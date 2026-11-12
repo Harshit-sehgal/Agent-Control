@@ -72,6 +72,9 @@ function renderRoute() {
   const route = store.route, main = el('main'), desk = isDesk();
   // A chat that was deleted in another tab falls back home, not to a blank thread.
   if ((route.bot || route.thread) && !conversation()) return go({}, {replace: true});
+  // A laptop home is never an empty pane: it opens the primary bot's chat (the empty "Select a chat" is for a company with no primary).
+  const primary = route.home && desk ? groups().find(g => g.id === 'home')?.bots?.find(b => b.settings?.lead) : null;
+  if (primary) return go({bot: primary.id}, {replace: true});
   document.body.dataset.view = route.bot || route.thread ? 'chat' : route.home ? 'home' : 'page';
   const view = `${JSON.stringify(route)}|${desk}`;
   if (view !== lastView) {

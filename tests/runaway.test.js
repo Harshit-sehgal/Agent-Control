@@ -78,7 +78,7 @@ test('a bot creates a bot from one sentence and it reports to its creator', asyn
   const made = companyBots(store.read()).find(b => b.origin === 'bot');
   assert.ok(made, 'a bot was made');
   assert.equal(made.instructions, job, 'the sentence is its job');
-  assert.equal(made.name, 'Inbox', 'no name was given, so it comes from the sentence');
+  assert.equal(made.name, 'Inbox Watcher', 'no name was given, so it comes from the sentence, by role');
   assert.equal(made.settings.reportsTo, 'atlas', 'Atlas is a lead, so the new bot reports to it');
   assert.deepEqual(made.permissions, [], 'it holds nothing a person has not granted');
   assert.equal(made.createdBy.botId, 'atlas');

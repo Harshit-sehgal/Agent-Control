@@ -90,7 +90,8 @@ export function feed({items = [], state, key, now = Date.now()}) {
   items.forEach((item, index) => {
     if (item.kind === 'day') return out.push({kind: 'day', at: item.at});
     const m = item.message, run = m.runId ? byId.get(m.runId) : null;
-    if (run && !placed.has(run.id)) {
+    // A bot made for the run is said first; the run's line ("Scout messaged Atlas") comes after it.
+    if (run && !placed.has(run.id) && !(m.role === 'system' && m.kind === 'bot-created')) {
       placed.add(run.id);
       const entry = pillEntry(run, state);
       if (entry) out.push(entry);

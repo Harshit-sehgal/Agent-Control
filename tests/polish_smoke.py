@@ -276,15 +276,17 @@ async def history_routes(page, base):
     await page.goto(f'{base}/index.html#you/about')
     await page.reload()
     await expect(page.locator('#main .st-head h2')).to_have_text('About this build')
+    # A chat that is gone falls back home, and a laptop home opens the primary's chat, never an empty pane.
     await page.goto(f'{base}/index.html#thread/does-not-exist')
     await page.reload()
-    await expect(page.locator('#main .rail-none')).to_contain_text('Select a chat')
+    await expect(page.locator('#main .cv-title h1')).to_have_text('Atlas')
+    await expect(page.locator('#main .rail-none')).to_have_count(0)
     await page.goto(f'{base}/index.html#team')  # an admin page is refused without a server session
     await page.reload()
     await expect(page.locator('#main .st-head h2')).to_have_text('General')
     await page.goto(f'{base}/index.html#bot/does-not-exist')
     await page.reload()
-    await expect(page.locator('#main .rail-none')).to_contain_text('Select a chat')
+    await expect(page.locator('#main .cv-title h1')).to_have_text('Atlas')
 
 
 async def you_pages(page, base):

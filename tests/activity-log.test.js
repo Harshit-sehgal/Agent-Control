@@ -31,8 +31,8 @@ const texts = (s, kind) => s.activity.filter(a => !kind || a.kind === kind).map(
 test('one entry: a plain sentence, the bot, the chat to open, and a kind from a short list', () => {
   assert.deepEqual(ACTIVITY_KINDS, ['outside', 'perm', 'bots']);
   assert.deepEqual(ACTIVITY_FILTERS, ['outside', 'perm', 'bots', 'all']);
-  assert.deepEqual(ACTIVITY_CHIPS.map(c => c.label), ['Left the app', 'Permissions', 'Bots', 'All']);
-  assert.deepEqual(ACTIVITY_CHIPS.map(c => c.filter), ['outside', 'perm', 'bots', 'all'], 'the default chip is first');
+  assert.deepEqual(ACTIVITY_CHIPS.map(c => c.label), ['All', 'Sent outside', 'Permissions', 'Bots']);
+  assert.deepEqual(ACTIVITY_CHIPS.map(c => c.filter), ['all', 'outside', 'perm', 'bots'], 'the default chip (All) is first');
   const s = state();
   const entry = logActivity(s, {botId: 'atlas', kind: 'outside', text: '  Atlas opened example.com.  ', threadId: 'atlas', undoUntil: at(1), now: NOW, makeId: () => 'a1'});
   assert.deepEqual(entry, {id: 'a1', at: NOW, botId: 'atlas', kind: 'outside', text: 'Atlas opened example.com.', threadId: 'atlas', undoUntil: at(1)});
@@ -64,8 +64,8 @@ test('a page is newest first, filtered by chip, and walks back with a cursor', (
   assert.deepEqual(activityPage(s, {filter: 'outside'}).items.map(a => a.id), ['e6', 'e3', 'e0']);
   assert.deepEqual(activityPage(s, {filter: 'perm'}).items.map(a => a.id), ['e5', 'e1']);
   assert.deepEqual(activityPage(s, {filter: 'bots'}).items.map(a => a.id), ['e4', 'e2']);
-  assert.equal(activityPage(s).items[0].id, 'e6', 'the default chip is Left the app');
-  assert.deepEqual(activityPage(s).items.map(a => a.kind), ['outside', 'outside', 'outside']);
+  assert.equal(activityPage(s).items[0].id, 'e6', 'the default chip is All');
+  assert.deepEqual(activityPage(s).items.map(a => a.id), ['e6', 'e5', 'e4', 'e3', 'e2', 'e1', 'e0']);
   // A cursor walks older, a page at a time.
   const first = activityPage(s, {filter: 'all', limit: 3});
   assert.deepEqual(first.items.map(a => a.id), ['e6', 'e5', 'e4']);
@@ -226,7 +226,7 @@ test('the log has one read route and no write route, and it is not part of the s
   assert.equal(page.items.length, 5, 'the five bots the fixture made');
   assert.ok(page.items.every(a => a.kind === 'bots'));
   assert.deepEqual((await call('?filter=outside')).items, []);
-  assert.deepEqual((await call('')).items, [], 'no filter means Left the app');
+  assert.equal((await call('')).items.length, 5, 'no filter means All');
   const small = await call('?filter=all&limit=2');
   assert.equal(small.items.length, 2);
   const older = await call(`?filter=all&limit=2&before=${small.next}`);
@@ -290,7 +290,7 @@ test('the Pages demo logs the same events and serves the same page, with no log 
   ]);
   assert.equal(all.total, 4);
   assert.deepEqual((await request('/api/activity?filter=perm')).items.map(a => a.kind), ['perm']);
-  assert.deepEqual((await request('/api/activity')).items, [], 'the default chip is Left the app');
+  assert.equal((await request('/api/activity')).items.length, 4, 'the default chip is All');
   const page = await request(`/api/activity?filter=all&limit=1&before=${all.items[0].id}`);
   assert.equal(page.items[0].text, 'All bots were paused.');
   assert.equal(page.next, page.items[0].id);

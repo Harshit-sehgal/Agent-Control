@@ -5,23 +5,23 @@
  *
  * Pages repaint only when the route changes, so each in-place change (a switch, a
  * forgotten note, a picked colour) updates its own node instead. */
-import {SHAPES, COLORS, face} from './ui-face.js?v=99c330d626';
-import {botStatus, botIsManager} from './ui-company.js?v=99c330d626';
-import {primaryOf} from './company.js?v=99c330d626';
-import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker, COLOR_NAMES} from './ui-kit.js?v=99c330d626';
-import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js?v=99c330d626';
-import {scheduleRows, scheduleTaskBody, SCHEDULE_OFTEN, scheduleChoice} from './schedules.js?v=99c330d626';
-import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=99c330d626';
-import {GRANT_LABELS} from './asks.js?v=99c330d626';
-import {grantRows, allGrantRows, grantUrl} from './ui-asks.js?v=99c330d626';
-import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=99c330d626';
-import {toast, confirmSheet} from './ui-dialogs.js?v=99c330d626';
-import {sendChat} from './ui-chat.js?v=99c330d626';
-import {computerPage as computerView, computerLabel, keysOwned, thumbSlot} from './ui-computer-view.js?v=99c330d626';
+import {SHAPES, COLORS, face} from './ui-face.js?v=ffa2a21520';
+import {botStatus, botIsManager} from './ui-company.js?v=ffa2a21520';
+import {primaryOf} from './company.js?v=ffa2a21520';
+import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker, COLOR_NAMES} from './ui-kit.js?v=ffa2a21520';
+import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js?v=ffa2a21520';
+import {scheduleRows, scheduleTaskBody, SCHEDULE_OFTEN, scheduleChoice} from './schedules.js?v=ffa2a21520';
+import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=ffa2a21520';
+import {GRANT_LABELS} from './asks.js?v=ffa2a21520';
+import {grantRows, allGrantRows, grantUrl} from './ui-asks.js?v=ffa2a21520';
+import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=ffa2a21520';
+import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=ffa2a21520';
+import {sendChat} from './ui-chat.js?v=ffa2a21520';
+import {computerPage as computerView, computerLabel, keysOwned, thumbSlot} from './ui-computer-view.js?v=ffa2a21520';
 import {
-  MAX_NAME, hasJob, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, lookOf, newBotDefaults,
+  MAX_NAME, MAX_JOB, hasJob, roleLine, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, lookOf, newBotDefaults,
   newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, closeTarget,
-} from './ui-profile-model.js?v=99c330d626';
+} from './ui-profile-model.js?v=ffa2a21520';
 
 const el = id => document.getElementById(id);
 const SHAPE_LABELS = {rounded: 'Rounded square', circle: 'Circle', hexagon: 'Hexagon', pebble: 'Pebble', drop: 'Drop', shield: 'Shield', arch: 'Arch', egg: 'Egg', blob: 'Blob', bean: 'Bean'};
@@ -121,10 +121,11 @@ export const headBar = (title, back) => `<header class="pr-bar pr-subbar">${back
 const subBar = (bot, title) => headBar(title, roundBtn('back', `Back to ${bot.name}`, 'profile-up', {id: bot.id}));
 
 function hero(bot) {
-  const state = store.state, job = hasJob(bot) ? esc(bot.instructions) : `No job yet. Tell ${esc(bot.name)} what to do in its chat.`;
+  const state = store.state, job = hasJob(bot) ? esc(roleLine(bot)) : `No job yet. Tell ${esc(bot.name)} what to do in its chat.`;
+  const view = hasJob(bot) ? `<button type="button" class="link pr-view" data-action="profile-instructions" data-id="${esc(bot.id)}">View instructions</button>` : '';
   return `<div class="pr-hero">
     <button type="button" class="pr-face" data-action="hop" aria-label="Say hi to ${esc(bot.name)}">${faceOf(bot, 84, {hop: false})}</button>
-    <h1>${esc(bot.name)}</h1><small>${esc(teamLine(state, bot.id))}</small><p>${job}</p>
+    <h1>${esc(bot.name)}</h1><small>${esc(teamLine(state, bot.id))}</small><p class="pr-role" data-role="${esc(bot.id)}">${job}</p>${view}
     ${canWrite() ? `<button type="button" class="pill-btn" data-action="profile-sub" data-id="${esc(bot.id)}" data-sub="edit">Edit</button>` : ''}
   </div>`;
 }
@@ -224,10 +225,10 @@ export function grantsHtml(botId = null) {
   if (botId) {
     const rows = grantRows(store.state, botId), name = findBot(botId)?.name || 'This bot';
     return rows.length ? `<div class="cd">${rows.map(grantRow).join('')}</div>`
-      : `<p class="st-note">No rules for ${esc(name)} yet. One appears here when you pick Always allow or Deny on its ask.</p>`;
+      : `<p class="st-note">No rules for ${esc(name)} yet. One appears here when you pick Always allow on its ask, or set one with Ask each time or Don't allow.</p>`;
   }
   const rows = allGrantRows(store.state);
-  if (!rows.length) return '<div class="cd"><div class="rw"><span class="w st-quiet">No rules yet. One appears here when you pick Always allow or Deny on a bot\'s ask.</span></div></div>';
+  if (!rows.length) return '<div class="cd"><div class="rw"><span class="w st-quiet">No rules yet. One appears here when you pick Always allow on a bot\'s ask.</span></div></div>';
   const by = new Map();
   for (const r of rows) by.set(r.botId, [...(by.get(r.botId) || []), r]);
   return [...by].map(([id, list]) => `<section class="st-g"><h4 class="st-h">${esc(list[0].botName)}</h4><div class="cd">${list.map(grantRow).join('')}</div></section>`).join('');
@@ -300,7 +301,7 @@ export function lookChanged(control) {
 function managerSelect(botId, current) {
   const options = managerOptions(store.state, botId), group = (label, kind) => { const list = options.filter(o => o.kind === kind); return list.length ? `<optgroup label="${label}">${list.map(o => `<option value="${esc(o.id)}"${o.id === current ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}</optgroup>` : ''; };
   const primary = primaryOf(store.state)?.name || 'Atlas';
-  return `<select class="input" name="reportsTo"><option value="">None, reports to ${esc(primary)}</option>${group('Managers', 'manager')}${group('Other bots', 'bot')}</select>`;
+  return `<select class="input" name="reportsTo"><option value="">${esc(primary)} (default)</option>${group('Managers', 'manager')}${group('Other bots', 'bot')}</select>`;
 }
 
 /** The one form behind Edit and New bot: a preview face, a big name, the shape and colour
@@ -319,6 +320,7 @@ function botForm({id, attrs = '', bot = null, look, primary = false, note, extra
     ${boss}
     <p class="pr-note nb-note">${note}</p>
     ${extra}
+    ${off ? '<p class="nb-hint" data-nb-hint>Name it to create</p>' : ''}
     <button type="submit" class="nb-go"${off ? ' disabled' : ''}>${submit}</button>
   </form>`;
 }
@@ -353,7 +355,8 @@ export function newBotView(route) {
 /** Create stays off until the bot has a name. */
 export function nameTyped(control) {
   if (control.form?.id !== 'new-bot-form' || control.name !== 'name') return false;
-  const create = control.form.querySelector('.nb-go'); if (create) create.disabled = !canCreate({name: control.value});
+  const create = control.form.querySelector('.nb-go'), ok = canCreate({name: control.value}); if (create) create.disabled = !ok;
+  const hint = control.form.querySelector('[data-nb-hint]'); if (hint) hint.hidden = ok;
   return true;
 }
 
@@ -397,6 +400,13 @@ export const profileActions = {
   'profile-sub': b => go({profile: b.dataset.id, sub: b.dataset.sub}),
   'schedule-stop': async b => { await api(`/api/tasks/${encodeURIComponent(b.dataset.task)}`, 'DELETE'); await sync(); refillSchedule(b.dataset.id); toast('Stopped.'); },
   'bot-menu': b => (botMenuOpen() ? closeBotMenu() : openBotMenu(b.dataset.id, {opener: b})),
+  // The whole job, to read and (for a member) to edit in place: the header shows only its first line.
+  'profile-instructions': b => {
+    const bot = findBot(b.dataset.id); if (!bot) return;
+    const write = canWrite();
+    openSheet(`<form id="instructions-form" data-bot="${esc(bot.id)}"><textarea class="input pr-instr" name="instructions" rows="10" maxlength="${MAX_JOB}" aria-label="${esc(bot.name)}'s instructions"${write ? '' : ' readonly'}>${esc(bot.instructions)}</textarea>${write ? `<div class="sheet-actions"><button type="submit" class="btn primary wide">Save</button></div>` : ''}</form>`,
+      {title: `${bot.name}'s instructions`, sub: write ? 'What it is told before every task. Edit it here or tell it in its chat.' : 'What it is told before every task.'});
+  },
   // The rules are listed once, in Settings > Permissions; a profile opens that list for this bot.
   'profile-perm': b => go({settings: `perm/${b.dataset.id}`}),
   'profile-activity-all': b => { showAll = showAll === b.dataset.id ? null : b.dataset.id; return loadBotActivity(b.dataset.id); },
@@ -417,7 +427,7 @@ export const profileActions = {
     // The list was repainted, so keyboard focus goes to the same choice in the new copy.
     const same = [['id', botId], ['act', action], ['scope', scope], ['choice', choice]].map(([k, v]) => `[data-${k}="${CSS.escape(v)}"]`).join('');
     document.querySelector(`[data-grants] button${same}`)?.focus({preventScroll: true});
-    toast(`${botName(botId)}: ${GRANT_LABELS[choice].toLowerCase()}.`);
+    toast(`${botName(botId)}: ${GRANT_LABELS[choice]}.`);
   },
   'menu-message': b => { close(); go({bot: b.dataset.id}); },
   'menu-pin': b => { close(); toast(togglePin(b.dataset.id) ? 'Pinned to the top' : 'Unpinned'); },
@@ -434,6 +444,16 @@ export const profileActions = {
 const saveListAdd = (key, id) => { const list = savedList(key); if (!list.includes(id)) saveLocal(key, [...list, id]); };
 
 export const profileForms = {
+  'instructions-form': async (form, f) => {
+    if (!canWrite()) throw new Error('Only a member can edit a bot.');
+    const id = form.dataset.bot, text = String(f.instructions ?? '').trim();
+    if (!text) throw new Error('Instructions cannot be empty.');
+    await patchBot(id, {instructions: text.slice(0, MAX_JOB)});
+    await sync(); closeSheet();
+    const bot = findBot(id), line = document.querySelector(`[data-role="${CSS.escape(id)}"]`);
+    if (bot && line) line.textContent = roleLine(bot);
+    toast('Saved.');
+  },
   'new-bot-form': async (form, f) => {
     if (!canCreate(f)) throw new Error('Give the bot a name first.');
     const payload = newBotPayload({name: f.name, job: f.job, tint: f.tint, shape: f.shape, reportsTo: f.reportsTo});
