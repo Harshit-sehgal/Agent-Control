@@ -7,6 +7,7 @@ import * as chats from '../shared/chats.js';
 import {botSettings, threadContext} from '../shared/bot-settings.js';
 import {createThread, titleFrom} from '../shared/threads.js';
 import {executeCustomBot} from './ai.js';
+import {meterTurn} from './usage.js';
 import {modelLimitLine} from './cli-model.js';
 import {resolveConfig} from './ai-providers.js';
 import {pauseAll} from '../shared/runaway.js';
@@ -106,7 +107,8 @@ async function runOneBotInner(store, {botId, input, page = '', browserDepth = 0}
   const notes = memoryBlock(memory);
   const everyone = botSettings(bot).canHandoff ? companyList(roster, bot.id) : [];
   // Context is automatic: the newest lines that fit; the recap in `memory` covers the rest.
-  const envelope = {message: input, thread: threadContext(state.chats?.[bot.id]), ...(everyone.length ? {company: everyone} : {}), ...(notes ? {memory: notes} : {}), ...(Object.keys(tools).length ? {tools} : {})};
+  // The tools lead: they are the same every turn, so a provider's prompt cache can reuse that head (src/ai.js).
+  const envelope = {...(Object.keys(tools).length ? {tools} : {}), message: input, thread: threadContext(state.chats?.[bot.id]), ...(everyone.length ? {company: everyone} : {}), ...(notes ? {memory: notes} : {})};
   // The same guard a group step carries: a recap and a rulebook are notes the
   // model reads, never a second set of instructions.
   const restrictions = [
@@ -123,7 +125,9 @@ async function runOneBotInner(store, {botId, input, page = '', browserDepth = 0}
   // One bot turn: a sub-agent round, a peer ask, then a new-bot block, in the
   // one order every caller uses. A 1:1 chat has no group to add a bot to, so
   // `groupId` is null and that step is skipped.
-  const turn = await withLimitLine(store, bot, () => runBotTurn(store, {bot, envelope, executor: executeCustomBot, config, peers: roster, configFor: peerId => resolveConfig(store, peerId), memoryForPeer: (mate, mateConfig) => memoryFor(store, {bot: mate, config: mateConfig, chatKey: bot.id}), handoffAllowed: botSettings(bot).canHandoff, groupId: group?.id ?? null}));
+  // Its model calls count on the bot's day and on the run record (src/usage.js).
+  let used = null;
+  const turn = await withLimitLine(store, bot, async () => { const metered = await meterTurn(store, {}, () => runBotTurn(store, {bot, envelope, executor: executeCustomBot, config, peers: roster, configFor: peerId => resolveConfig(store, peerId), memoryForPeer: (mate, mateConfig) => memoryFor(store, {bot: mate, config: mateConfig, chatKey: bot.id}), handoffAllowed: botSettings(bot).canHandoff, groupId: group?.id ?? null})); used = metered.total; return metered.value; });
   const raw = turn.output;
   const lines = turn.lines;
   const groupId = group?.id;
@@ -132,7 +136,7 @@ async function runOneBotInner(store, {botId, input, page = '', browserDepth = 0}
     const browsed = recordBrowserRequests(s, {bot, groupId, chatKey: bot.id, output: raw, depth: browserDepth});
     records = browsed.records; asked = browsed.asks;
     const output = browsed.text;
-    const run = {id: uuid(), botId: bot.id, botName: bot.name, input, output, at: new Date().toISOString()};
+    const run = {id: uuid(), botId: bot.id, botName: bot.name, input, output, at: new Date().toISOString(), ...(used ? {usage: used} : {})};
     s.runs.unshift(run); s.runs = s.runs.slice(0, 100);
     // The bot itself may be gone (removed mid-turn). The run record still
     // belongs in history; only the chat append is skipped.

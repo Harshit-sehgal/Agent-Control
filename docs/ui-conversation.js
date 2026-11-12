@@ -7,31 +7,32 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=d6e4136826';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=d6e4136826';
-import {requestOfMessage} from './bot-browser.js?v=d6e4136826';
-import {validHttpUrl} from './core.js?v=d6e4136826';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=d6e4136826';
-import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=d6e4136826';
-import {isPrimary} from './company.js?v=d6e4136826';
-import {hasJob, modelChip} from './ui-profile-model.js?v=d6e4136826';
-import {scheduleTaskBody} from './schedules.js?v=d6e4136826';
-import {feed, fileStrip} from './ui-feed.js?v=d6e4136826';
-import {attachButton, chipsSlot, wireAttach} from './ui-attach.js?v=d6e4136826';
-import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js?v=d6e4136826';
-import {askCard} from './ui-asks.js?v=d6e4136826';
-import {UNTIL_CHOICES, untilFor} from './asks.js?v=d6e4136826';
-import {undoToast} from './ui-settings.js?v=d6e4136826';
-import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=d6e4136826';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=d6e4136826';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=d6e4136826';
-import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=d6e4136826';
-import {toast, confirmSheet} from './ui-dialogs.js?v=d6e4136826';
-import {siteChip, thumbSlot} from './ui-computer-view.js?v=d6e4136826';
-import {cliChoice, googleCard} from './ui-connect-model.js?v=d6e4136826';
-import {connectAppNow} from './ui-connect.js?v=d6e4136826';
-import {appById} from './app-catalog.js?v=d6e4136826';
-import {templateChipsHtml, templateButton} from './ui-templates.js?v=d6e4136826';
+import {OFFJOB_CHOICES} from './off-job.js?v=e0e04f8691';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=e0e04f8691';
+import {requestOfMessage} from './bot-browser.js?v=e0e04f8691';
+import {validHttpUrl} from './core.js?v=e0e04f8691';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=e0e04f8691';
+import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=e0e04f8691';
+import {isPrimary} from './company.js?v=e0e04f8691';
+import {hasJob, modelChip} from './ui-profile-model.js?v=e0e04f8691';
+import {scheduleTaskBody} from './schedules.js?v=e0e04f8691';
+import {feed, fileStrip} from './ui-feed.js?v=e0e04f8691';
+import {attachButton, chipsSlot, wireAttach} from './ui-attach.js?v=e0e04f8691';
+import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js?v=e0e04f8691';
+import {askCard} from './ui-asks.js?v=e0e04f8691';
+import {UNTIL_CHOICES, untilFor} from './asks.js?v=e0e04f8691';
+import {undoToast} from './ui-settings.js?v=e0e04f8691';
+import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=e0e04f8691';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=e0e04f8691';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=e0e04f8691';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=e0e04f8691';
+import {toast, confirmSheet} from './ui-dialogs.js?v=e0e04f8691';
+import {siteChip, thumbSlot} from './ui-computer-view.js?v=e0e04f8691';
+import {cliChoice, googleCard} from './ui-connect-model.js?v=e0e04f8691';
+import {connectAppNow} from './ui-connect.js?v=e0e04f8691';
+import {appById} from './app-catalog.js?v=e0e04f8691';
+import {templateChipsHtml, templateButton} from './ui-templates.js?v=e0e04f8691';
+import {usageWords} from './usage.js?v=e0e04f8691';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -160,13 +161,15 @@ function noteEntry(entry, conv) {
  * hop ("Ranker messaged Atlas"). Either way a tap opens the hops, who wrote to whom and what they said. */
 const openRuns = new Set();
 const pillSeen = new Map();
-function hopLog(hops, nameOf) {
-  return `<ol class="cv-plog">${hops.map(h => `<li><span class="who"><b>${esc(nameOf(h.from))}</b><span>to ${esc(nameOf(h.to))}</span></span><div class="md">${md(h.text)}</div></li>`).join('')}</ol>`;
+function hopLog(hops, nameOf, run) {
+  // What the run used, last: tokens always, the cost when the owner set a price, "included" for a subscription.
+  const used = usageWords(run?.usage);
+  return `<ol class="cv-plog">${hops.map(h => `<li><span class="who"><b>${esc(nameOf(h.from))}</b><span>to ${esc(nameOf(h.to))}</span></span><div class="md">${md(h.text)}</div></li>`).join('')}${used ? `<li class="cv-use">${esc(`Used ${used}`)}</li>` : ''}</ol>`;
 }
 function pillEntry({run, pill, handoffs: hops}, conv) {
   const bots = company(), nameOf = id => bots.find(b => b.id === id)?.name || 'A bot';
   const open = openRuns.has(run.id) ? ' open' : '', count = `<span class="sr-only">, ${hops.length} message${hops.length === 1 ? '' : 's'}</span>`;
-  if (pill.done) return `<details class="cv-prog cv-done" data-pid="${esc(run.id)}"${open}><summary><span>${esc(pill.text)}</span>${count}${icon('chevron', 13)}</summary>${hopLog(hops, nameOf)}</details>`;
+  if (pill.done) return `<details class="cv-prog cv-done" data-pid="${esc(run.id)}"${open}><summary><span>${esc(pill.text)}</span>${count}${icon('chevron', 13)}</summary>${hopLog(hops, nameOf, run)}</details>`;
   const bot = bots.find(b => b.id === pill.botId) || askerOf(conv), waiting = String(run.status).startsWith('awaiting');
   // While a bot browses the pill carries the site, which opens the live view; while you hold the browser it says so.
   const chip = siteChip({runId: run.id, botId: pill.botId}), text = chip?.driving ? 'You are driving' : pill.text;
@@ -174,7 +177,7 @@ function pillEntry({run, pill, handoffs: hops}, conv) {
   const dots = waiting ? '' : '<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>';
   // The site chip is a button of its own, so a line carrying one is not also a disclosure.
   if (!hops.length || chip) return `<div class="cv-prog"><div class="cv-live" data-run="${esc(run.id)}">${faceHtml}<span class="cv-cur" data-text="${esc(text)}">${esc(text)}</span>${chip?.html || dots}</div></div>`;
-  return `<details class="cv-prog cv-done cv-going" data-pid="${esc(run.id)}"${open}><summary class="cv-live" data-run="${esc(run.id)}">${faceHtml}<span class="cv-cur" data-text="${esc(text)}">${esc(text)}</span>${dots}${count}${icon('chevron', 13)}</summary>${hopLog(hops, nameOf)}</details>`;
+  return `<details class="cv-prog cv-done cv-going" data-pid="${esc(run.id)}"${open}><summary class="cv-live" data-run="${esc(run.id)}">${faceHtml}<span class="cv-cur" data-text="${esc(text)}">${esc(text)}</span>${dots}${count}${icon('chevron', 13)}</summary>${hopLog(hops, nameOf, run)}</details>`;
 }
 
 /** What the runaway guard asks, in one card wherever it is shown: Keep going or Stop, for everything bots started. */

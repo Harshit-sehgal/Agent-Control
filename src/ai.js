@@ -4,6 +4,7 @@ import {SUBAGENT_PERMISSION} from '../shared/subagents.js';
 import {normaliseProtocol,inferProtocol,normaliseBaseUrl,isChatModel,DEFAULT_PROTOCOL,cleanEffort} from '../shared/ai-presets.js';
 import {imageNote} from '../shared/attachments.js';
 import {turnFiles} from './attachments.js';
+import {noteUsage} from './usage.js';
 
 // Provider-agnostic, bring-your-own-key model client. A call can run against an
 // explicitly resolved config (a workspace's saved provider + chosen model) and
@@ -116,12 +117,31 @@ export function userContent(protocol,input,images=[]){
 }
 /** A 400 that is about the images, so the turn is worth asking again without them. */
 const IMAGE_WORDS=/image|vision|multimodal|multi-modal|inline_data|input_image|image_url/i;
+/** Prompt caching on the Messages API is a prefix match that ends at a `cache_control` marker (at most four per
+ * request). Two are used: the system prompt, and the head of a task envelope that does not change from turn to
+ * turn (the bot's identity, its job, its contract and the tool descriptions, which createEnvelope puts first).
+ * The rest of the envelope (the objective, the clock, the thread, a page) follows the second marker, so a new turn
+ * reads the cached head instead of paying for it again. OpenAI caches the same prefix on its own, unmarked. */
+const CACHE=Object.freeze({type:'ephemeral'});
+export const STABLE_KEYS=['botId','botRole','contract','permissions','tools'];
+// Below a provider's minimum cacheable length a marker is only noise, so a short head stays one text.
+const MIN_CACHED_CHARS=2000;
+function anthropicContent(input){
+  const text=String(input??'');
+  let env=null;try{env=text.startsWith('{')?JSON.parse(text):null;}catch{/* plain text */}
+  if(!env||typeof env!=='object'||Array.isArray(env))return text;
+  const head={},rest={};
+  for(const [key,value] of Object.entries(env))(STABLE_KEYS.includes(key)?head:rest)[key]=value;
+  const cached=JSON.stringify(head);
+  if(cached.length<MIN_CACHED_CHARS||!Object.keys(rest).length)return text;
+  return [{type:'text',text:cached,cache_control:CACHE},{type:'text',text:JSON.stringify(rest)}];
+}
 function bodyFor(config,{instructions,input,maxTokens,temperature=null,images=[]}){
   const protocol=protocolOf(config);
   const content=userContent(protocol,input,images);
   const tuning=temperature===null||temperature===undefined?{}:{temperature};
   const headers=headersFor(config,protocol);
-  if(protocol==='anthropic')return {protocol,url:`${config.baseUrl}/messages`,headers,body:{model:config.model,max_tokens:maxTokens,system:instructions,messages:[{role:'user',content}],...tuning}};
+  if(protocol==='anthropic')return {protocol,url:`${config.baseUrl}/messages`,headers,body:{model:config.model,max_tokens:maxTokens,...(instructions?{system:[{type:'text',text:instructions,cache_control:CACHE}]}:{}),messages:[{role:'user',content:images?.length?content:anthropicContent(input)}],...tuning}};
   if(protocol==='gemini')return {protocol,url:`${config.baseUrl}/models/${encodeURIComponent(config.model)}:generateContent`,headers,body:{systemInstruction:{parts:[{text:instructions}]},contents:[{role:'user',parts:content}],generationConfig:{maxOutputTokens:maxTokens,...tuning}}};
   if(protocol==='openai-responses')return {protocol,url:`${config.baseUrl}/responses`,headers,body:{model:config.model,instructions,input:content,max_output_tokens:maxTokens,store:false,...tuning}};
   // Azure puts the deployment (the model you made) in the path and the API
@@ -195,8 +215,13 @@ function foldStream(protocol,text,config){
   const pieces=[];
   // A stream says why it stopped in the last frame, not in the text. Keeping
   // just the text turned a truncation or a refusal into "empty response".
-  let finish='', refusal='', blocked='';
+  let finish='', refusal='', blocked='', usage=null, usageMetadata=null;
   for(const event of streamEvents(text)){
+    // Usage arrives in its own frames: Anthropic's message_start and message_delta, the Responses API's
+    // response.completed, a chat stream's last chunk, and every Gemini chunk (the last one is the total).
+    const counted=event?.message?.usage||event?.response?.usage||event?.usage;
+    if(counted&&typeof counted==='object')usage={...usage,...Object.fromEntries(Object.entries(counted).filter(([,v])=>v!==null&&v!==undefined))};
+    if(event?.usageMetadata&&typeof event.usageMetadata==='object')usageMetadata=event.usageMetadata;
     if(event?.type==='error'||event?.error||event?.type==='response.failed'){
       const said=providerSaid(event)||providerSaid(event?.response)||'stream error';
       // Redact before bounding: a key cut at 200 characters no longer matches,
@@ -230,16 +255,34 @@ function foldStream(protocol,text,config){
   if(!body&&!finish&&!refusal&&!blocked)return null;
   // The folded frame is shaped like the provider's own non-streaming answer, so
   // `extract` reads one shape and reports one set of reasons.
-  if(protocol==='anthropic')return {content:[{type:'text',text:body}],stop_reason:finish};
-  if(protocol==='gemini')return {candidates:[{content:{parts:[{text:body}]},finishReason:blocked}]};
-  if(protocol==='openai-responses')return {output:[{content:[{type:'output_text',text:body}]}],status:finish==='max_output_tokens'?'incomplete':'completed',incomplete_details:finish?{reason:finish}:undefined};
-  return {choices:[{message:{content:body,refusal:refusal||undefined},finish_reason:finish||undefined}]};
+  const counted={...(usage?{usage}:{}),...(usageMetadata?{usageMetadata}:{})};
+  if(protocol==='anthropic')return {content:[{type:'text',text:body}],stop_reason:finish,...counted};
+  if(protocol==='gemini')return {candidates:[{content:{parts:[{text:body}]},finishReason:blocked}],...counted};
+  if(protocol==='openai-responses')return {output:[{content:[{type:'output_text',text:body}]}],status:finish==='max_output_tokens'?'incomplete':'completed',incomplete_details:finish?{reason:finish}:undefined,...counted};
+  return {choices:[{message:{content:body,refusal:refusal||undefined},finish_reason:finish||undefined}],...counted};
 }
 function protocolText(protocol,data){
   if(protocol==='anthropic')return anthropicText(data);
   if(protocol==='gemini')return geminiText(data);
   if(protocol==='openai-responses')return responseText(data);
   return chatText(data?.choices?.[0]?.message?.content);
+}
+const tokens=v=>Number.isFinite(Number(v))&&Number(v)>0?Math.round(Number(v)):0;
+/** The tokens one answer used, as {input, output, cacheRead, cacheWrite}, or null when the provider said nothing.
+ * `input` is the uncached part: OpenAI (chat, Responses, Azure) and Gemini count cached tokens inside their input
+ * total, Anthropic reports them apart. Reasoning tokens are output on every wire (Gemini lists them separately). */
+export function usageOf(protocol,data){
+  if(protocol==='gemini'){
+    const u=data?.usageMetadata;if(!u||typeof u!=='object')return null;
+    const cached=tokens(u.cachedContentTokenCount);
+    return {input:Math.max(0,tokens(u.promptTokenCount)-cached),output:tokens(u.candidatesTokenCount)+tokens(u.thoughtsTokenCount),cacheRead:cached,cacheWrite:0};
+  }
+  const u=data?.usage;if(!u||typeof u!=='object')return null;
+  if(protocol==='anthropic')return {input:tokens(u.input_tokens),output:tokens(u.output_tokens),cacheRead:tokens(u.cache_read_input_tokens),cacheWrite:tokens(u.cache_creation_input_tokens)};
+  // Chat completions say prompt/completion; the Responses API says input/output. A gateway may use either.
+  const chat='prompt_tokens' in u||'completion_tokens' in u;
+  const cached=tokens(chat?u.prompt_tokens_details?.cached_tokens:u.input_tokens_details?.cached_tokens);
+  return {input:Math.max(0,tokens(chat?u.prompt_tokens:u.input_tokens)-cached),output:tokens(chat?u.completion_tokens:u.output_tokens),cacheRead:cached,cacheWrite:0};
 }
 function extract(config,data){
   const protocol=protocolOf(config);
@@ -365,7 +408,40 @@ const providerHost=config=>{try{return new URL(config.baseUrl).host;}catch{retur
 const maxCalls=()=>{const n=Number(process.env.AI_MAX_CONCURRENCY);return Number.isInteger(n)&&n>=1?n:4;};
 let activeCalls=0;
 const slotWaitMs=()=>{const n=Number(process.env.AI_SLOT_WAIT_MS);return Number.isFinite(n)&&n>=0?n:20000;};
-async function callModel({instructions,input,maxTokens,config,temperature=null,images=[]}){
+const modelName=config=>String(config?.model||config?.engine||'the model');
+/** Why a call is being handed to the fallback, in the owner's words. */
+function fallbackWhy(e){
+  if(e?.timedOut)return 'timed out';
+  if(e?.network)return 'could not be reached';
+  const kind=e?.code||errorKind(e?.providerStatus);
+  return {'rate-limit':'rate limited','provider-down':'the provider is having trouble',auth:'the key was rejected',quota:'out of credit or quota','usage-limit':'the subscription reached its usage limit','not-signed-in':'not signed in','agent-offline':'the computer running it is offline',timeout:'timed out','cli-missing':'the CLI is not installed'}[kind]||'it failed';
+}
+/** Does this failure go to the owner's fallback model? Only when the provider could not answer: busy (429), down
+ * (5xx), timed out, unreachable, signed out or out of credit, and a subscription CLI that hit its limit, lost its
+ * sign-in or its computer. A 400 or 422 (a content or policy refusal, a bad request) is an answer, and so is a
+ * model the provider does not have; neither is retried elsewhere. This app's own busy queue (a 429 with no provider
+ * status) is not the provider's either. Pure. */
+export function fallsBack(error){
+  if(!error||typeof error!=='object')return false;
+  if(error.timedOut||error.network)return true;
+  const status=error.providerStatus;
+  if(error.code==='model-not-found')return false;
+  if(status===429||status===408||status===402||(status>=500&&status<600))return true;
+  if(status===401||status===403||error.code==='quota')return true;
+  return ['usage-limit','not-signed-in','agent-offline','timeout','cli-missing'].includes(error.code);
+}
+/** One model call, and at most one more on the owner's fallback model when the first could not be answered. The
+ * fallback config carries no fallback of its own, so a failing fallback ends the turn instead of looping. */
+async function callModel(call){
+  try{return await callOnce(call);}
+  catch(e){
+    const spare=call.config?.fallback;
+    if(!spare||!fallsBack(e))throw e;
+    return callOnce({...call,config:{...spare,fallback:null},fallbackFrom:{model:modelName(call.config),why:fallbackWhy(e)}});
+  }
+}
+async function callOnce({instructions,input,maxTokens,config,temperature=null,botId=null,fallbackFrom=null,images=[]}){
+  const from=fallbackFrom?{fallbackFrom}:{};
   // A subscription model is not a fetch: the paired local agent runs the owner's
   // own CLI. `config.run` is how the server reaches that agent; a config without
   // one (the Pages demo, a test) has nowhere to run.
@@ -373,18 +449,25 @@ async function callModel({instructions,input,maxTokens,config,temperature=null,i
     if(typeof config.run!=='function')throw upstream('This model runs on a paired local agent and is not available here.',422);
     // A CLI is handed text only, so an attached image becomes a note it can read.
     const said=images?.length?`${input}\n\n${imageNote(images.length)}`:input;
-    return config.run({engine:config.engine,model:config.model||'',effort:cleanEffort(config.effort)||'',instructions,input:said});
+    const out=await config.run({engine:config.engine,model:config.model||'',effort:cleanEffort(config.effort)||'',instructions,input:said});
+    // A runner answers with text, or with {text, usage} when the CLI reported its tokens.
+    const text=typeof out==='string'?out:out?.text;
+    await noteUsage({...(out?.usage||{}),subscription:true,model:config.model||config.engine||'',providerId:config.providerId||null,botId,...from});
+    return text;
   }
-  const call={instructions,input,maxTokens,config,temperature,images};
+  const one={instructions,input,maxTokens,config,temperature,images};
   // One busy or flaky answer (429, a gateway 502/503/504, a timeout) used to fail the whole run. It gets one more
   // try after the wait the provider asked for; a refusal (400, 401, 403) is an answer and is never sent again.
-  try{return await callProvider(call);}
+  let out;
+  try{out=await callProvider(one);}
   catch(e){
     const wait=retryWaitMs(e);
     if(wait===null)throw e;
     await new Promise(resolve=>setTimeout(resolve,wait));
-    return callProvider(call);
+    out=await callProvider(one);
   }
+  await noteUsage({...(out.usage||{}),model:out.model,providerId:config?.providerId||null,protocol:out.protocol,botId,...from});
+  return out.text;
 }
 const RETRY_STATUSES=new Set([429,502,503,504]);
 const RETRY_MAX_MS=10000;
@@ -490,7 +573,7 @@ async function callProvider({instructions,input,maxTokens,config,temperature=nul
       const said=providerSaid(out.data);
       throw Object.assign(upstream(`AI provider returned ${out.res.status}: ${errorText(out.data,out.res.status,cfg,statusHint(out.res.status,protocol,said))}`),{code:errorKind(out.res.status,said),providerId:cfg.providerId||null,model:cfg.model||null,providerStatus:out.res.status,retryAfter:out.res.headers?.get?.('retry-after')||null});
     }
-    return extract(cfg,out.data||{});
+    return {text:extract(cfg,out.data||{}),usage:usageOf(protocol,out.data),model:cfg.model||'',protocol};
   }catch(e){
     if(e.status){e.message=redactAll(e.message,cfg);throw e;}
     if(controller.signal.aborted)throw timeoutError();
@@ -499,7 +582,7 @@ async function callProvider({instructions,input,maxTokens,config,temperature=nul
     // fetch says only "fetch failed"; the reason (ECONNREFUSED, ENOTFOUND, a certificate) is on the cause.
     const cause=e?.cause?.code||e?.cause?.message||'';
     const why=cleanText(redactAll([e?.message,cause].filter(Boolean).join(': '),cfg),200);
-    throw upstream(`AI provider at ${providerHost(cfg)} could not be reached${why?`: ${why}`:'.'}`);
+    throw Object.assign(upstream(`AI provider at ${providerHost(cfg)} could not be reached${why?`: ${why}`:'.'}`),{network:true});
   }finally{clearTimeout(timer);activeCalls--;}
 }
 
@@ -701,6 +784,6 @@ export async function executeCustomBot(bot,input,config,{readFile=null}={}) {
   // The bot rides on the error, so a Switch card can name it and switch it.
   const files=readFile?turnFiles(input,readFile):null;
   const text=boundBotInput(input)+(files?.text?`\n\n${files.text}`:'');
-  try{return await callModel({instructions,input:text,maxTokens:maxTokensFor(bot),temperature:settings.temperature,config,images:files?.images||[]});}
+  try{return await callModel({instructions,input:text,maxTokens:maxTokensFor(bot),temperature:settings.temperature,config,images:files?.images||[],botId:bot?.id||null});}
   catch(e){if(e&&typeof e==='object'&&!e.botId&&bot?.id)e.botId=bot.id;throw e;}
 }
