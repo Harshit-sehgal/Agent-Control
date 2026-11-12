@@ -20,15 +20,22 @@
  * X and Twitter work like any other site: a bot may read, click and type there, and a click on Post asks
  * unless the owner set Always allow for posting on that site.
  */
-import {cleanText, validHttpUrl} from './core.js?v=71b92f8de6';
-import {fail} from './errors.js?v=71b92f8de6';
-import {decide, createAsk, scopeOf, declinedNeed} from './asks.js?v=71b92f8de6';
-import {controlFence} from './reply-blocks.js?v=71b92f8de6';
-import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=71b92f8de6';
-import {appForHost} from './app-catalog.js?v=71b92f8de6';
+import {cleanText, validHttpUrl} from './core.js?v=4e69dc379b';
+import {fail} from './errors.js?v=4e69dc379b';
+import {decide, createAsk, scopeOf, declinedNeed} from './asks.js?v=4e69dc379b';
+import {controlFence} from './reply-blocks.js?v=4e69dc379b';
+import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=4e69dc379b';
+import {appForHost} from './app-catalog.js?v=4e69dc379b';
 
 /** The most page text one model turn carries (the pages of a round together). */
 export const MAX_PAGE_CHARS = 24000;
+/** How much of one page a bot is handed at a time: the title, the main text from the top, its links and controls.
+ * A longer page is read in parts: the excerpt says which part it is and how to ask for the next one ("part"), and
+ * "find" reaches any words further down, so nothing on the page is out of reach. Every token of page text is paid
+ * for on every turn that carries it, which is why one part is a screenful of reading, not the whole page. */
+export const PAGE_EXCERPT_CHARS = 10000;
+/** The most parts a page is read in: the browser keeps 60,000 characters of a page (agent/browser.mjs). */
+export const MAX_PAGE_PARTS = 12;
 
 export const BROWSER_PERMISSION = 'browser.use';
 /** The most blocks one reply is read for: the backstop. The owner's own limit (Settings → Limits) may be lower. */
@@ -190,7 +197,9 @@ export function validateBrowserRequest(body) {
   });
   // No steps is a plain page read, which also works without the real browser.
   const find = cleanText(body.find, 200);
-  return {kind: steps.length ? 'browser.action' : 'browser.capture', url, steps, ...(find ? {find} : {})};
+  // "part": the next part of a long page, which the last excerpt named. Part 1 is the page as it is first read.
+  const part = Number(body.part);
+  return {kind: steps.length ? 'browser.action' : 'browser.capture', url, steps, ...(find ? {find} : {}), ...(Number.isInteger(part) && part >= 2 && part <= MAX_PAGE_PARTS ? {part} : {})};
 }
 
 /** Every browser block in a reply, validated. An invalid block is reported,
@@ -214,7 +223,7 @@ export function parseBrowserRequests(output) {
 export const stripBrowserBlocks = output => String(output ?? '').replace(BLOCK(), '').replace(/\n{3,}/g, '\n\n').trim();
 
 /** What a bot is told about the tool when it holds the permission. */
-export const BROWSER_TOOL_HINT = 'You can read or use a web page through a headless browser. Put one block per page in your reply, e.g. ```browser\n{"url":"https://example.com"}\n``` That returns the page text and a numbered list of controls. To act, name a control by its number in the same block: {"url":"https://example.com","steps":[{"op":"click","index":3}]} then read the result. Ops: navigate, click, type, waitFor, read, scroll. A CSS selector also works instead of an index. Scroll only moves the page. Any public site works, including X and YouTube. To find something you have no link for, search first: open https://www.bing.com/search?q=your+search+words and then open the results that fit. A long page is cut short; to reach a part further down, ask for it with "find": {"url":"https://example.com","find":"words on that part"} returns the passages that hold them. To book, apply, order or fill a form for the owner, do it yourself with steps, all the way to the last button: the app asks the owner before anything is sent, posted, booked or paid unless they set it to Always allow, so never say you cannot do it. Ask the owner only for details you cannot find, such as their phone number. If a site shows a human check, do not try to solve it: read another site, or when the owner needs that very site, send the setup block {"action":"signin","site":"that site"} so they can pass it in the shared browser. Do not ask the owner for a link you can find this way, and do not answer from memory when the question is about now. You may put several blocks in one reply to read pages side by side, and ask for more pages after you read those. The result comes back in the chat.';
+export const BROWSER_TOOL_HINT = 'You can read or use a web page through a headless browser. Put one block per page in your reply, e.g. ```browser\n{"url":"https://example.com"}\n``` That returns the page text and a numbered list of controls. To act, name a control by its number in the same block: {"url":"https://example.com","steps":[{"op":"click","index":3}]} then read the result. Ops: navigate, click, type, waitFor, read, scroll. A CSS selector also works instead of an index. Scroll only moves the page. Any public site works, including X and YouTube. To find something you have no link for, search first: open https://www.bing.com/search?q=your+search+words and then open the results that fit. A long page comes in parts and says so; ask for the next part with "part": {"url":"https://example.com","part":2}, or reach words further down with "find": {"url":"https://example.com","find":"words on that part"} returns the passages that hold them. To book, apply, order or fill a form for the owner, do it yourself with steps, all the way to the last button: the app asks the owner before anything is sent, posted, booked or paid unless they set it to Always allow, so never say you cannot do it. Ask the owner only for details you cannot find, such as their phone number. If a site shows a human check, do not try to solve it: read another site, or when the owner needs that very site, send the setup block {"action":"signin","site":"that site"} so they can pass it in the shared browser. Do not ask the owner for a link you can find this way, and do not answer from memory when the question is about now. You may put several blocks in one reply to read pages side by side, and ask for more pages after you read those. The result comes back in the chat.';
 
 /** The numbered controls a snapshot returned, in one line. The model acts on
  * these; a page of raw HTML is not something it can click. */
@@ -256,7 +265,6 @@ function clickHint(r, find = '') {
   };
 }
 
-/** Page text the next bot turn can draft from. The chat line uses a shorter cap. */
 /** The site to sign in to when `url` is a sign-in page (Google's accounts page for Gmail, a /login path), else null.
  * A sign-in page that names where it returns to (`continue`, `dest`, `next`, `redirect`) gives that site. */
 const SIGNIN_HOSTS = /^(?:accounts\.google\.com|login\.live\.com|login\.microsoftonline\.com|login\.yahoo\.com|appleid\.apple\.com|idmsa\.apple\.com)$/;
@@ -272,7 +280,9 @@ export function signinSite(url) {
   return u.hostname.toLowerCase();
 }
 
-export function capturePageText(result, limit = MAX_PAGE_CHARS, find = '') {
+/** Page text the next bot turn can draft from: `limit` characters at most. `part` (from 1) reads a long page in
+ * parts and says which part this is and how to ask for the next; without it the text is only cut (a chat line). */
+export function capturePageText(result, limit = PAGE_EXCERPT_CHARS, find = '', part = 0) {
   const r = result && typeof result === 'object' ? result : {};
   const reads = Array.isArray(r.actions) ? r.actions.filter(a => a && typeof a.text === 'string').map(a => a.text) : [];
   const controls = controlLine(r.elements);
@@ -293,7 +303,24 @@ export function capturePageText(result, limit = MAX_PAGE_CHARS, find = '') {
     .slice(0, 30).map(l => `${cleanText(String(l.text).replace(/\s+/g, ' '), 100)} → ${String(l.url).replace(/\s+/g, '').slice(0, 300)}`).join('\n');
   // The links go before the page text is cut, so a long page still shows them.
   const tail = [links ? `Links:\n${links}` : '', controls ? `${CONTROLS}${controls}` : '', click.example].filter(Boolean).join('\n\n');
-  return cleanText([tail ? String(body).slice(0, Math.max(1000, limit - tail.length - 4)) : body, tail].filter(Boolean).join('\n\n'), limit);
+  const room = Math.max(1000, limit - (tail ? tail.length + 4 : 0) - (part ? 200 : 0));
+  const text = String(body);
+  if (part && text.length > room) {
+    // Parts end at a space or a line break, so no word is cut in two between them.
+    const cuts = [0];
+    while (cuts.at(-1) < text.length && cuts.length <= MAX_PAGE_PARTS) {
+      const from = cuts.at(-1);
+      let end = Math.min(text.length, from + room);
+      if (end < text.length) { const gap = Math.max(text.lastIndexOf(' ', end), text.lastIndexOf('\n', end)); if (gap > from + room / 2) end = gap; }
+      cuts.push(end);
+    }
+    const parts = cuts.length - 1, n = Math.min(Math.max(1, part), parts);
+    const where = n < parts
+      ? `[Part ${n} of ${parts} of this page. For part ${n + 1}, ask for this page again with "part":${n + 1}; or use "find" for words further down.]`
+      : `[Part ${n} of ${parts}: the end of this page.${part > parts ? ` It has only ${parts} parts.` : ''}]`;
+    return cleanText([`${where}\n${text.slice(cuts[n - 1], cuts[n]).trim()}`, tail].filter(Boolean).join('\n\n'), limit);
+  }
+  return cleanText([tail ? text.slice(0, room) : body, tail].filter(Boolean).join('\n\n'), limit);
 }
 
 /** A short chat line summarising an agent's result. */
@@ -542,9 +569,10 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
   if (!limited && !closed) for (const item of found) {
     if (!item.ok) { say(`${bot.name} asked for a web page, but the request was refused: ${item.error}`); invalid.push(item.error); continue; }
     // A plain re-read of a page it has is no progress; finding words on it, or acting on it, is.
-    if (!item.request.find && !item.request.steps.length && skipUrls.some(url => samePage(url, item.request.url))) {
+    // The next part of a long page is new text too.
+    if (!item.request.find && !item.request.part && !item.request.steps.length && skipUrls.some(url => samePage(url, item.request.url))) {
       // The run read it already (perhaps for another bot): hand that page back instead of opening it again.
-      const had = (state.browserRequests || []).find(r => r.status === 'done' && r.result?.page && !r.find && (runId ? r.runId === runId : r.chatKey === chatKey)
+      const had = (state.browserRequests || []).find(r => r.status === 'done' && r.result?.page && !r.find && !r.part && (runId ? r.runId === runId : r.chatKey === chatKey)
         && [r.url, r.result.finalUrl].some(u => u && samePage(u, item.request.url)));
       if (had) again.push(had.result.page); else repeated++;
       say(`${bot.name} already has that page, so it was not opened again.`);

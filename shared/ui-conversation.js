@@ -28,6 +28,7 @@ import {siteChip, thumbSlot} from './ui-computer-view.js';
 import {cliChoice, googleCard} from './ui-connect-model.js';
 import {connectAppNow} from './ui-connect.js';
 import {appById} from './app-catalog.js';
+import {usageWords} from './usage.js';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -152,13 +153,15 @@ function noteEntry(entry, conv) {
  * hop ("Ranker messaged Atlas"). Either way a tap opens the hops, who wrote to whom and what they said. */
 const openRuns = new Set();
 const pillSeen = new Map();
-function hopLog(hops, nameOf) {
-  return `<ol class="cv-plog">${hops.map(h => `<li><span class="who"><b>${esc(nameOf(h.from))}</b><span>to ${esc(nameOf(h.to))}</span></span><div class="md">${md(h.text)}</div></li>`).join('')}</ol>`;
+function hopLog(hops, nameOf, run) {
+  // What the run used, last: tokens always, the cost when the owner set a price, "included" for a subscription.
+  const used = usageWords(run?.usage);
+  return `<ol class="cv-plog">${hops.map(h => `<li><span class="who"><b>${esc(nameOf(h.from))}</b><span>to ${esc(nameOf(h.to))}</span></span><div class="md">${md(h.text)}</div></li>`).join('')}${used ? `<li class="cv-use">${esc(`Used ${used}`)}</li>` : ''}</ol>`;
 }
 function pillEntry({run, pill, handoffs: hops}, conv) {
   const bots = company(), nameOf = id => bots.find(b => b.id === id)?.name || 'A bot';
   const open = openRuns.has(run.id) ? ' open' : '', count = `<span class="sr-only">, ${hops.length} message${hops.length === 1 ? '' : 's'}</span>`;
-  if (pill.done) return `<details class="cv-prog cv-done" data-pid="${esc(run.id)}"${open}><summary><span>${esc(pill.text)}</span>${count}${icon('chevron', 13)}</summary>${hopLog(hops, nameOf)}</details>`;
+  if (pill.done) return `<details class="cv-prog cv-done" data-pid="${esc(run.id)}"${open}><summary><span>${esc(pill.text)}</span>${count}${icon('chevron', 13)}</summary>${hopLog(hops, nameOf, run)}</details>`;
   const bot = bots.find(b => b.id === pill.botId) || askerOf(conv), waiting = String(run.status).startsWith('awaiting');
   // While a bot browses the pill carries the site, which opens the live view; while you hold the browser it says so.
   const chip = siteChip({runId: run.id, botId: pill.botId}), text = chip?.driving ? 'You are driving' : pill.text;
@@ -166,7 +169,7 @@ function pillEntry({run, pill, handoffs: hops}, conv) {
   const dots = waiting ? '' : '<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>';
   // The site chip is a button of its own, so a line carrying one is not also a disclosure.
   if (!hops.length || chip) return `<div class="cv-prog"><div class="cv-live" data-run="${esc(run.id)}">${faceHtml}<span class="cv-cur" data-text="${esc(text)}">${esc(text)}</span>${chip?.html || dots}</div></div>`;
-  return `<details class="cv-prog cv-done cv-going" data-pid="${esc(run.id)}"${open}><summary class="cv-live" data-run="${esc(run.id)}">${faceHtml}<span class="cv-cur" data-text="${esc(text)}">${esc(text)}</span>${dots}${count}${icon('chevron', 13)}</summary>${hopLog(hops, nameOf)}</details>`;
+  return `<details class="cv-prog cv-done cv-going" data-pid="${esc(run.id)}"${open}><summary class="cv-live" data-run="${esc(run.id)}">${faceHtml}<span class="cv-cur" data-text="${esc(text)}">${esc(text)}</span>${dots}${count}${icon('chevron', 13)}</summary>${hopLog(hops, nameOf, run)}</details>`;
 }
 
 /** What the runaway guard asks, in one card wherever it is shown: Keep going or Stop, for everything bots started. */

@@ -21,6 +21,8 @@ import {
 } from './ui-profile-model.js';
 import {COLORS} from './ui-face.js';
 import {limitsOf, limitWords, FAIL_STREAK} from './limits.js';
+import {monthByBot, usageWords} from './usage.js';
+import {companyBots} from './company.js';
 
 const el = id => document.getElementById(id);
 const ICONS = {general: 'gear', look: 'half', models: 'key', conn: 'plug', perm: 'shield', usage: 'chart'};
@@ -133,14 +135,24 @@ function limitsCard(owner) {
 
 const basicsWords = ask => (ask ? 'Bots ask you before opening a web page or reading a connected app' : "Bots open web pages and read connected apps on their own; a site you set to Ask each time or Don't allow still asks or refuses");
 
+/** Tokens this month by bot, with the cost where the owner set a price on the model (Models and keys). */
+function monthCard() {
+  const names = new Map(companyBots(store.state).map(b => [b.id, b.name]));
+  const {rows, total} = monthByBot(store.state, names);
+  if (!rows.length) return '';
+  const who = rows.map(r => { const bot = findBot(r.botId); return `<div class="rw"><span class="w">${bot ? faceOf(bot, 20, {state: 'asleep', motion: false}) : ''}${esc(r.name)}<small>${esc(usageWords(r))}</small></span></div>`; }).join('');
+  return `<section class="st-g"><h4 class="st-h">This month</h4><div class="cd">${srow('All bots', '', esc(usageWords(total)))}${who}</div></section>
+    <p class="st-note">Tokens each bot's model calls used this month. A cost shows only for models you gave a price under Models and keys; a subscription is included in its plan.</p>`;
+}
+
 function usage() {
   const {total, rows} = weekUsage(store.state);
-  if (!total) return `<section class="st-g"><h4 class="st-h">This week</h4><div class="cd pad"><p class="st-quiet">No bot has done any work this week.</p></div></section>`;
+  if (!total) return `<section class="st-g"><h4 class="st-h">This week</h4><div class="cd pad"><p class="st-quiet">No bot has done any work this week.</p></div></section>${monthCard()}`;
   const bar = rows.map(r => { const bot = findBot(r.botId), i = Math.max(0, (store.state.groups.find(g => g.id === 'home')?.bots || []).indexOf(bot)); const tint = Number.isInteger(bot?.settings?.tint) ? bot.settings.tint : i; return `<span style="width:${r.pct}%;background:${COLORS[Math.abs(tint) % COLORS.length]}"></span>`; }).join('');
   const who = rows.map(r => { const bot = findBot(r.botId); return `<span>${bot ? faceOf(bot, 20, {state: 'asleep', motion: false}) : ''}${esc(r.name)} <em>${r.pct}%</em></span>`; }).join('');
   return `<section class="st-g"><h4 class="st-h">This week</h4><div class="cd pad"><div class="st-big">${total}<small>bot ${total === 1 ? 'turn' : 'turns'}</small></div>
     <div class="st-stack" role="img" aria-label="${esc(rows.map(r => `${r.name} ${r.pct}%`).join(', '))} of this week's work">${bar}</div><div class="whoused">${who}</div></div></section>
-    <p class="st-note">Each bot's turns in the runs of the last seven days.</p>`;
+    <p class="st-note">Each bot's turns in the runs of the last seven days.</p>${monthCard()}`;
 }
 
 function about() {

@@ -61,7 +61,8 @@ export function cliSignIn(store, engine, nowMs = Date.now()) {
 }
 
 /** Run one prompt on the paired agent and return the reply text. */
-export async function runOnAgent(store, {engine, model = '', effort = '', instructions = '', input, label = '', waitMs = cliWaitMs(), pollMs = 250, botId = null, providerId = null}) {
+/** `withUsage` answers `{text, usage}` instead of the text, with the tokens the CLI reported (or null). */
+export async function runOnAgent(store, {engine, model = '', effort = '', instructions = '', input, label = '', waitMs = cliWaitMs(), pollMs = 250, botId = null, providerId = null, withUsage = false}) {
   const spec = cliEngineById(engine);
   if (!spec) throw problem('Unknown engine. Use claude or codex.', 400, 'bad-request');
   const meta = {engine: spec.id, botId, providerId, model: model || null};
@@ -75,7 +76,7 @@ export async function runOnAgent(store, {engine, model = '', effort = '', instru
   for (;;) {
     const row = store.get('SELECT status,result,error FROM agent_tasks WHERE id=?', task.id);
     if (!row) throw problem('The model task disappeared before it finished.', 502, 'agent-failed', meta);
-    if (row.status === 'done') return readResult(row.result, spec, meta);
+    if (row.status === 'done') return readResult(row.result, spec, meta, withUsage);
     if (row.status === 'failed') throw problem(`The paired agent could not run the model: ${row.error || 'it reported a failure'}`, 502, 'agent-failed', meta);
     // A laptop that sleeps or an agent that is killed stops beating: give up now, not at the end of the wait.
     const seen = store.get('SELECT last_seen_at FROM agents WHERE id=?', device.id)?.last_seen_at;
@@ -94,10 +95,10 @@ export async function runOnAgent(store, {engine, model = '', effort = '', instru
 const STATUS = {'not-signed-in': 422, 'usage-limit': 429, 'model-not-found': 422, 'cli-missing': 422, timeout: 504, 'bad-request': 400, 'output-too-large': 502, 'empty-reply': 502, 'cli-failed': 502};
 
 /** What the agent reported: the text, or an error with the agent's own code. */
-function readResult(raw, spec, meta) {
+function readResult(raw, spec, meta, withUsage = false) {
   let result = null;
   try { result = JSON.parse(raw); } catch { /* Handled below. */ }
-  if (result?.ok === true && typeof result.text === 'string' && result.text.trim()) return result.text;
+  if (result?.ok === true && typeof result.text === 'string' && result.text.trim()) return withUsage ? {text: result.text, usage: result.usage && typeof result.usage === 'object' ? result.usage : null} : result.text;
   if (result?.ok === false) {
     const code = Object.hasOwn(STATUS, result.code) ? result.code : 'cli-failed';
     throw problem(String(result.message || `The ${spec.binary} command failed.`).slice(0, 400), STATUS[code], code, meta);
@@ -107,7 +108,7 @@ function readResult(raw, spec, meta) {
 
 /** The `run` a local-cli config carries: one model call through the paired agent. */
 export function cliRunner(store, {botId = null, provider}) {
-  return ({engine, model, effort, instructions, input}) => runOnAgent(store, {engine, model, effort, instructions, input, label: provider.label, botId, providerId: provider.id});
+  return ({engine, model, effort, instructions, input}) => runOnAgent(store, {engine, model, effort, instructions, input, label: provider.label, botId, providerId: provider.id, withUsage: true});
 }
 
 /** The chat line for a hit usage limit, or null for any other error. It carries

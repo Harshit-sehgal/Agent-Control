@@ -165,7 +165,7 @@ export async function finishBrowserRequest(store, request, {ok, result = null, e
   // The owner took the browser while it ran: the steps after that point were not run, and what comes
   // back is the page as they left it. The chat and the bot are each told so.
   const tookOver = ok && result?.tookOver === true;
-  const captured = ok ? `${tookOver ? 'The owner took over the browser while this ran, so the steps after that point were not run. This is the page as they left it.\n\n' : ''}${pageHeading(request, result)}${capturePageText(result, undefined, request.find || '')}` : '';
+  const captured = ok ? `${tookOver ? 'The owner took over the browser while this ran, so the steps after that point were not run. This is the page as they left it.\n\n' : ''}${pageHeading(request, result)}${capturePageText(result, undefined, request.find || '', request.part || 1)}` : '';
   const text = ok ? `${browserResultText(request, result)}${tookOver ? '\n\nYou took over the browser, so the steps after that point were not run. This is the page as you left it.' : ''}` : `${request.botName}'s browser request failed: ${cleanText(error, 300) || 'the browser reported a failure.'}`;
   const done = await store.update(s => {
     const live = (s.browserRequests || []).find(r => r.id === request.id);

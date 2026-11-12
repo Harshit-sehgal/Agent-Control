@@ -20,7 +20,7 @@ export const ASSETS = [
   'core.js', 'errors.js', 'workflow.js', 'tasks.js', 'contracts.js', 'bot-settings.js', 'company.js', 'threads.js', 'off-job.js', 'bot-browser.js', 'bot-create.js', 'hire.js', 'offline-bots.js', 'bot-link.js', 'ask-limits.js', 'asks.js', 'activity-log.js', 'runaway.js', 'reply-blocks.js', 'subagents.js', 'retention.js', 'memory.js', 'run-state.js',
   // Connectors: the shape, the `connector` block and the envelope list. Imported by coordination.js, so the demo needs it.
   'connectors.js',
-  'coordination.js', 'chats.js', 'group-simulator.js', 'locks.js', 'ai-presets.js', 'run-follow.js', 'setup.js', 'schedules.js', 'limits.js',
+  'coordination.js', 'chats.js', 'group-simulator.js', 'locks.js', 'ai-presets.js', 'run-follow.js', 'setup.js', 'schedules.js', 'limits.js', 'usage.js',
   // Static pages and install assets.
   'manifest.webmanifest', 'icon-192.png', 'icon-512.png',
 ];

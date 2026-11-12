@@ -15,6 +15,7 @@ import {uuid} from '../shared/core.js';
 import {peek} from './sqlite-store.js';
 import {cliRunner,cliSignIn} from './cli-model.js';
 import {assertLocalOrPublic} from './reach-guard.js';
+import {cleanPrices} from '../shared/usage.js';
 
 const clean=(v,n)=>String(v??'').trim().slice(0,n);
 const validBase=u=>{try{const x=new URL(u);return (x.protocol==='http:'||x.protocol==='https:')&&!x.username&&!x.password&&!x.search&&!x.hash;}catch{return false;}};
@@ -79,6 +80,10 @@ function readHeaders(store,provider){
 }
 const headerNamesOf=p=>capList(p?.headerNames,MAX_HEADERS).filter(name=>typeof name==='string');
 const labelsOf=p=>p?.labels&&typeof p.labels==='object'&&!Array.isArray(p.labels)?p.labels:{};
+/** The owner's per-model prices (dollars per million tokens), admin listings only. */
+const pricesOf=p=>p?.prices&&typeof p.prices==='object'&&!Array.isArray(p.prices)?p.prices:{};
+/** The fallback model the owner picked, or null. */
+const fallbackOf=ai=>ai?.fallback?.providerId?{providerId:ai.fallback.providerId,model:ai.fallback.model||null}:null;
 
 /** Ensure the AI shape exists on a state document. */
 export function aiState(state){
@@ -113,7 +118,7 @@ const publicProvider=p=>({id:p.id,label:p.label,kind:isCli(p)?LOCAL_CLI_KIND:'ap
 /** The settings page gets the full picture: the endpoint, both model lists, the
  * friendly labels, the Azure version and the header NAMES. Values stay in the
  * vault, so even this listing cannot leak one. */
-const providerListing=p=>({...publicProvider(p),baseUrl:safeBase(p.baseUrl),models:Array.isArray(p.models)?p.models:[],chatModels:capList(p.chatModels||p.models,300),allModels:capList(p.allModels||p.models,2000),labels:labelsOf(p),apiVersion:p.apiVersion||null,hasHeaders:headerNamesOf(p),modelsAt:p.modelsAt||null,modelsError:p.modelsError||null,modelsTruncated:Boolean(p.modelsTruncated),keyOptional:Boolean(p.keyOptional)});
+const providerListing=p=>({...publicProvider(p),baseUrl:safeBase(p.baseUrl),models:Array.isArray(p.models)?p.models:[],chatModels:capList(p.chatModels||p.models,300),allModels:capList(p.allModels||p.models,2000),labels:labelsOf(p),apiVersion:p.apiVersion||null,hasHeaders:headerNamesOf(p),modelsAt:p.modelsAt||null,modelsError:p.modelsError||null,modelsTruncated:Boolean(p.modelsTruncated),keyOptional:Boolean(p.keyOptional),prices:pricesOf(p)});
 function publicBots(bots){
   const out={};
   if(!bots||typeof bots!=='object')return out;
@@ -127,12 +132,12 @@ function publicBots(bots){
 /** Provider metadata safe to send to the browser. No key, no vault id. */
 export function publicAi(state){
   const ai=aiState(state);
-  return {providers:ai.providers.map(publicProvider),defaultProviderId:ai.defaultProviderId,defaultModel:ai.defaultModel||null,defaultEffort:ai.defaultEffort||null,bots:publicBots(ai.bots)};
+  return {providers:ai.providers.map(publicProvider),defaultProviderId:ai.defaultProviderId,defaultModel:ai.defaultModel||null,defaultEffort:ai.defaultEffort||null,fallback:fallbackOf(ai),bots:publicBots(ai.bots)};
 }
 
 export function listProviders(state){
   const ai=aiState(state);
-  return {providers:ai.providers.map(providerListing),defaultProviderId:ai.defaultProviderId,defaultModel:ai.defaultModel||null,defaultEffort:ai.defaultEffort||null};
+  return {providers:ai.providers.map(providerListing),defaultProviderId:ai.defaultProviderId,defaultModel:ai.defaultModel||null,defaultEffort:ai.defaultEffort||null,fallback:fallbackOf(ai)};
 }
 
 /** Add a BYOK provider. The key is written to the vault, never to the state.
@@ -176,7 +181,7 @@ export async function addProvider(store,workspaceId,{kind,engine,model,label,bas
  * gateway. */
 export function listProviderListings(store){
   const ai=aiState(store.read());
-  return {providers:ai.providers.map(p=>({...providerListing(p),models:(Array.isArray(p.models)?p.models:[]).slice(0,300)})),defaultProviderId:ai.defaultProviderId||null,defaultModel:ai.defaultModel||null,defaultEffort:ai.defaultEffort||null,bots:ai.bots||{}};
+  return {providers:ai.providers.map(p=>({...providerListing(p),models:(Array.isArray(p.models)?p.models:[]).slice(0,300)})),defaultProviderId:ai.defaultProviderId||null,defaultModel:ai.defaultModel||null,defaultEffort:ai.defaultEffort||null,fallback:fallbackOf(ai),bots:ai.bots||{}};
 }
 
 /** One provider as the admin page sees it, or null. */
@@ -188,9 +193,12 @@ const listingOf=(store,id)=>getProvider(store,id)||{id};
 
 /** Change a saved provider, optionally rotating its key, and re-read the
  * catalogue: the models that key can use change with the key or the endpoint. */
-export async function updateProvider(store,workspaceId,id,{label,engine,model,baseUrl,apiKey,protocol,style,preset,apiVersion,headers}={}){
+export async function updateProvider(store,workspaceId,id,{label,engine,model,baseUrl,apiKey,protocol,style,preset,apiVersion,headers,prices}={}){
   const current=store.read().ai?.providers?.find(p=>p.id===id);
   if(!current)fail('Provider not found.',404);
+  // A price is the owner's own number for working out cost; it changes nothing about how the provider is called.
+  let nextPrices;
+  try{nextPrices=cleanPrices(prices);}catch(error){fail(error.message);}
   if(isCli(current)){
     if(String(apiKey??'').trim()||baseUrl||headers)fail('A subscription holds no key and no endpoint. Sign in to the CLI on the paired machine instead.');
     const name=label===undefined?current.label:clean(label,80);
@@ -246,6 +254,7 @@ export async function updateProvider(store,workspaceId,id,{label,engine,model,ba
     p.apiVersion=nextVersion;p.headersCredentialId=headersCredentialId;p.headerNames=headerNames;
     if(preset!==undefined)p.keyOptional=Boolean(presetById(preset)?.keyOptional);
     if(endpointChanged){p.models=[];p.chatModels=[];p.allModels=[];p.labels={};p.modelsAt=null;p.modelsError=null;}
+    if(nextPrices!==undefined)p.prices=nextPrices;
   });
   return {...listingOf(store,id),endpointChanged};
 }
@@ -288,6 +297,7 @@ export async function deleteProvider(store,workspaceId,id){
     try{credentials.deleteCredential(store,workspaceId,credentialId);}catch(error){if(error.status!==404)throw error;}
   }
   await store.update(s=>{const ai=aiState(s);ai.providers=ai.providers.filter(p=>p.id!==id);if(ai.defaultProviderId===id)ai.defaultProviderId=ai.providers[0]?.id||null;
+    if(ai.fallback?.providerId===id)ai.fallback=null;
     for(const [botId,override] of Object.entries(ai.bots)){
       if(override?.providerId!==id)continue;
       // Its model id belonged to the provider that is gone; sent to another one it is a 404. Effort stays.
@@ -313,6 +323,27 @@ function concreteModel(protocol,model,chatModels,allModels){
   return model||'auto';
 }
 
+/** The config of the owner's fallback model (Settings → Models), or null. Built like any other provider's, with
+ * the same effort; src/ai.js uses it for one call when the bot's own model could not answer. */
+function fallbackConfig(store,botId,ai,effort){
+  const pick=fallbackOf(ai);
+  const provider=pick&&ai.providers.find(p=>p.id===pick.providerId);
+  if(!provider)return null;
+  const level=effort?{effort}:{};
+  if(isCli(provider))return {kind:LOCAL_CLI_KIND,engine:provider.engine,model:cleanCliModel(pick.model)||provider.model||'',source:LOCAL_CLI_KIND,label:provider.label,providerId:provider.id,models:[],run:cliRunner(store,{botId,provider}),...level};
+  // A key deleted from the vault by hand leaves no fallback, never a failed turn.
+  try{
+    const config=providerConfig(store,provider);
+    const chatModels=Array.isArray(provider.chatModels)?provider.chatModels:config.models;
+    return {...config,model:concreteModel(config.protocol,pick.model||'auto',chatModels,config.models),...level};
+  }catch{return null;}
+}
+/** A config with the fallback attached, unless the fallback is the very model the config already runs. */
+function withFallback(store,botId,ai,config){
+  const spare=fallbackConfig(store,botId,ai,config.effort||'');
+  if(!spare||(spare.providerId===config.providerId&&(spare.model||'')===(config.model||'')))return config;
+  return {...config,fallback:spare};
+}
 /** The config a bot should run on: its own override, else the workspace default,
  * else the environment. `null` when nothing is configured. */
 export function resolveConfig(store,botId){
@@ -326,7 +357,7 @@ export function resolveConfig(store,botId){
   const provider=ai.providers.find(p=>p.id===providerId);
   // How hard to think: the bot's own pick, else the workspace's. Empty sends nothing.
   const effort=cleanEffort(override?.effort)||cleanEffort(ai.defaultEffort)||'';
-  const withEffort=config=>effort?{...config,effort}:config;
+  const withEffort=config=>withFallback(store,botId,ai,effort?{...config,effort}:config);
   if(provider&&isCli(provider)){
     // The workspace default model is an API model id; a CLI would only reject it.
     // A bot override that could read as a flag is dropped rather than passed on.
@@ -385,7 +416,8 @@ function effortOrFail(value){
 export async function setDefaults(store,body={}){
   // Only the two knobs this route owns. A typo (`temprature`) used to save
   // nothing and report success, which reads like the setting applied.
-  const {providerId,model,effort,...unknown}=body&&typeof body==='object'&&!Array.isArray(body)?body:{};
+  const {providerId,model,effort,fallback,...unknown}=body&&typeof body==='object'&&!Array.isArray(body)?body:{};
+  if(fallback!==undefined&&fallback!==null&&(typeof fallback!=='object'||Array.isArray(fallback)))fail('A fallback is {providerId, model}, or null for none.');
   const level=effort===undefined?undefined:effortOrFail(effort);
   const stray=Object.keys(unknown);
   if(stray.length)fail(`Unknown AI setting${stray.length>1?'s':''}: ${stray.slice(0,4).join(', ')}.`,400);
@@ -393,6 +425,10 @@ export async function setDefaults(store,body={}){
     if(providerId!==undefined){if(providerId&&!ai.providers.some(p=>p.id===providerId))throw fail('Provider not found.',404);ai.defaultProviderId=providerId||null;}
     if(model!==undefined)ai.defaultModel=clean(model,120)||null;
     if(level!==undefined)ai.defaultEffort=level||null;
+    if(fallback!==undefined){
+      if(fallback?.providerId&&!ai.providers.some(p=>p.id===fallback.providerId))throw fail('Provider not found.',404);
+      ai.fallback=fallback?.providerId?{providerId:fallback.providerId,model:clean(fallback.model,120)||null}:null;
+    }
   });
   return listProviders(store.read());
 }

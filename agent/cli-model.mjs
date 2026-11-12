@@ -118,6 +118,26 @@ const promptText = ({instructions, input}) => [instructions && String(instructio
 const lines = text => String(text || '').split('\n').map(s => s.trim()).filter(Boolean);
 const textOf = blocks => (Array.isArray(blocks) ? blocks.filter(b => b?.type === 'text' && typeof b.text === 'string').map(b => b.text).join('') : '');
 
+const tokens = v => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.round(Number(v)) : 0);
+/** The tokens a CLI run reported, as {input, output, cacheRead, cacheWrite}, or null when it said nothing.
+ * claude's closing `result` event carries Messages-API usage (cache reads and writes apart); codex's
+ * `turn.completed` carries input (cached included), cached input and output. A subscription bills none of it,
+ * but the owner still sees how much a run used. */
+export function usageFromCli(engine, raw) {
+  let found = null;
+  for (const line of lines(raw)) {
+    let event; try { event = JSON.parse(line); } catch { continue; }
+    const u = event?.usage;
+    if (!u || typeof u !== 'object') continue;
+    if (engine === 'claude' && event.type === 'result') found = {input: tokens(u.input_tokens), output: tokens(u.output_tokens), cacheRead: tokens(u.cache_read_input_tokens), cacheWrite: tokens(u.cache_creation_input_tokens)};
+    else if (engine === 'codex' && event.type === 'turn.completed') {
+      const cached = tokens(u.cached_input_tokens);
+      found = {input: Math.max(0, tokens(u.input_tokens) - cached), output: tokens(u.output_tokens), cacheRead: cached, cacheWrite: 0};
+    }
+  }
+  return found && Object.values(found).some(Boolean) ? found : null;
+}
+
 /** claude stream-json: the closing `result` event holds the answer. */
 function readClaude(raw) {
   let result = null, assistant = '', error = '';
@@ -212,7 +232,7 @@ async function runCliOnce({engine, model = '', effort = '', instructions = '', i
         const raw = Buffer.concat(out).toString('utf8');
         const read = spec.id === 'claude' ? readClaude(raw) : readCodex(raw);
         const text = read.text.trim();
-        if (code === 0 && !read.error && text) return done(null, {text: capReplyText(text), engine: spec.id, model: cleanCliModel(model) || null, ms: Date.now() - started});
+        if (code === 0 && !read.error && text) return done(null, {text: capReplyText(text), engine: spec.id, model: cleanCliModel(model) || null, ms: Date.now() - started, usage: usageFromCli(spec.id, raw)});
         const said = [read.error, err].filter(Boolean).join('\n');
         if (code === 0 && !said.trim()) return done(new CliModelError('empty-reply', `The ${spec.binary} command finished without an answer.`));
         done(classify(said, spec, cleanCliModel(model) || ''));

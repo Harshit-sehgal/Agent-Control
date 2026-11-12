@@ -72,7 +72,7 @@ test('Anthropic Messages uses x-api-key plus a version header, and only the text
   assert.equal(requests[0].headers.authorization,undefined,'Anthropic does not take a bearer token');
   assert.equal(requests[0].body.model,'claude-sonnet-4-5');
   assert.ok(Number.isInteger(requests[0].body.max_tokens));
-  assert.match(requests[0].body.system,/Draft it/,'Anthropic takes the system prompt as a top-level field');
+  assert.match(requests[0].body.system[0].text,/Draft it/,'Anthropic takes the system prompt as a top-level field, as a cached text block');
   assert.equal(requests[0].body.messages.length,1);
   assert.equal(requests[0].body.messages[0].role,'user');
   assert.equal(requests[0].body.messages[0].content,'go');

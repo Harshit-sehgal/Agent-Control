@@ -1,17 +1,39 @@
-/** A bot reads the page, not just its menu: the agent prefers the main article, and what the bot is handed is long
- * enough for a real article (a Wikipedia page's menu alone used to fill the old 3,600 characters). */
+/** A bot reads the page, not just its menu: the agent prefers the main article. What the bot is handed at once is
+ * a screenful (PAGE_EXCERPT_CHARS); a longer page comes in parts it can ask for, so nothing on it is out of reach. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {capturePageText} from '../shared/bot-browser.js';
+import {capturePageText, PAGE_EXCERPT_CHARS, validateBrowserRequest as validate, recordBrowserRequests as record} from '../shared/bot-browser.js';
 import {createEnvelope, MAX_PAGE_CHARS} from '../shared/coordination.js';
 
 const article = 'Large language models are trained to predict text. '.repeat(400);   // ~20k characters
 
-test('a captured page keeps a ~20k article whole for the bot, and never more than MAX_PAGE_CHARS', () => {
-  const text = capturePageText({text: article});
-  assert.ok(text.length >= article.length - 10, String(text.length));
+test('a long page is handed over a part at a time, each part says how to get the next, and every part together is the whole page', () => {
+  assert.ok(PAGE_EXCERPT_CHARS >= 8000 && PAGE_EXCERPT_CHARS <= 12000);
+  const page = Array.from({length: 2500}, (_, i) => `w${i}`).join(' ');   // ~16k characters, every word unique
+  const first = capturePageText({text: page}, undefined, '', 1);
+  assert.ok(first.length <= PAGE_EXCERPT_CHARS, String(first.length));
+  assert.match(first, /^\[Part 1 of 2 of this page\. For part 2, ask for this page again with "part":2/);
+  assert.match(first, /^w0 w1 w2/m, 'the top of the page comes first');
+  const second = capturePageText({text: page}, undefined, '', 2);
+  assert.match(second, /Part 2 of 2: the end of this page/);
+  const words = new Set([first, second].join(' ').split(/\s+/));
+  assert.ok(Array.from({length: 2500}, (_, i) => `w${i}`).every(w => words.has(w)), 'no word of the page is unreachable');
+  assert.match(capturePageText({text: page}, undefined, '', 9), /It has only 2 parts/);
+  // A short page is whole, with no part line; a chat line (no part) is only cut.
+  assert.doesNotMatch(capturePageText({text: 'Short page.'}, undefined, '', 1), /Part/);
+  assert.doesNotMatch(capturePageText({text: page}, 1500), /Part/);
   assert.ok(capturePageText({text: article.repeat(3)}).length <= MAX_PAGE_CHARS);
+});
+
+test('a browser request may ask for the next part of a page it read, and that is not a repeat', () => {
+  assert.equal(validate({url: 'https://example.com/a', part: 2}).part, 2);
+  assert.equal(validate({url: 'https://example.com/a', part: 1}).part, undefined, 'part 1 is the plain read');
+  assert.equal(validate({url: 'https://example.com/a', part: 99}).part, undefined);
+  const state = {bots: [], groups: [], browserRequests: [], grants: [], asks: []};
+  const out = record(state, {bot: {id: 'b', name: 'B', permissions: {browser: true}}, groupId: 'home', chatKey: 'b', output: '```browser\n{"url":"https://example.com/a","part":2}\n```', skipUrls: ['https://example.com/a']});
+  assert.equal(out.repeated, 0);
+  assert.equal(out.records[0].part, 2);
 });
 
 test('the envelope carries a long page whole, up to MAX_PAGE_CHARS', () => {
@@ -78,9 +100,9 @@ test('find on raw HTML markup (a README table) gives several readable rows with 
   assert.doesNotMatch(out, /<td>|<img/);
 });
 
-test('a page reaches the bot at the size the model input keeps (MAX_PAGE_CHARS), not cut at half', () => {
+test('a page reaches the bot as one full excerpt, not cut at half', () => {
   const text = 'word '.repeat(10000);
-  assert.ok(capturePageText({text}).length > 20000);
+  assert.ok(capturePageText({text}).length > PAGE_EXCERPT_CHARS * 0.9);
 });
 
 test('a browser request may ask to find words on a page, and that is not a repeat', () => {
@@ -95,6 +117,7 @@ test('a browser request may ask to find words on a page, and that is not a repea
 test('the hint searches on an engine that answers a headless browser, and names find', () => {
   assert.match(BROWSER_TOOL_HINT, /bing\.com\/search\?q=/);
   assert.match(BROWSER_TOOL_HINT, /"find"/);
+  assert.match(BROWSER_TOOL_HINT, /"part":2/);
 });
 
 import {isSearchPage} from '../shared/bot-browser.js';

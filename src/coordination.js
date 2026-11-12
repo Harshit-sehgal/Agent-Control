@@ -29,6 +29,7 @@ import {peek} from './sqlite-store.js';
 import {memoryFor,rememberTurn,maybeConsolidate} from './memory.js';
 import {rememberFromOwner} from '../shared/memory.js';
 import {executeCustomBot} from './ai.js';
+import {meterTurn,fallbacksOf} from './usage.js';
 import {holdFollowUp} from './follow-ups.js';
 import {resolveConfig,aiAvailable} from './ai-providers.js';
 import {modelLimitLine} from './cli-model.js';
@@ -346,7 +347,10 @@ async function runGroupInner(store,id,executor){
         if(live.trace.length>400)live.trace=live.trace.slice(-400);
       });
       const gate=()=>store.update(s=>noteBotWork(s,'run').paused);
-      const reply=await runBotTurn(store,{bot,envelope,executor,config,peers:everyone,configFor:peerId=>resolveConfig(store,peerId),memoryForPeer:(mate,mateConfig)=>memoryFor(store,{bot:mate,config:mateConfig,chatKey:r.chatKey}),handoffAllowed:mayHandoff(r,bot)&&!closing&&!declinedTurn,spawnRounds:(r.subagents||[]).some(spawn=>spawn.botId===bot.id)?MAX_SUBAGENT_DEPTH:0,budget,onEvent,gate,resume:resumed,stop:stopped,groupId:home?.id??null,runId:id,makeId:randomUUID,now:stamp});
+      // Every model call in the turn (the bot's, a helper's, a teammate's answer, a fallback) is counted on the
+      // run and on each bot's day (src/usage.js).
+      const metered=await meterTurn(store,{runId:id},()=>runBotTurn(store,{bot,envelope,executor,config,peers:everyone,configFor:peerId=>resolveConfig(store,peerId),memoryForPeer:(mate,mateConfig)=>memoryFor(store,{bot:mate,config:mateConfig,chatKey:r.chatKey}),handoffAllowed:mayHandoff(r,bot)&&!closing&&!declinedTurn,spawnRounds:(r.subagents||[]).some(spawn=>spawn.botId===bot.id)?MAX_SUBAGENT_DEPTH:0,budget,onEvent,gate,resume:resumed,stop:stopped,groupId:home?.id??null,runId:id,makeId:randomUUID,now:stamp}));
+      const reply=metered.value,fellBack=fallbacksOf(metered.calls);
       if(reply.limit){
         // A checkpoint, not a failure: what was said stays said, the bots still
         // waiting on an answer are kept, and the owner picks what happens next.
@@ -417,7 +421,12 @@ async function runGroupInner(store,id,executor){
         const guests=added.filter(x=>!host.bots.some(b=>b.id===x));
         if(guests.length)live.guestIds=[...(live.guestIds||[]),...guests];
         toBotId=live.recipients[i+1]??null;
-        live.currentStep=i+1;live.trace.push({botId:bot.id,output:previous.output,toBotId,at:stamp()});
+        live.currentStep=i+1;live.trace.push({botId:bot.id,output:previous.output,toBotId,at:stamp(),...(metered.total?{usage:metered.total}:{}),...(fellBack.length?{fallbacks:fellBack}:{})});
+        // The owner's fallback model answered: the run says which model did, and why the bot's own did not.
+        for(const fell of fellBack){
+          const who=s.groups.flatMap(x=>x.bots||[]).find(b=>b.id===fell.botId)?.name||bot.name;
+          say(s,live,{id:randomUUID(),role:'system',kind:'fallback',text:`${who}'s model (${fell.from}) ${fell.why}, so the fallback model ${fell.to} answered.`,runId:id,at:stamp()});
+        }
         const chat=s.groupMessages[live.groupId]??=[];
         // A reply that went to fetch pages or call apps is a working step: the run's live line covers it, and
         // only the answer it leads to belongs in the owner's chat.

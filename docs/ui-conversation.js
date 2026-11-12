@@ -7,27 +7,28 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=71b92f8de6';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=71b92f8de6';
-import {requestOfMessage} from './bot-browser.js?v=71b92f8de6';
-import {validHttpUrl} from './core.js?v=71b92f8de6';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=71b92f8de6';
-import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=71b92f8de6';
-import {isPrimary} from './company.js?v=71b92f8de6';
-import {hasJob, modelChip} from './ui-profile-model.js?v=71b92f8de6';
-import {scheduleTaskBody} from './schedules.js?v=71b92f8de6';
-import {feed} from './ui-feed.js?v=71b92f8de6';
-import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js?v=71b92f8de6';
-import {askCard} from './ui-asks.js?v=71b92f8de6';
-import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=71b92f8de6';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=71b92f8de6';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=71b92f8de6';
-import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=71b92f8de6';
-import {toast, confirmSheet} from './ui-dialogs.js?v=71b92f8de6';
-import {siteChip, thumbSlot} from './ui-computer-view.js?v=71b92f8de6';
-import {cliChoice, googleCard} from './ui-connect-model.js?v=71b92f8de6';
-import {connectAppNow} from './ui-connect.js?v=71b92f8de6';
-import {appById} from './app-catalog.js?v=71b92f8de6';
+import {OFFJOB_CHOICES} from './off-job.js?v=4e69dc379b';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=4e69dc379b';
+import {requestOfMessage} from './bot-browser.js?v=4e69dc379b';
+import {validHttpUrl} from './core.js?v=4e69dc379b';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=4e69dc379b';
+import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=4e69dc379b';
+import {isPrimary} from './company.js?v=4e69dc379b';
+import {hasJob, modelChip} from './ui-profile-model.js?v=4e69dc379b';
+import {scheduleTaskBody} from './schedules.js?v=4e69dc379b';
+import {feed} from './ui-feed.js?v=4e69dc379b';
+import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js?v=4e69dc379b';
+import {askCard} from './ui-asks.js?v=4e69dc379b';
+import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=4e69dc379b';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=4e69dc379b';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=4e69dc379b';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=4e69dc379b';
+import {toast, confirmSheet} from './ui-dialogs.js?v=4e69dc379b';
+import {siteChip, thumbSlot} from './ui-computer-view.js?v=4e69dc379b';
+import {cliChoice, googleCard} from './ui-connect-model.js?v=4e69dc379b';
+import {connectAppNow} from './ui-connect.js?v=4e69dc379b';
+import {appById} from './app-catalog.js?v=4e69dc379b';
+import {usageWords} from './usage.js?v=4e69dc379b';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -152,13 +153,15 @@ function noteEntry(entry, conv) {
  * hop ("Ranker messaged Atlas"). Either way a tap opens the hops, who wrote to whom and what they said. */
 const openRuns = new Set();
 const pillSeen = new Map();
-function hopLog(hops, nameOf) {
-  return `<ol class="cv-plog">${hops.map(h => `<li><span class="who"><b>${esc(nameOf(h.from))}</b><span>to ${esc(nameOf(h.to))}</span></span><div class="md">${md(h.text)}</div></li>`).join('')}</ol>`;
+function hopLog(hops, nameOf, run) {
+  // What the run used, last: tokens always, the cost when the owner set a price, "included" for a subscription.
+  const used = usageWords(run?.usage);
+  return `<ol class="cv-plog">${hops.map(h => `<li><span class="who"><b>${esc(nameOf(h.from))}</b><span>to ${esc(nameOf(h.to))}</span></span><div class="md">${md(h.text)}</div></li>`).join('')}${used ? `<li class="cv-use">${esc(`Used ${used}`)}</li>` : ''}</ol>`;
 }
 function pillEntry({run, pill, handoffs: hops}, conv) {
   const bots = company(), nameOf = id => bots.find(b => b.id === id)?.name || 'A bot';
   const open = openRuns.has(run.id) ? ' open' : '', count = `<span class="sr-only">, ${hops.length} message${hops.length === 1 ? '' : 's'}</span>`;
-  if (pill.done) return `<details class="cv-prog cv-done" data-pid="${esc(run.id)}"${open}><summary><span>${esc(pill.text)}</span>${count}${icon('chevron', 13)}</summary>${hopLog(hops, nameOf)}</details>`;
+  if (pill.done) return `<details class="cv-prog cv-done" data-pid="${esc(run.id)}"${open}><summary><span>${esc(pill.text)}</span>${count}${icon('chevron', 13)}</summary>${hopLog(hops, nameOf, run)}</details>`;
   const bot = bots.find(b => b.id === pill.botId) || askerOf(conv), waiting = String(run.status).startsWith('awaiting');
   // While a bot browses the pill carries the site, which opens the live view; while you hold the browser it says so.
   const chip = siteChip({runId: run.id, botId: pill.botId}), text = chip?.driving ? 'You are driving' : pill.text;
@@ -166,7 +169,7 @@ function pillEntry({run, pill, handoffs: hops}, conv) {
   const dots = waiting ? '' : '<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>';
   // The site chip is a button of its own, so a line carrying one is not also a disclosure.
   if (!hops.length || chip) return `<div class="cv-prog"><div class="cv-live" data-run="${esc(run.id)}">${faceHtml}<span class="cv-cur" data-text="${esc(text)}">${esc(text)}</span>${chip?.html || dots}</div></div>`;
-  return `<details class="cv-prog cv-done cv-going" data-pid="${esc(run.id)}"${open}><summary class="cv-live" data-run="${esc(run.id)}">${faceHtml}<span class="cv-cur" data-text="${esc(text)}">${esc(text)}</span>${dots}${count}${icon('chevron', 13)}</summary>${hopLog(hops, nameOf)}</details>`;
+  return `<details class="cv-prog cv-done cv-going" data-pid="${esc(run.id)}"${open}><summary class="cv-live" data-run="${esc(run.id)}">${faceHtml}<span class="cv-cur" data-text="${esc(text)}">${esc(text)}</span>${dots}${count}${icon('chevron', 13)}</summary>${hopLog(hops, nameOf, run)}</details>`;
 }
 
 /** What the runaway guard asks, in one card wherever it is shown: Keep going or Stop, for everything bots started. */

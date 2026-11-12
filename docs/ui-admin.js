@@ -5,14 +5,15 @@
  *
  * The look is Settings and Connectors: a titled card (`.st-g`, `.cd`), rows with a switch or a small
  * button on the right, a segmented pill for a choice of few, and one primary action per card. */
-import {esc, icon, btn, field, note, empty, tag, fullDate, textInput, switchBtn, modelSelect, effortPicker, runFullApp, demoList} from './ui-kit.js?v=71b92f8de6';
-import {store, api, sync, isAdmin, isStaticDemo} from './ui-store.js?v=71b92f8de6';
-import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=71b92f8de6';
-import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js?v=71b92f8de6';
-import {pushStatus, enablePush, disablePush} from './ui-push.js?v=71b92f8de6';
-import {connectorsPanel, loadConnectors, connectActions, connectForms} from './ui-connect.js?v=71b92f8de6';
-import {cliDraft, modelChoices, chosenModel, effortChoices, OTHER_MODEL, agentCliRows, agentPermissionRows, agentWorkLine, subscriptionLine, SIGN_IN_HINT} from './ui-connect-model.js?v=71b92f8de6';
-import {LOCAL_CLI_ENGINES, LOCAL_CLI_KIND} from './ai-presets.js?v=71b92f8de6';
+import {esc, icon, btn, field, note, empty, tag, fullDate, textInput, switchBtn, modelSelect, effortPicker, runFullApp, demoList} from './ui-kit.js?v=4e69dc379b';
+import {store, api, sync, isAdmin, isStaticDemo} from './ui-store.js?v=4e69dc379b';
+import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=4e69dc379b';
+import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js?v=4e69dc379b';
+import {pushStatus, enablePush, disablePush} from './ui-push.js?v=4e69dc379b';
+import {connectorsPanel, loadConnectors, connectActions, connectForms} from './ui-connect.js?v=4e69dc379b';
+import {cliDraft, modelChoices, chosenModel, effortChoices, OTHER_MODEL, agentCliRows, agentPermissionRows, agentWorkLine, subscriptionLine, SIGN_IN_HINT} from './ui-connect-model.js?v=4e69dc379b';
+import {LOCAL_CLI_ENGINES, LOCAL_CLI_KIND} from './ai-presets.js?v=4e69dc379b';
+import {parsePrices, pricesText} from './usage.js?v=4e69dc379b';
 
 /** The pages Settings can load into its body. Only the keys are read (is this a page?). */
 export const ADMIN_PAGES = {notifications: true, workspaces: true, team: true, agents: true, data: true, connectors: true, ai: true};
@@ -357,6 +358,7 @@ function editProviderSheet(provider) {
     ${field('New API key (leave blank to keep the saved one)', textInput('apiKey', {type: 'password', autocomplete: 'off'}))}
     ${headersField('')}
     ${headerNote}
+    ${provider.prices ? `<input type="hidden" name="pricesKnown" value="1">${field('Prices (optional)', `<textarea class="input" name="prices" rows="3" placeholder="gpt-4.1: 2 / 8&#10;claude-sonnet-5-5: 2 / 10 / 0.1" autocomplete="off" spellcheck="false">${esc(pricesText(provider.prices))}</textarea>`, 'One model per line: input / output dollars per million tokens, and optionally the cached-input price. Usage shows a cost only for these models; the rest show tokens.')}` : ''}
     ${note('Changing the endpoint or the key re-reads the model list with the saved key.')}
     <div class="sheet-actions">${btn('Save provider', null, {kind: 'primary', type: 'submit', wide: true})}${btn('Cancel', 'close-sheet', {wide: true})}</div>
   </form>`, {title: `Edit ${provider.label}`, sub: provider.host});
@@ -419,7 +421,8 @@ function providerEntry(p, res, agents) {
   const extra = listed > chat ? ` (+${listed - chat} listed)` : '';
   const version = needsApiVersion(p.protocol) && p.apiVersion ? ` · api-version ${esc(p.apiVersion)}` : '';
   const problem = p.modelsError ? `<p class="cn-msg">${esc(p.modelsError)}</p>` : '';
-  return entry('key', esc(p.label), `${esc(p.host)} · ${esc(protocolName(p.protocol))} · ${chat} model(s)${extra}${p.modelsTruncated ? ' · list capped' : ''}${version}`, star,
+  const priced = Object.keys(p.prices || {}).length;
+  return entry('key', esc(p.label), `${esc(p.host)} · ${esc(protocolName(p.protocol))} · ${chat} model(s)${extra}${p.modelsTruncated ? ' · list capped' : ''}${version}${priced ? ` · prices for ${priced}` : ''}`, star,
     problem + acts(btn('Test', 'ai-test-provider', {id: p.id, small: true}) + makeDefault + more));
 }
 
@@ -444,9 +447,24 @@ function aiPanel(res) {
     hint('Bring your own key, or use the Claude or ChatGPT plan you already pay for. Keys are stored encrypted and never shown again.'),
     providers.length ? group('Models', providers.map(p => providerEntry(p, res, res.agents)).join(''), {cls: 'cn-list'}) : quiet('No model yet. Add one below.'),
     defaults && group('Default model', defaults, {pad: true}),
+    providers.length ? group('If a model fails', fallbackForm(res, providers), {pad: true}) : '',
     group('Add a model', `<div class="ad-form">${choose}${subscriptionForm()}${apiForm()}</div>`, {pad: true}),
     link,
   );
+}
+
+/** The model a turn goes to once when a bot's own model cannot answer: any saved provider's model, or none. */
+function fallbackForm(res, providers) {
+  const now = res.fallback?.providerId ? `${res.fallback.providerId}|${res.fallback.model || ''}` : '';
+  const rows = providers.flatMap(p => (p.kind === LOCAL_CLI_KIND
+    ? [{value: `${p.id}|${p.model || ''}`, label: `${p.label} · ${p.model || 'its default model'}`}]
+    : (p.chatModels || p.models || []).slice(0, 300).map(m => ({value: `${p.id}|${m}`, label: `${p.label} · ${p.labels?.[m] || m}`}))));
+  if (now && !rows.some(r => r.value === now)) rows.unshift({value: now, label: `${providers.find(p => p.id === res.fallback.providerId)?.label || 'Saved'} · ${res.fallback.model || 'its default model'}`});
+  const options = [{value: '', label: 'None'}, ...rows].map(r => `<option value="${esc(r.value)}"${r.value === now ? ' selected' : ''}>${esc(r.label)}</option>`).join('');
+  return `<form id="ai-fallback-form" class="ad-form">
+    ${field('Fallback model', `<select class="input" name="fallback">${options}</select>`, 'When a bot\'s model is busy, down, times out or is signed out, that turn is answered once by this model. A refused request is not sent elsewhere.')}
+    <div class="cn-acts">${btn('Save', null, {kind: 'primary', type: 'submit'})}</div>
+  </form>`;
 }
 
 /** Refill the Default model dropdown when the provider it is for has a fresh list. */
@@ -644,7 +662,8 @@ export const adminActions = {
   },
   'ai-edit-provider': async button => {
     // Read the listing again: the panel may be older than another admin's change.
-    const providers = (await api('/api/ai')).providers || [];
+    // The admin listing carries the prices; the summary is the fallback when it cannot be read.
+    const providers = ((await api('/api/ai/providers').catch(() => null)) || await api('/api/ai')).providers || [];
     const provider = providers.find(p => p.id === button.dataset.id);
     if (!provider) throw new Error('Provider not found.');
     editProviderSheet(provider);
@@ -800,10 +819,22 @@ export const adminForms = {
       if (problem) throw new Error(problem);
       body.headers = parsed.headers;
     }
+    // Prices travel only when the sheet showed the saved ones, so an empty box clears them and nothing else does.
+    if (values.pricesKnown) {
+      const typed = parsePrices(values.prices);
+      if (typed.invalid.length) throw new Error(`Write each price as model: input / output, for example gpt-4.1: 2 / 8. Could not read: ${typed.invalid.slice(0, 3).join('; ')}`);
+      body.prices = typed.prices;
+    }
     const p = await api(`/api/ai/providers/${values.id}`, 'PATCH', body);
     rememberListing(p);
     closeSheet();
     toast(modelsToast(p, 'updated'));
+    await sync(); await ctx.reload();
+  },
+  'ai-fallback-form': async (form, values, ctx) => {
+    const value = String(values.fallback || ''), at = value.indexOf('|');
+    await api('/api/ai', 'PATCH', {fallback: value ? {providerId: value.slice(0, at), model: value.slice(at + 1)} : null});
+    toast(value ? 'Fallback model saved.' : 'No fallback model.');
     await sync(); await ctx.reload();
   },
   'ai-default-form': async (form, values, ctx) => {
