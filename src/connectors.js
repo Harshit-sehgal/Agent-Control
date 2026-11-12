@@ -9,7 +9,8 @@
  */
 import {cleanText} from '../shared/core.js';
 import {fail} from '../shared/errors.js';
-import {CONNECTOR_KINDS, MAX_CONNECTORS, newConnectorId, publicConnector, slugOf} from '../shared/connectors.js';
+import {CONNECTOR_KINDS, MAX_CONNECTORS, newConnectorId, publicConnector, slugOf, siteConnector} from '../shared/connectors.js';
+import {appById} from '../shared/app-catalog.js';
 import {checkMcpUrl, mcpList} from './mcp-client.js';
 import * as credentials from './credentials.js';
 
@@ -94,9 +95,24 @@ export async function addMcpConnector(store, workspaceId, body, {createdBy = nul
 
 /** Ask the server for its tools again. A server that does not answer is `error` with its words, and keeps the
  * tools it last had; this returns the connector either way, so the Settings page just shows the status. */
+/** Connect apps, one tap: the owner signs in to the app in the shared browser, and this records that bots may read it
+ * there. Once per app; a second tap returns the one already made. */
+export async function addSiteConnector(store, body = {}) {
+  const app = appById(cleanText(body?.app, 40));
+  if (!app) fail('That app is not in the list.', 400);
+  return store.update(s => {
+    const list = connectorsOf(s), had = list.find(c => c.kind === 'site' && c.app === app.id);
+    if (had) return publicConnector(had);
+    const made = siteConnector(s, app, {now: now()});
+    list.push(made);
+    return publicConnector(made);
+  });
+}
+
 export async function refreshConnector(store, id) {
   const connector = connectorsOf(store.read()).find(c => c.id === id);
   if (!connector) fail('Connector not found.', 404);
+  if (connector.kind === 'site') return publicConnector(connector);
   if (connector.kind !== 'mcp') fail('Only an MCP server is refreshed here. Google reconnects through its own sign-in.', 400);
   let outcome;
   try { outcome = {tools: (await mcpList(mcpTarget(store, connector))).tools}; }

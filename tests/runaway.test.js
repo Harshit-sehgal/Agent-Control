@@ -65,7 +65,9 @@ test('resuming clears the pause and starts a new window', () => {
   assert.equal(noteBotWork(state, 'creation', at(2000)).paused, false);
   pauseAll(state, at(3000));
   assert.equal(paused(state), true);
-  assert.equal(state.chats.atlas.filter(m => m.kind === 'guard').length, 1, 'only the automatic pause speaks in Atlas\'s chat');
+  // The owner asked for a Resume card in chat (2026-11-12): a pause by hand now speaks too, marked manual.
+  const lines = state.chats.atlas.filter(m => m.kind === 'guard');
+  assert.deepEqual(lines.map(m => Boolean(m.manual)), [false, true]);
 });
 
 test('a bot creates a bot from one sentence and it reports to its creator', async t => {
@@ -224,4 +226,17 @@ test('POST /api/guard is an admin route that pauses and resumes all bots', async
   assert.equal(resumed.guard.paused, false);
   assert.equal(resumed.resumed, 0);
   assert.equal(store.read().events.some(e => /Resumed all bots/.test(e.message)), true);
+});
+
+test('pausing every bot by hand leaves a Resume line in the primary bot\'s chat, and resuming quiets it', () => {
+  const state = bare();
+  pauseAll(state, at(0));
+  const line = (state.chats.atlas || []).find(m => m.kind === 'guard');
+  assert.ok(line, 'the primary chat says bots are paused');
+  assert.equal(line.manual, true);
+  assert.match(line.text, /paused/i);
+  pauseAll(state, at(1000));
+  assert.equal(state.chats.atlas.filter(m => m.kind === 'guard').length, 1, 'pausing twice does not say it twice');
+  resumeGuard(state, at(2000));
+  assert.equal(paused(state), false);
 });

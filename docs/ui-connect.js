@@ -7,11 +7,12 @@
  *
  * Secrets: the Google client secret and an MCP address or header are typed here and sent once. The server never
  * answers with one, so nothing on this page can show or log one. */
-import {esc, icon, btn, note, tag, field, textInput} from './ui-kit.js?v=c2744e0498';
-import {api, sync} from './ui-store.js?v=c2744e0498';
-import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=c2744e0498';
-import {mcpRows, googleCard, mcpDraft, statusOf} from './ui-connect-model.js?v=c2744e0498';
-import {catalogView, appById, appInputs, connectRequest} from './app-catalog.js?v=c2744e0498';
+import {esc, icon, btn, note, tag, field, textInput} from './ui-kit.js?v=cbbedc32a9';
+import {api, sync, store, go} from './ui-store.js?v=cbbedc32a9';
+import {primaryOf} from './company.js?v=cbbedc32a9';
+import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=cbbedc32a9';
+import {mcpRows, googleCard, mcpDraft, statusOf} from './ui-connect-model.js?v=cbbedc32a9';
+import {catalogView, appById, appInputs, connectRequest, connectHow} from './app-catalog.js?v=cbbedc32a9';
 
 const GOOGLE_START = '/api/connectors/google/start';
 
@@ -74,6 +75,11 @@ function mcpPanel(connectors) {
     return `<div class="cn-card cn-mcp" data-connector="${esc(r.id)}">${head(name, `${where} · ${detail}`, status)}${msg}${tools(raw, 'Tools')}
       <div class="cn-acts">${btn('Refresh tools', 'connector-refresh', {small: true, id: r.id})}${btn('Delete', 'connector-delete', {kind: 'danger', small: true, id: r.id, data: {name: r.name}})}</div></div>`;
   });
+  for (const c of connectors.filter(c => c?.kind === 'site')) {
+    const {name, host} = c, app = appById(c.app), token = app && !app.google && appInputs(app).length ? btn('Add a token', 'catalog-token', {small: true, id: app.id}) : '';
+    rows.unshift(`<div class="cn-card cn-site" data-connector="${esc(c.id)}">${head(name, `Signed in through the browser · ${host}`, statusOf('ready'))}
+      <div class="cn-acts">${btn('Sign in again', 'catalog-signin', {small: true, id: c.app})}${token}${btn('Remove', 'connector-delete', {kind: 'danger', small: true, id: c.id, data: {name}})}</div></div>`);
+  }
   const list = rows.length ? `<div class="cd cn-list">${rows.join('')}</div>` : '<div class="cd pad"><p class="st-quiet">No servers yet. Connect an app above and bots can use its tools, with your say-so.</p></div>';
   return `<section class="st-g" id="cn-connected"><h4 class="st-h">Connected</h4>${list}</section>`;
 }
@@ -186,6 +192,18 @@ async function connectApp(app, values) {
   return made;
 }
 
+/** One tap on an app with a web sign-in: remember it, then hand the owner the shared browser on its sign-in page.
+ * Bots then open its pages as the owner, through the browser block; nothing is typed for them. */
+async function signIn(app) {
+  const bot = primaryOf(store.state);
+  if (!bot) throw new Error('Add a bot first. It opens the sign-in page for you.');
+  await api('/api/connectors', 'POST', {kind: 'site', app: app.id});
+  go({profile: bot.id, sub: 'computer'});
+  await api(`/api/browser-live/${encodeURIComponent(bot.id)}/takeover`, 'POST', {});
+  await api(`/api/browser-live/${encodeURIComponent(bot.id)}/input`, 'POST', {type: 'navigate', url: app.site});
+  toast(`You are in control. Sign in to ${app.google ? 'Gmail' : app.name}, then tap Hand back control.`);
+}
+
 /** The Connectors section: Google, the servers, the form. `res` is `GET /api/connectors`. */
 export function connectorsPanel(res) {
   if (res?.demo) return note('Connectors need the Node server. The browser-only demo has no Gmail, Drive or MCP servers to connect. Run the full app to add them.');
@@ -209,19 +227,18 @@ export const connectActions = {
   'catalog-connect': async (button, ctx) => {
     const app = appById(button.dataset.id);
     if (!app) return;
-    if (app.google) {
-      const card = document.querySelector('[data-connector="google"]');
-      card?.scrollIntoView({block: 'start', behavior: 'smooth'});
-      (card?.querySelector('a.btn') || card?.querySelector('input:not([type=hidden])') || card?.querySelector('button'))?.focus({preventScroll: true});
-      return;
-    }
-    if (appInputs(app).length) return connectSheet(app);
+    const how = connectHow(app, {googleClient: Boolean(lastRes?.google?.configured)});
+    if (how === 'google') return void window.location.assign(GOOGLE_START);
+    if (how === 'gmail' || how === 'site') return signIn(app);
+    if (how === 'form') return connectSheet(app);
     const label = button.querySelector('span');
     button.disabled = true; if (label) label.textContent = 'Connecting…';
-    try { await connectApp(app, {}); }
+    try { await connectApp(app, Object.fromEntries(appInputs(app).filter(i => i.default).map(i => [i.key, i.default]))); }
     catch (error) { button.disabled = false; if (label) label.textContent = 'Connect'; throw error; }
     await sync(); await ctx.reload();
   },
+  'catalog-signin': async button => { const app = appById(button.dataset.id); if (app) await signIn(app); },
+  'catalog-token': button => { const app = appById(button.dataset.id); if (app) connectSheet(app); },
   'connector-refresh': async (button, ctx) => {
     const id = button.dataset.id;
     const result = await api(`/api/connectors/${encodeURIComponent(id)}/refresh`, 'POST', {});

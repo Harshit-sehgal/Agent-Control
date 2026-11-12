@@ -7,11 +7,11 @@
  *
  * Messages are display records only. Nothing here runs a bot or publishes.
  */
-import {cleanText} from './core.js?v=c2744e0498';
-import {fail} from './errors.js?v=c2744e0498';
-import {summonableGuests, BUSY_STATUSES} from './coordination.js?v=c2744e0498';
-import {denyBrowserRequest} from './bot-browser.js?v=c2744e0498';
-import {orphanAsks} from './asks.js?v=c2744e0498';
+import {cleanText} from './core.js?v=cbbedc32a9';
+import {fail} from './errors.js?v=cbbedc32a9';
+import {summonableGuests, BUSY_STATUSES} from './coordination.js?v=cbbedc32a9';
+import {denyBrowserRequest} from './bot-browser.js?v=cbbedc32a9';
+import {orphanAsks} from './asks.js?v=cbbedc32a9';
 
 export const MAX_CHAT_MESSAGES = 300;
 const MAX_TEXT = 8000;
@@ -82,6 +82,8 @@ function entry(raw, makeId, now) {
   if (setup) out.setup = setup;
   // A bot's working step (it went to fetch pages or call apps): kept for the record, left out of the chat.
   if (raw.step === true && raw.role === 'bot') out.step = true;
+  // The owner paused every bot by hand (not the runaway guard): its card offers Resume.
+  if (raw.manual === true && raw.role === 'system' && out.kind === 'guard') out.manual = true;
   return out;
 }
 

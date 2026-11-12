@@ -87,6 +87,20 @@ researcher"). Each one now produces the right card, or the right "nothing to cha
 | "Bots should open at most 3 pages" was read as being about the bot's own reply | It is a limits card |
 | The colour picker read "Colour 1" to "Colour 10" to a screen reader | Each colour is read by name |
 
+## Resume, and Connect in one tap
+
+- **Pausing every bot** now leaves a line in the chat with a **Resume** button. One tap starts them again
+  and says so. A pause from the guard (a run that went too far) still has no button, so a runaway is not
+  restarted by a stray tap.
+- **Connect apps is one tap per app.** An app with a web sign-in (Notion, GitHub, Slack, Linear, Figma,
+  Airtable, Stripe and more) opens its sign-in page in the shared browser, in the owner's hands. The owner
+  signs in, hands back control, and bots read it there as the owner. Its row then says "Signed in through the
+  browser" with Sign in again, Add a token and Remove. Google with no client saved does the same at Gmail.
+  An app that needs nothing (Time, Files with its default folder) connects at once. Only an app with no web
+  sign-in (Obsidian, Git) still asks for its token or folder.
+- Pages read on a signed-in app are private to the run: the run asks before it opens a site it has no
+  Always allow for, so what it read cannot leave in an address.
+
 ## Left to the owner, by design
 
 Each needs the owner's own account or details, which a bot must not supply.

@@ -9,11 +9,11 @@
  *
  * Pure and browser-safe.
  */
-import {titleFrom} from './threads.js?v=c2744e0498';
-import {cleanText} from './core.js?v=c2744e0498';
-import {mentionedBots} from './coordination.js?v=c2744e0498';
-import {MIN_BOT_JOB} from './bot-create.js?v=c2744e0498';
-import {basicKind} from './off-job.js?v=c2744e0498';
+import {titleFrom} from './threads.js?v=cbbedc32a9';
+import {cleanText} from './core.js?v=cbbedc32a9';
+import {mentionedBots} from './coordination.js?v=cbbedc32a9';
+import {MIN_BOT_JOB} from './bot-create.js?v=cbbedc32a9';
+import {basicKind} from './off-job.js?v=cbbedc32a9';
 
 const FILLER = new Set('about after also and are can could does from have here into just like make more need please should some than that their them then there these they this those want what when where which will with would your you for the'.split(' '));
 /** Content words of a text, lower-case, with a trailing plural `s` dropped, so

@@ -10,9 +10,9 @@
  * A run's trace holds one entry per step: {botId, output}. A bot-to-bot ask is
  * two entries, {botId: asker, kind: 'ask', to, task} and then
  * {botId: asked, kind: 'peer', to: asker, output}. */
-import {face} from './ui-face.js?v=c2744e0498';
-import {plain} from './ui-kit.js?v=c2744e0498';
-import {waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=c2744e0498';
+import {face} from './ui-face.js?v=cbbedc32a9';
+import {plain} from './ui-kit.js?v=cbbedc32a9';
+import {waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=cbbedc32a9';
 
 const teamKey = id => `team-${id}`;
 const settingsOf = bot => bot?.settings || {};

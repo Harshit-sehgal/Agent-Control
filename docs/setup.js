@@ -26,17 +26,17 @@
  *   make itself the primary bot, save a rule without the owner's tap, or reach a route the owner could not.
  *
  * Pure and browser-safe: the server reads replies with it and the UI paints the card from it. */
-import {cleanText, validHttpUrl} from './core.js?v=c2744e0498';
-import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=c2744e0498';
-import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=c2744e0498';
-import {controlFence} from './reply-blocks.js?v=c2744e0498';
-import {companyBots, primaryOf} from './company.js?v=c2744e0498';
-import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js?v=c2744e0498';
-import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=c2744e0498';
-import {grantWhat} from './ui-asks.js?v=c2744e0498';
-import {COLOR_NAMES} from './ui-kit.js?v=c2744e0498';
-import {SHAPES} from './company.js?v=c2744e0498';
-import {limitsOf, BACKSTOP} from './limits.js?v=c2744e0498';
+import {cleanText, validHttpUrl} from './core.js?v=cbbedc32a9';
+import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=cbbedc32a9';
+import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=cbbedc32a9';
+import {controlFence} from './reply-blocks.js?v=cbbedc32a9';
+import {companyBots, primaryOf} from './company.js?v=cbbedc32a9';
+import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js?v=cbbedc32a9';
+import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=cbbedc32a9';
+import {grantWhat} from './ui-asks.js?v=cbbedc32a9';
+import {COLOR_NAMES} from './ui-kit.js?v=cbbedc32a9';
+import {SHAPES} from './company.js?v=cbbedc32a9';
+import {limitsOf, BACKSTOP} from './limits.js?v=cbbedc32a9';
 
 export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'schedule', 'remove', 'open', 'signin', 'pause', 'limits', 'basics', 'forget', 'disconnect', 'thread'];
 /** The bot settings a bot may propose. Not the primary role, the browser approval mode, or layout (pins, order). */

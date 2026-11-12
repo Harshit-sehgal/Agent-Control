@@ -82,6 +82,8 @@ function entry(raw, makeId, now) {
   if (setup) out.setup = setup;
   // A bot's working step (it went to fetch pages or call apps): kept for the record, left out of the chat.
   if (raw.step === true && raw.role === 'bot') out.step = true;
+  // The owner paused every bot by hand (not the runaway guard): its card offers Resume.
+  if (raw.manual === true && raw.role === 'system' && out.kind === 'guard') out.manual = true;
   return out;
 }
 

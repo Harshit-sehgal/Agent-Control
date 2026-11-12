@@ -534,6 +534,13 @@ async def setup_cards_apply_the_new_changes(page, base):
     assert state.get('askBasics') is True
     assert next(g for g in state['groups'] if g['id'] == thread)['name'] == 'Goa in March'
     assert state['guard']['paused'] is True
+    # Pausing leaves a Resume card in Atlas's chat, so the way back is right where the owner is talking.
+    resume = page.locator('#main .cv-guard').get_by_role('button', name='Resume')
+    await expect(resume).to_be_visible()
+    await resume.click()
+    await expect(page.locator('#toast')).to_contain_text('running again')
+    await expect(page.locator('#main .cv-guard')).to_have_count(0)
+    assert (await api_state(page))['guard']['paused'] is False
     assert not state.get('memory', {}).get('rulebooks', {}).get(f"bot:{ids['Writer']}", {}).get('rules'), 'the Writer forgot'
     # The colour picker names its colours, so a screen reader hears "Blue", not "Colour 7".
     await page.goto(f"{base}/index.html#profile/{ids['Writer']}/edit")
@@ -1466,6 +1473,13 @@ class Server:
         if path == '/api/connectors':
             if method == 'GET':
                 return await reply({'connectors': self.connectors, 'google': self.google})
+            if body.get('kind') == 'site':
+                app, host = body['app'], {'notion': 'www.notion.so', 'google': 'mail.google.com'}.get(body['app'], f"{body['app']}.example.com")
+                made = next((c for c in self.connectors if c.get('app') == app), None) or {'id': f'{app}-site', 'kind': 'site', 'app': app,
+                        'name': 'Gmail' if app == 'google' else app.title(), 'host': host, 'url': f'https://{host}/', 'status': 'ready', 'statusMessage': '', 'actions': []}
+                if made not in self.connectors:
+                    self.connectors.append(made)
+                return await reply(made, 201)
             if any(c['name'].lower() == body['name'].lower() for c in self.connectors):
                 return await reply({'error': f"A connector called \"{body['name']}\" is already added."}, 409)
             made = connector(body['name'], **({'transport': 'stdio', 'host': None, 'agentServer': body['agentServer'], 'account': f"agent:{body['agentServer']}"} if 'agentServer' in body else {}))
@@ -1566,14 +1580,16 @@ async def connectors_add_and_delete_mcp(page, base):
     await body.locator('.ca-chip', has_text='Design').click()
     await expect(body.locator('.ca-chip', has_text='Design')).to_have_attribute('aria-pressed', 'true')
     await expect(body.locator('#ca-results .ca-app')).to_have_count(1)
-    # An app with a token opens a sheet that asks for it, hidden as it is typed; Escape changes nothing.
-    await body.locator('[data-app="figma"] .ca-go').click()
-    await expect(page.locator('#modal')).to_contain_text('Connect Figma')
+    await body.locator('.ca-chip', has_text='All').click()
+    # An app with no web sign-in opens a sheet that asks for its token, hidden as it is typed; Escape changes nothing.
+    await body.locator('#ca-search').fill('obsidian')
+    await body.locator('[data-app="obsidian"] .ca-go').click()
+    await expect(page.locator('#modal')).to_contain_text('Connect Obsidian')
     await expect(page.locator('#modal')).to_contain_text('Runs on this computer')
-    await expect(page.locator('#catalog-connect-form input[name="FIGMA_API_KEY"]')).to_have_attribute('type', 'password')
+    await expect(page.locator('#catalog-connect-form input[name="OBSIDIAN_API_KEY"]')).to_have_attribute('type', 'password')
     await page.keyboard.press('Escape')
     await expect(page.locator('#catalog-connect-form')).to_have_count(0)
-    await body.locator('.ca-chip', has_text='All').click()
+    await body.locator('#ca-search').fill('')
     await expect(body.locator('.st-h', has_text='Connected')).to_be_visible()
     await expect(body).to_contain_text('No servers yet')
     # Add a server over HTTP: the address and a header go out once. The raw form is folded away.
@@ -1631,6 +1647,45 @@ async def connectors_add_and_delete_mcp(page, base):
     await expect(page.locator('.cn-mcp[data-connector="notes"]')).to_have_count(0)
     assert len(server.sent('DELETE', '/api/connectors/notes')) == 1
     await expect(page.locator('.cn-mcp')).to_have_count(1)
+
+
+async def connect_apps_one_tap(page, base):
+    """Connect is one tap, like Gmail: an app with a web sign-in opens it in the shared browser, in the owner's hands."""
+    server = Server()
+    live = []
+
+    async def live_handle(route):
+        request = route.request
+        path = re.sub(r'^https?://[^/]+', '', request.url).split('?')[0]
+        if request.method != 'GET':
+            live.append((path, json.loads(request.post_data) if request.post_data else None))
+        data = [] if path == '/api/browser-live' else {'botId': path.split('/')[3] if path.count('/') >= 3 else None, 'agent': False, 'seq': 0, 'changed': False, 'state': 'driving', 'url': None, 'title': None, 'site': None}
+        await route.fulfill(status=200, content_type='application/json', body=json.dumps(data if request.method == 'GET' else {'ok': True, 'state': 'driving'}))
+    await page.add_init_script(via_fetch(['/api/connectors', '/api/ai', '/api/agents', '/api/activity/', '/api/browser-live']))
+    for pattern in ('**/api/connectors**', '**/api/ai**', '**/api/agents**', '**/api/activity/**'):
+        await page.route(pattern, server.handle)
+    await page.route('**/api/browser-live**', live_handle)
+    await open_app(page, base)
+    await open_settings(page, 'conn')
+    body = page.locator('#main .st-dlg .st-body')
+    await body.locator('.ca-sec[aria-label="Recommended"] [data-app="notion"] .ca-go').click()
+    await expect(page.locator('#toast')).to_contain_text('Sign in to Notion, then tap Hand back control')
+    assert server.sent('POST', '/api/connectors') == [{'kind': 'site', 'app': 'notion'}]
+    await eventually(lambda: [p.rsplit('/', 1)[1] for p, _ in live] == ['takeover', 'input'])
+    assert live[1][1] == {'type': 'navigate', 'url': 'https://www.notion.so/login'}, live
+    await expect(page.locator('#catalog-connect-form')).to_have_count(0)
+    # Back on the page, Notion is connected, and its row offers to sign in again or remove it.
+    await page.evaluate("location.hash = 'settings/conn'")
+    await expect(body.locator('.ca-sum')).to_contain_text('1 connected')
+    row = body.locator('.cn-site[data-connector="notion-site"]')
+    await expect(row).to_contain_text('Signed in through the browser')
+    await expect(row.get_by_role('button', name='Sign in again')).to_be_visible()
+    # With no Google client saved, Connect Google is a sign-in at Gmail too.
+    await body.locator('#ca-search').fill('google')
+    await body.locator('[data-app="google"] .ca-go').click()
+    await expect(page.locator('#toast')).to_contain_text('Sign in to Gmail')
+    assert server.sent('POST', '/api/connectors')[-1] == {'kind': 'site', 'app': 'google'}
+    await eventually(lambda: live[-1][1] == {'type': 'navigate', 'url': 'https://mail.google.com/'})
 
 
 async def google_setup_form_connect_and_reconnect(page, base):
@@ -2262,6 +2317,7 @@ async def main():
             await h.scenario('computer: the pill carries the site chip, opens the view and says You are driving', computer_site_chip_on_the_pill)
             await h.scenario('phone: the Computer view fits and its controls are thumb-sized', phone_computer_view, PHONE)
             await h.scenario('connectors: add an MCP server over HTTP and on the agent, refresh its tools, delete asks first, no secret is painted', connectors_add_and_delete_mcp)
+            await h.scenario('connectors: Connect is one tap, signing in to the app in the shared browser', connect_apps_one_tap)
             await h.scenario('connectors: the Google setup form, a plain Connect Google link, connected and reconnect states', google_setup_form_connect_and_reconnect)
             await h.scenario('connectors: ?google=connected toasts once, strips the address and opens Connectors; an error says why', google_return_toast_and_clean_address)
             await h.scenario('models: a subscription is a name and an engine with no key field, and its row says where it is signed in', subscription_provider_and_cli_status)

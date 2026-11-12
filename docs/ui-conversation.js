@@ -7,25 +7,25 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=c2744e0498';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=c2744e0498';
-import {requestOfMessage} from './bot-browser.js?v=c2744e0498';
-import {validHttpUrl} from './core.js?v=c2744e0498';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=c2744e0498';
-import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=c2744e0498';
-import {isPrimary} from './company.js?v=c2744e0498';
-import {hasJob, modelChip} from './ui-profile-model.js?v=c2744e0498';
-import {scheduleTaskBody} from './schedules.js?v=c2744e0498';
-import {feed} from './ui-feed.js?v=c2744e0498';
-import {setupCardOf, setupButton} from './setup.js?v=c2744e0498';
-import {askCard} from './ui-asks.js?v=c2744e0498';
-import {face, botColor} from './ui-face.js?v=c2744e0498';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=c2744e0498';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=c2744e0498';
-import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=c2744e0498';
-import {toast} from './ui-dialogs.js?v=c2744e0498';
-import {siteChip} from './ui-computer-view.js?v=c2744e0498';
-import {cliChoice, googleCard} from './ui-connect-model.js?v=c2744e0498';
+import {OFFJOB_CHOICES} from './off-job.js?v=cbbedc32a9';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=cbbedc32a9';
+import {requestOfMessage} from './bot-browser.js?v=cbbedc32a9';
+import {validHttpUrl} from './core.js?v=cbbedc32a9';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=cbbedc32a9';
+import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=cbbedc32a9';
+import {isPrimary} from './company.js?v=cbbedc32a9';
+import {hasJob, modelChip} from './ui-profile-model.js?v=cbbedc32a9';
+import {scheduleTaskBody} from './schedules.js?v=cbbedc32a9';
+import {feed} from './ui-feed.js?v=cbbedc32a9';
+import {setupCardOf, setupButton} from './setup.js?v=cbbedc32a9';
+import {askCard} from './ui-asks.js?v=cbbedc32a9';
+import {face, botColor} from './ui-face.js?v=cbbedc32a9';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=cbbedc32a9';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=cbbedc32a9';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=cbbedc32a9';
+import {toast} from './ui-dialogs.js?v=cbbedc32a9';
+import {siteChip} from './ui-computer-view.js?v=cbbedc32a9';
+import {cliChoice, googleCard} from './ui-connect-model.js?v=cbbedc32a9';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -180,6 +180,8 @@ function limitEntry({run}, conv) {
 
 /** The primary's own line when the guard paused everything. Once answered it is a quiet note. */
 function guardEntry({message: m, open}) {
+  // Paused by hand: one Resume button. Paused by the runaway guard: Keep going or Stop what it parked.
+  if (open && m.manual) return `<div class="cv-card flat cv-guard"><p>${esc(m.text)}</p>${canWrite() ? `<div class="acts">${btn('Resume', 'guard-resume', {kind: 'primary'})}</div>` : ''}</div>`;
   return open ? guardCard(m.text) : `<div class="cv-note"><span>${esc(m.text)}</span></div>`;
 }
 

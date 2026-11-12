@@ -11,10 +11,10 @@
  * window is a fixed five minutes from `since`; a quiet window starts the count
  * over. Pure and browser-safe: the server and the Pages demo share it.
  */
-import {activity} from './core.js?v=c2744e0498';
-import {logActivity} from './activity-log.js?v=c2744e0498';
-import {addChatMessages} from './chats.js?v=c2744e0498';
-import {primaryOf} from './company.js?v=c2744e0498';
+import {activity} from './core.js?v=cbbedc32a9';
+import {logActivity} from './activity-log.js?v=cbbedc32a9';
+import {addChatMessages} from './chats.js?v=cbbedc32a9';
+import {primaryOf} from './company.js?v=cbbedc32a9';
 
 export const GUARD = {windowMs: 300000, creations: 50, runs: 300};
 
@@ -28,10 +28,10 @@ const guardOf = state => {
 
 export const paused = state => Boolean(state?.guard?.paused);
 
-const say = (state, g, text) => {
+const say = (state, g, text, extra = {}) => {
   const primary = primaryOf(state);
   if (!primary) return;
-  try { addChatMessages(state, primary.id, [{id: `guard-${g.pausedAt}`.slice(0, 64), role: 'system', kind: 'guard', text}], {trusted: true}); }
+  try { addChatMessages(state, primary.id, [{id: `guard-${g.pausedAt}`.slice(0, 64), role: 'system', kind: 'guard', text, ...extra}], {trusted: true}); }
   catch { /* The primary's chat is gone; the flag still holds. */ }
 };
 
@@ -58,6 +58,8 @@ export function pauseAll(state, now = new Date().toISOString()) {
   const g = guardOf(state);
   if (g.paused) return g;
   Object.assign(g, {paused: true, pausedAt: now});
+  // A Resume button in the primary bot's chat, so the way back is where the owner is talking.
+  say(state, g, 'Every bot is paused. Nothing runs until you resume them.', {manual: true});
   activity(state, 'bot', 'Paused all bots.');
   logActivity(state, {kind: 'bots', text: 'All bots were paused.', now});
   return g;

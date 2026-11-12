@@ -72,12 +72,34 @@ export const APPS = [
     web: bearer('https://mcp.zapier.com/api/v1/connect', token('Connection token', 'Create a server and copy its connection token.', 'mcp.zapier.com'))},
 ];
 
+// Where each app signs in on the web. Connect opens it in the shared browser (as Gmail does with no Google client
+// saved): the owner signs in once and bots read the app there, as the owner. A token (the form) gives a bot the app's
+// own tools instead, and stays one tap away. An app with no web sign-in of its own has no entry.
+const SITES = {
+  notion: 'https://www.notion.so/login', github: 'https://github.com/login', slack: 'https://app.slack.com/client',
+  linear: 'https://linear.app/login', atlassian: 'https://home.atlassian.com/', todoist: 'https://app.todoist.com/auth/login',
+  figma: 'https://www.figma.com/login', sentry: 'https://sentry.io/auth/login/', cloudflare: 'https://dash.cloudflare.com/login',
+  supabase: 'https://supabase.com/dashboard/sign-in', airtable: 'https://airtable.com/login', stripe: 'https://dashboard.stripe.com/login',
+  zapier: 'https://zapier.com/app/login', google: 'https://mail.google.com/',
+};
+for (const app of APPS) if (SITES[app.id]) app.site = SITES[app.id];
+
 const BY_ID = new Map(APPS.map(a => [a.id, a]));
 /** The app with this id, or null. */
 export const appById = id => BY_ID.get(id) || null;
 
 /** The inputs the owner fills in for an app (none for Google). */
 export const appInputs = app => app?.run?.inputs || app?.web?.inputs || [];
+
+/** What one tap on Connect does: `now` (nothing to fill in, or only defaults), `site` (sign in on the app's own page in
+ * the shared browser), `google` (Google's sign-in with the owner's saved client), `gmail` (no client saved: sign in to
+ * Gmail in the shared browser) or `form` (an app with no web sign-in: its token or folder). */
+export function connectHow(app, {googleClient = false} = {}) {
+  if (!app) return 'form';
+  if (app.google) return googleClient ? 'google' : 'gmail';
+  if (appInputs(app).every(i => i.optional || i.default)) return 'now';
+  return app.site ? 'site' : 'form';
+}
 
 /** Initials of a two-word name, else its first letter. Text after a `·` is a description, not the name. */
 export function monogram(app) {
@@ -95,6 +117,7 @@ const hostOf = url => { try { return new URL(url).host.toLowerCase(); } catch { 
 
 /** Whether an app is already among the connectors: by its server name on this computer, or by its web host. */
 function isConnected(app, connectors, google) {
+  if (connectors.some(c => c?.kind === 'site' && c.app === app.id)) return true;
   if (app.google) return Boolean(google?.connected);
   const host = app.web ? hostOf(app.web.url) : '';
   return connectors.some(c => c?.kind === 'mcp' && ((app.run && c.agentServer === app.id) || (host && String(c.host || '').toLowerCase() === host)));

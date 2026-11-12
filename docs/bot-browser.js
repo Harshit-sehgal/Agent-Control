@@ -20,11 +20,11 @@
  * Posting stays human: interaction (click, type) is refused on X and Twitter
  * hosts, so no bot can press Post there. Reading those pages is allowed.
  */
-import {cleanText, validHttpUrl} from './core.js?v=c2744e0498';
-import {fail} from './errors.js?v=c2744e0498';
-import {decide, createAsk, scopeOf} from './asks.js?v=c2744e0498';
-import {controlFence} from './reply-blocks.js?v=c2744e0498';
-import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=c2744e0498';
+import {cleanText, validHttpUrl} from './core.js?v=cbbedc32a9';
+import {fail} from './errors.js?v=cbbedc32a9';
+import {decide, createAsk, scopeOf} from './asks.js?v=cbbedc32a9';
+import {controlFence} from './reply-blocks.js?v=cbbedc32a9';
+import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=cbbedc32a9';
 
 /** The most page text one model turn carries (the pages of a round together). */
 export const MAX_PAGE_CHARS = 24000;
@@ -452,8 +452,10 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
   // signed-in mail or files read in the browser. A new site then asks (asks.js verdict); the private site itself
   // does not, since reading more of the owner's own inbox carries nothing anywhere new.
   const run = runId ? (state.groupRuns || []).find(r => r.id === runId) : null;
+  // An app the owner connected by signing in to it in this browser is private too, like their mail.
+  const signedIn = new Set((state.connectors || []).filter(c => c?.kind === 'site' && c.host).map(c => String(c.host).toLowerCase()));
   const privateHosts = new Set((state.browserRequests || []).filter(r => runId && r.runId === runId && r.status === 'done')
-    .map(r => hostOf(r.result?.finalUrl || r.url)).filter(host => PRIVATE_HOSTS.test(host)));
+    .map(r => hostOf(r.result?.finalUrl || r.url)).filter(host => PRIVATE_HOSTS.test(host) || signedIn.has(host)));
   const guarded = Boolean(run && (run.connectorPage || run.readPrivate || privateHosts.size));
   if (!limited && !closed) for (const item of found) {
     if (!item.ok) { say(`${bot.name} asked for a web page, but the request was refused: ${item.error}`); invalid.push(item.error); continue; }

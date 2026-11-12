@@ -19,7 +19,7 @@ import {controlFence} from './reply-blocks.js';
 import {decide, createAsk} from './asks.js';
 import {BACKSTOP, pagesCap, roundsCap} from './limits.js';
 
-export const CONNECTOR_KINDS = ['google', 'mcp'];
+export const CONNECTOR_KINDS = ['google', 'mcp', 'site'];
 /** `ready` works; `setup` is Google with a client saved and no sign-in yet; `reconnect` is a sign-in that
  * lapsed (Google rejected the refresh token); `error` is anything else that stopped it, with its words in `statusMessage`. */
 export const CONNECTOR_STATUSES = ['ready', 'setup', 'reconnect', 'error'];
@@ -65,6 +65,15 @@ export function newConnectorId(state, name, kind = 'mcp') {
   return id;
 }
 
+/** An app the owner signed in to in the shared browser (Connect apps, one tap). It has no tools and no secret: bots
+ * open its pages with the browser block, as the owner, and what they read there is private to the run. */
+export function siteConnector(state, app, {now = new Date().toISOString()} = {}) {
+  if (!app?.site) throw Object.assign(new Error(`${app?.name || 'That app'} has no web sign-in to open. Connect it with its token.`), {status: 400});
+  const page = new URL(app.site), name = app.google ? 'Gmail' : app.name;
+  return {id: newConnectorId(state, name, 'site'), kind: 'site', app: app.id, name, host: page.host.toLowerCase(),
+    url: `${page.origin}/`, status: 'ready', statusMessage: '', actions: [], addedAt: now, checkedAt: now};
+}
+
 /** The connector a bot means by `use`: its id, or its name in any case. Null when none or when the name is not one. */
 export function findConnector(state, use) {
   if (typeof use !== 'string') return null;
@@ -77,7 +86,7 @@ export function findConnector(state, use) {
 /** What a route or the state snapshot may show: never an id into the vault. */
 export const publicConnector = c => ({
   id: c.id, kind: c.kind, name: c.name, account: c.account ?? null, status: c.status || 'ready', statusMessage: c.statusMessage || '',
-  transport: c.transport ?? null, host: c.host ?? null, agentServer: c.agentServer ?? null,
+  transport: c.transport ?? null, host: c.host ?? null, agentServer: c.agentServer ?? null, ...(c.kind === 'site' ? {app: c.app, url: c.url} : {}),
   actions: (c.actions || []).map(a => ({name: a.name, write: Boolean(a.write), description: cleanText(a.description, 200)})),
   addedAt: c.addedAt ?? null, checkedAt: c.checkedAt ?? null,
 });
@@ -178,7 +187,9 @@ export function envelopeConnectors(state) {
   let size = 0;
   for (const c of Array.isArray(state?.connectors) ? state.connectors : []) {
     if ((c.status || 'ready') !== 'ready') continue;
-    const entry = {id: c.id, name: c.name, account: c.account ?? null, tools: (c.actions || []).slice(0, 30).map(a => ({name: a.name, description: cleanText(a.description, 120), write: Boolean(a.write)}))};
+    const entry = c.kind === 'site'
+      ? {id: c.id, name: c.name, site: c.url, how: 'The owner is signed in to this in the shared browser. Open its pages with the browser block (under this address); it has no tools to call.'}
+      : {id: c.id, name: c.name, account: c.account ?? null, tools: (c.actions || []).slice(0, 30).map(a => ({name: a.name, description: cleanText(a.description, 120), write: Boolean(a.write)}))};
     size += JSON.stringify(entry).length;
     if (size > 2500 && out.length) break;
     out.push(entry);

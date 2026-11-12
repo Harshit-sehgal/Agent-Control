@@ -452,8 +452,10 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
   // signed-in mail or files read in the browser. A new site then asks (asks.js verdict); the private site itself
   // does not, since reading more of the owner's own inbox carries nothing anywhere new.
   const run = runId ? (state.groupRuns || []).find(r => r.id === runId) : null;
+  // An app the owner connected by signing in to it in this browser is private too, like their mail.
+  const signedIn = new Set((state.connectors || []).filter(c => c?.kind === 'site' && c.host).map(c => String(c.host).toLowerCase()));
   const privateHosts = new Set((state.browserRequests || []).filter(r => runId && r.runId === runId && r.status === 'done')
-    .map(r => hostOf(r.result?.finalUrl || r.url)).filter(host => PRIVATE_HOSTS.test(host)));
+    .map(r => hostOf(r.result?.finalUrl || r.url)).filter(host => PRIVATE_HOSTS.test(host) || signedIn.has(host)));
   const guarded = Boolean(run && (run.connectorPage || run.readPrivate || privateHosts.size));
   if (!limited && !closed) for (const item of found) {
     if (!item.ok) { say(`${bot.name} asked for a web page, but the request was refused: ${item.error}`); invalid.push(item.error); continue; }

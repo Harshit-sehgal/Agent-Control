@@ -180,6 +180,8 @@ function limitEntry({run}, conv) {
 
 /** The primary's own line when the guard paused everything. Once answered it is a quiet note. */
 function guardEntry({message: m, open}) {
+  // Paused by hand: one Resume button. Paused by the runaway guard: Keep going or Stop what it parked.
+  if (open && m.manual) return `<div class="cv-card flat cv-guard"><p>${esc(m.text)}</p>${canWrite() ? `<div class="acts">${btn('Resume', 'guard-resume', {kind: 'primary'})}</div>` : ''}</div>`;
   return open ? guardCard(m.text) : `<div class="cv-note"><span>${esc(m.text)}</span></div>`;
 }
 
