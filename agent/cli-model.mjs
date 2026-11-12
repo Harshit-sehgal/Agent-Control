@@ -49,6 +49,24 @@ export function capReplyText(text, max = MAX_REPLY_BYTES) {
   return text.slice(0, end) + CUT_NOTE;
 }
 const MAX_PROMPT_CHARS = 200000;
+/** Images the owner attached, as the CLI is handed them: Claude reads image blocks on stream-json input,
+ * codex reads files named with -i. The same bounds as a model request on the server (shared/attachments.js). */
+const IMAGE_TYPES = {'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif'};
+const MAX_IMAGES = 10, MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
+export function cleanImages(images) {
+  if (images === undefined || images === null) return [];
+  const bad = why => { throw new CliModelError('bad-request', `The attached images could not be used: ${why}.`); };
+  if (!Array.isArray(images)) bad('not a list');
+  if (images.length > MAX_IMAGES) bad(`more than ${MAX_IMAGES}`);
+  return images.map(image => {
+    if (!image || typeof image !== 'object' || !IMAGE_TYPES[image.type]) bad('an image type is not PNG, JPEG, WebP or GIF');
+    const data = String(image.data ?? '');
+    if (!data || data.length % 4 !== 0 || !BASE64.test(data)) bad('an image is not base64');
+    if (Math.floor(data.length * 3 / 4) > MAX_IMAGE_BYTES) bad('an image is over 5 MB');
+    return {type: image.type, data};
+  });
+}
 const MAX_STDERR = 16 * 1024;
 export const DEFAULT_TIMEOUT_MS = 180000;
 const MIN_TIMEOUT_MS = 5000;
@@ -81,7 +99,7 @@ const SYSTEM_TEXT = 'You are a bot inside an app that does things for you. Use n
 /** The program and argument list for one run. `dir` is the empty scratch directory. */
 const CODEX_FEATURES_OFF = ['shell_tool', 'unified_exec', 'shell_snapshot', 'browser_use', 'browser_use_external', 'browser_use_full_cdp_access', 'in_app_browser', 'computer_use', 'apps'];
 
-export function buildCommand(engine, {model = '', effort = '', dir}) {
+export function buildCommand(engine, {model = '', effort = '', dir, imageFiles = [], images = false}) {
   const spec = cliEngineById(engine);
   if (!spec) throw new CliModelError('bad-request', 'Unknown engine. Use claude or codex.');
   const chosen = cleanCliModel(model);
@@ -94,6 +112,8 @@ export function buildCommand(engine, {model = '', effort = '', dir}) {
       '--tools', '',
       '--safe-mode', '--strict-mcp-config', '--permission-prompts', 'none', '--no-session-persistence',
       '--system-prompt', SYSTEM_TEXT,
+      // With images the prompt is one stream-json user message: the image blocks, then the text.
+      ...(images ? ['--input-format', 'stream-json'] : []),
       ...(chosen ? ['--model', chosen] : []),
       ...(level ? ['--effort', level] : []),
     ]};
@@ -108,6 +128,7 @@ export function buildCommand(engine, {model = '', effort = '', dir}) {
     ...(chosen ? ['-m', chosen] : []),
     // codex reads a -c value as TOML; the quotes keep it a string.
     ...(level ? ['-c', `model_reasoning_effort="${level}"`] : []),
+    ...imageFiles.flatMap(file => ['-i', file]),
     '-',
   ]};
 }
@@ -199,13 +220,20 @@ export async function runCliModel(options = {}) {
     throw error;
   }
 }
-async function runCliOnce({engine, model = '', effort = '', instructions = '', input = '', timeoutMs = DEFAULT_TIMEOUT_MS, maxBytes = MAX_STDOUT_BYTES, env = process.env} = {}) {
+async function runCliOnce({engine, model = '', effort = '', instructions = '', input = '', images = [], timeoutMs = DEFAULT_TIMEOUT_MS, maxBytes = MAX_STDOUT_BYTES, env = process.env} = {}) {
   const prompt = promptText({instructions, input});
   if (!prompt.trim()) throw new CliModelError('bad-request', 'There is nothing to send to the model.');
   if (prompt.length > MAX_PROMPT_CHARS) throw new CliModelError('bad-request', 'The prompt is too long to send to a CLI.');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-cli-'));
   try {
-    const {command, args, spec} = buildCommand(engine, {model, effort, dir});
+    const pictures = cleanImages(images);
+    // codex reads images from files: they go in the run's own empty folder, which is removed after.
+    const imageFiles = engine === 'codex' ? pictures.map((image, i) => {
+      const file = path.join(dir, `image-${i + 1}.${IMAGE_TYPES[image.type]}`);
+      fs.writeFileSync(file, Buffer.from(image.data, 'base64'), {mode: 0o600});
+      return file;
+    }) : [];
+    const {command, args, spec} = buildCommand(engine, {model, effort, dir, imageFiles, images: engine === 'claude' && pictures.length > 0});
     const started = Date.now();
     return await new Promise((resolve, reject) => {
       const child = spawn(command, args, {cwd: dir, env: cliEnv(env), stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32'});
@@ -238,7 +266,12 @@ async function runCliOnce({engine, model = '', effort = '', instructions = '', i
         done(classify(said, spec, cleanCliModel(model) || ''));
       });
       // codex has no system-prompt flag, so it gets the same fixed words as a lead-in.
-      child.stdin.end(spec.id === 'codex' ? `${SYSTEM_TEXT}\n\n${prompt}` : prompt);
+      if (spec.id === 'codex') child.stdin.end(`${SYSTEM_TEXT}\n\n${prompt}`);
+      else if (pictures.length) child.stdin.end(JSON.stringify({type: 'user', message: {role: 'user', content: [
+        ...pictures.map(image => ({type: 'image', source: {type: 'base64', media_type: image.type, data: image.data}})),
+        {type: 'text', text: prompt},
+      ]}}) + '\n');
+      else child.stdin.end(prompt);
     });
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 }
@@ -254,7 +287,8 @@ export async function runModelTask(payload, {env = process.env} = {}) {
     if (p.instructions !== undefined && typeof p.instructions !== 'string') throw new CliModelError('bad-request', 'Instructions must be text.');
     const asked = Number(p.timeoutMs);
     const timeoutMs = Number.isFinite(asked) && asked > 0 ? Math.min(MAX_TIMEOUT_MS, Math.max(MIN_TIMEOUT_MS, asked)) : DEFAULT_TIMEOUT_MS;
-    const done = await runCliModel({engine: cliEngineById(p.engine).id, model: p.model || '', effort: p.effort || '', instructions: p.instructions || '', input: p.input, timeoutMs, env});
+    const images = cleanImages(p.images);
+    const done = await runCliModel({engine: cliEngineById(p.engine).id, model: p.model || '', effort: p.effort || '', instructions: p.instructions || '', input: p.input, images, timeoutMs, env});
     return {ok: true, ...done};
   } catch (error) {
     if (error instanceof CliModelError) return {ok: false, code: error.code, message: error.message, detail: error.detail};

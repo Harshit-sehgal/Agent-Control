@@ -7,32 +7,33 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=691b5cf293';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=691b5cf293';
-import {requestOfMessage} from './bot-browser.js?v=691b5cf293';
-import {validHttpUrl} from './core.js?v=691b5cf293';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=691b5cf293';
-import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=691b5cf293';
-import {isPrimary} from './company.js?v=691b5cf293';
-import {hasJob, modelChip} from './ui-profile-model.js?v=691b5cf293';
-import {scheduleTaskBody} from './schedules.js?v=691b5cf293';
-import {feed, fileStrip} from './ui-feed.js?v=691b5cf293';
-import {attachButton, chipsSlot, wireAttach} from './ui-attach.js?v=691b5cf293';
-import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js?v=691b5cf293';
-import {askCard} from './ui-asks.js?v=691b5cf293';
-import {UNTIL_CHOICES, untilFor} from './asks.js?v=691b5cf293';
-import {undoToast} from './ui-settings.js?v=691b5cf293';
-import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=691b5cf293';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=691b5cf293';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=691b5cf293';
-import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=691b5cf293';
-import {toast, confirmSheet} from './ui-dialogs.js?v=691b5cf293';
-import {siteChip, thumbSlot} from './ui-computer-view.js?v=691b5cf293';
-import {cliChoice, googleCard} from './ui-connect-model.js?v=691b5cf293';
-import {connectAppNow} from './ui-connect.js?v=691b5cf293';
-import {appById} from './app-catalog.js?v=691b5cf293';
-import {templateChipsHtml, templateButton} from './ui-templates.js?v=691b5cf293';
-import {usageWords} from './usage.js?v=691b5cf293';
+import {OFFJOB_CHOICES} from './off-job.js?v=20a8b2d024';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=20a8b2d024';
+import {requestOfMessage} from './bot-browser.js?v=20a8b2d024';
+import {validHttpUrl} from './core.js?v=20a8b2d024';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=20a8b2d024';
+import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=20a8b2d024';
+import {isPrimary} from './company.js?v=20a8b2d024';
+import {hasJob, modelChip} from './ui-profile-model.js?v=20a8b2d024';
+import {scheduleTaskBody} from './schedules.js?v=20a8b2d024';
+import {briefingTaskBody} from './briefing.js?v=20a8b2d024';
+import {feed, fileStrip} from './ui-feed.js?v=20a8b2d024';
+import {attachButton, chipsSlot, wireAttach} from './ui-attach.js?v=20a8b2d024';
+import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js?v=20a8b2d024';
+import {askCard} from './ui-asks.js?v=20a8b2d024';
+import {UNTIL_CHOICES, untilFor} from './asks.js?v=20a8b2d024';
+import {undoToast} from './ui-settings.js?v=20a8b2d024';
+import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=20a8b2d024';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=20a8b2d024';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=20a8b2d024';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=20a8b2d024';
+import {toast, confirmSheet} from './ui-dialogs.js?v=20a8b2d024';
+import {siteChip, thumbSlot} from './ui-computer-view.js?v=20a8b2d024';
+import {cliChoice, googleCard} from './ui-connect-model.js?v=20a8b2d024';
+import {connectAppNow} from './ui-connect.js?v=20a8b2d024';
+import {appById} from './app-catalog.js?v=20a8b2d024';
+import {templateChipsHtml, templateButton} from './ui-templates.js?v=20a8b2d024';
+import {usageWords} from './usage.js?v=20a8b2d024';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -547,6 +548,14 @@ export const conversationActions = {
       if (!group) throw new Error('That bot is already gone.');
       await api(`/api/groups/${group.id}/bots/${card.botId}`, 'DELETE', {});
     }
+    else if (card.action === 'template') await (card.remove ? api(`/api/templates/${encodeURIComponent(card.templateId)}`, 'DELETE') : api('/api/templates', 'POST', {title: card.title, text: card.templateText}));
+    else if (card.action === 'preset') {
+      // Like the Settings preset, the switch comes with Undo: the route returns what was there before.
+      const out = await api('/api/permissions/preset', 'POST', {preset: card.preset});
+      await sync();
+      return void undoToast(`${card.text.match(/^Switch to ([^:]+)/)?.[1] || 'The preset'} is on.`, out?.undo);
+    }
+    else if (card.action === 'briefing') await (card.stop ? api(`/api/tasks/${encodeURIComponent(card.taskId)}`, 'DELETE') : api('/api/tasks', 'POST', briefingTaskBody(store.state, {at: card.at})));
     else if (card.action === 'rule') await api('/api/grants', 'POST', {botId: card.botId, action: card.act, ...(card.scope ? {scope: card.scope} : {}), choice: card.choice});
     else if (['job', 'rename', 'settings'].includes(card.action)) {
       const group = groupOfBot(card.botId);

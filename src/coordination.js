@@ -428,7 +428,7 @@ async function runGroupInner(store,id,executor){
         // The owner's fallback model answered: the run says which model did, and why the bot's own did not.
         for(const fell of fellBack){
           const who=s.groups.flatMap(x=>x.bots||[]).find(b=>b.id===fell.botId)?.name||bot.name;
-          say(s,live,{id:randomUUID(),role:'system',kind:'fallback',text:`${who}'s model (${fell.from}) ${fell.why}, so the fallback model ${fell.to} answered.`,runId:id,at:stamp()});
+          say(s,live,{id:randomUUID(),role:'system',kind:'fallback',text:`${who}'s model (${fell.from}) couldn't answer (${fell.why}), so the fallback model ${fell.to} answered instead.`,runId:id,at:stamp()});
         }
         const chat=s.groupMessages[live.groupId]??=[];
         // A reply that went to fetch pages or call apps is a working step: the run's live line covers it, and

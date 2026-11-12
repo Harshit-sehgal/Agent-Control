@@ -71,7 +71,7 @@ export function monthByBot(state, names = new Map(), now = new Date()) {
   return {month, rows: list, total: {...total, tokens: tokensOf(total)}};
 }
 
-const short = n => (n >= 1e6 ? `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}k` : String(n));
+export const short = n => (n >= 1e6 ? `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}k` : String(n));
 export const dollars = v => (v > 0 && v < 0.01 ? '<$0.01' : `$${v.toFixed(2)}`);
 
 /** One line for a total: tokens always, money only when every priced call had one. '' when nothing was used. */

@@ -227,10 +227,13 @@ test('a 400 about something else is not retried without the image', async () => 
   assert.equal(p.requests.length, 1);
 });
 
-test('a subscription CLI is handed the note instead of the image', async () => {
-  let said = '';
-  await executeCustomBot({instructions: 'Help.'}, withImage, {kind: 'local-cli', engine: 'claude', run: async ({input}) => { said = input; return 'ok'; }}, {readFile: readPng});
-  assert.match(said, /cannot see images/);
+test('a subscription CLI is handed the images themselves, not a note', async () => {
+  let got = null;
+  await executeCustomBot({instructions: 'Help.'}, withImage, {kind: 'local-cli', engine: 'claude', run: async call => { got = call; return 'ok'; }}, {readFile: readPng});
+  assert.doesNotMatch(got.input, /cannot see images/);
+  assert.equal(got.images.length, 1);
+  assert.equal(got.images[0].type, 'image/png');
+  assert.ok(got.images[0].data.length > 0);
 });
 
 test('the feed shows a thumbnail per image and a chip per file, with names escaped and only safe links', async () => {

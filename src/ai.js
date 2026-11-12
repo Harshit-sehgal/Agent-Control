@@ -447,9 +447,8 @@ async function callOnce({instructions,input,maxTokens,config,temperature=null,bo
   // one (the Pages demo, a test) has nowhere to run.
   if(config?.kind==='local-cli'){
     if(typeof config.run!=='function')throw upstream('This model runs on a paired local agent and is not available here.',422);
-    // A CLI is handed text only, so an attached image becomes a note it can read.
-    const said=images?.length?`${input}\n\n${imageNote(images.length)}`:input;
-    const out=await config.run({engine:config.engine,model:config.model||'',effort:cleanEffort(config.effort)||'',instructions,input:said});
+    // The paired agent hands the images to the CLI itself (image blocks for claude, -i files for codex).
+    const out=await config.run({engine:config.engine,model:config.model||'',effort:cleanEffort(config.effort)||'',instructions,input,...(images?.length?{images:images.map(({type,data})=>({type,data}))}:{})});
     // A runner answers with text, or with {text, usage} when the CLI reported its tokens.
     const text=typeof out==='string'?out:out?.text;
     await noteUsage({...(out?.usage||{}),subscription:true,model:config.model||config.engine||'',providerId:config.providerId||null,botId,...from});

@@ -70,5 +70,5 @@ test('when the fallback model answered, the trace and the chat say which model d
   const all = Object.values(store.read().chats || {}).flatMap(c => Array.isArray(c) ? c : c?.messages || []);
   const line = all.find(m => m.kind === 'fallback');
   assert.ok(line, 'the chat says a fallback answered');
-  assert.match(line.text, /Scout's model \(main-model\) rate limited, so the fallback model spare-model answered/);
+  assert.match(line.text, /Scout's model \(main-model\) couldn't answer \(rate limited\), so the fallback model spare-model answered instead/);
 });

@@ -16,6 +16,7 @@ import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js';
 import {isPrimary} from './company.js';
 import {hasJob, modelChip} from './ui-profile-model.js';
 import {scheduleTaskBody} from './schedules.js';
+import {briefingTaskBody} from './briefing.js';
 import {feed, fileStrip} from './ui-feed.js';
 import {attachButton, chipsSlot, wireAttach} from './ui-attach.js';
 import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js';
@@ -547,6 +548,14 @@ export const conversationActions = {
       if (!group) throw new Error('That bot is already gone.');
       await api(`/api/groups/${group.id}/bots/${card.botId}`, 'DELETE', {});
     }
+    else if (card.action === 'template') await (card.remove ? api(`/api/templates/${encodeURIComponent(card.templateId)}`, 'DELETE') : api('/api/templates', 'POST', {title: card.title, text: card.templateText}));
+    else if (card.action === 'preset') {
+      // Like the Settings preset, the switch comes with Undo: the route returns what was there before.
+      const out = await api('/api/permissions/preset', 'POST', {preset: card.preset});
+      await sync();
+      return void undoToast(`${card.text.match(/^Switch to ([^:]+)/)?.[1] || 'The preset'} is on.`, out?.undo);
+    }
+    else if (card.action === 'briefing') await (card.stop ? api(`/api/tasks/${encodeURIComponent(card.taskId)}`, 'DELETE') : api('/api/tasks', 'POST', briefingTaskBody(store.state, {at: card.at})));
     else if (card.action === 'rule') await api('/api/grants', 'POST', {botId: card.botId, action: card.act, ...(card.scope ? {scope: card.scope} : {}), choice: card.choice});
     else if (['job', 'rename', 'settings'].includes(card.action)) {
       const group = groupOfBot(card.botId);

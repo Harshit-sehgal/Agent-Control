@@ -38,8 +38,11 @@ import {COLOR_NAMES} from './ui-kit.js';
 import {SHAPES} from './company.js';
 import {limitsOf, BACKSTOP} from './limits.js';
 import {APPS, appById} from './app-catalog.js';
+import {PRESETS, presetOf} from './presets.js';
+import {briefingSchedule} from './briefing.js';
+import {monthByBot, short as shortCount} from './usage.js';
 
-export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'schedule', 'remove', 'open', 'signin', 'pause', 'limits', 'basics', 'forget', 'disconnect', 'thread', 'reconnect', 'connect', 'memory'];
+export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'schedule', 'remove', 'open', 'signin', 'pause', 'limits', 'basics', 'forget', 'disconnect', 'thread', 'reconnect', 'connect', 'memory', 'template', 'preset', 'briefing'];
 /** The bot settings a bot may propose. Not the primary role, the browser approval mode, or layout (pins, order). */
 export const BOT_SETTABLE = ['replyLength', 'style', 'memory', 'canHandoff', 'summonable', 'enabled', 'temperature', 'reportsTo', 'tint', 'shape'];
 const LIMIT_KEYS = ['pages', 'rounds', 'steps'];
@@ -83,6 +86,9 @@ export const SETUP_TOOL_HINT = 'To change a setting for the owner, put one fence
   + '{"action":"pause"} pauses every bot at once (the owner resumes them). '
   + `{"action":"limits","pages":1-${BACKSTOP.pages},"rounds":1-${BACKSTOP.rounds},"steps":1-${BACKSTOP.steps}} caps how far one message may go (pages per reply, rounds of pages in a row, team steps); "none" removes a cap; "askCheckpoints":true|false asks the owner between bot-to-bot steps; give only what changes. The owner saying "bots should open at most 3 pages per reply" or "no more than 10 steps" is this block ({"action":"limits","pages":3}), never a note about your own reply. `
   + '{"action":"basics","ask":true|false} true makes every bot ask before opening any web page or reading a connected app; false lets them browse and read without asking. '
+  + '{"action":"template","title":"<short name>","text":"<the message it fills in>"} saves a task template the owner can tap under the message box; {"action":"template","remove":"<its title>"} deletes one. '
+  + '{"action":"preset","preset":"careful|balanced|handsOff"} switches the safety preset: careful asks before every page, read, send, post or payment; balanced browses and reads freely and asks before sending, posting, deleting or paying; handsOff also sends, posts and changes connected apps without asking (payments and deletes still ask). '
+  + '{"action":"briefing","at":"<HH:MM>"} turns on the daily briefing (the primary bot sums up what was done, what waits on the owner, what is coming and what failed, from the real records); {"action":"briefing","stop":true} turns it off. Use this, not a schedule, for a daily briefing or summary of the bots\' work. '
   + '{"action":"forget","bot":"<bot name>"} clears what that bot has learned (its memory notes), not its job. '
   + '{"action":"disconnect","connector":"<connector name>"} removes a connected service. {"action":"reconnect","connector":"<connector name>"} checks a connector that is not ready again, or has the owner sign in to it again. {"action":"connect","app":"<an app such as GitHub, Notion, Slack or Linear>"} connects an app with one tap, as the Connectors page does. '
   + '{"action":"thread","thread":"<words from its title>","name":"<new title>"} renames a thread; with "remove":true instead of a name it deletes the thread. {"action":"thread","new":true,"name":"<title>","message":"<the first message>"} starts a new thread for a separate piece of work. {"action":"memory","rule":"<words from a line the bots keep>","text":"<the new line>"} rewrites one line of the company notebook (add "bot" for that bot\'s own notes); "remove":true deletes it. '
@@ -90,7 +96,9 @@ export const SETUP_TOOL_HINT = 'To change a setting for the owner, put one fence
   + '{"action":"signin","site":"reddit.com"} gives the owner a button that opens the browser on this computer at that site, in their hands, to sign in once; use it when a site blocks you or needs the owner signed in (Reddit, LinkedIn, a shop or bank login), instead of only saying it is blocked. Never ask for a password in chat. ' + `{"action":"open","page":"${PAGE_LIST.replace(/, /g, '|')}"}` + ' shows the owner a Settings page, for things only they can do, such as pasting a key or pairing a computer ("devices" is the computers that run the browser, not bots). Every change to a bot (its job, name, settings, model, rules, schedules, removing it) is one of the blocks above, never a page to open; "gmail" (or "drive") is a button that connects it, so use it whenever the owner wants email or Drive connected. '
   + 'Nothing changes until the owner taps Apply on the card, so say in your reply what you proposed and why. Never ask for a key or password in chat.';
 
+const short80 = text => { const t = String(text ?? '').replace(/\s+/g, ' ').trim(); return t.length > 80 ? `${t.slice(0, 80)}…` : t; };
 const lower = value => String(value ?? '').trim().toLowerCase();
+const has = value => value !== undefined && value !== null && value !== '';
 const ENGINE_WORDS = {claude: 'claude', anthropic: 'claude', chatgpt: 'codex', codex: 'codex', openai: 'codex'};
 
 /** Read every setup block. Each is {ok, request} or {ok: false, error}. */
@@ -213,6 +221,36 @@ export function resolveSetup(state, request, {speaker = null} = {}) {
     if (typeof request.ask !== 'boolean' && yes === undefined) return {ok: false, error: 'say "ask": true to ask before every page and app read, or false to browse and read without asking.'};
     request = {...request, ask: typeof request.ask === 'boolean' ? request.ask : yes};
     return {ok: true, card: {action: 'basics', ask: request.ask, text: request.ask ? 'Every bot asks you before it opens a web page or reads a connected app' : 'Bots open web pages and read connected apps without asking; sending, posting, deleting and paying still ask'}};
+  }
+  if (request.action === 'template') {
+    const list = Array.isArray(state?.templates) ? state.templates : [];
+    if (has(request.remove)) {
+      const want = lower(request.remove);
+      const hit = list.find(t => lower(t.title) === want) || list.find(t => lower(t.title).includes(want) || lower(t.text).includes(want));
+      if (!hit) return {ok: false, error: `there is no saved template called "${request.remove}". ${list.length ? `The saved ones are: ${list.map(t => t.title).join(', ')}.` : 'None are saved yet.'}`};
+      return {ok: true, card: {action: 'template', remove: true, templateId: hit.id, text: `Delete the template “${hit.title}”`}};
+    }
+    const text = String(request.text ?? '').trim();
+    if (text.length < 3 || text.length > 4000) return {ok: false, error: 'a template is a message of 3 to 4000 characters, in "text".'};
+    const title = String(request.title ?? '').trim().slice(0, 40) || text.slice(0, 40);
+    return {ok: true, card: {action: 'template', title, templateText: text, text: `Save the template “${title}”: ${text.length > JOB_LINE ? `${text.slice(0, JOB_LINE)}…` : text}`}};
+  }
+  if (request.action === 'preset') {
+    const want = lower(request.preset).replace(/[\s_-]+/g, '');
+    const preset = PRESETS.find(p => p.id.toLowerCase() === want || p.name.toLowerCase().replace(/[\s_-]+/g, '') === want);
+    if (!preset) return {ok: false, error: 'the presets are careful, balanced and handsOff.'};
+    return {ok: true, card: {action: 'preset', preset: preset.id, text: `Switch to ${preset.name}: ${preset.text}`}};
+  }
+  if (request.action === 'briefing') {
+    const on = briefingSchedule(state);
+    if (request.stop === true) {
+      if (!on) return {ok: false, error: 'the daily briefing is not on.'};
+      return {ok: true, card: {action: 'briefing', stop: true, taskId: on.id, text: 'Turn off the daily briefing'}};
+    }
+    const at = cleanAt(has(request.at) ? request.at : '08:00');
+    if (!at) return {ok: false, error: `"${request.at}" is not a time of day. Use HH:MM, such as 08:00.`};
+    if (on) return {ok: false, error: `the daily briefing is already on (${on.when}). To change its time, turn it off first, then on at the new time.`};
+    return {ok: true, card: {action: 'briefing', at, text: `Turn on the daily briefing every day at ${at}`}};
   }
   if (request.action === 'forget') {
     const bot = botNamed(state, request.bot, speaker);
@@ -407,6 +445,9 @@ export function setupCardOf(message) {
   if (card.action === 'team') return typeof card.groupId === 'string' && card.settings && typeof card.settings === 'object' && Object.keys(card.settings).length && Object.keys(card.settings).every(k => TEAM_SETTABLE.includes(k)) ? card : null;
   if (card.action === 'remove' || card.action === 'forget') return typeof card.botId === 'string' ? card : null;
   if (card.action === 'pause') return card;
+  if (card.action === 'template') return card.remove === true ? (typeof card.templateId === 'string' ? card : null) : typeof card.title === 'string' && typeof card.templateText === 'string' && card.templateText.trim() ? card : null;
+  if (card.action === 'preset') return PRESETS.some(p => p.id === card.preset) ? card : null;
+  if (card.action === 'briefing') return card.stop === true ? (typeof card.taskId === 'string' ? card : null) : typeof card.at === 'string' && cleanAt(card.at) === card.at ? card : null;
   if (card.action === 'basics') return typeof card.ask === 'boolean' ? card : null;
   if (card.action === 'disconnect') return typeof card.connectorId === 'string' ? card : null;
   if (card.action === 'thread') return card.create === true ? (typeof card.message === 'string' && card.message.trim() ? card : null) : typeof card.groupId === 'string' && (card.remove === true || typeof card.name === 'string') ? card : null;
@@ -527,6 +568,9 @@ export function setupDone(state, card) {
   if (card.action === 'remove') return !companyBots(state).some(b => b.id === card.botId);
   if (card.action === 'pause') return state?.guard?.paused === true;
   if (card.action === 'basics') return Boolean(state?.askBasics) === card.ask;
+  if (card.action === 'template') { const list = state?.templates || []; return card.remove ? !list.some(t => t.id === card.templateId) : list.some(t => t.text === card.templateText); }
+  if (card.action === 'preset') return presetOf(state) === card.preset;
+  if (card.action === 'briefing') { const on = briefingSchedule(state); return card.stop ? !on : Boolean(on); }
   if (card.action === 'limits') { const now = limitsOf(state); return Object.entries(card.limits).every(([k, v]) => now[k] === v); }
   if (card.action === 'forget') return !(state?.memory?.rulebooks?.[`bot:${card.botId}`]?.rules?.length);
   if (card.action === 'disconnect') return !(state?.connectors || []).some(c => c?.id === card.connectorId);
@@ -553,7 +597,7 @@ export function setupDone(state, card) {
   return sameModel && sameEffort;
 }
 /** The button on a setup card. */
-export const setupButton = card => (card.action === 'reconnect' ? (card.app ? 'Sign in again' : 'Reconnect') : card.action === 'connect' ? 'Connect' : card.action === 'memory' && card.remove ? 'Delete' : card.action === 'thread' && card.create ? 'Start' : card.action === 'signin' ? 'Sign in' : card.app === 'google' ? 'Connect Google' : card.action === 'open' ? `Open ${card.text.replace(/^Settings → /, '')}` : card.action === 'remove' || card.action === 'disconnect' ? 'Remove' : card.action === 'forget' ? 'Forget' : card.action === 'thread' && card.remove ? 'Delete' : card.action === 'pause' ? 'Pause' : 'Apply');
+export const setupButton = card => (card.action === 'template' ? (card.remove ? 'Delete' : 'Save template') : card.action === 'preset' ? 'Switch' : card.action === 'briefing' ? (card.stop ? 'Stop briefing' : 'Turn on') : (card.action === 'reconnect' ? (card.app ? 'Sign in again' : 'Reconnect') : card.action === 'connect' ? 'Connect' : card.action === 'memory' && card.remove ? 'Delete' : card.action === 'thread' && card.create ? 'Start' : card.action === 'signin' ? 'Sign in' : card.app === 'google' ? 'Connect Google' : card.action === 'open' ? `Open ${card.text.replace(/^Settings → /, '')}` : card.action === 'remove' || card.action === 'disconnect' ? 'Remove' : card.action === 'forget' ? 'Forget' : card.action === 'thread' && card.remove ? 'Delete' : card.action === 'pause' ? 'Pause' : 'Apply'));
 
 /* ---------- what every bot knows ---------- */
 
@@ -623,6 +667,14 @@ export function workspaceBrief(state, {agents = [], connectors = [], speaker = n
     waitingOnOwner: waiting.length ? waiting : 'nothing',
     threads: threads.length ? threads : 'none',
     schedules: schedules.length ? schedules : 'none',
+    templates: (state?.templates || []).slice(0, 20).map(t => `${t.title}: ${short80(t.text)}`),
+    preset: ({careful: 'Careful', balanced: 'Balanced', handsOff: 'Hands-off'})[presetOf(state)] || 'Custom (the owner set rules by hand)',
+    briefing: (() => { const on = briefingSchedule(state); return on ? `on, ${on.when}` : 'off'; })(),
+    fallbackModel: ai.fallback?.providerId ? `${label(ai.fallback.providerId) || 'a removed model'}${ai.fallback.model ? ` · ${ai.fallback.model}` : ''} answers when a bot's model is down, busy or out of credit` : 'none',
+    usageThisMonth: (() => {
+      const m = monthByBot(state, new Map(companyBots(state).map(b => [b.id, b.name])));
+      return {total: m.total.tokens ? `${shortCount(m.total.tokens)} tokens in ${m.total.calls} model calls` : 'nothing used yet', byBot: m.rows.slice(0, 12).map(r => `${r.name}: ${shortCount(r.tokens)} tokens`), where: 'Settings → Usage shows it by bot and day, and the cost for models the owner priced'};
+    })(),
     connectors: connectors.length ? connectors.map(c => `${c.name}${c.status && c.status !== 'ready' ? ` (${c.status})` : ''}`) : 'none',
     facts: [
       'Opening a web page and reading a connected app need no answer unless basicAccess or a rule says so; sending, posting, deleting and paying ask the owner unless a rule says Always allow. Rules are in Settings → Permissions.',

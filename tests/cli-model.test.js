@@ -15,7 +15,9 @@ const mode = process.env.FAKE_MODE || 'ok';
 let stdin = '';
 process.stdin.on('data', c => { stdin += c; });
 process.stdin.on('end', () => {
-  if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({engine, argv: process.argv.slice(2), stdin, cwd: process.cwd(), pid: process.pid, apiKey: process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || null}) + '\\n');
+  const imageArgs = process.argv.slice(2).filter((a, i, all) => all[i - 1] === '-i');
+  const images = imageArgs.map(f => ({file: f, inDir: path.dirname(f) === process.cwd(), bytes: fs.existsSync(f) ? fs.readFileSync(f).length : -1}));
+  if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({engine, argv: process.argv.slice(2), stdin, images, cwd: process.cwd(), pid: process.pid, apiKey: process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || null}) + '\\n');
   const out = line => process.stdout.write(JSON.stringify(line) + '\\n');
   if (mode === 'hang') { setInterval(() => {}, 1000); return; }
   if (mode === 'flood') {
@@ -34,8 +36,13 @@ process.stdin.on('end', () => {
   if (engine === 'claude') {
     out({type: 'system', subtype: 'init', tools: []});
     if (said) { out({type: 'result', subtype: 'success', is_error: true, result: said}); process.exit(1); }
-    out({type: 'assistant', message: {content: [{type: 'text', text: 'echo: ' + stdin}]}});
-    out({type: 'result', subtype: 'success', is_error: false, result: 'echo: ' + stdin});
+    let heard = stdin;
+    if (process.argv.includes('stream-json') && process.argv[process.argv.indexOf('--input-format') + 1] === 'stream-json') {
+      const msg = JSON.parse(stdin.trim().split('\\n')[0]).message;
+      heard = msg.content.map(b => b.type === 'text' ? b.text : '[' + b.type + ' ' + b.source.media_type + ' ' + b.source.data.length + ']').join(' ');
+    }
+    out({type: 'assistant', message: {content: [{type: 'text', text: 'echo: ' + heard}]}});
+    out({type: 'result', subtype: 'success', is_error: false, result: 'echo: ' + heard});
     return;
   }
   out({type: 'thread.started', thread_id: 't'});
@@ -246,4 +253,37 @@ test('a CLI model is told the app runs its browser blocks, never that it cannot 
   assert.doesNotMatch(system, /\bor browse\b|cannot browse|no browsing/i);
   assert.match(system, /blocks?/i);
   assert.match(system, /do not run commands/i);
+});
+
+const PNG1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64').toString('base64');
+
+test('claude: images go in as image blocks of one stream-json user message', async t => {
+  const {calls, env} = rig(t);
+  const out = await runCliModel({engine: 'claude', instructions: 'I', input: 'What is in it?', images: [{type: 'image/png', data: PNG1}], env: env()});
+  const argv = calls()[0].argv;
+  assert.equal(argv[argv.indexOf('--input-format') + 1], 'stream-json');
+  assert.match(out.text, /\[image image\/png \d+\]/);
+  assert.match(out.text, /What is in it\?/);
+});
+
+test('claude: no images keeps the plain text prompt', async t => {
+  const {calls, env} = rig(t);
+  await runCliModel({engine: 'claude', input: 'x', env: env()});
+  assert.ok(!calls()[0].argv.includes('--input-format'));
+});
+
+test('codex: each image is written into the empty working root and passed with -i', async t => {
+  const {calls, env} = rig(t);
+  await runCliModel({engine: 'codex', input: 'look', images: [{type: 'image/png', data: PNG1}, {type: 'image/jpeg', data: PNG1}], env: env()});
+  const {images, argv} = calls()[0];
+  assert.equal(images.length, 2);
+  assert.ok(images.every(i => i.inDir && i.bytes > 0));
+  assert.equal(argv.at(-1), '-', 'the prompt still comes last from stdin');
+});
+
+test('an image the agent was handed is checked: type, size, count and base64', async () => {
+  for (const images of [[{type: 'image/svg+xml', data: PNG1}], [{type: 'image/png', data: 'not base64 !!'}], Array.from({length: 11}, () => ({type: 'image/png', data: PNG1})), [{type: 'image/png', data: 'A'.repeat(8 * 1024 * 1024)}], 'x']) {
+    const r = await runModelTask({engine: 'claude', input: 'x', images});
+    assert.equal(r.ok, false); assert.equal(r.code, 'bad-request');
+  }
 });
