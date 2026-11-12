@@ -8,8 +8,8 @@
  *
  * `state.limits = {pages, rounds, steps, askCheckpoints}`. Pure and browser-safe.
  */
-import {fail} from './errors.js?v=3a79d2c16f';
-import {logActivity} from './activity-log.js?v=3a79d2c16f';
+import {fail} from './errors.js?v=64ac2a0a37';
+import {logActivity} from './activity-log.js?v=64ac2a0a37';
 
 export const BACKSTOP = {pages: 8, rounds: 25, steps: 30};
 export const FAIL_STREAK = 3;

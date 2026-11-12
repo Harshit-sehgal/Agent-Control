@@ -23,14 +23,14 @@
  *   make itself the primary bot, save a rule without the owner's tap, or reach a route the owner could not.
  *
  * Pure and browser-safe: the server reads replies with it and the UI paints the card from it. */
-import {cleanText, validHttpUrl} from './core.js?v=3a79d2c16f';
-import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=3a79d2c16f';
-import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=3a79d2c16f';
-import {controlFence} from './reply-blocks.js?v=3a79d2c16f';
-import {companyBots, primaryOf} from './company.js?v=3a79d2c16f';
-import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js?v=3a79d2c16f';
-import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=3a79d2c16f';
-import {grantWhat} from './ui-asks.js?v=3a79d2c16f';
+import {cleanText, validHttpUrl} from './core.js?v=64ac2a0a37';
+import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=64ac2a0a37';
+import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=64ac2a0a37';
+import {controlFence} from './reply-blocks.js?v=64ac2a0a37';
+import {companyBots, primaryOf} from './company.js?v=64ac2a0a37';
+import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js?v=64ac2a0a37';
+import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=64ac2a0a37';
+import {grantWhat} from './ui-asks.js?v=64ac2a0a37';
 
 export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'schedule', 'remove', 'open', 'signin'];
 /** The bot settings a bot may propose. Not the primary role, the browser approval mode, or layout (pins, order). */
@@ -66,7 +66,7 @@ export const SETUP_TOOL_HINT = 'To change a setting for the owner, put one fence
   + '{"action":"rule","bot":"<bot name>","do":"open|send|post|delete|spend","site":"<site, e.g. github.com>","choice":"always|ask|deny"} saves what that bot may do without asking (a payment is never always). '
   + '{"action":"schedule","bot":"<bot name, or me>","do":"<the message that bot gets each time>","every":"day|hour|week|<minutes>","at":"<HH:MM, optional>","on":"<monday..sunday, optional: a weekly schedule on that day>"} puts work on a timer: the bot runs it in its own chat and the owner reads the result there. Give only "at" for a one-off later today or tomorrow. Add "stop":true with a few words of its message in "do" to stop one; workspace.schedules lists them. When the owner asks for something regular (every morning, each Monday), propose a schedule instead of telling them to come back. '
   + '{"action":"remove","bot":"<bot name>"} removes a bot the owner no longer wants, with its chat and schedules (never Atlas). '
-  + '{"action":"signin","site":"reddit.com"} gives the owner a button that opens the browser on this computer at that site, in their hands,, to sign in once; use it when a site blocks you or needs the owner signed in (Reddit, LinkedIn, a shop or bank login), instead of only saying it is blocked. Never ask for a password in chat. {"action":"open","page":"models|connectors|gmail|permissions|agents|usage"} shows the owner a Settings page, for things only they can do, such as pasting a key; "gmail" (or "drive") is a button that starts the Google sign-in itself, so use it whenever the owner wants email or Drive connected. '
+  + '{"action":"signin","site":"reddit.com"} gives the owner a button that opens the browser on this computer at that site, in their hands, to sign in once; use it when a site blocks you or needs the owner signed in (Reddit, LinkedIn, a shop or bank login), instead of only saying it is blocked. Never ask for a password in chat. {"action":"open","page":"models|connectors|gmail|permissions|agents|usage"} shows the owner a Settings page, for things only they can do, such as pasting a key; "gmail" (or "drive") is a button that connects it, so use it whenever the owner wants email or Drive connected. '
   + 'Nothing changes until the owner taps Apply on the card, so say in your reply what you proposed and why. Never ask for a key or password in chat.';
 
 const lower = value => String(value ?? '').trim().toLowerCase();
@@ -140,6 +140,14 @@ export function resolveSetup(state, request, {speaker = null} = {}) {
     const page = SETUP_PAGES[request.page];
     if (!page) return {ok: false, error: `there is no "${request.page || 'blank'}" page to open. Use models, connectors, permissions, agents or usage.`};
     // Gmail and Drive are one Google sign-in, so the card goes straight to it.
+    // With no Google client of their own saved, the owner signs in to Gmail or Drive once in the shared browser
+    // instead, and the bots read it there; nothing in Google Cloud to set up. A saved client keeps the real sign-in.
+    const client = (state?.connectors || []).some(c => c?.kind === 'google' && c.clientCredentialId);
+    const botId = speaker?.id || primaryOf(state)?.id;
+    if (GOOGLE_PAGES.includes(request.page) && !client && botId) {
+      const [url, name] = request.page === 'drive' ? ['https://drive.google.com/', 'Google Drive'] : ['https://mail.google.com/', 'Gmail'];
+      return {ok: true, card: {action: 'signin', botId, url, text: `Sign in to ${name} in this computer's browser. Bots use the same browser, so they can read it once you are signed in; anything they send still asks you first.`}};
+    }
     if (GOOGLE_PAGES.includes(request.page)) return {ok: true, card: {action: 'open', section: 'conn', app: 'google', text: 'Connect Google (Gmail and Drive)'}};
     return {ok: true, card: {action: 'open', section: page[0], text: `Settings → ${page[1]}`}};
   }
@@ -395,7 +403,7 @@ export function workspaceBrief(state, {agents = [], connectors = [], speaker = n
       'A bot opens a web page by asking with the browser block; the owner answers Decline, Allow or Always allow. Saved answers are in Settings → Permissions.',
       'This computer runs the browser and the claude and codex sign-in by itself; there is nothing to pair on it.',
       'Models and keys are added only by the owner, in Settings → Models and keys. Never ask for a key in chat; use the setup block to open that page.',
-      'To connect Gmail or Google Drive, send the setup block {"action":"open","page":"gmail"}: its button starts the Google sign-in. MCP servers are connected in Settings → Connectors. An MCP server that runs on this computer is added there under On my computer, with the command that starts it; the owner types it, never you.',
+      'To connect Gmail or Google Drive, send the setup block {"action":"open","page":"gmail"}: its button connects Google, or, when the owner has no Google client saved, has them sign in to Gmail in this computer\'s browser. Once they are signed in, read mail by asking for the page https://mail.google.com/mail/u/0/#inbox (a search is #search/<words>), and Drive at https://drive.google.com/. Sending mail is the owner\'s click on an ask card. MCP servers are connected in Settings → Connectors. An MCP server that runs on this computer is added there under On my computer, with the command that starts it; the owner types it, never you.',
       'When a run fails because a model is down or out of quota, propose another connected model with the setup block.',
     ],
   };

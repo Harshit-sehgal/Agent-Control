@@ -20,11 +20,11 @@
  * Posting stays human: interaction (click, type) is refused on X and Twitter
  * hosts, so no bot can press Post there. Reading those pages is allowed.
  */
-import {cleanText, validHttpUrl} from './core.js?v=3a79d2c16f';
-import {fail} from './errors.js?v=3a79d2c16f';
-import {decide, createAsk, scopeOf} from './asks.js?v=3a79d2c16f';
-import {controlFence} from './reply-blocks.js?v=3a79d2c16f';
-import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=3a79d2c16f';
+import {cleanText, validHttpUrl} from './core.js?v=64ac2a0a37';
+import {fail} from './errors.js?v=64ac2a0a37';
+import {decide, createAsk, scopeOf} from './asks.js?v=64ac2a0a37';
+import {controlFence} from './reply-blocks.js?v=64ac2a0a37';
+import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=64ac2a0a37';
 
 /** The most page text one model turn carries (the pages of a round together). */
 export const MAX_PAGE_CHARS = 24000;
@@ -45,6 +45,8 @@ const BLOCK = () => controlFence('browser');
 
 // `x.com.` and `x.com%2e` are x.com. Leaving the trailing dot on treated that
 // spelling as a different site, so a click or type there was allowed.
+/** Sites that hold the owner's own mail and files once they are signed in: reading them is reading private data. */
+export const PRIVATE_HOSTS = /^(?:mail|drive|docs|calendar|contacts|photos)\.google\.com$|^outlook\.(?:live|office|office365)\.com$|^(?:www\.)?dropbox\.com$|^mail\.yahoo\.com$|^(?:www\.)?icloud\.com$/;
 export const hostOf = url => { try { return new URL(url).hostname.toLowerCase().replace(/\.+$/, ''); } catch { return ''; } };
 
 /** An allowlist entry in the same spelling as `hostOf`: no scheme, no path, no
@@ -429,8 +431,13 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
   if (limited) say(`${bot.name} asked for another web page, but ${rounds} browsing rounds in a row is the most ${rounds < BACKSTOP.rounds ? 'your limit in Settings allows' : 'one message may take'}.`);
   else if (closed) say(`${bot.name} asked for another web page, but you had just declined, so nothing was opened.`);
   else if (all.length > found.length) say(`${bot.name} asked for ${all.length} pages at once; ${perReply} ${perReply === 1 ? 'is' : 'are'} opened per reply.`);
-  // A run that has already read a connector carries private data: a new site asks (asks.js verdict).
-  const readPrivate = Boolean(runId && (state.groupRuns || []).find(r => r.id === runId)?.connectorPage);
+  // A run that has read private data carries it: a connector result (now or earlier in the run), or the owner's
+  // signed-in mail or files read in the browser. A new site then asks (asks.js verdict); the private site itself
+  // does not, since reading more of the owner's own inbox carries nothing anywhere new.
+  const run = runId ? (state.groupRuns || []).find(r => r.id === runId) : null;
+  const privateHosts = new Set((state.browserRequests || []).filter(r => runId && r.runId === runId && r.status === 'done')
+    .map(r => hostOf(r.result?.finalUrl || r.url)).filter(host => PRIVATE_HOSTS.test(host)));
+  const guarded = Boolean(run && (run.connectorPage || run.readPrivate || privateHosts.size));
   if (!limited && !closed) for (const item of found) {
     if (!item.ok) { say(`${bot.name} asked for a web page, but the request was refused: ${item.error}`); invalid.push(item.error); continue; }
     // A plain re-read of a page it has is no progress; finding words on it, or acting on it, is.
@@ -469,7 +476,7 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
       continue;
     }
     const needs = browserNeeds(item.request, labels);
-    const decision = decide(state, bot, needs, {readPrivate});
+    const decision = decide(state, bot, needs, {readPrivate: guarded && !privateHosts.has(hostOf(item.request.url))});
     if (decision.verdict === 'deny') { say(`${bot.name} asked to ${describe(item.request)}. ${decision.message}`); continue; }
     // `approved`: the risky classes this request is cleared for once it is sent (a grant, or the owner's
     // answer to its ask), each for the origin it runs on ("send@https://b.example"). Written here after the

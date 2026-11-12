@@ -84,6 +84,8 @@ export async function runConnectorCalls(store, runId, {say, now = () => new Date
         ...(outcome.activityId ? {activityId: outcome.activityId, undoUntil: outcome.undoUntil} : {}),
       });
     }
+    // The run has seen private data now, and keeps that guard after this result is consumed (bot-browser.js).
+    live.readPrivate = true;
     live.connectorPage = page.length > MAX_PAGE_CHARS ? `${page.slice(0, MAX_PAGE_CHARS)}\n[cut]` : page;
     return true;
   });
