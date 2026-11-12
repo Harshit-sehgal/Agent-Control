@@ -7,20 +7,21 @@
  * team, agents, data) load the existing admin forms from ui-admin.js into the body.
  *
  * The lists behind it are pure and tested in ui-profile-model.js. */
-import {face} from './ui-face.js?v=71b92f8de6';
-import {botStatus} from './ui-company.js?v=71b92f8de6';
-import {esc, icon, btn, empty, note, roundBtn, switchBtn, fullDate} from './ui-kit.js?v=71b92f8de6';
-import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, applyTheme, themeChoice, THEMES} from './ui-store.js?v=71b92f8de6';
-import {isDesk, initials} from './ui-shell.js?v=71b92f8de6';
-import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=71b92f8de6';
-import {faceOf, headBar, activityBlocks, grantsHtml, grantNote} from './ui-profile.js?v=71b92f8de6';
-import {allGrantRows} from './ui-asks.js?v=71b92f8de6';
-import {toast, confirmSheet} from './ui-dialogs.js?v=71b92f8de6';
+import {face} from './ui-face.js?v=2812b99386';
+import {botStatus} from './ui-company.js?v=2812b99386';
+import {esc, icon, btn, empty, note, roundBtn, switchBtn, fullDate} from './ui-kit.js?v=2812b99386';
+import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, applyTheme, themeChoice, THEMES, saveLocal} from './ui-store.js?v=2812b99386';
+import {isDesk, initials, setupCardHtml, PERM_SEEN} from './ui-shell.js?v=2812b99386';
+import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=2812b99386';
+import {faceOf, headBar, activityBlocks, grantsHtml, grantNote} from './ui-profile.js?v=2812b99386';
+import {allGrantRows, permissionSummary} from './ui-asks.js?v=2812b99386';
+import {PRESETS, presetOf, applyPreset} from './presets.js?v=2812b99386';
+import {toast, confirmSheet} from './ui-dialogs.js?v=2812b99386';
 import {
   ACTIVITY_FILTERS, activityUrl, companyTree, weekUsage, settingsSections, resolveSection, sectionArg,
-} from './ui-profile-model.js?v=71b92f8de6';
-import {COLORS} from './ui-face.js?v=71b92f8de6';
-import {limitsOf, limitWords, FAIL_STREAK} from './limits.js?v=71b92f8de6';
+} from './ui-profile-model.js?v=2812b99386';
+import {COLORS} from './ui-face.js?v=2812b99386';
+import {limitsOf, limitWords, FAIL_STREAK} from './limits.js?v=2812b99386';
 
 const el = id => document.getElementById(id);
 const ICONS = {general: 'gear', look: 'half', models: 'key', conn: 'plug', perm: 'shield', usage: 'chart'};
@@ -79,7 +80,7 @@ function general(sections) {
   const more = sections.filter(s => s.extra).map(s => link(s.key, s.label)).join('');
   const sessions = isStaticDemo() ? '' : `<section class="st-g"><h4 class="st-h">Your sessions</h4><div class="cd" id="acct-sessions"><div class="rw"><span class="w st-quiet">Loading…</span></div></div></section>`;
   // The account is a fact, not a door: it sits flat on the page so it does not read as a row to tap.
-  return `<section class="st-g"><h4 class="st-h">Account</h4><div class="acct-flat">${account()}</div></section>` + sessions
+  return setupCardHtml() + `<section class="st-g"><h4 class="st-h">Account</h4><div class="acct-flat">${account()}</div></section>` + sessions
     + card(pauseRow(), 'Bots')
     + card(more, 'More')
     + (isStaticDemo() ? '' : card(`<button type="button" class="rw bad" data-action="delete-account"><span class="w">Delete my account</span></button>`));
@@ -105,15 +106,59 @@ const switchRow = (label, sub, on, action, attr, owner, subAttr = '') => `<div c
 /** From a profile: that bot's rules first, then one link to what applies to every bot. With no bot: Pause all at the
  * top, the switches and limits for every bot, then every bot's rules. This is the only place rules are listed and revoked. */
 function perm(arg) {
+  // Opening this page is the checklist's "review permissions" step (setupChecklist), for this person.
+  saveLocal(PERM_SEEN, true);
   const bot = arg ? findBot(arg) : null;
   if (bot) {
     const chip = `<div class="st-chip">${faceOf(bot, 22, {state: 'asleep', motion: false})}<span>Showing <b>${esc(bot.name)}</b></span><button type="button" class="link" data-action="perm-all">Show all</button></div>`;
     const all = card(`<button type="button" class="rw" data-action="perm-all"><span class="w">Limits for all bots<small>Browsing, limits and Pause all apply to every bot</small></span>${icon('chevron', 18)}</button>`);
-    return `${chip}<div data-grants="${esc(bot.id)}">${grantsHtml(bot.id)}</div>${grantNote('st-note')}${all}`;
+    return `${chip}<div data-summary="${esc(bot.id)}">${summaryHtml(bot.id)}</div><h4 class="st-h">Rules</h4><div data-grants="${esc(bot.id)}">${grantsHtml(bot.id)}</div>${grantNote('st-note')}${all}`;
   }
   const ask = Boolean(store.state?.askBasics), owner = canPause();
   const basics = card(switchRow('Browse and read without asking', basicsWords(ask), !ask, 'settings-basics', 'data-basics', owner, ' data-basics-sub'));
-  return `${card(pauseRow())}<p class="st-note">Every bot can chat, hand work to its team, make bots and set schedules. Sending, posting, deleting and paying ask you first; you can Always allow a bot per site.</p>${basics}${limitsCard(owner)}<div data-grants="all">${grantsHtml(null)}</div>${grantNote('st-note')}`;
+  return `${card(pauseRow())}<div data-presets>${presetCard()}</div><p class="st-note">Every bot can chat, hand work to its team, make bots and set schedules. Sending, posting, deleting and paying ask you first; you can Always allow a bot per site.</p>${basics}${limitsCard(owner)}<div data-grants="all">${grantsHtml(null)}</div>${grantNote('st-note')}`;
+}
+
+/** Presets and Undo are the owner's alone (the routes are owner only); the demo's one person is its owner. */
+const isOwner = () => isStaticDemo() || store.state?.me?.role === 'owner';
+
+/** One bot's permissions in plain words (permissionSummary): what it does without asking, what asks, what it may not do. */
+function summaryHtml(botId) {
+  const sum = permissionSummary(store.state, botId);
+  if (!sum) return '';
+  const rows = items => items.map(i => srow(esc(i.text), '', i.until ? `Until ${esc(fullDate(i.until))}` : '')).join('');
+  const part = (label, items) => (items.length ? card(rows(items), label) : '');
+  return part('Does without asking', sum.free) + part('Asks you first', sum.asks) + part('Not allowed', sum.denied)
+    + card(sum.limits.map(l => srow(esc(l))).join(''), 'Every run');
+}
+
+/** The three safety presets, the one the settings match pressed (none for Custom). */
+function presetCard() {
+  const now = presetOf(store.state), on = PRESETS.find(p => p.id === now), owner = isOwner();
+  const seg = PRESETS.map(p => `<button type="button" data-action="settings-preset" data-preset="${p.id}" aria-pressed="${p.id === now}"${owner ? '' : ' disabled'}>${esc(p.name)}</button>`).join('');
+  const sub = on ? on.text : 'Custom: your own mix of the switches and rules below.';
+  return card(`<div class="rw st-pre"><span class="w">Safety preset<small>${esc(owner ? sub : `${sub} Only the owner changes the preset.`)}</small></span><span class="st-seg" role="group" aria-label="Safety preset">${seg}</span></div>`);
+}
+
+/** Repaint what a preset or its Undo changes, in place. */
+function refreshPerm() {
+  const ask = Boolean(store.state?.askBasics);
+  document.querySelectorAll('[data-presets]').forEach(x => { x.innerHTML = presetCard(); });
+  document.querySelectorAll('[data-basics]').forEach(x => x.setAttribute('aria-checked', String(!ask)));
+  document.querySelectorAll('[data-basics-sub]').forEach(x => { x.textContent = basicsWords(ask); });
+  document.querySelectorAll('[data-grants]').forEach(x => { x.innerHTML = grantsHtml(x.dataset.grants === 'all' ? null : x.dataset.grants); });
+  document.querySelectorAll('[data-summary]').forEach(x => { x.innerHTML = summaryHtml(x.dataset.summary); });
+}
+
+/** A toast whose Undo puts the permissions back the way `undo` says (POST /api/permissions/restore). */
+export function undoToast(message, undo) {
+  if (!undo || !isOwner()) { toast(message); return; }
+  toast(message, false, {label: 'Undo', run: async () => {
+    await api('/api/permissions/restore', 'POST', undo);
+    await sync();
+    refreshPerm();
+    toast('Put back as it was.');
+  }});
 }
 
 // How far bots go on one message. Empty is no limit: only the safety stop (BACKSTOP) and the stop after repeated
@@ -310,6 +355,7 @@ export const settingsActions = {
     const ask = Boolean(store.state?.askBasics);
     document.querySelectorAll('[data-basics]').forEach(x => x.setAttribute('aria-checked', String(!ask)));
     document.querySelectorAll('[data-basics-sub]').forEach(x => { x.textContent = basicsWords(ask); });
+    document.querySelectorAll('[data-presets]').forEach(x => { x.innerHTML = presetCard(); });
   },
   'settings-limit': async b => {
     if (!canPause()) throw new Error('Only the owner can change this.');
@@ -324,6 +370,18 @@ export const settingsActions = {
     await sync();
     const on = limitsOf(store.state).askCheckpoints;
     document.querySelectorAll('[data-limit-check]').forEach(x => x.setAttribute('aria-checked', String(on)));
+  },
+  // A safety preset: the confirm lists what changes (applyPreset on a copy), then the owner's route applies it.
+  'settings-preset': async b => {
+    if (!isOwner()) throw new Error('Only the owner can change the preset.');
+    const preset = PRESETS.find(p => p.id === b.dataset.preset);
+    const {changes} = applyPreset(structuredClone(store.state), preset.id);
+    if (!changes.length) { toast(`${preset.name} is already on.`); return; }
+    if (!await confirmSheet(`Switch to ${preset.name}?`, {confirm: `Use ${preset.name}`, detail: changes.join(' ')})) return;
+    const out = await api('/api/permissions/preset', 'POST', {preset: preset.id});
+    await sync();
+    refreshPerm();
+    undoToast(`${preset.name} is on.`, out?.undo);
   },
   // The filter chip on Permissions: back to every bot's rules, in place of the filtered page.
   'perm-all': () => go({settings: 'perm'}, {replace: true}),

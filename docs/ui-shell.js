@@ -5,11 +5,12 @@
  * Home is the Chats layout only. On a phone it is two sections, Bots and Threads,
  * switched by swiping; on a laptop the sidebar holds both and the chat opens on the
  * right. The lists come from ui-company.js (pure); this file is markup and events. */
-import {botRows, threadRows} from './ui-company.js?v=71b92f8de6';
-import {face} from './ui-face.js?v=71b92f8de6';
-import {esc, icon, stamp} from './ui-kit.js?v=71b92f8de6';
-import {pauseBanner} from './ui-asks.js?v=71b92f8de6';
-import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, isStaticDemo, seenChats} from './ui-store.js?v=71b92f8de6';
+import {botRows, threadRows} from './ui-company.js?v=2812b99386';
+import {face} from './ui-face.js?v=2812b99386';
+import {esc, icon, stamp} from './ui-kit.js?v=2812b99386';
+import {pauseBanner} from './ui-asks.js?v=2812b99386';
+import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, saveLocal, isStaticDemo, seenChats, api} from './ui-store.js?v=2812b99386';
+import {setupChecklist} from './ui-profile-model.js?v=2812b99386';
 
 const el = id => document.getElementById(id);
 const DESK = '(min-width:1024px)';
@@ -99,6 +100,33 @@ function threadGroups(query = '', {headings = true} = {}) {
 }
 const waitingThreads = () => threadRows(store.state).waiting.length;
 
+/* ---------- the first-run checklist ---------- */
+
+/** Per-person choices, never sent to the server: the checklist was hidden, and Settings → Permissions was opened. */
+export const SETUP_HIDDEN = 'ac-setup', PERM_SEEN = 'ac-perm-seen';
+let pairedAgents; // undefined until GET /api/agents answers once
+function loadAgents() {
+  if (pairedAgents !== undefined || isStaticDemo()) return;
+  pairedAgents = 0;
+  api('/api/agents').then(r => {
+    pairedAgents = Array.isArray(r?.agents) ? r.agents.length : 0;
+    document.querySelectorAll('[data-setup]').forEach(node => { node.innerHTML = setupCardBody(); });
+  }).catch(() => { /* The pairing step stays unticked; the rest of the card works. */ });
+}
+/** The checklist card (setupChecklist): for whoever can do its steps, until every step is done or it is hidden. */
+export function setupCardHtml() {
+  if (!store.state || loadLocal(SETUP_HIDDEN, false) || !(isAdmin() || isStaticDemo())) return '';
+  loadAgents();
+  const body = setupCardBody();
+  return body ? `<div data-setup>${body}</div>` : '';
+}
+function setupCardBody() {
+  const list = setupChecklist(store.state, {agents: pairedAgents, seen: loadLocal(PERM_SEEN, false), demo: isStaticDemo()});
+  if (list.complete) return '';
+  const items = list.items.map(i => `<li><button type="button" class="su-i${i.done ? ' done' : ''}" data-action="setup-go" data-go="${esc(JSON.stringify(i.go))}"><i class="su-c" aria-hidden="true">${i.done ? icon('check', 14) : ''}</i><span>${esc(i.label)}</span>${i.done ? '<span class="sr-only">, done</span>' : icon('chevron', 16)}</button></li>`).join('');
+  return `<section class="su" aria-label="Get set up"><div class="su-head"><b>Get set up</b><span>${list.done} of ${list.total}</span><button type="button" class="su-x" data-action="setup-dismiss" aria-label="Hide this checklist">${icon('x', 16)}</button></div><ol>${items}</ol></section>`;
+}
+
 /* ---------- phone home ---------- */
 
 /** The phone home for the current section: Bots (pinned row, then the chat rows)
@@ -111,7 +139,7 @@ export function homeView() {
   const rows = chatRows(), pinned = rows.filter(r => r.pinned), rest = rows.filter(r => !r.pinned);
   const shelf = pinned.length ? `<div class="shelf" aria-label="Pinned bots">${pinned.map(r => pinnedRow(r, 76)).join('')}</div>` : '';
   const list = rest.length ? `<div class="crows">${rest.map(botRow).join('')}</div>` : (pinned.length === rows.length && rows.length < 2 ? '<p class="hv-empty"><strong>Atlas is your only bot</strong>Make another with the + button.</p>' : '');
-  return `<div class="hv" data-section="bots"><div class="hv-in">${shelf}${list}${hiddenLink()}</div></div>`;
+  return `<div class="hv" data-section="bots"><div class="hv-in">${setupCardHtml()}${shelf}${list}${hiddenLink()}</div></div>`;
 }
 
 /** Switch the phone home between Bots and Threads. The page slides a short way,
@@ -294,5 +322,7 @@ export const shellActions = {
   'back-to-list': () => back({home: true}),
   'home-section': b => switchSection(b.dataset.section, b.dataset.section === 'threads' ? 1 : -1),
   'rail-section': b => { if (SECTIONS.includes(b.dataset.section)) { store.section = b.dataset.section; renderRail(); } },
+  'setup-go': b => go(JSON.parse(b.dataset.go)),
+  'setup-dismiss': () => { saveLocal(SETUP_HIDDEN, true); document.querySelectorAll('[data-setup]').forEach(node => node.remove()); },
 };
 

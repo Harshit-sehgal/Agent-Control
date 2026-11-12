@@ -8,7 +8,7 @@
 import {SHAPES, COLORS, face} from './ui-face.js';
 import {botStatus, botIsManager} from './ui-company.js';
 import {primaryOf} from './company.js';
-import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker, COLOR_NAMES} from './ui-kit.js';
+import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker, COLOR_NAMES, fullDate} from './ui-kit.js';
 import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js';
 import {scheduleRows, scheduleTaskBody, SCHEDULE_OFTEN, scheduleChoice} from './schedules.js';
 import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js';
@@ -218,7 +218,8 @@ const canGrant = () => isAdmin() || isStaticDemo();
 function grantRow(r) {
   const off = canGrant() ? '' : ' disabled';
   const seg = `<div class="gr-seg" role="group" aria-label="${esc(`${r.label} for ${r.botName}`)}">${r.choices.map(c => `<button type="button" data-action="set-grant" data-id="${esc(r.botId)}" data-text="${esc(`${r.action} ${r.scope}`)}" data-act="${esc(r.action)}" data-scope="${esc(r.scope)}" data-choice="${c.id}" aria-pressed="${c.on}"${off}>${esc(c.label)}</button>`).join('')}</div>`;
-  return `<div class="gr"><div class="gr-top"><span class="w">${esc(r.label)}</span></div>${seg}</div>`;
+  // An Always allow with an end says when it ends; after that the row is gone and the bot asks again.
+  return `<div class="gr"><div class="gr-top"><span class="w">${esc(r.label)}${r.until ? `<small>Until ${esc(fullDate(r.until))}</small>` : ''}</span></div>${seg}</div>`;
 }
 /** One bot's rules as a card, or every bot's in a card each. Lives in Settings > Permissions only. The node is repainted in place when a choice is made. */
 export function grantsHtml(botId = null) {

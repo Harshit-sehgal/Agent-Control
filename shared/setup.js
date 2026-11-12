@@ -618,7 +618,7 @@ export function workspaceBrief(state, {agents = [], connectors = [], speaker = n
     ...(state?.guard?.paused ? {paused: true} : {}),
     running: state?.guard?.paused ? 'every bot is paused; the owner resumes them with Resume on the banner' : 'every bot is running; nothing is paused',
     limits: (() => { const l = limitsOf(state); return LIMIT_KEYS.map(k => `${l[k] ?? `no limit (at most ${BACKSTOP[k]})`}${k === 'pages' ? ' pages per reply' : k === 'rounds' ? ' rounds of pages' : ' team steps'}`).join(', '); })(),
-    basicAccess: state?.askBasics ? 'every bot asks the owner before opening a web page or reading a connected app' : 'every bot opens web pages and reads connected apps without asking; sending, posting, deleting and paying ask',
+    basicAccess: (state?.askBasics ? 'every bot asks the owner before opening a web page or reading a connected app' : 'every bot opens web pages and reads connected apps without asking; sending, posting, deleting and paying ask') + (state?.handsOff === true ? '. Hands-off is on: a send, a post or a connected-app change with no rule goes without asking; payments and deletes still ask' : ''),
     rules: rules.length ? rules : 'none',
     waitingOnOwner: waiting.length ? waiting : 'nothing',
     threads: threads.length ? threads : 'none',

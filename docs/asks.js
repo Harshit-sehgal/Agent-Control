@@ -10,7 +10,12 @@
  *   state.asks   [{id, botId, runId, chatKey, action, target, detail, body?, argsHash?, grantScope,
  *                  status 'pending'|'allowed'|'declined', scope 'once'|'always'|null,
  *                  createdAt, answeredAt?, expiresAt?, expired?, requestId?, implies?, covers?}]
- *   state.grants [{botId, action, scope, choice 'always'|'ask'|'deny', at}]
+ *   state.grants [{botId, action, scope, choice 'always'|'ask'|'deny', at, until?}]
+ *
+ * An Always allow may end (`until`, an ISO time): after it the grant is no answer at all, so the bot asks
+ * again, and the next load sweeps it. `state.handsOff` is the owner's Hands-off switch (presets.js): with it,
+ * a send, a post or a connector write that has no rule goes without asking, on every site. A rule the owner
+ * set (Ask each time, Deny) still wins, and a payment or a delete still asks.
  *
  * The basic kit (ask a bot, make a bot, set a schedule) is never asked about;
  * its limits are checkpoints and the runaway guard. Basic access (open a web page, read a connected app) is
@@ -21,9 +26,9 @@
  * Pure and browser-safe, like the other shared modules: the server and the
  * Pages demo share every rule here.
  */
-import {fail} from './errors.js?v=71b92f8de6';
-import {cleanText} from './core.js?v=71b92f8de6';
-import {logActivity} from './activity-log.js?v=71b92f8de6';
+import {fail} from './errors.js?v=2812b99386';
+import {cleanText} from './core.js?v=2812b99386';
+import {logActivity} from './activity-log.js?v=2812b99386';
 
 /** What every bot may do without a grant. */
 export const BASIC_KIT = ['bot.ask', 'bot.create', 'schedule.set'];
@@ -95,33 +100,96 @@ const grantSentence = (name, action, scope, choice) => {
 
 const sameGrant = (g, botId, action, scope) => g?.botId === botId && g.action === action && g.scope === scope;
 
-/** What the owner has said about this bot doing this: 'always', 'ask', 'deny', or null for nothing yet.
- * A payment Always allow with no site is refused here too (a doctored backup could carry one). */
-export function grantFor(state, botId, action, scope = '') {
+/** Has this grant's end passed? A grant with no end never ends. */
+export const grantEnded = (grant, now = iso()) => Boolean(grant?.until) && !(Date.parse(grant.until) > Date.parse(now));
+
+/** What the owner has said about this bot doing this: 'always', 'ask', 'deny', or null for nothing yet
+ * (or for an Always allow whose end has passed). A payment Always allow with no site is refused here too
+ * (a doctored backup could carry one). */
+export function grantFor(state, botId, action, scope = '', now = iso()) {
   if (!botIds(state).has(botId)) return null;
   const grant = (state.grants || []).find(g => sameGrant(g, botId, action, scope || ''));
-  if (!grant || !GRANT_CHOICES.includes(grant.choice)) return null;
+  if (!grant || !GRANT_CHOICES.includes(grant.choice) || grantEnded(grant, now)) return null;
   if (action === 'spend' && grant.choice === 'always' && !grant.scope) return 'ask';
   return grant.choice;
 }
 
 export const grantsOf = (state, botId) => (state.grants || []).filter(g => g?.botId === botId);
 
+const YEAR_MS = 366 * 86400000;
+/** An Always allow's end: null for none, else an ISO time in the future and within a year. */
+export function cleanUntil(until, now = iso()) {
+  if (until === undefined || until === null || until === '') return null;
+  const at = Date.parse(String(until));
+  if (!Number.isFinite(at)) fail('Say when it ends as a time.');
+  if (at <= Date.parse(now)) fail('An end must be in the future.');
+  if (at - Date.parse(now) > YEAR_MS) fail('An end must be within a year.');
+  return new Date(at).toISOString();
+}
+/** The ends the ask card offers. `untilFor` turns one into a time: '1h' an hour from now, 'today' the end of this
+ * local day (the browser's clock, so "today" is the owner's), anything else no end. */
+export const UNTIL_CHOICES = [['always', 'Always'], ['1h', 'For 1 hour'], ['today', 'For today']];
+export function untilFor(choice, now = new Date()) {
+  const at = new Date(now);
+  if (choice === '1h') return new Date(at.getTime() + 3600000).toISOString();
+  if (choice === 'today') { at.setHours(23, 59, 59, 999); return at.toISOString(); }
+  return null;
+}
+
 /** Set one grant, replacing the same key. Refuses a payment Always allow with no site, an action that is
  * not asked about, a browser grant with no site and a connector grant with no account. */
-export function setGrant(state, botId, action, scope, choice, now = iso(), {log = true, threadId = null} = {}) {
+export function setGrant(state, botId, action, scope, choice, now = iso(), {log = true, threadId = null, until = null} = {}) {
   if (!isAskAction(action)) fail(`"${String(action ?? '').slice(0, 60)}" is not something a bot asks about.`);
   if (!GRANT_CHOICES.includes(choice)) fail('Choose always, ask or deny.');
   if (!botIds(state).has(botId)) fail('Bot not found.', 404);
   const where = PER_ORIGIN.includes(action) || isConnector(action) || action === 'spend' ? scopeOf({action, target: scope}) : '';
   if ((PER_ORIGIN.includes(action) || (action === 'spend' && choice === 'always')) && !where) fail(`A ${SITE_WORD[action]} grant is for one site. Say which.`);
   if (isConnector(action) && !where) fail('A connector grant is for one account. Say which.');
+  // Only an Always allow ends; Ask each time and Deny stand until the owner changes them.
+  const end = choice === 'always' ? cleanUntil(until, now) : null;
   state.grants ??= [];
-  const found = state.grants.find(g => sameGrant(g, botId, action, where));
+  let found = state.grants.find(g => sameGrant(g, botId, action, where));
   if (found) Object.assign(found, {choice, at: now});
-  else state.grants.push({botId, action, scope: where, choice, at: now});
-  if (log) logActivity(state, {botId, kind: 'perm', text: grantSentence(botNameOf(state, botId), action, where, choice), threadId, now});
-  return state.grants.find(g => sameGrant(g, botId, action, where));
+  else state.grants.push(found = {botId, action, scope: where, choice, at: now});
+  if (end) found.until = end; else delete found.until;
+  if (log) logActivity(state, {botId, kind: 'perm', text: grantSentence(botNameOf(state, botId), action, where, choice) + (end ? ` Until ${end.slice(0, 16).replace('T', ' ')} UTC.` : ''), threadId, now});
+  return found;
+}
+
+/** A grant as Undo needs it: what it was, or `choice: null` when there was none. */
+const priorOf = (state, botId, action, scope) => {
+  const g = (state.grants || []).find(x => sameGrant(x, botId, action, scope));
+  return g ? {botId, action, scope, choice: g.choice, ...(g.until ? {until: g.until} : {})} : {botId, action, scope, choice: null};
+};
+export const grantPrior = priorOf;
+
+/** The owner's Hands-off switch: true lets every bot send, post and change connected apps with no rule, on every
+ * site. Payments and deletes still ask; a rule the owner set still wins. Logged like a grant change. */
+export function setHandsOff(state, on, now = iso()) {
+  if (typeof on !== 'boolean') fail('Say true or false.');
+  state.handsOff = on;
+  logActivity(state, {kind: 'perm', text: on ? 'Bots now send, post and change connected apps without asking. Payments and deletes still ask.' : 'Bots now ask before sending, posting or changing a connected app.', now});
+  return {handsOff: on};
+}
+
+/** Put permissions back the way an Undo snapshot says: `{askBasics?, handsOff?, grants?: [{botId, action, scope,
+ * choice|null, until?}]}`. A null choice removes the rule. Each grant goes through setGrant, so a restore can never
+ * hold what a grant cannot (an every-site payment Always allow); an end already past removes the rule. */
+export function restorePermissions(state, undo, now = iso()) {
+  if (!undo || typeof undo !== 'object') fail('Send what to put back.');
+  if ('grants' in undo && !Array.isArray(undo.grants)) fail('Grants must be a list.');
+  for (const key of ['askBasics', 'handsOff']) if (key in undo && typeof undo[key] !== 'boolean') fail('Say true or false.');
+  if ('askBasics' in undo && Boolean(state.askBasics) !== undo.askBasics) setAskBasics(state, undo.askBasics, now);
+  if ('handsOff' in undo && Boolean(state.handsOff) !== undo.handsOff) setHandsOff(state, undo.handsOff, now);
+  for (const g of (undo.grants || []).slice(0, 500)) {
+    const botId = String(g?.botId ?? ''), action = String(g?.action ?? ''), scope = String(g?.scope ?? '');
+    const gone = g?.choice === null || g?.choice === undefined || (g.until && grantEnded(g, now));
+    if (!gone) { setGrant(state, botId, action, scope, g.choice, now, {until: g.until || null}); continue; }
+    const before = (state.grants || []).length;
+    state.grants = (state.grants || []).filter(x => !sameGrant(x, botId, action, scope));
+    if (state.grants.length !== before) logActivity(state, {botId, kind: 'perm', text: `${botNameOf(state, botId)}'s rule to ${verbOf(action, scope)} was removed.`, now});
+  }
+  return {askBasics: Boolean(state.askBasics), handsOff: Boolean(state.handsOff)};
 }
 
 /** The owner's switch: `ask` true makes every bot ask before it opens a page or reads a connected app, as
@@ -138,7 +206,10 @@ const settled = ask => ask.status !== 'pending';
 /** The gate for one action: allowed, refused with a place to change it, or an ask is needed.
  * Only an explicit grant allows. The old permission checkbox and "run without asking" are settings a
  * member can change, so they read as Ask each time. */
-export function verdict(state, bot, action, target = '', {readPrivate = false} = {}) {
+/** What Hands-off lets through with no rule: a send, a post, a connector write. Never a payment or a delete. */
+export const handsOffCovers = action => action === 'send' || action === 'post' || connectorOf(action)?.[2] === 'write';
+
+export function verdict(state, bot, action, target = '', {readPrivate = false, now = iso()} = {}) {
   if (isBasicKit(action)) return {verdict: 'allow', scope: ''};
   if (!isAskAction(action)) return {verdict: 'deny', scope: '', message: `${bot?.name || 'This bot'} cannot do that.`};
   // `target` may be the page URL or the origin itself; a connector's is its account.
@@ -146,8 +217,8 @@ export function verdict(state, bot, action, target = '', {readPrivate = false} =
   const umbrella = umbrellaOf(action);
   // A Deny on the connector-wide write (from before writes were per tool) still covers every write tool.
   // A payment Deny with no site covers every site; otherwise the site's own grant, then the every-site one.
-  const everywhere = action === 'spend' && scope ? grantFor(state, bot?.id, action, '') : null;
-  const choice = (umbrella && grantFor(state, bot?.id, umbrella, scope) === 'deny') || everywhere === 'deny' ? 'deny' : grantFor(state, bot?.id, action, scope) ?? everywhere;
+  const everywhere = action === 'spend' && scope ? grantFor(state, bot?.id, action, '', now) : null;
+  const choice = (umbrella && grantFor(state, bot?.id, umbrella, scope, now) === 'deny') || everywhere === 'deny' ? 'deny' : grantFor(state, bot?.id, action, scope, now) ?? everywhere;
   if (choice === 'always') return {verdict: 'allow', scope};
   if (choice === 'deny') {
     const name = bot?.name || 'this bot';
@@ -158,6 +229,8 @@ export function verdict(state, bot, action, target = '', {readPrivate = false} =
   // what was read off. The caller says which basics the guard is for (`readPrivate`, per need in `decide`).
   // `askBasics` is the owner's switch to have even these asked (Settings → Permissions).
   if (choice === null && !state?.askBasics && isBasicAccess(action) && !readPrivate) return {verdict: 'allow', scope};
+  // Hands-off: the owner chose to let sends, posts and connector writes go with no rule (Settings → Permissions).
+  if (choice === null && state?.handsOff === true && handsOffCovers(action)) return {verdict: 'allow', scope};
   return {verdict: 'ask', scope};
 }
 
@@ -217,24 +290,29 @@ const parked = (state, runId) => runId ? (state.groupRuns || []).find(r => r.id 
  * account (and for the rest of what the same request needed). Returns the ask and the run to resume:
  * only when that run is still waiting on asks and this was the last one. An answer to an ask whose run
  * was cancelled or deleted is recorded, its grant stands, and nothing resumes. */
-export function answerAsk(state, askId, answer, now = iso()) {
+export function answerAsk(state, askId, answer, now = iso(), {until = null} = {}) {
   if (!ASK_ANSWERS.includes(answer)) fail('Answer decline, allow or always.');
   const ask = (state.asks || []).find(a => a.id === askId);
   if (!ask) fail('Ask not found.', 404);
   if (answer === 'always' && ask.action === 'spend' && !ask.grantScope) fail("This payment has no site to remember. Choose Allow once or Don't allow.");
   if (answer === 'always' && acrossSites(ask)) fail("This ask covers more than one site, and a grant is for one. Choose Allow once or Don't allow.");
   if (ask.status !== 'pending') fail('This ask was already answered.', 409);
+  const end = answer === 'always' ? cleanUntil(until, now) : null;
   ask.status = answer === 'decline' ? 'declined' : 'allowed';
   ask.scope = answer === 'always' ? 'always' : answer === 'allow' ? 'once' : null;
   ask.answeredAt = now;
   delete ask.expiresAt;
+  // What the rules were before, so the owner's Undo can put them back (restorePermissions).
+  const undo = {grants: []};
   if (answer === 'always' && botIds(state).has(ask.botId)) {
+    const keys = [[ask.action, ask.grantScope], ...(ask.implies || []).filter(x => x.scope === ask.grantScope).map(x => [x.action, x.scope])];
+    for (const [action, scope] of keys) undo.grants.push(priorOf(state, ask.botId, action, scopeOf({action, target: scope})));
     // One entry for the answer, in the chat it was asked in; what the same request also covered is not a second event.
-    setGrant(state, ask.botId, ask.action, ask.grantScope, 'always', now, {threadId: ask.chatKey});
-    for (const extra of ask.implies || []) if (extra.scope === ask.grantScope) setGrant(state, ask.botId, extra.action, extra.scope, 'always', now, {log: false});
+    setGrant(state, ask.botId, ask.action, ask.grantScope, 'always', now, {threadId: ask.chatKey, until: end});
+    for (const extra of ask.implies || []) if (extra.scope === ask.grantScope) setGrant(state, ask.botId, extra.action, extra.scope, 'always', now, {log: false, until: end});
   }
   const run = parked(state, ask.runId);
-  return {ask, resumeRunId: run && !holds(state, ask) ? run.id : null};
+  return {ask, resumeRunId: run && !holds(state, ask) ? run.id : null, ...(undo.grants.length ? {undo} : {})};
 }
 
 /** Decline every ask whose 24 hours are up. Returns them and the runs that may now go on. */
@@ -272,7 +350,7 @@ export const pendingAsks = state => (state.asks || []).filter(a => a.status === 
  * that is not one, a payment set to Always with no site, a per-site grant with no site (a Send, Post or Delete
  * grant stored before those were per site). A connector-wide write Always allow (from before writes
  * were per tool) becomes Ask each time. Idempotent; run on every load and restore. */
-export function sweepGrants(state) {
+export function sweepGrants(state, now = iso()) {
   const ids = botIds(state);
   for (const g of Array.isArray(state.grants) ? state.grants : []) {
     if (g && g.choice === 'always' && /^connector\.[a-z0-9_-]+\.write$/.test(String(g.action))) g.choice = 'ask';
@@ -280,7 +358,7 @@ export function sweepGrants(state) {
   state.grants = (Array.isArray(state.grants) ? state.grants : []).filter(g => g && typeof g === 'object'
     && ids.has(g.botId) && isAskAction(g.action) && typeof g.scope === 'string'
     && GRANT_CHOICES.includes(g.choice) && !(g.action === 'spend' && g.choice === 'always' && !g.scope)
-    && !(PER_ORIGIN.includes(g.action) && !g.scope));
+    && !(PER_ORIGIN.includes(g.action) && !g.scope) && !grantEnded(g, now));
   return state;
 }
 

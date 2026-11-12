@@ -5,14 +5,14 @@
  *
  * A bot's manager is settings.reportsTo (company.js); "manager" is simply a bot
  * with reports, so any bot can become one by receiving a report. */
-import {companyBots, primaryOf, managerOf, reportsOf, teamOf} from './company.js?v=71b92f8de6';
-import {firstUnusedTint} from './bot-create.js?v=71b92f8de6';
-import {TINT_COUNT, dayLabel} from './ui-kit.js?v=71b92f8de6';
-import {jobOf} from './ui-company.js?v=71b92f8de6';
-import {ACTIVITY_CHIPS} from './activity-log.js?v=71b92f8de6';
-import {grantRows} from './ui-asks.js?v=71b92f8de6';
-import {cleanEffort, effortLabel, EFFORT_LEVELS} from './ai-presets.js?v=71b92f8de6';
-import {scheduleRows} from './schedules.js?v=71b92f8de6';
+import {companyBots, primaryOf, managerOf, reportsOf, teamOf} from './company.js?v=2812b99386';
+import {firstUnusedTint} from './bot-create.js?v=2812b99386';
+import {TINT_COUNT, dayLabel} from './ui-kit.js?v=2812b99386';
+import {jobOf} from './ui-company.js?v=2812b99386';
+import {ACTIVITY_CHIPS} from './activity-log.js?v=2812b99386';
+import {grantRows} from './ui-asks.js?v=2812b99386';
+import {cleanEffort, effortLabel, EFFORT_LEVELS} from './ai-presets.js?v=2812b99386';
+import {scheduleRows} from './schedules.js?v=2812b99386';
 
 /** What a bot made without a job holds until the owner's first chat message
  * replaces it (the profile, the list and the chat all treat it as "no job yet"). */
@@ -281,3 +281,23 @@ export function resolveSection(name, sections) {
 }
 /** The argument after the slash in a section name ('' when there is none). */
 export const sectionArg = name => splitSection(name)[1];
+
+/** The first-run checklist on the Chats home: what a new workspace still needs, each step ticked from what is
+ * really there and linked to the place that does it. `agents` is how many local agents are paired (GET /api/agents;
+ * unknown counts as none), `seen` whether this person has opened Settings → Permissions, `demo` drops the two
+ * steps the Pages demo cannot do. The card hides once `complete` or dismissed (a per-person choice, `ac-setup`). */
+export function setupChecklist(state, {agents = 0, seen = false, demo = false} = {}) {
+  const providers = state?.ai?.providers || [], bots = companyBots(state), primary = primaryOf(state) || bots[0];
+  const sent = Object.values(state?.chats || {}).some(list => Array.isArray(list) && list.some(m => m?.role === 'user'))
+    || (state?.groupRuns || []).length > 0 || bots.length > 1;
+  const all = [
+    {id: 'model', label: 'Add a model key or a subscription', done: Boolean(state?.aiEnabled) || providers.length > 0, go: {settings: 'models'}},
+    {id: 'agent', label: 'Pair this computer so bots can open pages', done: Number(agents) > 0 || providers.some(p => p?.kind === 'local-cli'), go: {settings: 'agents'}},
+    {id: 'task', label: `Send ${primary?.name || 'a bot'} a first task, or make a bot`, done: sent, go: primary ? {bot: primary.id} : {newBot: true}},
+    {id: 'connect', label: 'Connect an app', done: (state?.connectors || []).length > 0, go: {settings: 'conn'}},
+    {id: 'perm', label: 'Choose what bots may do without asking', done: Boolean(seen) || (state?.grants || []).length > 0 || Boolean(state?.askBasics) || state?.handsOff === true, go: {settings: 'perm'}},
+  ];
+  const items = demo ? all.filter(i => i.id !== 'model' && i.id !== 'agent') : all;
+  const done = items.filter(i => i.done).length;
+  return {items, done, total: items.length, complete: done === items.length};
+}

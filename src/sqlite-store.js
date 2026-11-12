@@ -73,7 +73,7 @@ export function readDocuments(rows) {
 export function readAsks(rows) {
   return {
     asks: rows('asks').map(r => fromRow(r)),
-    grants: rows('grants').map(g => ({botId: g.bot_id, action: g.action, scope: g.scope ?? '', choice: g.choice, at: g.at})),
+    grants: rows('grants').map(g => ({botId: g.bot_id, action: g.action, scope: g.scope ?? '', choice: g.choice, at: g.at, ...(g.until ? {until: g.until} : {})})),
     activity: rows('activity').map(a => ({id: a.id, at: a.at, botId: a.bot_id ?? null, kind: a.kind, text: a.text, threadId: a.thread_id ?? null, undoUntil: a.undo_until ?? null})),
   };
 }
@@ -179,10 +179,10 @@ export const TABLE_SHAPES = [
   // What the owner said Always allow / Ask each time / Deny to: one row per bot, action and origin or account.
   {
     table: 'grants', pk: ['bot_id', 'action', 'scope'],
-    columns: ['bot_id', 'action', 'scope', 'choice', 'at'],
+    columns: ['bot_id', 'action', 'scope', 'choice', 'at', 'until'],
     rows: state => (state.grants || []).map(g => ({
       key: `${g.botId}/${g.action}/${g.scope}`, pk: [g.botId, g.action, g.scope],
-      params: [g.botId, g.action, g.scope, g.choice, g.at || now()],
+      params: [g.botId, g.action, g.scope, g.choice, g.at || now(), g.until ?? null],
     })),
   },
   // Everything that left the app, every permission change and every bot made, moved, paused or deleted.
@@ -432,6 +432,11 @@ const MIGRATIONS = [
         text TEXT NOT NULL, thread_id TEXT, undo_until TEXT);
       CREATE INDEX IF NOT EXISTS activity_at ON activity(at);
     `);
+  }},
+  // v13: an Always allow may end (`until`, an ISO time); past it the grant asks again and is swept on load.
+  {to: 13, up(db) {
+    const columns = db.prepare('PRAGMA table_info(grants)').all().map(c => c.name);
+    if (!columns.includes('until')) db.exec('ALTER TABLE grants ADD COLUMN until TEXT');
   }}];
 /** Current schema version, derived from the migration list so it cannot drift.
  * Tests and operators read it. */
@@ -583,6 +588,8 @@ export class SqliteStore {
       guard: (() => { try { return {...freshGuard(), ...JSON.parse(this.kvGet('guard') || '{}')}; } catch { return freshGuard(); } })(),
       // The owner's switch to ask before a bot opens a page or reads a connected app (shared/asks.js).
       askBasics: this.kvGet('ask_basics') === '1',
+      // The owner's Hands-off switch (shared/presets.js): sends, posts and connector writes with no rule go unasked.
+      handsOff: this.kvGet('hands_off') === '1',
       // The owner's limits on how far bots go per message (shared/limits.js); empty is no limit.
       limits: (() => { try { return JSON.parse(this.kvGet('limits') || '{}'); } catch { return {}; } })(),
       memory: readMemory(kind => this.db.prepare('SELECT key, doc FROM memory WHERE kind=? ORDER BY rowid').all(kind)),
@@ -684,6 +691,7 @@ export class SqliteStore {
       kv('held_sends', JSON.stringify(state.heldSends || []));
       kv('guard', JSON.stringify(state.guard || freshGuard()));
       kv('ask_basics', state.askBasics ? '1' : '0');
+      kv('hands_off', state.handsOff === true ? '1' : '0');
       kv('limits', JSON.stringify(state.limits || {}));
       const retention = state.settings?.retention ? JSON.stringify(state.settings.retention) : null;
       if (this.kvWritten.get('\0settings') !== String(retention)) {

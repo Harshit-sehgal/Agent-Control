@@ -12,7 +12,8 @@ import {resolveConfig} from './ai-providers.js';
 import {pauseAll} from '../shared/runaway.js';
 import {queueGroupRun, resumeGuardedRuns, resumeGroupRun, resumeBrowserRun, decidePlan, cancelRun, coordinationState} from './coordination.js';
 import {recordBrowserRequests, denyBrowserRequest, BROWSER_TOOL_HINT} from '../shared/bot-browser.js';
-import {setGrant, setAskBasics} from '../shared/asks.js';
+import {setGrant, setAskBasics, restorePermissions} from '../shared/asks.js';
+import {applyPreset} from '../shared/presets.js';
 import {setLimits} from '../shared/limits.js';
 import {addAskCards, notifyAsks} from './ask-cards.js';
 import {answerAskFlow} from './ask-runs.js';
@@ -238,13 +239,24 @@ export function groupRoutes(router) {
   // one closing turn. An answer after the run was stopped is recorded and resumes nothing.
   router.add('POST', '/api/asks/:id', 'admin', async c => {
     const b = await c.body();
-    return answerAskFlow(c.store, c.params.id, b?.answer, {actor: c.actor.email});
+    return answerAskFlow(c.store, c.params.id, b?.answer, {actor: c.actor.email, until: b?.until ?? null});
   });
   // What the owner said Always allow / Ask each time / Deny to, per bot, action and origin or account:
-  // {botId, action, scope?, choice}. A payment can only be Ask each time or Deny.
+  // {botId, action, scope?, choice, until?}. A payment can only be Ask each time or Deny. `until` ends an Always allow.
   router.add('POST', '/api/grants', 'admin', async c => {
     const b = await c.body();
-    return c.store.update(s => setGrant(s, String(b?.botId ?? ''), String(b?.action ?? ''), b?.scope ?? '', b?.choice));
+    return c.store.update(s => setGrant(s, String(b?.botId ?? ''), String(b?.action ?? ''), b?.scope ?? '', b?.choice, undefined, {until: b?.until ?? null}));
+  });
+
+  // A safety preset (shared/presets.js): {preset: 'careful' | 'balanced' | 'handsOff'}. Returns what changed and the
+  // Undo snapshot; restore puts that snapshot back. The owner's alone: they decide what every bot may do.
+  router.add('POST', '/api/permissions/preset', 'owner', async c => {
+    const b = await c.body();
+    return c.store.update(s => applyPreset(s, b?.preset));
+  });
+  router.add('POST', '/api/permissions/restore', 'owner', async c => {
+    const b = await c.body();
+    return c.store.update(s => restorePermissions(s, b));
   });
 
   // Whether every bot asks before opening a page or reading a connected app: {ask: true|false}.

@@ -315,7 +315,10 @@ async def phone_flow(page, base):
     await expect(page.locator('#main .crow')).to_have_count(3)
     assert await overflow(page) <= 0
     # Swipe left reaches Threads, swipe right comes back. A swipe on the pinned row does not.
-    async def swipe(start, end, y=500):
+    # Below the bot rows: a sideways drag on a row is the row's own gesture, and the first-run checklist moves the rows down.
+    rows = await page.locator('#main .crows').bounding_box()
+    free_y = rows['y'] + rows['height'] + 60
+    async def swipe(start, end, y=free_y):
         await page.mouse.move(start, y)
         await page.mouse.down()
         await page.mouse.move((start + end) / 2, y, steps=4)
