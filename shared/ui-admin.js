@@ -11,7 +11,7 @@ import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs
 import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js';
 import {pushStatus, enablePush, disablePush} from './ui-push.js';
 import {connectorsPanel, loadConnectors, connectActions, connectForms} from './ui-connect.js';
-import {cliDraft, modelChoices, chosenModel, effortChoices, OTHER_MODEL, modelRowMatches, agentCliRows, agentPermissionRows, agentWorkLine, subscriptionLine, SIGN_IN_HINT} from './ui-connect-model.js';
+import {cliDraft, modelChoices, chosenModel, effortChoices, OTHER_MODEL, modelRowMatches, modelGroupStays, agentCliRows, agentPermissionRows, agentWorkLine, subscriptionLine, SIGN_IN_HINT} from './ui-connect-model.js';
 import {LOCAL_CLI_ENGINES, LOCAL_CLI_KIND} from './ai-presets.js';
 import {parsePrices, pricesText} from './usage.js';
 
@@ -408,12 +408,11 @@ function filterModels(input) {
   }
   // A provider with a match keeps its "Another … model…" row; one with none disappears.
   for (const group of box.content.querySelectorAll('optgroup')) {
-    const left = [...group.querySelectorAll('option')].filter(o => !typedIdRow(o.value));
-    if (!left.length) group.remove();
+    if (!modelGroupStays([...group.querySelectorAll('option')].map(o => o.value), keep)) group.remove();
   }
   if (query.trim() && !shown) for (const option of new DOMParser().parseFromString(`<select>${list.all}</select>`, 'text/html').querySelectorAll('option')) {
     // Nothing matches: offer every typed-id row, so the model can still be named by hand.
-    if (typedIdRow(option.value)) box.content.append(option);
+    if (typedIdRow(option.value) && option.value !== keep) box.content.append(option);
   }
   select.innerHTML = box.innerHTML;
   select.value = keep;

@@ -35,3 +35,12 @@ test('the bar comes before the select, labelled, and never posts with the form',
   assert.match(input, /aria-label="Search models"/);
   assert.doesNotMatch(input, /\sname=/, 'no name, so FormData never carries the query');
 });
+
+test('a provider group stays while it holds a model or the picked row, even a typed-id one', async () => {
+  const {modelGroupStays, OTHER_MODEL} = await import('../shared/ui-connect-model.js');
+  const typed = `pA|${OTHER_MODEL}`;
+  assert.equal(modelGroupStays(['pA|gpt-5', typed], ''), true);
+  assert.equal(modelGroupStays([typed], ''), false, 'only the type-an-id row left: the group goes');
+  assert.equal(modelGroupStays([typed], typed), true, 'the picked "Another model" row keeps its group, so the typed id is still sent');
+  assert.equal(modelGroupStays([], typed), false);
+});

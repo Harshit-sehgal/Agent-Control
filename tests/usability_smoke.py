@@ -2038,6 +2038,12 @@ async def older_google_connection_listed(page, base):
     row = body.locator('.cn-site[data-connector="google"]')
     await expect(row).to_contain_text('Older connection')
     await expect(row.get_by_role('button', name='Connect Gmail')).to_be_visible()
+    await expect(row.get_by_role('link', name='Reconnect Google')).to_have_count(0)
+    # A Google sign-in that ended can be restored with its saved client.
+    server.connectors[0].update(status='reconnect')
+    await goto_settings_section(page, 'general')
+    await goto_settings_section(page, 'conn')
+    await expect(row.get_by_role('link', name='Reconnect Google')).to_have_attribute('href', '/api/connectors/google/start')
     await row.get_by_role('button', name='Remove').click()
     await expect(page.locator('#modal')).to_contain_text('Remove Google?')
     await page.locator('#modal').get_by_role('button', name='Remove').click()

@@ -5,8 +5,8 @@
  *
  * Nothing here ever sees a key: a subscription has none, an MCP address is typed once and sent, and the
  * server never answers with it. */
-import {cleanCliModel, cliEngineById, LOCAL_CLI_KIND, LOCAL_CLI_ENGINES, EFFORT_LEVELS, cleanEffort, CLI_MODELS} from './ai-presets.js?v=a9557469c7';
-import {appById} from './app-catalog.js?v=a9557469c7';
+import {cleanCliModel, cliEngineById, LOCAL_CLI_KIND, LOCAL_CLI_ENGINES, EFFORT_LEVELS, cleanEffort, CLI_MODELS} from './ai-presets.js?v=2c827d8a6b';
+import {appById} from './app-catalog.js?v=2c827d8a6b';
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
@@ -135,6 +135,10 @@ export function cliDraft(values = {}) {
 
 /** The value of the last row, which opens a box for any id. */
 export const OTHER_MODEL = '__other';
+const typedId = value => value === OTHER_MODEL || String(value).endsWith(`|${OTHER_MODEL}`);
+/** Whether a provider's group stays in a filtered model picker: it still holds a listed model, or the picked row
+ * (a picked "Another … model…" row too, or the typed id would be lost on save). */
+export const modelGroupStays = (values, picked) => values.some(v => !typedId(v) || v === picked);
 /** Every model a subscription can run, shorthands first, then each by its full name (shared/ai-presets.js). */
 export const CLI_MODEL_CHOICES = CLI_MODELS;
 

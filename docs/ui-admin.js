@@ -5,15 +5,15 @@
  *
  * The look is Settings and Connectors: a titled card (`.st-g`, `.cd`), rows with a switch or a small
  * button on the right, a segmented pill for a choice of few, and one primary action per card. */
-import {esc, icon, btn, field, note, empty, tag, fullDate, textInput, switchBtn, modelSelect, effortPicker, runFullApp, demoList, MODEL_SEARCH_FROM} from './ui-kit.js?v=a9557469c7';
-import {store, api, sync, isAdmin, isStaticDemo} from './ui-store.js?v=a9557469c7';
-import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=a9557469c7';
-import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js?v=a9557469c7';
-import {pushStatus, enablePush, disablePush} from './ui-push.js?v=a9557469c7';
-import {connectorsPanel, loadConnectors, connectActions, connectForms} from './ui-connect.js?v=a9557469c7';
-import {cliDraft, modelChoices, chosenModel, effortChoices, OTHER_MODEL, modelRowMatches, agentCliRows, agentPermissionRows, agentWorkLine, subscriptionLine, SIGN_IN_HINT} from './ui-connect-model.js?v=a9557469c7';
-import {LOCAL_CLI_ENGINES, LOCAL_CLI_KIND} from './ai-presets.js?v=a9557469c7';
-import {parsePrices, pricesText} from './usage.js?v=a9557469c7';
+import {esc, icon, btn, field, note, empty, tag, fullDate, textInput, switchBtn, modelSelect, effortPicker, runFullApp, demoList, MODEL_SEARCH_FROM} from './ui-kit.js?v=2c827d8a6b';
+import {store, api, sync, isAdmin, isStaticDemo} from './ui-store.js?v=2c827d8a6b';
+import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=2c827d8a6b';
+import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js?v=2c827d8a6b';
+import {pushStatus, enablePush, disablePush} from './ui-push.js?v=2c827d8a6b';
+import {connectorsPanel, loadConnectors, connectActions, connectForms} from './ui-connect.js?v=2c827d8a6b';
+import {cliDraft, modelChoices, chosenModel, effortChoices, OTHER_MODEL, modelRowMatches, modelGroupStays, agentCliRows, agentPermissionRows, agentWorkLine, subscriptionLine, SIGN_IN_HINT} from './ui-connect-model.js?v=2c827d8a6b';
+import {LOCAL_CLI_ENGINES, LOCAL_CLI_KIND} from './ai-presets.js?v=2c827d8a6b';
+import {parsePrices, pricesText} from './usage.js?v=2c827d8a6b';
 
 /** The pages Settings can load into its body. Only the keys are read (is this a page?). */
 export const ADMIN_PAGES = {notifications: true, workspaces: true, team: true, agents: true, data: true, connectors: true, ai: true};
@@ -408,12 +408,11 @@ function filterModels(input) {
   }
   // A provider with a match keeps its "Another … model…" row; one with none disappears.
   for (const group of box.content.querySelectorAll('optgroup')) {
-    const left = [...group.querySelectorAll('option')].filter(o => !typedIdRow(o.value));
-    if (!left.length) group.remove();
+    if (!modelGroupStays([...group.querySelectorAll('option')].map(o => o.value), keep)) group.remove();
   }
   if (query.trim() && !shown) for (const option of new DOMParser().parseFromString(`<select>${list.all}</select>`, 'text/html').querySelectorAll('option')) {
     // Nothing matches: offer every typed-id row, so the model can still be named by hand.
-    if (typedIdRow(option.value)) box.content.append(option);
+    if (typedIdRow(option.value) && option.value !== keep) box.content.append(option);
   }
   select.innerHTML = box.innerHTML;
   select.value = keep;

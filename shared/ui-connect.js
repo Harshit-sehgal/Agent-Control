@@ -36,9 +36,11 @@ function mcpPanel(connectors) {
   // through its own API. They keep working until removed; Connect gives the app's real MCP server.
   for (const c of connectors.filter(c => c?.kind === 'site' || c?.kind === 'google')) {
     const name = c.kind === 'google' ? 'Google' : c.name, app = c.kind === 'google' ? appById('gmail') : appById(c.app);
-    const upgrade = app ? btn(`Connect ${app.name}`, 'catalog-connect-row', {small: true, id: app.id, kind: 'primary'}) : '';
+    const upgrade = app ? btn(`Connect ${app.name}`, 'catalog-connect-row', {small: true, id: app.id, kind: c.kind === 'google' && c.status !== 'ready' ? 'quiet' : 'primary'}) : '';
+    // A Google sign-in that ended can be restored with the client it already saved, without moving to MCP.
+    const again = c.kind === 'google' && ['reconnect', 'error', 'setup'].includes(c.status) ? `<a class="btn primary small" href="/api/connectors/google/start" data-google-connect>${icon('arrow', 15)}<span>Reconnect Google</span></a>` : '';
     rows.push(`<div class="cn-card cn-site" data-connector="${esc(c.id)}">${head(name, `Older connection · ${c.kind === 'google' ? 'Google\'s API' : `through the browser · ${c.host || ''}`}`, statusOf(c.status || 'ready'))}
-      <div class="cn-acts">${upgrade}${btn('Remove', 'connector-delete', {kind: 'danger', small: true, id: c.id, data: {name}})}</div></div>`);
+      <div class="cn-acts">${again}${upgrade}${btn('Remove', 'connector-delete', {kind: 'danger', small: true, id: c.id, data: {name}})}</div></div>`);
   }
   const list = rows.length ? `<div class="cd cn-list">${rows.join('')}</div>` : '<div class="cd pad"><p class="st-quiet">No servers yet. Connect an app above and bots can use its tools, with your say-so.</p></div>';
   return `<section class="st-g" id="cn-connected"><h4 class="st-h">Connected</h4>${list}</section>`;
