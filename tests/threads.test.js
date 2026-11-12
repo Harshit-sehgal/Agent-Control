@@ -81,6 +81,7 @@ test('a thread title is a short name for the first message, like a chat app name
   assert.equal(titleFrom('Plan a 3-day trip to Jaipur under 15k and find a hotel'), 'Plan a 3-day trip to Jaipur');
   assert.equal(titleFrom('can you find me 5 remote internships posted this week, with links?'), 'Find me 5 remote internships');
   assert.equal(titleFrom('What is the weather in Delhi today?'), 'Weather in Delhi today');
+  assert.equal(titleFrom('Send an email to bob@example.com saying hi'), 'Send an email to bob@example.com', 'a title never ends on the word that led into the cut');
   assert.equal(titleFrom('x'.repeat(100)).length, 40, 'one long word is cut hard');
   assert.equal(titleFrom('  \n '), '');
   const thread = createThread({groups: [{id: 'home', bots: [{id: 'atlas', settings: {lead: true}}]}]}, {title: titleFrom('Plan my week\nmore'), now: '2026-11-11T10:00:00.000Z', makeId: () => 'abc'});

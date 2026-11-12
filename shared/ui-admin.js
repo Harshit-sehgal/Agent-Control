@@ -5,7 +5,7 @@
  *
  * The look is Settings and Connectors: a titled card (`.st-g`, `.cd`), rows with a switch or a small
  * button on the right, a segmented pill for a choice of few, and one primary action per card. */
-import {esc, icon, btn, field, note, empty, tag, fullDate, textInput, switchBtn, modelSelect, effortPicker} from './ui-kit.js';
+import {esc, icon, btn, field, note, empty, tag, fullDate, textInput, switchBtn, modelSelect, effortPicker, runFullApp, demoList} from './ui-kit.js';
 import {store, api, sync, isAdmin, isStaticDemo} from './ui-store.js';
 import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js';
 import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js';
@@ -468,7 +468,7 @@ export async function adminPage(kind) {
   if (kind === 'ai') {
     const res = await api('/api/ai');
     // The browser-only demo has no providers to manage and says so.
-    if (res?.demo) return note('Models and keys need the Node server. The browser-only demo answers with built-in replies and has no model to connect.');
+    if (res?.demo) return `${note('Models and keys need the Node server. The browser-only demo answers with built-in replies, so there is no key to add here. The full app speaks to every provider below.')}${runFullApp()}${demoList(PROVIDER_PRESETS.map(p => ({name: p.label, sub: p.note || ''})), 'Providers the full app supports')}`;
     // Admin-only detail (endpoints, cached model ids, catalogue errors). The demo
     // shim has no such route, so a failure just falls back to the summary.
     const full = await api('/api/ai/providers').catch(() => null);

@@ -13,16 +13,16 @@
  * Polling is what makes the device cast: the server tells the agent to stream a tab only
  * while somebody is looking, so the loop stops when the page is hidden or the view closes.
  * Input goes out in order, one request at a time, with typed letters joined. */
-import {esc, icon} from './ui-kit.js?v=fed80c15e0';
-import {botColor} from './ui-face.js?v=fed80c15e0';
-import {store, api, findBot, canWrite, isAdmin, isStaticDemo, changed, onChange, go, back} from './ui-store.js?v=fed80c15e0';
+import {esc, icon} from './ui-kit.js?v=a77585254b';
+import {botColor} from './ui-face.js?v=a77585254b';
+import {store, api, findBot, canWrite, isAdmin, isStaticDemo, changed, onChange, go, back} from './ui-store.js?v=a77585254b';
 /** Driving the tab (Take over, Hand back, input) is an admin's, the role those routes need; the demo is its one owner. */
 const canDrive = () => isStaticDemo() || isAdmin();
-import {toast} from './ui-dialogs.js?v=fed80c15e0';
+import {toast} from './ui-dialogs.js?v=a77585254b';
 import {
   PAGE, KEY_CHIPS, clickInput, wheelInput, keyInput, coalesce, navigateAddress, rowLabel, statusOf, stateLine, mergeView, veilFor, frameDelay, listDelay, wantsList,
   chipFor, containRect, controlPill, thumbFor, thumbDelay,
-} from './ui-computer.js?v=fed80c15e0';
+} from './ui-computer.js?v=a77585254b';
 
 const el = id => document.getElementById(id);
 const raw = (path, method = 'GET', body) => window.AGENT_API(path, method, body);   // no progress bar: these run all the time
@@ -110,6 +110,7 @@ export function computerPage(bot, {faceOf}) {
       <div class="pc-keys" role="group" aria-label="Keys">${keys}</div>
     </div>` : '<span hidden><span data-pc="dot"></span><input data-pc="url"><button data-pc="go"></button></span>';
   return `<div class="pc" id="pc" data-bot="${esc(bot.id)}" data-state="idle" role="dialog" aria-modal="true" aria-label="${esc(bot.name)}'s computer" style="--t:${esc(botColor(bot))}">
+    <button type="button" class="rbtn pc-back" data-action="computer-back" data-id="${esc(bot.id)}" aria-label="Back to ${esc(bot.name)}">${icon('back', 20)}</button>
     <div class="pc-screen" data-pc="stage" role="group" aria-label="${esc(bot.name)}'s browser tab">
       <img class="pc-img" data-pc="img" alt="Live picture of ${esc(bot.name)}'s browser tab" draggable="false" hidden>
       <div class="pc-veil" data-pc="veil"></div>
@@ -314,6 +315,8 @@ export const computerActions = {
     toast(`${botName(b.dataset.id)} has the browser back.`);
   },
   'computer-close': b => close(b.dataset.id),
+  // The header's back arrow leaves the same way the close button does.
+  'computer-back': b => close(b.dataset.id),
   'computer-tray': b => {
     if (session?.botId !== b.dataset.id) return;
     const open = session.tools.hidden;

@@ -7,12 +7,12 @@
  *
  * Secrets: the Google client secret and an MCP address or header are typed here and sent once. The server never
  * answers with one, so nothing on this page can show or log one. */
-import {esc, icon, btn, note, tag, field, textInput} from './ui-kit.js?v=fed80c15e0';
-import {api, sync, store, go} from './ui-store.js?v=fed80c15e0';
-import {primaryOf} from './company.js?v=fed80c15e0';
-import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=fed80c15e0';
-import {mcpRows, googleCard, mcpDraft, statusOf} from './ui-connect-model.js?v=fed80c15e0';
-import {catalogView, appById, appInputs, connectRequest, connectHow} from './app-catalog.js?v=fed80c15e0';
+import {esc, icon, btn, note, tag, field, textInput, runFullApp, demoList} from './ui-kit.js?v=a77585254b';
+import {api, sync, store, go} from './ui-store.js?v=a77585254b';
+import {primaryOf} from './company.js?v=a77585254b';
+import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=a77585254b';
+import {mcpRows, googleCard, mcpDraft, statusOf} from './ui-connect-model.js?v=a77585254b';
+import {catalogView, appById, appInputs, connectRequest, connectHow, APPS} from './app-catalog.js?v=a77585254b';
 
 const GOOGLE_START = '/api/connectors/google/start';
 
@@ -206,7 +206,7 @@ async function signIn(app) {
 
 /** The Connectors section: Google, the servers, the form. `res` is `GET /api/connectors`. */
 export function connectorsPanel(res) {
-  if (res?.demo) return note('Connectors need the Node server. The browser-only demo has no Gmail, Drive or MCP servers to connect. Run the full app to add them.');
+  if (res?.demo) return `${note('Connectors need the Node server. The browser-only demo has no Gmail, Drive or MCP servers to connect; the full app connects every app below.')}${runFullApp()}${demoList(APPS.map(a => ({name: a.name, sub: a.blurb || '', tag: a.category})), 'Apps the full app connects')}`;
   const connectors = Array.isArray(res?.connectors) ? res.connectors : [];
   lastRes = res;
   return `<div class="cn-panel">${catalogPanel(res)}${googlePanel(res?.google, connectors.find(c => c.id === 'google'))}${mcpPanel(connectors)}${addForm()}</div>`;

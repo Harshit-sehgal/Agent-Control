@@ -222,7 +222,7 @@ test('Pages creates a bot from a sentence',async()=>{
   const sent=await request('/api/groups/home/chat','POST',{message:'Make a bot that watches my inbox and drafts replies',directBotId:'atlas',chatKey:'atlas'});
   assert.equal(sent.status,'completed');
   const state=await request('/api/state');
-  const made=botNamed(state,'Inbox');
+  const made=botNamed(state,'Inbox Watcher');
   assert.ok(made,'a bot was made, named from the sentence');
   assert.equal(made.settings.reportsTo,'atlas','it reports to its creator');
   assert.deepEqual(made.permissions,[]);
@@ -232,17 +232,17 @@ test('Pages creates a bot from a sentence',async()=>{
   assert.doesNotMatch(chatText(state)('atlas'),/```create-bot/,'the block does not reach the chat');
   const again=await request('/api/groups/home/chat','POST',{message:'Make a bot that watches my inbox and drafts replies',directBotId:'atlas',chatKey:'atlas'});
   assert.equal(again.status,'completed');
-  assert.ok(botNamed(await request('/api/state'),'Inbox 2'),'a second one with the same job gets a number');
+  assert.ok(botNamed(await request('/api/state'),'Inbox Watcher 2'),'a second one with the same job gets a number');
 });
 
-test('Pages Atlas greets, and makes a bot for work no bot fits, which starts on it at once',async()=>{
+test('Pages Atlas greets, and answers work no bot fits itself, without making a bot',async()=>{
   const {request}=setup();
   await request('/api/groups/home/chat','POST',{message:'Hello there',directBotId:'atlas',chatKey:'atlas'});
   await request('/api/groups/home/chat','POST',{message:'Quarterly tax paperwork due soon',directBotId:'atlas',chatKey:'atlas'});
   const text=chatText(await request('/api/state'))('atlas');
   assert.match(text,/Hello! I'm Atlas/);
-  assert.match(text,/Atlas created a new bot for this work: Quarterly Tax/);
-  assert.match(text,/On it: Quarterly tax paperwork due soon/);
+  assert.match(text,/I'll take this one myself: quarterly tax paperwork due soon\./);
+  assert.doesNotMatch(text,/created a new bot/);
   assert.doesNotMatch(text,/make a bot for it/i);
 });
 
@@ -261,7 +261,8 @@ test('Pages threads are run by Atlas, which hands work to the bot whose job it i
   const talk=chatText(state)(`team-${started.thread.id}`);
   assert.match(talk,/I'll hand this to @Planner/);
   assert.match(talk,/On it: Please book my dentist appointment/);
-  assert.match(talk,/Done: Book my dentist appointment\./);
+  assert.match(talk,/That is everything back from the team\./);
+  assert.doesNotMatch(talk,/Done:/);
   assert.equal(botNamed(state,'Scholar')&&run.recipients.includes(botNamed(state,'Scholar').id),false,'a bot whose job does not match is not woken');
 });
 

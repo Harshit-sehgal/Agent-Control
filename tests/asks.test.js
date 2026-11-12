@@ -259,7 +259,7 @@ test('Review focus 5: a grant for a bot that no longer exists is ignored and swe
 
 test('the card copy: one sentence, the three buttons, and the collapsed line', () => {
   assert.deepEqual(ASK_ANSWER_LABELS, {decline: "Don't allow", allow: 'Allow once', always: 'Always allow'});
-  assert.deepEqual(GRANT_LABELS, {always: 'Always allow', ask: 'Ask each time', deny: 'Deny'});
+  assert.deepEqual(GRANT_LABELS, {always: 'Always allow', ask: 'Ask each time', deny: "Don't allow"});
   const s = state();
   const ask = createAsk(s, {botId: 'b', runId: null, chatKey: 'b', action: 'browser.use', target: 'https://a.com/x', detail: 'read a.com', now: NOW, makeId: mk});
   assert.equal(askText(ask, 'Mailroom'), 'Mailroom wants to read a.com.');

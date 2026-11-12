@@ -42,12 +42,21 @@ const MAX_BLOCKS_READ = 8;
 
 const WORDS = s => String(s ?? '').replace(/[^\p{L}\p{N}'’\s-]/gu, ' ').split(/\s+/).filter(Boolean);
 const LEAD_IN = new Set('please can could you i want need would like make create build add hire set up me us a an the my our your new bot helper agent assistant that which who to for someone somebody what whats what’s is are how when where tell give show get'.split(' '));
-const VERBS = new Set('watch watches find finds read reads write writes track tracks check checks draft drafts plan plans book books monitor monitors summarise summarize summarises summarizes look looks keep keeps help helps handle handles answer answers send sends collect collects review reviews research researches manage manages organise organize organises organizes take takes scan scans triage triages'.split(' '));
+const VERBS = new Set('watch watches find finds read reads write writes track tracks check checks draft drafts plan plans book books monitor monitors summarise summarize summarises summarizes look looks keep keeps help helps handle handles answer answers send sends collect collects review reviews research researches manage manages organise organize organises organizes take takes scan scans triage triages sum sums'.split(' '));
 const STOP = new Set('and or that which who to for from on in of by with when whenever every each so then at'.split(' '));
 const title = word => (/^\p{Lu}{2,5}$/u.test(word) ? word : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
+/** The role a job's opening verb names: "watches" is a Watcher. */
+const ROLES = {watch: 'Watcher', find: 'Finder', read: 'Reader', write: 'Writer', track: 'Tracker', check: 'Checker', draft: 'Drafter', plan: 'Planner',
+  book: 'Booker', monitor: 'Monitor', summarise: 'Summariser', summarize: 'Summarizer', look: 'Helper', keep: 'Keeper', help: 'Helper', handle: 'Handler',
+  answer: 'Helper', send: 'Sender', collect: 'Collector', review: 'Reviewer', research: 'Researcher', manage: 'Manager', organise: 'Organiser',
+  organize: 'Organizer', take: 'Helper', sum: 'Summariser', scan: 'Scanner', triage: 'Triager'};
+const roleOf = verb => ROLES[verb] || ROLES[verb.replace(/es$/, '')] || ROLES[verb.replace(/s$/, '')] || 'Helper';
+/** "Posts" before a role reads as "Post Finder"; an acronym or a word ending in ss stays. */
+const single = word => (/^\p{Lu}{2,5}$/u.test(word) || /ss$/i.test(word) || word.length < 4 ? word : word.replace(/s$/i, ''));
 
-/** A bot's name from the sentence that is its job: the first noun phrase after
- * the opening verb ("Watches my inbox and drafts replies" is "Inbox"), else
+/** A bot's name from the sentence that is its job, by its role: the first noun
+ * phrase after the opening verb and what the verb makes it ("Watches my inbox and
+ * drafts replies" is "Inbox Watcher"; a job with no known verb is a Helper), else
  * "Helper N". `taken` is the names already in the company; a name that is taken
  * gets a number. */
 export function nameFromSentence(sentence, taken = []) {
@@ -56,10 +65,11 @@ export function nameFromSentence(sentence, taken = []) {
   let i = 0;
   const skip = set => { while (i < words.length && set.has(words[i].toLowerCase())) i++; };
   skip(LEAD_IN);
-  if (i < words.length && VERBS.has(words[i].toLowerCase())) i++;
+  const verb = i < words.length && VERBS.has(words[i].toLowerCase()) ? words[i++].toLowerCase() : '';
   skip(LEAD_IN);
   const picked = [];
   while (i < words.length && picked.length < 2 && !STOP.has(words[i].toLowerCase())) picked.push(words[i++]);
+  if (picked.length) picked.push(single(picked.pop()), roleOf(verb));
   let name = picked.map(title).join(' ').slice(0, MAX_BOT_NAME);
   if (name.length < 2) {
     let n = 1;
@@ -142,7 +152,7 @@ export function buildCreatedBot(request, {bot, runId = null, now = new Date().to
   };
 }
 
-export const botCreatedText = (creator, created, groupName) => `${creator?.name || 'A bot'} created a new bot for this work: ${created.name} in ${groupName || 'this group'}.`;
+export const botCreatedText = (creator, created, groupName) => `${creator?.name || 'A bot'} created a new bot for this work: ${created.name}${groupName ? ` in ${groupName}` : ''}.`;
 export const botCreateRefusedText = (bot, reason) => `${bot?.name || 'The bot'} tried to create a new bot, but ${reason}`;
 
 /** What every bot is told about the tool. */

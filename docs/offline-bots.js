@@ -9,11 +9,10 @@
  *
  * Pure and browser-safe.
  */
-import {titleFrom} from './threads.js?v=fed80c15e0';
-import {cleanText} from './core.js?v=fed80c15e0';
-import {mentionedBots} from './coordination.js?v=fed80c15e0';
-import {MIN_BOT_JOB} from './bot-create.js?v=fed80c15e0';
-import {basicKind} from './off-job.js?v=fed80c15e0';
+import {cleanText} from './core.js?v=a77585254b';
+import {mentionedBots} from './coordination.js?v=a77585254b';
+import {MIN_BOT_JOB} from './bot-create.js?v=a77585254b';
+import {basicKind} from './off-job.js?v=a77585254b';
 
 const FILLER = new Set('about after also and are can could does from have here into just like make more need please should some than that their them then there these they this those want what when where which will with would your you for the'.split(' '));
 /** Content words of a text, lower-case, with a trailing plural `s` dropped, so
@@ -53,6 +52,30 @@ export function offlineSetup(request, bots = [], self = null) {
   return '';
 }
 
+const NO_MODEL = 'This demo runs without a model, so the answer is a stand-in. Run the full app with a model for real results.';
+
+/** What a request would send out of the app: a send, a post or a payment. The demo cannot do any of them, so
+ * it shows the same ask card the served app shows and stops there. Returns {action, target, detail, body, said}
+ * or null. `detail` finishes "Let Atlas …?", in the owner's own words. */
+export function outsideAsk(request) {
+  const text = cleanText(request, 4000).replace(/^(?:(?:please|pls|can you|could you|would you)\s+)+/i, '');
+  const site = (text.match(/\b(?:on|at|from)\s+((?:https?:\/\/)?[a-z0-9-]+(?:\.[a-z0-9-]+)+)/i) || [])[1] || '';
+  const target = site ? (/^https?:/i.test(site) ? site : `https://${site}`) : '';
+  const SAYING = /\s+(?:saying|that says|with the text|to say)\s+/i;
+  const body = text.split(SAYING)[1]?.replace(/^["“]|["”]?[.!?]*$/g, '') || '';
+  const detail = text.split(SAYING)[0].replace(/[.!?]+$/, '').replace(/^\w/, c => c.toLowerCase());
+  if (/^(?:send|email|e-mail|mail|text|dm|reply)\b/i.test(text) || /\bsend\b[^.?!]*\b(?:email|e-mail|mail|message|text|dm|note)\b/i.test(text)) {
+    return {action: 'send', target: '', detail, body, said: 'I drafted it. Sending leaves the app, so it waits for your answer.'};
+  }
+  if (/^(?:post|tweet|publish)\b/i.test(text) || /\b(?:post|tweet|publish)\b[^.?!]*\bon\s+(?:x|twitter|linkedin|reddit|facebook|instagram|threads|bluesky|mastodon)\b/i.test(text)) {
+    return {action: 'post', target, detail, body, said: 'I wrote the post. Posting leaves the app, so it waits for your answer.'};
+  }
+  if (/^(?:pay|buy|purchase|order|check out)\b/i.test(text) || /\bpay (?:for|the|my)\b/i.test(text)) {
+    return {action: 'spend', target, detail, body: '', said: 'I lined it up. A payment asks you first.'};
+  }
+  return null;
+}
+
 const GREETING = /^\s*(hi|hello|hey|hiya|good (morning|afternoon|evening)|thanks|thank you)\b[\s\S]{0,40}$/i;
 const HIRE = /\b(make|create|build|hire|add|set up|need)\b[^.?!]*\b(bot|helper|assistant|agent)\b/i;
 
@@ -71,7 +94,7 @@ const jobFrom = request => {
 export function offlineReply({bot, request, team = [], previous = null, closing = false, lead = false, own = false, anyway = false}) {
   const task = cleanText(request, 220);
   // The closing reply is the result: the demo has no model, so it says so in one line instead of relaying the team.
-  if (closing) return `Done: ${titleFrom(request) || 'that'}.\nThis demo runs without a model, so the team's answers are stand-ins. Connect one in Settings → Models and keys for real results.`;
+  if (closing) return `That is everything back from the team.\n${NO_MODEL}`;
   if (GREETING.test(request ?? '')) return `Hello! I'm ${bot.name}. Tell me what you need${lead ? " and I'll get the right bot on it" : ''}.`;
   // Thanks, ok and "what can you do?" are answered by any bot itself, never refused or handed on.
   const basic = basicKind(request);
@@ -88,8 +111,8 @@ export function offlineReply({bot, request, team = [], previous = null, closing 
     const byJob = team.filter(b => !named.includes(b.id)).map(b => ({id: b.id, n: overlap(request, b.instructions)})).filter(x => x.n > 0).sort((a, b) => b.n - a.n).slice(0, 3).map(x => x.id);
     const chosen = [...named, ...byJob].map(id => team.find(b => b.id === id)).filter(Boolean);
     if (chosen.length) return `I'll hand this to ${chosen.map(b => `@${b.name}`).join(' and ')}.`;
-    // No bot fits: Atlas makes one for the job and it starts at once, as the served app does.
-    return `Making a bot for this.\n\`\`\`create-bot\n${JSON.stringify({job: jobFrom(request)})}\n\`\`\``;
+    // No bot fits: the primary answers itself. It makes a bot only when asked to (HIRE above).
+    return `I'll take this one myself: ${task.replace(/[.!?]+$/, '').replace(/^[A-Z](?=[a-z])/, c => c.toLowerCase())}.\n${NO_MODEL}`;
   }
   // A plain bot in its own chat says when a request is not its job, unless told to do it anyway.
   if (own && !anyway && !overlap(request, bot.instructions) && !mentionedBots(team, request).length) {

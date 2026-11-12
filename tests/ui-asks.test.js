@@ -75,7 +75,7 @@ const grant = (extra = {}) => ({botId: 'mail', action: 'send', scope: '', choice
 test('a bot\'s grants list what it may do, each with the three choices and the current one marked', () => {
   const rows = grantRows(stateOf({grants: [grant(), grant({action: 'browser.use', scope: 'https://example.com', choice: 'deny'})]}), 'mail');
   assert.deepEqual(rows.map(r => [r.label, r.choice]), [['Open example.com', 'deny'], ['Send', 'always']], 'pages first, then in the order the actions are asked');
-  assert.deepEqual(rows[0].choices.map(c => [c.id, c.label, c.on]), [['always', 'Always allow', false], ['ask', 'Ask each time', false], ['deny', 'Deny', true]]);
+  assert.deepEqual(rows[0].choices.map(c => [c.id, c.label, c.on]), [['always', 'Always allow', false], ['ask', 'Ask each time', false], ['deny', "Don't allow", true]]);
   assert.equal(rows[0].scope, 'https://example.com');
   assert.equal(rows[0].botName, 'Mailroom');
 });

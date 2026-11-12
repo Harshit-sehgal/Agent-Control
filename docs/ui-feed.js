@@ -9,11 +9,11 @@
  * Atlas") and opens the hops, the cards that wait on the owner, and a failure that
  * ended a run. What a bot read, which connector it used, and the lines a page or
  * connector call left on the way are stored but not shown (tests/clean-feed.test.js). */
-import {handoffs, hopLine, progressPill} from './ui-company.js?v=fed80c15e0';
-import {isRunNote, runBelongsToChat} from './ui-model.js?v=fed80c15e0';
-import {connectorLine, modelLimitLine} from './ui-connect-model.js?v=fed80c15e0';
-import {setupCardOf, setupDone} from './setup.js?v=fed80c15e0';
-import {requestOfMessage} from './bot-browser.js?v=fed80c15e0';
+import {handoffs, hopLine, progressPill} from './ui-company.js?v=a77585254b';
+import {isRunNote, runBelongsToChat} from './ui-model.js?v=a77585254b';
+import {connectorLine, modelLimitLine} from './ui-connect-model.js?v=a77585254b';
+import {setupCardOf, setupDone} from './setup.js?v=a77585254b';
+import {requestOfMessage} from './bot-browser.js?v=a77585254b';
 
 const isActive = status => status === 'queued' || status === 'running';
 const isAwaiting = status => String(status || '').startsWith('awaiting');
@@ -90,7 +90,8 @@ export function feed({items = [], state, key, now = Date.now()}) {
   items.forEach((item, index) => {
     if (item.kind === 'day') return out.push({kind: 'day', at: item.at});
     const m = item.message, run = m.runId ? byId.get(m.runId) : null;
-    if (run && !placed.has(run.id)) {
+    // A bot made for the run is said first; the run's line ("Scout messaged Atlas") comes after it.
+    if (run && !placed.has(run.id) && !(m.role === 'system' && m.kind === 'bot-created')) {
       placed.add(run.id);
       const entry = pillEntry(run, state);
       if (entry) out.push(entry);

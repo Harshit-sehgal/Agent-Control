@@ -21,9 +21,9 @@
  * Pure and browser-safe, like the other shared modules: the server and the
  * Pages demo share every rule here.
  */
-import {fail} from './errors.js?v=fed80c15e0';
-import {cleanText} from './core.js?v=fed80c15e0';
-import {logActivity} from './activity-log.js?v=fed80c15e0';
+import {fail} from './errors.js?v=a77585254b';
+import {cleanText} from './core.js?v=a77585254b';
+import {logActivity} from './activity-log.js?v=a77585254b';
 
 /** What every bot may do without a grant. */
 export const BASIC_KIT = ['bot.ask', 'bot.create', 'schedule.set'];
@@ -48,7 +48,7 @@ export const ASK_ANSWERS = ['decline', 'allow', 'always'];
 export const GRANT_CHOICES = ['always', 'ask', 'deny'];
 /** The words on the ask card's buttons and the grant picker, verbatim. */
 export const ASK_ANSWER_LABELS = {decline: "Don't allow", allow: 'Allow once', always: 'Always allow'};
-export const GRANT_LABELS = {always: 'Always allow', ask: 'Ask each time', deny: 'Deny'};
+export const GRANT_LABELS = {always: 'Always allow', ask: 'Ask each time', deny: "Don't allow"};
 /** An ask that covers more than one site is only Decline or Allow: a grant is for one site, so no single
  * Always allow can mean what it shows. A payment with no site has no Always allow either. */
 export const askChoices = (action, {acrossSites = false, site = true} = {}) => (acrossSites || (action === 'spend' && !site) ? ['decline', 'allow'] : [...ASK_ANSWERS]);
@@ -151,7 +151,7 @@ export function verdict(state, bot, action, target = '', {readPrivate = false} =
   if (choice === 'always') return {verdict: 'allow', scope};
   if (choice === 'deny') {
     const name = bot?.name || 'this bot';
-    return {verdict: 'deny', scope, message: `${name} is set to Deny for this. Change it on ${name}'s profile → Permissions.`};
+    return {verdict: 'deny', scope, message: `${name} is set to Don't allow for this. Change it on ${name}'s profile → Permissions.`};
   }
   // The basics need no answer. But once this run has read private data, a page on a site the bot has no grant
   // for, or a read on a connector that did not supply that data, asks: an address or a query is enough to carry
@@ -221,8 +221,8 @@ export function answerAsk(state, askId, answer, now = iso()) {
   if (!ASK_ANSWERS.includes(answer)) fail('Answer decline, allow or always.');
   const ask = (state.asks || []).find(a => a.id === askId);
   if (!ask) fail('Ask not found.', 404);
-  if (answer === 'always' && ask.action === 'spend' && !ask.grantScope) fail('This payment has no site to remember. Choose Allow or Decline.');
-  if (answer === 'always' && acrossSites(ask)) fail('This ask covers more than one site, and a grant is for one. Choose Allow or Decline.');
+  if (answer === 'always' && ask.action === 'spend' && !ask.grantScope) fail("This payment has no site to remember. Choose Allow once or Don't allow.");
+  if (answer === 'always' && acrossSites(ask)) fail("This ask covers more than one site, and a grant is for one. Choose Allow once or Don't allow.");
   if (ask.status !== 'pending') fail('This ask was already answered.', 409);
   ask.status = answer === 'decline' ? 'declined' : 'allowed';
   ask.scope = answer === 'always' ? 'always' : answer === 'allow' ? 'once' : null;

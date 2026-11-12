@@ -22,19 +22,19 @@
  *   ui-dialogs      toast, sheet, confirm/ask      ui-actions action/form tables
  *   ui-fx           confetti, the send arrow and the bots' ambient life
  */
-import {companyRoute} from './ui-company.js?v=fed80c15e0';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=fed80c15e0';
-import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=fed80c15e0';
-import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, renderPause, closeSearch, homeView} from './ui-shell.js?v=fed80c15e0';
-import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=fed80c15e0';
-import {profileViews, wirePages} from './ui-profile.js?v=fed80c15e0';
-import {wireGestures, gesturesBusy} from './ui-gestures.js?v=fed80c15e0';
-import {settingsViews} from './ui-settings.js?v=fed80c15e0';
-import {showLogin, hideLogin} from './ui-sheets.js?v=fed80c15e0';
-import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=fed80c15e0';
-import {bringBotsToLife} from './ui-fx.js?v=fed80c15e0';
-import {wireComputer} from './ui-computer-view.js?v=fed80c15e0';
-import {googleReturn, withoutGoogleParams} from './ui-connect-model.js?v=fed80c15e0';
+import {companyRoute} from './ui-company.js?v=a77585254b';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=a77585254b';
+import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=a77585254b';
+import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, renderPause, closeSearch, homeView} from './ui-shell.js?v=a77585254b';
+import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=a77585254b';
+import {profileViews, wirePages} from './ui-profile.js?v=a77585254b';
+import {wireGestures, gesturesBusy} from './ui-gestures.js?v=a77585254b';
+import {settingsViews} from './ui-settings.js?v=a77585254b';
+import {showLogin, hideLogin} from './ui-sheets.js?v=a77585254b';
+import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=a77585254b';
+import {bringBotsToLife} from './ui-fx.js?v=a77585254b';
+import {wireComputer} from './ui-computer-view.js?v=a77585254b';
+import {googleReturn, withoutGoogleParams} from './ui-connect-model.js?v=a77585254b';
 
 const el = id => document.getElementById(id);
 const hashRoute = () => normalizeRoute(companyRoute(location.hash, store.state));
@@ -72,6 +72,9 @@ function renderRoute() {
   const route = store.route, main = el('main'), desk = isDesk();
   // A chat that was deleted in another tab falls back home, not to a blank thread.
   if ((route.bot || route.thread) && !conversation()) return go({}, {replace: true});
+  // A laptop home is never an empty pane: it opens the primary bot's chat (the empty "Select a chat" is for a company with no primary).
+  const primary = route.home && desk ? groups().find(g => g.id === 'home')?.bots?.find(b => b.settings?.lead) : null;
+  if (primary) return go({bot: primary.id}, {replace: true});
   document.body.dataset.view = route.bot || route.thread ? 'chat' : route.home ? 'home' : 'page';
   const view = `${JSON.stringify(route)}|${desk}`;
   if (view !== lastView) {

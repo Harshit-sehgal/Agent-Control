@@ -40,7 +40,7 @@ test('A: a Send after navigating to another site is decided by that site\'s gran
   const out = recordBrowserRequests(s, {bot: shopper(s), groupId: 'home', chatKey: 'b', makeId: mk, now: NOW, output: block(hop)});
   assert.deepEqual(out.records, [], 'nothing is dispatched: Send is Deny on b.example');
   assert.deepEqual(out.asks, []);
-  assert.match(out.lines.map(l => l.text).join('\n'), /Deny/);
+  assert.match(out.lines.map(l => l.text).join('\n'), /Don't allow/);
 });
 
 test('A: a Send on another site asks about that site, and is approved only for it', () => {

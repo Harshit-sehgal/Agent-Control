@@ -8,14 +8,14 @@
  * permission. It changes `state` in place, so the caller wraps it in its own
  * write (a store update, or the demo's state object).
  */
-import {activity} from './core.js?v=fed80c15e0';
-import {logActivity} from './activity-log.js?v=fed80c15e0';
-import {isLead, managerOf, companyBots} from './company.js?v=fed80c15e0';
-import {noteBotWork} from './runaway.js?v=fed80c15e0';
-import {TINT_COUNT} from './ui-kit.js?v=fed80c15e0';
-import {MAX_BOTS_PER_GROUP, buildCreatedBot, nameFromSentence, firstUnusedTint} from './bot-create.js?v=fed80c15e0';
+import {activity} from './core.js?v=a77585254b';
+import {logActivity} from './activity-log.js?v=a77585254b';
+import {isLead, managerOf, companyBots} from './company.js?v=a77585254b';
+import {noteBotWork} from './runaway.js?v=a77585254b';
+import {TINT_COUNT} from './ui-kit.js?v=a77585254b';
+import {MAX_BOTS_PER_GROUP, buildCreatedBot, nameFromSentence, firstUnusedTint} from './bot-create.js?v=a77585254b';
 
-/** `{record, groupName}` for the bot that was added, or `{refused}` with the
+/** `{record, groupName}` (no group name when there is only one company) for the bot that was added, or `{refused}` with the
  * reason, in words that follow "tried to create a new bot, but". */
 export function addCreatedBot(state, {bot, groupId, request, runId = null, now = new Date().toISOString(), makeId = () => crypto.randomUUID()}) {
   const group = (state.groups || []).find(g => g.id === groupId);
@@ -40,5 +40,7 @@ export function addCreatedBot(state, {bot, groupId, request, runId = null, now =
   }
   activity(state, 'bot', `${bot.name} created ${record.name}.`, {botId: record.id, runId});
   logActivity(state, {botId: record.id, kind: 'bots', text: `${bot.name} created ${record.name}.`, now});
-  return {record, groupName: group.name};
+  // With one company there is nowhere else it could be, so the line does not name the group.
+  const companies = (state.groups || []).filter(g => g?.settings?.kind !== 'thread').length;
+  return {record, groupName: companies > 1 ? group.name : null};
 }

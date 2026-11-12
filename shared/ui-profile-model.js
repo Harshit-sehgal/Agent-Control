@@ -22,6 +22,20 @@ export const MAX_JOB = 3000;
 const DEFAULT_SHAPE = 'rounded';
 
 export const hasJob = bot => { const text = String(bot?.instructions ?? '').trim(); return Boolean(text) && text !== NO_JOB; };
+/** A bot's job as one line for its profile header: the first sentence that says what it does, without a
+ * "You are Atlas," lead-in, cut at a word near 90 characters. The full instructions open from View instructions. */
+export function roleLine(bot) {
+  if (!hasJob(bot)) return '';
+  const name = String(bot?.name ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const sentences = String(bot.instructions).trim().split(/(?<=[.!?])\s+/)
+    .map(x => x.replace(new RegExp(`^you are\\s+${name || '\\S+'}\\s*[,.:-]?\\s*`, 'i'), '').replace(/[.!?]+$/, '').trim()).filter(Boolean);
+  // "You are Atlas, the primary bot." says only what the header already says: take the next sentence.
+  const pick = sentences.length > 1 && /^\s*you are\b/i.test(bot.instructions) && sentences[0].length < 25 ? sentences[1] : sentences[0] || '';
+  const line = pick.charAt(0).toUpperCase() + pick.slice(1);
+  if (line.length <= 90) return line;
+  const cut = line.slice(0, 90);
+  return `${cut.slice(0, cut.lastIndexOf(' ') > 40 ? cut.lastIndexOf(' ') : 90).replace(/[\s,;:-]+$/, '')}…`;
+}
 const plural = (n, word, many = `${word}s`) => `${n} ${n === 1 ? word : many}`;
 const botOf = (state, id) => companyBots(state).find(b => b.id === id) || null;
 
@@ -192,7 +206,7 @@ export function editChanges(was, now) {
 /** The four filter chips, default first, as [filter, label] (shared/activity-log.js is the one list). */
 export const ACTIVITY_FILTERS = ACTIVITY_CHIPS.map(c => [c.filter, c.label]);
 /** The request for a page of the log: a chip, an optional bot (one profile's own section), a page size and the cursor. */
-export function activityUrl({filter = 'outside', botId = null, limit = 50, before = null} = {}) {
+export function activityUrl({filter = 'all', botId = null, limit = 50, before = null} = {}) {
   const q = [`filter=${encodeURIComponent(filter)}`, `limit=${Math.floor(Number(limit)) || 50}`];
   if (botId) q.push(`bot=${encodeURIComponent(botId)}`);
   if (before) q.push(`before=${encodeURIComponent(before)}`);

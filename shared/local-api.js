@@ -103,7 +103,7 @@ function storeRunLines(state, run, entries) {
     const line = {id: entry.id || crypto.randomUUID(), runId: run.id, role: entry.role, senderId: entry.senderId, senderName: entry.senderName, toBotId: entry.toBotId, text: entry.text, at: entry.at || now(),
       // The cards a conversation draws (out of job, a hire, a limit, a setup change) carry their kind;
       // a plain reply's `handoff` kind is only the run log's.
-      ...(entry.kind && entry.kind !== 'handoff' ? {kind: entry.kind} : {}), ...(entry.request ? {request: entry.request} : {}), ...(entry.botId ? {botId: entry.botId} : {}), ...(entry.mode ? {mode: entry.mode} : {}), ...(entry.setup ? {setup: entry.setup} : {})};
+      ...(entry.kind && entry.kind !== 'handoff' ? {kind: entry.kind} : {}), ...(entry.request ? {request: entry.request} : {}), ...(entry.botId ? {botId: entry.botId} : {}), ...(entry.mode ? {mode: entry.mode} : {}), ...(entry.setup ? {setup: entry.setup} : {}), ...(entry.askId ? {askId: entry.askId} : {})};
     if (line.role === 'bot') log.push({...line, kind: entry.kind});
     try { addChatMessages(state, key, [line], {trusted: true}); } catch { /* The conversation was removed mid-run. */ }
   }
@@ -128,13 +128,18 @@ function cancelRunsForChat(state, key, reason) {
 /** A run parked on an ask whose answer has come (or lapsed). The offline engine cannot open a page or
  * take a model turn, so the run ends here instead of resuming: a decline says what was declined, and an
  * allow says the demo cannot do it. The answer and any grant are recorded either way, like the server's. */
+const DEMO_ALLOWED = {
+  send: 'Allowed. This demo has no mail account, so nothing was sent; in the full app it goes out now.',
+  post: 'Allowed. This demo has no browser, so nothing was posted; in the full app it is posted now.',
+  spend: 'Allowed. This demo cannot pay, so no money moved; in the full app the payment goes ahead now.',
+};
 function settleParkedRun(state, runId, ask) {
   const run = state.groupRuns.find(r => r.id === runId);
   if (!run || run.status !== 'awaiting_ask') return;
   run.status = 'cancelled'; run.completedAt = now(); run.checkpoint = null; run.askIds = [];
   storeRunLines(state, run, [{id: crypto.randomUUID(), role: 'system', text: ask.status === 'declined'
     ? `The owner declined: ${ask.detail || ask.action}.`
-    : 'This offline demo cannot open pages, so the run stopped here.'}]);
+    : DEMO_ALLOWED[ask.action] || 'This offline demo cannot open pages, so the run stopped here.'}]);
 }
 
 /** One answer to an ask, the same rules and the same reply shape as the server's `POST /api/asks/:id`. */

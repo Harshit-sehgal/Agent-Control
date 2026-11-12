@@ -110,6 +110,7 @@ export function computerPage(bot, {faceOf}) {
       <div class="pc-keys" role="group" aria-label="Keys">${keys}</div>
     </div>` : '<span hidden><span data-pc="dot"></span><input data-pc="url"><button data-pc="go"></button></span>';
   return `<div class="pc" id="pc" data-bot="${esc(bot.id)}" data-state="idle" role="dialog" aria-modal="true" aria-label="${esc(bot.name)}'s computer" style="--t:${esc(botColor(bot))}">
+    <button type="button" class="rbtn pc-back" data-action="computer-back" data-id="${esc(bot.id)}" aria-label="Back to ${esc(bot.name)}">${icon('back', 20)}</button>
     <div class="pc-screen" data-pc="stage" role="group" aria-label="${esc(bot.name)}'s browser tab">
       <img class="pc-img" data-pc="img" alt="Live picture of ${esc(bot.name)}'s browser tab" draggable="false" hidden>
       <div class="pc-veil" data-pc="veil"></div>
@@ -314,6 +315,8 @@ export const computerActions = {
     toast(`${botName(b.dataset.id)} has the browser back.`);
   },
   'computer-close': b => close(b.dataset.id),
+  // The header's back arrow leaves the same way the close button does.
+  'computer-back': b => close(b.dataset.id),
   'computer-tray': b => {
     if (session?.botId !== b.dataset.id) return;
     const open = session.tools.hidden;

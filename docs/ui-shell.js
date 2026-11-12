@@ -5,11 +5,11 @@
  * Home is the Chats layout only. On a phone it is two sections, Bots and Threads,
  * switched by swiping; on a laptop the sidebar holds both and the chat opens on the
  * right. The lists come from ui-company.js (pure); this file is markup and events. */
-import {botRows, threadRows} from './ui-company.js?v=fed80c15e0';
-import {face} from './ui-face.js?v=fed80c15e0';
-import {esc, icon, stamp} from './ui-kit.js?v=fed80c15e0';
-import {pauseBanner} from './ui-asks.js?v=fed80c15e0';
-import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, isStaticDemo, seenChats} from './ui-store.js?v=fed80c15e0';
+import {botRows, threadRows} from './ui-company.js?v=a77585254b';
+import {face} from './ui-face.js?v=a77585254b';
+import {esc, icon, stamp} from './ui-kit.js?v=a77585254b';
+import {pauseBanner} from './ui-asks.js?v=a77585254b';
+import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, isStaticDemo, seenChats} from './ui-store.js?v=a77585254b';
 
 const el = id => document.getElementById(id);
 const DESK = '(min-width:1024px)';
@@ -134,12 +134,12 @@ export function mountRail() {
     <div class="rail-seg" id="rail-seg" role="tablist" aria-label="Show bots or threads" data-on="bots"><span class="thumb" aria-hidden="true"></span>${SECTIONS.map(s => `<button type="button" role="tab" data-action="rail-section" data-section="${s}">${s === 'bots' ? 'Bots' : 'Threads'}</button>`).join('')}</div>
     <div class="rail-top">
       <label class="rail-find">${icon('search', 17)}<input id="rail-q" type="search" placeholder="Search bots and threads" aria-label="Search bots and threads" autocomplete="off"></label>
-      ${canWrite() ? `<button type="button" class="rail-btn" data-action="new-bot" aria-label="New bot" title="New bot">${icon('plus', 18)}</button>` : ''}
+      ${canWrite() ? `<button type="button" class="rail-btn" data-action="new-bot" aria-label="New bot" title="New bot: add a bot to your company">${icon('plus', 18)}</button>` : ''}
     </div>
     <div class="rail-list" id="rail-body"></div>
     <div class="rail-foot">
       <button type="button" class="rail-me" data-action="open-settings" aria-label="Your account and settings"><span class="ini" id="rail-ini"></span><span id="rail-name"></span></button>
-      ${canWrite() ? `<button type="button" class="rail-btn rail-new" data-action="new-thread" aria-label="New thread" title="New thread">${newThreadIcon(18)}<span id="rail-badge"></span></button>` : ''}
+      ${canWrite() ? `<button type="button" class="rail-btn rail-new" data-action="new-thread" title="Start a new thread run by your primary bot">${newThreadIcon(18)}<span class="rail-new-l">New thread</span><span id="rail-badge"></span></button>` : ''}
     </div>`;
 }
 

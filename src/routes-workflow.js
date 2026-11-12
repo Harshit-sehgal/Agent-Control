@@ -69,7 +69,7 @@ export function workflowRoutes(router, {auth}) {
     if (c.req.headers?.['if-none-match'] === etag) return reply(304, null, {ETag: etag});
     return reply(200, body, {ETag: etag});
   });
-  // The activity log, a page at a time: ?filter=outside|perm|bots|all (default outside, "Left the app"),
+  // The activity log, a page at a time: ?filter=outside|perm|bots|all (default all),
   // ?before=<entry id> for older entries, ?limit= and ?bot=<bot id> for one profile's own section.
   // Read only: nothing edits or deletes an entry.
   router.add('GET', '/api/activity', 'viewer', c => {

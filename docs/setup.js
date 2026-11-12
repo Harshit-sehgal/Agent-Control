@@ -26,18 +26,18 @@
  *   make itself the primary bot, save a rule without the owner's tap, or reach a route the owner could not.
  *
  * Pure and browser-safe: the server reads replies with it and the UI paints the card from it. */
-import {cleanText, validHttpUrl} from './core.js?v=fed80c15e0';
-import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=fed80c15e0';
-import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=fed80c15e0';
-import {controlFence} from './reply-blocks.js?v=fed80c15e0';
-import {companyBots, primaryOf} from './company.js?v=fed80c15e0';
-import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices, isAskAction} from './asks.js?v=fed80c15e0';
-import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=fed80c15e0';
-import {grantWhat, payAlwaysText} from './ui-asks.js?v=fed80c15e0';
-import {COLOR_NAMES} from './ui-kit.js?v=fed80c15e0';
-import {SHAPES} from './company.js?v=fed80c15e0';
-import {limitsOf, BACKSTOP} from './limits.js?v=fed80c15e0';
-import {APPS, appById} from './app-catalog.js?v=fed80c15e0';
+import {cleanText, validHttpUrl} from './core.js?v=a77585254b';
+import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=a77585254b';
+import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=a77585254b';
+import {controlFence} from './reply-blocks.js?v=a77585254b';
+import {companyBots, primaryOf} from './company.js?v=a77585254b';
+import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices, isAskAction} from './asks.js?v=a77585254b';
+import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=a77585254b';
+import {grantWhat, payAlwaysText} from './ui-asks.js?v=a77585254b';
+import {COLOR_NAMES} from './ui-kit.js?v=a77585254b';
+import {SHAPES} from './company.js?v=a77585254b';
+import {limitsOf, BACKSTOP} from './limits.js?v=a77585254b';
+import {APPS, appById} from './app-catalog.js?v=a77585254b';
 
 export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'schedule', 'remove', 'open', 'signin', 'pause', 'limits', 'basics', 'forget', 'disconnect', 'thread', 'reconnect', 'connect', 'memory'];
 /** The bot settings a bot may propose. Not the primary role, the browser approval mode, or layout (pins, order). */

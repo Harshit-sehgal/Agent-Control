@@ -159,16 +159,16 @@ test('a reply without a block passes through unchanged', async () => {
   assert.equal(store.state().groups[0].bots.length, 1);
 });
 
-test('a name comes from the first noun phrase of the sentence, else Helper N', () => {
-  assert.equal(nameFromSentence('Watches my inbox and drafts replies to the people who write to me.'), 'Inbox');
-  assert.equal(nameFromSentence('Find posts that mention the project and list their links.'), 'Posts');
-  assert.equal(nameFromSentence('Tracks the weekly budget for the family.'), 'Weekly Budget');
-  assert.equal(nameFromSentence('What is the weather in Delhi today'), 'Weather');
-  assert.equal(nameFromSentence('Tell me the USD to INR rate'), 'USD', 'an acronym keeps its capitals');
+test('a name is the first noun phrase of the sentence and the role its verb names, else Helper N', () => {
+  assert.equal(nameFromSentence('Watches my inbox and drafts replies to the people who write to me.'), 'Inbox Watcher');
+  assert.equal(nameFromSentence('Find posts that mention the project and list their links.'), 'Post Finder');
+  assert.equal(nameFromSentence('Tracks the weekly budget for the family.'), 'Weekly Budget Tracker');
+  assert.equal(nameFromSentence('What is the weather in Delhi today'), 'Weather Helper');
+  assert.equal(nameFromSentence('Tell me the USD to INR rate'), 'USD Helper', 'an acronym keeps its capitals');
   assert.equal(nameFromSentence('Make me a bot'), 'Helper 1');
   assert.equal(nameFromSentence('Make me a bot', ['helper 1', 'Helper 2']), 'Helper 3');
-  assert.equal(nameFromSentence('Watches my inbox.', ['Inbox']), 'Inbox 2', 'a taken name gets a number');
-  assert.equal(validateCreateBotRequest({job: 'Watches my inbox and drafts replies.'}).name, 'Inbox');
+  assert.equal(nameFromSentence('Watches my inbox.', ['Inbox Watcher']), 'Inbox Watcher 2', 'a taken name gets a number');
+  assert.equal(validateCreateBotRequest({job: 'Watches my inbox and drafts replies.'}).name, 'Inbox Watcher');
   assert.equal(validateCreateBotRequest({job: 'Watches my inbox and drafts replies.'}).derived, true);
   assert.equal(validateCreateBotRequest({name: 'Mail', job: 'Watches my inbox and drafts replies.'}).derived, undefined);
 });
@@ -177,4 +177,8 @@ test('the first unused colour counts a bot with no colour by its position', () =
   const bots = [{settings: {tint: 0}}, {settings: {}}, {settings: {tint: 3}}, {}];
   assert.equal(firstUnusedTint(bots, 6), 2, 'position 1 and 3 use colours 1 and 3; 2 is free');
   assert.equal(firstUnusedTint(Array.from({length: 6}, (_, i) => ({settings: {tint: i}})), 6), 0, 'all taken: wrap by position');
+});
+
+test('with one company the created-bot line does not name the group', () => {
+  assert.equal(botCreatedText({name: 'Atlas'}, {name: 'Inbox Watcher'}, null), 'Atlas created a new bot for this work: Inbox Watcher.');
 });

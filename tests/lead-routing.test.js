@@ -142,7 +142,7 @@ test('the Pages engine routes through the same rules: roster, closing step, cap'
   assert.deepEqual(names(run.trace), ['atlas', scout.id, 'atlas']);
   assert.ok(!run.recipients.includes(quiet.id));
   assert.equal(run.trace[1].output, 'On it: Please ask @Scout to look this up', 'the teammate answers the owner\'s request');
-  assert.match(run.trace[2].output, /^Done: Ask @Scout to look this up\./, 'Atlas closes with the result, not a relay of the team');
+  assert.match(run.trace[2].output, /^That is everything back from the team\./, 'Atlas closes in its own words, not a relay of the team or a cut title');
   assert.deepEqual(thread.settings.members, [scout.id]);
 });
 

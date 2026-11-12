@@ -196,3 +196,16 @@ test('a bot\'s working step (it only went to fetch pages) stays out of the chat;
   assert.ok(texts.includes('Acme is hiring.'));
   assert.ok(!texts.includes('Looking it up.'));
 });
+
+test('a bot made for a run is said before the run\'s line, never after "X messaged Atlas"', () => {
+  const out = build([
+    msg('q', 'user', 1),
+    msg('k', 'system', 2, {kind: 'bot-created', runId: 'r1', text: 'Atlas created a new bot for this work: Planner.'}),
+    msg('h', 'bot', 3, {senderId: 'atlas', runId: 'r1'}),
+    msg('p', 'bot', 4, {senderId: 'plan', runId: 'r1'}),
+    msg('f', 'bot', 5, {senderId: 'atlas', runId: 'r1'}),
+  ], [run()]);
+  assert.deepEqual(kinds(out), ['day', 'me', 'note', 'pill', 'bot']);
+  assert.match(out[2].message.text, /created a new bot/);
+  assert.equal(out[3].pill.text, 'Planner messaged Atlas');
+});
