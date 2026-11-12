@@ -184,8 +184,8 @@ test('a failed action is announced as an alert, not queued politely',()=>{
 
 test('search is a labelled box with a results popover on the phone and a live filter on a laptop',()=>{
  // The quick-navigation combobox is gone: search covers it.
- assert.match(js,/<input id="rail-q" type="search" placeholder="Search bots and threads" aria-label="Search bots and threads"/);
- assert.match(js,/<input id="sq" type="search" placeholder="Search" aria-label="Search bots and threads"/);
+ assert.match(js,/<input id="rail-q" type="search" placeholder="Search everything" aria-label="Search bots, threads and messages"/);
+ assert.match(js,/<input id="sq" type="search" placeholder="Search" aria-label="Search bots, threads and messages"/);
  assert.match(js,/<div class="ch-res" id="ch-res" hidden>/);
  assert.match(js,/if \(searchOpen\(\)\) \{ ev\.preventDefault\(\); closeSearch\(\); el\('sq'\)\?\.blur\(\); \}/);
 });

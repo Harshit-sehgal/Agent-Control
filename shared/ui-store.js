@@ -48,6 +48,8 @@ export const store = {
   listQuery: '',
   /** Conversation ids with a reply in flight; drives the typing indicator. */
   typing: new Set(),
+  /** A message search hit to scroll to once its chat paints: {key, id}, then null. */
+  focusMessage: null,
 };
 // `profiles` is cosmetic UI state only (tint, pin). An earlier build also wrote
 // name/instructions here, which would shadow the server's values forever.

@@ -4,6 +4,7 @@
  * holding `subagent.spawn` may hand one small job to a helper model, which has
  * no tools at all (see src/subagents.js).
  */
+import {briefingMessage} from '../shared/briefing.js';
 import {scheduleRunEnded} from '../shared/schedules.js';
 import {randomUUID} from 'node:crypto';
 import {createRun,createEnvelope,declinedOf,runNote,planHandoffs,handoffTargets,instructLead,wakeBots,assessTask,summonableGuests,mayHandoff,chatKeyFor,chatIsBusy,rosterFor,previousFor,enlist,promisesAction,PROMISE_NOTE,MAX_HANDOFFS,INTERRUPT_STATUSES as INTERRUPT} from '../shared/coordination.js';
@@ -221,7 +222,9 @@ export async function runBotTask(store,task,{queue=queueGroupRun,available=aiAva
   if(await store.update(st=>noteBotWork(st,'run').paused)){await note(`Scheduled task "${label}" skipped: bots are paused.`);return {skipped:'paused'};}
   // Queue first. A 409 or a validation error must not leave a "Scheduled task"
   // line for a run that never started; the queue retries those.
-  const result=await queue(store,{groupId,message,directBotId:botId,chatKey,confirmPlan:false,unattended:true,scheduleId:task.id});
+  // The daily briefing is given the workspace's facts as they are now (shared/briefing.js), so it reports real work.
+  const said=task.payload?.brief==='daily'?briefingMessage(message,store.read()):message;
+  const result=await queue(store,{groupId,message:said,directBotId:botId,chatKey,confirmPlan:false,unattended:true,scheduleId:task.id});
   // The run is queued and durable; the line in the conversation is not. A failed
   // note used to reject the handler, which the queue retried - and the retry
   // queued the same message again, so one reminder cost two model runs. Only a

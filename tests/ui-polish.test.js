@@ -14,7 +14,7 @@ test('Pages uses relative visual assets and an accessible search with shortcuts'
   assert.match(html,/href="\.\/shell\.css"/);
   // The quick-navigation palette is gone: search covers it, in the sidebar or the phone's bottom bar.
   assert.doesNotMatch(html,/id="command"/);
-  assert.match(js,/aria-label="Search bots and threads"/);
+  assert.match(js,/aria-label="Search bots, threads and messages"/);
   assert.match(js,/function focusSearch\(/);
   assert.match(js,/ev\.ctrlKey \|\| ev\.metaKey/);
   assert.match(js,/ev\.key === 't' \|\| ev\.key === 'T' \|\| ev\.key === '\/'/);

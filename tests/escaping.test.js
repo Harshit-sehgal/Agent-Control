@@ -6,6 +6,7 @@ import {fileURLToPath} from 'node:url';
 import {validHttpUrl, cleanText} from '../shared/core.js';
 import * as kit from '../shared/ui-kit.js';
 import {face} from '../shared/ui-face.js';
+import {snippetHtml} from '../shared/message-search.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 // The UI is app.js plus every ui-*.js module.
@@ -143,7 +144,7 @@ function stripCalls(text, names) {
 // behaviorally in the next test, so an expression passed through them may name a
 // user-text property without its own esc(). `roundBtn` and `switchBtn` escape their
 // label; `faceOf` and `botFace` only draw a face, which never prints a name.
-const ESCAPING_HELPERS = ['esc', 'btn', 'iconBtn', 'roundBtn', 'switchBtn', 'tag', 'empty', 'textInput', 'face', 'faceOf', 'botFace', 'md'];
+const ESCAPING_HELPERS = ['esc', 'btn', 'iconBtn', 'roundBtn', 'switchBtn', 'tag', 'empty', 'textInput', 'face', 'faceOf', 'botFace', 'md', 'snippetHtml'];
 const USER_TEXT = /\??\.(text|instructions|name|author|description|message|topic|claim|label|title|email|error)\b(?!\s*:)/;
 // A property used only as a ternary / && condition is tested, not printed.
 const CONDITION = /[\w$.\]\[?]+?\s*(?:\?(?!\.)|&&)/g;
@@ -173,6 +174,8 @@ test('the escaping helpers neutralize hostile text in every slot they accept', (
     kit.textInput('name', {value: bad, placeholder: bad, 'aria-label': bad, required: true}),
     // Model markdown: every slot it formats (bold, link text and href, code, a list item, a heading).
     kit.md(`**${bad}** _${bad}_ [${bad}](https://x.y/"onerror=alert(1)) \`${bad}\`\n- ${bad}\n1. ${bad}\n# ${bad}`),
+    // A message search line: escaped first, then only <mark> is added around the words found.
+    snippetHtml(`${bad} cafe ${bad}`, 'img cafe onerror'),
   ];
   for (const html of markup) {
     // Blank every quoted attribute value and every text node: whatever is left

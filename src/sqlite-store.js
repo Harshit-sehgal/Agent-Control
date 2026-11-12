@@ -593,6 +593,8 @@ export class SqliteStore {
       askBasics: this.kvGet('ask_basics') === '1',
       // The owner's limits on how far bots go per message (shared/limits.js); empty is no limit.
       limits: (() => { try { return JSON.parse(this.kvGet('limits') || '{}'); } catch { return {}; } })(),
+      // The owner's saved task templates (shared/templates.js).
+      templates: (() => { try { return JSON.parse(this.kvGet('templates') || '[]'); } catch { return []; } })(),
       memory: readMemory(kind => this.db.prepare('SELECT key, doc FROM memory WHERE kind=? ORDER BY rowid').all(kind)),
     };
     const cfg = this.db.prepare('SELECT * FROM settings WHERE id=1').get();
@@ -693,6 +695,7 @@ export class SqliteStore {
       kv('guard', JSON.stringify(state.guard || freshGuard()));
       kv('ask_basics', state.askBasics ? '1' : '0');
       kv('limits', JSON.stringify(state.limits || {}));
+      kv('templates', JSON.stringify(state.templates || []));
       const retention = state.settings?.retention ? JSON.stringify(state.settings.retention) : null;
       if (this.kvWritten.get('\0settings') !== String(retention)) {
         this.stmt('INSERT INTO settings (id,retention) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET retention=excluded.retention').run(retention);

@@ -29,6 +29,7 @@ import {siteChip, thumbSlot} from './ui-computer-view.js';
 import {cliChoice, googleCard} from './ui-connect-model.js';
 import {connectAppNow} from './ui-connect.js';
 import {appById} from './app-catalog.js';
+import {templateChipsHtml, templateButton} from './ui-templates.js';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -69,7 +70,7 @@ export function conversationShell(conv) {
     </header>
     <div class="cv-scroll" id="cv-scroll"><div class="cv-col" id="cv-log" role="log" aria-live="off" aria-label="Conversation"></div></div>
     <form id="chat-form" class="cv-composer" autocomplete="off">${chipsSlot}<div class="cv-box">
-      ${attachButton(write)}
+      ${attachButton(write)}${templateButton()}
       <textarea name="message" rows="1" placeholder="${esc(hint)}" aria-label="${esc(hint)}" maxlength="4000" required${write ? '' : ' disabled'}></textarea>
       <button type="submit" class="cv-send" aria-label="Send message"${write ? '' : ' disabled'}>${icon('send', 20)}</button>
     </div></form>
@@ -250,9 +251,10 @@ const fileSrc = ref => isStaticDemo() ? store.state?.attachments?.[ref.id]?.url 
 /** The owner's line, with its files above the words. A line of files alone is named by them, so the name is not repeated. */
 function meEntry(m) {
   const files = fileStrip(m.attachments, fileSrc);
-  if (!files) return `<div class="cv-me md">${md(m.text)}</div>`;
+  const at = ` data-m="${esc(m.id)}"`;
+  if (!files) return `<div class="cv-me md"${at}>${md(m.text)}</div>`;
   const named = m.text === (m.attachments || []).map(a => a.name).join(', ');
-  return `<div class="cv-me-files">${files}${named ? '' : `<div class="cv-me md">${md(m.text)}</div>`}</div>`;
+  return `<div class="cv-me-files"${at}>${files}${named ? '' : `<div class="cv-me md">${md(m.text)}</div>`}</div>`;
 }
 
 function entryHtml(entry, conv) {
@@ -286,7 +288,7 @@ function welcome(conv) {
       : 'This is an offline demo: replies are built in, not from a live AI model.';
   // A bot chat starts with the same starters as a new thread; a tap sends it to this bot.
   const chips = bot && canWrite() ? `<div class="nv-chips cv-starters">${NEW_THREAD_CHIPS.map(text => `<button type="button" data-action="quick-chat" data-text="${esc(text)}">${esc(text)}</button>`).join('')}</div>` : '';
-  return `<div class="cv-empty"><button type="button" class="hello" data-action="hop" aria-label="Say hi to ${esc(conv.name)}">${bot ? botFace(bot, bot.name, 84, {state: awake(bot.id)}) : ''}</button><h2>${esc(conv.name)}</h2><p>${esc(about)}</p><p class="sub">${esc(mode)}</p>${!isLive() && server && canWrite() ? btn('Open Models and keys', 'open-models', {kind: 'primary', small: true}) : ''}${chips}</div>`;
+  return `<div class="cv-empty"><button type="button" class="hello" data-action="hop" aria-label="Say hi to ${esc(conv.name)}">${bot ? botFace(bot, bot.name, 84, {state: awake(bot.id)}) : ''}</button><h2>${esc(conv.name)}</h2><p>${esc(about)}</p><p class="sub">${esc(mode)}</p>${!isLive() && server && canWrite() ? btn('Open Models and keys', 'open-models', {kind: 'primary', small: true}) : ''}${chips}${bot ? templateChipsHtml() : ''}</div>`;
 }
 
 /* ---------- painting ---------- */
@@ -370,6 +372,21 @@ export function renderConversation() {
   moments(entries);
   if (pinned || opened) scroller.scrollTop = scroller.scrollHeight;
   log.dataset.conv = conv.id;
+  showHit(conv);
+}
+
+/** A message search hit opened this chat: bring that line into view and light it up once. It waits while the line
+ * has not painted yet, and is dropped once another chat is open. */
+function showHit(conv) {
+  const hit = store.focusMessage;
+  if (!hit) return;
+  if (hit.key !== conv.id) { store.focusMessage = null; return; }
+  const node = el('cv-log')?.querySelector(`[data-m="${CSS.escape(hit.id)}"]`);
+  if (!node) return;
+  store.focusMessage = null;
+  node.scrollIntoView({block: 'center'});
+  node.classList.add('cv-hit');
+  setTimeout(() => node.classList.remove('cv-hit'), 2400);
 }
 
 /** Remember which handoff cards are open: `toggle` does not bubble, so app.js
@@ -395,6 +412,7 @@ export function newThreadView() {
         <button type="submit" class="cv-send" aria-label="Start thread"${write ? '' : ' disabled'}>${icon('send', 20)}</button>
       </form>
       ${write ? `<div class="nv-chips">${NEW_THREAD_CHIPS.map(text => `<button type="button" data-action="quick-thread" data-text="${esc(text)}">${esc(text)}</button>`).join('')}</div>` : '<p>Viewers can read chats. A member can send.</p>'}
+      ${templateChipsHtml()}
     </div>
   </section>`;
 }

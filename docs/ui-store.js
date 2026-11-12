@@ -1,9 +1,9 @@
 /** Single source of UI state: the server snapshot, the route, the conversations
  * it carries and cosmetic preferences. Views read from `store` and never
  * keep their own copies, so one `sync()` + one render keeps every pane current. */
-import {tintOf} from './ui-model.js?v=789d865101';
-import {companyHash} from './ui-company.js?v=789d865101';
-import {createOutbox} from './chats.js?v=789d865101';
+import {tintOf} from './ui-model.js?v=09588be5e2';
+import {companyHash} from './ui-company.js?v=09588be5e2';
+import {createOutbox} from './chats.js?v=09588be5e2';
 
 // Where an earlier build kept conversations; read once by importLocalChats().
 const CHAT_KEY = 'agent-control-bot-chats-v2';
@@ -48,6 +48,8 @@ export const store = {
   listQuery: '',
   /** Conversation ids with a reply in flight; drives the typing indicator. */
   typing: new Set(),
+  /** A message search hit to scroll to once its chat paints: {key, id}, then null. */
+  focusMessage: null,
 };
 // `profiles` is cosmetic UI state only (tint, pin). An earlier build also wrote
 // name/instructions here, which would shadow the server's values forever.
