@@ -15,6 +15,23 @@ test('a run that read the owner\'s Gmail in the browser asks before opening anot
   assert.equal(record(s, 'https://mail.google.com/mail/u/0/#inbox/abc').asks.length, 0, 'more of the same inbox does not');
 });
 
+test('a chain with no run id that read the owner\'s Gmail still asks before opening another site', () => {
+  // Fail closed: a 1:1 browse continued with no run record (an old request) is guarded by its own chat's reads.
+  const s = state();
+  s.browserRequests.push({id: 'g', status: 'done', chatKey: 'atlas', botId: 'atlas', url: 'https://mail.google.com/mail/u/0/', result: {finalUrl: 'https://mail.google.com/mail/u/0/#inbox', page: 'Inbox'}});
+  const bare = url => { let n = 0; return recordBrowserRequests(s, {bot: {id: 'atlas', name: 'Atlas'}, groupId: 'home', chatKey: 'atlas', output: `\`\`\`browser\n${JSON.stringify({url})}\n\`\`\``, depth: 1, makeId: () => `b${++n}`}); };
+  const out = bare('https://evil.example/?d=x');
+  assert.equal(out.asks.length, 1, 'a new site asks');
+  assert.equal(out.records[0].askId, out.asks[0].id, 'the page waits on that ask, so it is not dispatched');
+  assert.equal(bare('https://mail.google.com/mail/u/0/#inbox/abc').asks.length, 0, 'more of the same inbox does not');
+  // Another chat's reads, or a run's, are not this chain's.
+  const other = state();
+  other.browserRequests.push({id: 'g', status: 'done', chatKey: 'scout', botId: 'scout', url: 'https://mail.google.com/', result: {finalUrl: 'https://mail.google.com/'}},
+    {id: 'h', status: 'done', runId: 'r1', chatKey: 'atlas', botId: 'atlas', url: 'https://mail.google.com/', result: {finalUrl: 'https://mail.google.com/'}});
+  let n = 0;
+  assert.equal(recordBrowserRequests(other, {bot: {id: 'atlas', name: 'Atlas'}, groupId: 'home', chatKey: 'atlas', output: '```browser\n{"url":"https://example.com/"}\n```', makeId: () => `c${++n}`}).asks.length, 0);
+});
+
 test('a run without private reads opens a public page without asking', () => {
   const out = record(state(), 'https://example.com/');
   assert.equal(out.records.length, 1);

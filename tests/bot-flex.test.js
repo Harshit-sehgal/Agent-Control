@@ -456,8 +456,12 @@ test('group and bot edit routes enforce roles over HTTP',{timeout:40000},async()
     assert.equal(patched.status,200);assert.equal(patched.body.settings.routing,'everyone');
     assert.equal((await call('PATCH',`/api/groups/${g.id}`,{settings:{routing:'chaos'}},member)).status,400);
     assert.equal((await call('PATCH',`/api/groups/${g.id}/bots/${b.id}`,{settings:{enabled:false}},member)).body.settings.enabled,false);
-    assert.equal((await call('POST','/api/bots/run',{botId:b.id,input:'hi'},member)).status,409);
-    const scout=await call('POST','/api/bots/run',{botId:'atlas',input:'hello'},member);
+    // A 1:1 chat is the group chat route with the bot as directBotId; the old /api/bots/run route is gone, since its
+    // runs carried no run id and so skipped the private-data ask (shared/bot-browser.js).
+    assert.equal((await call('POST','/api/bots/run',{botId:'atlas',input:'hello'},member)).status,404);
+    assert.equal((await call('POST',`/api/groups/${g.id}/chat`,{message:'hi',directBotId:b.id,chatKey:b.id},member)).status,409);
+    const home=(await call('GET','/api/state',undefined,owner)).body.groups.find(x=>x.bots.some(y=>y.id==='atlas'));
+    const scout=await call('POST',`/api/groups/${home.id}/chat`,{message:'hello',directBotId:'atlas',chatKey:'atlas'},member);
     assert.equal(scout.status,422);
     assert.match(scout.body.error,/No AI provider/);
     assert.equal((await call('DELETE',`/api/groups/${g.id}/bots/${b.id}`,undefined,viewer)).status,403);

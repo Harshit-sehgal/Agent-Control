@@ -79,8 +79,9 @@ async function withLimitLine(store, bot, turn) {
   }
 }
 
-/** One bot in its own chat, not a group run. A page that comes back from a
- * 1:1 browse continues here so it does not start the whole pipeline. */
+/** One bot in its own chat, not a group run. Only a page that comes back to an
+ * old run-less 1:1 browse (stored before 1:1 chats became runs) continues here;
+ * its pages are still guarded by that chat's own private reads. */
 export function runOneBot(store, options) {
   const run = () => runOneBotInner(store, options);
   return typeof store.trackWork === 'function' ? store.trackWork(run) : run();
@@ -233,10 +234,8 @@ export function groupRoutes(router) {
     return reply(202, await decidePlan(c.store, c.params.run, {approve: b?.approve !== false}));
   });
 
-  router.add('POST', '/api/bots/run', 'member', async c => {
-    const b = await c.body();
-    return reply(201, await runOneBot(c.store, {botId: b.botId, input: cleanText(b.input, 4000), browserDepth: Number(b.browserDepth) || 0}));
-  });
+  // There is no route that runs one bot outside a run: a 1:1 chat is the group chat above with `directBotId`, so
+  // every turn has a run record and the private-data ask applies to its pages (shared/bot-browser.js).
 
   // The owner answers an ask: {answer: 'decline' | 'allow' | 'always'}. Always allow stores the grant for
   // this bot (for a payment only when the ask names a site; otherwise 400). Allow and Always allow let the run go on; Decline gives the bot

@@ -4,9 +4,9 @@
  * to use only those, so it reports real work instead of making some up. Both engines call it at run time
  * (src/coordination.js `runBotTask`, shared/local-api.js), so the facts are the ones of that morning.
  * Pure and browser-safe (tests/briefing.test.js). */
-import {primaryOf, PRIMARY_GROUP} from './company.js?v=20a8b2d024';
-import {scheduleRows, scheduleTaskBody, cleanAt} from './schedules.js?v=20a8b2d024';
-import {pendingAsks, askText} from './asks.js?v=20a8b2d024';
+import {primaryOf, PRIMARY_GROUP} from './company.js?v=e7ef376d24';
+import {scheduleRows, scheduleTaskBody, cleanAt} from './schedules.js?v=e7ef376d24';
+import {pendingAsks, askText} from './asks.js?v=e7ef376d24';
 
 /** One briefing per workspace: the queue keeps a single row under this key. */
 export const BRIEFING_KEY = 'daily-briefing';

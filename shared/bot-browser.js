@@ -531,11 +531,13 @@ function connectedVia(state, host) {
 }
 
 /** The owner's private sites this run has read in the browser: their mail and files, and an app the owner
- * connected by signing in to it in this browser. */
-export function runPrivateHosts(state, runId) {
-  if (!runId) return new Set();
+ * connected by signing in to it in this browser. A chain with no run id (an old 1:1 browse) fails closed: it
+ * counts what that chat's own run-less requests read. */
+export function runPrivateHosts(state, runId, chatKey = null) {
+  if (!runId && !chatKey) return new Set();
   const signedIn = new Set((state.connectors || []).filter(c => c?.kind === 'site' && c.host).map(c => String(c.host).toLowerCase()));
-  return new Set((state.browserRequests || []).filter(r => r.runId === runId && r.status === 'done')
+  const ours = r => runId ? r.runId === runId : !r.runId && r.chatKey === chatKey;
+  return new Set((state.browserRequests || []).filter(r => ours(r) && r.status === 'done')
     .map(r => hostOf(r.result?.finalUrl || r.url)).filter(host => PRIVATE_HOSTS.test(host) || signedIn.has(host)));
 }
 
@@ -564,8 +566,8 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
   // signed-in mail or files read in the browser. A new site then asks (asks.js verdict); the private site itself
   // does not, since reading more of the owner's own inbox carries nothing anywhere new.
   const run = runId ? (state.groupRuns || []).find(r => r.id === runId) : null;
-  const privateHosts = runPrivateHosts(state, runId);
-  const guarded = Boolean(run && (run.connectorPage || run.readPrivate || privateHosts.size));
+  const privateHosts = runPrivateHosts(state, runId, chatKey);
+  const guarded = Boolean(privateHosts.size || (run && (run.connectorPage || run.readPrivate)));
   if (!limited && !closed) for (const item of found) {
     if (!item.ok) { say(`${bot.name} asked for a web page, but the request was refused: ${item.error}`); invalid.push(item.error); continue; }
     // A plain re-read of a page it has is no progress; finding words on it, or acting on it, is.

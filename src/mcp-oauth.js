@@ -16,6 +16,7 @@ import {appById} from '../shared/app-catalog.js';
 import {newConnectorId, publicConnector} from '../shared/connectors.js';
 import {mcpList, readText, TooLarge} from './mcp-client.js';
 import * as credentials from './credentials.js';
+import {guardedFetch} from './reach-guard.js';
 
 export const MCP_CALLBACK = '/api/connectors/mcp/callback';
 const FLOW_TTL_MS = 10 * 60 * 1000, MAX_FLOWS = 50, SKEW_MS = 60 * 1000, TIMEOUT_MS = 15000, MAX_BYTES = 256 * 1024;
@@ -38,11 +39,14 @@ function endpoint(value, what) {
 async function call(url, init = {}) {
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(url, {redirect: 'manual', ...init, signal: controller.signal});
+    // Every address here comes from a server's metadata, so it is checked and pinned like the MCP address itself.
+    const res = await guardedFetch(url, {redirect: 'manual', ...init, signal: controller.signal}, {what: 'An app\'s sign-in server'});
     return {status: res.status, headers: res.headers, text: await readText(res, MAX_BYTES)};
   } catch (error) {
     if (controller.signal.aborted) throw problem('The app\'s server did not answer in time.', 504, 'server');
     if (error instanceof TooLarge) throw problem('The app\'s server sent more than this app reads.', 502, 'server');
+    // A private or metadata address is refused as such (src/reach-guard.js).
+    if (error.status === 400) throw problem(error.message, 400, 'server');
     throw problem(`Could not reach the app's server (${error.cause?.code || 'network error'}).`, 502, 'server');
   } finally { clearTimeout(timer); }
 }
