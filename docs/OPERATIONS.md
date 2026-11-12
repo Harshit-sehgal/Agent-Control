@@ -95,6 +95,22 @@ curl -fsS -X POST http://127.0.0.1:4174/api/admin/restore \
 A restore replaces the `users` table, so **everyone signs in again**; the
 credentials vault is re-entered by hand.
 
+**What a backup carries.** Besides the tables, a backup holds the files attached
+to messages (`tables.attachments`, base64) and the owner's settings kept in kv
+(`tables.owner_settings`: saved templates, token usage, limits, **Browse and read
+without asking** and Hands-off). Files go newest first up to 16 MB in all, so the
+document stays under the restore route's 32 MB body limit; any file past that is
+listed in the backup's `attachmentsLeftOut` and named in the restore result and
+the activity log, and shows as missing in its chat. A restore checks every file
+as an upload is checked (a generated id, at most 10 MB, a type read from the
+bytes that matches what the row says) and every setting through the same rules
+its Settings route uses; a backup that fails either is refused before anything
+is written. Grants keep their end time, and one that has ended is dropped. A
+backup written before files and settings travelled still restores and leaves
+the live files and settings as they were. Still **not** carried: credentials,
+sessions, pairing codes, model providers (they point at vault credentials),
+connectors, held sends, pending page requests and the runaway guard.
+
 **Last drill (automated, 2026-10-13):** seeded records + a credential + a
 provider → export (checksummed) → restore into a fresh instance → **the
 records restored**, credentials/providers `0/0` (excluded by design), and a

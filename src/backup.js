@@ -1,8 +1,10 @@
 /** Workspace backup export/import.
  *
  * An export is a single JSON document containing the workflow state plus the
- * relational surfaces (users, agents, agent tasks, jobs, notifications) so an
- * operator can move or archive an installation. The file itself is not
+ * relational surfaces (users, agents, agent tasks, jobs, notifications), the
+ * files attached to messages and the owner's settings kept in kv (templates,
+ * usage, limits, the two permission switches) so an operator can move or
+ * archive an installation. The file itself is not
  * encrypted — protect it like the database. It deliberately EXCLUDES
  * credential ciphertext and session secrets, and every secret-shaped value it
  * does carry is replaced with a placeholder: a restored installation re-enters
@@ -29,6 +31,10 @@ import {readDocuments, readMemory, readAsks} from './sqlite-store.js';
 import {GRANT_CHOICES, isAskAction} from '../shared/asks.js';
 import {INTERRUPT_STATUSES} from '../shared/coordination.js';
 import {validWorkspaceId} from './workspaces.js';
+import {MAX_FILE_BYTES, sniffType, cleanFileName, validAttachmentId, base64Bytes} from '../shared/attachments.js';
+import {addTemplate} from '../shared/templates.js';
+import {setLimits} from '../shared/limits.js';
+import {recordDay} from '../shared/usage.js';
 
 export const BACKUP_VERSION = 1;
 
@@ -44,9 +50,19 @@ const RETIRED_TABLES = ['candidates', 'drafts', 'evidence'];
 // Never exported, by design: credential ciphertext cannot be decrypted under a
 // different key, pairing codes are single-use, and a live session id is a
 // credential an attacker holding a backup must not obtain.
-// Attachments are raw file bytes: a JSON backup would carry them as base64 and
-// grow by megabytes per image, so a restored chat shows its files as missing.
-const EXCLUDED_TABLES = ['credentials', 'pairing_codes', 'sessions', 'kv', 'schema_meta', 'attachments'];
+// `kv` holds machine state (browser requests, held sends, the guard, push keys,
+// the model provider list, which points at credentials); the owner's settings
+// in it travel as `owner_settings` below.
+const EXCLUDED_TABLES = ['credentials', 'pairing_codes', 'sessions', 'kv', 'schema_meta'];
+// Attached files travel as base64 in `tables.attachments`, newest first, up to
+// this many bytes in all, so the document stays under the restore route's 32 MB
+// body limit. A file past it is named in `attachmentsLeftOut` and in the restore
+// result: its chat line shows it as missing.
+export const ATTACHMENT_BACKUP_BYTES = 16 * 1024 * 1024;
+// The owner's settings kept in kv, as `tables.owner_settings` rows {key, value}.
+// A backup without that table (written before they travelled) leaves the live
+// values alone; one with it sets every key it names and resets the rest.
+const OWNER_SETTINGS = ['ask_basics', 'hands_off', 'limits', 'templates', 'usage'];
 // Not a device credential. agents.secret_hash cannot be SQL NULL (the column
 // is NOT NULL), and a backup must still restore the agent row.
 const REDACTED_AGENT_HASH = 'redacted';
@@ -89,7 +105,7 @@ function interruptRestoredRun(row) {
 }
 
 /** Build the export document from an open store. */
-export function exportBackup(store) {
+export function exportBackup(store, {attachmentBytes = ATTACHMENT_BACKUP_BYTES} = {}) {
   const tables = {};
   for (const name of [...EXPORT_TABLES, ...OPTIONAL_TABLES]) {
     try { tables[name] = store.all(`SELECT * FROM ${name}`); }
@@ -109,15 +125,94 @@ export function exportBackup(store) {
   // Same reasoning for sign-in passwords, and the header above claims secrets
   // do not travel. password_hash is NOT NULL, so a placeholder replaces it.
   tables.users = (tables.users || []).map(u => ({...u, password_hash: REDACTED_PASSWORD_HASH}));
+  const {kept, leftOut} = exportAttachments(store, attachmentBytes);
+  tables.attachments = kept;
+  tables.owner_settings = OWNER_SETTINGS.map(key => ({key, value: store.kvGet?.(key) ?? null})).filter(row => row.value !== null);
   const checksum = crypto.createHash('sha256').update(JSON.stringify(tables)).digest('hex');
   return {
     backupVersion: BACKUP_VERSION,
     createdAt: new Date().toISOString(),
     schemaVersion: store.get('SELECT version FROM schema_meta WHERE id=1')?.version ?? null,
     excluded: EXCLUDED_TABLES,
+    attachmentsLeftOut: leftOut,
     checksum,
     tables,
   };
+}
+
+/** Attached files, newest first, until `cap` bytes; the rest are named, not carried. */
+function exportAttachments(store, cap) {
+  let rows;
+  try { rows = store.all('SELECT id,name,type,size,created_by,created_at FROM attachments ORDER BY created_at DESC, id'); }
+  catch (e) { if (/no such table/i.test(String(e?.message || ''))) return {kept: [], leftOut: []}; throw e; }
+  const kept = [], leftOut = [];
+  let total = 0;
+  for (const row of rows) {
+    if (total + row.size > cap) { leftOut.push({id: row.id, name: row.name, size: row.size}); continue; }
+    total += row.size;
+    const {data} = store.get('SELECT data FROM attachments WHERE id=?', row.id);
+    kept.push({...row, data: Buffer.from(data).toString('base64')});
+  }
+  return {kept, leftOut};
+}
+
+/** An attached file from a backup, checked like an upload (src/attachments.js): a
+ * generated id, a size within the cap that matches the bytes, and bytes of the type it claims. */
+function checkAttachment(row) {
+  if (!row || !validAttachmentId(row.id)) fail('Backup holds an attachment whose id was not generated here.');
+  const where = `Backup attachment ${row.id}`;
+  if (!(Number.isInteger(row.size) && row.size > 0 && row.size <= MAX_FILE_BYTES)) fail(`${where} is empty or over ${MAX_FILE_BYTES / 1048576} MB.`);
+  const bytes = typeof row.data === 'string' ? base64Bytes(row.data) : null;
+  if (!bytes || bytes.length !== row.size) fail(`${where} does not hold the bytes it says.`);
+  const name = cleanFileName(row.name), type = sniffType(bytes, name);
+  if (!type || type !== row.type) fail(`${where} (${name}) is not the kind of file it says it is.`);
+  if (typeof row.created_at !== 'string' || !Number.isFinite(Date.parse(row.created_at))) fail(`${where} has no valid time.`);
+  return {id: row.id, name, type, size: bytes.length, data: bytes, created_by: typeof row.created_by === 'string' ? row.created_by : null, created_at: row.created_at};
+}
+
+const USAGE_KEY = /^[A-Za-z0-9_.:-]{1,100}$/;
+const FORBIDDEN_KEYS = ['__proto__', 'constructor', 'prototype'];
+/** The owner's settings from a backup, each put through the function its live
+ * route (or the live recorder) uses, so a restore cannot hold what those refuse. */
+function checkOwnerSettings(rows) {
+  const out = new Map();
+  const parse = (key, value) => { try { return JSON.parse(value); } catch { return fail(`Backup setting "${key}" is not valid JSON.`); } };
+  for (const row of rows) {
+    if (!row || !OWNER_SETTINGS.includes(row.key) || typeof row.value !== 'string') fail(`Backup holds a setting that is not an owner setting: "${String(row?.key).slice(0, 40)}".`);
+    if (out.has(row.key)) fail(`Backup holds the setting "${row.key}" twice.`);
+    const {key, value} = row;
+    if (key === 'ask_basics' || key === 'hands_off') {
+      if (value !== '0' && value !== '1') fail(`Backup setting "${key}" must be 0 or 1.`);
+      out.set(key, value);
+    } else if (key === 'limits') {
+      const parsed = parse(key, value);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) fail('Backup limits are not an object.');
+      out.set(key, JSON.stringify(setLimits({}, parsed)));
+    } else if (key === 'templates') {
+      const list = parse(key, value);
+      if (!Array.isArray(list)) fail('Backup templates are not a list.');
+      const scratch = {templates: []};
+      for (const t of list) {
+        const id = typeof t?.id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(t.id) ? t.id : crypto.randomUUID();
+        const at = typeof t?.createdAt === 'string' && Number.isFinite(Date.parse(t.createdAt)) ? t.createdAt : new Date().toISOString();
+        addTemplate(scratch, {title: t?.title, text: t?.text}, {makeId: () => id, now: at});
+      }
+      out.set(key, JSON.stringify(scratch.templates));
+    } else {
+      const days = parse(key, value)?.days;
+      if (!days || typeof days !== 'object' || Array.isArray(days)) fail('Backup usage has no days.');
+      const scratch = {usage: {days: {}}};
+      for (const [day, bots] of Object.entries(days)) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !bots || typeof bots !== 'object' || Array.isArray(bots)) fail('Backup usage holds a day that is not one.');
+        for (const [botId, totals] of Object.entries(bots)) {
+          if (!USAGE_KEY.test(botId) || FORBIDDEN_KEYS.includes(botId) || !totals || typeof totals !== 'object') fail('Backup usage holds a bot that is not one.');
+          recordDay(scratch, {...totals, botId, calls: totals.calls ?? 0}, `${day}T12:00:00.000Z`);
+        }
+      }
+      out.set(key, JSON.stringify(scratch.usage));
+    }
+  }
+  return out;
 }
 
 /** Validate an untrusted backup document without writing anything. */
@@ -128,7 +223,7 @@ export function validateBackup(document, {primaryWorkspace = false} = {}) {
   for (const name of EXPORT_TABLES) {
     if (!Array.isArray(document.tables[name])) fail(`Backup is missing the "${name}" table.`);
   }
-  for (const name of OPTIONAL_TABLES) {
+  for (const name of [...OPTIONAL_TABLES, 'attachments', 'owner_settings']) {
     if (document.tables[name] !== undefined && !Array.isArray(document.tables[name])) fail(`Backup table "${name}" is not a list.`);
   }
   const workspaceIds = new Set();
@@ -211,16 +306,36 @@ export function validateBackup(document, {primaryWorkspace = false} = {}) {
   jsonShape('group_runs', 'recipients', Array.isArray, 'a list');
   jsonShape('group_runs', 'trace', () => true, 'JSON');
   jsonShape('group_runs', 'checkpoint', () => true, 'JSON');
+  // Files and settings are checked like an upload and a settings change, after
+  // the checksum: a document whose checksum was recomputed is still untrusted.
+  const ids = new Set();
+  let attachmentBytes = 0;
+  const attachments = document.tables.attachments === undefined ? null : document.tables.attachments.map(row => {
+    const file = checkAttachment(row);
+    if (ids.has(file.id)) fail('Backup holds the same attachment twice.');
+    ids.add(file.id);
+    attachmentBytes += file.size;
+    return file;
+  });
+  if (attachmentBytes > ATTACHMENT_BACKUP_BYTES) fail(`Backup attachments are over ${ATTACHMENT_BACKUP_BYTES / 1048576} MB in all.`);
+  let ownerSettings = null;
+  // The live functions answer a 409 for "30 templates already": in a backup it is a bad document.
+  try { if (document.tables.owner_settings !== undefined) ownerSettings = checkOwnerSettings(document.tables.owner_settings); }
+  catch (e) { fail(/^Backup/.test(e.message) ? e.message : `Backup settings are not valid: ${e.message}`); }
+  // What the export left out is only repeated back in the restore result, so
+  // only well-formed ids and clean names are kept.
+  const attachmentsLeftOut = (Array.isArray(document.attachmentsLeftOut) ? document.attachmentsLeftOut : [])
+    .filter(a => validAttachmentId(a?.id)).slice(0, 10000).map(a => ({id: a.id, name: cleanFileName(a.name), size: Number.isInteger(a.size) ? a.size : 0}));
   // The workflow document must survive a migration before being trusted.
-  const tables = Object.fromEntries(Object.entries(document.tables).filter(([name]) => !RETIRED_TABLES.includes(name)));
+  const tables = Object.fromEntries(Object.entries(document.tables).filter(([name]) => !RETIRED_TABLES.includes(name) && name !== 'attachments' && name !== 'owner_settings'));
   const state = tablesToState(tables);
   wf.migrate(state);
-  return {tables, state};
+  return {tables, state, attachments, ownerSettings, attachmentsLeftOut};
 }
 
 /** Restore into an empty-ish database inside one transaction. */
 export function importBackup(store, document, {force = false, primaryWorkspace = false} = {}) {
-  const {tables, state} = validateBackup(document, {primaryWorkspace});
+  const {tables, attachments, ownerSettings, attachmentsLeftOut} = validateBackup(document, {primaryWorkspace});
   const restoredAt = new Date().toISOString();
   // A freshly seeded database already contains the built-in group rows, so
   // "populated" means real content, not the defaults every install ships with.
@@ -281,6 +396,17 @@ export function importBackup(store, document, {force = false, primaryWorkspace =
         }
       }
     }
+    // A backup from before files travelled leaves the stored files alone.
+    if (attachments) {
+      store.run('DELETE FROM attachments');
+      for (const f of attachments) store.run('INSERT INTO attachments (id,name,type,size,data,created_by,created_at) VALUES (?,?,?,?,?,?,?)', f.id, f.name, f.type, f.size, f.data, f.created_by, f.created_at);
+    }
+    if (ownerSettings) {
+      for (const key of OWNER_SETTINGS) {
+        if (ownerSettings.has(key)) store.run('INSERT INTO kv (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', key, ownerSettings.get(key));
+        else store.run('DELETE FROM kv WHERE key=?', key);
+      }
+    }
   });
   // The store's in-memory document must agree with what was just written, so it
   // is read back through the store's own row readers, not assembled here.
@@ -292,7 +418,10 @@ export function importBackup(store, document, {force = false, primaryWorkspace =
   // The rows were written behind the store's back, so what it remembers having
   // written no longer describes the file.
   store.forgetWrites?.();
-  return {restored: [...EXPORT_TABLES, ...OPTIONAL_TABLES].reduce((n, name) => n + (tables[name]?.length || 0), 0)};
+  const restored = [...EXPORT_TABLES, ...OPTIONAL_TABLES].reduce((n, name) => n + (tables[name]?.length || 0), 0) + (attachments?.length || 0);
+  const n = attachmentsLeftOut.length;
+  const notes = n ? [`${n} attached file${n === 1 ? ' was' : 's were'} left out of this backup to keep it under ${ATTACHMENT_BACKUP_BYTES / 1048576} MB, so ${n === 1 ? 'it shows' : 'they show'} as missing in chat: ${attachmentsLeftOut.slice(0, 5).map(a => a.name).join(', ')}${n > 5 ? ', …' : ''}.`] : [];
+  return {restored, attachmentsLeftOut, notes};
 }
 
 /** Rebuild a plain state document from exported tables (for preview/validate).
