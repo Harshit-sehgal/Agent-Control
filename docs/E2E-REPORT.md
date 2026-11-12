@@ -132,4 +132,4 @@ Each needs the owner's own account or details, which a bot must not supply.
   Cloud client, pasted once in Settings → Connectors.
 - **Bot checks and CAPTCHAs** (LinkedIn showed one) are never solved by a bot; the Sign in card hands the page
   to the owner.
-- **Posting on X** stays refused for bots; the bot writes the post for the owner to send.
+- **Posting on X** is a Post like any other: bots click and type on X, and the Post asks the owner unless they set Always allow.

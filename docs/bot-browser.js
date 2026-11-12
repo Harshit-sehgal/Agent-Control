@@ -20,12 +20,12 @@
  * X and Twitter work like any other site: a bot may read, click and type there, and a click on Post asks
  * unless the owner set Always allow for posting on that site.
  */
-import {cleanText, validHttpUrl} from './core.js?v=7cc80de302';
-import {fail} from './errors.js?v=7cc80de302';
-import {decide, createAsk, scopeOf} from './asks.js?v=7cc80de302';
-import {controlFence} from './reply-blocks.js?v=7cc80de302';
-import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=7cc80de302';
-import {appForHost} from './app-catalog.js?v=7cc80de302';
+import {cleanText, validHttpUrl} from './core.js?v=99c330d626';
+import {fail} from './errors.js?v=99c330d626';
+import {decide, createAsk, scopeOf} from './asks.js?v=99c330d626';
+import {controlFence} from './reply-blocks.js?v=99c330d626';
+import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=99c330d626';
+import {appForHost} from './app-catalog.js?v=99c330d626';
 
 /** The most page text one model turn carries (the pages of a round together). */
 export const MAX_PAGE_CHARS = 24000;
@@ -214,7 +214,7 @@ export function parseBrowserRequests(output) {
 export const stripBrowserBlocks = output => String(output ?? '').replace(BLOCK(), '').replace(/\n{3,}/g, '\n\n').trim();
 
 /** What a bot is told about the tool when it holds the permission. */
-export const BROWSER_TOOL_HINT = 'You can read or use a web page through a headless browser. Put one block per page in your reply, e.g. ```browser\n{"url":"https://example.com"}\n``` That returns the page text and a numbered list of controls. To act, name a control by its number in the same block: {"url":"https://example.com","steps":[{"op":"click","index":3}]} then read the result. Ops: navigate, click, type, waitFor, read, scroll. A CSS selector also works instead of an index. Scroll only moves the page. Any public site works, including X and YouTube. To find something you have no link for, search first: open https://www.bing.com/search?q=your+search+words and then open the results that fit. A long page is cut short; to reach a part further down, ask for it with "find": {"url":"https://example.com","find":"words on that part"} returns the passages that hold them. To book, apply, order or fill a form for the owner, do it yourself with steps, all the way to the last button: the app asks the owner before anything is sent, posted, booked or paid unless they set it to Always allow, so never say you cannot do it. Ask the owner only for details you cannot find, such as their phone number. If a site shows a human check, do not try to solve it: read another site. Do not ask the owner for a link you can find this way, and do not answer from memory when the question is about now. You may put several blocks in one reply to read pages side by side, and ask for more pages after you read those. The result comes back in the chat.';
+export const BROWSER_TOOL_HINT = 'You can read or use a web page through a headless browser. Put one block per page in your reply, e.g. ```browser\n{"url":"https://example.com"}\n``` That returns the page text and a numbered list of controls. To act, name a control by its number in the same block: {"url":"https://example.com","steps":[{"op":"click","index":3}]} then read the result. Ops: navigate, click, type, waitFor, read, scroll. A CSS selector also works instead of an index. Scroll only moves the page. Any public site works, including X and YouTube. To find something you have no link for, search first: open https://www.bing.com/search?q=your+search+words and then open the results that fit. A long page is cut short; to reach a part further down, ask for it with "find": {"url":"https://example.com","find":"words on that part"} returns the passages that hold them. To book, apply, order or fill a form for the owner, do it yourself with steps, all the way to the last button: the app asks the owner before anything is sent, posted, booked or paid unless they set it to Always allow, so never say you cannot do it. Ask the owner only for details you cannot find, such as their phone number. If a site shows a human check, do not try to solve it: read another site, or when the owner needs that very site, send the setup block {"action":"signin","site":"that site"} so they can pass it in the shared browser. Do not ask the owner for a link you can find this way, and do not answer from memory when the question is about now. You may put several blocks in one reply to read pages side by side, and ask for more pages after you read those. The result comes back in the chat.';
 
 /** The numbered controls a snapshot returned, in one line. The model acts on
  * these; a page of raw HTML is not something it can click. */

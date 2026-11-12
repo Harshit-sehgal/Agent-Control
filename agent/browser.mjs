@@ -16,8 +16,9 @@
  *   never signed in to anything. Setting AGENT_BROWSER_PROFILE points it at a
  *   directory to keep instead — the explicit opt-in for signed-in journeys,
  *   where the operator signs in once and the profile (and its cookies) persist;
- * - it navigates and reads. Click and type exist for allowlisted hosts that
- *   are not X or Twitter; those two stay refused. There is no upload or download.
+ * - it navigates and reads, and clicks and types on allowlisted hosts; a Send,
+ *   Post, Delete or Pay control is clicked only when the owner allowed it.
+ *   There is no upload or download.
  */
 import {spawn} from 'node:child_process';
 import dns from 'node:dns/promises';
@@ -468,7 +469,7 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
    *
    * The rules that bound a capture still bound this: the page and every
    * navigation must be on the allowlist, the egress proxy still refuses private
-   * and local addresses, and click and type on X and Twitter is still refused.
+   * and local addresses.
    * Signing in is the point; publishing from here is not. */
   async function open(url, {allow, timeoutMs = 60000} = {}) {
     if (!hostAllowed(url, allow)) throw new Error(`Refusing to open ${url}: its host is not in AGENT_BROWSER_ALLOWLIST.`);

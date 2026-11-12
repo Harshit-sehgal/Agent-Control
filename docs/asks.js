@@ -21,9 +21,9 @@
  * Pure and browser-safe, like the other shared modules: the server and the
  * Pages demo share every rule here.
  */
-import {fail} from './errors.js?v=7cc80de302';
-import {cleanText} from './core.js?v=7cc80de302';
-import {logActivity} from './activity-log.js?v=7cc80de302';
+import {fail} from './errors.js?v=99c330d626';
+import {cleanText} from './core.js?v=99c330d626';
+import {logActivity} from './activity-log.js?v=99c330d626';
 
 /** What every bot may do without a grant. */
 export const BASIC_KIT = ['bot.ask', 'bot.create', 'schedule.set'];
@@ -71,7 +71,7 @@ const SITE_WORD = {'browser.use': 'browser', send: 'send', post: 'post', delete:
 const originOf = target => { try { const url = new URL(String(target ?? '')); return /^https?:$/.test(url.protocol) ? url.origin.toLowerCase() : ''; } catch { return ''; } };
 
 /** Where a grant applies: the origin for a browser page or a click on one, the account for a connector,
- * nothing else (a payment is asked every time, so its Deny is the only grant it has). */
+ * the site for a payment (Ask each time or Deny may also be for every site, with no scope). */
 export function scopeOf({action, target} = {}) {
   if (PER_ORIGIN.includes(action) || action === 'spend') return originOf(target);
   if (isConnector(action)) return cleanText(String(target ?? ''), 200).toLowerCase();

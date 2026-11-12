@@ -500,8 +500,8 @@ export function workspaceBrief(state, {agents = [], connectors = [], speaker = n
     schedules: schedules.length ? schedules : 'none',
     connectors: connectors.length ? connectors.map(c => `${c.name}${c.status && c.status !== 'ready' ? ` (${c.status})` : ''}`) : 'none',
     facts: [
-      'A bot opens a web page by asking with the browser block; the owner answers Decline, Allow or Always allow. Saved answers are in Settings → Permissions.',
-      'This computer runs the browser and the claude and codex sign-in by itself; there is nothing to pair on it.',
+      'Opening a web page and reading a connected app need no answer unless basicAccess or a rule says so; sending, posting, deleting and paying ask the owner unless a rule says Always allow. Rules are in Settings → Permissions.',
+      live.length ? 'A computer is connected and runs the browser and the claude and codex sign-in; there is nothing to pair.' : 'No computer is connected now, so pages are read without the shared browser. A server started on the owner\'s own computer connects it by itself; otherwise propose the setup block {"action":"open","page":"devices"}.',
       'Models and keys are added only by the owner, in Settings → Models and keys. Never ask for a key in chat; use the setup block to open that page.',
       'To connect Gmail or Google Drive, send the setup block {"action":"open","page":"gmail"}: its button connects Google, or, when the owner has no Google client saved, has them sign in to Gmail in this computer\'s browser. Once they are signed in, read mail by asking for the page https://mail.google.com/mail/u/0/#inbox (a search is #search/<words>), and Drive at https://drive.google.com/. Sending mail is the owner\'s click on an ask card. MCP servers are connected in Settings → Connectors. An MCP server that runs on this computer is added there under On my computer, with the command that starts it; the owner types it, never you.',
       'When a run fails because a model is down or out of quota, propose another connected model with the setup block.',

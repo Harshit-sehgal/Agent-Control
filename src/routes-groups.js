@@ -232,7 +232,7 @@ export function groupRoutes(router) {
   });
 
   // The owner answers an ask: {answer: 'decline' | 'allow' | 'always'}. Always allow stores the grant for
-  // this bot (never for a payment: 400). Allow and Always allow let the run go on; Decline gives the bot
+  // this bot (for a payment only when the ask names a site; otherwise 400). Allow and Always allow let the run go on; Decline gives the bot
   // one closing turn. An answer after the run was stopped is recorded and resumes nothing.
   router.add('POST', '/api/asks/:id', 'admin', async c => {
     const b = await c.body();
@@ -284,7 +284,7 @@ export function groupRoutes(router) {
   // Live takeover: a person drives the page a bot asked for, to sign in or
   // answer a challenge the browser cannot. The page is kept open between these
   // calls, and handed back (or closed) to finish. The allowlist and the egress
-  // proxy still decide where the page may go, and X still refuses click/type.
+  // proxy still decide where the page may go.
   router.add('GET', '/api/browser-sessions', 'member', () => ({sessions: browserRuntime.liveList()}));
   router.add('POST', '/api/browser-sessions', 'member', async c => {
     const b = await c.body();

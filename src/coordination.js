@@ -152,7 +152,7 @@ export async function queueGroupRun(store,{groupId,message,directBotId=null,chec
     const task=instructed.task?{...instructed.task,confirm}:null;
     const run=createRun({group,message:messageText,directBotId:instructed.directBotId,makeId:randomUUID,checkpoints:Boolean(checkpoints),chatKey,guests,task,anyway:anyway===true});
     // What the owner typed and asked every bot to remember goes to the company notes before the run reads them.
-    if(!taskId&&!scheduleId&&!unattended)rememberFromOwner(s,messageText);
+    if(!taskId&&!scheduleId&&!unattended){const saved=rememberFromOwner(s,messageText);if(saved?.length)run.remembered=saved.map(r=>String(r?.text??r).slice(0,200));}
     if(taskId)run.taskId=taskId;
     // The schedule a timer run came from, so its end can count toward stopping a schedule that keeps failing.
     if(scheduleId)run.scheduleId=scheduleId;

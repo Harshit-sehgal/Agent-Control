@@ -34,8 +34,12 @@ test('saying it twice keeps one note', () => {
   assert.equal(notes(s).length, 1);
 });
 
-test('bots are told a remember line is already saved', async () => {
+test('bots are told exactly which remember lines were saved, and to confirm only those', async () => {
   const {createEnvelope} = await import('../shared/coordination.js');
-  const env = createEnvelope({run: {id: 'r', groupId: 'home', currentStep: 0, recipients: ['b'], input: 'x'}, bot: {id: 'b', name: 'Atlas', instructions: 'Lead.'}});
-  assert.match(JSON.stringify(env), /already saved that line to the company notes/);
+  const env = createEnvelope({run: {id: 'r', groupId: 'home', currentStep: 0, recipients: ['b'], input: 'x', remembered: ['Reply in British English.']}, bot: {id: 'b', name: 'Atlas', instructions: 'Lead.'}});
+  assert.deepEqual(env.remembered, ['Reply in British English.']);
+  assert.match(JSON.stringify(env.restrictions), /remembered lists what the app just saved/);
+  const none = createEnvelope({run: {id: 'r', groupId: 'home', currentStep: 0, recipients: ['b'], input: 'x'}, bot: {id: 'b', name: 'Atlas', instructions: 'Lead.'}});
+  assert.equal(none.remembered, undefined, 'nothing saved, nothing to confirm');
+  assert.match(none.now.iso, /^\d{4}-\d{2}-\d{2}T/, 'every run carries today');
 });

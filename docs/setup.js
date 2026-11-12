@@ -26,17 +26,17 @@
  *   make itself the primary bot, save a rule without the owner's tap, or reach a route the owner could not.
  *
  * Pure and browser-safe: the server reads replies with it and the UI paints the card from it. */
-import {cleanText, validHttpUrl} from './core.js?v=7cc80de302';
-import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=7cc80de302';
-import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=7cc80de302';
-import {controlFence} from './reply-blocks.js?v=7cc80de302';
-import {companyBots, primaryOf} from './company.js?v=7cc80de302';
-import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js?v=7cc80de302';
-import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=7cc80de302';
-import {grantWhat} from './ui-asks.js?v=7cc80de302';
-import {COLOR_NAMES} from './ui-kit.js?v=7cc80de302';
-import {SHAPES} from './company.js?v=7cc80de302';
-import {limitsOf, BACKSTOP} from './limits.js?v=7cc80de302';
+import {cleanText, validHttpUrl} from './core.js?v=99c330d626';
+import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=99c330d626';
+import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=99c330d626';
+import {controlFence} from './reply-blocks.js?v=99c330d626';
+import {companyBots, primaryOf} from './company.js?v=99c330d626';
+import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js?v=99c330d626';
+import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=99c330d626';
+import {grantWhat} from './ui-asks.js?v=99c330d626';
+import {COLOR_NAMES} from './ui-kit.js?v=99c330d626';
+import {SHAPES} from './company.js?v=99c330d626';
+import {limitsOf, BACKSTOP} from './limits.js?v=99c330d626';
 
 export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'schedule', 'remove', 'open', 'signin', 'pause', 'limits', 'basics', 'forget', 'disconnect', 'thread'];
 /** The bot settings a bot may propose. Not the primary role, the browser approval mode, or layout (pins, order). */
@@ -500,8 +500,8 @@ export function workspaceBrief(state, {agents = [], connectors = [], speaker = n
     schedules: schedules.length ? schedules : 'none',
     connectors: connectors.length ? connectors.map(c => `${c.name}${c.status && c.status !== 'ready' ? ` (${c.status})` : ''}`) : 'none',
     facts: [
-      'A bot opens a web page by asking with the browser block; the owner answers Decline, Allow or Always allow. Saved answers are in Settings → Permissions.',
-      'This computer runs the browser and the claude and codex sign-in by itself; there is nothing to pair on it.',
+      'Opening a web page and reading a connected app need no answer unless basicAccess or a rule says so; sending, posting, deleting and paying ask the owner unless a rule says Always allow. Rules are in Settings → Permissions.',
+      live.length ? 'A computer is connected and runs the browser and the claude and codex sign-in; there is nothing to pair.' : 'No computer is connected now, so pages are read without the shared browser. A server started on the owner\'s own computer connects it by itself; otherwise propose the setup block {"action":"open","page":"devices"}.',
       'Models and keys are added only by the owner, in Settings → Models and keys. Never ask for a key in chat; use the setup block to open that page.',
       'To connect Gmail or Google Drive, send the setup block {"action":"open","page":"gmail"}: its button connects Google, or, when the owner has no Google client saved, has them sign in to Gmail in this computer\'s browser. Once they are signed in, read mail by asking for the page https://mail.google.com/mail/u/0/#inbox (a search is #search/<words>), and Drive at https://drive.google.com/. Sending mail is the owner\'s click on an ask card. MCP servers are connected in Settings → Connectors. An MCP server that runs on this computer is added there under On my computer, with the command that starts it; the owner types it, never you.',
       'When a run fails because a model is down or out of quota, propose another connected model with the setup block.',
