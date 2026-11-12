@@ -7,7 +7,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {Readable} from 'node:stream';
-import {sniffType, attachmentRefs, pickProblem, cleanFileName, MAX_FILES, MAX_FILE_BYTES, fencedFile} from '../shared/attachments.js';
+import {sniffType, attachmentRefs, pickProblem, cleanFileName, MAX_FILES, MAX_FILE_BYTES, MODEL_IMAGE_BYTES, MODEL_IMAGES_TOTAL, fencedFile} from '../shared/attachments.js';
 import {addChatMessages} from '../shared/chats.js';
 import {threadContext} from '../shared/bot-settings.js';
 import {SqliteStore} from '../src/sqlite-store.js';
@@ -43,12 +43,15 @@ test('names, references and the size and count caps', () => {
   assert.equal(cleanFileName('C:\\x\\<b>"q".png'), 'bq.png');
   assert.equal(cleanFileName(''), 'file');
   const refs = attachmentRefs([
-    ...Array.from({length: 6}, (_, i) => ({id: `aaaaaaa${i}`, name: `f${i}.png`, type: 'image/png', size: 3})),
+    ...Array.from({length: 12}, (_, i) => ({id: `aaaaaa${String(i).padStart(2, '0')}`, name: `f${i}.png`, type: 'image/png', size: 3})),
   ]);
   assert.equal(refs.length, MAX_FILES);
   assert.deepEqual(attachmentRefs([{id: '../x', type: 'image/png'}, {id: 'abcdefgh', type: 'text/html'}]), []);
-  assert.match(pickProblem({size: MAX_FILE_BYTES + 1}), /5 MB or smaller/);
-  assert.match(pickProblem({size: 10, count: MAX_FILES}), /at most 4/);
+  assert.equal(MAX_FILES, 10);
+  assert.equal(MAX_FILE_BYTES, 10 * 1024 * 1024);
+  assert.match(pickProblem({size: MAX_FILE_BYTES + 1}), /10 MB or smaller/);
+  assert.equal(pickProblem({size: MAX_FILE_BYTES, count: 9}), '');
+  assert.match(pickProblem({size: 10, count: MAX_FILES}), /at most 10/);
   assert.equal(pickProblem({size: 10, count: 0}), '');
   assert.match(fencedFile('a.txt', 'x'.repeat(20), 10), /first 10 characters/);
 });
@@ -158,6 +161,21 @@ test('a turn reads the files on the owner\'s newest lines only, and fences text 
   assert.equal(out.images.length, 1);
   assert.match(out.text, /Attached file n\.txt:\n```\nhello\n```/);
   assert.equal(turnFiles(env([{from: 'user', text: 'x', files: [{id: 'i1aaaaaa', name: 'a.png', type: 'image/png'}]}, {from: 'Atlas', text: 'seen'}]), read), null, 'an answered image is not sent again');
+});
+
+test('an image too big for one model request is named in the text instead of sent', () => {
+  const big = n => Buffer.concat([PNG, Buffer.alloc(n)]);
+  const files = {
+    b1aaaaaa: {type: 'image/png', name: 'huge.png', data: big(6 * 1024 * 1024)},
+    ...Object.fromEntries(Array.from({length: 4}, (_, i) => [`m${i}aaaaaa`, {type: 'image/png', name: `m${i}.png`, data: big(4 * 1024 * 1024)}])),
+  };
+  const refs = Object.entries(files).map(([id, f]) => ({id, name: f.name, type: f.type}));
+  const out = turnFiles(JSON.stringify({message: 'm', thread: [{from: 'user', text: 'look', files: refs}]}), id => files[id] || null);
+  assert.ok(out.images.every(image => Buffer.from(image.data, 'base64').length <= MODEL_IMAGE_BYTES), 'no single image is over the per-image limit');
+  assert.ok(out.images.reduce((n, image) => n + Buffer.from(image.data, 'base64').length, 0) <= MODEL_IMAGES_TOTAL, 'the images fit one request');
+  assert.ok(out.images.length >= 1, 'the ones that fit are still sent');
+  assert.match(out.text, /huge\.png/);
+  assert.match(out.text, /too large/);
 });
 
 async function provider(replies) {

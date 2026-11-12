@@ -4,27 +4,27 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {briefingMessage} from './briefing.js?v=e0e04f8691';
-import {addTemplate, removeTemplate} from './templates.js?v=e0e04f8691';
-import {initialState, cleanText} from './core.js?v=e0e04f8691';
-import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=e0e04f8691';
-import {RETENTION_DEFAULTS} from './retention.js?v=e0e04f8691';
-import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=e0e04f8691';
-import {addChatMessages, clearChat} from './chats.js?v=e0e04f8691';
-import {publicMemory, rememberFromOwner, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=e0e04f8691';
-import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=e0e04f8691';
-import {createThread, titleFrom} from './threads.js?v=e0e04f8691';
-import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=e0e04f8691';
-import {simulateGroup} from './group-simulator.js?v=e0e04f8691';
-import {BUSY_STATUSES} from './run-state.js?v=e0e04f8691';
-import {botSettings} from './bot-settings.js?v=e0e04f8691';
-import {denyBrowserRequest} from './bot-browser.js?v=e0e04f8691';
-import {answerAsk, expireAsks, orphanAsks, setGrant, setAskBasics, restorePermissions} from './asks.js?v=e0e04f8691';
-import {applyPreset} from './presets.js?v=e0e04f8691';
-import {setLimits} from './limits.js?v=e0e04f8691';
-import {activityPage} from './activity-log.js?v=e0e04f8691';
-import {withLocalLock} from './locks.js?v=e0e04f8691';
-import {base64Bytes, sniffType, cleanFileName, DEMO_MAX_FILE_BYTES, DEMO_MAX_STORED} from './attachments.js?v=e0e04f8691';
+import {briefingMessage} from './briefing.js?v=691b5cf293';
+import {addTemplate, removeTemplate} from './templates.js?v=691b5cf293';
+import {initialState, cleanText} from './core.js?v=691b5cf293';
+import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=691b5cf293';
+import {RETENTION_DEFAULTS} from './retention.js?v=691b5cf293';
+import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=691b5cf293';
+import {addChatMessages, clearChat} from './chats.js?v=691b5cf293';
+import {publicMemory, rememberFromOwner, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=691b5cf293';
+import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=691b5cf293';
+import {createThread, titleFrom} from './threads.js?v=691b5cf293';
+import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=691b5cf293';
+import {simulateGroup} from './group-simulator.js?v=691b5cf293';
+import {BUSY_STATUSES} from './run-state.js?v=691b5cf293';
+import {botSettings} from './bot-settings.js?v=691b5cf293';
+import {denyBrowserRequest} from './bot-browser.js?v=691b5cf293';
+import {answerAsk, expireAsks, orphanAsks, setGrant, setAskBasics, restorePermissions} from './asks.js?v=691b5cf293';
+import {applyPreset} from './presets.js?v=691b5cf293';
+import {setLimits} from './limits.js?v=691b5cf293';
+import {activityPage} from './activity-log.js?v=691b5cf293';
+import {withLocalLock} from './locks.js?v=691b5cf293';
+import {base64Bytes, sniffType, cleanFileName, DEMO_MAX_FILE_BYTES, DEMO_MAX_STORED, MAX_FILE_BYTES} from './attachments.js?v=691b5cf293';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
@@ -229,7 +229,7 @@ async function due(state) {
 function attachLocal(state, body) {
   const bytes = base64Bytes(body?.data), name = cleanFileName(body?.name);
   if (!bytes?.length) throw Object.assign(new Error('That file is empty.'), {status: 400});
-  if (bytes.length > DEMO_MAX_FILE_BYTES) throw Object.assign(new Error('The demo keeps files up to 512 KB. The Node build takes up to 5 MB.'), {status: 413});
+  if (bytes.length > DEMO_MAX_FILE_BYTES) throw Object.assign(new Error(`The demo keeps files up to 512 KB. The Node build takes up to ${MAX_FILE_BYTES / 1048576} MB.`), {status: 413});
   const type = sniffType(bytes, name);
   if (!type) throw Object.assign(new Error('Attach an image (PNG, JPEG, WebP or GIF) or a text file (.txt, .md, .csv, .json).'), {status: 415});
   const ref = {id: crypto.randomUUID(), name, type, size: bytes.length};

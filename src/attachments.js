@@ -10,7 +10,7 @@
  * removed, the line fell out of the history window, or it was never sent) is
  * deleted by the daily sweep once it is a day old. */
 import crypto from 'node:crypto';
-import {MAX_FILE_BYTES, sniffType, cleanFileName, isImage, attachmentRefs, base64Bytes, fencedFile, MAX_FILES} from '../shared/attachments.js';
+import {MAX_FILE_BYTES, sniffType, cleanFileName, isImage, attachmentRefs, base64Bytes, fencedFile, MAX_FILES, MODEL_IMAGE_BYTES, MODEL_IMAGES_TOTAL, tooBigNote} from '../shared/attachments.js';
 import {fail} from './http.js';
 
 const now = () => new Date().toISOString();
@@ -78,12 +78,17 @@ export function turnFiles(input, read) {
   const refs = [];
   for (let i = thread.length - 1; i >= 0 && thread[i]?.from === 'user'; i--) refs.unshift(...attachmentRefs(thread[i].files));
   if (!refs.length) return null;
-  const images = [], texts = [];
+  const images = [], texts = [], tooBig = [];
+  let sent = 0;
   for (const ref of refs.slice(-MAX_FILES)) {
     const file = read(ref.id);
     if (!file) continue;
-    if (isImage(file.type)) images.push({type: file.type, data: file.data.toString('base64'), name: file.name});
-    else texts.push(fencedFile(file.name, file.data.toString('utf8')));
+    if (!isImage(file.type)) { texts.push(fencedFile(file.name, file.data.toString('utf8'))); continue; }
+    // One request has room for so much image: a file over it is named, not sent, so the turn still goes through.
+    if (file.data.length > MODEL_IMAGE_BYTES || sent + file.data.length > MODEL_IMAGES_TOTAL) { tooBig.push(file.name); continue; }
+    sent += file.data.length;
+    images.push({type: file.type, data: file.data.toString('base64'), name: file.name});
   }
+  if (tooBig.length) texts.push(tooBigNote(tooBig));
   return images.length || texts.length ? {images, text: texts.join('\n\n')} : null;
 }

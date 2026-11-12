@@ -3,8 +3,8 @@
  * owner to edit before sending (`fill`) or turns on the daily briefing (`briefing`, shared/briefing.js).
  * Browser-safe and Node-tested (tests/templates.test.js); the add and remove rules are shared by the server and
  * the Pages demo. */
-import {fail} from './errors.js?v=e0e04f8691';
-import {briefingSchedule} from './briefing.js?v=e0e04f8691';
+import {fail} from './errors.js?v=691b5cf293';
+import {briefingSchedule} from './briefing.js?v=691b5cf293';
 
 export const MAX_TEMPLATES = 30;
 const MAX_TEXT = 4000, TITLE = 40;

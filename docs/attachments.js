@@ -6,8 +6,13 @@
  * claims: an image must start with its format's signature, and a text file must
  * have a text extension and decode as UTF-8 with no NUL bytes. Anything else is
  * refused. */
-export const MAX_FILE_BYTES = 5 * 1024 * 1024;
-export const MAX_FILES = 4;
+export const MAX_FILE_BYTES = 10 * 1024 * 1024;
+export const MAX_FILES = 10;
+/** What one model request can carry: Anthropic takes an image of at most 5 MB, and a request (Gemini's inline data,
+ * Anthropic's body) has room for about 15 MB of images. A bigger file stays in the chat and is named to the model. */
+export const MODEL_IMAGE_BYTES = 5 * 1024 * 1024;
+export const MODEL_IMAGES_TOTAL = 15 * 1024 * 1024;
+export const tooBigNote = names => `[The owner also attached ${names.join(', ')}, too large for this model to see. Say so if it matters to the answer.]`;
 /** The demo keeps files in localStorage, which holds a few MB in all. */
 export const DEMO_MAX_FILE_BYTES = 512 * 1024;
 export const DEMO_MAX_STORED = 8;

@@ -24,7 +24,7 @@ import {applyPreset} from './presets.js';
 import {setLimits} from './limits.js';
 import {activityPage} from './activity-log.js';
 import {withLocalLock} from './locks.js';
-import {base64Bytes, sniffType, cleanFileName, DEMO_MAX_FILE_BYTES, DEMO_MAX_STORED} from './attachments.js';
+import {base64Bytes, sniffType, cleanFileName, DEMO_MAX_FILE_BYTES, DEMO_MAX_STORED, MAX_FILE_BYTES} from './attachments.js';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
@@ -229,7 +229,7 @@ async function due(state) {
 function attachLocal(state, body) {
   const bytes = base64Bytes(body?.data), name = cleanFileName(body?.name);
   if (!bytes?.length) throw Object.assign(new Error('That file is empty.'), {status: 400});
-  if (bytes.length > DEMO_MAX_FILE_BYTES) throw Object.assign(new Error('The demo keeps files up to 512 KB. The Node build takes up to 5 MB.'), {status: 413});
+  if (bytes.length > DEMO_MAX_FILE_BYTES) throw Object.assign(new Error(`The demo keeps files up to 512 KB. The Node build takes up to ${MAX_FILE_BYTES / 1048576} MB.`), {status: 413});
   const type = sniffType(bytes, name);
   if (!type) throw Object.assign(new Error('Attach an image (PNG, JPEG, WebP or GIF) or a text file (.txt, .md, .csv, .json).'), {status: 415});
   const ref = {id: crypto.randomUUID(), name, type, size: bytes.length};
