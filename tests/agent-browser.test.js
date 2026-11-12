@@ -225,3 +225,22 @@ test('a session reuses one browser, numbers the controls, and signs nothing in',
     await assert.rejects(session.capture(`${base}/one`, {allow: ['other.example.com']}), /not in AGENT_BROWSER_ALLOWLIST/);
   } finally { await session.close(); server.close(); }
 });
+
+test('a click that opens a page (after a beat, or in a new tab) is read on that page', {skip: !browser && 'no browser installed', timeout: 60000}, async () => {
+  const server = http.createServer((req, res) => {
+    if (req.url === '/list') return res.writeHead(200, {'Content-Type': 'text/html'}).end(
+      `<title>Outlets</title><a id="card">Lazeez Affaire - Outer Circle</a><a id="tab" href="/tab" target="_blank">Open in a tab</a>` +
+      `<script>document.getElementById('card').addEventListener('click',()=>setTimeout(()=>{location.href='/outlet';},400));</script>`);
+    if (req.url === '/outlet') return res.writeHead(200, {'Content-Type': 'text/html'}).end('<title>Outlet</title><button>Book a table</button>');
+    if (req.url === '/tab') return res.writeHead(200, {'Content-Type': 'text/html'}).end('<title>Tab page</title><p>Opened here</p>');
+    res.writeHead(404).end();
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const host = `127.0.0.1:${server.address().port}`, permit = h => h !== 'localhost';
+  try {
+    const late = await captureWithBrowser(`http://${host}/list`, {allow: [host], binary: browser, permit, steps: [{op: 'click', selector: '#card'}]});
+    assert.equal(late.title, 'Outlet', 'the read waits for the page the click opened');
+    const tab = await captureWithBrowser(`http://${host}/list`, {allow: [host], binary: browser, permit, steps: [{op: 'click', selector: '#tab'}]});
+    assert.equal(tab.title, 'Tab page', 'a link meant for a new tab opens in the bot\'s own tab');
+  } finally { server.close(); }
+});

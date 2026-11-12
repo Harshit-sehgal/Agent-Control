@@ -20,11 +20,11 @@
  * Posting stays human: interaction (click, type) is refused on X and Twitter
  * hosts, so no bot can press Post there. Reading those pages is allowed.
  */
-import {cleanText, validHttpUrl} from './core.js?v=25bfe97b8d';
-import {fail} from './errors.js?v=25bfe97b8d';
-import {decide, createAsk, scopeOf} from './asks.js?v=25bfe97b8d';
-import {controlFence} from './reply-blocks.js?v=25bfe97b8d';
-import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=25bfe97b8d';
+import {cleanText, validHttpUrl} from './core.js?v=53a6f26029';
+import {fail} from './errors.js?v=53a6f26029';
+import {decide, createAsk, scopeOf} from './asks.js?v=53a6f26029';
+import {controlFence} from './reply-blocks.js?v=53a6f26029';
+import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=53a6f26029';
 
 /** The most page text one model turn carries (the pages of a round together). */
 export const MAX_PAGE_CHARS = 24000;
@@ -220,11 +220,38 @@ export const BROWSER_TOOL_HINT = 'You can read or use a web page through a headl
 
 /** The numbered controls a snapshot returned, in one line. The model acts on
  * these; a page of raw HTML is not something it can click. */
-const controlLine = elements => (Array.isArray(elements) ? elements : [])
-  .filter(e => e && Number.isInteger(e.index) && e.text)
-  .slice(0, 24)
-  .map(e => `[${e.index}] ${e.tag || 'element'} ${e.text}`.trim())
-  .join(' · ');
+// Buttons, fields and links named for an action come first, so a "Book Now" late on a page of links is still shown.
+const ACTION_WORDS = /\b(book|reserve|reservation|table|apply|buy|order|add to (?:cart|bag)|checkout|sign ?(?:in|up)|log ?in|register|submit|send|search|continue|next|select|choose|confirm|enquire|contact|schedule|slot)\b/i;
+const controlLine = elements => {
+  const all = (Array.isArray(elements) ? elements : []).filter(e => e && Number.isInteger(e.index) && e.text);
+  const first = all.filter(e => e.tag !== 'a' || ACTION_WORDS.test(e.text)).slice(0, 30);
+  const shown = new Set(first);
+  const rest = all.filter(e => !shown.has(e)).slice(0, Math.max(0, 40 - first.length));
+  return [...first, ...rest].sort((a, b) => a.index - b.index)
+    .map(e => `[${e.index}] ${e.tag || 'element'} ${e.text}`.trim())
+    .join(' · ');
+};
+
+const wordsOf = text => new Set(String(text || '').toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) || []);
+/** A control that is not a link (a restaurant card, a "Book a table" button) is reached only by a click, and
+ * small models rarely write one unprompted. So the page read shows the exact block: for the control whose words
+ * best match what the bot looked for (`match`), else for the first control that is not a link (`example`). */
+function clickHint(r, find = '') {
+  const at = String(r.finalUrl || r.url || '');
+  if (!/^https?:\/\//.test(at)) return {};
+  const linkTexts = new Set((Array.isArray(r.links) ? r.links : []).map(l => cleanText(l?.text, 100)));
+  const controls = (Array.isArray(r.elements) ? r.elements : []).filter(e => e && Number.isInteger(e.index) && String(e.text || '').trim().length >= 4);
+  const block = e => JSON.stringify({url: at.slice(0, 300), steps: [{op: 'click', index: e.index}]});
+  const wanted = wordsOf(find);
+  const score = e => [...wordsOf(e.text)].filter(w => wanted.has(w)).length;
+  const best = wanted.size ? controls.map(e => [score(e), e]).filter(([n]) => n >= 2).sort((a, b) => b[0] - a[0])[0]?.[1] : null;
+  const plain = controls.find(e => !linkTexts.has(cleanText(e.text, 100)));
+  const target = best || plain;
+  return {
+    match: best ? `Control ${best.index} (${cleanText(best.text, 80)}) matches it; to open it, send ${block(best)}` : '',
+    example: target ? `To click a control, ask for this page again with steps, e.g. for control ${target.index}: ${block(target)}` : '',
+  };
+}
 
 /** Page text the next bot turn can draft from. The chat line uses a shorter cap. */
 export function capturePageText(result, limit = MAX_PAGE_CHARS, find = '') {
@@ -233,13 +260,17 @@ export function capturePageText(result, limit = MAX_PAGE_CHARS, find = '') {
   const controls = controlLine(r.elements);
   let body = plainMarkup(reads.join('\n') || r.text || r.excerpt || '');
   // `find`: the bot asked for the parts of a long page that hold some words, so it can reach past the first screenful.
-  if (find) body = findPassages(body, find) || `"${find}" is not on this page. The page starts: ${String(body).slice(0, 1500)}`;
+  const click = clickHint(r, find);
+  if (find) {
+    const found = findPassages(body, find);
+    body = found ? `${click.match ? `${click.match}\n` : ''}${found}` : `"${find}" is not on this page.${click.match ? ` ${click.match}` : ''} The page starts: ${String(body).slice(0, 1500)}`;
+  }
   if (r.botCheck) body = `This site showed a human check to the browser. Do not try to solve it: read another site or search for the page elsewhere.\n\n${body}`;
   // Where the page's links go, so a bot can open a search result (page text alone drops the addresses).
   const links = (Array.isArray(r.links) ? r.links : []).filter(l => l && String(l.text || '').trim().length >= 4 && /^https?:\/\//.test(String(l.url || '')))
     .slice(0, 30).map(l => `${cleanText(l.text, 100)} → ${String(l.url).slice(0, 300)}`).join('\n');
   // The links go before the page text is cut, so a long page still shows them.
-  const tail = [links ? `Links:\n${links}` : '', controls ? `Controls: ${controls}` : ''].filter(Boolean).join('\n\n');
+  const tail = [links ? `Links:\n${links}` : '', controls ? `Controls: ${controls}` : '', click.example].filter(Boolean).join('\n\n');
   return cleanText([tail ? String(body).slice(0, Math.max(1000, limit - tail.length - 4)) : body, tail].filter(Boolean).join('\n\n'), limit);
 }
 
@@ -274,7 +305,9 @@ export const riskOf = label => RISKS.filter(([, pattern]) => pattern.test(String
 export function controlLabels(state, botId, chatKey) {
   const last = (state?.browserRequests || []).find(r => r.botId === botId && r.chatKey === chatKey && r.status === 'done' && r.result?.page);
   const labels = new Map();
-  for (const match of String(last?.result?.page || '').matchAll(/\[(\d+)\] (\S+) ([^·\n]*)/g)) labels.set(Number(match[1]), match[3].trim());
+  // Only the Controls line names controls; page text and the click hint may hold "[5]" too.
+  const line = String(last?.result?.page || '').split('\n').filter(l => l.startsWith('Controls: ')).at(-1) || '';
+  for (const match of line.matchAll(/\[(\d+)\] (\S+) ([^·\n]*)/g)) labels.set(Number(match[1]), match[3].trim());
   return labels;
 }
 

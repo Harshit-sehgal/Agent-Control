@@ -113,7 +113,7 @@ function riskGuard(approved, verb, click = false) {
 function actionExpression(step, approved = null) {
   const sel = targetOf(step);
   switch (step.op) {
-    case 'click': return `(()=>{const blocked=()=>${postingPage};if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};${riskGuard(approved, 'clicked', true)}el.scrollIntoView();if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};el.click();return{ok:true};})()`;
+    case 'click': return `(()=>{const blocked=()=>${postingPage};if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};${riskGuard(approved, 'clicked', true)}el.scrollIntoView();if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};const a=el.closest('a[target]');if(a)a.removeAttribute('target');el.click();return{ok:true};})()`;
     case 'type': return `(()=>{const blocked=()=>${postingPage};if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};${riskGuard(approved, 'typed into')}const v=${jsLiteral(step.text)};if(blocked())return{ok:false,reason:${jsLiteral(postingRefusal)}};if('value' in el){el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}else{el.textContent=v;}return{ok:true};})()`;
     case 'waitFor': return `new Promise(res=>{const sel=${sel};const end=Date.now()+${Number(step.timeoutMs) > 0 ? Math.min(Number(step.timeoutMs), 15000) : 5000};const tick=()=>{if(document.querySelector(sel))return res({ok:true});if(Date.now()>end)return res({ok:false,reason:'timed out'});setTimeout(tick,100);};tick();})`;
     case 'read': return `(()=>{const el=document.querySelector(${sel});return{ok:Boolean(el),text:el?String(el.textContent).slice(0,4000):null};})()`;
@@ -389,8 +389,25 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
             }
             const expression = actionExpression(step || {}, Array.isArray(approved) ? approved : []);
             if (!expression) { actions.push({op: String(step?.op || 'unknown'), ok: false, reason: 'unsupported action'}); continue; }
+            const before = step.op === 'click' ? await currentUrl() : '';
             const {result} = await cdp.send('Runtime.evaluate', {expression, awaitPromise: true, returnByValue: true}, sessionId);
             actions.push({op: step.op, ...(result?.value && typeof result.value === 'object' ? result.value : {ok: false})});
+            // A click often opens a page a moment later (a card, a script link): wait for the address to change, then
+            // for it to load, so the bot reads the page it opened rather than the one it left.
+            if (step.op === 'click' && result?.value?.ok) {
+              // 3 seconds at most, and a small share of a short deadline.
+              const beat = Math.min(200, timeoutMs / 40);
+              let moved = false;
+              for (let t = 0; t < 15 && !moved; t++) { await new Promise(resolve => setTimeout(resolve, beat)); moved = (await currentUrl()) !== before; }
+              if (moved) {
+                for (let t = 0; t < 25; t++) {
+                  const {result: ready} = await cdp.send('Runtime.evaluate', {expression: 'document.readyState', returnByValue: true}, sessionId);
+                  if (ready?.value === 'complete') break;
+                  await new Promise(resolve => setTimeout(resolve, beat));
+                }
+                await new Promise(resolve => setTimeout(resolve, settleMs));
+              }
+            }
           }
           const look = async () => JSON.parse((await cdp.send('Runtime.evaluate', {returnByValue: true, expression: `JSON.stringify({url: location.href, title: document.title, text: ${MAIN_TEXT}, links: ${LINKS}, snapshot: ${SNAPSHOT}})`}, sessionId)).result.value);
           let page = await look();
