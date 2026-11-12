@@ -255,7 +255,7 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
   if (path === '/api/threads' && method === 'POST') {
     const message = cleanText(body.message, 4000);
     if (!message) throw Object.assign(new Error('Say what the thread is about.'), {status: 400});
-    const thread = createThread(state, {title: titleFrom(message)});
+    const thread = createThread(state, {title: cleanText(body.title, 80) || titleFrom(message)});
     state.groups.push(thread);
     addChatMessages(state, `team-${thread.id}`, [{role: 'user', text: message}], {trusted: true});
     const run = await localRun(state, thread.id, {message});

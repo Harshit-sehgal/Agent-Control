@@ -66,6 +66,15 @@ test('a tool list is cleaned: names that cannot be called are dropped, text is b
   assert.deepEqual(cleanTools(undefined), []);
 });
 
+test('a cleaned tool keeps its argument names, required ones marked, and the paired agent\'s list keeps them too', () => {
+  const [tool] = cleanTools([{name: 'search', inputSchema: {type: 'object', properties: {query: {type: 'string'}, max: {type: 'number'}, 'bad name!': {}}, required: ['query']}}]);
+  assert.deepEqual(tool.args, ['query*', 'max'], 'a name that cannot be an argument is dropped');
+  assert.deepEqual(readTools([{name: 'search', write: false, args: ['query*', 'max']}])[0].args, ['query*', 'max']);
+  const many = cleanTools([{name: 'wide', inputSchema: {properties: Object.fromEntries(Array.from({length: 40}, (_, i) => [`a${i}`, {}]))}}])[0];
+  assert.ok(many.args.length <= 12);
+  assert.equal(cleanTools([{name: 'bare'}])[0].args, undefined, 'no schema, no args key');
+});
+
 test('a result becomes text a bot can read: text kept, other kinds named, an error flagged, the size capped', () => {
   assert.deepEqual(resultText({content: [{type: 'text', text: 'one'}, {type: 'image', data: 'AAAA', mimeType: 'image/png'}, {type: 'text', text: 'two'}]}),
     {ok: true, text: 'one\n[image omitted]\ntwo'});

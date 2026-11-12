@@ -188,7 +188,9 @@ test('a refresh Google rejects (invalid_grant) turns the connector to reconnect,
   const [c] = (await r.call('GET', '/api/connectors')).body.connectors;
   assert.equal(c.status, 'reconnect');
   assert.match(c.statusMessage, /Reconnect Google/);
-  assert.deepEqual(envelopeConnectors(r.store.read()), [], 'a bot is not offered a connector that needs reconnecting');
+  const offered = envelopeConnectors(r.store.read());
+  assert.deepEqual(offered.map(c => [c.status, c.tools]), [['reconnect', undefined]], 'a bot is offered no tools of a connector that needs reconnecting, only its status');
+  assert.match(offered[0].how, /"action":"reconnect"/);
   // Reconnect: the same client, a new sign-in.
   const flow = await start(r);
   assert.match((await finish(r, flow)).headers.Location, /google=connected/);

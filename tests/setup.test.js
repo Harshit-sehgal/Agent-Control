@@ -2,7 +2,7 @@
 import test from 'node:test';
 import {CLI_MODELS} from '../shared/ai-presets.js';
 import assert from 'node:assert/strict';
-import {parseSetupRequests, stripSetupBlocks, resolveSetup, modelFor, setupCardOf, setupButton, workspaceBrief, setupDone} from '../shared/setup.js';
+import {parseSetupRequests, stripSetupBlocks, resolveSetup, modelFor, setupCardOf, setupButton, workspaceBrief, setupDone, SETUP_TOOL_HINT} from '../shared/setup.js';
 import {CONTROL_FENCES} from '../shared/reply-blocks.js';
 
 const state = {
@@ -154,7 +154,7 @@ test('a team card turns on "Approve between steps" and the step limit for the sp
   assert.deepEqual(setupCardOf({setup: JSON.stringify(out.card)}), out.card);
   assert.equal(setupDone(state, out.card), false);
   assert.equal(setupDone({groups: [{...state.groups[0], settings: {checkpoints: true, maxSteps: 4}}]}, out.card), true);
-  assert.match(resolveSetup(state, {action: 'team', settings: {routing: 'everyone'}}, {speaker: atlas}).error, /checkpoints/);
+  assert.match(resolveSetup(state, {action: 'team', settings: {pipeline: []}}, {speaker: atlas}).error, /checkpoints/);
   assert.match(resolveSetup(state, {action: 'team', settings: {maxSteps: 99}}, {speaker: atlas}).error, /step limit/i);
   assert.match(resolveSetup(state, {action: 'team', team: 'Nowhere', settings: {checkpoints: true}}, {speaker: atlas}).error, /no team/);
   assert.equal(setupCardOf({setup: JSON.stringify({action: 'team', groupId: 'home', settings: {pipeline: []}})}), null, 'only the listed keys ride on a card');
@@ -204,4 +204,115 @@ test('the brief says each bot\'s effort and the workspace default', () => {
   const brief = workspaceBrief({...state, ai: {...state.ai, defaultEffort: 'medium', bots: {rep: {providerId: 'p1', model: 'haiku-5.5', effort: 'high'}}}});
   assert.equal(brief.bots.find(b => b.name === 'Replier').model, 'My Claude · haiku-5.5 · high effort');
   assert.equal(brief.defaultModel, 'Groq · llama-3.3-70b-versatile · medium effort');
+});
+
+/* ---------- everything the owner can do, a bot can propose ---------- */
+
+const wide = {
+  ...state,
+  groups: [...state.groups, {id: 't9', name: 'Plan the offsite', settings: {kind: 'thread'}, bots: []}],
+  connectors: [
+    {id: 'notes', name: 'Notes', kind: 'mcp', account: 'me@notes', status: 'ready', actions: [{name: 'list_notes', write: false}, {name: 'add_note', write: true}]},
+    {id: 'linear', name: 'Linear', kind: 'mcp', app: 'linear', status: 'reconnect', actions: []},
+    {id: 'files', name: 'Files', kind: 'mcp', status: 'error', actions: []},
+  ],
+  memory: {rulebooks: {company: {rules: [{id: 'r1', text: 'Write in British English.'}, {id: 'r2', text: 'Our office is in Pune.'}]}, 'bot:rep': {rules: [{id: 'r3', text: 'Sign off with Cheers.'}]}}},
+  tasks: [{id: 'task1', kind: 'bot-task', status: 'queued', runAt: '2026-11-13T08:00:00Z', payload: {botId: 'rep', groupId: 'home', message: 'Check the inbox for replies', kind: 'interval', intervalMinutes: 1440, at: '08:00'}}],
+};
+const ok = (request, s = wide, speaker = state.groups[0].bots[0]) => {
+  const out = resolveSetup(s, request, {speaker});
+  assert.equal(out.ok, true, out.error);
+  assert.deepEqual(setupCardOf({setup: JSON.stringify(out.card)}), out.card, 'the card reads back');
+  return out.card;
+};
+
+test('a rule can be for one connector tool: a write is per tool, a read is the whole account', () => {
+  const [{request}] = parseSetupRequests(block({action: 'rule', bot: 'Replier', do: 'connector', connector: 'Notes', tool: 'add_note', choice: 'always'}));
+  const write = ok(request);
+  assert.deepEqual([write.act, write.scope, write.choice], ['connector.notes.write.add_note', 'me@notes', 'always']);
+  assert.match(write.text, /Replier: Always allow/);
+  const read = ok({action: 'rule', bot: 'Replier', do: 'connector', connector: 'notes', tool: 'list_notes', choice: 'deny'});
+  assert.equal(read.act, 'connector.notes.read');
+  assert.equal(ok({action: 'rule', bot: 'Replier', do: 'connector', connector: 'notes', choice: 'ask'}).act, 'connector.notes.read', 'no tool is the read rule');
+  assert.equal(setupDone({...wide, grants: [{botId: 'rep', action: 'connector.notes.write.add_note', scope: 'me@notes', choice: 'always'}]}, write), true);
+  assert.match(resolveSetup(wide, {action: 'rule', bot: 'Replier', do: 'connector', connector: 'notes', tool: 'rm', choice: 'always'}).error, /add_note/);
+  assert.match(resolveSetup(wide, {action: 'rule', bot: 'Replier', do: 'connector', connector: 'Slack', tool: 'x', choice: 'always'}).error, /Notes/);
+  assert.equal(setupCardOf({setup: JSON.stringify({...write, act: 'connector.notes.exec'})}), null);
+});
+
+test('a connector that needs it can be reconnected, and a catalogue app connected, from a card', () => {
+  const again = ok({action: 'reconnect', connector: 'Files'});
+  assert.deepEqual([again.connectorId, again.app], ['files', undefined]);
+  assert.equal(setupButton(again), 'Reconnect');
+  const signin = ok({action: 'reconnect', connector: 'Linear'});
+  assert.equal(signin.app, 'linear', 'an app signed in to with its own sign-in opens that sign-in again');
+  assert.equal(setupButton(signin), 'Sign in again');
+  assert.match(resolveSetup(wide, {action: 'reconnect', connector: 'Nope'}).error, /Notes/);
+  const add = ok({action: 'connect', app: 'GitHub'});
+  assert.deepEqual([add.action, add.app], ['connect', 'github']);
+  assert.equal(setupButton(add), 'Connect');
+  assert.equal(setupDone({connectors: [{id: 'gh', kind: 'mcp', app: 'github'}]}, add), true);
+  assert.equal(setupDone(wide, add), false);
+  assert.match(resolveSetup(wide, {action: 'connect', app: 'Myspace'}).error, /not in the catalogue/);
+  assert.equal(setupCardOf({setup: JSON.stringify({action: 'connect', app: 'nope'})}), null);
+  assert.equal(ok({action: 'connect', app: 'gmail'}).app, undefined, 'Google is the Gmail card, not a catalogue connect');
+});
+
+test('a company memory line can be rewritten or deleted by its words', () => {
+  const [{request}] = parseSetupRequests(block({action: 'memory', rule: 'british english', text: 'Write in American English.'}));
+  const edit = ok(request);
+  assert.deepEqual([edit.ruleId, edit.bot, edit.text.includes('American')], ['r1', 'company', true]);
+  assert.equal(edit.newText, 'Write in American English.');
+  const gone = ok({action: 'memory', rule: 'Pune', remove: true});
+  assert.deepEqual([gone.ruleId, gone.remove], ['r2', true]);
+  assert.equal(setupButton(gone), 'Delete');
+  assert.equal(ok({action: 'memory', bot: 'Replier', rule: 'cheers', remove: true}).bot, 'rep');
+  assert.equal(setupDone({memory: {rulebooks: {company: {rules: []}}}}, gone), true);
+  assert.equal(setupDone(wide, gone), false);
+  assert.match(resolveSetup(wide, {action: 'memory', rule: 'zebra', remove: true}).error, /British English/);
+  assert.match(resolveSetup(wide, {action: 'memory', rule: 'english', text: 'ok'}).error, /4/);
+});
+
+test('a bot can start a new thread with a title and its first message', () => {
+  const [{request}] = parseSetupRequests(block({action: 'thread', new: true, name: 'Hire a designer', message: 'Find three freelance designers in Pune.'}));
+  const start = ok(request);
+  assert.deepEqual([start.create, start.name, start.message], [true, 'Hire a designer', 'Find three freelance designers in Pune.']);
+  assert.equal(setupButton(start), 'Start');
+  assert.equal(setupDone(wide, start), false);
+  assert.match(resolveSetup(wide, {action: 'thread', new: true, name: 'X'}).error, /message/);
+});
+
+test('limits carry "ask between steps", and a team card its routing and plan-first', () => {
+  const limits = ok({action: 'limits', askCheckpoints: true});
+  assert.deepEqual(limits.limits, {askCheckpoints: true});
+  assert.equal(setupDone({limits: {askCheckpoints: true}}, limits), true);
+  assert.equal(setupDone({}, limits), false);
+  assert.equal(parseSetupRequests(block({action: 'limits', askCheckpoints: false}))[0].request.askCheckpoints, false);
+  const team = ok({action: 'team', settings: {routing: 'everyone', confirmPlan: true}});
+  assert.deepEqual(team.settings, {routing: 'everyone', confirmPlan: true});
+  assert.match(team.text, /every bot/);
+  assert.match(resolveSetup(wide, {action: 'team', settings: {routing: 'random'}}, {speaker: state.groups[0].bots[0]}).error, /pipeline/);
+});
+
+test('a schedule can change its time or how often, in place', () => {
+  const [{request}] = parseSetupRequests(block({action: 'schedule', bot: 'Replier', change: 'inbox', at: '09:30'}));
+  const moved = ok(request);
+  assert.deepEqual([moved.replaces, moved.message, moved.every, moved.at], ['task1', 'Check the inbox for replies', 1440, '09:30']);
+  assert.match(moved.text, /09:30/);
+  const often = ok({action: 'schedule', bot: 'Replier', change: 'inbox', every: 'hour'});
+  assert.deepEqual([often.every, often.at], [60, '08:00']);
+  assert.equal(setupDone(wide, moved), false);
+  assert.match(resolveSetup(wide, {action: 'schedule', bot: 'Replier', change: 'nothing like it', at: '09:00'}).error, /Check the inbox/);
+});
+
+test('open reaches every Settings page, and the hint and the error list them', () => {
+  for (const [page, section] of [['notifications', 'notifications'], ['workspaces', 'workspaces'], ['members', 'team'], ['data', 'data'], ['retention', 'data'], ['appearance', 'look'], ['about', 'about']]) {
+    assert.equal(ok({action: 'open', page}).section, section, page);
+  }
+  const error = resolveSetup(wide, {action: 'open', page: 'secrets'}).error;
+  for (const word of ['notifications', 'workspaces', 'members', 'data', 'appearance']) {
+    assert.match(error, new RegExp(word));
+    assert.match(SETUP_TOOL_HINT, new RegExp(word));
+  }
+  for (const action of ['reconnect', 'connect', 'memory']) assert.match(SETUP_TOOL_HINT, new RegExp(`"action":"${action}"`));
 });

@@ -145,6 +145,20 @@ test('Decline gives the bot one closing turn that says what was declined, and op
   assert.equal(grantFor(store.read(), ids.mail, 'browser.use', 'https://docs.example.com'), null);
 });
 
+test('after a decline only that site stays closed: the bot may open another site in the same task', async t => {
+  useFakeBrowser(t);
+  const {store, ids} = await company(t);
+  await store.update(s => { setGrant(s, ids.mail, 'browser.use', 'https://other.example.org', 'always', undefined, {log: false}); });
+  const ai = model({Mailroom: envelope => (envelope.page ? `Read it: ${envelope.page}` : envelope.declined ? `${fence('https://docs.example.com/again')}\n${fence('https://other.example.org/notes')}` : fence('https://docs.example.com/guide'))});
+  wire(ai.executor);
+  const run = await ask(store, {message: 'Look up the guide', to: ids.mail, executor: ai.executor});
+  await answerAskFlow(store, store.read().asks[0].id, 'decline', {actor: 'owner@example.test', executor: ai.executor});
+  await until(() => runOf(store, run.id).status === 'completed', 'the run to finish');
+  assert.deepEqual(opened, ['https://other.example.org/notes'], 'the other site opened; the declined one did not');
+  assert.equal(store.read().asks.length, 1, 'the declined site was not asked about again');
+  assert.match(ai.of('Mailroom').at(-1).page, /other\.example\.org/);
+});
+
 test('Review focus 3: a Deny grant stops the bot, says where to change it, and never loops', async t => {
   useFakeBrowser(t);
   const {store, ids} = await company(t);

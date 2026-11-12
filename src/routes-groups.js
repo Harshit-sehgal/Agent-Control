@@ -168,7 +168,7 @@ export function groupRoutes(router) {
     const message = cleanText(b?.message, 4000);
     if (!message) fail('Say what the thread is about.');
     const thread = await c.store.update(s => {
-      const made = createThread(s, {title: titleFrom(message)});
+      const made = createThread(s, {title: cleanText(b?.title, 80) || titleFrom(message)});
       s.groups.push(made);
       chats.addChatMessages(s, `team-${made.id}`, [{role: 'user', text: message}], {trusted: true});
       return made;

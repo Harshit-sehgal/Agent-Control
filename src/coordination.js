@@ -14,7 +14,7 @@ import {noteBotWork,paused as botsPaused,resumeGuard} from '../shared/runaway.js
 import {parseOffJob,offJobMessage} from '../shared/off-job.js';
 import {STOPPABLE_STATUSES} from '../shared/run-state.js';
 import {botSettings,groupSettings,threadContext,MAX_STEPS_LIMIT} from '../shared/bot-settings.js';
-import {stepsCap,limitsOf,FAIL_STREAK} from '../shared/limits.js';
+import {stepsCap,limitsOf,FAIL_STREAK,runBudget} from '../shared/limits.js';
 import {addChatMessages} from '../shared/chats.js';
 import {assertContractOutput} from '../shared/contracts.js';
 import {recordBrowserRequests,stripBrowserBlocks,isSearchPage,parseBrowserRequests,MAX_BROWSER_DEPTH} from '../shared/bot-browser.js';
@@ -263,10 +263,8 @@ async function runGroupInner(store,id,executor){
     const stopNow=Boolean(before?.checkpoint?.stop);
     await store.update(s=>{coordinationState(s);const r=s.groupRuns.find(x=>x.id===id);if(!r||!['queued','running','awaiting_checkpoint','awaiting_limit'].includes(r.status))throw new Error('Run is not runnable');r.status='running';r.startedAt=r.startedAt||stamp();r.checkpoint=null;delete r.limit;});
     // The recipient list is read live each step: a bot's reply may append to it.
-    // A bot created during this run may take the work it was made for in this run
-    // (the step cap bounds how many turns that is), but it makes no bots of its
-    // own here: that is how a loop of fresh bots would start.
-    const fledglings=new Set();
+    // A bot created during this run may take the work it was made for in this run, and may make bots of its own:
+    // the step cap bounds how many turns that is, and MAX_BOTS_PER_GROUP how many bots.
     let i=start;
     while(true){
       // Calls a bot asked for that are cleared (an answer, or nothing to ask) are made now, before this step's turn,
@@ -316,9 +314,9 @@ async function runGroupInner(store,id,executor){
       // Context is automatic: the newest lines that fit; the stored recap, which is
       // in the memory block, stands in for whatever had to be cut.
       const thread=threadContext(current.chats?.[r.chatKey]);
-      const envelope=createEnvelope({run:r,bot,previous,thread,team:closing?[]:rosterFor(current,bot,roster,{thread:isThread(g)}),company:everyone,memory,lead,closing,connectors:closing||declinedTurn?[]:envelopeConnectors(current),
+      const envelope=createEnvelope({run:r,bot,previous,thread,team:closing?[]:rosterFor(current,bot,roster,{thread:isThread(g)}),company:everyone,memory,lead,closing,connectors:closing?[]:envelopeConnectors(current),
         // Every bot knows the workspace, so the owner can ask any of them to change a setting instead of learning Settings.
-        workspace:!closing?workspaceBrief(current,{agents:agentsBrief(store),connectors:envelopeConnectors(current),speaker:bot}):null});
+        workspace:!closing?workspaceBrief(current,{agents:agentsBrief(store),connectors:envelopeConnectors(current),speaker:bot}):null,budget:runBudget(current,r)});
       // Each bot runs on its own chosen model/provider, else the workspace
       // default. The turn itself is the one sequence every caller runs: a
       // sub-agent round, then a peer ask, then a new-bot block. A bot that
@@ -338,7 +336,7 @@ async function runGroupInner(store,id,executor){
         if(live.trace.length>400)live.trace=live.trace.slice(-400);
       });
       const gate=()=>store.update(s=>noteBotWork(s,'run').paused);
-      const reply=await runBotTurn(store,{bot,envelope,executor,config,peers:everyone,configFor:peerId=>resolveConfig(store,peerId),memoryForPeer:(mate,mateConfig)=>memoryFor(store,{bot:mate,config:mateConfig,chatKey:r.chatKey}),handoffAllowed:mayHandoff(r,bot)&&!closing&&!declinedTurn,spawnRounds:(r.subagents||[]).some(spawn=>spawn.botId===bot.id)?MAX_SUBAGENT_DEPTH:0,budget,onEvent,gate,resume:resumed,stop:stopped,groupId:fledglings.has(bot.id)?null:home?.id??null,runId:id,makeId:randomUUID,now:stamp});
+      const reply=await runBotTurn(store,{bot,envelope,executor,config,peers:everyone,configFor:peerId=>resolveConfig(store,peerId),memoryForPeer:(mate,mateConfig)=>memoryFor(store,{bot:mate,config:mateConfig,chatKey:r.chatKey}),handoffAllowed:mayHandoff(r,bot)&&!closing&&!declinedTurn,spawnRounds:(r.subagents||[]).some(spawn=>spawn.botId===bot.id)?MAX_SUBAGENT_DEPTH:0,budget,onEvent,gate,resume:resumed,stop:stopped,groupId:home?.id??null,runId:id,makeId:randomUUID,now:stamp});
       if(reply.limit){
         // A checkpoint, not a failure: what was said stays said, the bots still
         // waiting on an answer are kept, and the owner picks what happens next.
@@ -352,7 +350,6 @@ async function runGroupInner(store,id,executor){
           activity(s,'group-run',`Paused at a bot-to-bot limit (${reply.limit.kind})`,{runId:id});});
         return;
       }
-      for(const record of reply.created||[])fledglings.add(record.id);
       const output=reply.output;
       if(typeof output!=='string'||!output.trim())throw new Error('Bot returned empty output.');
       // A plain bot in its own chat may answer that the request is not its job.
@@ -383,9 +380,9 @@ async function runGroupInner(store,id,executor){
         // File fences from the full reply, then hand the next bot the text around them.
         const priorUrls=Array.isArray(live.browserUrls)?live.browserUrls:String(live.browserUrl||'').split(' | ').filter(Boolean);
         const skip=priorUrls;
-        const browsed=recordBrowserRequests(s,{bot,groupId:live.groupId,chatKey:live.chatKey||`team-${live.groupId}`,output:stripConnectorBlocks(body),depth:live.browserDepth||0,makeId:randomUUID,skipUrls:skip,runId:id,unattended:Boolean(live.unattended),closed:declinedTurn});
+        const browsed=recordBrowserRequests(s,{bot,groupId:live.groupId,chatKey:live.chatKey||`team-${live.groupId}`,output:stripConnectorBlocks(body),depth:live.browserDepth||0,makeId:randomUUID,skipUrls:skip,runId:id,unattended:Boolean(live.unattended),declined:live.declinedAsks||[]});
         // Connector blocks in the same reply: a page goes first, one kind at a time.
-        const conn=off?{text:'',calls:[],lines:[],asks:[]}:recordConnectorCalls(s,{bot,run:live,chatKey:live.chatKey||`team-${live.groupId}`,output:body,unattended:Boolean(live.unattended),closed:declinedTurn,blockedByPage:browsed.records.length>0,makeId:randomUUID,now:stamp()});
+        const conn=off?{text:'',calls:[],lines:[],asks:[]}:recordConnectorCalls(s,{bot,run:live,chatKey:live.chatKey||`team-${live.groupId}`,output:body,unattended:Boolean(live.unattended),declined:live.declinedAsks||[],blockedByPage:browsed.records.length>0,makeId:randomUUID,now:stamp()});
         newAsks=[...browsed.asks,...conn.asks];
         // Text around the browser fences is the browser helper's view of the
         // reply; with nothing to browse, the approved value is the output.
@@ -623,6 +620,9 @@ export async function resumeAfterAsks(store,runId,{executor,runtime,actor=null}=
     if(mine.some(a=>a.status==='pending'))return null;
     const declined=mine.filter(a=>a.status==='declined').map(a=>a.expired?`${a.detail||a.action} (no answer in 24 hours)`:(a.detail||a.action));
     if(declined.length)live.declined=declined;
+    // What was declined stays closed for the rest of the task, that action on that site or account only.
+    const no=mine.filter(a=>a.status==='declined').map(a=>({action:a.action,scope:a.grantScope||''}));
+    if(no.length)live.declinedAsks=[...(live.declinedAsks||[]),...no].slice(-50);
     live.askIds=[];
     // Each connector call waits on its own ask: an allowed one is cleared to run when the step starts, a declined one never runs.
     for(const call of live.connectorCalls||[]){

@@ -7,25 +7,27 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=99c330d626';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=99c330d626';
-import {requestOfMessage} from './bot-browser.js?v=99c330d626';
-import {validHttpUrl} from './core.js?v=99c330d626';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=99c330d626';
-import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=99c330d626';
-import {isPrimary} from './company.js?v=99c330d626';
-import {hasJob, modelChip} from './ui-profile-model.js?v=99c330d626';
-import {scheduleTaskBody} from './schedules.js?v=99c330d626';
-import {feed} from './ui-feed.js?v=99c330d626';
-import {setupCardOf, setupButton} from './setup.js?v=99c330d626';
-import {askCard} from './ui-asks.js?v=99c330d626';
-import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=99c330d626';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=99c330d626';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=99c330d626';
-import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=99c330d626';
-import {toast, confirmSheet} from './ui-dialogs.js?v=99c330d626';
-import {siteChip, thumbSlot} from './ui-computer-view.js?v=99c330d626';
-import {cliChoice, googleCard} from './ui-connect-model.js?v=99c330d626';
+import {OFFJOB_CHOICES} from './off-job.js?v=5451813041';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=5451813041';
+import {requestOfMessage} from './bot-browser.js?v=5451813041';
+import {validHttpUrl} from './core.js?v=5451813041';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=5451813041';
+import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=5451813041';
+import {isPrimary} from './company.js?v=5451813041';
+import {hasJob, modelChip} from './ui-profile-model.js?v=5451813041';
+import {scheduleTaskBody} from './schedules.js?v=5451813041';
+import {feed} from './ui-feed.js?v=5451813041';
+import {setupCardOf, setupButton} from './setup.js?v=5451813041';
+import {askCard} from './ui-asks.js?v=5451813041';
+import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=5451813041';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=5451813041';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=5451813041';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=5451813041';
+import {toast, confirmSheet} from './ui-dialogs.js?v=5451813041';
+import {siteChip, thumbSlot} from './ui-computer-view.js?v=5451813041';
+import {cliChoice, googleCard} from './ui-connect-model.js?v=5451813041';
+import {connectAppNow} from './ui-connect.js?v=5451813041';
+import {appById} from './app-catalog.js?v=5451813041';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -449,7 +451,28 @@ export const conversationActions = {
       await api(`/api/browser-live/${encodeURIComponent(card.botId)}/input`, 'POST', {type: 'navigate', url: card.url});
       return toast('You are in control. Sign in, then tap Hand back control.');
     }
-    if (card.action === 'team') await api(`/api/groups/${encodeURIComponent(card.groupId)}`, 'PATCH', {settings: card.settings});
+    // A connector to check again or sign in to again, a catalogue app, a new thread: the same taps as their own pages.
+    if (card.action === 'reconnect' && card.app) return void window.location.assign(`/api/connectors/mcp/start?app=${encodeURIComponent(card.app)}`);
+    if (card.action === 'connect') {
+      const app = appById(card.app);
+      if (!app) throw new Error('That app is no longer in the catalogue.');
+      if (isStaticDemo()) return toast('Connecting apps needs the app running on your computer.');
+      if (!(await connectAppNow(app))) return;
+    }
+    if (card.action === 'thread' && card.create) return void await startThread(card.message, {title: card.name});
+    if (card.action === 'reconnect') {
+      const result = await api(`/api/connectors/${encodeURIComponent(card.connectorId)}/refresh`, 'POST', {});
+      await sync();
+      return toast(result?.status && result.status !== 'ready' ? `${result.name || 'The connector'} is still not ready. ${result.statusMessage || ''}`.trim() : `${result?.name || 'The connector'} is ready.`);
+    }
+    if (card.action === 'connect') { /* connected above */ }
+    else if (card.action === 'memory') await (card.remove ? api(`/api/memory/rules/${encodeURIComponent(card.ruleId)}?bot=${encodeURIComponent(card.bot)}`, 'DELETE') : api(`/api/memory/rules/${encodeURIComponent(card.ruleId)}`, 'PATCH', {bot: card.bot, text: card.newText}));
+    else if (card.action === 'schedule' && card.replaces) {
+      // The new timing goes in first, so a refused one leaves the old schedule running.
+      await api('/api/tasks', 'POST', scheduleTaskBody(card));
+      await api(`/api/tasks/${encodeURIComponent(card.replaces)}`, 'DELETE');
+    }
+    else if (card.action === 'team') await api(`/api/groups/${encodeURIComponent(card.groupId)}`, 'PATCH', {settings: card.settings});
     else if (card.action === 'pause') await api('/api/guard', 'POST', {paused: true});
     else if (card.action === 'limits') await api('/api/limits', 'POST', card.limits);
     else if (card.action === 'basics') await api('/api/permissions/basics', 'POST', {ask: card.ask});

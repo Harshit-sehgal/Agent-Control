@@ -20,12 +20,12 @@
  * X and Twitter work like any other site: a bot may read, click and type there, and a click on Post asks
  * unless the owner set Always allow for posting on that site.
  */
-import {cleanText, validHttpUrl} from './core.js?v=99c330d626';
-import {fail} from './errors.js?v=99c330d626';
-import {decide, createAsk, scopeOf} from './asks.js?v=99c330d626';
-import {controlFence} from './reply-blocks.js?v=99c330d626';
-import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=99c330d626';
-import {appForHost} from './app-catalog.js?v=99c330d626';
+import {cleanText, validHttpUrl} from './core.js?v=5451813041';
+import {fail} from './errors.js?v=5451813041';
+import {decide, createAsk, scopeOf, declinedNeed} from './asks.js?v=5451813041';
+import {controlFence} from './reply-blocks.js?v=5451813041';
+import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=5451813041';
+import {appForHost} from './app-catalog.js?v=5451813041';
 
 /** The most page text one model turn carries (the pages of a round together). */
 export const MAX_PAGE_CHARS = 24000;
@@ -432,7 +432,7 @@ function connectedVia(state, host) {
   return (state.connectors || []).find(c => c?.status === 'ready' && (app.google ? c.kind === 'google' : c.kind === 'mcp' && c.app === app.id)) || null;
 }
 
-export function recordBrowserRequests(state, {bot, groupId, chatKey, output, depth = 0, skipUrls = [], runId = null, unattended = false, closed = false, makeId = () => crypto.randomUUID(), now = new Date().toISOString()}) {
+export function recordBrowserRequests(state, {bot, groupId, chatKey, output, depth = 0, skipUrls = [], runId = null, unattended = false, closed = false, declined = [], makeId = () => crypto.randomUUID(), now = new Date().toISOString()}) {
   depth = Math.max(0, Math.min(MAX_BROWSER_DEPTH, Number(depth) || 0));
   const rounds = roundsCap(state), perReply = pagesCap(state);
   const all = parseBrowserRequests(output), text = stripBrowserBlocks(output), lines = [], records = [], asks = [];
@@ -508,6 +508,9 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
       continue;
     }
     const needs = browserNeeds(item.request, labels);
+    // What the owner declined in this task stays declined; another site, or reading where a send was declined, goes on.
+    const no = declinedNeed(declined, needs);
+    if (no) { say(`${bot.name} asked to ${describe(item.request)}, but you declined that in this task, so it was not asked again.`); invalid.push(`the owner declined ${no.action === 'browser.use' ? 'opening' : no.action} ${hostOf(no.target)} in this task; do not ask for it again.`); continue; }
     const decision = decide(state, bot, needs, {readPrivate: guarded && !privateHosts.has(hostOf(item.request.url))});
     if (decision.verdict === 'deny') { say(`${bot.name} asked to ${describe(item.request)}. ${decision.message}`); continue; }
     // `approved`: the risky classes this request is cleared for once it is sent (a grant, or the owner's

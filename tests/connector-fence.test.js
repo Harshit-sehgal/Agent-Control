@@ -63,9 +63,26 @@ test('a call is classified by the connector, never by the bot: a read, a write, 
 
 test('the envelope lists ready connectors and their tools by name and description, with no secret', () => {
   const list = envelopeConnectors({connectors: [notes, {...notes, id: 'old', name: 'Old', status: 'reconnect'}, {...notes, id: 'bad', name: 'Bad', status: 'error'}]});
-  assert.deepEqual(list, [{id: 'notes', name: 'Notes', account: 'mcp.example.com', tools: [{name: 'search_notes', description: 'Find notes.', write: false}, {name: 'add_note', description: 'Save a note.', write: true}]}]);
+  assert.deepEqual(list[0], {id: 'notes', name: 'Notes', account: 'mcp.example.com', tools: [{name: 'search_notes', description: 'Find notes.', write: false}, {name: 'add_note', description: 'Save a note.', write: true}]});
   assert.equal(JSON.stringify(list).includes('SECRET-ID'), false);
   assert.deepEqual(envelopeConnectors({}), []);
+});
+
+test('a connector that is not ready is listed with its status and no tools, and the bot is told to propose reconnect', () => {
+  const list = envelopeConnectors({connectors: [{...notes, id: 'old', name: 'Old', status: 'reconnect', statusMessage: 'Sign in again.'}, notes]});
+  assert.equal(list[0].name, 'Notes', 'ready ones come first');
+  const old = list.find(c => c.id === 'old');
+  assert.deepEqual([old.status, old.tools], ['reconnect', undefined]);
+  assert.match(old.how, /"action":"reconnect"/);
+  assert.match(old.how, /Sign in again/);
+});
+
+test('each tool carries its argument names, required ones marked, within the size cap', () => {
+  const withArgs = {...notes, actions: [{name: 'search_notes', write: false, description: 'Find notes.', args: ['query*', 'max']}]};
+  assert.deepEqual(envelopeConnectors({connectors: [withArgs]})[0].tools[0].args, ['query*', 'max']);
+  assert.match(CONNECTOR_TOOL_HINT, /args[^.]*\*[^.]*required/i);
+  const big = Array.from({length: 30}, (_, i) => ({...withArgs, id: `c${i}`, name: `C${i}`, actions: Array.from({length: 30}, (_, j) => ({name: `tool_${j}`, write: false, description: 'x'.repeat(100), args: ['a*', 'b', 'c']}))}));
+  assert.ok(JSON.stringify(envelopeConnectors({connectors: big})).length < 6000, 'the list stays small');
 });
 
 test('createEnvelope offers the tool only when a connector is ready, and marks a result as untrusted data', () => {

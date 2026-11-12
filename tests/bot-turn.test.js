@@ -78,7 +78,7 @@ test('no group means the new-bot block is skipped, not silently applied', async 
   assert.equal(state.groups[0].bots.length, 2, 'the workspace is untouched');
   // With nowhere to put the bot the block is dropped and the chat says why, rather than showing the raw fence.
   assert.equal(turn.output, 'Plain reply.');
-  assert.match(turn.lines.at(-1).text, /cannot make bots of its own yet/);
+  assert.match(turn.lines.at(-1).text, /no team to add it to/);
 });
 
 test('the round budgets are honoured, so a resumed step does not repeat a block', async () => {

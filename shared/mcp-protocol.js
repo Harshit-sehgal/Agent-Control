@@ -45,14 +45,26 @@ export const toolIsWrite = tool => {
   return !(hints.readOnlyHint === true && hints.destructiveHint !== true);
 };
 
-/** The tools a bot may be told about: a callable name, a short plain description, and whether it writes.
- * A description comes from the server and goes into a prompt, so it is cut to one short line. */
+const ARG_NAME = /^[A-Za-z0-9_.-]{1,40}$/, MAX_ARGS = 12;
+/** A tool's argument names from its input schema, a required one ending in `*` (`['query*', 'max']`); or the same
+ * list another part of this app already cleaned. Empty when the tool names none. */
+function argsOf(tool) {
+  const schema = tool.inputSchema && typeof tool.inputSchema === 'object' ? tool.inputSchema : null;
+  if (!schema) return (Array.isArray(tool.args) ? tool.args : []).filter(a => typeof a === 'string' && ARG_NAME.test(a.replace(/\*$/, ''))).slice(0, MAX_ARGS);
+  const required = new Set(Array.isArray(schema.required) ? schema.required : []);
+  const props = schema.properties && typeof schema.properties === 'object' ? Object.keys(schema.properties) : [];
+  return props.filter(name => ARG_NAME.test(name)).slice(0, MAX_ARGS).map(name => (required.has(name) ? `${name}*` : name));
+}
+
+/** The tools a bot may be told about: a callable name, a short plain description, whether it writes, and its
+ * argument names. A description comes from the server and goes into a prompt, so it is cut to one short line. */
 export function cleanTools(list) {
   const seen = new Set(), out = [];
   for (const tool of Array.isArray(list) ? list : []) {
     if (!tool || typeof tool !== 'object' || typeof tool.name !== 'string' || !TOOL_NAME.test(tool.name) || seen.has(tool.name)) continue;
     seen.add(tool.name);
-    out.push({name: tool.name, description: oneLine(typeof tool.description === 'string' ? tool.description : '', MAX_DESCRIPTION), write: toolIsWrite(tool)});
+    const args = argsOf(tool);
+    out.push({name: tool.name, description: oneLine(typeof tool.description === 'string' ? tool.description : '', MAX_DESCRIPTION), write: toolIsWrite(tool), ...(args.length ? {args} : {})});
     if (out.length >= MAX_TOOLS) break;
   }
   return out;

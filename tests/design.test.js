@@ -45,7 +45,7 @@ test('the new thread page starts a thread run by Atlas from one box', () => {
   assert.match(app, /export async function startThread\(/);
   // The submit handler is keyed by the form id in the forms table.
   assert.match(app, /'new-thread-form': \(form, f\) => startThread\(f\.message\)/);
-  assert.match(app, /api\('\/api\/threads', 'POST', \{message\}\)/);
+  assert.match(app, /api\('\/api\/threads', 'POST', \{message[,}]/);
 });
 
 test('navigation marks the current page and dialogs return focus', () => {

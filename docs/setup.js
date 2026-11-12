@@ -26,25 +26,26 @@
  *   make itself the primary bot, save a rule without the owner's tap, or reach a route the owner could not.
  *
  * Pure and browser-safe: the server reads replies with it and the UI paints the card from it. */
-import {cleanText, validHttpUrl} from './core.js?v=99c330d626';
-import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=99c330d626';
-import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=99c330d626';
-import {controlFence} from './reply-blocks.js?v=99c330d626';
-import {companyBots, primaryOf} from './company.js?v=99c330d626';
-import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices} from './asks.js?v=99c330d626';
-import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=99c330d626';
-import {grantWhat} from './ui-asks.js?v=99c330d626';
-import {COLOR_NAMES} from './ui-kit.js?v=99c330d626';
-import {SHAPES} from './company.js?v=99c330d626';
-import {limitsOf, BACKSTOP} from './limits.js?v=99c330d626';
+import {cleanText, validHttpUrl} from './core.js?v=5451813041';
+import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=5451813041';
+import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=5451813041';
+import {controlFence} from './reply-blocks.js?v=5451813041';
+import {companyBots, primaryOf} from './company.js?v=5451813041';
+import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices, isAskAction} from './asks.js?v=5451813041';
+import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=5451813041';
+import {grantWhat} from './ui-asks.js?v=5451813041';
+import {COLOR_NAMES} from './ui-kit.js?v=5451813041';
+import {SHAPES} from './company.js?v=5451813041';
+import {limitsOf, BACKSTOP} from './limits.js?v=5451813041';
+import {APPS, appById} from './app-catalog.js?v=5451813041';
 
-export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'schedule', 'remove', 'open', 'signin', 'pause', 'limits', 'basics', 'forget', 'disconnect', 'thread'];
+export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'schedule', 'remove', 'open', 'signin', 'pause', 'limits', 'basics', 'forget', 'disconnect', 'thread', 'reconnect', 'connect', 'memory'];
 /** The bot settings a bot may propose. Not the primary role, the browser approval mode, or layout (pins, order). */
 export const BOT_SETTABLE = ['replyLength', 'style', 'memory', 'canHandoff', 'summonable', 'enabled', 'temperature', 'reportsTo', 'tint', 'shape'];
 const LIMIT_KEYS = ['pages', 'rounds', 'steps'];
-const LIMIT_WORDS = {pages: 'pages per reply', rounds: 'rounds of pages in a row', steps: 'team steps per message'};
+const LIMIT_WORDS = {pages: 'pages per reply', rounds: 'rounds of pages in a row', steps: 'team steps per message', askCheckpoints: 'ask between bot-to-bot steps'};
 /** The team (group) settings a bot may propose: approve between steps, the step limit, hand-offs between its bots. */
-export const TEAM_SETTABLE = ['checkpoints', 'maxSteps', 'botHandoffs'];
+export const TEAM_SETTABLE = ['checkpoints', 'maxSteps', 'botHandoffs', 'routing', 'confirmPlan'];
 const RULE_WORDS = {open: 'browser.use', browse: 'browser.use', browser: 'browser.use', 'browser.use': 'browser.use', web: 'browser.use', send: 'send', email: 'send', post: 'post', delete: 'delete', spend: 'spend', pay: 'spend', payment: 'spend', buy: 'spend'};
 const PER_SITE = ['browser.use', 'send', 'post', 'delete'];
 /** Settings pages a bot may point to, by the word it uses, and the section key and title the app uses. */
@@ -52,8 +53,14 @@ export const SETUP_PAGES = {
   models: ['models', 'Models and keys'], keys: ['models', 'Models and keys'],
   connectors: ['conn', 'Connectors'], gmail: ['conn', 'Connectors'], drive: ['conn', 'Connectors'], google: ['conn', 'Connectors'], mcp: ['conn', 'Connectors'],
   permissions: ['perm', 'Permissions'], devices: ['agents', 'Local agents'], agents: ['agents', 'Local agents'], computer: ['agents', 'Local agents'],
-  usage: ['usage', 'Usage'], appearance: ['look', 'Appearance'], general: ['general', 'General'],
+  usage: ['usage', 'Usage'], appearance: ['look', 'Appearance'], look: ['look', 'Appearance'], theme: ['look', 'Appearance'], general: ['general', 'General'],
+  notifications: ['notifications', 'Notifications'], alerts: ['notifications', 'Notifications'], workspaces: ['workspaces', 'Workspaces'], workspace: ['workspaces', 'Workspaces'],
+  members: ['team', 'Team and access'], people: ['team', 'Team and access'], access: ['team', 'Team and access'],
+  data: ['data', 'Data and security'], retention: ['data', 'Data and security'], security: ['data', 'Data and security'], backup: ['data', 'Data and security'],
+  about: ['about', 'About this build'],
 };
+/** The page words a bot is told, one per page. */
+const PAGE_LIST = 'models, connectors, gmail, permissions, devices, usage, appearance, notifications, workspaces, members, data, about';
 const GOOGLE_PAGES = ['gmail', 'drive', 'google'];
 /** A public site as an https address ("reddit.com" → https://reddit.com/), or null: never an IP address or a local name. */
 function signinUrl(value) {
@@ -70,17 +77,17 @@ export const SETUP_TOOL_HINT = 'To change a setting for the owner, put one fence
   + '{"action":"job","bot":"<bot name>","job":"<the new job, one or two sentences>"} rewrites a bot\'s job. '
   + '{"action":"rename","bot":"<bot name>","name":"<new name>"} renames a bot. '
   + `{"action":"settings","bot":"<bot name>","settings":{"replyLength":"short|medium|long","style":"<tone>","memory":true|false,"canHandoff":true|false,"summonable":true|false,"enabled":true|false,"temperature":0-2,"reportsTo":"<manager bot name, or none>","colour":"<${COLOR_NAMES.join('|')}>","shape":"<${SHAPES.join('|')}>"}} changes how a bot works or looks; give only what changes. `
-  + '{"action":"team","team":"<team name, or leave out for your own team>","settings":{"checkpoints":true|false,"maxSteps":1-30,"botHandoffs":true|false}} changes how a team runs: checkpoints asks the owner before each step. '
-  + '{"action":"rule","bot":"<bot name>","do":"open|send|post|delete|spend","site":"<site, e.g. github.com>","choice":"always|ask|deny"} saves what that bot may do without asking (a payment Always allow needs its site). '
-  + '{"action":"schedule","bot":"<bot name, or me>","do":"<the message that bot gets each time>","every":"day|hour|week|<minutes>","at":"<HH:MM, optional>","on":"<monday..sunday, optional: a weekly schedule on that day>"} puts work on a timer: the bot runs it in its own chat and the owner reads the result there. Give only "at" for a one-off later today or tomorrow. Add "stop":true with a few words of its message in "do" to stop one; workspace.schedules lists them. When the owner asks for something regular (every morning, each Monday), propose a schedule instead of telling them to come back. '
+  + '{"action":"team","team":"<team name, or leave out for your own team>","settings":{"checkpoints":true|false,"maxSteps":1-30,"botHandoffs":true|false,"routing":"pipeline|mentions|everyone","confirmPlan":true|false}} changes how a team runs: checkpoints asks the owner before each step, routing is who answers a message with no @mention, confirmPlan shows the plan before a tracked task starts. '
+  + '{"action":"rule","bot":"<bot name>","do":"open|send|post|delete|spend","site":"<site, e.g. github.com>","choice":"always|ask|deny"} saves what that bot may do without asking (a payment Always allow needs its site). {"action":"rule","bot":"<bot name>","do":"connector","connector":"<connector name>","tool":"<one of its tools, or leave out for reading it>","choice":"always|ask|deny"} is the same for a connected app: a write tool is its own rule. '
+  + '{"action":"schedule","bot":"<bot name, or me>","do":"<the message that bot gets each time>","every":"day|hour|week|<minutes>","at":"<HH:MM, optional>","on":"<monday..sunday, optional: a weekly schedule on that day>"} puts work on a timer: the bot runs it in its own chat and the owner reads the result there. Give only "at" for a one-off later today or tomorrow. Add "stop":true with a few words of its message in "do" to stop one; to move one, send "change":"<a few words of its message>" with only the new "every", "at" or "on" (and "do" for a new message); workspace.schedules lists them. When the owner asks for something regular (every morning, each Monday), propose a schedule instead of telling them to come back. '
   + '{"action":"pause"} pauses every bot at once (the owner resumes them). '
-  + `{"action":"limits","pages":1-${BACKSTOP.pages},"rounds":1-${BACKSTOP.rounds},"steps":1-${BACKSTOP.steps}} caps how far one message may go (pages per reply, rounds of pages in a row, team steps); "none" removes a cap; give only what changes. The owner saying "bots should open at most 3 pages per reply" or "no more than 10 steps" is this block ({"action":"limits","pages":3}), never a note about your own reply. `
+  + `{"action":"limits","pages":1-${BACKSTOP.pages},"rounds":1-${BACKSTOP.rounds},"steps":1-${BACKSTOP.steps}} caps how far one message may go (pages per reply, rounds of pages in a row, team steps); "none" removes a cap; "askCheckpoints":true|false asks the owner between bot-to-bot steps; give only what changes. The owner saying "bots should open at most 3 pages per reply" or "no more than 10 steps" is this block ({"action":"limits","pages":3}), never a note about your own reply. `
   + '{"action":"basics","ask":true|false} true makes every bot ask before opening any web page or reading a connected app; false lets them browse and read without asking. '
   + '{"action":"forget","bot":"<bot name>"} clears what that bot has learned (its memory notes), not its job. '
-  + '{"action":"disconnect","connector":"<connector name>"} removes a connected service. '
-  + '{"action":"thread","thread":"<words from its title>","name":"<new title>"} renames a thread; with "remove":true instead of a name it deletes the thread. '
+  + '{"action":"disconnect","connector":"<connector name>"} removes a connected service. {"action":"reconnect","connector":"<connector name>"} checks a connector that is not ready again, or has the owner sign in to it again. {"action":"connect","app":"<an app such as GitHub, Notion, Slack or Linear>"} connects an app with one tap, as the Connectors page does. '
+  + '{"action":"thread","thread":"<words from its title>","name":"<new title>"} renames a thread; with "remove":true instead of a name it deletes the thread. {"action":"thread","new":true,"name":"<title>","message":"<the first message>"} starts a new thread for a separate piece of work. {"action":"memory","rule":"<words from a line the bots keep>","text":"<the new line>"} rewrites one line of the company notebook (add "bot" for that bot\'s own notes); "remove":true deletes it. '
   + '{"action":"remove","bot":"<bot name>"} removes a bot the owner no longer wants, with its chat and schedules (never Atlas). '
-  + '{"action":"signin","site":"reddit.com"} gives the owner a button that opens the browser on this computer at that site, in their hands, to sign in once; use it when a site blocks you or needs the owner signed in (Reddit, LinkedIn, a shop or bank login), instead of only saying it is blocked. Never ask for a password in chat. {"action":"open","page":"models|connectors|gmail|permissions|devices|usage"} shows the owner a Settings page, for things only they can do, such as pasting a key or pairing a computer ("devices" is the computers that run the browser, not bots). Every change to a bot (its job, name, settings, model, rules, schedules, removing it) is one of the blocks above, never a page to open; "gmail" (or "drive") is a button that connects it, so use it whenever the owner wants email or Drive connected. '
+  + '{"action":"signin","site":"reddit.com"} gives the owner a button that opens the browser on this computer at that site, in their hands, to sign in once; use it when a site blocks you or needs the owner signed in (Reddit, LinkedIn, a shop or bank login), instead of only saying it is blocked. Never ask for a password in chat. ' + `{"action":"open","page":"${PAGE_LIST.replace(/, /g, '|')}"}` + ' shows the owner a Settings page, for things only they can do, such as pasting a key or pairing a computer ("devices" is the computers that run the browser, not bots). Every change to a bot (its job, name, settings, model, rules, schedules, removing it) is one of the blocks above, never a page to open; "gmail" (or "drive") is a button that connects it, so use it whenever the owner wants email or Drive connected. '
   + 'Nothing changes until the owner taps Apply on the card, so say in your reply what you proposed and why. Never ask for a key or password in chat.';
 
 const lower = value => String(value ?? '').trim().toLowerCase();
@@ -102,6 +109,12 @@ export function parseSetupRequests(output) {
       ...Object.fromEntries(LIMIT_KEYS.filter(k => body[k] !== undefined).map(k => [k, typeof body[k] === 'number' ? body[k] : lower(body[k])])),
       ...(body.connector !== undefined ? {connector: cleanText(body.connector, 80)} : {}),
       ...(body.thread !== undefined ? {thread: cleanText(body.thread, 160)} : {}), remove: body.remove === true,
+      // A connector tool rule, a catalogue app, a memory line, a new thread, a schedule to change, asking between steps.
+      ...(body.tool !== undefined ? {tool: cleanText(body.tool, 128)} : {}), ...(body.app !== undefined ? {app: cleanText(body.app, 80)} : {}),
+      ...(body.rule !== undefined ? {rule: cleanText(body.rule, 240)} : {}), ...(body.text !== undefined ? {text: cleanText(body.text, 241)} : {}),
+      ...(body.message !== undefined ? {message: cleanText(body.message, 4001)} : {}), create: body.new === true || body.create === true,
+      ...(body.change !== undefined ? {change: cleanText(body.change, 200)} : {}),
+      ...(body.askCheckpoints !== undefined ? {askCheckpoints: typeof body.askCheckpoints === 'boolean' ? body.askCheckpoints : lower(body.askCheckpoints)} : {}),
       ...(body.effort !== undefined && body.effort !== null ? {effort: lower(body.effort)} : {})}});
   }
   return found;
@@ -159,7 +172,7 @@ export function resolveSetup(state, request, {speaker = null} = {}) {
   if (request.action === 'open') {
     if (['bots', 'bot', 'team', 'teams', 'company'].includes(request.page)) return {ok: false, error: 'bots are changed with a card, not a page: send {"action":"remove","bot":"<name>"} to remove one, or the job, rename, settings, model, rule or schedule block.'};
     const page = SETUP_PAGES[request.page];
-    if (!page) return {ok: false, error: `there is no "${request.page || 'blank'}" page to open. Use models, connectors, permissions, devices or usage.`};
+    if (!page) return {ok: false, error: `there is no "${request.page || 'blank'}" page to open. Use ${PAGE_LIST}.`};
     // Gmail and Drive are one Google sign-in, so the card goes straight to it.
     // With no Google client of their own saved, the owner signs in to Gmail or Drive once in the shared browser
     // instead, and the bots read it there; nothing in Google Cloud to set up. A saved client keeps the real sign-in.
@@ -213,13 +226,16 @@ export function resolveSetup(state, request, {speaker = null} = {}) {
     return {ok: true, card: {action: 'disconnect', connectorId: hit.id, text: `Remove the ${hit.name || hit.id} connector`}};
   }
   if (request.action === 'thread') return threadCard(state, request);
+  if (request.action === 'reconnect') return reconnectCard(state, request);
+  if (request.action === 'connect') return connectCard(state, request, speaker);
+  if (request.action === 'memory') return memoryCard(state, request, speaker);
   if (request.action === 'schedule') return scheduleCard(state, request, speaker);
   if (request.action === 'rename' || request.action === 'settings' || request.action === 'rule') {
     const bot = botNamed(state, request.bot, speaker);
     if (!bot) return {ok: false, error: `there is no bot called "${request.bot || 'blank'}".`};
     if (request.action === 'rename') return renameCard(state, bot, request.name);
     if (request.action === 'settings') return settingsCard(state, bot, request.settings, speaker);
-    return ruleCard(bot, request);
+    return request.do === 'connector' ? connectorRuleCard(state, bot, request) : ruleCard(bot, request);
   }
   const bot = request.bot ? botNamed(state, request.bot, speaker) : null;
   if (request.bot && !bot) return {ok: false, error: `there is no bot called "${request.bot}".`};
@@ -293,6 +309,8 @@ function botWords(state) {
 const TEAM_WORDS = {
   checkpoints: v => (v ? 'asks you before each step' : 'runs every step without asking'),
   maxSteps: v => `at most ${v} steps`, botHandoffs: v => (v ? 'its bots may hand work to each other' : 'no hand-offs between its bots'),
+  routing: v => ({pipeline: 'its bots answer in order', mentions: 'only the first bot answers unless one is @mentioned', everyone: 'every bot answers'}[v] || `routing ${v}`),
+  confirmPlan: v => (v ? 'shows the plan before it starts' : 'starts without showing the plan'),
 };
 
 function teamCard(state, request, speaker) {
@@ -336,11 +354,21 @@ function limitsCard(state, request) {
     if (!Number.isInteger(n) || n < 1 || n > BACKSTOP[key]) return {ok: false, error: `${LIMIT_WORDS[key]} is a whole number from 1 to ${BACKSTOP[key]}, or "none".`};
     limits[key] = n;
   }
-  if (!Object.keys(limits).length) return {ok: false, error: `say which limit to change: ${LIMIT_KEYS.join(', ')}.`};
-  return {ok: true, card: {action: 'limits', limits, text: `Limits: ${Object.entries(limits).map(([k, v]) => `${LIMIT_WORDS[k]} ${v === null ? 'no limit' : v}`).join(', ')}`}};
+  if (Object.hasOwn(request, 'askCheckpoints')) {
+    const on = typeof request.askCheckpoints === 'boolean' ? request.askCheckpoints : {true: true, yes: true, on: true, false: false, no: false, off: false}[lower(request.askCheckpoints)];
+    if (on === undefined) return {ok: false, error: '"askCheckpoints" is true (ask the owner between bot-to-bot steps) or false.'};
+    limits.askCheckpoints = on;
+  }
+  if (!Object.keys(limits).length) return {ok: false, error: `say which limit to change: ${[...LIMIT_KEYS, 'askCheckpoints'].join(', ')}.`};
+  return {ok: true, card: {action: 'limits', limits, text: `Limits: ${Object.entries(limits).map(([k, v]) => (k === 'askCheckpoints' ? `${v ? '' : "don't "}${LIMIT_WORDS[k]}` : `${LIMIT_WORDS[k]} ${v === null ? 'no limit' : v}`)).join(', ')}`}};
 }
 
 function threadCard(state, request) {
+  if (request.create || request.new === true) {
+    const name = cleanText(request.name, 80), message = String(request.message || request.what || '').trim();
+    if (!message || message.length > 4000) return {ok: false, error: 'a new thread needs its first message in "message" (up to 4000 characters), and a title in "name".'};
+    return {ok: true, card: {action: 'thread', create: true, ...(name ? {name} : {}), message, text: `Start a thread${name ? ` “${name}”` : ''}: ${short(message, 200)}`}};
+  }
   const threads = (state?.groups || []).filter(g => g?.settings?.kind === 'thread'), want = lower(request.thread);
   // "the Goa trip thread" finds "Plan a 3 day Goa trip": every word that names it is in the title.
   const words = want.split(/[^\p{L}\p{N}]+/u).filter(w => w && !['the', 'a', 'an', 'my', 'thread', 'about', 'on', 'for', 'chat'].includes(w));
@@ -369,10 +397,13 @@ export function setupCardOf(message) {
   if (card.action === 'pause') return card;
   if (card.action === 'basics') return typeof card.ask === 'boolean' ? card : null;
   if (card.action === 'disconnect') return typeof card.connectorId === 'string' ? card : null;
-  if (card.action === 'thread') return typeof card.groupId === 'string' && (card.remove === true || typeof card.name === 'string') ? card : null;
-  if (card.action === 'limits') return card.limits && typeof card.limits === 'object' && Object.keys(card.limits).length && Object.entries(card.limits).every(([k, v]) => LIMIT_KEYS.includes(k) && (v === null || (Number.isInteger(v) && v >= 1 && v <= BACKSTOP[k]))) ? card : null;
-  if (card.action === 'schedule') return typeof card.botId === 'string' && (card.stop ? typeof card.taskId === 'string' : typeof card.groupId === 'string' && typeof card.message === 'string' && (Number.isInteger(card.every) || Boolean(cleanAt(card.at)))) ? card : null;
-  if (card.action === 'rule') return typeof card.botId === 'string' && ASK_ACTIONS.includes(card.act) && GRANT_CHOICES.includes(card.choice) && typeof card.scope === 'string' ? card : null;
+  if (card.action === 'thread') return card.create === true ? (typeof card.message === 'string' && card.message.trim() ? card : null) : typeof card.groupId === 'string' && (card.remove === true || typeof card.name === 'string') ? card : null;
+  if (card.action === 'limits') return card.limits && typeof card.limits === 'object' && Object.keys(card.limits).length && Object.entries(card.limits).every(([k, v]) => (k === 'askCheckpoints' ? typeof v === 'boolean' : LIMIT_KEYS.includes(k) && (v === null || (Number.isInteger(v) && v >= 1 && v <= BACKSTOP[k])))) ? card : null;
+  if (card.action === 'schedule') return typeof card.botId === 'string' && (card.stop ? typeof card.taskId === 'string' : typeof card.groupId === 'string' && typeof card.message === 'string' && (Number.isInteger(card.every) || Boolean(cleanAt(card.at))) && (card.replaces === undefined || typeof card.replaces === 'string')) ? card : null;
+  if (card.action === 'rule') return typeof card.botId === 'string' && isAskAction(card.act) && GRANT_CHOICES.includes(card.choice) && typeof card.scope === 'string' ? card : null;
+  if (card.action === 'reconnect') return typeof card.connectorId === 'string' && (card.app === undefined || Boolean(appById(card.app)?.oauth)) ? card : null;
+  if (card.action === 'connect') return appById(card.app) && !appById(card.app).google ? card : null;
+  if (card.action === 'memory') return typeof card.ruleId === 'string' && typeof card.bot === 'string' && (card.remove === true || typeof card.newText === 'string') ? card : null;
   return typeof card.providerId === 'string' || (typeof card.effort === 'string' && cleanEffort(card.effort) !== null) ? card : null;
 }
 /** Is the change already in place? Then the card is a done line with no button. An open card never is. */
@@ -389,6 +420,7 @@ function scheduleCard(state, request, speaker) {
     if (hits.length !== 1) return {ok: false, error: `say which schedule to stop with a few of its words in "do". ${bot.name} has: ${mine.map(r => `"${r.what}" ${r.when}`).join('; ')}.`};
     return {ok: true, card: {action: 'schedule', stop: true, taskId: hits[0].id, botId: bot.id, text: `Stop ${bot.name}: “${hits[0].what}” ${hits[0].when}`}};
   }
+  if (request.change) return changeScheduleCard(state, bot, request);
   if (what.length < 3) return {ok: false, error: 'say what to do in "do", as the message the bot will get each time.'};
   // A day of the week ("every Monday") is a weekly schedule on that day.
   const on = cleanDay(request.on);
@@ -402,6 +434,82 @@ function scheduleCard(state, request, speaker) {
   if (!group) return {ok: false, error: `${bot.name} is not in a team.`};
   return {ok: true, card: {action: 'schedule', botId: bot.id, groupId: group.id, message: what, ...(every ? {every} : {}), ...(at ? {at} : {}), ...(on ? {on} : {}), text: `${bot.name}: “${what}” ${whenWords({every, at, on})}`}};
 }
+/** A connector by its id or name (or a word of its name). */
+const connectorNamed = (list, name) => { const want = lower(name); return want ? list.find(c => lower(c.id) === want) || list.find(c => lower(c.name) === want) || list.find(c => lower(c.name).includes(want)) || null : null; };
+const connectedList = list => (list.length ? `Connected: ${list.map(c => c.name || c.id).join(', ')}.` : 'nothing is connected.');
+
+/** A rule for one connector: a write tool is its own rule (connector.<id>.write.<tool>), and reading is one rule
+ * for the whole account (connector.<id>.read). The scope is the account, as the ask names it. */
+function connectorRuleCard(state, bot, request) {
+  const list = (state?.connectors || []).filter(c => c?.id && c.kind !== 'site');
+  const hit = connectorNamed(list, request.connector);
+  if (!hit) return {ok: false, error: `there is no connector called "${cleanText(request.connector, 60) || 'blank'}". ${connectedList(list)}`};
+  const choice = request.choice === 'allow' ? 'always' : request.choice;
+  if (!GRANT_CHOICES.includes(choice)) return {ok: false, error: 'a rule is always, ask or deny.'};
+  const tools = hit.actions || [];
+  const tool = request.tool ? tools.find(a => a.name === request.tool) || tools.find(a => lower(a.name) === lower(request.tool)) : null;
+  if (request.tool && !tool) return {ok: false, error: `${hit.name} has no tool "${cleanText(request.tool, 60)}". Its tools: ${tools.map(a => a.name).join(', ') || 'none'}.`};
+  const act = `connector.${hit.id}.${tool?.write ? `write.${tool.name}` : 'read'}`;
+  const scope = scopeOf({action: act, target: String(hit.account || hit.name || hit.id)});
+  if (!isAskAction(act) || !scope) return {ok: false, error: `${hit.name} cannot take a rule.`};
+  return {ok: true, card: {action: 'rule', botId: bot.id, act, scope, choice, text: `${bot.name}: ${GRANT_LABELS[choice]} · ${grantWhat(act, scope)}`}};
+}
+
+/** Check a connector again; one that signed in with the app's own sign-in and needs it again opens that sign-in. */
+function reconnectCard(state, request) {
+  const list = (state?.connectors || []).filter(c => c?.id);
+  const hit = connectorNamed(list, request.connector || request.name || request.app);
+  if (!hit) return {ok: false, error: `there is no connector called "${cleanText(request.connector || request.app, 60) || 'blank'}". ${connectedList(list)}`};
+  const app = hit.kind === 'mcp' && hit.status === 'reconnect' && appById(hit.app)?.oauth ? hit.app : undefined;
+  return {ok: true, card: {action: 'reconnect', connectorId: hit.id, ...(app ? {app} : {}), text: app ? `Sign in to ${hit.name} again` : `Check ${hit.name} again and reconnect it`}};
+}
+
+/** Connect an app from the catalogue with the same one tap the Connectors page uses. Google is the Gmail card. */
+function connectCard(state, request, speaker) {
+  const want = lower(request.app || request.connector || request.name);
+  const app = APPS.find(a => a.id === want) || APPS.find(a => lower(a.name) === want) || APPS.find(a => lower(a.name.split('·')[0]) === want) || null;
+  if (GOOGLE_PAGES.includes(want) || app?.google) return resolveSetup(state, {action: 'open', page: want === 'drive' ? 'drive' : 'gmail'}, {speaker});
+  if (!app) return {ok: false, error: `"${cleanText(request.app, 40) || 'blank'}" is not in the catalogue. Apps: ${APPS.filter(a => !a.google).map(a => a.name).join(', ')}.`};
+  return {ok: true, card: {action: 'connect', app: app.id, text: `Connect ${app.name}`}};
+}
+
+const rulesOf = (state, key) => { const books = state?.memory?.rulebooks; return books && Object.hasOwn(books, key) && Array.isArray(books[key]?.rules) ? books[key].rules : []; };
+/** Rewrite or delete one line the bots keep: in the company notebook, or in one bot's own notes when "bot" names it. */
+function memoryCard(state, request, speaker) {
+  const bot = request.bot ? botNamed(state, request.bot, speaker) : null;
+  if (request.bot && !bot) return {ok: false, error: `there is no bot called "${request.bot}".`};
+  const rules = rulesOf(state, bot ? `bot:${bot.id}` : 'company'), want = lower(request.rule);
+  const words = want.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const exact = rules.filter(r => lower(r.text) === want);
+  const hits = !want ? [] : exact.length ? exact : rules.filter(r => words.length && words.every(w => lower(r.text).includes(w)));
+  const book = bot ? `${bot.name}'s notes` : 'the company notebook';
+  if (hits.length !== 1) return {ok: false, error: rules.length ? `say which line with words from it in "rule". In ${book}: ${rules.slice(0, 12).map(r => `"${short(r.text, 80)}"`).join(', ')}.` : `${book} is empty.`};
+  const [rule] = hits, base = {action: 'memory', bot: bot ? bot.id : 'company', ruleId: rule.id};
+  if (request.remove) return {ok: true, card: {...base, remove: true, text: `Delete from ${book}: “${short(rule.text, 160)}”`}};
+  const next = String(request.text ?? '').trim();
+  if (next.length < 4 || next.length > 240) return {ok: false, error: 'the new line in "text" is 4 to 240 characters, or send "remove":true to delete it.'};
+  return {ok: true, card: {...base, newText: next, text: `Change in ${book}: “${short(rule.text, 120)}” to “${short(next, 120)}”`}};
+}
+
+/** Move a schedule to a new time or a new rhythm: applied, the new one replaces the old one. What is not given stays. */
+function changeScheduleCard(state, bot, request) {
+  const words = lower(request.change), mine = scheduleRows(state, bot.id);
+  const hits = mine.filter(r => lower(r.what).includes(words));
+  if (hits.length !== 1) return {ok: false, error: mine.length ? `say which schedule to change with a few of its words in "change". ${bot.name} has: ${mine.map(r => `"${r.what}" ${r.when}`).join('; ')}.` : `${bot.name} has no schedule to change.`};
+  const task = (state.tasks || []).find(t => t.id === hits[0].id), old = task?.payload || {};
+  const given = value => value !== undefined && value !== null && value !== '';
+  const on = given(request.on) ? cleanDay(request.on) : given(request.every) ? '' : cleanDay(old.on) || '';
+  if (given(request.on) && !on) return {ok: false, error: `"${request.on}" is not a day of the week. Use monday to sunday.`};
+  const every = given(request.every) ? everyMinutes(request.every) : given(request.on) ? 10080 : old.kind === 'interval' ? old.intervalMinutes : undefined;
+  if (every === null) return {ok: false, error: `"${request.every}" is not how often. Use day, hour, week, or a number of minutes (at least ${MIN_EVERY} minutes, at most ${MAX_EVERY}).`};
+  if (on && every !== 10080) return {ok: false, error: 'a day of the week goes with every week.'};
+  const at = given(request.at) ? cleanAt(request.at) : cleanAt(old.at);
+  if (given(request.at) && !at) return {ok: false, error: `"${request.at}" is not a time of day. Use HH:MM, such as 08:00.`};
+  if (!every && !at) return {ok: false, error: 'say the new time in "at" or how often in "every".'};
+  const message = String(request.what || '').trim().length >= 3 ? String(request.what).trim() : String(old.message || hits[0].what);
+  return {ok: true, card: {action: 'schedule', replaces: task.id, botId: bot.id, groupId: old.groupId, message, ...(every ? {every} : {}), ...(at ? {at} : {}), ...(on ? {on} : {}), text: `Change ${bot.name}: “${short(message, 160)}” to ${whenWords({every, at, on})} (was ${hits[0].when})`}};
+}
+
 export function setupDone(state, card) {
   if (!card || card.action === 'open' || card.action === 'signin') return false;
   if (card.action === 'remove') return !companyBots(state).some(b => b.id === card.botId);
@@ -410,10 +518,15 @@ export function setupDone(state, card) {
   if (card.action === 'limits') { const now = limitsOf(state); return Object.entries(card.limits).every(([k, v]) => now[k] === v); }
   if (card.action === 'forget') return !(state?.memory?.rulebooks?.[`bot:${card.botId}`]?.rules?.length);
   if (card.action === 'disconnect') return !(state?.connectors || []).some(c => c?.id === card.connectorId);
+  if (card.action === 'thread' && card.create) return false;
   if (card.action === 'thread') { const g = (state?.groups || []).find(x => x.id === card.groupId); return card.remove ? !g : g?.name === card.name; }
+  if (card.action === 'reconnect') return (state?.connectors || []).find(c => c?.id === card.connectorId)?.status === 'ready';
+  if (card.action === 'connect') return (state?.connectors || []).some(c => c?.app === card.app);
+  if (card.action === 'memory') { const rule = rulesOf(state, card.bot === 'company' ? 'company' : `bot:${card.bot}`).find(r => r.id === card.ruleId); return card.remove ? !rule : rule?.text === card.newText; }
   if (card.action === 'job') return companyBots(state).find(b => b.id === card.botId)?.instructions === card.job;
   if (card.action === 'schedule') {
     const rows = scheduleRows(state, card.botId);
+    if (card.replaces) return !rows.some(r => r.id === card.replaces) && rows.some(r => r.what === card.message);
     return card.stop ? !rows.some(r => r.id === card.taskId) : rows.some(r => r.what === card.message);
   }
   if (card.action === 'team') { const group = (state?.groups || []).find(g => g.id === card.groupId); const now = groupSettings(group || {}); return Boolean(group) && Object.entries(card.settings).every(([k, v]) => now[k] === v); }
@@ -428,7 +541,7 @@ export function setupDone(state, card) {
   return sameModel && sameEffort;
 }
 /** The button on a setup card. */
-export const setupButton = card => (card.action === 'signin' ? 'Sign in' : card.app === 'google' ? 'Connect Google' : card.action === 'open' ? `Open ${card.text.replace(/^Settings → /, '')}` : card.action === 'remove' || card.action === 'disconnect' ? 'Remove' : card.action === 'forget' ? 'Forget' : card.action === 'thread' && card.remove ? 'Delete' : card.action === 'pause' ? 'Pause' : 'Apply');
+export const setupButton = card => (card.action === 'reconnect' ? (card.app ? 'Sign in again' : 'Reconnect') : card.action === 'connect' ? 'Connect' : card.action === 'memory' && card.remove ? 'Delete' : card.action === 'thread' && card.create ? 'Start' : card.action === 'signin' ? 'Sign in' : card.app === 'google' ? 'Connect Google' : card.action === 'open' ? `Open ${card.text.replace(/^Settings → /, '')}` : card.action === 'remove' || card.action === 'disconnect' ? 'Remove' : card.action === 'forget' ? 'Forget' : card.action === 'thread' && card.remove ? 'Delete' : card.action === 'pause' ? 'Pause' : 'Apply');
 
 /* ---------- what every bot knows ---------- */
 

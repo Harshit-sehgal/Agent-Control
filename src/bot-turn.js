@@ -55,8 +55,8 @@ export async function runBotTurn(store, {
   const made = groupId
     ? await createBotsFromReply(store, {bot, groupId, output: peer.output, runId, makeId, now})
     : parseCreateBotRequests(peer.output).length
-      // No group to add to (a bot made a moment ago, in its first run): the block is dropped, and said so.
-      ? {text: stripCreateBotBlocks(peer.output) || `${bot.name} tried to create a bot.`, created: [], lines: [{id: makeId(), role: 'system', kind: 'bot-created', text: botCreateRefusedText(bot, 'a bot made in this run cannot make bots of its own yet. Ask again in a new message.'), at: now()}]}
+      // No group to add to (a chat outside every team): the block is dropped, and said so.
+      ? {text: stripCreateBotBlocks(peer.output) || `${bot.name} tried to create a bot.`, created: [], lines: [{id: makeId(), role: 'system', kind: 'bot-created', text: botCreateRefusedText(bot, 'this chat has no team to add it to. Ask Atlas to make the bot instead.'), at: now()}]}
       : {text: peer.output, created: [], lines: []};
   // Last, a proposed settings change becomes a card the owner taps; it changes nothing by itself.
   let setup = setupCardsFromReply(store, {bot, output: made.text, makeId, now});

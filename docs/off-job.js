@@ -8,8 +8,8 @@
  *
  * Pure and browser-safe. The block grammar is the shared one in `reply-blocks.js`.
  */
-import {cleanText} from './core.js?v=99c330d626';
-import {controlFence} from './reply-blocks.js?v=99c330d626';
+import {cleanText} from './core.js?v=5451813041';
+import {controlFence} from './reply-blocks.js?v=5451813041';
 
 /** The buttons under an out-of-job reply, in order. "Do it anyway" sends the same
  * request again with `anyway`, "Ask Atlas" starts a thread with it, and "Make a
@@ -21,7 +21,7 @@ export const OFFJOB_CHOICES = [
 ];
 
 /** What a plain bot in its own chat is told about work that is not its job. */
-export const OFFJOB_RULE = 'Answer anything quick and general yourself, in one short reply: greetings, thanks, questions about you or your work, short facts or explanations, and follow-ups to your earlier replies. Only when the request is real work that belongs to a different job (a task, a draft, research or an action outside what you do), do not do it: reply only with a not-my-job block giving one short reason. The block is ```not-my-job followed by {"reason":"..."} and a closing ```.';
+export const OFFJOB_RULE = 'Answer anything quick and general yourself, in one short reply: greetings, thanks, questions about you or your work, short facts or explanations, and follow-ups to your earlier replies. When the request is real work that belongs to a different job (a task, a draft, research or an action outside what you do), never leave the owner at a dead end. If you can do it well with what you have, do it yourself, and say it is outside your usual job. If not, in the same reply name the bot in company whose job fits (by name, without @) so the owner can hand it over, or, when no bot does that work, add a create-bot block for one and say you made it. Only when none of that fits, reply only with a not-my-job block giving one short reason. The block is ```not-my-job followed by {"reason":"..."} and a closing ```.';
 
 /** A message any bot answers itself, with no job check: a greeting, thanks, a yes or ok, or a question about the
  * bot itself. The whole message must be that, so "thanks, now email Pat" is still work. */
