@@ -5,8 +5,8 @@
  *
  * Nothing here ever sees a key: a subscription has none, an MCP address is typed once and sent, and the
  * server never answers with it. */
-import {cleanCliModel, cliEngineById, LOCAL_CLI_KIND, LOCAL_CLI_ENGINES, EFFORT_LEVELS, cleanEffort, CLI_MODELS} from './ai-presets.js?v=a9e6960ec3';
-import {appById} from './app-catalog.js?v=a9e6960ec3';
+import {cleanCliModel, cliEngineById, LOCAL_CLI_KIND, LOCAL_CLI_ENGINES, EFFORT_LEVELS, cleanEffort, CLI_MODELS} from './ai-presets.js?v=8efaefd342';
+import {appById} from './app-catalog.js?v=8efaefd342';
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
@@ -305,4 +305,16 @@ export function cliChoice(agents, providers) {
   if (!engine) return {error: 'This computer is not signed in yet. Run `claude` (or `codex`) once in a terminal there to sign in, then tap again.'};
   const have = (Array.isArray(providers) ? providers : []).find(p => p.kind === 'local-cli' && p.engine === engine);
   return {engine, label: `My ${ENGINE_NAME[engine]}`, providerId: have?.id || null};
+}
+
+/** Words of a model row or a query: no case, no accents, separators (- _ . : / |) read as spaces. */
+const modelWords = text => String(text ?? '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[-_.:/|]+/g, ' ').trim();
+/** Does a model picker row match what was typed in its search bar? Every word must appear in the row's label or
+ * id, in any order; a word typed without separators ("gpt5") also matches across them ("gpt-5"). Pure. */
+export function modelRowMatches(query, {label = '', value = ''} = {}) {
+  const words = modelWords(query).split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  // A grouped row's value is `<provider id>|<model>`: only the model part is the row's own words.
+  const hay = modelWords(`${label} ${String(value).split('|').pop()}`), packed = hay.replace(/\s+/g, '');
+  return words.every(w => hay.includes(w) || packed.includes(w));
 }

@@ -306,3 +306,15 @@ export function cliChoice(agents, providers) {
   const have = (Array.isArray(providers) ? providers : []).find(p => p.kind === 'local-cli' && p.engine === engine);
   return {engine, label: `My ${ENGINE_NAME[engine]}`, providerId: have?.id || null};
 }
+
+/** Words of a model row or a query: no case, no accents, separators (- _ . : / |) read as spaces. */
+const modelWords = text => String(text ?? '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[-_.:/|]+/g, ' ').trim();
+/** Does a model picker row match what was typed in its search bar? Every word must appear in the row's label or
+ * id, in any order; a word typed without separators ("gpt5") also matches across them ("gpt-5"). Pure. */
+export function modelRowMatches(query, {label = '', value = ''} = {}) {
+  const words = modelWords(query).split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  // A grouped row's value is `<provider id>|<model>`: only the model part is the row's own words.
+  const hay = modelWords(`${label} ${String(value).split('|').pop()}`), packed = hay.replace(/\s+/g, '');
+  return words.every(w => hay.includes(w) || packed.includes(w));
+}
