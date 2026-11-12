@@ -174,7 +174,7 @@ select.input{appearance:none;padding-right:34px;background-image:linear-gradient
 .sheet-grip{display:none}
 .sheet-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:14px}
 .sheet-head h2{font-size:19px;font-weight:700}
-.sheet-head p{margin-top:3px;color:var(--muted);font-size:14px}
+.sheet-head p{margin-top:3px;color:var(--muted);font-size:14px;white-space:pre-line}
 .sheet-head .icon-btn{margin:-8px -8px 0 0}
 .sheet .box{margin:0;background:var(--surface)}
 .sheet .box button.row:hover{background:var(--control)}

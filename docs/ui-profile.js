@@ -5,23 +5,21 @@
  *
  * Pages repaint only when the route changes, so each in-place change (a switch, a
  * forgotten note, a picked colour) updates its own node instead. */
-import {SHAPES, COLORS, face} from './ui-face.js?v=691b5cf293';
-import {botStatus, botIsManager} from './ui-company.js?v=691b5cf293';
-import {primaryOf} from './company.js?v=691b5cf293';
-import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker, COLOR_NAMES, fullDate} from './ui-kit.js?v=691b5cf293';
-import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js?v=691b5cf293';
-import {scheduleRows, scheduleTaskBody, SCHEDULE_OFTEN, scheduleChoice} from './schedules.js?v=691b5cf293';
-import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=691b5cf293';
-import {GRANT_LABELS} from './asks.js?v=691b5cf293';
-import {grantRows, allGrantRows, grantUrl} from './ui-asks.js?v=691b5cf293';
-import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=691b5cf293';
-import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=691b5cf293';
-import {sendChat} from './ui-chat.js?v=691b5cf293';
-import {computerPage as computerView, computerLabel, keysOwned, thumbSlot} from './ui-computer-view.js?v=691b5cf293';
+import {SHAPES, COLORS, face} from './ui-face.js?v=2fe8218aac';
+import {botStatus, botIsManager} from './ui-company.js?v=2fe8218aac';
+import {primaryOf} from './company.js?v=2fe8218aac';
+import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker, COLOR_NAMES} from './ui-kit.js?v=2fe8218aac';
+import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js?v=2fe8218aac';
+import {scheduleRows, scheduleTaskBody, SCHEDULE_OFTEN, scheduleChoice} from './schedules.js?v=2fe8218aac';
+import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=2fe8218aac';
+import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=2fe8218aac';
+import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=2fe8218aac';
+import {sendChat} from './ui-chat.js?v=2fe8218aac';
+import {computerPage as computerView, computerLabel, keysOwned, thumbSlot} from './ui-computer-view.js?v=2fe8218aac';
 import {
   MAX_NAME, MAX_JOB, hasJob, roleLine, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, lookOf, newBotDefaults,
   newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, closeTarget,
-} from './ui-profile-model.js?v=691b5cf293';
+} from './ui-profile-model.js?v=2fe8218aac';
 
 const el = id => document.getElementById(id);
 const SHAPE_LABELS = {rounded: 'Rounded square', circle: 'Circle', hexagon: 'Hexagon', pebble: 'Pebble', drop: 'Drop', shield: 'Shield', arch: 'Arch', egg: 'Egg', blob: 'Blob', bean: 'Bean'};
@@ -211,32 +209,6 @@ async function fillActivityCount(botId) {
 }
 const activityPage = bot => { setTimeout(() => loadBotActivity(bot.id), 0); return '<div id="pr-activity" class="pr-stack"><p class="pr-note">Loading…</p></div>'; };
 
-/* ----- permissions: what each bot may do, and the answers you gave ----- */
-
-/** Only an admin (or the one person of the demo) changes a rule. */
-const canGrant = () => isAdmin() || isStaticDemo();
-function grantRow(r) {
-  const off = canGrant() ? '' : ' disabled';
-  const seg = `<div class="gr-seg" role="group" aria-label="${esc(`${r.label} for ${r.botName}`)}">${r.choices.map(c => `<button type="button" data-action="set-grant" data-id="${esc(r.botId)}" data-text="${esc(`${r.action} ${r.scope}`)}" data-act="${esc(r.action)}" data-scope="${esc(r.scope)}" data-choice="${c.id}" aria-pressed="${c.on}"${off}>${esc(c.label)}</button>`).join('')}</div>`;
-  // An Always allow with an end says when it ends; after that the row is gone and the bot asks again.
-  return `<div class="gr"><div class="gr-top"><span class="w">${esc(r.label)}${r.until ? `<small>Until ${esc(fullDate(r.until))}</small>` : ''}</span></div>${seg}</div>`;
-}
-/** One bot's rules as a card, or every bot's in a card each. Lives in Settings > Permissions only. The node is repainted in place when a choice is made. */
-export function grantsHtml(botId = null) {
-  if (botId) {
-    const rows = grantRows(store.state, botId), name = findBot(botId)?.name || 'This bot';
-    return rows.length ? `<div class="cd">${rows.map(grantRow).join('')}</div>`
-      : `<p class="st-note">No rules for ${esc(name)} yet. One appears here when you pick Always allow on its ask, or set one with Ask each time or Don't allow.</p>`;
-  }
-  const rows = allGrantRows(store.state);
-  if (!rows.length) return '<div class="cd"><div class="rw"><span class="w st-quiet">No rules yet. One appears here when you pick Always allow on a bot\'s ask.</span></div></div>';
-  const by = new Map();
-  for (const r of rows) by.set(r.botId, [...(by.get(r.botId) || []), r]);
-  return [...by].map(([id, list]) => `<section class="st-g"><h4 class="st-h">${esc(list[0].botName)}</h4><div class="cd">${list.map(grantRow).join('')}</div></section>`).join('');
-}
-/** The note under the list of rules (shown once, in Settings). */
-export const grantNote = (cls = 'st-note') => `<p class="${cls}">${canGrant() ? 'Payments ask every time unless you set Always allow for a site.' : 'Only the owner or an admin can change these.'}</p>`;
-
 /** A bot's Model page: one list of every model it can run on (grouped by provider, the workspace default
  * first, "Another … model…" to type any id) and how hard it thinks. One Save. */
 function modelPage(bot) {
@@ -416,19 +388,6 @@ export const profileActions = {
     await sync();
     const node = el('pr-memory'), bot = findBot(b.dataset.id); if (node && bot) node.innerHTML = memoryList(bot);
     toast('Forgotten.');
-  },
-  'set-grant': async b => {
-    const {id: botId, act: action, choice} = b.dataset, scope = b.dataset.scope || '';
-    // Always allow on a payment lets this bot pay on that site without asking: confirm it first.
-    if (action === 'spend' && choice === 'always' && !(await confirmSheet('Always allow payments here?', {confirm: 'Always allow', danger: true, detail: `${botName(botId)} will pay${scope ? ` on ${scope.replace(/^https?:\/\//, '')}` : ''} without asking you.`}))) return;
-    const {url, body} = grantUrl({botId, action, scope}, choice);
-    await api(url, 'POST', body);
-    await sync();
-    for (const node of document.querySelectorAll('[data-grants]')) node.innerHTML = grantsHtml(node.dataset.grants === 'all' ? null : node.dataset.grants);
-    // The list was repainted, so keyboard focus goes to the same choice in the new copy.
-    const same = [['id', botId], ['act', action], ['scope', scope], ['choice', choice]].map(([k, v]) => `[data-${k}="${CSS.escape(v)}"]`).join('');
-    document.querySelector(`[data-grants] button${same}`)?.focus({preventScroll: true});
-    toast(`${botName(botId)}: ${GRANT_LABELS[choice]}.`);
   },
   'menu-message': b => { close(); go({bot: b.dataset.id}); },
   'menu-pin': b => { close(); toast(togglePin(b.dataset.id) ? 'Pinned to the top' : 'Unpinned'); },

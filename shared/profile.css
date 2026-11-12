@@ -202,10 +202,15 @@ button.rw:active{background:var(--sunk)}
 /* ---------- permissions: a rule per row, its three choices under it ---------- */
 .gr{display:flex;flex-direction:column;gap:10px;padding:14px 18px 16px;position:relative}
 .gr+.gr::before{content:'';position:absolute;left:18px;right:0;top:0;border-top:1px solid var(--line)}
-.gr-top{display:flex;align-items:center;gap:12px}
-.gr-top .w{flex:1;min-width:0;font-size:16px;overflow-wrap:anywhere}
+.gr-top{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+.gr-top .w{flex:1 1 14em;min-width:0;font-size:16px;overflow-wrap:anywhere}
+/* How long an Always allow lasts: a quiet select beside its name (under it when the row is narrow), the ask card's ends. */
+.gr-until{flex:none;max-width:100%;min-height:36px;padding:0 8px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--text);font:inherit;font-size:13px;text-overflow:ellipsis}
+.gr-until:disabled{opacity:.55}
 .gr-seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:2px;padding:3px;border-radius:12px;background:var(--sunk)}
-.gr-seg button{min-height:40px;padding:0 4px;border-radius:9px;font-size:13px;white-space:nowrap;color:var(--muted);transition:background-color .15s,color .15s,scale .15s}
+/* The rules and a bot's summary are wrappers inside the page's gap, so their own cards keep the same rhythm. */
+[data-grants],[data-summary]{display:flex;flex-direction:column;gap:22px}
+.gr-seg button{min-height:40px;padding:0 4px;text-align:center;justify-content:center;border-radius:9px;font-size:13px;white-space:nowrap;color:var(--muted);transition:background-color .15s,color .15s,scale .15s}
 .gr-seg button:active{scale:.97}
 .gr-seg button[aria-pressed="true"]{background:var(--raise);color:var(--fg);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.12)}
 .gr-seg button[aria-pressed="true"][data-choice="always"]{color:var(--good)}
@@ -412,7 +417,7 @@ html.pc-open{overflow:hidden}
 @media(pointer:coarse),(max-width:640px){
   .ch-ind button,.rail-seg button{min-height:44px}
   .ch-find input,.rail-find input{min-height:44px}
-  .st-seg button{min-height:44px}
+  .st-seg button,.gr-seg button,.gr-until{min-height:44px}
   .swt::before{content:'';position:absolute;inset:-10px -4px}
   .cv-send{width:44px;height:44px}
   .cv-box textarea{min-height:44px}

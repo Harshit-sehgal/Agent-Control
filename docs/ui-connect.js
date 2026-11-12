@@ -7,12 +7,12 @@
  *
  * Secrets: the Google client secret and an MCP address or header are typed here and sent once. The server never
  * answers with one, so nothing on this page can show or log one. */
-import {esc, icon, btn, note, tag, field, textInput, runFullApp, demoList} from './ui-kit.js?v=691b5cf293';
-import {api, sync, store, go} from './ui-store.js?v=691b5cf293';
-import {primaryOf} from './company.js?v=691b5cf293';
-import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=691b5cf293';
-import {mcpRows, googleCard, mcpDraft, statusOf} from './ui-connect-model.js?v=691b5cf293';
-import {catalogView, appById, appInputs, connectRequest, connectHow, APPS} from './app-catalog.js?v=691b5cf293';
+import {esc, icon, btn, note, tag, field, textInput, runFullApp, demoList} from './ui-kit.js?v=2fe8218aac';
+import {api, sync, store, go} from './ui-store.js?v=2fe8218aac';
+import {primaryOf} from './company.js?v=2fe8218aac';
+import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=2fe8218aac';
+import {mcpRows, googleCard, mcpDraft, statusOf} from './ui-connect-model.js?v=2fe8218aac';
+import {catalogView, appById, appInputs, connectRequest, connectHow, APPS} from './app-catalog.js?v=2fe8218aac';
 
 const GOOGLE_START = '/api/connectors/google/start';
 

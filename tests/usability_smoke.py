@@ -529,6 +529,87 @@ async def per_bot_permissions_and_global_limits(page, base):
     await expect(switch).to_have_attribute('aria-checked', 'false')
 
 
+async def rule_end_and_preset_follow_each_change(page, base):
+    """A rule's end is set in the list, and the preset card follows every rule and switch change with no reload."""
+    ids = await open_app(page, base, bots={'Researcher': EXTRA_BOTS['Researcher']})
+    r = ids['Researcher']
+    # Careful: asking before browsing, and no Always allow anywhere.
+    await patch_state(page, 's.askBasics = true; s.handsOff = false; s.grants = [{botId: %s, action: "send", scope: "https://mail.example.com", choice: "ask", at: new Date().toISOString()}];' % json.dumps(r))
+    await page.goto(f'{base}/index.html#settings/perm')
+    await page.reload()
+    body = page.locator('#main .st-body')
+    presets = body.locator('[data-presets]')
+    await expect(presets.locator('button[aria-pressed="true"]')).to_have_text('Careful')
+    row = body.locator('.gr', has_text='Send on mail.example.com')
+    await expect(row.locator('select.gr-until')).to_have_count(0)
+    # One rule to Always allow: Careful no longer matches, so the card says Custom at once.
+    await row.get_by_role('button', name='Always allow').click()
+    await expect(presets.locator('button[aria-pressed="true"]')).to_have_count(0)
+    await expect(presets).to_contain_text('Custom')
+    # The Always allow row has the ask card's ends, Always first.
+    until = row.locator('select.gr-until')
+    await expect(until).to_have_value('always')
+    assert await until.locator('option').all_inner_texts() == ['Always', 'For 1 hour', 'For today']
+    await until.select_option('1h')
+    await expect(until).to_have_value('')
+    assert (await until.locator('option').first.inner_text()).startswith('Until '), await until.locator('option').all_inner_texts()
+    g = next(x for x in (await api_state(page))['grants'] if x['action'] == 'send')
+    left = await page.evaluate('u => (Date.parse(u) - Date.now()) / 60000', g['until'])
+    assert g['choice'] == 'always' and 55 < left <= 60, g
+    # For today, then back to Always: the end is changed, then cleared.
+    await until.select_option('today')
+
+    async def ends_tonight():
+        g = next(x for x in (await api_state(page))['grants'] if x['action'] == 'send')
+        return await page.evaluate('u => new Date(u).getHours() === 23 && new Date(u).getMinutes() === 59', g['until'])
+    await eventually(ends_tonight)
+    await expect(until).to_have_value('')
+    await until.select_option('always')
+    await expect(until).to_have_value('always')
+    await expect(until.locator('option')).to_have_text(['Always', 'For 1 hour', 'For today'])
+    assert 'until' not in next(x for x in (await api_state(page))['grants'] if x['action'] == 'send')
+    # Back to Ask each time: Careful again, no select.
+    await row.get_by_role('button', name='Ask each time').click()
+    await expect(presets.locator('button[aria-pressed="true"]')).to_have_text('Careful')
+    await expect(row.locator('select.gr-until')).to_have_count(0)
+    # The browsing switch moves it too: browsing on its own is Balanced.
+    await body.locator('[data-basics]').click()
+    await expect(presets.locator('button[aria-pressed="true"]')).to_have_text('Balanced')
+    # A bot's own page: its plain-words summary follows a rule change as well.
+    await page.goto(f'{base}/index.html#settings/perm%2F{r}')
+    await page.reload()
+    free = body.locator('[data-summary] .cd').first
+    await expect(free).not_to_contain_text('Send on mail.example.com')
+    await body.locator('.gr', has_text='Send on mail.example.com').get_by_role('button', name='Always allow').click()
+    await expect(free).to_contain_text('Send on mail.example.com')
+    await body.locator('.gr', has_text='Send on mail.example.com').locator('select.gr-until').select_option('1h')
+    await expect(free).to_contain_text('Until')
+
+
+async def ask_duration_survives_a_repaint(page, base):
+    """The ask card's "how long" keeps the owner's pick when the chat repaints, and Always allow uses it."""
+    ids = await open_app(page, base, bots={'Researcher': EXTRA_BOTS['Researcher']})
+    await seed_asks(page, ids['Researcher'])
+    await page.goto(f'{base}/index.html#bot/{ids["Researcher"]}')
+    await page.reload()
+    post = page.locator('#cv-log .cv-card[data-ask="a3"]')
+    pick = post.locator('select.ask-for')
+    await expect(pick).to_have_value('always')
+    await pick.select_option('1h')
+    before = await pick.element_handle()
+    # Another answer syncs and repaints the chat: the card is a new node, and the pick is still For 1 hour.
+    await page.locator('#cv-log .cv-card[data-ask="a2"]').get_by_role('button', name="Don't allow").click()
+    await expect(page.locator('#cv-log [data-ask="a2"].cv-card')).to_have_count(0)
+    assert not await before.evaluate('n => n.isConnected'), 'the chat did not repaint, so this proves nothing'
+    await expect(pick).to_have_value('1h')
+    await post.get_by_role('button', name='Always allow', exact=True).click()
+    await expect(page.locator('#cv-log .cv-card[data-ask="a3"]')).to_have_count(0)
+    g = next(x for x in (await api_state(page))['grants'] if x['action'] == 'post')
+    left = await page.evaluate('u => (Date.parse(u) - Date.now()) / 60000', g['until'])
+    assert 55 < left <= 60, g
+    await expect(page.locator('#toast')).to_contain_text('for the next hour')
+
+
 async def phone_targets_and_stacked_segments(page, base):
     """On a phone every small control is 44px tall and a segmented control sits under its label."""
     await open_app(page, base)
@@ -2602,6 +2683,8 @@ async def main():
             await h.scenario('demo: Connectors and Models and keys say they need the server', demo_says_connectors_and_models_need_the_server)
             await h.scenario('demo: a send shows the ask card, never Done; an empty chat offers starters', demo_send_shows_an_ask_card)
             await h.scenario('permissions: a profile shows its bot\'s rules first, then Limits for all bots; rows flip their switch', per_bot_permissions_and_global_limits)
+            await h.scenario('permissions: a rule\'s end is set in the list; the preset and the summary follow each rule and switch', rule_end_and_preset_follow_each_change)
+            await h.scenario('asks: the card\'s "how long" survives a repaint and Always allow uses it', ask_duration_survives_a_repaint)
             await h.scenario('phone: 44px targets and segments under their labels', phone_targets_and_stacked_segments, {'width': 375, 'height': 812})
             await h.scenario('profile: one line of the job, View instructions edits it; New bot manager default and Create hint', profile_role_line_and_instructions)
             await h.scenario('chat: connector use is hidden, a held send has Undo and names the account, then collapses to a muted line', chat_connector_lines_and_undo)
