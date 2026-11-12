@@ -197,6 +197,7 @@
 .rail-new .badge{top:-3px;right:-3px}
 .rail-none{height:100%;display:grid;place-content:center;justify-items:center;gap:6px;color:var(--muted);font-size:15px}
 .rail-none p{margin:0}
+.rail-none-go{min-height:32px;padding:4px 10px}
 
 /* ---------- conversation: header, feed, composer ---------- */
 .cv{flex:1;min-height:0;display:flex;flex-direction:column}

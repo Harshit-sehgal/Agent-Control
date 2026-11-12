@@ -485,6 +485,22 @@ async def faces_come_alive(page, base):
     await expect(page.locator('#sidebar .pin .face--sway')).to_have_count(1)
 
 
+async def first_reply_is_announced(page, base):
+    """A screen reader hears a bot's reply, including the first one in a chat that had none."""
+    await open_app(page, base, '#bot/atlas')
+    announce = page.locator('#announce')
+    await expect(announce).to_have_attribute('aria-live', 'polite')
+    await expect(announce).to_have_text('')
+    await page.locator('#chat-form textarea').fill('hello')
+    await page.locator('#chat-form textarea').press('Enter')
+    await expect(announce).to_have_text(re.compile(r'^Atlas: .+'), timeout=10000)
+    first = await announce.text_content()
+    await page.locator('#chat-form textarea').fill('what can you do?')
+    await page.locator('#chat-form textarea').press('Enter')
+    await expect(announce).not_to_have_text(first, timeout=10000)
+    await expect(announce).to_have_text(re.compile(r'^Atlas: .+'))
+
+
 async def keyboard_and_escape(page, base):
     await open_app(page, base, bots=EXTRA_BOTS)
     # Everything is reachable by keyboard: Tab walks the sidebar, Enter opens a bot.
@@ -2192,6 +2208,7 @@ async def main():
             await h.scenario('checkpoint card and page ask: the waiting face sits above', checkpoint_and_ask_cards)
             await h.scenario('faces: hello hop, one hop per first reply, awake and asleep', faces_come_alive)
             await h.scenario('keyboard: Tab, Enter, Ctrl+K and Esc in the sidebar', keyboard_and_escape)
+            await h.scenario('screen reader: the first reply in a new chat is announced, and the next', first_reply_is_announced)
             await h.scenario('phone: create a bot from the + button', phone_create_bot, PHONE)
             await h.scenario('phone: bottom search opens on focus and closes on Esc or a tap', phone_search_and_escape, PHONE)
             await h.scenario('phone: Settings cards, a section, Back, Esc, and the menu sheet', phone_settings_cards, PHONE)

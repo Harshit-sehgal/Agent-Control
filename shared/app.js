@@ -78,7 +78,7 @@ function renderRoute() {
     lastDesk = desk;
     if (route.bot || route.thread) conversationShell(conversation());
     else if (route.newThread) main.innerHTML = newThreadView();
-    else if (route.home) main.innerHTML = desk ? `<div class="rail-none"><p>Select a chat</p><button type="button" class="link" data-action="new-thread">or start a new thread</button></div>` : homeView();
+    else if (route.home) main.innerHTML = desk ? `<div class="rail-none"><p>Select a chat</p><button type="button" class="link rail-none-go" data-action="new-thread">or start a new thread</button></div>` : homeView();
     else main.innerHTML = pageView(route);
     lastHome = main.innerHTML;
     main.classList.remove('view-enter'); void main.offsetWidth; main.classList.add('view-enter');

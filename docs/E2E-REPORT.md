@@ -8,7 +8,7 @@ No setup step was done by hand.
 ## How it was tested
 
 - **Gates:** `npm run check`, `npm test` (1641 tests), `tests/polish_smoke.py` (10 scenarios) and
-  `tests/usability_smoke.py` (47 scenarios). All green.
+  `tests/usability_smoke.py` (48 scenarios). All green.
 - **Real bots:** 72 prompts an owner would type, covering search, prices, news, weather, long pages, YouTube,
   careers pages, schedules, bot changes, team set-up, sign-in sites, Gmail, a test order form, and a live
   restaurant booking site. Every run completed. Each flagged reply was read by hand; the ones that were real
@@ -36,6 +36,18 @@ anything only the owner may do.
 | A run that read a connector could open any site after that result was used | A run that read private data (a connector, or signed-in mail or files) asks before any new site for the rest of the run |
 | "Delete this bot" sent the owner to the devices page | Bot changes are always cards; "devices" is named as computers, and a bots page request is refused with the Remove block |
 | The same setup card could be offered twice | An identical card from the last ten minutes is not added again |
+
+## Accessibility pass
+
+Sixteen screens (chats, a bot chat, profile, New bot, New thread, Company, Activity and every Settings section)
+were checked at laptop and phone width, in light and dark. The checks covered accessible names, form labels, text
+contrast (WCAG AA), 24px targets, the keyboard focus ring, duplicate ids, landmarks, and dialogs.
+
+- Contrast, names, labels, landmarks and dialogs passed everywhere. Settings is a labelled modal dialog that keeps
+  Tab inside it, its switches report on or off, and every text field has a name.
+- **Fixed:** a screen reader never heard the first reply in a chat that had no reply yet (only later ones were
+  spoken). The first reply is now announced, and a smoke scenario covers it.
+- **Fixed:** "or start a new thread" on the empty laptop panel was a 21px target; it is now 32px.
 
 ## Left to the owner, by design
 

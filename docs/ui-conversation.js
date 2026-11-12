@@ -7,25 +7,25 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=a641a0ae3b';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=a641a0ae3b';
-import {requestOfMessage} from './bot-browser.js?v=a641a0ae3b';
-import {validHttpUrl} from './core.js?v=a641a0ae3b';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=a641a0ae3b';
-import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=a641a0ae3b';
-import {isPrimary} from './company.js?v=a641a0ae3b';
-import {hasJob, modelChip} from './ui-profile-model.js?v=a641a0ae3b';
-import {scheduleTaskBody} from './schedules.js?v=a641a0ae3b';
-import {feed} from './ui-feed.js?v=a641a0ae3b';
-import {setupCardOf, setupButton} from './setup.js?v=a641a0ae3b';
-import {askCard} from './ui-asks.js?v=a641a0ae3b';
-import {face, botColor} from './ui-face.js?v=a641a0ae3b';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=a641a0ae3b';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=a641a0ae3b';
-import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=a641a0ae3b';
-import {toast} from './ui-dialogs.js?v=a641a0ae3b';
-import {siteChip} from './ui-computer-view.js?v=a641a0ae3b';
-import {cliChoice, googleCard} from './ui-connect-model.js?v=a641a0ae3b';
+import {OFFJOB_CHOICES} from './off-job.js?v=27d187d55e';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=27d187d55e';
+import {requestOfMessage} from './bot-browser.js?v=27d187d55e';
+import {validHttpUrl} from './core.js?v=27d187d55e';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=27d187d55e';
+import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=27d187d55e';
+import {isPrimary} from './company.js?v=27d187d55e';
+import {hasJob, modelChip} from './ui-profile-model.js?v=27d187d55e';
+import {scheduleTaskBody} from './schedules.js?v=27d187d55e';
+import {feed} from './ui-feed.js?v=27d187d55e';
+import {setupCardOf, setupButton} from './setup.js?v=27d187d55e';
+import {askCard} from './ui-asks.js?v=27d187d55e';
+import {face, botColor} from './ui-face.js?v=27d187d55e';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=27d187d55e';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=27d187d55e';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=27d187d55e';
+import {toast} from './ui-dialogs.js?v=27d187d55e';
+import {siteChip} from './ui-computer-view.js?v=27d187d55e';
+import {cliChoice, googleCard} from './ui-connect-model.js?v=27d187d55e';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -268,9 +268,10 @@ let lastHtml = null, spoken = null;
  * genuinely new reply is spoken, through the hidden #announce node. */
 function announce(conv, entries) {
   const last = [...entries].reverse().find(e => e.kind === 'bot' || e.kind === 'offjob')?.message, node = el('announce');
-  if (!last || !node) return;
-  const key = `${conv.id}:${last.id}`, first = spoken === null || !spoken.startsWith(`${conv.id}:`);
-  if (key !== spoken && !first) node.textContent = `${last.senderName || conv.name}: ${plain(last.text).slice(0, 300)}`;
+  if (!node) return;
+  // A chat that opens with no reply yet is still "seen", so its first reply is spoken.
+  const key = `${conv.id}:${last?.id || ''}`, first = spoken === null || !spoken.startsWith(`${conv.id}:`);
+  if (last && key !== spoken && !first) node.textContent = `${last.senderName || conv.name}: ${plain(last.text).slice(0, 300)}`;
   spoken = key;
 }
 

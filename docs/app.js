@@ -22,19 +22,19 @@
  *   ui-dialogs      toast, sheet, confirm/ask      ui-actions action/form tables
  *   ui-fx           confetti, the send arrow and the bots' ambient life
  */
-import {companyRoute} from './ui-company.js?v=a641a0ae3b';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=a641a0ae3b';
-import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=a641a0ae3b';
-import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, renderPause, closeSearch, homeView} from './ui-shell.js?v=a641a0ae3b';
-import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=a641a0ae3b';
-import {profileViews, wirePages} from './ui-profile.js?v=a641a0ae3b';
-import {wireGestures, gesturesBusy} from './ui-gestures.js?v=a641a0ae3b';
-import {settingsViews} from './ui-settings.js?v=a641a0ae3b';
-import {showLogin, hideLogin} from './ui-sheets.js?v=a641a0ae3b';
-import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=a641a0ae3b';
-import {bringBotsToLife} from './ui-fx.js?v=a641a0ae3b';
-import {wireComputer} from './ui-computer-view.js?v=a641a0ae3b';
-import {googleReturn, withoutGoogleParams} from './ui-connect-model.js?v=a641a0ae3b';
+import {companyRoute} from './ui-company.js?v=27d187d55e';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=27d187d55e';
+import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=27d187d55e';
+import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, renderPause, closeSearch, homeView} from './ui-shell.js?v=27d187d55e';
+import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=27d187d55e';
+import {profileViews, wirePages} from './ui-profile.js?v=27d187d55e';
+import {wireGestures, gesturesBusy} from './ui-gestures.js?v=27d187d55e';
+import {settingsViews} from './ui-settings.js?v=27d187d55e';
+import {showLogin, hideLogin} from './ui-sheets.js?v=27d187d55e';
+import {actions, forms, onControlChange, onControlInput} from './ui-actions.js?v=27d187d55e';
+import {bringBotsToLife} from './ui-fx.js?v=27d187d55e';
+import {wireComputer} from './ui-computer-view.js?v=27d187d55e';
+import {googleReturn, withoutGoogleParams} from './ui-connect-model.js?v=27d187d55e';
 
 const el = id => document.getElementById(id);
 const hashRoute = () => normalizeRoute(companyRoute(location.hash, store.state));
@@ -78,7 +78,7 @@ function renderRoute() {
     lastDesk = desk;
     if (route.bot || route.thread) conversationShell(conversation());
     else if (route.newThread) main.innerHTML = newThreadView();
-    else if (route.home) main.innerHTML = desk ? `<div class="rail-none"><p>Select a chat</p><button type="button" class="link" data-action="new-thread">or start a new thread</button></div>` : homeView();
+    else if (route.home) main.innerHTML = desk ? `<div class="rail-none"><p>Select a chat</p><button type="button" class="link rail-none-go" data-action="new-thread">or start a new thread</button></div>` : homeView();
     else main.innerHTML = pageView(route);
     lastHome = main.innerHTML;
     main.classList.remove('view-enter'); void main.offsetWidth; main.classList.add('view-enter');

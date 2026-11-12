@@ -8,8 +8,8 @@
  *
  * Pure and browser-safe. The block grammar is the shared one in `reply-blocks.js`.
  */
-import {cleanText} from './core.js?v=a641a0ae3b';
-import {controlFence} from './reply-blocks.js?v=a641a0ae3b';
+import {cleanText} from './core.js?v=27d187d55e';
+import {controlFence} from './reply-blocks.js?v=27d187d55e';
 
 /** The buttons under an out-of-job reply, in order. "Do it anyway" sends the same
  * request again with `anyway`, "Ask Atlas" starts a thread with it, and "Make a

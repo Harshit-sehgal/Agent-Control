@@ -268,9 +268,10 @@ let lastHtml = null, spoken = null;
  * genuinely new reply is spoken, through the hidden #announce node. */
 function announce(conv, entries) {
   const last = [...entries].reverse().find(e => e.kind === 'bot' || e.kind === 'offjob')?.message, node = el('announce');
-  if (!last || !node) return;
-  const key = `${conv.id}:${last.id}`, first = spoken === null || !spoken.startsWith(`${conv.id}:`);
-  if (key !== spoken && !first) node.textContent = `${last.senderName || conv.name}: ${plain(last.text).slice(0, 300)}`;
+  if (!node) return;
+  // A chat that opens with no reply yet is still "seen", so its first reply is spoken.
+  const key = `${conv.id}:${last?.id || ''}`, first = spoken === null || !spoken.startsWith(`${conv.id}:`);
+  if (last && key !== spoken && !first) node.textContent = `${last.senderName || conv.name}: ${plain(last.text).slice(0, 300)}`;
   spoken = key;
 }
 
