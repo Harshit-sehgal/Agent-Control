@@ -254,3 +254,23 @@ test('a bot that submits a form a second time is told it already went through, a
   assert.equal(opened.length, 1, 'the form was submitted once');
   assert.match(note, /already submitted/i);
 });
+
+// Found by the real-model sweep: "post on X and tell me the top HN story" read HN, then x.com refused the browser
+// (net::ERR_HTTP_RESPONSE_CODE_FAILURE) round after round, and the run failed with the HN answer hidden.
+test('a site that refuses twice is not opened again, and a run that read something answers before it stops', async t => {
+  fakeBrowser(t, async request => {
+    if (request.url.includes('refuses.example')) throw new Error('The page could not be opened: net::ERR_HTTP_RESPONSE_CODE_FAILURE.');
+    return {title: 'News', finalUrl: request.url, text: 'Top story: Jane Street tutor'};
+  });
+  const {store, ids} = await company(t);
+  let n = 0;
+  const ai = model({Mailroom: e => (e.note && /Stop opening pages/.test(e.note) ? 'Top story is the Jane Street tutor; refuses.example would not open.'
+    : n++ === 0 ? fence('https://news.example/') : fence(`https://refuses.example/${n}`))});
+  wire(ai.executor);
+  const run = await ask(store, {message: 'news and the other site', to: ids.mail, executor: ai.executor});
+  await until(() => ended(store, run.id), 'the run');
+  const done = runOf(store, run.id);
+  assert.equal(done.status, 'completed', done.error);
+  assert.match(done.lastOutput, /Jane Street/);
+  assert.ok(opened.filter(u => u.includes('refuses.example')).length <= 2, `refused site opened ${opened.length} times`);
+});

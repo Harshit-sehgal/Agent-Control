@@ -20,12 +20,12 @@
  * X and Twitter work like any other site: a bot may read, click and type there, and a click on Post asks
  * unless the owner set Always allow for posting on that site.
  */
-import {cleanText, validHttpUrl} from './core.js?v=a77585254b';
-import {fail} from './errors.js?v=a77585254b';
-import {decide, createAsk, scopeOf, declinedNeed} from './asks.js?v=a77585254b';
-import {controlFence} from './reply-blocks.js?v=a77585254b';
-import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=a77585254b';
-import {appForHost} from './app-catalog.js?v=a77585254b';
+import {cleanText, validHttpUrl} from './core.js?v=71b92f8de6';
+import {fail} from './errors.js?v=71b92f8de6';
+import {decide, createAsk, scopeOf, declinedNeed} from './asks.js?v=71b92f8de6';
+import {controlFence} from './reply-blocks.js?v=71b92f8de6';
+import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=71b92f8de6';
+import {appForHost} from './app-catalog.js?v=71b92f8de6';
 
 /** The most page text one model turn carries (the pages of a round together). */
 export const MAX_PAGE_CHARS = 24000;
@@ -321,6 +321,8 @@ export const RISKS = [
 export const CHECKOUT_PATH = /\/(checkout|payment|billing)(\/|$)/i;
 
 /** The risk classes a control's label names, riskiest first: ['spend'], ['send'], [] ... */
+/** A CSS selector as words: "[data-testid=\"tweetButtonInline\"]" → "data testid tweet Button Inline". */
+const selectorWords = selector => String(selector ?? '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_\-\d"'=[\]#.:>()]+/g, ' ');
 /** The risk classes that mean a click submits something the owner is committed by. */
 const SUBMITS = ['send', 'post', 'spend'];
 export const riskOf = label => { const text = foldLabel(label); return RISKS.filter(([, pattern]) => pattern.test(text)).map(([action]) => action); };
@@ -383,12 +385,15 @@ export const approvedFor = (action, url) => `${action}@${originOf(url)}`;
  * URL, then each `navigate`), and `browser.use` for each origin it reaches. [{action, target, detail}],
  * one per action and origin. */
 export function browserNeeds(request, controls = new Map()) {
-  const needs = [], seen = new Set();
-  const add = (action, target, detail) => {
+  const needs = [], seen = new Map();
+  // One need per action and origin. A later click of the same kind names it instead: the last click is the one
+  // that commits ("click Post" after "click the text box").
+  const add = (action, target, detail, click = false) => {
     const key = approvedFor(action, target);
-    if (seen.has(key)) return;
-    seen.add(key);
-    needs.push({action, target, detail});
+    if (seen.has(key)) { if (click) seen.get(key).detail = detail; return; }
+    const need = {action, target, detail};
+    seen.set(key, need);
+    needs.push(need);
   };
   let here = request.url;
   for (const step of request.steps || []) {
@@ -396,10 +401,11 @@ export function browserNeeds(request, controls = new Map()) {
     if (!INTERACTIVE.includes(step.op)) continue;
     const label = step.index ? controls.get(step.index) || '' : '';
     const named = label || step.selector || `control ${step.index}`;
-    const actions = riskOf(label || step.selector);
+    // A selector's camelCase and underscores are words: [data-testid="tweetButtonInline"] reads "tweet Button Inline".
+    const actions = riskOf(label || selectorWords(step.selector));
     // Not labelled on a page this bot was shown: the app cannot tell what it does, so it is at least a Send.
     if (!label && !actions.length) actions.push('send');
-    for (const action of actions) add(action, here, `${step.op === 'type' ? 'type into' : 'click'} "${named.slice(0, 60)}" on ${hostOf(here) || here}`);
+    for (const action of actions) add(action, here, `${step.op === 'type' ? 'type into' : 'click'} "${named.slice(0, 60)}" on ${hostOf(here) || here}`, step.op === 'click');
   }
   const pages = [request.url, ...(request.steps || []).filter(s => s.op === 'navigate').map(s => s.url)];
   for (const u of pages) {
@@ -475,6 +481,8 @@ export function sameSearch(a, b) {
 }
 
 /** Page titles that mean the site turned this browser away. */
+/** A load the site itself turned away (an error status, a blocked request), as the browser reports it. */
+const LOAD_REFUSED = /net::ERR_(?:HTTP_RESPONSE_CODE_FAILURE|BLOCKED_BY_\w+)/;
 const REFUSED = /^(?:access denied|403\b|forbidden|request blocked|you have been blocked|you['’]ve been blocked|attention required|just a moment)/i;
 
 const samePage = (a, b) => {
@@ -517,7 +525,9 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
   let repeated = 0;
   const again = [], refused = [], invalid = [], resent = [];
   const refusals = host => (state.browserRequests || []).filter(r => (runId ? r.runId === runId : r.chatKey === chatKey)
-    && hostOf(r.result?.finalUrl || r.url) === host && (REFUSED.test(String(r.result?.title || '').trim()) || REFUSED.test(String(r.result?.text || '').trim()) || r.result?.botCheck)).length;
+    && hostOf(r.result?.finalUrl || r.url) === host && (REFUSED.test(String(r.result?.title || '').trim()) || REFUSED.test(String(r.result?.text || '').trim()) || r.result?.botCheck
+      // The site answered with an error status or blocked the load: it refused, as a block page would. A timeout may pass.
+      || (r.status === 'failed' && LOAD_REFUSED.test(String(r.error || ''))))).length;
   // A bot never answers "I don't have permission": a page it has no grant for is an ask, and the owner
   // says Allow, Always allow or Decline. A Deny the owner set is the one thing that refuses outright.
   if (limited) say(`${bot.name} asked for another web page, but ${rounds} browsing rounds in a row is the most ${rounds < BACKSTOP.rounds ? 'your limit in Settings allows' : 'one message may take'}.`);
@@ -568,7 +578,7 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
     const labels = controlLabels(state, bot.id, chatKey, item.request.url);
     // A click on a control named for sending, posting or paying submits something. Once one went through in
     // this run on a site, a second is never sent: a booking or an order made twice is worse than once.
-    const submits = (item.request.steps || []).some(step => step.op === 'click' && riskOf((step.index && labels.get(step.index)) || step.selector || '').some(a => SUBMITS.includes(a)));
+    const submits = (item.request.steps || []).some(step => step.op === 'click' && riskOf((step.index && labels.get(step.index)) || selectorWords(step.selector)).some(a => SUBMITS.includes(a)));
     const sentBefore = submits && runId && (state.browserRequests || []).find(r => r.runId === runId && r.submits && r.status === 'done' && originOf(r.url) === originOf(item.request.url));
     if (sentBefore) {
       say(`${bot.name} asked to submit on ${hostOf(item.request.url)} again, but it was already submitted in this task, so it was not sent twice.`);

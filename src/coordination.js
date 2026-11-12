@@ -490,8 +490,9 @@ async function runGroupInner(store,id,executor){
           if(conn.asks.length){live.status='awaiting_ask';live.askIds=conn.asks.map(a=>a.id);}
           else live.status='queued';
           holdBrowser=true;
-        } else if(!toBotId&&!off&&!stopped&&!declinedTurn&&!live.lastCall&&!live.promiseNudged&&!reply.spawns.length&&!reply.asks.length&&promisesAction(previous.output)){
+        } else if(!toBotId&&!off&&!stopped&&!declinedTurn&&!live.lastCall&&!live.promiseNudged&&!reply.spawns.length&&!reply.asks.length&&!(reply.after||[]).some(line=>line.setup)&&promisesAction(previous.output)){
           // "I'll open the booking page" with no block opens nothing; the bot is asked once to do what it said.
+          // A reply that made a setup card did what it said ("I'll propose…"), so it is not asked again.
           live.promiseNudged=true;live.browserNote=PROMISE_NOTE;
           live.checkpoint={nextStep:i,afterStep:i+1,previous,at:stamp()};
           live.status='queued';
@@ -599,6 +600,9 @@ export async function resumeBrowserRun(store,request,{ok,text='',executor}={}){
       const step=Number.isInteger(live.checkpoint?.nextStep)?live.checkpoint.nextStep:live.currentStep;
       const who=s.groups.find(g=>g.id===live.groupId)?.bots.find(b=>b.id===live.recipients[step])?.name||'The bot';
       live.failStreak=(Number(live.failStreak)||0)+1;
+      // A run that already read something answers from it first, with browsing closed, as the other stuck rounds do.
+      const readSome=(s.browserRequests||[]).some(r=>r.runId===id&&r.status==='done'&&r.result?.page);
+      if(live.failStreak>=FAIL_STREAK&&readSome&&!lastCallOrStop(live,s)){live.browserNote=`${LAST_CALL} The last page could not be opened (${why}).`;live.status='queued';return true;}
       if(live.failStreak>=FAIL_STREAK){
         endRun(live,'failed',{error:`${who}'s pages failed ${FAIL_STREAK} times in a row, so the task stopped. The last one said: ${why}`});
         say(s,live,runNote(live));

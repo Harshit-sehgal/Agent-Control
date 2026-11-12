@@ -37,11 +37,12 @@ const mk = (() => { let n = 0; return () => `fc-${++n}`; })();
 test('C1: with Always allow for the shop, a click by selector or by an index the bot never saw still asks', () => {
   const s = state();
   setGrant(s, 'b', 'browser.use', SHOP, 'always', NOW, {log: false});
-  for (const step of [{op: 'click', selector: '#place-order'}, {op: 'click', index: 7}, {op: 'type', selector: '#card', text: '4242'}]) {
+  // A selector's own words count ("#place-order" reads "place order", a payment); one with none is at least a Send.
+  for (const [step, action] of [[{op: 'click', selector: '#place-order'}, 'spend'], [{op: 'click', index: 7}, 'send'], [{op: 'type', selector: '#card', text: '4242'}, 'send']]) {
     const request = validateBrowserRequest({url: `${SHOP}/cart`, steps: [step]});
     const decision = decide(s, shopper(s), browserNeeds(request));
     assert.equal(decision.verdict, 'ask', `${JSON.stringify(step)} must not be allowed by the page grant alone`);
-    assert.equal(decision.need.action, 'send', 'an unlabelled control is at least a Send');
+    assert.equal(decision.need.action, action, 'an unlabelled control is at least a Send');
   }
   // A control the bot was shown with a harmless label is still just the page.
   const seen = validateBrowserRequest({url: `${SHOP}/cart`, steps: [{op: 'click', index: 2}]});

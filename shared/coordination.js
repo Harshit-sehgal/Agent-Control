@@ -285,12 +285,12 @@ export function rosterFor(state, bot, reach, {thread=false}={}) {
   return thread?[]:(reach||[]);
 }
 
-/** What the teammates said, one `Name: text` paragraph each (600 characters), for
- * the lead's closing step. */
+/** What the teammates said, one `Name: text` paragraph each (2,000 characters, so a list or a table
+ * reaches the lead whole), for the lead's closing step. */
 export function teamReplies(run, leadId, bots) {
   const name=id=>(bots||[]).find(b=>b.id===id)?.name||id;
   return stepsOf(run).filter(step=>step.botId!==leadId&&String(step.output||'').trim())
-    .map(step=>`${name(step.botId)}: ${String(step.output).slice(0,600)}`).join('\n\n');
+    .map(step=>`${name(step.botId)}: ${String(step.output).slice(0,2000)}`).join('\n\n');
 }
 
 /** The previous message a step is handed. A teammate a lead handed work to sees

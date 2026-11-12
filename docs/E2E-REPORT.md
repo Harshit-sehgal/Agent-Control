@@ -1,18 +1,22 @@
 # End-to-end report
 
 What a real owner's day looks like on this app, what was missing from the basics, and where each gap stands.
-Last full pass: 2026-11-12. All 72 everyday prompts ran on a fresh scratch workspace, through the owner's own
+Last full pass: 2026-11-12. All 108 everyday prompts ran on a scratch workspace, through the owner's own
 `claude` sign-in on haiku, with the local agent and its real headless Chrome started by `npm start` itself.
 No setup step was done by hand.
 
 ## How it was tested
 
-- **Gates:** `npm run check`, `npm test` (1656 tests), `tests/polish_smoke.py` (10 scenarios) and
-  `tests/usability_smoke.py` (49 scenarios). All green.
-- **Real bots:** 72 prompts an owner would type, covering search, prices, news, weather, long pages, YouTube,
-  careers pages, schedules, bot changes, team set-up, sign-in sites, Gmail, a test order form, and a live
-  restaurant booking site. Every run completed. Each flagged reply was read by hand; the ones that were real
-  gaps are listed below and were fixed, then that prompt was run again.
+- **Gates:** `npm run check`, `npm test` (1787 tests), `tests/polish_smoke.py` (10 scenarios) and
+  `tests/usability_smoke.py` (58 scenarios). All green.
+- **Real bots:** 108 prompts an owner would type, covering search, prices, news, weather, long pages, YouTube,
+  careers pages, schedules, bot changes, team set-up, sign-in sites, Gmail, a test order form, a live
+  restaurant booking site, and (new) the date and its own budget, a declined post next to a second job, paying
+  on one site without asking, limits, team routing, schedule and memory edits, threads, Connect Notion, opening
+  Settings, bots that make bots, off-job questions, pausing everyone, a summary of its own permissions, a model
+  switch, a page carrying instructions, and two sites compared. 107 of 108 completed on the first pass (the one
+  failure was X refusing the browser, fixed below). Each flagged reply was read by hand; the real gaps are
+  listed below and were fixed, then those prompts were run again.
 
 ## Gaps found and fixed
 
@@ -36,6 +40,10 @@ anything only the owner may do.
 | A run that read a connector could open any site after that result was used | A run that read private data (a connector, or signed-in mail or files) asks before any new site for the rest of the run |
 | "Delete this bot" sent the owner to the devices page | Bot changes are always cards; "devices" is named as computers, and a bots page request is refused with the Remove block |
 | The same setup card could be offered twice | An identical card from the last ten minutes is not added again |
+| "I'll propose…" with a setup card was said twice: the promise nudge ran the bot again | A reply that made a setup card did what it said and ends the turn |
+| A lead saw only the first 600 characters of a teammate's answer, so a grocery list read as cut off | Each teammate answer reaches the lead whole, up to 2,000 characters |
+| Posting on X by selector (`tweetButtonInline`) asked as a Send, and the card named the text box | Selector words are read (camelCase, underscores), so it asks as a Post, and the card names the button that posts |
+| A site that refused the browser (`ERR_HTTP_RESPONSE_CODE_FAILURE`) was retried until the run failed, hiding an answer already found | A site that refuses twice is not opened again; a run that read something answers from it before it stops |
 
 ## Accessibility pass
 
