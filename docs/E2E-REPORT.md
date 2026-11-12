@@ -7,7 +7,7 @@ No setup step was done by hand.
 
 ## How it was tested
 
-- **Gates:** `npm run check`, `npm test` (1910 tests), `tests/polish_smoke.py` (10 scenarios) and
+- **Gates:** `npm run check`, `npm test` (1915 tests), `tests/polish_smoke.py` (10 scenarios) and
   `tests/usability_smoke.py` (60 scenarios). All green.
 - **Real bots:** 108 prompts an owner would type, covering search, prices, news, weather, long pages, YouTube,
   careers pages, schedules, bot changes, team set-up, sign-in sites, Gmail, a test order form, a live
@@ -134,7 +134,7 @@ Phase 9 features: 11 prompts, then the four that showed a gap again after each f
   image. The agent's runner was ready for images, but the server's `model.run` payload check rebuilt the
   payload without them (and without the effort). Both now reach the paired computer: claude gets image blocks
   over `--input-format stream-json`, codex gets `-i` files. Asked again, the bot gave the invoice number and the
-  total. An image too big for one request is named to the bot instead of sent, so the turn still answers.
+  total. A photo too big for one request is now sent as a smaller JPEG copy: a 13 MB photo went up as 2.3 MB and the bot read the sign on it.
 - **A CSV is totalled correctly**, by category and in all.
 - **Careful asks before a page; the 1-hour Always allow saves an end; the next page in that hour does not ask.**
 - **Hands-off fills and submits a test form** (httpbin's echo form, test data) with no ask, and says what the
