@@ -36,16 +36,30 @@ export const hashPassword = password => {
   const hash = crypto.scryptSync(String(password), salt, 64, SCRYPT).toString('hex');
   return `scrypt$${SCRYPT.N}$${salt}$${hash}`;
 };
-const verifyPassword = (password, stored) => {
+// The stored form is `scrypt$N$salt$hash`. Anything else fails verification.
+const parseStored = stored => {
   const [scheme, n, salt, hash] = String(stored || '').split('$');
-  if (scheme !== 'scrypt' || !salt || !hash) return false;
-  const actual = crypto.scryptSync(String(password), salt, 64, {...SCRYPT, N: Number(n) || SCRYPT.N});
-  const expected = Buffer.from(hash, 'hex');
+  if (scheme !== 'scrypt' || !salt || !hash) return null;
+  return {salt, expected: Buffer.from(hash, 'hex'), options: {...SCRYPT, N: Number(n) || SCRYPT.N}};
+};
+const sameHash = (actual, expected) => {
   // A truncated or corrupt stored hash must fail verification, not throw a
   // RangeError from timingSafeEqual (which would turn a wrong password into a
   // 500 instead of a clean refusal).
   if (expected.length !== actual.length) return false;
   return crypto.timingSafeEqual(actual, expected);
+};
+const verifyPassword = (password, stored) => {
+  const parsed = parseStored(stored);
+  if (!parsed) return false;
+  return sameHash(crypto.scryptSync(String(password), parsed.salt, 64, parsed.options), parsed.expected);
+};
+/** The same check on the thread pool, so a sign-in does not hold the event loop for the length of the hash. */
+const verifyPasswordAsync = (password, stored) => {
+  const parsed = parseStored(stored);
+  if (!parsed) return Promise.resolve(false);
+  return new Promise((resolve, reject) => crypto.scrypt(String(password), parsed.salt, 64, parsed.options,
+    (error, actual) => error ? reject(error) : resolve(sameHash(actual, parsed.expected))));
 };
 // Verified against when the address is unknown, to spend the same time.
 const DUMMY_HASH = hashPassword(crypto.randomBytes(16).toString('hex'));
@@ -64,16 +78,27 @@ export class Auth {
     });
   }
   /** @returns {{ok:true,user,role,sessionId} | {ok:false,error,status}} */
-  login({email, password}, {ip, userAgent} = {}) {
+  login({email, password}, meta = {}) {
+    const found = this.accountFor(email);
+    return this.finishLogin(found, verifyPassword(password, found.row ? found.row.password_hash : DUMMY_HASH), meta);
+  }
+  /** `login`, with the password check on the thread pool. Same answers, same order of checks. */
+  async loginAsync({email, password}, meta = {}) {
+    const found = this.accountFor(email);
+    return this.finishLogin(found, await verifyPasswordAsync(password, found.row ? found.row.password_hash : DUMMY_HASH), meta);
+  }
+  accountFor(email) {
     // Omitting the email keeps the single-owner behavior of the prototype:
     // one shared password for the bootstrapped owner account.
     const mail = resolveAccount(email);
-    const row = this.store.get('SELECT * FROM users WHERE email=?', mail);
+    return {mail, row: this.store.get('SELECT * FROM users WHERE email=?', mail)};
+  }
+  finishLogin({row}, passwordOk, {ip, userAgent} = {}) {
     // One answer for an unknown address, a wrong password and a disabled
     // account, after the same amount of work, so sign-in cannot be used to
     // find out which addresses have accounts.
     const refused = {ok: false, error: 'Incorrect email or password.', status: 401};
-    if (!verifyPassword(password, row ? row.password_hash : DUMMY_HASH) || !row || row.disabled_at) return refused;
+    if (!passwordOk || !row || row.disabled_at) return refused;
     const workspaceId = this.homeWorkspace(row.id);
     if (!workspaceId) return {ok: false, error: 'This account is not in any workspace. Ask an admin to add you.', status: 403};
     // The cookie holds the id; the table holds only its hash, so neither the

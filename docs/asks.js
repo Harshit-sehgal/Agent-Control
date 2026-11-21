@@ -26,9 +26,9 @@
  * Pure and browser-safe, like the other shared modules: the server and the
  * Pages demo share every rule here.
  */
-import {fail} from './errors.js?v=2c827d8a6b';
-import {cleanText} from './core.js?v=2c827d8a6b';
-import {logActivity} from './activity-log.js?v=2c827d8a6b';
+import {fail} from './errors.js?v=7bcf0dde92';
+import {cleanText} from './core.js?v=7bcf0dde92';
+import {logActivity} from './activity-log.js?v=7bcf0dde92';
 
 /** What every bot may do without a grant. */
 export const BASIC_KIT = ['bot.ask', 'bot.create', 'schedule.set'];
@@ -209,7 +209,7 @@ const settled = ask => ask.status !== 'pending';
 /** What Hands-off lets through with no rule: a send, a post, a connector write. Never a payment or a delete. */
 export const handsOffCovers = action => action === 'send' || action === 'post' || connectorOf(action)?.[2] === 'write';
 
-export function verdict(state, bot, action, target = '', {readPrivate = false, now = iso()} = {}) {
+export function verdict(state, bot, action, target = '', {readPrivate = false, outside = false, tainted = false, now = iso()} = {}) {
   if (isBasicKit(action)) return {verdict: 'allow', scope: ''};
   if (!isAskAction(action)) return {verdict: 'deny', scope: '', message: `${bot?.name || 'This bot'} cannot do that.`};
   // `target` may be the page URL or the origin itself; a connector's is its account.
@@ -230,8 +230,20 @@ export function verdict(state, bot, action, target = '', {readPrivate = false, n
   // `askBasics` is the owner's switch to have even these asked (Settings → Permissions).
   if (choice === null && !state?.askBasics && isBasicAccess(action) && !readPrivate) return {verdict: 'allow', scope};
   // Hands-off: the owner chose to let sends, posts and connector writes go with no rule (Settings → Permissions).
-  if (choice === null && state?.handsOff === true && handsOffCovers(action)) return {verdict: 'allow', scope};
+  // A run an outside event started (`outside`) read text no owner wrote, so Hands-off does not cover it: it asks.
+  // `tainted`: the run has read something from outside (a connector result, a page, an outside event). Its text may
+  // have been written by someone else, so a send or write asks even with Hands-off on.
+  if (choice === null && state?.handsOff === true && !outside && !readPrivate && !tainted && handsOffCovers(action)) return {verdict: 'allow', scope};
   return {verdict: 'ask', scope};
+}
+
+/** Whether a run has read anything from outside: an outside event's body, or any web page it opened (`browserRequests`
+ * done for that run, or for the chat when there is no run). Connector reads are tracked on the run itself. */
+export function outsideRead(state, {runId = null, chatKey = null, outsideInput = false} = {}) {
+  if (outsideInput) return true;
+  if (!runId && !chatKey) return false;
+  const ours = r => runId ? r.runId === runId : !r.runId && r.chatKey === chatKey;
+  return (state?.browserRequests || []).some(r => r?.status === 'done' && ours(r));
 }
 
 /** The need the owner already declined in this task, or null. `declined` is the run's [{action, scope}]: only that

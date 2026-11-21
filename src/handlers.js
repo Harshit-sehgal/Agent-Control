@@ -33,7 +33,8 @@ export function createNotifier({ws, workspaceId, auth, push}) {
     // workspace goes to every member who can still sign in.
     const members = auth.listUsers(workspaceId).filter(u => !u.disabled).map(u => u.id);
     push.announce(ws, enqueue, event.userId ? members.filter(id => id === event.userId) : members,
-      {id, title: event.title, body: event.body});
+      // An approval request is urgent: it is pushed even in quiet hours.
+      {id, title: event.title, body: event.body, urgent: event.kind === 'ask'});
     await notifications.deliveriesQueued();
     return id;
   };

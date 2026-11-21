@@ -37,22 +37,29 @@ export function slimRun(r) {
 }
 const tagHash = value => crypto.createHash('sha1').update(value).digest('base64url').slice(0, 16);
 
+/** Keys the browser snapshot may carry. An allowlist: a key added to the document later stays server-side until
+ * someone decides the browser needs it. Triggers, held sends and the activity log are deliberately absent. */
+export const SNAPSHOT_KEYS = ['createdAt', 'ai', 'askBasics', 'asks', 'browserRequests', 'chats', 'connectors', 'events', 'grants',
+  'groupMessages', 'groupRuns', 'groups', 'guard', 'handsOff', 'limits', 'memory', 'runs', 'schedulesPaused', 'settings',
+  'tasks', 'templates', 'usage', 'version'];
+export function snapshotOf(doc) {
+  const s = {};
+  for (const key of SNAPSHOT_KEYS) if (key in doc) s[key] = doc[key];
+  return s;
+}
+
 export function workflowRoutes(router, {auth}) {
   router.add('GET', '/api/state', 'viewer', c => {
     // Read-only: the cached document is never mutated here. Every field this
     // route changes is replaced on a shallow copy.
     const doc = peek(c.store), me = c.actor, live = aiAvailable(c.store);
-    const s = {...doc};
+    const s = snapshotOf(doc);
     // The stored provider row holds the vault id and may carry a key inside a
     // pasted base URL. The snapshot the browser receives is metadata only.
     // `publicAi` normalises its argument in place, so it gets its own copy.
     s.ai = publicAi({ai: structuredClone(doc.ai)});
     // A connector record is metadata (its secrets are vault credentials), but the snapshot gets the public view anyway.
     s.connectors = publicConnectors({connectors: structuredClone(doc.connectors)});
-    // An email waiting out its Undo window carries its text; the snapshot never does.
-    delete s.heldSends;
-    // The log can be thousands of entries; the snapshot the browser polls leaves it out. GET /api/activity pages it.
-    delete s.activity;
     s.browserRequests = Array.isArray(doc.browserRequests) ? doc.browserRequests.map(slimRequest) : doc.browserRequests;
     s.groupRuns = Array.isArray(doc.groupRuns) ? doc.groupRuns.map(slimRun) : doc.groupRuns;
     const hasSavedDefault = s.ai?.providers?.some(provider => provider.id === s.ai.defaultProviderId);
@@ -102,6 +109,11 @@ export function workflowRoutes(router, {auth}) {
   router.add('DELETE', '/api/templates/:id', 'member', c => c.store.update(s => removeTemplate(s, c.params.id)));
   router.add('POST', '/api/tasks/:id/retry', 'member', c => c.store.update(s => tasks.retryTask(s, c.params.id)));
   router.add('DELETE', '/api/tasks/:id', 'member', c => c.store.update(s => tasks.cancelTask(s, c.params.id)));
+  // Pause and resume one schedule, and the kill switch that holds every schedule at once (shared/tasks.js).
+  router.add('POST', '/api/tasks/:id/pause', 'member', c => c.store.update(s => tasks.pauseTask(s, c.params.id)));
+  router.add('POST', '/api/tasks/:id/resume', 'member', c => c.store.update(s => tasks.resumeTask(s, c.params.id)));
+  router.add('POST', '/api/automation/pause-all', 'member', c => c.store.update(s => ({paused: tasks.pauseAllSchedules(s)})));
+  router.add('POST', '/api/automation/resume-all', 'member', c => c.store.update(s => ({resumed: tasks.resumeAllSchedules(s)})));
 
   // Retention: preview, then apply the workspace policy.
   router.add('GET', '/api/retention/preview', 'viewer', c => { const state = c.store.read(); return {policy: retentionSettings(state), preview: pruneState(state, {dryRun: true})}; });

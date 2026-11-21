@@ -5,22 +5,22 @@
  *
  * Pages repaint only when the route changes, so each in-place change (a switch, a
  * forgotten note, a picked colour) updates its own node instead. */
-import {SHAPES, COLORS, face} from './ui-face.js?v=2c827d8a6b';
-import {botStatus, botIsManager} from './ui-company.js?v=2c827d8a6b';
-import {primaryOf} from './company.js?v=2c827d8a6b';
-import {resetModelSearch} from './ui-admin.js?v=2c827d8a6b';
-import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker, COLOR_NAMES} from './ui-kit.js?v=2c827d8a6b';
-import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js?v=2c827d8a6b';
-import {scheduleRows, scheduleTaskBody, SCHEDULE_OFTEN, scheduleChoice} from './schedules.js?v=2c827d8a6b';
-import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=2c827d8a6b';
-import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=2c827d8a6b';
-import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=2c827d8a6b';
-import {sendChat} from './ui-chat.js?v=2c827d8a6b';
-import {computerPage as computerView, computerLabel, keysOwned, thumbSlot} from './ui-computer-view.js?v=2c827d8a6b';
+import {SHAPES, COLORS, face} from './ui-face.js?v=7bcf0dde92';
+import {botStatus, botIsManager} from './ui-company.js?v=7bcf0dde92';
+import {primaryOf} from './company.js?v=7bcf0dde92';
+import {resetModelSearch} from './ui-admin.js?v=7bcf0dde92';
+import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker, COLOR_NAMES} from './ui-kit.js?v=7bcf0dde92';
+import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js?v=7bcf0dde92';
+import {scheduleRows, scheduleTaskBody, SCHEDULE_OFTEN, scheduleChoice} from './schedules.js?v=7bcf0dde92';
+import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=7bcf0dde92';
+import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=7bcf0dde92';
+import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=7bcf0dde92';
+import {sendChat} from './ui-chat.js?v=7bcf0dde92';
+import {computerPage as computerView, computerLabel, keysOwned, thumbSlot} from './ui-computer-view.js?v=7bcf0dde92';
 import {
   MAX_NAME, MAX_JOB, hasJob, roleLine, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, lookOf, newBotDefaults,
   newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, closeTarget,
-} from './ui-profile-model.js?v=2c827d8a6b';
+} from './ui-profile-model.js?v=7bcf0dde92';
 
 const el = id => document.getElementById(id);
 const SHAPE_LABELS = {rounded: 'Rounded square', circle: 'Circle', hexagon: 'Hexagon', pebble: 'Pebble', drop: 'Drop', shield: 'Shield', arch: 'Arch', egg: 'Egg', blob: 'Blob', bean: 'Bean'};
@@ -160,9 +160,11 @@ function memoryList(bot) {
  * from chat too ("every morning at 8, sum up my inbox"), so the form is the fallback, not the way in. */
 function scheduleList(bot) {
   const rows = scheduleRows(store.state, bot.id), write = canWrite();
-  if (!rows.length) return `<p class="pr-note">Nothing on a timer. Tell ${esc(bot.name)} something like “every morning at 8, sum up my inbox”, or add one below.</p>`;
+  // The kill switch sits inside this block, so the refill after a tap relabels it.
+  const kill = write ? `<p class="pr-note"><button type="button" class="btn" data-action="schedules-kill" data-id="${esc(bot.id)}">${store.state.schedulesPaused ? 'Resume every schedule' : 'Pause every schedule (kill switch)'}</button> ${store.state.schedulesPaused ? 'Every schedule is paused. New ones start paused too.' : 'Stops every timer in the company until you resume it. Runs already in progress finish.'}</p>` : '';
+  if (!rows.length) return `${kill}<p class="pr-note">Nothing on a timer. Tell ${esc(bot.name)} something like “every morning at 8, sum up my inbox”, or add one below.</p>`;
   const next = at => { const d = new Date(at); return Number.isNaN(d.getTime()) ? '' : ` · next ${d.toLocaleString([], {weekday: 'short', hour: '2-digit', minute: '2-digit'})}`; };
-  return `<div class="cd">${rows.map(r => `<div class="rw memo"><span class="w">${esc(r.what)}<small>${esc(r.when)}${esc(next(r.nextAt))}</small>${r.lastError ? `<small class="sc-err">Last try failed: ${esc(r.lastError)}</small>` : ''}</span>${write ? `<button type="button" class="memo-x" data-action="schedule-stop" data-id="${esc(bot.id)}" data-task="${esc(r.id)}" aria-label="Stop this schedule">Stop</button>` : ''}</div>`).join('')}</div>`;
+  return `${kill}<div class="cd">${rows.map(r => `<div class="rw memo"><span class="w">${esc(r.what)}<small>${r.paused ? 'Paused · ' : ''}${esc(r.when)}${esc(next(r.nextAt))}</small>${r.lastError ? `<small class="sc-err">Last try failed: ${esc(r.lastError)}</small>` : ''}</span>${write ? `<button type="button" class="memo-x" data-action="${r.paused ? 'schedule-resume' : 'schedule-pause'}" data-id="${esc(bot.id)}" data-task="${esc(r.id)}" aria-label="${r.paused ? 'Resume' : 'Pause'} this schedule">${r.paused ? 'Resume' : 'Pause'}</button><button type="button" class="memo-x" data-action="schedule-stop" data-id="${esc(bot.id)}" data-task="${esc(r.id)}" aria-label="Stop this schedule">Stop</button>` : ''}</div>`).join('')}</div>`;
 }
 function schedulePage(bot) {
   const write = canWrite();
@@ -374,6 +376,10 @@ export const profileActions = {
   'profile-up': b => go({profile: b.dataset.id}, {replace: true}),
   'profile-sub': b => go({profile: b.dataset.id, sub: b.dataset.sub}),
   'schedule-stop': async b => { await api(`/api/tasks/${encodeURIComponent(b.dataset.task)}`, 'DELETE'); await sync(); refillSchedule(b.dataset.id); toast('Stopped.'); },
+  'schedule-pause': async b => { await api(`/api/tasks/${encodeURIComponent(b.dataset.task)}/pause`, 'POST'); await sync(); refillSchedule(b.dataset.id); toast('Paused.'); },
+  'schedule-resume': async b => { await api(`/api/tasks/${encodeURIComponent(b.dataset.task)}/resume`, 'POST'); await sync(); refillSchedule(b.dataset.id); toast('Resumed.'); },
+  // The kill switch: every schedule in the company at once.
+  'schedules-kill': async b => { const paused = !!store.state.schedulesPaused; await api(`/api/automation/${paused ? 'resume-all' : 'pause-all'}`, 'POST'); await sync(); refillSchedule(b.dataset.id); toast(paused ? 'Schedules resumed.' : 'All schedules paused.'); },
   'bot-menu': b => (botMenuOpen() ? closeBotMenu() : openBotMenu(b.dataset.id, {opener: b})),
   // The whole job, to read and (for a member) to edit in place: the header shows only its first line.
   'profile-instructions': b => {
@@ -441,10 +447,10 @@ export const profileForms = {
     toast('Remembered.');
   },
   'schedule-form': async (form, f) => {
-    const {every, on} = scheduleChoice(f.every), group = groupOfBot(form.dataset.bot);
+    const {every, on, days} = scheduleChoice(f.every), group = groupOfBot(form.dataset.bot);
     if (!group) throw new Error('That bot is no longer in the company.');
     if (!every && !f.at) throw new Error('Pick a time for a one-off.');
-    await api('/api/tasks', 'POST', scheduleTaskBody({botId: form.dataset.bot, groupId: group.id, message: String(f.message || '').trim(), every, on, at: f.at || ''}));
+    await api('/api/tasks', 'POST', scheduleTaskBody({botId: form.dataset.bot, groupId: group.id, message: String(f.message || '').trim(), every, on, days, at: f.at || ''}));
     await sync(); form.reset(); refillSchedule(form.dataset.bot); toast('Added to the schedule.');
   },
   'bot-model-form': async (form, f) => {

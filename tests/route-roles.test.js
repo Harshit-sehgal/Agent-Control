@@ -50,6 +50,7 @@ import {memoryRoutes} from '../src/routes-memory.js';
 import {connectorRoutes} from '../src/routes-connectors.js';
 import {liveRoutes} from '../src/routes-live.js';
 import {fileRoutes} from '../src/routes-files.js';
+import {eventRoutes} from '../src/routes-events.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -58,6 +59,7 @@ const MODULES = [
   ['publicRoutes', publicRoutes], ['workflowRoutes', workflowRoutes], ['groupRoutes', groupRoutes],
   ['accountRoutes', accountRoutes], ['workspaceRoutes', workspaceRoutes], ['pushRoutes', pushRoutes],
   ['aiRoutes', aiRoutes], ['memoryRoutes', memoryRoutes], ['connectorRoutes', connectorRoutes], ['liveRoutes', liveRoutes], ['fileRoutes', fileRoutes],
+  ['eventRoutes', eventRoutes],
 ];
 
 /** Registration must not need a live server. Anything a module reads from the
@@ -91,12 +93,18 @@ const PUBLIC_ROUTES = [
   // checks a single-use state nonce and a flow cookie (src/google.js). It takes no id.
   'GET /api/connectors/google/callback',
   'GET /api/connectors/mcp/callback',
+  // An outside event sender (a deploy hook, GitHub) answers no session. It must prove the request with an HMAC.
+  'POST /api/events/:workspace/:trigger',
 ];
 
 /** A public route with an id segment would be an unauthenticated lookup by id.
- * Empty on purpose; an entry needs a written reason (e.g. a signed one-time
- * token that the handler verifies). */
-const PUBLIC_WITH_PARAM = [];
+ * Each entry needs a written reason (e.g. a signed one-time token that the handler verifies). */
+const PUBLIC_WITH_PARAM = [
+  // Event triggers (src/routes-events.js): the workspace and trigger ids name the target, and the handler refuses
+  // any request whose HMAC-SHA256 of the raw body does not match the trigger's vault secret. Unknown, disabled and
+  // wrong-signature requests are not told apart beyond their status. No session is used or granted.
+  'POST /api/events/:workspace/:trigger',
+];
 
 /** Least role for the routes where "who may do this" is the whole point. */
 const LEAST_ROLE = {

@@ -1,0 +1,51 @@
+# Agent Control on a server behind a Cloudflare Tunnel, with no open ports.
+#
+#   cd deploy
+#   cp ../.env.example .env            # then set DASHBOARD_PASSWORD, PUBLIC_ORIGIN, AGENT_BROWSER_ALLOWLIST
+#   docker compose -f compose.cloudflare.yaml up -d --build              # the app and its browser
+#   # add TUNNEL_TOKEN to .env, then:
+#   docker compose -f compose.cloudflare.yaml --profile tunnel up -d     # the tunnel
+#
+# Nothing is published on the host. The app listens on the container's loopback
+# only, so it starts "this computer" (its own browser agent, see src/local-agent.js),
+# and cloudflared shares that network namespace to reach it. The public hostname
+# and a Cloudflare Access policy decide who may open it (docs/OPERATIONS.md).
+services:
+  app:
+    build:
+      context: ..
+      args:
+        # Chromium for the bots' shared browser. Its hosts still need AGENT_BROWSER_ALLOWLIST.
+        INSTALL_BROWSER: "1"
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      HOST: 127.0.0.1
+      PORT: "4173"
+      DATA_FILE: /data/state.json
+      HSTS: "1"
+      AGENT_BROWSER: "1"
+      # The owner's zone: quiet hours and weekday schedules are read in this zone, not the server's (UTC).
+      TZ: ${TZ:-Asia/Kolkata}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?Set PUBLIC_ORIGIN in deploy/.env to the tunnel hostname}
+    shm_size: 1gb            # Chromium uses shared memory; the default 64 MB makes pages crash
+    volumes:
+      - data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4173/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+  tunnel:
+    image: cloudflare/cloudflared:2026.11.1
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    # Share the app's network namespace, so the ingress is the app's loopback and
+    # nothing is published on the host.
+    network_mode: "service:app"
+    # Set TUNNEL_TOKEN in deploy/.env before starting this profile; cloudflared exits without it.
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
+    depends_on:
+      - app
+volumes:
+  data:

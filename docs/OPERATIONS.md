@@ -147,6 +147,52 @@ for (let i = 0; i < 12; i++)                       // 12 x 25 = 300 reads
 SQLite connection per workspace; model calls are bounded by `AI_MAX_CONCURRENCY`
 (default 4) and refused with `429` above it rather than queued without bound.
 
+## Contabo: tunnel, Access, encrypted backups (2026-11-20)
+
+The live install runs in Docker on the Contabo server from `/srv/agent-control/deploy`, with
+`compose.cloudflare.yaml`. Nothing is published on the host. The tunnel `agent-control` (Cloudflare
+Zero Trust) routes `https://agent-control.harshitsehgal.online` to the app's loopback, and a
+Cloudflare Access application (`agent-control`, policy "Owner only") lets in only the owner's
+email. An anonymous request gets a 302 to the Access login, and `/api/health` behind it does too.
+
+**Why the hostname is `agent-control`, not `agent`.** `agent.harshitsehgal.online` already points at
+another tunnel (`dsh`). Do not overwrite a DNS record that serves another service.
+
+**Timezone.** `TZ` defaults to `Asia/Kolkata` in `compose.cloudflare.yaml`. Quiet hours and weekday
+schedules are read in the server's local zone, so keep `TZ` set to the owner's zone.
+
+**Quiet hours.** Set `QUIET_HOURS=22:00-07:00` in `deploy/.env` to hold non-urgent phone pushes
+overnight. Approval requests (`ask` notifications) are always pushed. A held message stays in the app;
+it is not sent to the phone later.
+
+**Kill switch.** Schedules on a bot's page have a "Pause every schedule" button. It sets
+`schedulesPaused`, pauses every waiting schedule, and makes new schedules start paused. A run already
+in progress finishes. Turning it off resumes only the schedules the switch paused.
+API: `POST /api/automation/pause-all` and `POST /api/automation/resume-all`.
+
+**Encrypted backups.** `deploy/backup-encrypted.sh` runs on the server at 03:30 UTC (cron; 09:00 in Kolkata). It copies the
+database with sqlite's `.backup`, packs it with `vault.key` and `local-agent.json`, and encrypts it to
+a public certificate. The server holds only `/var/backups/agent-control/backup-cert.pem`; the private key
+is kept on the owner's machine (`~/.config/agent-control/backup-key.pem`, mode 600).
+The server keeps 14 copies. Backups live outside `/srv/agent-control` so a sync with `--delete`
+cannot remove them.
+
+- Copy the private key somewhere safe off the laptop (a password manager). Without it no backup can
+  be opened. Losing it means losing the backups.
+- `~/.local/bin/agent-control-pull-backup.sh` copies the newest encrypted backup to
+  `~/Backups/agent-control` at 03:45 laptop time. It runs only while the laptop is awake.
+- Restore check, on the owner's machine:
+
+  ```bash
+  deploy/restore-encrypted.sh ~/Backups/agent-control/<file>.tgz.enc ~/.config/agent-control/backup-key.pem /tmp/restore-check
+  ```
+
+  It decrypts, unpacks, and runs `PRAGMA integrity_check`. Delete the restored folder afterwards: it
+  holds the vault key in plain form.
+
+**Phone approvals.** Approval requests reach the phone as web push. Install the app on the phone and
+allow notifications once.
+
 ## Known limits
 
 - One Node process per install; SQLite is single-writer. Scale vertically, not
@@ -154,3 +200,35 @@ SQLite connection per workspace; model calls are bounded by `AI_MAX_CONCURRENCY`
 - Push delivery, restore drills and long-running workloads are operational and
   must be validated on your own host (see above) — the code and tests prove the
   mechanics, not your environment.
+
+## Event triggers and memory switches (2026-11-21)
+
+- **Make a trigger.** `POST /api/triggers` with `name`, `botId`, `groupId`, `instruction`, and optionally
+  `cooldownMinutes` (0 to 1440) and `match: {path, op: "equals" | "contains", value}`. The response holds the
+  secret once and the event path, `/api/events/<workspace>/<trigger>`. Save the secret in the sender now.
+- **The sender** posts the raw JSON body with `X-Hub-Signature-256: sha256=<HMAC-SHA256 of the raw body, keyed by the secret>`.
+  GitHub's webhook setup does this when given the same secret. Set GitHub's content type to `application/json`;
+  the form-encoded option is refused (400), because the signed bytes must be JSON. A GitHub `ping` (sent when the
+  webhook is made) is signed and answered `ignored`, so it starts nothing.
+- **Answers.** `queued` (a run started), `duplicate` (same body within 24 hours), `cooldown`,
+  `ignored` (the condition did not match), `held` (kill switch on). Any refusal (bad signature, unknown or disabled trigger, unknown workspace) is the same 401. Past 60 events a minute from one address to one trigger, the answer is 429.
+- **Cloudflare Access.** Senders cannot log in, so the event path needs a bypass rule for
+  `agent-control.harshitsehgal.online/api/events/*`. That is your decision; the app does not
+  change Access. Without it, the sender gets the Access login page.
+- **Rotate or switch off.** `POST /api/triggers/:id/rotate` (old secret stops at once),
+  `PATCH /api/triggers/:id` with `{enabled}`, `DELETE /api/triggers/:id`.
+- **Run safety.** A triggered run gets the event body fenced as outside data. Its sends and posts ask for
+  an answer even when Hands-off is on (a public issue or PR body is written by anyone). Payments and deletes ask as before.
+  The same holds for any run that has read outside content (a connector result or an opened page), not only event runs.
+- **Rules on and off.** `PATCH /api/memory/rules/:id` with `{bot, enabled: false}` keeps a rule and stops it
+  reaching the bot. A tidy-up pass keeps it off. A "next time ..." sentence from the owner is saved as a rule.
+
+## Hardening pass (2026-11-21)
+
+- **Secrets file.** `.env` should be owner-only (`chmod 600 .env`). The server warns at boot if it is not.
+- **Vault key.** Without `MASTER_KEY` the key is `vault.key` beside the database. Set `MASTER_KEY` from a secret store to keep the key apart from the data.
+- **Database files.** The database, its WAL and its shared-memory file are owner-only. The process also sets `umask 077`, so backups and the vault key it writes are private.
+- **Health.** `/api/health` answers 503 when a store cannot be read or a started queue has stopped sweeping for over a minute. The container health check reads that.
+- **Sign-in.** The password check runs on the thread pool, so a sign-in does not stop the event loop.
+- **Rollback.** `deploy/rollback.sh <commit>` takes an encrypted backup first (it refuses to run without a backup certificate unless `ROLLBACK_SKIP_BACKUP=1`), builds that commit from a temporary checkout, restarts the app and waits for it to become healthy. The data volume is not reverted, and a build older than the database schema refuses to start: then restore the backup taken before the upgrade. Not yet run against the live host.
+

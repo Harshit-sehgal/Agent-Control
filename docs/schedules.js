@@ -29,6 +29,16 @@ export function cleanAt(value) {
 }
 
 export const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+/** Which days a daily schedule runs: Monday to Friday, or Saturday and Sunday. '' or absent means every day. */
+export const DAY_RULES = ['weekdays', 'weekends'];
+/** Move a planned time forward, one step (`step` ms) at a time, until it falls on a day the rule allows (at most a week). */
+export function skipToDays(time, step, rule) {
+  if (!DAY_RULES.includes(rule)) return time;
+  const allowed = day => (rule === 'weekdays' ? day >= 1 && day <= 5 : day === 0 || day === 6);
+  let next = time;
+  for (let i = 0; i < 7 && !allowed(new Date(next).getDay()); i++) next += step;
+  return next;
+}
 /** "Mon", "monday", "Mondays" as "monday", or '' when it is not a day of the week. */
 export function cleanDay(value) {
   const text = String(value ?? '').trim().toLowerCase().replace(/s$/, '');
@@ -36,10 +46,11 @@ export function cleanDay(value) {
 }
 
 /** The Schedule form's "How often" choices; "week:<day>" is weekly on that day. */
-export const SCHEDULE_OFTEN = [['1440', 'Every day'], ['60', 'Every hour'], ...DAYS.slice(1).concat(DAYS[0]).map(day => [`week:${day}`, `Every ${day[0].toUpperCase()}${day.slice(1)}`]), ['', 'Once']];
+export const SCHEDULE_OFTEN = [['1440', 'Every day'], ['60', 'Every hour'], ['weekdays', 'Every weekday'], ['weekends', 'Every weekend'], ...DAYS.slice(1).concat(DAYS[0]).map(day => [`week:${day}`, `Every ${day[0].toUpperCase()}${day.slice(1)}`]), ['', 'Once']];
 /** A "How often" choice as {every, on}. */
 export function scheduleChoice(value) {
   const text = String(value ?? '');
+  if (DAY_RULES.includes(text)) return {every: 1440, on: '', days: text};
   if (text.startsWith('week:')) return {every: 10080, on: cleanDay(text.slice(5))};
   return {every: Number(text) || undefined, on: ''};
 }
@@ -62,31 +73,34 @@ export function nextAtFor(at, now = new Date(), on = '') {
 }
 
 /** "every day at 08:00", "every 45 minutes", "once at 17:30". */
-export function whenWords({every, at, on} = {}) {
+export function whenWords({every, at, on, days} = {}) {
   const time = cleanAt(at), when = time ? ` at ${time}` : '', day = cleanDay(on);
   if (!every) return `once${when || ' soon'}`;
-  const unit = every === 1440 ? 'every day' : every === 60 ? 'every hour' : every === 10080 ? (day ? `every ${day[0].toUpperCase()}${day.slice(1)}` : 'every week') : `every ${every} minutes`;
+  const unit = every === 1440 && DAY_RULES.includes(days) ? `every ${days === 'weekdays' ? 'weekday' : 'weekend'}` : every === 1440 ? 'every day' : every === 60 ? 'every hour' : every === 10080 ? (day ? `every ${day[0].toUpperCase()}${day.slice(1)}` : 'every week') : `every ${every} minutes`;
   return `${unit}${when}`;
 }
 
-const live = t => t?.kind === 'bot-task' && ['queued', 'running'].includes(t.status);
-const timingOf = t => ({every: t.payload?.kind === 'interval' ? Number(t.payload.intervalMinutes) || Number(t.intervalMinutes) : undefined, at: t.payload?.at || '', on: t.payload?.on || ''});
+const live = t => t?.kind === 'bot-task' && ['queued', 'running', 'paused'].includes(t.status);
+const timingOf = t => ({every: t.payload?.kind === 'interval' ? Number(t.payload.intervalMinutes) || Number(t.intervalMinutes) : undefined, at: t.payload?.at || '', on: t.payload?.on || '', days: t.payload?.days || ''});
 
 /** A bot's live schedules (or every bot's, with no id), newest first: id, botId, what, when, next run, and why the
  * last try failed (null once one succeeds), so a schedule that keeps failing says so on its card. */
 export function scheduleRows(state, botId = null) {
   return (state?.tasks || []).filter(t => live(t) && (!botId || t.payload?.botId === botId))
-    .map(t => ({id: t.id, botId: t.payload?.botId || null, what: String(t.payload?.message || ''), when: whenWords(timingOf(t)), nextAt: t.runAt || null, lastError: t.lastError ? String(t.lastError).slice(0, 300) : null}));
+    .map(t => ({id: t.id, botId: t.payload?.botId || null, what: String(t.payload?.message || ''), when: whenWords(timingOf(t)), nextAt: t.runAt || null, paused: t.status === 'paused', lastError: t.lastError ? String(t.lastError).slice(0, 300) : null}));
 }
 
 /** The `POST /api/tasks` body for a schedule card or the Schedule form, with the first run at the next local
  * `at` (the browser's clock, so "08:00" means the owner's 8 in the morning). */
-export function scheduleTaskBody({botId, groupId, message, every, at, on}, now = new Date()) {
+export function scheduleTaskBody({botId, groupId, message, every, at, on, days}, now = new Date()) {
   // A weekly schedule on a named day runs first on that day; the timer then steps a week from the planned time.
   const day = every === 10080 ? cleanDay(on) : '';
-  const time = cleanAt(at) || (day ? '09:00' : ''), first = time ? nextAtFor(time, now, day) : null;
+  // A weekdays or weekends schedule runs daily, but its first run must also land on an allowed day.
+  const rule = every === 1440 && DAY_RULES.includes(days) ? days : '';
+  const time = cleanAt(at) || (day ? '09:00' : ''), first0 = time ? nextAtFor(time, now, day) : null;
+  const first = first0 && rule ? new Date(skipToDays(first0.getTime(), 86400000, rule)) : first0;
   const timing = every ? {kind: 'interval', intervalMinutes: every} : {kind: 'once'};
-  return {kind: 'bot-task', payload: {groupId, botId, message, ...timing, ...(time ? {at: time} : {}), ...(day ? {on: day} : {}), ...(first ? {nextAt: first.toISOString()} : {})}};
+  return {kind: 'bot-task', payload: {groupId, botId, message, ...timing, ...(time ? {at: time} : {}), ...(day ? {on: day} : {}), ...(rule ? {days: rule} : {}), ...(first ? {nextAt: first.toISOString()} : {})}};
 }
 
 /** Failures that waiting will not fix: the schedule stops at once instead of spending a run each time. */

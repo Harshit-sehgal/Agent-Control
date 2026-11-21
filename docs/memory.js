@@ -17,7 +17,7 @@
  * survives even with no AI provider. `mergeConsolidation` applies the result of
  * one model-written consolidation pass. Both are pure and bounded.
  */
-import {cleanText} from './core.js?v=2c827d8a6b';
+import {cleanText} from './core.js?v=7bcf0dde92';
 
 export const MEMORY_VERSION = 1;
 export const MAX_RULES = 50;
@@ -111,13 +111,13 @@ const DENIES = /\b(can(?:no|')t|can not|unable to|not able to|do(?:es)? not have
 export const deniesAbility = text => DENIES.test(String(text || ''));
 
 /** The owner asked for this to be kept, in so many words (a one-off task is not). */
-const KEEP_ASKED = /\b(remember|keep in mind|from now on|going forward|for future)\b/i;
+const KEEP_ASKED = /\b(remember|keep in mind|from now on|going forward|for future|next time)\b/i;
 const words = text => new Set(normalize(text).replace(/[^a-z0-9 ]+/g, ' ').split(' ').filter(w => w.length > 3 && !['remember', 'prefer', 'prefers', 'owner', 'user'].includes(w)));
 const sameNote = (a, b) => { const x = words(a), y = words(b); if (!x.size) return true; let hit = 0; for (const w of x) if (y.has(w)) hit++; return hit / x.size >= 0.6; };
 
 /** The rulebook as prompt lines: newest rules first, bounded by characters. */
 export function ruleLines(book, maxChars = 1600) {
-  const rules = (book?.rules || []).filter(r => r && r.text && !deniesAbility(r.text)).slice(0, 30);
+  const rules = (book?.rules || []).filter(r => r && r.text && r.enabled !== false && !deniesAbility(r.text)).slice(0, 30);
   const kept = [];
   let total = 0;
   for (const rule of rules) {
@@ -172,7 +172,7 @@ export function memoryBlock(memory) {
  * has to address the assistant ("always", "don't", "from now on", "you
  * should"), not merely contain a modal: "we must ship today" is a fact about
  * the task, not a rule for every later turn. */
-const DURABLE = /^(?:always|never|don'?t|do not|avoid|prefer|use|keep|reply|answer|write|make sure|from now on|going forward|remember|please)\b|\byou(?:'re| are| should| must| always| never| do not| don'?t)\b|\bfrom now on\b|\bgoing forward\b|\bremember (?:to|that|this)\b|\bkeep in mind\b/i;
+const DURABLE = /^(?:next time|always|never|don'?t|do not|avoid|prefer|use|keep|reply|answer|write|make sure|from now on|going forward|remember|please)\b|\byou(?:'re| are| should| must| always| never| do not| don'?t)\b|\bfrom now on\b|\bgoing forward\b|\bremember (?:to|that|this)\b|\bkeep in mind\b|\bnext time\b/i;
 const QUESTION = /\?\s*$/;
 const SPLIT = /(?<=[.!?])\s+|\n+/;
 
@@ -258,6 +258,16 @@ export function editRule(state, key, ruleId, text, {now = new Date().toISOString
 export function bookKeyOfRule(state, ruleId) {
   for (const [key, book] of Object.entries(memoryState(state).rulebooks)) if ((book?.rules || []).some(rule => rule.id === ruleId)) return key;
   return null;
+}
+
+/** Turn one rule on or off. A disabled rule is kept, never sent to a bot turn, and survives a tidy-up pass. */
+export function setRuleEnabled(state, key, ruleId, enabled, {now = new Date().toISOString()} = {}) {
+  const book = findRulebook(state, key);
+  const rule = book?.rules.find(r => r.id === ruleId);
+  if (!rule) throw Object.assign(new Error('Rule not found.'), {status: 404});
+  rule.enabled = enabled !== false;
+  book.updatedAt = now;
+  return rule;
 }
 
 export function removeRule(state, key, ruleId, now = new Date().toISOString()) {
@@ -458,10 +468,12 @@ export function mergeConsolidation(state, key, result, {now = new Date().toISOSt
   const kept = (result.rules || []).filter(text => !deniesAbility(text));
   // What the owner said in so many words survives a tidy-up that dropped it (a rephrasing of it counts as kept).
   const owner = (Array.isArray(sentPending) ? sentPending : book.pending || []).filter(text => text && KEEP_ASKED.test(text) && !deniesAbility(text) && !kept.some(k => sameNote(text, k)));
+  // A rule the owner turned off stays off: a pass that leaves it out keeps it (disabled), and one that writes it again keeps it disabled.
+  const parked = [...existing.values()].filter(rule => rule.enabled === false && !kept.some(text => normalize(text) === normalize(rule.text)));
   book.rules = [...kept.map(text => {
     const old = existing.get(normalize(text));
     return old ? {...old, text, updatedAt: now} : {id: cleanText(makeId(), 64), text, source: 'model', createdAt: now, updatedAt: now, uses: 0};
-  }), ...owner.map(text => ({id: cleanText(makeId(), 64), text: cleanText(text, MAX_RULE_CHARS), source: 'user', createdAt: now, updatedAt: now, uses: 0}))].slice(0, MAX_RULES);
+  }), ...owner.map(text => ({id: cleanText(makeId(), 64), text: cleanText(text, MAX_RULE_CHARS), source: 'user', createdAt: now, updatedAt: now, uses: 0})), ...parked].slice(0, MAX_RULES);
   // One pass rewrites one chat's recap and one model's book. A recap of this
   // conversation must not become the model-wide notes of every other chat that
   // model serves, so the two only meet when the pass had no chat at all.
@@ -510,7 +522,7 @@ export function noteTurn(state, key, {userText = '', botText = '', now = new Dat
  * recap and the company notebook: what a bot's profile shows. */
 export function publicMemory(state, {bot = null} = {}) {
   const memory = memoryState(state);
-  const rules = book => (book?.rules || []).map(rule => ({id: rule.id, text: rule.text, source: rule.source, createdAt: rule.createdAt}));
+  const rules = book => (book?.rules || []).map(rule => ({id: rule.id, text: rule.text, source: rule.source, createdAt: rule.createdAt, enabled: rule.enabled !== false}));
   const company = {rules: rules(own(memory.rulebooks, COMPANY_KEY))};
   if (bot) {
     const book = own(memory.rulebooks, botKey(bot));

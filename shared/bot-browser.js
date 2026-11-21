@@ -22,7 +22,7 @@
  */
 import {cleanText, validHttpUrl} from './core.js';
 import {fail} from './errors.js';
-import {decide, createAsk, scopeOf, declinedNeed} from './asks.js';
+import {decide, createAsk, scopeOf, declinedNeed, outsideRead} from './asks.js';
 import {controlFence} from './reply-blocks.js';
 import {BACKSTOP, pagesCap, roundsCap} from './limits.js';
 import {appForHost} from './app-catalog.js';
@@ -623,7 +623,7 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
     if (no) { say(`${bot.name} asked to ${describe(item.request)}, but you declined that in this task, so it was not asked again.`); invalid.push(`the owner declined ${no.action === 'browser.use' ? 'opening' : no.action} ${hostOf(no.target)} in this task; do not ask for it again.`); continue; }
     // Per page: every site the request reaches that is not one of the run's private hosts asks, including one a
     // `navigate` step opens after a private first page.
-    const decision = decide(state, bot, needs, {readPrivate: need => guarded && need.action === BROWSER_PERMISSION && !privateHosts.has(hostOf(need.target))});
+    const decision = decide(state, bot, needs, {readPrivate: need => guarded && need.action === BROWSER_PERMISSION && !privateHosts.has(hostOf(need.target)), outside: run?.outsideInput === true, tainted: guarded || outsideRead(state, {runId, chatKey, outsideInput: run?.outsideInput === true})});
     if (decision.verdict === 'deny') { say(`${bot.name} asked to ${describe(item.request)}. ${decision.message}`); continue; }
     // `approved`: the risky classes this request is cleared for once it is sent (a grant, or the owner's
     // answer to its ask), each for the origin it runs on ("send@https://b.example"). Written here after the

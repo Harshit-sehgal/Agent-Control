@@ -7,7 +7,7 @@
  * browser-local demo both run them, so the two backends cannot drift.
  */
 import {activity, cleanText} from './core.js';
-import {cleanDay} from './schedules.js';
+import {cleanDay, DAY_RULES, skipToDays} from './schedules.js';
 
 export const MAX_ATTEMPTS_DEFAULT = 5;
 
@@ -63,7 +63,8 @@ const PAYLOAD_KINDS = {
     const on = body.kind === 'interval' && Number(body.intervalMinutes) === 10080 ? cleanDay(body.on) : '';
     // The daily briefing (shared/briefing.js) is marked so its run is given the workspace's facts; nothing else is kept.
     const brief = body.brief === 'daily' ? {brief: 'daily'} : {};
-    return {groupId, botId, message, label: cleanText(body.label, 200) || message.slice(0, 60), ...timing(body), ...(at ? {at} : {}), ...(on ? {on} : {}), ...brief};
+    const days = dayRule(body);
+    return {groupId, botId, message, label: cleanText(body.label, 200) || message.slice(0, 60), ...timing(body), ...(at ? {at} : {}), ...(on ? {on} : {}), ...(days ? {days} : {}), ...brief, ...(body.source === 'event' ? {source: 'event'} : {})};
   },
   'group-run': body => ({groupId: cleanText(body.groupId, 64), message: cleanText(body.message, 4000), directBotId: cleanText(body.directBotId, 64) || null}),
   'agent-job': body => ({action: cleanText(body.action, 64), params: body.params && typeof body.params === 'object' ? body.params : {}, agentId: cleanText(body.agentId, 64) || null}),
@@ -80,6 +81,13 @@ export function fail(message, status = 400) {
   throw Object.assign(new Error(message), {status});
 }
 
+/** Which days a daily schedule runs (`DAY_RULES` in shared/schedules.js), or '' for every day. */
+function dayRule(body) {
+  if (body.days === undefined || body.days === null || body.days === '') return '';
+  if (body.kind !== 'interval' || Number(body.intervalMinutes) !== 1440) fail('Weekdays or weekends can only be used with a daily schedule.');
+  if (!DAY_RULES.includes(body.days)) fail('Choose weekdays or weekends.');
+  return body.days;
+}
 /** The schedule part of a scheduled bot task. */
 function timing(body) {
   if (body.kind === 'once') {
@@ -133,6 +141,9 @@ export function retryDelay(attempt, now = Date.now()) {
 export function enqueueTask(state, body = {}) {
   const kind = cleanText(body.kind, 64);
   const payload = buildPayload(kind, body.payload || body);
+  // A schedule made while the kill switch is on starts held. The marker lives in the payload, the one part of a row the store keeps whole.
+  const held = kind === 'bot-task' && state.schedulesPaused === true;
+  if (held) payload.pausedBy = 'switch';
   const idempotencyKey = body.idempotencyKey ? cleanText(body.idempotencyKey, 120) : null;
   if (kind === 'bot-task') {
     const group = (state.groups || []).find(g => g.id === payload.groupId);
@@ -159,7 +170,7 @@ export function enqueueTask(state, body = {}) {
       existing.kind = kind;
       existing.title = cleanText(body.title, 200) || taskTitle(kind, payload);
       existing.payload = payload;
-      existing.status = 'queued';
+      existing.status = held ? 'paused' : 'queued';
       existing.runAt = payload.nextAt || new Date().toISOString();
       existing.intervalMinutes = intervalMinutes;
       existing.attempts = 0;
@@ -176,7 +187,9 @@ export function enqueueTask(state, body = {}) {
   }
   const task = {
     id: crypto.randomUUID(), kind, title: cleanText(body.title, 200) || taskTitle(kind, payload),
-    payload, status: 'queued', runAt: payload.nextAt || new Date().toISOString(), intervalMinutes,
+    // While the kill switch is on (state.schedulesPaused), a new schedule starts paused, so nothing runs until the owner resumes.
+    payload, status: held ? 'paused' : 'queued',
+    runAt: payload.nextAt || new Date().toISOString(), intervalMinutes,
     idempotencyKey, attempts: 0, maxAttempts: Math.max(1, Math.min(20, Number(body.maxAttempts) || MAX_ATTEMPTS_DEFAULT)),
     leaseOwner: null, leaseUntil: null, lastError: null, result: null,
     createdBy: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), completedAt: null,
@@ -239,6 +252,7 @@ export function completeTask(state, id, result = null, now = Date.now()) {
     const step = task.intervalMinutes * 60000, planned = Date.parse(task.runAt);
     let next = Number.isFinite(planned) && planned <= now ? planned + step : now + step;
     if (next <= now) next += Math.ceil((now - next + 1) / step) * step;
+    next = skipToDays(next, step, task.payload?.days);
     task.runAt = new Date(next).toISOString();
     task.completedAt = null;
     task.attempts = 0;
@@ -366,6 +380,69 @@ export function cancelTask(state, id) {
   task.updatedAt = new Date().toISOString();
   activity(state, 'task', `Cancelled task: ${task.title}`, {taskId: task.id});
   return task;
+}
+
+/** Pause one waiting schedule. It keeps its place and its record; `claimTasks` never takes a paused row.
+ * A running one cannot be paused: it finishes first. */
+export function pauseTask(state, id) {
+  const task = state.tasks.find(t => t.id === id);
+  if (!task) fail('Task not found.', 404);
+  if (task.kind !== 'bot-task') fail('Only a schedule can be paused.', 409);
+  if (task.status === 'running') fail('A running task cannot be paused. Wait for it to finish.', 409);
+  if (task.status !== 'queued') fail('Only a schedule that is waiting can be paused.', 409);
+  task.status = 'paused';
+  task.payload = {...task.payload, pausedBy: 'owner'};
+  task.updatedAt = new Date().toISOString();
+  activity(state, 'task', `Paused task: ${task.title}`, {taskId: task.id});
+  return task;
+}
+
+/** Resume a paused schedule. A time that already passed while it was paused becomes "now", so it runs once, not as a backlog. */
+export function resumeTask(state, id, now = Date.now()) {
+  const task = state.tasks.find(t => t.id === id);
+  if (!task) fail('Task not found.', 404);
+  if (task.status !== 'paused') fail('Only a paused task can be resumed.', 409);
+  const planned = Date.parse(task.runAt);
+  task.status = 'queued';
+  task.payload = {...task.payload, pausedBy: null};
+  task.runAt = new Date(Number.isFinite(planned) && planned > now ? planned : now).toISOString();
+  task.updatedAt = new Date(now).toISOString();
+  activity(state, 'task', `Resumed task: ${task.title}`, {taskId: task.id});
+  return task;
+}
+
+/** The kill switch: pause every waiting schedule and hold new ones until resumed. Notices and
+ * running work are left alone. A run already in progress finishes; nothing new starts. */
+export function pauseAllSchedules(state) {
+  state.schedulesPaused = true;
+  let count = 0;
+  const stamp = new Date().toISOString();
+  for (const task of state.tasks) {
+    if (task.kind !== 'bot-task' || task.status !== 'queued') continue;
+    task.status = 'paused';
+    task.payload = {...task.payload, pausedBy: 'switch'};
+    task.updatedAt = stamp;
+    count++;
+  }
+  activity(state, 'task', `Kill switch on: ${count} schedule(s) paused.`);
+  return count;
+}
+
+/** Turn the kill switch off. Only the schedules the switch paused come back; one the owner paused by hand stays paused. */
+export function resumeAllSchedules(state, now = Date.now()) {
+  state.schedulesPaused = false;
+  let count = 0;
+  for (const task of state.tasks) {
+    if (task.kind !== 'bot-task' || task.status !== 'paused' || task.payload?.pausedBy !== 'switch') continue;
+    const planned = Date.parse(task.runAt);
+    task.status = 'queued';
+    task.payload = {...task.payload, pausedBy: null};
+    task.runAt = new Date(Number.isFinite(planned) && planned > now ? planned : now).toISOString();
+    task.updatedAt = new Date(now).toISOString();
+    count++;
+  }
+  activity(state, 'task', `Kill switch off: ${count} schedule(s) resumed.`);
+  return count;
 }
 
 /** Tasks whose lease has expired (a crashed worker) are visible as interrupted

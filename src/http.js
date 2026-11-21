@@ -37,6 +37,17 @@ export function send(res,status,value,headers={}){
   res.writeHead(status,head);res.end(body);
 }
 
+/** Whether the operator says a reverse proxy is in front (TRUST_PROXY=1). Only then are forwarded headers believed. */
+export const trustProxy = () => process.env.TRUST_PROXY === '1';
+/** The address a request came from. Behind a proxy the socket is the proxy, so the forwarded address is used, and the
+ * rightmost entry is the one the proxy appended: the leftmost is whatever the client sent. */
+export function clientIpOf(req) {
+  if (trustProxy()) {
+    const hops = String(req.headers['x-forwarded-for'] || '').split(',').map(h => h.trim()).filter(Boolean);
+    if (hops.length) return hops[hops.length - 1];
+  }
+  return req.socket?.remoteAddress || 'unknown';
+}
 export function cookie(req, key) {
   const found = (req.headers.cookie || '').split(';').map(x => x.trim()).find(x => x.startsWith(key + '='));
   return found?.slice(key.length + 1);

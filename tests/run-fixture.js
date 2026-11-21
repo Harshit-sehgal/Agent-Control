@@ -19,6 +19,8 @@ export async function company(t, {extra = {}} = {}) {
   t.after(() => rm(dir, {recursive: true, force: true}));
   const ids = {atlas: 'atlas'};
   await store.update(s => {
+    // These runs test the ask cards, so they start on Balanced; a new install now starts on Hands-off.
+    s.handsOff = false;
     const add = (key, name, instructions, settings = {}, more = {}) => { ids[key] = wf.addBot(s, 'home', {name, instructions, settings, ...more}).id; };
     add('ops', 'Ops lead', 'Runs operations: mail, calendars and logistics for the owner.');
     add('mail', 'Mailroom', 'Reads and drafts email for the owner.', {reportsTo: ids.ops});

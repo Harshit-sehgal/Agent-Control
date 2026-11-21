@@ -130,7 +130,7 @@ function lastCallOrStop(live,state){
 }
 /** Pages one message may open before the bot is told to answer with what it has. */
 export const PAGE_NUDGE=15;
-export async function queueGroupRun(store,{groupId,message,directBotId=null,checkpoints=false,chatKey=null,browserDepth=0,confirmPlan,taskId=null,anyway=false,unattended=false,scheduleId=null,wait=false}={}){
+export async function queueGroupRun(store,{groupId,message,directBotId=null,checkpoints=false,chatKey=null,browserDepth=0,confirmPlan,taskId=null,anyway=false,unattended=false,scheduleId=null,wait=false,outsideInput=false}={}){
   // Validate the request against the store first so a missing group reports 404
   // and a busy group reports 409, instead of the AI-key check shadowing them
   // with a misleading 422 on an instance that simply has no key yet.
@@ -170,6 +170,8 @@ export async function queueGroupRun(store,{groupId,message,directBotId=null,chec
     if(scheduleId)run.scheduleId=scheduleId;
     // Nobody typed in this run (a timer started it): an ask it makes lapses after 24 hours.
     if(unattended)run.unattended=true;
+    // A run an outside event started: its text came from outside, so Hands-off does not cover its sends (shared/asks.js).
+    if(outsideInput)run.outsideInput=true;
     if(run.status!=='awaiting_plan')wakeBots(group,run.task?.woke);
     if(run.task)say(s,run,{id:randomUUID(),role:'system',text:`${run.task.summary} ${run.task.doneWhen}${run.status==='awaiting_plan'?' Start it when you are ready.':''}`,runId:run.id,at:stamp()});
     // The owner's workspace limit on steps (Settings → Limits), when there is one, bounds every team.
@@ -225,7 +227,7 @@ export async function runBotTask(store,task,{queue=queueGroupRun,available=aiAva
   // line for a run that never started; the queue retries those.
   // The daily briefing is given the workspace's facts as they are now (shared/briefing.js), so it reports real work.
   const said=task.payload?.brief==='daily'?briefingMessage(message,store.read()):message;
-  const result=await queue(store,{groupId,message:said,directBotId:botId,chatKey,confirmPlan:false,unattended:true,scheduleId:task.id});
+  const result=await queue(store,{groupId,message:said,directBotId:botId,chatKey,confirmPlan:false,unattended:true,scheduleId:task.id,...(task.payload?.source==='event'?{outsideInput:true}:{})});
   // The run is queued and durable; the line in the conversation is not. A failed
   // note used to reject the handler, which the queue retried - and the retry
   // queued the same message again, so one reminder cost two model runs. Only a

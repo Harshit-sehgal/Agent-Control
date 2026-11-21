@@ -9,6 +9,7 @@ import {openStore as openSqliteStore} from './sqlite-store.js';
 import {HSTS_ENABLED} from './http.js';
 import {aiEnabled,aiModel,aiProvider} from './ai.js';
 import {smtpConfig} from './mail.js';
+import {envModeWarning} from './env-mode.js';
 import {Auth} from './auth.js';
 import {openWorkspaces} from './workspaces.js';
 import {createPush} from './push.js';
@@ -26,6 +27,8 @@ const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 // The /api/health version is the package version, not a literal, so a release
 // bump cannot drift away from the health endpoint.
 const VERSION=JSON.parse(await fs.readFile(path.join(ROOT,'package.json'),'utf8')).version;
+// Files this process creates (the database, its WAL, backups, the vault key) are owner-only by default.
+process.umask(0o077);
 const PORT=Number(process.env.PORT||4173);
 const HOST=process.env.HOST||'127.0.0.1';
 const STORE_PATH=process.env.DATA_FILE||path.join(ROOT,'data','state.json');
@@ -72,6 +75,11 @@ function preflight(){
   if(HOST!=='127.0.0.1'&&HOST!=='localhost'&&!origin.startsWith('https://'))console.warn('config: binding to '+HOST+' without HTTPS. Put TLS in front (reverse proxy).');
   // A mailbox typo should surface at boot, not on the first reminder: an
   // impossible value throws here, and a risky one is only warned about.
+  // Without MASTER_KEY the vault key is a file beside the database, so anyone who can read the data directory has both.
+  if(!process.env.MASTER_KEY)console.warn('config: MASTER_KEY is not set, so the vault key sits beside the database (vault.key). Set MASTER_KEY from a secret store to keep it apart.');
+  // The secrets file must not be readable by other local users (it holds the AI key and the dashboard password).
+  const envWarning=envModeWarning(path.join(ROOT,'.env'));
+  if(envWarning)console.warn(envWarning);
   const mail=smtpConfig();
   if(mail){
     if(!mail.requireTls&&!mail.secure)console.warn('config: SMTP_REQUIRE_TLS=0, so mail may be submitted in cleartext. Only do that for a relay on your own network.');

@@ -1,6 +1,8 @@
 /** Routes that work without a browser session: health, sign-in and password
  * reset, and the local-agent protocol. Each
  * one authenticates in its own way, or is safe to answer to anyone. */
+import {healthOf} from './health.js';
+import {lastSweepAt} from './queue.js';
 import {activity} from '../shared/core.js';
 import * as wf from '../shared/workflow.js';
 import * as agent from './agent.js';
@@ -9,7 +11,7 @@ import {queueGroupRun, resumeBrowserRun} from './coordination.js';
 import {runOneBot} from './routes-groups.js';
 import {sessionCookie, clearCookie, DEFAULT_WORKSPACE, resolveAccount} from './auth.js';
 import {sha256} from './vault.js';
-import {fail, cookie, safeJson} from './http.js';
+import {fail, cookie, safeJson, clientIpOf, trustProxy as trustProxyEnv} from './http.js';
 import {reply} from './router.js';
 
 // A page read by this server's own browser finishes exactly where a device's
@@ -64,29 +66,19 @@ export function publicRoutes(router, {auth, workspaces, version}) {
   const full = (key, limit) => rateLimitOn() && recordOf(key).count >= limit;
   const miss = key => { if (rateLimitOn()) recordOf(key).count++; };
 
-  // Behind a reverse proxy the socket address is the proxy, so the limiter (and
-  // the session's recorded ip) would collapse every client into one bucket.
-  // The forwarded headers are only trusted when the operator says a proxy is in
-  // front (TRUST_PROXY=1), for both the client ip and the https hint.
-  const trustProxy = () => process.env.TRUST_PROXY === '1';
-  const clientIp = req => {
-    if (trustProxy()) {
-      // The *rightmost* entry is the one the proxy in front of us appended. The
-      // leftmost is whatever the client sent, so keying the limiter on it would
-      // let an attacker rotate a fake X-Forwarded-For per guess and never be
-      // counted.
-      const hops = String(req.headers['x-forwarded-for'] || '').split(',').map(h => h.trim()).filter(Boolean);
-      if (hops.length) return hops[hops.length - 1];
-    }
-    return req.socket.remoteAddress || 'unknown';
-  };
+  const trustProxy = () => trustProxyEnv();
+  const clientIp = clientIpOf;
 
   // The workspace a device was paired in. An unknown id falls through to the
   // first workspace, whose signature check refuses it.
   const agentStore = c => workspaces.holding('SELECT 1 AS x FROM agents WHERE id=?', String(c.req.headers['x-agent-id'] || '')) || workspaces.get(DEFAULT_WORKSPACE);
 
   // Health checks and uptime probes commonly use HEAD; the server answers it bodyless.
-  for (const method of ['GET', 'HEAD']) router.add(method, '/api/health', 'public', () => ({ok: true, version}));
+  // Ok only while every store answers and every started queue is sweeping; otherwise 503, which the container's
+  // health check reads as unhealthy. The body says nothing about which part failed.
+  const health = () => healthOf(workspaces.stores?.() || [], {lastSweep: lastSweepAt})
+    ? {ok: true, version} : reply(503, {ok: false});
+  for (const method of ['GET', 'HEAD']) router.add(method, '/api/health', 'public', health);
 
   router.add('POST', '/api/login', 'public', async c => {
     const ip = clientIp(c.req);
@@ -108,7 +100,7 @@ export function publicRoutes(router, {auth, workspaces, version}) {
     const accountKey = `login:account:${account}`;
     const accountFull = Boolean(account) && full(accountKey, LOGIN_ACCOUNT_ATTEMPTS);
     if (account) attempt(`${accountKey}:${ip}`, LOGIN_ATTEMPTS);
-    const result = auth.login({email: b.email, password: b.password}, {ip, userAgent: c.req.headers['user-agent']});
+    const result = await auth.loginAsync({email: b.email, password: b.password}, {ip, userAgent: c.req.headers['user-agent']});
     if (!result.ok) {
       if (account) miss(accountKey);
       if (accountFull) tooMany();

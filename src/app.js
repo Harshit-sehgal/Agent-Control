@@ -39,6 +39,7 @@ import {workspaceRoutes} from './routes-workspaces.js';
 import {pushRoutes} from './routes-push.js';
 import {aiRoutes} from './routes-ai.js';
 import {memoryRoutes} from './routes-memory.js';
+import {eventRoutes} from './routes-events.js';
 import {connectorRoutes} from './routes-connectors.js';
 import {liveRoutes} from './routes-live.js';
 import {fileRoutes} from './routes-files.js';
@@ -139,6 +140,7 @@ export function createApp({store, auth, workspaces, push, version}) {
   pushRoutes(router, app);
   aiRoutes(router, app);
   memoryRoutes(router);
+  eventRoutes(router, app);
   connectorRoutes(router, app);
   liveRoutes(router, app);
   fileRoutes(router);
