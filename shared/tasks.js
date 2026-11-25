@@ -216,6 +216,8 @@ export function claimTasks(state, {workerId, now = Date.now(), limit = 5, leaseM
   for (const task of state.tasks) {
     if (claimed.length >= limit) break;
     if (task.status !== 'queued') continue;
+    // The kill switch holds every schedule, including one a hand resume or an older build left queued.
+    if (task.kind === 'bot-task' && state.schedulesPaused === true) continue;
     if (Date.parse(task.runAt) > now) continue;
     if (task.leaseUntil && Date.parse(task.leaseUntil) > now) continue;
     task.status = 'running';
@@ -226,6 +228,28 @@ export function claimTasks(state, {workerId, now = Date.now(), limit = 5, leaseM
     claimed.push(task);
   }
   return claimed;
+}
+
+/** Put a task back in line. A schedule re-armed while the kill switch is on (a run that was already going when
+ * the owner stopped everything, its retry, a crashed worker's lease) waits as paused by the switch, so the
+ * switch's Resume brings it back and nothing new starts before then. */
+function requeue(state, task) {
+  if (task.kind === 'bot-task' && state.schedulesPaused === true) {
+    task.status = 'paused';
+    task.payload = {...(task.payload || {}), pausedBy: 'switch'};
+  } else {
+    task.status = 'queued';
+  }
+}
+
+/** The next window of a recurring task: from the planned time, not the finish, so "every day at 08:00" stays at
+ * 08:00 instead of drifting by however long each run took. A run that missed windows skips to the next one
+ * ahead, and a weekdays or weekends rule moves it to the next day it allows. */
+function nextWindow(task, now) {
+  const step = task.intervalMinutes * 60000, planned = Date.parse(task.runAt);
+  let next = Number.isFinite(planned) && planned <= now ? planned + step : now + step;
+  if (next <= now) next += Math.ceil((now - next + 1) / step) * step;
+  return skipToDays(next, step, task.payload?.days);
 }
 
 export function completeTask(state, id, result = null, now = Date.now()) {
@@ -246,14 +270,8 @@ export function completeTask(state, id, result = null, now = Date.now()) {
   clearMissed(task);
   // A recurring task re-arms itself for the next window instead of finishing.
   if (task.intervalMinutes) {
-    task.status = 'queued';
-    // From the planned time, not the finish: "every day at 08:00" stays at 08:00 instead of
-    // drifting by however long each run took. A run that missed windows skips to the next one ahead.
-    const step = task.intervalMinutes * 60000, planned = Date.parse(task.runAt);
-    let next = Number.isFinite(planned) && planned <= now ? planned + step : now + step;
-    if (next <= now) next += Math.ceil((now - next + 1) / step) * step;
-    next = skipToDays(next, step, task.payload?.days);
-    task.runAt = new Date(next).toISOString();
+    requeue(state, task);
+    task.runAt = new Date(nextWindow(task, now)).toISOString();
     task.completedAt = null;
     task.attempts = 0;
   }
@@ -319,13 +337,9 @@ export function failTask(state, id, message, now = Date.now(), {conflict = false
     if (task.intervalMinutes && !permanent) {
       clearRetryAnchor(task);
       task.payload = {...(task.payload || {}), [MISSED_WINDOWS]: (Number(task.payload?.[MISSED_WINDOWS]) || 0) + 1};
-      task.status = 'queued';
+      requeue(state, task);
       task.lastError = error;
-      // From the planned time, not the finish, as in completeTask.
-      const step = task.intervalMinutes * 60000, planned = Date.parse(task.runAt);
-      let next = Number.isFinite(planned) && planned <= now ? planned + step : now + step;
-      if (next <= now) next += Math.ceil((now - next + 1) / step) * step;
-      task.runAt = new Date(next).toISOString();
+      task.runAt = new Date(nextWindow(task, now)).toISOString();
       task.completedAt = null;
       task.attempts = 0;
       activity(state, 'task-retry', `Task missed its window and will run again at its next one: ${task.title}`, {taskId: task.id});
@@ -336,7 +350,7 @@ export function failTask(state, id, message, now = Date.now(), {conflict = false
       activity(state, 'task-error', `Task failed after ${task.attempts} attempts: ${task.title}`, {taskId: task.id});
     }
   } else {
-    task.status = 'queued';
+    requeue(state, task);
     task.lastError = error;
     task.runAt = new Date(retryDelay(task.attempts, now)).toISOString();
     activity(state, 'task-retry', `Task will retry: ${task.title}`, {taskId: task.id});
@@ -453,7 +467,7 @@ export function recoverStalledTasks(state, now = Date.now()) {
     if (task.status !== 'running') continue;
     const leaseUntil = Date.parse(task.leaseUntil || 0);
     if (Number.isFinite(leaseUntil) && leaseUntil > now) continue; // still leased
-    task.status = 'queued';
+    requeue(state, task);
     task.lastError = 'Previous worker stopped before completing. Re-armed automatically.';
     task.leaseOwner = null;
     task.leaseUntil = null;

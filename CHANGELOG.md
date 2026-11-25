@@ -102,6 +102,13 @@ browser tasks, and accounts, workspaces and backup.
   post or a connector write (`outsideRead` in `shared/asks.js`). Basic access,
   page asks, deletes and payments are unchanged. A memory recap is not tracked
   (SECURITY.md, Known limitations).
+- **The kill switch holds a schedule that was mid-run.** A recurring schedule
+  that finished or failed after the owner switched everything off re-armed
+  itself as queued, and the next sweep ran it again; so did a retry and a
+  crashed worker's recovered lease. Each now waits as paused by the switch and
+  comes back with its Resume, and the queue never claims a schedule while the
+  switch is on. A weekdays or weekends schedule that ran out of retries is
+  re-armed on a day its rule allows, as a completed one already was.
 
 ### Kept
 - **The posting guard.** A bot may read an X page through an approved
