@@ -24,6 +24,7 @@ import {startRetention} from './scheduler.js';
 import {markInterrupted, queueGroupRun} from './coordination.js';
 import {startFollowUps} from './follow-ups.js';
 import {createHealthWatch} from './health-watch.js';
+import {startSweep} from './interval.js';
 import {startAskExpiry} from './ask-runs.js';
 import {startHeldSends} from './held-sends.js';
 import {startBrowserExpiry} from './bot-browser.js';
@@ -53,20 +54,10 @@ const PUBLIC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 
  * sweep for those two tables. Work is tracked so a workspace being restored
  * never has raw SQL run against its file mid-swap. */
 function startAgentRetention(ws, intervalMs = 86400000) {
-  let busy = false, stopped = false;
-  const run = async () => {
-    if (busy || stopped) return;
-    busy = true;
-    try {
-      const sweep = () => ({...ws.pruneAgentRows(), files: pruneAttachments(ws)});
-      const report = ws.trackWork ? await ws.trackWork(async () => sweep()) : sweep();
-      if (report.pairingCodes || report.agentTasks || report.files) console.log(`Retention pruned ${report.pairingCodes} pairing code(s), ${report.agentTasks} agent task record(s), ${report.files} unused attachment(s).`);
-    } catch (e) { if (e?.status !== 503) console.error('Agent retention error:', e.message); }
-    finally { busy = false; }
-  };
-  void run();
-  const timer = setInterval(() => void run(), intervalMs); timer.unref();
-  return async () => { stopped = true; clearInterval(timer); if (busy) await new Promise(resolve => setTimeout(resolve, 50)); };
+  return startSweep('Agent retention', async () => {
+    const report = {...ws.pruneAgentRows(), files: pruneAttachments(ws)};
+    if (report.pairingCodes || report.agentTasks || report.files) console.log(`Retention pruned ${report.pairingCodes} pairing code(s), ${report.agentTasks} agent task record(s), ${report.files} unused attachment(s).`);
+  }, {intervalMs, ws});
 }
 
 /** Build the `start(store, id)` a workspace opener calls. Everything that runs in

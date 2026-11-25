@@ -109,7 +109,8 @@ Not built, with the reason:
 
 Built, with tests:
 - **Health alerts and session expiry** (Keep items 1 and 4): `src/health-watch.js`. A computer gone quiet while
-  schedules wait, or background work running late, is one urgent phone notice and one "back" notice. A scheduled
+  a schedule is due, or background work running late, is one phone notice and one "back" notice, said only
+  once two checks in a row see it; only late work is urgent. A scheduled
   task that a site signed out tells the owner at once instead of leaving a card in a chat nobody opens.
   `tests/health-watch.test.js`.
 - **Per-site daily limit** (Keep item 2): `perSite` in `shared/limits.js`, Settings → Limits "Pages a day on one
@@ -120,7 +121,10 @@ Built, with tests:
 - **Keyboard shortcuts sheet**: press ? (or Settings → Look → Keyboard shortcuts); comma opens Settings.
   `tests/shortcuts.test.js`, usability smoke "shortcuts".
 - **Backup freshness**: with `HEALTH_BACKUP_DIR` naming the nightly backup folder, the health watch says when the
-  newest backup is more than 36 hours old. `docs/OPERATIONS.md`, Monitoring.
+  newest backup is more than 36 hours old, or that it cannot read the folder. `docs/OPERATIONS.md`, Monitoring.
+- **One sweep helper** (architecture): `src/interval.js` `startSweep` runs every per-workspace background pass
+  (ask expiry, browser expiry, agent retention, the health watch): no overlap, failures logged, and `stop()`
+  waits for the pass in flight. `tests/interval.test.js`.
 
 Still not built, with the reason: **watch-and-tell**, **drafts for approval** and **a screenshot in the action
 log** each touch the ask and outside-read rules and want their own design pass; **Android Trusted Web Activity**

@@ -2061,6 +2061,11 @@ async def shortcuts_sheet(page, base):
     await expect(modal).to_contain_text('Keyboard shortcuts')
     await expect(modal.locator('kbd', has_text='K')).to_have_count(1)
     await expect(modal).to_contain_text('Open Settings')
+    # With a sheet open, comma does not move the page underneath it.
+    before = page.url
+    await page.keyboard.press(',')
+    await expect(modal).to_contain_text('Keyboard shortcuts')
+    assert page.url == before, (before, page.url)
     await page.keyboard.press('Escape')
     await expect(modal).to_be_hidden()
     box = page.locator('#chat-form textarea')

@@ -5,15 +5,15 @@
  * Home is the Chats layout only. On a phone it is two sections, Bots and Threads,
  * switched by swiping; on a laptop the sidebar holds both and the chat opens on the
  * right. The lists come from ui-company.js (pure); this file is markup and events. */
-import {botRows, threadRows} from './ui-company.js?v=9e3b23476a';
-import {face} from './ui-face.js?v=9e3b23476a';
-import {esc, icon, stamp} from './ui-kit.js?v=9e3b23476a';
-import {pauseBanner} from './ui-asks.js?v=9e3b23476a';
-import {searchMessages, snippetHtml} from './message-search.js?v=9e3b23476a';
-import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, saveLocal, isStaticDemo, seenChats, api} from './ui-store.js?v=9e3b23476a';
-import {setupChecklist} from './ui-profile-model.js?v=9e3b23476a';
-import {shortcutRows} from './ui-model.js?v=9e3b23476a';
-import {openSheet} from './ui-dialogs.js?v=9e3b23476a';
+import {botRows, threadRows} from './ui-company.js?v=6b2d0a8515';
+import {face} from './ui-face.js?v=6b2d0a8515';
+import {esc, icon, stamp} from './ui-kit.js?v=6b2d0a8515';
+import {pauseBanner} from './ui-asks.js?v=6b2d0a8515';
+import {searchMessages, snippetHtml} from './message-search.js?v=6b2d0a8515';
+import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, saveLocal, isStaticDemo, seenChats, api} from './ui-store.js?v=6b2d0a8515';
+import {setupChecklist} from './ui-profile-model.js?v=6b2d0a8515';
+import {shortcutRows} from './ui-model.js?v=6b2d0a8515';
+import {openSheet, sheetOpen} from './ui-dialogs.js?v=6b2d0a8515';
 
 const el = id => document.getElementById(id);
 const DESK = '(min-width:1024px)';
@@ -305,6 +305,8 @@ export function wireShell() {
     if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') { ev.preventDefault(); return focusSearch(); }
     if (ev.altKey || ev.ctrlKey || ev.metaKey || typing(ev.target) || !store.state) return;
     if (ev.key === 't' || ev.key === 'T' || ev.key === '/') { ev.preventDefault(); return focusSearch(); }
+    // A sheet already open (a confirm, an ask, this one) keeps the keyboard: no second sheet over it, no page change under it.
+    if ((ev.key === '?' || ev.key === ',') && sheetOpen()) return;
     if (ev.key === '?') { ev.preventDefault(); return showShortcuts(); }
     if (ev.key === ',') { ev.preventDefault(); return go({settings: 'general'}); }
     // No swipe on a keyboard: the arrows switch the phone home between its two halves.

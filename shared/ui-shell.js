@@ -13,7 +13,7 @@ import {searchMessages, snippetHtml} from './message-search.js';
 import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, saveLocal, isStaticDemo, seenChats, api} from './ui-store.js';
 import {setupChecklist} from './ui-profile-model.js';
 import {shortcutRows} from './ui-model.js';
-import {openSheet} from './ui-dialogs.js';
+import {openSheet, sheetOpen} from './ui-dialogs.js';
 
 const el = id => document.getElementById(id);
 const DESK = '(min-width:1024px)';
@@ -305,6 +305,8 @@ export function wireShell() {
     if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') { ev.preventDefault(); return focusSearch(); }
     if (ev.altKey || ev.ctrlKey || ev.metaKey || typing(ev.target) || !store.state) return;
     if (ev.key === 't' || ev.key === 'T' || ev.key === '/') { ev.preventDefault(); return focusSearch(); }
+    // A sheet already open (a confirm, an ask, this one) keeps the keyboard: no second sheet over it, no page change under it.
+    if ((ev.key === '?' || ev.key === ',') && sheetOpen()) return;
     if (ev.key === '?') { ev.preventDefault(); return showShortcuts(); }
     if (ev.key === ',') { ev.preventDefault(); return go({settings: 'general'}); }
     // No swipe on a keyboard: the arrows switch the phone home between its two halves.
