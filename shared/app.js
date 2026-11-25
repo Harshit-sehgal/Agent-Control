@@ -30,7 +30,7 @@ import {conversationShell, renderConversation, newThreadView, trackOpen} from '.
 import {profileViews, wirePages} from './ui-profile.js';
 import {wireGestures, gesturesBusy} from './ui-gestures.js';
 import {settingsViews} from './ui-settings.js';
-import {showLogin, hideLogin} from './ui-sheets.js';
+import {showLogin, hideLogin, setSignInMethods} from './ui-sheets.js';
 import {actions, forms, onControlChange, onControlInput, modelSearchKey} from './ui-actions.js';
 import {bringBotsToLife} from './ui-fx.js';
 import {wireComputer} from './ui-computer-view.js';
@@ -198,7 +198,7 @@ async function boot() {
     finishGoogleSignIn();
     finishShare(primary);
   } catch (e) {
-    if (e.status === 401) return showLogin(e.message);
+    if (e.status === 401) return signInScreen(e.message);
     el('main').innerHTML = `<section class="home"><h1>Could not start</h1><p></p><p>${isStaticDemo() ? 'Enable browser local storage and reload. If the page was cached from an older deploy, hard-refresh once.' : 'Check that the Node server is running and reload.'}</p></section>`;
     el('main').querySelector('p').textContent = e.message;
   }
@@ -241,6 +241,18 @@ function lockScreen(message) {
   store.state = null; store.messages = {}; lastView = '';
   for (const id of ['sidebar', 'main', 'chrome']) el(id).innerHTML = '';
   renderPause();
+  void signInScreen(message);
+}
+/** The sign-in screen, with Continue with Google when the server offers it. Google sends a refused account back to
+ * `/?signin=google-refused`: the screen says so once, and the address loses the parameter. */
+async function signInScreen(message) {
+  try { setSignInMethods(await api('/api/auth/methods')); } catch { setSignInMethods(null); }
+  const q = new URLSearchParams(location.search);
+  if (q.get('signin') === 'google-refused') {
+    q.delete('signin');
+    history.replaceState(history.state, '', `${location.pathname}${q.size ? `?${q}` : ''}${location.hash}`);
+    message = 'That Google account can\'t sign in here.';
+  }
   showLogin(message);
 }
 actions.logout = async () => {

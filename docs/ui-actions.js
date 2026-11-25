@@ -1,23 +1,23 @@
 /** What the UI can do, as three lookup tables keyed by `data-action`, form id and
  * control id. app.js owns the DOM events and dispatches here; handlers throw on
  * failure and the dispatcher turns that into one toast. */
-import {store, api, sync, setTyping, conversation, findGroup, teamKey, recentRuns, chatKeyOf} from './ui-store.js?v=adaf6b1514';
-import {groupSettings} from './bot-settings.js?v=adaf6b1514';
-import {toast, closeSheet} from './ui-dialogs.js?v=adaf6b1514';
-import {sendChat, streamGroupRun, rerun} from './ui-chat.js?v=adaf6b1514';
-import {runWithTyping} from './run-follow.js?v=adaf6b1514';
-import {whoosh, react} from './ui-fx.js?v=adaf6b1514';
-import {shellActions} from './ui-shell.js?v=adaf6b1514';
-import {conversationActions, conversationForms, conversationChanges} from './ui-conversation.js?v=adaf6b1514';
-import {attachBusy, takeAttachments} from './ui-attach.js?v=adaf6b1514';
-import {profileActions, profileForms, profileChanges, lookChanged, nameTyped, adoptFirstMessage} from './ui-profile.js?v=adaf6b1514';
-import {settingsActions, settingsChanges, reloadAdminPage} from './ui-settings.js?v=adaf6b1514';
-import {changePasswordSheet} from './ui-sheets.js?v=adaf6b1514';
-import {adminActions, adminForms, adminChanges, modelSearchInput, modelSearchKey} from './ui-admin.js?v=adaf6b1514';
-import {takeoverActions, takeoverForms} from './ui-takeover.js?v=adaf6b1514';
-import {computerActions, computerForms} from './ui-computer-view.js?v=adaf6b1514';
-import {catalogSearch} from './ui-connect.js?v=adaf6b1514';
-import {templateActions, templateForms} from './ui-templates.js?v=adaf6b1514';
+import {store, api, sync, setTyping, conversation, findGroup, teamKey, recentRuns, chatKeyOf} from './ui-store.js?v=515e121074';
+import {groupSettings} from './bot-settings.js?v=515e121074';
+import {toast, closeSheet} from './ui-dialogs.js?v=515e121074';
+import {sendChat, streamGroupRun, rerun} from './ui-chat.js?v=515e121074';
+import {runWithTyping} from './run-follow.js?v=515e121074';
+import {whoosh, react} from './ui-fx.js?v=515e121074';
+import {shellActions} from './ui-shell.js?v=515e121074';
+import {conversationActions, conversationForms, conversationChanges} from './ui-conversation.js?v=515e121074';
+import {attachBusy, takeAttachments} from './ui-attach.js?v=515e121074';
+import {profileActions, profileForms, profileChanges, lookChanged, nameTyped, adoptFirstMessage} from './ui-profile.js?v=515e121074';
+import {settingsActions, settingsChanges, reloadAdminPage} from './ui-settings.js?v=515e121074';
+import {changePasswordSheet} from './ui-sheets.js?v=515e121074';
+import {adminActions, adminForms, adminChanges, modelSearchInput, modelSearchKey} from './ui-admin.js?v=515e121074';
+import {takeoverActions, takeoverForms} from './ui-takeover.js?v=515e121074';
+import {computerActions, computerForms} from './ui-computer-view.js?v=515e121074';
+import {catalogSearch} from './ui-connect.js?v=515e121074';
+import {templateActions, templateForms} from './ui-templates.js?v=515e121074';
 
 const adminCtx = {reload: reloadAdminPage};
 const chatId = () => chatKeyOf(store.route);
@@ -28,7 +28,7 @@ export const actions = {
   ...conversationActions,
   ...profileActions,
   ...settingsActions,
-  'change-password': () => changePasswordSheet(),
+  'change-password': () => changePasswordSheet({hasPassword: store.state?.me?.hasPassword !== false}),
   'close-sheet': () => closeSheet(),
   'sheet-confirm': () => closeSheet(true),
 
@@ -105,8 +105,12 @@ export const forms = {
   ...profileForms,
   'ask-form': (form, f) => closeSheet(String(f.answer || '')),
   'password-form': async (form, f) => {
-    await api('/api/auth/password', 'POST', {currentPassword: f.currentPassword, newPassword: f.newPassword});
-    closeSheet(); toast('Password updated. Other sessions are signed out.');
+    await api('/api/auth/password', 'POST', {currentPassword: f.currentPassword || '', newPassword: f.newPassword});
+    // Settings is painted once per visit, so the button changes in place, like the sessions list does.
+    if (store.state?.me) store.state.me.hasPassword = true;
+    const label = document.querySelector('[data-action="change-password"] span');
+    if (label) label.textContent = 'Change password';
+    closeSheet(); toast('Password saved. Other sessions are signed out.');
   },
   ...Object.fromEntries(Object.entries(adminForms).map(([id, run]) => [id, (form, f) => run(form, f, adminCtx)])),
   ...takeoverForms,
