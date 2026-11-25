@@ -44,6 +44,16 @@ This product does not OAuth into X or any other platform.
   `X-Forwarded-For` hop, which is the one the proxy wrote. `POST
   /api/auth/reset` consumes a one-hour, single-use token. The
   server prints that token to the console unless `RESET_TOKEN_CONSOLE=0`.
+- Owner sign-in with Google (`src/google-owner.js`): only when `OWNER_EMAIL`,
+  `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set. OpenID Connect code flow with
+  PKCE, a single-use `state` bound to an `HttpOnly` cookie, and a `nonce`. The
+  id_token comes straight from Google's token endpoint over TLS; its issuer,
+  audience, expiry, nonce, `email_verified` and address (`OWNER_EMAIL`, any case)
+  are checked before a session for the first workspace's owner is made. Every
+  failure lands on one message; the reason is logged. The start is rate-limited
+  per address. No password is generated: an owner without `DASHBOARD_PASSWORD`
+  has none until one is set, and only an account with none may set one without
+  the current password.
 
 ## What each role is trusted with
 Routes and their least role are in `src/routes-*.js` (registered through

@@ -68,7 +68,7 @@ export function workflowRoutes(router, {auth}) {
     if (Array.isArray(doc.watches)) s.watches = doc.watches.map(publicWatch);
     const hasSavedDefault = s.ai?.providers?.some(provider => provider.id === s.ai.defaultProviderId);
     const model = live ? (s.ai?.defaultModel || (hasSavedDefault ? 'auto' : aiModel())) : null;
-    const extra = {aiEnabled: live, aiModel: model, me: {email: me.email, role: me.role, hasPassword: auth.hasPassword(me.userId)}, workspaces: auth.listWorkspaces(me.userId).map(w => ({...w, current: w.id === me.workspaceId})), canCreateWorkspace: auth.roleOf(me.userId) === 'owner', retention: retentionSettings(s),
+    const extra = {aiEnabled: live, aiModel: model, me: {email: me.email, role: me.role, hasPassword: auth.hasPassword?.(me.userId) ?? true}, workspaces: auth.listWorkspaces(me.userId).map(w => ({...w, current: w.id === me.workspaceId})), canCreateWorkspace: auth.roleOf(me.userId) === 'owner', retention: retentionSettings(s),
       notifications: notifications.listNotifications(c.store, me.userId, 50), unread: notifications.unreadCount(c.store, me.userId)};
     const body = {...s, ...extra, serverTime: new Date().toISOString()};
     // The document version names everything read from the store; the rest of

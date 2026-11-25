@@ -102,6 +102,10 @@ The JSON store is gone, one list decides what ships, and the app opens without
 a network.
 
 ### Added
+- **The owner signs in with Google.** Set `OWNER_EMAIL` with the Google client in `.env`, and the sign-in
+  screen offers Continue with Google; only that verified address gets in. The server no longer makes up a
+  random password and prints it on each boot: without `DASHBOARD_PASSWORD` the owner has none until one is
+  set in Settings (**Set a password**, no current one asked) or with `npm run reset-password`.
 - **A browser the app owns, so a bot can read a page with nothing paired.**
   An approved `browser.use` request now runs on the server itself when
   `AGENT_BROWSER_ALLOWLIST` is set and a Chrome, Chromium or Edge is installed
