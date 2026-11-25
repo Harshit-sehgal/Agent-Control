@@ -11,7 +11,7 @@ import {OFFJOB_CHOICES} from './off-job.js';
 import {LIMIT_CHOICES, limitText} from './ask-limits.js';
 import {requestOfMessage} from './bot-browser.js';
 import {validHttpUrl} from './core.js';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou, teachPrompt, teachRule} from './ui-model.js';
 import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js';
 import {isPrimary} from './company.js';
 import {hasJob, modelChip} from './ui-profile-model.js';
@@ -27,7 +27,7 @@ import {face, botColor, botAccent, accentStyle} from './ui-face.js';
 import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js';
 import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen} from './ui-store.js';
 import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js';
-import {toast, confirmSheet} from './ui-dialogs.js';
+import {toast, confirmSheet, askSheet} from './ui-dialogs.js';
 import {siteChip, thumbSlot} from './ui-computer-view.js';
 import {cliChoice} from './ui-connect-model.js';
 import {connectAppNow} from './ui-connect.js';
@@ -257,8 +257,13 @@ function botEntry(m, conv) {
   const bot = m.senderId ? findBot(m.senderId) : conv.bot, name = bot?.name || m.senderName || conv.name;
   // The name says who is talking in a thread; its job is on its profile, not on every reply.
   const own = !conv.isTeam && bot && bot === conv.bot ? ' own' : '';
-  return `<div class="cv-bot${own}" data-m="${esc(m.id)}" style="--t:${tintOf(bot, name)}">${botFace(bot, name, 36)}<div class="cv-body"><div class="cv-name">${esc(name)}</div><div class="md">${md(m.text)}</div></div></div>`;
+  // Copy and Teach sit under the words: Teach turns "not like that" into a rule the bot keeps (see `teach-reply`).
+  const acts = `<div class="cv-acts">${btn('Copy', 'copy-reply', {small: true, glyph: 'copy'})}${bot && canWrite() ? btn('Teach', 'teach-reply', {small: true, glyph: 'spark', data: {bot: bot.id}}) : ''}</div>`;
+  return `<div class="cv-bot${own}" data-m="${esc(m.id)}" style="--t:${tintOf(bot, name)}">${botFace(bot, name, 36)}<div class="cv-body"><div class="cv-name">${esc(name)}</div><div class="md">${md(m.text)}</div>${acts}</div></div>`;
 }
+
+/** The words of the reply a Copy or Teach button sits under, as the owner sees them. */
+const replyText = b => b.closest('.cv-bot')?.querySelector('.md')?.innerText?.trim() || '';
 
 /** Where an attached file is read from: the server route, or the demo's own copy. */
 const fileSrc = ref => isStaticDemo() ? store.state?.attachments?.[ref.id]?.url || '' : `/api/attachments/${ref.id}`;
@@ -465,6 +470,25 @@ export const conversationChanges = {
 
 export const conversationActions = {
   'ask-answer': b => answerAsk(b.dataset.id, b.dataset.choice),
+  'copy-reply': async b => {
+    try { await navigator.clipboard.writeText(replyText(b)); toast('Copied.'); }
+    catch { toast('This browser did not allow copying. Select the words and copy them instead.', true); }
+  },
+  // A wrong reply becomes a fix in one tap: the owner says what to do from now on, and it is kept as that bot's own
+  // rule, the same as one added on its profile. Nothing is sent to the bot now; its next turn reads the rule.
+  'teach-reply': async b => {
+    const bot = findBot(b.dataset.bot);
+    if (!bot) return;
+    const prompt = teachPrompt({botName: bot.name});
+    const answer = await askSheet(prompt.title, {sub: prompt.sub, placeholder: prompt.placeholder, submit: 'Keep this rule'});
+    if (answer == null) return;
+    const text = teachRule(answer);
+    if (!text) { toast('Write a little more: a rule needs at least 4 characters.', true); return; }
+    // `label` names the bot's rule book if this is its first rule (as on its profile), not the rule.
+    await api('/api/memory/rules', 'POST', {bot: bot.id, text, label: bot.name});
+    await sync();
+    toast(`${bot.name} will do that from now on. Edit it on its profile.`);
+  },
   'open-profile': b => go({profile: b.dataset.id}),
   hop: b => hop(b),
   'offjob-anyway': b => { const m = offjobOf(b); return runAnyway(m.botId, m.request); },

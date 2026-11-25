@@ -260,3 +260,19 @@ const SHORTCUTS = [
 export function shortcutRows(mac = false) {
   return SHORTCUTS.map(s => ({what: s.what, keys: s.keys.map(k => (mac && k === 'Ctrl' ? '⌘' : k))}));
 }
+
+/** The Teach sheet under a bot reply: what to ask. Pure. */
+export function teachPrompt({botName = ''} = {}) {
+  return {
+    title: `Teach ${botName || 'this bot'}`,
+    sub: 'What should it do differently from now on? It keeps this as a rule in every chat, and you can edit or switch it off on its profile.',
+    placeholder: 'For example: Keep replies under five lines, and put links last.',
+  };
+}
+
+/** What the owner typed in the Teach sheet as one rule line (at most 240 characters, the rule route's limit), or
+ * null when it is too short to be a rule. Pure. */
+export function teachRule(text) {
+  const line = String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, 240);
+  return line.length >= 4 ? line : null;
+}

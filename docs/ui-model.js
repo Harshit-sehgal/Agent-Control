@@ -2,10 +2,10 @@
  * a pane shows: the chat list, a thread's timeline and the "needs you" count.
  * (The hash route lives in ui-company.js.) No DOM and no globals, so the product rules here are unit
  * tested directly (tests/ui-model.test.js). */
-import {botSettings} from './bot-settings.js?v=6b2d0a8515';
-import {STOPPABLE_STATUSES} from './run-state.js?v=6b2d0a8515';
-import {primaryOf} from './company.js?v=6b2d0a8515';
-import {plain} from './ui-kit.js?v=6b2d0a8515';
+import {botSettings} from './bot-settings.js?v=5caa8d148c';
+import {STOPPABLE_STATUSES} from './run-state.js?v=5caa8d148c';
+import {primaryOf} from './company.js?v=5caa8d148c';
+import {plain} from './ui-kit.js?v=5caa8d148c';
 
 const teamKey = groupId => `team-${groupId}`;
 const time = value => { const t = Date.parse(value || ''); return Number.isFinite(t) ? t : 0; };
@@ -259,4 +259,20 @@ const SHORTCUTS = [
 /** The shortcuts as rows, with ⌘ for Ctrl on a Mac. */
 export function shortcutRows(mac = false) {
   return SHORTCUTS.map(s => ({what: s.what, keys: s.keys.map(k => (mac && k === 'Ctrl' ? '⌘' : k))}));
+}
+
+/** The Teach sheet under a bot reply: what to ask. Pure. */
+export function teachPrompt({botName = ''} = {}) {
+  return {
+    title: `Teach ${botName || 'this bot'}`,
+    sub: 'What should it do differently from now on? It keeps this as a rule in every chat, and you can edit or switch it off on its profile.',
+    placeholder: 'For example: Keep replies under five lines, and put links last.',
+  };
+}
+
+/** What the owner typed in the Teach sheet as one rule line (at most 240 characters, the rule route's limit), or
+ * null when it is too short to be a rule. Pure. */
+export function teachRule(text) {
+  const line = String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, 240);
+  return line.length >= 4 ? line : null;
 }

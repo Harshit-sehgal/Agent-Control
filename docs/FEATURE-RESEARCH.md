@@ -126,6 +126,10 @@ Built, with tests:
   (retention, agent retention, ask expiry, browser expiry, follow-ups, the health watch): no overlap, failures logged, and `stop()`
   waits for the pass in flight. `tests/interval.test.js`.
 
+- **Teach from a reply** (Round 2's "failure-to-improvement"): each bot reply has Copy and Teach. Teach asks what
+  the bot should do differently from now on and keeps it as that bot's own rule, editable on its profile.
+  `tests/teach-reply.test.js`, usability smoke "teach".
+
 Still not built, with the reason: **watch-and-tell**, **drafts for approval** and **a screenshot in the action
 log** each touch the ask and outside-read rules and want their own design pass; **Android Trusted Web Activity**
 needs a signing key on the owner's machine.
