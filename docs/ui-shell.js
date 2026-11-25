@@ -5,13 +5,15 @@
  * Home is the Chats layout only. On a phone it is two sections, Bots and Threads,
  * switched by swiping; on a laptop the sidebar holds both and the chat opens on the
  * right. The lists come from ui-company.js (pure); this file is markup and events. */
-import {botRows, threadRows} from './ui-company.js?v=5864997c0e';
-import {face} from './ui-face.js?v=5864997c0e';
-import {esc, icon, stamp} from './ui-kit.js?v=5864997c0e';
-import {pauseBanner} from './ui-asks.js?v=5864997c0e';
-import {searchMessages, snippetHtml} from './message-search.js?v=5864997c0e';
-import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, saveLocal, isStaticDemo, seenChats, api} from './ui-store.js?v=5864997c0e';
-import {setupChecklist} from './ui-profile-model.js?v=5864997c0e';
+import {botRows, threadRows} from './ui-company.js?v=554c9f792c';
+import {face} from './ui-face.js?v=554c9f792c';
+import {esc, icon, stamp} from './ui-kit.js?v=554c9f792c';
+import {pauseBanner} from './ui-asks.js?v=554c9f792c';
+import {searchMessages, snippetHtml} from './message-search.js?v=554c9f792c';
+import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, saveLocal, isStaticDemo, seenChats, api} from './ui-store.js?v=554c9f792c';
+import {setupChecklist} from './ui-profile-model.js?v=554c9f792c';
+import {shortcutRows} from './ui-model.js?v=554c9f792c';
+import {openSheet, sheetOpen} from './ui-dialogs.js?v=554c9f792c';
 
 const el = id => document.getElementById(id);
 const DESK = '(min-width:1024px)';
@@ -290,12 +292,23 @@ export function focusSearch() {
 
 const typing = target => target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName || '');
 
+/** The keyboard shortcuts, in a sheet (rows from ui-model.js, ⌘ on a Mac). */
+export function showShortcuts() {
+  const mac = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform || globalThis.navigator?.userAgent || '');
+  const rows = shortcutRows(mac).map(r => `<div class="rw kb-row"><span class="w">${esc(r.what)}</span><span class="kb-keys">${r.keys.map(k => `<kbd>${esc(k)}</kbd>`).join('<span aria-hidden="true">+</span>')}</span></div>`).join('');
+  openSheet(`<div class="cd kb-list">${rows}</div>`, {title: 'Keyboard shortcuts', label: 'Keyboard shortcuts'});
+}
+
 /** Document-level wiring: shortcuts, the search boxes, swipes. Called once. */
 export function wireShell() {
   document.addEventListener('keydown', ev => {
     if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') { ev.preventDefault(); return focusSearch(); }
     if (ev.altKey || ev.ctrlKey || ev.metaKey || typing(ev.target) || !store.state) return;
     if (ev.key === 't' || ev.key === 'T' || ev.key === '/') { ev.preventDefault(); return focusSearch(); }
+    // A sheet already open (a confirm, an ask, this one) keeps the keyboard: no second sheet over it, no page change under it.
+    if ((ev.key === '?' || ev.key === ',') && sheetOpen()) return;
+    if (ev.key === '?') { ev.preventDefault(); return showShortcuts(); }
+    if (ev.key === ',') { ev.preventDefault(); return go({settings: 'general'}); }
     // No swipe on a keyboard: the arrows switch the phone home between its two halves.
     if (store.route.home && !isDesk() && (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight')) switchSection(ev.key === 'ArrowLeft' ? 'bots' : 'threads', ev.key === 'ArrowLeft' ? -1 : 1);
   });

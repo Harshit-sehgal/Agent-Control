@@ -215,3 +215,48 @@ export function isOfflineError(error) {
   if (error.timeout === true || error.name === 'TimeoutError' || error.name === 'AbortError') return true;
   return error.name === 'TypeError' && /fetch|network|load failed|connection/i.test(String(error.message || ''));
 }
+
+/** Share to Agent Control: the manifest's `share_target` sends what the phone's Share sheet holds to `./?share-…`.
+ * The parameter names, read here and named in shared/manifest.webmanifest. */
+export const SHARE_PARAMS = {title: 'share-title', text: 'share-text', url: 'share-url'};
+
+/** What was shared, as one draft for the message box: the title, the text, then the link unless the text already
+ * holds it; null when nothing was shared. A draft only: the owner reads it and presses Send. */
+export function sharedDraft(search) {
+  const q = new URLSearchParams(String(search ?? ''));
+  const get = key => String(q.get(SHARE_PARAMS[key]) ?? '').trim();
+  const title = get('title'), text = get('text'), url = get('url');
+  const parts = [];
+  if (title && title !== text) parts.push(title);
+  if (text) parts.push(text);
+  if (url && !text.includes(url)) parts.push(url);
+  const draft = parts.join('\n').slice(0, 4000);
+  return draft || null;
+}
+
+/** The address with the shared words taken out, so a reload does not paste them again. */
+export function withoutShareParams(search) {
+  const q = new URLSearchParams(String(search ?? ''));
+  for (const name of Object.values(SHARE_PARAMS)) q.delete(name);
+  const rest = q.toString();
+  return rest ? `?${rest}` : '';
+}
+
+/** The keys the app answers to, for the shortcuts sheet (press ? or Settings → Look). Each names a real listener:
+ * the search and the sheet in ui-shell.js, Enter in app.js, Alt+arrows and the menu key in ui-gestures.js. */
+const SHORTCUTS = [
+  {keys: ['Ctrl', 'K'], what: 'Search bots, threads and messages'},
+  {keys: ['/'], what: 'Search, when you are not typing in a box'},
+  {keys: ['Enter'], what: 'Send the message'},
+  {keys: ['Shift', 'Enter'], what: 'Start a new line in the message'},
+  {keys: ['Esc'], what: 'Close a sheet or the search'},
+  {keys: [','], what: 'Open Settings'},
+  {keys: ['Alt', '↑ ↓'], what: 'Move a chat up or down the list, or pin it at the top'},
+  {keys: ['Shift', 'F10'], what: 'Open the menu of the chat in focus'},
+  {keys: ['?'], what: 'Show these shortcuts'},
+];
+
+/** The shortcuts as rows, with ⌘ for Ctrl on a Mac. */
+export function shortcutRows(mac = false) {
+  return SHORTCUTS.map(s => ({what: s.what, keys: s.keys.map(k => (mac && k === 'Ctrl' ? '⌘' : k))}));
+}

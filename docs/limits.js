@@ -6,21 +6,27 @@
  * stops a stuck run is FAIL_STREAK: that many rounds in a row where nothing new came back (every page failed, or
  * the bot only asked for pages it already had) stops the run and tells the owner.
  *
- * `state.limits = {pages, rounds, steps, askCheckpoints}`. Pure and browser-safe.
+ * One limit is per day, not per message: `perSite`, the pages bots may open on one site in a UTC day, so a
+ * looping schedule cannot spend an account's goodwill on X or LinkedIn. It has no backstop: unset, it never
+ * refuses. The count lives in `state.siteVisits = {day, counts: {site: n}}` (kv `site_visits`) and holds only today.
+ *
+ * `state.limits = {pages, rounds, steps, perSite, askCheckpoints}`. Pure and browser-safe.
  */
-import {fail} from './errors.js?v=5864997c0e';
-import {logActivity} from './activity-log.js?v=5864997c0e';
+import {fail} from './errors.js?v=554c9f792c';
+import {logActivity} from './activity-log.js?v=554c9f792c';
 
 export const BACKSTOP = {pages: 8, rounds: 25, steps: 30};
 export const FAIL_STREAK = 3;
-const FIELDS = ['pages', 'rounds', 'steps'];
+export const MAX_PER_SITE = 1000;
+const FIELDS = ['pages', 'rounds', 'steps', 'perSite'];
+const MAXES = {...BACKSTOP, perSite: MAX_PER_SITE};
 
 const number = (value, max) => (Number.isInteger(value) && value >= 1 && value <= max ? value : null);
 
 /** What the owner set; null is no limit. */
 export function limitsOf(state) {
   const l = state?.limits && typeof state.limits === 'object' ? state.limits : {};
-  return {pages: number(l.pages, Infinity), rounds: number(l.rounds, Infinity), steps: number(l.steps, Infinity), askCheckpoints: l.askCheckpoints === true};
+  return {pages: number(l.pages, Infinity), rounds: number(l.rounds, Infinity), steps: number(l.steps, Infinity), perSite: number(l.perSite, MAX_PER_SITE), askCheckpoints: l.askCheckpoints === true};
 }
 const cap = key => state => Math.min(limitsOf(state)[key] ?? BACKSTOP[key], BACKSTOP[key]);
 /** Pages (and connector calls) one reply may ask for. */
@@ -56,7 +62,7 @@ export function setLimits(state, body = {}) {
   for (const key of FIELDS) {
     if (!(key in body)) continue;
     if (body[key] === null) { next[key] = null; continue; }
-    if (!number(body[key], BACKSTOP[key])) fail(`Choose a whole number from 1 to ${BACKSTOP[key]}, or no limit.`);
+    if (!number(body[key], MAXES[key])) fail(`Choose a whole number from 1 to ${MAXES[key]}, or no limit.`);
     next[key] = body[key];
   }
   if ('askCheckpoints' in body) {
@@ -64,7 +70,33 @@ export function setLimits(state, body = {}) {
     next.askCheckpoints = body.askCheckpoints;
   }
   state.limits = next;
-  const words = [`pages per reply ${limitWords(next.pages)}`, `rounds ${limitWords(next.rounds)}`, `team steps ${limitWords(next.steps)}`, `checkpoints ${next.askCheckpoints ? 'on' : 'off'}`];
+  const words = [`pages per reply ${limitWords(next.pages)}`, `rounds ${limitWords(next.rounds)}`, `team steps ${limitWords(next.steps)}`, `pages per site a day ${limitWords(next.perSite)}`, `checkpoints ${next.askCheckpoints ? 'on' : 'off'}`];
   logActivity(state, {kind: 'perm', text: `Bot limits changed: ${words.join(', ')}.`});
   return next;
+}
+
+/** The site a page is on: its host without `www.`, or '' for an address that is not one. */
+export function siteOf(url) {
+  try { return new URL(url).hostname.toLowerCase().replace(/^www\./, ''); } catch { return ''; }
+}
+const dayOf = now => new Date(now).toISOString().slice(0, 10);
+
+/** Pages bots opened (or asked to open) on a site today, UTC. */
+export function sitePagesToday(state, site, now = new Date().toISOString()) {
+  const v = state?.siteVisits;
+  return v && v.day === dayOf(now) ? Math.max(0, Number(v.counts?.[site]) || 0) : 0;
+}
+
+/** Count one page on a site. A new day starts the counts over, so yesterday's are dropped, not kept. */
+export function countSitePage(state, site, now = new Date().toISOString()) {
+  if (!site) return;
+  const day = dayOf(now);
+  if (state.siteVisits?.day !== day) state.siteVisits = {day, counts: {}};
+  state.siteVisits.counts[site] = sitePagesToday(state, site, now) + 1;
+}
+
+/** Pages bots may still open on a site today; Infinity when the owner set no per-site limit. */
+export function siteCapLeft(state, site, now = new Date().toISOString()) {
+  const cap = limitsOf(state).perSite;
+  return cap == null ? Infinity : Math.max(0, cap - sitePagesToday(state, site, now));
 }

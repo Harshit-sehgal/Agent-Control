@@ -52,6 +52,35 @@ Probe it from a timer and alert on failure:
 Watch the process log for `config:` warnings (startup validation) and
 `Group execution:` errors from failed runs.
 
+**Alerts on the owner's phone (health watch).** The server checks itself every 5 minutes
+(`src/health-watch.js`) and sends one notice when:
+
+- background work is more than 15 minutes late (not while every schedule is paused). This one is
+  urgent: it is pushed even in quiet hours;
+- a paired computer has been quiet for 15 minutes while a schedule is due within the next 15;
+- a scheduled task meets a site it is signed out of (said at once by the run, once per site);
+- the nightly backup is more than 36 hours old, or its folder cannot be read, when
+  `HEALTH_BACKUP_DIR` names the backup folder.
+
+A problem must show on two checks in a row (about 5 minutes apart) before it is said, so the
+late work every restart finds while the queue catches up is not an alert. Each notice is sent
+once and followed by a plain "back" notice when it clears. To watch the nightly backup from
+Docker, mount its folder read-only and name it:
+
+```yaml
+# deploy/compose.yaml, service app
+    volumes:
+      - data:/data
+      - /var/backups/agent-control:/backups:ro
+    environment:
+      HEALTH_BACKUP_DIR: /backups
+```
+
+The app runs as the `node` user and only lists the folder and reads each file's date, never
+its contents. `deploy/backup-encrypted.sh` creates the folder with `umask 077` (root only), so
+open the folder itself once: `sudo chmod 755 /var/backups/agent-control`. The backups inside
+stay `600`. Without that the first check says "The backup folder cannot be read".
+
 ## Email, without a gateway
 
 The email notification channel submits over SMTP when `SMTP_HOST` is set

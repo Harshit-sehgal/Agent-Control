@@ -457,3 +457,7 @@ html.pc-open{overflow:hidden}
 .mdl-find:focus-within>svg{color:var(--text)}
 .mdl-count{position:absolute;right:40px;font-size:12.5px;color:var(--muted);pointer-events:none;font-variant-numeric:tabular-nums;white-space:nowrap}
 .mdl-count:empty{display:none}
+/* The keyboard shortcuts sheet (ui-shell.js showShortcuts). */
+.kb-list .kb-row{gap:12px}
+.kb-keys{display:inline-flex;align-items:center;gap:4px;flex-shrink:0;color:var(--muted);font-size:12px}
+.kb-keys kbd{font:600 12px/1 ui-monospace,SFMono-Regular,Menlo,monospace;min-width:24px;padding:5px 7px;text-align:center;border-radius:6px;background:var(--raised);color:var(--text);border:1px solid var(--line);border-bottom-width:2px}

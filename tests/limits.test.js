@@ -9,7 +9,7 @@ const state = () => ({groups: [], activity: []});
 
 test('no limits by default: each cap is the backstop', () => {
   const s = state();
-  assert.deepEqual(limitsOf(s), {pages: null, rounds: null, steps: null, askCheckpoints: false});
+  assert.deepEqual(limitsOf(s), {pages: null, rounds: null, steps: null, perSite: null, askCheckpoints: false});
   assert.equal(pagesCap(s), BACKSTOP.pages);
   assert.equal(roundsCap(s), BACKSTOP.rounds);
   assert.equal(stepsCap(s), BACKSTOP.steps);
@@ -20,7 +20,7 @@ test('no limits by default: each cap is the backstop', () => {
 test('the owner sets a limit, clears it with null, and a bad value is refused', () => {
   const s = state();
   setLimits(s, {pages: 2, rounds: 4, steps: 6, askCheckpoints: true});
-  assert.deepEqual(limitsOf(s), {pages: 2, rounds: 4, steps: 6, askCheckpoints: true});
+  assert.deepEqual(limitsOf(s), {pages: 2, rounds: 4, steps: 6, perSite: null, askCheckpoints: true});
   assert.equal(pagesCap(s), 2);
   assert.match(s.activity.at(-1).text, /limits/i);
   setLimits(s, {rounds: null});

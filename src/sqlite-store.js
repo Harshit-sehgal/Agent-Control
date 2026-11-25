@@ -610,6 +610,8 @@ export class SqliteStore {
       triggers: (() => { try { return JSON.parse(this.kvGet('triggers') || '[]'); } catch { return []; } })(),
       // Tokens (and cost, where the owner set a price) per bot per day, bounded by shared/usage.js.
       usage: (() => { try { return JSON.parse(this.kvGet('usage') || '{"days":{}}'); } catch { return {days: {}}; } })(),
+      // Pages bots opened per site today, for the per-site daily limit (shared/limits.js); only today is kept.
+      siteVisits: (() => { try { return JSON.parse(this.kvGet('site_visits') || 'null'); } catch { return null; } })(),
       memory: readMemory(kind => this.db.prepare('SELECT key, doc FROM memory WHERE kind=? ORDER BY rowid').all(kind)),
     };
     const cfg = this.db.prepare('SELECT * FROM settings WHERE id=1').get();
@@ -715,6 +717,7 @@ export class SqliteStore {
       kv('templates', JSON.stringify(state.templates || []));
       kv('triggers', JSON.stringify(state.triggers || []));
       kv('usage', JSON.stringify(state.usage || {days: {}}));
+      kv('site_visits', JSON.stringify(state.siteVisits || null));
       const retention = state.settings?.retention ? JSON.stringify(state.settings.retention) : null;
       if (this.kvWritten.get('\0settings') !== String(retention)) {
         this.stmt('INSERT INTO settings (id,retention) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET retention=excluded.retention').run(retention);
