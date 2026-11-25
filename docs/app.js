@@ -22,19 +22,20 @@
  *   ui-dialogs      toast, sheet, confirm/ask      ui-actions action/form tables
  *   ui-fx           confetti, the send arrow and the bots' ambient life
  */
-import {companyRoute} from './ui-company.js?v=137f50e22a';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=137f50e22a';
-import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=137f50e22a';
-import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, renderPause, closeSearch, homeView, setupCardHtml} from './ui-shell.js?v=137f50e22a';
-import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=137f50e22a';
-import {profileViews, wirePages} from './ui-profile.js?v=137f50e22a';
-import {wireGestures, gesturesBusy} from './ui-gestures.js?v=137f50e22a';
-import {settingsViews} from './ui-settings.js?v=137f50e22a';
-import {showLogin, hideLogin} from './ui-sheets.js?v=137f50e22a';
-import {actions, forms, onControlChange, onControlInput, modelSearchKey} from './ui-actions.js?v=137f50e22a';
-import {bringBotsToLife} from './ui-fx.js?v=137f50e22a';
-import {wireComputer} from './ui-computer-view.js?v=137f50e22a';
-import {googleReturn, withoutGoogleParams} from './ui-connect-model.js?v=137f50e22a';
+import {companyRoute} from './ui-company.js?v=23c89414c2';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=23c89414c2';
+import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=23c89414c2';
+import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, renderPause, closeSearch, homeView, setupCardHtml} from './ui-shell.js?v=23c89414c2';
+import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=23c89414c2';
+import {profileViews, wirePages} from './ui-profile.js?v=23c89414c2';
+import {wireGestures, gesturesBusy} from './ui-gestures.js?v=23c89414c2';
+import {settingsViews} from './ui-settings.js?v=23c89414c2';
+import {showLogin, hideLogin} from './ui-sheets.js?v=23c89414c2';
+import {actions, forms, onControlChange, onControlInput, modelSearchKey} from './ui-actions.js?v=23c89414c2';
+import {bringBotsToLife} from './ui-fx.js?v=23c89414c2';
+import {wireComputer} from './ui-computer-view.js?v=23c89414c2';
+import {googleReturn, withoutGoogleParams} from './ui-connect-model.js?v=23c89414c2';
+import {sharedDraft, withoutShareParams} from './ui-model.js?v=23c89414c2';
 
 const el = id => document.getElementById(id);
 const hashRoute = () => normalizeRoute(companyRoute(location.hash, store.state));
@@ -195,6 +196,7 @@ async function boot() {
     const primary = (groups().find(g => g.id === 'home')?.bots || []).find(b => b.settings?.lead === true);
     if (isDesk() && store.route.home && !location.hash && primary) go({bot: primary.id}, {replace: true}); else changed('route');
     finishGoogleSignIn();
+    finishShare(primary);
   } catch (e) {
     if (e.status === 401) return showLogin(e.message);
     el('main').innerHTML = `<section class="home"><h1>Could not start</h1><p></p><p>${isStaticDemo() ? 'Enable browser local storage and reload. If the page was cached from an older deploy, hard-refresh once.' : 'Check that the Node server is running and reload.'}</p></section>`;
@@ -210,6 +212,25 @@ function finishGoogleSignIn() {
   history.replaceState(history.state, '', `${location.pathname}${withoutGoogleParams(location.search)}${location.hash}`);
   toast(result.text, !result.ok);
   go({settings: 'conn'});
+}
+/** The phone's Share sheet sent something to `/?share-…` (manifest `share_target`): it becomes a draft in the lead
+ * bot's message box, and nothing is sent until the owner presses Send. The words leave the address first, so a
+ * reload does not paste them again. */
+function finishShare(primary) {
+  const draft = sharedDraft(location.search);
+  if (!draft) return;
+  history.replaceState(history.state, '', `${location.pathname}${withoutShareParams(location.search)}${location.hash}`);
+  if (!primary) { toast('Make a bot first, then share to it again.', true); return; }
+  go({bot: primary.id});
+  const fill = (tries = 0) => {
+    const box = document.querySelector('#chat-form textarea');
+    if (!box) { if (tries < 40) setTimeout(() => fill(tries + 1), 50); return; }
+    box.value = draft;
+    box.dispatchEvent(new Event('input', {bubbles: true}));
+    box.focus();
+    toast('What you shared is in the message box. It is sent only when you press Send.');
+  };
+  fill();
 }
 /** Leave nothing of the signed-out workspace in the DOM behind the sign-in. */
 function lockScreen(message) {

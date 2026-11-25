@@ -215,3 +215,29 @@ export function isOfflineError(error) {
   if (error.timeout === true || error.name === 'TimeoutError' || error.name === 'AbortError') return true;
   return error.name === 'TypeError' && /fetch|network|load failed|connection/i.test(String(error.message || ''));
 }
+
+/** Share to Agent Control: the manifest's `share_target` sends what the phone's Share sheet holds to `./?share-…`.
+ * The parameter names, read here and named in shared/manifest.webmanifest. */
+export const SHARE_PARAMS = {title: 'share-title', text: 'share-text', url: 'share-url'};
+
+/** What was shared, as one draft for the message box: the title, the text, then the link unless the text already
+ * holds it; null when nothing was shared. A draft only: the owner reads it and presses Send. */
+export function sharedDraft(search) {
+  const q = new URLSearchParams(String(search ?? ''));
+  const get = key => String(q.get(SHARE_PARAMS[key]) ?? '').trim();
+  const title = get('title'), text = get('text'), url = get('url');
+  const parts = [];
+  if (title && title !== text) parts.push(title);
+  if (text) parts.push(text);
+  if (url && !text.includes(url)) parts.push(url);
+  const draft = parts.join('\n').slice(0, 4000);
+  return draft || null;
+}
+
+/** The address with the shared words taken out, so a reload does not paste them again. */
+export function withoutShareParams(search) {
+  const q = new URLSearchParams(String(search ?? ''));
+  for (const name of Object.values(SHARE_PARAMS)) q.delete(name);
+  const rest = q.toString();
+  return rest ? `?${rest}` : '';
+}

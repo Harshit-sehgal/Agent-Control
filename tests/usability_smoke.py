@@ -2050,6 +2050,23 @@ async def older_google_connection_listed(page, base):
     await eventually(lambda: len(server.sent('DELETE', '/api/connectors/google')) == 1)
 
 
+async def share_target_prefills_never_sends(page, base):
+    """A link shared from the phone's Share sheet opens the lead bot with it in the message box, says nothing is
+    sent until Send, and leaves the address so a reload does not paste it again."""
+    server = await install(page)
+    await page.goto(f'{base}/index.html?share-title=Rust%202.0&share-url=https%3A%2F%2Fblog.example%2Frust')
+    await page.locator(SCREEN).first.wait_for()
+    box = page.locator('#chat-form textarea')
+    await expect(box).to_have_value('Rust 2.0\nhttps://blog.example/rust')
+    await expect(page.locator('#toast')).to_contain_text('sent only when you press Send')
+    assert await page.evaluate('location.search') == '', 'the shared words should leave the address'
+    await page.wait_for_timeout(300)
+    assert not [c for c in server.calls if c[0] == 'POST' and '/chat' in c[1]], 'nothing may be sent by a share'
+    await page.reload()
+    await page.locator(SCREEN).first.wait_for()
+    await expect(page.locator('#toast.show')).to_have_count(0)
+
+
 async def google_return_toast_and_clean_address(page, base):
     await install(page)
     await page.goto(f'{base}/index.html?google=connected')
@@ -2637,6 +2654,7 @@ async def main():
             await h.scenario('connectors: add an MCP server over HTTP and on the agent, refresh its tools, delete asks first, no secret is painted', connectors_add_and_delete_mcp)
             await h.scenario('connectors: Connect is one tap to the app\'s own MCP sign-in, a token, or what .env lacks', connect_apps_one_tap)
             await h.scenario('connectors: no Google Cloud form; an older Google connection offers Gmail\'s MCP server', older_google_connection_listed)
+            await h.scenario('share: a shared link prefills the lead bot\'s message box and sends nothing', share_target_prefills_never_sends)
             await h.scenario('connectors: ?google=connected toasts once, strips the address and opens Connectors; an error says why', google_return_toast_and_clean_address)
             await h.scenario('models: a subscription is a name and an engine with no key field, and its row says where it is signed in', subscription_provider_and_cli_status)
             await h.scenario('models: Add a model is one card with a choice, the dots hold Edit, Refresh and Delete, one model picker', models_api_provider_menu_and_one_model_picker)

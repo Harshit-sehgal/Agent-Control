@@ -114,3 +114,6 @@ Built, with tests:
   `tests/health-watch.test.js`.
 - **Per-site daily limit** (Keep item 2): `perSite` in `shared/limits.js`, Settings → Limits "Pages a day on one
   site". Off by default. `tests/site-limit.test.js`.
+- **Share to Agent Control** (the "universal capture" item, text and links): the manifest's `share_target`
+  lists the installed app in the phone's Share sheet; what is shared lands in the lead bot's message box and is
+  sent only when the owner presses Send. `tests/share-target.test.js`, usability smoke "share".
