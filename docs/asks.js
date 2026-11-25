@@ -26,11 +26,11 @@
  * Pure and browser-safe, like the other shared modules: the server and the
  * Pages demo share every rule here.
  */
-import {fail} from './errors.js?v=34419968de';
-import {cleanText} from './core.js?v=34419968de';
-import {logActivity} from './activity-log.js?v=34419968de';
-import {MAX_CONTEXT_MESSAGES} from './bot-settings.js?v=34419968de';
-import {botKey} from './memory.js?v=34419968de';
+import {fail} from './errors.js?v=266416420f';
+import {cleanText} from './core.js?v=266416420f';
+import {logActivity} from './activity-log.js?v=266416420f';
+import {MAX_CONTEXT_MESSAGES} from './bot-settings.js?v=266416420f';
+import {botKey} from './memory.js?v=266416420f';
 
 /** What every bot may do without a grant. */
 export const BASIC_KIT = ['bot.ask', 'bot.create', 'schedule.set'];
@@ -263,13 +263,35 @@ function runReadOutside(state, run) {
   if (!run) return false;
   if (run.outsideInput === true || run.readPrivate === true || run.connectorPage) return true;
   if (Array.isArray(run.readFrom) && run.readFrom.length) return true;
+  if (run.readPages === true) return true;
   return (state?.browserRequests || []).some(r => r?.status === 'done' && r.runId === run.id);
+}
+
+/** Keep what pruned records said about outside text on what remains. A finished page request about to be dropped
+ * marks its run (`readPages`); a run about to be dropped marks its replies in the chat and the group log
+ * (`outside`), which are never pruned and stay in the window a later run is handed. */
+export function keepOutsideMarks(state, {requests = [], runs = []} = {}) {
+  const groupRuns = Array.isArray(state?.groupRuns) ? state.groupRuns : [];
+  for (const request of requests) {
+    if (request?.status !== 'done' || !request.runId) continue;
+    const run = groupRuns.find(r => r?.id === request.runId);
+    if (run) run.readPages = true;
+  }
+  for (const run of runs) {
+    if (!run?.id || !runReadOutside(state, run)) continue;
+    const logs = [state?.chats?.[run.chatKey || `team-${run.groupId}`], run.groupId ? state?.groupMessages?.[run.groupId] : null];
+    for (const log of logs) for (const message of Array.isArray(log) ? log : []) {
+      if (message?.role === 'bot' && message.runId === run.id) message.outside = true;
+    }
+  }
 }
 
 /** Does any bot reply among `messages` come from a run that read outside content? */
 function messagesCarryOutside(state, messages, {except = null} = {}) {
   const runs = Array.isArray(state?.groupRuns) ? state.groupRuns : [];
-  const ids = new Set((Array.isArray(messages) ? messages : []).filter(m => m?.role === 'bot' && m.runId && m.runId !== except).map(m => m.runId));
+  const replies = (Array.isArray(messages) ? messages : []).filter(m => m?.role === 'bot' && !(except && m.runId === except));
+  if (replies.some(m => m.outside === true)) return true;
+  const ids = new Set(replies.filter(m => m.runId).map(m => m.runId));
   for (const id of ids) if (runReadOutside(state, runs.find(r => r?.id === id))) return true;
   return false;
 }

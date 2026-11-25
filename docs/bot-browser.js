@@ -20,12 +20,12 @@
  * X and Twitter work like any other site: a bot may read, click and type there, and a click on Post asks
  * unless the owner set Always allow for posting on that site.
  */
-import {cleanText, validHttpUrl} from './core.js?v=34419968de';
-import {fail} from './errors.js?v=34419968de';
-import {decide, createAsk, scopeOf, declinedNeed, outsideRead} from './asks.js?v=34419968de';
-import {controlFence} from './reply-blocks.js?v=34419968de';
-import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=34419968de';
-import {appForHost} from './app-catalog.js?v=34419968de';
+import {cleanText, validHttpUrl} from './core.js?v=266416420f';
+import {fail} from './errors.js?v=266416420f';
+import {decide, createAsk, scopeOf, declinedNeed, outsideRead, keepOutsideMarks} from './asks.js?v=266416420f';
+import {controlFence} from './reply-blocks.js?v=266416420f';
+import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=266416420f';
+import {appForHost} from './app-catalog.js?v=266416420f';
 
 /** The most page text one model turn carries (the pages of a round together). */
 export const MAX_PAGE_CHARS = 24000;
@@ -667,7 +667,10 @@ export function pruneBrowserRequests(state) {
     const open = r => ['pending', 'dispatched'].includes(r.status);
     const waiting = state.browserRequests.filter(open);
     const finished = state.browserRequests.filter(r => !open(r));
-    state.browserRequests = [...waiting, ...finished.slice(0, Math.max(0, MAX_BROWSER_REQUESTS - waiting.length))];
+    const room = Math.max(0, MAX_BROWSER_REQUESTS - waiting.length);
+    // A dropped page read stays known on its run, so Hands-off still asks after it (shared/asks.js).
+    keepOutsideMarks(state, {requests: finished.slice(room)});
+    state.browserRequests = [...waiting, ...finished.slice(0, room)];
   }
   return state.browserRequests;
 }

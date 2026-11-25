@@ -5,14 +5,14 @@
  *
  * A bot's manager is settings.reportsTo (company.js); "manager" is simply a bot
  * with reports, so any bot can become one by receiving a report. */
-import {companyBots, primaryOf, managerOf, reportsOf, teamOf} from './company.js?v=34419968de';
-import {firstUnusedTint} from './bot-create.js?v=34419968de';
-import {TINT_COUNT, dayLabel} from './ui-kit.js?v=34419968de';
-import {jobOf} from './ui-company.js?v=34419968de';
-import {ACTIVITY_CHIPS} from './activity-log.js?v=34419968de';
-import {grantRows} from './ui-asks.js?v=34419968de';
-import {cleanEffort, effortLabel, EFFORT_LEVELS} from './ai-presets.js?v=34419968de';
-import {scheduleRows} from './schedules.js?v=34419968de';
+import {companyBots, primaryOf, managerOf, reportsOf, teamOf} from './company.js?v=266416420f';
+import {firstUnusedTint} from './bot-create.js?v=266416420f';
+import {TINT_COUNT, dayLabel} from './ui-kit.js?v=266416420f';
+import {jobOf} from './ui-company.js?v=266416420f';
+import {ACTIVITY_CHIPS} from './activity-log.js?v=266416420f';
+import {grantRows} from './ui-asks.js?v=266416420f';
+import {cleanEffort, effortLabel, EFFORT_LEVELS} from './ai-presets.js?v=266416420f';
+import {scheduleRows} from './schedules.js?v=266416420f';
 
 /** What a bot made without a job holds until the owner's first chat message
  * replaces it (the profile, the list and the chat all treat it as "no job yet"). */

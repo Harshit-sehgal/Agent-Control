@@ -123,9 +123,10 @@ replay cache reject replays; agents run only permission-gated task kinds.
 ## Known limitations
 - Hands-off tracks outside text through the recent replies a run is handed and
   through the memory a tidy-up pass wrote from them (marked when it is written,
-  so it outlives the run). A reply from a run that retention has already removed
-  counts as clean. A model can still restate outside text in its own reply to a
-  clean request; that reply is marked only through the run that produced it.
+  so it outlives the run). When retention removes a run, or its page requests
+  age out, the mark moves to the run or to its replies, which are kept. A model
+  can still restate outside text in its own reply to a clean request; that
+  reply is marked only through the run that produced it.
 - Workspaces are separated by database file, and a session can only reach the
   workspace it is in. An owner of the first workspace administers the
   installation; this is not a boundary between mutually hostile tenants, who

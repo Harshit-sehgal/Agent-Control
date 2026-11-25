@@ -22,7 +22,7 @@
  */
 import {cleanText, validHttpUrl} from './core.js';
 import {fail} from './errors.js';
-import {decide, createAsk, scopeOf, declinedNeed, outsideRead} from './asks.js';
+import {decide, createAsk, scopeOf, declinedNeed, outsideRead, keepOutsideMarks} from './asks.js';
 import {controlFence} from './reply-blocks.js';
 import {BACKSTOP, pagesCap, roundsCap} from './limits.js';
 import {appForHost} from './app-catalog.js';
@@ -667,7 +667,10 @@ export function pruneBrowserRequests(state) {
     const open = r => ['pending', 'dispatched'].includes(r.status);
     const waiting = state.browserRequests.filter(open);
     const finished = state.browserRequests.filter(r => !open(r));
-    state.browserRequests = [...waiting, ...finished.slice(0, Math.max(0, MAX_BROWSER_REQUESTS - waiting.length))];
+    const room = Math.max(0, MAX_BROWSER_REQUESTS - waiting.length);
+    // A dropped page read stays known on its run, so Hands-off still asks after it (shared/asks.js).
+    keepOutsideMarks(state, {requests: finished.slice(room)});
+    state.browserRequests = [...waiting, ...finished.slice(0, room)];
   }
   return state.browserRequests;
 }

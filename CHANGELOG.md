@@ -107,6 +107,11 @@ browser tasks, and accounts, workspaces and backup.
   (`outside`), the mark carries into later passes that read it, and a run
   handed a marked recap or an enabled marked rule asks before a send. The bot's
   profile labels those notes; editing or forgetting one clears it.
+- **What a run read outlives its records.** Page requests past the newest 200
+  and runs past the retention window were dropped while their replies stayed in
+  the chat, so a later run counted those replies as clean. A dropped page read
+  now marks its run (`readPages`), and a removed run marks its replies
+  (`outside`).
 - **The kill switch holds a schedule that was mid-run.** A recurring schedule
   that finished or failed after the owner switched everything off re-armed
   itself as queued, and the next sweep ran it again; so did a retry and a
