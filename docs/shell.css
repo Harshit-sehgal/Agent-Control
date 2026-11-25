@@ -506,3 +506,13 @@ body[data-paused] .chrome{--pad-t:calc(var(--pause-h) + env(safe-area-inset-top,
 .toast:has(.toast-act){pointer-events:none}
 .toast-act{pointer-events:auto;margin-left:10px;padding:2px 4px;font:inherit;font-weight:700;color:inherit;text-decoration:underline;text-underline-offset:3px}
 @media(pointer:coarse){.toast-act{min-height:44px}}
+
+/* Copy and Teach on a bot reply: a small bar on the bubble's lower edge, in the gap below it, so it takes no room.
+   It shows while the pointer is on the reply or a key reaches it; on a touch screen the newest reply keeps it and a
+   tap brings it up on the others. */
+.cv-body{position:relative}
+.cv-acts{position:absolute;right:10px;bottom:-17px;display:flex;gap:2px;padding:2px;background:var(--raised);border:1px solid var(--line);border-radius:999px;box-shadow:0 2px 8px var(--shade);opacity:0;pointer-events:none;transition:opacity .15s;z-index:1}
+.cv-acts .btn.small{min-height:28px;padding:2px 10px;color:var(--muted)}
+.cv-bot:hover .cv-acts,.cv-acts:focus-within{opacity:1;pointer-events:auto}
+@media (hover:none){.cv-col>.cv-bot:not(:has(~ .cv-bot)) .cv-acts{opacity:1;pointer-events:auto}}
+@media (prefers-reduced-motion:reduce){.cv-acts{transition:none}}

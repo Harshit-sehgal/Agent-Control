@@ -2101,6 +2101,34 @@ async def share_target_prefills_never_sends(page, base):
     await expect(page.locator('#toast.show')).to_have_count(0)
 
 
+async def teach_from_a_reply(page, base):
+    """A bot reply has Copy and Teach on hover; Teach keeps what the owner types as that bot's own rule, on one line,
+    and says so. The bar takes no room in the bubble."""
+    await open_app(page, base, bots=EXTRA_BOTS)
+    await patch_state(page, f'''
+        s.chats[{PRIMARY!r}] = [
+          {{id: 'q', role: 'user', text: 'Draft my week', at: new Date(Date.now() - 2000).toISOString()}},
+          {{id: 'a', role: 'bot', senderId: {PRIMARY!r}, senderName: 'Atlas', text: 'Here is a very long plan for your week, with every detail.', at: new Date().toISOString()}}];''')
+    await page.goto(f'{base}/index.html#bot/{PRIMARY}')
+    reply = page.locator('#cv-log .cv-bot').last
+    await expect(reply).to_contain_text('very long plan')
+    bubble = await reply.locator('.cv-body').bounding_box()
+    words = await reply.locator('.md').bounding_box()
+    assert bubble['y'] + bubble['height'] - (words['y'] + words['height']) < 20, 'the bar must not add room to the bubble'
+    await reply.hover()
+    await expect(reply.locator('.cv-acts')).to_have_css('opacity', '1')
+    await expect(reply.get_by_role('button', name='Copy')).to_be_visible()
+    await reply.get_by_role('button', name='Teach').click()
+    modal = page.locator('#modal')
+    await expect(modal).to_contain_text('Teach Atlas')
+    await modal.locator('textarea').fill('Keep plans\n under five lines.')
+    await modal.get_by_role('button', name='Keep this rule').click()
+    await expect(modal).to_be_hidden()
+    await expect(page.locator('#toast')).to_contain_text('Atlas will do that from now on')
+    book = await page.evaluate("id => window.AGENT_API('/api/memory?bot=' + id).then(m => JSON.stringify(m))", PRIMARY)
+    assert 'Keep plans under five lines.' in book, book[:400]
+
+
 async def google_return_toast_and_clean_address(page, base):
     await install(page)
     await page.goto(f'{base}/index.html?google=connected')
@@ -2690,6 +2718,7 @@ async def main():
             await h.scenario('connectors: no Google Cloud form; an older Google connection offers Gmail\'s MCP server', older_google_connection_listed)
             await h.scenario('shortcuts: ? opens the sheet (not while typing), comma opens Settings, Look has the row', shortcuts_sheet)
             await h.scenario('share: a shared link prefills the lead bot\'s message box and sends nothing', share_target_prefills_never_sends)
+            await h.scenario('teach: a reply\'s Teach keeps a rule for that bot; the bar takes no room', teach_from_a_reply)
             await h.scenario('connectors: ?google=connected toasts once, strips the address and opens Connectors; an error says why', google_return_toast_and_clean_address)
             await h.scenario('models: a subscription is a name and an engine with no key field, and its row says where it is signed in', subscription_provider_and_cli_status)
             await h.scenario('models: Add a model is one card with a choice, the dots hold Edit, Refresh and Delete, one model picker', models_api_provider_menu_and_one_model_picker)
