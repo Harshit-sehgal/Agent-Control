@@ -116,6 +116,9 @@ browser tasks, and accounts, workspaces and backup.
   the day is read there. Older schedules and ones without a zone keep the
   server's clock. A daily time still steps 24 hours, so it moves by an hour
   across a daylight-saving change, as before.
+- **Quiet hours can follow the owner's clock.** `QUIET_HOURS_TZ` (an IANA
+  zone) sets the clock `QUIET_HOURS` is read on; without it the server's is
+  used, as before.
 - **Health stays up during a restore.** A restore stops the workspace's queue,
   and its last tick aged past a minute, so `/api/health` answered 503 and a
   container health check could restart the server mid-restore. A stopped queue
