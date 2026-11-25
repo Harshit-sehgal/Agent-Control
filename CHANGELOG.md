@@ -124,8 +124,12 @@ browser tasks, and accounts, workspaces and backup.
   had Monday's run skipped and Saturday's made. A day-rule schedule now carries
   the browser's time zone (`tz`, checked against the runtime's zone list) and
   the day is read there. Older schedules and ones without a zone keep the
-  server's clock. A daily time still steps 24 hours, so it moves by an hour
-  across a daylight-saving change, as before.
+  server's clock.
+- **A daily or weekly time stays put across daylight saving.** A schedule
+  stepped exactly 24 hours, so "every day at 08:00" ran at 09:00 after the
+  clocks changed. A recurring schedule with a time of day now carries the
+  browser's zone too, and each re-arm puts it back on that time
+  (`keepWallTime` in `shared/schedules.js`).
 - **Quiet hours can follow the owner's clock.** `QUIET_HOURS_TZ` (an IANA
   zone) sets the clock `QUIET_HOURS` is read on; without it the server's is
   used, as before.

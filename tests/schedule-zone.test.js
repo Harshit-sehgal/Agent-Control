@@ -31,11 +31,9 @@ test('an unknown zone falls back to the server clock', () => {
   assert.equal(skipToDays(local, DAY, 'weekdays', 'Not/AZone'), skipToDays(local, DAY, 'weekdays'));
 });
 
-test('the Schedule form records the browser\'s zone on a day-rule schedule only', () => {
+test('the Schedule form records the browser\'s zone on a day-rule schedule', () => {
   const body = scheduleTaskBody({botId: 'b', groupId: 'g', message: 'Hi', every: 1440, at: '08:00', days: 'weekdays'});
   assert.equal(body.payload.tz, Intl.DateTimeFormat().resolvedOptions().timeZone);
-  const daily = scheduleTaskBody({botId: 'b', groupId: 'g', message: 'Hi', every: 1440, at: '08:00'});
-  assert.equal('tz' in daily.payload, false);
 });
 
 test('a stored schedule keeps a real zone, drops a bad one, and re-arms on the owner\'s weekday', () => {
@@ -52,4 +50,29 @@ test('a stored schedule keeps a real zone, drops a bad one, and re-arms on the o
   assert.equal(claimTasks(state, {workerId: 'w', now: friday + 60000}).length, 1);
   completeTask(state, task.id, null, friday + 60000);
   assert.equal(task.runAt, new Date(mondayAuckland).toISOString());
+});
+
+test('a daily 08:00 stays at 08:00 on the owner\'s clock across a daylight-saving change', () => {
+  const state = {tasks: [], events: [], groups: [{id: 'g', name: 'G', bots: [{id: 'b', name: 'B'}]}]};
+  const task = enqueueTask(state, {kind: 'bot-task', payload: {groupId: 'g', botId: 'b', message: 'Brief me', kind: 'interval', intervalMinutes: 1440, at: '08:00', tz: 'Europe/London'}}).task;
+  assert.equal(task.payload.tz, 'Europe/London', 'a schedule with a time keeps its zone');
+  const run = (at, now) => {
+    task.runAt = new Date(at).toISOString();
+    assert.equal(claimTasks(state, {workerId: 'w', now}).length, 1);
+    completeTask(state, task.id, null, now);
+    return task.runAt;
+  };
+  // Clocks go forward on 29 March 2026: 08:00 GMT is 08:00 UTC, 08:00 BST is 07:00 UTC.
+  assert.equal(run(Date.UTC(2026, 2, 28, 8, 0), Date.UTC(2026, 2, 28, 8, 1)), '2026-03-29T07:00:00.000Z');
+  // And back on 25 October 2026.
+  assert.equal(run(Date.UTC(2026, 9, 24, 7, 0), Date.UTC(2026, 9, 24, 7, 1)), '2026-10-25T08:00:00.000Z');
+  // An ordinary day is a plain 24 hours.
+  assert.equal(run(Date.UTC(2026, 5, 10, 7, 0), Date.UTC(2026, 5, 10, 7, 1)), '2026-06-11T07:00:00.000Z');
+});
+
+test('the Schedule form records the zone for any schedule with a time of day', () => {
+  const body = scheduleTaskBody({botId: 'b', groupId: 'g', message: 'Hi', every: 1440, at: '08:00'});
+  assert.equal(body.payload.tz, Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const hourly = scheduleTaskBody({botId: 'b', groupId: 'g', message: 'Hi', every: 60});
+  assert.equal('tz' in hourly.payload, false);
 });

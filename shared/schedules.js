@@ -36,6 +36,28 @@ export function cleanZone(value) {
   if (typeof value !== 'string' || !value || value.length > 64) return '';
   try { return new Intl.DateTimeFormat('en-US', {timeZone: value}).resolvedOptions().timeZone; } catch { return ''; }
 }
+/** Minutes from midnight of `time` on the clock of `zone`, or null when the zone is unusable. */
+function minuteIn(time, zone) {
+  if (!zone) return null;
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {timeZone: zone, hour: 'numeric', minute: 'numeric', hourCycle: 'h23'}).formatToParts(time);
+    const part = type => Number(parts.find(p => p.type === type)?.value);
+    const hour = part('hour'), minute = part('minute');
+    return Number.isFinite(hour) && Number.isFinite(minute) ? hour * 60 + minute : null;
+  } catch { return null; }
+}
+/** Put a daily or weekly run back on its time of day (`at`, "08:00") on the owner's clock (`zone`). A fixed 24-hour
+ * step lands an hour off after a daylight-saving change; this moves it by that difference (at most two hours). With
+ * no time or no usable zone the time is kept as it is. */
+export function keepWallTime(time, at, zone) {
+  const want = /^(\d{2}):(\d{2})$/.exec(cleanAt(at));
+  const minute = want ? minuteIn(time, zone) : null;
+  if (minute === null) return time;
+  let diff = Number(want[1]) * 60 + Number(want[2]) - minute;
+  if (diff > 720) diff -= 1440;
+  if (diff < -720) diff += 1440;
+  return Math.abs(diff) <= 120 ? time + diff * 60000 : time;
+}
 /** The day of the week (0 = Sunday) of `time` in `zone`, or on this machine's clock when there is no usable zone. */
 function weekday(time, zone) {
   if (zone) {
@@ -114,9 +136,10 @@ export function scheduleTaskBody({botId, groupId, message, every, at, on, days},
   const time = cleanAt(at) || (day ? '09:00' : ''), first0 = time ? nextAtFor(time, now, day) : null;
   const first = first0 && rule ? new Date(skipToDays(first0.getTime(), 86400000, rule)) : first0;
   const timing = every ? {kind: 'interval', intervalMinutes: every} : {kind: 'once'};
-  // A day rule is re-judged by the server each day, so it carries the zone this browser's Monday is in.
+  // The server re-arms a recurring schedule each time it runs, so one with a time of day or a day rule carries the zone this
+  // browser's clock is in: its 08:00 and its Monday stay the owner's across daylight saving and on a server elsewhere.
   let tz = '';
-  if (rule) { try { tz = cleanZone(Intl.DateTimeFormat().resolvedOptions().timeZone); } catch { /* no Intl time zone */ } }
+  if (every && (rule || time)) { try { tz = cleanZone(Intl.DateTimeFormat().resolvedOptions().timeZone); } catch { /* no Intl time zone */ } }
   return {kind: 'bot-task', payload: {groupId, botId, message, ...timing, ...(time ? {at: time} : {}), ...(day ? {on: day} : {}), ...(rule ? {days: rule} : {}), ...(tz ? {tz} : {}), ...(first ? {nextAt: first.toISOString()} : {})}};
 }
 

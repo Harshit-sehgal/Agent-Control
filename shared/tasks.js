@@ -7,7 +7,7 @@
  * browser-local demo both run them, so the two backends cannot drift.
  */
 import {activity, cleanText} from './core.js';
-import {cleanDay, cleanZone, DAY_RULES, skipToDays} from './schedules.js';
+import {cleanDay, cleanZone, DAY_RULES, keepWallTime, skipToDays} from './schedules.js';
 
 export const MAX_ATTEMPTS_DEFAULT = 5;
 
@@ -64,8 +64,8 @@ const PAYLOAD_KINDS = {
     // The daily briefing (shared/briefing.js) is marked so its run is given the workspace's facts; nothing else is kept.
     const brief = body.brief === 'daily' ? {brief: 'daily'} : {};
     const days = dayRule(body);
-    // The owner's time zone, so the day rule keeps their Monday on a server with another clock (shared/schedules.js).
-    const tz = days ? cleanZone(body.tz) : '';
+    // The owner's time zone, so a time of day and a day rule stay on their clock (keepWallTime, skipToDays in shared/schedules.js).
+    const tz = days || at ? cleanZone(body.tz) : '';
     return {groupId, botId, message, label: cleanText(body.label, 200) || message.slice(0, 60), ...timing(body), ...(at ? {at} : {}), ...(on ? {on} : {}), ...(days ? {days} : {}), ...(tz ? {tz} : {}), ...brief, ...(body.source === 'event' ? {source: 'event'} : {})};
   },
   'group-run': body => ({groupId: cleanText(body.groupId, 64), message: cleanText(body.message, 4000), directBotId: cleanText(body.directBotId, 64) || null}),
@@ -246,12 +246,20 @@ function requeue(state, task) {
 
 /** The next window of a recurring task: from the planned time, not the finish, so "every day at 08:00" stays at
  * 08:00 instead of drifting by however long each run took. A run that missed windows skips to the next one
- * ahead, and a weekdays or weekends rule moves it to the next day it allows. */
+ * ahead, a weekdays or weekends rule moves it to the next day it allows, and a time of day stays on the owner's
+ * clock across a daylight-saving change. */
 function nextWindow(task, now) {
   const step = task.intervalMinutes * 60000, planned = Date.parse(task.runAt);
   let next = Number.isFinite(planned) && planned <= now ? planned + step : now + step;
   if (next <= now) next += Math.ceil((now - next + 1) / step) * step;
-  return skipToDays(next, step, task.payload?.days, task.payload?.tz);
+  const {at, days, tz} = task.payload || {};
+  // A daily or weekly time keeps the owner's wall clock across daylight saving, before and after a day skip.
+  if (step % 86400000 === 0 && at && tz) {
+    next = keepWallTime(next, at, tz);
+    if (next <= now) next += step;
+    return keepWallTime(skipToDays(next, step, days, tz), at, tz);
+  }
+  return skipToDays(next, step, days, tz);
 }
 
 export function completeTask(state, id, result = null, now = Date.now()) {
