@@ -104,3 +104,11 @@ Not built, with the reason:
   walkie-talkie, skill packs, task-first onboarding, workspace pulse.** Each is a product or UI project;
   none has a design yet. Shadow mode also needs an opt-in data policy before any code.
 - **Agent tournament.** Dropped, as agreed.
+
+## Round 3 (2026-11-25): daily-use pack
+
+Built, with tests:
+- **Health alerts and session expiry** (Keep items 1 and 4): `src/health-watch.js`. A computer gone quiet while
+  schedules wait, or background work running late, is one urgent phone notice and one "back" notice. A scheduled
+  task that a site signed out tells the owner at once instead of leaving a card in a chat nobody opens.
+  `tests/health-watch.test.js`.
