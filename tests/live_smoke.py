@@ -27,6 +27,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
+from browser_launch import launch_chromium_sync
 
 ROOT = Path(__file__).resolve().parents[1]
 PASSWORD = 'live-smoke-pass-1'
@@ -158,7 +159,7 @@ def sign_in(page, base):
 
 def run(base, stub, errors, bad):
     with sync_playwright() as pw:
-        browser = pw.chromium.launch()
+        browser = launch_chromium_sync(pw)
         page = browser.new_page(viewport={'width': 1360, 'height': 860})
         # The signed-out state request prints one 401 line; drop it so the
         # console assertion stays strict about everything else.

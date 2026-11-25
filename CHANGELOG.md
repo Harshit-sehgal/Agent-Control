@@ -119,6 +119,9 @@ browser tasks, and accounts, workspaces and backup.
 - **Quiet hours can follow the owner's clock.** `QUIET_HOURS_TZ` (an IANA
   zone) sets the clock `QUIET_HOURS` is read on; without it the server's is
   used, as before.
+- **The browser smokes run without a browser download.** When Playwright's own
+  Chromium is not installed, `npm run test:ui` and `npm run test:e2e` drive the
+  installed Google Chrome instead (`tests/browser_launch.py`).
 - **Health stays up during a restore.** A restore stops the workspace's queue,
   and its last tick aged past a minute, so `/api/health` answered 503 and a
   container health check could restart the server mid-restore. A stopped queue
