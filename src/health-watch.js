@@ -10,7 +10,8 @@
  *
  * A problem must be seen on two checks in a row before it is said, so the late work every boot or wake finds
  * (the queue has not drained yet) is not an alert. It is then said once, nothing while it lasts, and a plain "back"
- * notice when it clears. The said keys live in the workspace (`kv health_alerts`), so a restart does not repeat
+ * notice when it really clears: a computer still quiet after its schedule went by, or late work the kill switch
+ * holds, keeps its alert (`heldKeys`), and a removed computer's alert is dropped without a notice. The said keys live in the workspace (`kv health_alerts`), so a restart does not repeat
  * them. Only late work is urgent (pushed in quiet hours): nothing is gained by waking the owner for a sleeping
  * laptop or a backup.
  *
@@ -62,13 +63,30 @@ export function healthIssues({agents = [], tasks = [], schedulesPaused = false, 
   return issues;
 }
 
+/** The said problems that are no longer issues only because nothing is waiting on them right now, so their "back"
+ * notice would be false: a computer still quiet when no schedule is due soon, and late work the kill switch holds.
+ * And the said problems that can never clear: a computer removed or forgotten, dropped without a notice. Pure. */
+export function heldKeys({agents = [], schedulesPaused = false, now = Date.now()} = {}) {
+  const hold = new Set(), present = new Set();
+  for (const agent of agents) {
+    if (agent.revokedAt) continue;
+    present.add(`agent-offline:${agent.id}`);
+    const seen = Date.parse(agent.lastSeenAt);
+    if (agent.lastSeenAt && Number.isFinite(seen) && now - seen > AGENT_GRACE_MS) hold.add(`agent-offline:${agent.id}`);
+  }
+  if (schedulesPaused) hold.add('queue-behind');
+  return {hold, gone: key => key.startsWith('agent-offline:') && !present.has(key)};
+}
+
 /** What to say and what to clear. A problem is said when it was also seen on the check before (`seenBefore`) and
- * was not said already (`previousKeys`); one that went away is cleared at once. Pure. */
-export function alertChanges(previousKeys = [], issues = [], seenBefore = null) {
+ * was not said already (`previousKeys`); one that went away is cleared at once, unless `hold` keeps it (still true,
+ * nothing waits on it) or `gone` drops it without a word. Pure. */
+export function alertChanges(previousKeys = [], issues = [], seenBefore = null, {hold = new Set(), gone = () => false} = {}) {
   const said = new Set(previousKeys), now = new Set(issues.map(i => i.key));
   const raise = issues.filter(i => !said.has(i.key) && (!seenBefore || seenBefore.has(i.key)));
-  const clear = previousKeys.filter(k => !now.has(k));
-  return {raise, clear, keys: [...previousKeys.filter(k => now.has(k)), ...raise.map(i => i.key)]};
+  const kept = previousKeys.filter(k => now.has(k) || (hold.has(k) && !gone(k)));
+  const clear = previousKeys.filter(k => !kept.includes(k) && !gone(k));
+  return {raise, clear, keys: [...kept, ...raise.map(i => i.key)]};
 }
 
 const cleared = key => key.startsWith('agent-offline:')
@@ -106,10 +124,16 @@ export function createHealthWatch(ws, {workspaceId = DEFAULT_WORKSPACE, backupDi
   // first check after boot.
   let seenBefore = new Set();
   const check = async () => {
-    const issues = healthIssues(await factsOf(ws, workspaceId, now(), backupDir));
-    const {raise, clear, keys} = alertChanges(savedKeys(ws), issues, seenBefore);
+    const facts = await factsOf(ws, workspaceId, now(), backupDir);
+    const issues = healthIssues(facts);
+    const previous = savedKeys(ws);
+    const {raise, clear, keys} = alertChanges(previous, issues, seenBefore, heldKeys(facts));
     seenBefore = new Set(issues.map(i => i.key));
-    if (!raise.length && !clear.length) return;
+    if (!raise.length && !clear.length) {
+      // A removed computer's alert is dropped without a notice; save that so it is not carried forever.
+      if (keys.length !== previous.length) ws.kvSet?.(ALERTS_KEY, JSON.stringify(keys));
+      return;
+    }
     // Saved first: a notice that fails to send is not worth a second one every five minutes.
     ws.kvSet?.(ALERTS_KEY, JSON.stringify(keys));
     for (const issue of raise) await notify({title: issue.title, body: issue.body, kind: 'health', urgent: issue.urgent === true, meta: {health: issue.key}});

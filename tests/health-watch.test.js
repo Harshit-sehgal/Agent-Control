@@ -82,6 +82,46 @@ test('the watch says nothing on the first check, notifies once after the second,
   assert.match(sent[1].title, /back/i);
 });
 
+test('a computer still asleep after its schedule went by is not "back"; it is when it is seen again', async () => {
+  const agents = [laptop({lastSeenAt: ago(AGENT_GRACE_MS * 2)})];
+  const state = {tasks: [schedule()]};
+  const ws = fakeWorkspace(state, agents);
+  ws.read = () => structuredClone(state);
+  const sent = [];
+  const watch = createHealthWatch(ws, {notify: async event => { sent.push(event); }, now: () => NOW});
+  await watch.tick(); await watch.tick();
+  assert.equal(sent.length, 1);
+  state.tasks = [schedule({status: 'done'}), schedule({id: 's2', runAt: tomorrow})];
+  await watch.tick(); await watch.tick();
+  assert.equal(sent.length, 1, 'nothing is due, but the laptop is still asleep: no false all-clear');
+  agents[0].lastSeenAt = ago(1000);
+  await watch.tick();
+  assert.equal(sent.length, 2);
+  assert.match(sent[1].title, /back/i);
+});
+
+test('a removed computer\'s alert is dropped without a notice, and the kill switch does not say work caught up', async () => {
+  const agents = [laptop({lastSeenAt: ago(AGENT_GRACE_MS * 2)})];
+  const late = {id: 't1', kind: 'group-run', status: 'queued', runAt: ago(QUEUE_LAG_MS * 2)};
+  const state = {tasks: [schedule(), late]};
+  const ws = fakeWorkspace(state, agents);
+  ws.read = () => structuredClone(state);
+  const sent = [];
+  const watch = createHealthWatch(ws, {notify: async event => { sent.push(event); }, now: () => NOW});
+  await watch.tick(); await watch.tick();
+  assert.equal(sent.length, 2);
+  agents[0].revokedAt = ago(1);
+  state.schedulesPaused = true;
+  await watch.tick();
+  assert.equal(sent.length, 2, JSON.stringify(sent.slice(2)));
+  assert.deepEqual(JSON.parse(ws.kv.get('health_alerts')), ['queue-behind']);
+  state.schedulesPaused = false;
+  state.tasks = [];
+  await watch.tick();
+  assert.equal(sent.length, 3);
+  assert.match(sent[2].title, /caught up/);
+});
+
 test('late work found by the first check after boot is not an alert when the queue drains', async () => {
   const state = {tasks: [{id: 't1', kind: 'group-run', status: 'queued', runAt: ago(QUEUE_LAG_MS * 4)}]};
   const ws = fakeWorkspace(state, []);

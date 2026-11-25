@@ -122,8 +122,8 @@ Built, with tests:
   `tests/shortcuts.test.js`, usability smoke "shortcuts".
 - **Backup freshness**: with `HEALTH_BACKUP_DIR` naming the nightly backup folder, the health watch says when the
   newest backup is more than 36 hours old, or that it cannot read the folder. `docs/OPERATIONS.md`, Monitoring.
-- **One sweep helper** (architecture): `src/interval.js` `startSweep` runs every per-workspace background pass
-  (ask expiry, browser expiry, agent retention, the health watch): no overlap, failures logged, and `stop()`
+- **One sweep helper** (architecture): `src/interval.js` `startSweep` runs every repeating per-workspace pass
+  (retention, agent retention, ask expiry, browser expiry, follow-ups, the health watch): no overlap, failures logged, and `stop()`
   waits for the pass in flight. `tests/interval.test.js`.
 
 Still not built, with the reason: **watch-and-tell**, **drafts for approval** and **a screenshot in the action

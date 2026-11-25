@@ -2,6 +2,7 @@
  * soon as that run ends, oldest first, so the owner never has to send it again. A timer's run does not wait here:
  * the task queue retries it on its own. */
 import {chatIsBusy, chatKeyFor} from '../shared/coordination.js';
+import {startSweep} from './interval.js';
 
 export const MAX_FOLLOW_UPS = 5;
 const ENDED = ['completed', 'failed', 'cancelled', 'interrupted'];
@@ -38,33 +39,26 @@ export function nextFollowUp(state) {
 
 /** Start each waiting message whose chat is free. `queue` is queueGroupRun, passed in so this module stays below it. */
 export function startFollowUps(store, queue, intervalMs = 1000) {
-  let busy = false, stopped = false;
-  const run = async () => {
-    if (busy || stopped) return;
-    busy = true;
-    try {
-      for (let i = 0; i < 10; i++) {
-        let item = null;
-        await store.update(s => { item = nextFollowUp(s); });
-        if (!item) break;
-        try {
-          const out = await queue(store, {groupId: item.groupId, message: item.message, directBotId: item.directBotId, chatKey: item.chatKey, checkpoints: item.checkpoints});
-          // The messages still waiting behind it follow the run it starts, in order. They leave the ended run and
-          // join the new one in one write: two writes could clear them and then fail to attach them.
-          await store.update(s => {
-            const next = s.groupRuns.find(r => r.id === out?.runId);
-            const from = s.groupRuns.find(r => r !== next && r.followUps && r.followUps.length && r.followUps[0].chatKey === item.chatKey && ENDED.includes(r.status));
-            if (!next || !from) return;
-            next.followUps = [...(next.followUps || []), ...from.followUps];
-            from.followUps = [];
-          });
-        } catch (e) {
-          await store.update(s => { const chat = (s.chats ||= {})[item.chatKey] ||= []; chat.push({id: `followup-${Date.now()}`, role: 'system', text: `Your message "${item.message.slice(0, 60)}" could not start: ${e.message}`, at: new Date().toISOString()}); });
-        }
+  const pass = async () => {
+    for (let i = 0; i < 10; i++) {
+      let item = null;
+      await store.update(s => { item = nextFollowUp(s); });
+      if (!item) break;
+      try {
+        const out = await queue(store, {groupId: item.groupId, message: item.message, directBotId: item.directBotId, chatKey: item.chatKey, checkpoints: item.checkpoints});
+        // The messages still waiting behind it follow the run it starts, in order. They leave the ended run and
+        // join the new one in one write: two writes could clear them and then fail to attach them.
+        await store.update(s => {
+          const next = s.groupRuns.find(r => r.id === out?.runId);
+          const from = s.groupRuns.find(r => r !== next && r.followUps && r.followUps.length && r.followUps[0].chatKey === item.chatKey && ENDED.includes(r.status));
+          if (!next || !from) return;
+          next.followUps = [...(next.followUps || []), ...from.followUps];
+          from.followUps = [];
+        });
+      } catch (e) {
+        await store.update(s => { const chat = (s.chats ||= {})[item.chatKey] ||= []; chat.push({id: `followup-${Date.now()}`, role: 'system', text: `Your message "${item.message.slice(0, 60)}" could not start: ${e.message}`, at: new Date().toISOString()}); });
       }
-    } catch (e) { if (e?.status !== 503) console.error('Follow-up error:', e.message); }
-    finally { busy = false; }
+    }
   };
-  const timer = setInterval(() => void run(), intervalMs); timer.unref();
-  return async () => { stopped = true; clearInterval(timer); };
+  return startSweep('Follow-up', pass, {intervalMs, immediate: false});
 }
