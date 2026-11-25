@@ -14,7 +14,8 @@ description of what is and is not defended.
   payment asks the owner unless a grant says Always allow. A send, post or
   connector write asks the same way, except under **Hands-off**, which a new
   install starts on: with it, those go without asking in a run that has read
-  nothing from outside (no page, connector result, private read or event body).
+  nothing from outside (no page, connector result, private read or event body)
+  and whose chat carries no recent reply from a run that did.
   The Balanced and Careful presets switch it off. Once a run has read private data (mail, files, a connector) a page
   on a site with no Always allow asks again. Pages run on a paired local agent
   (or this server's own browser), under the device-side allowlist and
@@ -108,8 +109,9 @@ access only to people you would let read the owner's connected accounts.
 - A delete or payment click asks the owner unless they set Always allow for
   that bot on that site; a payment Always allow is confirmed first. A send or
   post click asks the same way, except under Hands-off (on for a new install)
-  in a run that has read nothing from outside. An event-started run, and any
-  run that has opened a page or read a connector, always asks.
+  in a run that has read nothing from outside. An event-started run, any run
+  that has opened a page or read a connector, and any run handed a recent reply
+  from such a run in its chat, always asks.
   `tests/prompt-injection.test.js` and `tests/owner-choices.test.js` lock this in.
 
 ## Local agent protocol
@@ -118,6 +120,10 @@ over method, path, timestamp and body hash; a timestamp window plus a per-agent
 replay cache reject replays; agents run only permission-gated task kinds.
 
 ## Known limitations
+- Hands-off tracks outside text through the recent replies a run is handed, but
+  not through a memory recap: a recap condensed from a run that read a page can
+  still reach a later run that counts as clean. A run that retention has
+  already removed also counts as clean.
 - Workspaces are separated by database file, and a session can only reach the
   workspace it is in. An owner of the first workspace administers the
   installation; this is not a boundary between mutually hostile tenants, who

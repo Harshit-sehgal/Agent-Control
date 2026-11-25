@@ -95,6 +95,13 @@ browser tasks, and accounts, workspaces and backup.
   limited past 60 a minute. A new install starts on Hands-off (a clean run
   sends and posts unasked; deletes and payments always ask), and the event
   route blocks an address after 20 refusals a minute. A test pins that limit.
+- **Hands-off no longer sends on outside text carried in through the chat.** A
+  run is handed the recent replies in its chat, so a reply written by a run
+  that read a page or a connector brought that text into the next run, which
+  still counted as clean and sent unasked. That run now asks before a send, a
+  post or a connector write (`outsideRead` in `shared/asks.js`). Basic access,
+  page asks, deletes and payments are unchanged. A memory recap is not tracked
+  (SECURITY.md, Known limitations).
 
 ### Kept
 - **The posting guard.** A bot may read an X page through an approved

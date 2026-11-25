@@ -26,9 +26,10 @@
  * Pure and browser-safe, like the other shared modules: the server and the
  * Pages demo share every rule here.
  */
-import {fail} from './errors.js?v=7bcf0dde92';
-import {cleanText} from './core.js?v=7bcf0dde92';
-import {logActivity} from './activity-log.js?v=7bcf0dde92';
+import {fail} from './errors.js?v=091f432717';
+import {cleanText} from './core.js?v=091f432717';
+import {logActivity} from './activity-log.js?v=091f432717';
+import {MAX_CONTEXT_MESSAGES} from './bot-settings.js?v=091f432717';
 
 /** What every bot may do without a grant. */
 export const BASIC_KIT = ['bot.ask', 'bot.create', 'schedule.set'];
@@ -238,12 +239,38 @@ export function verdict(state, bot, action, target = '', {readPrivate = false, o
 }
 
 /** Whether a run has read anything from outside: an outside event's body, or any web page it opened (`browserRequests`
- * done for that run, or for the chat when there is no run). Connector reads are tracked on the run itself. */
+ * done for that run, or for the chat when there is no run). Connector reads are tracked on the run itself.
+ *
+ * A run is also handed the recent replies in its chat (`threadContext`), so a reply written by another run that read
+ * outside content carries that text in: it counts too. The scan covers the last `MAX_CONTEXT_MESSAGES` lines, a
+ * superset of what `threadContext` sends. A prior run that retention has removed is no longer known and counts as
+ * clean; so does a memory recap condensed from such a run (SECURITY.md, Known limitations). */
 export function outsideRead(state, {runId = null, chatKey = null, outsideInput = false} = {}) {
   if (outsideInput) return true;
   if (!runId && !chatKey) return false;
   const ours = r => runId ? r.runId === runId : !r.runId && r.chatKey === chatKey;
-  return (state?.browserRequests || []).some(r => r?.status === 'done' && ours(r));
+  if ((state?.browserRequests || []).some(r => r?.status === 'done' && ours(r))) return true;
+  return Boolean(runId) && threadCarriesOutside(state, runId);
+}
+
+/** What makes a run's own replies outside text: the same marks the page and connector guards read. */
+function runReadOutside(state, run) {
+  if (!run) return false;
+  if (run.outsideInput === true || run.readPrivate === true || run.connectorPage) return true;
+  if (Array.isArray(run.readFrom) && run.readFrom.length) return true;
+  return (state?.browserRequests || []).some(r => r?.status === 'done' && r.runId === run.id);
+}
+
+function threadCarriesOutside(state, runId) {
+  const runs = Array.isArray(state?.groupRuns) ? state.groupRuns : [];
+  const run = runs.find(r => r?.id === runId);
+  if (!run) return false;
+  const chat = state?.chats?.[run.chatKey || `team-${run.groupId}`];
+  if (!Array.isArray(chat)) return false;
+  const others = new Set(chat.filter(m => m && ['user', 'bot'].includes(m.role)).slice(-MAX_CONTEXT_MESSAGES)
+    .filter(m => m.role === 'bot' && m.runId && m.runId !== runId).map(m => m.runId));
+  for (const id of others) if (runReadOutside(state, runs.find(r => r?.id === id))) return true;
+  return false;
 }
 
 /** The need the owner already declined in this task, or null. `declined` is the run's [{action, scope}]: only that
