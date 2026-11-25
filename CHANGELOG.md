@@ -127,6 +127,10 @@ browser tasks, and accounts, workspaces and backup.
 - **The browser smokes run without a browser download.** When Playwright's own
   Chromium is not installed, `npm run test:ui` and `npm run test:e2e` drive the
   installed Google Chrome instead (`tests/browser_launch.py`).
+- **A throwaway browser profile is removed on a busy machine too.** The local
+  agent gave up after five quick tries, and a Chrome helper could write the
+  directory back after a removal, so a temporary profile was left in the temp
+  folder. It now retries for up to three seconds until the folder is gone.
 - **Health stays up during a restore.** A restore stops the workspace's queue,
   and its last tick aged past a minute, so `/api/health` answered 503 and a
   container health check could restart the server mid-restore. A stopped queue
