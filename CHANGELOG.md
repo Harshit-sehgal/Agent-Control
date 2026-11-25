@@ -90,6 +90,11 @@ browser tasks, and accounts, workspaces and backup.
   Atlas, in a Home group, in place of the X-engage group and its example bots.
 - **The package description** is now "Local-first personal bot platform with
   human-approved actions".
+- **The docs say what a new install does.** README, SECURITY.md, AGENTS.md and
+  OPERATIONS.md claimed every send and post asks by default and that events are
+  limited past 60 a minute. A new install starts on Hands-off (a clean run
+  sends and posts unasked; deletes and payments always ask), and the event
+  route blocks an address after 20 refusals a minute. A test pins that limit.
 
 ### Kept
 - **The posting guard.** A bot may read an X page through an approved

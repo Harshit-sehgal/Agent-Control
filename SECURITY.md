@@ -10,9 +10,12 @@ description of what is and is not defended.
   reach a publication or filesystem tool. Every bot has basic access with no
   grant: it may open a web page and read a connected app (`BASIC_ACCESS` in
   `shared/asks.js`), unless the owner set that site or account to Ask each time
-  or Deny, or switched **Browse and read without asking** off. A send, post,
-  delete, payment or connector write asks the owner unless a grant says Always
-  allow, and once a run has read private data (mail, files, a connector) a page
+  or Deny, or switched **Browse and read without asking** off. A delete or
+  payment asks the owner unless a grant says Always allow. A send, post or
+  connector write asks the same way, except under **Hands-off**, which a new
+  install starts on: with it, those go without asking in a run that has read
+  nothing from outside (no page, connector result, private read or event body).
+  The Balanced and Careful presets switch it off. Once a run has read private data (mail, files, a connector) a page
   on a site with no Always allow asks again. Pages run on a paired local agent
   (or this server's own browser), under the device-side allowlist and
   private-address proxy, in one shared browser profile the owner signs in to.
@@ -96,14 +99,17 @@ access only to people you would let read the owner's connected accounts.
   is imported once (and a corrupt one is moved aside, not crash-looped) and then
   left beside the database.
 
-## The hard boundary: no automated publishing
+## The hard boundary: publishing only through the ask check
 - `shared/contracts.js` `ACTIONS` deliberately contains no publish/post action,
   so **no** bot contract can ever grant automated posting.
 - Every model output is validated against the bot's declared output contract
   before a handoff (`assertContractOutput`), so a bot cannot smuggle an
   unexpected payload forward.
-- A send, post, delete or payment click asks the owner unless they set Always
-  allow for that bot on that site; a payment Always allow is confirmed first.
+- A delete or payment click asks the owner unless they set Always allow for
+  that bot on that site; a payment Always allow is confirmed first. A send or
+  post click asks the same way, except under Hands-off (on for a new install)
+  in a run that has read nothing from outside. An event-started run, and any
+  run that has opened a page or read a connector, always asks.
   `tests/prompt-injection.test.js` and `tests/owner-choices.test.js` lock this in.
 
 ## Local agent protocol

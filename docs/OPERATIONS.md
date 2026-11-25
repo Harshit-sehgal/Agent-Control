@@ -211,7 +211,7 @@ allow notifications once.
   the form-encoded option is refused (400), because the signed bytes must be JSON. A GitHub `ping` (sent when the
   webhook is made) is signed and answered `ignored`, so it starts nothing.
 - **Answers.** `queued` (a run started), `duplicate` (same body within 24 hours), `cooldown`,
-  `ignored` (the condition did not match), `held` (kill switch on). Any refusal (bad signature, unknown or disabled trigger, unknown workspace) is the same 401. Past 60 events a minute from one address to one trigger, the answer is 429.
+  `ignored` (the condition did not match), `held` (kill switch on). Any refusal (bad signature, unknown or disabled trigger, unknown workspace) is the same 401. After 20 refused events in a minute from one address to one trigger, that address gets 429 for the rest of the minute; correctly signed events are never counted.
 - **Cloudflare Access.** Senders cannot log in, so the event path needs a bypass rule for
   `agent-control.harshitsehgal.online/api/events/*`. That is your decision; the app does not
   change Access. Without it, the sender gets the Access login page.
