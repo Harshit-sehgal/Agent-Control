@@ -38,7 +38,7 @@ const SERVER_ONLY_KINDS = ['mcp.call', 'model.run'];
 
 export function accountRoutes(router, {auth, workspaces}) {
   // The signed-in user's own account and sessions.
-  router.add('GET', '/api/me', 'viewer', c => ({email: c.actor.email, role: c.actor.role}));
+  router.add('GET', '/api/me', 'viewer', c => ({email: c.actor.email, role: c.actor.role, hasPassword: auth.hasPassword(c.actor.userId)}));
   router.add('POST', '/api/auth/password', 'viewer', async c => { const b = await c.body(); auth.changePassword(c.actor.userId, b.currentPassword, b.newPassword, c.actor.sessionId); return {ok: true}; });
   router.add('GET', '/api/sessions', 'viewer', c => ({sessions: auth.listSessions(c.actor.userId).map(s => ({...s, current: s.id === c.actor.sessionId}))}));
   router.add('POST', '/api/sessions/revoke-all', 'viewer', c => { auth.revokeAll(c.actor.userId, c.actor.sessionId); return {ok: true}; });

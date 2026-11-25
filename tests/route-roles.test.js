@@ -93,6 +93,11 @@ const PUBLIC_ROUTES = [
   // checks a single-use state nonce and a flow cookie (src/google.js). It takes no id.
   'GET /api/connectors/google/callback',
   'GET /api/connectors/mcp/callback',
+  // Owner sign-in with Google (src/google-owner.js): which sign-ins exist, the start that sends the browser to Google,
+  // and the return, which checks a single-use state against its cookie and Google's id_token before any session.
+  'GET /api/auth/methods',
+  'GET /api/auth/google/start',
+  'GET /api/auth/google/callback',
   // An outside event sender (a deploy hook, GitHub) answers no session. It must prove the request with an HMAC.
   'POST /api/events/:workspace/:trigger',
 ];

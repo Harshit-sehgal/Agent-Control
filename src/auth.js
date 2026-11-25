@@ -67,12 +67,14 @@ export const validEmail = value => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(v
 
 export class Auth {
   constructor(store) { this.store = store; }
-  /** Create the owner account and default workspace on a brand-new install. */
-  ensureBootstrap(password) {
+  /** Create the owner account and default workspace on a brand-new install. With no password the account has
+   * none (an empty hash matches nothing): the owner signs in with Google (OWNER_EMAIL) or sets one with
+   * `npm run reset-password`. */
+  ensureBootstrap(password = '') {
     if (this.store.get('SELECT id FROM users LIMIT 1')) return;
     const id = crypto.randomUUID();
     this.store.transaction(() => {
-      this.store.run('INSERT INTO users (id,email,password_hash,created_at,verified_at) VALUES (?,?,?,?,?)', id, OWNER_EMAIL, hashPassword(password), now(), now());
+      this.store.run('INSERT INTO users (id,email,password_hash,created_at,verified_at) VALUES (?,?,?,?,?)', id, OWNER_EMAIL, password ? hashPassword(password) : '', now(), now());
       this.store.run('INSERT OR IGNORE INTO workspaces (id,name,created_at) VALUES (?,?,?)', DEFAULT_WORKSPACE, 'Primary workspace', now());
       this.store.run('INSERT INTO workspace_members (workspace_id,user_id,role,created_at) VALUES (?,?,?,?)', DEFAULT_WORKSPACE, id, 'owner', now());
     });
@@ -86,6 +88,21 @@ export class Auth {
   async loginAsync({email, password}, meta = {}) {
     const found = this.accountFor(email);
     return this.finishLogin(found, await verifyPasswordAsync(password, found.row ? found.row.password_hash : DUMMY_HASH), meta);
+  }
+  /** A session for the owner of the first workspace, after Google proved the OWNER_EMAIL address
+   * (src/google-owner.js). The same checks and the same session as a password sign-in. */
+  loginOwner(meta = {}) {
+    const id = this.ownerId();
+    const row = id ? this.store.get('SELECT * FROM users WHERE id=? AND disabled_at IS NULL', id) : null;
+    return this.finishLogin({row}, Boolean(row), meta);
+  }
+  /** The first owner of the first workspace, or null. */
+  ownerId() {
+    return this.store.get(`SELECT user_id AS id FROM workspace_members WHERE workspace_id=? AND role='owner' ORDER BY created_at LIMIT 1`, DEFAULT_WORKSPACE)?.id || null;
+  }
+  /** Whether the account can sign in with a password at all. */
+  hasPassword(userId) {
+    return Boolean(this.store.get('SELECT password_hash AS hash FROM users WHERE id=?', userId)?.hash);
   }
   accountFor(email) {
     // Omitting the email keeps the single-owner behavior of the prototype:
@@ -353,7 +370,8 @@ export class Auth {
   changePassword(userId, currentPassword, newPassword, keepSessionId = null) {
     const row = this.store.get('SELECT password_hash FROM users WHERE id=?', userId);
     if (!row) throw Object.assign(new Error('Account not found.'), {status: 404});
-    if (!verifyPassword(currentPassword, row.password_hash)) throw Object.assign(new Error('Current password is incorrect.'), {status: 401});
+    // An account with no password yet (an owner who signs in with Google) sets its first one without a current one.
+    if (row.password_hash && !verifyPassword(currentPassword, row.password_hash)) throw Object.assign(new Error('Current password is incorrect.'), {status: 401});
     if (String(newPassword || '').length < 8) throw Object.assign(new Error('Password must be at least 8 characters.'), {status: 400});
     this.store.transaction(() => {
       this.store.run('UPDATE users SET password_hash=? WHERE id=?', hashPassword(newPassword), userId);
