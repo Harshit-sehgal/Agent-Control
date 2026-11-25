@@ -13,6 +13,7 @@ import {ACTIVITY_CHIPS} from './activity-log.js';
 import {grantRows} from './ui-asks.js';
 import {cleanEffort, effortLabel, EFFORT_LEVELS} from './ai-presets.js';
 import {scheduleRows} from './schedules.js';
+import {WATCH_EVERY} from './watches.js';
 
 /** What a bot made without a job holds until the owner's first chat message
  * replaces it (the profile, the list and the chat all treat it as "no job yet"). */
@@ -136,6 +137,37 @@ export function modelChip(state, botId) {
 }
 
 /** `activityCount` is the log's own total for this bot (GET /api/activity), which is not in the snapshot. */
+function scheduleValue(timers, watched) {
+  if (!watched) return timers.length === 1 ? timers[0].when : timers.length ? plural(timers.length, 'task') : 'None';
+  return [timers.length ? plural(timers.length, 'task') : '', plural(watched, 'page watched', 'pages watched')].filter(Boolean).join(' · ');
+}
+
+/** How long ago, in the short words a row has room for. */
+function since(value, now) {
+  const ms = now - Date.parse(value);
+  if (!Number.isFinite(ms)) return '';
+  if (ms < 60000) return 'just now';
+  if (ms < 3600000) return `${Math.floor(ms / 60000)} min ago`;
+  if (ms < 86400000) return `${Math.floor(ms / 3600000)} h ago`;
+  return `${Math.floor(ms / 86400000)} d ago`;
+}
+
+/** A bot's watched pages, oldest first, as its Schedule page lists them: what (the page, or the words on it), when
+ * (how often, last checked, last changed) and any problem. Pure; `state.watches` is the snapshot's `publicWatch`. */
+export function watchRows(state, botId, now = Date.now()) {
+  return (state?.watches || []).filter(w => w.botId === botId)
+    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+    .map(w => {
+      let page = String(w.url || '');
+      try { const u = new URL(page); page = (u.host + u.pathname + u.search).replace(/\/$/, ''); } catch { /* keep as typed */ }
+      const checking = Boolean(w.requestId);
+      const when = [w.on === false ? 'Paused' : '', WATCH_EVERY.find(e => e.id === w.every)?.label || w.everyLabel || '',
+        checking ? 'checking now' : w.lastCheckedAt ? `checked ${since(w.lastCheckedAt, now)}` : 'not checked yet',
+        w.lastChangedAt ? `changed ${since(w.lastChangedAt, now)}` : ''].filter(Boolean).join(' · ');
+      return {id: w.id, url: w.url, what: w.words ? `"${w.words}" on ${page}` : page, when, on: w.on !== false, checking, problem: String(w.problem || '')};
+    });
+}
+
 export function profileRows(state, botId, {activityCount = 0, canPickModel = true} = {}) {
   const bot = botOf(state, botId);
   if (!bot) return [];
@@ -145,7 +177,8 @@ export function profileRows(state, botId, {activityCount = 0, canPickModel = tru
     {key: 'memory', label: 'Memory', value: notes ? plural(notes, 'note') : 'Empty'},
     {key: 'activity', label: 'Activity', value: acts ? String(acts) : ''},
     // One schedule reads its when ("every day at 08:00"); more read as a count.
-    {key: 'schedule', label: 'Schedule', value: timers.length === 1 ? timers[0].when : timers.length ? plural(timers.length, 'task') : 'None'},
+    // Watched pages count beside the timers ("1 task · 2 pages watched").
+    {key: 'schedule', label: 'Schedule', value: scheduleValue(timers, watchRows(state, botId).length)},
     {key: 'permissions', label: 'Permissions', value: rules ? plural(rules, 'rule') : 'None'},
     // With nothing to pick (the demo has no model) the row is only a value, not a door to an empty page.
     {key: 'model', label: 'Model', value: modelLine(state, botId), ...(canPickModel ? {} : {plain: true})},

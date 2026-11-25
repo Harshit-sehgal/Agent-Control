@@ -130,6 +130,14 @@ Built, with tests:
   the bot should do differently from now on and keeps it as that bot's own rule, editable on its profile.
   `tests/teach-reply.test.js`, usability smoke "teach".
 
-Still not built, with the reason: **watch-and-tell**, **drafts for approval** and **a screenshot in the action
+- **Watch and tell** (idea 5): a bot checks a page every hour, 6 hours or day and the owner hears once when it
+  changes, or when chosen words appear. Compared by code, never by a model; clocks and "3 min ago" are not changes.
+  The check runs under its own key, so it never taints the bot's chat or reaches a model turn, and it never asks:
+  a site set to Ask each time stops it with a notice. The stored last-seen lines live in kv `watches`, not
+  `src/memory.js`, so they never reach a prompt. Added and managed on a bot's Schedule page. Design:
+  `docs/superpowers/specs/2026-11-25-watch-and-tell-design.md`; `tests/watches.test.js`, `tests/watch-sweep.test.js`,
+  `tests/watch-ui.test.js`, usability smoke "watch".
+
+Still not built, with the reason: **drafts for approval** and **a screenshot in the action
 log** each touch the ask and outside-read rules and want their own design pass; **Android Trusted Web Activity**
 needs a signing key on the owner's machine.

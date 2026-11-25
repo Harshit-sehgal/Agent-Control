@@ -2,10 +2,10 @@
  * a pane shows: the chat list, a thread's timeline and the "needs you" count.
  * (The hash route lives in ui-company.js.) No DOM and no globals, so the product rules here are unit
  * tested directly (tests/ui-model.test.js). */
-import {botSettings} from './bot-settings.js?v=5017baa34f';
-import {STOPPABLE_STATUSES} from './run-state.js?v=5017baa34f';
-import {primaryOf} from './company.js?v=5017baa34f';
-import {plain} from './ui-kit.js?v=5017baa34f';
+import {botSettings} from './bot-settings.js?v=c7776be546';
+import {STOPPABLE_STATUSES} from './run-state.js?v=c7776be546';
+import {primaryOf} from './company.js?v=c7776be546';
+import {plain} from './ui-kit.js?v=c7776be546';
 
 const teamKey = groupId => `team-${groupId}`;
 const time = value => { const t = Date.parse(value || ''); return Number.isFinite(t) ? t : 0; };

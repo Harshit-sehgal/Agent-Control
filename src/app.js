@@ -24,6 +24,7 @@ import {startRetention} from './scheduler.js';
 import {markInterrupted, queueGroupRun} from './coordination.js';
 import {startFollowUps} from './follow-ups.js';
 import {createHealthWatch} from './health-watch.js';
+import {startWatches} from './watches.js';
 import {startSweep} from './interval.js';
 import {startAskExpiry} from './ask-runs.js';
 import {startHeldSends} from './held-sends.js';
@@ -86,7 +87,7 @@ export function createWorkspaceStarter({auth, push}) {
     // Nothing runs until recovery has finished, so a stalled task is re-armed
     // before the first sweep can see it.
     let stops = [], stopped = false;
-    ready.then(() => { if (!stopped) stops = [startRetention(ws), startAgentRetention(ws), startAskExpiry(ws), startHeldSends(ws), startBrowserExpiry(ws), startFollowUps(ws, queueGroupRun), createHealthWatch(ws, {workspaceId, notify}).start(), queue.start()]; }).catch(error => console.error(`Workspace ${workspaceId} failed to start:`, error.message));
+    ready.then(() => { if (!stopped) stops = [startRetention(ws), startAgentRetention(ws), startAskExpiry(ws), startHeldSends(ws), startBrowserExpiry(ws), startFollowUps(ws, queueGroupRun), createHealthWatch(ws, {workspaceId, notify}).start(), startWatches(ws, {notify}), queue.start()]; }).catch(error => console.error(`Workspace ${workspaceId} failed to start:`, error.message));
     const stop = async () => { stopped = true; await ready.catch(() => {}); for (const s of stops) await s(); };
     stop.ready = ready;
     return stop;

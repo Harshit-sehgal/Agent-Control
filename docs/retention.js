@@ -8,9 +8,9 @@
  * workflow document — they are bounded by the in-app feed cap in
  * src/notifications.js — so there is no retention knob for them here.)
  */
-import {activity} from './core.js?v=5017baa34f';
-import {BUSY_STATUSES} from './coordination.js?v=5017baa34f';
-import {keepOutsideMarks} from './asks.js?v=5017baa34f';
+import {activity} from './core.js?v=c7776be546';
+import {BUSY_STATUSES} from './coordination.js?v=c7776be546';
+import {keepOutsideMarks} from './asks.js?v=c7776be546';
 
 export const RETENTION_DEFAULTS = {events: 90, doneTasks: 30, runs: 30};
 
