@@ -26,10 +26,10 @@
  * Pure and browser-safe, like the other shared modules: the server and the
  * Pages demo share every rule here.
  */
-import {fail} from './errors.js?v=cb69ba1470';
-import {cleanText} from './core.js?v=cb69ba1470';
-import {logActivity} from './activity-log.js?v=cb69ba1470';
-import {MAX_CONTEXT_MESSAGES} from './bot-settings.js?v=cb69ba1470';
+import {fail} from './errors.js?v=38c42dacdb';
+import {cleanText} from './core.js?v=38c42dacdb';
+import {logActivity} from './activity-log.js?v=38c42dacdb';
+import {MAX_CONTEXT_MESSAGES} from './bot-settings.js?v=38c42dacdb';
 
 /** What every bot may do without a grant. */
 export const BASIC_KIT = ['bot.ask', 'bot.create', 'schedule.set'];

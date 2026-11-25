@@ -158,8 +158,10 @@ email. An anonymous request gets a 302 to the Access login, and `/api/health` be
 **Why the hostname is `agent-control`, not `agent`.** `agent.harshitsehgal.online` already points at
 another tunnel (`dsh`). Do not overwrite a DNS record that serves another service.
 
-**Timezone.** `TZ` defaults to `Asia/Kolkata` in `compose.cloudflare.yaml`. Quiet hours and weekday
-schedules are read in the server's local zone, so keep `TZ` set to the owner's zone.
+**Timezone.** `TZ` defaults to `Asia/Kolkata` in `compose.cloudflare.yaml`. Quiet hours are read in
+the server's local zone, so keep `TZ` set to the owner's zone. A weekdays or weekends schedule made in
+the app carries the browser's zone and keeps the owner's days whatever `TZ` is; one made before that
+change, or without a zone, uses the server's.
 
 **Quiet hours.** Set `QUIET_HOURS=22:00-07:00` in `deploy/.env` to hold non-urgent phone pushes
 overnight. Approval requests (`ask` notifications) are always pushed. A held message stays in the app;

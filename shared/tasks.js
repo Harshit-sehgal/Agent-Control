@@ -367,7 +367,7 @@ export function retryTask(state, id) {
   if (!task) fail('Task not found.', 404);
   if (task.status === 'cancelled') fail('A cancelled task cannot be retried. Enqueue a new one.', 409);
   if (task.status !== 'failed') fail('Only a failed task can be retried.', 409);
-  task.status = 'queued';
+  requeue(state, task);
   task.runAt = new Date().toISOString();
   task.attempts = 0;
   task.lastError = null;
@@ -419,11 +419,13 @@ export function resumeTask(state, id, now = Date.now()) {
   if (!task) fail('Task not found.', 404);
   if (task.status !== 'paused') fail('Only a paused task can be resumed.', 409);
   const planned = Date.parse(task.runAt);
-  task.status = 'queued';
+  // Cleared before requeue: while the kill switch is on, requeue marks it as the switch's, so it comes back with
+  // the switch's Resume instead of running now.
   task.payload = {...task.payload, pausedBy: null};
+  requeue(state, task);
   task.runAt = new Date(Number.isFinite(planned) && planned > now ? planned : now).toISOString();
   task.updatedAt = new Date(now).toISOString();
-  activity(state, 'task', `Resumed task: ${task.title}`, {taskId: task.id});
+  activity(state, 'task', task.status === 'paused' ? `Will resume when the kill switch is off: ${task.title}` : `Resumed task: ${task.title}`, {taskId: task.id});
   return task;
 }
 

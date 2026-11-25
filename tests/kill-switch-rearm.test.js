@@ -4,13 +4,15 @@
  * completes or fails, and a crashed worker's lease is re-armed by recovery. Each of those used to put the task
  * straight back to `queued`, so the next sweep ran it again while every schedule was meant to be held. They now
  * park it as paused by the switch, and the switch's Resume brings it back. A daily weekdays schedule that ran out
- * of retries is also re-armed on a weekday, as a completed one is.
+ * of retries is also re-armed on a weekday, as a completed one is. A schedule the owner resumes or retries by hand
+ * while the switch is on waits for the switch as well.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   enqueueTask, claimTasks, completeTask, failTask, recoverStalledTasks,
   pauseAllSchedules, resumeAllSchedules, RETRY_STARTED, RETRY_WINDOW_MS,
+  resumeTask as resumeTaskByHand, retryTask as retryTaskByHand,
 } from '../shared/tasks.js';
 
 const fresh = () => ({tasks: [], events: [], schedulesPaused: false,
@@ -90,4 +92,27 @@ test('a weekdays schedule that ran out of retries on a Friday next runs on Monda
   const next = new Date(task.runAt);
   assert.equal(next.getDay(), 1, `re-armed for ${next}`);
   assert.equal(next.getHours(), 8);
+});
+
+test('a schedule resumed by hand while the switch is on waits for the switch', () => {
+  const state = fresh();
+  const task = schedule(state);
+  pauseAllSchedules(state);
+  task.payload = {...task.payload, pausedBy: null}; // paused by hand, not by the switch
+  resumeTaskByHand(state, task.id);
+  held(task);
+  const later = Date.now() + 3600000;
+  assert.deepEqual(claimTasks(state, {workerId: 'w', now: later}), []);
+  resumeAllSchedules(state, later);
+  assert.equal(task.status, 'queued');
+  assert.equal(claimTasks(state, {workerId: 'w', now: later}).length, 1);
+});
+
+test('a failed schedule retried by hand while the switch is on waits too', () => {
+  const state = fresh();
+  const task = schedule(state);
+  task.status = 'failed';
+  pauseAllSchedules(state);
+  retryTaskByHand(state, task.id);
+  held(task);
 });

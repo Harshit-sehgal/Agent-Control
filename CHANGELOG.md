@@ -107,7 +107,7 @@ browser tasks, and accounts, workspaces and backup.
   itself as queued, and the next sweep ran it again; so did a retry and a
   crashed worker's recovered lease. Each now waits as paused by the switch and
   comes back with its Resume, and the queue never claims a schedule while the
-  switch is on. A weekdays or weekends schedule that ran out of retries is
+  switch is on. One resumed or retried by hand while it is on waits for it too. A weekdays or weekends schedule that ran out of retries is
   re-armed on a day its rule allows, as a completed one already was.
 - **Weekdays and weekends follow the owner's calendar.** The server judged the
   day of each run on its own clock, so on a server in UTC an owner far from UTC
