@@ -112,3 +112,5 @@ Built, with tests:
   schedules wait, or background work running late, is one urgent phone notice and one "back" notice. A scheduled
   task that a site signed out tells the owner at once instead of leaving a card in a chat nobody opens.
   `tests/health-watch.test.js`.
+- **Per-site daily limit** (Keep item 2): `perSite` in `shared/limits.js`, Settings → Limits "Pages a day on one
+  site". Off by default. `tests/site-limit.test.js`.

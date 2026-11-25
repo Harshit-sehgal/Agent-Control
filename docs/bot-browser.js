@@ -20,12 +20,12 @@
  * X and Twitter work like any other site: a bot may read, click and type there, and a click on Post asks
  * unless the owner set Always allow for posting on that site.
  */
-import {cleanText, validHttpUrl} from './core.js?v=7bcf0dde92';
-import {fail} from './errors.js?v=7bcf0dde92';
-import {decide, createAsk, scopeOf, declinedNeed, outsideRead} from './asks.js?v=7bcf0dde92';
-import {controlFence} from './reply-blocks.js?v=7bcf0dde92';
-import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=7bcf0dde92';
-import {appForHost} from './app-catalog.js?v=7bcf0dde92';
+import {cleanText, validHttpUrl} from './core.js?v=137f50e22a';
+import {fail} from './errors.js?v=137f50e22a';
+import {decide, createAsk, scopeOf, declinedNeed, outsideRead} from './asks.js?v=137f50e22a';
+import {controlFence} from './reply-blocks.js?v=137f50e22a';
+import {BACKSTOP, pagesCap, roundsCap, siteOf, siteCapLeft, countSitePage, limitsOf} from './limits.js?v=137f50e22a';
+import {appForHost} from './app-catalog.js?v=137f50e22a';
 
 /** The most page text one model turn carries (the pages of a round together). */
 export const MAX_PAGE_CHARS = 24000;
@@ -625,6 +625,15 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
     // `navigate` step opens after a private first page.
     const decision = decide(state, bot, needs, {readPrivate: need => guarded && need.action === BROWSER_PERMISSION && !privateHosts.has(hostOf(need.target)), outside: run?.outsideInput === true, tainted: guarded || outsideRead(state, {runId, chatKey, outsideInput: run?.outsideInput === true})});
     if (decision.verdict === 'deny') { say(`${bot.name} asked to ${describe(item.request)}. ${decision.message}`); continue; }
+    // The owner's per-site daily limit (Settings → Limits): past it, nothing more opens on that site today.
+    const site = siteOf(item.request.url);
+    if (siteCapLeft(state, site, now) <= 0) {
+      const cap = limitsOf(state).perSite;
+      say(`${bot.name} asked to open ${site}, but bots already opened ${cap} pages on ${site} today, the limit you set in Settings. It starts over at midnight UTC.`);
+      invalid.push(`the owner's limit of ${cap} pages a day on ${site} is used up; do not ask for ${site} again today.`);
+      continue;
+    }
+    countSitePage(state, site, now);
     // `approved`: the risky classes this request is cleared for once it is sent (a grant, or the owner's
     // answer to its ask), each for the origin it runs on ("send@https://b.example"). Written here after the
     // validated request, so a reply cannot set it; the browser refuses any other risky control it meets,

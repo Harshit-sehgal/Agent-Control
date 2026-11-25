@@ -217,6 +217,7 @@ const LIMIT_ROWS = [
   ['pages', 'Pages opened at once', 'Pages or app reads a bot opens side by side. Set one to keep a bot from fanning out across many sites.', [1, 3, 5]],
   ['rounds', 'Look-ups before answering', 'Times in a row a bot reads more before it replies. Set one for quicker, cheaper answers.', [2, 5, 10]],
   ['steps', 'Bot hand-offs per message', 'Bot turns one message can take across a team. Set one to stop bots passing work around for long.', [3, 6, 12]],
+  ['perSite', 'Pages a day on one site', 'Pages bots open on any one site in a day. Set one so a schedule stuck in a loop cannot wear out your X or LinkedIn account.', [20, 50, 100]],
 ];
 function limitsCard(owner) {
   const now = limitsOf(store.state);

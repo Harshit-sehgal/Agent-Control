@@ -7,24 +7,24 @@
  * team, agents, data) load the existing admin forms from ui-admin.js into the body.
  *
  * The lists behind it are pure and tested in ui-profile-model.js. */
-import {face} from './ui-face.js?v=7bcf0dde92';
-import {botStatus} from './ui-company.js?v=7bcf0dde92';
-import {esc, icon, btn, empty, note, roundBtn, switchBtn, fullDate} from './ui-kit.js?v=7bcf0dde92';
-import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, applyTheme, themeChoice, THEMES, saveLocal} from './ui-store.js?v=7bcf0dde92';
-import {isDesk, initials, setupCardHtml, PERM_SEEN} from './ui-shell.js?v=7bcf0dde92';
-import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=7bcf0dde92';
-import {faceOf, headBar, activityBlocks} from './ui-profile.js?v=7bcf0dde92';
-import {grantRows, allGrantRows, grantUrl, untilOptions, permissionSummary} from './ui-asks.js?v=7bcf0dde92';
-import {GRANT_LABELS, untilFor} from './asks.js?v=7bcf0dde92';
-import {PRESETS, presetOf, applyPreset} from './presets.js?v=7bcf0dde92';
-import {toast, confirmSheet} from './ui-dialogs.js?v=7bcf0dde92';
+import {face} from './ui-face.js?v=137f50e22a';
+import {botStatus} from './ui-company.js?v=137f50e22a';
+import {esc, icon, btn, empty, note, roundBtn, switchBtn, fullDate} from './ui-kit.js?v=137f50e22a';
+import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, applyTheme, themeChoice, THEMES, saveLocal} from './ui-store.js?v=137f50e22a';
+import {isDesk, initials, setupCardHtml, PERM_SEEN} from './ui-shell.js?v=137f50e22a';
+import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=137f50e22a';
+import {faceOf, headBar, activityBlocks} from './ui-profile.js?v=137f50e22a';
+import {grantRows, allGrantRows, grantUrl, untilOptions, permissionSummary} from './ui-asks.js?v=137f50e22a';
+import {GRANT_LABELS, untilFor} from './asks.js?v=137f50e22a';
+import {PRESETS, presetOf, applyPreset} from './presets.js?v=137f50e22a';
+import {toast, confirmSheet} from './ui-dialogs.js?v=137f50e22a';
 import {
   ACTIVITY_FILTERS, activityUrl, companyTree, weekUsage, settingsSections, resolveSection, sectionArg,
-} from './ui-profile-model.js?v=7bcf0dde92';
-import {COLORS} from './ui-face.js?v=7bcf0dde92';
-import {limitsOf, limitWords, FAIL_STREAK} from './limits.js?v=7bcf0dde92';
-import {monthByBot, usageWords} from './usage.js?v=7bcf0dde92';
-import {companyBots} from './company.js?v=7bcf0dde92';
+} from './ui-profile-model.js?v=137f50e22a';
+import {COLORS} from './ui-face.js?v=137f50e22a';
+import {limitsOf, limitWords, FAIL_STREAK} from './limits.js?v=137f50e22a';
+import {monthByBot, usageWords} from './usage.js?v=137f50e22a';
+import {companyBots} from './company.js?v=137f50e22a';
 
 const el = id => document.getElementById(id);
 const ICONS = {general: 'gear', look: 'half', models: 'key', conn: 'plug', perm: 'shield', usage: 'chart'};
@@ -217,6 +217,7 @@ const LIMIT_ROWS = [
   ['pages', 'Pages opened at once', 'Pages or app reads a bot opens side by side. Set one to keep a bot from fanning out across many sites.', [1, 3, 5]],
   ['rounds', 'Look-ups before answering', 'Times in a row a bot reads more before it replies. Set one for quicker, cheaper answers.', [2, 5, 10]],
   ['steps', 'Bot hand-offs per message', 'Bot turns one message can take across a team. Set one to stop bots passing work around for long.', [3, 6, 12]],
+  ['perSite', 'Pages a day on one site', 'Pages bots open on any one site in a day. Set one so a schedule stuck in a loop cannot wear out your X or LinkedIn account.', [20, 50, 100]],
 ];
 function limitsCard(owner) {
   const now = limitsOf(store.state);

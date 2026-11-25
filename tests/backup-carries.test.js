@@ -34,7 +34,7 @@ async function filled() {
   const notes = saveAttachment(t.store, upload('notes.md', Buffer.from('# hi\n')), {at: '2026-01-02T00:00:00.000Z'});
   await t.store.update(s => {
     addTemplate(s, {text: 'Summarise the news for me.'});
-    setLimits(s, {pages: 3, steps: 12, askCheckpoints: true});
+    setLimits(s, {pages: 3, steps: 12, perSite: 40, askCheckpoints: true});
     recordDay(s, {botId: 'atlas', input: 100, output: 20, cost: 0.5}, new Date().toISOString());
     s.askBasics = true;
     s.handsOff = true;
@@ -61,7 +61,7 @@ test('a backup round-trips attachment bytes, templates, usage, limits, switches 
     const s = other.store.read();
     assert.deepEqual(s.templates.map(x => x.text), ['Summarise the news for me.']);
     assert.equal(s.templates[0].id, t.store.read().templates[0].id, 'a template keeps its id');
-    assert.deepEqual(s.limits, {pages: 3, rounds: null, steps: 12, askCheckpoints: true});
+    assert.deepEqual(s.limits, {pages: 3, rounds: null, steps: 12, perSite: 40, askCheckpoints: true});
     assert.equal(s.askBasics, true);
     assert.equal(s.handsOff, true);
     const today = new Date().toISOString().slice(0, 10);
