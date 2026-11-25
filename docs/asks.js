@@ -26,11 +26,11 @@
  * Pure and browser-safe, like the other shared modules: the server and the
  * Pages demo share every rule here.
  */
-import {fail} from './errors.js?v=e88fe6080b';
-import {cleanText} from './core.js?v=e88fe6080b';
-import {logActivity} from './activity-log.js?v=e88fe6080b';
-import {MAX_CONTEXT_MESSAGES} from './bot-settings.js?v=e88fe6080b';
-import {botKey} from './memory.js?v=e88fe6080b';
+import {fail} from './errors.js?v=34419968de';
+import {cleanText} from './core.js?v=34419968de';
+import {logActivity} from './activity-log.js?v=34419968de';
+import {MAX_CONTEXT_MESSAGES} from './bot-settings.js?v=34419968de';
+import {botKey} from './memory.js?v=34419968de';
 
 /** What every bot may do without a grant. */
 export const BASIC_KIT = ['bot.ask', 'bot.create', 'schedule.set'];
@@ -276,7 +276,8 @@ function messagesCarryOutside(state, messages, {except = null} = {}) {
 
 /** Do the notes a bot turn is handed carry outside text? A chat recap or an enabled rule a tidy-up pass wrote from a
  * conversation that held some is marked `outside` (`mergeConsolidation`); a recap still built from the stored lines
- * quotes the chat's last two replies, so those are checked as they stand. The company notebook is the owner's own. */
+ * quotes the chat's last two replies, so those are checked as they stand. The bot's own summary carries the mark of
+ * the pass that wrote it (`summaryOutside`). The company notebook is the owner's own. */
 export function memoryCarriesOutside(state, {botId = null, chatKey = null} = {}) {
   const memory = state?.memory;
   if (!memory || typeof memory !== 'object') return false;
@@ -287,6 +288,7 @@ export function memoryCarriesOutside(state, {botId = null, chatKey = null} = {})
     if (messagesCarryOutside(state, replies)) return true;
   }
   const book = botId ? memory.rulebooks?.[botKey(botId)] : null;
+  if (book?.summaryOutside === true && book.summary) return true;
   return Boolean(book?.rules?.some(rule => rule?.outside === true && rule.enabled !== false));
 }
 

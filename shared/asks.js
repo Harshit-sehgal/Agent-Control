@@ -276,7 +276,8 @@ function messagesCarryOutside(state, messages, {except = null} = {}) {
 
 /** Do the notes a bot turn is handed carry outside text? A chat recap or an enabled rule a tidy-up pass wrote from a
  * conversation that held some is marked `outside` (`mergeConsolidation`); a recap still built from the stored lines
- * quotes the chat's last two replies, so those are checked as they stand. The company notebook is the owner's own. */
+ * quotes the chat's last two replies, so those are checked as they stand. The bot's own summary carries the mark of
+ * the pass that wrote it (`summaryOutside`). The company notebook is the owner's own. */
 export function memoryCarriesOutside(state, {botId = null, chatKey = null} = {}) {
   const memory = state?.memory;
   if (!memory || typeof memory !== 'object') return false;
@@ -287,6 +288,7 @@ export function memoryCarriesOutside(state, {botId = null, chatKey = null} = {})
     if (messagesCarryOutside(state, replies)) return true;
   }
   const book = botId ? memory.rulebooks?.[botKey(botId)] : null;
+  if (book?.summaryOutside === true && book.summary) return true;
   return Boolean(book?.rules?.some(rule => rule?.outside === true && rule.enabled !== false));
 }
 

@@ -482,7 +482,12 @@ export function mergeConsolidation(state, key, result, {now = new Date().toISOSt
   // conversation must not become the model-wide notes of every other chat that
   // model serves, so the two only meet when the pass had no chat at all.
   if (result.summary && chatKey) setChatSummary(state, chatKey, result.summary, {now, outside});
-  else if (result.summary) book.summary = cleanText(result.summary, MAX_MODEL_SUMMARY);
+  else if (result.summary) {
+    book.summary = cleanText(result.summary, MAX_MODEL_SUMMARY);
+    // Every turn of this bot is handed the summary, so it carries the pass's mark; a clean rewrite drops it.
+    if (outside) book.summaryOutside = true;
+    else delete book.summaryOutside;
+  }
   // Clear only the instructions this pass actually sent. `noteTurn` is not
   // locked out during the model call, so a sentence that arrived meanwhile has
   // never been to the model: dropping it deleted the rule and marked its turn
