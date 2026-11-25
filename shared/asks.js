@@ -252,6 +252,8 @@ export function outsideRead(state, {runId = null, chatKey = null, botId = null, 
   const run = runId && Array.isArray(state?.groupRuns) ? state.groupRuns.find(r => r?.id === runId) : null;
   const memoryChat = chatKey || run?.chatKey || (run?.groupId ? `team-${run.groupId}` : null);
   if (memoryCarriesOutside(state, {botId, chatKey: memoryChat})) return true;
+  // The run's own marks: what it read, and marked memory any of its turns was handed (`outsideMemory`).
+  if (runReadOutside(state, run)) return true;
   if (!runId && !chatKey) return false;
   const ours = r => runId ? r.runId === runId : !r.runId && r.chatKey === chatKey;
   if ((state?.browserRequests || []).some(r => r?.status === 'done' && ours(r))) return true;
@@ -263,7 +265,7 @@ function runReadOutside(state, run) {
   if (!run) return false;
   if (run.outsideInput === true || run.readPrivate === true || run.connectorPage) return true;
   if (Array.isArray(run.readFrom) && run.readFrom.length) return true;
-  if (run.readPages === true) return true;
+  if (run.readPages === true || run.outsideMemory === true) return true;
   return (state?.browserRequests || []).some(r => r?.status === 'done' && r.runId === run.id);
 }
 

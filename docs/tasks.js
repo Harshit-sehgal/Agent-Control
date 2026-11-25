@@ -6,8 +6,8 @@
  * These transitions are pure and mirror `workflow.js`: the Node worker and the
  * browser-local demo both run them, so the two backends cannot drift.
  */
-import {activity, cleanText} from './core.js?v=8994216aeb';
-import {cleanDay, cleanZone, DAY_RULES, keepWallTime, skipToDays} from './schedules.js?v=8994216aeb';
+import {activity, cleanText} from './core.js?v=8034a6501a';
+import {cleanDay, cleanZone, DAY_RULES, keepWallTime, skipToDays} from './schedules.js?v=8034a6501a';
 
 export const MAX_ATTEMPTS_DEFAULT = 5;
 

@@ -137,3 +137,21 @@ test('a pass with no chat marks the bot-wide summary, which outlives the rule it
   assert.equal(book.summaryOutside, undefined, 'a clean rewrite drops the mark');
   assert.equal(sendFromB(s), 'allow');
 });
+
+test('a run handed marked memory is outside text for the next run in its chat', () => {
+  const s = state({tainted: false});
+  s.groupRuns[0].outsideMemory = true; // run A was handed a marked recap or rule (its own bot's or a teammate's)
+  assert.equal(outsideRead(s, {runId: 'B', botId: 'nova'}), true, 'B sees A\'s reply, which may restate it');
+  assert.equal(outsideRead(s, {runId: 'A', botId: 'nova'}), true, 'and A itself counts');
+});
+
+test('the memory a turn is handed says whether it carries outside text', async () => {
+  const {memoryFor} = await import('../src/memory.js');
+  const config = {model: 'test-model', baseUrl: 'http://127.0.0.1:9/v1', apiKey: 'key'};
+  const s = state({tainted: false});
+  rulebook(s, key, {label: 'Atlas'});
+  mergeConsolidation(s, key, {rules: pass.rules, summary: ''}, {makeId, outside: true});
+  const store = {read: () => s};
+  assert.equal(memoryFor(store, {bot, config, chatKey: 'atlas'}).outside, true);
+  assert.equal(memoryFor(store, {bot: {id: 'nova', name: 'Nova'}, config, chatKey: 'atlas'}).outside, false);
+});

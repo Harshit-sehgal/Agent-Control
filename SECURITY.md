@@ -121,12 +121,15 @@ over method, path, timestamp and body hash; a timestamp window plus a per-agent
 replay cache reject replays; agents run only permission-gated task kinds.
 
 ## Known limitations
-- Hands-off tracks outside text through the recent replies a run is handed and
-  through the memory a tidy-up pass wrote from them (marked when it is written,
-  so it outlives the run). When retention removes a run, or its page requests
-  age out, the mark moves to the run or to its replies, which are kept. A model
-  can still restate outside text in its own reply to a clean request; that
-  reply is marked only through the run that produced it.
+- Hands-off tracks outside text by where it enters a run: an event body, a
+  page, a connector result, the recent replies of the run's chat, and the
+  memory its bots and any teammate it consults are handed (a recap, a rule or a
+  summary a tidy-up pass wrote from such text is marked, and so is a run handed
+  one). When retention removes a run, or its page requests age out, the mark
+  moves to the run or to its replies, which are kept. Text the owner types or
+  attaches is the owner's own and is not marked; the tracking is a rule for
+  Hands-off, not a content filter, so turn Hands-off off for a bot whose sends
+  must always be seen first.
 - Workspaces are separated by database file, and a session can only reach the
   workspace it is in. An owner of the first workspace administers the
   installation; this is not a boundary between mutually hostile tenants, who

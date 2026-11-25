@@ -107,6 +107,9 @@ browser tasks, and accounts, workspaces and backup.
   (`outside`), the mark carries into later passes that read it, and a run
   handed a marked recap or an enabled marked rule asks before a send. The bot's
   profile labels those notes; editing or forgetting one clears it.
+  A run whose bot, or a teammate it consulted, was handed such notes is
+  marked as well (`outsideMemory`), so its replies count for the next run in
+  the chat.
 - **What a run read outlives its records.** Page requests past the newest 200
   and runs past the retention window were dropped while their replies stayed in
   the chat, so a later run counted those replies as clean. A dropped page read

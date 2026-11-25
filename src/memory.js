@@ -15,7 +15,7 @@ import {
   consolidationInstructions, consolidationInput, parseConsolidation, mergeConsolidation,
   consolidationDue, findRulebook,
 } from '../shared/memory.js';
-import {consolidationReadsOutside} from '../shared/asks.js';
+import {consolidationReadsOutside, memoryCarriesOutside} from '../shared/asks.js';
 import {complete} from './ai.js';
 import {resolveConfig} from './ai-providers.js';
 import {companyBots} from '../shared/company.js';
@@ -53,7 +53,9 @@ export function memoryFor(store, {bot, config, chatKey}) {
   const state = store.read();
   const {key, label} = bookFor(bot, config);
   const prompt = promptMemory(state, key, chatKey, {label});
-  return {...prompt, key, label};
+  // Whether these notes were written from outside text (never sent to the model: memoryBlock picks the fields).
+  const outside = memoryCarriesOutside(state, {botId: bot?.id || null, chatKey});
+  return {...prompt, key, label, outside};
 }
 
 /** Record one exchange. Adds durable candidates to this model's book and
