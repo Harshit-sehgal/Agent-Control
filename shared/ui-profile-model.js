@@ -106,7 +106,10 @@ export function deleteCopy(state, botId) {
 
 const bookOf = (state, botId) => state?.memory?.rulebooks?.[`bot:${botId}`] || null;
 /** A bot's own memory notes (rules), from the snapshot. */
-export const memoryNotes = (state, botId) => (bookOf(state, botId)?.rules || []).map(r => ({id: r.id, text: r.text, source: r.source || 'user', createdAt: r.createdAt || ''}));
+/** `outside`: a tidy-up pass wrote it from something the bot read on a page or in an app, so its sends ask first. */
+export const memoryNotes = (state, botId) => (bookOf(state, botId)?.rules || []).map(r => ({id: r.id, text: r.text, source: r.source || 'user', createdAt: r.createdAt || '', ...(r.outside === true && r.enabled !== false ? {outside: true} : {})}));
+/** The line under a note written from outside text. */
+export const OUTSIDE_NOTE = 'Learned from a page or app it read, so its sends ask you first. Forget it to stop that.';
 
 /** One line for the Model row: the bot's own override, else the workspace default. */
 export function modelLine(state, botId) {

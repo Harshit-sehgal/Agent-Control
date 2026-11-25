@@ -100,8 +100,13 @@ browser tasks, and accounts, workspaces and backup.
   that read a page or a connector brought that text into the next run, which
   still counted as clean and sent unasked. That run now asks before a send, a
   post or a connector write (`outsideRead` in `shared/asks.js`). Basic access,
-  page asks, deletes and payments are unchanged. A memory recap is not tracked
-  (SECURITY.md, Known limitations).
+  page asks, deletes and payments are unchanged.
+- **Hands-off asks when a bot's memory holds outside text.** A tidy-up pass
+  that read a reply from such a run wrote rules and a chat recap from it, and a
+  later run handed them sent unasked. What such a pass writes is now marked
+  (`outside`), the mark carries into later passes that read it, and a run
+  handed a marked recap or an enabled marked rule asks before a send. The bot's
+  profile labels those notes; editing or forgetting one clears it.
 - **The kill switch holds a schedule that was mid-run.** A recurring schedule
   that finished or failed after the owner switched everything off re-armed
   itself as queued, and the next sweep ran it again; so did a retry and a

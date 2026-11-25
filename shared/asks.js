@@ -30,6 +30,7 @@ import {fail} from './errors.js';
 import {cleanText} from './core.js';
 import {logActivity} from './activity-log.js';
 import {MAX_CONTEXT_MESSAGES} from './bot-settings.js';
+import {botKey} from './memory.js';
 
 /** What every bot may do without a grant. */
 export const BASIC_KIT = ['bot.ask', 'bot.create', 'schedule.set'];
@@ -243,10 +244,14 @@ export function verdict(state, bot, action, target = '', {readPrivate = false, o
  *
  * A run is also handed the recent replies in its chat (`threadContext`), so a reply written by another run that read
  * outside content carries that text in: it counts too. The scan covers the last `MAX_CONTEXT_MESSAGES` lines, a
- * superset of what `threadContext` sends. A prior run that retention has removed is no longer known and counts as
- * clean; so does a memory recap condensed from such a run (SECURITY.md, Known limitations). */
-export function outsideRead(state, {runId = null, chatKey = null, outsideInput = false} = {}) {
+ * superset of what `threadContext` sends. The notes a bot turn is handed (its chat recap, its own rules) count when a
+ * tidy-up pass wrote them from outside text (`memoryCarriesOutside`). A prior run that retention has removed is no
+ * longer known and counts as clean (SECURITY.md, Known limitations). */
+export function outsideRead(state, {runId = null, chatKey = null, botId = null, outsideInput = false} = {}) {
   if (outsideInput) return true;
+  const run = runId && Array.isArray(state?.groupRuns) ? state.groupRuns.find(r => r?.id === runId) : null;
+  const memoryChat = chatKey || run?.chatKey || (run?.groupId ? `team-${run.groupId}` : null);
+  if (memoryCarriesOutside(state, {botId, chatKey: memoryChat})) return true;
   if (!runId && !chatKey) return false;
   const ours = r => runId ? r.runId === runId : !r.runId && r.chatKey === chatKey;
   if ((state?.browserRequests || []).some(r => r?.status === 'done' && ours(r))) return true;
@@ -261,16 +266,47 @@ function runReadOutside(state, run) {
   return (state?.browserRequests || []).some(r => r?.status === 'done' && r.runId === run.id);
 }
 
+/** Does any bot reply among `messages` come from a run that read outside content? */
+function messagesCarryOutside(state, messages, {except = null} = {}) {
+  const runs = Array.isArray(state?.groupRuns) ? state.groupRuns : [];
+  const ids = new Set((Array.isArray(messages) ? messages : []).filter(m => m?.role === 'bot' && m.runId && m.runId !== except).map(m => m.runId));
+  for (const id of ids) if (runReadOutside(state, runs.find(r => r?.id === id))) return true;
+  return false;
+}
+
+/** Do the notes a bot turn is handed carry outside text? A chat recap or an enabled rule a tidy-up pass wrote from a
+ * conversation that held some is marked `outside` (`mergeConsolidation`); a recap still built from the stored lines
+ * quotes the chat's last two replies, so those are checked as they stand. The company notebook is the owner's own. */
+export function memoryCarriesOutside(state, {botId = null, chatKey = null} = {}) {
+  const memory = state?.memory;
+  if (!memory || typeof memory !== 'object') return false;
+  const chat = chatKey ? memory.chats?.[chatKey] : null;
+  if (chat?.outside === true) return true;
+  if (chat && !chat.summarizedAt) {
+    const replies = (state?.chats?.[chatKey] || []).filter(m => m?.role === 'bot' && m.text && !m.step).slice(-2);
+    if (messagesCarryOutside(state, replies)) return true;
+  }
+  const book = botId ? memory.rulebooks?.[botKey(botId)] : null;
+  return Boolean(book?.rules?.some(rule => rule?.outside === true && rule.enabled !== false));
+}
+
+/** Will a tidy-up pass over this book and chat read outside text? It is sent the chat's recent lines, its recap and
+ * the book's rules, so any of them carrying some makes what the pass writes outside text too. */
+export function consolidationReadsOutside(state, {key, chatKey = null, messages = []} = {}) {
+  const recent = (Array.isArray(messages) ? messages : []).filter(m => m && ['user', 'bot'].includes(m.role)).slice(-MAX_CONTEXT_MESSAGES);
+  if (messagesCarryOutside(state, recent)) return true;
+  const memory = state?.memory;
+  if (chatKey && memory?.chats?.[chatKey]?.outside === true) return true;
+  return Boolean(memory?.rulebooks?.[key]?.rules?.some(rule => rule?.outside === true));
+}
+
 function threadCarriesOutside(state, runId) {
   const runs = Array.isArray(state?.groupRuns) ? state.groupRuns : [];
   const run = runs.find(r => r?.id === runId);
   if (!run) return false;
   const chat = state?.chats?.[run.chatKey || `team-${run.groupId}`];
   if (!Array.isArray(chat)) return false;
-  const others = new Set(chat.filter(m => m && ['user', 'bot'].includes(m.role)).slice(-MAX_CONTEXT_MESSAGES)
-    .filter(m => m.role === 'bot' && m.runId && m.runId !== runId).map(m => m.runId));
-  for (const id of others) if (runReadOutside(state, runs.find(r => r?.id === id))) return true;
-  return false;
+  return messagesCarryOutside(state, chat.filter(m => m && ['user', 'bot'].includes(m.role)).slice(-MAX_CONTEXT_MESSAGES), {except: runId});
 }
 
 /** The need the owner already declined in this task, or null. `declined` is the run's [{action, scope}]: only that

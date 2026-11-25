@@ -9,13 +9,13 @@
  * Atlas") and opens the hops, the cards that wait on the owner, and a failure that
  * ended a run. What a bot read, which connector it used, and the lines a page or
  * connector call left on the way are stored but not shown (tests/clean-feed.test.js). */
-import {handoffs, hopLine, progressPill} from './ui-company.js?v=38c42dacdb';
-import {isRunNote, runBelongsToChat} from './ui-model.js?v=38c42dacdb';
-import {connectorLine, modelLimitLine} from './ui-connect-model.js?v=38c42dacdb';
-import {setupCardOf, setupDone} from './setup.js?v=38c42dacdb';
-import {requestOfMessage} from './bot-browser.js?v=38c42dacdb';
-import {attachmentRefs, isImage, sizeLabel} from './attachments.js?v=38c42dacdb';
-import {esc, icon} from './ui-kit.js?v=38c42dacdb';
+import {handoffs, hopLine, progressPill} from './ui-company.js?v=e88fe6080b';
+import {isRunNote, runBelongsToChat} from './ui-model.js?v=e88fe6080b';
+import {connectorLine, modelLimitLine} from './ui-connect-model.js?v=e88fe6080b';
+import {setupCardOf, setupDone} from './setup.js?v=e88fe6080b';
+import {requestOfMessage} from './bot-browser.js?v=e88fe6080b';
+import {attachmentRefs, isImage, sizeLabel} from './attachments.js?v=e88fe6080b';
+import {esc, icon} from './ui-kit.js?v=e88fe6080b';
 
 const isActive = status => status === 'queued' || status === 'running';
 const isAwaiting = status => String(status || '').startsWith('awaiting');

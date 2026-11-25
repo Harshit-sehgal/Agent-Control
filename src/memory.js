@@ -15,6 +15,7 @@ import {
   consolidationInstructions, consolidationInput, parseConsolidation, mergeConsolidation,
   consolidationDue, findRulebook,
 } from '../shared/memory.js';
+import {consolidationReadsOutside} from '../shared/asks.js';
 import {complete} from './ai.js';
 import {resolveConfig} from './ai-providers.js';
 import {companyBots} from '../shared/company.js';
@@ -87,6 +88,8 @@ export async function consolidateModel(store, {key, config, chatKey = '', label 
     const chatEntry = chatKey ? state.memory?.chats?.[chatKey] : null;
     const messages = chatKey ? conversationMessages(state, chatKey) : [];
     const sentPending = [...(book.pending || [])], sentTurns = Number(book.turns || 0);
+    // What this pass reads decides whether what it writes is outside text (Hands-off asks in a run handed it).
+    const outside = consolidationReadsOutside(state, {key: id, chatKey: chatKey || null, messages});
     const input = consolidationInput({book, messages, chatSummary: chatEntry?.summary || ''});
     const call = executor || ((instructions, body, cfg) => complete({instructions, input: body, maxTokens: 1600, config: cfg}));
     const raw = await call(consolidationInstructions(), input, config);
@@ -110,7 +113,7 @@ export async function consolidateModel(store, {key, config, chatKey = '', label 
     }
     const updated = await store.update(current => {
       if (!findRulebook(current, id)) return null;
-      return mergeConsolidation(current, id, parsed, {now, label: label || modelLabel(config), chatKey: chatKey || null, sentPending, sentTurns});
+      return mergeConsolidation(current, id, parsed, {now, label: label || modelLabel(config), chatKey: chatKey || null, sentPending, sentTurns, outside});
     });
     if (!updated) return {book: null, skipped: true, reason: 'The rulebook was removed while the model was answering.'};
     return {book: updated, skipped: false};

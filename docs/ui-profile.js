@@ -5,22 +5,22 @@
  *
  * Pages repaint only when the route changes, so each in-place change (a switch, a
  * forgotten note, a picked colour) updates its own node instead. */
-import {SHAPES, COLORS, face} from './ui-face.js?v=38c42dacdb';
-import {botStatus, botIsManager} from './ui-company.js?v=38c42dacdb';
-import {primaryOf} from './company.js?v=38c42dacdb';
-import {resetModelSearch} from './ui-admin.js?v=38c42dacdb';
-import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker, COLOR_NAMES} from './ui-kit.js?v=38c42dacdb';
-import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js?v=38c42dacdb';
-import {scheduleRows, scheduleTaskBody, SCHEDULE_OFTEN, scheduleChoice} from './schedules.js?v=38c42dacdb';
-import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=38c42dacdb';
-import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=38c42dacdb';
-import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=38c42dacdb';
-import {sendChat} from './ui-chat.js?v=38c42dacdb';
-import {computerPage as computerView, computerLabel, keysOwned, thumbSlot} from './ui-computer-view.js?v=38c42dacdb';
+import {SHAPES, COLORS, face} from './ui-face.js?v=e88fe6080b';
+import {botStatus, botIsManager} from './ui-company.js?v=e88fe6080b';
+import {primaryOf} from './company.js?v=e88fe6080b';
+import {resetModelSearch} from './ui-admin.js?v=e88fe6080b';
+import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker, COLOR_NAMES} from './ui-kit.js?v=e88fe6080b';
+import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js?v=e88fe6080b';
+import {scheduleRows, scheduleTaskBody, SCHEDULE_OFTEN, scheduleChoice} from './schedules.js?v=e88fe6080b';
+import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=e88fe6080b';
+import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=e88fe6080b';
+import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=e88fe6080b';
+import {sendChat} from './ui-chat.js?v=e88fe6080b';
+import {computerPage as computerView, computerLabel, keysOwned, thumbSlot} from './ui-computer-view.js?v=e88fe6080b';
 import {
-  MAX_NAME, MAX_JOB, hasJob, roleLine, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, lookOf, newBotDefaults,
+  MAX_NAME, MAX_JOB, hasJob, roleLine, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, OUTSIDE_NOTE, lookOf, newBotDefaults,
   newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, closeTarget,
-} from './ui-profile-model.js?v=38c42dacdb';
+} from './ui-profile-model.js?v=e88fe6080b';
 
 const el = id => document.getElementById(id);
 const SHAPE_LABELS = {rounded: 'Rounded square', circle: 'Circle', hexagon: 'Hexagon', pebble: 'Pebble', drop: 'Drop', shield: 'Shield', arch: 'Arch', egg: 'Egg', blob: 'Blob', bean: 'Bean'};
@@ -154,7 +154,7 @@ function profileMain(bot) {
 function memoryList(bot) {
   const notes = memoryNotes(store.state, bot.id), write = canWrite();
   if (!notes.length) return `<p class="pr-note">Nothing yet. Tell ${esc(bot.name)} to remember something, or add a note below.</p>`;
-  return `<div class="cd">${notes.map(n => `<div class="rw memo"><span class="w">${esc(n.text)}</span>${write ? `<button type="button" class="memo-x" data-action="memory-forget" data-id="${esc(bot.id)}" data-rule="${esc(n.id)}" aria-label="Forget this note">Forget</button>` : ''}</div>`).join('')}</div>`;
+  return `<div class="cd">${notes.map(n => `<div class="rw memo"><span class="w">${esc(n.text)}${n.outside ? `<small>${esc(OUTSIDE_NOTE)}</small>` : ''}</span>${write ? `<button type="button" class="memo-x" data-action="memory-forget" data-id="${esc(bot.id)}" data-rule="${esc(n.id)}" aria-label="Forget this note">Forget</button>` : ''}</div>`).join('')}</div>`;
 }
 /** A bot's timers: each one says what and when, with Stop; below, one line to add another. The bot sets these
  * from chat too ("every morning at 8, sum up my inbox"), so the form is the fallback, not the way in. */

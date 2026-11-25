@@ -14,11 +14,11 @@
  *
  * Pure and browser-safe, like the other shared modules.
  */
-import {cleanText} from './core.js?v=38c42dacdb';
-import {controlFence} from './reply-blocks.js?v=38c42dacdb';
-import {decide, createAsk, declinedNeed, outsideRead} from './asks.js?v=38c42dacdb';
-import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=38c42dacdb';
-import {runPrivateHosts} from './bot-browser.js?v=38c42dacdb';
+import {cleanText} from './core.js?v=e88fe6080b';
+import {controlFence} from './reply-blocks.js?v=e88fe6080b';
+import {decide, createAsk, declinedNeed, outsideRead} from './asks.js?v=e88fe6080b';
+import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=e88fe6080b';
+import {runPrivateHosts} from './bot-browser.js?v=e88fe6080b';
 
 export const CONNECTOR_KINDS = ['google', 'mcp', 'site'];
 /** `ready` works; `setup` is Google with a client saved and no sign-in yet; `reconnect` is a sign-in that
@@ -223,7 +223,7 @@ export function recordConnectorCalls(state, {bot, run, chatKey, output, unattend
     if (!needs) { say(`${bot.name} asked ${connector.name} for "${tool}", but ${connector.name} has no tool called "${tool}".`); continue; }
     // A tool the owner declined in this task stays declined; the connector's other tools go on as usual.
     if (declinedNeed(declined, needs)) { say(`${bot.name} asked to ${needs[0].detail}, but you declined that in this task, so it was not asked again.`); continue; }
-    const tainted = guarded || outsideRead(state, {runId: run.id, outsideInput: run.outsideInput === true});
+    const tainted = guarded || outsideRead(state, {runId: run.id, botId: bot.id, outsideInput: run.outsideInput === true});
     const decision = decide(state, bot, needs, {readPrivate: guarded && !readFrom.has(connector.id), outside: run.outsideInput === true, tainted});
     if (decision.verdict === 'deny') { say(`${bot.name} asked to ${needs[0].detail}. ${decision.message}`); continue; }
     const call = {id: makeId(), connectorId: connector.id, identity: connectorIdentity(connector), connectorName: connector.name, tool, args, write: actionOf(connector, tool).write, botId: bot.id, botName: bot.name, status: 'go', chatKey};
