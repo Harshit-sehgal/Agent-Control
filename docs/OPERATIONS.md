@@ -161,8 +161,8 @@ another tunnel (`dsh`). Do not overwrite a DNS record that serves another servic
 **Timezone.** `TZ` defaults to `Asia/Kolkata` in `compose.cloudflare.yaml`. Quiet hours are read on
 `QUIET_HOURS_TZ` (an IANA name such as `Europe/Paris`) when it is set, else in the server's local zone.
 A recurring schedule made in the app with a time of day or a weekdays/weekends rule carries the
-browser's zone, so it keeps the owner's time and days across daylight saving whatever `TZ` is; one
-made before that change, or without a zone, uses the server's.
+browser's zone, so it keeps the owner's time and days across daylight saving whatever `TZ` is. One saved
+by an older build gets the zone of the next browser that opens the app.
 
 **Quiet hours.** Set `QUIET_HOURS=22:00-07:00` (and `QUIET_HOURS_TZ` to the owner's zone when the
 server runs on another clock) in `deploy/.env` to hold non-urgent phone pushes overnight. Approval requests (`ask` notifications) are always pushed. A held message stays in the app;

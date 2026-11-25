@@ -6,8 +6,8 @@
  * These transitions are pure and mirror `workflow.js`: the Node worker and the
  * browser-local demo both run them, so the two backends cannot drift.
  */
-import {activity, cleanText} from './core.js?v=8034a6501a';
-import {cleanDay, cleanZone, DAY_RULES, keepWallTime, skipToDays} from './schedules.js?v=8034a6501a';
+import {activity, cleanText} from './core.js?v=5864997c0e';
+import {cleanDay, cleanZone, DAY_RULES, keepWallTime, needsZone, skipToDays} from './schedules.js?v=5864997c0e';
 
 export const MAX_ATTEMPTS_DEFAULT = 5;
 
@@ -435,6 +435,20 @@ export function resumeTask(state, id, now = Date.now()) {
   task.updatedAt = new Date(now).toISOString();
   activity(state, 'task', task.status === 'paused' ? `Will resume when the kill switch is off: ${task.title}` : `Resumed task: ${task.title}`, {taskId: task.id});
   return task;
+}
+
+/** Give the schedules an older build saved without a zone the owner's (`needsZone`): the zone of the browser that
+ * sent it. A schedule that has a zone keeps it, and a zone this runtime does not know fills nothing. */
+export function fillScheduleZones(state, zone) {
+  const tz = cleanZone(zone);
+  if (!tz) return 0;
+  let filled = 0;
+  for (const task of state.tasks || []) {
+    if (!needsZone(task)) continue;
+    task.payload = {...task.payload, tz};
+    filled += 1;
+  }
+  return filled;
 }
 
 /** The kill switch: pause every waiting schedule and hold new ones until resumed. Notices and

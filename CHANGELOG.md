@@ -133,6 +133,9 @@ browser tasks, and accounts, workspaces and backup.
   clocks changed. A recurring schedule with a time of day now carries the
   browser's zone too, and each re-arm puts it back on that time
   (`keepWallTime` in `shared/schedules.js`).
+- **Older schedules pick up the owner's zone.** A recurring schedule saved
+  before schedules carried a zone gets the zone of the first browser that opens
+  the app afterwards (`POST /api/tasks/zone`); one that has a zone keeps it.
 - **Quiet hours can follow the owner's clock.** `QUIET_HOURS_TZ` (an IANA
   zone) sets the clock `QUIET_HOURS` is read on; without it the server's is
   used, as before.

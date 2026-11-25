@@ -75,6 +75,12 @@ export function skipToDays(time, step, rule, zone = '') {
   for (let i = 0; i < 7 && !allowed(weekday(next, zone)); i++) next += step;
   return next;
 }
+/** A live recurring schedule whose time of day or day rule is read on the owner's clock, saved by an older build with
+ * no zone (`tz`). The app sends its zone for these once (`POST /api/tasks/zone`, `fillScheduleZones`). */
+export const needsZone = task => task?.kind === 'bot-task' && ['queued', 'paused', 'running'].includes(task.status)
+  && task.payload?.kind === 'interval' && !task.payload.tz && Boolean(task.payload.at || task.payload.days);
+/** Does any schedule in a snapshot need the owner's zone? */
+export const schedulesNeedZone = state => (Array.isArray(state?.tasks) ? state.tasks : []).some(needsZone);
 /** "Mon", "monday", "Mondays" as "monday", or '' when it is not a day of the week. */
 export function cleanDay(value) {
   const text = String(value ?? '').trim().toLowerCase().replace(/s$/, '');
