@@ -119,3 +119,9 @@ Built, with tests:
   sent only when the owner presses Send. `tests/share-target.test.js`, usability smoke "share".
 - **Keyboard shortcuts sheet**: press ? (or Settings → Look → Keyboard shortcuts); comma opens Settings.
   `tests/shortcuts.test.js`, usability smoke "shortcuts".
+- **Backup freshness**: with `HEALTH_BACKUP_DIR` naming the nightly backup folder, the health watch says when the
+  newest backup is more than 36 hours old. `docs/OPERATIONS.md`, Monitoring.
+
+Still not built, with the reason: **watch-and-tell**, **drafts for approval** and **a screenshot in the action
+log** each touch the ask and outside-read rules and want their own design pass; **Android Trusted Web Activity**
+needs a signing key on the owner's machine.

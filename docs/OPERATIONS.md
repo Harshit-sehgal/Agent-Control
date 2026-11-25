@@ -52,6 +52,26 @@ Probe it from a timer and alert on failure:
 Watch the process log for `config:` warnings (startup validation) and
 `Group execution:` errors from failed runs.
 
+**Alerts on the owner's phone (health watch).** The server checks itself every 5 minutes
+(`src/health-watch.js`) and sends one urgent notice, pushed even in quiet hours, when:
+
+- a paired computer has been quiet for 15 minutes while a schedule is waiting;
+- background work is more than 15 minutes late (not while every schedule is paused);
+- a scheduled task meets a site it is signed out of (said at once by the run, once per site);
+- the nightly backup is more than 36 hours old, when `HEALTH_BACKUP_DIR` names the backup folder.
+
+Each notice is sent once and followed by a plain "back" notice when it clears. To watch the
+nightly backup from Docker, mount its folder read-only and name it:
+
+```yaml
+# deploy/compose.yaml, service app
+    volumes:
+      - data:/data
+      - /var/backups/agent-control:/backups:ro
+    environment:
+      HEALTH_BACKUP_DIR: /backups
+```
+
 ## Email, without a gateway
 
 The email notification channel submits over SMTP when `SMTP_HOST` is set

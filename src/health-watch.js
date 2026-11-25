@@ -8,20 +8,34 @@
  * lasts, and a plain "back" notice when it clears. The raised keys live in the workspace (`kv health_alerts`),
  * so a restart does not send the same notice again.
  *
+ * - when `HEALTH_BACKUP_DIR` names the nightly backup folder (deploy/backup-encrypted.sh, mounted read-only), the
+ *   newest backup in it is older than `BACKUP_STALE_MS`. Watched by the first workspace only, as the folder is the host's.
+ *
  * A third problem is said by the run that met it, not the timer: a scheduled task whose site signed it out
  * (a sign-in card in an unattended run) notifies the owner at once (`signinSites`, `signinNotice`). */
+
+import {readdir, stat} from 'node:fs/promises';
+import {join} from 'node:path';
 
 export const WATCH_MS = 5 * 60000;
 export const AGENT_GRACE_MS = 15 * 60000;
 export const QUEUE_LAG_MS = 15 * 60000;
+export const BACKUP_STALE_MS = 36 * 3600000;
 export const ALERTS_KEY = 'health_alerts';
+const BACKUP_FILE = /^agent-control-.*\.tgz\.enc$/;
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const clock = iso => new Date(iso).toISOString().slice(11, 16);
 
 /** The problems in one workspace right now, from plain facts. Pure. */
-export function healthIssues({agents = [], tasks = [], schedulesPaused = false, now = Date.now()} = {}) {
+export function healthIssues({agents = [], tasks = [], schedulesPaused = false, lastBackupAt, now = Date.now()} = {}) {
   const issues = [];
+  // undefined: no backup folder is watched. null: the folder holds no backup yet.
+  if (lastBackupAt !== undefined && (lastBackupAt == null || now - lastBackupAt > BACKUP_STALE_MS)) {
+    issues.push({key: 'backup-stale', title: 'The nightly backup did not run',
+      body: lastBackupAt == null ? 'The backup folder has no backup in it yet. Check the nightly backup job on the server.'
+        : `The newest backup is from ${new Date(lastBackupAt).toISOString().slice(0, 16).replace('T', ' ')} UTC, more than a day and a half ago. Check the nightly backup job on the server.`});
+  }
   const waiting = tasks.filter(t => t?.kind === 'bot-task' && ['queued', 'running'].includes(t.status)).length;
   if (waiting) for (const agent of agents) {
     // A computer paired but never started is the setup checklist's job, not an alert.
@@ -49,13 +63,26 @@ export function alertChanges(previousKeys = [], issues = []) {
 
 const cleared = key => key.startsWith('agent-offline:')
   ? {title: 'Your computer is back', body: 'The paired computer is online again; waiting schedules run as planned.'}
-  : {title: 'Background work caught up', body: 'Nothing is running late any more.'};
+  : key === 'backup-stale' ? {title: 'Backups are running again', body: 'A fresh nightly backup is in the backup folder.'}
+    : {title: 'Background work caught up', body: 'Nothing is running late any more.'};
 
-function factsOf(ws, workspaceId, now) {
+/** When the newest nightly backup in a folder was written (ms), or null when it holds none or cannot be read. */
+export async function newestBackupAt(dir) {
+  let names;
+  try { names = await readdir(dir); } catch { return null; }
+  let newest = null;
+  for (const name of names.filter(n => BACKUP_FILE.test(n))) {
+    try { const t = (await stat(join(dir, name))).mtimeMs; if (newest == null || t > newest) newest = t; } catch { /* gone since the listing */ }
+  }
+  return newest;
+}
+
+async function factsOf(ws, workspaceId, now, backupDir) {
   const state = ws.read();
   const agents = (ws.all?.('SELECT id, name, last_seen_at, revoked_at FROM agents WHERE workspace_id=?', workspaceId) || [])
     .map(a => ({id: a.id, name: a.name, lastSeenAt: a.last_seen_at, revokedAt: a.revoked_at}));
-  return {agents, tasks: state.tasks || [], schedulesPaused: state.schedulesPaused === true, now};
+  const lastBackupAt = backupDir && workspaceId === 'default' ? await newestBackupAt(backupDir) : undefined;
+  return {agents, tasks: state.tasks || [], schedulesPaused: state.schedulesPaused === true, lastBackupAt, now};
 }
 
 function savedKeys(ws) {
@@ -64,13 +91,13 @@ function savedKeys(ws) {
 }
 
 /** One workspace's watch. `tick()` checks once; `start()` checks now and every `intervalMs`, and returns stop. */
-export function createHealthWatch(ws, {workspaceId = 'default', notify, now = () => Date.now(), intervalMs = WATCH_MS, log = message => console.error(message)} = {}) {
+export function createHealthWatch(ws, {workspaceId = 'default', backupDir = process.env.HEALTH_BACKUP_DIR || '', notify, now = () => Date.now(), intervalMs = WATCH_MS, log = message => console.error(message)} = {}) {
   let busy = false;
   const tick = async () => {
     if (busy) return;
     busy = true;
     try {
-      const {raise, clear, keys} = alertChanges(savedKeys(ws), healthIssues(factsOf(ws, workspaceId, now())));
+      const {raise, clear, keys} = alertChanges(savedKeys(ws), healthIssues(await factsOf(ws, workspaceId, now(), backupDir)));
       if (!raise.length && !clear.length) return;
       // Saved first: a notice that fails to send is not worth a second one every five minutes.
       ws.kvSet?.(ALERTS_KEY, JSON.stringify(keys));

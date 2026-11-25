@@ -108,3 +108,36 @@ test('a scheduled run that meets a sign-in wall tells the owner at once; one the
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.deepEqual(sent.filter(n => n.kind === 'health'), [], 'the owner is in the chat and sees the card');
 });
+
+test('a nightly backup older than a day and a half is an issue, only when the backup folder is set', async t => {
+  const {BACKUP_STALE_MS, newestBackupAt} = await import('../src/health-watch.js');
+  assert.deepEqual(healthIssues({lastBackupAt: undefined, now: NOW}), [], 'no folder set, nothing watched');
+  const [issue] = healthIssues({lastBackupAt: NOW - BACKUP_STALE_MS - 60000, now: NOW});
+  assert.equal(issue.key, 'backup-stale');
+  assert.match(issue.body, /backup/i);
+  assert.equal(healthIssues({lastBackupAt: null, now: NOW})[0].key, 'backup-stale', 'a folder with no backup in it');
+  assert.deepEqual(healthIssues({lastBackupAt: NOW - 3600000, now: NOW}), []);
+  const fs = await import('node:fs/promises'), os = await import('node:os'), path = await import('node:path');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'backups-'));
+  t.after(() => fs.rm(dir, {recursive: true, force: true}));
+  assert.equal(await newestBackupAt(dir), null);
+  await fs.writeFile(path.join(dir, 'notes.txt'), 'x');
+  assert.equal(await newestBackupAt(dir), null, 'only backup files count');
+  await fs.writeFile(path.join(dir, 'agent-control-20261125T020000Z.tgz.enc'), 'x');
+  assert.ok(Math.abs(await newestBackupAt(dir) - Date.now()) < 60000);
+  assert.equal(await newestBackupAt(path.join(dir, 'missing')), null);
+});
+
+test('only the first workspace watches the host\'s backup folder', async t => {
+  const fs = await import('node:fs/promises'), os = await import('node:os'), path = await import('node:path');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'backups-'));
+  t.after(() => fs.rm(dir, {recursive: true, force: true}));
+  const sent = [];
+  const notify = async event => { sent.push(event); };
+  await createHealthWatch(fakeWorkspace({tasks: []}, []), {workspaceId: 'team-2', backupDir: dir, notify, now: () => NOW}).tick();
+  assert.deepEqual(sent, []);
+  await createHealthWatch(fakeWorkspace({tasks: []}, []), {workspaceId: 'default', backupDir: dir, notify, now: () => NOW}).tick();
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].meta.health, 'backup-stale');
+  assert.equal(sent[0].urgent, true);
+});
