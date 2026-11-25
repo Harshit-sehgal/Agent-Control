@@ -22,7 +22,7 @@ export const ASSETS = [
   'connectors.js',
   'coordination.js', 'chats.js', 'attachments.js', 'group-simulator.js', 'locks.js', 'ai-presets.js', 'run-follow.js', 'setup.js', 'schedules.js', 'limits.js', 'usage.js',
   // Message search, the daily briefing and task templates (pure; the conversation and shell import them).
-  'message-search.js', 'briefing.js', 'templates.js',
+  'message-search.js', 'briefing.js', 'templates.js', 'watches.js',
   // Static pages and install assets.
   'manifest.webmanifest', 'icon-192.png', 'icon-512.png',
 ];

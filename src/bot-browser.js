@@ -173,9 +173,12 @@ export async function finishBrowserRequest(store, request, {ok, result = null, e
     if (!live || ['done', 'failed', 'denied'].includes(live.status)) return null;
     live.status = ok ? 'done' : 'failed'; live.updatedAt = stamp(); live.error = ok ? null : cleanText(error, 300);
     live.result = ok && result && typeof result === 'object' ? {title: cleanText(result.title, 200) || null, finalUrl: cleanText(result.finalUrl || result.url, 2000) || null, text: cleanText(text, 4000), page: captured || null} : null;
-    say(s, live.chatKey, text);
+    // A watch's page is compared by code on the watch sweep's next pass (src/watches.js): it is said in no chat and
+    // handed to no bot, so a watched page never reaches a model turn.
+    if (!live.watchId) say(s, live.chatKey, text);
     return live;
   });
+  if (done?.watchId) return done;
   // The continued turn is one round deeper; recordBrowserRequests refuses to
   // open another page once a chain reaches MAX_BROWSER_DEPTH.
   if (done?.runId) {

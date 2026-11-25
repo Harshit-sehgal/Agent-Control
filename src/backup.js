@@ -34,6 +34,7 @@ import {validWorkspaceId} from './workspaces.js';
 import {MAX_FILE_BYTES, sniffType, cleanFileName, validAttachmentId, base64Bytes} from '../shared/attachments.js';
 import {addTemplate} from '../shared/templates.js';
 import {setLimits} from '../shared/limits.js';
+import {sanitizeWatch, MAX_WATCHES} from '../shared/watches.js';
 import {recordDay} from '../shared/usage.js';
 
 export const BACKUP_VERSION = 1;
@@ -62,7 +63,7 @@ export const ATTACHMENT_BACKUP_BYTES = 16 * 1024 * 1024;
 // The owner's settings kept in kv, as `tables.owner_settings` rows {key, value}.
 // A backup without that table (written before they travelled) leaves the live
 // values alone; one with it sets every key it names and resets the rest.
-const OWNER_SETTINGS = ['ask_basics', 'hands_off', 'limits', 'templates', 'usage'];
+const OWNER_SETTINGS = ['ask_basics', 'hands_off', 'limits', 'templates', 'usage', 'watches'];
 // Not a device credential. agents.secret_hash cannot be SQL NULL (the column
 // is NOT NULL), and a backup must still restore the agent row.
 const REDACTED_AGENT_HASH = 'redacted';
@@ -188,6 +189,10 @@ function checkOwnerSettings(rows) {
       const parsed = parse(key, value);
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) fail('Backup limits are not an object.');
       out.set(key, JSON.stringify(setLimits({}, parsed)));
+    } else if (key === 'watches') {
+      const list = parse(key, value);
+      if (!Array.isArray(list)) fail('Backup watches are not a list.');
+      out.set(key, JSON.stringify(list.map(sanitizeWatch).filter(Boolean).slice(0, MAX_WATCHES)));
     } else if (key === 'templates') {
       const list = parse(key, value);
       if (!Array.isArray(list)) fail('Backup templates are not a list.');
