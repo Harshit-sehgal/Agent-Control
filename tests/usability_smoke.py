@@ -2128,6 +2128,37 @@ async def teach_from_a_reply(page, base):
     assert 'Keep plans under five lines.' in book, book[:400]
 
 
+async def watch_a_page(page, base):
+    """A bot's Schedule page watches a page: the form adds it, the row says how often and that it is not checked yet,
+    Pause and Remove work, the profile counts it, a bad address says why, and the demo's Check now says it has no
+    browser rather than pretending."""
+    await open_app(page, base, bots=EXTRA_BOTS)
+    await page.goto(f'{base}/index.html#profile/{PRIMARY}/schedule')
+    form = page.locator('#watch-form')
+    await form.locator('[name=url]').fill('https://shop.example/item')
+    await form.locator('[name=every]').select_option('hour')
+    await form.locator('[name=words]').fill('In stock')
+    await form.get_by_role('button', name='Watch this page').click()
+    await expect(page.locator('#toast')).to_contain_text('You hear only when it changes')
+    row = page.locator('#pr-watches .rw').first
+    await expect(row).to_contain_text('"In stock" on shop.example/item')
+    await expect(row).to_contain_text('Every hour · not checked yet')
+    await row.get_by_role('button', name='Check now').click()
+    await expect(page.locator('#toast')).to_contain_text('no browser')
+    await row.get_by_role('button', name='Pause').click()
+    await expect(row).to_contain_text('Paused · Every hour')
+    await expect(row.get_by_role('button', name='Check now')).to_have_count(0)
+    await page.evaluate("document.querySelector('#watch-form [name=url]').type = 'text'")
+    await form.locator('[name=url]').fill('file:///etc/passwd')
+    await form.get_by_role('button', name='Watch this page').click()
+    await expect(page.locator('#toast')).to_contain_text('public web address')
+    await page.goto(f'{base}/index.html#profile/{PRIMARY}')
+    await expect(page.locator('#main')).to_contain_text('1 page watched')
+    await page.goto(f'{base}/index.html#profile/{PRIMARY}/schedule')
+    await page.locator('#pr-watches .rw').first.get_by_role('button', name='Remove').click()
+    await expect(page.locator('#pr-watches')).to_contain_text('No pages watched')
+
+
 async def google_return_toast_and_clean_address(page, base):
     await install(page)
     await page.goto(f'{base}/index.html?google=connected')
@@ -2718,6 +2749,7 @@ async def main():
             await h.scenario('shortcuts: ? opens the sheet (not while typing), comma opens Settings, Look has the row', shortcuts_sheet)
             await h.scenario('share: a shared link prefills the lead bot\'s message box and sends nothing', share_target_prefills_never_sends)
             await h.scenario('teach: a reply\'s Teach keeps a rule for that bot; the bar takes no room', teach_from_a_reply)
+            await h.scenario('watch: a page is watched from the Schedule page; pause, remove, a bad address, the demo has no browser', watch_a_page)
             await h.scenario('connectors: ?google=connected toasts once, strips the address and opens Connectors; an error says why', google_return_toast_and_clean_address)
             await h.scenario('models: a subscription is a name and an engine with no key field, and its row says where it is signed in', subscription_provider_and_cli_status)
             await h.scenario('models: Add a model is one card with a choice, the dots hold Edit, Refresh and Delete, one model picker', models_api_provider_menu_and_one_model_picker)
