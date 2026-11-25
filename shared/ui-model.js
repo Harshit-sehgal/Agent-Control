@@ -241,3 +241,22 @@ export function withoutShareParams(search) {
   const rest = q.toString();
   return rest ? `?${rest}` : '';
 }
+
+/** The keys the app answers to, for the shortcuts sheet (press ? or Settings → Look). Each names a real listener:
+ * the search and the sheet in ui-shell.js, Enter in app.js, Alt+arrows and the menu key in ui-gestures.js. */
+const SHORTCUTS = [
+  {keys: ['Ctrl', 'K'], what: 'Search bots, threads and messages'},
+  {keys: ['/'], what: 'Search, when you are not typing in a box'},
+  {keys: ['Enter'], what: 'Send the message'},
+  {keys: ['Shift', 'Enter'], what: 'Start a new line in the message'},
+  {keys: ['Esc'], what: 'Close a sheet or the search'},
+  {keys: [','], what: 'Open Settings'},
+  {keys: ['Alt', '↑ ↓'], what: 'Move a chat up or down the list, or pin it at the top'},
+  {keys: ['Shift', 'F10'], what: 'Open the menu of the chat in focus'},
+  {keys: ['?'], what: 'Show these shortcuts'},
+];
+
+/** The shortcuts as rows, with ⌘ for Ctrl on a Mac. */
+export function shortcutRows(mac = false) {
+  return SHORTCUTS.map(s => ({what: s.what, keys: s.keys.map(k => (mac && k === 'Ctrl' ? '⌘' : k))}));
+}

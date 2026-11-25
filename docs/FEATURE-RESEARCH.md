@@ -117,3 +117,5 @@ Built, with tests:
 - **Share to Agent Control** (the "universal capture" item, text and links): the manifest's `share_target`
   lists the installed app in the phone's Share sheet; what is shared lands in the lead bot's message box and is
   sent only when the owner presses Send. `tests/share-target.test.js`, usability smoke "share".
+- **Keyboard shortcuts sheet**: press ? (or Settings → Look → Keyboard shortcuts); comma opens Settings.
+  `tests/shortcuts.test.js`, usability smoke "shortcuts".

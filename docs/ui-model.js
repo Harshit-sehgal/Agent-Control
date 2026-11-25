@@ -2,10 +2,10 @@
  * a pane shows: the chat list, a thread's timeline and the "needs you" count.
  * (The hash route lives in ui-company.js.) No DOM and no globals, so the product rules here are unit
  * tested directly (tests/ui-model.test.js). */
-import {botSettings} from './bot-settings.js?v=23c89414c2';
-import {STOPPABLE_STATUSES} from './run-state.js?v=23c89414c2';
-import {primaryOf} from './company.js?v=23c89414c2';
-import {plain} from './ui-kit.js?v=23c89414c2';
+import {botSettings} from './bot-settings.js?v=9e3b23476a';
+import {STOPPABLE_STATUSES} from './run-state.js?v=9e3b23476a';
+import {primaryOf} from './company.js?v=9e3b23476a';
+import {plain} from './ui-kit.js?v=9e3b23476a';
 
 const teamKey = groupId => `team-${groupId}`;
 const time = value => { const t = Date.parse(value || ''); return Number.isFinite(t) ? t : 0; };
@@ -240,4 +240,23 @@ export function withoutShareParams(search) {
   for (const name of Object.values(SHARE_PARAMS)) q.delete(name);
   const rest = q.toString();
   return rest ? `?${rest}` : '';
+}
+
+/** The keys the app answers to, for the shortcuts sheet (press ? or Settings → Look). Each names a real listener:
+ * the search and the sheet in ui-shell.js, Enter in app.js, Alt+arrows and the menu key in ui-gestures.js. */
+const SHORTCUTS = [
+  {keys: ['Ctrl', 'K'], what: 'Search bots, threads and messages'},
+  {keys: ['/'], what: 'Search, when you are not typing in a box'},
+  {keys: ['Enter'], what: 'Send the message'},
+  {keys: ['Shift', 'Enter'], what: 'Start a new line in the message'},
+  {keys: ['Esc'], what: 'Close a sheet or the search'},
+  {keys: [','], what: 'Open Settings'},
+  {keys: ['Alt', '↑ ↓'], what: 'Move a chat up or down the list, or pin it at the top'},
+  {keys: ['Shift', 'F10'], what: 'Open the menu of the chat in focus'},
+  {keys: ['?'], what: 'Show these shortcuts'},
+];
+
+/** The shortcuts as rows, with ⌘ for Ctrl on a Mac. */
+export function shortcutRows(mac = false) {
+  return SHORTCUTS.map(s => ({what: s.what, keys: s.keys.map(k => (mac && k === 'Ctrl' ? '⌘' : k))}));
 }

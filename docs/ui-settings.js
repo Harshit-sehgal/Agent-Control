@@ -7,24 +7,24 @@
  * team, agents, data) load the existing admin forms from ui-admin.js into the body.
  *
  * The lists behind it are pure and tested in ui-profile-model.js. */
-import {face} from './ui-face.js?v=23c89414c2';
-import {botStatus} from './ui-company.js?v=23c89414c2';
-import {esc, icon, btn, empty, note, roundBtn, switchBtn, fullDate} from './ui-kit.js?v=23c89414c2';
-import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, applyTheme, themeChoice, THEMES, saveLocal} from './ui-store.js?v=23c89414c2';
-import {isDesk, initials, setupCardHtml, PERM_SEEN} from './ui-shell.js?v=23c89414c2';
-import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=23c89414c2';
-import {faceOf, headBar, activityBlocks} from './ui-profile.js?v=23c89414c2';
-import {grantRows, allGrantRows, grantUrl, untilOptions, permissionSummary} from './ui-asks.js?v=23c89414c2';
-import {GRANT_LABELS, untilFor} from './asks.js?v=23c89414c2';
-import {PRESETS, presetOf, applyPreset} from './presets.js?v=23c89414c2';
-import {toast, confirmSheet} from './ui-dialogs.js?v=23c89414c2';
+import {face} from './ui-face.js?v=9e3b23476a';
+import {botStatus} from './ui-company.js?v=9e3b23476a';
+import {esc, icon, btn, empty, note, roundBtn, switchBtn, fullDate} from './ui-kit.js?v=9e3b23476a';
+import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, applyTheme, themeChoice, THEMES, saveLocal} from './ui-store.js?v=9e3b23476a';
+import {isDesk, initials, setupCardHtml, PERM_SEEN, showShortcuts} from './ui-shell.js?v=9e3b23476a';
+import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=9e3b23476a';
+import {faceOf, headBar, activityBlocks} from './ui-profile.js?v=9e3b23476a';
+import {grantRows, allGrantRows, grantUrl, untilOptions, permissionSummary} from './ui-asks.js?v=9e3b23476a';
+import {GRANT_LABELS, untilFor} from './asks.js?v=9e3b23476a';
+import {PRESETS, presetOf, applyPreset} from './presets.js?v=9e3b23476a';
+import {toast, confirmSheet} from './ui-dialogs.js?v=9e3b23476a';
 import {
   ACTIVITY_FILTERS, activityUrl, companyTree, weekUsage, settingsSections, resolveSection, sectionArg,
-} from './ui-profile-model.js?v=23c89414c2';
-import {COLORS} from './ui-face.js?v=23c89414c2';
-import {limitsOf, limitWords, FAIL_STREAK} from './limits.js?v=23c89414c2';
-import {monthByBot, usageWords} from './usage.js?v=23c89414c2';
-import {companyBots} from './company.js?v=23c89414c2';
+} from './ui-profile-model.js?v=9e3b23476a';
+import {COLORS} from './ui-face.js?v=9e3b23476a';
+import {limitsOf, limitWords, FAIL_STREAK} from './limits.js?v=9e3b23476a';
+import {monthByBot, usageWords} from './usage.js?v=9e3b23476a';
+import {companyBots} from './company.js?v=9e3b23476a';
 
 const el = id => document.getElementById(id);
 const ICONS = {general: 'gear', look: 'half', models: 'key', conn: 'plug', perm: 'shield', usage: 'chart'};
@@ -92,7 +92,8 @@ function general(sections) {
 function look() {
   const now = themeChoice();
   const seg = THEMES.map(t => `<button type="button" data-action="settings-theme" data-theme="${t.id}" aria-pressed="${t.id === now}">${esc(t.name)}</button>`).join('');
-  return card(srow('Theme', `<span class="st-seg" role="group" aria-label="Colour theme">${seg}</span>`, 'Light by day, dark by night, or pinned'));
+  return card(srow('Theme', `<span class="st-seg" role="group" aria-label="Colour theme">${seg}</span>`, 'Light by day, dark by night, or pinned'))
+    + card(`<button type="button" class="rw" data-action="show-shortcuts"><span class="w">Keyboard shortcuts<small>Press ? anywhere to see them</small></span></button>`);
 }
 
 const adminHost = key => `<div id="admin-panel" class="st-admin" data-page="${ADMIN_OF[key]}">${note('Loading…')}</div>`;
@@ -390,6 +391,7 @@ export function activityView() {
 /* ---------- what the buttons do ---------- */
 
 export const settingsActions = {
+  'show-shortcuts': () => showShortcuts(),
   'settings-open': b => {
     const key = b.dataset.section;
     // Beside the sections (laptop) the dialog just changes its body; on a phone a section is a page of its own.
