@@ -7,7 +7,7 @@
  * browser-local demo both run them, so the two backends cannot drift.
  */
 import {activity, cleanText} from './core.js';
-import {cleanDay, DAY_RULES, skipToDays} from './schedules.js';
+import {cleanDay, cleanZone, DAY_RULES, skipToDays} from './schedules.js';
 
 export const MAX_ATTEMPTS_DEFAULT = 5;
 
@@ -64,7 +64,9 @@ const PAYLOAD_KINDS = {
     // The daily briefing (shared/briefing.js) is marked so its run is given the workspace's facts; nothing else is kept.
     const brief = body.brief === 'daily' ? {brief: 'daily'} : {};
     const days = dayRule(body);
-    return {groupId, botId, message, label: cleanText(body.label, 200) || message.slice(0, 60), ...timing(body), ...(at ? {at} : {}), ...(on ? {on} : {}), ...(days ? {days} : {}), ...brief, ...(body.source === 'event' ? {source: 'event'} : {})};
+    // The owner's time zone, so the day rule keeps their Monday on a server with another clock (shared/schedules.js).
+    const tz = days ? cleanZone(body.tz) : '';
+    return {groupId, botId, message, label: cleanText(body.label, 200) || message.slice(0, 60), ...timing(body), ...(at ? {at} : {}), ...(on ? {on} : {}), ...(days ? {days} : {}), ...(tz ? {tz} : {}), ...brief, ...(body.source === 'event' ? {source: 'event'} : {})};
   },
   'group-run': body => ({groupId: cleanText(body.groupId, 64), message: cleanText(body.message, 4000), directBotId: cleanText(body.directBotId, 64) || null}),
   'agent-job': body => ({action: cleanText(body.action, 64), params: body.params && typeof body.params === 'object' ? body.params : {}, agentId: cleanText(body.agentId, 64) || null}),
@@ -249,7 +251,7 @@ function nextWindow(task, now) {
   const step = task.intervalMinutes * 60000, planned = Date.parse(task.runAt);
   let next = Number.isFinite(planned) && planned <= now ? planned + step : now + step;
   if (next <= now) next += Math.ceil((now - next + 1) / step) * step;
-  return skipToDays(next, step, task.payload?.days);
+  return skipToDays(next, step, task.payload?.days, task.payload?.tz);
 }
 
 export function completeTask(state, id, result = null, now = Date.now()) {

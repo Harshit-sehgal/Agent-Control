@@ -109,6 +109,13 @@ browser tasks, and accounts, workspaces and backup.
   comes back with its Resume, and the queue never claims a schedule while the
   switch is on. A weekdays or weekends schedule that ran out of retries is
   re-armed on a day its rule allows, as a completed one already was.
+- **Weekdays and weekends follow the owner's calendar.** The server judged the
+  day of each run on its own clock, so on a server in UTC an owner far from UTC
+  had Monday's run skipped and Saturday's made. A day-rule schedule now carries
+  the browser's time zone (`tz`, checked against the runtime's zone list) and
+  the day is read there. Older schedules and ones without a zone keep the
+  server's clock. A daily time still steps 24 hours, so it moves by an hour
+  across a daylight-saving change, as before.
 
 ### Kept
 - **The posting guard.** A bot may read an X page through an approved
