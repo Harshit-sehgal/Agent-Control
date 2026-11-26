@@ -35,6 +35,7 @@ import {createSharedBrowser, browserProfileDir, runBrowserTask} from './shared-b
 import {createLiveChannel} from './live-channel.mjs';
 import {runModelTask} from './cli-model.mjs';
 import {cliStatusReporter} from './cli-status.mjs';
+import {DEVICE_FEATURES} from '../shared/device-features.js';
 import {runMcpTask} from './mcp-stdio.mjs';
 import {reportResult, skipExpired} from './report-result.mjs';
 import {hostAllowed, hostOf, parseAllowlist} from '../shared/bot-browser.js';
@@ -264,7 +265,7 @@ async function run() {
     // Whether the owner's CLIs are signed in, from their own status commands (cached
     // ten minutes, no model call). Only a device allowed to run models looks.
     const cli = (config.permissions || []).includes('model.run') ? cliStatus.snapshot() : undefined;
-    const beat = await call(config, '/api/agent/heartbeat', {version: '1', os: process.platform, node: process.version, beat: ++beatSeq, at: Date.now(), ...(cli ? {cli} : {})});
+    const beat = await call(config, '/api/agent/heartbeat', {version: '1', os: process.platform, node: process.version, beat: ++beatSeq, at: Date.now(), features: DEVICE_FEATURES, ...(cli ? {cli} : {})});
     config.lastSeenAt = new Date().toISOString();
     if (Array.isArray(beat.agent?.permissions)) { config.permissions = beat.agent.permissions; startLive(); }
     for (const task of beat.tasks || []) if (task && task.id && !inbox.has(task.id)) inbox.set(task.id, task);

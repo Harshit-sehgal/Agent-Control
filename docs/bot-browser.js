@@ -20,12 +20,12 @@
  * X and Twitter work like any other site: a bot may read, click and type there, and a click on Post asks
  * unless the owner set Always allow for posting on that site.
  */
-import {cleanText, validHttpUrl} from './core.js?v=3163bac0ee';
-import {fail} from './errors.js?v=3163bac0ee';
-import {decide, createAsk, scopeOf, declinedNeed, outsideRead, keepOutsideMarks} from './asks.js?v=3163bac0ee';
-import {controlFence} from './reply-blocks.js?v=3163bac0ee';
-import {BACKSTOP, pagesCap, roundsCap, siteOf, siteCapLeft, countSitePage, limitsOf} from './limits.js?v=3163bac0ee';
-import {appForHost} from './app-catalog.js?v=3163bac0ee';
+import {cleanText, validHttpUrl} from './core.js?v=f345637389';
+import {fail} from './errors.js?v=f345637389';
+import {decide, createAsk, scopeOf, declinedNeed, outsideRead, keepOutsideMarks} from './asks.js?v=f345637389';
+import {controlFence} from './reply-blocks.js?v=f345637389';
+import {BACKSTOP, pagesCap, roundsCap, siteOf, siteCapLeft, countSitePage, limitsOf} from './limits.js?v=f345637389';
+import {appForHost} from './app-catalog.js?v=f345637389';
 
 /** The most page text one model turn carries (the pages of a round together). */
 export const MAX_PAGE_CHARS = 24000;

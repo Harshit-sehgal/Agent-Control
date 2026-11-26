@@ -9,10 +9,10 @@
  * It is a screenshot remote control, not a live stream: one JPEG per call. The
  * server enforces the same allowlist and the same X refusal as any other page,
  * so this is a way to sign in, never a way around the rules. */
-import {esc, btn} from './ui-kit.js?v=3163bac0ee';
-import {takeoverControl} from './ui-model.js?v=3163bac0ee';
-import {api, sync, isStaticDemo} from './ui-store.js?v=3163bac0ee';
-import {openSheet, closeSheet, sheetOpen, toast} from './ui-dialogs.js?v=3163bac0ee';
+import {esc, btn} from './ui-kit.js?v=f345637389';
+import {takeoverControl} from './ui-model.js?v=f345637389';
+import {api, sync, isStaticDemo} from './ui-store.js?v=f345637389';
+import {openSheet, closeSheet, sheetOpen, toast} from './ui-dialogs.js?v=f345637389';
 
 /** The open takeover: its session id on the server, the request it belongs to,
  * the last page the server sent, and the control the person is typing into. */
@@ -49,6 +49,8 @@ function render() {
     <input class="input" name="text" placeholder="${selected ? 'Type here, then Send' : 'No field chosen'}" aria-label="Text to type" ${selected ? 'autofocus' : 'disabled'}>
     <button type="submit" class="btn primary small" ${selected ? '' : 'disabled'}>Send</button>
   </form>`;
+  // This sheet drives a page in the server's own browser, not a device, so it keeps its fields whatever a paired device
+  // reports (`secret-input-v1` gates only the Computer view, which types through a device).
   // A password or a code is sent as a `secret`: the device tags the field first, and nothing here echoes it.
   const secretRow = (id, label, attrs) => `<form id="${id}" class="takeover-type" autocomplete="off">
     <input class="input" name="text" maxlength="2000" placeholder="${label}" aria-label="${label}" ${attrs} ${secretReady ? '' : 'disabled'}>

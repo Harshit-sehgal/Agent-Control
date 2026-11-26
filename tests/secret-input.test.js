@@ -72,14 +72,18 @@ function call(register, method, pattern, body, {ip = '192.168.1.20', headers = {
   const found = router.find(method, pattern.replace(/:(\w+)/g, (_, k) => params[k] ?? k));
   return found.route.handler({
     req: {headers, socket: {remoteAddress: ip, encrypted}},
-    path: pattern, params: found.params, actor, store: {read: () => state},
+    path: pattern, params: found.params, actor, store: {read: () => state, kvGet: key => kv[key] ?? null},
     body: async () => body,
   });
 }
+/** What the device on the live line reported (`agent_features:<id>` in kv): the route reads it for a secret. */
+const kv = {};
 const rejected = async promise => { try { await promise; return null; } catch (e) { return e; } };
 
 test('secret input over plain HTTP from the network is refused on the device path, plain input is not', async () => {
   const input = mock.method(browserLive, 'input', () => {});
+  const device = mock.method(browserLive, 'agentId', () => 'dev-1');
+  kv['agent_features:dev-1'] = JSON.stringify(['secret-input-v1']);
   try {
     const secret = {type: 'type', text: '482913', secret: true};
     const e = await rejected(call(liveRoutes, 'POST', '/api/browser-live/:botId/input', secret, {params: {botId: BOT}}));
@@ -96,7 +100,7 @@ test('secret input over plain HTTP from the network is refused on the device pat
     // Only an exact `true` marks a secret.
     await call(liveRoutes, 'POST', '/api/browser-live/:botId/input', {...secret, secret: 'yes'}, {params: {botId: BOT}});
     assert.equal(input.mock.callCount(), 3);
-  } finally { input.mock.restore(); }
+  } finally { input.mock.restore(); device.mock.restore(); delete kv['agent_features:dev-1']; }
 });
 
 test('secret input over plain HTTP from the network is refused on the server-runtime path, before anything runs', async () => {

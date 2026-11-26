@@ -256,6 +256,7 @@ let s = ''; process.stdin.on('data', c => s += c); process.stdin.on('end', () =>
     // The first beat has nothing yet; a later one carries the real answer.
     const listed = await until(async () => { const a = (await send('GET', '/api/agents', undefined, owner)).body.agents[0]; return a?.cli?.claude === 'signed-in' && a.cli.codex === 'signed-in' ? a : null; }, 'a signed-in report');
     assert.ok(listed.permissions.includes('model.run'));
+    assert.deepEqual(listed.features, ['secret-input-v1'], 'the real app says what it can do on the same beat');
     // And a model.run goes through the whole path: server queue, agent, fake CLI, result. Only the server's own code
     // queues a model.run (the generic task route refuses it), so the test writes the queued row the way enqueueAgentTask does.
     const refused = await send('POST', `/api/agents/${listed.id}/tasks`, {kind: 'model.run', payload: {engine: 'codex', input: 'hello'}}, owner);

@@ -49,6 +49,8 @@ function render() {
     <input class="input" name="text" placeholder="${selected ? 'Type here, then Send' : 'No field chosen'}" aria-label="Text to type" ${selected ? 'autofocus' : 'disabled'}>
     <button type="submit" class="btn primary small" ${selected ? '' : 'disabled'}>Send</button>
   </form>`;
+  // This sheet drives a page in the server's own browser, not a device, so it keeps its fields whatever a paired device
+  // reports (`secret-input-v1` gates only the Computer view, which types through a device).
   // A password or a code is sent as a `secret`: the device tags the field first, and nothing here echoes it.
   const secretRow = (id, label, attrs) => `<form id="${id}" class="takeover-type" autocomplete="off">
     <input class="input" name="text" maxlength="2000" placeholder="${label}" aria-label="${label}" ${attrs} ${secretReady ? '' : 'disabled'}>

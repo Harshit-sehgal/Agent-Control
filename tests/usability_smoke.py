@@ -1225,6 +1225,8 @@ class Live:
             {'url': 'https://calendar.google.com/calendar/r/week', 'title': None, 'at': '2026-11-11T10:02:00.000Z'},
         ]
         self.posts, self.frame_polls, self.list_polls, self.refuse_secret = [], 0, 0, False
+        # What the device's app says it can do (its heartbeat's `features`); the server passes it on in the frame reply.
+        self.features = ['secret-input-v1']
         self.__dict__.update(kw)
 
     def entry(self):
@@ -1249,7 +1251,7 @@ class Live:
             self.frame_polls += 1
             after = int(re.search(r'after=(\d+)', request.url).group(1)) if 'after=' in request.url else 0
             out = {'botId': self.bot, 'agent': self.agent, 'seq': self.seq if self.agent else 0, 'changed': self.agent and after != self.seq,
-                   'state': self.state, 'url': self.url, 'title': self.title, 'site': self.entry()['site']}
+                   'state': self.state, 'url': self.url, 'title': self.title, 'site': self.entry()['site'], 'features': self.features}
             if self.agent:
                 out.update(w=1280, h=800, at=1)
                 if out['changed']:
@@ -1269,6 +1271,8 @@ class Live:
         if path == f'/api/browser-live/{self.bot}/input':
             if self.state != 'driving':
                 return await reply({'error': 'Take over the browser before you click or type in it.'}, 409)
+            if body.get('secret') is True and 'secret-input-v1' not in self.features:
+                return await reply({'error': 'Update the app on your computer to type passwords and codes here.'}, 409)
             if self.refuse_secret and body.get('secret') is True:
                 return await reply({'error': 'Passwords and codes are only sent over HTTPS or from this computer.'}, 403)
             return await reply({'ok': True})
@@ -1454,6 +1458,31 @@ async def computer_take_over_drives_the_page(page, base):
     await expect(password).to_have_value('')
     await nowhere_on_screen('swordfish9')
     live.refuse_secret = False
+
+
+async def computer_older_device_has_no_masked_fields(page, base):
+    """A device whose app does not report `secret-input-v1` gets no Password or Code field: the tray says to update it."""
+    live, bot = await open_computer(page, base)
+    live.features = []
+    await goto_profile(page, bot, 'computer')
+    await page.locator('#main [data-action="computer-takeover"]').click()
+    await expect(page.locator('#main [data-action="computer-handback"]')).to_have_text('Hand back control')
+    await page.locator('#main [data-action="computer-tray"]').click()
+    note = page.locator('#main [data-pc="secret-note"]')
+    await expect(note).to_be_visible()
+    await expect(note).to_have_text('Update the app on your computer to type passwords and codes here.')
+    assert await page.locator('#main #computer-password').count() == 0 and await page.locator('#main #computer-code').count() == 0
+    assert await page.locator('#main input[type="password"]').count() == 0
+    # The ordinary box is still there, and it still types.
+    await page.locator('#main #computer-type input').fill('abc')
+    await page.locator('#main #computer-type button').click()
+    await eventually(lambda: ''.join(e['text'] for e in live.inputs() if e['type'] == 'type') == 'abc')
+    assert not [e for e in live.inputs() if e.get('secret')], 'no secret was sent'
+    # The app is updated: the next poll names the feature, and the line gives way to the two fields.
+    live.features = ['secret-input-v1']
+    await expect(page.locator('#main #computer-password input')).to_be_visible(timeout=8000)
+    await expect(page.locator('#main #computer-code input')).to_be_visible()
+    await expect(note).to_be_hidden()
 
 
 async def computer_hand_back(page, base):
@@ -2865,6 +2894,7 @@ async def main():
             await h.scenario('phone: long press opens the options sheet; hold and drag pins', phone_long_press_menu_and_drag, PHONE)
             await h.scenario('computer: the row says Browsing, the view shows a frame and the pages of the run', computer_row_frame_and_pages)
             await h.scenario('computer: Take over sends clicks, keys, the wheel and an address to the page', computer_take_over_drives_the_page)
+            await h.scenario('computer: a device without secret-input-v1 shows a line and no Password or Code field', computer_older_device_has_no_masked_fields)
             await h.scenario('computer: Hand back returns the browser to the bot', computer_hand_back)
             await h.scenario('takeover sheet: Password and Code fields send a secret, echo nothing and say a refusal', takeover_sheet_masked_fields)
             await h.scenario('computer: no device shows how to start the local agent, and notices', computer_no_device_empty_state)
