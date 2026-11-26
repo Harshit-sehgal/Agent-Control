@@ -101,7 +101,11 @@ test('one browser serves every request and is closed after the idle spell', asyn
   await runtime.close();
 });
 
-test('requests are serial, so two bots never share a page', async () => {
+const A = 'w\u0000bot-a', B = 'w\u0000bot-b';
+const within = (promise, ms, message) => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms))]);
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+test('one bot\'s requests are serial, and two bots\' pages overlap', async () => {
   const order = [];
   let release;
   const gate = new Promise(resolve => { release = resolve; });
@@ -109,18 +113,140 @@ test('requests are serial, so two bots never share a page', async () => {
     env: env({}),
     find: () => '/usr/bin/chrome',
     start: async () => ({
-      capture: async url => { order.push(`start ${url}`); if (url.endsWith('a')) await gate; order.push(`end ${url}`); return {url}; },
+      capture: async url => { order.push(`start ${url}`); if (url.endsWith('/a')) await gate; order.push(`end ${url}`); return {url}; },
       close: async () => {},
     }),
   });
+  const a1 = runtime.run({url: 'https://example.com/a', lane: A}), a2 = runtime.run({url: 'https://example.com/a-next', lane: A});
+  // Give the first request every chance to be in flight before the others.
+  await pause(20);
+  assert.equal((await within(runtime.run({url: 'https://example.com/b', lane: B}), 1000, 'B waited for A')).url, 'https://example.com/b');
+  release(); await Promise.all([a1, a2]);
+  assert.deepEqual(order.filter(x => x.includes('/a')), ['start https://example.com/a', 'end https://example.com/a', 'start https://example.com/a-next', 'end https://example.com/a-next']);
+  await runtime.close();
+});
+
+test('requests with no lane share one queue', async () => {
+  const order = [];
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const runtime = createBrowserRuntime({
+    env: env({}),
+    find: () => '/usr/bin/chrome',
+    start: async () => ({capture: async url => { order.push(`start ${url}`); if (url.endsWith('/a')) await gate; order.push(`end ${url}`); return {url}; }, close: async () => {}}),
+  });
   const first = runtime.run({url: 'https://example.com/a'});
-  // Give the first request every chance to be in flight before the second one.
-  await new Promise(resolve => setTimeout(resolve, 20));
+  await pause(20);
   const second = runtime.run({url: 'https://example.com/b'});
+  await pause(20);
+  assert.deepEqual(order, ['start https://example.com/a'], 'The second request waits for the first.');
   release();
   await Promise.all([first, second]);
   assert.deepEqual(order, ['start https://example.com/a', 'end https://example.com/a', 'start https://example.com/b', 'end https://example.com/b']);
   await runtime.close();
+});
+
+test('a page that fails for one bot does not close the browser under another bot\'s page', async () => {
+  let closes = 0;
+  const runtime = createBrowserRuntime({
+    env: env({BROWSER_IDLE_MS: '5000'}),
+    find: () => '/usr/bin/chrome',
+    start: async () => ({
+      capture: async url => {
+        if (url.endsWith('/bad')) throw new Error('That page failed.');
+        await pause(60);
+        return {url};
+      },
+      close: async () => { closes += 1; },
+      dead: false,
+    }),
+  });
+  const slow = runtime.run({url: 'https://example.com/slow', lane: A});
+  await pause(10);
+  await assert.rejects(runtime.run({url: 'https://example.com/bad', lane: B}), /That page failed/);
+  assert.equal(closes, 0, 'Another bot\'s page is still open, so the browser stays.');
+  assert.equal((await slow).url, 'https://example.com/slow');
+  assert.equal(runtime.open, true);
+  await runtime.close();
+});
+
+test('a dead browser is dropped even while another page is in flight', async () => {
+  let closes = 0, launches = 0;
+  const runtime = createBrowserRuntime({
+    env: env({BROWSER_IDLE_MS: '5000'}),
+    find: () => '/usr/bin/chrome',
+    start: async () => {
+      launches += 1;
+      const session = {
+        dead: false,
+        capture: async url => {
+          if (url.endsWith('/bad')) { session.dead = true; throw new Error('The browser died.'); }
+          await pause(60);
+          return {url};
+        },
+        close: async () => { closes += 1; },
+      };
+      return session;
+    },
+  });
+  const slow = runtime.run({url: 'https://example.com/slow', lane: A});
+  await pause(10);
+  await assert.rejects(runtime.run({url: 'https://example.com/bad', lane: B}), /died/);
+  assert.equal(closes, 1, 'A dead process cannot serve anyone, so it is dropped at once.');
+  assert.equal(runtime.open, false);
+  await slow;
+  assert.equal(closes, 1, 'The late page does not close the next browser.');
+  assert.equal((await runtime.run({url: 'https://example.com/next', lane: B})).url, 'https://example.com/next');
+  assert.equal(launches, 2);
+  await runtime.close();
+});
+
+test('the idle clock starts only once no bot has a page open', async () => {
+  let closes = 0;
+  const runtime = createBrowserRuntime({
+    env: env({BROWSER_IDLE_MS: '30'}),
+    find: () => '/usr/bin/chrome',
+    start: async () => ({
+      capture: async url => { await pause(url.endsWith('/a') ? 90 : 5); return {url}; },
+      close: async () => { closes += 1; },
+    }),
+  });
+  const a = runtime.run({url: 'https://example.com/a', lane: A});
+  await pause(5);
+  await runtime.run({url: 'https://example.com/b', lane: B});
+  await pause(50);
+  assert.equal(closes, 0, 'B ended, but A still has a page open.');
+  await a;
+  await pause(60);
+  assert.equal(closes, 1, 'Once A ends too, the idle clock closes the browser.');
+  await runtime.close();
+});
+
+test('an open takeover keeps the idle clock from closing the browser', async () => {
+  const {runtime, log} = harness({BROWSER_IDLE_MS: '20'});
+  const live = await runtime.beginLive({url: 'https://example.com/a', lane: A});
+  await runtime.run({url: 'https://example.com/b', lane: B});
+  await pause(60);
+  assert.equal(runtime.open, true, 'A person is still on a page.');
+  assert.equal(log.some(entry => entry[0] === 'close'), false);
+  await runtime.endLive(live.id);
+  await pause(60);
+  assert.equal(runtime.open, false, 'The clock starts when the takeover ends.');
+  await runtime.close();
+});
+
+test('close waits for every lane', async () => {
+  const done = [];
+  const runtime = createBrowserRuntime({
+    env: env({}),
+    find: () => '/usr/bin/chrome',
+    start: async () => ({capture: async url => { await pause(url.endsWith('/a') ? 60 : 30); done.push(url); return {url}; }, close: async () => {}}),
+  });
+  const a = runtime.run({url: 'https://example.com/a', lane: A}), b = runtime.run({url: 'https://example.com/b', lane: B});
+  await pause(10);
+  await runtime.close();
+  assert.deepEqual(done.sort(), ['https://example.com/a', 'https://example.com/b'], 'A drain does not kill a page on any lane.');
+  await Promise.all([a, b]);
 });
 
 test('a capture that fails relaunches the browser for the next request', async () => {
@@ -210,13 +336,45 @@ test('a takeover opens one page, keeps it, and refuses a second', async () => {
   await runtime.close();
 });
 
-test('a person using the browser blocks a bot, and the bot blocks a person', async () => {
+test('a takeover refuses only the bot whose page is held', async () => {
   const {runtime} = harness({BROWSER_LIVE_MS: '5000'});
-  const live = await runtime.beginLive({url: 'https://example.com/a'});
-  await assert.rejects(runtime.run({url: 'https://example.com/b'}), error => error.status === 409 && /A person is using the browser/.test(error.message));
+  const live = await runtime.beginLive({url: 'https://example.com/a', lane: A});
+  await assert.rejects(runtime.run({url: 'https://example.com/b', lane: A}), e => e.status === 409 && /A person is using the browser/.test(e.message));
+  assert.equal((await runtime.run({url: 'https://example.com/b', lane: B})).url, 'https://example.com/b');
   await runtime.endLive(live.id);
   // With the takeover closed the bot may run again.
-  assert.equal((await runtime.run({url: 'https://example.com/b'})).url, 'https://example.com/b');
+  assert.equal((await runtime.run({url: 'https://example.com/b', lane: A})).url, 'https://example.com/b');
+  await runtime.close();
+});
+
+test('a request with no lane is refused by a takeover with no lane', async () => {
+  const {runtime} = harness({BROWSER_LIVE_MS: '5000'});
+  const live = await runtime.beginLive({url: 'https://example.com/a'});
+  await assert.rejects(runtime.run({url: 'https://example.com/b'}), e => e.status === 409 && /A person is using the browser/.test(e.message));
+  await runtime.endLive(live.id);
+  await runtime.close();
+});
+
+test('a takeover on one bot is looked at and acted on without waiting for another bot\'s page', async () => {
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const runtime = createBrowserRuntime({
+    env: env({BROWSER_LIVE_MS: '5000'}),
+    find: () => '/usr/bin/chrome',
+    start: async () => ({
+      capture: async url => { await gate; return {url}; },
+      open: async url => ({act: async () => ({ok: true}), view: async () => ({url, title: 'T', text: '', elements: []}), page: async () => ({url}), close: async () => {}}),
+      close: async () => {},
+    }),
+  });
+  const live = await runtime.beginLive({url: 'https://example.com/a', lane: A});
+  const busy = runtime.run({url: 'https://example.com/b', lane: B});
+  await pause(20);
+  assert.equal((await within(runtime.liveView(live.id), 1000, 'the look waited for B')).title, 'T');
+  assert.equal((await within(runtime.liveAct(live.id, {op: 'click', index: 1}), 1000, 'the action waited for B')).ok, true);
+  release();
+  await busy;
+  await runtime.endLive(live.id);
   await runtime.close();
 });
 
