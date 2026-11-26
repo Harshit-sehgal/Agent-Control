@@ -16,7 +16,7 @@
  * Pure and dependency-free like the other shared modules: the browser imports
  * it, and no Node builtin is touched.
  */
-import {runNote} from './coordination.js?v=01cd03d88d';
+import {runNote} from './coordination.js?v=0311e05212';
 
 /** The statuses that end a watch: the run stopped for a person, or it is done.
  * A run in any other state is still working, so the loop keeps looking. */

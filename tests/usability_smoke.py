@@ -252,6 +252,19 @@ async def edit_pins_a_bot_to_one_computer(page, base):
     await page.evaluate(f"location.hash = '#profile/{writer}/edit'")
     await expect(page.locator('#edit-bot-form select[name=device]')).to_have_value('a1')
     assert await overflow(page) <= 0, 'the Computer row overflows the phone'
+    # Every computer revoked, the bot still pinned: the owner still sees the pin and Any computer clears it.
+    for agent in server.agents:
+        agent['status'] = 'revoked'
+    await page.evaluate(f"location.hash = '#profile/{writer}'")
+    await page.evaluate(f"location.hash = '#profile/{writer}/edit'")
+    await expect(select).to_have_count(1)
+    values = await select.locator('option').evaluate_all('o => o.map(x => [x.value, x.textContent])')
+    assert values == [['', 'Any computer'], ['a1', 'A computer that is no longer paired']], values
+    await expect(select).to_have_value('a1')
+    await select.select_option('')
+    await page.locator('#edit-bot-form button[type=submit]').click()
+    await expect(page.locator('#toast')).to_have_text('Saved.')
+    assert company_bot(await api_state(page), 'Drafter')['settings'].get('device') is None
 
 
 async def edit_rename_and_move(page, base):

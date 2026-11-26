@@ -240,11 +240,12 @@ export function editChanges(was, now) {
 }
 
 /** The Computer choice on Edit: Any computer, then each paired computer, labelled by its name, in the order given; a pin on one that is gone shows last.
- * Empty when no computer is paired, so the row is not drawn. `agents` is GET /api/agents; `current` the bot's pin. */
+ * Empty when no computer is paired and nothing is pinned, so the row is not drawn; a pin always shows, so the owner can clear it. `agents` is GET /api/agents; `current` the bot's pin. */
 export function deviceOptions(agents, current) {
   const live = (agents || []).filter(a => a.status !== 'revoked');
-  if (!live.length) return [];
-  const pin = current || '', list = [{id: '', label: 'Any computer', selected: !pin}, ...live.map(a => ({id: a.id, label: a.name, selected: a.id === pin}))];
+  const pin = current || '';
+  if (!live.length && !pin) return [];
+  const list = [{id: '', label: 'Any computer', selected: !pin}, ...live.map(a => ({id: a.id, label: a.name, selected: a.id === pin}))];
   if (pin && !live.some(a => a.id === pin)) list.push({id: pin, label: 'A computer that is no longer paired', selected: true});
   return list;
 }

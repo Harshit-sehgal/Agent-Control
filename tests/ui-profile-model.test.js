@@ -197,6 +197,13 @@ test('the Computer choice: any computer first, each paired one by name, and a re
   assert.deepEqual(deviceOptions([{id: 'a3', name: 'Old', status: 'revoked'}], null), []);
 });
 
+test('a pin to a computer that is gone still shows when every computer is revoked, so the owner can clear it', () => {
+  const gone = [{id: 'a3', name: 'Old', status: 'revoked'}];
+  assert.deepEqual(deviceOptions(gone, 'a3'), [{id: '', label: 'Any computer', selected: false}, {id: 'a3', label: 'A computer that is no longer paired', selected: true}]);
+  assert.deepEqual(deviceOptions([], 'a3').map(o => o.id), ['', 'a3']);
+  assert.deepEqual(deviceOptions(gone, ''), []);
+});
+
 test('Edit saves the computer only when it changed, and keeps a pin it did not show', () => {
   const was = {name: 'Web', reportsTo: null, shape: 'rounded', tint: 2, device: 'a1'}, same = {name: 'Web', reportsTo: '', shape: 'rounded', tint: 2};
   assert.equal(editChanges(was, same), null);

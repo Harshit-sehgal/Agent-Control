@@ -5,15 +5,15 @@
  *
  * A bot's manager is settings.reportsTo (company.js); "manager" is simply a bot
  * with reports, so any bot can become one by receiving a report. */
-import {companyBots, primaryOf, managerOf, reportsOf, teamOf} from './company.js?v=01cd03d88d';
-import {firstUnusedTint} from './bot-create.js?v=01cd03d88d';
-import {TINT_COUNT, dayLabel} from './ui-kit.js?v=01cd03d88d';
-import {jobOf} from './ui-company.js?v=01cd03d88d';
-import {ACTIVITY_CHIPS} from './activity-log.js?v=01cd03d88d';
-import {grantRows} from './ui-asks.js?v=01cd03d88d';
-import {cleanEffort, effortLabel, EFFORT_LEVELS} from './ai-presets.js?v=01cd03d88d';
-import {scheduleRows} from './schedules.js?v=01cd03d88d';
-import {WATCH_EVERY} from './watches.js?v=01cd03d88d';
+import {companyBots, primaryOf, managerOf, reportsOf, teamOf} from './company.js?v=0311e05212';
+import {firstUnusedTint} from './bot-create.js?v=0311e05212';
+import {TINT_COUNT, dayLabel} from './ui-kit.js?v=0311e05212';
+import {jobOf} from './ui-company.js?v=0311e05212';
+import {ACTIVITY_CHIPS} from './activity-log.js?v=0311e05212';
+import {grantRows} from './ui-asks.js?v=0311e05212';
+import {cleanEffort, effortLabel, EFFORT_LEVELS} from './ai-presets.js?v=0311e05212';
+import {scheduleRows} from './schedules.js?v=0311e05212';
+import {WATCH_EVERY} from './watches.js?v=0311e05212';
 
 /** What a bot made without a job holds until the owner's first chat message
  * replaces it (the profile, the list and the chat all treat it as "no job yet"). */
@@ -240,11 +240,12 @@ export function editChanges(was, now) {
 }
 
 /** The Computer choice on Edit: Any computer, then each paired computer, labelled by its name, in the order given; a pin on one that is gone shows last.
- * Empty when no computer is paired, so the row is not drawn. `agents` is GET /api/agents; `current` the bot's pin. */
+ * Empty when no computer is paired and nothing is pinned, so the row is not drawn; a pin always shows, so the owner can clear it. `agents` is GET /api/agents; `current` the bot's pin. */
 export function deviceOptions(agents, current) {
   const live = (agents || []).filter(a => a.status !== 'revoked');
-  if (!live.length) return [];
-  const pin = current || '', list = [{id: '', label: 'Any computer', selected: !pin}, ...live.map(a => ({id: a.id, label: a.name, selected: a.id === pin}))];
+  const pin = current || '';
+  if (!live.length && !pin) return [];
+  const list = [{id: '', label: 'Any computer', selected: !pin}, ...live.map(a => ({id: a.id, label: a.name, selected: a.id === pin}))];
   if (pin && !live.some(a => a.id === pin)) list.push({id: pin, label: 'A computer that is no longer paired', selected: true});
   return list;
 }
