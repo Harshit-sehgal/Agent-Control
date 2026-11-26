@@ -22,8 +22,11 @@ export function fakeCdp({pages = {}} = {}) {
     const shown = pages[page.url] || {};
     const snapshot = {count: (shown.elements || []).length, elements: shown.elements || []};
     // The takeover's two questions about the focused field: is it secret (answered by `focusSecret`), and the tag.
-    if (expression.startsWith('document.activeElement?.setAttribute(')) { tagged.push({sessionId, expression}); return {result: {}}; }
-    if (expression.startsWith('(()=>{') && expression.includes('isSecretField(el)')) return {result: {value: state.focusSecret}};
+    if (expression.startsWith('(()=>{') && expression.includes('isSecretField(el)')) {
+      // 'throws': the page expression threw, which Chrome answers with exceptionDetails and no value.
+      return state.focusSecret === 'throws' ? {result: {type: 'object', subtype: 'error'}, exceptionDetails: {text: 'Uncaught'}} : {result: {value: state.focusSecret}};
+    }
+    if (expression.includes("setAttribute('data-agent-secret'")) { tagged.push({sessionId, expression}); return {result: {}}; }
     if (expression === 'location.href') return {result: {value: page.url}};
     if (expression.startsWith('(function(){var els=')) return {result: {value: snapshot}};
     if (expression.startsWith('JSON.stringify({url: location.href')) {
@@ -75,7 +78,7 @@ export function fakeCdp({pages = {}} = {}) {
   };
   return {
     cdp, calls, pages, actions, input, targets, tagged,
-    /** Whether the focused field answers "secret" to the takeover's check. */
+    /** Whether the focused field answers "secret" to the takeover's check (true, false, or 'throws'). */
     set focusSecret(value) { state.focusSecret = value; },
     connection: {cdp},
     emit, hook: (method, fn) => { hooks[method] = fn; },

@@ -24,7 +24,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {startBrowserSession, ACTION_OPS, MAX_ACTIONS} from './browser.mjs';
-import {PAGE_SECRETS_JS} from './page-secrets.mjs';
+import {PAGE_SECRETS_JS, TAG_FOCUSED_SECRET_JS} from './page-secrets.mjs';
 import {hostAllowed, hostOf} from '../shared/bot-browser.js';
 import {cleanInput, KEYS, VIEWPORT} from './live-input.mjs';
 
@@ -219,12 +219,13 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     } else if (ev.type === 'scroll') {
       await send('Input.dispatchMouseEvent', {type: 'mouseWheel', x: ev.x, y: ev.y, deltaX: ev.dx, deltaY: ev.dy});
     } else if (ev.type === 'type') {
-      // Ask the page first whether the cursor is in a secret field (a failed question counts as yes), then type,
-      // then tag that field so the page hides it from every model. Nothing here ever names the text.
+      // Ask the page whether the cursor is in a secret field, tag that field while focus is certain (before the
+      // text can move it), then type. An answer that is not a plain boolean (a page expression that threw) counts
+      // as yes, and a tag that fails stops the typing. Nothing here ever names the text.
       const asked = await send('Runtime.evaluate', {expression: `(()=>{${PAGE_SECRETS_JS};const el=document.activeElement;return !!el&&isSecretField(el)})()`, returnByValue: true})
-        .then(reply => reply?.result?.value === true, () => true);
+        .then(reply => (!reply?.exceptionDetails && typeof reply?.result?.value === 'boolean' ? reply.result.value : true), () => true);
+      if (ev.secret || asked) await send('Runtime.evaluate', {expression: TAG_FOCUSED_SECRET_JS}).catch(() => { throw new Error('The browser could not mark that field secret.'); });
       await send('Input.insertText', {text: ev.text}).catch(() => { throw new Error('The browser did not take the typed text.'); });
-      if (ev.secret || asked) await send('Runtime.evaluate', {expression: "document.activeElement?.setAttribute('data-agent-secret','1')"}).catch(() => { throw new Error('The browser could not mark that field secret.'); });
     } else if (ev.type === 'key') {
       const key = KEYS[ev.key], base = {key: ev.key, code: key.code, windowsVirtualKeyCode: key.vk, nativeVirtualKeyCode: key.vk};
       await send('Input.dispatchKeyEvent', {type: 'keyDown', ...base, ...(key.text ? {text: key.text} : {})});

@@ -4,6 +4,8 @@ import {startBrowserSession} from '../agent/browser.mjs';
 import {createSharedBrowser} from '../agent/shared-browser.mjs';
 import {createLiveChannel} from '../agent/live-channel.mjs';
 import {fakeCdp} from './fake-cdp.js';
+import {TAG_FOCUSED_SECRET_JS} from '../agent/page-secrets.mjs';
+import vm from 'node:vm';
 
 /* The owner takes the browser, and hands it back. Against the scripted DevTools
  * connection (tests/fake-cdp.js): no Chrome starts. */
@@ -216,11 +218,11 @@ test('by default a takeover has no clock: the person keeps the browser until the
   assert.match(src, /if \(!idleMs\) return;/);
 });
 
-/** Methods the fake saw on the tab, from the first Input.insertText on. */
-const afterInsert = fake => { const i = fake.calls.findIndex(c => c.method === 'Input.insertText'); return i < 0 ? [] : fake.calls.slice(i + 1); };
-const tagsAfter = fake => afterInsert(fake).filter(c => c.method === 'Runtime.evaluate' && c.params.expression.startsWith('document.activeElement?.setAttribute('));
+/** The evaluations that tag the focused field, in the order the device sent them. */
+const isTag = c => c.method === 'Runtime.evaluate' && c.params.expression.includes("setAttribute('data-agent-secret'") && !c.params.expression.includes('isSecretField');
+const tagCalls = fake => fake.calls.filter(isTag);
 
-test('text the owner marks secret is typed, then the field it went into is tagged for the page', async t => {
+test('text the owner marks secret goes into a field that is tagged for the page first', async t => {
   const {sb, fake} = rig();
   t.after(() => sb.close());
   await sb.run('bot-a', {url: 'https://docs.example.com/'});
@@ -228,10 +230,10 @@ test('text the owner marks secret is typed, then the field it went into is tagge
   await sb.applyInput('bot-a', {type: 'type', text: '482913', secret: true});
   assert.equal(fake().input.length, 1);
   assert.equal(fake().input[0].params.text, '482913');
-  const tags = tagsAfter(fake());
-  assert.equal(tags.length, 1, 'one tag, after the text went in');
-  assert.match(tags[0].params.expression, /data-agent-secret/);
-  assert.equal(tags[0].params.expression, "document.activeElement?.setAttribute('data-agent-secret','1')");
+  const tags = tagCalls(fake());
+  assert.equal(tags.length, 1, 'one tag');
+  assert.ok(fake().calls.indexOf(tags[0]) < fake().calls.findIndex(c => c.method === 'Input.insertText'), 'tagged while focus is certain, before the text can move it');
+  assert.equal(tags[0].params.expression, TAG_FOCUSED_SECRET_JS);
   assert.equal(fake().actions.length, 0, 'the tag is not a bot step');
 });
 
@@ -241,14 +243,14 @@ test('a plain type event into a field the page says is secret is tagged too, and
   await sb.run('bot-a', {url: 'https://docs.example.com/'});
   await sb.takeover('bot-a');
   await sb.applyInput('bot-a', {type: 'type', text: 'hello'});
-  assert.equal(tagsAfter(fake()).length, 0, 'an ordinary field is left alone');
+  assert.equal(tagCalls(fake()).length, 0, 'an ordinary field is left alone');
   const asked = fake().calls.filter(c => c.method === 'Runtime.evaluate' && c.params.expression.includes('isSecretField(el)'));
   assert.equal(asked.length, 1, 'the focused field was asked about, once');
   assert.ok(fake().calls.indexOf(asked[0]) < fake().calls.findIndex(c => c.method === 'Input.insertText'), 'before the text went in');
   assert.match(asked[0].params.expression, /function isSecretField/, 'the whole bundle travels with the question');
   fake().focusSecret = true;
   await sb.applyInput('bot-a', {type: 'type', text: 'hunter2'});
-  assert.equal(tagsAfter(fake()).length, 1, 'a password field is tagged though the event was not marked');
+  assert.equal(tagCalls(fake()).length, 1, 'a password field is tagged though the event was not marked');
 });
 
 test('a key press and a click are not asked about, and nothing the owner typed is in an error or a log line', async t => {
@@ -274,4 +276,33 @@ test('a key press and a click are not asked about, and nothing the owner typed i
   }
   assert.ok(!seen.join('\n').includes(text), 'nothing was logged with the text');
   await assert.rejects(() => sb.applyInput('bot-a', {type: 'type', text: text.repeat(300), secret: true}), e => !e.message.includes(text));
+});
+
+test('a focus question the page could not answer counts as secret, and a tag that fails stops the typing', async t => {
+  const {sb, fake} = rig();
+  t.after(() => sb.close());
+  await sb.run('bot-a', {url: 'https://docs.example.com/'});
+  await sb.takeover('bot-a');
+  fake().focusSecret = 'throws';
+  await sb.applyInput('bot-a', {type: 'type', text: 'hello'});
+  assert.equal(tagCalls(fake()).length, 1, 'a page expression that threw (exceptionDetails, no value) is not an answer of "no"');
+  assert.equal(fake().input.length, 1);
+  fake().hook('Runtime.evaluate', async ({expression}) => { if (expression === TAG_FOCUSED_SECRET_JS) throw new Error('boom 482913'); });
+  await assert.rejects(() => sb.applyInput('bot-a', {type: 'type', text: '482913', secret: true}), e => !e.message.includes('482913'));
+  assert.equal(fake().input.length, 1, 'the text was not typed into a field that could not be hidden');
+});
+
+test('the tag expression skips the page body, the page root and an empty focus', () => {
+  const run = active => {
+    const mark = {setAttribute(name, value) { (this.set ||= []).push([name, value]); }};
+    const body = {...mark, set: []}, root = {...mark, set: []}, field = {...mark, set: []};
+    const doc = {body, documentElement: root, activeElement: {body, root, field, none: null, undef: undefined}[active]};
+    vm.runInNewContext(TAG_FOCUSED_SECRET_JS, {document: doc});
+    return [body.set, root.set, field.set].map(x => x.length);
+  };
+  assert.deepEqual(run('field'), [0, 0, 1], 'a focused field is tagged');
+  assert.deepEqual(run('body'), [0, 0, 0]);
+  assert.deepEqual(run('root'), [0, 0, 0]);
+  assert.deepEqual(run('none'), [0, 0, 0]);
+  assert.deepEqual(run('undef'), [0, 0, 0]);
 });
