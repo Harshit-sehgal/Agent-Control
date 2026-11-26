@@ -8,6 +8,7 @@ import {createRouter} from '../src/router.js';
 import {liveRoutes} from '../src/routes-live.js';
 import {groupRoutes} from '../src/routes-groups.js';
 import {browserLive} from '../src/browser-live.js';
+import {browserRuntime} from '../src/browser-runtime.js';
 import http from 'node:http';
 import {findBrowser, startBrowserSession} from '../agent/browser.mjs';
 
@@ -39,6 +40,9 @@ test('secureRequest: TLS, a trusted proxy that says https, or loopback', async (
   await withEnv({TRUST_PROXY: '1'}, () => {
     assert.equal(secureRequest({headers: {'x-forwarded-proto': 'https'}, socket: {remoteAddress: '127.0.0.1'}}), true);
     assert.equal(secureRequest({headers: {'x-forwarded-proto': 'http'}, socket: {remoteAddress: '127.0.0.1'}}), false);
+    // A proxy that appends turns a client's own "https" over plain HTTP into a list: only the whole value counts.
+    for (const v of ['https, http', 'http, https', 'https,http']) assert.equal(secureRequest({headers: {'x-forwarded-proto': v}, socket: {remoteAddress: '127.0.0.1'}}), false, v);
+    assert.equal(secureRequest({headers: {'x-forwarded-proto': ' HTTPS '}, socket: {remoteAddress: '127.0.0.1'}}), true);
     assert.equal(secureRequest({headers: {}, socket: {remoteAddress: '127.0.0.1'}}), false);
     // With a trusted proxy, loopback alone proves nothing: the proxy is the loopback peer.
     assert.equal(secureRequest({headers: local, socket: {remoteAddress: '127.0.0.1'}}), false);
@@ -120,4 +124,19 @@ test('a field the owner typed into in secret is tagged in the page, and a plain 
     assert.equal((await live.act({op: 'waitFor', selector: '#u[data-agent-secret]', timeoutMs: 300})).ok, false);
     await live.close();
   } finally { await session.close(); server.close(); }
+});
+
+test('the act route hands liveAct secret: true only for an exact true, over a secure request', async () => {
+  const seen = [];
+  const assertLive = mock.method(browserRuntime, 'assertLive', () => {});
+  const liveAct = mock.method(browserRuntime, 'liveAct', async (id, step) => { seen.push(step); return {ok: true}; });
+  try {
+    const run = body => call(groupRoutes, 'POST', '/api/browser-sessions/:session/act', {op: 'type', index: 1, text: '482913', ...body}, {params: {session: 's1'}, ip: '203.0.113.5', encrypted: true});
+    await run({secret: true});
+    await run({secret: 'yes'});
+    await run({secret: false});
+    await run({});
+    assert.deepEqual(seen.map(step => step.secret), [true, false, false, false]);
+    assert.equal(seen[0].text, '482913');
+  } finally { assertLive.mock.restore(); liveAct.mock.restore(); }
 });

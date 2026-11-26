@@ -320,6 +320,7 @@ export function groupRoutes(router) {
   router.add('GET', '/api/browser-sessions/:session', 'member', c => browserRuntime.liveView(c.params.session, scope(c)));
   router.add('POST', '/api/browser-sessions/:session/act', 'admin', async c => {
     const b = await c.body();
+    // On purpose before the session lookup: an unsafe connection learns nothing about which sessions exist.
     requireSecureSecret(c.req, b);
     browserRuntime.assertLive(c.params.session, c.actor.workspaceId);
     return browserRuntime.liveAct(c.params.session, {op: b?.op, index: b?.index, selector: b?.selector, text: b?.text, url: b?.url, secret: b?.secret === true}, scope(c));

@@ -56,7 +56,7 @@ const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 export function secureRequest(req) {
   if (req.socket?.encrypted === true) return true;
   const h = req.headers || {};
-  if (trustProxy()) return String(h['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase() === 'https';
+  if (trustProxy()) return String(h['x-forwarded-proto'] || '').trim().toLowerCase() === 'https';
   if (!LOOPBACK.has(req.socket?.remoteAddress)) return false;
   if (h['x-forwarded-for'] || h.forwarded || h['x-real-ip']) return false;
   try { return LOOPBACK_HOSTS.has(new URL(String(h.origin)).hostname); } catch { return false; }
