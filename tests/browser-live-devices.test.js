@@ -113,6 +113,48 @@ test('a holder that went quiet holds nothing: input is refused, the hold is not 
   hub.close();
 });
 
+test('a computer that was quiet while the server let go hears the handback when it polls again: by handback, by a takeover elsewhere, and by a moved pin', async () => {
+  const handbacks = async (hub, id) => (await hub.agentSync(WS, id, {})).commands.filter(c => c.type === 'handback').map(c => [c.botId, c.account ?? null]);
+  const held = async (hub, tick, opts = {}) => {
+    const x = hub.agentSync(WS, 'pc-x', {});
+    hub.takeover(WS, 'atlas', opts);
+    await x;
+    tick(60_000);
+    await hub.agentSync(WS, 'pc-y', {});             // x is quiet, y polled last
+  };
+  { // a handback
+    const {hub, tick} = rig();
+    await held(hub, tick);
+    hub.handback(WS, 'atlas');
+    assert.deepEqual(await handbacks(hub, 'pc-x'), [['atlas', null]], 'x is told when it comes back');
+    hub.close();
+  }
+  { // a takeover that lands on another computer
+    const {hub, tick} = rig();
+    await held(hub, tick);
+    hub.takeover(WS, 'atlas');
+    assert.deepEqual((await hub.agentSync(WS, 'pc-y', {})).commands.map(c => c.type), ['takeover']);
+    assert.deepEqual(await handbacks(hub, 'pc-x'), [['atlas', null]], 'the old holder is told to let go');
+    hub.close();
+  }
+  { // the pin moves to y while x holds the bot
+    const {hub, tick} = rig();
+    await held(hub, tick, {agentId: 'pc-x', account: A});
+    hub.takeover(WS, 'atlas', {agentId: 'pc-y', account: A});
+    assert.deepEqual(await handbacks(hub, 'pc-x'), [['atlas', A]], 'with the account it held');
+    hub.close();
+  }
+  { // a holder that is still there hears one handback, not two
+    const {hub} = rig();
+    const x = hub.agentSync(WS, 'pc-x', {});
+    hub.takeover(WS, 'atlas');
+    await x;
+    hub.handback(WS, 'atlas');
+    assert.deepEqual(await handbacks(hub, 'pc-x'), [['atlas', null]]);
+    hub.close();
+  }
+});
+
 test('a pinned bot after a re-pair: the old computer\'s hold does not outlive its silence', async () => {
   const {hub, tick} = rig();
   const old = hub.agentSync(WS, 'pc-old', {});

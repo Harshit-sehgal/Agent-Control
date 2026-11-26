@@ -20,6 +20,7 @@ import {companyBots} from '../shared/company.js';
 import {hostOf} from '../shared/bot-browser.js';
 import {cleanInput} from '../agent/live-input.mjs';
 import {UPDATE_DEVICE_LINE, BROWSER_ACCOUNTS_V1} from '../shared/device-features.js';
+import {missingFeatureLine} from './agent.js';
 import {browserAccountOf, browserDeviceOf} from '../shared/browser-accounts.js';
 import {ACCOUNT_ID} from '../shared/bot-settings.js';
 
@@ -38,7 +39,7 @@ const text = (value, max) => (typeof value === 'string' ? value.slice(0, max) : 
 const accountOf = value => (typeof value === 'string' && ACCOUNT_ID.test(value) ? value : null);
 /** How a tab is named in a report: the account (none for the default profile) and the bot. */
 const tabId = (account, botId) => `${account || ''}|${botId}`;
-const ACCOUNTS_LINE = `This needs a newer app on your computer: it does not report ${BROWSER_ACCOUNTS_V1}. Update the app on your computer, then try again.`;
+const ACCOUNTS_LINE = missingFeatureLine(BROWSER_ACCOUNTS_V1);
 const sameWatch = (a, b) => (a?.botId ?? null) === (b?.botId ?? null) && (a?.account ?? null) === (b?.account ?? null);
 
 export function createLiveHub({now = Date.now, waitMs = LIVE_WAIT_MS} = {}) {
@@ -188,15 +189,26 @@ export function createLiveHub({now = Date.now, waitMs = LIVE_WAIT_MS} = {}) {
     const sp = peek(workspaceId, deviceFor(workspaceId, botId, agentId));
     if (!alive(sp)) fail('The local agent is not running the shared browser right now, so there is nothing to take over. Start it with AGENT_BROWSER=1 and try again.', 409);
     sp.notices.delete(botId);
-    for (const other of spaces.values()) if (other !== sp && other.workspaceId === workspaceId) other.driving.delete(botId);
+    // Any other computer that held this bot's tab is told to let go (it hears it when it next polls, even if it is quiet now).
+    for (const other of spaces.values()) if (other !== sp && other.workspaceId === workspaceId) release(other, botId);
     sp.driving.set(botId, {since: now(), account});
     command(sp, {type: 'takeover', botId}, account);
   }
+  /** Forget this computer's hold on a bot and queue the handback it will hear. True when it held it. */
+  function release(sp, botId) {
+    const held = sp.driving.get(botId);
+    if (!held) return false;
+    sp.driving.delete(botId);
+    sp.commands.push(held.account ? {type: 'handback', botId, account: held.account} : {type: 'handback', botId});
+    wake(sp);
+    return true;
+  }
   function handback(workspaceId, botId, {agentId = null, account = null} = {}) {
     const sp = peek(workspaceId, deviceFor(workspaceId, botId, agentId));
-    // The hold goes everywhere at once; the command goes to the computer that was holding it.
-    for (const other of spaces.values()) if (other.workspaceId === workspaceId) other.driving.delete(botId);
-    if (!sp) return;
+    // The hold goes everywhere at once, and every computer that held it is told, even one that is quiet now.
+    const told = new Set();
+    for (const other of spaces.values()) if (other.workspaceId === workspaceId && release(other, botId)) told.add(other);
+    if (!sp || told.has(sp)) return;
     sp.commands.push(account ? {type: 'handback', botId, account} : {type: 'handback', botId});
     wake(sp);
   }

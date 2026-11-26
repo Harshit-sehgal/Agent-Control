@@ -59,7 +59,7 @@ export function createLiveChannel({call, shared, frameGapMs = 100, retryMs = 200
     } else if (command?.type === 'handback') {
       // Releasing is always safe, and the server has already let go (the account may have changed or gone meanwhile),
       // so it is honoured whatever account it names. Only the owner's input is gated by the account.
-      held = null;
+      if (held?.botId === command.botId) held = null;
       await shared.handback(command.botId);
     }
   }

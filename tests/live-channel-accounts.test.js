@@ -82,6 +82,15 @@ test('a handback is always honoured, whatever account it names: the server has a
   }
 });
 
+test('a handback for another bot does not make the owner forget the tab they hold', async t => {
+  const {channel, sb, fake, sessionA} = await rig(t, {poll: [{commands: [{type: 'takeover', botId: 'scout', account: A}, {type: 'handback', botId: 'writer', account: A}, {type: 'input', botId: 'scout', account: A, event: key}], watch: null}]});
+  channel.start();
+  await sleep(60);
+  assert.equal(sb.owner(), 'scout');
+  assert.ok(fake.input.length > 0, 'the owner\'s input still reaches the tab they hold');
+  assert.equal(fake.input.every(e => e.sessionId === sessionA), true);
+});
+
 test('a handback for the held account releases it', async t => {
   const {channel, sb} = await rig(t, {poll: [{commands: [{type: 'takeover', botId: 'scout', account: A}, {type: 'handback', botId: 'scout', account: A}], watch: null}]});
   channel.start();
