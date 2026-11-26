@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import {complete, executeCustomBot, usageOf, fallsBack} from '../src/ai.js';
-import {meterTurn, turnNote} from '../src/usage.js';
+import {meterTurn, turnNote, fallbacksOf} from '../src/usage.js';
 
 // Usage parsing per wire, the prompt-cache markers, and the one fallback call, each driven against a loopback
 // provider so the request body and the response shape are the real ones.
@@ -216,6 +216,7 @@ test('a turn that moved stays on the model that answered it', async () => {
       assert.equal(f2.requests.length, 0);
       assert.deepEqual(out.calls.map(c => c.model), ['f1', 'f1']);
       assert.equal(out.calls[1].fallbackFrom.model, 'main');
+      assert.deepEqual(fallbacksOf(out.calls), [{botId: 'b1', from: 'main', why: 'the provider is having trouble', to: 'f1'}], 'one notice for the move, not one per later call');
     });
   } finally { closeAll(own, f1, f2); }
 });

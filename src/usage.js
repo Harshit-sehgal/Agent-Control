@@ -60,5 +60,14 @@ export async function meterTurn(store, {runId = null} = {}, fn) {
   return {value, calls, total: calls.reduce((t, c) => addUsage(t, c), null)};
 }
 
-/** What a turn's calls say about fallbacks: one entry per call a fallback model answered. */
-export const fallbacksOf = calls => calls.filter(c => c.fallbackFrom).map(c => ({botId: c.botId || null, from: c.fallbackFrom.model, why: c.fallbackFrom.why, to: c.model || ''}));
+/** What a turn's calls say about fallbacks: one entry per bot and move (own model to the model that answered). A turn
+ * that moved keeps its later calls on that model, each carrying `fallbackFrom`, but the owner is told once. */
+export function fallbacksOf(calls) {
+  const seen = new Map();
+  for (const c of calls) {
+    if (!c.fallbackFrom) continue;
+    const key = [c.botId || '', c.fallbackFrom.model, c.model || ''].join('|');
+    if (!seen.has(key)) seen.set(key, {botId: c.botId || null, from: c.fallbackFrom.model, why: c.fallbackFrom.why, to: c.model || ''});
+  }
+  return [...seen.values()];
+}
