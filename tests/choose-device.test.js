@@ -131,6 +131,7 @@ test('normalizeNeeds: nothing is no needs, a string is one, a list is itself, an
   assert.equal(normalizeNeeds(list), list);
   assert.deepEqual(normalizeNeeds([]), []);
   for (const odd of ['', 7, true, {}, {length: 0}, () => {}]) assert.deepEqual(normalizeNeeds(odd), ['<invalid>'], String(typeof odd));
+  for (const odd of [[''], [null], [0], ['a-v1', 7]]) assert.deepEqual(normalizeNeeds(odd), ['<invalid>'], JSON.stringify(odd));
 });
 
 test('agentsBrief says online by the one online rule: a device never seen but just paired is online', async t => {

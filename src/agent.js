@@ -54,11 +54,11 @@ export const missingFeatureLine = name =>
 const agentMay = (row, kind) => { try { const list = JSON.parse(row.permissions || '[]'); return Array.isArray(list) && list.includes(kind); } catch { return false; } };
 
 /** The list of device features a piece of work needs, read once and failing closed: nothing is none, a string is one
- * name, a list is itself, and anything else is a name no device reports, so the chooser refuses instead of ignoring it. */
+ * name, a list of names is itself, and anything else is a name no device reports, so the chooser refuses instead of ignoring it. */
 export function normalizeNeeds(needs) {
   if (needs === null || needs === undefined) return [];
   if (typeof needs === 'string' && needs) return [needs];
-  if (Array.isArray(needs)) return needs;
+  if (Array.isArray(needs)) return needs.every(name => typeof name === 'string' && name) ? needs : ['<invalid>'];
   return ['<invalid>'];
 }
 
