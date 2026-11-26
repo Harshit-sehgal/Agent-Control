@@ -4,6 +4,18 @@ Design, 26 Nov 2026, written against `main` at `90bb68f` (every branch merged). 
 
 Marks: **[measured]** was run on this machine; **[untested]** is a design I expect to work but have not run.
 
+**Second revision, same day.** An independent review read this design against the code and found that a few parts could not work as written: the self-redesign rule, a missing runner for fixed steps, the kill switch, backups, and the order of the build. Its findings were each checked against the code before being taken in. The changes:
+- the narrower secret-field rule in 6.1;
+- the playbook runner (8.4);
+- the outbox in its own table (8.2);
+- storage and restore (9.4);
+- one goal as one group (9.2);
+- the stand-up under its own key (10.2);
+- the owner's screens and the Pages demo (13);
+- a smaller first goal slice and a reordered build (15).
+
+The Phase 0 plan is `docs/superpowers/plans/2026-11-26-phase-0-secrets-never-reach-a-model.md`.
+
 ---
 
 ## 1. The idea
@@ -75,6 +87,10 @@ A new use is new data (a blueprint, a profile, a skill, a template). A new kind 
 11. **Hands-off is on for a new install** (an absent kv `hands_off` reads as on). That suits a chat; a goal that sends on a timer for days needs its own, stricter default.
 12. **Sign-in pages are recognised narrowly.** `signinSite` matches a few identity hosts (`SIGNIN_HOSTS`, `shared/bot-browser.js:270`: Google, Microsoft, Yahoo, Apple) and a list of login paths. A service with its own sign-in form at another path is missed.
 13. **Tracked tasks are not a base for goals.** `planTracked` (`shared/coordination.js:91`) names no workers, and `createRun` sets `run.task` only when it does (`:232`), so `run.task` is null in practice.
+14. **The kill switch holds only one task kind.** `claimDue` and `requeue` (`shared/tasks.js:224`, `:237`) hold back `kind === 'bot-task'` while `state.schedulesPaused` is on. Any new kind that acts on its own (a timer, a playbook) would fire straight through the switch.
+15. **Backups leave machine state out.** `kv` is never exported, and a restore deletes `browser_requests` from the live store (`src/backup.js:57`, `:360`), while the `tasks` table travels. A queue item kept in kv and a timer kept in `tasks` would come back from a restore out of step.
+16. **Nothing runs fixed steps without a model.** Every scheduled thing is a `bot-task`, which is a model turn. A step like "count the leads by status at 18:00" has nothing to run it.
+17. **Outside marks belong to a run and its chat, not to a bot.** `outsideRead` (`shared/asks.js:250`) marks a run as soon as any page request in it is done, and `threadCarriesOutside` marks a later run whose chat holds that run's replies. A lead that shares a chat with a scout that browsed is always marked.
 
 ---
 
@@ -104,7 +120,7 @@ A new use is new data (a blueprint, a profile, a skill, a template). A new kind 
 | Device runtime | A task runs on the device and in the account the server stamped on it, never one a model named. |
 | Accounts & secrets | Passwords, codes, cookie jars and tokens never reach a model, a chat line, memory, a log or a backup. |
 | Network guard | Bots reach only allowed sites and never a private network (`agent/net-guard.mjs`, `src/reach-guard.js`). |
-| Budgets & guards | Ceilings per goal and per day that bots cannot raise; the runaway guard and kill switch over everything. |
+| Budgets & guards | Ceilings per goal and per day that bots cannot raise; the runaway guard and kill switch over everything, every task kind included. |
 | Store | Schema changes only by migration in a release. |
 | Activity log | Every outward action, approval, account change and blueprint change is logged with who, what and why. |
 | Chats, cards & push | Only the owner's own words or taps count as the owner. |
@@ -119,7 +135,7 @@ A new use is new data (a blueprint, a profile, a skill, a template). A new kind 
 | call | A connector tool | Exists | Per-bot connections (5.4) |
 | think | A model turn | Exists | Roles name a model tier |
 | timer | One thing after a delay, a window or at a time | None | New task kind (8.1) |
-| schedule | Repeat a playbook | Bot proposes, owner applies | Unchanged unless you decide otherwise (15.4) |
+| schedule | Repeat a playbook | Bot proposes, owner applies | Unchanged unless you decide otherwise (16.4) |
 | watch | Tell when a page or query changes | Pages, made by the owner | Feeds and connector queries; may start a playbook (10.4) |
 | on | Start a playbook on an event | Signed webhooks | Unchanged |
 | outbox | Queue an outward action for approval, timing and pacing | `browserRequests`, held sends | One general queue (8.2) |
@@ -169,7 +185,7 @@ A **browser account** is a named, isolated cookie space in the one Chrome: `work
 
 So:
 - **Default, `storage: "cookies"`:** a context per account, its cookies saved to `browser-accounts/<id>.jar` (folder 0700, file 0600, AES-256-GCM under a key derived with HKDF from the agent's pairing secret). Saved after every task that touched the account and every 10 minutes; restored when the context is created. The key protects a copied file, not a compromised server: the server can decrypt the pairing secret (`secret_enc`, `src/agent.js:150`), so it could derive the key too. Jars never leave the device. On re-pair the device re-encrypts its jars under the new secret before dropping the old one; if that fails, the accounts show signed out and the owner signs in again.
-- **Fallback, `storage: "profile"`:** for a service whose sign-in lives in local storage, the account gets its own Chrome on its own `--user-data-dir`, started and stopped by the shared browser, its tabs in the same tab map and its screencast through its own CDP connection. The device finds out by itself: if the keeper tab (5.3) shows a sign-in page right after a restore, the account is marked as needing a profile and a card offers the switch, naming the memory cost (about 400 MB, more on a real site).
+- **Fallback, `storage: "profile"` (deferred until a real service needs it, 15):** for a service whose sign-in lives in local storage, the account gets its own Chrome on its own `--user-data-dir`, started and stopped by the shared browser, its tabs in the same tab map and its screencast through its own CDP connection. The device finds out by itself: if the keeper tab (5.3) shows a sign-in page right after a restore, the account is marked as needing a profile. Until the fallback ships, the card says the service keeps its sign-in outside cookies and the owner signs in again after a restart. Once it ships, the card offers the switch and names the memory cost (about 400 MB, more on a real site).
 - The `default` account is today's persistent profile, so a bot with no account behaves as now.
 
 **Records.** `browserAccounts: [{id, name, site, deviceId, storage}]` live in kv `browser_accounts` in the workspace store, travel in backups as names only (never jars), and are managed by owner-only routes `GET/POST/PATCH/DELETE /api/browser-accounts`. A bot's `browserAccount` is a bot setting validated in `shared/bot-settings.js` (must name an existing account), set only by the owner or by an applied blueprint, never from a model's block, the way `shared/bot-create.js` refuses permission fields. The pure rules (validation, which account a bot uses) go in a new browser-safe module listed in `shared/assets.js`; jar crypto stays in `agent/`, since `shared/` may not import `node:` builtins. The Pages demo answers these routes as it answers connectors: it says they need the server.
@@ -187,7 +203,7 @@ A request whose bot has an account never runs in the server runtime: under `BROW
 
 ### 5.3 Tabs, keepers and session checks
 
-- A block may say `"tab": "new"` or `"tab": "<name>"`; the result names the tab. The default is the bot's main tab, so today's blocks keep working. At most 6 tabs per bot and 12 per account.
+- Phase 2 gives each bot one tab per account: today's blocks keep working unchanged. Named tabs come later, when a real use needs them: a block may say `"tab": "new"` or `"tab": "<name>"`, at most 6 tabs per bot and 12 per account.
 - A tab untouched for 10 minutes is closed after its cookies are saved.
 - One **keeper tab** per signed-in account stays on the service's home page. It does not keep a sign-in alive by itself (the cookie's own expiry and the site do that); it gives a warm page and an early warning. Every 30 minutes the device looks at each keeper; a sign-in page marks the account signed out and the sign-in card goes out (6) before a routine hits it.
 - **Sign-in detection** widens: `signinSite` keeps its hosts and paths, and a page with a visible password field also counts.
@@ -224,20 +240,37 @@ Two other places enqueue device work and keep their rules: an `agent-job` fans o
 
 ## 6. Sign-in from the phone
 
-### 6.1 Nothing typed reaches a model (Phase 0)
+### 6.1 Secrets never reach a model (Phase 0)
 
-- **Text-entry controls are never labelled by their contents.** In `SNAPSHOT` and in `riskGuard`'s `words`, `value` is read only for button-like inputs (`type` `button`, `submit`, `reset`, `image`), where it is the only label ("Pay now", "Send"); for every other `input`, `textarea` and `select`, the label comes from `aria-label`, an associated `<label>`, `placeholder` or `name`. A contenteditable element is labelled the same way, never by its `innerText`. `riskGuard` keeps classifying Pay and Send buttons exactly as now.
-- **Page text skips what was typed.** `MAIN_TEXT` (`agent/browser.mjs:80`) is the `innerText` of the main element or the body, so it carries whatever was typed into a contenteditable, and both capture paths put it in the result (`:403`, `:510`). It becomes a walk over the same root that leaves out every contenteditable subtree and form control, writing `[text field]` in their place. The `read` step (`:130`) returns `textContent` of its target; it refuses a target that is, or holds, a text-entry control or contenteditable.
+The first draft stripped every text field and every contenteditable from what a bot sees. That is too broad. It would blank an online document editor, which is one big contenteditable. It would hide a bot's own search box and its own draft, and it would hide the text of a page built as an editor. A bot needs to see those to work. What must never reach a model is **secrets**, so the rule names exactly those.
+
+**A secret field** is one of these:
+- an `input[type=password]`;
+- a field whose `autocomplete` holds `current-password`, `new-password`, `one-time-code`, `cc-number`, `cc-csc`, `cc-exp`, `cc-exp-month` or `cc-exp-year`;
+- a field carrying `data-agent-secret`, or inside an element that carries it.
+
+The device sets that attribute on the focused field at the moment the owner types through a masked field (6.2). It also sets it when the owner types anything into a field that is already secret. Many sites draw their code box as a plain `<input type=text>`; the attribute covers them.
+
+- **A secret field is never named by what is in it.** In `SNAPSHOT` (`agent/browser.mjs:83`) and in `riskGuard`'s `words` (`:113`), a secret field is labelled by `aria-label`, its `<label>`, `placeholder` or `name`, and otherwise as `password field` or `secret field`. Every other element is labelled as today. So `<input type=submit value="Pay now">` still reads "Pay now", and `riskGuard` still classifies it as a payment.
+- **Page text hides secrets wherever they appear.** `MAIN_TEXT` (`:80`) and the `read` step (`:130`) replace each secret field's content with `[hidden]` everywhere in the text. That covers a "show password" span or a page that prints back what was typed. Content under 3 characters is left alone, since replacing it would scramble ordinary words.
+- **A bot never types into a secret field.** A bot's own `type` step there is refused: "This is a password or code field. The owner signs in; a bot never types there."
 - **The hand back is covered by the same fixes**, since `handBackTakeover` passes on the `text`, `excerpt` and `elements` these produce (`src/bot-browser.js:244`).
-- **Tests** (on `tests/fake-cdp.js` and `tests/agent-browser.test.js`): a page with a filled password field, text field, textarea and contenteditable, each holding a marker string; the marker appears in none of the snapshot labels, the click label, a `riskGuard` refusal reason, the page `text` and `excerpt` of either capture path, a `read` result, or the text and elements of a hand back; after a run through the server, it appears in none of the state document, `browserRequests` results, chat lines, activity entries or `agent_tasks` results. A `<input type=submit value="Pay now">` is still classified as a payment.
+- **Written once, tested in Node.** The three page functions (`isSecretField`, `labelOf`, `hideSecrets`) live in `agent/page-secrets.mjs`. They are embedded into the page scripts with `.toString()`, the way `foldLabel` already is (`agent/browser.mjs:110`), and unit-tested with fake elements and `node:vm`. One real-browser test in `tests/agent-browser.test.js` checks the whole path.
+- **What stays visible, on purpose.** Search boxes, drafts and editors stay visible: a bot needs to read what it is working on. A password a site shows in plain text in a field that is not marked as secret cannot be recognised. Masked input (6.2) is how the owner keeps that case covered.
 
 ### 6.2 Masked fields in both takeover paths
 
 The two takeover UIs reach the page by different routes, and both get a **Password** field (`type="password"`, `autocomplete="current-password"`) and a **Code** field (`inputmode="numeric"`, `autocomplete="one-time-code"`) beside the plain one:
 
-- **Device path.** The Computer view (`shared/ui-computer-view.js`) posts input to `POST /api/browser-live/:botId/input`; the server holds it in memory (`sp.commands`, `src/browser-live.js:124`) until the device drains it on its next poll. A masked field sends `{type: "type", text, secret: true}`. `secret` means: never merged with a neighbouring type event (`shared/ui-computer.js:67` merges consecutive ones today), never echoed in the tray or a toast, and absent from every error and log line on the way (including the error line in `agent/live-channel.mjs:44`). The text is already kept only in memory and dropped when drained; `secret` adds that guarantee and the tests for it.
-- **Server-runtime path.** The takeover sheet (`shared/ui-takeover.js:159`) posts `{op: "type", index, text}` to `POST /api/browser-sessions/:session/act` (`src/routes-groups.js:321`), run by `liveAct` (`src/browser-runtime.js:204`). It gets the same masked fields and the same `secret` rule. Its contexts are throwaway, so a sign-in there does not last: accounts are signed in on the device path only.
-- **Only over a safe transport.** `secret` input is refused unless the request is HTTPS or from loopback. A small helper in `src/http.js` decides it from what is already there: the request's own scheme, or `x-forwarded-proto` only when `trustProxy()` holds (`src/http.js:41`), and the peer address from `clientIpOf` (`:44`). `PUBLIC_BASE_URL` (`publicBaseUrl`, `src/connectors.js:157`) is not enough alone, since it says where the app should be reached, not how this request came.
+- **Device path.** The Computer view (`shared/ui-computer-view.js`) posts input to `POST /api/browser-live/:botId/input`; the server holds it in memory (`sp.commands`, `src/browser-live.js:124`) until the device drains it on its next poll. A masked field sends `{type: "type", text, secret: true}`. `secret` means:
+- the event is never merged with a neighbouring type event (`shared/ui-computer.js:67` merges consecutive ones today);
+- the text is never echoed in the tray or a toast;
+- the text is absent from every error and log line on the way, including the error line in `agent/live-channel.mjs:44`;
+- the device tags the focused field with `data-agent-secret` after typing (`applyInput`, `agent/shared-browser.mjs:203`). Before any type event, it asks the page whether the focused field is already secret, and treats the event as secret if so.
+
+The text is already kept only in memory and dropped when drained; `secret` adds that guarantee and the tests for it.
+- **Server-runtime path.** The takeover sheet (`shared/ui-takeover.js:159`) posts `{op: "type", index, text}` to `POST /api/browser-sessions/:session/act` (`src/routes-groups.js:321`), run by `liveAct` (`src/browser-runtime.js:204`). It gets the same masked fields and the same `secret` rule. The route passes `secret` into the step, and the takeover handle tags the field it typed into. Its contexts are throwaway, so a sign-in there does not last: accounts are signed in on the device path only.
+- **Only over a safe transport.** `secret` input is refused unless the request is HTTPS or from loopback. A small helper in `src/http.js` decides it from what is already there: the request's own scheme, or `x-forwarded-proto` only when `trustProxy()` holds (`src/http.js:41`), and the peer address from `clientIpOf` (`:44`). `PUBLIC_BASE_URL` (`publicBaseUrl`, `src/connectors.js:157`) is not enough alone, since it says where the app should be reached, not how this request came. `tailscale serve` (`deploy/compose.tailscale.yaml`) and a local Caddy reach the app from loopback, so both pass; a remote proxy must be trusted with `TRUST_PROXY=1` and forward the scheme. The refusal is 403 "Passwords and codes are only sent over HTTPS or from this computer.", given before anything is queued.
 
 ### 6.3 The card and the wait (Phase 3)
 
@@ -268,28 +301,64 @@ The two takeover UIs reach the page by different routes, and both get a **Passwo
 - **When:** `"after": "90s"`, a window `{"min", "max"}`, or `"at"` on the owner's clock (`tz`, `keepWallTime` from `shared/schedules.js`). A window is drawn once, when the timer is made, to the second, and stored, so a restart does not move it.
 - **Then:** release an outbox item, start a playbook, wake a role with a message, or run a device task the bot may already run. A timer never does what its bot could not do directly and never skips an approval.
 - **Stored:** a new task kind `timer` in `PAYLOAD_KINDS` (`shared/tasks.js`), fired by the queue without a model. Not a `once` `bot-task`, which runs a model turn.
+- **Held by the switch.** `claimDue` and `requeue` hold every task kind that acts on its own (`timer`, `playbook`), not only `bot-task` (2.2, item 14). A test pins it for each kind.
+- **Re-checked when it fires.** A timer was made earlier, so before it acts it checks again:
+  - the goal is active and the lane is not paused;
+  - the ceilings still allow it;
+  - the account is still signed in;
+  - every grant it relied on still stands.
+
+  If any of these fails, it does nothing and posts one line saying which one.
 - **Limits:** 10 seconds to 30 days, at most 50 pending per bot and 500 per goal; each firing counts against the goal's budget.
 - **Visible:** the chat line shows a countdown with Do it now, Cancel and Edit; a bot may cancel its own; the goal page lists them all.
 
 ### 8.2 The outbox
 
-Any action that acts for you outside the app can go through it: a message, an email, a post, a comment, a form submission, a booking, a record changed in someone else's system. It grows out of two things that exist, instead of sitting beside them:
+Any action that acts for you outside the app can go through it: a message, an email, a post, a comment, a form submission, a booking, a record changed in someone else's system.
 
-- **Browser items extend `state.browserRequests`.** A browser outbox item is a browser request with a `payloadHash` (account, origin, and every step with its text) in place of `class@origin` clearance, plus the lane fields below.
-- **Connector items reuse `connectorCalls` and `argsHash`.** The held email send becomes a lane setting: a lane with `startAfter: "now"`, a fixed 30 s window and Cancel as Undo does what `src/held-sends.js` does for `gmail.send`, for any connector write. The in-memory rule stays for that case: an undo window that a restart cut is settled as not sent.
+**Where it lives.** Outbox items live for hours or days, so they get their own per-workspace table, `outbox_items`, made by migration and written by direct SQL (`src/outbox.js`), the way `attachments` is. They do not go in kv, which a backup leaves out (2.2, item 15), and not in one JSON blob rewritten on every change. The outbox is where an item waits. Running it uses what exists:
+- **A connector item** becomes a `connectorCalls` entry with its `argsHash`, run by `src/connector-runs.js` as today.
+- **A browser item** becomes a browser request, dispatched as today and linked back by `outboxId`. Its payload is a **trusted skill and its parameters** (11.4), not steps a model wrote. A model's plan made now would meet a changed page hours later. When the item is released, the device runs the skill's `check` first, and the item fails on any mismatch instead of improvising. Until skills ship, a browser item is approved and sent in one go, with no timer.
+- **The held email send** becomes a lane setting. A lane with `startAfter: "now"`, a fixed 30 s window and Cancel as Undo does what `src/held-sends.js` does for `gmail.send`, for any connector write. The in-memory rule stays for that case: an undo window that a restart cut is settled as not sent.
 
-`outbox item: {id, goalId, lane, account, action: {connector call | browser steps}, payload, payloadHash, status: draft → approved → scheduled → sending → sent | failed | unknown | cancelled, approval: {mode, by, at}, timerId, result: {url, externalId}}`
+`outbox item: {id, goalId, lane, account, action: {connector: {id, tool, args}} | {skill: {id, version, params}}, payloadHash, status: draft → approved → scheduled → sending → sent | failed | unknown | cancelled, approval: {mode, by, at}, timerId, result: {url, externalId}}`
 
-- **Approval covers the exact payload.** Editing sends it back to draft.
+- **Approval covers the exact payload.** `payloadHash` is taken over the account, the connector call or the skill version, and every parameter with its text. Editing sends the item back to draft.
+- **"Sent" needs evidence.** For a connector it is the call's success result, with an id where the tool returns one. For a browser item it is the skill's `check` after the final step, for example the sent message showing in the outbox page. Without that evidence the item is `unknown`, never `sent`.
+- **A dispatched send that times out is `unknown`.** `expireBrowserTasks` fails a dispatched request after 10 minutes. A request with an `outboxId` becomes `unknown` instead and is never sent again, because the page may have gone out.
 - **Approval modes per lane:** one card per item; one card per batch ("5 drafts for studio-mail": approve, edit or drop each); or an Always allow grant, which only the owner gives, as a power change. Payments and deletes still ask every time.
-- **Hands-off does not reach a goal's lanes.** A goal sends without asking only if its ceilings say so (default off), whatever the workspace's Hands-off switch says. Chats outside goals keep today's rules.
+- **Hands-off does not reach a goal's lanes.** A goal sends without asking only if its ceilings say so (default off), whatever the workspace's Hands-off switch says. For a run with a `goalId`, the goal's "no" also overrides any Always allow the bot already holds from chat. Chats outside goals keep today's rules.
 - **Sending is claimed.** The release marks the item `sending` in its own store update before the call, as `src/connector-runs.js` does; an item still `sending` at start-up becomes `unknown`, is never resent, and the owner is told. Paced items late after downtime go one per gap, in order, never in a burst.
 - **Results are recorded:** a sent item writes its link and id into a collection, and the blueprint may attach follow-up timers (check replies after an hour, a day, a week).
 - **Logged:** every send under `outside`, and every approval, batch answer and ceiling change under a new activity kind `goal`.
 
 ### 8.3 Lanes and the pacer
 
-A lane is one per account and channel: a gap window, a daily cap, quiet hours (`shared/quiet-hours.js`), an optional best-time preference (prefer the best hours found so far, keep a share elsewhere so early luck doesn't freeze the data), and `startAfter`: `approval` (default) or `now` (counts at once; goes when the timer has ended and it is approved). The pacer draws `fireAt = max(now + random(window), lastFireAt + random(window))`, each gap on its own. Controls on the line: Send now (skips the timer, not the approval), Cancel, Edit, Pause lane. Lanes space your actions and keep you inside a service's published limits. They are not for hiding automation: nothing here imitates a person, changes fingerprints or solves a CAPTCHA.
+A lane is one per account and channel. It has:
+- a gap window;
+- a daily cap;
+- quiet hours (`shared/quiet-hours.js`);
+- `startAfter`: `approval` (the default) or `now`. With `now`, the item counts against the cap at once, and it goes when its timer has ended and it is approved.
+
+A best-time preference (sending in the hours that worked best so far) is deferred until there are records to learn from.
+
+The pacer spaces each item from the lane's last **scheduled** send, not its last fired one: `fireAt = max(now, lastScheduledAt) + random(window)`, with each gap drawn on its own. So approving a batch of 5 chains them 5 to 15 minutes apart instead of bunching them. The pure rules (windows, caps, quiet hours, the next slot) live in a browser-safe `shared/outbox.js`, so the Pages demo runs them too (13.2). Controls on the line: Send now (skips the timer, not the approval), Cancel, Edit, Pause lane. Lanes space your actions and keep you inside a service's published limits. They are not for hiding automation: nothing here imitates a person, changes fingerprints or solves a CAPTCHA.
+
+### 8.4 The playbook runner
+
+A playbook (10.1) is a trigger plus steps. Today nothing can run a step without a model (2.2, item 16), so this is the piece that makes playbooks real.
+
+- **A new task kind `playbook`** in `PAYLOAD_KINDS`: `{goalId, playbook, version, step}`. A schedule, a timer, a watch or an event enqueues one. The kill switch holds it like a timer (8.1).
+- **Fixed steps run in code** (`src/playbooks.js`), each in its own store update with no model:
+  - `record` queries and stats;
+  - `read` of a page or feed;
+  - a `call` to a connector read;
+  - making an `outbox` item from a template the blueprint holds;
+  - setting a `timer`;
+  - a `notify`.
+- **A role step starts a role turn.** It enqueues a `bot-task` or a group run carrying the `goalId`, with the step's message. The playbook goes on to its next step when that turn ends, or right away for a step marked `"wait": false`.
+- **Each step re-checks** what a timer checks (8.1). A failure stops the playbook with one line in the goal's chat. Three failed runs in a row of one playbook pause that playbook (`FAIL_STREAK`), not the goal.
+- **Schedules stay as they are.** A playbook's `on: {daily: "18:00"}` is stored as a schedule the owner applied with the blueprint, so the rule that only the owner makes schedules holds (16.4).
 
 ---
 
@@ -312,19 +381,49 @@ Workspace
 └─ Templates/         goal templates (beside today's message templates)
 ```
 
-- **Records** follow the attachments model, not `TABLE_SHAPES`: `TABLE_SHAPES` mirrors the in-memory state document and is diffed on every write, so rows there would sit in memory and in the snapshot. A new per-workspace table `records(goal_id, collection, id, data, created_at, updated_at)` is created by migration and read and written by direct SQL through `src/records.js` and its routes. `src/backup.js` carries it as `tables.records` with a size cap and a `recordsLeftOut` list, as it does for attachments; restore checks each row through the live function; the retention sweep prunes it. Collections and field types come from the blueprint. `record` adds, updates, queries (filter, sort, limit) and computes count, sum, median, and by hour or weekday in code, so a report doesn't depend on a model's arithmetic. **Rows carry where they came from.** A row written by a run marked by the outside taint, or copied from a page, a connector result or a form, is stored with `outside: true` on every field it wrote that is not a `number` (text, url, enum and any type added later), so the mark never depends on a field's type being listed. A run that is handed a marked field is itself marked (`outsideRecord`, beside `outsideRead` and `outsideMemory`), so a stranger's words cannot reach a lead's plan through a collection. Only numbers count as inside data: a `number` field written by a deterministic step, and aggregates the `record` primitive computes in code (count, sum, median), which a run may be handed without the mark even when the rows they count came from outside, since a number cannot carry an instruction. A **group label** is different: it is the stored value of the grouped field. Grouping keeps the inside-data exception only when the key is a number, a time bucket (hour, weekday, date) or an `enum` field whose values the blueprint declares; a row whose value is not one of them is counted as `other`, never shown as written. Grouping by any other field (`text`, `url`, or a type added later) is allowed, but if any of its rows are outside-marked, the result carries the mark. The rule is written as an allow-list so a new field type is outside by default.
-- **Team notes:** one notebook per goal every team role may append to and read. A line written in a run that read outside text carries the existing outside mark, and a marked line cannot approve, grant or auto-apply anything. The company notebook stays read-only to bots.
+- **Records** follow the attachments model, not `TABLE_SHAPES`: `TABLE_SHAPES` mirrors the in-memory state document and is diffed on every write, so rows there would sit in memory and in the snapshot. A new per-workspace table `records(goal_id, collection, id, data, created_at, updated_at)` is created by migration and read and written by direct SQL through `src/records.js` and its routes. `src/backup.js` carries it as `tables.records` with a size cap and a `recordsLeftOut` list, as it does for attachments; restore checks each row through the live function. Rows are not pruned by age, since weekly metrics and de-duplication need them. They are removed when a goal is archived and you choose to delete its data, and they are capped at 20,000 rows per goal (a write past the cap is refused with one line). Each collection may name a **`key` field** (`site` for leads, say). Adding a row whose key already exists updates that row instead, so a scout that runs daily does not add the same lead twice. Collections and field types come from the blueprint. `record` adds, updates, queries (filter, sort, limit) and computes count, sum, median, and by hour or weekday in code, so a report doesn't depend on a model's arithmetic. **Rows carry where they came from.** A row written by a run marked by the outside taint, or copied from a page, a connector result or a form, is stored with `outside: true` on every field it wrote that is not a `number` (text, url, enum and any type added later), so the mark never depends on a field's type being listed. A run that is handed a marked field is itself marked (`outsideRecord`, beside `outsideRead` and `outsideMemory`), so a stranger's words cannot reach a lead's plan through a collection. Only numbers count as inside data: a `number` field written by a deterministic step, and aggregates the `record` primitive computes in code (count, sum, median), which a run may be handed without the mark even when the rows they count came from outside, since a number cannot carry an instruction. A **group label** is different: it is the stored value of the grouped field. Grouping keeps the inside-data exception only when the key is a number, a time bucket (hour, weekday, date) or an `enum` field whose values the blueprint declares; a row whose value is not one of them is counted as `other`, never shown as written. Grouping by any other field (`text`, `url`, or a type added later) is allowed, but if any of its rows are outside-marked, the result carries the mark. The rule is written as an allow-list so a new field type is outside by default.
+- **Team notes:** one notebook per goal every team role may append to and read, at most 2,000 lines (the oldest are dropped first, and the stand-up says so). A line written in a run that read outside text carries the existing outside mark, and a marked line cannot approve, grant or auto-apply anything. The company notebook stays read-only to bots.
 - **Rule of the place:** nothing important lives only in a chat. A role added tomorrow can do its job from these places alone.
 
 ### 9.2 Goals
 
-A goal is new state, not a reuse of `run.task` (2.2, item 13): `{id, title, leadBotId, metrics, deadline, status, ceilings, blueprintVersion}`. You make one in chat or the lead proposes one; either way your Apply sets its ceilings. Its **stand-up** is the daily briefing (`shared/briefing.js`) narrowed to the goal: each role writes one line to the notes, and the lead posts one status from real records (progress against metrics, blueprint changes, what's next). You can move it or turn it off.
+A goal is new state, not a reuse of `run.task` (2.2, item 13): `{id, groupId, title, brief, leadBotId, metrics, deadline, status, ceilings, blueprintVersion}`. You make one in chat or the lead proposes one; either way your Apply sets its ceilings.
+
+**One goal is one group.** The app already has groups: a set of bots with a lead, a group chat, group runs and a profile page. A goal reuses all of it instead of adding a second kind of team:
+- the goal's roles are the group's bots;
+- the group chat is the goal's home, where the stand-up, outbox cards and timer lines appear;
+- the group's profile page gains the goal's brief, metrics, ceilings, records, outbox and timers (13.1).
+
+A group without a goal is a plain team, as today. **A bot belongs to at most one goal** (my call for v1). That keeps budgets and account pins unambiguous, and it means every run and model call of a goal's bot carries a `goalId`, so per-goal counting is exact. A bot can be moved between goals by the owner, and the move is logged.
+
+Its **stand-up** is the daily briefing (`shared/briefing.js`) narrowed to the goal. It runs under its own chat key, `goal:<id>:standup`, never in the group chat, so it does not inherit the scouts' marks (2.2, item 17). It is handed only inside data:
+- code-computed numbers and `enum` group labels from records (9.1);
+- outbox and timer counts;
+- budget left;
+- notes lines that carry no outside mark. Marked lines are only counted ("3 notes from runs that read outside pages").
+
+Its one status line (progress against metrics, what changed, what's next) is posted to the group chat. You can move it or turn it off.
 
 ### 9.3 Ceilings and budgets
 
 Set once per goal, read-only to bots: max bots; model runs and tokens per day; outward actions per lane per day; the minimum gap per lane; which accounts, connections, sites and model tiers; quiet hours; whether anything may send without asking (default no); and whether signed-in pages may be seen as images. They sit beside `state.limits` and use the same `BACKSTOP` idea: only the owner raises a ceiling, and never past a backstop.
 
-The server counts each goal's model runs and tokens (from `src/usage.js`), outward actions and timers per day. When one runs out it pauses **that goal's** playbooks, not the app, with a card to raise it or wait until tomorrow. The runaway guard and the kill switch still hold over everything.
+The server counts each goal's model runs and tokens (from `src/usage.js`, by the `goalId` every run and model call carries), outward actions and timers per day. When one runs out it pauses **that goal's** playbooks, not the app, with a card to raise it or wait until tomorrow. The runaway guard and the kill switch still hold over everything, every task kind included. Ceilings are edited on the goal's page (13.1), and every change is logged under `goal`.
+
+### 9.4 Storage, backups and restore
+
+| What | Where | In backups | On restore |
+|---|---|---|---|
+| Goals, their ceilings and blueprint versions (at most 50 versions per goal; older ones dropped first) | kv `goals`, carried as owner settings (`OWNER_SETTINGS`) | Yes | As saved; every goal comes back **paused**, so nothing acts until you resume it |
+| Records | table `records` | Yes, capped (`recordsLeftOut`) | Each row checked |
+| Notes | table `records`, collection `_notes` | Yes | As saved |
+| Outbox items | table `outbox_items` | Yes | `sending` becomes `unknown`; `scheduled` goes back to `approved` with its timer cancelled; drafts stay drafts |
+| Timers and playbook tasks | `tasks` | Yes | Cancelled, like `interruptRestoredRun` does for runs; the goal's resume re-arms them from the outbox and playbooks |
+| Service profiles and skills | kv `services`, owner settings | Yes | As saved |
+| Browser accounts | kv `browser_accounts` | Names only, never jars | Shown signed out until a keeper reports |
+| Sign-ins waiting | kv `signin_pending` | No (machine state) | Dropped; a keeper raises a new card |
+
+Everything new reaches the state document through a migration (schema v15 onward, one per phase that adds a table or kv key). `TABLE_SHAPES` gains nothing, because records and outbox items are not in the state document, and the snapshot carries only counts and the newest few of each.
 
 ---
 
@@ -347,14 +446,17 @@ One versioned JSON document per goal (trimmed):
     {"key": "count", "on": {"daily": "18:00"}, "steps": [{"record": "leads", "stat": "count", "by": "status"}]}
   ],
   "lanes": [{"key": "studio-mail", "gap": {"min": "5m", "max": "15m"}, "dailyCap": 10, "quiet": "19:00-08:30", "startAfter": "approval"}],
-  "collections": [{"name": "leads", "fields": {"name": "text", "site": "url", "contact": "text", "district": {"enum": ["north", "centre", "south", "east", "west"]}, "status": {"enum": ["new", "qualified", "emailed", "replied"]}, "why": "text"}}],
-  "experiments": [{"key": "subject-line", "arms": ["question", "plain"], "metric": "reply_rate", "minSample": 20}]
+  "collections": [{"name": "leads", "key": "site", "fields": {"name": "text", "site": "url", "contact": "text", "district": {"enum": ["north", "centre", "south", "east", "west"]}, "status": {"enum": ["new", "qualified", "emailed", "replied"]}, "why": "text"}}]
 }
 ```
 
-Roles become bots, and each role's `reportsTo` sets the bot's existing `reportsTo` setting. Playbooks are a trigger (`on`: schedule, timer, watch, event, record change) plus steps.
+Roles become the group's bots, and each role's `reportsTo` sets the bot's existing `reportsTo` setting. Playbooks are a trigger (`on`: schedule, timer, watch or event) plus steps, run by the playbook runner (8.4). Two things are deferred until goals have run for a while: experiments (comparing two ways of doing a step by a metric) and record-change triggers.
+
+The pure rules live in a browser-safe `shared/blueprints.js`, so the Pages demo can check, compare and sort a change (13.2): the schema, references, the diff and its sorting.
 
 ### 10.2 How a change is judged
+
+This ships in two steps (15). **First, every change is a card you apply.** The lead may propose; only your Apply changes the team. **Later, free changes apply by themselves.** That step adds the sorting below, once the stand-up has run long enough to show it plans from inside data.
 
 The lead (or a role the blueprint allows) sends a `blueprint` block. The server:
 
@@ -364,13 +466,13 @@ The lead (or a role the blueprint allows) sends a `blueprint` block. The server:
 
 | Kind | Examples | What happens |
 |---|---|---|
-| Free | A role's job text; a playbook using primitives the team already holds; a wider lane gap; a new collection or field; an experiment; retiring a role; a permissionless role within the bot cap | Applies by itself, logged with its reason, in the next stand-up, one-tap undo |
-| Power | A new schedule, timer pattern or watch (see 15.4); a new account, connection, site or permission; any Always allow; a higher ceiling; a gap below your floor; deleting a collection's data; touching another goal | A card with Apply, Edit or Decline, showing only the diff |
+| Free | A role's job text; a playbook using primitives the team already holds; a wider lane gap; a new collection or field; retiring a role; a permissionless role within the bot cap | Applies by itself (second step only), logged with its reason, in the next stand-up, one-tap undo |
+| Power | A new schedule, timer pattern or watch (see 16.4); a new account, connection, site or permission; any Always allow; a higher ceiling; a gap below your floor; deleting a collection's data; touching another goal | A card with Apply, Edit or Decline, showing only the diff |
 | Never | Core code, the permission registry, approval rules, guards, secrets | Refused, with one line why |
 
-4. **Outside text holds it.** A free change written by a run marked by the existing taint (`tainted`, `outsideRead`, `outsideInput`, `outsideMemory`) becomes a card instead. A stranger's mail, page or form entry cannot rewrite a role's job. A lead that plans from numbers and code-computed aggregates (inside data, 9.1) can still change its team without asking; a lead handed the text of an outside-marked row cannot.
+4. **Outside text holds it.** A free change written by a run marked by the existing taint (`tainted`, `outsideRead`, `outsideInput`, `outsideMemory`, `outsideRecord`) becomes a card instead. A stranger's mail, page or form entry cannot rewrite a role's job. Marks follow a run and its chat (2.2, item 17), so only a change made in the stand-up's own run (9.2) can be free. That run is handed inside data only, so it stays unmarked. A change written anywhere else, the group chat included, is a card.
 5. **Applied on the server.** A new owner-only `POST /api/goals/:id/apply` validates the whole diff again, applies it in one store update and logs it under `goal`. Setup cards today are applied by the UI calling routes one by one; a blueprint is too many parts for that.
-6. **Rollback and pace.** Every version is kept and any can be restored in one tap. If a new version's playbooks fail 3 times in a row (`FAIL_STREAK`), the server goes back to the last good one and says so. At most 5 free changes per goal per day, and an experiment cannot be ended before its minimum sample.
+6. **Rollback and pace.** The newest 50 versions are kept, and any of them can be restored in one tap. A playbook that fails 3 runs in a row (`FAIL_STREAK`) is paused, and the stand-up says so. If the last change to it was free, that change alone is undone. A change you applied is never undone by itself, because a flaky site would otherwise revert your decisions. At most 5 free changes per goal per day.
 
 ### 10.3 Templates
 
@@ -413,7 +515,9 @@ Actions use one vocabulary across every service, so patterns never name a platfo
 - **Money and removal:** `purchase`, `pay`, `delete`
 - **Upkeep:** `sign_in_check`
 
-A digest says `read_list`; a pipeline says `create`; outreach says `message`. The profile says how that is done on this service. A per-site rule the owner set (`shared/asks.js`) always wins over a profile's `allowed`.
+A digest says `read_list`; a pipeline says `create`; outreach says `message`. The profile says how that is done on this service.
+
+**`allowed` only ever narrows.** It is not a grant. The asks and grants in `shared/asks.js` decide first, as they do today. A profile's `allowed` can only make an action stricter: `never` refuses it, and `approve-each` or `ask-each` asks even where a grant would let it go. `yes` changes nothing, so a run that read outside text and wrote `"update": "yes"` into a profile has gained nothing.
 
 ### 11.2 The access ladder
 
@@ -428,7 +532,7 @@ Per action the team takes the highest rung that exists and that the service's ru
 
 ### 11.3 What needs you
 
-Bots may create and fill a profile. Three fields are powers: which account a service uses, `allowed` for any action toward people or money, and pacing faster than your floor. Those change only through your Apply.
+Bots may create and fill a profile. Since `allowed` only narrows, the powers are two: which account a service uses, and pacing faster than your floor. Those change only through your Apply. Loosening an `allowed` (from `never` to `approve-each`, say) is also a card, so a bot cannot undo a limit you set.
 
 ### 11.4 Skills
 
@@ -442,8 +546,10 @@ When a bot works out how to do an action on a service without an API, it saves t
 
 - Steps name things by meaning ("the price next to Add to basket"), not by position, so small layout changes don't break them.
 - Draft → trial (first runs checked against `check`) → trusted → broken after 2 failures in a row → the bot that hit it repairs it as a new version. Old versions are kept.
-- Steps use only primitive vocabulary, can't reach a domain outside the profile, and a step toward people or money becomes an outbox item. A page's text never adds steps, so a stranger can't plant an action in a skill.
-- Every goal using the service reuses its skills.
+- Steps use only primitive vocabulary, can't reach a domain outside the profile, and a step toward people or money becomes an outbox item.
+- **A skill is always written after reading the page, so it is always written by a marked run.** "A page's text never adds steps" cannot be enforced by reading the steps, so it is enforced by who may trust them. A skill whose steps only read (go, find, save) may become trusted by working. A skill with any step that clicks, types or submits stays a draft until you approve it once. The approval card shows its steps in plain words, and every new version asks again.
+- Every goal using the service reuses its trusted skills.
+- The lifecycle above (trial runs, broken after 2 failures, repair as a new version) comes after the first goals run. The first version has draft and trusted only, and the owner removes a broken one.
 
 ---
 
@@ -477,7 +583,55 @@ Gaps that need something new but no core change: a phone chat channel for approv
 
 ---
 
-## 13. A walk-through: finding sales leads
+## 13. What you see, the demo and the health watch
+
+### 13.1 Where each thing appears
+
+The app stays chat-first. Nothing here adds a new top-level place; each piece goes where its kind of thing already lives.
+
+| Thing | Where | Built on |
+|---|---|---|
+| A goal | The group's chat and its profile page. The profile gains Brief, Metrics, Ceilings (edited here), Records, Outbox, Timers and Blueprint versions. | The group profile in `shared/ui-profile.js`, `shared/ui-profile-model.js` |
+| The stand-up | One line a day in the group chat, from the stand-up run (9.2) | Bot replies in `shared/ui-feed.js` |
+| An outbox card | In the group chat. One item: Approve, Edit, Drop. A batch: one card listing each draft with its own Approve, Edit or Drop, and Approve all. The account and lane are named on the card. | The ask card in `shared/ui-asks.js` |
+| A timer line | A new feed item kind in `shared/ui-feed.js`: label, a countdown, and Do it now, Cancel, Edit. The account it will act in is named. | The progress pill's live updates in `shared/ui-company.js` |
+| A sign-in card | The bot's chat and the group chat, with Take control, as today | The `signin` setup card |
+| A blueprint change | A card in the group chat showing only the diff, with Apply, Edit, Decline | Setup cards, applied by `POST /api/goals/:id/apply` |
+| A rules summary to confirm | A card per service, with the summary, its links and its date | Setup cards |
+| A skill that acts, to approve | A card with the steps in plain words | Setup cards |
+| Browser accounts | Settings → Accounts, beside Connectors: name, site, device, signed in or out, Sign in | `shared/ui-connect.js` for the shape |
+| A bot's account and device | The bot's profile, owner-only | The bot settings route |
+| What needs you | `needsYou` (`shared/ui-model.js:22`) also counts outbox drafts, blueprint and skill cards, and signed-out accounts a goal needs | The count on the Chats home |
+| The audit trail | Activity, with the new `goal` kind beside `outside` and `perm` | `shared/activity-log.js` |
+
+### 13.2 The Pages demo
+
+AGENTS.md says the UI never branches on the build to drive a run, so the demo gets the same routes from `shared/local-api.js`. The pure rules live in browser-safe modules that both sides run:
+- `shared/goals.js`: ceilings and counting;
+- `shared/records-rules.js`: queries, stats and outside marks;
+- `shared/outbox.js`: the pacer and lanes;
+- `shared/blueprints.js`: checking, comparing and sorting changes.
+
+In the demo:
+- records sit in the workspace snapshot;
+- an outbox send shows as "sent (demo)" and nothing leaves the page;
+- timers run on the page's clock while it is open;
+- devices, browser accounts, reading and sign-in answer "this needs the server", as connectors do today.
+
+Each new module goes into `shared/assets.js`.
+
+### 13.3 The health watch
+
+`healthIssues` (`src/health-watch.js:37`) gains three checks:
+- an outbox item `sending` for more than 15 minutes;
+- any item `unknown` that you have not looked at;
+- a timer more than 15 minutes past due while nothing holds it.
+
+They follow the existing rules: two checks in a row before an alert, said once, and a notice when it clears. The kill switch's hold and a paused goal are held keys (`heldKeys`), not alerts.
+
+---
+
+## 14. A walk-through: finding sales leads
 
 "Find 20 qualified leads a week for my design studio and draft a first email to each."
 
@@ -486,58 +640,67 @@ Gaps that need something new but no core change: a phone chat channel for approv
 3. **Pattern.** Pipeline into draft and approve.
 4. **Blueprint.** Scout (cheap model, signed out, saves `read_listing@1` as a skill), qualifier (reads each company's own site and records `why`), writer (drafts into the outbox on lane `studio-mail`, 5 to 15 minutes apart, 10 a day, quiet after 19:00), lead (stand-up at 18:00 from `records:leads`).
 5. **Apply.** One card: the brief, four roles, the mailbox, "10 emails a day at most, each approved by you", a daily budget of 300 model runs.
-6. **Work.** Each morning the scout adds rows; the qualifier marks them; in the afternoon you approve a batch of drafts with a few taps and the lane sends them over the evening. After two weeks the lead's stand-up is handed a code-computed count of replies by `district`, an `enum` the blueprint declares (so inside data, though the rows came from outside pages) and shifts the scout's job text toward the district with most replies. That grants nothing new and no outside text reached the lead, so it applies by itself and shows in the stand-up. Had the lead read the rows' `why` text, the same change would come to you as a card. A second mailbox or 30 sends a day would be a card.
+6. **Work.** Each morning the scout adds rows; the qualifier marks them; in the afternoon you approve a batch of drafts with a few taps and the lane sends them over the evening. After two weeks the stand-up run (its own key, 9.2) is handed a code-computed count of replies by `district`. `district` is an `enum` the blueprint declares, so that count is inside data even though the rows came from outside pages. The lead shifts the scout's job text toward the district with most replies. In the first release that is a card you apply in one tap. Once free changes ship, it applies by itself and shows in the stand-up, because it grants nothing new and no outside text reached that run. Had the lead proposed it from the group chat, where the scouts' replies sit, or after reading the rows' `why` text, it would stay a card. A second mailbox or 30 sends a day is always a card.
 
 Swap the directory for a tender portal, a marketplace, a CRM, a code host or a social network and steps 1 to 6 are the same. Only the profile, its skills and the pattern differ.
 
 ---
 
-## 14. Build order
+## 15. Build order
 
-Rough focused days for one person who knows the code, tests included. Each phase ends green (`check`, `test`, `build:pages`, the UI smokes where UI changed) and is its own PR.
+Rough focused days for one person who knows the code, tests included. Each phase ends green (`check`, `test`, `build:pages`, the UI smokes where UI changed) and is its own PR. Each also names one thing you can see working, which is its definition of done.
 
-| Phase | What | Days | Why here |
+| Phase | What | Days | Done when you can see |
 |---|---|---|---|
-| 0. Typed-text leak | 6.1 and 6.2: labels without field contents in `SNAPSHOT` and `riskGuard`; page text and `read` without editable contents; the same for the hand back; masked Password and Code fields in both takeover paths with `secret`; `secret` only over HTTPS or loopback; the tests listed | 1 to 2 | A live leak; ships alone |
-| 1. Devices and parallel work | 5.5: `chooseDevice` and its table; bot device pins; a queue per bot on the device and in the server runtime; a takeover parks one bot; worker pool, per-engine cap, busy count; the tests listed | 2 to 3 | Accounts need a known device, and they are little use while one bot blocks all |
-| 2. Browser accounts | 5.1 to 5.3: account records, routes and backups; bot pinning; a context per account; encrypted jars and re-pair; stamping at four hops; never in the server runtime; tabs, reaper, keepers, heartbeat state, wider sign-in detection; the profile fallback and its card | 4 to 6 | Fixes mixed accounts |
-| 3. Sign-in from the phone | 6.3: the server-posted card per account with push; the `awaiting_ask` park and `signin` request status; re-dispatch on hand back | 2 | Makes 2 usable without the VM |
-| 4. Connector accounts | 5.4: several connections per app; per-bot pins | 2 | Same rule for API accounts |
-| 5. Timers, outbox, lanes | 8: the `timer` task kind; outbox items on `browserRequests` and `connectorCalls`; `payloadHash`; batch cards; claimed sends and `unknown`; held sends as a lane; the pacer; the `goal` activity kind | 4 to 5 | The general primitive for anything that acts outside |
-| 6. Reading | 7: plain first; content types; redirects; `look`, `images`, image links; images on handoffs | 3 to 4 | Independent; can run beside 4 or 5 |
-| 7. Records and notes | 9.1: the records table, migration, backups, retention, stats; outside marks on record fields and `outsideRecord` on runs handed them; the team notebook with outside marks | 2 to 3 | Goals and every metric need them |
-| 8. Goals, ceilings, budgets | 9.2, 9.3: goal state; ceilings beside `state.limits`; per-goal daily counting and pause; the stand-up | 3 to 4 | Bounds everything after it |
-| 9. Blueprints | 10: schema, validation, dry run and step resolver, diff and sorting, the outside hold, `POST /api/goals/:id/apply`, versions, auto-revert, watch and event playbooks | 5 to 7 | The self-redesign layer |
-| 10. Services and skills | 11: profiles, the action vocabulary, the ladder, rule summaries you confirm, skills and their lifecycle; intake and the work loop in every lead and role | 4 to 6 | Any service without a hand-built integration |
-| 11. Capability card | 4.3 | 1 | After what it describes exists |
-| 12. Goal templates | 10.3: format, Apply, a few built-ins (lead finding, support triage, price watch, repo upkeep) | 2 to 3 | Uses everything above |
+| 0. Secrets never reach a model | 6.1, 6.2: the secret-field rule in `SNAPSHOT`, `riskGuard`, page text and `read`; bots refused in secret fields; masked Password and Code fields in both takeover paths; the device's tag; `secret` only over HTTPS or loopback. Plan: `docs/superpowers/plans/2026-11-26-phase-0-secrets-never-reach-a-model.md` | 1 to 2 | You sign in to a site through the Computer view's Password field; the bot's next turn and its stored page say `[hidden]` where the password was |
+| 1. Devices and parallel work | 5.5: `chooseDevice` and its table; bot device pins; a queue per bot on the device and in the server runtime; a takeover parks one bot; worker pool, per-engine cap, busy count | 2 to 3 | Two bots read two sites at the same time, and taking over one does not stop the other |
+| 2. Browser accounts | 5.1 to 5.3 without the profile fallback or named tabs: account records, routes and backups; bot pinning; a context per account; encrypted jars and re-pair; stamping at four hops; never in the server runtime; reaper, keepers, heartbeat state, wider sign-in detection | 5 to 7 | Two bots signed in to two accounts of one site, each seeing its own; both still signed in after the device restarts |
+| 3. Sign-in from the phone | 6.3: the server-posted card per account with push; the `awaiting_ask` park and `signin` request status; re-dispatch on hand back | 2 | A keeper finds an account signed out, your phone buzzes, you sign in from it, and the waiting run carries on by itself |
+| 4. Goal v0 | One goal as one group (9.2), brief, ceilings and per-goal budget with `goalId` on runs and model calls; records with a `key`, outside marks and stats (9.1); notes; the stand-up under its own key; the outbox in its table with approve-each and batch cards for connector items (8.2); the `timer` and `playbook` task kinds held by the kill switch, with re-checks (8.1, 8.4); one lane per account; storage and restore (9.4); the `goal` activity kind; the health checks (13.3); the goal's page and cards (13.1); capability card lines for what exists (4.3). The team is edited by you. | 10 to 12 | A lead-finding goal runs for a day: rows appear without duplicates, you approve 3 drafts in one card, they go out 5 to 15 minutes apart, and a restart in the middle shows `unknown` for the one being sent and sends nothing twice |
+| 5. Connector accounts | 5.4: several connections per app; per-bot pins | 2 | Two mailboxes connected, one bot pinned to each |
+| 6. Reading | 7: plain first; content types; redirects; `look`, `images`, image links; images on handoffs | 3 to 4 | A bot reads a PDF and a JSON feed, and sees a page as an image when you allow it |
+| 7. Blueprints you apply | 10.1, 10.2 first step: schema, `shared/blueprints.js`, validation, dry run and step resolver, the diff card, `POST /api/goals/:id/apply`, versions, pausing on failures; watch and event playbooks (10.4) | 6 to 8 | The lead proposes adding a role; you see only the diff, apply it, and the new bot joins the group |
+| 8. Services and skills | 11: profiles, the action vocabulary, the ladder, rule summaries you confirm, read skills trusted by working, acting skills approved once; browser outbox items as skills; intake (4.1) writing the first blueprint | 5 to 7 | You say a goal in a sentence and get one Apply card naming the services, their rules and the team |
+| 9. Free changes | 10.2 second step: sorting free, power and never; the stand-up's own-key rule; 5 a day; undo of free changes | 3 to 4 | The stand-up shifts a role's job by itself from code-computed numbers, and the change shows with Undo |
+| 10. Goal templates | 10.3: format, Apply, a few built-ins (lead finding, support triage, price watch, repo upkeep) | 2 to 3 | You install "price watch" from a template with one card |
+| Later, when a real use asks | The profile fallback (5.1), named tabs (5.3), experiments, record-change triggers, the best-time preference, the skill repair lifecycle | as needed | |
 
-About 35 to 48 days in all. Phases 0 to 3 (9 to 13 days) fix what was reported: mixed accounts, bots blocking each other, and signing in from the phone. Phase 0 goes first and alone, because it closes a leak in today's code. Every new `shared/` module is added to `shared/assets.js` and followed by `npm run build:pages` (AGENTS.md, invariant 1).
-
----
-
-## 15. Decisions for you
-
-None of these blocks Phases 0 to 4.
-
-1. **The publishing boundary (Phase 5).** `shared/contracts.js` says no contract can grant automated publishing, yet a click on Post with an Always allow grant already goes out. My suggestion: say instead "every outward action goes through an ask or the outbox, with an approval or a grant you gave", in that comment and the README. If you'd rather keep publishing impossible without a per-item yes, lanes never offer Always allow.
-2. **Sending without asking inside a goal (Phase 5).** Off by default whatever Hands-off says (8.2). If you want Hands-off to carry into goals, that is one ceiling default to flip.
-3. **The profile fallback's memory (Phase 2).** About 400 MB per account that needs its own Chrome. The card asks each time; the alternative is to refuse such services.
-4. **Schedules and watches made by a team (Phase 9).** Today every bot-proposed schedule waits for your Apply, and only you make watches. I've kept that: a new schedule or watch in a blueprint is a power change. Making them free within a goal's budget would let a team run itself more, and widens what bots may do without you.
+About 41 to 54 days in all. Phases 0 to 3 (10 to 14 days) fix what was reported: mixed accounts, bots blocking each other, and signing in from the phone. Phase 4 then gives a goal you can use for lead finding or support triage after 20 to 26 days, instead of after all of it. Phase 0 goes first and alone, because it closes a leak in today's code. Phases 5 and 6 can run beside 4. Every new `shared/` module is added to `shared/assets.js` and followed by `npm run build:pages` (AGENTS.md, invariant 1).
 
 ---
 
-## 16. Risks
+## 16. Decisions for you
+
+None of these blocks Phases 0 to 3.
+
+1. **The publishing boundary (Phase 4).** `shared/contracts.js` says no contract can grant automated publishing, yet a click on Post with an Always allow grant already goes out. My suggestion: say instead "every outward action goes through an ask or the outbox, with an approval or a grant you gave", in that comment and the README. If you'd rather keep publishing impossible without a per-item yes, lanes never offer Always allow.
+2. **Sending without asking inside a goal (Phase 4).** Off by default whatever Hands-off says (8.2). If you want Hands-off to carry into goals, that is one ceiling default to flip.
+3. **The profile fallback's memory (later).** About 400 MB per account that needs its own Chrome. It is deferred until a service you use needs it; then the card asks each time, or such services are refused.
+4. **Schedules and watches made by a team (Phase 7).** Today every bot-proposed schedule waits for your Apply, and only you make watches. I've kept that: a new schedule or watch in a blueprint is a power change. Making them free within a goal's budget would let a team run itself more, and widens what bots may do without you.
+
+**Calls I made, which you can change:**
+- a bot belongs to at most one goal (9.2);
+- only the stand-up's own run may make a free change (10.2);
+- the first release of blueprints is apply-only;
+- a failing playbook is paused, not reverted;
+- records are capped at 20,000 rows per goal and kept until the goal is deleted;
+- the profile fallback, named tabs, experiments and record-change triggers wait for a real use.
+
+---
+
+## 17. Risks
 
 - **Cookie jars are as valuable as passwords.** Encrypted, 0600, never in a backup or upload, wiped with the account; the key protects a copied file, not a compromised server.
 - **Some services keep sign-in outside cookies** [measured: local storage and IndexedDB don't restore]. The keeper check finds it, and the profile fallback costs memory.
 - **Acting from the wrong account.** Four stamped hops, a device check before every step, and the account named on every card and countdown.
-- **Self-redesign going wrong within its powers.** Ceilings, the dry run, the outside hold, 5 free changes a day, auto-revert, one-tap rollback, every change in the stand-up.
+- **Self-redesign going wrong within its powers.** Apply-only first; then ceilings, the dry run, the outside hold, free changes only from the stand-up's own run, 5 a day, failing playbooks paused, one-tap rollback, every change in the stand-up.
 - **Prompt injection through outside content.** Marked as outside, can't approve, grant or auto-apply, and runs it starts ask before every send.
 - **Rules and terms change.** Summaries are dated and re-read; unknown means approve-each.
 - **More parallel work, more spend.** Per-goal budgets, deterministic steps, cheap tiers for routine roles, spend per goal on the usage page.
 - **Screenshots of signed-in pages** go to the model provider: opt-in, once per page, off by default for signed-in pages.
-- **Store growth.** Records in their own table, outside the state document, with per-goal caps and retention.
+- **Store growth.** Records and outbox items in their own tables, outside the state document; 20,000 rows per goal, 2,000 note lines, 50 blueprint versions.
+- **A restore in the middle of a send.** `sending` comes back `unknown`, scheduled items come back approved but not timed, every goal comes back paused (9.4).
+- **The kill switch missing a new kind.** Every task kind that acts on its own is held, with a test per kind (8.1).
 
 ---
 

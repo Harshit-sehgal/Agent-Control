@@ -234,16 +234,14 @@ work should be added as a fresh section.
 - [ ] **Move the server from the laptop to the Oracle VM** (it runs on the laptop first)
 
 ## Phase AA — goals, services and self-organising teams (design: `docs/superpowers/specs/2026-11-26-goals-services-teams-design.md`)
-- [ ] 0. Typed-text leak: no field `value` in the control list, click labels or `riskGuard` reasons; masked Password and Code fields with `secret` in both takeover UIs; `secret` refused over plain HTTP
-- [ ] 1. Devices and parallel work: one `pickDevice` with pinning, per-tab queues, a takeover parks one tab, a device worker pool
-- [ ] 2. Browser accounts: a context per account with encrypted cookie jars, stamped at four hops, never in the server runtime; tabs, idle reaper, keeper tabs, session check, profile fallback
+- [ ] 0. Secrets never reach a model: secret fields (password, one-time code, card, or tagged by the device) never labelled by their contents and `[hidden]` in page text; bots never type into them; masked Password and Code fields with `secret` in both takeover UIs; `secret` refused over plain HTTP (plan: `docs/superpowers/plans/2026-11-26-phase-0-secrets-never-reach-a-model.md`)
+- [ ] 1. Devices and parallel work: one `chooseDevice` with pinning, per-bot queues, a takeover parks one bot, a device worker pool
+- [ ] 2. Browser accounts: a context per account with encrypted cookie jars, stamped at four hops, never in the server runtime; idle reaper, keeper tabs, session check
 - [ ] 3. Sign-in from the phone: a server-posted card with push, parked runs that resume after hand back
-- [ ] 4. Connector accounts: several connections per app, pinned per bot
-- [ ] 5. Timers, outbox and lanes: a `timer` task kind, exact-payload approval for browser actions, batch cards, claimed sends with `unknown`, the pacer, every approval in the activity log
+- [ ] 4. Goal v0: one goal as one group with brief, ceilings and budget; records with a key and outside marks; notes; the stand-up under its own key; the outbox table with approve-each and batch cards; `timer` and `playbook` task kinds held by the kill switch; lanes; restore rules; the `goal` activity kind and health checks
+- [ ] 5. Connector accounts: several connections per app, pinned per bot
 - [ ] 6. Reading: plain first, content types, safe redirects, `look` and images, images on handoffs
-- [ ] 7. Records and team notes: a records table with stats, a team notebook with outside marks
-- [ ] 8. Goals, ceilings and budgets: goals from tracked tasks, per-goal daily counting and pause, the stand-up
-- [ ] 9. Blueprints: validation, dry run, free / power / never, the outside hold, a server apply route, versions and auto-revert
-- [ ] 10. Services and skills: profiles, the action vocabulary, the access ladder, confirmed rule summaries, skills
-- [ ] 11. Capability card per bot
-- [ ] 12. Goal templates
+- [ ] 7. Blueprints you apply: validation, dry run, the diff card, a server apply route, versions, failing playbooks paused; watch and event playbooks
+- [ ] 8. Services and skills: profiles whose `allowed` only narrows, the action vocabulary, the access ladder, confirmed rule summaries, read skills and approved acting skills; intake
+- [ ] 9. Free changes: free / power / never, only from the stand-up's own run, 5 a day, undo
+- [ ] 10. Goal templates
