@@ -221,7 +221,7 @@ export function createPairing(store, workspaceId, {label, createdBy, permissions
 }
 
 /** Exchange a pairing code for agent credentials. */
-export function redeemPairing(store, {code, name, permissions = []}) {
+export function redeemPairing(store, {code, name, permissions = [], features}) {
   const row = store.get('SELECT * FROM pairing_codes WHERE code_hash=?', sha256(String(code || '')));
   if (!row) fail('This pairing code is not valid.', 401);
   if (row.consumed_at) fail('This pairing code has already been used.', 409);
@@ -242,6 +242,8 @@ export function redeemPairing(store, {code, name, permissions = []}) {
     store.run('INSERT INTO agents (id,workspace_id,name,secret_hash,secret_enc,status,permissions,paired_by,paired_at) VALUES (?,?,?,?,?,?,?,?,?)',
       agentId, row.workspace_id, cleanText(name, 120) || 'Local agent', sha256(secret), stored, 'paired', JSON.stringify(granted), row.created_by, now());
   });
+  // What its app can do, so work that needs a feature is not refused before the first heartbeat. An older app sends none.
+  if (features !== undefined) recordAgentFeatures(store, agentId, features);
   return {agentId, secret, workspaceId: row.workspace_id, permissions: granted, pollIntervalMs: 30000};
 }
 

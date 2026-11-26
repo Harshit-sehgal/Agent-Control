@@ -122,7 +122,7 @@ async function pair(argv) {
   const permissions = requested === null ? TASK_KINDS : requested.split(',').map(s => s.trim()).filter(Boolean);
   const name = argValue(argv, '--name') || `${process.env.COMPUTERNAME || process.env.HOSTNAME || 'device'}-agent`;
   const url = new URL(server.replace(/\/+$/, '') + '/api/agent/pair');
-  const body = JSON.stringify({code, name, permissions});
+  const body = JSON.stringify({code, name, permissions, features: DEVICE_FEATURES});
   let res;
   try { res = await post(url, {headers: {'Content-Type': 'application/json'}, body}); }
   catch (e) { fail(e.message); }

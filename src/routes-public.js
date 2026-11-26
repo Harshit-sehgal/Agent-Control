@@ -190,7 +190,7 @@ export function publicRoutes(router, {auth, workspaces, version}) {
     // same answer a wrong code always got.
     const store = workspaces.holding('SELECT 1 AS x FROM pairing_codes WHERE code_hash=?', sha256(b.code)) || workspaces.get(DEFAULT_WORKSPACE);
     const pair = async () => {
-      const result = agent.redeemPairing(store, {code: b.code, name: b.name, permissions: b.permissions});
+      const result = agent.redeemPairing(store, {code: b.code, name: b.name, permissions: b.permissions, features: b.features});
       await store.update(s => { activity(s, 'agent', `Paired local agent "${String(b.name || 'Local agent').slice(0, 60)}".`, {agentId: result.agentId}); });
       return reply(201, result);
     };

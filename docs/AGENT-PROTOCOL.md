@@ -11,10 +11,15 @@ The control plane never dials your device. Every request in this protocol is
    stored only as a SHA-256 hash, so a database leak cannot redeem a pending
    pairing.
 2. The **device** exchanges it exactly once:
-   `POST /api/agent/pair {code, name, permissions}` →
+   `POST /api/agent/pair {code, name, permissions, features}` →
    `{agentId, secret, workspaceId, permissions, pollIntervalMs}`.
    The plaintext `secret` is returned once; the server keeps only an
-   AES-256-GCM-encrypted copy and a SHA-256 hash.
+   AES-256-GCM-encrypted copy and a SHA-256 hash. `features` is what the app
+   can do (`shared/device-features.js`), the same list every heartbeat sends,
+   so work that needs a feature is not refused before the first beat. An app
+   that sends none still pairs and reports none until it beats. A device whose
+   app lacks a feature the server needs shows "Needs an update" on its card in
+   Settings, naming what it cannot do.
 
 ## 2. Signed requests
 Every subsequent agent request carries three headers:
