@@ -9,9 +9,9 @@
  * It is a screenshot remote control, not a live stream: one JPEG per call. The
  * server enforces the same allowlist and the same X refusal as any other page,
  * so this is a way to sign in, never a way around the rules. */
-import {esc, btn} from './ui-kit.js?v=c77fd59cad';
-import {api, sync, isStaticDemo} from './ui-store.js?v=c77fd59cad';
-import {openSheet, closeSheet, sheetOpen, toast} from './ui-dialogs.js?v=c77fd59cad';
+import {esc, btn} from './ui-kit.js?v=26a178cb10';
+import {api, sync, isStaticDemo} from './ui-store.js?v=26a178cb10';
+import {openSheet, closeSheet, sheetOpen, toast} from './ui-dialogs.js?v=26a178cb10';
 
 /** The open takeover: its session id on the server, the request it belongs to,
  * the last page the server sent, and the control the person is typing into. */
@@ -46,12 +46,19 @@ function render() {
     <input class="input" name="text" placeholder="${selected ? 'Type here, then Send' : 'No field chosen'}" aria-label="Text to type" ${selected ? 'autofocus' : 'disabled'}>
     <button type="submit" class="btn primary small" ${selected ? '' : 'disabled'}>Send</button>
   </form>`;
+  // A password or a code is sent as a `secret`: the device tags the field first, and nothing here echoes it.
+  const secretRow = (id, label, attrs) => `<form id="${id}" class="takeover-type" autocomplete="off">
+    <input class="input" name="text" maxlength="2000" placeholder="${label}" aria-label="${label}" ${attrs} ${selected ? '' : 'disabled'}>
+    <button type="submit" class="btn primary small" ${selected ? '' : 'disabled'}>Type</button>
+  </form>`;
+  const secrets = secretRow('takeover-password', 'Password', 'type="password" autocomplete="current-password"')
+    + secretRow('takeover-code', 'Code', 'inputmode="numeric" autocomplete="one-time-code" spellcheck="false" autocapitalize="off"');
   const actions = `<div class="sheet-actions">
     ${btn('Refresh', 'takeover-refresh', {small: true})}
     ${btn('Hand back to the bot', 'takeover-handback', {kind: 'primary', wide: true})}
     ${btn('Close without handing back', 'takeover-close', {kind: 'quiet', small: true})}
   </div>`;
-  openSheet(`${page}${go}${controls}${type}${actions}<p class="note">Signing in is saved only for this takeover and thrown away when it ends.</p>`,
+  openSheet(`${page}${go}${controls}${type}${secrets}${actions}<p class="note">Signing in is saved only for this takeover and thrown away when it ends.</p>`,
     {title: 'Take over the page', sub: 'Sign in or answer the challenge, then hand the page back to the bot.', onDismiss: releaseOnDismiss});
 }
 
@@ -153,11 +160,21 @@ export const takeoverActions = {
   'takeover-close': () => closeHeld(),
 };
 
+/** The text leaves the box before it is sent, so a refused or failed send never leaves a password sitting in it. */
+async function typeSecret(form, values) {
+  const text = String(values.text ?? '');
+  form.reset();
+  if (!live || live.selected == null || !text) return;
+  await act({op: 'type', index: live.selected, text, secret: true});
+}
+
 export const takeoverForms = {
   'takeover-form': async (form, values) => {
     if (!live || live.selected == null) return;
     await act({op: 'type', index: live.selected, text: String(values.text ?? '')});
   },
+  'takeover-password': (form, values) => typeSecret(form, values),
+  'takeover-code': (form, values) => typeSecret(form, values),
   'takeover-go-form': async (form, values) => {
     const url = String(values.url || '').trim();
     if (url) await act({op: 'navigate', url});

@@ -13,16 +13,16 @@
  * Polling is what makes the device cast: the server tells the agent to stream a tab only
  * while somebody is looking, so the loop stops when the page is hidden or the view closes.
  * Input goes out in order, one request at a time, with typed letters joined. */
-import {esc, icon} from './ui-kit.js?v=c77fd59cad';
-import {botColor} from './ui-face.js?v=c77fd59cad';
-import {store, api, findBot, canWrite, isAdmin, isStaticDemo, changed, onChange, go, back} from './ui-store.js?v=c77fd59cad';
+import {esc, icon} from './ui-kit.js?v=26a178cb10';
+import {botColor} from './ui-face.js?v=26a178cb10';
+import {store, api, findBot, canWrite, isAdmin, isStaticDemo, changed, onChange, go, back} from './ui-store.js?v=26a178cb10';
 /** Driving the tab (Take over, Hand back, input) is an admin's, the role those routes need; the demo is its one owner. */
 const canDrive = () => isStaticDemo() || isAdmin();
-import {toast} from './ui-dialogs.js?v=c77fd59cad';
+import {toast} from './ui-dialogs.js?v=26a178cb10';
 import {
   PAGE, KEY_CHIPS, clickInput, wheelInput, keyInput, coalesce, navigateAddress, rowLabel, statusOf, stateLine, mergeView, veilFor, frameDelay, listDelay, wantsList,
   chipFor, containRect, controlPill, thumbFor, thumbDelay,
-} from './ui-computer.js?v=c77fd59cad';
+} from './ui-computer.js?v=26a178cb10';
 
 const el = id => document.getElementById(id);
 const raw = (path, method = 'GET', body) => window.AGENT_API(path, method, body);   // no progress bar: these run all the time
@@ -107,6 +107,8 @@ export function computerPage(bot, {faceOf}) {
         <button type="submit" class="pc-go" data-pc="go" hidden>Go</button>
       </form>
       <form class="pc-type" id="computer-type" data-bot="${esc(bot.id)}" autocomplete="off"><input class="input" name="text" maxlength="2000" placeholder="Type into the page" aria-label="Type into the page"><button type="submit" class="btn">Type</button></form>
+      <form class="pc-type" id="computer-password" data-bot="${esc(bot.id)}" autocomplete="off"><input class="input" type="password" name="text" maxlength="2000" autocomplete="current-password" placeholder="Password" aria-label="Password"><button type="submit" class="btn">Type</button></form>
+      <form class="pc-type" id="computer-code" data-bot="${esc(bot.id)}" autocomplete="off"><input class="input" name="text" inputmode="numeric" maxlength="2000" autocomplete="one-time-code" placeholder="Code" aria-label="Code" spellcheck="false" autocapitalize="off"><button type="submit" class="btn">Type</button></form>
       <div class="pc-keys" role="group" aria-label="Keys">${keys}</div>
     </div>` : '<span hidden><span data-pc="dot"></span><input data-pc="url"><button data-pc="go"></button></span>';
   return `<div class="pc" id="pc" data-bot="${esc(bot.id)}" data-state="idle" role="dialog" aria-modal="true" aria-label="${esc(bot.name)}'s computer" style="--t:${esc(botColor(bot))}">
@@ -340,7 +342,16 @@ export const computerForms = {
     push(session, {type: 'type', text});
     form.reset();
   },
+  // A password or a code goes as its own `secret` event (never joined to other typing) and is cleared from the box at once.
+  'computer-password': (form, f) => typeSecret(form, f),
+  'computer-code': (form, f) => typeSecret(form, f),
 };
+function typeSecret(form, f) {
+  const text = String(f.text ?? '');
+  form.reset();
+  if (!text || session?.botId !== form.dataset.bot) return;
+  push(session, {type: 'type', text, secret: true});
+}
 
 /* ---------- the small live picture on a profile and a bot chat's header ---------- */
 

@@ -5,15 +5,15 @@
  * Home is the Chats layout only. On a phone it is two sections, Bots and Threads,
  * switched by swiping; on a laptop the sidebar holds both and the chat opens on the
  * right. The lists come from ui-company.js (pure); this file is markup and events. */
-import {botRows, threadRows} from './ui-company.js?v=c77fd59cad';
-import {face} from './ui-face.js?v=c77fd59cad';
-import {esc, icon, stamp} from './ui-kit.js?v=c77fd59cad';
-import {pauseBanner} from './ui-asks.js?v=c77fd59cad';
-import {searchMessages, snippetHtml} from './message-search.js?v=c77fd59cad';
-import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, saveLocal, isStaticDemo, seenChats, api} from './ui-store.js?v=c77fd59cad';
-import {setupChecklist} from './ui-profile-model.js?v=c77fd59cad';
-import {shortcutRows} from './ui-model.js?v=c77fd59cad';
-import {openSheet, sheetOpen} from './ui-dialogs.js?v=c77fd59cad';
+import {botRows, threadRows} from './ui-company.js?v=26a178cb10';
+import {face} from './ui-face.js?v=26a178cb10';
+import {esc, icon, stamp} from './ui-kit.js?v=26a178cb10';
+import {pauseBanner} from './ui-asks.js?v=26a178cb10';
+import {searchMessages, snippetHtml} from './message-search.js?v=26a178cb10';
+import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, saveLocal, isStaticDemo, seenChats, api} from './ui-store.js?v=26a178cb10';
+import {setupChecklist} from './ui-profile-model.js?v=26a178cb10';
+import {shortcutRows} from './ui-model.js?v=26a178cb10';
+import {openSheet, sheetOpen} from './ui-dialogs.js?v=26a178cb10';
 
 const el = id => document.getElementById(id);
 const DESK = '(min-width:1024px)';

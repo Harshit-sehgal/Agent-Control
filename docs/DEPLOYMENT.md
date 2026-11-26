@@ -349,7 +349,10 @@ it, a proxied request is never taken as secure, and the owner can type a secret
 only on the host itself (at `http://localhost`, with no proxy in between). Set
 `TRUST_PROXY=1` only when every request reaches the server through that proxy,
 and never put a plain-HTTP proxy in front of this server for secret input: it
-would carry the password in the clear.
+would carry the password in the clear. This is what the masked Password and Code
+fields in the Computer view and the takeover sheet rely on: when a request is
+refused, the owner sees "Passwords and codes are only sent over HTTPS or from
+this computer." in a toast, and nothing they typed is kept.
 
 ## Secrets & the vault
 - Without `MASTER_KEY`, a `vault.key` (mode `0600`) is created beside the

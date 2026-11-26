@@ -107,6 +107,8 @@ export function computerPage(bot, {faceOf}) {
         <button type="submit" class="pc-go" data-pc="go" hidden>Go</button>
       </form>
       <form class="pc-type" id="computer-type" data-bot="${esc(bot.id)}" autocomplete="off"><input class="input" name="text" maxlength="2000" placeholder="Type into the page" aria-label="Type into the page"><button type="submit" class="btn">Type</button></form>
+      <form class="pc-type" id="computer-password" data-bot="${esc(bot.id)}" autocomplete="off"><input class="input" type="password" name="text" maxlength="2000" autocomplete="current-password" placeholder="Password" aria-label="Password"><button type="submit" class="btn">Type</button></form>
+      <form class="pc-type" id="computer-code" data-bot="${esc(bot.id)}" autocomplete="off"><input class="input" name="text" inputmode="numeric" maxlength="2000" autocomplete="one-time-code" placeholder="Code" aria-label="Code" spellcheck="false" autocapitalize="off"><button type="submit" class="btn">Type</button></form>
       <div class="pc-keys" role="group" aria-label="Keys">${keys}</div>
     </div>` : '<span hidden><span data-pc="dot"></span><input data-pc="url"><button data-pc="go"></button></span>';
   return `<div class="pc" id="pc" data-bot="${esc(bot.id)}" data-state="idle" role="dialog" aria-modal="true" aria-label="${esc(bot.name)}'s computer" style="--t:${esc(botColor(bot))}">
@@ -340,7 +342,16 @@ export const computerForms = {
     push(session, {type: 'type', text});
     form.reset();
   },
+  // A password or a code goes as its own `secret` event (never joined to other typing) and is cleared from the box at once.
+  'computer-password': (form, f) => typeSecret(form, f),
+  'computer-code': (form, f) => typeSecret(form, f),
 };
+function typeSecret(form, f) {
+  const text = String(f.text ?? '');
+  form.reset();
+  if (!text || session?.botId !== form.dataset.bot) return;
+  push(session, {type: 'type', text, secret: true});
+}
 
 /* ---------- the small live picture on a profile and a bot chat's header ---------- */
 

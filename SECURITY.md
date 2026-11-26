@@ -101,6 +101,17 @@ access only to people you would let read the owner's connected accounts.
   (`src/vault.js`). A corrupt keyfile is **never** silently overwritten — the
   server refuses to boot rather than rotate the key and brick the data.
 - AI provider keys are read only on the server; the browser never sees them.
+- **Secret fields on a page.** A password field, a field whose `autocomplete` names a one-time code or a card
+  (`one-time-code`, `cc-number`, `cc-csc`, `cc-exp*`), and anything inside an element the page's author tagged
+  `data-agent-secret` is secret (`agent/page-secrets.mjs`), as is the field the owner typed a secret into, which the
+  device tags first. A secret field is never named by what it holds, its value is `[hidden]` wherever it shows in
+  page text, and a bot never types into one: it is refused and told the owner signs in. The owner types a
+  password or code through the masked Password and Code fields in the Computer view and the takeover sheet, which
+  send the text marked `secret`. The server accepts that only over HTTPS, through a trusted proxy (`TRUST_PROXY=1`)
+  that says it spoke HTTPS, or from the computer that runs the app, and refuses it with a 403 otherwise. A plain-HTTP
+  proxy on this host voids the loopback exemption: the request then carries forwarding headers or an `Origin` that is
+  not `localhost`, `127.0.0.1` or `[::1]`, and the `Origin` check refuses it. Never put a plain-HTTP proxy in front
+  of this server for secret input.
 
 ## Data at rest
 - The store is SQLite (`src/sqlite-store.js`, `node:sqlite`) with a migration

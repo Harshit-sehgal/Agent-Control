@@ -64,8 +64,8 @@ def serve(directory):
 def known_noise(msg):
     """The meta CSP cannot carry frame-ancestors (the server header does), and no favicon is shipped."""
     url = (msg.location or {}).get('url', '')
-    # A takeover with no device running answers 409 on purpose; the browser logs every failed fetch.
-    return 'frame-ancestors' in msg.text or 'favicon' in url or '409 (Conflict)' in msg.text
+    # A takeover with no device running answers 409, and a secret over plain HTTP answers 403, on purpose; the browser logs every failed fetch.
+    return 'frame-ancestors' in msg.text or 'favicon' in url or '409 (Conflict)' in msg.text or '403 (Forbidden)' in msg.text
 
 
 class Harness:
@@ -1221,7 +1221,7 @@ class Live:
             {'url': 'https://mail.google.com/mail/u/0/#inbox/northwind', 'title': 'Northwind: a time next week?', 'at': '2026-11-11T10:01:00.000Z'},
             {'url': 'https://calendar.google.com/calendar/r/week', 'title': None, 'at': '2026-11-11T10:02:00.000Z'},
         ]
-        self.posts, self.frame_polls, self.list_polls = [], 0, 0
+        self.posts, self.frame_polls, self.list_polls, self.refuse_secret = [], 0, 0, False
         self.__dict__.update(kw)
 
     def entry(self):
@@ -1266,6 +1266,8 @@ class Live:
         if path == f'/api/browser-live/{self.bot}/input':
             if self.state != 'driving':
                 return await reply({'error': 'Take over the browser before you click or type in it.'}, 409)
+            if self.refuse_secret and body.get('secret') is True:
+                return await reply({'error': 'Passwords and codes are only sent over HTTPS or from this computer.'}, 403)
             return await reply({'ok': True})
         return await reply({'error': 'unexpected'}, 404)
 
@@ -1413,11 +1415,41 @@ async def computer_take_over_drives_the_page(page, base):
     await url.press('Enter')
     await expect(page.locator('#toast')).to_contain_text('Type a web address')
     # Phones have no keyboard on the picture: a field and key buttons send the same events.
-    await page.locator('#main .pc-type input').fill('abc')
-    await page.locator('#main .pc-type button').click()
+    await page.locator('#main #computer-type input').fill('abc')
+    await page.locator('#main #computer-type button').click()
     await page.locator('#main .pc-key[data-text="Tab"]').click()
     await eventually(lambda: {'type': 'key', 'key': 'Tab'} in live.inputs())
     assert ''.join(e['text'] for e in live.inputs() if e['type'] == 'type').endswith('abc')
+    # A password and a code have their own masked fields: each is sent alone and marked `secret`, and nothing echoes it.
+    password = page.locator('#main #computer-password input')
+    code = page.locator('#main #computer-code input')
+    assert await password.get_attribute('type') == 'password' and await password.get_attribute('autocomplete') == 'current-password'
+    assert await code.get_attribute('inputmode') == 'numeric' and await code.get_attribute('autocomplete') == 'one-time-code'
+    assert await password.get_attribute('placeholder') == 'Password' and await code.get_attribute('placeholder') == 'Code'
+    await password.fill('hunter22')
+    await page.locator('#main #computer-password button').click()
+    await code.fill('483920')
+    await page.locator('#main #computer-code button').click()
+    await eventually(lambda: [e for e in live.inputs() if e.get('secret')] == [
+        {'type': 'type', 'text': 'hunter22', 'secret': True}, {'type': 'type', 'text': '483920', 'secret': True}])
+    assert all('hunter22' not in e.get('text', '') and '483920' not in e.get('text', '') for e in live.inputs() if not e.get('secret'))
+    await expect(password).to_have_value('')
+    await expect(code).to_have_value('')
+
+    async def nowhere_on_screen(*secrets):
+        shown = await page.evaluate("document.documentElement.outerHTML + '\\n' + document.body.innerText")
+        stored = await page.evaluate("JSON.stringify([Object.entries(localStorage), Object.entries(sessionStorage)])")
+        for secret in secrets:
+            assert secret not in shown and secret not in stored, secret
+    await nowhere_on_screen('hunter22', '483920')
+    # A server that refuses a secret (plain HTTP from another device) is said in the toast, and the field is still emptied.
+    live.refuse_secret = True
+    await password.fill('swordfish9')
+    await page.locator('#main #computer-password button').click()
+    await expect(page.locator('#toast')).to_contain_text('only sent over HTTPS or from this computer')
+    await expect(password).to_have_value('')
+    await nowhere_on_screen('swordfish9')
+    live.refuse_secret = False
 
 
 async def computer_hand_back(page, base):
@@ -1464,6 +1496,74 @@ async def computer_no_device_empty_state(page, base):
     await expect(page.locator('#main .pc-img')).to_be_visible(timeout=8000)
     await expect(veil).to_be_hidden()
     await expect(page.locator('#main .pc-notice')).to_be_hidden()
+
+
+async def takeover_sheet_masked_fields(page, base):
+    """The takeover sheet (a person signing in to a page a bot asked for) has a Password and a Code field of its own."""
+    await page.add_init_script(VIA_FETCH.replace("'/api/browser-live'", "'/api/browser-sessions'"))
+    posts, refuse = [], {'on': False}
+    view = {'id': 's1', 'requestId': 'r1', 'url': 'https://x.com/login', 'title': 'Sign in', 'blockedRequests': 0,
+            'image': page_picture(), 'elements': [{'index': 1, 'tag': 'input', 'text': 'Password'}, {'index': 2, 'tag': 'button', 'text': 'Sign in'}]}
+
+    async def handle(route):
+        request = route.request
+        path = re.sub(r'^https?://[^/]+', '', request.url).split('?')[0]
+        body = json.loads(request.post_data) if request.post_data else None
+        if request.method != 'GET':
+            posts.append((path, body))
+        if path.endswith('/act') and refuse['on'] and body.get('secret') is True:
+            return await route.fulfill(status=403, content_type='application/json', body=json.dumps({'error': 'Passwords and codes are only sent over HTTPS or from this computer.'}))
+        await route.fulfill(status=200, content_type='application/json', body=json.dumps(view if path == '/api/browser-sessions' else {'ok': True}))
+    await page.route('**/api/browser-sessions**', handle)
+    await open_app(page, base)
+    # The static build has no sessions; tell the page it has a server, then open the sheet the way a request card does.
+    await page.evaluate("""() => {
+        document.querySelector('meta[name="agent-backend"]').setAttribute('content', 'server');
+        const b = document.createElement('button');
+        b.id = 'try-takeover'; b.dataset.action = 'takeover-browser'; b.dataset.id = 'r1'; b.textContent = 'Take over';
+        document.body.append(b);
+    }""")
+    await page.locator('#try-takeover').click()
+    sheet = page.locator('#modal')
+    password, code = sheet.locator('#takeover-password input'), sheet.locator('#takeover-code input')
+    assert await password.get_attribute('type') == 'password' and await password.get_attribute('autocomplete') == 'current-password'
+    assert await code.get_attribute('inputmode') == 'numeric' and await code.get_attribute('autocomplete') == 'one-time-code'
+    # Nothing to type into until a field is chosen.
+    await expect(password).to_be_disabled()
+    await expect(code).to_be_disabled()
+    await sheet.locator('.takeover-control', has_text='Password').click()
+    await expect(password).to_be_enabled()
+    async def send(field, button):
+        """Fill, press, and wait for the sheet to be drawn again (it is, after every send that works)."""
+        node = await field.element_handle()
+        await button.click()
+        await page.wait_for_function('n => !n.isConnected', arg=node)
+    await password.fill('hunter22')
+    await send(password, sheet.locator('#takeover-password button'))
+    await eventually(lambda: ('/api/browser-sessions/s1/act', {'op': 'type', 'index': 1, 'text': 'hunter22', 'secret': True}) in posts)
+    await code.fill('483920')
+    await send(code, sheet.locator('#takeover-code button'))
+    await eventually(lambda: ('/api/browser-sessions/s1/act', {'op': 'type', 'index': 1, 'text': '483920', 'secret': True}) in posts)
+    await expect(password).to_have_value('')
+    await expect(code).to_have_value('')
+
+    async def nowhere_on_screen(*secrets):
+        shown = await page.evaluate("document.documentElement.outerHTML + '\\n' + document.body.innerText")
+        stored = await page.evaluate("JSON.stringify([Object.entries(localStorage), Object.entries(sessionStorage)])")
+        for secret in secrets:
+            assert secret not in shown and secret not in stored, secret
+    await nowhere_on_screen('hunter22', '483920')
+    # The ordinary box still sends plain text, with no `secret`.
+    await sheet.locator('#takeover-form input').fill('plain words')
+    await send(sheet.locator('#takeover-form input'), sheet.locator('#takeover-form button'))
+    await eventually(lambda: ('/api/browser-sessions/s1/act', {'op': 'type', 'index': 1, 'text': 'plain words'}) in posts)
+    # A refusal (plain HTTP from another device) is said in the toast, and the field is emptied all the same.
+    refuse['on'] = True
+    await password.fill('swordfish9')
+    await sheet.locator('#takeover-password button').click()
+    await expect(page.locator('#toast')).to_contain_text('only sent over HTTPS or from this computer')
+    await expect(password).to_have_value('')
+    await nowhere_on_screen('swordfish9')
 
 
 async def computer_demo_has_no_browser(page, base):
@@ -2761,6 +2861,7 @@ async def main():
             await h.scenario('computer: the row says Browsing, the view shows a frame and the pages of the run', computer_row_frame_and_pages)
             await h.scenario('computer: Take over sends clicks, keys, the wheel and an address to the page', computer_take_over_drives_the_page)
             await h.scenario('computer: Hand back returns the browser to the bot', computer_hand_back)
+            await h.scenario('takeover sheet: Password and Code fields send a secret, echo nothing and say a refusal', takeover_sheet_masked_fields)
             await h.scenario('computer: no device shows how to start the local agent, and notices', computer_no_device_empty_state)
             await h.scenario('computer: the demo has no browser, and Atlas has a Computer too', computer_demo_has_no_browser)
             await h.scenario('computer: the pill carries the site chip, opens the view and says You are driving', computer_site_chip_on_the_pill)
