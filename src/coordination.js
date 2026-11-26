@@ -21,6 +21,7 @@ import {assertContractOutput} from '../shared/contracts.js';
 import {recordBrowserRequests,stripBrowserBlocks,isSearchPage,parseBrowserRequests,MAX_BROWSER_DEPTH} from '../shared/bot-browser.js';
 import {orphanAsks} from '../shared/asks.js';
 import {addAskCards,notifyAsks} from './ask-cards.js';
+import {signinSites,signinNotice} from './health-watch.js';
 import {MAX_SUBAGENT_DEPTH} from '../shared/subagents.js';
 import {autoDispatch,dispatchBrowserRequest,finishBrowserRequest} from './bot-browser.js';
 import {recordConnectorCalls,parseConnectorCalls,stripConnectorBlocks,envelopeConnectors} from '../shared/connectors.js';
@@ -130,7 +131,7 @@ function lastCallOrStop(live,state){
 }
 /** Pages one message may open before the bot is told to answer with what it has. */
 export const PAGE_NUDGE=15;
-export async function queueGroupRun(store,{groupId,message,directBotId=null,checkpoints=false,chatKey=null,browserDepth=0,confirmPlan,taskId=null,anyway=false,unattended=false,scheduleId=null,wait=false}={}){
+export async function queueGroupRun(store,{groupId,message,directBotId=null,checkpoints=false,chatKey=null,browserDepth=0,confirmPlan,taskId=null,anyway=false,unattended=false,scheduleId=null,wait=false,outsideInput=false}={}){
   // Validate the request against the store first so a missing group reports 404
   // and a busy group reports 409, instead of the AI-key check shadowing them
   // with a misleading 422 on an instance that simply has no key yet.
@@ -170,6 +171,8 @@ export async function queueGroupRun(store,{groupId,message,directBotId=null,chec
     if(scheduleId)run.scheduleId=scheduleId;
     // Nobody typed in this run (a timer started it): an ask it makes lapses after 24 hours.
     if(unattended)run.unattended=true;
+    // A run an outside event started: its text came from outside, so Hands-off does not cover its sends (shared/asks.js).
+    if(outsideInput)run.outsideInput=true;
     if(run.status!=='awaiting_plan')wakeBots(group,run.task?.woke);
     if(run.task)say(s,run,{id:randomUUID(),role:'system',text:`${run.task.summary} ${run.task.doneWhen}${run.status==='awaiting_plan'?' Start it when you are ready.':''}`,runId:run.id,at:stamp()});
     // The owner's workspace limit on steps (Settings → Limits), when there is one, bounds every team.
@@ -225,7 +228,7 @@ export async function runBotTask(store,task,{queue=queueGroupRun,available=aiAva
   // line for a run that never started; the queue retries those.
   // The daily briefing is given the workspace's facts as they are now (shared/briefing.js), so it reports real work.
   const said=task.payload?.brief==='daily'?briefingMessage(message,store.read()):message;
-  const result=await queue(store,{groupId,message:said,directBotId:botId,chatKey,confirmPlan:false,unattended:true,scheduleId:task.id});
+  const result=await queue(store,{groupId,message:said,directBotId:botId,chatKey,confirmPlan:false,unattended:true,scheduleId:task.id,...(task.payload?.source==='event'?{outsideInput:true}:{})});
   // The run is queued and durable; the line in the conversation is not. A failed
   // note used to reject the handler, which the queue retried - and the retry
   // queued the same message again, so one reminder cost two model runs. Only a
@@ -391,7 +394,7 @@ async function runGroupInner(store,id,executor){
       // neither keeps the fences the model happened to wrap around them.
       const gated=typeof validated==='string'?validated:JSON.stringify(validated);
       previous={botId:bot.id,output:gated.slice(0,3600)};
-      let toBotId=null,auto=[],holdBrowser=false,newAsks=[],stuckStop=null;
+      let toBotId=null,auto=[],holdBrowser=false,newAsks=[],stuckStop=null,signins=[];
       await store.update(s=>{coordinationState(s);const live=s.groupRuns.find(x=>x.id===id);if(!live||live.status!=='running')throw new Error('Run no longer active');
         const host=s.groups.find(x=>x.id===live.groupId);
         // File fences from the full reply, then hand the next bot the text around them.
@@ -401,6 +404,9 @@ async function runGroupInner(store,id,executor){
         // Connector blocks in the same reply: a page goes first, one kind at a time.
         const conn=off?{text:'',calls:[],lines:[],asks:[]}:recordConnectorCalls(s,{bot,run:live,chatKey:live.chatKey||`team-${live.groupId}`,output:body,unattended:Boolean(live.unattended),declined:live.declinedAsks||[],blockedByPage:browsed.records.length>0,makeId:randomUUID,now:stamp()});
         newAsks=[...browsed.asks,...conn.asks];
+        // A schedule runs with nobody watching: a site that signed it out is said to the owner now, once per site
+        // per run, instead of waiting in a chat nobody opens (src/health-watch.js).
+        if(live.unattended){const fresh=signinSites([...browsed.lines,...(reply.after||[])]).filter(site=>!(live.signinNoticed||[]).includes(site));if(fresh.length){live.signinNoticed=[...(live.signinNoticed||[]),...fresh];signins=fresh;}}
         // Text around the browser fences is the browser helper's view of the
         // reply; with nothing to browse, the approved value is the output.
         // A reply that held a browser block (opened, refused or a repeat) is shown without it: a block is never chat text.
@@ -517,6 +523,7 @@ async function runGroupInner(store,id,executor){
       });
       if(stuckStop)throw Object.assign(new Error(stuckStop),{stopped:true});
       if(newAsks.length)notifyAsks(store,newAsks,bot.name);
+      if(signins.length)Promise.resolve().then(()=>store.notify?.({...signinNotice({botName:bot.name,sites:signins}),meta:{runId:id}})).catch(error=>console.error('Sign-in notification:',error.message));
       if(auto.length)await autoDispatch(store,auto);
       // Keep what this model learned. The reply is already stored, so a memory
       // failure is logged and never turns a finished step into a failed run.

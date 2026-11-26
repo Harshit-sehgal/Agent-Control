@@ -5,22 +5,23 @@
  *
  * Pages repaint only when the route changes, so each in-place change (a switch, a
  * forgotten note, a picked colour) updates its own node instead. */
-import {SHAPES, COLORS, face} from './ui-face.js?v=2c827d8a6b';
-import {botStatus, botIsManager} from './ui-company.js?v=2c827d8a6b';
-import {primaryOf} from './company.js?v=2c827d8a6b';
-import {resetModelSearch} from './ui-admin.js?v=2c827d8a6b';
-import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker, COLOR_NAMES} from './ui-kit.js?v=2c827d8a6b';
-import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js?v=2c827d8a6b';
-import {scheduleRows, scheduleTaskBody, SCHEDULE_OFTEN, scheduleChoice} from './schedules.js?v=2c827d8a6b';
-import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=2c827d8a6b';
-import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=2c827d8a6b';
-import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=2c827d8a6b';
-import {sendChat} from './ui-chat.js?v=2c827d8a6b';
-import {computerPage as computerView, computerLabel, keysOwned, thumbSlot} from './ui-computer-view.js?v=2c827d8a6b';
+import {SHAPES, COLORS, face} from './ui-face.js?v=adaf6b1514';
+import {botStatus, botIsManager} from './ui-company.js?v=adaf6b1514';
+import {primaryOf} from './company.js?v=adaf6b1514';
+import {resetModelSearch} from './ui-admin.js?v=adaf6b1514';
+import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker, COLOR_NAMES} from './ui-kit.js?v=adaf6b1514';
+import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js?v=adaf6b1514';
+import {scheduleRows, scheduleTaskBody, SCHEDULE_OFTEN, scheduleChoice} from './schedules.js?v=adaf6b1514';
+import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=adaf6b1514';
+import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=adaf6b1514';
+import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=adaf6b1514';
+import {sendChat} from './ui-chat.js?v=adaf6b1514';
+import {computerPage as computerView, computerLabel, keysOwned, thumbSlot} from './ui-computer-view.js?v=adaf6b1514';
 import {
   MAX_NAME, MAX_JOB, hasJob, roleLine, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, lookOf, newBotDefaults,
-  newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, closeTarget,
-} from './ui-profile-model.js?v=2c827d8a6b';
+  newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, closeTarget, watchRows,
+} from './ui-profile-model.js?v=adaf6b1514';
+import {WATCH_EVERY} from './watches.js?v=adaf6b1514';
 
 const el = id => document.getElementById(id);
 const SHAPE_LABELS = {rounded: 'Rounded square', circle: 'Circle', hexagon: 'Hexagon', pebble: 'Pebble', drop: 'Drop', shield: 'Shield', arch: 'Arch', egg: 'Egg', blob: 'Blob', bean: 'Bean'};
@@ -160,16 +161,30 @@ function memoryList(bot) {
  * from chat too ("every morning at 8, sum up my inbox"), so the form is the fallback, not the way in. */
 function scheduleList(bot) {
   const rows = scheduleRows(store.state, bot.id), write = canWrite();
-  if (!rows.length) return `<p class="pr-note">Nothing on a timer. Tell ${esc(bot.name)} something like “every morning at 8, sum up my inbox”, or add one below.</p>`;
+  // The kill switch sits inside this block, so the refill after a tap relabels it.
+  const kill = write ? `<p class="pr-note"><button type="button" class="btn" data-action="schedules-kill" data-id="${esc(bot.id)}">${store.state.schedulesPaused ? 'Resume every schedule' : 'Pause every schedule (kill switch)'}</button> ${store.state.schedulesPaused ? 'Every schedule is paused. New ones start paused too.' : 'Stops every timer in the company until you resume it. Runs already in progress finish.'}</p>` : '';
+  if (!rows.length) return `${kill}<p class="pr-note">Nothing on a timer. Tell ${esc(bot.name)} something like “every morning at 8, sum up my inbox”, or add one below.</p>`;
   const next = at => { const d = new Date(at); return Number.isNaN(d.getTime()) ? '' : ` · next ${d.toLocaleString([], {weekday: 'short', hour: '2-digit', minute: '2-digit'})}`; };
-  return `<div class="cd">${rows.map(r => `<div class="rw memo"><span class="w">${esc(r.what)}<small>${esc(r.when)}${esc(next(r.nextAt))}</small>${r.lastError ? `<small class="sc-err">Last try failed: ${esc(r.lastError)}</small>` : ''}</span>${write ? `<button type="button" class="memo-x" data-action="schedule-stop" data-id="${esc(bot.id)}" data-task="${esc(r.id)}" aria-label="Stop this schedule">Stop</button>` : ''}</div>`).join('')}</div>`;
+  return `${kill}<div class="cd">${rows.map(r => `<div class="rw memo"><span class="w">${esc(r.what)}<small>${r.paused ? 'Paused · ' : ''}${esc(r.when)}${esc(next(r.nextAt))}</small>${r.lastError ? `<small class="sc-err">Last try failed: ${esc(r.lastError)}</small>` : ''}</span>${write ? `<button type="button" class="memo-x" data-action="${r.paused ? 'schedule-resume' : 'schedule-pause'}" data-id="${esc(bot.id)}" data-task="${esc(r.id)}" aria-label="${r.paused ? 'Resume' : 'Pause'} this schedule">${r.paused ? 'Resume' : 'Pause'}</button><button type="button" class="memo-x" data-action="schedule-stop" data-id="${esc(bot.id)}" data-task="${esc(r.id)}" aria-label="Stop this schedule">Stop</button>` : ''}</div>`).join('')}</div>`;
+}
+/** A bot's watched pages: each says what and how often, when it last looked and last saw a change, and any problem,
+ * with Check now, Pause or Resume, and Remove. The page is compared by code; the owner hears only when it changes. */
+function watchList(bot) {
+  const rows = watchRows(store.state, bot.id), write = canWrite();
+  if (!rows.length) return `<p class="pr-note">No pages watched. Add a page below and ${esc(bot.name)} checks it for you, and tells you only when it changes.</p>`;
+  // The spoken name starts with the visible word, so voice control ("click Pause") finds it.
+  const act = (action, r, label) => `<button type="button" class="memo-x" data-action="${action}" data-id="${esc(bot.id)}" data-watch="${esc(r.id)}" aria-label="${esc(`${label}, ${r.what}`)}">${label}</button>`;
+  return `<div class="cd">${rows.map(r => `<div class="rw memo wt"><span class="w">${esc(r.what)}<small>${esc(r.when)}</small>${r.problem ? `<small class="sc-err">${esc(r.problem)}</small>` : ''}</span>${write ? `${r.on && !r.checking ? act('watch-check', r, 'Check now') : ''}${act('watch-toggle', r, r.on ? 'Pause' : 'Resume')}${act('watch-remove', r, 'Remove')}` : ''}</div>`).join('')}</div>`;
 }
 function schedulePage(bot) {
   const write = canWrite();
   const often = `<select class="input" name="every" aria-label="How often">${SCHEDULE_OFTEN.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>`;
   return `<p class="pr-note">${esc(bot.name)} runs each one in its own chat, and the answer waits for you there.</p>
     <div id="pr-schedule">${scheduleList(bot)}</div>
-    ${write ? `<form id="schedule-form" class="pr-form" data-bot="${esc(bot.id)}" autocomplete="off">${field('What to do', `<input class="input" name="message" minlength="3" maxlength="2000" placeholder="Sum up my unread email in five lines" required>`)}<div class="sc-when">${field('How often', often)}${field('At', '<input class="input" name="at" type="time" value="08:00">')}</div><button type="submit" class="btn primary wide">Add to schedule</button></form>` : ''}`;
+    ${write ? `<form id="schedule-form" class="pr-form" data-bot="${esc(bot.id)}" autocomplete="off">${field('What to do', `<input class="input" name="message" minlength="3" maxlength="2000" placeholder="Sum up my unread email in five lines" required>`)}<div class="sc-when">${field('How often', often)}${field('At', '<input class="input" name="at" type="time" value="08:00">')}</div><button type="submit" class="btn primary wide">Add to schedule</button></form>` : ''}
+    <h4 class="st-h sc-sec">Watched pages</h4>
+    <div id="pr-watches">${watchList(bot)}</div>
+    ${write ? `<form id="watch-form" class="pr-form" data-bot="${esc(bot.id)}" autocomplete="off">${field('Page', '<input class="input" name="url" type="url" inputmode="url" maxlength="2000" placeholder="https://shop.example/item" required>')}<div class="sc-when">${field('How often', `<select class="input" name="every" aria-label="How often">${WATCH_EVERY.map(e => `<option value="${e.id}"${e.id === 'day' ? ' selected' : ''}>${esc(e.label)}</option>`).join('')}</select>`)}${field('Look for (optional)', '<input class="input" name="words" maxlength="100" placeholder="In stock">')}</div><button type="submit" class="btn primary wide">Watch this page</button></form>` : ''}`;
 }
 function memoryPage(bot) {
   const write = canWrite();
@@ -231,6 +246,7 @@ async function loadBotModels() {
   refillBotModels();
 }
 function refillSchedule(botId) { const box = el('pr-schedule'), bot = findBot(botId); if (box && bot) box.innerHTML = scheduleList(bot); }
+function refillWatches(botId) { const box = el('pr-watches'), bot = findBot(botId); if (box && bot) box.innerHTML = watchList(bot); }
 function refillBotModels() {
   const form = el('bot-model-form'); if (!form) return;
   const select = form.elements.namedItem('model'), keep = select.value;
@@ -374,6 +390,13 @@ export const profileActions = {
   'profile-up': b => go({profile: b.dataset.id}, {replace: true}),
   'profile-sub': b => go({profile: b.dataset.id, sub: b.dataset.sub}),
   'schedule-stop': async b => { await api(`/api/tasks/${encodeURIComponent(b.dataset.task)}`, 'DELETE'); await sync(); refillSchedule(b.dataset.id); toast('Stopped.'); },
+  'schedule-pause': async b => { await api(`/api/tasks/${encodeURIComponent(b.dataset.task)}/pause`, 'POST'); await sync(); refillSchedule(b.dataset.id); toast('Paused.'); },
+  'schedule-resume': async b => { await api(`/api/tasks/${encodeURIComponent(b.dataset.task)}/resume`, 'POST'); await sync(); refillSchedule(b.dataset.id); toast('Resumed.'); },
+  // The kill switch: every schedule in the company at once.
+  'watch-check': async b => { await api(`/api/watches/${encodeURIComponent(b.dataset.watch)}/check`, 'POST'); await sync(); refillWatches(b.dataset.id); toast('Checking it within a minute.'); },
+  'watch-toggle': async b => { const on = !watchRows(store.state, b.dataset.id).find(r => r.id === b.dataset.watch)?.on; await api(`/api/watches/${encodeURIComponent(b.dataset.watch)}`, 'PATCH', {on}); await sync(); refillWatches(b.dataset.id); toast(on ? 'Watching again.' : 'Paused.'); },
+  'watch-remove': async b => { await api(`/api/watches/${encodeURIComponent(b.dataset.watch)}`, 'DELETE'); await sync(); refillWatches(b.dataset.id); toast('No longer watched.'); },
+  'schedules-kill': async b => { const paused = !!store.state.schedulesPaused; await api(`/api/automation/${paused ? 'resume-all' : 'pause-all'}`, 'POST'); await sync(); refillSchedule(b.dataset.id); toast(paused ? 'Schedules resumed.' : 'All schedules paused.'); },
   'bot-menu': b => (botMenuOpen() ? closeBotMenu() : openBotMenu(b.dataset.id, {opener: b})),
   // The whole job, to read and (for a member) to edit in place: the header shows only its first line.
   'profile-instructions': b => {
@@ -441,11 +464,15 @@ export const profileForms = {
     toast('Remembered.');
   },
   'schedule-form': async (form, f) => {
-    const {every, on} = scheduleChoice(f.every), group = groupOfBot(form.dataset.bot);
+    const {every, on, days} = scheduleChoice(f.every), group = groupOfBot(form.dataset.bot);
     if (!group) throw new Error('That bot is no longer in the company.');
     if (!every && !f.at) throw new Error('Pick a time for a one-off.');
-    await api('/api/tasks', 'POST', scheduleTaskBody({botId: form.dataset.bot, groupId: group.id, message: String(f.message || '').trim(), every, on, at: f.at || ''}));
+    await api('/api/tasks', 'POST', scheduleTaskBody({botId: form.dataset.bot, groupId: group.id, message: String(f.message || '').trim(), every, on, days, at: f.at || ''}));
     await sync(); form.reset(); refillSchedule(form.dataset.bot); toast('Added to the schedule.');
+  },
+  'watch-form': async (form, f) => {
+    await api('/api/watches', 'POST', {botId: form.dataset.bot, url: String(f.url || '').trim(), every: f.every || 'day', words: String(f.words || '').trim()});
+    await sync(); form.reset(); refillWatches(form.dataset.bot); toast('Watching it. You hear only when it changes.');
   },
   'bot-model-form': async (form, f) => {
     await api(`/api/ai/bots/${form.dataset.bot}`, 'PATCH', {...pickedModel(f), effort: f.effort || ''});

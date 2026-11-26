@@ -17,9 +17,16 @@
 import * as tasks from '../shared/tasks.js';
 import {peek} from './sqlite-store.js';
 
-export function createQueue(store, handlers = {}, {intervalMs = 2000, workerId, leaseMs = 60000, batch = 5, onFail = null} = {}) {
+/** When each store's queue last began a sweep. Health reads it: a queue that stops sweeping is not healthy. */
+const sweeps = new WeakMap();
+export const lastSweepAt = store => sweeps.get(store) || 0;
+
+export function createQueue(store, handlers = {}, {intervalMs = 2000, workerId, leaseMs = 60000, batch = 5, onFail = null, maxOverlap = 3} = {}) {
   const id = workerId || `worker-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
-  let busy = false;
+  // Sweeps in progress. A sweep waits for the tasks it claimed, so a slow model turn would hold back a due push or
+  // follow-up. The timer therefore starts another sweep while one is still running, up to `maxOverlap`; the store
+  // serializes the claims, so a task is still claimed by one sweep only.
+  let running = 0;
   let timer = null;
   let started = false;
   const idleWaiters = [];
@@ -36,8 +43,8 @@ export function createQueue(store, handlers = {}, {intervalMs = 2000, workerId, 
   const completionMisses = new Map();
 
   async function sweep(now = Date.now()) {
-    if (busy) return; // one sweep at a time; the store serializes writes anyway
-    busy = true;
+    if (running >= maxOverlap) return;
+    running += 1;
     try {
       // Skip the write when nothing is due: store.update rewrites the whole
       // state (DELETE + re-INSERT for SQLite) and this runs every couple of
@@ -82,21 +89,23 @@ export function createQueue(store, handlers = {}, {intervalMs = 2000, workerId, 
       }, Math.max(1000, Math.floor(leaseMs / 3)));
       beat.unref?.();
       try {
-        for (const task of claimed) {
+        // The claimed tasks run side by side, so one slow turn does not hold back the others in its batch. A group
+        // cannot run twice at once: coordination refuses a second run for a busy chat with a 409, and the queue retries it.
+        await Promise.allSettled(claimed.map(async task => {
           // The release has to reach `runTask`: it drops the id before the
           // failure transition, so a heartbeat that is already queued cannot
           // renew a lease that transition just expired.
           try { await runTask(task, () => live.delete(task.id)); }
           finally { live.delete(task.id); }
-        }
+        }));
       } finally {
         clearInterval(beat);
       }
     } catch (e) {
       console.error('Queue sweep error:', e.message);
     } finally {
-      busy = false;
-      for (const resolve of idleWaiters.splice(0)) resolve();
+      running -= 1;
+      if (!running) for (const resolve of idleWaiters.splice(0)) resolve();
     }
   }
 
@@ -201,12 +210,13 @@ export function createQueue(store, handlers = {}, {intervalMs = 2000, workerId, 
     sweep,
     start() {
       started = true;
-      timer = setInterval(() => { if (started) void sweep(); }, intervalMs);
+      // The tick is what health reads: a timer that still fires means the queue is alive, even while every sweep waits on a model.
+      timer = setInterval(() => { if (!started) return; sweeps.set(store, Date.now()); void sweep(); }, intervalMs);
       timer.unref();
       return () => {
         started = false;
         clearInterval(timer);
-        return busy ? new Promise(resolve => idleWaiters.push(resolve)) : Promise.resolve();
+        return running ? new Promise(resolve => idleWaiters.push(resolve)) : Promise.resolve();
       };
     },
   };

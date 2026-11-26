@@ -27,6 +27,6 @@ VOLUME /data
 USER node
 EXPOSE 4173
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s CMD node -e "fetch('http://127.0.0.1:'+process.env.PORT+'/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
-# Node 22 needs --experimental-sqlite for `node:sqlite`; the tag is pinned here so
-# the container does not silently depend on a newer runtime.
+# Node 22 needs --experimental-sqlite for `node:sqlite`. The base image floats within major 22 (node:22-slim):
+# it takes the newest 22.x patch on each build. To pin an exact patch, set FROM to that tag (see .nvmrc).
 CMD ["node", "--experimental-sqlite", "src/server.js"]

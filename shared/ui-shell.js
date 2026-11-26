@@ -12,6 +12,8 @@ import {pauseBanner} from './ui-asks.js';
 import {searchMessages, snippetHtml} from './message-search.js';
 import {store, go, back, groups, findBot, canWrite, isAdmin, loadLocal, saveLocal, isStaticDemo, seenChats, api} from './ui-store.js';
 import {setupChecklist} from './ui-profile-model.js';
+import {shortcutRows} from './ui-model.js';
+import {openSheet, sheetOpen} from './ui-dialogs.js';
 
 const el = id => document.getElementById(id);
 const DESK = '(min-width:1024px)';
@@ -290,12 +292,23 @@ export function focusSearch() {
 
 const typing = target => target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName || '');
 
+/** The keyboard shortcuts, in a sheet (rows from ui-model.js, ⌘ on a Mac). */
+export function showShortcuts() {
+  const mac = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform || globalThis.navigator?.userAgent || '');
+  const rows = shortcutRows(mac).map(r => `<div class="rw kb-row"><span class="w">${esc(r.what)}</span><span class="kb-keys">${r.keys.map(k => `<kbd>${esc(k)}</kbd>`).join('<span aria-hidden="true">+</span>')}</span></div>`).join('');
+  openSheet(`<div class="cd kb-list">${rows}</div>`, {title: 'Keyboard shortcuts', label: 'Keyboard shortcuts'});
+}
+
 /** Document-level wiring: shortcuts, the search boxes, swipes. Called once. */
 export function wireShell() {
   document.addEventListener('keydown', ev => {
     if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') { ev.preventDefault(); return focusSearch(); }
     if (ev.altKey || ev.ctrlKey || ev.metaKey || typing(ev.target) || !store.state) return;
     if (ev.key === 't' || ev.key === 'T' || ev.key === '/') { ev.preventDefault(); return focusSearch(); }
+    // A sheet already open (a confirm, an ask, this one) keeps the keyboard: no second sheet over it, no page change under it.
+    if ((ev.key === '?' || ev.key === ',') && sheetOpen()) return;
+    if (ev.key === '?') { ev.preventDefault(); return showShortcuts(); }
+    if (ev.key === ',') { ev.preventDefault(); return go({settings: 'general'}); }
     // No swipe on a keyboard: the arrows switch the phone home between its two halves.
     if (store.route.home && !isDesk() && (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight')) switchSection(ev.key === 'ArrowLeft' ? 'bots' : 'threads', ev.key === 'ArrowLeft' ? -1 : 1);
   });

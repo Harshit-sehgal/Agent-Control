@@ -4,27 +4,28 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {briefingMessage} from './briefing.js?v=2c827d8a6b';
-import {addTemplate, removeTemplate} from './templates.js?v=2c827d8a6b';
-import {initialState, cleanText} from './core.js?v=2c827d8a6b';
-import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=2c827d8a6b';
-import {RETENTION_DEFAULTS} from './retention.js?v=2c827d8a6b';
-import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=2c827d8a6b';
-import {addChatMessages, clearChat} from './chats.js?v=2c827d8a6b';
-import {publicMemory, rememberFromOwner, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=2c827d8a6b';
-import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=2c827d8a6b';
-import {createThread, titleFrom} from './threads.js?v=2c827d8a6b';
-import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=2c827d8a6b';
-import {simulateGroup} from './group-simulator.js?v=2c827d8a6b';
-import {BUSY_STATUSES} from './run-state.js?v=2c827d8a6b';
-import {botSettings} from './bot-settings.js?v=2c827d8a6b';
-import {denyBrowserRequest} from './bot-browser.js?v=2c827d8a6b';
-import {answerAsk, expireAsks, orphanAsks, setGrant, setAskBasics, restorePermissions} from './asks.js?v=2c827d8a6b';
-import {applyPreset} from './presets.js?v=2c827d8a6b';
-import {setLimits} from './limits.js?v=2c827d8a6b';
-import {activityPage} from './activity-log.js?v=2c827d8a6b';
-import {withLocalLock} from './locks.js?v=2c827d8a6b';
-import {base64Bytes, sniffType, cleanFileName, DEMO_MAX_FILE_BYTES, DEMO_MAX_STORED, MAX_FILE_BYTES} from './attachments.js?v=2c827d8a6b';
+import {briefingMessage} from './briefing.js?v=adaf6b1514';
+import {addTemplate, removeTemplate} from './templates.js?v=adaf6b1514';
+import {initialState, cleanText} from './core.js?v=adaf6b1514';
+import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=adaf6b1514';
+import {RETENTION_DEFAULTS} from './retention.js?v=adaf6b1514';
+import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=adaf6b1514';
+import {addChatMessages, clearChat} from './chats.js?v=adaf6b1514';
+import {publicMemory, rememberFromOwner, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=adaf6b1514';
+import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=adaf6b1514';
+import {createThread, titleFrom} from './threads.js?v=adaf6b1514';
+import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=adaf6b1514';
+import {simulateGroup} from './group-simulator.js?v=adaf6b1514';
+import {BUSY_STATUSES} from './run-state.js?v=adaf6b1514';
+import {botSettings} from './bot-settings.js?v=adaf6b1514';
+import {denyBrowserRequest} from './bot-browser.js?v=adaf6b1514';
+import {answerAsk, expireAsks, orphanAsks, setGrant, setAskBasics, restorePermissions} from './asks.js?v=adaf6b1514';
+import {applyPreset} from './presets.js?v=adaf6b1514';
+import {setLimits} from './limits.js?v=adaf6b1514';
+import {activityPage} from './activity-log.js?v=adaf6b1514';
+import {withLocalLock} from './locks.js?v=adaf6b1514';
+import {addWatch, setWatchOn, removeWatch, publicWatch} from './watches.js?v=adaf6b1514';
+import {base64Bytes, sniffType, cleanFileName, DEMO_MAX_FILE_BYTES, DEMO_MAX_STORED, MAX_FILE_BYTES} from './attachments.js?v=adaf6b1514';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
@@ -361,6 +362,12 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
   // Saved task templates, as on the server (shared/templates.js).
   if (path === '/api/templates' && method === 'POST') { const r = addTemplate(state, {title: body.title, text: body.text}); save(state); return r; }
   if ((m = path.match(/^\/api\/templates\/([a-z0-9-]+)$/)) && method === 'DELETE') { const r = removeTemplate(state, m[1]); save(state); return r; }
+  // Watched pages: kept and listed the same way as on the server, but this demo has no browser to check them with.
+  if (path === '/api/watches' && method === 'GET') return {watches: (state.watches || []).map(publicWatch)};
+  if (path === '/api/watches' && method === 'POST') { const w = addWatch(state, {botId: body.botId, url: body.url, every: body.every, words: body.words}); save(state); return publicWatch(w); }
+  if ((m = path.match(/^\/api\/watches\/([A-Za-z0-9-]+)$/)) && method === 'PATCH') { const w = setWatchOn(state, m[1], body.on === true); save(state); return publicWatch(w); }
+  if ((m = path.match(/^\/api\/watches\/([A-Za-z0-9-]+)$/)) && method === 'DELETE') { removeWatch(state, m[1]); save(state); return {ok: true}; }
+  if ((m = path.match(/^\/api\/watches\/([A-Za-z0-9-]+)\/check$/)) && method === 'POST') throw Object.assign(new Error('This demo has no browser, so it cannot check pages. Run the full app to watch a page.'), {status: 409});
   // Structured task endpoints, identical to the Node server's queue surface.
   if (path === '/api/tasks' && method === 'POST') {
     // Delivery tasks are created by the server from a user's own preferences.

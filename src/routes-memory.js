@@ -9,7 +9,7 @@
  * action here and a background pass during runs.
  */
 import {cleanText} from '../shared/core.js';
-import {addRules, editRule, bookKeyOfRule, findRulebook, forgetChat, forgetRulebook, modelKey, botKey, COMPANY_KEY, publicMemory, removeRule} from '../shared/memory.js';
+import {addRules, editRule, bookKeyOfRule, findRulebook, forgetChat, forgetRulebook, modelKey, botKey, COMPANY_KEY, publicMemory, removeRule, setRuleEnabled} from '../shared/memory.js';
 import {consolidateModel} from './memory.js';
 import {resolveConfig} from './ai-providers.js';
 import {fail} from './http.js';
@@ -45,6 +45,11 @@ export function memoryRoutes(router) {
   // Change one line's text. Its book is the one named, else the one that holds it.
   router.add('PATCH', '/api/memory/rules/:id', 'member', async c => {
     const b = await c.body();
+    // Turning a rule on or off: `{enabled}` alone. A disabled rule is kept but never sent to a bot turn.
+    if (typeof b.enabled === 'boolean' && b.text === undefined) {
+      const rule = await c.store.update(s => setRuleEnabled(s, bookOf(c, b) || bookKeyOfRule(s, c.params.id) || fail('Rule not found.', 404), c.params.id, b.enabled));
+      return {ok: true, rule: {id: rule.id, text: rule.text, source: rule.source, enabled: rule.enabled !== false}};
+    }
     const text = cleanText(b.text, 240);
     if (text.length < 4) fail('A rule needs at least 4 characters.', 400);
     const rule = await c.store.update(s => editRule(s, bookOf(c, b) || bookKeyOfRule(s, c.params.id) || fail('Rule not found.', 404), c.params.id, text));

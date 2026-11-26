@@ -13,6 +13,7 @@
 import crypto from 'node:crypto';
 import {assertPublicUrl, resolvePublicAddress, pinnedRequest} from '../agent/net-guard.mjs';
 import {encryptJson, decryptJson} from './vault.js';
+import {parseQuietHours, inQuietHours} from '../shared/quiet-hours.js';
 
 const RECORD_SIZE = 4096;
 const MAX_PER_USER = 10;
@@ -145,16 +146,18 @@ export function createPush(store, {fetcher = null, guard = assertPublicUrl, reso
     },
     /** Queue one delivery per device of the given accounts, through the
      * workspace's own task queue so an outage is retried. */
-    announce(workspaceStore, enqueue, userIds, {id, title, body}) {
+    announce(workspaceStore, enqueue, userIds, {id, title, body, urgent = false}) {
       for (const userId of userIds) for (const device of devices(userId)) {
         enqueue(workspaceStore, {kind: 'notification', title: 'Push notification', maxAttempts: 3, idempotencyKey: `push:${id}:${device.id}`,
-          payload: {notificationId: id, channel: 'push', target: device.id, title, body}});
+          payload: {notificationId: id, channel: 'push', target: device.id, title, body, urgent: urgent === true}});
       }
     },
     /** Run one queued delivery. */
     async deliver(task) {
       const device = store.get('SELECT * FROM push_subscriptions WHERE id=?', task.payload.target);
       if (!device) return {delivered: 'gone'};
+      // Quiet hours (QUIET_HOURS, e.g. 22:00-07:00): a non-urgent message stays in the app and is not pushed to the phone.
+      if (!task.payload.urgent && inQuietHours(parseQuietHours(process.env.QUIET_HOURS), new Date())) return {delivered: 'quiet'};
       return {delivered: await send(device, task.payload)};
     },
   };

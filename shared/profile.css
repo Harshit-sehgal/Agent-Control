@@ -404,6 +404,9 @@ html.pc-open{overflow:hidden}
 .st-chip .link:hover{background:var(--line)}
 /* the Schedule page: how often and when, side by side */
 .sc-when{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.st-h.sc-sec{margin-top:28px}
+/* A watched page has three buttons: on a phone they sit under its words, not beside them. */
+@media (max-width:560px){.rw.memo.wt{flex-wrap:wrap;row-gap:4px}.rw.memo.wt .w{flex:1 1 100%}.rw.memo.wt .w+.memo-x{margin-left:-10px}}
 .memo .w small{display:block;margin-top:2px;font-size:12.5px;color:var(--muted)}
 .memo .w small.sc-err{color:var(--bad)}
 /* The account is information, not a control: no card, no hover. */
@@ -457,3 +460,7 @@ html.pc-open{overflow:hidden}
 .mdl-find:focus-within>svg{color:var(--text)}
 .mdl-count{position:absolute;right:40px;font-size:12.5px;color:var(--muted);pointer-events:none;font-variant-numeric:tabular-nums;white-space:nowrap}
 .mdl-count:empty{display:none}
+/* The keyboard shortcuts sheet (ui-shell.js showShortcuts). */
+.kb-list .kb-row{gap:12px}
+.kb-keys{display:inline-flex;align-items:center;gap:4px;flex-shrink:0;color:var(--muted);font-size:12px}
+.kb-keys kbd{font:600 12px/1 ui-monospace,SFMono-Regular,Menlo,monospace;min-width:24px;padding:5px 7px;text-align:center;border-radius:6px;background:var(--raised);color:var(--text);border:1px solid var(--line);border-bottom-width:2px}

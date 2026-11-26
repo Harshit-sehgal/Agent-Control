@@ -24,6 +24,7 @@ import {applyPreset} from './presets.js';
 import {setLimits} from './limits.js';
 import {activityPage} from './activity-log.js';
 import {withLocalLock} from './locks.js';
+import {addWatch, setWatchOn, removeWatch, publicWatch} from './watches.js';
 import {base64Bytes, sniffType, cleanFileName, DEMO_MAX_FILE_BYTES, DEMO_MAX_STORED, MAX_FILE_BYTES} from './attachments.js';
 
 const KEY = 'agent-control-ghpages-v1';
@@ -361,6 +362,12 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
   // Saved task templates, as on the server (shared/templates.js).
   if (path === '/api/templates' && method === 'POST') { const r = addTemplate(state, {title: body.title, text: body.text}); save(state); return r; }
   if ((m = path.match(/^\/api\/templates\/([a-z0-9-]+)$/)) && method === 'DELETE') { const r = removeTemplate(state, m[1]); save(state); return r; }
+  // Watched pages: kept and listed the same way as on the server, but this demo has no browser to check them with.
+  if (path === '/api/watches' && method === 'GET') return {watches: (state.watches || []).map(publicWatch)};
+  if (path === '/api/watches' && method === 'POST') { const w = addWatch(state, {botId: body.botId, url: body.url, every: body.every, words: body.words}); save(state); return publicWatch(w); }
+  if ((m = path.match(/^\/api\/watches\/([A-Za-z0-9-]+)$/)) && method === 'PATCH') { const w = setWatchOn(state, m[1], body.on === true); save(state); return publicWatch(w); }
+  if ((m = path.match(/^\/api\/watches\/([A-Za-z0-9-]+)$/)) && method === 'DELETE') { removeWatch(state, m[1]); save(state); return {ok: true}; }
+  if ((m = path.match(/^\/api\/watches\/([A-Za-z0-9-]+)\/check$/)) && method === 'POST') throw Object.assign(new Error('This demo has no browser, so it cannot check pages. Run the full app to watch a page.'), {status: 409});
   // Structured task endpoints, identical to the Node server's queue surface.
   if (path === '/api/tasks' && method === 'POST') {
     // Delivery tasks are created by the server from a user's own preferences.

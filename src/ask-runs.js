@@ -9,6 +9,7 @@
  * the run was stopped or deleted is recorded (and an Always allow still stores its
  * grant) but resumes nothing.
  */
+import {startSweep} from './interval.js';
 import {answerAsk, expireAsks} from '../shared/asks.js';
 import {denyBrowserRequest} from '../shared/bot-browser.js';
 import {dispatchBrowserRequest, finishBrowserRequest} from './bot-browser.js';
@@ -60,15 +61,5 @@ export async function expirePendingAsks(store, {now = new Date().toISOString(), 
 /** The hourly sweep for one workspace, and one pass at start-up for what lapsed while the server was off.
  * Tracked work, so a restore never runs against a file mid-swap. Returns the stop function. */
 export function startAskExpiry(ws, intervalMs = 3600000) {
-  let busy = false, stopped = false;
-  const run = async () => {
-    if (busy || stopped) return;
-    busy = true;
-    try { await (ws.trackWork ? ws.trackWork(() => expirePendingAsks(ws)) : expirePendingAsks(ws)); }
-    catch (e) { if (e?.status !== 503) console.error('Ask expiry error:', e.message); }
-    finally { busy = false; }
-  };
-  void run();
-  const timer = setInterval(() => void run(), intervalMs); timer.unref();
-  return async () => { stopped = true; clearInterval(timer); if (busy) await new Promise(resolve => setTimeout(resolve, 50)); };
+  return startSweep('Ask expiry', () => expirePendingAsks(ws), {intervalMs, ws});
 }

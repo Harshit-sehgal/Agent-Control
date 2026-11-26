@@ -9,6 +9,8 @@ import {aiModel} from './ai.js';
 import {aiAvailable, publicAi} from './ai-providers.js';
 import {fail} from './http.js';
 import {activityPage} from '../shared/activity-log.js';
+import {addWatch, setWatchOn, removeWatch, publicWatch} from '../shared/watches.js';
+import {checkNow} from './watches.js';
 import {publicConnectors} from '../shared/connectors.js';
 import {reply, allows} from './router.js';
 import {peek} from './sqlite-store.js';
@@ -37,24 +39,33 @@ export function slimRun(r) {
 }
 const tagHash = value => crypto.createHash('sha1').update(value).digest('base64url').slice(0, 16);
 
+/** Keys the browser snapshot may carry. An allowlist: a key added to the document later stays server-side until
+ * someone decides the browser needs it. Triggers, held sends and the activity log are deliberately absent. */
+export const SNAPSHOT_KEYS = ['createdAt', 'ai', 'askBasics', 'asks', 'browserRequests', 'chats', 'connectors', 'events', 'grants',
+  'groupMessages', 'groupRuns', 'groups', 'guard', 'handsOff', 'limits', 'memory', 'runs', 'schedulesPaused', 'settings',
+  'tasks', 'templates', 'usage', 'version', 'watches'];
+export function snapshotOf(doc) {
+  const s = {};
+  for (const key of SNAPSHOT_KEYS) if (key in doc) s[key] = doc[key];
+  return s;
+}
+
 export function workflowRoutes(router, {auth}) {
   router.add('GET', '/api/state', 'viewer', c => {
     // Read-only: the cached document is never mutated here. Every field this
     // route changes is replaced on a shallow copy.
     const doc = peek(c.store), me = c.actor, live = aiAvailable(c.store);
-    const s = {...doc};
+    const s = snapshotOf(doc);
     // The stored provider row holds the vault id and may carry a key inside a
     // pasted base URL. The snapshot the browser receives is metadata only.
     // `publicAi` normalises its argument in place, so it gets its own copy.
     s.ai = publicAi({ai: structuredClone(doc.ai)});
     // A connector record is metadata (its secrets are vault credentials), but the snapshot gets the public view anyway.
     s.connectors = publicConnectors({connectors: structuredClone(doc.connectors)});
-    // An email waiting out its Undo window carries its text; the snapshot never does.
-    delete s.heldSends;
-    // The log can be thousands of entries; the snapshot the browser polls leaves it out. GET /api/activity pages it.
-    delete s.activity;
     s.browserRequests = Array.isArray(doc.browserRequests) ? doc.browserRequests.map(slimRequest) : doc.browserRequests;
     s.groupRuns = Array.isArray(doc.groupRuns) ? doc.groupRuns.map(slimRun) : doc.groupRuns;
+    // A watch without what it last saw: those page lines are the server's, for comparing, and could be long.
+    if (Array.isArray(doc.watches)) s.watches = doc.watches.map(publicWatch);
     const hasSavedDefault = s.ai?.providers?.some(provider => provider.id === s.ai.defaultProviderId);
     const model = live ? (s.ai?.defaultModel || (hasSavedDefault ? 'auto' : aiModel())) : null;
     const extra = {aiEnabled: live, aiModel: model, me: {email: me.email, role: me.role}, workspaces: auth.listWorkspaces(me.userId).map(w => ({...w, current: w.id === me.workspaceId})), canCreateWorkspace: auth.roleOf(me.userId) === 'owner', retention: retentionSettings(s),
@@ -100,8 +111,20 @@ export function workflowRoutes(router, {auth}) {
   // Saved task templates (shared/templates.js): one list per workspace, read in the snapshot.
   router.add('POST', '/api/templates', 'member', async c => { const b = await c.body(); return reply(201, await c.store.update(s => addTemplate(s, {title: b.title, text: b.text}))); });
   router.add('DELETE', '/api/templates/:id', 'member', c => c.store.update(s => removeTemplate(s, c.params.id)));
+  // Pages bots watch for changes (shared/watches.js, src/watches.js): read in the snapshot without what they last saw.
+  router.add('GET', '/api/watches', 'viewer', c => ({watches: (peek(c.store).watches || []).map(publicWatch)}));
+  router.add('POST', '/api/watches', 'member', async c => { const b = await c.body(); return reply(201, publicWatch(await c.store.update(s => addWatch(s, {botId: b.botId, url: b.url, every: b.every, words: b.words})))); });
+  router.add('PATCH', '/api/watches/:id', 'member', async c => { const b = await c.body(); return publicWatch(await c.store.update(s => setWatchOn(s, c.params.id, b.on === true))); });
+  router.add('DELETE', '/api/watches/:id', 'member', c => c.store.update(s => { removeWatch(s, c.params.id); return {ok: true}; }));
+  // Check now: due at once, and the sweep starts it within a minute.
+  router.add('POST', '/api/watches/:id/check', 'member', c => c.store.update(s => publicWatch(checkNow(s, c.params.id) || fail('Watch not found.', 404))));
   router.add('POST', '/api/tasks/:id/retry', 'member', c => c.store.update(s => tasks.retryTask(s, c.params.id)));
   router.add('DELETE', '/api/tasks/:id', 'member', c => c.store.update(s => tasks.cancelTask(s, c.params.id)));
+  // Pause and resume one schedule, and the kill switch that holds every schedule at once (shared/tasks.js).
+  router.add('POST', '/api/tasks/:id/pause', 'member', c => c.store.update(s => tasks.pauseTask(s, c.params.id)));
+  router.add('POST', '/api/tasks/:id/resume', 'member', c => c.store.update(s => tasks.resumeTask(s, c.params.id)));
+  router.add('POST', '/api/automation/pause-all', 'member', c => c.store.update(s => ({paused: tasks.pauseAllSchedules(s)})));
+  router.add('POST', '/api/automation/resume-all', 'member', c => c.store.update(s => ({resumed: tasks.resumeAllSchedules(s)})));
 
   // Retention: preview, then apply the workspace policy.
   router.add('GET', '/api/retention/preview', 'viewer', c => { const state = c.store.read(); return {policy: retentionSettings(state), preview: pruneState(state, {dryRun: true})}; });

@@ -11,7 +11,7 @@ import {face} from './ui-face.js';
 import {botStatus} from './ui-company.js';
 import {esc, icon, btn, empty, note, roundBtn, switchBtn, fullDate} from './ui-kit.js';
 import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, applyTheme, themeChoice, THEMES, saveLocal} from './ui-store.js';
-import {isDesk, initials, setupCardHtml, PERM_SEEN} from './ui-shell.js';
+import {isDesk, initials, setupCardHtml, PERM_SEEN, showShortcuts} from './ui-shell.js';
 import {ADMIN_PAGES, adminPage} from './ui-admin.js';
 import {faceOf, headBar, activityBlocks} from './ui-profile.js';
 import {grantRows, allGrantRows, grantUrl, untilOptions, permissionSummary} from './ui-asks.js';
@@ -92,7 +92,8 @@ function general(sections) {
 function look() {
   const now = themeChoice();
   const seg = THEMES.map(t => `<button type="button" data-action="settings-theme" data-theme="${t.id}" aria-pressed="${t.id === now}">${esc(t.name)}</button>`).join('');
-  return card(srow('Theme', `<span class="st-seg" role="group" aria-label="Colour theme">${seg}</span>`, 'Light by day, dark by night, or pinned'));
+  return card(srow('Theme', `<span class="st-seg" role="group" aria-label="Colour theme">${seg}</span>`, 'Light by day, dark by night, or pinned'))
+    + card(`<button type="button" class="rw" data-action="show-shortcuts"><span class="w">Keyboard shortcuts<small>Press ? anywhere to see them</small></span></button>`);
 }
 
 const adminHost = key => `<div id="admin-panel" class="st-admin" data-page="${ADMIN_OF[key]}">${note('Loading…')}</div>`;
@@ -217,6 +218,7 @@ const LIMIT_ROWS = [
   ['pages', 'Pages opened at once', 'Pages or app reads a bot opens side by side. Set one to keep a bot from fanning out across many sites.', [1, 3, 5]],
   ['rounds', 'Look-ups before answering', 'Times in a row a bot reads more before it replies. Set one for quicker, cheaper answers.', [2, 5, 10]],
   ['steps', 'Bot hand-offs per message', 'Bot turns one message can take across a team. Set one to stop bots passing work around for long.', [3, 6, 12]],
+  ['perSite', 'Pages a day on one site', 'Pages bots open on any one site in a day. Set one so a schedule stuck in a loop cannot wear out your X or LinkedIn account.', [20, 50, 100]],
 ];
 function limitsCard(owner) {
   const now = limitsOf(store.state);
@@ -389,6 +391,7 @@ export function activityView() {
 /* ---------- what the buttons do ---------- */
 
 export const settingsActions = {
+  'show-shortcuts': () => showShortcuts(),
   'settings-open': b => {
     const key = b.dataset.section;
     // Beside the sections (laptop) the dialog just changes its body; on a phone a section is a page of its own.

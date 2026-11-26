@@ -8,6 +8,7 @@
  * nothing of the user's is awake; the agent path stays for a laptop that has
  * the browser and the signed-in profile.
  */
+import {startSweep} from './interval.js';
 import * as agent from './agent.js';
 import {browserRuntime} from './browser-runtime.js';
 import {fail} from '../shared/errors.js';
@@ -172,9 +173,12 @@ export async function finishBrowserRequest(store, request, {ok, result = null, e
     if (!live || ['done', 'failed', 'denied'].includes(live.status)) return null;
     live.status = ok ? 'done' : 'failed'; live.updatedAt = stamp(); live.error = ok ? null : cleanText(error, 300);
     live.result = ok && result && typeof result === 'object' ? {title: cleanText(result.title, 200) || null, finalUrl: cleanText(result.finalUrl || result.url, 2000) || null, text: cleanText(text, 4000), page: captured || null} : null;
-    say(s, live.chatKey, text);
+    // A watch's page is compared by code on the watch sweep's next pass (src/watches.js): it is said in no chat and
+    // handed to no bot, so a watched page never reaches a model turn.
+    if (!live.watchId) say(s, live.chatKey, text);
     return live;
   });
+  if (done?.watchId) return done;
   // The continued turn is one round deeper; recordBrowserRequests refuses to
   // open another page once a chain reaches MAX_BROWSER_DEPTH.
   if (done?.runId) {
@@ -273,17 +277,7 @@ export async function expireBrowserTasks(store, hooks = resultHooks, nowMs = Dat
 
 /** Run `expireBrowserTasks` on a short cadence, so a page waits a bounded time even when no device beats. */
 export function startBrowserExpiry(ws, intervalMs = 30000) {
-  let busy = false, stopped = false;
-  const run = async () => {
-    if (busy || stopped) return;
-    busy = true;
-    try { await (ws.trackWork ? ws.trackWork(() => expireBrowserTasks(ws)) : expireBrowserTasks(ws)); }
-    catch (e) { if (e?.status !== 503) console.error('Browser expiry error:', e.message); }
-    finally { busy = false; }
-  };
-  void run();
-  const timer = setInterval(() => void run(), intervalMs); timer.unref();
-  return async () => { stopped = true; clearInterval(timer); if (busy) await new Promise(resolve => setTimeout(resolve, 50)); };
+  return startSweep('Browser expiry', () => expireBrowserTasks(ws), {intervalMs, ws});
 }
 
 /** An agent reported on a task. A task that will retry changes nothing yet. */

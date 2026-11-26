@@ -181,7 +181,7 @@ test('a bot can propose "every Monday at 10"; a day alone means weekly', () => {
 
 test('the stored schedule keeps its day, so its words stay "every Monday"', () => {
   const s = state();
-  const body = scheduleTaskBody({botId: 'inbox', groupId: 'home', message: 'Update my resume', every: 10080, at: '10:00', on: 'monday'}, new Date(2026, 10, 11, 9, 30));
+  const body = scheduleTaskBody({botId: 'inbox', groupId: 'home', message: 'Update my resume', every: 10080, at: '10:00', on: 'monday'}, new Date());
   enqueueTask(s, body);
   assert.equal(scheduleRows(s)[0].when, 'every Monday at 10:00');
 });

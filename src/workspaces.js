@@ -129,6 +129,7 @@ export async function openWorkspaces(primary, auth, start) {
 
   return {
     get: id => open.get(id)?.store || null,
+    stores: () => [...open.values()].map(entry => entry.store).filter(Boolean),
     all: () => [...open].map(([id, {store}]) => ({id, store})),
     create(idOrCreate) {
       if (globallyPaused) return Promise.reject(Object.assign(new Error('A restore is already in progress.'), {status: 409}));

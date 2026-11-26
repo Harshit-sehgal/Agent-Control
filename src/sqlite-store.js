@@ -14,6 +14,7 @@
  * applied version, and `migrate()` is idempotent.
  */
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
 import {initialState} from '../shared/core.js';
 import crypto from 'node:crypto';
@@ -489,7 +490,7 @@ export class SqliteStore {
       this.db = null;
       throw e;
     }
-    try {await fs.chmod(this.dbPath, 0o600);} catch {}
+    this.restrictFiles();
     return this;
   }
   migrate() {
@@ -597,13 +598,22 @@ export class SqliteStore {
       // The owner's switch to ask before a bot opens a page or reads a connected app (shared/asks.js).
       askBasics: this.kvGet('ask_basics') === '1',
       // The owner's Hands-off switch (shared/presets.js): sends, posts and connector writes with no rule go unasked.
-      handsOff: this.kvGet('hands_off') === '1',
+      // A new install (no stored choice) starts on Hands-off; a stored choice of 0 or 1 is kept as it is.
+      handsOff: this.kvGet('hands_off') !== '0',
+      // The kill switch that holds every schedule (shared/tasks.js pauseAllSchedules); a restart keeps it on.
+      schedulesPaused: this.kvGet('schedules_paused') === '1',
       // The owner's limits on how far bots go per message (shared/limits.js); empty is no limit.
       limits: (() => { try { return JSON.parse(this.kvGet('limits') || '{}'); } catch { return {}; } })(),
       // The owner's saved task templates (shared/templates.js).
       templates: (() => { try { return JSON.parse(this.kvGet('templates') || '[]'); } catch { return []; } })(),
+      // Event triggers (src/triggers.js): their rules, dedup records and last fire time. The secret is in the vault.
+      triggers: (() => { try { return JSON.parse(this.kvGet('triggers') || '[]'); } catch { return []; } })(),
       // Tokens (and cost, where the owner set a price) per bot per day, bounded by shared/usage.js.
       usage: (() => { try { return JSON.parse(this.kvGet('usage') || '{"days":{}}'); } catch { return {days: {}}; } })(),
+      // Pages bots opened per site today, for the per-site daily limit (shared/limits.js); only today is kept.
+      siteVisits: (() => { try { return JSON.parse(this.kvGet('site_visits') || 'null'); } catch { return null; } })(),
+      // Pages bots watch for changes (shared/watches.js), with what each last saw.
+      watches: (() => { try { return JSON.parse(this.kvGet('watches') || '[]'); } catch { return []; } })(),
       memory: readMemory(kind => this.db.prepare('SELECT key, doc FROM memory WHERE kind=? ORDER BY rowid').all(kind)),
     };
     const cfg = this.db.prepare('SELECT * FROM settings WHERE id=1').get();
@@ -704,9 +714,13 @@ export class SqliteStore {
       kv('guard', JSON.stringify(state.guard || freshGuard()));
       kv('ask_basics', state.askBasics ? '1' : '0');
       kv('hands_off', state.handsOff === true ? '1' : '0');
+      kv('schedules_paused', state.schedulesPaused === true ? '1' : '0');
       kv('limits', JSON.stringify(state.limits || {}));
       kv('templates', JSON.stringify(state.templates || []));
+      kv('triggers', JSON.stringify(state.triggers || []));
       kv('usage', JSON.stringify(state.usage || {days: {}}));
+      kv('site_visits', JSON.stringify(state.siteVisits || null));
+      kv('watches', JSON.stringify(state.watches || []));
       const retention = state.settings?.retention ? JSON.stringify(state.settings.retention) : null;
       if (this.kvWritten.get('\0settings') !== String(retention)) {
         this.stmt('INSERT INTO settings (id,retention) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET retention=excluded.retention').run(retention);
@@ -763,12 +777,21 @@ export class SqliteStore {
       const result = await fn(next);
       this.writeCollections(next);
       this.cache = next;
+      // The write-ahead and shared-memory files appear with the first commit, after open, so their mode is
+      // set then. They hold the same recent writes as the database.
+      if (!this.modesSet) { this.modesSet = true; this.restrictFiles(); }
       return result;
     });
     this.serial = op.catch(() => {});
     return op;
   }
   update(fn) { return this.enqueue(fn); }
+  /** Owner-only on every file the database writes, not just the main one. */
+  restrictFiles() {
+    for (const file of [this.dbPath, `${this.dbPath}-wal`, `${this.dbPath}-shm`]) {
+      try { fsSync.chmodSync(file, 0o600); } catch { /* not created (yet) */ }
+    }
+  }
 }
 
 /** ROLLBACK can itself fail: SQLite already rolls the transaction back on

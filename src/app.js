@@ -23,6 +23,9 @@ import * as agent from './agent.js';
 import {startRetention} from './scheduler.js';
 import {markInterrupted, queueGroupRun} from './coordination.js';
 import {startFollowUps} from './follow-ups.js';
+import {createHealthWatch} from './health-watch.js';
+import {startWatches} from './watches.js';
+import {startSweep} from './interval.js';
 import {startAskExpiry} from './ask-runs.js';
 import {startHeldSends} from './held-sends.js';
 import {startBrowserExpiry} from './bot-browser.js';
@@ -39,6 +42,7 @@ import {workspaceRoutes} from './routes-workspaces.js';
 import {pushRoutes} from './routes-push.js';
 import {aiRoutes} from './routes-ai.js';
 import {memoryRoutes} from './routes-memory.js';
+import {eventRoutes} from './routes-events.js';
 import {connectorRoutes} from './routes-connectors.js';
 import {liveRoutes} from './routes-live.js';
 import {fileRoutes} from './routes-files.js';
@@ -51,20 +55,10 @@ const PUBLIC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 
  * sweep for those two tables. Work is tracked so a workspace being restored
  * never has raw SQL run against its file mid-swap. */
 function startAgentRetention(ws, intervalMs = 86400000) {
-  let busy = false, stopped = false;
-  const run = async () => {
-    if (busy || stopped) return;
-    busy = true;
-    try {
-      const sweep = () => ({...ws.pruneAgentRows(), files: pruneAttachments(ws)});
-      const report = ws.trackWork ? await ws.trackWork(async () => sweep()) : sweep();
-      if (report.pairingCodes || report.agentTasks || report.files) console.log(`Retention pruned ${report.pairingCodes} pairing code(s), ${report.agentTasks} agent task record(s), ${report.files} unused attachment(s).`);
-    } catch (e) { if (e?.status !== 503) console.error('Agent retention error:', e.message); }
-    finally { busy = false; }
-  };
-  void run();
-  const timer = setInterval(() => void run(), intervalMs); timer.unref();
-  return async () => { stopped = true; clearInterval(timer); if (busy) await new Promise(resolve => setTimeout(resolve, 50)); };
+  return startSweep('Agent retention', async () => {
+    const report = {...ws.pruneAgentRows(), files: pruneAttachments(ws)};
+    if (report.pairingCodes || report.agentTasks || report.files) console.log(`Retention pruned ${report.pairingCodes} pairing code(s), ${report.agentTasks} agent task record(s), ${report.files} unused attachment(s).`);
+  }, {intervalMs, ws});
 }
 
 /** Build the `start(store, id)` a workspace opener calls. Everything that runs in
@@ -93,7 +87,7 @@ export function createWorkspaceStarter({auth, push}) {
     // Nothing runs until recovery has finished, so a stalled task is re-armed
     // before the first sweep can see it.
     let stops = [], stopped = false;
-    ready.then(() => { if (!stopped) stops = [startRetention(ws), startAgentRetention(ws), startAskExpiry(ws), startHeldSends(ws), startBrowserExpiry(ws), startFollowUps(ws, queueGroupRun), queue.start()]; }).catch(error => console.error(`Workspace ${workspaceId} failed to start:`, error.message));
+    ready.then(() => { if (!stopped) stops = [startRetention(ws), startAgentRetention(ws), startAskExpiry(ws), startHeldSends(ws), startBrowserExpiry(ws), startFollowUps(ws, queueGroupRun), createHealthWatch(ws, {workspaceId, notify}).start(), startWatches(ws, {notify}), queue.start()]; }).catch(error => console.error(`Workspace ${workspaceId} failed to start:`, error.message));
     const stop = async () => { stopped = true; await ready.catch(() => {}); for (const s of stops) await s(); };
     stop.ready = ready;
     return stop;
@@ -139,6 +133,7 @@ export function createApp({store, auth, workspaces, push, version}) {
   pushRoutes(router, app);
   aiRoutes(router, app);
   memoryRoutes(router);
+  eventRoutes(router, app);
   connectorRoutes(router, app);
   liveRoutes(router, app);
   fileRoutes(router);

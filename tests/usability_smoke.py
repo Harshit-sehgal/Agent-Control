@@ -2050,6 +2050,115 @@ async def older_google_connection_listed(page, base):
     await eventually(lambda: len(server.sent('DELETE', '/api/connectors/google')) == 1)
 
 
+async def shortcuts_sheet(page, base):
+    """? opens the shortcuts sheet (not while typing), Esc closes it, comma opens Settings, and Settings → Look
+    has a row that opens the same sheet."""
+    await install(page)
+    await open_app(page, base)
+    await page.locator('body').click(position={'x': 5, 'y': 5})
+    await page.keyboard.press('?')
+    modal = page.locator('#modal')
+    await expect(modal).to_contain_text('Keyboard shortcuts')
+    await expect(modal.locator('kbd', has_text='K')).to_have_count(1)
+    await expect(modal).to_contain_text('Open Settings')
+    # With a sheet open, comma does not move the page underneath it.
+    before = page.url
+    await page.keyboard.press(',')
+    await expect(modal).to_contain_text('Keyboard shortcuts')
+    assert page.url == before, (before, page.url)
+    await page.keyboard.press('Escape')
+    await expect(modal).to_be_hidden()
+    box = page.locator('#chat-form textarea')
+    if await box.count():
+        await box.click()
+        await page.keyboard.type('?')
+        await expect(modal).to_be_hidden()
+        await expect(box).to_have_value('?')
+        await box.fill('')
+    await page.locator('body').click(position={'x': 5, 'y': 5})
+    await page.keyboard.press(',')
+    await expect(page.locator('#main .st-dlg')).to_be_visible()
+    await goto_settings_section(page, 'look')
+    await page.locator('#main .st-dlg').get_by_role('button', name='Keyboard shortcuts').click()
+    await expect(modal).to_contain_text('Show these shortcuts')
+
+
+async def share_target_prefills_never_sends(page, base):
+    """A link shared from the phone's Share sheet opens the lead bot with it in the message box, says nothing is
+    sent until Send, and leaves the address so a reload does not paste it again."""
+    server = await install(page)
+    await page.goto(f'{base}/index.html?share-title=Rust%202.0&share-url=https%3A%2F%2Fblog.example%2Frust')
+    await page.locator(SCREEN).first.wait_for()
+    box = page.locator('#chat-form textarea')
+    await expect(box).to_have_value('Rust 2.0\nhttps://blog.example/rust')
+    await expect(page.locator('#toast')).to_contain_text('sent only when you press Send')
+    assert await page.evaluate('location.search') == '', 'the shared words should leave the address'
+    await page.wait_for_timeout(300)
+    assert not [c for c in server.calls if c[0] == 'POST' and '/chat' in c[1]], 'nothing may be sent by a share'
+    await page.reload()
+    await page.locator(SCREEN).first.wait_for()
+    await expect(page.locator('#toast.show')).to_have_count(0)
+
+
+async def teach_from_a_reply(page, base):
+    """A bot reply has Copy and Teach on hover; Teach keeps what the owner types as that bot's own rule, on one line,
+    and says so. The bar takes no room in the bubble."""
+    await open_app(page, base, bots=EXTRA_BOTS)
+    await patch_state(page, f'''
+        s.chats[{PRIMARY!r}] = [
+          {{id: 'q', role: 'user', text: 'Draft my week', at: new Date(Date.now() - 2000).toISOString()}},
+          {{id: 'a', role: 'bot', senderId: {PRIMARY!r}, senderName: 'Atlas', text: 'Here is a very long plan for your week, with every detail.', at: new Date().toISOString()}}];''')
+    await page.goto(f'{base}/index.html#bot/{PRIMARY}')
+    reply = page.locator('#cv-log .cv-bot').last
+    await expect(reply).to_contain_text('very long plan')
+    bubble = await reply.locator('.cv-body').bounding_box()
+    words = await reply.locator('.md').bounding_box()
+    assert bubble['y'] + bubble['height'] - (words['y'] + words['height']) < 20, 'the bar must not add room to the bubble'
+    await reply.hover()
+    await expect(reply.locator('.cv-acts')).to_have_css('opacity', '1')
+    await expect(reply.get_by_role('button', name='Copy')).to_be_visible()
+    await reply.get_by_role('button', name='Teach').click()
+    modal = page.locator('#modal')
+    await expect(modal).to_contain_text('Teach Atlas')
+    await modal.locator('textarea').fill('Keep plans\n under five lines.')
+    await modal.get_by_role('button', name='Keep this rule').click()
+    await expect(modal).to_be_hidden()
+    await expect(page.locator('#toast')).to_contain_text('Atlas will do that from now on')
+    book = await page.evaluate("id => window.AGENT_API('/api/memory?bot=' + id).then(m => JSON.stringify(m))", PRIMARY)
+    assert 'Keep plans under five lines.' in book, book[:400]
+
+
+async def watch_a_page(page, base):
+    """A bot's Schedule page watches a page: the form adds it, the row says how often and that it is not checked yet,
+    Pause and Remove work, the profile counts it, a bad address says why, and the demo's Check now says it has no
+    browser rather than pretending."""
+    await open_app(page, base, bots=EXTRA_BOTS)
+    await page.goto(f'{base}/index.html#profile/{PRIMARY}/schedule')
+    form = page.locator('#watch-form')
+    await form.locator('[name=url]').fill('https://shop.example/item')
+    await form.locator('[name=every]').select_option('hour')
+    await form.locator('[name=words]').fill('In stock')
+    await form.get_by_role('button', name='Watch this page').click()
+    await expect(page.locator('#toast')).to_contain_text('You hear only when it changes')
+    row = page.locator('#pr-watches .rw').first
+    await expect(row).to_contain_text('"In stock" on shop.example/item')
+    await expect(row).to_contain_text('Every hour · not checked yet')
+    await row.get_by_role('button', name='Check now').click()
+    await expect(page.locator('#toast')).to_contain_text('no browser')
+    await row.get_by_role('button', name='Pause').click()
+    await expect(row).to_contain_text('Paused · Every hour')
+    await expect(row.get_by_role('button', name='Check now')).to_have_count(0)
+    await page.evaluate("document.querySelector('#watch-form [name=url]').type = 'text'")
+    await form.locator('[name=url]').fill('file:///etc/passwd')
+    await form.get_by_role('button', name='Watch this page').click()
+    await expect(page.locator('#toast')).to_contain_text('public web address')
+    await page.goto(f'{base}/index.html#profile/{PRIMARY}')
+    await expect(page.locator('#main')).to_contain_text('1 page watched')
+    await page.goto(f'{base}/index.html#profile/{PRIMARY}/schedule')
+    await page.locator('#pr-watches .rw').first.get_by_role('button', name='Remove').click()
+    await expect(page.locator('#pr-watches')).to_contain_text('No pages watched')
+
+
 async def google_return_toast_and_clean_address(page, base):
     await install(page)
     await page.goto(f'{base}/index.html?google=connected')
@@ -2637,6 +2746,10 @@ async def main():
             await h.scenario('connectors: add an MCP server over HTTP and on the agent, refresh its tools, delete asks first, no secret is painted', connectors_add_and_delete_mcp)
             await h.scenario('connectors: Connect is one tap to the app\'s own MCP sign-in, a token, or what .env lacks', connect_apps_one_tap)
             await h.scenario('connectors: no Google Cloud form; an older Google connection offers Gmail\'s MCP server', older_google_connection_listed)
+            await h.scenario('shortcuts: ? opens the sheet (not while typing), comma opens Settings, Look has the row', shortcuts_sheet)
+            await h.scenario('share: a shared link prefills the lead bot\'s message box and sends nothing', share_target_prefills_never_sends)
+            await h.scenario('teach: a reply\'s Teach keeps a rule for that bot; the bar takes no room', teach_from_a_reply)
+            await h.scenario('watch: a page is watched from the Schedule page; pause, remove, a bad address, the demo has no browser', watch_a_page)
             await h.scenario('connectors: ?google=connected toasts once, strips the address and opens Connectors; an error says why', google_return_toast_and_clean_address)
             await h.scenario('models: a subscription is a name and an engine with no key field, and its row says where it is signed in', subscription_provider_and_cli_status)
             await h.scenario('models: Add a model is one card with a choice, the dots hold Edit, Refresh and Delete, one model picker', models_api_provider_menu_and_one_model_picker)

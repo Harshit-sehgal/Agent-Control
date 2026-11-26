@@ -157,7 +157,7 @@ test('a claimed batch keeps every lease alive while an earlier task runs', async
   let openGate;
   const gate = new Promise(resolve => { openGate = resolve; });
   const leaseMs = 1500;
-  // Handlers run serially. Only the first blocks, so a second worker that
+  // The batch runs side by side. Only the first blocks, so a second worker that
   // wrongly re-claims a task records the duplicate instead of deadlocking.
   const handler = async task => { calls.push(task.id); if (calls.length === 1) await gate; };
   const a = createQueue(store, {slow: handler}, {intervalMs: 60000, workerId: 'worker-a', leaseMs, batch: 2});
@@ -166,11 +166,11 @@ test('a claimed batch keeps every lease alive while an earlier task runs', async
   const second = await store.update(s => rawTask(s, {kind: 'slow', title: 'second'}));
   const running = a.sweep();
   // Wait past the original lease window while the first task still runs. Every
-  // claim in the batch must have been renewed by then, or the waiting second
-  // task looks stalled and gets executed twice.
+  // claim in the batch must have been renewed by then, or a claim that looks
+  // stalled would be executed twice.
   await new Promise(resolve => setTimeout(resolve, leaseMs + 400));
   await b.sweep();
-  assert.equal(calls.length, 1, 'the waiting task must not be re-claimed by another worker');
+  assert.equal(calls.length, 2, 'each task ran once; the other worker must not re-claim either');
   openGate();
   await running;
   assert.deepEqual([...calls].sort(), [first.id, second.id].sort(), 'each task ran exactly once');

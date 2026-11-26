@@ -9,6 +9,7 @@ const auth = {
   login: ({password}) => password === 'right'
     ? {ok: true, user: {email: 'owner@localhost'}, role: 'owner', sessionId: 's'}
     : {ok: false, error: 'Wrong email or password.', status: 401},
+  async loginAsync(input, meta) { return this.login(input, meta); },
   logout() {},
   requestPasswordReset: () => 'reset-token-123',
   consumePasswordReset() {},

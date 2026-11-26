@@ -7,33 +7,33 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=2c827d8a6b';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=2c827d8a6b';
-import {requestOfMessage} from './bot-browser.js?v=2c827d8a6b';
-import {validHttpUrl} from './core.js?v=2c827d8a6b';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=2c827d8a6b';
-import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=2c827d8a6b';
-import {isPrimary} from './company.js?v=2c827d8a6b';
-import {hasJob, modelChip} from './ui-profile-model.js?v=2c827d8a6b';
-import {scheduleTaskBody} from './schedules.js?v=2c827d8a6b';
-import {briefingTaskBody} from './briefing.js?v=2c827d8a6b';
-import {feed, fileStrip} from './ui-feed.js?v=2c827d8a6b';
-import {attachButton, chipsSlot, wireAttach} from './ui-attach.js?v=2c827d8a6b';
-import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js?v=2c827d8a6b';
-import {askCard} from './ui-asks.js?v=2c827d8a6b';
-import {UNTIL_CHOICES, untilFor} from './asks.js?v=2c827d8a6b';
-import {undoToast} from './ui-settings.js?v=2c827d8a6b';
-import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=2c827d8a6b';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=2c827d8a6b';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=2c827d8a6b';
-import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=2c827d8a6b';
-import {toast, confirmSheet} from './ui-dialogs.js?v=2c827d8a6b';
-import {siteChip, thumbSlot} from './ui-computer-view.js?v=2c827d8a6b';
-import {cliChoice} from './ui-connect-model.js?v=2c827d8a6b';
-import {connectAppNow} from './ui-connect.js?v=2c827d8a6b';
-import {appById} from './app-catalog.js?v=2c827d8a6b';
-import {templateChipsHtml, templateButton} from './ui-templates.js?v=2c827d8a6b';
-import {usageWords} from './usage.js?v=2c827d8a6b';
+import {OFFJOB_CHOICES} from './off-job.js?v=adaf6b1514';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=adaf6b1514';
+import {requestOfMessage} from './bot-browser.js?v=adaf6b1514';
+import {validHttpUrl} from './core.js?v=adaf6b1514';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou, teachPrompt, teachRule} from './ui-model.js?v=adaf6b1514';
+import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=adaf6b1514';
+import {isPrimary} from './company.js?v=adaf6b1514';
+import {hasJob, modelChip} from './ui-profile-model.js?v=adaf6b1514';
+import {scheduleTaskBody} from './schedules.js?v=adaf6b1514';
+import {briefingTaskBody} from './briefing.js?v=adaf6b1514';
+import {feed, fileStrip} from './ui-feed.js?v=adaf6b1514';
+import {attachButton, chipsSlot, wireAttach} from './ui-attach.js?v=adaf6b1514';
+import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js?v=adaf6b1514';
+import {askCard} from './ui-asks.js?v=adaf6b1514';
+import {UNTIL_CHOICES, untilFor} from './asks.js?v=adaf6b1514';
+import {undoToast} from './ui-settings.js?v=adaf6b1514';
+import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=adaf6b1514';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=adaf6b1514';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=adaf6b1514';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=adaf6b1514';
+import {toast, confirmSheet, askSheet} from './ui-dialogs.js?v=adaf6b1514';
+import {siteChip, thumbSlot} from './ui-computer-view.js?v=adaf6b1514';
+import {cliChoice} from './ui-connect-model.js?v=adaf6b1514';
+import {connectAppNow} from './ui-connect.js?v=adaf6b1514';
+import {appById} from './app-catalog.js?v=adaf6b1514';
+import {templateChipsHtml, templateButton} from './ui-templates.js?v=adaf6b1514';
+import {usageWords} from './usage.js?v=adaf6b1514';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -257,8 +257,13 @@ function botEntry(m, conv) {
   const bot = m.senderId ? findBot(m.senderId) : conv.bot, name = bot?.name || m.senderName || conv.name;
   // The name says who is talking in a thread; its job is on its profile, not on every reply.
   const own = !conv.isTeam && bot && bot === conv.bot ? ' own' : '';
-  return `<div class="cv-bot${own}" data-m="${esc(m.id)}" style="--t:${tintOf(bot, name)}">${botFace(bot, name, 36)}<div class="cv-body"><div class="cv-name">${esc(name)}</div><div class="md">${md(m.text)}</div></div></div>`;
+  // Copy and Teach sit under the words: Teach turns "not like that" into a rule the bot keeps (see `teach-reply`).
+  const acts = `<div class="cv-acts">${btn('Copy', 'copy-reply', {small: true, glyph: 'copy'})}${bot && canWrite() ? btn('Teach', 'teach-reply', {small: true, glyph: 'spark', data: {bot: bot.id}}) : ''}</div>`;
+  return `<div class="cv-bot${own}" data-m="${esc(m.id)}" style="--t:${tintOf(bot, name)}">${botFace(bot, name, 36)}<div class="cv-body"><div class="cv-name">${esc(name)}</div><div class="md">${md(m.text)}</div>${acts}</div></div>`;
 }
+
+/** The words of the reply a Copy or Teach button sits under, as the owner sees them. */
+const replyText = b => b.closest('.cv-bot')?.querySelector('.md')?.innerText?.trim() || '';
 
 /** Where an attached file is read from: the server route, or the demo's own copy. */
 const fileSrc = ref => isStaticDemo() ? store.state?.attachments?.[ref.id]?.url || '' : `/api/attachments/${ref.id}`;
@@ -465,6 +470,25 @@ export const conversationChanges = {
 
 export const conversationActions = {
   'ask-answer': b => answerAsk(b.dataset.id, b.dataset.choice),
+  'copy-reply': async b => {
+    try { await navigator.clipboard.writeText(replyText(b)); toast('Copied.'); }
+    catch { toast('This browser did not allow copying. Select the words and copy them instead.', true); }
+  },
+  // A wrong reply becomes a fix in one tap: the owner says what to do from now on, and it is kept as that bot's own
+  // rule, the same as one added on its profile. Nothing is sent to the bot now; its next turn reads the rule.
+  'teach-reply': async b => {
+    const bot = findBot(b.dataset.bot);
+    if (!bot) return;
+    const prompt = teachPrompt({botName: bot.name});
+    const answer = await askSheet(prompt.title, {sub: prompt.sub, placeholder: prompt.placeholder, submit: 'Keep this rule'});
+    if (answer == null) return;
+    const text = teachRule(answer);
+    if (!text) { toast('Write a little more: a rule needs at least 4 characters.', true); return; }
+    // `label` names the bot's rule book if this is its first rule (as on its profile), not the rule.
+    await api('/api/memory/rules', 'POST', {bot: bot.id, text, label: bot.name});
+    await sync();
+    toast(`${bot.name} will do that from now on. Edit it on its profile.`);
+  },
   'open-profile': b => go({profile: b.dataset.id}),
   hop: b => hop(b),
   'offjob-anyway': b => { const m = offjobOf(b); return runAnyway(m.botId, m.request); },

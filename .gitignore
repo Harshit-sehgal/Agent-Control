@@ -32,3 +32,6 @@ agent/agent.config.json
 
 # Generated UI screenshots
 ui-*.png
+
+# Nested git worktrees made by agents
+.claude/worktrees/

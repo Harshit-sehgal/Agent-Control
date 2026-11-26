@@ -20,12 +20,12 @@
  * X and Twitter work like any other site: a bot may read, click and type there, and a click on Post asks
  * unless the owner set Always allow for posting on that site.
  */
-import {cleanText, validHttpUrl} from './core.js?v=2c827d8a6b';
-import {fail} from './errors.js?v=2c827d8a6b';
-import {decide, createAsk, scopeOf, declinedNeed} from './asks.js?v=2c827d8a6b';
-import {controlFence} from './reply-blocks.js?v=2c827d8a6b';
-import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=2c827d8a6b';
-import {appForHost} from './app-catalog.js?v=2c827d8a6b';
+import {cleanText, validHttpUrl} from './core.js?v=adaf6b1514';
+import {fail} from './errors.js?v=adaf6b1514';
+import {decide, createAsk, scopeOf, declinedNeed, outsideRead} from './asks.js?v=adaf6b1514';
+import {controlFence} from './reply-blocks.js?v=adaf6b1514';
+import {BACKSTOP, pagesCap, roundsCap, siteOf, siteCapLeft, countSitePage, limitsOf} from './limits.js?v=adaf6b1514';
+import {appForHost} from './app-catalog.js?v=adaf6b1514';
 
 /** The most page text one model turn carries (the pages of a round together). */
 export const MAX_PAGE_CHARS = 24000;
@@ -623,8 +623,17 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
     if (no) { say(`${bot.name} asked to ${describe(item.request)}, but you declined that in this task, so it was not asked again.`); invalid.push(`the owner declined ${no.action === 'browser.use' ? 'opening' : no.action} ${hostOf(no.target)} in this task; do not ask for it again.`); continue; }
     // Per page: every site the request reaches that is not one of the run's private hosts asks, including one a
     // `navigate` step opens after a private first page.
-    const decision = decide(state, bot, needs, {readPrivate: need => guarded && need.action === BROWSER_PERMISSION && !privateHosts.has(hostOf(need.target))});
+    const decision = decide(state, bot, needs, {readPrivate: need => guarded && need.action === BROWSER_PERMISSION && !privateHosts.has(hostOf(need.target)), outside: run?.outsideInput === true, tainted: guarded || outsideRead(state, {runId, chatKey, outsideInput: run?.outsideInput === true})});
     if (decision.verdict === 'deny') { say(`${bot.name} asked to ${describe(item.request)}. ${decision.message}`); continue; }
+    // The owner's per-site daily limit (Settings → Limits): past it, nothing more opens on that site today.
+    const site = siteOf(item.request.url);
+    if (siteCapLeft(state, site, now) <= 0) {
+      const cap = limitsOf(state).perSite;
+      say(`${bot.name} asked to open ${site}, but bots already opened ${cap} pages on ${site} today, the limit you set in Settings. It starts over at midnight UTC.`);
+      invalid.push(`the owner's limit of ${cap} pages a day on ${site} is used up; do not ask for ${site} again today.`);
+      continue;
+    }
+    countSitePage(state, site, now);
     // `approved`: the risky classes this request is cleared for once it is sent (a grant, or the owner's
     // answer to its ask), each for the origin it runs on ("send@https://b.example"). Written here after the
     // validated request, so a reply cannot set it; the browser refuses any other risky control it meets,
