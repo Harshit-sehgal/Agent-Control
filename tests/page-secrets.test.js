@@ -90,28 +90,60 @@ test('hiding reads a contenteditable secret from innerText, skips other fields, 
   assert.equal(hideSecrets('text', []), 'text');
 });
 
-test('the three functions agree on what is secret', () => {
+test('the whole token matrix is secret to all three functions', () => {
+  const kinds = ['current-password', 'new-password', 'one-time-code', 'cc-number', 'cc-csc', 'cc-exp', 'cc-exp-month', 'cc-exp-year'];
   const cases = [
-    field({type: 'password', value: 'secret-value'}),
-    field({type: 'text', value: 'secret-value', attrs: {autocomplete: 'cc-csc'}}),
-    field({type: 'text', value: 'secret-value', taggedAncestor: true}),
-    field({type: 'text', value: 'secret-value'}),
-    field({tagName: 'TEXTAREA', value: 'secret-value'}),
+    ...kinds.flatMap(k => [k, k.toUpperCase(), `section-a ${k}`].map(autocomplete => ({type: 'text', attrs: {autocomplete}}))),
+    {type: 'PASSWORD', attrs: {}}, {type: 'password', attrs: {}}, {type: 'text', attrs: {'data-agent-secret': ''}},
   ];
-  for (const el of cases) {
-    const secret = isSecretField(el);
-    assert.equal(hideSecrets('x secret-value x', [el]) !== 'x secret-value x', secret);
-    assert.equal(labelOf(el).includes('secret-value'), !secret);
+  for (const c of cases) {
+    const el = field({tagName: 'INPUT', value: 'secret-value', ...c});
+    assert.equal(isSecretField(el), true, JSON.stringify(c));
+    assert.doesNotMatch(labelOf(el), /secret-value/, JSON.stringify(c));
+    assert.equal(hideSecrets('x secret-value x', [el]), 'x [hidden] x', JSON.stringify(c));
   }
+  const plain = field({tagName: 'INPUT', type: 'text', value: 'secret-value'});
+  assert.equal(labelOf(plain), 'secret-value');
+  assert.equal(hideSecrets('x secret-value x', [plain]), 'x secret-value x');
 });
 
-test('the embedded script declares the same functions', () => {
-  const ctx = {}; vm.runInNewContext(`${PAGE_SECRETS_JS};this.ok=typeof isSecretField+typeof labelOf+typeof hideSecrets`, ctx);
-  assert.equal(ctx.ok, 'functionfunctionfunction');
+test('only form fields can be secret: a button keeps its own label', () => {
+  const pay = field({tagName: 'INPUT', type: 'submit', value: 'Pay now', attrs: {autocomplete: 'cc-csc'}});
+  assert.equal(isSecretField(pay), false);
+  assert.equal(labelOf(pay), 'Pay now');
+  for (const type of ['button', 'reset', 'image']) assert.equal(isSecretField(field({type, attrs: {autocomplete: 'cc-csc'}})), false, type);
+  const button = field({tagName: 'BUTTON', innerText: 'Pay now', taggedAncestor: true});
+  assert.equal(isSecretField(button), false);
+  assert.equal(labelOf(button), 'Pay now');
+  assert.equal(hideSecrets('Pay now', [pay, button]), 'Pay now');
+  for (const tagName of ['TEXTAREA', 'SELECT']) assert.equal(isSecretField(field({tagName, taggedAncestor: true})), true, tagName);
 });
 
-test('each function works alone, with nothing else from the module in scope', () => {
+test('hiding is one pass: a secret cannot mangle the marker, and overlapping secrets leave nothing visible', () => {
+  const pw = field({type: 'password', value: 'hunter22'});
+  const hid = field({type: 'password', value: 'hid'});
+  assert.equal(hideSecrets('hunter22 and hid', [pw, hid]), '[hidden] and [hidden]');
+  assert.equal(hideSecrets('hunter22 and hid', [hid, pw]), '[hidden] and [hidden]');
+  const a = field({type: 'password', value: 'abcd'});
+  const b = field({type: 'password', value: 'cdef'});
+  assert.equal(hideSecrets('is abcdef ok', [a, b]), 'is [hidden] ok');
+  assert.equal(hideSecrets('is abcdef ok', [b, a]), 'is [hidden] ok');
+  // One value found at overlapping places ("aaaa" twice in "aaaaa") is one hidden run.
+  assert.equal(hideSecrets('x aaaaa y', [field({type: 'password', value: 'aaaa'})]), 'x [hidden] y');
+});
+
+test('a contenteditable secret is trimmed before matching, a password value is not', () => {
+  const code = field({tagName: 'DIV', isContentEditable: true, innerText: '123456\n', taggedAncestor: true});
+  assert.equal(hideSecrets('Code 123456 sent', [code]), 'Code [hidden] sent');
+  const padded = field({type: 'password', value: ' abc '});
+  assert.equal(hideSecrets('x abc y', [padded]), 'x[hidden]y');
+  assert.equal(hideSecrets('x abc y', [field({type: 'password', value: 'abc'})]), 'x [hidden] y');
+  assert.equal(hideSecrets('x  abc  y', [padded]), 'x [hidden] y');
+});
+
+test('the embedded bundle declares the three functions and they work together', () => {
   const ctx = {el: field({type: 'password', value: 'hunter22'})};
-  vm.runInNewContext(`this.a=(${isSecretField.toString()})(el);this.b=(${labelOf.toString()})(el);this.c=(${hideSecrets.toString()})('hunter22',[el])`, ctx);
-  assert.deepEqual([ctx.a, ctx.b, ctx.c], [true, 'password field', '[hidden]']);
+  vm.runInNewContext(`${PAGE_SECRETS_JS};this.ok=typeof isSecretField+typeof labelOf+typeof hideSecrets;this.a=isSecretField(el);this.b=labelOf(el);this.c=hideSecrets('pw hunter22',[el])`, ctx);
+  assert.equal(ctx.ok, 'functionfunctionfunction');
+  assert.deepEqual([ctx.a, ctx.b, ctx.c], [true, 'password field', 'pw [hidden]']);
 });
