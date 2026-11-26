@@ -1,0 +1,126 @@
+// Encrypted cookie jars: one file per browser account, on this computer only.
+//
+// A jar holds every cookie of one account's browser context, so it is as
+// valuable as a password. It is AES-256-GCM encrypted under a key derived from
+// the pairing secret, bound to its account id, 0600 inside a 0700 folder, and
+// never read by anything but the shared browser. Nothing here logs a cookie
+// value or a key, and no error message carries one.
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
+/** A local copy of the server's ACCOUNT_ID pattern (`shared/browser-accounts.js`),
+ * so this module needs no import from `shared/`. An id is checked before any
+ * path is built from it. */
+const JAR_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const BAD_ID = 'This task names a browser account this device cannot use.';
+const KEY_INFO = 'agent-control browser-account jar v1';
+
+/** Where the jars live: `AGENT_BROWSER_ACCOUNTS`, else next to the agent's config. */
+export function browserAccountsDir(env = process.env, configPath) {
+  return env.AGENT_BROWSER_ACCOUNTS ? path.resolve(env.AGENT_BROWSER_ACCOUNTS) : path.join(path.dirname(configPath), 'browser-accounts');
+}
+
+function checkId(id) {
+  if (typeof id !== 'string' || !JAR_ID.test(id)) throw new Error(BAD_ID);
+  return id;
+}
+const keyOf = (secret, salt) => Buffer.from(crypto.hkdfSync('sha256', secret, salt, KEY_INFO, 32));
+const b64 = buf => buf.toString('base64');
+const missing = e => e?.code === 'ENOENT';
+function rmQuiet(file) { try { fs.unlinkSync(file); } catch (e) { if (!missing(e)) throw e; } }
+
+function seal(secret, id, cookies) {
+  const salt = crypto.randomBytes(16), iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', keyOf(secret, salt), iv);
+  cipher.setAAD(Buffer.from(`account:${id}`));
+  const data = Buffer.concat([cipher.update(JSON.stringify(cookies), 'utf8'), cipher.final()]);
+  return JSON.stringify({v: 1, salt: b64(salt), iv: b64(iv), tag: b64(cipher.getAuthTag()), data: b64(data)});
+}
+
+/** The cookies in a jar's text, or null when it is not a jar this secret and this id open. */
+function unseal(secret, id, text) {
+  try {
+    const file = JSON.parse(text);
+    if (file?.v !== 1) return null;
+    const [salt, iv, tag, data] = ['salt', 'iv', 'tag', 'data'].map(k => Buffer.from(String(file[k]), 'base64'));
+    const decipher = crypto.createDecipheriv('aes-256-gcm', keyOf(secret, salt), iv);
+    decipher.setAAD(Buffer.from(`account:${id}`));
+    decipher.setAuthTag(tag);
+    const cookies = JSON.parse(Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8'));
+    return Array.isArray(cookies) ? cookies : null;
+  } catch { return null; }
+}
+
+/** The jars of one folder, opened with one secret. */
+export function createJarStore({dir, secret}) {
+  if (typeof secret !== 'string' || !secret) throw new Error('A cookie jar needs the computer\'s pairing secret.');
+  const jarPath = id => path.join(dir, `${id}.jar`);
+  const tmpPath = id => `${jarPath(id)}.tmp`;
+  const readText = id => { try { return fs.readFileSync(jarPath(id), 'utf8'); } catch (e) { if (missing(e)) return null; throw e; } };
+  const names = suffix => { try { return fs.readdirSync(dir).filter(n => n.endsWith(suffix) && JAR_ID.test(n.slice(0, -suffix.length))).map(n => n.slice(0, -suffix.length)); } catch (e) { if (missing(e)) return []; throw e; } };
+
+  /** Writes the jar to `<id>.jar.tmp`, private and fsynced; `commit` renames it into place. */
+  function stage(id, cookies) {
+    if (!Array.isArray(cookies)) throw new Error('A cookie jar holds an array of cookies.');
+    fs.mkdirSync(dir, {recursive: true, mode: 0o700});
+    fs.chmodSync(dir, 0o700);
+    const tmp = tmpPath(id);
+    rmQuiet(tmp);                                  // never write through a link someone left here
+    const fd = fs.openSync(tmp, 'wx', 0o600);
+    try {
+      fs.fchmodSync(fd, 0o600);
+      fs.writeFileSync(fd, seal(secret, id, cookies));
+      fs.fsyncSync(fd);
+    } catch (e) { fs.closeSync(fd); rmQuiet(tmp); throw e; }
+    fs.closeSync(fd);
+    return {tmp, commit: () => fs.renameSync(tmp, jarPath(id)), discard: () => rmQuiet(tmp)};
+  }
+  const wipeId = id => { rmQuiet(jarPath(id)); rmQuiet(tmpPath(id)); };
+
+  return {
+    save(id, cookies) { checkId(id); const staged = stage(id, cookies); staged.commit(); },
+    load(id) {
+      checkId(id);
+      const text = readText(id);
+      if (text === null) return null;
+      const cookies = unseal(secret, id, text);
+      if (!cookies) rmQuiet(jarPath(id));
+      return cookies;
+    },
+    wipe(id) { checkId(id); wipeId(id); },
+    ids() { return names('.jar'); },
+    /** Wipes every jar (and any half-written copy) whose id is not in an explicit list. */
+    retain(ids) {
+      if (!Array.isArray(ids)) return [];
+      const keep = new Set(ids.filter(id => typeof id === 'string' && JAR_ID.test(id)));
+      const wiped = names('.jar').filter(id => !keep.has(id));
+      for (const id of new Set([...wiped, ...names('.jar.tmp')])) if (!keep.has(id)) wipeId(id);
+      return wiped;
+    },
+    stage,
+  };
+}
+
+/** A re-pair gives the computer a new secret. Each jar is opened under the old
+ * one and written under the new; one that will not open is wiped. Every copy is
+ * staged before any is put in place, so a write that fails leaves the old jars
+ * as they were, readable under the old secret. */
+export function rekeyJars({dir, oldSecret, newSecret}) {
+  const from = createJarStore({dir, secret: oldSecret}), to = createJarStore({dir, secret: newSecret});
+  const kept = [], wiped = [], staged = [];
+  try {
+    for (const id of from.ids()) {
+      const cookies = from.load(id);
+      if (cookies) { staged.push(to.stage(id, cookies)); kept.push(id); } else wiped.push(id);
+    }
+  } catch (e) { for (const s of staged) s.discard(); throw e; }
+  for (const s of staged) s.commit();
+  return {kept, wiped};
+}
+
+/** What a computer sends to prove it held the old secret: the hex HMAC-SHA256
+ * of `re-pair\n<code>`. The server checks the same formula (`src/`, Task 3). */
+export function rePairProof(secret, code) {
+  return crypto.createHmac('sha256', secret).update(`re-pair\n${code}`).digest('hex');
+}
