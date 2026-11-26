@@ -24,6 +24,7 @@ import {cleanText} from '../shared/core.js';
 import {validateBrowserRequest} from '../shared/bot-browser.js';
 import {cliEngineById,cleanCliModel,cleanEffort,LOCAL_CLI_ENGINE_IDS} from '../shared/ai-presets.js';
 import {cleanFeatures,hasFeature} from '../shared/device-features.js';
+import {cleanAccountReport,ACCOUNT_STATES} from '../shared/browser-accounts.js';
 import {base64Bytes,sniffType,isImage,MAX_FILES,MODEL_IMAGE_BYTES,MODEL_IMAGES_TOTAL} from '../shared/attachments.js';
 import {encryptJson,decryptJson,sha256,loadMasterKey} from './vault.js';
 
@@ -229,8 +230,23 @@ export function createPairing(store, workspaceId, {label, createdBy, permissions
   return {code, expiresAt: expires, ttlSeconds: Math.round(ttlMs / 1000), permissions: scope};
 }
 
+/** The computer a pairing replaces, or null. Only a computer of the code's workspace that is not revoked, whose
+ * caller proves it still holds its secret: `previous.proof` is HMAC-SHA256(old secret, 're-pair\n' + code) in hex.
+ * Anything else pairs a new computer and moves nothing. */
+function provenPrevious(store, workspaceId, code, previous) {
+  const {agentId, proof} = previous && typeof previous === 'object' ? previous : {};
+  if (typeof agentId !== 'string' || typeof proof !== 'string' || !/^[0-9a-f]{64}$/i.test(proof)) return null;
+  const old = store.get('SELECT * FROM agents WHERE id=? AND workspace_id=? AND revoked_at IS NULL', agentId, workspaceId);
+  if (!old) return null;
+  let secret;
+  try { secret = decryptJson(store.vaultKey, JSON.parse(old.secret_enc)).secret; } catch { return null; }
+  const expected = crypto.createHmac('sha256', secret).update(`re-pair\n${code}`).digest();
+  const given = Buffer.from(proof, 'hex');
+  return given.length === expected.length && crypto.timingSafeEqual(given, expected) ? old.id : null;
+}
+
 /** Exchange a pairing code for agent credentials. */
-export function redeemPairing(store, {code, name, permissions = [], features}) {
+export function redeemPairing(store, {code, name, permissions = [], features, previous}) {
   const row = store.get('SELECT * FROM pairing_codes WHERE code_hash=?', sha256(String(code || '')));
   if (!row) fail('This pairing code is not valid.', 401);
   if (row.consumed_at) fail('This pairing code has already been used.', 409);
@@ -246,6 +262,7 @@ export function redeemPairing(store, {code, name, permissions = [], features}) {
   const granted = requested.filter(p => allowed.includes(p));
   // The secret is stored encrypted; pairing_codes keeps only hashes.
   const stored = JSON.stringify(encryptJson(store.vaultKey, {secret}));
+  const replaces = provenPrevious(store, row.workspace_id, String(code), previous);
   store.transaction(() => {
     store.run('UPDATE pairing_codes SET consumed_at=? WHERE code_hash=?', now(), sha256(String(code)));
     store.run('INSERT INTO agents (id,workspace_id,name,secret_hash,secret_enc,status,permissions,paired_by,paired_at) VALUES (?,?,?,?,?,?,?,?,?)',
@@ -254,7 +271,7 @@ export function redeemPairing(store, {code, name, permissions = [], features}) {
     // none). In the same write: a failure here must not leave a used code and an agent behind.
     if (features !== undefined) recordAgentFeatures(store, agentId, features);
   });
-  return {agentId, secret, workspaceId: row.workspace_id, permissions: granted, pollIntervalMs: 30000};
+  return {agentId, secret, workspaceId: row.workspace_id, permissions: granted, pollIntervalMs: 30000, replaces};
 }
 
 export const agentTaskKinds = () => [...AGENT_ACTIONS];
@@ -449,6 +466,25 @@ export function recordAgentFeatures(store, agentId, reported) {
   if (typeof store.kvSet !== 'function') return;
   store.kvSet(`agent_features:${agentId}`, JSON.stringify(cleanFeatures(reported)));
 }
+/** What a computer says of its browser accounts (shared/browser-accounts.js), kept in kv `agent_accounts:<agentId>`:
+ * only the entries for accounts that name this computer, each as `{id, state, storage, lost?, checkedAt}`. A cookie
+ * value is not a field here, so it cannot be stored. A beat with no list (an older app, or one that is not a list)
+ * writes nothing, so the last report stands. No report reads signed out. */
+export function recordAccountReports(store, agentId, reported) {
+  if (!Array.isArray(reported) || typeof store.kvSet !== 'function') return;
+  const ids = (store.read().browserAccounts || []).filter(a => a.deviceId === agentId).map(a => a.id);
+  const at = now();
+  store.kvSet(`agent_accounts:${agentId}`, JSON.stringify(cleanAccountReport(reported, ids).map(r => ({...r, checkedAt: at}))));
+}
+export function readAccountReports(store, agentId) {
+  try {
+    const raw = typeof store.kvGet === 'function' ? store.kvGet(`agent_accounts:${agentId}`) : null;
+    const list = raw ? JSON.parse(raw) : [];
+    return (Array.isArray(list) ? list : []).filter(r => r && typeof r.id === 'string' && ACCOUNT_STATES.includes(r.state))
+      .map(r => ({id: r.id, state: r.state, storage: 'cookies', ...(r.lost === true ? {lost: true} : {}), checkedAt: typeof r.checkedAt === 'string' ? r.checkedAt : null}));
+  } catch { return []; }
+}
+
 export function readAgentFeatures(store, agentId) {
   try {
     const raw = typeof store.kvGet === 'function' ? store.kvGet(`agent_features:${agentId}`) : null;
