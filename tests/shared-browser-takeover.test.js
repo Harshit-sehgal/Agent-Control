@@ -290,6 +290,10 @@ test('a focus question the page could not answer counts as secret, and a tag tha
   fake().hook('Runtime.evaluate', async ({expression}) => { if (expression === TAG_FOCUSED_SECRET_JS) throw new Error('boom 482913'); });
   await assert.rejects(() => sb.applyInput('bot-a', {type: 'type', text: '482913', secret: true}), e => !e.message.includes('482913'));
   assert.equal(fake().input.length, 1, 'the text was not typed into a field that could not be hidden');
+  // The page's own expression threw: CDP answers with exceptionDetails and raises nothing.
+  fake().hook('Runtime.evaluate', async ({expression}) => (expression === TAG_FOCUSED_SECRET_JS ? {result: {}, exceptionDetails: {text: 'Uncaught'}} : undefined));
+  await assert.rejects(() => sb.applyInput('bot-a', {type: 'type', text: '482913', secret: true}), e => !e.message.includes('482913'));
+  assert.equal(fake().input.length, 1, 'a tag that threw in the page also stops the typing');
 });
 
 test('the tag expression skips the page body, the page root and an empty focus', () => {

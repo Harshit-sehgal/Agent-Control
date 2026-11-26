@@ -224,7 +224,10 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
       // as yes, and a tag that fails stops the typing. Nothing here ever names the text.
       const asked = await send('Runtime.evaluate', {expression: `(()=>{${PAGE_SECRETS_JS};const el=document.activeElement;return !!el&&isSecretField(el)})()`, returnByValue: true})
         .then(reply => (!reply?.exceptionDetails && typeof reply?.result?.value === 'boolean' ? reply.result.value : true), () => true);
-      if (ev.secret || asked) await send('Runtime.evaluate', {expression: TAG_FOCUSED_SECRET_JS}).catch(() => { throw new Error('The browser could not mark that field secret.'); });
+      if (ev.secret || asked) {
+        const tagged = await send('Runtime.evaluate', {expression: TAG_FOCUSED_SECRET_JS, returnByValue: true}).catch(() => null);
+        if (!tagged || tagged.exceptionDetails) throw new Error('The browser could not mark that field secret.');
+      }
       await send('Input.insertText', {text: ev.text}).catch(() => { throw new Error('The browser did not take the typed text.'); });
     } else if (ev.type === 'key') {
       const key = KEYS[ev.key], base = {key: ev.key, code: key.code, windowsVirtualKeyCode: key.vk, nativeVirtualKeyCode: key.vk};

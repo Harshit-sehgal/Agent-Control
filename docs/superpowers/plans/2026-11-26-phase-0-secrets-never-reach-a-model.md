@@ -133,7 +133,7 @@ In `tests/agent-browser.test.js`, add one test in the style of the test at line 
 - Test: `tests/ui-computer.test.js`, `tests/shared-browser-takeover.test.js`
 
 **Interfaces:**
-- Produces: a type event may carry `secret: true`; `cleanInput` keeps it as `secret: true` and drops any other value. After a secret type, the device runs `document.activeElement?.setAttribute('data-agent-secret','1')` in the tab. Before any type, it asks the tab whether the focused element `isSecretField`; if so the event is treated as secret.
+- Produces: a type event may carry `secret: true`; `cleanInput` keeps it as `secret: true` and drops any other value. Before a secret type, the device runs `document.activeElement?.setAttribute('data-agent-secret','1')` in the tab (skipping `body`, the root and an empty focus). Before any type, it asks the tab whether the focused element `isSecretField`; if so the event is treated as secret.
 
 - [ ] **Step 1: Write the failing tests.**
 
@@ -149,9 +149,9 @@ test('cleanInput keeps secret only as true, and its errors never carry the text'
 });
 ```
 
-In `tests/shared-browser-takeover.test.js`, with the fake CDP: take over a bot, send `{type: 'type', text: '482913', secret: true}`, and assert that an `Input.insertText` is followed by a `Runtime.evaluate` whose expression contains `data-agent-secret`; then, with the focused-field check hooked to answer `true`, a plain type event is also followed by the tag.
+In `tests/shared-browser-takeover.test.js`, with the fake CDP: take over a bot, send `{type: 'type', text: '482913', secret: true}`, and assert that a `Runtime.evaluate` whose expression contains `data-agent-secret` comes before the `Input.insertText`; then, with the focused-field check hooked to answer `true`, a plain type event is also tagged first.
 - [ ] **Step 2: Run them to see them fail.** Run: `node --test tests/ui-computer.test.js tests/shared-browser-takeover.test.js`. Expected: FAIL.
-- [ ] **Step 3: Implement.** `coalesce` never merges when either event has `secret`. `cleanInput` returns `{type: 'type', text, ...(event.secret === true ? {secret: true} : {})}`. `applyInput` asks the focused-field question first, then inserts the text, then tags the element when either says secret.
+- [ ] **Step 3: Implement.** `coalesce` never merges when either event has `secret`. `cleanInput` returns `{type: 'type', text, ...(event.secret === true ? {secret: true} : {})}`. `applyInput` asks the focused-field question first, then tags the focused element when either says secret (and types nothing if the tag fails), then inserts the text.
 - [ ] **Step 4: Run them to see them pass,** then `npm test`. Expected: PASS.
 - [ ] **Step 5: Commit.** `git commit -m "feat: the device tags fields the owner types secrets into"`
 
