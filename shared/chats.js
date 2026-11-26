@@ -18,7 +18,7 @@ export const MAX_CHAT_MESSAGES = 300;
 const MAX_TEXT = 8000;
 const ROLES = ['user', 'bot', 'system'];
 /** Optional short fields a message may carry; anything else is dropped. */
-const LABELS = ['senderId', 'senderName', 'toBotId', 'runId', 'mode', 'kind', 'botId', 'askId', 'switchTo', 'connectorId', 'activityId', 'undoUntil'];
+const LABELS = ['senderId', 'senderName', 'toBotId', 'runId', 'mode', 'kind', 'botId', 'askId', 'switchTo', 'connectorId', 'activityId', 'undoUntil', 'ruleId'];
 
 const chatKeys = state => new Set((state.groups || []).flatMap(g => [`team-${g.id}`, ...(g.bots || []).map(b => b.id)]));
 const groupOf = (state, key) => (state.groups || []).find(g => `team-${g.id}` === key || (g.bots || []).some(b => b.id === key));
@@ -48,6 +48,9 @@ function untrusted(state, key, message) {
   delete message.setup;
   // A connector line may carry an Undo for a held send; only the server writes one.
   delete message.activityId; delete message.undoUntil;
+  // A Learned line carries an Undo that switches its rule off; only a memory pass on the server writes one.
+  delete message.ruleId; delete message.off;
+  if (message.kind === 'learned') delete message.kind;
   if (message.role !== 'user') message.origin = 'browser';
   return message;
 }
@@ -86,9 +89,20 @@ function entry(raw, makeId, now) {
   if (setup) out.setup = setup;
   // A bot's working step (it went to fetch pages or call apps): kept for the record, left out of the chat.
   if (raw.step === true && raw.role === 'bot') out.step = true;
+  // A Learned line whose rule the owner switched off reads "Switched off" (see `markLearned`).
+  if (out.kind === 'learned' && typeof raw.off === 'boolean') out.off = raw.off;
   // The owner paused every bot by hand (not the runaway guard): its card offers Resume.
   if (raw.manual === true && raw.role === 'system' && out.kind === 'guard') out.manual = true;
   return out;
+}
+
+/** Mark every Learned line of one rule as switched off (or back on), so the chat says what the rule is now. */
+export function markLearned(state, ruleId, off) {
+  let marked = 0;
+  for (const list of Object.values(state.chats || {})) for (const m of list || []) {
+    if (m && m.kind === 'learned' && m.ruleId === ruleId) { m.off = Boolean(off); marked++; }
+  }
+  return marked;
 }
 
 /** Append messages to a conversation. A message whose id is already stored is

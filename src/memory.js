@@ -20,6 +20,7 @@ import {complete} from './ai.js';
 import {resolveConfig} from './ai-providers.js';
 import {companyBots} from '../shared/company.js';
 import {botSettings} from '../shared/bot-settings.js';
+import {addChatMessages} from '../shared/chats.js';
 
 /** Consolidation calls already in flight, per store and model key, so two steps
  * of the same run cannot start two rewrites of one book. Keyed by store first:
@@ -90,6 +91,7 @@ export async function consolidateModel(store, {key, config, chatKey = '', label 
     const chatEntry = chatKey ? state.memory?.chats?.[chatKey] : null;
     const messages = chatKey ? conversationMessages(state, chatKey) : [];
     const sentPending = [...(book.pending || [])], sentTurns = Number(book.turns || 0);
+    const sentCorrections = [...(book.corrections || [])], sentLiked = [...(book.liked || [])];
     // What this pass reads decides whether what it writes is outside text (Hands-off asks in a run handed it).
     const outside = consolidationReadsOutside(state, {key: id, chatKey: chatKey || null, messages});
     const input = consolidationInput({book, messages, chatSummary: chatEntry?.summary || ''});
@@ -115,7 +117,15 @@ export async function consolidateModel(store, {key, config, chatKey = '', label 
     }
     const updated = await store.update(current => {
       if (!findRulebook(current, id)) return null;
-      return mergeConsolidation(current, id, parsed, {now, label: label || modelLabel(config), chatKey: chatKey || null, sentPending, sentTurns, outside});
+      const merged = mergeConsolidation(current, id, parsed, {now, label: label || modelLabel(config), chatKey: chatKey || null, sentPending, sentTurns, sentCorrections, sentLiked, outside});
+      // What a correction taught is said in the chat it came from, with Undo; the list itself is never stored.
+      const said = merged.announce || [];
+      delete merged.announce;
+      for (const chat of new Set(said.map(a => a.chat))) {
+        const lines = said.filter(a => a.chat === chat).map(a => ({role: 'system', kind: 'learned', text: a.text, ruleId: a.id, at: now}));
+        try { addChatMessages(current, chat, lines, {trusted: true, now}); } catch { /* The chat was removed meanwhile. */ }
+      }
+      return merged;
     });
     if (!updated) return {book: null, skipped: true, reason: 'The rulebook was removed while the model was answering.'};
     return {book: updated, skipped: false};

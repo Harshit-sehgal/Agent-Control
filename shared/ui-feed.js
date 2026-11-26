@@ -120,6 +120,8 @@ export function feed({items = [], state, key, now = Date.now()}) {
       }
       if (m.kind === 'model-limit') return out.push({kind: 'model-limit', message: m, line: modelLimitLine(m, {state})});
       if (m.kind === 'guard') return out.push({kind: 'guard', message: m, open: m.id === lastGuard && Boolean(state?.guard?.paused)});
+      // What a memory pass learned from a correction, with its Undo (server-written only: shared/chats.js).
+      if (m.kind === 'learned') return out.push({kind: 'learned', message: m});
       if (!isRunNote(m)) return out.push({kind: 'note', message: m, run: null});
       if (run?.status === 'completed' && m.id === `${run.id}-completed`) return;
       return out.push({kind: 'note', message: m, run: run && lastNote.get(run.id) === m.id ? run : null});

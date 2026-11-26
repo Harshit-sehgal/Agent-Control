@@ -10,8 +10,8 @@ import {initialState, cleanText} from './core.js';
 import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js';
 import {RETENTION_DEFAULTS} from './retention.js';
 import {enqueueTask, retryTask, cancelTask, fillScheduleZones} from './tasks.js';
-import {addChatMessages, clearChat} from './chats.js';
-import {publicMemory, rememberFromOwner, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js';
+import {addChatMessages, clearChat, markLearned} from './chats.js';
+import {publicMemory, rememberFromOwner, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY, setRuleEnabled, feedbackOn} from './memory.js';
 import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js';
 import {createThread, titleFrom} from './threads.js';
 import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js';
@@ -396,6 +396,13 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
     save(state);
     return {ok: true, model: book, rules: r.book.rules.map(rule => ({id: rule.id, text: rule.text, source: rule.source}))};
   }
+  if ((m = memoryPath.match(/^\/api\/memory\/rules\/([a-z0-9-]+)$/)) && method === 'PATCH' && typeof body.enabled === 'boolean' && body.text === undefined) {
+    const rule = setRuleEnabled(state, bookOf(body) || bookKeyOfRule(state, m[1]) || '', m[1], body.enabled);
+    markLearned(state, m[1], !body.enabled);
+    save(state); return {ok: true, rule: {id: rule.id, text: rule.text, source: rule.source, enabled: rule.enabled !== false}};
+  }
+  // 👍 / 👎 from the reply popover: kept like the server keeps it. The demo has no model, so no pass follows.
+  if (path === '/api/memory/feedback' && method === 'POST') { feedbackOn(state, {botId: body.bot, chat: body.chat, messageId: body.message, kind: body.kind, note: body.note}); save(state); return {ok: true}; }
   if ((m = memoryPath.match(/^\/api\/memory\/rules\/([a-z0-9-]+)$/)) && method === 'PATCH') {
     const rule = editRule(state, bookOf(body) || bookKeyOfRule(state, m[1]) || '', m[1], body.text);
     if (!rule) throw Object.assign(new Error('That bot already keeps that line.'), {status: 409});

@@ -2,18 +2,18 @@
  * The bots answer with canned replies (shared/offline-bots.js), and everything a
  * reply asks for goes through the rules the served loop uses: hand-offs, hires,
  * the out-of-job refusal, checkpoints and the runaway guard. */
-import {createRun,createEnvelope,handoffTargets,instructLead,wakeBots,assessTask,runNote,rosterFor,previousFor,enlist} from './coordination.js?v=c7776be546';
-import {offlineReply,outsideAsk} from './offline-bots.js?v=c7776be546';
-import {createAsk,askText} from './asks.js?v=c7776be546';
-import {parseOffJob,offJobMessage} from './off-job.js?v=c7776be546';
-import {parseCreateBotRequests,stripCreateBotBlocks,botCreatedText,botCreateRefusedText} from './bot-create.js?v=c7776be546';
-import {addCreatedBot} from './hire.js?v=c7776be546';
-import {parseSetupRequests,stripSetupBlocks,resolveSetup} from './setup.js?v=c7776be546';
-import {noteBotWork} from './runaway.js?v=c7776be546';
-import {isLead} from './company.js?v=c7776be546';
-import {botSettings,groupSettings,threadContext} from './bot-settings.js?v=c7776be546';
-import {normalizeBot} from './contracts.js?v=c7776be546';
-import {isThread,noteMember} from './threads.js?v=c7776be546';
+import {createRun,createEnvelope,handoffTargets,instructLead,wakeBots,assessTask,runNote,rosterFor,previousFor,enlist} from './coordination.js?v=45393fcc46';
+import {offlineReply,outsideAsk} from './offline-bots.js?v=45393fcc46';
+import {createAsk,askText} from './asks.js?v=45393fcc46';
+import {parseOffJob,offJobMessage} from './off-job.js?v=45393fcc46';
+import {parseCreateBotRequests,stripCreateBotBlocks,botCreatedText,botCreateRefusedText} from './bot-create.js?v=45393fcc46';
+import {addCreatedBot} from './hire.js?v=45393fcc46';
+import {parseSetupRequests,stripSetupBlocks,resolveSetup} from './setup.js?v=45393fcc46';
+import {noteBotWork} from './runaway.js?v=45393fcc46';
+import {isLead} from './company.js?v=45393fcc46';
+import {botSettings,groupSettings,threadContext} from './bot-settings.js?v=45393fcc46';
+import {normalizeBot} from './contracts.js?v=45393fcc46';
+import {isThread,noteMember} from './threads.js?v=45393fcc46';
 
 export async function simulateGroup({group, message, directBotId=null, guests=[], state, api, makeId, emit, chatKey=null, started=false, resume=null, shouldStop=()=>false, anyway=false}) {
   let run, previous, i;

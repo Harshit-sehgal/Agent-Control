@@ -1,7 +1,7 @@
 /** Push notifications on this device: what the browser allows, whether this
  * device is subscribed, and turning it on or off. The server keeps one
  * subscription per device and only ever sends to the signed-in account's own. */
-import {api} from './ui-store.js?v=c7776be546';
+import {api} from './ui-store.js?v=45393fcc46';
 
 const supported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 const keyBytes = text => {

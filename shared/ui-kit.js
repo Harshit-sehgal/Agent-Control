@@ -9,6 +9,7 @@ export const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&': 
  * tags in the result are the ones made here. */
 const LIST = /^\s*(?:[-*•]|(\d+)[.)])\s+(.*)$/;
 const HEAD = /^\s*#{1,6}\s+(.*)$/;
+const QUOTE = /^\s*>\s?(.*)$/;
 const UNESC = s => s.replace(/&amp;/g, '&');
 function inline(text) {
   const codes = [];
@@ -20,13 +21,18 @@ function inline(text) {
 }
 export function md(text) {
   const out = [];
-  let para = [], list = null;
+  let para = [], list = null, quote = null;
+  // `> ` lines (a quoted reply, as Ask about this sends one) are one blockquote, formatted the same way inside.
+  const flushQuote = () => { if (quote) out.push(`<blockquote>${md(quote.join('\n'))}</blockquote>`); quote = null; };
   const flush = () => {
     if (para.length) out.push(`<p>${para.map(inline).join('<br>')}</p>`);
     if (list) out.push(`<${list.tag}>${list.items.map(i => `<li>${inline(i)}</li>`).join('')}</${list.tag}>`);
     para = []; list = null;
   };
   for (const line of String(text ?? '').split('\n')) {
+    const quoted = QUOTE.exec(line);
+    if (quoted) { flush(); (quote ||= []).push(quoted[1]); continue; }
+    flushQuote();
     const item = LIST.exec(line), head = HEAD.exec(line);
     if (!line.trim()) flush();
     else if (head) { flush(); out.push(`<p class="md-h">${inline(head[1])}</p>`); }
@@ -37,14 +43,14 @@ export function md(text) {
     } else if (list && /^\s{2,}\S/.test(line)) list.items[list.items.length - 1] += ` ${line.trim()}`;
     else { if (list) flush(); para.push(line); }
   }
-  flush();
+  flush(); flushQuote();
   return out.join('');
 }
 /** The same text with its markdown markers dropped, on one line, for previews. */
 export const plain = text => String(text ?? '')
   .replace(/`([^`\n]+)`/g, '$1').replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, '$1')
   .replace(/\*\*(.+?)\*\*|__(.+?)__/g, (_, a, b) => a ?? b).replace(/(^|[^\w*])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?!\w)/g, '$1$2')
-  .replace(/^\s*(?:#{1,6}|[-*•]|\d+[.)])\s+/gm, '').replace(/\s+/g, ' ').trim();
+  .replace(/^\s*(?:#{1,6}|[-*•]|\d+[.)])\s+/gm, '').replace(/^\s*>\s?/gm, '').replace(/\s+/g, ' ').trim();
 
 const ICONS = {
   back: '<path d="m15 18-6-6 6-6"/>',
@@ -64,6 +70,11 @@ const ICONS = {
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   people: '<circle cx="9" cy="9" r="3.5"/><path d="M2.500 19c.6-3 3.200-5 6.500-5s5.900 2 6.500 5M16 5.500a3.500 3.500 0 0 1 0 7M18.500 14.500c1.700.7 2.800 2.300 3 4.500"/>',
   bot: '<rect x="4" y="8" width="16" height="12" rx="4"/><path d="M12 8V4M9 14h.01M15 14h.01"/>',
+  share: '<path d="M12 3v12M7 8l5-5 5 5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/>',
+  retry: '<path d="M4 12a8 8 0 1 0 2.3-5.7"/><path d="M4 4v4h4"/>',
+  up: '<path d="M7 10v11H4V10zm0 0 4-7a2 2 0 0 1 3 2l-1 5h6a2 2 0 0 1 2 2.3l-1.3 7a2 2 0 0 1-2 1.7H7"/>',
+  down: '<path d="M7 14V3H4v11zm0 0 4 7a2 2 0 0 0 3-2l-1-5h6a2 2 0 0 0 2-2.3l-1.3-7a2 2 0 0 0-2-1.7H7"/>',
+  cursor: '<path d="M9 4h6M9 20h6M12 4v16"/>',
   copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>',
   trash: '<path d="M3 6h18M8 6V4h8v2m3 0-1 15H6L5 6m5 4v7m4-7v7"/>',
   note: '<path d="M6 3.5h12v17l-6-4-6 4z"/>',

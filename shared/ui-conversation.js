@@ -11,7 +11,8 @@ import {OFFJOB_CHOICES} from './off-job.js';
 import {LIMIT_CHOICES, limitText} from './ask-limits.js';
 import {requestOfMessage} from './bot-browser.js';
 import {validHttpUrl} from './core.js';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou, teachPrompt, teachRule} from './ui-model.js';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js';
+import {hintFor, hintHtml, pinsOf, pinsStripHtml, HINT_KEY, PINS_MSG_KEY} from './reply-menu.js';
 import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js';
 import {isPrimary} from './company.js';
 import {hasJob, modelChip} from './ui-profile-model.js';
@@ -25,9 +26,9 @@ import {UNTIL_CHOICES, untilFor} from './asks.js';
 import {undoToast} from './ui-settings.js';
 import {face, botColor, botAccent, accentStyle} from './ui-face.js';
 import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen} from './ui-store.js';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen, loadLocal, saveLocal, changed} from './ui-store.js';
 import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js';
-import {toast, confirmSheet, askSheet} from './ui-dialogs.js';
+import {toast, confirmSheet} from './ui-dialogs.js';
 import {siteChip, thumbSlot} from './ui-computer-view.js';
 import {cliChoice} from './ui-connect-model.js';
 import {connectAppNow} from './ui-connect.js';
@@ -72,6 +73,7 @@ export function conversationShell(conv) {
       <div class="cv-title"><h1>${esc(conv.name)}</h1><span id="cv-line"></span></div>
       ${bot ? `${thumbSlot(bot.id)}<span id="cv-model">${modelChipHtml(bot)}</span>` : ''}
     </header>
+    <div id="cv-pins"></div>
     <div class="cv-scroll" id="cv-scroll"><div class="cv-col" id="cv-log" role="log" aria-live="off" aria-label="Conversation"></div></div>
     <form id="chat-form" class="cv-composer" autocomplete="off">${chipsSlot}<div class="cv-box">
       ${attachButton(write)}${templateButton()}
@@ -247,6 +249,12 @@ function offlineEntry({message: m, retry}) {
   return `<div class="cv-card flat" data-m="${esc(m.id)}"><p>${esc(m.text)}</p>${again}</div>`;
 }
 
+/** What a bot learned from a correction: one quiet line, with Undo while the rule is on. */
+function learnedEntry({message: m}) {
+  const act = m.off ? '<span class="cv-learned-off">Switched off</span>' : canWrite() && m.ruleId ? btn('Undo', 'learned-undo', {small: true, kind: 'quiet', data: {rule: m.ruleId}}) : '';
+  return `<div class="cv-note cv-learned" data-m="${esc(m.id)}"><span>Learned: ${esc(m.text)}</span>${act}</div>`;
+}
+
 function offjobEntry({message: m, open}, conv) {
   const bot = findBot(m.botId || m.senderId), name = bot?.name || m.senderName || conv.name;
   const choices = open && canWrite() ? `<div class="cv-card"><p>This is not ${esc(name)}'s job. What should happen to it?</p><div class="acts">${OFFJOB_CHOICES.map(c => btn(c.label, `offjob-${c.id}`, {kind: c.id === 'anyway' ? 'primary' : 'quiet', data: {message: m.id}})).join('')}</div></div>` : '';
@@ -257,13 +265,13 @@ function botEntry(m, conv) {
   const bot = m.senderId ? findBot(m.senderId) : conv.bot, name = bot?.name || m.senderName || conv.name;
   // The name says who is talking in a thread; its job is on its profile, not on every reply.
   const own = !conv.isTeam && bot && bot === conv.bot ? ' own' : '';
-  // Copy and Teach sit under the words: Teach turns "not like that" into a rule the bot keeps (see `teach-reply`).
-  const acts = `<div class="cv-acts">${btn('Copy', 'copy-reply', {small: true, glyph: 'copy'})}${bot && canWrite() ? btn('Teach', 'teach-reply', {small: true, glyph: 'spark', data: {bot: bot.id}}) : ''}</div>`;
-  return `<div class="cv-bot${own}" data-m="${esc(m.id)}" style="--t:${tintOf(bot, name)}">${botFace(bot, name, 36)}<div class="cv-body"><div class="cv-name">${esc(name)}</div><div class="md">${md(m.text)}</div>${acts}</div></div>`;
+  // Holding the reply (right-click, or the menu key when it has focus) opens its popover: shared/ui-reply-menu.js.
+  const tip = m.id === hintId ? hintHtml() : '';
+  return `<div class="cv-bot${own}" data-m="${esc(m.id)}" tabindex="0" aria-haspopup="menu" style="--t:${tintOf(bot, name)}">${botFace(bot, name, 36)}<div class="cv-body"><div class="cv-name">${esc(name)}</div><div class="md">${md(m.text)}</div>${tip}</div></div>`;
 }
 
-/** The words of the reply a Copy or Teach button sits under, as the owner sees them. */
-const replyText = b => b.closest('.cv-bot')?.querySelector('.md')?.innerText?.trim() || '';
+/** The reply that shows the one-time "hold a reply" tip in this paint, if any. */
+let hintId = null;
 
 /** Where an attached file is read from: the server route, or the demo's own copy. */
 const fileSrc = ref => isStaticDemo() ? store.state?.attachments?.[ref.id]?.url || '' : `/api/attachments/${ref.id}`;
@@ -293,6 +301,7 @@ function entryHtml(entry, conv) {
     case 'setup': return setupEntry(entry);
     case 'no-model': return noModelEntry(entry);
     case 'offline': return offlineEntry(entry);
+    case 'learned': return learnedEntry(entry);
     default: return '';
   }
 }
@@ -374,6 +383,8 @@ export function renderConversation() {
   if (who && conv.bot && who.dataset.state !== awake(conv.bot.id)) { who.dataset.state = awake(conv.bot.id); who.innerHTML = botFace(conv.bot, conv.name, 36, {state: who.dataset.state}); }
   if (born.conv !== conv.id) { born.conv = conv.id; born.seen = new Set(); born.fresh = false; }
   const entries = feed({items: timeline({conv, state: store.state, messages: store.messages}), state: store.state, key: conv.id, now: Date.now()});
+  hintId = hintFor(entries, Boolean(loadLocal(HINT_KEY, false)));
+  paintPins(conv, entries);
   announce(conv, entries);
   watchUndo(entries);
   const asker = askerOf(conv), live = entries.some(e => e.kind === 'pill' && !e.pill.done) || entries.some(e => e.kind === 'limit');
@@ -392,6 +403,17 @@ export function renderConversation() {
   if (pinned || opened) scroller.scrollTop = scroller.scrollHeight;
   log.dataset.conv = conv.id;
   showHit(conv);
+}
+
+/** The pinned-replies strip under the header (per person, on this device), kept open while it is redrawn. */
+function paintPins(conv, entries) {
+  const slot = el('cv-pins'); if (!slot) return;
+  const shown = new Map(entries.filter(e => e.kind === 'bot').map(e => [e.message.id, e.message]));
+  const html = pinsStripHtml(pinsOf(loadLocal(PINS_MSG_KEY, {}), conv.id, [...shown.keys()]).map(id => shown.get(id)));
+  if (slot.dataset.html === html) return;
+  const open = slot.querySelector('.cv-pins-head')?.getAttribute('aria-expanded') === 'true';
+  slot.dataset.html = html; slot.innerHTML = html;
+  if (open) { slot.querySelector('.cv-pins-head')?.setAttribute('aria-expanded', 'true'); slot.querySelector('.cv-pins-list')?.removeAttribute('hidden'); }
 }
 
 /** A message search hit opened this chat: bring that line into view and light it up once. It waits while the line
@@ -470,24 +492,27 @@ export const conversationChanges = {
 
 export const conversationActions = {
   'ask-answer': b => answerAsk(b.dataset.id, b.dataset.choice),
-  'copy-reply': async b => {
-    try { await navigator.clipboard.writeText(replyText(b)); toast('Copied.'); }
-    catch { toast('This browser did not allow copying. Select the words and copy them instead.', true); }
+  // The pinned-replies strip: open or close its list, or bring one pinned reply into view.
+  'pins-toggle': b => {
+    const open = b.getAttribute('aria-expanded') !== 'true';
+    b.setAttribute('aria-expanded', String(open));
+    b.nextElementSibling?.toggleAttribute('hidden', !open);
   },
-  // A wrong reply becomes a fix in one tap: the owner says what to do from now on, and it is kept as that bot's own
-  // rule, the same as one added on its profile. Nothing is sent to the bot now; its next turn reads the rule.
-  'teach-reply': async b => {
-    const bot = findBot(b.dataset.bot);
-    if (!bot) return;
-    const prompt = teachPrompt({botName: bot.name});
-    const answer = await askSheet(prompt.title, {sub: prompt.sub, placeholder: prompt.placeholder, submit: 'Keep this rule'});
-    if (answer == null) return;
-    const text = teachRule(answer);
-    if (!text) { toast('Write a little more: a rule needs at least 4 characters.', true); return; }
-    // `label` names the bot's rule book if this is its first rule (as on its profile), not the rule.
-    await api('/api/memory/rules', 'POST', {bot: bot.id, text, label: bot.name});
+  'pin-jump': b => {
+    const node = el('cv-log')?.querySelector(`.cv-bot[data-m="${CSS.escape(b.dataset.m)}"]`);
+    if (!node) return;
+    node.scrollIntoView({block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'});
+    node.classList.add('cv-hit');
+    setTimeout(() => node.classList.remove('cv-hit'), 2400);
+  },
+  'hint-close': () => { saveLocal(HINT_KEY, true); changed('thread'); },
+  // Switch off a rule a bot learned; a rule already deleted on the profile just reads as switched off.
+  'learned-undo': async b => {
+    b.disabled = true;
+    try { await api(`/api/memory/rules/${encodeURIComponent(b.dataset.rule)}`, 'PATCH', {enabled: false}); }
+    catch (error) { if (error?.status !== 404) { b.disabled = false; throw error; } }
+    b.replaceWith(Object.assign(document.createElement('span'), {className: 'cv-learned-off', textContent: 'Switched off'}));
     await sync();
-    toast(`${bot.name} will do that from now on. Edit it on its profile.`);
   },
   'open-profile': b => go({profile: b.dataset.id}),
   hop: b => hop(b),

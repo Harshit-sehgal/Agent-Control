@@ -22,7 +22,7 @@ import {SUBAGENT_PERMISSION, SUBAGENT_TOOL_HINT} from '../shared/subagents.js';
 import {BOT_ASK_TOOL_HINT, companyList} from '../shared/bot-link.js';
 import {companyBots} from '../shared/company.js';
 import {BOT_CREATE_TOOL_HINT} from '../shared/bot-create.js';
-import {memoryBlock} from '../shared/memory.js';
+import {memoryBlock, chatCorrection, noteChatCorrection} from '../shared/memory.js';
 import {runBotTurn} from './bot-turn.js';
 import {memoryFor, rememberTurn, maybeConsolidate} from './memory.js';
 import {dispatchBrowserRequest, autoDispatch, beginTakeover, handBackTakeover} from './bot-browser.js';
@@ -207,6 +207,12 @@ export function groupRoutes(router) {
   });
   router.add('POST', '/api/groups/:group/chat', 'member', async c => {
     const b = await c.body();
+    // "No, too long" right after a bot's reply in its own chat is kept for that bot's next memory pass. Read first,
+    // so an ordinary message costs no write; a failure here never stops the message.
+    if (b.directBotId) try {
+      const said = {botId: cleanText(b.directBotId, 80), chatKey: typeof b.chatKey === 'string' ? b.chatKey : cleanText(b.directBotId, 80), text: b.message};
+      if (chatCorrection(c.store.read(), said)) await c.store.update(s => { noteChatCorrection(s, said); });
+    } catch (error) { console.error('Memory update:', error.message); }
     return reply(202, await queueGroupRun(c.store, {groupId: c.params.group, message: b.message, directBotId: b.directBotId || null, checkpoints: b.checkpoints === true, chatKey: typeof b.chatKey === 'string' ? b.chatKey : null, anyway: b.anyway === true, wait: true}));
   });
   // A run is addressed under the group it belongs to, so the path has to name
