@@ -101,6 +101,66 @@ browser tasks, and accounts, workspaces and backup.
   Atlas, in a Home group, in place of the X-engage group and its example bots.
 - **The package description** is now "Local-first personal bot platform with
   human-approved actions".
+- **The docs say what a new install does.** README, SECURITY.md, AGENTS.md and
+  OPERATIONS.md claimed every send and post asks by default and that events are
+  limited past 60 a minute. A new install starts on Hands-off (a clean run
+  sends and posts unasked; deletes and payments always ask), and the event
+  route blocks an address after 20 refusals a minute. A test pins that limit.
+- **Hands-off no longer sends on outside text carried in through the chat.** A
+  run is handed the recent replies in its chat, so a reply written by a run
+  that read a page or a connector brought that text into the next run, which
+  still counted as clean and sent unasked. That run now asks before a send, a
+  post or a connector write (`outsideRead` in `shared/asks.js`). Basic access,
+  page asks, deletes and payments are unchanged.
+- **Hands-off asks when a bot's memory holds outside text.** A tidy-up pass
+  that read a reply from such a run wrote rules and a chat recap from it, and a
+  later run handed them sent unasked. What such a pass writes is now marked
+  (`outside`), the mark carries into later passes that read it, and a run
+  handed a marked recap or an enabled marked rule asks before a send. The bot's
+  profile labels those notes; editing or forgetting one clears it.
+  A run whose bot, or a teammate it consulted, was handed such notes is
+  marked as well (`outsideMemory`), so its replies count for the next run in
+  the chat.
+- **What a run read outlives its records.** Page requests past the newest 200
+  and runs past the retention window were dropped while their replies stayed in
+  the chat, so a later run counted those replies as clean. A dropped page read
+  now marks its run (`readPages`), and a removed run marks its replies
+  (`outside`).
+- **The kill switch holds a schedule that was mid-run.** A recurring schedule
+  that finished or failed after the owner switched everything off re-armed
+  itself as queued, and the next sweep ran it again; so did a retry and a
+  crashed worker's recovered lease. Each now waits as paused by the switch and
+  comes back with its Resume, and the queue never claims a schedule while the
+  switch is on. One resumed or retried by hand while it is on waits for it too. A weekdays or weekends schedule that ran out of retries is
+  re-armed on a day its rule allows, as a completed one already was.
+- **Weekdays and weekends follow the owner's calendar.** The server judged the
+  day of each run on its own clock, so on a server in UTC an owner far from UTC
+  had Monday's run skipped and Saturday's made. A day-rule schedule now carries
+  the browser's time zone (`tz`, checked against the runtime's zone list) and
+  the day is read there. Older schedules and ones without a zone keep the
+  server's clock.
+- **A daily or weekly time stays put across daylight saving.** A schedule
+  stepped exactly 24 hours, so "every day at 08:00" ran at 09:00 after the
+  clocks changed. A recurring schedule with a time of day now carries the
+  browser's zone too, and each re-arm puts it back on that time
+  (`keepWallTime` in `shared/schedules.js`).
+- **Older schedules pick up the owner's zone.** A recurring schedule saved
+  before schedules carried a zone gets the zone of the first browser that opens
+  the app afterwards (`POST /api/tasks/zone`); one that has a zone keeps it.
+- **Quiet hours can follow the owner's clock.** `QUIET_HOURS_TZ` (an IANA
+  zone) sets the clock `QUIET_HOURS` is read on; without it the server's is
+  used, as before.
+- **The browser smokes run without a browser download.** When Playwright's own
+  Chromium is not installed, `npm run test:ui` and `npm run test:e2e` drive the
+  installed Google Chrome instead (`tests/browser_launch.py`).
+- **A throwaway browser profile is removed on a busy machine too.** The local
+  agent gave up after five quick tries, and a Chrome helper could write the
+  directory back after a removal, so a temporary profile was left in the temp
+  folder. It now retries for up to three seconds until the folder is gone.
+- **Health stays up during a restore.** A restore stops the workspace's queue,
+  and its last tick aged past a minute, so `/api/health` answered 503 and a
+  container health check could restart the server mid-restore. A stopped queue
+  now drops out of the check, and a started one counts at once.
 
 ### Kept
 - **The posting guard.** A bot may read an X page through an approved

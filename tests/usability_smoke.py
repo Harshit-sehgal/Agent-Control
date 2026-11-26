@@ -22,6 +22,7 @@ import threading
 import traceback
 from pathlib import Path
 from playwright.async_api import async_playwright, expect
+from browser_launch import launch_chromium
 
 ROOT = Path(__file__).resolve().parents[1]
 DESKTOP = {'width': 1360, 'height': 860}
@@ -2731,7 +2732,7 @@ async def main():
         server = serve(build_site(site_dir))
         base = f'http://127.0.0.1:{server.server_address[1]}'
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True, args=['--no-sandbox'])
+            browser = await launch_chromium(p, headless=True, args=['--no-sandbox'])
             h = Harness(browser, base, shots)
             print(f'Usability smoke against {base}')
             await h.scenario('bot: create from the New bot page and land in its chat', create_bot_from_page)

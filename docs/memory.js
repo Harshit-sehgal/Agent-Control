@@ -17,8 +17,8 @@
  * survives even with no AI provider. `mergeConsolidation` applies the result of
  * one model-written consolidation pass. Both are pure and bounded.
  */
-import {cleanText} from './core.js?v=d5c4fabe4b';
-import {botSettings} from './bot-settings.js?v=d5c4fabe4b';
+import {cleanText} from './core.js?v=45393fcc46';
+import {botSettings} from './bot-settings.js?v=45393fcc46';
 
 export const MEMORY_VERSION = 1;
 export const MAX_RULES = 50;
@@ -360,6 +360,8 @@ export function editRule(state, key, ruleId, text, {now = new Date().toISOString
   if (value.length < 4) throw Object.assign(new Error('A rule needs at least 4 characters.'), {status: 400});
   if (book.rules.some(other => other !== rule && normalize(other.text) === normalize(value))) return null;
   Object.assign(rule, {text: value, source: 'user', updatedAt: now});
+  // The owner's own words now: no longer outside text, whatever pass first wrote it.
+  delete rule.outside;
   book.updatedAt = now;
   return rule;
 }
@@ -455,7 +457,7 @@ export function noteChat(state, chatKey, {now = new Date().toISOString(), messag
     summary: fresh ? previous.summary : summary,
     turns,
     updatedAt: now,
-    ...(fresh ? {summarizedAt: previous.summarizedAt, summarizedTurns: previous.summarizedTurns || 0} : {}),
+    ...(fresh ? {summarizedAt: previous.summarizedAt, summarizedTurns: previous.summarizedTurns || 0, ...(previous.outside === true ? {outside: true} : {})} : {}),
   };
   memory.chats[key] = entry;
   pruneMemory(state);
@@ -464,14 +466,14 @@ export function noteChat(state, chatKey, {now = new Date().toISOString(), messag
 
 /** Replace the recap with a model-written one (or keep the deterministic one
  * when the model returned nothing usable). */
-export function setChatSummary(state, chatKey, summary, {now = new Date().toISOString()} = {}) {
+export function setChatSummary(state, chatKey, summary, {now = new Date().toISOString(), outside = false} = {}) {
   const memory = memoryState(state);
   const key = memoryKey(chatKey, 120);
   const value = cleanText(summary, MAX_CHAT_SUMMARY);
   if (!key || !value) return own(memory.chats, key) || null;
   const previous = own(memory.chats, key);
   const turns = Number(previous?.turns || 0);
-  const entry = {chat: key, summary: value, turns, updatedAt: now, summarizedAt: now, summarizedTurns: turns};
+  const entry = {chat: key, summary: value, turns, updatedAt: now, summarizedAt: now, summarizedTurns: turns, ...(outside ? {outside: true} : {})};
   memory.chats[key] = entry;
   pruneMemory(state);
   return entry;
@@ -576,7 +578,7 @@ export function parseConsolidation(text) {
 
 /** Apply one consolidation result to a model book. Existing rule ids are kept
  * for rules that survive, so a UI row does not jump on every pass. */
-export function mergeConsolidation(state, key, result, {now = new Date().toISOString(), makeId = () => crypto.randomUUID(), label = '', chatKey = null, sentPending = null, sentTurns, sentCorrections = null, sentLiked = null} = {}) {
+export function mergeConsolidation(state, key, result, {now = new Date().toISOString(), makeId = () => crypto.randomUUID(), label = '', chatKey = null, sentPending = null, sentTurns, sentCorrections = null, sentLiked = null, outside = false} = {}) {
   const book = rulebook(state, key, {label});
   if (!result) return book;
   const before = [...book.rules];
@@ -590,7 +592,9 @@ export function mergeConsolidation(state, key, result, {now = new Date().toISOSt
   const written = kept.map(text => {
     const old = existing.get(normalize(text));
     if (old) return {...old, text, updatedAt: now};
-    const rule = {id: cleanText(makeId(), 64), text, source: 'model', createdAt: now, updatedAt: now, uses: 0};
+    // A pass that read outside text (consolidationReadsOutside in shared/asks.js) marks what it wrote, so Hands-off asks
+    // in a run handed it; a rule kept word for word keeps the mark it had.
+    const rule = {id: cleanText(makeId(), 64), text, source: 'model', createdAt: now, updatedAt: now, uses: 0, ...(outside ? {outside: true} : {})};
     if (!before.some(prior => alike(text, prior.text))) fresh.push(rule);
     return rule;
   });
@@ -610,8 +614,13 @@ export function mergeConsolidation(state, key, result, {now = new Date().toISOSt
   // One pass rewrites one chat's recap and one model's book. A recap of this
   // conversation must not become the model-wide notes of every other chat that
   // model serves, so the two only meet when the pass had no chat at all.
-  if (result.summary && chatKey) setChatSummary(state, chatKey, result.summary, {now});
-  else if (result.summary) book.summary = cleanText(result.summary, MAX_MODEL_SUMMARY);
+  if (result.summary && chatKey) setChatSummary(state, chatKey, result.summary, {now, outside});
+  else if (result.summary) {
+    book.summary = cleanText(result.summary, MAX_MODEL_SUMMARY);
+    // Every turn of this bot is handed the summary, so it carries the pass's mark; a clean rewrite drops it.
+    if (outside) book.summaryOutside = true;
+    else delete book.summaryOutside;
+  }
   // Clear only the instructions this pass actually sent. `noteTurn` is not
   // locked out during the model call, so a sentence that arrived meanwhile has
   // never been to the model: dropping it deleted the rule and marked its turn
@@ -655,7 +664,7 @@ export function noteTurn(state, key, {userText = '', botText = '', now = new Dat
  * recap and the company notebook: what a bot's profile shows. */
 export function publicMemory(state, {bot = null} = {}) {
   const memory = memoryState(state);
-  const rules = book => (book?.rules || []).map(rule => ({id: rule.id, text: rule.text, source: rule.source, createdAt: rule.createdAt, enabled: rule.enabled !== false}));
+  const rules = book => (book?.rules || []).map(rule => ({id: rule.id, text: rule.text, source: rule.source, createdAt: rule.createdAt, enabled: rule.enabled !== false, ...(rule.outside === true ? {outside: true} : {})}));
   const company = {rules: rules(own(memory.rulebooks, COMPANY_KEY))};
   if (bot) {
     const book = own(memory.rulebooks, botKey(bot));

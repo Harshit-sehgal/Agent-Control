@@ -18,7 +18,7 @@ import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js';
 import {sendChat} from './ui-chat.js';
 import {computerPage as computerView, computerLabel, keysOwned, thumbSlot} from './ui-computer-view.js';
 import {
-  MAX_NAME, MAX_JOB, hasJob, roleLine, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, lookOf, newBotDefaults,
+  MAX_NAME, MAX_JOB, hasJob, roleLine, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, OUTSIDE_NOTE, lookOf, newBotDefaults,
   newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, closeTarget, watchRows,
 } from './ui-profile-model.js';
 import {WATCH_EVERY} from './watches.js';
@@ -155,7 +155,7 @@ function profileMain(bot) {
 function memoryList(bot) {
   const notes = memoryNotes(store.state, bot.id), write = canWrite();
   if (!notes.length) return `<p class="pr-note">Nothing yet. Tell ${esc(bot.name)} to remember something, or add a note below.</p>`;
-  return `<div class="cd">${notes.map(n => `<div class="rw memo"><span class="w">${esc(n.text)}</span>${write ? `<button type="button" class="memo-x" data-action="memory-forget" data-id="${esc(bot.id)}" data-rule="${esc(n.id)}" aria-label="Forget this note">Forget</button>` : ''}</div>`).join('')}</div>`;
+  return `<div class="cd">${notes.map(n => `<div class="rw memo"><span class="w">${esc(n.text)}${n.outside ? `<small>${esc(OUTSIDE_NOTE)}</small>` : ''}</span>${write ? `<button type="button" class="memo-x" data-action="memory-forget" data-id="${esc(bot.id)}" data-rule="${esc(n.id)}" aria-label="Forget this note">Forget</button>` : ''}</div>`).join('')}</div>`;
 }
 /** A bot's timers: each one says what and when, with Stop; below, one line to add another. The bot sets these
  * from chat too ("every morning at 8, sum up my inbox"), so the form is the fallback, not the way in. */

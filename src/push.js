@@ -156,8 +156,9 @@ export function createPush(store, {fetcher = null, guard = assertPublicUrl, reso
     async deliver(task) {
       const device = store.get('SELECT * FROM push_subscriptions WHERE id=?', task.payload.target);
       if (!device) return {delivered: 'gone'};
-      // Quiet hours (QUIET_HOURS, e.g. 22:00-07:00): a non-urgent message stays in the app and is not pushed to the phone.
-      if (!task.payload.urgent && inQuietHours(parseQuietHours(process.env.QUIET_HOURS), new Date())) return {delivered: 'quiet'};
+      // Quiet hours (QUIET_HOURS, e.g. 22:00-07:00, on the QUIET_HOURS_TZ clock or the server's): a non-urgent message
+      // stays in the app and is not pushed to the phone.
+      if (!task.payload.urgent && inQuietHours(parseQuietHours(process.env.QUIET_HOURS), new Date(), process.env.QUIET_HOURS_TZ || '')) return {delivered: 'quiet'};
       return {delivered: await send(device, task.payload)};
     },
   };

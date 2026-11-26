@@ -463,10 +463,12 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
     // A kept profile (AGENT_BROWSER_PROFILE) survives so its sign-in does; a
     // throwaway one is removed. Chromium child processes can still be flushing
     // the directory for a moment after the parent exits (maxRetries only helps
-    // on Windows), so retry and never let a cleanup race mask the real result.
-    if (!keepProfile && !connection) for (let attempt = 0; attempt < 5; attempt++) {
-      try { fs.rmSync(dir, {recursive: true, force: true}); break; }
-      catch { await new Promise(resolve => setTimeout(resolve, 120)); }
+    // on Windows), and one can write a file back after a removal that succeeded, so retry until the directory is
+    // really gone (up to three seconds on a busy machine) and never let a cleanup race mask the real result.
+    if (!keepProfile && !connection) for (const until = Date.now() + 3000; ;) {
+      try { fs.rmSync(dir, {recursive: true, force: true}); } catch { /* Still in use; try again. */ }
+      if (!fs.existsSync(dir) || Date.now() > until) break;
+      await new Promise(resolve => setTimeout(resolve, 120));
     }
   }
 

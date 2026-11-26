@@ -327,7 +327,9 @@ async function runGroupInner(store,id,executor){
       if(handed)previous=handed;
       // This bot's own provider and its own rulebook, plus the company notebook.
       const config=resolveConfig(store,bot.id);
-      const memory=memoryFor(store,{bot,config,chatKey:r.chatKey});
+      // Notes written from outside text mark the run, so Hands-off asks in it and in a later run its replies reach.
+      const markOutside=handed=>{if(handed?.outside)void store.update(s=>{const live=s.groupRuns.find(x=>x.id===id);if(live)live.outsideMemory=true;});return handed;};
+      const memory=markOutside(memoryFor(store,{bot,config,chatKey:r.chatKey}));
       // Context is automatic: the newest lines that fit; the stored recap, which is
       // in the memory block, stands in for whatever had to be cut.
       const thread=threadContext(current.chats?.[r.chatKey]);
@@ -355,7 +357,7 @@ async function runGroupInner(store,id,executor){
       const gate=()=>store.update(s=>noteBotWork(s,'run').paused);
       // Every model call in the turn (the bot's, a helper's, a teammate's answer, a fallback) is counted on the
       // run and on each bot's day (src/usage.js).
-      const metered=await meterTurn(store,{runId:id},()=>runBotTurn(store,{bot,envelope,executor,config,peers:everyone,configFor:peerId=>resolveConfig(store,peerId),memoryForPeer:(mate,mateConfig)=>memoryFor(store,{bot:mate,config:mateConfig,chatKey:r.chatKey}),handoffAllowed:mayHandoff(r,bot)&&!closing&&!declinedTurn,spawnRounds:(r.subagents||[]).some(spawn=>spawn.botId===bot.id)?MAX_SUBAGENT_DEPTH:0,budget,onEvent,gate,resume:resumed,stop:stopped,groupId:home?.id??null,runId:id,makeId:randomUUID,now:stamp}));
+      const metered=await meterTurn(store,{runId:id},()=>runBotTurn(store,{bot,envelope,executor,config,peers:everyone,configFor:peerId=>resolveConfig(store,peerId),memoryForPeer:(mate,mateConfig)=>markOutside(memoryFor(store,{bot:mate,config:mateConfig,chatKey:r.chatKey})),handoffAllowed:mayHandoff(r,bot)&&!closing&&!declinedTurn,spawnRounds:(r.subagents||[]).some(spawn=>spawn.botId===bot.id)?MAX_SUBAGENT_DEPTH:0,budget,onEvent,gate,resume:resumed,stop:stopped,groupId:home?.id??null,runId:id,makeId:randomUUID,now:stamp}));
       const reply=metered.value,fellBack=fallbacksOf(metered.calls);
       if(reply.limit){
         // A checkpoint, not a failure: what was said stays said, the bots still

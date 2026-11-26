@@ -22,21 +22,21 @@
  *   ui-dialogs      toast, sheet, confirm/ask      ui-actions action/form tables
  *   ui-fx           confetti, the send arrow and the bots' ambient life
  */
-import {companyRoute} from './ui-company.js?v=d5c4fabe4b';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=d5c4fabe4b';
-import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=d5c4fabe4b';
-import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, renderPause, closeSearch, homeView, setupCardHtml} from './ui-shell.js?v=d5c4fabe4b';
-import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=d5c4fabe4b';
-import {profileViews, wirePages} from './ui-profile.js?v=d5c4fabe4b';
-import {wireGestures, gesturesBusy} from './ui-gestures.js?v=d5c4fabe4b';
-import {wireReplyMenu} from './ui-reply-menu.js?v=d5c4fabe4b';
-import {settingsViews} from './ui-settings.js?v=d5c4fabe4b';
-import {showLogin, hideLogin} from './ui-sheets.js?v=d5c4fabe4b';
-import {actions, forms, onControlChange, onControlInput, modelSearchKey} from './ui-actions.js?v=d5c4fabe4b';
-import {bringBotsToLife} from './ui-fx.js?v=d5c4fabe4b';
-import {wireComputer} from './ui-computer-view.js?v=d5c4fabe4b';
-import {googleReturn, withoutGoogleParams} from './ui-connect-model.js?v=d5c4fabe4b';
-import {sharedDraft, withoutShareParams} from './ui-model.js?v=d5c4fabe4b';
+import {companyRoute} from './ui-company.js?v=45393fcc46';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=45393fcc46';
+import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=45393fcc46';
+import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, renderPause, closeSearch, homeView, setupCardHtml} from './ui-shell.js?v=45393fcc46';
+import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=45393fcc46';
+import {profileViews, wirePages} from './ui-profile.js?v=45393fcc46';
+import {wireGestures, gesturesBusy} from './ui-gestures.js?v=45393fcc46';
+import {wireReplyMenu} from './ui-reply-menu.js?v=45393fcc46';
+import {settingsViews} from './ui-settings.js?v=45393fcc46';
+import {showLogin, hideLogin} from './ui-sheets.js?v=45393fcc46';
+import {actions, forms, onControlChange, onControlInput, modelSearchKey} from './ui-actions.js?v=45393fcc46';
+import {bringBotsToLife} from './ui-fx.js?v=45393fcc46';
+import {wireComputer} from './ui-computer-view.js?v=45393fcc46';
+import {googleReturn, withoutGoogleParams} from './ui-connect-model.js?v=45393fcc46';
+import {sharedDraft, withoutShareParams} from './ui-model.js?v=45393fcc46';
 
 const el = id => document.getElementById(id);
 const hashRoute = () => normalizeRoute(companyRoute(location.hash, store.state));

@@ -6,8 +6,8 @@
  * These transitions are pure and mirror `workflow.js`: the Node worker and the
  * browser-local demo both run them, so the two backends cannot drift.
  */
-import {activity, cleanText} from './core.js?v=d5c4fabe4b';
-import {cleanDay, DAY_RULES, skipToDays} from './schedules.js?v=d5c4fabe4b';
+import {activity, cleanText} from './core.js?v=45393fcc46';
+import {cleanDay, cleanZone, DAY_RULES, keepWallTime, needsZone, skipToDays} from './schedules.js?v=45393fcc46';
 
 export const MAX_ATTEMPTS_DEFAULT = 5;
 
@@ -64,7 +64,9 @@ const PAYLOAD_KINDS = {
     // The daily briefing (shared/briefing.js) is marked so its run is given the workspace's facts; nothing else is kept.
     const brief = body.brief === 'daily' ? {brief: 'daily'} : {};
     const days = dayRule(body);
-    return {groupId, botId, message, label: cleanText(body.label, 200) || message.slice(0, 60), ...timing(body), ...(at ? {at} : {}), ...(on ? {on} : {}), ...(days ? {days} : {}), ...brief, ...(body.source === 'event' ? {source: 'event'} : {})};
+    // The owner's time zone, so a time of day and a day rule stay on their clock (keepWallTime, skipToDays in shared/schedules.js).
+    const tz = days || at ? cleanZone(body.tz) : '';
+    return {groupId, botId, message, label: cleanText(body.label, 200) || message.slice(0, 60), ...timing(body), ...(at ? {at} : {}), ...(on ? {on} : {}), ...(days ? {days} : {}), ...(tz ? {tz} : {}), ...brief, ...(body.source === 'event' ? {source: 'event'} : {})};
   },
   'group-run': body => ({groupId: cleanText(body.groupId, 64), message: cleanText(body.message, 4000), directBotId: cleanText(body.directBotId, 64) || null}),
   'agent-job': body => ({action: cleanText(body.action, 64), params: body.params && typeof body.params === 'object' ? body.params : {}, agentId: cleanText(body.agentId, 64) || null}),
@@ -216,6 +218,8 @@ export function claimTasks(state, {workerId, now = Date.now(), limit = 5, leaseM
   for (const task of state.tasks) {
     if (claimed.length >= limit) break;
     if (task.status !== 'queued') continue;
+    // The kill switch holds every schedule, including one a hand resume or an older build left queued.
+    if (task.kind === 'bot-task' && state.schedulesPaused === true) continue;
     if (Date.parse(task.runAt) > now) continue;
     if (task.leaseUntil && Date.parse(task.leaseUntil) > now) continue;
     task.status = 'running';
@@ -226,6 +230,36 @@ export function claimTasks(state, {workerId, now = Date.now(), limit = 5, leaseM
     claimed.push(task);
   }
   return claimed;
+}
+
+/** Put a task back in line. A schedule re-armed while the kill switch is on (a run that was already going when
+ * the owner stopped everything, its retry, a crashed worker's lease) waits as paused by the switch, so the
+ * switch's Resume brings it back and nothing new starts before then. */
+function requeue(state, task) {
+  if (task.kind === 'bot-task' && state.schedulesPaused === true) {
+    task.status = 'paused';
+    task.payload = {...(task.payload || {}), pausedBy: 'switch'};
+  } else {
+    task.status = 'queued';
+  }
+}
+
+/** The next window of a recurring task: from the planned time, not the finish, so "every day at 08:00" stays at
+ * 08:00 instead of drifting by however long each run took. A run that missed windows skips to the next one
+ * ahead, a weekdays or weekends rule moves it to the next day it allows, and a time of day stays on the owner's
+ * clock across a daylight-saving change. */
+function nextWindow(task, now) {
+  const step = task.intervalMinutes * 60000, planned = Date.parse(task.runAt);
+  let next = Number.isFinite(planned) && planned <= now ? planned + step : now + step;
+  if (next <= now) next += Math.ceil((now - next + 1) / step) * step;
+  const {at, days, tz} = task.payload || {};
+  // A daily or weekly time keeps the owner's wall clock across daylight saving, before and after a day skip.
+  if (step % 86400000 === 0 && at && tz) {
+    next = keepWallTime(next, at, tz);
+    if (next <= now) next += step;
+    return keepWallTime(skipToDays(next, step, days, tz), at, tz);
+  }
+  return skipToDays(next, step, days, tz);
 }
 
 export function completeTask(state, id, result = null, now = Date.now()) {
@@ -246,14 +280,8 @@ export function completeTask(state, id, result = null, now = Date.now()) {
   clearMissed(task);
   // A recurring task re-arms itself for the next window instead of finishing.
   if (task.intervalMinutes) {
-    task.status = 'queued';
-    // From the planned time, not the finish: "every day at 08:00" stays at 08:00 instead of
-    // drifting by however long each run took. A run that missed windows skips to the next one ahead.
-    const step = task.intervalMinutes * 60000, planned = Date.parse(task.runAt);
-    let next = Number.isFinite(planned) && planned <= now ? planned + step : now + step;
-    if (next <= now) next += Math.ceil((now - next + 1) / step) * step;
-    next = skipToDays(next, step, task.payload?.days);
-    task.runAt = new Date(next).toISOString();
+    requeue(state, task);
+    task.runAt = new Date(nextWindow(task, now)).toISOString();
     task.completedAt = null;
     task.attempts = 0;
   }
@@ -319,13 +347,9 @@ export function failTask(state, id, message, now = Date.now(), {conflict = false
     if (task.intervalMinutes && !permanent) {
       clearRetryAnchor(task);
       task.payload = {...(task.payload || {}), [MISSED_WINDOWS]: (Number(task.payload?.[MISSED_WINDOWS]) || 0) + 1};
-      task.status = 'queued';
+      requeue(state, task);
       task.lastError = error;
-      // From the planned time, not the finish, as in completeTask.
-      const step = task.intervalMinutes * 60000, planned = Date.parse(task.runAt);
-      let next = Number.isFinite(planned) && planned <= now ? planned + step : now + step;
-      if (next <= now) next += Math.ceil((now - next + 1) / step) * step;
-      task.runAt = new Date(next).toISOString();
+      task.runAt = new Date(nextWindow(task, now)).toISOString();
       task.completedAt = null;
       task.attempts = 0;
       activity(state, 'task-retry', `Task missed its window and will run again at its next one: ${task.title}`, {taskId: task.id});
@@ -336,7 +360,7 @@ export function failTask(state, id, message, now = Date.now(), {conflict = false
       activity(state, 'task-error', `Task failed after ${task.attempts} attempts: ${task.title}`, {taskId: task.id});
     }
   } else {
-    task.status = 'queued';
+    requeue(state, task);
     task.lastError = error;
     task.runAt = new Date(retryDelay(task.attempts, now)).toISOString();
     activity(state, 'task-retry', `Task will retry: ${task.title}`, {taskId: task.id});
@@ -351,7 +375,7 @@ export function retryTask(state, id) {
   if (!task) fail('Task not found.', 404);
   if (task.status === 'cancelled') fail('A cancelled task cannot be retried. Enqueue a new one.', 409);
   if (task.status !== 'failed') fail('Only a failed task can be retried.', 409);
-  task.status = 'queued';
+  requeue(state, task);
   task.runAt = new Date().toISOString();
   task.attempts = 0;
   task.lastError = null;
@@ -403,12 +427,28 @@ export function resumeTask(state, id, now = Date.now()) {
   if (!task) fail('Task not found.', 404);
   if (task.status !== 'paused') fail('Only a paused task can be resumed.', 409);
   const planned = Date.parse(task.runAt);
-  task.status = 'queued';
+  // Cleared before requeue: while the kill switch is on, requeue marks it as the switch's, so it comes back with
+  // the switch's Resume instead of running now.
   task.payload = {...task.payload, pausedBy: null};
+  requeue(state, task);
   task.runAt = new Date(Number.isFinite(planned) && planned > now ? planned : now).toISOString();
   task.updatedAt = new Date(now).toISOString();
-  activity(state, 'task', `Resumed task: ${task.title}`, {taskId: task.id});
+  activity(state, 'task', task.status === 'paused' ? `Will resume when the kill switch is off: ${task.title}` : `Resumed task: ${task.title}`, {taskId: task.id});
   return task;
+}
+
+/** Give the schedules an older build saved without a zone the owner's (`needsZone`): the zone of the browser that
+ * sent it. A schedule that has a zone keeps it, and a zone this runtime does not know fills nothing. */
+export function fillScheduleZones(state, zone) {
+  const tz = cleanZone(zone);
+  if (!tz) return 0;
+  let filled = 0;
+  for (const task of state.tasks || []) {
+    if (!needsZone(task)) continue;
+    task.payload = {...task.payload, tz};
+    filled += 1;
+  }
+  return filled;
 }
 
 /** The kill switch: pause every waiting schedule and hold new ones until resumed. Notices and
@@ -453,7 +493,7 @@ export function recoverStalledTasks(state, now = Date.now()) {
     if (task.status !== 'running') continue;
     const leaseUntil = Date.parse(task.leaseUntil || 0);
     if (Number.isFinite(leaseUntil) && leaseUntil > now) continue; // still leased
-    task.status = 'queued';
+    requeue(state, task);
     task.lastError = 'Previous worker stopped before completing. Re-armed automatically.';
     task.leaseOwner = null;
     task.leaseUntil = null;

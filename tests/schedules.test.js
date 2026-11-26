@@ -101,7 +101,7 @@ import {scheduleTaskBody} from '../shared/schedules.js';
 test('a card becomes the task the queue takes: first run at the next local time', () => {
   const now = new Date(2026, 10, 11, 9, 30);
   const daily = scheduleTaskBody({botId: 'inbox', groupId: 'home', message: 'Sum up', every: 1440, at: '08:00'}, now);
-  assert.deepEqual(daily, {kind: 'bot-task', payload: {groupId: 'home', botId: 'inbox', message: 'Sum up', kind: 'interval', intervalMinutes: 1440, at: '08:00', nextAt: new Date(2026, 10, 12, 8, 0).toISOString()}});
+  assert.deepEqual(daily, {kind: 'bot-task', payload: {groupId: 'home', botId: 'inbox', message: 'Sum up', kind: 'interval', intervalMinutes: 1440, at: '08:00', tz: Intl.DateTimeFormat().resolvedOptions().timeZone, nextAt: new Date(2026, 10, 12, 8, 0).toISOString()}});
   const hourly = scheduleTaskBody({botId: 'inbox', groupId: 'home', message: 'Check', every: 60}, now);
   assert.deepEqual(hourly.payload, {groupId: 'home', botId: 'inbox', message: 'Check', kind: 'interval', intervalMinutes: 60});
   const once = scheduleTaskBody({botId: 'inbox', groupId: 'home', message: 'Call Sam', at: '17:30'}, now);

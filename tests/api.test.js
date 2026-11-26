@@ -201,3 +201,22 @@ test('removed X routes answer 404 JSON', {timeout:25000}, async()=>{
     }
   }finally{await t.stop();}
 });
+
+test('an older schedule without a time zone takes the one the app sends', {timeout:25000}, async()=>{
+  const {t,send,cookie}=await session();
+  try{
+    const state=(await send('GET','/api/state',undefined,cookie)).body;
+    const group=state.groups[0],bot=group.bots[0];
+    // What an older build posted: a daily time and no zone.
+    const made=await send('POST','/api/tasks',{kind:'bot-task',payload:{groupId:group.id,botId:bot.id,message:'Morning summary',kind:'interval',intervalMinutes:1440,at:'08:00'}},cookie);
+    assert.equal(made.status,201);
+    assert.equal(made.body.payload.tz,undefined);
+    const filled=await send('POST','/api/tasks/zone',{tz:'Europe/London'},cookie);
+    assert.equal(filled.status,200);
+    assert.deepEqual(filled.body,{filled:1});
+    const after=(await send('GET','/api/state',undefined,cookie)).body.tasks.find(task=>task.id===made.body.id);
+    assert.equal(after.payload.tz,'Europe/London');
+    assert.deepEqual((await send('POST','/api/tasks/zone',{tz:'Asia/Tokyo'},cookie)).body,{filled:0},'a zone already set is kept');
+    assert.equal((await send('POST','/api/tasks/zone',{tz:'Europe/London'})).status,401,'no session, no change');
+  }finally{await t.stop();}
+});

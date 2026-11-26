@@ -15,6 +15,7 @@ import {
   consolidationInstructions, consolidationInput, parseConsolidation, mergeConsolidation,
   consolidationDue, findRulebook,
 } from '../shared/memory.js';
+import {consolidationReadsOutside, memoryCarriesOutside} from '../shared/asks.js';
 import {complete} from './ai.js';
 import {resolveConfig} from './ai-providers.js';
 import {companyBots} from '../shared/company.js';
@@ -53,7 +54,9 @@ export function memoryFor(store, {bot, config, chatKey}) {
   const state = store.read();
   const {key, label} = bookFor(bot, config);
   const prompt = promptMemory(state, key, chatKey, {label});
-  return {...prompt, key, label};
+  // Whether these notes were written from outside text (never sent to the model: memoryBlock picks the fields).
+  const outside = memoryCarriesOutside(state, {botId: bot?.id || null, chatKey});
+  return {...prompt, key, label, outside};
 }
 
 /** Record one exchange. Adds durable candidates to this model's book and
@@ -89,6 +92,8 @@ export async function consolidateModel(store, {key, config, chatKey = '', label 
     const messages = chatKey ? conversationMessages(state, chatKey) : [];
     const sentPending = [...(book.pending || [])], sentTurns = Number(book.turns || 0);
     const sentCorrections = [...(book.corrections || [])], sentLiked = [...(book.liked || [])];
+    // What this pass reads decides whether what it writes is outside text (Hands-off asks in a run handed it).
+    const outside = consolidationReadsOutside(state, {key: id, chatKey: chatKey || null, messages});
     const input = consolidationInput({book, messages, chatSummary: chatEntry?.summary || ''});
     const call = executor || ((instructions, body, cfg) => complete({instructions, input: body, maxTokens: 1600, config: cfg}));
     const raw = await call(consolidationInstructions(), input, config);
@@ -112,7 +117,7 @@ export async function consolidateModel(store, {key, config, chatKey = '', label 
     }
     const updated = await store.update(current => {
       if (!findRulebook(current, id)) return null;
-      const merged = mergeConsolidation(current, id, parsed, {now, label: label || modelLabel(config), chatKey: chatKey || null, sentPending, sentTurns, sentCorrections, sentLiked});
+      const merged = mergeConsolidation(current, id, parsed, {now, label: label || modelLabel(config), chatKey: chatKey || null, sentPending, sentTurns, sentCorrections, sentLiked, outside});
       // What a correction taught is said in the chat it came from, with Undo; the list itself is never stored.
       const said = merged.announce || [];
       delete merged.announce;

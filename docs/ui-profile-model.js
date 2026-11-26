@@ -5,15 +5,15 @@
  *
  * A bot's manager is settings.reportsTo (company.js); "manager" is simply a bot
  * with reports, so any bot can become one by receiving a report. */
-import {companyBots, primaryOf, managerOf, reportsOf, teamOf} from './company.js?v=d5c4fabe4b';
-import {firstUnusedTint} from './bot-create.js?v=d5c4fabe4b';
-import {TINT_COUNT, dayLabel} from './ui-kit.js?v=d5c4fabe4b';
-import {jobOf} from './ui-company.js?v=d5c4fabe4b';
-import {ACTIVITY_CHIPS} from './activity-log.js?v=d5c4fabe4b';
-import {grantRows} from './ui-asks.js?v=d5c4fabe4b';
-import {cleanEffort, effortLabel, EFFORT_LEVELS} from './ai-presets.js?v=d5c4fabe4b';
-import {scheduleRows} from './schedules.js?v=d5c4fabe4b';
-import {WATCH_EVERY} from './watches.js?v=d5c4fabe4b';
+import {companyBots, primaryOf, managerOf, reportsOf, teamOf} from './company.js?v=45393fcc46';
+import {firstUnusedTint} from './bot-create.js?v=45393fcc46';
+import {TINT_COUNT, dayLabel} from './ui-kit.js?v=45393fcc46';
+import {jobOf} from './ui-company.js?v=45393fcc46';
+import {ACTIVITY_CHIPS} from './activity-log.js?v=45393fcc46';
+import {grantRows} from './ui-asks.js?v=45393fcc46';
+import {cleanEffort, effortLabel, EFFORT_LEVELS} from './ai-presets.js?v=45393fcc46';
+import {scheduleRows} from './schedules.js?v=45393fcc46';
+import {WATCH_EVERY} from './watches.js?v=45393fcc46';
 
 /** What a bot made without a job holds until the owner's first chat message
  * replaces it (the profile, the list and the chat all treat it as "no job yet"). */
@@ -107,7 +107,10 @@ export function deleteCopy(state, botId) {
 
 const bookOf = (state, botId) => state?.memory?.rulebooks?.[`bot:${botId}`] || null;
 /** A bot's own memory notes (rules), from the snapshot. */
-export const memoryNotes = (state, botId) => (bookOf(state, botId)?.rules || []).map(r => ({id: r.id, text: r.text, source: r.source || 'user', createdAt: r.createdAt || ''}));
+/** `outside`: a tidy-up pass wrote it from something the bot read on a page or in an app, so its sends ask first. */
+export const memoryNotes = (state, botId) => (bookOf(state, botId)?.rules || []).map(r => ({id: r.id, text: r.text, source: r.source || 'user', createdAt: r.createdAt || '', ...(r.outside === true && r.enabled !== false ? {outside: true} : {})}));
+/** The line under a note written from outside text. */
+export const OUTSIDE_NOTE = 'Learned from a page or app it read, so its sends ask you first. Forget it to stop that.';
 
 /** One line for the Model row: the bot's own override, else the workspace default. */
 export function modelLine(state, botId) {

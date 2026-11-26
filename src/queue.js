@@ -211,11 +211,14 @@ export function createQueue(store, handlers = {}, {intervalMs = 2000, workerId, 
     start() {
       started = true;
       // The tick is what health reads: a timer that still fires means the queue is alive, even while every sweep waits on a model.
+      sweeps.set(store, Date.now());
       timer = setInterval(() => { if (!started) return; sweeps.set(store, Date.now()); void sweep(); }, intervalMs);
       timer.unref();
       return () => {
         started = false;
         clearInterval(timer);
+        // Stopped on purpose (a restore, shutdown): no tick to age, so health does not read it as stalled.
+        sweeps.delete(store);
         return running ? new Promise(resolve => idleWaiters.push(resolve)) : Promise.resolve();
       };
     },
