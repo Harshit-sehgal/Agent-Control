@@ -28,7 +28,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import {isPrivateAddress} from './net-guard.mjs';
-import {PAGE_SECRETS_JS} from './page-secrets.mjs';
+import {PAGE_SECRETS_JS, SECRET_FIELDS_JS as SECRET_FIELDS, scrubTyped, rememberTyped} from './page-secrets.mjs';
 import {hostAllowed, RISKS, PATH_RISKS, ACTION_KEYS, CHECKOUT_PATH, foldLabel, botCheck, searchAlternates} from '../shared/bot-browser.js';
 
 // The allowlist rule lives with the rest of the browser-block rules in
@@ -77,10 +77,6 @@ const PICKABLE = `(function(){var sel='a[href],button,input,textarea,select,[rol
  * reliable on a page it has never seen; the attributes make the step cheap.
  * Both lists come from the same `PICKABLE` expression in the same page load. */
 /** A page's words for the bot: the main article when the page marks one (menus and sidebars left out), else the whole body. */
-/** The page's secret fields, as a page expression. It needs the whole `PAGE_SECRETS_JS` bundle in scope. A
- * `select` and a contenteditable count; `isSecretField` then keeps only a password, a one-time code, a card
- * number or a field the page's author tagged `data-agent-secret`. */
-const SECRET_FIELDS = `Array.prototype.filter.call(document.querySelectorAll('input,textarea,select,[contenteditable],[data-agent-secret]'),isSecretField)`;
 /** The words a bot gets as the page's text. A secret field's content is hidden wherever it appears, so a page that
  * prints back what was typed ("Code 482913 sent") shows `[hidden]`. Hidden before the cut, so no part of a secret is left. */
 const MAIN_TEXT = `(function(){${PAGE_SECRETS_JS};var b=document.body;if(!b)return "";var m=document.querySelector('main, article, [role=main], #content');var t=m?m.innerText:"";return hideSecrets(t&&t.length>400?t:b.innerText,${SECRET_FIELDS}).slice(0,60000);})()`;
@@ -159,7 +155,7 @@ function actionExpression(step, approved = [], {person = false} = {}) {
   const owner = person === true;
   switch (step.op) {
     case 'click': return `(()=>{const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};${riskGuard(bot, 'clicked', true, false, owner)}el.scrollIntoView();const a=el.closest('a[target]');if(a)a.removeAttribute('target');el.click();return{ok:true};})()`;
-    case 'type': return `(()=>{const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};${riskGuard(bot, 'typed into', false, true, owner)}${owner ? ownerTyping(step) : ''}const v=${jsLiteral(step.text)};if('value' in el){el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}else{el.textContent=v;}return{ok:true};})()`;
+    case 'type': return `(()=>{const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};${riskGuard(bot, 'typed into', false, true, owner)}${owner ? ownerTyping(step) : ''}const v=${jsLiteral(step.text)};if('value' in el){el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}else{el.textContent=v;}return{ok:true${owner ? ',secret:isSecretField(el)' : ''}};})()`;
     case 'waitFor': return `new Promise(res=>{const sel=${sel};const end=Date.now()+${Number(step.timeoutMs) > 0 ? Math.min(Number(step.timeoutMs), 15000) : 5000};const tick=()=>{if(document.querySelector(sel))return res({ok:true});if(Date.now()>end)return res({ok:false,reason:'timed out'});setTimeout(tick,100);};tick();})`;
     case 'read': return `(()=>{${PAGE_SECRETS_JS};const el=document.querySelector(${sel});return{ok:Boolean(el),text:el?hideSecrets(String(el.textContent),${SECRET_FIELDS}).slice(0,4000):null};})()`;
     case 'snapshot': return SNAPSHOT;
@@ -543,17 +539,22 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
       // laid out for a desktop is the page they meant to open.
       await cdp.send('Emulation.setDeviceMetricsOverride', {width: 1024, height: 768, deviceScaleFactor: 1, mobile: false}, sessionId).catch(() => {});
       const evaluate = expression => cdp.send('Runtime.evaluate', {expression, returnByValue: true, awaitPromise: true}, sessionId);
+      // What the owner typed in secret during this takeover, for the life of this page and in memory only. Every
+      // result that leaves (`act`, `view`, `page`, `snapshot`, and what `read` returns to them) is scrubbed of it,
+      // since a site may echo it in an address, a title or a field it draws again.
+      const typed = new Set();
+      const scrub = result => scrubTyped(result, typed);
 
       async function read() {
         const {result} = await evaluate(pageRead({ready: true}));
         const page = JSON.parse(result.value);
         const snap = page.snapshot && typeof page.snapshot === 'object' ? page.snapshot : {count: 0, elements: []};
-        return {
+        return scrub({
           url: page.shown, title: page.title || null,
           text: String(page.text || '').replace(/\s+/g, ' ').trim().slice(0, 60000),
           elements: Array.isArray(snap.elements) ? snap.elements : [], elementCount: Number(snap.count) || 0,
           blockedRequests: blocked.length + (refused.length - blockedBefore),
-        };
+        });
       }
       const done = () => evaluate('document.readyState').then(({result}) => result?.value === 'complete').catch(() => false);
       /** An action may start a navigation, and the app is being read by a person
@@ -577,7 +578,7 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
       async function view(withImage = true) {
         // A page can be mid-navigation when the person asks for it; an empty
         // frame with the address they are heading to is more useful than a 500.
-        const page = await read().catch(() => ({url, title: null, text: '', elements: [], elementCount: 0, blockedRequests: blocked.length + (refused.length - blockedBefore)}));
+        const page = await read().catch(() => scrub({url, title: null, text: '', elements: [], elementCount: 0, blockedRequests: blocked.length + (refused.length - blockedBefore)}));
         if (!withImage) return page;
         const {data} = await cdp.send('Page.captureScreenshot', {format: 'jpeg', quality: 70, captureBeyondViewport: false}, sessionId).catch(() => ({data: null}));
         return {...page, image: data ? `data:image/jpeg;base64,${data}` : null};
@@ -607,17 +608,22 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
             // says only that something did not work.
             const refusal = blocked.length > blockedBefore ? blocked[blocked.length - 1]
               : refused.length > refusedBefore ? refused[refused.length - 1] : '';
-            return {ok: !nav.errorText && !refusal, reason: nav.errorText || refusal ? `The page was not opened. ${refusal || nav.errorText}` : '', ...page};
+            return scrub({ok: !nav.errorText && !refusal, reason: nav.errorText || refusal ? `The page was not opened. ${refusal || nav.errorText}` : '', ...page});
           }
           const here = await read().catch(() => ({url: ''}));
           const expression = actionExpression(step || {}, [], {person: true});
-          if (!expression) return {ok: false, reason: 'That action is not supported.', ...here};
+          if (!expression) return scrub({ok: false, reason: 'That action is not supported.', ...here});
+          // Remembered before the text is written, so nothing the page does with it can come back unhidden.
+          const secretText = op === 'type' && typeof step.text === 'string';
+          if (secretText && step.secret === true) rememberTyped(typed, step.text);
           const {result} = await evaluate(expression).catch(error => ({result: {value: {ok: false, reason: error.message}}}));
           const value = result?.value && typeof result.value === 'object' ? result.value : {ok: false, reason: 'The page did not answer.'};
+          // A plain type into a field the page counts as secret is remembered too.
+          if (secretText && value.secret === true) rememberTyped(typed, step.text);
           const page = await settled(here.url);
           // `read` returns an element's text; keep it next to the page instead of
           // letting the page's own text win the spread.
-          return {ok: Boolean(value.ok), reason: String(value.reason || ''), readText: typeof value.text === 'string' ? value.text : null, ...page};
+          return scrub({ok: Boolean(value.ok), reason: String(value.reason || ''), readText: typeof value.text === 'string' ? value.text : null, ...page});
         },
         /** The page as the person left it: what the bot is handed back. */
         view: () => view(),

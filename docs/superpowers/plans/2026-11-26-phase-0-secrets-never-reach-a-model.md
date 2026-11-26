@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A password, a one-time code or a card number, whether typed by the owner during a takeover or already in a field, never reaches a model, a chat line, a stored result, a log or an error while the field is on the page. The owner gets masked Password and Code fields in both takeover screens.
+**Goal:** A password, a one-time code or a card number, whether typed by the owner during a takeover or already in a field, never reaches a model, a chat line, a stored result, a log or an error, including after the page navigates and echoes it elsewhere. The owner gets masked Password and Code fields in both takeover screens.
 
 **Architecture:** One set of small page functions decides which fields are **secret** and how a field is named. They are written once in `agent/page-secrets.mjs`, unit-tested in Node, and embedded into the page scripts with `.toString()`, as `foldLabel` is today (`agent/browser.mjs:110`). The device tags a field the owner typed into through a masked field (`data-agent-secret`), so the rule also covers sites whose code fields are plain text inputs. The server accepts `secret` input only over HTTPS or from loopback.
 
@@ -242,32 +242,32 @@ test('secret input over plain HTTP from the network is refused on both takeover 
   - It never mutates its input.
 
 **Steps:**
-- [ ] **Step 1: unit tests for `scrubTyped`.**
+- [x] **Step 1: unit tests for `scrubTyped`.**
   - Case-insensitive match.
   - The percent-encoded form in a URL query is matched.
   - A value under 3 characters is ignored.
   - Nested `links` and `elements` are scrubbed.
   - The input object is unchanged.
   - Overlapping remembered strings are merged in one pass, the way `hideSecrets` merges ranges, so `[hidden]` is never cut in half.
-- [ ] **Step 2: device set tests** (fake CDP).
+- [x] **Step 2: device set tests** (fake CDP).
   - After a secret type of `hunter22` and a page whose title, URL and a re-drawn field echo it, the next capture, action result and live view carry `[hidden]` and no `hunter22` in any letter case.
   - A plain type into a field that answered "secret" is remembered too.
   - A plain type into an ordinary field is not remembered.
   - Closing the tab drops its set.
   - The set is never written anywhere: no config, log, disk or jar.
-- [ ] **Step 3: clear after submit.**
-  - When a secret field's form is submitted (a click on its submit control, or Enter in the field), or the owner hands back, the device sets that field's `value` to empty and removes its `value` attribute in the page.
+- [x] **Step 3: clear at the hand back.** (Fix round 1 dropped the clear after a submit: it can blank a password before a slow or captcha submit has read it.)
+  - When the owner hands back, the device sets that field's `value` to empty and removes its `value` attribute in the page.
   - Use one small page expression next to the others in `page-secrets.mjs`, with an exact constant so `tests/fake-cdp.js` can match it.
   - Its failure is logged with fixed wording and never blocks the hand back.
   - Test it on the fake CDP, and on the real-browser test if one already covers the takeover.
-- [ ] **Step 4: the planted-secret test** `tests/planted-secret.test.js`.
+- [x] **Step 4: the planted-secret test** `tests/planted-secret.test.js`.
   - Type a unique marker, for example `Planted-<random>-Zq9`, as `secret: true` into a test page served locally. The page echoes it in its title, its URL query, and a field it draws again after "a failed sign-in".
   - Then run a bot capture and a read, and a hand back that stores a run.
   - Assert the marker, in any letter case, is in none of these: any model request body (stub the AI with a recording fake), any line written to the console, the stored store state (serialise it), any chat line, any activity line.
   - Use the test rigs other integration tests use (look at `tests/secret-input.test.js` and the bot-browser tests). Keep it off port 4173 and the real `data/state.json`.
   - It may be skipped only when no Chrome is found, the same way the existing real-browser tests are skipped. If it can run without Chrome on the fake CDP, prefer that and keep one Chrome variant.
-- [ ] **Step 5: docs and gate.**
-  - One sentence in `SECURITY.md`'s secret-fields paragraph about the typed-value memory and the clear after submit. Replace the "not yet covered after navigation" line the fix wave added, since this task covers it.
+- [x] **Step 5: docs and gate.**
+  - One sentence in `SECURITY.md`'s secret-fields paragraph about the typed-value memory and the clear at the hand back. Replace the "not yet covered after navigation" line the fix wave added, since this task covers it.
   - In the plan file, the Goal line goes back to covering navigation.
   - Run `npm run check && npm test && npm run build:pages` (no drift) and `npm run test:ui`.
   - Commit: `feat: the device remembers secret typing and scrubs it from every result`.

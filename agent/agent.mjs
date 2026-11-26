@@ -178,7 +178,7 @@ async function execute(task, config) {
       // A page that came back nearly empty (drawn by scripts the browser did not finish) is read plainly too.
       if (!task.payload?.steps?.length && (turnedAway(seen) || String(seen?.text || '').trim().length < 300)) {
         const plain = await readPlain(target).catch(() => null);
-        if (plain?.text && (turnedAway(seen) ? !turnedAway(plain) : preferRead(seen, plain) === plain)) return {...plain, readBy: 'plain'};
+        if (plain?.text && (turnedAway(seen) ? !turnedAway(plain) : preferRead(seen, plain) === plain)) return shared().scrub(task.payload?.botId, {...plain, readBy: 'plain'});
       }
       return seen;
     }

@@ -6,6 +6,10 @@ import {createLiveChannel} from '../agent/live-channel.mjs';
 import {fakeCdp} from './fake-cdp.js';
 import {FOCUSED_IS_SECRET_JS, TAG_FOCUSED_SECRET_JS} from '../agent/page-secrets.mjs';
 import vm from 'node:vm';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {mock} from 'node:test';
 
 /* The owner takes the browser, and hands it back. Against the scripted DevTools
  * connection (tests/fake-cdp.js): no Chrome starts. */
@@ -338,4 +342,240 @@ test('what a model is handed is the address, title and links with secrets hidden
   assert.equal(result.title, 'Hi [hidden]');
   assert.deepEqual(result.links, pages['https://docs.example.com/'].links);
   assert.equal(sb.status()[0].url, 'https://docs.example.com/?code=[hidden]', 'the address remembered from the capture is the hidden one');
+});
+
+/* What the owner typed in secret is remembered per tab and scrubbed from every result. A page that echoes it is a
+ * page of the fake connection whose title, address, text, links, controls and read all say the typed text. */
+const URL_A = 'https://docs.example.com/';
+const echoing = text => ({
+  title: `Welcome ${text.toUpperCase()}`, shown: `${URL_A}?pw=${encodeURIComponent(text)}&u=${text}`, text: `Signed in? code ${text}.`,
+  links: [{text: `Reset ${text}`, url: `${URL_A}r?c=${text}`}], elements: [{index: 1, tag: 'input', type: 'text', text: `Code ${text}`}], read: `again ${text.toLowerCase()}`,
+});
+function rigWith(pages, extra = {}) {
+  const processes = [];
+  const sb = createSharedBrowser({allow: ALLOW, settleMs: 0, ...extra, start: async () => { const fake = fakeCdp({pages}); processes.push(fake); return startBrowserSession({connection: fake.connection}); }});
+  return {sb, fake: () => processes[0]};
+}
+const noText = (value, text) => { assert.ok(!JSON.stringify(value).toLowerCase().includes(text.toLowerCase()), 'the typed text is in a result'); };
+
+test('a secret the owner typed is hidden from the next capture, action result and status, in any letter case', async t => {
+  const pages = {[URL_A]: {title: 'Docs', text: 'Hello', elements: []}};
+  const {sb, fake} = rigWith(pages);
+  t.after(() => sb.close());
+  await sb.run('bot-a', {url: URL_A});
+  await sb.takeover('bot-a');
+  await sb.applyInput('bot-a', {type: 'type', text: 'hunter22', secret: true});
+  await sb.handback('bot-a');
+  pages[URL_A] = echoing('Hunter22');
+  const capture = await sb.run('bot-a', {url: URL_A});
+  noText(capture, 'hunter22');
+  assert.equal(capture.finalUrl, `${URL_A}?pw=[hidden]&u=[hidden]`);
+  assert.equal(capture.title, 'Welcome [hidden]');
+  assert.deepEqual(capture.links, [{text: 'Reset [hidden]', url: `${URL_A}r?c=[hidden]`}]);
+  assert.equal(capture.elements[0].text, 'Code [hidden]');
+  const acted = await sb.run('bot-a', {url: URL_A, steps: [{op: 'read', selector: 'main'}]});
+  noText(acted, 'hunter22');
+  assert.equal(acted.actions[0].text, 'again [hidden]');
+  // The status is what Chrome says now, which a click may have moved.
+  [...fake().targets.values()][0].url = `${URL_A}?pw=Hunter22`;
+  [...fake().targets.values()][0].title = 'Hello HUNTER22';
+  await sb.refresh();
+  noText(sb.status(), 'hunter22');
+  assert.deepEqual(sb.status().map(x => [x.url, x.title]), [[`${URL_A}?pw=[hidden]`, 'Hello [hidden]']]);
+});
+
+test('a plain type into a field the page says is secret is remembered, and a plain type into any other is not', async t => {
+  const pages = {[URL_A]: {title: 'Docs', text: 'Hello', elements: []}};
+  const {sb, fake} = rigWith(pages);
+  t.after(() => sb.close());
+  await sb.run('bot-a', {url: URL_A});
+  await sb.takeover('bot-a');
+  await sb.applyInput('bot-a', {type: 'type', text: 'red shoes'});
+  fake().focusSecret = true;
+  await sb.applyInput('bot-a', {type: 'type', text: 'hunter22'});
+  fake().focusSecret = false;
+  await sb.handback('bot-a');
+  pages[URL_A] = {...echoing('hunter22'), text: 'you typed red shoes and hunter22'};
+  const result = await sb.run('bot-a', {url: URL_A});
+  assert.equal(result.text, 'you typed red shoes and [hidden]', 'the search words stay, the password does not');
+  // A page whose own check threw counts as secret, so what was typed is remembered as well.
+  fake().focusSecret = 'throws';
+  await sb.takeover('bot-a');
+  await sb.applyInput('bot-a', {type: 'type', text: 'unsure-value'});
+  await sb.handback('bot-a');
+  pages[URL_A] = {title: 'Docs', text: 'it says unsure-value', elements: []};
+  assert.equal((await sb.run('bot-a', {url: URL_A})).text, 'it says [hidden]');
+});
+
+test('each tab has its own memory, and a tab the browser dropped takes its memory with it', async t => {
+  const pages = {[URL_A]: {title: 'Docs', text: 'Hello', elements: []}};
+  const {sb, fake} = rigWith(pages);
+  t.after(() => sb.close());
+  await sb.run('bot-a', {url: URL_A});
+  await sb.run('bot-b', {url: URL_A});
+  await sb.takeover('bot-a');
+  await sb.applyInput('bot-a', {type: 'type', text: 'hunter22', secret: true});
+  await sb.handback('bot-a');
+  pages[URL_A] = {title: 'Docs', text: 'echo hunter22', elements: []};
+  assert.equal((await sb.run('bot-a', {url: URL_A})).text, 'echo [hidden]');
+  assert.equal((await sb.run('bot-b', {url: URL_A})).text, 'echo hunter22', 'bot b\'s tab never had it typed');
+  // The browser no longer has bot a's tab: the next task gets a new one, and the old memory is gone with the old tab.
+  const [first] = [...fake().targets.keys()];
+  fake().targets.delete(first);
+  assert.equal((await sb.run('bot-a', {url: URL_A})).text, 'echo hunter22');
+});
+
+test('the memory is never written anywhere: no log line, no file write, and the text goes to the page only as typing', async t => {
+  const pages = {[URL_A]: {title: 'Docs', text: 'Hello', elements: []}};
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'ac-typed-'));
+  t.after(() => fs.rmSync(profile, {recursive: true, force: true}));
+  const {sb, fake} = rigWith(pages, {profile});
+  const written = [], seen = [];
+  const keep = {...console};
+  const spy = (...args) => { seen.push(args.join(' ')); };
+  Object.assign(console, {log: spy, info: spy, warn: spy, error: spy, debug: spy});
+  const stdout = mock.method(process.stdout, 'write', (chunk) => { seen.push(String(chunk)); return true; });
+  const stderr = mock.method(process.stderr, 'write', (chunk) => { seen.push(String(chunk)); return true; });
+  const sinks = ['writeFileSync', 'appendFileSync', 'writeSync'].map(name => mock.method(fs, name, (...args) => { written.push(args.map(String).join(' ')); }));
+  const asyncSinks = ['writeFile', 'appendFile'].map(name => mock.method(fs.promises, name, async (...args) => { written.push(args.map(String).join(' ')); }));
+  try {
+    await sb.run('bot-a', {url: URL_A});
+    await sb.takeover('bot-a');
+    await sb.applyInput('bot-a', {type: 'type', text: 'hunter22-unique', secret: true});
+    await sb.applyInput('bot-a', {type: 'key', key: 'Enter'});
+    await sb.handback('bot-a');
+    pages[URL_A] = echoing('hunter22-unique');
+    await sb.run('bot-a', {url: URL_A});
+    await sb.close();
+  } finally {
+    Object.assign(console, keep);
+    for (const m of [stdout, stderr, ...sinks, ...asyncSinks]) m.mock.restore();
+  }
+  assert.ok(!seen.join('\n').toLowerCase().includes('hunter22-unique'), 'a log line carried the text');
+  assert.ok(!written.join('\n').toLowerCase().includes('hunter22-unique'), 'a file write carried the text');
+  const sent = fake().calls.filter(c => JSON.stringify(c.params).includes('hunter22-unique')).map(c => c.method);
+  assert.deepEqual(sent, ['Input.insertText'], 'the page is told the text once, as typing, and nothing else carries it');
+});
+
+test('the page\'s secret fields are emptied when the owner hands back, and at no other moment, and only if a secret was typed', async t => {
+  const pages = {[URL_A]: {title: 'Docs', text: 'Hello', elements: []}};
+  const {sb, fake} = rigWith(pages);
+  t.after(() => sb.close());
+  await sb.run('bot-a', {url: URL_A});
+  await sb.takeover('bot-a');
+  await sb.applyInput('bot-a', {type: 'click', x: 5, y: 5});
+  await sb.applyInput('bot-a', {type: 'key', key: 'Enter'});
+  await sb.handback('bot-a');
+  assert.deepEqual(fake().cleared, [], 'nothing was typed in secret, so there is nothing to empty');
+  await sb.takeover('bot-a');
+  await sb.applyInput('bot-a', {type: 'type', text: 'hunter22', secret: true});
+  await sb.applyInput('bot-a', {type: 'key', key: 'Tab'});
+  await sb.applyInput('bot-a', {type: 'click', x: 5, y: 5});
+  await sb.applyInput('bot-a', {type: 'key', key: 'Enter'});
+  await sb.applyInput('bot-a', {type: 'scroll', dy: 10});
+  assert.deepEqual(fake().cleared, [], 'a click or Enter is not a hand back: a slow or captcha submit may not have read the password yet');
+  assert.equal(fake().actions.length, 0, 'no page script ran for it');
+  const before = fake().calls.length;
+  await sb.handback('bot-a');
+  assert.deepEqual(fake().cleared.map(c => c.when), ['handback']);
+  assert.ok(fake().calls.slice(before).some(c => c.method === 'Runtime.evaluate'), 'asked while the owner still held the tab');
+  assert.equal(sb.owner(), null);
+});
+
+test('a tab keeps the most recent 50 typed strings: the oldest is forgotten, the newest still hidden', async t => {
+  const pages = {[URL_A]: {title: 'Docs', text: 'Hello', elements: []}};
+  const {sb} = rigWith(pages);
+  t.after(() => sb.close());
+  await sb.run('bot-a', {url: URL_A});
+  await sb.takeover('bot-a');
+  for (let i = 0; i < 52; i++) await sb.applyInput('bot-a', {type: 'type', text: `secret-${String(i).padStart(2, '0')}`, secret: true});
+  await sb.handback('bot-a');
+  pages[URL_A] = {title: 'Docs', text: 'echo secret-00 secret-01 secret-02 secret-51', elements: []};
+  assert.equal((await sb.run('bot-a', {url: URL_A})).text, 'echo secret-00 secret-01 [hidden] [hidden]');
+});
+
+test('a takeover that ends on its own empties the secret fields too', async t => {
+  const {sb, fake} = rigWith({[URL_A]: {title: 'Docs', text: 'Hello', elements: []}}, {idleMs: 40});
+  t.after(() => sb.close());
+  await sb.run('bot-a', {url: URL_A});
+  await sb.takeover('bot-a');
+  await sb.applyInput('bot-a', {type: 'type', text: 'hunter22', secret: true});
+  await sleep(120);
+  assert.equal(sb.owner(), null);
+  assert.deepEqual(fake().cleared.map(c => c.when), ['handback']);
+});
+
+test('a clear that fails is said in fixed words and never stops the hand back', async t => {
+  const {sb, fake} = rigWith({[URL_A]: {title: 'Docs', text: 'Hello', elements: []}});
+  const seen = [], keep = {...console};
+  Object.assign(console, {error: (...args) => seen.push(args.join(' ')), log: (...args) => seen.push(args.join(' ')), warn: (...args) => seen.push(args.join(' '))});
+  t.after(() => { Object.assign(console, keep); return sb.close(); });
+  const text = 'hunter22-482913';
+  await sb.run('bot-a', {url: URL_A});
+  await sb.takeover('bot-a');
+  await sb.applyInput('bot-a', {type: 'type', text, secret: true});
+  const failing = expression => expression.includes('querySelectorAll') && expression.includes('clearSecrets');
+  // The browser refuses the command, and then the page's own expression throws.
+  fake().hook('Runtime.evaluate', async ({expression}) => { if (failing(expression)) throw new Error(`boom ${text}`); });
+  await sb.handback('bot-a');
+  assert.equal(sb.owner(), null, 'handed back all the same');
+  await sb.takeover('bot-a');
+  fake().hook('Runtime.evaluate', async ({expression}) => (failing(expression) ? {result: {}, exceptionDetails: {text: `Uncaught ${text}`}} : undefined));
+  await sb.handback('bot-a');
+  assert.equal(sb.owner(), null);
+  assert.deepEqual(seen, ['agent: could not empty the secret fields on the page.', 'agent: could not empty the secret fields on the page.']);
+});
+
+test('a clear the page never answers is let go after a moment, and the owner is handed back anyway', {timeout: 8000}, async t => {
+  const {sb, fake} = rigWith({[URL_A]: {title: 'Docs', text: 'Hello', elements: []}});
+  const keep = console.error;
+  console.error = () => {};
+  t.after(() => { console.error = keep; return sb.close(); });
+  await sb.run('bot-a', {url: URL_A});
+  await sb.takeover('bot-a');
+  await sb.applyInput('bot-a', {type: 'type', text: 'hunter22', secret: true});
+  fake().hook('Runtime.evaluate', ({expression}) => (expression.includes('clearSecrets') ? new Promise(() => {}) : undefined));
+  const started = Date.now();
+  await sb.handback('bot-a');
+  assert.equal(sb.owner(), null);
+  assert.ok(Date.now() - started < 4000);
+});
+
+test('a capture that fails says nothing the owner typed, and a plain read taken instead is scrubbed through the same tab', async t => {
+  const pages = {[URL_A]: {title: 'Docs', text: 'Hello', elements: []}};
+  const {sb, fake} = rigWith(pages);
+  t.after(() => sb.close());
+  await sb.run('bot-a', {url: URL_A});
+  await sb.takeover('bot-a');
+  await sb.applyInput('bot-a', {type: 'type', text: 'hunter22', secret: true});
+  await sb.handback('bot-a');
+  // The page sent the browser to an address nobody allowed, with the echo in it, and the navigation failed.
+  fake().hook('Page.navigate', async (params, sessionId) => {
+    fake().emit('Fetch.requestPaused', {requestId: 'r1', request: {url: 'https://evil.example.net/?pw=HUNTER22'}, resourceType: 'Document'}, sessionId);
+    return {errorText: 'net::ERR_BLOCKED_BY_CLIENT'};
+  });
+  await assert.rejects(() => sb.run('bot-a', {url: URL_A}), error => /The page was not opened/.test(error.message) && !/hunter22/i.test(`${error.message}${error.stack}`) && /\[hidden\]/.test(error.message));
+  assert.equal(JSON.stringify(sb.scrub('bot-a', {text: 'plain read: Hunter22'})), '{"text":"plain read: [hidden]"}');
+  assert.equal(sb.scrub('other-bot', {text: 'hunter22'}).text, 'hunter22', 'another bot\'s tab has its own memory');
+});
+
+test('the plain-read fallback in agent.mjs goes through the tab\'s memory, for the bot\'s own tab and for a task with no bot', async () => {
+  // `execute` is not importable (agent.mjs runs its command on load), so the wiring is pinned in its source and the
+  // behaviour in `scrub`, which is what that line calls.
+  const source = fs.readFileSync(new URL('../agent/agent.mjs', import.meta.url), 'utf8');
+  assert.match(source, /return shared\(\)\.scrub\(task\.payload\?\.botId, \{\.\.\.plain, readBy: 'plain'\}\);/);
+  const pages = {[URL_A]: {title: 'Docs', text: 'Hello', elements: []}};
+  const {sb} = rigWith(pages);
+  try {
+    // A task that names no bot runs on the shared tab.
+    await sb.run(undefined, {url: URL_A});
+    await sb.takeover('shared');
+    await sb.applyInput('shared', {type: 'type', text: 'hunter22', secret: true});
+    await sb.handback('shared');
+    const plain = {url: URL_A, finalUrl: `${URL_A}?pw=hunter22`, title: 'Echo HUNTER22', text: 'you typed hunter22', links: [{text: 'x', url: `${URL_A}?c=hunter22`}], readBy: 'plain'};
+    const out = sb.scrub(undefined, plain);
+    assert.equal(JSON.stringify(out).toLowerCase().includes('hunter22'), false);
+    assert.equal(out.text, 'you typed [hidden]');
+    assert.equal(out.readBy, 'plain');
+  } finally { await sb.close(); }
 });
