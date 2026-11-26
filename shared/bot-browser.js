@@ -280,6 +280,17 @@ export function signinSite(url) {
   return u.hostname.toLowerCase();
 }
 
+/** The site to sign in to for a page result: `signinSite` of where the page ended, else, when the page shows a visible
+ * password field (the snapshot lists only visible elements), the page's own host, else null. */
+export function signinPage(result) {
+  const r = result && typeof result === 'object' ? result : {};
+  const url = r.finalUrl || r.url;
+  const site = signinSite(url);
+  if (site) return site;
+  if (!(Array.isArray(r.elements) ? r.elements : []).some(e => e && e.tag === 'input' && e.type === 'password')) return null;
+  try { return new URL(url).hostname.toLowerCase() || null; } catch { return null; }
+}
+
 /** Page text the next bot turn can draft from: `limit` characters at most. `part` (from 1) reads a long page in
  * parts and says which part this is and how to ask for the next; without it the text is only cut (a chat line). */
 export function capturePageText(result, limit = PAGE_EXCERPT_CHARS, find = '', part = 0) {
@@ -293,7 +304,7 @@ export function capturePageText(result, limit = PAGE_EXCERPT_CHARS, find = '', p
     const found = findPassages(body, find);
     body = found ? `${click.match ? `${click.match}\n` : ''}${found}` : `"${find}" is not on this page.${click.match ? ` ${click.match}` : ''} The page starts: ${String(body).slice(0, 1500)}`;
   }
-  const signin = signinSite(r.finalUrl);
+  const signin = signinPage(r);
   if (signin) body = `This is a sign-in page: the owner is not signed in to ${signin} in this browser. Never type a password or a code. Send the setup block {"action":"signin","site":"${signin}"} so the owner signs in once, then ask for the page again.\n\n${body}`;
   if (r.botCheck) body = `This site showed a human check to the browser. Do not try to solve it: read another site or search for the page elsewhere.\n\n${body}`;
   // The page's own text cannot pose as the Controls line, which names what each control is (controlLabels).
