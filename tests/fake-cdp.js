@@ -1,4 +1,6 @@
-import {FOCUSED_IS_SECRET_JS, TAG_FOCUSED_SECRET_JS} from '../agent/page-secrets.mjs';
+import {FOCUSED_IS_SECRET_JS, TAG_FOCUSED_SECRET_JS, CLEAR_SECRETS_AFTER_CLICK_JS, CLEAR_SECRETS_AFTER_ENTER_JS, CLEAR_SECRETS_ON_HANDBACK_JS} from '../agent/page-secrets.mjs';
+
+const CLEARS = new Map([[CLEAR_SECRETS_AFTER_CLICK_JS, 'click'], [CLEAR_SECRETS_AFTER_ENTER_JS, 'enter'], [CLEAR_SECRETS_ON_HANDBACK_JS, 'handback']]);
 
 /** A scripted DevTools connection, so the browser code can run with no Chrome.
  *
@@ -10,7 +12,7 @@ import {FOCUSED_IS_SECRET_JS, TAG_FOCUSED_SECRET_JS} from '../agent/page-secrets
  * agent sends with the replies Chrome gives for them, nothing more.
  */
 export function fakeCdp({pages = {}} = {}) {
-  const calls = [], tagged = [], listeners = new Map(), closers = [], hooks = {}, targets = new Map(), actions = [], input = [];
+  const calls = [], tagged = [], cleared = [], listeners = new Map(), closers = [], hooks = {}, targets = new Map(), actions = [], input = [];
   const state = {focusSecret: false};
   let seq = 0, closed = false;
 
@@ -29,7 +31,10 @@ export function fakeCdp({pages = {}} = {}) {
       return state.focusSecret === 'throws' ? {result: {type: 'object', subtype: 'error'}, exceptionDetails: {text: 'Uncaught'}} : {result: {value: state.focusSecret}};
     }
     if (expression === TAG_FOCUSED_SECRET_JS) { tagged.push({sessionId, expression}); return {result: {value: true}}; }
+    // The device emptying the page's secret fields: which of its three moments asked, in order.
+    if (CLEARS.has(expression)) { cleared.push({sessionId, when: CLEARS.get(expression)}); return {result: {value: 1}}; }
     if (expression === 'location.href') return {result: {value: page.url}};
+    if (expression === 'document.readyState') return {result: {value: 'complete'}};
     if (expression.startsWith('(function(){var els=')) return {result: {value: snapshot}};
     // A page read: `url` is the real address the device decides with, `shown` the one a model is handed (secrets hidden).
     if (expression.startsWith('JSON.stringify((function(){') && expression.includes('shown:')) {
@@ -80,7 +85,7 @@ export function fakeCdp({pages = {}} = {}) {
     close: () => { closed = true; },
   };
   return {
-    cdp, calls, pages, actions, input, targets, tagged,
+    cdp, calls, pages, actions, input, targets, tagged, cleared,
     /** Whether the focused field answers "secret" to the takeover's check (true, false, or 'throws'). */
     set focusSecret(value) { state.focusSecret = value; },
     connection: {cdp},
