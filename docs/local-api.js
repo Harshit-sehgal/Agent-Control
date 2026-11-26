@@ -4,28 +4,28 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {briefingMessage} from './briefing.js?v=adaf6b1514';
-import {addTemplate, removeTemplate} from './templates.js?v=adaf6b1514';
-import {initialState, cleanText} from './core.js?v=adaf6b1514';
-import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=adaf6b1514';
-import {RETENTION_DEFAULTS} from './retention.js?v=adaf6b1514';
-import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=adaf6b1514';
-import {addChatMessages, clearChat} from './chats.js?v=adaf6b1514';
-import {publicMemory, rememberFromOwner, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=adaf6b1514';
-import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=adaf6b1514';
-import {createThread, titleFrom} from './threads.js?v=adaf6b1514';
-import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=adaf6b1514';
-import {simulateGroup} from './group-simulator.js?v=adaf6b1514';
-import {BUSY_STATUSES} from './run-state.js?v=adaf6b1514';
-import {botSettings} from './bot-settings.js?v=adaf6b1514';
-import {denyBrowserRequest} from './bot-browser.js?v=adaf6b1514';
-import {answerAsk, expireAsks, orphanAsks, setGrant, setAskBasics, restorePermissions} from './asks.js?v=adaf6b1514';
-import {applyPreset} from './presets.js?v=adaf6b1514';
-import {setLimits} from './limits.js?v=adaf6b1514';
-import {activityPage} from './activity-log.js?v=adaf6b1514';
-import {withLocalLock} from './locks.js?v=adaf6b1514';
-import {addWatch, setWatchOn, removeWatch, publicWatch} from './watches.js?v=adaf6b1514';
-import {base64Bytes, sniffType, cleanFileName, DEMO_MAX_FILE_BYTES, DEMO_MAX_STORED, MAX_FILE_BYTES} from './attachments.js?v=adaf6b1514';
+import {briefingMessage} from './briefing.js?v=d0b83e7c58';
+import {addTemplate, removeTemplate} from './templates.js?v=d0b83e7c58';
+import {initialState, cleanText} from './core.js?v=d0b83e7c58';
+import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=d0b83e7c58';
+import {RETENTION_DEFAULTS} from './retention.js?v=d0b83e7c58';
+import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=d0b83e7c58';
+import {addChatMessages, clearChat} from './chats.js?v=d0b83e7c58';
+import {publicMemory, rememberFromOwner, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=d0b83e7c58';
+import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=d0b83e7c58';
+import {createThread, titleFrom} from './threads.js?v=d0b83e7c58';
+import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=d0b83e7c58';
+import {simulateGroup} from './group-simulator.js?v=d0b83e7c58';
+import {BUSY_STATUSES} from './run-state.js?v=d0b83e7c58';
+import {botSettings} from './bot-settings.js?v=d0b83e7c58';
+import {denyBrowserRequest} from './bot-browser.js?v=d0b83e7c58';
+import {answerAsk, expireAsks, orphanAsks, setGrant, setAskBasics, restorePermissions} from './asks.js?v=d0b83e7c58';
+import {applyPreset} from './presets.js?v=d0b83e7c58';
+import {setLimits} from './limits.js?v=d0b83e7c58';
+import {activityPage} from './activity-log.js?v=d0b83e7c58';
+import {withLocalLock} from './locks.js?v=d0b83e7c58';
+import {addWatch, setWatchOn, removeWatch, publicWatch} from './watches.js?v=d0b83e7c58';
+import {base64Bytes, sniffType, cleanFileName, DEMO_MAX_FILE_BYTES, DEMO_MAX_STORED, MAX_FILE_BYTES} from './attachments.js?v=d0b83e7c58';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
