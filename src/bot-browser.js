@@ -292,6 +292,22 @@ export function startBrowserExpiry(ws, intervalMs = 30000) {
   return startSweep('Browser expiry', () => expireBrowserTasks(ws), {intervalMs, ws});
 }
 
+/** Revoke a computer and finish the pages it will never open. Revoking fails its queued and running work, and a run
+ * waiting on one of those pages only carries on when its request is finished, so each page's request is told here:
+ * the admin's revoke and a re-pair both come through this. */
+export async function revokeAgentFinishingPages(store, agentId, hooks = {}) {
+  const pages = store.all(
+    "SELECT id FROM agent_tasks WHERE agent_id=? AND kind IN ('browser.capture','browser.action') AND status IN ('queued','running')",
+    agentId,
+  ).map(task => task.id);
+  const result = agent.revokeAgent(store, agentId);
+  for (const id of pages) {
+    try { await onAgentTaskResult(store, id, hooks); }
+    catch (error) { console.error('Browser revocation:', error.message); }
+  }
+  return result;
+}
+
 /** An agent reported on a task. A task that will retry changes nothing yet. */
 export async function onAgentTaskResult(store, taskId, hooks = {}) {
   const request = (store.read().browserRequests || []).find(r => (r.agentTaskIds || []).includes(taskId));

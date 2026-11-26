@@ -7,7 +7,7 @@ import {activity} from '../shared/core.js';
 import * as wf from '../shared/workflow.js';
 import * as agent from './agent.js';
 import {repointDevice} from '../shared/browser-accounts.js';
-import {onAgentTaskResult, continueBrowserWork, setBrowserResultHooks} from './bot-browser.js';
+import {onAgentTaskResult, continueBrowserWork, setBrowserResultHooks, revokeAgentFinishingPages} from './bot-browser.js';
 import {queueGroupRun, resumeBrowserRun} from './coordination.js';
 import {runOneBot} from './routes-groups.js';
 import {sessionCookie, clearCookie, DEFAULT_WORKSPACE, resolveAccount} from './auth.js';
@@ -195,7 +195,8 @@ export function publicRoutes(router, {auth, workspaces, version}) {
       // A computer that proved it held the old secret keeps its accounts and bot pins, and the old row is retired.
       if (replaces) {
         await store.update(s => { repointDevice(s, replaces, result.agentId); });
-        agent.revokeAgent(store, replaces);
+        await revokeAgentFinishingPages(store, replaces, {resumeBrowser: resumeBrowserRun});
+        await store.update(s => { activity(s, 'agent', 'A local agent was replaced by a computer that proved it was the same one. Its pages in flight were failed, and its accounts moved.', {agentId: replaces}); });
       }
       await store.update(s => { activity(s, 'agent', `Paired local agent "${String(b.name || 'Local agent').slice(0, 60)}".`, {agentId: result.agentId}); });
       return reply(201, result);

@@ -176,3 +176,22 @@ test('a backup carries account names, never a report, and a restore reads every 
   const out = await router.find('GET', '/api/browser-accounts').route.handler({store: other, actor: {role: 'owner', workspaceId: 'default'}, params: {}});
   assert.deepEqual(out.accounts.map(a => [a.name, a.state, a.checkedAt]), [['CRM', 'signed-out', null], ['Billing', 'signed-out', null]]);
 });
+
+test('a re-pair tells the runs waiting on the old computer\'s pages that they failed, and says it replaced the computer', async t => {
+  const {store, pair, newCode, device: d1} = await harness(t);
+  const at = new Date().toISOString();
+  const taskRow = (id, status) => store.run('INSERT INTO agent_tasks (id,agent_id,kind,payload,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?)', id, d1.agentId, 'browser.action', '{}', status, at, at);
+  taskRow('page-queued', 'queued');
+  taskRow('page-running', 'running');
+  const request = (id, task) => ({id, botId: 'web', botName: 'Web', groupId: 'lab', chatKey: 'web', url: 'https://crm.example.com/', steps: [], kind: 'browser.action', depth: 0, status: 'dispatched', via: 'agent', agentTaskIds: [task], result: null, error: null, createdAt: at, updatedAt: at});
+  await store.update(s => {
+    s.groups.push({id: 'lab', name: 'Lab', bots: [{id: 'web', name: 'Web'}]});
+    s.browserRequests = [request('r-queued', 'page-queued'), request('r-running', 'page-running')];
+  });
+  const code = newCode();
+  assert.equal((await pair({code, name: 'Laptop again', previous: {agentId: d1.agentId, proof: proofOf(d1.secret, code)}})).status, 201);
+  const s = store.read();
+  assert.deepEqual(s.browserRequests.map(r => r.status), ['failed', 'failed'], 'no page is left waiting on the replaced computer');
+  assert.equal(s.chats.web.filter(m => /browser request failed/.test(m.text)).length, 2, 'each run is told');
+  assert.ok(s.events.some(e => /replaced/i.test(e.message) && e.meta?.agentId === d1.agentId), 'the activity log says the old computer was replaced');
+});
