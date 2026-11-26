@@ -22,10 +22,10 @@ const until = async (ready, ms, step = 50) => {
 
 // A stand-in control plane. `beats` says what each heartbeat hands over (by 1-based count);
 // every result report is held `holdMs` before it is answered.
-async function rig({beats, holdMs, concurrency}) {
+async function rig({beats, holdMs, concurrency, honourStopping = false}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-parallel-'));
   const config = path.join(dir, 'agent.config.json');
-  const state = {arrived: {}, answered: {}, bodies: {}, heartbeats: [], held: 0, beatsWhileHeld: 0};
+  const state = {arrived: {}, answered: {}, bodies: {}, heartbeats: [], beatBodies: [], held: 0, beatsWhileHeld: 0};
   const front = await listen();
   front.on('request', (req, res) => {
     let raw = '';
@@ -34,8 +34,11 @@ async function rig({beats, holdMs, concurrency}) {
       const json = body => { res.writeHead(200, {'Content-Type': 'application/json'}); res.end(JSON.stringify(body)); };
       if (req.url === '/api/agent/heartbeat') {
         state.heartbeats.push(Date.now());
+        const beatBody = JSON.parse(raw || '{}');
+        state.beatBodies.push(beatBody);
         if (state.held > 0) state.beatsWhileHeld += 1;
-        const tasks = (beats[state.heartbeats.length] || []).map(id => ({id, kind: 'http.check', payload: {url: 'http://example.com/'}, attempts: 1}));
+        // A server that has learned `stopping` hands a stopping device nothing.
+        const tasks = (honourStopping && beatBody.stopping === true ? [] : beats[state.heartbeats.length] || []).map(id => ({id, kind: 'http.check', payload: {url: 'http://example.com/'}, attempts: 1}));
         json({ok: true, agent: {id: 'device-1', name: 'Device', permissions: []}, tasks});
         return;
       }
@@ -119,5 +122,34 @@ test('Ctrl+C lets a running task finish and report, hands queued tasks back unst
     assert.ok(state.answered.t1, 'the running task finished its report before the device exited');
     assert.match(out.text, /agent: stopped\./);
     assert.ok(!/running http\.check t[23]/.test(out.text), `queued tasks never start: ${out.text}`);
+  } finally { await close(); }
+});
+
+test('once the device is stopping, every heartbeat says so, and a server that honours it hands over nothing to hand back', {timeout: 40000}, async () => {
+  const {state, out, child, exited, close} = await rig({beats: {1: ['t1'], 2: ['t3'], 3: ['t4']}, holdMs: 7000, concurrency: 1, honourStopping: true});
+  try {
+    await until(() => state.arrived.t1, 15000);
+    assert.ok(state.arrived.t1, out.text);
+    const before = state.beatBodies.length;
+    assert.ok(state.beatBodies.every(body => body.stopping !== true), 'no beat before Ctrl+C says stopping');
+    child.kill('SIGINT');
+    await until(() => state.beatBodies.length > before, 10000);
+    assert.ok(state.beatBodies.length > before, `a keepalive beat while stopping: ${out.text}`);
+    assert.ok(state.beatBodies.slice(before).every(body => body.stopping === true), 'every beat after Ctrl+C says stopping');
+    assert.equal(await exited, 0, out.text);
+    assert.ok(!state.arrived.t3 && !state.arrived.t4, `nothing queued after stopping began is handed back as failed: ${out.text}`);
+  } finally { await close(); }
+});
+
+test('with AGENT_CONCURRENCY=1, one task held and one queued, the keepalive still beats so the lease holds (no Ctrl+C)', {timeout: 30000}, async () => {
+  const {state, out, close} = await rig({beats: {1: ['t1', 't2']}, holdMs: 6000, concurrency: 1});
+  try {
+    await until(() => state.arrived.t1, 15000);
+    assert.ok(state.arrived.t1, out.text);
+    assert.ok(!state.arrived.t2, 't2 is queued behind t1');
+    await until(() => state.beatsWhileHeld >= 1, 8000);
+    assert.ok(state.beatsWhileHeld >= 1, `the main loop does not poll while a task waits, so the keepalive had to beat: ${out.text}`);
+    assert.ok(state.beatBodies.every(body => body.stopping !== true), 'not on the stopping path');
+    assert.ok(!state.arrived.t2, 't2 still waiting for t1');
   } finally { await close(); }
 });

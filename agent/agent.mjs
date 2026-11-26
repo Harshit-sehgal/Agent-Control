@@ -293,7 +293,7 @@ async function run() {
     // ten minutes, no model call). Only a device allowed to run models looks.
     const cli = (config.permissions || []).includes('model.run') ? cliStatus.snapshot() : undefined;
     lastBeatAt = Date.now();
-    const beat = await call(config, '/api/agent/heartbeat', {version: '1', os: process.platform, node: process.version, beat: ++beatSeq, at: Date.now(), features: DEVICE_FEATURES, ...(cli ? {cli} : {})});
+    const beat = await call(config, '/api/agent/heartbeat', {version: '1', os: process.platform, node: process.version, beat: ++beatSeq, at: Date.now(), features: DEVICE_FEATURES, ...(stopping ? {stopping: true} : {}), ...(cli ? {cli} : {})});
     config.lastSeenAt = new Date().toISOString();
     if (Array.isArray(beat.agent?.permissions)) { config.permissions = beat.agent.permissions; startLive(); }
     for (const task of beat.tasks || []) {

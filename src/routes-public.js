@@ -204,8 +204,8 @@ export function publicRoutes(router, {auth, workspaces, version}) {
       agent.touchAgent(store, device.id);
       // Whether the owner's CLIs are signed in on that machine, as the CLIs' own
       // status commands said. Four words only; a malformed report changes nothing.
-      let report = null, features;
-      try { const beat = JSON.parse(raw || '{}'); report = beat?.cli; features = beat?.features; } catch { /* A beat that is not JSON carries no report. */ }
+      let report = null, features, stopping = false;
+      try { const beat = JSON.parse(raw || '{}'); report = beat?.cli; features = beat?.features; stopping = beat?.stopping === true; } catch { /* A beat that is not JSON carries no report. */ }
       agent.recordAgentCli(store, device.id, report);
       // What its app can do; a beat without the list (an older app) leaves none.
       agent.recordAgentFeatures(store, device.id, features);
@@ -223,7 +223,8 @@ export function publicRoutes(router, {auth, workspaces, version}) {
         try { await onAgentTaskResult(store, id, {resumeBrowser: resumeBrowserRun}); }
         catch (error) { console.error('Browser recovery:', error.message); }
       }
-      const tasks = agent.claimAgentTasks(store, device.id).map(t => ({id: t.id, kind: t.kind, payload: JSON.parse(t.payload), attempts: t.attempts}));
+      // A device that is stopping beats only to keep its running leases: it is handed nothing new (an older server ignores the field).
+      const tasks = (stopping ? [] : agent.claimAgentTasks(store, device.id)).map(t => ({id: t.id, kind: t.kind, payload: JSON.parse(t.payload), attempts: t.attempts}));
       if (recovered) await store.update(s => { activity(s, 'agent', `Re-armed ${recovered} agent task(s) after a disconnect.`); });
       let permissions = [];
       try { permissions = JSON.parse(device.permissions || '[]'); } catch { /* Stored JSON. */ }
