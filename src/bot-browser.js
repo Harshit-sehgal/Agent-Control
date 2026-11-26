@@ -13,6 +13,7 @@ import * as agent from './agent.js';
 import {browserRuntime} from './browser-runtime.js';
 import {fail} from '../shared/errors.js';
 import {addChatMessages} from '../shared/chats.js';
+import {pinnedDevice} from '../shared/bot-settings.js';
 import {activity, cleanText} from '../shared/core.js';
 import {browserResultText, capturePageText, hostOf, MAX_BROWSER_DEPTH} from '../shared/bot-browser.js';
 import {logActivity} from '../shared/activity-log.js';
@@ -31,27 +32,25 @@ export function setBrowserResultHooks(hooks) { resultHooks = {...resultHooks, ..
 /** How long a page sent to a device may take before it is failed, so a run never waits on it forever. */
 export const BROWSER_WAIT_MS = 600000;
 const OFFLINE = 'Your computer\'s agent is offline. A server on your own computer restarts it within a few seconds; on another machine, start it there (`node agent/agent.mjs run`), then approve again.';
-/** Seen lately. A device paired a moment ago counts until its first beat lands. */
-const online = (row, nowMs = Date.now()) => Boolean(row?.last_seen_at || row?.paired_at) && Date.parse(row.last_seen_at || row.paired_at) > nowMs - agent.AGENT_ONLINE_MS;
-
-/** The most recently seen online agent that may run this kind; null when none may; throws when the ones that may are offline. */
-function pickAgent(store, kind) {
-  if (typeof store.all !== 'function') return null;
-  const may = store.all('SELECT id,permissions,last_seen_at,paired_at FROM agents WHERE revoked_at IS NULL ORDER BY last_seen_at DESC')
-    .filter(a => { try { return JSON.parse(a.permissions || '[]').includes(kind); } catch { return false; } });
-  const live = may.find(a => online(a));
-  if (may.length && !live) fail(OFFLINE, 409);
-  return live?.id || null;
-}
 
 /** Send a pending request to a local agent, or run it here. A request with no
  * capable agent stays pending, so pairing one and approving again still works. */
-export async function dispatchBrowserRequest(store, id, {actor = null, runtime = browserRuntime} = {}) {
+export async function dispatchBrowserRequest(store, id, {actor = null, runtime = browserRuntime, needs = []} = {}) {
   const request = (store.read().browserRequests || []).find(r => r.id === id);
   if (!request) fail('Browser request not found.', 404);
   if (request.status !== 'pending') fail('This browser request is no longer waiting.', 409);
-  const here = runtime.mode !== 'agent' && runtime.available();
-  const agentId = here ? null : pickAgent(store, request.kind);
+  const pin = pinnedDevice(store.read(), request.botId);
+  if (pin && runtime.mode === 'server') fail('This bot is set to use one computer, and this install opens pages only on the server (BROWSER_RUNTIME=server). Clear the bot\'s computer on its profile, or set BROWSER_RUNTIME=auto.', 409);
+  // A pinned bot never opens pages on the server, and a need names a device feature the server browser has none of.
+  const here = !pin && !needs.length && runtime.mode !== 'agent' && runtime.available();
+  let agentId = null;
+  if (!here) {
+    const chosen = agent.chooseDevice(store, {kind: request.kind, deviceId: pin, needs});
+    if (chosen.reason === 'agent-offline') fail(OFFLINE, 409);
+    if (chosen.reason === 'not-pinned') fail('This bot\'s computer is not available. Pair it again, or choose another computer on the bot\'s profile.', 409);
+    if (chosen.reason === 'missing-feature') fail(agent.missingFeatureLine(chosen.feature), 409);
+    agentId = chosen.agent?.id || null;
+  }
   if (!here && !agentId) fail(`No paired local agent holds the ${request.kind} permission. ${runtime.mode === 'agent'
     ? 'This install only runs browser requests on a paired device (BROWSER_RUNTIME=agent). Pair one in Settings → Local agents and grant it, then approve again.'
     : 'A server started on your own computer connects this computer by itself; restart it, pair one in Settings → Local agents, or give this server a browser: set AGENT_BROWSER_ALLOWLIST=* for any public site (or name hosts) and install Chrome, or point AGENT_BROWSER_PATH at one. Then approve again.'}`, 409);
@@ -265,7 +264,7 @@ export async function expireBrowserTasks(store, hooks = resultHooks, nowMs = Dat
       const task = store.get('SELECT agent_id,status FROM agent_tasks WHERE id=?', taskId);
       if (!task || !['queued', 'running'].includes(task.status)) continue;
       const device = store.get('SELECT last_seen_at,paired_at,revoked_at FROM agents WHERE id=?', task.agent_id);
-      const reason = !online(device, nowMs) ? 'Your computer went offline before it opened the page. Start the app on it again, then ask again.'
+      const reason = !agent.agentOnline(device, nowMs) ? 'Your computer went offline before it opened the page. Start the app on it again, then ask again.'
         : Number.isFinite(request.notAfter) && nowMs > request.notAfter ? 'Your computer did not open the page in time.' : null;
       if (!reason) continue;
       agent.failAgentTasks(store, [taskId], reason);
