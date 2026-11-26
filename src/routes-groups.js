@@ -128,20 +128,25 @@ async function runOneBotInner(store, {botId, input, page = '', browserDepth = 0}
   // `groupId` is null and that step is skipped.
   // Its model calls count on the bot's day and on the run record (src/usage.js).
   let used = null;
-  const turn = await withLimitLine(store, bot, async () => { const metered = await meterTurn(store, {}, () => runBotTurn(store, {bot, envelope, executor: executeCustomBot, config, peers: roster, configFor: peerId => resolveConfig(store, peerId), memoryForPeer: (mate, mateConfig) => memoryFor(store, {bot: mate, config: mateConfig, chatKey: bot.id}), handoffAllowed: botSettings(bot).canHandoff, groupId: group?.id ?? null})); used = metered.total; return metered.value; });
+  const turn = await withLimitLine(store, bot, async () => { const metered = await meterTurn(store, {}, () => runBotTurn(store, {bot, envelope, executor: executeCustomBot, config, peers: roster, configFor: peerId => resolveConfig(store, peerId), memoryForPeer: (mate, mateConfig) => memoryFor(store, {bot: mate, config: mateConfig, chatKey: bot.id}), handoffAllowed: botSettings(bot).canHandoff, groupId: group?.id ?? null, chatKey: bot.id})); used = metered.total; return metered.value; });
   const raw = turn.output;
   const lines = turn.lines;
   const groupId = group?.id;
   let records = [], asked = [];
   const run = await store.update(s => {
-    const browsed = recordBrowserRequests(s, {bot, groupId, chatKey: bot.id, output: raw, depth: browserDepth});
+    // A hit from an older chat line that came from outside text taints this reply's pages too (`search_chat`).
+    const browsed = recordBrowserRequests(s, {bot, groupId, chatKey: bot.id, output: raw, depth: browserDepth, outsideChat: turn.outsideChat === true});
     records = browsed.records; asked = browsed.asks;
     const output = browsed.text;
     const run = {id: uuid(), botId: bot.id, botName: bot.name, input, output, at: new Date().toISOString(), ...(used ? {usage: used} : {})};
     s.runs.unshift(run); s.runs = s.runs.slice(0, 100);
     // The bot itself may be gone (removed mid-turn). The run record still
     // belongs in history; only the chat append is skipped.
-    try { chats.addChatMessages(s, bot.id, [...lines, {id: run.id, role: 'bot', text: output, mode: 'ai', at: run.at}, ...(turn.after || []).map(line => ({...line, at: new Date().toISOString()})), ...browsed.lines], {trusted: true}); } catch { /* Conversation removed. */ }
+    try {
+      chats.addChatMessages(s, bot.id, [...lines, {id: run.id, role: 'bot', text: output, mode: 'ai', at: run.at}, ...(turn.after || []).map(line => ({...line, at: new Date().toISOString()})), ...browsed.lines], {trusted: true});
+      // The reply was written from old chat lines that came from outside text: it counts as outside text in later turns.
+      if (turn.outsideChat) { const line = s.chats[bot.id]?.find(m => m.id === run.id); if (line) line.outside = true; }
+    } catch { /* Conversation removed. */ }
     for (const ask of browsed.asks) addAskCards(s, ask, bot);
     activity(s, 'run', `Completed ${bot.name} task.`, {runId: run.id}); return run;
   });

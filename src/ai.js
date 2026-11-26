@@ -306,7 +306,7 @@ function extract(config,data){
   }
   // The token limit already bounds the call. Slicing here cut a fence that
   // models put last, so the orchestrator never paused for the page.
-  if(/```(?:browser|spawn|ask|create-bot|connector|setup)\b/i.test(text))return text;
+  if(/```(?:browser|spawn|ask|create-bot|connector|setup|search_chat)\b/i.test(text))return text;
   return text.slice(0,3000);
 }
 /** Strip leaked chain-of-thought so a draft is the answer, not the scratchpad.
@@ -319,7 +319,7 @@ function extract(config,data){
 function sanitize(text){
   const raw=String(text);
   const fences=[];
-  const withoutFences=raw.replace(/```(?:browser|spawn|ask|create-bot|connector|setup)[ \t]*\r?\n[\s\S]*?(?:```|$)/gi,block=>{fences.push(block);return '';});
+  const withoutFences=raw.replace(/```(?:browser|spawn|ask|create-bot|connector|setup|search_chat)[ \t]*\r?\n[\s\S]*?(?:```|$)/gi,block=>{fences.push(block);return '';});
   const stripPaired=s=>s.replace(/<(think|thinking|reasoning)>[\s\S]*?<\/\1>/gi,'');
   // Remove tool fences before reasoning cleanup, then put them back. A
   // reasoning tag may wrap the fence, and either a paired or unclosed tag must
@@ -818,7 +818,7 @@ export function boundBotInput(input, max=MAX_BOT_INPUT){
   // bot asked in prose for JSON that its contract required answers in prose.
   // Memory is the only field here that is context and not the job, so it goes
   // first when the cut still does not fit.
-  const slim={objective:cut(env.objective,1200),now:env.now,unattended:env.unattended,remembered:env.remembered,botId:env.botId,runId:env.runId,step:env.step,contract:env.contract,botRole:cut(env.botRole,1200),message:cut(env.message,1200),maxSteps:env.maxSteps,permissions:list(env.permissions),page:cut(env.page,Math.floor(max/2)),note:cut(env.note,600),connectors:env.connectors,connectorResult:cut(env.connectorResult,2000),memory:env.memory,peerAnswer:env.peerAnswer,previous:env.previous&&typeof env.previous==='object'?{...env.previous,output:cut(env.previous.output,600)}:env.previous,restrictions:list(env.restrictions),tools:list(env.tools),truncated:'The full task was cut to fit the model input limit.'};
+  const slim={objective:cut(env.objective,1200),now:env.now,unattended:env.unattended,remembered:env.remembered,botId:env.botId,runId:env.runId,step:env.step,contract:env.contract,botRole:cut(env.botRole,1200),message:cut(env.message,1200),maxSteps:env.maxSteps,permissions:list(env.permissions),page:cut(env.page,Math.floor(max/2)),note:cut(env.note,600),connectors:env.connectors,connectorResult:cut(env.connectorResult,2000),memory:env.memory,peerAnswer:env.peerAnswer,previous:env.previous&&typeof env.previous==='object'?{...env.previous,output:cut(env.previous.output,600)}:env.previous,restrictions:list(env.restrictions),tools:list(env.tools),chatSearch:env.chatSearch,handoff:env.handoff,truncated:'The full task was cut to fit the model input limit.'};
   out=JSON.stringify(slim);
   // Without its tools a bot loses the block syntax and stalls, so memory and the page go before tools do.
   if(out.length>max)out=JSON.stringify({...slim,memory:undefined,peerAnswer:undefined,page:cut(slim.page,4000)});
