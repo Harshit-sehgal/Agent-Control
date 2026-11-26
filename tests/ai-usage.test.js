@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import {complete, executeCustomBot, usageOf, fallsBack} from '../src/ai.js';
-import {meterTurn} from '../src/usage.js';
+import {meterTurn, turnNote, fallbacksOf} from '../src/usage.js';
 
 // Usage parsing per wire, the prompt-cache markers, and the one fallback call, each driven against a loopback
 // provider so the request body and the response shape are the real ones.
@@ -107,33 +107,153 @@ test('which errors fall back: busy, down, timed out, unreachable or signed out y
   for (const no of [{providerStatus: 400}, {status: 422}, {providerStatus: 404, code: 'model-not-found'}, {status: 429}, {}, null]) assert.equal(fallsBack(no && err(no)), false, JSON.stringify(no));
 });
 
-test('a retryable failure is answered once by the fallback model, the trace learns which model answered, and a fallback never falls back again', async () => {
-  const primary = await stub([{status: 503, json: {error: {message: 'overloaded'}}}]);
-  const backup = await stub([{status: 200, json: {choices: [{message: {content: 'from backup'}}], usage: {prompt_tokens: 7, completion_tokens: 3}}}]);
-  const broken = await stub([{status: 500, json: {error: {message: 'down too'}}}]);
+/** Run `fn` with AI_RETRY_MS=0 so a model's one retry does not wait. */
+async function quick(fn) {
+  const prev = process.env.AI_RETRY_MS; process.env.AI_RETRY_MS = '0';
+  try { return await fn(); } finally { if (prev === undefined) delete process.env.AI_RETRY_MS; else process.env.AI_RETRY_MS = prev; }
+}
+const ok = text => ({status: 200, json: {choices: [{message: {content: text}}], usage: {prompt_tokens: 7, completion_tokens: 3}}});
+const down = status => ({status, json: {error: {message: 'trouble'}}});
+const chat = (port, model, extra) => cfg(port, {protocol: 'openai-chat', model, ...extra});
+const closeAll = (...servers) => servers.forEach(s => s.close());
+
+test('the walk goes down the list: own model, then each fallback once, each with its own retry', async () => {
+  const own = await stub([down(503)]);
+  const f1 = await stub([down(503)]);
+  const f2 = await stub([ok('from second')]);
   const store = memStore({groupRuns: []});
   const bot = {id: 'b1', name: 'Scout', instructions: 'Find things.'};
-  const prev = process.env.AI_RETRY_MS; process.env.AI_RETRY_MS = '0';
   try {
-    const config = cfg(primary.port, {protocol: 'openai-chat', model: 'main-model', fallback: cfg(backup.port, {protocol: 'openai-chat', model: 'spare-model'})});
-    const out = await meterTurn(store, {}, () => executeCustomBot(bot, 'hi', config));
-    assert.equal(out.value, 'from backup');
-    assert.equal(primary.requests.length, 2, 'the primary keeps its own one retry');
-    assert.equal(backup.requests.length, 1);
-    assert.equal(out.calls.length, 1);
-    assert.equal(out.calls[0].model, 'spare-model');
-    assert.deepEqual(out.calls[0].fallbackFrom, {model: 'main-model', why: 'the provider is having trouble'});
-    // The fallback failing too is the end: its config carries no fallback of its own, so nothing loops.
-    const chained = cfg(primary.port, {protocol: 'openai-chat', model: 'main-model', fallback: cfg(broken.port, {protocol: 'openai-chat', model: 'b', fallback: cfg(backup.port, {protocol: 'openai-chat'})})});
-    await assert.rejects(() => executeCustomBot(bot, 'hi', chained), /500/);
-    assert.equal(backup.requests.length, 1, 'a fallback never falls back again');
-    // A refused request is an answer, not an outage: no fallback.
-    const refusing = await stub([{status: 400, json: {error: {message: 'content policy'}}}]);
-    try {
-      await assert.rejects(() => executeCustomBot(bot, 'hi', cfg(refusing.port, {protocol: 'openai-chat', fallback: cfg(backup.port, {protocol: 'openai-chat'})})), /400/);
-      assert.equal(backup.requests.length, 1);
-    } finally { refusing.close(); }
-  } finally { primary.close(); backup.close(); broken.close(); if (prev === undefined) delete process.env.AI_RETRY_MS; else process.env.AI_RETRY_MS = prev; }
+    await quick(async () => {
+      const config = chat(own.port, 'main-model', {fallbacks: [chat(f1.port, 'f1'), chat(f2.port, 'f2')]});
+      const out = await meterTurn(store, {}, () => executeCustomBot(bot, 'hi', config));
+      assert.equal(out.value, 'from second');
+      assert.deepEqual([own.requests.length, f1.requests.length, f2.requests.length], [2, 2, 1]);
+      assert.equal(out.calls.length, 1);
+      assert.equal(out.calls[0].model, 'f2');
+      assert.deepEqual(out.calls[0].fallbackFrom, {model: 'main-model', why: 'the provider is having trouble'});
+    });
+  } finally { closeAll(own, f1, f2); }
+});
+
+test('every model failing rejects with the last model\'s error, and no model is asked twice beyond its own retry', async () => {
+  const own = await stub([down(503)]);
+  const f1 = await stub([down(503)]);
+  const f2 = await stub([down(500)]);
+  const spare = await stub([ok('never')]);
+  const bot = {id: 'b1', name: 'Scout', instructions: 'x'};
+  try {
+    await quick(async () => {
+      // A fallback's own `fallbacks` (or legacy `fallback`) is never walked: only the bot's own list is.
+      const config = chat(own.port, 'main', {fallbacks: [chat(f1.port, 'f1', {fallbacks: [chat(spare.port, 's')]}), chat(f2.port, 'f2', {fallback: chat(spare.port, 's')})]});
+      await assert.rejects(() => meterTurn(memStore({}), {}, () => executeCustomBot(bot, 'hi', config)), /500/);
+      assert.deepEqual([own.requests.length, f1.requests.length, f2.requests.length, spare.requests.length], [2, 2, 1, 0]);
+    });
+  } finally { closeAll(own, f1, f2, spare); }
+});
+
+test('a lone legacy config.fallback still walks as a list of one', async () => {
+  const own = await stub([down(503)]);
+  const backup = await stub([ok('from backup')]);
+  const bot = {id: 'b1', name: 'Scout', instructions: 'x'};
+  try {
+    await quick(async () => {
+      const out = await meterTurn(memStore({}), {}, () => executeCustomBot(bot, 'hi', chat(own.port, 'main', {fallback: chat(backup.port, 'spare')})));
+      assert.equal(out.value, 'from backup');
+      assert.equal(out.calls[0].fallbackFrom.model, 'main');
+    });
+  } finally { closeAll(own, backup); }
+});
+
+test('a refused request never moves on', async () => {
+  const own = await stub([{status: 400, json: {error: {message: 'content policy'}}}]);
+  const backup = await stub([ok('never')]);
+  const bot = {id: 'b1', name: 'Scout', instructions: 'x'};
+  try {
+    await quick(async () => {
+      await assert.rejects(() => meterTurn(memStore({}), {}, () => executeCustomBot(bot, 'hi', chat(own.port, 'main', {fallbacks: [chat(backup.port, 'f1')]}))), /400/);
+      assert.equal(backup.requests.length, 0);
+    });
+  } finally { closeAll(own, backup); }
+});
+
+test('once the bot has replied in a turn, a later call that fails is not replayed on another model', async () => {
+  // The first reply may carry a send block; the turn has acted. A second call failing must not hand the work to
+  // another model, or the send could be proposed twice.
+  const own = await stub([ok('one'), down(503)]);
+  const backup = await stub([ok('never')]);
+  const bot = {id: 'b1', name: 'Scout', instructions: 'x'};
+  try {
+    await quick(async () => {
+      const config = chat(own.port, 'main', {fallbacks: [chat(backup.port, 'f1')]});
+      await assert.rejects(() => meterTurn(memStore({}), {}, async () => {
+        assert.equal(await executeCustomBot(bot, 'one', config), 'one');
+        assert.equal(turnNote('b1').acted, true);
+        return executeCustomBot(bot, 'two', config);
+      }), /503/);
+      assert.equal(own.requests.length, 3, 'the second call used its own retry and stopped');
+      assert.equal(backup.requests.length, 0);
+    });
+  } finally { closeAll(own, backup); }
+});
+
+test('a turn that moved stays on the model that answered it', async () => {
+  const own = await stub([down(503)]);
+  const f1 = await stub([ok('first'), ok('second')]);
+  const f2 = await stub([ok('never')]);
+  const bot = {id: 'b1', name: 'Scout', instructions: 'x'};
+  try {
+    await quick(async () => {
+      const config = chat(own.port, 'main', {fallbacks: [chat(f1.port, 'f1'), chat(f2.port, 'f2')]});
+      const out = await meterTurn(memStore({}), {}, async () => {
+        const first = await executeCustomBot(bot, 'one', config);
+        assert.deepEqual({...turnNote('b1')}, {acted: true, answeredBy: 1, kept: null, why: 'the provider is having trouble'});
+        return [first, await executeCustomBot(bot, 'two', config)];
+      });
+      assert.deepEqual(out.value, ['first', 'second']);
+      assert.equal(own.requests.length, 2, 'the second call never went back to the own model');
+      assert.equal(f1.requests.length, 2);
+      assert.equal(f2.requests.length, 0);
+      assert.deepEqual(out.calls.map(c => c.model), ['f1', 'f1']);
+      assert.equal(out.calls[1].fallbackFrom.model, 'main');
+      assert.deepEqual(fallbacksOf(out.calls), [{botId: 'b1', from: 'main', why: 'the provider is having trouble', to: 'f1'}], 'one notice for the move, not one per later call');
+    });
+  } finally { closeAll(own, f1, f2); }
+});
+
+test('a later call that starts on a fallback and fails does not walk back up or on past a model that has answered', async () => {
+  const own = await stub([down(503)]);
+  const f1 = await stub([ok('first'), down(503)]);
+  const f2 = await stub([ok('never')]);
+  const bot = {id: 'b1', name: 'Scout', instructions: 'x'};
+  try {
+    await quick(async () => {
+      const config = chat(own.port, 'main', {fallbacks: [chat(f1.port, 'f1'), chat(f2.port, 'f2')]});
+      await assert.rejects(() => meterTurn(memStore({}), {}, async () => { await executeCustomBot(bot, 'one', config); return executeCustomBot(bot, 'two', config); }), /503/);
+      assert.equal(f2.requests.length, 0);
+    });
+  } finally { closeAll(own, f1, f2); }
+});
+
+test('outside a turn nothing has acted, and the note is per bot', async () => {
+  assert.equal(turnNote('b1'), null);
+  const own = await stub([ok('b1 reply'), down(503)]);
+  const backup = await stub([ok('b2 from backup')]);
+  try {
+    await quick(async () => {
+      const config = chat(own.port, 'main', {fallbacks: [chat(backup.port, 'f1')]});
+      await meterTurn(memStore({}), {}, async () => {
+        assert.deepEqual({...turnNote('b1')}, {acted: false, answeredBy: 0, kept: null, why: null}, 'made on first use');
+        assert.equal(turnNote('b1'), turnNote('b1'), 'one mutable note per bot');
+        assert.equal(await executeCustomBot({id: 'b1', name: 'A', instructions: 'x'}, 'hi', config), 'b1 reply');
+        // b2 has not acted yet, so b1's reply does not stop b2's own model failing over to its fallback.
+        assert.equal(await executeCustomBot({id: 'b2', name: 'B', instructions: 'x'}, 'hi', config), 'b2 from backup');
+        assert.deepEqual([turnNote('b1').answeredBy, turnNote('b2').answeredBy], [0, 1]);
+        assert.equal(turnNote('b2').acted, true);
+      });
+      assert.equal(turnNote('b1'), null, 'the note ends with the turn');
+    });
+  } finally { closeAll(own, backup); }
 });
 
 test('a subscription call is recorded as included, with the tokens its CLI reported', async () => {
