@@ -158,6 +158,8 @@ export function createLiveHub({now = Date.now, waitMs = LIVE_WAIT_MS} = {}) {
     agentSync, putFrame, view, takeover, handback, input, taskQueued,
     isDriving: (workspaceId, botId) => space(workspaceId).driving.has(botId),
     agentLive: workspaceId => alive(space(workspaceId)),
+    /** The device that is serving this workspace's live view: the one that polled last, or null. */
+    agentId: workspaceId => space(workspaceId).agentId,
     /** Where the device last said this bot's tab was, while the device is still there. */
     tab: (workspaceId, botId) => { const sp = space(workspaceId); return alive(sp) ? sp.tabs.get(botId) || null : null; },
     /** Release every parked poll and forget everything: shutdown, and tests. */

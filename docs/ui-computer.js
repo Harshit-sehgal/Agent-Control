@@ -8,7 +8,8 @@
  * The numbers match agent/live-input.mjs, which is the one place the device checks an
  * event: a point is clamped to the page, text is at most 2000 characters and a wheel
  * turn at most 5000 pixels, so nothing built here can be refused for its size. */
-import {hostOf} from './bot-browser.js?v=3163bac0ee';
+import {hostOf} from './bot-browser.js?v=f345637389';
+import {cleanFeatures} from './device-features.js?v=f345637389';
 
 /** The page the owner sees, in CSS pixels. A frame carries its own size; this is the fallback. */
 export const PAGE = {w: 1280, h: 800};
@@ -123,7 +124,7 @@ export function mergeView(prev, reply) {
   const p = prev || {}, r = reply || {};
   const agent = r.agent !== false;
   const state = STATES.includes(r.state) ? r.state : p.state || 'idle';
-  const base = {agent, demo: r.demo === true, state, url: text(r.url, p.url || ''), title: text(r.title, p.title || ''), site: text(r.site, p.site || ''), notice: noteFor(r)};
+  const base = {agent, demo: r.demo === true, state, url: text(r.url, p.url || ''), title: text(r.title, p.title || ''), site: text(r.site, p.site || ''), notice: noteFor(r), features: cleanFeatures(r.features)};
   if (!agent) return {...base, seq: 0, image: '', w: p.w || PAGE.w, h: p.h || PAGE.h};
   const fresh = typeof r.image === 'string';
   return {

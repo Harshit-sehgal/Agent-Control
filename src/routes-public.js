@@ -204,9 +204,11 @@ export function publicRoutes(router, {auth, workspaces, version}) {
       agent.touchAgent(store, device.id);
       // Whether the owner's CLIs are signed in on that machine, as the CLIs' own
       // status commands said. Four words only; a malformed report changes nothing.
-      let report = null;
-      try { report = JSON.parse(raw || '{}')?.cli; } catch { /* A beat that is not JSON carries no report. */ }
+      let report = null, features;
+      try { const beat = JSON.parse(raw || '{}'); report = beat?.cli; features = beat?.features; } catch { /* A beat that is not JSON carries no report. */ }
       agent.recordAgentCli(store, device.id, report);
+      // What its app can do; a beat without the list (an older app) leaves none.
+      agent.recordAgentFeatures(store, device.id, features);
       const nowMs = Date.now();
       // Renew this device's running leases first: it is heartbeating because it
       // is alive, so a task it is still executing (a slow page, a serial queue)
