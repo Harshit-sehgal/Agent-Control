@@ -464,7 +464,7 @@ function resting(config){
   if(entry.until<=Date.now()){coolOff.delete(key);return null;}
   return entry;
 }
-/** One model call, walked down `[own model, ...config.fallbacks]` (a lone older `config.fallback` is a list of one).
+/** One model call, walked down `[own model, ...config.fallbacks]`.
  * Each model is tried at most once, with its own one retry inside `callOnce`. The walk moves on only when the
  * failure is the provider's (`fallsBack`), a model is left, and the bot has not acted in this turn: once any call
  * for the bot has returned, its reply may already be acted on (a send block), so a later failure is not replayed
@@ -476,7 +476,7 @@ function resting(config){
  * `call.handoff({from,to,why})` is the input rebuilt for a model other than the bot's own (`handoffInput`). */
 async function callModel(call){
   const {config}=call;
-  const models=[config,...(config?.fallbacks??(config?.fallback?[config.fallback]:[]))];
+  const models=[config,...(config?.fallbacks??[])];
   const note=turnNote(call.botId);
   const first=note&&note.answeredBy<models.length?note.answeredBy:0;
   let why=first>0?note.why:null,last=null;

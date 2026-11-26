@@ -147,25 +147,12 @@ test('every model failing rejects with the last model\'s error, and no model is 
   const bot = {id: 'b1', name: 'Scout', instructions: 'x'};
   try {
     await quick(async () => {
-      // A fallback's own `fallbacks` (or legacy `fallback`) is never walked: only the bot's own list is.
-      const config = chat(own.port, 'main', {fallbacks: [chat(f1.port, 'f1', {fallbacks: [chat(spare.port, 's')]}), chat(f2.port, 'f2', {fallback: chat(spare.port, 's')})]});
+      // A fallback's own `fallbacks` is never walked: only the bot's own list is.
+      const config = chat(own.port, 'main', {fallbacks: [chat(f1.port, 'f1', {fallbacks: [chat(spare.port, 's')]}), chat(f2.port, 'f2', {fallbacks: [chat(spare.port, 's')]})]});
       await assert.rejects(() => meterTurn(memStore({}), {}, () => executeCustomBot(bot, 'hi', config)), /500/);
       assert.deepEqual([own.requests.length, f1.requests.length, f2.requests.length, spare.requests.length], [2, 2, 1, 0]);
     });
   } finally { closeAll(own, f1, f2, spare); }
-});
-
-test('a lone legacy config.fallback still walks as a list of one', async () => {
-  const own = await stub([down(503)]);
-  const backup = await stub([ok('from backup')]);
-  const bot = {id: 'b1', name: 'Scout', instructions: 'x'};
-  try {
-    await quick(async () => {
-      const out = await meterTurn(memStore({}), {}, () => executeCustomBot(bot, 'hi', chat(own.port, 'main', {fallback: chat(backup.port, 'spare')})));
-      assert.equal(out.value, 'from backup');
-      assert.equal(out.calls[0].fallbackFrom.model, 'main');
-    });
-  } finally { closeAll(own, backup); }
 });
 
 test('a refused request never moves on', async () => {
