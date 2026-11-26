@@ -22,6 +22,7 @@ import crypto from 'node:crypto';
 import {fail} from '../shared/errors.js';
 import {cleanText} from '../shared/core.js';
 import {validateBrowserRequest} from '../shared/bot-browser.js';
+import {ACCOUNT_ID} from '../shared/bot-settings.js';
 import {cliEngineById,cleanCliModel,cleanEffort,LOCAL_CLI_ENGINE_IDS} from '../shared/ai-presets.js';
 import {cleanFeatures,hasFeature} from '../shared/device-features.js';
 import {base64Bytes,sniffType,isImage,MAX_FILES,MODEL_IMAGE_BYTES,MODEL_IMAGES_TOTAL} from '../shared/attachments.js';
@@ -261,7 +262,7 @@ export const agentTaskKinds = () => [...AGENT_ACTIONS];
 
 /** Enqueue work for a paired agent. Idempotency is per-agent so a repeated
  * request (double-clicked button, retried polling) cannot run a job twice. */
-export function enqueueAgentTask(store, agentId, {kind, payload = {}, idempotencyKey, createdBy, permission, approved = []}) {
+export function enqueueAgentTask(store, agentId, {kind, payload = {}, idempotencyKey, createdBy, permission, approved = [], account = null}) {
   if (!AGENT_ACTIONS.includes(kind)) fail(`Unknown agent task kind. Expected one of: ${agentTaskKinds().join(', ')}.`);
   // Every enqueue goes through here — the pairing route, the queue scheduler and
   // the bot's own request — so the browser rules are enforced once, at the choke
@@ -276,7 +277,10 @@ export function enqueueAgentTask(store, agentId, {kind, payload = {}, idempotenc
     // only the bot-browser dispatch passes it, so no route, schedule or model text can widen it. Absent
     // means none: the device refuses every risky control.
     const cleared = (Array.isArray(approved) ? approved : []).filter(a => typeof a === 'string').slice(0, 8);
-    payload = {url: request.url, steps: request.steps, ...(botId ? {botId} : {}), ...(cleared.length ? {approved: cleared} : {})};
+    payload = {url: request.url, steps: request.steps, ...(botId ? {botId} : {}), ...(cleared.length ? {approved: cleared} : {}),
+      // Like `approved`, the account is an argument: only the bot-browser dispatch passes it, from the bot's record. The
+      // computer is the one the task is queued for, so a task can never name a computer it is not on.
+      ...(typeof account === 'string' && ACCOUNT_ID.test(account) ? {account, deviceId: agentId} : {})};
   }
   if (kind === 'model.run') payload = validateModelRun(payload);
   if (kind === 'mcp.call') payload = validateMcpCall(payload);
