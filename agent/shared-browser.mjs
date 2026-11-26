@@ -19,7 +19,7 @@
  *   stale one can be used.
  * - What the owner types in secret is remembered for the life of that bot's tab (`typed`, in memory only, never
  *   written anywhere) and scrubbed from every result that leaves: a capture, an action's answer and the status.
- *   The page's secret fields are emptied after a click or Enter that submits them and when the owner hands back.
+ *   The page's secret fields are emptied when the owner hands back.
  * - The rules that bound a page read still bound every step: the allowlist, the
  *   egress proxy that refuses private addresses, and the X click/type refusal.
  *   Those live in `agent/browser.mjs`, which this file drives.
@@ -27,7 +27,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {startBrowserSession, ACTION_OPS, MAX_ACTIONS} from './browser.mjs';
-import {FOCUSED_IS_SECRET_JS, TAG_FOCUSED_SECRET_JS, CLEAR_SECRETS_AFTER_CLICK_JS, CLEAR_SECRETS_AFTER_ENTER_JS, CLEAR_SECRETS_ON_HANDBACK_JS, scrubTyped} from './page-secrets.mjs';
+import {FOCUSED_IS_SECRET_JS, TAG_FOCUSED_SECRET_JS, CLEAR_SECRETS_ON_HANDBACK_JS, rememberTyped, scrubTyped} from './page-secrets.mjs';
 import {hostAllowed, hostOf} from '../shared/bot-browser.js';
 import {cleanInput, KEYS, VIEWPORT} from './live-input.mjs';
 
@@ -166,11 +166,11 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
   /** Empty the page's secret fields (the typed memory is kept: the site may echo it later). Said in fixed words when
    * it fails, and it never holds anything up: one that does not answer in two seconds is let go. Nothing to clear
    * when the owner typed nothing in secret on this tab. */
-  async function clearSecretFields(entry, expression) {
+  async function clearSecretFields(entry) {
     if (!entry?.typed.size || !session) return;
     let timer;
     const answer = await Promise.race([
-      session.cdp.send('Runtime.evaluate', {expression, returnByValue: true}, entry.tab.sessionId).catch(() => null),
+      session.cdp.send('Runtime.evaluate', {expression: CLEAR_SECRETS_ON_HANDBACK_JS, returnByValue: true}, entry.tab.sessionId).catch(() => null),
       new Promise(resolve => { timer = setTimeout(() => resolve(null), 2000); timer.unref?.(); }),
     ]);
     clearTimeout(timer);
@@ -180,7 +180,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
   /** The owner is done: bots may go on, and the page's secret fields are emptied first. Handing back what you do not hold does nothing. */
   async function handback(botId) {
     if (driving !== botId) return;
-    await clearSecretFields(tabs.get(botId), CLEAR_SECRETS_ON_HANDBACK_JS);
+    await clearSecretFields(tabs.get(botId));
     if (driving !== botId) return;
     driving = null;
     clearTimeout(idleTimer);
@@ -241,7 +241,6 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
         await send('Input.dispatchMouseEvent', {type: 'mousePressed', x: ev.x, y: ev.y, button: 'left', clickCount: count});
         await send('Input.dispatchMouseEvent', {type: 'mouseReleased', x: ev.x, y: ev.y, button: 'left', clickCount: count});
       }
-      await clearSecretFields(entry, CLEAR_SECRETS_AFTER_CLICK_JS);
     } else if (ev.type === 'scroll') {
       await send('Input.dispatchMouseEvent', {type: 'mouseWheel', x: ev.x, y: ev.y, deltaX: ev.dx, deltaY: ev.dy});
     } else if (ev.type === 'type') {
@@ -258,13 +257,12 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
         if (!tagged || tagged.exceptionDetails || tagged.result?.value !== true) throw new Error('The browser could not mark that field secret.');
       }
       // Remembered before the text goes in, so nothing the page does with it can come back unhidden.
-      if (ev.secret || asked) entry.typed.add(ev.text);
+      if (ev.secret || asked) rememberTyped(entry.typed, ev.text);
       await send('Input.insertText', {text: ev.text}).catch(() => { throw new Error('The browser did not take the typed text.'); });
     } else if (ev.type === 'key') {
       const key = KEYS[ev.key], base = {key: ev.key, code: key.code, windowsVirtualKeyCode: key.vk, nativeVirtualKeyCode: key.vk};
       await send('Input.dispatchKeyEvent', {type: 'keyDown', ...base, ...(key.text ? {text: key.text} : {})});
       await send('Input.dispatchKeyEvent', {type: 'keyUp', ...base});
-      if (ev.key === 'Enter') await clearSecretFields(entry, CLEAR_SECRETS_AFTER_ENTER_JS);
     } else if (ev.type === 'navigate') {
       if (!hostAllowed(ev.url, allowed())) throw new Error('That host is not in AGENT_BROWSER_ALLOWLIST.');
       await send('Page.navigate', {url: ev.url});

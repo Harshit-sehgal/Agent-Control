@@ -457,7 +457,7 @@ test('the memory is never written anywhere: no log line, no file write, and the 
   assert.deepEqual(sent, ['Input.insertText'], 'the page is told the text once, as typing, and nothing else carries it');
 });
 
-test('the page\'s secret fields are emptied after a click or Enter that submits them and when the owner hands back, only if a secret was typed', async t => {
+test('the page\'s secret fields are emptied when the owner hands back, and at no other moment, and only if a secret was typed', async t => {
   const pages = {[URL_A]: {title: 'Docs', text: 'Hello', elements: []}};
   const {sb, fake} = rigWith(pages);
   t.after(() => sb.close());
@@ -465,20 +465,33 @@ test('the page\'s secret fields are emptied after a click or Enter that submits 
   await sb.takeover('bot-a');
   await sb.applyInput('bot-a', {type: 'click', x: 5, y: 5});
   await sb.applyInput('bot-a', {type: 'key', key: 'Enter'});
+  await sb.handback('bot-a');
   assert.deepEqual(fake().cleared, [], 'nothing was typed in secret, so there is nothing to empty');
+  await sb.takeover('bot-a');
   await sb.applyInput('bot-a', {type: 'type', text: 'hunter22', secret: true});
   await sb.applyInput('bot-a', {type: 'key', key: 'Tab'});
-  await sb.applyInput('bot-a', {type: 'scroll', dy: 10});
-  assert.deepEqual(fake().cleared, [], 'typing, Tab and a scroll submit nothing');
   await sb.applyInput('bot-a', {type: 'click', x: 5, y: 5});
   await sb.applyInput('bot-a', {type: 'key', key: 'Enter'});
-  assert.deepEqual(fake().cleared.map(c => c.when), ['click', 'enter']);
-  assert.equal(fake().actions.length, 0, 'the expressions are the device\'s own, not a bot step');
+  await sb.applyInput('bot-a', {type: 'scroll', dy: 10});
+  assert.deepEqual(fake().cleared, [], 'a click or Enter is not a hand back: a slow or captcha submit may not have read the password yet');
+  assert.equal(fake().actions.length, 0, 'no page script ran for it');
   const before = fake().calls.length;
   await sb.handback('bot-a');
-  assert.deepEqual(fake().cleared.map(c => c.when), ['click', 'enter', 'handback']);
+  assert.deepEqual(fake().cleared.map(c => c.when), ['handback']);
   assert.ok(fake().calls.slice(before).some(c => c.method === 'Runtime.evaluate'), 'asked while the owner still held the tab');
   assert.equal(sb.owner(), null);
+});
+
+test('a tab keeps the most recent 50 typed strings: the oldest is forgotten, the newest still hidden', async t => {
+  const pages = {[URL_A]: {title: 'Docs', text: 'Hello', elements: []}};
+  const {sb} = rigWith(pages);
+  t.after(() => sb.close());
+  await sb.run('bot-a', {url: URL_A});
+  await sb.takeover('bot-a');
+  for (let i = 0; i < 52; i++) await sb.applyInput('bot-a', {type: 'type', text: `secret-${String(i).padStart(2, '0')}`, secret: true});
+  await sb.handback('bot-a');
+  pages[URL_A] = {title: 'Docs', text: 'echo secret-00 secret-01 secret-02 secret-51', elements: []};
+  assert.equal((await sb.run('bot-a', {url: URL_A})).text, 'echo secret-00 secret-01 [hidden] [hidden]');
 });
 
 test('a takeover that ends on its own empties the secret fields too', async t => {
@@ -544,4 +557,25 @@ test('a capture that fails says nothing the owner typed, and a plain read taken 
   await assert.rejects(() => sb.run('bot-a', {url: URL_A}), error => /The page was not opened/.test(error.message) && !/hunter22/i.test(`${error.message}${error.stack}`) && /\[hidden\]/.test(error.message));
   assert.equal(JSON.stringify(sb.scrub('bot-a', {text: 'plain read: Hunter22'})), '{"text":"plain read: [hidden]"}');
   assert.equal(sb.scrub('other-bot', {text: 'hunter22'}).text, 'hunter22', 'another bot\'s tab has its own memory');
+});
+
+test('the plain-read fallback in agent.mjs goes through the tab\'s memory, for the bot\'s own tab and for a task with no bot', async () => {
+  // `execute` is not importable (agent.mjs runs its command on load), so the wiring is pinned in its source and the
+  // behaviour in `scrub`, which is what that line calls.
+  const source = fs.readFileSync(new URL('../agent/agent.mjs', import.meta.url), 'utf8');
+  assert.match(source, /return shared\(\)\.scrub\(task\.payload\?\.botId, \{\.\.\.plain, readBy: 'plain'\}\);/);
+  const pages = {[URL_A]: {title: 'Docs', text: 'Hello', elements: []}};
+  const {sb} = rigWith(pages);
+  try {
+    // A task that names no bot runs on the shared tab.
+    await sb.run(undefined, {url: URL_A});
+    await sb.takeover('shared');
+    await sb.applyInput('shared', {type: 'type', text: 'hunter22', secret: true});
+    await sb.handback('shared');
+    const plain = {url: URL_A, finalUrl: `${URL_A}?pw=hunter22`, title: 'Echo HUNTER22', text: 'you typed hunter22', links: [{text: 'x', url: `${URL_A}?c=hunter22`}], readBy: 'plain'};
+    const out = sb.scrub(undefined, plain);
+    assert.equal(JSON.stringify(out).toLowerCase().includes('hunter22'), false);
+    assert.equal(out.text, 'you typed [hidden]');
+    assert.equal(out.readBy, 'plain');
+  } finally { await sb.close(); }
 });

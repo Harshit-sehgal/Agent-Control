@@ -10,7 +10,7 @@
  *   isTextEntry(el)           can a person type text into this control? The one rule for where a secret may go.
  *   labelOf(el)               the words that name a control for the model, never a secret field's content
  *   hideSecrets(text, fields) `text` with every secret field's content replaced by "[hidden]"
- *   clearSecrets(scope, delay) empties the secret fields in `scope` (now, or after `delay` ms if still unchanged)
+ *   clearSecrets(scope)      empties the secret text fields in `scope` (the page, when the owner hands back)
  *
  * `scrubTyped` is the one function here that runs in Node: it hides what the owner typed in secret from a result.
  */
@@ -29,13 +29,13 @@ export function isSecretField(el) {
   return type === 'password' || tokens.some(t => kinds.includes(t)) || Boolean(el.closest('[data-agent-secret]'));
 }
 
-/** True for a control a person types text into: an input that is not a button, a checkbox, a radio, a file, a range
+/** True for a control a person types text into: an input that is not a button, a hidden input, a checkbox, a radio, a file, a range
  * or a colour picker, a textarea, or a contenteditable. A page body, a wrapper that took the focus, a select or a
  * button is not. A secret is typed only into one of these, and only one of these is ever tagged secret. */
 export function isTextEntry(el) {
   const tag = String(el.tagName || '').toUpperCase();
   const type = String(el.type || '').toLowerCase();
-  if (tag === 'INPUT') return !['submit', 'button', 'reset', 'image', 'checkbox', 'radio', 'file', 'range', 'color'].includes(type);
+  if (tag === 'INPUT') return !['submit', 'button', 'reset', 'image', 'checkbox', 'radio', 'file', 'range', 'color', 'hidden'].includes(type);
   return tag === 'TEXTAREA' || Boolean(el.isContentEditable);
 }
 
@@ -97,41 +97,34 @@ export const TAG_FOCUSED_SECRET_JS = `(()=>{${PAGE_SECRETS_JS};const el=document
  * field the page's author tagged `data-agent-secret`. */
 export const SECRET_FIELDS_JS = `Array.prototype.filter.call(document.querySelectorAll('input,textarea,select,[contenteditable],[data-agent-secret]'),isSecretField)`;
 
-/** Empties the secret fields in `scope` (a form, a field, or the document): `value` set to empty and the `value`
- * attribute removed, so a page that was told nothing has nothing left to echo and a later read finds an empty
- * field. With a `delay` it empties each field after that many milliseconds, and only if it still holds what it held
- * now, so a sign-in that reads the field after a script step (a captcha) still works and a field the person has
- * since retyped is left alone. Answers how many fields it found. Page code: embedded with the bundle, never
- * imported into it. It tells the page nothing: no event fires. */
-export function clearSecrets(scope, delay) {
+/** Empties the secret fields of the page: each text-entry field's `value` set to empty and its `value` attribute
+ * removed, a contenteditable's text cleared, so a page that was told nothing has nothing left to echo and a later
+ * read finds an empty field. Only a field a person types text into is wiped (`isTextEntry`, or a contenteditable):
+ * a hidden, checkbox, radio, file or select input under a tagged container keeps what it holds, since its value is
+ * not what the owner typed and a page may need it. Answers how many fields it wiped. Page code: embedded with the
+ * bundle, never imported into it. It tells the page nothing: no event fires. */
+export function clearSecrets(scope) {
   const found = scope.querySelectorAll ? Array.prototype.slice.call(scope.querySelectorAll('input,textarea,select,[contenteditable],[data-agent-secret]')) : [];
   if (scope.tagName) found.push(scope);
-  const fields = found.filter(isSecretField);
-  const held = el => (typeof el.value === 'string' ? el.value : String(el.textContent || ''));
-  const wipe = el => { if (typeof el.value === 'string') { el.value = ''; el.removeAttribute('value'); } else el.textContent = ''; };
-  if (!(delay > 0)) { fields.forEach(wipe); return fields.length; }
-  const before = fields.map(el => [el, held(el)]);
-  setTimeout(() => before.forEach(pair => { if (held(pair[0]) === pair[1]) wipe(pair[0]); }), delay);
+  const fields = found.filter(el => isSecretField(el) && (isTextEntry(el) || Boolean(el.isContentEditable)));
+  fields.forEach(el => { if (typeof el.value === 'string') { el.value = ''; el.removeAttribute('value'); } else el.textContent = ''; });
   return fields.length;
 }
 
-/** A control that submits its form (the same list as `SUBMIT` in agent/browser.mjs). */
-const SUBMIT_CONTROL = 'button[type=submit],button:not([type]),input[type=submit],input[type=image]';
-/** How long a submitted form's secrets are left before they are emptied, so a script that reads them after a step
- * of its own (a captcha token) still gets them. A navigation ends the page, and the fields with it. */
-export const CLEAR_AFTER_SUBMIT_MS = 1500;
-const clearing = (scope, delay) => `(()=>{${PAGE_SECRETS_JS};${clearSecrets};const a=document.activeElement;const form=a&&(a.form||(a.closest&&a.closest('form')));const scope=${scope};return scope?clearSecrets(scope,${delay}):0})()`;
-/** After the owner's click on the device path: the form of the submit control that now has the focus. A click into
- * a field only focuses it, and is never a submit. */
-export const CLEAR_SECRETS_AFTER_CLICK_JS = clearing(`a&&a.matches&&a.matches(${JSON.stringify(SUBMIT_CONTROL)})&&form||null`, CLEAR_AFTER_SUBMIT_MS);
-/** After the owner's Enter on the device path: the form of the focused input or submit control, else a focused
- * secret field of no form (a script's own sign-in). Enter in a textarea is a new line, not a submit. */
-export const CLEAR_SECRETS_AFTER_ENTER_JS = clearing(`a&&(a.tagName==='INPUT'||(a.matches&&a.matches(${JSON.stringify(SUBMIT_CONTROL)})))&&form||(a&&isSecretField(a)&&a.tagName!=='TEXTAREA'?a:null)`, CLEAR_AFTER_SUBMIT_MS);
-/** When the owner hands back: every secret field of the page, now. */
-export const CLEAR_SECRETS_ON_HANDBACK_JS = clearing('document', 0);
-/** The server runtime's click on a control it names by index: a statement for `owner` clicks that clears the form
- * of `el` when `el` is a submit control. Self-contained, so the caller needs nothing in scope but `el`. */
-export const clearAfterSubmitJS = elVar => `(()=>{${PAGE_SECRETS_JS};${clearSecrets};const c=${elVar}.closest&&${elVar}.closest(${JSON.stringify(SUBMIT_CONTROL)});const f=c&&(c.form||c.closest('form'));if(f)clearSecrets(f,${CLEAR_AFTER_SUBMIT_MS});})();`;
+/** When the owner hands back: every secret text field of the page, now. It is the only clearing: a clear after a
+ * click or Enter was dropped, since it can blank a password before a slow or captcha submit has read it, or when
+ * nothing was submitted, and a submit is not always a click on a button. What was typed stays out of every result
+ * by `scrubTyped`, whether or not the page's fields were emptied. */
+export const CLEAR_SECRETS_ON_HANDBACK_JS = `(()=>{${PAGE_SECRETS_JS};${clearSecrets};return clearSecrets(document)})()`;
+
+/** How many typed strings a tab remembers: the most recent ones. A person types a handful of secrets in a takeover. */
+export const MAX_REMEMBERED = 50;
+/** Remember `text` in `typed` (a Set), most recent last, dropping the oldest past `MAX_REMEMBERED`. */
+export function rememberTyped(typed, text) {
+  typed.delete(text);
+  typed.add(text);
+  while (typed.size > MAX_REMEMBERED) typed.delete(typed.values().next().value);
+}
 
 /** The marker a hidden secret becomes (the same word `hideSecrets` writes in the page). */
 const HIDDEN = '[hidden]';
@@ -163,6 +156,10 @@ export function scrubTyped(result, typed) {
       found.lastIndex = 0;
       for (let m = found.exec(text); m; m = found.exec(text)) { ranges.push([m.index, m.index + m[0].length]); found.lastIndex = m.index + 1; }
     }
+    // A `[hidden]` already in the text is the page's own marker, never part of a match: a typed "hid" must not cut it.
+    const marks = [];
+    for (let at = text.indexOf(HIDDEN); at >= 0; at = text.indexOf(HIDDEN, at + HIDDEN.length)) marks.push([at, at + HIDDEN.length]);
+    if (marks.length) for (let i = ranges.length - 1; i >= 0; i--) if (marks.some(([from, to]) => ranges[i][0] < to && ranges[i][1] > from)) ranges.splice(i, 1);
     if (!ranges.length) return text;
     ranges.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
     let out = '', at = 0;

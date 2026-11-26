@@ -255,8 +255,8 @@ test('secret input over plain HTTP from the network is refused on both takeover 
   - A plain type into an ordinary field is not remembered.
   - Closing the tab drops its set.
   - The set is never written anywhere: no config, log, disk or jar.
-- [x] **Step 3: clear after submit.**
-  - When a secret field's form is submitted (a click on its submit control, or Enter in the field), or the owner hands back, the device sets that field's `value` to empty and removes its `value` attribute in the page.
+- [x] **Step 3: clear at the hand back.** (Fix round 1 dropped the clear after a submit: it can blank a password before a slow or captcha submit has read it.)
+  - When the owner hands back, the device sets that field's `value` to empty and removes its `value` attribute in the page.
   - Use one small page expression next to the others in `page-secrets.mjs`, with an exact constant so `tests/fake-cdp.js` can match it.
   - Its failure is logged with fixed wording and never blocks the hand back.
   - Test it on the fake CDP, and on the real-browser test if one already covers the takeover.
@@ -267,7 +267,7 @@ test('secret input over plain HTTP from the network is refused on both takeover 
   - Use the test rigs other integration tests use (look at `tests/secret-input.test.js` and the bot-browser tests). Keep it off port 4173 and the real `data/state.json`.
   - It may be skipped only when no Chrome is found, the same way the existing real-browser tests are skipped. If it can run without Chrome on the fake CDP, prefer that and keep one Chrome variant.
 - [x] **Step 5: docs and gate.**
-  - One sentence in `SECURITY.md`'s secret-fields paragraph about the typed-value memory and the clear after submit. Replace the "not yet covered after navigation" line the fix wave added, since this task covers it.
+  - One sentence in `SECURITY.md`'s secret-fields paragraph about the typed-value memory and the clear at the hand back. Replace the "not yet covered after navigation" line the fix wave added, since this task covers it.
   - In the plan file, the Goal line goes back to covering navigation.
   - Run `npm run check && npm test && npm run build:pages` (no drift) and `npm run test:ui`.
   - Commit: `feat: the device remembers secret typing and scrubs it from every result`.

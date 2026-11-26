@@ -113,11 +113,13 @@ access only to people you would let read the owner's connected accounts.
   not `localhost`, `127.0.0.1` or `[::1]`, and the `Origin` check refuses it. With `TRUST_PROXY=1` the "from this computer" path is off: only the forwarded
   `X-Forwarded-Proto: https` counts (`secureRequest` in `src/http.js`). Never put a plain-HTTP proxy in front
   of this server for secret input. The field rule stops at the field, so the device and the server's takeover also remember what
-  the owner typed in secret, per tab and in memory only (never written to disk, a log or a backup), and scrub it by
-  value from every capture, action result, live view and tab status before it leaves, in any letter case and, in an
-  address, percent-encoded (`scrubTyped`), so a site that echoes it in a title, an address or a field it draws again
-  after navigating shows `[hidden]`. The page's secret fields are also emptied after a click or Enter that submits
-  them and when the owner hands back.
+  the owner typed in secret, per tab and in memory only (never written to disk, a log or a backup; the 50 most recent
+  strings), and scrub it by value from every capture, action result, takeover view, error text and tab status before it
+  leaves, in any letter case and percent-encoded (`scrubTyped`), so a site that echoes it in a title, an address or a
+  field it draws again after navigating shows `[hidden]`. The page's secret text fields are emptied when the owner
+  hands back; a clear after a submit was dropped, since it can blank a password before a slow or captcha submit has
+  read it. The device path's live view is pixel frames, which cannot be scrubbed: a page that prints the value in
+  plain text is visible to the owner who is watching it, and the frames are not given to a model.
 
 ## Data at rest
 - The store is SQLite (`src/sqlite-store.js`, `node:sqlite`) with a migration

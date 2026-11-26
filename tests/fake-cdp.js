@@ -1,6 +1,4 @@
-import {FOCUSED_IS_SECRET_JS, TAG_FOCUSED_SECRET_JS, CLEAR_SECRETS_AFTER_CLICK_JS, CLEAR_SECRETS_AFTER_ENTER_JS, CLEAR_SECRETS_ON_HANDBACK_JS} from '../agent/page-secrets.mjs';
-
-const CLEARS = new Map([[CLEAR_SECRETS_AFTER_CLICK_JS, 'click'], [CLEAR_SECRETS_AFTER_ENTER_JS, 'enter'], [CLEAR_SECRETS_ON_HANDBACK_JS, 'handback']]);
+import {FOCUSED_IS_SECRET_JS, TAG_FOCUSED_SECRET_JS, CLEAR_SECRETS_ON_HANDBACK_JS} from '../agent/page-secrets.mjs';
 
 /** A scripted DevTools connection, so the browser code can run with no Chrome.
  *
@@ -31,8 +29,8 @@ export function fakeCdp({pages = {}} = {}) {
       return state.focusSecret === 'throws' ? {result: {type: 'object', subtype: 'error'}, exceptionDetails: {text: 'Uncaught'}} : {result: {value: state.focusSecret}};
     }
     if (expression === TAG_FOCUSED_SECRET_JS) { tagged.push({sessionId, expression}); return {result: {value: true}}; }
-    // The device emptying the page's secret fields: which of its three moments asked, in order.
-    if (CLEARS.has(expression)) { cleared.push({sessionId, when: CLEARS.get(expression)}); return {result: {value: 1}}; }
+    // The device emptying the page's secret fields when the owner hands back.
+    if (expression === CLEAR_SECRETS_ON_HANDBACK_JS) { cleared.push({sessionId, when: 'handback'}); return {result: {value: 1}}; }
     if (expression === 'location.href') return {result: {value: page.url}};
     if (expression === 'document.readyState') return {result: {value: 'complete'}};
     if (expression.startsWith('(function(){var els=')) return {result: {value: snapshot}};

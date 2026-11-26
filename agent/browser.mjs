@@ -28,7 +28,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import {isPrivateAddress} from './net-guard.mjs';
-import {PAGE_SECRETS_JS, SECRET_FIELDS_JS as SECRET_FIELDS, scrubTyped, clearAfterSubmitJS} from './page-secrets.mjs';
+import {PAGE_SECRETS_JS, SECRET_FIELDS_JS as SECRET_FIELDS, scrubTyped, rememberTyped} from './page-secrets.mjs';
 import {hostAllowed, RISKS, PATH_RISKS, ACTION_KEYS, CHECKOUT_PATH, foldLabel, botCheck, searchAlternates} from '../shared/bot-browser.js';
 
 // The allowlist rule lives with the rest of the browser-block rules in
@@ -154,7 +154,7 @@ function actionExpression(step, approved = [], {person = false} = {}) {
   const bot = person === true ? [] : (Array.isArray(approved) ? approved : []);
   const owner = person === true;
   switch (step.op) {
-    case 'click': return `(()=>{const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};${riskGuard(bot, 'clicked', true, false, owner)}el.scrollIntoView();const a=el.closest('a[target]');if(a)a.removeAttribute('target');el.click();${owner ? clearAfterSubmitJS('el') : ''}return{ok:true};})()`;
+    case 'click': return `(()=>{const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};${riskGuard(bot, 'clicked', true, false, owner)}el.scrollIntoView();const a=el.closest('a[target]');if(a)a.removeAttribute('target');el.click();return{ok:true};})()`;
     case 'type': return `(()=>{const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};${riskGuard(bot, 'typed into', false, true, owner)}${owner ? ownerTyping(step) : ''}const v=${jsLiteral(step.text)};if('value' in el){el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}else{el.textContent=v;}return{ok:true${owner ? ',secret:isSecretField(el)' : ''}};})()`;
     case 'waitFor': return `new Promise(res=>{const sel=${sel};const end=Date.now()+${Number(step.timeoutMs) > 0 ? Math.min(Number(step.timeoutMs), 15000) : 5000};const tick=()=>{if(document.querySelector(sel))return res({ok:true});if(Date.now()>end)return res({ok:false,reason:'timed out'});setTimeout(tick,100);};tick();})`;
     case 'read': return `(()=>{${PAGE_SECRETS_JS};const el=document.querySelector(${sel});return{ok:Boolean(el),text:el?hideSecrets(String(el.textContent),${SECRET_FIELDS}).slice(0,4000):null};})()`;
@@ -615,11 +615,11 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
           if (!expression) return scrub({ok: false, reason: 'That action is not supported.', ...here});
           // Remembered before the text is written, so nothing the page does with it can come back unhidden.
           const secretText = op === 'type' && typeof step.text === 'string';
-          if (secretText && step.secret === true) typed.add(step.text);
+          if (secretText && step.secret === true) rememberTyped(typed, step.text);
           const {result} = await evaluate(expression).catch(error => ({result: {value: {ok: false, reason: error.message}}}));
           const value = result?.value && typeof result.value === 'object' ? result.value : {ok: false, reason: 'The page did not answer.'};
           // A plain type into a field the page counts as secret is remembered too.
-          if (secretText && value.secret === true) typed.add(step.text);
+          if (secretText && value.secret === true) rememberTyped(typed, step.text);
           const page = await settled(here.url);
           // `read` returns an element's text; keep it next to the page instead of
           // letting the page's own text win the spread.

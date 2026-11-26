@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import {isSecretField, isTextEntry, labelOf, hideSecrets, PAGE_SECRETS_JS, scrubTyped, clearSecrets, CLEAR_SECRETS_AFTER_CLICK_JS, CLEAR_SECRETS_AFTER_ENTER_JS, CLEAR_SECRETS_ON_HANDBACK_JS, clearAfterSubmitJS} from '../agent/page-secrets.mjs';
+import {isSecretField, isTextEntry, labelOf, hideSecrets, PAGE_SECRETS_JS, scrubTyped, clearSecrets, CLEAR_SECRETS_ON_HANDBACK_JS, rememberTyped, MAX_REMEMBERED} from '../agent/page-secrets.mjs';
 
 /** A fake page element with the few members the functions read. */
 function field({tagName = 'INPUT', type = '', value, innerText, isContentEditable = false, labels, attrs = {}, taggedAncestor = false}) {
@@ -162,7 +162,7 @@ test('hiding matches whatever case the page echoes, and keeps the page\'s own le
 test('only a text-entry control can be typed into as a secret', () => {
   const yes = [{tagName: 'INPUT', type: 'text'}, {tagName: 'INPUT', type: 'password'}, {tagName: 'INPUT', type: ''}, {tagName: 'INPUT', type: 'search'},
     {tagName: 'INPUT', type: 'email'}, {tagName: 'INPUT', type: 'number'}, {tagName: 'TEXTAREA'}, {tagName: 'DIV', isContentEditable: true}];
-  const no = [...['submit', 'button', 'reset', 'image', 'checkbox', 'radio', 'file', 'range', 'color'].map(type => ({tagName: 'INPUT', type})),
+  const no = [...['hidden', 'submit', 'button', 'reset', 'image', 'checkbox', 'radio', 'file', 'range', 'color'].map(type => ({tagName: 'INPUT', type})),
     {tagName: 'SELECT'}, {tagName: 'DIV'}, {tagName: 'MAIN'}, {tagName: 'BUTTON'}, {tagName: 'A'}, {tagName: 'BODY'}];
   for (const c of yes) assert.equal(isTextEntry(field(c)), true, JSON.stringify(c));
   for (const c of no) assert.equal(isTextEntry(field(c)), false, JSON.stringify(c));
@@ -244,95 +244,66 @@ test('scrubTyped leaves a picture alone, since a match inside it would only dama
   assert.equal(scrubTyped({image, text: 'JRg'}, ['JRg']).text, '[hidden]');
 });
 
-/** A fake page for the clearing expressions: fields with a value, a form, the focus. */
-function fakePage({active, fields}) {
-  const timers = [];
-  const make = f => {
-    const el = {tagName: 'INPUT', type: 'text', value: '', attrs: {}, isContentEditable: false, ...f, removed: [],
-      getAttribute(n) { return n in this.attrs ? this.attrs[n] : null; },
-      removeAttribute(n) { this.removed.push(n); delete this.attrs[n]; },
-      closest(sel) { return sel === '[data-agent-secret]' && 'data-agent-secret' in this.attrs ? this : sel === 'form' ? this.form || null : null; },
-      matches(sel) { return Boolean(this.submit) && sel.includes('button[type=submit]'); }};
-    return el;
-  };
-  const els = fields.map(make);
-  const form = {tagName: 'FORM', querySelectorAll: () => els.filter(e => e.form === form)};
-  for (const e of els) if (e.inForm) e.form = form;
-  const doc = {querySelectorAll: () => els, activeElement: active === undefined ? null : els[active]};
-  const run = expression => vm.runInNewContext(expression, {document: doc, setTimeout: (fn, ms) => { timers.push({fn, ms}); return timers.length; }});
-  return {els, form, doc, run, timers, fire: () => timers.splice(0).forEach(t => t.fn())};
+/** A fake page for the clearing expression: fields with a value and the page's `querySelectorAll`. */
+function fakePage(fields) {
+  const els = fields.map(f => ({tagName: 'INPUT', type: 'text', value: '', attrs: {}, isContentEditable: false, ...f, removed: [],
+    getAttribute(n) { return n in this.attrs ? this.attrs[n] : null; },
+    removeAttribute(n) { this.removed.push(n); delete this.attrs[n]; },
+    closest(sel) { return sel === '[data-agent-secret]' && ('data-agent-secret' in this.attrs || this.taggedAncestor) ? this : null; }}));
+  const doc = {querySelectorAll: () => els};
+  return {els, doc, run: expression => vm.runInNewContext(expression, {document: doc})};
 }
 
-test('clearSecrets empties each secret field and its value attribute, and nothing else', () => {
-  const page = fakePage({fields: [{type: 'password', value: 'hunter22', attrs: {value: 'hunter22'}}, {type: 'text', value: 'ada'}, {tagName: 'DIV', value: undefined, isContentEditable: true, textContent: 'abc', attrs: {'data-agent-secret': ''}}]});
+test('clearSecrets empties each secret text field, its value attribute and a contenteditable, and nothing else', () => {
+  const page = fakePage([{type: 'password', value: 'hunter22', attrs: {value: 'hunter22'}}, {type: 'text', value: 'ada'},
+    {tagName: 'DIV', value: undefined, isContentEditable: true, textContent: 'abc', attrs: {'data-agent-secret': ''}}]);
   const [pw, user, editable] = page.els;
-  const count = vm.runInNewContext(`${PAGE_SECRETS_JS};${clearSecrets};clearSecrets(document, 0)`, {document: page.doc});
-  assert.equal(count, 2);
+  assert.equal(vm.runInNewContext(`${PAGE_SECRETS_JS};${clearSecrets};clearSecrets(document)`, {document: page.doc}), 2);
   assert.equal(pw.value, '');
   assert.deepEqual(pw.removed, ['value']);
   assert.equal(user.value, 'ada', 'an ordinary field is left alone');
   assert.equal(editable.textContent, '');
 });
 
-test('the hand back expression empties every secret field of the page at once', () => {
-  const page = fakePage({fields: [{type: 'password', value: 'hunter22'}, {type: 'text', value: 'ada'}]});
+test('clearSecrets never wipes a hidden, checkbox, radio, file or select input, even under a tagged container', () => {
+  const kept = [{type: 'hidden', value: 'csrf-token'}, {type: 'checkbox', value: 'on'}, {type: 'radio', value: 'a'}, {type: 'file', value: 'C:\\x'}, {type: 'range', value: '5'}, {type: 'color', value: '#fff'}, {tagName: 'SELECT', type: 'select-one', value: 'uk'}, {type: 'submit', value: 'Pay now'}]
+    .map(f => ({taggedAncestor: true, ...f}));
+  const page = fakePage([...kept, {type: 'text', value: 'typed-secret', taggedAncestor: true}, {tagName: 'TEXTAREA', type: '', value: 'typed-note', taggedAncestor: true}]);
+  assert.equal(page.run(CLEAR_SECRETS_ON_HANDBACK_JS), 2, 'only the two text fields');
+  assert.deepEqual(page.els.slice(0, kept.length).map(e => e.value), kept.map(f => f.value));
+  assert.equal(page.els.at(-2).value, '');
+  assert.equal(page.els.at(-1).value, '');
+});
+
+test('the hand back expression empties every secret field of the page at once, and is the only clearing there is', async () => {
+  const page = fakePage([{type: 'password', value: 'hunter22'}, {type: 'text', value: 'ada'}]);
   assert.equal(page.run(CLEAR_SECRETS_ON_HANDBACK_JS), 1);
   assert.equal(page.els[0].value, '');
   assert.equal(page.els[1].value, 'ada');
-  assert.equal(page.timers.length, 0, 'now, not later');
+  const exported = Object.keys(await import('../agent/page-secrets.mjs')).filter(name => /^CLEAR|^clear/.test(name)).sort();
+  assert.deepEqual(exported, ['CLEAR_SECRETS_ON_HANDBACK_JS', 'clearSecrets'], 'nothing clears after a click or Enter: it can blank a password a slow submit has not read yet');
 });
 
-test('after a click only a submit control that has the focus empties its form, and only later and only if unchanged', () => {
-  const fields = [{type: 'password', value: 'hunter22', inForm: true}, {type: 'text', value: 'ada', inForm: true}, {tagName: 'BUTTON', type: 'submit', submit: true, inForm: true, value: ''}, {type: 'password', value: 'other-pass'}];
-  // A click that left the focus in the password field is a click into a field, not a submit.
-  let page = fakePage({active: 0, fields});
-  assert.equal(page.run(CLEAR_SECRETS_AFTER_CLICK_JS), 0);
-  assert.equal(page.els[0].value, 'hunter22');
-  // The submit control has the focus: its form's secret is emptied after the delay, and not another form's.
-  page = fakePage({active: 2, fields});
-  assert.equal(page.run(CLEAR_SECRETS_AFTER_CLICK_JS), 1);
-  assert.equal(page.els[0].value, 'hunter22', 'not yet: a script may still read it');
-  assert.ok(page.timers[0].ms > 0);
-  page.fire();
-  assert.equal(page.els[0].value, '');
-  assert.equal(page.els[3].value, 'other-pass');
-  // A person who retyped it meanwhile keeps what they typed.
-  page = fakePage({active: 2, fields});
-  page.run(CLEAR_SECRETS_AFTER_CLICK_JS);
-  page.els[0].value = 'retyped-pass';
-  page.fire();
-  assert.equal(page.els[0].value, 'retyped-pass');
-  // Nothing focused is nothing to clear.
-  assert.equal(fakePage({fields}).run(CLEAR_SECRETS_AFTER_CLICK_JS), 0);
+test('scrubTyped never cuts a [hidden] that is already in the text', () => {
+  assert.equal(scrubTyped({text: 'code [hidden] and hid'}, ['hid']).text, 'code [hidden] and [hidden]');
+  assert.equal(scrubTyped({text: '[hidden]'}, ['hid', 'idde', 'hidden', '[hid']).text, '[hidden]');
+  assert.equal(scrubTyped({text: 'x[hidden]y hunter22'}, ['hunter22', 'hid']).text, 'x[hidden]y [hidden]');
+  const once = scrubTyped({text: 'Hunter22 [hidden]'}, ['hid', 'hunter22']);
+  assert.deepEqual(scrubTyped(once, ['hid', 'hunter22']), once, 'scrubbing twice changes nothing');
 });
 
-test('after Enter the focused input\'s form is emptied, a formless secret field empties itself, a textarea does not submit', () => {
-  const inForm = [{type: 'password', value: 'hunter22', inForm: true}, {type: 'text', value: 'ada', inForm: true}];
-  const page = fakePage({active: 1, fields: inForm});
-  assert.equal(page.run(CLEAR_SECRETS_AFTER_ENTER_JS), 1);
-  page.fire();
-  assert.equal(page.els[0].value, '');
-  const loose = fakePage({active: 0, fields: [{type: 'password', value: 'hunter22'}, {type: 'text', value: 'ada'}]});
-  assert.equal(loose.run(CLEAR_SECRETS_AFTER_ENTER_JS), 1);
-  loose.fire();
-  assert.equal(loose.els[0].value, '');
-  assert.equal(loose.els[1].value, 'ada');
-  const area = fakePage({active: 0, fields: [{tagName: 'TEXTAREA', value: 'hunter22', attrs: {'data-agent-secret': ''}}]});
-  assert.equal(area.run(CLEAR_SECRETS_AFTER_ENTER_JS), 0, 'Enter in a textarea is a new line');
-  // Enter in a loose ordinary field with no form submits nothing.
-  const plain = fakePage({active: 1, fields: [{type: 'password', value: 'hunter22'}, {type: 'text', value: 'ada'}]});
-  assert.equal(plain.run(CLEAR_SECRETS_AFTER_ENTER_JS), 0);
-});
-
-test('the server runtime\'s click clears the form of a submit control it clicked, and does nothing for any other element', () => {
-  const page = fakePage({fields: [{type: 'password', value: 'hunter22', inForm: true}, {tagName: 'BUTTON', submit: true, inForm: true}, {tagName: 'A'}]});
-  const [, button, link] = page.els;
-  button.closest = sel => (sel.includes('button[type=submit]') ? button : sel === 'form' ? page.form : null);
-  link.closest = () => null;
-  const statement = el => vm.runInNewContext(`(()=>{const el=this.el;${clearAfterSubmitJS('el')}})()`, {el, setTimeout: (fn, ms) => { page.timers.push({fn, ms}); return 1; }, document: page.doc});
-  statement(link);
-  assert.equal(page.timers.length, 0, 'a link is not a submit control');
-  statement(button);
-  page.fire();
-  assert.equal(page.els[0].value, '');
+test('a tab remembers the most recent 50 typed strings and drops the oldest', () => {
+  const typed = new Set();
+  for (let i = 0; i < MAX_REMEMBERED + 5; i++) rememberTyped(typed, `secret-${i}`);
+  assert.equal(typed.size, MAX_REMEMBERED);
+  assert.equal(typed.has('secret-0'), false);
+  assert.equal(typed.has('secret-4'), false);
+  assert.equal(typed.has('secret-5'), true);
+  assert.equal(typed.has(`secret-${MAX_REMEMBERED + 4}`), true);
+  // Typing an old one again makes it the newest.
+  rememberTyped(typed, 'secret-5');
+  rememberTyped(typed, 'fresh-one');
+  assert.equal(typed.has('secret-5'), true);
+  assert.equal(typed.has('secret-6'), false);
+  assert.equal(MAX_REMEMBERED, 50);
 });
