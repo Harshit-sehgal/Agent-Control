@@ -13,6 +13,7 @@ import {pushStatus, enablePush, disablePush} from './ui-push.js';
 import {connectorsPanel, loadConnectors, connectActions, connectForms} from './ui-connect.js';
 import {cliDraft, modelChoices, chosenModel, effortChoices, OTHER_MODEL, modelRowMatches, modelGroupStays, agentCliRows, agentPermissionRows, agentWorkLine, subscriptionLine, SIGN_IN_HINT} from './ui-connect-model.js';
 import {LOCAL_CLI_ENGINES, LOCAL_CLI_KIND} from './ai-presets.js';
+import {updateNeeded} from './device-features.js';
 import {parsePrices, pricesText} from './usage.js';
 
 /** The pages Settings can load into its body. Only the keys are read (is this a page?). */
@@ -162,8 +163,11 @@ function agentCard(agent, actions) {
   const signIn = cli.engines.map(e => line(esc(e.name), e.status === 'signed-out' ? withCode(SIGN_IN_HINT) : '', tag(e.word, e.tone))).join('');
   const perms = agentPermissionRows(actions, agent.permissions || []).map(p => switchRow(p.label, `${esc(p.note)}${p.note ? ' · ' : ''}<code>${esc(p.id)}</code>`, p.on, p.label, ` data-action="toggle-agent-permission" data-id="${esc(agent.id)}" data-permission="${esc(p.id)}"`)).join('');
   const seen = agent.lastSeenAt ? `Last seen ${esc(fullDate(agent.lastSeenAt))}` : 'Not seen yet';
+  // A device whose app lacks something the server relies on says so, in the words of what it cannot do.
+  const whats = updateNeeded(agent.features).map(f => f.what);
+  const update = whats.length ? line('Needs an update', esc(`Its app cannot ${whats.join(' or ')}. Update the app on this computer. Everything else it runs as before.`), tag('Update', 'warn')) : '';
   const rows = line(seen, '', `<span class="pv">${esc(agentWorkLine(agent.tasks))}</span>`)
-    + signIn + `<div class="ad-lbl">Allowed to</div>${perms}`
+    + update + signIn + `<div class="ad-lbl">Allowed to</div>${perms}`
     + `<button type="button" class="rw bad" data-action="revoke-agent" data-id="${esc(agent.id)}"><span class="w">Revoke<small>Stops it taking work. Anything it is doing fails.</small></span></button>`;
   return group(agent.name, rows, {aside: tag(STATUS_WORD[agent.status] || agent.status, tone(agent.status))});
 }

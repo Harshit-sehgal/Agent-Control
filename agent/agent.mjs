@@ -42,6 +42,7 @@ import {hostAllowed, hostOf, parseAllowlist} from '../shared/bot-browser.js';
 import {resolvePublicAddress, pinnedRequest} from './net-guard.mjs';
 import {findBrowser} from './browser.mjs';
 import {readableHtml, turnedAway, preferRead, PLAIN_AGENT} from './page-fetch.mjs';
+import {createTaskPool, concurrencyOf} from './task-pool.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG = process.env.AGENT_CONFIG ? path.resolve(process.env.AGENT_CONFIG) : path.join(HERE, 'agent.config.json');
@@ -122,7 +123,7 @@ async function pair(argv) {
   const permissions = requested === null ? TASK_KINDS : requested.split(',').map(s => s.trim()).filter(Boolean);
   const name = argValue(argv, '--name') || `${process.env.COMPUTERNAME || process.env.HOSTNAME || 'device'}-agent`;
   const url = new URL(server.replace(/\/+$/, '') + '/api/agent/pair');
-  const body = JSON.stringify({code, name, permissions});
+  const body = JSON.stringify({code, name, permissions, features: DEVICE_FEATURES});
   let res;
   try { res = await post(url, {headers: {'Content-Type': 'application/json'}, body}); }
   catch (e) { fail(e.message); }
@@ -217,6 +218,9 @@ async function run() {
   /** Resolves the wait between polls; a signal wakes it so Ctrl+C does not take
    * up to a full interval to take effect. */
   let wake = null;
+  // The worker pool and the tasks it holds, set below; `stop` reaches them before they exist only through these.
+  let pool = null;
+  let drained = Promise.resolve();
   const sleep = ms => new Promise(resolve => {
     const done = () => { clearTimeout(timer); wake = null; resolve(); };
     const timer = setTimeout(done, ms);
@@ -228,7 +232,10 @@ async function run() {
   const stop = signal => {
     if (stopping) return;
     stopping = true;
-    console.log(`\nagent: ${signal} received, stopping after the current task.`);
+    console.log(`\nagent: ${signal} received, stopping after the running tasks.`);
+    // At once, not in the `finally`: a running task that ends from here on must not start a queued one.
+    drained = pool ? pool.drain() : Promise.resolve();
+    handBackQueued();
     wake?.();
   };
   process.on('SIGINT', () => stop('SIGINT'));
@@ -253,10 +260,30 @@ async function run() {
     live.start();
   };
   startLive();
-  // Tasks handed over by a heartbeat that arrived while a task was executing.
-  const inbox = new Map();
-  let busy = false;
+  // Every task a heartbeat handed over that has not finished, and which of those have started.
+  const claimed = new Map();
+  const started = new Set();
+  // Reports and heartbeats still in flight when the device stops: the `finally` waits for them.
+  const inflight = new Set();
+  const track = promise => { inflight.add(promise); const done = () => inflight.delete(promise); promise.then(done, done); return promise; };
   let beatSeq = 0;
+  let lastBeatAt = 0;
+
+  /** A task this device will not start: reported failed, as an expired one is, so the server does not hold it
+   * until its lease lapses. A kind that may be retried goes back to the queue; one that may not is failed. */
+  const handBack = task => {
+    console.error(`agent: ${task.kind} ${task.id} was not started: the device is stopping.`);
+    track(call(config, `/api/agent/tasks/${task.id}/result`, {status: 'failed', error: 'The device stopped before it started this task.', attempts: task.attempts})
+      .catch(error => console.error(`agent: ${task.kind} ${task.id} could not be handed back: ${error.message}`)));
+  };
+  /** Everything claimed and still waiting in the pool. After the pool has been told to drain none of it can start. */
+  function handBackQueued() {
+    for (const [id, task] of claimed) {
+      if (started.has(id)) continue;
+      claimed.delete(id);
+      handBack(task);
+    }
+  }
 
   /** One heartbeat. `beat` rides in the signed body because two heartbeats in
    * the same millisecond would otherwise be identical bytes, which the server
@@ -265,32 +292,42 @@ async function run() {
     // Whether the owner's CLIs are signed in, from their own status commands (cached
     // ten minutes, no model call). Only a device allowed to run models looks.
     const cli = (config.permissions || []).includes('model.run') ? cliStatus.snapshot() : undefined;
-    const beat = await call(config, '/api/agent/heartbeat', {version: '1', os: process.platform, node: process.version, beat: ++beatSeq, at: Date.now(), features: DEVICE_FEATURES, ...(cli ? {cli} : {})});
+    lastBeatAt = Date.now();
+    const beat = await call(config, '/api/agent/heartbeat', {version: '1', os: process.platform, node: process.version, beat: ++beatSeq, at: Date.now(), features: DEVICE_FEATURES, ...(stopping ? {stopping: true} : {}), ...(cli ? {cli} : {})});
     config.lastSeenAt = new Date().toISOString();
     if (Array.isArray(beat.agent?.permissions)) { config.permissions = beat.agent.permissions; startLive(); }
-    for (const task of beat.tasks || []) if (task && task.id && !inbox.has(task.id)) inbox.set(task.id, task);
+    for (const task of beat.tasks || []) {
+      if (!task || !task.id || claimed.has(task.id)) continue;
+      // The server has handed this over, but a stopping device starts nothing new.
+      if (stopping) { handBack(task); continue; }
+      claimed.set(task.id, task);
+      try { pool.add(task); } catch { claimed.delete(task.id); handBack(task); }
+    }
   };
 
-  // The heartbeat has to keep going while `execute()` blocks. A task can outlive
+  // The heartbeat has to keep going while tasks run. A task can outlive
   // its 120s server lease easily (25 browser steps at up to 15s each), and a
   // device that only heartbeats between tasks looks disconnected: the server
   // then fails a browser.action whose click did land and reports a failure the
   // person reads as "The agent disconnected", while the honest result that comes
-  // later is refused as already completed. This timer renews the running lease
-  // from inside the block.
+  // later is refused as already completed. This timer renews the running leases
+  // (the server renews every running row on a beat) while the pool works, unless
+  // the main loop beat within the last half interval.
   const keepalive = setInterval(() => {
-    if (!busy) return;
-    heartbeat().catch(error => console.error(`agent: keepalive heartbeat failed (${error.message}).`));
+    if (!pool || pool.running() === 0 || Date.now() - lastBeatAt < interval / 2) return;
+    track(heartbeat()).catch(error => console.error(`agent: keepalive heartbeat failed (${error.message}).`));
   }, interval);
   keepalive.unref();
 
   /** Execute one delivered task and report it. The result carries the attempt
    * the task was claimed with so the server can tell this run's outcome from a
-   * later attempt's if the lease lapsed meanwhile. */
+   * later attempt's if the lease lapsed meanwhile. A throw anywhere in here still
+   * ends with the task reported, never held until its lease lapses. */
   const runTask = async task => {
-    if (await skipExpired(call, config, task)) return;
-    console.log(`agent: running ${task.kind} ${task.id}`);
+    started.add(task.id);
     try {
+      if (await skipExpired(call, config, task)) return;
+      console.log(`agent: running ${task.kind} ${task.id}`);
       const result = await execute(task, config);
       // A model run that found the CLI signed out or missing: look again soon, the owner is about to fix it.
       if (task.kind === 'model.run' && result?.ok === false && ['not-signed-in', 'cli-missing'].includes(result.code)) cliStatus.invalidate();
@@ -299,22 +336,18 @@ async function run() {
     } catch (e) {
       console.error(`agent: ${task.kind} ${task.id} failed: ${e.message}`);
       await call(config, `/api/agent/tasks/${task.id}/result`, {status: 'failed', error: e.message, attempts: task.attempts}).catch(() => {});
-    }
+    } finally { claimed.delete(task.id); started.delete(task.id); }
   };
+  pool = createTaskPool({concurrency: concurrencyOf(process.env), run: runTask});
 
   let failures = 0;
   try {
     while (!stopping) {
       let wait = interval;
       try {
-        // A pending task needs no new poll; poll only when there is nothing to do.
-        if (!inbox.size) await heartbeat();
-        while (!stopping && inbox.size) {
-          const [id, task] = inbox.entries().next().value;
-          inbox.delete(id);
-          busy = true;
-          try { await runTask(task); } finally { busy = false; }
-        }
+        // Tasks waiting for a free slot need no new poll; poll when nothing waits. The loop never waits for a
+        // task: the pool runs them, and the keepalive renews their leases.
+        if (pool.queued() === 0) await heartbeat();
         failures = 0;
         // Reported separately: an unwritable config file is not a network
         // problem, and saying "heartbeat failed" sends the operator to the wrong
@@ -335,7 +368,17 @@ async function run() {
       if (stopping) break;
       await sleep(wait);
     }
-  } finally { clearInterval(keepalive); await live?.stop(); await sharedBrowser?.close(); console.log('agent: stopped.'); }
+  } finally {
+    // The running tasks finish and report first, and the keepalive goes on until then: their leases hold.
+    // Queued ones were handed back when the device began to stop (`stop`); this is for any other way out.
+    drained = pool.drain();
+    handBackQueued();
+    await drained;
+    clearInterval(keepalive);
+    // A beat or a hand-back still on its way; a beat that lands now hands its tasks back too.
+    while (inflight.size) await Promise.allSettled([...inflight]);
+    await live?.stop(); await sharedBrowser?.close(); console.log('agent: stopped.');
+  }
 }
 
 function status() {

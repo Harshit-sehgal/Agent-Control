@@ -8,6 +8,7 @@ import path from 'node:path';
 import {EventEmitter} from 'node:events';
 import * as agent from '../src/agent.js';
 import {SqliteStore} from '../src/sqlite-store.js';
+import {DEVICE_FEATURES} from '../shared/device-features.js';
 import {ensureLocalAgent, startLocalAgent, localAgentWanted} from '../src/local-agent.js';
 
 async function harness() {
@@ -32,6 +33,12 @@ test('the first start pairs this computer and keeps the secret in a 0600 file be
   const row = store.get('SELECT * FROM agents WHERE id=?', made.agentId);
   assert.equal(row.name, 'This computer');
   assert.deepEqual(JSON.parse(row.permissions).sort(), [...agent.AGENT_ACTIONS].sort(), 'it may do everything a paired device may');
+});
+
+test('the local agent is paired with what its app can do, before its first heartbeat', async () => {
+  const {store, dataFile} = await harness();
+  const made = ensureLocalAgent(store, {dataFile, server: 'http://127.0.0.1:4173'});
+  assert.deepEqual(agent.readAgentFeatures(store, made.agentId), DEVICE_FEATURES);
 });
 
 test('a later start reuses the same agent, and a port change only rewrites the address', async () => {

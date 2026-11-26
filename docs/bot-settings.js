@@ -7,11 +7,11 @@
  * off, but never grant an action (that is `contracts.js` permissions) or lift
  * the hard step cap.
  */
-import {cleanText} from './core.js?v=f345637389';
-import {fail} from './errors.js?v=f345637389';
-import {BACKSTOP} from './limits.js?v=f345637389';
-import {TINT_COUNT} from './ui-kit.js?v=f345637389';
-import {SHAPES} from './company.js?v=f345637389';
+import {cleanText} from './core.js?v=bb93f46435';
+import {fail} from './errors.js?v=bb93f46435';
+import {BACKSTOP} from './limits.js?v=bb93f46435';
+import {TINT_COUNT} from './ui-kit.js?v=bb93f46435';
+import {SHAPES} from './company.js?v=bb93f46435';
 
 export const REPLY_LENGTHS = {short: 500, medium: 1500, long: 3000};
 export const ROUTING_MODES = ['pipeline', 'mentions', 'everyone'];
@@ -57,7 +57,12 @@ export const BOT_DEFAULTS = Object.freeze({
   /** Pinned to the top of the chat list, and its place in the saved order. */
   pinned: false,
   order: null,
+  /** The one paired computer this bot's pages, model runs and device MCP calls
+   * use, or null for any computer. Only the owner sets it (src/routes-groups.js);
+   * no model text can (it is not in BOT_SETTABLE or buildCreatedBot). */
+  device: null,
 });
+const DEVICE_ID = /^[A-Za-z0-9-]{1,64}$/;
 export const BROWSER_APPROVALS = ['ask', 'auto'];
 
 export const GROUP_DEFAULTS = Object.freeze({
@@ -141,7 +146,21 @@ export function validateBotSettings(body, current = {}) {
   if (body.pinned !== undefined) next.pinned = flag(body.pinned, 'Pinned');
   if (body.order !== undefined) next.order = body.order === null ? null : integer(body.order, 0, 100000, 'Order');
   if (body.tint !== undefined) next.tint = body.tint === null ? null : integer(body.tint, 0, TINT_COUNT - 1, 'Colour');
+  if (body.device !== undefined) {
+    if (body.device !== null && body.device !== '' && !(typeof body.device === 'string' && DEVICE_ID.test(body.device))) fail("A computer must be a paired computer's id, or empty for any computer.");
+    next.device = body.device || null;
+  }
   return next;
+}
+
+/** The computer a bot is pinned to, looking across every group, or null for
+ * any computer (and for a bot that does not exist). */
+export function pinnedDevice(state, botId) {
+  for (const group of state?.groups || []) {
+    const bot = (group.bots || []).find(b => b.id === botId);
+    if (bot) return botSettings(bot).device || null;
+  }
+  return null;
 }
 
 /** The output budget a bot's reply length allows. */

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   NO_JOB, hasJob, roleLine, lookOf, resolveSection, roleOf, teamLine, moveTargets, menuItems, deleteCopy, profileRows, profileBackRoute, closeTarget, memoryNotes, modelLine,
-  newBotDefaults, newBotPayload, canCreate, editChanges, ACTIVITY_FILTERS, activityUrl, activityTarget, activityDays, companyTree, weekUsage, settingsSections, sectionArg,
+  newBotDefaults, newBotPayload, canCreate, editChanges, deviceOptions, ACTIVITY_FILTERS, activityUrl, activityTarget, activityDays, companyTree, weekUsage, settingsSections, sectionArg,
 } from '../shared/ui-profile-model.js';
 
 const bot = (id, name, settings = {}, instructions = 'Does its work.', extra = {}) => ({id, name, instructions, settings, ...extra});
@@ -187,6 +187,30 @@ test('Edit only sends what changed, so a shape left alone stays the role default
   assert.deepEqual(editChanges(was, {name: 'Mailroom', reportsTo: 'ops', shape: 'rounded', tint: 2}), null);
   assert.deepEqual(editChanges(was, {name: ' Post ', reportsTo: 'ops', shape: 'rounded', tint: 2}), {name: 'Post'});
   assert.deepEqual(editChanges(was, {name: 'Mailroom', reportsTo: '', shape: 'blob', tint: 5}), {settings: {reportsTo: null, shape: 'blob', tint: 5}});
+});
+
+test('the Runs on choice: any computer first, each paired one by name, and a removed pin still shows', () => {
+  const agents = [{id: 'a1', name: 'Laptop', status: 'online'}, {id: 'a2', name: 'Desk PC', status: 'stale'}, {id: 'a3', name: 'Old', status: 'revoked'}];
+  assert.deepEqual(deviceOptions(agents, null), [{id: '', label: 'Any computer', selected: true}, {id: 'a1', label: 'Laptop', selected: false}, {id: 'a2', label: 'Desk PC', selected: false}]);
+  assert.equal(deviceOptions(agents, 'a2').find(o => o.selected).id, 'a2');
+  assert.deepEqual(deviceOptions(agents, 'a3').at(-1), {id: 'a3', label: 'A computer that is no longer paired', selected: true});
+  assert.deepEqual(deviceOptions([{id: 'a3', name: 'Old', status: 'revoked'}], null), []);
+});
+
+test('a pin to a computer that is gone still shows when every computer is revoked, so the owner can clear it', () => {
+  const gone = [{id: 'a3', name: 'Old', status: 'revoked'}];
+  assert.deepEqual(deviceOptions(gone, 'a3'), [{id: '', label: 'Any computer', selected: false}, {id: 'a3', label: 'A computer that is no longer paired', selected: true}]);
+  assert.deepEqual(deviceOptions([], 'a3').map(o => o.id), ['', 'a3']);
+  assert.deepEqual(deviceOptions(gone, ''), []);
+});
+
+test('Edit saves the computer only when it changed, and keeps a pin it did not show', () => {
+  const was = {name: 'Web', reportsTo: null, shape: 'rounded', tint: 2, device: 'a1'}, same = {name: 'Web', reportsTo: '', shape: 'rounded', tint: 2};
+  assert.equal(editChanges(was, same), null);
+  assert.equal(editChanges(was, {...same, device: 'a1'}), null);
+  assert.deepEqual(editChanges(was, {...same, device: 'a2'}), {settings: {device: 'a2'}});
+  assert.deepEqual(editChanges(was, {...same, device: ''}), {settings: {device: null}});
+  assert.deepEqual(editChanges(was, {...same, name: 'Scout'}), {name: 'Scout'}, 'a rename by someone who sees no Runs on row keeps the pin');
 });
 
 // ---- activity ----

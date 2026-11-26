@@ -8,12 +8,12 @@
  * permission. It changes `state` in place, so the caller wraps it in its own
  * write (a store update, or the demo's state object).
  */
-import {activity} from './core.js?v=f345637389';
-import {logActivity} from './activity-log.js?v=f345637389';
-import {isLead, managerOf, companyBots} from './company.js?v=f345637389';
-import {noteBotWork} from './runaway.js?v=f345637389';
-import {TINT_COUNT} from './ui-kit.js?v=f345637389';
-import {MAX_BOTS_PER_GROUP, buildCreatedBot, nameFromSentence, firstUnusedTint} from './bot-create.js?v=f345637389';
+import {activity} from './core.js?v=bb93f46435';
+import {logActivity} from './activity-log.js?v=bb93f46435';
+import {isLead, managerOf, companyBots} from './company.js?v=bb93f46435';
+import {noteBotWork} from './runaway.js?v=bb93f46435';
+import {TINT_COUNT} from './ui-kit.js?v=bb93f46435';
+import {MAX_BOTS_PER_GROUP, buildCreatedBot, nameFromSentence, firstUnusedTint} from './bot-create.js?v=bb93f46435';
 
 /** `{record, groupName}` (no group name when there is only one company) for the bot that was added, or `{refused}` with the
  * reason, in words that follow "tried to create a new bot, but". */

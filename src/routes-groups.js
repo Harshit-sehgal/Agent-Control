@@ -29,7 +29,7 @@ import {dispatchBrowserRequest, autoDispatch, beginTakeover, handBackTakeover} f
 import {browserRuntime} from './browser-runtime.js';
 import {failAgentTasks} from './agent.js';
 import {fail, requireSecureSecret} from './http.js';
-import {reply} from './router.js';
+import {reply, allows} from './router.js';
 import {peek} from './sqlite-store.js';
 
 /** Deny waiting pages (clear chat, remove bot) then drop the agent jobs those
@@ -157,12 +157,22 @@ async function runOneBotInner(store, {botId, input, page = '', browserDepth = 0}
   return run;
 }
 
+/** A bot's computer is the owner's choice, and only a computer paired here that
+ * is not revoked. A body with no `device` key is not asked anything. */
+function assertDevicePin(c, settings) {
+  if (!settings || typeof settings !== 'object' || !Object.hasOwn(settings, 'device')) return;
+  if (!allows(c.actor.role, 'owner')) fail('Only the owner can choose which computer a bot uses.', 403);
+  const id = settings.device;
+  if (typeof id !== 'string' || !id) return; // empty or null clears it; the shape check is validateBotSettings'
+  if (!c.store.get('SELECT id FROM agents WHERE id=? AND revoked_at IS NULL', id)) fail('That computer is not paired. Choose one in Settings → Local agents, or use any computer.');
+}
+
 export function groupRoutes(router) {
   router.add('POST', '/api/groups', 'member', async c => { const b = await c.body(); return reply(201, await c.store.update(s => wf.addGroup(s, b))); });
-  router.add('POST', '/api/groups/:group/bots', 'member', async c => { const b = await c.body(); return reply(201, await c.store.update(s => wf.addBot(s, c.params.group, b))); });
+  router.add('POST', '/api/groups/:group/bots', 'member', async c => { const b = await c.body(); assertDevicePin(c, b?.settings); return reply(201, await c.store.update(s => wf.addBot(s, c.params.group, b))); });
   // Lasting bot profile edits go to the store so they survive a reload and are
   // shared by every device, instead of living only in browser localStorage.
-  router.add('PATCH', '/api/groups/:group/bots/:bot', 'member', async c => { const b = await c.body(); return c.store.update(s => wf.updateBot(s, c.params.group, c.params.bot, b)); });
+  router.add('PATCH', '/api/groups/:group/bots/:bot', 'member', async c => { const b = await c.body(); assertDevicePin(c, b?.settings); return c.store.update(s => wf.updateBot(s, c.params.group, c.params.bot, b)); });
   router.add('DELETE', '/api/groups/:group/bots/:bot', 'member', c => failDeniedAgentTasks(c.store, s => wf.removeBot(s, c.params.group, c.params.bot)));
   router.add('PATCH', '/api/groups/:group', 'member', async c => { const b = await c.body(); return c.store.update(s => wf.updateGroup(s, c.params.group, b)); });
   router.add('DELETE', '/api/groups/:group', 'admin', c => failDeniedAgentTasks(c.store, s => wf.removeGroup(s, c.params.group)));
