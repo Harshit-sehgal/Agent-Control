@@ -242,6 +242,6 @@ work should be added as a fresh section.
 - [ ] 5. Connector accounts: several connections per app, pinned per bot
 - [ ] 6. Reading: plain first, content types, safe redirects, `look` and images, images on handoffs
 - [ ] 7. Blueprints you apply: validation, dry run, the diff card, a server apply route, versions, failing playbooks paused; watch and event playbooks
-- [ ] 8. Services and skills: profiles whose `allowed` only narrows, the action vocabulary, the access ladder, confirmed rule summaries, read skills and approved acting skills; intake
+- [ ] 8. Services and skills: profiles whose `allowed` only narrows, the action vocabulary, the access ladder, confirmed rule summaries, every skill approved once, `actionPaths` set by you; intake
 - [ ] 9. Free changes: free / power / never, only from the stand-up's own run, 5 a day, undo
 - [ ] 10. Goal templates

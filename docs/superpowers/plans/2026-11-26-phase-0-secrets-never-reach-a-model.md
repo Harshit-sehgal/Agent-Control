@@ -22,9 +22,9 @@
 - `secureRequest(req)` is true when any of these holds:
   - `req.socket?.encrypted === true`;
   - `trustProxy()` holds and `x-forwarded-proto` equals `https`;
-  - `trustProxy()` does not hold, the peer (`req.socket.remoteAddress`) is `127.0.0.1`, `::1` or `::ffff:127.0.0.1`, **and** the request has no `x-forwarded-for`, `forwarded` or `x-real-ip` header.
+  - `trustProxy()` does not hold, the peer (`req.socket.remoteAddress`) is `127.0.0.1`, `::1` or `::ffff:127.0.0.1`, the request has no `x-forwarded-for`, `forwarded` or `x-real-ip` header, **and** its `origin` header's host is `localhost`, `127.0.0.1` or `[::1]` (a missing or unparsable `origin` fails).
 
-  A proxy on this host relays other devices' requests from loopback, so a forwarded request is never "this computer". Behind `tailscale serve` or Caddy, the owner sets `TRUST_PROXY=1`. Check during Task 4 that `tailscale serve` sends `x-forwarded-proto`, and write in `DEPLOYMENT.md` what each setup needs. A plain-HTTP proxy must never carry secret input.
+  A proxy on this host relays other devices' requests from loopback, sometimes with no forwarding header at all (nginx's default `proxy_pass`), and passes the phone's own `Origin` through, so a relayed request is never "this computer". Behind `tailscale serve` or Caddy, the owner sets `TRUST_PROXY=1`. Check during Task 4 that `tailscale serve` sends `x-forwarded-proto`, and write in `DEPLOYMENT.md` what each setup needs. A plain-HTTP proxy must never carry secret input.
 - Secret text never appears in a toast, the tray's echo, an activity line, a run record, a log line or an error message.
 
 ## Review Focus
@@ -171,11 +171,15 @@ In `tests/shared-browser-takeover.test.js`, with the fake CDP: take over a bot, 
 ```js
 test('secureRequest: TLS, a trusted proxy that says https, or loopback', () => {
   assert.equal(secureRequest({headers: {}, socket: {encrypted: true, remoteAddress: '203.0.113.5'}}), true);
-  assert.equal(secureRequest({headers: {}, socket: {remoteAddress: '127.0.0.1'}}), true);
+  const local = {origin: 'http://localhost:4173'};
+  assert.equal(secureRequest({headers: local, socket: {remoteAddress: '127.0.0.1'}}), true);
+  // A proxy that adds no headers: loopback peer, the phone's own origin, or none at all.
+  assert.equal(secureRequest({headers: {origin: 'http://192.168.1.20:8080'}, socket: {remoteAddress: '127.0.0.1'}}), false);
+  assert.equal(secureRequest({headers: {}, socket: {remoteAddress: '127.0.0.1'}}), false);
   assert.equal(secureRequest({headers: {}, socket: {remoteAddress: '192.168.1.20'}}), false);
   // A local proxy relaying a phone over plain HTTP arrives from loopback but says so in its headers.
   for (const h of ['x-forwarded-for', 'forwarded', 'x-real-ip']) {
-    assert.equal(secureRequest({headers: {[h]: '192.168.1.20'}, socket: {remoteAddress: '127.0.0.1'}}), false);
+    assert.equal(secureRequest({headers: {...local, [h]: '192.168.1.20'}, socket: {remoteAddress: '127.0.0.1'}}), false);
   }
   withEnv({TRUST_PROXY: '1'}, () => {
     assert.equal(secureRequest({headers: {'x-forwarded-proto': 'https'}, socket: {remoteAddress: '127.0.0.1'}}), true);
@@ -209,7 +213,7 @@ test('secret input over plain HTTP from the network is refused on both takeover 
 - [ ] **Step 2: Run it to see it fail.** Run: `npm run test:ui`. Expected: the new check FAILS.
 - [ ] **Step 3: Add the two fields** beside "Type into the page" in each screen: `<form id="computer-password">` with `<input type="password" name="text" autocomplete="current-password" aria-label="Password">` and a Type button, and `<form id="computer-code">` with `<input name="text" inputmode="numeric" autocomplete="one-time-code" aria-label="Code">`. Both actions push `{type: 'type', text, secret: true}` (Computer view) or call `act({op: 'type', index, text, secret: true})` (takeover sheet), then reset the form. Nothing echoes the text. Copy: the button says `Type`; the field's placeholder says `Password` or `Code`.
 - [ ] **Step 4: Run it to see it pass.** Run: `npm run build:pages && npm run test:ui`. Expected: PASS, and `docs/` has no drift.
-- [ ] **Step 5: Docs and commit.** Add one paragraph to `SECURITY.md` saying what counts as a secret field, that bots never type into one, and that masked input needs HTTPS or this computer, never a plain-HTTP proxy. In `DEPLOYMENT.md`, say to set `TRUST_PROXY=1` behind `tailscale serve` or Caddy. Tick Phase AA step 0 in `docs/BUILD-PLAN.md`. Run `npm run check && npm test && npm run build:pages`. `git commit -m "feat: masked password and code fields in the takeover screens"`
+- [ ] **Step 5: Docs and commit.** Add one paragraph to `SECURITY.md` saying what counts as a secret field, that bots never type into one, and that masked input needs HTTPS or this computer, never a plain-HTTP proxy: such a proxy voids the loopback exemption, and the `Origin` check is what refuses it. In `DEPLOYMENT.md`, say to set `TRUST_PROXY=1` behind `tailscale serve` or Caddy. Tick Phase AA step 0 in `docs/BUILD-PLAN.md`. Run `npm run check && npm test && npm run build:pages`. `git commit -m "feat: masked password and code fields in the takeover screens"`
 
 ---
 
