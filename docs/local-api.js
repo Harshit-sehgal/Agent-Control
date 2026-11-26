@@ -4,28 +4,28 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {briefingMessage} from './briefing.js?v=adaf6b1514';
-import {addTemplate, removeTemplate} from './templates.js?v=adaf6b1514';
-import {initialState, cleanText} from './core.js?v=adaf6b1514';
-import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=adaf6b1514';
-import {RETENTION_DEFAULTS} from './retention.js?v=adaf6b1514';
-import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=adaf6b1514';
-import {addChatMessages, clearChat} from './chats.js?v=adaf6b1514';
-import {publicMemory, rememberFromOwner, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=adaf6b1514';
-import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=adaf6b1514';
-import {createThread, titleFrom} from './threads.js?v=adaf6b1514';
-import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=adaf6b1514';
-import {simulateGroup} from './group-simulator.js?v=adaf6b1514';
-import {BUSY_STATUSES} from './run-state.js?v=adaf6b1514';
-import {botSettings} from './bot-settings.js?v=adaf6b1514';
-import {denyBrowserRequest} from './bot-browser.js?v=adaf6b1514';
-import {answerAsk, expireAsks, orphanAsks, setGrant, setAskBasics, restorePermissions} from './asks.js?v=adaf6b1514';
-import {applyPreset} from './presets.js?v=adaf6b1514';
-import {setLimits} from './limits.js?v=adaf6b1514';
-import {activityPage} from './activity-log.js?v=adaf6b1514';
-import {withLocalLock} from './locks.js?v=adaf6b1514';
-import {addWatch, setWatchOn, removeWatch, publicWatch} from './watches.js?v=adaf6b1514';
-import {base64Bytes, sniffType, cleanFileName, DEMO_MAX_FILE_BYTES, DEMO_MAX_STORED, MAX_FILE_BYTES} from './attachments.js?v=adaf6b1514';
+import {briefingMessage} from './briefing.js?v=c7776be546';
+import {addTemplate, removeTemplate} from './templates.js?v=c7776be546';
+import {initialState, cleanText} from './core.js?v=c7776be546';
+import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=c7776be546';
+import {RETENTION_DEFAULTS} from './retention.js?v=c7776be546';
+import {enqueueTask, retryTask, cancelTask, fillScheduleZones} from './tasks.js?v=c7776be546';
+import {addChatMessages, clearChat} from './chats.js?v=c7776be546';
+import {publicMemory, rememberFromOwner, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=c7776be546';
+import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=c7776be546';
+import {createThread, titleFrom} from './threads.js?v=c7776be546';
+import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=c7776be546';
+import {simulateGroup} from './group-simulator.js?v=c7776be546';
+import {BUSY_STATUSES} from './run-state.js?v=c7776be546';
+import {botSettings} from './bot-settings.js?v=c7776be546';
+import {denyBrowserRequest} from './bot-browser.js?v=c7776be546';
+import {answerAsk, expireAsks, orphanAsks, setGrant, setAskBasics, restorePermissions} from './asks.js?v=c7776be546';
+import {applyPreset} from './presets.js?v=c7776be546';
+import {setLimits} from './limits.js?v=c7776be546';
+import {activityPage} from './activity-log.js?v=c7776be546';
+import {withLocalLock} from './locks.js?v=c7776be546';
+import {addWatch, setWatchOn, removeWatch, publicWatch} from './watches.js?v=c7776be546';
+import {base64Bytes, sniffType, cleanFileName, DEMO_MAX_FILE_BYTES, DEMO_MAX_STORED, MAX_FILE_BYTES} from './attachments.js?v=c7776be546';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
@@ -375,6 +375,7 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
     if (body.kind === 'notification') throw Object.assign(new Error('Notification deliveries are queued by the server, not by request.'), {status: 403});
     const t = enqueueTask(state, body); save(state); return t.task;
   }
+  if (path === '/api/tasks/zone' && method === 'POST') { const r = {filled: fillScheduleZones(state, body.tz)}; save(state); return r; }
   if ((m = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/retry$/)) && method === 'POST') { const r = retryTask(state, m[1]); save(state); return r; }
   if ((m = path.match(/^\/api\/tasks\/([a-f0-9-]+)$/)) && method === 'DELETE') { const r = cancelTask(state, m[1]); save(state); return r; }
   // Conversation history, stored with the rest of the browser-local state.

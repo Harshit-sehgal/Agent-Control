@@ -23,3 +23,13 @@ test('a window that crosses midnight is quiet late at night and early in the mor
   assert.equal(inQuietHours(window, at(12, 0)), false);
   assert.equal(inQuietHours(null, at(23, 15)), false, 'no window means never quiet');
 });
+
+test('quiet hours can be read in a named zone instead of the server clock', () => {
+  const window = parseQuietHours('22:00-07:00');
+  // 23:30 in Kolkata is 18:00 UTC; noon in Kolkata is 06:30 UTC.
+  assert.equal(inQuietHours(window, new Date(Date.UTC(2026, 10, 20, 18, 0)), 'Asia/Kolkata'), true);
+  assert.equal(inQuietHours(window, new Date(Date.UTC(2026, 10, 20, 6, 30)), 'Asia/Kolkata'), false);
+  // An unknown zone keeps the server clock.
+  const local = new Date(2026, 10, 20, 23, 15);
+  assert.equal(inQuietHours(window, local, 'Not/AZone'), inQuietHours(window, local));
+});

@@ -31,14 +31,56 @@ export function cleanAt(value) {
 export const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 /** Which days a daily schedule runs: Monday to Friday, or Saturday and Sunday. '' or absent means every day. */
 export const DAY_RULES = ['weekdays', 'weekends'];
-/** Move a planned time forward, one step (`step` ms) at a time, until it falls on a day the rule allows (at most a week). */
-export function skipToDays(time, step, rule) {
+/** An IANA time zone ("Europe/Paris") this runtime knows, in its canonical spelling, or '' for anything else. */
+export function cleanZone(value) {
+  if (typeof value !== 'string' || !value || value.length > 64) return '';
+  try { return new Intl.DateTimeFormat('en-US', {timeZone: value}).resolvedOptions().timeZone; } catch { return ''; }
+}
+/** Minutes from midnight of `time` on the clock of `zone`, or null when the zone is unusable. */
+function minuteIn(time, zone) {
+  if (!zone) return null;
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {timeZone: zone, hour: 'numeric', minute: 'numeric', hourCycle: 'h23'}).formatToParts(time);
+    const part = type => Number(parts.find(p => p.type === type)?.value);
+    const hour = part('hour'), minute = part('minute');
+    return Number.isFinite(hour) && Number.isFinite(minute) ? hour * 60 + minute : null;
+  } catch { return null; }
+}
+/** Put a daily or weekly run back on its time of day (`at`, "08:00") on the owner's clock (`zone`). A fixed 24-hour
+ * step lands an hour off after a daylight-saving change; this moves it by that difference (at most two hours). With
+ * no time or no usable zone the time is kept as it is. */
+export function keepWallTime(time, at, zone) {
+  const want = /^(\d{2}):(\d{2})$/.exec(cleanAt(at));
+  const minute = want ? minuteIn(time, zone) : null;
+  if (minute === null) return time;
+  let diff = Number(want[1]) * 60 + Number(want[2]) - minute;
+  if (diff > 720) diff -= 1440;
+  if (diff < -720) diff += 1440;
+  return Math.abs(diff) <= 120 ? time + diff * 60000 : time;
+}
+/** The day of the week (0 = Sunday) of `time` in `zone`, or on this machine's clock when there is no usable zone. */
+function weekday(time, zone) {
+  if (zone) {
+    try { return DAYS.indexOf(new Intl.DateTimeFormat('en-US', {timeZone: zone, weekday: 'long'}).format(time).toLowerCase()); } catch { /* unknown zone */ }
+  }
+  return new Date(time).getDay();
+}
+/** Move a planned time forward, one step (`step` ms) at a time, until it falls on a day the rule allows (at most a
+ * week). The day is read in `zone`, the owner's time zone the schedule was made in, so a server on another clock
+ * keeps the owner's Monday; with none it is this machine's. */
+export function skipToDays(time, step, rule, zone = '') {
   if (!DAY_RULES.includes(rule)) return time;
   const allowed = day => (rule === 'weekdays' ? day >= 1 && day <= 5 : day === 0 || day === 6);
   let next = time;
-  for (let i = 0; i < 7 && !allowed(new Date(next).getDay()); i++) next += step;
+  for (let i = 0; i < 7 && !allowed(weekday(next, zone)); i++) next += step;
   return next;
 }
+/** A live recurring schedule whose time of day or day rule is read on the owner's clock, saved by an older build with
+ * no zone (`tz`). The app sends its zone for these once (`POST /api/tasks/zone`, `fillScheduleZones`). */
+export const needsZone = task => task?.kind === 'bot-task' && ['queued', 'paused', 'running'].includes(task.status)
+  && task.payload?.kind === 'interval' && !task.payload.tz && Boolean(task.payload.at || task.payload.days);
+/** Does any schedule in a snapshot need the owner's zone? */
+export const schedulesNeedZone = state => (Array.isArray(state?.tasks) ? state.tasks : []).some(needsZone);
 /** "Mon", "monday", "Mondays" as "monday", or '' when it is not a day of the week. */
 export function cleanDay(value) {
   const text = String(value ?? '').trim().toLowerCase().replace(/s$/, '');
@@ -100,7 +142,11 @@ export function scheduleTaskBody({botId, groupId, message, every, at, on, days},
   const time = cleanAt(at) || (day ? '09:00' : ''), first0 = time ? nextAtFor(time, now, day) : null;
   const first = first0 && rule ? new Date(skipToDays(first0.getTime(), 86400000, rule)) : first0;
   const timing = every ? {kind: 'interval', intervalMinutes: every} : {kind: 'once'};
-  return {kind: 'bot-task', payload: {groupId, botId, message, ...timing, ...(time ? {at: time} : {}), ...(day ? {on: day} : {}), ...(rule ? {days: rule} : {}), ...(first ? {nextAt: first.toISOString()} : {})}};
+  // The server re-arms a recurring schedule each time it runs, so one with a time of day or a day rule carries the zone this
+  // browser's clock is in: its 08:00 and its Monday stay the owner's across daylight saving and on a server elsewhere.
+  let tz = '';
+  if (every && (rule || time)) { try { tz = cleanZone(Intl.DateTimeFormat().resolvedOptions().timeZone); } catch { /* no Intl time zone */ } }
+  return {kind: 'bot-task', payload: {groupId, botId, message, ...timing, ...(time ? {at: time} : {}), ...(day ? {on: day} : {}), ...(rule ? {days: rule} : {}), ...(tz ? {tz} : {}), ...(first ? {nextAt: first.toISOString()} : {})}};
 }
 
 /** Failures that waiting will not fix: the schedule stops at once instead of spending a run each time. */

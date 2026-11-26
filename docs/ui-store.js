@@ -1,9 +1,10 @@
 /** Single source of UI state: the server snapshot, the route, the conversations
  * it carries and cosmetic preferences. Views read from `store` and never
  * keep their own copies, so one `sync()` + one render keeps every pane current. */
-import {tintOf} from './ui-model.js?v=adaf6b1514';
-import {companyHash} from './ui-company.js?v=adaf6b1514';
-import {createOutbox} from './chats.js?v=adaf6b1514';
+import {tintOf} from './ui-model.js?v=c7776be546';
+import {companyHash} from './ui-company.js?v=c7776be546';
+import {createOutbox} from './chats.js?v=c7776be546';
+import {schedulesNeedZone} from './schedules.js?v=c7776be546';
 
 // Where an earlier build kept conversations; read once by importLocalChats().
 const CHAT_KEY = 'agent-control-bot-chats-v2';
@@ -119,7 +120,18 @@ export async function loadState() {
   lastUnchanged = snap === store.state;
   store.state = snap;
   store.messages = outbox.adopt(store.state.chats || {}, store.messages, fetch);
+  sendZoneOnce(snap);
   return store.state;
+}
+let zoneSent = false;
+/** Schedules an older build saved without a zone keep the owner's clock once this browser sends its zone. Once per
+ * page load, in the background; a viewer's refusal or a failure is left for the next load. */
+function sendZoneOnce(snap) {
+  if (zoneSent || !schedulesNeedZone(snap)) return;
+  zoneSent = true;
+  let tz = '';
+  try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { /* no Intl time zone */ }
+  if (tz) window.AGENT_API('/api/tasks/zone', 'POST', {tz}).catch(() => {});
 }
 let lastUnchanged = false;
 /** Refresh and repaint. `quiet` (the background poll) skips the repaint when

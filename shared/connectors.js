@@ -223,7 +223,7 @@ export function recordConnectorCalls(state, {bot, run, chatKey, output, unattend
     if (!needs) { say(`${bot.name} asked ${connector.name} for "${tool}", but ${connector.name} has no tool called "${tool}".`); continue; }
     // A tool the owner declined in this task stays declined; the connector's other tools go on as usual.
     if (declinedNeed(declined, needs)) { say(`${bot.name} asked to ${needs[0].detail}, but you declined that in this task, so it was not asked again.`); continue; }
-    const tainted = guarded || outsideRead(state, {runId: run.id, outsideInput: run.outsideInput === true});
+    const tainted = guarded || outsideRead(state, {runId: run.id, botId: bot.id, outsideInput: run.outsideInput === true});
     const decision = decide(state, bot, needs, {readPrivate: guarded && !readFrom.has(connector.id), outside: run.outsideInput === true, tainted});
     if (decision.verdict === 'deny') { say(`${bot.name} asked to ${needs[0].detail}. ${decision.message}`); continue; }
     const call = {id: makeId(), connectorId: connector.id, identity: connectorIdentity(connector), connectorName: connector.name, tool, args, write: actionOf(connector, tool).write, botId: bot.id, botName: bot.name, status: 'go', chatKey};
