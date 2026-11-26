@@ -193,3 +193,45 @@ test('the browser is not slowed down while it runs in the background', () => {
   const args = browserArgs({profile: '/p', proxyPort: 1});
   for (const flag of ['--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows']) assert.ok(args.includes(flag), flag);
 });
+
+test('a lane exists only while someone holds or waits on it, and the last holder to release removes it', async t => {
+  const {sb, processes} = rig(t);
+  assert.equal(sb.laneCount(), 0);
+  await sb.run('bot-a', {url: 'https://docs.example.com/'});
+  assert.equal(sb.laneCount(), 0, 'a finished task leaves no lane behind');
+  const [fake] = processes;
+  let release; const gate = new Promise(r => { release = r; });
+  fake.hook('Page.navigate', async () => { await gate; });
+  const first = sb.run('bot-a', {url: 'https://docs.example.com/'});
+  const second = sb.run('bot-a', {url: 'https://docs.example.com/'});
+  const other = sb.run('bot-b', {url: 'https://mail.example.com/'});
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(sb.laneCount(), 2, 'one lane per bot, however many wait on it');
+  release();
+  await Promise.all([first, second, other]);
+  assert.equal(sb.laneCount(), 0, 'every holder released: no lane lingers');
+  // A task that fails on its way in releases its lane too.
+  await assert.rejects(sb.run('bot-a', {url: 'https://evil.example.org/'}), /not in AGENT_BROWSER_ALLOWLIST/);
+  fake.hook('Page.navigate', async () => { throw new Error('net::ERR_FAILED'); });
+  await assert.rejects(sb.run('bot-a', {url: 'https://docs.example.com/'}), /ERR_FAILED/);
+  assert.equal(sb.laneCount(), 0, 'a failed task releases its lane');
+});
+
+test('a failure in one lane\'s task neither stalls nor fails another lane', async t => {
+  const {sb, processes} = rig(t);
+  await sb.run('bot-a', {url: 'https://docs.example.com/'});
+  await sb.run('bot-b', {url: 'https://mail.example.com/'});
+  const [fake] = processes;
+  let releaseA; const gateA = new Promise(r => { releaseA = r; });
+  fake.hook('Page.navigate', async ({url}) => {
+    if (url === 'https://docs.example.com/') { await gateA; throw new Error('net::ERR_FAILED'); }
+  });
+  const a = sb.run('bot-a', {url: 'https://docs.example.com/'}).then(() => 'ok', error => error.message);
+  const b = await within(sb.run('bot-b', {url: 'https://mail.example.com/'}), 1000, 'B waited for A');
+  assert.equal(b.title, 'Mail', 'B finished while A was still in flight');
+  releaseA();
+  assert.match(await a, /ERR_FAILED/, 'A failed on its own');
+  assert.equal((await sb.run('bot-b', {url: 'https://mail.example.com/'})).title, 'Mail', 'and B goes on working after A failed');
+  fake.hook('Page.navigate', async () => {});
+  assert.equal((await sb.run('bot-a', {url: 'https://docs.example.com/'})).title, 'Docs', 'A\'s own lane is not left broken by its failure');
+});

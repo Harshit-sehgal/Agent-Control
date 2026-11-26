@@ -133,8 +133,8 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
       const tab = await tabFor(live, id);
       const {typed} = tabs.get(id);
       const remember = ({url: at, title}) => { const entry = tabs.get(id); if (entry) { entry.url = at || entry.url; entry.title = title ?? entry.title; } };
-      // Asked before each step. False once the owner has taken the browser since
-      // this task began; if they still hold it, wait here for the hand back.
+      // Asked before each step. False once the owner has taken this bot's tab since this task began (another
+      // bot's tab being taken changes nothing here); if they still hold it, wait here for the hand back.
       const startEpoch = lane.epoch;
       const gate = async () => {
         if (driving === id) { lane.parked = true; notify(); try { await until(() => driving === null); } finally { lane.parked = false; } return false; }
@@ -306,7 +306,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
   /** `value` scrubbed of what the owner typed in secret on this bot's tab: for a result that left some other way. */
   const scrub = (botId, value) => scrubTyped(value, tabs.get(botId || ANONYMOUS_BOT)?.typed);
 
-  return {run, scrub, status, close, onFrame, watch, unwatch, applyInput, refresh, takeover, handback, owner: () => driving};
+  return {run, scrub, status, close, onFrame, watch, unwatch, applyInput, refresh, takeover, handback, owner: () => driving, laneCount: () => lanes.size};
 }
 
 /** One `browser.capture` or `browser.action` task, with the rules every browser
