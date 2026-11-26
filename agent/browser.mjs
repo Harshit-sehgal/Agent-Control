@@ -251,6 +251,18 @@ function launch(binary, profile, proxyPort, extraArgs) {
   return {child, address};
 }
 
+/** The newest refusal since index `from` that is for `url`'s own host, or ''.
+ * Pages in different tabs share one `refused` list, so the newest entry may
+ * belong to another tab; an entry reads `${host}: message` and the host of a
+ * tunnel is `name:443`, so the match is the hostname followed by a colon. */
+export function ownRefusal(refused, from, url) {
+  let hostname;
+  try { hostname = new URL(url).hostname; } catch { return ''; }
+  const mine = `${hostname}:`;
+  for (let i = refused.length - 1; i >= from; i--) if (refused[i].startsWith(mine)) return refused[i];
+  return '';
+}
+
 /** A DevTools connection: `send` resolves with the reply, `on` hears events
  * (the listener gets the params with the flat session id, and the browser's
  * own params as a second argument: a screencast frame's ack id is a field
@@ -377,7 +389,7 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
           // The proxy's own refusal is the useful sentence: "it is on a private
           // or local network" says what happened, where ERR_HTTP_RESPONSE_CODE_
           // FAILURE says only that something did.
-          const lastRefusal = refused.length > blockedBefore ? refused[refused.length - 1] : '';
+          const lastRefusal = ownRefusal(refused, blockedBefore, url);
           if (navigation.errorText) throw new Error(blocked[0] ? `The page was not opened. ${blocked[0]}`
             : lastRefusal ? `The page was not opened. ${lastRefusal}`
             : `The page could not be opened: ${navigation.errorText}.`);
@@ -585,7 +597,7 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
       }
 
       const navigation = await cdp.send('Page.navigate', {url}, sessionId);
-      const lastRefusal = refused.length > blockedBefore ? refused[refused.length - 1] : '';
+      const lastRefusal = ownRefusal(refused, blockedBefore, url);
       if (navigation.errorText) throw new Error(blocked[0] ? `The page was not opened. ${blocked[0]}`
         : lastRefusal ? `The page was not opened. ${lastRefusal}`
         : `The page could not be opened: ${navigation.errorText}.`);
@@ -606,8 +618,7 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
             // says which host was not allowed, and the proxy says when the
             // address is on a private or local network. A bare Chrome error code
             // says only that something did not work.
-            const refusal = blocked.length > blockedBefore ? blocked[blocked.length - 1]
-              : refused.length > refusedBefore ? refused[refused.length - 1] : '';
+            const refusal = blocked.length > blockedBefore ? blocked[blocked.length - 1] : ownRefusal(refused, refusedBefore, target);
             return scrub({ok: !nav.errorText && !refusal, reason: nav.errorText || refusal ? `The page was not opened. ${refusal || nav.errorText}` : '', ...page});
           }
           const here = await read().catch(() => ({url: ''}));
