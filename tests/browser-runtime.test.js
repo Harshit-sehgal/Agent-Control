@@ -503,3 +503,32 @@ test('by default a takeover has no clock: it stays open until the person hands b
   await runtime.endLive(live.id);
   await runtime.close();
 });
+
+test('a takeover whose first view fails closes its page and frees the slot', async () => {
+  const closed = [];
+  let opened = 0;
+  const runtime = createBrowserRuntime({
+    env: env({BROWSER_LIVE_MS: '5000'}),
+    find: () => '/usr/bin/chrome',
+    start: async () => ({
+      open: async url => {
+        const n = (opened += 1);
+        const page = {url, title: 'T', text: 't', elements: [], elementCount: 0, blockedRequests: 0};
+        return {
+          view: async () => { if (n === 1) throw new Error('The page went away.'); return page; },
+          act: async () => ({ok: true}),
+          page: async () => page,
+          close: async () => { closed.push(n); if (n === 1) throw new Error('already gone'); },
+        };
+      },
+      close: async () => {},
+    }),
+  });
+  await assert.rejects(runtime.beginLive({url: 'https://example.com/a', lane: A}), /went away/);
+  assert.deepEqual(closed, [1], 'the half-open page is closed (and a close that throws changes nothing)');
+  assert.deepEqual(runtime.liveIds(), [], 'it is not left in the list of open takeovers');
+  const next = await runtime.beginLive({url: 'https://example.com/b', lane: B});
+  assert.match(next.id, /^takeover-/, 'a second takeover is not refused for the first one\'s leaked slot');
+  await runtime.endLive(next.id);
+  await runtime.close();
+});

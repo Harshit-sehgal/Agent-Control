@@ -207,7 +207,15 @@ export function createBrowserRuntime({env = process.env, start = startBrowserSes
         const entry = {id: `takeover-${crypto.randomUUID()}`, handle, requestId, openedBy, workspaceId, lane, url: null, createdAt: Date.now(), timer: null};
         lives.set(entry.id, entry);
         touch(entry);
-        const view = await handle.view();
+        let view;
+        try { view = await handle.view(); }
+        catch (error) {
+          // The person never got an id for this page, so nothing would ever close it or free its slot.
+          lives.delete(entry.id);
+          clearTimeout(entry.timer);
+          await handle.close().catch(() => {});
+          throw error;
+        }
         entry.url = view.url;
         return {id: entry.id, url: view.url, title: view.title, text: view.text, elements: view.elements, elementCount: view.elementCount, blockedRequests: view.blockedRequests, image: view.image};
       } finally {
