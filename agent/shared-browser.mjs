@@ -171,7 +171,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     let timer;
     const answer = await Promise.race([
       session.cdp.send('Runtime.evaluate', {expression: CLEAR_SECRETS_ON_HANDBACK_JS, returnByValue: true}, entry.tab.sessionId).catch(() => null),
-      new Promise(resolve => { timer = setTimeout(() => resolve(null), 2000); timer.unref?.(); }),
+      new Promise(resolve => { timer = setTimeout(() => resolve(null), 2000); }),
     ]);
     clearTimeout(timer);
     if (!answer || answer.exceptionDetails) console.error('agent: could not empty the secret fields on the page.');
