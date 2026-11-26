@@ -3,7 +3,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {recordBrowserRequests} from '../shared/bot-browser.js';
-import {resolveSetup} from '../shared/setup.js';
 
 const state = () => ({groups: [{id: 'home', bots: [{id: 'atlas', name: 'Atlas', settings: {lead: true}}]}], groupRuns: [{id: 'r1', status: 'running'}], browserRequests: [], asks: [], grants: [], activity: [], tasks: [], events: []});
 const record = (s, url) => { let n = 0; return recordBrowserRequests(s, {bot: {id: 'atlas', name: 'Atlas'}, groupId: 'home', chatKey: 'atlas', output: `\`\`\`browser\n${JSON.stringify({url})}\n\`\`\``, depth: 0, makeId: () => `id${++n}`, runId: 'r1'}); };
@@ -44,16 +43,4 @@ test('a connector read keeps the run guarded after its result is consumed', () =
   s.groupRuns[0].readPrivate = true;
   const out = record(s, 'https://example.com/?q=secret');
   assert.equal(out.asks.length, 1);
-});
-
-test('with no Google client saved, Connect Gmail offers a Sign in card for Gmail in the shared browser', () => {
-  const s = state();
-  for (const page of ['gmail', 'google']) {
-    const made = resolveSetup(s, {action: 'open', page});
-    assert.equal(made.card.action, 'signin');
-    assert.equal(made.card.url, 'https://mail.google.com/');
-  }
-  assert.equal(resolveSetup(s, {action: 'open', page: 'drive'}).card.url, 'https://drive.google.com/');
-  s.connectors = [{id: 'google', kind: 'google', clientCredentialId: 'c1', status: 'setup'}];
-  assert.equal(resolveSetup(s, {action: 'open', page: 'gmail'}).card.app, 'google', 'a saved client keeps the real Google sign-in');
 });

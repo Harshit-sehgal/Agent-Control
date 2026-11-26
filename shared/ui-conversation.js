@@ -29,7 +29,7 @@ import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, 
 import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js';
 import {toast, confirmSheet} from './ui-dialogs.js';
 import {siteChip, thumbSlot} from './ui-computer-view.js';
-import {cliChoice, googleCard} from './ui-connect-model.js';
+import {cliChoice} from './ui-connect-model.js';
 import {connectAppNow} from './ui-connect.js';
 import {appById} from './app-catalog.js';
 import {templateChipsHtml, templateButton} from './ui-templates.js';
@@ -505,14 +505,6 @@ export const conversationActions = {
     // Always allow on payments is confirmed first, with the ask card's own words.
     const confirm = setupConfirm(card, findBot(card.botId)?.name);
     if (confirm && !(await confirmSheet('Always allow payments here?', {confirm: 'Always allow', danger: true, detail: confirm}))) return;
-    if (card.app === 'google') {
-      // With a Google client saved, the tap is the sign-in itself; without one, the Connectors page shows the one-time setup.
-      const google = !isStaticDemo() ? googleCard((await api('/api/connectors').catch(() => null))?.google) : null;
-      if (google?.connectLabel) return void window.location.assign('/api/connectors/google/start');
-      if (google?.state === 'connected') return toast('Google is already connected.');
-      go({settings: 'conn'});
-      return toast('Google needs a one-time client first. Paste it below, then Connect.');
-    }
     if (card.action === 'open') return go({settings: card.section});
     if (card.action === 'signin') {
       // The owner signs in by hand in the shared browser: take the bot's tab, send it to the site, show it.

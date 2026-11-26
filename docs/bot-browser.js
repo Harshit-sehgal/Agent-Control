@@ -20,12 +20,12 @@
  * X and Twitter work like any other site: a bot may read, click and type there, and a click on Post asks
  * unless the owner set Always allow for posting on that site.
  */
-import {cleanText, validHttpUrl} from './core.js?v=a9e6960ec3';
-import {fail} from './errors.js?v=a9e6960ec3';
-import {decide, createAsk, scopeOf, declinedNeed} from './asks.js?v=a9e6960ec3';
-import {controlFence} from './reply-blocks.js?v=a9e6960ec3';
-import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=a9e6960ec3';
-import {appForHost} from './app-catalog.js?v=a9e6960ec3';
+import {cleanText, validHttpUrl} from './core.js?v=2c827d8a6b';
+import {fail} from './errors.js?v=2c827d8a6b';
+import {decide, createAsk, scopeOf, declinedNeed} from './asks.js?v=2c827d8a6b';
+import {controlFence} from './reply-blocks.js?v=2c827d8a6b';
+import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=2c827d8a6b';
+import {appForHost} from './app-catalog.js?v=2c827d8a6b';
 
 /** The most page text one model turn carries (the pages of a round together). */
 export const MAX_PAGE_CHARS = 24000;
@@ -527,7 +527,8 @@ const samePage = (a, b) => {
 function connectedVia(state, host) {
   const app = appForHost(host);
   if (!app) return null;
-  return (state.connectors || []).find(c => c?.status === 'ready' && (app.google ? c.kind === 'google' : c.kind === 'mcp' && c.app === app.id)) || null;
+  // An older Google connection (its own API, not MCP) still covers Gmail and Drive.
+  return (state.connectors || []).find(c => c?.status === 'ready' && ((c.kind === 'mcp' && c.app === app.id) || (c.kind === 'google' && ['gmail', 'google-drive'].includes(app.id)))) || null;
 }
 
 /** The owner's private sites this run has read in the browser: their mail and files, and an app the owner

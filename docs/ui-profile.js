@@ -5,21 +5,22 @@
  *
  * Pages repaint only when the route changes, so each in-place change (a switch, a
  * forgotten note, a picked colour) updates its own node instead. */
-import {SHAPES, COLORS, face} from './ui-face.js?v=a9e6960ec3';
-import {botStatus, botIsManager} from './ui-company.js?v=a9e6960ec3';
-import {primaryOf} from './company.js?v=a9e6960ec3';
-import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker, COLOR_NAMES} from './ui-kit.js?v=a9e6960ec3';
-import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js?v=a9e6960ec3';
-import {scheduleRows, scheduleTaskBody, SCHEDULE_OFTEN, scheduleChoice} from './schedules.js?v=a9e6960ec3';
-import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=a9e6960ec3';
-import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=a9e6960ec3';
-import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=a9e6960ec3';
-import {sendChat} from './ui-chat.js?v=a9e6960ec3';
-import {computerPage as computerView, computerLabel, keysOwned, thumbSlot} from './ui-computer-view.js?v=a9e6960ec3';
+import {SHAPES, COLORS, face} from './ui-face.js?v=2c827d8a6b';
+import {botStatus, botIsManager} from './ui-company.js?v=2c827d8a6b';
+import {primaryOf} from './company.js?v=2c827d8a6b';
+import {resetModelSearch} from './ui-admin.js?v=2c827d8a6b';
+import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker, COLOR_NAMES} from './ui-kit.js?v=2c827d8a6b';
+import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js?v=2c827d8a6b';
+import {scheduleRows, scheduleTaskBody, SCHEDULE_OFTEN, scheduleChoice} from './schedules.js?v=2c827d8a6b';
+import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=2c827d8a6b';
+import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=2c827d8a6b';
+import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=2c827d8a6b';
+import {sendChat} from './ui-chat.js?v=2c827d8a6b';
+import {computerPage as computerView, computerLabel, keysOwned, thumbSlot} from './ui-computer-view.js?v=2c827d8a6b';
 import {
   MAX_NAME, MAX_JOB, hasJob, roleLine, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, lookOf, newBotDefaults,
   newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, closeTarget,
-} from './ui-profile-model.js?v=a9e6960ec3';
+} from './ui-profile-model.js?v=2c827d8a6b';
 
 const el = id => document.getElementById(id);
 const SHAPE_LABELS = {rounded: 'Rounded square', circle: 'Circle', hexagon: 'Hexagon', pebble: 'Pebble', drop: 'Drop', shield: 'Shield', arch: 'Arch', egg: 'Egg', blob: 'Blob', bean: 'Bean'};
@@ -234,12 +235,13 @@ function refillBotModels() {
   const form = el('bot-model-form'); if (!form) return;
   const select = form.elements.namedItem('model'), keep = select.value;
   const own = store.state?.ai?.bots?.[form.dataset.bot] || {};
-  // The same markup the page drew, minus its outer <select> and the typed-id box beside it.
-  select.innerHTML = groupedModelSelect(botModelChoices(store.state?.ai || {}, own)).replace(/^<select[^>]*>|<\/select>[\s\S]*$/g, '');
+  // The options of the markup the page drew, without the search bar, the <select> itself or the typed-id box.
+  select.innerHTML = groupedModelSelect(botModelChoices(store.state?.ai || {}, own)).match(/<select[^>]*>([\s\S]*)<\/select>/)?.[1] || '';
   const fresh = select;
   // Keep a pick the list still has, except "Another…": after a save the typed id is a row of its own.
   if (!keep.endsWith('|__other') && [...fresh.options].some(o => o.value === keep)) fresh.value = keep;
   const box = form.querySelector('.model-other'); if (box) { box.hidden = !fresh.value.endsWith('|__other'); box.disabled = box.hidden; if (box.hidden) box.value = ''; }
+  resetModelSearch(fresh);
 }
 /** `change` handlers for the profile pages, keyed by data-action. */
 export const profileChanges = {

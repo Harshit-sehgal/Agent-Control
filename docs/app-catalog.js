@@ -4,8 +4,9 @@
  *
  * An app either runs on this computer (`run`: a command started without a shell, its tokens passed as env and kept
  * in the local agent's 0600 config) or is a web server (`web`: an address, and a token sent as one header). The
- * packages and addresses were checked against each vendor's own docs (2026-11-11). Google has a card of its own and
- * is listed here only so it can be found. */
+ * packages and addresses were checked against each vendor's own docs (2026-11-11). An app with an `oauth` address
+ * signs in to its official MCP server in one tap instead; Gmail, Drive and Calendar are Google's own MCP servers.
+ * Every app is a real MCP server: nothing here is "connected" by signing in to a website. */
 
 export const CATEGORIES = ['Productivity', 'Communication', 'Design', 'Code', 'Data', 'Files', 'Web', 'Business'];
 
@@ -21,6 +22,7 @@ export const APPS = [
     web: bearer('https://api.githubcopilot.com/mcp/', token('Personal access token', 'Create a fine-grained token with access to the repos bots may use.', 'github.com/settings/personal-access-tokens/new'))},
   {id: 'slack', name: 'Slack', category: 'Communication', recommended: true, blurb: 'Read channels and threads, search messages',
     run: {command: 'npx -y slack-mcp-server@latest --transport stdio', inputs: [envToken('SLACK_MCP_XOXP_TOKEN', 'User token', 'Create a Slack app, install it to your workspace and copy its user token (xoxp-…).', 'api.slack.com/apps')]}},
+  {id: 'gmail', name: 'Gmail', category: 'Communication', recommended: true, blurb: 'Search and read mail, draft replies, label and tidy'},
   {id: 'linear', name: 'Linear', category: 'Productivity', recommended: true, blurb: 'Read and update issues, projects and docs',
     web: bearer('https://mcp.linear.app/mcp', token('API key', 'In Linear, open Settings › Security & access › API keys and create one.', 'linear.app/settings/account/security'))},
   {id: 'filesystem', name: 'Filesystem', category: 'Files', recommended: true, blurb: 'Read, write and search files in folders you choose',
@@ -41,7 +43,8 @@ export const APPS = [
   {id: 'todoist', name: 'Todoist', category: 'Productivity', blurb: 'Add, find and complete tasks',
     run: {command: 'npx -y -p @todoist/mcp todoist-mcp', inputs: [envToken('TODOIST_API_KEY', 'API token', 'Copy your API token from the Developer tab.', 'Todoist › Settings › Integrations › Developer')]}},
 
-  {id: 'google', name: 'Google · Gmail and Drive', category: 'Communication', blurb: 'Read and send email, find and read files', google: true},
+  {id: 'google-drive', name: 'Google Drive', category: 'Files', blurb: 'Find, read and create files'},
+  {id: 'google-calendar', name: 'Google Calendar', category: 'Productivity', blurb: 'See your events, find a time, add and answer invites'},
 
   {id: 'figma', name: 'Figma', category: 'Design', blurb: 'Read design files, frames and components',
     run: {command: 'npx -y figma-developer-mcp --stdio', inputs: [envToken('FIGMA_API_KEY', 'Personal access token', 'Create a personal access token under Security.', 'Figma › Settings › Security')]}},
@@ -72,34 +75,34 @@ export const APPS = [
     web: bearer('https://mcp.zapier.com/api/v1/connect', token('Connection token', 'Create a server and copy its connection token.', 'mcp.zapier.com'))},
 ];
 
-// Where each app signs in on the web. Connect opens it in the shared browser (as Gmail does with no Google client
-// saved): the owner signs in once and bots read the app there, as the owner. A token (the form) gives a bot the app's
-// own tools instead, and stays one tap away. An app with no web sign-in of its own has no entry.
-const SITES = {
-  notion: 'https://www.notion.so/login', github: 'https://github.com/login', slack: 'https://app.slack.com/client',
-  linear: 'https://linear.app/login', atlassian: 'https://home.atlassian.com/', todoist: 'https://app.todoist.com/auth/login',
-  figma: 'https://www.figma.com/login', sentry: 'https://sentry.io/auth/login/', cloudflare: 'https://dash.cloudflare.com/login',
-  supabase: 'https://supabase.com/dashboard/sign-in', airtable: 'https://airtable.com/login', stripe: 'https://dashboard.stripe.com/login',
-  zapier: 'https://zapier.com/app/login', google: 'https://mail.google.com/',
-};
-for (const app of APPS) if (SITES[app.id]) app.site = SITES[app.id];
-
-// The app's official MCP server, where it lets an app register itself and sign the owner in (checked against each
-// server's own sign-in metadata, November 2026). Connect then signs in straight to the account, like Gmail; the
-// bots use its tools as the owner. GitHub, Slack, Figma, Asana and HubSpot do not allow that yet, so they keep a token.
+// The app's official MCP server, signed in to in one tap (checked against each server's own sign-in metadata,
+// November 2026); the bots use its tools as the owner. Most let an app register itself. Google, Slack and GitHub do
+// not, so they sign in with the client the person running this server made once with them (CLIENTS, read from .env
+// by src/mcp-oauth.js); until it is there, GitHub and Slack take a token and Google waits for it. Figma, Asana and
+// HubSpot allow neither yet, so they keep a token.
 const OAUTH = {
+  gmail: 'https://gmailmcp.googleapis.com/mcp/v1', 'google-drive': 'https://drivemcp.googleapis.com/mcp/v1', 'google-calendar': 'https://calendarmcp.googleapis.com/mcp/v1',
+  github: 'https://api.githubcopilot.com/mcp/', slack: 'https://mcp.slack.com/mcp',
   notion: 'https://mcp.notion.com/mcp', linear: 'https://mcp.linear.app/mcp', atlassian: 'https://mcp.atlassian.com/v1/mcp',
   sentry: 'https://mcp.sentry.dev/mcp', cloudflare: 'https://mcp.cloudflare.com/mcp',
   supabase: 'https://mcp.supabase.com/mcp', stripe: 'https://mcp.stripe.com', zapier: 'https://mcp.zapier.com/api/v1/connect',
   todoist: 'https://ai.todoist.net/mcp', airtable: 'https://mcp.airtable.com/mcp',
 };
 for (const app of APPS) if (OAUTH[app.id]) app.oauth = OAUTH[app.id];
+const G = 'https://www.googleapis.com/auth/';
+// The client each one signs in with, and what it asks for (each server lists more than a bot needs; Google's are its
+// MCP servers' own scopes).
+const CLIENTS = {
+  gmail: ['google', [`${G}gmail.modify`]], 'google-drive': ['google', [`${G}drive`]], 'google-calendar': ['google', [`${G}calendar`]],
+  github: ['github', ['repo', 'read:org', 'read:user']], slack: ['slack'],
+};
+for (const app of APPS) if (CLIENTS[app.id]) Object.assign(app, {client: CLIENTS[app.id][0]}, CLIENTS[app.id][1] ? {scopes: CLIENTS[app.id][1]} : {});
 
 // The sites that are the app's own: a page there is the app, so a bot with the app connected uses its tools instead.
 const DOMAINS = {
   notion: ['notion.so', 'notion.com'], github: ['github.com'], slack: ['slack.com'], linear: ['linear.app'], atlassian: ['atlassian.net', 'atlassian.com'],
   todoist: ['todoist.com'], figma: ['figma.com'], sentry: ['sentry.io'], cloudflare: ['dash.cloudflare.com'], supabase: ['supabase.com'],
-  airtable: ['airtable.com'], stripe: ['dashboard.stripe.com'], zapier: ['zapier.com'], google: ['mail.google.com', 'drive.google.com', 'docs.google.com'],
+  airtable: ['airtable.com'], stripe: ['dashboard.stripe.com'], zapier: ['zapier.com'], gmail: ['mail.google.com'], 'google-drive': ['drive.google.com', 'docs.google.com'], 'google-calendar': ['calendar.google.com'],
 };
 /** The app a web host belongs to, or null. A subdomain counts (acme.atlassian.net); a look-alike does not. */
 export function appForHost(host) {
@@ -112,18 +115,23 @@ const BY_ID = new Map(APPS.map(a => [a.id, a]));
 /** The app with this id, or null. */
 export const appById = id => BY_ID.get(id) || null;
 
-/** The inputs the owner fills in for an app (none for Google). */
+/** The inputs the owner fills in for an app (none for one that only signs in). */
 export const appInputs = app => app?.run?.inputs || app?.web?.inputs || [];
 
-/** What one tap on Connect does: `now` (nothing to fill in, or only defaults), `site` (sign in on the app's own page in
- * the shared browser), `google` (Google's sign-in with the owner's saved client), `gmail` (no client saved: sign in to
- * Gmail in the shared browser) or `form` (an app with no web sign-in: its token or folder). */
-export function connectHow(app, {googleClient = false} = {}) {
+/** What one tap on Connect does: `oauth` (the app's own sign-in), `now` (nothing to fill in, or only defaults),
+ * `form` (its token or folder) or `setup` (an app that signs in only with the server's own client, which `clients`
+ * from `GET /api/connectors` says is not there yet). */
+export function connectHow(app, {clients = {}} = {}) {
   if (!app) return 'form';
-  if (app.google) return googleClient ? 'google' : 'gmail';
-  if (app.oauth) return 'oauth';
-  if (appInputs(app).every(i => i.optional || i.default)) return 'now';
-  return app.site ? 'site' : 'form';
+  if (app.oauth && (!app.client || clients?.[app.client] === true)) return 'oauth';
+  if (!app.run && !app.web) return 'setup';
+  return appInputs(app).every(i => i.optional || i.default) ? 'now' : 'form';
+}
+
+/** What a tap on an app that waits for the server's sign-in client says: who adds what, once. No value is in it. */
+export function clientSetupLine(app) {
+  const env = String(app?.client || '').toUpperCase();
+  return `${app?.name || 'That app'} signs in with this server's own ${app?.client === 'google' ? 'Google' : app?.name || ''} client, which is not set up yet. Whoever runs the server adds ${env}_CLIENT_ID and ${env}_CLIENT_SECRET to .env once (docs/DEPLOYMENT.md) and restarts it; then Connect is one tap.`;
 }
 
 /** Initials of a two-word name, else its first letter. Text after a `·` is a description, not the name. */
@@ -141,9 +149,8 @@ const tintOf = id => HUES[Math.max(0, APPS.findIndex(a => a.id === id)) % HUES.l
 const hostOf = url => { try { return new URL(url).host.toLowerCase(); } catch { return ''; } };
 
 /** Whether an app is already among the connectors: by its server name on this computer, or by its web host. */
-function isConnected(app, connectors, google) {
-  if (connectors.some(c => (c?.kind === 'site' || c?.kind === 'mcp') && c.app === app.id)) return true;
-  if (app.google) return Boolean(google?.connected);
+function isConnected(app, connectors) {
+  if (connectors.some(c => c?.kind === 'mcp' && c.app === app.id)) return true;
   const host = app.web ? hostOf(app.web.url) : '';
   return connectors.some(c => c?.kind === 'mcp' && ((app.run && c.agentServer === app.id) || (host && String(c.host || '').toLowerCase() === host)));
 }
@@ -160,7 +167,7 @@ export function filterApps(apps, {query = '', category = 'All'} = {}) {
 export function catalogView(res, {query = '', category = 'All'} = {}) {
   const connectors = Array.isArray(res?.connectors) ? res.connectors : [];
   const chosen = CATEGORIES.includes(category) ? category : 'All';
-  const rows = APPS.map(a => ({...a, mono: monogram(a), tint: tintOf(a.id), connected: isConnected(a, connectors, res?.google), inputs: appInputs(a)}));
+  const rows = APPS.map(a => ({...a, mono: monogram(a), tint: tintOf(a.id), connected: isConnected(a, connectors), inputs: appInputs(a)}));
   const connected = rows.filter(a => a.connected);
   const filtering = Boolean(String(query ?? '').trim()) || chosen !== 'All';
   const kept = filterApps(rows, {query, category: chosen});
@@ -203,7 +210,7 @@ function readInput(input, raw) {
  * on this computer `{ok, local: {name, command, env?}, body}` (POST /api/agents/local/mcp, then POST /api/connectors);
  * on the web `{ok, body: {kind: 'mcp', name, url, headers}}`; or `{ok: false, error}` naming the field to fix. */
 export function connectRequest(app, values = {}) {
-  if (!app || app.google || !(app.run || app.web)) return fail('Connect Google from its own card.');
+  if (!app || !(app.run || app.web)) return fail(`${app?.name || 'That app'} connects with its own sign-in, not a token.`);
   const read = {};
   for (const input of appInputs(app)) {
     const got = readInput(input, values?.[input.key]);

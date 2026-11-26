@@ -15,8 +15,9 @@ test('every app has a valid server id, a known category and exactly one way to s
     assert.ok(!ids.has(app.id), `duplicate ${app.id}`); ids.add(app.id);
     assert.ok(CATEGORIES.includes(app.category), `${app.id}: ${app.category}`);
     assert.ok(app.name && app.blurb, app.id);
-    const ways = [app.run, app.web, app.google].filter(Boolean).length;
-    assert.equal(ways, 1, app.id);
+    // A token way at most, and a real MCP server always: run here, a web address, or its own sign-in.
+    assert.ok([app.run, app.web].filter(Boolean).length <= 1, app.id);
+    assert.ok(app.run || app.web || app.oauth, app.id);
     for (const input of app.run?.inputs || app.web?.inputs || []) {
       assert.ok(input.label, `${app.id} input label`);
       if (input.env) for (const key of Object.keys(input.env)) assert.match(key, ENV_NAME, `${app.id} ${key}`);
@@ -32,7 +33,7 @@ test('the list carries the vetted packages and addresses, and none of the ones l
   assert.equal(appById('linear').web.url, 'https://mcp.linear.app/mcp');
   assert.equal(appById('todoist').run.command, 'npx -y -p @todoist/mcp todoist-mcp');
   for (const gone of ['postgres', 'sqlite', 'vercel', 'hubspot', 'asana']) assert.equal(appById(gone), null, gone);
-  assert.equal(APPS.length, 24);
+  assert.equal(APPS.length, 26);
 });
 
 test('a monogram is the initials of a two-word name, else the first letter', () => {
@@ -48,7 +49,7 @@ test('with nothing connected, All shows Recommended first and then every categor
   assert.equal(view.connectedCount, 0);
   assert.deepEqual(view.connected, []);
   assert.equal(view.sections[0].title, 'Recommended');
-  assert.deepEqual(view.sections[0].apps.map(a => a.id), ['notion', 'github', 'slack', 'linear', 'filesystem', 'brave-search']);
+  assert.deepEqual(view.sections[0].apps.map(a => a.id), ['notion', 'github', 'slack', 'gmail', 'linear', 'filesystem', 'brave-search']);
   assert.deepEqual(view.sections.slice(1).map(s => s.title), CATEGORIES.filter(c => APPS.some(a => a.category === c)));
   assert.deepEqual(view.chips.map(c => c.label), ['All', ...CATEGORIES]);
   assert.equal(view.chips.find(c => c.selected).label, 'All');
@@ -68,9 +69,9 @@ test('an app is connected by its server name on this computer or by its web host
   assert.equal(rec.find(a => a.id === 'slack').connected, false);
 });
 
-test('Google counts as connected when its card says so', () => {
-  assert.equal(catalogView({connectors: [], google: {configured: true, connected: true}}).connectedCount, 1);
-  assert.equal(catalogView({connectors: [], google: {configured: true, connected: false}}).connectedCount, 0);
+test('Gmail counts as connected by its MCP sign-in, not by the older Google connection', () => {
+  assert.equal(catalogView({connectors: [{id: 'gmail', kind: 'mcp', app: 'gmail', name: 'Gmail'}]}).connectedCount, 1);
+  assert.equal(catalogView({connectors: [{id: 'google', kind: 'google', name: 'Google'}], google: {configured: true, connected: true}}).connectedCount, 0);
 });
 
 test('a missing or odd response is an empty, unconnected catalogue', () => {

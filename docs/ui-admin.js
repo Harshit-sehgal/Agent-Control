@@ -5,15 +5,15 @@
  *
  * The look is Settings and Connectors: a titled card (`.st-g`, `.cd`), rows with a switch or a small
  * button on the right, a segmented pill for a choice of few, and one primary action per card. */
-import {esc, icon, btn, field, note, empty, tag, fullDate, textInput, switchBtn, modelSelect, effortPicker, runFullApp, demoList} from './ui-kit.js?v=a9e6960ec3';
-import {store, api, sync, isAdmin, isStaticDemo} from './ui-store.js?v=a9e6960ec3';
-import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=a9e6960ec3';
-import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js?v=a9e6960ec3';
-import {pushStatus, enablePush, disablePush} from './ui-push.js?v=a9e6960ec3';
-import {connectorsPanel, loadConnectors, connectActions, connectForms} from './ui-connect.js?v=a9e6960ec3';
-import {cliDraft, modelChoices, chosenModel, effortChoices, OTHER_MODEL, agentCliRows, agentPermissionRows, agentWorkLine, subscriptionLine, SIGN_IN_HINT} from './ui-connect-model.js?v=a9e6960ec3';
-import {LOCAL_CLI_ENGINES, LOCAL_CLI_KIND} from './ai-presets.js?v=a9e6960ec3';
-import {parsePrices, pricesText} from './usage.js?v=a9e6960ec3';
+import {esc, icon, btn, field, note, empty, tag, fullDate, textInput, switchBtn, modelSelect, effortPicker, runFullApp, demoList, MODEL_SEARCH_FROM} from './ui-kit.js?v=2c827d8a6b';
+import {store, api, sync, isAdmin, isStaticDemo} from './ui-store.js?v=2c827d8a6b';
+import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=2c827d8a6b';
+import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js?v=2c827d8a6b';
+import {pushStatus, enablePush, disablePush} from './ui-push.js?v=2c827d8a6b';
+import {connectorsPanel, loadConnectors, connectActions, connectForms} from './ui-connect.js?v=2c827d8a6b';
+import {cliDraft, modelChoices, chosenModel, effortChoices, OTHER_MODEL, modelRowMatches, modelGroupStays, agentCliRows, agentPermissionRows, agentWorkLine, subscriptionLine, SIGN_IN_HINT} from './ui-connect-model.js?v=2c827d8a6b';
+import {LOCAL_CLI_ENGINES, LOCAL_CLI_KIND} from './ai-presets.js?v=2c827d8a6b';
+import {parsePrices, pricesText} from './usage.js?v=2c827d8a6b';
 
 /** The pages Settings can load into its body. Only the keys are read (is this a page?). */
 export const ADMIN_PAGES = {notifications: true, workspaces: true, team: true, agents: true, data: true, connectors: true, ai: true};
@@ -375,6 +375,82 @@ export function refillModelSelect(select, rows) {
   if (keep && keep !== OTHER_MODEL && rows.some(r => r.value === keep)) select.value = keep;
   showOtherBox(select);
 }
+/* The search bar over a model picker. A native select cannot hide options everywhere (iOS shows hidden ones), so
+ * the full list is kept aside and the select is redrawn with the rows that match; the picked row always stays,
+ * so filtering never changes what the form posts. */
+const modelLists = new WeakMap();
+const typedIdRow = value => value === OTHER_MODEL || value.endsWith(`|${OTHER_MODEL}`);
+const listed = o => o.value && !typedIdRow(o.value) && !o.value.endsWith('|');
+const searchOf = select => select?.previousElementSibling?.matches('.mdl-find') ? select.previousElementSibling : null;
+const pickerOf = input => input?.closest('.mdl-find')?.nextElementSibling;
+/** The full option list, read again whenever something other than the search redrew the select. */
+function fullList(select) {
+  const known = modelLists.get(select);
+  if (known && known.drawn === select.innerHTML) return known;
+  const fresh = {all: select.innerHTML, drawn: select.innerHTML};
+  modelLists.set(select, fresh);
+  return fresh;
+}
+function filterModels(input) {
+  const select = pickerOf(input);
+  if (!select?.matches('select[data-action="model-pick"]')) return false;
+  const list = fullList(select), keep = select.value, query = input.value;
+  const box = document.createElement('template');
+  box.innerHTML = list.all;
+  let shown = 0, total = 0;
+  for (const option of box.content.querySelectorAll('option')) {
+    const counts = listed(option);
+    const hit = modelRowMatches(query, {label: option.textContent, value: option.value});
+    if (counts) total++;
+    if (counts && hit) shown++;
+    // Kept: a match, the picked row, and the typed-id and default rows while nothing is typed.
+    if (!(hit && (counts || !query.trim())) && option.value !== keep) option.remove();
+  }
+  // A provider with a match keeps its "Another … model…" row; one with none disappears.
+  for (const group of box.content.querySelectorAll('optgroup')) {
+    if (!modelGroupStays([...group.querySelectorAll('option')].map(o => o.value), keep)) group.remove();
+  }
+  if (query.trim() && !shown) for (const option of new DOMParser().parseFromString(`<select>${list.all}</select>`, 'text/html').querySelectorAll('option')) {
+    // Nothing matches: offer every typed-id row, so the model can still be named by hand.
+    if (typedIdRow(option.value) && option.value !== keep) box.content.append(option);
+  }
+  select.innerHTML = box.innerHTML;
+  select.value = keep;
+  list.drawn = select.innerHTML;
+  const count = input.parentElement.querySelector('.mdl-count');
+  if (count) count.textContent = !query.trim() ? '' : shown ? `${shown} of ${total}` : 'No match';
+  return true;
+}
+/** `input` on a model search bar: filter its picker. True when it handled the event. */
+export const modelSearchInput = control => control?.matches?.('[data-model-search]') ? filterModels(control) : false;
+/** Keys in a model search bar: Enter picks the only match (and never submits the form), ↓ moves to the list, Esc
+ * clears what was typed. True when it handled the key. */
+export function modelSearchKey(ev) {
+  const input = ev.target;
+  if (!input?.matches?.('[data-model-search]')) return false;
+  const select = pickerOf(input);
+  if (ev.key === 'Enter') {
+    ev.preventDefault();
+    const hits = [...(select?.options || [])].filter(listed).filter(o => modelRowMatches(input.value, {label: o.textContent, value: o.value}));
+    if (hits.length === 1 && select.value !== hits[0].value) { select.value = hits[0].value; select.dispatchEvent(new Event('change', {bubbles: true})); }
+    if (hits.length === 1) select.focus();
+    return true;
+  }
+  if (ev.key === 'ArrowDown') { ev.preventDefault(); select?.focus(); return true; }
+  if (ev.key === 'Escape' && input.value) { ev.preventDefault(); ev.stopPropagation(); input.value = ''; filterModels(input); return true; }
+  return false;
+}
+/** After a picker's options were redrawn from new data: forget the old list, clear the query, and show the bar
+ * only if the list is now long enough to need it. */
+export function resetModelSearch(select) {
+  const bar = searchOf(select); if (!bar) return;
+  modelLists.delete(select);
+  const input = bar.querySelector('[data-model-search]');
+  if (input) input.value = '';
+  const count = bar.querySelector('.mdl-count'); if (count) count.textContent = '';
+  bar.hidden = [...select.options].filter(listed).length < MODEL_SEARCH_FROM;
+}
+
 /** Other… opens a box for any id; any other row closes it. */
 function showOtherBox(select) {
   const box = select?.parentElement?.querySelector('.model-other'); if (!box) return;

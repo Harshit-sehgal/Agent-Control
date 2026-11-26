@@ -5,8 +5,8 @@
  *
  * Nothing here ever sees a key: a subscription has none, an MCP address is typed once and sent, and the
  * server never answers with it. */
-import {cleanCliModel, cliEngineById, LOCAL_CLI_KIND, LOCAL_CLI_ENGINES, EFFORT_LEVELS, cleanEffort, CLI_MODELS} from './ai-presets.js?v=a9e6960ec3';
-import {appById} from './app-catalog.js?v=a9e6960ec3';
+import {cleanCliModel, cliEngineById, LOCAL_CLI_KIND, LOCAL_CLI_ENGINES, EFFORT_LEVELS, cleanEffort, CLI_MODELS} from './ai-presets.js?v=2c827d8a6b';
+import {appById} from './app-catalog.js?v=2c827d8a6b';
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
@@ -30,6 +30,7 @@ const CONNECT_REASONS = {
   code: 'The app did not send back a sign-in code. Try Connect again.',
   register: 'The app did not let this app sign in. Try again, or connect it with a token.',
   'no-register': 'That app does not let an app sign in by itself yet. Connect it with a token instead.',
+  'no-client': 'This server has no sign-in client for it yet. Whoever runs the server adds one to .env once (docs/DEPLOYMENT.md).',
   setup: 'This workspace is not open any more. Sign in to the app again.',
   server: 'The app\'s server could not finish the sign-in. Try again in a moment.',
 };
@@ -61,7 +62,7 @@ const STATUSES = {ready: ['Ready', 'good'], setup: ['Not signed in', 'warn'], re
 /** A connector's status as a label and a tone for the tag. Unknown reads as Ready, like the server's default. */
 export const statusOf = status => { const [label, tone] = STATUSES[status] || STATUSES.ready; return {label, tone}; };
 
-/** The MCP servers as rows. Google has a card of its own. */
+/** The MCP servers as rows. */
 export function mcpRows(connectors) {
   return (Array.isArray(connectors) ? connectors : []).filter(c => c?.kind === 'mcp').map(c => {
     const actions = Array.isArray(c.actions) ? c.actions : [], writes = actions.filter(a => a.write).length;
@@ -76,23 +77,6 @@ export function mcpRows(connectors) {
   });
 }
 
-/** The Google card from `google` in `GET /api/connectors`. Null when the server gave none (the demo). */
-export function googleCard(google) {
-  if (!google || typeof google !== 'object' || !('configured' in google)) return null;
-  const status = google.status || 'none';
-  const state = google.connected ? 'connected' : !google.configured ? 'none' : status === 'reconnect' || status === 'error' ? status : 'ready';
-  return {
-    state,
-    account: google.account || '',
-    // The address has a box of its own with a Copy button, so a step that quotes it points at that box instead of printing it twice.
-    steps: (Array.isArray(google.steps) ? google.steps : []).map(step => (google.redirectUri ? String(step).split(google.redirectUri).join('the address shown below') : step)),
-    redirectUri: google.redirectUri || '',
-    testingNote: google.testingNote || '',
-    // Connect Google is a link to the server's start route; it needs a saved client first.
-    connectLabel: state === 'ready' ? 'Connect Google' : state === 'reconnect' || state === 'error' ? 'Reconnect Google' : null,
-    showForm: state === 'none',
-  };
-}
 
 /* ---------- the add forms ---------- */
 
@@ -151,6 +135,10 @@ export function cliDraft(values = {}) {
 
 /** The value of the last row, which opens a box for any id. */
 export const OTHER_MODEL = '__other';
+const typedId = value => value === OTHER_MODEL || String(value).endsWith(`|${OTHER_MODEL}`);
+/** Whether a provider's group stays in a filtered model picker: it still holds a listed model, or the picked row
+ * (a picked "Another … model…" row too, or the typed id would be lost on save). */
+export const modelGroupStays = (values, picked) => values.some(v => !typedId(v) || v === picked);
 /** Every model a subscription can run, shorthands first, then each by its full name (shared/ai-presets.js). */
 export const CLI_MODEL_CHOICES = CLI_MODELS;
 
@@ -305,4 +293,16 @@ export function cliChoice(agents, providers) {
   if (!engine) return {error: 'This computer is not signed in yet. Run `claude` (or `codex`) once in a terminal there to sign in, then tap again.'};
   const have = (Array.isArray(providers) ? providers : []).find(p => p.kind === 'local-cli' && p.engine === engine);
   return {engine, label: `My ${ENGINE_NAME[engine]}`, providerId: have?.id || null};
+}
+
+/** Words of a model row or a query: no case, no accents, separators (- _ . : / |) read as spaces. */
+const modelWords = text => String(text ?? '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[-_.:/|]+/g, ' ').trim();
+/** Does a model picker row match what was typed in its search bar? Every word must appear in the row's label or
+ * id, in any order; a word typed without separators ("gpt5") also matches across them ("gpt-5"). Pure. */
+export function modelRowMatches(query, {label = '', value = ''} = {}) {
+  const words = modelWords(query).split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  // A grouped row's value is `<provider id>|<model>`: only the model part is the row's own words.
+  const hay = modelWords(`${label} ${String(value).split('|').pop()}`), packed = hay.replace(/\s+/g, '');
+  return words.every(w => hay.includes(w) || packed.includes(w));
 }

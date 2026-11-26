@@ -14,11 +14,11 @@
  *
  * Pure and browser-safe, like the other shared modules.
  */
-import {cleanText} from './core.js?v=a9e6960ec3';
-import {controlFence} from './reply-blocks.js?v=a9e6960ec3';
-import {decide, createAsk, declinedNeed} from './asks.js?v=a9e6960ec3';
-import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=a9e6960ec3';
-import {runPrivateHosts} from './bot-browser.js?v=a9e6960ec3';
+import {cleanText} from './core.js?v=2c827d8a6b';
+import {controlFence} from './reply-blocks.js?v=2c827d8a6b';
+import {decide, createAsk, declinedNeed} from './asks.js?v=2c827d8a6b';
+import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=2c827d8a6b';
+import {runPrivateHosts} from './bot-browser.js?v=2c827d8a6b';
 
 export const CONNECTOR_KINDS = ['google', 'mcp', 'site'];
 /** `ready` works; `setup` is Google with a client saved and no sign-in yet; `reconnect` is a sign-in that
@@ -64,15 +64,6 @@ export function newConnectorId(state, name, kind = 'mcp') {
   let id = RESERVED_IDS.includes(base) ? `${base}-2` : base, n = 2;
   while (taken.has(id) || RESERVED_IDS.includes(id)) id = `${base}-${n++}`.slice(0, 40);
   return id;
-}
-
-/** An app the owner signed in to in the shared browser (Connect apps, one tap). It has no tools and no secret: bots
- * open its pages with the browser block, as the owner, and what they read there is private to the run. */
-export function siteConnector(state, app, {now = new Date().toISOString()} = {}) {
-  if (!app?.site) throw Object.assign(new Error(`${app?.name || 'That app'} has no web sign-in to open. Connect it with its token.`), {status: 400});
-  const page = new URL(app.site), name = app.google ? 'Gmail' : app.name;
-  return {id: newConnectorId(state, name, 'site'), kind: 'site', app: app.id, name, host: page.host.toLowerCase(),
-    url: `${page.origin}/`, status: 'ready', statusMessage: '', actions: [], addedAt: now, checkedAt: now};
 }
 
 /** The connector a bot means by `use`: its id, or its name in any case. Null when none or when the name is not one. */

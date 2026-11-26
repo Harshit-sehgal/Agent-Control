@@ -159,45 +159,46 @@ what the call would carry: the recipient, subject and the start of the body for 
 email, the arguments for an MCP tool. What comes back (a mail, a file, a server's
 answer) reaches the same bot as untrusted data, not as instructions.
 
-Secrets (the Google client secret, the refresh token, an MCP server's address and
-headers) are stored encrypted in the vault and never returned by any route, put in
-the state snapshot, logged or written to a backup. Backups carry no credentials;
-after a restore onto another machine, add the connectors again.
+Secrets (a sign-in's tokens, an MCP server's address and headers) are stored
+encrypted in the vault and never returned by any route, put in the state snapshot,
+logged or written to a backup. Backups carry no credentials; after a restore onto
+another machine, connect the apps again.
 
-**Google (Gmail and Drive).** You make your own Google Cloud OAuth client; the app
-holds only what you paste.
+**Apps that sign in in one tap.** Every app in Connect apps is an MCP server. Where
+the app's official MCP server lets an app register itself (Notion, Linear, Sentry,
+Todoist and others), Connect signs in straight away. Google, Slack and GitHub do not
+allow that, so they sign in with one OAuth client that **whoever runs this server**
+makes once with each vendor and puts in `.env`. Nobody types a client into the app;
+until one is there, GitHub and Slack take a token instead and Gmail, Drive and
+Calendar say what is missing.
 
-1. In the [Google Cloud Console](https://console.cloud.google.com) create a project
-   (or pick one) and, under APIs & Services → Library, enable the **Gmail API** and
-   the **Google Drive API**.
-2. Under OAuth consent screen choose **External**, fill in an app name and your
-   email, and add your own Google account under **Test users**.
-3. Under Credentials create an **OAuth client ID** of type **Web application** and
-   add the Authorized redirect URI that `GET /api/connectors` shows in
-   `google.redirectUri`: your `PUBLIC_BASE_URL` plus `/api/connectors/google/callback`.
-4. Paste the Client ID and Client secret: `POST /api/connectors/google/setup`
-   `{"clientId", "clientSecret"}` (owner only). Then open
-   `/api/connectors/google/start` in the browser (**Connect Google**) and approve
-   Gmail and Drive access.
+| App | `.env` | Make the client at | Redirect address to register |
+|---|---|---|---|
+| Gmail, Google Drive, Google Calendar | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google Cloud Console → Credentials → OAuth client ID (Web application) | `<PUBLIC_BASE_URL>/api/connectors/mcp/callback` |
+| Slack | `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET` | api.slack.com/apps → your app → OAuth & Permissions | same |
+| GitHub | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | github.com/settings/developers → OAuth App | same |
 
-The redirect address comes from `PUBLIC_BASE_URL` (or `PUBLIC_ORIGIN`), else from
-the address the request came to; the code has no host of its own, so moving the
-server to the VM means changing that one setting and the redirect URI in Google
-Cloud. The scopes are `gmail.modify` and `drive.readonly`.
+For Google, in the same Cloud project: enable the Gmail, Drive and Calendar APIs and
+their MCP servers (Google Workspace MCP is a Developer Preview, so the project must
+be enrolled), set the OAuth consent screen to **External** and add your own account
+under **Test users**. Bots then use Google's own MCP servers
+(`gmailmcp.googleapis.com`, `drivemcp.googleapis.com`, `calendarmcp.googleapis.com`)
+with the scopes `gmail.modify`, `drive` and `calendar`. Gmail's server drafts mail but
+has no send tool: the owner sends a draft from Gmail. While the consent screen is in
+*Testing*, Google ends the sign-in after 7 days and the connector shows **Sign in
+again**; publishing it for your own use removes the limit (Google shows an
+"unverified app" notice).
 
-**Testing status and the 7-day refresh.** While the consent screen is in *Testing*,
-Google ends the sign-in after 7 days. The connector then shows **reconnect**
-(`status: "reconnect"`) and bots are not offered it until you choose Connect Google
-again. Publishing the app (*In production*) for your own use removes the limit; you
-do not need Google's verification for an app only you use, but Google shows an
-"unverified app" notice at sign-in.
+The secret is read from `.env` each time a token is renewed, never copied into the
+vault, so rotating it there and restarting is enough. `GET /api/connectors` says
+which clients are present (`clients: {google, slack, github}`, true or false). The
+redirect address comes from `PUBLIC_BASE_URL` (or `PUBLIC_ORIGIN`), else from the
+address the request came to, so moving the server means changing that setting and
+the redirect address registered with each vendor.
 
-Gmail and Drive actions: `gmail.search`, `gmail.read`, `drive.search`, `drive.read`
-(reads); `gmail.draft`, `gmail.send` (writes). **Undo:** an email send you have
-Always-allowed is held for 30 seconds, shown in Activity with an Undo
-(`POST /api/activity/:id/undo`), and goes out when the window ends. A send you
-answered Allow on its card goes at once. Every write that goes out is logged as
-having left the app. A server restart during the 30 seconds sends nothing and says so.
+An older Google connection (Google's REST API with a client pasted into the app,
+from before Gmail was an MCP server) keeps working until removed; Connectors lists
+it under Connected with a button to connect Gmail instead.
 
 **MCP servers.** Any MCP server is a connector; its tools are the connector's
 actions. The client is hand-written (JSON-RPC 2.0, no SDK).
@@ -216,9 +217,9 @@ actions. The client is hand-written (JSON-RPC 2.0, no SDK).
   A task carries only the server's name; the agent starts the program fresh for each
   call with a small environment and kills it when it is slow or says too much.
 
-Environment: `PUBLIC_BASE_URL`; `GOOGLE_AUTH_URL`, `GOOGLE_TOKEN_URL` and
-`GOOGLE_API_BASE` (Google's own addresses by default; they exist so tests can use a
-fake).
+Environment: `PUBLIC_BASE_URL`; the sign-in clients above; `GOOGLE_AUTH_URL`,
+`GOOGLE_TOKEN_URL` and `GOOGLE_API_BASE` (only for the older Google connection;
+Google's own addresses by default, so tests can use a fake).
 
 ### The browser a bot may use
 

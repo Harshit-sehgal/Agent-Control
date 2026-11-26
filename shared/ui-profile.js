@@ -8,6 +8,7 @@
 import {SHAPES, COLORS, face} from './ui-face.js';
 import {botStatus, botIsManager} from './ui-company.js';
 import {primaryOf} from './company.js';
+import {resetModelSearch} from './ui-admin.js';
 import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker, COLOR_NAMES} from './ui-kit.js';
 import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js';
 import {scheduleRows, scheduleTaskBody, SCHEDULE_OFTEN, scheduleChoice} from './schedules.js';
@@ -234,12 +235,13 @@ function refillBotModels() {
   const form = el('bot-model-form'); if (!form) return;
   const select = form.elements.namedItem('model'), keep = select.value;
   const own = store.state?.ai?.bots?.[form.dataset.bot] || {};
-  // The same markup the page drew, minus its outer <select> and the typed-id box beside it.
-  select.innerHTML = groupedModelSelect(botModelChoices(store.state?.ai || {}, own)).replace(/^<select[^>]*>|<\/select>[\s\S]*$/g, '');
+  // The options of the markup the page drew, without the search bar, the <select> itself or the typed-id box.
+  select.innerHTML = groupedModelSelect(botModelChoices(store.state?.ai || {}, own)).match(/<select[^>]*>([\s\S]*)<\/select>/)?.[1] || '';
   const fresh = select;
   // Keep a pick the list still has, except "Another…": after a save the typed id is a row of its own.
   if (!keep.endsWith('|__other') && [...fresh.options].some(o => o.value === keep)) fresh.value = keep;
   const box = form.querySelector('.model-other'); if (box) { box.hidden = !fresh.value.endsWith('|__other'); box.disabled = box.hidden; if (box.hidden) box.value = ''; }
+  resetModelSearch(fresh);
 }
 /** `change` handlers for the profile pages, keyed by data-action. */
 export const profileChanges = {

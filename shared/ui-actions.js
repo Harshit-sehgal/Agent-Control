@@ -13,7 +13,7 @@ import {attachBusy, takeAttachments} from './ui-attach.js';
 import {profileActions, profileForms, profileChanges, lookChanged, nameTyped, adoptFirstMessage} from './ui-profile.js';
 import {settingsActions, settingsChanges, reloadAdminPage} from './ui-settings.js';
 import {changePasswordSheet} from './ui-sheets.js';
-import {adminActions, adminForms, adminChanges} from './ui-admin.js';
+import {adminActions, adminForms, adminChanges, modelSearchInput, modelSearchKey} from './ui-admin.js';
 import {takeoverActions, takeoverForms} from './ui-takeover.js';
 import {computerActions, computerForms} from './ui-computer-view.js';
 import {catalogSearch} from './ui-connect.js';
@@ -123,4 +123,5 @@ export function onControlChange(control) {
   if (admin) return admin(control, adminCtx);
 }
 /** `input` events: the Connect apps search filters live; the New bot name switches Create on. */
-export function onControlInput(control) { if (catalogSearch(control)) return; nameTyped(control); }
+export function onControlInput(control) { if (catalogSearch(control) || modelSearchInput(control)) return; nameTyped(control); }
+export {modelSearchKey};

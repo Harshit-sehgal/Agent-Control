@@ -138,14 +138,20 @@ export const textInput = (name, {type = 'text', value = '', ...rest} = {}) => {
   const extra = Object.entries(rest).map(([k, v]) => (v === true ? ` ${k}` : ` ${k}="${esc(v)}"`)).join('');
   return `<input class="input" name="${esc(name)}" type="${esc(type)}" value="${esc(value)}"${extra}>`;
 };
+/** A model list this long gets a search bar above it; a shorter one is quicker to read than to search. */
+export const MODEL_SEARCH_FROM = 8;
+/** The models a picker lists, not counting the rows that open the typed-id box (`__other`) or the default (''). */
+const modelCount = rows => rows.filter(r => r.value && !String(r.value).endsWith('__other') && !String(r.value).endsWith('|')).length;
+/** The search bar over a model picker: no name, so a form never posts the query (shared/ui-admin.js filters). */
+const modelSearch = count => `<div class="mdl-find"${count < MODEL_SEARCH_FROM ? ' hidden' : ''}>${icon('search', 17)}<input class="input" type="search" data-model-search placeholder="Search models" aria-label="Search models" autocomplete="off" spellcheck="false" maxlength="60" enterkeyhint="search"><output class="mdl-count" aria-live="polite"></output></div>`;
 /** A model dropdown from `modelChoices` rows, and the box Other… opens (hidden and disabled until then, so it
  * never posts by accident). The change handler `model-pick` shows it. */
-export const modelSelect = (rows, {label = 'Model'} = {}) => `<select class="input" name="model" data-action="model-pick" aria-label="${esc(label)}">${rows.map(r => `<option value="${esc(r.value)}"${r.selected ? ' selected' : ''}>${esc(r.label)}</option>`).join('')}</select><input class="input model-other" name="modelOther" type="text" placeholder="Type a model id" maxlength="120" autocomplete="off" spellcheck="false" aria-label="Model id" hidden disabled>`;
+export const modelSelect = (rows, {label = 'Model'} = {}) => `${modelSearch(modelCount(rows))}<select class="input" name="model" data-action="model-pick" aria-label="${esc(label)}">${rows.map(r => `<option value="${esc(r.value)}"${r.selected ? ' selected' : ''}>${esc(r.label)}</option>`).join('')}</select><input class="input model-other" name="modelOther" type="text" placeholder="Type a model id" maxlength="120" autocomplete="off" spellcheck="false" aria-label="Model id" hidden disabled>`;
 /** One model dropdown for every connected provider, from `botModelChoices`: the workspace default, then an
  * optgroup per provider. Its "Another … model…" rows open the same typed-id box as `modelSelect`. */
 export const groupedModelSelect = ({top, groups}, {label = 'Model'} = {}) => {
   const option = r => `<option value="${esc(r.value)}"${r.selected ? ' selected' : ''}>${esc(r.label)}</option>`;
-  return `<select class="input" name="model" data-action="model-pick" aria-label="${esc(label)}">${option(top)}${groups.map(g => `<optgroup label="${esc(g.label)}">${g.rows.map(option).join('')}</optgroup>`).join('')}</select><input class="input model-other" name="modelOther" type="text" placeholder="Type the model id, e.g. gpt-5-mini" maxlength="120" autocomplete="off" spellcheck="false" aria-label="Model id" hidden disabled>`;
+  return `${modelSearch(modelCount(groups.flatMap(g => g.rows)))}<select class="input" name="model" data-action="model-pick" aria-label="${esc(label)}">${option(top)}${groups.map(g => `<optgroup label="${esc(g.label)}">${g.rows.map(option).join('')}</optgroup>`).join('')}</select><input class="input model-other" name="modelOther" type="text" placeholder="Type the model id, e.g. gpt-5-mini" maxlength="120" autocomplete="off" spellcheck="false" aria-label="Model id" hidden disabled>`;
 };
 /** How hard the model thinks: four pills (Default, Low, Medium, High) from `effortChoices`, native radios so the
  * keyboard works, each with its hint as a tooltip and one line of help under them. */
