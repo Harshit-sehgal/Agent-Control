@@ -11,10 +11,10 @@
  * window is a fixed five minutes from `since`; a quiet window starts the count
  * over. Pure and browser-safe: the server and the Pages demo share it.
  */
-import {activity} from './core.js?v=13aa44e5ea';
-import {logActivity} from './activity-log.js?v=13aa44e5ea';
-import {addChatMessages} from './chats.js?v=13aa44e5ea';
-import {primaryOf} from './company.js?v=13aa44e5ea';
+import {activity} from './core.js?v=01cd03d88d';
+import {logActivity} from './activity-log.js?v=01cd03d88d';
+import {addChatMessages} from './chats.js?v=01cd03d88d';
+import {primaryOf} from './company.js?v=01cd03d88d';
 
 export const GUARD = {windowMs: 300000, creations: 50, runs: 300};
 

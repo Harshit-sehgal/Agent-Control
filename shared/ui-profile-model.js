@@ -233,8 +233,20 @@ export function editChanges(was, now) {
   if (boss !== (was.reportsTo || null)) settings.reportsTo = boss;
   if (now.shape && now.shape !== was.shape) settings.shape = now.shape;
   if (Number.isInteger(Number(now.tint)) && now.tint !== '' && Number(now.tint) !== was.tint) settings.tint = Number(now.tint);
+  // The Computer row is the owner's, so it is sent only when the form had one and it changed (undefined: no row).
+  if (now.device !== undefined && (now.device || null) !== (was.device || null)) settings.device = now.device || null;
   if (Object.keys(settings).length) out.settings = settings;
   return Object.keys(out).length ? out : null;
+}
+
+/** The Computer choice on Edit: Any computer, then each paired computer, labelled by its name, in the order given; a pin on one that is gone shows last.
+ * Empty when no computer is paired, so the row is not drawn. `agents` is GET /api/agents; `current` the bot's pin. */
+export function deviceOptions(agents, current) {
+  const live = (agents || []).filter(a => a.status !== 'revoked');
+  if (!live.length) return [];
+  const pin = current || '', list = [{id: '', label: 'Any computer', selected: !pin}, ...live.map(a => ({id: a.id, label: a.name, selected: a.id === pin}))];
+  if (pin && !live.some(a => a.id === pin)) list.push({id: pin, label: 'A computer that is no longer paired', selected: true});
+  return list;
 }
 
 /* ---------- activity ---------- */

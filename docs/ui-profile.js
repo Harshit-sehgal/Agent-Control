@@ -5,23 +5,23 @@
  *
  * Pages repaint only when the route changes, so each in-place change (a switch, a
  * forgotten note, a picked colour) updates its own node instead. */
-import {SHAPES, COLORS, face} from './ui-face.js?v=13aa44e5ea';
-import {botStatus, botIsManager} from './ui-company.js?v=13aa44e5ea';
-import {primaryOf} from './company.js?v=13aa44e5ea';
-import {resetModelSearch} from './ui-admin.js?v=13aa44e5ea';
-import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker, COLOR_NAMES} from './ui-kit.js?v=13aa44e5ea';
-import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js?v=13aa44e5ea';
-import {scheduleRows, scheduleTaskBody, SCHEDULE_OFTEN, scheduleChoice} from './schedules.js?v=13aa44e5ea';
-import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=13aa44e5ea';
-import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=13aa44e5ea';
-import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=13aa44e5ea';
-import {sendChat} from './ui-chat.js?v=13aa44e5ea';
-import {computerPage as computerView, computerLabel, keysOwned, thumbSlot} from './ui-computer-view.js?v=13aa44e5ea';
+import {SHAPES, COLORS, face} from './ui-face.js?v=01cd03d88d';
+import {botStatus, botIsManager} from './ui-company.js?v=01cd03d88d';
+import {primaryOf} from './company.js?v=01cd03d88d';
+import {resetModelSearch} from './ui-admin.js?v=01cd03d88d';
+import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker, COLOR_NAMES} from './ui-kit.js?v=01cd03d88d';
+import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js?v=01cd03d88d';
+import {scheduleRows, scheduleTaskBody, SCHEDULE_OFTEN, scheduleChoice} from './schedules.js?v=01cd03d88d';
+import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=01cd03d88d';
+import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=01cd03d88d';
+import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=01cd03d88d';
+import {sendChat} from './ui-chat.js?v=01cd03d88d';
+import {computerPage as computerView, computerLabel, keysOwned, thumbSlot} from './ui-computer-view.js?v=01cd03d88d';
 import {
-  MAX_NAME, MAX_JOB, hasJob, roleLine, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, OUTSIDE_NOTE, lookOf, newBotDefaults,
+  MAX_NAME, MAX_JOB, hasJob, roleLine, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, OUTSIDE_NOTE, lookOf, newBotDefaults, deviceOptions,
   newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, closeTarget, watchRows,
-} from './ui-profile-model.js?v=13aa44e5ea';
-import {WATCH_EVERY} from './watches.js?v=13aa44e5ea';
+} from './ui-profile-model.js?v=01cd03d88d';
+import {WATCH_EVERY} from './watches.js?v=01cd03d88d';
 
 const el = id => document.getElementById(id);
 const SHAPE_LABELS = {rounded: 'Rounded square', circle: 'Circle', hexagon: 'Hexagon', pebble: 'Pebble', drop: 'Drop', shield: 'Shield', arch: 'Arch', egg: 'Egg', blob: 'Blob', bean: 'Bean'};
@@ -309,6 +309,7 @@ function botForm({id, attrs = '', bot = null, look, primary = false, note, extra
     ${name}
     ${lookPicker(look)}
     ${boss}
+    ${bot ? '<div data-device-slot hidden></div>' : ''}
     <p class="pr-note nb-note">${note}</p>
     ${extra}
     ${off ? '<p class="nb-hint" data-nb-hint>Name it to create</p>' : ''}
@@ -316,8 +317,24 @@ function botForm({id, attrs = '', bot = null, look, primary = false, note, extra
   </form>`;
 }
 
+/** The owner's Computer row on Edit: which paired computer runs this bot, or any. Drawn when the page has loaded the
+ * list, only for the owner and only when a computer is paired; anyone else's form has no `device` field, so saving
+ * it never sends one and a pin is kept. */
+async function fillDevices(botId) {
+  if (store.state?.me?.role !== 'owner') return;
+  const res = await api('/api/agents').catch(() => null);
+  const form = el('edit-bot-form'), slot = form?.querySelector('[data-device-slot]');
+  if (!slot || form.dataset.bot !== botId || store.state?.me?.role !== 'owner') return;
+  const options = deviceOptions(res?.agents, JSON.parse(form.dataset.was || '{}').device);
+  if (!options.length) return;
+  const row = document.createElement('template');
+  row.innerHTML = `<label class="nb-boss nb-device"><span>Computer</span><select class="input" name="device">${options.map(o => `<option value="${esc(o.id)}"${o.selected ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}</select></label>`;
+  slot.replaceWith(row.content);
+}
+
 function editPage(bot) {
-  const look = lookOf(store.state, bot.id), primary = primaryOf(store.state)?.id === bot.id;
+  const look = {...lookOf(store.state, bot.id), device: bot.settings?.device || null}, primary = primaryOf(store.state)?.id === bot.id;
+  setTimeout(() => fillDevices(bot.id), 0);
   return botForm({id: 'edit-bot-form', attrs: `data-bot="${esc(bot.id)}" data-was="${esc(JSON.stringify(look))}"`, bot, look, primary,
     note: `To change what ${esc(bot.name)} does, tell it in its chat.`, submit: 'Save'});
 }
