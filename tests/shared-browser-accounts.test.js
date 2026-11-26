@@ -106,6 +106,20 @@ test('a context that vanished under a live browser is rebuilt from the jar', asy
   assert.notEqual(processes[0].contexts()[0], old);
 });
 
+test('a tab that fails to open on a healthy context does not tear the context down', async t => {
+  const {sb, jars, processes} = rig(t, {jars: memJars({[A]: [who('alice')]})});
+  await sb.run('scout', {url: URL_, account: A});
+  const [fake] = processes, [context] = fake.contexts(), saved = jars.saves.length;
+  let failed = false;
+  fake.hook('Target.createTarget', () => { if (!failed) { failed = true; throw new Error('Target closed'); } return undefined; });
+  await assert.rejects(sb.run('writer', {url: URL_, account: A}), /Target closed/);
+  assert.deepEqual(fake.contexts(), [context], 'the context is the same one');
+  assert.equal(fake.called('Target.createBrowserContext').length, 1, 'no new context was made');
+  assert.equal((await sb.run('scout', {url: URL_, account: A})).text, 'alice', 'the account\'s other tab goes on');
+  assert.equal(fake.called('Target.disposeBrowserContext').length, 0);
+  assert.ok(jars.saves.length > saved);
+});
+
 test('a tab that is not in the account\'s context never serves a step, and nothing is navigated', async t => {
   for (const [label, account, claimed] of [['another context', A, 'C-elsewhere'], ['the default profile', A, null], ['an account context for a default-profile task', null, 'C-elsewhere']]) {
     const {sb, processes} = rig(t, {jars: memJars({[A]: [who('alice')]}), wrap: lying(claimed)});
@@ -143,10 +157,10 @@ test('a takeover and the bot\'s own first task open one tab, not two', async t =
     const {sb, processes} = rig(t, {jars: memJars({[A]: [who('alice')]})});
     const start = {takeover: () => sb.takeover('scout', A), run: () => sb.run('scout', {url: URL_, account: A})};
     const one = start[first](), two = start[second]();
-    await Promise.race([sb.owner() === 'scout' ? one : two, sleep(300)]);
-    await sb.handback('scout').catch(() => {});
-    await Promise.all([one, two]).catch(() => {});
+    await sleep(150); // a task asked while the owner holds the tab waits for the hand back
     await sb.handback('scout');
+    const outcomes = await Promise.all([one, two]);
+    assert.equal(outcomes.find(o => o?.text)?.text, 'alice', 'the task ran and read the account\'s page');
     assert.equal(processes[0].called('Target.createTarget').length, 1, `${first} then ${second}: one Target.createTarget`);
   }
 });

@@ -65,9 +65,9 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
   const allowed = () => (typeof allow === 'function' ? allow() : allow);
   let session = null, starting = null;
   const tabs = new Map();      // tabKey -> {botId, account, tab, url, title, typed}: `typed` is what the owner typed in secret, in memory only
-  const opening = new Map();   // tabKey -> the tab being opened, so two askers for one tab open one
+  const opening = new Map();   // tabKey -> {live, promise}: the tab being opened, so two askers for one tab open one
   const contexts = new Map();  // account -> {id, restored}: the browser contexts of this session, gone with it
-  const contextStarts = new Map(); // account -> the context being made
+  const contextStarts = new Map(); // account -> {live, promise}: the context being made
   // tabKey -> {queue: ticket[], holding, parked, epoch}. Made on first use, dropped when nothing is queued or running.
   const lanes = new Map();
   const waits = new Set();     // {predicate, resolve}
@@ -111,25 +111,24 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
   function contextFor(live, account) {
     const have = contexts.get(account);
     if (have) return Promise.resolve(have);
-    let pending = contextStarts.get(account);
-    if (!pending) {
-      pending = (async () => {
-        const id = await live.createContext();
-        try {
-          let cookies;
-          // Said in fixed words: an error from here must never carry a cookie.
-          try { cookies = jars.load(account) || []; await live.setCookies(id, cookies); }
-          catch { throw new Error('This browser account\'s saved sign-in could not be put back in the browser.'); }
-          // A browser that was replaced while this ran must not have this context in its map.
-          if (session !== live) throw new Error('The browser restarted. Try again.');
-          const made = {id, restored: cookies.length > 0};
-          contexts.set(account, made);
-          return made;
-        } catch (error) { await live.disposeContext(id).catch(() => {}); throw error; }
-      })().finally(() => contextStarts.delete(account));
-      contextStarts.set(account, pending);
-    }
-    return pending;
+    const started = contextStarts.get(account);
+    if (started?.live === live) return started.promise;
+    const promise = (async () => {
+      const id = await live.createContext();
+      try {
+        let cookies;
+        // Said in fixed words: an error from here must never carry a cookie.
+        try { cookies = jars.load(account) || []; await live.setCookies(id, cookies); }
+        catch { throw new Error('This browser account\'s saved sign-in could not be put back in the browser.'); }
+        // A browser that was replaced while this ran must not have this context in its map.
+        if (session !== live) throw new Error('The browser restarted. Try again.');
+        const made = {id, restored: cookies.length > 0};
+        contexts.set(account, made);
+        return made;
+      } catch (error) { await live.disposeContext(id).catch(() => {}); throw error; }
+    })().finally(() => { if (contextStarts.get(account)?.promise === promise) contextStarts.delete(account); });
+    contextStarts.set(account, {live, promise});
+    return promise;
   }
 
   /** Throws unless `tab` sits in the context this account has now (the default profile for none). The account's
@@ -139,17 +138,17 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     if (account ? !want || tab.browserContextId !== want : tab.browserContextId != null) throw new Error(WRONG_CONTEXT);
   }
 
-  /** Closes an account's tabs, then its context (Chrome closes a context's targets but leaves a tab's listener on). */
-  async function dropContext(live, account) {
-    const entry = contexts.get(account);
-    contexts.delete(account);
+  /** Closes the tabs of one context of an account, then the context (Chrome closes a context's targets but leaves
+   * a tab's listener on). Only that context: one already replaced is somebody else's now. */
+  async function dropContext(live, account, entry) {
+    if (contexts.get(account) === entry) contexts.delete(account);
     for (const [key, held] of tabs) {
-      if (held.account !== account) continue;
+      if (held.account !== account || held.tab.browserContextId !== entry.id) continue;
       tabs.delete(key);
-      if (watched?.key === key) watched = null;
+      if (watched?.key === key) await unwatch();
       await live.closeTab(held.tab);
     }
-    if (entry) await live.disposeContext(entry.id).catch(() => {});
+    await live.disposeContext(entry.id).catch(() => {});
   }
 
   /** The account's cookies, written to its jar. A failure is said in fixed words: nothing here may print a cookie. */
@@ -163,13 +162,11 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
   /** This tab: the one it has if the browser still has it (in the account's current context), else a new one.
    * One at a time per tab, so a takeover and a task asking together open one. */
   function tabFor(live, account, botId) {
-    const key = tabKey(account, botId);
-    let pending = opening.get(key);
-    if (!pending) {
-      pending = openTab(live, key, account, botId).finally(() => opening.delete(key));
-      opening.set(key, pending);
-    }
-    return pending;
+    const key = tabKey(account, botId), started = opening.get(key);
+    if (started?.live === live) return started.promise;
+    const promise = openTab(live, key, account, botId).finally(() => { if (opening.get(key)?.promise === promise) opening.delete(key); });
+    opening.set(key, {live, promise});
+    return promise;
   }
   async function openTab(live, key, account, botId) {
     const known = tabs.get(key);
@@ -177,18 +174,23 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
       const alive = (await live.liveTargets().catch(() => [])).some(target => target.targetId === known.tab.targetId);
       if (alive && !account === !known.tab.browserContextId && (!account || known.tab.browserContextId === contexts.get(account)?.id)) return known.tab;
       tabs.delete(key);
-      known.tab.off();
+      if (watched?.tab === known.tab) await unwatch();
+      if (alive) await live.closeTab(known.tab); else known.tab.off();
     }
     let context = account ? await contextFor(live, account) : null;
     let tab;
     try { tab = await live.newTab({allow: allowed(), browserContextId: context?.id}); }
     catch (error) {
-      if (!context) throw error;
-      // The context is gone under a live browser: start it again from the jar.
-      await dropContext(live, account);
+      // Only a context Chrome no longer has is started again from the jar: any other failure leaves it, and the
+      // tabs of the account's other bots, alone.
+      const gone = context && session === live && !live.dead && await live.getCookies(context.id).then(() => false, () => true);
+      if (!gone) throw error;
+      await dropContext(live, account, context);
       context = await contextFor(live, account);
       tab = await live.newTab({allow: allowed(), browserContextId: context.id});
     }
+    // A browser replaced while this opened must not have the tab in its map.
+    if (session !== live) { await live.closeTab(tab); throw new Error('The browser restarted. Try again.'); }
     tabs.set(key, {botId, account, tab, url: null, title: null, typed: new Set()});
     return tab;
   }
