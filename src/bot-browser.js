@@ -42,7 +42,8 @@ export const browserLane = (store, botId) => `${store?.dbPath || ''}\u0000${botI
 
 /** Send a pending request to a local agent, or run it here. A request with no
  * capable agent stays pending, so pairing one and approving again still works. */
-export async function dispatchBrowserRequest(store, id, {actor = null, runtime = browserRuntime, needs = []} = {}) {
+export async function dispatchBrowserRequest(store, id, {actor = null, runtime = browserRuntime, needs: asked = []} = {}) {
+  const needs = agent.normalizeNeeds(asked);
   const request = (store.read().browserRequests || []).find(r => r.id === id);
   if (!request) fail('Browser request not found.', 404);
   if (request.status !== 'pending') fail('This browser request is no longer waiting.', 409);

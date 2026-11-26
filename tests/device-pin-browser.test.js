@@ -182,3 +182,12 @@ test('a pinned computer that lacks a needed feature gives the missing-feature li
   assert.equal(store.read().browserRequests[0].status, 'pending');
   assert.equal(tasks(store).length, 0, 'the other computer that has the feature is not used for a pinned bot');
 });
+
+test('needs that is not a list is read once: a string is one need, anything else is refused, never ignored', async t => {
+  const {store, pair} = await rig(t, {requests: ['br1', 'br2']});
+  pair('Laptop', ['browser.capture'], {seenAgo: 0, features: [SECRET_INPUT_V1]});
+  const here = {mode: 'auto', available: () => true, run: async () => assert.fail('ran on the server')};
+  await assert.rejects(browser.dispatchBrowserRequest(store, 'br1', {runtime: here, needs: {0: SECRET_INPUT_V1}}), e => e.status === 409 && e.message === missingFeatureLine('<invalid>'));
+  assert.equal(store.read().browserRequests[0].status, 'pending');
+  assert.equal((await browser.dispatchBrowserRequest(store, 'br2', {runtime: here, needs: SECRET_INPUT_V1})).via, 'agent', 'a string need skips the server browser like a one-item list');
+});

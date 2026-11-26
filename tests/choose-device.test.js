@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import * as agent from '../src/agent.js';
-import {chooseDevice, agentOnline, missingFeatureLine, AGENT_ONLINE_MS} from '../src/agent.js';
+import {chooseDevice, normalizeNeeds, agentOnline, missingFeatureLine, AGENT_ONLINE_MS} from '../src/agent.js';
 import {SqliteStore} from '../src/sqlite-store.js';
 import {SECRET_INPUT_V1} from '../shared/device-features.js';
 
@@ -115,5 +115,20 @@ test('fails closed: permissions that are not a list grant nothing, and needs tha
   assert.deepEqual(chooseDevice(store, {kind: 'browser.capture', deviceId: id}), {reason: 'not-pinned'});
   store.run('UPDATE agents SET permissions=? WHERE id=?', JSON.stringify(['browser.capture']), id);
   assert.equal(chooseDevice(store, {kind: 'browser.capture', needs: null}).agent.id, id);
-  assert.equal(chooseDevice(store, {kind: 'browser.capture', needs: 'secret-input-v1'}).agent.id, id);
+  // A string is a one-item list; anything else is a need nobody can meet, so the chooser refuses rather than ignore it.
+  assert.deepEqual(chooseDevice(store, {kind: 'browser.capture', needs: 'no-such-v9'}), {reason: 'missing-feature', feature: 'no-such-v9'});
+  assert.deepEqual(chooseDevice(store, {kind: 'browser.capture', needs: {0: 'x'}}), {reason: 'missing-feature', feature: '<invalid>'});
+  assert.deepEqual(chooseDevice(store, {kind: 'browser.capture', needs: 7}), {reason: 'missing-feature', feature: '<invalid>'});
+  agent.recordAgentFeatures(store, id, [SECRET_INPUT_V1]);
+  assert.equal(chooseDevice(store, {kind: 'browser.capture', needs: SECRET_INPUT_V1}).agent.id, id, 'a string need behaves like a one-item list');
+});
+
+test('normalizeNeeds: nothing is no needs, a string is one, a list is itself, anything else is a need nobody meets', () => {
+  assert.deepEqual(normalizeNeeds(undefined), []);
+  assert.deepEqual(normalizeNeeds(null), []);
+  assert.deepEqual(normalizeNeeds('a-v1'), ['a-v1']);
+  const list = ['a-v1', 'b-v1'];
+  assert.equal(normalizeNeeds(list), list);
+  assert.deepEqual(normalizeNeeds([]), []);
+  for (const odd of ['', 7, true, {}, {length: 0}, () => {}]) assert.deepEqual(normalizeNeeds(odd), ['<invalid>'], String(typeof odd));
 });

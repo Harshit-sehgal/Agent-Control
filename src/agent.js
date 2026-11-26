@@ -53,11 +53,20 @@ export const missingFeatureLine = name =>
 
 const agentMay = (row, kind) => { try { const list = JSON.parse(row.permissions || '[]'); return Array.isArray(list) && list.includes(kind); } catch { return false; } };
 
+/** The list of device features a piece of work needs, read once and failing closed: nothing is none, a string is one
+ * name, a list is itself, and anything else is a name no device reports, so the chooser refuses instead of ignoring it. */
+export function normalizeNeeds(needs) {
+  if (needs === null || needs === undefined) return [];
+  if (typeof needs === 'string' && needs) return [needs];
+  if (Array.isArray(needs)) return needs;
+  return ['<invalid>'];
+}
+
 /** The computer that gets a task of `kind`: the pinned one (`deviceId`), else the most recently seen one that may run
  * it, reports every name in `needs` and is online. Returns `{agent: row}`, `{reason}` (`no-agent`, `no-permission`,
  * `agent-offline`, `not-pinned`) or `{reason: 'missing-feature', feature}`. */
 export function chooseDevice(store, {kind, deviceId = null, needs: asked = [], nowMs = Date.now()} = {}) {
-  const needs = Array.isArray(asked) ? asked : [];
+  const needs = normalizeNeeds(asked);
   const lacks = row => {
     if (!needs.length) return null;
     const features = readAgentFeatures(store, row.id);
