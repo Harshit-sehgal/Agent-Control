@@ -446,7 +446,11 @@ const MIGRATIONS = [
   {to: 14, up(db) {
     const columns = db.prepare('PRAGMA table_info(grants)').all().map(c => c.name);
     if (!columns.includes('until')) db.exec('ALTER TABLE grants ADD COLUMN until TEXT');
-  }}];
+  }},
+  // v15: browser accounts (shared/browser-accounts.js, kv `browser_accounts`). Nothing is converted: a bot with an
+  // account must never run on the default profile, and migrate() refuses a database from a newer build, so a
+  // downgraded build cannot open this one and run account bots with someone else's sign-in.
+  {to: 15, up() {}}];
 /** Current schema version, derived from the migration list so it cannot drift.
  * Tests and operators read it. */
 export const SCHEMA_DB_VERSION = MIGRATIONS.length;
@@ -614,6 +618,8 @@ export class SqliteStore {
       siteVisits: (() => { try { return JSON.parse(this.kvGet('site_visits') || 'null'); } catch { return null; } })(),
       // Pages bots watch for changes (shared/watches.js), with what each last saw.
       watches: (() => { try { return JSON.parse(this.kvGet('watches') || '[]'); } catch { return []; } })(),
+      // Browser accounts (shared/browser-accounts.js): which computer holds each sign-in. Never a cookie value.
+      browserAccounts: (() => { try { return JSON.parse(this.kvGet('browser_accounts') || '[]'); } catch { return []; } })(),
       memory: readMemory(kind => this.db.prepare('SELECT key, doc FROM memory WHERE kind=? ORDER BY rowid').all(kind)),
     };
     const cfg = this.db.prepare('SELECT * FROM settings WHERE id=1').get();
@@ -721,6 +727,7 @@ export class SqliteStore {
       kv('usage', JSON.stringify(state.usage || {days: {}}));
       kv('site_visits', JSON.stringify(state.siteVisits || null));
       kv('watches', JSON.stringify(state.watches || []));
+      kv('browser_accounts', JSON.stringify(state.browserAccounts || []));
       const retention = state.settings?.retention ? JSON.stringify(state.settings.retention) : null;
       if (this.kvWritten.get('\0settings') !== String(retention)) {
         this.stmt('INSERT INTO settings (id,retention) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET retention=excluded.retention').run(retention);

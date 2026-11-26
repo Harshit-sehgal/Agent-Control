@@ -167,12 +167,22 @@ function assertDevicePin(c, settings) {
   if (!c.store.get('SELECT id FROM agents WHERE id=? AND revoked_at IS NULL', id)) fail('That computer is not paired. Choose one in Settings → Local agents, or use any computer.');
 }
 
+/** A bot's browser account is the owner's choice, and only an account that exists. A body with no `browserAccount` key is
+ * not asked anything; the shape check is validateBotSettings'. */
+function assertAccountPin(c, settings) {
+  if (!settings || typeof settings !== 'object' || !Object.hasOwn(settings, 'browserAccount')) return;
+  if (!allows(c.actor.role, 'owner')) fail("Only the owner can choose which browser account a bot signs in as.", 403);
+  const id = settings.browserAccount;
+  if (typeof id !== 'string' || !id) return; // empty or null clears it
+  if (!(c.store.read().browserAccounts || []).some(a => a.id === id)) fail("That browser account does not exist. Choose one in Settings → Local agents, or use the computer's own browser.");
+}
+
 export function groupRoutes(router) {
   router.add('POST', '/api/groups', 'member', async c => { const b = await c.body(); return reply(201, await c.store.update(s => wf.addGroup(s, b))); });
-  router.add('POST', '/api/groups/:group/bots', 'member', async c => { const b = await c.body(); assertDevicePin(c, b?.settings); return reply(201, await c.store.update(s => wf.addBot(s, c.params.group, b))); });
+  router.add('POST', '/api/groups/:group/bots', 'member', async c => { const b = await c.body(); assertDevicePin(c, b?.settings); assertAccountPin(c, b?.settings); return reply(201, await c.store.update(s => wf.addBot(s, c.params.group, b))); });
   // Lasting bot profile edits go to the store so they survive a reload and are
   // shared by every device, instead of living only in browser localStorage.
-  router.add('PATCH', '/api/groups/:group/bots/:bot', 'member', async c => { const b = await c.body(); assertDevicePin(c, b?.settings); return c.store.update(s => wf.updateBot(s, c.params.group, c.params.bot, b)); });
+  router.add('PATCH', '/api/groups/:group/bots/:bot', 'member', async c => { const b = await c.body(); assertDevicePin(c, b?.settings); assertAccountPin(c, b?.settings); return c.store.update(s => wf.updateBot(s, c.params.group, c.params.bot, b)); });
   router.add('DELETE', '/api/groups/:group/bots/:bot', 'member', c => failDeniedAgentTasks(c.store, s => wf.removeBot(s, c.params.group, c.params.bot)));
   router.add('PATCH', '/api/groups/:group', 'member', async c => { const b = await c.body(); return c.store.update(s => wf.updateGroup(s, c.params.group, b)); });
   router.add('DELETE', '/api/groups/:group', 'admin', c => failDeniedAgentTasks(c.store, s => wf.removeGroup(s, c.params.group)));
