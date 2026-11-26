@@ -8,7 +8,8 @@
  * agent sends with the replies Chrome gives for them, nothing more.
  */
 export function fakeCdp({pages = {}} = {}) {
-  const calls = [], listeners = new Map(), closers = [], hooks = {}, targets = new Map(), actions = [], input = [];
+  const calls = [], tagged = [], listeners = new Map(), closers = [], hooks = {}, targets = new Map(), actions = [], input = [];
+  const state = {focusSecret: false};
   let seq = 0, closed = false;
 
   const emit = (method, params = {}, sessionId, raw = params) => {
@@ -20,6 +21,12 @@ export function fakeCdp({pages = {}} = {}) {
     const page = pageOf(sessionId) || {url: 'about:blank', title: ''};
     const shown = pages[page.url] || {};
     const snapshot = {count: (shown.elements || []).length, elements: shown.elements || []};
+    // The takeover's two questions about the focused field: is it secret (answered by `focusSecret`), and the tag.
+    if (expression.startsWith('(()=>{') && expression.includes('isSecretField(el)')) {
+      // 'throws': the page expression threw, which Chrome answers with exceptionDetails and no value.
+      return state.focusSecret === 'throws' ? {result: {type: 'object', subtype: 'error'}, exceptionDetails: {text: 'Uncaught'}} : {result: {value: state.focusSecret}};
+    }
+    if (expression.includes("setAttribute('data-agent-secret'")) { tagged.push({sessionId, expression}); return {result: {}}; }
     if (expression === 'location.href') return {result: {value: page.url}};
     if (expression.startsWith('(function(){var els=')) return {result: {value: snapshot}};
     if (expression.startsWith('JSON.stringify({url: location.href')) {
@@ -70,7 +77,9 @@ export function fakeCdp({pages = {}} = {}) {
     close: () => { closed = true; },
   };
   return {
-    cdp, calls, pages, actions, input, targets,
+    cdp, calls, pages, actions, input, targets, tagged,
+    /** Whether the focused field answers "secret" to the takeover's check (true, false, or 'throws'). */
+    set focusSecret(value) { state.focusSecret = value; },
     connection: {cdp},
     emit, hook: (method, fn) => { hooks[method] = fn; },
     called: method => calls.filter(call => call.method === method),

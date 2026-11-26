@@ -8,7 +8,7 @@
  * The numbers match agent/live-input.mjs, which is the one place the device checks an
  * event: a point is clamped to the page, text is at most 2000 characters and a wheel
  * turn at most 5000 pixels, so nothing built here can be refused for its size. */
-import {hostOf} from './bot-browser.js?v=b65971fe47';
+import {hostOf} from './bot-browser.js?v=c77fd59cad';
 
 /** The page the owner sees, in CSS pixels. A frame carries its own size; this is the fallback. */
 export const PAGE = {w: 1280, h: 800};
@@ -59,12 +59,13 @@ export function keyInput(ev) {
   return [...ev.key].length === 1 ? {type: 'type', text: ev.key} : null;
 }
 
-/** Join events that can travel as one, in order: letters typed in a row, and wheel turns in a row. */
+/** Join events that can travel as one, in order: letters typed in a row, and wheel turns in a row.
+ * Text marked `secret` is never joined to anything, so the device sees where it begins and ends. */
 export function coalesce(events) {
   const out = [];
   for (const e of events || []) {
     const last = out.at(-1);
-    if (last && e.type === 'type' && last.type === 'type' && last.text.length + e.text.length <= MAX_TYPED) last.text += e.text;
+    if (last && e.type === 'type' && last.type === 'type' && !e.secret && !last.secret && last.text.length + e.text.length <= MAX_TYPED) last.text += e.text;
     else if (last && e.type === 'scroll' && last.type === 'scroll') Object.assign(last, {x: e.x, y: e.y, dx: clamp(last.dx + e.dx, -WHEEL_LIMIT, WHEEL_LIMIT), dy: clamp(last.dy + e.dy, -WHEEL_LIMIT, WHEEL_LIMIT)});
     else out.push({...e});
   }

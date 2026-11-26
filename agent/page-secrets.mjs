@@ -66,3 +66,7 @@ export function hideSecrets(text, fields) {
 
 /** The three functions as one script that declares them, to embed in a page expression. */
 export const PAGE_SECRETS_JS = [isSecretField, labelOf, hideSecrets].map(f => f.toString()).join(';');
+
+/** Tags the focused element `data-agent-secret` so the page hides it from every model, unless nothing is focused
+ * (the page body or root stands in for "nothing"): tagging those would hide the whole page. */
+export const TAG_FOCUSED_SECRET_JS = "(()=>{const el=document.activeElement;if(el&&el!==document.body&&el!==document.documentElement)el.setAttribute('data-agent-secret','1')})()";
