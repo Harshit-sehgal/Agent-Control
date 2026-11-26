@@ -842,7 +842,7 @@ export function boundBotInput(input, max=MAX_BOT_INPUT){
 const SEARCH_CHAT_TOOL='Search this chat\'s older lines: put one block in your reply, e.g. ```search_chat\n{"query": "<words>"}\n``` and you are handed up to 8 matching lines. Read-only, once. Send only that block; nothing else in the reply is kept.';
 /** The task envelope as a model other than the bot's own is sent it: the same job with `handoff: {from, to, why}`
  * after the existing keys (so an Anthropic cache head, which holds only the stable keys, is cut where it was),
- * `tools.search_chat` described, and the thread cut to the newest lines that fit `max`, whole, never shortened.
+ * `tools.search_chat` described (on the bot's own chat turn only), and the thread cut to the newest lines that fit `max`, whole, never shortened.
  * Anything that is not a JSON object is bounded as it always was. Pure. */
 export function handoffInput(input, {from, to, why}, max=MAX_BOT_INPUT){
   const text=String(input??'');
@@ -850,7 +850,9 @@ export function handoffInput(input, {from, to, why}, max=MAX_BOT_INPUT){
   try{env=JSON.parse(text);}catch{/* not an envelope */}
   if(!env||typeof env!=='object'||Array.isArray(env))return boundBotInput(text,max);
   const tools=env.tools&&typeof env.tools==='object'&&!Array.isArray(env.tools)?env.tools:{};
-  const out={...env,tools:{...tools,search_chat:SEARCH_CHAT_TOOL},handoff:{from,to,why}};
+  // Only the bot's own chat turn (the one with a thread, and not yet its hits) may search; a helper's or a teammate's prompt has none.
+  const search=Array.isArray(env.thread)&&!env.chatSearch;
+  const out={...env,...(search||env.tools!==undefined?{tools:{...tools,...(search?{search_chat:SEARCH_CHAT_TOOL}:{})}}:{}),handoff:{from,to,why}};
   if(Array.isArray(env.thread)){
     // Everything but the thread is measured first; the newest lines then take what is left, `,` between them included.
     let room=max-JSON.stringify({...out,thread:[]}).length;

@@ -64,6 +64,16 @@ test('a short thread is kept whole, and an envelope with no tools gets just the 
   assert.deepEqual(Object.keys(out.tools), ['search_chat']);
 });
 
+test('search_chat is offered only on the bot\'s own chat turn: not to a helper, a teammate, or the call that already has hits', () => {
+  const note = {from: 'a', to: 'b', why: 'x'};
+  const helper = JSON.parse(handoffInput(JSON.stringify({task: 'look', askedBy: 'Writer', note: 'Answer only this task.'}), note));
+  assert.equal(helper.tools, undefined); assert.deepEqual(helper.handoff, note);
+  const teammate = JSON.parse(handoffInput(JSON.stringify({task: 'Which source?', company: [], tools: {ask: 'a'}, note: 'Answer only this question for your teammate.'}), note));
+  assert.deepEqual(Object.keys(teammate.tools), ['ask']);
+  const second = JSON.parse(handoffInput(JSON.stringify({objective: 'o', thread: thread(2), chatSearch: {query: 'q', hits: []}}), note));
+  assert.equal(second.tools, undefined);
+});
+
 test('input that is not a JSON envelope comes back as boundBotInput gives it', () => {
   for (const input of ['hello there', '[1,2]', '"x"', 'z'.repeat(200)]) {
     assert.equal(handoffInput(input, {from: 'a', to: 'b', why: 'x'}, 100), boundBotInput(input, 100));
