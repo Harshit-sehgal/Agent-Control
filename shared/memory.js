@@ -18,6 +18,7 @@
  * one model-written consolidation pass. Both are pure and bounded.
  */
 import {cleanText} from './core.js';
+import {botSettings} from './bot-settings.js';
 
 export const MEMORY_VERSION = 1;
 export const MAX_RULES = 50;
@@ -264,6 +265,45 @@ export function noteLiked(state, key, {reply = '', chat = ''} = {}, {now = new D
   book.liked = book.liked.slice(-MAX_LIKED);
   book.updatedAt = now;
   return book;
+}
+
+const httpError = (message, status) => Object.assign(new Error(message), {status});
+const botIn = (state, id) => (state?.groups || []).flatMap(g => g.bots || []).find(b => b.id === id) || null;
+
+/** The owner's message in a bot's own chat corrects that bot's last reply: keep it for the next pass. Only a bot's
+ * own chat counts, since in a thread the next message may go to another bot (there, 👎 names the bot). Returns the
+ * correction, or null. */
+export function noteChatCorrection(state, said, {now = new Date().toISOString()} = {}) {
+  const hit = chatCorrection(state, said);
+  if (hit) noteCorrection(state, botKey(cleanText(said.botId, 80)), {...hit, chat: said.chatKey}, {now});
+  return hit;
+}
+
+/** The read-only half of `noteChatCorrection`: the correction it would keep, or null. Writes nothing. */
+export function chatCorrection(state, {botId, chatKey, text} = {}) {
+  const id = cleanText(botId, 80);
+  if (!id || chatKey !== id) return null;
+  const bot = botIn(state, id);
+  if (!bot || botSettings(bot).memory === false) return null;
+  return correctionFrom(state.chats?.[chatKey], text, id);
+}
+
+/** 👍 or 👎 on one bot reply. The reply is read from the stored chat, never from the request, and it must be that
+ * bot's reply in that chat: in a bot's own chat its lines may carry no sender; in a thread they name it. 👎 keeps a
+ * correction (the owner's note, or a plain "not right"); 👍 keeps the reply as an example of the style to keep. */
+export function feedbackOn(state, {botId, chat, messageId, kind, note = ''}, {now = new Date().toISOString()} = {}) {
+  if (kind !== 'up' && kind !== 'down') throw httpError('Say up or down.', 400);
+  const bot = botIn(state, cleanText(botId, 80));
+  if (!bot) throw httpError('Bot not found.', 404);
+  if (botSettings(bot).memory === false) throw httpError(`${bot.name}'s memory is off. Turn it on in its profile.`, 409);
+  const key = cleanText(chat, 120), list = Array.isArray(state.chats?.[key]) ? state.chats[key] : [];
+  const reply = list.find(m => m && m.id === cleanText(messageId, 64));
+  const mine = reply && reply.role === 'bot' && (reply.senderId ? reply.senderId === bot.id : key === bot.id);
+  if (!mine) throw httpError('That reply was not found.', 404);
+  const said = cleanText(note, 600) || 'The owner marked this reply as not right.';
+  if (kind === 'down') noteCorrection(state, botKey(bot.id), {said, reply: reply.text, chat: key}, {now});
+  else noteLiked(state, botKey(bot.id), {reply: reply.text, chat: key}, {now});
+  return {ok: true, bot: bot.id, kind, learn: kind === 'down' && Boolean(cleanText(note, 600))};
 }
 
 const sameItem = (a, b) => a?.at === b?.at && (a?.said ?? a?.reply) === (b?.said ?? b?.reply);

@@ -5,7 +5,7 @@
  * The event body is outside data. It is fenced and labelled as data, and it never changes what the bot may do:
  * a send or a post still goes through an ask card.
  */
-import {cleanText} from './core.js?v=d0b83e7c58';
+import {cleanText} from './core.js?v=de31f59d0b';
 
 /** A request body larger than this is refused before it is read. */
 export const MAX_EVENT_BYTES = 64 * 1024;
