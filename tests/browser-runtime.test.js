@@ -204,20 +204,20 @@ test('a dead browser is dropped even while another page is in flight', async () 
 test('the idle clock starts only once no bot has a page open', async () => {
   let closes = 0;
   const runtime = createBrowserRuntime({
-    env: env({BROWSER_IDLE_MS: '30'}),
+    env: env({BROWSER_IDLE_MS: '120'}),
     find: () => '/usr/bin/chrome',
     start: async () => ({
-      capture: async url => { await pause(url.endsWith('/a') ? 90 : 5); return {url}; },
+      capture: async url => { await pause(url.endsWith('/a') ? 360 : 20); return {url}; },
       close: async () => { closes += 1; },
     }),
   });
   const a = runtime.run({url: 'https://example.com/a', lane: A});
-  await pause(5);
+  await pause(20);
   await runtime.run({url: 'https://example.com/b', lane: B});
-  await pause(50);
+  await pause(200);
   assert.equal(closes, 0, 'B ended, but A still has a page open.');
   await a;
-  await pause(60);
+  await pause(300);
   assert.equal(closes, 1, 'Once A ends too, the idle clock closes the browser.');
   await runtime.close();
 });
