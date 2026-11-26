@@ -189,7 +189,7 @@ test('Edit only sends what changed, so a shape left alone stays the role default
   assert.deepEqual(editChanges(was, {name: 'Mailroom', reportsTo: '', shape: 'blob', tint: 5}), {settings: {reportsTo: null, shape: 'blob', tint: 5}});
 });
 
-test('the Computer choice: any computer first, each paired one by name, and a removed pin still shows', () => {
+test('the Runs on choice: any computer first, each paired one by name, and a removed pin still shows', () => {
   const agents = [{id: 'a1', name: 'Laptop', status: 'online'}, {id: 'a2', name: 'Desk PC', status: 'stale'}, {id: 'a3', name: 'Old', status: 'revoked'}];
   assert.deepEqual(deviceOptions(agents, null), [{id: '', label: 'Any computer', selected: true}, {id: 'a1', label: 'Laptop', selected: false}, {id: 'a2', label: 'Desk PC', selected: false}]);
   assert.equal(deviceOptions(agents, 'a2').find(o => o.selected).id, 'a2');
@@ -210,7 +210,7 @@ test('Edit saves the computer only when it changed, and keeps a pin it did not s
   assert.equal(editChanges(was, {...same, device: 'a1'}), null);
   assert.deepEqual(editChanges(was, {...same, device: 'a2'}), {settings: {device: 'a2'}});
   assert.deepEqual(editChanges(was, {...same, device: ''}), {settings: {device: null}});
-  assert.deepEqual(editChanges(was, {...same, name: 'Scout'}), {name: 'Scout'}, 'a rename by someone who sees no Computer row keeps the pin');
+  assert.deepEqual(editChanges(was, {...same, name: 'Scout'}), {name: 'Scout'}, 'a rename by someone who sees no Runs on row keeps the pin');
 });
 
 // ---- activity ----

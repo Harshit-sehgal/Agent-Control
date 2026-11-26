@@ -317,7 +317,7 @@ function botForm({id, attrs = '', bot = null, look, primary = false, note, extra
   </form>`;
 }
 
-/** The owner's Computer row on Edit: which paired computer runs this bot, or any. Drawn when the page has loaded the
+/** The owner's Runs on row on Edit: which paired computer runs this bot, or any. Drawn when the page has loaded the
  * list, only for the owner and only when a computer is paired; anyone else's form has no `device` field, so saving
  * it never sends one and a pin is kept. */
 async function fillDevices(botId) {
@@ -328,7 +328,7 @@ async function fillDevices(botId) {
   const options = deviceOptions(res?.agents, JSON.parse(form.dataset.was || '{}').device);
   if (!options.length) return;
   const row = document.createElement('template');
-  row.innerHTML = `<label class="nb-boss nb-device"><span>Computer</span><select class="input" name="device">${options.map(o => `<option value="${esc(o.id)}"${o.selected ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}</select></label>`;
+  row.innerHTML = `<label class="nb-boss nb-device"><span>Runs on</span><select class="input" name="device">${options.map(o => `<option value="${esc(o.id)}"${o.selected ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}</select></label>`;
   slot.replaceWith(row.content);
 }
 

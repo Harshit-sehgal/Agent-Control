@@ -281,14 +281,15 @@ others wait their turn in order; a bot never touches another bot's tab.
   the step it is on, runs no further step, waits for the hand back and then
   answers with the page as you left it. Other bots keep working, on that
   computer and on the server's browser, and a model run no longer waits behind
-  a parked browser task. A takeover has no clock: you hold the browser until
+  a parked browser task (unless `AGENT_CONCURRENCY=1`, which runs one task at a
+  time). A takeover has no clock: you hold the browser until
   you hand back (set `AGENT_TAKEOVER_IDLE_MS` to end a forgotten one). You
   drive one tab at a time.
 - **Parallel work:** a computer runs up to `AGENT_CONCURRENCY` tasks at once
   (default 3, a whole number from 1 to 8; above 8 is 8 and anything else is 3).
   One bot's page tasks still run one at a time, and each CLI engine runs one
   model run at a time.
-- **Choose a bot's computer:** on a bot's Edit page, **Computer** lets the
+- **Choose a bot's computer:** on a bot's Edit page, **Runs on** lets the
   owner pin that bot to one paired computer for its pages, its model runs and
   its MCP calls on the device. It shows only to the owner, and only when this
   workspace has a paired computer or the bot is already pinned. Leave it on

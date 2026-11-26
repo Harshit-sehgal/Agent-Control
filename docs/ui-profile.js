@@ -5,23 +5,23 @@
  *
  * Pages repaint only when the route changes, so each in-place change (a switch, a
  * forgotten note, a picked colour) updates its own node instead. */
-import {SHAPES, COLORS, face} from './ui-face.js?v=0311e05212';
-import {botStatus, botIsManager} from './ui-company.js?v=0311e05212';
-import {primaryOf} from './company.js?v=0311e05212';
-import {resetModelSearch} from './ui-admin.js?v=0311e05212';
-import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker, COLOR_NAMES} from './ui-kit.js?v=0311e05212';
-import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js?v=0311e05212';
-import {scheduleRows, scheduleTaskBody, SCHEDULE_OFTEN, scheduleChoice} from './schedules.js?v=0311e05212';
-import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=0311e05212';
-import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=0311e05212';
-import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=0311e05212';
-import {sendChat} from './ui-chat.js?v=0311e05212';
-import {computerPage as computerView, computerLabel, keysOwned, thumbSlot} from './ui-computer-view.js?v=0311e05212';
+import {SHAPES, COLORS, face} from './ui-face.js?v=bb93f46435';
+import {botStatus, botIsManager} from './ui-company.js?v=bb93f46435';
+import {primaryOf} from './company.js?v=bb93f46435';
+import {resetModelSearch} from './ui-admin.js?v=bb93f46435';
+import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker, COLOR_NAMES} from './ui-kit.js?v=bb93f46435';
+import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js?v=bb93f46435';
+import {scheduleRows, scheduleTaskBody, SCHEDULE_OFTEN, scheduleChoice} from './schedules.js?v=bb93f46435';
+import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=bb93f46435';
+import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=bb93f46435';
+import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=bb93f46435';
+import {sendChat} from './ui-chat.js?v=bb93f46435';
+import {computerPage as computerView, computerLabel, keysOwned, thumbSlot} from './ui-computer-view.js?v=bb93f46435';
 import {
   MAX_NAME, MAX_JOB, hasJob, roleLine, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, OUTSIDE_NOTE, lookOf, newBotDefaults, deviceOptions,
   newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, closeTarget, watchRows,
-} from './ui-profile-model.js?v=0311e05212';
-import {WATCH_EVERY} from './watches.js?v=0311e05212';
+} from './ui-profile-model.js?v=bb93f46435';
+import {WATCH_EVERY} from './watches.js?v=bb93f46435';
 
 const el = id => document.getElementById(id);
 const SHAPE_LABELS = {rounded: 'Rounded square', circle: 'Circle', hexagon: 'Hexagon', pebble: 'Pebble', drop: 'Drop', shield: 'Shield', arch: 'Arch', egg: 'Egg', blob: 'Blob', bean: 'Bean'};
@@ -317,7 +317,7 @@ function botForm({id, attrs = '', bot = null, look, primary = false, note, extra
   </form>`;
 }
 
-/** The owner's Computer row on Edit: which paired computer runs this bot, or any. Drawn when the page has loaded the
+/** The owner's Runs on row on Edit: which paired computer runs this bot, or any. Drawn when the page has loaded the
  * list, only for the owner and only when a computer is paired; anyone else's form has no `device` field, so saving
  * it never sends one and a pin is kept. */
 async function fillDevices(botId) {
@@ -328,7 +328,7 @@ async function fillDevices(botId) {
   const options = deviceOptions(res?.agents, JSON.parse(form.dataset.was || '{}').device);
   if (!options.length) return;
   const row = document.createElement('template');
-  row.innerHTML = `<label class="nb-boss nb-device"><span>Computer</span><select class="input" name="device">${options.map(o => `<option value="${esc(o.id)}"${o.selected ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}</select></label>`;
+  row.innerHTML = `<label class="nb-boss nb-device"><span>Runs on</span><select class="input" name="device">${options.map(o => `<option value="${esc(o.id)}"${o.selected ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}</select></label>`;
   slot.replaceWith(row.content);
 }
 

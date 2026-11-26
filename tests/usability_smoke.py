@@ -229,13 +229,14 @@ async def edit_pins_a_bot_to_one_computer(page, base):
     await open_edit()
     select = page.locator('#edit-bot-form select[name=device]')
     await expect(select).to_have_count(1)
+    await expect(page.locator('#edit-bot-form .nb-device span')).to_have_text('Runs on')
     values = await select.locator('option').evaluate_all('o => o.map(x => [x.value, x.textContent])')
     assert values == [['', 'Any computer'], ['a1', 'Laptop'], ['a2', 'Desk PC']], values
     await select.select_option('a1')
     await page.locator('#edit-bot-form button[type=submit]').click()
     await expect(page.locator('#toast')).to_have_text('Saved.')
     assert company_bot(await api_state(page), 'Writer')['settings']['device'] == 'a1'
-    # A member sees no Computer row; renaming the bot leaves its pin where it was.
+    # A member sees no Runs on row; renaming the bot leaves its pin where it was.
     await be('member')
     await open_edit()
     await expect(page.locator('#edit-bot-form .nb-boss', has_text='Manager')).to_have_count(1)
@@ -251,7 +252,7 @@ async def edit_pins_a_bot_to_one_computer(page, base):
     await page.evaluate(f"location.hash = '#profile/{writer}'")
     await page.evaluate(f"location.hash = '#profile/{writer}/edit'")
     await expect(page.locator('#edit-bot-form select[name=device]')).to_have_value('a1')
-    assert await overflow(page) <= 0, 'the Computer row overflows the phone'
+    assert await overflow(page) <= 0, 'the Runs on row overflows the phone'
     # Every computer revoked, the bot still pinned: the owner still sees the pin and Any computer clears it.
     for agent in server.agents:
         agent['status'] = 'revoked'
