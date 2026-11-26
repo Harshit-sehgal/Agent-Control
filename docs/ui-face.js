@@ -7,7 +7,7 @@
  * file just names the classes (face--sway, face--nod, face--blink2, face--hop)
  * and the state (face--awake|asleep|working|waiting). Muting on dark is a CSS
  * filter on `.face`, since the theme is not known here. */
-import {esc} from './ui-kit.js?v=6c8c152065';
+import {esc} from './ui-kit.js?v=361705c53b';
 
 export const SHAPES = ['rounded', 'circle', 'hexagon', 'pebble', 'drop', 'shield', 'arch', 'egg', 'blob', 'bean'];
 

@@ -2100,10 +2100,12 @@ async def share_target_prefills_never_sends(page, base):
     await expect(page.locator('#toast.show')).to_have_count(0)
 
 
-async def teach_from_a_reply(page, base):
-    """A bot reply has Copy and Teach on hover; Teach keeps what the owner types as that bot's own rule, on one line,
-    and says so. The bar takes no room in the bubble."""
+async def reply_popover(page, base):
+    """No buttons on a reply: a one-time tip says to hold it. Right-click opens the popover with 👍 / 👎, the ask box
+    and the actions; Escape closes it. Pin shows the pinned strip, 👎 asks what was wrong and thanks, and Ask about
+    this sends the owner's words under a quote of the reply."""
     await open_app(page, base, bots=EXTRA_BOTS)
+    await page.evaluate("localStorage.removeItem('ac-hold-hint'); localStorage.removeItem('ac-msg-pins')")
     await patch_state(page, f'''
         s.chats[{PRIMARY!r}] = [
           {{id: 'q', role: 'user', text: 'Draft my week', at: new Date(Date.now() - 2000).toISOString()}},
@@ -2111,21 +2113,40 @@ async def teach_from_a_reply(page, base):
     await page.goto(f'{base}/index.html#bot/{PRIMARY}')
     reply = page.locator('#cv-log .cv-bot').last
     await expect(reply).to_contain_text('very long plan')
-    bubble = await reply.locator('.cv-body').bounding_box()
-    words = await reply.locator('.md').bounding_box()
-    assert bubble['y'] + bubble['height'] - (words['y'] + words['height']) < 20, 'the bar must not add room to the bubble'
-    await reply.hover()
-    await expect(reply.locator('.cv-acts')).to_have_css('opacity', '1')
-    await expect(reply.get_by_role('button', name='Copy')).to_be_visible()
-    await reply.get_by_role('button', name='Teach').click()
-    modal = page.locator('#modal')
-    await expect(modal).to_contain_text('Teach Atlas')
-    await modal.locator('textarea').fill('Keep plans\n under five lines.')
-    await modal.get_by_role('button', name='Keep this rule').click()
-    await expect(modal).to_be_hidden()
-    await expect(page.locator('#toast')).to_contain_text('Atlas will do that from now on')
-    book = await page.evaluate("id => window.AGENT_API('/api/memory?bot=' + id).then(m => JSON.stringify(m))", PRIMARY)
-    assert 'Keep plans under five lines.' in book, book[:400]
+    await expect(reply.locator('.cv-acts')).to_have_count(0)
+    await expect(reply.locator('.cv-hint')).to_contain_text('hold a reply for more')
+
+    await reply.locator('.md').click(button='right')
+    menu = page.locator('.rmenu')
+    await expect(menu).to_be_visible()
+    for name in ['Copy', 'Try again', 'Share', 'Pin', 'Start a thread', 'Save as template']:
+        await expect(menu.get_by_role('menuitem', name=name)).to_be_visible()
+    await expect(menu.get_by_label('Ask about this reply')).to_be_visible()
+    await expect(page.locator('#cv-log .cv-hint')).to_have_count(0)
+    await page.keyboard.press('Escape')
+    await expect(menu).to_have_count(0)
+
+    await reply.locator('.md').click(button='right')
+    await page.locator('.rmenu').get_by_role('menuitem', name='Pin').click()
+    await expect(page.locator('#cv-pins')).to_contain_text('1 pinned')
+
+    await reply.locator('.md').click(button='right')
+    await page.locator('.rmenu').get_by_role('button', name='Not right').click()
+    why = page.locator('.rmenu').get_by_label('What was wrong?')
+    await expect(why).to_be_focused()
+    await why.fill('Too long, three lines at most')
+    await why.press('Enter')
+    await expect(page.locator('.rmenu .rm-thanks')).to_have_text('Thanks, noted')
+    await page.keyboard.press('Escape')
+
+    await reply.locator('.md').click(button='right')
+    ask = page.locator('.rmenu').get_by_label('Ask about this reply')
+    await ask.fill('Why so long?')
+    await ask.press('Enter')
+    await expect(page.locator('.rmenu')).to_have_count(0)
+    mine = page.locator('#cv-log .cv-me').last
+    await expect(mine.locator('blockquote')).to_contain_text('very long plan')
+    await expect(mine).to_contain_text('Why so long?')
 
 
 async def watch_a_page(page, base):
@@ -2748,7 +2769,7 @@ async def main():
             await h.scenario('connectors: no Google Cloud form; an older Google connection offers Gmail\'s MCP server', older_google_connection_listed)
             await h.scenario('shortcuts: ? opens the sheet (not while typing), comma opens Settings, Look has the row', shortcuts_sheet)
             await h.scenario('share: a shared link prefills the lead bot\'s message box and sends nothing', share_target_prefills_never_sends)
-            await h.scenario('teach: a reply\'s Teach keeps a rule for that bot; the bar takes no room', teach_from_a_reply)
+            await h.scenario('reply popover: hold or right-click a reply for feedback, ask and actions', reply_popover)
             await h.scenario('watch: a page is watched from the Schedule page; pause, remove, a bad address, the demo has no browser', watch_a_page)
             await h.scenario('connectors: ?google=connected toasts once, strips the address and opens Connectors; an error says why', google_return_toast_and_clean_address)
             await h.scenario('models: a subscription is a name and an engine with no key field, and its row says where it is signed in', subscription_provider_and_cli_status)

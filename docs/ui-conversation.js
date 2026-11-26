@@ -7,33 +7,34 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=6c8c152065';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=6c8c152065';
-import {requestOfMessage} from './bot-browser.js?v=6c8c152065';
-import {validHttpUrl} from './core.js?v=6c8c152065';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou, teachPrompt, teachRule} from './ui-model.js?v=6c8c152065';
-import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=6c8c152065';
-import {isPrimary} from './company.js?v=6c8c152065';
-import {hasJob, modelChip} from './ui-profile-model.js?v=6c8c152065';
-import {scheduleTaskBody} from './schedules.js?v=6c8c152065';
-import {briefingTaskBody} from './briefing.js?v=6c8c152065';
-import {feed, fileStrip} from './ui-feed.js?v=6c8c152065';
-import {attachButton, chipsSlot, wireAttach} from './ui-attach.js?v=6c8c152065';
-import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js?v=6c8c152065';
-import {askCard} from './ui-asks.js?v=6c8c152065';
-import {UNTIL_CHOICES, untilFor} from './asks.js?v=6c8c152065';
-import {undoToast} from './ui-settings.js?v=6c8c152065';
-import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=6c8c152065';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=6c8c152065';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=6c8c152065';
-import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=6c8c152065';
-import {toast, confirmSheet, askSheet} from './ui-dialogs.js?v=6c8c152065';
-import {siteChip, thumbSlot} from './ui-computer-view.js?v=6c8c152065';
-import {cliChoice} from './ui-connect-model.js?v=6c8c152065';
-import {connectAppNow} from './ui-connect.js?v=6c8c152065';
-import {appById} from './app-catalog.js?v=6c8c152065';
-import {templateChipsHtml, templateButton} from './ui-templates.js?v=6c8c152065';
-import {usageWords} from './usage.js?v=6c8c152065';
+import {OFFJOB_CHOICES} from './off-job.js?v=361705c53b';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=361705c53b';
+import {requestOfMessage} from './bot-browser.js?v=361705c53b';
+import {validHttpUrl} from './core.js?v=361705c53b';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=361705c53b';
+import {hintFor, hintHtml, pinsOf, pinsStripHtml, HINT_KEY, PINS_MSG_KEY} from './reply-menu.js?v=361705c53b';
+import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=361705c53b';
+import {isPrimary} from './company.js?v=361705c53b';
+import {hasJob, modelChip} from './ui-profile-model.js?v=361705c53b';
+import {scheduleTaskBody} from './schedules.js?v=361705c53b';
+import {briefingTaskBody} from './briefing.js?v=361705c53b';
+import {feed, fileStrip} from './ui-feed.js?v=361705c53b';
+import {attachButton, chipsSlot, wireAttach} from './ui-attach.js?v=361705c53b';
+import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js?v=361705c53b';
+import {askCard} from './ui-asks.js?v=361705c53b';
+import {UNTIL_CHOICES, untilFor} from './asks.js?v=361705c53b';
+import {undoToast} from './ui-settings.js?v=361705c53b';
+import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=361705c53b';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=361705c53b';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen, loadLocal, saveLocal, changed} from './ui-store.js?v=361705c53b';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=361705c53b';
+import {toast, confirmSheet} from './ui-dialogs.js?v=361705c53b';
+import {siteChip, thumbSlot} from './ui-computer-view.js?v=361705c53b';
+import {cliChoice} from './ui-connect-model.js?v=361705c53b';
+import {connectAppNow} from './ui-connect.js?v=361705c53b';
+import {appById} from './app-catalog.js?v=361705c53b';
+import {templateChipsHtml, templateButton} from './ui-templates.js?v=361705c53b';
+import {usageWords} from './usage.js?v=361705c53b';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -72,6 +73,7 @@ export function conversationShell(conv) {
       <div class="cv-title"><h1>${esc(conv.name)}</h1><span id="cv-line"></span></div>
       ${bot ? `${thumbSlot(bot.id)}<span id="cv-model">${modelChipHtml(bot)}</span>` : ''}
     </header>
+    <div id="cv-pins"></div>
     <div class="cv-scroll" id="cv-scroll"><div class="cv-col" id="cv-log" role="log" aria-live="off" aria-label="Conversation"></div></div>
     <form id="chat-form" class="cv-composer" autocomplete="off">${chipsSlot}<div class="cv-box">
       ${attachButton(write)}${templateButton()}
@@ -263,13 +265,13 @@ function botEntry(m, conv) {
   const bot = m.senderId ? findBot(m.senderId) : conv.bot, name = bot?.name || m.senderName || conv.name;
   // The name says who is talking in a thread; its job is on its profile, not on every reply.
   const own = !conv.isTeam && bot && bot === conv.bot ? ' own' : '';
-  // Copy and Teach sit under the words: Teach turns "not like that" into a rule the bot keeps (see `teach-reply`).
-  const acts = `<div class="cv-acts">${btn('Copy', 'copy-reply', {small: true, glyph: 'copy'})}${bot && canWrite() ? btn('Teach', 'teach-reply', {small: true, glyph: 'spark', data: {bot: bot.id}}) : ''}</div>`;
-  return `<div class="cv-bot${own}" data-m="${esc(m.id)}" style="--t:${tintOf(bot, name)}">${botFace(bot, name, 36)}<div class="cv-body"><div class="cv-name">${esc(name)}</div><div class="md">${md(m.text)}</div>${acts}</div></div>`;
+  // Holding the reply (right-click, or the menu key when it has focus) opens its popover: shared/ui-reply-menu.js.
+  const tip = m.id === hintId ? hintHtml() : '';
+  return `<div class="cv-bot${own}" data-m="${esc(m.id)}" tabindex="0" aria-haspopup="menu" style="--t:${tintOf(bot, name)}">${botFace(bot, name, 36)}<div class="cv-body"><div class="cv-name">${esc(name)}</div><div class="md">${md(m.text)}</div>${tip}</div></div>`;
 }
 
-/** The words of the reply a Copy or Teach button sits under, as the owner sees them. */
-const replyText = b => b.closest('.cv-bot')?.querySelector('.md')?.innerText?.trim() || '';
+/** The reply that shows the one-time "hold a reply" tip in this paint, if any. */
+let hintId = null;
 
 /** Where an attached file is read from: the server route, or the demo's own copy. */
 const fileSrc = ref => isStaticDemo() ? store.state?.attachments?.[ref.id]?.url || '' : `/api/attachments/${ref.id}`;
@@ -381,6 +383,8 @@ export function renderConversation() {
   if (who && conv.bot && who.dataset.state !== awake(conv.bot.id)) { who.dataset.state = awake(conv.bot.id); who.innerHTML = botFace(conv.bot, conv.name, 36, {state: who.dataset.state}); }
   if (born.conv !== conv.id) { born.conv = conv.id; born.seen = new Set(); born.fresh = false; }
   const entries = feed({items: timeline({conv, state: store.state, messages: store.messages}), state: store.state, key: conv.id, now: Date.now()});
+  hintId = hintFor(entries, Boolean(loadLocal(HINT_KEY, false)));
+  paintPins(conv, entries);
   announce(conv, entries);
   watchUndo(entries);
   const asker = askerOf(conv), live = entries.some(e => e.kind === 'pill' && !e.pill.done) || entries.some(e => e.kind === 'limit');
@@ -399,6 +403,17 @@ export function renderConversation() {
   if (pinned || opened) scroller.scrollTop = scroller.scrollHeight;
   log.dataset.conv = conv.id;
   showHit(conv);
+}
+
+/** The pinned-replies strip under the header (per person, on this device), kept open while it is redrawn. */
+function paintPins(conv, entries) {
+  const slot = el('cv-pins'); if (!slot) return;
+  const shown = new Map(entries.filter(e => e.kind === 'bot').map(e => [e.message.id, e.message]));
+  const html = pinsStripHtml(pinsOf(loadLocal(PINS_MSG_KEY, {}), conv.id, [...shown.keys()]).map(id => shown.get(id)));
+  if (slot.dataset.html === html) return;
+  const open = slot.querySelector('.cv-pins-head')?.getAttribute('aria-expanded') === 'true';
+  slot.dataset.html = html; slot.innerHTML = html;
+  if (open) { slot.querySelector('.cv-pins-head')?.setAttribute('aria-expanded', 'true'); slot.querySelector('.cv-pins-list')?.removeAttribute('hidden'); }
 }
 
 /** A message search hit opened this chat: bring that line into view and light it up once. It waits while the line
@@ -477,25 +492,20 @@ export const conversationChanges = {
 
 export const conversationActions = {
   'ask-answer': b => answerAsk(b.dataset.id, b.dataset.choice),
-  'copy-reply': async b => {
-    try { await navigator.clipboard.writeText(replyText(b)); toast('Copied.'); }
-    catch { toast('This browser did not allow copying. Select the words and copy them instead.', true); }
+  // The pinned-replies strip: open or close its list, or bring one pinned reply into view.
+  'pins-toggle': b => {
+    const open = b.getAttribute('aria-expanded') !== 'true';
+    b.setAttribute('aria-expanded', String(open));
+    b.nextElementSibling?.toggleAttribute('hidden', !open);
   },
-  // A wrong reply becomes a fix in one tap: the owner says what to do from now on, and it is kept as that bot's own
-  // rule, the same as one added on its profile. Nothing is sent to the bot now; its next turn reads the rule.
-  'teach-reply': async b => {
-    const bot = findBot(b.dataset.bot);
-    if (!bot) return;
-    const prompt = teachPrompt({botName: bot.name});
-    const answer = await askSheet(prompt.title, {sub: prompt.sub, placeholder: prompt.placeholder, submit: 'Keep this rule'});
-    if (answer == null) return;
-    const text = teachRule(answer);
-    if (!text) { toast('Write a little more: a rule needs at least 4 characters.', true); return; }
-    // `label` names the bot's rule book if this is its first rule (as on its profile), not the rule.
-    await api('/api/memory/rules', 'POST', {bot: bot.id, text, label: bot.name});
-    await sync();
-    toast(`${bot.name} will do that from now on. Edit it on its profile.`);
+  'pin-jump': b => {
+    const node = el('cv-log')?.querySelector(`.cv-bot[data-m="${CSS.escape(b.dataset.m)}"]`);
+    if (!node) return;
+    node.scrollIntoView({block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'});
+    node.classList.add('cv-hit');
+    setTimeout(() => node.classList.remove('cv-hit'), 2400);
   },
+  'hint-close': () => { saveLocal(HINT_KEY, true); changed('thread'); },
   // Switch off a rule a bot learned; a rule already deleted on the profile just reads as switched off.
   'learned-undo': async b => {
     b.disabled = true;

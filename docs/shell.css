@@ -508,12 +508,41 @@ body[data-paused] .chrome{--pad-t:calc(var(--pause-h) + env(safe-area-inset-top,
 .toast-act{pointer-events:auto;margin-left:10px;padding:2px 4px;font:inherit;font-weight:700;color:inherit;text-decoration:underline;text-underline-offset:3px}
 @media(pointer:coarse){.toast-act{min-height:44px}}
 
-/* Copy and Teach on a bot reply: a small bar on the bubble's lower edge, in the gap below it, so it takes no room.
-   It shows while the pointer is on the reply or a key reaches it; on a touch screen the newest reply keeps it and a
-   tap brings it up on the others. */
+/* The reply popover (shared/ui-reply-menu.js): hold a bot reply, right-click it, or press the menu key on it.
+   The held reply lifts a little; on a touch screen its words are not selectable (the hold is ours) until Select text. */
 .cv-body{position:relative}
-.cv-acts{position:absolute;right:10px;bottom:-17px;display:flex;gap:2px;padding:2px;background:var(--raised);border:1px solid var(--line);border-radius:999px;box-shadow:0 2px 8px var(--shade);opacity:0;pointer-events:none;transition:opacity .15s;z-index:1}
-.cv-acts .btn.small{min-height:28px;padding:2px 10px;color:var(--muted)}
-.cv-bot:hover .cv-acts,.cv-acts:focus-within{opacity:1;pointer-events:auto}
-@media (hover:none){.cv-col>.cv-bot:not(:has(~ .cv-bot)) .cv-acts{opacity:1;pointer-events:auto}}
-@media (prefers-reduced-motion:reduce){.cv-acts{transition:none}}
+.cv-bot{border-radius:20px;outline-offset:3px}
+.cv-bot .cv-body{transition:transform .16s ease,box-shadow .16s ease}
+.cv-bot.cv-held .cv-body{transform:scale(1.015);box-shadow:0 6px 18px var(--shade)}
+@media (hover:none){.cv-bot:not(.cv-select) .md{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}.cv-bot .md a{-webkit-touch-callout:default}}
+.cv-bot.cv-select .md{-webkit-user-select:text;user-select:text}
+.rmenu{position:fixed;z-index:60;width:min(300px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;display:flex;flex-direction:column;gap:6px;padding:8px;background:var(--surface);border:1px solid var(--line);border-radius:18px;box-shadow:0 12px 32px var(--shade);animation:rm-in .14s ease-out}
+.rmenu[data-side="above"]{transform-origin:bottom left}.rmenu[data-side="below"]{transform-origin:top left}
+@keyframes rm-in{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:none}}
+.rm-about{margin:2px 6px;font-size:12px;color:var(--muted)}
+.rm-fb{display:flex;align-items:center;gap:4px;padding:0 2px}
+.rm-thumb{display:grid;place-items:center;width:40px;height:40px;border-radius:12px;color:var(--muted)}
+.rm-thumb:hover,.rm-thumb[aria-pressed="true"]{background:var(--raised);color:var(--text)}
+.rm-thanks{margin-left:6px;font-size:12px;color:var(--muted)}
+.rm-why,.rm-ask{display:flex;gap:6px;align-items:center}
+.rm-why .input,.rm-ask .input{flex:1;min-width:0;min-height:40px}
+.rm-send{display:grid;place-items:center;width:40px;height:40px;border-radius:12px;background:var(--raised);color:var(--text)}
+.rm-list{display:flex;flex-direction:column;border-top:1px solid var(--line);padding-top:4px}
+.rm-row{display:flex;align-items:center;gap:12px;min-height:44px;padding:0 10px;border-radius:12px;text-align:left;color:var(--text)}
+.rm-row svg{color:var(--muted)}
+.rm-row:hover,.rm-row:focus-visible,.rm-thumb:focus-visible{background:var(--raised)}
+/* Pinned replies (per person) and the one-time tip. */
+#cv-pins:empty{display:none}
+.cv-pins{border-bottom:1px solid var(--line);padding:4px 12px}
+.cv-pins-head{display:flex;align-items:center;gap:6px;min-height:36px;font-size:13px;color:var(--muted)}
+.cv-pins-list{display:flex;flex-direction:column;gap:2px;padding-bottom:6px}
+.cv-pin-row{display:flex;justify-content:space-between;gap:12px;min-height:40px;padding:6px 10px;border-radius:12px;text-align:left;font-size:13px}
+.cv-pin-row:hover{background:var(--raised)}
+.cv-pin-row span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cv-pin-row small{flex:none;color:var(--muted)}
+.cv-hint{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:12px;color:var(--muted)}
+.cv-hint-x{display:grid;place-items:center;width:28px;height:28px;border-radius:999px}
+@media(pointer:coarse){.cv-hint-x{width:44px;height:44px}}
+.md blockquote{margin:4px 0 8px;padding:2px 0 2px 10px;border-left:3px solid var(--line);color:var(--muted)}
+.md blockquote p{margin:0}
+@media (prefers-reduced-motion:reduce){.rmenu{animation:none}.cv-bot .cv-body{transition:none}.cv-bot.cv-held .cv-body{transform:none}}

@@ -5,21 +5,21 @@
  * They throw errors carrying an HTTP `status` so the same rules apply to the
  * Node HTTP routes and to any browser-local transport.
  */
-import {activity,cleanText,initialState} from './core.js?v=6c8c152065';
-import {fail} from './errors.js?v=6c8c152065';
-import {cancelTask} from './tasks.js?v=6c8c152065';
-import {normalizeRetention} from './retention.js?v=6c8c152065';
-import * as contracts from './contracts.js?v=6c8c152065';
-import {pruneChats, releaseChatWork} from './chats.js?v=6c8c152065';
-import {denyBrowserRequest} from './bot-browser.js?v=6c8c152065';
-import {BUSY_STATUSES} from './coordination.js?v=6c8c152065';
-import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=6c8c152065';
-import {memoryState} from './memory.js?v=6c8c152065';
-import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=6c8c152065';
-import {freshGuard} from './runaway.js?v=6c8c152065';
-import {sweepGrants, forgetBotAsks, lapseOrphans} from './asks.js?v=6c8c152065';
-import {assertManager, releaseReports, companyBots, PRIMARY_GROUP, primaryOf, isPrimary} from './company.js?v=6c8c152065';
-import {logActivity} from './activity-log.js?v=6c8c152065';
+import {activity,cleanText,initialState} from './core.js?v=361705c53b';
+import {fail} from './errors.js?v=361705c53b';
+import {cancelTask} from './tasks.js?v=361705c53b';
+import {normalizeRetention} from './retention.js?v=361705c53b';
+import * as contracts from './contracts.js?v=361705c53b';
+import {pruneChats, releaseChatWork} from './chats.js?v=361705c53b';
+import {denyBrowserRequest} from './bot-browser.js?v=361705c53b';
+import {BUSY_STATUSES} from './coordination.js?v=361705c53b';
+import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=361705c53b';
+import {memoryState} from './memory.js?v=361705c53b';
+import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=361705c53b';
+import {freshGuard} from './runaway.js?v=361705c53b';
+import {sweepGrants, forgetBotAsks, lapseOrphans} from './asks.js?v=361705c53b';
+import {assertManager, releaseReports, companyBots, PRIMARY_GROUP, primaryOf, isPrimary} from './company.js?v=361705c53b';
+import {logActivity} from './activity-log.js?v=361705c53b';
 
 export const SCHEMA_VERSION = 3;
 

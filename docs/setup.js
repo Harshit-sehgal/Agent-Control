@@ -26,22 +26,22 @@
  *   make itself the primary bot, save a rule without the owner's tap, or reach a route the owner could not.
  *
  * Pure and browser-safe: the server reads replies with it and the UI paints the card from it. */
-import {cleanText, validHttpUrl} from './core.js?v=6c8c152065';
-import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=6c8c152065';
-import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=6c8c152065';
-import {controlFence} from './reply-blocks.js?v=6c8c152065';
-import {companyBots, primaryOf} from './company.js?v=6c8c152065';
-import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices, isAskAction} from './asks.js?v=6c8c152065';
-import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=6c8c152065';
-import {grantWhat, payAlwaysText} from './ui-asks.js?v=6c8c152065';
-import {COLOR_NAMES} from './ui-kit.js?v=6c8c152065';
-import {SHAPES} from './company.js?v=6c8c152065';
-import {limitsOf, BACKSTOP} from './limits.js?v=6c8c152065';
-import {APPS, appById} from './app-catalog.js?v=6c8c152065';
-import {PRESETS, presetOf} from './presets.js?v=6c8c152065';
-import {titleOf as templateTitle} from './templates.js?v=6c8c152065';
-import {briefingSchedule} from './briefing.js?v=6c8c152065';
-import {monthByBot, tokensOf, short as shortCount} from './usage.js?v=6c8c152065';
+import {cleanText, validHttpUrl} from './core.js?v=361705c53b';
+import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=361705c53b';
+import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=361705c53b';
+import {controlFence} from './reply-blocks.js?v=361705c53b';
+import {companyBots, primaryOf} from './company.js?v=361705c53b';
+import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices, isAskAction} from './asks.js?v=361705c53b';
+import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=361705c53b';
+import {grantWhat, payAlwaysText} from './ui-asks.js?v=361705c53b';
+import {COLOR_NAMES} from './ui-kit.js?v=361705c53b';
+import {SHAPES} from './company.js?v=361705c53b';
+import {limitsOf, BACKSTOP} from './limits.js?v=361705c53b';
+import {APPS, appById} from './app-catalog.js?v=361705c53b';
+import {PRESETS, presetOf} from './presets.js?v=361705c53b';
+import {titleOf as templateTitle} from './templates.js?v=361705c53b';
+import {briefingSchedule} from './briefing.js?v=361705c53b';
+import {monthByBot, tokensOf, short as shortCount} from './usage.js?v=361705c53b';
 
 export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'schedule', 'remove', 'open', 'signin', 'pause', 'limits', 'basics', 'forget', 'disconnect', 'thread', 'reconnect', 'connect', 'memory', 'template', 'preset', 'briefing'];
 /** The bot settings a bot may propose. Not the primary role, the browser approval mode, or layout (pins, order). */

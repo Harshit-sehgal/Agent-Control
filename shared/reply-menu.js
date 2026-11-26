@@ -8,6 +8,9 @@
 import {esc, plain, icon, stamp} from './ui-kit.js';
 
 export const MAX_MSG_PINS = 20;
+/** Per-person keys (saveLocal, never sent): pinned replies per chat, and whether the hold tip was seen. */
+export const PINS_MSG_KEY = 'ac-msg-pins';
+export const HINT_KEY = 'ac-hold-hint';
 /** Room kept between the popover and the viewport's edges (and the composer). */
 export const MARGIN = 12;
 const GAP = 8, MAX_QUOTE = 1200;
