@@ -4,7 +4,7 @@ import {SUBAGENT_PERMISSION} from '../shared/subagents.js';
 import {normaliseProtocol,inferProtocol,normaliseBaseUrl,isChatModel,DEFAULT_PROTOCOL,cleanEffort} from '../shared/ai-presets.js';
 import {imageNote} from '../shared/attachments.js';
 import {turnFiles} from './attachments.js';
-import {noteUsage} from './usage.js';
+import {noteUsage, turnNote} from './usage.js';
 import {guardedFetch} from './reach-guard.js';
 
 // Provider-agnostic, bring-your-own-key model client. A call can run against an
@@ -431,14 +431,28 @@ export function fallsBack(error){
   if(status===401||status===403||error.code==='quota')return true;
   return ['usage-limit','not-signed-in','agent-offline','timeout','cli-missing'].includes(error.code);
 }
-/** One model call, and at most one more on the owner's fallback model when the first could not be answered. The
- * fallback config carries no fallback of its own, so a failing fallback ends the turn instead of looping. */
+/** One model call, walked down `[own model, ...config.fallbacks]` (a lone older `config.fallback` is a list of one).
+ * Each model is tried at most once, with its own one retry inside `callOnce`. The walk moves on only when the
+ * failure is the provider's (`fallsBack`), a model is left, and the bot has not acted in this turn: once any call
+ * for the bot has returned, its reply may already be acted on (a send block), so a later failure is not replayed
+ * elsewhere. A call that was answered by a model other than the bot's own starts the bot's later calls in this turn
+ * at that model. Only the bot's own config is walked: a fallback's own list is ignored, so nothing chains. */
 async function callModel(call){
-  try{return await callOnce(call);}
-  catch(e){
-    const spare=call.config?.fallback;
-    if(!spare||!fallsBack(e))throw e;
-    return callOnce({...call,config:{...spare,fallback:null},fallbackFrom:{model:modelName(call.config),why:fallbackWhy(e)}});
+  const {config}=call;
+  const models=[config,...(config?.fallbacks??(config?.fallback?[config.fallback]:[]))];
+  const note=turnNote(call.botId);
+  const first=note&&note.answeredBy<models.length?note.answeredBy:0;
+  let why=first>0?note.why:null;
+  for(let i=first;;i++){
+    // A later task skips a resting model here (continue), and swaps the input for a model that was not asked first.
+    try{
+      const text=await callOnce({...call,config:models[i],...(i>0?{fallbackFrom:{model:modelName(config),why:why??''}}:{})});
+      if(note){note.acted=true;note.answeredBy=i;note.why=why;}
+      return text;
+    }catch(e){
+      if(note?.acted||i+1>=models.length||!fallsBack(e))throw e;
+      if(i===0)why=fallbackWhy(e);
+    }
   }
 }
 async function callOnce({instructions,input,maxTokens,config,temperature=null,botId=null,fallbackFrom=null,images=[]}){

@@ -11,11 +11,25 @@
 import {AsyncLocalStorage} from 'node:async_hooks';
 import {addUsage, recordDay, costOf, priceFor} from '../shared/usage.js';
 
+// One turn's scope: `sink` counts calls, `bots` holds each bot's note (see `turnNote`).
 const scope = new AsyncLocalStorage();
+
+/** What this turn knows about one bot's model calls, or null outside a turn. One mutable note per bot, made on first
+ * use: `acted` is true once any model call for that bot has returned in this turn (that text is its reply, tool
+ * blocks and all, so a later failure must not be replayed on another model); `answeredBy` is the place in the bot's
+ * list of models (0 is its own) that answered, and the turn's later calls start there, so a turn never changes
+ * models halfway; `why` is the words for why its own model was left; `kept` is for the handoff prompt (Task 5). */
+export function turnNote(botId) {
+  const bots = scope.getStore()?.bots;
+  if (!bots) return null;
+  const key = botId || '';
+  if (!bots.has(key)) bots.set(key, {acted: false, answeredBy: 0, kept: null, why: null});
+  return bots.get(key);
+}
 
 /** Report one finished call. Never throws: a bookkeeping failure must not cost the owner their answer. */
 export async function noteUsage(call) {
-  const sink = scope.getStore();
+  const sink = scope.getStore()?.sink;
   if (!sink) return;
   try { await sink(call); } catch (error) { console.error('Usage was not recorded:', error.message); }
 }
@@ -42,7 +56,7 @@ export async function meterTurn(store, {runId = null} = {}, fn) {
       if (run) run.usage = addUsage(run.usage, row);
     });
   };
-  const value = await scope.run(sink, fn);
+  const value = await scope.run({sink, bots: new Map()}, fn);
   return {value, calls, total: calls.reduce((t, c) => addUsage(t, c), null)};
 }
 
