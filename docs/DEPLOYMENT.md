@@ -138,10 +138,17 @@ What to expect:
 - **No agent, or it is not running:** the run fails with "No computer is
   connected to run `claude`…" (or a note that the agent is offline or may not run
   models). Nothing is queued.
-- **Usage limit:** the run fails with a clear message and the chat gets a card
-  offering to switch that bot to another connected model, through
-  `PATCH /api/ai/bots/:bot`. There is no silent fallback and no retry; a retry
-  would spend the plan twice.
+- **Usage limit:** when the owner has picked fallback models (up to three, in
+  Settings → Models), a turn that has not replied yet goes to them in order,
+  and the fallback note names both models. A model rests after an outage or a
+  rate limit, and the whole provider rests after a quota or usage limit (a
+  subscription CLI always rests whole), until its cool-off ends (the time the
+  provider asked for, else 5 minutes, at most an hour), so the next turns use
+  it again afterwards; a restart ends the rest at once. With no fallback, or when none answers, the run fails with a
+  clear message and the chat gets a card offering to switch that bot to another
+  connected model, through `PATCH /api/ai/bots/:bot`. A turn that has already
+  replied is never replayed on another model, and a subscription at its limit
+  is not retried; a retry would spend the plan twice.
 - **Pickup delay:** the agent polls (`AGENT_POLL_MS`, 15s by default), so a turn
   can start up to one poll interval late.
 - **Timeouts:** a turn waits `AI_CLI_TIMEOUT_MS` in all (default 300000), and the

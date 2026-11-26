@@ -10,7 +10,7 @@
 import * as credentials from './credentials.js';
 import {fail} from '../shared/errors.js';
 import {envConfig,discoverModels,protocolOf,configReady,complete} from './ai.js';
-import {normaliseProtocol,inferProtocol,presetById,protocolById,LOCAL_CLI_KIND,LOCAL_CLI_ENGINES,cliEngineById,cleanCliModel,cleanEffort,EFFORT_IDS} from '../shared/ai-presets.js';
+import {normaliseProtocol,inferProtocol,presetById,protocolById,LOCAL_CLI_KIND,LOCAL_CLI_ENGINES,cliEngineById,cleanCliModel,cleanEffort,EFFORT_IDS,fallbackPicks,MAX_FALLBACKS} from '../shared/ai-presets.js';
 import {uuid} from '../shared/core.js';
 import {peek} from './sqlite-store.js';
 import {cliRunner,cliSignIn} from './cli-model.js';
@@ -82,8 +82,7 @@ const headerNamesOf=p=>capList(p?.headerNames,MAX_HEADERS).filter(name=>typeof n
 const labelsOf=p=>p?.labels&&typeof p.labels==='object'&&!Array.isArray(p.labels)?p.labels:{};
 /** The owner's per-model prices (dollars per million tokens), admin listings only. */
 const pricesOf=p=>p?.prices&&typeof p.prices==='object'&&!Array.isArray(p.prices)?p.prices:{};
-/** The fallback model the owner picked, or null. */
-const fallbackOf=ai=>ai?.fallback?.providerId?{providerId:ai.fallback.providerId,model:ai.fallback.model||null}:null;
+const firstPick=ai=>fallbackPicks(ai)[0]||null;
 
 /** Ensure the AI shape exists on a state document. */
 export function aiState(state){
@@ -132,12 +131,12 @@ function publicBots(bots){
 /** Provider metadata safe to send to the browser. No key, no vault id. */
 export function publicAi(state){
   const ai=aiState(state);
-  return {providers:ai.providers.map(publicProvider),defaultProviderId:ai.defaultProviderId,defaultModel:ai.defaultModel||null,defaultEffort:ai.defaultEffort||null,fallback:fallbackOf(ai),bots:publicBots(ai.bots)};
+  return {providers:ai.providers.map(publicProvider),defaultProviderId:ai.defaultProviderId,defaultModel:ai.defaultModel||null,defaultEffort:ai.defaultEffort||null,fallbacks:fallbackPicks(ai),fallback:firstPick(ai),bots:publicBots(ai.bots)};
 }
 
 export function listProviders(state){
   const ai=aiState(state);
-  return {providers:ai.providers.map(providerListing),defaultProviderId:ai.defaultProviderId,defaultModel:ai.defaultModel||null,defaultEffort:ai.defaultEffort||null,fallback:fallbackOf(ai)};
+  return {providers:ai.providers.map(providerListing),defaultProviderId:ai.defaultProviderId,defaultModel:ai.defaultModel||null,defaultEffort:ai.defaultEffort||null,fallbacks:fallbackPicks(ai),fallback:firstPick(ai)};
 }
 
 /** Add a BYOK provider. The key is written to the vault, never to the state.
@@ -181,7 +180,7 @@ export async function addProvider(store,workspaceId,{kind,engine,model,label,bas
  * gateway. */
 export function listProviderListings(store){
   const ai=aiState(store.read());
-  return {providers:ai.providers.map(p=>({...providerListing(p),models:(Array.isArray(p.models)?p.models:[]).slice(0,300)})),defaultProviderId:ai.defaultProviderId||null,defaultModel:ai.defaultModel||null,defaultEffort:ai.defaultEffort||null,fallback:fallbackOf(ai),bots:ai.bots||{}};
+  return {providers:ai.providers.map(p=>({...providerListing(p),models:(Array.isArray(p.models)?p.models:[]).slice(0,300)})),defaultProviderId:ai.defaultProviderId||null,defaultModel:ai.defaultModel||null,defaultEffort:ai.defaultEffort||null,fallbacks:fallbackPicks(ai),fallback:firstPick(ai),bots:ai.bots||{}};
 }
 
 /** One provider as the admin page sees it, or null. */
@@ -297,7 +296,7 @@ export async function deleteProvider(store,workspaceId,id){
     try{credentials.deleteCredential(store,workspaceId,credentialId);}catch(error){if(error.status!==404)throw error;}
   }
   await store.update(s=>{const ai=aiState(s);ai.providers=ai.providers.filter(p=>p.id!==id);if(ai.defaultProviderId===id)ai.defaultProviderId=ai.providers[0]?.id||null;
-    if(ai.fallback?.providerId===id)ai.fallback=null;
+    if(ai.fallbacks!==undefined||ai.fallback!==undefined){ai.fallbacks=fallbackPicks(ai).filter(pick=>pick.providerId!==id);delete ai.fallback;}
     for(const [botId,override] of Object.entries(ai.bots)){
       if(override?.providerId!==id)continue;
       // Its model id belonged to the provider that is gone; sent to another one it is a 404. Effort stays.
@@ -323,26 +322,31 @@ function concreteModel(protocol,model,chatModels,allModels){
   return model||'auto';
 }
 
-/** The config of the owner's fallback model (Settings → Models), or null. Built like any other provider's, with
- * the same effort; src/ai.js uses it for one call when the bot's own model could not answer. */
-function fallbackConfig(store,botId,ai,effort){
-  const pick=fallbackOf(ai);
+/** The config of one of the owner's fallback models (Settings → Models), or null. Built like any other provider's,
+ * with the same effort; src/ai.js uses them when the bot's own model could not answer. */
+function fallbackConfig(store,botId,ai,effort,pick){
   const provider=pick&&ai.providers.find(p=>p.id===pick.providerId);
   if(!provider)return null;
   const level=effort?{effort}:{};
   if(isCli(provider))return {kind:LOCAL_CLI_KIND,engine:provider.engine,model:cleanCliModel(pick.model)||provider.model||'',source:LOCAL_CLI_KIND,label:provider.label,providerId:provider.id,models:[],run:cliRunner(store,{botId,provider}),...level};
-  // A key deleted from the vault by hand leaves no fallback, never a failed turn.
+  // A key deleted from the vault by hand leaves that fallback out, never a failed turn.
   try{
     const config=providerConfig(store,provider);
     const chatModels=Array.isArray(provider.chatModels)?provider.chatModels:config.models;
     return {...config,model:concreteModel(config.protocol,pick.model||'auto',chatModels,config.models),...level};
   }catch{return null;}
 }
-/** A config with the fallback attached, unless the fallback is the very model the config already runs. */
-function withFallback(store,botId,ai,config){
-  const spare=fallbackConfig(store,botId,ai,config.effort||'');
-  if(!spare||(spare.providerId===config.providerId&&(spare.model||'')===(config.model||'')))return config;
-  return {...config,fallback:spare};
+/** A config with its fallbacks attached, in the owner's order: not the model the config already runs, not a model
+ * twice, not one whose key is gone. A fallback config has no `fallbacks` of its own. */
+function withFallbacks(store,botId,ai,config){
+  const same=(a,b)=>a.providerId===b.providerId&&(a.model||'')===(b.model||'');
+  const spares=[];
+  for(const pick of fallbackPicks(ai)){
+    const spare=fallbackConfig(store,botId,ai,config.effort||'',pick);
+    if(!spare||same(spare,config)||spares.some(other=>same(other,spare)))continue;
+    spares.push(spare);
+  }
+  return spares.length?{...config,fallbacks:spares}:config;
 }
 /** The config a bot should run on: its own override, else the workspace default,
  * else the environment. `null` when nothing is configured. */
@@ -357,7 +361,7 @@ export function resolveConfig(store,botId){
   const provider=ai.providers.find(p=>p.id===providerId);
   // How hard to think: the bot's own pick, else the workspace's. Empty sends nothing.
   const effort=cleanEffort(override?.effort)||cleanEffort(ai.defaultEffort)||'';
-  const withEffort=config=>withFallback(store,botId,ai,effort?{...config,effort}:config);
+  const withEffort=config=>withFallbacks(store,botId,ai,effort?{...config,effort}:config);
   if(provider&&isCli(provider)){
     // The workspace default model is an API model id; a CLI would only reject it.
     // A bot override that could read as a flag is dropped rather than passed on.
@@ -416,8 +420,15 @@ function effortOrFail(value){
 export async function setDefaults(store,body={}){
   // Only the two knobs this route owns. A typo (`temprature`) used to save
   // nothing and report success, which reads like the setting applied.
-  const {providerId,model,effort,fallback,...unknown}=body&&typeof body==='object'&&!Array.isArray(body)?body:{};
-  if(fallback!==undefined&&fallback!==null&&(typeof fallback!=='object'||Array.isArray(fallback)))fail('A fallback is {providerId, model}, or null for none.');
+  const {providerId,model,effort,fallback,fallbacks,...unknown}=body&&typeof body==='object'&&!Array.isArray(body)?body:{};
+  // `fallbacks` is the list; the old `fallback` is a list of one, or none. When both come, the list wins.
+  // An empty alias (`{}`, no provider id) is none, as the old API read it; an entry inside `fallbacks` stays strict.
+  const aliasNone=fallback===null||(fallback&&typeof fallback==='object'&&!Array.isArray(fallback)&&!fallback.providerId);
+  const asked=fallbacks!==undefined?fallbacks:fallback===undefined?undefined:aliasNone?[]:[fallback];
+  if(fallbacks!==undefined&&!Array.isArray(fallbacks))fail('Fallbacks are a list of {providerId, model}.');
+  if(fallbacks===undefined&&fallback!==undefined&&fallback!==null&&(typeof fallback!=='object'||Array.isArray(fallback)))fail('A fallback is {providerId, model}, or null for none.');
+  if(asked&&asked.length>MAX_FALLBACKS)fail(`At most ${MAX_FALLBACKS} fallback models.`);
+  if(asked&&asked.some(e=>!e||typeof e!=='object'||Array.isArray(e)||typeof e.providerId!=='string'||!e.providerId))fail('A fallback is {providerId, model}, or null for none.');
   const level=effort===undefined?undefined:effortOrFail(effort);
   const stray=Object.keys(unknown);
   if(stray.length)fail(`Unknown AI setting${stray.length>1?'s':''}: ${stray.slice(0,4).join(', ')}.`,400);
@@ -425,9 +436,10 @@ export async function setDefaults(store,body={}){
     if(providerId!==undefined){if(providerId&&!ai.providers.some(p=>p.id===providerId))throw fail('Provider not found.',404);ai.defaultProviderId=providerId||null;}
     if(model!==undefined)ai.defaultModel=clean(model,120)||null;
     if(level!==undefined)ai.defaultEffort=level||null;
-    if(fallback!==undefined){
-      if(fallback?.providerId&&!ai.providers.some(p=>p.id===fallback.providerId))throw fail('Provider not found.',404);
-      ai.fallback=fallback?.providerId?{providerId:fallback.providerId,model:clean(fallback.model,120)||null}:null;
+    if(asked!==undefined){
+      if(asked.some(e=>!ai.providers.some(p=>p.id===e.providerId)))throw fail('Provider not found.',404);
+      ai.fallbacks=fallbackPicks({fallbacks:asked.map(e=>({providerId:e.providerId,model:clean(e.model,120)||null}))});
+      delete ai.fallback;
     }
   });
   return listProviders(store.read());

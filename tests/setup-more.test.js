@@ -6,6 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {resolveSetup, setupCardOf, setupDone, workspaceBrief, SETUP_TOOL_HINT} from '../shared/setup.js';
 import {BRIEFING_KEY} from '../shared/briefing.js';
+import {publicAi} from '../src/ai-providers.js';
 
 const month = new Date().toISOString().slice(0, 7);
 const state = () => ({
@@ -62,7 +63,13 @@ test('the brief tells a bot its templates, preset, briefing, fallback and this m
   assert.deepEqual(brief.templates, ['HN digest: Summarise the top 5 Hacker News stories']);
   assert.equal(brief.preset, 'Balanced');
   assert.match(brief.briefing, /off/);
-  assert.match(brief.fallbackModel, /My Claude · haiku/);
+  assert.match(brief.fallbackModel, /My Claude · haiku answers when a bot's model is down/);
+  // Up to three, in order; a removed provider is still named; an empty list is "none".
+  const many = state();
+  many.ai = {...many.ai, fallback: undefined, fallbacks: [{providerId: 'p1', model: 'haiku'}, {providerId: 'gone', model: null}, {providerId: 'p1', model: 'sonnet'}]};
+  assert.match(workspaceBrief(many).fallbackModel, /^My Claude · haiku, then a removed model, then My Claude · sonnet answer in turn when a bot's model is down/);
+  many.ai.fallbacks = [];
+  assert.equal(workspaceBrief(many).fallbackModel, 'none');
   assert.match(brief.usageThisMonth.total, /2\.1k tokens/);
   assert.deepEqual(brief.usageThisMonth.byBot.map(r => r.split(':')[0]), ['Atlas', 'Scout']);
 });
@@ -111,4 +118,13 @@ test('a template card shows the title the saved template will carry', () => {
   const long = card(state(), {action: 'template', text: 'Every Monday, list the five biggest AI research papers of last week with links'});
   assert.ok(long.title.length <= 41 && long.title.endsWith('…'), long.title);
   assert.match(c.text, new RegExp(`“${c.title}”`));
+});
+
+test('a stored list with a repeat reads the same in the brief as in the settings listing', () => {
+  const s = state();
+  s.ai = {...s.ai, fallback: undefined, fallbacks: [{providerId: 'p1', model: 'haiku'}, {providerId: 'p1', model: 'haiku'}, {providerId: 'p1', model: 'sonnet'}]};
+  assert.deepEqual(publicAi(s).fallbacks, [{providerId: 'p1', model: 'haiku'}, {providerId: 'p1', model: 'sonnet'}]);
+  const brief = workspaceBrief(s).fallbackModel;
+  assert.match(brief, /^My Claude · haiku, then My Claude · sonnet answer in turn when/, 'the repeat is named once');
+  assert.doesNotMatch(brief, /haiku.*haiku/);
 });

@@ -357,13 +357,15 @@ async function runGroupInner(store,id,executor){
       const gate=()=>store.update(s=>noteBotWork(s,'run').paused);
       // Every model call in the turn (the bot's, a helper's, a teammate's answer, a fallback) is counted on the
       // run and on each bot's day (src/usage.js).
-      const metered=await meterTurn(store,{runId:id},()=>runBotTurn(store,{bot,envelope,executor,config,peers:everyone,configFor:peerId=>resolveConfig(store,peerId),memoryForPeer:(mate,mateConfig)=>markOutside(memoryFor(store,{bot:mate,config:mateConfig,chatKey:r.chatKey})),handoffAllowed:mayHandoff(r,bot)&&!closing&&!declinedTurn,spawnRounds:(r.subagents||[]).some(spawn=>spawn.botId===bot.id)?MAX_SUBAGENT_DEPTH:0,budget,onEvent,gate,resume:resumed,stop:stopped,groupId:home?.id??null,runId:id,makeId:randomUUID,now:stamp}));
+      const metered=await meterTurn(store,{runId:id},()=>runBotTurn(store,{bot,envelope,executor,config,peers:everyone,configFor:peerId=>resolveConfig(store,peerId),memoryForPeer:(mate,mateConfig)=>markOutside(memoryFor(store,{bot:mate,config:mateConfig,chatKey:r.chatKey})),handoffAllowed:mayHandoff(r,bot)&&!closing&&!declinedTurn,spawnRounds:(r.subagents||[]).some(spawn=>spawn.botId===bot.id)?MAX_SUBAGENT_DEPTH:0,budget,onEvent,gate,resume:resumed,stop:stopped,groupId:home?.id??null,runId:id,chatKey:r.chatKey,makeId:randomUUID,now:stamp}));
       const reply=metered.value,fellBack=fallbacksOf(metered.calls);
       if(reply.limit){
         // A checkpoint, not a failure: what was said stays said, the bots still
         // waiting on an answer are kept, and the owner picks what happens next.
         await store.update(s=>{coordinationState(s);const live=s.groupRuns.find(x=>x.id===id);if(!live||live.status!=='running')throw new Error('Run no longer active');
           for(const line of reply.lines)say(s,live,{...line,runId:id});
+          // An old chat line from outside text was read before the checkpoint: the run keeps the mark when it resumes.
+          if(reply.outsideChat)live.readOldChat=true;
           live.asks=structuredClone(budget.asks);
           live.status='awaiting_limit';
           live.limit={kind:reply.limit.kind,at:stamp()};
@@ -399,6 +401,9 @@ async function runGroupInner(store,id,executor){
       let toBotId=null,auto=[],holdBrowser=false,newAsks=[],stuckStop=null,signins=[];
       await store.update(s=>{coordinationState(s);const live=s.groupRuns.find(x=>x.id===id);if(!live||live.status!=='running')throw new Error('Run no longer active');
         const host=s.groups.find(x=>x.id===live.groupId);
+        // A bot on a fallback model searched this chat's older lines and a hit came from outside text: the run counts as
+        // having read it before its sends and pages below are decided, so Hands-off does not cover them.
+        if(reply.outsideChat)live.readOldChat=true;
         // File fences from the full reply, then hand the next bot the text around them.
         const priorUrls=Array.isArray(live.browserUrls)?live.browserUrls:String(live.browserUrl||'').split(' | ').filter(Boolean);
         const skip=priorUrls;

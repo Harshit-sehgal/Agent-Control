@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {PROTOCOLS,PROTOCOL_IDS,DEFAULT_PROTOCOL,PROVIDER_PRESETS,normaliseProtocol,inferProtocol,normaliseBaseUrl,protocolById,presetById} from '../shared/ai-presets.js';
+import {PROTOCOLS,PROTOCOL_IDS,DEFAULT_PROTOCOL,PROVIDER_PRESETS,normaliseProtocol,inferProtocol,normaliseBaseUrl,protocolById,presetById,fallbackPicks,MAX_FALLBACKS} from '../shared/ai-presets.js';
 
 // shared/ai-presets.js is the one list the settings page and the server share.
 // A typo here is a provider that saves and then sends the wrong body shape, so
@@ -133,4 +133,17 @@ test('normaliseBaseUrl trims a pasted call endpoint, a trailing slash and an Azu
   assert.equal(normaliseBaseUrl(''),'');
   assert.equal(normaliseBaseUrl(undefined),'');
   assert.equal(normaliseBaseUrl('not a url   '),'not a url','junk is returned trimmed instead of thrown at the form');
+});
+
+test('fallbackPicks reads the owner\'s list: in order, no repeat, three at most, and an old single key as a list of one', () => {
+  assert.equal(MAX_FALLBACKS, 3);
+  assert.deepEqual(fallbackPicks(undefined), []);
+  assert.deepEqual(fallbackPicks({}), []);
+  assert.deepEqual(fallbackPicks({fallback: {providerId: 'a', model: 'x'}}), [{providerId: 'a', model: 'x'}]);
+  assert.deepEqual(fallbackPicks({fallback: {providerId: 'a'}}), [{providerId: 'a', model: null}]);
+  // The list wins over the old key, even an empty one.
+  assert.deepEqual(fallbackPicks({fallbacks: [], fallback: {providerId: 'a', model: 'x'}}), []);
+  const stored = [{providerId: 'a', model: 'x'}, null, {providerId: ''}, {model: 'y'}, {providerId: 'a', model: 'x'}, {providerId: 'a'}, {providerId: 'b', model: 'y'}, {providerId: 'c', model: 'z'}];
+  assert.deepEqual(fallbackPicks({fallbacks: stored}), [{providerId: 'a', model: 'x'}, {providerId: 'a', model: null}, {providerId: 'b', model: 'y'}]);
+  assert.equal(fallbackPicks({fallbacks: [1, 2, 3, 4, 5].map(n => ({providerId: `p${n}`, model: 'm'}))}).length, 3);
 });

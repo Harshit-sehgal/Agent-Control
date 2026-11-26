@@ -337,14 +337,14 @@ test('a provider saved before protocols existed resolves from its legacy style',
 });
 
 test('an environment key alone picks the Anthropic or Gemini endpoint', async () => {
-  await withEnv({AI_BASE_URL: '', OPENAI_BASE_URL: '', AI_API_KEY: '', OPENAI_API_KEY: '', AI_API_STYLE: '', GEMINI_API_KEY: '', GOOGLE_API_KEY: '', ANTHROPIC_API_KEY: 'sk-ant-env'}, async () => {
+  await withEnv({AI_BASE_URL: '', OPENAI_BASE_URL: '', ANTHROPIC_BASE_URL: '', AZURE_OPENAI_ENDPOINT: '', ANTHROPIC_AUTH_TOKEN: '', AI_API_KEY: '', OPENAI_API_KEY: '', AI_API_STYLE: '', GEMINI_API_KEY: '', GOOGLE_API_KEY: '', ANTHROPIC_API_KEY: 'sk-ant-env'}, async () => {
     const cfg = envConfig();
     assert.equal(cfg.baseUrl, 'https://api.anthropic.com/v1');
     assert.equal(cfg.protocol, 'anthropic');
     assert.equal(cfg.apiKey, 'sk-ant-env');
     assert.equal(cfg.source, 'env');
   });
-  await withEnv({AI_BASE_URL: '', OPENAI_BASE_URL: '', AI_API_KEY: '', OPENAI_API_KEY: '', AI_API_STYLE: '', ANTHROPIC_API_KEY: '', GEMINI_API_KEY: 'gm-env'}, async () => {
+  await withEnv({AI_BASE_URL: '', OPENAI_BASE_URL: '', ANTHROPIC_BASE_URL: '', AZURE_OPENAI_ENDPOINT: '', ANTHROPIC_AUTH_TOKEN: '', AI_API_KEY: '', OPENAI_API_KEY: '', AI_API_STYLE: '', ANTHROPIC_API_KEY: '', GEMINI_API_KEY: 'gm-env'}, async () => {
     const cfg = envConfig();
     assert.equal(cfg.baseUrl, 'https://generativelanguage.googleapis.com/v1beta');
     assert.equal(cfg.protocol, 'gemini');

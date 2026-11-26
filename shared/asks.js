@@ -266,6 +266,8 @@ function runReadOutside(state, run) {
   if (run.outsideInput === true || run.readPrivate === true || run.connectorPage) return true;
   if (Array.isArray(run.readFrom) && run.readFrom.length) return true;
   if (run.readPages === true || run.outsideMemory === true) return true;
+  // A bot on a fallback model searched this chat's older lines and a hit was outside text (`search_chat`).
+  if (run.readOldChat === true) return true;
   return (state?.browserRequests || []).some(r => r?.status === 'done' && r.runId === run.id);
 }
 
@@ -289,7 +291,7 @@ export function keepOutsideMarks(state, {requests = [], runs = []} = {}) {
 }
 
 /** Does any bot reply among `messages` come from a run that read outside content? */
-function messagesCarryOutside(state, messages, {except = null} = {}) {
+export function messagesCarryOutside(state, messages, {except = null} = {}) {
   const runs = Array.isArray(state?.groupRuns) ? state.groupRuns : [];
   const replies = (Array.isArray(messages) ? messages : []).filter(m => m?.role === 'bot' && !(except && m.runId === except));
   if (replies.some(m => m.outside === true)) return true;

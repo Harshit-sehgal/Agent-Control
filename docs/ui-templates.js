@@ -2,12 +2,12 @@
  * and its sheet (use one, save what you typed, delete a saved one), and the Daily briefing sheet that picks the
  * morning time. A chip fills the composer and the owner edits before sending; only the briefing makes a schedule.
  * The lists and rules are pure (shared/templates.js, shared/briefing.js); this file is markup and events. */
-import {templateChips} from './templates.js?v=bb93f46435';
-import {briefingTaskBody} from './briefing.js?v=bb93f46435';
-import {esc, icon, btn, field} from './ui-kit.js?v=bb93f46435';
-import {store, api, sync, canWrite, findBot} from './ui-store.js?v=bb93f46435';
-import {openSheet, closeSheet, toast} from './ui-dialogs.js?v=bb93f46435';
-import {primaryOf} from './company.js?v=bb93f46435';
+import {templateChips} from './templates.js?v=13abce6dce';
+import {briefingTaskBody} from './briefing.js?v=13abce6dce';
+import {esc, icon, btn, field} from './ui-kit.js?v=13abce6dce';
+import {store, api, sync, canWrite, findBot} from './ui-store.js?v=13abce6dce';
+import {openSheet, closeSheet, toast} from './ui-dialogs.js?v=13abce6dce';
+import {primaryOf} from './company.js?v=13abce6dce';
 
 const box = () => document.querySelector('#chat-form textarea[name="message"], #new-thread-form textarea[name="message"]');
 const chip = t => `<button type="button" data-action="use-template" data-id="${esc(t.id)}"${t.action === 'briefing' ? ' class="tp-brief"' : ''}>${t.action === 'briefing' ? icon('clock', 14) : ''}${esc(t.title)}</button>`;

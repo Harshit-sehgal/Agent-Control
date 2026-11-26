@@ -4,8 +4,9 @@
  * in shared/chats.js), so the browser can search all the history there is without a route of its own, on the
  * server build and the Pages demo alike. Every word of the query must appear (in any order); case and accents
  * are ignored. Pure and browser-safe (tests/message-search.test.js). */
-import {esc, plain} from './ui-kit.js?v=bb93f46435';
-import {isThread} from './threads.js?v=bb93f46435';
+import {esc, plain} from './ui-kit.js?v=13abce6dce';
+import {isThread} from './threads.js?v=13abce6dce';
+import {controlFence} from './reply-blocks.js?v=13abce6dce';
 
 export const MAX_RESULTS = 40;
 const BEFORE = 24, WIDTH = 160;
@@ -42,6 +43,36 @@ export function searchMessages(state, query, {limit = MAX_RESULTS} = {}) {
     }
   }
   return hits.sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0)).slice(0, Math.max(0, limit));
+}
+
+/** A bot's own look at the older lines of the chat it is answering in (`search_chat`, src/bot-turn.js): the lines
+ * every word of `query` appears in, newest first, at most `limit`, each as `{id, from, at, text}` with the text cut to
+ * 800 characters, the same cut `threadContext` makes. The newest `skipNewest` lines are left out first, counted the way
+ * `threadContext` counts what a model was handed (a user or bot line with text, steps included), so a bot is shown
+ * only what it was not given. Working steps are then dropped from what remains: the chat does not show them. */
+export function searchChat(messages, query, {skipNewest = 0, limit = 8} = {}) {
+  const words = wordsOf(query);
+  if (!words.length || !Array.isArray(messages)) return [];
+  const given = messages.filter(m => m && m.text && ['user', 'bot'].includes(m.role));
+  const older = given.slice(0, Math.max(0, given.length - Math.max(0, Number(skipNewest) || 0)));
+  const hits = [];
+  for (let i = older.length - 1; i >= 0 && hits.length < Math.max(0, limit); i--) {
+    const m = older[i], text = String(m.text);
+    if (m.step || !words.every(w => fold(text).includes(w))) continue;
+    hits.push({id: m.id, from: m.role === 'user' ? 'user' : (m.senderName || m.senderId || 'bot'), at: m.at || '', text: text.slice(0, 800)});
+  }
+  return hits;
+}
+
+/** The query of the first `search_chat` block in a reply, trimmed, or null when there is none, it is not JSON, or its
+ * query is missing or empty. */
+export function parseSearchChat(output) {
+  const match = controlFence('search_chat').exec(String(output ?? ''));
+  if (!match) return null;
+  try {
+    const query = JSON.parse(match[1].trim())?.query;
+    return typeof query === 'string' && query.trim() ? query.trim().slice(0, 200) : null;
+  } catch { return null; }
 }
 
 /** The folded text with, for each of its characters, where it came from in the original. */

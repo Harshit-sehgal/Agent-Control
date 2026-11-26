@@ -12,7 +12,7 @@ import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol
 import {pushStatus, enablePush, disablePush} from './ui-push.js';
 import {connectorsPanel, loadConnectors, connectActions, connectForms} from './ui-connect.js';
 import {cliDraft, modelChoices, chosenModel, effortChoices, OTHER_MODEL, modelRowMatches, modelGroupStays, agentCliRows, agentPermissionRows, agentWorkLine, subscriptionLine, SIGN_IN_HINT} from './ui-connect-model.js';
-import {LOCAL_CLI_ENGINES, LOCAL_CLI_KIND} from './ai-presets.js';
+import {LOCAL_CLI_ENGINES, LOCAL_CLI_KIND, fallbackPicks} from './ai-presets.js';
 import {updateNeeded} from './device-features.js';
 import {parsePrices, pricesText} from './usage.js';
 
@@ -533,16 +533,26 @@ function aiPanel(res) {
   );
 }
 
-/** The model a turn goes to once when a bot's own model cannot answer: any saved provider's model, or none. */
+/** The ordinals the three fallback choices are labelled with; the form has exactly this many. */
+const FALLBACK_LABELS = ['First fallback', 'Second fallback', 'Third fallback'];
+/** The models a turn moves to, in order, when a bot's own model cannot answer: up to three saved providers' models. */
 function fallbackForm(res, providers) {
-  const now = res.fallback?.providerId ? `${res.fallback.providerId}|${res.fallback.model || ''}` : '';
+  const picks = fallbackPicks(res), keyOf = f => `${f.providerId}|${f.model || ''}`;
   const rows = providers.flatMap(p => (p.kind === LOCAL_CLI_KIND
     ? [{value: `${p.id}|${p.model || ''}`, label: `${p.label} · ${p.model || 'its default model'}`}]
     : (p.chatModels || p.models || []).slice(0, 300).map(m => ({value: `${p.id}|${m}`, label: `${p.label} · ${p.labels?.[m] || m}`}))));
-  if (now && !rows.some(r => r.value === now)) rows.unshift({value: now, label: `${providers.find(p => p.id === res.fallback.providerId)?.label || 'Saved'} · ${res.fallback.model || 'its default model'}`});
-  const options = [{value: '', label: 'None'}, ...rows].map(r => `<option value="${esc(r.value)}"${r.value === now ? ' selected' : ''}>${esc(r.label)}</option>`).join('');
+  // A saved pick the listing no longer offers (a model the provider dropped) is still shown, so saving does not lose it silently.
+  for (const f of [...picks].reverse()) if (!rows.some(r => r.value === keyOf(f))) rows.unshift({value: keyOf(f), label: `${providers.find(p => p.id === f.providerId)?.label || 'Saved'} · ${f.model || 'its default model'}`});
+  const choices = [{value: '', label: 'None'}, ...rows];
+  const selects = FALLBACK_LABELS.map((label, i) => {
+    const now = picks[i] ? keyOf(picks[i]) : '';
+    const options = choices.map(r => `<option value="${esc(r.value)}"${r.value === now ? ' selected' : ''}>${esc(r.label)}</option>`).join('');
+    // A choice opens only after the one before it has a model, so the list never has a gap.
+    return field(label, `<select class="input" name="fallback${i + 1}" data-action="ai-fallback-pick"${i > 0 && !picks[i - 1] ? ' disabled' : ''}>${options}</select>`);
+  }).join('');
   return `<form id="ai-fallback-form" class="ad-form">
-    ${field('Fallback model', `<select class="input" name="fallback">${options}</select>`, 'When a bot\'s model is busy, down, times out or is signed out, that turn is answered once by this model. A refused request is not sent elsewhere.')}
+    ${selects}
+    ${hint('When a bot\'s model is busy, down, times out or is signed out, the turn goes to these in order, before it has replied. A refused request is not sent elsewhere.')}
     <div class="cn-acts">${btn('Save', null, {kind: 'primary', type: 'submit'})}</div>
   </form>`;
 }
@@ -912,9 +922,11 @@ export const adminForms = {
     await sync(); await ctx.reload();
   },
   'ai-fallback-form': async (form, values, ctx) => {
-    const value = String(values.fallback || ''), at = value.indexOf('|');
-    await api('/api/ai', 'PATCH', {fallback: value ? {providerId: value.slice(0, at), model: value.slice(at + 1)} : null});
-    toast(value ? 'Fallback model saved.' : 'No fallback model.');
+    // The empties and the repeats go; what is left is the list in the order it was picked.
+    const asked = [values.fallback1, values.fallback2, values.fallback3].filter(Boolean).map(v => { const at = String(v).indexOf('|'); return {providerId: String(v).slice(0, at), model: String(v).slice(at + 1)}; });
+    const fallbacks = fallbackPicks({fallbacks: asked});
+    await api('/api/ai', 'PATCH', {fallbacks});
+    toast(fallbacks.length ? 'Fallback models saved.' : 'No fallback models.');
     await sync(); await ctx.reload();
   },
   'ai-default-form': async (form, values, ctx) => {
@@ -960,6 +972,14 @@ export const adminChanges = {
   // Azure is the only protocol that needs the query-string version, so the field
   // appears and disappears with the selection, without a server round trip.
   'ai-protocol': control => syncApiVersionField(control.form, control.value),
+  // The fallback choices open in order: one after a None is closed and reset, so the form never posts a gap.
+  'ai-fallback-pick': control => {
+    const picks = [...control.form.querySelectorAll('select[data-action="ai-fallback-pick"]')];
+    picks.forEach((select, i) => {
+      select.disabled = i > 0 && !picks[i - 1].value;
+      if (select.disabled) select.value = '';
+    });
+  },
   'model-pick': control => showOtherBox(control),
   // A subscription's model names follow the engine picked above them.
   'cli-engine': control => refillModelSelect(control.form?.elements.namedItem('model'), modelChoices({provider: {kind: LOCAL_CLI_KIND, engine: control.value}, defaultLabel: CLI_DEFAULT})),
