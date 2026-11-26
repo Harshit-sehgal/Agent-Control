@@ -24,6 +24,10 @@
  * - Each tab keeps its own typed memory: what the owner types in secret is remembered for the life of that
  *   bot's tab (`typed`, in memory only, never written anywhere) and scrubbed from every result that leaves: a capture, an action's answer and the status.
  *   The page's secret fields are emptied when the owner hands back.
+ * - `sweep` is the housekeeping, called about once a minute: it closes a bot's tab idle for 10 minutes (after saving its
+ *   account's cookies), saves each account context every 10 minutes, disposes a context nothing uses, reads each signed-in
+ *   account's site every 30 minutes on a keeper tab of its own, and, only when asked (`quitIdle`), closes an idle browser. A
+ *   save never holds a lane or a caller for more than a moment (`saveWaitMs`), and nothing here prints a cookie.
  * - The rules that bound a page read still bound every step: the allowlist, the
  *   egress proxy that refuses private addresses, and the X click/type refusal.
  *   Those live in `agent/browser.mjs`, which this file drives.
@@ -32,7 +36,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {startBrowserSession, ACTION_OPS, MAX_ACTIONS} from './browser.mjs';
 import {FOCUSED_IS_SECRET_JS, TAG_FOCUSED_SECRET_JS, CLEAR_SECRETS_ON_HANDBACK_JS, rememberTyped, scrubTyped} from './page-secrets.mjs';
-import {hostAllowed, hostOf} from '../shared/bot-browser.js';
+import {hostAllowed, hostOf, signinPage} from '../shared/bot-browser.js';
 import {cleanInput, KEYS, VIEWPORT} from './live-input.mjs';
 import {ACCOUNT_ID} from '../shared/bot-settings.js';
 
@@ -58,13 +62,17 @@ const SCREENCAST = {format: 'jpeg', quality: 60, maxWidth: VIEWPORT.width, maxHe
 /** What names one tab and its queue: the account (empty for the device's own profile) and the bot. */
 export const tabKey = (account, botId) => `${account || ''}\u0000${botId}`;
 
+/** Housekeeping timings (the shared browser's `sweep`), and the name a keeper tab answers to. */
+export const REAP_MS = 600000, SAVE_MS = 600000, KEEPER_MS = 1800000, QUIT_IDLE_MS = 1800000;
+export const KEEPER = '\u0000keeper';
+
 const NO_ACCOUNT = 'This task names a browser account this device cannot use.';
 const WRONG_CONTEXT = 'This tab is not in the bot\'s browser account, so the step was not run.';
 
-export function createSharedBrowser({start = startBrowserSession, allow = [], profile, settleMs, timeoutMs, jars = null, idleMs = Number(process.env.AGENT_TAKEOVER_IDLE_MS) || 0} = {}) {
+export function createSharedBrowser({start = startBrowserSession, allow = [], profile, settleMs, timeoutMs, jars = null, quitIdle = false, now = Date.now, saveWaitMs = 3000, idleMs = Number(process.env.AGENT_TAKEOVER_IDLE_MS) || 0} = {}) {
   const allowed = () => (typeof allow === 'function' ? allow() : allow);
   let session = null, starting = null;
-  const tabs = new Map();      // tabKey -> {botId, account, tab, url, title, typed}: `typed` is what the owner typed in secret, in memory only
+  const tabs = new Map();      // tabKey -> {botId, account, tab, url, title, typed, usedAt}: `typed` is what the owner typed in secret, in memory only
   const opening = new Map();   // tabKey -> {live, promise}: the tab being opened, so two askers for one tab open one
   const contexts = new Map();  // account -> {id, restored}: the browser contexts of this session, gone with it
   const contextStarts = new Map(); // account -> {live, promise}: the context being made
@@ -75,6 +83,13 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
   let idleTimer = null;
   let watched = null;          // the tab being cast: {key, botId, account, tab, live, off}
   let frameSink = null;
+  let listed = null;           // account -> {id, site}: what the server says this computer holds (null until it has said)
+  const states = new Map();    // account -> {state, lost}: the last keeper or task finding
+  const checkedAt = new Map(); // account -> when that finding was made
+  const savedAt = new Map();   // account -> when its context was last saved
+  const restoredPending = new Set(); // accounts whose context was filled from a jar and has had no finding since
+  let lastActive = now();      // the last time a task ran, a person drove or a person watched (a keeper's read is none of them)
+  let sweeping = null;
 
   const notify = () => { for (const wait of [...waits]) if (wait.predicate()) { waits.delete(wait); wait.resolve(); } };
   const until = predicate => (predicate() ? Promise.resolve() : new Promise(resolve => { waits.add({predicate, resolve}); }));
@@ -98,6 +113,8 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     watched = null;
     tabs.clear();
     contexts.clear();
+    restoredPending.clear();
+    savedAt.clear();
     if (dropped) void dropped.close().catch(() => {});
   }
 
@@ -124,6 +141,8 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
         if (session !== live) throw new Error('The browser restarted. Try again.');
         const made = {id, restored: cookies.length > 0};
         contexts.set(account, made);
+        savedAt.set(account, now());
+        if (made.restored) restoredPending.add(account); else restoredPending.delete(account);
         return made;
       } catch (error) { await live.disposeContext(id).catch(() => {}); throw error; }
     })().finally(() => { if (contextStarts.get(account)?.promise === promise) contextStarts.delete(account); });
@@ -141,7 +160,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
   /** Closes the tabs of one context of an account, then the context (Chrome closes a context's targets but leaves
    * a tab's listener on). Only that context: one already replaced is somebody else's now. */
   async function dropContext(live, account, entry) {
-    if (contexts.get(account) === entry) contexts.delete(account);
+    if (contexts.get(account) === entry) { contexts.delete(account); restoredPending.delete(account); savedAt.delete(account); }
     for (const [key, held] of tabs) {
       if (held.account !== account || held.tab.browserContextId !== entry.id) continue;
       tabs.delete(key);
@@ -155,9 +174,21 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
   async function saveJar(live, account) {
     const entry = contexts.get(account);
     if (!entry || session !== live || live.dead) return;
-    try { jars.save(account, await live.getCookies(entry.id)); }
-    catch { console.error('agent: could not save a browser account\'s cookies.'); }
+    try {
+      const cookies = await live.getCookies(entry.id);
+      // An account dropped, or a context replaced, while this waited must not bring its jar back.
+      if (contexts.get(account) !== entry || (listed && !listed.has(account))) return;
+      jars.save(account, cookies);
+      savedAt.set(account, now());
+    } catch { console.error('agent: could not save a browser account\'s cookies.'); }
   }
+  /** Waits for `promise` only a moment: a browser that is alive but does not answer never holds a caller up. */
+  function bounded(promise) {
+    let timer;
+    return Promise.race([promise, new Promise(resolve => { timer = setTimeout(resolve, saveWaitMs); })]).finally(() => clearTimeout(timer));
+  }
+  const saveSoon = (live, account) => bounded(saveJar(live, account));
+  const touch = key => { const entry = tabs.get(key); if (entry) entry.usedAt = now(); lastActive = now(); };
 
   /** This tab: the one it has if the browser still has it (in the account's current context), else a new one.
    * One at a time per tab, so a takeover and a task asking together open one. */
@@ -191,7 +222,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     }
     // A browser replaced while this opened must not have the tab in its map.
     if (session !== live) { await live.closeTab(tab); throw new Error('The browser restarted. Try again.'); }
-    tabs.set(key, {botId, account, tab, url: null, title: null, typed: new Set()});
+    tabs.set(key, {botId, account, tab, url: null, title: null, typed: new Set(), usedAt: now()});
     return tab;
   }
 
@@ -220,11 +251,14 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     if (!hostAllowed(url, allowed())) throw new Error(`Refusing to open ${url}: its host is not in AGENT_BROWSER_ALLOWLIST.`);
     const id = botId || ANONYMOUS_BOT, key = tabKey(account, id);
     const lane = await acquire(key, id);
+    // A keeper's read is the device looking after itself: it is no use of the browser, and never keeps it awake.
+    const keeping = id === KEEPER;
     let live = null;
     try {
       live = await ensure();
       const tab = await tabFor(live, account, id);
       checkContext(account, tab);
+      if (!keeping) touch(key);
       const {typed} = tabs.get(key);
       const remember = ({url: at, title}) => { const entry = tabs.get(key); if (entry) { entry.url = at || entry.url; entry.title = title ?? entry.title; } };
       // Asked before each step. False once the owner has taken this bot's tab since this task began (another
@@ -236,16 +270,40 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
         return lane.epoch === startEpoch;
       };
       // The last point before the result leaves the device: what the owner typed in secret is hidden from all of it.
-      try { return scrubTyped(await live.capture(url, {allow: allowed(), steps, approved, tab, timeoutMs, settleMs, onPage: remember, gate}), typed); }
-      catch (error) {
+      try {
+        const result = scrubTyped(await live.capture(url, {allow: allowed(), steps, approved, tab, timeoutMs, settleMs, onPage: remember, gate}), typed);
+        // A page the owner left the tab on is no finding about the account.
+        if (account && !result?.tookOver) noteResult(account, result);
+        return result;
+      } catch (error) {
         // An error names what the page did (a blocked address it was sent to may carry the echo), and leaves as text.
         throw Object.assign(new Error(scrubTyped(String(error?.message ?? ''), typed)), {status: error?.status});
       }
     } finally {
-      // What the page changed in the account's cookies is kept before the next task, or a restart, can lose it.
-      if (account && live) await saveJar(live, account);
+      // The lane is let go first: a browser that is alive but never answers the cookie request must not hold it.
       release(key, lane);
+      if (!keeping) touch(key);
+      // What the page changed in the account's cookies is kept before the next task, or a restart, can lose it. The
+      // task waits only a moment for it.
+      if (account && live) await saveSoon(live, account);
     }
+  }
+
+  const onSite = (host, site) => Boolean(site) && Boolean(host) && (host === site || host.endsWith(`.${site}`));
+  /** What a page on the account's own site says about the account: a sign-in page signs it out, any other page of the
+   * site signs it in. A page on another site says nothing. */
+  function noteResult(account, result) {
+    const site = listed?.get(account)?.site;
+    if (!site) return;
+    const out = signinPage(result);
+    let found;
+    if (out && onSite(out, site)) found = 'signed-out';
+    else if (onSite(hostOf(result?.finalUrl || result?.url), site)) found = 'signed-in';
+    else return;
+    const first = restoredPending.delete(account), before = states.get(account);
+    // `lost`: the jar was put back and the first look at the site found a sign-in page, so the site keeps its sign-in outside cookies.
+    states.set(account, {state: found, lost: found === 'signed-out' && (first || Boolean(before?.lost))});
+    checkedAt.set(account, now());
   }
 
   const armIdle = () => {
@@ -266,7 +324,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     const first = !driving;
     if (first) { driving = {key, botId, account}; const lane = lanes.get(key); if (lane) lane.epoch++; notify(); }
     armIdle();
-    try { await tabFor(await ensure(), account, botId); }
+    try { await tabFor(await ensure(), account, botId); touch(key); }
     catch (error) {
       // A browser that will not start must not leave the owner "holding" nothing.
       if (first) { driving = null; clearTimeout(idleTimer); notify(); }
@@ -290,11 +348,19 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
   /** The owner is done: bots may go on, and the page's secret fields are emptied first. Handing back what you do not hold does nothing. */
   async function handback(botId) {
     if (driving?.botId !== botId) return;
-    await clearSecretFields(tabs.get(driving.key));
+    const was = driving;
+    await clearSecretFields(tabs.get(was.key));
     if (driving?.botId !== botId) return;
     driving = null;
     clearTimeout(idleTimer);
+    touch(was.key);
     notify();
+    // A sign-in the owner made in this tab is kept now, not at the next save, and the keeper looks again.
+    const live = session;
+    if (was.account && jars && live) {
+      await saveSoon(live, was.account);
+      if (states.get(was.account)?.state === 'signed-out') { states.delete(was.account); checkedAt.delete(was.account); }
+    }
   }
 
   /** Frames of the watched tab, newest first wins at the receiver: `fn({botId, image, w, h, at})`. */
@@ -304,6 +370,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     const was = watched;
     watched = null;
     if (!was) return;
+    lastActive = now();
     was.off();
     await was.live.cdp.send('Page.stopScreencast', {}, was.tab.sessionId).catch(() => {});
   }
@@ -324,6 +391,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
       frameSink?.({botId, account, image: params.data, w: Number(params.metadata?.deviceWidth) || tab.viewport.width, h: Number(params.metadata?.deviceHeight) || tab.viewport.height, at: Date.now()});
     });
     watched = {key, botId, account, tab, live, off};
+    touch(key);
     try {
       await live.cdp.send('Page.startScreencast', SCREENCAST, tab.sessionId);
       // A page that never repaints sends no frame, and the viewer would stare at nothing.
@@ -346,6 +414,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     const entry = tabs.get(key);
     if (driving?.key !== key || !entry || !session) throw conflict('You are not driving that bot\'s tab. Take it over first.');
     armIdle();
+    touch(key);
     const {sessionId} = entry.tab, send = (method, params) => session.cdp.send(method, params, sessionId);
     if (ev.type === 'click') {
       await send('Input.dispatchMouseEvent', {type: 'mouseMoved', x: ev.x, y: ev.y});
@@ -394,22 +463,137 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
 
   /** What the device knows about each tab: for the status it reports. `refresh` stores Chrome's own address and title,
    * so what leaves here is scrubbed of what the owner typed in secret. */
-  const status = () => [...tabs].map(([key, {botId, account, url, title, typed}]) => ({botId, account, state: driving?.key === key ? 'driving' : lanes.get(key)?.holding ? 'browsing' : 'idle', ...scrubTyped({url, title}, typed)}));
+  const status = () => [...tabs].filter(([, entry]) => entry.botId !== KEEPER).map(([key, {botId, account, url, title, typed}]) => ({botId, account, state: driving?.key === key ? 'driving' : lanes.get(key)?.holding ? 'browsing' : 'idle', ...scrubTyped({url, title}, typed)}));
 
+  /** Every account's cookies are kept before the browser ends (best effort, each only a moment), then it is closed. */
   async function close() {
     clearTimeout(idleTimer);
     const live = session;
+    if (live && jars && !live.dead) await Promise.all([...contexts.keys()].map(account => saveSoon(live, account)));
     session = null;
     watched = null;
     tabs.clear();
     contexts.clear();
+    restoredPending.clear();
+    savedAt.clear();
     if (live) await live.close().catch(() => {});
+  }
+
+  const jarIds = () => { try { return new Set(jars ? jars.ids() : []); } catch { return new Set(); } };
+  const up = () => Boolean(session) && !session.dead;
+  const shown = (id, ids) => (!ids.has(id) && !contexts.has(id) ? 'signed-out' : states.get(id)?.state ?? 'unknown');
+
+  /** What this computer is told it holds, `[{id, site}]`. Anything but an array changes nothing. An account the browser
+   * holds (a context, tabs or a jar) that is not on the list is let go: tabs closed, context disposed, jar wiped. */
+  async function setAccounts(list) {
+    if (!Array.isArray(list)) return;
+    const next = new Map();
+    for (const item of list) {
+      if (item && typeof item.id === 'string' && ACCOUNT_ID.test(item.id)) next.set(item.id, {id: item.id, site: typeof item.site === 'string' ? item.site.trim().toLowerCase() : ''});
+    }
+    listed = next;
+    const held = new Set([...contexts.keys(), ...[...tabs.values()].map(entry => entry.account), ...jarIds(), ...states.keys()]);
+    for (const id of held) if (id && !next.has(id)) await letGo(id);
+  }
+  async function letGo(account) {
+    const live = session, entry = contexts.get(account);
+    if (driving?.account === account) { driving = null; clearTimeout(idleTimer); notify(); }
+    if (entry && live) await bounded(dropContext(live, account, entry).catch(() => {}));
+    contexts.delete(account);
+    for (const [key, held] of [...tabs]) {
+      if (held.account !== account) continue;
+      tabs.delete(key);
+      if (watched?.key === key) await unwatch();
+      if (live) await bounded(live.closeTab(held.tab));
+    }
+    for (const map of [states, checkedAt, savedAt]) map.delete(account);
+    restoredPending.delete(account);
+    if (jars) try { jars.wipe(account); } catch { console.error('agent: could not remove a browser account\'s saved sign-in.'); }
+  }
+
+  /** One entry per listed account: signed out when the browser holds nothing of it, else the last keeper or task finding. */
+  function accountStates() {
+    if (!listed) return [];
+    const ids = jarIds();
+    return [...listed.keys()].map(id => {
+      const state = shown(id, ids);
+      return {id, state, storage: 'cookies', ...(state === 'signed-out' && states.get(id)?.lost ? {lost: true} : {})};
+    });
+  }
+
+  /** Whether this account has a keeper: it is signed in, or has a jar nobody has checked yet, and its site may be opened. */
+  function wantsKeeper(id, ids) {
+    const site = listed?.get(id)?.site;
+    if (!site || !hostAllowed(`https://${site}/`, allowed())) return false;
+    const state = states.get(id)?.state;
+    return state === 'signed-in' || (ids.has(id) && state === undefined);
+  }
+  async function closeKeeper(live, id) {
+    const key = tabKey(id, KEEPER), entry = tabs.get(key);
+    if (!entry) return;
+    tabs.delete(key);
+    await bounded(live.closeTab(entry.tab));
+  }
+
+  /** The housekeeping, one pass: reap, save, close, keep, quit. `at` is the time it judges by. One pass at a time. */
+  function sweep(at = now()) {
+    sweeping ??= pass(at).finally(() => { sweeping = null; });
+    return sweeping;
+  }
+  async function pass(at) {
+    let live = up() ? session : null;
+    if (live) {
+      // 1. Reap: a bot's tab nobody has used for ten minutes goes, after its account's cookies are saved. Taken out of
+      // the map in one go, so a task that comes meanwhile opens a tab of its own.
+      const idle = [...tabs].filter(([key, entry]) => entry.botId !== KEEPER && entry.usedAt + REAP_MS <= at
+        && driving?.key !== key && !lanes.has(key) && !opening.has(key) && watched?.key !== key);
+      for (const [key] of idle) tabs.delete(key);
+      const reaped = new Set(idle.map(([, entry]) => entry.account).filter(Boolean));
+      await Promise.all([...reaped].map(async account => { await saveSoon(live, account); savedAt.set(account, at); }));
+      for (const [, entry] of idle) await bounded(live.closeTab(entry.tab));
+      // 2. Save: each account context not saved in ten minutes.
+      for (const account of [...contexts.keys()]) {
+        if ((savedAt.get(account) ?? 0) + SAVE_MS > at) continue;
+        await saveSoon(live, account);
+        savedAt.set(account, at);
+      }
+      // 3. Close: a context with no tab and no keeper, after it is saved. It comes back from its jar.
+      const ids = jarIds();
+      const busy = account => [...tabs.values()].some(entry => entry.account === account)
+        || [...lanes.keys(), ...opening.keys()].some(key => key.startsWith(`${account}\u0000`)) || contextStarts.has(account);
+      for (const [account, entry] of [...contexts]) {
+        if (busy(account) || wantsKeeper(account, ids)) continue;
+        await saveSoon(live, account);
+        if (contexts.get(account) !== entry || busy(account) || session !== live) continue;
+        await bounded(dropContext(live, account, entry).catch(() => {}));
+      }
+    }
+    // 4. Keep: a keeper tab for each account that has a sign-in to look after, read every 30 minutes. Not while the
+    // browser is quit (it would be woken for nothing), and never for a host the allowlist refuses.
+    if (listed && (up() || !quitIdle)) {
+      const ids = jarIds();
+      for (const id of [...listed.keys()]) {
+        if (!listed.has(id) || !wantsKeeper(id, ids)) continue;
+        const site = listed.get(id).site;
+        if ((checkedAt.get(id) ?? -Infinity) + KEEPER_MS <= at) {
+          try { await run(KEEPER, {url: `https://${site}/`, account: id}); }
+          catch { console.error('agent: a browser account\'s keeper could not read its site.'); }
+          checkedAt.set(id, at);
+          if (states.get(id)?.state === 'signed-out' && up()) await closeKeeper(session, id);
+        } else if (up() && !tabs.has(tabKey(id, KEEPER))) {
+          await tabFor(session, id, KEEPER).catch(() => {});
+        }
+      }
+    }
+    // 5. Quit: nothing has run, been driven or been watched for 30 minutes. Every jar is saved, then the browser closes.
+    live = up() ? session : null;
+    if (quitIdle && live && !driving && !watched && !lanes.size && at - lastActive >= QUIT_IDLE_MS) await close();
   }
 
   /** `value` scrubbed of what the owner typed in secret on this bot's tab: for a result that left some other way. */
   const scrub = (botId, value, account = null) => scrubTyped(value, tabs.get(tabKey(account, botId || ANONYMOUS_BOT))?.typed);
 
-  return {run, scrub, status, close, onFrame, watch, unwatch, applyInput, refresh, takeover, handback, owner: () => driving?.botId ?? null, laneCount: () => lanes.size};
+  return {run, scrub, status, close, setAccounts, accountStates, sweep, onFrame, watch, unwatch, applyInput, refresh, takeover, handback, owner: () => driving?.botId ?? null, laneCount: () => lanes.size};
 }
 
 /** One `browser.capture` or `browser.action` task, with the rules every browser
