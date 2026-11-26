@@ -355,6 +355,44 @@ test('a request with no lane is refused by a takeover with no lane', async () =>
   await runtime.close();
 });
 
+test('two takeovers on different bots at once leave exactly one open', async () => {
+  const opened = [];
+  const runtime = createBrowserRuntime({
+    env: env({BROWSER_LIVE_MS: '5000'}),
+    find: () => '/usr/bin/chrome',
+    start: async () => ({
+      open: async url => { opened.push(url); await pause(20); return {view: async () => ({url, title: 'T', text: '', elements: []}), page: async () => ({url}), close: async () => {}}; },
+      close: async () => {},
+    }),
+  });
+  const results = await Promise.allSettled([runtime.beginLive({url: 'https://example.com/a', lane: A}), runtime.beginLive({url: 'https://example.com/b', lane: B})]);
+  assert.deepEqual(results.map(r => r.status).sort(), ['fulfilled', 'rejected']);
+  const refused = results.find(r => r.status === 'rejected').reason;
+  assert.equal(refused.status, 409);
+  assert.match(refused.message, /A takeover is already open/);
+  assert.equal(opened.length, 1, 'Only one context was opened.');
+  assert.equal(runtime.liveIds().length, 1);
+  // The slot is free again once the person hands back, and a failed open does not keep it.
+  await runtime.endLive(runtime.liveIds()[0]);
+  assert.equal((await runtime.beginLive({url: 'https://example.com/c', lane: B})).title, 'T');
+  await runtime.close();
+});
+
+test('a browser that died on its own is not handed to the next page', async () => {
+  let launches = 0;
+  const sessions = [];
+  const runtime = createBrowserRuntime({
+    env: env({BROWSER_IDLE_MS: '5000'}),
+    find: () => '/usr/bin/chrome',
+    start: async () => { launches += 1; const session = {dead: false, capture: async url => ({url, n: launches}), close: async () => {}}; sessions.push(session); return session; },
+  });
+  await runtime.run({url: 'https://example.com/a', lane: A});
+  sessions[0].dead = true;
+  assert.equal((await runtime.run({url: 'https://example.com/b', lane: B})).n, 2, 'A dead process is replaced before it is used.');
+  assert.equal(launches, 2);
+  await runtime.close();
+});
+
 test('a takeover on one bot is looked at and acted on without waiting for another bot\'s page', async () => {
   let release;
   const gate = new Promise(resolve => { release = resolve; });

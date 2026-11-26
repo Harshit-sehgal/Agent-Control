@@ -109,6 +109,8 @@ export function createBrowserRuntime({env = process.env, start = startBrowserSes
   }
 
   async function ensure() {
+    // A browser that exited on its own is never handed out again: it would fail the page that got it.
+    if (session?.dead === true) await forget(session);
     if (session) return session;
     if (!starting) {
       starting = (async () => {
@@ -162,6 +164,7 @@ export function createBrowserRuntime({env = process.env, start = startBrowserSes
    * context open; a second one would fight it for the same process and turn
    * "which page is this" into a guess. */
   const lives = new Map();
+  let opening = 0;
   const noBrowser = () => Object.assign(new Error(mode === 'server'
     ? 'This install runs browser requests on the server, but no browser or allowlist is configured there. Set AGENT_BROWSER_ALLOWLIST (a host list, or * for any public site) and install Chrome, or point AGENT_BROWSER_PATH at one; or switch BROWSER_RUNTIME=agent.'
     : 'No browser is available on this server.'), {status: 503});
@@ -188,16 +191,17 @@ export function createBrowserRuntime({env = process.env, start = startBrowserSes
   function beginLive({url, requestId = null, openedBy = null, workspaceId = null, lane = ''}) {
     if (closed) return Promise.reject(Object.assign(new Error('The browser runtime is shutting down.'), {status: 503}));
     if (!available()) return Promise.reject(noBrowser());
-    if (lives.size >= MAX_LIVE) return Promise.reject(Object.assign(new Error('A takeover is already open. Finish or close it first — one page at a time.'), {status: 409}));
+    // The slot is taken here, before any queue, because each lane has its own queue: two takeovers on
+    // different lanes would otherwise both pass this check and both open a context. `opening` counts the
+    // takeovers that hold a slot but are not yet in `lives`.
+    if (lives.size + opening >= MAX_LIVE) return Promise.reject(Object.assign(new Error('A takeover is already open. Finish or close it first — one page at a time.'), {status: 409}));
+    opening += 1;
     return enqueue(lane, async () => {
-      if (closed) throw Object.assign(new Error('The browser runtime is shutting down.'), {status: 503});
-      // Checked again inside the queue: two requests that both passed the check
-      // above would otherwise both open a context.
-      if (lives.size >= MAX_LIVE) throw Object.assign(new Error('A takeover is already open. Finish or close it first — one page at a time.'), {status: 409});
       active += 1;
       clearTimeout(idle);
       idle = null;
       try {
+        if (closed) throw Object.assign(new Error('The browser runtime is shutting down.'), {status: 503});
         const live = await ensure();
         const handle = await live.open(url, {allow: allowed(), timeoutMs});
         const entry = {id: `takeover-${crypto.randomUUID()}`, handle, requestId, openedBy, workspaceId, lane, url: null, createdAt: Date.now(), timer: null};
@@ -207,6 +211,8 @@ export function createBrowserRuntime({env = process.env, start = startBrowserSes
         entry.url = view.url;
         return {id: entry.id, url: view.url, title: view.title, text: view.text, elements: view.elements, elementCount: view.elementCount, blockedRequests: view.blockedRequests, image: view.image};
       } finally {
+        // The entry is in `lives` by now (or the open failed), so the slot passes from `opening` to `lives`.
+        opening -= 1;
         active -= 1;
         armIdle();
       }
