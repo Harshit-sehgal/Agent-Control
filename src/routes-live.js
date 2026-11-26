@@ -14,7 +14,7 @@ import {companyBots} from '../shared/company.js';
 import * as agent from './agent.js';
 import {browserLive as hub, liveStates} from './browser-live.js';
 import {DEFAULT_WORKSPACE} from './auth.js';
-import {fail, safeJson} from './http.js';
+import {fail, safeJson, requireSecureSecret} from './http.js';
 
 /** A frame is a JPEG in base64: larger than an ordinary request body. */
 const FRAME_BODY_LIMIT = 1024 * 1024;
@@ -54,7 +54,9 @@ export function liveRoutes(router, {workspaces}) {
   });
   router.add('POST', '/api/browser-live/:botId/input', 'admin', async c => {
     const botId = botOf(c);
-    hub.input(c.actor.workspaceId, botId, await c.body());
+    const event = await c.body();
+    requireSecureSecret(c.req, event);
+    hub.input(c.actor.workspaceId, botId, event);
     return {ok: true};
   });
   // The owner takes the bot's tab: its run (if any) parks, no bot starts anything, and input is accepted.

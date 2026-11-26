@@ -340,6 +340,17 @@ mailbox). The client address is the **rightmost** `X-Forwarded-For` hop, which i
 caller can invent. A proxy that appends rather than replaces is fine for the same
 reason; one that passes the header through untouched is not.
 
+**Passwords and codes typed during a takeover.** The server accepts a secret
+typed into a bot's page only when the request came over TLS, through a trusted
+proxy that says it spoke HTTPS, or from the computer that runs the app. Anything
+else is refused with a 403. Behind `tailscale serve` or Caddy, set
+`TRUST_PROXY=1` so the proxy's `X-Forwarded-Proto: https` is believed; without
+it, a proxied request is never taken as secure, and the owner can type a secret
+only on the host itself (at `http://localhost`, with no proxy in between). Set
+`TRUST_PROXY=1` only when every request reaches the server through that proxy,
+and never put a plain-HTTP proxy in front of this server for secret input: it
+would carry the password in the clear.
+
 ## Secrets & the vault
 - Without `MASTER_KEY`, a `vault.key` (mode `0600`) is created beside the
   database. **Back it up with the database** — losing it makes every encrypted

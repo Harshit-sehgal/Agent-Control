@@ -576,6 +576,8 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
           if (!expression) return {ok: false, reason: 'That action is not supported.', ...here};
           const {result} = await evaluate(expression).catch(error => ({result: {value: {ok: false, reason: error.message}}}));
           const value = result?.value && typeof result.value === 'object' ? result.value : {ok: false, reason: 'The page did not answer.'};
+          // What the owner typed in secret marks its field, so no later read of the page hands the value to a model.
+          if (step?.op === 'type' && step.secret === true && value.ok) await evaluate(`(()=>{const el=document.querySelector(${targetOf(step)});if(el)el.setAttribute('data-agent-secret','1');})()`).catch(() => {});
           const page = await settled(here.url);
           // `read` returns an element's text; keep it next to the page instead of
           // letting the page's own text win the spread.
