@@ -19,7 +19,12 @@
 - In page text and `read` results, each secret field's content (its `value`, or `innerText` for a contenteditable) is replaced wherever it appears by `[hidden]` when it is at least 3 characters long.
 - A bot's own `type` step into a secret field is refused with: `This is a password or code field. The owner signs in; a bot never types there.`
 - `secret` input is accepted only when `secureRequest(req)` is true; otherwise 403 with: `Passwords and codes are only sent over HTTPS or from this computer.`
-- `secureRequest(req)` is: `req.socket?.encrypted === true`, or, when `trustProxy()` holds, `x-forwarded-proto` equals `https`, or, when it does not, the peer (`req.socket.remoteAddress`) is `127.0.0.1`, `::1` or `::ffff:127.0.0.1`. (Tailscale serve and a local reverse proxy reach the app from loopback; a proxy set up with `TRUST_PROXY=1` must forward the scheme.)
+- `secureRequest(req)` is true when any of these holds:
+  - `req.socket?.encrypted === true`;
+  - `trustProxy()` holds and `x-forwarded-proto` equals `https`;
+  - `trustProxy()` does not hold, the peer (`req.socket.remoteAddress`) is `127.0.0.1`, `::1` or `::ffff:127.0.0.1`, **and** the request has no `x-forwarded-for`, `forwarded` or `x-real-ip` header.
+
+  A proxy on this host relays other devices' requests from loopback, so a forwarded request is never "this computer". Behind `tailscale serve` or Caddy, the owner sets `TRUST_PROXY=1`. Check during Task 4 that `tailscale serve` sends `x-forwarded-proto`, and write in `DEPLOYMENT.md` what each setup needs. A plain-HTTP proxy must never carry secret input.
 - Secret text never appears in a toast, the tray's echo, an activity line, a run record, a log line or an error message.
 
 ## Review Focus
@@ -27,7 +32,7 @@
 1. **A site's one-time-code box is a plain `<input type=text>` with no `autocomplete`.** Expected: once the owner types the code through the masked Code field, the device tags that input and the code is hidden from the snapshot, page text and hand back. Task 3 pins it.
 2. **A page echoes a secret elsewhere** (a "show password" span, a confirmation that prints the card's last digits in full). Expected: every occurrence of a 3+ character secret value is `[hidden]` in page text. Task 2 pins it.
 3. **The owner types a code into the plain "Type into the page" box** while a password field has focus. Expected: the device treats it as secret anyway, because the focused field is secret. Task 3 pins it.
-4. **Plain HTTP from another device on the network.** Expected: 403 for `secret`, while ordinary takeover input keeps working. Task 4 pins it.
+4. **Plain HTTP from another device on the network, directly or through a proxy on this host.** Expected: 403 for `secret`, while ordinary takeover input keeps working. Task 4 pins it.
 5. **A Pay or Send button built as `<input type=submit value="Pay now">`.** Expected: still classified as a payment by `riskGuard`. Task 2 pins it.
 
 ---
@@ -168,6 +173,10 @@ test('secureRequest: TLS, a trusted proxy that says https, or loopback', () => {
   assert.equal(secureRequest({headers: {}, socket: {encrypted: true, remoteAddress: '203.0.113.5'}}), true);
   assert.equal(secureRequest({headers: {}, socket: {remoteAddress: '127.0.0.1'}}), true);
   assert.equal(secureRequest({headers: {}, socket: {remoteAddress: '192.168.1.20'}}), false);
+  // A local proxy relaying a phone over plain HTTP arrives from loopback but says so in its headers.
+  for (const h of ['x-forwarded-for', 'forwarded', 'x-real-ip']) {
+    assert.equal(secureRequest({headers: {[h]: '192.168.1.20'}, socket: {remoteAddress: '127.0.0.1'}}), false);
+  }
   withEnv({TRUST_PROXY: '1'}, () => {
     assert.equal(secureRequest({headers: {'x-forwarded-proto': 'https'}, socket: {remoteAddress: '127.0.0.1'}}), true);
     assert.equal(secureRequest({headers: {'x-forwarded-proto': 'http'}, socket: {remoteAddress: '127.0.0.1'}}), false);
@@ -200,7 +209,7 @@ test('secret input over plain HTTP from the network is refused on both takeover 
 - [ ] **Step 2: Run it to see it fail.** Run: `npm run test:ui`. Expected: the new check FAILS.
 - [ ] **Step 3: Add the two fields** beside "Type into the page" in each screen: `<form id="computer-password">` with `<input type="password" name="text" autocomplete="current-password" aria-label="Password">` and a Type button, and `<form id="computer-code">` with `<input name="text" inputmode="numeric" autocomplete="one-time-code" aria-label="Code">`. Both actions push `{type: 'type', text, secret: true}` (Computer view) or call `act({op: 'type', index, text, secret: true})` (takeover sheet), then reset the form. Nothing echoes the text. Copy: the button says `Type`; the field's placeholder says `Password` or `Code`.
 - [ ] **Step 4: Run it to see it pass.** Run: `npm run build:pages && npm run test:ui`. Expected: PASS, and `docs/` has no drift.
-- [ ] **Step 5: Docs and commit.** Add one paragraph to `SECURITY.md` saying what counts as a secret field, that bots never type into one, and that masked input needs HTTPS or loopback. Tick Phase AA step 0 in `docs/BUILD-PLAN.md`. Run `npm run check && npm test && npm run build:pages`. `git commit -m "feat: masked password and code fields in the takeover screens"`
+- [ ] **Step 5: Docs and commit.** Add one paragraph to `SECURITY.md` saying what counts as a secret field, that bots never type into one, and that masked input needs HTTPS or this computer, never a plain-HTTP proxy. In `DEPLOYMENT.md`, say to set `TRUST_PROXY=1` behind `tailscale serve` or Caddy. Tick Phase AA step 0 in `docs/BUILD-PLAN.md`. Run `npm run check && npm test && npm run build:pages`. `git commit -m "feat: masked password and code fields in the takeover screens"`
 
 ---
 
