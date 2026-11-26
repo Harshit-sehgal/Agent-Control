@@ -3,7 +3,7 @@
  * anything is queued or typed. */
 import test, {mock} from 'node:test';
 import assert from 'node:assert/strict';
-import {secureRequest} from '../src/http.js';
+import {secureRequest, forwardedHttps} from '../src/http.js';
 import {createRouter} from '../src/router.js';
 import {liveRoutes} from '../src/routes-live.js';
 import {groupRoutes} from '../src/routes-groups.js';
@@ -19,6 +19,16 @@ async function withEnv(vars, fn) {
   for (const [k, v] of Object.entries(vars)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
   try { return await fn(); } finally { for (const [k, v] of Object.entries(before)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } }
 }
+
+test('forwardedHttps: the proxy header, trimmed and in any case, and exactly https', () => {
+  const req = v => ({headers: v === undefined ? {} : {'x-forwarded-proto': v}});
+  for (const v of ['https', 'HTTPS', ' Https ', '\thttps\n']) assert.equal(forwardedHttps(req(v)), true, JSON.stringify(v));
+  // A list is a client's own value with a proxy's appended: only a header that is https and nothing else counts.
+  for (const v of ['http', '', 'https, http', 'http, https', 'https,https', 'httpss', 'xhttps', 'wss', undefined]) assert.equal(forwardedHttps(req(v)), false, JSON.stringify(v));
+  assert.equal(forwardedHttps({}), false);
+  assert.equal(forwardedHttps(undefined), false);
+  assert.equal(forwardedHttps({headers: {'x-forwarded-proto': ['https']}}), false, 'a repeated header arrives as one string; anything else is not believed');
+});
 
 test('secureRequest: TLS, a trusted proxy that says https, or loopback', async () => {
   assert.equal(secureRequest({headers: {}, socket: {encrypted: true, remoteAddress: '203.0.113.5'}}), true);
@@ -108,7 +118,7 @@ const browser = findBrowser();
 test('a field the owner typed into in secret is tagged in the page, and a plain one is not', {skip: !browser && 'no browser installed', timeout: 60000}, async () => {
   const server = http.createServer((req, res) => {
     res.writeHead(200, {'Content-Type': 'text/html'});
-    res.end('<title>Sign in</title><input id="u" placeholder="Email"><input id="p" type="password" placeholder="Password">');
+    res.end('<title>Sign in</title><input id="u" placeholder="Email"><input id="p" type="password" placeholder="Password"><input id="b" type="submit" value="Pay now"><main id="m" tabindex="-1"><input id="s" placeholder="Search"></main>');
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const host = `127.0.0.1:${server.address().port}`;
@@ -122,6 +132,18 @@ test('a field the owner typed into in secret is tagged in the page, and a plain 
     assert.equal((await live.act({op: 'type', index: at('Password'), text: '482913', secret: true})).ok, true);
     assert.equal((await live.act({op: 'waitFor', selector: '#p[data-agent-secret]'})).ok, true, 'the secret field is tagged');
     assert.equal((await live.act({op: 'waitFor', selector: '#u[data-agent-secret]', timeoutMs: 300})).ok, false);
+    // A secret aimed at a button is refused with fixed words, and the button keeps its value and its name.
+    const refused = await live.act({op: 'type', index: at('Pay now'), text: 'hunter22-482913', secret: true});
+    assert.equal(refused.ok, false);
+    assert.equal(refused.reason, 'Choose a text field first.');
+    assert.doesNotMatch(JSON.stringify(refused), /hunter22|482913/);
+    assert.equal((await live.act({op: 'waitFor', selector: '#b[data-agent-secret]', timeoutMs: 300})).ok, false, 'the button is not tagged');
+    assert.equal((await live.act({op: 'waitFor', selector: '#b[value="Pay now"]'})).ok, true, 'its value is unchanged');
+    // A plain type into the password field (already secret) keeps it tagged; a plain field stays untagged.
+    assert.equal((await live.act({op: 'type', index: at('Password'), text: 'again'})).ok, true);
+    assert.equal((await live.act({op: 'waitFor', selector: '#p[data-agent-secret]'})).ok, true);
+    assert.equal((await live.act({op: 'type', index: at('Search'), text: 'red shoes'})).ok, true);
+    assert.equal((await live.act({op: 'waitFor', selector: '[data-agent-secret] #s, #s[data-agent-secret], main[data-agent-secret]', timeoutMs: 300})).ok, false, 'a search box is not secret');
     await live.close();
   } finally { await session.close(); server.close(); }
 });

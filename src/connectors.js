@@ -13,6 +13,7 @@ import {CONNECTOR_KINDS, MAX_CONNECTORS, newConnectorId, publicConnector, slugOf
 import {checkMcpUrl, mcpList} from './mcp-client.js';
 import * as credentials from './credentials.js';
 import {mcpAuthHeaders, askToSignInAgain} from './mcp-oauth.js';
+import {forwardedHttps} from './http.js';
 
 const now = () => new Date().toISOString();
 export const connectorsOf = state => (state.connectors ??= []);
@@ -157,7 +158,7 @@ export async function removeConnector(store, workspaceId, id) {
 export function publicBaseUrl(req) {
   const set = String(process.env.PUBLIC_BASE_URL || process.env.PUBLIC_ORIGIN || '').trim().replace(/\/+$/, '');
   if (/^https?:\/\/[^/\s]+$/i.test(set)) return set;
-  const proxied = process.env.TRUST_PROXY === '1' && String(req?.headers?.['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
+  const proxied = process.env.TRUST_PROXY === '1' && forwardedHttps(req);
   const scheme = req?.socket?.encrypted || proxied ? 'https' : 'http';
   return `${scheme}://${req?.headers?.host || ''}`;
 }

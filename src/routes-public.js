@@ -11,7 +11,7 @@ import {queueGroupRun, resumeBrowserRun} from './coordination.js';
 import {runOneBot} from './routes-groups.js';
 import {sessionCookie, clearCookie, DEFAULT_WORKSPACE, resolveAccount} from './auth.js';
 import {sha256} from './vault.js';
-import {fail, cookie, safeJson, clientIpOf, trustProxy as trustProxyEnv} from './http.js';
+import {fail, cookie, safeJson, clientIpOf, trustProxy as trustProxyEnv, forwardedHttps} from './http.js';
 import {reply} from './router.js';
 import {ownerGoogleConfig, startOwnerSignIn, takeOwnerFlow, finishOwnerSignIn, OWNER_CALLBACK} from './google-owner.js';
 import {publicBaseUrl} from './connectors.js';
@@ -118,7 +118,7 @@ export function publicRoutes(router, {auth, workspaces, version}) {
       attempts.delete(`login:account:${account}:${ip}`);
       attempts.delete(`login:account:${account}`);
     }
-    const secure = Boolean(c.req.socket.encrypted || (trustProxy() && c.req.headers['x-forwarded-proto'] === 'https'));
+    const secure = Boolean(c.req.socket.encrypted || (trustProxy() && forwardedHttps(c.req)));
     return reply(200, {ok: true, me: {email: result.user.email, role: result.role}}, {'Set-Cookie': sessionCookie(result.sessionId, {secure})});
   });
   // How the sign-in screen may offer sign-in. Says only whether Google is set up, never for whom.
