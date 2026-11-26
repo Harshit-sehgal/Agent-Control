@@ -215,3 +215,63 @@ test('by default a takeover has no clock: the person keeps the browser until the
   assert.match(src, /AGENT_TAKEOVER_IDLE_MS\) \|\| 0\}/);
   assert.match(src, /if \(!idleMs\) return;/);
 });
+
+/** Methods the fake saw on the tab, from the first Input.insertText on. */
+const afterInsert = fake => { const i = fake.calls.findIndex(c => c.method === 'Input.insertText'); return i < 0 ? [] : fake.calls.slice(i + 1); };
+const tagsAfter = fake => afterInsert(fake).filter(c => c.method === 'Runtime.evaluate' && c.params.expression.startsWith('document.activeElement?.setAttribute('));
+
+test('text the owner marks secret is typed, then the field it went into is tagged for the page', async t => {
+  const {sb, fake} = rig();
+  t.after(() => sb.close());
+  await sb.run('bot-a', {url: 'https://docs.example.com/'});
+  await sb.takeover('bot-a');
+  await sb.applyInput('bot-a', {type: 'type', text: '482913', secret: true});
+  assert.equal(fake().input.length, 1);
+  assert.equal(fake().input[0].params.text, '482913');
+  const tags = tagsAfter(fake());
+  assert.equal(tags.length, 1, 'one tag, after the text went in');
+  assert.match(tags[0].params.expression, /data-agent-secret/);
+  assert.equal(tags[0].params.expression, "document.activeElement?.setAttribute('data-agent-secret','1')");
+  assert.equal(fake().actions.length, 0, 'the tag is not a bot step');
+});
+
+test('a plain type event into a field the page says is secret is tagged too, and into any other is not', async t => {
+  const {sb, fake} = rig();
+  t.after(() => sb.close());
+  await sb.run('bot-a', {url: 'https://docs.example.com/'});
+  await sb.takeover('bot-a');
+  await sb.applyInput('bot-a', {type: 'type', text: 'hello'});
+  assert.equal(tagsAfter(fake()).length, 0, 'an ordinary field is left alone');
+  const asked = fake().calls.filter(c => c.method === 'Runtime.evaluate' && c.params.expression.includes('isSecretField(el)'));
+  assert.equal(asked.length, 1, 'the focused field was asked about, once');
+  assert.ok(fake().calls.indexOf(asked[0]) < fake().calls.findIndex(c => c.method === 'Input.insertText'), 'before the text went in');
+  assert.match(asked[0].params.expression, /function isSecretField/, 'the whole bundle travels with the question');
+  fake().focusSecret = true;
+  await sb.applyInput('bot-a', {type: 'type', text: 'hunter2'});
+  assert.equal(tagsAfter(fake()).length, 1, 'a password field is tagged though the event was not marked');
+});
+
+test('a key press and a click are not asked about, and nothing the owner typed is in an error or a log line', async t => {
+  const {sb, fake} = rig();
+  t.after(() => sb.close());
+  await sb.run('bot-a', {url: 'https://docs.example.com/'});
+  await sb.takeover('bot-a');
+  await sb.applyInput('bot-a', {type: 'key', key: 'Enter'});
+  await sb.applyInput('bot-a', {type: 'click', x: 5, y: 5});
+  assert.equal(fake().calls.filter(c => c.method === 'Runtime.evaluate' && c.params.expression.includes('isSecretField(el)')).length, 0);
+  // Every way a type can fail: the check, the insert and the tag all throw with the text in the browser's own message.
+  const seen = [], spy = (...args) => seen.push(args.join(' ')), keep = {error: console.error, warn: console.warn, log: console.log};
+  Object.assign(console, {error: spy, warn: spy, log: spy});
+  t.after(() => Object.assign(console, keep));
+  const text = 'hunter22-482913';
+  for (const method of ['Runtime.evaluate', 'Input.insertText']) {
+    fake().hook(method, async ({expression}) => {
+      if (method === 'Runtime.evaluate' && !/isSecretField\(el\)|setAttribute/.test(expression)) return undefined;
+      throw new Error(`CDP failed on ${text}`);
+    });
+    await assert.rejects(() => sb.applyInput('bot-a', {type: 'type', text, secret: true}), e => !String(e.message).includes(text) && !String(e.stack).includes(text), method);
+    fake().hook(method, async () => undefined);
+  }
+  assert.ok(!seen.join('\n').includes(text), 'nothing was logged with the text');
+  await assert.rejects(() => sb.applyInput('bot-a', {type: 'type', text: text.repeat(300), secret: true}), e => !e.message.includes(text));
+});

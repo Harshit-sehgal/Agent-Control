@@ -34,7 +34,7 @@ export function cleanInput(event) {
     case 'type': {
       if (typeof event.text !== 'string' || !event.text) fail('Text to type is required.', 400);
       if (event.text.length > MAX_TYPED) fail(`At most ${MAX_TYPED} characters can be typed at once.`, 400);
-      return {type: 'type', text: event.text};
+      return {type: 'type', text: event.text, ...(event.secret === true ? {secret: true} : {})};
     }
     case 'key':
       if (typeof event.key !== 'string' || !Object.hasOwn(KEYS, event.key)) fail(`A key is one of: ${Object.keys(KEYS).join(', ')}.`, 400);

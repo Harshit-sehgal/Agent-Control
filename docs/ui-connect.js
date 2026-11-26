@@ -7,11 +7,11 @@
  *
  * Secrets: an MCP address or header is typed here and sent once; sign-in clients live in the server's .env. The server never
  * answers with one, so nothing on this page can show or log one. */
-import {esc, icon, btn, note, tag, field, textInput, runFullApp, demoList} from './ui-kit.js?v=b65971fe47';
-import {api, sync} from './ui-store.js?v=b65971fe47';
-import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=b65971fe47';
-import {mcpRows, mcpDraft, statusOf} from './ui-connect-model.js?v=b65971fe47';
-import {catalogView, appById, appInputs, connectRequest, connectHow, clientSetupLine, APPS} from './app-catalog.js?v=b65971fe47';
+import {esc, icon, btn, note, tag, field, textInput, runFullApp, demoList} from './ui-kit.js?v=c77fd59cad';
+import {api, sync} from './ui-store.js?v=c77fd59cad';
+import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=c77fd59cad';
+import {mcpRows, mcpDraft, statusOf} from './ui-connect-model.js?v=c77fd59cad';
+import {catalogView, appById, appInputs, connectRequest, connectHow, clientSetupLine, APPS} from './app-catalog.js?v=c77fd59cad';
 
 const tools = (connector, label) => {
   const list = Array.isArray(connector?.actions) ? connector.actions : [];
