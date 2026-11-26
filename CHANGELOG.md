@@ -33,6 +33,17 @@ browser tasks, and accounts, workspaces and backup.
   thread.
 
 ### Added
+- **Hold a reply for more.** Touch and hold a bot reply (right-click on a
+  computer, or the menu key) for a popover at it: 👍 / 👎 (👎 asks what was
+  wrong), Ask about this (your words under a quote of the reply, or of the part
+  you selected), Copy, Try again, Share, Pin, Start a thread, Save as template
+  (the question that got the reply) and, on a phone, Select text. Pinned replies
+  show in a strip under the chat's header. A one-time tip says to hold a reply.
+  It replaces the Copy and Teach buttons under each reply.
+- **Bots learn from the chat.** A plain correction of a bot's last reply ("no,
+  too long") and a 👍 / 👎 reach its next memory pass, which keeps only lasting
+  preferences. What a correction taught shows in that chat as "Learned: …" with
+  Undo, and a rule you switched off stays off.
 - **Connectors and subscriptions in Settings.** Settings → Connectors lists, adds,
   refreshes and deletes MCP servers (a web address with optional headers, or the
   name of a server on your agent), runs the Google setup form with its steps,

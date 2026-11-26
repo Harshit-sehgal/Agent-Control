@@ -126,9 +126,11 @@ Built, with tests:
   (retention, agent retention, ask expiry, browser expiry, follow-ups, the health watch): no overlap, failures logged, and `stop()`
   waits for the pass in flight. `tests/interval.test.js`.
 
-- **Teach from a reply** (Round 2's "failure-to-improvement"): each bot reply has Copy and Teach. Teach asks what
-  the bot should do differently from now on and keeps it as that bot's own rule, editable on its profile.
-  `tests/teach-reply.test.js`, usability smoke "teach".
+- **Learn from the chat, and the reply popover** (Round 2's "failure-to-improvement"; replaced the Copy and Teach
+  bar): a plain correction ("no, too long") and 👍 / 👎 reach the bot's next memory pass, and what it learned shows in
+  the chat as "Learned: …" with Undo. Holding a reply opens a popover with feedback, Ask about this and its actions.
+  `tests/memory-learning.test.js`, `tests/memory-feedback.test.js`, `tests/reply-menu.test.js`, usability smoke
+  "reply popover".
 
 - **Watch and tell** (idea 5): a bot checks a page every hour, 6 hours or day and the owner hears once when it
   changes, or when chosen words appear. Compared by code, never by a model; clocks and "3 min ago" are not changes.
