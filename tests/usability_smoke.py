@@ -207,6 +207,66 @@ async def create_bot_from_page(page, base):
     await expect(page.locator('#main h1')).to_have_text('Publishing assistant')
 
 
+async def edit_pins_a_bot_to_one_computer(page, base):
+    """The owner picks the computer on a bot's Edit page; a member's Edit shows no such row and a rename keeps the pin."""
+    server = await install_admin(page)
+    ids = await open_app(page, base, bots=EXTRA_BOTS)
+    writer = ids['Writer']
+
+    async def be(role):
+        await page.evaluate("""async role => {
+            const v = new URL(document.querySelector('script[src*="app.js"]').src).search;
+            const {store} = await import('./ui-store.js' + v);
+            store.state.me = {...(store.state.me || {}), email: 'owner@localhost', role};
+        }""", role)
+
+    async def open_edit():
+        await page.evaluate(f"location.hash = '#profile/{writer}'")
+        await page.evaluate(f"location.hash = '#profile/{writer}/edit'")
+        await page.locator('#edit-bot-form').wait_for()
+
+    await be('owner')
+    await open_edit()
+    select = page.locator('#edit-bot-form select[name=device]')
+    await expect(select).to_have_count(1)
+    values = await select.locator('option').evaluate_all('o => o.map(x => [x.value, x.textContent])')
+    assert values == [['', 'Any computer'], ['a1', 'Laptop'], ['a2', 'Desk PC']], values
+    await select.select_option('a1')
+    await page.locator('#edit-bot-form button[type=submit]').click()
+    await expect(page.locator('#toast')).to_have_text('Saved.')
+    assert company_bot(await api_state(page), 'Writer')['settings']['device'] == 'a1'
+    # A member sees no Computer row; renaming the bot leaves its pin where it was.
+    await be('member')
+    await open_edit()
+    await expect(page.locator('#edit-bot-form .nb-boss', has_text='Manager')).to_have_count(1)
+    await page.wait_for_timeout(300)
+    await expect(page.locator('#edit-bot-form select[name=device]')).to_have_count(0)
+    assert await overflow(page) <= 0, 'the Edit page overflows the phone'
+    await page.locator('#edit-bot-form input[name=name]').fill('Drafter')
+    await page.locator('#edit-bot-form button[type=submit]').click()
+    await expect(page.locator('#main .pr-hero h1')).to_have_text('Drafter')
+    assert company_bot(await api_state(page), 'Drafter')['settings']['device'] == 'a1'
+    # The owner's page, with the pin showing, fits a phone too.
+    await be('owner')
+    await page.evaluate(f"location.hash = '#profile/{writer}'")
+    await page.evaluate(f"location.hash = '#profile/{writer}/edit'")
+    await expect(page.locator('#edit-bot-form select[name=device]')).to_have_value('a1')
+    assert await overflow(page) <= 0, 'the Computer row overflows the phone'
+    # Every computer revoked, the bot still pinned: the owner still sees the pin and Any computer clears it.
+    for agent in server.agents:
+        agent['status'] = 'revoked'
+    await page.evaluate(f"location.hash = '#profile/{writer}'")
+    await page.evaluate(f"location.hash = '#profile/{writer}/edit'")
+    await expect(select).to_have_count(1)
+    values = await select.locator('option').evaluate_all('o => o.map(x => [x.value, x.textContent])')
+    assert values == [['', 'Any computer'], ['a1', 'A computer that is no longer paired']], values
+    await expect(select).to_have_value('a1')
+    await select.select_option('')
+    await page.locator('#edit-bot-form button[type=submit]').click()
+    await expect(page.locator('#toast')).to_have_text('Saved.')
+    assert company_bot(await api_state(page), 'Drafter')['settings'].get('device') is None
+
+
 async def edit_rename_and_move(page, base):
     ids = await open_app(page, base, bots=EXTRA_BOTS)
     writer, researcher = ids['Writer'], ids['Researcher']
@@ -2884,6 +2944,7 @@ async def main():
             print(f'Usability smoke against {base}')
             await h.scenario('bot: create from the New bot page and land in its chat', create_bot_from_page)
             await h.scenario('bot: edit renames it and a menu move puts it under a manager', edit_rename_and_move)
+            await h.scenario('bot: the owner pins a bot to one computer on Edit, a member keeps the pin', edit_pins_a_bot_to_one_computer)
             await h.scenario('bot: delete asks first, and its reports go Solo', delete_bot_reports_go_solo)
             await h.scenario('bot: Atlas has no Delete or Hide; pin from the menu', atlas_has_no_delete)
             await h.scenario('pin: the menu pins, the menu key opens it, Alt+arrows reorder and it is saved', pin_by_menu_and_move_by_keyboard)

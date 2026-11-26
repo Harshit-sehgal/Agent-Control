@@ -5,15 +5,15 @@
  *
  * A bot's manager is settings.reportsTo (company.js); "manager" is simply a bot
  * with reports, so any bot can become one by receiving a report. */
-import {companyBots, primaryOf, managerOf, reportsOf, teamOf} from './company.js?v=13aa44e5ea';
-import {firstUnusedTint} from './bot-create.js?v=13aa44e5ea';
-import {TINT_COUNT, dayLabel} from './ui-kit.js?v=13aa44e5ea';
-import {jobOf} from './ui-company.js?v=13aa44e5ea';
-import {ACTIVITY_CHIPS} from './activity-log.js?v=13aa44e5ea';
-import {grantRows} from './ui-asks.js?v=13aa44e5ea';
-import {cleanEffort, effortLabel, EFFORT_LEVELS} from './ai-presets.js?v=13aa44e5ea';
-import {scheduleRows} from './schedules.js?v=13aa44e5ea';
-import {WATCH_EVERY} from './watches.js?v=13aa44e5ea';
+import {companyBots, primaryOf, managerOf, reportsOf, teamOf} from './company.js?v=0311e05212';
+import {firstUnusedTint} from './bot-create.js?v=0311e05212';
+import {TINT_COUNT, dayLabel} from './ui-kit.js?v=0311e05212';
+import {jobOf} from './ui-company.js?v=0311e05212';
+import {ACTIVITY_CHIPS} from './activity-log.js?v=0311e05212';
+import {grantRows} from './ui-asks.js?v=0311e05212';
+import {cleanEffort, effortLabel, EFFORT_LEVELS} from './ai-presets.js?v=0311e05212';
+import {scheduleRows} from './schedules.js?v=0311e05212';
+import {WATCH_EVERY} from './watches.js?v=0311e05212';
 
 /** What a bot made without a job holds until the owner's first chat message
  * replaces it (the profile, the list and the chat all treat it as "no job yet"). */
@@ -233,8 +233,21 @@ export function editChanges(was, now) {
   if (boss !== (was.reportsTo || null)) settings.reportsTo = boss;
   if (now.shape && now.shape !== was.shape) settings.shape = now.shape;
   if (Number.isInteger(Number(now.tint)) && now.tint !== '' && Number(now.tint) !== was.tint) settings.tint = Number(now.tint);
+  // The Computer row is the owner's, so it is sent only when the form had one and it changed (undefined: no row).
+  if (now.device !== undefined && (now.device || null) !== (was.device || null)) settings.device = now.device || null;
   if (Object.keys(settings).length) out.settings = settings;
   return Object.keys(out).length ? out : null;
+}
+
+/** The Computer choice on Edit: Any computer, then each paired computer, labelled by its name, in the order given; a pin on one that is gone shows last.
+ * Empty when no computer is paired and nothing is pinned, so the row is not drawn; a pin always shows, so the owner can clear it. `agents` is GET /api/agents; `current` the bot's pin. */
+export function deviceOptions(agents, current) {
+  const live = (agents || []).filter(a => a.status !== 'revoked');
+  const pin = current || '';
+  if (!live.length && !pin) return [];
+  const list = [{id: '', label: 'Any computer', selected: !pin}, ...live.map(a => ({id: a.id, label: a.name, selected: a.id === pin}))];
+  if (pin && !live.some(a => a.id === pin)) list.push({id: pin, label: 'A computer that is no longer paired', selected: true});
+  return list;
 }
 
 /* ---------- activity ---------- */
