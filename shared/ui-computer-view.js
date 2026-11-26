@@ -350,6 +350,8 @@ function typeSecret(form, f) {
   const text = String(f.text ?? '');
   form.reset();
   if (!text || session?.botId !== form.dataset.bot) return;
+  // `push` drops input while the bot holds the browser; say so rather than lose a password without a word.
+  if (stateOf(session) !== 'driving') return toast('Press Take control first, then type it again.', true);
   push(session, {type: 'type', text, secret: true});
 }
 

@@ -110,7 +110,8 @@ access only to people you would let read the owner's connected accounts.
   send the text marked `secret`. The server accepts that only over HTTPS, through a trusted proxy (`TRUST_PROXY=1`)
   that says it spoke HTTPS, or from the computer that runs the app, and refuses it with a 403 otherwise. A plain-HTTP
   proxy on this host voids the loopback exemption: the request then carries forwarding headers or an `Origin` that is
-  not `localhost`, `127.0.0.1` or `[::1]`, and the `Origin` check refuses it. Never put a plain-HTTP proxy in front
+  not `localhost`, `127.0.0.1` or `[::1]`, and the `Origin` check refuses it. With `TRUST_PROXY=1` the "from this computer" path is off: only the forwarded
+  `X-Forwarded-Proto: https` counts (`secureRequest` in `src/http.js`). Never put a plain-HTTP proxy in front
   of this server for secret input.
 
 ## Data at rest

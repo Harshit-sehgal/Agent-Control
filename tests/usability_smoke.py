@@ -64,8 +64,11 @@ def serve(directory):
 def known_noise(msg):
     """The meta CSP cannot carry frame-ancestors (the server header does), and no favicon is shipped."""
     url = (msg.location or {}).get('url', '')
-    # A takeover with no device running answers 409, and a secret over plain HTTP answers 403, on purpose; the browser logs every failed fetch.
-    return 'frame-ancestors' in msg.text or 'favicon' in url or '409 (Conflict)' in msg.text or '403 (Forbidden)' in msg.text
+    # A takeover with no device running answers 409 on purpose; the browser logs every failed fetch.
+    # A secret refused over plain HTTP answers 403 on purpose, but only from the two input routes that carry it:
+    # a 403 from any other URL is a real failure.
+    refused_secret = '403 (Forbidden)' in msg.text and re.search(r'/api/(browser-live/[^/]+/input|browser-sessions/[^/]+/act)$', url.split('?')[0])
+    return 'frame-ancestors' in msg.text or 'favicon' in url or '409 (Conflict)' in msg.text or bool(refused_secret)
 
 
 class Harness:
@@ -1437,6 +1440,7 @@ async def computer_take_over_drives_the_page(page, base):
     await expect(code).to_have_value('')
 
     async def nowhere_on_screen(*secrets):
+        # outerHTML misses an input's live value (a property, not an attribute), which is why the to_have_value('') checks stay.
         shown = await page.evaluate("document.documentElement.outerHTML + '\\n' + document.body.innerText")
         stored = await page.evaluate("JSON.stringify([Object.entries(localStorage), Object.entries(sessionStorage)])")
         for secret in secrets:
@@ -1548,6 +1552,7 @@ async def takeover_sheet_masked_fields(page, base):
     await expect(code).to_have_value('')
 
     async def nowhere_on_screen(*secrets):
+        # outerHTML misses an input's live value (a property, not an attribute), which is why the to_have_value('') checks stay.
         shown = await page.evaluate("document.documentElement.outerHTML + '\\n' + document.body.innerText")
         stored = await page.evaluate("JSON.stringify([Object.entries(localStorage), Object.entries(sessionStorage)])")
         for secret in secrets:

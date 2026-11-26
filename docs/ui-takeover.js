@@ -9,9 +9,9 @@
  * It is a screenshot remote control, not a live stream: one JPEG per call. The
  * server enforces the same allowlist and the same X refusal as any other page,
  * so this is a way to sign in, never a way around the rules. */
-import {esc, btn} from './ui-kit.js?v=26a178cb10';
-import {api, sync, isStaticDemo} from './ui-store.js?v=26a178cb10';
-import {openSheet, closeSheet, sheetOpen, toast} from './ui-dialogs.js?v=26a178cb10';
+import {esc, btn} from './ui-kit.js?v=0aadb36130';
+import {api, sync, isStaticDemo} from './ui-store.js?v=0aadb36130';
+import {openSheet, closeSheet, sheetOpen, toast} from './ui-dialogs.js?v=0aadb36130';
 
 /** The open takeover: its session id on the server, the request it belongs to,
  * the last page the server sent, and the control the person is typing into. */
