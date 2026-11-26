@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import * as agent from '../src/agent.js';
+import {DEVICE_FEATURES} from '../shared/device-features.js';
 import {SqliteStore} from '../src/sqlite-store.js';
 import {loadMasterKey} from '../src/vault.js';
 
@@ -161,6 +162,7 @@ test('pairing asks for the admin scope and neither pairing nor polling follows a
     const paired = await runAgent(['pair', '--server', base, '--code', 'ABCD234567']);
     assert.equal(paired.code, 0, paired.output);
     assert.deepEqual(seen[0].body.permissions, ['http.check', 'browser.capture', 'browser.action', 'model.run', 'mcp.call']);
+    assert.deepEqual(seen[0].body.features, DEVICE_FEATURES, 'the device says what its app can do when it pairs');
     const redirected = await runAgent(['pair', '--server', base, '--code', 'ABCD234567', '--permissions', 'http.check']);
     assert.equal(redirected.code, 1, redirected.output);
     assert.match(redirected.output, /Refusing to follow a redirect \(307\)/);

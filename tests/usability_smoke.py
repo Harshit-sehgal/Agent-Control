@@ -1911,9 +1911,9 @@ class Server:
         self.providers, self.default_provider, self.default_model = [], None, None
         self.agents = [
             {'id': 'a1', 'name': 'Laptop', 'status': 'online', 'permissions': ['model.run'], 'lastSeenAt': '2026-11-11T10:00:00Z', 'tasks': {'queued': 0, 'running': 0, 'failed': 0},
-             'cli': {'claude': 'signed-in', 'codex': 'signed-out', 'checkedAt': '2026-11-11T10:00:00Z'}},
+             'features': ['secret-input-v1'], 'cli': {'claude': 'signed-in', 'codex': 'signed-out', 'checkedAt': '2026-11-11T10:00:00Z'}},
             {'id': 'a2', 'name': 'Desk PC', 'status': 'stale', 'permissions': ['model.run'], 'lastSeenAt': '2026-11-10T10:00:00Z', 'tasks': {'queued': 0, 'running': 0, 'failed': 0},
-             'cli': {'claude': 'missing', 'codex': 'signed-in', 'checkedAt': '2026-11-10T10:00:00Z'}},
+             'features': [], 'cli': {'claude': 'missing', 'codex': 'signed-in', 'checkedAt': '2026-11-10T10:00:00Z'}},
         ]
         self.late = {'act-late'}
         self.calls = []
@@ -2596,6 +2596,19 @@ async def agents_page_status_signin_and_switches(page, base):
     await expect(panel).not_to_contain_text('can never publish')
 
 
+async def agents_page_says_which_computer_needs_an_update(page, base):
+    await install_admin(page)
+    await open_app(page, base)
+    panel = await mount_admin(page, 'agents')
+    # A computer whose app does not report a feature the server needs says what it cannot do; one that has it says nothing.
+    desk = panel.locator('.st-g', has=page.locator('.st-h', has_text='Desk PC'))
+    await expect(desk).to_contain_text('Needs an update')
+    await expect(desk).to_contain_text('type passwords and codes')
+    laptop = panel.locator('.st-g', has=page.locator('.st-h', has_text='Laptop'))
+    await expect(laptop).not_to_contain_text('Needs an update')
+    await expect(laptop).not_to_contain_text('type passwords and codes')
+
+
 async def agents_page_pairing_form_and_code(page, base):
     server = await install_admin(page, agents=[])
     await open_app(page, base)
@@ -2913,6 +2926,7 @@ async def main():
             await h.scenario('models: Add a model is one card with a choice, the dots hold Edit, Refresh and Delete, one model picker', models_api_provider_menu_and_one_model_picker)
             await h.scenario('models: a provider\'s list loads by itself into the dropdown, and Other… takes any id', model_list_loads_by_itself)
             await h.scenario('agents: one page with each computer online or not, claude and codex sign-in, a switch per permission, Revoke asks first', agents_page_status_signin_and_switches)
+            await h.scenario('agents: a computer whose app cannot type passwords and codes says it needs an update', agents_page_says_which_computer_needs_an_update)
             await h.scenario('agents: the pairing form is switches, the code shows once with the command to run', agents_page_pairing_form_and_code)
             await h.scenario('team: roles are pills, the owner has none, sessions are not on this page', team_roles_are_pills_and_sessions_are_not_here)
             await h.scenario('notifications: switches that save at once; webhook and email show only when they can deliver', notifications_are_switches_and_unwired_channels_are_hidden)

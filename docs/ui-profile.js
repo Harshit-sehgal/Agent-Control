@@ -5,23 +5,23 @@
  *
  * Pages repaint only when the route changes, so each in-place change (a switch, a
  * forgotten note, a picked colour) updates its own node instead. */
-import {SHAPES, COLORS, face} from './ui-face.js?v=083aad2cdb';
-import {botStatus, botIsManager} from './ui-company.js?v=083aad2cdb';
-import {primaryOf} from './company.js?v=083aad2cdb';
-import {resetModelSearch} from './ui-admin.js?v=083aad2cdb';
-import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker, COLOR_NAMES} from './ui-kit.js?v=083aad2cdb';
-import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js?v=083aad2cdb';
-import {scheduleRows, scheduleTaskBody, SCHEDULE_OFTEN, scheduleChoice} from './schedules.js?v=083aad2cdb';
-import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=083aad2cdb';
-import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=083aad2cdb';
-import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=083aad2cdb';
-import {sendChat} from './ui-chat.js?v=083aad2cdb';
-import {computerPage as computerView, computerLabel, keysOwned, thumbSlot} from './ui-computer-view.js?v=083aad2cdb';
+import {SHAPES, COLORS, face} from './ui-face.js?v=13aa44e5ea';
+import {botStatus, botIsManager} from './ui-company.js?v=13aa44e5ea';
+import {primaryOf} from './company.js?v=13aa44e5ea';
+import {resetModelSearch} from './ui-admin.js?v=13aa44e5ea';
+import {esc, icon, field, textInput, clock, roundBtn, groupedModelSelect, effortPicker, COLOR_NAMES} from './ui-kit.js?v=13aa44e5ea';
+import {botModelChoices, pickedModel, effortChoices} from './ui-connect-model.js?v=13aa44e5ea';
+import {scheduleRows, scheduleTaskBody, SCHEDULE_OFTEN, scheduleChoice} from './schedules.js?v=13aa44e5ea';
+import {store, api, sync, go, back, changed, onChange, findBot, groupOfBot, canWrite, isAdmin, isStaticDemo, loadLocal, saveLocal} from './ui-store.js?v=13aa44e5ea';
+import {PINS_KEY, HIDDEN_KEY, ORDER_KEY} from './ui-shell.js?v=13aa44e5ea';
+import {toast, confirmSheet, openSheet, closeSheet} from './ui-dialogs.js?v=13aa44e5ea';
+import {sendChat} from './ui-chat.js?v=13aa44e5ea';
+import {computerPage as computerView, computerLabel, keysOwned, thumbSlot} from './ui-computer-view.js?v=13aa44e5ea';
 import {
   MAX_NAME, MAX_JOB, hasJob, roleLine, teamLine, managerOptions, menuItems, deleteCopy, profileRows, profileBackRoute, memoryNotes, OUTSIDE_NOTE, lookOf, newBotDefaults,
   newBotPayload, canCreate, editChanges, activityUrl, activityTarget, activityDays, closeTarget, watchRows,
-} from './ui-profile-model.js?v=083aad2cdb';
-import {WATCH_EVERY} from './watches.js?v=083aad2cdb';
+} from './ui-profile-model.js?v=13aa44e5ea';
+import {WATCH_EVERY} from './watches.js?v=13aa44e5ea';
 
 const el = id => document.getElementById(id);
 const SHAPE_LABELS = {rounded: 'Rounded square', circle: 'Circle', hexagon: 'Hexagon', pebble: 'Pebble', drop: 'Drop', shield: 'Shield', arch: 'Arch', egg: 'Egg', blob: 'Blob', bean: 'Bean'};

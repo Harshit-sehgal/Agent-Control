@@ -7,24 +7,24 @@
  * team, agents, data) load the existing admin forms from ui-admin.js into the body.
  *
  * The lists behind it are pure and tested in ui-profile-model.js. */
-import {face} from './ui-face.js?v=083aad2cdb';
-import {botStatus} from './ui-company.js?v=083aad2cdb';
-import {esc, icon, btn, empty, note, roundBtn, switchBtn, fullDate} from './ui-kit.js?v=083aad2cdb';
-import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, applyTheme, themeChoice, THEMES, saveLocal} from './ui-store.js?v=083aad2cdb';
-import {isDesk, initials, setupCardHtml, PERM_SEEN, showShortcuts} from './ui-shell.js?v=083aad2cdb';
-import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=083aad2cdb';
-import {faceOf, headBar, activityBlocks} from './ui-profile.js?v=083aad2cdb';
-import {grantRows, allGrantRows, grantUrl, untilOptions, permissionSummary} from './ui-asks.js?v=083aad2cdb';
-import {GRANT_LABELS, untilFor} from './asks.js?v=083aad2cdb';
-import {PRESETS, presetOf, applyPreset} from './presets.js?v=083aad2cdb';
-import {toast, confirmSheet} from './ui-dialogs.js?v=083aad2cdb';
+import {face} from './ui-face.js?v=13aa44e5ea';
+import {botStatus} from './ui-company.js?v=13aa44e5ea';
+import {esc, icon, btn, empty, note, roundBtn, switchBtn, fullDate} from './ui-kit.js?v=13aa44e5ea';
+import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, applyTheme, themeChoice, THEMES, saveLocal} from './ui-store.js?v=13aa44e5ea';
+import {isDesk, initials, setupCardHtml, PERM_SEEN, showShortcuts} from './ui-shell.js?v=13aa44e5ea';
+import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=13aa44e5ea';
+import {faceOf, headBar, activityBlocks} from './ui-profile.js?v=13aa44e5ea';
+import {grantRows, allGrantRows, grantUrl, untilOptions, permissionSummary} from './ui-asks.js?v=13aa44e5ea';
+import {GRANT_LABELS, untilFor} from './asks.js?v=13aa44e5ea';
+import {PRESETS, presetOf, applyPreset} from './presets.js?v=13aa44e5ea';
+import {toast, confirmSheet} from './ui-dialogs.js?v=13aa44e5ea';
 import {
   ACTIVITY_FILTERS, activityUrl, companyTree, weekUsage, settingsSections, resolveSection, sectionArg,
-} from './ui-profile-model.js?v=083aad2cdb';
-import {COLORS} from './ui-face.js?v=083aad2cdb';
-import {limitsOf, limitWords, FAIL_STREAK} from './limits.js?v=083aad2cdb';
-import {monthByBot, usageWords} from './usage.js?v=083aad2cdb';
-import {companyBots} from './company.js?v=083aad2cdb';
+} from './ui-profile-model.js?v=13aa44e5ea';
+import {COLORS} from './ui-face.js?v=13aa44e5ea';
+import {limitsOf, limitWords, FAIL_STREAK} from './limits.js?v=13aa44e5ea';
+import {monthByBot, usageWords} from './usage.js?v=13aa44e5ea';
+import {companyBots} from './company.js?v=13aa44e5ea';
 
 const el = id => document.getElementById(id);
 const ICONS = {general: 'gear', look: 'half', models: 'key', conn: 'plug', perm: 'shield', usage: 'chart'};
