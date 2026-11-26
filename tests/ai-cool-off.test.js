@@ -146,20 +146,37 @@ test('a model resting in the middle of the list is stepped over', async () => {
   } finally { closeAll(own, mid, last); }
 });
 
-test('with no free model left, resting ones are tried anyway, so a turn is never left with nothing to try', async () => {
-  const a = await stub([fail(503)]), mid = await stub([fail(503), fail(503), ok('from mid')]), last = await stub([fail(503)]);
-  const own = await stub([fail(401)]);
+test('a resting model is never asked while the own model is the one that failed: the own error is thrown', async () => {
+  const a = await stub([fail(503)]), mid = await stub([ok('never')]), last = await stub([fail(503)]);
+  const own = await stub([fail(401)]), free = await stub([fail(503)]), rested = await stub([fail(503, {'Retry-After': '3600'}), ok('never')]);
   try {
     await quick(async () => {
-      // Both spares are made to rest by a bot whose own model is another one.
-      await assert.rejects(() => turn(chat(a.port, 'a', {fallbacks: [chat(mid.port, 'f1'), chat(last.port, 'f2')]})), /503/);
-      assert.deepEqual([mid.requests.length, last.requests.length], [2, 2]);
-      // This bot's own key is refused (no rest); both spares rest, and nothing else is free: the first is tried.
-      const out = await turn(chat(own.port, 'main', {fallbacks: [chat(mid.port, 'f1'), chat(last.port, 'f2')]}));
-      assert.equal(out.value, 'from mid');
-      assert.equal(last.requests.length, 2);
+      // Make the spares rest through another bot's list.
+      await assert.rejects(() => turn(chat(a.port, 'a', {fallbacks: [chat(rested.port, 'f1')]})), /503/);
+      assert.equal(rested.requests.length, 1);
+      // Own is free and f1 rests: own's 503 is thrown, and f1 (resting) is not touched, nor retried.
+      await assert.rejects(() => turn(chat(free.port, 'main', {fallbacks: [chat(rested.port, 'f1')]})), /503/);
+      assert.equal(rested.requests.length, 1, 'a resting spare is not asked');
+      assert.equal(free.requests.length, 2, 'the own model had its own retry');
+      // A refused own key (no rest) with every spare resting: the 401 is thrown, no spare is asked.
+      await assert.rejects(() => turn(chat(own.port, 'main', {fallbacks: [chat(rested.port, 'f1')]})), /401/);
+      assert.equal(rested.requests.length, 1);
+      assert.equal(mid.requests.length + last.requests.length, 0);
     });
-  } finally { closeAll(a, mid, last, own); }
+  } finally { closeAll(a, mid, last, own, free, rested); }
+});
+
+test('when every model is resting only the own one is tried, and its error is the one thrown', async () => {
+  const own = await stub([fail(503), fail(503), fail(503), fail(503)]), f1 = await stub([fail(503)]), f2 = await stub([fail(500)]);
+  try {
+    await quick(async () => {
+      const config = chat(own.port, 'main', {fallbacks: [chat(f1.port, 'f1'), chat(f2.port, 'f2')]});
+      await assert.rejects(() => turn(config), /500/, 'the first turn walks them all, so all rest, and the last error is the third\'s');
+      assert.deepEqual([own.requests.length, f1.requests.length, f2.requests.length], [2, 2, 1]);
+      await assert.rejects(() => turn(config), /503/, 'then only the own model is asked, with its own retry, and its own error is thrown');
+      assert.deepEqual([own.requests.length, f1.requests.length, f2.requests.length], [4, 2, 1]);
+    });
+  } finally { closeAll(own, f1, f2); }
 });
 
 test('a cool-off never holds a turn that has acted: its later calls stay on the model that answered', async () => {

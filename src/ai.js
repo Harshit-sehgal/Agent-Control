@@ -470,9 +470,9 @@ function resting(config){
  * for the bot has returned, its reply may already be acted on (a send block), so a later failure is not replayed
  * elsewhere. A call that was answered by a model other than the bot's own starts the bot's later calls in this turn
  * at that model. Only the bot's own config is walked: a fallback's own list is ignored, so nothing chains.
- * A provider that hit a limit or an outage rests (`coolOff`) and is stepped over for a while, unless no later model
- * is free (all of them resting: the own model is tried anyway, so a turn never has nothing to try); a success ends
- * its rest. A turn that has acted never skips: it stays on the model that answered. */
+ * A provider that hit a limit or an outage rests (`coolOff`) and is stepped over for a while, unless every
+ * model rests (then the own model is tried anyway, so a turn never has nothing to try, and a resting spare is never
+ * asked after it); a success ends its rest. A turn that has acted never skips: it stays on the model that answered. */
 async function callModel(call){
   const {config}=call;
   const models=[config,...(config?.fallbacks??(config?.fallback?[config.fallback]:[]))];
@@ -482,7 +482,8 @@ async function callModel(call){
   for(let i=first;i<models.length;i++){
     // A swap of the input for a model that was not asked first comes here in a later task.
     const rest=note?.acted?null:resting(models[i]);
-    if(rest&&models.slice(i+1).some(spare=>!resting(spare))){
+    // A resting model is stepped over, except the own one when every model rests: that one is asked anyway.
+    if(rest&&!(i===0&&models.every(resting))){
       if(i===0)why=rest.why;
       continue;
     }
