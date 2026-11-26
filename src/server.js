@@ -11,6 +11,7 @@ import {aiEnabled,aiModel,aiProvider} from './ai.js';
 import {smtpConfig} from './mail.js';
 import {envModeWarning} from './env-mode.js';
 import {Auth} from './auth.js';
+import {ownerGoogleConfig} from './google-owner.js';
 import {openWorkspaces} from './workspaces.js';
 import {createPush} from './push.js';
 import {browserRuntime} from './browser-runtime.js';
@@ -32,9 +33,11 @@ process.umask(0o077);
 const PORT=Number(process.env.PORT||4173);
 const HOST=process.env.HOST||'127.0.0.1';
 const STORE_PATH=process.env.DATA_FILE||path.join(ROOT,'data','state.json');
-const PASSWORD=process.env.DASHBOARD_PASSWORD||crypto.randomBytes(12).toString('base64url');
+// No password is made up: without DASHBOARD_PASSWORD a new owner account has none, and signs in with Google
+// (OWNER_EMAIL) or sets one with `npm run reset-password`.
+const PASSWORD=process.env.DASHBOARD_PASSWORD||'';
 const store=await openSqliteStore(STORE_PATH);
-// First boot bootstraps the owner account from DASHBOARD_PASSWORD; afterwards
+// First boot bootstraps the owner account from DASHBOARD_PASSWORD (or none); afterwards
 // sessions, resets and roles live in the database.
 const auth=new Auth(store);
 auth.ensureBootstrap(PASSWORD);
@@ -71,7 +74,7 @@ function preflight(){
   const origin=process.env.PUBLIC_ORIGIN||'';
   if(origin&&!/^https?:\/\//.test(origin))throw new Error('PUBLIC_ORIGIN must be an absolute http(s) URL, e.g. https://dash.example.com');
   if(HSTS_ENABLED&&!origin.startsWith('https://'))console.warn('config: HSTS is on but PUBLIC_ORIGIN is not https. Only enable it behind TLS termination.');
-  if(!process.env.DASHBOARD_PASSWORD)console.warn('config: no DASHBOARD_PASSWORD set. A random password is printed each boot; set one for a stable login.');
+  if(process.env.OWNER_EMAIL&&!ownerGoogleConfig())console.warn('config: OWNER_EMAIL is set, but Google sign-in also needs GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (and OWNER_EMAIL must be an address).');
   if(HOST!=='127.0.0.1'&&HOST!=='localhost'&&!origin.startsWith('https://'))console.warn('config: binding to '+HOST+' without HTTPS. Put TLS in front (reverse proxy).');
   // A mailbox typo should surface at boot, not on the first reminder: an
   // impossible value throws here, and a risky one is only warned about.
@@ -90,7 +93,9 @@ function preflight(){
 preflight();
 server.listen(PORT,HOST,()=>{
   console.log(`\nAgent Control Prototype: http${server instanceof https.Server?'s':''}://${HOST}:${PORT}`);
-  if(!process.env.DASHBOARD_PASSWORD) console.log(`Temporary dashboard password (changes on restart): ${PASSWORD}`);
+  const google=ownerGoogleConfig();
+  if(google)console.log(`Sign in with Google as ${google.ownerEmail} (redirect URI: <your address>/api/auth/google/callback).`);
+  else if(!auth.hasPassword(auth.ownerId())&&!process.env.DASHBOARD_PASSWORD)console.warn('Sign-in: the owner has no password and Google sign-in is not set up. Set OWNER_EMAIL, GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env, or run `npm run reset-password`.');
   console.log(`AI mode: ${isLive()?`Connected · ${aiModel()} @ ${aiProvider()}`:'none in the environment. Connect one in the app under Settings → Models and keys (a claude or codex sign-in on this computer needs no key), or set AI_API_KEY.'}`);
   if(HOST!=='127.0.0.1'&&HOST!=='localhost')console.warn('WARNING: Use HTTPS plus a private network / access proxy for remote access.');
   // The browser, the claude/codex sign-in and stdio MCP servers need a local agent. On this computer the

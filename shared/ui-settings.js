@@ -56,7 +56,7 @@ const pauseRow = () => {
 function account() {
   const demo = isStaticDemo(), me = store.state?.me || {};
   const who = demo ? '' : `<small>Signed in as ${esc(me.role || 'member')}</small>`;
-  const actions = demo ? '' : `<div class="st-acts">${btn('Change password', 'change-password', {small: true})}${btn('Sign out', 'logout', {small: true})}</div>`;
+  const actions = demo ? '' : `<div class="st-acts">${btn(me.hasPassword === false ? 'Set a password' : 'Change password', 'change-password', {small: true})}${btn('Sign out', 'logout', {small: true})}</div>`;
   const where = demo ? '<small>Your bots and chats are kept in this browser only</small>' : '';
   return `<div class="rw acct"><span class="ini av" aria-hidden="true">${esc(initials())}</span><span class="w">${esc(demo ? 'This browser' : ownerName())}${who}${where}</span></div>${actions}`;
 }

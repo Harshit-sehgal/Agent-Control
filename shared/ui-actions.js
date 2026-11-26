@@ -28,7 +28,7 @@ export const actions = {
   ...conversationActions,
   ...profileActions,
   ...settingsActions,
-  'change-password': () => changePasswordSheet(),
+  'change-password': () => changePasswordSheet({hasPassword: store.state?.me?.hasPassword !== false}),
   'close-sheet': () => closeSheet(),
   'sheet-confirm': () => closeSheet(true),
 
@@ -105,8 +105,12 @@ export const forms = {
   ...profileForms,
   'ask-form': (form, f) => closeSheet(String(f.answer || '')),
   'password-form': async (form, f) => {
-    await api('/api/auth/password', 'POST', {currentPassword: f.currentPassword, newPassword: f.newPassword});
-    closeSheet(); toast('Password updated. Other sessions are signed out.');
+    await api('/api/auth/password', 'POST', {currentPassword: f.currentPassword || '', newPassword: f.newPassword});
+    // Settings is painted once per visit, so the button changes in place, like the sessions list does.
+    if (store.state?.me) store.state.me.hasPassword = true;
+    const label = document.querySelector('[data-action="change-password"] span');
+    if (label) label.textContent = 'Change password';
+    closeSheet(); toast('Password saved. Other sessions are signed out.');
   },
   ...Object.fromEntries(Object.entries(adminForms).map(([id, run]) => [id, (form, f) => run(form, f, adminCtx)])),
   ...takeoverForms,

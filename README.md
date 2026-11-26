@@ -145,7 +145,7 @@ The Pages edition remains a browser-local simulation without authenticated cloud
 
 ## What works now
 
-- Responsive web dashboard with email and password login (desktop/mobile browser). The owner account can omit the email. Change password lives in Settings.
+- Responsive web dashboard (desktop/mobile browser). The owner signs in with Google (`OWNER_EMAIL` plus a Google client) or a password; invited members use email and password. The owner account can omit the email. Set or change the password in Settings.
 - A primary bot (Atlas) in a Home group, plus bots and groups you create. Bots have their own profile, behaviour settings, colour and model.
 - Group chat with routing, handoffs and group runs, each recorded with a step-by-step trace and a Retry action.
 - Bring-your-own-key AI through any provider speaking OpenAI chat completions, OpenAI Responses, Anthropic Messages, Google Gemini or Azure OpenAI. With no provider configured, bots answer with a clearly labelled offline reply.
@@ -184,7 +184,12 @@ npm start
 
 `npm start`, `dev`, `test`, `test:coverage` and `backup` pass `--experimental-sqlite` for you, and so does the Dockerfile. If you run `node src/server.js` yourself, pass the flag too.
 
-Open **http://127.0.0.1:4173**. On first startup without environment variables, the terminal prints a randomly generated dashboard password. Later restarts may print a different random string that does not update the stored owner password — set `DASHBOARD_PASSWORD` or change it under **Settings**. For a stable password:
+Open **http://127.0.0.1:4173**. The owner signs in one of two ways:
+
+- **With Google.** Put your Google address in `.env` as `OWNER_EMAIL`, with `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` from a Google Cloud OAuth client (Web application). Add `https://<your address>/api/auth/google/callback` to that client's authorized redirect URIs. The sign-in screen then shows **Continue with Google**, and only that address, verified by Google, gets in.
+- **With a password.** `DASHBOARD_PASSWORD` sets it on first start; later, set or change it under **Settings**, or run `npm run reset-password`.
+
+No password is made up or printed. With neither set, the terminal says how to get in. For a password from the start:
 
 ```bash
 # Linux/macOS

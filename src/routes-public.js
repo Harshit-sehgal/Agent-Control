@@ -13,6 +13,13 @@ import {sessionCookie, clearCookie, DEFAULT_WORKSPACE, resolveAccount} from './a
 import {sha256} from './vault.js';
 import {fail, cookie, safeJson, clientIpOf, trustProxy as trustProxyEnv} from './http.js';
 import {reply} from './router.js';
+import {ownerGoogleConfig, startOwnerSignIn, takeOwnerFlow, finishOwnerSignIn, OWNER_CALLBACK} from './google-owner.js';
+import {publicBaseUrl} from './connectors.js';
+
+// The browser half of an owner Google sign-in: the state the callback must match, scoped to these routes and Lax so it
+// survives the return from Google's own site.
+const OWNER_COOKIE = 'owner_google_state';
+const ownerCookie = (value, {secure, maxAge}) => `${OWNER_COOKIE}=${value}; HttpOnly; SameSite=Lax; Path=/api/auth/google; Max-Age=${maxAge}${secure ? '; Secure' : ''}`;
 
 // A page read by this server's own browser finishes exactly where a device's
 // result does: the same chat line, the same continuation. Those functions live
@@ -113,6 +120,35 @@ export function publicRoutes(router, {auth, workspaces, version}) {
     }
     const secure = Boolean(c.req.socket.encrypted || (trustProxy() && c.req.headers['x-forwarded-proto'] === 'https'));
     return reply(200, {ok: true, me: {email: result.user.email, role: result.role}}, {'Set-Cookie': sessionCookie(result.sessionId, {secure})});
+  });
+  // How the sign-in screen may offer sign-in. Says only whether Google is set up, never for whom.
+  router.add('GET', '/api/auth/methods', 'public', () => ({password: true, google: Boolean(ownerGoogleConfig())}));
+  // The owner signs in with the Google address in OWNER_EMAIL (src/google-owner.js). Anything that goes wrong lands
+  // on the sign-in screen with one message; the reason is in the server log only.
+  router.add('GET', '/api/auth/google/start', 'public', c => {
+    attempt(`google:${clientIp(c.req)}`, LOGIN_ATTEMPTS * 3);
+    const base = publicBaseUrl(c.req), config = ownerGoogleConfig();
+    if (!config) return reply(302, {ok: false}, {Location: `${base}/?signin=google-refused`});
+    const {url, state} = startOwnerSignIn(config, base);
+    return reply(302, {ok: true}, {Location: url, 'Set-Cookie': ownerCookie(state, {secure: base.startsWith('https:'), maxAge: 600})});
+  });
+  router.add('GET', OWNER_CALLBACK, 'public', async c => {
+    const q = new URL(c.req.url, 'http://callback').searchParams;
+    const flow = takeOwnerFlow(q.get('state') || '', cookie(c.req, OWNER_COOKIE));
+    const base = flow ? new URL(flow.redirectUri).origin : publicBaseUrl(c.req);
+    const secure = base.startsWith('https:');
+    const refuse = reason => {
+      console.warn(`Google sign-in refused: ${reason}`);
+      return reply(302, {ok: false}, {Location: `${base}/?signin=google-refused`, 'Set-Cookie': ownerCookie('', {secure, maxAge: 0})});
+    };
+    const config = ownerGoogleConfig();
+    if (!flow) return refuse('state');
+    if (!config) return refuse('setup');
+    const result = await finishOwnerSignIn(config, flow, {code: q.get('code'), error: q.get('error')});
+    if (!result.ok) return refuse(result.reason);
+    const login = auth.loginOwner({ip: clientIp(c.req), userAgent: c.req.headers['user-agent']});
+    if (!login.ok) return refuse('no-owner');
+    return reply(302, {ok: true}, {Location: `${base}/`, 'Set-Cookie': [sessionCookie(login.sessionId, {secure}), ownerCookie('', {secure, maxAge: 0})]});
   });
   router.add('POST', '/api/logout', 'public', c => {
     auth.logout(cookie(c.req, 'agent_session'));

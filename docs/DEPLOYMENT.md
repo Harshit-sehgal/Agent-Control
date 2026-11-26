@@ -18,7 +18,8 @@ knobs.
 
 | var | purpose |
 |---|---|
-| `DASHBOARD_PASSWORD` | bootstraps the owner on first run; **set a long one** |
+| `DASHBOARD_PASSWORD` | bootstraps the owner's password on first run; **set a long one**, or leave it out and sign in with Google |
+| `OWNER_EMAIL` | the owner's Google address; with `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` the sign-in screen offers **Continue with Google** for that address only |
 | `HOST` / `PORT` | bind address (default `127.0.0.1:4173`) |
 | `DATA_FILE` | JSON sibling path (default `data/state.json`), used to find the database and to import a 0.6 `state.json` once; the SQLite file is the same name with `.db`, or `DATA_DB` |
 | `PUBLIC_ORIGIN` | absolute `https://…` URL; enables the origin/CSRF check for that host |
@@ -174,7 +175,7 @@ Calendar say what is missing.
 
 | App | `.env` | Make the client at | Redirect address to register |
 |---|---|---|---|
-| Gmail, Google Drive, Google Calendar | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google Cloud Console → Credentials → OAuth client ID (Web application) | `<PUBLIC_BASE_URL>/api/connectors/mcp/callback` |
+| Gmail, Google Drive, Google Calendar | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google Cloud Console → Credentials → OAuth client ID (Web application) | `<PUBLIC_BASE_URL>/api/connectors/mcp/callback`, and `<PUBLIC_BASE_URL>/api/auth/google/callback` for the owner's own sign-in |
 | Slack | `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET` | api.slack.com/apps → your app → OAuth & Permissions | same |
 | GitHub | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | github.com/settings/developers → OAuth App | same |
 
@@ -300,8 +301,9 @@ uses a site, and a click on a Send, Post, Delete or Pay control gets its own
 ask. X is no exception: a Post there asks unless you set Always allow.
 
 `preflight()` refuses to boot on an invalid `PUBLIC_ORIGIN` and warns when HSTS
-is on without HTTPS, when no `DASHBOARD_PASSWORD` is set, or when the server is
-bound off-loopback without HTTPS. The store refuses to open a database written
+is on without HTTPS, when `OWNER_EMAIL` is set without a whole Google client, or
+when the server is bound off-loopback without HTTPS. No password is made up: on
+start it says when the owner has neither a password nor Google sign-in. The store refuses to open a database written
 by a newer build: the message names the database's schema version and the one
 this build understands, so an accidental downgrade stops instead of running
 against columns it does not know.

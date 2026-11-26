@@ -22,21 +22,21 @@
  *   ui-dialogs      toast, sheet, confirm/ask      ui-actions action/form tables
  *   ui-fx           confetti, the send arrow and the bots' ambient life
  */
-import {companyRoute} from './ui-company.js?v=45393fcc46';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=45393fcc46';
-import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=45393fcc46';
-import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, renderPause, closeSearch, homeView, setupCardHtml} from './ui-shell.js?v=45393fcc46';
-import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=45393fcc46';
-import {profileViews, wirePages} from './ui-profile.js?v=45393fcc46';
-import {wireGestures, gesturesBusy} from './ui-gestures.js?v=45393fcc46';
-import {wireReplyMenu} from './ui-reply-menu.js?v=45393fcc46';
-import {settingsViews} from './ui-settings.js?v=45393fcc46';
-import {showLogin, hideLogin} from './ui-sheets.js?v=45393fcc46';
-import {actions, forms, onControlChange, onControlInput, modelSearchKey} from './ui-actions.js?v=45393fcc46';
-import {bringBotsToLife} from './ui-fx.js?v=45393fcc46';
-import {wireComputer} from './ui-computer-view.js?v=45393fcc46';
-import {googleReturn, withoutGoogleParams} from './ui-connect-model.js?v=45393fcc46';
-import {sharedDraft, withoutShareParams} from './ui-model.js?v=45393fcc46';
+import {companyRoute} from './ui-company.js?v=439d5201b7';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=439d5201b7';
+import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=439d5201b7';
+import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, renderPause, closeSearch, homeView, setupCardHtml} from './ui-shell.js?v=439d5201b7';
+import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=439d5201b7';
+import {profileViews, wirePages} from './ui-profile.js?v=439d5201b7';
+import {wireGestures, gesturesBusy} from './ui-gestures.js?v=439d5201b7';
+import {wireReplyMenu} from './ui-reply-menu.js?v=439d5201b7';
+import {settingsViews} from './ui-settings.js?v=439d5201b7';
+import {showLogin, hideLogin, setSignInMethods} from './ui-sheets.js?v=439d5201b7';
+import {actions, forms, onControlChange, onControlInput, modelSearchKey} from './ui-actions.js?v=439d5201b7';
+import {bringBotsToLife} from './ui-fx.js?v=439d5201b7';
+import {wireComputer} from './ui-computer-view.js?v=439d5201b7';
+import {googleReturn, withoutGoogleParams} from './ui-connect-model.js?v=439d5201b7';
+import {sharedDraft, withoutShareParams} from './ui-model.js?v=439d5201b7';
 
 const el = id => document.getElementById(id);
 const hashRoute = () => normalizeRoute(companyRoute(location.hash, store.state));
@@ -199,7 +199,7 @@ async function boot() {
     finishGoogleSignIn();
     finishShare(primary);
   } catch (e) {
-    if (e.status === 401) return showLogin(e.message);
+    if (e.status === 401) return signInScreen(e.message);
     el('main').innerHTML = `<section class="home"><h1>Could not start</h1><p></p><p>${isStaticDemo() ? 'Enable browser local storage and reload. If the page was cached from an older deploy, hard-refresh once.' : 'Check that the Node server is running and reload.'}</p></section>`;
     el('main').querySelector('p').textContent = e.message;
   }
@@ -242,6 +242,18 @@ function lockScreen(message) {
   store.state = null; store.messages = {}; lastView = '';
   for (const id of ['sidebar', 'main', 'chrome']) el(id).innerHTML = '';
   renderPause();
+  void signInScreen(message);
+}
+/** The sign-in screen, with Continue with Google when the server offers it. Google sends a refused account back to
+ * `/?signin=google-refused`: the screen says so once, and the address loses the parameter. */
+async function signInScreen(message) {
+  try { setSignInMethods(await api('/api/auth/methods')); } catch { setSignInMethods(null); }
+  const q = new URLSearchParams(location.search);
+  if (q.get('signin') === 'google-refused') {
+    q.delete('signin');
+    history.replaceState(history.state, '', `${location.pathname}${q.size ? `?${q}` : ''}${location.hash}`);
+    message = 'That Google account can\'t sign in here.';
+  }
   showLogin(message);
 }
 actions.logout = async () => {

@@ -7,24 +7,24 @@
  * team, agents, data) load the existing admin forms from ui-admin.js into the body.
  *
  * The lists behind it are pure and tested in ui-profile-model.js. */
-import {face} from './ui-face.js?v=45393fcc46';
-import {botStatus} from './ui-company.js?v=45393fcc46';
-import {esc, icon, btn, empty, note, roundBtn, switchBtn, fullDate} from './ui-kit.js?v=45393fcc46';
-import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, applyTheme, themeChoice, THEMES, saveLocal} from './ui-store.js?v=45393fcc46';
-import {isDesk, initials, setupCardHtml, PERM_SEEN, showShortcuts} from './ui-shell.js?v=45393fcc46';
-import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=45393fcc46';
-import {faceOf, headBar, activityBlocks} from './ui-profile.js?v=45393fcc46';
-import {grantRows, allGrantRows, grantUrl, untilOptions, permissionSummary} from './ui-asks.js?v=45393fcc46';
-import {GRANT_LABELS, untilFor} from './asks.js?v=45393fcc46';
-import {PRESETS, presetOf, applyPreset} from './presets.js?v=45393fcc46';
-import {toast, confirmSheet} from './ui-dialogs.js?v=45393fcc46';
+import {face} from './ui-face.js?v=439d5201b7';
+import {botStatus} from './ui-company.js?v=439d5201b7';
+import {esc, icon, btn, empty, note, roundBtn, switchBtn, fullDate} from './ui-kit.js?v=439d5201b7';
+import {store, api, sync, go, back, findBot, isAdmin, isStaticDemo, applyTheme, themeChoice, THEMES, saveLocal} from './ui-store.js?v=439d5201b7';
+import {isDesk, initials, setupCardHtml, PERM_SEEN, showShortcuts} from './ui-shell.js?v=439d5201b7';
+import {ADMIN_PAGES, adminPage} from './ui-admin.js?v=439d5201b7';
+import {faceOf, headBar, activityBlocks} from './ui-profile.js?v=439d5201b7';
+import {grantRows, allGrantRows, grantUrl, untilOptions, permissionSummary} from './ui-asks.js?v=439d5201b7';
+import {GRANT_LABELS, untilFor} from './asks.js?v=439d5201b7';
+import {PRESETS, presetOf, applyPreset} from './presets.js?v=439d5201b7';
+import {toast, confirmSheet} from './ui-dialogs.js?v=439d5201b7';
 import {
   ACTIVITY_FILTERS, activityUrl, companyTree, weekUsage, settingsSections, resolveSection, sectionArg,
-} from './ui-profile-model.js?v=45393fcc46';
-import {COLORS} from './ui-face.js?v=45393fcc46';
-import {limitsOf, limitWords, FAIL_STREAK} from './limits.js?v=45393fcc46';
-import {monthByBot, usageWords} from './usage.js?v=45393fcc46';
-import {companyBots} from './company.js?v=45393fcc46';
+} from './ui-profile-model.js?v=439d5201b7';
+import {COLORS} from './ui-face.js?v=439d5201b7';
+import {limitsOf, limitWords, FAIL_STREAK} from './limits.js?v=439d5201b7';
+import {monthByBot, usageWords} from './usage.js?v=439d5201b7';
+import {companyBots} from './company.js?v=439d5201b7';
 
 const el = id => document.getElementById(id);
 const ICONS = {general: 'gear', look: 'half', models: 'key', conn: 'plug', perm: 'shield', usage: 'chart'};
@@ -56,7 +56,7 @@ const pauseRow = () => {
 function account() {
   const demo = isStaticDemo(), me = store.state?.me || {};
   const who = demo ? '' : `<small>Signed in as ${esc(me.role || 'member')}</small>`;
-  const actions = demo ? '' : `<div class="st-acts">${btn('Change password', 'change-password', {small: true})}${btn('Sign out', 'logout', {small: true})}</div>`;
+  const actions = demo ? '' : `<div class="st-acts">${btn(me.hasPassword === false ? 'Set a password' : 'Change password', 'change-password', {small: true})}${btn('Sign out', 'logout', {small: true})}</div>`;
   const where = demo ? '<small>Your bots and chats are kept in this browser only</small>' : '';
   return `<div class="rw acct"><span class="ini av" aria-hidden="true">${esc(initials())}</span><span class="w">${esc(demo ? 'This browser' : ownerName())}${who}${where}</span></div>${actions}`;
 }

@@ -56,7 +56,7 @@ test('a signed-in caller is checked against the route role, not just for a sessi
   const {call} = seam({session: 'viewer@example.test', role: 'viewer'});
   const me = await call(request('GET', '/api/me', {cookie: 'agent_session=abc'}));
   assert.equal(me.status, 200);
-  assert.deepEqual(JSON.parse(me.body), {email: 'viewer@example.test', role: 'viewer'});
+  assert.deepEqual(JSON.parse(me.body), {email: 'viewer@example.test', role: 'viewer', hasPassword: true});
   // A member-only route refuses a viewer by role.
   const write = await call(request('POST', '/api/groups', {cookie: 'agent_session=abc'}));
   assert.equal(write.status, 403);
