@@ -15,10 +15,15 @@
 /** Masked `secret` input: the device holds a typed password or code in memory only and scrubs it from every result. */
 export const SECRET_INPUT_V1 = 'secret-input-v1';
 
+/** Separate browser accounts: a context of its own and a cookie jar per account. An older app would ignore the
+ * account and act in the default profile, which is the wrong sign-in, so every piece of account work needs this. */
+export const BROWSER_ACCOUNTS_V1 = 'browser-accounts-v1';
+
 /** Every feature the server knows. `since` is the day (ISO) the server first relied on it; `use` is `needed` or
  * `preferred`; `what` finishes "Its app cannot ..." on the device's card. */
 export const FEATURES = [
   {name: SECRET_INPUT_V1, since: '2026-11-26', use: 'needed', what: 'type passwords and codes'},
+  {name: BROWSER_ACCOUNTS_V1, since: '2026-11-27', use: 'needed', what: 'keep separate browser accounts'},
 ];
 
 /** How long a preferred feature keeps the older path, from its `since` day. */
