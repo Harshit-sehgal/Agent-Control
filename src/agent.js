@@ -23,7 +23,7 @@ import {fail} from '../shared/errors.js';
 import {cleanText} from '../shared/core.js';
 import {validateBrowserRequest} from '../shared/bot-browser.js';
 import {cliEngineById,cleanCliModel,cleanEffort,LOCAL_CLI_ENGINE_IDS} from '../shared/ai-presets.js';
-import {cleanFeatures} from '../shared/device-features.js';
+import {cleanFeatures,hasFeature} from '../shared/device-features.js';
 import {base64Bytes,sniffType,isImage,MAX_FILES,MODEL_IMAGE_BYTES,MODEL_IMAGES_TOTAL} from '../shared/attachments.js';
 import {encryptJson,decryptJson,sha256,loadMasterKey} from './vault.js';
 
@@ -40,6 +40,45 @@ const CLOCK_SKEW_MS = 5 * 60000;
 const DEFAULT_LEASE_MS = 120000;
 /** How recently a device must have been seen to count as online: the agent list, and every picker that hands it work. */
 export const AGENT_ONLINE_MS = 180000;
+
+/** The one online rule: seen within `AGENT_ONLINE_MS`, or, for a device never seen, paired within it. */
+export function agentOnline(row, nowMs = Date.now()) {
+  const at = Date.parse(row?.last_seen_at || row?.paired_at || '');
+  return Number.isFinite(at) && at > nowMs - AGENT_ONLINE_MS;
+}
+
+/** The words for work that needs an ability the computer's app does not report. */
+export const missingFeatureLine = name =>
+  `This needs a newer app on your computer: it does not report ${name}. Update the app on your computer, then try again.`;
+
+const agentMay = (row, kind) => { try { return JSON.parse(row.permissions || '[]').includes(kind); } catch { return false; } };
+
+/** The computer that gets a task of `kind`: the pinned one (`deviceId`), else the most recently seen one that may run
+ * it, reports every name in `needs` and is online. Returns `{agent: row}`, `{reason}` (`no-agent`, `no-permission`,
+ * `agent-offline`, `not-pinned`) or `{reason: 'missing-feature', feature}`. */
+export function chooseDevice(store, {kind, deviceId = null, needs = [], nowMs = Date.now()} = {}) {
+  const lacks = row => {
+    if (!needs.length) return null;
+    const features = readAgentFeatures(store, row.id);
+    return needs.find(name => !hasFeature(features, name)) ?? null;
+  };
+  if (deviceId) {
+    const row = typeof store?.get === 'function' ? store.get('SELECT * FROM agents WHERE id=? AND revoked_at IS NULL', deviceId) : null;
+    if (!row || !agentMay(row, kind)) return {reason: 'not-pinned'};
+    const feature = lacks(row);
+    if (feature) return {reason: 'missing-feature', feature};
+    return agentOnline(row, nowMs) ? {agent: row} : {reason: 'agent-offline'};
+  }
+  if (typeof store?.all !== 'function') return {reason: 'no-agent'};
+  const rows = store.all('SELECT * FROM agents WHERE revoked_at IS NULL ORDER BY last_seen_at DESC');
+  if (!rows.length) return {reason: 'no-agent'};
+  const may = rows.filter(row => agentMay(row, kind));
+  if (!may.length) return {reason: 'no-permission'};
+  const capable = may.filter(row => !lacks(row));
+  if (!capable.length) return {reason: 'missing-feature', feature: lacks(may[0])};
+  const online = capable.find(row => agentOnline(row, nowMs));
+  return online ? {agent: online} : {reason: 'agent-offline'};
+}
 // A task kind is its own permission: 'browser.action' exists beside
 // 'browser.capture' because acting on a page is a deliberate grant, not a read.
 // AGENT_ACTIONS is the list; a separate kind table only ever repeated it.
