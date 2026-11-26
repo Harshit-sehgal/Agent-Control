@@ -357,9 +357,11 @@ this computer." in a toast, and nothing they typed is kept.
 With `TRUST_PROXY=1` the app trusts only the proxy's word, so opening it directly at
 `http://localhost` (around the proxy) gets a 403 on the Password and Code fields: a request
 with no `X-Forwarded-Proto: https` is never taken as secure. Open the app through the proxy
-to type a secret. `deploy/compose.yaml`, `deploy/compose.tailscale.yaml` and
-`deploy/compose.cloudflare.yaml` set `TRUST_PROXY=1`, and in each the app's port is not
-reachable except through the proxy (Caddy, `tailscale serve`, cloudflared).
+to type a secret. `deploy/compose.tailscale.yaml` and `deploy/compose.cloudflare.yaml` set
+`TRUST_PROXY=1`: the app listens on loopback there, so it is reachable only through
+`tailscale serve` or cloudflared. `deploy/compose.yaml` does not set it, because its `ports:` publish
+Caddy on every interface; set `TRUST_PROXY=1` in `deploy/.env` once you have confirmed that only
+Caddy can reach the app's port.
 
 `tailscale serve` sets `X-Forwarded-Proto: https` on TLS requests, and `X-Forwarded-For`. That
 is read from Tailscale's source (`ipn/ipnlocal/serve.go`, `addProxyForwardedHeaders`), not

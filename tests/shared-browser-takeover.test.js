@@ -337,5 +337,5 @@ test('what a model is handed is the address, title and links with secrets hidden
   assert.equal(result.finalUrl, 'https://docs.example.com/?code=[hidden]');
   assert.equal(result.title, 'Hi [hidden]');
   assert.deepEqual(result.links, pages['https://docs.example.com/'].links);
-  assert.equal(sb.status()[0].url, 'https://docs.example.com/?code=[hidden]', 'the tab the device reports is the hidden address too');
+  assert.equal(sb.status()[0].url, 'https://docs.example.com/?code=[hidden]', 'the address remembered from the capture is the hidden one');
 });
