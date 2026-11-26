@@ -6,8 +6,8 @@
  * These transitions are pure and mirror `workflow.js`: the Node worker and the
  * browser-local demo both run them, so the two backends cannot drift.
  */
-import {activity, cleanText} from './core.js?v=439d5201b7';
-import {cleanDay, cleanZone, DAY_RULES, keepWallTime, needsZone, skipToDays} from './schedules.js?v=439d5201b7';
+import {activity, cleanText} from './core.js?v=b65971fe47';
+import {cleanDay, cleanZone, DAY_RULES, keepWallTime, needsZone, skipToDays} from './schedules.js?v=b65971fe47';
 
 export const MAX_ATTEMPTS_DEFAULT = 5;
 
@@ -76,6 +76,8 @@ const PAYLOAD_KINDS = {
     target: cleanText(body.target, 4000) || null,
     title: cleanText(body.title, 200), body: cleanText(body.body, 2000),
     meta: body.meta && typeof body.meta === 'object' ? body.meta : {},
+    // An urgent push (an ask, late work) still goes out in quiet hours (src/push.js).
+    urgent: body.urgent === true,
   }),
 };
 

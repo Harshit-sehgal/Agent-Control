@@ -1,8 +1,8 @@
 /** The one grammar every control block in a bot reply is read with.
  *
  * A bot asks for something outside its reply — a helper model, a teammate, a
- * new bot, a web page — by fenced block. There are six kinds (`ask`, `spawn`,
- * `create-bot`, `browser`, `not-my-job`, `connector`) and each has its own parser in its own module, but
+ * new bot, a web page — by fenced block. There are seven kinds (`ask`, `spawn`,
+ * `create-bot`, `browser`, `not-my-job`, `connector`, `setup`) and each has its own parser in its own module, but
  * they must agree on one thing: what a block *is*. This module owns that, so no
  * two parsers can drift apart about the fence and leave a bot echoing control
  * text into a prompt, or a quoted block filing a real request.
