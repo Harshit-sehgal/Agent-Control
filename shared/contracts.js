@@ -27,10 +27,10 @@ export const FIELD_TYPES = ['text', 'number', 'boolean', 'string_list', 'url'];
 /** Actions a bot may be granted. Deliberately absent: publish/post anything
  * externally. If it is not in this list, no profile can ever enable it.
  * `browser.use` asks the user's paired local agent for a page; see
- * bot-browser.js for why it still cannot press Post on X. `subagent.spawn`
+ * bot-browser.js for why a click on Post still asks the owner. `subagent.spawn`
  * lets a bot hand one small job to a helper model; see subagents.js for why
  * that helper has no tools at all. `bot.ask` lets a bot put one question to a
- * teammate, and `bot.create` lets it add a permissionless bot to its group;
+ * teammate, and `bot.create` lets it add permissionless bots (up to five a reply);
  * see bot-link.js and bot-create.js. */
 export const ACTIONS = ['schedule.set', 'agent.dispatch', 'chat.send', 'browser.use', 'subagent.spawn', 'bot.ask', 'bot.create'];
 

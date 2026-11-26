@@ -76,6 +76,8 @@ const PAYLOAD_KINDS = {
     target: cleanText(body.target, 4000) || null,
     title: cleanText(body.title, 200), body: cleanText(body.body, 2000),
     meta: body.meta && typeof body.meta === 'object' ? body.meta : {},
+    // An urgent push (an ask, late work) still goes out in quiet hours (src/push.js).
+    urgent: body.urgent === true,
   }),
 };
 

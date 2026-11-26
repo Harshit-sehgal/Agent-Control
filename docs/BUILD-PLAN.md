@@ -162,7 +162,7 @@ work should be added as a fresh section.
 
 ## Phase V — bots that create bots
 - [x] `bot.create` permission on any bot; envelope and system prompt describe the block only to bots holding it
-- [x] Fenced `create-bot` blocks validated (`shared/bot-create.js`): one per reply, bounded name and job, JSON only
+- [x] Fenced `create-bot` blocks validated (`shared/bot-create.js`): up to five per reply, bounded name and job, JSON only
 - [x] The new bot is a lasting roster record: always `custom`, no permissions, no model/contract escalation, capped by the group's bot limit
 - [x] A group with an explicit pipeline adds the new bot at the end; created bots are reviewed and editable like any other
 - [x] Refused, duplicate and over-limit requests say why in the chat and write nothing

@@ -61,3 +61,10 @@ test('an explicit lease window is the one that gets stored', () => {
   claimTasks(quiet, {workerId: 'w', now});
   assert.equal(quiet.tasks[0].leaseUntil, new Date(now + 60000).toISOString());
 });
+
+test('a notification task keeps its urgent mark, so quiet hours still let an urgent push through', () => {
+  // src/push.js reads task.payload.urgent after the payload was rebuilt here; dropping it held asks and late-work alerts until morning.
+  assert.equal(buildPayload('notification', {channel: 'push', title: 'Late', body: 'x', urgent: true}).urgent, true);
+  assert.equal(buildPayload('notification', {channel: 'push', title: 'Quiet', body: 'x'}).urgent, false);
+  assert.equal(buildPayload('notification', {channel: 'push', title: 'Odd', body: 'x', urgent: 'yes'}).urgent, false);
+});
