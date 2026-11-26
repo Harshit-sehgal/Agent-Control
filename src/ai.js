@@ -839,7 +839,7 @@ export function boundBotInput(input, max=MAX_BOT_INPUT){
   // Never return more than the limit, even if every field was cut already.
   return out.length>max?out.slice(0,max):out;
 }
-const SEARCH_CHAT_TOOL='Search this chat\'s older lines: send a search_chat block {"query": "<words>"} and you are handed up to 8 matching lines. Read-only, once.';
+const SEARCH_CHAT_TOOL='Search this chat\'s older lines: put one block in your reply, e.g. ```search_chat\n{"query": "<words>"}\n``` and you are handed up to 8 matching lines. Read-only, once. Send only that block; nothing else in the reply is kept.';
 /** The task envelope as a model other than the bot's own is sent it: the same job with `handoff: {from, to, why}`
  * after the existing keys (so an Anthropic cache head, which holds only the stable keys, is cut where it was),
  * `tools.search_chat` described, and the thread cut to the newest lines that fit `max`, whole, never shortened.

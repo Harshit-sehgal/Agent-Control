@@ -8,7 +8,9 @@ import {searchChat, parseSearchChat} from '../shared/message-search.js';
 import {outsideRead, decide, messagesCarryOutside} from '../shared/asks.js';
 import {runBotTurn} from '../src/bot-turn.js';
 import {runOneBot} from '../src/routes-groups.js';
-import {executeCustomBot, clearCoolOff} from '../src/ai.js';
+import {executeCustomBot, clearCoolOff, handoffInput} from '../src/ai.js';
+import {BOT_ASK_PERMISSION, stripControlBlocks} from '../shared/bot-link.js';
+import {CONTROL_FENCES} from '../shared/reply-blocks.js';
 import {meterTurn, turnNote} from '../src/usage.js';
 import {SqliteStore} from '../src/sqlite-store.js';
 import {loadMasterKey} from '../src/vault.js';
@@ -92,7 +94,7 @@ test('on the bot\'s own model the block runs nothing', async () => {
   const first = 'Let me check.\n' + block('search_chat', {query: 'invoice'});
   const out = await turnOf(state, spare(calls, {first, answeredBy: 0}));
   assert.equal(calls.length, 1);
-  assert.equal(out.value.output, first, 'a block from its own model is plain text');
+  assert.equal(out.value.output, 'Let me check.', 'a block from its own model is not shown, and is not run');
   assert.equal(out.value.outsideChat, false);
 });
 
@@ -104,7 +106,8 @@ test('a fallback reply with no block, or a search with no chat to read, costs no
   const calls2 = [];
   const first = block('search_chat', {query: 'invoice'});
   const out2 = await turnOf({chats: {writer: lines}}, spare(calls2, {first}), {chatKey: null});
-  assert.equal(calls2.length, 1); assert.equal(out2.value.output, first);
+  assert.equal(calls2.length, 1); assert.doesNotMatch(out2.value.output, /```|search_chat/);
+  assert.match(out2.value.output, /Writer/, 'a reply that was only a block still says something');
 });
 
 test('only lines this turn was not given are searched: the skip is the kept count of the reply that carried the block', async () => {
@@ -287,4 +290,32 @@ test('a handoff cut to nothing (the slim envelope) still searches every line and
     const again = JSON.parse(userText(second.requests[1]));
     assert.deepEqual(again.chatSearch.hits.map(h => h.text), ['newest about Acme', 'older Acme thing'], 'no line was given, so every line is searched');
   } finally { main.close(); second.close(); }
+});
+
+test('a search_chat block never reaches the chat text: own model, after a peer round, or unclosed', async () => {
+  const peerBot = {id: 'researcher', name: 'Researcher', type: 'custom', instructions: 'Find sources', permissions: []};
+  const asker = {...writer, permissions: [BOT_ASK_PERMISSION]};
+  const state = {chats: {writer: lines}};
+  const ctx = {bot: asker, envelope: {task: 'go'}, config: {}, chatKey: 'writer', peers: [asker, peerBot]};
+  // After a peer round: the bot asks, the teammate answers, and its final reply carries a block.
+  const viaPeer = await meterTurn(memStore(state), {}, () => runBotTurn(memStore(state), {...ctx, executor: async (who, prompt) => {
+    if (who.id === 'researcher') return 'Source X.';
+    return JSON.parse(prompt).peerAnswer ? 'Final.\n' + block('search_chat', {query: 'invoice'}) : 'Asking.\n' + block('ask', {to: '@Researcher', task: 'Which source?'});
+  }}));
+  assert.equal(viaPeer.value.output, 'Final.');
+  // An unclosed final fence is a block too.
+  const unclosed = await turnOf(state, spare([], {first: 'Answer.\n```search_chat\n{"query": "invoice"}', answeredBy: 0}));
+  assert.equal(unclosed.value.output, 'Answer.');
+  // A teammate's answer never carries one back into the asker's prompt.
+  assert.equal(stripControlBlocks('Peer said:\n```search_chat\n{"query":"x"}'), 'Peer said:');
+  assert.equal(stripControlBlocks('Peer said:\n```search_chat\n{"query":"x"}\n```'), 'Peer said:');
+  assert.equal(stripControlBlocks('Note:```search_chat{"query":"x"}```'), 'Note:');
+});
+
+test('the search_chat hint shows the fenced block, and says only it is read', () => {
+  const hint = handoffInput(JSON.stringify({task: 'go', thread: []}), {from: 'a', to: 'b', why: 'c'});
+  const tool = JSON.parse(hint).tools.search_chat;
+  assert.ok(tool.includes('```search_chat\n{"query": "'), 'the exact fenced example');
+  assert.match(tool, /Send only that block; nothing else in the reply is kept\./);
+  assert.ok(CONTROL_FENCES.includes('search_chat'));
 });

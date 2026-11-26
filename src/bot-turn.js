@@ -52,6 +52,15 @@ async function chatSearchRound(store, {bot, envelope, executor, config, output, 
   return {output: strip(text) || strip(output), outsideChat};
 }
 
+/** A `search_chat` block is a request to the platform, never chat text: whatever its model wrote it on (the bot's own,
+ * which has no such tool, or a reply after a peer round), the block is dropped from the final output. A reply that was
+ * only the block says so in a line. */
+function noSearchBlocks(bot, text) {
+  const value = String(text ?? '');
+  if (!controlFence('search_chat').test(value)) return text;
+  return value.replace(controlFence('search_chat'), '').replace(/\n{3,}/g, '\n\n').trim() || `${bot.name} tried to search this chat's older lines and had nothing to say.`;
+}
+
 /** Run one bot turn and return its output.
  *
  * `executor(bot, input, config)` is the model call the caller was given (the
@@ -100,7 +109,7 @@ export async function runBotTurn(store, {
     if (again.trim()) setup = setupCardsFromReply(store, {bot, output: again, makeId, now});
   }
   return {
-    output: setup.text,
+    output: noSearchBlocks(bot, setup.text),
     lines: [...sub.lines, ...peer.lines, ...made.lines],
     // What the reply proposes reads after it, like a page the reply asked for.
     after: setup.lines,
