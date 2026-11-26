@@ -121,3 +121,18 @@ test('usage totals survive a restart', async () => withStore(async (store, open)
   assert.equal(again.read().usage.days['2026-11-12'].writer.input, 10);
   await again.close();
 }));
+
+test('an empty old-style fallback means none, as the old API did; entries inside fallbacks stay strict', async () => withStore(async store => {
+  const a = await add(store, 'A', 'x');
+  await ai.setDefaults(store, {fallbacks: [{providerId: a.id, model: 'x'}]});
+  for (const none of [{}, {providerId: ''}, {model: 'x'}, {providerId: null}]) {
+    await ai.setDefaults(store, {fallbacks: [{providerId: a.id, model: 'x'}]});
+    const cleared = await ai.setDefaults(store, {fallback: none});
+    assert.deepEqual(cleared.fallbacks, [], JSON.stringify(none));
+    assert.equal(cleared.fallback, null);
+    assert.equal(Object.hasOwn(store.read().ai, 'fallback'), false);
+  }
+  await assert.rejects(() => ai.setDefaults(store, {fallbacks: [{}]}), /\{providerId, model\}/);
+  await assert.rejects(() => ai.setDefaults(store, {fallbacks: [{providerId: ''}]}), /\{providerId, model\}/);
+  await assert.rejects(() => ai.setDefaults(store, {fallback: {providerId: 5}}), /\{providerId, model\}/);
+}));
