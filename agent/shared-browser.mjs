@@ -7,14 +7,18 @@
  * code: nothing here reads it, Chrome alone does.
  *
  * - One bot drives each tab, and tabs run side by side. A bot's tasks wait their turn on its own
- *   queue, in the order they asked, and never touch another bot's tab (`laneOf` names the queue).
+ *   queue, in the order they asked, and never touch another bot's tab (`tabKey` names the queue).
+ * - A task may name a browser account. Each account has a browser context of its own (cookies shared
+ *   with no other), filled from its jar when the context is made and saved back after a task that
+ *   used it. A tab belongs to one (account, bot) pair, and every step first checks that its tab sits in
+ *   that account's current context, so a stale tab or a tab in the default profile never serves it.
  * - The owner can take one bot's tab (`takeover`) and hand it back (`handback`). A takeover parks
  *   only the tab the owner holds: no new task starts on that tab, and other bots' tabs go on as
  *   before. A task already running on it finishes the step it is in, runs no further step (the page
  *   is no longer the one its steps were planned for), waits for the hand back and then answers with
  *   the page as the owner left it. The owner's input waits for that step too, so an action is never
  *   applied twice or cut in half, and never waits for another bot's step.
- * - Each bot has its own tab (`botId` -> tab). A tab the browser no longer has
+ * - Each (account, bot) has its own tab. A tab the browser no longer has
  *   is dropped and replaced; after a restart there are no tab ids at all, so no
  *   stale one can be used.
  * - Each tab keeps its own typed memory: what the owner types in secret is remembered for the life of that
@@ -30,6 +34,7 @@ import {startBrowserSession, ACTION_OPS, MAX_ACTIONS} from './browser.mjs';
 import {FOCUSED_IS_SECRET_JS, TAG_FOCUSED_SECRET_JS, CLEAR_SECRETS_ON_HANDBACK_JS, rememberTyped, scrubTyped} from './page-secrets.mjs';
 import {hostAllowed, hostOf} from '../shared/bot-browser.js';
 import {cleanInput, KEYS, VIEWPORT} from './live-input.mjs';
+import {ACCOUNT_ID} from '../shared/bot-settings.js';
 
 /** Where the profile lives: `AGENT_BROWSER_PROFILE`, else next to the agent's config. */
 export function browserProfileDir(env = process.env, configPath) {
@@ -50,19 +55,25 @@ export const ANONYMOUS_BOT = 'shared';
 /** The cast the owner watches: small and cheap, since a person is looking at it. */
 const SCREENCAST = {format: 'jpeg', quality: 60, maxWidth: VIEWPORT.width, maxHeight: VIEWPORT.height, everyNthFrame: 2};
 
-/** The queue a bot's tasks wait in. Today one per bot; a later phase keys it by account and tab. */
-const laneOf = botId => botId;
+/** What names one tab and its queue: the account (empty for the device's own profile) and the bot. */
+export const tabKey = (account, botId) => `${account || ''}\u0000${botId}`;
 
-export function createSharedBrowser({start = startBrowserSession, allow = [], profile, settleMs, timeoutMs, idleMs = Number(process.env.AGENT_TAKEOVER_IDLE_MS) || 0} = {}) {
+const NO_ACCOUNT = 'This task names a browser account this device cannot use.';
+const WRONG_CONTEXT = 'This tab is not in the bot\'s browser account, so the step was not run.';
+
+export function createSharedBrowser({start = startBrowserSession, allow = [], profile, settleMs, timeoutMs, jars = null, idleMs = Number(process.env.AGENT_TAKEOVER_IDLE_MS) || 0} = {}) {
   const allowed = () => (typeof allow === 'function' ? allow() : allow);
   let session = null, starting = null;
-  const tabs = new Map();      // botId -> {tab, url, title, typed}: `typed` is what the owner typed in secret, in memory only
-  // lane -> {queue: ticket[], holding, parked, epoch}. Made on first use, dropped when nothing is queued or running.
+  const tabs = new Map();      // tabKey -> {botId, account, tab, url, title, typed}: `typed` is what the owner typed in secret, in memory only
+  const opening = new Map();   // tabKey -> {live, promise}: the tab being opened, so two askers for one tab open one
+  const contexts = new Map();  // account -> {id, restored}: the browser contexts of this session, gone with it
+  const contextStarts = new Map(); // account -> {live, promise}: the context being made
+  // tabKey -> {queue: ticket[], holding, parked, epoch}. Made on first use, dropped when nothing is queued or running.
   const lanes = new Map();
   const waits = new Set();     // {predicate, resolve}
-  let driving = null;          // the bot whose tab the owner holds: one tab at a time
+  let driving = null;          // the tab the owner holds, {key, botId, account}: one tab at a time
   let idleTimer = null;
-  let watched = null;          // the tab being cast: {botId, tab, live, off}
+  let watched = null;          // the tab being cast: {key, botId, account, tab, live, off}
   let frameSink = null;
 
   const notify = () => { for (const wait of [...waits]) if (wait.predicate()) { waits.delete(wait); wait.resolve(); } };
@@ -86,58 +97,142 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     session = null;
     watched = null;
     tabs.clear();
+    contexts.clear();
     if (dropped) void dropped.close().catch(() => {});
   }
 
-  /** This bot's tab: the one it has if the browser still has it, else a new one. */
-  async function tabFor(live, botId) {
-    const known = tabs.get(botId);
+  /** A task that names an account needs jars to keep it in and an id that cannot be a path. */
+  function checkAccount(account) {
+    if (account == null) return;
+    if (!jars || typeof account !== 'string' || !ACCOUNT_ID.test(account)) throw new Error(NO_ACCOUNT);
+  }
+
+  /** This account's browser context: made once (however many ask at once) and filled from its jar. */
+  function contextFor(live, account) {
+    const have = contexts.get(account);
+    if (have) return Promise.resolve(have);
+    const started = contextStarts.get(account);
+    if (started?.live === live) return started.promise;
+    const promise = (async () => {
+      const id = await live.createContext();
+      try {
+        let cookies;
+        // Said in fixed words: an error from here must never carry a cookie.
+        try { cookies = jars.load(account) || []; await live.setCookies(id, cookies); }
+        catch { throw new Error('This browser account\'s saved sign-in could not be put back in the browser.'); }
+        // A browser that was replaced while this ran must not have this context in its map.
+        if (session !== live) throw new Error('The browser restarted. Try again.');
+        const made = {id, restored: cookies.length > 0};
+        contexts.set(account, made);
+        return made;
+      } catch (error) { await live.disposeContext(id).catch(() => {}); throw error; }
+    })().finally(() => { if (contextStarts.get(account)?.promise === promise) contextStarts.delete(account); });
+    contextStarts.set(account, {live, promise});
+    return promise;
+  }
+
+  /** Throws unless `tab` sits in the context this account has now (the default profile for none). The account's
+   * own context id is the only one compared: a browser also names the default context. */
+  function checkContext(account, tab) {
+    const want = account ? contexts.get(account)?.id : null;
+    if (account ? !want || tab.browserContextId !== want : tab.browserContextId != null) throw new Error(WRONG_CONTEXT);
+  }
+
+  /** Closes the tabs of one context of an account, then the context (Chrome closes a context's targets but leaves
+   * a tab's listener on). Only that context: one already replaced is somebody else's now. */
+  async function dropContext(live, account, entry) {
+    if (contexts.get(account) === entry) contexts.delete(account);
+    for (const [key, held] of tabs) {
+      if (held.account !== account || held.tab.browserContextId !== entry.id) continue;
+      tabs.delete(key);
+      if (watched?.key === key) await unwatch();
+      await live.closeTab(held.tab);
+    }
+    await live.disposeContext(entry.id).catch(() => {});
+  }
+
+  /** The account's cookies, written to its jar. A failure is said in fixed words: nothing here may print a cookie. */
+  async function saveJar(live, account) {
+    const entry = contexts.get(account);
+    if (!entry || session !== live || live.dead) return;
+    try { jars.save(account, await live.getCookies(entry.id)); }
+    catch { console.error('agent: could not save a browser account\'s cookies.'); }
+  }
+
+  /** This tab: the one it has if the browser still has it (in the account's current context), else a new one.
+   * One at a time per tab, so a takeover and a task asking together open one. */
+  function tabFor(live, account, botId) {
+    const key = tabKey(account, botId), started = opening.get(key);
+    if (started?.live === live) return started.promise;
+    const promise = openTab(live, key, account, botId).finally(() => { if (opening.get(key)?.promise === promise) opening.delete(key); });
+    opening.set(key, {live, promise});
+    return promise;
+  }
+  async function openTab(live, key, account, botId) {
+    const known = tabs.get(key);
     if (known) {
       const alive = (await live.liveTargets().catch(() => [])).some(target => target.targetId === known.tab.targetId);
-      if (alive) return known.tab;
-      tabs.delete(botId);
-      known.tab.off();
+      if (alive && !account === !known.tab.browserContextId && (!account || known.tab.browserContextId === contexts.get(account)?.id)) return known.tab;
+      tabs.delete(key);
+      if (watched?.tab === known.tab) await unwatch();
+      if (alive) await live.closeTab(known.tab); else known.tab.off();
     }
-    const tab = await live.newTab({allow: allowed()});
-    tabs.set(botId, {tab, url: null, title: null, typed: new Set()});
+    let context = account ? await contextFor(live, account) : null;
+    let tab;
+    try { tab = await live.newTab({allow: allowed(), browserContextId: context?.id}); }
+    catch (error) {
+      // Only a context Chrome no longer has is started again from the jar: any other failure leaves it, and the
+      // tabs of the account's other bots, alone.
+      const gone = context && session === live && !live.dead && await live.getCookies(context.id).then(() => false, () => true);
+      if (!gone) throw error;
+      await dropContext(live, account, context);
+      context = await contextFor(live, account);
+      tab = await live.newTab({allow: allowed(), browserContextId: context.id});
+    }
+    // A browser replaced while this opened must not have the tab in its map.
+    if (session !== live) { await live.closeTab(tab); throw new Error('The browser restarted. Try again.'); }
+    tabs.set(key, {botId, account, tab, url: null, title: null, typed: new Set()});
     return tab;
   }
 
-  /** Wait this bot's turn on its own lane (and for the owner, if they hold this bot's tab). Returns the lane. */
-  async function acquire(botId) {
-    const key = laneOf(botId);
+  /** Wait this tab's turn on its own lane (and for the owner, if they hold this tab). Returns the lane. */
+  async function acquire(key, botId) {
     let lane = lanes.get(key);
     if (!lane) lanes.set(key, lane = {queue: [], holding: false, parked: false, epoch: 0});
     const ticket = {botId};
     lane.queue.push(ticket);
-    await until(() => lane.queue[0] === ticket && !lane.holding && driving !== botId);
+    await until(() => lane.queue[0] === ticket && !lane.holding && driving?.key !== key);
     lane.queue.shift();
     lane.holding = true;
     return lane;
   }
-  const release = (botId, lane) => {
+  const release = (key, lane) => {
     lane.holding = false; lane.parked = false;
-    if (!lane.queue.length && lanes.get(laneOf(botId)) === lane) lanes.delete(laneOf(botId));
+    if (!lane.queue.length && lanes.get(key) === lane) lanes.delete(key);
     notify();
   };
 
-  /** Run one page read or action list on this bot's tab. A browser that died
-   * under it is noticed by `ensure` on the next task. */
-  async function run(botId, {url, steps = [], approved = []}) {
-    // A host nobody allowed costs no process, and no place in the queue.
+  /** Run one page read or action list on this bot's tab (in its account's context, if it names one). A browser
+   * that died under it is noticed by `ensure` on the next task. */
+  async function run(botId, {url, steps = [], approved = [], account = null}) {
+    // A host nobody allowed, or an account this device cannot hold, costs no process and no place in the queue.
+    checkAccount(account);
     if (!hostAllowed(url, allowed())) throw new Error(`Refusing to open ${url}: its host is not in AGENT_BROWSER_ALLOWLIST.`);
-    const id = botId || ANONYMOUS_BOT;
-    const lane = await acquire(id);
+    const id = botId || ANONYMOUS_BOT, key = tabKey(account, id);
+    const lane = await acquire(key, id);
+    let live = null;
     try {
-      const live = await ensure();
-      const tab = await tabFor(live, id);
-      const {typed} = tabs.get(id);
-      const remember = ({url: at, title}) => { const entry = tabs.get(id); if (entry) { entry.url = at || entry.url; entry.title = title ?? entry.title; } };
+      live = await ensure();
+      const tab = await tabFor(live, account, id);
+      checkContext(account, tab);
+      const {typed} = tabs.get(key);
+      const remember = ({url: at, title}) => { const entry = tabs.get(key); if (entry) { entry.url = at || entry.url; entry.title = title ?? entry.title; } };
       // Asked before each step. False once the owner has taken this bot's tab since this task began (another
       // bot's tab being taken changes nothing here); if they still hold it, wait here for the hand back.
       const startEpoch = lane.epoch;
       const gate = async () => {
-        if (driving === id) { lane.parked = true; notify(); try { await until(() => driving === null); } finally { lane.parked = false; } return false; }
+        checkContext(account, tab);
+        if (driving?.key === key) { lane.parked = true; notify(); try { await until(() => driving === null); } finally { lane.parked = false; } return false; }
         return lane.epoch === startEpoch;
       };
       // The last point before the result leaves the device: what the owner typed in secret is hidden from all of it.
@@ -146,26 +241,32 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
         // An error names what the page did (a blocked address it was sent to may carry the echo), and leaves as text.
         throw Object.assign(new Error(scrubTyped(String(error?.message ?? ''), typed)), {status: error?.status});
       }
-    } finally { release(id, lane); }
+    } finally {
+      // What the page changed in the account's cookies is kept before the next task, or a restart, can lose it.
+      if (account && live) await saveJar(live, account);
+      release(key, lane);
+    }
   }
 
   const armIdle = () => {
     clearTimeout(idleTimer);
     // No clock by default: the person holds the browser until they hand back. AGENT_TAKEOVER_IDLE_MS opts into one.
     if (!idleMs) return;
-    idleTimer = setTimeout(() => { if (driving) void handback(driving); }, idleMs);
+    idleTimer = setTimeout(() => { if (driving) void handback(driving.botId); }, idleMs);
     idleTimer.unref?.();
   };
   const conflict = message => Object.assign(new Error(message), {status: 409});
 
   /** The owner takes this bot's tab (opening it if the bot never had one). The
    * bot's running task, if any, is not interrupted mid-step: see the header. */
-  async function takeover(botId) {
-    if (driving && driving !== botId) throw conflict('You are already driving another bot\'s tab. Hand it back first.');
+  async function takeover(botId, account = null) {
+    checkAccount(account);
+    const key = tabKey(account, botId);
+    if (driving && driving.key !== key) throw conflict('You are already driving another bot\'s tab. Hand it back first.');
     const first = !driving;
-    if (first) { driving = botId; const lane = lanes.get(laneOf(botId)); if (lane) lane.epoch++; notify(); }
+    if (first) { driving = {key, botId, account}; const lane = lanes.get(key); if (lane) lane.epoch++; notify(); }
     armIdle();
-    try { await tabFor(await ensure(), botId); }
+    try { await tabFor(await ensure(), account, botId); }
     catch (error) {
       // A browser that will not start must not leave the owner "holding" nothing.
       if (first) { driving = null; clearTimeout(idleTimer); notify(); }
@@ -188,9 +289,9 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
 
   /** The owner is done: bots may go on, and the page's secret fields are emptied first. Handing back what you do not hold does nothing. */
   async function handback(botId) {
-    if (driving !== botId) return;
-    await clearSecretFields(tabs.get(botId));
-    if (driving !== botId) return;
+    if (driving?.botId !== botId) return;
+    await clearSecretFields(tabs.get(driving.key));
+    if (driving?.botId !== botId) return;
     driving = null;
     clearTimeout(idleTimer);
     notify();
@@ -210,24 +311,24 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
   /** Cast one bot's tab, and only that one: Chrome pays for every frame it
    * encodes, so a tab nobody looks at is never cast. A bot with no tab has
    * nothing to show yet (false). Asking again for the same tab changes nothing. */
-  async function watch(botId) {
-    const entry = tabs.get(botId);
+  async function watch(botId, account = null) {
+    const key = tabKey(account, botId), entry = tabs.get(key);
     if (!entry || !session) { await unwatch(); return false; }
-    if (watched?.botId === botId && watched.tab === entry.tab) return true;
+    if (watched?.key === key && watched.tab === entry.tab) return true;
     await unwatch();
     const live = session, tab = entry.tab;
     const off = live.cdp.on('Page.screencastFrame', (params, raw) => {
       if (params.sessionId !== tab.sessionId) return;
       // Chrome sends no further frame until the last one is acked, with its own id.
       live.cdp.send('Page.screencastFrameAck', {sessionId: raw.sessionId}, tab.sessionId).catch(() => {});
-      frameSink?.({botId, image: params.data, w: Number(params.metadata?.deviceWidth) || tab.viewport.width, h: Number(params.metadata?.deviceHeight) || tab.viewport.height, at: Date.now()});
+      frameSink?.({botId, account, image: params.data, w: Number(params.metadata?.deviceWidth) || tab.viewport.width, h: Number(params.metadata?.deviceHeight) || tab.viewport.height, at: Date.now()});
     });
-    watched = {botId, tab, live, off};
+    watched = {key, botId, account, tab, live, off};
     try {
       await live.cdp.send('Page.startScreencast', SCREENCAST, tab.sessionId);
       // A page that never repaints sends no frame, and the viewer would stare at nothing.
       const {data} = await live.cdp.send('Page.captureScreenshot', {format: 'jpeg', quality: SCREENCAST.quality}, tab.sessionId);
-      if (data && watched?.tab === tab) frameSink?.({botId, image: data, w: tab.viewport.width, h: tab.viewport.height, at: Date.now()});
+      if (data && watched?.tab === tab) frameSink?.({botId, account, image: data, w: tab.viewport.width, h: tab.viewport.height, at: Date.now()});
     } catch { await unwatch(); return false; }
     return true;
   }
@@ -237,12 +338,13 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
    * the allowlist like every page the browser opens. */
   async function applyInput(botId, event) {
     const ev = cleanInput(event);
-    if (driving !== botId) throw conflict('You are not driving that bot\'s tab. Take it over first.');
+    if (driving?.botId !== botId) throw conflict('You are not driving that bot\'s tab. Take it over first.');
     // The bot's step in flight finishes first, or the owner's click would land in the middle of it.
-    // Only this bot's own lane: another bot's step is no reason to hold the owner's typing.
-    await until(() => { const lane = lanes.get(laneOf(botId)); return !lane?.holding || lane.parked || driving !== botId; });
-    const entry = tabs.get(botId);
-    if (driving !== botId || !entry || !session) throw conflict('You are not driving that bot\'s tab. Take it over first.');
+    // Only this tab's own lane: another tab's step is no reason to hold the owner's typing.
+    const key = driving.key;
+    await until(() => { const lane = lanes.get(key); return !lane?.holding || lane.parked || driving?.key !== key; });
+    const entry = tabs.get(key);
+    if (driving?.key !== key || !entry || !session) throw conflict('You are not driving that bot\'s tab. Take it over first.');
     armIdle();
     const {sessionId} = entry.tab, send = (method, params) => session.cdp.send(method, params, sessionId);
     if (ev.type === 'click') {
@@ -292,7 +394,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
 
   /** What the device knows about each tab: for the status it reports. `refresh` stores Chrome's own address and title,
    * so what leaves here is scrubbed of what the owner typed in secret. */
-  const status = () => [...tabs].map(([botId, {url, title, typed}]) => ({botId, state: driving === botId ? 'driving' : lanes.get(laneOf(botId))?.holding ? 'browsing' : 'idle', ...scrubTyped({url, title}, typed)}));
+  const status = () => [...tabs].map(([key, {botId, account, url, title, typed}]) => ({botId, account, state: driving?.key === key ? 'driving' : lanes.get(key)?.holding ? 'browsing' : 'idle', ...scrubTyped({url, title}, typed)}));
 
   async function close() {
     clearTimeout(idleTimer);
@@ -300,13 +402,14 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     session = null;
     watched = null;
     tabs.clear();
+    contexts.clear();
     if (live) await live.close().catch(() => {});
   }
 
   /** `value` scrubbed of what the owner typed in secret on this bot's tab: for a result that left some other way. */
-  const scrub = (botId, value) => scrubTyped(value, tabs.get(botId || ANONYMOUS_BOT)?.typed);
+  const scrub = (botId, value, account = null) => scrubTyped(value, tabs.get(tabKey(account, botId || ANONYMOUS_BOT))?.typed);
 
-  return {run, scrub, status, close, onFrame, watch, unwatch, applyInput, refresh, takeover, handback, owner: () => driving, laneCount: () => lanes.size};
+  return {run, scrub, status, close, onFrame, watch, unwatch, applyInput, refresh, takeover, handback, owner: () => driving?.botId ?? null, laneCount: () => lanes.size};
 }
 
 /** One `browser.capture` or `browser.action` task, with the rules every browser
@@ -314,8 +417,12 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
  * needs steps drawn from the known operations, and interaction needs the real
  * browser (`AGENT_BROWSER=1`), not the plain HTTP read. `shared` is the shared
  * browser; `botId` in the payload picks the tab. */
-export async function runBrowserTask(task, {shared, allow, env = process.env}) {
+export async function runBrowserTask(task, {shared, allow, env = process.env, agentId = null}) {
   const payload = task.payload || {};
+  // A task another computer was meant for, or an account id that could be a path, is refused before anything else.
+  if (agentId && payload.deviceId != null && payload.deviceId !== agentId) throw new Error('This task is for another computer, so it was not run.');
+  const account = payload.account == null || payload.account === '' ? null : payload.account;
+  if (account !== null && !(typeof account === 'string' && ACCOUNT_ID.test(account))) throw new Error('This task names a browser account this device cannot use.');
   const target = String(payload.url || '');
   if (!hostAllowed(target, allow)) {
     throw new Error(`Refusing to ${task.kind === 'browser.action' ? 'act on' : 'read'} ${hostOf(target) || target}: it is not in AGENT_BROWSER_ALLOWLIST. Only explicitly allowed pages are ${task.kind === 'browser.action' ? 'driven' : 'read'}.`);
@@ -331,5 +438,5 @@ export async function runBrowserTask(task, {shared, allow, env = process.env}) {
   }
   // `approved` is what the server cleared (never the model): the browser refuses any other risky control.
   const approved = Array.isArray(payload.approved) ? payload.approved.filter(a => typeof a === 'string') : [];
-  return shared.run(typeof payload.botId === 'string' && payload.botId ? payload.botId : ANONYMOUS_BOT, {url: target, steps, approved});
+  return shared.run(typeof payload.botId === 'string' && payload.botId ? payload.botId : ANONYMOUS_BOT, {url: target, steps, approved, account});
 }

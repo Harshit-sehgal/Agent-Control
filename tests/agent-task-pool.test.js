@@ -25,12 +25,12 @@ test('AGENT_CONCURRENCY: 3 by default, 1 to 8, a bad value is 3', () => {
   for (const bad of ['0', '-2', '2.5', 'many', '']) assert.equal(concurrencyOf({AGENT_CONCURRENCY: bad}), 3);
 });
 
-test('taskKey: one key per model engine, one per bot for pages, none for the rest', () => {
+test('taskKey: one key per model engine, one per account and bot for pages, none for the rest', () => {
   assert.equal(taskKey(model('m', 'claude')), 'model:claude');
-  assert.equal(taskKey(page('p', 'bot-a')), 'bot:bot-a');
-  assert.equal(taskKey(page('p', 'bot-a', 'browser.action')), 'bot:bot-a');
-  assert.equal(taskKey(page('p', '')), 'bot:shared');
-  assert.equal(taskKey({id: 'p', kind: 'browser.capture'}), 'bot:shared');
+  assert.equal(taskKey(page('p', 'bot-a')), 'tab::bot-a');
+  assert.equal(taskKey(page('p', 'bot-a', 'browser.action')), 'tab::bot-a');
+  assert.equal(taskKey(page('p', '')), 'tab::shared');
+  assert.equal(taskKey({id: 'p', kind: 'browser.capture'}), 'tab::shared');
   assert.equal(taskKey(check('c')), null);
   assert.equal(taskKey({id: 'k', kind: 'mcp.call', payload: {}}), null);
 });

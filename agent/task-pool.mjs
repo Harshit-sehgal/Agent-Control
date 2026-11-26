@@ -13,11 +13,11 @@ export function concurrencyOf(env = process.env) {
   return Math.min(n, MAX_CONCURRENCY);
 }
 
-// What a task must not overlap with: one model.run per CLI engine, one browser task per bot.
+// What a task must not overlap with: one model.run per CLI engine, one browser task per tab (account and bot).
 // null means no cap beyond the pool's own. A later phase changes only this function.
 export function taskKey(task) {
   if (task?.kind === 'model.run') return `model:${task.payload?.engine}`;
-  if (task?.kind === 'browser.capture' || task?.kind === 'browser.action') return `bot:${task.payload?.botId || 'shared'}`;
+  if (task?.kind === 'browser.capture' || task?.kind === 'browser.action') return `tab:${task.payload?.account || ''}:${task.payload?.botId || 'shared'}`;
   return null;
 }
 
