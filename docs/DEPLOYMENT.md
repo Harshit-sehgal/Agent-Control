@@ -277,11 +277,27 @@ others wait their turn in order; a bot never touches another bot's tab.
   address from the address box; a site must be in `AGENT_BROWSER_ALLOWLIST` for the browser to
   load it, so list the sign-in host too (for Google, `accounts.google.com`).
   Press **Hand back** when you are through.
-- **While you drive:** no bot starts anything. A bot already mid-task finishes
+- **While you drive:** only that bot waits. A bot already mid-task finishes
   the step it is on, runs no further step, waits for the hand back and then
-  answers with the page as you left it. A takeover has no clock: you hold the
-  browser until you hand back (set `AGENT_TAKEOVER_IDLE_MS` to end a forgotten one). Other jobs on that
-  device, such as a subscription model run, wait behind a parked browser task.
+  answers with the page as you left it. Other bots keep working, on that
+  computer and on the server's browser, and a model run no longer waits behind
+  a parked browser task. A takeover has no clock: you hold the browser until
+  you hand back (set `AGENT_TAKEOVER_IDLE_MS` to end a forgotten one). You
+  drive one tab at a time.
+- **Parallel work:** a computer runs up to `AGENT_CONCURRENCY` tasks at once
+  (default 3, a whole number from 1 to 8; above 8 is 8 and anything else is 3).
+  One bot's page tasks still run one at a time, and each CLI engine runs one
+  model run at a time.
+- **Choose a bot's computer:** on a bot's Edit page, **Computer** lets the
+  owner pin that bot to one paired computer for its pages, its model runs and
+  its MCP calls on the device. It shows only to the owner, and only when this
+  workspace has a paired computer or the bot is already pinned. Leave it on
+  any computer to let the server pick. If a pinned computer is offline or has
+  been removed, the bot is told why and does not move to another.
+- **Old app:** a computer whose app is too old for something the server now
+  relies on is marked **Needs an update** under Settings → Local agents. It
+  still does everything it can; only the work that needs the newer app is
+  refused, with a line naming what to update.
 - **Wipe it:** stop the agent, delete the `browser-profile` directory, start the
   agent. Every bot is signed out and the next sign-in starts fresh. To sign out
   of one site, take over and use that site's own sign-out.
