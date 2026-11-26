@@ -278,3 +278,29 @@ Undo. Holding a bot reply opens a popover anchored at it, with feedback, an ask 
   - `docs/FEATURE-RESEARCH.md`: the line that names `teach-reply`.
 - [ ] Run the full gate. Afterwards `git status` must be clean.
 - [ ] Commit `docs: the reply popover and learning from the chat`.
+
+## Amendments (review before building)
+
+- **Task 1**
+  - Each correction also stores `chat` (the chat key it came from). Each learned rule is announced in the chat of the
+    correction it came from, not in the chat of the pass. When the corrections name several chats, use the newest.
+  - `isCorrection` ignores lines starting with `>` (a quoted reply), and is false when nothing is left. Pin this in a
+    test.
+  - Liked `reply` is capped at 300 characters.
+  - A test round-trips `corrections` and `liked` through `src/sqlite-store.js`, which saves rulebooks as JSON docs.
+- **Task 2**
+  - `markLearned` is called both ways: on gives `off: false`, off gives `off: true`.
+  - Add a 👎 test on a thread reply (`team-<group>` key; thread lines live in `state.chats` as well).
+- **Task 3**
+  - Undo on a deleted rule (404) quietly marks the line as switched off.
+- **Task 5**
+  - `md()` in `shared/ui-kit.js` learns blockquotes (`> ` lines become `<blockquote>`), tested in
+    `tests/ui-kit-md.test.js`.
+  - On open, focus goes to the first button, never the ask box.
+  - The popover closes on a feed scroll only past 24 px, and only when not within 600 ms of a focus or a
+    `visualViewport` resize. It is placed again on `visualViewport` resize.
+  - A right-click or long press inside an `<a>` keeps the browser's own behaviour, and links keep the touch callout.
+  - The pins strip and hint markup live in pure `reply-menu.js`. `ui-reply-menu.js` imports store, chat and dialog
+    modules only, never `ui-conversation.js`, to avoid an import cycle.
+  - Split the work into two commits: (a) the popover with Copy and Teach removed, then (b) pins and the hint.
+- **Browser check:** serve this worktree's own build (`docs/`) on a fresh port, never 4180 or 4173.
