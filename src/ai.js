@@ -431,29 +431,75 @@ export function fallsBack(error){
   if(status===401||status===403||error.code==='quota')return true;
   return ['usage-limit','not-signed-in','agent-offline','timeout','cli-missing'].includes(error.code);
 }
+/** The providers that hit a limit or an outage and are resting, by `coolKey`: `{until, why}`. In memory only, so a
+ * restart starts empty and the bot's own model is asked at once. */
+const coolOff=new Map();
+/** What a provider is called for resting: its saved id (unique across workspaces, so one owner's limit never rests
+ * another's), else its subscription CLI, else the operator's own environment address (shared by every workspace). */
+export function coolKey(config){
+  if(config?.providerId)return String(config.providerId);
+  if(config?.kind==='local-cli')return `cli:${config.engine||''}`;
+  return `env:${config?.baseUrl||''}`;
+}
+const COOL_DEFAULT_MS=300000,COOL_MAX_MS=3600000;
+/** How long a provider rests after this failure, or null when it sets no rest: a limit (429, 402, quota, a
+ * subscription's usage limit) or an outage (5xx, 408, a timeout, unreachable, a computer offline) rests for the
+ * provider's own Retry-After (seconds or a date) when it gives one, else 5 minutes, at most an hour, never below 0.
+ * A refused key, a signed-out or missing CLI, and a refused request move the walk on (or not) but rest nothing. Pure. */
+export function coolOffMs(error,now=Date.now()){
+  if(!error||typeof error!=='object')return null;
+  const status=error.providerStatus;
+  const rests=error.timedOut||error.network||status===429||status===402||status===408||(status>=500&&status<600)||['quota','usage-limit','agent-offline','timeout'].includes(error.code);
+  if(!rests)return null;
+  const said=String(error.retryAfter??'').trim();
+  const ms=!said?NaN:/^\d+(\.\d+)?$/.test(said)?Number(said)*1000:Date.parse(said)-now;
+  return Math.min(Math.max(Number.isFinite(ms)?Math.round(ms):COOL_DEFAULT_MS,0),COOL_MAX_MS);
+}
+/** Forget every cool-off: a restart, for tests and for nothing else. */
+export function clearCoolOff(){coolOff.clear();}
+/** The entry of a provider that is still resting, or null (an ended one is dropped). */
+function resting(config){
+  const key=coolKey(config),entry=coolOff.get(key);
+  if(!entry)return null;
+  if(entry.until<=Date.now()){coolOff.delete(key);return null;}
+  return entry;
+}
 /** One model call, walked down `[own model, ...config.fallbacks]` (a lone older `config.fallback` is a list of one).
  * Each model is tried at most once, with its own one retry inside `callOnce`. The walk moves on only when the
  * failure is the provider's (`fallsBack`), a model is left, and the bot has not acted in this turn: once any call
  * for the bot has returned, its reply may already be acted on (a send block), so a later failure is not replayed
  * elsewhere. A call that was answered by a model other than the bot's own starts the bot's later calls in this turn
- * at that model. Only the bot's own config is walked: a fallback's own list is ignored, so nothing chains. */
+ * at that model. Only the bot's own config is walked: a fallback's own list is ignored, so nothing chains.
+ * A provider that hit a limit or an outage rests (`coolOff`) and is stepped over for a while, unless no later model
+ * is free (all of them resting: the own model is tried anyway, so a turn never has nothing to try); a success ends
+ * its rest. A turn that has acted never skips: it stays on the model that answered. */
 async function callModel(call){
   const {config}=call;
   const models=[config,...(config?.fallbacks??(config?.fallback?[config.fallback]:[]))];
   const note=turnNote(call.botId);
   const first=note&&note.answeredBy<models.length?note.answeredBy:0;
-  let why=first>0?note.why:null;
-  for(let i=first;;i++){
-    // A later task skips a resting model here (continue), and swaps the input for a model that was not asked first.
+  let why=first>0?note.why:null,last=null;
+  for(let i=first;i<models.length;i++){
+    // A swap of the input for a model that was not asked first comes here in a later task.
+    const rest=note?.acted?null:resting(models[i]);
+    if(rest&&models.slice(i+1).some(spare=>!resting(spare))){
+      if(i===0)why=rest.why;
+      continue;
+    }
     try{
       const text=await callOnce({...call,config:models[i],...(i>0?{fallbackFrom:{model:modelName(config),why:why??''}}:{})});
+      coolOff.delete(coolKey(models[i]));
       if(note){note.acted=true;note.answeredBy=i;note.why=why;}
       return text;
     }catch(e){
-      if(note?.acted||i+1>=models.length||!fallsBack(e))throw e;
+      const ms=coolOffMs(e);
+      if(ms!==null)coolOff.set(coolKey(models[i]),{until:Date.now()+ms,why:fallbackWhy(e)});
+      last=e;
+      if(note?.acted||!fallsBack(e))throw e;
       if(i===0)why=fallbackWhy(e);
     }
   }
+  throw last;
 }
 async function callOnce({instructions,input,maxTokens,config,temperature=null,botId=null,fallbackFrom=null,images=[]}){
   const from=fallbackFrom?{fallbackFrom}:{};

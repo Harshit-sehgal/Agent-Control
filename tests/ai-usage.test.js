@@ -1,8 +1,11 @@
-import test from 'node:test';
+import test, {beforeEach} from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import {complete, executeCustomBot, usageOf, fallsBack} from '../src/ai.js';
+import {complete, executeCustomBot, usageOf, fallsBack, clearCoolOff} from '../src/ai.js';
 import {meterTurn, turnNote, fallbacksOf} from '../src/usage.js';
+
+// A stub's port can be handed out again to a later test, and a provider that failed must not rest into it.
+beforeEach(() => clearCoolOff());
 
 // Usage parsing per wire, the prompt-cache markers, and the one fallback call, each driven against a loopback
 // provider so the request body and the response shape are the real ones.
