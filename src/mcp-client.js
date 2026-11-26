@@ -14,7 +14,7 @@
  * value, the owner's secret, is removed from every error before it leaves.
  */
 import {fail} from '../shared/errors.js';
-import {enqueueAgentTask, failAgentTasks} from './agent.js';
+import {agentOnline, chooseDevice, enqueueAgentTask, failAgentTasks, missingFeatureLine} from './agent.js';
 import {assertLocalOrPublic, guardedFetch} from './reach-guard.js';
 import {PROTOCOL_VERSION, MAX_TOOLS, MAX_RESULT_CHARS, initializeRequest, initializedNotification, toolsListRequest, toolsCallRequest, rpcResult, cleanTools, readTools, resultText} from '../shared/mcp-protocol.js';
 
@@ -158,25 +158,28 @@ export async function mcpCall(target, tool, args = {}, options = {}) {
 }
 
 // --- a stdio server, through the paired local agent ------------------------------------------------------
-const ONLINE_MS = 180000; // the window the agent list calls "online"
 const AGENT_WAIT_MS = 90000;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const problem = (message, status, code) => Object.assign(new Error(message), {status, code});
 
-/** The agent to use: paired, not revoked, allowed to run MCP servers and seen lately. */
-function pickAgent(store, nowMs = Date.now()) {
-  const rows = store.all('SELECT * FROM agents WHERE revoked_at IS NULL ORDER BY last_seen_at DESC');
-  if (!rows.length) throw problem('No computer is connected for an MCP server that runs on your computer. A server started on your own computer connects it by itself; otherwise pair one in Settings → Local agents.', 422, 'no-agent');
-  const may = rows.filter(row => { try { return JSON.parse(row.permissions || '[]').includes('mcp.call'); } catch { return false; } });
-  if (!may.length) throw problem('Your paired agent is not allowed to run MCP servers. Allow mcp.call for it, then try again.', 422, 'no-permission');
-  const live = may.find(row => row.last_seen_at && Date.parse(row.last_seen_at) > nowMs - ONLINE_MS);
-  if (!live) throw problem('Your computer\'s agent is offline. A server on your own computer restarts it within a few seconds; on another machine, start it there (`node agent/agent.mjs run`), then try again.', 422, 'agent-offline');
-  return live;
+/** The computer to use, from the one chooser (`chooseDevice`): the pinned one (`deviceId`), else the most recently seen
+ * that may run MCP servers, reports every name in `needs` and is online. */
+function pickAgent(store, {deviceId = null, needs = []} = {}) {
+  const found = chooseDevice(store, {kind: 'mcp.call', deviceId, needs});
+  if (found.agent) return found.agent;
+  const says = {
+    'no-agent': 'No computer is connected for an MCP server that runs on your computer. A server started on your own computer connects it by itself; otherwise pair one in Settings → Local agents.',
+    'no-permission': 'Your paired agent is not allowed to run MCP servers. Allow mcp.call for it, then try again.',
+    'agent-offline': 'Your computer\'s agent is offline. A server on your own computer restarts it within a few seconds; on another machine, start it there (`node agent/agent.mjs run`), then try again.',
+    'not-pinned': 'This bot is set to use a computer that is not available or may not run MCP servers. Choose another computer on the bot\'s profile, or set it to any computer.',
+    'missing-feature': missingFeatureLine(found.feature),
+  }[found.reason];
+  throw problem(says, 422, found.reason);
 }
 
 /** One `mcp.call` task for the agent, and its answer. The command that runs is in the agent's own config. */
-async function viaAgent(target, {op, tool, args}, {timeoutMs = AGENT_WAIT_MS, pollMs = 250} = {}) {
-  const device = pickAgent(target.store);
+async function viaAgent(target, {op, tool, args}, {timeoutMs = AGENT_WAIT_MS, pollMs = 250, needs = []} = {}) {
+  const device = pickAgent(target.store, {deviceId: target.deviceId ?? null, needs});
   // The agent stops its server before this side stops waiting, leaving room for pickup and the report back.
   const agentMs = Math.max(2000, Math.min(60000, timeoutMs - 45000));
   // `notAfter` is when this side stops waiting: a device that picks the task up later skips it instead of running a call nobody will read.
@@ -195,8 +198,7 @@ async function viaAgent(target, {op, tool, args}, {timeoutMs = AGENT_WAIT_MS, po
       throw problem('The paired agent returned an answer this app could not read.', 502, 'agent-failed');
     }
     // A laptop that sleeps or an agent that is killed stops beating: give up now, not at the end of the wait.
-    const seen = target.store.get('SELECT last_seen_at FROM agents WHERE id=?', device.id)?.last_seen_at;
-    if (!seen || Date.parse(seen) <= Date.now() - ONLINE_MS) {
+    if (!agentOnline(target.store.get('SELECT last_seen_at,paired_at FROM agents WHERE id=?', device.id))) {
       failAgentTasks(target.store, [task.id], 'The computer went offline before the MCP server answered.');
       throw problem(`Your computer went offline while running the MCP server "${target.server}". Start the app on it again, then retry.`, 503, 'agent-offline');
     }

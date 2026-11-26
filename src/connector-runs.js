@@ -12,6 +12,7 @@ import {logActivity} from '../shared/activity-log.js';
 import {useConnector} from './connector-use.js';
 import {holdSend} from './held-sends.js';
 import {argsHash, connectorIdentity} from '../shared/connectors.js';
+import {pinnedDevice} from '../shared/bot-settings.js';
 
 /** Total a run keeps of what its connectors answered. */
 const MAX_PAGE_CHARS = 5000;
@@ -61,7 +62,7 @@ export async function runConnectorCalls(store, runId, {say, now = () => new Date
       return Boolean(stored);
     })) return false;
     else {
-      try { outcome = call.hold ? await holdSend(store, connector, call) : await useConnector(store, connector, call.tool, call.args); }
+      try { outcome = call.hold ? await holdSend(store, connector, call) : await useConnector(store, connector, call.tool, call.args, {deviceId: pinnedDevice(state, call.botId)}); }
       catch (error) { outcome = {ok: false, unreachable: true, text: cleanText(error?.message, 300) || 'The connector failed.'}; }
     }
     results.push({call, outcome});

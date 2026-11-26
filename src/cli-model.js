@@ -13,9 +13,9 @@
  * on an answer nobody is waiting for.
  */
 import {cliEngineById, LOCAL_CLI_KIND} from '../shared/ai-presets.js';
-import {enqueueAgentTask, failAgentTasks, readAgentCli} from './agent.js';
+import {pinnedDevice} from '../shared/bot-settings.js';
+import {agentOnline, chooseDevice, enqueueAgentTask, failAgentTasks, missingFeatureLine, readAgentCli} from './agent.js';
 
-const ONLINE_MS = 180000; // the same window the agent list calls "online"
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 /** How long a turn waits for the agent in all: pickup (one poll interval),
@@ -27,16 +27,19 @@ export const cliWaitMs = () => {
 
 const problem = (message, status, code, extra = {}) => Object.assign(new Error(message), {status, code, ...extra});
 
-/** The agent to use: paired, not revoked, holding model.run and seen lately.
- * Throws the sentence that says what to do when there is none. */
-function pickAgent(store, spec, nowMs = Date.now()) {
-  const rows = store.all('SELECT * FROM agents WHERE revoked_at IS NULL ORDER BY last_seen_at DESC');
-  if (!rows.length) throw problem(`No computer is connected to run \`${spec.binary}\`. A server started on your own computer connects it by itself; otherwise pair one in Settings → Local agents. Then run \`${spec.binary}\` there once to sign in.`, 422, 'no-agent');
-  const may = rows.filter(row => { try { return JSON.parse(row.permissions || '[]').includes('model.run'); } catch { return false; } });
-  if (!may.length) throw problem('Your paired agent is not allowed to run models. Allow model.run for it under Settings, then try again.', 422, 'no-permission');
-  const live = may.find(row => row.last_seen_at && Date.parse(row.last_seen_at) > nowMs - ONLINE_MS);
-  if (!live) throw problem('Your computer\'s agent is offline. A server on your own computer restarts it within a few seconds; on another machine, start it there (`node agent/agent.mjs run`), then try again.', 422, 'agent-offline');
-  return live;
+/** The computer to use, from the one chooser (`chooseDevice`): the bot's pinned one, else the most recently seen that
+ * may run models, reports every name in `needs` and is online. Throws the sentence that says what to do when there is none. */
+function pickAgent(store, spec, {deviceId = null, needs = [], nowMs = Date.now()} = {}) {
+  const found = chooseDevice(store, {kind: 'model.run', deviceId, needs, nowMs});
+  if (found.agent) return found.agent;
+  const says = {
+    'no-agent': `No computer is connected to run \`${spec.binary}\`. A server started on your own computer connects it by itself; otherwise pair one in Settings → Local agents. Then run \`${spec.binary}\` there once to sign in.`,
+    'no-permission': 'Your paired agent is not allowed to run models. Allow model.run for it under Settings, then try again.',
+    'agent-offline': 'Your computer\'s agent is offline. A server on your own computer restarts it within a few seconds; on another machine, start it there (`node agent/agent.mjs run`), then try again.',
+    'not-pinned': 'This bot is set to use a computer that is not available or may not run models. Choose another computer on the bot\'s profile, or set it to any computer.',
+    'missing-feature': missingFeatureLine(found.feature),
+  }[found.reason];
+  throw problem(says, 422, found.reason);
 }
 
 /** Is this engine signed in on the paired machine? Read from what the agent's
@@ -47,7 +50,7 @@ export function cliSignIn(store, engine, nowMs = Date.now()) {
   const spec = cliEngineById(engine);
   if (!spec) throw problem('Unknown engine. Use claude or codex.', 400, 'bad-request');
   let device;
-  try { device = pickAgent(store, spec, nowMs); }
+  try { device = pickAgent(store, spec, {nowMs}); }
   catch (error) { return {ok: false, status: error.code, agent: null, message: error.message, checkedAt: null}; }
   const reported = readAgentCli(store, device.id);
   const status = ['signed-in', 'signed-out', 'missing'].includes(reported?.[spec.id]) ? reported[spec.id] : 'unknown';
@@ -62,11 +65,11 @@ export function cliSignIn(store, engine, nowMs = Date.now()) {
 
 /** Run one prompt on the paired agent and return the reply text. */
 /** `withUsage` answers `{text, usage}` instead of the text, with the tokens the CLI reported (or null). */
-export async function runOnAgent(store, {engine, model = '', effort = '', instructions = '', input, images = [], label = '', waitMs = cliWaitMs(), pollMs = 250, botId = null, providerId = null, withUsage = false}) {
+export async function runOnAgent(store, {engine, model = '', effort = '', instructions = '', input, images = [], label = '', waitMs = cliWaitMs(), pollMs = 250, botId = null, providerId = null, withUsage = false, needs = []}) {
   const spec = cliEngineById(engine);
   if (!spec) throw problem('Unknown engine. Use claude or codex.', 400, 'bad-request');
   const meta = {engine: spec.id, botId, providerId, model: model || null};
-  const device = pickAgent(store, spec);
+  const device = pickAgent(store, spec, {deviceId: botId ? pinnedDevice(store.read(), botId) : null, needs});
   // The agent stops its CLI before the server stops waiting, leaving room for the
   // agent's own pickup delay and the report back.
   const timeoutMs = Math.max(5000, waitMs - 45000);
@@ -79,8 +82,7 @@ export async function runOnAgent(store, {engine, model = '', effort = '', instru
     if (row.status === 'done') return readResult(row.result, spec, meta, withUsage);
     if (row.status === 'failed') throw problem(`The paired agent could not run the model: ${row.error || 'it reported a failure'}`, 502, 'agent-failed', meta);
     // A laptop that sleeps or an agent that is killed stops beating: give up now, not at the end of the wait.
-    const seen = store.get('SELECT last_seen_at FROM agents WHERE id=?', device.id)?.last_seen_at;
-    if (!seen || Date.parse(seen) <= Date.now() - ONLINE_MS) {
+    if (!agentOnline(store.get('SELECT last_seen_at,paired_at FROM agents WHERE id=?', device.id))) {
       failAgentTasks(store, [task.id], 'The computer went offline before the model answered.');
       throw problem(`Your computer went offline while running ${label || spec.label}. Start the app on it again, then retry.`, 503, 'agent-offline', meta);
     }
