@@ -230,5 +230,20 @@ work should be added as a fresh section.
 - [x] (Phase 9, polish) Big photos and IPv4-only hosts: the composer sends a photo over 5 MB as a smaller JPEG (`shrinkTarget` in `shared/attachments.js`) so the model sees it; `guardedFetch` tries every checked address in turn, so a provider whose first answer is IPv6 still connects from an IPv4-only VM.
 - [x] (Phase 9, connectors) Every app is a real MCP server: Gmail, Google Drive and Google Calendar are Google's own MCP servers, and they, Slack and GitHub sign in in one tap with an OAuth client from `.env` (`envClient` in `src/mcp-oauth.js`; Google gets offline access and no `resource`; a token with no end and no refresh token lasts until refused). The Google Cloud steps, redirect copy and client form are gone from Connectors, and nothing new connects by a website sign-in. Model picker: a search bar over long model lists.
 - [x] (Phase 10, daily use) A health watch that tells the owner, once and urgently, when a paired computer goes quiet while a schedule waits, background work runs late, a scheduled task is signed out of a site, or the nightly backup stops (`src/health-watch.js`, `HEALTH_BACKUP_DIR`); an optional per-site daily page limit in Settings → Limits (`perSite`, `state.siteVisits`); Share to Agent Control from the phone's Share sheet, which only fills the lead bot's message box (`share_target`, `sharedDraft`); a keyboard shortcuts sheet on ? and Settings on comma (`shortcutRows`). Tests: `tests/health-watch.test.js`, `tests/site-limit.test.js`, `tests/share-target.test.js`, `tests/shortcuts.test.js`, two usability smoke scenarios.
-- [x] (Phase 10, daily use) Watch and tell: a bot checks a page every hour, 6 hours or day and the owner hears once when it changes or chosen words appear, compared by code and never by a model, under the watch's own key so the bot's chat is never tainted; set up and managed on a bot's Schedule page (`shared/watches.js`, `src/watches.js`, `/api/watches`). Copy and Teach on every bot reply keep a correction as that bot's rule.
+- [x] (Phase 10, daily use) Watch and tell: a bot checks a page every hour, 6 hours or day and the owner hears once when it changes or chosen words appear, compared by code and never by a model, under the watch's own key so the bot's chat is never tainted; set up and managed on a bot's Schedule page (`shared/watches.js`, `src/watches.js`, `/api/watches`). A correction in a bot's chat, or a 👍 / 👎 from the reply popover, reaches the next memory pass, which keeps lasting preferences as that bot's rules.
 - [ ] **Move the server from the laptop to the Oracle VM** (it runs on the laptop first)
+
+## Phase AA — goals, services and self-organising teams (design: `docs/superpowers/specs/2026-11-26-goals-services-teams-design.md`)
+- [ ] 0. Typed-text leak: no field `value` in the control list, click labels or `riskGuard` reasons; masked Password and Code fields with `secret` in both takeover UIs; `secret` refused over plain HTTP
+- [ ] 1. Devices and parallel work: one `pickDevice` with pinning, per-tab queues, a takeover parks one tab, a device worker pool
+- [ ] 2. Browser accounts: a context per account with encrypted cookie jars, stamped at four hops, never in the server runtime; tabs, idle reaper, keeper tabs, session check, profile fallback
+- [ ] 3. Sign-in from the phone: a server-posted card with push, parked runs that resume after hand back
+- [ ] 4. Connector accounts: several connections per app, pinned per bot
+- [ ] 5. Timers, outbox and lanes: a `timer` task kind, exact-payload approval for browser actions, batch cards, claimed sends with `unknown`, the pacer, every approval in the activity log
+- [ ] 6. Reading: plain first, content types, safe redirects, `look` and images, images on handoffs
+- [ ] 7. Records and team notes: a records table with stats, a team notebook with outside marks
+- [ ] 8. Goals, ceilings and budgets: goals from tracked tasks, per-goal daily counting and pause, the stand-up
+- [ ] 9. Blueprints: validation, dry run, free / power / never, the outside hold, a server apply route, versions and auto-revert
+- [ ] 10. Services and skills: profiles, the action vocabulary, the access ladder, confirmed rule summaries, skills
+- [ ] 11. Capability card per bot
+- [ ] 12. Goal templates
