@@ -26,22 +26,22 @@
  *   make itself the primary bot, save a rule without the owner's tap, or reach a route the owner could not.
  *
  * Pure and browser-safe: the server reads replies with it and the UI paints the card from it. */
-import {cleanText, validHttpUrl} from './core.js?v=bc0163e01c';
-import {cleanEffort, CLI_MODELS} from './ai-presets.js?v=bc0163e01c';
-import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=bc0163e01c';
-import {controlFence} from './reply-blocks.js?v=bc0163e01c';
-import {companyBots, primaryOf} from './company.js?v=bc0163e01c';
-import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices, isAskAction} from './asks.js?v=bc0163e01c';
-import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=bc0163e01c';
-import {grantWhat, payAlwaysText} from './ui-asks.js?v=bc0163e01c';
-import {COLOR_NAMES} from './ui-kit.js?v=bc0163e01c';
-import {SHAPES} from './company.js?v=bc0163e01c';
-import {limitsOf, BACKSTOP} from './limits.js?v=bc0163e01c';
-import {APPS, appById} from './app-catalog.js?v=bc0163e01c';
-import {PRESETS, presetOf} from './presets.js?v=bc0163e01c';
-import {titleOf as templateTitle} from './templates.js?v=bc0163e01c';
-import {briefingSchedule} from './briefing.js?v=bc0163e01c';
-import {monthByBot, tokensOf, short as shortCount} from './usage.js?v=bc0163e01c';
+import {cleanText, validHttpUrl} from './core.js?v=3cae02add8';
+import {cleanEffort, CLI_MODELS, fallbackPicks} from './ai-presets.js?v=3cae02add8';
+import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js?v=3cae02add8';
+import {controlFence} from './reply-blocks.js?v=3cae02add8';
+import {companyBots, primaryOf} from './company.js?v=3cae02add8';
+import {GRANT_LABELS, GRANT_CHOICES, ASK_ACTIONS, askText, pendingAsks, scopeOf, grantChoices, isAskAction} from './asks.js?v=3cae02add8';
+import {botSettings, validateBotSettings, groupSettings, validateGroupSettings, BOT_DEFAULTS, GROUP_DEFAULTS} from './bot-settings.js?v=3cae02add8';
+import {grantWhat, payAlwaysText} from './ui-asks.js?v=3cae02add8';
+import {COLOR_NAMES} from './ui-kit.js?v=3cae02add8';
+import {SHAPES} from './company.js?v=3cae02add8';
+import {limitsOf, BACKSTOP} from './limits.js?v=3cae02add8';
+import {APPS, appById} from './app-catalog.js?v=3cae02add8';
+import {PRESETS, presetOf} from './presets.js?v=3cae02add8';
+import {titleOf as templateTitle} from './templates.js?v=3cae02add8';
+import {briefingSchedule} from './briefing.js?v=3cae02add8';
+import {monthByBot, tokensOf, short as shortCount} from './usage.js?v=3cae02add8';
 
 export const SETUP_ACTIONS = ['model', 'job', 'rename', 'settings', 'team', 'rule', 'schedule', 'remove', 'open', 'signin', 'pause', 'limits', 'basics', 'forget', 'disconnect', 'thread', 'reconnect', 'connect', 'memory', 'template', 'preset', 'briefing'];
 /** The bot settings a bot may propose. Not the primary role, the browser approval mode, or layout (pins, order). */
@@ -669,7 +669,12 @@ export function workspaceBrief(state, {agents = [], connectors = [], speaker = n
     templates: (state?.templates || []).slice(0, 20).map(t => `${t.title}: ${short80(t.text)}`),
     preset: ({careful: 'Careful', balanced: 'Balanced', handsOff: 'Hands-off'})[presetOf(state)] || 'Custom (the owner set rules by hand)',
     briefing: (() => { const on = briefingSchedule(state); return on ? `on, ${on.when}` : 'off'; })(),
-    fallbackModel: ai.fallback?.providerId ? `${label(ai.fallback.providerId) || 'a removed model'}${ai.fallback.model ? ` · ${ai.fallback.model}` : ''} answers when a bot's model is down, busy or out of credit` : 'none',
+    fallbackModel: (() => {
+      const picks = fallbackPicks(ai);
+      if (!picks.length) return 'none';
+      const names = picks.map(f => `${label(f.providerId) || 'a removed model'}${f.model ? ` · ${f.model}` : ''}`).join(', then ');
+      return `${names} ${picks.length > 1 ? 'answer in turn' : 'answers'} when a bot's model is down, busy or out of credit`;
+    })(),
     usageThisMonth: (() => {
       const m = monthByBot(state, new Map(companyBots(state).map(b => [b.id, b.name])));
       const day = Object.values(state?.usage?.days?.[new Date().toISOString().slice(0, 10)] || {});

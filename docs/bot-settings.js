@@ -7,11 +7,11 @@
  * off, but never grant an action (that is `contracts.js` permissions) or lift
  * the hard step cap.
  */
-import {cleanText} from './core.js?v=bc0163e01c';
-import {fail} from './errors.js?v=bc0163e01c';
-import {BACKSTOP} from './limits.js?v=bc0163e01c';
-import {TINT_COUNT} from './ui-kit.js?v=bc0163e01c';
-import {SHAPES} from './company.js?v=bc0163e01c';
+import {cleanText} from './core.js?v=3cae02add8';
+import {fail} from './errors.js?v=3cae02add8';
+import {BACKSTOP} from './limits.js?v=3cae02add8';
+import {TINT_COUNT} from './ui-kit.js?v=3cae02add8';
+import {SHAPES} from './company.js?v=3cae02add8';
 
 export const REPLY_LENGTHS = {short: 500, medium: 1500, long: 3000};
 export const ROUTING_MODES = ['pipeline', 'mentions', 'everyone'];

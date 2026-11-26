@@ -301,7 +301,7 @@ test('one consolidation call rewrites the rulebook and the chat recap', async ()
   assert.equal(result.skipped, false);
   assert.match(seen.instructions, /JSON only/);
   assert.match(seen.input, /Always cite a source/);
-  assert.deepEqual(seen.config, {model: 'm'});
+  assert.deepEqual(seen.config, {model: 'm', fallbacks: []});
   const book = store.state().memory.rulebooks['env:m'];
   assert.deepEqual(book.rules.map(rule => rule.text), ['Always cite a source.', 'Prefer British spelling.']);
   assert.equal(book.pending.length, 0);

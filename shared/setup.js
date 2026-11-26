@@ -27,7 +27,7 @@
  *
  * Pure and browser-safe: the server reads replies with it and the UI paints the card from it. */
 import {cleanText, validHttpUrl} from './core.js';
-import {cleanEffort, CLI_MODELS} from './ai-presets.js';
+import {cleanEffort, CLI_MODELS, fallbackPicks} from './ai-presets.js';
 import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js';
 import {controlFence} from './reply-blocks.js';
 import {companyBots, primaryOf} from './company.js';
@@ -669,7 +669,12 @@ export function workspaceBrief(state, {agents = [], connectors = [], speaker = n
     templates: (state?.templates || []).slice(0, 20).map(t => `${t.title}: ${short80(t.text)}`),
     preset: ({careful: 'Careful', balanced: 'Balanced', handsOff: 'Hands-off'})[presetOf(state)] || 'Custom (the owner set rules by hand)',
     briefing: (() => { const on = briefingSchedule(state); return on ? `on, ${on.when}` : 'off'; })(),
-    fallbackModel: ai.fallback?.providerId ? `${label(ai.fallback.providerId) || 'a removed model'}${ai.fallback.model ? ` · ${ai.fallback.model}` : ''} answers when a bot's model is down, busy or out of credit` : 'none',
+    fallbackModel: (() => {
+      const picks = fallbackPicks(ai);
+      if (!picks.length) return 'none';
+      const names = picks.map(f => `${label(f.providerId) || 'a removed model'}${f.model ? ` · ${f.model}` : ''}`).join(', then ');
+      return `${names} ${picks.length > 1 ? 'answer in turn' : 'answers'} when a bot's model is down, busy or out of credit`;
+    })(),
     usageThisMonth: (() => {
       const m = monthByBot(state, new Map(companyBots(state).map(b => [b.id, b.name])));
       const day = Object.values(state?.usage?.days?.[new Date().toISOString().slice(0, 10)] || {});

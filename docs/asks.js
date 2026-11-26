@@ -26,11 +26,11 @@
  * Pure and browser-safe, like the other shared modules: the server and the
  * Pages demo share every rule here.
  */
-import {fail} from './errors.js?v=bc0163e01c';
-import {cleanText} from './core.js?v=bc0163e01c';
-import {logActivity} from './activity-log.js?v=bc0163e01c';
-import {MAX_CONTEXT_MESSAGES} from './bot-settings.js?v=bc0163e01c';
-import {botKey} from './memory.js?v=bc0163e01c';
+import {fail} from './errors.js?v=3cae02add8';
+import {cleanText} from './core.js?v=3cae02add8';
+import {logActivity} from './activity-log.js?v=3cae02add8';
+import {MAX_CONTEXT_MESSAGES} from './bot-settings.js?v=3cae02add8';
+import {botKey} from './memory.js?v=3cae02add8';
 
 /** What every bot may do without a grant. */
 export const BASIC_KIT = ['bot.ask', 'bot.create', 'schedule.set'];
@@ -266,6 +266,8 @@ function runReadOutside(state, run) {
   if (run.outsideInput === true || run.readPrivate === true || run.connectorPage) return true;
   if (Array.isArray(run.readFrom) && run.readFrom.length) return true;
   if (run.readPages === true || run.outsideMemory === true) return true;
+  // A bot on a fallback model searched this chat's older lines and a hit was outside text (`search_chat`).
+  if (run.readOldChat === true) return true;
   return (state?.browserRequests || []).some(r => r?.status === 'done' && r.runId === run.id);
 }
 
@@ -317,7 +319,7 @@ function feedbackCarriesOutside(state, item) {
 }
 
 /** Does any bot reply among `messages` come from a run that read outside content? */
-function messagesCarryOutside(state, messages, {except = null} = {}) {
+export function messagesCarryOutside(state, messages, {except = null} = {}) {
   const runs = Array.isArray(state?.groupRuns) ? state.groupRuns : [];
   const replies = (Array.isArray(messages) ? messages : []).filter(m => m?.role === 'bot' && !(except && m.runId === except));
   if (replies.some(m => m.outside === true)) return true;

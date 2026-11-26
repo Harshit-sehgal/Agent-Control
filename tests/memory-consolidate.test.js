@@ -129,3 +129,13 @@ test('a book forgotten while the model is answering is not resurrected by the an
   assert.equal(second.skipped, true);
   assert.equal(unreadable.state.memory.rulebooks.k, undefined);
 });
+
+test('a tidy-up pass never runs on a spare model: the config it is handed has no fallbacks', async () => {
+  const seen = [];
+  const executor = async (instructions, input, cfg) => { seen.push(cfg); return answer(); };
+  const spare = {...config, model: 'spare'};
+  await maybeConsolidate(bookStore(), {key: 'k', config: {...config, fallbacks: [spare]}, executor});
+  await consolidateModel(bookStore(), {key: 'k', config: {...config, fallbacks: [spare]}, executor});
+  assert.equal(seen.length, 2);
+  for (const cfg of seen) { assert.deepEqual(cfg.fallbacks, []); assert.equal(cfg.model, 'test-model'); }
+});

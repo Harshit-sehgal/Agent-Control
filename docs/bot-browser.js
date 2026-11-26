@@ -20,12 +20,12 @@
  * X and Twitter work like any other site: a bot may read, click and type there, and a click on Post asks
  * unless the owner set Always allow for posting on that site.
  */
-import {cleanText, validHttpUrl} from './core.js?v=bc0163e01c';
-import {fail} from './errors.js?v=bc0163e01c';
-import {decide, createAsk, scopeOf, declinedNeed, outsideRead, keepOutsideMarks} from './asks.js?v=bc0163e01c';
-import {controlFence} from './reply-blocks.js?v=bc0163e01c';
-import {BACKSTOP, pagesCap, roundsCap, siteOf, siteCapLeft, countSitePage, limitsOf} from './limits.js?v=bc0163e01c';
-import {appForHost} from './app-catalog.js?v=bc0163e01c';
+import {cleanText, validHttpUrl} from './core.js?v=3cae02add8';
+import {fail} from './errors.js?v=3cae02add8';
+import {decide, createAsk, scopeOf, declinedNeed, outsideRead, keepOutsideMarks} from './asks.js?v=3cae02add8';
+import {controlFence} from './reply-blocks.js?v=3cae02add8';
+import {BACKSTOP, pagesCap, roundsCap, siteOf, siteCapLeft, countSitePage, limitsOf} from './limits.js?v=3cae02add8';
+import {appForHost} from './app-catalog.js?v=3cae02add8';
 
 /** The most page text one model turn carries (the pages of a round together). */
 export const MAX_PAGE_CHARS = 24000;
@@ -542,7 +542,7 @@ export function runPrivateHosts(state, runId, chatKey = null) {
     .map(r => hostOf(r.result?.finalUrl || r.url)).filter(host => PRIVATE_HOSTS.test(host) || signedIn.has(host)));
 }
 
-export function recordBrowserRequests(state, {bot, groupId, chatKey, output, depth = 0, skipUrls = [], runId = null, unattended = false, closed = false, declined = [], makeId = () => crypto.randomUUID(), now = new Date().toISOString()}) {
+export function recordBrowserRequests(state, {bot, groupId, chatKey, output, depth = 0, skipUrls = [], runId = null, unattended = false, closed = false, declined = [], outsideChat = false, makeId = () => crypto.randomUUID(), now = new Date().toISOString()}) {
   depth = Math.max(0, Math.min(MAX_BROWSER_DEPTH, Number(depth) || 0));
   const rounds = roundsCap(state), perReply = pagesCap(state);
   const all = parseBrowserRequests(output), text = stripBrowserBlocks(output), lines = [], records = [], asks = [];
@@ -623,7 +623,7 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
     if (no) { say(`${bot.name} asked to ${describe(item.request)}, but you declined that in this task, so it was not asked again.`); invalid.push(`the owner declined ${no.action === 'browser.use' ? 'opening' : no.action} ${hostOf(no.target)} in this task; do not ask for it again.`); continue; }
     // Per page: every site the request reaches that is not one of the run's private hosts asks, including one a
     // `navigate` step opens after a private first page.
-    const decision = decide(state, bot, needs, {readPrivate: need => guarded && need.action === BROWSER_PERMISSION && !privateHosts.has(hostOf(need.target)), outside: run?.outsideInput === true, tainted: guarded || outsideRead(state, {runId, chatKey, botId: bot.id, outsideInput: run?.outsideInput === true})});
+    const decision = decide(state, bot, needs, {readPrivate: need => guarded && need.action === BROWSER_PERMISSION && !privateHosts.has(hostOf(need.target)), outside: run?.outsideInput === true, tainted: guarded || outsideChat || outsideRead(state, {runId, chatKey, botId: bot.id, outsideInput: run?.outsideInput === true})});
     if (decision.verdict === 'deny') { say(`${bot.name} asked to ${describe(item.request)}. ${decision.message}`); continue; }
     // The owner's per-site daily limit (Settings → Limits): past it, nothing more opens on that site today.
     const site = siteOf(item.request.url);
