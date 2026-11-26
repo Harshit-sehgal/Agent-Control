@@ -26,11 +26,11 @@
  * Pure and browser-safe, like the other shared modules: the server and the
  * Pages demo share every rule here.
  */
-import {fail} from './errors.js?v=b65971fe47';
-import {cleanText} from './core.js?v=b65971fe47';
-import {logActivity} from './activity-log.js?v=b65971fe47';
-import {MAX_CONTEXT_MESSAGES} from './bot-settings.js?v=b65971fe47';
-import {botKey} from './memory.js?v=b65971fe47';
+import {fail} from './errors.js?v=08ab16542d';
+import {cleanText} from './core.js?v=08ab16542d';
+import {logActivity} from './activity-log.js?v=08ab16542d';
+import {MAX_CONTEXT_MESSAGES} from './bot-settings.js?v=08ab16542d';
+import {botKey} from './memory.js?v=08ab16542d';
 
 /** What every bot may do without a grant. */
 export const BASIC_KIT = ['bot.ask', 'bot.create', 'schedule.set'];
@@ -285,7 +285,35 @@ export function keepOutsideMarks(state, {requests = [], runs = []} = {}) {
     for (const log of logs) for (const message of Array.isArray(log) ? log : []) {
       if (message?.role === 'bot' && message.runId === run.id) message.outside = true;
     }
+    // A 👍 or 👎 on one of its replies keeps that reply's text for the next memory pass, so it keeps the mark too.
+    for (const item of feedbackItems(state?.memory?.rulebooks)) if (item.runId === run.id) item.outside = true;
   }
+}
+
+/** Every correction and liked reply waiting in any bot's book for its next memory pass. */
+function feedbackItems(books) {
+  const out = [];
+  for (const book of Object.values(books && typeof books === 'object' ? books : {})) {
+    for (const item of [...(book?.corrections || []), ...(book?.liked || [])]) if (item && typeof item === 'object') out.push(item);
+  }
+  return out;
+}
+
+/** Does one kept correction or liked reply carry outside text? Its reply was marked when it was kept, or the run that
+ * wrote it read outside content. One kept before feedback recorded where its reply came from (no boolean `outside`)
+ * is checked against the stored reply it quotes; when that reply is gone it counts as outside, since nothing says
+ * otherwise. */
+function feedbackCarriesOutside(state, item) {
+  if (item.outside === true) return true;
+  const runs = Array.isArray(state?.groupRuns) ? state.groupRuns : [];
+  if (item.runId && runReadOutside(state, runs.find(r => r?.id === item.runId))) return true;
+  if (typeof item.outside === 'boolean') return false;
+  const quoted = String(item.reply ?? '');
+  if (!quoted) return false;
+  // A kept reply is the stored text cut to a length, so it is the start of the reply it came from.
+  const head = quoted.replace(/…$/, '');
+  const source = (state?.chats?.[item.chat] || []).filter(m => m?.role === 'bot' && String(m.text ?? '').trim().startsWith(head));
+  return !source.length || messagesCarryOutside(state, source);
 }
 
 /** Does any bot reply among `messages` come from a run that read outside content? */
@@ -323,7 +351,10 @@ export function consolidationReadsOutside(state, {key, chatKey = null, messages 
   if (messagesCarryOutside(state, recent)) return true;
   const memory = state?.memory;
   if (chatKey && memory?.chats?.[chatKey]?.outside === true) return true;
-  return Boolean(memory?.rulebooks?.[key]?.rules?.some(rule => rule?.outside === true));
+  const book = memory?.rulebooks?.[key];
+  if (book?.rules?.some(rule => rule?.outside === true)) return true;
+  // The pass is also sent the corrections and liked replies waiting in the book, which may come from another chat.
+  return feedbackItems({book}).some(item => feedbackCarriesOutside(state, item));
 }
 
 function threadCarriesOutside(state, runId) {

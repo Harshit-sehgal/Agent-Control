@@ -5,7 +5,7 @@
  * which of those a person gets, what text a quote, an ask and a new thread send, which question a reply answered,
  * how message pins are kept (per person, `ac-msg-pins`), where the popover sits, and which reply carries the
  * one-time hint. The pins strip and the hint are drawn here too, so the chat view needs no import of the popover. */
-import {esc, plain, icon, stamp} from './ui-kit.js?v=b65971fe47';
+import {esc, plain, icon, stamp} from './ui-kit.js?v=08ab16542d';
 
 export const MAX_MSG_PINS = 20;
 /** Per-person keys (saveLocal, never sent): pinned replies per chat, and whether the hold tip was seen. */
@@ -44,6 +44,15 @@ export function quoteText(text) {
 export const askText = (quoted, words) => [quoted, String(words ?? '').trim()].filter(Boolean).join('\n\n');
 /** What Start a thread opens with: the quote, then the owner's words or a plain ask to follow up. */
 export const threadText = (quoted, words) => askText(quoted, String(words ?? '').trim() || 'Follow up on this.');
+
+/** Run one popover row. Closing the popover removes its Ask about this box, so what was typed there is read first and
+ * handed to the action (Start a thread opens with it). `typed()` reads the box, `close()` closes the popover, and
+ * `run(ctx, {typed})` is the row's action. */
+export async function runMenuAction(ctx, {typed = () => '', close = () => {}, run}) {
+  const words = String(typed() ?? '');
+  close();
+  return run(ctx, {typed: words});
+}
 
 /** The owner line a reply answered: the nearest one before it in time (the browser can hold a sent line after the
  * run's lines that synced in first, so the list is put in time order as the feed is). A thread's helpers speak in

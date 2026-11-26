@@ -8,13 +8,13 @@
  * It closes on Escape, a press outside, a real scroll of the chat (not the one a phone keyboard causes when the ask
  * box gets focus), a route change, and after an action; focus goes back to the reply. On open the first button has
  * focus, never the ask box, so a phone keyboard does not jump up uninvited. */
-import {esc, icon} from './ui-kit.js?v=b65971fe47';
-import {menuItems, showFeedback, quoteText, askText, threadText, askedBefore, togglePin, isPinned, placePopover, PINS_MSG_KEY, HINT_KEY} from './reply-menu.js?v=b65971fe47';
-import {store, conversation, findBot, canWrite, api, sync, loadLocal, saveLocal, changed, onChange} from './ui-store.js?v=b65971fe47';
-import {sendChat, startThread, rerun} from './ui-chat.js?v=b65971fe47';
-import {retryTarget} from './ui-model.js?v=b65971fe47';
-import {botSettings} from './bot-settings.js?v=b65971fe47';
-import {toast} from './ui-dialogs.js?v=b65971fe47';
+import {esc, icon} from './ui-kit.js?v=08ab16542d';
+import {menuItems, showFeedback, quoteText, askText, threadText, runMenuAction, askedBefore, togglePin, isPinned, placePopover, PINS_MSG_KEY, HINT_KEY} from './reply-menu.js?v=08ab16542d';
+import {store, conversation, findBot, canWrite, api, sync, loadLocal, saveLocal, changed, onChange} from './ui-store.js?v=08ab16542d';
+import {sendChat, startThread, rerun} from './ui-chat.js?v=08ab16542d';
+import {retryTarget} from './ui-model.js?v=08ab16542d';
+import {botSettings} from './bot-settings.js?v=08ab16542d';
+import {toast} from './ui-dialogs.js?v=08ab16542d';
 
 const REPLY = '#cv-log .cv-bot';
 const HOLD = 420, SLOP = 9, SCROLL_CLOSE = 24, SETTLE_MS = 600;
@@ -136,7 +136,7 @@ const ACTIONS = {
     toast(isPinned(pins, ctx.conv.id, ctx.id) ? 'Pinned. It shows at the top of this chat.' : 'Unpinned.');
     changed('thread');
   },
-  thread: ctx => startThread(threadText(quoteText(ctx.text), document.querySelector('.rmenu [name=ask]')?.value || '')),
+  thread: (ctx, {typed = ''} = {}) => startThread(threadText(quoteText(ctx.text), typed)),
   template: async ctx => {
     await api('/api/templates', 'POST', {text: ctx.asked});
     await sync();
@@ -165,9 +165,9 @@ async function onMenuClick(ev) {
     }
     const run = ACTIONS[what];
     if (!run) return;
-    // Select text hands the reply back for selecting, so focus stays off it.
-    closeReplyMenu({restore: what !== 'select'});
-    await run(ctx);
+    // Select text hands the reply back for selecting, so focus stays off it. What was typed in Ask about this is
+    // read before the popover (and its box) goes.
+    await runMenuAction(ctx, {typed: () => node.querySelector('[name=ask]')?.value || '', close: () => closeReplyMenu({restore: what !== 'select'}), run});
   } catch (error) { toast(error?.message || 'That did not work.', true); }
 }
 
