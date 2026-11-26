@@ -48,7 +48,8 @@ browser tasks, and accounts, workspaces and backup.
   rules learned from it, so Hands-off still asks (even after that run is pruned,
   and for feedback kept before this). A pass that rewords a learned rule keeps
   its id, so Undo still reaches it. A switched-off rule with no long words
-  ("Use USD.", or one not in Latin letters) no longer blocks every new rule.
+  ("Use USD.", or one not in Latin letters) no longer blocks every new rule, and
+  stays off when a pass returns it with other punctuation.
   Start a thread opens with the question typed in Ask about this.
 - **Connectors and subscriptions in Settings.** Settings → Connectors lists, adds,
   refreshes and deletes MCP servers (a web address with optional headers, or the

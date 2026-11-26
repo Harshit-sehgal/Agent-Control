@@ -5,7 +5,7 @@
  * which of those a person gets, what text a quote, an ask and a new thread send, which question a reply answered,
  * how message pins are kept (per person, `ac-msg-pins`), where the popover sits, and which reply carries the
  * one-time hint. The pins strip and the hint are drawn here too, so the chat view needs no import of the popover. */
-import {esc, plain, icon, stamp} from './ui-kit.js?v=08ab16542d';
+import {esc, plain, icon, stamp} from './ui-kit.js?v=69c45d8532';
 
 export const MAX_MSG_PINS = 20;
 /** Per-person keys (saveLocal, never sent): pinned replies per chat, and whether the hold tip was seen. */

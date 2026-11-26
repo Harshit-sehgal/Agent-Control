@@ -140,6 +140,18 @@ test('a switched-off rule with no long words blocks only itself', () => {
   }
 });
 
+test('a switched-off short rule stays off when a pass returns it with other punctuation', () => {
+  for (const [off, back] of [['Use USD.', 'Use USD'], ['use usd', 'Use  USD!'], ['हिंदी में जवाब दो।', 'हिंदी में जवाब दो']]) {
+    const state = {memory: memoryState({}), chats: {}};
+    const book = rulebook(state, key);
+    book.rules = [{id: 'off', text: off, source: 'model', createdAt: NOW, updatedAt: NOW, uses: 0, enabled: false}];
+    mergeConsolidation(state, key, {rules: [back, 'Use EUR.'], summary: ''}, {now: NOW, makeId: () => 'new'});
+    const rules = rulebook(state, key).rules;
+    assert.deepEqual(rules.filter(r => r.enabled !== false).map(r => r.text), ['Use EUR.'], `${back}: only the unrelated rule is learned`);
+    assert.equal(rules.find(r => r.id === 'off').enabled, false, `${back}: the owner's off switch holds`);
+  }
+});
+
 test('Start a thread opens with the question typed before the popover closed', async () => {
   let box = 'Can you turn this into a plan?';
   const order = [];

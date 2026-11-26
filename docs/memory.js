@@ -17,8 +17,8 @@
  * survives even with no AI provider. `mergeConsolidation` applies the result of
  * one model-written consolidation pass. Both are pure and bounded.
  */
-import {cleanText} from './core.js?v=08ab16542d';
-import {botSettings} from './bot-settings.js?v=08ab16542d';
+import {cleanText} from './core.js?v=69c45d8532';
+import {botSettings} from './bot-settings.js?v=69c45d8532';
 
 export const MEMORY_VERSION = 1;
 export const MAX_RULES = 50;
@@ -322,11 +322,16 @@ export function feedbackOn(state, {botId, chat, messageId, kind, note = ''}, {no
 }
 
 const sameItem = (a, b) => a?.at === b?.at && (a?.said ?? a?.reply) === (b?.said ?? b?.reply);
+/** A rule's letters and digits in any script, lower-cased, with punctuation and spacing dropped. */
+const bare = value => normalize(value).replace(/[^\p{L}\p{M}\p{N}]+/gu, ' ').trim();
 /** Two rules say the same thing. A rule with no word long enough to compare ("Use USD.", or one not in Latin
- * letters) only matches the same text: `sameNote` reads an empty side as a match, which would make one short rule
- * the twin of every other. */
+ * letters) only matches the same words, whatever the punctuation ("Use USD" is still "Use USD."): `sameNote` reads an
+ * empty side as a match, which would make one short rule the twin of every other. */
 const alike = (a, b) => {
-  if (!words(a).size || !words(b).size) return normalize(a) === normalize(b);
+  if (!words(a).size || !words(b).size) {
+    const [x, y] = [bare(a), bare(b)];
+    return x || y ? x === y : normalize(a) === normalize(b);
+  }
   return sameNote(a, b) || sameNote(b, a);
 };
 
