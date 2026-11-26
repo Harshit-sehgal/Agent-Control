@@ -9,7 +9,7 @@ import {SqliteStore} from '../src/sqlite-store.js';
 import * as wf from '../shared/workflow.js';
 import {createApp} from '../src/app.js';
 import {browserLive} from '../src/browser-live.js';
-import {SECRET_INPUT_V1, DEVICE_FEATURES, cleanFeatures, hasFeature, UPDATE_DEVICE_LINE} from '../shared/device-features.js';
+import {SECRET_INPUT_V1, BROWSER_ACCOUNTS_V1, DEVICE_FEATURES, neededNow, cleanFeatures, hasFeature, UPDATE_DEVICE_LINE} from '../shared/device-features.js';
 import {mergeView} from '../shared/ui-computer.js';
 
 /* A device says what it can do (`features` on each heartbeat). The one feature Phase 0 relies on is
@@ -20,7 +20,9 @@ const typed = {type: 'type', text: SECRET, secret: true};
 
 test('the names are fixed, the list a report is read from is bounded, and nothing else survives', () => {
   assert.equal(SECRET_INPUT_V1, 'secret-input-v1');
-  assert.deepEqual(DEVICE_FEATURES, ['secret-input-v1']);
+  assert.equal(BROWSER_ACCOUNTS_V1, 'browser-accounts-v1');
+  assert.deepEqual(DEVICE_FEATURES, ['secret-input-v1', 'browser-accounts-v1']);
+  assert.equal(neededNow(BROWSER_ACCOUNTS_V1), true, 'an older app would act in the default profile, so account work always needs it');
   assert.deepEqual(cleanFeatures(['secret-input-v1', 'secret-input-v1', 'future-thing-v2']), ['secret-input-v1', 'future-thing-v2'], 'a repeat is dropped, a new name of the same shape is kept');
   for (const bad of [undefined, null, 'secret-input-v1', 7, {0: 'secret-input-v1'}, true]) assert.deepEqual(cleanFeatures(bad), [], `${JSON.stringify(bad)} is no list`);
   assert.deepEqual(cleanFeatures([7, null, {}, [], 'Has Spaces', 'UPPER-v1', '../etc', 'a'.repeat(41), '', '<b>x</b>', 'ok-v1']), ['ok-v1'], 'only short lowercase names of one shape');

@@ -67,6 +67,15 @@ test('no model text sets a pin: not a setup card, not a new-bot block', () => {
   assert.equal(Object.hasOwn(made.settings, 'device'), false);
 });
 
+test('no model text sets a browser account either', () => {
+  const A = '0b6f1c2e-4d5a-4b8c-9e1f-2a3b4c5d6e7f';
+  assert.equal(BOT_SETTABLE.includes('browserAccount'), false);
+  const state = {groups: [{id: 'home', bots: [{id: 'web', name: 'Web', instructions: 'x', settings: {}}]}]};
+  assert.match(resolveSetup(state, {action: 'settings', bot: 'Web', settings: {browserAccount: A}}).error, /nothing to change/);
+  const made = buildCreatedBot(validateCreateBotRequest({name: 'Scout', job: 'Read the supplier pages each morning', browserAccount: A, settings: {browserAccount: A}}), {bot: {id: 'atlas'}});
+  assert.equal(Object.hasOwn(made.settings, 'browserAccount'), false);
+});
+
 test('only the owner pins, and only to a computer paired here', async t => {
   const store = await workspace(t);
   const call = harness(groupRoutes);
