@@ -144,3 +144,41 @@ test('a need skips the server browser and goes to a device that reports it', asy
   assert.equal((await browser.dispatchBrowserRequest(store, 'br1', {runtime: here, needs: [SECRET_INPUT_V1]})).via, 'agent');
   assert.equal(store.get('SELECT agent_id FROM agent_tasks').agent_id, fresh);
 });
+
+const SERVER_PIN_LINE = 'This bot is set to use one computer, and this install opens pages only on the server (BROWSER_RUNTIME=server). Clear the bot\'s computer on its profile, or set BROWSER_RUNTIME=auto.';
+
+test('a takeover is refused for a pinned bot, because it would open the page on the server', async t => {
+  const {store, pair, setup} = await rig(t);
+  const desk = pair('Desk', ['browser.capture'], {seenAgo: 0});
+  await setup(desk);
+  const here = {mode: 'auto', available: () => true, beginLive: async () => assert.fail('opened a pinned bot\'s page on the server')};
+  await assert.rejects(browser.beginTakeover(store, 'br1', {runtime: here}), e => e.status === 409 && e.message === SERVER_PIN_LINE);
+  assert.equal(store.read().browserRequests[0].status, 'pending');
+});
+
+test('a takeover for an unpinned bot still opens on the server', async t => {
+  const {store} = await rig(t);
+  let opened = null;
+  const here = {mode: 'auto', available: () => true, beginLive: async options => { opened = options; return {id: 'takeover-1', url: options.url}; }};
+  assert.equal((await browser.beginTakeover(store, 'br1', {runtime: here})).id, 'takeover-1');
+  assert.equal(opened.requestId, 'br1');
+});
+
+test('a pin to a device id that does not exist gives the server sentence under server mode, and not-pinned elsewhere', async t => {
+  const {store, setup} = await rig(t, {requests: ['br1', 'br2']});
+  await setup('no-such-device');
+  const serverOnly = {mode: 'server', available: () => true, run: async () => assert.fail('ran on the server')};
+  await assert.rejects(browser.dispatchBrowserRequest(store, 'br1', {runtime: serverOnly}), e => e.status === 409 && e.message === SERVER_PIN_LINE);
+  await assert.rejects(browser.dispatchBrowserRequest(store, 'br2', {runtime: agentOnly}), e => e.status === 409 && /computer is not available/.test(e.message));
+  assert.equal(tasks(store).length, 0);
+});
+
+test('a pinned computer that lacks a needed feature gives the missing-feature line through dispatch', async t => {
+  const {store, pair, setup} = await rig(t);
+  pair('Laptop', ['browser.capture'], {seenAgo: 0, features: [SECRET_INPUT_V1]});
+  const desk = pair('Desk', ['browser.capture'], {seenAgo: 0});
+  await setup(desk);
+  await assert.rejects(browser.dispatchBrowserRequest(store, 'br1', {runtime: agentOnly, needs: [SECRET_INPUT_V1]}), e => e.status === 409 && e.message === missingFeatureLine(SECRET_INPUT_V1));
+  assert.equal(store.read().browserRequests[0].status, 'pending');
+  assert.equal(tasks(store).length, 0, 'the other computer that has the feature is not used for a pinned bot');
+});

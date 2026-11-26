@@ -33,6 +33,9 @@ export function setBrowserResultHooks(hooks) { resultHooks = {...resultHooks, ..
 export const BROWSER_WAIT_MS = 600000;
 const OFFLINE = 'Your computer\'s agent is offline. A server on your own computer restarts it within a few seconds; on another machine, start it there (`node agent/agent.mjs run`), then approve again.';
 
+/** Said when a bot pinned to one computer would have its page opened on the server instead. */
+const PINNED_ON_SERVER = 'This bot is set to use one computer, and this install opens pages only on the server (BROWSER_RUNTIME=server). Clear the bot\'s computer on its profile, or set BROWSER_RUNTIME=auto.';
+
 /** The lane a bot's pages queue on in the server's shared browser: its workspace and its id. The runtime is one
  * process for every workspace, and every workspace has a bot called `atlas`. */
 export const browserLane = (store, botId) => `${store?.dbPath || ''}\u0000${botId || ''}`;
@@ -44,7 +47,7 @@ export async function dispatchBrowserRequest(store, id, {actor = null, runtime =
   if (!request) fail('Browser request not found.', 404);
   if (request.status !== 'pending') fail('This browser request is no longer waiting.', 409);
   const pin = pinnedDevice(store.read(), request.botId);
-  if (pin && runtime.mode === 'server') fail('This bot is set to use one computer, and this install opens pages only on the server (BROWSER_RUNTIME=server). Clear the bot\'s computer on its profile, or set BROWSER_RUNTIME=auto.', 409);
+  if (pin && runtime.mode === 'server') fail(PINNED_ON_SERVER, 409);
   // A pinned bot never opens pages on the server, and a need names a device feature the server browser has none of.
   const here = !pin && !needs.length && runtime.mode !== 'agent' && runtime.available();
   let agentId = null;
@@ -217,7 +220,7 @@ export async function finishBrowserRequest(store, request, {ok, result = null, e
  * so a cookie earned here survives from one call to the next — and nothing
  * else: the next capture still starts with a fresh, signed-out context. The
  * request stays waiting on a person meanwhile, so a takeover that times out
- * leaves nothing stuck: the runtime refuses a second takeover and a bot's page
+ * leaves nothing stuck: the runtime refuses a second takeover and that bot's page
  * while the person is holding it, and the request can be taken over again. The
  * bot is resumed when the person hands the page back, with the page as they
  * left it. */
@@ -228,6 +231,8 @@ export async function beginTakeover(store, requestId, {actor = null, workspaceId
   if (runtime.mode === 'agent' || !runtime.available()) fail(`No browser is available on this server to take over. ${runtime.mode === 'agent'
     ? 'This install only runs browser requests on a paired device (BROWSER_RUNTIME=agent).'
     : 'Set AGENT_BROWSER_ALLOWLIST (a host list, or * for any public site) and install Chrome, or point AGENT_BROWSER_PATH at one.'}`, 409);
+  // A takeover always opens on the server's browser, which a bot pinned to one computer never uses.
+  if (pinnedDevice(store.read(), request.botId)) fail(PINNED_ON_SERVER, 409);
   const view = await runtime.beginLive({url: request.url, requestId: request.id, openedBy: actor, workspaceId, lane: browserLane(store, request.botId)});
   return {...view, requestId: request.id};
 }
