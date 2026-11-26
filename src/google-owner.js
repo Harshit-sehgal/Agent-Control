@@ -32,7 +32,8 @@ export function startOwnerSignIn(config, baseUrl) {
   const state = crypto.randomBytes(32).toString('hex'), redirectUri = `${baseUrl}${OWNER_CALLBACK}`;
   const cutoff = Date.now() - FLOW_TTL_MS;
   for (const [key, flow] of ownerFlows) if (flow.createdAt < cutoff) ownerFlows.delete(key);
-  while (ownerFlows.size >= MAX_FLOWS) ownerFlows.delete(ownerFlows.keys().next().value);
+  // Full: refuse the newcomer rather than drop a flow someone may be finishing on Google's page.
+  if (ownerFlows.size >= MAX_FLOWS) throw Object.assign(new Error('Too many sign-ins in progress. Try again in a few minutes.'), {status: 429});
   ownerFlows.set(state, {verifier, nonce, redirectUri, createdAt: Date.now()});
   const url = new URL(googleEndpoints().auth);
   const challenge = b64url(crypto.createHash('sha256').update(verifier).digest());

@@ -42,6 +42,15 @@ test('the start address asks Google for the email only, with PKCE, a state and a
   assert.ok(q.get('nonce') && q.get('code_challenge'));
 });
 
+test('a full set of sign-ins in progress refuses a new one and keeps the owner\'s', () => {
+  ownerFlows.clear();
+  const owners = startOwnerSignIn(config, 'https://dash.example.com');
+  for (let i = 0; i < 19; i++) startOwnerSignIn(config, 'https://dash.example.com');
+  assert.throws(() => startOwnerSignIn(config, 'https://dash.example.com'), error => error.status === 429);
+  assert.ok(takeOwnerFlow(owners.state, owners.state), 'the first flow is still there');
+  ownerFlows.clear();
+});
+
 test('a state is spent once, and only with the cookie that carries it', () => {
   const {state} = startOwnerSignIn(config, 'https://dash.example.com');
   assert.equal(takeOwnerFlow(state, 'f'.repeat(64)), null, 'a wrong cookie');

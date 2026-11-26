@@ -201,6 +201,23 @@ test('a corrupt stored password hash is refused, not thrown as a server error', 
   } finally { await fs.rm(dir, {recursive: true, force: true}); }
 });
 
+test('an account restored from a backup has no password, so its owner can set one', async () => {
+  const {store, auth, dir} = await harness();
+  try {
+    auth.ensureBootstrap('owner-secret-1');
+    // A restore writes this placeholder in place of every hash (src/backup.js): it matches nothing.
+    store.run("UPDATE users SET password_hash='redacted' WHERE email='owner@localhost'");
+    const owner = auth.ownerId();
+    assert.equal(auth.hasPassword(owner), false);
+    assert.equal(auth.login({password: 'redacted'}).ok, false);
+    auth.changePassword(owner, '', 'new-password-1');
+    assert.equal(auth.hasPassword(owner), true);
+    assert.equal(auth.login({password: 'new-password-1'}).ok, true);
+    // A real hash still needs the current password.
+    assert.throws(() => auth.changePassword(owner, '', 'another-password-1'), /Current password is incorrect/);
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});
+
 test('changing your own password keeps the acting session and signs out the others', async () => {
   const {auth, dir} = await harness();
   try {

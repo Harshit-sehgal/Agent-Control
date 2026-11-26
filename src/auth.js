@@ -100,9 +100,10 @@ export class Auth {
   ownerId() {
     return this.store.get(`SELECT user_id AS id FROM workspace_members WHERE workspace_id=? AND role='owner' ORDER BY created_at LIMIT 1`, DEFAULT_WORKSPACE)?.id || null;
   }
-  /** Whether the account can sign in with a password at all. */
+  /** Whether the account can sign in with a password at all: none set (an owner who signs in with Google), or the
+   * placeholder a restore writes (src/backup.js), is no password. */
   hasPassword(userId) {
-    return Boolean(this.store.get('SELECT password_hash AS hash FROM users WHERE id=?', userId)?.hash);
+    return Boolean(parseStored(this.store.get('SELECT password_hash AS hash FROM users WHERE id=?', userId)?.hash));
   }
   accountFor(email) {
     // Omitting the email keeps the single-owner behavior of the prototype:
@@ -370,8 +371,9 @@ export class Auth {
   changePassword(userId, currentPassword, newPassword, keepSessionId = null) {
     const row = this.store.get('SELECT password_hash FROM users WHERE id=?', userId);
     if (!row) throw Object.assign(new Error('Account not found.'), {status: 404});
-    // An account with no password yet (an owner who signs in with Google) sets its first one without a current one.
-    if (row.password_hash && !verifyPassword(currentPassword, row.password_hash)) throw Object.assign(new Error('Current password is incorrect.'), {status: 401});
+    // An account with no password (an owner who signs in with Google, or one restored from a backup) sets its first
+    // one without a current one.
+    if (parseStored(row.password_hash) && !verifyPassword(currentPassword, row.password_hash)) throw Object.assign(new Error('Current password is incorrect.'), {status: 401});
     if (String(newPassword || '').length < 8) throw Object.assign(new Error('Password must be at least 8 characters.'), {status: 400});
     this.store.transaction(() => {
       this.store.run('UPDATE users SET password_hash=? WHERE id=?', hashPassword(newPassword), userId);
