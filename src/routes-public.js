@@ -6,7 +6,8 @@ import {lastSweepAt} from './queue.js';
 import {activity} from '../shared/core.js';
 import * as wf from '../shared/workflow.js';
 import * as agent from './agent.js';
-import {onAgentTaskResult, continueBrowserWork, setBrowserResultHooks} from './bot-browser.js';
+import {repointDevice} from '../shared/browser-accounts.js';
+import {onAgentTaskResult, continueBrowserWork, setBrowserResultHooks, revokeAgentFinishingPages} from './bot-browser.js';
 import {queueGroupRun, resumeBrowserRun} from './coordination.js';
 import {runOneBot} from './routes-groups.js';
 import {sessionCookie, clearCookie, DEFAULT_WORKSPACE, resolveAccount} from './auth.js';
@@ -190,7 +191,13 @@ export function publicRoutes(router, {auth, workspaces, version}) {
     // same answer a wrong code always got.
     const store = workspaces.holding('SELECT 1 AS x FROM pairing_codes WHERE code_hash=?', sha256(b.code)) || workspaces.get(DEFAULT_WORKSPACE);
     const pair = async () => {
-      const result = agent.redeemPairing(store, {code: b.code, name: b.name, permissions: b.permissions, features: b.features});
+      const {replaces, ...result} = agent.redeemPairing(store, {code: b.code, name: b.name, permissions: b.permissions, features: b.features, previous: b.previous});
+      // A computer that proved it held the old secret keeps its accounts and bot pins, and the old row is retired.
+      if (replaces) {
+        await store.update(s => { repointDevice(s, replaces, result.agentId); });
+        await revokeAgentFinishingPages(store, replaces, {resumeBrowser: resumeBrowserRun});
+        await store.update(s => { activity(s, 'agent', 'A local agent was replaced by a computer that proved it was the same one. Its pages in flight were failed, and its accounts moved.', {agentId: replaces}); });
+      }
       await store.update(s => { activity(s, 'agent', `Paired local agent "${String(b.name || 'Local agent').slice(0, 60)}".`, {agentId: result.agentId}); });
       return reply(201, result);
     };
@@ -204,11 +211,13 @@ export function publicRoutes(router, {auth, workspaces, version}) {
       agent.touchAgent(store, device.id);
       // Whether the owner's CLIs are signed in on that machine, as the CLIs' own
       // status commands said. Four words only; a malformed report changes nothing.
-      let report = null, features, stopping = false;
-      try { const beat = JSON.parse(raw || '{}'); report = beat?.cli; features = beat?.features; stopping = beat?.stopping === true; } catch { /* A beat that is not JSON carries no report. */ }
+      let report = null, features, accounts, stopping = false;
+      try { const beat = JSON.parse(raw || '{}'); report = beat?.cli; features = beat?.features; accounts = beat?.accounts; stopping = beat?.stopping === true; } catch { /* A beat that is not JSON carries no report. */ }
       agent.recordAgentCli(store, device.id, report);
       // What its app can do; a beat without the list (an older app) leaves none.
       agent.recordAgentFeatures(store, device.id, features);
+      // The sign-in state of each browser account it holds; states only, never a cookie.
+      agent.recordAccountReports(store, device.id, accounts);
       const nowMs = Date.now();
       // Renew this device's running leases first: it is heartbeating because it
       // is alive, so a task it is still executing (a slow page, a serial queue)
@@ -228,7 +237,9 @@ export function publicRoutes(router, {auth, workspaces, version}) {
       if (recovered) await store.update(s => { activity(s, 'agent', `Re-armed ${recovered} agent task(s) after a disconnect.`); });
       let permissions = [];
       try { permissions = JSON.parse(device.permissions || '[]'); } catch { /* Stored JSON. */ }
-      return {ok: true, serverTime: new Date().toISOString(), agent: {id: device.id, name: device.name, permissions}, tasks};
+      // The accounts whose cookies this computer keeps, so it can drop a jar the owner moved or deleted.
+      const held = (store.read().browserAccounts || []).filter(a => a.deviceId === device.id).map(a => ({id: a.id, site: a.site}));
+      return {ok: true, serverTime: new Date().toISOString(), agent: {id: device.id, name: device.name, permissions}, tasks, accounts: held};
     };
     return store.trackWork ? store.trackWork(heartbeat) : heartbeat();
   });
