@@ -54,6 +54,13 @@ export function createLiveHub({now = Date.now, waitMs = LIVE_WAIT_MS} = {}) {
   const deviceOf = (workspaceId, agentId) => agentId || lastPoller.get(workspaceId) || null;
   /** A computer's space, or null when it has none: a named computer that never polled is not there. */
   const peek = (workspaceId, agentId = null) => spaces.get(keyOf(workspaceId, deviceOf(workspaceId, agentId))) || null;
+  /** The computer for one bot: the one named, else the one the owner already holds this bot's tab on (so a bot with no
+   * pin does not change computer each time another one polls), else the one that polled last. */
+  const deviceFor = (workspaceId, botId, agentId = null) => {
+    if (agentId) return agentId;
+    for (const sp of spaces.values()) if (sp.workspaceId === workspaceId && sp.agentId && sp.driving.has(botId)) return sp.agentId;
+    return null;
+  };
   const space = (workspaceId, agentId = null) => {
     const id = deviceOf(workspaceId, agentId), key = keyOf(workspaceId, id);
     let sp = spaces.get(key);
@@ -144,7 +151,7 @@ export function createLiveHub({now = Date.now, waitMs = LIVE_WAIT_MS} = {}) {
   /** The owner's page asks for a bot's frame. Asking is what makes the device cast it. `account` is the bot's browser
    * account when it has one (else the one the owner took over with). */
   function view(workspaceId, botId, {after, agentId = null, account} = {}) {
-    const sp = space(workspaceId, agentId);
+    const sp = space(workspaceId, deviceFor(workspaceId, botId, agentId));
     const acct = account === undefined ? sp.driving.get(botId)?.account ?? null : accountOf(account);
     sp.viewers.set(botId, {at: now(), account: acct});
     if (!sameWatch(watchOf(sp), sp.sentWatch)) wake(sp);
@@ -171,14 +178,14 @@ export function createLiveHub({now = Date.now, waitMs = LIVE_WAIT_MS} = {}) {
     command(sp, {type: 'takeover', botId}, account);
   }
   function handback(workspaceId, botId, {agentId = null, account = null} = {}) {
-    const sp = peek(workspaceId, agentId);
+    const sp = peek(workspaceId, deviceFor(workspaceId, botId, agentId));
     if (!sp) return;
     sp.driving.delete(botId);
     sp.commands.push(account ? {type: 'handback', botId, account} : {type: 'handback', botId});
     wake(sp);
   }
   function input(workspaceId, botId, event, {agentId = null, account = null} = {}) {
-    const sp = peek(workspaceId, agentId);
+    const sp = peek(workspaceId, deviceFor(workspaceId, botId, agentId));
     if (!sp?.driving.has(botId)) fail('Take over the browser before you click or type in it.', 409);
     command(sp, {type: 'input', botId, event: cleanInput(event)}, account);
   }
@@ -201,7 +208,7 @@ export function createLiveHub({now = Date.now, waitMs = LIVE_WAIT_MS} = {}) {
     /** The computer serving a workspace's live view: the named one if it is known, else the one that polled last, or null. */
     agentId: (workspaceId, agentId = null) => peek(workspaceId, agentId)?.agentId ?? null,
     /** Where a computer last said this bot's tab (on this account) was, while it is still there. */
-    tab: (workspaceId, botId, {agentId = null, account = null} = {}) => { const sp = peek(workspaceId, agentId); return alive(sp) ? sp.tabs.get(tabId(account, botId)) || null : null; },
+    tab: (workspaceId, botId, {agentId = null, account = null} = {}) => { const sp = peek(workspaceId, deviceFor(workspaceId, botId, agentId)); return alive(sp) ? sp.tabs.get(tabId(account, botId)) || null : null; },
     /** Release every parked poll and forget everything: shutdown, and tests. */
     close() { for (const sp of spaces.values()) { deliver(sp); sp.frame = null; sp.viewers.clear(); sp.commands.length = 0; sp.driving.clear(); sp.notices.clear(); } spaces.clear(); lastPoller.clear(); },
   });

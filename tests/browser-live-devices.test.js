@@ -67,6 +67,20 @@ test('an unpinned bot is served by whichever computer polled last', async () => 
   hub.close();
 });
 
+test('an unpinned bot the owner holds stays on the computer it was taken over on, whichever polls next', async () => {
+  const {hub} = rig();
+  const x = hub.agentSync(WS, 'pc-x', {});
+  hub.takeover(WS, 'atlas');
+  assert.deepEqual((await x).commands, [{type: 'takeover', botId: 'atlas'}]);
+  await hub.agentSync(WS, 'pc-y', {});                 // the other computer polls last now
+  hub.input(WS, 'atlas', click);
+  assert.deepEqual((await hub.agentSync(WS, 'pc-y', {})).commands, [], 'not on the other computer\'s line');
+  assert.deepEqual((await hub.agentSync(WS, 'pc-x', {})).commands.map(c => c.type), ['input'], 'on the computer that holds the tab');
+  hub.handback(WS, 'atlas');
+  assert.deepEqual((await hub.agentSync(WS, 'pc-x', {})).commands, [{type: 'handback', botId: 'atlas'}]);
+  hub.close();
+});
+
 test('a named computer that has not polled is not there: nothing is queued for it', async () => {
   const {hub} = rig();
   await hub.agentSync(WS, 'pc-a', {});
