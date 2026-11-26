@@ -4,7 +4,7 @@ import {startBrowserSession} from '../agent/browser.mjs';
 import {createSharedBrowser} from '../agent/shared-browser.mjs';
 import {createLiveChannel} from '../agent/live-channel.mjs';
 import {fakeCdp} from './fake-cdp.js';
-import {TAG_FOCUSED_SECRET_JS} from '../agent/page-secrets.mjs';
+import {FOCUSED_IS_SECRET_JS, TAG_FOCUSED_SECRET_JS} from '../agent/page-secrets.mjs';
 import vm from 'node:vm';
 
 /* The owner takes the browser, and hands it back. Against the scripted DevTools
@@ -219,7 +219,7 @@ test('by default a takeover has no clock: the person keeps the browser until the
 });
 
 /** The evaluations that tag the focused field, in the order the device sent them. */
-const isTag = c => c.method === 'Runtime.evaluate' && c.params.expression.includes("setAttribute('data-agent-secret'") && !c.params.expression.includes('isSecretField');
+const isTag = c => c.method === 'Runtime.evaluate' && c.params.expression === TAG_FOCUSED_SECRET_JS;
 const tagCalls = fake => fake.calls.filter(isTag);
 
 test('text the owner marks secret goes into a field that is tagged for the page first', async t => {
@@ -244,7 +244,7 @@ test('a plain type event into a field the page says is secret is tagged too, and
   await sb.takeover('bot-a');
   await sb.applyInput('bot-a', {type: 'type', text: 'hello'});
   assert.equal(tagCalls(fake()).length, 0, 'an ordinary field is left alone');
-  const asked = fake().calls.filter(c => c.method === 'Runtime.evaluate' && c.params.expression.includes('isSecretField(el)'));
+  const asked = fake().calls.filter(c => c.method === 'Runtime.evaluate' && c.params.expression === FOCUSED_IS_SECRET_JS);
   assert.equal(asked.length, 1, 'the focused field was asked about, once');
   assert.ok(fake().calls.indexOf(asked[0]) < fake().calls.findIndex(c => c.method === 'Input.insertText'), 'before the text went in');
   assert.match(asked[0].params.expression, /function isSecretField/, 'the whole bundle travels with the question');
@@ -260,7 +260,7 @@ test('a key press and a click are not asked about, and nothing the owner typed i
   await sb.takeover('bot-a');
   await sb.applyInput('bot-a', {type: 'key', key: 'Enter'});
   await sb.applyInput('bot-a', {type: 'click', x: 5, y: 5});
-  assert.equal(fake().calls.filter(c => c.method === 'Runtime.evaluate' && c.params.expression.includes('isSecretField(el)')).length, 0);
+  assert.equal(fake().calls.filter(c => c.method === 'Runtime.evaluate' && c.params.expression === FOCUSED_IS_SECRET_JS).length, 0);
   // Every way a type can fail: the check, the insert and the tag all throw with the text in the browser's own message.
   const seen = [], spy = (...args) => seen.push(args.join(' ')), keep = {error: console.error, warn: console.warn, log: console.log};
   Object.assign(console, {error: spy, warn: spy, log: spy});
@@ -268,7 +268,7 @@ test('a key press and a click are not asked about, and nothing the owner typed i
   const text = 'hunter22-482913';
   for (const method of ['Runtime.evaluate', 'Input.insertText']) {
     fake().hook(method, async ({expression}) => {
-      if (method === 'Runtime.evaluate' && !/isSecretField\(el\)|setAttribute/.test(expression)) return undefined;
+      if (method === 'Runtime.evaluate' && expression !== FOCUSED_IS_SECRET_JS && expression !== TAG_FOCUSED_SECRET_JS) return undefined;
       throw new Error(`CDP failed on ${text}`);
     });
     await assert.rejects(() => sb.applyInput('bot-a', {type: 'type', text, secret: true}), e => !String(e.message).includes(text) && !String(e.stack).includes(text), method);

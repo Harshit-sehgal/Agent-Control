@@ -24,7 +24,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {startBrowserSession, ACTION_OPS, MAX_ACTIONS} from './browser.mjs';
-import {PAGE_SECRETS_JS, TAG_FOCUSED_SECRET_JS} from './page-secrets.mjs';
+import {FOCUSED_IS_SECRET_JS, TAG_FOCUSED_SECRET_JS} from './page-secrets.mjs';
 import {hostAllowed, hostOf} from '../shared/bot-browser.js';
 import {cleanInput, KEYS, VIEWPORT} from './live-input.mjs';
 
@@ -222,7 +222,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
       // Ask the page whether the cursor is in a secret field, tag that field while focus is certain (before the
       // text can move it), then type. An answer that is not a plain boolean (a page expression that threw) counts
       // as yes, and a tag that fails stops the typing. Nothing here ever names the text.
-      const asked = await send('Runtime.evaluate', {expression: `(()=>{${PAGE_SECRETS_JS};const el=document.activeElement;return !!el&&isSecretField(el)})()`, returnByValue: true})
+      const asked = await send('Runtime.evaluate', {expression: FOCUSED_IS_SECRET_JS, returnByValue: true})
         .then(reply => (!reply?.exceptionDetails && typeof reply?.result?.value === 'boolean' ? reply.result.value : true), () => true);
       if (ev.secret || asked) {
         const tagged = await send('Runtime.evaluate', {expression: TAG_FOCUSED_SECRET_JS, returnByValue: true}).catch(() => null);

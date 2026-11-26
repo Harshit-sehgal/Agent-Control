@@ -1,3 +1,5 @@
+import {FOCUSED_IS_SECRET_JS, TAG_FOCUSED_SECRET_JS} from '../agent/page-secrets.mjs';
+
 /** A scripted DevTools connection, so the browser code can run with no Chrome.
  *
  * `fakeCdp()` returns the shape `connect()` in agent/browser.mjs returns
@@ -22,11 +24,11 @@ export function fakeCdp({pages = {}} = {}) {
     const shown = pages[page.url] || {};
     const snapshot = {count: (shown.elements || []).length, elements: shown.elements || []};
     // The takeover's two questions about the focused field: is it secret (answered by `focusSecret`), and the tag.
-    if (expression.startsWith('(()=>{') && expression.includes('isSecretField(el)')) {
+    if (expression === FOCUSED_IS_SECRET_JS) {
       // 'throws': the page expression threw, which Chrome answers with exceptionDetails and no value.
       return state.focusSecret === 'throws' ? {result: {type: 'object', subtype: 'error'}, exceptionDetails: {text: 'Uncaught'}} : {result: {value: state.focusSecret}};
     }
-    if (expression.includes("setAttribute('data-agent-secret'")) { tagged.push({sessionId, expression}); return {result: {}}; }
+    if (expression === TAG_FOCUSED_SECRET_JS) { tagged.push({sessionId, expression}); return {result: {}}; }
     if (expression === 'location.href') return {result: {value: page.url}};
     if (expression.startsWith('(function(){var els=')) return {result: {value: snapshot}};
     if (expression.startsWith('JSON.stringify({url: location.href')) {
