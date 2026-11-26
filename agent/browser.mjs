@@ -228,6 +228,8 @@ export async function startProxy({permit = publicOnly, lookup = dns.lookup, refu
 export function browserArgs({profile, proxyPort, extraArgs = [], noSandbox = false}) {
   return ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check',
     '--disable-extensions', '--disable-background-networking', '--disable-sync', '--disable-gpu', '--mute-audio',
+    // Several bots' tabs share one headless window: a tab that is not in front must not have its timers and rendering slowed.
+    '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows',
     ...(noSandbox ? ['--no-sandbox', '--disable-dev-shm-usage'] : []),
     // Everything goes through the proxy, loopback included, and nothing may
     // leave another way (WebRTC would otherwise send UDP directly).

@@ -132,3 +132,13 @@ test('normalizeNeeds: nothing is no needs, a string is one, a list is itself, an
   assert.deepEqual(normalizeNeeds([]), []);
   for (const odd of ['', 7, true, {}, {length: 0}, () => {}]) assert.deepEqual(normalizeNeeds(odd), ['<invalid>'], String(typeof odd));
 });
+
+test('agentsBrief says online by the one online rule: a device never seen but just paired is online', async t => {
+  const {store, pair} = await rig(t);
+  pair('Fresh', ['browser.capture'], {seenAgo: null, pairedAgo: MIN});
+  pair('Stale', ['browser.capture'], {seenAgo: null, pairedAgo: 10 * MIN});
+  pair('Away', ['browser.capture'], {seenAgo: 10 * MIN});
+  pair('Here', ['browser.capture'], {seenAgo: 0});
+  const online = Object.fromEntries(agent.agentsBrief(store).map(a => [a.name, a.online]));
+  assert.deepEqual(online, {Fresh: true, Stale: false, Away: false, Here: true});
+});

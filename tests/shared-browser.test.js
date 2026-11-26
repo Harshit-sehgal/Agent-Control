@@ -188,3 +188,8 @@ test('runBrowserTask holds the same rules the old path held', async t => {
   assert.equal(anon.title, 'Mail');
   assert.equal(sb.status().length, 2, 'a task that names no bot shares one anonymous tab');
 });
+
+test('the browser is not slowed down while it runs in the background', () => {
+  const args = browserArgs({profile: '/p', proxyPort: 1});
+  for (const flag of ['--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows']) assert.ok(args.includes(flag), flag);
+});

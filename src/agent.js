@@ -476,7 +476,7 @@ export function listAgents(store, workspaceId) {
 export function agentsBrief(store) {
   if (typeof store?.all !== 'function') return [];
   return store.all('SELECT * FROM agents WHERE revoked_at IS NULL ORDER BY last_seen_at DESC').map(a => ({
-    name: a.name, online: Boolean(a.last_seen_at && Date.parse(a.last_seen_at) > Date.now() - AGENT_ONLINE_MS),
+    name: a.name, online: agentOnline(a),
     permissions: (() => { try { return JSON.parse(a.permissions || '[]'); } catch { return []; } })(), cli: readAgentCli(store, a.id),
     features: readAgentFeatures(store, a.id),
   }));
