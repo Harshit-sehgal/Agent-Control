@@ -241,9 +241,10 @@ export function redeemPairing(store, {code, name, permissions = [], features}) {
     store.run('UPDATE pairing_codes SET consumed_at=? WHERE code_hash=?', now(), sha256(String(code)));
     store.run('INSERT INTO agents (id,workspace_id,name,secret_hash,secret_enc,status,permissions,paired_by,paired_at) VALUES (?,?,?,?,?,?,?,?,?)',
       agentId, row.workspace_id, cleanText(name, 120) || 'Local agent', sha256(secret), stored, 'paired', JSON.stringify(granted), row.created_by, now());
+    // What its app can do, so work that needs a feature is not refused before the first heartbeat (an older app sends
+    // none). In the same write: a failure here must not leave a used code and an agent behind.
+    if (features !== undefined) recordAgentFeatures(store, agentId, features);
   });
-  // What its app can do, so work that needs a feature is not refused before the first heartbeat. An older app sends none.
-  if (features !== undefined) recordAgentFeatures(store, agentId, features);
   return {agentId, secret, workspaceId: row.workspace_id, permissions: granted, pollIntervalMs: 30000};
 }
 

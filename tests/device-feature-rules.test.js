@@ -3,9 +3,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import {Readable} from 'node:stream';
 import * as agent from '../src/agent.js';
 import {chooseDevice, readAgentFeatures, recordAgentFeatures, redeemPairing} from '../src/agent.js';
 import {SqliteStore} from '../src/sqlite-store.js';
+import * as wf from '../shared/workflow.js';
+import {createApp} from '../src/app.js';
 import {FEATURES, FEATURE_GRACE_DAYS, DEVICE_FEATURES, SECRET_INPUT_V1, cleanFeatures, hasFeature, neededNow, requiredNow, updateNeeded} from '../shared/device-features.js';
 
 /* The device feature list: needed or preferred, the 60 days a preferred one keeps the older path, and what a device
@@ -91,4 +94,40 @@ test('a paired computer that has not beaten yet is chosen for work that needs a 
   const {store, code} = await rig(t);
   const {agentId} = redeemPairing(store, {code: code(), name: 'Fresh', permissions: ['browser.capture'], features: DEVICE_FEATURES});
   assert.equal(chooseDevice(store, {kind: 'browser.capture', needs: [SECRET_INPUT_V1]}).agent.id, agentId);
+});
+
+test('POST /api/agent/pair stores the features in its body, and a body with none still pairs', async t => {
+  const {store, code} = await rig(t);
+  await store.update(s => { wf.migrate(s); });
+  const app = createApp({store, auth: {session: () => null}, workspaces: {get: () => store, holding: () => store}, push: {}, version: 't'});
+  const pair = async body => {
+    const text = JSON.stringify(body);
+    const headers = {host: '127.0.0.1:4173', origin: 'http://127.0.0.1:4173'};
+    const req = Object.assign(Readable.from([Buffer.from(text)]), {method: 'POST', url: '/api/agent/pair', headers, socket: {remoteAddress: '127.0.0.1'}});
+    const res = {status: null, body: null, writeHead(status) { this.status = status; return this; }, end(b) { this.body = b; }};
+    await app.handler(req, res);
+    return {status: res.status, body: res.body ? JSON.parse(res.body) : null};
+  };
+  const withList = await pair({code: code(), name: 'New app', permissions: [], features: [SECRET_INPUT_V1, 'BAD NAME']});
+  assert.equal(withList.status, 201, JSON.stringify(withList.body));
+  assert.deepEqual(readAgentFeatures(store, withList.body.agentId), [SECRET_INPUT_V1]);
+  const without = await pair({code: code(), name: 'Old app', permissions: []});
+  assert.equal(without.status, 201, JSON.stringify(without.body));
+  assert.deepEqual(readAgentFeatures(store, without.body.agentId), []);
+});
+
+test('pairing is one write: a failed feature record leaves no used code and no agent behind', async t => {
+  const {store, code} = await rig(t);
+  const c = code();
+  const kvSet = store.kvSet;
+  store.kvSet = () => { throw new Error('disk full'); };
+  assert.throws(() => redeemPairing(store, {code: c, name: 'Laptop', permissions: [], features: [SECRET_INPUT_V1]}), /disk full/);
+  store.kvSet = kvSet;
+  assert.equal(store.all('SELECT id FROM agents').length, 0);
+  assert.ok(redeemPairing(store, {code: c, name: 'Laptop', permissions: [], features: [SECRET_INPUT_V1]}).agentId, 'the same code still works');
+});
+
+test('updateNeeded with a list that is not an array fails closed, like neededNow', () => {
+  assert.deepEqual(updateNeeded([], {list: null}).map(f => f.name), [SECRET_INPUT_V1], 'the shipped list answers instead of nothing');
+  assert.equal(neededNow('x-v1', {list: null}), true);
 });

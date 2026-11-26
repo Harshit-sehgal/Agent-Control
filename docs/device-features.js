@@ -61,5 +61,7 @@ export const requiredNow = (prefers, opts) => (Array.isArray(prefers) ? prefers.
 
 /** The entries of `list` that are needed now and that `features` does not name, as `{name, what}`. Anything that is
  * not a list names nothing, so it lacks all of them. */
-export const updateNeeded = (features, {list = FEATURES, ...rest} = {}) =>
-  list.filter(f => neededNow(f.name, {...rest, list}) && !hasFeature(features, f.name)).map(f => ({name: f.name, what: f.what}));
+export const updateNeeded = (features, {list: given = FEATURES, ...rest} = {}) => {
+  const list = Array.isArray(given) ? given : FEATURES;   // a list that is not one falls back to the shipped list: it never throws, never says "nothing needed"
+  return list.filter(f => neededNow(f.name, {...rest, list}) && !hasFeature(features, f.name)).map(f => ({name: f.name, what: f.what}));
+};
