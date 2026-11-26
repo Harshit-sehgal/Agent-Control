@@ -96,7 +96,8 @@ export async function consolidateModel(store, {key, config, chatKey = '', label 
     const outside = consolidationReadsOutside(state, {key: id, chatKey: chatKey || null, messages});
     const input = consolidationInput({book, messages, chatSummary: chatEntry?.summary || ''});
     const call = executor || ((instructions, body, cfg) => complete({instructions, input: body, maxTokens: 1600, config: cfg}));
-    const raw = await call(consolidationInstructions(), input, config);
+    // A tidy-up is the bot's own model's job: a spare that answered for a busy moment never writes its memory.
+    const raw = await call(consolidationInstructions(), input, {...config, fallbacks: []});
     const parsed = parseConsolidation(raw);
     // The model call can take minutes, and the person who started it can press
     // "Forget this model" while it runs. `rulebook()` creates a book that is not

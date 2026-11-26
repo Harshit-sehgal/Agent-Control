@@ -39,7 +39,7 @@ test('a handoff keeps the job, says which model and why, offers search_chat, and
   const env = {objective: 'o', contract: 'c', botRole: 'r', thread: thread(30), tools: {browser: 'b'}};
   const out = JSON.parse(handoffInput(JSON.stringify(env), {from: 'main', to: 'spare', why: 'rate limited'}, 12000));
   assert.deepEqual(out.handoff, {from: 'main', to: 'spare', why: 'rate limited'});
-  assert.match(out.tools.search_chat, /search_chat block/); assert.equal(out.tools.browser, 'b');
+  assert.match(out.tools.search_chat, /```search_chat\n/); assert.equal(out.tools.browser, 'b');
   assert.equal(out.thread.at(-1).text.startsWith('line 29'), true, 'the newest line is kept');
   assert.ok(out.thread.length < 30 && JSON.stringify(out).length <= 12000);
   assert.deepEqual(Object.keys(out).slice(0, 4), ['objective', 'contract', 'botRole', 'thread'], 'the existing keys keep their order');
@@ -62,6 +62,16 @@ test('a short thread is kept whole, and an envelope with no tools gets just the 
   const out = JSON.parse(handoffInput(JSON.stringify(env), {from: 'a', to: 'b', why: 'x'}));
   assert.equal(out.thread.length, 2);
   assert.deepEqual(Object.keys(out.tools), ['search_chat']);
+});
+
+test('search_chat is offered only on the bot\'s own chat turn: not to a helper, a teammate, or the call that already has hits', () => {
+  const note = {from: 'a', to: 'b', why: 'x'};
+  const helper = JSON.parse(handoffInput(JSON.stringify({task: 'look', askedBy: 'Writer', note: 'Answer only this task.'}), note));
+  assert.equal(helper.tools, undefined); assert.deepEqual(helper.handoff, note);
+  const teammate = JSON.parse(handoffInput(JSON.stringify({task: 'Which source?', company: [], tools: {ask: 'a'}, note: 'Answer only this question for your teammate.'}), note));
+  assert.deepEqual(Object.keys(teammate.tools), ['ask']);
+  const second = JSON.parse(handoffInput(JSON.stringify({objective: 'o', thread: thread(2), chatSearch: {query: 'q', hits: []}}), note));
+  assert.equal(second.tools, undefined);
 });
 
 test('input that is not a JSON envelope comes back as boundBotInput gives it', () => {
@@ -93,7 +103,7 @@ test('the fallback model is sent the handoff prompt and the bot\'s own model the
         const note = turnNote('b1');
         const sent = JSON.parse(userContentOf(spare.requests[0]));
         assert.deepEqual(sent.handoff, {from: 'main', to: 'spare', why: 'the provider is having trouble'});
-        assert.match(sent.tools.search_chat, /search_chat block/);
+        assert.match(sent.tools.search_chat, /```search_chat\n/);
         assert.equal(sent.tools.browser, 'b');
         assert.equal(note.kept, sent.thread.length, 'the note says how many lines the model was given');
         assert.ok(note.kept > 4 && note.kept < 100, `kept ${note.kept}`);
@@ -178,7 +188,7 @@ test('an Anthropic fallback keeps its cache breakpoints, with handoff after the 
       assert.deepEqual(content[0].cache_control, {type: 'ephemeral'});
       assert.equal(content[1].cache_control, undefined);
       assert.deepEqual(Object.keys(JSON.parse(content[0].text)), ['botId', 'botRole', 'tools'], 'the stable head holds only the stable keys');
-      assert.match(JSON.parse(content[0].text).tools.search_chat, /search_chat block/);
+      assert.match(JSON.parse(content[0].text).tools.search_chat, /```search_chat\n/);
       const rest = Object.keys(JSON.parse(content[1].text));
       assert.deepEqual(rest, ['objective', 'now', 'thread', 'handoff'], 'handoff follows the per-turn keys');
       assert.equal(JSON.stringify(body).match(/cache_control/g).length, 2, 'two breakpoints: system and the stable head');

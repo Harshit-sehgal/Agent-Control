@@ -17,7 +17,7 @@
  */
 
 /** Every control block a bot reply may carry. */
-export const CONTROL_FENCES = ['ask', 'spawn', 'create-bot', 'browser', 'not-my-job', 'connector', 'setup'];
+export const CONTROL_FENCES = ['ask', 'spawn', 'create-bot', 'browser', 'not-my-job', 'connector', 'setup', 'search_chat'];
 
 /** A fresh regex for the named fences, or for every control fence when no name
  * is given (the strip path). Call it per use: the `g` flag carries matching

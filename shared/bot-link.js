@@ -24,7 +24,7 @@ export const MAX_PEER_ANSWER = 2000;
 /** Every control block in a bot reply, and the one grammar that reads them,
  * live in `shared/reply-blocks.js`. Re-exported here because this module was
  * their first home and callers still reach for them through it. */
-import {controlFence} from './reply-blocks.js';
+import {controlFence, CONTROL_FENCES} from './reply-blocks.js';
 export {CONTROL_FENCES, controlFence} from './reply-blocks.js';
 const ASK_FENCE = () => controlFence('ask');
 const normalize = value => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
@@ -65,7 +65,7 @@ export const stripAskBlocks = output => String(output ?? '').replace(ASK_FENCE()
  * a prompt should still not carry. */
 export const stripControlBlocks = output => String(output ?? '')
   .replace(controlFence(), '')
-  .replace(/```(?:ask|spawn|create-bot|browser|not-my-job|connector|setup)[\s\S]*?```/gi, '')
+  .replace(new RegExp('```(?:' + CONTROL_FENCES.join('|') + ')[\\s\\S]*?```', 'gi'), '')
   .replace(/\n{3,}/g, '\n\n').trim();
 
 /** Find the teammate a block names. An exact id wins, then a case-insensitive

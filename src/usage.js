@@ -18,7 +18,7 @@ const scope = new AsyncLocalStorage();
  * use: `acted` is true once any model call for that bot has returned in this turn (that text is its reply, tool
  * blocks and all, so a later failure must not be replayed on another model); `answeredBy` is the place in the bot's
  * list of models (0 is its own) that answered, and the turn's later calls start there, so a turn never changes
- * models halfway; `why` is the words for why its own model was left; `kept` is for the handoff prompt (Task 5). */
+ * models halfway; `why` is the words for why its own model was left; `kept` is how many chat lines the handoff prompt held, which `search_chat` leaves out. */
 export function turnNote(botId) {
   const bots = scope.getStore()?.bots;
   if (!bots) return null;

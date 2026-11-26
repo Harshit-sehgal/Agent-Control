@@ -306,7 +306,7 @@ function extract(config,data){
   }
   // The token limit already bounds the call. Slicing here cut a fence that
   // models put last, so the orchestrator never paused for the page.
-  if(/```(?:browser|spawn|ask|create-bot|connector|setup)\b/i.test(text))return text;
+  if(/```(?:browser|spawn|ask|create-bot|connector|setup|search_chat)\b/i.test(text))return text;
   return text.slice(0,3000);
 }
 /** Strip leaked chain-of-thought so a draft is the answer, not the scratchpad.
@@ -319,7 +319,7 @@ function extract(config,data){
 function sanitize(text){
   const raw=String(text);
   const fences=[];
-  const withoutFences=raw.replace(/```(?:browser|spawn|ask|create-bot|connector|setup)[ \t]*\r?\n[\s\S]*?(?:```|$)/gi,block=>{fences.push(block);return '';});
+  const withoutFences=raw.replace(/```(?:browser|spawn|ask|create-bot|connector|setup|search_chat)[ \t]*\r?\n[\s\S]*?(?:```|$)/gi,block=>{fences.push(block);return '';});
   const stripPaired=s=>s.replace(/<(think|thinking|reasoning)>[\s\S]*?<\/\1>/gi,'');
   // Remove tool fences before reasoning cleanup, then put them back. A
   // reasoning tag may wrap the fence, and either a paired or unclosed tag must
@@ -431,16 +431,24 @@ export function fallsBack(error){
   if(status===401||status===403||error.code==='quota')return true;
   return ['usage-limit','not-signed-in','agent-offline','timeout','cli-missing'].includes(error.code);
 }
-/** The providers that hit a limit or an outage and are resting, by `coolKey`: `{until, why}`. In memory only, so a
+/** The models that hit a limit or an outage and are resting, by `restKey`: `{until, why}`. In memory only, so a
  * restart starts empty and the bot's own model is asked at once. */
 const coolOff=new Map();
 /** What a provider is called for resting: its saved id (unique across workspaces, so one owner's limit never rests
- * another's), else its subscription CLI, else the operator's own environment address (shared by every workspace). */
+ * another's), else its subscription CLI, else the operator's own environment address (shared by every workspace).
+ * No config is the environment provider, the same key `envConfig()` has. */
 export function coolKey(config){
-  if(config?.providerId)return String(config.providerId);
-  if(config?.kind==='local-cli')return `cli:${config.engine||''}`;
-  return `env:${config?.baseUrl||''}`;
+  const cfg=config||envConfig();
+  if(cfg.providerId)return String(cfg.providerId);
+  if(cfg.kind==='local-cli')return `cli:${cfg.engine||''}`;
+  return `env:${cfg.baseUrl||''}`;
 }
+/** One model on its provider: what a limit or an outage of that model alone rests. */
+const modelKey=config=>`${coolKey(config)}|${(config||envConfig()).model||''}`;
+/** Which rest this failure sets: the model's own (`<base>|<model>`: 429, 5xx, 408, a timeout, unreachable, a
+ * computer offline) or the provider's whole account (`<base>`: a credit or quota limit, a usage limit, and every
+ * subscription CLI failure, where the model is not what ran out). */
+const restKey=(config,error)=>config?.kind==='local-cli'||error?.providerStatus===402||['quota','usage-limit'].includes(error?.code)?coolKey(config):modelKey(config);
 const COOL_DEFAULT_MS=300000,COOL_MAX_MS=3600000;
 /** How long a provider rests after this failure, or null when it sets no rest: a limit (429, 402, quota, a
  * subscription's usage limit) or an outage (5xx, 408, a timeout, unreachable, a computer offline) rests for the
@@ -457,26 +465,30 @@ export function coolOffMs(error,now=Date.now()){
 }
 /** Forget every cool-off: a restart, for tests and for nothing else. */
 export function clearCoolOff(){coolOff.clear();}
-/** The entry of a provider that is still resting, or null (an ended one is dropped). */
+/** The entry of a model that is still resting (its own, or its provider's), or null (an ended one is dropped). */
 function resting(config){
-  const key=coolKey(config),entry=coolOff.get(key);
-  if(!entry)return null;
-  if(entry.until<=Date.now()){coolOff.delete(key);return null;}
-  return entry;
+  let found=null;
+  for(const key of [modelKey(config),coolKey(config)]){
+    const entry=coolOff.get(key);
+    if(!entry)continue;
+    if(entry.until<=Date.now()){coolOff.delete(key);continue;}
+    if(!found||entry.until>found.until)found=entry;
+  }
+  return found;
 }
-/** One model call, walked down `[own model, ...config.fallbacks]` (a lone older `config.fallback` is a list of one).
+/** One model call, walked down `[own model, ...config.fallbacks]`.
  * Each model is tried at most once, with its own one retry inside `callOnce`. The walk moves on only when the
  * failure is the provider's (`fallsBack`), a model is left, and the bot has not acted in this turn: once any call
  * for the bot has returned, its reply may already be acted on (a send block), so a later failure is not replayed
  * elsewhere. A call that was answered by a model other than the bot's own starts the bot's later calls in this turn
  * at that model. Only the bot's own config is walked: a fallback's own list is ignored, so nothing chains.
- * A provider that hit a limit or an outage rests (`coolOff`) and is stepped over for a while, unless every
+ * A model that hit a limit or an outage rests (`coolOff`; a quota or usage limit rests its whole provider) and is stepped over for a while, unless every
  * model rests (then the own model is tried anyway, so a turn never has nothing to try, and a resting spare is never
  * asked after it); a success ends its rest. A turn that has acted never skips: it stays on the model that answered.
  * `call.handoff({from,to,why})` is the input rebuilt for a model other than the bot's own (`handoffInput`). */
 async function callModel(call){
   const {config}=call;
-  const models=[config,...(config?.fallbacks??(config?.fallback?[config.fallback]:[]))];
+  const models=[config,...(config?.fallbacks??[])];
   const note=turnNote(call.botId);
   const first=note&&note.answeredBy<models.length?note.answeredBy:0;
   let why=first>0?note.why:null,last=null;
@@ -491,12 +503,12 @@ async function callModel(call){
     const handed=i>0&&typeof call.handoff==='function'?call.handoff({from:modelName(config),to:modelName(models[i]),why:why??''}):null;
     try{
       const text=await callOnce({...call,config:models[i],...(handed!==null?{input:handed}:{}),...(i>0?{fallbackFrom:{model:modelName(config),why:why??''}}:{})});
-      coolOff.delete(coolKey(models[i]));
+      coolOff.delete(modelKey(models[i]));coolOff.delete(coolKey(models[i]));
       if(note){note.acted=true;note.answeredBy=i;note.why=why;if(handed!==null)note.kept=keptLines(handed);}
       return text;
     }catch(e){
       const ms=coolOffMs(e);
-      if(ms!==null)coolOff.set(coolKey(models[i]),{until:Date.now()+ms,why:fallbackWhy(e)});
+      if(ms!==null)coolOff.set(restKey(models[i],e),{until:Date.now()+ms,why:fallbackWhy(e)});
       last=e;
       if(note?.acted||!fallsBack(e))throw e;
       if(i===0)why=fallbackWhy(e);
@@ -818,7 +830,7 @@ export function boundBotInput(input, max=MAX_BOT_INPUT){
   // bot asked in prose for JSON that its contract required answers in prose.
   // Memory is the only field here that is context and not the job, so it goes
   // first when the cut still does not fit.
-  const slim={objective:cut(env.objective,1200),now:env.now,unattended:env.unattended,remembered:env.remembered,botId:env.botId,runId:env.runId,step:env.step,contract:env.contract,botRole:cut(env.botRole,1200),message:cut(env.message,1200),maxSteps:env.maxSteps,permissions:list(env.permissions),page:cut(env.page,Math.floor(max/2)),note:cut(env.note,600),connectors:env.connectors,connectorResult:cut(env.connectorResult,2000),memory:env.memory,peerAnswer:env.peerAnswer,previous:env.previous&&typeof env.previous==='object'?{...env.previous,output:cut(env.previous.output,600)}:env.previous,restrictions:list(env.restrictions),tools:list(env.tools),truncated:'The full task was cut to fit the model input limit.'};
+  const slim={objective:cut(env.objective,1200),now:env.now,unattended:env.unattended,remembered:env.remembered,botId:env.botId,runId:env.runId,step:env.step,contract:env.contract,botRole:cut(env.botRole,1200),message:cut(env.message,1200),maxSteps:env.maxSteps,permissions:list(env.permissions),page:cut(env.page,Math.floor(max/2)),note:cut(env.note,600),connectors:env.connectors,connectorResult:cut(env.connectorResult,2000),memory:env.memory,peerAnswer:env.peerAnswer,previous:env.previous&&typeof env.previous==='object'?{...env.previous,output:cut(env.previous.output,600)}:env.previous,restrictions:list(env.restrictions),tools:list(env.tools),chatSearch:env.chatSearch,handoff:env.handoff,truncated:'The full task was cut to fit the model input limit.'};
   out=JSON.stringify(slim);
   // Without its tools a bot loses the block syntax and stalls, so memory and the page go before tools do.
   if(out.length>max)out=JSON.stringify({...slim,memory:undefined,peerAnswer:undefined,page:cut(slim.page,4000)});
@@ -827,10 +839,10 @@ export function boundBotInput(input, max=MAX_BOT_INPUT){
   // Never return more than the limit, even if every field was cut already.
   return out.length>max?out.slice(0,max):out;
 }
-const SEARCH_CHAT_TOOL='Search this chat\'s older lines: send a search_chat block {"query": "<words>"} and you are handed up to 8 matching lines. Read-only, once.';
+const SEARCH_CHAT_TOOL='Search this chat\'s older lines: put one block in your reply, e.g. ```search_chat\n{"query": "<words>"}\n``` and you are handed up to 8 matching lines. Read-only, once. Send only that block; nothing else in the reply is kept.';
 /** The task envelope as a model other than the bot's own is sent it: the same job with `handoff: {from, to, why}`
  * after the existing keys (so an Anthropic cache head, which holds only the stable keys, is cut where it was),
- * `tools.search_chat` described, and the thread cut to the newest lines that fit `max`, whole, never shortened.
+ * `tools.search_chat` described (on the bot's own chat turn only), and the thread cut to the newest lines that fit `max`, whole, never shortened.
  * Anything that is not a JSON object is bounded as it always was. Pure. */
 export function handoffInput(input, {from, to, why}, max=MAX_BOT_INPUT){
   const text=String(input??'');
@@ -838,7 +850,9 @@ export function handoffInput(input, {from, to, why}, max=MAX_BOT_INPUT){
   try{env=JSON.parse(text);}catch{/* not an envelope */}
   if(!env||typeof env!=='object'||Array.isArray(env))return boundBotInput(text,max);
   const tools=env.tools&&typeof env.tools==='object'&&!Array.isArray(env.tools)?env.tools:{};
-  const out={...env,tools:{...tools,search_chat:SEARCH_CHAT_TOOL},handoff:{from,to,why}};
+  // Only the bot's own chat turn (the one with a thread, and not yet its hits) may search; a helper's or a teammate's prompt has none.
+  const search=Array.isArray(env.thread)&&!env.chatSearch;
+  const out={...env,...(search||env.tools!==undefined?{tools:{...tools,...(search?{search_chat:SEARCH_CHAT_TOOL}:{})}}:{}),handoff:{from,to,why}};
   if(Array.isArray(env.thread)){
     // Everything but the thread is measured first; the newest lines then take what is left, `,` between them included.
     let room=max-JSON.stringify({...out,thread:[]}).length;
