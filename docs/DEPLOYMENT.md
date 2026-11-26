@@ -140,10 +140,11 @@ What to expect:
   models). Nothing is queued.
 - **Usage limit:** when the owner has picked fallback models (up to three, in
   Settings → Models), a turn that has not replied yet goes to them in order,
-  and the fallback note names both models. The limited model then rests until
-  its own cool-off ends (the time the provider asked for, else 5 minutes, at
-  most an hour), so the next turns use it again afterwards; a restart ends the
-  rest at once. With no fallback, or when none answers, the run fails with a
+  and the fallback note names both models. A model rests after an outage or a
+  rate limit, and the whole provider rests after a quota or usage limit (a
+  subscription CLI always rests whole), until its cool-off ends (the time the
+  provider asked for, else 5 minutes, at most an hour), so the next turns use
+  it again afterwards; a restart ends the rest at once. With no fallback, or when none answers, the run fails with a
   clear message and the chat gets a card offering to switch that bot to another
   connected model, through `PATCH /api/ai/bots/:bot`. A turn that has already
   replied is never replayed on another model, and a subscription at its limit
