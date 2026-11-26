@@ -145,6 +145,7 @@ test('a need skips the server browser and goes to a device that reports it', asy
   assert.equal(store.get('SELECT agent_id FROM agent_tasks').agent_id, fresh);
 });
 
+const TAKEOVER_PIN_LINE = 'This bot is set to use one computer, and a takeover here opens the page in this server\'s browser. Take over from that computer\'s Computer view, or clear "Runs on" on the bot\'s Edit page.';
 const SERVER_PIN_LINE = 'This bot is set to use one computer, and this install opens pages only on the server (BROWSER_RUNTIME=server). Clear the bot\'s computer on its profile, or set BROWSER_RUNTIME=auto.';
 
 test('a takeover is refused for a pinned bot, because it would open the page on the server', async t => {
@@ -152,7 +153,7 @@ test('a takeover is refused for a pinned bot, because it would open the page on 
   const desk = pair('Desk', ['browser.capture'], {seenAgo: 0});
   await setup(desk);
   const here = {mode: 'auto', available: () => true, beginLive: async () => assert.fail('opened a pinned bot\'s page on the server')};
-  await assert.rejects(browser.beginTakeover(store, 'br1', {runtime: here}), e => e.status === 409 && e.message === SERVER_PIN_LINE);
+  await assert.rejects(browser.beginTakeover(store, 'br1', {runtime: here}), e => e.status === 409 && e.message === TAKEOVER_PIN_LINE);
   assert.equal(store.read().browserRequests[0].status, 'pending');
 });
 

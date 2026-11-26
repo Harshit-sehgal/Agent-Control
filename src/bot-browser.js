@@ -36,6 +36,9 @@ const OFFLINE = 'Your computer\'s agent is offline. A server on your own compute
 /** Said when a bot pinned to one computer would have its page opened on the server instead. */
 const PINNED_ON_SERVER = 'This bot is set to use one computer, and this install opens pages only on the server (BROWSER_RUNTIME=server). Clear the bot\'s computer on its profile, or set BROWSER_RUNTIME=auto.';
 
+/** Said when a takeover would open a pinned bot's page in the server's browser. */
+const PINNED_TAKEOVER = 'This bot is set to use one computer, and a takeover here opens the page in this server\'s browser. Take over from that computer\'s Computer view, or clear "Runs on" on the bot\'s Edit page.';
+
 /** The lane a bot's pages queue on in the server's shared browser: its workspace and its id. The runtime is one
  * process for every workspace, and every workspace has a bot called `atlas`. */
 export const browserLane = (store, botId) => `${store?.dbPath || ''}\u0000${botId || ''}`;
@@ -233,7 +236,7 @@ export async function beginTakeover(store, requestId, {actor = null, workspaceId
     ? 'This install only runs browser requests on a paired device (BROWSER_RUNTIME=agent).'
     : 'Set AGENT_BROWSER_ALLOWLIST (a host list, or * for any public site) and install Chrome, or point AGENT_BROWSER_PATH at one.'}`, 409);
   // A takeover always opens on the server's browser, which a bot pinned to one computer never uses.
-  if (pinnedDevice(store.read(), request.botId)) fail(PINNED_ON_SERVER, 409);
+  if (pinnedDevice(store.read(), request.botId)) fail(PINNED_TAKEOVER, 409);
   const view = await runtime.beginLive({url: request.url, requestId: request.id, openedBy: actor, workspaceId, lane: browserLane(store, request.botId)});
   return {...view, requestId: request.id};
 }
