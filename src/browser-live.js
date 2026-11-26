@@ -19,7 +19,7 @@ import {fail} from '../shared/errors.js';
 import {companyBots} from '../shared/company.js';
 import {hostOf} from '../shared/bot-browser.js';
 import {cleanInput} from '../agent/live-input.mjs';
-import {UPDATE_DEVICE_LINE} from '../shared/device-features.js';
+import {UPDATE_DEVICE_LINE, BROWSER_ACCOUNTS_V1} from '../shared/device-features.js';
 import {browserAccountOf, browserDeviceOf} from '../shared/browser-accounts.js';
 import {ACCOUNT_ID} from '../shared/bot-settings.js';
 
@@ -38,6 +38,7 @@ const text = (value, max) => (typeof value === 'string' ? value.slice(0, max) : 
 const accountOf = value => (typeof value === 'string' && ACCOUNT_ID.test(value) ? value : null);
 /** How a tab is named in a report: the account (none for the default profile) and the bot. */
 const tabId = (account, botId) => `${account || ''}|${botId}`;
+const ACCOUNTS_LINE = `This needs a newer app on your computer: it does not report ${BROWSER_ACCOUNTS_V1}. Update the app on your computer, then try again.`;
 const sameWatch = (a, b) => (a?.botId ?? null) === (b?.botId ?? null) && (a?.account ?? null) === (b?.account ?? null);
 
 export function createLiveHub({now = Date.now, waitMs = LIVE_WAIT_MS} = {}) {
@@ -48,18 +49,24 @@ export function createLiveHub({now = Date.now, waitMs = LIVE_WAIT_MS} = {}) {
    * device's stored features; until then no device is trusted with one. Each device drains only its own queue, and this
    * is asked again when commands are handed over, not only when they are queued. */
   hub.holdsSecrets = () => false;
+  /** The same for `browser-accounts-v1`: a device without it would ignore an account and act in, or cast, the default
+   * profile. Asked when commands and the watch are handed over, so a computer rolled back after they were queued is not
+   * sent them. */
+  hub.holdsAccounts = () => false;
 
   const keyOf = (workspaceId, agentId) => `${workspaceId}\u0000${agentId || ''}`;
   /** The device a call means: the one named, else the one that polled last (none before any has). */
   const deviceOf = (workspaceId, agentId) => agentId || lastPoller.get(workspaceId) || null;
   /** A computer's space, or null when it has none: a named computer that never polled is not there. */
   const peek = (workspaceId, agentId = null) => spaces.get(keyOf(workspaceId, deviceOf(workspaceId, agentId))) || null;
-  /** The computer for one bot: the one named, else the one the owner already holds this bot's tab on (so a bot with no
-   * pin does not change computer each time another one polls), else the one that polled last. */
+  /** The one resolver of a bot's computer, used by every method here and by the routes: the one named (an account's or
+   * a pin), else the computer that is still there and holds this bot's tab (so a bot with no pin does not change
+   * computer each time another one polls), else the one that polled last, else none. A holder that went quiet does not
+   * count: nothing drains its line. */
   const deviceFor = (workspaceId, botId, agentId = null) => {
     if (agentId) return agentId;
-    for (const sp of spaces.values()) if (sp.workspaceId === workspaceId && sp.agentId && sp.driving.has(botId)) return sp.agentId;
-    return null;
+    for (const sp of spaces.values()) if (sp.workspaceId === workspaceId && sp.agentId && sp.driving.has(botId) && alive(sp)) return sp.agentId;
+    return lastPoller.get(workspaceId) || null;
   };
   const space = (workspaceId, agentId = null) => {
     const id = deviceOf(workspaceId, agentId), key = keyOf(workspaceId, id);
@@ -96,6 +103,13 @@ export function createLiveHub({now = Date.now, waitMs = LIVE_WAIT_MS} = {}) {
     sp.sentWatch = watch;
     const out = {commands: sp.commands.splice(0), watch: watch ? watch.botId : null};
     if (watch?.account) out.watchAccount = watch.account;
+    // An account's command or tab goes only to a device that holds `browser-accounts-v1` now. For any other it is
+    // dropped, never sent, the hold is released here, and the owner is told in fixed words.
+    if ((out.commands.some(c => c.account) || watch?.account) && !hub.holdsAccounts(sp.workspaceId, agentId)) {
+      for (const c of out.commands) if (c.account) { sp.notices.set(c.botId, ACCOUNTS_LINE); sp.driving.delete(c.botId); }
+      out.commands = out.commands.filter(c => !c.account);
+      if (watch?.account) { sp.notices.set(watch.botId, ACCOUNTS_LINE); out.watch = null; delete out.watchAccount; }
+    }
     // A secret goes only to a device that holds `secret-input-v1` now. For any other it is dropped, never sent (it
     // would be typed untagged and left in the page's results), and the owner is told in fixed words, never the text.
     if (out.commands.some(isSecret) && !hub.holdsSecrets(sp.workspaceId, agentId)) {
@@ -171,16 +185,18 @@ export function createLiveHub({now = Date.now, waitMs = LIVE_WAIT_MS} = {}) {
   };
 
   function takeover(workspaceId, botId, {agentId = null, account = null} = {}) {
-    const sp = peek(workspaceId, agentId);
+    const sp = peek(workspaceId, deviceFor(workspaceId, botId, agentId));
     if (!alive(sp)) fail('The local agent is not running the shared browser right now, so there is nothing to take over. Start it with AGENT_BROWSER=1 and try again.', 409);
     sp.notices.delete(botId);
+    for (const other of spaces.values()) if (other !== sp && other.workspaceId === workspaceId) other.driving.delete(botId);
     sp.driving.set(botId, {since: now(), account});
     command(sp, {type: 'takeover', botId}, account);
   }
   function handback(workspaceId, botId, {agentId = null, account = null} = {}) {
     const sp = peek(workspaceId, deviceFor(workspaceId, botId, agentId));
+    // The hold goes everywhere at once; the command goes to the computer that was holding it.
+    for (const other of spaces.values()) if (other.workspaceId === workspaceId) other.driving.delete(botId);
     if (!sp) return;
-    sp.driving.delete(botId);
     sp.commands.push(account ? {type: 'handback', botId, account} : {type: 'handback', botId});
     wake(sp);
   }
@@ -202,7 +218,9 @@ export function createLiveHub({now = Date.now, waitMs = LIVE_WAIT_MS} = {}) {
   return Object.assign(hub, {
     agentSync, putFrame, view, takeover, handback, input, taskQueued,
     /** Whether the owner holds this bot's tab, on any of the workspace's computers. */
-    isDriving: (workspaceId, botId) => [...spaces.values()].some(sp => sp.workspaceId === workspaceId && sp.driving.has(botId)),
+    isDriving: (workspaceId, botId) => [...spaces.values()].some(sp => sp.workspaceId === workspaceId && alive(sp) && sp.driving.has(botId)),
+    /** The computer that serves this bot now (`agentId` is its account's or its pin): the one resolver, for the routes too. */
+    deviceFor,
     /** Whether a computer is polling: the named one, else the one that polled last. A named one with no space is not there. */
     agentLive: (workspaceId, agentId = null) => alive(peek(workspaceId, agentId)),
     /** The computer serving a workspace's live view: the named one if it is known, else the one that polled last, or null. */
@@ -261,10 +279,11 @@ export function liveStates(state, {hub, ws}) {
     seen.add(bot.id);
     // The bot's own computer: its account's, else its pin, else whichever polled last.
     const {account} = browserAccountOf(state, bot.id), agentId = browserDeviceOf(state, bot.id) || null;
-    const live = hub.agentLive(ws, agentId);
+    const device = hub.deviceFor(ws, bot.id, agentId);
+    const live = hub.agentLive(ws, device);
     const open = requests.find(r => r.botId === bot.id && r.status === 'dispatched') || null;
     const mode = hub.isDriving(ws, bot.id) ? 'driving' : open ? 'browsing' : 'idle';
-    const tab = hub.tab(ws, bot.id, {agentId, account: account?.id || null});
+    const tab = hub.tab(ws, bot.id, {agentId: device, account: account?.id || null});
     const lastDone = requests.filter(r => r.botId === bot.id && r.status === 'done').sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0];
     const url = tab?.url || (open ? open.url : lastDone?.result?.finalUrl || lastDone?.url) || null;
     const title = tab?.title || (open ? null : lastDone?.result?.title) || null;

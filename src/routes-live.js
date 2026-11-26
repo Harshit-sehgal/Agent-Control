@@ -27,6 +27,10 @@ export function liveRoutes(router, {workspaces}) {
   agent.onAgentTaskQueued((workspaceId, agentId) => hub.taskQueued(workspaceId, agentId));
   // The workspace a device was paired in, as the other agent routes find it.
   // The hub asks, as it hands commands to a device, whether that device may be sent a typed secret.
+  hub.holdsAccounts = (ws, agentId) => {
+    const store = workspaces.get?.(ws);
+    return Boolean(store && agentId) && hasFeature(agent.readAgentFeatures(store, agentId), BROWSER_ACCOUNTS_V1);
+  };
   hub.holdsSecrets = (ws, agentId) => {
     const store = workspaces.get?.(ws);
     return Boolean(store && agentId) && hasFeature(agent.readAgentFeatures(store, agentId), SECRET_INPUT_V1);
@@ -59,7 +63,8 @@ export function liveRoutes(router, {workspaces}) {
    * is gone: it is refused, never shown or driven in the default profile. */
   const lineOf = (c, botId) => {
     const state = c.store.read(), {account, missing} = browserAccountOf(state, botId);
-    return {agentId: browserDeviceOf(state, botId) || null, account: account?.id ?? null, missing};
+    // One computer for the whole request: the check and the queue must name the same one.
+    return {agentId: hub.deviceFor(c.actor.workspaceId, botId, browserDeviceOf(state, botId) || null), account: account?.id ?? null, missing};
   };
   /** What a computer says its app can do (none when no computer is on the line). */
   const featuresOf = (c, agentId = null) => {

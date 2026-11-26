@@ -9,7 +9,7 @@
  *   is the browser account that tab is in, when it has one.
  * - A tab is named by its (account, bot): one bot on two accounts has two tabs.
  *   Every command, frame and report here carries the account, and the owner's
- *   input and handback reach only the tab the owner took over.
+ *   input reaches only the tab the owner took over; a handback always releases it.
  * - `/api/agent/frames` carries one screencast frame of that tab. Only the
  *   newest frame is kept and at most about ten go out a second; an older one is
  *   dropped, never queued. The reply says whether anyone still watches.
@@ -57,7 +57,8 @@ export function createLiveChannel({call, shared, frameGapMs = 100, retryMs = 200
       try { await shared.takeover(command.botId, account); held = {botId: command.botId, account}; }
       catch (error) { failed = {botId: command.botId, message: String(error.message).slice(0, 200)}; log.error(`agent: takeover failed (${error.message}).`); }
     } else if (command?.type === 'handback') {
-      if (!holds(command)) return;
+      // Releasing is always safe, and the server has already let go (the account may have changed or gone meanwhile),
+      // so it is honoured whatever account it names. Only the owner's input is gated by the account.
       held = null;
       await shared.handback(command.botId);
     }

@@ -72,12 +72,14 @@ test('input that names the other account of the same bot is refused: it never re
   assert.deepEqual(fake.input, [], 'input for account B, or for no account, drove nothing');
 });
 
-test('a handback for the other account does not release the held tab', async t => {
-  const {channel, sb} = await rig(t, {poll: [{commands: [{type: 'takeover', botId: 'scout', account: A}, {type: 'handback', botId: 'scout', account: B}], watch: null}]});
-  channel.start();
-  await sleep(60);
-  assert.equal(sb.owner(), 'scout');
-  assert.equal(sb.status().find(s => s.account === A).state, 'driving');
+test('a handback is always honoured, whatever account it names: the server has already let go, so the device must too', async t => {
+  for (const named of [B, null]) {
+    const {channel, sb} = await rig(t, {poll: [{commands: [{type: 'takeover', botId: 'scout', account: A}, {type: 'handback', botId: 'scout', ...(named ? {account: named} : {})}], watch: null}]});
+    channel.start();
+    await sleep(60);
+    assert.equal(sb.owner(), null, `released by a handback naming ${named}`);
+    await channel.stop();
+  }
 });
 
 test('a handback for the held account releases it', async t => {

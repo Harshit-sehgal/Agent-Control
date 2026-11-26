@@ -20,7 +20,7 @@ const WS = 'default';
 const A = '0a1b2c3d-0000-4000-8000-00000000000a';
 const B = '0a1b2c3d-0000-4000-8000-00000000000b';
 const click = {type: 'click', x: 5, y: 6};
-const rig = (extra = {}) => { let t = 1_000_000; const hub = createLiveHub({now: () => t, waitMs: 25, ...extra}); return {hub, tick: ms => { t += ms; }}; };
+const rig = (extra = {}) => { let t = 1_000_000; const hub = createLiveHub({now: () => t, waitMs: 25, ...extra}); hub.holdsAccounts = () => true; return {hub, tick: ms => { t += ms; }}; };
 
 test('with two computers, an account bot\'s takeover, input and watch go to the account\'s computer, not the last poller', async () => {
   const {hub} = rig();
@@ -78,6 +78,66 @@ test('an unpinned bot the owner holds stays on the computer it was taken over on
   assert.deepEqual((await hub.agentSync(WS, 'pc-x', {})).commands.map(c => c.type), ['input'], 'on the computer that holds the tab');
   hub.handback(WS, 'atlas');
   assert.deepEqual((await hub.agentSync(WS, 'pc-x', {})).commands, [{type: 'handback', botId: 'atlas'}]);
+  hub.close();
+});
+
+test('a repeated takeover of a held unpinned bot lands on the computer that holds it, not on the last poller', async () => {
+  const {hub} = rig();
+  const x = hub.agentSync(WS, 'pc-x', {});
+  hub.takeover(WS, 'atlas');
+  await x;
+  await hub.agentSync(WS, 'pc-y', {});
+  hub.takeover(WS, 'atlas');
+  assert.deepEqual((await hub.agentSync(WS, 'pc-y', {})).commands, [], 'nothing for the last poller');
+  assert.deepEqual((await hub.agentSync(WS, 'pc-x', {})).commands.map(c => c.type), ['takeover']);
+  hub.input(WS, 'atlas', click);
+  assert.deepEqual((await hub.agentSync(WS, 'pc-x', {})).commands.map(c => c.type), ['input'], 'one holder, so input has one line');
+  hub.close();
+});
+
+test('a holder that went quiet holds nothing: input is refused, the hold is not shown, and a takeover goes to a computer that is there', async () => {
+  const {hub, tick} = rig();
+  const x = hub.agentSync(WS, 'pc-x', {});
+  hub.takeover(WS, 'atlas');
+  await x;
+  tick(60_000);
+  await hub.agentSync(WS, 'pc-y', {});
+  assert.equal(hub.isDriving(WS, 'atlas'), false, 'a computer nobody hears from holds nothing');
+  assert.throws(() => hub.input(WS, 'atlas', click), e => e.status === 409, 'not accepted onto a line nobody drains');
+  hub.takeover(WS, 'atlas');
+  assert.deepEqual((await hub.agentSync(WS, 'pc-y', {})).commands.map(c => c.type), ['takeover']);
+  assert.equal(hub.isDriving(WS, 'atlas'), true);
+  await hub.agentSync(WS, 'pc-x', {});                 // the old holder comes back: it holds nothing
+  hub.handback(WS, 'atlas');
+  assert.equal(hub.isDriving(WS, 'atlas'), false, 'the hold is gone everywhere');
+  hub.close();
+});
+
+test('a pinned bot after a re-pair: the old computer\'s hold does not outlive its silence', async () => {
+  const {hub, tick} = rig();
+  const old = hub.agentSync(WS, 'pc-old', {});
+  hub.takeover(WS, 'scout', {agentId: 'pc-old', account: A});
+  await old;
+  tick(60_000);
+  assert.equal(hub.isDriving(WS, 'scout'), false);
+  assert.equal(hub.agentLive(WS, 'pc-old'), false);
+  hub.close();
+});
+
+test('account commands and the watch are dropped at hand-over for a computer that no longer reports browser-accounts-v1', async () => {
+  const {hub} = rig();
+  const line = 'This needs a newer app on your computer: it does not report browser-accounts-v1. Update the app on your computer, then try again.';
+  await hub.agentSync(WS, 'pc-b', {});
+  hub.takeover(WS, 'scout', {agentId: 'pc-b', account: A});
+  hub.view(WS, 'scout', {agentId: 'pc-b'});
+  hub.holdsAccounts = () => false;                      // rolled back after they were queued
+  const heard = await hub.agentSync(WS, 'pc-b', {});
+  assert.deepEqual(heard, {commands: [], watch: null}, 'nothing for an old app: it would act in, and cast, the default profile');
+  assert.equal(hub.isDriving(WS, 'scout'), false, 'the hold is released here');
+  assert.equal(hub.view(WS, 'scout', {agentId: 'pc-b'}).notice, line);
+  // A command with no account is untouched.
+  hub.takeover(WS, 'atlas', {agentId: 'pc-b'});
+  assert.deepEqual((await hub.agentSync(WS, 'pc-b', {})).commands, [{type: 'takeover', botId: 'atlas'}]);
   hub.close();
 });
 
@@ -203,12 +263,12 @@ async function harness() {
   });
   const send = async (method, url, {cookie, body, signedBy} = {}) => {
     const text = body === undefined ? '' : JSON.stringify(body);
-    const headers = {host: '127.0.0.1:4173', ...(cookie ? {cookie: `agent_session=${cookie}`} : {})};
+    const headers = {host: '127.0.0.1:4173', origin: 'http://127.0.0.1:4173', ...(cookie ? {cookie: `agent_session=${cookie}`} : {})};
     if (signedBy) {
       const ts = Date.now();
       Object.assign(headers, {'x-agent-id': signedBy.id, 'x-agent-ts': String(ts), 'x-agent-sig': agent.signRequest(signedBy.secret, {method, path: url, timestamp: ts, body: text})});
     }
-    const req = Object.assign(Readable.from(text ? [Buffer.from(text)] : []), {method, url, headers});
+    const req = Object.assign(Readable.from(text ? [Buffer.from(text)] : []), {method, url, headers, socket: {remoteAddress: '127.0.0.1'}});
     const res = {status: null, body: null, writeHead(status) { this.status = status; return this; }, end(b) { this.body = b; }};
     await app.handler(req, res);
     return {status: res.status, body: res.body ? JSON.parse(res.body) : null};
@@ -271,4 +331,28 @@ test('an account bot whose record is gone is refused, never run in the default p
   const r = await send('POST', '/api/browser-live/scout/takeover', {cookie: 'owner'});
   assert.equal(r.status, 409);
   assert.match(r.body.error, /no longer exists/);
+});
+
+test('over HTTP: the feature check and the queue name the same computer, the one that holds the bot', async t => {
+  const {dir, store, send, pcA, pcB} = await harness();
+  t.after(() => fs.rm(dir, {recursive: true, force: true}));
+  browserLive.waitMs = 30;
+  t.after(() => browserLive.close());
+  const poll = (who, extra = {}) => send('POST', '/api/agent/live', {body: {tabs: [], ...extra}, signedBy: who});
+  const secret = {type: 'type', text: 'pw-123', secret: true};
+  agent.recordAgentFeatures(store, pcA.id, ['secret-input-v1']);   // A can hold a secret, B cannot
+  await poll(pcA);
+  assert.equal((await send('POST', '/api/browser-live/atlas/takeover', {cookie: 'owner'})).status, 200);   // held on A
+  await poll(pcB);                                                  // B polled last
+  const typed = await send('POST', '/api/browser-live/atlas/input', {cookie: 'owner', body: secret});
+  assert.equal(typed.status, 200, 'the computer that will type it can hold a secret');
+  assert.deepEqual((await poll(pcA)).body.commands.filter(c => c.type === 'input').map(c => c.event.secret), [true], 'and it is the one that is handed it');
+  assert.deepEqual((await poll(pcB)).body.commands, []);
+  const view = await send('GET', '/api/browser-live/atlas', {cookie: 'member'});
+  assert.deepEqual(view.body.features, ['secret-input-v1'], 'the Password and Code fields follow the holding computer, not the last poller');
+  // The reverse: the holder cannot hold a secret, the last poller can: refused, nothing queued.
+  agent.recordAgentFeatures(store, pcA.id, []);
+  agent.recordAgentFeatures(store, pcB.id, ['secret-input-v1']);
+  assert.equal((await send('POST', '/api/browser-live/atlas/input', {cookie: 'owner', body: secret})).status, 409);
+  assert.deepEqual((await poll(pcA)).body.commands, []);
 });
