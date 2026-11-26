@@ -2,19 +2,19 @@
  * LLM output may only extend a run's recipients through `handoffTargets`, which
  * revalidates every target against this policy and the step cap.
  */
-import {SETUP_TOOL_HINT} from './setup.js?v=3fe83129d0';
-import {botSettings,groupSettings,pipelineOf,MAX_STEPS_LIMIT} from './bot-settings.js?v=3fe83129d0';
-import {BROWSER_TOOL_HINT,MAX_PAGE_CHARS} from './bot-browser.js?v=3fe83129d0';
-import {CONNECTOR_TOOL_HINT} from './connectors.js?v=3fe83129d0';
-import {SUBAGENT_PERMISSION,SUBAGENT_TOOL_HINT} from './subagents.js?v=3fe83129d0';
-import {BOT_ASK_TOOL_HINT,companyList} from './bot-link.js?v=3fe83129d0';
-import {limitText} from './ask-limits.js?v=3fe83129d0';
-import {BOT_CREATE_TOOL_HINT,MAX_BOTS_PER_GROUP} from './bot-create.js?v=3fe83129d0';
-import {memoryBlock} from './memory.js?v=3fe83129d0';
-import {isThread} from './threads.js?v=3fe83129d0';
-import {BUSY_STATUSES as BUSY} from './run-state.js?v=3fe83129d0';
-import {companyBots,PRIMARY_GROUP,isLead,teamOf} from './company.js?v=3fe83129d0';
-import {OFFJOB_RULE,OFFJOB_ANYWAY,basicAsk} from './off-job.js?v=3fe83129d0';
+import {SETUP_TOOL_HINT} from './setup.js?v=bc0163e01c';
+import {botSettings,groupSettings,pipelineOf,MAX_STEPS_LIMIT} from './bot-settings.js?v=bc0163e01c';
+import {BROWSER_TOOL_HINT,MAX_PAGE_CHARS} from './bot-browser.js?v=bc0163e01c';
+import {CONNECTOR_TOOL_HINT} from './connectors.js?v=bc0163e01c';
+import {SUBAGENT_PERMISSION,SUBAGENT_TOOL_HINT} from './subagents.js?v=bc0163e01c';
+import {BOT_ASK_TOOL_HINT,companyList} from './bot-link.js?v=bc0163e01c';
+import {limitText} from './ask-limits.js?v=bc0163e01c';
+import {BOT_CREATE_TOOL_HINT,MAX_BOTS_PER_GROUP} from './bot-create.js?v=bc0163e01c';
+import {memoryBlock} from './memory.js?v=bc0163e01c';
+import {isThread} from './threads.js?v=bc0163e01c';
+import {BUSY_STATUSES as BUSY} from './run-state.js?v=bc0163e01c';
+import {companyBots,PRIMARY_GROUP,isLead,teamOf} from './company.js?v=bc0163e01c';
+import {OFFJOB_RULE,OFFJOB_ANYWAY,basicAsk} from './off-job.js?v=bc0163e01c';
 
 /** The default step count of a run: no limit of its own, only the backstop. A group may set fewer. */
 export const MAX_HANDOFFS = MAX_STEPS_LIMIT;
@@ -24,7 +24,7 @@ export {MAX_PAGE_CHARS};
 /** Which run statuses are busy or interruptible is decided once in
  * `shared/run-state.js`; re-exported here because callers have reached for them
  * through the coordination module since they were declared here. */
-export {BUSY_STATUSES, INTERRUPT_STATUSES} from './run-state.js?v=3fe83129d0';
+export {BUSY_STATUSES, INTERRUPT_STATUSES} from './run-state.js?v=bc0163e01c';
 const normalize = value => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 const safe = value => String(value ?? '').slice(0, MAX_CONTEXT_CHARS);
 const fail = (message, status) => Object.assign(new Error(message), {status});

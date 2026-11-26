@@ -13,6 +13,7 @@ import * as agent from './agent.js';
 import {browserRuntime} from './browser-runtime.js';
 import {fail} from '../shared/errors.js';
 import {addChatMessages} from '../shared/chats.js';
+import {pinnedDevice} from '../shared/bot-settings.js';
 import {activity, cleanText} from '../shared/core.js';
 import {browserResultText, capturePageText, hostOf, MAX_BROWSER_DEPTH} from '../shared/bot-browser.js';
 import {logActivity} from '../shared/activity-log.js';
@@ -31,27 +32,36 @@ export function setBrowserResultHooks(hooks) { resultHooks = {...resultHooks, ..
 /** How long a page sent to a device may take before it is failed, so a run never waits on it forever. */
 export const BROWSER_WAIT_MS = 600000;
 const OFFLINE = 'Your computer\'s agent is offline. A server on your own computer restarts it within a few seconds; on another machine, start it there (`node agent/agent.mjs run`), then approve again.';
-/** Seen lately. A device paired a moment ago counts until its first beat lands. */
-const online = (row, nowMs = Date.now()) => Boolean(row?.last_seen_at || row?.paired_at) && Date.parse(row.last_seen_at || row.paired_at) > nowMs - agent.AGENT_ONLINE_MS;
 
-/** The most recently seen online agent that may run this kind; null when none may; throws when the ones that may are offline. */
-function pickAgent(store, kind) {
-  if (typeof store.all !== 'function') return null;
-  const may = store.all('SELECT id,permissions,last_seen_at,paired_at FROM agents WHERE revoked_at IS NULL ORDER BY last_seen_at DESC')
-    .filter(a => { try { return JSON.parse(a.permissions || '[]').includes(kind); } catch { return false; } });
-  const live = may.find(a => online(a));
-  if (may.length && !live) fail(OFFLINE, 409);
-  return live?.id || null;
-}
+/** Said when a bot pinned to one computer would have its page opened on the server instead. */
+const PINNED_ON_SERVER = 'This bot is set to use one computer, and this install opens pages only on the server (BROWSER_RUNTIME=server). Clear the bot\'s computer on its profile, or set BROWSER_RUNTIME=auto.';
+
+/** Said when a takeover would open a pinned bot's page in the server's browser. */
+const PINNED_TAKEOVER = 'This bot is set to use one computer, and a takeover here opens the page in this server\'s browser. Take over from that computer\'s Computer view, or clear "Runs on" on the bot\'s Edit page.';
+
+/** The lane a bot's pages queue on in the server's shared browser: its workspace and its id. The runtime is one
+ * process for every workspace, and every workspace has a bot called `atlas`. */
+export const browserLane = (store, botId) => `${store?.dbPath || ''}\u0000${botId || ''}`;
 
 /** Send a pending request to a local agent, or run it here. A request with no
  * capable agent stays pending, so pairing one and approving again still works. */
-export async function dispatchBrowserRequest(store, id, {actor = null, runtime = browserRuntime} = {}) {
+export async function dispatchBrowserRequest(store, id, {actor = null, runtime = browserRuntime, needs: asked = []} = {}) {
+  const needs = agent.normalizeNeeds(asked);
   const request = (store.read().browserRequests || []).find(r => r.id === id);
   if (!request) fail('Browser request not found.', 404);
   if (request.status !== 'pending') fail('This browser request is no longer waiting.', 409);
-  const here = runtime.mode !== 'agent' && runtime.available();
-  const agentId = here ? null : pickAgent(store, request.kind);
+  const pin = pinnedDevice(store.read(), request.botId);
+  if (pin && runtime.mode === 'server') fail(PINNED_ON_SERVER, 409);
+  // A pinned bot never opens pages on the server, and a need names a device feature the server browser has none of.
+  const here = !pin && !needs.length && runtime.mode !== 'agent' && runtime.available();
+  let agentId = null;
+  if (!here) {
+    const chosen = agent.chooseDevice(store, {kind: request.kind, deviceId: pin, needs});
+    if (chosen.reason === 'agent-offline') fail(OFFLINE, 409);
+    if (chosen.reason === 'not-pinned') fail('This bot\'s computer is not available. Pair it again, or choose another computer on the bot\'s profile.', 409);
+    if (chosen.reason === 'missing-feature') fail(agent.missingFeatureLine(chosen.feature), 409);
+    agentId = chosen.agent?.id || null;
+  }
   if (!here && !agentId) fail(`No paired local agent holds the ${request.kind} permission. ${runtime.mode === 'agent'
     ? 'This install only runs browser requests on a paired device (BROWSER_RUNTIME=agent). Pair one in Settings → Local agents and grant it, then approve again.'
     : 'A server started on your own computer connects this computer by itself; restart it, pair one in Settings → Local agents, or give this server a browser: set AGENT_BROWSER_ALLOWLIST=* for any public site (or name hosts) and install Chrome, or point AGENT_BROWSER_PATH at one. Then approve again.'}`, 409);
@@ -122,7 +132,7 @@ async function runHere(store, id, runtime) {
   const request = (store.read().browserRequests || []).find(r => r.id === id);
   if (!request) return;
   try {
-    const result = await runtime.run({url: request.url, steps: request.steps || [], approved: approvedOf(request)});
+    const result = await runtime.run({url: request.url, steps: request.steps || [], approved: approvedOf(request), lane: browserLane(store, request.botId)});
     await finishBrowserRequest(store, request, {ok: true, result});
   } catch (error) {
     // The write recording the page can be the thing that failed (a store refusing writes), so this
@@ -214,7 +224,7 @@ export async function finishBrowserRequest(store, request, {ok, result = null, e
  * so a cookie earned here survives from one call to the next — and nothing
  * else: the next capture still starts with a fresh, signed-out context. The
  * request stays waiting on a person meanwhile, so a takeover that times out
- * leaves nothing stuck: the runtime refuses a second takeover and a bot's page
+ * leaves nothing stuck: the runtime refuses a second takeover and that bot's page
  * while the person is holding it, and the request can be taken over again. The
  * bot is resumed when the person hands the page back, with the page as they
  * left it. */
@@ -225,7 +235,9 @@ export async function beginTakeover(store, requestId, {actor = null, workspaceId
   if (runtime.mode === 'agent' || !runtime.available()) fail(`No browser is available on this server to take over. ${runtime.mode === 'agent'
     ? 'This install only runs browser requests on a paired device (BROWSER_RUNTIME=agent).'
     : 'Set AGENT_BROWSER_ALLOWLIST (a host list, or * for any public site) and install Chrome, or point AGENT_BROWSER_PATH at one.'}`, 409);
-  const view = await runtime.beginLive({url: request.url, requestId: request.id, openedBy: actor, workspaceId});
+  // A takeover always opens on the server's browser, which a bot pinned to one computer never uses.
+  if (pinnedDevice(store.read(), request.botId)) fail(PINNED_TAKEOVER, 409);
+  const view = await runtime.beginLive({url: request.url, requestId: request.id, openedBy: actor, workspaceId, lane: browserLane(store, request.botId)});
   return {...view, requestId: request.id};
 }
 
@@ -265,7 +277,7 @@ export async function expireBrowserTasks(store, hooks = resultHooks, nowMs = Dat
       const task = store.get('SELECT agent_id,status FROM agent_tasks WHERE id=?', taskId);
       if (!task || !['queued', 'running'].includes(task.status)) continue;
       const device = store.get('SELECT last_seen_at,paired_at,revoked_at FROM agents WHERE id=?', task.agent_id);
-      const reason = !online(device, nowMs) ? 'Your computer went offline before it opened the page. Start the app on it again, then ask again.'
+      const reason = !agent.agentOnline(device, nowMs) ? 'Your computer went offline before it opened the page. Start the app on it again, then ask again.'
         : Number.isFinite(request.notAfter) && nowMs > request.notAfter ? 'Your computer did not open the page in time.' : null;
       if (!reason) continue;
       agent.failAgentTasks(store, [taskId], reason);

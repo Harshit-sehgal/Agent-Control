@@ -11,10 +11,15 @@ The control plane never dials your device. Every request in this protocol is
    stored only as a SHA-256 hash, so a database leak cannot redeem a pending
    pairing.
 2. The **device** exchanges it exactly once:
-   `POST /api/agent/pair {code, name, permissions}` →
+   `POST /api/agent/pair {code, name, permissions, features}` →
    `{agentId, secret, workspaceId, permissions, pollIntervalMs}`.
    The plaintext `secret` is returned once; the server keeps only an
-   AES-256-GCM-encrypted copy and a SHA-256 hash.
+   AES-256-GCM-encrypted copy and a SHA-256 hash. `features` is what the app
+   can do (`shared/device-features.js`), the same list every heartbeat sends,
+   so work that needs a feature is not refused before the first beat. An app
+   that sends none still pairs and reports none until it beats. A device whose
+   app lacks a feature the server needs shows "Needs an update" on its card in
+   Settings, naming what it cannot do.
 
 ## 2. Signed requests
 Every subsequent agent request carries three headers:
@@ -79,10 +84,20 @@ frame), uses these; `src/browser-live.js` keeps what they carry in memory:
   Backspace, Delete, Escape, arrows, Home, End, PageUp, PageDown),
   `navigate {url}` (held to the allowlist).
 
-While the owner drives, bots wait. A running task finishes the step it is in,
-runs no later step (the page is no longer the one the steps were planned for),
-waits for the hand back and answers with the page as the owner left it and
-`tookOver: true`. A takeover has no clock unless `AGENT_TAKEOVER_IDLE_MS` is set.
+While the owner drives a bot's tab, only that bot waits. A running task of
+that bot finishes the step it is in, runs no later step (the page is no longer
+the one the steps were planned for), waits for the hand back and answers with
+the page as the owner left it and `tookOver: true`. Other bots' tasks, and
+`model.run` tasks, keep running. A takeover has no clock unless
+`AGENT_TAKEOVER_IDLE_MS` is set.
+
+The device runs up to `AGENT_CONCURRENCY` claimed tasks at once (default 3,
+whole number 1 to 8). One bot's browser tasks run one at a time, at most one
+`model.run` runs per CLI engine, and the keepalive counts every running task.
+The pairing request and each heartbeat carry the device's `features`; the
+server uses them to choose a device (`chooseDevice`) and marks one that lacks
+a feature it relies on as needing an update, without refusing the rest of its
+work.
 
 ## 4. Task leases & recovery
 - `claimAgentTasks` leases a due task (`status='running'`, `lease_until`).

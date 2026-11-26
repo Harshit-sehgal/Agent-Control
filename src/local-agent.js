@@ -22,6 +22,7 @@ import {fileURLToPath} from 'node:url';
 import {spawn as nodeSpawn} from 'node:child_process';
 import {AGENT_ACTIONS, createPairing, redeemPairing} from './agent.js';
 import {DEFAULT_WORKSPACE} from './auth.js';
+import {DEVICE_FEATURES} from '../shared/device-features.js';
 
 const AGENT_SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'agent', 'agent.mjs');
 const NAME = 'This computer';
@@ -58,7 +59,7 @@ export function ensureLocalAgent(store, {dataFile, server}) {
     return {agentId: row.id, configPath};
   }
   const {code} = createPairing(store, DEFAULT_WORKSPACE, {label: NAME, createdBy: null, permissions: AGENT_ACTIONS, ttlMs: 60_000});
-  const made = redeemPairing(store, {code, name: NAME, permissions: AGENT_ACTIONS});
+  const made = redeemPairing(store, {code, name: NAME, permissions: AGENT_ACTIONS, features: DEVICE_FEATURES});
   writeConfig(configPath, {server, agentId: made.agentId, secret: made.secret, permissions: made.permissions, name: NAME, pairedAt: new Date().toISOString(), startedBy: 'server'});
   return {agentId: made.agentId, configPath};
 }

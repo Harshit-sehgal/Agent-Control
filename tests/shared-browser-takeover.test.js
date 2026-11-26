@@ -16,6 +16,8 @@ import {mock} from 'node:test';
 
 const ALLOW = ['docs.example.com'];
 const PAGES = {'https://docs.example.com/': {title: 'Docs', text: 'Hello', elements: [{index: 1, tag: 'button', text: 'Go'}]}};
+/** Rejects with `why` when `promise` is not settled in `ms`. */
+const within = (promise, ms, why) => Promise.race([promise, new Promise((_, reject) => { const id = setTimeout(() => reject(new Error(why)), ms); promise.finally(() => clearTimeout(id)).catch(() => {}); })]);
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 function rig(extra = {}, {start} = {}) {
   const processes = [];
@@ -27,11 +29,12 @@ function rig(extra = {}, {start} = {}) {
 }
 const steps = [{op: 'click', index: 1}, {op: 'click', index: 1}, {op: 'read', selector: 'main'}];
 /** Hold the Nth page evaluation that is an action (not a snapshot or a read of the page) until released. */
-function holdStep(fake, nth) {
+function holdStep(fake, nth, {sessionId} = {}) {
   let seen = 0, release, started;
   const began = new Promise(resolve => { started = resolve; });
   const gate = new Promise(resolve => { release = resolve; });
-  fake.hook('Runtime.evaluate', async ({expression}) => {
+  fake.hook('Runtime.evaluate', async ({expression}, sid) => {
+    if (sessionId && sid !== sessionId) return undefined;
     if (expression === 'location.href' || expression.startsWith('(function(){var els=') || expression.startsWith('JSON.stringify(')) return undefined;
     if (++seen === nth) { started(); await gate; }
     return undefined;
@@ -67,21 +70,91 @@ test('the owner takes the browser while a bot is mid-task: the step in flight fi
   assert.equal(sb.status()[0].state, 'idle');
 });
 
-test('a task that starts while the owner is driving waits, then runs whole', async t => {
-  const {sb, fake} = rig();
+test('while the owner drives bot A, A\'s next task waits and B\'s runs whole', async t => {
+  const {sb, fake} = rig({timeoutMs: 400}); // a click waits up to 15 beats for the page to move: a short deadline keeps the beat short
   t.after(() => sb.close());
   await sb.takeover('bot-a');
-  const waiting = sb.run('bot-b', {url: 'https://docs.example.com/', steps: [{op: 'click', index: 1}]});
+  const waiting = sb.run('bot-a', {url: 'https://docs.example.com/', steps: [{op: 'click', index: 1}]});
   let settled = false;
   waiting.then(() => { settled = true; });
+  const other = await within(sb.run('bot-b', {url: 'https://docs.example.com/', steps: [{op: 'click', index: 1}]}), 1000, 'B waited for the takeover of A');
+  assert.equal(other.tookOver, undefined);
+  assert.equal(other.actions[0].ok, true, 'B was never interrupted, so its steps ran');
   await sleep(40);
-  assert.equal(settled, false, 'bots wait while the owner holds the browser');
-  assert.equal(fake().called('Page.navigate').length, 0, 'bot B opened nothing');
+  assert.equal(settled, false, 'A\'s own next task waits while the owner holds A\'s tab');
+  assert.equal(fake().called('Page.navigate').length, 1, 'only B opened a page');
   await sb.handback('bot-a');
   const result = await waiting;
   assert.equal(result.tookOver, undefined);
-  assert.equal(result.actions[0].ok, true, 'it was never interrupted, so its steps ran');
-  assert.equal(fake().actions.length, 1);
+  assert.equal(result.actions[0].ok, true);
+  assert.equal(fake().actions.length, 2, 'one click for B, one for A');
+});
+
+test('a takeover of bot A\'s tab does not delay bot B', async t => {
+  const {sb, fake} = rig({timeoutMs: 400}); // a click waits up to 15 beats for the page to move: a short deadline keeps the beat short
+  t.after(() => sb.close());
+  await sb.run('bot-a', {url: 'https://docs.example.com/'});
+  await sb.run('bot-b', {url: 'https://docs.example.com/'});
+  const [tabA] = [...fake().targets.values()].map(target => target.sessionId);
+  const held = holdStep(fake(), 1, {sessionId: tabA});
+  const a = sb.run('bot-a', {url: 'https://docs.example.com/', steps});
+  await held.began;
+  await sb.takeover('bot-a');
+  held.release();
+  const b = await within(sb.run('bot-b', {url: 'https://docs.example.com/', steps: [{op: 'click', index: 1}]}), 1000, 'B was parked by A\'s takeover');
+  assert.equal(b.tookOver, undefined);
+  assert.equal(b.actions[0].ok, true);
+  await sb.handback('bot-a');
+  assert.equal((await a).tookOver, true);
+});
+
+test('the owner\'s input to bot A waits only for A\'s own step, never for bot B\'s', async t => {
+  const {sb, fake} = rig({timeoutMs: 400}); // a click waits up to 15 beats for the page to move: a short deadline keeps the beat short
+  t.after(() => sb.close());
+  await sb.run('bot-a', {url: 'https://docs.example.com/'});
+  await sb.run('bot-b', {url: 'https://docs.example.com/'});
+  const tabB = [...fake().targets.values()].map(target => target.sessionId)[1];
+  const held = holdStep(fake(), 1, {sessionId: tabB});
+  const b = sb.run('bot-b', {url: 'https://docs.example.com/', steps});
+  await held.began;
+  await sb.takeover('bot-a');
+  await within(sb.applyInput('bot-a', {type: 'key', key: 'Enter'}), 1000, 'input waited on B');
+  assert.equal(fake().input.length, 2, 'the key went in while B\'s step was still in flight');
+  held.release();
+  await sb.handback('bot-a');
+  const result = await b;
+  assert.equal(result.tookOver, undefined, 'B never saw the takeover of A');
+  assert.equal(result.actions.every(x => x.ok), true);
+});
+
+test('secret typing into A while B runs keeps its order, and each tab is scrubbed only by its own memory', async t => {
+  const secret = 'hunter2-secret';
+  const pages = {
+    'https://docs.example.com/': {title: 'Docs', text: 'Hello', elements: [{index: 1, tag: 'button', text: 'Go'}]},
+    'https://echo.example.com/': {title: 'Echo', text: `you said ${secret}`, elements: [{index: 1, tag: 'button', text: 'Go'}]},
+  };
+  const made = [];
+  const {sb} = rig({allow: ['docs.example.com', 'echo.example.com'], timeoutMs: 400}, {start: async () => { const f = fakeCdp({pages}); made.push(f); return startBrowserSession({connection: f.connection}); }});
+  t.after(() => sb.close());
+  const fake = () => made[0];
+  await sb.run('bot-a', {url: 'https://docs.example.com/'});
+  await sb.run('bot-b', {url: 'https://docs.example.com/'});
+  const [tabA, tabB] = [...fake().targets.values()].map(target => target.sessionId);
+  const held = holdStep(fake(), 1, {sessionId: tabB});
+  const b = sb.run('bot-b', {url: 'https://echo.example.com/', steps: [{op: 'click', index: 1}]});
+  await held.began;
+  await sb.takeover('bot-a');
+  await within(sb.applyInput('bot-a', {type: 'type', text: secret, secret: true}), 1000, 'secret typing waited on B');
+  const onA = fake().calls.filter(c => c.sessionId === tabA && (c.method === 'Input.insertText' || [FOCUSED_IS_SECRET_JS, TAG_FOCUSED_SECRET_JS].includes(c.params?.expression)));
+  assert.deepEqual(onA.map(c => (c.method === 'Input.insertText' ? 'insert' : c.params.expression === FOCUSED_IS_SECRET_JS ? 'ask' : 'tag')), ['ask', 'tag', 'insert']);
+  assert.equal(fake().calls.filter(c => c.sessionId === tabB && (c.method === 'Input.insertText' || isTag(c))).length, 0, 'nothing of it reached B\'s tab');
+  held.release();
+  const rb = await b;
+  assert.ok(JSON.stringify(rb).includes(secret), 'B\'s result is not scrubbed of what the owner typed into A\'s tab');
+  await sb.handback('bot-a');
+  assert.deepEqual(fake().cleared.map(c => c.sessionId), [tabA], 'A\'s secret fields were emptied once, and only A\'s');
+  const again = await sb.run('bot-a', {url: 'https://echo.example.com/'});
+  assert.ok(!JSON.stringify(again).includes(secret) && JSON.stringify(again).includes('[hidden]'), 'A\'s own capture of a page echoing it says [hidden]');
 });
 
 test('owner input waits for the action in flight, and is refused unless the owner holds that bot\'s tab', async t => {

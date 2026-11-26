@@ -207,6 +207,67 @@ async def create_bot_from_page(page, base):
     await expect(page.locator('#main h1')).to_have_text('Publishing assistant')
 
 
+async def edit_pins_a_bot_to_one_computer(page, base):
+    """The owner picks the computer on a bot's Edit page; a member's Edit shows no such row and a rename keeps the pin."""
+    server = await install_admin(page)
+    ids = await open_app(page, base, bots=EXTRA_BOTS)
+    writer = ids['Writer']
+
+    async def be(role):
+        await page.evaluate("""async role => {
+            const v = new URL(document.querySelector('script[src*="app.js"]').src).search;
+            const {store} = await import('./ui-store.js' + v);
+            store.state.me = {...(store.state.me || {}), email: 'owner@localhost', role};
+        }""", role)
+
+    async def open_edit():
+        await page.evaluate(f"location.hash = '#profile/{writer}'")
+        await page.evaluate(f"location.hash = '#profile/{writer}/edit'")
+        await page.locator('#edit-bot-form').wait_for()
+
+    await be('owner')
+    await open_edit()
+    select = page.locator('#edit-bot-form select[name=device]')
+    await expect(select).to_have_count(1)
+    await expect(page.locator('#edit-bot-form .nb-device span')).to_have_text('Runs on')
+    values = await select.locator('option').evaluate_all('o => o.map(x => [x.value, x.textContent])')
+    assert values == [['', 'Any computer'], ['a1', 'Laptop'], ['a2', 'Desk PC']], values
+    await select.select_option('a1')
+    await page.locator('#edit-bot-form button[type=submit]').click()
+    await expect(page.locator('#toast')).to_have_text('Saved.')
+    assert company_bot(await api_state(page), 'Writer')['settings']['device'] == 'a1'
+    # A member sees no Runs on row; renaming the bot leaves its pin where it was.
+    await be('member')
+    await open_edit()
+    await expect(page.locator('#edit-bot-form .nb-boss', has_text='Manager')).to_have_count(1)
+    await page.wait_for_timeout(300)
+    await expect(page.locator('#edit-bot-form select[name=device]')).to_have_count(0)
+    assert await overflow(page) <= 0, 'the Edit page overflows the phone'
+    await page.locator('#edit-bot-form input[name=name]').fill('Drafter')
+    await page.locator('#edit-bot-form button[type=submit]').click()
+    await expect(page.locator('#main .pr-hero h1')).to_have_text('Drafter')
+    assert company_bot(await api_state(page), 'Drafter')['settings']['device'] == 'a1'
+    # The owner's page, with the pin showing, fits a phone too.
+    await be('owner')
+    await page.evaluate(f"location.hash = '#profile/{writer}'")
+    await page.evaluate(f"location.hash = '#profile/{writer}/edit'")
+    await expect(page.locator('#edit-bot-form select[name=device]')).to_have_value('a1')
+    assert await overflow(page) <= 0, 'the Runs on row overflows the phone'
+    # Every computer revoked, the bot still pinned: the owner still sees the pin and Any computer clears it.
+    for agent in server.agents:
+        agent['status'] = 'revoked'
+    await page.evaluate(f"location.hash = '#profile/{writer}'")
+    await page.evaluate(f"location.hash = '#profile/{writer}/edit'")
+    await expect(select).to_have_count(1)
+    values = await select.locator('option').evaluate_all('o => o.map(x => [x.value, x.textContent])')
+    assert values == [['', 'Any computer'], ['a1', 'A computer that is no longer paired']], values
+    await expect(select).to_have_value('a1')
+    await select.select_option('')
+    await page.locator('#edit-bot-form button[type=submit]').click()
+    await expect(page.locator('#toast')).to_have_text('Saved.')
+    assert company_bot(await api_state(page), 'Drafter')['settings'].get('device') is None
+
+
 async def edit_rename_and_move(page, base):
     ids = await open_app(page, base, bots=EXTRA_BOTS)
     writer, researcher = ids['Writer'], ids['Researcher']
@@ -1911,9 +1972,9 @@ class Server:
         self.providers, self.default_provider, self.default_model = [], None, None
         self.agents = [
             {'id': 'a1', 'name': 'Laptop', 'status': 'online', 'permissions': ['model.run'], 'lastSeenAt': '2026-11-11T10:00:00Z', 'tasks': {'queued': 0, 'running': 0, 'failed': 0},
-             'cli': {'claude': 'signed-in', 'codex': 'signed-out', 'checkedAt': '2026-11-11T10:00:00Z'}},
+             'features': ['secret-input-v1'], 'cli': {'claude': 'signed-in', 'codex': 'signed-out', 'checkedAt': '2026-11-11T10:00:00Z'}},
             {'id': 'a2', 'name': 'Desk PC', 'status': 'stale', 'permissions': ['model.run'], 'lastSeenAt': '2026-11-10T10:00:00Z', 'tasks': {'queued': 0, 'running': 0, 'failed': 0},
-             'cli': {'claude': 'missing', 'codex': 'signed-in', 'checkedAt': '2026-11-10T10:00:00Z'}},
+             'features': [], 'cli': {'claude': 'missing', 'codex': 'signed-in', 'checkedAt': '2026-11-10T10:00:00Z'}},
         ]
         self.late = {'act-late'}
         self.calls = []
@@ -2596,6 +2657,19 @@ async def agents_page_status_signin_and_switches(page, base):
     await expect(panel).not_to_contain_text('can never publish')
 
 
+async def agents_page_says_which_computer_needs_an_update(page, base):
+    await install_admin(page)
+    await open_app(page, base)
+    panel = await mount_admin(page, 'agents')
+    # A computer whose app does not report a feature the server needs says what it cannot do; one that has it says nothing.
+    desk = panel.locator('.st-g', has=page.locator('.st-h', has_text='Desk PC'))
+    await expect(desk).to_contain_text('Needs an update')
+    await expect(desk).to_contain_text('type passwords and codes')
+    laptop = panel.locator('.st-g', has=page.locator('.st-h', has_text='Laptop'))
+    await expect(laptop).not_to_contain_text('Needs an update')
+    await expect(laptop).not_to_contain_text('type passwords and codes')
+
+
 async def agents_page_pairing_form_and_code(page, base):
     server = await install_admin(page, agents=[])
     await open_app(page, base)
@@ -2871,6 +2945,7 @@ async def main():
             print(f'Usability smoke against {base}')
             await h.scenario('bot: create from the New bot page and land in its chat', create_bot_from_page)
             await h.scenario('bot: edit renames it and a menu move puts it under a manager', edit_rename_and_move)
+            await h.scenario('bot: the owner pins a bot to one computer on Edit, a member keeps the pin', edit_pins_a_bot_to_one_computer)
             await h.scenario('bot: delete asks first, and its reports go Solo', delete_bot_reports_go_solo)
             await h.scenario('bot: Atlas has no Delete or Hide; pin from the menu', atlas_has_no_delete)
             await h.scenario('pin: the menu pins, the menu key opens it, Alt+arrows reorder and it is saved', pin_by_menu_and_move_by_keyboard)
@@ -2913,6 +2988,7 @@ async def main():
             await h.scenario('models: Add a model is one card with a choice, the dots hold Edit, Refresh and Delete, one model picker', models_api_provider_menu_and_one_model_picker)
             await h.scenario('models: a provider\'s list loads by itself into the dropdown, and Other… takes any id', model_list_loads_by_itself)
             await h.scenario('agents: one page with each computer online or not, claude and codex sign-in, a switch per permission, Revoke asks first', agents_page_status_signin_and_switches)
+            await h.scenario('agents: a computer whose app cannot type passwords and codes says it needs an update', agents_page_says_which_computer_needs_an_update)
             await h.scenario('agents: the pairing form is switches, the code shows once with the command to run', agents_page_pairing_form_and_code)
             await h.scenario('team: roles are pills, the owner has none, sessions are not on this page', team_roles_are_pills_and_sessions_are_not_here)
             await h.scenario('notifications: switches that save at once; webhook and email show only when they can deliver', notifications_are_switches_and_unwired_channels_are_hidden)

@@ -11,9 +11,10 @@ import {mcpCall} from './mcp-client.js';
 import {withMcp} from './connectors.js';
 import {callGoogle} from './google-actions.js';
 
-/** Run one call. Returns `{ok, text}`; throws for a failure the service did not report as a tool result. */
-export async function useConnector(store, connector, tool, args = {}) {
-  if (connector.kind === 'mcp') return withMcp(store, connector, target => mcpCall(target, tool, args));
+/** Run one call. Returns `{ok, text}`; throws for a failure the service did not report as a tool result. `deviceId` is the
+ * computer the calling bot is pinned to (a server that runs on a computer goes only to it), or null for any. */
+export async function useConnector(store, connector, tool, args = {}, {deviceId = null} = {}) {
+  if (connector.kind === 'mcp') return withMcp(store, connector, target => mcpCall(target.transport === 'stdio' ? {...target, deviceId} : target, tool, args));
   if (connector.kind === 'google') return callGoogle(store, connector, tool, args);
   fail(`${connector.name} cannot be used yet.`, 422);
 }

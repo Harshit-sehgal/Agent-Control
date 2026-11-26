@@ -23,7 +23,7 @@ import {fail} from '../shared/errors.js';
 import {cleanText} from '../shared/core.js';
 import {validateBrowserRequest} from '../shared/bot-browser.js';
 import {cliEngineById,cleanCliModel,cleanEffort,LOCAL_CLI_ENGINE_IDS} from '../shared/ai-presets.js';
-import {cleanFeatures} from '../shared/device-features.js';
+import {cleanFeatures,hasFeature} from '../shared/device-features.js';
 import {base64Bytes,sniffType,isImage,MAX_FILES,MODEL_IMAGE_BYTES,MODEL_IMAGES_TOTAL} from '../shared/attachments.js';
 import {encryptJson,decryptJson,sha256,loadMasterKey} from './vault.js';
 
@@ -40,6 +40,55 @@ const CLOCK_SKEW_MS = 5 * 60000;
 const DEFAULT_LEASE_MS = 120000;
 /** How recently a device must have been seen to count as online: the agent list, and every picker that hands it work. */
 export const AGENT_ONLINE_MS = 180000;
+
+/** The one online rule: seen within `AGENT_ONLINE_MS`, or, for a device never seen, paired within it. */
+export function agentOnline(row, nowMs = Date.now()) {
+  const at = Date.parse(row?.last_seen_at || row?.paired_at || '');
+  return Number.isFinite(at) && at > nowMs - AGENT_ONLINE_MS;
+}
+
+/** The words for work that needs an ability the computer's app does not report. */
+export const missingFeatureLine = name =>
+  `This needs a newer app on your computer: it does not report ${name}. Update the app on your computer, then try again.`;
+
+const agentMay = (row, kind) => { try { const list = JSON.parse(row.permissions || '[]'); return Array.isArray(list) && list.includes(kind); } catch { return false; } };
+
+/** The list of device features a piece of work needs, read once and failing closed: nothing is none, a string is one
+ * name, a list of names is itself, and anything else is a name no device reports, so the chooser refuses instead of ignoring it. */
+export function normalizeNeeds(needs) {
+  if (needs === null || needs === undefined) return [];
+  if (typeof needs === 'string' && needs) return [needs];
+  if (Array.isArray(needs)) return needs.every(name => typeof name === 'string' && name) ? needs : ['<invalid>'];
+  return ['<invalid>'];
+}
+
+/** The computer that gets a task of `kind`: the pinned one (`deviceId`), else the most recently seen one that may run
+ * it, reports every name in `needs` and is online. Returns `{agent: row}`, `{reason}` (`no-agent`, `no-permission`,
+ * `agent-offline`, `not-pinned`) or `{reason: 'missing-feature', feature}`. */
+export function chooseDevice(store, {kind, deviceId = null, needs: asked = [], nowMs = Date.now()} = {}) {
+  const needs = normalizeNeeds(asked);
+  const lacks = row => {
+    if (!needs.length) return null;
+    const features = readAgentFeatures(store, row.id);
+    return needs.find(name => !hasFeature(features, name)) ?? null;
+  };
+  if (deviceId) {
+    const row = typeof store?.get === 'function' ? store.get('SELECT * FROM agents WHERE id=? AND revoked_at IS NULL', deviceId) : null;
+    if (!row || !agentMay(row, kind)) return {reason: 'not-pinned'};
+    const feature = lacks(row);
+    if (feature) return {reason: 'missing-feature', feature};
+    return agentOnline(row, nowMs) ? {agent: row} : {reason: 'agent-offline'};
+  }
+  if (typeof store?.all !== 'function') return {reason: 'no-agent'};
+  const rows = store.all('SELECT * FROM agents WHERE revoked_at IS NULL ORDER BY last_seen_at DESC');
+  if (!rows.length) return {reason: 'no-agent'};
+  const may = rows.filter(row => agentMay(row, kind));
+  if (!may.length) return {reason: 'no-permission'};
+  const capable = may.filter(row => !lacks(row));
+  if (!capable.length) return {reason: 'missing-feature', feature: lacks(may[0])};
+  const online = capable.find(row => agentOnline(row, nowMs));
+  return online ? {agent: online} : {reason: 'agent-offline'};
+}
 // A task kind is its own permission: 'browser.action' exists beside
 // 'browser.capture' because acting on a page is a deliberate grant, not a read.
 // AGENT_ACTIONS is the list; a separate kind table only ever repeated it.
@@ -181,7 +230,7 @@ export function createPairing(store, workspaceId, {label, createdBy, permissions
 }
 
 /** Exchange a pairing code for agent credentials. */
-export function redeemPairing(store, {code, name, permissions = []}) {
+export function redeemPairing(store, {code, name, permissions = [], features}) {
   const row = store.get('SELECT * FROM pairing_codes WHERE code_hash=?', sha256(String(code || '')));
   if (!row) fail('This pairing code is not valid.', 401);
   if (row.consumed_at) fail('This pairing code has already been used.', 409);
@@ -201,6 +250,9 @@ export function redeemPairing(store, {code, name, permissions = []}) {
     store.run('UPDATE pairing_codes SET consumed_at=? WHERE code_hash=?', now(), sha256(String(code)));
     store.run('INSERT INTO agents (id,workspace_id,name,secret_hash,secret_enc,status,permissions,paired_by,paired_at) VALUES (?,?,?,?,?,?,?,?,?)',
       agentId, row.workspace_id, cleanText(name, 120) || 'Local agent', sha256(secret), stored, 'paired', JSON.stringify(granted), row.created_by, now());
+    // What its app can do, so work that needs a feature is not refused before the first heartbeat (an older app sends
+    // none). In the same write: a failure here must not leave a used code and an agent behind.
+    if (features !== undefined) recordAgentFeatures(store, agentId, features);
   });
   return {agentId, secret, workspaceId: row.workspace_id, permissions: granted, pollIntervalMs: 30000};
 }
@@ -424,7 +476,7 @@ export function listAgents(store, workspaceId) {
 export function agentsBrief(store) {
   if (typeof store?.all !== 'function') return [];
   return store.all('SELECT * FROM agents WHERE revoked_at IS NULL ORDER BY last_seen_at DESC').map(a => ({
-    name: a.name, online: Boolean(a.last_seen_at && Date.parse(a.last_seen_at) > Date.now() - AGENT_ONLINE_MS),
+    name: a.name, online: agentOnline(a),
     permissions: (() => { try { return JSON.parse(a.permissions || '[]'); } catch { return []; } })(), cli: readAgentCli(store, a.id),
     features: readAgentFeatures(store, a.id),
   }));

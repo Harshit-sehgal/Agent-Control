@@ -6,19 +6,19 @@
  * default context. The profile is never uploaded, logged or backed up by this
  * code: nothing here reads it, Chrome alone does.
  *
- * - One bot drives at a time. A task that finds the browser busy waits its turn,
- *   in the order it asked, and never touches another bot's tab.
- * - The owner can take the browser (`takeover`) and hand it back (`handback`).
- *   While they hold it no bot starts a task. A task already running finishes the
- *   step it is in, runs no further step (the page is no longer the one its steps
- *   were planned for), waits for the hand back and then answers with the page as
- *   the owner left it. The owner's input waits for that step too, so an action
- *   is never applied twice or cut in half.
+ * - One bot drives each tab, and tabs run side by side. A bot's tasks wait their turn on its own
+ *   queue, in the order they asked, and never touch another bot's tab (`laneOf` names the queue).
+ * - The owner can take one bot's tab (`takeover`) and hand it back (`handback`). A takeover parks
+ *   only the tab the owner holds: no new task starts on that tab, and other bots' tabs go on as
+ *   before. A task already running on it finishes the step it is in, runs no further step (the page
+ *   is no longer the one its steps were planned for), waits for the hand back and then answers with
+ *   the page as the owner left it. The owner's input waits for that step too, so an action is never
+ *   applied twice or cut in half, and never waits for another bot's step.
  * - Each bot has its own tab (`botId` -> tab). A tab the browser no longer has
  *   is dropped and replaced; after a restart there are no tab ids at all, so no
  *   stale one can be used.
- * - What the owner types in secret is remembered for the life of that bot's tab (`typed`, in memory only, never
- *   written anywhere) and scrubbed from every result that leaves: a capture, an action's answer and the status.
+ * - Each tab keeps its own typed memory: what the owner types in secret is remembered for the life of that
+ *   bot's tab (`typed`, in memory only, never written anywhere) and scrubbed from every result that leaves: a capture, an action's answer and the status.
  *   The page's secret fields are emptied when the owner hands back.
  * - The rules that bound a page read still bound every step: the allowlist, the
  *   egress proxy that refuses private addresses, and the X click/type refusal.
@@ -50,16 +50,17 @@ export const ANONYMOUS_BOT = 'shared';
 /** The cast the owner watches: small and cheap, since a person is looking at it. */
 const SCREENCAST = {format: 'jpeg', quality: 60, maxWidth: VIEWPORT.width, maxHeight: VIEWPORT.height, everyNthFrame: 2};
 
+/** The queue a bot's tasks wait in. Today one per bot; a later phase keys it by account and tab. */
+const laneOf = botId => botId;
+
 export function createSharedBrowser({start = startBrowserSession, allow = [], profile, settleMs, timeoutMs, idleMs = Number(process.env.AGENT_TAKEOVER_IDLE_MS) || 0} = {}) {
   const allowed = () => (typeof allow === 'function' ? allow() : allow);
   let session = null, starting = null;
   const tabs = new Map();      // botId -> {tab, url, title, typed}: `typed` is what the owner typed in secret, in memory only
-  const queue = [];            // tickets, first come first served
+  // lane -> {queue: ticket[], holding, parked, epoch}. Made on first use, dropped when nothing is queued or running.
+  const lanes = new Map();
   const waits = new Set();     // {predicate, resolve}
-  let holder = null;           // the bot whose task has the browser
-  let driving = null;          // the bot whose tab the owner holds
-  let epoch = 0;               // bumps whenever the owner takes the browser
-  let parked = false;          // the running task is waiting at a step for the hand back
+  let driving = null;          // the bot whose tab the owner holds: one tab at a time
   let idleTimer = null;
   let watched = null;          // the tab being cast: {botId, tab, live, off}
   let frameSink = null;
@@ -102,15 +103,23 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     return tab;
   }
 
+  /** Wait this bot's turn on its own lane (and for the owner, if they hold this bot's tab). Returns the lane. */
   async function acquire(botId) {
+    const key = laneOf(botId);
+    let lane = lanes.get(key);
+    if (!lane) lanes.set(key, lane = {queue: [], holding: false, parked: false, epoch: 0});
     const ticket = {botId};
-    queue.push(ticket);
-    // Bots wait for the owner as well as for each other.
-    await until(() => queue[0] === ticket && holder === null && driving === null);
-    queue.shift();
-    holder = botId;
+    lane.queue.push(ticket);
+    await until(() => lane.queue[0] === ticket && !lane.holding && driving !== botId);
+    lane.queue.shift();
+    lane.holding = true;
+    return lane;
   }
-  const release = () => { holder = null; parked = false; notify(); };
+  const release = (botId, lane) => {
+    lane.holding = false; lane.parked = false;
+    if (!lane.queue.length && lanes.get(laneOf(botId)) === lane) lanes.delete(laneOf(botId));
+    notify();
+  };
 
   /** Run one page read or action list on this bot's tab. A browser that died
    * under it is noticed by `ensure` on the next task. */
@@ -118,18 +127,18 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     // A host nobody allowed costs no process, and no place in the queue.
     if (!hostAllowed(url, allowed())) throw new Error(`Refusing to open ${url}: its host is not in AGENT_BROWSER_ALLOWLIST.`);
     const id = botId || ANONYMOUS_BOT;
-    await acquire(id);
+    const lane = await acquire(id);
     try {
       const live = await ensure();
       const tab = await tabFor(live, id);
       const {typed} = tabs.get(id);
       const remember = ({url: at, title}) => { const entry = tabs.get(id); if (entry) { entry.url = at || entry.url; entry.title = title ?? entry.title; } };
-      // Asked before each step. False once the owner has taken the browser since
-      // this task began; if they still hold it, wait here for the hand back.
-      const startEpoch = epoch;
+      // Asked before each step. False once the owner has taken this bot's tab since this task began (another
+      // bot's tab being taken changes nothing here); if they still hold it, wait here for the hand back.
+      const startEpoch = lane.epoch;
       const gate = async () => {
-        if (driving) { parked = true; notify(); try { await until(() => driving === null); } finally { parked = false; } return false; }
-        return epoch === startEpoch;
+        if (driving === id) { lane.parked = true; notify(); try { await until(() => driving === null); } finally { lane.parked = false; } return false; }
+        return lane.epoch === startEpoch;
       };
       // The last point before the result leaves the device: what the owner typed in secret is hidden from all of it.
       try { return scrubTyped(await live.capture(url, {allow: allowed(), steps, approved, tab, timeoutMs, settleMs, onPage: remember, gate}), typed); }
@@ -137,7 +146,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
         // An error names what the page did (a blocked address it was sent to may carry the echo), and leaves as text.
         throw Object.assign(new Error(scrubTyped(String(error?.message ?? ''), typed)), {status: error?.status});
       }
-    } finally { release(); }
+    } finally { release(id, lane); }
   }
 
   const armIdle = () => {
@@ -154,7 +163,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
   async function takeover(botId) {
     if (driving && driving !== botId) throw conflict('You are already driving another bot\'s tab. Hand it back first.');
     const first = !driving;
-    if (first) { driving = botId; epoch++; notify(); }
+    if (first) { driving = botId; const lane = lanes.get(laneOf(botId)); if (lane) lane.epoch++; notify(); }
     armIdle();
     try { await tabFor(await ensure(), botId); }
     catch (error) {
@@ -230,7 +239,8 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     const ev = cleanInput(event);
     if (driving !== botId) throw conflict('You are not driving that bot\'s tab. Take it over first.');
     // The bot's step in flight finishes first, or the owner's click would land in the middle of it.
-    await until(() => holder === null || parked || driving !== botId);
+    // Only this bot's own lane: another bot's step is no reason to hold the owner's typing.
+    await until(() => { const lane = lanes.get(laneOf(botId)); return !lane?.holding || lane.parked || driving !== botId; });
     const entry = tabs.get(botId);
     if (driving !== botId || !entry || !session) throw conflict('You are not driving that bot\'s tab. Take it over first.');
     armIdle();
@@ -282,7 +292,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
 
   /** What the device knows about each tab: for the status it reports. `refresh` stores Chrome's own address and title,
    * so what leaves here is scrubbed of what the owner typed in secret. */
-  const status = () => [...tabs].map(([botId, {url, title, typed}]) => ({botId, state: driving === botId ? 'driving' : holder === botId ? 'browsing' : 'idle', ...scrubTyped({url, title}, typed)}));
+  const status = () => [...tabs].map(([botId, {url, title, typed}]) => ({botId, state: driving === botId ? 'driving' : lanes.get(laneOf(botId))?.holding ? 'browsing' : 'idle', ...scrubTyped({url, title}, typed)}));
 
   async function close() {
     clearTimeout(idleTimer);
@@ -296,7 +306,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
   /** `value` scrubbed of what the owner typed in secret on this bot's tab: for a result that left some other way. */
   const scrub = (botId, value) => scrubTyped(value, tabs.get(botId || ANONYMOUS_BOT)?.typed);
 
-  return {run, scrub, status, close, onFrame, watch, unwatch, applyInput, refresh, takeover, handback, owner: () => driving};
+  return {run, scrub, status, close, onFrame, watch, unwatch, applyInput, refresh, takeover, handback, owner: () => driving, laneCount: () => lanes.size};
 }
 
 /** One `browser.capture` or `browser.action` task, with the rules every browser

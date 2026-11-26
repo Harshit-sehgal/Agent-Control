@@ -9,7 +9,7 @@ import * as wf from '../shared/workflow.js';
 import {createRun, createEnvelope} from '../shared/coordination.js';
 import {coordinationState, runGroup, resumeBrowserRun} from '../src/coordination.js';
 import {answerAskFlow} from '../src/ask-runs.js';
-import {dispatchBrowserRequest, onAgentTaskResult, autoDispatch, continueBrowserWork, setBrowserResultHooks, beginTakeover, handBackTakeover} from '../src/bot-browser.js';
+import {browserLane, dispatchBrowserRequest, onAgentTaskResult, autoDispatch, continueBrowserWork, setBrowserResultHooks, beginTakeover, handBackTakeover} from '../src/bot-browser.js';
 import {parseBrowserRequests, validateBrowserRequest, recordBrowserRequests, stripBrowserBlocks, denyBrowserRequest, browserResultText, capturePageText, requestOfMessage, pruneBrowserRequests, MAX_BROWSER_REQUESTS, MAX_BROWSER_DEPTH, MAX_ELEMENT_INDEX, BROWSER_PERMISSION} from '../shared/bot-browser.js';
 import {addChatMessages} from '../shared/chats.js';
 import {validateBotSettings} from '../shared/bot-settings.js';
@@ -218,7 +218,7 @@ test('a request runs on this server when no device is paired, and continues like
     assert.deepEqual(sent.agentTaskIds, [], 'No device is asked to open the page.');
     const done = await until(() => { const r = store.read().browserRequests.find(x => x.id === 'here'); return r.status === 'dispatched' ? null : r; }, 'the server to read the page');
     assert.equal(done.status, 'done');
-    assert.deepEqual(ran, [{url: 'https://example.com/docs', steps: [], approved: []}]);
+    assert.deepEqual(ran, [{url: 'https://example.com/docs', steps: [], approved: [], lane: browserLane(store, 'web')}], 'The page queues on its bot\'s lane.');
     assert.equal(done.result.title, 'Docs');
     assert.match(done.result.page, /Install with npm/);
     assert.match(store.read().chats.web.find(m => m.kind === 'browser-result').text, /Browser result for Web: Docs/);

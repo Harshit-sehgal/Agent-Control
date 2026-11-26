@@ -5,15 +5,16 @@
  *
  * The look is Settings and Connectors: a titled card (`.st-g`, `.cd`), rows with a switch or a small
  * button on the right, a segmented pill for a choice of few, and one primary action per card. */
-import {esc, icon, btn, field, note, empty, tag, fullDate, textInput, switchBtn, modelSelect, effortPicker, runFullApp, demoList, MODEL_SEARCH_FROM} from './ui-kit.js?v=3fe83129d0';
-import {store, api, sync, isAdmin, isStaticDemo} from './ui-store.js?v=3fe83129d0';
-import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=3fe83129d0';
-import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js?v=3fe83129d0';
-import {pushStatus, enablePush, disablePush} from './ui-push.js?v=3fe83129d0';
-import {connectorsPanel, loadConnectors, connectActions, connectForms} from './ui-connect.js?v=3fe83129d0';
-import {cliDraft, modelChoices, chosenModel, effortChoices, OTHER_MODEL, modelRowMatches, modelGroupStays, agentCliRows, agentPermissionRows, agentWorkLine, subscriptionLine, SIGN_IN_HINT} from './ui-connect-model.js?v=3fe83129d0';
-import {LOCAL_CLI_ENGINES, LOCAL_CLI_KIND} from './ai-presets.js?v=3fe83129d0';
-import {parsePrices, pricesText} from './usage.js?v=3fe83129d0';
+import {esc, icon, btn, field, note, empty, tag, fullDate, textInput, switchBtn, modelSelect, effortPicker, runFullApp, demoList, MODEL_SEARCH_FROM} from './ui-kit.js?v=bc0163e01c';
+import {store, api, sync, isAdmin, isStaticDemo} from './ui-store.js?v=bc0163e01c';
+import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=bc0163e01c';
+import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js?v=bc0163e01c';
+import {pushStatus, enablePush, disablePush} from './ui-push.js?v=bc0163e01c';
+import {connectorsPanel, loadConnectors, connectActions, connectForms} from './ui-connect.js?v=bc0163e01c';
+import {cliDraft, modelChoices, chosenModel, effortChoices, OTHER_MODEL, modelRowMatches, modelGroupStays, agentCliRows, agentPermissionRows, agentWorkLine, subscriptionLine, SIGN_IN_HINT} from './ui-connect-model.js?v=bc0163e01c';
+import {LOCAL_CLI_ENGINES, LOCAL_CLI_KIND} from './ai-presets.js?v=bc0163e01c';
+import {updateNeeded} from './device-features.js?v=bc0163e01c';
+import {parsePrices, pricesText} from './usage.js?v=bc0163e01c';
 
 /** The pages Settings can load into its body. Only the keys are read (is this a page?). */
 export const ADMIN_PAGES = {notifications: true, workspaces: true, team: true, agents: true, data: true, connectors: true, ai: true};
@@ -162,8 +163,11 @@ function agentCard(agent, actions) {
   const signIn = cli.engines.map(e => line(esc(e.name), e.status === 'signed-out' ? withCode(SIGN_IN_HINT) : '', tag(e.word, e.tone))).join('');
   const perms = agentPermissionRows(actions, agent.permissions || []).map(p => switchRow(p.label, `${esc(p.note)}${p.note ? ' · ' : ''}<code>${esc(p.id)}</code>`, p.on, p.label, ` data-action="toggle-agent-permission" data-id="${esc(agent.id)}" data-permission="${esc(p.id)}"`)).join('');
   const seen = agent.lastSeenAt ? `Last seen ${esc(fullDate(agent.lastSeenAt))}` : 'Not seen yet';
+  // A device whose app lacks something the server relies on says so, in the words of what it cannot do.
+  const whats = updateNeeded(agent.features).map(f => f.what);
+  const update = whats.length ? line('Needs an update', esc(`Its app cannot ${whats.join(' or ')}. Update the app on this computer. Everything else it runs as before.`), tag('Update', 'warn')) : '';
   const rows = line(seen, '', `<span class="pv">${esc(agentWorkLine(agent.tasks))}</span>`)
-    + signIn + `<div class="ad-lbl">Allowed to</div>${perms}`
+    + update + signIn + `<div class="ad-lbl">Allowed to</div>${perms}`
     + `<button type="button" class="rw bad" data-action="revoke-agent" data-id="${esc(agent.id)}"><span class="w">Revoke<small>Stops it taking work. Anything it is doing fails.</small></span></button>`;
   return group(agent.name, rows, {aside: tag(STATUS_WORD[agent.status] || agent.status, tone(agent.status))});
 }
