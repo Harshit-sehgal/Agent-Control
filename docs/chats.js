@@ -7,12 +7,12 @@
  *
  * Messages are display records only. Nothing here runs a bot or publishes.
  */
-import {cleanText} from './core.js?v=0aadb36130';
-import {fail} from './errors.js?v=0aadb36130';
-import {summonableGuests, BUSY_STATUSES} from './coordination.js?v=0aadb36130';
-import {denyBrowserRequest} from './bot-browser.js?v=0aadb36130';
-import {orphanAsks} from './asks.js?v=0aadb36130';
-import {attachmentRefs} from './attachments.js?v=0aadb36130';
+import {cleanText} from './core.js?v=3163bac0ee';
+import {fail} from './errors.js?v=3163bac0ee';
+import {summonableGuests, BUSY_STATUSES} from './coordination.js?v=3163bac0ee';
+import {denyBrowserRequest} from './bot-browser.js?v=3163bac0ee';
+import {orphanAsks} from './asks.js?v=3163bac0ee';
+import {attachmentRefs} from './attachments.js?v=3163bac0ee';
 
 export const MAX_CHAT_MESSAGES = 300;
 const MAX_TEXT = 8000;

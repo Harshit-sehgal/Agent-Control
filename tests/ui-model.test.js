@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {needsYou, chatRows, timeline, retryTarget, threadLineActions, runButtons, waitingOnYou, totalWaitingOnYou, isRunNote, runBelongsToChat} from '../shared/ui-model.js';
+import {needsYou, chatRows, timeline, retryTarget, threadLineActions, runButtons, waitingOnYou, totalWaitingOnYou, isRunNote, runBelongsToChat, takeoverControl} from '../shared/ui-model.js';
 
 // ---- fixtures -------------------------------------------------------------------------
 
@@ -350,4 +350,17 @@ test('chatRows preview skips a bot\'s working step', () => {
   const row = chatRows({state: state(), messages}).find(r => r.id === 'scout');
   assert.equal(row.text, 'Find posts');
   assert.equal(row.sender, 'You');
+});
+
+test('a takeover chip is a field to type into only when a person can type in it, and a secret only goes to text entry', () => {
+  const take = (tag, type) => takeoverControl({index: 1, tag, text: 'x', ...(type === undefined ? {} : {type})});
+  for (const type of ['text', 'password', 'email', 'search', 'number', '']) assert.deepEqual(take('input', type), {field: true, text: true}, type);
+  assert.deepEqual(take('input'), {field: true, text: true}, 'an older snapshot with no type is a text field');
+  assert.deepEqual(take('textarea'), {field: true, text: true});
+  assert.deepEqual(take('select'), {field: true, text: false}, 'a choice takes a plain Send, never a secret');
+  for (const type of ['checkbox', 'radio', 'file', 'range', 'color']) assert.deepEqual(take('input', type), {field: true, text: false}, type);
+  // A button-type input is clicked, never typed into, and is never a secret target.
+  for (const type of ['submit', 'button', 'reset', 'image', 'SUBMIT']) assert.deepEqual(take('input', type), {field: false, text: false}, type);
+  for (const tag of ['button', 'a', 'div']) assert.deepEqual(take(tag), {field: false, text: false}, tag);
+  assert.deepEqual(takeoverControl(null), {field: false, text: false});
 });

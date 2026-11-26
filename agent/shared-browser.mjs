@@ -221,12 +221,15 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     } else if (ev.type === 'type') {
       // Ask the page whether the cursor is in a secret field, tag that field while focus is certain (before the
       // text can move it), then type. An answer that is not a plain boolean (a page expression that threw) counts
-      // as yes, and a tag that fails stops the typing. Nothing here ever names the text.
+      // as yes, and a tag that fails stops the typing. The tag lands only on a text-entry field. Nothing here ever names the text.
       const asked = await send('Runtime.evaluate', {expression: FOCUSED_IS_SECRET_JS, returnByValue: true})
         .then(reply => (!reply?.exceptionDetails && typeof reply?.result?.value === 'boolean' ? reply.result.value : true), () => true);
       if (ev.secret || asked) {
         const tagged = await send('Runtime.evaluate', {expression: TAG_FOCUSED_SECRET_JS, returnByValue: true}).catch(() => null);
-        if (!tagged || tagged.exceptionDetails) throw new Error('The browser could not mark that field secret.');
+        // `false` is the page's own answer that nothing typeable has the focus (a wrapper an app focused, a button):
+        // nothing was tagged, so nothing is typed. Any other failure is the generic one.
+        if (tagged && !tagged.exceptionDetails && tagged.result?.value === false) throw new Error('Tap the field you want to type into first.');
+        if (!tagged || tagged.exceptionDetails || tagged.result?.value !== true) throw new Error('The browser could not mark that field secret.');
       }
       await send('Input.insertText', {text: ev.text}).catch(() => { throw new Error('The browser did not take the typed text.'); });
     } else if (ev.type === 'key') {

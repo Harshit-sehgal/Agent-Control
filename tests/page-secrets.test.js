@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import {isSecretField, labelOf, hideSecrets, PAGE_SECRETS_JS} from '../agent/page-secrets.mjs';
+import {isSecretField, isTextEntry, labelOf, hideSecrets, PAGE_SECRETS_JS} from '../agent/page-secrets.mjs';
 
 /** A fake page element with the few members the functions read. */
 function field({tagName = 'INPUT', type = '', value, innerText, isContentEditable = false, labels, attrs = {}, taggedAncestor = false}) {
@@ -146,4 +146,27 @@ test('the embedded bundle declares the three functions and they work together', 
   vm.runInNewContext(`${PAGE_SECRETS_JS};this.ok=typeof isSecretField+typeof labelOf+typeof hideSecrets;this.a=isSecretField(el);this.b=labelOf(el);this.c=hideSecrets('pw hunter22',[el])`, ctx);
   assert.equal(ctx.ok, 'functionfunctionfunction');
   assert.deepEqual([ctx.a, ctx.b, ctx.c], [true, 'password field', 'pw [hidden]']);
+});
+
+test('hiding matches whatever case the page echoes, and keeps the page\'s own letters elsewhere', () => {
+  const pw = field({type: 'password', value: 'Hunter22'});
+  assert.equal(hideSecrets('Echo: HUNTER22 and hunter22 and Hunter22, but Hunters stay', [pw]), 'Echo: [hidden] and [hidden] and [hidden], but Hunters stay');
+  // A value with regex characters is matched as the letters it is, not as a pattern.
+  const odd = field({type: 'password', value: 'a.c+(d)'});
+  assert.equal(hideSecrets('abc and A.C+(D) and a.c+(d)', [odd]), 'abc and [hidden] and [hidden]');
+  // A character whose upper case is longer must not shift the ranges.
+  const sharp = field({type: 'password', value: 'straße-1'});
+  assert.equal(hideSecrets('x straße-1 y', [sharp]), 'x [hidden] y');
+});
+
+test('only a text-entry control can be typed into as a secret', () => {
+  const yes = [{tagName: 'INPUT', type: 'text'}, {tagName: 'INPUT', type: 'password'}, {tagName: 'INPUT', type: ''}, {tagName: 'INPUT', type: 'search'},
+    {tagName: 'INPUT', type: 'email'}, {tagName: 'INPUT', type: 'number'}, {tagName: 'TEXTAREA'}, {tagName: 'DIV', isContentEditable: true}];
+  const no = [...['submit', 'button', 'reset', 'image', 'checkbox', 'radio', 'file', 'range', 'color'].map(type => ({tagName: 'INPUT', type})),
+    {tagName: 'SELECT'}, {tagName: 'DIV'}, {tagName: 'MAIN'}, {tagName: 'BUTTON'}, {tagName: 'A'}, {tagName: 'BODY'}];
+  for (const c of yes) assert.equal(isTextEntry(field(c)), true, JSON.stringify(c));
+  for (const c of no) assert.equal(isTextEntry(field(c)), false, JSON.stringify(c));
+  assert.equal(isTextEntry(field({tagName: 'INPUT', type: 'SUBMIT'})), false, 'type is read in lower case');
+  // It is one of the functions the page receives.
+  assert.match(PAGE_SECRETS_JS, /function isTextEntry/);
 });

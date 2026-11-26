@@ -10,6 +10,7 @@
  * server enforces the same allowlist and the same X refusal as any other page,
  * so this is a way to sign in, never a way around the rules. */
 import {esc, btn} from './ui-kit.js';
+import {takeoverControl} from './ui-model.js';
 import {api, sync, isStaticDemo} from './ui-store.js';
 import {openSheet, closeSheet, sheetOpen, toast} from './ui-dialogs.js';
 
@@ -22,7 +23,7 @@ let live = null;
 const gone = error => error && [404, 409].includes(error.status);
 
 function controlChip(element) {
-  const isField = ['input', 'textarea', 'select'].includes(element.tag);
+  const isField = takeoverControl(element).field;
   const on = live.selected === element.index;
   const label = `[${element.index}] ${element.tag}${element.text ? ` ${element.text}` : ''}`;
   return `<button type="button" class="takeover-control${on ? ' on' : ''}" data-action="takeover-control" data-index="${element.index}" aria-pressed="${on}" title="${esc(isField ? 'Type into this control' : 'Click this control')}">${esc(label)}</button>`;
@@ -35,6 +36,8 @@ function render() {
     ? `<div class="takeover-controls">${elements.slice(0, 80).map(controlChip).join('')}</div>`
     : '<p class="note">This page has no controls to tap. Use the address box to open another page.</p>';
   const selected = live.selected == null ? null : elements.find(e => e.index === live.selected);
+  // A password or a code goes only into a text-entry control: the rows stay disabled for a select or a checkbox.
+  const secretReady = Boolean(selected) && takeoverControl(selected).text;
   const page = `<div class="takeover-page">
     ${view.image ? `<img class="takeover-shot" src="${esc(view.image)}" alt="A picture of the page open in the browser">` : '<p class="note">Waiting for the page…</p>'}
     <p class="takeover-here">${view.title ? `<strong>${esc(view.title)}</strong> ` : ''}<a href="${esc(view.url || '#')}" target="_blank" rel="noopener noreferrer">${esc(view.url || '')}</a></p>
@@ -48,8 +51,8 @@ function render() {
   </form>`;
   // A password or a code is sent as a `secret`: the device tags the field first, and nothing here echoes it.
   const secretRow = (id, label, attrs) => `<form id="${id}" class="takeover-type" autocomplete="off">
-    <input class="input" name="text" maxlength="2000" placeholder="${label}" aria-label="${label}" ${attrs} ${selected ? '' : 'disabled'}>
-    <button type="submit" class="btn primary small" ${selected ? '' : 'disabled'}>Type</button>
+    <input class="input" name="text" maxlength="2000" placeholder="${label}" aria-label="${label}" ${attrs} ${secretReady ? '' : 'disabled'}>
+    <button type="submit" class="btn primary small" ${secretReady ? '' : 'disabled'}>Type</button>
   </form>`;
   const secrets = secretRow('takeover-password', 'Password', 'type="password" autocomplete="current-password"')
     + secretRow('takeover-code', 'Code', 'inputmode="numeric" autocomplete="one-time-code" spellcheck="false" autocapitalize="off"');
@@ -149,7 +152,7 @@ export const takeoverActions = {
     const element = (live.view.elements || []).find(e => e.index === index);
     if (!element) return;
     // A field is chosen for typing; anything else is a click.
-    if (['input', 'textarea', 'select'].includes(element.tag)) {
+    if (takeoverControl(element).field) {
       live.selected = live.selected === index ? null : index;
       render();
       return;
@@ -164,7 +167,8 @@ export const takeoverActions = {
 async function typeSecret(form, values) {
   const text = String(values.text ?? '');
   form.reset();
-  if (!live || live.selected == null || !text) return;
+  const chosen = live && live.selected != null ? (live.view.elements || []).find(e => e.index === live.selected) : null;
+  if (!chosen || !takeoverControl(chosen).text || !text) return;
   await act({op: 'type', index: live.selected, text, secret: true});
 }
 

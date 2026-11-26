@@ -28,7 +28,7 @@ function holdStep(fake, nth) {
   const began = new Promise(resolve => { started = resolve; });
   const gate = new Promise(resolve => { release = resolve; });
   fake.hook('Runtime.evaluate', async ({expression}) => {
-    if (expression === 'location.href' || expression.startsWith('(function(){var els=') || expression.startsWith('JSON.stringify')) return undefined;
+    if (expression === 'location.href' || expression.startsWith('(function(){var els=') || expression.startsWith('JSON.stringify(')) return undefined;
     if (++seen === nth) { started(); await gate; }
     return undefined;
   });
@@ -296,17 +296,46 @@ test('a focus question the page could not answer counts as secret, and a tag tha
   assert.equal(fake().input.length, 1, 'a tag that threw in the page also stops the typing');
 });
 
-test('the tag expression skips the page body, the page root and an empty focus', () => {
+test('the tag expression tags only a text-entry form field, never the page body, the root, a wrapper or a button', () => {
   const run = active => {
-    const mark = {setAttribute(name, value) { (this.set ||= []).push([name, value]); }};
-    const body = {...mark, set: []}, root = {...mark, set: []}, field = {...mark, set: []};
-    const doc = {body, documentElement: root, activeElement: {body, root, field, none: null, undef: undefined}[active]};
-    vm.runInNewContext(TAG_FOCUSED_SECRET_JS, {document: doc});
-    return [body.set, root.set, field.set].map(x => x.length);
+    const mark = tagName => ({tagName, type: '', isContentEditable: false, setAttribute(name, value) { (this.set ||= []).push([name, value]); }});
+    const els = {
+      body: mark('BODY'), root: mark('HTML'), field: mark('INPUT'), area: mark('TEXTAREA'), main: mark('MAIN'), div: mark('DIV'),
+      submit: {...mark('INPUT'), type: 'submit'}, checkbox: {...mark('INPUT'), type: 'checkbox'}, editable: {...mark('DIV'), isContentEditable: true},
+    };
+    const doc = {body: els.body, documentElement: els.root, activeElement: active in els ? els[active] : (active === 'none' ? null : undefined)};
+    const answer = vm.runInNewContext(TAG_FOCUSED_SECRET_JS, {document: doc});
+    return [answer, Object.values(els).filter(e => (e.set || []).length).length, (els[active]?.set || []).length];
   };
-  assert.deepEqual(run('field'), [0, 0, 1], 'a focused field is tagged');
-  assert.deepEqual(run('body'), [0, 0, 0]);
-  assert.deepEqual(run('root'), [0, 0, 0]);
-  assert.deepEqual(run('none'), [0, 0, 0]);
-  assert.deepEqual(run('undef'), [0, 0, 0]);
+  assert.deepEqual(run('field'), [true, 1, 1], 'a focused field is tagged');
+  assert.deepEqual(run('area'), [true, 1, 1]);
+  assert.deepEqual(run('editable'), [true, 1, 1]);
+  for (const what of ['body', 'root', 'none', 'undef', 'main', 'div', 'submit', 'checkbox']) assert.deepEqual(run(what), [false, 0, 0], `${what} is not tagged, and the answer says so`);
+});
+
+test('a secret type with a wrapper focused, not a field, types nothing and says what to do without naming the text', async t => {
+  const {sb, fake} = rig();
+  t.after(() => sb.close());
+  await sb.run('bot-a', {url: 'https://docs.example.com/'});
+  await sb.takeover('bot-a');
+  // What the real expression answers when a <main tabindex=-1> has the focus.
+  fake().hook('Runtime.evaluate', async ({expression}) => (expression === TAG_FOCUSED_SECRET_JS ? {result: {value: false}} : undefined));
+  const text = 'hunter22-482913';
+  await assert.rejects(() => sb.applyInput('bot-a', {type: 'type', text, secret: true}), e => e.message === 'Tap the field you want to type into first.' && !String(e.stack).includes(text));
+  assert.equal(fake().input.length, 0, 'no Input.insertText was sent');
+  // A page expression that threw is a different failure, with the generic wording.
+  fake().hook('Runtime.evaluate', async ({expression}) => (expression === TAG_FOCUSED_SECRET_JS ? {result: {}, exceptionDetails: {text: 'Uncaught'}} : undefined));
+  await assert.rejects(() => sb.applyInput('bot-a', {type: 'type', text, secret: true}), e => e.message === 'The browser could not mark that field secret.');
+  assert.equal(fake().input.length, 0);
+});
+
+test('what a model is handed is the address, title and links with secrets hidden; the real address only decides', async t => {
+  const pages = {'https://docs.example.com/': {title: 'Hi [hidden]', shown: 'https://docs.example.com/?code=[hidden]', text: 'Hello', links: [{text: 'Reset [hidden]', url: 'https://docs.example.com/r?c=[hidden]'}], elements: []}};
+  const {sb} = rig({}, {start: async () => startBrowserSession({connection: fakeCdp({pages}).connection})});
+  t.after(() => sb.close());
+  const result = await sb.run('bot-a', {url: 'https://docs.example.com/'});
+  assert.equal(result.finalUrl, 'https://docs.example.com/?code=[hidden]');
+  assert.equal(result.title, 'Hi [hidden]');
+  assert.deepEqual(result.links, pages['https://docs.example.com/'].links);
+  assert.equal(sb.status()[0].url, 'https://docs.example.com/?code=[hidden]', 'the tab the device reports is the hidden address too');
 });

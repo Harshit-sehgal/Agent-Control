@@ -28,11 +28,12 @@ export function fakeCdp({pages = {}} = {}) {
       // 'throws': the page expression threw, which Chrome answers with exceptionDetails and no value.
       return state.focusSecret === 'throws' ? {result: {type: 'object', subtype: 'error'}, exceptionDetails: {text: 'Uncaught'}} : {result: {value: state.focusSecret}};
     }
-    if (expression === TAG_FOCUSED_SECRET_JS) { tagged.push({sessionId, expression}); return {result: {}}; }
+    if (expression === TAG_FOCUSED_SECRET_JS) { tagged.push({sessionId, expression}); return {result: {value: true}}; }
     if (expression === 'location.href') return {result: {value: page.url}};
     if (expression.startsWith('(function(){var els=')) return {result: {value: snapshot}};
-    if (expression.startsWith('JSON.stringify({url: location.href')) {
-      return {result: {value: JSON.stringify({url: page.url, title: shown.title || '', text: shown.text || '', snapshot})}};
+    // A page read: `url` is the real address the device decides with, `shown` the one a model is handed (secrets hidden).
+    if (expression.startsWith('JSON.stringify((function(){') && expression.includes('shown:')) {
+      return {result: {value: JSON.stringify({url: page.url, shown: shown.shown ?? page.url, title: shown.title || '', text: shown.text || '', links: shown.links || [], snapshot})}};
     }
     actions.push({sessionId, url: page.url, expression});
     return {result: {value: {ok: true, text: shown.read ?? null}}};
