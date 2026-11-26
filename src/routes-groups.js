@@ -28,7 +28,7 @@ import {memoryFor, rememberTurn, maybeConsolidate} from './memory.js';
 import {dispatchBrowserRequest, autoDispatch, beginTakeover, handBackTakeover} from './bot-browser.js';
 import {browserRuntime} from './browser-runtime.js';
 import {failAgentTasks} from './agent.js';
-import {fail} from './http.js';
+import {fail, requireSecureSecret} from './http.js';
 import {reply} from './router.js';
 import {peek} from './sqlite-store.js';
 
@@ -319,9 +319,11 @@ export function groupRoutes(router) {
   });
   router.add('GET', '/api/browser-sessions/:session', 'member', c => browserRuntime.liveView(c.params.session, scope(c)));
   router.add('POST', '/api/browser-sessions/:session/act', 'admin', async c => {
-    browserRuntime.assertLive(c.params.session, c.actor.workspaceId);
     const b = await c.body();
-    return browserRuntime.liveAct(c.params.session, {op: b?.op, index: b?.index, selector: b?.selector, text: b?.text, url: b?.url}, scope(c));
+    // On purpose before the session lookup: an unsafe connection learns nothing about which sessions exist.
+    requireSecureSecret(c.req, b);
+    browserRuntime.assertLive(c.params.session, c.actor.workspaceId);
+    return browserRuntime.liveAct(c.params.session, {op: b?.op, index: b?.index, selector: b?.selector, text: b?.text, url: b?.url, secret: b?.secret === true}, scope(c));
   });
   router.add('POST', '/api/browser-sessions/:session/handback', 'admin', c => handBackTakeover(c.store, c.params.session, scope(c)));
   router.add('DELETE', '/api/browser-sessions/:session', 'admin', async c => {

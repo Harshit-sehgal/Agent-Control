@@ -234,7 +234,7 @@ work should be added as a fresh section.
 - [ ] **Move the server from the laptop to the Oracle VM** (it runs on the laptop first)
 
 ## Phase AA — goals, services and self-organising teams (design: `docs/superpowers/specs/2026-11-26-goals-services-teams-design.md`)
-- [ ] 0. Secrets never reach a model: secret fields (password, one-time code, card, or tagged by the device) never labelled by their contents and `[hidden]` in page text; bots never type into them; masked Password and Code fields with `secret` in both takeover UIs; `secret` refused over plain HTTP (plan: `docs/superpowers/plans/2026-11-26-phase-0-secrets-never-reach-a-model.md`)
+- [x] 0. Secrets never reach a model: secret fields (password, one-time code, card, or tagged by the device) never labelled by their contents and `[hidden]` in page text; bots never type into them; masked Password and Code fields with `secret` in both takeover UIs; `secret` refused over plain HTTP (plan: `docs/superpowers/plans/2026-11-26-phase-0-secrets-never-reach-a-model.md`)
 - [ ] 1. Devices and parallel work: one `chooseDevice` with pinning, per-bot queues, a takeover parks one bot, a device worker pool
 - [ ] 2. Browser accounts: a context per account with encrypted cookie jars, stamped at four hops, never in the server runtime; idle reaper, keeper tabs, session check
 - [ ] 3. Sign-in from the phone: a server-posted card with push, parked runs that resume after hand back

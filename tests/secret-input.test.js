@@ -1,0 +1,168 @@
+/* Passwords and codes typed during a takeover travel only over HTTPS, or from the
+ * computer that runs the app. Both takeover paths refuse them otherwise, before
+ * anything is queued or typed. */
+import test, {mock} from 'node:test';
+import assert from 'node:assert/strict';
+import {secureRequest, forwardedHttps} from '../src/http.js';
+import {createRouter} from '../src/router.js';
+import {liveRoutes} from '../src/routes-live.js';
+import {groupRoutes} from '../src/routes-groups.js';
+import {browserLive} from '../src/browser-live.js';
+import {browserRuntime} from '../src/browser-runtime.js';
+import http from 'node:http';
+import {findBrowser, startBrowserSession} from '../agent/browser.mjs';
+
+const MESSAGE = 'Passwords and codes are only sent over HTTPS or from this computer.';
+
+async function withEnv(vars, fn) {
+  const before = Object.fromEntries(Object.keys(vars).map(k => [k, process.env[k]]));
+  for (const [k, v] of Object.entries(vars)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+  try { return await fn(); } finally { for (const [k, v] of Object.entries(before)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } }
+}
+
+test('forwardedHttps: the proxy header, trimmed and in any case, and exactly https', () => {
+  const req = v => ({headers: v === undefined ? {} : {'x-forwarded-proto': v}});
+  for (const v of ['https', 'HTTPS', ' Https ', '\thttps\n']) assert.equal(forwardedHttps(req(v)), true, JSON.stringify(v));
+  // A list is a client's own value with a proxy's appended: only a header that is https and nothing else counts.
+  for (const v of ['http', '', 'https, http', 'http, https', 'https,https', 'httpss', 'xhttps', 'wss', undefined]) assert.equal(forwardedHttps(req(v)), false, JSON.stringify(v));
+  assert.equal(forwardedHttps({}), false);
+  assert.equal(forwardedHttps(undefined), false);
+  assert.equal(forwardedHttps({headers: {'x-forwarded-proto': ['https']}}), false, 'a repeated header arrives as one string; anything else is not believed');
+});
+
+test('secureRequest: TLS, a trusted proxy that says https, or loopback', async () => {
+  assert.equal(secureRequest({headers: {}, socket: {encrypted: true, remoteAddress: '203.0.113.5'}}), true);
+  const local = {origin: 'http://localhost:4173'};
+  assert.equal(secureRequest({headers: local, socket: {remoteAddress: '127.0.0.1'}}), true);
+  assert.equal(secureRequest({headers: {origin: 'http://127.0.0.1:4173'}, socket: {remoteAddress: '::1'}}), true);
+  assert.equal(secureRequest({headers: {origin: 'http://[::1]:4173'}, socket: {remoteAddress: '::ffff:127.0.0.1'}}), true);
+  // A proxy that adds no headers: loopback peer, the phone's own origin, or none at all.
+  assert.equal(secureRequest({headers: {origin: 'http://192.168.1.20:8080'}, socket: {remoteAddress: '127.0.0.1'}}), false);
+  assert.equal(secureRequest({headers: {origin: 'http://localhost.evil.test'}, socket: {remoteAddress: '127.0.0.1'}}), false);
+  assert.equal(secureRequest({headers: {origin: 'not a url'}, socket: {remoteAddress: '127.0.0.1'}}), false);
+  assert.equal(secureRequest({headers: {}, socket: {remoteAddress: '127.0.0.1'}}), false);
+  assert.equal(secureRequest({headers: local, socket: {remoteAddress: '192.168.1.20'}}), false);
+  assert.equal(secureRequest({headers: {}, socket: {}}), false);
+  // A local proxy relaying a phone over plain HTTP arrives from loopback but says so in its headers.
+  for (const h of ['x-forwarded-for', 'forwarded', 'x-real-ip']) {
+    assert.equal(secureRequest({headers: {...local, [h]: '192.168.1.20'}, socket: {remoteAddress: '127.0.0.1'}}), false, h);
+  }
+  await withEnv({TRUST_PROXY: '1'}, () => {
+    assert.equal(secureRequest({headers: {'x-forwarded-proto': 'https'}, socket: {remoteAddress: '127.0.0.1'}}), true);
+    assert.equal(secureRequest({headers: {'x-forwarded-proto': 'http'}, socket: {remoteAddress: '127.0.0.1'}}), false);
+    // A proxy that appends turns a client's own "https" over plain HTTP into a list: only the whole value counts.
+    for (const v of ['https, http', 'http, https', 'https,http']) assert.equal(secureRequest({headers: {'x-forwarded-proto': v}, socket: {remoteAddress: '127.0.0.1'}}), false, v);
+    assert.equal(secureRequest({headers: {'x-forwarded-proto': ' HTTPS '}, socket: {remoteAddress: '127.0.0.1'}}), true);
+    assert.equal(secureRequest({headers: {}, socket: {remoteAddress: '127.0.0.1'}}), false);
+    // With a trusted proxy, loopback alone proves nothing: the proxy is the loopback peer.
+    assert.equal(secureRequest({headers: local, socket: {remoteAddress: '127.0.0.1'}}), false);
+  });
+  // Without a trusted proxy a client cannot claim https for itself.
+  assert.equal(secureRequest({headers: {'x-forwarded-proto': 'https'}, socket: {remoteAddress: '192.168.1.20'}}), false);
+});
+
+const WS = 'default';
+const BOT = 'bot-1';
+const state = {groups: [{id: 'g', bots: [{id: BOT, name: 'Bot'}]}]};
+const actor = {email: 'owner@example.test', workspaceId: WS};
+
+function call(register, method, pattern, body, {ip = '192.168.1.20', headers = {}, params = {}, encrypted = false} = {}) {
+  const router = createRouter();
+  register(router, {workspaces: {}});
+  const found = router.find(method, pattern.replace(/:(\w+)/g, (_, k) => params[k] ?? k));
+  return found.route.handler({
+    req: {headers, socket: {remoteAddress: ip, encrypted}},
+    path: pattern, params: found.params, actor, store: {read: () => state, kvGet: key => kv[key] ?? null},
+    body: async () => body,
+  });
+}
+/** What the device on the live line reported (`agent_features:<id>` in kv): the route reads it for a secret. */
+const kv = {};
+const rejected = async promise => { try { await promise; return null; } catch (e) { return e; } };
+
+test('secret input over plain HTTP from the network is refused on the device path, plain input is not', async () => {
+  const input = mock.method(browserLive, 'input', () => {});
+  const device = mock.method(browserLive, 'agentId', () => 'dev-1');
+  kv['agent_features:dev-1'] = JSON.stringify(['secret-input-v1']);
+  try {
+    const secret = {type: 'type', text: '482913', secret: true};
+    const e = await rejected(call(liveRoutes, 'POST', '/api/browser-live/:botId/input', secret, {params: {botId: BOT}}));
+    assert.equal(e?.status, 403);
+    assert.equal(e.message, MESSAGE);
+    assert.ok(!e.message.includes('482913'));
+    assert.equal(input.mock.callCount(), 0, 'nothing was queued for the device');
+    // The same text without the flag is ordinary input.
+    assert.deepEqual(await call(liveRoutes, 'POST', '/api/browser-live/:botId/input', {type: 'type', text: '482913'}, {params: {botId: BOT}}), {ok: true});
+    assert.equal(input.mock.callCount(), 1);
+    // From this computer, on its own origin, a secret goes through.
+    await call(liveRoutes, 'POST', '/api/browser-live/:botId/input', secret, {params: {botId: BOT}, ip: '127.0.0.1', headers: {origin: 'http://localhost:4173'}});
+    assert.equal(input.mock.callCount(), 2);
+    // Only an exact `true` marks a secret.
+    await call(liveRoutes, 'POST', '/api/browser-live/:botId/input', {...secret, secret: 'yes'}, {params: {botId: BOT}});
+    assert.equal(input.mock.callCount(), 3);
+  } finally { input.mock.restore(); device.mock.restore(); delete kv['agent_features:dev-1']; }
+});
+
+test('secret input over plain HTTP from the network is refused on the server-runtime path, before anything runs', async () => {
+  const act = {op: 'type', index: 1, text: '482913'};
+  const params = {session: 'no-such-session'};
+  const e = await rejected(call(groupRoutes, 'POST', '/api/browser-sessions/:session/act', {...act, secret: true}, {params}));
+  assert.equal(e?.status, 403);
+  assert.equal(e.message, MESSAGE);
+  assert.ok(!e.message.includes('482913'));
+  // Without the flag it gets past the check and meets the missing session instead.
+  const plain = await rejected(call(groupRoutes, 'POST', '/api/browser-sessions/:session/act', act, {params}));
+  assert.notEqual(plain?.status, 403);
+  // Over HTTPS the secret gets past the check too.
+  const tls = await rejected(call(groupRoutes, 'POST', '/api/browser-sessions/:session/act', {...act, secret: true}, {params, ip: '203.0.113.5', encrypted: true}));
+  assert.notEqual(tls?.status, 403);
+});
+
+const browser = findBrowser();
+test('a field the owner typed into in secret is tagged in the page, and a plain one is not', {skip: !browser && 'no browser installed', timeout: 60000}, async () => {
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, {'Content-Type': 'text/html'});
+    res.end('<title>Sign in</title><input id="u" placeholder="Email"><input id="p" type="password" placeholder="Password"><input id="b" type="submit" value="Pay now"><main id="m" tabindex="-1"><input id="s" placeholder="Search"></main>');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const host = `127.0.0.1:${server.address().port}`;
+  const session = await startBrowserSession({binary: browser, permit: h => h !== 'localhost'});
+  try {
+    const live = await session.open(`http://${host}/`, {allow: [host]});
+    const start = await live.view();
+    const at = text => start.elements.find(e => e.text === text).index;
+    assert.equal((await live.act({op: 'type', index: at('Email'), text: 'ada@example.com'})).ok, true);
+    assert.equal((await live.act({op: 'waitFor', selector: '[data-agent-secret]', timeoutMs: 300})).ok, false, 'a plain field is not tagged');
+    assert.equal((await live.act({op: 'type', index: at('Password'), text: '482913', secret: true})).ok, true);
+    assert.equal((await live.act({op: 'waitFor', selector: '#p[data-agent-secret]'})).ok, true, 'the secret field is tagged');
+    assert.equal((await live.act({op: 'waitFor', selector: '#u[data-agent-secret]', timeoutMs: 300})).ok, false);
+    // A secret aimed at a button is refused with fixed words, and the button keeps its value and its name.
+    const refused = await live.act({op: 'type', index: at('Pay now'), text: 'hunter22-482913', secret: true});
+    assert.equal(refused.ok, false);
+    assert.equal(refused.reason, 'Choose a text field first.');
+    assert.doesNotMatch(JSON.stringify(refused), /hunter22|482913/);
+    assert.equal((await live.act({op: 'waitFor', selector: '#b[data-agent-secret]', timeoutMs: 300})).ok, false, 'the button is not tagged');
+    assert.equal((await live.act({op: 'waitFor', selector: '#b[value="Pay now"]'})).ok, true, 'its value is unchanged');
+    // A plain type into the password field (already secret) keeps it tagged; a plain field stays untagged.
+    assert.equal((await live.act({op: 'type', index: at('Password'), text: 'again'})).ok, true);
+    assert.equal((await live.act({op: 'waitFor', selector: '#p[data-agent-secret]'})).ok, true);
+    assert.equal((await live.act({op: 'type', index: at('Search'), text: 'red shoes'})).ok, true);
+    assert.equal((await live.act({op: 'waitFor', selector: '[data-agent-secret] #s, #s[data-agent-secret], main[data-agent-secret]', timeoutMs: 300})).ok, false, 'a search box is not secret');
+    await live.close();
+  } finally { await session.close(); server.close(); }
+});
+
+test('the act route hands liveAct secret: true only for an exact true, over a secure request', async () => {
+  const seen = [];
+  const assertLive = mock.method(browserRuntime, 'assertLive', () => {});
+  const liveAct = mock.method(browserRuntime, 'liveAct', async (id, step) => { seen.push(step); return {ok: true}; });
+  try {
+    const run = body => call(groupRoutes, 'POST', '/api/browser-sessions/:session/act', {op: 'type', index: 1, text: '482913', ...body}, {params: {session: 's1'}, ip: '203.0.113.5', encrypted: true});
+    await run({secret: true});
+    await run({secret: 'yes'});
+    await run({secret: false});
+    await run({});
+    assert.deepEqual(seen.map(step => step.secret), [true, false, false, false]);
+    assert.equal(seen[0].text, '482913');
+  } finally { assertLive.mock.restore(); liveAct.mock.restore(); }
+});

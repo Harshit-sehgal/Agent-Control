@@ -157,6 +157,24 @@ test('browser.action types, clicks and reads, and refuses off-allowlist navigati
   } finally { server.close(); }
 });
 
+test('a page script never hands a bot the password or code in a field, even when the page prints it back', {skip: !browser && 'no browser installed', timeout: 60000}, async () => {
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, {'Content-Type': 'text/html'}).end(
+      `<title>Pay</title><main><input type="password" value="hunter22" aria-label="Password hunter22"><input autocomplete="one-time-code" value="482913"><input type="search" value="red shoes">` +
+      `<p id="out"></p></main><script>document.getElementById('out').textContent='Typed '+document.querySelectorAll('input')[0].value+' and '+document.querySelectorAll('input')[1].value;</script>`);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const host = `127.0.0.1:${server.address().port}`;
+  try {
+    const page = await captureWithBrowser(`http://${host}/`, {allow: [host], binary: browser, permit: h => h !== 'localhost', steps: [{op: 'read', selector: 'main'}, {op: 'snapshot'}]});
+    const everything = JSON.stringify(page);
+    assert.doesNotMatch(everything, /hunter22/, 'the password is nowhere in what a model gets');
+    assert.doesNotMatch(everything, /482913/, 'the one-time code is nowhere in what a model gets');
+    assert.match(everything, /red shoes/, 'an ordinary field keeps its value');
+    assert.match(everything, /\[hidden\]/);
+  } finally { server.close(); }
+});
+
 test('a takeover keeps one page open, so a person can sign in and hand it back', {skip: !browser && 'no browser installed', timeout: 60000}, async () => {
   const server = http.createServer((req, res) => {
     const signedIn = /session=yes/.test(req.headers.cookie || '');

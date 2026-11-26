@@ -23,6 +23,10 @@ services:
       DATA_FILE: /data/state.json
       PUBLIC_ORIGIN: https://${DOMAIN:?Set DOMAIN in deploy/.env}
       HSTS: "1"
+      # TRUST_PROXY is not set here. The `ports:` below publish Caddy on every interface (80 and 443, not just
+      # loopback); the app itself is only `expose`d to Caddy. A password or code typed into a bot's page is then
+      # refused with a 403 until you set TRUST_PROXY=1 in deploy/.env, which makes the app believe Caddy's
+      # X-Forwarded-Proto. Do that after confirming nothing but Caddy can reach the app's port.
     volumes:
       - data:/data
     expose:

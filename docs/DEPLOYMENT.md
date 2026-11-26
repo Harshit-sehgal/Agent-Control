@@ -340,6 +340,34 @@ mailbox). The client address is the **rightmost** `X-Forwarded-For` hop, which i
 caller can invent. A proxy that appends rather than replaces is fine for the same
 reason; one that passes the header through untouched is not.
 
+**Passwords and codes typed during a takeover.** The server accepts a secret
+typed into a bot's page only when the request came over TLS, through a trusted
+proxy that says it spoke HTTPS, or from the computer that runs the app. Anything
+else is refused with a 403. Behind `tailscale serve` or Caddy, set
+`TRUST_PROXY=1` so the proxy's `X-Forwarded-Proto: https` is believed; without
+it, a proxied request is never taken as secure, and the owner can type a secret
+only on the host itself (at `http://localhost`, with no proxy in between). Set
+`TRUST_PROXY=1` only when every request reaches the server through that proxy,
+and never put a plain-HTTP proxy in front of this server for secret input: it
+would carry the password in the clear. This is what the masked Password and Code
+fields in the Computer view and the takeover sheet rely on: when a request is
+refused, the owner sees "Passwords and codes are only sent over HTTPS or from
+this computer." in a toast, and nothing they typed is kept.
+
+With `TRUST_PROXY=1` the app trusts only the proxy's word, so opening it directly at
+`http://localhost` (around the proxy) gets a 403 on the Password and Code fields: a request
+with no `X-Forwarded-Proto: https` is never taken as secure. Open the app through the proxy
+to type a secret. `deploy/compose.tailscale.yaml` and `deploy/compose.cloudflare.yaml` set
+`TRUST_PROXY=1`: the app listens on loopback there, so it is reachable only through
+`tailscale serve` or cloudflared. `deploy/compose.yaml` does not set it, because its `ports:` publish
+Caddy on every interface; set `TRUST_PROXY=1` in `deploy/.env` once you have confirmed that only
+Caddy can reach the app's port.
+
+`tailscale serve` sets `X-Forwarded-Proto: https` on TLS requests, and `X-Forwarded-For`. That
+is read from Tailscale's source (`ipn/ipnlocal/serve.go`, `addProxyForwardedHeaders`), not
+tested here. The Cloudflare setup relies on cloudflared passing Cloudflare's own
+`X-Forwarded-Proto` through; that is not tested here either.
+
 ## Secrets & the vault
 - Without `MASTER_KEY`, a `vault.key` (mode `0600`) is created beside the
   database. **Back it up with the database** — losing it makes every encrypted

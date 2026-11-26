@@ -40,7 +40,10 @@ Verification (`verifyAgentRequest`):
 - `POST /api/agent/heartbeat` → marks the agent online and returns due tasks.
   The body may carry `cli: {claude, codex}`, each `signed-in`, `signed-out`,
   `missing` or `unknown`, taken from the CLIs' own status commands; the server
-  keeps only those four words and shows them in `GET /api/agents`.
+  keeps only those four words and shows them in `GET /api/agents`. It also
+  carries `features: ["secret-input-v1"]`, what the app can do (`shared/device-features.js`);
+  each beat replaces the last list, a beat without it means none, and the server
+  queues a masked `secret` input (`secret: true`) only for a device that lists `secret-input-v1`.
 - `POST /api/agent/live` `{tabs:[{botId,url,title}], owner, failed?}` → a long
   poll (held up to 20 s) that answers `{commands, watch}`: `watch` is the bot
   whose tab the owner is looking at (or null), `commands` are `takeover`,

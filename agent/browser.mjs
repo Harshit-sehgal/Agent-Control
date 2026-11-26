@@ -28,6 +28,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import {isPrivateAddress} from './net-guard.mjs';
+import {PAGE_SECRETS_JS, SECRET_FIELDS_JS as SECRET_FIELDS, scrubTyped, rememberTyped} from './page-secrets.mjs';
 import {hostAllowed, RISKS, PATH_RISKS, ACTION_KEYS, CHECKOUT_PATH, foldLabel, botCheck, searchAlternates} from '../shared/bot-browser.js';
 
 // The allowlist rule lives with the rest of the browser-block rules in
@@ -70,20 +71,36 @@ const jsLiteral = value => JSON.stringify(String(value ?? ''));
  * them: not disabled, with a real box on the page. Shared by the snapshot and
  * by every index-based step, so "index 3" means the same element in both. */
 const PICKABLE = `(function(){var sel='a[href],button,input,textarea,select,[role=button],[role=link],[role=tab],[onclick],[contenteditable="true"]';return Array.prototype.filter.call(document.querySelectorAll(sel),function(e){if(e.disabled)return false;var r=e.getBoundingClientRect();if(r.width<=0||r.height<=0)return false;var s=getComputedStyle(e);return s.visibility!=='hidden'&&s.display!=='none';});})()`;
-/** Number the interactive elements and report them. Indices let the model act
+/** Number the interactive elements and report them (an input also says its `type`, so the takeover can tell a field
+ * from a button). Indices let the model act
  * without inventing a CSS selector, which is what makes an agent's second step
  * reliable on a page it has never seen; the attributes make the step cheap.
  * Both lists come from the same `PICKABLE` expression in the same page load. */
 /** A page's words for the bot: the main article when the page marks one (menus and sidebars left out), else the whole body. */
-// The page's links with their addresses: text alone drops where a search result leads.
-const LINKS = '(function(){var m=document.querySelector(\'main, article, [role=main], #content, #b_results, #links\')||document.body;if(!m)return [];var seen={},out=[];m.querySelectorAll(\'a[href]\').forEach(function(a){var t=(a.innerText||\'\').replace(/\\s+/g,\' \').trim();var h=a.href;if(out.length>=40||t.length<4||!/^https?:/.test(h)||seen[h])return;seen[h]=1;out.push({text:t.slice(0,100),url:h.slice(0,300)});});return out;})()';
-const MAIN_TEXT = '(function(){var b=document.body;if(!b)return "";var m=document.querySelector(\'main, article, [role=main], #content\');var t=m?m.innerText:"";return (t&&t.length>400?t:b.innerText).slice(0,60000);})()';
+/** The words a bot gets as the page's text. A secret field's content is hidden wherever it appears, so a page that
+ * prints back what was typed ("Code 482913 sent") shows `[hidden]`. Hidden before the cut, so no part of a secret is left. */
+const MAIN_TEXT = `(function(){${PAGE_SECRETS_JS};var b=document.body;if(!b)return "";var m=document.querySelector('main, article, [role=main], #content');var t=m?m.innerText:"";return hideSecrets(t&&t.length>400?t:b.innerText,${SECRET_FIELDS}).slice(0,60000);})()`;
+/** The page's links with their addresses: text alone drops where a search result leads. A secret field's content is
+ * hidden in the text and in the address (a reset link can carry a code), before the cut. */
+const LINKS = `(function(){${PAGE_SECRETS_JS};var secrets=${SECRET_FIELDS};var m=document.querySelector('main, article, [role=main], #content, #b_results, #links')||document.body;if(!m)return [];var seen={},out=[];m.querySelectorAll('a[href]').forEach(function(a){var t=(a.innerText||'').replace(/\\s+/g,' ').trim();var h=a.href;if(out.length>=40||t.length<4||!/^https?:/.test(h)||seen[h])return;seen[h]=1;out.push({text:hideSecrets(t,secrets).slice(0,100),url:hideSecrets(h,secrets).slice(0,300)});});return out;})()`;
+/** One read of the page, as JSON. Everything a model is handed is hidden in the page, where the secret fields are:
+ * `shown` (the address), `title`, `text`, `links` and the control names. `url` stays the real address, for the
+ * device's own decisions (the allowlist, a search alternate) and is never sent on. */
+const pageRead = ({links = false, ready = false} = {}) => `JSON.stringify((function(){${PAGE_SECRETS_JS};var s=${SECRET_FIELDS};var h=function(t){return hideSecrets(t,s)};return {url:location.href,shown:h(location.href),title:h(document.title),${ready ? 'ready:document.readyState,' : ''}text:${MAIN_TEXT},${links ? `links:${LINKS},` : ''}snapshot:${SNAPSHOT}};})())`;
 /** A control that submits its form: at least a Send, whatever it says. */
 const SUBMIT = 'button[type=submit],button:not([type]),input[type=submit],input[type=image]';
-const SNAPSHOT = `(function(){var els=${PICKABLE};els.forEach(function(e,i){e.setAttribute('data-agent-index',String(i+1));});return {count:els.length,elements:els.slice(0,${MAX_ELEMENTS}).map(function(e,i){var t=(e.innerText||e.value||e.getAttribute('aria-label')||e.getAttribute('placeholder')||e.name||'');var f=e.form||e.closest('form');return {index:i+1,tag:e.tagName.toLowerCase(),text:String(t).replace(/\\s+/g,' ').trim().slice(0,80),submit:Boolean(f)&&e.matches(${jsLiteral(SUBMIT)})};})};})()`;
+const SNAPSHOT = `(function(){var els=${PICKABLE};${PAGE_SECRETS_JS};var secrets=${SECRET_FIELDS};els.forEach(function(e,i){e.setAttribute('data-agent-index',String(i+1));});return {count:els.length,elements:els.slice(0,${MAX_ELEMENTS}).map(function(e,i){var t=hideSecrets(labelOf(e),secrets);var f=e.form||e.closest('form');var r={index:i+1,tag:e.tagName.toLowerCase(),text:t.slice(0,80),submit:Boolean(f)&&e.matches(${jsLiteral(SUBMIT)})};if(r.tag==='input')r.type=String(e.type||'text').toLowerCase();return r;})};})()`;
 /** A step targets an element by the index from the last snapshot, or by a CSS
  * selector when the model prefers one. */
 const targetOf = step => step.index ? jsLiteral(`[data-agent-index="${Math.round(step.index)}"]`) : jsLiteral(step.selector);
+/** What a bot is told when it tries to type into a password, code or card field. */
+const SECRET_REFUSAL = 'This is a password or code field. The owner signs in; a bot never types there.';
+/** The owner's typing, before the value is written. A secret goes only into a text-entry field (never into a
+ * button, whose label would then name the password). A secret, or a field that already counts as secret, is tagged
+ * `data-agent-secret` in this same evaluation, ahead of the write, so the tag lands or nothing is typed. */
+const ownerTyping = step => `${PAGE_SECRETS_JS};${step.secret === true ? `if(!isTextEntry(el))return{ok:false,reason:${jsLiteral(NEEDS_FIELD)}};` : ''}if(${step.secret === true}||isSecretField(el))el.setAttribute('data-agent-secret','1');`;
+/** What the owner is told when a secret is aimed at something that is not a text field. Fixed words: never the text. */
+const NEEDS_FIELD = 'Choose a text field first.';
 const RISK_WORDS = {spend: 'a payment', delete: 'a delete', post: 'a post', send: 'a send'};
 /** What a click lands on: `el.click()` bubbles, so a click on an icon inside Pay now is a click on Pay now. */
 const CONTROL = 'button,a[href],input,[role=button],[role=link],summary,label,[onclick]';
@@ -92,9 +109,9 @@ const CONTROL = 'button,a[href],input,[role=button],[role=link],summary,label,[o
  * click, from the submit control of its form), and refuse it when they name a risky class the owner did not
  * approve (`approved`, from the server; the model cannot set it). A click on a checkout page is a payment
  * unless one was approved. The check and the click are one evaluation, so the page cannot swap the label in
- * between. `approved` null is a person's own click: no check. */
-function riskGuard(approved, verb, click = false) {
-  if (approved === null) return '';
+ * between. `person` is the owner's own click or typing: no check. */
+function riskGuard(approved, verb, click = false, typing = false, person = false) {
+  if (person) return '';
   // Each entry is "class@origin" (shared/bot-browser.js approvedFor): a class is cleared only on the origin the
   // page is on at this click, so a Send approved for one site is refused after a navigate to another.
   const cleared = approved.filter(a => typeof a === 'string' && a.includes('@'));
@@ -107,27 +124,40 @@ function riskGuard(approved, verb, click = false) {
   // zero-width character or a full-width form does not hide a risky label. A link's address is read as a GET
   // that may act ("/unsubscribe"); a form submit is at least a Send; a control with no words at all is refused
   // unless something risky was approved on this origin, since nobody can tell what it does.
-  return `const fold=${foldLabel.toString()};const here='@'+location.origin;const ok=${JSON.stringify(cleared)};const open=${JSON.stringify(risks)}.filter(r=>!ok.includes(r[0]+here));`
+  // A bot never types into a secret field (the owner signs in), and that is checked before anything else, so the
+  // refusal is the same whatever was approved. The page's secret fields are read once: they are also hidden from
+  // every label this guard shows, since a label from aria-label, placeholder or name can hold the secret itself.
+  const secrets = `${PAGE_SECRETS_JS};const secrets=${SECRET_FIELDS};`
+    + (typing ? `if(isSecretField(el))return{ok:false,reason:${jsLiteral(SECRET_REFUSAL)}};` : '');
+  return secrets + `const fold=${foldLabel.toString()};const here='@'+location.origin;const ok=${JSON.stringify(cleared)};const open=${JSON.stringify(risks)}.filter(r=>!ok.includes(r[0]+here));`
     + `const ctl=el.closest(${jsLiteral(CONTROL)})||el;`
     + (click ? `const form=ctl.form||ctl.closest('form');const sub=form&&form.querySelector(${jsLiteral(SUBMIT)});const submits=Boolean(form)&&ctl.matches(${jsLiteral(SUBMIT)});` : 'const sub=null;const submits=false;')
-    + `const words=n=>n?[n.innerText,n.value,n.getAttribute('aria-label'),n.getAttribute('placeholder'),n.getAttribute('title'),n.getAttribute('alt'),n.getAttribute('name')]:[];`
-    + `const full=fold([...words(el),...(ctl!==el?words(ctl):[]),...(sub&&sub!==ctl&&sub!==el?words(sub):[])].filter(t=>typeof t==='string'&&t.trim()).join(' ')).replace(/\\s+/g,' ').trim().slice(0,2000);const label=full.slice(0,120);`
+    + `const words=n=>n?[...(isSecretField(n)?[]:[n.innerText,n.value]),n.getAttribute('aria-label'),n.getAttribute('placeholder'),n.getAttribute('title'),n.getAttribute('alt'),n.getAttribute('name')]:[];`
+    // The risk is read from the words as the page wrote them; only the label the reason shows is hidden, so a
+    // page cannot hide a "Pay" by filling a secret field with that word.
+    + `const said=[...words(el),...(ctl!==el?words(ctl):[]),...(sub&&sub!==ctl&&sub!==el?words(sub):[])].filter(t=>typeof t==='string'&&t.trim()).join(' ');`
+    + `const full=fold(said).replace(/\\s+/g,' ').trim().slice(0,2000);const label=fold(hideSecrets(said,secrets)).replace(/\\s+/g,' ').trim().slice(0,120);`
     + `const risky=open.find(r=>new RegExp(r[1],r[2]).test(full));`
     + `if(risky)return{ok:false,risk:risky[0],reason:'This control says "'+label.slice(0,60)+'", which is '+risky[3]+' nobody approved, so it was not ${verb}.'+(risky[0]==='spend'?' A payment needs the owner to answer a payment ask.':'')};`
     + (click ? `const link=el.closest('a[href]');let path='';if(link){try{const u=new URL(link.href);let p=u.pathname;try{p=decodeURIComponent(p);}catch(e){}const keys=new RegExp(${jsLiteral(ACTION_KEYS.source)},${jsLiteral(ACTION_KEYS.flags)});path=fold([p,...[...u.searchParams].flatMap(([k,v])=>keys.test(k)?[k,v]:[k])].join(' ')).replace(/[/_\\-.+=&?]+/g,' ');}catch(e){}}`
       + `const acts=path&&${JSON.stringify(paths)}.filter(r=>!ok.includes(r[0]+here)).find(r=>new RegExp(r[1],r[2]).test(path));`
-      + `if(acts)return{ok:false,risk:acts[0],reason:'This link goes to "'+link.getAttribute('href').slice(0,60)+'", which is '+acts[3]+' nobody approved, so it was not ${verb}.'};` : '')
+      + `if(acts)return{ok:false,risk:acts[0],reason:'This link goes to "'+hideSecrets(link.getAttribute('href'),secrets).slice(0,60)+'", which is '+acts[3]+' nobody approved, so it was not ${verb}.'};` : '')
     + `if(submits&&!['send','post','spend'].some(c=>ok.includes(c+here)))return{ok:false,risk:'send',reason:'This control submits a form, which is a send nobody approved, so it was not ${verb}.'};`
     + `if(!full&&!ok.some(a=>a.endsWith(here)))return{ok:false,risk:'send',reason:'This control has no words, so nobody can tell what it does, and nothing was approved on this site, so it was not ${verb}.'};`
     + checkout;
 }
-function actionExpression(step, approved = null) {
+/** The page expression for one step. `approved` is what the server cleared for a bot (a missing or malformed one
+ * clears nothing); `{person: true}` is the owner's own click or typing during a takeover, which no rule judges.
+ * Leaving the flag out is a bot's step, so a caller that forgets it gets the stricter rules. */
+function actionExpression(step, approved = [], {person = false} = {}) {
   const sel = targetOf(step);
+  const bot = person === true ? [] : (Array.isArray(approved) ? approved : []);
+  const owner = person === true;
   switch (step.op) {
-    case 'click': return `(()=>{const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};${riskGuard(approved, 'clicked', true)}el.scrollIntoView();const a=el.closest('a[target]');if(a)a.removeAttribute('target');el.click();return{ok:true};})()`;
-    case 'type': return `(()=>{const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};${riskGuard(approved, 'typed into')}const v=${jsLiteral(step.text)};if('value' in el){el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}else{el.textContent=v;}return{ok:true};})()`;
+    case 'click': return `(()=>{const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};${riskGuard(bot, 'clicked', true, false, owner)}el.scrollIntoView();const a=el.closest('a[target]');if(a)a.removeAttribute('target');el.click();return{ok:true};})()`;
+    case 'type': return `(()=>{const el=document.querySelector(${sel});if(!el)return{ok:false,reason:'selector not found'};${riskGuard(bot, 'typed into', false, true, owner)}${owner ? ownerTyping(step) : ''}const v=${jsLiteral(step.text)};if('value' in el){el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}else{el.textContent=v;}return{ok:true${owner ? ',secret:isSecretField(el)' : ''}};})()`;
     case 'waitFor': return `new Promise(res=>{const sel=${sel};const end=Date.now()+${Number(step.timeoutMs) > 0 ? Math.min(Number(step.timeoutMs), 15000) : 5000};const tick=()=>{if(document.querySelector(sel))return res({ok:true});if(Date.now()>end)return res({ok:false,reason:'timed out'});setTimeout(tick,100);};tick();})`;
-    case 'read': return `(()=>{const el=document.querySelector(${sel});return{ok:Boolean(el),text:el?String(el.textContent).slice(0,4000):null};})()`;
+    case 'read': return `(()=>{${PAGE_SECRETS_JS};const el=document.querySelector(${sel});return{ok:Boolean(el),text:el?hideSecrets(String(el.textContent),${SECRET_FIELDS}).slice(0,4000):null};})()`;
     case 'snapshot': return SNAPSHOT;
     case 'scroll': {
       const times = Math.min(4, Math.max(1, Number(step.times) || 2));
@@ -136,6 +166,10 @@ function actionExpression(step, approved = null) {
     default: return null;
   }
 }
+
+// For tests only: the page scripts are strings that run in Chrome, so a test runs them against a fake page.
+export {SNAPSHOT, MAIN_TEXT, actionExpression};
+export const LOOK = pageRead({links: true});
 
 /** Decide one request the page being read wants to make. The page itself
  * (and any frame in it) must be on the allowlist; where a request may connect
@@ -378,7 +412,7 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
               onPage?.({url: target, title: null});
               continue;
             }
-            const expression = actionExpression(step || {}, Array.isArray(approved) ? approved : []);
+            const expression = actionExpression(step || {}, approved);
             if (!expression) { actions.push({op: String(step?.op || 'unknown'), ok: false, reason: 'unsupported action'}); continue; }
             const before = step.op === 'click' ? await currentUrl() : '';
             const {result} = await cdp.send('Runtime.evaluate', {expression, awaitPromise: true, returnByValue: true}, sessionId);
@@ -400,7 +434,7 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
               }
             }
           }
-          const look = async () => JSON.parse((await cdp.send('Runtime.evaluate', {returnByValue: true, expression: `JSON.stringify({url: location.href, title: document.title, text: ${MAIN_TEXT}, links: ${LINKS}, snapshot: ${SNAPSHOT}})`}, sessionId)).result.value);
+          const look = async () => JSON.parse((await cdp.send('Runtime.evaluate', {returnByValue: true, expression: LOOK}, sessionId)).result.value);
           let page = await look();
           // A "checking your browser" wall often clears itself in a few seconds; wait for it rather than hand the bot the wall.
           for (let i = 0; i < 8 && botCheck(page.title, page.text); i++) { await new Promise(resolve => setTimeout(resolve, 1000)); page = await look(); }
@@ -412,15 +446,15 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
             if (nav.errorText) continue;
             await next; await new Promise(resolve => setTimeout(resolve, settleMs));
             page = await look();
-            onPage?.({url: page.url, title: page.title || null});
+            onPage?.({url: page.shown, title: page.title || null});
             if (!botCheck(page.title, page.text)) break;
           }
-          onPage?.({url: page.url, title: page.title || null});
+          onPage?.({url: page.shown, title: page.title || null});
           if (!hostAllowed(page.url, allow)) throw new Error(`The page ended up on ${new URL(page.url).host}, which is not in AGENT_BROWSER_ALLOWLIST.`);
           const text = page.text.replace(/\s+/g, ' ').trim();
           const snapshot = page.snapshot && typeof page.snapshot === 'object' ? page.snapshot : {count: 0, elements: []};
           return {
-            url, finalUrl: page.url, title: page.title || null,
+            url, finalUrl: page.shown, title: page.title || null,
             excerpt: text.slice(0, 600), text: text.slice(0, 60000),
             links: Array.isArray(page.links) ? page.links : [],
             ...(botCheck(page.title, text) ? {botCheck: true} : {}),
@@ -505,17 +539,22 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
       // laid out for a desktop is the page they meant to open.
       await cdp.send('Emulation.setDeviceMetricsOverride', {width: 1024, height: 768, deviceScaleFactor: 1, mobile: false}, sessionId).catch(() => {});
       const evaluate = expression => cdp.send('Runtime.evaluate', {expression, returnByValue: true, awaitPromise: true}, sessionId);
+      // What the owner typed in secret during this takeover, for the life of this page and in memory only. Every
+      // result that leaves (`act`, `view`, `page`, `snapshot`, and what `read` returns to them) is scrubbed of it,
+      // since a site may echo it in an address, a title or a field it draws again.
+      const typed = new Set();
+      const scrub = result => scrubTyped(result, typed);
 
       async function read() {
-        const {result} = await evaluate(`JSON.stringify({url: location.href, title: document.title, ready: document.readyState, text: ${MAIN_TEXT}, snapshot: ${SNAPSHOT}})`);
+        const {result} = await evaluate(pageRead({ready: true}));
         const page = JSON.parse(result.value);
         const snap = page.snapshot && typeof page.snapshot === 'object' ? page.snapshot : {count: 0, elements: []};
-        return {
-          url: page.url, title: page.title || null,
+        return scrub({
+          url: page.shown, title: page.title || null,
           text: String(page.text || '').replace(/\s+/g, ' ').trim().slice(0, 60000),
           elements: Array.isArray(snap.elements) ? snap.elements : [], elementCount: Number(snap.count) || 0,
           blockedRequests: blocked.length + (refused.length - blockedBefore),
-        };
+        });
       }
       const done = () => evaluate('document.readyState').then(({result}) => result?.value === 'complete').catch(() => false);
       /** An action may start a navigation, and the app is being read by a person
@@ -539,7 +578,7 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
       async function view(withImage = true) {
         // A page can be mid-navigation when the person asks for it; an empty
         // frame with the address they are heading to is more useful than a 500.
-        const page = await read().catch(() => ({url, title: null, text: '', elements: [], elementCount: 0, blockedRequests: blocked.length + (refused.length - blockedBefore)}));
+        const page = await read().catch(() => scrub({url, title: null, text: '', elements: [], elementCount: 0, blockedRequests: blocked.length + (refused.length - blockedBefore)}));
         if (!withImage) return page;
         const {data} = await cdp.send('Page.captureScreenshot', {format: 'jpeg', quality: 70, captureBeyondViewport: false}, sessionId).catch(() => ({data: null}));
         return {...page, image: data ? `data:image/jpeg;base64,${data}` : null};
@@ -569,17 +608,22 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
             // says only that something did not work.
             const refusal = blocked.length > blockedBefore ? blocked[blocked.length - 1]
               : refused.length > refusedBefore ? refused[refused.length - 1] : '';
-            return {ok: !nav.errorText && !refusal, reason: nav.errorText || refusal ? `The page was not opened. ${refusal || nav.errorText}` : '', ...page};
+            return scrub({ok: !nav.errorText && !refusal, reason: nav.errorText || refusal ? `The page was not opened. ${refusal || nav.errorText}` : '', ...page});
           }
           const here = await read().catch(() => ({url: ''}));
-          const expression = actionExpression(step || {});
-          if (!expression) return {ok: false, reason: 'That action is not supported.', ...here};
+          const expression = actionExpression(step || {}, [], {person: true});
+          if (!expression) return scrub({ok: false, reason: 'That action is not supported.', ...here});
+          // Remembered before the text is written, so nothing the page does with it can come back unhidden.
+          const secretText = op === 'type' && typeof step.text === 'string';
+          if (secretText && step.secret === true) rememberTyped(typed, step.text);
           const {result} = await evaluate(expression).catch(error => ({result: {value: {ok: false, reason: error.message}}}));
           const value = result?.value && typeof result.value === 'object' ? result.value : {ok: false, reason: 'The page did not answer.'};
+          // A plain type into a field the page counts as secret is remembered too.
+          if (secretText && value.secret === true) rememberTyped(typed, step.text);
           const page = await settled(here.url);
           // `read` returns an element's text; keep it next to the page instead of
           // letting the page's own text win the spread.
-          return {ok: Boolean(value.ok), reason: String(value.reason || ''), readText: typeof value.text === 'string' ? value.text : null, ...page};
+          return scrub({ok: Boolean(value.ok), reason: String(value.reason || ''), readText: typeof value.text === 'string' ? value.text : null, ...page});
         },
         /** The page as the person left it: what the bot is handed back. */
         view: () => view(),

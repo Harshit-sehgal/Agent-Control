@@ -2,10 +2,10 @@
  * a pane shows: the chat list, a thread's timeline and the "needs you" count.
  * (The hash route lives in ui-company.js.) No DOM and no globals, so the product rules here are unit
  * tested directly (tests/ui-model.test.js). */
-import {botSettings} from './bot-settings.js?v=b65971fe47';
-import {STOPPABLE_STATUSES} from './run-state.js?v=b65971fe47';
-import {primaryOf} from './company.js?v=b65971fe47';
-import {plain} from './ui-kit.js?v=b65971fe47';
+import {botSettings} from './bot-settings.js?v=f345637389';
+import {STOPPABLE_STATUSES} from './run-state.js?v=f345637389';
+import {primaryOf} from './company.js?v=f345637389';
+import {plain} from './ui-kit.js?v=f345637389';
 
 const teamKey = groupId => `team-${groupId}`;
 const time = value => { const t = Date.parse(value || ''); return Number.isFinite(t) ? t : 0; };
@@ -261,3 +261,16 @@ export function shortcutRows(mac = false) {
   return SHORTCUTS.map(s => ({what: s.what, keys: s.keys.map(k => (mac && k === 'Ctrl' ? '⌘' : k))}));
 }
 
+
+/** What a control in the takeover sheet is for. `field` is a control the owner may choose to type into: a text
+ * input, a textarea or a select. A button-type input (submit, button, reset, image) is clicked, never typed into.
+ * `text` is a control a person types text in, the only kind a password or code goes to: not a select, a checkbox,
+ * a radio, a file, a range or a colour picker. The device checks the same thing on the page (`isTextEntry`). */
+export function takeoverControl(element) {
+  const tag = String(element?.tag || '');
+  const type = String(element?.type || '').toLowerCase();
+  const button = tag === 'input' && ['submit', 'button', 'reset', 'image'].includes(type);
+  const field = !button && ['input', 'textarea', 'select'].includes(tag);
+  const text = field && (tag === 'textarea' || (tag === 'input' && !['checkbox', 'radio', 'file', 'range', 'color'].includes(type)));
+  return {field, text};
+}

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A password, a one-time code or a card number, whether typed by the owner during a takeover or already in a field, never reaches a model, a chat line, a stored result, a log or an error. The owner gets masked Password and Code fields in both takeover screens.
+**Goal:** A password, a one-time code or a card number, whether typed by the owner during a takeover or already in a field, never reaches a model, a chat line, a stored result, a log or an error, including after the page navigates and echoes it elsewhere. The owner gets masked Password and Code fields in both takeover screens.
 
 **Architecture:** One set of small page functions decides which fields are **secret** and how a field is named. They are written once in `agent/page-secrets.mjs`, unit-tested in Node, and embedded into the page scripts with `.toString()`, as `foldLabel` is today (`agent/browser.mjs:110`). The device tags a field the owner typed into through a masked field (`data-agent-secret`), so the rule also covers sites whose code fields are plain text inputs. The server accepts `secret` input only over HTTPS or from loopback.
 
@@ -133,7 +133,7 @@ In `tests/agent-browser.test.js`, add one test in the style of the test at line 
 - Test: `tests/ui-computer.test.js`, `tests/shared-browser-takeover.test.js`
 
 **Interfaces:**
-- Produces: a type event may carry `secret: true`; `cleanInput` keeps it as `secret: true` and drops any other value. After a secret type, the device runs `document.activeElement?.setAttribute('data-agent-secret','1')` in the tab. Before any type, it asks the tab whether the focused element `isSecretField`; if so the event is treated as secret.
+- Produces: a type event may carry `secret: true`; `cleanInput` keeps it as `secret: true` and drops any other value. Before a secret type, the device runs `document.activeElement?.setAttribute('data-agent-secret','1')` in the tab (skipping `body`, the root and an empty focus). Before any type, it asks the tab whether the focused element `isSecretField`; if so the event is treated as secret.
 
 - [ ] **Step 1: Write the failing tests.**
 
@@ -149,9 +149,9 @@ test('cleanInput keeps secret only as true, and its errors never carry the text'
 });
 ```
 
-In `tests/shared-browser-takeover.test.js`, with the fake CDP: take over a bot, send `{type: 'type', text: '482913', secret: true}`, and assert that an `Input.insertText` is followed by a `Runtime.evaluate` whose expression contains `data-agent-secret`; then, with the focused-field check hooked to answer `true`, a plain type event is also followed by the tag.
+In `tests/shared-browser-takeover.test.js`, with the fake CDP: take over a bot, send `{type: 'type', text: '482913', secret: true}`, and assert that a `Runtime.evaluate` whose expression contains `data-agent-secret` comes before the `Input.insertText`; then, with the focused-field check hooked to answer `true`, a plain type event is also tagged first.
 - [ ] **Step 2: Run them to see them fail.** Run: `node --test tests/ui-computer.test.js tests/shared-browser-takeover.test.js`. Expected: FAIL.
-- [ ] **Step 3: Implement.** `coalesce` never merges when either event has `secret`. `cleanInput` returns `{type: 'type', text, ...(event.secret === true ? {secret: true} : {})}`. `applyInput` asks the focused-field question first, then inserts the text, then tags the element when either says secret.
+- [ ] **Step 3: Implement.** `coalesce` never merges when either event has `secret`. `cleanInput` returns `{type: 'type', text, ...(event.secret === true ? {secret: true} : {})}`. `applyInput` asks the focused-field question first, then tags the focused element when either says secret (and types nothing if the tag fails), then inserts the text.
 - [ ] **Step 4: Run them to see them pass,** then `npm test`. Expected: PASS.
 - [ ] **Step 5: Commit.** `git commit -m "feat: the device tags fields the owner types secrets into"`
 
@@ -214,6 +214,99 @@ test('secret input over plain HTTP from the network is refused on both takeover 
 - [ ] **Step 3: Add the two fields** beside "Type into the page" in each screen: `<form id="computer-password">` with `<input type="password" name="text" autocomplete="current-password" aria-label="Password">` and a Type button, and `<form id="computer-code">` with `<input name="text" inputmode="numeric" autocomplete="one-time-code" aria-label="Code">`. Both actions push `{type: 'type', text, secret: true}` (Computer view) or call `act({op: 'type', index, text, secret: true})` (takeover sheet), then reset the form. Nothing echoes the text. Copy: the button says `Type`; the field's placeholder says `Password` or `Code`.
 - [ ] **Step 4: Run it to see it pass.** Run: `npm run build:pages && npm run test:ui`. Expected: PASS, and `docs/` has no drift.
 - [ ] **Step 5: Docs and commit.** Add one paragraph to `SECURITY.md` saying what counts as a secret field, that bots never type into one, and that masked input needs HTTPS or this computer, never a plain-HTTP proxy: such a proxy voids the loopback exemption, and the `Origin` check is what refuses it. In `DEPLOYMENT.md`, say to set `TRUST_PROXY=1` behind `tailscale serve` or Caddy. Tick Phase AA step 0 in `docs/BUILD-PLAN.md`. Run `npm run check && npm test && npm run build:pages`. `git commit -m "feat: masked password and code fields in the takeover screens"`
+
+---
+
+### Task 6: Remember what was typed in secret, scrub it from every result, clear it after submit, and one planted-secret test
+
+**Spec:** `docs/superpowers/specs/2026-11-26-goals-services-teams-design.md` section 6.1. Read these bullets: "What was typed is remembered, and scrubbed from every result", "A submitted secret is cleared from the page", "One planted-secret test". They are binding. Read 6.2 for the two takeover paths.
+
+**Files:**
+- Modify:
+  - `agent/page-secrets.mjs`: add `scrubTyped`, which runs in Node and is not embedded in the page.
+  - `agent/shared-browser.mjs`: the device path. Keep a per-tab `typedSecrets` set. Add to it in `applyInput` when a type event is secret, or when the field answered "secret". Scrub every capture and action result before it leaves.
+  - `agent/browser.mjs`: the takeover handle used by the server runtime. It keeps its own set for the session and scrubs in `act`, `view` and `read`. It also clears submitted secret fields.
+  - The result paths that carry page results off the device. Find where capture, action and live-view results are returned or sent (`agent/live-channel.mjs`, `agent/agent.mjs`), and scrub at the last point before they leave.
+- Test:
+  - `tests/page-secrets.test.js` for `scrubTyped`.
+  - `tests/shared-browser-takeover.test.js` for the device set.
+  - A new `tests/planted-secret.test.js`.
+
+**Interfaces:**
+- Consumes: `hideSecrets`, `FOCUSED_IS_SECRET_JS`, `TAG_FOCUSED_SECRET_JS`, the text-entry predicate added by the final-review fix wave, and `applyInput`'s ask-tag-insert order. All are already on the branch.
+- Produces: `scrubTyped(result, typed) -> result` in `agent/page-secrets.mjs`.
+  - `typed` is an iterable of strings.
+  - It returns a deep copy with every string field scrubbed: `url`, `finalUrl`, `title`, `text`, `excerpt`, `links` (each text and href), `elements` (each label and any string field), `readText`, and any nested strings in those.
+  - Each remembered string of 3 or more characters becomes `[hidden]`, case-insensitively.
+  - In strings that are URLs, its `encodeURIComponent` form is also matched.
+  - It never mutates its input.
+
+**Steps:**
+- [x] **Step 1: unit tests for `scrubTyped`.**
+  - Case-insensitive match.
+  - The percent-encoded form in a URL query is matched.
+  - A value under 3 characters is ignored.
+  - Nested `links` and `elements` are scrubbed.
+  - The input object is unchanged.
+  - Overlapping remembered strings are merged in one pass, the way `hideSecrets` merges ranges, so `[hidden]` is never cut in half.
+- [x] **Step 2: device set tests** (fake CDP).
+  - After a secret type of `hunter22` and a page whose title, URL and a re-drawn field echo it, the next capture, action result and live view carry `[hidden]` and no `hunter22` in any letter case.
+  - A plain type into a field that answered "secret" is remembered too.
+  - A plain type into an ordinary field is not remembered.
+  - Closing the tab drops its set.
+  - The set is never written anywhere: no config, log, disk or jar.
+- [x] **Step 3: clear at the hand back.** (Fix round 1 dropped the clear after a submit: it can blank a password before a slow or captcha submit has read it.)
+  - When the owner hands back, the device sets that field's `value` to empty and removes its `value` attribute in the page.
+  - Use one small page expression next to the others in `page-secrets.mjs`, with an exact constant so `tests/fake-cdp.js` can match it.
+  - Its failure is logged with fixed wording and never blocks the hand back.
+  - Test it on the fake CDP, and on the real-browser test if one already covers the takeover.
+- [x] **Step 4: the planted-secret test** `tests/planted-secret.test.js`.
+  - Type a unique marker, for example `Planted-<random>-Zq9`, as `secret: true` into a test page served locally. The page echoes it in its title, its URL query, and a field it draws again after "a failed sign-in".
+  - Then run a bot capture and a read, and a hand back that stores a run.
+  - Assert the marker, in any letter case, is in none of these: any model request body (stub the AI with a recording fake), any line written to the console, the stored store state (serialise it), any chat line, any activity line.
+  - Use the test rigs other integration tests use (look at `tests/secret-input.test.js` and the bot-browser tests). Keep it off port 4173 and the real `data/state.json`.
+  - It may be skipped only when no Chrome is found, the same way the existing real-browser tests are skipped. If it can run without Chrome on the fake CDP, prefer that and keep one Chrome variant.
+- [x] **Step 5: docs and gate.**
+  - One sentence in `SECURITY.md`'s secret-fields paragraph about the typed-value memory and the clear at the hand back. Replace the "not yet covered after navigation" line the fix wave added, since this task covers it.
+  - In the plan file, the Goal line goes back to covering navigation.
+  - Run `npm run check && npm test && npm run build:pages` (no drift) and `npm run test:ui`.
+  - Commit: `feat: the device remembers secret typing and scrubs it from every result`.
+
+**Constraints:**
+- Never put a typed value in an error, toast, log or test failure message. Assertions print a fixed message, not the marker.
+- The set lives in memory only.
+
+---
+
+### Task 7: The `secret-input-v1` device feature, and masked fields only for a device that has it
+
+**Spec:** `docs/superpowers/specs/2026-11-26-goals-services-teams-design.md`. Read these, which are binding:
+- 6.2: "The server queues a `secret` event only for a device that reports `secret-input-v1`… For any other device the masked fields are not shown, and a line says to update the device app."
+- 5.5, the "Features" paragraph. Phase 0 ships only `secret-input-v1` and this one check. The general `needs` and `missing-feature` in `chooseDevice`, and the 60-day window, are Phase 1. Do not build those.
+
+**Files:**
+- Modify:
+  - `agent/agent.mjs`: the heartbeat near line 266 already sends `cli`. Send `features: ['secret-input-v1']` with every heartbeat. Use a constant list exported from one place in `agent/`, for example `agent/features.mjs`. If you make a new agent file, make sure `scripts/check.mjs` walks it; it walks `agent/`.
+  - `src/agent.js`: store the reported features per agent, the way `cli` is stored (look at `readAgentCli` and where the heartbeat writes `cli`). Expose them as `features` in the agent rows the UI reads, near lines 396 and 411. Use a kv or column choice matching how `cli` is kept. If it needs a schema change, follow `TABLE_SHAPES` and the store migration pattern, because `tests/store-incremental.test.js` checks it.
+  - `src/routes-live.js`: the `POST /api/browser-live/:botId/input` route. A `secret: true` event for a bot whose live device lacks `secret-input-v1` is refused with 409 "Update the app on your computer to type passwords and codes here.". Find which device serves that bot's live session (`src/browser-live.js`). The check runs after the `secureRequest` 403, keeping that order, and before anything is queued.
+  - `shared/ui-computer-view.js`: hide the Password and Code rows when the serving device lacks the feature, and show that same sentence as a line in the tray instead. Read the device's features from what the snapshot or live session already gives the view. If nothing gives it, add `features` to the smallest existing payload that reaches the view.
+  - The server-runtime takeover sheet (`shared/ui-takeover.js`) runs in the server's own browser, not on a device, so it keeps its fields. Say so in a code comment.
+- Test:
+  - a unit or integration test that a heartbeat's `features` is stored and shown;
+  - the 409 for a device without the feature, and acceptance for one with it;
+  - a usability smoke step: with a device that does not report the feature, the tray shows the line and no Password field.
+  - Update the existing Computer view smoke's fake device to report the feature, so its masked-field steps still run.
+
+**Steps:** write the tests first, see them fail, implement, see them pass. Then:
+- Run `npm run build:pages` and commit the regenerated `docs/`.
+- Add one line in `docs/AGENT-PROTOCOL.md` (it documents the device protocol) naming the `features` heartbeat field and `secret-input-v1`.
+- Run the gate: `npm run check && npm test && npm run build:pages` (no drift) and `npm run test:ui`.
+- Commit: `feat: masked input only for a device that reports secret-input-v1`.
+
+**Constraints:**
+- An older device that sends no `features` is treated as having none. It never crashes the heartbeat.
+- `features` from the device is validated: an array of short known-shaped strings, capped in length and count. It is never trusted as anything else.
+- Never put typed text in an error or log.
 
 ---
 
