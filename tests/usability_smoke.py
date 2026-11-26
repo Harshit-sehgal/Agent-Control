@@ -1970,6 +1970,7 @@ class Server:
         self.google = {'configured': False, 'connected': False, 'status': 'none', 'account': None, 'redirectUri': REDIRECT, 'scopes': [], 'steps': GOOGLE_STEPS,
                        'testingNote': 'While the consent screen is in Testing, Google ends the sign-in after 7 days and this page shows Reconnect Google.'}
         self.providers, self.default_provider, self.default_model = [], None, None
+        self.fallbacks = []
         self.agents = [
             {'id': 'a1', 'name': 'Laptop', 'status': 'online', 'permissions': ['model.run'], 'lastSeenAt': '2026-11-11T10:00:00Z', 'tasks': {'queued': 0, 'running': 0, 'failed': 0},
              'features': ['secret-input-v1'], 'cli': {'claude': 'signed-in', 'codex': 'signed-out', 'checkedAt': '2026-11-11T10:00:00Z'}},
@@ -2039,12 +2040,14 @@ class Server:
         if path == '/api/ai' and method == 'PATCH':
             self.default_provider = body.get('providerId', self.default_provider)
             self.default_model = body.get('model', self.default_model)
+            if 'fallbacks' in body:
+                self.fallbacks = body['fallbacks']
             return await reply({'ok': True})
         if path == '/api/ai':
             return await reply({'providers': [{k: v for k, v in p.items() if k in ('id', 'label', 'kind', 'engine', 'model', 'protocol', 'host', 'modelCount')} for p in self.providers],
-                                'defaultProviderId': self.default_provider, 'defaultModel': self.default_model, 'bots': {}})
+                                'defaultProviderId': self.default_provider, 'defaultModel': self.default_model, 'fallbacks': self.fallbacks, 'fallback': (self.fallbacks or [None])[0], 'bots': {}})
         if path == '/api/ai/providers' and method == 'GET':
-            return await reply({'providers': [self.provider_listing(p) for p in self.providers], 'defaultProviderId': self.default_provider, 'defaultModel': self.default_model, 'bots': {}})
+            return await reply({'providers': [self.provider_listing(p) for p in self.providers], 'defaultProviderId': self.default_provider, 'defaultModel': self.default_model, 'fallbacks': self.fallbacks, 'fallback': (self.fallbacks or [None])[0], 'bots': {}})
         if path == '/api/ai/providers' and method == 'POST':
             assert 'apiKey' not in body and 'baseUrl' not in body, 'a subscription holds no key'
             made = {'id': f'p-{len(self.providers) + 1}', 'label': body['label'], 'kind': 'local-cli', 'engine': body['engine'], 'model': body['model'], 'protocol': 'local-cli', 'host': None, 'modelCount': 0}
@@ -2494,6 +2497,51 @@ async def models_api_provider_menu_and_one_model_picker(page, base):
     await api_form.locator('summary').click()
     await expect(api_form.locator('select[name="protocol"]')).to_be_visible()
     await expect(api_form.locator('textarea[name="headers"]')).to_be_visible()
+
+
+async def models_page_saves_fallbacks_in_order(page, base):
+    gpt = {'id': 'p-9', 'label': 'Groq', 'kind': 'api', 'engine': None, 'model': None, 'protocol': 'openai-chat', 'host': 'api.groq.com', 'modelCount': 2, 'chatModels': ['llama-3.3-70b', 'mixtral']}
+    claude = {'id': 'p-8', 'label': 'My Claude', 'kind': 'local-cli', 'engine': 'claude', 'model': '', 'protocol': 'local-cli', 'host': None, 'modelCount': 0}
+    server = await install(page, providers=[gpt, claude], default_provider='p-9')
+    await open_app(page, base)
+    await open_settings(page, 'models')
+    form = page.locator('#ai-fallback-form')
+    pick = lambda n: form.locator(f'select[name="fallback{n}"]')
+    await expect(form.locator('select')).to_have_count(3)
+    await expect(form.locator('.field-label')).to_have_text(['First fallback', 'Second fallback', 'Third fallback'])
+    await expect(form).to_contain_text("When a bot's model is busy, down, times out or is signed out, the turn goes to these in order, before it has replied. A refused request is not sent elsewhere.")
+    assert await pick(1).locator('option').evaluate_all('o => o.map(x => x.textContent)') == ['None', 'Groq \u00b7 llama-3.3-70b', 'Groq \u00b7 mixtral', 'My Claude \u00b7 its default model']
+    # A choice after a None cannot be made yet.
+    await expect(pick(1)).to_be_enabled()
+    await expect(pick(2)).to_be_disabled()
+    await expect(pick(3)).to_be_disabled()
+    await pick(1).select_option('p-9|mixtral')
+    await expect(pick(2)).to_be_enabled()
+    await expect(pick(3)).to_be_disabled()
+    await pick(2).select_option('p-8|')
+    await expect(pick(3)).to_be_enabled()
+    await form.get_by_role('button', name='Save').click()
+    await expect(page.locator('#toast')).to_contain_text('Fallback models saved.')
+    assert server.sent('PATCH', '/api/ai') == [{'fallbacks': [{'providerId': 'p-9', 'model': 'mixtral'}, {'providerId': 'p-8', 'model': None}]}]
+    # What was saved is what the page shows, and the third choice is open.
+    await expect(pick(1)).to_have_value('p-9|mixtral')
+    await expect(pick(2)).to_have_value('p-8|')
+    await expect(pick(3)).to_be_enabled()
+    await expect(pick(3)).to_have_value('')
+    assert await form.locator('select').count() == 3, 'there is no fourth choice'
+    # The same model twice is sent once.
+    await pick(3).select_option('p-9|mixtral')
+    await form.get_by_role('button', name='Save').click()
+    await expect(page.locator('#toast')).to_contain_text('Fallback models saved.')
+    assert server.sent('PATCH', '/api/ai')[-1] == {'fallbacks': [{'providerId': 'p-9', 'model': 'mixtral'}, {'providerId': 'p-8', 'model': None}]}
+    await expect(pick(3)).to_have_value('')  # the page has redrawn from what was saved
+    # Back to None in the first closes the rest, and saving sends an empty list.
+    await pick(1).select_option('')
+    await expect(pick(2)).to_be_disabled()
+    await expect(pick(3)).to_be_disabled()
+    await form.get_by_role('button', name='Save').click()
+    await expect(page.locator('#toast')).to_contain_text('No fallback models.')
+    assert server.sent('PATCH', '/api/ai')[-1] == {'fallbacks': []}
 
 
 async def model_list_loads_by_itself(page, base):
@@ -2986,6 +3034,7 @@ async def main():
             await h.scenario('connectors: ?google=connected toasts once, strips the address and opens Connectors; an error says why', google_return_toast_and_clean_address)
             await h.scenario('models: a subscription is a name and an engine with no key field, and its row says where it is signed in', subscription_provider_and_cli_status)
             await h.scenario('models: Add a model is one card with a choice, the dots hold Edit, Refresh and Delete, one model picker', models_api_provider_menu_and_one_model_picker)
+            await h.scenario('models: three fallback choices, each open only after the one before, saved in order with repeats dropped', models_page_saves_fallbacks_in_order)
             await h.scenario('models: a provider\'s list loads by itself into the dropdown, and Other… takes any id', model_list_loads_by_itself)
             await h.scenario('agents: one page with each computer online or not, claude and codex sign-in, a switch per permission, Revoke asks first', agents_page_status_signin_and_switches)
             await h.scenario('agents: a computer whose app cannot type passwords and codes says it needs an update', agents_page_says_which_computer_needs_an_update)

@@ -236,3 +236,20 @@ export const CLI_MODELS = {
     ['gpt-5.3-codex', 'GPT-5.3-Codex · gpt-5.3-codex'],
   ],
 };
+
+/** The most fallback models an install keeps. */
+export const MAX_FALLBACKS = 3;
+/** The fallback models the owner picked, in order: `ai.fallbacks`, else a stored single `ai.fallback` as a list of
+ * one (an install from before). Never a repeat, never more than three. The one reading rule: the server, the setup
+ * brief and the Settings form all use it. */
+export function fallbackPicks(ai) {
+  const stored = Array.isArray(ai?.fallbacks) ? ai.fallbacks : ai?.fallback ? [ai.fallback] : [];
+  const picks = [], seen = new Set();
+  for (const entry of stored) {
+    if (!entry || typeof entry !== 'object' || typeof entry.providerId !== 'string' || !entry.providerId) continue;
+    const pick = {providerId: entry.providerId, model: entry.model || null}, key = `${pick.providerId}|${pick.model || ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key); picks.push(pick);
+  }
+  return picks.slice(0, MAX_FALLBACKS);
+}
