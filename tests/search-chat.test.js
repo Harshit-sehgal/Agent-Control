@@ -192,6 +192,9 @@ for (const outside of [true, false]) {
     assert.equal(searched.length, 1);
     assert.equal(searched[0].env.chatSearch.hits[0].id, 'm1');
     assert.equal(run.readOldChat, outside ? true : undefined);
+    // The mark is in the database, not only in memory: a restarted server reads the same run.
+    const reopened = await new SqliteStore(store.dbPath, store.legacyPath).init();
+    try { assert.equal(reopened.read().groupRuns.find(r => r.id === run.id).readOldChat, outside ? true : undefined); } finally { await reopened.close(); }
     const s = structuredClone(store.read());
     Object.assign(s, {handsOff: true, askBasics: false, grants: [], asks: []});
     s.browserRequests = [];
@@ -260,6 +263,8 @@ for (const outside of [true, false]) {
       assert.equal(handed.thread.length, 4, 'the first call was handed the 4 newest lines, so the older one is what was searched');
       const line = store.read().chats.writer.find(m => m.id === run.id);
       assert.equal(line.outside, outside ? true : undefined);
+      const reopened = await new SqliteStore(store.dbPath, store.legacyPath).init();
+      try { assert.equal(reopened.read().chats.writer.find(m => m.id === run.id).outside, outside ? true : undefined); } finally { await reopened.close(); }
     } finally { main.close(); second.close(); }
   }));
 }
