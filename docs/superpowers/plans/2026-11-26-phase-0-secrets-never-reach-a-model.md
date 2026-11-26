@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A password, a one-time code or a card number, whether typed by the owner during a takeover or already in a field, never reaches a model, a chat line, a stored result, a log or an error. The owner gets masked Password and Code fields in both takeover screens.
+**Goal:** A password, a one-time code or a card number, whether typed by the owner during a takeover or already in a field, never reaches a model, a chat line, a stored result, a log or an error while the field is on the page. The owner gets masked Password and Code fields in both takeover screens.
 
 **Architecture:** One set of small page functions decides which fields are **secret** and how a field is named. They are written once in `agent/page-secrets.mjs`, unit-tested in Node, and embedded into the page scripts with `.toString()`, as `foldLabel` is today (`agent/browser.mjs:110`). The device tags a field the owner typed into through a masked field (`data-agent-secret`), so the rule also covers sites whose code fields are plain text inputs. The server accepts `secret` input only over HTTPS or from loopback.
 

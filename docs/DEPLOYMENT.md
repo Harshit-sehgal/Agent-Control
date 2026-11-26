@@ -354,6 +354,18 @@ fields in the Computer view and the takeover sheet rely on: when a request is
 refused, the owner sees "Passwords and codes are only sent over HTTPS or from
 this computer." in a toast, and nothing they typed is kept.
 
+With `TRUST_PROXY=1` the app trusts only the proxy's word, so opening it directly at
+`http://localhost` (around the proxy) gets a 403 on the Password and Code fields: a request
+with no `X-Forwarded-Proto: https` is never taken as secure. Open the app through the proxy
+to type a secret. `deploy/compose.yaml`, `deploy/compose.tailscale.yaml` and
+`deploy/compose.cloudflare.yaml` set `TRUST_PROXY=1`, and in each the app's port is not
+reachable except through the proxy (Caddy, `tailscale serve`, cloudflared).
+
+`tailscale serve` sets `X-Forwarded-Proto: https` on TLS requests, and `X-Forwarded-For`. That
+is read from Tailscale's source (`ipn/ipnlocal/serve.go`, `addProxyForwardedHeaders`), not
+tested here. The Cloudflare setup relies on cloudflared passing Cloudflare's own
+`X-Forwarded-Proto` through; that is not tested here either.
+
 ## Secrets & the vault
 - Without `MASTER_KEY`, a `vault.key` (mode `0600`) is created beside the
   database. **Back it up with the database** — losing it makes every encrypted

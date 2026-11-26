@@ -112,7 +112,8 @@ access only to people you would let read the owner's connected accounts.
   proxy on this host voids the loopback exemption: the request then carries forwarding headers or an `Origin` that is
   not `localhost`, `127.0.0.1` or `[::1]`, and the `Origin` check refuses it. With `TRUST_PROXY=1` the "from this computer" path is off: only the forwarded
   `X-Forwarded-Proto: https` counts (`secureRequest` in `src/http.js`). Never put a plain-HTTP proxy in front
-  of this server for secret input.
+  of this server for secret input. The rule is tied to the field: once the page navigates away, a page that echoes the
+  value somewhere else is not yet covered, which is a follow-up.
 
 ## Data at rest
 - The store is SQLite (`src/sqlite-store.js`, `node:sqlite`) with a migration

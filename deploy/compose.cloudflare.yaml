@@ -22,6 +22,10 @@ services:
     environment:
       HOST: 127.0.0.1
       PORT: "4173"
+      # Nothing is published and the app listens on the container's loopback, so every outside request arrives
+      # through cloudflared, which says when it spoke HTTPS. Believed, so a password or code typed into a bot's
+      # page is accepted.
+      TRUST_PROXY: "1"
       DATA_FILE: /data/state.json
       HSTS: "1"
       AGENT_BROWSER: "1"

@@ -23,6 +23,10 @@ services:
       DATA_FILE: /data/state.json
       PUBLIC_ORIGIN: https://${DOMAIN:?Set DOMAIN in deploy/.env}
       HSTS: "1"
+      # Believe the proxy's X-Forwarded-Proto, so a password or code typed into a bot's page is accepted over
+      # HTTPS. Safe here because the app's port is only `expose`d to Caddy; the `ports:` below are Caddy's,
+      # and Caddy overwrites the forwarded headers a client sends. Never set this where the app is published.
+      TRUST_PROXY: "1"
     volumes:
       - data:/data
     expose:

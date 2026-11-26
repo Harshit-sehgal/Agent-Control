@@ -33,6 +33,9 @@ services:
     environment:
       HOST: 127.0.0.1
       PORT: "4173"
+      # The app listens on loopback only, so every outside request arrives through `tailscale serve`, which says
+      # when it spoke HTTPS. Believed, so a password or code typed into a bot's page is accepted.
+      TRUST_PROXY: "1"
       DATA_FILE: /data/state.json
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-https://${TS_HOST:?Set TS_HOST to this machine's Tailscale name}}
     volumes:
