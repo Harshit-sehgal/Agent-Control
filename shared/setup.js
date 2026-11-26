@@ -27,7 +27,7 @@
  *
  * Pure and browser-safe: the server reads replies with it and the UI paints the card from it. */
 import {cleanText, validHttpUrl} from './core.js';
-import {cleanEffort, CLI_MODELS} from './ai-presets.js';
+import {cleanEffort, CLI_MODELS, fallbackPicks} from './ai-presets.js';
 import {everyMinutes, cleanAt, cleanDay, whenWords, scheduleRows, MIN_EVERY, MAX_EVERY} from './schedules.js';
 import {controlFence} from './reply-blocks.js';
 import {companyBots, primaryOf} from './company.js';
@@ -670,8 +670,7 @@ export function workspaceBrief(state, {agents = [], connectors = [], speaker = n
     preset: ({careful: 'Careful', balanced: 'Balanced', handsOff: 'Hands-off'})[presetOf(state)] || 'Custom (the owner set rules by hand)',
     briefing: (() => { const on = briefingSchedule(state); return on ? `on, ${on.when}` : 'off'; })(),
     fallbackModel: (() => {
-      // `ai.fallbacks` in order, else an old single `ai.fallback` as a list of one (the rule src/ai-providers.js `fallbackPicks` keeps).
-      const picks = (Array.isArray(ai.fallbacks) ? ai.fallbacks : ai.fallback ? [ai.fallback] : []).filter(f => f?.providerId).slice(0, 3);
+      const picks = fallbackPicks(ai);
       if (!picks.length) return 'none';
       const names = picks.map(f => `${label(f.providerId) || 'a removed model'}${f.model ? ` · ${f.model}` : ''}`).join(', then ');
       return `${names} ${picks.length > 1 ? 'answer in turn' : 'answers'} when a bot's model is down, busy or out of credit`;

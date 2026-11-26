@@ -10,7 +10,7 @@
 import * as credentials from './credentials.js';
 import {fail} from '../shared/errors.js';
 import {envConfig,discoverModels,protocolOf,configReady,complete} from './ai.js';
-import {normaliseProtocol,inferProtocol,presetById,protocolById,LOCAL_CLI_KIND,LOCAL_CLI_ENGINES,cliEngineById,cleanCliModel,cleanEffort,EFFORT_IDS} from '../shared/ai-presets.js';
+import {normaliseProtocol,inferProtocol,presetById,protocolById,LOCAL_CLI_KIND,LOCAL_CLI_ENGINES,cliEngineById,cleanCliModel,cleanEffort,EFFORT_IDS,fallbackPicks,MAX_FALLBACKS} from '../shared/ai-presets.js';
 import {uuid} from '../shared/core.js';
 import {peek} from './sqlite-store.js';
 import {cliRunner,cliSignIn} from './cli-model.js';
@@ -82,21 +82,6 @@ const headerNamesOf=p=>capList(p?.headerNames,MAX_HEADERS).filter(name=>typeof n
 const labelsOf=p=>p?.labels&&typeof p.labels==='object'&&!Array.isArray(p.labels)?p.labels:{};
 /** The owner's per-model prices (dollars per million tokens), admin listings only. */
 const pricesOf=p=>p?.prices&&typeof p.prices==='object'&&!Array.isArray(p.prices)?p.prices:{};
-/** The most fallback models an install keeps. */
-const MAX_FALLBACKS=3;
-/** The fallback models the owner picked, in order: `ai.fallbacks`, else a stored single `ai.fallback` as a list of
- * one (an install from before). Never a repeat, never more than three. Not `fallbacksOf`: src/usage.js owns that name. */
-export function fallbackPicks(ai){
-  const stored=Array.isArray(ai?.fallbacks)?ai.fallbacks:ai?.fallback?[ai.fallback]:[];
-  const picks=[],seen=new Set();
-  for(const entry of stored){
-    if(!entry||typeof entry!=='object'||typeof entry.providerId!=='string'||!entry.providerId)continue;
-    const pick={providerId:entry.providerId,model:entry.model||null},key=`${pick.providerId}|${pick.model||''}`;
-    if(seen.has(key))continue;
-    seen.add(key);picks.push(pick);
-  }
-  return picks.slice(0,MAX_FALLBACKS);
-}
 const firstPick=ai=>fallbackPicks(ai)[0]||null;
 
 /** Ensure the AI shape exists on a state document. */
@@ -437,7 +422,9 @@ export async function setDefaults(store,body={}){
   // nothing and report success, which reads like the setting applied.
   const {providerId,model,effort,fallback,fallbacks,...unknown}=body&&typeof body==='object'&&!Array.isArray(body)?body:{};
   // `fallbacks` is the list; the old `fallback` is a list of one, or none. When both come, the list wins.
-  const asked=fallbacks!==undefined?fallbacks:fallback===undefined?undefined:fallback===null?[]:[fallback];
+  // An empty alias (`{}`, no provider id) is none, as the old API read it; an entry inside `fallbacks` stays strict.
+  const aliasNone=fallback===null||(fallback&&typeof fallback==='object'&&!Array.isArray(fallback)&&!fallback.providerId);
+  const asked=fallbacks!==undefined?fallbacks:fallback===undefined?undefined:aliasNone?[]:[fallback];
   if(fallbacks!==undefined&&!Array.isArray(fallbacks))fail('Fallbacks are a list of {providerId, model}.');
   if(fallbacks===undefined&&fallback!==undefined&&fallback!==null&&(typeof fallback!=='object'||Array.isArray(fallback)))fail('A fallback is {providerId, model}, or null for none.');
   if(asked&&asked.length>MAX_FALLBACKS)fail(`At most ${MAX_FALLBACKS} fallback models.`);
