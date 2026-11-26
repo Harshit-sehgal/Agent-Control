@@ -30,14 +30,16 @@ async function withStore(fn) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-fallback-turn-'));
   const retry = process.env.AI_RETRY_MS; process.env.AI_RETRY_MS = '0';
   clearCoolOff();
+  let store = null;
   try {
     const dataFile = path.join(dir, 'state.json');
-    const store = await new SqliteStore(path.join(dir, 'state.db'), dataFile).init();
+    store = await new SqliteStore(path.join(dir, 'state.db'), dataFile).init();
     store.vaultKey = loadMasterKey(dataFile).key;
     await store.update(s => { migrate(s); s.groups = [{id: 'home', name: 'Home', bots: [{id: 'writer', name: 'Writer', type: 'custom'}]}]; });
     return await fn(store);
   } finally {
     if (retry === undefined) delete process.env.AI_RETRY_MS; else process.env.AI_RETRY_MS = retry;
+    await store?.close();
     await fs.rm(dir, {recursive: true, force: true});
   }
 }
@@ -78,5 +80,29 @@ test('a stored ai.fallback with no ai.fallbacks (an install from before) answers
     assert.equal(out.value, 'from the old fallback');
     assert.deepEqual([main.requests.length, spare.requests.length], [2, 1]);
     assert.equal(out.calls[0].fallbackFrom.model, 'big');
+  } finally { main.close(); spare.close(); }
+}));
+
+test('a walk that reaches the third model still names the own model and its reason, not the second\'s', async () => withStore(async store => {
+  const main = await stub(down), second = await stub({status: 429, json: {error: {message: 'busy'}}}), third = await stub(ok('from the third'));
+  try {
+    const a = await provider(store, 'Main', 'big', main), b = await provider(store, 'Second', 'mid', second), c = await provider(store, 'Third', 'small', third);
+    await ai.setDefaults(store, {providerId: a.id, model: 'big'});
+    await ai.setDefaults(store, {fallbacks: [{providerId: b.id, model: 'mid'}, {providerId: c.id, model: 'small'}]});
+    const out = await turn(store);
+    assert.equal(out.value, 'from the third');
+    assert.deepEqual(out.calls[0].fallbackFrom, {model: 'big', why: 'the provider is having trouble'});
+    assert.equal(out.calls[0].providerId, c.id);
+  } finally { for (const s of [main, second, third]) s.close(); }
+}));
+
+test('a fallback answers a call made outside any turn scope too', async () => withStore(async store => {
+  const main = await stub(down), spare = await stub(ok('from the spare'));
+  try {
+    const a = await provider(store, 'Main', 'big', main), b = await provider(store, 'Spare', 'mid', spare);
+    await ai.setDefaults(store, {providerId: a.id, model: 'big'});
+    await ai.setDefaults(store, {fallbacks: [{providerId: b.id, model: 'mid'}]});
+    assert.equal(await executeCustomBot(bot, 'hello', ai.resolveConfig(store, 'writer')), 'from the spare');
+    assert.deepEqual([main.requests.length, spare.requests.length], [2, 1]);
   } finally { main.close(); spare.close(); }
 }));
