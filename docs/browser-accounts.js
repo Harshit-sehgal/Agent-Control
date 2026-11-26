@@ -7,10 +7,10 @@
  *
  * Pure and browser-safe, no secrets: a jar never reaches this file. The route checks that `deviceId` is a paired
  * computer of the workspace; the rules here check only its shape. */
-import {cleanText} from './core.js?v=73b610b405';
-import {fail} from './errors.js?v=73b610b405';
-import {hostOf} from './bot-browser.js?v=73b610b405';
-import {ACCOUNT_ID, DEVICE_ID, botSettings, pinnedDevice} from './bot-settings.js?v=73b610b405';
+import {cleanText} from './core.js?v=4307004d1d';
+import {fail} from './errors.js?v=4307004d1d';
+import {hostOf} from './bot-browser.js?v=4307004d1d';
+import {ACCOUNT_ID, DEVICE_ID, botSettings, pinnedDevice} from './bot-settings.js?v=4307004d1d';
 
 export const MAX_ACCOUNTS = 20;
 export const ACCOUNT_STATES = ['signed-in', 'signed-out', 'unknown'];

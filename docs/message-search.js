@@ -4,9 +4,9 @@
  * in shared/chats.js), so the browser can search all the history there is without a route of its own, on the
  * server build and the Pages demo alike. Every word of the query must appear (in any order); case and accents
  * are ignored. Pure and browser-safe (tests/message-search.test.js). */
-import {esc, plain} from './ui-kit.js?v=73b610b405';
-import {isThread} from './threads.js?v=73b610b405';
-import {controlFence} from './reply-blocks.js?v=73b610b405';
+import {esc, plain} from './ui-kit.js?v=4307004d1d';
+import {isThread} from './threads.js?v=4307004d1d';
+import {controlFence} from './reply-blocks.js?v=4307004d1d';
 
 export const MAX_RESULTS = 40;
 const BEFORE = 24, WIDTH = 160;
