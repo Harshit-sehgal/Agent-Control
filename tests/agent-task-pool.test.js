@@ -143,3 +143,50 @@ test('drain on an idle pool resolves at once, and a failing running task still l
   await done;
   assert.equal(pool.running(), 0);
 });
+
+test('a failed task goes to onError, with the task and the error, and the pool goes on', async () => {
+  const seen = [];
+  const b = blocker();
+  const pool = createTaskPool({concurrency: 1, run: b.run, onError: (task, error) => seen.push([task.id, error.message])});
+  pool.add(check('1')); pool.add(check('2'));
+  b.fail('1', new Error('boom')); await pool.settled();
+  assert.deepEqual(seen, [['1', 'boom']]);
+  b.finish('2'); await pool.drain();
+  assert.deepEqual(seen, [['1', 'boom']], 'a task that succeeds is not reported');
+});
+
+test('with no onError a failure logs one fixed line, never the error text or the task', async () => {
+  const lines = [];
+  const original = console.error;
+  console.error = (...args) => lines.push(args);
+  try {
+    const pool = createTaskPool({concurrency: 1, run: () => Promise.reject(new Error('secret-token-123'))});
+    pool.add({id: '1', kind: 'http.check', payload: {url: 'https://secret.example/path'}});
+    await pool.settled(); await pool.drain();
+  } finally { console.error = original; }
+  assert.deepEqual(lines, [['agent: a task failed in the worker pool.']]);
+});
+
+test('an onError that throws does not stall the pool', async () => {
+  const b = blocker();
+  const pool = createTaskPool({concurrency: 1, run: b.run, onError: () => { throw new Error('reporter broke'); }});
+  pool.add(check('1')); pool.add(check('2'));
+  b.fail('1', new Error('boom')); await pool.settled();
+  assert.deepEqual(b.log.at(-1), ['start', '2']);
+  b.finish('2'); await pool.drain();
+});
+
+test('a keyOf that throws in add leaves the id free and stores nothing, and drain still resolves', async () => {
+  const b = blocker();
+  let bad = true;
+  const pool = createTaskPool({concurrency: 2, run: b.run, keyOf: task => { if (bad && task.id === 'x') throw new Error('bad key'); return null; }});
+  pool.add(check('1'));
+  assert.throws(() => pool.add(check('x')), /bad key/);
+  assert.deepEqual([pool.running(), pool.queued()], [1, 0]);
+  bad = false;
+  assert.equal(pool.add(check('x')), true, 'the id was never taken');
+  const done = pool.drain();
+  b.finish('1'); b.finish('x');
+  await done;
+  assert.equal(pool.running(), 0);
+});
