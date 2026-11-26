@@ -15,6 +15,7 @@ import {fail} from '../shared/errors.js';
 import {companyBots} from '../shared/company.js';
 import {hostOf} from '../shared/bot-browser.js';
 import {cleanInput} from '../agent/live-input.mjs';
+import {UPDATE_DEVICE_LINE} from '../shared/device-features.js';
 
 export const LIVE_WAIT_MS = 20000;
 /** A viewer that has not asked for a frame for this long is gone. */
@@ -31,11 +32,15 @@ const text = (value, max) => (typeof value === 'string' ? value.slice(0, max) : 
 export function createLiveHub({now = Date.now, waitMs = LIVE_WAIT_MS} = {}) {
   const spaces = new Map();
   const hub = {waitMs};
+  /** Whether a device has said it can hold a typed secret (`secret-input-v1`). Set by the routes, which can read the
+   * device's stored features; until then no device is trusted with one. The queue is per workspace and any device that
+   * polls drains it, so this is asked again when commands are handed over, not only when they are queued. */
+  hub.holdsSecrets = () => false;
 
   const space = id => {
     let sp = spaces.get(id);
     if (!sp) {
-      sp = {agentId: null, polledAt: 0, parked: null, sentWatch: null, commands: [], frame: null, seq: 0, viewers: new Map(), driving: new Map(), tabs: new Map(), notices: new Map(), tasks: false};
+      sp = {workspaceId: id, agentId: null, polledAt: 0, parked: null, sentWatch: null, commands: [], frame: null, seq: 0, viewers: new Map(), driving: new Map(), tabs: new Map(), notices: new Map(), tasks: false};
       spaces.set(id, sp);
     }
     return sp;
@@ -57,17 +62,24 @@ export function createLiveHub({now = Date.now, waitMs = LIVE_WAIT_MS} = {}) {
     if (!parked) return;
     sp.parked = null;
     clearTimeout(parked.timer);
-    parked.resolve(answer(sp));
+    parked.resolve(answer(sp, parked.agentId));
   }
   /** What the device hears: the owner's commands, the tab to cast, and
    * `tasks: true` when work was queued for it since its last answer. */
-  function answer(sp) {
+  function answer(sp, agentId) {
     const watch = watchOf(sp);
     sp.sentWatch = watch;
     const out = {commands: sp.commands.splice(0), watch};
+    // A secret goes only to a device that holds `secret-input-v1` now. For any other it is dropped, never sent (it
+    // would be typed untagged and left in the page's results), and the owner is told in fixed words, never the text.
+    if (out.commands.some(isSecret) && !hub.holdsSecrets(sp.workspaceId, agentId)) {
+      for (const c of out.commands) if (isSecret(c)) sp.notices.set(c.botId, UPDATE_DEVICE_LINE);
+      out.commands = out.commands.filter(c => !isSecret(c));
+    }
     if (sp.tasks) { sp.tasks = false; out.tasks = true; }
     return out;
   }
+  const isSecret = c => c.type === 'input' && c.event?.secret === true;
   /** Something the device should hear now: answer its parked poll. */
   const wake = sp => deliver(sp);
 
@@ -87,10 +99,10 @@ export function createLiveHub({now = Date.now, waitMs = LIVE_WAIT_MS} = {}) {
     // The device is the authority on whether the owner holds a tab, once it has had time to hear about it.
     for (const [botId, since] of sp.driving) if (report?.owner !== botId && now() - since > DRIVE_GRACE_MS) sp.driving.delete(botId);
     deliver(sp);
-    if (sp.commands.length || sp.tasks || watchOf(sp) !== sp.sentWatch) return Promise.resolve(answer(sp));
+    if (sp.commands.length || sp.tasks || watchOf(sp) !== sp.sentWatch) return Promise.resolve(answer(sp, agentId));
     return new Promise(resolve => {
       const timer = setTimeout(() => deliver(sp), hub.waitMs);
-      sp.parked = {resolve, timer};
+      sp.parked = {resolve, timer, agentId};
     });
   }
 

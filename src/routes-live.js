@@ -24,6 +24,11 @@ export function liveRoutes(router, {workspaces}) {
   // A task queued for a device answers its parked live poll, so it heartbeats at once.
   agent.onAgentTaskQueued((workspaceId, agentId) => hub.taskQueued(workspaceId, agentId));
   // The workspace a device was paired in, as the other agent routes find it.
+  // The hub asks, as it hands commands to a device, whether that device may be sent a typed secret.
+  hub.holdsSecrets = (ws, agentId) => {
+    const store = workspaces.get?.(ws);
+    return Boolean(store && agentId) && hasFeature(agent.readAgentFeatures(store, agentId), SECRET_INPUT_V1);
+  };
   const agentStore = c => workspaces.holding('SELECT 1 AS x FROM agents WHERE id=?', String(c.req.headers['x-agent-id'] || '')) || workspaces.get(DEFAULT_WORKSPACE);
   const device = (c, raw) => agent.verifyAgentRequest(agentStore(c), c.req.headers, 'POST', c.path, raw);
 

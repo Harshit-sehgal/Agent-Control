@@ -97,7 +97,14 @@ async function harness(t) {
     assert.equal((await send('POST', '/api/agent/live', {body: {tabs: []}, signedBy: signed})).status, 200);
     assert.equal((await send('POST', '/api/browser-live/web/takeover', {cookie: 'owner', body: {}})).status, 200);
   };
-  return {store, send, signed, beat, drive, agentId: device.agentId};
+  /** Another paired device in the same workspace, with its own beat. */
+  const pairAnother = name => {
+    const again = agent.createPairing(store, 'default', {});
+    const other = agent.redeemPairing(store, {code: again.code, name, permissions: ['browser.capture', 'browser.action']});
+    const who = {id: other.agentId, secret: other.secret};
+    return {signed: who, beat: features => send('POST', '/api/agent/heartbeat', {body: {version: '1', os: 'linux', ...(features === undefined ? {} : {features})}, signedBy: who})};
+  };
+  return {store, send, signed, beat, drive, agentId: device.agentId, pairAnother};
 }
 
 test('over HTTP: a heartbeat with features is stored, one without clears them, and a bad list never fails the beat', async t => {
@@ -159,4 +166,42 @@ test('over HTTP: the frame reply names the serving device\'s features, so the Co
   assert.deepEqual(await features(), []);
   assert.equal((await beat(['secret-input-v1'])).status, 200);
   assert.deepEqual(await features(), ['secret-input-v1']);
+});
+
+const secretsOf = reply => reply.body.commands.filter(c => c.type === 'input' && c.event?.secret === true);
+
+test('over HTTP: with two devices on one workspace, a secret is handed only to one that holds secret-input-v1', async t => {
+  const {send, beat, drive, signed: newer, pairAnother} = await harness(t);
+  const older = pairAnother('Old laptop');
+  await drive();
+  const poll = who => send('POST', '/api/agent/live', {body: {tabs: []}, signedBy: who});
+  assert.equal((await beat(['secret-input-v1'])).status, 200);
+  assert.equal((await older.beat()).status, 200);
+  const type = () => send('POST', '/api/browser-live/web/input', {cookie: 'owner', body: typed});
+
+  // The newer device polled last, so the queue-time check passes; the older one polls first and drains the queue.
+  await poll(older.signed); await poll(newer);
+  assert.equal((await type()).status, 200);
+  const old = await poll(older.signed);
+  assert.deepEqual(secretsOf(old), [], 'the older device is never sent the secret');
+  assert.equal(JSON.stringify(old.body).includes(SECRET), false);
+  assert.deepEqual(secretsOf(await poll(newer)), [], 'and it was dropped, not kept for another device');
+  // The owner is told in fixed words, never the text (a notice shows once the owner is not driving).
+  assert.equal((await send('POST', '/api/browser-live/web/handback', {cookie: 'owner', body: {}})).status, 200);
+  const view = await send('GET', '/api/browser-live/web', {cookie: 'owner'});
+  assert.equal(view.body.notice, 'Update the app on your computer to type passwords and codes here.');
+  assert.equal(JSON.stringify(view.body).includes(SECRET), false);
+
+  // The newer device, polling, is handed it.
+  assert.equal((await send('POST', '/api/browser-live/web/takeover', {cookie: 'owner', body: {}})).status, 200);
+  await poll(newer);
+  assert.equal((await type()).status, 200);
+  const got = secretsOf(await poll(newer));
+  assert.deepEqual(got.map(c => c.event), [{type: 'type', text: SECRET, secret: true}]);
+
+  // A device that reported the feature and later beats without it (the app was rolled back) is no longer sent one.
+  assert.equal((await type()).status, 200);
+  assert.equal((await beat()).status, 200);
+  assert.deepEqual(secretsOf(await poll(newer)), []);
+  assert.equal((await type()).status, 409, 'and the queue-time check agrees');
 });
