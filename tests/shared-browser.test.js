@@ -35,6 +35,8 @@ function rig(t, {pages = PAGES, profile = path.join(tmp(t), 'browser-profile')} 
   t.after(() => sb.close());
   return {sb, processes, profile};
 }
+/** Rejects with `why` when `promise` is not settled in `ms`. */
+const within = (promise, ms, why) => Promise.race([promise, new Promise((_, reject) => { const id = setTimeout(() => reject(new Error(why)), ms); promise.finally(() => clearTimeout(id)).catch(() => {}); })]);
 const navigations = fake => fake.called('Page.navigate').map(c => [c.sessionId, c.params.url]);
 
 test('the profile lives in the agent config dir, is private, and the browser is started on it', t => {
@@ -77,37 +79,38 @@ test('each bot gets its own tab, and it keeps it', async t => {
   assert.deepEqual(sb.status().map(s => [s.botId, s.state]).sort(), [['bot-a', 'idle'], ['bot-b', 'idle']]);
 });
 
-test('two bots asking at once: one waits, and neither takes the other\'s tab', async t => {
+test('two bots\' browser tasks overlap in time on the fake CDP', async t => {
   const {sb, processes} = rig(t);
   await sb.run('bot-a', {url: 'https://docs.example.com/'});
   const [fake] = processes;
-  // Hold bot A's next page load open, and let bot B ask while it is in flight.
-  let release;
-  const gate = new Promise(resolve => { release = resolve; });
-  fake.hook('Page.navigate', async () => { await gate; });
+  let release; const gate = new Promise(r => { release = r; });
+  fake.hook('Page.navigate', async ({url}) => { if (url === 'https://docs.example.com/') await gate; });
   const a = sb.run('bot-a', {url: 'https://docs.example.com/'});
-  const b = sb.run('bot-b', {url: 'https://mail.example.com/'});
-  await new Promise(resolve => setTimeout(resolve, 30));
-  assert.equal(fake.called('Page.navigate').length, 2, 'B has not started: A holds the browser');
+  assert.equal((await within(sb.run('bot-b', {url: 'https://mail.example.com/'}), 1000, 'B waited for A')).title, 'Mail');
   assert.equal(sb.status().find(s => s.botId === 'bot-a').state, 'browsing');
   release();
-  const [ra, rb] = await Promise.all([a, b]);
-  assert.deepEqual([ra.title, rb.title], ['Docs', 'Mail']);
+  assert.equal((await a).title, 'Docs');
   const sessions = navigations(fake).map(([s]) => s);
-  assert.equal(new Set(sessions).size, 2);
+  assert.equal(new Set(sessions).size, 2, 'neither took the other\'s tab');
   assert.equal(fake.called('Target.createTarget').length, 2);
 });
 
-test('the queue is first come, first served, and a failing task does not strand the next', async t => {
+test('one bot\'s tasks run one at a time, first come first served, and a failure does not strand the next', async t => {
   const {sb, processes} = rig(t);
-  const order = [];
   await sb.run('bot-a', {url: 'https://docs.example.com/'});
   const [fake] = processes;
-  let n = 0;
-  fake.hook('Page.navigate', async () => { if (++n === 1) throw new Error('net::ERR_FAILED'); });
-  const jobs = ['bot-a', 'bot-b', 'bot-c'].map((id, i) => sb.run(id, {url: 'https://docs.example.com/'}).then(() => order.push(id), () => order.push(`${id}!`)));
+  const order = [];
+  let n = 0, inFlight = 0, most = 0;
+  fake.hook('Page.navigate', async () => {
+    inFlight++; most = Math.max(most, inFlight);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    inFlight--;
+    if (++n === 1) throw new Error('net::ERR_FAILED');
+  });
+  const jobs = [1, 2, 3].map(i => sb.run('bot-a', {url: 'https://docs.example.com/'}).then(() => order.push(i), () => order.push(`${i}!`)));
   await Promise.all(jobs);
-  assert.deepEqual(order, ['bot-a!', 'bot-b', 'bot-c']);
+  assert.deepEqual(order, ['1!', 2, 3]);
+  assert.equal(most, 1, 'never two at once on one bot\'s tab');
 });
 
 test('the profile survives a restart and stale tab ids are dropped', async t => {
