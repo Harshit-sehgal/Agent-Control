@@ -17,6 +17,9 @@
  * - Each bot has its own tab (`botId` -> tab). A tab the browser no longer has
  *   is dropped and replaced; after a restart there are no tab ids at all, so no
  *   stale one can be used.
+ * - What the owner types in secret is remembered for the life of that bot's tab (`typed`, in memory only, never
+ *   written anywhere) and scrubbed from every result that leaves: a capture, an action's answer and the status.
+ *   The page's secret fields are emptied when the owner hands back.
  * - The rules that bound a page read still bound every step: the allowlist, the
  *   egress proxy that refuses private addresses, and the X click/type refusal.
  *   Those live in `agent/browser.mjs`, which this file drives.
@@ -24,6 +27,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {startBrowserSession, ACTION_OPS, MAX_ACTIONS} from './browser.mjs';
+import {FOCUSED_IS_SECRET_JS, TAG_FOCUSED_SECRET_JS, CLEAR_SECRETS_ON_HANDBACK_JS, rememberTyped, scrubTyped} from './page-secrets.mjs';
 import {hostAllowed, hostOf} from '../shared/bot-browser.js';
 import {cleanInput, KEYS, VIEWPORT} from './live-input.mjs';
 
@@ -49,7 +53,7 @@ const SCREENCAST = {format: 'jpeg', quality: 60, maxWidth: VIEWPORT.width, maxHe
 export function createSharedBrowser({start = startBrowserSession, allow = [], profile, settleMs, timeoutMs, idleMs = Number(process.env.AGENT_TAKEOVER_IDLE_MS) || 0} = {}) {
   const allowed = () => (typeof allow === 'function' ? allow() : allow);
   let session = null, starting = null;
-  const tabs = new Map();      // botId -> {tab, url, title}
+  const tabs = new Map();      // botId -> {tab, url, title, typed}: `typed` is what the owner typed in secret, in memory only
   const queue = [];            // tickets, first come first served
   const waits = new Set();     // {predicate, resolve}
   let holder = null;           // the bot whose task has the browser
@@ -94,7 +98,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
       known.tab.off();
     }
     const tab = await live.newTab({allow: allowed()});
-    tabs.set(botId, {tab, url: null, title: null});
+    tabs.set(botId, {tab, url: null, title: null, typed: new Set()});
     return tab;
   }
 
@@ -118,6 +122,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     try {
       const live = await ensure();
       const tab = await tabFor(live, id);
+      const {typed} = tabs.get(id);
       const remember = ({url: at, title}) => { const entry = tabs.get(id); if (entry) { entry.url = at || entry.url; entry.title = title ?? entry.title; } };
       // Asked before each step. False once the owner has taken the browser since
       // this task began; if they still hold it, wait here for the hand back.
@@ -126,7 +131,12 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
         if (driving) { parked = true; notify(); try { await until(() => driving === null); } finally { parked = false; } return false; }
         return epoch === startEpoch;
       };
-      return await live.capture(url, {allow: allowed(), steps, approved, tab, timeoutMs, settleMs, onPage: remember, gate});
+      // The last point before the result leaves the device: what the owner typed in secret is hidden from all of it.
+      try { return scrubTyped(await live.capture(url, {allow: allowed(), steps, approved, tab, timeoutMs, settleMs, onPage: remember, gate}), typed); }
+      catch (error) {
+        // An error names what the page did (a blocked address it was sent to may carry the echo), and leaves as text.
+        throw Object.assign(new Error(scrubTyped(String(error?.message ?? ''), typed)), {status: error?.status});
+      }
     } finally { release(); }
   }
 
@@ -134,7 +144,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     clearTimeout(idleTimer);
     // No clock by default: the person holds the browser until they hand back. AGENT_TAKEOVER_IDLE_MS opts into one.
     if (!idleMs) return;
-    idleTimer = setTimeout(() => { if (driving) { driving = null; notify(); } }, idleMs);
+    idleTimer = setTimeout(() => { if (driving) void handback(driving); }, idleMs);
     idleTimer.unref?.();
   };
   const conflict = message => Object.assign(new Error(message), {status: 409});
@@ -153,8 +163,24 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
       throw error;
     }
   }
-  /** The owner is done: bots may go on. Handing back what you do not hold does nothing. */
+  /** Empty the page's secret fields (the typed memory is kept: the site may echo it later). Said in fixed words when
+   * it fails, and it never holds anything up: one that does not answer in two seconds is let go. Nothing to clear
+   * when the owner typed nothing in secret on this tab. */
+  async function clearSecretFields(entry) {
+    if (!entry?.typed.size || !session) return;
+    let timer;
+    const answer = await Promise.race([
+      session.cdp.send('Runtime.evaluate', {expression: CLEAR_SECRETS_ON_HANDBACK_JS, returnByValue: true}, entry.tab.sessionId).catch(() => null),
+      new Promise(resolve => { timer = setTimeout(() => resolve(null), 2000); }),
+    ]);
+    clearTimeout(timer);
+    if (!answer || answer.exceptionDetails) console.error('agent: could not empty the secret fields on the page.');
+  }
+
+  /** The owner is done: bots may go on, and the page's secret fields are emptied first. Handing back what you do not hold does nothing. */
   async function handback(botId) {
+    if (driving !== botId) return;
+    await clearSecretFields(tabs.get(botId));
     if (driving !== botId) return;
     driving = null;
     clearTimeout(idleTimer);
@@ -218,7 +244,21 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     } else if (ev.type === 'scroll') {
       await send('Input.dispatchMouseEvent', {type: 'mouseWheel', x: ev.x, y: ev.y, deltaX: ev.dx, deltaY: ev.dy});
     } else if (ev.type === 'type') {
-      await send('Input.insertText', {text: ev.text});
+      // Ask the page whether the cursor is in a secret field, tag that field while focus is certain (before the
+      // text can move it), then type. An answer that is not a plain boolean (a page expression that threw) counts
+      // as yes, and a tag that fails stops the typing. The tag lands only on a text-entry field. Nothing here ever names the text.
+      const asked = await send('Runtime.evaluate', {expression: FOCUSED_IS_SECRET_JS, returnByValue: true})
+        .then(reply => (!reply?.exceptionDetails && typeof reply?.result?.value === 'boolean' ? reply.result.value : true), () => true);
+      if (ev.secret || asked) {
+        const tagged = await send('Runtime.evaluate', {expression: TAG_FOCUSED_SECRET_JS, returnByValue: true}).catch(() => null);
+        // `false` is the page's own answer that nothing typeable has the focus (a wrapper an app focused, a button):
+        // nothing was tagged, so nothing is typed. Any other failure is the generic one.
+        if (tagged && !tagged.exceptionDetails && tagged.result?.value === false) throw new Error('Tap the field you want to type into first.');
+        if (!tagged || tagged.exceptionDetails || tagged.result?.value !== true) throw new Error('The browser could not mark that field secret.');
+      }
+      // Remembered before the text goes in, so nothing the page does with it can come back unhidden.
+      if (ev.secret || asked) rememberTyped(entry.typed, ev.text);
+      await send('Input.insertText', {text: ev.text}).catch(() => { throw new Error('The browser did not take the typed text.'); });
     } else if (ev.type === 'key') {
       const key = KEYS[ev.key], base = {key: ev.key, code: key.code, windowsVirtualKeyCode: key.vk, nativeVirtualKeyCode: key.vk};
       await send('Input.dispatchKeyEvent', {type: 'keyDown', ...base, ...(key.text ? {text: key.text} : {})});
@@ -240,8 +280,9 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     }
   }
 
-  /** What the device knows about each tab: for the status it reports. */
-  const status = () => [...tabs].map(([botId, {url, title}]) => ({botId, state: driving === botId ? 'driving' : holder === botId ? 'browsing' : 'idle', url, title}));
+  /** What the device knows about each tab: for the status it reports. `refresh` stores Chrome's own address and title,
+   * so what leaves here is scrubbed of what the owner typed in secret. */
+  const status = () => [...tabs].map(([botId, {url, title, typed}]) => ({botId, state: driving === botId ? 'driving' : holder === botId ? 'browsing' : 'idle', ...scrubTyped({url, title}, typed)}));
 
   async function close() {
     clearTimeout(idleTimer);
@@ -252,7 +293,10 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     if (live) await live.close().catch(() => {});
   }
 
-  return {run, status, close, onFrame, watch, unwatch, applyInput, refresh, takeover, handback, owner: () => driving};
+  /** `value` scrubbed of what the owner typed in secret on this bot's tab: for a result that left some other way. */
+  const scrub = (botId, value) => scrubTyped(value, tabs.get(botId || ANONYMOUS_BOT)?.typed);
+
+  return {run, scrub, status, close, onFrame, watch, unwatch, applyInput, refresh, takeover, handback, owner: () => driving};
 }
 
 /** One `browser.capture` or `browser.action` task, with the rules every browser

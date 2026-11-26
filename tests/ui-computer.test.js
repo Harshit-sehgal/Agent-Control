@@ -338,3 +338,20 @@ test('the control pill says who is in control and offers the one switch', () => 
   assert.deepEqual(controlPill({name: 'Scout', state: 'driving'}), {who: 'You are in control', action: 'back', label: 'Hand back control'});
   assert.deepEqual(controlPill({name: 'Scout', state: 'idle', unavailable: 'No browser running'}), {who: 'No browser running', action: '', label: ''});
 });
+
+// ---- secret typing ----
+
+test('a secret type event never merges with its neighbours', () => {
+  const out = coalesce([{type: 'type', text: 'a'}, {type: 'type', text: 'b', secret: true}, {type: 'type', text: 'c'}]);
+  assert.deepEqual(out.map(e => [e.text, e.secret === true]), [['a', false], ['b', true], ['c', false]]);
+  const twice = coalesce([{type: 'type', text: '12', secret: true}, {type: 'type', text: '34', secret: true}]);
+  assert.deepEqual(twice.map(e => e.text), ['12', '34'], 'two secret events stay two');
+});
+
+test('cleanInput keeps secret only as true, and its errors never carry the text', () => {
+  assert.equal(cleanInput({type: 'type', text: 'x', secret: true}).secret, true);
+  assert.equal('secret' in cleanInput({type: 'type', text: 'x', secret: 'yes'}), false);
+  assert.equal('secret' in cleanInput({type: 'type', text: 'x'}), false);
+  assert.throws(() => cleanInput({type: 'type', text: 'hunter22'.repeat(300), secret: true}), e => !e.message.includes('hunter22'));
+  assert.throws(() => cleanInput({type: 'type', text: 'hunter22'.repeat(300)}), e => !e.message.includes('hunter22'));
+});

@@ -13,16 +13,17 @@
  * Polling is what makes the device cast: the server tells the agent to stream a tab only
  * while somebody is looking, so the loop stops when the page is hidden or the view closes.
  * Input goes out in order, one request at a time, with typed letters joined. */
-import {esc, icon} from './ui-kit.js?v=69c45d8532';
-import {botColor} from './ui-face.js?v=69c45d8532';
-import {store, api, findBot, canWrite, isAdmin, isStaticDemo, changed, onChange, go, back} from './ui-store.js?v=69c45d8532';
+import {esc, icon} from './ui-kit.js?v=3fe83129d0';
+import {botColor} from './ui-face.js?v=3fe83129d0';
+import {store, api, findBot, canWrite, isAdmin, isStaticDemo, changed, onChange, go, back} from './ui-store.js?v=3fe83129d0';
 /** Driving the tab (Take over, Hand back, input) is an admin's, the role those routes need; the demo is its one owner. */
 const canDrive = () => isStaticDemo() || isAdmin();
-import {toast} from './ui-dialogs.js?v=69c45d8532';
+import {toast} from './ui-dialogs.js?v=3fe83129d0';
+import {SECRET_INPUT_V1, UPDATE_DEVICE_LINE, hasFeature} from './device-features.js?v=3fe83129d0';
 import {
   PAGE, KEY_CHIPS, clickInput, wheelInput, keyInput, coalesce, navigateAddress, rowLabel, statusOf, stateLine, mergeView, veilFor, frameDelay, listDelay, wantsList,
   chipFor, containRect, controlPill, thumbFor, thumbDelay,
-} from './ui-computer.js?v=69c45d8532';
+} from './ui-computer.js?v=3fe83129d0';
 
 const el = id => document.getElementById(id);
 const raw = (path, method = 'GET', body) => window.AGENT_API(path, method, body);   // no progress bar: these run all the time
@@ -93,6 +94,12 @@ const INIT = {agent: true, demo: false, seq: 0, image: '', w: PAGE.w, h: PAGE.h,
 const alive = s => session === s && s.root.isConnected;
 const entryOf = botId => list.items.find(e => e.botId === botId);
 
+/** The masked Password and Code rows. They are drawn only when the device serving the view reports `secret-input-v1`
+ * (see `paintSecrets`); for any other device a line takes their place. The takeover sheet (`ui-takeover.js`) is not
+ * gated this way: it drives the server's own browser, which is not a device and always holds a secret in memory only. */
+const SECRET_ROWS = bot => `<form class="pc-type" id="computer-password" data-bot="${esc(bot)}" autocomplete="off"><input class="input" type="password" name="text" maxlength="2000" autocomplete="current-password" placeholder="Password" aria-label="Password"><button type="submit" class="btn">Type</button></form>
+      <form class="pc-type" id="computer-code" data-bot="${esc(bot)}" autocomplete="off"><input class="input" name="text" inputmode="numeric" maxlength="2000" autocomplete="one-time-code" placeholder="Code" aria-label="Code" spellcheck="false" autocapitalize="off"><button type="submit" class="btn">Type</button></form>`;
+
 /** The page for `#profile/<id>/computer`: the bot's tab on the whole screen, and one pill that says who is in
  * control with the switch that changes it. While you drive, the pill also opens a small tray (an address, a box
  * to type into, the keys a phone has no keyboard for). `faceOf(state)` draws the bot's face in the pill. */
@@ -107,6 +114,8 @@ export function computerPage(bot, {faceOf}) {
         <button type="submit" class="pc-go" data-pc="go" hidden>Go</button>
       </form>
       <form class="pc-type" id="computer-type" data-bot="${esc(bot.id)}" autocomplete="off"><input class="input" name="text" maxlength="2000" placeholder="Type into the page" aria-label="Type into the page"><button type="submit" class="btn">Type</button></form>
+      <div class="pc-secrets" data-pc="secrets"></div>
+      <p class="pc-note" data-pc="secret-note" role="status" hidden></p>
       <div class="pc-keys" role="group" aria-label="Keys">${keys}</div>
     </div>` : '<span hidden><span data-pc="dot"></span><input data-pc="url"><button data-pc="go"></button></span>';
   return `<div class="pc" id="pc" data-bot="${esc(bot.id)}" data-state="idle" role="dialog" aria-modal="true" aria-label="${esc(bot.name)}'s computer" style="--t:${esc(botColor(bot))}">
@@ -136,7 +145,7 @@ function mount(botId, faceOf) {
   const q = name => root.querySelector(`[data-pc="${name}"]`);
   const s = session = {
     botId, root, faceOf, view: {...INIT}, failures: 0, timer: null, denied: false, queue: [], flush: null, sending: false, lastHint: 0, shown: -1, faceState: '',
-    stage: q('stage'), img: q('img'), veil: q('veil'), url: q('url'), go: q('go'), dot: q('dot'), notice: q('notice'), line: q('line'), who: q('who'), face: q('face'), hold: q('hold'), tools: q('tools'), kb: q('kb'),
+    stage: q('stage'), img: q('img'), veil: q('veil'), url: q('url'), go: q('go'), dot: q('dot'), notice: q('notice'), line: q('line'), who: q('who'), face: q('face'), hold: q('hold'), tools: q('tools'), kb: q('kb'), secrets: q('secrets'), secretNote: q('secret-note'), secretsOn: null,
   };
   // Esc leaves the view, unless the owner is driving: then it belongs to the page.
   s.onKey = ev => { if (ev.key === 'Escape' && alive(s) && stateOf(s) !== 'driving' && !ev.defaultPrevented) { ev.preventDefault(); close(s.botId); } };
@@ -218,6 +227,7 @@ function paintSession() {
   s.line.hidden = !line;
   const faceState = driving ? 'waiting' : state === 'browsing' ? 'working' : 'awake';
   if (s.faceState !== faceState && bot) { s.faceState = faceState; s.face.innerHTML = s.faceOf(faceState); }
+  paintSecrets(s);
   if (s.hold) {
     s.hold.hidden = !pill.action;
     s.hold.textContent = pill.label;
@@ -225,6 +235,21 @@ function paintSession() {
     s.kb.hidden = !driving;
     if (!driving) { s.tools.hidden = true; s.kb.setAttribute('aria-expanded', 'false'); }
   }
+}
+
+/** The masked rows are in the tray only for a device that said it can hold a secret; for any other the tray says to update
+ * the app. Until the first reply names the device's features nothing shows. The rows are built once and left alone after,
+ * so what is being typed is never reset by a repaint. */
+function paintSecrets(s) {
+  if (!s.secrets) return;
+  const known = Array.isArray(s.view.features);
+  const on = known && hasFeature(s.view.features, SECRET_INPUT_V1);
+  if (s.secretsOn !== on) {
+    s.secretsOn = on;
+    s.secrets.innerHTML = on ? SECRET_ROWS(s.botId) : '';
+  }
+  s.secretNote.hidden = !known || on;
+  if (s.secretNote.textContent !== (known && !on ? UPDATE_DEVICE_LINE : '')) s.secretNote.textContent = known && !on ? UPDATE_DEVICE_LINE : '';
 }
 
 /* ---------- the owner's input ---------- */
@@ -340,7 +365,20 @@ export const computerForms = {
     push(session, {type: 'type', text});
     form.reset();
   },
+  // A password or a code goes as its own `secret` event (never joined to other typing) and is cleared from the box at once.
+  'computer-password': (form, f) => typeSecret(form, f),
+  'computer-code': (form, f) => typeSecret(form, f),
 };
+function typeSecret(form, f) {
+  const text = String(f.text ?? '');
+  form.reset();
+  if (!text || session?.botId !== form.dataset.bot) return;
+  // The rows are not drawn for a device without the feature; this holds if one lingers (the device changed under the view).
+  if (!hasFeature(session.view.features, SECRET_INPUT_V1)) return toast(UPDATE_DEVICE_LINE, true);
+  // `push` drops input while the bot holds the browser; say so rather than lose a password without a word.
+  if (stateOf(session) !== 'driving') return toast('Press Take control first, then type it again.', true);
+  push(session, {type: 'type', text, secret: true});
+}
 
 /* ---------- the small live picture on a profile and a bot chat's header ---------- */
 

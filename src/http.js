@@ -48,6 +48,30 @@ export function clientIpOf(req) {
   }
   return req.socket?.remoteAddress || 'unknown';
 }
+const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+/** Whether the proxy in front says it spoke HTTPS: `X-Forwarded-Proto` trimmed, in any letter case, and exactly
+ * `https`. A list ("https, http") is not believed: a proxy that appends turns a client's own "https" into one. Only
+ * meaningful when `trustProxy()` is on, since otherwise any client can send the header. */
+export const forwardedHttps = req => {
+  const v = req?.headers?.['x-forwarded-proto'];
+  return typeof v === 'string' && v.trim().toLowerCase() === 'https';
+};
+/** Whether what this request carries cannot be read on the way: TLS to this process, a trusted proxy that says it
+ * spoke https, or the owner's own computer (a loopback peer that no proxy relayed, from a page on a loopback
+ * address). Passwords and codes are accepted only then. */
+export function secureRequest(req) {
+  if (req.socket?.encrypted === true) return true;
+  const h = req.headers || {};
+  if (trustProxy()) return forwardedHttps(req);
+  if (!LOOPBACK.has(req.socket?.remoteAddress)) return false;
+  if (h['x-forwarded-for'] || h.forwarded || h['x-real-ip']) return false;
+  try { return LOOPBACK_HOSTS.has(new URL(String(h.origin)).hostname); } catch { return false; }
+}
+/** Refuse a secret typed over a connection that is not safe. Call before anything is queued or run. */
+export function requireSecureSecret(req, body) {
+  if (body?.secret === true && !secureRequest(req)) fail('Passwords and codes are only sent over HTTPS or from this computer.', 403);
+}
 export function cookie(req, key) {
   const found = (req.headers.cookie || '').split(';').map(x => x.trim()).find(x => x.startsWith(key + '='));
   return found?.slice(key.length + 1);

@@ -23,6 +23,7 @@ import {fail} from '../shared/errors.js';
 import {cleanText} from '../shared/core.js';
 import {validateBrowserRequest} from '../shared/bot-browser.js';
 import {cliEngineById,cleanCliModel,cleanEffort,LOCAL_CLI_ENGINE_IDS} from '../shared/ai-presets.js';
+import {cleanFeatures} from '../shared/device-features.js';
 import {base64Bytes,sniffType,isImage,MAX_FILES,MODEL_IMAGE_BYTES,MODEL_IMAGES_TOTAL} from '../shared/attachments.js';
 import {encryptJson,decryptJson,sha256,loadMasterKey} from './vault.js';
 
@@ -389,6 +390,20 @@ export function readAgentCli(store, agentId) {
   } catch { return null; }
 }
 
+/** What the device says its app can do (`shared/device-features.js`). Every heartbeat replaces the last list, and a
+ * beat with none (an older app, or a malformed list) leaves none, so a device that was downgraded is noticed. Kept in
+ * kv beside the CLI report: it describes a machine, not the data. */
+export function recordAgentFeatures(store, agentId, reported) {
+  if (typeof store.kvSet !== 'function') return;
+  store.kvSet(`agent_features:${agentId}`, JSON.stringify(cleanFeatures(reported)));
+}
+export function readAgentFeatures(store, agentId) {
+  try {
+    const raw = typeof store.kvGet === 'function' ? store.kvGet(`agent_features:${agentId}`) : null;
+    return raw ? cleanFeatures(JSON.parse(raw)) : [];
+  } catch { return []; }
+}
+
 export function listAgents(store, workspaceId) {
   const agents = store.all('SELECT * FROM agents WHERE workspace_id=? ORDER BY paired_at DESC', workspaceId);
   return agents.map(a => ({
@@ -396,6 +411,8 @@ export function listAgents(store, workspaceId) {
     permissions: JSON.parse(a.permissions || '[]'), pairedAt: a.paired_at, lastSeenAt: a.last_seen_at,
     // Whether `claude` and `codex` are signed in on that machine, as the device last said.
     cli: a.revoked_at ? null : readAgentCli(store, a.id),
+    // The abilities its app reported on its last heartbeat (none for an older app).
+    features: a.revoked_at ? [] : readAgentFeatures(store, a.id),
     tasks: {queued: store.get("SELECT count(*) AS n FROM agent_tasks WHERE agent_id=? AND status='queued'", a.id).n,
       running: store.get("SELECT count(*) AS n FROM agent_tasks WHERE agent_id=? AND status='running'", a.id).n,
       failed: store.get("SELECT count(*) AS n FROM agent_tasks WHERE agent_id=? AND status='failed'", a.id).n},
@@ -409,6 +426,7 @@ export function agentsBrief(store) {
   return store.all('SELECT * FROM agents WHERE revoked_at IS NULL ORDER BY last_seen_at DESC').map(a => ({
     name: a.name, online: Boolean(a.last_seen_at && Date.parse(a.last_seen_at) > Date.now() - AGENT_ONLINE_MS),
     permissions: (() => { try { return JSON.parse(a.permissions || '[]'); } catch { return []; } })(), cli: readAgentCli(store, a.id),
+    features: readAgentFeatures(store, a.id),
   }));
 }
 

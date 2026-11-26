@@ -9,9 +9,10 @@
  * It is a screenshot remote control, not a live stream: one JPEG per call. The
  * server enforces the same allowlist and the same X refusal as any other page,
  * so this is a way to sign in, never a way around the rules. */
-import {esc, btn} from './ui-kit.js?v=69c45d8532';
-import {api, sync, isStaticDemo} from './ui-store.js?v=69c45d8532';
-import {openSheet, closeSheet, sheetOpen, toast} from './ui-dialogs.js?v=69c45d8532';
+import {esc, btn} from './ui-kit.js?v=3fe83129d0';
+import {takeoverControl} from './ui-model.js?v=3fe83129d0';
+import {api, sync, isStaticDemo} from './ui-store.js?v=3fe83129d0';
+import {openSheet, closeSheet, sheetOpen, toast} from './ui-dialogs.js?v=3fe83129d0';
 
 /** The open takeover: its session id on the server, the request it belongs to,
  * the last page the server sent, and the control the person is typing into. */
@@ -22,7 +23,7 @@ let live = null;
 const gone = error => error && [404, 409].includes(error.status);
 
 function controlChip(element) {
-  const isField = ['input', 'textarea', 'select'].includes(element.tag);
+  const isField = takeoverControl(element).field;
   const on = live.selected === element.index;
   const label = `[${element.index}] ${element.tag}${element.text ? ` ${element.text}` : ''}`;
   return `<button type="button" class="takeover-control${on ? ' on' : ''}" data-action="takeover-control" data-index="${element.index}" aria-pressed="${on}" title="${esc(isField ? 'Type into this control' : 'Click this control')}">${esc(label)}</button>`;
@@ -35,6 +36,8 @@ function render() {
     ? `<div class="takeover-controls">${elements.slice(0, 80).map(controlChip).join('')}</div>`
     : '<p class="note">This page has no controls to tap. Use the address box to open another page.</p>';
   const selected = live.selected == null ? null : elements.find(e => e.index === live.selected);
+  // A password or a code goes only into a text-entry control: the rows stay disabled for a select or a checkbox.
+  const secretReady = Boolean(selected) && takeoverControl(selected).text;
   const page = `<div class="takeover-page">
     ${view.image ? `<img class="takeover-shot" src="${esc(view.image)}" alt="A picture of the page open in the browser">` : '<p class="note">Waiting for the page…</p>'}
     <p class="takeover-here">${view.title ? `<strong>${esc(view.title)}</strong> ` : ''}<a href="${esc(view.url || '#')}" target="_blank" rel="noopener noreferrer">${esc(view.url || '')}</a></p>
@@ -46,12 +49,21 @@ function render() {
     <input class="input" name="text" placeholder="${selected ? 'Type here, then Send' : 'No field chosen'}" aria-label="Text to type" ${selected ? 'autofocus' : 'disabled'}>
     <button type="submit" class="btn primary small" ${selected ? '' : 'disabled'}>Send</button>
   </form>`;
+  // This sheet drives a page in the server's own browser, not a device, so it keeps its fields whatever a paired device
+  // reports (`secret-input-v1` gates only the Computer view, which types through a device).
+  // A password or a code is sent as a `secret`: the device tags the field first, and nothing here echoes it.
+  const secretRow = (id, label, attrs) => `<form id="${id}" class="takeover-type" autocomplete="off">
+    <input class="input" name="text" maxlength="2000" placeholder="${label}" aria-label="${label}" ${attrs} ${secretReady ? '' : 'disabled'}>
+    <button type="submit" class="btn primary small" ${secretReady ? '' : 'disabled'}>Type</button>
+  </form>`;
+  const secrets = secretRow('takeover-password', 'Password', 'type="password" autocomplete="current-password"')
+    + secretRow('takeover-code', 'Code', 'inputmode="numeric" autocomplete="one-time-code" spellcheck="false" autocapitalize="off"');
   const actions = `<div class="sheet-actions">
     ${btn('Refresh', 'takeover-refresh', {small: true})}
     ${btn('Hand back to the bot', 'takeover-handback', {kind: 'primary', wide: true})}
     ${btn('Close without handing back', 'takeover-close', {kind: 'quiet', small: true})}
   </div>`;
-  openSheet(`${page}${go}${controls}${type}${actions}<p class="note">Signing in is saved only for this takeover and thrown away when it ends.</p>`,
+  openSheet(`${page}${go}${controls}${type}${secrets}${actions}<p class="note">Signing in is saved only for this takeover and thrown away when it ends.</p>`,
     {title: 'Take over the page', sub: 'Sign in or answer the challenge, then hand the page back to the bot.', onDismiss: releaseOnDismiss});
 }
 
@@ -142,7 +154,7 @@ export const takeoverActions = {
     const element = (live.view.elements || []).find(e => e.index === index);
     if (!element) return;
     // A field is chosen for typing; anything else is a click.
-    if (['input', 'textarea', 'select'].includes(element.tag)) {
+    if (takeoverControl(element).field) {
       live.selected = live.selected === index ? null : index;
       render();
       return;
@@ -153,11 +165,22 @@ export const takeoverActions = {
   'takeover-close': () => closeHeld(),
 };
 
+/** The text leaves the box before it is sent, so a refused or failed send never leaves a password sitting in it. */
+async function typeSecret(form, values) {
+  const text = String(values.text ?? '');
+  form.reset();
+  const chosen = live && live.selected != null ? (live.view.elements || []).find(e => e.index === live.selected) : null;
+  if (!chosen || !takeoverControl(chosen).text || !text) return;
+  await act({op: 'type', index: live.selected, text, secret: true});
+}
+
 export const takeoverForms = {
   'takeover-form': async (form, values) => {
     if (!live || live.selected == null) return;
     await act({op: 'type', index: live.selected, text: String(values.text ?? '')});
   },
+  'takeover-password': (form, values) => typeSecret(form, values),
+  'takeover-code': (form, values) => typeSecret(form, values),
   'takeover-go-form': async (form, values) => {
     const url = String(values.url || '').trim();
     if (url) await act({op: 'navigate', url});

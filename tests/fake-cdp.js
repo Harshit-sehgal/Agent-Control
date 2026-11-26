@@ -1,3 +1,5 @@
+import {FOCUSED_IS_SECRET_JS, TAG_FOCUSED_SECRET_JS, CLEAR_SECRETS_ON_HANDBACK_JS} from '../agent/page-secrets.mjs';
+
 /** A scripted DevTools connection, so the browser code can run with no Chrome.
  *
  * `fakeCdp()` returns the shape `connect()` in agent/browser.mjs returns
@@ -8,7 +10,8 @@
  * agent sends with the replies Chrome gives for them, nothing more.
  */
 export function fakeCdp({pages = {}} = {}) {
-  const calls = [], listeners = new Map(), closers = [], hooks = {}, targets = new Map(), actions = [], input = [];
+  const calls = [], tagged = [], cleared = [], listeners = new Map(), closers = [], hooks = {}, targets = new Map(), actions = [], input = [];
+  const state = {focusSecret: false};
   let seq = 0, closed = false;
 
   const emit = (method, params = {}, sessionId, raw = params) => {
@@ -20,10 +23,20 @@ export function fakeCdp({pages = {}} = {}) {
     const page = pageOf(sessionId) || {url: 'about:blank', title: ''};
     const shown = pages[page.url] || {};
     const snapshot = {count: (shown.elements || []).length, elements: shown.elements || []};
+    // The takeover's two questions about the focused field: is it secret (answered by `focusSecret`), and the tag.
+    if (expression === FOCUSED_IS_SECRET_JS) {
+      // 'throws': the page expression threw, which Chrome answers with exceptionDetails and no value.
+      return state.focusSecret === 'throws' ? {result: {type: 'object', subtype: 'error'}, exceptionDetails: {text: 'Uncaught'}} : {result: {value: state.focusSecret}};
+    }
+    if (expression === TAG_FOCUSED_SECRET_JS) { tagged.push({sessionId, expression}); return {result: {value: true}}; }
+    // The device emptying the page's secret fields when the owner hands back.
+    if (expression === CLEAR_SECRETS_ON_HANDBACK_JS) { cleared.push({sessionId, when: 'handback'}); return {result: {value: 1}}; }
     if (expression === 'location.href') return {result: {value: page.url}};
+    if (expression === 'document.readyState') return {result: {value: 'complete'}};
     if (expression.startsWith('(function(){var els=')) return {result: {value: snapshot}};
-    if (expression.startsWith('JSON.stringify({url: location.href')) {
-      return {result: {value: JSON.stringify({url: page.url, title: shown.title || '', text: shown.text || '', snapshot})}};
+    // A page read: `url` is the real address the device decides with, `shown` the one a model is handed (secrets hidden).
+    if (expression.startsWith('JSON.stringify((function(){') && expression.includes('shown:')) {
+      return {result: {value: JSON.stringify({url: page.url, shown: shown.shown ?? page.url, title: shown.title || '', text: shown.text || '', links: shown.links || [], snapshot})}};
     }
     actions.push({sessionId, url: page.url, expression});
     return {result: {value: {ok: true, text: shown.read ?? null}}};
@@ -70,7 +83,9 @@ export function fakeCdp({pages = {}} = {}) {
     close: () => { closed = true; },
   };
   return {
-    cdp, calls, pages, actions, input, targets,
+    cdp, calls, pages, actions, input, targets, tagged, cleared,
+    /** Whether the focused field answers "secret" to the takeover's check (true, false, or 'throws'). */
+    set focusSecret(value) { state.focusSecret = value; },
     connection: {cdp},
     emit, hook: (method, fn) => { hooks[method] = fn; },
     called: method => calls.filter(call => call.method === method),
