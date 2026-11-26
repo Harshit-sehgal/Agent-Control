@@ -50,7 +50,8 @@ const on = (value, fallback) => {
 };
 
 /** One person at a time. Two takeovers would fight for the same browser
- * process, and "which page is this" would become a guess. */
+ * process, and "which page is this" would become a guess. A takeover holds only
+ * the bot whose page it is (its lane); other bots' pages keep running. */
 export const MAX_LIVE = 1;
 
 /** One runtime per process. `start` and `env` are injectable so a test can run
@@ -67,14 +68,29 @@ export function createBrowserRuntime({env = process.env, start = startBrowserSes
   const liveIdleMs = on(env.BROWSER_LIVE_MS, 0);
   const liveMaxMs = on(env.BROWSER_LIVE_MAX_MS, Infinity);
   let session = null, starting = null, idle = null;
-  let tail = Promise.resolve();
+  // One queue per lane (a workspace and a bot, see `browserLane`): one bot's pages are serial, two bots' pages overlap
+  // in the one process, each in its own context. `active` counts the pages open right now, across every lane.
+  const tails = new Map();
+  let active = 0;
   let closed = false;
+
+  /** Queue `work` behind everything already queued on `lane`. The entry is dropped once its lane is quiet. */
+  function enqueue(lane, work) {
+    const next = (tails.get(lane) || Promise.resolve()).then(work);
+    const settled = next.then(() => {}, () => {});
+    tails.set(lane, settled);
+    void settled.then(() => { if (tails.get(lane) === settled) tails.delete(lane); });
+    return next;
+  }
 
   const allowed = () => browserAllowlist(env);
   /** Is there a browser here that a bot could use at all? */
   const available = () => mode !== 'agent' && allowed().length > 0 && Boolean(find(env));
 
-  function forget() {
+  /** Drop the browser. With `only`, drop it only if that is still the current one: a page that outlives a
+   * dead process must not close the browser that replaced it. */
+  function forget(only) {
+    if (only && session !== only) return Promise.resolve();
     clearTimeout(idle);
     idle = null;
     const live = session;
@@ -83,13 +99,18 @@ export function createBrowserRuntime({env = process.env, start = startBrowserSes
     return live ? live.close().catch(() => {}) : Promise.resolve();
   }
 
+  /** The idle clock runs only while nobody has the browser: no bot's page and no person's takeover. */
   function armIdle() {
     clearTimeout(idle);
-    idle = setTimeout(() => { void forget(); }, idleMs);
+    idle = null;
+    if (!session || active > 0 || lives.size) return;
+    idle = setTimeout(() => { idle = null; if (!active && !lives.size) void forget(); }, idleMs);
     idle.unref?.();
   }
 
   async function ensure() {
+    // A browser that exited on its own is never handed out again: it would fail the page that got it.
+    if (session?.dead === true) await forget(session);
     if (session) return session;
     if (!starting) {
       starting = (async () => {
@@ -101,48 +122,49 @@ export function createBrowserRuntime({env = process.env, start = startBrowserSes
     return starting;
   }
 
-  /** Run one request. Requests are serial: one Chromium, one page at a time, so
-   * two bots cannot interleave their steps on the same browser. */
+  /** Run one request. One bot's requests are serial (its lane); another bot's page may be open at the same time. */
   function run(request) {
-    const next = tail.then(async () => {
+    const lane = request.lane || '';
+    return enqueue(lane, async () => {
       if (closed) throw Object.assign(new Error('The browser runtime is shutting down.'), {status: 503});
-      if (lives.size) {
-        throw Object.assign(new Error('A person is using the browser right now. Finish or close that takeover, then approve again.'), {status: 409});
+      for (const entry of lives.values()) {
+        if (entry.lane === lane) throw Object.assign(new Error('A person is using the browser right now. Finish or close that takeover, then approve again.'), {status: 409});
       }
       if (!available()) {
         throw Object.assign(new Error(mode === 'server'
           ? 'This install runs browser requests on the server, but no browser or allowlist is configured there. Set AGENT_BROWSER_ALLOWLIST (a host list, or * for any public site) and install Chrome, or point AGENT_BROWSER_PATH at one; or switch BROWSER_RUNTIME=agent.'
           : 'No browser is available on this server.'), {status: 503});
       }
-      const live = await ensure();
-      // A request now owns the browser, so the idle clock from the last one must
-      // not fire under it; it is re-armed in the `finally` below.
+      // A page now owns the browser, so the idle clock must not fire under it (not even while it launches);
+      // it is re-armed in the `finally` below, once no page and no takeover is left.
+      active += 1;
       clearTimeout(idle);
       idle = null;
+      let live = null;
       try {
+        live = await ensure();
         return await live.capture(request.url, {allow: allowed(), steps: request.steps || [], approved: request.approved || [], timeoutMs});
       } catch (error) {
-        // A capture can fail because the page did, or because the process died.
-        // Only the second is worth paying a relaunch for, and a dead process
-        // cannot answer the close() below: drop the session either way, so the
+        // A capture can fail because the page did, or because the process died. Only the second is worth paying
+        // a relaunch for, and it takes down every other page too. A page that failed on its own leaves the
+        // browser alone while another bot's page (or a person) is on it; with nothing else open, drop it so the
         // next request starts from a known state.
-        await forget();
+        // `active` still counts this page, so "no other page" is a count of one.
+        if (live && (live.dead === true || (active === 1 && !lives.size))) await forget(live);
         throw error;
       } finally {
-        // The idle clock starts when the work ends, never when the browser is
-        // handed out: a page that takes longer than BROWSER_IDLE_MS would else
-        // have the browser closed underneath it mid-capture.
-        if (session) armIdle();
+        // The idle clock starts when the work ends, never when the browser is handed out.
+        active -= 1;
+        armIdle();
       }
     });
-    tail = next.then(() => {}, () => {});
-    return next;
   }
 
   /** Takeovers, one at a time. A person signing in is holding one browser
    * context open; a second one would fight it for the same process and turn
    * "which page is this" into a guess. */
   const lives = new Map();
+  let opening = 0;
   const noBrowser = () => Object.assign(new Error(mode === 'server'
     ? 'This install runs browser requests on the server, but no browser or allowlist is configured there. Set AGENT_BROWSER_ALLOWLIST (a host list, or * for any public site) and install Chrome, or point AGENT_BROWSER_PATH at one; or switch BROWSER_RUNTIME=agent.'
     : 'No browser is available on this server.'), {status: 503});
@@ -166,43 +188,56 @@ export function createBrowserRuntime({env = process.env, start = startBrowserSes
 
   /** Open the page for a person to act on. The page is not disposed until the
    * takeover ends, which is what lets a sign-in survive between calls. */
-  function beginLive({url, requestId = null, openedBy = null, workspaceId = null}) {
+  function beginLive({url, requestId = null, openedBy = null, workspaceId = null, lane = ''}) {
     if (closed) return Promise.reject(Object.assign(new Error('The browser runtime is shutting down.'), {status: 503}));
     if (!available()) return Promise.reject(noBrowser());
-    if (lives.size >= MAX_LIVE) return Promise.reject(Object.assign(new Error('A takeover is already open. Finish or close it first — one page at a time.'), {status: 409}));
-    const next = tail.then(async () => {
-      if (closed) throw Object.assign(new Error('The browser runtime is shutting down.'), {status: 503});
-      // Checked again inside the queue: two requests that both passed the check
-      // above would otherwise both open a context.
-      if (lives.size >= MAX_LIVE) throw Object.assign(new Error('A takeover is already open. Finish or close it first — one page at a time.'), {status: 409});
-      const live = await ensure();
+    // The slot is taken here, before any queue, because each lane has its own queue: two takeovers on
+    // different lanes would otherwise both pass this check and both open a context. `opening` counts the
+    // takeovers that hold a slot but are not yet in `lives`.
+    if (lives.size + opening >= MAX_LIVE) return Promise.reject(Object.assign(new Error('A takeover is already open. Finish or close it first — one page at a time.'), {status: 409}));
+    opening += 1;
+    return enqueue(lane, async () => {
+      active += 1;
       clearTimeout(idle);
       idle = null;
-      const handle = await live.open(url, {allow: allowed(), timeoutMs});
-      const entry = {id: `takeover-${crypto.randomUUID()}`, handle, requestId, openedBy, workspaceId, url: null, createdAt: Date.now(), timer: null};
-      lives.set(entry.id, entry);
-      touch(entry);
-      const view = await handle.view();
-      entry.url = view.url;
-      return {id: entry.id, url: view.url, title: view.title, text: view.text, elements: view.elements, elementCount: view.elementCount, blockedRequests: view.blockedRequests, image: view.image};
+      try {
+        if (closed) throw Object.assign(new Error('The browser runtime is shutting down.'), {status: 503});
+        const live = await ensure();
+        const handle = await live.open(url, {allow: allowed(), timeoutMs});
+        const entry = {id: `takeover-${crypto.randomUUID()}`, handle, requestId, openedBy, workspaceId, lane, url: null, createdAt: Date.now(), timer: null};
+        lives.set(entry.id, entry);
+        touch(entry);
+        const view = await handle.view();
+        entry.url = view.url;
+        return {id: entry.id, url: view.url, title: view.title, text: view.text, elements: view.elements, elementCount: view.elementCount, blockedRequests: view.blockedRequests, image: view.image};
+      } finally {
+        // The entry is in `lives` by now (or the open failed), so the slot passes from `opening` to `lives`.
+        opening -= 1;
+        active -= 1;
+        armIdle();
+      }
     });
-    tail = next.then(() => {}, () => {});
-    return next;
+  }
+
+  /** A look or an action queues on the lane of the page it belongs to, so it never waits for another bot's page.
+   * An id that is not open is "not found" at once. */
+  function onLane(id, workspaceId, work) {
+    let lane;
+    try { lane = liveOf(id, workspaceId).lane; } catch (error) { return Promise.reject(error); }
+    return enqueue(lane, work);
   }
 
   function liveView(id, {workspaceId} = {}) {
-    const next = tail.then(async () => {
+    return onLane(id, workspaceId, async () => {
       const entry = liveOf(id, workspaceId);
       touch(entry);
       return entry.handle.view();
     });
-    tail = next.then(() => {}, () => {});
-    return next;
   }
 
   /** One action by the person, then the page as it is now. */
   function liveAct(id, step, {workspaceId} = {}) {
-    const next = tail.then(async () => {
+    return onLane(id, workspaceId, async () => {
       const entry = liveOf(id, workspaceId);
       touch(entry);
       if (Date.now() - entry.createdAt > liveMaxMs) {
@@ -215,8 +250,6 @@ export function createBrowserRuntime({env = process.env, start = startBrowserSes
       // looking at now, and the picture is of the page they landed on.
       return {...result, ...page, ok: Boolean(result.ok), reason: String(result.reason || '')};
     });
-    tail = next.then(() => {}, () => {});
-    return next;
   }
 
   /** Close a takeover, returning the page the person left it on and the request
@@ -227,7 +260,7 @@ export function createBrowserRuntime({env = process.env, start = startBrowserSes
     clearTimeout(entry.timer);
     const page = await entry.handle.page().catch(() => null);
     await entry.handle.close().catch(() => {});
-    if (session && !lives.size) armIdle();
+    armIdle();
     return {requestId: entry.requestId, openedBy: entry.openedBy, page};
   }
 
@@ -249,7 +282,8 @@ export function createBrowserRuntime({env = process.env, start = startBrowserSes
       const open = [...lives.values()];
       lives.clear();
       for (const entry of open) clearTimeout(entry.timer);
-      await tail;
+      // Every lane finishes what it has; nothing new is accepted because `closed` is set.
+      await Promise.all([...tails.values()]);
       await Promise.all(open.map(entry => entry.handle.close().catch(() => {})));
       await forget();
     },

@@ -33,6 +33,10 @@ export function setBrowserResultHooks(hooks) { resultHooks = {...resultHooks, ..
 export const BROWSER_WAIT_MS = 600000;
 const OFFLINE = 'Your computer\'s agent is offline. A server on your own computer restarts it within a few seconds; on another machine, start it there (`node agent/agent.mjs run`), then approve again.';
 
+/** The lane a bot's pages queue on in the server's shared browser: its workspace and its id. The runtime is one
+ * process for every workspace, and every workspace has a bot called `atlas`. */
+export const browserLane = (store, botId) => `${store?.dbPath || ''}\u0000${botId || ''}`;
+
 /** Send a pending request to a local agent, or run it here. A request with no
  * capable agent stays pending, so pairing one and approving again still works. */
 export async function dispatchBrowserRequest(store, id, {actor = null, runtime = browserRuntime, needs = []} = {}) {
@@ -121,7 +125,7 @@ async function runHere(store, id, runtime) {
   const request = (store.read().browserRequests || []).find(r => r.id === id);
   if (!request) return;
   try {
-    const result = await runtime.run({url: request.url, steps: request.steps || [], approved: approvedOf(request)});
+    const result = await runtime.run({url: request.url, steps: request.steps || [], approved: approvedOf(request), lane: browserLane(store, request.botId)});
     await finishBrowserRequest(store, request, {ok: true, result});
   } catch (error) {
     // The write recording the page can be the thing that failed (a store refusing writes), so this
@@ -224,7 +228,7 @@ export async function beginTakeover(store, requestId, {actor = null, workspaceId
   if (runtime.mode === 'agent' || !runtime.available()) fail(`No browser is available on this server to take over. ${runtime.mode === 'agent'
     ? 'This install only runs browser requests on a paired device (BROWSER_RUNTIME=agent).'
     : 'Set AGENT_BROWSER_ALLOWLIST (a host list, or * for any public site) and install Chrome, or point AGENT_BROWSER_PATH at one.'}`, 409);
-  const view = await runtime.beginLive({url: request.url, requestId: request.id, openedBy: actor, workspaceId});
+  const view = await runtime.beginLive({url: request.url, requestId: request.id, openedBy: actor, workspaceId, lane: browserLane(store, request.botId)});
   return {...view, requestId: request.id};
 }
 
