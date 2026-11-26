@@ -216,6 +216,34 @@ test('a restored jar that does not sign the site in is marked lost', async t => 
   r.advance(KEEPER_MS);
   await r.sb.sweep();
   assert.deepEqual(r.sb.accountStates(), [{id: A, state: 'signed-out', storage: 'cookies'}], 'the session ran out later: not lost');
+  // The expired session's context is then recycled (disposed, unused, and restored from the stale jar by the next task):
+  // that restore is routine, and its sign-in page is still the session that ran out, not a sign-in the site keeps elsewhere.
+  r.advance(REAP_MS + 1);
+  await r.sb.sweep();
+  assert.equal(r.fake().contexts().length, 0, 'the unused context was disposed');
+  await r.sb.run('scout', {url: HOME, account: A});
+  assert.equal(r.fake().called('Target.createBrowserContext').length, 2, 'and the task restored it from the jar');
+  assert.deepEqual(r.sb.accountStates(), [{id: A, state: 'signed-out', storage: 'cookies'}], 'a recycled context is not a lost sign-in');
+});
+
+test('a hand back with no new sign-in keeps `lost`; a real sign-in afterwards clears it', async t => {
+  const r = rig(t, {jars: memJars({[A]: [SID]})});
+  const {sb, site} = r;
+  site.out = true;
+  await sb.setAccounts([{id: A, site: SITE}]);
+  await sb.run('scout', {url: HOME, account: A});
+  assert.equal(sb.accountStates()[0].lost, true);
+  await sb.takeover('scout', A);
+  await sb.handback('scout');                                  // the owner signed in to nothing
+  assert.equal(sb.accountStates()[0].state, 'unknown', 'the keeper will look again');
+  await sb.sweep();
+  assert.deepEqual(sb.accountStates(), [{id: A, state: 'signed-out', storage: 'cookies', lost: true}], 'still the same site that keeps its sign-in elsewhere');
+  await sb.takeover('scout', A);
+  site.out = false;
+  r.fake().setCookie(r.fake().contexts()[0], {...SID, value: 'new'});  // now a real sign-in
+  await sb.handback('scout');
+  await sb.sweep();
+  assert.deepEqual(sb.accountStates(), [{id: A, state: 'signed-in', storage: 'cookies'}]);
 });
 
 test('a keeper does not run for a host the allowlist refuses', async t => {

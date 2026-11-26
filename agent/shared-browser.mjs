@@ -142,7 +142,9 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
         const made = {id, restored: cookies.length > 0};
         contexts.set(account, made);
         savedAt.set(account, now());
-        if (made.restored) restoredPending.add(account); else restoredPending.delete(account);
+        // Only a first look at an account not known to be signed out can say its sign-in was lost: a session that ran out, in
+        // a context that was recycled since, shows the sign-in page again for that reason alone.
+        if (made.restored && states.get(account)?.state !== 'signed-out') restoredPending.add(account); else restoredPending.delete(account);
         return made;
       } catch (error) { await live.disposeContext(id).catch(() => {}); throw error; }
     })().finally(() => { if (contextStarts.get(account)?.promise === promise) contextStarts.delete(account); });
@@ -359,7 +361,8 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     const live = session;
     if (was.account && jars && live) {
       await saveSoon(live, was.account);
-      if (states.get(was.account)?.state === 'signed-out') { states.delete(was.account); checkedAt.delete(was.account); }
+      const before = states.get(was.account);
+      if (before?.state === 'signed-out') { states.set(was.account, {state: 'unknown', lost: before.lost}); checkedAt.delete(was.account); }
     }
   }
 
@@ -526,7 +529,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     const site = listed?.get(id)?.site;
     if (!site || !hostAllowed(`https://${site}/`, allowed())) return false;
     const state = states.get(id)?.state;
-    return state === 'signed-in' || (ids.has(id) && state === undefined);
+    return state === 'signed-in' || (ids.has(id) && (state === undefined || state === 'unknown'));
   }
   async function closeKeeper(live, id) {
     const key = tabKey(id, KEEPER), entry = tabs.get(key);
