@@ -1,7 +1,7 @@
 import test, {beforeEach} from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import {executeCustomBot, coolOffMs, coolKey, clearCoolOff} from '../src/ai.js';
+import {executeCustomBot, coolOffMs, coolKey, clearCoolOff, envConfig} from '../src/ai.js';
 import {meterTurn} from '../src/usage.js';
 
 // A provider that hit a limit or an outage rests for a while, then the bot is back on it. Loopback provider
@@ -179,15 +179,106 @@ test('when every model is resting only the own one is tried, and its error is th
   } finally { closeAll(own, f1, f2); }
 });
 
-test('a cool-off never holds a turn that has acted: its later calls stay on the model that answered', async () => {
+test('a cool-off never holds a turn that has acted: its later calls stay on the model that answered, even once it rests', async () => {
   const own = await stub([fail(503)]);
-  const spare = await stub([ok('one'), ok('two')]);
+  // Call 1 answers; the other bot's two requests (its call and its one retry) fail and so rest this spare; call 2 answers.
+  const spare = await stub([ok('one'), fail(503), fail(503), ok('two')]);
   try {
     await quick(async () => {
       const config = chat(own.port, 'main', {fallbacks: [chat(spare.port, 'f1')]});
-      const out = await meterTurn(memStore({}), {}, async () => [await executeCustomBot(bot, 'one', config), await executeCustomBot(bot, 'two', config)]);
-      assert.deepEqual(out.value, ['one', 'two']);
-      assert.deepEqual([own.requests.length, spare.requests.length], [2, 2]);
+      const out = await meterTurn(memStore({}), {}, async () => {
+        const first = await executeCustomBot(bot, 'one', config);
+        // From outside this bot's turn work: another bot's call puts the model that answered into its rest.
+        await assert.rejects(() => executeCustomBot({id: 'b2', name: 'Other', instructions: 'x'}, 'hi', chat(spare.port, 'f1')), /503/);
+        assert.deepEqual(own.requests.length, 2, 'the own model was asked for call 1 only');
+        return [first, await executeCustomBot(bot, 'two', config)];
+      });
+      assert.deepEqual(out.value, ['one', 'two'], 'call 2 still went to the resting model that answered');
+      assert.equal(own.requests.length, 2, 'and the own model was not asked again for it');
+      assert.equal(spare.requests.length, 4);
     });
   } finally { closeAll(own, spare); }
+});
+
+/** One provider server that answers by the model named in the request body: `byModel[model]` is the reply list for it. */
+async function modelStub(byModel) {
+  const seen = {};
+  const server = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', c => { body += c; });
+    req.on('end', () => {
+      const model = JSON.parse(body).model;
+      (seen[model] ||= []).push(model);
+      const replies = byModel[model] || [fail(404)];
+      const reply = replies[Math.min(seen[model].length - 1, replies.length - 1)];
+      res.writeHead(reply.status, {'Content-Type': 'application/json', ...(reply.headers || {})});
+      res.end(JSON.stringify(reply.json));
+    });
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  return {seen, count: m => (seen[m] || []).length, port: server.address().port, close: () => server.close()};
+}
+const saved = (port, model, extra) => chat(port, model, {providerId: 'prov-one', ...extra});
+
+test('a model that hit a rate limit rests alone: a fallback on the same provider is still asked, and the own model comes back', async t => {
+  t.mock.timers.enable({apis: ['Date'], now: 1.7e12});
+  const p = await modelStub({big: [fail(429, {'Retry-After': '120'}), ok('big again')], small: [ok('from small')]});
+  try {
+    await quick(async () => {
+      const config = saved(p.port, 'big', {fallbacks: [saved(p.port, 'small')]});
+      assert.equal((await turn(config)).value, 'from small', 'the same-provider spare answers the own 429');
+      assert.equal((await turn(config)).value, 'from small');
+      assert.deepEqual([p.count('big'), p.count('small')], [1, 2], 'the resting model is skipped, the spare is asked');
+      t.mock.timers.tick(121000);
+      assert.equal((await turn(config)).value, 'big again', 'after the rest the own model is back');
+      assert.deepEqual([p.count('big'), p.count('small')], [2, 2]);
+    });
+  } finally { p.close(); }
+});
+
+test('a quota or credit limit rests the whole provider: its other models are not asked', async () => {
+  const p = await modelStub({big: [{status: 402, json: {error: {message: 'out of credit'}}}], small: [ok('never')]});
+  try {
+    await quick(async () => {
+      const config = saved(p.port, 'big', {fallbacks: [saved(p.port, 'small')]});
+      await assert.rejects(() => turn(config), /out of credit|402/);
+      assert.equal(p.count('small'), 0, 'the same account has no credit for the spare either');
+      // A second turn: every model rests, so the own one is asked anyway and the spare stays untouched.
+      await assert.rejects(() => turn(config), /out of credit|402/);
+      assert.deepEqual([p.count('big'), p.count('small')], [2, 0]);
+    });
+  } finally { p.close(); }
+});
+
+test('a success clears the model\'s own rest and the provider-wide one', async () => {
+  const p = await modelStub({big: [{status: 402, json: {error: {message: 'out of credit'}}}, ok('big paid up')], small: [ok('small answers')]});
+  const x = await stub([ok('from x')]);
+  try {
+    await quick(async () => {
+      const bigFirst = saved(p.port, 'big', {fallbacks: [saved(p.port, 'small')]});
+      const smallFirst = saved(p.port, 'small', {fallbacks: [chat(x.port, 'x')]});
+      await assert.rejects(() => turn(bigFirst), /out of credit|402/);
+      assert.equal((await turn(smallFirst)).value, 'from x', 'the provider rests, so its small model is stepped over');
+      assert.equal((await turn(bigFirst)).value, 'big paid up', 'every model of this bot rests, so the own one is asked, and it answers');
+      assert.equal((await turn(smallFirst)).value, 'small answers', 'big\'s success ended the provider\'s rest');
+    });
+  } finally { p.close(); x.close(); }
+});
+
+test('coolKey of no config is the environment provider\'s key, the same as envConfig()', () => {
+  assert.equal(coolKey(null), coolKey(envConfig()));
+  assert.equal(coolKey(undefined), coolKey(envConfig()));
+});
+
+test('a subscription CLI failure rests the whole CLI, whatever model it was run with', async () => {
+  const asked = [];
+  const cli = model => ({kind: 'local-cli', engine: 'claude', model, run: async () => { asked.push(model); throw Object.assign(new Error('limit reached'), {code: 'usage-limit'}); }});
+  const spare = await stub([ok('from spare')]);
+  try {
+    await quick(async () => {
+      assert.equal((await turn({...cli('opus'), fallbacks: [chat(spare.port, 'f1')]})).value, 'from spare');
+      assert.equal((await turn({...cli('sonnet'), fallbacks: [chat(spare.port, 'f1')]})).value, 'from spare');
+      assert.deepEqual(asked, ['opus'], 'the other model of the same CLI is stepped over');
+    });
+  } finally { spare.close(); }
 });
