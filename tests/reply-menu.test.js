@@ -44,6 +44,16 @@ test('the question a reply answered is the owner line before it, across its own 
   assert.equal(askedBefore([{id: 'b9', role: 'bot', text: 'hello'}], 'b9'), '', 'a greeting answers nothing');
 });
 
+test('the question is found by time, not by where the line sits in the list', () => {
+  // The browser keeps a sent line after the run's lines that synced in first; the feed sorts by time.
+  const chat = [
+    {id: 's1', role: 'system', runId: 'r1', text: 'Passing this through 1 bot(s).', at: '2026-11-26T10:00:01Z'},
+    {id: 'b1', role: 'bot', senderId: 'atlas', runId: 'r1', text: 'I can do a lot.', at: '2026-11-26T10:00:02Z'},
+    {id: 'u1', role: 'user', text: 'What can you do?', at: '2026-11-26T10:00:00Z'},
+  ];
+  assert.equal(askedBefore(chat, 'b1'), 'What can you do?');
+});
+
 test('pins are per chat, newest first, capped, and stale ones drop', () => {
   let pins = {};
   for (let i = 0; i < 25; i++) pins = togglePin(pins, 'scout', `m${i}`);

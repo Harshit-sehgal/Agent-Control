@@ -5,7 +5,7 @@
  * which of those a person gets, what text a quote, an ask and a new thread send, which question a reply answered,
  * how message pins are kept (per person, `ac-msg-pins`), where the popover sits, and which reply carries the
  * one-time hint. The pins strip and the hint are drawn here too, so the chat view needs no import of the popover. */
-import {esc, plain, icon, stamp} from './ui-kit.js?v=361705c53b';
+import {esc, plain, icon, stamp} from './ui-kit.js?v=d5c4fabe4b';
 
 export const MAX_MSG_PINS = 20;
 /** Per-person keys (saveLocal, never sent): pinned replies per chat, and whether the hold tip was seen. */
@@ -45,10 +45,14 @@ export const askText = (quoted, words) => [quoted, String(words ?? '').trim()].f
 /** What Start a thread opens with: the quote, then the owner's words or a plain ask to follow up. */
 export const threadText = (quoted, words) => askText(quoted, String(words ?? '').trim() || 'Follow up on this.');
 
-/** The owner line a reply answered: the nearest one before it. A thread's helpers speak in the same run first, so a
- * line of the reply's own run is passed over; any other reply in between means this one answered nothing new. */
+/** The owner line a reply answered: the nearest one before it in time (the browser can hold a sent line after the
+ * run's lines that synced in first, so the list is put in time order as the feed is). A thread's helpers speak in
+ * the same run first, so a line of the reply's own run is passed over; any other reply in between means this one
+ * answered nothing new. */
 export function askedBefore(messages, messageId) {
-  const list = Array.isArray(messages) ? messages : [];
+  const ms = m => { const t = Date.parse(m?.at); return Number.isFinite(t) ? t : 0; };
+  const list = (Array.isArray(messages) ? messages : []).map((m, order) => ({m, order}))
+    .sort((a, b) => ms(a.m) - ms(b.m) || a.order - b.order).map(x => x.m);
   const at = list.findIndex(m => m?.id === messageId);
   if (at < 0) return '';
   const runId = list[at].runId;
