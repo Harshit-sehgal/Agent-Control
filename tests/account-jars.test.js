@@ -77,6 +77,28 @@ test('a missing jar is null; one that will not decrypt is removed and reads null
   assert.equal(fs.existsSync(path.join(dir, `${A}.jar`)), false);
 });
 
+test('a jar with a shortened auth tag is refused and removed, never accepted at 32 bits', async t => {
+  const dir = await tmp(t);
+  const jars = createJarStore({dir, secret: 's1'});
+  for (const len of [0, 1, 4, 8, 12, 15, 17]) {
+    jars.save(A, [cookie('v')]);
+    const file = JSON.parse(fs.readFileSync(path.join(dir, `${A}.jar`), 'utf8'));
+    const tag = Buffer.from(file.tag, 'base64');
+    file.tag = Buffer.concat([tag, Buffer.alloc(len)]).subarray(0, len).toString('base64');
+    fs.writeFileSync(path.join(dir, `${A}.jar`), JSON.stringify(file));
+    assert.equal(jars.load(A), null, `tag of ${len} bytes`);
+    assert.equal(fs.existsSync(path.join(dir, `${A}.jar`)), false, `tag of ${len} bytes is removed`);
+  }
+});
+
+test('the store has no way to write a path an id did not pass: staging is private', async t => {
+  const dir = await tmp(t);
+  const jars = createJarStore({dir, secret: 's1'});
+  assert.deepEqual(Object.keys(jars).sort(), ['ids', 'load', 'retain', 'save', 'wipe']);
+  assert.throws(() => jars.save('../x', []), /cannot use\.$/);
+  assert.equal(fs.existsSync(path.join(path.dirname(dir), 'x.jar.tmp')), false);
+});
+
 test('each save uses a fresh salt and iv, and only an array of cookies is saved', async t => {
   const dir = await tmp(t);
   const jars = createJarStore({dir, secret: 's1'});

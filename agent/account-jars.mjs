@@ -14,6 +14,7 @@ import path from 'node:path';
  * path is built from it. */
 const JAR_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BAD_ID = 'This task names a browser account this device cannot use.';
+const TAG_BYTES = 16;
 const KEY_INFO = 'agent-control browser-account jar v1';
 
 /** Where the jars live: `AGENT_BROWSER_ACCOUNTS`, else next to the agent's config. */
@@ -44,12 +45,33 @@ function unseal(secret, id, text) {
     const file = JSON.parse(text);
     if (file?.v !== 1) return null;
     const [salt, iv, tag, data] = ['salt', 'iv', 'tag', 'data'].map(k => Buffer.from(String(file[k]), 'base64'));
-    const decipher = crypto.createDecipheriv('aes-256-gcm', keyOf(secret, salt), iv);
+    // GCM would accept a shortened tag, which anyone who can write the file could
+    // cut to 32 bits. Only a full-length tag opens a jar.
+    if (tag.length !== TAG_BYTES) return null;
+    const decipher = crypto.createDecipheriv('aes-256-gcm', keyOf(secret, salt), iv, {authTagLength: TAG_BYTES});
     decipher.setAAD(Buffer.from(`account:${id}`));
     decipher.setAuthTag(tag);
     const cookies = JSON.parse(Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8'));
     return Array.isArray(cookies) ? cookies : null;
   } catch { return null; }
+}
+
+/** Writes a jar to `<id>.jar.tmp`, private and fsynced, and hands back the means
+ * to put it in place or drop it. Private: every caller has already checked the id. */
+function stage({dir, secret}, id, cookies) {
+  if (!Array.isArray(cookies)) throw new Error('A cookie jar holds an array of cookies.');
+  fs.mkdirSync(dir, {recursive: true, mode: 0o700});
+  fs.chmodSync(dir, 0o700);
+  const jar = path.join(dir, `${id}.jar`), tmp = `${jar}.tmp`;
+  rmQuiet(tmp);                                  // never write through a link someone left here
+  const fd = fs.openSync(tmp, 'wx', 0o600);
+  try {
+    fs.fchmodSync(fd, 0o600);
+    fs.writeFileSync(fd, seal(secret, id, cookies));
+    fs.fsyncSync(fd);
+  } catch (e) { fs.closeSync(fd); rmQuiet(tmp); throw e; }
+  fs.closeSync(fd);
+  return {commit: () => fs.renameSync(tmp, jar), discard: () => rmQuiet(tmp)};
 }
 
 /** The jars of one folder, opened with one secret. */
@@ -59,27 +81,10 @@ export function createJarStore({dir, secret}) {
   const tmpPath = id => `${jarPath(id)}.tmp`;
   const readText = id => { try { return fs.readFileSync(jarPath(id), 'utf8'); } catch (e) { if (missing(e)) return null; throw e; } };
   const names = suffix => { try { return fs.readdirSync(dir).filter(n => n.endsWith(suffix) && JAR_ID.test(n.slice(0, -suffix.length))).map(n => n.slice(0, -suffix.length)); } catch (e) { if (missing(e)) return []; throw e; } };
-
-  /** Writes the jar to `<id>.jar.tmp`, private and fsynced; `commit` renames it into place. */
-  function stage(id, cookies) {
-    if (!Array.isArray(cookies)) throw new Error('A cookie jar holds an array of cookies.');
-    fs.mkdirSync(dir, {recursive: true, mode: 0o700});
-    fs.chmodSync(dir, 0o700);
-    const tmp = tmpPath(id);
-    rmQuiet(tmp);                                  // never write through a link someone left here
-    const fd = fs.openSync(tmp, 'wx', 0o600);
-    try {
-      fs.fchmodSync(fd, 0o600);
-      fs.writeFileSync(fd, seal(secret, id, cookies));
-      fs.fsyncSync(fd);
-    } catch (e) { fs.closeSync(fd); rmQuiet(tmp); throw e; }
-    fs.closeSync(fd);
-    return {tmp, commit: () => fs.renameSync(tmp, jarPath(id)), discard: () => rmQuiet(tmp)};
-  }
   const wipeId = id => { rmQuiet(jarPath(id)); rmQuiet(tmpPath(id)); };
 
   return {
-    save(id, cookies) { checkId(id); const staged = stage(id, cookies); staged.commit(); },
+    save(id, cookies) { checkId(id); stage({dir, secret}, id, cookies).commit(); },
     load(id) {
       checkId(id);
       const text = readText(id);
@@ -98,24 +103,32 @@ export function createJarStore({dir, secret}) {
       for (const id of new Set([...wiped, ...names('.jar.tmp')])) if (!keep.has(id)) wipeId(id);
       return wiped;
     },
-    stage,
   };
 }
 
 /** A re-pair gives the computer a new secret. Each jar is opened under the old
- * one and written under the new; one that will not open is wiped. Every copy is
- * staged before any is put in place, so a write that fails leaves the old jars
- * as they were, readable under the old secret. */
+ * one and written under the new; one that will not open is wiped.
+ *
+ * Every copy is staged before any is put in place. A jar that cannot be read or
+ * staged throws with the staged copies removed, and every old jar still opens
+ * under the old secret. Only the final renames can fail halfway (a full disk,
+ * a vanished folder): the copies not yet in place are removed, the jars already
+ * renamed open only under the new secret and the rest only under the old, and
+ * the error is thrown so the caller does not save the new secret. A jar that no
+ * secret opens is removed on its next load, so the worst result is an account
+ * that reads signed out, never a readable jar under a wrong key. */
 export function rekeyJars({dir, oldSecret, newSecret}) {
-  const from = createJarStore({dir, secret: oldSecret}), to = createJarStore({dir, secret: newSecret});
+  const from = createJarStore({dir, secret: oldSecret});
   const kept = [], wiped = [], staged = [];
   try {
     for (const id of from.ids()) {
       const cookies = from.load(id);
-      if (cookies) { staged.push(to.stage(id, cookies)); kept.push(id); } else wiped.push(id);
+      if (cookies) { staged.push(stage({dir, secret: newSecret}, id, cookies)); kept.push(id); } else wiped.push(id);
     }
   } catch (e) { for (const s of staged) s.discard(); throw e; }
-  for (const s of staged) s.commit();
+  let done = 0;
+  try { for (; done < staged.length; done++) staged[done].commit(); }
+  catch (e) { for (const s of staged.slice(done)) s.discard(); throw e; }
   return {kept, wiped};
 }
 
