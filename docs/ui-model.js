@@ -2,10 +2,10 @@
  * a pane shows: the chat list, a thread's timeline and the "needs you" count.
  * (The hash route lives in ui-company.js.) No DOM and no globals, so the product rules here are unit
  * tested directly (tests/ui-model.test.js). */
-import {botSettings} from './bot-settings.js?v=de31f59d0b';
-import {STOPPABLE_STATUSES} from './run-state.js?v=de31f59d0b';
-import {primaryOf} from './company.js?v=de31f59d0b';
-import {plain} from './ui-kit.js?v=de31f59d0b';
+import {botSettings} from './bot-settings.js?v=6c8c152065';
+import {STOPPABLE_STATUSES} from './run-state.js?v=6c8c152065';
+import {primaryOf} from './company.js?v=6c8c152065';
+import {plain} from './ui-kit.js?v=6c8c152065';
 
 const teamKey = groupId => `team-${groupId}`;
 const time = value => { const t = Date.parse(value || ''); return Number.isFinite(t) ? t : 0; };
@@ -46,7 +46,7 @@ export function retryTarget(group, run) {
 }
 
 // System lines with a kind of their own paint a card, not a run note.
-const RUN_LESS_KINDS = new Set(['browser', 'subagent', 'peer', 'bot-created', 'limit', 'guard', 'model-limit']);
+const RUN_LESS_KINDS = new Set(['browser', 'subagent', 'peer', 'bot-created', 'limit', 'guard', 'model-limit', 'learned']);
 
 /** A system line that may carry Start, Retry or Approve. A browser card or a
  * sub-agent line has its own presentation and returns before those, so it must

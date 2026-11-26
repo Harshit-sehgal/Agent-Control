@@ -247,6 +247,12 @@ function offlineEntry({message: m, retry}) {
   return `<div class="cv-card flat" data-m="${esc(m.id)}"><p>${esc(m.text)}</p>${again}</div>`;
 }
 
+/** What a bot learned from a correction: one quiet line, with Undo while the rule is on. */
+function learnedEntry({message: m}) {
+  const act = m.off ? '<span class="cv-learned-off">Switched off</span>' : canWrite() && m.ruleId ? btn('Undo', 'learned-undo', {small: true, kind: 'quiet', data: {rule: m.ruleId}}) : '';
+  return `<div class="cv-note cv-learned" data-m="${esc(m.id)}"><span>Learned: ${esc(m.text)}</span>${act}</div>`;
+}
+
 function offjobEntry({message: m, open}, conv) {
   const bot = findBot(m.botId || m.senderId), name = bot?.name || m.senderName || conv.name;
   const choices = open && canWrite() ? `<div class="cv-card"><p>This is not ${esc(name)}'s job. What should happen to it?</p><div class="acts">${OFFJOB_CHOICES.map(c => btn(c.label, `offjob-${c.id}`, {kind: c.id === 'anyway' ? 'primary' : 'quiet', data: {message: m.id}})).join('')}</div></div>` : '';
@@ -293,6 +299,7 @@ function entryHtml(entry, conv) {
     case 'setup': return setupEntry(entry);
     case 'no-model': return noModelEntry(entry);
     case 'offline': return offlineEntry(entry);
+    case 'learned': return learnedEntry(entry);
     default: return '';
   }
 }
@@ -488,6 +495,14 @@ export const conversationActions = {
     await api('/api/memory/rules', 'POST', {bot: bot.id, text, label: bot.name});
     await sync();
     toast(`${bot.name} will do that from now on. Edit it on its profile.`);
+  },
+  // Switch off a rule a bot learned; a rule already deleted on the profile just reads as switched off.
+  'learned-undo': async b => {
+    b.disabled = true;
+    try { await api(`/api/memory/rules/${encodeURIComponent(b.dataset.rule)}`, 'PATCH', {enabled: false}); }
+    catch (error) { if (error?.status !== 404) { b.disabled = false; throw error; } }
+    b.replaceWith(Object.assign(document.createElement('span'), {className: 'cv-learned-off', textContent: 'Switched off'}));
+    await sync();
   },
   'open-profile': b => go({profile: b.dataset.id}),
   hop: b => hop(b),

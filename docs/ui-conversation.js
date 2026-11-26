@@ -7,33 +7,33 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=de31f59d0b';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=de31f59d0b';
-import {requestOfMessage} from './bot-browser.js?v=de31f59d0b';
-import {validHttpUrl} from './core.js?v=de31f59d0b';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou, teachPrompt, teachRule} from './ui-model.js?v=de31f59d0b';
-import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=de31f59d0b';
-import {isPrimary} from './company.js?v=de31f59d0b';
-import {hasJob, modelChip} from './ui-profile-model.js?v=de31f59d0b';
-import {scheduleTaskBody} from './schedules.js?v=de31f59d0b';
-import {briefingTaskBody} from './briefing.js?v=de31f59d0b';
-import {feed, fileStrip} from './ui-feed.js?v=de31f59d0b';
-import {attachButton, chipsSlot, wireAttach} from './ui-attach.js?v=de31f59d0b';
-import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js?v=de31f59d0b';
-import {askCard} from './ui-asks.js?v=de31f59d0b';
-import {UNTIL_CHOICES, untilFor} from './asks.js?v=de31f59d0b';
-import {undoToast} from './ui-settings.js?v=de31f59d0b';
-import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=de31f59d0b';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=de31f59d0b';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=de31f59d0b';
-import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=de31f59d0b';
-import {toast, confirmSheet, askSheet} from './ui-dialogs.js?v=de31f59d0b';
-import {siteChip, thumbSlot} from './ui-computer-view.js?v=de31f59d0b';
-import {cliChoice} from './ui-connect-model.js?v=de31f59d0b';
-import {connectAppNow} from './ui-connect.js?v=de31f59d0b';
-import {appById} from './app-catalog.js?v=de31f59d0b';
-import {templateChipsHtml, templateButton} from './ui-templates.js?v=de31f59d0b';
-import {usageWords} from './usage.js?v=de31f59d0b';
+import {OFFJOB_CHOICES} from './off-job.js?v=6c8c152065';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=6c8c152065';
+import {requestOfMessage} from './bot-browser.js?v=6c8c152065';
+import {validHttpUrl} from './core.js?v=6c8c152065';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou, teachPrompt, teachRule} from './ui-model.js?v=6c8c152065';
+import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=6c8c152065';
+import {isPrimary} from './company.js?v=6c8c152065';
+import {hasJob, modelChip} from './ui-profile-model.js?v=6c8c152065';
+import {scheduleTaskBody} from './schedules.js?v=6c8c152065';
+import {briefingTaskBody} from './briefing.js?v=6c8c152065';
+import {feed, fileStrip} from './ui-feed.js?v=6c8c152065';
+import {attachButton, chipsSlot, wireAttach} from './ui-attach.js?v=6c8c152065';
+import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js?v=6c8c152065';
+import {askCard} from './ui-asks.js?v=6c8c152065';
+import {UNTIL_CHOICES, untilFor} from './asks.js?v=6c8c152065';
+import {undoToast} from './ui-settings.js?v=6c8c152065';
+import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=6c8c152065';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=6c8c152065';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen} from './ui-store.js?v=6c8c152065';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=6c8c152065';
+import {toast, confirmSheet, askSheet} from './ui-dialogs.js?v=6c8c152065';
+import {siteChip, thumbSlot} from './ui-computer-view.js?v=6c8c152065';
+import {cliChoice} from './ui-connect-model.js?v=6c8c152065';
+import {connectAppNow} from './ui-connect.js?v=6c8c152065';
+import {appById} from './app-catalog.js?v=6c8c152065';
+import {templateChipsHtml, templateButton} from './ui-templates.js?v=6c8c152065';
+import {usageWords} from './usage.js?v=6c8c152065';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -247,6 +247,12 @@ function offlineEntry({message: m, retry}) {
   return `<div class="cv-card flat" data-m="${esc(m.id)}"><p>${esc(m.text)}</p>${again}</div>`;
 }
 
+/** What a bot learned from a correction: one quiet line, with Undo while the rule is on. */
+function learnedEntry({message: m}) {
+  const act = m.off ? '<span class="cv-learned-off">Switched off</span>' : canWrite() && m.ruleId ? btn('Undo', 'learned-undo', {small: true, kind: 'quiet', data: {rule: m.ruleId}}) : '';
+  return `<div class="cv-note cv-learned" data-m="${esc(m.id)}"><span>Learned: ${esc(m.text)}</span>${act}</div>`;
+}
+
 function offjobEntry({message: m, open}, conv) {
   const bot = findBot(m.botId || m.senderId), name = bot?.name || m.senderName || conv.name;
   const choices = open && canWrite() ? `<div class="cv-card"><p>This is not ${esc(name)}'s job. What should happen to it?</p><div class="acts">${OFFJOB_CHOICES.map(c => btn(c.label, `offjob-${c.id}`, {kind: c.id === 'anyway' ? 'primary' : 'quiet', data: {message: m.id}})).join('')}</div></div>` : '';
@@ -293,6 +299,7 @@ function entryHtml(entry, conv) {
     case 'setup': return setupEntry(entry);
     case 'no-model': return noModelEntry(entry);
     case 'offline': return offlineEntry(entry);
+    case 'learned': return learnedEntry(entry);
     default: return '';
   }
 }
@@ -488,6 +495,14 @@ export const conversationActions = {
     await api('/api/memory/rules', 'POST', {bot: bot.id, text, label: bot.name});
     await sync();
     toast(`${bot.name} will do that from now on. Edit it on its profile.`);
+  },
+  // Switch off a rule a bot learned; a rule already deleted on the profile just reads as switched off.
+  'learned-undo': async b => {
+    b.disabled = true;
+    try { await api(`/api/memory/rules/${encodeURIComponent(b.dataset.rule)}`, 'PATCH', {enabled: false}); }
+    catch (error) { if (error?.status !== 404) { b.disabled = false; throw error; } }
+    b.replaceWith(Object.assign(document.createElement('span'), {className: 'cv-learned-off', textContent: 'Switched off'}));
+    await sync();
   },
   'open-profile': b => go({profile: b.dataset.id}),
   hop: b => hop(b),

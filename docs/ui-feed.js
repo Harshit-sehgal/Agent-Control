@@ -9,13 +9,13 @@
  * Atlas") and opens the hops, the cards that wait on the owner, and a failure that
  * ended a run. What a bot read, which connector it used, and the lines a page or
  * connector call left on the way are stored but not shown (tests/clean-feed.test.js). */
-import {handoffs, hopLine, progressPill} from './ui-company.js?v=de31f59d0b';
-import {isRunNote, runBelongsToChat} from './ui-model.js?v=de31f59d0b';
-import {connectorLine, modelLimitLine} from './ui-connect-model.js?v=de31f59d0b';
-import {setupCardOf, setupDone} from './setup.js?v=de31f59d0b';
-import {requestOfMessage} from './bot-browser.js?v=de31f59d0b';
-import {attachmentRefs, isImage, sizeLabel} from './attachments.js?v=de31f59d0b';
-import {esc, icon} from './ui-kit.js?v=de31f59d0b';
+import {handoffs, hopLine, progressPill} from './ui-company.js?v=6c8c152065';
+import {isRunNote, runBelongsToChat} from './ui-model.js?v=6c8c152065';
+import {connectorLine, modelLimitLine} from './ui-connect-model.js?v=6c8c152065';
+import {setupCardOf, setupDone} from './setup.js?v=6c8c152065';
+import {requestOfMessage} from './bot-browser.js?v=6c8c152065';
+import {attachmentRefs, isImage, sizeLabel} from './attachments.js?v=6c8c152065';
+import {esc, icon} from './ui-kit.js?v=6c8c152065';
 
 const isActive = status => status === 'queued' || status === 'running';
 const isAwaiting = status => String(status || '').startsWith('awaiting');
@@ -120,6 +120,8 @@ export function feed({items = [], state, key, now = Date.now()}) {
       }
       if (m.kind === 'model-limit') return out.push({kind: 'model-limit', message: m, line: modelLimitLine(m, {state})});
       if (m.kind === 'guard') return out.push({kind: 'guard', message: m, open: m.id === lastGuard && Boolean(state?.guard?.paused)});
+      // What a memory pass learned from a correction, with its Undo (server-written only: shared/chats.js).
+      if (m.kind === 'learned') return out.push({kind: 'learned', message: m});
       if (!isRunNote(m)) return out.push({kind: 'note', message: m, run: null});
       if (run?.status === 'completed' && m.id === `${run.id}-completed`) return;
       return out.push({kind: 'note', message: m, run: run && lastNote.get(run.id) === m.id ? run : null});

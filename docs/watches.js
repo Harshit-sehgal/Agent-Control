@@ -8,9 +8,9 @@
  * `watch:<id>`, never the bot's chat: a watched page neither taints that chat (`outsideRead`) nor reaches a model turn.
  * The chat line it leaves names the site, never the page's words. `state.watches` lives in kv `watches`.
  * Pure and browser-safe. Design: docs/superpowers/specs/2026-11-25-watch-and-tell-design.md. */
-import {cleanText, validHttpUrl} from './core.js?v=de31f59d0b';
-import {fail} from './errors.js?v=de31f59d0b';
-import {siteOf} from './limits.js?v=de31f59d0b';
+import {cleanText, validHttpUrl} from './core.js?v=6c8c152065';
+import {fail} from './errors.js?v=6c8c152065';
+import {siteOf} from './limits.js?v=6c8c152065';
 
 export const WATCH_EVERY = [
   {id: 'hour', label: 'Every hour', ms: 3600000},
