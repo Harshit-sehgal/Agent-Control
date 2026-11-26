@@ -51,12 +51,13 @@ export function agentOnline(row, nowMs = Date.now()) {
 export const missingFeatureLine = name =>
   `This needs a newer app on your computer: it does not report ${name}. Update the app on your computer, then try again.`;
 
-const agentMay = (row, kind) => { try { return JSON.parse(row.permissions || '[]').includes(kind); } catch { return false; } };
+const agentMay = (row, kind) => { try { const list = JSON.parse(row.permissions || '[]'); return Array.isArray(list) && list.includes(kind); } catch { return false; } };
 
 /** The computer that gets a task of `kind`: the pinned one (`deviceId`), else the most recently seen one that may run
  * it, reports every name in `needs` and is online. Returns `{agent: row}`, `{reason}` (`no-agent`, `no-permission`,
  * `agent-offline`, `not-pinned`) or `{reason: 'missing-feature', feature}`. */
-export function chooseDevice(store, {kind, deviceId = null, needs = [], nowMs = Date.now()} = {}) {
+export function chooseDevice(store, {kind, deviceId = null, needs: asked = [], nowMs = Date.now()} = {}) {
+  const needs = Array.isArray(asked) ? asked : [];
   const lacks = row => {
     if (!needs.length) return null;
     const features = readAgentFeatures(store, row.id);

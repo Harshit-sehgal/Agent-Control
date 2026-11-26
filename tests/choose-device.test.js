@@ -94,3 +94,26 @@ test('nowMs moves the clock the online rule reads', async t => {
   assert.equal(chooseDevice(store, {kind: 'model.run'}).agent.id, id);
   assert.deepEqual(chooseDevice(store, {kind: 'model.run', nowMs: Date.now() + 10 * MIN}), {reason: 'agent-offline'});
 });
+
+test('fails closed: an unknown need, a features value that is not a list, and a pin that is asleep and lacks one', async t => {
+  const {store, pair} = await rig(t);
+  const id = pair('Laptop', ['browser.capture'], {seenAgo: 0, features: [SECRET_INPUT_V1]});
+  assert.deepEqual(chooseDevice(store, {kind: 'browser.capture', needs: ['no-such-v9']}), {reason: 'missing-feature', feature: 'no-such-v9'});
+  assert.deepEqual(chooseDevice(store, {kind: 'browser.capture', needs: [SECRET_INPUT_V1, 'no-such-v9']}), {reason: 'missing-feature', feature: 'no-such-v9'}, 'the first need is met, so the second is named');
+  store.kvSet(`agent_features:${id}`, JSON.stringify(SECRET_INPUT_V1));
+  assert.deepEqual(chooseDevice(store, {kind: 'browser.capture', needs: [SECRET_INPUT_V1]}), {reason: 'missing-feature', feature: SECRET_INPUT_V1}, 'a string is not a list');
+  store.kvSet(`agent_features:${id}`, JSON.stringify([]));
+  store.run('UPDATE agents SET last_seen_at=? WHERE id=?', new Date(Date.now() - 10 * MIN).toISOString(), id);
+  assert.deepEqual(chooseDevice(store, {kind: 'browser.capture', deviceId: id, needs: [SECRET_INPUT_V1]}), {reason: 'missing-feature', feature: SECRET_INPUT_V1}, 'missing-feature comes before agent-offline');
+});
+
+test('fails closed: permissions that are not a list grant nothing, and needs that is not a list needs nothing', async t => {
+  const {store, pair} = await rig(t);
+  const id = pair('Odd', ['browser.capture'], {seenAgo: 0});
+  store.run('UPDATE agents SET permissions=? WHERE id=?', JSON.stringify('browser.capture'), id);
+  assert.deepEqual(chooseDevice(store, {kind: 'browser.capture'}), {reason: 'no-permission'}, 'a string that contains the kind is not a grant');
+  assert.deepEqual(chooseDevice(store, {kind: 'browser.capture', deviceId: id}), {reason: 'not-pinned'});
+  store.run('UPDATE agents SET permissions=? WHERE id=?', JSON.stringify(['browser.capture']), id);
+  assert.equal(chooseDevice(store, {kind: 'browser.capture', needs: null}).agent.id, id);
+  assert.equal(chooseDevice(store, {kind: 'browser.capture', needs: 'secret-input-v1'}).agent.id, id);
+});
