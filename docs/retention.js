@@ -8,8 +8,9 @@
  * workflow document — they are bounded by the in-app feed cap in
  * src/notifications.js — so there is no retention knob for them here.)
  */
-import {activity} from './core.js?v=515e121074';
-import {BUSY_STATUSES} from './coordination.js?v=515e121074';
+import {activity} from './core.js?v=439d5201b7';
+import {BUSY_STATUSES} from './coordination.js?v=439d5201b7';
+import {keepOutsideMarks} from './asks.js?v=439d5201b7';
 
 export const RETENTION_DEFAULTS = {events: 90, doneTasks: 30, runs: 30};
 
@@ -77,7 +78,11 @@ export function pruneState(state, {now = Date.now(), dryRun = false, policy} = {
       const settled = Date.parse(runCutoff);
       const kept = state.groupRuns.filter(g => BUSY_STATUSES.includes(g.status) || happenedAt(g, ['completedAt', 'updatedAt', 'createdAt'], now) >= settled);
       report.runs += state.groupRuns.length - kept.length;
-      if (!dryRun) state.groupRuns = kept;
+      if (!dryRun) {
+        // Chats are kept, so a removed run's replies carry what it read from outside (shared/asks.js).
+        keepOutsideMarks(state, {runs: state.groupRuns.filter(g => !kept.includes(g))});
+        state.groupRuns = kept;
+      }
     }
   }
   if (!dryRun && report.events + report.doneTasks + report.runs > 0) {

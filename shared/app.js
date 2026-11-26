@@ -29,6 +29,7 @@ import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, ren
 import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js';
 import {profileViews, wirePages} from './ui-profile.js';
 import {wireGestures, gesturesBusy} from './ui-gestures.js';
+import {wireReplyMenu} from './ui-reply-menu.js';
 import {settingsViews} from './ui-settings.js';
 import {showLogin, hideLogin, setSignInMethods} from './ui-sheets.js';
 import {actions, forms, onControlChange, onControlInput, modelSearchKey} from './ui-actions.js';
@@ -343,7 +344,7 @@ window.addEventListener('popstate', event => { syncDepth(event); if (!store.stat
 window.addEventListener('resize', () => { if (store.state && isDesk() !== lastDesk) changed('route'); });
 // `toggle` does not bubble, so listen in the capture phase to remember which handoff cards are open.
 document.addEventListener('toggle', trackOpen, true);
-wireShell(); wirePages(); wireGestures(); wireComputer();
+wireShell(); wirePages(); wireGestures(); wireReplyMenu(); wireComputer();
 
 applyTheme(); watchSystemTheme(); bringBotsToLife(); registerWorker();
 boot();

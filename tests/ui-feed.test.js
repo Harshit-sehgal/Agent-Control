@@ -209,3 +209,12 @@ test('a bot made for a run is said before the run\'s line, never after "X messag
   assert.match(out[2].message.text, /created a new bot/);
   assert.equal(out[3].pill.text, 'Planner messaged Atlas');
 });
+
+test('a Learned line is its own quiet entry, never a run note', async () => {
+  const {isRunNote} = await import('../shared/ui-model.js');
+  const learned = msg('l1', 'system', 3, {kind: 'learned', text: 'Keep replies under five lines.', ruleId: 'r9'});
+  const out = build([msg('q', 'user', 1), msg('a', 'bot', 2, {senderId: 'atlas', senderName: 'Atlas'}), learned]);
+  assert.deepEqual(kinds(out), ['day', 'me', 'bot', 'learned']);
+  assert.equal(out[3].message.ruleId, 'r9');
+  assert.equal(isRunNote(learned), false);
+});

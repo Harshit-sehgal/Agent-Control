@@ -20,12 +20,12 @@
  * X and Twitter work like any other site: a bot may read, click and type there, and a click on Post asks
  * unless the owner set Always allow for posting on that site.
  */
-import {cleanText, validHttpUrl} from './core.js?v=515e121074';
-import {fail} from './errors.js?v=515e121074';
-import {decide, createAsk, scopeOf, declinedNeed, outsideRead} from './asks.js?v=515e121074';
-import {controlFence} from './reply-blocks.js?v=515e121074';
-import {BACKSTOP, pagesCap, roundsCap, siteOf, siteCapLeft, countSitePage, limitsOf} from './limits.js?v=515e121074';
-import {appForHost} from './app-catalog.js?v=515e121074';
+import {cleanText, validHttpUrl} from './core.js?v=439d5201b7';
+import {fail} from './errors.js?v=439d5201b7';
+import {decide, createAsk, scopeOf, declinedNeed, outsideRead, keepOutsideMarks} from './asks.js?v=439d5201b7';
+import {controlFence} from './reply-blocks.js?v=439d5201b7';
+import {BACKSTOP, pagesCap, roundsCap, siteOf, siteCapLeft, countSitePage, limitsOf} from './limits.js?v=439d5201b7';
+import {appForHost} from './app-catalog.js?v=439d5201b7';
 
 /** The most page text one model turn carries (the pages of a round together). */
 export const MAX_PAGE_CHARS = 24000;
@@ -623,7 +623,7 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
     if (no) { say(`${bot.name} asked to ${describe(item.request)}, but you declined that in this task, so it was not asked again.`); invalid.push(`the owner declined ${no.action === 'browser.use' ? 'opening' : no.action} ${hostOf(no.target)} in this task; do not ask for it again.`); continue; }
     // Per page: every site the request reaches that is not one of the run's private hosts asks, including one a
     // `navigate` step opens after a private first page.
-    const decision = decide(state, bot, needs, {readPrivate: need => guarded && need.action === BROWSER_PERMISSION && !privateHosts.has(hostOf(need.target)), outside: run?.outsideInput === true, tainted: guarded || outsideRead(state, {runId, chatKey, outsideInput: run?.outsideInput === true})});
+    const decision = decide(state, bot, needs, {readPrivate: need => guarded && need.action === BROWSER_PERMISSION && !privateHosts.has(hostOf(need.target)), outside: run?.outsideInput === true, tainted: guarded || outsideRead(state, {runId, chatKey, botId: bot.id, outsideInput: run?.outsideInput === true})});
     if (decision.verdict === 'deny') { say(`${bot.name} asked to ${describe(item.request)}. ${decision.message}`); continue; }
     // The owner's per-site daily limit (Settings → Limits): past it, nothing more opens on that site today.
     const site = siteOf(item.request.url);
@@ -676,7 +676,10 @@ export function pruneBrowserRequests(state) {
     const open = r => ['pending', 'dispatched'].includes(r.status);
     const waiting = state.browserRequests.filter(open);
     const finished = state.browserRequests.filter(r => !open(r));
-    state.browserRequests = [...waiting, ...finished.slice(0, Math.max(0, MAX_BROWSER_REQUESTS - waiting.length))];
+    const room = Math.max(0, MAX_BROWSER_REQUESTS - waiting.length);
+    // A dropped page read stays known on its run, so Hands-off still asks after it (shared/asks.js).
+    keepOutsideMarks(state, {requests: finished.slice(room)});
+    state.browserRequests = [...waiting, ...finished.slice(0, room)];
   }
   return state.browserRequests;
 }

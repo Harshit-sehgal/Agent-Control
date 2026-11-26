@@ -22,20 +22,21 @@
  *   ui-dialogs      toast, sheet, confirm/ask      ui-actions action/form tables
  *   ui-fx           confetti, the send arrow and the bots' ambient life
  */
-import {companyRoute} from './ui-company.js?v=515e121074';
-import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=515e121074';
-import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=515e121074';
-import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, renderPause, closeSearch, homeView, setupCardHtml} from './ui-shell.js?v=515e121074';
-import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=515e121074';
-import {profileViews, wirePages} from './ui-profile.js?v=515e121074';
-import {wireGestures, gesturesBusy} from './ui-gestures.js?v=515e121074';
-import {settingsViews} from './ui-settings.js?v=515e121074';
-import {showLogin, hideLogin, setSignInMethods} from './ui-sheets.js?v=515e121074';
-import {actions, forms, onControlChange, onControlInput, modelSearchKey} from './ui-actions.js?v=515e121074';
-import {bringBotsToLife} from './ui-fx.js?v=515e121074';
-import {wireComputer} from './ui-computer-view.js?v=515e121074';
-import {googleReturn, withoutGoogleParams} from './ui-connect-model.js?v=515e121074';
-import {sharedDraft, withoutShareParams} from './ui-model.js?v=515e121074';
+import {companyRoute} from './ui-company.js?v=439d5201b7';
+import {store, api, sync, loadState, importLocalChats, onChange, changed, go, syncDepth, conversation, isStaticDemo, applyTheme, watchSystemTheme, retireSession, sessionEpoch, normalizeRoute, groups} from './ui-store.js?v=439d5201b7';
+import {toast, closeSheet, sheetOpen, trapTab, confirmSheet, askSheet} from './ui-dialogs.js?v=439d5201b7';
+import {isDesk, mountRail, mountChrome, wireShell, renderRail, renderChrome, renderPause, closeSearch, homeView, setupCardHtml} from './ui-shell.js?v=439d5201b7';
+import {conversationShell, renderConversation, newThreadView, trackOpen} from './ui-conversation.js?v=439d5201b7';
+import {profileViews, wirePages} from './ui-profile.js?v=439d5201b7';
+import {wireGestures, gesturesBusy} from './ui-gestures.js?v=439d5201b7';
+import {wireReplyMenu} from './ui-reply-menu.js?v=439d5201b7';
+import {settingsViews} from './ui-settings.js?v=439d5201b7';
+import {showLogin, hideLogin, setSignInMethods} from './ui-sheets.js?v=439d5201b7';
+import {actions, forms, onControlChange, onControlInput, modelSearchKey} from './ui-actions.js?v=439d5201b7';
+import {bringBotsToLife} from './ui-fx.js?v=439d5201b7';
+import {wireComputer} from './ui-computer-view.js?v=439d5201b7';
+import {googleReturn, withoutGoogleParams} from './ui-connect-model.js?v=439d5201b7';
+import {sharedDraft, withoutShareParams} from './ui-model.js?v=439d5201b7';
 
 const el = id => document.getElementById(id);
 const hashRoute = () => normalizeRoute(companyRoute(location.hash, store.state));
@@ -343,7 +344,7 @@ window.addEventListener('popstate', event => { syncDepth(event); if (!store.stat
 window.addEventListener('resize', () => { if (store.state && isDesk() !== lastDesk) changed('route'); });
 // `toggle` does not bubble, so listen in the capture phase to remember which handoff cards are open.
 document.addEventListener('toggle', trackOpen, true);
-wireShell(); wirePages(); wireGestures(); wireComputer();
+wireShell(); wirePages(); wireGestures(); wireReplyMenu(); wireComputer();
 
 applyTheme(); watchSystemTheme(); bringBotsToLife(); registerWorker();
 boot();

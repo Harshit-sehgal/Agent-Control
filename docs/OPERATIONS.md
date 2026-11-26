@@ -187,11 +187,14 @@ email. An anonymous request gets a 302 to the Access login, and `/api/health` be
 **Why the hostname is `agent-control`, not `agent`.** `agent.harshitsehgal.online` already points at
 another tunnel (`dsh`). Do not overwrite a DNS record that serves another service.
 
-**Timezone.** `TZ` defaults to `Asia/Kolkata` in `compose.cloudflare.yaml`. Quiet hours and weekday
-schedules are read in the server's local zone, so keep `TZ` set to the owner's zone.
+**Timezone.** `TZ` defaults to `Asia/Kolkata` in `compose.cloudflare.yaml`. Quiet hours are read on
+`QUIET_HOURS_TZ` (an IANA name such as `Europe/Paris`) when it is set, else in the server's local zone.
+A recurring schedule made in the app with a time of day or a weekdays/weekends rule carries the
+browser's zone, so it keeps the owner's time and days across daylight saving whatever `TZ` is. One saved
+by an older build gets the zone of the next browser that opens the app.
 
-**Quiet hours.** Set `QUIET_HOURS=22:00-07:00` in `deploy/.env` to hold non-urgent phone pushes
-overnight. Approval requests (`ask` notifications) are always pushed. A held message stays in the app;
+**Quiet hours.** Set `QUIET_HOURS=22:00-07:00` (and `QUIET_HOURS_TZ` to the owner's zone when the
+server runs on another clock) in `deploy/.env` to hold non-urgent phone pushes overnight. Approval requests (`ask` notifications) are always pushed. A held message stays in the app;
 it is not sent to the phone later.
 
 **Kill switch.** Schedules on a bot's page have a "Pause every schedule" button. It sets
@@ -240,7 +243,7 @@ allow notifications once.
   the form-encoded option is refused (400), because the signed bytes must be JSON. A GitHub `ping` (sent when the
   webhook is made) is signed and answered `ignored`, so it starts nothing.
 - **Answers.** `queued` (a run started), `duplicate` (same body within 24 hours), `cooldown`,
-  `ignored` (the condition did not match), `held` (kill switch on). Any refusal (bad signature, unknown or disabled trigger, unknown workspace) is the same 401. Past 60 events a minute from one address to one trigger, the answer is 429.
+  `ignored` (the condition did not match), `held` (kill switch on). Any refusal (bad signature, unknown or disabled trigger, unknown workspace) is the same 401. After 20 refused events in a minute from one address to one trigger, that address gets 429 for the rest of the minute; correctly signed events are never counted.
 - **Cloudflare Access.** Senders cannot log in, so the event path needs a bypass rule for
   `agent-control.harshitsehgal.online/api/events/*`. That is your decision; the app does not
   change Access. Without it, the sender gets the Access login page.

@@ -4,28 +4,28 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {briefingMessage} from './briefing.js?v=515e121074';
-import {addTemplate, removeTemplate} from './templates.js?v=515e121074';
-import {initialState, cleanText} from './core.js?v=515e121074';
-import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=515e121074';
-import {RETENTION_DEFAULTS} from './retention.js?v=515e121074';
-import {enqueueTask, retryTask, cancelTask} from './tasks.js?v=515e121074';
-import {addChatMessages, clearChat} from './chats.js?v=515e121074';
-import {publicMemory, rememberFromOwner, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY} from './memory.js?v=515e121074';
-import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=515e121074';
-import {createThread, titleFrom} from './threads.js?v=515e121074';
-import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=515e121074';
-import {simulateGroup} from './group-simulator.js?v=515e121074';
-import {BUSY_STATUSES} from './run-state.js?v=515e121074';
-import {botSettings} from './bot-settings.js?v=515e121074';
-import {denyBrowserRequest} from './bot-browser.js?v=515e121074';
-import {answerAsk, expireAsks, orphanAsks, setGrant, setAskBasics, restorePermissions} from './asks.js?v=515e121074';
-import {applyPreset} from './presets.js?v=515e121074';
-import {setLimits} from './limits.js?v=515e121074';
-import {activityPage} from './activity-log.js?v=515e121074';
-import {withLocalLock} from './locks.js?v=515e121074';
-import {addWatch, setWatchOn, removeWatch, publicWatch} from './watches.js?v=515e121074';
-import {base64Bytes, sniffType, cleanFileName, DEMO_MAX_FILE_BYTES, DEMO_MAX_STORED, MAX_FILE_BYTES} from './attachments.js?v=515e121074';
+import {briefingMessage} from './briefing.js?v=439d5201b7';
+import {addTemplate, removeTemplate} from './templates.js?v=439d5201b7';
+import {initialState, cleanText} from './core.js?v=439d5201b7';
+import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=439d5201b7';
+import {RETENTION_DEFAULTS} from './retention.js?v=439d5201b7';
+import {enqueueTask, retryTask, cancelTask, fillScheduleZones} from './tasks.js?v=439d5201b7';
+import {addChatMessages, clearChat, markLearned} from './chats.js?v=439d5201b7';
+import {publicMemory, rememberFromOwner, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY, setRuleEnabled, feedbackOn} from './memory.js?v=439d5201b7';
+import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=439d5201b7';
+import {createThread, titleFrom} from './threads.js?v=439d5201b7';
+import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=439d5201b7';
+import {simulateGroup} from './group-simulator.js?v=439d5201b7';
+import {BUSY_STATUSES} from './run-state.js?v=439d5201b7';
+import {botSettings} from './bot-settings.js?v=439d5201b7';
+import {denyBrowserRequest} from './bot-browser.js?v=439d5201b7';
+import {answerAsk, expireAsks, orphanAsks, setGrant, setAskBasics, restorePermissions} from './asks.js?v=439d5201b7';
+import {applyPreset} from './presets.js?v=439d5201b7';
+import {setLimits} from './limits.js?v=439d5201b7';
+import {activityPage} from './activity-log.js?v=439d5201b7';
+import {withLocalLock} from './locks.js?v=439d5201b7';
+import {addWatch, setWatchOn, removeWatch, publicWatch} from './watches.js?v=439d5201b7';
+import {base64Bytes, sniffType, cleanFileName, DEMO_MAX_FILE_BYTES, DEMO_MAX_STORED, MAX_FILE_BYTES} from './attachments.js?v=439d5201b7';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
@@ -375,6 +375,7 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
     if (body.kind === 'notification') throw Object.assign(new Error('Notification deliveries are queued by the server, not by request.'), {status: 403});
     const t = enqueueTask(state, body); save(state); return t.task;
   }
+  if (path === '/api/tasks/zone' && method === 'POST') { const r = {filled: fillScheduleZones(state, body.tz)}; save(state); return r; }
   if ((m = path.match(/^\/api\/tasks\/([a-f0-9-]+)\/retry$/)) && method === 'POST') { const r = retryTask(state, m[1]); save(state); return r; }
   if ((m = path.match(/^\/api\/tasks\/([a-f0-9-]+)$/)) && method === 'DELETE') { const r = cancelTask(state, m[1]); save(state); return r; }
   // Conversation history, stored with the rest of the browser-local state.
@@ -395,6 +396,13 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
     save(state);
     return {ok: true, model: book, rules: r.book.rules.map(rule => ({id: rule.id, text: rule.text, source: rule.source}))};
   }
+  if ((m = memoryPath.match(/^\/api\/memory\/rules\/([a-z0-9-]+)$/)) && method === 'PATCH' && typeof body.enabled === 'boolean' && body.text === undefined) {
+    const rule = setRuleEnabled(state, bookOf(body) || bookKeyOfRule(state, m[1]) || '', m[1], body.enabled);
+    markLearned(state, m[1], !body.enabled);
+    save(state); return {ok: true, rule: {id: rule.id, text: rule.text, source: rule.source, enabled: rule.enabled !== false}};
+  }
+  // 👍 / 👎 from the reply popover: kept like the server keeps it. The demo has no model, so no pass follows.
+  if (path === '/api/memory/feedback' && method === 'POST') { feedbackOn(state, {botId: body.bot, chat: body.chat, messageId: body.message, kind: body.kind, note: body.note}); save(state); return {ok: true}; }
   if ((m = memoryPath.match(/^\/api\/memory\/rules\/([a-z0-9-]+)$/)) && method === 'PATCH') {
     const rule = editRule(state, bookOf(body) || bookKeyOfRule(state, m[1]) || '', m[1], body.text);
     if (!rule) throw Object.assign(new Error('That bot already keeps that line.'), {status: 409});

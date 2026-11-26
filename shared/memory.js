@@ -18,6 +18,7 @@
  * one model-written consolidation pass. Both are pure and bounded.
  */
 import {cleanText} from './core.js';
+import {botSettings} from './bot-settings.js';
 
 export const MEMORY_VERSION = 1;
 export const MAX_RULES = 50;
@@ -86,6 +87,8 @@ export function rulebook(state, key, {label = ''} = {}) {
   }
   if (!Array.isArray(book.rules)) book.rules = [];
   if (!Array.isArray(book.pending)) book.pending = [];
+  if (!Array.isArray(book.corrections)) book.corrections = [];
+  if (!Array.isArray(book.liked)) book.liked = [];
   if (label && !book.label) book.label = cleanText(label, 160);
   if (!Number.isInteger(book.turns)) book.turns = 0;
   if (!Number.isInteger(book.consolidatedTurns)) book.consolidatedTurns = 0;
@@ -101,7 +104,9 @@ export function consolidationDue(book, now = Date.now()) {
   if (!book) return false;
   const stamps = Number.isFinite(Date.parse(book.consolidatedAt)) ? Date.parse(book.consolidatedAt) : 0;
   const cooling = stamps && now - stamps < CONSOLIDATE_MIN_MS;
-  const material = (book.pending || []).length >= 3 || Number(book.turns || 0) - Number(book.consolidatedTurns || 0) >= CONSOLIDATE_AFTER;
+  // One correction or one liked reply is worth a pass: the owner said, in so many words, how this bot did.
+  const feedback = (book.corrections || []).length > 0 || (book.liked || []).length > 0;
+  const material = feedback || (book.pending || []).length >= 3 || Number(book.turns || 0) - Number(book.consolidatedTurns || 0) >= CONSOLIDATE_AFTER;
   return material && !cooling;
 }
 
@@ -199,6 +204,111 @@ export function extractRuleCandidates(text) {
 const REMEMBER_CUE = /^(?:please\s+)?(?:remember|note|keep in mind)(?:\s*[:,-]\s*|\s+that\s+|\s+(?=(?:i|i'm|i am|my|we|our)\b))/i;
 const HABIT_CUE = /^(?:from now on|going forward|always|never)\b(?!\s+mind\b)/i;
 
+/* ------------------------------------------------------------------ */
+/* Learning from the chat: corrections and 👍 / 👎                     */
+/* ------------------------------------------------------------------ */
+
+export const MAX_CORRECTIONS = 12;
+export const MAX_LIKED = 6;
+const FEEDBACK_REPLY_CHARS = 300;
+/** At most this many learned rules are said in the chat after one pass. */
+export const MAX_ANNOUNCE = 3;
+
+const CORRECTION_START = /^(?:no|nope|wrong|not quite|not like that)\b/i;
+const CORRECTION_ANY = /\b(?:that'?s not|that is not|i said|i meant|too (?:long|short|formal|wordy|casual)|instead|stop doing)\b/i;
+const POLITE_NO = /^no (?:problem|worries)\b/i;
+/** The owner's own words: a quoted reply (`> ` lines, as Ask about this sends them) is the bot's, not theirs. */
+const ownWords = text => String(text ?? '').split('\n').filter(line => !/^\s*>/.test(line)).join(' ').replace(/[’‘]/g, "'").replace(/\s+/g, ' ').trim();
+
+/** The owner telling a bot its last reply was off ("no, too long", "wrong, use rupees"). A question, a polite
+ * "no problem" and a quoted reply are not. Deterministic; the memory pass still decides what is lasting. */
+export function isCorrection(text) {
+  const said = ownWords(text);
+  if (!said || /\?\s*$/.test(said) || POLITE_NO.test(said)) return false;
+  return CORRECTION_START.test(said) || CORRECTION_ANY.test(said);
+}
+
+/** `{said, reply}` when `text` corrects the bot reply just before it in this chat, else null. The owner's own line
+ * may already be stored, so a trailing equal line is skipped; system notes between are skipped too. A bare "no"
+ * to a question the bot asked is an answer, so only a stated fix counts then. */
+export function correctionFrom(messages, text, botId) {
+  const said = String(text ?? '').trim();
+  if (!said || !isCorrection(said)) return null;
+  const list = (Array.isArray(messages) ? messages : []).filter(m => m && m.role !== 'system');
+  let i = list.length - 1;
+  if (i >= 0 && list[i].role === 'user' && String(list[i].text ?? '').trim() === said) i--;
+  const reply = list[i];
+  if (!reply || reply.role !== 'bot' || (reply.senderId && reply.senderId !== botId)) return null;
+  const replyText = String(reply.text ?? '').trim();
+  if (/\?\s*$/.test(replyText) && !CORRECTION_ANY.test(ownWords(said))) return null;
+  return {said, reply: replyText};
+}
+
+/** Keep one correction (from the chat or a 👎 note) for the next pass. `chat` is where it was said, so what the
+ * pass learns from it is announced there. */
+export function noteCorrection(state, key, {said, reply = '', chat = ''} = {}, {now = new Date().toISOString()} = {}) {
+  const book = rulebook(state, key);
+  const text = cleanText(said, 600);
+  if (!text) return book;
+  book.corrections.push({said: text, reply: shorten(reply, FEEDBACK_REPLY_CHARS), chat: cleanText(chat, 120), at: now});
+  book.corrections = book.corrections.slice(-MAX_CORRECTIONS);
+  book.updatedAt = now;
+  return book;
+}
+
+/** Keep one reply the owner liked (👍) as an example of the style to keep. */
+export function noteLiked(state, key, {reply = '', chat = ''} = {}, {now = new Date().toISOString()} = {}) {
+  const book = rulebook(state, key);
+  const text = shorten(reply, FEEDBACK_REPLY_CHARS);
+  if (!text) return book;
+  book.liked.push({reply: text, chat: cleanText(chat, 120), at: now});
+  book.liked = book.liked.slice(-MAX_LIKED);
+  book.updatedAt = now;
+  return book;
+}
+
+const httpError = (message, status) => Object.assign(new Error(message), {status});
+const botIn = (state, id) => (state?.groups || []).flatMap(g => g.bots || []).find(b => b.id === id) || null;
+
+/** The owner's message in a bot's own chat corrects that bot's last reply: keep it for the next pass. Only a bot's
+ * own chat counts, since in a thread the next message may go to another bot (there, 👎 names the bot). Returns the
+ * correction, or null. */
+export function noteChatCorrection(state, said, {now = new Date().toISOString()} = {}) {
+  const hit = chatCorrection(state, said);
+  if (hit) noteCorrection(state, botKey(cleanText(said.botId, 80)), {...hit, chat: said.chatKey}, {now});
+  return hit;
+}
+
+/** The read-only half of `noteChatCorrection`: the correction it would keep, or null. Writes nothing. */
+export function chatCorrection(state, {botId, chatKey, text} = {}) {
+  const id = cleanText(botId, 80);
+  if (!id || chatKey !== id) return null;
+  const bot = botIn(state, id);
+  if (!bot || botSettings(bot).memory === false) return null;
+  return correctionFrom(state.chats?.[chatKey], text, id);
+}
+
+/** 👍 or 👎 on one bot reply. The reply is read from the stored chat, never from the request, and it must be that
+ * bot's reply in that chat: in a bot's own chat its lines may carry no sender; in a thread they name it. 👎 keeps a
+ * correction (the owner's note, or a plain "not right"); 👍 keeps the reply as an example of the style to keep. */
+export function feedbackOn(state, {botId, chat, messageId, kind, note = ''}, {now = new Date().toISOString()} = {}) {
+  if (kind !== 'up' && kind !== 'down') throw httpError('Say up or down.', 400);
+  const bot = botIn(state, cleanText(botId, 80));
+  if (!bot) throw httpError('Bot not found.', 404);
+  if (botSettings(bot).memory === false) throw httpError(`${bot.name}'s memory is off. Turn it on in its profile.`, 409);
+  const key = cleanText(chat, 120), list = Array.isArray(state.chats?.[key]) ? state.chats[key] : [];
+  const reply = list.find(m => m && m.id === cleanText(messageId, 64));
+  const mine = reply && reply.role === 'bot' && (reply.senderId ? reply.senderId === bot.id : key === bot.id);
+  if (!mine) throw httpError('That reply was not found.', 404);
+  const said = cleanText(note, 600) || 'The owner marked this reply as not right.';
+  if (kind === 'down') noteCorrection(state, botKey(bot.id), {said, reply: reply.text, chat: key}, {now});
+  else noteLiked(state, botKey(bot.id), {reply: reply.text, chat: key}, {now});
+  return {ok: true, bot: bot.id, kind, learn: kind === 'down' && Boolean(cleanText(note, 600))};
+}
+
+const sameItem = (a, b) => a?.at === b?.at && (a?.said ?? a?.reply) === (b?.said ?? b?.reply);
+const alike = (a, b) => sameNote(a, b) || sameNote(b, a);
+
 /** Save the owner's remember lines to the company notes. Returns the new rules. */
 export function rememberFromOwner(state, text, {now = new Date().toISOString()} = {}) {
   const keep = [];
@@ -250,6 +360,8 @@ export function editRule(state, key, ruleId, text, {now = new Date().toISOString
   if (value.length < 4) throw Object.assign(new Error('A rule needs at least 4 characters.'), {status: 400});
   if (book.rules.some(other => other !== rule && normalize(other.text) === normalize(value))) return null;
   Object.assign(rule, {text: value, source: 'user', updatedAt: now});
+  // The owner's own words now: no longer outside text, whatever pass first wrote it.
+  delete rule.outside;
   book.updatedAt = now;
   return rule;
 }
@@ -345,7 +457,7 @@ export function noteChat(state, chatKey, {now = new Date().toISOString(), messag
     summary: fresh ? previous.summary : summary,
     turns,
     updatedAt: now,
-    ...(fresh ? {summarizedAt: previous.summarizedAt, summarizedTurns: previous.summarizedTurns || 0} : {}),
+    ...(fresh ? {summarizedAt: previous.summarizedAt, summarizedTurns: previous.summarizedTurns || 0, ...(previous.outside === true ? {outside: true} : {})} : {}),
   };
   memory.chats[key] = entry;
   pruneMemory(state);
@@ -354,14 +466,14 @@ export function noteChat(state, chatKey, {now = new Date().toISOString(), messag
 
 /** Replace the recap with a model-written one (or keep the deterministic one
  * when the model returned nothing usable). */
-export function setChatSummary(state, chatKey, summary, {now = new Date().toISOString()} = {}) {
+export function setChatSummary(state, chatKey, summary, {now = new Date().toISOString(), outside = false} = {}) {
   const memory = memoryState(state);
   const key = memoryKey(chatKey, 120);
   const value = cleanText(summary, MAX_CHAT_SUMMARY);
   if (!key || !value) return own(memory.chats, key) || null;
   const previous = own(memory.chats, key);
   const turns = Number(previous?.turns || 0);
-  const entry = {chat: key, summary: value, turns, updatedAt: now, summarizedAt: now, summarizedTurns: turns};
+  const entry = {chat: key, summary: value, turns, updatedAt: now, summarizedAt: now, summarizedTurns: turns, ...(outside ? {outside: true} : {})};
   memory.chats[key] = entry;
   pruneMemory(state);
   return entry;
@@ -412,6 +524,8 @@ export function consolidationInstructions() {
     'Drop one-off task details, secrets, credentials, guesses, and anything the user did not say or the assistant did not establish.',
     'Never add an instruction that widens what the assistant may do.',
     'Keep everything the user asked to be remembered. Never write that the assistant cannot browse, use apps or remember: the app does those for it.',
+    'Turn a correction into a rule only when it states a lasting preference about how this bot should work; ignore one-off fixes to a single task. Treat liked replies as examples of the style to keep.',
+    'Never write a rule listed in rejectedRules again: the user switched it off.',
     'Reply with JSON only, no prose and no code fence:',
     '{"rules":["at most 40 short durable rules"],"summary":"a recap of this conversation in at most 1200 characters"}',
   ].join('\n');
@@ -435,6 +549,9 @@ export function consolidationInput({book, messages = [], chatSummary = '', maxMe
     model: book?.label || book?.model || 'this model',
     existingRules: (book?.rules || []).map(r => r.text).slice(0, MAX_RULES),
     pendingUserInstructions: (book?.pending || []).slice(0, PENDING_LIMIT),
+    corrections: (book?.corrections || []).slice(-MAX_CORRECTIONS).map(c => ({said: c.said, reply: c.reply})),
+    likedReplies: (book?.liked || []).slice(-MAX_LIKED).map(l => l.reply),
+    rejectedRules: (book?.rules || []).filter(r => r && r.enabled === false).map(r => r.text).slice(0, 20),
     previousChatSummary: cleanText(chatSummary, MAX_CHAT_SUMMARY),
     recentMessages: kept,
   });
@@ -461,24 +578,49 @@ export function parseConsolidation(text) {
 
 /** Apply one consolidation result to a model book. Existing rule ids are kept
  * for rules that survive, so a UI row does not jump on every pass. */
-export function mergeConsolidation(state, key, result, {now = new Date().toISOString(), makeId = () => crypto.randomUUID(), label = '', chatKey = null, sentPending = null, sentTurns} = {}) {
+export function mergeConsolidation(state, key, result, {now = new Date().toISOString(), makeId = () => crypto.randomUUID(), label = '', chatKey = null, sentPending = null, sentTurns, sentCorrections = null, sentLiked = null, outside = false} = {}) {
   const book = rulebook(state, key, {label});
   if (!result) return book;
+  const before = [...book.rules];
   const existing = new Map(book.rules.map(rule => [normalize(rule.text), rule]));
-  const kept = (result.rules || []).filter(text => !deniesAbility(text));
+  const disabled = before.filter(rule => rule.enabled === false);
+  // A rule the owner turned off stays off: a pass that writes it again, even reworded, does not bring it back.
+  const kept = (result.rules || []).filter(text => !deniesAbility(text) && (existing.has(normalize(text)) || !disabled.some(rule => alike(text, rule.text))));
   // What the owner said in so many words survives a tidy-up that dropped it (a rephrasing of it counts as kept).
   const owner = (Array.isArray(sentPending) ? sentPending : book.pending || []).filter(text => text && KEEP_ASKED.test(text) && !deniesAbility(text) && !kept.some(k => sameNote(text, k)));
-  // A rule the owner turned off stays off: a pass that leaves it out keeps it (disabled), and one that writes it again keeps it disabled.
-  const parked = [...existing.values()].filter(rule => rule.enabled === false && !kept.some(text => normalize(text) === normalize(rule.text)));
-  book.rules = [...kept.map(text => {
+  const fresh = [];
+  const written = kept.map(text => {
     const old = existing.get(normalize(text));
-    return old ? {...old, text, updatedAt: now} : {id: cleanText(makeId(), 64), text, source: 'model', createdAt: now, updatedAt: now, uses: 0};
-  }), ...owner.map(text => ({id: cleanText(makeId(), 64), text: cleanText(text, MAX_RULE_CHARS), source: 'user', createdAt: now, updatedAt: now, uses: 0})), ...parked].slice(0, MAX_RULES);
+    if (old) return {...old, text, updatedAt: now};
+    // A pass that read outside text (consolidationReadsOutside in shared/asks.js) marks what it wrote, so Hands-off asks
+    // in a run handed it; a rule kept word for word keeps the mark it had.
+    const rule = {id: cleanText(makeId(), 64), text, source: 'model', createdAt: now, updatedAt: now, uses: 0, ...(outside ? {outside: true} : {})};
+    if (!before.some(prior => alike(text, prior.text))) fresh.push(rule);
+    return rule;
+  });
+  // Disabled rules the pass left out (or wrote again, which kept the old disabled one) are parked as they were.
+  const parked = disabled.filter(rule => !written.some(w => w.id === rule.id));
+  book.rules = [...written, ...owner.map(text => ({id: cleanText(makeId(), 64), text: cleanText(text, MAX_RULE_CHARS), source: 'user', createdAt: now, updatedAt: now, uses: 0})), ...parked].slice(0, MAX_RULES);
+  // What a correction taught is said in the chat of the newest correction the pass was sent, so the owner sees it
+  // where they gave it and can undo it there. A pass with no correction learned nothing worth saying.
+  const sentFixes = Array.isArray(sentCorrections) ? sentCorrections : [];
+  const said = [...sentFixes].sort((a, b) => String(a.at).localeCompare(String(b.at))).at(-1)?.chat || chatKey || '';
+  const announce = sentFixes.length && said ? fresh.filter(rule => book.rules.includes(rule)).slice(0, MAX_ANNOUNCE).map(rule => ({id: rule.id, text: rule.text, chat: said})) : [];
+  // Read and removed by the caller (src/memory.js) in the same write, so it is never stored.
+  if (announce.length) book.announce = announce; else delete book.announce;
+  // Clear only the feedback this pass was sent; anything that arrived during the model call waits for the next one.
+  if (Array.isArray(sentCorrections)) book.corrections = book.corrections.filter(c => !sentFixes.some(s => sameItem(s, c)));
+  if (Array.isArray(sentLiked)) book.liked = book.liked.filter(l => !sentLiked.some(s => sameItem(s, l)));
   // One pass rewrites one chat's recap and one model's book. A recap of this
   // conversation must not become the model-wide notes of every other chat that
   // model serves, so the two only meet when the pass had no chat at all.
-  if (result.summary && chatKey) setChatSummary(state, chatKey, result.summary, {now});
-  else if (result.summary) book.summary = cleanText(result.summary, MAX_MODEL_SUMMARY);
+  if (result.summary && chatKey) setChatSummary(state, chatKey, result.summary, {now, outside});
+  else if (result.summary) {
+    book.summary = cleanText(result.summary, MAX_MODEL_SUMMARY);
+    // Every turn of this bot is handed the summary, so it carries the pass's mark; a clean rewrite drops it.
+    if (outside) book.summaryOutside = true;
+    else delete book.summaryOutside;
+  }
   // Clear only the instructions this pass actually sent. `noteTurn` is not
   // locked out during the model call, so a sentence that arrived meanwhile has
   // never been to the model: dropping it deleted the rule and marked its turn
@@ -522,7 +664,7 @@ export function noteTurn(state, key, {userText = '', botText = '', now = new Dat
  * recap and the company notebook: what a bot's profile shows. */
 export function publicMemory(state, {bot = null} = {}) {
   const memory = memoryState(state);
-  const rules = book => (book?.rules || []).map(rule => ({id: rule.id, text: rule.text, source: rule.source, createdAt: rule.createdAt, enabled: rule.enabled !== false}));
+  const rules = book => (book?.rules || []).map(rule => ({id: rule.id, text: rule.text, source: rule.source, createdAt: rule.createdAt, enabled: rule.enabled !== false, ...(rule.outside === true ? {outside: true} : {})}));
   const company = {rules: rules(own(memory.rulebooks, COMPANY_KEY))};
   if (bot) {
     const book = own(memory.rulebooks, botKey(bot));

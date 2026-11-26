@@ -111,6 +111,8 @@ export function workflowRoutes(router, {auth}) {
   // Saved task templates (shared/templates.js): one list per workspace, read in the snapshot.
   router.add('POST', '/api/templates', 'member', async c => { const b = await c.body(); return reply(201, await c.store.update(s => addTemplate(s, {title: b.title, text: b.text}))); });
   router.add('DELETE', '/api/templates/:id', 'member', c => c.store.update(s => removeTemplate(s, c.params.id)));
+  // The app sends its zone for schedules an older build saved without one (shared/tasks.js fillScheduleZones).
+  router.add('POST', '/api/tasks/zone', 'member', async c => { const b = await c.body(); return c.store.update(s => ({filled: tasks.fillScheduleZones(s, b?.tz)})); });
   // Pages bots watch for changes (shared/watches.js, src/watches.js): read in the snapshot without what they last saw.
   router.add('GET', '/api/watches', 'viewer', c => ({watches: (peek(c.store).watches || []).map(publicWatch)}));
   router.add('POST', '/api/watches', 'member', async c => { const b = await c.body(); return reply(201, publicWatch(await c.store.update(s => addWatch(s, {botId: b.botId, url: b.url, every: b.every, words: b.words})))); });

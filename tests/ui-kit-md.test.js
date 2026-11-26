@@ -37,3 +37,10 @@ test('plain drops the markers for one-line previews', () => {
   assert.equal(plain('Done — **Job scout** is on your *team*.\n- `a`'), 'Done — Job scout is on your team. a');
   assert.equal(plain('## Plan\n1. [docs](https://x.y)'), 'Plan docs');
 });
+
+test('quoted lines become one blockquote, formatted inside and escaped', () => {
+  assert.equal(md('> It costs **5**.\n> Per month.\n\nWhy so much?'), '<blockquote><p>It costs <strong>5</strong>.<br>Per month.</p></blockquote><p>Why so much?</p>');
+  assert.equal(md('> a\n>\n> b'), '<blockquote><p>a</p><p>b</p></blockquote>');
+  assert.equal(md('> <b>x</b>'), '<blockquote><p>&lt;b&gt;x&lt;/b&gt;</p></blockquote>');
+  assert.equal(plain('> quoted\nmine'), 'quoted mine');
+});

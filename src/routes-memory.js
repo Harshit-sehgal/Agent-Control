@@ -9,8 +9,9 @@
  * action here and a background pass during runs.
  */
 import {cleanText} from '../shared/core.js';
-import {addRules, editRule, bookKeyOfRule, findRulebook, forgetChat, forgetRulebook, modelKey, botKey, COMPANY_KEY, publicMemory, removeRule, setRuleEnabled} from '../shared/memory.js';
-import {consolidateModel} from './memory.js';
+import {addRules, editRule, bookKeyOfRule, findRulebook, forgetChat, forgetRulebook, modelKey, botKey, COMPANY_KEY, publicMemory, removeRule, setRuleEnabled, feedbackOn} from '../shared/memory.js';
+import {markLearned} from '../shared/chats.js';
+import {consolidateModel, maybeConsolidate} from './memory.js';
 import {resolveConfig} from './ai-providers.js';
 import {fail} from './http.js';
 import {reply} from './router.js';
@@ -47,7 +48,8 @@ export function memoryRoutes(router) {
     const b = await c.body();
     // Turning a rule on or off: `{enabled}` alone. A disabled rule is kept but never sent to a bot turn.
     if (typeof b.enabled === 'boolean' && b.text === undefined) {
-      const rule = await c.store.update(s => setRuleEnabled(s, bookOf(c, b) || bookKeyOfRule(s, c.params.id) || fail('Rule not found.', 404), c.params.id, b.enabled));
+      // A Learned line in a chat says what the rule is now: its Undo, or "Switched off".
+      const rule = await c.store.update(s => { const r = setRuleEnabled(s, bookOf(c, b) || bookKeyOfRule(s, c.params.id) || fail('Rule not found.', 404), c.params.id, b.enabled); markLearned(s, c.params.id, !b.enabled); return r; });
       return {ok: true, rule: {id: rule.id, text: rule.text, source: rule.source, enabled: rule.enabled !== false}};
     }
     const text = cleanText(b.text, 240);
@@ -68,6 +70,19 @@ export function memoryRoutes(router) {
       return removeRule(s, model, c.params.id);
     });
     return result;
+  });
+
+  // 👍 or 👎 on one bot reply, from the reply popover. A 👎 with a note starts a memory pass at once (behind the
+  // usual cooldown), so what it teaches is learned before the bot's next turn; a 👍 waits for that turn.
+  router.add('POST', '/api/memory/feedback', 'member', async c => {
+    const b = await c.body();
+    const result = await c.store.update(s => feedbackOn(s, {botId: b.bot, chat: b.chat, messageId: b.message, kind: b.kind, note: b.note}));
+    if (result.learn) {
+      const config = resolveConfig(c.store, result.bot);
+      const pass = () => maybeConsolidate(c.store, {key: botKey(result.bot), config, chatKey: cleanText(b.chat, 120), label: ''}).catch(error => console.error('Memory update:', error.message));
+      if (config) void (typeof c.store.trackWork === 'function' ? c.store.trackWork(pass) : pass());
+    }
+    return {ok: true};
   });
 
   router.add('POST', '/api/memory/forget', 'member', async c => {
