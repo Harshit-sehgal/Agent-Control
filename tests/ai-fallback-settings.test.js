@@ -29,26 +29,78 @@ test('the owner picks a fallback model; a bot turn carries it, and never carries
   const main = await add(store, 'Main', 'big-model');
   const spare = await add(store, 'Spare', 'small-model');
   await ai.setDefaults(store, {providerId: main.id, model: 'big-model'});
-  assert.equal(ai.resolveConfig(store, 'writer').fallback, undefined, 'no fallback until one is picked');
+  assert.equal(ai.resolveConfig(store, 'writer').fallbacks, undefined, 'no fallbacks until one is picked');
   const listed = await ai.setDefaults(store, {fallback: {providerId: spare.id, model: 'small-model'}});
+  assert.deepEqual(listed.fallbacks, [{providerId: spare.id, model: 'small-model'}]);
   assert.deepEqual(listed.fallback, {providerId: spare.id, model: 'small-model'});
   assert.deepEqual(ai.publicAi(store.read()).fallback, {providerId: spare.id, model: 'small-model'});
+  assert.deepEqual(ai.publicAi(store.read()).fallbacks, [{providerId: spare.id, model: 'small-model'}]);
+  assert.deepEqual(ai.listProviderListings(store).fallbacks, [{providerId: spare.id, model: 'small-model'}]);
   const config = ai.resolveConfig(store, 'writer');
   assert.equal(config.model, 'big-model');
-  assert.equal(config.fallback.model, 'small-model');
-  assert.equal(config.fallback.providerId, spare.id);
-  assert.equal(config.fallback.apiKey, 'key-for-Spare-12345');
-  assert.equal(config.fallback.fallback, undefined, 'a fallback has no fallback of its own');
+  assert.equal(Object.hasOwn(config, 'fallback'), false, 'the single key is gone from a config');
+  assert.equal(config.fallbacks.length, 1);
+  assert.equal(config.fallbacks[0].model, 'small-model');
+  assert.equal(config.fallbacks[0].providerId, spare.id);
+  assert.equal(config.fallbacks[0].apiKey, 'key-for-Spare-12345');
+  assert.equal(config.fallbacks[0].fallbacks, undefined, 'a fallback has no fallbacks of its own');
   // A bot already on the fallback model has nothing to fall back to.
   await ai.setBotModel(store, 'writer', {providerId: spare.id, model: 'small-model'});
-  assert.equal(ai.resolveConfig(store, 'writer').fallback, undefined);
-  // An unknown provider is refused; null clears; deleting the provider clears it too.
+  assert.equal(ai.resolveConfig(store, 'writer').fallbacks, undefined);
+  // An unknown provider is refused; an empty list or null clears; deleting the provider clears it too.
   await assert.rejects(() => ai.setDefaults(store, {fallback: {providerId: 'nope', model: 'x'}}), /Provider not found/);
+  await assert.rejects(() => ai.setDefaults(store, {fallbacks: [{providerId: 'nope', model: 'x'}]}), /Provider not found/);
   await ai.setDefaults(store, {fallback: {providerId: spare.id, model: 'small-model'}});
   await ai.deleteProvider(store, 'w1', spare.id);
-  assert.equal(store.read().ai.fallback, null);
+  assert.deepEqual(store.read().ai.fallbacks, []);
+  assert.equal(Object.hasOwn(store.read().ai, 'fallback'), false);
   await ai.setDefaults(store, {fallback: null});
   assert.equal(ai.listProviders(store.read()).fallback, null);
+  assert.deepEqual(ai.listProviders(store.read()).fallbacks, []);
+}));
+
+test('up to three fallbacks, in order, saved and listed; the old single fallback reads as a list of one', async () => withStore(async store => {
+  const a = await add(store, 'A', 'x'), b = await add(store, 'B', 'y');
+  const listed = await ai.setDefaults(store, {fallbacks: [{providerId: a.id, model: 'x'}, {providerId: b.id, model: 'y'}]});
+  assert.deepEqual(listed.fallbacks, [{providerId: a.id, model: 'x'}, {providerId: b.id, model: 'y'}]);
+  assert.deepEqual(listed.fallback, {providerId: a.id, model: 'x'});
+  assert.equal(Object.hasOwn(store.read().ai, 'fallback'), false);
+  await assert.rejects(() => ai.setDefaults(store, {fallbacks: [1, 2, 3, 4].map(() => ({providerId: a.id, model: 'x'}))}), /^Error: At most 3 fallback models\.$/);
+  // The failed save changed nothing.
+  assert.deepEqual(ai.publicAi(store.read()).fallbacks, [{providerId: a.id, model: 'x'}, {providerId: b.id, model: 'y'}]);
+  // Something that is not a list is refused, and so is an entry that is not a pick.
+  await assert.rejects(() => ai.setDefaults(store, {fallbacks: 'x'}), /list/);
+  await assert.rejects(() => ai.setDefaults(store, {fallbacks: [1]}), /\{providerId, model\}/);
+  // The same pick twice is saved once.
+  const twice = await ai.setDefaults(store, {fallbacks: [{providerId: a.id, model: 'x'}, {providerId: a.id, model: 'x'}, {providerId: b.id}]});
+  assert.deepEqual(twice.fallbacks, [{providerId: a.id, model: 'x'}, {providerId: b.id, model: null}]);
+  // An install from before: only the single key, read as a list of one until the owner saves again.
+  await store.update(s => { delete s.ai.fallbacks; s.ai.fallback = {providerId: b.id, model: 'y'}; });
+  assert.deepEqual(ai.publicAi(store.read()).fallbacks, [{providerId: b.id, model: 'y'}]);
+  assert.deepEqual(ai.resolveConfig(store, 'writer').fallbacks.map(f => f.model), ['y']);
+  await ai.setDefaults(store, {effort: 'low'});
+  assert.deepEqual(store.read().ai.fallback, {providerId: b.id, model: 'y'}, 'a save that does not touch fallbacks leaves the old key');
+  await ai.setDefaults(store, {fallback: null});
+  assert.deepEqual(store.read().ai.fallbacks, []);
+  assert.equal(Object.hasOwn(store.read().ai, 'fallback'), false);
+}));
+
+test('a bot\'s config carries its fallbacks in order, never itself, never a repeat, and none carries its own', async () => withStore(async store => {
+  const a = await add(store, 'A', 'x'), b = await add(store, 'B', 'y'), c = await add(store, 'C', 'z');
+  await ai.setDefaults(store, {providerId: a.id, model: 'x'});
+  const pick = p => ({providerId: p.id, model: {A: 'x', B: 'y', C: 'z'}[p.label]});
+  await store.update(s => { s.ai.fallbacks = [a, b, b, c].map(pick); });
+  const config = ai.resolveConfig(store, 'writer');
+  assert.deepEqual(config.fallbacks.map(f => f.model), ['y', 'z']);
+  assert.ok(config.fallbacks.every(f => f.fallbacks === undefined && !Object.hasOwn(f, 'fallback')));
+  // Three picks is the most a list reads, even when more were written straight into state.
+  await store.update(s => { s.ai.fallbacks = [b, c, b, a].map(pick); });
+  assert.deepEqual(ai.publicAi(store.read()).fallbacks.map(f => f.model), ['y', 'z', 'x']);
+  // A provider that is deleted drops out of the list and the turn.
+  await store.update(s => { s.ai.fallbacks = [b, c].map(pick); });
+  await ai.deleteProvider(store, 'w1', b.id);
+  assert.deepEqual(ai.resolveConfig(store, 'writer').fallbacks.map(f => f.model), ['z']);
+  assert.deepEqual(store.read().ai.fallbacks, [{providerId: c.id, model: 'z'}]);
 }));
 
 test('prices are saved on a provider, shown to the admin listing only, and never change the endpoint', async () => withStore(async store => {

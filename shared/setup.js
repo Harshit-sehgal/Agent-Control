@@ -669,7 +669,13 @@ export function workspaceBrief(state, {agents = [], connectors = [], speaker = n
     templates: (state?.templates || []).slice(0, 20).map(t => `${t.title}: ${short80(t.text)}`),
     preset: ({careful: 'Careful', balanced: 'Balanced', handsOff: 'Hands-off'})[presetOf(state)] || 'Custom (the owner set rules by hand)',
     briefing: (() => { const on = briefingSchedule(state); return on ? `on, ${on.when}` : 'off'; })(),
-    fallbackModel: ai.fallback?.providerId ? `${label(ai.fallback.providerId) || 'a removed model'}${ai.fallback.model ? ` · ${ai.fallback.model}` : ''} answers when a bot's model is down, busy or out of credit` : 'none',
+    fallbackModel: (() => {
+      // `ai.fallbacks` in order, else an old single `ai.fallback` as a list of one (the rule src/ai-providers.js `fallbackPicks` keeps).
+      const picks = (Array.isArray(ai.fallbacks) ? ai.fallbacks : ai.fallback ? [ai.fallback] : []).filter(f => f?.providerId).slice(0, 3);
+      if (!picks.length) return 'none';
+      const names = picks.map(f => `${label(f.providerId) || 'a removed model'}${f.model ? ` · ${f.model}` : ''}`).join(', then ');
+      return `${names} ${picks.length > 1 ? 'answer in turn' : 'answers'} when a bot's model is down, busy or out of credit`;
+    })(),
     usageThisMonth: (() => {
       const m = monthByBot(state, new Map(companyBots(state).map(b => [b.id, b.name])));
       const day = Object.values(state?.usage?.days?.[new Date().toISOString().slice(0, 10)] || {});

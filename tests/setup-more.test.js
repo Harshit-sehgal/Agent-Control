@@ -62,7 +62,13 @@ test('the brief tells a bot its templates, preset, briefing, fallback and this m
   assert.deepEqual(brief.templates, ['HN digest: Summarise the top 5 Hacker News stories']);
   assert.equal(brief.preset, 'Balanced');
   assert.match(brief.briefing, /off/);
-  assert.match(brief.fallbackModel, /My Claude · haiku/);
+  assert.match(brief.fallbackModel, /My Claude · haiku answers when a bot's model is down/);
+  // Up to three, in order; a removed provider is still named; an empty list is "none".
+  const many = state();
+  many.ai = {...many.ai, fallback: undefined, fallbacks: [{providerId: 'p1', model: 'haiku'}, {providerId: 'gone', model: null}, {providerId: 'p1', model: 'sonnet'}]};
+  assert.match(workspaceBrief(many).fallbackModel, /^My Claude · haiku, then a removed model, then My Claude · sonnet answer in turn when a bot's model is down/);
+  many.ai.fallbacks = [];
+  assert.equal(workspaceBrief(many).fallbackModel, 'none');
   assert.match(brief.usageThisMonth.total, /2\.1k tokens/);
   assert.deepEqual(brief.usageThisMonth.byBot.map(r => r.split(':')[0]), ['Atlas', 'Scout']);
 });
