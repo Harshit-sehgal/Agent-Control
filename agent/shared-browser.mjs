@@ -21,8 +21,9 @@
  * - Each (account, bot) has its own tab. A tab the browser no longer has
  *   is dropped and replaced; after a restart there are no tab ids at all, so no
  *   stale one can be used.
- * - Each tab keeps its own typed memory: what the owner types in secret is remembered for the life of that
- *   bot's tab (`typed`, in memory only, never written anywhere) and scrubbed from every result that leaves: a capture, an action's answer and the status.
+ * - Each tab keeps a typed memory: what the owner types in secret is remembered for the life of that
+ *   bot's tab, or, for a tab in an account, of the account (one set shared by every tab of it, so what was typed
+ *   on one bot's tab is hidden in the others'; `typed`, in memory only, never written anywhere) and scrubbed from every result that leaves: a capture, an action's answer and the status.
  *   The page's secret fields are emptied when the owner hands back.
  * - `sweep` is the housekeeping, called about once a minute: it closes a bot's tab idle for 10 minutes (after saving its
  *   account's cookies), saves each account context every 10 minutes, disposes a context nothing uses, reads each signed-in
@@ -36,7 +37,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {startBrowserSession, ACTION_OPS, MAX_ACTIONS} from './browser.mjs';
 import {FOCUSED_IS_SECRET_JS, TAG_FOCUSED_SECRET_JS, CLEAR_SECRETS_ON_HANDBACK_JS, rememberTyped, scrubTyped} from './page-secrets.mjs';
-import {hostAllowed, hostOf, signinPage} from '../shared/bot-browser.js';
+import {hostAllowed, hostOf} from '../shared/bot-browser.js';
+import {accountWall, onSite} from '../shared/browser-accounts.js';
 import {cleanInput, KEYS, VIEWPORT} from './live-input.mjs';
 import {ACCOUNT_ID} from '../shared/bot-settings.js';
 
@@ -77,6 +79,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
   let session = null, starting = null;
   const tabs = new Map();      // tabKey -> {botId, account, tab, url, title, typed, usedAt}: `typed` is what the owner typed in secret, in memory only
   const opening = new Map();   // tabKey -> {live, promise}: the tab being opened, so two askers for one tab open one
+  const typedBy = new Map();   // account -> the Set of what the owner typed in secret on any tab of it (a tab with no account has its own)
   const contexts = new Map();  // account -> {id, restored}: the browser contexts of this session, gone with it
   const contextStarts = new Map(); // account -> {live, promise}: the context being made
   // tabKey -> {queue: ticket[], holding, parked, epoch}. Made on first use, dropped when nothing is queued or running.
@@ -115,6 +118,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     session = null;
     watched = null;
     tabs.clear();
+    typedBy.clear();
     contexts.clear();
     restoredPending.clear();
     savedAt.clear();
@@ -232,8 +236,15 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     }
     // A browser replaced while this opened must not have the tab in its map.
     if (session !== live) { await live.closeTab(tab); throw new Error('The browser restarted. Try again.'); }
-    tabs.set(key, {botId, account, tab, url: null, title: null, typed: new Set(), usedAt: now()});
+    tabs.set(key, {botId, account, tab, url: null, title: null, typed: typedFor(account), usedAt: now()});
     return tab;
+  }
+
+  /** What was typed in secret: one set for all of an account's tabs, a set of its own for a tab with no account. */
+  function typedFor(account) {
+    if (!account) return new Set();
+    if (!typedBy.has(account)) typedBy.set(account, new Set());
+    return typedBy.get(account);
   }
 
   /** Wait this tab's turn on its own lane (and for the owner, if they hold this tab). Returns the lane. */
@@ -285,7 +296,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
       try {
         const result = scrubTyped(await live.capture(url, {allow: allowed(), steps, approved, tab, timeoutMs, settleMs, onPage: remember, gate}), typed);
         // A page the owner left the tab on is no finding about the account.
-        if (account && !result?.tookOver) noteResult(account, result);
+        if (account && !result?.tookOver) noteResult(account, url, result);
         return result;
       } catch (error) {
         // An error names what the page did (a blocked address it was sent to may carry the echo), and leaves as text.
@@ -301,15 +312,13 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     }
   }
 
-  const onSite = (host, site) => Boolean(site) && Boolean(host) && (host === site || host.endsWith(`.${site}`));
-  /** What a page on the account's own site says about the account: a sign-in page signs it out, any other page of the
-   * site signs it in. A page on another site says nothing. */
-  function noteResult(account, result) {
+  /** What a page says about the account: its sign-in wall (a sign-in page of its site, or its site sending the task to an
+   * identity provider) signs it out, any other page of the site signs it in. A page on another site says nothing. */
+  function noteResult(account, url, result) {
     const site = listed?.get(account)?.site;
     if (!site) return;
-    const out = signinPage(result);
     let found;
-    if (out && onSite(out, site)) found = 'signed-out';
+    if (accountWall(site, url, result)) found = 'signed-out';
     else if (onSite(hostOf(result?.finalUrl || result?.url), site)) found = 'signed-in';
     else return;
     const first = restoredPending.delete(account), before = states.get(account);
@@ -487,6 +496,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     session = null;
     watched = null;
     tabs.clear();
+    typedBy.clear();
     contexts.clear();
     restoredPending.clear();
     savedAt.clear();
@@ -508,7 +518,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     listed = next;
     // The owner's hold on a wiped account's tab goes with it, even before that tab exists.
     if (driving?.account && !next.has(driving.account)) { driving = null; clearTimeout(idleTimer); notify(); }
-    const held = new Set([...contexts.keys(), ...[...tabs.values()].map(entry => entry.account), ...jarIds(), ...states.keys()]);
+    const held = new Set([...contexts.keys(), ...[...tabs.values()].map(entry => entry.account), ...jarIds(), ...states.keys(), ...typedBy.keys()]);
     // A newer list that came while this one let accounts go does the rest itself.
     for (const id of held) if (id && !next.has(id)) { if (listed !== next) return; await letGo(id); }
   }
@@ -523,7 +533,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
       if (watched?.key === key) await unwatch();
       if (live) await bounded(live.closeTab(held.tab));
     }
-    for (const map of [states, checkedAt, savedAt]) map.delete(account);
+    for (const map of [states, checkedAt, savedAt, typedBy]) map.delete(account);
     restoredPending.delete(account);
     if (jars) try { jars.wipe(account); } catch { console.error('agent: could not remove a browser account\'s saved sign-in.'); }
   }

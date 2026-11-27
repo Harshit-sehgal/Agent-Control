@@ -21,6 +21,9 @@ const SID = {name: 'sid', value: 'abc', domain: SITE, path: '/'};
 const MIN = 60000;
 const HOME_PAGE = {title: 'CRM', text: 'Inbox', elements: [{index: 1, tag: 'button', text: 'Go'}]};
 const LOGIN_PAGE = {title: 'Sign in', text: 'Please sign in', elements: [{index: 1, tag: 'input', type: 'password', text: ''}]};
+const IDP_URL = 'https://accounts.google.com/v3/signin/identifier';
+// The page a task is sent to after the site bounced it to an identity provider: no password field, no sign-in title.
+const IDP_PAGE = {shown: IDP_URL, title: 'Choose an account', text: 'Choose an account to continue to CRM', elements: [{index: 1, tag: 'button', text: 'Next'}]};
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const within = (promise, ms, why) => Promise.race([promise, new Promise((_, reject) => { const id = setTimeout(() => reject(new Error(why)), ms); promise.finally(() => clearTimeout(id)).catch(() => {}); })]);
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return {promise, resolve}; };
@@ -39,9 +42,9 @@ function memJars(initial = {}) {
 }
 
 function rig(t, {jars = memJars(), extra = {}, allow = [SITE]} = {}) {
-  const processes = [], site = {out: false};
+  const processes = [], site = {out: false, idp: false};
   let clock = 1_800_000_000_000;
-  const pages = {[HOME]: () => (site.out ? LOGIN_PAGE : HOME_PAGE)};
+  const pages = {[HOME]: () => (site.out ? LOGIN_PAGE : site.idp ? IDP_PAGE : HOME_PAGE)};
   const sb = createSharedBrowser({
     allow, settleMs: 0, jars, now: () => clock, ...extra,
     start: async () => { const fake = fakeCdp({pages}); processes.push(fake); return startBrowserSession({connection: fake.connection}); },
@@ -431,4 +434,34 @@ test('a planted cookie value leaves the device nowhere', async t => {
   assert.ok(lines.some(line => /could not save/.test(line)), 'the failure was said');
   assert.doesNotMatch(fs.readFileSync(path.join(dir, `${A}.jar`), 'utf8'), /MARKER-COOKIE-7f3/i);
   assert.equal(tabKey(A, KEEPER), `${A}\u0000\u0000keeper`);
+});
+
+test('a keeper sent to an IdP with no way back marks the account signed out', async t => {
+  const r = rig(t, {jars: memJars({[A]: [SID]})});
+  const {sb, site} = r;
+  await sb.setAccounts([{id: A, site: SITE}]);
+  await sb.run('scout', {url: HOME, account: A});
+  assert.deepEqual(sb.accountStates(), [{id: A, state: 'signed-in', storage: 'cookies'}]);
+  site.idp = true;
+  r.advance(KEEPER_MS);
+  await sb.sweep();
+  assert.equal(navigations(r.fake()), 2, 'the keeper read the front page once, and the site sent it to the IdP');
+  assert.deepEqual(sb.accountStates(), [{id: A, state: 'signed-out', storage: 'cookies'}]);
+  // The same wall met by a bot's own task reads the same way, and a way back (the site's page) signs it in again.
+  site.idp = false;
+  await sb.run('scout', {url: HOME, account: A});
+  assert.equal(sb.accountStates()[0].state, 'signed-in');
+  site.idp = true;
+  await sb.run('scout', {url: HOME, account: A});
+  assert.equal(sb.accountStates()[0].state, 'signed-out', 'a task sent to the IdP marks it too');
+});
+
+test('a bot with no account that lands on an IdP changes no account\'s state', async t => {
+  const r = rig(t, {jars: memJars({[A]: [SID]})});
+  const {sb, site} = r;
+  await sb.setAccounts([{id: A, site: SITE}]);
+  await sb.run('scout', {url: HOME, account: A});
+  site.idp = true;
+  await sb.run('plain', {url: HOME});
+  assert.equal(sb.accountStates()[0].state, 'signed-in');
 });
