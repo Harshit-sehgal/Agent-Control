@@ -41,6 +41,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import crypto from 'node:crypto';
 import {createBrowserHost} from './browser-host.mjs';
+import {takeLock, refreshLock, releaseLock, lockFileFor, REFRESH_MS} from './agent-lock.mjs';
 import {browserAccountsDir, rekeyJars, rePairProof, wipeAllJars} from './account-jars.mjs';
 import {createLiveChannel} from './live-channel.mjs';
 import {runModelTask} from './cli-model.mjs';
@@ -94,37 +95,21 @@ function saveConfig(config) {
   fs.renameSync(tmp, target);
 }
 
-/** The lock, `<config>.lock`, holding the pid of the one process that may change this computer's pairing or keep its
- * browser jars: a running agent, or a `pair`. Taken whole and atomically (a complete file is linked into place), so a
- * second process never reads a half-written one. One whose process is gone is stale and is replaced. Nothing that is
- * not the holder may change the secret the jars are under: a pair re-keys them, a run saves them. */
-const LOCK = `${CONFIG}.lock`;
-const processAlive = pid => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
-function lockPid() {
-  try { const pid = Number(fs.readFileSync(LOCK, 'utf8')); return Number.isInteger(pid) && pid > 0 ? pid : null; } catch { return null; }
-}
-/** True when this process now holds the lock; false when another live process does. */
-function takeLock() {
-  const mine = `${LOCK}.${process.pid}`;
-  fs.writeFileSync(mine, String(process.pid), {mode: 0o600});
-  try {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try { fs.linkSync(mine, LOCK); return true; } catch (e) { if (e.code !== 'EEXIST') throw e; }
-      const holder = lockPid();
-      if (holder && holder !== process.pid && processAlive(holder)) return false;
-      if (lockPid() === holder) { try { fs.unlinkSync(LOCK); } catch {} }   // stale: its process is gone (or it holds no pid)
-    }
-    return false;
-  } finally { try { fs.unlinkSync(mine); } catch {} }
-}
-function releaseLock() {
-  try { if (fs.readFileSync(LOCK, 'utf8') === String(process.pid)) fs.unlinkSync(LOCK); } catch {}
-}
-/** Takes the lock or stops with a sentence naming the file (a pid may have been reused by an unrelated process). It is
- * given back on every way out, `fail` included. */
-function lockOrFail() {
-  if (!takeLock()) fail(`another agent process holds ${LOCK}: this computer's agent is running, or a pair is in progress. If neither is, delete that file and try again.`);
-  process.on('exit', releaseLock);
+/** The lock this process holds (agent/agent-lock.mjs): one running agent or one pair at a time may change this computer's
+ * pairing or keep its browser jars. Given back on every way out, `fail` included. */
+let heldLock = null;
+function lockOrFail({required}) {
+  const file = lockFileFor(CONFIG);
+  const got = takeLock(file);
+  if (got.status === 'held') fail(`another agent process holds ${file}: this computer's agent is running, or a pair is in progress. If neither is, delete that file and try again.`);
+  if (got.status === 'unavailable') {
+    // A pair writes the config in that folder anyway; a run did without a lock before there was one, so it still starts.
+    if (required) fail(`could not create ${file} (${got.code}): the folder that holds the agent config must be writable to pair.`);
+    console.error(`agent: could not create ${file} (${got.code}); running without a lock, so do not pair while this runs.`);
+    return;
+  }
+  heldLock = got.lock;
+  process.on('exit', () => releaseLock(heldLock));
 }
 function fail(message) { console.error(`agent: ${message}`); process.exit(1); }
 
@@ -172,7 +157,7 @@ async function pair(argv) {
   const server = argValue(argv, '--server');
   const code = argValue(argv, '--code');
   if (!server || !code) fail('pair requires --server and --code.');
-  lockOrFail();
+  lockOrFail({required: true});
   // `--permissions ""` asks for nothing; only an absent flag asks for the full
   // scope. Reading both as "absent" meant a typo granted browser.action.
   const requested = argv.includes('--permissions') ? (argValue(argv, '--permissions') || '') : null;
@@ -218,7 +203,13 @@ async function pair(argv) {
 function readableConfig() {
   let text;
   try { text = fs.readFileSync(CONFIG, 'utf8'); }
-  catch (e) { if (e.code === 'ENOENT') return null; fail(`could not read ${CONFIG} (${e.code || 'error'}), so nothing was changed.`); }
+  catch (e) {
+    if (e.code === 'ENOENT') {
+      // A link to a file that is not there (a volume not mounted yet) is a config that cannot be read, not no config.
+      try { fs.lstatSync(CONFIG); } catch { return null; }
+      fail(`${CONFIG} is a link to a file that is not there, so nothing was changed. Mount it, or delete the link (which discards the saved browser sign-ins), then pair again.`);
+    }
+    fail(`could not read ${CONFIG} (${e.code || 'error'}), so nothing was changed.`); }
   let c = null;
   try { c = JSON.parse(text); } catch {}
   if (!(c && typeof c.server === 'string' && typeof c.agentId === 'string' && typeof c.secret === 'string' && c.secret)) {
@@ -305,7 +296,9 @@ async function readPlain(target) {
 let stopping = false;
 async function run() {
   // Before the config is read: a pair in flight is about to replace it, and a run that read the old one would save it back.
-  lockOrFail();
+  lockOrFail({required: false});
+  const lockTimer = setInterval(() => refreshLock(heldLock), REFRESH_MS);
+  lockTimer.unref();
   const config = loadConfig();
   if (!Array.isArray(config.permissions)) config.permissions = [];
   // A re-pair that stopped before it re-encrypted the jars is finished before anything opens one.
@@ -486,7 +479,7 @@ async function run() {
     while (inflight.size) await Promise.allSettled([...inflight]);
     // The sweep first (a pass left running could start the browser again), then the live view, then the browser.
     await host.stopSweeps();
-    await live?.stop(); await host.close(); releaseLock(); console.log('agent: stopped.');
+    await live?.stop(); await host.close(); clearInterval(lockTimer); releaseLock(heldLock); console.log('agent: stopped.');
   }
 }
 

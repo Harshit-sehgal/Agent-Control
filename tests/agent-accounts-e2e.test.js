@@ -260,7 +260,7 @@ test('a pair is refused while the agent runs here; a lock left by a dead process
   await worker.stop();
   assert.equal(fs.existsSync(`${config}.lock`), false, 'the lock goes when the agent stops');
   const dead = spawnSync(process.execPath, ['-e', '']).pid;
-  fs.writeFileSync(`${config}.lock`, String(dead));
+  fs.writeFileSync(`${config}.lock`, JSON.stringify({pid: dead, token: 'a'.repeat(32), at: Date.now()}));
   await agent.pair(plane.url, 'ABCD-1234');
   assert.ok(plane.hits.includes('/api/agent/pair'), 'a stale lock does not block a pair');
   assert.ok(before.length > 0);
@@ -354,4 +354,52 @@ test('a config that is a symlink stays one, and its target is the file that is u
   assert.equal(fs.realpathSync(config), fs.realpathSync(target));
   assert.deepEqual(fs.readdirSync(dir).filter(n => n.endsWith('.tmp')), [], 'no temp file beside the link');
   assert.equal(fs.statSync(target).mode & 0o777, 0o600);
+});
+
+/* Fix round 3. */
+
+test('a run starts in a folder it cannot write a lock to, saying so once; a pair there is refused plainly', {timeout: 60000}, async t => {
+  if (process.getuid?.() === 0) return t.skip('root writes anywhere');
+  const dir = await scratch(t);
+  const plane = await stubPlane(t, () => ({ok: true, tasks: []}));
+  const config = stubConfig(dir, plane.url);
+  fs.chmodSync(dir, 0o500);
+  const agent = agentIn(dir, {});
+  const worker = agent.run();
+  t.after(() => worker.kill());
+  try {
+    await until(() => plane.beats.length > 0, 'a heartbeat');
+    await worker.stop();
+    assert.equal((agent.log().match(/without a lock/g) || []).length, 1);
+    const refused = await agentIn(dir, {}).pair(plane.url, 'ABCD-1234');
+    assert.notEqual(refused.status, 0);
+    assert.ok(!plane.hits.includes('/api/agent/pair'));
+  } finally { fs.chmodSync(dir, 0o700); }
+  assert.ok(fs.existsSync(config));
+});
+
+test('a config that is a dangling symlink makes pair stop before the server is asked, with jars untouched', {timeout: 60000}, async t => {
+  const dir = await scratch(t);
+  const jarDir = path.join(dir, 'browser-accounts');
+  const plane = await stubPlane(t, () => ({ok: true, tasks: []}));
+  fs.symlinkSync(path.join(dir, 'volume-not-mounted.json'), path.join(dir, 'agent.config.json'));
+  createJarStore({dir: jarDir, secret: 'some-secret'}).save(A, [cookie]);
+  const out = await agentIn(dir, {}).pair(plane.url, 'ABCD-1234');
+  assert.notEqual(out.status, 0);
+  assert.deepEqual(plane.hits, []);
+  assert.equal(createJarStore({dir: jarDir, secret: 'some-secret'}).load(A)?.[0].value, MARKER);
+  assert.ok(fs.lstatSync(path.join(dir, 'agent.config.json')).isSymbolicLink(), 'the link is as it was');
+});
+
+test('the lock a running agent holds is one whole file of its own, refreshed while it runs', {timeout: 60000}, async t => {
+  const dir = await scratch(t);
+  const plane = await stubPlane(t, () => ({ok: true, tasks: []}));
+  const config = stubConfig(dir, plane.url);
+  const worker = agentIn(dir, {}).run();
+  t.after(() => worker.kill());
+  await until(() => readJson(config)?.lastSeenAt, 'a heartbeat');
+  const body = readJson(`${config}.lock`);
+  assert.ok(Number.isInteger(body.pid) && body.pid > 0 && typeof body.token === 'string');
+  assert.deepEqual(fs.readdirSync(dir).filter(n => n.includes('.lock')), ['agent.config.json.lock']);
+  await worker.stop();
 });
