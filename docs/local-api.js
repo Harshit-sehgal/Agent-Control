@@ -4,28 +4,28 @@
  * not reimplemented here: they come from the same `workflow.js` + `core.js`
  * modules the Node server uses, so the demo and the real dashboard cannot drift.
  */
-import {briefingMessage} from './briefing.js?v=4307004d1d';
-import {addTemplate, removeTemplate} from './templates.js?v=4307004d1d';
-import {initialState, cleanText} from './core.js?v=4307004d1d';
-import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=4307004d1d';
-import {RETENTION_DEFAULTS} from './retention.js?v=4307004d1d';
-import {enqueueTask, retryTask, cancelTask, fillScheduleZones} from './tasks.js?v=4307004d1d';
-import {addChatMessages, clearChat, markLearned} from './chats.js?v=4307004d1d';
-import {publicMemory, rememberFromOwner, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY, setRuleEnabled, feedbackOn} from './memory.js?v=4307004d1d';
-import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=4307004d1d';
-import {createThread, titleFrom} from './threads.js?v=4307004d1d';
-import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=4307004d1d';
-import {simulateGroup} from './group-simulator.js?v=4307004d1d';
-import {BUSY_STATUSES} from './run-state.js?v=4307004d1d';
-import {botSettings} from './bot-settings.js?v=4307004d1d';
-import {denyBrowserRequest} from './bot-browser.js?v=4307004d1d';
-import {answerAsk, expireAsks, orphanAsks, setGrant, setAskBasics, restorePermissions} from './asks.js?v=4307004d1d';
-import {applyPreset} from './presets.js?v=4307004d1d';
-import {setLimits} from './limits.js?v=4307004d1d';
-import {activityPage} from './activity-log.js?v=4307004d1d';
-import {withLocalLock} from './locks.js?v=4307004d1d';
-import {addWatch, setWatchOn, removeWatch, publicWatch} from './watches.js?v=4307004d1d';
-import {base64Bytes, sniffType, cleanFileName, DEMO_MAX_FILE_BYTES, DEMO_MAX_STORED, MAX_FILE_BYTES} from './attachments.js?v=4307004d1d';
+import {briefingMessage} from './briefing.js?v=942dc8a723';
+import {addTemplate, removeTemplate} from './templates.js?v=942dc8a723';
+import {initialState, cleanText} from './core.js?v=942dc8a723';
+import {migrate, addGroup, addBot, updateBot, updateGroup, removeBot, removeGroup, updateRetention} from './workflow.js?v=942dc8a723';
+import {RETENTION_DEFAULTS} from './retention.js?v=942dc8a723';
+import {enqueueTask, retryTask, cancelTask, fillScheduleZones} from './tasks.js?v=942dc8a723';
+import {addChatMessages, clearChat, markLearned} from './chats.js?v=942dc8a723';
+import {publicMemory, rememberFromOwner, addRules, editRule, removeRule, bookKeyOfRule, forgetChat, forgetRulebook, botKey, COMPANY_KEY, setRuleEnabled, feedbackOn} from './memory.js?v=942dc8a723';
+import {summonableGuests, chatKeyFor, chatIsBusy} from './coordination.js?v=942dc8a723';
+import {createThread, titleFrom} from './threads.js?v=942dc8a723';
+import {pauseAll, resumeGuard, noteBotWork, paused as botsPaused} from './runaway.js?v=942dc8a723';
+import {simulateGroup} from './group-simulator.js?v=942dc8a723';
+import {BUSY_STATUSES} from './run-state.js?v=942dc8a723';
+import {botSettings} from './bot-settings.js?v=942dc8a723';
+import {denyBrowserRequest} from './bot-browser.js?v=942dc8a723';
+import {answerAsk, expireAsks, orphanAsks, setGrant, setAskBasics, restorePermissions} from './asks.js?v=942dc8a723';
+import {applyPreset} from './presets.js?v=942dc8a723';
+import {setLimits} from './limits.js?v=942dc8a723';
+import {activityPage} from './activity-log.js?v=942dc8a723';
+import {withLocalLock} from './locks.js?v=942dc8a723';
+import {addWatch, setWatchOn, removeWatch, publicWatch} from './watches.js?v=942dc8a723';
+import {base64Bytes, sniffType, cleanFileName, DEMO_MAX_FILE_BYTES, DEMO_MAX_STORED, MAX_FILE_BYTES} from './attachments.js?v=942dc8a723';
 
 const KEY = 'agent-control-ghpages-v1';
 const now = () => new Date().toISOString();
@@ -275,6 +275,9 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
   if (live === '/api/connectors' && method === 'GET') return {connectors: [], google: null, demo: true};
   if (live === '/api/ai' && method === 'GET') return {providers: [], defaultProviderId: null, defaultModel: null, bots: {}, demo: true};
   if (live === '/api/agents' && method === 'GET') return {agents: [], actions: [], demo: true};
+  // Browser accounts live on a paired computer, and the demo has none.
+  if (live === '/api/browser-accounts' && method === 'GET') return {accounts: [], demo: true};
+  if (/^\/api\/browser-accounts(\/[a-z0-9-]+)?$/.test(live) && ['POST', 'PATCH', 'DELETE'].includes(method)) throw Object.assign(new Error('The demo has no computer to keep browser accounts on. Run the full app with the local agent to use them.'), {status: 409});
 
   // A thread: a new chat run by the primary bot, started in one call like the server's.
   if (path === '/api/threads' && method === 'POST') {

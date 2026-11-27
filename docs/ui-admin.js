@@ -5,16 +5,17 @@
  *
  * The look is Settings and Connectors: a titled card (`.st-g`, `.cd`), rows with a switch or a small
  * button on the right, a segmented pill for a choice of few, and one primary action per card. */
-import {esc, icon, btn, field, note, empty, tag, fullDate, textInput, switchBtn, modelSelect, effortPicker, runFullApp, demoList, MODEL_SEARCH_FROM} from './ui-kit.js?v=4307004d1d';
-import {store, api, sync, isAdmin, isStaticDemo} from './ui-store.js?v=4307004d1d';
-import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=4307004d1d';
-import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js?v=4307004d1d';
-import {pushStatus, enablePush, disablePush} from './ui-push.js?v=4307004d1d';
-import {connectorsPanel, loadConnectors, connectActions, connectForms} from './ui-connect.js?v=4307004d1d';
-import {cliDraft, modelChoices, chosenModel, effortChoices, OTHER_MODEL, modelRowMatches, modelGroupStays, agentCliRows, agentPermissionRows, agentWorkLine, subscriptionLine, SIGN_IN_HINT} from './ui-connect-model.js?v=4307004d1d';
-import {LOCAL_CLI_ENGINES, LOCAL_CLI_KIND, fallbackPicks} from './ai-presets.js?v=4307004d1d';
-import {updateNeeded} from './device-features.js?v=4307004d1d';
-import {parsePrices, pricesText} from './usage.js?v=4307004d1d';
+import {esc, icon, btn, field, note, empty, tag, fullDate, textInput, switchBtn, modelSelect, effortPicker, runFullApp, demoList, MODEL_SEARCH_FROM} from './ui-kit.js?v=942dc8a723';
+import {store, api, sync, isAdmin, isStaticDemo} from './ui-store.js?v=942dc8a723';
+import {toast, openSheet, closeSheet, confirmSheet, askSheet} from './ui-dialogs.js?v=942dc8a723';
+import {PROTOCOLS, PROVIDER_PRESETS, presetById, protocolById, normaliseProtocol, normaliseBaseUrl, isChatModel, DEFAULT_PROTOCOL} from './ai-presets.js?v=942dc8a723';
+import {pushStatus, enablePush, disablePush} from './ui-push.js?v=942dc8a723';
+import {connectorsPanel, loadConnectors, connectActions, connectForms} from './ui-connect.js?v=942dc8a723';
+import {cliDraft, modelChoices, chosenModel, effortChoices, OTHER_MODEL, modelRowMatches, modelGroupStays, agentCliRows, agentPermissionRows, agentWorkLine, subscriptionLine, SIGN_IN_HINT} from './ui-connect-model.js?v=942dc8a723';
+import {LOCAL_CLI_ENGINES, LOCAL_CLI_KIND, fallbackPicks} from './ai-presets.js?v=942dc8a723';
+import {updateNeeded} from './device-features.js?v=942dc8a723';
+import {accountRows} from './ui-profile-model.js?v=942dc8a723';
+import {parsePrices, pricesText} from './usage.js?v=942dc8a723';
 
 /** The pages Settings can load into its body. Only the keys are read (is this a page?). */
 export const ADMIN_PAGES = {notifications: true, workspaces: true, team: true, agents: true, data: true, connectors: true, ai: true};
@@ -186,12 +187,32 @@ function pairForm(actions) {
   return `<form id="pairing-form">${group('Pair a computer', `<div class="ad-pad">${field('Name', textInput('label', {placeholder: 'Laptop', maxlength: 120}))}</div><div class="ad-lbl">It may</div>${perms}<div class="ad-foot">${btn('Create pairing code', null, {kind: 'primary', type: 'submit'})}</div>`)}</form>`;
 }
 
-function agentsPanel(res, pairing) {
+/** The computers an account can live on: paired and not revoked. */
+const pairedChoices = (agents, current = '') => (agents || []).filter(a => a.status !== 'revoked')
+  .map(a => `<option value="${esc(a.id)}"${a.id === current ? ' selected' : ''}>${esc(a.name)}</option>`).join('');
+
+/** Browser accounts, the owner's alone: each account's sign-in on its computer, and a form to add one. `accounts` is
+ * null when the list could not be read (anyone but the owner), and then the group is left out. */
+function accountsGroups(accounts, agents) {
+  if (!accounts) return '';
+  const cards = accountRows(accounts, agents).map(r => entry('key', esc(r.name),
+    `${esc(r.site)} · ${r.computer ? esc(r.computer) : 'No computer'}${r.note ? `<br>${esc(r.note)}` : ''}`, tag(r.word, r.tone),
+    acts(btn('Rename', 'account-rename', {id: r.id, small: true, data: {name: r.name}}) + btn('Move', 'account-move', {id: r.id, small: true}) + btn('Delete', 'account-delete', {kind: 'danger', id: r.id, small: true, data: {name: r.name}})))).join('');
+  const choices = pairedChoices(agents);
+  const form = choices
+    ? `<form id="account-form" class="ad-form"><div class="form-grid">${field('Name', textInput('name', {required: true, maxlength: 60, placeholder: 'CRM'}))}${field('Site', textInput('site', {required: true, placeholder: 'crm.example.com', autocapitalize: 'off', spellcheck: 'false'}))}</div>${field('Computer', `<select class="input" name="deviceId">${choices}</select>`)}<div class="cn-acts">${btn('Add account', null, {kind: 'primary', type: 'submit'})}</div></form>`
+    : '<p class="st-quiet">Pair a computer first.</p>';
+  return (cards ? group(`Browser accounts, ${accounts.length}`, cards, {cls: 'cn-list'}) : quiet('No browser account yet.'))
+    + group('Add a browser account', form, {pad: true})
+    + hint('Each account is its own cookie space on one computer: bots on different accounts never see each other\'s sign-ins. Its cookies stay on that computer, encrypted, and are never in a backup. To sign in, open a bot that uses it, take over its Computer view and sign in there.');
+}
+
+function agentsPanel(res, pairing, accounts = null) {
   const agents = res.agents || [], actions = res.actions || [];
   const cards = agents.length
     ? agents.map(a => agentCard(a, actions)).join('')
     : quiet('No computer is paired yet. Pair one below to use your own Claude or ChatGPT plan, give bots a browser, or reach an MCP server that runs on your machine.');
-  return panel(pairingCard(pairing), cards, pairForm(actions), hint('A computer runs only what you allow here. Revoke it any time.'));
+  return panel(pairingCard(pairing), cards, accountsGroups(accounts, agents), pairForm(actions), hint('A computer runs only what you allow here. Revoke it any time.'));
 }
 
 /* ---------- Data and security ---------- */
@@ -602,10 +623,12 @@ export async function adminPage(kind) {
   if (kind === 'workspaces') return workspacesPanel(await api('/api/workspaces'));
   if (kind === 'agents') {
     const res = await api('/api/agents');
+    // Browser accounts are the owner's: anyone else's refusal (or a failed read) leaves the group out.
+    const accounts = store.state?.me?.role === 'owner' ? (await api('/api/browser-accounts').catch(() => null))?.accounts || null : null;
     // Shown once: hand the code to this render and forget it.
     const pairing = lastPairing;
     lastPairing = null;
-    return agentsPanel(res, pairing);
+    return agentsPanel(res, pairing, accounts);
   }
   throw new Error(`Unknown admin page: ${kind}`);
 }
@@ -691,6 +714,29 @@ export const adminActions = {
     if (!await confirmSheet('Revoke this local agent?', {confirm: 'Revoke', danger: true, detail: 'Its in-flight work is failed.'})) return;
     await api(`/api/agents/${button.dataset.id}`, 'DELETE', {});
     toast('Agent revoked.');
+    await ctx.reload();
+  },
+  'account-rename': async (button, ctx) => {
+    const name = await askSheet('Rename this account', {value: button.dataset.name || '', submit: 'Rename'});
+    if (name === null || !name.trim()) return;
+    await api(`/api/browser-accounts/${button.dataset.id}`, 'PATCH', {name: name.trim()});
+    toast('Account renamed.');
+    await ctx.reload();
+  },
+  // Which computer holds the cookies. A sheet over the computers read again now, since the page may be older than a pairing.
+  'account-move': async button => {
+    const [{accounts = []} = {}, {agents = []} = {}] = await Promise.all([api('/api/browser-accounts'), api('/api/agents')]);
+    const account = accounts.find(a => a.id === button.dataset.id);
+    if (!account) throw new Error('That browser account is no longer here.');
+    const choices = pairedChoices(agents, account.deviceId);
+    if (!choices) throw new Error('Pair a computer first.');
+    openSheet(`<form id="account-move-form" class="form"><input type="hidden" name="account" value="${esc(account.id)}">${field('Computer', `<select class="input" name="deviceId">${choices}</select>`)}
+      <div class="sheet-actions">${btn('Move', null, {kind: 'primary', type: 'submit', wide: true})}${btn('Cancel', 'close-sheet', {wide: true})}</div></form>`, {title: `Move ${account.name}`, sub: 'Its sign-in does not travel. Sign in again on the new computer.'});
+  },
+  'account-delete': async (button, ctx) => {
+    if (!await confirmSheet(`Delete ${button.dataset.name || 'this account'}?`, {confirm: 'Delete', danger: true, detail: 'Its saved sign-in is removed from its computer.'})) return;
+    await api(`/api/browser-accounts/${button.dataset.id}`, 'DELETE', {});
+    toast('Account deleted.');
     await ctx.reload();
   },
   // The new list is read off the agent's switches, with this one flipped; the switch moves once the server took it.
@@ -863,6 +909,17 @@ export const adminForms = {
     lastPairing = await api('/api/agents/pair', 'POST', {label: values.label, permissions});
     await ctx.reload();
     toast('Pairing code created. It is shown once.');
+  },
+  'account-form': async (form, values, ctx) => {
+    await api('/api/browser-accounts', 'POST', {name: values.name, site: values.site, deviceId: values.deviceId});
+    toast('Account added. Sign in from a bot that uses it.');
+    await ctx.reload();
+  },
+  'account-move-form': async (form, values, ctx) => {
+    await api(`/api/browser-accounts/${values.account}`, 'PATCH', {deviceId: values.deviceId});
+    closeSheet();
+    toast('Account moved.');
+    await ctx.reload();
   },
   'cli-provider-form': async (form, values, ctx) => {
     const draft = cliDraft({...values, model: chosenModel(values)});
