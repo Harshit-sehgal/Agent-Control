@@ -6,8 +6,7 @@ import {lastSweepAt} from './queue.js';
 import {activity} from '../shared/core.js';
 import * as wf from '../shared/workflow.js';
 import * as agent from './agent.js';
-import {repointDevice} from '../shared/browser-accounts.js';
-import {onAgentTaskResult, continueBrowserWork, setBrowserResultHooks, revokeAgentFinishingPages} from './bot-browser.js';
+import {onAgentTaskResult, continueBrowserWork, setBrowserResultHooks, finishReplacement} from './bot-browser.js';
 import {queueGroupRun, resumeBrowserRun} from './coordination.js';
 import {runOneBot} from './routes-groups.js';
 import {sessionCookie, clearCookie, DEFAULT_WORKSPACE, resolveAccount} from './auth.js';
@@ -191,13 +190,9 @@ export function publicRoutes(router, {auth, workspaces, version}) {
     // same answer a wrong code always got.
     const store = workspaces.holding('SELECT 1 AS x FROM pairing_codes WHERE code_hash=?', sha256(b.code)) || workspaces.get(DEFAULT_WORKSPACE);
     const pair = async () => {
-      const {replaces, ...result} = agent.redeemPairing(store, {code: b.code, name: b.name, permissions: b.permissions, features: b.features, previous: b.previous});
-      // A computer that proved it held the old secret keeps its accounts and bot pins, and the old row is retired.
-      if (replaces) {
-        await store.update(s => { repointDevice(s, replaces, result.agentId); });
-        await revokeAgentFinishingPages(store, replaces, {resumeBrowser: resumeBrowserRun});
-        await store.update(s => { activity(s, 'agent', 'A local agent was replaced by a computer that proved it was the same one. Its pages in flight were failed, and its accounts moved.', {agentId: replaces}); });
-      }
+      // A computer that proved it held the old secret keeps its accounts and bot pins: they move, and the old row is
+      // retired, on the new id's first heartbeat, so a reply that never reaches the computer changes nothing.
+      const result = agent.redeemPairing(store, {code: b.code, name: b.name, permissions: b.permissions, features: b.features, previous: b.previous});
       await store.update(s => { activity(s, 'agent', `Paired local agent "${String(b.name || 'Local agent').slice(0, 60)}".`, {agentId: result.agentId}); });
       return reply(201, result);
     };
@@ -209,6 +204,9 @@ export function publicRoutes(router, {auth, workspaces, version}) {
     const heartbeat = async () => {
       const device = agent.verifyAgentRequest(store, c.req.headers, 'POST', c.path, raw);
       agent.touchAgent(store, device.id);
+      // A re-pair takes over the old computer's accounts now, before its report is read or its list is sent. A failure
+      // fails this beat: an answer whose list missed the moved accounts would have the computer wipe their jars.
+      await finishReplacement(store, device.id, {resumeBrowser: resumeBrowserRun});
       // Whether the owner's CLIs are signed in on that machine, as the CLIs' own
       // status commands said. Four words only; a malformed report changes nothing.
       let report = null, features, accounts, stopping = false;

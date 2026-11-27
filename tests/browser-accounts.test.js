@@ -81,6 +81,8 @@ test('removing an account a bot uses is refused, naming the bot; repoint moves a
   assert.equal(s.browserAccounts[0].deviceId, 'pc-9'); assert.equal(s.groups[0].bots[1].settings.device, 'pc-9');
   assert.equal(s.groups[0].bots[0].settings.device, 'pc-9');
   assert.equal(repointDevice(s, 'pc-2', 'pc-9'), 0, 'nothing is left to move');
+  for (const none of ['', null, undefined]) assert.equal(repointDevice(s, 'pc-9', none), 0, 'no computer to move to moves nothing');
+  assert.equal(s.browserAccounts[0].deviceId, 'pc-9', 'and leaves the account where it was');
   s.groups[0].bots.length = 2;
   s.groups[0].bots[0].settings.browserAccount = null;
   assert.equal(removeAccount(s, A).id, A);

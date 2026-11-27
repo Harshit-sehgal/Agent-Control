@@ -92,32 +92,115 @@ test('the owner\'s list reads each account\'s reported state, and signed out whe
   assert.deepEqual([(await list())[A].state, (await list())[A].checkedAt], ['signed-out', null], 'moved to a computer that has not reported');
 });
 
-test('a re-pair that proves the old secret moves the accounts and pins, and revokes the old computer', async t => {
+test('a proven re-pair moves nothing at pairing: the new computer\'s first beat moves the accounts and pins, and revokes the old one', async t => {
   const {store, pair, newCode, beatAs, device: d1} = await harness(t);
   await store.update(s => {
     s.browserAccounts = [acct(A, d1.agentId), acct(B, 'someone-elses-pc')];
     s.groups.push({id: 'g-t', name: 'Team', bots: [{id: 'atlas', name: 'Atlas', settings: {device: d1.agentId}}, {id: 'zed', name: 'Zed', settings: {device: 'someone-elses-pc'}}]});
   });
+  const devices = () => store.read().browserAccounts.map(a => a.deviceId);
+  const pins = () => Object.fromEntries(store.read().groups.flatMap(g => g.bots).map(b => [b.id, b.settings?.device]));
+  const revoked = id => store.get('SELECT revoked_at FROM agents WHERE id=?', id).revoked_at;
   const code = newCode();
   const paired = await pair({code, name: 'Laptop again', previous: {agentId: d1.agentId, proof: proofOf(d1.secret, code)}});
   assert.equal(paired.status, 201);
-  assert.ok(!('replaces' in paired.body), 'the reply says nothing of what was replaced');
+  assert.ok(!('replaces' in paired.body), 'the reply does not name the old computer');
+  assert.equal(paired.body.replaced, true, 'the reply says the proof was taken');
   const d2 = paired.body;
   assert.notEqual(d2.agentId, d1.agentId);
-  const s = store.read();
-  assert.deepEqual(s.browserAccounts.map(a => a.deviceId), [d2.agentId, 'someone-elses-pc']);
-  const bots = Object.fromEntries(s.groups.flatMap(g => g.bots).map(b => [b.id, b.settings?.device]));
-  assert.equal(bots.atlas, d2.agentId);
-  assert.equal(bots.zed, 'someone-elses-pc');
-  assert.ok(store.get('SELECT revoked_at FROM agents WHERE id=?', d1.agentId).revoked_at, 'the old computer is revoked');
-  assert.equal(store.get('SELECT revoked_at FROM agents WHERE id=?', d2.agentId).revoked_at, null);
+  // Until the new computer beats, the old one is untouched: a reply lost on the way changes nothing.
+  assert.deepEqual(devices(), [d1.agentId, 'someone-elses-pc']);
+  assert.equal(pins().atlas, d1.agentId);
+  assert.equal(revoked(d1.agentId), null, 'the old computer still works');
+  const old = await beatAs(d1, {});
+  assert.equal(old.status, 200);
+  assert.deepEqual(old.body.accounts, [{id: A, site: 'crm.example.com'}], 'the old computer still holds its accounts');
+
+  const beat = await beatAs(d2, {accounts: [{id: A, state: 'signed-in'}]});
+  assert.equal(beat.status, 200);
+  assert.deepEqual(beat.body.accounts, [{id: A, site: 'crm.example.com'}], 'the first beat hears the moved accounts');
+  assert.deepEqual(agent.readAccountReports(store, d2.agentId).map(r => [r.id, r.state]), [[A, 'signed-in']], 'and its report of them is kept');
+  assert.deepEqual(devices(), [d2.agentId, 'someone-elses-pc']);
+  assert.deepEqual(pins(), {atlas: d2.agentId, zed: 'someone-elses-pc'});
+  assert.ok(revoked(d1.agentId), 'the old computer is revoked');
+  assert.equal(revoked(d2.agentId), null);
   assert.equal((await beatAs(d1, {})).status, 403, 'the old secret no longer works');
+  assert.deepEqual((await beatAs(d2, {})).body.accounts, [{id: A, site: 'crm.example.com'}], 'a later beat changes nothing');
+});
+
+test('a re-pair whose reply never reached the computer leaves the old one working, and a later re-pair still keeps its accounts', async t => {
+  const {store, pair, newCode, beatAs, device: d1} = await harness(t);
+  await store.update(s => { s.browserAccounts = [acct(A, d1.agentId)]; });
+  const lostCode = newCode();
+  // The server answered, but the computer never read it: it keeps its old pairing.
+  assert.equal((await pair({code: lostCode, name: 'Laptop', previous: {agentId: d1.agentId, proof: proofOf(d1.secret, lostCode)}})).body.replaced, true);
+  for (let i = 0; i < 2; i++) assert.deepEqual((await beatAs(d1, {})).body.accounts, [{id: A, site: 'crm.example.com'}]);
+  assert.equal(store.get('SELECT revoked_at FROM agents WHERE id=?', d1.agentId).revoked_at, null);
+  // It pairs again with a fresh code, proving the same old secret, and this time hears the reply.
+  const code = newCode();
+  const again = await pair({code, name: 'Laptop', previous: {agentId: d1.agentId, proof: proofOf(d1.secret, code)}});
+  assert.equal(again.body.replaced, true);
+  assert.deepEqual((await beatAs(again.body, {})).body.accounts, [{id: A, site: 'crm.example.com'}]);
+  assert.deepEqual(store.read().browserAccounts.map(a => a.deviceId), [again.body.agentId]);
+});
+
+test('a re-pair made again before the first new pairing ever beat still reaches the accounts', async t => {
+  const {store, pair, newCode, beatAs, device: d1} = await harness(t);
+  await store.update(s => { s.browserAccounts = [acct(A, d1.agentId)]; });
+  const c2 = newCode();
+  const d2 = (await pair({code: c2, name: 'Laptop', previous: {agentId: d1.agentId, proof: proofOf(d1.secret, c2)}})).body;
+  // The computer saved the second pairing but paired once more before it ran: it proves the second secret.
+  const c3 = newCode();
+  const d3 = (await pair({code: c3, name: 'Laptop', previous: {agentId: d2.agentId, proof: proofOf(d2.secret, c3)}})).body;
+  assert.equal(d3.replaced, true);
+  assert.deepEqual((await beatAs(d3, {})).body.accounts, [{id: A, site: 'crm.example.com'}], 'the accounts of the first pairing come along');
+  assert.deepEqual(store.read().browserAccounts.map(a => a.deviceId), [d3.agentId]);
+  for (const id of [d1.agentId, d2.agentId]) assert.ok(store.get('SELECT revoked_at FROM agents WHERE id=?', id).revoked_at, 'both earlier pairings are retired');
+});
+
+test('a re-pair whose move fails on the first beat answers an error, lists nothing short, and finishes on the next beat', async t => {
+  const {store, pair, newCode, beatAs, device: d1} = await harness(t);
+  await store.update(s => { s.browserAccounts = [acct(A, d1.agentId)]; });
+  const revoked = id => store.get('SELECT revoked_at FROM agents WHERE id=?', id).revoked_at;
+  const code = newCode();
+  const d2 = (await pair({code, name: 'Laptop', previous: {agentId: d1.agentId, proof: proofOf(d1.secret, code)}})).body;
+  // 1. The document write that moves the accounts throws.
+  const update = store.update.bind(store);
+  store.update = fn => { store.update = update; return Promise.reject(new Error('disk full')); };
+  const failed = await beatAs(d2, {});
+  assert.ok(failed.status >= 500, `the beat fails (${failed.status})`);
+  assert.ok(!failed.body?.accounts, 'no account list goes out, so the computer wipes nothing');
+  assert.deepEqual(store.read().browserAccounts.map(a => a.deviceId), [d1.agentId], 'nothing moved');
+  assert.equal(revoked(d1.agentId), null, 'the old computer still works');
+  // 2. The move lands, but retiring the old computer throws.
+  const run = store.run.bind(store);
+  store.run = (sql, ...args) => { if (/UPDATE agents SET revoked_at/.test(sql)) { store.run = run; throw new Error('disk full'); } return run(sql, ...args); };
+  const half = await beatAs(d2, {});
+  assert.ok(half.status >= 500, `the beat fails (${half.status})`);
+  assert.ok(!half.body?.accounts);
+  assert.equal(revoked(d1.agentId), null, 'the old computer is not left half retired');
+  // 3. The next beat finishes the job.
+  const done = await beatAs(d2, {});
+  assert.equal(done.status, 200);
+  assert.deepEqual(done.body.accounts, [{id: A, site: 'crm.example.com'}]);
+  assert.deepEqual(store.read().browserAccounts.map(a => a.deviceId), [d2.agentId]);
+  assert.ok(revoked(d1.agentId));
+});
+
+test('an old computer the owner removed before the new one beat gives nothing to the new one', async t => {
+  const {store, pair, newCode, beatAs, device: d1} = await harness(t);
+  await store.update(s => { s.browserAccounts = [acct(A, d1.agentId)]; });
+  const code = newCode();
+  const d2 = (await pair({code, name: 'Laptop', previous: {agentId: d1.agentId, proof: proofOf(d1.secret, code)}})).body;
+  agent.revokeAgent(store, d1.agentId);
   const beat = await beatAs(d2, {});
-  assert.deepEqual(beat.body.accounts, [{id: A, site: 'crm.example.com'}], 'the new computer hears its accounts on its first beat');
+  assert.equal(beat.status, 200);
+  assert.deepEqual(beat.body.accounts, [], 'the removed computer\'s accounts stay where the owner left them');
+  assert.deepEqual(store.read().browserAccounts.map(a => a.deviceId), [d1.agentId]);
 });
 
 test('a wrong proof, or an old computer in another workspace, pairs a new computer and moves nothing', async t => {
-  const {store, pair, newCode, device: d1} = await harness(t);
+  const {store, pair, newCode, beatAs, device: d1} = await harness(t);
   store.run("INSERT INTO workspaces (id,name,created_at) VALUES ('other','Other',?)", new Date().toISOString());
   const foreign = agent.redeemPairing(store, {code: newCode('other'), name: 'Foreign PC'});
   await store.update(s => { s.browserAccounts = [acct(A, d1.agentId), acct(B, foreign.agentId)]; });
@@ -137,7 +220,9 @@ test('a wrong proof, or an old computer in another workspace, pairs a new comput
     const code = newCode();
     const paired = await pair({code, name: 'New', previous: make(code)});
     assert.equal(paired.status, 201, label);
+    assert.equal(paired.body.replaced, false, `${label}: the reply says no proof was taken`);
     assert.notEqual(paired.body.agentId, d1.agentId, label);
+    await beatAs(paired.body, {});
     assert.deepEqual(moved(), [d1.agentId, foreign.agentId], `${label}: nothing moved`);
     assert.equal(revoked(d1.agentId), null, `${label}: the old computer stays`);
     assert.equal(revoked(foreign.agentId), null, label);
@@ -147,6 +232,8 @@ test('a wrong proof, or an old computer in another workspace, pairs a new comput
   const code = newCode();
   const paired = await pair({code, name: 'New', previous: {agentId: d1.agentId, proof: proofOf(d1.secret, code)}});
   assert.equal(paired.status, 201);
+  assert.equal(paired.body.replaced, false);
+  await beatAs(paired.body, {});
   assert.deepEqual(moved(), [d1.agentId, foreign.agentId], 'a revoked computer\'s accounts are not moved');
 });
 
@@ -166,10 +253,12 @@ test('a backup carries account names, never a report, and a restore reads every 
   other.kvSet(`agent_accounts:${deviceId}`, JSON.stringify([{id: A, state: 'signed-in', storage: 'cookies', checkedAt: new Date().toISOString()}]));
   other.kvSet('agent_accounts:another', '[]');
   other.kvSet('agent_features:keep', '[]');
+  other.kvSet('agent_replaces:pending', '["old-pc"]');
   importBackup(other, document, {force: true});
   assert.deepEqual(other.read().browserAccounts.map(a => a.name), ['CRM', 'Billing']);
   assert.equal(other.get("SELECT count(*) AS n FROM kv WHERE key LIKE 'agent\\_accounts:%' ESCAPE '\\'").n, 0, 'every report is gone');
   assert.deepEqual(agent.readAccountReports(other, deviceId), []);
+  assert.equal(other.kvGet('agent_replaces:pending'), null, 'a re-pair waiting from before the restore is gone with the computers');
   assert.notEqual(other.kvGet('agent_features:keep'), null, 'other kv keys stay');
   const router = createRouter();
   browserAccountRoutes(router, {});
@@ -177,8 +266,8 @@ test('a backup carries account names, never a report, and a restore reads every 
   assert.deepEqual(out.accounts.map(a => [a.name, a.state, a.checkedAt]), [['CRM', 'signed-out', null], ['Billing', 'signed-out', null]]);
 });
 
-test('a re-pair tells the runs waiting on the old computer\'s pages that they failed, and says it replaced the computer', async t => {
-  const {store, pair, newCode, device: d1} = await harness(t);
+test('a re-pair, on the new computer\'s first beat, tells the runs waiting on the old computer\'s pages that they failed, and says it replaced the computer', async t => {
+  const {store, pair, newCode, beatAs, device: d1} = await harness(t);
   const at = new Date().toISOString();
   const taskRow = (id, status) => store.run('INSERT INTO agent_tasks (id,agent_id,kind,payload,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?)', id, d1.agentId, 'browser.action', '{}', status, at, at);
   taskRow('page-queued', 'queued');
@@ -189,7 +278,9 @@ test('a re-pair tells the runs waiting on the old computer\'s pages that they fa
     s.browserRequests = [request('r-queued', 'page-queued'), request('r-running', 'page-running')];
   });
   const code = newCode();
-  assert.equal((await pair({code, name: 'Laptop again', previous: {agentId: d1.agentId, proof: proofOf(d1.secret, code)}})).status, 201);
+  const d2 = (await pair({code, name: 'Laptop again', previous: {agentId: d1.agentId, proof: proofOf(d1.secret, code)}})).body;
+  assert.deepEqual(store.read().browserRequests.map(r => r.status), ['dispatched', 'dispatched'], 'pairing alone fails nothing');
+  assert.equal((await beatAs(d2, {})).status, 200);
   const s = store.read();
   assert.deepEqual(s.browserRequests.map(r => r.status), ['failed', 'failed'], 'no page is left waiting on the replaced computer');
   assert.equal(s.chats.web.filter(m => /browser request failed/.test(m.text)).length, 2, 'each run is told');

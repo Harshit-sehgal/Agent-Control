@@ -33,7 +33,7 @@
  * this computer holds; a jar the list omits is wiped, and a beat with no list wipes nothing. A task for an account runs
  * only when it names this computer and the account is on that list, and only in the real browser: it is never read by
  * the plain fetch, which has no cookies. A re-pair that proves the old secret keeps the jars (they are re-encrypted
- * under the new one; the config holds both secrets until that is done). The housekeeping sweep (idle tabs, jar saves,
+ * under the new one; the config holds both secrets until that is done), unless the pair reply says `replaced: false`. The housekeeping sweep (idle tabs, jar saves,
  * keepers, the optional idle quit AGENT_BROWSER_QUIT_IDLE=1) runs every minute (agent/browser-host.mjs).
  */
 import fs from 'node:fs';
@@ -165,7 +165,8 @@ async function pair(argv) {
   const name = argValue(argv, '--name') || `${process.env.COMPUTERNAME || process.env.HOSTNAME || 'device'}-agent`;
   const url = new URL(server.replace(/\/+$/, '') + '/api/agent/pair');
   // A computer that holds a working pairing with this same server proves it by the old secret, so the server moves its
-  // accounts to the new id and this computer keeps their jars.
+  // accounts to the new id (on that id's first heartbeat) and this computer keeps their jars. A reply that never comes
+  // changes nothing on either side: the old pairing and its jars stay as they are.
   const old = readableConfig();
   const sameServer = old && old.server.replace(/\/+$/, '') === server.replace(/\/+$/, '');
   // The jars of an earlier pairing must be under the saved secret before another secret is added: a third secret would
@@ -183,7 +184,12 @@ async function pair(argv) {
   if (!value || typeof value.agentId !== 'string' || typeof value.secret !== 'string') fail('the server did not return an agent credential; nothing was saved.');
   const granted = Array.isArray(value.permissions) ? value.permissions : [];
   const next = {server: server.replace(/\/+$/, ''), agentId: value.agentId, secret: value.secret, workspaceId: value.workspaceId, permissions: granted, pollIntervalMs: value.pollIntervalMs, name};
-  if (sameServer) {
+  // `replaced: false` is the server saying it did not take the proof (the old computer was removed, or the code is of
+  // another workspace): no account is coming to this pairing, so the jars go. A server that does not say (an older
+  // one) is taken at its word as before.
+  const refused = sameServer && value.replaced === false;
+  if (refused) console.log('The server did not take this as the same computer, so its saved browser sign-ins were removed. Move its accounts to it under Settings.');
+  if (sameServer && !refused) {
     // Both secrets are in the saved config until the jars are re-encrypted, so a stop in between strands nothing: the
     // next start finishes the job.
     saveConfig({...next, rekeyFrom: old.secret});

@@ -246,7 +246,19 @@ function provenPrevious(store, workspaceId, code, previous) {
   return given.length === expected.length && crypto.timingSafeEqual(given, expected) ? old.id : null;
 }
 
-/** Exchange a pairing code for agent credentials. */
+/** A proven re-pair is kept in kv `agent_replaces:<newId>` as the list of earlier ids it takes over, oldest first, and
+ * nothing moves until that new id's first heartbeat (`finishReplacement` in src/bot-browser.js): a reply the computer
+ * never read leaves the old pairing working. A pairing that replaces one which never beat takes over that one's list too. */
+export const replacesKey = agentId => `agent_replaces:${agentId}`;
+export function pendingReplacement(store, agentId) {
+  try {
+    const list = JSON.parse((typeof store.kvGet === 'function' && store.kvGet(replacesKey(agentId))) || '[]');
+    return Array.isArray(list) ? list.filter(id => typeof id === 'string') : [];
+  } catch { return []; }
+}
+
+/** Exchange a pairing code for agent credentials. `replaced` says whether the caller's proof of an earlier pairing was
+ * taken; its accounts and bot pins move on the new id's first heartbeat. */
 export function redeemPairing(store, {code, name, permissions = [], features, previous}) {
   const row = store.get('SELECT * FROM pairing_codes WHERE code_hash=?', sha256(String(code || '')));
   if (!row) fail('This pairing code is not valid.', 401);
@@ -271,8 +283,9 @@ export function redeemPairing(store, {code, name, permissions = [], features, pr
     // What its app can do, so work that needs a feature is not refused before the first heartbeat (an older app sends
     // none). In the same write: a failure here must not leave a used code and an agent behind.
     if (features !== undefined) recordAgentFeatures(store, agentId, features);
+    if (replaces) store.kvSet(replacesKey(agentId), JSON.stringify([...new Set([...pendingReplacement(store, replaces), replaces])]));
   });
-  return {agentId, secret, workspaceId: row.workspace_id, permissions: granted, pollIntervalMs: 30000, replaces};
+  return {agentId, secret, workspaceId: row.workspace_id, permissions: granted, pollIntervalMs: 30000, replaced: Boolean(replaces)};
 }
 
 export const agentTaskKinds = () => [...AGENT_ACTIONS];

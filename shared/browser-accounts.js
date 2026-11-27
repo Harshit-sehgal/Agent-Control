@@ -102,7 +102,7 @@ export const browserDeviceOf = (state, botId) => browserAccountOf(state, botId).
 
 /** Move every account and every bot pin from one computer to another (a re-pair). Returns how many moved. */
 export function repointDevice(state, fromId, toId) {
-  if (!fromId || fromId === toId) return 0;
+  if (!fromId || !toId || fromId === toId) return 0;
   let moved = 0;
   for (const account of accountsOf(state)) if (account.deviceId === fromId) { account.deviceId = toId; moved++; }
   for (const bot of botsOf(state)) if (isObject(bot.settings) && bot.settings.device === fromId) { bot.settings.device = toId; moved++; }

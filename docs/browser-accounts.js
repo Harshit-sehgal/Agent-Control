@@ -7,10 +7,10 @@
  *
  * Pure and browser-safe, no secrets: a jar never reaches this file. The route checks that `deviceId` is a paired
  * computer of the workspace; the rules here check only its shape. */
-import {cleanText} from './core.js?v=18c4ca58d0';
-import {fail} from './errors.js?v=18c4ca58d0';
-import {hostOf} from './bot-browser.js?v=18c4ca58d0';
-import {ACCOUNT_ID, DEVICE_ID, botSettings, pinnedDevice} from './bot-settings.js?v=18c4ca58d0';
+import {cleanText} from './core.js?v=92036db114';
+import {fail} from './errors.js?v=92036db114';
+import {hostOf} from './bot-browser.js?v=92036db114';
+import {ACCOUNT_ID, DEVICE_ID, botSettings, pinnedDevice} from './bot-settings.js?v=92036db114';
 
 export const MAX_ACCOUNTS = 20;
 export const ACCOUNT_STATES = ['signed-in', 'signed-out', 'unknown'];
@@ -102,7 +102,7 @@ export const browserDeviceOf = (state, botId) => browserAccountOf(state, botId).
 
 /** Move every account and every bot pin from one computer to another (a re-pair). Returns how many moved. */
 export function repointDevice(state, fromId, toId) {
-  if (!fromId || fromId === toId) return 0;
+  if (!fromId || !toId || fromId === toId) return 0;
   let moved = 0;
   for (const account of accountsOf(state)) if (account.deviceId === fromId) { account.deviceId = toId; moved++; }
   for (const bot of botsOf(state)) if (isObject(bot.settings) && bot.settings.device === fromId) { bot.settings.device = toId; moved++; }
