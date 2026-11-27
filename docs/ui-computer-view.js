@@ -13,17 +13,17 @@
  * Polling is what makes the device cast: the server tells the agent to stream a tab only
  * while somebody is looking, so the loop stops when the page is hidden or the view closes.
  * Input goes out in order, one request at a time, with typed letters joined. */
-import {esc, icon} from './ui-kit.js?v=3cae02add8';
-import {botColor} from './ui-face.js?v=3cae02add8';
-import {store, api, findBot, canWrite, isAdmin, isStaticDemo, changed, onChange, go, back} from './ui-store.js?v=3cae02add8';
+import {esc, icon} from './ui-kit.js?v=85aac70d41';
+import {botColor} from './ui-face.js?v=85aac70d41';
+import {store, api, findBot, canWrite, isAdmin, isStaticDemo, changed, onChange, go, back} from './ui-store.js?v=85aac70d41';
 /** Driving the tab (Take over, Hand back, input) is an admin's, the role those routes need; the demo is its one owner. */
 const canDrive = () => isStaticDemo() || isAdmin();
-import {toast} from './ui-dialogs.js?v=3cae02add8';
-import {SECRET_INPUT_V1, UPDATE_DEVICE_LINE, hasFeature} from './device-features.js?v=3cae02add8';
+import {toast} from './ui-dialogs.js?v=85aac70d41';
+import {SECRET_INPUT_V1, UPDATE_DEVICE_LINE, hasFeature} from './device-features.js?v=85aac70d41';
 import {
   PAGE, KEY_CHIPS, clickInput, wheelInput, keyInput, coalesce, navigateAddress, rowLabel, statusOf, stateLine, mergeView, veilFor, frameDelay, listDelay, wantsList,
   chipFor, containRect, controlPill, thumbFor, thumbDelay,
-} from './ui-computer.js?v=3cae02add8';
+} from './ui-computer.js?v=85aac70d41';
 
 const el = id => document.getElementById(id);
 const raw = (path, method = 'GET', body) => window.AGENT_API(path, method, body);   // no progress bar: these run all the time
@@ -32,7 +32,7 @@ const raw = (path, method = 'GET', body) => window.AGENT_API(path, method, body)
 
 const list = {items: [], timer: null, busy: false, disabled: false, key: ''};
 export const liveList = () => list.items;
-const fingerprint = items => JSON.stringify((items || []).map(e => [e.botId, e.state, e.site, e.live, (e.pages || []).length, e.pages?.at(-1)?.title || '']));
+const fingerprint = items => JSON.stringify((items || []).map(e => [e.botId, e.state, e.site, e.live, (e.pages || []).length, e.pages?.at(-1)?.title || '', e.account?.name || '']));
 
 /** Patch one bot's entry now (after Take over or Hand back), so the row and the pill do not wait for the poll. */
 function patchLive(botId, patch) {
@@ -129,7 +129,7 @@ export function computerPage(bot, {faceOf}) {
       ${tray}
       <div class="pc-pill" role="toolbar" aria-label="Who is in control">
         <span class="pc-face" data-pc="face"></span>
-        <span class="pc-who" role="status" aria-live="polite"><b data-pc="who">${esc(bot.name)} is in control</b><small class="pc-line" data-pc="line">Idle</small></span>
+        <span class="pc-who" role="status" aria-live="polite"><b data-pc="who">${esc(bot.name)} is in control</b><small class="pc-line" data-pc="line">Idle</small><small class="pc-acct" data-pc="account" hidden></small></span>
         ${write ? `<button type="button" class="pc-kb" data-pc="kb" data-action="computer-tray" data-id="${esc(bot.id)}" aria-label="Keyboard and address" aria-expanded="false" hidden>${icon('keyboard', 16)}</button>
         <button type="button" class="pc-hold" data-pc="hold" data-action="computer-takeover" autofocus data-id="${esc(bot.id)}">Take control</button>` : ''}
         <button type="button" class="pc-x" data-action="computer-close" data-id="${esc(bot.id)}" aria-label="Close ${esc(bot.name)}'s computer">${icon('x', 16)}</button>
@@ -145,7 +145,7 @@ function mount(botId, faceOf) {
   const q = name => root.querySelector(`[data-pc="${name}"]`);
   const s = session = {
     botId, root, faceOf, view: {...INIT}, failures: 0, timer: null, denied: false, queue: [], flush: null, sending: false, lastHint: 0, shown: -1, faceState: '',
-    stage: q('stage'), img: q('img'), veil: q('veil'), url: q('url'), go: q('go'), dot: q('dot'), notice: q('notice'), line: q('line'), who: q('who'), face: q('face'), hold: q('hold'), tools: q('tools'), kb: q('kb'), secrets: q('secrets'), secretNote: q('secret-note'), secretsOn: null,
+    stage: q('stage'), img: q('img'), veil: q('veil'), url: q('url'), go: q('go'), dot: q('dot'), notice: q('notice'), line: q('line'), who: q('who'), account: q('account'), face: q('face'), hold: q('hold'), tools: q('tools'), kb: q('kb'), secrets: q('secrets'), secretNote: q('secret-note'), secretsOn: null,
   };
   // Esc leaves the view, unless the owner is driving: then it belongs to the page.
   s.onKey = ev => { if (ev.key === 'Escape' && alive(s) && stateOf(s) !== 'driving' && !ev.defaultPrevented) { ev.preventDefault(); close(s.botId); } };
@@ -225,6 +225,10 @@ function paintSession() {
   const line = unavailable ? '' : state === 'idle' ? stateLine({name, state, pages: entry.pages}) : onPage || (driving ? 'Click the page to use it' : 'Opening a page');
   if (s.line.textContent !== line) s.line.textContent = line;
   s.line.hidden = !line;
+  // The browser account the bot signs in as, when it has one (a member is told its name only).
+  const account = entry.account?.name ? `Signs in as ${entry.account.name}` : '';
+  if (s.account.textContent !== account) s.account.textContent = account;
+  s.account.hidden = !account;
   const faceState = driving ? 'waiting' : state === 'browsing' ? 'working' : 'awake';
   if (s.faceState !== faceState && bot) { s.faceState = faceState; s.face.innerHTML = s.faceOf(faceState); }
   paintSecrets(s);

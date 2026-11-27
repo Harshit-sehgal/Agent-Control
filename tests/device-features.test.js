@@ -9,7 +9,7 @@ import {SqliteStore} from '../src/sqlite-store.js';
 import * as wf from '../shared/workflow.js';
 import {createApp} from '../src/app.js';
 import {browserLive} from '../src/browser-live.js';
-import {SECRET_INPUT_V1, DEVICE_FEATURES, cleanFeatures, hasFeature, UPDATE_DEVICE_LINE} from '../shared/device-features.js';
+import {SECRET_INPUT_V1, BROWSER_ACCOUNTS_V1, DEVICE_FEATURES, neededNow, cleanFeatures, hasFeature, UPDATE_DEVICE_LINE} from '../shared/device-features.js';
 import {mergeView} from '../shared/ui-computer.js';
 
 /* A device says what it can do (`features` on each heartbeat). The one feature Phase 0 relies on is
@@ -20,7 +20,9 @@ const typed = {type: 'type', text: SECRET, secret: true};
 
 test('the names are fixed, the list a report is read from is bounded, and nothing else survives', () => {
   assert.equal(SECRET_INPUT_V1, 'secret-input-v1');
-  assert.deepEqual(DEVICE_FEATURES, ['secret-input-v1']);
+  assert.equal(BROWSER_ACCOUNTS_V1, 'browser-accounts-v1');
+  assert.deepEqual(DEVICE_FEATURES, ['secret-input-v1', 'browser-accounts-v1']);
+  assert.equal(neededNow(BROWSER_ACCOUNTS_V1), true, 'an older app would act in the default profile, so account work always needs it');
   assert.deepEqual(cleanFeatures(['secret-input-v1', 'secret-input-v1', 'future-thing-v2']), ['secret-input-v1', 'future-thing-v2'], 'a repeat is dropped, a new name of the same shape is kept');
   for (const bad of [undefined, null, 'secret-input-v1', 7, {0: 'secret-input-v1'}, true]) assert.deepEqual(cleanFeatures(bad), [], `${JSON.stringify(bad)} is no list`);
   assert.deepEqual(cleanFeatures([7, null, {}, [], 'Has Spaces', 'UPPER-v1', '../etc', 'a'.repeat(41), '', '<b>x</b>', 'ok-v1']), ['ok-v1'], 'only short lowercase names of one shape');
@@ -179,29 +181,24 @@ test('over HTTP: with two devices on one workspace, a secret is handed only to o
   assert.equal((await older.beat()).status, 200);
   const type = () => send('POST', '/api/browser-live/web/input', {cookie: 'owner', body: typed});
 
-  // The newer device polled last, so the queue-time check passes; the older one polls first and drains the queue.
+  // The newer device polled last, so the queue-time check passes and the request is queued for it: each computer has
+  // its own line, so the older one is never even handed the command.
   await poll(older.signed); await poll(newer);
   assert.equal((await type()).status, 200);
   const old = await poll(older.signed);
   assert.deepEqual(secretsOf(old), [], 'the older device is never sent the secret');
   assert.equal(JSON.stringify(old.body).includes(SECRET), false);
-  assert.deepEqual(secretsOf(await poll(newer)), [], 'and it was dropped, not kept for another device');
+  const got = secretsOf(await poll(newer));
+  assert.deepEqual(got.map(c => c.event), [{type: 'type', text: SECRET, secret: true}], 'the newer device, polling, is handed it');
+
+  // A device that reported the feature and later beats without it (the app was rolled back) is no longer sent one.
+  assert.equal((await type()).status, 200);
+  assert.equal((await beat()).status, 200);
+  assert.deepEqual(secretsOf(await poll(newer)), [], 'dropped at hand-over, not kept for another device');
   // The owner is told in fixed words, never the text (a notice shows once the owner is not driving).
   assert.equal((await send('POST', '/api/browser-live/web/handback', {cookie: 'owner', body: {}})).status, 200);
   const view = await send('GET', '/api/browser-live/web', {cookie: 'owner'});
   assert.equal(view.body.notice, 'Update the app on your computer to type passwords and codes here.');
   assert.equal(JSON.stringify(view.body).includes(SECRET), false);
-
-  // The newer device, polling, is handed it.
-  assert.equal((await send('POST', '/api/browser-live/web/takeover', {cookie: 'owner', body: {}})).status, 200);
-  await poll(newer);
-  assert.equal((await type()).status, 200);
-  const got = secretsOf(await poll(newer));
-  assert.deepEqual(got.map(c => c.event), [{type: 'type', text: SECRET, secret: true}]);
-
-  // A device that reported the feature and later beats without it (the app was rolled back) is no longer sent one.
-  assert.equal((await type()).status, 200);
-  assert.equal((await beat()).status, 200);
-  assert.deepEqual(secretsOf(await poll(newer)), []);
   assert.equal((await type()).status, 409, 'and the queue-time check agrees');
 });

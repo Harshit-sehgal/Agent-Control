@@ -13,7 +13,8 @@ import * as agent from './agent.js';
 import {browserRuntime} from './browser-runtime.js';
 import {fail} from '../shared/errors.js';
 import {addChatMessages} from '../shared/chats.js';
-import {pinnedDevice} from '../shared/bot-settings.js';
+import {browserAccountOf, browserDeviceOf, repointDevice} from '../shared/browser-accounts.js';
+import {BROWSER_ACCOUNTS_V1} from '../shared/device-features.js';
 import {activity, cleanText} from '../shared/core.js';
 import {browserResultText, capturePageText, hostOf, MAX_BROWSER_DEPTH} from '../shared/bot-browser.js';
 import {logActivity} from '../shared/activity-log.js';
@@ -39,6 +40,18 @@ const PINNED_ON_SERVER = 'This bot is set to use one computer, and this install 
 /** Said when a takeover would open a pinned bot's page in the server's browser. */
 const PINNED_TAKEOVER = 'This bot is set to use one computer, and a takeover here opens the page in this server\'s browser. Take over from that computer\'s Computer view, or clear "Runs on" on the bot\'s Edit page.';
 
+/** Said when a bot names a browser account that has no record: it is refused, never run in the default profile. */
+export const ACCOUNT_GONE = 'This bot\'s browser account no longer exists. Choose another on the bot\'s Edit page, or clear it.';
+
+/** Said when a bot with a browser account would have its page opened on the server instead of the account's computer. */
+const ACCOUNT_ON_SERVER = 'This bot signs in as a browser account, which lives on a computer, and this install opens pages only on the server (BROWSER_RUNTIME=server). Set BROWSER_RUNTIME=auto, or clear the bot\'s account on its Edit page.';
+
+/** Said when the computer holding a bot's browser account is revoked, lacks the permission or is gone. */
+const ACCOUNT_NOT_PINNED = 'This bot\'s browser account is on a computer that is not available. Pair it again, or move the account to another computer in Settings → Local agents.';
+
+/** Said when a takeover would open an account bot's page in the server's browser, which holds no account. */
+const ACCOUNT_TAKEOVER = 'This bot signs in as a browser account, which lives on its computer. Take over from the bot\'s Computer view instead.';
+
 /** The lane a bot's pages queue on in the server's shared browser: its workspace and its id. The runtime is one
  * process for every workspace, and every workspace has a bot called `atlas`. */
 export const browserLane = (store, botId) => `${store?.dbPath || ''}\u0000${botId || ''}`;
@@ -50,14 +63,21 @@ export async function dispatchBrowserRequest(store, id, {actor = null, runtime =
   const request = (store.read().browserRequests || []).find(r => r.id === id);
   if (!request) fail('Browser request not found.', 404);
   if (request.status !== 'pending') fail('This browser request is no longer waiting.', 409);
-  const pin = pinnedDevice(store.read(), request.botId);
+  // A bot that names a browser account whose record is gone is refused before anything is claimed: the default
+  // profile is somebody else's sign-in. With an account, the page runs on the account's computer or not at all.
+  const {account, missing} = browserAccountOf(store.read(), request.botId);
+  if (missing) fail(ACCOUNT_GONE, 409);
+  if (account && runtime.mode === 'server') fail(ACCOUNT_ON_SERVER, 409);
+  const pin = browserDeviceOf(store.read(), request.botId);
   if (pin && runtime.mode === 'server') fail(PINNED_ON_SERVER, 409);
   // A pinned bot never opens pages on the server, and a need names a device feature the server browser has none of.
-  const here = !pin && !needs.length && runtime.mode !== 'agent' && runtime.available();
+  const wants = account ? [...needs, BROWSER_ACCOUNTS_V1] : needs;
+  const here = !pin && !wants.length && runtime.mode !== 'agent' && runtime.available();
   let agentId = null;
   if (!here) {
-    const chosen = agent.chooseDevice(store, {kind: request.kind, deviceId: pin, needs});
+    const chosen = agent.chooseDevice(store, {kind: request.kind, deviceId: pin, needs: wants});
     if (chosen.reason === 'agent-offline') fail(OFFLINE, 409);
+    if (chosen.reason === 'not-pinned' && account) fail(ACCOUNT_NOT_PINNED, 409);
     if (chosen.reason === 'not-pinned') fail('This bot\'s computer is not available. Pair it again, or choose another computer on the bot\'s profile.', 409);
     if (chosen.reason === 'missing-feature') fail(agent.missingFeatureLine(chosen.feature), 409);
     agentId = chosen.agent?.id || null;
@@ -71,6 +91,7 @@ export async function dispatchBrowserRequest(store, id, {actor = null, runtime =
     const live = (s.browserRequests || []).find(r => r.id === id);
     if (!live || live.status !== 'pending') fail(live ? 'This browser request is no longer waiting.' : 'Browser request not found.', live ? 409 : 404);
     live.status = 'dispatched'; live.approvedBy = actor || 'auto'; live.via = here ? 'server' : 'agent'; live.updatedAt = stamp();
+    if (account) { live.account = account.id; live.accountName = account.name; }
     // Sending the page out is the moment it leaves the app. A page nobody opened (declined, stopped) is never logged.
     const n = (live.steps || []).length;
     logActivity(s, {botId: live.botId, kind: 'outside', text: `${live.botName} ${n ? 'used' : 'read'} ${hostOf(live.url) || live.url}${n ? ` (${n} step${n === 1 ? '' : 's'})` : ''}.`, threadId: live.chatKey});
@@ -94,7 +115,11 @@ export async function dispatchBrowserRequest(store, id, {actor = null, runtime =
       const current = (s.browserRequests || []).find(r => r.id === id);
       // A feed can still be denied after the claim and before this enqueue.
       if (!current || current.status !== 'dispatched') fail(current ? 'This browser request is no longer waiting.' : 'Browser request not found.', current ? 409 : 404);
-      const {task} = agent.enqueueAgentTask(store, agentId, {kind: request.kind, payload: {url: request.url, steps: request.steps, botId: request.botId}, approved: approvedOf(request), idempotencyKey: `browser:${id}`, createdBy: actor || `bot:${request.botId}`});
+      // The account could be changed or moved while the claim was written; the task goes only where it was checked.
+      const now = browserAccountOf(s, request.botId);
+      if (now.missing) fail(ACCOUNT_GONE, 409);
+      if (now.account?.id !== account?.id || now.account?.deviceId !== account?.deviceId) fail('This bot\'s browser account changed. Approve again.', 409);
+      const {task} = agent.enqueueAgentTask(store, agentId, {kind: request.kind, payload: {url: request.url, steps: request.steps, botId: request.botId}, approved: approvedOf(request), ...(account ? {account: account.id} : {}), idempotencyKey: `browser:${id}`, createdBy: actor || `bot:${request.botId}`});
       taskId = task.id;
       current.agentTaskIds = [task.id]; current.notAfter = Date.now() + BROWSER_WAIT_MS; current.updatedAt = stamp();
       activity(s, 'agent', `Sent ${current.botName}'s browser request to a local agent.`, {requestId: id, taskId: task.id});
@@ -117,7 +142,7 @@ export async function dispatchBrowserRequest(store, id, {actor = null, runtime =
         await store.update(s => {
           const live = (s.browserRequests || []).find(r => r.id === id);
           if (!live || live.status !== 'dispatched' || (live.agentTaskIds || []).length) return;
-          live.status = 'pending'; delete live.approvedBy; delete live.via; live.updatedAt = stamp();
+          live.status = 'pending'; delete live.approvedBy; delete live.via; delete live.account; delete live.accountName; live.updatedAt = stamp();
         });
       } catch (revertError) { error.cause = revertError; }
     }
@@ -235,8 +260,12 @@ export async function beginTakeover(store, requestId, {actor = null, workspaceId
   if (runtime.mode === 'agent' || !runtime.available()) fail(`No browser is available on this server to take over. ${runtime.mode === 'agent'
     ? 'This install only runs browser requests on a paired device (BROWSER_RUNTIME=agent).'
     : 'Set AGENT_BROWSER_ALLOWLIST (a host list, or * for any public site) and install Chrome, or point AGENT_BROWSER_PATH at one.'}`, 409);
-  // A takeover always opens on the server's browser, which a bot pinned to one computer never uses.
-  if (pinnedDevice(store.read(), request.botId)) fail(PINNED_TAKEOVER, 409);
+  // A takeover always opens on the server's browser, which holds no browser account and which a bot pinned to one
+  // computer never uses.
+  const {account, missing} = browserAccountOf(store.read(), request.botId);
+  if (missing) fail(ACCOUNT_GONE, 409);
+  if (account) fail(ACCOUNT_TAKEOVER, 409);
+  if (browserDeviceOf(store.read(), request.botId)) fail(PINNED_TAKEOVER, 409);
   const view = await runtime.beginLive({url: request.url, requestId: request.id, openedBy: actor, workspaceId, lane: browserLane(store, request.botId)});
   return {...view, requestId: request.id};
 }
@@ -290,6 +319,52 @@ export async function expireBrowserTasks(store, hooks = resultHooks, nowMs = Dat
 /** Run `expireBrowserTasks` on a short cadence, so a page waits a bounded time even when no device beats. */
 export function startBrowserExpiry(ws, intervalMs = 30000) {
   return startSweep('Browser expiry', () => expireBrowserTasks(ws), {intervalMs, ws});
+}
+
+/** Revoke a computer and finish the pages it will never open. Revoking fails its queued and running work, and a run
+ * waiting on one of those pages only carries on when its request is finished, so each page's request is told here:
+ * the admin's revoke and a re-pair both come through this. */
+export async function revokeAgentFinishingPages(store, agentId, hooks = {}) {
+  const pages = store.all(
+    "SELECT id FROM agent_tasks WHERE agent_id=? AND kind IN ('browser.capture','browser.action') AND status IN ('queued','running')",
+    agentId,
+  ).map(task => task.id);
+  const result = agent.revokeAgent(store, agentId);
+  for (const id of pages) {
+    try { await onAgentTaskResult(store, id, hooks); }
+    catch (error) { console.error('Browser revocation:', error.message); }
+  }
+  return result;
+}
+
+/** On a re-paired computer's heartbeat, before anything reads which computer holds what: move the accounts and bot
+ * pins of the pairings it proved it replaces (`agent.pendingReplacement`), then retire them. Only pairings of its
+ * workspace that are still live count, so one the owner removed meanwhile keeps its accounts where they are. The move
+ * comes first and both steps are idempotent: a failure anywhere leaves the record, the beat fails (so the computer is
+ * sent no list it would wipe jars by), and the next beat finishes. The revoke and the record's removal are one write. */
+export async function finishReplacement(store, agentId, hooks = {}) {
+  const listed = agent.pendingReplacement(store, agentId);
+  if (!listed.length) return 0;
+  const me = store.get('SELECT workspace_id FROM agents WHERE id=?', agentId);
+  const old = listed.filter(id => id !== agentId && store.get('SELECT 1 AS x FROM agents WHERE id=? AND workspace_id=? AND revoked_at IS NULL', id, me?.workspace_id));
+  if (old.length) {
+    await store.update(s => {
+      for (const id of old) repointDevice(s, id, agentId);
+      activity(s, 'agent', 'A local agent was replaced by a computer that proved it was the same one. Its pages in flight were failed, and its accounts moved.', {agentId: old[old.length - 1]});
+    });
+  }
+  const pages = old.length ? store.all(
+    `SELECT id FROM agent_tasks WHERE agent_id IN (${old.map(() => '?').join(',')}) AND kind IN ('browser.capture','browser.action') AND status IN ('queued','running')`, ...old,
+  ).map(task => task.id) : [];
+  store.transaction(() => {
+    for (const id of old) agent.revokeAgent(store, id);
+    for (const id of [agentId, ...listed]) store.run('DELETE FROM kv WHERE key=?', agent.replacesKey(id));
+  });
+  for (const id of pages) {
+    try { await onAgentTaskResult(store, id, hooks); }
+    catch (error) { console.error('Browser revocation:', error.message); }
+  }
+  return old.length;
 }
 
 /** An agent reported on a task. A task that will retry changes nothing yet. */

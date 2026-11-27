@@ -7,11 +7,11 @@
  * off, but never grant an action (that is `contracts.js` permissions) or lift
  * the hard step cap.
  */
-import {cleanText} from './core.js?v=3cae02add8';
-import {fail} from './errors.js?v=3cae02add8';
-import {BACKSTOP} from './limits.js?v=3cae02add8';
-import {TINT_COUNT} from './ui-kit.js?v=3cae02add8';
-import {SHAPES} from './company.js?v=3cae02add8';
+import {cleanText} from './core.js?v=85aac70d41';
+import {fail} from './errors.js?v=85aac70d41';
+import {BACKSTOP} from './limits.js?v=85aac70d41';
+import {TINT_COUNT} from './ui-kit.js?v=85aac70d41';
+import {SHAPES} from './company.js?v=85aac70d41';
 
 export const REPLY_LENGTHS = {short: 500, medium: 1500, long: 3000};
 export const ROUTING_MODES = ['pipeline', 'mentions', 'everyone'];
@@ -61,8 +61,14 @@ export const BOT_DEFAULTS = Object.freeze({
    * use, or null for any computer. Only the owner sets it (src/routes-groups.js);
    * no model text can (it is not in BOT_SETTABLE or buildCreatedBot). */
   device: null,
+  /** The browser account (shared/browser-accounts.js) this bot's pages sign in as, or null for the computer's own
+   * browser. Only the owner sets it (src/routes-groups.js); no model text can (it is not in BOT_SETTABLE or
+   * buildCreatedBot). */
+  browserAccount: null,
 });
-const DEVICE_ID = /^[A-Za-z0-9-]{1,64}$/;
+export const DEVICE_ID = /^[A-Za-z0-9-]{1,64}$/;
+/** A browser account's id: a UUID the server made. The device accepts nothing else before it builds a path. */
+export const ACCOUNT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 export const BROWSER_APPROVALS = ['ask', 'auto'];
 
 export const GROUP_DEFAULTS = Object.freeze({
@@ -149,6 +155,10 @@ export function validateBotSettings(body, current = {}) {
   if (body.device !== undefined) {
     if (body.device !== null && body.device !== '' && !(typeof body.device === 'string' && DEVICE_ID.test(body.device))) fail("A computer must be a paired computer's id, or empty for any computer.");
     next.device = body.device || null;
+  }
+  if (body.browserAccount !== undefined) {
+    if (body.browserAccount !== null && body.browserAccount !== '' && !(typeof body.browserAccount === 'string' && ACCOUNT_ID.test(body.browserAccount))) fail("A browser account must be an account's id, or empty for the computer's own browser.");
+    next.browserAccount = body.browserAccount || null;
   }
   return next;
 }

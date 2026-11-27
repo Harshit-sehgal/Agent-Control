@@ -9,7 +9,7 @@ import {chooseDevice, readAgentFeatures, recordAgentFeatures, redeemPairing} fro
 import {SqliteStore} from '../src/sqlite-store.js';
 import * as wf from '../shared/workflow.js';
 import {createApp} from '../src/app.js';
-import {FEATURES, FEATURE_GRACE_DAYS, DEVICE_FEATURES, SECRET_INPUT_V1, cleanFeatures, hasFeature, neededNow, requiredNow, updateNeeded} from '../shared/device-features.js';
+import {FEATURES, FEATURE_GRACE_DAYS, DEVICE_FEATURES, SECRET_INPUT_V1, BROWSER_ACCOUNTS_V1, cleanFeatures, hasFeature, neededNow, requiredNow, updateNeeded} from '../shared/device-features.js';
 
 /* The device feature list: needed or preferred, the 60 days a preferred one keeps the older path, and what a device
  * says when it pairs. Every rule here fails closed: an unknown name, a malformed list or a missing kv means "lacks it". */
@@ -40,7 +40,8 @@ test('the list is well formed, and what the device reports is every name on it',
   }
   assert.equal(new Set(FEATURES.map(f => f.name)).size, FEATURES.length);
   assert.deepEqual(DEVICE_FEATURES, FEATURES.map(f => f.name));
-  assert.deepEqual(DEVICE_FEATURES, [SECRET_INPUT_V1], 'Phase 1 adds no feature name');
+  assert.deepEqual(DEVICE_FEATURES, [SECRET_INPUT_V1, BROWSER_ACCOUNTS_V1], 'Phase 2 adds browser-accounts-v1');
+  assert.deepEqual(FEATURES.find(f => f.name === BROWSER_ACCOUNTS_V1), {name: BROWSER_ACCOUNTS_V1, since: '2026-11-27', use: 'needed', what: 'keep separate browser accounts'});
   assert.deepEqual(FEATURES.find(f => f.name === SECRET_INPUT_V1), {name: SECRET_INPUT_V1, since: '2026-11-26', use: 'needed', what: 'type passwords and codes'});
   assert.equal(FEATURE_GRACE_DAYS, 60);
 });
@@ -69,8 +70,9 @@ test("a preferred feature's older path still answers inside the 60 days, and is 
 });
 
 test('which features a device needs an update for: none when it has them, a malformed list counts as none', () => {
-  assert.deepEqual(updateNeeded([SECRET_INPUT_V1]), []);
-  for (const none of [[], undefined, null, 'secret-input-v1', {}, 7]) assert.deepEqual(updateNeeded(none).map(f => f.name), [SECRET_INPUT_V1]);
+  assert.deepEqual(updateNeeded(DEVICE_FEATURES), []);
+  assert.deepEqual(updateNeeded([SECRET_INPUT_V1]).map(f => f.name), [BROWSER_ACCOUNTS_V1], 'an app from before Phase 2 is asked for browser accounts only');
+  for (const none of [[], undefined, null, 'secret-input-v1', {}, 7]) assert.deepEqual(updateNeeded(none).map(f => f.name), [SECRET_INPUT_V1, BROWSER_ACCOUNTS_V1]);
   assert.deepEqual(updateNeeded([], {nowMs: Date.parse('2026-12-02'), list: LIST}).map(f => f.name), ['must-v1'], 'a preferred one inside its window is not asked for yet');
   assert.deepEqual(updateNeeded([], {nowMs: at(60), list: LIST}).map(f => f.name), ['new-thing-v1', 'must-v1'], 'past its window it is');
   assert.deepEqual(updateNeeded(['must-v1'], {nowMs: at(60), list: LIST}).map(f => f.name), ['new-thing-v1']);
@@ -128,6 +130,6 @@ test('pairing is one write: a failed feature record leaves no used code and no a
 });
 
 test('updateNeeded with a list that is not an array fails closed, like neededNow', () => {
-  assert.deepEqual(updateNeeded([], {list: null}).map(f => f.name), [SECRET_INPUT_V1], 'the shipped list answers instead of nothing');
+  assert.deepEqual(updateNeeded([], {list: null}).map(f => f.name), [SECRET_INPUT_V1, BROWSER_ACCOUNTS_V1], 'the shipped list answers instead of nothing');
   assert.equal(neededNow('x-v1', {list: null}), true);
 });

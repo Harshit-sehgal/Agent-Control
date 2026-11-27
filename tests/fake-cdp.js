@@ -11,6 +11,31 @@ import {FOCUSED_IS_SECRET_JS, TAG_FOCUSED_SECRET_JS, CLEAR_SECRETS_ON_HANDBACK_J
  */
 export function fakeCdp({pages = {}} = {}) {
   const calls = [], tagged = [], cleared = [], listeners = new Map(), closers = [], hooks = {}, targets = new Map(), actions = [], input = [];
+  // Browser contexts: id -> {cookies}. `null` is the default context, which always exists.
+  const contexts = new Map([[null, {cookies: []}]]);
+  const contextNamed = id => {
+    const context = contexts.get(id ?? null);
+    if (!context) throw new Error(`Failed to find browser context with id ${id}`);
+    return context;
+  };
+  // What Storage.setCookies accepts (CookieParam). Chrome ignores a field it does not know; this fake is deliberately
+  // stricter and refuses one, so a jar that carries more than the cookie's own fields fails a test.
+  const COOKIE_PARAM = new Set(['name', 'value', 'url', 'domain', 'path', 'secure', 'httpOnly', 'sameSite', 'expires', 'priority', 'sameParty', 'sourceScheme', 'sourcePort', 'partitionKey']);
+  const asCookie = param => {
+    for (const key of Object.keys(param)) if (!COOKIE_PARAM.has(key)) throw new Error(`Invalid parameters: unexpected cookie field ${key}`);
+    if (typeof param.name !== 'string' || typeof param.value !== 'string') throw new Error('Invalid parameters: a cookie needs a name and a value');
+    const session = !(param.expires > 0);
+    return {path: '/', secure: false, httpOnly: false, ...param, expires: session ? -1 : param.expires, size: param.name.length + param.value.length, session};
+  };
+  const hostOf = url => { try { return new URL(url).hostname; } catch { return ''; } };
+  // A cookie goes to a page when its domain is the page's host or a parent of it.
+  const sentTo = (cookie, url) => { const host = hostOf(url), domain = String(cookie.domain || '').replace(/^\./, ''); return !domain || host === domain || host.endsWith(`.${domain}`); };
+  /** What a url shows for the cookies the page's context holds: a `pages` value may be a function of them. */
+  const shownFor = page => {
+    const value = pages[page.url];
+    if (typeof value !== 'function') return value || {};
+    return value({cookies: contexts.get(page.browserContextId ?? null)?.cookies.filter(c => sentTo(c, page.url)).map(c => ({...c})) || []}) || {};
+  };
   const state = {focusSecret: false};
   let seq = 0, closed = false;
 
@@ -21,7 +46,7 @@ export function fakeCdp({pages = {}} = {}) {
 
   const evaluate = (expression, sessionId) => {
     const page = pageOf(sessionId) || {url: 'about:blank', title: ''};
-    const shown = pages[page.url] || {};
+    const shown = shownFor(page);
     const snapshot = {count: (shown.elements || []).length, elements: shown.elements || []};
     // The takeover's two questions about the focused field: is it secret (answered by `focusSecret`), and the tag.
     if (expression === FOCUSED_IS_SECRET_JS) {
@@ -49,7 +74,8 @@ export function fakeCdp({pages = {}} = {}) {
     switch (method) {
       case 'Target.createTarget': {
         const targetId = `T${++seq}`;
-        targets.set(targetId, {targetId, sessionId: null, url: params.url || 'about:blank', title: '', type: 'page'});
+        contextNamed(params.browserContextId); // a target in a context that is gone is refused
+        targets.set(targetId, {targetId, sessionId: null, url: params.url || 'about:blank', title: '', type: 'page', browserContextId: params.browserContextId ?? null});
         return {targetId};
       }
       case 'Target.attachToTarget': {
@@ -58,11 +84,32 @@ export function fakeCdp({pages = {}} = {}) {
         target.sessionId = `S${++seq}`;
         return {sessionId: target.sessionId};
       }
-      case 'Target.getTargets': return {targetInfos: [...targets.values()].map(({targetId, url, title, type}) => ({targetId, url, title, type}))};
+      case 'Target.getTargets': return {targetInfos: [...targets.values()].map(({targetId, url, title, type, browserContextId}) => ({targetId, url, title, type, ...(browserContextId ? {browserContextId} : {})}))};
+      case 'Target.createBrowserContext': {
+        const id = `C${++seq}`;
+        contexts.set(id, {cookies: []});
+        return {browserContextId: id};
+      }
+      case 'Target.disposeBrowserContext': {
+        if (params.browserContextId == null || !contexts.has(params.browserContextId)) throw new Error(`Failed to find context with id ${params.browserContextId}`);
+        contexts.delete(params.browserContextId);
+        for (const [id, target] of targets) if (target.browserContextId === params.browserContextId) targets.delete(id);
+        return {};
+      }
+      case 'Storage.getCookies': return {cookies: contextNamed(params.browserContextId).cookies.map(c => ({...c}))};
+      case 'Storage.setCookies': {
+        const context = contextNamed(params.browserContextId);
+        const next = (params.cookies || []).map(asCookie); // all or nothing, as Chrome does
+        for (const cookie of next) {
+          const same = c => c.name === cookie.name && c.domain === cookie.domain && c.path === cookie.path;
+          context.cookies = [...context.cookies.filter(c => !same(c)), cookie];
+        }
+        return {};
+      }
       case 'Target.closeTarget': return {success: targets.delete(params.targetId)};
       case 'Page.navigate': {
         const page = pageOf(sessionId);
-        if (page) { page.url = params.url; page.title = pages[params.url]?.title || ''; }
+        if (page) { page.url = params.url; page.title = shownFor(page).title || ''; }
         setTimeout(() => emit('Page.loadEventFired', {}, sessionId), 0);
         return {frameId: 'F'};
       }
@@ -84,6 +131,15 @@ export function fakeCdp({pages = {}} = {}) {
   };
   return {
     cdp, calls, pages, actions, input, targets, tagged, cleared,
+    /** Put a cookie (as Storage.getCookies reports it) in a browser context, as if a sign-in had set it. */
+    setCookie: (contextId, cookie) => {
+      const context = contextNamed(contextId);
+      context.cookies = [...context.cookies.filter(c => !(c.name === cookie.name && c.domain === cookie.domain && c.path === (cookie.path ?? '/'))), {path: '/', ...cookie}];
+    },
+    /** The ids of the contexts that exist now (the default one is not listed). */
+    contexts: () => [...contexts.keys()].filter(id => id !== null),
+    /** The cookies a context holds. */
+    cookiesOf: contextId => contextNamed(contextId).cookies.map(c => ({...c})),
     /** Whether the focused field answers "secret" to the takeover's check (true, false, or 'throws'). */
     set focusSecret(value) { state.focusSecret = value; },
     connection: {cdp},

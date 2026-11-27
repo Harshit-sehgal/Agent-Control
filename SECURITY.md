@@ -167,11 +167,29 @@ replay cache reject replays; agents run only permission-gated task kinds.
   allowlisted `browser.capture`, and `browser.action` (click, type, read
   steps) granted per device. With `AGENT_BROWSER=1` capture and action run in
   one real Chrome with a saved profile (`browser-profile/`, mode 0700) that
-  every bot shares, so a site the owner signed in to there is signed in for
-  every bot. A click that sends, posts or pays runs only after the ask for it
+  every bot without a browser account shares, so a site the owner signed in to
+  there is signed in for each of them; a bot that signs in as a browser account
+  uses that account's own context instead. A click that sends, posts or pays runs only after the ask for it
   was answered (or an Always allow covers it).
   A spawned sub-agent is a model call, not a client: it never sees a token, a
   device or a request queue.
+- A browser account's cookie jar is as valuable as a password. A jar is
+  `browser-accounts/<id>.jar` next to the local agent's config (or in
+  `AGENT_BROWSER_ACCOUNTS`), in a folder of mode 0700, each file mode 0600. It is
+  AES-256-GCM under a key derived with HKDF from the computer's pairing secret
+  and bound to its account id. It never leaves that computer: the server keeps
+  only each account's name, site and computer, and the state the computer
+  reports, never a cookie. It is not in `npm run backup`, and the agent wipes it
+  when the account is deleted or the computer pairs with another server. The key
+  protects a copied file, not a compromised server: the server holds the pairing
+  secret (encrypted in its vault) and could derive the key, and so can anyone who
+  can read the agent's config on that computer. Treat a jar like a password
+  file: keep the folder out of your own backups and do not share it. A bot's
+  account is the owner's setting and never comes from model text, a bot with an
+  account never runs in the server's own browser, and the computer checks the
+  account before every step. A site that keeps its sign-in outside cookies is
+  signed out again after a restart. Re-pairing the same computer keeps its jars
+  only when it proves it held the old secret.
 - TLS: for anything beyond loopback, terminate HTTPS at a reverse proxy
   (recommended) or set `TLS_CERT` and `TLS_KEY` together for in-process
   HTTPS. HSTS, startup validation and `docs/DEPLOYMENT.md` cover the rest.

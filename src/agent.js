@@ -22,10 +22,13 @@ import crypto from 'node:crypto';
 import {fail} from '../shared/errors.js';
 import {cleanText} from '../shared/core.js';
 import {validateBrowserRequest} from '../shared/bot-browser.js';
+import {ACCOUNT_ID} from '../shared/bot-settings.js';
 import {cliEngineById,cleanCliModel,cleanEffort,LOCAL_CLI_ENGINE_IDS} from '../shared/ai-presets.js';
 import {cleanFeatures,hasFeature} from '../shared/device-features.js';
+import {cleanAccountReport,ACCOUNT_STATES} from '../shared/browser-accounts.js';
 import {base64Bytes,sniffType,isImage,MAX_FILES,MODEL_IMAGE_BYTES,MODEL_IMAGES_TOTAL} from '../shared/attachments.js';
 import {encryptJson,decryptJson,sha256,loadMasterKey} from './vault.js';
+import {peek} from './sqlite-store.js';
 
 /** Told when a task is queued for a device (src/server.js points it at the live
  * hub). A no-op by default, so this module needs nothing else to be loaded. */
@@ -229,8 +232,35 @@ export function createPairing(store, workspaceId, {label, createdBy, permissions
   return {code, expiresAt: expires, ttlSeconds: Math.round(ttlMs / 1000), permissions: scope};
 }
 
-/** Exchange a pairing code for agent credentials. */
-export function redeemPairing(store, {code, name, permissions = [], features}) {
+/** The computer a pairing replaces, or null. Only a computer of the code's workspace that is not revoked, whose
+ * caller proves it still holds its secret: `previous.proof` is HMAC-SHA256(old secret, 're-pair\n' + code) in hex.
+ * Anything else pairs a new computer and moves nothing. */
+function provenPrevious(store, workspaceId, code, previous) {
+  const {agentId, proof} = previous && typeof previous === 'object' ? previous : {};
+  if (typeof agentId !== 'string' || typeof proof !== 'string' || !/^[0-9a-f]{64}$/i.test(proof)) return null;
+  const old = store.get('SELECT * FROM agents WHERE id=? AND workspace_id=? AND revoked_at IS NULL', agentId, workspaceId);
+  if (!old) return null;
+  let secret;
+  try { secret = decryptJson(store.vaultKey, JSON.parse(old.secret_enc)).secret; } catch { return null; }
+  const expected = crypto.createHmac('sha256', secret).update(`re-pair\n${code}`).digest();
+  const given = Buffer.from(proof, 'hex');
+  return given.length === expected.length && crypto.timingSafeEqual(given, expected) ? old.id : null;
+}
+
+/** A proven re-pair is kept in kv `agent_replaces:<newId>` as the list of earlier ids it takes over, oldest first, and
+ * nothing moves until that new id's first heartbeat (`finishReplacement` in src/bot-browser.js): a reply the computer
+ * never read leaves the old pairing working. A pairing that replaces one which never beat takes over that one's list too. */
+export const replacesKey = agentId => `agent_replaces:${agentId}`;
+export function pendingReplacement(store, agentId) {
+  try {
+    const list = JSON.parse((typeof store.kvGet === 'function' && store.kvGet(replacesKey(agentId))) || '[]');
+    return Array.isArray(list) ? list.filter(id => typeof id === 'string') : [];
+  } catch { return []; }
+}
+
+/** Exchange a pairing code for agent credentials. `replaced` says whether the caller's proof of an earlier pairing was
+ * taken; its accounts and bot pins move on the new id's first heartbeat. */
+export function redeemPairing(store, {code, name, permissions = [], features, previous}) {
   const row = store.get('SELECT * FROM pairing_codes WHERE code_hash=?', sha256(String(code || '')));
   if (!row) fail('This pairing code is not valid.', 401);
   if (row.consumed_at) fail('This pairing code has already been used.', 409);
@@ -246,6 +276,7 @@ export function redeemPairing(store, {code, name, permissions = [], features}) {
   const granted = requested.filter(p => allowed.includes(p));
   // The secret is stored encrypted; pairing_codes keeps only hashes.
   const stored = JSON.stringify(encryptJson(store.vaultKey, {secret}));
+  const replaces = provenPrevious(store, row.workspace_id, String(code), previous);
   store.transaction(() => {
     store.run('UPDATE pairing_codes SET consumed_at=? WHERE code_hash=?', now(), sha256(String(code)));
     store.run('INSERT INTO agents (id,workspace_id,name,secret_hash,secret_enc,status,permissions,paired_by,paired_at) VALUES (?,?,?,?,?,?,?,?,?)',
@@ -253,15 +284,16 @@ export function redeemPairing(store, {code, name, permissions = [], features}) {
     // What its app can do, so work that needs a feature is not refused before the first heartbeat (an older app sends
     // none). In the same write: a failure here must not leave a used code and an agent behind.
     if (features !== undefined) recordAgentFeatures(store, agentId, features);
+    if (replaces) store.kvSet(replacesKey(agentId), JSON.stringify([...new Set([...pendingReplacement(store, replaces), replaces])]));
   });
-  return {agentId, secret, workspaceId: row.workspace_id, permissions: granted, pollIntervalMs: 30000};
+  return {agentId, secret, workspaceId: row.workspace_id, permissions: granted, pollIntervalMs: 30000, replaced: Boolean(replaces)};
 }
 
 export const agentTaskKinds = () => [...AGENT_ACTIONS];
 
 /** Enqueue work for a paired agent. Idempotency is per-agent so a repeated
  * request (double-clicked button, retried polling) cannot run a job twice. */
-export function enqueueAgentTask(store, agentId, {kind, payload = {}, idempotencyKey, createdBy, permission, approved = []}) {
+export function enqueueAgentTask(store, agentId, {kind, payload = {}, idempotencyKey, createdBy, permission, approved = [], account = null}) {
   if (!AGENT_ACTIONS.includes(kind)) fail(`Unknown agent task kind. Expected one of: ${agentTaskKinds().join(', ')}.`);
   // Every enqueue goes through here — the pairing route, the queue scheduler and
   // the bot's own request — so the browser rules are enforced once, at the choke
@@ -276,7 +308,10 @@ export function enqueueAgentTask(store, agentId, {kind, payload = {}, idempotenc
     // only the bot-browser dispatch passes it, so no route, schedule or model text can widen it. Absent
     // means none: the device refuses every risky control.
     const cleared = (Array.isArray(approved) ? approved : []).filter(a => typeof a === 'string').slice(0, 8);
-    payload = {url: request.url, steps: request.steps, ...(botId ? {botId} : {}), ...(cleared.length ? {approved: cleared} : {})};
+    payload = {url: request.url, steps: request.steps, ...(botId ? {botId} : {}), ...(cleared.length ? {approved: cleared} : {}),
+      // Like `approved`, the account is an argument: only the bot-browser dispatch passes it, from the bot's record. The
+      // computer is the one the task is queued for, so a task can never name a computer it is not on.
+      ...(typeof account === 'string' && ACCOUNT_ID.test(account) ? {account, deviceId: agentId} : {})};
   }
   if (kind === 'model.run') payload = validateModelRun(payload);
   if (kind === 'mcp.call') payload = validateMcpCall(payload);
@@ -449,6 +484,31 @@ export function recordAgentFeatures(store, agentId, reported) {
   if (typeof store.kvSet !== 'function') return;
   store.kvSet(`agent_features:${agentId}`, JSON.stringify(cleanFeatures(reported)));
 }
+/** What a computer says of its browser accounts (shared/browser-accounts.js), kept in kv `agent_accounts:<agentId>`:
+ * only the entries for accounts that name this computer, each as `{id, state, storage, lost?, checkedAt}`. A cookie
+ * value is not a field here, so it cannot be stored. A beat with no list (an older app, or one that is not a list)
+ * writes nothing, so the last report stands. No report reads signed out. */
+export function recordAccountReports(store, agentId, reported) {
+  if (!Array.isArray(reported) || typeof store.kvSet !== 'function') return;
+  const ids = (peek(store).browserAccounts || []).filter(a => a.deviceId === agentId).map(a => a.id);
+  // `checkedAt` is when an entry's finding was first heard: an entry that says what it said last keeps its time, and a
+  // report that is the same as the last one is not written again (a computer beats every few seconds).
+  const before = new Map(readAccountReports(store, agentId).map(r => [r.id, r]));
+  const same = (r, was) => was && was.state === r.state && Boolean(was.lost) === Boolean(r.lost);
+  const at = now();
+  const next = cleanAccountReport(reported, ids).map(r => ({...r, checkedAt: same(r, before.get(r.id)) && before.get(r.id).checkedAt ? before.get(r.id).checkedAt : at}));
+  if (next.length === before.size && next.every(r => same(r, before.get(r.id)) && r.checkedAt === before.get(r.id).checkedAt)) return;
+  store.kvSet(`agent_accounts:${agentId}`, JSON.stringify(next));
+}
+export function readAccountReports(store, agentId) {
+  try {
+    const raw = typeof store.kvGet === 'function' ? store.kvGet(`agent_accounts:${agentId}`) : null;
+    const list = raw ? JSON.parse(raw) : [];
+    return (Array.isArray(list) ? list : []).filter(r => r && typeof r.id === 'string' && ACCOUNT_STATES.includes(r.state))
+      .map(r => ({id: r.id, state: r.state, storage: 'cookies', ...(r.lost === true ? {lost: true} : {}), checkedAt: typeof r.checkedAt === 'string' ? r.checkedAt : null}));
+  } catch { return []; }
+}
+
 export function readAgentFeatures(store, agentId) {
   try {
     const raw = typeof store.kvGet === 'function' ? store.kvGet(`agent_features:${agentId}`) : null;

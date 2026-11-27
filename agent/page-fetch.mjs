@@ -84,3 +84,13 @@ export function preferRead(seen, plain) {
   if (length(seen) >= 300 || !plain || turnedAway(plain) || length(plain) <= length(seen) * 2) return seen;
   return plain;
 }
+
+/** Whether a page the browser answered is read once more by a plain, cookieless fetch: it was turned away, or came
+ * back under 300 characters, and the task is a plain read. Never for a task with steps (a plain read only reads), and
+ * never for a page read as a browser account: a cookieless read shows the page signed out and would be passed off as
+ * the account's, so the browser's own answer stands. */
+export function plainFallback(task, seen) {
+  const payload = task?.payload;
+  if (payload?.account || payload?.steps?.length) return false;
+  return turnedAway(seen) || String(seen?.text || '').trim().length < 300;
+}
