@@ -109,7 +109,7 @@ function statusLine(conv) {
 
 /* ---------- entries ---------- */
 
-const BROWSER_STATUS = {pending: ['Waiting on you', 'warn'], dispatched: ['Running', 'warn'], done: ['Done', 'good'], failed: ['Failed', 'bad'], denied: ['Not allowed', '']};
+const BROWSER_STATUS = {pending: ['Waiting on you', 'warn'], dispatched: ['Running', 'warn'], done: ['Done', 'good'], failed: ['Failed', 'bad'], denied: ['Not allowed', ''], signin: ['Waiting for you to sign in', 'warn']};
 /** A bot's request to open a page. It says where it runs (this server or a paired
  * device), so "nothing happened" has an obvious cause. */
 function browserEntry(m, conv) {
@@ -140,7 +140,10 @@ function askEntry({message: m}, conv) {
   if (!card.open) lastsPicked.delete(m.askId);
   if (!card.open) return `<div class="cv-note cv-asked" data-ask="${esc(m.askId)}"><span>${esc(card.text)}</span></div>`;
   const bot = findBot(card.botId) || askerOf(conv), name = card.botName;
-  const choose = ({id, label, primary}) => btn(label, 'ask-answer', {id: card.askId, small: true, kind: primary ? 'primary' : 'quiet', data: {choice: id}});
+  // Take control is the sign-in card's one yes: it opens the bot's browser, and signing in there answers the card.
+  const choose = ({id, label, primary}) => id === 'signin'
+    ? btn(label, 'signin-take-control', {id: card.askId, small: true, kind: 'primary'})
+    : btn(label, 'ask-answer', {id: card.askId, small: true, kind: primary ? 'primary' : 'quiet', data: {choice: id}});
   // How long an Always allow lasts: no end by default, or an hour, or the rest of today (asks.js untilFor).
   const picked = lastsPicked.get(card.askId) || 'always';
   const lasts = card.choices.some(c => c.id === 'always') ? `<select class="ask-for" data-action="ask-for" data-for="${esc(card.askId)}" aria-label="How long Always allow lasts">${UNTIL_CHOICES.map(([id, label]) => `<option value="${id}"${id === picked ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select>` : '';
@@ -469,6 +472,16 @@ const offjobOf = button => {
 };
 const hop = node => { const f = node?.querySelector('.face'); if (f) { f.classList.remove('face--hop'); void f.getBoundingClientRect(); f.classList.add('face--hop'); } };
 
+/** The owner signs in by hand in the shared browser: take the bot's tab, send it to the site, show it. The setup
+ * card's Sign in and a sign-in ask card's Take control both come here. */
+async function takeControl(botId, url) {
+  if (isStaticDemo()) return toast('Signing in needs the app running on your computer.');
+  go({profile: botId, sub: 'computer'});
+  await api(`/api/browser-live/${encodeURIComponent(botId)}/takeover`, 'POST', {});
+  await api(`/api/browser-live/${encodeURIComponent(botId)}/input`, 'POST', {type: 'navigate', url});
+  toast('You are in control. Sign in, then tap Hand back control.');
+}
+
 /** The owner's answer to an ask card. The run that was parked on it carries on from the server, so the poll
  * (and the pill) follow it from here. */
 async function answerAsk(id, answer) {
@@ -480,7 +493,8 @@ async function answerAsk(id, answer) {
   const {ask, undo} = await api(`/api/asks/${encodeURIComponent(id)}`, 'POST', {answer, ...(until ? {until} : {})});
   lastsPicked.delete(id);
   await sync();
-  if (answer !== 'always') { toast(answer === 'decline' ? 'Not allowed.' : 'Allowed once.'); return; }
+  // A sign-in card's Not now needs no toast: the card collapses to "You chose not now".
+  if (answer !== 'always') { if (ask?.kind !== 'signin') toast(answer === 'decline' ? 'Not allowed.' : 'Allowed once.'); return; }
   const name = findBot(ask?.botId)?.name || 'The bot';
   undoToast(lasts === '1h' ? `${name} may do this for the next hour.` : lasts === 'today' ? `${name} may do this until the end of today.` : `${name} may always do this.`, undo);
 }
@@ -492,6 +506,12 @@ export const conversationChanges = {
 
 export const conversationActions = {
   'ask-answer': b => answerAsk(b.dataset.id, b.dataset.choice),
+  // The sign-in card's Take control: the ask's own bot and address, read from the state, not from the page.
+  'signin-take-control': b => {
+    const ask = (store.state?.asks || []).find(a => a.id === b.dataset.id);
+    if (!ask || ask.kind !== 'signin' || ask.status !== 'pending') throw new Error('That sign-in is no longer waiting.');
+    return takeControl(ask.botId, ask.url);
+  },
   // The pinned-replies strip: open or close its list, or bring one pinned reply into view.
   'pins-toggle': b => {
     const open = b.getAttribute('aria-expanded') !== 'true';
@@ -555,14 +575,7 @@ export const conversationActions = {
     const confirm = setupConfirm(card, findBot(card.botId)?.name);
     if (confirm && !(await confirmSheet('Always allow payments here?', {confirm: 'Always allow', danger: true, detail: confirm}))) return;
     if (card.action === 'open') return go({settings: card.section});
-    if (card.action === 'signin') {
-      // The owner signs in by hand in the shared browser: take the bot's tab, send it to the site, show it.
-      if (isStaticDemo()) return toast('Signing in needs the app running on your computer.');
-      go({profile: card.botId, sub: 'computer'});
-      await api(`/api/browser-live/${encodeURIComponent(card.botId)}/takeover`, 'POST', {});
-      await api(`/api/browser-live/${encodeURIComponent(card.botId)}/input`, 'POST', {type: 'navigate', url: card.url});
-      return toast('You are in control. Sign in, then tap Hand back control.');
-    }
+    if (card.action === 'signin') return takeControl(card.botId, card.url);
     // A connector to check again or sign in to again, a catalogue app, a new thread: the same taps as their own pages.
     if (card.action === 'reconnect' && card.app) return void window.location.assign(`/api/connectors/mcp/start?app=${encodeURIComponent(card.app)}`);
     if (card.action === 'connect') {

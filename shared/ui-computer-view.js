@@ -320,15 +320,18 @@ function wireStage(s) {
 const botName = id => findBot(id)?.name || 'The bot';
 /** Leave the full-screen view. Closing while you drive hands the browser back, so no run is left waiting on you. */
 async function close(botId) {
-  if (session?.botId === botId && stateOf(session) === 'driving') await hold(botId, 'handback').catch(() => {});
+  const gave = session?.botId === botId && stateOf(session) === 'driving' ? await hold(botId, 'handback').catch(() => null) : null;
   back();
+  if (gave?.signedIn) toast(carriesOn(botId));
 }
+/** What a hand back says when it answered a sign-in card: the held request went on by itself. */
+const carriesOn = botId => `Signed in. ${botName(botId)}'s task carries on.`;
 async function hold(botId, action) {
   const reply = await api(`/api/browser-live/${encodeURIComponent(botId)}/${action}`, 'POST', {});
   const state = reply?.state || (action === 'takeover' ? 'driving' : 'idle');
   if (session?.botId === botId) session.view = {...session.view, state};
   patchLive(botId, {state});
-  return state;
+  return {state, signedIn: reply?.signedIn || null};
 }
 
 export const computerActions = {
@@ -340,8 +343,8 @@ export const computerActions = {
     toast(`You are in control of ${botName(b.dataset.id)}'s browser.`);
   },
   'computer-handback': async b => {
-    await hold(b.dataset.id, 'handback');
-    toast(`${botName(b.dataset.id)} has the browser back.`);
+    const {signedIn} = await hold(b.dataset.id, 'handback');
+    toast(signedIn ? carriesOn(b.dataset.id) : `${botName(b.dataset.id)} has the browser back.`);
   },
   'computer-close': b => close(b.dataset.id),
   // The header's back arrow leaves the same way the close button does.

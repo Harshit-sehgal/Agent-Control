@@ -7,8 +7,11 @@
  * An ask is a line in a chat (`{kind: 'ask', askId, text}`) whose status lives in
  * `state.asks`, so answering never rewrites a line. A grant is `{botId, action,
  * scope, choice}` in `state.grants`. */
-import {ASK_ANSWER_LABELS, GRANT_LABELS, ASK_ACTIONS, UNTIL_CHOICES, askChoices, acrossSites, grantChoices, answeredText, grantFor, isAskAction, scopeOf, grantEnded} from './asks.js';
+import {ASK_ANSWER_LABELS, GRANT_LABELS, ASK_ACTIONS, UNTIL_CHOICES, askChoices, acrossSites, grantChoices, answeredText, grantFor, isAskAction, scopeOf, grantEnded, isSigninAsk, askText} from './asks.js';
 import {limitsOf, FAIL_STREAK} from './limits.js';
+
+/** The sign-in card's note: what Take control does and what happens after Hand back. */
+export const signinNote = ask => `Take control opens ${ask?.accountName}'s browser on its computer. Sign in there, then tap Hand back, and the task carries on by itself.`;
 
 export const PAUSE_TEXT = 'All bots are paused. Nothing runs until you resume.';
 /** The banner while everything bots start is paused; `resume` says whether this person may lift it. */
@@ -29,6 +32,12 @@ export function askCard(state, line) {
     const said = ask ? answeredText(ask) : 'Answered';
     return {open: false, botId: ask?.botId || null, botName, text: copy && ask ? `${said} (${botName})` : said, choices: [], note: '', target: '', body: ''};
   }
+  // A sign-in card is answered by signing in, never by a grant: Take control and Not now, no Allow and no Always allow.
+  if (isSigninAsk(ask)) return {
+    open: true, ask, askId: ask.id, botId: ask.botId, botName, text: line.text, question: askText(ask, botName), note: signinNote(ask),
+    choices: [{id: 'signin', label: 'Take control', primary: true}, {id: 'decline', label: 'Not now', primary: false}],
+    target: '', body: '', url: ask.url,
+  };
   return {
     open: true, ask, askId: ask.id, botId: ask.botId, botName, text: line.text,
     question: askQuestion(ask, botName),
