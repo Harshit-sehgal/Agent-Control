@@ -178,18 +178,21 @@ test('a proven re-pair moves nothing at pairing: the new computer\'s first beat 
 
 test('a re-pair whose reply never reached the computer leaves the old one working, and a later re-pair still keeps its accounts', async t => {
   const {store, pair, newCode, beatAs, device: d1} = await harness(t);
-  await store.update(s => { s.browserAccounts = [acct(A, d1.agentId)]; });
+  await store.update(s => { s.browserAccounts = [acct(A, d1.agentId)]; s.groups.push({id: 'g-t', name: 'Team', bots: [{id: 'pinned', name: 'Pinned', settings: {device: d1.agentId}}]}); });
+  const pin = () => store.read().groups.flatMap(g => g.bots).find(b => b.id === 'pinned').settings.device;
   const lostCode = newCode();
   // The server answered, but the computer never read it: it keeps its old pairing.
   assert.equal((await pair({code: lostCode, name: 'Laptop', previous: {agentId: d1.agentId, proof: proofOf(d1.secret, lostCode)}})).body.replaced, true);
   for (let i = 0; i < 2; i++) assert.deepEqual((await beatAs(d1, {})).body.accounts, [{id: A, site: 'crm.example.com'}]);
   assert.equal(store.get('SELECT revoked_at FROM agents WHERE id=?', d1.agentId).revoked_at, null);
+  assert.equal(pin(), d1.agentId, 'the bot pin stays on the old computer');
   // It pairs again with a fresh code, proving the same old secret, and this time hears the reply.
   const code = newCode();
   const again = await pair({code, name: 'Laptop', previous: {agentId: d1.agentId, proof: proofOf(d1.secret, code)}});
   assert.equal(again.body.replaced, true);
   assert.deepEqual((await beatAs(again.body, {})).body.accounts, [{id: A, site: 'crm.example.com'}]);
   assert.deepEqual(store.read().browserAccounts.map(a => a.deviceId), [again.body.agentId]);
+  assert.equal(pin(), again.body.agentId);
 });
 
 test('a re-pair made again before the first new pairing ever beat still reaches the accounts', async t => {
@@ -208,7 +211,8 @@ test('a re-pair made again before the first new pairing ever beat still reaches 
 
 test('a re-pair whose move fails on the first beat answers an error, lists nothing short, and finishes on the next beat', async t => {
   const {store, pair, newCode, beatAs, device: d1} = await harness(t);
-  await store.update(s => { s.browserAccounts = [acct(A, d1.agentId)]; });
+  await store.update(s => { s.browserAccounts = [acct(A, d1.agentId)]; s.groups.push({id: 'g-t', name: 'Team', bots: [{id: 'pinned', name: 'Pinned', settings: {device: d1.agentId}}]}); });
+  const pin = () => store.read().groups.flatMap(g => g.bots).find(b => b.id === 'pinned').settings.device;
   const revoked = id => store.get('SELECT revoked_at FROM agents WHERE id=?', id).revoked_at;
   const code = newCode();
   const d2 = (await pair({code, name: 'Laptop', previous: {agentId: d1.agentId, proof: proofOf(d1.secret, code)}})).body;
@@ -219,6 +223,7 @@ test('a re-pair whose move fails on the first beat answers an error, lists nothi
   assert.ok(failed.status >= 500, `the beat fails (${failed.status})`);
   assert.ok(!failed.body?.accounts, 'no account list goes out, so the computer wipes nothing');
   assert.deepEqual(store.read().browserAccounts.map(a => a.deviceId), [d1.agentId], 'nothing moved');
+  assert.equal(pin(), d1.agentId, 'nor the bot pin');
   assert.equal(revoked(d1.agentId), null, 'the old computer still works');
   // 2. The move lands, but retiring the old computer throws.
   const run = store.run.bind(store);
@@ -232,6 +237,7 @@ test('a re-pair whose move fails on the first beat answers an error, lists nothi
   assert.equal(done.status, 200);
   assert.deepEqual(done.body.accounts, [{id: A, site: 'crm.example.com'}]);
   assert.deepEqual(store.read().browserAccounts.map(a => a.deviceId), [d2.agentId]);
+  assert.equal(pin(), d2.agentId);
   assert.ok(revoked(d1.agentId));
 });
 

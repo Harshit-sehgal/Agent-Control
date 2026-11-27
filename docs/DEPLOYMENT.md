@@ -336,7 +336,9 @@ others wait their turn in order; a bot never touches another bot's tab.
 - **Re-pairing:** pair again with the same server, without removing the
   computer first and with a code from the same workspace, and the jars are kept:
   they are re-encrypted under the new secret, and the accounts and bot pins move
-  to the new pairing when it first checks in (start the agent after pairing). If
+  to the new pairing when it first checks in (start the agent right after
+  pairing, and do not remove the new computer in Settings before it first
+  checks in: that loses its jars). If
   the computer was removed, or the code is of another workspace, `pair` says the
   server did not take it as the same computer and removes the jars; move the
   accounts to it in Settings. A pair whose reply never arrived changes nothing:

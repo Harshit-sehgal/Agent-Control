@@ -205,12 +205,15 @@ test('a pair whose reply body never ends gives up in time, with the config as it
   const dir = await scratch(t);
   const plane = await stubPlane(t, () => ({ok: true, tasks: []}), {stallPairBody: true});
   const config = stubConfig(dir, plane.url);
+  const jarDir = path.join(dir, 'browser-accounts');
+  createJarStore({dir: jarDir, secret: 'stub-secret-1'}).save(A, [cookie]);
   const before = fs.readFileSync(config, 'utf8');
   const started = Date.now();
   const out = await agentIn(dir, {}).pair(plane.url, 'ABCD-1234');
   assert.notEqual(out.status, 0);
   assert.ok(Date.now() - started < 30000, 'the body read is bounded like the request');
   assert.equal(fs.readFileSync(config, 'utf8'), before);
+  assert.equal(createJarStore({dir: jarDir, secret: 'stub-secret-1'}).load(A)?.[0].value, MARKER, 'a pair that timed out leaves the jars as they were');
   assert.equal(fs.existsSync(`${config}.lock`), false);
 });
 
