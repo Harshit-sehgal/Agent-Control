@@ -83,17 +83,27 @@ export function releaseSignin(state, askId, {signedIn = false, now = stamp()} = 
   return {ask, runIds, openIds};
 }
 
+/** Did a sign-in card made since `since` already cover this account's fall? The newest such card decides: one the
+ * owner signed in from (`allowed`) means the account was signed in again after it, so it covers nothing. */
+function coveredSince(state, accountId, since) {
+  const from = Date.parse(since);
+  if (!Number.isFinite(from)) return false;
+  // Asks are kept in the order they were made, so the last one made since is the newest.
+  const newest = (state.asks || []).findLast(a => isSigninAsk(a) && a.accountId === accountId && Date.parse(a.createdAt) >= from);
+  return Boolean(newest) && newest.status !== 'allowed';
+}
+
 /** A card for an account that signed out while no run was waiting on it (the account's keeper saw it). Null when
  * the account has no record, already has an open card, or no bot signs in as it; otherwise the new card (in the
  * bot's own chat) and that bot. `since` is when the computer first said the account was signed in (or unknown): a
  * sign-in card made for the account after that already covered this sign-out (a page met the wall before the next
  * beat said so), so a beat that reports the fall late makes no second card, whether that card is open, answered with
- * Not now, or lapsed. */
+ * Not now, or lapsed. A card the owner signed in from (`allowed`) covers nothing after it: the account was signed in
+ * again, perhaps between two beats, so the next fall is a new one. */
 export function signinFromKeeper(state, accountId, {now = stamp(), makeId = randomUUID, since = null} = {}) {
   const account = (state.browserAccounts || []).find(a => a.id === accountId);
   if (!account || openSigninAsk(state, accountId)) return null;
-  const from = Date.parse(since);
-  if (Number.isFinite(from) && (state.asks || []).some(a => isSigninAsk(a) && a.accountId === accountId && Date.parse(a.createdAt) >= from)) return null;
+  if (coveredSince(state, accountId, since)) return null;
   const bot = (state.groups || []).flatMap(g => g.bots || []).find(b => botSettings(b).browserAccount === accountId);
   if (!bot) return null;
   const ask = createSigninAsk(state, {botId: bot.id, runId: null, chatKey: bot.id, account, now, makeId});

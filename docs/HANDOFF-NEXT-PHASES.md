@@ -1240,7 +1240,8 @@ The review of the Phase 3 PR then fixed:
   account can answer it;
 - the wall is decided by the host showing the form, never by its `next` or `continue` address (`accountWall`);
 - a beat that reports a sign-out late makes no second card after the wall's card was answered (`since` from
-  `recordAccountReports`, used by `signinFromKeeper`).
+  `recordAccountReports`, used by `signinFromKeeper`), while a sign-out after a card the owner signed in from still
+  makes a new card (the newest card decides).
 
 One edge is left on purpose: when no bot signs in as the account any more, Take control says so and the owner taps
 Not now (or the card lapses after 24 hours).
