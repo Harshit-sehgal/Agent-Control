@@ -18,16 +18,19 @@ export const askLineId = ask => `ask-${ask.id}`.slice(0, 64);
 // time order: the card takes the later of the two so it sits under the reply that asked.
 const postedAt = made => new Date(Math.max(Date.parse(made) || 0, Date.now())).toISOString();
 
+/** One ask's line in a conversation: the same card in every chat that shows it, keyed by the ask's id. `runId` is the
+ * run that waits on it in that chat, or none. */
+const askLine = (ask, text, runId) => ({id: askLineId(ask), role: 'system', kind: 'ask', askId: ask.id, ...(runId ? {runId} : {}), at: postedAt(ask.createdAt), text});
+
 export function addAskCards(state, ask, bot) {
   const name = bot?.name || 'A bot';
   const text = askText(ask, name);
-  const card = {id: askLineId(ask), role: 'system', kind: 'ask', askId: ask.id, ...(ask.runId ? {runId: ask.runId} : {}), at: postedAt(ask.createdAt)};
   const targets = [];
   if (ask.chatKey) targets.push([ask.chatKey, text]);
   const primary = primaryOf(state);
   if (primary && primary.id !== ask.chatKey) targets.push([primary.id, `Needs you: ${text}`]);
   for (const [key, line] of targets) {
-    try { addChatMessages(state, key, [{...card, text: line}], {trusted: true}); } catch { /* That conversation is gone. */ }
+    try { addChatMessages(state, key, [askLine(ask, line, ask.runId)], {trusted: true}); } catch { /* That conversation is gone. */ }
   }
 }
 
@@ -43,16 +46,17 @@ export function notifyAsks(store, asks, botName = 'A bot') {
 
 /** Put an existing ask's card into one more conversation, only when that conversation lacks it. A sign-in card is one
  * per account, so a second run that meets the same wall gets its own line for the card that is already open and never
- * a second card. The line keeps the ask's id, so answering the card settles every copy. Returns whether it was added. */
-export function addAskLine(state, key, ask, bot) {
+ * a second card. The line keeps the ask's id, so answering the card settles every copy, and it names `runId`, the run
+ * waiting on the card in this chat (none for a request with no run). Returns whether it was added. */
+export function addAskLine(state, key, ask, bot, runId = null) {
   if (!key || (state.chats?.[key] || []).some(m => m.id === askLineId(ask))) return false;
   const text = askText(ask, bot?.name || 'A bot');
-  const line = {id: askLineId(ask), role: 'system', kind: 'ask', askId: ask.id, ...(ask.runId ? {runId: ask.runId} : {}), at: postedAt(ask.createdAt), text: primaryOf(state)?.id === key ? `Needs you: ${text}` : text};
-  try { addChatMessages(state, key, [line], {trusted: true}); return true; } catch { return false; /* That conversation is gone. */ }
+  try { addChatMessages(state, key, [askLine(ask, primaryOf(state)?.id === key ? `Needs you: ${text}` : text, runId)], {trusted: true}); return true; } catch { return false; /* That conversation is gone. */ }
 }
 
-/** Where tapping a sign-in notice opens: the bot's chat, or the thread for a `team-<groupId>` chat. */
-export const signinRoute = chatKey => (String(chatKey || '').startsWith('team-') ? `#thread/${String(chatKey).slice(5)}` : `#bot/${chatKey}`);
+/** Where tapping a sign-in notice opens: the bot's chat, or `#chat/team-<groupId>`, which the app resolves to the
+ * thread, or to the lead's chat for any other team chat (a schedule's, the primary group's). */
+export const signinRoute = chatKey => (String(chatKey || '').startsWith('team-') ? `#chat/${chatKey}` : `#bot/${chatKey}`);
 
 /** Push the one notice for a new sign-in card. Quiet (never urgent): the owner signs in when they next pick up the
  * phone. Fire and forget, like `notifyAsks`. */

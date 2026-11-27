@@ -26,6 +26,8 @@ const stamp = () => new Date().toISOString();
  * was made, so the caller pushes it once. */
 export function holdForSignin(state, request, result, {now = stamp(), makeId = randomUUID} = {}) {
   if (!request || request.watchId || !result || typeof result !== 'object' || result.tookOver === true) return null;
+  // Only a page a computer was sent for is held, never one waiting for approval or already held.
+  if (request.status !== 'dispatched') return null;
   const holds = Number(request.signinHolds) || 0;
   if (holds >= MAX_SIGNIN_HOLDS) return null;
   const {account} = browserAccountOf(state, request.botId);
@@ -35,7 +37,7 @@ export function holdForSignin(state, request, result, {now = stamp(), makeId = r
 
   const bot = {name: request.botName};
   let ask = openSigninAsk(state, account.id), fresh = false;
-  if (ask) addAskLine(state, request.chatKey, ask, bot);
+  if (ask) addAskLine(state, request.chatKey, ask, bot, request.runId);
   else {
     ask = createSigninAsk(state, {botId: request.botId, runId: request.runId ?? null, chatKey: request.chatKey ?? null, account, now, makeId});
     addAskCards(state, ask, bot);

@@ -129,8 +129,8 @@ test('a push carries the route a notice opens, only when it is a plain in-app ha
       await t.push.deliver({payload: {...queued[0].payload, route: bad}});
       assert.equal(Object.hasOwn(JSON.parse(decrypt(calls.at(-1).body, phone).text), 'route'), false, `${String(bad).slice(0, 20)} is dropped`);
     }
-    await t.push.deliver({payload: {...queued[0].payload, route: '#thread/team-1_x'}});
-    assert.equal(JSON.parse(decrypt(calls.at(-1).body, phone).text).route, '#thread/team-1_x');
+    await t.push.deliver({payload: {...queued[0].payload, route: '#chat/team-1_x'}});
+    assert.equal(JSON.parse(decrypt(calls.at(-1).body, phone).text).route, '#chat/team-1_x');
   } finally { await t.done(); }
 });
 

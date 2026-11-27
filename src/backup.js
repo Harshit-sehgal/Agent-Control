@@ -106,6 +106,18 @@ function interruptRestoredRun(row) {
   return next;
 }
 
+/** A sign-in card points at a held request and the account's open-card entry, neither of which a restore brings
+ * back, so a pending one would sit in Needs you with nothing behind it: it comes back declined. */
+function declineRestoredSignin(row, at) {
+  if (!row || typeof row !== 'object' || row.action !== 'signin' || row.status !== 'pending') return row;
+  const next = {...row, status: 'declined', scope: null, answered_at: at};
+  if (typeof row.doc === 'string' && row.doc) {
+    const {expiresAt, ...doc} = JSON.parse(row.doc);
+    next.doc = JSON.stringify({...doc, status: 'declined', scope: null, answeredAt: at});
+  }
+  return next;
+}
+
 /** Build the export document from an open store. */
 export function exportBackup(store, {attachmentBytes = ATTACHMENT_BACKUP_BYTES} = {}) {
   const tables = {};
@@ -402,6 +414,7 @@ export function importBackup(store, document, {force = false, primaryWorkspace =
         completed_at: restoredAt,
       } : row);
       if (name === 'group_runs') rows = rows.map(interruptRestoredRun);
+      if (name === 'asks') rows = rows.map(row => declineRestoredSignin(row, restoredAt));
       if (!rows.length) continue;
       // Column names go into the statement, so only the table's own are used.
       const known = new Set(store.all(`PRAGMA table_info(${name})`).map(c => c.name));

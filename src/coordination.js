@@ -595,7 +595,8 @@ export async function resumeBrowserRun(store,request,{ok,text='',executor}={}){
   let stoppedRun=null;
   const start=await store.update(s=>{
     const live=s.groupRuns.find(r=>r.id===id);
-    if(!live)return false;
+    // The status read above was before this write: a run that has gone on since (its card answered) is not given the page late.
+    if(!live||!['awaiting_browser','awaiting_ask'].includes(live.status))return false;
     // Consume the page inside this update, so the append and the wait-decision
     // land atomically. A mark-done that commits before its append ("left"
     // check by status) would resume the run too early and drop this page.

@@ -9,11 +9,11 @@ import path from 'node:path';
 import * as agent from '../src/agent.js';
 import {SqliteStore} from '../src/sqlite-store.js';
 import * as wf from '../shared/workflow.js';
-import {coordinationState, resumeBrowserRun} from '../src/coordination.js';
+import {coordinationState, resumeBrowserRun, cancelRun} from '../src/coordination.js';
 import {BROWSER_PERMISSION, capturePageText} from '../shared/bot-browser.js';
 import {BROWSER_ACCOUNTS_V1} from '../shared/device-features.js';
 import {isSigninAsk, openSigninAsk, createSigninAsk} from '../shared/asks.js';
-import {askLineId} from '../src/ask-cards.js';
+import {askLineId, signinRoute, notifySignin} from '../src/ask-cards.js';
 import * as browser from '../src/bot-browser.js';
 import {MAX_SIGNIN_HOLDS, holdForSignin, signinFromKeeper, noticeSignins} from '../src/signin-wait.js';
 import * as backup from '../src/backup.js';
@@ -125,6 +125,8 @@ test('a second run on the same account parks on the same card: one push, its own
   const second = chat(store, 'team-lab').filter(m => m.id === askLineId(ask));
   assert.equal(second.length, 1, 'the second run\'s chat has its own line');
   assert.equal(second[0].text, 'Web Two needs you to sign in to crm.example.com as Sales.');
+  assert.equal(second[0].runId, 'run2', 'the line carries the run that waits on it here, not the run that made the card');
+  assert.equal(chat(store, 'web').find(m => m.id === askLineId(ask)).runId, 'run1');
   assert.equal(sent.length, 1, 'one push for the card');
 
   // A further wall in a chat that already holds the line neither adds a line, rewrites it, nor pushes again.
@@ -135,6 +137,14 @@ test('a second run on the same account parks on the same card: one push, its own
   assert.deepEqual(runIn(store, 'run2').askIds, [ask.id], 'the ask is added once');
   assert.equal(cards(store).length, 1);
   assert.equal(sent.length, 1);
+
+  // A request with no run puts the card in its chat with no run id at all.
+  await store.update(s => { s.browserRequests.push(request('br4', {botId: 'plain', botName: 'Plain', chatKey: 'plain', runId: undefined, account: undefined})); });
+  await store.update(s => { s.groups[0].bots.find(b => b.id === 'plain').settings = {browserAccount: A}; s.browserRequests.find(r => r.id === 'br4').account = A; });
+  await browser.finishBrowserRequest(store, requestOf(store, 'br4'), {ok: true, result: wall}, hooks);
+  const bare = chat(store, 'plain').find(m => m.id === askLineId(ask));
+  assert.equal(bare.text, 'Plain needs you to sign in to crm.example.com as Sales.');
+  assert.equal(Object.hasOwn(bare, 'runId'), false);
 });
 
 test('a late result for the first task leaves a held request held; the re-dispatch is a new task', async t => {
@@ -359,6 +369,8 @@ test('holdForSignin answers null and leaves the state exactly as it was whenever
     'a run not waiting': [request('a', {runId: 'run9'}), wall],
     'a run that is running': [request('a', {runId: 'run8'}), wall],
     'another account stamped': [request('a', {account: 'someone-else'}), wall],
+    'a request that is not out with a computer': [request('a', {status: 'pending'}), wall],
+    'a request already held': [request('a', {status: 'signin'}), wall],
   };
   for (const [name, [req, result]] of Object.entries(cases)) {
     const s = base(), before = JSON.stringify(s);
@@ -395,4 +407,99 @@ test('signin_pending survives a reopen and is dropped by a restore', async t => 
   backup.importBackup(reopened, JSON.parse(JSON.stringify(doc)), {force: true});
   assert.equal(reopened.kvGet('signin_pending'), null, 'a restore drops it');
   assert.deepEqual(reopened.read().signinPending, {});
+});
+
+test('a sign-in notice opens the chat its card is in: a bot chat, or a team chat of any kind', () => {
+  assert.equal(signinRoute('web'), '#bot/web');
+  assert.equal(signinRoute('team-lab'), '#chat/team-lab', 'a thread and any other team chat both resolve from this route');
+  const sent = [];
+  const store = {notify: async event => { sent.push(event); }};
+  const ask = {id: 'k1', site: 'crm.example.com', accountName: 'Sales', accountId: A};
+  return Promise.resolve().then(async () => {
+    notifySignin(store, {...ask, chatKey: 'web'}, 'Web');
+    notifySignin(store, {...ask, chatKey: 'team-lab'}, 'Web');
+    notifySignin(store, {...ask, chatKey: null}, 'Web');
+    await tick();
+    assert.deepEqual(sent.map(e => e.route), ['#bot/web', '#chat/team-lab', undefined]);
+    assert.equal(Object.hasOwn(sent[2], 'route'), false, 'no chat, no route key');
+    for (const route of ['#bot/web', '#chat/team-lab']) assert.match(route, /^#[A-Za-z0-9/_-]{1,200}$/, 'the push carries it');
+  });
+});
+
+test('resumeBrowserRun keeps a page only for a run that is still waiting, checked inside the write', async t => {
+  const {store} = await rig(t, {requests: [request('r1', {status: 'done', result: {page: 'x'}})], runs: [runOf('run1', {status: 'awaiting_ask'})]});
+  const update = store.update.bind(store);
+  let started = 0;
+  const executor = async () => { started++; return 'unexpected'; };
+  // The run goes on between the peek at its status and the write: the page must not be appended into a run that is running.
+  store.update = fn => update(s => { s.groupRuns[0].status = 'queued'; return fn(s); });
+  await resumeBrowserRun(store, requestOf(store, 'r1'), {ok: true, text: 'Page: https://crm.example.com/inbox\n\nThree new leads.', executor});
+  store.update = update;
+  await tick();
+  const run = runIn(store, 'run1');
+  assert.equal(run.browserPage, undefined, 'the page was not appended');
+  assert.equal(run.browserConsumed, undefined);
+  assert.equal(run.status, 'queued');
+  assert.equal(started, 0);
+});
+
+test('stopping a run parked on a sign-in denies its held request and fails no device task', async t => {
+  const {store} = await rig(t, {requests: [request('r1'), request('r2', {status: 'pending'})]});
+  const {hooks} = hooksOf();
+  await browser.finishBrowserRequest(store, requestOf(store, 'r1'), {ok: true, result: wall}, hooks);
+  assert.equal(requestOf(store, 'r1').status, 'signin');
+  // The held request's task is a stale row that still reads queued: only a dispatched request's tasks are failed.
+  const {agentId} = {agentId: store.get('SELECT id FROM agents').id};
+  const {task} = agent.enqueueAgentTask(store, agentId, {kind: 'browser.capture', payload: {url: 'https://crm.example.com/', steps: [], botId: 'web'}, idempotencyKey: 'browser:r1'});
+  await store.update(s => { s.browserRequests.find(r => r.id === 'r1').agentTaskIds = [task.id]; });
+
+  await cancelRun(store, 'run1');
+  assert.equal(runIn(store, 'run1').status, 'cancelled');
+  assert.equal(requestOf(store, 'r1').status, 'denied', 'the held request is denied, not left as a ghost');
+  assert.equal(requestOf(store, 'r2').status, 'denied');
+  assert.equal(store.get('SELECT status FROM agent_tasks WHERE id=?', task.id).status, 'queued', 'no task id was collected for it');
+});
+
+test('a page that came back first is kept, then the sign-in wall parks the run (the other order)', async t => {
+  const {store} = await rig(t, {requests: [request('r1'), request('r2')]});
+  let started = 0;
+  const executor = async () => { started++; return 'unexpected'; };
+  const hooks = {resumeBrowser: (st, req, opts) => resumeBrowserRun(st, req, {...opts, executor}), continueRun: async () => {}};
+  await browser.finishBrowserRequest(store, requestOf(store, 'r1'), {ok: true, result: inbox}, hooks);
+  assert.equal(runIn(store, 'run1').status, 'awaiting_browser', 'r2 is still out');
+  await browser.finishBrowserRequest(store, requestOf(store, 'r2'), {ok: true, result: wall}, hooks);
+  await tick();
+  const run = runIn(store, 'run1');
+  assert.deepEqual(run.browserConsumed, ['r1']);
+  assert.match(run.browserPage, /Three new leads\./);
+  assert.equal(run.status, 'awaiting_ask');
+  assert.equal(cards(store).length, 1);
+  assert.equal(started, 0);
+  assert.equal(requestOf(store, 'r2').status, 'signin');
+});
+
+test('a restore declines every pending sign-in card it brings back, and leaves other asks alone', async t => {
+  const first = await rig(t);
+  await first.store.update(s => {
+    createSigninAsk(s, {botId: 'web', chatKey: 'web', account: s.browserAccounts[0], now: NOW, makeId: () => 'si-1'});
+    s.asks.push({id: 'o-1', botId: 'web', runId: null, chatKey: 'web', action: 'send', target: 'x', detail: 'send it', status: 'pending', scope: null, createdAt: NOW, expiresAt: '2026-11-28T10:00:00.000Z'});
+  });
+  first.store.vaultKey = loadMasterKey(path.join(first.dir, 'state.json')).key;
+  const doc = backup.exportBackup(first.store);
+  const dir2 = await fs.mkdtemp(path.join(os.tmpdir(), 'signin-restore-'));
+  t.after(() => fs.rm(dir2, {recursive: true, force: true}));
+  const second = await new SqliteStore(path.join(dir2, 'state.db'), path.join(dir2, 'state.json')).init();
+  t.after(() => second.close().catch(() => {}));
+  second.vaultKey = loadMasterKey(path.join(dir2, 'state.json')).key;
+  backup.importBackup(second, JSON.parse(JSON.stringify(doc)));
+  const asks = second.read().asks;
+  const si = asks.find(a => a.id === 'si-1'), other = asks.find(a => a.id === 'o-1');
+  assert.equal(si.status, 'declined');
+  assert.equal(si.scope, null);
+  assert.ok(si.answeredAt, 'it is answered');
+  assert.equal(Object.hasOwn(si, 'expiresAt'), false);
+  assert.equal(second.get("SELECT status FROM asks WHERE id='si-1'").status, 'declined', 'the column agrees with the document');
+  assert.equal(other.status, 'pending', 'an ordinary ask is left to its own rules');
+  assert.deepEqual(second.read().signinPending, {});
+  assert.equal(openSigninAsk(second.read(), A), null);
 });
