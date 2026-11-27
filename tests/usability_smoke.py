@@ -1290,6 +1290,8 @@ class Live:
         self.features = ['secret-input-v1']
         # The browser account the bot signs in as, as the server's list names it ({id, name}), or none.
         self.account = None
+        # What the handback route answers when the hand back answered a sign-in card: {'resumed': n}, or nothing.
+        self.signed_in = None
         self.__dict__.update(kw)
 
     def entry(self):
@@ -1330,7 +1332,7 @@ class Live:
             return await reply({'botId': self.bot, 'state': 'driving'})
         if path == f'/api/browser-live/{self.bot}/handback':
             self.state = 'browsing'
-            return await reply({'botId': self.bot, 'state': 'browsing'})
+            return await reply({'botId': self.bot, 'state': 'browsing', **({'signedIn': self.signed_in} if self.signed_in else {})})
         if path == f'/api/browser-live/{self.bot}/input':
             if self.state != 'driving':
                 return await reply({'error': 'Take over the browser before you click or type in it.'}, 409)
@@ -1571,6 +1573,147 @@ async def computer_hand_back(page, base):
     await page.keyboard.press('Escape')
     await expect(page.locator('#main .pr-hero')).to_be_visible()
     await expect(page.locator('#main .rw', has_text='Computer').locator('[data-computer-row]')).to_have_text('Browsing')
+
+
+# ---------------------------------------------------------------- the sign-in card (Phase 3: sign in from the phone)
+
+SIGNIN_SITE, SIGNIN_ACCOUNT = 'crm.example.com', 'CRM, sales'
+
+
+async def seed_signin_ask(page, bot_id, name='Writer'):
+    """Put one sign-in ask, and the chat lines that carry it, into the stored workspace, as the server writes them:
+    a line in the asking bot's chat and its copy in the primary's Needs you."""
+    primary = await primary_id(page)
+    script = '''
+        const [bot, primary, name, site, account] = %s;
+        const at = new Date().toISOString();
+        s.asks = [{id: 's1', kind: 'signin', action: 'signin', botId: bot, runId: null, chatKey: bot, accountId: 'acct-1', accountName: account, site, url: 'https://' + site + '/',
+          detail: 'signing in to ' + site + ' as ' + account, target: '', grantScope: '', status: 'pending', scope: null, createdAt: at, expiresAt: new Date(Date.now() + 864e5).toISOString()}];
+        s.signinPending = {'acct-1': 's1'};
+        const text = name + ' needs you to sign in to ' + site + ' as ' + account + '.';
+        const line = t => ({id: 'ask-s1', role: 'system', kind: 'ask', askId: 's1', text: t, at});
+        s.chats[bot] = [...(s.chats[bot] || []), line(text)];
+        s.chats[primary] = [...(s.chats[primary] || []), line('Needs you: ' + text)];
+    ''' % json.dumps([bot_id, primary, name, SIGNIN_SITE, SIGNIN_ACCOUNT])
+    await patch_state(page, script)
+
+
+async def open_signin_card(page, base, **kw):
+    live, bot = await open_computer(page, base, **kw)
+    await seed_signin_ask(page, bot)
+    await page.goto(f'{base}/index.html#bot/{bot}')
+    await page.reload()
+    await expect(page.locator('#cv-log .cv-card[data-ask="s1"]')).to_be_visible()
+    return live, bot
+
+
+async def signin_card_names_bot_site_and_account(page, base):
+    live, bot = await open_signin_card(page, base)
+    card = page.locator('#cv-log .cv-card[data-ask="s1"]')
+    await expect(card.locator('p')).to_have_text('Writer needs you to sign in to crm.example.com as CRM, sales.')
+    await expect(card.locator('small')).to_have_text("Take control opens CRM, sales's browser on its computer. Sign in there, then tap Hand back, and the task carries on by itself.")
+    assert await card.locator('.btn').all_inner_texts() == ['Take control', 'Not now']
+    await expect(card.locator('.btn.primary')).to_have_text('Take control')
+    # The owner's answer is signing in: no Allow, no Always allow, no "how long" select.
+    await expect(card.get_by_role('button', name=re.compile('allow', re.I))).to_have_count(0)
+    await expect(card.locator('select')).to_have_count(0)
+    await expect(page.locator('#cv-log .cv-wait .face--waiting').first).to_be_visible()
+    await expect(page.locator('#cv-log .cv-wait').first).to_contain_text('Writer is waiting on you')
+    # Escape decides nothing.
+    await card.get_by_role('button', name='Not now').focus()
+    await page.keyboard.press('Escape')
+    await expect(card).to_be_visible()
+    assert (await api_state(page))['asks'][0]['status'] == 'pending'
+    # The bot's row and Atlas's face both carry the one thing that waits on the owner.
+    await expect(page.locator('#sidebar .crow', has_text='Writer').locator('.badge')).to_have_text('1')
+    await expect(page.locator('#sidebar .pin', has_text='Atlas').locator('.badge')).to_have_text('1')
+    assert live.posts == []
+
+
+async def signin_take_control_opens_the_computer_view_and_hand_back_says_it_carries_on(page, base):
+    live, bot = await open_signin_card(page, base, signed_in={'resumed': 1})
+    # The app is the server's, and the owner is signed in: the card's own button is in the page already.
+    await page.evaluate("""async () => {
+        const v = new URL(document.querySelector('script[src*="app.js"]').src).search;
+        const {store} = await import('./ui-store.js' + v);
+        const me = {email: 'owner@localhost', role: 'owner'};
+        store.state.me = {...(store.state.me || {}), ...me};
+        const real = Object.getOwnPropertyDescriptor(window, 'AGENT_API');
+        Object.defineProperty(window, 'AGENT_API', {configurable: true, set: real.set, get: () => {
+            const f = real.get();
+            return (path, method, body) => Promise.resolve(f(path, method, body)).then(r => String(path).startsWith('/api/state') && r ? {...r, me} : r);
+        }});
+        document.querySelector('meta[name="agent-backend"]').setAttribute('content', 'server');
+        document.querySelector('#cv-log .cv-card[data-ask="s1"] [data-action="signin-take-control"]').click();
+    }""")
+    await eventually(lambda: [p for p, _ in live.posts] == [f'/api/browser-live/{bot}/takeover', f'/api/browser-live/{bot}/input'])
+    assert live.posts[1][1] == {'type': 'navigate', 'url': 'https://crm.example.com/'}, live.posts
+    assert await hash_(page) == f'#profile/{bot}/computer', await hash_(page)
+    await expect(page.locator('#toast')).to_have_text('You are in control. Sign in, then tap Hand back control.')
+    # Hand back: the toast says the task carries on, from the reply's signedIn.
+    handback = page.locator('#main [data-action="computer-handback"]')
+    await expect(handback).to_be_visible()
+    await handback.click()
+    await expect(page.locator('#toast')).to_have_text("Signed in. Writer's task carries on.")
+    assert [p for p, _ in live.posts] == [f'/api/browser-live/{bot}/takeover', f'/api/browser-live/{bot}/input', f'/api/browser-live/{bot}/handback'], live.posts
+
+
+async def signin_hand_back_without_a_sign_in_keeps_the_old_toast(page, base):
+    live, bot = await open_computer(page, base)
+    await goto_profile(page, bot, 'computer')
+    await page.locator('#main [data-action="computer-takeover"]').click()
+    await page.locator('#main [data-action="computer-handback"]').click()
+    await expect(page.locator('#toast')).to_contain_text('Writer has the browser back')
+
+
+async def signin_not_now_collapses_the_card(page, base):
+    live, bot = await open_signin_card(page, base)
+    card = page.locator('#cv-log .cv-card[data-ask="s1"]')
+    await card.get_by_role('button', name='Not now').click()
+    # An answered ask leaves the chat, like every ask card, and the count drops.
+    await expect(page.locator('#cv-log [data-ask="s1"]')).to_have_count(0)
+    await expect(page.locator('#sidebar .crow', has_text='Writer').locator('.badge')).to_have_count(0)
+    ask = (await api_state(page))['asks'][0]
+    assert ask['status'] == 'declined', ask
+    assert not ask.get('expired'), ask
+    # Nothing was asked of the computer, and no signing-in toast was made up for it.
+    assert live.posts == []
+    # What the card collapses to, from the stored state the demo's own answer wrote: a line in the bot's chat, and
+    # the primary's copy that says whose it was.
+    said = await page.evaluate("""async () => {
+        const v = new URL(document.querySelector('script[src*="app.js"]').src).search;
+        const {store} = await import('./ui-store.js' + v);
+        const {askCard} = await import('./ui-asks.js' + v);
+        return [askCard(store.state, {askId: 's1', text: 'Writer needs you to sign in.'}).text, askCard(store.state, {askId: 's1', text: 'Needs you: Writer needs you to sign in.'}).text];
+    }""")
+    assert said == ['You chose not now', 'You chose not now (Writer)'], said
+
+
+async def signin_the_demo_says_signing_in_needs_the_app(page, base):
+    live, bot = await open_signin_card(page, base)
+    await page.locator('#cv-log .cv-card[data-ask="s1"]').get_by_role('button', name='Take control').click()
+    await expect(page.locator('#toast')).to_have_text('Signing in needs the app running on your computer.')
+    assert live.posts == [], live.posts
+    assert await hash_(page) == f'#bot/{bot}', await hash_(page)
+    assert (await api_state(page))['asks'][0]['status'] == 'pending'
+
+
+async def phone_signin_card_and_take_control_fit(page, base):
+    live, bot = await open_signin_card(page, base)
+    card = page.locator('#cv-log .cv-card[data-ask="s1"]')
+    assert await overflow(page) <= 0, await overflow(page)
+    await expect(card.locator('small')).to_be_visible()
+    buttons = card.locator('.btn')
+    assert await buttons.count() == 2
+    for i in range(2):
+        box = await buttons.nth(i).bounding_box()
+        assert box['height'] >= 40 and box['x'] >= 0 and box['x'] + box['width'] <= 390, box
+    box = await card.bounding_box()
+    assert box['x'] >= 0 and box['x'] + box['width'] <= 390, box
+    # Tapped in the demo, Take control says so and the page still fits.
+    await card.get_by_role('button', name='Take control').click()
+    await expect(page.locator('#toast')).to_have_text('Signing in needs the app running on your computer.')
+    assert await overflow(page) <= 0
 
 
 async def computer_no_device_empty_state(page, base):
@@ -3175,6 +3318,12 @@ async def main():
             await h.scenario('computer: Hand back returns the browser to the bot', computer_hand_back)
             await h.scenario('computer: the pill says which browser account the bot signs in as', computer_view_says_which_account_the_bot_signs_in_as)
             await h.scenario('takeover sheet: Password and Code fields send a secret, echo nothing and say a refusal', takeover_sheet_masked_fields)
+            await h.scenario('sign-in: the card names the bot, the site and the account, with Take control and Not now and no Allow', signin_card_names_bot_site_and_account)
+            await h.scenario('sign-in: Take control opens the Computer view on the site, and Hand back says the task carries on', signin_take_control_opens_the_computer_view_and_hand_back_says_it_carries_on)
+            await h.scenario('sign-in: a hand back that answered no card keeps the old toast', signin_hand_back_without_a_sign_in_keeps_the_old_toast)
+            await h.scenario('sign-in: Not now collapses the card to "You chose not now"', signin_not_now_collapses_the_card)
+            await h.scenario('sign-in: the demo says signing in needs the app', signin_the_demo_says_signing_in_needs_the_app)
+            await h.scenario('phone: the sign-in card and Take control fit, thumb-sized', phone_signin_card_and_take_control_fit, PHONE)
             await h.scenario('computer: no device shows how to start the local agent, and notices', computer_no_device_empty_state)
             await h.scenario('computer: the demo has no browser, and Atlas has a Computer too', computer_demo_has_no_browser)
             await h.scenario('computer: the pill carries the site chip, opens the view and says You are driving', computer_site_chip_on_the_pill)
