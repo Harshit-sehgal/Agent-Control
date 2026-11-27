@@ -17,6 +17,8 @@ import {parseQuietHours, inQuietHours} from '../shared/quiet-hours.js';
 
 const RECORD_SIZE = 4096;
 const MAX_PER_USER = 10;
+/** Where a notice opens in the app: a hash route and nothing else. */
+const ROUTE = /^#[A-Za-z0-9/_-]{1,200}$/;
 const now = () => new Date().toISOString();
 const b64 = value => Buffer.from(String(value || ''), 'base64url');
 const refuse = (message, status = 400) => { throw Object.assign(new Error(message), {status}); };
@@ -97,7 +99,9 @@ export function createPush(store, {fetcher = null, guard = assertPublicUrl, reso
       'Content-Encoding': 'aes128gcm', 'Content-Type': 'application/octet-stream', TTL: '86400', Urgency: 'normal',
       Authorization: vapidHeader(subscription.endpoint, vapid(), subject()),
     };
-    const body = encryptPayload(JSON.stringify({title: String(message.title || 'Agent Control').slice(0, 120), body: String(message.body || '').slice(0, 300)}), subscription);
+    // A route is where tapping the notice opens in the app; only a plain in-app hash is carried, never an address.
+    const route = typeof message.route === 'string' && ROUTE.test(message.route) ? {route: message.route} : {};
+    const body = encryptPayload(JSON.stringify({title: String(message.title || 'Agent Control').slice(0, 120), body: String(message.body || '').slice(0, 300), ...route}), subscription);
     let response;
     if (fetcher) {
       // Injectable fetchers are for isolated callers. Keep their guard hook;
@@ -146,10 +150,10 @@ export function createPush(store, {fetcher = null, guard = assertPublicUrl, reso
     },
     /** Queue one delivery per device of the given accounts, through the
      * workspace's own task queue so an outage is retried. */
-    announce(workspaceStore, enqueue, userIds, {id, title, body, urgent = false}) {
+    announce(workspaceStore, enqueue, userIds, {id, title, body, urgent = false, route}) {
       for (const userId of userIds) for (const device of devices(userId)) {
         enqueue(workspaceStore, {kind: 'notification', title: 'Push notification', maxAttempts: 3, idempotencyKey: `push:${id}:${device.id}`,
-          payload: {notificationId: id, channel: 'push', target: device.id, title, body, urgent: urgent === true}});
+          payload: {notificationId: id, channel: 'push', target: device.id, title, body, urgent: urgent === true, ...(typeof route === 'string' && ROUTE.test(route) ? {route} : {})}});
       }
     },
     /** Run one queued delivery. */

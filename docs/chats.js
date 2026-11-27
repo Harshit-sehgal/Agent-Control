@@ -7,12 +7,12 @@
  *
  * Messages are display records only. Nothing here runs a bot or publishes.
  */
-import {cleanText} from './core.js?v=85aac70d41';
-import {fail} from './errors.js?v=85aac70d41';
-import {summonableGuests, BUSY_STATUSES} from './coordination.js?v=85aac70d41';
-import {denyBrowserRequest} from './bot-browser.js?v=85aac70d41';
-import {orphanAsks} from './asks.js?v=85aac70d41';
-import {attachmentRefs} from './attachments.js?v=85aac70d41';
+import {cleanText} from './core.js?v=c6f1335acc';
+import {fail} from './errors.js?v=c6f1335acc';
+import {summonableGuests, BUSY_STATUSES} from './coordination.js?v=c6f1335acc';
+import {denyBrowserRequest, OPEN_REQUEST_STATUSES} from './bot-browser.js?v=c6f1335acc';
+import {orphanAsks} from './asks.js?v=c6f1335acc';
+import {attachmentRefs} from './attachments.js?v=c6f1335acc';
 
 export const MAX_CHAT_MESSAGES = 300;
 const MAX_TEXT = 8000;
@@ -170,7 +170,7 @@ export function releaseChatWork(state, key) {
   const ofChat = item => matchesBusyChat(item, key, groupId);
   const now = new Date().toISOString();
   for (const request of state.browserRequests || []) {
-    if (!ofChat(request) || !['pending', 'dispatched'].includes(request.status)) continue;
+    if (!ofChat(request) || !OPEN_REQUEST_STATUSES.includes(request.status)) continue;
     try { denyBrowserRequest(state, request.id); }
     catch { request.status = 'denied'; request.updatedAt = now; }
   }

@@ -238,7 +238,7 @@ work should be added as a fresh section.
 - [x] 1. Devices and parallel work: one `chooseDevice` with pinning and device features, per-bot queues, a takeover parks one bot, a device worker pool (plan: `docs/superpowers/plans/2026-11-26-phase-1-devices-and-parallel-work.md`)
 - [x] 1b. Model fallbacks: up to three in order, only before a turn has replied, a cool-off and the way back, a handoff prompt with search_chat (plan: `docs/superpowers/plans/2026-11-26-phase-1b-model-fallbacks.md`)
 - [x] 2. Browser accounts: a context per account with encrypted cookie jars, stamped at four hops, never in the server runtime; idle reaper, keeper tabs, session check (plan: `docs/superpowers/plans/2026-11-27-phase-2-browser-accounts.md`)
-- [ ] 3. Sign-in from the phone: a server-posted card with push, parked runs that resume after hand back
+- [x] 3. Sign-in from the phone: a server-posted card with push, parked runs that resume after hand back (plan: `docs/superpowers/plans/2026-11-27-phase-3-signin-from-phone.md`)
 - [ ] 4. Goal v0: one goal as one group with brief, ceilings and budget; records with a key and outside marks; notes; the stand-up under its own key; the outbox table with approve-each and batch cards; `timer` and `playbook` task kinds held by the kill switch; lanes; restore rules; the `goal` activity kind and health checks
 - [ ] 5. Connector accounts: several connections per app, pinned per bot
 - [ ] 6. Reading: plain first, content types, safe redirects, `look` and images, images on handoffs

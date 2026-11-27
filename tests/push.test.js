@@ -9,6 +9,7 @@ import {loadMasterKey} from '../src/vault.js';
 import {Auth} from '../src/auth.js';
 import {createPush, encryptPayload, vapidHeader, generateVapidKeys} from '../src/push.js';
 import {enablePush, disablePush, pushStatus} from '../shared/ui-push.js';
+import {createNotifier} from '../src/handlers.js';
 
 /** A browser's side of a subscription: its key pair and shared secret. */
 function device(endpoint = 'https://push.example.com/send/abc') {
@@ -103,6 +104,51 @@ test('delivery encrypts for the device, drops dead subscriptions and retries the
     assert.deepEqual(await t.push.deliver(task), {delivered: 'gone'});
     assert.equal(t.push.endpoints(t.userId).length, 0, 'A device that unsubscribed is forgotten.');
     assert.deepEqual(await t.push.deliver(task), {delivered: 'gone'});
+  } finally { await t.done(); }
+});
+
+test('a push carries the route a notice opens, only when it is a plain in-app hash', async () => {
+  const calls = [], phone = device();
+  const t = await harness({fetcher: async (url, init) => { calls.push(init); return {status: 201, ok: true}; }});
+  try {
+    t.push.subscribe(t.userId, phone.subscription);
+    const queued = [];
+    const enqueue = (store, spec) => queued.push(spec);
+    t.push.announce('ws', enqueue, [t.userId], {id: 'n1', title: 'Sign in to crm.example.com', body: 'Open the card.', urgent: false, route: '#bot/web'});
+    t.push.announce('ws', enqueue, [t.userId], {id: 'n2', title: 'No route', body: 'Plain.'});
+    assert.equal(queued[0].payload.route, '#bot/web');
+    assert.equal(Object.hasOwn(queued[1].payload, 'route'), false, 'a notice with no route queues none');
+    assert.equal(queued[0].payload.urgent, false);
+
+    assert.deepEqual(await t.push.deliver({payload: queued[0].payload}), {delivered: 'sent'});
+    assert.deepEqual(JSON.parse(decrypt(calls[0].body, phone).text), {title: 'Sign in to crm.example.com', body: 'Open the card.', route: '#bot/web'});
+    await t.push.deliver({payload: queued[1].payload});
+    assert.deepEqual(JSON.parse(decrypt(calls[1].body, phone).text), {title: 'No route', body: 'Plain.'}, 'no route key at all, not null');
+
+    for (const bad of ['javascript:x', 'https://evil.example/', '#bot/web?x=1', '#', 'bot/web', '#a b', `#${'a'.repeat(201)}`, 7, null]) {
+      await t.push.deliver({payload: {...queued[0].payload, route: bad}});
+      assert.equal(Object.hasOwn(JSON.parse(decrypt(calls.at(-1).body, phone).text), 'route'), false, `${String(bad).slice(0, 20)} is dropped`);
+    }
+    await t.push.deliver({payload: {...queued[0].payload, route: '#chat/team-1_x'}});
+    assert.equal(JSON.parse(decrypt(calls.at(-1).body, phone).text).route, '#chat/team-1_x');
+  } finally { await t.done(); }
+});
+
+test('the notifier hands the push its route, and a sign-in notice is never urgent where an ask is', async () => {
+  const t = await harness();
+  try {
+    const seen = [];
+    const push = {announce: (ws, enqueue, userIds, options) => { seen.push({userIds, options}); }};
+    const notify = createNotifier({ws: t.store, workspaceId: 'default', auth: {listUsers: () => [{id: 'u1'}, {id: 'u2', disabled: true}]}, push});
+    await notify({title: 'Sign in to crm.example.com', body: 'Open the card.', kind: 'signin', urgent: false, route: '#bot/web', meta: {askId: 'a1'}});
+    await notify({title: 'Web needs you', body: 'Send it?', kind: 'ask', meta: {askId: 'a2'}});
+    await notify({title: 'Late', body: 'Late work.', kind: 'health', urgent: true});
+    assert.deepEqual(seen.map(x => x.userIds), [['u1'], ['u1'], ['u1']]);
+    assert.deepEqual(seen.map(x => [x.options.title, x.options.urgent, x.options.route]), [
+      ['Sign in to crm.example.com', false, '#bot/web'],
+      ['Web needs you', true, undefined],
+      ['Late', true, undefined],
+    ]);
   } finally { await t.done(); }
 });
 

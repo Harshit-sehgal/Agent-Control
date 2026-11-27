@@ -248,7 +248,11 @@ test('restoring a backup keeps a shown plan and a checkpoint, and drops live bro
   const store2 = await new SqliteStore(path.join(dir2, 'state.db'), dataFile2).init();
   store2.vaultKey = loadMasterKey(dataFile2).key;
   store2.kvSet('browser_requests', JSON.stringify([{id: 'stale', status: 'pending'}]));
+  // A sign-in card's pointer names asks and requests a restore replaces: it is dropped with them.
+  store2.kvSet('signin_pending', JSON.stringify({'acct-1': 'ghost-ask'}));
   backup.importBackup(store2, JSON.parse(JSON.stringify(backupDoc)));
+  assert.equal(store2.kvGet('signin_pending'), null);
+  assert.deepEqual(store2.read().signinPending, {});
   assert.equal(store2.read().groupRuns.find(r => r.id === 'r-plan')?.status, 'awaiting_plan');
   assert.equal(store2.read().groupRuns.find(r => r.id === 'r-pause')?.status, 'awaiting_checkpoint');
   assert.equal((store2.read().browserRequests || []).length, 0);

@@ -13,17 +13,17 @@
  * Polling is what makes the device cast: the server tells the agent to stream a tab only
  * while somebody is looking, so the loop stops when the page is hidden or the view closes.
  * Input goes out in order, one request at a time, with typed letters joined. */
-import {esc, icon} from './ui-kit.js?v=85aac70d41';
-import {botColor} from './ui-face.js?v=85aac70d41';
-import {store, api, findBot, canWrite, isAdmin, isStaticDemo, changed, onChange, go, back} from './ui-store.js?v=85aac70d41';
+import {esc, icon} from './ui-kit.js?v=c6f1335acc';
+import {botColor} from './ui-face.js?v=c6f1335acc';
+import {store, api, findBot, canWrite, isAdmin, isStaticDemo, changed, onChange, go, back} from './ui-store.js?v=c6f1335acc';
 /** Driving the tab (Take over, Hand back, input) is an admin's, the role those routes need; the demo is its one owner. */
 const canDrive = () => isStaticDemo() || isAdmin();
-import {toast} from './ui-dialogs.js?v=85aac70d41';
-import {SECRET_INPUT_V1, UPDATE_DEVICE_LINE, hasFeature} from './device-features.js?v=85aac70d41';
+import {toast} from './ui-dialogs.js?v=c6f1335acc';
+import {SECRET_INPUT_V1, UPDATE_DEVICE_LINE, hasFeature} from './device-features.js?v=c6f1335acc';
 import {
   PAGE, KEY_CHIPS, clickInput, wheelInput, keyInput, coalesce, navigateAddress, rowLabel, statusOf, stateLine, mergeView, veilFor, frameDelay, listDelay, wantsList,
   chipFor, containRect, controlPill, thumbFor, thumbDelay,
-} from './ui-computer.js?v=85aac70d41';
+} from './ui-computer.js?v=c6f1335acc';
 
 const el = id => document.getElementById(id);
 const raw = (path, method = 'GET', body) => window.AGENT_API(path, method, body);   // no progress bar: these run all the time
@@ -320,15 +320,21 @@ function wireStage(s) {
 const botName = id => findBot(id)?.name || 'The bot';
 /** Leave the full-screen view. Closing while you drive hands the browser back, so no run is left waiting on you. */
 async function close(botId) {
-  if (session?.botId === botId && stateOf(session) === 'driving') await hold(botId, 'handback').catch(() => {});
+  const gave = session?.botId === botId && stateOf(session) === 'driving' ? await hold(botId, 'handback').catch(() => null) : null;
   back();
+  if (wentOn(gave)) toast(carriesOn(botId));
 }
+/** Did the hand back answer a sign-in card that something went on from? `resumed` is 0 for a keeper's card nothing
+ * waited on, a run still held by another ask, or a run already stopped: then the task does not "carry on". */
+const wentOn = gave => gave?.signedIn?.resumed > 0;
+/** What a hand back says when it answered a sign-in card: the held request went on by itself. */
+const carriesOn = botId => `Signed in. ${botName(botId)}'s task carries on.`;
 async function hold(botId, action) {
   const reply = await api(`/api/browser-live/${encodeURIComponent(botId)}/${action}`, 'POST', {});
   const state = reply?.state || (action === 'takeover' ? 'driving' : 'idle');
   if (session?.botId === botId) session.view = {...session.view, state};
   patchLive(botId, {state});
-  return state;
+  return {state, signedIn: reply?.signedIn || null};
 }
 
 export const computerActions = {
@@ -340,8 +346,8 @@ export const computerActions = {
     toast(`You are in control of ${botName(b.dataset.id)}'s browser.`);
   },
   'computer-handback': async b => {
-    await hold(b.dataset.id, 'handback');
-    toast(`${botName(b.dataset.id)} has the browser back.`);
+    const gave = await hold(b.dataset.id, 'handback');
+    toast(wentOn(gave) ? carriesOn(b.dataset.id) : `${botName(b.dataset.id)} has the browser back.`);
   },
   'computer-close': b => close(b.dataset.id),
   // The header's back arrow leaves the same way the close button does.

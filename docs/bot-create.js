@@ -18,10 +18,10 @@
  *
  * This module is pure. `src/bot-create.js` applies it inside the run.
  */
-import {cleanText} from './core.js?v=85aac70d41';
-import {fail} from './errors.js?v=85aac70d41';
-import {defaultContract} from './contracts.js?v=85aac70d41';
-import {controlFence} from './reply-blocks.js?v=85aac70d41';
+import {cleanText} from './core.js?v=c6f1335acc';
+import {fail} from './errors.js?v=c6f1335acc';
+import {defaultContract} from './contracts.js?v=c6f1335acc';
+import {controlFence} from './reply-blocks.js?v=c6f1335acc';
 
 export const BOT_CREATE_PERMISSION = 'bot.create';
 /** A lead can staff a job in one reply ("make five bots, one per site"); the runaway guard paces the rest. */

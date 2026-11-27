@@ -5,21 +5,21 @@
  * They throw errors carrying an HTTP `status` so the same rules apply to the
  * Node HTTP routes and to any browser-local transport.
  */
-import {activity,cleanText,initialState} from './core.js?v=85aac70d41';
-import {fail} from './errors.js?v=85aac70d41';
-import {cancelTask} from './tasks.js?v=85aac70d41';
-import {normalizeRetention} from './retention.js?v=85aac70d41';
-import * as contracts from './contracts.js?v=85aac70d41';
-import {pruneChats, releaseChatWork} from './chats.js?v=85aac70d41';
-import {denyBrowserRequest} from './bot-browser.js?v=85aac70d41';
-import {BUSY_STATUSES} from './coordination.js?v=85aac70d41';
-import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=85aac70d41';
-import {memoryState} from './memory.js?v=85aac70d41';
-import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=85aac70d41';
-import {freshGuard} from './runaway.js?v=85aac70d41';
-import {sweepGrants, forgetBotAsks, lapseOrphans} from './asks.js?v=85aac70d41';
-import {assertManager, releaseReports, companyBots, PRIMARY_GROUP, primaryOf, isPrimary} from './company.js?v=85aac70d41';
-import {logActivity} from './activity-log.js?v=85aac70d41';
+import {activity,cleanText,initialState} from './core.js?v=c6f1335acc';
+import {fail} from './errors.js?v=c6f1335acc';
+import {cancelTask} from './tasks.js?v=c6f1335acc';
+import {normalizeRetention} from './retention.js?v=c6f1335acc';
+import * as contracts from './contracts.js?v=c6f1335acc';
+import {pruneChats, releaseChatWork} from './chats.js?v=c6f1335acc';
+import {denyBrowserRequest, OPEN_REQUEST_STATUSES} from './bot-browser.js?v=c6f1335acc';
+import {BUSY_STATUSES} from './coordination.js?v=c6f1335acc';
+import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=c6f1335acc';
+import {memoryState} from './memory.js?v=c6f1335acc';
+import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=c6f1335acc';
+import {freshGuard} from './runaway.js?v=c6f1335acc';
+import {sweepGrants, forgetBotAsks, lapseOrphans} from './asks.js?v=c6f1335acc';
+import {assertManager, releaseReports, companyBots, PRIMARY_GROUP, primaryOf, isPrimary} from './company.js?v=c6f1335acc';
+import {logActivity} from './activity-log.js?v=c6f1335acc';
 
 export const SCHEMA_VERSION = 3;
 
@@ -211,7 +211,7 @@ function forgetBot(state, botId) {
   releaseChatWork(state, botId);
   const now = new Date().toISOString();
   for (const request of state.browserRequests || []) {
-    if (request.botId !== botId || !['pending', 'dispatched'].includes(request.status)) continue;
+    if (request.botId !== botId || !OPEN_REQUEST_STATUSES.includes(request.status)) continue;
     try { denyBrowserRequest(state, request.id); }
     catch { request.status = 'denied'; request.updatedAt = now; }
   }

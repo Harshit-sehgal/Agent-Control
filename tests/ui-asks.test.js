@@ -11,6 +11,59 @@ const stateOf = (extra = {}) => ({groups: [{id: 'home', name: 'Home', settings: 
 const ask = (extra = {}) => ({id: 'a1', botId: 'mail', runId: 'r1', chatKey: 'mail', action: 'send', target: '', detail: 'send an email to Northwind', grantScope: '', status: 'pending', scope: null, createdAt: '2026-11-11T10:00:00Z', ...extra});
 const line = (extra = {}) => ({id: 'ask-a1', role: 'system', kind: 'ask', askId: 'a1', text: 'Mailroom wants to send an email to Northwind.', ...extra});
 
+// ---- the sign-in card (Phase 3: sign in from the phone) ----
+
+const scout = bot('scout', 'Scout', {reportsTo: 'atlas'});
+const signinState = (extra = {}) => stateOf({groups: [{id: 'home', name: 'Home', settings: {}, bots: [atlas, scout]}], ...extra});
+const signinAsk = (extra = {}) => ({id: 's1', kind: 'signin', action: 'signin', botId: 'scout', runId: 'r1', chatKey: 'scout', accountId: 'acct-1', accountName: 'CRM, sales', site: 'crm.example.com', url: 'https://crm.example.com/', detail: 'signing in to crm.example.com as CRM, sales', target: '', grantScope: '', status: 'pending', scope: null, createdAt: '2026-11-11T10:00:00Z', expiresAt: '2026-11-12T10:00:00Z', ...extra});
+const signinLine = (extra = {}) => ({id: 'ask-s1', role: 'system', kind: 'ask', askId: 's1', text: 'Scout needs you to sign in to crm.example.com as CRM, sales.', ...extra});
+const CARD_NOTE = "Take control opens CRM, sales's browser on its computer. Sign in there, then tap Hand back, and the task carries on by itself.";
+
+test('a pending sign-in ask names the bot, the site and the account, with Take control and Not now', () => {
+  const card = askCard(signinState({asks: [signinAsk()]}), signinLine());
+  assert.equal(card.open, true);
+  assert.equal(card.askId, 's1');
+  assert.equal(card.botId, 'scout');
+  assert.equal(card.botName, 'Scout');
+  assert.equal(card.text, 'Scout needs you to sign in to crm.example.com as CRM, sales.');
+  assert.equal(card.question, 'Scout needs you to sign in to crm.example.com as CRM, sales.');
+  assert.equal(card.note, CARD_NOTE);
+  assert.deepEqual(card.choices, [{id: 'signin', label: 'Take control', primary: true}, {id: 'decline', label: 'Not now', primary: false}]);
+  assert.equal(card.url, 'https://crm.example.com/');
+  assert.equal(card.target, '');
+  assert.equal(card.body, '');
+});
+
+test('a sign-in card never offers Allow once or Always allow, and shows no payment confirmation', () => {
+  const card = askCard(signinState({asks: [signinAsk()]}), signinLine());
+  const ids = card.choices.map(c => c.id), labels = card.choices.map(c => c.label);
+  for (const word of ['allow', 'always']) assert.ok(!ids.includes(word), word);
+  assert.ok(!labels.some(l => /allow/i.test(l)), labels.join());
+  assert.equal(card.confirmAlways, undefined);
+  // The question is the card's line from the server's own wording, not "Let Scout ...?".
+  assert.doesNotMatch(card.question, /^Let /);
+});
+
+test('the sign-in card says whose it is when the copy sits in the primary\'s Needs you', () => {
+  const card = askCard(signinState({asks: [signinAsk()]}), signinLine({text: 'Needs you: Scout needs you to sign in to crm.example.com as CRM, sales.'}));
+  assert.equal(card.open, true);
+  assert.equal(card.botName, 'Scout');
+  assert.equal(card.question, 'Scout needs you to sign in to crm.example.com as CRM, sales.');
+});
+
+test('an answered sign-in card collapses to one of the three lines', () => {
+  const signed = askCard(signinState({asks: [signinAsk({status: 'allowed', scope: 'once'})]}), signinLine());
+  assert.deepEqual([signed.open, signed.text, signed.choices], [false, 'You signed in', []]);
+  assert.equal(askCard(signinState({asks: [signinAsk({status: 'declined'})]}), signinLine()).text, 'You chose not now');
+  assert.equal(askCard(signinState({asks: [signinAsk({status: 'declined', expired: true})]}), signinLine()).text, 'No sign-in in 24 hours, so the task went on without it');
+});
+
+test('the primary\'s Needs you copy of an answered sign-in card reads "You signed in (Scout)"', () => {
+  const copy = signinLine({text: 'Needs you: Scout needs you to sign in to crm.example.com as CRM, sales.'});
+  assert.equal(askCard(signinState({asks: [signinAsk({status: 'allowed', scope: 'once'})]}), copy).text, 'You signed in (Scout)');
+  assert.equal(askCard(signinState({asks: [signinAsk({status: 'declined'})]}), copy).text, 'You chose not now (Scout)');
+});
+
 // ---- the card ----
 
 test('a pending ask is an open card: its sentence, the asking bot, and the three buttons in the owner\'s words', () => {

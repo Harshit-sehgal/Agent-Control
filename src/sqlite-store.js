@@ -620,6 +620,8 @@ export class SqliteStore {
       watches: (() => { try { return JSON.parse(this.kvGet('watches') || '[]'); } catch { return []; } })(),
       // Browser accounts (shared/browser-accounts.js): which computer holds each sign-in. Never a cookie value.
       browserAccounts: (() => { try { return JSON.parse(this.kvGet('browser_accounts') || '[]'); } catch { return []; } })(),
+      // The open sign-in card of each browser account, `{accountId: askId}` (shared/asks.js). It names asks and requests, so it is not backed up.
+      signinPending: (() => { try { const v = JSON.parse(this.kvGet('signin_pending') || '{}'); return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; } catch { return {}; } })(),
       memory: readMemory(kind => this.db.prepare('SELECT key, doc FROM memory WHERE kind=? ORDER BY rowid').all(kind)),
     };
     const cfg = this.db.prepare('SELECT * FROM settings WHERE id=1').get();
@@ -728,6 +730,7 @@ export class SqliteStore {
       kv('site_visits', JSON.stringify(state.siteVisits || null));
       kv('watches', JSON.stringify(state.watches || []));
       kv('browser_accounts', JSON.stringify(state.browserAccounts || []));
+      kv('signin_pending', JSON.stringify(state.signinPending || {}));
       const retention = state.settings?.retention ? JSON.stringify(state.settings.retention) : null;
       if (this.kvWritten.get('\0settings') !== String(retention)) {
         this.stmt('INSERT INTO settings (id,retention) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET retention=excluded.retention').run(retention);
