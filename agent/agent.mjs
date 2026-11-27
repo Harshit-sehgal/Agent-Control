@@ -74,7 +74,11 @@ function loadConfig() {
 /** Written whole to a private temp file, fsynced, then renamed into place: a stop or a full disk mid-write leaves the
  * old config, never half of one (the config holds the only copy of the secret that opens the browser jars). */
 function saveConfig(config) {
-  const tmp = `${CONFIG}.tmp`;
+  // A config that is a symlink (to a persistent volume, say) stays one: the file it points at is replaced, from a temp
+  // file beside that file.
+  let target = CONFIG;
+  try { target = fs.realpathSync(CONFIG); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+  const tmp = `${target}.tmp`;
   try { fs.unlinkSync(tmp); } catch (e) { if (e.code !== 'ENOENT') throw e; }   // never write through a link left here
   const fd = fs.openSync(tmp, 'wx', 0o600);
   try {
@@ -87,26 +91,40 @@ function saveConfig(config) {
     throw e;
   }
   fs.closeSync(fd);
-  fs.renameSync(tmp, CONFIG);
+  fs.renameSync(tmp, target);
 }
 
-/** The lock a running agent holds, `<config>.lock`, holding its pid. `pair` refuses while it is held: a pair re-keys the
- * jars and replaces the secret, which the running agent would go on using (and saving jars under). A lock whose process
- * is gone is stale and holds nothing. */
+/** The lock, `<config>.lock`, holding the pid of the one process that may change this computer's pairing or keep its
+ * browser jars: a running agent, or a `pair`. Taken whole and atomically (a complete file is linked into place), so a
+ * second process never reads a half-written one. One whose process is gone is stale and is replaced. Nothing that is
+ * not the holder may change the secret the jars are under: a pair re-keys them, a run saves them. */
 const LOCK = `${CONFIG}.lock`;
 const processAlive = pid => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
-function lockHolder() {
-  try {
-    const pid = Number(fs.readFileSync(LOCK, 'utf8'));
-    return Number.isInteger(pid) && pid > 0 && pid !== process.pid && processAlive(pid) ? pid : null;
-  } catch { return null; }
+function lockPid() {
+  try { const pid = Number(fs.readFileSync(LOCK, 'utf8')); return Number.isInteger(pid) && pid > 0 ? pid : null; } catch { return null; }
 }
+/** True when this process now holds the lock; false when another live process does. */
 function takeLock() {
-  try { fs.writeFileSync(LOCK, String(process.pid), {flag: 'wx', mode: 0o600}); }
-  catch (e) { if (e.code !== 'EEXIST') throw e; fs.writeFileSync(LOCK, String(process.pid), {mode: 0o600}); }   // stale, or an earlier run: the newest owns it
+  const mine = `${LOCK}.${process.pid}`;
+  fs.writeFileSync(mine, String(process.pid), {mode: 0o600});
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try { fs.linkSync(mine, LOCK); return true; } catch (e) { if (e.code !== 'EEXIST') throw e; }
+      const holder = lockPid();
+      if (holder && holder !== process.pid && processAlive(holder)) return false;
+      if (lockPid() === holder) { try { fs.unlinkSync(LOCK); } catch {} }   // stale: its process is gone (or it holds no pid)
+    }
+    return false;
+  } finally { try { fs.unlinkSync(mine); } catch {} }
 }
 function releaseLock() {
   try { if (fs.readFileSync(LOCK, 'utf8') === String(process.pid)) fs.unlinkSync(LOCK); } catch {}
+}
+/** Takes the lock or stops with a sentence naming the file (a pid may have been reused by an unrelated process). It is
+ * given back on every way out, `fail` included. */
+function lockOrFail() {
+  if (!takeLock()) fail(`another agent process holds ${LOCK}: this computer's agent is running, or a pair is in progress. If neither is, delete that file and try again.`);
+  process.on('exit', releaseLock);
 }
 function fail(message) { console.error(`agent: ${message}`); process.exit(1); }
 
@@ -154,6 +172,7 @@ async function pair(argv) {
   const server = argValue(argv, '--server');
   const code = argValue(argv, '--code');
   if (!server || !code) fail('pair requires --server and --code.');
+  lockOrFail();
   // `--permissions ""` asks for nothing; only an absent flag asks for the full
   // scope. Reading both as "absent" meant a typo granted browser.action.
   const requested = argv.includes('--permissions') ? (argValue(argv, '--permissions') || '') : null;
@@ -162,8 +181,6 @@ async function pair(argv) {
   const url = new URL(server.replace(/\/+$/, '') + '/api/agent/pair');
   // A computer that holds a working pairing with this same server proves it by the old secret, so the server moves its
   // accounts to the new id and this computer keeps their jars.
-  const holder = lockHolder();
-  if (holder) fail(`this computer's agent is running (process ${holder}). Stop it, then pair again.`);
   const old = readableConfig();
   const sameServer = old && old.server.replace(/\/+$/, '') === server.replace(/\/+$/, '');
   // The jars of an earlier pairing must be under the saved secret before another secret is added: a third secret would
@@ -196,12 +213,18 @@ async function pair(argv) {
   console.log('Start the loop with: node agent/agent.mjs run');
 }
 
-/** The saved config when it is a usable pairing, else null (nothing is reported or exited). */
+/** The saved config, or null when there is none (no file). A config that is there but cannot be read, is not JSON or is
+ * not a usable pairing stops the command: taking it for no config would wipe jars whose secret it may still hold. */
 function readableConfig() {
-  try {
-    const c = JSON.parse(fs.readFileSync(CONFIG, 'utf8'));
-    return c && typeof c.server === 'string' && typeof c.agentId === 'string' && typeof c.secret === 'string' && c.secret ? c : null;
-  } catch { return null; }
+  let text;
+  try { text = fs.readFileSync(CONFIG, 'utf8'); }
+  catch (e) { if (e.code === 'ENOENT') return null; fail(`could not read ${CONFIG} (${e.code || 'error'}), so nothing was changed.`); }
+  let c = null;
+  try { c = JSON.parse(text); } catch {}
+  if (!(c && typeof c.server === 'string' && typeof c.agentId === 'string' && typeof c.secret === 'string' && c.secret)) {
+    fail(`${CONFIG} is not a usable pairing, so nothing was changed. Fix it, or delete it (which discards the saved browser sign-ins), then pair again.`);
+  }
+  return c;
 }
 
 /** Finish a re-key a stop left half done: a config carrying `rekeyFrom` (the secret before a re-pair) has its jars
@@ -281,10 +304,11 @@ async function readPlain(target) {
 
 let stopping = false;
 async function run() {
+  // Before the config is read: a pair in flight is about to replace it, and a run that read the old one would save it back.
+  lockOrFail();
   const config = loadConfig();
   if (!Array.isArray(config.permissions)) config.permissions = [];
   // A re-pair that stopped before it re-encrypted the jars is finished before anything opens one.
-  takeLock();
   // A re-key that cannot finish leaves the jars where they are, under the old secret: opening one under the new would
   // remove it. Browser accounts are off for this run, and the next start tries again.
   const rekeyed = finishRekey(config);

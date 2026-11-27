@@ -37,7 +37,8 @@ function agentIn(dir, env) {
   const run = () => {
     const c = spawn(process.execPath, ['agent/agent.mjs', 'run'], {cwd: root, env: full, stdio: ['ignore', 'pipe', 'pipe']});
     c.stdout.on('data', b => { log += b; }); c.stderr.on('data', b => { log += b; });
-    return {stop: async () => { const exited = new Promise(r => c.once('exit', r)); c.kill('SIGTERM'); await exited; }, kill: () => c.kill('SIGKILL')};
+    const exited = new Promise(r => c.once('exit', status => r(status)));
+    return {stop: async () => { c.kill('SIGTERM'); await exited; }, kill: () => c.kill('SIGKILL'), exited};
   };
   return {config, pair, run, log: () => log};
 }
@@ -62,8 +63,10 @@ async function scratch(t) {
 }
 
 /** A control plane that answers every heartbeat with `answer(beatNumber)` and keeps what the device sent. */
-async function stubPlane(t, answer) {
+async function stubPlane(t, answer, {holdPair = false} = {}) {
   const beats = [], results = {}, hits = [];
+  let releasePair = null;
+  const pairHeld = new Promise(r => { releasePair = r; });
   const srv = http.createServer((req, res) => {
     let raw = '';
     req.on('data', b => { raw += b; });
@@ -71,6 +74,7 @@ async function stubPlane(t, answer) {
       const body = (() => { try { return JSON.parse(raw || '{}'); } catch { return {}; } })();
       res.setHeader('Content-Type', 'application/json');
       hits.push(req.url);
+      if (req.url === '/api/agent/pair' && holdPair) { pairHeld.then(() => { res.statusCode = 500; res.end('{"error":"stub"}'); }); return; }
       if (req.url === '/api/agent/heartbeat') { beats.push({body, raw}); res.end(JSON.stringify(answer(beats.length))); return; }
       const m = /^\/api\/agent\/tasks\/([^/]+)\/result$/.exec(req.url);
       if (m) { results[m[1]] = body; res.end('{"ok":true}'); return; }
@@ -79,7 +83,8 @@ async function stubPlane(t, answer) {
   });
   await new Promise(r => srv.listen(0, '127.0.0.1', r));
   t.after(() => new Promise(r => srv.close(r)));
-  return {url: `http://127.0.0.1:${srv.address().port}`, beats, results, hits};
+  t.after(() => releasePair());
+  return {url: `http://127.0.0.1:${srv.address().port}`, beats, results, hits, releasePair};
 }
 const stubConfig = (dir, server, extra = {}) => {
   const file = path.join(dir, 'agent.config.json');
@@ -249,7 +254,7 @@ test('a pair is refused while the agent runs here; a lock left by a dead process
   const before = fs.readFileSync(config, 'utf8').replace(/"lastSeenAt".*\n/, '');
   const refused = await agent.pair(plane.url, 'ABCD-1234');
   assert.notEqual(refused.status, 0);
-  assert.match(refused.log, /is running/);
+  assert.match(refused.log, /\.lock/, 'the refusal names the lock file, not a process id');
   assert.ok(!plane.hits.includes('/api/agent/pair'), 'the server was not asked to pair');
   assert.equal(readJson(config).agentId, 'stub-agent');
   await worker.stop();
@@ -274,4 +279,79 @@ test('the config is replaced, never rewritten in place, and stays private', {tim
   assert.equal('lastSeenAt' in readJson(alias), false, 'the old file was not written through');
   assert.equal(fs.statSync(config).mode & 0o777, 0o600);
   assert.deepEqual(fs.readdirSync(dir).filter(n => n.endsWith('.tmp')), [], 'no temp file left behind');
+});
+
+/* Fix round 2: one holder of the lock at a time, whichever of run and pair it is. */
+
+test('a second run is refused while the first lives, and it leaves the first\'s lock alone', {timeout: 60000}, async t => {
+  const dir = await scratch(t);
+  const plane = await stubPlane(t, () => ({ok: true, tasks: []}));
+  const config = stubConfig(dir, plane.url);
+  const agent = agentIn(dir, {});
+  const first = agent.run();
+  t.after(() => first.kill());
+  await until(() => readJson(config)?.lastSeenAt, 'a heartbeat');
+  const second = agent.run();
+  t.after(() => second.kill());
+  assert.notEqual(await second.exited, 0, 'the second run did not start');
+  assert.match(agent.log(), /\.lock/);
+  assert.ok(fs.existsSync(`${config}.lock`), 'the first run still holds its lock');
+  const beats = plane.beats.length;
+  await until(() => plane.beats.length > beats, 'the first run to carry on');
+  await first.stop();
+  assert.equal(fs.existsSync(`${config}.lock`), false);
+});
+
+test('a run is refused, and reads no config, while a pair holds the lock; a second pair is refused too', {timeout: 60000}, async t => {
+  const dir = await scratch(t);
+  const plane = await stubPlane(t, () => ({ok: true, tasks: []}), {holdPair: true});
+  const config = stubConfig(dir, plane.url);
+  const before = fs.readFileSync(config, 'utf8');
+  const agent = agentIn(dir, {});
+  const pairing = agent.pair(plane.url, 'ABCD-1234');
+  await until(() => plane.hits.includes('/api/agent/pair'), 'the pair request');
+  const run = agent.run();
+  t.after(() => run.kill());
+  assert.notEqual(await run.exited, 0, 'the run did not start');
+  assert.equal(plane.beats.length, 0, 'it never beat: it did not load a config');
+  const again = await agentIn(dir, {}).pair(plane.url, 'EFGH-5678');
+  assert.notEqual(again.status, 0);
+  assert.match(again.log, /\.lock/);
+  assert.equal(plane.hits.filter(h => h === '/api/agent/pair').length, 1, 'only one pair reached the server');
+  plane.releasePair();
+  assert.notEqual((await pairing).status, 0);
+  assert.equal(fs.readFileSync(config, 'utf8'), before, 'the config is as it was');
+  assert.equal(fs.existsSync(`${config}.lock`), false, 'a pair releases the lock on every way out');
+});
+
+test('a config that cannot be read makes pair fail before the server is asked, with every jar untouched', {timeout: 60000}, async t => {
+  const dir = await scratch(t);
+  const jarDir = path.join(dir, 'browser-accounts');
+  const plane = await stubPlane(t, () => ({ok: true, tasks: []}));
+  const config = path.join(dir, 'agent.config.json');
+  fs.writeFileSync(config, '{"server": "x", "secret": ', {mode: 0o600});   // a typo, or a write that stopped halfway
+  createJarStore({dir: jarDir, secret: 'some-secret'}).save(A, [cookie]);
+  const out = await agentIn(dir, {}).pair(plane.url, 'ABCD-1234');
+  assert.notEqual(out.status, 0);
+  assert.deepEqual(plane.hits, [], 'the server was not asked');
+  assert.equal(createJarStore({dir: jarDir, secret: 'some-secret'}).load(A)?.[0].value, MARKER, 'the jar is still there');
+  assert.equal(fs.readFileSync(config, 'utf8'), '{"server": "x", "secret": ');
+});
+
+test('a config that is a symlink stays one, and its target is the file that is updated', {timeout: 60000}, async t => {
+  const dir = await scratch(t);
+  const plane = await stubPlane(t, () => ({ok: true, tasks: []}));
+  const real = path.join(dir, 'volume');
+  fs.mkdirSync(real);
+  const target = stubConfig(real, plane.url);
+  const config = path.join(dir, 'agent.config.json');
+  fs.symlinkSync(target, config);
+  const worker = agentIn(dir, {}).run();
+  t.after(() => worker.kill());
+  await until(() => readJson(target)?.lastSeenAt, 'a heartbeat');
+  await worker.stop();
+  assert.ok(fs.lstatSync(config).isSymbolicLink(), 'the link is still a link');
+  assert.equal(fs.realpathSync(config), fs.realpathSync(target));
+  assert.deepEqual(fs.readdirSync(dir).filter(n => n.endsWith('.tmp')), [], 'no temp file beside the link');
+  assert.equal(fs.statSync(target).mode & 0o777, 0o600);
 });
