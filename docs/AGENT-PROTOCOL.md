@@ -205,6 +205,31 @@ The housekeeping `sweep` runs about once a minute (`agent/browser-host.mjs`):
   next task starts Chrome again with each account signed in from its jar. Without
   it the browser is never quit for being idle.
 
+#### The sign-in wall of an account
+
+A page a task for an account brings back is that account's **sign-in wall** when it
+is a sign-in page, or shows a visible password field, on the account's own site; or
+when a page of the account's site ends on an identity provider's sign-in host
+(Google, Microsoft, Yahoo or Apple), whether or not the redirect names where to
+return. A sign-in page of another site is that site's wall, never the account's.
+The device marks the account `signed-out` on such a page, as it does for the keeper.
+
+The server holds a page that comes back as its account's wall and does not hand it
+to the bot. The request reads `signin`, and the owner signs in from the Computer
+view, which opens the account's tab (takeover, then input). The device sees no change
+until the owner hands back. Then the server answers the account's card and sends
+the page again as a **new task**, with the idempotency key `browser:<request id>:<n>`.
+The old task's id is forgotten, so a late result for it changes nothing. A page is
+held at most twice; the third wall goes to the bot as the page. A result with
+`tookOver: true` is never held.
+
+What the owner types in secret (a `type` input with `secret: true`, or into a
+field the page counts as secret) is remembered in memory only. A tab with no account keeps its own memory for the life
+of the tab; for a tab in an account the memory is **one set for the account**, shared
+by every tab of it, so a password typed on one bot's tab is hidden in the results of
+every other bot's tab in that account. It is scrubbed from every result that
+leaves the device, and it is never written anywhere.
+
 While the owner drives a bot's tab, only that bot waits. A running task of
 that bot finishes the step it is in, runs no later step (the page is no longer
 the one the steps were planned for), waits for the hand back and answers with
