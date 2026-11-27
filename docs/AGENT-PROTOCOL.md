@@ -197,8 +197,9 @@ The housekeeping `sweep` runs about once a minute (`agent/browser-host.mjs`):
   names it) of each account that is signed in, or whose jar has not been checked
   yet, every 30 minutes. A sign-in page, or any page with
   a visible password field, marks the account `signed-out`; any other page of the
-  site marks it `signed-in`. A task's own page says the same. The keeper's read is
-  not use of the browser;
+  site marks it `signed-in`. A task's own page says the same, by the rule in "The
+  sign-in wall of an account" below (a click or a type that ends on an identity
+  provider says nothing). The keeper's read is not use of the browser;
 - with `AGENT_BROWSER_QUIT_IDLE=1`, Chrome is closed after 30 minutes in which no
   task ran and no one drove or watched a tab. Every jar is saved first, a task
   that arrives during those saves keeps it open, and the
