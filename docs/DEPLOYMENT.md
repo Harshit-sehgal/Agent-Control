@@ -270,7 +270,8 @@ missing.
 On the device that runs `node agent/agent.mjs run`, set `AGENT_BROWSER=1` (and
 `AGENT_BROWSER_ALLOWLIST`, as above) and every bot's browser work shares **one
 Chrome with one saved profile**. Sign in to a site there once and the sign-in is
-there for every bot. Each bot has its own tab, one bot drives at a time and the
+there for every bot that does not sign in as a browser account (see **Two
+accounts of one site** below). Each bot has its own tab, one bot drives at a time and the
 others wait their turn in order; a bot never touches another bot's tab.
 
 - **Where it lives:** `browser-profile/` next to the agent's `agent.config.json`
@@ -328,22 +329,28 @@ others wait their turn in order; a bot never touches another bot's tab.
   server stores only the account's name, site and computer, and shows the state
   the computer reports (Signed in, Not signed in or Not checked yet).
 - **Not in a backup, and not portable:** `npm run backup` carries the account
-  records as names only, so a restore shows every account signed out. A jar
+  records (name, site and computer) with no state and no cookie, so a restore
+  shows every account signed out. A jar
   copied to another machine does nothing: that machine's pairing secret does not
   open it, and the jar is removed the first time it is read. Sign in again there.
-- **Re-pairing:** pairing again with the same server keeps the jars (they are
-  re-encrypted under the new secret, and the accounts move to the new pairing).
-  Pairing with another server removes them. Stop the agent before you pair: a
-  `pair` refuses while the agent runs.
+- **Re-pairing:** pair again with the same server, without removing the
+  computer first and with a code from the same workspace, and the jars are kept:
+  they are re-encrypted under the new secret, and the accounts and bot pins move
+  to the new pairing when it first checks in (start the agent after pairing). If
+  the computer was removed, or the code is of another workspace, `pair` says the
+  server did not take it as the same computer and removes the jars; move the
+  accounts to it in Settings. A pair whose reply never arrived changes nothing:
+  the old pairing still works. Pairing with another server removes the jars.
+  Stop the agent before you pair: a `pair` refuses while the agent runs.
 - **Wipe one account:** delete it in Settings → Local agents (a bot that still
   signs in as it must be moved to another account first). On its next beat the
   computer finds the account missing from the list the server sends and removes
   its jar and context. To wipe every jar, stop the agent and delete the
   `browser-accounts` directory.
 - **Looking after sign-ins:** a tab no bot has used for 10 minutes is closed
-  after its cookies are saved, and about every 30 minutes a keeper tab reads each
-  signed-in account's site, so a sign-in that ran out shows as Signed out before
-  a task meets it. Chrome is kept running between tasks. Set
+  after its cookies are saved, and about every 30 minutes a keeper tab reads the
+  site of each account that is signed in, or whose jar has not been checked yet,
+  so a sign-in that ran out shows as Signed out before a task meets it. Chrome is kept running between tasks. Set
   `AGENT_BROWSER_QUIT_IDLE=1` to have it quit after 30 minutes with nothing run,
   driven or watched, which frees its memory (a headless Chrome with one tab is
   about 400 MB, and each account's context a little more); the next task starts
