@@ -67,6 +67,7 @@ const TASK_KINDS = ['http.check', 'browser.capture', 'browser.action', 'model.ru
 // that is not a positive number is the default, not a spin.
 const POLL_MS = (() => { const n = Number(process.env.AGENT_POLL_MS); return Number.isFinite(n) && n > 0 ? n : 15000; })();
 const TIMEOUT_MS = 15000;
+const TIMED_OUT = Symbol('timed out');
 
 function loadConfig() {
   try { return JSON.parse(fs.readFileSync(CONFIG, 'utf8')); }
@@ -158,6 +159,8 @@ async function pair(argv) {
   const code = argValue(argv, '--code');
   if (!server || !code) fail('pair requires --server and --code.');
   lockOrFail({required: true});
+  // A pair waits on the network: its lock is kept fresh meanwhile, so a run started then cannot take it as stale.
+  setInterval(() => refreshLock(heldLock), REFRESH_MS).unref();
   // `--permissions ""` asks for nothing; only an absent flag asks for the full
   // scope. Reading both as "absent" meant a typo granted browser.action.
   const requested = argv.includes('--permissions') ? (argValue(argv, '--permissions') || '') : null;
@@ -176,7 +179,11 @@ async function pair(argv) {
   let res;
   try { res = await post(url, {headers: {'Content-Type': 'application/json'}, body}); }
   catch (e) { fail(e.message); }
-  const value = await res.json().catch(() => null);
+  // The body is bounded like the request: a server that sends its headers and then stalls ends the pair, not hangs it.
+  let stalled;
+  const value = await Promise.race([res.json().catch(() => null), new Promise(resolve => { stalled = setTimeout(() => resolve(TIMED_OUT), TIMEOUT_MS); })]);
+  clearTimeout(stalled);
+  if (value === TIMED_OUT) fail(`the reply from ${url.host} did not finish within ${TIMEOUT_MS / 1000}s; nothing was saved.`);
   if (!res.ok) fail(`pairing failed: ${value?.error || res.status}`);
   // A 2xx from something that is not the control plane (a proxy error page, a
   // captive portal) parses to null. Saving that would overwrite a working

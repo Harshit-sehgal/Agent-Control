@@ -23,15 +23,19 @@ export function lockFileFor(configPath) {
   return `${real}.lock`;
 }
 
-const UNAVAILABLE = new Set(['EROFS', 'EACCES', 'EPERM', 'ENOENT']);
-
 function create(file, pid, now) {
   const token = crypto.randomBytes(16).toString('hex');
   const fd = fs.openSync(file, 'wx', 0o600);
   try {
     fs.writeFileSync(fd, JSON.stringify({pid, token, at: now()}));
     fs.fsyncSync(fd);
-  } finally { fs.closeSync(fd); }
+  } catch (e) {
+    // A full disk or a failing device: the empty file just made would read as a maker mid-write for ten seconds.
+    fs.closeSync(fd);
+    try { fs.unlinkSync(file); } catch {}
+    throw e;
+  }
+  fs.closeSync(fd);
   return token;
 }
 
@@ -51,7 +55,7 @@ function stale(seen, pid, alive) {
 }
 
 /** `{status: 'taken', lock}`, `{status: 'held'}` (another live process has it) or `{status: 'unavailable', code}`
- * (the folder cannot be written: the caller decides whether that matters). */
+ * (the lock cannot be made: a read-only folder, a full disk, a failing device; the caller decides whether that matters). */
 export function takeLock(file, {pid = process.pid, now = Date.now, alive = processAlive} = {}) {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -60,8 +64,7 @@ export function takeLock(file, {pid = process.pid, now = Date.now, alive = proce
       if (inspect(file, now)?.token !== token) return {status: 'held'};
       return {status: 'taken', lock: {file, token}};
     } catch (e) {
-      if (UNAVAILABLE.has(e.code) && e.code !== 'EEXIST') return {status: 'unavailable', code: e.code};
-      if (e.code !== 'EEXIST') throw e;
+      if (e.code !== 'EEXIST') return {status: 'unavailable', code: e.code || 'error'};
     }
     const seen = inspect(file, now);
     if (seen && !stale(seen, pid, alive)) return {status: 'held'};

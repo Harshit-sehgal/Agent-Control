@@ -63,7 +63,7 @@ async function scratch(t) {
 }
 
 /** A control plane that answers every heartbeat with `answer(beatNumber)` and keeps what the device sent. */
-async function stubPlane(t, answer, {holdPair = false, pairReply = null} = {}) {
+async function stubPlane(t, answer, {holdPair = false, pairReply = null, stallPairBody = false} = {}) {
   const beats = [], results = {}, hits = [];
   let releasePair = null;
   const pairHeld = new Promise(r => { releasePair = r; });
@@ -75,6 +75,7 @@ async function stubPlane(t, answer, {holdPair = false, pairReply = null} = {}) {
       res.setHeader('Content-Type', 'application/json');
       hits.push(req.url);
       if (req.url === '/api/agent/pair' && holdPair) { pairHeld.then(() => { res.statusCode = 500; res.end('{"error":"stub"}'); }); return; }
+      if (req.url === '/api/agent/pair' && stallPairBody) { res.writeHead(201, {'Content-Type': 'application/json'}); res.write('{"agentId":'); pairHeld.then(() => res.destroy()); return; }
       if (req.url === '/api/agent/pair' && pairReply) { res.statusCode = 201; res.end(JSON.stringify(pairReply)); return; }
       if (req.url === '/api/agent/heartbeat') { beats.push({body, raw}); res.end(JSON.stringify(answer(beats.length))); return; }
       const m = /^\/api\/agent\/tasks\/([^/]+)\/result$/.exec(req.url);
@@ -198,6 +199,19 @@ test('a re-pair the server did not take as the same computer removes the old sig
   assert.equal(saved.agentId, 'new-agent');
   assert.equal('rekeyFrom' in saved, false);
   assert.deepEqual(createJarStore({dir: jarDir, secret: 'new-secret-9'}).ids(), [], 'no jar is kept for accounts that are not coming');
+});
+
+test('a pair whose reply body never ends gives up in time, with the config as it was', {timeout: 60000}, async t => {
+  const dir = await scratch(t);
+  const plane = await stubPlane(t, () => ({ok: true, tasks: []}), {stallPairBody: true});
+  const config = stubConfig(dir, plane.url);
+  const before = fs.readFileSync(config, 'utf8');
+  const started = Date.now();
+  const out = await agentIn(dir, {}).pair(plane.url, 'ABCD-1234');
+  assert.notEqual(out.status, 0);
+  assert.ok(Date.now() - started < 30000, 'the body read is bounded like the request');
+  assert.equal(fs.readFileSync(config, 'utf8'), before);
+  assert.equal(fs.existsSync(`${config}.lock`), false);
 });
 
 test('a re-pair that stopped before the jars were re-keyed is finished at the next start', {timeout: 90000}, async t => {
