@@ -226,6 +226,38 @@ test('what is never held: a watch, a takeover result, a page with no account, a 
   assert.match(calls.find(c => c.id === 'third').text, /\n\nThis is a sign-in page/);
 });
 
+test('a signed-in bot that clicks Continue with Google is not held: no card, no push, the page goes to the run', async t => {
+  const oauth = {finalUrl: 'https://accounts.google.com/o/oauth2/v2/auth?client_id=x&redirect_uri=https%3A%2F%2Fcrm.example.com%2Fcb', title: 'Choose an account', text: 'Choose an account to continue to CRM'};
+  const bare = {finalUrl: 'https://accounts.google.com/v3/signin/identifier', title: 'Sign in', text: ''};
+  const {store, sent} = await rig(t, {
+    requests: [
+      request('click', {steps: [{op: 'click', index: 3}]}),
+      request('type', {steps: [{op: 'type', index: 2, text: 'me@example.test'}], runId: 'run2'}),
+      request('read', {runId: 'run3'}),
+      request('nav', {steps: [{op: 'navigate', url: 'https://crm.example.com/settings'}], runId: 'run4'}),
+    ],
+    runs: [runOf('run1'), runOf('run2'), runOf('run3'), runOf('run4')],
+  });
+  const {calls, hooks} = hooksOf();
+  const finish = (id, result) => browser.finishBrowserRequest(store, requestOf(store, id), {ok: true, result}, hooks);
+  await finish('click', oauth);
+  await finish('type', bare);
+  await tick();
+  for (const id of ['click', 'type']) assert.equal(requestOf(store, id).status, 'done', id);
+  assert.deepEqual(cards(store), [], 'no card for a click through to the IdP');
+  assert.deepEqual(sent, [], 'and no push');
+  assert.deepEqual(calls.map(c => c.id).sort(), ['click', 'type'], 'both pages reach their runs');
+  for (const id of ['run1', 'run2']) assert.equal(runIn(store, id).status, 'awaiting_browser', id);
+
+  // A plain read, or a navigate, that the site sends to the IdP is still the wall.
+  await finish('read', oauth);
+  await finish('nav', bare);
+  await tick();
+  for (const id of ['read', 'nav']) assert.equal(requestOf(store, id).status, 'signin', id);
+  assert.equal(cards(store).length, 1);
+  assert.equal(sent.length, 1);
+});
+
 test('a held request with no run parks nothing and continues no chat', async t => {
   const {store, sent} = await rig(t, {requests: [request('br1', {runId: undefined})]});
   const {calls, continued, hooks} = hooksOf();
@@ -386,6 +418,41 @@ test('holdForSignin answers null and leaves the state exactly as it was whenever
   assert.equal(again.ask.id, first.ask.id);
   assert.equal(s.asks.length, 1);
   assert.equal(MAX_SIGNIN_HOLDS, 2);
+});
+
+test('a run that said Not now to the account is not held again: its page goes to the bot; a decline on another account holds', () => {
+  const B = '22222222-2222-4222-8222-222222222222';
+  const base = declined => ({
+    groups: [{id: 'lab', bots: [{id: 'web', name: 'Web', settings: {browserAccount: A}}]}],
+    browserAccounts: [{id: A, name: 'Sales', site: 'crm.example.com', deviceId: 'pc', storage: 'cookies'}],
+    groupRuns: [runOf('run1', {declinedAsks: declined})], asks: [], grants: [], chats: {}, browserRequests: [],
+  });
+  const opts = {now: NOW, makeId: () => 'k1'};
+  const s = base([{action: 'browser.use', scope: 'https://crm.example.com'}, {action: 'signin', scope: A}]), before = JSON.stringify(s);
+  assert.equal(holdForSignin(s, request('a'), wall, opts), null);
+  assert.equal(JSON.stringify(s), before, 'nothing was written');
+  const other = base([{action: 'signin', scope: B}]);
+  assert.equal(holdForSignin(other, request('a'), wall, opts).fresh, true, 'a decline on account B does not stop a hold on A');
+  // An old record with no account in its scope says nothing about A.
+  assert.equal(holdForSignin(base([{action: 'signin', scope: ''}]), request('a'), wall, opts).fresh, true);
+});
+
+test('an unattended run that said Not now to the account sends no sign-in notice for its site', async t => {
+  const signin = '```setup\n{"action":"signin","site":"crm.example.com"}\n```\nI need you to sign in to the CRM.';
+  const runUnattended = async declinedAsks => {
+    const {store} = await company(t);
+    const sent = [];
+    store.notify = async event => { sent.push(event); };
+    await store.update(s => {
+      s.browserAccounts = [{id: A, name: 'Sales', site: 'crm.example.com', deviceId: 'pc-1', storage: 'cookies'}];
+      s.groups.find(g => g.id === 'home').bots.find(b => b.id === 'atlas').settings.browserAccount = A;
+    });
+    await startRun(store, {message: 'Check the CRM', executor: model({Atlas: signin}).executor, extra: {unattended: true, declinedAsks}});
+    await tick();
+    return sent.filter(n => n.kind === 'health');
+  };
+  assert.equal((await runUnattended([{action: 'signin', scope: '22222222-2222-4222-8222-222222222222'}])).length, 1, 'a decline on another account changes nothing');
+  assert.deepEqual(await runUnattended([{action: 'signin', scope: A}]), [], 'the owner already said not now to this account in this run');
 });
 
 test('signin_pending survives a reopen and is dropped by a restore', async t => {

@@ -13,7 +13,8 @@ import * as agent from '../src/agent.js';
 import {createApp} from '../src/app.js';
 import {browserLive} from '../src/browser-live.js';
 import {executeCustomBot} from '../src/ai.js';
-import {healthIssues} from '../src/health-watch.js';
+import {healthIssues, createHealthWatch, QUEUE_LAG_MS} from '../src/health-watch.js';
+import {expireBrowserTasks} from '../src/bot-browser.js';
 import {isSigninAsk} from '../shared/asks.js';
 import {BROWSER_ACCOUNTS_V1, SECRET_INPUT_V1} from '../shared/device-features.js';
 import {company, ask as startRun} from './run-fixture.js';
@@ -121,6 +122,23 @@ test('a keeper finds an account signed out, the phone is told, the owner signs i
   assert.equal(store.read().browserRequests.find(r => r.id === request.id).signinAskId, card.id);
   assert.equal(notices().length, 1, 'no second push');
 
+  // 2b. While the page is held, nothing calls it late (Call 23). The health watch, checked twice in a row past the queue's
+  // lag as its sweep is, says nothing. The control shows that same moment would call queued work late.
+  const later = Date.now() + QUEUE_LAG_MS + 60000;
+  const health = [], errors = [];
+  const watch = createHealthWatch(store, {now: () => later, notify: async event => { health.push(event); }, log: message => { errors.push(message); }});
+  await watch.tick(); await watch.tick();
+  assert.deepEqual([health, errors], [[], []], 'a parked run leaves nothing for the health watch, which checked without an error');
+  const facts = {agents: [], tasks: store.read().tasks || [], now: later};
+  assert.deepEqual(healthIssues(facts), []);
+  assert.deepEqual(healthIssues({...facts, tasks: [...facts.tasks, {kind: 'bot-task', status: 'queued', runAt: new Date().toISOString()}]}).map(i => i.key), ['queue-behind'], 'the control: queued work this old is late');
+  // Two hours on, the computer is long unseen, so a page out with it would be failed; the held page is not, and its run waits.
+  const twoHours = Date.now() + 2 * 3600e3;
+  assert.equal(agent.agentOnline(store.get('SELECT last_seen_at, paired_at FROM agents WHERE id=?', device.agentId), twoHours), false, 'the control: the computer counts as gone');
+  assert.equal(await expireBrowserTasks(store, undefined, twoHours), 0);
+  assert.equal(store.read().browserRequests.find(r => r.id === request.id).status, 'signin');
+  assert.equal(store.read().groupRuns.find(r => r.id === run.id).status, 'awaiting_ask');
+
   // 3. From the phone: Take control, then the address and the two typed secrets, over https. The same typing over a
   // connection that could be read is refused, and none of it reaches the store.
   await poll();
@@ -158,7 +176,4 @@ test('a keeper finds an account signed out, the phone is told, the owner signs i
   assert.match(modelCalls.at(-1), /Reports for Sales/);
   assert.match(store.read().chats[ids.scholar].filter(m => m.role !== 'system' && m.role !== 'user').at(-1).text, /Reports for Sales/);
   assert.equal(notices().length, 1, 'the owner was pushed once for the whole thing');
-
-  // 6. Nothing is left waiting that the health watch would call late.
-  assert.deepEqual(healthIssues({agents: [], tasks: store.read().tasks || [], now: Date.now()}), []);
 });

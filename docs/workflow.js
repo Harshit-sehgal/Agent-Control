@@ -5,21 +5,21 @@
  * They throw errors carrying an HTTP `status` so the same rules apply to the
  * Node HTTP routes and to any browser-local transport.
  */
-import {activity,cleanText,initialState} from './core.js?v=6e40c6c244';
-import {fail} from './errors.js?v=6e40c6c244';
-import {cancelTask} from './tasks.js?v=6e40c6c244';
-import {normalizeRetention} from './retention.js?v=6e40c6c244';
-import * as contracts from './contracts.js?v=6e40c6c244';
-import {pruneChats, releaseChatWork} from './chats.js?v=6e40c6c244';
-import {denyBrowserRequest, OPEN_REQUEST_STATUSES} from './bot-browser.js?v=6e40c6c244';
-import {BUSY_STATUSES} from './coordination.js?v=6e40c6c244';
-import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=6e40c6c244';
-import {memoryState} from './memory.js?v=6e40c6c244';
-import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=6e40c6c244';
-import {freshGuard} from './runaway.js?v=6e40c6c244';
-import {sweepGrants, forgetBotAsks, lapseOrphans} from './asks.js?v=6e40c6c244';
-import {assertManager, releaseReports, companyBots, PRIMARY_GROUP, primaryOf, isPrimary} from './company.js?v=6e40c6c244';
-import {logActivity} from './activity-log.js?v=6e40c6c244';
+import {activity,cleanText,initialState} from './core.js?v=56cf61828d';
+import {fail} from './errors.js?v=56cf61828d';
+import {cancelTask} from './tasks.js?v=56cf61828d';
+import {normalizeRetention} from './retention.js?v=56cf61828d';
+import * as contracts from './contracts.js?v=56cf61828d';
+import {pruneChats, releaseChatWork} from './chats.js?v=56cf61828d';
+import {denyBrowserRequest, OPEN_REQUEST_STATUSES} from './bot-browser.js?v=56cf61828d';
+import {BUSY_STATUSES} from './coordination.js?v=56cf61828d';
+import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js?v=56cf61828d';
+import {memoryState} from './memory.js?v=56cf61828d';
+import {MAX_BOTS_PER_GROUP} from './bot-create.js?v=56cf61828d';
+import {freshGuard} from './runaway.js?v=56cf61828d';
+import {sweepGrants, forgetBotAsks, lapseOrphans} from './asks.js?v=56cf61828d';
+import {assertManager, releaseReports, companyBots, PRIMARY_GROUP, primaryOf, isPrimary} from './company.js?v=56cf61828d';
+import {logActivity} from './activity-log.js?v=56cf61828d';
 
 export const SCHEMA_VERSION = 3;
 

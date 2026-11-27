@@ -12,9 +12,9 @@
  * `applyPreset` changes the state and returns the sentences the confirm sheet lists (run it on a copy to preview)
  * and the Undo snapshot `restorePermissions` in asks.js puts back. Pure and browser-safe: the server route and the
  * Pages demo apply it the same way. */
-import {fail} from './errors.js?v=6e40c6c244';
-import {setAskBasics, setHandsOff, setGrant, grantEnded, grantPrior} from './asks.js?v=6e40c6c244';
-import {grantWhat} from './ui-asks.js?v=6e40c6c244';
+import {fail} from './errors.js?v=56cf61828d';
+import {setAskBasics, setHandsOff, setGrant, grantEnded, grantPrior} from './asks.js?v=56cf61828d';
+import {grantWhat} from './ui-asks.js?v=56cf61828d';
 
 export const PRESETS = [
   {id: 'careful', name: 'Careful', text: 'Every bot asks before it opens a page, reads an app, sends, posts or pays.', askBasics: true, handsOff: false},

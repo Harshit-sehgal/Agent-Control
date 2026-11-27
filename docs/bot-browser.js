@@ -20,13 +20,13 @@
  * X and Twitter work like any other site: a bot may read, click and type there, and a click on Post asks
  * unless the owner set Always allow for posting on that site.
  */
-import {cleanText, validHttpUrl} from './core.js?v=6e40c6c244';
-import {fail} from './errors.js?v=6e40c6c244';
-import {decide, createAsk, scopeOf, declinedNeed, outsideRead, keepOutsideMarks, openSigninAsk} from './asks.js?v=6e40c6c244';
-import {botSettings} from './bot-settings.js?v=6e40c6c244';
-import {controlFence} from './reply-blocks.js?v=6e40c6c244';
-import {BACKSTOP, pagesCap, roundsCap, siteOf, siteCapLeft, countSitePage, limitsOf} from './limits.js?v=6e40c6c244';
-import {appForHost} from './app-catalog.js?v=6e40c6c244';
+import {cleanText, validHttpUrl} from './core.js?v=56cf61828d';
+import {fail} from './errors.js?v=56cf61828d';
+import {decide, createAsk, scopeOf, declinedNeed, outsideRead, keepOutsideMarks, openSigninAsk, signinDeclined} from './asks.js?v=56cf61828d';
+import {botSettings} from './bot-settings.js?v=56cf61828d';
+import {controlFence} from './reply-blocks.js?v=56cf61828d';
+import {BACKSTOP, pagesCap, roundsCap, siteOf, siteCapLeft, countSitePage, limitsOf} from './limits.js?v=56cf61828d';
+import {appForHost} from './app-catalog.js?v=56cf61828d';
 
 /** The most page text one model turn carries (the pages of a round together). */
 export const MAX_PAGE_CHARS = 24000;
@@ -626,7 +626,9 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
       const rosterBot = (state.groups || []).flatMap(g => g.bots || []).find(b => b.id === bot.id);
       const accountId = rosterBot ? botSettings(rosterBot).browserAccount : null;
       const accountCard = accountId ? openSigninAsk(state, accountId) : null;
-      if (live && !(live.signinOffered || []).includes(host) && !(accountCard && onSite(host, accountCard.site))) {
+      // Nor after the owner said Not now to that account's card in this run.
+      const declinedSite = live && signinDeclined(live, accountId) ? (state.browserAccounts || []).find(a => a.id === accountId)?.site : null;
+      if (live && !(live.signinOffered || []).includes(host) && !(accountCard && onSite(host, accountCard.site)) && !(declinedSite && onSite(host, declinedSite))) {
         live.signinOffered = [...(live.signinOffered || []), host];
         const card = {action: 'signin', botId: bot.id, url: `https://${host}/`, text: `Sign in to ${host.replace(/^www\./, '')} in the browser on this computer. ${host.replace(/^www\./, '')} turned the bots away; once you are signed in, they use the same browser and can read it.`};
         lines.push({id: makeId(), role: 'system', kind: 'setup', botId: bot.id, setup: JSON.stringify(card), text: `${bot.name} suggests: ${card.text}`, at: now});

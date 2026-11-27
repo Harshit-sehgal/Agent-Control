@@ -2,8 +2,8 @@
 // account (never a grant), the account's own wall, and the `signin` request status that holds a run's request.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {SIGNIN_ASK, isSigninAsk, createSigninAsk, openSigninAsk, answerAsk, askText, answeredText, isAskAction, expireAsks, ASK_EXPIRY_MS} from '../shared/asks.js';
-import {accountWall, onSite} from '../shared/browser-accounts.js';
+import {SIGNIN_ASK, isSigninAsk, createSigninAsk, openSigninAsk, signinDeclined, answerAsk, askText, answeredText, isAskAction, expireAsks, ASK_EXPIRY_MS} from '../shared/asks.js';
+import {accountWall, onSite, stepsAct} from '../shared/browser-accounts.js';
 import {OPEN_REQUEST_STATUSES, isSigninHost, pruneBrowserRequests, denyBrowserRequest, recordBrowserRequests, MAX_BROWSER_REQUESTS} from '../shared/bot-browser.js';
 import {releaseChatWork} from '../shared/chats.js';
 import {removeBot} from '../shared/workflow.js';
@@ -91,6 +91,27 @@ test('the account\'s wall: a sign-in page on its site, a password field alone, a
   assert.equal(accountWall('crm.example.com', 'https://crm.example.com/', null), false);
 });
 
+test('a click or a type that ends on an identity provider is not the account\'s wall; a navigate or a read sent there is', () => {
+  const page = (finalUrl, elements = []) => ({finalUrl, elements});
+  const back = 'https://accounts.google.com/o/oauth2/v2/auth?redirect_uri=https://crm.example.com/cb';
+  const bare = 'https://accounts.google.com/v3/signin/identifier';
+  // "Continue with Google" on a signed-in site: both branches (a return parameter, or none) give way to the click.
+  assert.equal(accountWall('crm.example.com', 'https://crm.example.com/', page(back), {clicked: true}), false);
+  assert.equal(accountWall('crm.example.com', 'https://crm.example.com/', page(bare), {clicked: true}), false);
+  // Without the click they are walls, as before.
+  assert.equal(accountWall('crm.example.com', 'https://crm.example.com/', page(back)), true);
+  assert.equal(accountWall('crm.example.com', 'https://crm.example.com/', page(bare), {clicked: false}), true);
+  // A click that ends on the site's own sign-in page still counts.
+  assert.equal(accountWall('crm.example.com', 'https://crm.example.com/', page('https://crm.example.com/login'), {clicked: true}), true);
+  // Which steps act: a click or a type does; a navigate, a read, a scroll or a wait does not.
+  assert.equal(stepsAct([{op: 'click', index: 1}]), true);
+  assert.equal(stepsAct([{op: 'navigate', url: 'https://crm.example.com/x'}, {op: 'type', index: 2, text: 'a'}]), true);
+  assert.equal(stepsAct([{op: 'navigate', url: 'https://crm.example.com/x'}, {op: 'read', selector: 'main'}, {op: 'scroll'}, {op: 'waitFor', selector: 'h1'}]), false);
+  assert.equal(stepsAct([]), false);
+  assert.equal(stepsAct(undefined), false);
+  assert.equal(stepsAct([null]), false);
+});
+
 test('onSite and isSigninHost', () => {
   assert.equal(onSite('crm.example.com', 'crm.example.com'), true);
   assert.equal(onSite('app.crm.example.com', 'crm.example.com'), true);
@@ -154,4 +175,19 @@ test('a site that refused twice posts no setup card while its account\'s sign-in
   // A card that was answered is no open card.
   const done = fresh(); mkAsk(done); answerAsk(done, 'k1', 'decline', NOW);
   assert.equal(run(done).lines.filter(l => l.kind === 'setup').length, 1);
+});
+
+test('a site that refused twice posts no setup card in a run that said Not now to its account', () => {
+  const blocked = {status: 'done', runId: 'r1', chatKey: 'scout', botId: 'scout', url: 'https://crm.example.com/search', result: {title: null, page: 'x', text: "You've been blocked by network security."}};
+  const run = s => { let n = 0; return recordBrowserRequests(s, {bot: {id: 'scout', name: 'Scout'}, groupId: 'home', chatKey: 'scout', output: `\`\`\`browser\n${JSON.stringify({url: 'https://crm.example.com/top'})}\n\`\`\``, depth: 0, makeId: () => `m${++n}`, runId: 'r1', now: NOW}); };
+  const fresh = declinedAsks => { const s = state(); s.groupRuns = [{id: 'r1', status: 'running', declinedAsks}]; s.browserRequests.push({...blocked, id: 'a'}, {...blocked, id: 'b'}); return s; };
+  const out = run(fresh([{action: 'signin', scope: A}]));
+  assert.equal(out.records.length, 0, 'not opened a third time');
+  assert.equal(out.lines.filter(l => l.kind === 'setup').length, 0, 'no card for a sign-in the owner just declined');
+  assert.equal(run(fresh([{action: 'signin', scope: 'another-account'}])).lines.filter(l => l.kind === 'setup').length, 1, 'a decline on another account does not cover it');
+
+  assert.equal(signinDeclined({declinedAsks: [{action: 'signin', scope: A}]}, A), true);
+  assert.equal(signinDeclined({declinedAsks: [{action: 'browser.use', scope: A}, {action: 'signin', scope: ''}]}, A), false);
+  assert.equal(signinDeclined(null, A), false);
+  assert.equal(signinDeclined({declinedAsks: [{action: 'signin', scope: ''}]}, ''), false, 'no account, no decline');
 });

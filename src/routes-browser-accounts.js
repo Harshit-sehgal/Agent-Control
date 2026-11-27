@@ -40,7 +40,8 @@ export function browserAccountRoutes(router) {
   router.add('DELETE', '/api/browser-accounts/:id', 'owner', async c => {
     const state = c.store.read(), card = (state.asks || []).find(a => a.id === state.signinPending?.[c.params.id] && isSigninAsk(a) && a.status === 'pending');
     await c.store.update(s => { removeAccount(s, c.params.id); return {ok: true}; });
-    if (card) await answerSigninFlow(c.store, card.id, {signedIn: false, actor: c.actor.email});
+    // The card may be answered between the read and the delete (it lapsed, a hand back): the delete still happened.
+    if (card) await answerSigninFlow(c.store, card.id, {signedIn: false, actor: c.actor.email}).catch(error => { if (error?.status !== 409) throw error; });
     return {ok: true};
   });
 }

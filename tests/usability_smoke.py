@@ -1665,19 +1665,28 @@ async def signin_hand_back_without_a_sign_in_keeps_the_old_toast(page, base):
     await page.locator('#main [data-action="computer-takeover"]').click()
     await page.locator('#main [data-action="computer-handback"]').click()
     await expect(page.locator('#toast')).to_contain_text('Writer has the browser back')
+    # A hand back that answered a card nothing went on from (a keeper's card, or a run still held by another ask) does
+    # not say the task carries on.
+    live.signed_in = {'resumed': 0}
+    await page.locator('#main [data-action="computer-takeover"]').click()
+    await expect(page.locator('#toast')).to_contain_text('You are in control')
+    await page.locator('#main [data-action="computer-handback"]').click()
+    await expect(page.locator('#toast')).to_contain_text('Writer has the browser back')
 
 
 async def signin_not_now_collapses_the_card(page, base):
     live, bot = await open_signin_card(page, base)
     card = page.locator('#cv-log .cv-card[data-ask="s1"]')
     await card.get_by_role('button', name='Not now').click()
+    # An answered ask leaves the chat, like every ask card, so the tap is said in a toast.
+    await expect(page.locator('#toast')).to_have_text('You chose not now')
     # An answered ask leaves the chat, like every ask card, and the count drops.
     await expect(page.locator('#cv-log [data-ask="s1"]')).to_have_count(0)
     await expect(page.locator('#sidebar .crow', has_text='Writer').locator('.badge')).to_have_count(0)
     ask = (await api_state(page))['asks'][0]
     assert ask['status'] == 'declined', ask
     assert not ask.get('expired'), ask
-    # Nothing was asked of the computer, and no signing-in toast was made up for it.
+    # Nothing was asked of the computer.
     assert live.posts == []
     # What the card collapses to, from the stored state the demo's own answer wrote: a line in the bot's chat, and
     # the primary's copy that says whose it was.

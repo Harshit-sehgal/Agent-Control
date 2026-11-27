@@ -6,8 +6,8 @@
  * Server only. It imports `shared/` and `ask-cards.js` and nothing else, so `bot-browser.js` can use it without a cycle.
  * The state functions are pure over the workspace state; `noticeSignins` is the one that writes a store. */
 import {randomUUID} from 'node:crypto';
-import {accountWall, browserAccountOf} from '../shared/browser-accounts.js';
-import {createSigninAsk, openSigninAsk, isSigninAsk} from '../shared/asks.js';
+import {accountWall, browserAccountOf, stepsAct} from '../shared/browser-accounts.js';
+import {createSigninAsk, openSigninAsk, isSigninAsk, signinDeclined} from '../shared/asks.js';
 import {botSettings} from '../shared/bot-settings.js';
 import {addAskCards, addAskLine, notifySignin} from './ask-cards.js';
 
@@ -20,7 +20,8 @@ const stamp = () => new Date().toISOString();
 
 /** Hold a request whose page is its account's sign-in wall. Changes nothing and answers null when it is not held:
  * a watch, a takeover, a bot with no account (or one the page did not run as), a page that is not that account's
- * wall, a request already held `MAX_SIGNIN_HOLDS` times, or a request whose run is not waiting on a page.
+ * wall, a request already held `MAX_SIGNIN_HOLDS` times, a request whose run is not waiting on a page, or one whose
+ * run already said Not now to the account (`signinDeclined`).
  * Otherwise the request becomes `signin`, its run (if any) parks on the account's card, and the card is posted:
  * the account's open card is reused (its line added to this request's chat), else one is made. `fresh` says a card
  * was made, so the caller pushes it once. */
@@ -31,9 +32,11 @@ export function holdForSignin(state, request, result, {now = stamp(), makeId = r
   const holds = Number(request.signinHolds) || 0;
   if (holds >= MAX_SIGNIN_HOLDS) return null;
   const {account} = browserAccountOf(state, request.botId);
-  if (!account?.site || request.account !== account.id || !accountWall(account.site, request.url, result)) return null;
+  if (!account?.site || request.account !== account.id || !accountWall(account.site, request.url, result, {clicked: stepsAct(request.steps)})) return null;
   const run = request.runId ? (state.groupRuns || []).find(r => r.id === request.runId) : null;
   if (request.runId && !(run && PARKABLE.includes(run.status))) return null;
+  // The run said Not now to this account's card (or let it lapse): the wall goes to the bot, as it did before Phase 3.
+  if (signinDeclined(run, account.id)) return null;
 
   const bot = {name: request.botName};
   let ask = openSigninAsk(state, account.id), fresh = false;

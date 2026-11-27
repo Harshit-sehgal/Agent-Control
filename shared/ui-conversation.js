@@ -22,7 +22,7 @@ import {feed, fileStrip} from './ui-feed.js';
 import {attachButton, chipsSlot, wireAttach} from './ui-attach.js';
 import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js';
 import {askCard} from './ui-asks.js';
-import {UNTIL_CHOICES, untilFor} from './asks.js';
+import {UNTIL_CHOICES, untilFor, answeredText} from './asks.js';
 import {undoToast} from './ui-settings.js';
 import {face, botColor, botAccent, accentStyle} from './ui-face.js';
 import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js';
@@ -493,8 +493,8 @@ async function answerAsk(id, answer) {
   const {ask, undo} = await api(`/api/asks/${encodeURIComponent(id)}`, 'POST', {answer, ...(until ? {until} : {})});
   lastsPicked.delete(id);
   await sync();
-  // A sign-in card's Not now needs no toast: the card collapses to "You chose not now".
-  if (answer !== 'always') { if (ask?.kind !== 'signin') toast(answer === 'decline' ? 'Not allowed.' : 'Allowed once.'); return; }
+  // An answered ask leaves the feed, so a sign-in card's Not now says what its card would collapse to.
+  if (answer !== 'always') { toast(ask?.kind === 'signin' ? answeredText(ask) : answer === 'decline' ? 'Not allowed.' : 'Allowed once.'); return; }
   const name = findBot(ask?.botId)?.name || 'The bot';
   undoToast(lasts === '1h' ? `${name} may do this for the next hour.` : lasts === 'today' ? `${name} may do this until the end of today.` : `${name} may always do this.`, undo);
 }

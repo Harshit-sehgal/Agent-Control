@@ -451,21 +451,23 @@ notice on your phone, `Sign in to <site>`, that opens the card. You tap **Take
 control**, type the Password and Code in the masked fields, and tap **Hand back**;
 the task that waited on the card then carries on. For this to work from a phone:
 
-- **The phone must reach the app over HTTPS, or the app must have `TRUST_PROXY=1`
-  behind a proxy that does.** A password or a code typed from a phone is a secret,
-  and the server takes it only under the rule in the section above. Without it the
+- **The phone must reach the app over HTTPS: the app's own HTTPS, or a proxy that
+  terminates HTTPS and says so in `X-Forwarded-Proto`, with `TRUST_PROXY=1` set on
+  the app.** A password or a code typed from a phone is a secret, and the server
+  takes it only under the rule in the section above. Without it the
   phone shows "Passwords and codes are only sent over HTTPS or from this computer."
   and nothing is typed. Taking control and handing back need no secret and work over
   plain HTTP.
-- **The notice waits out `QUIET_HOURS`.** It is not urgent, so with `QUIET_HOURS`
-  set it is not pushed to the phone during those hours. The card is still in the
-  chat and in Needs you, but the notice is not sent later, so open the app when you
-  wake. Turn push on first, under Settings → Notifications (see "Push notifications"
-  below).
+- **The notice is not pushed during `QUIET_HOURS`.** It is not urgent, so with
+  `QUIET_HOURS` set a card made in those hours is not pushed to the phone, then or
+  later. The card waits in the chat and in Needs you, so open the app when you wake.
+  A push when quiet hours end is a planned follow-up. Turn push on first, under
+  Settings → Notifications (see "Push notifications" below).
 - The computer that holds the account must be running its app, with
   `AGENT_BROWSER=1`, since the sign-in happens in its browser.
-- A card nobody answers ends after 24 hours, and the task that waited on it is told
-  the page was not opened.
+- A card nobody answers ends after 24 hours, as **Not now** does: a waiting task is
+  told the sign-in was declined, and a page asked for in a plain chat is simply not
+  opened.
 
 ## Secrets & the vault
 - Without `MASTER_KEY`, a `vault.key` (mode `0600`) is created beside the

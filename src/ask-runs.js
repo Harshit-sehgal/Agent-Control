@@ -52,11 +52,18 @@ export async function answerAskFlow(store, askId, answer, {actor = null, runtime
 }
 
 /** Do what a released sign-in card means: resume each run that waited on it (it goes on only when nothing else holds
- * it), and send each request with no run out again. Returns how many went on. */
+ * it), and send each request with no run out again. Returns how many went on. One that fails is logged and the rest
+ * still go on, so a store error on one run never leaves the others parked on a card that is already answered. */
 async function carryOn(store, {runIds, openIds}, {actor, runtime, executor}) {
   let resumed = 0;
-  for (const runId of runIds) if (await resumeAfterAsks(store, runId, {executor, runtime, actor})) resumed++;
-  for (const id of openIds) { await open(store, id, {actor, runtime}); resumed++; }
+  for (const runId of runIds) {
+    try { if (await resumeAfterAsks(store, runId, {executor, runtime, actor})) resumed++; }
+    catch (error) { console.error('Sign-in release:', `run ${runId}:`, error?.message ?? error); }
+  }
+  for (const id of openIds) {
+    try { await open(store, id, {actor, runtime}); resumed++; }
+    catch (error) { console.error('Sign-in release:', `request ${id}:`, error?.message ?? error); }
+  }
   return resumed;
 }
 
@@ -76,8 +83,8 @@ export async function answerSigninFlow(store, askId, {signedIn = false, actor = 
 
 /** The account's hand back: its open card (if any) is answered as signed in. Null when the account has none. */
 export async function finishSignin(store, accountId, opts = {}) {
-  const open = store.read().signinPending?.[accountId];
-  if (!open) return null;
+  const pending = store.read().signinPending?.[accountId];
+  if (!pending) return null;
   const out = await store.update(s => { const card = openSigninAsk(s, accountId); return card ? releaseSignin(s, card.id, {signedIn: true}) : null; });
   if (!out) return null;
   const resumed = await carryOn(store, out, {actor: opts.actor ?? null, runtime: opts.runtime, executor: opts.executor});

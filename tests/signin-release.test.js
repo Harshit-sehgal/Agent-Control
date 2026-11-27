@@ -212,8 +212,40 @@ test('Not now denies every held page and each run takes its declined turn', asyn
   }
   assert.equal(rg.store.read().asks.find(a => a.id === fresh.id).status, 'pending', 'still waiting for a sign-in');
   assert.equal(rg.request(next.first.id).status, 'signin');
-  // Not now over HTTP closes the fresh card; a second Not now is a conflict, as for every ask.
+  // Not now over HTTP, the phone's own route, closes the fresh card and denies its page; a second Not now is a
+  // conflict, as for every ask.
+  const notNow = await rg.send('POST', `/api/asks/${fresh.id}`, {body: {answer: 'decline'}});
+  assert.equal(notNow.status, 200, JSON.stringify(notNow.body));
+  assert.equal(notNow.body.ask.status, 'declined');
+  assert.equal(rg.store.read().asks.find(a => a.id === fresh.id).status, 'declined');
+  assert.equal(rg.request(next.first.id).status, 'denied');
+  assert.deepEqual(rg.store.read().signinPending, {});
+  assert.equal((await rg.send('POST', `/api/asks/${fresh.id}`, {body: {answer: 'decline'}})).status, 409);
   assert.equal((await rg.send('POST', `/api/asks/${card.id}`, {body: {answer: 'decline'}})).status, 409);
+  // The route resumes the run with the server's own model, which this test has no key for: the run left its wait.
+  await until(() => rg.run(next.run.id).status !== 'awaiting_ask', 'the run to go on');
+});
+
+test('after Not now, the same run\'s next wall on that account goes to the bot: no second card and no second push', async t => {
+  const INBOX = CRM + 'inbox';
+  // Turn 1 asks for the CRM; the declined turn asks for another page of it; then the bot writes up what it got.
+  const rg = await rig(t, {Scholar: envelope => (envelope.page ? `Read: ${envelope.page}` : envelope.declined ? fences(INBOX) : fences(CRM))});
+  const {run} = await rg.parked('scholar');
+  const [card] = rg.cards();
+  const pushes = () => rg.sent.filter(e => e.kind === 'signin').length;
+  assert.equal(pushes(), 1);
+  await answerAskFlow(rg.store, card.id, 'decline', {actor: 'owner@x.test', executor: rg.ai.executor});
+  const again = await until(() => rg.requests(run.id).find(r => r.url === INBOX && r.status === 'dispatched'), 'the declined turn to ask for another CRM page');
+  assert.deepEqual(rg.run(run.id).declinedAsks.filter(d => d.action === 'signin'), [{action: 'signin', scope: A}], 'the decline is kept per account');
+
+  await rg.returns(again, wall);
+  await until(() => rg.run(run.id).status === 'completed', 'the run to finish with the page');
+  assert.equal(rg.request(again.id).status, 'done', 'the wall went to the bot as a page, not held');
+  assert.equal(rg.request(again.id).signinAskId, undefined);
+  assert.deepEqual(rg.cards().filter(a => a.status === 'pending'), [], 'no second card');
+  assert.deepEqual(rg.store.read().signinPending, {});
+  assert.equal(pushes(), 1, 'no second push');
+  assert.match(String(rg.ai.of('Scholar').at(-1).page), /sign-in page/i, 'the bot was handed the sign-in page and told what it is');
 });
 
 test('24 hours with no sign-in end it like Not now, with the expired line', async t => {
@@ -392,6 +424,52 @@ test('deleting an account declines its open card', async t => {
   assert.equal(refused.status, 409);
   assert.equal(rg2.cards()[0].status, 'pending');
   assert.equal(rg2.request(held.first.id).status, 'signin');
+});
+
+test('one run that fails to go on does not stop the others: the failure is logged and the rest resume', async t => {
+  const rg = await rig(t);
+  const one = await rg.parked('scholar');
+  const two = await rg.parked('scribe', 'Check the CRM too');
+  const [card] = rg.cards();
+  const logged = t.mock.method(console, 'error', () => {});
+  // The write that answers the card goes through; the first run's resume write then fails.
+  const real = rg.store.update.bind(rg.store);
+  let writes = 0;
+  rg.store.update = fn => (++writes === 2 ? Promise.reject(new Error('disk full')) : real(fn));
+  t.after(() => { rg.store.update = real; });
+  const out = await answerSigninFlow(rg.store, card.id, {signedIn: false, actor: 'owner@x.test', executor: rg.ai.executor});
+  rg.store.update = real;
+  assert.equal(out.ask.status, 'declined');
+  assert.equal(out.resumed, 1, 'the other run went on');
+  // Whichever run was resumed first is the one whose write failed: it stays parked, and the other finishes.
+  const failed = [one, two].find(({run}) => logged.mock.calls.some(c => c.arguments.join(' ').includes(run.id)));
+  const other = failed === one ? two : one;
+  assert.ok(failed, 'the failed run is named in the log');
+  await until(() => rg.run(other.run.id).status === 'completed', 'the other run to finish');
+  assert.equal(rg.run(failed.run.id).status, 'awaiting_ask', 'the run whose resume failed is where it was');
+  assert.ok(logged.mock.calls.some(c => /^Sign-in release:/.test(String(c.arguments[0])) && /disk full/.test(c.arguments.join(' '))), 'the failure is logged');
+});
+
+test('a delete whose card is answered between its two writes still answers ok', async t => {
+  const rg = await rig(t);
+  const {first} = await rg.parked('scholar');
+  const [card] = rg.cards();
+  await rg.store.update(s => { for (const bot of s.groups.find(g => g.id === 'home').bots) if (bot.settings?.browserAccount === A) bot.settings = {...bot.settings, browserAccount: null}; });
+  // The card lapses (or a hand back answers it) in the same write that removes the account, after the route read it.
+  const real = rg.store.update.bind(rg.store);
+  rg.store.update = fn => real(s => {
+    const out = fn(s);
+    if (!(s.browserAccounts || []).some(a => a.id === A) && s.asks.find(a => a.id === card.id)?.status === 'pending') releaseSignin(s, card.id, {signedIn: false});
+    return out;
+  });
+  t.after(() => { rg.store.update = real; });
+  const gone = await rg.send('DELETE', `/api/browser-accounts/${A}`);
+  rg.store.update = real;
+  assert.equal(gone.status, 200, JSON.stringify(gone.body));
+  assert.deepEqual(gone.body, {ok: true});
+  assert.deepEqual(rg.store.read().browserAccounts, []);
+  assert.equal(rg.store.read().asks.find(a => a.id === card.id).status, 'declined');
+  assert.equal(rg.request(first.id).status, 'denied');
 });
 
 test('a sign-in card and another ask: the run goes on only when both are answered, either way round', async t => {
