@@ -7,10 +7,10 @@
  *
  * Pure and browser-safe, no secrets: a jar never reaches this file. The route checks that `deviceId` is a paired
  * computer of the workspace; the rules here check only its shape. */
-import {cleanText} from './core.js?v=92036db114';
-import {fail} from './errors.js?v=92036db114';
-import {hostOf} from './bot-browser.js?v=92036db114';
-import {ACCOUNT_ID, DEVICE_ID, botSettings, pinnedDevice} from './bot-settings.js?v=92036db114';
+import {cleanText} from './core.js?v=c65f5880dd';
+import {fail} from './errors.js?v=c65f5880dd';
+import {hostOf} from './bot-browser.js?v=c65f5880dd';
+import {ACCOUNT_ID, DEVICE_ID, botSettings, pinnedDevice} from './bot-settings.js?v=c65f5880dd';
 
 export const MAX_ACCOUNTS = 20;
 export const ACCOUNT_STATES = ['signed-in', 'signed-out', 'unknown'];
@@ -21,12 +21,17 @@ const accountsOf = state => (Array.isArray(state?.browserAccounts) ? state.brows
 const botsOf = state => (state?.groups || []).flatMap(group => group.bots || []);
 const sameName = (a, b) => a.toLowerCase() === b.toLowerCase();
 
-/** The hostname of what the owner typed: a bare host, or a URL whose host is kept. Empty when it is not one with a dot. */
+/** One label of a host name: 1 to 63 letters, digits or hyphens, with no hyphen at either end. */
+const LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+/** The hostname of what the owner typed: a bare host, or a URL whose host is kept. Empty when it is not a host name of
+ * two labels or more, each a real label, ending in one that is not all digits (an IP address is not a site). */
 function siteOf(value) {
   if (typeof value !== 'string' || /\s/.test(value.trim())) return '';
   const text = value.trim();
   const host = hostOf(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `https://${text}`);
-  return host.includes('.') ? host : '';
+  const labels = host.split('.');
+  return labels.length >= 2 && labels.every(label => LABEL.test(label)) && !/^\d+$/.test(labels.at(-1)) ? host : '';
 }
 
 /** A request body read as an account's fields, or a refusal. With `current`, a field the body leaves out keeps its

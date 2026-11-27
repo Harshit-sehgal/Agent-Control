@@ -21,12 +21,17 @@ const accountsOf = state => (Array.isArray(state?.browserAccounts) ? state.brows
 const botsOf = state => (state?.groups || []).flatMap(group => group.bots || []);
 const sameName = (a, b) => a.toLowerCase() === b.toLowerCase();
 
-/** The hostname of what the owner typed: a bare host, or a URL whose host is kept. Empty when it is not one with a dot. */
+/** One label of a host name: 1 to 63 letters, digits or hyphens, with no hyphen at either end. */
+const LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+/** The hostname of what the owner typed: a bare host, or a URL whose host is kept. Empty when it is not a host name of
+ * two labels or more, each a real label, ending in one that is not all digits (an IP address is not a site). */
 function siteOf(value) {
   if (typeof value !== 'string' || /\s/.test(value.trim())) return '';
   const text = value.trim();
   const host = hostOf(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `https://${text}`);
-  return host.includes('.') ? host : '';
+  const labels = host.split('.');
+  return labels.length >= 2 && labels.every(label => LABEL.test(label)) && !/^\d+$/.test(labels.at(-1)) ? host : '';
 }
 
 /** A request body read as an account's fields, or a refusal. With `current`, a field the body leaves out keeps its
