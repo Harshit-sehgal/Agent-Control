@@ -10,7 +10,7 @@
 import {cleanText} from './core.js';
 import {fail} from './errors.js';
 import {summonableGuests, BUSY_STATUSES} from './coordination.js';
-import {denyBrowserRequest} from './bot-browser.js';
+import {denyBrowserRequest, OPEN_REQUEST_STATUSES} from './bot-browser.js';
 import {orphanAsks} from './asks.js';
 import {attachmentRefs} from './attachments.js';
 
@@ -170,7 +170,7 @@ export function releaseChatWork(state, key) {
   const ofChat = item => matchesBusyChat(item, key, groupId);
   const now = new Date().toISOString();
   for (const request of state.browserRequests || []) {
-    if (!ofChat(request) || !['pending', 'dispatched'].includes(request.status)) continue;
+    if (!ofChat(request) || !OPEN_REQUEST_STATUSES.includes(request.status)) continue;
     try { denyBrowserRequest(state, request.id); }
     catch { request.status = 'denied'; request.updatedAt = now; }
   }
