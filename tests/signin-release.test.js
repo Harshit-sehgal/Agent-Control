@@ -212,8 +212,18 @@ test('Not now denies every held page and each run takes its declined turn', asyn
   }
   assert.equal(rg.store.read().asks.find(a => a.id === fresh.id).status, 'pending', 'still waiting for a sign-in');
   assert.equal(rg.request(next.first.id).status, 'signin');
-  // Not now over HTTP closes the fresh card; a second Not now is a conflict, as for every ask.
+  // Not now over HTTP, the phone's own route, closes the fresh card and denies its page; a second Not now is a
+  // conflict, as for every ask.
+  const notNow = await rg.send('POST', `/api/asks/${fresh.id}`, {body: {answer: 'decline'}});
+  assert.equal(notNow.status, 200, JSON.stringify(notNow.body));
+  assert.equal(notNow.body.ask.status, 'declined');
+  assert.equal(rg.store.read().asks.find(a => a.id === fresh.id).status, 'declined');
+  assert.equal(rg.request(next.first.id).status, 'denied');
+  assert.deepEqual(rg.store.read().signinPending, {});
+  assert.equal((await rg.send('POST', `/api/asks/${fresh.id}`, {body: {answer: 'decline'}})).status, 409);
   assert.equal((await rg.send('POST', `/api/asks/${card.id}`, {body: {answer: 'decline'}})).status, 409);
+  // The route resumes the run with the server's own model, which this test has no key for: the run left its wait.
+  await until(() => rg.run(next.run.id).status !== 'awaiting_ask', 'the run to go on');
 });
 
 test('after Not now, the same run\'s next wall on that account goes to the bot: no second card and no second push', async t => {
