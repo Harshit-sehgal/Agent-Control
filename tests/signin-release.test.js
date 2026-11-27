@@ -416,6 +416,52 @@ test('deleting an account declines its open card', async t => {
   assert.equal(rg2.request(held.first.id).status, 'signin');
 });
 
+test('one run that fails to go on does not stop the others: the failure is logged and the rest resume', async t => {
+  const rg = await rig(t);
+  const one = await rg.parked('scholar');
+  const two = await rg.parked('scribe', 'Check the CRM too');
+  const [card] = rg.cards();
+  const logged = t.mock.method(console, 'error', () => {});
+  // The write that answers the card goes through; the first run's resume write then fails.
+  const real = rg.store.update.bind(rg.store);
+  let writes = 0;
+  rg.store.update = fn => (++writes === 2 ? Promise.reject(new Error('disk full')) : real(fn));
+  t.after(() => { rg.store.update = real; });
+  const out = await answerSigninFlow(rg.store, card.id, {signedIn: false, actor: 'owner@x.test', executor: rg.ai.executor});
+  rg.store.update = real;
+  assert.equal(out.ask.status, 'declined');
+  assert.equal(out.resumed, 1, 'the other run went on');
+  // Whichever run was resumed first is the one whose write failed: it stays parked, and the other finishes.
+  const failed = [one, two].find(({run}) => logged.mock.calls.some(c => c.arguments.join(' ').includes(run.id)));
+  const other = failed === one ? two : one;
+  assert.ok(failed, 'the failed run is named in the log');
+  await until(() => rg.run(other.run.id).status === 'completed', 'the other run to finish');
+  assert.equal(rg.run(failed.run.id).status, 'awaiting_ask', 'the run whose resume failed is where it was');
+  assert.ok(logged.mock.calls.some(c => /^Sign-in release:/.test(String(c.arguments[0])) && /disk full/.test(c.arguments.join(' '))), 'the failure is logged');
+});
+
+test('a delete whose card is answered between its two writes still answers ok', async t => {
+  const rg = await rig(t);
+  const {first} = await rg.parked('scholar');
+  const [card] = rg.cards();
+  await rg.store.update(s => { for (const bot of s.groups.find(g => g.id === 'home').bots) if (bot.settings?.browserAccount === A) bot.settings = {...bot.settings, browserAccount: null}; });
+  // The card lapses (or a hand back answers it) in the same write that removes the account, after the route read it.
+  const real = rg.store.update.bind(rg.store);
+  rg.store.update = fn => real(s => {
+    const out = fn(s);
+    if (!(s.browserAccounts || []).some(a => a.id === A) && s.asks.find(a => a.id === card.id)?.status === 'pending') releaseSignin(s, card.id, {signedIn: false});
+    return out;
+  });
+  t.after(() => { rg.store.update = real; });
+  const gone = await rg.send('DELETE', `/api/browser-accounts/${A}`);
+  rg.store.update = real;
+  assert.equal(gone.status, 200, JSON.stringify(gone.body));
+  assert.deepEqual(gone.body, {ok: true});
+  assert.deepEqual(rg.store.read().browserAccounts, []);
+  assert.equal(rg.store.read().asks.find(a => a.id === card.id).status, 'declined');
+  assert.equal(rg.request(first.id).status, 'denied');
+});
+
 test('a sign-in card and another ask: the run goes on only when both are answered, either way round', async t => {
   const rg = await rig(t);
   const one = await rg.parked('scholar');
