@@ -9,7 +9,7 @@
  * computer of the workspace; the rules here check only its shape. */
 import {cleanText} from './core.js';
 import {fail} from './errors.js';
-import {hostOf} from './bot-browser.js';
+import {hostOf, onSite, isSigninHost, signinPage} from './bot-browser.js';
 import {ACCOUNT_ID, DEVICE_ID, botSettings, pinnedDevice} from './bot-settings.js';
 
 export const MAX_ACCOUNTS = 20;
@@ -100,6 +100,19 @@ export function browserAccountOf(state, botId) {
   if (!id) return {account: null, missing: false};
   const account = accountsOf(state).find(a => a.id === id) || null;
   return {account, missing: !account};
+}
+
+export {onSite};
+
+/** Is this page the account's sign-in wall? True when the page is a sign-in page (or shows a password field) on the
+ * account's site, or when a page on the site ended on an identity provider's sign-in host, whatever its return
+ * parameter says. A sign-in page on another site is that site's wall, never this account's. `url` is what was asked
+ * for, `result` is the browser's answer. */
+export function accountWall(site, url, result) {
+  const page = signinPage(result);
+  if (page && onSite(page, site)) return true;
+  const r = result && typeof result === 'object' ? result : {};
+  return onSite(hostOf(url), site) && isSigninHost(hostOf(r.finalUrl || r.url));
 }
 
 /** The computer a bot's pages run on: its account's, else its own pin, else null for any computer. */
