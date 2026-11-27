@@ -18,8 +18,9 @@ import {botSettings,groupSettings,threadContext,MAX_STEPS_LIMIT} from '../shared
 import {stepsCap,limitsOf,FAIL_STREAK,runBudget} from '../shared/limits.js';
 import {addChatMessages} from '../shared/chats.js';
 import {assertContractOutput} from '../shared/contracts.js';
-import {recordBrowserRequests,stripBrowserBlocks,isSearchPage,parseBrowserRequests,MAX_BROWSER_DEPTH} from '../shared/bot-browser.js';
-import {orphanAsks} from '../shared/asks.js';
+import {recordBrowserRequests,stripBrowserBlocks,isSearchPage,parseBrowserRequests,MAX_BROWSER_DEPTH,OPEN_REQUEST_STATUSES} from '../shared/bot-browser.js';
+import {orphanAsks,openSigninAsk} from '../shared/asks.js';
+import {browserAccountOf,onSite} from '../shared/browser-accounts.js';
 import {addAskCards,notifyAsks} from './ask-cards.js';
 import {signinSites,signinNotice} from './health-watch.js';
 import {MAX_SUBAGENT_DEPTH} from '../shared/subagents.js';
@@ -83,7 +84,7 @@ function parkForGuard(s,live,{nextStep,previous}){
 function denyRunPages(state,runId,reason=''){
   const ids=[];
   for(const request of state.browserRequests||[]){
-    if(request.runId!==runId||!['pending','dispatched'].includes(request.status))continue;
+    if(request.runId!==runId||!OPEN_REQUEST_STATUSES.includes(request.status))continue;
     if(request.status==='dispatched')for(const id of request.agentTaskIds||[])ids.push(id);
     request.status='denied';request.updatedAt=stamp();
     if(reason)request.error=reason;
@@ -413,7 +414,8 @@ async function runGroupInner(store,id,executor){
         newAsks=[...browsed.asks,...conn.asks];
         // A schedule runs with nobody watching: a site that signed it out is said to the owner now, once per site
         // per run, instead of waiting in a chat nobody opens (src/health-watch.js).
-        if(live.unattended){const fresh=signinSites([...browsed.lines,...(reply.after||[])]).filter(site=>!(live.signinNoticed||[]).includes(site));if(fresh.length){live.signinNoticed=[...(live.signinNoticed||[]),...fresh];signins=fresh;}}
+        // An account bot whose account already has an open sign-in card says nothing more: that card is the notice.
+        if(live.unattended){const acct=browserAccountOf(s,bot.id).account,carded=acct&&openSigninAsk(s,acct.id)?acct.site:null;const fresh=signinSites([...browsed.lines,...(reply.after||[])]).filter(site=>!(live.signinNoticed||[]).includes(site)&&!(carded&&onSite(site,carded)));if(fresh.length){live.signinNoticed=[...(live.signinNoticed||[]),...fresh];signins=fresh;}}
         // Text around the browser fences is the browser helper's view of the
         // reply; with nothing to browse, the approved value is the output.
         // A reply that held a browser block (opened, refused or a repeat) is shown without it: a block is never chat text.
@@ -587,7 +589,8 @@ export async function resumeBrowserRun(store,request,{ok,text='',executor}={}){
   const id=request?.runId;
   if(!id)return false;
   const cur=peek(store).groupRuns?.find(r=>r.id===id);
-  if(!cur||cur.status!=='awaiting_browser')return false;
+  // A run parked on a sign-in card is `awaiting_ask`: a page of the same round that comes back meanwhile is kept for it, and only a run waiting on its pages is resumed (below).
+  if(!cur||!['awaiting_browser','awaiting_ask'].includes(cur.status))return false;
   const page=clean(text).trim();
   let stoppedRun=null;
   const start=await store.update(s=>{

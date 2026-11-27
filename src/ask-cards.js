@@ -40,3 +40,29 @@ export function notifyAsks(store, asks, botName = 'A bot') {
       .catch(error => console.error('Ask notification:', error.message));
   }
 }
+
+/** Put an existing ask's card into one more conversation, only when that conversation lacks it. A sign-in card is one
+ * per account, so a second run that meets the same wall gets its own line for the card that is already open and never
+ * a second card. The line keeps the ask's id, so answering the card settles every copy. Returns whether it was added. */
+export function addAskLine(state, key, ask, bot) {
+  if (!key || (state.chats?.[key] || []).some(m => m.id === askLineId(ask))) return false;
+  const text = askText(ask, bot?.name || 'A bot');
+  const line = {id: askLineId(ask), role: 'system', kind: 'ask', askId: ask.id, ...(ask.runId ? {runId: ask.runId} : {}), at: postedAt(ask.createdAt), text: primaryOf(state)?.id === key ? `Needs you: ${text}` : text};
+  try { addChatMessages(state, key, [line], {trusted: true}); return true; } catch { return false; /* That conversation is gone. */ }
+}
+
+/** Where tapping a sign-in notice opens: the bot's chat, or the thread for a `team-<groupId>` chat. */
+export const signinRoute = chatKey => (String(chatKey || '').startsWith('team-') ? `#thread/${String(chatKey).slice(5)}` : `#bot/${chatKey}`);
+
+/** Push the one notice for a new sign-in card. Quiet (never urgent): the owner signs in when they next pick up the
+ * phone. Fire and forget, like `notifyAsks`. */
+export function notifySignin(store, ask, botName = 'A bot') {
+  Promise.resolve()
+    .then(() => store.notify?.({
+      title: `Sign in to ${ask.site}`,
+      body: `${askText(ask, botName)} Open the card and tap Take control; the task carries on by itself.`,
+      kind: 'signin', urgent: false, ...(ask.chatKey ? {route: signinRoute(ask.chatKey)} : {}),
+      meta: {askId: ask.id, accountId: ask.accountId},
+    }))
+    .catch(error => console.error('Sign-in notification:', error.message));
+}

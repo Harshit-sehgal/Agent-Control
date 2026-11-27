@@ -369,6 +369,8 @@ export function importBackup(store, document, {force = false, primaryWorkspace =
     // from the live database so a restore cannot show Approve for a run that
     // is no longer waiting.
     try { store.run("DELETE FROM kv WHERE key = 'browser_requests'"); } catch { /* Older schema. */ }
+    // Each account's open sign-in card points at an ask and a held request, both of which a restore replaces.
+    try { store.run("DELETE FROM kv WHERE key = 'signin_pending'"); } catch { /* Older schema. */ }
     // What the computers last said of each browser account. After a restore no account has a report, so each reads
     // signed out until its computer reports again.
     try { store.run("DELETE FROM kv WHERE key LIKE 'agent\\_accounts:%' ESCAPE '\\'"); } catch { /* Older schema. */ }

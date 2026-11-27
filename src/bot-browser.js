@@ -18,6 +18,8 @@ import {BROWSER_ACCOUNTS_V1} from '../shared/device-features.js';
 import {activity, cleanText} from '../shared/core.js';
 import {browserResultText, capturePageText, hostOf, MAX_BROWSER_DEPTH} from '../shared/bot-browser.js';
 import {logActivity} from '../shared/activity-log.js';
+import {holdForSignin} from './signin-wait.js';
+import {notifySignin} from './ask-cards.js';
 
 const stamp = () => new Date().toISOString();
 /** The risky classes the owner cleared this request for; none for a request recorded before they were. */
@@ -119,7 +121,7 @@ export async function dispatchBrowserRequest(store, id, {actor = null, runtime =
       const now = browserAccountOf(s, request.botId);
       if (now.missing) fail(ACCOUNT_GONE, 409);
       if (now.account?.id !== account?.id || now.account?.deviceId !== account?.deviceId) fail('This bot\'s browser account changed. Approve again.', 409);
-      const {task} = agent.enqueueAgentTask(store, agentId, {kind: request.kind, payload: {url: request.url, steps: request.steps, botId: request.botId}, approved: approvedOf(request), ...(account ? {account: account.id} : {}), idempotencyKey: `browser:${id}`, createdBy: actor || `bot:${request.botId}`});
+      const {task} = agent.enqueueAgentTask(store, agentId, {kind: request.kind, payload: {url: request.url, steps: request.steps, botId: request.botId}, approved: approvedOf(request), ...(account ? {account: account.id} : {}), idempotencyKey: current.signinHolds ? `browser:${id}:${current.signinHolds}` : `browser:${id}`, createdBy: actor || `bot:${request.botId}`});
       taskId = task.id;
       current.agentTaskIds = [task.id]; current.notAfter = Date.now() + BROWSER_WAIT_MS; current.updatedAt = stamp();
       activity(s, 'agent', `Sent ${current.botName}'s browser request to a local agent.`, {requestId: id, taskId: task.id});
@@ -203,9 +205,14 @@ export async function finishBrowserRequest(store, request, {ok, result = null, e
   const tookOver = ok && result?.tookOver === true;
   const captured = ok ? `${tookOver ? 'The owner took over the browser while this ran, so the steps after that point were not run. This is the page as they left it.\n\n' : ''}${pageHeading(request, result)}${capturePageText(result, undefined, request.find || '', request.part || 1)}` : '';
   const text = ok ? `${browserResultText(request, result)}${tookOver ? '\n\nYou took over the browser, so the steps after that point were not run. This is the page as you left it.' : ''}` : `${request.botName}'s browser request failed: ${cleanText(error, 300) || 'the browser reported a failure.'}`;
+  let held = null;
   const done = await store.update(s => {
     const live = (s.browserRequests || []).find(r => r.id === request.id);
-    if (!live || ['done', 'failed', 'denied'].includes(live.status)) return null;
+    // A held request waits for the owner: a late or repeated report for the task it was sent as changes nothing.
+    if (!live || ['done', 'failed', 'denied', 'signin'].includes(live.status)) return null;
+    // The account's sign-in wall is not a page: the request is held, its run parks on the account's card and the
+    // bot hears nothing until the owner has signed in (or the card lapses).
+    if (ok && !tookOver) { held = holdForSignin(s, live, result); if (held) return live; }
     live.status = ok ? 'done' : 'failed'; live.updatedAt = stamp(); live.error = ok ? null : cleanText(error, 300);
     live.result = ok && result && typeof result === 'object' ? {title: cleanText(result.title, 200) || null, finalUrl: cleanText(result.finalUrl || result.url, 2000) || null, text: cleanText(text, 4000), page: captured || null} : null;
     // A watch's page is compared by code on the watch sweep's next pass (src/watches.js): it is said in no chat and
@@ -213,6 +220,7 @@ export async function finishBrowserRequest(store, request, {ok, result = null, e
     if (!live.watchId) say(s, live.chatKey, text);
     return live;
   });
+  if (held) { if (held.fresh) notifySignin(store, held.ask, done.botName || request.botName); return done; }
   if (done?.watchId) return done;
   // The continued turn is one round deeper; recordBrowserRequests refuses to
   // open another page once a chain reaches MAX_BROWSER_DEPTH.
