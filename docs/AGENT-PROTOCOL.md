@@ -197,13 +197,44 @@ The housekeeping `sweep` runs about once a minute (`agent/browser-host.mjs`):
   names it) of each account that is signed in, or whose jar has not been checked
   yet, every 30 minutes. A sign-in page, or any page with
   a visible password field, marks the account `signed-out`; any other page of the
-  site marks it `signed-in`. A task's own page says the same. The keeper's read is
-  not use of the browser;
+  site marks it `signed-in`. A task's own page says the same, by the rule in "The
+  sign-in wall of an account" below (a click or a type that ends on an identity
+  provider says nothing). The keeper's read is not use of the browser;
 - with `AGENT_BROWSER_QUIT_IDLE=1`, Chrome is closed after 30 minutes in which no
   task ran and no one drove or watched a tab. Every jar is saved first, a task
   that arrives during those saves keeps it open, and the
   next task starts Chrome again with each account signed in from its jar. Without
   it the browser is never quit for being idle.
+
+#### The sign-in wall of an account
+
+A page a task for an account brings back is that account's **sign-in wall** when it
+is a sign-in page, or shows a visible password field, on the account's own site; or
+when a page of the account's site ends on an identity provider's sign-in host
+(Google, Microsoft, Yahoo or Apple), whether or not the redirect names where to
+return. A sign-in page of another site is that site's wall, never the account's.
+A task with a `click` or `type` step that ends on an identity provider is not the
+wall: the bot clicked through to it (Continue with Google, an OAuth connect), so the
+page goes to the bot and the account's state is left as it was. A plain read, or a
+`navigate` step, that the site sends to an identity provider is still the wall, and
+so is a click that ends on the site's own sign-in page.
+The device marks the account `signed-out` on such a page, as it does for the keeper.
+
+The server holds a page that comes back as its account's wall and does not hand it
+to the bot. The request reads `signin`, and the owner signs in from the Computer
+view, which opens the account's tab (takeover, then input). The device sees no change
+until the owner hands back. Then the server answers the account's card and sends
+the page again as a **new task**, with the idempotency key `browser:<request id>:<n>`.
+The old task's id is forgotten, so a late result for it changes nothing. A page is
+held at most twice; the third wall goes to the bot as the page. A result with
+`tookOver: true` is never held.
+
+What the owner types in secret (a `type` input with `secret: true`, or into a
+field the page counts as secret) is remembered in memory only. A tab with no account keeps its own memory for the life
+of the tab; for a tab in an account the memory is **one set for the account**, shared
+by every tab of it, so a password typed on one bot's tab is hidden in the results of
+every other bot's tab in that account. It is scrubbed from every result that
+leaves the device, and it is never written anywhere.
 
 While the owner drives a bot's tab, only that bot waits. A running task of
 that bot finishes the step it is in, runs no later step (the page is no longer

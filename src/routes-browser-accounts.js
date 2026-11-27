@@ -6,6 +6,8 @@ import crypto from 'node:crypto';
 import {addAccount, updateAccount, removeAccount} from '../shared/browser-accounts.js';
 import {readAccountReports} from './agent.js';
 import {fail} from './http.js';
+import {isSigninAsk} from '../shared/asks.js';
+import {answerSigninFlow} from './ask-runs.js';
 import {reply} from './router.js';
 
 /** An account as the owner's page reads it: the record, and what its computer last reported of it (signed out when
@@ -34,5 +36,12 @@ export function browserAccountRoutes(router) {
     assertPaired(c, b);
     return publicAccount(c.store, await c.store.update(s => updateAccount(s, c.params.id, b)));
   });
-  router.add('DELETE', '/api/browser-accounts/:id', 'owner', c => c.store.update(s => { removeAccount(s, c.params.id); return {ok: true}; }));
+  // A deleted account has no one left to sign in as it: its open card is closed like Not now, so its runs go on.
+  router.add('DELETE', '/api/browser-accounts/:id', 'owner', async c => {
+    const state = c.store.read(), card = (state.asks || []).find(a => a.id === state.signinPending?.[c.params.id] && isSigninAsk(a) && a.status === 'pending');
+    await c.store.update(s => { removeAccount(s, c.params.id); return {ok: true}; });
+    // The card may be answered between the read and the delete (it lapsed, a hand back): the delete still happened.
+    if (card) await answerSigninFlow(c.store, card.id, {signedIn: false, actor: c.actor.email}).catch(error => { if (error?.status !== 409) throw error; });
+    return {ok: true};
+  });
 }

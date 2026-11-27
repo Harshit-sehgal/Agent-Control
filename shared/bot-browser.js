@@ -22,7 +22,8 @@
  */
 import {cleanText, validHttpUrl} from './core.js';
 import {fail} from './errors.js';
-import {decide, createAsk, scopeOf, declinedNeed, outsideRead, keepOutsideMarks} from './asks.js';
+import {decide, createAsk, scopeOf, declinedNeed, outsideRead, keepOutsideMarks, openSigninAsk, signinDeclined} from './asks.js';
+import {botSettings} from './bot-settings.js';
 import {controlFence} from './reply-blocks.js';
 import {BACKSTOP, pagesCap, roundsCap, siteOf, siteCapLeft, countSitePage, limitsOf} from './limits.js';
 import {appForHost} from './app-catalog.js';
@@ -44,6 +45,8 @@ export const MAX_STEPS = 25;
 /** The highest index a request may name; matches what a snapshot reports. */
 export const MAX_ELEMENT_INDEX = 500;
 export const MAX_BROWSER_REQUESTS = 200;
+/** A request is open while it waits on the owner, a computer or a sign-in: it holds its run, so it is never pruned. */
+export const OPEN_REQUEST_STATUSES = ['pending', 'dispatched', 'signin'];
 export const STEP_OPS = ['navigate', 'click', 'type', 'waitFor', 'read', 'scroll'];
 const INTERACTIVE = ['click', 'type'];
 // One fence grammar shared with every other control block (see bot-link.js):
@@ -278,6 +281,15 @@ export function signinSite(url) {
     try { const b = new URL(back, u); if (/^https?:$/.test(b.protocol) && b.hostname.includes('.')) return b.hostname.toLowerCase(); } catch { /* not an address */ }
   }
   return u.hostname.toLowerCase();
+}
+
+/** Is this host one of the identity providers' sign-in hosts (Google, Microsoft, Yahoo, Apple)? */
+export const isSigninHost = host => SIGNIN_HOSTS.test(String(host || '').toLowerCase());
+
+/** Is `host` the site, or a subdomain of it? Both lowercased; an empty value is never on a site. */
+export function onSite(host, site) {
+  const h = String(host || '').toLowerCase(), s = String(site || '').toLowerCase();
+  return Boolean(h && s && (h === s || h.endsWith(`.${s}`)));
 }
 
 /** The site to sign in to for a page result: `signinSite` of where the page ended, else, when the page shows a visible
@@ -610,7 +622,13 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
       say(`${host} refused this browser twice, so it was not opened again.`);
       // The owner may get in where a bot cannot: once per task, a card opens the shared browser there for them to sign in.
       const live = runId && (state.groupRuns || []).find(r => r.id === runId);
-      if (live && !(live.signinOffered || []).includes(host)) {
+      // A bot with a browser account is signed in through that account's own card (asks.js), so this one is not also posted.
+      const rosterBot = (state.groups || []).flatMap(g => g.bots || []).find(b => b.id === bot.id);
+      const accountId = rosterBot ? botSettings(rosterBot).browserAccount : null;
+      const accountCard = accountId ? openSigninAsk(state, accountId) : null;
+      // Nor after the owner said Not now to that account's card in this run.
+      const declinedSite = live && signinDeclined(live, accountId) ? (state.browserAccounts || []).find(a => a.id === accountId)?.site : null;
+      if (live && !(live.signinOffered || []).includes(host) && !(accountCard && onSite(host, accountCard.site)) && !(declinedSite && onSite(host, declinedSite))) {
         live.signinOffered = [...(live.signinOffered || []), host];
         const card = {action: 'signin', botId: bot.id, url: `https://${host}/`, text: `Sign in to ${host.replace(/^www\./, '')} in the browser on this computer. ${host.replace(/^www\./, '')} turned the bots away; once you are signed in, they use the same browser and can read it.`};
         lines.push({id: makeId(), role: 'system', kind: 'setup', botId: bot.id, setup: JSON.stringify(card), text: `${bot.name} suggests: ${card.text}`, at: now});
@@ -673,8 +691,7 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
 export function denyBrowserRequest(state, id) {
   const request = (state.browserRequests || []).find(r => r.id === id);
   if (!request) fail('Browser request not found.', 404);
-  const cancellable = request.status === 'pending' || request.status === 'dispatched';
-  if (!cancellable) fail('This browser request is no longer waiting.', 409);
+  if (!OPEN_REQUEST_STATUSES.includes(request.status)) fail('This browser request is no longer waiting.', 409);
   request.status = 'denied';
   request.updatedAt = new Date().toISOString();
   return request;
@@ -684,7 +701,7 @@ export function denyBrowserRequest(state, id) {
 export function pruneBrowserRequests(state) {
   state.browserRequests ??= [];
   if (state.browserRequests.length > MAX_BROWSER_REQUESTS) {
-    const open = r => ['pending', 'dispatched'].includes(r.status);
+    const open = r => OPEN_REQUEST_STATUSES.includes(r.status);
     const waiting = state.browserRequests.filter(open);
     const finished = state.browserRequests.filter(r => !open(r));
     const room = Math.max(0, MAX_BROWSER_REQUESTS - waiting.length);

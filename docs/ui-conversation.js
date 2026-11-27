@@ -7,34 +7,34 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=c65f5880dd';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=c65f5880dd';
-import {requestOfMessage} from './bot-browser.js?v=c65f5880dd';
-import {validHttpUrl} from './core.js?v=c65f5880dd';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=c65f5880dd';
-import {hintFor, hintHtml, pinsOf, pinsStripHtml, HINT_KEY, PINS_MSG_KEY} from './reply-menu.js?v=c65f5880dd';
-import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=c65f5880dd';
-import {isPrimary} from './company.js?v=c65f5880dd';
-import {hasJob, modelChip} from './ui-profile-model.js?v=c65f5880dd';
-import {scheduleTaskBody} from './schedules.js?v=c65f5880dd';
-import {briefingTaskBody} from './briefing.js?v=c65f5880dd';
-import {feed, fileStrip} from './ui-feed.js?v=c65f5880dd';
-import {attachButton, chipsSlot, wireAttach} from './ui-attach.js?v=c65f5880dd';
-import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js?v=c65f5880dd';
-import {askCard} from './ui-asks.js?v=c65f5880dd';
-import {UNTIL_CHOICES, untilFor} from './asks.js?v=c65f5880dd';
-import {undoToast} from './ui-settings.js?v=c65f5880dd';
-import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=c65f5880dd';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=c65f5880dd';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen, loadLocal, saveLocal, changed} from './ui-store.js?v=c65f5880dd';
-import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=c65f5880dd';
-import {toast, confirmSheet} from './ui-dialogs.js?v=c65f5880dd';
-import {siteChip, thumbSlot} from './ui-computer-view.js?v=c65f5880dd';
-import {cliChoice} from './ui-connect-model.js?v=c65f5880dd';
-import {connectAppNow} from './ui-connect.js?v=c65f5880dd';
-import {appById} from './app-catalog.js?v=c65f5880dd';
-import {templateChipsHtml, templateButton} from './ui-templates.js?v=c65f5880dd';
-import {usageWords} from './usage.js?v=c65f5880dd';
+import {OFFJOB_CHOICES} from './off-job.js?v=56cf61828d';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=56cf61828d';
+import {requestOfMessage} from './bot-browser.js?v=56cf61828d';
+import {validHttpUrl} from './core.js?v=56cf61828d';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=56cf61828d';
+import {hintFor, hintHtml, pinsOf, pinsStripHtml, HINT_KEY, PINS_MSG_KEY} from './reply-menu.js?v=56cf61828d';
+import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=56cf61828d';
+import {isPrimary} from './company.js?v=56cf61828d';
+import {hasJob, modelChip} from './ui-profile-model.js?v=56cf61828d';
+import {scheduleTaskBody} from './schedules.js?v=56cf61828d';
+import {briefingTaskBody} from './briefing.js?v=56cf61828d';
+import {feed, fileStrip} from './ui-feed.js?v=56cf61828d';
+import {attachButton, chipsSlot, wireAttach} from './ui-attach.js?v=56cf61828d';
+import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js?v=56cf61828d';
+import {askCard} from './ui-asks.js?v=56cf61828d';
+import {UNTIL_CHOICES, untilFor, answeredText} from './asks.js?v=56cf61828d';
+import {undoToast} from './ui-settings.js?v=56cf61828d';
+import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=56cf61828d';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=56cf61828d';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen, loadLocal, saveLocal, changed} from './ui-store.js?v=56cf61828d';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=56cf61828d';
+import {toast, confirmSheet} from './ui-dialogs.js?v=56cf61828d';
+import {siteChip, thumbSlot} from './ui-computer-view.js?v=56cf61828d';
+import {cliChoice} from './ui-connect-model.js?v=56cf61828d';
+import {connectAppNow} from './ui-connect.js?v=56cf61828d';
+import {appById} from './app-catalog.js?v=56cf61828d';
+import {templateChipsHtml, templateButton} from './ui-templates.js?v=56cf61828d';
+import {usageWords} from './usage.js?v=56cf61828d';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -109,7 +109,7 @@ function statusLine(conv) {
 
 /* ---------- entries ---------- */
 
-const BROWSER_STATUS = {pending: ['Waiting on you', 'warn'], dispatched: ['Running', 'warn'], done: ['Done', 'good'], failed: ['Failed', 'bad'], denied: ['Not allowed', '']};
+const BROWSER_STATUS = {pending: ['Waiting on you', 'warn'], dispatched: ['Running', 'warn'], done: ['Done', 'good'], failed: ['Failed', 'bad'], denied: ['Not allowed', ''], signin: ['Waiting for you to sign in', 'warn']};
 /** A bot's request to open a page. It says where it runs (this server or a paired
  * device), so "nothing happened" has an obvious cause. */
 function browserEntry(m, conv) {
@@ -140,7 +140,10 @@ function askEntry({message: m}, conv) {
   if (!card.open) lastsPicked.delete(m.askId);
   if (!card.open) return `<div class="cv-note cv-asked" data-ask="${esc(m.askId)}"><span>${esc(card.text)}</span></div>`;
   const bot = findBot(card.botId) || askerOf(conv), name = card.botName;
-  const choose = ({id, label, primary}) => btn(label, 'ask-answer', {id: card.askId, small: true, kind: primary ? 'primary' : 'quiet', data: {choice: id}});
+  // Take control is the sign-in card's one yes: it opens the bot's browser, and signing in there answers the card.
+  const choose = ({id, label, primary}) => id === 'signin'
+    ? btn(label, 'signin-take-control', {id: card.askId, small: true, kind: 'primary'})
+    : btn(label, 'ask-answer', {id: card.askId, small: true, kind: primary ? 'primary' : 'quiet', data: {choice: id}});
   // How long an Always allow lasts: no end by default, or an hour, or the rest of today (asks.js untilFor).
   const picked = lastsPicked.get(card.askId) || 'always';
   const lasts = card.choices.some(c => c.id === 'always') ? `<select class="ask-for" data-action="ask-for" data-for="${esc(card.askId)}" aria-label="How long Always allow lasts">${UNTIL_CHOICES.map(([id, label]) => `<option value="${id}"${id === picked ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select>` : '';
@@ -469,6 +472,16 @@ const offjobOf = button => {
 };
 const hop = node => { const f = node?.querySelector('.face'); if (f) { f.classList.remove('face--hop'); void f.getBoundingClientRect(); f.classList.add('face--hop'); } };
 
+/** The owner signs in by hand in the shared browser: take the bot's tab, send it to the site, show it. The setup
+ * card's Sign in and a sign-in ask card's Take control both come here. */
+async function takeControl(botId, url) {
+  if (isStaticDemo()) return toast('Signing in needs the app running on your computer.');
+  go({profile: botId, sub: 'computer'});
+  await api(`/api/browser-live/${encodeURIComponent(botId)}/takeover`, 'POST', {});
+  await api(`/api/browser-live/${encodeURIComponent(botId)}/input`, 'POST', {type: 'navigate', url});
+  toast('You are in control. Sign in, then tap Hand back control.');
+}
+
 /** The owner's answer to an ask card. The run that was parked on it carries on from the server, so the poll
  * (and the pill) follow it from here. */
 async function answerAsk(id, answer) {
@@ -480,7 +493,8 @@ async function answerAsk(id, answer) {
   const {ask, undo} = await api(`/api/asks/${encodeURIComponent(id)}`, 'POST', {answer, ...(until ? {until} : {})});
   lastsPicked.delete(id);
   await sync();
-  if (answer !== 'always') { toast(answer === 'decline' ? 'Not allowed.' : 'Allowed once.'); return; }
+  // An answered ask leaves the feed, so a sign-in card's Not now says what its card would collapse to.
+  if (answer !== 'always') { toast(ask?.kind === 'signin' ? answeredText(ask) : answer === 'decline' ? 'Not allowed.' : 'Allowed once.'); return; }
   const name = findBot(ask?.botId)?.name || 'The bot';
   undoToast(lasts === '1h' ? `${name} may do this for the next hour.` : lasts === 'today' ? `${name} may do this until the end of today.` : `${name} may always do this.`, undo);
 }
@@ -492,6 +506,12 @@ export const conversationChanges = {
 
 export const conversationActions = {
   'ask-answer': b => answerAsk(b.dataset.id, b.dataset.choice),
+  // The sign-in card's Take control: the ask's own bot and address, read from the state, not from the page.
+  'signin-take-control': b => {
+    const ask = (store.state?.asks || []).find(a => a.id === b.dataset.id);
+    if (!ask || ask.kind !== 'signin' || ask.status !== 'pending') throw new Error('That sign-in is no longer waiting.');
+    return takeControl(ask.botId, ask.url);
+  },
   // The pinned-replies strip: open or close its list, or bring one pinned reply into view.
   'pins-toggle': b => {
     const open = b.getAttribute('aria-expanded') !== 'true';
@@ -555,14 +575,7 @@ export const conversationActions = {
     const confirm = setupConfirm(card, findBot(card.botId)?.name);
     if (confirm && !(await confirmSheet('Always allow payments here?', {confirm: 'Always allow', danger: true, detail: confirm}))) return;
     if (card.action === 'open') return go({settings: card.section});
-    if (card.action === 'signin') {
-      // The owner signs in by hand in the shared browser: take the bot's tab, send it to the site, show it.
-      if (isStaticDemo()) return toast('Signing in needs the app running on your computer.');
-      go({profile: card.botId, sub: 'computer'});
-      await api(`/api/browser-live/${encodeURIComponent(card.botId)}/takeover`, 'POST', {});
-      await api(`/api/browser-live/${encodeURIComponent(card.botId)}/input`, 'POST', {type: 'navigate', url: card.url});
-      return toast('You are in control. Sign in, then tap Hand back control.');
-    }
+    if (card.action === 'signin') return takeControl(card.botId, card.url);
     // A connector to check again or sign in to again, a catalogue app, a new thread: the same taps as their own pages.
     if (card.action === 'reconnect' && card.app) return void window.location.assign(`/api/connectors/mcp/start?app=${encodeURIComponent(card.app)}`);
     if (card.action === 'connect') {

@@ -11,7 +11,7 @@ import {cancelTask} from './tasks.js';
 import {normalizeRetention} from './retention.js';
 import * as contracts from './contracts.js';
 import {pruneChats, releaseChatWork} from './chats.js';
-import {denyBrowserRequest} from './bot-browser.js';
+import {denyBrowserRequest, OPEN_REQUEST_STATUSES} from './bot-browser.js';
 import {BUSY_STATUSES} from './coordination.js';
 import {validateBotSettings, validateGroupSettings, prunePipeline} from './bot-settings.js';
 import {memoryState} from './memory.js';
@@ -211,7 +211,7 @@ function forgetBot(state, botId) {
   releaseChatWork(state, botId);
   const now = new Date().toISOString();
   for (const request of state.browserRequests || []) {
-    if (request.botId !== botId || !['pending', 'dispatched'].includes(request.status)) continue;
+    if (request.botId !== botId || !OPEN_REQUEST_STATUSES.includes(request.status)) continue;
     try { denyBrowserRequest(state, request.id); }
     catch { request.status = 'denied'; request.updatedAt = now; }
   }

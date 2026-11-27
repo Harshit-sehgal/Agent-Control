@@ -7,10 +7,10 @@
  *
  * Pure and browser-safe, no secrets: a jar never reaches this file. The route checks that `deviceId` is a paired
  * computer of the workspace; the rules here check only its shape. */
-import {cleanText} from './core.js?v=c65f5880dd';
-import {fail} from './errors.js?v=c65f5880dd';
-import {hostOf} from './bot-browser.js?v=c65f5880dd';
-import {ACCOUNT_ID, DEVICE_ID, botSettings, pinnedDevice} from './bot-settings.js?v=c65f5880dd';
+import {cleanText} from './core.js?v=56cf61828d';
+import {fail} from './errors.js?v=56cf61828d';
+import {hostOf, onSite, isSigninHost, signinPage} from './bot-browser.js?v=56cf61828d';
+import {ACCOUNT_ID, DEVICE_ID, botSettings, pinnedDevice} from './bot-settings.js?v=56cf61828d';
 
 export const MAX_ACCOUNTS = 20;
 export const ACCOUNT_STATES = ['signed-in', 'signed-out', 'unknown'];
@@ -100,6 +100,26 @@ export function browserAccountOf(state, botId) {
   if (!id) return {account: null, missing: false};
   const account = accountsOf(state).find(a => a.id === id) || null;
   return {account, missing: !account};
+}
+
+export {onSite};
+
+/** Did a task's steps act on the page, with a click or a type? */
+export const stepsAct = steps => (Array.isArray(steps) ? steps : []).some(step => step?.op === 'click' || step?.op === 'type');
+
+/** Is this page the account's sign-in wall? True when the page is a sign-in page (or shows a password field) on the
+ * account's site, or when a page on the site ended on an identity provider's sign-in host, whatever its return
+ * parameter says. A sign-in page on another site is that site's wall, never this account's. `url` is what was asked
+ * for, `result` is the browser's answer. `clicked` (the task clicked or typed, `stepsAct`): a page that then ends on
+ * an identity provider is the bot going through a sign-in it chose ("Continue with Google", an OAuth connect), not
+ * the account's wall. A plain read or a navigate the site sends there still is, and so is a click that ends on the
+ * site's own sign-in page. The device and the server both decide with this. */
+export function accountWall(site, url, result, {clicked = false} = {}) {
+  const r = result && typeof result === 'object' ? result : {};
+  if (clicked && isSigninHost(hostOf(r.finalUrl || r.url))) return false;
+  const page = signinPage(result);
+  if (page && onSite(page, site)) return true;
+  return onSite(hostOf(url), site) && isSigninHost(hostOf(r.finalUrl || r.url));
 }
 
 /** The computer a bot's pages run on: its account's, else its own pin, else null for any computer. */

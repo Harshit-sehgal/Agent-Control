@@ -376,14 +376,58 @@ export function createAsk(state, {botId, runId = null, chatKey = null, action, t
     ...(implies.length ? {implies} : {}),
     ...(covers.length > 1 ? {covers: covers.map(c => ({action: c.action, scope: c.scope || ''}))} : {}),
   };
+  return pushAsk(state, ask);
+}
+
+/** Add an ask to the state. Settled history is bounded; an ask nobody has answered never is. */
+function pushAsk(state, ask) {
   state.asks ??= [];
   state.asks.push(ask);
-  // Settled history is bounded; an ask nobody has answered never is.
   const open = state.asks.filter(a => !settled(a));
   const done = state.asks.filter(settled);
   if (done.length > MAX_SETTLED_ASKS) state.asks = [...done.slice(-MAX_SETTLED_ASKS), ...open].sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
   return ask;
 }
+
+/** The sign-in ask: a card that asks the owner to sign a browser account in from the phone (Take control, sign in,
+ * Hand back). It is not a permission: `'signin'` is not in ASK_ACTIONS, so no grant, rule card or backup row can name
+ * it, and Allow and Always allow are refused. */
+export const SIGNIN_ASK = 'signin';
+export const isSigninAsk = ask => ask?.kind === SIGNIN_ASK && ask?.action === SIGNIN_ASK;
+export const SIGNIN_REFUSAL = 'This card is answered by signing in: tap Take control, sign in, then Hand back.';
+
+/** Create the pending sign-in ask for one browser account and remember it as the account's open card
+ * (`state.signinPending[accountId]`). It always lapses after 24 hours, attended or not. */
+export function createSigninAsk(state, {botId, runId = null, chatKey = null, account, now = iso(), makeId = () => crypto.randomUUID()} = {}) {
+  if (!botId) fail('An ask needs the bot that is asking.');
+  if (!account?.id || !account.site) fail('A sign-in ask needs a browser account with a site.');
+  const name = cleanText(String(account.name ?? ''), 200);
+  const ask = {
+    id: makeId(), kind: SIGNIN_ASK, action: SIGNIN_ASK, botId, runId, chatKey,
+    accountId: account.id, accountName: name, site: account.site, url: `https://${account.site}/`,
+    detail: `signing in to ${account.site} as ${name}`, target: '', grantScope: '',
+    status: 'pending', scope: null, createdAt: now, expiresAt: new Date(Date.parse(now) + ASK_EXPIRY_MS).toISOString(),
+  };
+  pushAsk(state, ask);
+  (state.signinPending ??= {})[account.id] = ask.id;
+  return ask;
+}
+
+/** The account's open sign-in card, or null. An entry whose ask is gone or settled, or whose bot left the roster, is
+ * dropped from the map here, so a stale one never blocks a new card. */
+export function openSigninAsk(state, accountId) {
+  const map = state.signinPending;
+  if (!map || typeof map !== 'object' || !(accountId in map)) return null;
+  const ask = (state.asks || []).find(a => a.id === map[accountId]);
+  if (ask && isSigninAsk(ask) && ask.status === 'pending' && botIds(state).has(ask.botId)) return ask;
+  delete map[accountId];
+  return null;
+}
+
+/** Did this run say Not now to the account's sign-in card (or let it lapse)? `resumeAfterAsks` keeps that decline per
+ * account in `run.declinedAsks` (`{action: 'signin', scope: accountId}`), and nothing in the run asks for that sign-in
+ * again: no hold, no second card, no notice. */
+export const signinDeclined = (run, accountId) => Boolean(accountId) && (run?.declinedAsks || []).some(d => d?.action === SIGNIN_ASK && d.scope === accountId);
 
 /** True when another pending ask still holds this run. */
 const holds = (state, ask) => (state.asks || []).some(a => a.runId === ask.runId && a.id !== ask.id && a.status === 'pending');
@@ -397,6 +441,9 @@ export function answerAsk(state, askId, answer, now = iso(), {until = null} = {}
   if (!ASK_ANSWERS.includes(answer)) fail('Answer decline, allow or always.');
   const ask = (state.asks || []).find(a => a.id === askId);
   if (!ask) fail('Ask not found.', 404);
+  // A sign-in card is answered by signing in, never by a grant. Declining it only closes it: the server fans the
+  // run's held requests out (src), since this rule has no run to resume.
+  if (isSigninAsk(ask) && answer !== 'decline') fail(SIGNIN_REFUSAL, 409);
   if (answer === 'always' && ask.action === 'spend' && !ask.grantScope) fail("This payment has no site to remember. Choose Allow once or Don't allow.");
   if (answer === 'always' && acrossSites(ask)) fail("This ask covers more than one site, and a grant is for one. Choose Allow once or Don't allow.");
   if (ask.status !== 'pending') fail('This ask was already answered.', 409);
@@ -413,6 +460,10 @@ export function answerAsk(state, askId, answer, now = iso(), {until = null} = {}
     // One entry for the answer, in the chat it was asked in; what the same request also covered is not a second event.
     setGrant(state, ask.botId, ask.action, ask.grantScope, 'always', now, {threadId: ask.chatKey, until: end});
     for (const extra of ask.implies || []) if (extra.scope === ask.grantScope) setGrant(state, ask.botId, extra.action, extra.scope, 'always', now, {log: false, until: end});
+  }
+  if (isSigninAsk(ask)) {
+    if (state.signinPending?.[ask.accountId] === ask.id) delete state.signinPending[ask.accountId];
+    return {ask, resumeRunId: null};
   }
   const run = parked(state, ask.runId);
   return {ask, resumeRunId: run && !holds(state, ask) ? run.id : null, ...(undo.grants.length ? {undo} : {})};
@@ -472,11 +523,12 @@ export function forgetBotAsks(state, botId, now = iso()) {
 }
 
 /** The card's one sentence. */
-export const askText = (ask, botName = 'A bot') => `${botName} wants to ${ask.detail || (ask.action === 'browser.use' ? `open ${ask.target}` : `do this: ${ask.action}`)}.`;
+export const askText = (ask, botName = 'A bot') => (isSigninAsk(ask) ? `${botName} needs you to sign in to ${ask.site} as ${ask.accountName}.` : `${botName} wants to ${ask.detail || (ask.action === 'browser.use' ? `open ${ask.target}` : `do this: ${ask.action}`)}.`);
 
 /** What an answered card collapses to. */
 export function answeredText(ask) {
   if (ask.status === 'pending') return 'Waiting for you';
+  if (isSigninAsk(ask)) return ask.status === 'allowed' ? 'You signed in' : ask.expired ? 'No sign-in in 24 hours, so the task went on without it' : 'You chose not now';
   if (ask.expired) return 'No answer in 24 hours, so it was declined';
   if (ask.status === 'declined') return 'You declined it';
   return ask.scope === 'always' ? 'You always allow it for this bot' : 'You allowed it once';

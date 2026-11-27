@@ -29,12 +29,12 @@ function memJars(initial = {}) {
     retain: () => [],
   };
 }
-function rig(t, {jars = memJars(), wrap = null, extra = {}} = {}) {
+function rig(t, {jars = memJars(), wrap = null, extra = {}, pages = PAGES, allow = ['docs.example.com']} = {}) {
   const processes = [];
   const sb = createSharedBrowser({
-    allow: ['docs.example.com'], settleMs: 0, jars, ...extra,
+    allow, settleMs: 0, jars, ...extra,
     start: async () => {
-      const fake = fakeCdp({pages: PAGES});
+      const fake = fakeCdp({pages});
       processes.push(fake);
       const live = await startBrowserSession({connection: fake.connection});
       return wrap ? wrap(live) : live;
@@ -199,4 +199,71 @@ test('one lane per account and bot in the worker pool', () => {
   assert.notEqual(taskKey(task({botId: 'scout', account: A})), taskKey(task({botId: 'scout'})));
   assert.notEqual(taskKey(task({botId: 'scout', account: A})), taskKey(task({botId: 'scout', account: B})));
   assert.equal(taskKey(task({botId: 'scout', account: A})), taskKey({kind: 'browser.action', payload: {botId: 'scout', account: A}}));
+});
+
+const TYPED = 'hunter22-marker';
+const ECHO = 'https://echo.example.com/';
+/** A page that says back what was typed into it, on a site two bots can reach. */
+const ECHOING = {...PAGES, [ECHO]: {title: 'Echo', text: `you said ${TYPED}`, elements: [{index: 1, tag: 'button', text: 'Go'}]}};
+const echoRig = (t, extra = {}) => rig(t, {pages: ECHOING, allow: ['docs.example.com', 'echo.example.com'], ...extra});
+
+test('what the owner types in secret on one bot\'s account tab is hidden in another bot\'s tab of that account', async t => {
+  const {sb} = echoRig(t);
+  await sb.run('scout', {url: URL_, account: A});
+  await sb.run('writer', {url: URL_, account: A});
+  await sb.takeover('scout', A);
+  await sb.applyInput('scout', {type: 'type', text: TYPED, secret: true});
+  await sb.handback('scout');
+  const writer = await sb.run('writer', {url: ECHO, account: A});
+  const text = JSON.stringify(writer);
+  assert.ok(!text.includes(TYPED), 'the marker reached the second bot\'s result');
+  assert.ok(text.includes('[hidden]'), 'the echo is hidden in words');
+  assert.ok(!JSON.stringify(sb.status()).includes(TYPED), 'nor the status');
+  // The same account's other bot, a different account and no account: each keeps the memory it has.
+  const other = await sb.run('atlas', {url: ECHO, account: B});
+  assert.ok(JSON.stringify(other).includes(TYPED), 'another account\'s tab has its own memory');
+  const plain = await sb.run('atlas', {url: ECHO});
+  assert.ok(JSON.stringify(plain).includes(TYPED), 'a tab with no account keeps its own memory, empty here');
+});
+
+test('a tab opened after the owner typed still has that account\'s memory', async t => {
+  const {sb} = echoRig(t);
+  await sb.run('scout', {url: URL_, account: A});
+  await sb.takeover('scout', A);
+  await sb.applyInput('scout', {type: 'type', text: TYPED, secret: true});
+  await sb.handback('scout');
+  const late = await sb.run('late', {url: ECHO, account: A});
+  assert.ok(!JSON.stringify(late).includes(TYPED) && JSON.stringify(late).includes('[hidden]'));
+});
+
+test('letting an account go forgets what was typed on it', async t => {
+  const {sb} = echoRig(t);
+  await sb.setAccounts([{id: A, site: 'docs.example.com'}]);
+  await sb.run('scout', {url: URL_, account: A});
+  await sb.takeover('scout', A);
+  await sb.applyInput('scout', {type: 'type', text: TYPED, secret: true});
+  await sb.handback('scout');
+  assert.ok(!JSON.stringify(await sb.run('scout', {url: ECHO, account: A})).includes(TYPED), 'hidden while the account is held');
+  await sb.setAccounts([]);
+  await sb.setAccounts([{id: A, site: 'docs.example.com'}]);
+  const again = await sb.run('scout', {url: ECHO, account: A});
+  assert.ok(JSON.stringify(again).includes(TYPED), 'the memory went with the account: nothing is left to hide');
+});
+
+test('an account with nothing open any more still forgets what was typed on it when the server lets it go', async t => {
+  // No jar is kept and no site is listed, so only the typed memory is left of the account once its idle tab is reaped.
+  let clock = 1_800_000_000_000;
+  const jars = {...memJars(), save() {}};
+  const {sb} = echoRig(t, {jars, extra: {now: () => clock}});
+  await sb.setAccounts([{id: A, site: ''}]);
+  await sb.run('scout', {url: URL_, account: A});
+  await sb.takeover('scout', A);
+  await sb.applyInput('scout', {type: 'type', text: TYPED, secret: true});
+  await sb.handback('scout');
+  clock += 11 * 60000;
+  await sb.sweep();
+  assert.deepEqual(sb.status(), [], 'the idle tab is gone');
+  await sb.setAccounts([{id: B, site: ''}]);
+  await sb.setAccounts([{id: A, site: ''}, {id: B, site: ''}]);
+  assert.ok(JSON.stringify(await sb.run('scout', {url: ECHO, account: A})).includes(TYPED), 'nothing of it is left to hide');
 });
