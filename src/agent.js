@@ -487,9 +487,11 @@ export function recordAgentFeatures(store, agentId, reported) {
 /** What a computer says of its browser accounts (shared/browser-accounts.js), kept in kv `agent_accounts:<agentId>`:
  * only the entries for accounts that name this computer, each as `{id, state, storage, lost?, checkedAt}`. A cookie
  * value is not a field here, so it cannot be stored. A beat with no list (an older app, or one that is not a list)
- * writes nothing, so the last report stands. No report reads signed out. */
+ * writes nothing, so the last report stands. No report reads signed out. Returns the ids that fell: an entry already stored
+ * as `signed-in` or `unknown` that this report says `signed-out`. A first report of signed out (a new account, or one
+ * after a restore dropped the reports) is not a fall, and every early return is `[]`. */
 export function recordAccountReports(store, agentId, reported) {
-  if (!Array.isArray(reported) || typeof store.kvSet !== 'function') return;
+  if (!Array.isArray(reported) || typeof store.kvSet !== 'function') return [];
   const ids = (peek(store).browserAccounts || []).filter(a => a.deviceId === agentId).map(a => a.id);
   // `checkedAt` is when an entry's finding was first heard: an entry that says what it said last keeps its time, and a
   // report that is the same as the last one is not written again (a computer beats every few seconds).
@@ -497,8 +499,10 @@ export function recordAccountReports(store, agentId, reported) {
   const same = (r, was) => was && was.state === r.state && Boolean(was.lost) === Boolean(r.lost);
   const at = now();
   const next = cleanAccountReport(reported, ids).map(r => ({...r, checkedAt: same(r, before.get(r.id)) && before.get(r.id).checkedAt ? before.get(r.id).checkedAt : at}));
-  if (next.length === before.size && next.every(r => same(r, before.get(r.id)) && r.checkedAt === before.get(r.id).checkedAt)) return;
+  const fell = next.filter(r => r.state === 'signed-out' && ['signed-in', 'unknown'].includes(before.get(r.id)?.state)).map(r => r.id);
+  if (next.length === before.size && next.every(r => same(r, before.get(r.id)) && r.checkedAt === before.get(r.id).checkedAt)) return fell;
   store.kvSet(`agent_accounts:${agentId}`, JSON.stringify(next));
+  return fell;
 }
 export function readAccountReports(store, agentId) {
   try {

@@ -17,6 +17,7 @@ import {createRouter} from '../src/router.js';
 import {browserAccountRoutes} from '../src/routes-browser-accounts.js';
 import {exportBackup, importBackup} from '../src/backup.js';
 import {DEVICE_FEATURES} from '../shared/device-features.js';
+import {askLineId} from '../src/ask-cards.js';
 
 const A = '0b6f1c2e-4d5a-4b8c-9e1f-2a3b4c5d6e7f', B = '1c7a2d3f-5e6b-4c9d-8f2a-3b4c5d6e7f80';
 const acct = (id, deviceId, name = `Account ${id.slice(0, 4)}`) => ({id, name, site: 'crm.example.com', deviceId, storage: 'cookies'});
@@ -339,4 +340,136 @@ test('a re-pair, on the new computer\'s first beat, tells the runs waiting on th
   assert.deepEqual(s.browserRequests.map(r => r.status), ['failed', 'failed'], 'no page is left waiting on the replaced computer');
   assert.equal(s.chats.web.filter(m => /browser request failed/.test(m.text)).length, 2, 'each run is told');
   assert.ok(s.events.some(e => /replaced/i.test(e.message) && e.meta?.agentId === d1.agentId), 'the activity log says the old computer was replaced');
+});
+
+// ---- A keeper's signed-out finding posts the account's sign-in card (Phase 3, Task 3) ----
+const tick = () => new Promise(r => setTimeout(r, 20));
+const signinCards = store => (store.read().asks || []).filter(a => a.kind === 'signin');
+async function withBot(t, extra = {}) {
+  const h = await harness(t);
+  const sent = [];
+  h.store.notify = async event => { sent.push(event); };
+  await h.store.update(s => {
+    s.browserAccounts = [acct(A, h.deviceId, 'Sales CRM')];
+    s.groups.push({id: 'lab', name: 'Lab', bots: [
+      {id: 'idle', name: 'Idle', settings: {}},
+      {id: 'web', name: 'Web', settings: {browserAccount: A}},
+      {id: 'web2', name: 'Web Two', settings: {browserAccount: A}},
+    ]});
+    Object.assign(s, extra);
+  });
+  return {...h, sent};
+}
+const report = state => ({accounts: [{id: A, state}]});
+
+test('an account that goes from signed in to signed out on a beat posts one card and one quiet push', async t => {
+  const {store, beat, sent} = await withBot(t);
+  await beat(report('signed-in'));
+  await tick();
+  assert.deepEqual(signinCards(store), [], 'signed in posts nothing');
+  assert.equal(sent.length, 0);
+
+  const out = await beat(report('signed-out'));
+  assert.equal(out.status, 200);
+  assert.deepEqual(out.body.accounts, [{id: A, site: 'crm.example.com'}], 'the beat still answers with its account list');
+  await tick();
+  const cards = signinCards(store);
+  assert.equal(cards.length, 1);
+  assert.equal(cards[0].accountId, A);
+  assert.equal(cards[0].botId, 'web', 'the first bot that signs in as the account');
+  assert.equal(cards[0].status, 'pending');
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].kind, 'signin');
+  assert.equal(sent[0].urgent, false, 'a quiet push');
+  assert.equal(sent[0].title, 'Sign in to crm.example.com');
+  assert.equal(sent[0].route, '#bot/web');
+  assert.ok((store.read().chats.web || []).some(m => m.id === askLineId(cards[0])), 'the card is in the bot\'s chat');
+
+  await beat(report('signed-out'));
+  await beat(report('signed-out'));
+  await tick();
+  assert.equal(signinCards(store).length, 1, 'a third beat still signed out makes nothing more');
+  assert.equal(sent.length, 1, 'and pushes nothing more');
+});
+
+test('signing in and out again while a card is still open reuses it and pushes nothing new', async t => {
+  const {store, beat, sent} = await withBot(t);
+  await beat(report('signed-in'));
+  await beat(report('signed-out'));
+  await tick();
+  await beat(report('signed-in'));
+  await beat(report('signed-out'));
+  await tick();
+  assert.equal(signinCards(store).length, 1, 'one card per account');
+  assert.equal(sent.length, 1);
+});
+
+test('a first report of signed out, a new account or one after a restore, posts nothing', async t => {
+  const {store, beat, deviceId, sent} = await withBot(t);
+  // A new account: no stored entry yet.
+  assert.deepEqual(agent.readAccountReports(store, deviceId), []);
+  assert.equal((await beat(report('signed-out'))).status, 200);
+  await tick();
+  assert.deepEqual(signinCards(store), [], 'the first report is signed out, so there is no change to tell');
+  assert.equal(sent.length, 0);
+  // A restore drops every report, so the account's next report is a first one again.
+  await beat(report('signed-in'));
+  store.kvSet(`agent_accounts:${deviceId}`, JSON.stringify([]));
+  await store.update(s => { s.asks = []; });
+  await beat(report('signed-out'));
+  await tick();
+  assert.deepEqual(signinCards(store), []);
+  assert.equal(sent.length, 0);
+});
+
+test('a restored jar found lost after a restart posts the card: unknown, then signed out', async t => {
+  const {store, beat, sent} = await withBot(t);
+  await beat(report('unknown'));
+  await tick();
+  assert.deepEqual(signinCards(store), [], 'unknown alone is not a finding');
+  await beat({accounts: [{id: A, state: 'signed-out', lost: true}]});
+  await tick();
+  assert.equal(signinCards(store).length, 1);
+  assert.equal(signinCards(store)[0].accountId, A);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].kind, 'signin');
+});
+
+test('an account no bot signs in as posts nothing', async t => {
+  const {store, beat, deviceId, sent} = await withBot(t);
+  await store.update(s => { for (const b of s.groups.find(g => g.id === 'lab').bots) b.settings = {}; });
+  await beat(report('signed-in'));
+  const out = await beat(report('signed-out'));
+  assert.equal(out.status, 200);
+  await tick();
+  assert.deepEqual(signinCards(store), []);
+  assert.equal(sent.length, 0);
+  assert.equal(agent.readAccountReports(store, deviceId)[0].state, 'signed-out', 'the finding itself is still kept');
+});
+
+test('a card that cannot be posted does not fail the beat', async t => {
+  const {store, beat, sent} = await withBot(t);
+  await beat(report('signed-in'));
+  store.notify = async () => { throw new Error('push down'); };
+  const logged = [];
+  const orig = console.error;
+  console.error = (...a) => { logged.push(a.join(' ')); };
+  t.after(() => { console.error = orig; });
+  const out = await beat(report('signed-out'));
+  await tick();
+  assert.equal(out.status, 200, 'the beat goes through');
+  assert.ok(out.body.accounts, 'with its account list in the reply');
+  assert.equal(signinCards(store).length, 1, 'the card was made; only its push failed');
+  assert.equal(sent.length, 0);
+  assert.ok(logged.some(l => /push down/.test(l)), 'and the failure is logged');
+
+  // The write that makes the card itself fails: logged as `Sign-in card:`, the beat still answers.
+  await store.update(s => { s.asks = []; delete s.signinPending; });
+  await beat(report('signed-in'));
+  const update = store.update.bind(store);
+  store.update = fn => { store.update = update; return Promise.reject(new Error('disk full')); };
+  const failed = await beat(report('signed-out'));
+  assert.equal(failed.status, 200);
+  assert.ok(failed.body.accounts);
+  assert.ok(logged.some(l => /Sign-in card:.*disk full/.test(l)), 'logged as Sign-in card:');
 });

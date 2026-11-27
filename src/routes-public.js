@@ -11,6 +11,7 @@ import {hasFeature, BROWSER_ACCOUNTS_V1} from '../shared/device-features.js';
 import {onAgentTaskResult, continueBrowserWork, setBrowserResultHooks, finishReplacement} from './bot-browser.js';
 import {queueGroupRun, resumeBrowserRun} from './coordination.js';
 import {runOneBot} from './routes-groups.js';
+import {noticeSignins} from './signin-wait.js';
 import {sessionCookie, clearCookie, DEFAULT_WORKSPACE, resolveAccount} from './auth.js';
 import {sha256} from './vault.js';
 import {fail, cookie, safeJson, clientIpOf, trustProxy as trustProxyEnv, forwardedHttps} from './http.js';
@@ -217,7 +218,12 @@ export function publicRoutes(router, {auth, workspaces, version}) {
       // What its app can do; a beat without the list (an older app) leaves none.
       agent.recordAgentFeatures(store, device.id, features);
       // The sign-in state of each browser account it holds; states only, never a cookie.
-      agent.recordAccountReports(store, device.id, accounts);
+      const fell = agent.recordAccountReports(store, device.id, accounts);
+      // An account that just signed out gets its sign-in card and one quiet push. A failure here is logged and never fails the beat.
+      if (fell.length) {
+        try { await noticeSignins(store, fell); }
+        catch (error) { console.error('Sign-in card:', error.message); }
+      }
       const nowMs = Date.now();
       // Renew this device's running leases first: it is heartbeating because it
       // is alive, so a task it is still executing (a slow page, a serial queue)
