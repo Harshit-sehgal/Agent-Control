@@ -340,7 +340,8 @@ async function fillAccounts(botId) {
   const res = await api('/api/browser-accounts').catch(() => null);
   const form = el('edit-bot-form'), slot = form?.querySelector('[data-account-slot]');
   if (!slot || form.dataset.bot !== botId || store.state?.me?.role !== 'owner') return;
-  const options = accountOptions(res?.accounts, JSON.parse(form.dataset.was || '{}').browserAccount);
+  if (!res) return;   // a failed read must not call the bot's real account gone
+  const options = accountOptions(res.accounts, JSON.parse(form.dataset.was || '{}').browserAccount);
   if (!options.length) return;
   const row = document.createElement('template');
   row.innerHTML = `<label class="nb-boss nb-account"><span>Signs in as</span><select class="input" name="browserAccount">${options.map(o => `<option value="${esc(o.id)}"${o.selected ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}</select></label>`;

@@ -2763,6 +2763,7 @@ async def local_agents_page_adds_a_browser_account(page, base):
     await open_app(page, base)
     panel = await mount_admin(page, 'agents')
     await expect(panel).to_contain_text('No browser account yet.')
+    await expect(panel.locator('.st-g .st-h', has_text='Browser accounts')).to_have_count(1)
     await expect(panel).to_contain_text("Each account is its own cookie space on one computer: bots on different accounts never see each other's sign-ins.")
     await expect(panel).to_contain_text('To sign in, open a bot that uses it, take over its Computer view and sign in there.')
     form = panel.locator('#account-form')

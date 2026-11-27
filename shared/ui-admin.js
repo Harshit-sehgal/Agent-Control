@@ -202,7 +202,7 @@ function accountsGroups(accounts, agents) {
   const form = choices
     ? `<form id="account-form" class="ad-form"><div class="form-grid">${field('Name', textInput('name', {required: true, maxlength: 60, placeholder: 'CRM'}))}${field('Site', textInput('site', {required: true, placeholder: 'crm.example.com', autocapitalize: 'off', spellcheck: 'false'}))}</div>${field('Computer', `<select class="input" name="deviceId">${choices}</select>`)}<div class="cn-acts">${btn('Add account', null, {kind: 'primary', type: 'submit'})}</div></form>`
     : '<p class="st-quiet">Pair a computer first.</p>';
-  return (cards ? group(`Browser accounts, ${accounts.length}`, cards, {cls: 'cn-list'}) : quiet('No browser account yet.'))
+  return (cards ? group(`Browser accounts, ${accounts.length}`, cards, {cls: 'cn-list'}) : group('Browser accounts', '<p class="st-quiet">No browser account yet.</p>', {pad: true}))
     + group('Add a browser account', form, {pad: true})
     + hint('Each account is its own cookie space on one computer: bots on different accounts never see each other\'s sign-ins. Its cookies stay on that computer, encrypted, and are never in a backup. To sign in, open a bot that uses it, take over its Computer view and sign in there.');
 }

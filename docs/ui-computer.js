@@ -8,8 +8,8 @@
  * The numbers match agent/live-input.mjs, which is the one place the device checks an
  * event: a point is clamped to the page, text is at most 2000 characters and a wheel
  * turn at most 5000 pixels, so nothing built here can be refused for its size. */
-import {hostOf} from './bot-browser.js?v=942dc8a723';
-import {cleanFeatures} from './device-features.js?v=942dc8a723';
+import {hostOf} from './bot-browser.js?v=18c4ca58d0';
+import {cleanFeatures} from './device-features.js?v=18c4ca58d0';
 
 /** The page the owner sees, in CSS pixels. A frame carries its own size; this is the fallback. */
 export const PAGE = {w: 1280, h: 800};
