@@ -6,6 +6,8 @@ import {lastSweepAt} from './queue.js';
 import {activity} from '../shared/core.js';
 import * as wf from '../shared/workflow.js';
 import * as agent from './agent.js';
+import {peek} from './sqlite-store.js';
+import {hasFeature, BROWSER_ACCOUNTS_V1} from '../shared/device-features.js';
 import {onAgentTaskResult, continueBrowserWork, setBrowserResultHooks, finishReplacement} from './bot-browser.js';
 import {queueGroupRun, resumeBrowserRun} from './coordination.js';
 import {runOneBot} from './routes-groups.js';
@@ -231,12 +233,22 @@ export function publicRoutes(router, {auth, workspaces, version}) {
         catch (error) { console.error('Browser recovery:', error.message); }
       }
       // A device that is stopping beats only to keep its running leases: it is handed nothing new (an older server ignores the field).
-      const tasks = (stopping ? [] : agent.claimAgentTasks(store, device.id)).map(t => ({id: t.id, kind: t.kind, payload: JSON.parse(t.payload), attempts: t.attempts}));
+      const claimed = (stopping ? [] : agent.claimAgentTasks(store, device.id)).map(t => ({id: t.id, kind: t.kind, payload: JSON.parse(t.payload), attempts: t.attempts}));
+      // A task for a browser account goes only to an app that keeps them. One queued before this computer was rolled
+      // back to an older app is failed here, never run in its default profile.
+      const keepsAccounts = hasFeature(agent.readAgentFeatures(store, device.id), BROWSER_ACCOUNTS_V1);
+      const refused = keepsAccounts ? [] : claimed.filter(t => t.payload?.account).map(t => t.id);
+      if (refused.length) agent.failAgentTasks(store, refused, agent.missingFeatureLine(BROWSER_ACCOUNTS_V1));
+      for (const id of refused) {
+        try { await onAgentTaskResult(store, id, {resumeBrowser: resumeBrowserRun}); }
+        catch (error) { console.error('Browser result:', error.message); }
+      }
+      const tasks = claimed.filter(t => !refused.includes(t.id));
       if (recovered) await store.update(s => { activity(s, 'agent', `Re-armed ${recovered} agent task(s) after a disconnect.`); });
       let permissions = [];
       try { permissions = JSON.parse(device.permissions || '[]'); } catch { /* Stored JSON. */ }
       // The accounts whose cookies this computer keeps, so it can drop a jar the owner moved or deleted.
-      const held = (store.read().browserAccounts || []).filter(a => a.deviceId === device.id).map(a => ({id: a.id, site: a.site}));
+      const held = (peek(store).browserAccounts || []).filter(a => a.deviceId === device.id).map(a => ({id: a.id, site: a.site}));
       return {ok: true, serverTime: new Date().toISOString(), agent: {id: device.id, name: device.name, permissions}, tasks, accounts: held};
     };
     return store.trackWork ? store.trackWork(heartbeat) : heartbeat();

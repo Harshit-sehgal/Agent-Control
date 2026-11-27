@@ -299,8 +299,8 @@ export function liveStates(state, {hub, ws}) {
     const lastDone = requests.filter(r => r.botId === bot.id && r.status === 'done').sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0];
     const url = tab?.url || (open ? open.url : lastDone?.result?.finalUrl || lastDone?.url) || null;
     const title = tab?.title || (open ? null : lastDone?.result?.title) || null;
-    // A member gets the account's name and id (the id is already in the bot's settings), never its computer, site or jar.
-    out.push({botId: bot.id, state: mode, url, title, site: mode === 'idle' ? null : hostOf(url) || null, pages: pagesOf(requests, bot.id), runId: open?.runId || null, requestId: open?.id || null, live, account: account ? {id: account.id, name: account.name} : null});
+    // A member gets the account's name only, never its id, computer, site or jar.
+    out.push({botId: bot.id, state: mode, url, title, site: mode === 'idle' ? null : hostOf(url) || null, pages: pagesOf(requests, bot.id), runId: open?.runId || null, requestId: open?.id || null, live, account: account ? {name: account.name} : null});
   }
   return out;
 }

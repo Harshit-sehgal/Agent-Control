@@ -16,6 +16,7 @@ import {browserLive} from '../src/browser-live.js';
 import {createRouter} from '../src/router.js';
 import {browserAccountRoutes} from '../src/routes-browser-accounts.js';
 import {exportBackup, importBackup} from '../src/backup.js';
+import {DEVICE_FEATURES} from '../shared/device-features.js';
 
 const A = '0b6f1c2e-4d5a-4b8c-9e1f-2a3b4c5d6e7f', B = '1c7a2d3f-5e6b-4c9d-8f2a-3b4c5d6e7f80';
 const acct = (id, deviceId, name = `Account ${id.slice(0, 4)}`) => ({id, name, site: 'crm.example.com', deviceId, storage: 'cookies'});
@@ -68,6 +69,53 @@ test('a heartbeat records its own accounts\' states, never a cookie, and hears t
   await beat({accounts: []});
   assert.deepEqual(agent.readAccountReports(store, deviceId), [], 'an empty list is a report: nothing is signed in');
   assert.deepEqual(agent.readAccountReports(store, 'nobody'), [], 'no report reads as none');
+});
+
+test('a report the same as the last is not written again, and keeps when its state was first said', async t => {
+  const {store, beat, deviceId} = await harness(t);
+  await store.update(s => { s.browserAccounts = [acct(A, deviceId), acct(B, deviceId)]; });
+  await beat({accounts: [{id: A, state: 'signed-in'}, {id: B, state: 'unknown'}]});
+  const first = agent.readAccountReports(store, deviceId);
+  const writes = [];
+  const kvSet = store.kvSet.bind(store);
+  store.kvSet = (key, value) => { writes.push(key); return kvSet(key, value); };
+  await new Promise(r => setTimeout(r, 5));
+  await beat({accounts: [{id: A, state: 'signed-in'}, {id: B, state: 'unknown'}]});
+  assert.ok(!writes.includes(`agent_accounts:${deviceId}`), 'an unchanged report writes nothing');
+  assert.deepEqual(agent.readAccountReports(store, deviceId), first);
+  await new Promise(r => setTimeout(r, 5));
+  await beat({accounts: [{id: A, state: 'signed-in'}, {id: B, state: 'signed-out'}]});
+  const now = Object.fromEntries(agent.readAccountReports(store, deviceId).map(r => [r.id, r]));
+  assert.equal(now[A].checkedAt, first[0].checkedAt, 'A did not change: it keeps when it was said');
+  assert.notEqual(now[B].checkedAt, first[1].checkedAt, 'B changed: it is stamped now');
+  assert.equal(now[B].state, 'signed-out');
+});
+
+test('a task for an account is failed, not handed over, to a computer whose app no longer reports browser accounts', async t => {
+  const {store, newCode, beatAs} = await harness(t);
+  const pc = agent.redeemPairing(store, {code: newCode(), name: 'PC', permissions: ['browser.capture'], features: DEVICE_FEATURES});
+  await store.update(s => {
+    s.browserAccounts = [acct(A, pc.agentId)];
+    s.groups.push({id: 'lab', name: 'Lab', bots: [{id: 'web', name: 'Web', settings: {browserAccount: A}}]});
+  });
+  const at = new Date().toISOString();
+  const queue = async (id, account) => {
+    const {task} = agent.enqueueAgentTask(store, pc.agentId, {kind: 'browser.capture', payload: {url: 'https://crm.example.com/', steps: [], botId: 'web'}, ...(account ? {account} : {})});
+    await store.update(s => { (s.browserRequests ||= []).push({id, botId: 'web', botName: 'Web', groupId: 'lab', chatKey: 'web', url: 'https://crm.example.com/', steps: [], kind: 'browser.capture', depth: 0, status: 'dispatched', via: 'agent', agentTaskIds: [task.id], result: null, error: null, createdAt: at, updatedAt: at}); });
+    return task.id;
+  };
+  const withAccount = await queue('r-account', A);
+  const plain = await queue('r-plain', null);
+  // The computer was rolled back to an app that does not report the feature, after the tasks were queued.
+  const beat = await beatAs(pc, {features: []});
+  assert.equal(beat.status, 200);
+  assert.deepEqual(beat.body.tasks.map(task => task.id), [plain], 'only the task with no account is handed over');
+  const row = store.get('SELECT status,error FROM agent_tasks WHERE id=?', withAccount);
+  assert.equal(row.status, 'failed');
+  assert.match(row.error, /newer app on your computer.*browser-accounts-v1/);
+  const request = store.read().browserRequests.find(r => r.id === 'r-account');
+  assert.equal(request.status, 'failed', 'its page is finished, so the run waiting on it goes on');
+  assert.equal(store.read().browserRequests.find(r => r.id === 'r-plain').status, 'dispatched');
 });
 
 test('the owner\'s list reads each account\'s reported state, and signed out when nothing was reported', async t => {

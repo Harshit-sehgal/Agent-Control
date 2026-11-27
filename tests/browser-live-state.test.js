@@ -42,6 +42,17 @@ test('a bot with a request out is browsing, one the owner holds is driving, the 
   hub.close();
 });
 
+test('a bot that signs in as an account shows that account\'s name only: no id, computer, site or jar', async () => {
+  const {hub} = hubRig();
+  const s = state([]);
+  s.groups[0].bots[0].settings = {browserAccount: '0a1b2c3d-0000-4000-8000-00000000000a'};
+  s.browserAccounts = [{id: '0a1b2c3d-0000-4000-8000-00000000000a', name: 'CRM', site: 'crm.example.com', deviceId: 'pc-1', storage: 'cookies'}];
+  const list = by(liveStates(s, {hub, ws: WS}));
+  assert.deepEqual(list.web.account, {name: 'CRM'});
+  assert.equal(list.mail.account, null);
+  hub.close();
+});
+
 test('the site is the host of the page the tab is on now, only while the bot browses or is driven', async () => {
   const {hub} = hubRig();
   const s = state([request('a', 'web', {status: 'dispatched', result: null}), request('b', 'mail')]);

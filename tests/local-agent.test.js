@@ -50,6 +50,27 @@ test('a later start reuses the same agent, and a port change only rewrites the a
   assert.equal(store.all('SELECT id FROM agents').length, 1);
 });
 
+test('the config is replaced whole, never truncated and rewritten in place; a link to it stays a link', async () => {
+  const {store, dataFile, dir} = await harness();
+  const first = ensureLocalAgent(store, {dataFile, server: 'http://127.0.0.1:4173'});
+  const alias = path.join(dir, 'alias.json');
+  await fs.link(first.configPath, alias);             // a second name for the same file: an in-place write changes both
+  ensureLocalAgent(store, {dataFile, server: 'http://127.0.0.1:4174'});
+  assert.equal(JSON.parse(await fs.readFile(alias, 'utf8')).server, 'http://127.0.0.1:4173', 'the old file was not written through');
+  assert.equal(JSON.parse(await fs.readFile(first.configPath, 'utf8')).server, 'http://127.0.0.1:4174');
+  assert.equal((await fs.stat(first.configPath)).mode & 0o777, 0o600);
+  assert.deepEqual((await fs.readdir(dir)).filter(n => n.endsWith('.tmp')), [], 'no temp file left behind');
+  // A config kept on a volume through a link: the link stays, the file it names is the one replaced.
+  const volume = path.join(dir, 'volume');
+  await fs.mkdir(volume);
+  const real = path.join(volume, 'local-agent.json');
+  await fs.rename(first.configPath, real);
+  await fs.symlink(real, first.configPath);
+  ensureLocalAgent(store, {dataFile, server: 'http://127.0.0.1:4175'});
+  assert.ok((await fs.lstat(first.configPath)).isSymbolicLink());
+  assert.equal(JSON.parse(await fs.readFile(real, 'utf8')).server, 'http://127.0.0.1:4175');
+});
+
 test('an agent revoked in Settings stays revoked: no new one is paired behind the owner\'s back', async () => {
   const {store, dataFile} = await harness();
   const first = ensureLocalAgent(store, {dataFile, server: 'http://127.0.0.1:4173'});

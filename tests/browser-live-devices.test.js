@@ -265,13 +265,13 @@ test('liveStates names each bot\'s account, and takes live and url from the bot\
     browserAccounts: [{id: A, name: 'CRM', site: 'crm.example.com', deviceId: 'pc-b', storage: 'cookies'}],
   };
   const by = Object.fromEntries(liveStates(state, {hub, ws: WS}).map(e => [e.botId, e]));
-  assert.deepEqual(by.scout.account, {id: A, name: 'CRM'});
+  assert.deepEqual(by.scout.account, {name: 'CRM'}, 'the name only');
   assert.equal(by.scout.url, 'https://crm.example.com/');
   assert.equal(by.scout.live, true);
   assert.equal(by.atlas.account, null);
   assert.equal(by.atlas.url, 'https://plain.example.com/');
   assert.equal(by.pinned.live, false, 'a bot pinned to a computer that is not there has no live line');
-  assert.equal(Object.keys(by.scout.account).sort().join(), 'id,name', 'a member gets the name, no computer, site or jar');
+  assert.equal(Object.keys(by.scout.account).sort().join(), 'name', 'a member gets the name, no id, computer, site or jar');
   hub.close();
 });
 
@@ -357,7 +357,7 @@ test('the routes resolve the bot\'s computer, refuse an older app, and name the 
 
   const list = await send('GET', '/api/browser-live', {cookie: 'member'});
   const scout = list.body.find(e => e.botId === 'scout');
-  assert.deepEqual(scout.account, {id: A, name: 'CRM'});
+  assert.deepEqual(scout.account, {name: 'CRM'}, 'the name only');
   assert.equal(scout.state, 'driving');
   assert.equal(list.body.find(e => e.botId === 'atlas').account, null);
   assert.equal(JSON.stringify(list.body).includes(pcB.id), false, 'a member is never told which computer');

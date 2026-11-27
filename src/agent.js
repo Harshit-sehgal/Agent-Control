@@ -28,6 +28,7 @@ import {cleanFeatures,hasFeature} from '../shared/device-features.js';
 import {cleanAccountReport,ACCOUNT_STATES} from '../shared/browser-accounts.js';
 import {base64Bytes,sniffType,isImage,MAX_FILES,MODEL_IMAGE_BYTES,MODEL_IMAGES_TOTAL} from '../shared/attachments.js';
 import {encryptJson,decryptJson,sha256,loadMasterKey} from './vault.js';
+import {peek} from './sqlite-store.js';
 
 /** Told when a task is queued for a device (src/server.js points it at the live
  * hub). A no-op by default, so this module needs nothing else to be loaded. */
@@ -489,9 +490,15 @@ export function recordAgentFeatures(store, agentId, reported) {
  * writes nothing, so the last report stands. No report reads signed out. */
 export function recordAccountReports(store, agentId, reported) {
   if (!Array.isArray(reported) || typeof store.kvSet !== 'function') return;
-  const ids = (store.read().browserAccounts || []).filter(a => a.deviceId === agentId).map(a => a.id);
+  const ids = (peek(store).browserAccounts || []).filter(a => a.deviceId === agentId).map(a => a.id);
+  // `checkedAt` is when an entry's finding was first heard: an entry that says what it said last keeps its time, and a
+  // report that is the same as the last one is not written again (a computer beats every few seconds).
+  const before = new Map(readAccountReports(store, agentId).map(r => [r.id, r]));
+  const same = (r, was) => was && was.state === r.state && Boolean(was.lost) === Boolean(r.lost);
   const at = now();
-  store.kvSet(`agent_accounts:${agentId}`, JSON.stringify(cleanAccountReport(reported, ids).map(r => ({...r, checkedAt: at}))));
+  const next = cleanAccountReport(reported, ids).map(r => ({...r, checkedAt: same(r, before.get(r.id)) && before.get(r.id).checkedAt ? before.get(r.id).checkedAt : at}));
+  if (next.length === before.size && next.every(r => same(r, before.get(r.id)) && r.checkedAt === before.get(r.id).checkedAt)) return;
+  store.kvSet(`agent_accounts:${agentId}`, JSON.stringify(next));
 }
 export function readAccountReports(store, agentId) {
   try {

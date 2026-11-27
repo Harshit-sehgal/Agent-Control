@@ -41,10 +41,27 @@ let running = null;
 
 const configPathFor = dataFile => path.join(path.dirname(path.resolve(dataFile)), 'local-agent.json');
 function readConfig(file) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } }
+/** Written whole to a private temp file, fsynced, then renamed into place, as the agent's own `saveConfig` does: the
+ * secret in this file is the only key to the browser jars, so a crash mid-write must leave the old config, never an
+ * empty one (which would pair anew and wipe them). A config that is a link stays one: the file it names is replaced. */
 function writeConfig(file, config) {
   fs.mkdirSync(path.dirname(file), {recursive: true});
-  const fd = fs.openSync(file, 'w', 0o600);
-  try { fs.fchmodSync(fd, 0o600); fs.writeFileSync(fd, JSON.stringify(config, null, 2)); } finally { fs.closeSync(fd); }
+  let target = file;
+  try { target = fs.realpathSync(file); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+  const tmp = `${target}.tmp`;
+  try { fs.unlinkSync(tmp); } catch (e) { if (e.code !== 'ENOENT') throw e; }   // never write through a link left here
+  const fd = fs.openSync(tmp, 'wx', 0o600);
+  try {
+    fs.fchmodSync(fd, 0o600);
+    fs.writeFileSync(fd, JSON.stringify(config, null, 2));
+    fs.fsyncSync(fd);
+  } catch (e) {
+    fs.closeSync(fd);
+    try { fs.unlinkSync(tmp); } catch {}
+    throw e;
+  }
+  fs.closeSync(fd);
+  fs.renameSync(tmp, target);
 }
 
 /** Pair this computer once, or reuse the pairing, and point it at `server`.

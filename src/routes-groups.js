@@ -144,8 +144,9 @@ async function runOneBotInner(store, {botId, input, page = '', browserDepth = 0}
     // belongs in history; only the chat append is skipped.
     try {
       chats.addChatMessages(s, bot.id, [...lines, {id: run.id, role: 'bot', text: output, mode: 'ai', at: run.at}, ...(turn.after || []).map(line => ({...line, at: new Date().toISOString()})), ...browsed.lines], {trusted: true});
-      // The reply was written from old chat lines that came from outside text: it counts as outside text in later turns.
-      if (turn.outsideChat) { const line = s.chats[bot.id]?.find(m => m.id === run.id); if (line) line.outside = true; }
+      // The reply was written from a page handed to this turn, or from old chat lines that came from outside text: it
+      // counts as outside text in later turns. Nothing else would say so once the page's run-less request is pruned.
+      if (turn.outsideChat || page) { const line = s.chats[bot.id]?.find(m => m.id === run.id); if (line) line.outside = true; }
     } catch { /* Conversation removed. */ }
     for (const ask of browsed.asks) addAskCards(s, ask, bot);
     activity(s, 'run', `Completed ${bot.name} task.`, {runId: run.id}); return run;
