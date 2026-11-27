@@ -64,12 +64,15 @@ export const tabKey = (account, botId) => `${account || ''}\u0000${botId}`;
 
 /** Housekeeping timings (the shared browser's `sweep`), and the name a keeper tab answers to. */
 export const REAP_MS = 600000, SAVE_MS = 600000, KEEPER_MS = 1800000, QUIT_IDLE_MS = 1800000;
+/** How often the agent runs `sweep`. */
+export const SWEEP_MS = 60000;
 export const KEEPER = '\u0000keeper';
 
 const NO_ACCOUNT = 'This task names a browser account this device cannot use.';
+const OTHER_COMPUTER = 'This task is for another computer, so it was not run.';
 const WRONG_CONTEXT = 'This tab is not in the bot\'s browser account, so the step was not run.';
 
-export function createSharedBrowser({start = startBrowserSession, allow = [], profile, settleMs, timeoutMs, jars = null, quitIdle = false, now = Date.now, saveWaitMs = 3000, idleMs = Number(process.env.AGENT_TAKEOVER_IDLE_MS) || 0} = {}) {
+export function createSharedBrowser({start = startBrowserSession, allow = [], profile, settleMs, timeoutMs, jars = null, quitIdle = false, requireListed = false, now = Date.now, saveWaitMs = 3000, idleMs = Number(process.env.AGENT_TAKEOVER_IDLE_MS) || 0} = {}) {
   const allowed = () => (typeof allow === 'function' ? allow() : allow);
   let session = null, starting = null;
   const tabs = new Map();      // tabKey -> {botId, account, tab, url, title, typed, usedAt}: `typed` is what the owner typed in secret, in memory only
@@ -121,11 +124,16 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
   /** A task that names an account needs jars to keep it in and an id that cannot be a path. */
   function checkAccount(account) {
     if (account == null) return;
-    if (!jars || typeof account !== 'string' || !ACCOUNT_ID.test(account)) throw new Error(NO_ACCOUNT);
+    if (!jars || typeof account !== 'string' || !ACCOUNT_ID.test(account) || !isListed(account)) throw new Error(NO_ACCOUNT);
   }
+  /** Whether the server's latest list holds this account. A list that was never sent holds none when `requireListed`
+   * (the agent sets it: a computer serves only what its server has named), and says nothing otherwise. */
+  const isListed = account => (listed ? listed.has(account) : !requireListed);
 
   /** This account's browser context: made once (however many ask at once) and filled from its jar. */
   function contextFor(live, account) {
+    // An account dropped from the list while its task waited never gets a context (nor, so, a jar).
+    if (!isListed(account)) return Promise.reject(new Error(NO_ACCOUNT));
     const have = contexts.get(account);
     if (have) return Promise.resolve(have);
     const started = contextStarts.get(account);
@@ -257,6 +265,8 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     const keeping = id === KEEPER;
     let live = null;
     try {
+      // The list may have changed while this waited for its turn.
+      checkAccount(account);
       live = await ensure();
       const tab = await tabFor(live, account, id);
       checkContext(account, tab);
@@ -495,6 +505,8 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
       if (item && typeof item.id === 'string' && ACCOUNT_ID.test(item.id)) next.set(item.id, {id: item.id, site: typeof item.site === 'string' ? item.site.trim().toLowerCase() : ''});
     }
     listed = next;
+    // The owner's hold on a wiped account's tab goes with it, even before that tab exists.
+    if (driving?.account && !next.has(driving.account)) { driving = null; clearTimeout(idleTimer); notify(); }
     const held = new Set([...contexts.keys(), ...[...tabs.values()].map(entry => entry.account), ...jarIds(), ...states.keys()]);
     for (const id of held) if (id && !next.has(id)) await letGo(id);
   }
@@ -599,6 +611,19 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
   return {run, scrub, status, close, setAccounts, accountStates, sweep, onFrame, watch, unwatch, applyInput, refresh, takeover, handback, owner: () => driving?.botId ?? null, laneCount: () => lanes.size};
 }
 
+/** The browser account a task names (null for the device's own profile), once the task is known to be this
+ * computer's. An id that could be a path is refused. A task for an account must carry `deviceId` and it must be this
+ * computer's `agentId`: a missing or other one is refused, and so is a computer that does not know its own id (it can
+ * verify nothing). A task with no account but another computer's `deviceId` is refused too. */
+export function taskAccount(payload, agentId = null) {
+  const account = payload?.account == null || payload.account === '' ? null : payload.account;
+  if (account !== null && !(typeof account === 'string' && ACCOUNT_ID.test(account))) throw new Error(NO_ACCOUNT);
+  const device = payload?.deviceId == null || payload.deviceId === '' ? null : payload.deviceId;
+  if (account !== null && (!agentId || device === null)) throw new Error(NO_ACCOUNT);
+  if (agentId && device !== null && device !== agentId) throw new Error(OTHER_COMPUTER);
+  return account;
+}
+
 /** One `browser.capture` or `browser.action` task, with the rules every browser
  * task has had since they were added: the host must be allowlisted, an action
  * needs steps drawn from the known operations, and interaction needs the real
@@ -606,10 +631,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
  * browser; `botId` in the payload picks the tab. */
 export async function runBrowserTask(task, {shared, allow, env = process.env, agentId = null}) {
   const payload = task.payload || {};
-  // A task another computer was meant for, or an account id that could be a path, is refused before anything else.
-  if (agentId && payload.deviceId != null && payload.deviceId !== agentId) throw new Error('This task is for another computer, so it was not run.');
-  const account = payload.account == null || payload.account === '' ? null : payload.account;
-  if (account !== null && !(typeof account === 'string' && ACCOUNT_ID.test(account))) throw new Error('This task names a browser account this device cannot use.');
+  const account = taskAccount(payload, agentId);
   const target = String(payload.url || '');
   if (!hostAllowed(target, allow)) {
     throw new Error(`Refusing to ${task.kind === 'browser.action' ? 'act on' : 'read'} ${hostOf(target) || target}: it is not in AGENT_BROWSER_ALLOWLIST. Only explicitly allowed pages are ${task.kind === 'browser.action' ? 'driven' : 'read'}.`);
