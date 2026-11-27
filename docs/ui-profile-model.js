@@ -5,15 +5,15 @@
  *
  * A bot's manager is settings.reportsTo (company.js); "manager" is simply a bot
  * with reports, so any bot can become one by receiving a report. */
-import {companyBots, primaryOf, managerOf, reportsOf, teamOf} from './company.js?v=13abce6dce';
-import {firstUnusedTint} from './bot-create.js?v=13abce6dce';
-import {TINT_COUNT, dayLabel} from './ui-kit.js?v=13abce6dce';
-import {jobOf} from './ui-company.js?v=13abce6dce';
-import {ACTIVITY_CHIPS} from './activity-log.js?v=13abce6dce';
-import {grantRows} from './ui-asks.js?v=13abce6dce';
-import {cleanEffort, effortLabel, EFFORT_LEVELS} from './ai-presets.js?v=13abce6dce';
-import {scheduleRows} from './schedules.js?v=13abce6dce';
-import {WATCH_EVERY} from './watches.js?v=13abce6dce';
+import {companyBots, primaryOf, managerOf, reportsOf, teamOf} from './company.js?v=c65f5880dd';
+import {firstUnusedTint} from './bot-create.js?v=c65f5880dd';
+import {TINT_COUNT, dayLabel} from './ui-kit.js?v=c65f5880dd';
+import {jobOf} from './ui-company.js?v=c65f5880dd';
+import {ACTIVITY_CHIPS} from './activity-log.js?v=c65f5880dd';
+import {grantRows} from './ui-asks.js?v=c65f5880dd';
+import {cleanEffort, effortLabel, EFFORT_LEVELS} from './ai-presets.js?v=c65f5880dd';
+import {scheduleRows} from './schedules.js?v=c65f5880dd';
+import {WATCH_EVERY} from './watches.js?v=c65f5880dd';
 
 /** What a bot made without a job holds until the owner's first chat message
  * replaces it (the profile, the list and the chat all treat it as "no job yet"). */
@@ -235,6 +235,8 @@ export function editChanges(was, now) {
   if (Number.isInteger(Number(now.tint)) && now.tint !== '' && Number(now.tint) !== was.tint) settings.tint = Number(now.tint);
   // The Computer row is the owner's, so it is sent only when the form had one and it changed (undefined: no row).
   if (now.device !== undefined && (now.device || null) !== (was.device || null)) settings.device = now.device || null;
+  // The Signs in as row is the owner's too: no row, no field, nothing sent (any `browserAccount` from a member is a 403).
+  if (now.browserAccount !== undefined && (now.browserAccount || null) !== (was.browserAccount || null)) settings.browserAccount = now.browserAccount || null;
   if (Object.keys(settings).length) out.settings = settings;
   return Object.keys(out).length ? out : null;
 }
@@ -248,6 +250,33 @@ export function deviceOptions(agents, current) {
   const list = [{id: '', label: 'Any computer', selected: !pin}, ...live.map(a => ({id: a.id, label: a.name, selected: a.id === pin}))];
   if (pin && !live.some(a => a.id === pin)) list.push({id: pin, label: 'A computer that is no longer paired', selected: true});
   return list;
+}
+
+const ACCOUNT_WORD = {'signed-in': ['Signed in', 'good'], 'signed-out': ['Not signed in', 'warn'], unknown: ['Not checked yet', 'warn']};
+const NOT_PAIRED = 'Its computer is not paired. Move it to another.';
+const LOST_NOTE = 'This site keeps its sign-in outside cookies, so sign in again after the computer restarts.';
+
+/** The browser accounts under Settings → Local agents: each one's name, site, computer by name, whether it is signed in, and
+ * a note when its computer is gone or its site keeps the sign-in outside cookies. `agents` is GET /api/agents; a computer
+ * that is not in it, or is revoked, is not paired. A state nobody reported reads Not signed in. */
+export function accountRows(accounts, agents) {
+  const live = (agents || []).filter(a => a.status !== 'revoked');
+  return (accounts || []).map(a => {
+    const computer = live.find(x => x.id === a.deviceId);
+    const [word, tone] = ACCOUNT_WORD[a.state] || ACCOUNT_WORD['signed-out'];
+    return {id: a.id, name: a.name, site: a.site, computer: computer?.name || '', word, tone, note: !computer ? NOT_PAIRED : a.lost === true ? LOST_NOTE : ''};
+  });
+}
+
+/** The Signs in as choice on Edit: the computer's own browser, then each account as `name · site`; an account that was
+ * deleted still shows last, so the owner can clear it. Empty when there is no account and none is named, so the row is
+ * not drawn. `accounts` is GET /api/browser-accounts; `current` the bot's `browserAccount`. */
+export function accountOptions(accounts, current) {
+  const list = accounts || [], pick = current || '';
+  if (!list.length && !pick) return [];
+  const out = [{id: '', label: "The computer's own browser", selected: !pick}, ...list.map(a => ({id: a.id, label: `${a.name} · ${a.site}`, selected: a.id === pick}))];
+  if (pick && !list.some(a => a.id === pick)) out.push({id: pick, label: 'An account that no longer exists', selected: true});
+  return out;
 }
 
 /* ---------- activity ---------- */

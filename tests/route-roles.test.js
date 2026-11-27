@@ -49,6 +49,7 @@ import {aiRoutes} from '../src/routes-ai.js';
 import {memoryRoutes} from '../src/routes-memory.js';
 import {connectorRoutes} from '../src/routes-connectors.js';
 import {liveRoutes} from '../src/routes-live.js';
+import {browserAccountRoutes} from '../src/routes-browser-accounts.js';
 import {fileRoutes} from '../src/routes-files.js';
 import {eventRoutes} from '../src/routes-events.js';
 
@@ -58,7 +59,7 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const MODULES = [
   ['publicRoutes', publicRoutes], ['workflowRoutes', workflowRoutes], ['groupRoutes', groupRoutes],
   ['accountRoutes', accountRoutes], ['workspaceRoutes', workspaceRoutes], ['pushRoutes', pushRoutes],
-  ['aiRoutes', aiRoutes], ['memoryRoutes', memoryRoutes], ['connectorRoutes', connectorRoutes], ['liveRoutes', liveRoutes], ['fileRoutes', fileRoutes],
+  ['aiRoutes', aiRoutes], ['memoryRoutes', memoryRoutes], ['connectorRoutes', connectorRoutes], ['liveRoutes', liveRoutes], ['browserAccountRoutes', browserAccountRoutes], ['fileRoutes', fileRoutes],
   ['eventRoutes', eventRoutes],
 ];
 
@@ -117,6 +118,11 @@ const LEAST_ROLE = {
   'GET /api/agents/local/mcp': 'owner',
   'POST /api/agents/local/mcp': 'owner',
   'DELETE /api/agents/local/mcp/:name': 'owner',
+  // A browser account is a signed-in cookie jar on a computer: the owner alone makes, moves and removes them.
+  'GET /api/browser-accounts': 'owner',
+  'POST /api/browser-accounts': 'owner',
+  'PATCH /api/browser-accounts/:id': 'owner',
+  'DELETE /api/browser-accounts/:id': 'owner',
   'POST /api/retention/prune': 'admin',
   'PATCH /api/retention': 'admin',
   // Asks and grants are the owner's call: a member or viewer cannot answer a bot's ask or widen what it may do.

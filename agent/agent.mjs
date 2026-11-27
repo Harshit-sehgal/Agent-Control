@@ -26,12 +26,23 @@
  * (agent/shared-browser.mjs): each bot has its own tab, one bot drives at a
  * time. "browser.action" may click, type, scroll and read there; a click on a
  * Send, Post, Delete or Pay control runs only when the owner allowed it.
+ *
+ * Browser accounts (the "browser-accounts-v1" feature): a task may name an account, a separate sign-in of one site
+ * whose cookies live only on this computer, encrypted under the pairing secret in `browser-accounts/` beside this
+ * config (agent/account-jars.mjs). The heartbeat reports each account's state, never a cookie, and hears which accounts
+ * this computer holds; a jar the list omits is wiped, and a beat with no list wipes nothing. A task for an account runs
+ * only when it names this computer and the account is on that list, and only in the real browser: it is never read by
+ * the plain fetch, which has no cookies. A re-pair that proves the old secret keeps the jars (they are re-encrypted
+ * under the new one; the config holds both secrets until that is done), unless the pair reply says `replaced: false`. The housekeeping sweep (idle tabs, jar saves,
+ * keepers, the optional idle quit AGENT_BROWSER_QUIT_IDLE=1) runs every minute (agent/browser-host.mjs).
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import crypto from 'node:crypto';
-import {createSharedBrowser, browserProfileDir, runBrowserTask} from './shared-browser.mjs';
+import {createBrowserHost} from './browser-host.mjs';
+import {takeLock, refreshLock, releaseLock, lockFileFor, REFRESH_MS} from './agent-lock.mjs';
+import {browserAccountsDir, rekeyJars, rePairProof, wipeAllJars} from './account-jars.mjs';
 import {createLiveChannel} from './live-channel.mjs';
 import {runModelTask} from './cli-model.mjs';
 import {cliStatusReporter} from './cli-status.mjs';
@@ -41,7 +52,7 @@ import {reportResult, skipExpired} from './report-result.mjs';
 import {hostAllowed, hostOf, parseAllowlist} from '../shared/bot-browser.js';
 import {resolvePublicAddress, pinnedRequest} from './net-guard.mjs';
 import {findBrowser} from './browser.mjs';
-import {readableHtml, turnedAway, preferRead, PLAIN_AGENT} from './page-fetch.mjs';
+import {readableHtml, PLAIN_AGENT} from './page-fetch.mjs';
 import {createTaskPool, concurrencyOf} from './task-pool.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -56,20 +67,50 @@ const TASK_KINDS = ['http.check', 'browser.capture', 'browser.action', 'model.ru
 // that is not a positive number is the default, not a spin.
 const POLL_MS = (() => { const n = Number(process.env.AGENT_POLL_MS); return Number.isFinite(n) && n > 0 ? n : 15000; })();
 const TIMEOUT_MS = 15000;
+const TIMED_OUT = Symbol('timed out');
 
 function loadConfig() {
   try { return JSON.parse(fs.readFileSync(CONFIG, 'utf8')); }
   catch { fail('No agent config found. Run `node agent/agent.mjs pair --server <url> --code <code>` first.'); }
 }
+/** Written whole to a private temp file, fsynced, then renamed into place: a stop or a full disk mid-write leaves the
+ * old config, never half of one (the config holds the only copy of the secret that opens the browser jars). */
 function saveConfig(config) {
-  const fd = fs.openSync(CONFIG, 'w', 0o600);
+  // A config that is a symlink (to a persistent volume, say) stays one: the file it points at is replaced, from a temp
+  // file beside that file.
+  let target = CONFIG;
+  try { target = fs.realpathSync(CONFIG); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+  const tmp = `${target}.tmp`;
+  try { fs.unlinkSync(tmp); } catch (e) { if (e.code !== 'ENOENT') throw e; }   // never write through a link left here
+  const fd = fs.openSync(tmp, 'wx', 0o600);
   try {
-    // open's mode only applies to a new file; repair permissions before the
-    // pairing secret is written when an older config already exists.
     fs.fchmodSync(fd, 0o600);
     fs.writeFileSync(fd, JSON.stringify(config, null, 2));
     fs.fsyncSync(fd);
-  } finally { fs.closeSync(fd); }
+  } catch (e) {
+    fs.closeSync(fd);
+    try { fs.unlinkSync(tmp); } catch {}
+    throw e;
+  }
+  fs.closeSync(fd);
+  fs.renameSync(tmp, target);
+}
+
+/** The lock this process holds (agent/agent-lock.mjs): one running agent or one pair at a time may change this computer's
+ * pairing or keep its browser jars. Given back on every way out, `fail` included. */
+let heldLock = null;
+function lockOrFail({required}) {
+  const file = lockFileFor(CONFIG);
+  const got = takeLock(file);
+  if (got.status === 'held') fail(`another agent process holds ${file}: this computer's agent is running, or a pair is in progress. If neither is, delete that file and try again.`);
+  if (got.status === 'unavailable') {
+    // A pair writes the config in that folder anyway; a run did without a lock before there was one, so it still starts.
+    if (required) fail(`could not create ${file} (${got.code}): the folder that holds the agent config must be writable to pair.`);
+    console.error(`agent: could not create ${file} (${got.code}); running without a lock, so do not pair while this runs.`);
+    return;
+  }
+  heldLock = got.lock;
+  process.on('exit', () => releaseLock(heldLock));
 }
 function fail(message) { console.error(`agent: ${message}`); process.exit(1); }
 
@@ -117,27 +158,94 @@ async function pair(argv) {
   const server = argValue(argv, '--server');
   const code = argValue(argv, '--code');
   if (!server || !code) fail('pair requires --server and --code.');
+  lockOrFail({required: true});
+  // A pair waits on the network: its lock is kept fresh meanwhile, so a run started then cannot take it as stale.
+  setInterval(() => refreshLock(heldLock), REFRESH_MS).unref();
   // `--permissions ""` asks for nothing; only an absent flag asks for the full
   // scope. Reading both as "absent" meant a typo granted browser.action.
   const requested = argv.includes('--permissions') ? (argValue(argv, '--permissions') || '') : null;
   const permissions = requested === null ? TASK_KINDS : requested.split(',').map(s => s.trim()).filter(Boolean);
   const name = argValue(argv, '--name') || `${process.env.COMPUTERNAME || process.env.HOSTNAME || 'device'}-agent`;
   const url = new URL(server.replace(/\/+$/, '') + '/api/agent/pair');
-  const body = JSON.stringify({code, name, permissions, features: DEVICE_FEATURES});
+  // A computer that holds a working pairing with this same server proves it by the old secret, so the server moves its
+  // accounts to the new id (on that id's first heartbeat) and this computer keeps their jars. A reply that never comes
+  // changes nothing on either side: the old pairing and its jars stay as they are.
+  const old = readableConfig();
+  const sameServer = old && old.server.replace(/\/+$/, '') === server.replace(/\/+$/, '');
+  // The jars of an earlier pairing must be under the saved secret before another secret is added: a third secret would
+  // leave the oldest unreadable. Nothing was asked of the server or changed.
+  if (sameServer && !finishRekey(old)) fail('browser sign-ins from the earlier pairing could not be re-encrypted, so nothing was changed. Free disk space or fix the permissions of the browser-accounts folder, then try again.');
+  const body = JSON.stringify({code, name, permissions, features: DEVICE_FEATURES, ...(sameServer ? {previous: {agentId: old.agentId, proof: rePairProof(old.secret, code)}} : {})});
   let res;
   try { res = await post(url, {headers: {'Content-Type': 'application/json'}, body}); }
   catch (e) { fail(e.message); }
-  const value = await res.json().catch(() => null);
+  // The body is bounded like the request: a server that sends its headers and then stalls ends the pair, not hangs it.
+  let stalled;
+  const value = await Promise.race([res.json().catch(() => null), new Promise(resolve => { stalled = setTimeout(() => resolve(TIMED_OUT), TIMEOUT_MS); })]);
+  clearTimeout(stalled);
+  if (value === TIMED_OUT) fail(`the reply from ${url.host} did not finish within ${TIMEOUT_MS / 1000}s; nothing was saved.`);
   if (!res.ok) fail(`pairing failed: ${value?.error || res.status}`);
   // A 2xx from something that is not the control plane (a proxy error page, a
   // captive portal) parses to null. Saving that would overwrite a working
   // pairing with empty credentials and then crash on `permissions.join`.
   if (!value || typeof value.agentId !== 'string' || typeof value.secret !== 'string') fail('the server did not return an agent credential; nothing was saved.');
   const granted = Array.isArray(value.permissions) ? value.permissions : [];
-  saveConfig({server: server.replace(/\/+$/, ''), agentId: value.agentId, secret: value.secret, workspaceId: value.workspaceId, permissions: granted, pollIntervalMs: value.pollIntervalMs, name});
+  const next = {server: server.replace(/\/+$/, ''), agentId: value.agentId, secret: value.secret, workspaceId: value.workspaceId, permissions: granted, pollIntervalMs: value.pollIntervalMs, name};
+  // `replaced: false` is the server saying it did not take the proof (the old computer was removed, or the code is of
+  // another workspace): no account is coming to this pairing, so the jars go. A server that does not say (an older
+  // one) is taken at its word as before.
+  const refused = sameServer && value.replaced === false;
+  if (refused) console.log('The server did not take this as the same computer, so its saved browser sign-ins were removed. Move its accounts to it under Settings.');
+  if (sameServer && !refused) {
+    // Both secrets are in the saved config until the jars are re-encrypted, so a stop in between strands nothing: the
+    // next start finishes the job.
+    saveConfig({...next, rekeyFrom: old.secret});
+    if (finishRekey({...next, rekeyFrom: old.secret}, next)) saveConfig(next);
+  } else {
+    // No pairing this computer can prove: no secret it holds opens the jars that are here.
+    try { wipeAllJars(browserAccountsDir(process.env, CONFIG)); } catch { console.error('agent: could not remove the old browser sign-ins.'); }
+    saveConfig(next);
+  }
   console.log(`Paired as "${name}". Credentials saved to ${CONFIG} (mode 0600).`);
   console.log('Granted permissions:', granted.join(', ') || '(none)');
   console.log('Start the loop with: node agent/agent.mjs run');
+}
+
+/** The saved config, or null when there is none (no file). A config that is there but cannot be read, is not JSON or is
+ * not a usable pairing stops the command: taking it for no config would wipe jars whose secret it may still hold. */
+function readableConfig() {
+  let text;
+  try { text = fs.readFileSync(CONFIG, 'utf8'); }
+  catch (e) {
+    if (e.code === 'ENOENT') {
+      // A link to a file that is not there (a volume not mounted yet) is a config that cannot be read, not no config.
+      try { fs.lstatSync(CONFIG); } catch { return null; }
+      fail(`${CONFIG} is a link to a file that is not there, so nothing was changed. Mount it, or delete the link (which discards the saved browser sign-ins), then pair again.`);
+    }
+    fail(`could not read ${CONFIG} (${e.code || 'error'}), so nothing was changed.`); }
+  let c = null;
+  try { c = JSON.parse(text); } catch {}
+  if (!(c && typeof c.server === 'string' && typeof c.agentId === 'string' && typeof c.secret === 'string' && c.secret)) {
+    fail(`${CONFIG} is not a usable pairing, so nothing was changed. Fix it, or delete it (which discards the saved browser sign-ins), then pair again.`);
+  }
+  return c;
+}
+
+/** Finish a re-key a stop left half done: a config carrying `rekeyFrom` (the secret before a re-pair) has its jars
+ * re-encrypted under `secret`, then the field goes. `clean` is the config to save without it (default: this one without
+ * the field). False when it could not be done: the field stays, and the next start tries again. Nothing printed names a
+ * secret or a cookie. */
+function finishRekey(config, clean = null) {
+  if (typeof config.rekeyFrom !== 'string' || !config.rekeyFrom) return true;
+  try {
+    const {kept, wiped} = rekeyJars({dir: browserAccountsDir(process.env, CONFIG), oldSecret: config.rekeyFrom, newSecret: config.secret});
+    if (kept.length || wiped.length) console.log(`Kept ${kept.length} browser account(s); ${wiped.length} need signing in again.`);
+    if (!clean) { delete config.rekeyFrom; saveConfig(config); }
+    return true;
+  } catch {
+    console.error('agent: could not re-encrypt the saved browser sign-ins. They will be tried again when the agent starts.');
+    return false;
+  }
 }
 
 function argValue(argv, flag) {
@@ -145,9 +253,9 @@ function argValue(argv, flag) {
   return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : null;
 }
 
-/** The browser every bot shares, started on first use and kept between tasks. */
-let sharedBrowser = null;
-const shared = () => sharedBrowser ??= createSharedBrowser({allow: () => parseAllowlist(process.env.AGENT_BROWSER_ALLOWLIST), profile: browserProfileDir(process.env, CONFIG)});
+/** The device's browser wiring (agent/browser-host.mjs), made once `run` knows this computer's id and secret. */
+let host = null;
+const shared = () => host.shared();
 
 /** Local, permission-gated execution. Returns a JSON-serializable result. */
 async function execute(task, config) {
@@ -171,21 +279,11 @@ async function execute(task, config) {
     if (!hostAllowed(target, allow)) {
       throw new Error(`Refusing to read ${hostOf(target) || target}: it is not in AGENT_BROWSER_ALLOWLIST. Only explicitly allowed pages are read.`);
     }
-    // A real browser when this computer has one. Without Chrome, Chromium or Edge the page is still read, by a plain fetch.
-    if (process.env.AGENT_BROWSER === '1' && findBrowser()) {
-      const seen = await runBrowserTask(task, {shared: shared(), allow});
-      // A site that turns the headless browser away (Wikimedia's "Too many requests") is read once more by a
-      // plain request that names itself; a plain read only reads, so a page with steps keeps the browser's answer.
-      // A page that came back nearly empty (drawn by scripts the browser did not finish) is read plainly too.
-      if (!task.payload?.steps?.length && (turnedAway(seen) || String(seen?.text || '').trim().length < 300)) {
-        const plain = await readPlain(target).catch(() => null);
-        if (plain?.text && (turnedAway(seen) ? !turnedAway(plain) : preferRead(seen, plain) === plain)) return shared().scrub(task.payload?.botId, {...plain, readBy: 'plain'});
-      }
-      return seen;
-    }
-    return readPlain(target);
+    // A real browser when this computer has one. Without Chrome, Chromium or Edge the page is still read, by a plain
+    // fetch, but never a page of a browser account (the plain read has no cookies). The host decides.
+    return host.capture(task, {browser: process.env.AGENT_BROWSER === '1' && Boolean(findBrowser()), readPlain});
   }
-  if (task.kind === 'browser.action') return runBrowserTask(task, {shared: shared(), allow: parseAllowlist(process.env.AGENT_BROWSER_ALLOWLIST)});
+  if (task.kind === 'browser.action') return host.run(task);
   if (task.kind === 'model.run') {
     // Runs the owner's own signed-in `claude` or `codex` CLI. A failure the CLI
     // reports (not signed in, a usage limit) is an answer, not an agent error, so
@@ -210,8 +308,19 @@ async function readPlain(target) {
 
 let stopping = false;
 async function run() {
+  // Before the config is read: a pair in flight is about to replace it, and a run that read the old one would save it back.
+  lockOrFail({required: false});
+  const lockTimer = setInterval(() => refreshLock(heldLock), REFRESH_MS);
+  lockTimer.unref();
   const config = loadConfig();
   if (!Array.isArray(config.permissions)) config.permissions = [];
+  // A re-pair that stopped before it re-encrypted the jars is finished before anything opens one.
+  // A re-key that cannot finish leaves the jars where they are, under the old secret: opening one under the new would
+  // remove it. Browser accounts are off for this run, and the next start tries again.
+  const rekeyed = finishRekey(config);
+  if (!rekeyed) console.error('agent: browser accounts are off for this run, so no saved sign-in is touched.');
+  host = createBrowserHost({agentId: config.agentId, secret: config.secret, configPath: CONFIG, accounts: rekeyed});
+  host.startSweeps();
   const configured = Number(config.pollIntervalMs);
   const interval = Math.max(2000, Number.isFinite(configured) && configured > 0 ? configured : POLL_MS);
   console.log(`Agent ${config.agentId} polling ${config.server} every ${interval / 1000}s. Ctrl+C to stop.`);
@@ -293,8 +402,12 @@ async function run() {
     // ten minutes, no model call). Only a device allowed to run models looks.
     const cli = (config.permissions || []).includes('model.run') ? cliStatus.snapshot() : undefined;
     lastBeatAt = Date.now();
-    const beat = await call(config, '/api/agent/heartbeat', {version: '1', os: process.platform, node: process.version, beat: ++beatSeq, at: Date.now(), features: DEVICE_FEATURES, ...(stopping ? {stopping: true} : {}), ...(cli ? {cli} : {})});
+    const seq = ++beatSeq;
+    const beat = await call(config, '/api/agent/heartbeat', {version: '1', os: process.platform, node: process.version, beat: seq, at: Date.now(), features: DEVICE_FEATURES, accounts: host.accountReport(), ...(stopping ? {stopping: true} : {}), ...(cli ? {cli} : {})});
     config.lastSeenAt = new Date().toISOString();
+    // The accounts this computer holds, before any task of this beat runs: a jar the list omits is wiped, and a task for
+    // an account is served only when it is on the list. An answer with no list (an older server) changes nothing.
+    await host.applyAccounts(beat.accounts, seq);
     if (Array.isArray(beat.agent?.permissions)) { config.permissions = beat.agent.permissions; startLive(); }
     for (const task of beat.tasks || []) {
       if (!task || !task.id || claimed.has(task.id)) continue;
@@ -377,7 +490,9 @@ async function run() {
     clearInterval(keepalive);
     // A beat or a hand-back still on its way; a beat that lands now hands its tasks back too.
     while (inflight.size) await Promise.allSettled([...inflight]);
-    await live?.stop(); await sharedBrowser?.close(); console.log('agent: stopped.');
+    // The sweep first (a pass left running could start the browser again), then the live view, then the browser.
+    await host.stopSweeps();
+    await live?.stop(); await host.close(); clearInterval(lockTimer); releaseLock(heldLock); console.log('agent: stopped.');
   }
 }
 

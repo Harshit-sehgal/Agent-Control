@@ -157,3 +157,46 @@ test('a backup written before files and settings travelled still restores, and l
     assert.equal(grantFor(other.store.read(), 'atlas', 'post', 'https://x.example'), 'always');
   } finally { await t.done(); await other.done(); }
 });
+
+const ACCT_A = '0b6f1c2e-4d5a-4b8c-9e1f-2a3b4c5d6e7f', ACCT_B = '1c7a2d3f-5e6b-4c9d-8f2a-3b4c5d6e7f80';
+const goodAccount = (id, name) => ({id, name, site: 'crm.example.com', deviceId: 'pc-1', storage: 'cookies'});
+
+test('a backup\'s browser accounts are read as untrusted: five fields, no repeats, at most twenty', async () => {
+  const t = await filled();
+  const other = await sandbox();
+  try {
+    const document = copy(backup.exportBackup(t.store));
+    const withAccounts = list => {
+      const doc = copy(document);
+      doc.tables.owner_settings = doc.tables.owner_settings.filter(r => r.key !== 'browser_accounts').concat({key: 'browser_accounts', value: JSON.stringify(list)});
+      return seal(doc);
+    };
+    const many = Array.from({length: 25}, (_, i) => goodAccount(`0b6f1c2e-4d5a-4b8c-9e1f-${String(i).padStart(12, '0')}`, `Acct ${i}`));
+    const dirty = [
+      {...goodAccount(ACCT_A, 'CRM'), jar: 'MARKER-JAR', cookies: [{value: 'MARKER-COOKIE'}]},
+      goodAccount(ACCT_A, 'Same id again'),
+      goodAccount('../../etc/passwd', 'Bad id'),
+      {...goodAccount(ACCT_B, 'Bad storage'), storage: 'profile'},
+      'not an object',
+      goodAccount(ACCT_B, 'Billing'),
+    ];
+    backup.importBackup(other.store, withAccounts(dirty), {force: true});
+    assert.deepEqual(other.store.read().browserAccounts, [goodAccount(ACCT_A, 'CRM'), goodAccount(ACCT_B, 'Billing')]);
+    assert.doesNotMatch(other.store.kvGet('browser_accounts'), /MARKER/);
+    backup.importBackup(other.store, withAccounts(many), {force: true});
+    assert.equal(other.store.read().browserAccounts.length, 20, 'at most twenty');
+    assert.throws(() => backup.validateBackup(withAccounts({not: 'a list'})), e => e.status === 400);
+    // A backup with no accounts clears them; one from before they travelled leaves them alone.
+    backup.importBackup(other.store, withAccounts([]), {force: true});
+    assert.deepEqual(other.store.read().browserAccounts, []);
+    await other.store.update(s => { s.browserAccounts = [goodAccount(ACCT_A, 'CRM')]; });
+    const old = copy(document);
+    old.tables.owner_settings = old.tables.owner_settings.filter(r => r.key !== 'browser_accounts');
+    backup.importBackup(other.store, seal(old), {force: true});
+    assert.deepEqual(other.store.read().browserAccounts, [], 'a table that names every setting resets the rest');
+    delete old.tables.owner_settings;
+    await other.store.update(s => { s.browserAccounts = [goodAccount(ACCT_A, 'CRM')]; });
+    backup.importBackup(other.store, seal(old), {force: true});
+    assert.equal(other.store.read().browserAccounts.length, 1, 'no settings in the file: the live ones stay');
+  } finally { await t.done(); await other.done(); }
+});

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   NO_JOB, hasJob, roleLine, lookOf, resolveSection, roleOf, teamLine, moveTargets, menuItems, deleteCopy, profileRows, profileBackRoute, closeTarget, memoryNotes, modelLine,
-  newBotDefaults, newBotPayload, canCreate, editChanges, deviceOptions, ACTIVITY_FILTERS, activityUrl, activityTarget, activityDays, companyTree, weekUsage, settingsSections, sectionArg,
+  newBotDefaults, newBotPayload, canCreate, editChanges, deviceOptions, accountRows, accountOptions, ACTIVITY_FILTERS, activityUrl, activityTarget, activityDays, companyTree, weekUsage, settingsSections, sectionArg,
 } from '../shared/ui-profile-model.js';
 
 const bot = (id, name, settings = {}, instructions = 'Does its work.', extra = {}) => ({id, name, instructions, settings, ...extra});
@@ -211,6 +211,47 @@ test('Edit saves the computer only when it changed, and keeps a pin it did not s
   assert.deepEqual(editChanges(was, {...same, device: 'a2'}), {settings: {device: 'a2'}});
   assert.deepEqual(editChanges(was, {...same, device: ''}), {settings: {device: null}});
   assert.deepEqual(editChanges(was, {...same, name: 'Scout'}), {name: 'Scout'}, 'a rename by someone who sees no Runs on row keeps the pin');
+});
+
+const ACC_A = '0a1b2c3d-1111-4222-8333-444455556666', ACC_B = '0a1b2c3d-1111-4222-8333-777788889999';
+
+test('account rows say whether each is signed in, and when its computer or its storage needs you', () => {
+  const rows = accountRows([{id: ACC_A, name: 'CRM', site: 'crm.example.com', deviceId: 'pc-1', state: 'signed-in'}, {id: ACC_B, name: 'Mail', site: 'mail.example.com', deviceId: 'gone', state: 'signed-out', lost: true}], [{id: 'pc-1', name: 'Laptop', status: 'online'}]);
+  assert.deepEqual(rows.map(r => [r.word, r.tone, r.computer, r.note]), [['Signed in', 'good', 'Laptop', ''], ['Not signed in', 'warn', '', 'Its computer is not paired. Move it to another.']]);
+  assert.deepEqual(rows.map(r => [r.id, r.name, r.site]), [[ACC_A, 'CRM', 'crm.example.com'], [ACC_B, 'Mail', 'mail.example.com']]);
+});
+
+test('an account row: not checked yet, a lost sign-in, a revoked computer, an odd or missing state', () => {
+  const agents = [{id: 'pc-1', name: 'Laptop', status: 'stale'}, {id: 'pc-2', name: 'Old', status: 'revoked'}];
+  const row = (extra, deviceId = 'pc-1') => accountRows([{id: ACC_A, name: 'CRM', site: 'crm.example.com', deviceId, ...extra}], agents)[0];
+  assert.deepEqual([row({state: 'unknown'}).word, row({state: 'unknown'}).tone], ['Not checked yet', 'warn']);
+  assert.equal(row({state: 'signed-in', lost: true}).note, 'This site keeps its sign-in outside cookies, so sign in again after the computer restarts.');
+  assert.equal(row({state: 'signed-in', lost: true}, 'pc-2').note, 'Its computer is not paired. Move it to another.', 'a revoked computer is not paired, and that note comes first');
+  assert.equal(row({state: 'signed-in'}, 'pc-2').computer, '');
+  assert.deepEqual([row({state: 'wat'}).word, row({}).word, row({}).tone], ['Not signed in', 'Not signed in', 'warn']);
+  assert.deepEqual(accountRows(undefined, undefined), []);
+});
+
+test('the account choice on Edit: the computer\'s own browser first, each account, a gone one last, nothing with none', () => {
+  const accounts = [{id: ACC_A, name: 'CRM', site: 'crm.example.com'}];
+  assert.deepEqual(accountOptions(accounts, 'f'.repeat(8) + ACC_A.slice(8)).map(o => o.label), ["The computer's own browser", 'CRM · crm.example.com', 'An account that no longer exists']);
+  assert.deepEqual(accountOptions(accounts, null), [{id: '', label: "The computer's own browser", selected: true}, {id: ACC_A, label: 'CRM · crm.example.com', selected: false}]);
+  assert.deepEqual(accountOptions(accounts, ACC_A).map(o => o.selected), [false, true]);
+  assert.deepEqual(accountOptions([], null), []);
+  assert.deepEqual(accountOptions(undefined, ''), []);
+  assert.deepEqual(accountOptions([], ACC_B).map(o => [o.id, o.selected]), [['', false], [ACC_B, true]], 'a gone account shows even with none left, so the owner can clear it');
+});
+
+test('Edit saves the browser account only when the owner changed it; a form with no such row never sends one', () => {
+  const was = {name: 'Web', reportsTo: null, shape: 'rounded', tint: 2, browserAccount: ACC_A}, same = {name: 'Web', reportsTo: '', shape: 'rounded', tint: 2};
+  assert.equal(editChanges(was, {...same, browserAccount: ACC_A}), null);
+  assert.deepEqual(editChanges(was, {...same, browserAccount: ACC_B}), {settings: {browserAccount: ACC_B}});
+  assert.deepEqual(editChanges(was, {...same, browserAccount: ''}), {settings: {browserAccount: null}});
+  assert.deepEqual(editChanges({...was, browserAccount: null}, {...same, browserAccount: ACC_A}), {settings: {browserAccount: ACC_A}});
+  assert.equal(editChanges({...was, browserAccount: null}, {...same, browserAccount: ''}), null);
+  // A member's page draws no row, so the form has no field: a rename is only a rename (a `browserAccount: null` would be a 403).
+  assert.deepEqual(editChanges(was, {...same, name: 'Scout'}), {name: 'Scout'});
+  assert.deepEqual(editChanges(was, {...same, name: 'Scout', device: 'a1'}), {name: 'Scout', settings: {device: 'a1'}});
 });
 
 // ---- activity ----

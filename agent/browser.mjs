@@ -657,13 +657,14 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
     }
   }
 
-  /** A page in the default context, which is the kept profile: what a bot's tab
-   * in the shared browser is. Its own guard stays on for the tab's lifetime, so
+  /** A page in the default context (the kept profile), or in `browserContextId`
+   * when one is given (a browser account's own context): what a bot's tab in the
+   * shared browser is. Its own guard stays on for the tab's lifetime, so
    * a bot's step and a person's click are held to the same allowlist. */
-  async function newTab({allow, viewport = {width: 1280, height: 800}} = {}) {
-    const {targetId} = await cdp.send('Target.createTarget', {url: 'about:blank'});
+  async function newTab({allow, viewport = {width: 1280, height: 800}, browserContextId = null} = {}) {
+    const {targetId} = await cdp.send('Target.createTarget', {url: 'about:blank', ...(browserContextId ? {browserContextId} : {})});
     const {sessionId} = await cdp.send('Target.attachToTarget', {targetId, flatten: true});
-    const tab = {targetId, sessionId, blocked: [], sink: null, viewport, off: () => {}};
+    const tab = {targetId, sessionId, blocked: [], sink: null, viewport, browserContextId, off: () => {}};
     tab.off = cdp.on('Fetch.requestPaused', ({requestId, request, resourceType, sessionId: from}) => {
       if (from && from !== sessionId) return;
       const verdict = requestVerdict({url: request.url, isDocument: resourceType === 'Document', method: request.method, resourceType}, {allow});
@@ -689,7 +690,35 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
   const liveTargets = async () => (await cdp.send('Target.getTargets')).targetInfos || [];
   const closeTab = async tab => { tab.off(); await cdp.send('Target.closeTarget', {targetId: tab.targetId}).catch(() => {}); };
 
-  return {capture, open, close, newTab, closeTab, liveTargets, cdp, get dead() { return dead; }};
+  /** A browser context of its own: cookies and storage shared with no other. A
+   * browser account lives in one. Its tabs are made with `newTab({browserContextId})`. */
+  const createContext = async () => (await cdp.send('Target.createBrowserContext')).browserContextId;
+  /** Closes the context and every tab in it. */
+  const disposeContext = async id => { await cdp.send('Target.disposeBrowserContext', {browserContextId: id}); };
+  /** Every cookie the context holds, as Chrome reports them. These are secrets:
+   * they go to the device's own jar and nowhere else. */
+  const getCookies = async id => (await cdp.send('Storage.getCookies', {browserContextId: id})).cookies || [];
+  const setCookies = async (id, cookies) => { await cdp.send('Storage.setCookies', {browserContextId: id, cookies: cookieParams(cookies)}); };
+
+  return {capture, open, close, newTab, closeTab, liveTargets, createContext, disposeContext, getCookies, setCookies, cdp, get dead() { return dead; }};
+}
+
+/** The fields of a cookie `Storage.setCookies` takes (a CookieParam). What
+ * `Storage.getCookies` reports has more (`size`, `session`), and a session
+ * cookie's `expires` is -1, which a CookieParam must leave out. An entry without
+ * a string name and value is dropped. Nothing here logs or returns a value
+ * outside the array it is given. */
+const COOKIE_FIELDS = ['name', 'value', 'domain', 'path', 'secure', 'httpOnly', 'sameSite', 'expires', 'priority', 'sourceScheme', 'sourcePort', 'partitionKey'];
+export function cookieParams(cookies) {
+  const out = [];
+  for (const cookie of Array.isArray(cookies) ? cookies : []) {
+    if (!cookie || typeof cookie.name !== 'string' || typeof cookie.value !== 'string') continue;
+    const param = {};
+    for (const key of COOKIE_FIELDS) if (cookie[key] !== undefined && cookie[key] !== null) param[key] = cookie[key];
+    if (!(Number(param.expires) > 0)) delete param.expires;
+    out.push(param);
+  }
+  return out;
 }
 
 /** One page in a browser that lives only for that page. The device process and

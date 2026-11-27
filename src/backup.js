@@ -36,6 +36,7 @@ import {addTemplate} from '../shared/templates.js';
 import {setLimits} from '../shared/limits.js';
 import {sanitizeWatch, MAX_WATCHES} from '../shared/watches.js';
 import {recordDay} from '../shared/usage.js';
+import {sanitizeAccount, MAX_ACCOUNTS} from '../shared/browser-accounts.js';
 
 export const BACKUP_VERSION = 1;
 
@@ -63,7 +64,7 @@ export const ATTACHMENT_BACKUP_BYTES = 16 * 1024 * 1024;
 // The owner's settings kept in kv, as `tables.owner_settings` rows {key, value}.
 // A backup without that table (written before they travelled) leaves the live
 // values alone; one with it sets every key it names and resets the rest.
-const OWNER_SETTINGS = ['ask_basics', 'hands_off', 'limits', 'templates', 'usage', 'watches'];
+const OWNER_SETTINGS = ['ask_basics', 'browser_accounts', 'hands_off', 'limits', 'templates', 'usage', 'watches'];
 // Not a device credential. agents.secret_hash cannot be SQL NULL (the column
 // is NOT NULL), and a backup must still restore the agent row.
 const REDACTED_AGENT_HASH = 'redacted';
@@ -193,6 +194,16 @@ function checkOwnerSettings(rows) {
       const list = parse(key, value);
       if (!Array.isArray(list)) fail('Backup watches are not a list.');
       out.set(key, JSON.stringify(list.map(sanitizeWatch).filter(Boolean).slice(0, MAX_WATCHES)));
+    } else if (key === 'browser_accounts') {
+      const list = parse(key, value);
+      if (!Array.isArray(list)) fail('Backup browser accounts are not a list.');
+      // Names only: the five fields of each record, no repeated id or name, so a restore reads each signed out.
+      const kept = [];
+      for (const raw of list) {
+        const a = sanitizeAccount(raw);
+        if (a && !kept.some(k => k.id === a.id || k.name.toLowerCase() === a.name.toLowerCase())) kept.push(a);
+      }
+      out.set(key, JSON.stringify(kept.slice(0, MAX_ACCOUNTS)));
     } else if (key === 'templates') {
       const list = parse(key, value);
       if (!Array.isArray(list)) fail('Backup templates are not a list.');
@@ -358,6 +369,11 @@ export function importBackup(store, document, {force = false, primaryWorkspace =
     // from the live database so a restore cannot show Approve for a run that
     // is no longer waiting.
     try { store.run("DELETE FROM kv WHERE key = 'browser_requests'"); } catch { /* Older schema. */ }
+    // What the computers last said of each browser account. After a restore no account has a report, so each reads
+    // signed out until its computer reports again.
+    try { store.run("DELETE FROM kv WHERE key LIKE 'agent\\_accounts:%' ESCAPE '\\'"); } catch { /* Older schema. */ }
+    // A re-pair waiting for its first heartbeat names computers the restore revokes: it can never finish.
+    try { store.run("DELETE FROM kv WHERE key LIKE 'agent\\_replaces:%' ESCAPE '\\'"); } catch { /* Older schema. */ }
     // Pairing codes are excluded from backups. A pre-restore code must not
     // remain usable after restored agents have been revoked.
     store.run('DELETE FROM pairing_codes');

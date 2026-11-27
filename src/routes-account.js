@@ -7,7 +7,7 @@ import * as credentials from './credentials.js';
 import * as backup from './backup.js';
 import * as notifications from './notifications.js';
 import {deleteProvider} from './ai-providers.js';
-import {onAgentTaskResult} from './bot-browser.js';
+import {revokeAgentFinishingPages} from './bot-browser.js';
 import {resumeBrowserRun} from './coordination.js';
 import {DEFAULT_WORKSPACE, ROLES, clearCookie} from './auth.js';
 import {fail} from './http.js';
@@ -142,16 +142,8 @@ export function accountRoutes(router, {auth, workspaces}) {
     return {servers};
   });
   router.add('DELETE', '/api/agents/:id', 'admin', async c => {
-    const browserTasks = c.store.all(
-      "SELECT id FROM agent_tasks WHERE agent_id=? AND kind IN ('browser.capture','browser.action') AND status IN ('queued','running')",
-      c.params.id,
-    ).map(task => task.id);
-    const result = agent.revokeAgent(c.store, c.params.id);
+    const result = await revokeAgentFinishingPages(c.store, c.params.id, {resumeBrowser: resumeBrowserRun});
     await c.store.update(s => activity(s, 'agent', 'Revoked a local agent. Its in-flight tasks were failed, not dropped silently.', {agentId: c.params.id}));
-    for (const id of browserTasks) {
-      try { await onAgentTaskResult(c.store, id, {resumeBrowser: resumeBrowserRun}); }
-      catch (error) { console.error('Browser revocation:', error.message); }
-    }
     return result;
   });
 

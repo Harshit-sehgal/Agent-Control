@@ -633,10 +633,10 @@ test('a capture that fails says nothing the owner typed, and a plain read taken 
 });
 
 test('the plain-read fallback in agent.mjs goes through the tab\'s memory, for the bot\'s own tab and for a task with no bot', async () => {
-  // `execute` is not importable (agent.mjs runs its command on load), so the wiring is pinned in its source and the
-  // behaviour in `scrub`, which is what that line calls.
-  const source = fs.readFileSync(new URL('../agent/agent.mjs', import.meta.url), 'utf8');
-  assert.match(source, /return shared\(\)\.scrub\(task\.payload\?\.botId, \{\.\.\.plain, readBy: 'plain'\}\);/);
+  // The fallback lives in agent/browser-host.mjs (agent.mjs runs its command on load, so a test cannot import it), so
+  // the wiring is pinned in its source and the behaviour in `scrub`, which is what that line calls.
+  const source = fs.readFileSync(new URL('../agent/browser-host.mjs', import.meta.url), 'utf8');
+  assert.match(source, /return shared\(\)\.scrub\(task\.payload\?\.botId, \{\.\.\.plain, readBy: 'plain'\}, account\);/);
   const pages = {[URL_A]: {title: 'Docs', text: 'Hello', elements: []}};
   const {sb} = rigWith(pages);
   try {

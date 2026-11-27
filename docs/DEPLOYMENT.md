@@ -270,7 +270,8 @@ missing.
 On the device that runs `node agent/agent.mjs run`, set `AGENT_BROWSER=1` (and
 `AGENT_BROWSER_ALLOWLIST`, as above) and every bot's browser work shares **one
 Chrome with one saved profile**. Sign in to a site there once and the sign-in is
-there for every bot. Each bot has its own tab, one bot drives at a time and the
+there for every bot that does not sign in as a browser account (see **Two
+accounts of one site** below). Each bot has its own tab, one bot drives at a time and the
 others wait their turn in order; a bot never touches another bot's tab.
 
 - **Where it lives:** `browser-profile/` next to the agent's `agent.config.json`
@@ -309,6 +310,57 @@ others wait their turn in order; a bot never touches another bot's tab.
 - **Wipe it:** stop the agent, delete the `browser-profile` directory, start the
   agent. Every bot is signed out and the next sign-in starts fresh. To sign out
   of one site, take over and use that site's own sign-out.
+- **Two accounts of one site:** a browser account is a separate sign-in of one
+  site on one computer, so two bots can be signed in to two accounts of it. The
+  owner adds one in Settings → Local agents (a name, the site and the computer),
+  then picks it for a bot in the **Signs in as** row on that bot's Edit page. Each account has its own
+  browser context, so its cookies are seen by no other account and by no bot
+  without it; a bot with no account keeps using the profile above. Sign in
+  with **Take over** on the bot's Computer view, which opens the bot's own
+  account. The computer needs `AGENT_BROWSER=1`, and an account's pages never
+  run in the server's browser.
+- **Where the accounts live:** `browser-accounts/` next to the agent's
+  `agent.config.json` (or the directory in `AGENT_BROWSER_ACCOUNTS`), mode
+  `0700`, one `<id>.jar` file per account, mode `0600`. A jar holds the
+  account's cookies, so it is as valuable as a password. It is encrypted with
+  AES-256-GCM under a key made from this computer's pairing secret, and is saved
+  after each task, about every 10 minutes and when the browser closes, and put
+  back when the account's context is made. It never leaves the computer: the
+  server stores only the account's name, site and computer, and shows the state
+  the computer reports (Signed in, Not signed in or Not checked yet).
+- **Not in a backup, and not portable:** `npm run backup` carries the account
+  records (name, site and computer) with no state and no cookie, so a restore
+  shows every account signed out. A jar
+  copied to another machine does nothing: that machine's pairing secret does not
+  open it, and the jar is removed the first time it is read. Sign in again there.
+- **Re-pairing:** pair again with the same server, without removing the
+  computer first and with a code from the same workspace, and the jars are kept:
+  they are re-encrypted under the new secret, and the accounts and bot pins move
+  to the new pairing when it first checks in (start the agent right after
+  pairing). Until the new pairing first checks in, Settings shows both the old
+  and the new computer: remove neither of them, because that loses the jars and
+  can leave the accounts and pins on a removed computer. The old one disappears
+  by itself once the new one checks in. If
+  the computer was removed, or the code is of another workspace, `pair` says the
+  server did not take it as the same computer and removes the jars; move the
+  accounts to it in Settings. A pair whose reply never arrived changes nothing:
+  the old pairing still works. Pairing with another server removes the jars.
+  Stop the agent before you pair: a `pair` refuses while the agent runs.
+- **Wipe one account:** delete it in Settings → Local agents (a bot that still
+  signs in as it must be moved to another account first). On its next beat the
+  computer finds the account missing from the list the server sends and removes
+  its jar and context. To wipe every jar, stop the agent and delete the
+  `browser-accounts` directory.
+- **Looking after sign-ins:** a tab no bot has used for 10 minutes is closed
+  after its cookies are saved, and about every 30 minutes a keeper tab reads the
+  site of each account that is signed in, or whose jar has not been checked yet,
+  so a sign-in that ran out shows as Signed out before a task meets it. Chrome is kept running between tasks. Set
+  `AGENT_BROWSER_QUIT_IDLE=1` to have it quit after 30 minutes with nothing run,
+  driven or watched, which frees its memory (a headless Chrome with one tab is
+  about 400 MB, and each account's context a little more); the next task starts
+  it again and each account is signed in from its jar. A site that keeps its
+  sign-in outside cookies (in local storage, say) is signed out again after a
+  restart, and the account shows that.
 - **Live view:** frames are a screencast of the one tab you are watching, sent
   by the agent (about ten a second at most) and kept by the server in memory
   only while your page is polling; they are never stored, and a read-only

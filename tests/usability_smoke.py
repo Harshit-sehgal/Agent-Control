@@ -1288,12 +1288,14 @@ class Live:
         self.posts, self.frame_polls, self.list_polls, self.refuse_secret = [], 0, 0, False
         # What the device's app says it can do (its heartbeat's `features`); the server passes it on in the frame reply.
         self.features = ['secret-input-v1']
+        # The browser account the bot signs in as, as the server's list names it ({id, name}), or none.
+        self.account = None
         self.__dict__.update(kw)
 
     def entry(self):
         site = None if self.state == 'idle' else re.sub(r'^https?://([^/]+).*$', r'\1', self.url or '') or None
         return {'botId': self.bot, 'state': self.state, 'url': self.url, 'title': self.title, 'site': site, 'pages': self.pages,
-                'runId': None, 'requestId': None, 'live': self.agent}
+                'runId': None, 'requestId': None, 'live': self.agent, 'account': self.account}
 
     def inputs(self):
         return [body for path, body in self.posts if path.endswith('/input')]
@@ -1973,7 +1975,7 @@ class Server:
         self.fallbacks = []
         self.agents = [
             {'id': 'a1', 'name': 'Laptop', 'status': 'online', 'permissions': ['model.run'], 'lastSeenAt': '2026-11-11T10:00:00Z', 'tasks': {'queued': 0, 'running': 0, 'failed': 0},
-             'features': ['secret-input-v1'], 'cli': {'claude': 'signed-in', 'codex': 'signed-out', 'checkedAt': '2026-11-11T10:00:00Z'}},
+             'features': ['secret-input-v1', 'browser-accounts-v1'], 'cli': {'claude': 'signed-in', 'codex': 'signed-out', 'checkedAt': '2026-11-11T10:00:00Z'}},
             {'id': 'a2', 'name': 'Desk PC', 'status': 'stale', 'permissions': ['model.run'], 'lastSeenAt': '2026-11-10T10:00:00Z', 'tasks': {'queued': 0, 'running': 0, 'failed': 0},
              'features': [], 'cli': {'claude': 'missing', 'codex': 'signed-in', 'checkedAt': '2026-11-10T10:00:00Z'}},
         ]
@@ -2587,6 +2589,8 @@ class AdminServer(Server):
         self.prefs = {'inApp': True, 'webhook': False, 'webhookCredentialId': None, 'email': False, 'emailAddress': '', 'emailReady': False}
         self.notifications = [{'id': 'n1', 'title': 'A task failed', 'body': 'Backup check', 'channel': 'in_app', 'status': 'delivered', 'created_at': '2026-11-11T09:00:00Z'}]
         self.preview = {'events': 0, 'doneTasks': 4, 'runs': 1, 'dryRun': True}
+        # Browser accounts, as GET /api/browser-accounts lists them for the owner.
+        self.accounts = []
         super().__init__(**kw)
 
     async def handle(self, route):
@@ -2594,8 +2598,8 @@ class AdminServer(Server):
         path = re.sub(r'^https?://[^/]+', '', request.url).split('?')[0]
         method = request.method
         body = json.loads(request.post_data) if request.post_data else None
-        admin = path in ('/api/users', '/api/notifications', '/api/notifications/read', '/api/notification-prefs', '/api/push', '/api/credentials', '/api/retention/preview', '/api/retention/prune', '/api/admin/restore', '/api/sessions') \
-            or re.match(r'^/api/(users|credentials)/[a-z0-9-]+(/reveal)?$', path)
+        admin = path in ('/api/users', '/api/notifications', '/api/notifications/read', '/api/notification-prefs', '/api/push', '/api/credentials', '/api/retention/preview', '/api/retention/prune', '/api/admin/restore', '/api/sessions', '/api/browser-accounts') \
+            or re.match(r'^/api/(users|credentials|browser-accounts)/[a-z0-9-]+(/reveal)?$', path)
         if not admin:
             return await super().handle(route)
         if method != 'GET':
@@ -2610,6 +2614,20 @@ class AdminServer(Server):
         m = re.match(r'^/api/users/([a-z0-9-]+)$', path)
         if m and method == 'PATCH':
             next(u for u in self.users if u['id'] == m.group(1)).update(body)
+            return await reply({'ok': True})
+        if path == '/api/browser-accounts':
+            if method == 'POST':
+                made = {'id': f'0a1b2c3d-1111-4222-8333-{len(self.accounts) + 1:012d}', **body, 'storage': 'cookies', 'state': 'signed-out', 'lost': False, 'checkedAt': None}
+                self.accounts.append(made)
+                return await reply(made, 201)
+            return await reply({'accounts': self.accounts})
+        m = re.match(r'^/api/browser-accounts/([a-z0-9-]+)$', path)
+        if m and method == 'PATCH':
+            found = next(a for a in self.accounts if a['id'] == m.group(1))
+            found.update(body)
+            return await reply(found)
+        if m and method == 'DELETE':
+            self.accounts = [a for a in self.accounts if a['id'] != m.group(1)]
             return await reply({'ok': True})
         if path == '/api/notifications':
             return await reply({'notifications': self.notifications, 'unread': 1})
@@ -2633,13 +2651,13 @@ class AdminServer(Server):
         return await reply({'error': 'unexpected'}, 404)
 
 
-ADMIN_PREFIXES = ['/api/connectors', '/api/ai', '/api/agents', '/api/activity/', '/api/users', '/api/notification', '/api/push', '/api/credentials', '/api/retention/', '/api/admin/restore', '/api/sessions']
+ADMIN_PREFIXES = ['/api/connectors', '/api/ai', '/api/agents', '/api/browser-accounts', '/api/activity/', '/api/users', '/api/notification', '/api/push', '/api/credentials', '/api/retention/', '/api/admin/restore', '/api/sessions']
 
 
 async def install_admin(page, **kw):
     server = AdminServer(**kw)
     await page.add_init_script(via_fetch(ADMIN_PREFIXES))
-    for pattern in ('connectors', 'ai', 'agents', 'activity/', 'users', 'notification', 'push', 'credentials', 'retention/', 'admin/restore', 'sessions'):
+    for pattern in ('connectors', 'ai', 'agents', 'browser-accounts', 'activity/', 'users', 'notification', 'push', 'credentials', 'retention/', 'admin/restore', 'sessions'):
         await page.route(f'**/api/{pattern}**', server.handle)
     return server
 
@@ -2737,6 +2755,142 @@ async def agents_page_pairing_form_and_code(page, base):
     await expect(code.locator('.cn-copy code')).to_contain_text('node agent/agent.mjs pair --server')
     await expect(code.locator('.cn-copy code')).to_contain_text('--code ABCD-1234')
     await expect(code.get_by_role('button', name='Copy')).to_be_visible()
+
+
+async def local_agents_page_adds_a_browser_account(page, base):
+    """The owner adds an account under the computers, then renames, moves and deletes it; anyone else's page has none."""
+    server = await install_admin(page)
+    await open_app(page, base)
+    panel = await mount_admin(page, 'agents')
+    await expect(panel).to_contain_text('No browser account yet.')
+    await expect(panel.locator('.st-g .st-h', has_text='Browser accounts')).to_have_count(1)
+    await expect(panel).to_contain_text("Each account is its own cookie space on one computer: bots on different accounts never see each other's sign-ins.")
+    await expect(panel).to_contain_text('To sign in, open a bot that uses it, take over its Computer view and sign in there.')
+    form = panel.locator('#account-form')
+    # Only paired computers are offered, by name.
+    values = await form.locator('select[name=deviceId] option').evaluate_all('o => o.map(x => [x.value, x.textContent])')
+    assert values == [['a1', 'Laptop'], ['a2', 'Desk PC']], values
+    await form.locator('input[name=name]').fill('CRM')
+    await form.locator('input[name=site]').fill('crm.example.com')
+    await form.locator('select[name=deviceId]').select_option('a1')
+    await form.get_by_role('button', name='Add account').click()
+    assert server.sent('POST', '/api/browser-accounts') == [{'name': 'CRM', 'site': 'crm.example.com', 'deviceId': 'a1'}], server.sent('POST', '/api/browser-accounts')
+    card = panel.locator('.cn-card', has_text='CRM')
+    await expect(card).to_contain_text('crm.example.com · Laptop')
+    await expect(card.locator('.tag')).to_have_text('Not signed in')
+    # Rename asks for the new name; Move reads the computers again and offers the paired ones.
+    await card.get_by_role('button', name='Rename').click()
+    await page.locator('#modal textarea').fill('CRM, sales')
+    await page.locator('#modal').get_by_role('button', name='Rename').click()
+    assert server.sent('PATCH', '/api/browser-accounts/' + server.accounts[0]['id']) == [{'name': 'CRM, sales'}]
+    card = panel.locator('.cn-card', has_text='CRM, sales')
+    await card.get_by_role('button', name='Move').click()
+    await page.locator('#modal select[name=deviceId]').select_option('a2')
+    await page.locator('#modal').get_by_role('button', name='Move').click()
+    await expect(panel.locator('.cn-card', has_text='CRM, sales')).to_contain_text('crm.example.com · Desk PC')
+    assert server.sent('PATCH', '/api/browser-accounts/' + server.accounts[0]['id'])[-1] == {'deviceId': 'a2'}
+    # A computer that is gone says so, and what to do.
+    server.agents[1]['status'] = 'revoked'
+    panel = await mount_admin(page, 'agents')
+    await expect(panel.locator('.cn-card', has_text='CRM, sales')).to_contain_text('Its computer is not paired. Move it to another.')
+    # Delete asks first.
+    await panel.get_by_role('button', name='Delete').click()
+    await expect(page.locator('#modal')).to_contain_text('Delete CRM, sales?')
+    await page.locator('#modal').get_by_role('button', name='Delete').click()
+    await expect(panel).to_contain_text('No browser account yet.')
+    assert server.accounts == []
+    # Anyone but the owner has no such group, and asks for none.
+    before = len(server.calls)
+    panel = await mount_admin(page, 'agents', role='admin')
+    await expect(panel.locator('.st-g .st-h', has_text='Browser accounts')).to_have_count(0)
+    await expect(panel.locator('#account-form')).to_have_count(0)
+    assert not [c for c in server.calls[before:] if c[1] == '/api/browser-accounts'], 'a non-owner asked for the accounts'
+
+
+async def phone_local_agents_accounts_fit(page, base):
+    server = await install_admin(page)
+    server.accounts = [{'id': '0a1b2c3d-1111-4222-8333-000000000001', 'name': 'A long account name for the sales team', 'site': 'crm.example.com', 'deviceId': 'a1', 'storage': 'cookies', 'state': 'signed-in', 'lost': True, 'checkedAt': None}]
+    await open_app(page, base)
+    panel = await mount_admin(page, 'agents')
+    await expect(panel.locator('.cn-card', has_text='A long account name')).to_contain_text('This site keeps its sign-in outside cookies, so sign in again after the computer restarts.')
+    assert await overflow(page) <= 0, 'the browser accounts overflow the phone'
+
+
+async def edit_page_sets_a_bots_browser_account(page, base):
+    """The owner picks the account on a bot's Edit page; a member's Edit has no such field and a rename keeps it."""
+    account = {'id': '0a1b2c3d-1111-4222-8333-000000000001', 'name': 'CRM', 'site': 'crm.example.com', 'deviceId': 'a1', 'storage': 'cookies', 'state': 'signed-in', 'lost': False, 'checkedAt': None}
+    server = await install_admin(page)
+    ids = await open_app(page, base, bots=EXTRA_BOTS)
+    writer = ids['Writer']
+
+    async def be(role):
+        await page.evaluate("""async role => {
+            const v = new URL(document.querySelector('script[src*="app.js"]').src).search;
+            const {store} = await import('./ui-store.js' + v);
+            store.state.me = {...(store.state.me || {}), email: 'owner@localhost', role};
+        }""", role)
+
+    async def open_edit():
+        await page.evaluate(f"location.hash = '#profile/{writer}'")
+        await page.evaluate(f"location.hash = '#profile/{writer}/edit'")
+        await page.locator('#edit-bot-form').wait_for()
+
+    select = page.locator('#edit-bot-form select[name=browserAccount]')
+    # No account yet: no row.
+    await be('owner')
+    await open_edit()
+    await page.wait_for_timeout(300)
+    await expect(select).to_have_count(0)
+    # With one: the owner's own browser first, then the account by name and site.
+    server.accounts.append(account)
+    await open_edit()
+    await expect(select).to_have_count(1)
+    await expect(page.locator('#edit-bot-form .nb-account span')).to_have_text('Signs in as')
+    values = await select.locator('option').evaluate_all('o => o.map(x => [x.value, x.textContent])')
+    assert values == [['', "The computer's own browser"], [account['id'], 'CRM · crm.example.com']], values
+    await select.select_option(account['id'])
+    await page.locator('#edit-bot-form button[type=submit]').click()
+    await expect(page.locator('#toast')).to_have_text('Saved.')
+    assert company_bot(await api_state(page), 'Writer')['settings']['browserAccount'] == account['id']
+    # A member sees no row, and a rename leaves the account where it was (a member's `browserAccount` is a 403).
+    await be('member')
+    await open_edit()
+    await expect(page.locator('#edit-bot-form .nb-boss', has_text='Manager')).to_have_count(1)
+    await page.wait_for_timeout(300)
+    await expect(select).to_have_count(0)
+    await page.locator('#edit-bot-form input[name=name]').fill('Drafter')
+    await page.locator('#edit-bot-form button[type=submit]').click()
+    await expect(page.locator('#main .pr-hero h1')).to_have_text('Drafter')
+    assert company_bot(await api_state(page), 'Drafter')['settings']['browserAccount'] == account['id']
+    # The owner's page, with the account showing, fits a phone.
+    await be('owner')
+    await open_edit()
+    await expect(select).to_have_value(account['id'])
+    await page.set_viewport_size(PHONE)
+    assert await overflow(page) <= 0, 'the Signs in as row overflows the phone'
+    # An account that was deleted still shows, so the owner can clear it.
+    server.accounts.clear()
+    await open_edit()
+    values = await select.locator('option').evaluate_all('o => o.map(x => [x.value, x.textContent])')
+    assert values == [['', "The computer's own browser"], [account['id'], 'An account that no longer exists']], values
+    await expect(select).to_have_value(account['id'])
+    await select.select_option('')
+    await page.locator('#edit-bot-form button[type=submit]').click()
+    await expect(page.locator('#toast')).to_have_text('Saved.')
+    assert company_bot(await api_state(page), 'Drafter')['settings'].get('browserAccount') is None
+
+
+async def computer_view_says_which_account_the_bot_signs_in_as(page, base):
+    live, bot = await open_computer(page, base)
+    await goto_profile(page, bot, 'computer')
+    await expect(page.locator('#main .pc-line')).to_have_text('Inbox')
+    await expect(page.locator('#main .pc-acct')).to_be_hidden()
+    live.account = {'id': '0a1b2c3d-1111-4222-8333-000000000001', 'name': 'CRM, sales'}
+    live.state = 'idle'
+    await expect(page.locator('#main .pc-acct')).to_have_text('Signs in as CRM, sales')
+    live.account = None
+    live.state = 'browsing'
+    await expect(page.locator('#main .pc-acct')).to_be_hidden()
 
 
 async def team_roles_are_pills_and_sessions_are_not_here(page, base):
@@ -3019,6 +3173,7 @@ async def main():
             await h.scenario('computer: Take over sends clicks, keys, the wheel and an address to the page', computer_take_over_drives_the_page)
             await h.scenario('computer: a device without secret-input-v1 shows a line and no Password or Code field', computer_older_device_has_no_masked_fields)
             await h.scenario('computer: Hand back returns the browser to the bot', computer_hand_back)
+            await h.scenario('computer: the pill says which browser account the bot signs in as', computer_view_says_which_account_the_bot_signs_in_as)
             await h.scenario('takeover sheet: Password and Code fields send a secret, echo nothing and say a refusal', takeover_sheet_masked_fields)
             await h.scenario('computer: no device shows how to start the local agent, and notices', computer_no_device_empty_state)
             await h.scenario('computer: the demo has no browser, and Atlas has a Computer too', computer_demo_has_no_browser)
@@ -3039,6 +3194,9 @@ async def main():
             await h.scenario('agents: one page with each computer online or not, claude and codex sign-in, a switch per permission, Revoke asks first', agents_page_status_signin_and_switches)
             await h.scenario('agents: a computer whose app cannot type passwords and codes says it needs an update', agents_page_says_which_computer_needs_an_update)
             await h.scenario('agents: the pairing form is switches, the code shows once with the command to run', agents_page_pairing_form_and_code)
+            await h.scenario('agents: the owner adds a browser account under the computers, renames, moves and deletes it; others have none', local_agents_page_adds_a_browser_account)
+            await h.scenario('phone: the browser accounts fit', phone_local_agents_accounts_fit, PHONE)
+            await h.scenario('bot: the owner picks the browser account a bot signs in as on Edit, a member keeps it', edit_page_sets_a_bots_browser_account)
             await h.scenario('team: roles are pills, the owner has none, sessions are not on this page', team_roles_are_pills_and_sessions_are_not_here)
             await h.scenario('notifications: switches that save at once; webhook and email show only when they can deliver', notifications_are_switches_and_unwired_channels_are_hidden)
             await h.scenario('notifications: no webhook switch without a saved address, no email without a mailbox', notifications_hide_webhook_without_a_saved_address)

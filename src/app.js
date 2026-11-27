@@ -45,6 +45,7 @@ import {memoryRoutes} from './routes-memory.js';
 import {eventRoutes} from './routes-events.js';
 import {connectorRoutes} from './routes-connectors.js';
 import {liveRoutes} from './routes-live.js';
+import {browserAccountRoutes} from './routes-browser-accounts.js';
 import {fileRoutes} from './routes-files.js';
 import {pruneAttachments} from './attachments.js';
 
@@ -136,6 +137,7 @@ export function createApp({store, auth, workspaces, push, version}) {
   eventRoutes(router, app);
   connectorRoutes(router, app);
   liveRoutes(router, app);
+  browserAccountRoutes(router);
   fileRoutes(router);
 
   async function api(req, res, u) {
