@@ -424,6 +424,11 @@ export function openSigninAsk(state, accountId) {
   return null;
 }
 
+/** Did this run say Not now to the account's sign-in card (or let it lapse)? `resumeAfterAsks` keeps that decline per
+ * account in `run.declinedAsks` (`{action: 'signin', scope: accountId}`), and nothing in the run asks for that sign-in
+ * again: no hold, no second card, no notice. */
+export const signinDeclined = (run, accountId) => Boolean(accountId) && (run?.declinedAsks || []).some(d => d?.action === SIGNIN_ASK && d.scope === accountId);
+
 /** True when another pending ask still holds this run. */
 const holds = (state, ask) => (state.asks || []).some(a => a.runId === ask.runId && a.id !== ask.id && a.status === 'pending');
 const parked = (state, runId) => runId ? (state.groupRuns || []).find(r => r.id === runId && r.status === 'awaiting_ask') || null : null;

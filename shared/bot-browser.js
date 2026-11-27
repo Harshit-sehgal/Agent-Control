@@ -22,7 +22,7 @@
  */
 import {cleanText, validHttpUrl} from './core.js';
 import {fail} from './errors.js';
-import {decide, createAsk, scopeOf, declinedNeed, outsideRead, keepOutsideMarks, openSigninAsk} from './asks.js';
+import {decide, createAsk, scopeOf, declinedNeed, outsideRead, keepOutsideMarks, openSigninAsk, signinDeclined} from './asks.js';
 import {botSettings} from './bot-settings.js';
 import {controlFence} from './reply-blocks.js';
 import {BACKSTOP, pagesCap, roundsCap, siteOf, siteCapLeft, countSitePage, limitsOf} from './limits.js';
@@ -626,7 +626,9 @@ export function recordBrowserRequests(state, {bot, groupId, chatKey, output, dep
       const rosterBot = (state.groups || []).flatMap(g => g.bots || []).find(b => b.id === bot.id);
       const accountId = rosterBot ? botSettings(rosterBot).browserAccount : null;
       const accountCard = accountId ? openSigninAsk(state, accountId) : null;
-      if (live && !(live.signinOffered || []).includes(host) && !(accountCard && onSite(host, accountCard.site))) {
+      // Nor after the owner said Not now to that account's card in this run.
+      const declinedSite = live && signinDeclined(live, accountId) ? (state.browserAccounts || []).find(a => a.id === accountId)?.site : null;
+      if (live && !(live.signinOffered || []).includes(host) && !(accountCard && onSite(host, accountCard.site)) && !(declinedSite && onSite(host, declinedSite))) {
         live.signinOffered = [...(live.signinOffered || []), host];
         const card = {action: 'signin', botId: bot.id, url: `https://${host}/`, text: `Sign in to ${host.replace(/^www\./, '')} in the browser on this computer. ${host.replace(/^www\./, '')} turned the bots away; once you are signed in, they use the same browser and can read it.`};
         lines.push({id: makeId(), role: 'system', kind: 'setup', botId: bot.id, setup: JSON.stringify(card), text: `${bot.name} suggests: ${card.text}`, at: now});

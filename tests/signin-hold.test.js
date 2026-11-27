@@ -420,6 +420,41 @@ test('holdForSignin answers null and leaves the state exactly as it was whenever
   assert.equal(MAX_SIGNIN_HOLDS, 2);
 });
 
+test('a run that said Not now to the account is not held again: its page goes to the bot; a decline on another account holds', () => {
+  const B = '22222222-2222-4222-8222-222222222222';
+  const base = declined => ({
+    groups: [{id: 'lab', bots: [{id: 'web', name: 'Web', settings: {browserAccount: A}}]}],
+    browserAccounts: [{id: A, name: 'Sales', site: 'crm.example.com', deviceId: 'pc', storage: 'cookies'}],
+    groupRuns: [runOf('run1', {declinedAsks: declined})], asks: [], grants: [], chats: {}, browserRequests: [],
+  });
+  const opts = {now: NOW, makeId: () => 'k1'};
+  const s = base([{action: 'browser.use', scope: 'https://crm.example.com'}, {action: 'signin', scope: A}]), before = JSON.stringify(s);
+  assert.equal(holdForSignin(s, request('a'), wall, opts), null);
+  assert.equal(JSON.stringify(s), before, 'nothing was written');
+  const other = base([{action: 'signin', scope: B}]);
+  assert.equal(holdForSignin(other, request('a'), wall, opts).fresh, true, 'a decline on account B does not stop a hold on A');
+  // An old record with no account in its scope says nothing about A.
+  assert.equal(holdForSignin(base([{action: 'signin', scope: ''}]), request('a'), wall, opts).fresh, true);
+});
+
+test('an unattended run that said Not now to the account sends no sign-in notice for its site', async t => {
+  const signin = '```setup\n{"action":"signin","site":"crm.example.com"}\n```\nI need you to sign in to the CRM.';
+  const runUnattended = async declinedAsks => {
+    const {store} = await company(t);
+    const sent = [];
+    store.notify = async event => { sent.push(event); };
+    await store.update(s => {
+      s.browserAccounts = [{id: A, name: 'Sales', site: 'crm.example.com', deviceId: 'pc-1', storage: 'cookies'}];
+      s.groups.find(g => g.id === 'home').bots.find(b => b.id === 'atlas').settings.browserAccount = A;
+    });
+    await startRun(store, {message: 'Check the CRM', executor: model({Atlas: signin}).executor, extra: {unattended: true, declinedAsks}});
+    await tick();
+    return sent.filter(n => n.kind === 'health');
+  };
+  assert.equal((await runUnattended([{action: 'signin', scope: '22222222-2222-4222-8222-222222222222'}])).length, 1, 'a decline on another account changes nothing');
+  assert.deepEqual(await runUnattended([{action: 'signin', scope: A}]), [], 'the owner already said not now to this account in this run');
+});
+
 test('signin_pending survives a reopen and is dropped by a restore', async t => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'signin-pending-'));
   t.after(() => fs.rm(dir, {recursive: true, force: true}));

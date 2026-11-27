@@ -2,7 +2,7 @@
 // account (never a grant), the account's own wall, and the `signin` request status that holds a run's request.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {SIGNIN_ASK, isSigninAsk, createSigninAsk, openSigninAsk, answerAsk, askText, answeredText, isAskAction, expireAsks, ASK_EXPIRY_MS} from '../shared/asks.js';
+import {SIGNIN_ASK, isSigninAsk, createSigninAsk, openSigninAsk, signinDeclined, answerAsk, askText, answeredText, isAskAction, expireAsks, ASK_EXPIRY_MS} from '../shared/asks.js';
 import {accountWall, onSite, stepsAct} from '../shared/browser-accounts.js';
 import {OPEN_REQUEST_STATUSES, isSigninHost, pruneBrowserRequests, denyBrowserRequest, recordBrowserRequests, MAX_BROWSER_REQUESTS} from '../shared/bot-browser.js';
 import {releaseChatWork} from '../shared/chats.js';
@@ -175,4 +175,19 @@ test('a site that refused twice posts no setup card while its account\'s sign-in
   // A card that was answered is no open card.
   const done = fresh(); mkAsk(done); answerAsk(done, 'k1', 'decline', NOW);
   assert.equal(run(done).lines.filter(l => l.kind === 'setup').length, 1);
+});
+
+test('a site that refused twice posts no setup card in a run that said Not now to its account', () => {
+  const blocked = {status: 'done', runId: 'r1', chatKey: 'scout', botId: 'scout', url: 'https://crm.example.com/search', result: {title: null, page: 'x', text: "You've been blocked by network security."}};
+  const run = s => { let n = 0; return recordBrowserRequests(s, {bot: {id: 'scout', name: 'Scout'}, groupId: 'home', chatKey: 'scout', output: `\`\`\`browser\n${JSON.stringify({url: 'https://crm.example.com/top'})}\n\`\`\``, depth: 0, makeId: () => `m${++n}`, runId: 'r1', now: NOW}); };
+  const fresh = declinedAsks => { const s = state(); s.groupRuns = [{id: 'r1', status: 'running', declinedAsks}]; s.browserRequests.push({...blocked, id: 'a'}, {...blocked, id: 'b'}); return s; };
+  const out = run(fresh([{action: 'signin', scope: A}]));
+  assert.equal(out.records.length, 0, 'not opened a third time');
+  assert.equal(out.lines.filter(l => l.kind === 'setup').length, 0, 'no card for a sign-in the owner just declined');
+  assert.equal(run(fresh([{action: 'signin', scope: 'another-account'}])).lines.filter(l => l.kind === 'setup').length, 1, 'a decline on another account does not cover it');
+
+  assert.equal(signinDeclined({declinedAsks: [{action: 'signin', scope: A}]}, A), true);
+  assert.equal(signinDeclined({declinedAsks: [{action: 'browser.use', scope: A}, {action: 'signin', scope: ''}]}, A), false);
+  assert.equal(signinDeclined(null, A), false);
+  assert.equal(signinDeclined({declinedAsks: [{action: 'signin', scope: ''}]}, ''), false, 'no account, no decline');
 });

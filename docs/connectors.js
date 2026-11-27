@@ -14,11 +14,11 @@
  *
  * Pure and browser-safe, like the other shared modules.
  */
-import {cleanText} from './core.js?v=5ad0697a60';
-import {controlFence} from './reply-blocks.js?v=5ad0697a60';
-import {decide, createAsk, declinedNeed, outsideRead} from './asks.js?v=5ad0697a60';
-import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=5ad0697a60';
-import {runPrivateHosts} from './bot-browser.js?v=5ad0697a60';
+import {cleanText} from './core.js?v=e020a5f84c';
+import {controlFence} from './reply-blocks.js?v=e020a5f84c';
+import {decide, createAsk, declinedNeed, outsideRead} from './asks.js?v=e020a5f84c';
+import {BACKSTOP, pagesCap, roundsCap} from './limits.js?v=e020a5f84c';
+import {runPrivateHosts} from './bot-browser.js?v=e020a5f84c';
 
 export const CONNECTOR_KINDS = ['google', 'mcp', 'site'];
 /** `ready` works; `setup` is Google with a client saved and no sign-in yet; `reconnect` is a sign-in that

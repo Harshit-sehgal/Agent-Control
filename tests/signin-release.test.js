@@ -216,6 +216,28 @@ test('Not now denies every held page and each run takes its declined turn', asyn
   assert.equal((await rg.send('POST', `/api/asks/${card.id}`, {body: {answer: 'decline'}})).status, 409);
 });
 
+test('after Not now, the same run\'s next wall on that account goes to the bot: no second card and no second push', async t => {
+  const INBOX = CRM + 'inbox';
+  // Turn 1 asks for the CRM; the declined turn asks for another page of it; then the bot writes up what it got.
+  const rg = await rig(t, {Scholar: envelope => (envelope.page ? `Read: ${envelope.page}` : envelope.declined ? fences(INBOX) : fences(CRM))});
+  const {run} = await rg.parked('scholar');
+  const [card] = rg.cards();
+  const pushes = () => rg.sent.filter(e => e.kind === 'signin').length;
+  assert.equal(pushes(), 1);
+  await answerAskFlow(rg.store, card.id, 'decline', {actor: 'owner@x.test', executor: rg.ai.executor});
+  const again = await until(() => rg.requests(run.id).find(r => r.url === INBOX && r.status === 'dispatched'), 'the declined turn to ask for another CRM page');
+  assert.deepEqual(rg.run(run.id).declinedAsks.filter(d => d.action === 'signin'), [{action: 'signin', scope: A}], 'the decline is kept per account');
+
+  await rg.returns(again, wall);
+  await until(() => rg.run(run.id).status === 'completed', 'the run to finish with the page');
+  assert.equal(rg.request(again.id).status, 'done', 'the wall went to the bot as a page, not held');
+  assert.equal(rg.request(again.id).signinAskId, undefined);
+  assert.deepEqual(rg.cards().filter(a => a.status === 'pending'), [], 'no second card');
+  assert.deepEqual(rg.store.read().signinPending, {});
+  assert.equal(pushes(), 1, 'no second push');
+  assert.match(String(rg.ai.of('Scholar').at(-1).page), /sign-in page/i, 'the bot was handed the sign-in page and told what it is');
+});
+
 test('24 hours with no sign-in end it like Not now, with the expired line', async t => {
   const rg = await rig(t);
   const one = await rg.parked('scholar');

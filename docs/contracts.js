@@ -14,9 +14,9 @@
  *
  * Pure functions over bot records, like the other shared modules.
  */
-import {validHttpUrl} from './core.js?v=5ad0697a60';
-import {fail} from './errors.js?v=5ad0697a60';
-import {BASIC_KIT, isBasicKit, isAskAction, verdict} from './asks.js?v=5ad0697a60';
+import {validHttpUrl} from './core.js?v=e020a5f84c';
+import {fail} from './errors.js?v=e020a5f84c';
+import {BASIC_KIT, isBasicKit, isAskAction, verdict} from './asks.js?v=e020a5f84c';
 
 export const CONTRACT_VERSION = 1;
 

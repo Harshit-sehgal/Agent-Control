@@ -26,11 +26,11 @@
  * Pure and browser-safe, like the other shared modules: the server and the
  * Pages demo share every rule here.
  */
-import {fail} from './errors.js?v=5ad0697a60';
-import {cleanText} from './core.js?v=5ad0697a60';
-import {logActivity} from './activity-log.js?v=5ad0697a60';
-import {MAX_CONTEXT_MESSAGES} from './bot-settings.js?v=5ad0697a60';
-import {botKey} from './memory.js?v=5ad0697a60';
+import {fail} from './errors.js?v=e020a5f84c';
+import {cleanText} from './core.js?v=e020a5f84c';
+import {logActivity} from './activity-log.js?v=e020a5f84c';
+import {MAX_CONTEXT_MESSAGES} from './bot-settings.js?v=e020a5f84c';
+import {botKey} from './memory.js?v=e020a5f84c';
 
 /** What every bot may do without a grant. */
 export const BASIC_KIT = ['bot.ask', 'bot.create', 'schedule.set'];
@@ -423,6 +423,11 @@ export function openSigninAsk(state, accountId) {
   delete map[accountId];
   return null;
 }
+
+/** Did this run say Not now to the account's sign-in card (or let it lapse)? `resumeAfterAsks` keeps that decline per
+ * account in `run.declinedAsks` (`{action: 'signin', scope: accountId}`), and nothing in the run asks for that sign-in
+ * again: no hold, no second card, no notice. */
+export const signinDeclined = (run, accountId) => Boolean(accountId) && (run?.declinedAsks || []).some(d => d?.action === SIGNIN_ASK && d.scope === accountId);
 
 /** True when another pending ask still holds this run. */
 const holds = (state, ask) => (state.asks || []).some(a => a.runId === ask.runId && a.id !== ask.id && a.status === 'pending');

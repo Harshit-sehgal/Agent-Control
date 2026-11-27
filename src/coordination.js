@@ -19,7 +19,7 @@ import {stepsCap,limitsOf,FAIL_STREAK,runBudget} from '../shared/limits.js';
 import {addChatMessages} from '../shared/chats.js';
 import {assertContractOutput} from '../shared/contracts.js';
 import {recordBrowserRequests,stripBrowserBlocks,isSearchPage,parseBrowserRequests,MAX_BROWSER_DEPTH,OPEN_REQUEST_STATUSES} from '../shared/bot-browser.js';
-import {orphanAsks,openSigninAsk} from '../shared/asks.js';
+import {orphanAsks,openSigninAsk,signinDeclined} from '../shared/asks.js';
 import {browserAccountOf,onSite} from '../shared/browser-accounts.js';
 import {addAskCards,notifyAsks} from './ask-cards.js';
 import {signinSites,signinNotice} from './health-watch.js';
@@ -414,8 +414,9 @@ async function runGroupInner(store,id,executor){
         newAsks=[...browsed.asks,...conn.asks];
         // A schedule runs with nobody watching: a site that signed it out is said to the owner now, once per site
         // per run, instead of waiting in a chat nobody opens (src/health-watch.js).
-        // An account bot whose account already has an open sign-in card says nothing more: that card is the notice.
-        if(live.unattended){const acct=browserAccountOf(s,bot.id).account,carded=acct&&openSigninAsk(s,acct.id)?acct.site:null;const fresh=signinSites([...browsed.lines,...(reply.after||[])]).filter(site=>!(live.signinNoticed||[]).includes(site)&&!(carded&&onSite(site,carded)));if(fresh.length){live.signinNoticed=[...(live.signinNoticed||[]),...fresh];signins=fresh;}}
+        // An account bot whose account already has an open sign-in card says nothing more: that card is the notice. Nor
+        // does one whose run said Not now to that card: the owner already knows.
+        if(live.unattended){const acct=browserAccountOf(s,bot.id).account,carded=acct&&(openSigninAsk(s,acct.id)||signinDeclined(live,acct.id))?acct.site:null;const fresh=signinSites([...browsed.lines,...(reply.after||[])]).filter(site=>!(live.signinNoticed||[]).includes(site)&&!(carded&&onSite(site,carded)));if(fresh.length){live.signinNoticed=[...(live.signinNoticed||[]),...fresh];signins=fresh;}}
         // Text around the browser fences is the browser helper's view of the
         // reply; with nothing to browse, the approved value is the output.
         // A reply that held a browser block (opened, refused or a repeat) is shown without it: a block is never chat text.
@@ -673,8 +674,9 @@ export async function resumeAfterAsks(store,runId,{executor,runtime,actor=null}=
     if(mine.some(a=>a.status==='pending'))return null;
     const declined=mine.filter(a=>a.status==='declined').map(a=>a.expired?`${a.detail||a.action} (no answer in 24 hours)`:(a.detail||a.action));
     if(declined.length)live.declined=declined;
-    // What was declined stays closed for the rest of the task, that action on that site or account only.
-    const no=mine.filter(a=>a.status==='declined').map(a=>({action:a.action,scope:a.grantScope||''}));
+    // What was declined stays closed for the rest of the task, that action on that site or account only. A sign-in card
+    // has no grant scope: its decline is kept by account (`signinDeclined`).
+    const no=mine.filter(a=>a.status==='declined').map(a=>({action:a.action,scope:a.grantScope||a.accountId||''}));
     if(no.length)live.declinedAsks=[...(live.declinedAsks||[]),...no].slice(-50);
     live.askIds=[];
     // Each connector call waits on its own ask: an allowed one is cleared to run when the step starts, a declined one never runs.

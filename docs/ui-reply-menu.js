@@ -8,13 +8,13 @@
  * It closes on Escape, a press outside, a real scroll of the chat (not the one a phone keyboard causes when the ask
  * box gets focus), a route change, and after an action; focus goes back to the reply. On open the first button has
  * focus, never the ask box, so a phone keyboard does not jump up uninvited. */
-import {esc, icon} from './ui-kit.js?v=5ad0697a60';
-import {menuItems, showFeedback, quoteText, askText, threadText, askedBefore, togglePin, isPinned, placePopover, PINS_MSG_KEY, HINT_KEY} from './reply-menu.js?v=5ad0697a60';
-import {store, conversation, findBot, canWrite, api, sync, loadLocal, saveLocal, changed, onChange} from './ui-store.js?v=5ad0697a60';
-import {sendChat, startThread, rerun} from './ui-chat.js?v=5ad0697a60';
-import {retryTarget} from './ui-model.js?v=5ad0697a60';
-import {botSettings} from './bot-settings.js?v=5ad0697a60';
-import {toast} from './ui-dialogs.js?v=5ad0697a60';
+import {esc, icon} from './ui-kit.js?v=e020a5f84c';
+import {menuItems, showFeedback, quoteText, askText, threadText, askedBefore, togglePin, isPinned, placePopover, PINS_MSG_KEY, HINT_KEY} from './reply-menu.js?v=e020a5f84c';
+import {store, conversation, findBot, canWrite, api, sync, loadLocal, saveLocal, changed, onChange} from './ui-store.js?v=e020a5f84c';
+import {sendChat, startThread, rerun} from './ui-chat.js?v=e020a5f84c';
+import {retryTarget} from './ui-model.js?v=e020a5f84c';
+import {botSettings} from './bot-settings.js?v=e020a5f84c';
+import {toast} from './ui-dialogs.js?v=e020a5f84c';
 
 const REPLY = '#cv-log .cv-bot';
 const HOLD = 420, SLOP = 9, SCROLL_CLOSE = 24, SETTLE_MS = 600;
