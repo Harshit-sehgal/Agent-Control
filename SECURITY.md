@@ -167,8 +167,9 @@ replay cache reject replays; agents run only permission-gated task kinds.
   allowlisted `browser.capture`, and `browser.action` (click, type, read
   steps) granted per device. With `AGENT_BROWSER=1` capture and action run in
   one real Chrome with a saved profile (`browser-profile/`, mode 0700) that
-  every bot shares, so a site the owner signed in to there is signed in for
-  every bot. A click that sends, posts or pays runs only after the ask for it
+  every bot without a browser account shares, so a site the owner signed in to
+  there is signed in for each of them; a bot that signs in as a browser account
+  uses that account's own context instead. A click that sends, posts or pays runs only after the ask for it
   was answered (or an Always allow covers it).
   A spawned sub-agent is a model call, not a client: it never sees a token, a
   device or a request queue.

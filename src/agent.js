@@ -28,6 +28,7 @@ import {cleanFeatures,hasFeature} from '../shared/device-features.js';
 import {cleanAccountReport,ACCOUNT_STATES} from '../shared/browser-accounts.js';
 import {base64Bytes,sniffType,isImage,MAX_FILES,MODEL_IMAGE_BYTES,MODEL_IMAGES_TOTAL} from '../shared/attachments.js';
 import {encryptJson,decryptJson,sha256,loadMasterKey} from './vault.js';
+import {peek} from './sqlite-store.js';
 
 /** Told when a task is queued for a device (src/server.js points it at the live
  * hub). A no-op by default, so this module needs nothing else to be loaded. */
@@ -246,7 +247,19 @@ function provenPrevious(store, workspaceId, code, previous) {
   return given.length === expected.length && crypto.timingSafeEqual(given, expected) ? old.id : null;
 }
 
-/** Exchange a pairing code for agent credentials. */
+/** A proven re-pair is kept in kv `agent_replaces:<newId>` as the list of earlier ids it takes over, oldest first, and
+ * nothing moves until that new id's first heartbeat (`finishReplacement` in src/bot-browser.js): a reply the computer
+ * never read leaves the old pairing working. A pairing that replaces one which never beat takes over that one's list too. */
+export const replacesKey = agentId => `agent_replaces:${agentId}`;
+export function pendingReplacement(store, agentId) {
+  try {
+    const list = JSON.parse((typeof store.kvGet === 'function' && store.kvGet(replacesKey(agentId))) || '[]');
+    return Array.isArray(list) ? list.filter(id => typeof id === 'string') : [];
+  } catch { return []; }
+}
+
+/** Exchange a pairing code for agent credentials. `replaced` says whether the caller's proof of an earlier pairing was
+ * taken; its accounts and bot pins move on the new id's first heartbeat. */
 export function redeemPairing(store, {code, name, permissions = [], features, previous}) {
   const row = store.get('SELECT * FROM pairing_codes WHERE code_hash=?', sha256(String(code || '')));
   if (!row) fail('This pairing code is not valid.', 401);
@@ -271,8 +284,9 @@ export function redeemPairing(store, {code, name, permissions = [], features, pr
     // What its app can do, so work that needs a feature is not refused before the first heartbeat (an older app sends
     // none). In the same write: a failure here must not leave a used code and an agent behind.
     if (features !== undefined) recordAgentFeatures(store, agentId, features);
+    if (replaces) store.kvSet(replacesKey(agentId), JSON.stringify([...new Set([...pendingReplacement(store, replaces), replaces])]));
   });
-  return {agentId, secret, workspaceId: row.workspace_id, permissions: granted, pollIntervalMs: 30000, replaces};
+  return {agentId, secret, workspaceId: row.workspace_id, permissions: granted, pollIntervalMs: 30000, replaced: Boolean(replaces)};
 }
 
 export const agentTaskKinds = () => [...AGENT_ACTIONS];
@@ -476,9 +490,15 @@ export function recordAgentFeatures(store, agentId, reported) {
  * writes nothing, so the last report stands. No report reads signed out. */
 export function recordAccountReports(store, agentId, reported) {
   if (!Array.isArray(reported) || typeof store.kvSet !== 'function') return;
-  const ids = (store.read().browserAccounts || []).filter(a => a.deviceId === agentId).map(a => a.id);
+  const ids = (peek(store).browserAccounts || []).filter(a => a.deviceId === agentId).map(a => a.id);
+  // `checkedAt` is when an entry's finding was first heard: an entry that says what it said last keeps its time, and a
+  // report that is the same as the last one is not written again (a computer beats every few seconds).
+  const before = new Map(readAccountReports(store, agentId).map(r => [r.id, r]));
+  const same = (r, was) => was && was.state === r.state && Boolean(was.lost) === Boolean(r.lost);
   const at = now();
-  store.kvSet(`agent_accounts:${agentId}`, JSON.stringify(cleanAccountReport(reported, ids).map(r => ({...r, checkedAt: at}))));
+  const next = cleanAccountReport(reported, ids).map(r => ({...r, checkedAt: same(r, before.get(r.id)) && before.get(r.id).checkedAt ? before.get(r.id).checkedAt : at}));
+  if (next.length === before.size && next.every(r => same(r, before.get(r.id)) && r.checkedAt === before.get(r.id).checkedAt)) return;
+  store.kvSet(`agent_accounts:${agentId}`, JSON.stringify(next));
 }
 export function readAccountReports(store, agentId) {
   try {

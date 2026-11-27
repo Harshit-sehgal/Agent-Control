@@ -38,7 +38,11 @@ test('a site is a hostname with a dot, however the owner pasted it', () => {
   assert.equal(site('CRM.Example.com.'), 'crm.example.com');
   assert.equal(site('crm.example.com:8443/app?x=1'), 'crm.example.com');
   assert.equal(site('http://user:pw@crm.example.com/'), 'crm.example.com');
-  for (const bad of ['', '   ', 'localhost', 'https://localhost:3000', 'not a host', 7, null, undefined, {}, '[::1]']) {
+  assert.equal(site('my-crm.example.co'), 'my-crm.example.co');
+  assert.equal(site('Bücher.example'), 'xn--bcher-kva.example', 'a name in another script is kept as the browser spells it');
+  assert.equal(site(`${'a'.repeat(63)}.com`), `${'a'.repeat(63)}.com`);
+  for (const bad of ['', '   ', 'localhost', 'https://localhost:3000', 'not a host', 7, null, undefined, {}, '[::1]',
+    'a..b', '.com', '-.com', 'a-.com', 'crm.-example.com', 'a_b.example.com', `${'a'.repeat(64)}.com`, '10.0.0.1', 'https://192.168.1.20/', 'crm.123']) {
     assert.throws(() => cleanAccount({name: 'X', site: bad, deviceId: 'pc-1'}), /such as crm\.example\.com/, JSON.stringify(bad));
   }
 });
@@ -81,6 +85,8 @@ test('removing an account a bot uses is refused, naming the bot; repoint moves a
   assert.equal(s.browserAccounts[0].deviceId, 'pc-9'); assert.equal(s.groups[0].bots[1].settings.device, 'pc-9');
   assert.equal(s.groups[0].bots[0].settings.device, 'pc-9');
   assert.equal(repointDevice(s, 'pc-2', 'pc-9'), 0, 'nothing is left to move');
+  for (const none of ['', null, undefined]) assert.equal(repointDevice(s, 'pc-9', none), 0, 'no computer to move to moves nothing');
+  assert.equal(s.browserAccounts[0].deviceId, 'pc-9', 'and leaves the account where it was');
   s.groups[0].bots.length = 2;
   s.groups[0].bots[0].settings.browserAccount = null;
   assert.equal(removeAccount(s, A).id, A);

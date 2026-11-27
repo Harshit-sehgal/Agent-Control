@@ -18,7 +18,8 @@ export function fakeCdp({pages = {}} = {}) {
     if (!context) throw new Error(`Failed to find browser context with id ${id}`);
     return context;
   };
-  // What Storage.setCookies accepts (CookieParam): anything else is a protocol error, as in Chrome.
+  // What Storage.setCookies accepts (CookieParam). Chrome ignores a field it does not know; this fake is deliberately
+  // stricter and refuses one, so a jar that carries more than the cookie's own fields fails a test.
   const COOKIE_PARAM = new Set(['name', 'value', 'url', 'domain', 'path', 'secure', 'httpOnly', 'sameSite', 'expires', 'priority', 'sameParty', 'sourceScheme', 'sourcePort', 'partitionKey']);
   const asCookie = param => {
     for (const key of Object.keys(param)) if (!COOKIE_PARAM.has(key)) throw new Error(`Invalid parameters: unexpected cookie field ${key}`);

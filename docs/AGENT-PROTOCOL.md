@@ -12,7 +12,7 @@ The control plane never dials your device. Every request in this protocol is
    pairing.
 2. The **device** exchanges it exactly once:
    `POST /api/agent/pair {code, name, permissions, features}` →
-   `{agentId, secret, workspaceId, permissions, pollIntervalMs}`.
+   `{agentId, secret, workspaceId, permissions, pollIntervalMs, replaced}`.
    The plaintext `secret` is returned once; the server keeps only an
    AES-256-GCM-encrypted copy and a SHA-256 hash. `features` is what the app
    can do (`shared/device-features.js`), the same list every heartbeat sends,
@@ -25,13 +25,22 @@ The control plane never dials your device. Every request in this protocol is
    hex HMAC-SHA256, keyed by the old secret, of `re-pair\n` and the new code.
    The server accepts it only for an agent of the code's workspace that is not
    revoked, and compares it in constant time. A proven `previous` makes the new
-   agent that computer's replacement: its browser accounts and bot pins move to
-   the new id, its old row is retired and its pages in flight are failed. Any
-   other `previous` (or none) pairs a new computer and moves nothing. The reply
-   does not say which happened.
+   agent that computer's replacement, and the reply says `replaced: true`. Any
+   other `previous` (or none) pairs a new computer, moves nothing and says
+   `replaced: false`. Nothing moves at pairing: on the new id's first heartbeat
+   the old computer's browser accounts and bot pins move to it, then its old row
+   is retired and its pages in flight are failed, and that same answer lists the
+   moved accounts. So a reply that never reaches the computer (a timeout, a
+   proxy error, a crash) changes nothing: the old pairing keeps working, and the
+   new id never beats. If the move fails, the beat fails, and the next one
+   finishes it. An old row the owner removed before the new id beat gives it
+   nothing. A pairing that proves one which never beat takes over what that one
+   was waiting for.
 
    The device does a re-pair in two steps, so a stop in the middle strands
-   nothing. It first finishes any earlier re-key. When the server answers it
+   nothing. It first finishes any earlier re-key. When the server answers
+   `replaced: false` it wipes every jar, because no account is coming to the new
+   pairing. Otherwise (an older server that does not say counts as yes) it
    saves the config with both secrets (`rekeyFrom` holds the old one), then
    re-encrypts the browser-account jars under the new secret, then saves the
    config again without `rekeyFrom`. A start that finds `rekeyFrom` finishes the
@@ -47,8 +56,11 @@ The control plane never dials your device. Every request in this protocol is
    cannot be read or parsed. The lock is created with `wx`, mode 0600, and holds
    `{pid, token, at}`. It is stale when its process is the one asking or is gone,
    or when it was last refreshed over 2 minutes ago; `run` refreshes it every 30
-   seconds. A folder that cannot be written stops `pair`, and lets `run` go on
-   without a lock.
+   seconds, and `pair` refreshes it while it waits on the server, whose reply
+   body is bounded by the same 15-second timeout as the request. A folder that
+   cannot be written, or any other error making the lock but "it exists" (a
+   full disk, a failing device), stops `pair` and lets `run` go on without a
+   lock.
 
 ## 2. Signed requests
 Every subsequent agent request carries three headers:
@@ -83,13 +95,17 @@ Verification (`verifyAgentRequest`):
   `unknown`, `storage` is `cookies`, and `lost: true` says the jar was put back
   and the site still showed its sign-in page. The server keeps only those
   fields, only for accounts that name this computer, one entry each; a
-  cookie value is not a field, so none can be stored. A beat without a list
-  leaves the last report as it was. The answer carries `accounts: [{id, site}]`,
+  cookie value is not a field, so none can be stored. An entry that says what
+  it said last keeps the time it was first said, and a report the same as the
+  last is not written again. A beat without a list leaves the last report as it
+  was. The answer carries `accounts: [{id, site}]`,
   the accounts that name this computer. The device wipes any jar that is not on
   that list, and refuses a task for an account that is not on it. A beat with no
   list in the answer (an older server) wipes nothing. A device lists
   `browser-accounts-v1` in its `features`, and the server sends it account work
-  only when it does.
+  only when it does: a task for an account claimed by a beat whose `features`
+  lack it (an app rolled back after the task was queued) is failed with the
+  update line instead of handed over.
 - `POST /api/agent/live` `{tabs:[{botId,account,url,title}], owner, failed?}` → a long
   poll (held up to 20 s) that answers `{commands, watch, watchAccount?}`: `watch` is the bot
   whose tab the owner is looking at (or null) and `watchAccount` the browser account that
@@ -115,7 +131,7 @@ frame), uses these; `src/browser-live.js` keeps what they carry in memory:
 
 - `GET /api/browser-live` → `[{botId, state: idle|browsing|driving, url, title,
   site, pages: [{url, title, at}], runId, requestId, live, account}]`. `account` is
-  `{id, name}` when the bot signs in as a browser account, else null. `pages` are this
+  `{name}` when the bot signs in as a browser account, else null. `pages` are this
   run's, or the last run's when idle. `site` is the host of the page now while
   the bot is browsing or driven, else null.
 - `GET /api/browser-live/:botId?after=<seq>` → the same line plus the newest
@@ -155,9 +171,10 @@ stamps the account at four hops, and the device checks it before every step:
 
 On the device the shared browser keeps one Chrome and gives each listed account a
 browser context of its own, made when a task first needs it and filled from that
-account's jar. A tab belongs to one (account, bot) and has its own queue, so one
-bot's tasks on two accounts run side by side and two bots on one account each
-have a tab in its context. Before every step the device checks that the tab sits
+account's jar. A tab belongs to one (account, bot) and has its own queue, so two
+bots on one account each have a tab in its context, and two bots on two accounts
+work side by side. A bot signs in as one account at a time, and its browser
+tasks still run one at a time. Before every step the device checks that the tab sits
 in the account's current context, and it refuses the step if it does not. A bot
 with no account uses the persistent profile, as before.
 
@@ -176,13 +193,15 @@ The housekeeping `sweep` runs about once a minute (`agent/browser-host.mjs`):
   saved;
 - an account context with no tab and no keeper is saved and closed, and comes back
   from its jar;
-- a **keeper** tab reads each signed-in account's site (`https://<site>/`, only
-  when the allowlist names it) every 30 minutes. A sign-in page, or any page with
+- a **keeper** tab reads the site (`https://<site>/`, only when the allowlist
+  names it) of each account that is signed in, or whose jar has not been checked
+  yet, every 30 minutes. A sign-in page, or any page with
   a visible password field, marks the account `signed-out`; any other page of the
   site marks it `signed-in`. A task's own page says the same. The keeper's read is
   not use of the browser;
 - with `AGENT_BROWSER_QUIT_IDLE=1`, Chrome is closed after 30 minutes in which no
-  task ran and no one drove or watched a tab. Every jar is saved first, and the
+  task ran and no one drove or watched a tab. Every jar is saved first, a task
+  that arrives during those saves keeps it open, and the
   next task starts Chrome again with each account signed in from its jar. Without
   it the browser is never quit for being idle.
 
@@ -284,8 +303,10 @@ Boundaries — the same as a read, plus interaction:
   `AGENT_BROWSER_ALLOWLIST`, including after a redirect;
 - the browser reaches the network only through the agent's proxy, which refuses
   private/local addresses, so a step cannot pivot to your LAN;
-- the real browser runs on a **persistent profile shared by every bot**, so
-  what the owner signed in to is available to all of them. That is the design
+- the real browser runs on a **persistent profile shared by every bot** that
+  does not sign in as a browser account, so what the owner signed in to there is
+  available to all of them; a bot with an account has that account's context
+  instead. That is the design
   (see "The shared browser"); the allowlist and the egress proxy still decide
   where it may go;
 - interaction requires the real browser (`AGENT_BROWSER=1`); the fetch fallback

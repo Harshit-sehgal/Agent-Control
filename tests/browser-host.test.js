@@ -53,6 +53,37 @@ test('both the jars and this computer\'s id reach the shared browser', async t =
   assert.equal((await r.host.run(task({}))).text, 'signed out', 'no account: the default profile');
 });
 
+test('without AGENT_BROWSER=1 a browser action starts no browser, and the sweep starts none for a jar on disk', async t => {
+  const r = rig(t);
+  r.jars().save(A, [SID]);
+  await r.host.applyAccounts([{id: A, site: SITE}], 1);
+  r.host.startSweeps();
+  const action = {kind: 'browser.action', payload: {url: HOME, botId: 'scout', steps: [{op: 'scroll'}]}};
+  await assert.rejects(r.host.run(action), /needs a real browser: set AGENT_BROWSER=1/);
+  await sleep(80);                                       // several sweep periods
+  assert.equal(r.host.current(), null, 'no shared browser was made');
+  assert.equal(r.processes.length, 0, 'no browser was started');
+  assert.deepEqual(r.jars().ids(), [A], 'the jar is left alone');
+});
+
+test('a list applied when the browser is made late is never followed by an older one', async t => {
+  const r = rig(t);
+  r.jars().save(A, [SID]); r.jars().save(B, [SID]);
+  // Two beats land before any task: both updates wait in the chain, the newer list drops A.
+  r.host.applyAccounts([{id: A, site: SITE}, {id: B, site: SITE}], 1);
+  const settled = r.host.applyAccounts([{id: B, site: SITE}], 2);
+  const sb = r.host.shared();
+  const seen = [];
+  const set = sb.setAccounts;
+  sb.setAccounts = list => { seen.push(list.map(a => a.id)); return set(list); };
+  await settled;
+  await r.host.applyAccounts(undefined);
+  assert.ok(seen.length > 0);
+  for (const ids of seen) assert.deepEqual(ids, [B], 'only the newest list is applied once the browser exists');
+  await assert.rejects(r.host.run(task({account: A, deviceId: AGENT})), /cannot use\.$/, 'the dropped account is never served');
+  assert.deepEqual(r.jars().ids(), [B]);
+});
+
 test('the idle quit is on only when asked, through the environment', async t => {
   for (const [value, quits] of [['1', true], [undefined, false]]) {
     const r = rig(t, {env: value ? {AGENT_BROWSER_QUIT_IDLE: value} : {}});
@@ -107,8 +138,8 @@ test('list updates never overlap, and an older beat\'s list never replaces a new
   r.jars().save(A, [SID]);
   await Promise.all([r.host.applyAccounts([], 2), r.host.applyAccounts([{id: A, site: SITE}], 3), r.host.applyAccounts([{id: B, site: SITE}], 2)]);
   assert.equal(most, 1, 'one update at a time');
-  assert.deepEqual(order, [[], [A]], 'in the order asked; a beat no newer than the last applied is dropped');
-  assert.equal((await r.host.run(task({account: A, deviceId: AGENT}))).text, 'signed out', 'A was wiped and listed again: it runs, from no jar');
+  assert.deepEqual(order, [[A], [A]], 'each update applies the newest list; a beat no newer than the last applied is dropped');
+  assert.equal((await r.host.run(task({account: A, deviceId: AGENT}))).text, 'signed in', 'the newest list holds A, so its jar was never wiped');
 });
 
 test('the heartbeat reports each jar as unknown with no browser, and the browser\'s own states once there is one', async t => {

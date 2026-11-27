@@ -306,6 +306,37 @@ test('the idle quit waits while a person drives or watches, and without it nothi
   assert.equal(plain.fake().closed, false, 'no idle quit unless asked for');
 });
 
+test('the idle quit gives way to a task that arrives while it saves the jars', async t => {
+  // The same quiet browser twice: once to count the cookie reads a quitting sweep makes, once to hold its last one.
+  const quiet = async r => {
+    await r.sb.setAccounts([{id: A, site: SITE}]);
+    await r.sb.run('scout', {url: HOME});
+    r.advance(QUIT_IDLE_MS);
+  };
+  const dry = rig(t, {jars: memJars({[A]: [SID]}), extra: {quitIdle: true}});
+  await quiet(dry);
+  const before = dry.fake().called('Storage.getCookies').length;
+  await dry.sb.sweep();
+  assert.equal(dry.fake().closed, true, 'a quiet browser quits');
+  const reads = dry.fake().called('Storage.getCookies').length - before;
+  assert.ok(reads > 0, 'the quit saves a jar first');
+
+  const r = rig(t, {jars: memJars({[A]: [SID]}), extra: {quitIdle: true}});
+  await quiet(r);
+  const began = deferred(), gate = deferred();
+  let seen = 0;
+  r.fake().hook('Storage.getCookies', async () => { if (++seen === reads) { began.resolve(); await gate.promise; } return undefined; });
+  const sweeping = r.sb.sweep();
+  await began.promise;
+  const task = r.sb.run('scout', {url: HOME});
+  for (let i = 0; i < 50 && !r.sb.laneCount(); i++) await sleep(5);
+  gate.resolve();
+  await sweeping;
+  assert.equal((await task).text, 'Inbox', 'the task that came during the saves is served');
+  assert.equal(r.fake().closed, false, 'and the browser is not closed under it');
+  assert.equal(r.processes.length, 1);
+});
+
 test('a sign-in made during a takeover is saved at the hand back', async t => {
   const r = rig(t);
   const {sb, jars} = r;
@@ -387,6 +418,14 @@ test('a planted cookie value leaves the device nowhere', async t => {
   r.advance(SAVE_MS);
   await sb.sweep();                                    // saves fail here, in fixed words
   await sb.run('scout', {url: HOME, account: A});
+  // Putting a jar back fails too, in a context made fresh: the browser's error, which names the cookie, stays inside.
+  const fresh = rig(t, {jars});
+  await fresh.sb.setAccounts([{id: A, site: SITE}]);
+  await fresh.sb.run('warmup', {url: HOME});
+  fresh.fake().hook('Storage.setCookies', () => { throw new Error(`boom ${MARKER}`); });
+  const refused = await fresh.sb.run('scout', {url: HOME, account: A}).then(() => null, error => error);
+  assert.ok(refused, 'a jar that cannot be put back refuses the task');
+  lines.push(String(refused.message), String(refused.stack));
   const out = JSON.stringify([result, sb.accountStates(), sb.status(), lines]);
   assert.doesNotMatch(out, /MARKER-COOKIE-7f3/i);
   assert.ok(lines.some(line => /could not save/.test(line)), 'the failure was said');

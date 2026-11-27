@@ -48,9 +48,12 @@ export function createBrowserHost({agentId, secret, configPath, env = process.en
     if (!Array.isArray(list) || seq <= appliedSeq) return chain;
     appliedSeq = seq;
     lastList = list;
+    // Each update applies the newest list, not the one it was queued with: a browser made meanwhile was given the
+    // newest at once, and an older list after it would list again an account just let go.
     chain = chain.then(async () => {
-      try { jars?.retain(list.map(a => a?.id)); } catch { console.error('agent: could not remove a browser account\'s saved sign-in.'); }
-      if (sb) await sb.setAccounts(list);
+      const newest = lastList;
+      try { jars?.retain(newest.map(a => a?.id)); } catch { console.error('agent: could not remove a browser account\'s saved sign-in.'); }
+      if (sb) await sb.setAccounts(newest);
     }).catch(() => console.error('agent: could not apply the browser account list.'));
     return chain;
   }
@@ -62,7 +65,10 @@ export function createBrowserHost({agentId, secret, configPath, env = process.en
     try { return jars.ids().map(id => ({id, state: 'unknown', storage: 'cookies'})); } catch { return []; }
   }
 
-  const run = task => runBrowserTask(task, {shared: shared(), allow: allow(), env, agentId});
+  // The browser is made only when a task gets past every refusal: a browser action on a computer without AGENT_BROWSER=1
+  // is refused first, so it never starts the browser, and with no browser the sweep has nothing to keep.
+  const lazy = {run: (...args) => shared().run(...args)};
+  const run = task => runBrowserTask(task, {shared: lazy, allow: allow(), env, agentId});
 
   /** One `browser.capture`. `browser` is whether this computer drives a real browser; `readPlain` reads a page with no
    * browser. The account and computer are checked first, so no fallback sees a task that was not this computer's. */

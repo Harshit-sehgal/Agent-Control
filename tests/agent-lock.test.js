@@ -98,6 +98,20 @@ test('a read-only folder is "unavailable", not a crash', t => {
   releaseLock(got.lock);   // nothing to give back is fine
 });
 
+test('any error making the lock other than "it exists" is "unavailable", and a lock whose write failed is not left behind', t => {
+  for (const code of ['ENOSPC', 'EDQUOT', 'EIO', 'ENOTSUP']) {
+    const file = path.join(tmp(t), 'x.lock');
+    const open = t.mock.method(fs, 'openSync', () => { throw Object.assign(new Error(code), {code}); });
+    assert.deepEqual(takeLock(file, {pid: PID}), {status: 'unavailable', code}, `${code} at open`);
+    open.mock.restore();
+    const write = t.mock.method(fs, 'writeFileSync', () => { throw Object.assign(new Error(code), {code}); });
+    assert.deepEqual(takeLock(file, {pid: PID}), {status: 'unavailable', code}, `${code} at write`);
+    write.mock.restore();
+    assert.equal(fs.existsSync(file), false, `${code}: the empty lock the failed write made is removed`);
+    assert.equal(takeLock(file, {pid: PID}).status, 'taken', 'and the next try takes it');
+  }
+});
+
 test('a link and its target share one lock', t => {
   const dir = tmp(t);
   const real = path.join(dir, 'volume.json');

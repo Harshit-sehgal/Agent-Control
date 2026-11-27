@@ -63,7 +63,7 @@ async function scratch(t) {
 }
 
 /** A control plane that answers every heartbeat with `answer(beatNumber)` and keeps what the device sent. */
-async function stubPlane(t, answer, {holdPair = false} = {}) {
+async function stubPlane(t, answer, {holdPair = false, pairReply = null, stallPairBody = false} = {}) {
   const beats = [], results = {}, hits = [];
   let releasePair = null;
   const pairHeld = new Promise(r => { releasePair = r; });
@@ -75,6 +75,8 @@ async function stubPlane(t, answer, {holdPair = false} = {}) {
       res.setHeader('Content-Type', 'application/json');
       hits.push(req.url);
       if (req.url === '/api/agent/pair' && holdPair) { pairHeld.then(() => { res.statusCode = 500; res.end('{"error":"stub"}'); }); return; }
+      if (req.url === '/api/agent/pair' && stallPairBody) { res.writeHead(201, {'Content-Type': 'application/json'}); res.write('{"agentId":'); pairHeld.then(() => res.destroy()); return; }
+      if (req.url === '/api/agent/pair' && pairReply) { res.statusCode = 201; res.end(JSON.stringify(pairReply)); return; }
       if (req.url === '/api/agent/heartbeat') { beats.push({body, raw}); res.end(JSON.stringify(answer(beats.length))); return; }
       const m = /^\/api\/agent\/tasks\/([^/]+)\/result$/.exec(req.url);
       if (m) { results[m[1]] = body; res.end('{"ok":true}'); return; }
@@ -115,19 +117,104 @@ test('a re-pair keeps every jar: the first heartbeat after it wipes nothing it s
   assert.notEqual(config2.agentId, first.agentId);
   assert.equal('rekeyFrom' in config2, false, 'the old secret is not kept once the jars are re-keyed');
   assert.equal(createJarStore({dir: jarDir, secret: config2.secret}).load(account.id)?.[0].value, MARKER, 'the jar opens under the new secret');
-  const moved = (await server.send('GET', '/api/browser-accounts')).body.accounts.find(a => a.id === account.id);
-  assert.equal(moved.deviceId, config2.agentId, 'the server moved the account to the new computer id');
-  const agents = (await server.send('GET', '/api/agents')).body.agents;
-  assert.ok(!agents.find(a => a.id === first.agentId && a.status !== 'revoked'), 'the old row is revoked');
+  const deviceOf = async () => (await server.send('GET', '/api/browser-accounts')).body.accounts.find(a => a.id === account.id).deviceId;
+  const oldLive = async () => (await server.send('GET', '/api/agents')).body.agents.some(a => a.id === first.agentId && a.status !== 'revoked');
+  assert.equal(await deviceOf(), first.agentId, 'nothing moves until the new computer beats');
+  assert.equal(await oldLive(), true);
 
   const worker = agent.run();
   t.after(() => worker.kill());
   await until(() => readJson(agent.config)?.lastSeenAt, 'a heartbeat');
   await worker.stop();
+  assert.equal(await deviceOf(), config2.agentId, 'the first beat moved the account to the new computer id');
+  assert.equal(await oldLive(), false, 'and revoked the old row');
   const after = createJarStore({dir: jarDir, secret: config2.secret});
   assert.deepEqual(after.ids(), [account.id], 'the account\'s jar stays, the orphan the server omits is gone');
   assert.equal(after.load(account.id)?.[0].value, MARKER);
   assert.ok(!agent.log().includes(MARKER) && !agent.log().includes(config2.secret) && !agent.log().includes(first.secret), 'no cookie and no secret in the output');
+});
+
+test('a re-pair whose reply is lost on the way keeps the old pairing and every jar, and the next re-pair keeps them too', {timeout: 90000}, async t => {
+  const dir = await scratch(t);
+  const server = await serverIn(dir);
+  t.after(() => server.stop());
+  // A proxy that hands the pair to the server, lets it answer, then drops the connection: the server has redeemed the
+  // code, the computer never hears it.
+  const proxy = http.createServer((req, res) => {
+    let raw = '';
+    req.on('data', b => { raw += b; });
+    req.on('end', async () => {
+      await fetch(server.base + req.url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: raw}).then(r => r.text()).catch(() => {});
+      req.socket.destroy();
+    });
+  });
+  await new Promise(r => proxy.listen(0, '127.0.0.1', r));
+  t.after(() => new Promise(r => proxy.close(r)));
+  const lossy = `http://127.0.0.1:${proxy.address().port}`;
+  const agent = agentIn(dir, {});
+  const code = async () => (await server.send('POST', '/api/agents/pair', {label: 'Laptop', permissions: ['browser.capture']})).body.code;
+  assert.equal((await agent.pair(server.base, await code())).status, 0);
+  const first = readJson(agent.config);
+  assert.equal((await server.send('POST', '/api/browser-accounts', {name: 'CRM', site: SITE, deviceId: first.agentId})).status, 201);
+  const account = (await server.send('GET', '/api/browser-accounts')).body.accounts[0];
+  const jarDir = path.join(dir, 'browser-accounts');
+  createJarStore({dir: jarDir, secret: first.secret}).save(account.id, [cookie]);
+  // The same server behind the proxy: the saved pairing is for `server.base`, so point it at the proxy for this pair.
+  fs.writeFileSync(agent.config, JSON.stringify({...first, server: lossy}), {mode: 0o600});
+  const lost = await agent.pair(lossy, await code());
+  assert.notEqual(lost.status, 0, 'the pair reports the failure');
+  assert.equal(readJson(agent.config).agentId, first.agentId, 'the old pairing is kept');
+  assert.equal(readJson(agent.config).secret, first.secret);
+  assert.equal(createJarStore({dir: jarDir, secret: first.secret}).load(account.id)?.[0].value, MARKER, 'the jar still opens under the old secret');
+  const agents = (await server.send('GET', '/api/agents')).body.agents;
+  assert.ok(agents.some(a => a.id === first.agentId && a.status !== 'revoked'), 'the server did not retire the old computer');
+  assert.equal((await server.send('GET', '/api/browser-accounts')).body.accounts[0].deviceId, first.agentId, 'nor move its account');
+
+  fs.writeFileSync(agent.config, JSON.stringify(first), {mode: 0o600});
+  const again = await agent.pair(server.base, await code());
+  assert.equal(again.status, 0);
+  assert.match(again.log, /Kept 1 browser account\(s\)/);
+  const next = readJson(agent.config);
+  const worker = agent.run();
+  t.after(() => worker.kill());
+  await until(() => readJson(agent.config)?.lastSeenAt, 'a heartbeat');
+  await worker.stop();
+  assert.equal((await server.send('GET', '/api/browser-accounts')).body.accounts[0].deviceId, next.agentId);
+  assert.deepEqual(createJarStore({dir: jarDir, secret: next.secret}).ids(), [account.id]);
+  assert.equal(createJarStore({dir: jarDir, secret: next.secret}).load(account.id)?.[0].value, MARKER);
+});
+
+test('a re-pair the server did not take as the same computer removes the old sign-ins and says so', {timeout: 60000}, async t => {
+  const dir = await scratch(t);
+  const jarDir = path.join(dir, 'browser-accounts');
+  const plane = await stubPlane(t, () => ({ok: true, tasks: []}), {pairReply: {agentId: 'new-agent', secret: 'new-secret-9', workspaceId: 'default', permissions: ['browser.capture'], pollIntervalMs: 2000, replaced: false}});
+  stubConfig(dir, plane.url);
+  createJarStore({dir: jarDir, secret: 'stub-secret-1'}).save(A, [cookie]);
+  const agent = agentIn(dir, {});
+  const out = await agent.pair(plane.url, 'ABCD-1234');
+  assert.equal(out.status, 0);
+  assert.doesNotMatch(out.log, /Kept/);
+  assert.match(out.log, /not take this as the same computer/);
+  const saved = readJson(agent.config);
+  assert.equal(saved.agentId, 'new-agent');
+  assert.equal('rekeyFrom' in saved, false);
+  assert.deepEqual(createJarStore({dir: jarDir, secret: 'new-secret-9'}).ids(), [], 'no jar is kept for accounts that are not coming');
+});
+
+test('a pair whose reply body never ends gives up in time, with the config as it was', {timeout: 60000}, async t => {
+  const dir = await scratch(t);
+  const plane = await stubPlane(t, () => ({ok: true, tasks: []}), {stallPairBody: true});
+  const config = stubConfig(dir, plane.url);
+  const jarDir = path.join(dir, 'browser-accounts');
+  createJarStore({dir: jarDir, secret: 'stub-secret-1'}).save(A, [cookie]);
+  const before = fs.readFileSync(config, 'utf8');
+  const started = Date.now();
+  const out = await agentIn(dir, {}).pair(plane.url, 'ABCD-1234');
+  assert.notEqual(out.status, 0);
+  assert.ok(Date.now() - started < 30000, 'the body read is bounded like the request');
+  assert.equal(fs.readFileSync(config, 'utf8'), before);
+  assert.equal(createJarStore({dir: jarDir, secret: 'stub-secret-1'}).load(A)?.[0].value, MARKER, 'a pair that timed out leaves the jars as they were');
+  assert.equal(fs.existsSync(`${config}.lock`), false);
 });
 
 test('a re-pair that stopped before the jars were re-keyed is finished at the next start', {timeout: 90000}, async t => {

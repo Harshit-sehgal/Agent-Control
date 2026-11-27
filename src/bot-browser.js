@@ -13,7 +13,7 @@ import * as agent from './agent.js';
 import {browserRuntime} from './browser-runtime.js';
 import {fail} from '../shared/errors.js';
 import {addChatMessages} from '../shared/chats.js';
-import {browserAccountOf, browserDeviceOf} from '../shared/browser-accounts.js';
+import {browserAccountOf, browserDeviceOf, repointDevice} from '../shared/browser-accounts.js';
 import {BROWSER_ACCOUNTS_V1} from '../shared/device-features.js';
 import {activity, cleanText} from '../shared/core.js';
 import {browserResultText, capturePageText, hostOf, MAX_BROWSER_DEPTH} from '../shared/bot-browser.js';
@@ -335,6 +335,36 @@ export async function revokeAgentFinishingPages(store, agentId, hooks = {}) {
     catch (error) { console.error('Browser revocation:', error.message); }
   }
   return result;
+}
+
+/** On a re-paired computer's heartbeat, before anything reads which computer holds what: move the accounts and bot
+ * pins of the pairings it proved it replaces (`agent.pendingReplacement`), then retire them. Only pairings of its
+ * workspace that are still live count, so one the owner removed meanwhile keeps its accounts where they are. The move
+ * comes first and both steps are idempotent: a failure anywhere leaves the record, the beat fails (so the computer is
+ * sent no list it would wipe jars by), and the next beat finishes. The revoke and the record's removal are one write. */
+export async function finishReplacement(store, agentId, hooks = {}) {
+  const listed = agent.pendingReplacement(store, agentId);
+  if (!listed.length) return 0;
+  const me = store.get('SELECT workspace_id FROM agents WHERE id=?', agentId);
+  const old = listed.filter(id => id !== agentId && store.get('SELECT 1 AS x FROM agents WHERE id=? AND workspace_id=? AND revoked_at IS NULL', id, me?.workspace_id));
+  if (old.length) {
+    await store.update(s => {
+      for (const id of old) repointDevice(s, id, agentId);
+      activity(s, 'agent', 'A local agent was replaced by a computer that proved it was the same one. Its pages in flight were failed, and its accounts moved.', {agentId: old[old.length - 1]});
+    });
+  }
+  const pages = old.length ? store.all(
+    `SELECT id FROM agent_tasks WHERE agent_id IN (${old.map(() => '?').join(',')}) AND kind IN ('browser.capture','browser.action') AND status IN ('queued','running')`, ...old,
+  ).map(task => task.id) : [];
+  store.transaction(() => {
+    for (const id of old) agent.revokeAgent(store, id);
+    for (const id of [agentId, ...listed]) store.run('DELETE FROM kv WHERE key=?', agent.replacesKey(id));
+  });
+  for (const id of pages) {
+    try { await onAgentTaskResult(store, id, hooks); }
+    catch (error) { console.error('Browser revocation:', error.message); }
+  }
+  return old.length;
 }
 
 /** An agent reported on a task. A task that will retry changes nothing yet. */

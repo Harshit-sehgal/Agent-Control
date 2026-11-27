@@ -75,6 +75,24 @@ test('an account bot\'s page goes to the account\'s computer with the account st
   assert.equal(store.read().browserRequests[0].account, ACCOUNT);
 });
 
+test('an account moved between the claim and the enqueue sends nothing: 409, no task, and the request waits again', async t => {
+  const {store, pair, setup} = await rig(t);
+  const pc1 = pair('Desk', ['browser.capture']);
+  const pc2 = pair('Laptop', ['browser.capture']);
+  await setup({account: ACCOUNT, deviceId: pc1});
+  const update = store.update.bind(store);
+  let writes = 0;
+  // The claim write lands as written; while the enqueue write runs, the owner has just moved the account.
+  store.update = fn => (++writes === 2 ? update(s => { s.browserAccounts[0].deviceId = pc2; return fn(s); }) : update(fn));
+  await assert.rejects(browser.dispatchBrowserRequest(store, 'br1', {runtime: noRun}), e => e.status === 409 && e.message === 'This bot\'s browser account changed. Approve again.');
+  store.update = update;
+  assert.deepEqual(tasks(store), [], 'no task was queued');
+  const request = store.read().browserRequests[0];
+  assert.equal(request.status, 'pending', 'the request waits for the owner again');
+  assert.equal('account' in request, false);
+  assert.equal('accountName' in request, false);
+});
+
 test('an account bot with no pin still goes to the account\'s computer, not the most recent one', async t => {
   const {store, pair, setup} = await rig(t);
   const pc1 = pair('Desk', ['browser.capture'], {seenAgo: 2 * MIN});

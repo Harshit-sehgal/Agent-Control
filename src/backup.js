@@ -372,6 +372,8 @@ export function importBackup(store, document, {force = false, primaryWorkspace =
     // What the computers last said of each browser account. After a restore no account has a report, so each reads
     // signed out until its computer reports again.
     try { store.run("DELETE FROM kv WHERE key LIKE 'agent\\_accounts:%' ESCAPE '\\'"); } catch { /* Older schema. */ }
+    // A re-pair waiting for its first heartbeat names computers the restore revokes: it can never finish.
+    try { store.run("DELETE FROM kv WHERE key LIKE 'agent\\_replaces:%' ESCAPE '\\'"); } catch { /* Older schema. */ }
     // Pairing codes are excluded from backups. A pre-restore code must not
     // remain usable after restored agents have been revoked.
     store.run('DELETE FROM pairing_codes');

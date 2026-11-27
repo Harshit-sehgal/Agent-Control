@@ -657,8 +657,9 @@ export async function startBrowserSession({binary = findBrowser(), permit = publ
     }
   }
 
-  /** A page in the default context, which is the kept profile: what a bot's tab
-   * in the shared browser is. Its own guard stays on for the tab's lifetime, so
+  /** A page in the default context (the kept profile), or in `browserContextId`
+   * when one is given (a browser account's own context): what a bot's tab in the
+   * shared browser is. Its own guard stays on for the tab's lifetime, so
    * a bot's step and a person's click are held to the same allowlist. */
   async function newTab({allow, viewport = {width: 1280, height: 800}, browserContextId = null} = {}) {
     const {targetId} = await cdp.send('Target.createTarget', {url: 'about:blank', ...(browserContextId ? {browserContextId} : {})});

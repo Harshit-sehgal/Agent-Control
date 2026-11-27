@@ -478,11 +478,12 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
    * so what leaves here is scrubbed of what the owner typed in secret. */
   const status = () => [...tabs].filter(([, entry]) => entry.botId !== KEEPER).map(([key, {botId, account, url, title, typed}]) => ({botId, account, state: driving?.key === key ? 'driving' : lanes.get(key)?.holding ? 'browsing' : 'idle', ...scrubTyped({url, title}, typed)}));
 
-  /** Every account's cookies are kept before the browser ends (best effort, each only a moment), then it is closed. */
-  async function close() {
+  /** Every account's cookies are kept before the browser ends (best effort, each only a moment), then it is closed.
+   * `save: false` is for a caller that has just saved them: the session is let go at once, with no wait in between. */
+  async function close({save = true} = {}) {
     clearTimeout(idleTimer);
     const live = session;
-    if (live && jars && !live.dead) await Promise.all([...contexts.keys()].map(account => saveSoon(live, account)));
+    if (save && live && jars && !live.dead) await Promise.all([...contexts.keys()].map(account => saveSoon(live, account)));
     session = null;
     watched = null;
     tabs.clear();
@@ -508,7 +509,8 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
     // The owner's hold on a wiped account's tab goes with it, even before that tab exists.
     if (driving?.account && !next.has(driving.account)) { driving = null; clearTimeout(idleTimer); notify(); }
     const held = new Set([...contexts.keys(), ...[...tabs.values()].map(entry => entry.account), ...jarIds(), ...states.keys()]);
-    for (const id of held) if (id && !next.has(id)) await letGo(id);
+    // A newer list that came while this one let accounts go does the rest itself.
+    for (const id of held) if (id && !next.has(id)) { if (listed !== next) return; await letGo(id); }
   }
   async function letGo(account) {
     const live = session, entry = contexts.get(account);
@@ -601,8 +603,13 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
       }
     }
     // 5. Quit: nothing has run, been driven or been watched for 30 minutes. Every jar is saved, then the browser closes.
+    // The jars are saved before the browser is let go, and a task, a person or a page being opened meanwhile keeps it:
+    // the second look and the close are in one step, so nothing can start in between.
+    const quiet = () => !driving && !watched && !lanes.size && !opening.size && at - lastActive >= QUIT_IDLE_MS;
     live = up() ? session : null;
-    if (quitIdle && live && !driving && !watched && !lanes.size && at - lastActive >= QUIT_IDLE_MS) await close();
+    if (!quitIdle || !live || !quiet()) return;
+    if (jars) await Promise.all([...contexts.keys()].map(account => saveSoon(live, account)));
+    if (session === live && up() && quiet()) await close({save: false});
   }
 
   /** `value` scrubbed of what the owner typed in secret on this bot's tab: for a result that left some other way. */
