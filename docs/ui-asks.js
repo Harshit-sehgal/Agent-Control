@@ -7,8 +7,8 @@
  * An ask is a line in a chat (`{kind: 'ask', askId, text}`) whose status lives in
  * `state.asks`, so answering never rewrites a line. A grant is `{botId, action,
  * scope, choice}` in `state.grants`. */
-import {ASK_ANSWER_LABELS, GRANT_LABELS, ASK_ACTIONS, UNTIL_CHOICES, askChoices, acrossSites, grantChoices, answeredText, grantFor, isAskAction, scopeOf, grantEnded, isSigninAsk, askText} from './asks.js?v=e020a5f84c';
-import {limitsOf, FAIL_STREAK} from './limits.js?v=e020a5f84c';
+import {ASK_ANSWER_LABELS, GRANT_LABELS, ASK_ACTIONS, UNTIL_CHOICES, askChoices, acrossSites, grantChoices, answeredText, grantFor, isAskAction, scopeOf, grantEnded, isSigninAsk, askText} from './asks.js?v=56cf61828d';
+import {limitsOf, FAIL_STREAK} from './limits.js?v=56cf61828d';
 
 /** The sign-in card's note: what Take control does and what happens after Hand back. */
 export const signinNote = ask => `Take control opens ${ask?.accountName}'s browser on its computer. Sign in there, then tap Hand back, and the task carries on by itself.`;

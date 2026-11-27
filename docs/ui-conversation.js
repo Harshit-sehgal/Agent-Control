@@ -7,34 +7,34 @@
  * log and the status line are repainted after that, so a background refresh can
  * never wipe what is being typed. The log is only replaced when its markup
  * changed, which keeps a scrolled-up reader where they are. */
-import {OFFJOB_CHOICES} from './off-job.js?v=e020a5f84c';
-import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=e020a5f84c';
-import {requestOfMessage} from './bot-browser.js?v=e020a5f84c';
-import {validHttpUrl} from './core.js?v=e020a5f84c';
-import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=e020a5f84c';
-import {hintFor, hintHtml, pinsOf, pinsStripHtml, HINT_KEY, PINS_MSG_KEY} from './reply-menu.js?v=e020a5f84c';
-import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=e020a5f84c';
-import {isPrimary} from './company.js?v=e020a5f84c';
-import {hasJob, modelChip} from './ui-profile-model.js?v=e020a5f84c';
-import {scheduleTaskBody} from './schedules.js?v=e020a5f84c';
-import {briefingTaskBody} from './briefing.js?v=e020a5f84c';
-import {feed, fileStrip} from './ui-feed.js?v=e020a5f84c';
-import {attachButton, chipsSlot, wireAttach} from './ui-attach.js?v=e020a5f84c';
-import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js?v=e020a5f84c';
-import {askCard} from './ui-asks.js?v=e020a5f84c';
-import {UNTIL_CHOICES, untilFor} from './asks.js?v=e020a5f84c';
-import {undoToast} from './ui-settings.js?v=e020a5f84c';
-import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=e020a5f84c';
-import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=e020a5f84c';
-import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen, loadLocal, saveLocal, changed} from './ui-store.js?v=e020a5f84c';
-import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=e020a5f84c';
-import {toast, confirmSheet} from './ui-dialogs.js?v=e020a5f84c';
-import {siteChip, thumbSlot} from './ui-computer-view.js?v=e020a5f84c';
-import {cliChoice} from './ui-connect-model.js?v=e020a5f84c';
-import {connectAppNow} from './ui-connect.js?v=e020a5f84c';
-import {appById} from './app-catalog.js?v=e020a5f84c';
-import {templateChipsHtml, templateButton} from './ui-templates.js?v=e020a5f84c';
-import {usageWords} from './usage.js?v=e020a5f84c';
+import {OFFJOB_CHOICES} from './off-job.js?v=56cf61828d';
+import {LIMIT_CHOICES, limitText} from './ask-limits.js?v=56cf61828d';
+import {requestOfMessage} from './bot-browser.js?v=56cf61828d';
+import {validHttpUrl} from './core.js?v=56cf61828d';
+import {timeline, threadLineActions, retryTarget, waitingOnYou, totalWaitingOnYou} from './ui-model.js?v=56cf61828d';
+import {hintFor, hintHtml, pinsOf, pinsStripHtml, HINT_KEY, PINS_MSG_KEY} from './reply-menu.js?v=56cf61828d';
+import {botStatus, botIsManager, chatStatus, threadCrew} from './ui-company.js?v=56cf61828d';
+import {isPrimary} from './company.js?v=56cf61828d';
+import {hasJob, modelChip} from './ui-profile-model.js?v=56cf61828d';
+import {scheduleTaskBody} from './schedules.js?v=56cf61828d';
+import {briefingTaskBody} from './briefing.js?v=56cf61828d';
+import {feed, fileStrip} from './ui-feed.js?v=56cf61828d';
+import {attachButton, chipsSlot, wireAttach} from './ui-attach.js?v=56cf61828d';
+import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js?v=56cf61828d';
+import {askCard} from './ui-asks.js?v=56cf61828d';
+import {UNTIL_CHOICES, untilFor, answeredText} from './asks.js?v=56cf61828d';
+import {undoToast} from './ui-settings.js?v=56cf61828d';
+import {face, botColor, botAccent, accentStyle} from './ui-face.js?v=56cf61828d';
+import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js?v=56cf61828d';
+import {store, conversation, findBot, groups, groupOfBot, isStaticDemo, isLive, canWrite, isAdmin, recentRuns, go, api, sync, markSeen, loadLocal, saveLocal, changed} from './ui-store.js?v=56cf61828d';
+import {runAnyway, startThread, answerLimit, rerun} from './ui-chat.js?v=56cf61828d';
+import {toast, confirmSheet} from './ui-dialogs.js?v=56cf61828d';
+import {siteChip, thumbSlot} from './ui-computer-view.js?v=56cf61828d';
+import {cliChoice} from './ui-connect-model.js?v=56cf61828d';
+import {connectAppNow} from './ui-connect.js?v=56cf61828d';
+import {appById} from './app-catalog.js?v=56cf61828d';
+import {templateChipsHtml, templateButton} from './ui-templates.js?v=56cf61828d';
+import {usageWords} from './usage.js?v=56cf61828d';
 
 const el = id => document.getElementById(id);
 /** esc() only makes a value markup-safe: a `javascript:` URL comes out of it
@@ -493,8 +493,8 @@ async function answerAsk(id, answer) {
   const {ask, undo} = await api(`/api/asks/${encodeURIComponent(id)}`, 'POST', {answer, ...(until ? {until} : {})});
   lastsPicked.delete(id);
   await sync();
-  // A sign-in card's Not now needs no toast: the card collapses to "You chose not now".
-  if (answer !== 'always') { if (ask?.kind !== 'signin') toast(answer === 'decline' ? 'Not allowed.' : 'Allowed once.'); return; }
+  // An answered ask leaves the feed, so a sign-in card's Not now says what its card would collapse to.
+  if (answer !== 'always') { toast(ask?.kind === 'signin' ? answeredText(ask) : answer === 'decline' ? 'Not allowed.' : 'Allowed once.'); return; }
   const name = findBot(ask?.botId)?.name || 'The bot';
   undoToast(lasts === '1h' ? `${name} may do this for the next hour.` : lasts === 'today' ? `${name} may do this until the end of today.` : `${name} may always do this.`, undo);
 }

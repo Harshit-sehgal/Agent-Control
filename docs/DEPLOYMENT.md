@@ -464,8 +464,9 @@ the task that waited on the card then carries on. For this to work from a phone:
   below).
 - The computer that holds the account must be running its app, with
   `AGENT_BROWSER=1`, since the sign-in happens in its browser.
-- A card nobody answers ends after 24 hours, and the task that waited on it is told
-  the page was not opened.
+- A card nobody answers ends after 24 hours, as **Not now** does: a waiting task is
+  told the sign-in was declined, and a page asked for in a plain chat is simply not
+  opened.
 
 ## Secrets & the vault
 - Without `MASTER_KEY`, a `vault.key` (mode `0600`) is created beside the
