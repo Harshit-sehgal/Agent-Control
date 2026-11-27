@@ -20,13 +20,13 @@
  * X and Twitter work like any other site: a bot may read, click and type there, and a click on Post asks
  * unless the owner set Always allow for posting on that site.
  */
-import {cleanText, validHttpUrl} from './core.js?v=56cf61828d';
-import {fail} from './errors.js?v=56cf61828d';
-import {decide, createAsk, scopeOf, declinedNeed, outsideRead, keepOutsideMarks, openSigninAsk, signinDeclined} from './asks.js?v=56cf61828d';
-import {botSettings} from './bot-settings.js?v=56cf61828d';
-import {controlFence} from './reply-blocks.js?v=56cf61828d';
-import {BACKSTOP, pagesCap, roundsCap, siteOf, siteCapLeft, countSitePage, limitsOf} from './limits.js?v=56cf61828d';
-import {appForHost} from './app-catalog.js?v=56cf61828d';
+import {cleanText, validHttpUrl} from './core.js?v=c985d30feb';
+import {fail} from './errors.js?v=c985d30feb';
+import {decide, createAsk, scopeOf, declinedNeed, outsideRead, keepOutsideMarks, openSigninAsk, signinDeclined} from './asks.js?v=c985d30feb';
+import {botSettings} from './bot-settings.js?v=c985d30feb';
+import {controlFence} from './reply-blocks.js?v=c985d30feb';
+import {BACKSTOP, pagesCap, roundsCap, siteOf, siteCapLeft, countSitePage, limitsOf} from './limits.js?v=c985d30feb';
+import {appForHost} from './app-catalog.js?v=c985d30feb';
 
 /** The most page text one model turn carries (the pages of a round together). */
 export const MAX_PAGE_CHARS = 24000;

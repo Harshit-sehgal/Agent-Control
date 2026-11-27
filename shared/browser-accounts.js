@@ -107,19 +107,20 @@ export {onSite};
 /** Did a task's steps act on the page, with a click or a type? */
 export const stepsAct = steps => (Array.isArray(steps) ? steps : []).some(step => step?.op === 'click' || step?.op === 'type');
 
-/** Is this page the account's sign-in wall? True when the page is a sign-in page (or shows a password field) on the
- * account's site, or when a page on the site ended on an identity provider's sign-in host, whatever its return
- * parameter says. A sign-in page on another site is that site's wall, never this account's. `url` is what was asked
+/** Is this page the account's sign-in wall? True when the page is a sign-in page (or shows a password field) whose own
+ * host is on the account's site, or when a page on the site ended on an identity provider's sign-in host, whatever its
+ * return parameter says. The host showing the form decides, never where its `next` or `continue` would send the
+ * browser: a sign-in page on another site is that site's wall, never this account's, even when it returns here. `url` is what was asked
  * for, `result` is the browser's answer. `clicked` (the task clicked or typed, `stepsAct`): a page that then ends on
  * an identity provider is the bot going through a sign-in it chose ("Continue with Google", an OAuth connect), not
  * the account's wall. A plain read or a navigate the site sends there still is, and so is a click that ends on the
  * site's own sign-in page. The device and the server both decide with this. */
 export function accountWall(site, url, result, {clicked = false} = {}) {
   const r = result && typeof result === 'object' ? result : {};
-  if (clicked && isSigninHost(hostOf(r.finalUrl || r.url))) return false;
-  const page = signinPage(result);
-  if (page && onSite(page, site)) return true;
-  return onSite(hostOf(url), site) && isSigninHost(hostOf(r.finalUrl || r.url));
+  const at = hostOf(r.finalUrl || r.url);
+  if (clicked && isSigninHost(at)) return false;
+  if (signinPage(result) && onSite(at, site)) return true;
+  return onSite(hostOf(url), site) && isSigninHost(at);
 }
 
 /** The computer a bot's pages run on: its account's, else its own pin, else null for any computer. */

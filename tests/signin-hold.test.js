@@ -385,6 +385,34 @@ test('a card the account\'s keeper makes: none without a record, an open card or
   assert.equal(sent.length, 1);
 });
 
+test('a beat that reports a sign-out late makes no second card after the wall\'s card was answered with Not now', async t => {
+  const {store, sent} = await rig(t);
+  // The computer last said signed in at 09:00. A page met the wall at 10:00 and made the card; the owner chose Not now.
+  await store.update(s => { createSigninAsk(s, {botId: 'web', chatKey: 'web', account: s.browserAccounts[0], now: NOW, makeId: () => 'wall-1'}); });
+  await store.update(s => { const ask = s.asks.find(a => a.id === 'wall-1'); ask.status = 'declined'; delete s.signinPending[A]; });
+  // The next beat says the account fell: that sign-out was already the wall's card, so nothing new.
+  assert.equal(await noticeSignins(store, [{id: A, since: '2026-11-27T09:00:00.000Z'}]), 0);
+  await tick();
+  assert.equal(sent.length, 0);
+  assert.equal(cards(store).length, 1);
+  // A fall after the account was signed in again (heard at 10:30, after the card) is a new sign-out: a new card.
+  assert.equal(await noticeSignins(store, [{id: A, since: '2026-11-27T10:30:00.000Z'}]), 1);
+  await tick();
+  assert.equal(sent.length, 1);
+  // With no time kept for the earlier state, the fall makes a card as before.
+  await store.update(s => { const open = s.asks.find(a => a.status === 'pending'); open.status = 'declined'; delete s.signinPending[A]; });
+  assert.equal(await noticeSignins(store, [{id: A, since: null}]), 1);
+});
+
+test('the account report says when the fallen state was first heard', () => {
+  const kv = new Map();
+  const store = {kvSet: (k, v) => kv.set(k, v), kvGet: k => kv.get(k) ?? null, read: () => ({browserAccounts: [{id: A, deviceId: 'pc'}]})};
+  assert.deepEqual(agent.recordAccountReports(store, 'pc', [{id: A, state: 'signed-in'}]), [], 'a first report is no fall');
+  const heard = JSON.parse(kv.get('agent_accounts:pc'))[0].checkedAt;
+  const fell = agent.recordAccountReports(store, 'pc', [{id: A, state: 'signed-out'}]);
+  assert.deepEqual(fell, [{id: A, since: heard}]);
+});
+
 test('holdForSignin answers null and leaves the state exactly as it was whenever a page is not held', () => {
   const base = () => ({
     groups: [{id: 'lab', bots: [{id: 'web', name: 'Web', settings: {browserAccount: A}}]}],
