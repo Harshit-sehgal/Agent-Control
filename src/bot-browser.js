@@ -41,7 +41,7 @@ const PINNED_ON_SERVER = 'This bot is set to use one computer, and this install 
 const PINNED_TAKEOVER = 'This bot is set to use one computer, and a takeover here opens the page in this server\'s browser. Take over from that computer\'s Computer view, or clear "Runs on" on the bot\'s Edit page.';
 
 /** Said when a bot names a browser account that has no record: it is refused, never run in the default profile. */
-const ACCOUNT_GONE = 'This bot\'s browser account no longer exists. Choose another on the bot\'s Edit page, or clear it.';
+export const ACCOUNT_GONE = 'This bot\'s browser account no longer exists. Choose another on the bot\'s Edit page, or clear it.';
 
 /** Said when a bot with a browser account would have its page opened on the server instead of the account's computer. */
 const ACCOUNT_ON_SERVER = 'This bot signs in as a browser account, which lives on a computer, and this install opens pages only on the server (BROWSER_RUNTIME=server). Set BROWSER_RUNTIME=auto, or clear the bot\'s account on its Edit page.';
