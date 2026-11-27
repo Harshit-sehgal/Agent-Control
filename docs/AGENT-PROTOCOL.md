@@ -212,6 +212,11 @@ is a sign-in page, or shows a visible password field, on the account's own site;
 when a page of the account's site ends on an identity provider's sign-in host
 (Google, Microsoft, Yahoo or Apple), whether or not the redirect names where to
 return. A sign-in page of another site is that site's wall, never the account's.
+A task with a `click` or `type` step that ends on an identity provider is not the
+wall: the bot clicked through to it (Continue with Google, an OAuth connect), so the
+page goes to the bot and the account's state is left as it was. A plain read, or a
+`navigate` step, that the site sends to an identity provider is still the wall, and
+so is a click that ends on the site's own sign-in page.
 The device marks the account `signed-out` on such a page, as it does for the keeper.
 
 The server holds a page that comes back as its account's wall and does not hand it

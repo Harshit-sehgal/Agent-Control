@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {SIGNIN_ASK, isSigninAsk, createSigninAsk, openSigninAsk, answerAsk, askText, answeredText, isAskAction, expireAsks, ASK_EXPIRY_MS} from '../shared/asks.js';
-import {accountWall, onSite} from '../shared/browser-accounts.js';
+import {accountWall, onSite, stepsAct} from '../shared/browser-accounts.js';
 import {OPEN_REQUEST_STATUSES, isSigninHost, pruneBrowserRequests, denyBrowserRequest, recordBrowserRequests, MAX_BROWSER_REQUESTS} from '../shared/bot-browser.js';
 import {releaseChatWork} from '../shared/chats.js';
 import {removeBot} from '../shared/workflow.js';
@@ -89,6 +89,27 @@ test('the account\'s wall: a sign-in page on its site, a password field alone, a
   // An IdP reached from another site is not this account's wall.
   assert.equal(accountWall('crm.example.com', 'https://other.example.org/', page('https://accounts.google.com/v3/signin/identifier')), false);
   assert.equal(accountWall('crm.example.com', 'https://crm.example.com/', null), false);
+});
+
+test('a click or a type that ends on an identity provider is not the account\'s wall; a navigate or a read sent there is', () => {
+  const page = (finalUrl, elements = []) => ({finalUrl, elements});
+  const back = 'https://accounts.google.com/o/oauth2/v2/auth?redirect_uri=https://crm.example.com/cb';
+  const bare = 'https://accounts.google.com/v3/signin/identifier';
+  // "Continue with Google" on a signed-in site: both branches (a return parameter, or none) give way to the click.
+  assert.equal(accountWall('crm.example.com', 'https://crm.example.com/', page(back), {clicked: true}), false);
+  assert.equal(accountWall('crm.example.com', 'https://crm.example.com/', page(bare), {clicked: true}), false);
+  // Without the click they are walls, as before.
+  assert.equal(accountWall('crm.example.com', 'https://crm.example.com/', page(back)), true);
+  assert.equal(accountWall('crm.example.com', 'https://crm.example.com/', page(bare), {clicked: false}), true);
+  // A click that ends on the site's own sign-in page still counts.
+  assert.equal(accountWall('crm.example.com', 'https://crm.example.com/', page('https://crm.example.com/login'), {clicked: true}), true);
+  // Which steps act: a click or a type does; a navigate, a read, a scroll or a wait does not.
+  assert.equal(stepsAct([{op: 'click', index: 1}]), true);
+  assert.equal(stepsAct([{op: 'navigate', url: 'https://crm.example.com/x'}, {op: 'type', index: 2, text: 'a'}]), true);
+  assert.equal(stepsAct([{op: 'navigate', url: 'https://crm.example.com/x'}, {op: 'read', selector: 'main'}, {op: 'scroll'}, {op: 'waitFor', selector: 'h1'}]), false);
+  assert.equal(stepsAct([]), false);
+  assert.equal(stepsAct(undefined), false);
+  assert.equal(stepsAct([null]), false);
 });
 
 test('onSite and isSigninHost', () => {

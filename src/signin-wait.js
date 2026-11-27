@@ -6,7 +6,7 @@
  * Server only. It imports `shared/` and `ask-cards.js` and nothing else, so `bot-browser.js` can use it without a cycle.
  * The state functions are pure over the workspace state; `noticeSignins` is the one that writes a store. */
 import {randomUUID} from 'node:crypto';
-import {accountWall, browserAccountOf} from '../shared/browser-accounts.js';
+import {accountWall, browserAccountOf, stepsAct} from '../shared/browser-accounts.js';
 import {createSigninAsk, openSigninAsk, isSigninAsk} from '../shared/asks.js';
 import {botSettings} from '../shared/bot-settings.js';
 import {addAskCards, addAskLine, notifySignin} from './ask-cards.js';
@@ -31,7 +31,7 @@ export function holdForSignin(state, request, result, {now = stamp(), makeId = r
   const holds = Number(request.signinHolds) || 0;
   if (holds >= MAX_SIGNIN_HOLDS) return null;
   const {account} = browserAccountOf(state, request.botId);
-  if (!account?.site || request.account !== account.id || !accountWall(account.site, request.url, result)) return null;
+  if (!account?.site || request.account !== account.id || !accountWall(account.site, request.url, result, {clicked: stepsAct(request.steps)})) return null;
   const run = request.runId ? (state.groupRuns || []).find(r => r.id === request.runId) : null;
   if (request.runId && !(run && PARKABLE.includes(run.status))) return null;
 

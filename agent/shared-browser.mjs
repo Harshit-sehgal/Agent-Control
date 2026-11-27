@@ -38,7 +38,7 @@ import path from 'node:path';
 import {startBrowserSession, ACTION_OPS, MAX_ACTIONS} from './browser.mjs';
 import {FOCUSED_IS_SECRET_JS, TAG_FOCUSED_SECRET_JS, CLEAR_SECRETS_ON_HANDBACK_JS, rememberTyped, scrubTyped} from './page-secrets.mjs';
 import {hostAllowed, hostOf} from '../shared/bot-browser.js';
-import {accountWall, onSite} from '../shared/browser-accounts.js';
+import {accountWall, onSite, stepsAct} from '../shared/browser-accounts.js';
 import {cleanInput, KEYS, VIEWPORT} from './live-input.mjs';
 import {ACCOUNT_ID} from '../shared/bot-settings.js';
 
@@ -296,7 +296,7 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
       try {
         const result = scrubTyped(await live.capture(url, {allow: allowed(), steps, approved, tab, timeoutMs, settleMs, onPage: remember, gate}), typed);
         // A page the owner left the tab on is no finding about the account.
-        if (account && !result?.tookOver) noteResult(account, url, result);
+        if (account && !result?.tookOver) noteResult(account, url, result, stepsAct(steps));
         return result;
       } catch (error) {
         // An error names what the page did (a blocked address it was sent to may carry the echo), and leaves as text.
@@ -313,12 +313,13 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
   }
 
   /** What a page says about the account: its sign-in wall (a sign-in page of its site, or its site sending the task to an
-   * identity provider) signs it out, any other page of the site signs it in. A page on another site says nothing. */
-  function noteResult(account, url, result) {
+   * identity provider) signs it out, any other page of the site signs it in. A page on another site says nothing, and
+   * so does an identity provider a click or a type of the task led to (`clicked`, the rule in `accountWall`). */
+  function noteResult(account, url, result, clicked) {
     const site = listed?.get(account)?.site;
     if (!site) return;
     let found;
-    if (accountWall(site, url, result)) found = 'signed-out';
+    if (accountWall(site, url, result, {clicked})) found = 'signed-out';
     else if (onSite(hostOf(result?.finalUrl || result?.url), site)) found = 'signed-in';
     else return;
     const first = restoredPending.delete(account), before = states.get(account);
@@ -354,7 +355,8 @@ export function createSharedBrowser({start = startBrowserSession, allow = [], pr
   }
   /** Empty the page's secret fields (the typed memory is kept: the site may echo it later). Said in fixed words when
    * it fails, and it never holds anything up: one that does not answer in two seconds is let go. Nothing to clear
-   * when the owner typed nothing in secret on this tab. */
+   * when the owner typed nothing in secret on any tab of this account (or, with no account, on this tab): the memory is
+   * one set per account, shared by its tabs. */
   async function clearSecretFields(entry) {
     if (!entry?.typed.size || !session) return;
     let timer;

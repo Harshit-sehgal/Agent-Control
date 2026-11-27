@@ -226,6 +226,38 @@ test('what is never held: a watch, a takeover result, a page with no account, a 
   assert.match(calls.find(c => c.id === 'third').text, /\n\nThis is a sign-in page/);
 });
 
+test('a signed-in bot that clicks Continue with Google is not held: no card, no push, the page goes to the run', async t => {
+  const oauth = {finalUrl: 'https://accounts.google.com/o/oauth2/v2/auth?client_id=x&redirect_uri=https%3A%2F%2Fcrm.example.com%2Fcb', title: 'Choose an account', text: 'Choose an account to continue to CRM'};
+  const bare = {finalUrl: 'https://accounts.google.com/v3/signin/identifier', title: 'Sign in', text: ''};
+  const {store, sent} = await rig(t, {
+    requests: [
+      request('click', {steps: [{op: 'click', index: 3}]}),
+      request('type', {steps: [{op: 'type', index: 2, text: 'me@example.test'}], runId: 'run2'}),
+      request('read', {runId: 'run3'}),
+      request('nav', {steps: [{op: 'navigate', url: 'https://crm.example.com/settings'}], runId: 'run4'}),
+    ],
+    runs: [runOf('run1'), runOf('run2'), runOf('run3'), runOf('run4')],
+  });
+  const {calls, hooks} = hooksOf();
+  const finish = (id, result) => browser.finishBrowserRequest(store, requestOf(store, id), {ok: true, result}, hooks);
+  await finish('click', oauth);
+  await finish('type', bare);
+  await tick();
+  for (const id of ['click', 'type']) assert.equal(requestOf(store, id).status, 'done', id);
+  assert.deepEqual(cards(store), [], 'no card for a click through to the IdP');
+  assert.deepEqual(sent, [], 'and no push');
+  assert.deepEqual(calls.map(c => c.id).sort(), ['click', 'type'], 'both pages reach their runs');
+  for (const id of ['run1', 'run2']) assert.equal(runIn(store, id).status, 'awaiting_browser', id);
+
+  // A plain read, or a navigate, that the site sends to the IdP is still the wall.
+  await finish('read', oauth);
+  await finish('nav', bare);
+  await tick();
+  for (const id of ['read', 'nav']) assert.equal(requestOf(store, id).status, 'signin', id);
+  assert.equal(cards(store).length, 1);
+  assert.equal(sent.length, 1);
+});
+
 test('a held request with no run parks nothing and continues no chat', async t => {
   const {store, sent} = await rig(t, {requests: [request('br1', {runId: undefined})]});
   const {calls, continued, hooks} = hooksOf();
