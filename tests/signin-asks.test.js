@@ -2,7 +2,7 @@
 // account (never a grant), the account's own wall, and the `signin` request status that holds a run's request.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {SIGNIN_ASK, isSigninAsk, createSigninAsk, openSigninAsk, signinDeclined, answerAsk, askText, answeredText, isAskAction, expireAsks, ASK_EXPIRY_MS} from '../shared/asks.js';
+import {SIGNIN_ASK, isSigninAsk, createSigninAsk, openSigninAsk, signinBotFor, signinDeclined, answerAsk, askText, answeredText, isAskAction, expireAsks, ASK_EXPIRY_MS} from '../shared/asks.js';
 import {accountWall, onSite, stepsAct} from '../shared/browser-accounts.js';
 import {OPEN_REQUEST_STATUSES, isSigninHost, pruneBrowserRequests, denyBrowserRequest, recordBrowserRequests, MAX_BROWSER_REQUESTS} from '../shared/bot-browser.js';
 import {releaseChatWork} from '../shared/chats.js';
@@ -69,6 +69,27 @@ test('a stale entry heals: an ask gone, or whose bot is gone, is no open card', 
   assert.equal(openSigninAsk(state(), A), null, 'no map at all is no card');
 });
 
+test('a card follows its account: its bot moved or deleted, a bot that still signs in as the account answers it', () => {
+  const two = () => { const s = state(); s.groups[0].bots.push({id: 'helper', name: 'Helper', settings: {browserAccount: A}}); return s; };
+  // The card's own bot while it still uses the account.
+  const s = two(); const ask = mkAsk(s);
+  assert.equal(signinBotFor(s, ask), 'scout');
+  // Scout moves to another account: the card stays open, and Helper (still on A) is the tab that answers it.
+  s.groups[0].bots[0].settings.browserAccount = 'another-account';
+  assert.equal(signinBotFor(s, ask), 'helper');
+  assert.equal(openSigninAsk(s, A).id, 'k1');
+  // Scout is deleted: the same.
+  const t = two(); const ask2 = mkAsk(t);
+  t.groups[0].bots = t.groups[0].bots.filter(b => b.id !== 'scout');
+  assert.equal(signinBotFor(t, ask2), 'helper');
+  assert.equal(openSigninAsk(t, A).id, 'k1');
+  // No bot signs in as the account any more: no bot answers it, and the entry heals.
+  t.groups[0].bots[0].settings.browserAccount = null;
+  assert.equal(signinBotFor(t, ask2), null);
+  assert.equal(openSigninAsk(t, A), null);
+  assert.equal(signinBotFor(t, null), null);
+});
+
 test('settled sign-in history is bounded like any ask, and an open one is never dropped', () => {
   const s = state();
   for (let i = 0; i < 502; i++) { const ask = mkAsk(s, () => `d${i}`); answerAsk(s, ask.id, 'decline', NOW); }
@@ -89,6 +110,12 @@ test('the account\'s wall: a sign-in page on its site, a password field alone, a
   // An IdP reached from another site is not this account's wall.
   assert.equal(accountWall('crm.example.com', 'https://other.example.org/', page('https://accounts.google.com/v3/signin/identifier')), false);
   assert.equal(accountWall('crm.example.com', 'https://crm.example.com/', null), false);
+  // The host showing the form decides, never where its return parameter points.
+  assert.equal(accountWall('crm.example.com', 'https://crm.example.com/r/1', page('https://crm.example.com/login?next=https%3A%2F%2Fportal.example.com%2F')), true);
+  assert.equal(accountWall('crm.example.com', 'https://crm.example.com/r/1', page('https://crm.example.com/login?next=https%3A%2F%2Fportal.example.com%2F', [{tag: 'input', type: 'password'}])), true);
+  assert.equal(accountWall('crm.example.com', 'https://other.example.org/', page('https://other.example.org/login?next=https%3A%2F%2Fcrm.example.com%2F')), false);
+  // An IdP that names the site as its way back is still the wall only when the page was the site's.
+  assert.equal(accountWall('crm.example.com', 'https://crm.example.com/', page('https://accounts.google.com/signin?continue=https%3A%2F%2Fcrm.example.com%2F')), true);
 });
 
 test('a click or a type that ends on an identity provider is not the account\'s wall; a navigate or a read sent there is', () => {

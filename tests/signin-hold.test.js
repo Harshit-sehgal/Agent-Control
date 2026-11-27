@@ -15,7 +15,7 @@ import {BROWSER_ACCOUNTS_V1} from '../shared/device-features.js';
 import {isSigninAsk, openSigninAsk, createSigninAsk} from '../shared/asks.js';
 import {askLineId, signinRoute, notifySignin} from '../src/ask-cards.js';
 import * as browser from '../src/bot-browser.js';
-import {MAX_SIGNIN_HOLDS, holdForSignin, signinFromKeeper, noticeSignins} from '../src/signin-wait.js';
+import {MAX_SIGNIN_HOLDS, holdForSignin, signinFromKeeper, noticeSignins, releaseSignin} from '../src/signin-wait.js';
 import * as backup from '../src/backup.js';
 import {loadMasterKey} from '../src/vault.js';
 import {company, model, ask as startRun} from './run-fixture.js';
@@ -383,6 +383,49 @@ test('a card the account\'s keeper makes: none without a record, an open card or
   assert.equal(await noticeSignins(store, [A]), 0);
   await tick();
   assert.equal(sent.length, 1);
+});
+
+test('a beat that reports a sign-out late makes no second card after the wall\'s card was answered with Not now', async t => {
+  const {store, sent} = await rig(t);
+  // The computer last said signed in at 09:00. A page met the wall at 10:00 and made the card; the owner chose Not now.
+  await store.update(s => { createSigninAsk(s, {botId: 'web', chatKey: 'web', account: s.browserAccounts[0], now: NOW, makeId: () => 'wall-1'}); });
+  await store.update(s => { const ask = s.asks.find(a => a.id === 'wall-1'); ask.status = 'declined'; delete s.signinPending[A]; });
+  // The next beat says the account fell: that sign-out was already the wall's card, so nothing new.
+  assert.equal(await noticeSignins(store, [{id: A, since: '2026-11-27T09:00:00.000Z'}]), 0);
+  await tick();
+  assert.equal(sent.length, 0);
+  assert.equal(cards(store).length, 1);
+  // A fall after the account was signed in again (heard at 10:30, after the card) is a new sign-out: a new card.
+  assert.equal(await noticeSignins(store, [{id: A, since: '2026-11-27T10:30:00.000Z'}]), 1);
+  await tick();
+  assert.equal(sent.length, 1);
+  // With no time kept for the earlier state, the fall makes a card as before.
+  await store.update(s => { const open = s.asks.find(a => a.status === 'pending'); open.status = 'declined'; delete s.signinPending[A]; });
+  assert.equal(await noticeSignins(store, [{id: A, since: null}]), 1);
+});
+
+test('a sign-out after the owner signed in from a card makes a new card, though no beat saw the sign-in', async t => {
+  const {store, sent} = await rig(t);
+  // Signed in at 09:00. A wall at 10:00 made the card and the owner signed in from it before the next beat, so every
+  // beat said signed in and the time first heard stayed 09:00.
+  await store.update(s => { createSigninAsk(s, {botId: 'web', chatKey: 'web', account: s.browserAccounts[0], now: NOW, makeId: () => 'wall-1'}); });
+  await store.update(s => releaseSignin(s, 'wall-1', {signedIn: true, now: NOW}));
+  // A later, separate sign-out is a new one: a card and a push.
+  assert.equal(await noticeSignins(store, [{id: A, since: '2026-11-27T09:00:00.000Z'}]), 1);
+  await tick();
+  assert.equal(sent.length, 1);
+  // A card made after the signed-in one and answered Not now covers the fall again: the newest card decides.
+  await store.update(s => { const open = s.asks.find(a => a.status === 'pending'); open.status = 'declined'; delete s.signinPending[A]; });
+  assert.equal(await noticeSignins(store, [{id: A, since: '2026-11-27T09:00:00.000Z'}]), 0);
+});
+
+test('the account report says when the fallen state was first heard', () => {
+  const kv = new Map();
+  const store = {kvSet: (k, v) => kv.set(k, v), kvGet: k => kv.get(k) ?? null, read: () => ({browserAccounts: [{id: A, deviceId: 'pc'}]})};
+  assert.deepEqual(agent.recordAccountReports(store, 'pc', [{id: A, state: 'signed-in'}]), [], 'a first report is no fall');
+  const heard = JSON.parse(kv.get('agent_accounts:pc'))[0].checkedAt;
+  const fell = agent.recordAccountReports(store, 'pc', [{id: A, state: 'signed-out'}]);
+  assert.deepEqual(fell, [{id: A, since: heard}]);
 });
 
 test('holdForSignin answers null and leaves the state exactly as it was whenever a page is not held', () => {

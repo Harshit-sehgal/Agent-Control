@@ -1234,6 +1234,18 @@ These come from Phase 3's final whole-branch review and its per-task reviews. Th
 - two weak tests;
 - the doc wording.
 
+The review of the Phase 3 PR then fixed:
+- a card follows its account, not its bot (`signinBotFor` in `shared/asks.js`): Take control opens the tab of a bot
+  that still signs in as the account, and a card whose bot was moved or deleted stays open while another bot on the
+  account can answer it;
+- the wall is decided by the host showing the form, never by its `next` or `continue` address (`accountWall`);
+- a beat that reports a sign-out late makes no second card after the wall's card was answered (`since` from
+  `recordAccountReports`, used by `signinFromKeeper`), while a sign-out after a card the owner signed in from still
+  makes a new card (the newest card decides).
+
+One edge is left on purpose: when no bot signs in as the account any more, Take control says so and the owner taps
+Not now (or the card lapses after 24 hours).
+
 The items below are still open. Line numbers are from Phase 3's tree, so grep before you fix.
 
 **Do first (a real gap in Phase 3's promise)**
@@ -1254,11 +1266,6 @@ The items below are still open. Line numbers are from Phase 3's tree, so grep be
     again (no second push).
 
 **Optional**
-- **The card of a deleted bot strands another bot's run.**
-  - What happens: bot A makes the card and bot B, on the same account, parks on it. Then A is deleted. `openSigninAsk`
-    (`shared/asks.js`) drops a pending card whose bot is gone, so B's hand back answers nothing, and B waits 24 hours.
-  - Fix: re-home the card to another bot that signs in as the account (`ask.botId = that bot`), and drop it only when
-    there is none. Add one test.
 - **A visible password field on the account's own site reads as the wall.** An example is a signed-in bot that clicks
   into a change-password form (`accountWall` in `shared/browser-accounts.js`).
   - It fails safe: two holds, then the bot gets the page.
@@ -1278,9 +1285,6 @@ The items below are still open. Line numbers are from Phase 3's tree, so grep be
   consumed by `resumeBrowserRun`. On Not now, `resumeAfterAsks` takes its `start` branch (`src/coordination.js`) and
   skips the `browserDepth` increment and the `failStreak` count. The cost is bounded: one undercount per declined card,
   and an account is declined at most once per run.
-- **A keeper card can follow seconds after Not now.** If the owner taps Not now after the server held the wall, but
-  before the device's next beat reports the account falling, `noticeSignins` makes a fresh card and push.
-  `recordAccountReports` still holds the old signed-in state.
 - **Test gaps from the fix wave:**
   - the smoke does not assert that closing the Computer view after a hand back with `resumed: 0` says nothing;
   - the per-account decline scope (`|| a.accountId` in `src/coordination.js`) is pinned only by the end-to-end test

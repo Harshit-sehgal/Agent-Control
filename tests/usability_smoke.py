@@ -1583,7 +1583,7 @@ SIGNIN_SITE, SIGNIN_ACCOUNT = 'crm.example.com', 'CRM, sales'
 
 async def seed_signin_ask(page, bot_id, name='Writer'):
     """Put one sign-in ask, and the chat lines that carry it, into the stored workspace, as the server writes them:
-    a line in the asking bot's chat and its copy in the primary's Needs you."""
+    a line in the asking bot's chat and its copy in the primary's Needs you. The asking bot signs in as the account."""
     primary = await primary_id(page)
     script = '''
         const [bot, primary, name, site, account] = %s;
@@ -1591,6 +1591,8 @@ async def seed_signin_ask(page, bot_id, name='Writer'):
         s.asks = [{id: 's1', kind: 'signin', action: 'signin', botId: bot, runId: null, chatKey: bot, accountId: 'acct-1', accountName: account, site, url: 'https://' + site + '/',
           detail: 'signing in to ' + site + ' as ' + account, target: '', grantScope: '', status: 'pending', scope: null, createdAt: at, expiresAt: new Date(Date.now() + 864e5).toISOString()}];
         s.signinPending = {'acct-1': 's1'};
+        // A card is made only for an account a bot signs in as, and it is answered through such a bot.
+        for (const g of s.groups || []) for (const b of g.bots || []) if (b.id === bot) b.settings = {...(b.settings || {}), browserAccount: 'acct-1'};
         const text = name + ' needs you to sign in to ' + site + ' as ' + account + '.';
         const line = t => ({id: 'ask-s1', role: 'system', kind: 'ask', askId: 's1', text: t, at});
         s.chats[bot] = [...(s.chats[bot] || []), line(text)];

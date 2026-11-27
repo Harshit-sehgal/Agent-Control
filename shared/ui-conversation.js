@@ -22,7 +22,7 @@ import {feed, fileStrip} from './ui-feed.js';
 import {attachButton, chipsSlot, wireAttach} from './ui-attach.js';
 import {setupCardOf, setupButton, setupDetail, setupConfirm} from './setup.js';
 import {askCard} from './ui-asks.js';
-import {UNTIL_CHOICES, untilFor, answeredText} from './asks.js';
+import {UNTIL_CHOICES, untilFor, answeredText, signinBotFor} from './asks.js';
 import {undoToast} from './ui-settings.js';
 import {face, botColor, botAccent, accentStyle} from './ui-face.js';
 import {esc, icon, btn, dayLabel, tag, md, plain} from './ui-kit.js';
@@ -506,11 +506,14 @@ export const conversationChanges = {
 
 export const conversationActions = {
   'ask-answer': b => answerAsk(b.dataset.id, b.dataset.choice),
-  // The sign-in card's Take control: the ask's own bot and address, read from the state, not from the page.
+  // The sign-in card's Take control: a bot that signs in as the card's account (its own bot while it still does) and
+  // the card's address, read from the state, not from the page. Hand back on that bot then answers this card.
   'signin-take-control': b => {
     const ask = (store.state?.asks || []).find(a => a.id === b.dataset.id);
     if (!ask || ask.kind !== 'signin' || ask.status !== 'pending') throw new Error('That sign-in is no longer waiting.');
-    return takeControl(ask.botId, ask.url);
+    const botId = signinBotFor(store.state, ask);
+    if (!botId) throw new Error(`No bot signs in as ${ask.accountName || 'this account'} any more. Choose Not now on the card.`);
+    return takeControl(botId, ask.url);
   },
   // The pinned-replies strip: open or close its list, or bring one pinned reply into view.
   'pins-toggle': b => {

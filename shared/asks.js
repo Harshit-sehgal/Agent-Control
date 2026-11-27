@@ -29,7 +29,7 @@
 import {fail} from './errors.js';
 import {cleanText} from './core.js';
 import {logActivity} from './activity-log.js';
-import {MAX_CONTEXT_MESSAGES} from './bot-settings.js';
+import {MAX_CONTEXT_MESSAGES, botSettings} from './bot-settings.js';
 import {botKey} from './memory.js';
 
 /** What every bot may do without a grant. */
@@ -413,13 +413,24 @@ export function createSigninAsk(state, {botId, runId = null, chatKey = null, acc
   return ask;
 }
 
-/** The account's open sign-in card, or null. An entry whose ask is gone or settled, or whose bot left the roster, is
- * dropped from the map here, so a stale one never blocks a new card. */
+/** The bot whose tab answers a sign-in card: the card's own bot while it still signs in as the card's account, else the
+ * first bot in the roster that does, else null. Take control and Hand back act on a bot's current account, so a card
+ * whose bot moved to another account, or was deleted, is answered through a bot that still uses its account. */
+export function signinBotFor(state, ask) {
+  if (!ask?.accountId) return null;
+  const bots = (state?.groups || []).flatMap(g => g.bots || []);
+  const uses = bot => bot && botSettings(bot).browserAccount === ask.accountId;
+  return (uses(bots.find(b => b.id === ask.botId)) ? ask.botId : bots.find(uses)?.id) || null;
+}
+
+/** The account's open sign-in card, or null. An entry whose ask is gone or settled, or that no bot signs in as any more,
+ * is dropped from the map here, so a stale one never blocks a new card. A card whose own bot left (deleted, or moved to
+ * another account) stays open while another bot signs in as its account (`signinBotFor`). */
 export function openSigninAsk(state, accountId) {
   const map = state.signinPending;
   if (!map || typeof map !== 'object' || !(accountId in map)) return null;
   const ask = (state.asks || []).find(a => a.id === map[accountId]);
-  if (ask && isSigninAsk(ask) && ask.status === 'pending' && botIds(state).has(ask.botId)) return ask;
+  if (ask && isSigninAsk(ask) && ask.status === 'pending' && signinBotFor(state, ask)) return ask;
   delete map[accountId];
   return null;
 }
