@@ -36,3 +36,13 @@ test('wipeAllJars removes every jar and half-written copy, and is quiet for a fo
   assert.deepEqual(fs.readdirSync(dir), []);
   assert.deepEqual(wipeAllJars(path.join(dir, 'nope')), []);
 });
+
+test('a jar that cannot be read is an error, never taken for one the new secret does not open', t => {
+  const dir = tmp(t);
+  createJarStore({dir, secret: 'new'}).save(A, [cookie('a')]);
+  fs.chmodSync(path.join(dir, `${A}.jar`), 0o000);
+  if (process.getuid?.() === 0) return t.skip('root reads anything');
+  assert.throws(() => rekeyJars({dir, oldSecret: 'old', newSecret: 'new'}), /EACCES/);
+  assert.ok(fs.existsSync(path.join(dir, `${A}.jar`)), 'the jar is still there');
+  fs.chmodSync(path.join(dir, `${A}.jar`), 0o600);
+});

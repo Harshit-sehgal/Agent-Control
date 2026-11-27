@@ -71,15 +71,42 @@ function loadConfig() {
   try { return JSON.parse(fs.readFileSync(CONFIG, 'utf8')); }
   catch { fail('No agent config found. Run `node agent/agent.mjs pair --server <url> --code <code>` first.'); }
 }
+/** Written whole to a private temp file, fsynced, then renamed into place: a stop or a full disk mid-write leaves the
+ * old config, never half of one (the config holds the only copy of the secret that opens the browser jars). */
 function saveConfig(config) {
-  const fd = fs.openSync(CONFIG, 'w', 0o600);
+  const tmp = `${CONFIG}.tmp`;
+  try { fs.unlinkSync(tmp); } catch (e) { if (e.code !== 'ENOENT') throw e; }   // never write through a link left here
+  const fd = fs.openSync(tmp, 'wx', 0o600);
   try {
-    // open's mode only applies to a new file; repair permissions before the
-    // pairing secret is written when an older config already exists.
     fs.fchmodSync(fd, 0o600);
     fs.writeFileSync(fd, JSON.stringify(config, null, 2));
     fs.fsyncSync(fd);
-  } finally { fs.closeSync(fd); }
+  } catch (e) {
+    fs.closeSync(fd);
+    try { fs.unlinkSync(tmp); } catch {}
+    throw e;
+  }
+  fs.closeSync(fd);
+  fs.renameSync(tmp, CONFIG);
+}
+
+/** The lock a running agent holds, `<config>.lock`, holding its pid. `pair` refuses while it is held: a pair re-keys the
+ * jars and replaces the secret, which the running agent would go on using (and saving jars under). A lock whose process
+ * is gone is stale and holds nothing. */
+const LOCK = `${CONFIG}.lock`;
+const processAlive = pid => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+function lockHolder() {
+  try {
+    const pid = Number(fs.readFileSync(LOCK, 'utf8'));
+    return Number.isInteger(pid) && pid > 0 && pid !== process.pid && processAlive(pid) ? pid : null;
+  } catch { return null; }
+}
+function takeLock() {
+  try { fs.writeFileSync(LOCK, String(process.pid), {flag: 'wx', mode: 0o600}); }
+  catch (e) { if (e.code !== 'EEXIST') throw e; fs.writeFileSync(LOCK, String(process.pid), {mode: 0o600}); }   // stale, or an earlier run: the newest owns it
+}
+function releaseLock() {
+  try { if (fs.readFileSync(LOCK, 'utf8') === String(process.pid)) fs.unlinkSync(LOCK); } catch {}
 }
 function fail(message) { console.error(`agent: ${message}`); process.exit(1); }
 
@@ -135,9 +162,13 @@ async function pair(argv) {
   const url = new URL(server.replace(/\/+$/, '') + '/api/agent/pair');
   // A computer that holds a working pairing with this same server proves it by the old secret, so the server moves its
   // accounts to the new id and this computer keeps their jars.
+  const holder = lockHolder();
+  if (holder) fail(`this computer's agent is running (process ${holder}). Stop it, then pair again.`);
   const old = readableConfig();
   const sameServer = old && old.server.replace(/\/+$/, '') === server.replace(/\/+$/, '');
-  if (sameServer) finishRekey(old);
+  // The jars of an earlier pairing must be under the saved secret before another secret is added: a third secret would
+  // leave the oldest unreadable. Nothing was asked of the server or changed.
+  if (sameServer && !finishRekey(old)) fail('browser sign-ins from the earlier pairing could not be re-encrypted, so nothing was changed. Free disk space or fix the permissions of the browser-accounts folder, then try again.');
   const body = JSON.stringify({code, name, permissions, features: DEVICE_FEATURES, ...(sameServer ? {previous: {agentId: old.agentId, proof: rePairProof(old.secret, code)}} : {})});
   let res;
   try { res = await post(url, {headers: {'Content-Type': 'application/json'}, body}); }
@@ -253,8 +284,12 @@ async function run() {
   const config = loadConfig();
   if (!Array.isArray(config.permissions)) config.permissions = [];
   // A re-pair that stopped before it re-encrypted the jars is finished before anything opens one.
-  finishRekey(config);
-  host = createBrowserHost({agentId: config.agentId, secret: config.secret, configPath: CONFIG});
+  takeLock();
+  // A re-key that cannot finish leaves the jars where they are, under the old secret: opening one under the new would
+  // remove it. Browser accounts are off for this run, and the next start tries again.
+  const rekeyed = finishRekey(config);
+  if (!rekeyed) console.error('agent: browser accounts are off for this run, so no saved sign-in is touched.');
+  host = createBrowserHost({agentId: config.agentId, secret: config.secret, configPath: CONFIG, accounts: rekeyed});
   host.startSweeps();
   const configured = Number(config.pollIntervalMs);
   const interval = Math.max(2000, Number.isFinite(configured) && configured > 0 ? configured : POLL_MS);
@@ -427,7 +462,7 @@ async function run() {
     while (inflight.size) await Promise.allSettled([...inflight]);
     // The sweep first (a pass left running could start the browser again), then the live view, then the browser.
     await host.stopSweeps();
-    await live?.stop(); await host.close(); console.log('agent: stopped.');
+    await live?.stop(); await host.close(); releaseLock(); console.log('agent: stopped.');
   }
 }
 

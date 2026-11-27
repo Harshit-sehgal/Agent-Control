@@ -27,19 +27,19 @@ const deferred = () => { let resolve; const promise = new Promise(r => { resolve
 const PAGES = {[HOME]: ({cookies}) => ({title: 'CRM', text: cookies.some(c => c.name === 'sid') ? 'signed in' : 'signed out', elements: []})};
 const task = payload => ({kind: 'browser.capture', payload: {url: HOME, botId: 'scout', ...payload}});
 
-function rig(t, {env = {}, shared = {}} = {}) {
+function rig(t, {env = {}, shared = {}, accounts = true} = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-host-'));
   t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
   const processes = [];
   let clock = 1_800_000_000_000;
   const host = createBrowserHost({
     agentId: AGENT, secret: SECRET, configPath: path.join(dir, 'agent.config.json'),
-    env: {AGENT_BROWSER_ALLOWLIST: SITE, ...env}, sweepMs: 10,
+    env: {AGENT_BROWSER_ALLOWLIST: SITE, ...env}, sweepMs: 10, accounts,
     sharedOptions: {settleMs: 0, now: () => clock, start: async () => { const fake = fakeCdp({pages: PAGES}); processes.push(fake); return startBrowserSession({connection: fake.connection}); }, ...shared},
   });
   t.after(() => host.close());
   const dirOf = path.join(dir, 'browser-accounts');
-  return {host, processes, dir, jarDir: dirOf, jars: () => createJarStore({dir: dirOf, secret: SECRET}), advance: ms => { clock += ms; }};
+  return {host, processes, dir, jarDir: dirOf, jars: () => createJarStore({dir: dirOf, secret: SECRET}), otherJars: secret => createJarStore({dir: dirOf, secret}), advance: ms => { clock += ms; }};
 }
 
 test('both the jars and this computer\'s id reach the shared browser', async t => {
@@ -190,4 +190,18 @@ test('a sweep that fails is logged and the timer carries on', async t => {
   console.error = was;
   assert.ok(passes >= 2);
   assert.ok(lines.some(l => /sweep/.test(l)));
+});
+
+test('with accounts off, no jar is opened, wiped or reported, and an account task is refused even with a browser', async t => {
+  const r = rig(t, {accounts: false});
+  r.otherJars('some-other-secret').save(A, [SID]);        // a jar this run's secret cannot open
+  r.otherJars('some-other-secret').save(B, [SID]);
+  await r.host.applyAccounts([{id: A, site: SITE}], 1);   // a list that omits B
+  assert.deepEqual(r.otherJars('some-other-secret').ids().sort(), [A, B], 'nothing is wiped');
+  await assert.rejects(r.host.run(task({account: A, deviceId: AGENT})), /cannot use\.$/);
+  await assert.rejects(r.host.capture(task({account: A, deviceId: AGENT}), {browser: true, readPlain: async () => ({text: 'plain'})}), /cannot use\.$/);
+  assert.equal(r.processes.length, 0);
+  assert.equal(r.otherJars('some-other-secret').load(A)?.[0].value, MARKER, 'the jar was never loaded, so never removed');
+  assert.deepEqual(r.host.accountReport(), []);
+  assert.equal((await r.host.run(task({}))).text, 'signed out', 'the default profile still works');
 });

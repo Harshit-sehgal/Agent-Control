@@ -21,8 +21,10 @@ import {plainFallback, turnedAway, preferRead} from './page-fetch.mjs';
 
 export const NEEDS_BROWSER = 'This bot signs in as a browser account, which needs the real browser on this computer. Set AGENT_BROWSER=1 on it, with Chrome, Chromium or Edge installed.';
 
-export function createBrowserHost({agentId, secret, configPath, env = process.env, sweepMs = SWEEP_MS, sharedOptions = {}}) {
-  const jars = createJarStore({dir: browserAccountsDir(env, configPath), secret});
+/** `accounts: false` switches browser accounts off for this run (the jars could not be brought under this secret): no jar
+ * is opened, wiped or reported, and every account task is refused. The default profile works as ever. */
+export function createBrowserHost({agentId, secret, configPath, env = process.env, sweepMs = SWEEP_MS, sharedOptions = {}, accounts = true}) {
+  const jars = accounts ? createJarStore({dir: browserAccountsDir(env, configPath), secret}) : null;
   const allow = () => parseAllowlist(env.AGENT_BROWSER_ALLOWLIST);
   let sb = null;
   let lastList = null;          // the server's latest account list, for a browser made after it came
@@ -47,7 +49,7 @@ export function createBrowserHost({agentId, secret, configPath, env = process.en
     appliedSeq = seq;
     lastList = list;
     chain = chain.then(async () => {
-      try { jars.retain(list.map(a => a?.id)); } catch { console.error('agent: could not remove a browser account\'s saved sign-in.'); }
+      try { jars?.retain(list.map(a => a?.id)); } catch { console.error('agent: could not remove a browser account\'s saved sign-in.'); }
       if (sb) await sb.setAccounts(list);
     }).catch(() => console.error('agent: could not apply the browser account list.'));
     return chain;
@@ -55,6 +57,7 @@ export function createBrowserHost({agentId, secret, configPath, env = process.en
 
   /** What each heartbeat reports of the accounts: the browser's states, or, before it exists, each jar as unknown. */
   function accountReport() {
+    if (!jars) return [];
     if (sb) return sb.accountStates();
     try { return jars.ids().map(id => ({id, state: 'unknown', storage: 'cookies'})); } catch { return []; }
   }

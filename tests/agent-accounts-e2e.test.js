@@ -6,7 +6,7 @@ import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import {spawn} from 'node:child_process';
+import {spawn, spawnSync} from 'node:child_process';
 import {createJarStore} from '../agent/account-jars.mjs';
 
 /* The real server and the real agent process, with no browser on the device: what a computer does with its browser
@@ -63,13 +63,14 @@ async function scratch(t) {
 
 /** A control plane that answers every heartbeat with `answer(beatNumber)` and keeps what the device sent. */
 async function stubPlane(t, answer) {
-  const beats = [], results = {};
+  const beats = [], results = {}, hits = [];
   const srv = http.createServer((req, res) => {
     let raw = '';
     req.on('data', b => { raw += b; });
     req.on('end', () => {
       const body = (() => { try { return JSON.parse(raw || '{}'); } catch { return {}; } })();
       res.setHeader('Content-Type', 'application/json');
+      hits.push(req.url);
       if (req.url === '/api/agent/heartbeat') { beats.push({body, raw}); res.end(JSON.stringify(answer(beats.length))); return; }
       const m = /^\/api\/agent\/tasks\/([^/]+)\/result$/.exec(req.url);
       if (m) { results[m[1]] = body; res.end('{"ok":true}'); return; }
@@ -78,7 +79,7 @@ async function stubPlane(t, answer) {
   });
   await new Promise(r => srv.listen(0, '127.0.0.1', r));
   t.after(() => new Promise(r => srv.close(r)));
-  return {url: `http://127.0.0.1:${srv.address().port}`, beats, results};
+  return {url: `http://127.0.0.1:${srv.address().port}`, beats, results, hits};
 }
 const stubConfig = (dir, server, extra = {}) => {
   const file = path.join(dir, 'agent.config.json');
@@ -197,4 +198,80 @@ test('a first pairing wipes jars it cannot open, and keeps a new computer from i
   const code = (await server.send('POST', '/api/agents/pair', {label: 'Laptop', permissions: ['browser.capture']})).body.code;
   assert.equal((await agent.pair(server.base, code)).status, 0);
   assert.deepEqual(createJarStore({dir: jarDir, secret: readJson(agent.config).secret}).ids(), []);
+});
+
+/* Fix round 1: no path leaves a jar unreadable under every secret on disk. */
+
+/** A folder where re-keying jar A cannot stage its copy: a directory sits where the temp file goes. */
+const blockRekey = jarDir => fs.mkdirSync(path.join(jarDir, `${A}.jar.tmp`));
+
+test('a re-key that fails at start leaves the jars under the old secret and switches browser accounts off for the run', {timeout: 60000}, async t => {
+  const dir = await scratch(t);
+  const jarDir = path.join(dir, 'browser-accounts');
+  const plane = await stubPlane(t, () => ({ok: true, tasks: [], accounts: [{id: A, site: SITE}]}));
+  const config = stubConfig(dir, plane.url, {secret: 'new-secret-2', rekeyFrom: 'old-secret-1'});
+  createJarStore({dir: jarDir, secret: 'old-secret-1'}).save(A, [cookie]);
+  blockRekey(jarDir);
+  const agent = agentIn(dir, {});
+  const worker = agent.run();
+  t.after(() => worker.kill());
+  await until(() => readJson(config)?.lastSeenAt, 'a heartbeat');
+  await worker.stop();
+  assert.equal(readJson(config).rekeyFrom, 'old-secret-1', 'the old secret is kept for the next start');
+  assert.equal(createJarStore({dir: jarDir, secret: 'old-secret-1'}).load(A)?.[0].value, MARKER, 'the jar still opens under the old secret');
+  assert.match(agent.log(), /browser accounts are off for this run/);
+  assert.deepEqual(plane.beats[0].body.accounts, [], 'no account is reported while they are off');
+});
+
+test('a pair does not go on while the earlier pairing\'s re-key cannot finish', {timeout: 60000}, async t => {
+  const dir = await scratch(t);
+  const jarDir = path.join(dir, 'browser-accounts');
+  const plane = await stubPlane(t, () => ({ok: true, tasks: []}));
+  const config = stubConfig(dir, plane.url, {secret: 'new-secret-2', rekeyFrom: 'old-secret-1'});
+  createJarStore({dir: jarDir, secret: 'old-secret-1'}).save(A, [cookie]);
+  blockRekey(jarDir);
+  const before = fs.readFileSync(config, 'utf8');
+  const out = await agentIn(dir, {}).pair(plane.url, 'ABCD-1234');
+  assert.notEqual(out.status, 0);
+  assert.ok(!plane.hits.includes('/api/agent/pair'), 'the server was not asked to pair');
+  assert.equal(fs.readFileSync(config, 'utf8'), before, 'the config is as it was');
+  assert.equal(createJarStore({dir: jarDir, secret: 'old-secret-1'}).load(A)?.[0].value, MARKER);
+});
+
+test('a pair is refused while the agent runs here; a lock left by a dead process does not block it', {timeout: 60000}, async t => {
+  const dir = await scratch(t);
+  const plane = await stubPlane(t, () => ({ok: true, tasks: []}));
+  const config = stubConfig(dir, plane.url);
+  const agent = agentIn(dir, {});
+  const worker = agent.run();
+  t.after(() => worker.kill());
+  await until(() => readJson(config)?.lastSeenAt, 'a heartbeat');
+  const before = fs.readFileSync(config, 'utf8').replace(/"lastSeenAt".*\n/, '');
+  const refused = await agent.pair(plane.url, 'ABCD-1234');
+  assert.notEqual(refused.status, 0);
+  assert.match(refused.log, /is running/);
+  assert.ok(!plane.hits.includes('/api/agent/pair'), 'the server was not asked to pair');
+  assert.equal(readJson(config).agentId, 'stub-agent');
+  await worker.stop();
+  assert.equal(fs.existsSync(`${config}.lock`), false, 'the lock goes when the agent stops');
+  const dead = spawnSync(process.execPath, ['-e', '']).pid;
+  fs.writeFileSync(`${config}.lock`, String(dead));
+  await agent.pair(plane.url, 'ABCD-1234');
+  assert.ok(plane.hits.includes('/api/agent/pair'), 'a stale lock does not block a pair');
+  assert.ok(before.length > 0);
+});
+
+test('the config is replaced, never rewritten in place, and stays private', {timeout: 60000}, async t => {
+  const dir = await scratch(t);
+  const plane = await stubPlane(t, () => ({ok: true, tasks: []}));
+  const config = stubConfig(dir, plane.url);
+  const alias = path.join(dir, 'alias.json');
+  fs.linkSync(config, alias);                      // a second name for the same file: an in-place write would change both
+  const worker = agentIn(dir, {}).run();
+  t.after(() => worker.kill());
+  await until(() => readJson(config)?.lastSeenAt, 'a heartbeat');
+  await worker.stop();
+  assert.equal('lastSeenAt' in readJson(alias), false, 'the old file was not written through');
+  assert.equal(fs.statSync(config).mode & 0o777, 0o600);
+  assert.deepEqual(fs.readdirSync(dir).filter(n => n.endsWith('.tmp')), [], 'no temp file left behind');
 });

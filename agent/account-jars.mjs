@@ -108,7 +108,11 @@ export function createJarStore({dir, secret}) {
 
 /** Whether the jar file of `id` opens under `secret`; nothing is removed either way. */
 function opensUnder(secret, dir, id) {
-  try { return unseal(secret, id, fs.readFileSync(path.join(dir, `${id}.jar`), 'utf8')) !== null; } catch { return false; }
+  let text;
+  // A jar that is gone is not open. A read that fails for any other reason is an error, not "does not open": taking
+  // it for a jar the new secret cannot open would send it to be re-keyed from the old secret, which removes it.
+  try { text = fs.readFileSync(path.join(dir, `${id}.jar`), 'utf8'); } catch (e) { if (missing(e)) return false; throw e; }
+  return unseal(secret, id, text) !== null;
 }
 
 /** Wipes every jar and half-written copy in a folder: for a computer that paired anew, whose jars no secret it holds opens. */
