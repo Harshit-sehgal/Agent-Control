@@ -45,6 +45,15 @@ export const askText = (quoted, words) => [quoted, String(words ?? '').trim()].f
 /** What Start a thread opens with: the quote, then the owner's words or a plain ask to follow up. */
 export const threadText = (quoted, words) => askText(quoted, String(words ?? '').trim() || 'Follow up on this.');
 
+/** Run one popover row. Closing the popover removes its Ask about this box, so what was typed there is read first and
+ * handed to the action (Start a thread opens with it). `typed()` reads the box, `close()` closes the popover, and
+ * `run(ctx, {typed})` is the row's action. */
+export async function runMenuAction(ctx, {typed = () => '', close = () => {}, run}) {
+  const words = String(typed() ?? '');
+  close();
+  return run(ctx, {typed: words});
+}
+
 /** The owner line a reply answered: the nearest one before it in time (the browser can hold a sent line after the
  * run's lines that synced in first, so the list is put in time order as the feed is). A thread's helpers speak in
  * the same run first, so a line of the reply's own run is passed over; any other reply in between means this one

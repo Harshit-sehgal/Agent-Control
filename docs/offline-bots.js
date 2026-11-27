@@ -9,10 +9,10 @@
  *
  * Pure and browser-safe.
  */
-import {cleanText} from './core.js?v=56cf61828d';
-import {mentionedBots} from './coordination.js?v=56cf61828d';
-import {MIN_BOT_JOB} from './bot-create.js?v=56cf61828d';
-import {basicKind} from './off-job.js?v=56cf61828d';
+import {cleanText} from './core.js?v=c6f1335acc';
+import {mentionedBots} from './coordination.js?v=c6f1335acc';
+import {MIN_BOT_JOB} from './bot-create.js?v=c6f1335acc';
+import {basicKind} from './off-job.js?v=c6f1335acc';
 
 const FILLER = new Set('about after also and are can could does from have here into just like make more need please should some than that their them then there these they this those want what when where which will with would your you for the'.split(' '));
 /** Content words of a text, lower-case, with a trailing plural `s` dropped, so

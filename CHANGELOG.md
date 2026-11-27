@@ -43,7 +43,14 @@ browser tasks, and accounts, workspaces and backup.
 - **Bots learn from the chat.** A plain correction of a bot's last reply ("no,
   too long") and a 👍 / 👎 reach its next memory pass, which keeps only lasting
   preferences. What a correction taught shows in that chat as "Learned: …" with
-  Undo, and a rule you switched off stays off.
+  Undo, and a rule you switched off stays off. A 👍 / 👎 or a correction keeps
+  where its reply came from: one from a run that read outside content marks the
+  rules learned from it, so Hands-off still asks (even after that run is pruned,
+  and for feedback kept before this). A pass that rewords a learned rule keeps
+  its id, so Undo still reaches it. A switched-off rule with no long words
+  ("Use USD.", or one not in Latin letters) no longer blocks every new rule, and
+  stays off when a pass returns it with other punctuation.
+  Start a thread opens with the question typed in Ask about this.
 - **Connectors and subscriptions in Settings.** Settings → Connectors lists, adds,
   refreshes and deletes MCP servers (a web address with optional headers, or the
   name of a server on your agent), runs the Google setup form with its steps,

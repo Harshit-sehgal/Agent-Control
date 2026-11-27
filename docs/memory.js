@@ -17,8 +17,8 @@
  * survives even with no AI provider. `mergeConsolidation` applies the result of
  * one model-written consolidation pass. Both are pure and bounded.
  */
-import {cleanText} from './core.js?v=56cf61828d';
-import {botSettings} from './bot-settings.js?v=56cf61828d';
+import {cleanText} from './core.js?v=c6f1335acc';
+import {botSettings} from './bot-settings.js?v=c6f1335acc';
 
 export const MEMORY_VERSION = 1;
 export const MAX_RULES = 50;
@@ -232,6 +232,12 @@ export function isCorrection(text) {
  * may already be stored, so a trailing equal line is skipped; system notes between are skipped too. A bare "no"
  * to a question the bot asked is an answer, so only a stated fix counts then. */
 export function correctionFrom(messages, text, botId) {
+  const hit = correctionHit(messages, text, botId);
+  return hit && {said: hit.said, reply: hit.reply};
+}
+
+/** `correctionFrom` plus the stored reply it corrects, whose marks say where its text came from. */
+function correctionHit(messages, text, botId) {
   const said = String(text ?? '').trim();
   if (!said || !isCorrection(said)) return null;
   const list = (Array.isArray(messages) ? messages : []).filter(m => m && m.role !== 'system');
@@ -241,27 +247,32 @@ export function correctionFrom(messages, text, botId) {
   if (!reply || reply.role !== 'bot' || (reply.senderId && reply.senderId !== botId)) return null;
   const replyText = String(reply.text ?? '').trim();
   if (/\?\s*$/.test(replyText) && !CORRECTION_ANY.test(ownWords(said))) return null;
-  return {said, reply: replyText};
+  return {said, reply: replyText, message: reply};
 }
+
+/** Where a bot reply's text came from, kept with feedback about it so it outlives the run's own record: `outside`
+ * when the reply is already marked (`keepOutsideMarks`), and the run that wrote it, which `consolidationReadsOutside`
+ * in shared/asks.js checks while the run is kept (and `keepOutsideMarks` marks this feedback when it is pruned). */
+const provenance = message => ({outside: message?.outside === true, ...(message?.runId ? {runId: cleanText(message.runId, 80)} : {})});
 
 /** Keep one correction (from the chat or a 👎 note) for the next pass. `chat` is where it was said, so what the
  * pass learns from it is announced there. */
-export function noteCorrection(state, key, {said, reply = '', chat = ''} = {}, {now = new Date().toISOString()} = {}) {
+export function noteCorrection(state, key, {said, reply = '', chat = '', outside = false, runId = ''} = {}, {now = new Date().toISOString()} = {}) {
   const book = rulebook(state, key);
   const text = cleanText(said, 600);
   if (!text) return book;
-  book.corrections.push({said: text, reply: shorten(reply, FEEDBACK_REPLY_CHARS), chat: cleanText(chat, 120), at: now});
+  book.corrections.push({said: text, reply: shorten(reply, FEEDBACK_REPLY_CHARS), chat: cleanText(chat, 120), at: now, outside: outside === true, ...(runId ? {runId: cleanText(runId, 80)} : {})});
   book.corrections = book.corrections.slice(-MAX_CORRECTIONS);
   book.updatedAt = now;
   return book;
 }
 
 /** Keep one reply the owner liked (👍) as an example of the style to keep. */
-export function noteLiked(state, key, {reply = '', chat = ''} = {}, {now = new Date().toISOString()} = {}) {
+export function noteLiked(state, key, {reply = '', chat = '', outside = false, runId = ''} = {}, {now = new Date().toISOString()} = {}) {
   const book = rulebook(state, key);
   const text = shorten(reply, FEEDBACK_REPLY_CHARS);
   if (!text) return book;
-  book.liked.push({reply: text, chat: cleanText(chat, 120), at: now});
+  book.liked.push({reply: text, chat: cleanText(chat, 120), at: now, outside: outside === true, ...(runId ? {runId: cleanText(runId, 80)} : {})});
   book.liked = book.liked.slice(-MAX_LIKED);
   book.updatedAt = now;
   return book;
@@ -275,7 +286,9 @@ const botIn = (state, id) => (state?.groups || []).flatMap(g => g.bots || []).fi
  * correction, or null. */
 export function noteChatCorrection(state, said, {now = new Date().toISOString()} = {}) {
   const hit = chatCorrection(state, said);
-  if (hit) noteCorrection(state, botKey(cleanText(said.botId, 80)), {...hit, chat: said.chatKey}, {now});
+  if (!hit) return null;
+  const source = correctionHit(state.chats?.[said.chatKey], said.text, cleanText(said.botId, 80))?.message;
+  noteCorrection(state, botKey(cleanText(said.botId, 80)), {...hit, chat: said.chatKey, ...provenance(source)}, {now});
   return hit;
 }
 
@@ -301,13 +314,26 @@ export function feedbackOn(state, {botId, chat, messageId, kind, note = ''}, {no
   const mine = reply && reply.role === 'bot' && (reply.senderId ? reply.senderId === bot.id : key === bot.id);
   if (!mine) throw httpError('That reply was not found.', 404);
   const said = cleanText(note, 600) || 'The owner marked this reply as not right.';
-  if (kind === 'down') noteCorrection(state, botKey(bot.id), {said, reply: reply.text, chat: key}, {now});
-  else noteLiked(state, botKey(bot.id), {reply: reply.text, chat: key}, {now});
+  // The reply's text reaches the next pass, so it keeps the reply's outside mark (a 👍 on a connector reply in a
+  // thread must not launder it into a clean rule in the bot's own chat).
+  if (kind === 'down') noteCorrection(state, botKey(bot.id), {said, reply: reply.text, chat: key, ...provenance(reply)}, {now});
+  else noteLiked(state, botKey(bot.id), {reply: reply.text, chat: key, ...provenance(reply)}, {now});
   return {ok: true, bot: bot.id, kind, learn: kind === 'down' && Boolean(cleanText(note, 600))};
 }
 
 const sameItem = (a, b) => a?.at === b?.at && (a?.said ?? a?.reply) === (b?.said ?? b?.reply);
-const alike = (a, b) => sameNote(a, b) || sameNote(b, a);
+/** A rule's letters and digits in any script, lower-cased, with punctuation and spacing dropped. */
+const bare = value => normalize(value).replace(/[^\p{L}\p{M}\p{N}]+/gu, ' ').trim();
+/** Two rules say the same thing. A rule with no word long enough to compare ("Use USD.", or one not in Latin
+ * letters) only matches the same words, whatever the punctuation ("Use USD" is still "Use USD."): `sameNote` reads an
+ * empty side as a match, which would make one short rule the twin of every other. */
+const alike = (a, b) => {
+  if (!words(a).size || !words(b).size) {
+    const [x, y] = [bare(a), bare(b)];
+    return x || y ? x === y : normalize(a) === normalize(b);
+  }
+  return sameNote(a, b) || sameNote(b, a);
+};
 
 /** Save the owner's remember lines to the company notes. Returns the new rules. */
 export function rememberFromOwner(state, text, {now = new Date().toISOString()} = {}) {
@@ -589,11 +615,22 @@ export function mergeConsolidation(state, key, result, {now = new Date().toISOSt
   // What the owner said in so many words survives a tidy-up that dropped it (a rephrasing of it counts as kept).
   const owner = (Array.isArray(sentPending) ? sentPending : book.pending || []).filter(text => text && KEEP_ASKED.test(text) && !deniesAbility(text) && !kept.some(k => sameNote(text, k)));
   const fresh = [];
+  // A pass may reword a rule it keeps. The reworded line keeps the rule's id, so a Learned line's Undo in the chat
+  // still reaches it; each old rule lends its id once, and a word-for-word match is taken first.
+  const taken = new Set(kept.map(text => existing.get(normalize(text))?.id).filter(Boolean));
+  const reworded = text => {
+    if (existing.has(normalize(text))) return null;
+    const prior = before.find(rule => rule.enabled !== false && !taken.has(rule.id) && alike(text, rule.text));
+    if (prior) taken.add(prior.id);
+    return prior || null;
+  };
   const written = kept.map(text => {
     const old = existing.get(normalize(text));
     if (old) return {...old, text, updatedAt: now};
     // A pass that read outside text (consolidationReadsOutside in shared/asks.js) marks what it wrote, so Hands-off asks
-    // in a run handed it; a rule kept word for word keeps the mark it had.
+    // in a run handed it; a rule kept word for word keeps the mark it had, and a reworded one keeps it too.
+    const prior = reworded(text);
+    if (prior) return {...prior, text, source: 'model', updatedAt: now, ...(outside || prior.outside ? {outside: true} : {})};
     const rule = {id: cleanText(makeId(), 64), text, source: 'model', createdAt: now, updatedAt: now, uses: 0, ...(outside ? {outside: true} : {})};
     if (!before.some(prior => alike(text, prior.text))) fresh.push(rule);
     return rule;

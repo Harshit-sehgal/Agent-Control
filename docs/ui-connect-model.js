@@ -5,8 +5,8 @@
  *
  * Nothing here ever sees a key: a subscription has none, an MCP address is typed once and sent, and the
  * server never answers with it. */
-import {cleanCliModel, cliEngineById, LOCAL_CLI_KIND, LOCAL_CLI_ENGINES, EFFORT_LEVELS, cleanEffort, CLI_MODELS} from './ai-presets.js?v=56cf61828d';
-import {appById} from './app-catalog.js?v=56cf61828d';
+import {cleanCliModel, cliEngineById, LOCAL_CLI_KIND, LOCAL_CLI_ENGINES, EFFORT_LEVELS, cleanEffort, CLI_MODELS} from './ai-presets.js?v=c6f1335acc';
+import {appById} from './app-catalog.js?v=c6f1335acc';
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
