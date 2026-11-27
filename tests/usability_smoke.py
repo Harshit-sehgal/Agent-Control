@@ -1211,7 +1211,8 @@ async def phone_ask_card_permissions_and_pause(page, base):
     box, me = await banner.bounding_box(), await page.locator('.ch-me').bounding_box()
     assert me['y'] >= box['y'] + box['height'], (box, me)
     go = await banner.get_by_role('button', name='Resume').bounding_box()
-    assert go['height'] >= 34 and go['x'] + go['width'] <= 390, go
+    # Half a pixel of slack: the layout rounds the 34 px button to 33.99999 at times.
+    assert go['height'] >= 33.5 and go['x'] + go['width'] <= 390, go
     assert await overflow(page) <= 0
     await banner.get_by_role('button', name='Resume').click()
     await expect(banner).to_be_hidden()
