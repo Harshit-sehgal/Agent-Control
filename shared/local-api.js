@@ -275,6 +275,9 @@ async function localApiUnlocked(path, method = 'GET', body = {}) {
   if (live === '/api/connectors' && method === 'GET') return {connectors: [], google: null, demo: true};
   if (live === '/api/ai' && method === 'GET') return {providers: [], defaultProviderId: null, defaultModel: null, bots: {}, demo: true};
   if (live === '/api/agents' && method === 'GET') return {agents: [], actions: [], demo: true};
+  // Browser accounts live on a paired computer, and the demo has none.
+  if (live === '/api/browser-accounts' && method === 'GET') return {accounts: [], demo: true};
+  if (/^\/api\/browser-accounts(\/[a-z0-9-]+)?$/.test(live) && ['POST', 'PATCH', 'DELETE'].includes(method)) throw Object.assign(new Error('The demo has no computer to keep browser accounts on. Run the full app with the local agent to use them.'), {status: 409});
 
   // A thread: a new chat run by the primary bot, started in one call like the server's.
   if (path === '/api/threads' && method === 'POST') {
