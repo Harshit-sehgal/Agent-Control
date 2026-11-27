@@ -18,6 +18,7 @@ import {fail, safeJson, requireSecureSecret} from './http.js';
 import {SECRET_INPUT_V1, BROWSER_ACCOUNTS_V1, UPDATE_DEVICE_LINE, hasFeature} from '../shared/device-features.js';
 import {browserAccountOf, browserDeviceOf} from '../shared/browser-accounts.js';
 import {ACCOUNT_GONE} from './bot-browser.js';
+import {finishSignin} from './ask-runs.js';
 
 /** A frame is a JPEG in base64: larger than an ordinary request body. */
 const FRAME_BODY_LIMIT = 1024 * 1024;
@@ -112,9 +113,11 @@ export function liveRoutes(router, {workspaces}) {
     return {botId, state: entryOf(c, botId).state};
   });
   // The owner is done: the parked run goes on, and bots may use the browser again.
-  router.add('POST', '/api/browser-live/:botId/handback', 'admin', c => {
+  // The account's open sign-in card is answered by it: every run waiting on it goes on, and its held pages go out again.
+  router.add('POST', '/api/browser-live/:botId/handback', 'admin', async c => {
     const botId = botOf(c), line = lineOf(c, botId);
     hub.handback(c.actor.workspaceId, botId, {agentId: line.agentId, account: line.account});
-    return {botId, state: entryOf(c, botId).state};
+    const signedIn = line.account ? await finishSignin(c.store, line.account, {actor: c.actor.email}) : null;
+    return {botId, state: entryOf(c, botId).state, ...(signedIn ? {signedIn: {resumed: signedIn.resumed}} : {})};
   });
 }

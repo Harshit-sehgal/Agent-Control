@@ -689,6 +689,9 @@ export async function resumeAfterAsks(store,runId,{executor,runtime,actor=null}=
     live.browserConsumed=[...handled];
     const go=(s.browserRequests||[]).filter(r=>r.runId===runId&&r.status==='pending').map(r=>r.id);
     if(go.length){live.status='awaiting_browser';return {dispatch:go};}
+    // A page of the round that is still out (sent to the computer, or done but not yet taken into the run) is waited
+    // for: `resumeBrowserRun` takes it in and carries the run on, so starting now would drop it.
+    if((s.browserRequests||[]).some(r=>r.runId===runId&&!handled.has(r.id))){live.status='awaiting_browser';return {dispatch:[]};}
     live.status='queued';
     return {start:true};
   });

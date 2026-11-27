@@ -7,7 +7,7 @@
  * The state functions are pure over the workspace state; `noticeSignins` is the one that writes a store. */
 import {randomUUID} from 'node:crypto';
 import {accountWall, browserAccountOf} from '../shared/browser-accounts.js';
-import {createSigninAsk, openSigninAsk} from '../shared/asks.js';
+import {createSigninAsk, openSigninAsk, isSigninAsk} from '../shared/asks.js';
 import {botSettings} from '../shared/bot-settings.js';
 import {addAskCards, addAskLine, notifySignin} from './ask-cards.js';
 
@@ -46,6 +46,38 @@ export function holdForSignin(state, request, result, {now = stamp(), makeId = r
   request.status = 'signin'; request.signinAskId = ask.id; request.signinHolds = holds + 1; request.updatedAt = now;
   if (run) { run.status = 'awaiting_ask'; run.askIds = [...new Set([...(run.askIds || []), ask.id])]; }
   return {ask, fresh};
+}
+
+/** The owner's answer to a sign-in card, applied to everything that waited on it: the ask is answered (signed in:
+ * `allowed`, once; not now: `declined`), the account is free for a new card, and every request held on it is made
+ * ready to go out again (`pending`) or denied. An ask that already lapsed keeps its own `declined`, `expired` and
+ * time. A page sent again is a new task: it loses the old task ids (so a late result for the first one matches
+ * nothing, and a failed re-dispatch may put it back to `pending`) and the claim of its first dispatch, as the revert in
+ * `dispatchBrowserRequest` does; it keeps `signinHolds`, which makes the new task's idempotency key.
+ *
+ * Returns null for an ask that is not a sign-in card. `runIds` are the runs parked on the card (the caller resumes each
+ * with `resumeAfterAsks`, which also waits for any other ask or page that run has open). `openIds` are the requests
+ * with no run, made ready, for the caller to send. A held request whose run is no longer parked on the card (stopped,
+ * deleted) is denied either way, so nothing is sent for a run nobody waits on. */
+export function releaseSignin(state, askId, {signedIn = false, now = stamp()} = {}) {
+  const ask = (state.asks || []).find(a => a.id === askId);
+  if (!ask || !isSigninAsk(ask)) return null;
+  if (ask.status === 'pending') {
+    Object.assign(ask, signedIn ? {status: 'allowed', scope: 'once'} : {status: 'declined', scope: null}, {answeredAt: now});
+    delete ask.expiresAt;
+  }
+  if (state.signinPending?.[ask.accountId] === ask.id) delete state.signinPending[ask.accountId];
+  const runIds = (state.groupRuns || []).filter(r => r.status === 'awaiting_ask' && (r.askIds || []).includes(ask.id)).map(r => r.id);
+  const openIds = [];
+  for (const request of state.browserRequests || []) {
+    if (request.status !== 'signin' || request.signinAskId !== ask.id) continue;
+    request.updatedAt = now;
+    if (!signedIn || (request.runId && !runIds.includes(request.runId))) { request.status = 'denied'; continue; }
+    request.status = 'pending'; request.agentTaskIds = [];
+    for (const key of ['notAfter', 'approvedBy', 'via', 'account', 'accountName']) delete request[key];
+    if (!request.runId) openIds.push(request.id);
+  }
+  return {ask, runIds, openIds};
 }
 
 /** A card for an account that signed out while no run was waiting on it (the account's keeper saw it). Null when
