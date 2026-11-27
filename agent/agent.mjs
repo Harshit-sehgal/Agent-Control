@@ -26,12 +26,22 @@
  * (agent/shared-browser.mjs): each bot has its own tab, one bot drives at a
  * time. "browser.action" may click, type, scroll and read there; a click on a
  * Send, Post, Delete or Pay control runs only when the owner allowed it.
+ *
+ * Browser accounts (the "browser-accounts-v1" feature): a task may name an account, a separate sign-in of one site
+ * whose cookies live only on this computer, encrypted under the pairing secret in `browser-accounts/` beside this
+ * config (agent/account-jars.mjs). The heartbeat reports each account's state, never a cookie, and hears which accounts
+ * this computer holds; a jar the list omits is wiped, and a beat with no list wipes nothing. A task for an account runs
+ * only when it names this computer and the account is on that list, and only in the real browser: it is never read by
+ * the plain fetch, which has no cookies. A re-pair that proves the old secret keeps the jars (they are re-encrypted
+ * under the new one; the config holds both secrets until that is done). The housekeeping sweep (idle tabs, jar saves,
+ * keepers, the optional idle quit AGENT_BROWSER_QUIT_IDLE=1) runs every minute (agent/browser-host.mjs).
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import crypto from 'node:crypto';
-import {createSharedBrowser, browserProfileDir, runBrowserTask} from './shared-browser.mjs';
+import {createBrowserHost} from './browser-host.mjs';
+import {browserAccountsDir, rekeyJars, rePairProof, wipeAllJars} from './account-jars.mjs';
 import {createLiveChannel} from './live-channel.mjs';
 import {runModelTask} from './cli-model.mjs';
 import {cliStatusReporter} from './cli-status.mjs';
@@ -41,7 +51,7 @@ import {reportResult, skipExpired} from './report-result.mjs';
 import {hostAllowed, hostOf, parseAllowlist} from '../shared/bot-browser.js';
 import {resolvePublicAddress, pinnedRequest} from './net-guard.mjs';
 import {findBrowser} from './browser.mjs';
-import {readableHtml, turnedAway, preferRead, PLAIN_AGENT} from './page-fetch.mjs';
+import {readableHtml, PLAIN_AGENT} from './page-fetch.mjs';
 import {createTaskPool, concurrencyOf} from './task-pool.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -123,7 +133,12 @@ async function pair(argv) {
   const permissions = requested === null ? TASK_KINDS : requested.split(',').map(s => s.trim()).filter(Boolean);
   const name = argValue(argv, '--name') || `${process.env.COMPUTERNAME || process.env.HOSTNAME || 'device'}-agent`;
   const url = new URL(server.replace(/\/+$/, '') + '/api/agent/pair');
-  const body = JSON.stringify({code, name, permissions, features: DEVICE_FEATURES});
+  // A computer that holds a working pairing with this same server proves it by the old secret, so the server moves its
+  // accounts to the new id and this computer keeps their jars.
+  const old = readableConfig();
+  const sameServer = old && old.server.replace(/\/+$/, '') === server.replace(/\/+$/, '');
+  if (sameServer) finishRekey(old);
+  const body = JSON.stringify({code, name, permissions, features: DEVICE_FEATURES, ...(sameServer ? {previous: {agentId: old.agentId, proof: rePairProof(old.secret, code)}} : {})});
   let res;
   try { res = await post(url, {headers: {'Content-Type': 'application/json'}, body}); }
   catch (e) { fail(e.message); }
@@ -134,10 +149,45 @@ async function pair(argv) {
   // pairing with empty credentials and then crash on `permissions.join`.
   if (!value || typeof value.agentId !== 'string' || typeof value.secret !== 'string') fail('the server did not return an agent credential; nothing was saved.');
   const granted = Array.isArray(value.permissions) ? value.permissions : [];
-  saveConfig({server: server.replace(/\/+$/, ''), agentId: value.agentId, secret: value.secret, workspaceId: value.workspaceId, permissions: granted, pollIntervalMs: value.pollIntervalMs, name});
+  const next = {server: server.replace(/\/+$/, ''), agentId: value.agentId, secret: value.secret, workspaceId: value.workspaceId, permissions: granted, pollIntervalMs: value.pollIntervalMs, name};
+  if (sameServer) {
+    // Both secrets are in the saved config until the jars are re-encrypted, so a stop in between strands nothing: the
+    // next start finishes the job.
+    saveConfig({...next, rekeyFrom: old.secret});
+    if (finishRekey({...next, rekeyFrom: old.secret}, next)) saveConfig(next);
+  } else {
+    // No pairing this computer can prove: no secret it holds opens the jars that are here.
+    try { wipeAllJars(browserAccountsDir(process.env, CONFIG)); } catch { console.error('agent: could not remove the old browser sign-ins.'); }
+    saveConfig(next);
+  }
   console.log(`Paired as "${name}". Credentials saved to ${CONFIG} (mode 0600).`);
   console.log('Granted permissions:', granted.join(', ') || '(none)');
   console.log('Start the loop with: node agent/agent.mjs run');
+}
+
+/** The saved config when it is a usable pairing, else null (nothing is reported or exited). */
+function readableConfig() {
+  try {
+    const c = JSON.parse(fs.readFileSync(CONFIG, 'utf8'));
+    return c && typeof c.server === 'string' && typeof c.agentId === 'string' && typeof c.secret === 'string' && c.secret ? c : null;
+  } catch { return null; }
+}
+
+/** Finish a re-key a stop left half done: a config carrying `rekeyFrom` (the secret before a re-pair) has its jars
+ * re-encrypted under `secret`, then the field goes. `clean` is the config to save without it (default: this one without
+ * the field). False when it could not be done: the field stays, and the next start tries again. Nothing printed names a
+ * secret or a cookie. */
+function finishRekey(config, clean = null) {
+  if (typeof config.rekeyFrom !== 'string' || !config.rekeyFrom) return true;
+  try {
+    const {kept, wiped} = rekeyJars({dir: browserAccountsDir(process.env, CONFIG), oldSecret: config.rekeyFrom, newSecret: config.secret});
+    if (kept.length || wiped.length) console.log(`Kept ${kept.length} browser account(s); ${wiped.length} need signing in again.`);
+    if (!clean) { delete config.rekeyFrom; saveConfig(config); }
+    return true;
+  } catch {
+    console.error('agent: could not re-encrypt the saved browser sign-ins. They will be tried again when the agent starts.');
+    return false;
+  }
 }
 
 function argValue(argv, flag) {
@@ -145,9 +195,9 @@ function argValue(argv, flag) {
   return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : null;
 }
 
-/** The browser every bot shares, started on first use and kept between tasks. */
-let sharedBrowser = null;
-const shared = () => sharedBrowser ??= createSharedBrowser({allow: () => parseAllowlist(process.env.AGENT_BROWSER_ALLOWLIST), profile: browserProfileDir(process.env, CONFIG)});
+/** The device's browser wiring (agent/browser-host.mjs), made once `run` knows this computer's id and secret. */
+let host = null;
+const shared = () => host.shared();
 
 /** Local, permission-gated execution. Returns a JSON-serializable result. */
 async function execute(task, config) {
@@ -171,21 +221,11 @@ async function execute(task, config) {
     if (!hostAllowed(target, allow)) {
       throw new Error(`Refusing to read ${hostOf(target) || target}: it is not in AGENT_BROWSER_ALLOWLIST. Only explicitly allowed pages are read.`);
     }
-    // A real browser when this computer has one. Without Chrome, Chromium or Edge the page is still read, by a plain fetch.
-    if (process.env.AGENT_BROWSER === '1' && findBrowser()) {
-      const seen = await runBrowserTask(task, {shared: shared(), allow});
-      // A site that turns the headless browser away (Wikimedia's "Too many requests") is read once more by a
-      // plain request that names itself; a plain read only reads, so a page with steps keeps the browser's answer.
-      // A page that came back nearly empty (drawn by scripts the browser did not finish) is read plainly too.
-      if (!task.payload?.steps?.length && (turnedAway(seen) || String(seen?.text || '').trim().length < 300)) {
-        const plain = await readPlain(target).catch(() => null);
-        if (plain?.text && (turnedAway(seen) ? !turnedAway(plain) : preferRead(seen, plain) === plain)) return shared().scrub(task.payload?.botId, {...plain, readBy: 'plain'});
-      }
-      return seen;
-    }
-    return readPlain(target);
+    // A real browser when this computer has one. Without Chrome, Chromium or Edge the page is still read, by a plain
+    // fetch, but never a page of a browser account (the plain read has no cookies). The host decides.
+    return host.capture(task, {browser: process.env.AGENT_BROWSER === '1' && Boolean(findBrowser()), readPlain});
   }
-  if (task.kind === 'browser.action') return runBrowserTask(task, {shared: shared(), allow: parseAllowlist(process.env.AGENT_BROWSER_ALLOWLIST)});
+  if (task.kind === 'browser.action') return host.run(task);
   if (task.kind === 'model.run') {
     // Runs the owner's own signed-in `claude` or `codex` CLI. A failure the CLI
     // reports (not signed in, a usage limit) is an answer, not an agent error, so
@@ -212,6 +252,10 @@ let stopping = false;
 async function run() {
   const config = loadConfig();
   if (!Array.isArray(config.permissions)) config.permissions = [];
+  // A re-pair that stopped before it re-encrypted the jars is finished before anything opens one.
+  finishRekey(config);
+  host = createBrowserHost({agentId: config.agentId, secret: config.secret, configPath: CONFIG});
+  host.startSweeps();
   const configured = Number(config.pollIntervalMs);
   const interval = Math.max(2000, Number.isFinite(configured) && configured > 0 ? configured : POLL_MS);
   console.log(`Agent ${config.agentId} polling ${config.server} every ${interval / 1000}s. Ctrl+C to stop.`);
@@ -293,8 +337,12 @@ async function run() {
     // ten minutes, no model call). Only a device allowed to run models looks.
     const cli = (config.permissions || []).includes('model.run') ? cliStatus.snapshot() : undefined;
     lastBeatAt = Date.now();
-    const beat = await call(config, '/api/agent/heartbeat', {version: '1', os: process.platform, node: process.version, beat: ++beatSeq, at: Date.now(), features: DEVICE_FEATURES, ...(stopping ? {stopping: true} : {}), ...(cli ? {cli} : {})});
+    const seq = ++beatSeq;
+    const beat = await call(config, '/api/agent/heartbeat', {version: '1', os: process.platform, node: process.version, beat: seq, at: Date.now(), features: DEVICE_FEATURES, accounts: host.accountReport(), ...(stopping ? {stopping: true} : {}), ...(cli ? {cli} : {})});
     config.lastSeenAt = new Date().toISOString();
+    // The accounts this computer holds, before any task of this beat runs: a jar the list omits is wiped, and a task for
+    // an account is served only when it is on the list. An answer with no list (an older server) changes nothing.
+    await host.applyAccounts(beat.accounts, seq);
     if (Array.isArray(beat.agent?.permissions)) { config.permissions = beat.agent.permissions; startLive(); }
     for (const task of beat.tasks || []) {
       if (!task || !task.id || claimed.has(task.id)) continue;
@@ -377,7 +425,9 @@ async function run() {
     clearInterval(keepalive);
     // A beat or a hand-back still on its way; a beat that lands now hands its tasks back too.
     while (inflight.size) await Promise.allSettled([...inflight]);
-    await live?.stop(); await sharedBrowser?.close(); console.log('agent: stopped.');
+    // The sweep first (a pass left running could start the browser again), then the live view, then the browser.
+    await host.stopSweeps();
+    await live?.stop(); await host.close(); console.log('agent: stopped.');
   }
 }
 

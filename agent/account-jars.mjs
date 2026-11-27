@@ -106,8 +106,20 @@ export function createJarStore({dir, secret}) {
   };
 }
 
+/** Whether the jar file of `id` opens under `secret`; nothing is removed either way. */
+function opensUnder(secret, dir, id) {
+  try { return unseal(secret, id, fs.readFileSync(path.join(dir, `${id}.jar`), 'utf8')) !== null; } catch { return false; }
+}
+
+/** Wipes every jar and half-written copy in a folder: for a computer that paired anew, whose jars no secret it holds opens. */
+export function wipeAllJars(dir) {
+  return createJarStore({dir, secret: crypto.randomBytes(8).toString('hex')}).retain([]);
+}
+
 /** A re-pair gives the computer a new secret. Each jar is opened under the old
- * one and written under the new; one that will not open is wiped.
+ * one and written under the new; one that will not open is wiped. Run again over
+ * a folder that was half done, it finishes the rest (the agent keeps both secrets
+ * in its config until this has run once through).
  *
  * Every copy is staged before any is put in place. A jar that cannot be read or
  * staged throws with the staged copies removed, and every old jar still opens
@@ -122,6 +134,9 @@ export function rekeyJars({dir, oldSecret, newSecret}) {
   const kept = [], wiped = [], staged = [];
   try {
     for (const id of from.ids()) {
+      // A jar the new secret already opens (an earlier run got this far) is left alone: `load` under the old secret
+      // would remove it.
+      if (opensUnder(newSecret, dir, id)) { kept.push(id); continue; }
       const cookies = from.load(id);
       if (cookies) { staged.push(stage({dir, secret: newSecret}, id, cookies)); kept.push(id); } else wiped.push(id);
     }
