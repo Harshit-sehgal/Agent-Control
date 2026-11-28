@@ -27,7 +27,7 @@ test('a jar is encrypted, private to this user, and tied to its account', async 
   jars.save(A, [{name: 'sid', value: 'MARKER-COOKIE', domain: 'crm.example.com', path: '/', httpOnly: true}]);
   assert.equal(fs.statSync(dir).mode & 0o777, 0o700, 'a looser folder is tightened');
   assert.equal(fs.statSync(path.join(dir, `${A}.jar`)).mode & 0o777, 0o600);
-  assert.doesNotMatch(fs.readFileSync(path.join(dir, `${A}.jar`), 'utf8'), /MARKER-COOKIE|sid/);
+  assert.doesNotMatch(fs.readFileSync(path.join(dir, `${A}.jar`), 'utf8'), /MARKER-COOKIE|"sid"/, 'no cookie name or value in the clear (quoted, since base64 can spell sid by chance)');
   assert.equal(jars.load(A)[0].value, 'MARKER-COOKIE');
   fs.copyFileSync(path.join(dir, `${A}.jar`), path.join(dir, `${B}.jar`));
   assert.equal(jars.load(B), null, 'a copied jar does not open as another account'); assert.equal(fs.existsSync(path.join(dir, `${B}.jar`)), false);

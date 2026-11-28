@@ -1,0 +1,75 @@
+name: codex review on push
+
+# Asks the Codex GitHub app (chatgpt-codex-connector) to review a pull request
+# again each time new commits are pushed to it. Codex already reviews a PR on
+# its own when it is opened or marked ready, but not on later pushes; this fills
+# that gap by posting the same "@codex review" comment the owner would type.
+#
+# The review runs in the Codex GitHub app, so it comes out of the owner's Codex
+# code review allowance. Nothing here calls the OpenAI API and no API key is used.
+#
+# Why a personal token: Codex ignores or refuses "@codex review" from
+# github-actions[bot], because it ties each request to a GitHub account that is
+# connected to Codex. So the comment is posted with CODEX_REVIEW_TOKEN, a
+# fine-grained token from the owner's own account (this repo only,
+# Pull requests: read and write). Without that secret the job does nothing.
+#
+# Codex reviews the PR's changes, not the whole repository.
+
+on:
+  pull_request:
+    types: [synchronize]
+
+permissions: {}
+
+# A burst of pushes to one PR collapses into one request for the newest commit.
+concurrency:
+  group: codex-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  request:
+    if: >-
+      !github.event.pull_request.draft &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !endsWith(github.actor, '[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      HAS_TOKEN: ${{ secrets.CODEX_REVIEW_TOKEN != '' }}
+    steps:
+      - name: Skip without a token
+        if: env.HAS_TOKEN != 'true'
+        run: echo "::notice::CODEX_REVIEW_TOKEN is not set, so no review was requested."
+
+      - name: Wait for pushes to settle
+        if: env.HAS_TOKEN == 'true'
+        run: sleep 90
+
+      - name: Ask Codex to review the newest commit
+        if: env.HAS_TOKEN == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.CODEX_REVIEW_TOKEN }}
+          script: |
+            const {owner, repo} = context.repo;
+            const number = context.payload.pull_request.number;
+            const {data: pr} = await github.rest.pulls.get({owner, repo, pull_number: number});
+            if (pr.state !== 'open' || pr.draft) {
+              core.info('The PR is closed or a draft now; nothing to do.');
+              return;
+            }
+            const sha = pr.head.sha;
+            const marker = `<!-- codex-push-trigger:${sha} -->`;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number: number, per_page: 100,
+            });
+            if (comments.some(c => (c.body || '').includes(marker))) {
+              core.info(`Codex was already asked to review ${sha.slice(0, 7)}.`);
+              return;
+            }
+            await github.rest.issues.createComment({
+              owner, repo, issue_number: number,
+              body: `@codex review\n\n${marker}`,
+            });
+            core.info(`Asked Codex to review ${sha.slice(0, 7)}.`);
